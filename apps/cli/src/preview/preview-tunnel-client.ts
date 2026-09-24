@@ -36,6 +36,8 @@ import {
 } from 'ws';
 import {
   verifyPreviewTunnelRoundTrip,
+  PREVIEW_PROXY_RESPONSE_HEADER,
+  PREVIEW_PROXY_RESPONSE_VERSION,
   VISUAL_ANNOTATION_RUNTIME_RESPONSE_HEADER,
   VISUAL_ANNOTATION_RUNTIME_RESPONSE_VERSION,
 } from './preview-tunnel-readiness';
@@ -790,18 +792,22 @@ async function openTunnelConnection(options: {
             status: localResponse.status,
             statusText: localResponse.statusText,
             headers: headersToEntries(
-              buildInjectedHtmlHeaders(localResponse.headers, injectedHtml.byteLength),
+              buildInjectedHtmlHeaders(
+                localResponse.headers,
+                injectedHtml.body.byteLength,
+                injectedHtml.runtimeInjected
+              ),
               {
                 localOrigin: options.localOrigin,
                 previewOrigin: options.previewOrigin,
               }
             ),
-            hasBody: injectedHtml.byteLength > 0,
+            hasBody: injectedHtml.body.byteLength > 0,
           });
           await sendResponseBodyBytes({
             requestId: message.requestId,
             requestContext,
-            body: injectedHtml,
+            body: injectedHtml.body,
             useBinaryPayload,
             useResponseBodyCredit,
           });
@@ -1275,7 +1281,7 @@ export async function maybeInjectVisualAnnotationRuntime(
   response: Response,
   method: string,
   maxResponseBodyBytes: number
-): Promise<Uint8Array | null> {
+): Promise<{ body: Uint8Array; runtimeInjected: boolean } | null> {
   if (!canInjectVisualAnnotationRuntime(response, method)) {
     return null;
   }
@@ -1288,7 +1294,7 @@ export async function maybeInjectVisualAnnotationRuntime(
     return null;
   }
   if (html.includes(VISUAL_ANNOTATION_INJECTED_MARKER)) {
-    return responseBody;
+    return { body: responseBody, runtimeInjected: true };
   }
   const scriptTag = `<script ${VISUAL_ANNOTATION_INJECTED_MARKER}="true">\n${escapeHtmlScriptContent(
     VISUAL_ANNOTATION_INSPECTOR_BROWSER_SCRIPT
@@ -1311,9 +1317,10 @@ export async function maybeInjectVisualAnnotationRuntime(
     injectedHtml = Buffer.from(`${html}${scriptTag}`, 'utf8');
   }
   if (injectedHtml.byteLength > maxResponseBodyBytes) {
-    throw new Error(`Preview response exceeds ${maxResponseBodyBytes} byte limit`);
+    // Optional instrumentation must not reject an otherwise valid response.
+    return { body: responseBody, runtimeInjected: false };
   }
-  return injectedHtml;
+  return { body: injectedHtml, runtimeInjected: true };
 }
 
 function looksLikeDecodedHtml(value: string): boolean {
@@ -1325,6 +1332,16 @@ export function buildLocalPreviewRequestHeaders(
   options?: LocalPreviewRequestHeaderOptions
 ): Headers {
   const proxyHeaders = new Headers(stripLocalPreviewRequestHeaders(headers));
+  const fetchMode = proxyHeaders.get('sec-fetch-mode');
+  if (fetchMode === 'navigate' || fetchMode === 'nested-navigate') {
+    // Node fetch replaces navigation mode with "cors". Forwarding the browser's
+    // cross-site metadata alongside that mode makes Astro reject an otherwise
+    // permitted iframe navigation. Treat this hop as a server-side navigation
+    // fetch, while retaining metadata on subresources and preserving Origin.
+    for (const name of ['sec-fetch-site', 'sec-fetch-mode', 'sec-fetch-dest', 'sec-fetch-user']) {
+      proxyHeaders.delete(name);
+    }
+  }
   if (options) {
     const rewrittenReferer = rewriteLocalPreviewReferer(getHeaderValue(headers, 'referer') ?? '', {
       localOrigin: options.localOrigin,
@@ -1376,20 +1393,29 @@ async function readResponseBodyBytesWithinLimit(
   return concatUint8Arrays(chunks, totalByteLength);
 }
 
-export function buildInjectedHtmlHeaders(sourceHeaders: Headers, bodyByteLength: number): Headers {
+export function buildInjectedHtmlHeaders(
+  sourceHeaders: Headers,
+  bodyByteLength: number,
+  runtimeInjected = true
+): Headers {
   const headers = new Headers(sourceHeaders);
   headers.delete('content-encoding');
   headers.delete('content-length');
-  headers.delete('content-security-policy');
-  headers.delete('content-security-policy-report-only');
+  if (runtimeInjected) {
+    headers.delete('content-security-policy');
+    headers.delete('content-security-policy-report-only');
+  }
   headers.delete('etag');
   headers.delete('last-modified');
   headers.set('cache-control', 'no-store');
   headers.set('content-length', String(bodyByteLength));
-  headers.set(
-    VISUAL_ANNOTATION_RUNTIME_RESPONSE_HEADER,
-    VISUAL_ANNOTATION_RUNTIME_RESPONSE_VERSION
-  );
+  headers.delete(VISUAL_ANNOTATION_RUNTIME_RESPONSE_HEADER);
+  if (runtimeInjected) {
+    headers.set(
+      VISUAL_ANNOTATION_RUNTIME_RESPONSE_HEADER,
+      VISUAL_ANNOTATION_RUNTIME_RESPONSE_VERSION
+    );
+  }
   if (!headers.has('content-type')) {
     headers.set('content-type', 'text/html; charset=utf-8');
   }
@@ -1407,6 +1433,7 @@ export function headersToEntries(
     const lowerName = name.toLowerCase();
     if (
       !LOCAL_RESPONSE_HEADER_EXCLUSIONS.has(lowerName) &&
+      lowerName !== PREVIEW_PROXY_RESPONSE_HEADER &&
       !(bodyWasDecoded && (lowerName === 'content-encoding' || lowerName === 'content-length'))
     ) {
       responseHeaders.push([
@@ -1417,6 +1444,7 @@ export function headersToEntries(
       ]);
     }
   }
+  responseHeaders.push([PREVIEW_PROXY_RESPONSE_HEADER, PREVIEW_PROXY_RESPONSE_VERSION]);
   return responseHeaders;
 }
 

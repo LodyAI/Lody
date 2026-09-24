@@ -7,17 +7,20 @@ import {
   type MachineViewMeta,
   type ProviderSetupTask,
 } from '@lody/shared';
-import { Loader2, RotateCcw, Trash2, XCircle } from 'lucide-react';
+import { RotateCcw, Trash2 } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 
-import { AgentIcon } from '@/components/icons/agent-icon';
+import { AgentReadinessMark, type AgentReadiness } from '@/components/shared/agent-readiness-mark';
 import { Button } from '@/ui/button';
 import { cn } from '@/lib/utils';
+import { openExternalUrl } from '@/lib/native-browser';
 import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
 import { useMachineAcpBinaryProgress } from '@/hooks/use-machine-acp-binary-progress';
 import { useMachineOnlineStatus } from '@/hooks/use-machine-online-status';
 import { AcpAuthenticationPanel } from './acp-authentication-panel';
 import { labelForAgent } from './provider-row';
 import { ProviderProgressButton } from './provider-progress-button';
+import { BUB_ACP_INSTALL_DOCS_URL, BubInstallGuide } from './bub-install-guide';
 
 export type ProviderSetupRowProps = {
   setup: ProviderSetupTask;
@@ -38,6 +41,10 @@ export function ProviderSetupRow({
   const { t } = useTranslation();
   const [actionPending, setActionPending] = useState<'retry' | 'delete' | null>(null);
   const config = setup.config;
+  const isBubSetup = config.cliType === 'builtin' && config.agentType === 'bub';
+  const installDocsUrl = isBubSetup ? BUB_ACP_INSTALL_DOCS_URL : undefined;
+  const showBubInstallCommand =
+    isBubSetup && setup.status === 'failed' && setup.failureCode === 'runtime-unavailable';
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
   const runtimeProgress = useMachineAcpBinaryProgress(runtime, setup.machineId, config.agentType);
   const machineOnline = useMachineOnlineStatus(setup.machineId) === 'online';
@@ -80,6 +87,12 @@ export function ProviderSetupRow({
         return t('settings.agent.setup.awaitingAuth', 'Sign in to finish this provider setup.');
       case 'failed':
         if (setup.failureCode === 'runtime-unavailable') {
+          if (isBubSetup) {
+            return t(
+              'settings.agent.setup.bubInstallRequired',
+              'Bub or its ACP server is not installed on the target machine.'
+            );
+          }
           return t(
             'settings.agent.setup.runtimeUnavailable',
             'This runtime is not available on the target machine.'
@@ -115,80 +128,121 @@ export function ProviderSetupRow({
     }
   };
 
+  // A setup row sits in the same list as a published AgentConfig row, so it
+  // borrows that row's geometry exactly: the same mark, the same two-line text
+  // column, the same fixed action slots. Anything narrower here re-ragged every
+  // column the moment a pending setup appeared above the published agents.
+  const markReadiness: AgentReadiness =
+    setup.status === 'failed' ||
+    (setup.status === 'queued' &&
+      (!machineOnline || (machine !== undefined && !supportsSetupProtocol)))
+      ? 'cold'
+      : active
+        ? 'arriving'
+        : 'ready';
+
   return (
     <div
       className={cn(
-        'rounded-xl border border-border/60 bg-card/40 px-3 py-3',
+        'rounded-lg border border-border/60 bg-card/40',
         setup.status === 'failed' && 'border-status-error/30',
         className
       )}
     >
-      <div className="flex min-w-0 items-center gap-3">
-        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-muted/40">
-          <AgentIcon
-            cliType={config.cliType}
-            agentType={config.agentType}
-            brandId={config.brandId}
-            env={config.env}
-            className="h-5 w-5"
-          />
-        </div>
+      <div className="flex min-w-0 items-center gap-3 py-3 pl-3">
+        <AgentReadinessMark
+          cliType={config.cliType}
+          agentType={config.agentType}
+          brandId={config.brandId}
+          env={config.env}
+          readiness={markReadiness}
+          percent={downloadPercent}
+          size="md"
+        />
         <div className="min-w-0 flex-1">
-          <div className="truncate text-sm font-medium">{config.name}</div>
+          <div className="truncate text-sm font-normal">{config.name}</div>
           <div className="truncate text-xs text-muted-foreground">
             {labelForAgent(config.cliType, config.agentType)}
           </div>
         </div>
-        {active ? (
-          <ProviderProgressButton
-            percent={downloadPercent}
-            label={
-              downloadPercent !== null
-                ? `${downloadPercent}%`
-                : setup.status === 'queued'
-                  ? t('onboarding.providers.waitingAction', 'Waiting')
-                  : t('onboarding.providers.workingAction', 'Working')
-            }
-            ariaLabel={statusText}
-          />
-        ) : setup.status === 'failed' ? (
-          <XCircle className="h-4 w-4 shrink-0 text-status-error" />
-        ) : null}
-        {setup.status === 'failed' ? (
+        {/* Reserve the provider row's status and edit columns so setup actions
+            stay aligned with published providers. Failures are explained below. */}
+        <div className="min-w-20 shrink-0" aria-hidden="true" />
+        <div className="flex shrink-0 items-center gap-1 pr-3">
+          <div className="w-12 shrink-0" />
+          <div className="flex w-20 shrink-0 items-center justify-end">
+            {active ? (
+              <ProviderProgressButton
+                className="w-full"
+                percent={downloadPercent}
+                label={
+                  downloadPercent !== null
+                    ? `${downloadPercent}%`
+                    : setup.status === 'queued'
+                      ? t('onboarding.providers.waitingAction', 'Waiting')
+                      : t('onboarding.providers.workingAction', 'Working')
+                }
+                ariaLabel={statusText}
+              />
+            ) : setup.status === 'failed' ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="w-full gap-1 px-0"
+                disabled={actionPending !== null}
+                onClick={() => void runAction('retry', onRetry)}
+              >
+                {actionPending === 'retry' ? (
+                  <Spinner className="h-3.5 w-3.5" />
+                ) : (
+                  <RotateCcw className="h-3.5 w-3.5" />
+                )}
+                {t('common.retry', 'Retry')}
+              </Button>
+            ) : null}
+          </div>
           <Button
             type="button"
-            variant="outline"
-            size="sm"
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8 shrink-0 text-muted-foreground hover:text-destructive"
             disabled={actionPending !== null}
-            onClick={() => void runAction('retry', onRetry)}
+            aria-label={t('common.delete', 'Delete')}
+            onClick={() => void runAction('delete', onDelete)}
           >
-            {actionPending === 'retry' ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            {actionPending === 'delete' ? (
+              <Spinner className="h-3.5 w-3.5" />
             ) : (
-              <RotateCcw className="h-3.5 w-3.5" />
+              <Trash2 className="h-3.5 w-3.5" />
             )}
-            {t('common.retry', 'Retry')}
           </Button>
-        ) : null}
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          className="h-8 w-8 shrink-0 text-muted-foreground hover:text-destructive"
-          disabled={actionPending !== null}
-          aria-label={t('common.delete', 'Delete')}
-          onClick={() => void runAction('delete', onDelete)}
-        >
-          {actionPending === 'delete' ? (
-            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-          ) : (
-            <Trash2 className="h-3.5 w-3.5" />
-          )}
-        </Button>
+        </div>
       </div>
-      <p className="mt-2 text-xs text-muted-foreground">{statusText}</p>
+      {/* Aligned to the name above it, not to the card edge: the sentence is
+          about this agent, so it starts where the agent's text column starts. */}
+      <p className="ml-[3.25rem] pb-3 pr-3 text-xs text-muted-foreground">{statusText}</p>
+      {showBubInstallCommand ? (
+        <div className="ml-[3.25rem] space-y-2 pb-3 pr-3">
+          <BubInstallGuide />
+        </div>
+      ) : setup.status === 'failed' && installDocsUrl ? (
+        <div className="ml-[3.25rem] pb-3 pr-3">
+          <Button
+            type="button"
+            variant="link"
+            size="sm"
+            className="h-auto p-0 text-xs"
+            onClick={() => {
+              void openExternalUrl(installDocsUrl);
+            }}
+          >
+            {t('settings.agent.dialog.bubInstallDocs', 'Open install guide')}
+          </Button>
+        </div>
+      ) : null}
       {setup.status === 'awaiting-auth' ? (
-        <div className="mt-3">
+        <div className="ml-[3.25rem] pb-3 pr-3">
           <AcpAuthenticationPanel
             machineId={setup.machineId}
             configId={config.id}

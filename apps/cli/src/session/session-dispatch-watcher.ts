@@ -1,3 +1,4 @@
+import { readSessionHistory } from '@lody/shared/session-data';
 import type { RepoTransportRoomStatus, RepoWatchHandle } from 'loro-repo';
 import { Effect, Fiber } from 'effect';
 import {
@@ -5,7 +6,6 @@ import {
   buildPendingUserHistoryEntry,
   buildSessionTurnInputConfig,
   getSessionRoomId,
-  getLegacyReadForSessionHistoryStatus,
   type ChatFailedReason,
   isLoroRepoDocDeleted,
   isSessionDocRoomId,
@@ -31,6 +31,7 @@ import type { Logger } from '@/utils/logger';
 import { formatErrorMessage } from '@/utils/format-error';
 import { startTraceSpan, traceAsync } from '@/utils/trace-span';
 import type { LoroDocumentManager } from '@/lib/loro/doc';
+import { subscribeSessionChanges } from '@/lib/loro/doc';
 import { SessionExecutionService, type SessionDispatchSource } from './session-execution-service';
 import {
   extractPromptPreviewFromInputBlocks,
@@ -150,6 +151,9 @@ type InitialProbeObserver = {
 type InitialProbeRecord = {
   promise: Promise<void>;
   observer: InitialProbeObserver;
+  /** The whole-check chain promise this probe belongs to (resolves after any agent turn). */
+  chain: Promise<void>;
+  lifecycleGeneration: number | undefined;
   started: boolean;
   settled: boolean;
 };
@@ -223,7 +227,7 @@ const isConfigOptionValueRecord = (
  *    CRDT metadata changes (e.g. new session created, status updated, cancel requested).
  *    This is the primary trigger for new sessions and cancel requests.
  *
- * 2. **Mirror subscribe** (`sessionDoc.mirror.subscribe()`) — fires when a session
+ * 2. **Session subscription** (`sessionDoc.subscribeAll()`) — fires when a session
  *    doc's content changes (e.g. new user message synced from the web client).
  *    This handles follow-up messages on already-watched sessions.
  *
@@ -290,7 +294,15 @@ const isConfigOptionValueRecord = (
  * Each session has two independent serialized promise chains:
  * - `sessionCheckChains` — at most one `maybeHandleSession` runs per session at a time.
  *   If multiple events fire while a check is in progress, exactly one follow-up check
- *   runs after it completes (coalescing).
+ *   runs after it completes (coalescing): `enqueueSessionCheck` reuses the queued,
+ *   not-yet-started check instead of appending another one. This matters because
+ *   the dispatch branch awaits the whole agent turn, and the session mirror fires
+ *   once per commit while the agent streams output — a long turn would otherwise
+ *   leave hundreds of backlogged checks, each re-reading the full history
+ *   (~130 ms on a 13 MB doc), and drain them back-to-back on microtasks without
+ *   ever yielding to timers (observed: 42 s of event-loop starvation). A check that
+ *   follows another one in the chain also yields one macrotask first, so even a
+ *   real drain cannot starve timers or the Loro heartbeat.
  * - `cancelCheckChains` — same pattern for cancel requests. Separate from dispatch
  *   so that a cancel can be processed without waiting for a long-running dispatch.
  *
@@ -347,13 +359,9 @@ const isConfigOptionValueRecord = (
  * renderer derives a visible "not delivered" label for it from the marker plus
  * its non-terminal status (no CLI repair write, no schema change). Recovery is
  * a fresh send — the row's "not delivered" label opens a confirmation dialog
- * that re-sends the same content as a brand-new message (new turn id) through
- * the ordinary producer path, whose ordinary dispatch write clears the marker
- * as a side effect; the resend also supersedes the abandoned entry to
- * `canceled` so the stale pending copy can never dispatch once the marker is
- * gone. That is preferred over an unbounded silent wait, repeated recovery
- * loops, or resurrecting a message the user may already have resent as a new
- * turn.
+ * that re-sends the same content as a brand-new message (new turn id). The
+ * renderer retains the marker and supersedes the abandoned entry to
+ * `canceled`.
  *
  * Sessions without an explicit activation signal stay metadata-only. History is
  * a turn-selection source after activation, not a startup activation index.
@@ -549,6 +557,15 @@ export class SessionDispatchWatcher {
   /**
    * Enqueue a dispatch check for a session. Multiple calls while a check is in-flight
    * are coalesced: exactly one follow-up check will run after the current one finishes.
+   *
+   * Every check reads meta and history fresh when it starts, so a check that is
+   * queued but has not started yet already covers any trigger that arrives
+   * before it. Such calls return the queued check's promises instead of
+   * appending a new link, which bounds the post-turn backlog to one check no
+   * matter how many mirror commits fired during the turn. Callers that await
+   * the result keep their contract: `resolveAfterInitialProbe` still resolves
+   * once that check's probe finishes, and the default still resolves once the
+   * whole check (including a dispatched turn) finishes.
    */
   enqueueSessionCheck(sessionId: SessionId, options: SessionCheckOptions = {}): Promise<void> {
     // Tests may drive an as-yet-unstarted watcher directly (generation 0). Once
@@ -576,8 +593,16 @@ export class SessionDispatchWatcher {
       const firstQueuedProbe = [...(probes ?? [])].find((probe) => !probe.settled);
       return firstQueuedProbe?.promise ?? existing;
     }
+    if (existing !== undefined) {
+      const queued = [...(this.sessionInitialProbes.get(sessionId) ?? [])].find(
+        (probe) => !probe.started && probe.lifecycleGeneration === lifecycleGeneration
+      );
+      if (queued) {
+        return options.resolveAfterInitialProbe === true ? queued.promise : queued.chain;
+      }
+    }
 
-    const previous = this.sessionCheckChains.get(sessionId) ?? Promise.resolve();
+    const previous = existing ?? Promise.resolve();
     let resolveProbe!: () => void;
     let rejectProbe!: (error: unknown) => void;
     let probeSettled = false;
@@ -607,6 +632,8 @@ export class SessionDispatchWatcher {
     probeRecord = {
       promise: probe,
       observer: initialProbe,
+      chain: Promise.resolve(),
+      lifecycleGeneration,
       started: false,
       settled: false,
     };
@@ -619,6 +646,13 @@ export class SessionDispatchWatcher {
     const next = previous
       .catch(() => {})
       .then(async () => {
+        if (existing !== undefined) {
+          // This check follows another one in the chain. Every await inside a
+          // check settles on in-memory objects (microtasks), so a drain would
+          // otherwise run back-to-back without ever reaching the timer phase.
+          // Triggers that land during this yield still coalesce into this check.
+          await SessionDispatchWatcher.yieldToEventLoop();
+        }
         probeRecord.started = true;
         await this.maybeHandleSession(sessionId, initialProbe, lifecycleGeneration);
       })
@@ -633,6 +667,7 @@ export class SessionDispatchWatcher {
           this.sessionCheckChains.delete(sessionId);
         }
       });
+    probeRecord.chain = next;
     this.sessionCheckChains.set(sessionId, next);
     // The maps own these promises even when an event handler intentionally
     // ignores the returned handle. Attach observers to avoid unhandled rejects;
@@ -1186,14 +1221,12 @@ export class SessionDispatchWatcher {
         // Bootstrap and live metadata can race on the same session. Re-check
         // after the awaited open so only one subscription is installed.
         if (!this.watchedSessions.has(sessionId)) {
-          const unsubscribe = sessionDoc.mirror?.subscribe(() => {
+          const unsubscribe = subscribeSessionChanges(sessionDoc, () => {
             if (isActive()) {
               void this.enqueueSessionCheck(sessionId, { lifecycleGeneration });
             }
           });
-          if (unsubscribe) {
-            this.watchedSessions.set(sessionId, { unsubscribe });
-          }
+          this.watchedSessions.set(sessionId, { unsubscribe });
         }
       }
 
@@ -1574,6 +1607,11 @@ export class SessionDispatchWatcher {
             sessionId,
             sessionDoc,
             userTurnId: nextUserTurn.id,
+            invocation: {
+              sourceTurnId: nextUserTurn.id,
+              requesterUserId: nextUserTurn.userId,
+              inputConfig: nextUserTurn.inputConfig ?? {},
+            },
             dispatchSource,
             accessPromise: executionAccessPromise,
             requestPromise,
@@ -1794,19 +1832,11 @@ export class SessionDispatchWatcher {
     this.deps.logger.warn(`[${sessionId}] Refusing dispatch: ${message}`);
 
     let entryMatched = false;
-    await sessionDoc.updateHistory((history) =>
-      history.map((entry) => {
-        if (entry.id !== userTurnId || entry.role !== 'user') {
-          return entry;
-        }
-        entryMatched = true;
-        return {
-          ...entry,
-          status: 'failed' as const,
-          read: getLegacyReadForSessionHistoryStatus('failed'),
-        };
-      })
-    );
+    await sessionDoc.sessionData.commands
+      .applyHistoryAction({ kind: 'user-status', turnId: userTurnId, status: 'failed' })
+      .then((result) => {
+        entryMatched = result.matched ?? false;
+      });
     // An RPC-stashed turn can be denied before its history entry syncs; record
     // the failure so the late entry gets repaired to 'failed' instead of
     // re-dispatched, and drop the stash copy so it cannot loop back in.
@@ -1823,6 +1853,7 @@ export class SessionDispatchWatcher {
       lastHandledUserMsgId: userTurnId,
       processingUserMsgId: undefined,
     } satisfies Partial<SessionMeta>);
+    await this.deps.executionService.acknowledgeSteerTurn(sessionId, userTurnId);
     await sessionDoc.setStatus(SessionStatusFactory.idle());
 
     // Surface the denial to the user. Without this the turn renders as
@@ -1867,13 +1898,16 @@ export class SessionDispatchWatcher {
       return;
     }
     this.cancelSeenTurn.set(sessionId, action.turnId);
-    await this.deps.executionService.cancelSession({
-      type: 'session/cancel',
-      sessionId,
-      machineId: this.deps.machineId,
-      workspaceId: this.deps.workspaceId,
-      turnId: action.turnId,
-    });
+    await this.deps.executionService.cancelSession(
+      {
+        type: 'session/cancel',
+        sessionId,
+        machineId: this.deps.machineId,
+        workspaceId: this.deps.workspaceId,
+        turnId: action.turnId,
+      },
+      { pendingInput: 'promote', prePromptSession: 'discard' }
+    );
     if (!isActive()) {
       return;
     }
@@ -1962,13 +1996,12 @@ export class SessionDispatchWatcher {
         inputBlocks: inputBlocks.length > 0 ? inputBlocks : undefined,
         cliType: entry.inputConfig?.cliType ?? meta.cliType,
         agentType: entry.inputConfig?.agentType ?? meta.agentType,
-        customAcp: entry.inputConfig?.customAcp ?? launchConfig?.customAcp,
-        runtimeOverrides: entry.inputConfig?.runtimeOverrides ?? launchConfig?.runtimeOverrides,
+        customAcp: launchConfig?.customAcp,
+        runtimeOverrides: launchConfig?.runtimeOverrides,
         modeId: entry.inputConfig?.modeId,
         modelId: entry.inputConfig?.modelId,
         configOptionValues: entry.inputConfig?.configOptionValues,
         mcpServerIds: entry.inputConfig?.mcpServerIds ?? [],
-        taskToolsEnabled: entry.inputConfig?.taskToolsEnabled === true,
         agentRoleId: entry.inputConfig?.agentRoleId,
         agentRoleRevision: entry.inputConfig?.agentRoleRevision,
         issuePRMentions: entry.inputConfig?.issuePRMentions,
@@ -2006,13 +2039,12 @@ export class SessionDispatchWatcher {
         inputBlocks: inputBlocks.length > 0 ? inputBlocks : undefined,
         cliType: entry.inputConfig?.cliType ?? meta.cliType,
         agentType: entry.inputConfig?.agentType ?? meta.agentType,
-        customAcp: entry.inputConfig?.customAcp ?? launchConfig?.customAcp,
-        runtimeOverrides: entry.inputConfig?.runtimeOverrides ?? launchConfig?.runtimeOverrides,
+        customAcp: launchConfig?.customAcp,
+        runtimeOverrides: launchConfig?.runtimeOverrides,
         modeId: entry.inputConfig?.modeId,
         modelId: entry.inputConfig?.modelId,
         configOptionValues: entry.inputConfig?.configOptionValues,
         mcpServerIds: entry.inputConfig?.mcpServerIds ?? [],
-        taskToolsEnabled: entry.inputConfig?.taskToolsEnabled === true,
         agentRoleId: entry.inputConfig?.agentRoleId,
         agentRoleRevision: entry.inputConfig?.agentRoleRevision,
         issuePRMentions: entry.inputConfig?.issuePRMentions,
@@ -2052,12 +2084,12 @@ export class SessionDispatchWatcher {
   }
 
   /**
-   * Try to pop a message from the session's message queue and promote it into
+   * Peek a ready message from the session's message queue and promote it into
    * a history entry. This handles the case where the web client enqueues messages
    * via the message queue API instead of writing directly to the session history.
    *
-   * This is an I/O operation (mutates the session doc by popping the queue and
-   * appending to history), which is why it lives in the watcher rather than in
+   * Remove its queue row only after history and activation accept it. This I/O operation
+   * lives in the watcher rather than in
    * the pure turn-finding logic.
    */
   private async promoteNextQueuedMessage(
@@ -2072,20 +2104,53 @@ export class SessionDispatchWatcher {
       return null;
     }
     try {
-      const popMessageQueue = (
-        sessionDoc as { popMessageQueue?: (() => Promise<MessageQueueItem | null>) | undefined }
-      ).popMessageQueue;
-      if (!popMessageQueue) {
+      const peekMessageQueue = (
+        sessionDoc as {
+          peekReadyMessageQueue?: (() => Promise<MessageQueueItem | null>) | undefined;
+        }
+      ).peekReadyMessageQueue;
+      if (!peekMessageQueue) {
         return null;
       }
 
-      const queuedItem = await popMessageQueue.call(sessionDoc);
+      const queuedItem = await peekMessageQueue.call(sessionDoc);
       if (!queuedItem) {
         return null;
       }
 
       const queuedTurnId = queuedItem.userTurnId?.trim() || `queued-${queuedItem.$cid}`;
-      if (history.some((entry) => entry.id === queuedTurnId)) {
+      const existing = history.find((entry) => entry.id === queuedTurnId);
+      if (existing) {
+        if (existing.role === 'user' && isActivationAwaitingHistory(history, queuedTurnId)) {
+          const currentMeta = await sessionDoc.getMetaState();
+          if (!currentMeta) return null;
+          const alreadyExecuted =
+            currentMeta.lastHandledUserMsgId === queuedTurnId ||
+            currentMeta.settledActivationUserMsgId === queuedTurnId ||
+            currentMeta.lastMissingHistoryUserMsgId === queuedTurnId ||
+            this.deps.executionService.getTerminalUserTurnStatusWithoutEntry?.(
+              meta.id,
+              queuedTurnId
+            ) !== undefined ||
+            history.some(
+              (entry) =>
+                entry.role === 'assistant' &&
+                entry.userTurnId === queuedTurnId &&
+                typeof entry.endedAt === 'number'
+            );
+          if (!alreadyExecuted) {
+            // History may have committed before activation publication failed. Do not
+            // discard the retry record until the missing second write succeeds.
+            const pending = getPendingUserTurnActivationId(currentMeta);
+            if (pending && pending !== queuedTurnId) return null;
+            await this.deps.workspaceDocument.repo.upsertDocMeta(getSessionRoomId(meta.id), {
+              latestUserMsgId: queuedTurnId,
+            });
+            await sessionDoc.removeMessageQueueItem(queuedItem.$cid);
+            return existing;
+          }
+        }
+        await sessionDoc.removeMessageQueueItem(queuedItem.$cid);
         this.deps.logger.debug(
           `[${meta.id}] Dropping already-promoted queued message ${queuedItem.$cid}`
         );
@@ -2111,7 +2176,6 @@ export class SessionDispatchWatcher {
           : undefined,
         mcpServerIds:
           normalizeMcpServerIdSelection(queuedItem.acpSessionConfig?.mcpServerIds) ?? [],
-        taskToolsEnabled: queuedItem.acpSessionConfig?.taskToolsEnabled === true,
         agentRoleId: queuedItem.acpSessionConfig?.agentRoleId,
         agentRoleRevision: queuedItem.acpSessionConfig?.agentRoleRevision,
         issuePRMentions: queuedItem.acpSessionConfig?.issuePRMentions,
@@ -2125,7 +2189,7 @@ export class SessionDispatchWatcher {
       });
 
       if (!pendingEntry) {
-        this.deps.logger.debug(`[${meta.id}] Dropping invalid queued message ${queuedItem.$cid}`);
+        this.deps.logger.debug(`[${meta.id}] Retaining invalid queued message ${queuedItem.$cid}`);
         return null;
       }
 
@@ -2136,6 +2200,7 @@ export class SessionDispatchWatcher {
 
       // Promotion is a dispatch producer; `appendUserTurn` publishes the pointer.
       await sessionDoc.appendUserTurn(entry);
+      await sessionDoc.removeMessageQueueItem(queuedItem.$cid);
       return entry;
     } finally {
       releaseQueueMutation();
@@ -2149,6 +2214,17 @@ export class SessionDispatchWatcher {
   private static readonly HISTORY_RECONNECT_JITTER_MAX_MS = 1_500;
   private static readonly HISTORY_RECONNECT_BASE_DELAY_MS = 1_000;
   private static readonly HISTORY_RECONNECT_MAX_DELAY_MS = 15_000;
+  /**
+   * One macrotask yield. `setImmediate` runs after the timer phase, so a queued
+   * check gives pending timers (Loro heartbeat, event-loop lag monitor, other
+   * sessions' waits) a turn before the next history read.
+   */
+  private static yieldToEventLoop(): Promise<void> {
+    return new Promise((resolve) => {
+      setImmediate(resolve);
+    });
+  }
+
   private static setUnrefTimeout(
     callback: () => void,
     delayMs: number
@@ -2493,7 +2569,7 @@ export class SessionDispatchWatcher {
       // arrives during join retries is a complete turn source and must preempt
       // the CRDT wait without bypassing the serialized dispatch chain.
       unsubscribeRpcOffers = this.subscribeToRpcTurnOffers(sessionId, requestTurnCheck);
-      unsubscribeMirror = sessionDoc.mirror?.subscribe(requestTurnCheck);
+      unsubscribeMirror = subscribeSessionChanges(sessionDoc, requestTurnCheck);
       if (!unsubscribeMirror) {
         this.deps.logger.debug(
           `[${sessionId}] Session mirror is unavailable during history sync wait`
@@ -2606,6 +2682,8 @@ export class SessionDispatchWatcher {
       `[${sessionId}] Marking missing-history recovery for user turn ${pendingUserMsgId ?? 'unknown'} (message_delivery_failed)`
     );
     await this.deps.workspaceDocument.repo.upsertDocMeta?.(roomId, recoveryPatch);
+    if (pendingUserMsgId)
+      await this.deps.executionService.acknowledgeSteerTurn(sessionId, pendingUserMsgId);
     this.deps.logger.info(
       `[${sessionId}] Recorded missing-history recovery for user turn ${
         pendingUserMsgId ?? 'unknown'
@@ -2649,7 +2727,8 @@ export class SessionDispatchWatcher {
     meta: SessionMeta,
     isActive: () => boolean = () => true
   ): Promise<{ turn: SessionHistoryInput | null; history: SessionHistoryInput[] }> {
-    const history = await sessionDoc.getHistory();
+    await this.deps.executionService.reconcileSteerHistory(meta.id, sessionDoc);
+    const history = readSessionHistory(sessionDoc.sessionData.history);
     if (!isActive()) {
       return { turn: null, history };
     }
@@ -2708,7 +2787,7 @@ export class SessionDispatchWatcher {
       sessionId,
       turn.id
     );
-    if (!terminalStatus && turn.status === 'pending') {
+    if (!terminalStatus && ['pending', 'seen', 'processing'].includes(turn.status ?? '')) {
       // Restart backstop (in-memory record is gone): a completed assistant
       // entry linked to this user turn is positive proof it ran to completion.
       // endedAt is written at ACP finalization. Only this proves 'handled'.
@@ -2739,17 +2818,11 @@ export class SessionDispatchWatcher {
     this.deps.logger.debug(
       `[${sessionId}] Repairing late-arriving user turn ${turn.id} to '${status}' (already executed via fast path)`
     );
-    await sessionDoc.updateHistory((entries) =>
-      entries.map((entry) =>
-        entry.id === turn.id && entry.role === 'user'
-          ? {
-              ...entry,
-              status,
-              read: getLegacyReadForSessionHistoryStatus(status),
-            }
-          : entry
-      )
-    );
+    await sessionDoc.sessionData.commands.applyHistoryAction({
+      kind: 'user-status',
+      turnId: turn.id,
+      status,
+    });
     this.deps.executionService.clearTerminalUserTurnStatusWithoutEntry?.(sessionId, turn.id);
     this.consumeStashedRpcTurn(sessionId, turn.id);
     return true;

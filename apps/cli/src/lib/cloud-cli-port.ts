@@ -1,5 +1,7 @@
-import { ConvexClient } from 'convex/browser';
+import { ConvexClient, ConvexHttpClient } from 'convex/browser';
+import { z } from 'zod';
 import { api } from '@lody/cloud-api';
+import { ShareDeliveryEnvelopeSchema } from '@lody/shared/session-share-delivery';
 import {
   buildLoroStreamsTokenEndpoint,
   createLoroStreamsTokenProvider,
@@ -11,6 +13,7 @@ import {
   type CloudAccessSnapshot,
   type CloudBillingPort,
   type CloudPort,
+  type CloudSessionSharingPort,
   type CloudPrAssociationInput,
   type CloudStreamsTokenPort,
   type CloudUsageUpdateInput,
@@ -43,6 +46,38 @@ export interface CloudCliPortOptions {
   /** Optional operator mirror; the public artifact channel is the default. */
   runtimeArtifactsBaseUrl?: string;
   logger: Logger;
+}
+
+export function createCloudSessionSharingPort(options: {
+  token: string;
+  authBaseUrl: string;
+}): CloudSessionSharingPort {
+  const client = new ConvexHttpClient(normalizeBaseUrl(options.authBaseUrl));
+  const result = z
+    .object({
+      requestId: z.string().min(1),
+      shareRequestId: z.string().min(1),
+      status: z.enum(['pending', 'confirmed', 'cancelled', 'expired', 'published']),
+      shareId: z.string().optional(),
+      delivery: ShareDeliveryEnvelopeSchema.optional(),
+    })
+    .strict();
+  return {
+    getResult: async (input) =>
+      result.parse(
+        await client.query(api.sessionSharing.getRequestResultFromCli, {
+          ...input,
+          cliToken: options.token,
+        })
+      ),
+    request: async (input) =>
+      result.parse(
+        await client.mutation(api.sessionSharing.requestFromCli, {
+          ...input,
+          cliToken: options.token,
+        })
+      ),
+  };
 }
 
 export function createCloudBillingPort(options: { token: string }): CloudBillingPort {
@@ -106,6 +141,7 @@ export function createCloudCliPort(options: CloudCliPortOptions): CloudPort {
 
   return {
     kind: 'cloud',
+    sessionSharing: createCloudSessionSharingPort(options),
     identity: options.identity,
     access: {
       watchWorkspaceAccess: (listener, onError) =>
@@ -214,7 +250,7 @@ export function createCloudCliPort(options: CloudCliPortOptions): CloudPort {
     prAssociation: {
       associatePullRequest: async (input: CloudPrAssociationInput) => {
         const { ownerSessionId, ...association } = input;
-        const response = await fetch(new URL('/api/action', authBaseUrl), {
+        const response = await fetch(new URL('/api/action', authSiteUrl), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({

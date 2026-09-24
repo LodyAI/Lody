@@ -1,5 +1,6 @@
 import { useCallback, useRef } from 'react';
 import type { ClipboardEvent, KeyboardEvent, ReactNode, Ref } from 'react';
+import { usePostHog } from '@posthog/react';
 import type { Mention as MentionRange } from '@/ui/mention/index';
 import type { CombinedMentionTextareaHandle } from '@/components/mentions/combined-mention-textarea';
 import type { PersistedMentionRange } from '@/components/mentions/mention-persistence';
@@ -16,8 +17,12 @@ import {
 import type { AttachmentAddMenuMcp } from '@/components/chat/attachment-add-menu';
 import { ErrorBoundary } from '@/components/error-boundary';
 import type { MentionProjectSource } from '@/components/mentions/mention-project-file-source';
-import { ArrowUp, Bug, Download, ExternalLink, Loader2, Settings } from 'lucide-react';
+import { ArrowUp, Bug, Download, ExternalLink, Settings } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import type { PastedTextDraft } from '@/lib/pasted-text-draft';
+import { getDroppedFileLocalPath, toPathMentionInsertion } from '@/lib/dropped-local-path';
+import { isPlainLinkPasteShortcut, parseAppSessionUrl } from '@/lib/session-app-url';
+import { capturePostHogEvent } from '@/lib/posthog-analytics';
 import { MobileChatLandingScreen } from '@/components/mobile/mobile-chat-landing-screen';
 import { WebChatLandingScreen } from './web-chat-landing-screen';
 
@@ -55,6 +60,7 @@ export interface ChatLandingViewProps {
   onImageDrop?: (files: File[]) => void;
   /** Placeholder text for the prompt textarea */
   promptPlaceholder?: string;
+  compactPlaceholderName?: string | null;
   /** Mobile keyboard action hint for the prompt textarea */
   promptEnterKeyHint?: 'send' | 'enter';
   /** Ref for the prompt textarea */
@@ -195,6 +201,7 @@ export function ChatLandingView({
   onPromptPaste,
   onImageDrop,
   promptPlaceholder,
+  compactPlaceholderName,
   promptEnterKeyHint = 'send',
   promptRef,
   pastedTextDrafts = [],
@@ -242,8 +249,55 @@ export function ChatLandingView({
   errorLabels = {},
 }: ChatLandingViewProps) {
   const isDark = tone === 'dark';
+  const postHog = usePostHog();
   const { mentionActionsRef, dropZone, overlayActive } = useSessionMentionDrop(
     !isMobile && !submissionPending
+  );
+  // A folder is not an attachment — it becomes a `@path` mention, through the
+  // same handle the session drop uses, so it lands in this composer's draft.
+  const handleDirectoryDrop = useCallback(
+    (directories: File[]) => {
+      const insertions = directories.flatMap((directory) => {
+        const localPath = getDroppedFileLocalPath(directory);
+        return localPath ? [toPathMentionInsertion(localPath, 'dir')] : [];
+      });
+      mentionActionsRef.current?.insertPathMentions(insertions);
+    },
+    [mentionActionsRef]
+  );
+  const handlePromptPasteWithSessionUrl = useCallback(
+    (event: ClipboardEvent<HTMLTextAreaElement>) => {
+      const text = event.clipboardData.getData('text/plain');
+      // Cmd/Ctrl+Shift+V keeps a conversation URL as a plain link.
+      const sessionUrl = text ? parseAppSessionUrl(text) : null;
+      if (sessionUrl) {
+        if (isPlainLinkPasteShortcut(event)) {
+          capturePostHogEvent(postHog, 'mention/session_link_pasted', {
+            converted: false,
+            surface: 'chat_landing',
+          });
+        } else {
+          const target = event.currentTarget;
+          const at = target.selectionStart ?? target.value.length;
+          const replaceEnd = target.selectionEnd ?? at;
+          if (
+            mentionActionsRef.current?.insertSessionMention(sessionUrl.sessionId, {
+              at,
+              replaceEnd,
+            })
+          ) {
+            capturePostHogEvent(postHog, 'mention/session_link_pasted', {
+              converted: true,
+              surface: 'chat_landing',
+            });
+            event.preventDefault();
+            return;
+          }
+        }
+      }
+      onPromptPaste?.(event);
+    },
+    [mentionActionsRef, onPromptPaste, postHog]
   );
 
   const {
@@ -295,12 +349,7 @@ export function ChatLandingView({
         )}
       >
         {isDaemonStartingHint ? (
-          <Loader2
-            className={cn(
-              'mt-0.5 h-4 w-4 shrink-0 animate-spin opacity-70',
-              'text-muted-foreground'
-            )}
-          />
+          <Spinner className="mt-0.5 h-4 w-4 opacity-70 text-muted-foreground" />
         ) : (
           <Download className={cn('mt-0.5 h-4 w-4 shrink-0 opacity-70', 'text-muted-foreground')} />
         )}
@@ -350,11 +399,7 @@ export function ChatLandingView({
         aria-label={submissionPending ? submittingLabel : submitLabel}
         className={cn(primaryActionButtonClassName, isMobile ? 'h-6 w-6' : 'h-7 w-7')}
       >
-        {submissionPending ? (
-          <Loader2 className="h-4 w-4 animate-spin" />
-        ) : (
-          <ArrowUp className="h-4 w-4" />
-        )}
+        {submissionPending ? <Spinner className="h-4 w-4" /> : <ArrowUp className="h-4 w-4" />}
       </Button>
     </ErrorBoundary>
   );
@@ -369,7 +414,7 @@ export function ChatLandingView({
         value={submissionPending ? '' : promptValue}
         onChange={(event) => onPromptChange(event.target.value)}
         onKeyDown={onPromptKeyDown}
-        onPaste={onPromptPaste}
+        onPaste={handlePromptPasteWithSessionUrl}
         rows={isMobile ? 3 : 4}
         enterKeyHint={promptEnterKeyHint}
         placeholder={promptPlaceholder}
@@ -429,10 +474,12 @@ export function ChatLandingView({
         promptValue={submissionPending ? '' : promptValue}
         onPromptChange={onPromptChange}
         onPromptKeyDown={onPromptKeyDown}
-        onPromptPaste={onPromptPaste}
+        onPromptPaste={handlePromptPasteWithSessionUrl}
         onImageDrop={submissionPending ? undefined : onImageDrop}
+        onDirectoryDrop={submissionPending ? undefined : handleDirectoryDrop}
         imageDropDisabled={submissionPending}
         promptPlaceholder={promptPlaceholder}
+        compactPlaceholderName={compactPlaceholderName}
         promptDisabled={submissionPending}
         promptRows={2}
         promptEnterKeyHint={promptEnterKeyHint}

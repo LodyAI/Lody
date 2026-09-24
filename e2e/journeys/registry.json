@@ -1,0 +1,1140 @@
+{
+  "schemaVersion": 1,
+  "scoring": {
+    "criticality": 100,
+    "boundaryRisk": 20,
+    "changeFrequency": 5,
+    "freshness": 5,
+    "escapedDefect": 40,
+    "scoutSignal": 35,
+    "changedPath": 50,
+    "estimatedMinutePenalty": 2
+  },
+  "journeys": [
+    {
+      "id": "LODY-ONBOARDING-001",
+      "state": "active",
+      "priority": "P0",
+      "runtime": "none",
+      "title": "New user enters an isolated local workspace through the bundled CLI",
+      "owner": "desktop-bootstrap",
+      "feature": "src/features/onboarding.feature",
+      "fixture": "fresh-local-workspace",
+      "fingerprint": "ccfecdbae92c8a9848a554d502beb53acc897e21b3c30ab8a45d5c5eebbee1b3",
+      "ownerPaths": [
+        "apps/electron/",
+        "packages/components/src/components/onboarding/",
+        "packages/components/src/routes/onboarding.tsx"
+      ],
+      "actions": [
+        { "id": "desktop.launchFresh" },
+        { "id": "onboarding.waitForLocalBootstrap" },
+        { "id": "onboarding.skipAgentConfiguration" },
+        { "id": "onboarding.enterWorkspace" }
+      ],
+      "checkpoints": [
+        "bundled CLI owns the isolated local runtime",
+        "workspace initialization completes",
+        "session composer is editable"
+      ],
+      "cleanup": ["desktop process tree exits", "isolated endpoint can be rebound"],
+      "coverage": {
+        "renderer": "Intro and local entry",
+        "electronIpc": "Real window and invoke bridge",
+        "bundledCli": "Real owned runtime",
+        "durableState": "Isolated workspace catalog and onboarding state",
+        "externalWire": "None"
+      },
+      "signals": {
+        "criticality": 5,
+        "boundaryRisk": 5,
+        "changeFrequency": 3,
+        "escapedDefect": false
+      },
+      "freshness": 5,
+      "scoutJourneys": [],
+      "blockedReason": null,
+      "estimatedMinutes": 1
+    },
+    {
+      "id": "LODY-SESSION-001",
+      "state": "active",
+      "priority": "P0",
+      "runtime": "simulator",
+      "title": "Stop and permanently delete a running ACP Session",
+      "owner": "session-lifecycle",
+      "feature": "src/features/lifecycle.feature",
+      "fixture": "scripted-acp",
+      "fingerprint": "beb2be11585dd90453549de89982f739c1dac077026294fcdfbd8827d6d8278c",
+      "ownerPaths": [
+        "apps/cli/src/session/",
+        "packages/components/src/components/sessions/",
+        "packages/components/src/components/chat/"
+      ],
+      "actions": [
+        { "id": "agent.configureScripted" },
+        { "id": "session.createHeld" },
+        { "id": "session.stop" },
+        { "id": "session.archive" },
+        { "id": "session.deletePermanent" }
+      ],
+      "checkpoints": [
+        "Stop becomes available while ACP is running",
+        "ACP process exits after Stop",
+        "Session disappears after permanent deletion"
+      ],
+      "cleanup": ["ACP process exits", "Session durable state is deleted"],
+      "coverage": {
+        "renderer": "Session lifecycle",
+        "electronIpc": "Real window and invoke bridge",
+        "bundledCli": "Real owned runtime",
+        "durableState": "Create, stop, archive, and permanent delete",
+        "externalWire": "Scripted ACP"
+      },
+      "signals": {
+        "criticality": 5,
+        "boundaryRisk": 5,
+        "changeFrequency": 5,
+        "escapedDefect": false
+      },
+      "freshness": 5,
+      "scoutJourneys": ["session"],
+      "blockedReason": null,
+      "estimatedMinutes": 2
+    },
+    {
+      "id": "LODY-SHORTCUT-001",
+      "state": "active",
+      "priority": "P0",
+      "runtime": "none",
+      "title": "Synchronize user-rebound desktop shortcuts across windows and renderer reload",
+      "owner": "desktop-shortcuts",
+      "feature": "src/features/shortcuts.feature",
+      "fixture": "fresh-local-workspace",
+      "fingerprint": "ca40a75b29ba41bb0e96b2e86fbbff3d18b42f40878b35d631857d2addb3844f",
+      "ownerPaths": [
+        "packages/components/src/lib/commands/",
+        "packages/components/src/components/settings/keyboard-shortcuts-setting.tsx",
+        "packages/components/src/hooks/use-keyboard-navigation.ts"
+      ],
+      "actions": [
+        { "id": "shortcut.openPaletteWithDefaultBinding" },
+        { "id": "shortcut.openSettingsWithPhysicalPunctuation" },
+        { "id": "window.openSecondaryWorkspace" },
+        { "id": "shortcut.verifySecondaryDefaults" },
+        { "id": "shortcut.rebindSidebarWithShiftedDigit" },
+        { "id": "shortcut.verifyOldBindingRemovedInBothWindows" },
+        { "id": "renderer.reloadSecondary" },
+        { "id": "shortcut.verifyUserBindingRestoredInSecondary" }
+      ],
+      "checkpoints": [
+        "default command palette and settings bindings execute in both Electron windows",
+        "the old sidebar binding stops while the shifted-digit physical key works immediately in both windows",
+        "the user binding is restored in the secondary window after its renderer reload"
+      ],
+      "cleanup": ["isolated desktop profile and shortcut overrides are deleted"],
+      "coverage": {
+        "renderer": "Two command hosts, settings recorder, sidebars, and secondary renderer reload",
+        "electronIpc": "Real primary and auxiliary Electron windows through app.openWindow IPC",
+        "bundledCli": "Real owned runtime for local workspace entry",
+        "durableState": "User shortcut override in isolated localStorage",
+        "externalWire": "None"
+      },
+      "signals": {
+        "criticality": 5,
+        "boundaryRisk": 4,
+        "changeFrequency": 4,
+        "escapedDefect": false
+      },
+      "freshness": 5,
+      "scoutJourneys": [],
+      "blockedReason": null,
+      "estimatedMinutes": 2
+    },
+    {
+      "id": "LODY-SHORTCUT-002",
+      "state": "active",
+      "priority": "P1",
+      "runtime": "simulator",
+      "title": "New-tab and digit shortcuts drive the conversation tab strip",
+      "owner": "desktop-shortcuts",
+      "feature": "src/features/shortcuts.feature",
+      "fixture": "ui-created-session-and-scripted-acp",
+      "fingerprint": "176e7647a641125f6b04a5d22cee689ea3421f2ae8bbf5fc57f53716899c63b1",
+      "ownerPaths": [
+        "packages/components/src/lib/commands/",
+        "packages/components/src/components/sessions/session-detail.tsx",
+        "packages/components/src/components/sessions/session-tab-bar.tsx"
+      ],
+      "actions": [
+        { "id": "settings.createCustomAcpAgent" },
+        { "id": "session.createFromComposer" },
+        { "id": "session.openDraftTabsWithShortcut", "args": { "count": 2, "binding": "Mod+t" } },
+        { "id": "shortcut.switchSessionTabByDigit", "args": { "positions": [1, 8, 2, "last"] } }
+      ],
+      "checkpoints": [
+        "Mod+t opens each new draft tab in the conversation strip",
+        "Mod+1 activates the parent conversation tab from a draft tab",
+        "a digit beyond the open tab count leaves the active tab unchanged",
+        "Mod+2 activates the second conversation tab by position",
+        "Mod+9 activates the last conversation tab"
+      ],
+      "cleanup": [
+        "draft tabs live only inside the disposable run directory",
+        "owned ACP process exits"
+      ],
+      "coverage": {
+        "renderer": "Session tab strip aria-selected state through real keydown dispatch",
+        "electronIpc": "Real renderer key events through the command registry",
+        "bundledCli": "Real owned runtime for Session creation",
+        "durableState": "UI-created Session plus draft tab order",
+        "externalWire": "Scripted ACP"
+      },
+      "signals": {
+        "criticality": 3,
+        "boundaryRisk": 3,
+        "changeFrequency": 3,
+        "escapedDefect": false
+      },
+      "freshness": 5,
+      "scoutJourneys": ["session"],
+      "blockedReason": null,
+      "estimatedMinutes": 3
+    },
+    {
+      "id": "LODY-WORK-001",
+      "state": "active",
+      "priority": "P0",
+      "runtime": "simulator",
+      "title": "Delete a worktree Session with ACP and Terminal resources",
+      "owner": "work-lifecycle",
+      "feature": "src/features/lifecycle.feature",
+      "fixture": "synthetic-git-and-scripted-acp",
+      "fingerprint": "5beb37208e9e503a21177a8291f7f35472d32a9ff241ac459f070a02c413b31c",
+      "ownerPaths": [
+        "apps/cli/src/session/worktree/",
+        "packages/components/src/components/terminal/",
+        "packages/components/src/components/sessions/"
+      ],
+      "actions": [
+        { "id": "project.addSyntheticGit" },
+        { "id": "session.enableWorktree" },
+        { "id": "session.createCompleted" },
+        { "id": "terminal.openAndRunMarker" },
+        { "id": "session.archive" },
+        { "id": "session.deletePermanent" }
+      ],
+      "checkpoints": [
+        "worktree Session completes",
+        "Terminal command produces its marker",
+        "worktree, ACP, and Terminal resources are released"
+      ],
+      "cleanup": ["ACP process exits", "Terminal exits", "generated worktree is removed"],
+      "coverage": {
+        "renderer": "Work lifecycle",
+        "electronIpc": "Real window, IPC, and Terminal",
+        "bundledCli": "Real owned runtime",
+        "durableState": "Session, worktree, and terminal cleanup",
+        "externalWire": "Scripted ACP"
+      },
+      "signals": {
+        "criticality": 5,
+        "boundaryRisk": 5,
+        "changeFrequency": 4,
+        "escapedDefect": false
+      },
+      "freshness": 5,
+      "scoutJourneys": ["work"],
+      "blockedReason": null,
+      "estimatedMinutes": 3
+    },
+    {
+      "id": "LODY-WINDOW-001",
+      "state": "active",
+      "priority": "P0",
+      "runtime": "none",
+      "title": "Connect an auxiliary Workspace window with isolated persistent sync caches",
+      "owner": "desktop-windows",
+      "feature": "src/features/desktop-windows.feature",
+      "fixture": "fresh-local-workspace",
+      "fingerprint": "63f89f6ae59f0e7ec1bb23be631e3a0a5cc18c0957db634d5b0cf06cf2ce1a8e",
+      "ownerPaths": [
+        "packages/components/src/providers/create-workspace-runtime.ts",
+        "packages/components/src/lib/desktop-window.ts",
+        "packages/components/src/lib/eager-sync-high-water-cache.ts"
+      ],
+      "actions": [
+        { "id": "workspace.enterLocal" },
+        { "id": "window.observeAuxiliaryIndexedDb" },
+        { "id": "window.openAuxiliaryWorkspace" },
+        { "id": "window.verifyAuxiliaryRuntimeReady" },
+        { "id": "window.verifyAuxiliaryCacheNamespace" }
+      ],
+      "checkpoints": [
+        "auxiliary renderer exposes an editable composer after runtime initialization",
+        "auxiliary Repo database name ends in its session-scoped window id",
+        "eager-sync high-water lookup uses the same Repo cache namespace"
+      ],
+      "cleanup": [
+        "desktop process tree exits",
+        "isolated desktop profile and per-window caches are deleted"
+      ],
+      "coverage": {
+        "renderer": "Primary and auxiliary Workspace windows with an editable composer",
+        "electronIpc": "Real primary and auxiliary Electron windows through app.openWindow IPC",
+        "bundledCli": "Real owned runtime for local Workspace entry",
+        "durableState": "Window-scoped Repo and eager-sync high-water IndexedDB access",
+        "externalWire": "None"
+      },
+      "signals": {
+        "criticality": 5,
+        "boundaryRisk": 5,
+        "changeFrequency": 3,
+        "escapedDefect": true
+      },
+      "freshness": 5,
+      "scoutJourneys": [],
+      "blockedReason": null,
+      "estimatedMinutes": 2
+    },
+    {
+      "id": "LODY-REVIEW-001",
+      "state": "active",
+      "priority": "P1",
+      "runtime": "simulator",
+      "title": "Open, hide, and switch a synthetic large diff",
+      "owner": "review-lifecycle",
+      "feature": "src/features/lifecycle.feature",
+      "fixture": "synthetic-large-diff-and-scripted-acp",
+      "fingerprint": "b5f672ce3fafd7b8ebb8223b3b2c79a2b1ef83e0103a43508814920f26bb59f0",
+      "ownerPaths": [
+        "packages/code-review-viewer/",
+        "packages/components/src/ui/diff-viewer/",
+        "packages/components/src/components/sessions/"
+      ],
+      "actions": [
+        { "id": "project.addSyntheticLargeDiff" },
+        { "id": "session.createCompleted" },
+        { "id": "review.openAllChanges" },
+        { "id": "review.switchLargeDiff" },
+        { "id": "review.hideAndShow" },
+        { "id": "review.close" },
+        { "id": "session.deletePermanent" }
+      ],
+      "checkpoints": [
+        "both synthetic changed files render",
+        "Review survives hide and restore",
+        "Review state is released after Session deletion"
+      ],
+      "cleanup": ["Review tabs close", "Session durable state is deleted"],
+      "coverage": {
+        "renderer": "Large diff Review lifecycle",
+        "electronIpc": "Real window and diff RPC",
+        "bundledCli": "Real owned runtime",
+        "durableState": "Synthetic project and Session lifecycle",
+        "externalWire": "Scripted ACP"
+      },
+      "signals": {
+        "criticality": 4,
+        "boundaryRisk": 4,
+        "changeFrequency": 4,
+        "escapedDefect": false
+      },
+      "freshness": 5,
+      "scoutJourneys": ["review"],
+      "blockedReason": null,
+      "estimatedMinutes": 4
+    },
+    {
+      "id": "LODY-MCP-001",
+      "state": "active",
+      "priority": "P1",
+      "runtime": "simulator",
+      "title": "Create a workspace MCP server and preserve explicit turn selection through dispatch",
+      "owner": "workspace-catalog",
+      "feature": "src/features/mcp-catalog.feature",
+      "fixture": "synthetic-stdio-mcp-and-scripted-acp",
+      "fingerprint": "6b0a21b7f13f9d43adfa0ec34d26d4cae3a4a63871a67dbbcad1ea1eb307cba4",
+      "ownerPaths": [
+        "apps/cli/src/agent/session-mcp-resolver.ts",
+        "apps/cli/src/lib/workspace-mcp-store.ts",
+        "apps/cli/src/mcp/",
+        "packages/components/src/components/settings/mcp-setting.tsx",
+        "packages/components/src/hooks/use-session-mcp-selection.ts"
+      ],
+      "actions": [
+        { "id": "settings.openMcpCatalog" },
+        { "id": "mcp.createSyntheticStdioServer" },
+        { "id": "composer.selectMcpServer" },
+        { "id": "session.createCompleted" },
+        { "id": "mcp.deleteServer" }
+      ],
+      "checkpoints": [
+        "workspace MCP catalog write is durable",
+        "driving turn carries the explicit MCP selection into ACP startup",
+        "catalog entry is removed without changing prior turn input"
+      ],
+      "cleanup": ["synthetic MCP process exits", "workspace MCP catalog entry is deleted"],
+      "coverage": {
+        "renderer": "MCP settings and composer selection",
+        "electronIpc": "Real window and workspace RPC",
+        "bundledCli": "Catalog persistence and ACP dispatch",
+        "durableState": "Workspace catalog plus turn input selection",
+        "externalWire": "Synthetic stdio MCP and scripted ACP"
+      },
+      "signals": {
+        "criticality": 5,
+        "boundaryRisk": 5,
+        "changeFrequency": 4,
+        "escapedDefect": false
+      },
+      "freshness": 4,
+      "scoutJourneys": ["session"],
+      "blockedReason": null,
+      "estimatedMinutes": 6
+    },
+    {
+      "id": "LODY-ROLE-001",
+      "state": "active",
+      "priority": "P1",
+      "runtime": "simulator",
+      "title": "Create an Agent Role and freeze its execution target into a Session",
+      "owner": "workspace-catalog",
+      "feature": "src/features/agent-role.feature",
+      "fixture": "scripted-agent-role",
+      "fingerprint": "1f2bc41853b8b774bf33944b5c7319b200f27190b39f4cd0ef2b773009a2772e",
+      "ownerPaths": [
+        "packages/components/src/components/settings/agent-role-form.tsx",
+        "packages/components/src/components/settings/agent-roles-setting.tsx",
+        "packages/components/src/hooks/use-session-agent-role.ts",
+        "packages/components/src/lib/composer-agent-roles.ts"
+      ],
+      "actions": [
+        { "id": "settings.openAgentRoles" },
+        { "id": "role.createDeterministic" },
+        { "id": "composer.selectAgentRole" },
+        { "id": "session.createCompleted" },
+        { "id": "role.editAfterDispatch" },
+        { "id": "role.delete" }
+      ],
+      "checkpoints": [
+        "Role row is durable and selectable",
+        "Session records Role id and revision",
+        "later Role edits do not alter the accepted Session execution target"
+      ],
+      "cleanup": ["Session is permanently deleted", "Agent Role catalog row is deleted"],
+      "coverage": {
+        "renderer": "Agent Role settings and composer selection",
+        "electronIpc": "Real window and workspace RPC",
+        "bundledCli": "Frozen dispatch configuration",
+        "durableState": "Role catalog plus Session provenance",
+        "externalWire": "Scripted ACP"
+      },
+      "signals": {
+        "criticality": 5,
+        "boundaryRisk": 5,
+        "changeFrequency": 4,
+        "escapedDefect": false
+      },
+      "freshness": 4,
+      "scoutJourneys": ["session"],
+      "blockedReason": null,
+      "estimatedMinutes": 7
+    },
+    {
+      "id": "LODY-FORK-001",
+      "state": "active",
+      "priority": "P1",
+      "runtime": "simulator",
+      "feature": "src/features/session-fork.feature",
+      "title": "Fork a completed Session into an independent worktree Session",
+      "owner": "session-lifecycle",
+      "fixture": "synthetic-git-and-scripted-acp",
+      "fingerprint": "35f80dbd4dd21492ab30c54ff6915cc715f210ad78c1659f5d911e01c1d3b8b0",
+      "ownerPaths": [
+        "apps/cli/src/session/session-fork-service.ts",
+        "apps/cli/src/session/session-fork-operation-store.ts",
+        "packages/components/src/components/sessions/session-fork-destination-menu.tsx"
+      ],
+      "actions": [
+        { "id": "project.addSyntheticGit" },
+        { "id": "session.createCompleted" },
+        { "id": "session.forkToWorktree" },
+        { "id": "session.openFork" },
+        { "id": "session.deletePermanent" }
+      ],
+      "checkpoints": [
+        "fork retains the completed conversation prefix",
+        "fork records its origin and owns an independent worktree",
+        "source Session remains unchanged when the fork is deleted"
+      ],
+      "cleanup": ["fork ACP process exits", "fork worktree and Session are deleted"],
+      "coverage": {
+        "renderer": "Session fork destination and origin",
+        "electronIpc": "Real window and Session RPC",
+        "bundledCli": "Fork operation and recovery markers",
+        "durableState": "Independent Session history and worktree",
+        "externalWire": "Scripted ACP"
+      },
+      "signals": {
+        "criticality": 5,
+        "boundaryRisk": 5,
+        "changeFrequency": 3,
+        "escapedDefect": true
+      },
+      "freshness": 4,
+      "scoutJourneys": ["session", "work"],
+      "blockedReason": null,
+      "estimatedMinutes": 8
+    },
+    {
+      "id": "LODY-SESSION-002",
+      "state": "active",
+      "priority": "P1",
+      "runtime": "simulator",
+      "title": "Rename, pin, archive, and restore a local Session",
+      "owner": "session-lifecycle",
+      "feature": "src/features/session-management.feature",
+      "fixture": "ui-created-session-and-scripted-acp",
+      "fingerprint": "01436f3a914e841f9240ef7fc814431550814e62a25810511ccc24980b070f11",
+      "ownerPaths": [
+        "packages/components/src/components/archive/",
+        "packages/components/src/components/sessions/rename-session-dialog.tsx",
+        "packages/components/src/components/sessions/session-pin.tsx",
+        "packages/components/src/lib/archived-session-tree.ts"
+      ],
+      "actions": [
+        { "id": "settings.createCustomAcpAgent" },
+        { "id": "session.createFromComposer" },
+        { "id": "session.rename" },
+        { "id": "session.pin" },
+        { "id": "session.archive" },
+        { "id": "archive.restoreSession" }
+      ],
+      "checkpoints": [
+        "renamed title survives navigation",
+        "pin state is durable",
+        "archived Session can be restored without losing history"
+      ],
+      "cleanup": ["Session is permanently deleted", "owned ACP process exits"],
+      "coverage": {
+        "renderer": "Session metadata and Archive UI",
+        "electronIpc": "Real window and Session RPC",
+        "bundledCli": "Real owned runtime",
+        "durableState": "UI-created history, title, pin, archive, and restore",
+        "externalWire": "Scripted ACP"
+      },
+      "signals": {
+        "criticality": 4,
+        "boundaryRisk": 3,
+        "changeFrequency": 3,
+        "escapedDefect": false
+      },
+      "freshness": 3,
+      "scoutJourneys": ["session"],
+      "blockedReason": null,
+      "estimatedMinutes": 4
+    },
+    {
+      "id": "LODY-SESSION-004",
+      "state": "active",
+      "priority": "P1",
+      "runtime": "simulator",
+      "title": "Opened Sessions survive opener archive and delete",
+      "owner": "session-lifecycle",
+      "feature": "src/features/session-management.feature",
+      "fixture": "session-fork-and-seeded-relations",
+      "fingerprint": "4f2e14b9458ebd4f064cc8aca5a02bfd1209989a8c450207cec5409c7eac23d9",
+      "ownerPaths": [
+        "packages/components/src/hooks/use-session-actions.ts",
+        "packages/components/src/lib/session-navigation.ts",
+        "packages/components/src/components/shared/session-relation-card.tsx"
+      ],
+      "actions": [
+        { "id": "session.createCompletedSource" },
+        { "id": "session.forkWorktree", "args": { "count": 2 } },
+        { "id": "session.seedRelations" },
+        { "id": "session.archiveOpener" },
+        { "id": "archive.deletePermanently" },
+        { "id": "session.reloadWithMetadataScanBlocked" },
+        { "id": "session.closeEmptyChildTab" }
+      ],
+      "checkpoints": [
+        "archive cascades through containment and opened-by links to the child Tab and both opened Sessions",
+        "each archived opened Session releases its ACP process and worktree directory",
+        "permanent delete removes only the archived root and its direct child Tab",
+        "opened Sessions stay archived, listed, and undeleted after the root delete",
+        "exact child deletion succeeds before metadata hydration completes"
+      ],
+      "cleanup": [
+        "surviving archived Sessions live only inside the disposable run directory",
+        "isolated app and Git fixture directories are removed"
+      ],
+      "coverage": {
+        "renderer": "Session archive, Archive delete, and child Tabs",
+        "electronIpc": "Real window, local repo, terminal, and Session RPC",
+        "bundledCli": "Real archive and worktree cleanup command processing",
+        "durableState": "Archive cascade teardown and containment-scoped deletion",
+        "externalWire": "Scripted fork-capable ACP"
+      },
+      "signals": {
+        "criticality": 5,
+        "boundaryRisk": 5,
+        "changeFrequency": 3,
+        "escapedDefect": true
+      },
+      "freshness": 5,
+      "scoutJourneys": ["session", "work"],
+      "blockedReason": null,
+      "estimatedMinutes": 6
+    },
+    {
+      "id": "LODY-PROJECT-001",
+      "state": "active",
+      "priority": "P1",
+      "runtime": "none",
+      "title": "Add, select, and remove a local project without deleting its directory",
+      "owner": "local-project-lifecycle",
+      "feature": "src/features/project-lifecycle.feature",
+      "fixture": "synthetic-git-project",
+      "fingerprint": "33767160306fc2657e3d630e9fbc6aed5e91eb6c20b79a2f74b8f0f2f1dba6e4",
+      "ownerPaths": [
+        "apps/cli/src/lib/message-handler.ts",
+        "packages/components/src/components/loro-app-sidebar.tsx",
+        "packages/components/src/hooks/use-remove-local-project.ts"
+      ],
+      "actions": [
+        { "id": "project.createSyntheticGit" },
+        { "id": "project.addThroughPicker" },
+        { "id": "project.selectFromSidebar" },
+        { "id": "project.confirmRemoval" },
+        { "id": "project.verifyOriginalDirectory" }
+      ],
+      "checkpoints": [
+        "local project appears in the bundled CLI catalog and sidebar",
+        "removal confirmation states that the original directory is preserved",
+        "removed project disappears while its original files remain"
+      ],
+      "cleanup": ["synthetic project fixture directory is deleted after verification"],
+      "coverage": {
+        "renderer": "Project picker, sidebar selection, and removal confirmation",
+        "electronIpc": "Real window and local project control bridge",
+        "bundledCli": "Project catalog add, list, and delete",
+        "durableState": "Workspace project catalog lifecycle",
+        "externalWire": "None"
+      },
+      "signals": {
+        "criticality": 4,
+        "boundaryRisk": 4,
+        "changeFrequency": 3,
+        "escapedDefect": false
+      },
+      "freshness": 5,
+      "scoutJourneys": ["work"],
+      "blockedReason": null,
+      "estimatedMinutes": 3
+    },
+    {
+      "id": "LODY-QUEUE-001",
+      "state": "active",
+      "priority": "P1",
+      "runtime": "simulator",
+      "title": "Remove one queued follow-up and dispatch only the retained message",
+      "owner": "session-message-queue",
+      "feature": "src/features/session-queue.feature",
+      "fixture": "file-signaled-scripted-acp",
+      "fingerprint": "08f272b9e146c4292d0f93f152f07ef7d1eb3db0ca2aadf12305d1604f539075",
+      "ownerPaths": [
+        "apps/cli/src/lib/message-handler.ts",
+        "packages/components/src/components/settings/queued-message-behavior-control.tsx",
+        "packages/components/src/components/sessions/message-queue/"
+      ],
+      "actions": [
+        { "id": "settings.selectQueuedMessageBehavior" },
+        { "id": "session.createHeld" },
+        { "id": "queue.enqueueTwoMessages" },
+        { "id": "queue.removeFirstMessage" },
+        { "id": "fixture.releaseHeldTurn" }
+      ],
+      "checkpoints": [
+        "both follow-ups are visible in the pending queue",
+        "the removed follow-up never reaches the ACP provider",
+        "the retained follow-up dispatches after the current Turn completes"
+      ],
+      "cleanup": ["owned ACP process exits with the isolated desktop"],
+      "coverage": {
+        "renderer": "Queue controls and pending-message list",
+        "electronIpc": "Real window and Session RPC",
+        "bundledCli": "Queue persistence and ordered dispatch",
+        "durableState": "Pending Turn queue removal and drain",
+        "externalWire": "File-signaled scripted ACP"
+      },
+      "signals": {
+        "criticality": 5,
+        "boundaryRisk": 5,
+        "changeFrequency": 5,
+        "escapedDefect": false
+      },
+      "freshness": 5,
+      "scoutJourneys": ["session"],
+      "blockedReason": null,
+      "estimatedMinutes": 4
+    },
+    {
+      "id": "LODY-MCP-002",
+      "state": "active",
+      "priority": "P1",
+      "runtime": "none",
+      "title": "Edit, disable, re-enable, and delete a workspace MCP catalog entry",
+      "owner": "workspace-catalog",
+      "feature": "src/features/mcp-catalog-editing.feature",
+      "fixture": "synthetic-workspace-mcp-entry",
+      "fingerprint": "e132b9f2c20e861728fe7b645ece1791efeebfd511db02d159c904b723c8945e",
+      "ownerPaths": [
+        "apps/cli/src/lib/workspace-mcp-store.ts",
+        "packages/components/src/components/settings/mcp-setting.tsx",
+        "packages/components/src/components/settings/mcp-connection-form.tsx"
+      ],
+      "actions": [
+        { "id": "mcp.createEnabledCatalogEntry" },
+        { "id": "settings.reopenMcpCatalog" },
+        { "id": "mcp.editCatalogEntry" },
+        { "id": "mcp.disableAndReEnableCatalogEntry" },
+        { "id": "mcp.deleteCatalogEntry" }
+      ],
+      "checkpoints": [
+        "created name, description, and enabled state survive settings reopen",
+        "edited fields and both toggle transitions are durable",
+        "deletion leaves an empty catalog after settings reopen"
+      ],
+      "cleanup": ["workspace MCP catalog entry is deleted"],
+      "coverage": {
+        "renderer": "MCP catalog editor and enabled-state switch",
+        "electronIpc": "Real window and workspace RPC",
+        "bundledCli": "Workspace MCP catalog create, update, and delete",
+        "durableState": "MCP fields and enabled state across settings reopen",
+        "externalWire": "None"
+      },
+      "signals": {
+        "criticality": 4,
+        "boundaryRisk": 4,
+        "changeFrequency": 4,
+        "escapedDefect": false
+      },
+      "freshness": 5,
+      "scoutJourneys": [],
+      "blockedReason": null,
+      "estimatedMinutes": 3
+    },
+    {
+      "id": "LODY-PROJECT-002",
+      "state": "active",
+      "priority": "P1",
+      "runtime": "none",
+      "title": "Switch between local projects without duplicating a reopened folder",
+      "owner": "local-project-lifecycle",
+      "feature": "src/features/project-reopen.feature",
+      "fixture": "two-synthetic-git-projects",
+      "fingerprint": "227a906389724f0c960d29420bf5a5455a748e40e6c061775b4ee500c04509b4",
+      "ownerPaths": [
+        "apps/cli/src/lib/message-handler.ts",
+        "packages/components/src/components/chat/unified-project-selector.tsx",
+        "packages/components/src/components/loro-app-sidebar.tsx"
+      ],
+      "actions": [
+        { "id": "project.createTwoSyntheticGitRepositories" },
+        { "id": "project.addBothThroughPicker" },
+        { "id": "project.switchAcrossSidebarAndPicker" },
+        { "id": "project.attemptDuplicateAdd" },
+        { "id": "project.verifyCatalogIdentity" }
+      ],
+      "checkpoints": [
+        "both projects remain selectable across picker reopen",
+        "duplicate add preserves each original local project id",
+        "sidebar and picker expose exactly one row per project"
+      ],
+      "cleanup": ["synthetic Git fixture directories are deleted after verification"],
+      "coverage": {
+        "renderer": "Project picker and sidebar switching",
+        "electronIpc": "Real window and local project control bridge",
+        "bundledCli": "Project catalog identity and duplicate prevention",
+        "durableState": "Two unique local project records",
+        "externalWire": "None"
+      },
+      "signals": {
+        "criticality": 4,
+        "boundaryRisk": 4,
+        "changeFrequency": 4,
+        "escapedDefect": false
+      },
+      "freshness": 5,
+      "scoutJourneys": ["work"],
+      "blockedReason": null,
+      "estimatedMinutes": 4
+    },
+    {
+      "id": "LODY-SETTINGS-001",
+      "state": "active",
+      "priority": "P1",
+      "runtime": "none",
+      "title": "Cancel a theme preview without replacing the committed appearance",
+      "owner": "desktop-settings",
+      "feature": "src/features/settings-appearance.feature",
+      "fixture": "isolated-electron-user-data",
+      "fingerprint": "5f9692a1b1a4a348aa46781bcf959961a216595592b4a109caba5fe3e5a452c8",
+      "ownerPaths": [
+        "packages/components/src/components/settings/appearance-setting.tsx",
+        "packages/components/src/components/settings/preview-select.tsx",
+        "packages/components/src/theme-provider.tsx"
+      ],
+      "actions": [
+        { "id": "settings.openAppearance" },
+        { "id": "appearance.commitLightTheme" },
+        { "id": "settings.reopenAppearance" },
+        { "id": "appearance.previewDarkTheme" },
+        { "id": "appearance.cancelPreview" }
+      ],
+      "checkpoints": [
+        "committed light theme survives settings reopen",
+        "dark preview changes the rendered theme without changing storage",
+        "cancel restores the rendered and persisted light theme"
+      ],
+      "cleanup": ["isolated Electron user data is deleted at teardown"],
+      "coverage": {
+        "renderer": "Appearance selector and live theme root",
+        "electronIpc": "Real Electron window",
+        "bundledCli": "Real owned runtime bootstrap",
+        "durableState": "Committed theme in isolated local storage",
+        "externalWire": "None"
+      },
+      "signals": {
+        "criticality": 3,
+        "boundaryRisk": 3,
+        "changeFrequency": 4,
+        "escapedDefect": false
+      },
+      "freshness": 5,
+      "scoutJourneys": [],
+      "blockedReason": null,
+      "estimatedMinutes": 2
+    },
+    {
+      "id": "LODY-SESSION-003",
+      "state": "active",
+      "priority": "P1",
+      "runtime": "simulator",
+      "title": "Mark a Session unread and clear the state by opening it",
+      "owner": "session-read-state",
+      "feature": "src/features/session-read-state.feature",
+      "fixture": "two-ui-created-sessions-and-scripted-acp",
+      "fingerprint": "a5df70f326431cd5ac346e3327fed15a985477bca64e873ee1f1b4e09984866d",
+      "ownerPaths": [
+        "packages/components/src/components/session-list.tsx",
+        "packages/components/src/components/sidebar-row-shared.tsx",
+        "packages/components/src/hooks/use-session-actions.ts",
+        "packages/components/src/lib/session-read-receipt.ts"
+      ],
+      "actions": [
+        { "id": "settings.createCustomAcpAgent" },
+        { "id": "session.createTwoFromComposer" },
+        { "id": "session.markFirstUnreadFromSecond" },
+        { "id": "session.openFirstFromSidebar" },
+        { "id": "session.deleteBothThroughUi" }
+      ],
+      "checkpoints": [
+        "manual unread state appears while another Session remains active",
+        "opening the unread Session restores its exact history",
+        "visible read receipt clears the unread state"
+      ],
+      "cleanup": ["both Sessions are permanently deleted", "owned ACP processes exit"],
+      "coverage": {
+        "renderer": "Session unread indicator, context menu, and sidebar navigation",
+        "electronIpc": "Real window and Session RPC",
+        "bundledCli": "Real owned runtime and Session histories",
+        "durableState": "Two Sessions plus unread and read receipt transitions",
+        "externalWire": "Scripted ACP"
+      },
+      "signals": {
+        "criticality": 4,
+        "boundaryRisk": 4,
+        "changeFrequency": 5,
+        "escapedDefect": false
+      },
+      "freshness": 5,
+      "scoutJourneys": ["session"],
+      "blockedReason": null,
+      "estimatedMinutes": 4
+    },
+    {
+      "id": "LODY-SEARCH-001",
+      "state": "active",
+      "priority": "P1",
+      "runtime": "simulator",
+      "title": "Search, rename, revisit, archive, and delete across a three-Session index",
+      "owner": "session-search",
+      "feature": "src/features/sidebar-search.feature",
+      "fixture": "three-ui-created-sessions-and-scripted-acp",
+      "fingerprint": "6bd5ef160471a73c8180652953372bbbd9b9f586dd9c8db950388d2dcb177c1f",
+      "ownerPaths": [
+        "packages/components/src/components/commands/command-palette.tsx",
+        "packages/components/src/components/commands/command-palette-view.tsx",
+        "packages/components/src/components/loro-sidebar.tsx"
+      ],
+      "actions": [
+        { "id": "settings.createCustomAcpAgent" },
+        { "id": "session.createAndNameThree" },
+        { "id": "sidebar.searchCasePartialAndEmpty" },
+        { "id": "session.renameAfterSearch" },
+        { "id": "sidebar.openRenamedTarget" },
+        { "id": "sidebar.reopenRenamedTarget" },
+        { "id": "session.archiveTarget" },
+        { "id": "sidebar.verifyArchivedAndDeletedExclusion" },
+        { "id": "session.deleteAllThroughUi" }
+      ],
+      "checkpoints": [
+        "case-insensitive partial search returns two matching Sessions, excludes an unrelated title, and supports an empty result",
+        "clearing the query restores all three sidebar rows",
+        "renaming removes the old search term, indexes the new title, and opens the exact target history",
+        "leaving and reopening through the sidebar preserves all titles and the rebuilt search index",
+        "Archive and permanent deletion remove only the target while the similar active result remains searchable"
+      ],
+      "cleanup": ["all three Sessions are permanently deleted", "owned ACP processes exit"],
+      "coverage": {
+        "renderer": "Search palette queries, rename refresh, Session navigation, Archive, and UI revisit",
+        "electronIpc": "Real window and Session RPC",
+        "bundledCli": "Real owned runtime and three isolated Session histories",
+        "durableState": "Three named Sessions across rename, UI revisit, Archive, and deletion",
+        "externalWire": "Scripted ACP"
+      },
+      "signals": {
+        "criticality": 4,
+        "boundaryRisk": 4,
+        "changeFrequency": 4,
+        "escapedDefect": false
+      },
+      "freshness": 5,
+      "scoutJourneys": ["session"],
+      "blockedReason": null,
+      "estimatedMinutes": 6
+    },
+    {
+      "id": "LODY-ATTACHMENT-001",
+      "state": "active",
+      "priority": "P1",
+      "runtime": "simulator",
+      "title": "Exercise text attachment draft, persistence, Archive, and cross-Session isolation",
+      "owner": "session-file-attachment",
+      "feature": "src/features/text-attachment.feature",
+      "fixture": "two-ui-created-sessions-local-text-and-scripted-acp",
+      "fingerprint": "6ba3d4df0f911a006f91db85c932c3607cbc7497f6b6682ac913199e5e8e4649",
+      "ownerPaths": [
+        "apps/cli/src/session/",
+        "packages/components/src/components/chat/",
+        "packages/components/src/components/sessions/session-chat-input-area.tsx",
+        "packages/components/src/hooks/use-chat-landing-file-draft.ts"
+      ],
+      "actions": [
+        { "id": "settings.createCustomAcpAgent" },
+        { "id": "session.createPrimaryFromComposer" },
+        { "id": "composer.cancelFilePicker" },
+        { "id": "composer.attachAndSendTextFileWithPrompt" },
+        { "id": "session.sendPlainFollowUp" },
+        { "id": "sidebar.reopenAttachmentHistory" },
+        { "id": "archive.restorePrimary" },
+        { "id": "session.createAttachmentFreeSecondary" },
+        { "id": "session.deletePrimaryAndVerifySecondary" },
+        { "id": "session.deleteSecondary" }
+      ],
+      "checkpoints": [
+        "cancelling the file chooser leaves no preview and cannot submit an empty draft",
+        "the composer sends synthetic local text plus a prompt without cloud authentication and clears both draft fields",
+        "a later plain-text turn does not inherit the prior attachment",
+        "leaving and reopening through the sidebar plus Archive restore preserve the primary Session attachment and ordered messages",
+        "the secondary Session contains no attachment and survives deletion of the primary Session"
+      ],
+      "cleanup": [
+        "both Sessions and the attachment history are permanently deleted",
+        "owned ACP process exits"
+      ],
+      "coverage": {
+        "renderer": "File picker cancellation, attachment draft, multi-turn history, UI revisit, Archive, and isolation",
+        "electronIpc": "Real Electron local-file handoff and Session RPC",
+        "bundledCli": "Local attachment storage and two Session histories",
+        "durableState": "Local file block across follow-up, UI revisit, Archive restore, isolation, and deletion",
+        "externalWire": "Scripted ACP"
+      },
+      "signals": {
+        "criticality": 4,
+        "boundaryRisk": 5,
+        "changeFrequency": 4,
+        "escapedDefect": true
+      },
+      "freshness": 5,
+      "scoutJourneys": ["session"],
+      "blockedReason": null,
+      "estimatedMinutes": 6
+    },
+    {
+      "id": "LODY-GOAL-001",
+      "state": "active",
+      "priority": "P1",
+      "runtime": "simulator",
+      "title": "Control and persist a goal across metadata updates, UI revisit, Archive, and Session isolation",
+      "owner": "session-goal-control",
+      "feature": "src/features/session-goal.feature",
+      "fixture": "goal-capable-two-session-scripted-acp",
+      "fingerprint": "870f809122eb54e50baa12dfe01a65ecc54bd31571e669ba3df4f599c6967f64",
+      "ownerPaths": [
+        "apps/cli/src/session/",
+        "packages/components/src/components/sessions/",
+        "packages/shared/src/acp/"
+      ],
+      "actions": [
+        { "id": "settings.createGoalCapableAgent" },
+        { "id": "session.startPersistentGoal" },
+        { "id": "session.createIndependentControl" },
+        { "id": "goal.pause" },
+        { "id": "goal.rejectUnavailableActions" },
+        { "id": "goal.updateViaComposer" },
+        { "id": "goal.resume" },
+        { "id": "sidebar.reopenGoalState" },
+        { "id": "goal.pauseAndClear" },
+        { "id": "archive.restoreAndDeleteBoth" }
+      ],
+      "checkpoints": [
+        "the advertised capability exposes only valid controls while a second Session has no goal state or goal wire events",
+        "Pause reaches the out-of-band ACP control once and unavailable duplicate actions cannot create an error state",
+        "a real paused-Session composer turn updates objective and usage metadata before Resume",
+        "Resume carries goal metadata without visible command text and a sidebar reopen preserves the active updated snapshot",
+        "pause-to-clear survives Archive restore with no illegal follow-up controls"
+      ],
+      "cleanup": ["both Sessions are permanently deleted", "goal-capable ACP process exits"],
+      "coverage": {
+        "renderer": "Goal controls, unavailable actions, composer update, UI revisit, Archive, and two-Session isolation",
+        "electronIpc": "Real window and Session RPC",
+        "bundledCli": "Goal snapshot persistence, ACP negotiation, prompt metadata, and independent Session history",
+        "durableState": "Isolated active, paused, updated, resumed, revisited, cleared, and restored goal snapshots",
+        "externalWire": "Goal-capable scripted ACP"
+      },
+      "signals": {
+        "criticality": 4,
+        "boundaryRisk": 5,
+        "changeFrequency": 4,
+        "escapedDefect": false
+      },
+      "freshness": 5,
+      "scoutJourneys": ["session"],
+      "blockedReason": null,
+      "estimatedMinutes": 7
+    },
+    {
+      "id": "LODY-AGENT-001",
+      "state": "active",
+      "priority": "P1",
+      "runtime": "simulator",
+      "title": "Validate, edit, revisit, dispatch, and delete two custom command Agent Providers",
+      "owner": "agent-provider-catalog",
+      "feature": "src/features/agent-provider-lifecycle.feature",
+      "fixture": "two-editable-custom-command-scripted-acp",
+      "fingerprint": "ba82d51c6dba18c3bfbd2a383c8e429e49b1589e28d700ea1573560247933d7e",
+      "ownerPaths": [
+        "apps/cli/src/lib/agent-config-machine-flock.ts",
+        "packages/components/src/components/settings/agent-config-dialog.tsx",
+        "packages/components/src/components/settings/machine-agent-settings.tsx",
+        "packages/components/src/components/sessions/desktop-run-config-menu.tsx"
+      ],
+      "actions": [
+        { "id": "settings.rejectUnparseableCustomAgent" },
+        { "id": "settings.createAndPersistCustomAgent" },
+        { "id": "settings.cancelDraftEdit" },
+        { "id": "settings.saveRenamedAgentAndCreateSecond" },
+        { "id": "settings.reopenAgentCatalog" },
+        { "id": "composer.createSessionWithEachAgent" },
+        { "id": "settings.deleteFirstAndRetainSessionHistory" },
+        { "id": "sessionAndAgent.cleanup" }
+      ],
+      "checkpoints": [
+        "an unparseable command disables Test and Create and cancellation leaves the catalog empty",
+        "created fields persist while cancelled draft edits cannot mutate the saved Provider",
+        "saved rename, command, prompt, and second Provider survive closing and reopening Settings while the old name disappears from catalog and composer",
+        "two explicit Provider selections create isolated histories and distinct ACP command-variant and prompt evidence",
+        "deleting the first Provider removes future selection without erasing its completed Session history"
+      ],
+      "cleanup": [
+        "both Sessions are permanently deleted",
+        "both custom Agent Provider rows are deleted"
+      ],
+      "coverage": {
+        "renderer": "Provider validation, edit rollback, Settings revisit, run selection, retained history, and cleanup",
+        "electronIpc": "Real Electron process launch and workspace RPC",
+        "bundledCli": "Two-Provider catalog persistence and selected command dispatch",
+        "durableState": "Rejected draft, cancelled edit, two saved Providers, two Sessions, and deletion transitions",
+        "externalWire": "Two-variant editable scripted ACP"
+      },
+      "signals": {
+        "criticality": 4,
+        "boundaryRisk": 5,
+        "changeFrequency": 4,
+        "escapedDefect": false
+      },
+      "freshness": 5,
+      "scoutJourneys": ["session"],
+      "blockedReason": null,
+      "estimatedMinutes": 8
+    },
+    {
+      "id": "LODY-CONTEXT-001",
+      "state": "active",
+      "priority": "P1",
+      "runtime": "simulator",
+      "title": "Copy Markdown across user, assistant, streaming, revisit, cancel, and Session isolation boundaries",
+      "owner": "session-context-copy",
+      "feature": "src/features/conversation-context-copy.feature",
+      "fixture": "two-session-rich-markdown-streaming-scripted-acp",
+      "fingerprint": "48caeb56b763e1350b9fa34212a141c9895b8e87a28d49b578e1c19dc982b5ea",
+      "ownerPaths": [
+        "packages/components/src/components/chat/",
+        "packages/components/src/components/sessions/",
+        "packages/shared/src/conversation-markdown.ts"
+      ],
+      "actions": [
+        { "id": "settings.createCustomAcpAgent" },
+        { "id": "session.createRichTwoTurnPrimary" },
+        { "id": "message.copyUserPrefix" },
+        { "id": "message.copyAssistantPrefixWithoutNativeFork" },
+        { "id": "sidebar.reopenContextHistory" },
+        { "id": "session.copyStreamingIncompleteMarkdown" },
+        { "id": "session.stopStreamAndRequestCompletedResponse" },
+        { "id": "session.copyCompletedMarkdown" },
+        { "id": "session.cancelIsolatedStream" },
+        { "id": "session.copyIsolatedMarkdown" },
+        { "id": "session.deleteBothThroughUi" }
+      ],
+      "checkpoints": [
+        "user-message copy includes rich Markdown from only the selected first user turn",
+        "assistant-message copy adds that response and still excludes later history while native fork destinations remain absent",
+        "leaving and reopening through the sidebar preserves history and repeats the assistant prefix boundary",
+        "generating Session export includes the stream prefix and incomplete marker; after the user clicks Stop and sends a complete request, export includes the tail without that marker",
+        "a second cancelled Session has ACP cancellation evidence and exports none of the primary Session history"
+      ],
+      "cleanup": ["both Sessions are permanently deleted", "owned ACP process exits"],
+      "coverage": {
+        "renderer": "User and assistant fork menus, streaming Stop, Session copy submenu, UI revisit, and clipboard isolation",
+        "electronIpc": "Real Electron clipboard and Session RPC",
+        "bundledCli": "Two isolated Session histories with completed and cancelled turns",
+        "durableState": "Rich history prefixes, user-stopped streaming state, completed follow-up, UI revisit, and cross-Session isolation",
+        "externalWire": "Scripted ACP with user-triggered cancellation and completed-prompt evidence"
+      },
+      "signals": {
+        "criticality": 4,
+        "boundaryRisk": 4,
+        "changeFrequency": 4,
+        "escapedDefect": false
+      },
+      "freshness": 5,
+      "scoutJourneys": ["session"],
+      "blockedReason": null,
+      "estimatedMinutes": 7
+    }
+  ]
+}

@@ -100,7 +100,15 @@ export default defineConfig(({ mode }) => {
       define: viteEnvDefine,
       build: {
         externalizeDeps: {
-          exclude: ['@lody/cli-supervisor', '@lody/shared', 'effect']
+          exclude: [
+            '@devframes/agentic',
+            '@devframes/hub',
+            '@devframes/json-render',
+            '@lody/cli-supervisor',
+            '@lody/shared',
+            'devframe',
+            'effect'
+          ]
         }
       }
     },
@@ -167,6 +175,7 @@ export default defineConfig(({ mode }) => {
           // with code paths that might themselves crash on boot.
           input: {
             index: resolve(__dirname, 'src/renderer/index.html'),
+            devbar: resolve(__dirname, 'src/renderer/devbar.html'),
             recovery: resolve(__dirname, 'src/renderer/recovery.html')
           },
           output: {

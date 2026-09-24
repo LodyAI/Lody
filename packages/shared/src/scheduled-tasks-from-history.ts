@@ -8,16 +8,24 @@ import type { PendingScheduledTask } from './schema';
  * calls this on the history it already renders.
  *
  * The persisted `tool_call` keeps `title` (the tool name), `rawInput`, `rawOutput`, `content`,
- * `status`, and `schedulingTimeZone` (the creating machine's zone), but not provider metadata.
- * So we reconstruct from
- * `rawInput` + the owning turn's timestamp:
- *  - ScheduleWakeup: only the latest matters; scheduledFor ≈ turn end + delaySeconds (no TZ).
+ * `status`, `schedulingTimeZone` (the creating machine's zone), and `recordedAtMs` (when the
+ * call was first persisted), but not provider metadata. So we reconstruct from
+ * `rawInput` + the call's `recordedAtMs` (falling back to the owning turn's timestamps):
+ *  - ScheduleWakeup: only the latest matters; scheduledFor ≈ call time + delaySeconds (no TZ).
  *  - CronCreate: schedule/recurring/prompt come from rawInput.cron/recurring/prompt, and the
  *    cron is local-time to `schedulingTimeZone` — carried onto the task so the UI resolves it
- *    in the right zone (cron carries no timezone; the machine may differ from the viewer).
+ *    in the right zone (cron carries no timezone; the machine may differ from the viewer). For
+ *    a one-shot (`recurring: false`), the output's `nextFireAt` line is the runtime-committed
+ *    fire time and wins over any re-derivation from the expression.
  *  - CronDelete: removes any cron whose output text contains the deleted id.
  *  - CronList: skipped (its structured jobs aren't persisted).
  * Fire-time resolution and "already fired -> hide" happen in the UI (see `nextCronFireMs`).
+ *
+ * Why the turn entry's `endedAt` is NOT the anchor: cron-fire follow-up turns are
+ * runtime-internal steers, so one history entry can aggregate several runtime turns and its
+ * `endedAt` keeps advancing — past a one-shot's fire minute. Anchoring there rolls the
+ * resolved fire time to the NEXT matching year (a fired job showing "fires in 364 days"),
+ * and the panel's fired-row filter can never catch it because that phantom time is future.
  */
 
 const MAX_SUMMARY_LENGTH = 200;
@@ -71,16 +79,38 @@ function cleanTask(task: PendingScheduledTask): PendingScheduledTask {
   return out;
 }
 
-/** Best-effort anchor for a turn: prefer when it ended, else started, else its timestamp. */
+/**
+ * Best-effort anchor for a turn when the tool call carries no `recordedAtMs`: prefer when
+ * it STARTED, else its timestamp; `endedAt` is the last resort (see the module doc — a
+ * merged entry's `endedAt` can land past a one-shot's fire minute and skip a year ahead).
+ */
 function resolveAnchorMs(entry: ScheduledTaskHistoryEntry): number {
-  if (typeof entry.endedAt === 'number' && Number.isFinite(entry.endedAt)) return entry.endedAt;
   if (typeof entry.startedAt === 'number' && Number.isFinite(entry.startedAt))
     return entry.startedAt;
   if (entry.timestamp) {
     const parsed = Date.parse(entry.timestamp);
     if (!Number.isNaN(parsed)) return parsed;
   }
+  if (typeof entry.endedAt === 'number' && Number.isFinite(entry.endedAt)) return entry.endedAt;
   return 0;
+}
+
+/**
+ * The runtime-committed fire time from a CronCreate output's `nextFireAt:` line (local ISO
+ * with numeric offset, so `Date.parse` reads it exactly). The output format is a deliberate
+ * one-key-per-line contract (`formatOutput` in the runtime's CronCreate tool), and the text
+ * survives the history pipeline inside `rawOutput` / `content` (terminal_output). Returns
+ * undefined when absent or unparseable — the caller falls back to re-deriving from the cron
+ * expression.
+ */
+function parseCommittedOneShotFireMs(sourceText: string): number | undefined {
+  const match =
+    /nextFireAt:\s*"?(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2}))/i.exec(
+      sourceText
+    );
+  if (!match || match[1] === undefined) return undefined;
+  const parsed = Date.parse(match[1]);
+  return Number.isNaN(parsed) ? undefined : parsed;
 }
 
 export function collectPendingScheduledTasksFromHistory(
@@ -101,12 +131,13 @@ export function collectPendingScheduledTasksFromHistory(
 
       switch (toolName) {
         case 'ScheduleWakeup': {
+          const callMs = asFiniteNumber(item.recordedAtMs) ?? anchorMs;
           const delaySeconds = asFiniteNumber(rawInput.delaySeconds);
           wakeup = cleanTask({
             id: WAKEUP_TASK_ID,
             kind: 'wakeup',
-            createdAtMs: anchorMs,
-            scheduledForMs: delaySeconds !== undefined ? anchorMs + delaySeconds * 1000 : undefined,
+            createdAtMs: callMs,
+            scheduledForMs: delaySeconds !== undefined ? callMs + delaySeconds * 1000 : undefined,
             summary: truncateSummary(asString(rawInput.reason) ?? asString(rawInput.prompt)),
           });
           break;
@@ -115,20 +146,30 @@ export function collectPendingScheduledTasksFromHistory(
           const cron = asString(rawInput.cron);
           const toolCallId = asString(item.toolCallId);
           if (!cron || !toolCallId) break;
+          // The created job's id (needed to match a later CronDelete) and the committed
+          // one-shot fire time are only in the output text, so keep it for a robust
+          // substring match and the `nextFireAt` parse.
+          const sourceText = JSON.stringify([item.rawOutput ?? null, item.content ?? null]);
+          const recurring = asBoolean(rawInput.recurring);
           cronByCallId.set(toolCallId, {
             task: cleanTask({
               id: toolCallId,
               kind: 'cron',
-              createdAtMs: anchorMs,
+              // The call's own persist stamp is the true creation moment; the turn anchor
+              // is only a fallback (see the module doc for why `endedAt` cannot serve).
+              createdAtMs: asFiniteNumber(item.recordedAtMs) ?? anchorMs,
               humanSchedule: cron,
-              recurring: asBoolean(rawInput.recurring),
+              recurring,
               summary: truncateSummary(asString(rawInput.prompt)),
               // Cron is local-time to the machine that created it (recorded at persist time).
               timeZone: asString(item.schedulingTimeZone),
+              // One-shot: pin the runtime-committed fire time when the output carried it.
+              // Only explicit `recurring: false` — an absent flag defaults to recurring in
+              // the runtime, where nextFireAt is just the FIRST of many fires.
+              scheduledForMs:
+                recurring === false ? parseCommittedOneShotFireMs(sourceText) : undefined,
             }),
-            // The created job's id (needed to match a later CronDelete) is only in the
-            // output text, so keep it for a robust substring match.
-            sourceText: JSON.stringify([item.rawOutput ?? null, item.content ?? null]),
+            sourceText,
           });
           break;
         }
@@ -151,7 +192,7 @@ export function collectPendingScheduledTasksFromHistory(
   return wakeup ? [wakeup, ...cronTasks] : cronTasks;
 }
 
-/** Resolve a task's concrete fire time: wakeups carry it, cron jobs derive it. */
+/** Resolve a task's concrete fire time: wakeups and one-shot crons may carry it, cron jobs derive it. */
 export function resolveFireMs(task: PendingScheduledTask, nowMs: number): number | undefined {
   if (task.kind === 'wakeup') {
     return typeof task.scheduledForMs === 'number' ? task.scheduledForMs : undefined;
@@ -162,8 +203,13 @@ export function resolveFireMs(task: PendingScheduledTask, nowMs: number): number
   const timeZone = task.timeZone;
   // Recurring cron: next occurrence relative to now (always upcoming).
   if (task.recurring) return nextCronFireMs(task.humanSchedule, nowMs, timeZone);
-  // One-shot cron: its single fire time, anchored at creation — so once it has fired the
-  // time resolves to the PAST (and the row is hidden) instead of jumping to next year.
+  // One-shot cron with the runtime-committed fire time (parsed from CronCreate's output):
+  // exact and anchor-independent, and once it has fired the time is in the PAST so the row
+  // hides — this is the path that cannot produce a next-year phantom.
+  if (typeof task.scheduledForMs === 'number') return task.scheduledForMs;
+  // One-shot cron, legacy fallback: resolve its single fire time anchored at creation — so
+  // once it has fired the time resolves to the PAST (and the row is hidden) instead of
+  // jumping to next year.
   // Anchor just before the START of the creation minute (nextCronFireMs matches strictly
   // after `from`, rounded up to the next whole minute): a cron scheduled to fire in the
   // same minute it was created (e.g. "25 16 3 7 *" while the turn ends at 16:25:1x) must

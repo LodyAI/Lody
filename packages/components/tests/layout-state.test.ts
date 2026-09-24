@@ -8,6 +8,7 @@ import {
   toggleNavigationSidebarAtom,
   toggleZenLayoutModeAtom,
   zenLayoutModeAtom,
+  zenRightPanelAtom,
 } from '../src/atoms/layout-state';
 import { sidebarCollapsedAtom } from '../src/atoms/sidebar-state';
 
@@ -17,6 +18,7 @@ describe('Zen layout state', () => {
     (collapsed) => {
       const store = createStore();
       store.set(sidebarCollapsedAtom, collapsed);
+      store.set(zenRightPanelAtom, { open: true, reveal: () => {} });
 
       store.set(toggleZenLayoutModeAtom);
 
@@ -31,6 +33,55 @@ describe('Zen layout state', () => {
       expect(store.get(sidebarCollapsedAtom)).toBe(collapsed);
     }
   );
+
+  it.each([false, true])('reveals both manually closed panels with Zen=%s', (zen) => {
+    const store = createStore();
+    store.set(sidebarCollapsedAtom, true);
+    store.set(zenLayoutModeAtom, zen);
+    const panel = {
+      open: false,
+      reveal: () => store.set(zenRightPanelAtom, { ...panel, open: true }),
+    };
+    store.set(zenRightPanelAtom, panel);
+
+    store.set(toggleZenLayoutModeAtom);
+
+    expect(store.get(zenLayoutModeAtom)).toBe(false);
+    expect(store.get(navigationSidebarHiddenAtom)).toBe(false);
+    expect(store.get(zenRightPanelAtom)?.open).toBe(true);
+
+    store.set(toggleZenLayoutModeAtom);
+    expect(store.get(zenLayoutModeAtom)).toBe(true);
+    expect(store.get(navigationSidebarHiddenAtom)).toBe(true);
+    store.set(toggleZenLayoutModeAtom);
+    expect(store.get(zenLayoutModeAtom)).toBe(false);
+    expect(store.get(navigationSidebarHiddenAtom)).toBe(false);
+    expect(store.get(zenRightPanelAtom)?.open).toBe(true);
+  });
+
+  it('restores a left-only layout without opening the right panel', () => {
+    const store = createStore();
+    store.set(sidebarCollapsedAtom, false);
+    const panel = {
+      open: false,
+      reveal: () => store.set(zenRightPanelAtom, { ...panel, open: true }),
+    };
+    store.set(zenRightPanelAtom, panel);
+    store.set(toggleZenLayoutModeAtom);
+    expect(store.get(navigationSidebarHiddenAtom)).toBe(true);
+    store.set(toggleZenLayoutModeAtom);
+    expect(store.get(navigationSidebarHiddenAtom)).toBe(false);
+    expect(store.get(zenRightPanelAtom)?.open).toBe(false);
+  });
+
+  it('reveals navigation when there is no mounted right panel', () => {
+    const store = createStore();
+    store.set(sidebarCollapsedAtom, true);
+    store.set(toggleZenLayoutModeAtom);
+    expect(store.get(zenLayoutModeAtom)).toBe(false);
+    expect(store.get(navigationSidebarHiddenAtom)).toBe(false);
+    expect(store.get(zenRightPanelAtom)).toBeNull();
+  });
 
   it('leaves Zen and expands the navigation sidebar for an explicit show', () => {
     const store = createStore();

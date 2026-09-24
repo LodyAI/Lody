@@ -214,6 +214,15 @@ describe('built-in path launchers', () => {
     });
   });
 
+  it('keeps a DMG file URL distinct from a directory URL', () => {
+    const vscode = getEditor('vscode', 'darwin');
+    expect(
+      buildPathLauncherLaunchInput(vscode!, '/tmp/My Build/Lody.dmg', 'darwin', 'file')
+    ).toMatchObject({
+      fallbackUrl: 'vscode://file/tmp/My%20Build/Lody.dmg?windowId=_blank',
+    });
+  });
+
   it('encodes a Windows workspace path for the VS Code new-window deeplink', () => {
     expect(buildVSCodePathLauncherFallbackUrl('C:\\Users\\me\\My #Project?')).toBe(
       'vscode://file/C:/Users/me/My%20%23Project%3F/?windowId=_blank'
@@ -261,7 +270,11 @@ describe('built-in path launchers', () => {
 
   it('exposes no built-in launchers on the web (desktop bridge only)', () => {
     expect(
-      getAvailablePathLauncherOptions({ customLaunchers: [], isElectron: false, platform: 'darwin' })
+      getAvailablePathLauncherOptions({
+        customLaunchers: [],
+        isElectron: false,
+        platform: 'darwin',
+      })
     ).toEqual([]);
   });
 });

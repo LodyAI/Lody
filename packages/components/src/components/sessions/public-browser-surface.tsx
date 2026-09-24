@@ -1,5 +1,6 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { Globe2, Loader2, ShieldAlert } from 'lucide-react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { Globe2, ShieldAlert } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import { useTranslation } from 'react-i18next';
 import type { ElectronPublicBrowserBounds, ElectronPublicBrowserState } from '@lody/shared';
 
@@ -7,14 +8,17 @@ import { isElectronRenderer } from '@/lib/electron';
 import { getPublicBrowserBridge } from '@/lib/electron-ipc-client';
 import { observeResizeOnAnimationFrame } from '@/lib/resize-observer';
 import { cn } from '@/lib/utils';
+import { useAtomValue } from 'jotai';
+import { semanticShortcutsFeatureEnabledAtom } from '@/atoms/settings';
+import { reportSemanticActionInteraction } from '@/lib/commands/semantic-action-router';
 
 type PublicBrowserSurfaceProps = {
   browserId: string;
-  url: string;
-  navigationRequestId: number | null;
+  navigationRequest: { id: number; url: string } | null;
   active: boolean;
   className?: string;
   onStateChange: (state: ElectronPublicBrowserState) => void;
+  onNavigationRequestConsumed: (request: { id: number; url: string }) => void;
 };
 
 const readBounds = (element: HTMLElement): ElectronPublicBrowserBounds | null => {
@@ -33,11 +37,11 @@ const formatBridgeError = (error: unknown): string =>
 
 export function PublicBrowserSurface({
   browserId,
-  url,
-  navigationRequestId,
+  navigationRequest,
   active,
   className,
   onStateChange,
+  onNavigationRequestConsumed,
 }: PublicBrowserSurfaceProps) {
   const { t } = useTranslation();
   const hostRef = useRef<HTMLDivElement | null>(null);
@@ -48,10 +52,22 @@ export function PublicBrowserSurface({
   const [phase, setPhase] = useState<ElectronPublicBrowserState['phase']>('idle');
   const [surfaceReady, setSurfaceReady] = useState(false);
   const [blockingOverlayOpen, setBlockingOverlayOpen] = useState(false);
-  const bridge =
-    typeof window === 'undefined' ? undefined : (getPublicBrowserBridge() ?? undefined);
+  const bridge = useMemo(
+    () => (typeof window === 'undefined' ? undefined : (getPublicBrowserBridge() ?? undefined)),
+    []
+  );
   const electron = isElectronRenderer();
   const nativeViewVisible = active && !blockingOverlayOpen;
+  const semanticShortcutsEnabled = useAtomValue(semanticShortcutsFeatureEnabledAtom);
+
+  useEffect(() => {
+    if (!nativeViewVisible || !semanticShortcutsEnabled || !bridge) return undefined;
+    return bridge.onInteraction((event) => {
+      if (event.browserId === browserId && hostRef.current) {
+        reportSemanticActionInteraction(hostRef.current, event.source);
+      }
+    });
+  }, [bridge, browserId, nativeViewVisible, semanticShortcutsEnabled]);
 
   useEffect(() => {
     if (!electron) return undefined;
@@ -163,32 +179,54 @@ export function PublicBrowserSurface({
      timestamp) became an unbounded setVisible/render spin. A failed attempt
      records the error and waits for the next real visibility change instead
      of retrying itself. */
-  const lastRequestedVisibilityRef = useRef<{ browserId: string; visible: boolean } | null>(null);
+  const lastRequestedVisibilityRef = useRef<{
+    browserId: string;
+    visible: boolean;
+    trackInteraction: boolean;
+  } | null>(null);
   useEffect(() => {
     if (!electron || !bridge || !createdRef.current) return;
     const targetVisible = nativeViewVisible && !localError;
     const last = lastRequestedVisibilityRef.current;
-    if (last && last.browserId === browserId && last.visible === targetVisible) return;
-    lastRequestedVisibilityRef.current = { browserId, visible: targetVisible };
-    void bridge.setVisible(browserId, targetVisible).then(
+    if (
+      last &&
+      last.browserId === browserId &&
+      last.visible === targetVisible &&
+      last.trackInteraction === semanticShortcutsEnabled
+    )
+      return;
+    lastRequestedVisibilityRef.current = {
+      browserId,
+      visible: targetVisible,
+      trackInteraction: semanticShortcutsEnabled,
+    };
+    void bridge.setVisible(browserId, targetVisible, semanticShortcutsEnabled).then(
       (result) => {
         if (!result.ok) setLocalError(result.error);
       },
       (error: unknown) => setLocalError(formatBridgeError(error))
     );
-  }, [bridge, browserId, electron, localError, nativeViewVisible]);
+  }, [
+    bridge,
+    browserId,
+    electron,
+    localError,
+    nativeViewVisible,
+    semanticShortcutsEnabled,
+    surfaceReady,
+  ]);
 
   useEffect(() => {
-    if (!electron || !bridge || !surfaceReady || !url || navigationRequestId === null) return;
-    if (
-      navigationRef.current?.requestId === navigationRequestId &&
-      navigationRef.current.url === url
-    ) {
+    const requestId = navigationRequest?.id ?? null;
+    const url = navigationRequest?.url;
+    if (!electron || !bridge || !surfaceReady || !url || requestId === null) return;
+    if (navigationRef.current?.requestId === requestId && navigationRef.current.url === url) {
       return;
     }
-    navigationRef.current = { requestId: navigationRequestId, url };
+    navigationRef.current = { requestId, url };
     setPhase('loading');
     setLocalError(null);
+    onNavigationRequestConsumed({ id: requestId, url });
     void bridge.navigate(browserId, url).then(
       (result) => {
         if (!result.ok) {
@@ -201,7 +239,7 @@ export function PublicBrowserSurface({
         setLocalError(formatBridgeError(error));
       }
     );
-  }, [bridge, browserId, electron, navigationRequestId, surfaceReady, url]);
+  }, [bridge, browserId, electron, navigationRequest, onNavigationRequestConsumed, surfaceReady]);
 
   if (!electron) {
     return (
@@ -232,7 +270,7 @@ export function PublicBrowserSurface({
     >
       {phase === 'loading' ? (
         <div className="absolute inset-0 flex items-center justify-center bg-background">
-          <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+          <Spinner className="h-5 w-5 text-muted-foreground" />
         </div>
       ) : null}
       {localError ? (

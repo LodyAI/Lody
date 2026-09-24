@@ -2,6 +2,7 @@ import { EphemeralStore } from 'loro-crdt';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   getLodySessionPresenceKey,
+  LODY_PRESENCE_HEARTBEAT_MS,
   LODY_PRESENCE_TTL_MS,
   parseLodyPresenceStates,
   SessionStatusFactory,
@@ -89,12 +90,41 @@ const getSessionPresenceState = (
 
 let runtime: CliPresenceRuntime | null = null;
 
-const createRuntime = (): CliPresenceRuntime => {
+const createRuntime = (logger: Logger = createLogger()): CliPresenceRuntime => {
   runtime = new CliPresenceRuntime({
     workspaceId: 'workspace-presence-1' as WorkspaceId,
-    logger: createLogger(),
+    logger,
   });
   return runtime;
+};
+
+/**
+ * The shared presence write queue as the transport reports it. The runtime only ever
+ * reads this subscription, so a stand-in is enough to drive its delivery observability.
+ */
+type PresenceQueueStub = {
+  pendingLocalCount: number;
+  status: string;
+  lastLocalAppendAtMs?: number;
+  lastWriteError?: { code: string; retryable: boolean };
+  waitUntilSynced: () => Promise<void>;
+};
+
+/** Attach a queue stand-in the way a successful room join would, teardown included. */
+const attachPresenceQueue = (presence: CliPresenceRuntime, queue: PresenceQueueStub): void => {
+  (
+    presence as unknown as { subscription: PresenceQueueStub & { unsubscribe: () => void } }
+  ).subscription = { unsubscribe: () => {}, ...queue };
+};
+
+const loggedLines = (fn: unknown): string[] =>
+  (fn as { mock: { calls: unknown[][] } }).mock.calls.map((call) => String(call[0]));
+
+/** Settle the delivery probe's promise chain without touching timers. */
+const flushProbe = async (): Promise<void> => {
+  for (let tick = 0; tick < 8; tick += 1) {
+    await Promise.resolve();
+  }
 };
 
 afterEach(async () => {
@@ -102,6 +132,136 @@ afterEach(async () => {
   runtime = null;
   vi.useRealTimers();
   vi.restoreAllMocks();
+});
+
+describe('CliPresenceRuntime heartbeat delivery observability', () => {
+  const BASE_MS = Date.UTC(2026, 8, 20, 14, 0, 0);
+  const neverSettles = (): Promise<void> => new Promise<void>(() => {});
+
+  const freezeClock = (): void => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(BASE_MS);
+  };
+
+  it('records the shared write queue alongside every heartbeat', () => {
+    freezeClock();
+    const logger = createLogger();
+    const presence = createRuntime(logger);
+    attachPresenceQueue(presence, {
+      pendingLocalCount: 4000,
+      status: 'joined',
+      lastLocalAppendAtMs: BASE_MS - 12_000,
+      lastWriteError: { code: 'auth_callback_failed', retryable: true },
+      waitUntilSynced: neverSettles,
+    });
+
+    presence.setMachineOnline(MACHINE_ID);
+
+    const written = loggedLines(logger.debug).find((line) => line.includes('heartbeat written'));
+    expect(written).toBeDefined();
+    // A backlog this deep is invisible without these counters: the room still says joined.
+    expect(written).toContain('queued=4000');
+    expect(written).toContain('room=joined');
+    expect(written).toContain('sinceLastAppendMs=12000');
+    expect(written).toContain('writeError=auth_callback_failed');
+    expect(written).toContain('writeErrorRetryable=true');
+  });
+
+  it('omits queue counters while no transport is attached', () => {
+    freezeClock();
+    const logger = createLogger();
+    const presence = createRuntime(logger);
+
+    presence.setMachineOnline(MACHINE_ID);
+
+    const written = loggedLines(logger.debug).find((line) => line.includes('heartbeat written'));
+    // A real heartbeat line, so the absent counters below are a decision and not a
+    // heartbeat that never happened: presence is produced with or without a transport.
+    expect(written).toContain('seq=1');
+    expect(written).not.toContain('queued=');
+    expect(written).not.toContain('undefined');
+  });
+
+  it('warns when a heartbeat leaves this process already past its freshness window', async () => {
+    freezeClock();
+    const logger = createLogger();
+    const presence = createRuntime(logger);
+    let releaseQueue!: () => void;
+    attachPresenceQueue(presence, {
+      pendingLocalCount: 3,
+      status: 'joined',
+      waitUntilSynced: () =>
+        new Promise<void>((resolve) => {
+          releaseQueue = resolve;
+        }),
+    });
+
+    presence.setMachineOnline(MACHINE_ID);
+    // The backlog drains only after the entry outlived the window it is judged by.
+    vi.setSystemTime(BASE_MS + LODY_PRESENCE_TTL_MS + 1);
+    releaseQueue();
+    await flushProbe();
+
+    const warned = loggedLines(logger.warn).find((line) => line.includes('heartbeat delivered'));
+    expect(warned).toBeDefined();
+    expect(warned).toContain(`ageAtSendMs=${LODY_PRESENCE_TTL_MS + 1}`);
+    expect(warned).toContain('readers still report this machine offline');
+    // Two entries were ahead of the heartbeat in the shared queue.
+    expect(warned).toContain('queuedAhead=2');
+  });
+
+  it('does not warn when the heartbeat is delivered inside the window', async () => {
+    freezeClock();
+    const logger = createLogger();
+    const presence = createRuntime(logger);
+    let releaseQueue!: () => void;
+    attachPresenceQueue(presence, {
+      pendingLocalCount: 1,
+      status: 'joined',
+      waitUntilSynced: () =>
+        new Promise<void>((resolve) => {
+          releaseQueue = resolve;
+        }),
+    });
+
+    presence.setMachineOnline(MACHINE_ID);
+    vi.setSystemTime(BASE_MS + 250);
+    releaseQueue();
+    await flushProbe();
+
+    expect(loggedLines(logger.warn)).toHaveLength(0);
+    const delivered = loggedLines(logger.debug).find((line) =>
+      line.includes('heartbeat delivered')
+    );
+    expect(delivered).toContain('ageAtSendMs=250');
+    expect(delivered).toContain('queuedAhead=0');
+  });
+
+  it('surfaces a heartbeat the queue never acknowledged on the next heartbeat', async () => {
+    freezeClock();
+    const logger = createLogger();
+    const presence = createRuntime(logger);
+    const waitUntilSynced = vi.fn(neverSettles);
+    attachPresenceQueue(presence, {
+      pendingLocalCount: 900,
+      status: 'joined',
+      waitUntilSynced,
+    });
+
+    presence.setMachineOnline(MACHINE_ID);
+    await flushProbe();
+    vi.setSystemTime(BASE_MS + LODY_PRESENCE_HEARTBEAT_MS);
+    presence.writeMachineHeartbeat();
+
+    const written = loggedLines(logger.debug).filter((line) => line.includes('heartbeat written'));
+    expect(written).toHaveLength(2);
+    // A stalled queue produces silence otherwise: the probe cannot report an age it
+    // never reached, so the next heartbeat carries the outstanding one's age instead.
+    expect(written[1]).toContain('unackedHeartbeatSeq=1');
+    expect(written[1]).toContain(`unackedForMs=${LODY_PRESENCE_HEARTBEAT_MS}`);
+    // And a second probe is never armed behind the first.
+    expect(waitUntilSynced).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('CliPresenceRuntime session presence', () => {

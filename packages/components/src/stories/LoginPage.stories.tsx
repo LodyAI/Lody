@@ -6,6 +6,8 @@ import { LoginPage, type LoginPageProps } from '@/components/login-page';
 import { AuthProvider } from '@/providers/convex-provider';
 import { StableSessionContext } from '@/hooks/useStableSession';
 import type { LodyAuthClient } from '@/lib/auth';
+import { Provider, createStore } from 'jotai';
+import { electronLoginErrorAtom, electronLoginPhaseAtom } from '@/atoms';
 
 type StableSessionValue = NonNullable<
   ComponentProps<typeof StableSessionContext.Provider>['value']
@@ -17,6 +19,7 @@ type LoginPageStoryHarnessProps = LoginPageProps & {
   signInEmail?: () => Promise<unknown>;
   signUpEmail?: () => Promise<unknown>;
   sendVerificationEmail?: () => Promise<unknown>;
+  transferUser?: () => Promise<{ data?: { electron_authorization_code?: string | null } }>;
 };
 
 function createStableSessionValue(overrides: Partial<StableSessionValue> = {}): StableSessionValue {
@@ -42,6 +45,7 @@ function LoginPageStoryHarness({
   signInEmail,
   signUpEmail,
   sendVerificationEmail,
+  transferUser,
   replaceLocation,
   isElectronRenderer,
 }: LoginPageStoryHarnessProps) {
@@ -55,6 +59,7 @@ function LoginPageStoryHarness({
     },
     sendVerificationEmail: sendVerificationEmail ?? (async () => ({ data: null, error: null })),
     signOut: async () => undefined,
+    electron: transferUser ? { transferUser } : undefined,
   } as unknown as LodyAuthClient;
 
   return (
@@ -258,4 +263,51 @@ export const VerificationErrorNestedInRedirect: Story = {
 
 export const AuthenticatedRedirect: Story = {
   render: (args) => <LoginPageStoryHarness {...args} sessionValue={authenticatedSession} />,
+};
+
+// The browser page the desktop app opens, while this browser is still signed in
+// (the state a user lands in after signing out of the desktop app). No play
+// function clicks Continue: a successful transfer navigates to `lody://…`, and a
+// story must not fire a protocol handoff at whoever is browsing the docs. The
+// post-transfer state is covered by `tests/electron-browser-login-handoff.test.tsx`.
+export const ElectronBrowserHandoff: Story = {
+  name: 'Electron Browser Handoff (account choice)',
+  render: (args) => (
+    <WithSearchParam search="?client_id=electron&state=story-state&code_challenge=story-challenge">
+      <LoginPageStoryHarness
+        {...args}
+        sessionValue={authenticatedSession}
+        // Never settles: Continue shows the preparing state without minting a
+        // code, so no story can navigate a reader to `lody://`.
+        transferUser={() => new Promise(() => {})}
+      />
+    </WithSearchParam>
+  ),
+};
+
+function DesktopLoginFailure(args: LoginPageProps) {
+  const [store] = useState(() => {
+    const value = createStore();
+    value.set(electronLoginPhaseAtom, 'error');
+    value.set(electronLoginErrorAtom, 'exchange_timeout');
+    return value;
+  });
+  return (
+    <Provider store={store}>
+      <LoginPageStoryHarness
+        {...args}
+        isElectronRenderer
+        sessionValue={createStableSessionValue()}
+      />
+    </Provider>
+  );
+}
+
+export const ElectronCallbackFailure: Story = {
+  name: 'Electron sign-in request timed out',
+  render: (args) => (
+    <WithSearchParam search="">
+      <DesktopLoginFailure {...args} />
+    </WithSearchParam>
+  ),
 };

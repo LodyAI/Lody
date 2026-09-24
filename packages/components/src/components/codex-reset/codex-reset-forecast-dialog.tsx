@@ -1,8 +1,10 @@
 import { useCallback, type ReactNode } from 'react';
 import { Trans, useTranslation } from 'react-i18next';
 import { formatDistance, type Locale } from 'date-fns';
-import { enUS, zhCN } from 'date-fns/locale';
-import { ExternalLink, Loader2, TimerReset } from 'lucide-react';
+import { enUS } from 'date-fns/locale/en-US';
+import { zhCN } from 'date-fns/locale/zh-CN';
+import { ExternalLink, TimerReset } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 
 import { Badge } from '@/ui/badge';
 import { Button } from '@/ui/button';
@@ -90,7 +92,7 @@ export function CodexResetForecastDialog({
         <div className="flex flex-col gap-4">
           {isInitialLoading ? (
             <p className="flex items-center gap-2 py-1 text-sm text-muted-foreground">
-              <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+              <Spinner className="h-3.5 w-3.5" aria-hidden="true" />
               {t('codexReset.loading', 'Loading the latest forecast…')}
             </p>
           ) : watch ? (

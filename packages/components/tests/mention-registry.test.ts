@@ -132,6 +132,24 @@ describe('selectMentionMenuView', () => {
     expect(getCategoryNavigateText({ namespace: 'issue' })).toBe('@issue:');
   });
 
+  it.each(['/', '、'])('routes %s to commands and shortcuts only', (trigger) => {
+    const command = makeCategory('command', 'command', 'Commands', []);
+    command.directTrigger = '/';
+    command.getCandidates = vi.fn((term: string) =>
+      buildCommandCandidates([{ name: 'review', description: 'Review' }], term)
+    );
+    const shortcut = makeCategory('prompt_shortcut', 'shortcut', 'Shortcuts', ['review-template']);
+    shortcut.directTrigger = '/';
+    const file = makeCategory('file', 'file', 'Files', ['review.ts']);
+
+    const view = selectMentionMenuViewForTrigger([command, shortcut, file], trigger, 'rev');
+    if (view?.level !== 'aggregate') throw new Error('expected aggregate');
+    expect(view.groups.map((group) => group.category.id)).toEqual(['command', 'prompt_shortcut']);
+    expect(
+      view.groups.flatMap((group) => group.candidates.map((candidate) => candidate.insertText))
+    ).toEqual(['/review', '@review-template']);
+  });
+
   it('opens skills directly from the retained $ trigger', () => {
     const skill = makeCategory('skill', 'skill', 'Skills', ['review']);
     skill.directTrigger = '$';
@@ -230,4 +248,18 @@ describe('buildFileCandidates', () => {
       'src/file generated-name.ts'
     );
   });
+});
+
+it('keeps pending and failed sources visible in aggregate search without stale candidates', () => {
+  const file = makeCategory('file', 'file', 'Files', []);
+  for (const status of ['loading', 'error'] as const) {
+    file.status = status;
+    const view = selectMentionMenuView([file], 'composer');
+    expect(view.level).toBe('aggregate');
+    if (view.level !== 'aggregate') throw new Error('Expected aggregate search');
+    expect(view.groups).toEqual([{ category: file, candidates: [] }]);
+  }
+  file.status = 'ready';
+  const view = selectMentionMenuView([file], 'composer');
+  expect(view.level === 'aggregate' && view.groups).toEqual([]);
 });

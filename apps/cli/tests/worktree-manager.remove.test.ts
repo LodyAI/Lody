@@ -35,6 +35,20 @@ describe('WorktreeManager', () => {
       expect(fs.existsSync(info.hostPath)).toBe(false);
     });
 
+    it('keeps the session branch when preserveBranch is requested', async () => {
+      await manager.ensureRepo();
+
+      const sessionId = 'remove02-preserve-branch' as SessionId;
+      const info = await manager.createWorktree(sessionId);
+      // @ts-expect-error - accessing private property for testing
+      const bareGitDir: string = manager.bareGitDir;
+
+      await manager.removeWorktree(sessionId, true, undefined, { preserveBranch: true });
+
+      expect(fs.existsSync(info.hostPath)).toBe(false);
+      expect(runGit(bareGitDir, ['branch', '--list', info.branch])).toContain(info.branch);
+    });
+
     it('should remove a worktree when the worktrees root resolves through a symlink', async () => {
       const realRoot = path.join(testDir, 'real-root');
       const linkRoot = path.join(testDir, 'link-root');

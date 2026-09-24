@@ -4,14 +4,11 @@ import {
   useCallback,
   useEffect,
   useMemo,
-  useRef,
   type MutableRefObject,
   type ReactNode,
 } from 'react';
 import type {
-  SessionDoc,
   SessionFilePayload,
-  SessionHistory,
   SessionHistoryParsed,
   SessionId,
   SessionInputBlock,
@@ -19,7 +16,7 @@ import type {
 } from '@lody/shared';
 import { DEFAULT_CONVERSATION_FONT_SIZE, type ConversationFontSize } from '@/atoms/settings';
 import { cloudOperations } from '@/lib/cloud-api-operations';
-import type { AgentActivityTone } from '@/components/shared';
+import type { AgentActivityTone } from './view';
 import {
   MessageRowView,
   SessionChatStreamView,
@@ -28,32 +25,16 @@ import {
   type MessageFileDiffEntriesByTurn,
   type SessionChatStreamHandle,
 } from './view';
-import { buildChatStreamItems, type BuildChatStreamItemsCache } from './build-chat-stream-items';
 import { useStableCallback } from '@/hooks/use-stable-callback';
+import { useConversationStreamItems } from '@/hooks/use-conversation-stream-items';
+import { useConversationVersion } from '@/hooks/use-conversation-view';
+import { findLastIndex, type ConversationView } from '@/lib/conversation-view';
 import { useCloudQuery } from '@lody/platform/react';
 import type { SessionNavigationTarget } from '@/lib/session-navigation';
 import type {
   SessionForkDestination,
   SessionForkWorktreeAvailability,
 } from '@/components/sessions/session-fork-destination-menu';
-
-const emptyHistory = [] as SessionDoc['history'];
-const CHAT_STREAM_ITEMS_CACHE_LIMIT = 20;
-const chatStreamItemsCacheBySessionId = new Map<SessionId, BuildChatStreamItemsCache>();
-
-function getChatStreamItemsCache(sessionId: SessionId): BuildChatStreamItemsCache | undefined {
-  return chatStreamItemsCacheBySessionId.get(sessionId);
-}
-
-function setChatStreamItemsCache(sessionId: SessionId, cache: BuildChatStreamItemsCache): void {
-  chatStreamItemsCacheBySessionId.delete(sessionId);
-  chatStreamItemsCacheBySessionId.set(sessionId, cache);
-  while (chatStreamItemsCacheBySessionId.size > CHAT_STREAM_ITEMS_CACHE_LIMIT) {
-    const oldestSessionId = chatStreamItemsCacheBySessionId.keys().next().value;
-    if (oldestSessionId === undefined) break;
-    chatStreamItemsCacheBySessionId.delete(oldestSessionId);
-  }
-}
 
 export type {
   AssistantMessageAction,
@@ -62,10 +43,12 @@ export type {
   EmptySessionItem,
   GoalCommand,
   MessageFileDiffEntriesByTurn,
+  PlaceholderSessionItem,
   SessionChatStreamHandle,
   SessionChatStreamViewProps,
   SessionChatUser,
   SessionMessageItem,
+  VisibleTurnRange,
 } from './view';
 
 export { MessageRowView, SessionChatStreamView } from './view';
@@ -74,7 +57,9 @@ export { MarkdownRenderer, type MarkdownRendererSize } from './markdown-renderer
 export interface SessionChatStreamProps {
   sessionId: SessionId;
   workspaceId?: WorkspaceId | null;
-  sessionDoc: SessionDoc;
+  /** Shows sender names and desktop profile cards in multi-member workspaces. */
+  showSenderIdentity?: boolean;
+  view: ConversationView | null;
   sessionCreatedAt?: string;
   dividerLabel?: string;
   className?: string;
@@ -85,6 +70,8 @@ export interface SessionChatStreamProps {
   showScrollToLatest?: boolean;
   agentActivityLabel?: string | null;
   agentActivityTone?: AgentActivityTone;
+  /** The status is live work (not waiting on the user): shimmer it. */
+  agentActivityShimmer?: boolean;
   onFileDiffClick?: (turnId: string, filePath: string) => void;
   onFilePathClick?: (filePath: string) => void;
   /** Routes HTML attachment clicks to a live file or Browser surface. */
@@ -92,6 +79,7 @@ export interface SessionChatStreamProps {
   messageFileDiffEntriesByTurn?: MessageFileDiffEntriesByTurn;
   assistantActions?: AssistantMessageAction[];
   assistantActionsMessageId?: string | null;
+  onCopyContext?: (messageId: string) => void;
   onForkLastAssistant?: (turnId: string, destination?: SessionForkDestination) => void;
   forkWorktreeAvailability?: SessionForkWorktreeAvailability;
   onForkWorktreeMenuOpen?: () => void;
@@ -117,6 +105,7 @@ const MessageRowConnected = memo(function MessageRowConnected({
   message,
   sessionId,
   workspaceId,
+  showSenderIdentity,
   onNavigateSession,
   onEditLastUser,
   onResendUndelivered,
@@ -126,6 +115,7 @@ const MessageRowConnected = memo(function MessageRowConnected({
   message: SessionHistoryParsed;
   sessionId: SessionId;
   workspaceId?: WorkspaceId | null;
+  showSenderIdentity: boolean;
   onNavigateSession?: (target: SessionNavigationTarget) => void;
   onEditLastUser?: (message: SessionHistoryParsed, text: string) => Promise<boolean>;
   /** Resends an undelivered (missing-history-acked) user turn's content as a
@@ -144,6 +134,7 @@ const MessageRowConnected = memo(function MessageRowConnected({
       message={message}
       sessionId={sessionId}
       user={userInfo}
+      showSenderIdentity={showSenderIdentity}
       onNavigateSession={onNavigateSession}
       onEdit={onEditLastUser}
       onResendUndelivered={onResendUndelivered}
@@ -158,7 +149,8 @@ const SessionChatStreamImpl = forwardRef<SessionChatStreamHandle, SessionChatStr
     {
       sessionId,
       workspaceId,
-      sessionDoc,
+      showSenderIdentity = false,
+      view,
       sessionCreatedAt: _sessionCreatedAt,
       dividerLabel: _dividerLabel,
       className,
@@ -168,6 +160,7 @@ const SessionChatStreamImpl = forwardRef<SessionChatStreamHandle, SessionChatStr
       showScrollToLatest = true,
       agentActivityLabel = null,
       agentActivityTone = 'primary',
+      agentActivityShimmer,
       onFileDiffClick,
       onFilePathClick,
       onOpenHtmlFile,
@@ -175,6 +168,7 @@ const SessionChatStreamImpl = forwardRef<SessionChatStreamHandle, SessionChatStr
       assistantActions,
       assistantActionsMessageId,
       onForkLastAssistant,
+      onCopyContext,
       forkWorktreeAvailability,
       onForkWorktreeMenuOpen,
       forkingAssistantMessageId,
@@ -190,19 +184,16 @@ const SessionChatStreamImpl = forwardRef<SessionChatStreamHandle, SessionChatStr
     },
     ref
   ) => {
-    const sessionHistory = (sessionDoc.history as SessionHistory[]) ?? emptyHistory;
-    const chatStreamItemsCacheRef = useRef<BuildChatStreamItemsCache | undefined>(undefined);
-    if (chatStreamItemsCacheRef.current === undefined) {
-      chatStreamItemsCacheRef.current = getChatStreamItemsCache(sessionId);
-    }
-    const { items, lastAssistantMessageId, lastCompletedAssistantMessageId, cache } = useMemo(
-      () => buildChatStreamItems(sessionHistory, sessionId, chatStreamItemsCacheRef.current),
-      [sessionHistory, sessionId]
-    );
-    chatStreamItemsCacheRef.current = cache;
-    useEffect(() => {
-      setChatStreamItemsCache(sessionId, cache);
-    }, [cache, sessionId]);
+    const version = useConversationVersion(view);
+    const {
+      initialWindowReady,
+      items,
+      lastAssistantMessageId,
+      lastCompletedAssistantMessageId,
+      onVisibleTurnRangeChange: handleVisibleTurnRangeChange,
+      onOutlinePreviewRound: handleOutlinePreviewRound,
+      onRetainedTurnIdsChange,
+    } = useConversationStreamItems(view, sessionId);
     useEffect(() => {
       onLastCompletedAssistantMessageIdChange?.(lastCompletedAssistantMessageId);
     }, [lastCompletedAssistantMessageId, onLastCompletedAssistantMessageIdChange]);
@@ -216,6 +207,9 @@ const SessionChatStreamImpl = forwardRef<SessionChatStreamHandle, SessionChatStr
     const stableOnNavigateSession = useStableCallback((target: SessionNavigationTarget) => {
       onNavigateSession?.(target);
     });
+    const stableOnCopyContext = useStableCallback((messageId: string) =>
+      onCopyContext?.(messageId)
+    );
     const stableOnForkLastAssistant = useStableCallback(
       (turnId: string, destination?: SessionForkDestination) => {
         onForkLastAssistant?.(turnId, destination);
@@ -226,11 +220,11 @@ const SessionChatStreamImpl = forwardRef<SessionChatStreamHandle, SessionChatStr
     const hasNavigateSession = onNavigateSession !== undefined;
     const hasForkLastAssistant = onForkLastAssistant !== undefined;
     const lastUserMessageId = useMemo(() => {
-      for (let index = sessionHistory.length - 1; index >= 0; index -= 1) {
-        if (sessionHistory[index]?.role === 'user') return sessionHistory[index]?.id ?? null;
-      }
-      return null;
-    }, [sessionHistory]);
+      if (!view) return null;
+      const index = findLastIndex(view, (row) => row.role === 'user');
+      return index >= 0 ? (view.index(index)?.id ?? null) : null;
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [view, version]);
 
     const renderMessageRow = useCallback(
       ({
@@ -245,6 +239,7 @@ const SessionChatStreamImpl = forwardRef<SessionChatStreamHandle, SessionChatStr
             message={message}
             sessionId={messageSessionId}
             workspaceId={workspaceId}
+            showSenderIdentity={showSenderIdentity}
             onNavigateSession={hasNavigateSession ? stableOnNavigateSession : undefined}
             onEditLastUser={message.id === lastUserMessageId ? onEditLastUser : undefined}
             onResendUndelivered={onResendUndelivered}
@@ -261,12 +256,14 @@ const SessionChatStreamImpl = forwardRef<SessionChatStreamHandle, SessionChatStr
         onResendUndelivered,
         capacityRetry,
         stableOnNavigateSession,
+        showSenderIdentity,
         workspaceId,
       ]
     );
 
     return (
       <SessionChatStreamView
+        initialWindowReady={initialWindowReady}
         ref={ref}
         items={items}
         sessionId={sessionId}
@@ -284,16 +281,22 @@ const SessionChatStreamImpl = forwardRef<SessionChatStreamHandle, SessionChatStr
         messageFileDiffEntriesByTurn={messageFileDiffEntriesByTurn}
         assistantActions={assistantActions}
         assistantActionsMessageId={assistantActionsMessageId}
+        onCopyContext={onCopyContext ? stableOnCopyContext : undefined}
         onForkLastAssistant={hasForkLastAssistant ? stableOnForkLastAssistant : undefined}
         forkWorktreeAvailability={forkWorktreeAvailability}
         onForkWorktreeMenuOpen={onForkWorktreeMenuOpen}
         forkingAssistantMessageId={forkingAssistantMessageId}
         agentActivityLabel={agentActivityLabel}
         agentActivityTone={agentActivityTone}
+        agentActivityShimmer={agentActivityShimmer}
         conversationFontSize={conversationFontSize}
         skipNextViewportResizeAutoScrollRef={skipNextViewportResizeAutoScrollRef}
         suppressStickyAutoScrollRef={suppressStickyAutoScrollRef}
         outlineOverlayRoot={outlineOverlayRoot}
+        conversationView={view}
+        onRetainedTurnIdsChange={onRetainedTurnIdsChange}
+        onVisibleTurnRangeChange={handleVisibleTurnRangeChange}
+        onOutlinePreviewRound={handleOutlinePreviewRound}
       />
     );
   }

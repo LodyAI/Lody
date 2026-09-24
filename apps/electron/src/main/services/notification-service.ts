@@ -1,3 +1,4 @@
+import { productWindows } from '../window-state'
 import { Notification, shell, systemPreferences, type BrowserWindow } from 'electron'
 import type {
   GetNotificationPermissionStatusResult,
@@ -7,6 +8,7 @@ import type {
   ShowSessionCompletionNotificationResult
 } from '../types'
 import { formatUnknownError } from '../utils'
+import { showNativeNotification } from './notification-delivery'
 
 function getNotificationSettingsUrls(platform: NodeJS.Platform): string[] {
   if (platform === 'darwin') {
@@ -49,6 +51,8 @@ function focusWindow(window: BrowserWindow): void {
 }
 
 export class NotificationService {
+  private readonly activeNotifications = new Set<Notification>()
+
   constructor(private readonly getMainWindow: () => BrowserWindow | null) {}
 
   getPermissionStatus(): GetNotificationPermissionStatusResult {
@@ -119,13 +123,16 @@ export class NotificationService {
     }
   }
 
-  showSessionCompletion(
+  async showSessionCompletion(
     input: ShowSessionCompletionNotificationInput
-  ): ShowSessionCompletionNotificationResult {
+  ): Promise<ShowSessionCompletionNotificationResult> {
     if (!Notification.isSupported()) {
       return { shown: false, reason: 'notification_not_supported' }
     }
 
+    if ([...productWindows].some((window) => window.isFocused())) {
+      return { shown: false, reason: 'app_foreground' }
+    }
     const title = input.title.trim()
     const body = input.body.trim()
     if (!title || !body) {
@@ -155,12 +162,6 @@ export class NotificationService {
       })
     })
 
-    try {
-      notification.show()
-    } catch (error) {
-      return { shown: false, reason: formatUnknownError(error) }
-    }
-
-    return { shown: true }
+    return await showNativeNotification(notification, this.activeNotifications)
   }
 }

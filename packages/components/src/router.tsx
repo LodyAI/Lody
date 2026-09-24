@@ -4,15 +4,10 @@ import type { LodyAuthClient } from './lib/auth';
 
 export type RouterContext = {
   authClient: LodyAuthClient;
-  desktopAuth?: {
-    completeCallback: (token: string) => Promise<void>;
-    isCallbackActive: () => boolean;
-  };
 };
 
 type CreateRouterOptions = {
   authClient: LodyAuthClient;
-  desktopAuth?: RouterContext['desktopAuth'];
   basepath?: string;
   history?: Parameters<typeof createTanstackRouter>[0]['history'];
 };
@@ -26,7 +21,6 @@ export const createRouter = (options: CreateRouterOptions) => {
     scrollRestoration: true,
     context: {
       authClient: options.authClient,
-      desktopAuth: options.desktopAuth,
     },
   });
   return router;

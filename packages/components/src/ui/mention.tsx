@@ -58,7 +58,7 @@ function MentionContent({
       <MentionPrimitive.Content
         data-slot="mention-content"
         className={cn(
-          'data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 relative z-50 min-w-32 overflow-hidden rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md data-[state=closed]:animate-out data-[state=open]:animate-in',
+          'data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 relative z-[var(--z-popover)] min-w-32 overflow-hidden rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md data-[state=closed]:animate-out data-[state=open]:animate-in',
           className
         )}
         {...props}
@@ -78,7 +78,7 @@ function MentionItem({
     <MentionPrimitive.Item
       data-slot="mention-item"
       className={cn(
-        'relative flex w-full cursor-default select-none items-center gap-2 rounded-xs px-2 py-1.5 text-sm outline-hidden data-[disabled]:pointer-events-none data-[highlighted]:bg-hover data-[highlighted]:text-hover-foreground data-[disabled]:opacity-50',
+        'relative flex w-full cursor-default select-none items-center gap-2 rounded-xs px-2 py-1.5 text-sm outline-hidden data-[disabled]:pointer-events-none data-[highlighted]:bg-foreground/[0.05] data-[highlighted]:text-foreground data-[disabled]:opacity-50 dark:data-[highlighted]:bg-white/[0.10] dark:data-[highlighted]:text-foreground',
         className
       )}
       {...props}

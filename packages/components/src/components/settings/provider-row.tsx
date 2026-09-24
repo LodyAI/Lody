@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAtomValue } from 'jotai';
-import { Loader2, RefreshCw, Trash2 } from 'lucide-react';
+import { RefreshCw, Trash2 } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import {
   REGISTRY_ACP_AGENTS,
   type AgentConfigCliType,
@@ -24,6 +25,7 @@ import {
   AlertDialogTitle,
 } from '@/ui/alert-dialog';
 import { cn } from '@/lib/utils';
+import { SETTINGS_ROW_CARD_CLASS } from './compact-layout';
 import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
 import { useMachineAcpBinaryProgress } from '@/hooks/use-machine-acp-binary-progress';
 import { AgentIcon } from '@/components/icons/agent-icon';
@@ -31,6 +33,7 @@ import { CodexResetForecastChip } from '@/components/codex-reset/codex-reset-for
 import { canShowCodexResetForecast } from '@/lib/codex-reset-forecast';
 import {
   canShowSubscriptionRateLimits,
+  formatAgentRateLimitWindowLabel,
   formatRateLimitWindowShortLabel,
   getAgentRateLimitEntries,
   getAgentRateLimitWindows,
@@ -133,7 +136,7 @@ export function ProviderRow({
       className={cn(
         'overflow-hidden',
         variant === 'card'
-          ? '@container rounded-lg bg-foreground/[0.04]'
+          ? cn('@container', SETTINGS_ROW_CARD_CLASS)
           : 'bg-transparent [&+&]:border-t [&+&]:border-border',
         className
       )}
@@ -164,7 +167,7 @@ export function ProviderRow({
           </div>
           <div className="min-w-0 flex-1">
             <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
-              <span className="min-w-0 truncate text-sm font-medium">{config.name}</span>
+              <span className="min-w-0 truncate text-sm font-normal">{config.name}</span>
               {typeBadge ? (
                 <Badge variant="secondary" className="text-[10px] capitalize">
                   {typeBadge}
@@ -187,7 +190,11 @@ export function ProviderRow({
               {rateLimitWindows.map((window, index) => (
                 <RateLimitMeter
                   key={`${window.windowDurationSeconds ?? 'unknown'}-${index}`}
-                  label={formatRateLimitWindowShortLabel(window.windowDurationSeconds)}
+                  label={formatAgentRateLimitWindowLabel(
+                    window,
+                    formatRateLimitWindowShortLabel(window.windowDurationSeconds),
+                    t
+                  )}
                   remainingPercent={window.remainingPercent}
                 />
               ))}
@@ -215,7 +222,7 @@ export function ProviderRow({
               }}
             >
               {refreshing ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                <Spinner className="h-3.5 w-3.5" />
               ) : (
                 <RefreshCw className="h-3.5 w-3.5" />
               )}
@@ -274,7 +281,7 @@ export function ProviderRow({
               }}
               className={cn('bg-destructive text-destructive-foreground hover:bg-destructive/90')}
             >
-              {deleting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              {deleting && <Spinner className="mr-2 h-4 w-4" />}
               {t('common.delete', 'Delete')}
             </AlertDialogAction>
           </AlertDialogFooter>
@@ -298,7 +305,7 @@ function RateLimitMeter({
       className="flex shrink-0 items-center gap-1.5 text-[11px] text-muted-foreground"
       title={`${label}: ${percentText}`}
     >
-      <span className="font-medium">{label}</span>
+      <span className="font-normal">{label}</span>
       <span className="relative h-1 w-10 overflow-hidden rounded-full bg-foreground/10">
         <span
           className="absolute inset-y-0 left-0 rounded-full bg-muted-foreground/60"

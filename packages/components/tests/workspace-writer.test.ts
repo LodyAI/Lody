@@ -1,12 +1,23 @@
 import { describe, expect, it, vi } from 'vitest';
 import { Flock } from '@loro-dev/flock-wasm';
+import { LoroDoc } from 'loro-crdt';
 import {
   createPreviewVisualComment,
   createPreviewVisualCommentDoc,
+  createSessionMirror,
+  type SessionHistory,
   type MinimalVisualAnnotationAnchor,
   type PreviewVisualCommentDocInput,
 } from '@lody/shared';
+import { createLoroSessionData } from '@lody/shared/session-data';
 import { createDirectWorkspaceWriter } from '../src/providers/workspace-writer-impl';
+import { persistReconciledAgentRole } from '../src/lib/agent-role-schema-reconciliation';
+import {
+  AGENT_ROLE_VERSION,
+  workspaceFlockKeys,
+  type AgentRole,
+  type AcpCapabilityCacheEntry,
+} from '@lody/shared';
 
 const anchor: MinimalVisualAnnotationAnchor = {
   version: 1,
@@ -34,6 +45,124 @@ const anchor: MinimalVisualAnnotationAnchor = {
 };
 
 describe('createDirectWorkspaceWriter', () => {
+  it.each(['unchanged', 'edited', 'deleted', 'cancelled', 'other-owner', 'write-failure'] as const)(
+    'reconciles the durable role without overwriting intervening changes: %s',
+    async (scenario) => {
+      const flock = new Flock('role-reconciliation');
+      const role: AgentRole = {
+        v: AGENT_ROLE_VERSION,
+        id: 'role' as never,
+        machineId: 'machine' as never,
+        agentConfigId: 'config' as never,
+        ownerUserId: 'owner',
+        visibility: 'private',
+        name: 'Reviewer',
+        runConfig: { configOptionValues: { retired: 'value' } },
+        revision: 1,
+        createdAt: 1,
+        updatedAt: 1,
+      };
+      const key = workspaceFlockKeys.agentRole(role.id);
+      flock.set(key, role as never);
+      flock.commit();
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const repo = {
+        openFlockDoc: async () => {
+          await gate;
+          if (scenario === 'write-failure') throw new Error('storage unavailable');
+          return { flock, syncOnce: async () => {} };
+        },
+      };
+      const writer = createDirectWorkspaceWriter({ repo } as never);
+      const runtime = { repo, writer, workspaceId: 'workspace' } as never;
+      const capability: AcpCapabilityCacheEntry = {
+        cliType: 'builtin',
+        agentType: 'codex',
+        provenance: 'runtime',
+        fetchedAt: 2,
+        modes: [],
+        models: [],
+        configOptions: [],
+      };
+      const pending = persistReconciledAgentRole(
+        runtime,
+        role,
+        capability,
+        scenario === 'other-owner' ? 'someone-else' : 'owner',
+        3,
+        () => scenario !== 'cancelled'
+      );
+      if (scenario === 'edited')
+        flock.set(key, { ...role, name: 'New name', revision: 2 } as never);
+      if (scenario === 'deleted') flock.delete(key);
+      flock.commit();
+      const before = flock.get(key);
+      release();
+      if (scenario === 'write-failure')
+        await expect(pending).rejects.toThrow('storage unavailable');
+      else await pending;
+      if (scenario === 'unchanged') {
+        expect(flock.get(key)).toEqual({
+          ...role,
+          runConfig: { configOptionValues: {} },
+          revision: 2,
+          updatedAt: 3,
+        });
+        await persistReconciledAgentRole(runtime, role, capability, 'owner', 4, () => true);
+        expect(flock.get(key)).toMatchObject({ revision: 2, updatedAt: 3 });
+      } else expect(flock.get(key)).toEqual(before);
+    }
+  );
+  it('routes renderer history writes through the real shared boundary', async () => {
+    const doc = new LoroDoc();
+    const mirror = createSessionMirror({
+      doc,
+      initialState: { session: { id: 'session-1' as never }, history: [] },
+    });
+    const writer = createDirectWorkspaceWriter({
+      repo: {} as never,
+      acquireSessionStore: async () =>
+        ({
+          ...mirror,
+          sessionData: createLoroSessionData({
+            sessionId: 'session-1' as never,
+            doc,
+            writer: mirror.historyWriter,
+          }),
+        }) as never,
+      releaseSessionStoreRef: () => {},
+      acquirePreviewVisualCommentStore: async () => {
+        throw new Error('not used');
+      },
+      releasePreviewVisualCommentStoreRef: () => {},
+    });
+    const entry: SessionHistory = {
+      id: 'turn',
+      role: 'user',
+      timestamp: 'synthetic',
+      items: [{ type: 'text', text: 'hello' }],
+      fileDiff: [],
+    };
+    const version = doc.version().toJSON();
+    await expect(
+      writer.appendSessionTurn('session-1', {
+        ...entry,
+        items: [{ type: 'text' }],
+      } as SessionHistory)
+    ).rejects.toThrow('Invalid history write');
+    expect(doc.version().toJSON()).toEqual(version);
+    await writer.appendSessionTurn('session-1', entry);
+    await writer.updateSessionHistory('session-1', 'turn', {
+      ...entry,
+      items: [{ type: 'text', text: 'updated' }],
+    });
+    expect(doc.toJSON().history[0].items).toEqual([{ type: 'text', text: 'updated' }]);
+    mirror.dispose();
+  });
+
   it('puts a Flock row only when the key is absent in the same synchronous transaction', async () => {
     const flock = new Flock('workspace-writer-test');
     const writer = createDirectWorkspaceWriter({
@@ -105,8 +234,14 @@ describe('createDirectWorkspaceWriter', () => {
       releasePreviewVisualCommentStoreRef: vi.fn(),
     });
 
-    await expect(writer.appendSessionTurn('session-1', { id: 'turn-1' })).rejects.toThrow(
-      'store unavailable'
-    );
+    await expect(
+      writer.appendSessionTurn('session-1', {
+        id: 'turn-1',
+        role: 'user',
+        timestamp: '2026-01-01',
+        items: [{ type: 'text', text: 'hello' }],
+        fileDiff: [],
+      })
+    ).rejects.toThrow('store unavailable');
   });
 });

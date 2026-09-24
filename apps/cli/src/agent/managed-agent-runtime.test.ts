@@ -27,6 +27,7 @@ import {
   KIMI_CODE_VERSION,
   formatManagedRuntimeFailureMessage,
   isNodeVersionAtLeast,
+  getHostMachineProtocolCapabilities,
   mapManagedRuntimePlatform,
   ManagedAgentRuntimeManager,
   ManagedRuntimeIncompatibleHostError,
@@ -35,6 +36,24 @@ import {
   type FetchImpl,
   type ManagedRuntimeProgressEvent,
 } from './managed-agent-runtime';
+
+describe('host runtime capabilities', () => {
+  it.each([
+    ['22.14.0', 'darwin', 'arm64', undefined],
+    ['22.18.0', 'linux', 'x64', undefined],
+    ['22.19.0', 'darwin', 'arm64', 1],
+    ['23.6.0', 'win32', 'x64', 1],
+    ['24.0.0', 'freebsd', 'x64', undefined],
+    ['24.0.0', 'linux', 'ia32', undefined],
+  ] as const)(
+    'advertises Pi only on compatible host %s %s %s',
+    (node, platform, arch, expected) => {
+      const capabilities = getHostMachineProtocolCapabilities(node, platform, arch);
+      expect(capabilities.builtinPi).toBe(expected);
+      expect(capabilities.providerSetup).toBe(1);
+    }
+  );
+});
 
 async function sha256(bytes: Uint8Array): Promise<string> {
   return createHash('sha256').update(bytes).digest('hex');
@@ -207,6 +226,7 @@ describe('ManagedAgentRuntimeManager', () => {
     ['codex', 'linux', 'x64', 'linux-x64'],
     ['claude-code', 'linux', 'x64', 'linux-x64'],
     ['kimi-code', 'linux', 'x64', 'node'],
+    ['pi', 'linux', 'x64', 'node'],
     ['grok-build', 'linux', 'x64', 'linux-x64'],
     ['grok-build', 'win32', 'x64', 'win32-x64'],
   ] as const)(
@@ -237,13 +257,97 @@ describe('ManagedAgentRuntimeManager', () => {
     }
   );
 
-  it('rejects malformed legacy runtime metadata', async () => {
+  it.each(['archiveSha256', 'archiveSize', 'command', 'minNodeVersion'] as const)(
+    'reinstalls a same-version runtime when %s changes',
+    async (field) => {
+      const { archiveBytes, definition, originalArchive } =
+        await installTinyCodexArchiveDefinition('repacked-codex.tar.zst');
+      try {
+        const archive = definition.platforms['linux-x64'];
+        const command = await installCachedCodex({
+          version: definition.version,
+          installedAt: '2026-08-01T00:00:00.000Z',
+          archiveSha256: archive.sha256,
+          archiveSize: archive.size,
+        });
+        const metadataPath = join(dirname(dirname(command)), 'metadata.json');
+        const metadata = JSON.parse(await readFile(metadataPath, 'utf8'));
+        const staleValues = {
+          archiveSha256: 'f'.repeat(64),
+          archiveSize: archive.size + 1,
+          command: 'bin/old-codex',
+          minNodeVersion: '22.19.0',
+        };
+        if (field === 'command') {
+          await writeFile(join(dirname(command), 'old-codex'), 'stale-codex');
+        }
+        await writeFile(metadataPath, JSON.stringify({ ...metadata, [field]: staleValues[field] }));
+        const manager = new ManagedAgentRuntimeManager({
+          rootDir,
+          platform: 'linux',
+          arch: 'x64',
+          runtimeBaseUrl: 'https://runtime.example.test',
+          fetchImpl: async () => new Response(archiveBytes),
+        });
+
+        await expect(manager.getRuntimeStatus('codex')).resolves.toMatchObject({
+          kind: 'not-installed',
+        });
+        await expect(manager.prepareCache()).resolves.toBeUndefined();
+        await expect(manager.resolveRuntimeForLaunch('codex')).resolves.toMatchObject({
+          command,
+          version: definition.version,
+          updateAvailable: false,
+        });
+        expect(await readFile(command, 'utf8')).toBe('tiny-codex');
+        expect(JSON.parse(await readFile(metadataPath, 'utf8'))).toMatchObject({
+          archiveSha256: archive.sha256,
+          archiveSize: archive.size,
+          command: archive.cmd,
+        });
+      } finally {
+        definition.platforms['linux-x64'] = originalArchive;
+      }
+    }
+  );
+
+  it.each([
+    Object.assign(new Error('permission denied'), { code: 'EACCES' }),
+    new Error('unexpected cleanup failure'),
+    'non-Error cleanup failure',
+  ])('continues cleaning other runtimes after a startup cleanup failure: %s', async (error) => {
+    const obsolete = await installCachedCodex({
+      version: '0.1.0',
+      installedAt: '2026-01-01T00:00:00.000Z',
+    });
+    const retained = await installCachedCodex({
+      version: '0.2.0',
+      installedAt: '2026-02-01T00:00:00.000Z',
+    });
+    const manager = new ManagedAgentRuntimeManager({ rootDir, platform: 'linux', arch: 'x64' });
+    const prune = vi.spyOn(manager, 'pruneSupersededVersions').mockRejectedValueOnce(error);
+    try {
+      await expect(manager.prepareCache()).resolves.toBeUndefined();
+      expect(existsSync(obsolete)).toBe(false);
+      expect(existsSync(retained)).toBe(true);
+    } finally {
+      prune.mockRestore();
+    }
+  });
+
+  it('skips malformed metadata during startup but still rejects it for launch and install', async () => {
     const command = await installCachedCodex({
-      version: '0.147.0',
+      version: CODEX_RUNTIME_VERSION,
       installedAt: '2026-08-01T00:00:00.000Z',
       metadataFormat: 'legacy',
     });
-    const metadataPath = join(rootDir, 'codex', '0.147.0', 'linux-x64', 'metadata.json');
+    const metadataPath = join(
+      rootDir,
+      'codex',
+      CODEX_RUNTIME_VERSION,
+      'linux-x64',
+      'metadata.json'
+    );
     const metadata = JSON.parse(await readFile(metadataPath, 'utf8')) as Record<string, unknown>;
     await writeFile(metadataPath, JSON.stringify({ ...metadata, unexpected: true }));
     const manager = new ManagedAgentRuntimeManager({
@@ -252,10 +356,32 @@ describe('ManagedAgentRuntimeManager', () => {
       arch: 'x64',
     });
 
-    await expect(manager.prepareCache()).rejects.toThrow(
-      'Managed runtime cache metadata is invalid for codex/0.147.0/linux-x64'
-    );
+    await expect(manager.prepareCache()).resolves.toBeUndefined();
+    await expect(manager.listAvailableUpdates()).resolves.toEqual([]);
+    for (const operation of [
+      () => manager.getRuntimeStatus('codex'),
+      () => manager.resolveRuntimeForLaunch('codex'),
+      () => manager.ensureCurrentRuntime('codex'),
+    ]) {
+      await expect(operation()).rejects.toThrow(
+        `Managed runtime cache metadata is invalid for codex/${CODEX_RUNTIME_VERSION}/linux-x64`
+      );
+    }
     expect(existsSync(command)).toBe(true);
+  });
+
+  it('still finds updates for other runtimes when one cache cannot be read', async () => {
+    await installCachedCodex({
+      version: '0.1.0',
+      installedAt: '2026-01-01T00:00:00.000Z',
+    });
+    const manager = new ManagedAgentRuntimeManager({ rootDir, platform: 'linux', arch: 'x64' });
+    const status = vi.spyOn(manager, 'getRuntimeStatus').mockRejectedValueOnce(new Error('EIO'));
+    try {
+      await expect(manager.listAvailableUpdates()).resolves.toEqual(['codex']);
+    } finally {
+      status.mockRestore();
+    }
   });
 
   it('matches the exact locked Codex dependency version', () => {
@@ -293,9 +419,9 @@ describe('ManagedAgentRuntimeManager', () => {
     expect(mapManagedRuntimePlatform('kimi-code', 'win32', 'x64')).toBe('node');
   });
 
-  it('pins Grok 1.0.13 for every supported native platform', () => {
+  it('pins Grok 1.0.34 for every supported native platform', () => {
     expect(GROK_BUILD_RUNTIME_VERSION).toBe(grokRuntimeManifest.officialRuntime.version);
-    expect(grokRuntimeManifest.officialRuntime.minimumSupportedVersion).toBe('1.0.13');
+    expect(grokRuntimeManifest.officialRuntime.minimumSupportedVersion).toBe('1.0.34');
     expect(mapManagedRuntimePlatform('grok-build', 'darwin', 'arm64')).toBe('darwin-arm64');
     expect(mapManagedRuntimePlatform('grok-build', 'linux', 'x64')).toBe('linux-x64');
     expect(mapManagedRuntimePlatform('grok-build', 'win32', 'arm64')).toBe('win32-arm64');
@@ -480,6 +606,72 @@ describe('ManagedAgentRuntimeManager', () => {
             event.downloadedBytes >= splitAt
         )
       ).toBe(true);
+    } finally {
+      definition.platforms['linux-x64'] = originalArchive;
+    }
+  });
+
+  it('bounds download progress by elapsed time rather than by changed percent', async () => {
+    // Every progress event is republished as session presence, and presence is a shared
+    // serial queue the machine heartbeat also uses. The emit ceiling must therefore be a
+    // property of this publisher: a clock that never advances must suppress every
+    // chunk-driven emit no matter how many chunks arrive, or how much the percent moves.
+    const { archiveBytes, definition, originalArchive } =
+      await installTinyCodexArchiveDefinition('throttled-codex.tar.zst');
+
+    try {
+      const chunkCount = 64;
+      const chunkSize = Math.ceil(archiveBytes.byteLength / chunkCount);
+      let deliveredChunks = 0;
+      const fetchImpl = vi.fn<FetchImpl>(async () => ({
+        ok: true,
+        status: 200,
+        headers: new Headers(),
+        body: new ReadableStream<Uint8Array>({
+          start(controller) {
+            for (let offset = 0; offset < archiveBytes.byteLength; offset += chunkSize) {
+              controller.enqueue(new Uint8Array(archiveBytes.subarray(offset, offset + chunkSize)));
+              deliveredChunks += 1;
+            }
+            controller.close();
+          },
+        }) as unknown as NonNullable<Awaited<ReturnType<FetchImpl>>['body']>,
+      }));
+
+      const throttledManager = new ManagedAgentRuntimeManager({
+        rootDir,
+        platform: 'linux',
+        arch: 'x64',
+        runtimeBaseUrl: 'https://runtime.example.test',
+        fetchImpl,
+      });
+
+      // Fake ONLY Date: the download pipeline still needs real I/O scheduling.
+      vi.useFakeTimers({ toFake: ['Date'] });
+      vi.setSystemTime(new Date('2026-09-20T00:00:00.000Z'));
+      const progressEvents: ManagedRuntimeProgressEvent[] = [];
+      try {
+        await throttledManager.ensureCurrentRuntime('codex', {
+          onProgress: (event) => {
+            progressEvents.push(event);
+          },
+        });
+      } finally {
+        vi.useRealTimers();
+      }
+
+      const downloadEvents = progressEvents.filter((event) => event.phase === 'downloading');
+      expect(deliveredChunks).toBeGreaterThan(8);
+      // A frozen clock leaves only the three lifecycle emits: attempt start, the forced
+      // one before the pipeline, and the forced one after it settles. The count is
+      // independent of deliveredChunks; per-chunk emission would scale with it.
+      expect(downloadEvents).toHaveLength(3);
+      // The terminal byte count is still reported, so a bounded rate never hides completion.
+      expect(downloadEvents.at(-1)).toMatchObject({
+        phase: 'downloading',
+        downloadedBytes: archiveBytes.byteLength,
+        totalBytes: archiveBytes.byteLength,
+      });
     } finally {
       definition.platforms['linux-x64'] = originalArchive;
     }

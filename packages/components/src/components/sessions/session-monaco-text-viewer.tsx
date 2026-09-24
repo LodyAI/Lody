@@ -112,7 +112,7 @@ export function SessionMonacoTextViewer({
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const controllerRef = useRef<SessionMonacoEditorController | null>(null);
-  useKeyScope('session-monaco-quick-fix', containerRef, { claims: ['$mod+.'] });
+  useKeyScope('session-monaco-quick-fix', containerRef, { claims: ['Mod+.'] });
 
   // Line wrap is a global, persisted viewer preference (defaults on). Read it
   // here so every SessionMonacoTextViewer mount — session file viewer, mobile

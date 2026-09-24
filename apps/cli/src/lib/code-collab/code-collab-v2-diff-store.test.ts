@@ -290,7 +290,7 @@ describe('CodeCollabV2DiffStore', () => {
     });
   });
 
-  it('keeps zero-line file creation as a clickable per-turn file diff', async () => {
+  it('keeps zero-line file changes as clickable per-turn file diffs', async () => {
     await withStore(async (store, workspaceRoot) => {
       const fileDiff = await store.recordTurnDiffs({
         workspaceRoot,
@@ -300,21 +300,39 @@ describe('CodeCollabV2DiffStore', () => {
         recordedAtMs: 1000,
         events: [
           {
-            path: path.join(workspaceRoot, 'empty.txt'),
+            path: path.join(workspaceRoot, 'empty-created.txt'),
             oldText: null,
             newText: '',
+          },
+          {
+            path: path.join(workspaceRoot, 'empty-deleted.txt'),
+            oldText: '',
+            newText: null,
+          },
+          {
+            path: path.join(workspaceRoot, 'unchanged.txt'),
+            oldText: 'same\n',
+            newText: 'same\n',
           },
         ],
       });
 
-      expect(fileDiff).toEqual([{ filePath: 'empty.txt', add: 0, del: 0 }]);
+      expect(fileDiff).toEqual([
+        { filePath: 'empty-created.txt', add: 0, del: 0 },
+        { filePath: 'empty-deleted.txt', add: 0, del: 0 },
+        { filePath: 'unchanged.txt', add: 0, del: 0 },
+      ]);
       expect(
         await store.listTurnFileDiffs({
           ownerSessionId: SESSION_ID,
           turnId: 'turn-1',
           nowMs: 1000,
         })
-      ).toEqual([{ filePath: 'empty.txt', add: 0, del: 0 }]);
+      ).toEqual([
+        { filePath: 'empty-created.txt', add: 0, del: 0 },
+        { filePath: 'empty-deleted.txt', add: 0, del: 0 },
+        { filePath: 'unchanged.txt', add: 0, del: 0 },
+      ]);
     });
   });
 

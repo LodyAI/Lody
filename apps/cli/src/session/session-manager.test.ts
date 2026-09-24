@@ -8,6 +8,7 @@ import {
   buildSessionPreparationRequestKey,
   buildSessionLaunchConfig,
   normalizeSessionPreparationRunConfigForDedup,
+  type ACPSessionId,
   type AgentConfigId,
   type LocalProjectId,
   type MachineId,
@@ -19,7 +20,7 @@ import {
 import { deriveRepoIdFromLocalProjectPath } from '@lody/shared/node/worktree-paths';
 import { normalizeLocalProjectRootPath } from '@lody/shared/node/local-project';
 
-import { getDefaultSessionWorkdir } from './session';
+import { getDefaultSessionWorkdir, Session } from './session';
 import { SessionManager, type ISession } from './session-manager';
 import { createNoopSessionSandbox } from './session-sandbox';
 import type { SessionConfig } from './types';
@@ -133,7 +134,6 @@ const createSessionConfig = (
   agentCliType: 'builtin',
   agentType: 'codex',
   mcpServerIds: [],
-  taskToolsEnabled: false,
   assumeDocExisting: true,
   userName: 'Test User',
   userEmail: 'test@example.com',
@@ -149,12 +149,11 @@ const createPreparedTestCompatibility = (
   runConfig: normalizeSessionPreparationRunConfigForDedup({
     mcpServerIds,
     configOptionValues,
-    taskToolsEnabled: false,
   }),
 });
 
 type PreparedTestResource = SessionPreparationResource & {
-  config: Pick<SessionConfig, 'mcpServerIds' | 'configOptionValues' | 'taskToolsEnabled'>;
+  config: Pick<SessionConfig, 'mcpServerIds' | 'configOptionValues'>;
   compatibility: ReturnType<typeof createPreparedTestCompatibility>;
   readCurrentLaunchConfig?: () => {
     config: SessionLaunchConfig | undefined;
@@ -184,6 +183,50 @@ const createSessionInner = async (
       ): Promise<ISession>;
     }
   ).createSessionInner(config, undefined, preparedWorktree);
+
+describe('SessionManager ACP project identity', () => {
+  it.each([undefined, 'parent-session' as SessionId])(
+    'resolves the registered root for local worktree sessions, including child %s',
+    async (parentSessionId) => {
+      const manager = new SessionManager(
+        createLogger(),
+        'test-token',
+        'machine-1' as MachineId,
+        'workspace-1' as WorkspaceId,
+        createWorkspaceDocument(new Map()),
+        {
+          sessionSandboxFactory: async () => createNoopSessionSandbox(),
+          cloudPort: createTestCloudPort(),
+        }
+      );
+      const localProjectId = 'local-project' as LocalProjectId;
+      vi.spyOn(manager, 'resolveLocalProjectRootPath').mockImplementation(async (id) => {
+        if (id !== localProjectId) throw new Error('wrong project');
+        return '/registered-project';
+      });
+      const config = createSessionConfig({
+        sessionId: 'session-project' as SessionId,
+        parentSessionId,
+        project: { kind: 'local', localProjectId, useWorktree: true },
+        workdir: '/execution-worktree',
+      });
+      const session = new Session(config, createLogger(), '/execution-worktree');
+      const callbacks = (
+        manager as unknown as {
+          buildCreateAgentConfig(
+            session: Session,
+            config: SessionConfig,
+            launch: { command: string; args: string[] }
+          ): import('./session-manager').CreateAgentConfig;
+        }
+      ).buildCreateAgentConfig(session, config, { command: 'agent', args: [] });
+      expect(await callbacks.resolveWorktreeProject?.()).toEqual({
+        version: 1,
+        originProjectPath: '/registered-project',
+      });
+    }
+  );
+});
 
 describe('SessionManager cleanup phases', () => {
   it('stops session producers before closing the workspace document', async () => {
@@ -872,6 +915,65 @@ describe('SessionManager durable create ownership', () => {
 });
 
 describe('SessionManager preparation compatibility', () => {
+  it('keeps an adopted preparation when its Git identity changes', async () => {
+    const logger = createLogger();
+    const workspaceDocument = createWorkspaceDocument(new Map());
+    const manager = new SessionManager(
+      logger,
+      'token',
+      'machine-1' as MachineId,
+      'workspace-1' as WorkspaceId,
+      workspaceDocument,
+      {
+        sessionSandboxFactory: async () => createNoopSessionSandbox(),
+        cloudPort: createTestCloudPort(),
+      }
+    );
+    const sessionId = 'stale-prepared-git-identity' as SessionId;
+    const config = createSessionConfig({ sessionId });
+    const preparedSession = new Session(config, logger, process.cwd(), createNoopSessionSandbox());
+    const updateIdentity = vi.spyOn(preparedSession, 'updateGitIdentity');
+    const dispose = vi.fn(async () => await preparedSession.terminate(true));
+    const prepared = {
+      session: preparedSession,
+      config,
+      compatibility: createPreparedTestCompatibility({}),
+      initialized: Promise.resolve(),
+      sessionReady: Promise.resolve(),
+      workspaceReady: Promise.resolve(null),
+      agentResult: Promise.resolve('prepared-acp-session'),
+      adopt: vi.fn(async () => undefined),
+      dispose,
+    };
+    const sessionDoc = await workspaceDocument.getOrCreateSessionDoc(sessionId);
+    sessionDoc.setACPSessionId = vi.fn(async () => undefined);
+    const internals = manager as unknown as {
+      finishPreparedSession(config: SessionConfig, prepared: typeof prepared): Promise<ISession>;
+      createSessionInnerWithAgent(config: SessionConfig): Promise<ISession>;
+    };
+    const coldCreate = vi
+      .spyOn(internals, 'createSessionInnerWithAgent')
+      .mockRejectedValue(new Error('unexpected cold restart'));
+    const terminated = vi.fn();
+    manager.on('terminated', terminated);
+
+    const incomingConfig = { ...config, userEmail: 'changed@example.com' };
+    await expect(internals.finishPreparedSession(incomingConfig, prepared)).resolves.toBe(
+      preparedSession
+    );
+
+    expect(dispose).not.toHaveBeenCalled();
+    expect(terminated).not.toHaveBeenCalled();
+    expect(manager.getSession(sessionId)).toBe(preparedSession);
+    expect(coldCreate).not.toHaveBeenCalled();
+    expect(updateIdentity).toHaveBeenCalledWith(
+      config.userName,
+      'changed@example.com',
+      config.requesterUserId,
+      { preferMachineIdentity: true }
+    );
+  });
+
   it('rejects a prepared session with different initial config option values', async () => {
     const manager = new SessionManager(
       createLogger(),
@@ -890,7 +992,6 @@ describe('SessionManager preparation compatibility', () => {
       config: {
         mcpServerIds: [],
         configOptionValues: { permission_mode: 'always-approve' },
-        taskToolsEnabled: false,
       },
       compatibility: createPreparedTestCompatibility({}, [], { permission_mode: 'always-approve' }),
       initialized: Promise.resolve(),
@@ -952,7 +1053,7 @@ describe('SessionManager preparation compatibility', () => {
     const sessionId = 'missing-agent-config-cold-fallback' as SessionId;
     const cleanup = deferred<void>();
     const prepared = {
-      config: { mcpServerIds: [], taskToolsEnabled: false },
+      config: { mcpServerIds: [] },
       compatibility: createPreparedTestCompatibility({}),
       initialized: Promise.resolve(),
       sessionReady: Promise.resolve(),
@@ -1004,7 +1105,7 @@ describe('SessionManager preparation compatibility', () => {
     const agentConfigId = 'agent-1' as AgentConfigId;
     const cleanup = deferred<void>();
     const prepared = {
-      config: { mcpServerIds: [], taskToolsEnabled: false },
+      config: { mcpServerIds: [] },
       compatibility: createPreparedTestCompatibility({}),
       initialized: Promise.resolve(),
       sessionReady: Promise.resolve(),
@@ -1075,7 +1176,7 @@ describe('SessionManager preparation compatibility', () => {
     const sessionId = 'empty-launch-config' as SessionId;
     const agentConfigId = 'agent-1' as AgentConfigId;
     const prepared = {
-      config: { mcpServerIds: [], taskToolsEnabled: false },
+      config: { mcpServerIds: [] },
       compatibility: createPreparedTestCompatibility({ env: {} }),
       initialized: Promise.resolve(),
       sessionReady: Promise.resolve(),
@@ -1138,7 +1239,7 @@ describe('SessionManager preparation compatibility', () => {
     const preparedConfig = buildSessionLaunchConfig({ env: { PREPARED: '1' } });
     let currentConfig = preparedConfig;
     const prepared = {
-      config: { mcpServerIds: [], taskToolsEnabled: false },
+      config: { mcpServerIds: [] },
       compatibility: createPreparedTestCompatibility(preparedConfig ?? {}),
       readCurrentLaunchConfig: () => ({ config: currentConfig, source: 'agent-config' }),
       initialized: Promise.resolve(),
@@ -1214,5 +1315,81 @@ describe('SessionManager preparation resource accounting', () => {
 
     expect(durableApplyLimits).toHaveBeenCalledTimes(1);
     expect(preparationApplyLimits).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('SessionManager failed agent creation', () => {
+  let tempHome: string;
+
+  beforeEach(() => {
+    tempHome = mkdtempSync(path.join(os.tmpdir(), 'lody-session-manager-'));
+    vi.stubEnv('HOME', tempHome);
+    vi.stubEnv('LODY_LOCKS_DIR', path.join(tempHome, 'locks'));
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+    rmSync(tempHome, { recursive: true, force: true });
+  });
+
+  it('publishes no lifecycle events for an instance whose agent never started', async () => {
+    const sourceDir = createLocalRepo(tempHome);
+    const sessionId = 'agent-start-failed' as SessionId;
+    const docs = new Map<SessionId, FakeSessionDoc>();
+    const manager = new SessionManager(
+      createLogger(),
+      'token',
+      'machine-1' as MachineId,
+      'workspace-1' as WorkspaceId,
+      createWorkspaceDocument(docs),
+      {
+        sessionSandboxFactory: async () => createNoopSessionSandbox(),
+        cloudPort: createTestCloudPort(),
+      }
+    );
+    const terminated = vi.fn();
+    const exit = vi.fn();
+    manager.on('terminated', terminated);
+    manager.on('exit', exit);
+    const config = createSessionConfig({
+      sessionId,
+      agentCliType: 'custom',
+      agentType: 'custom-agent',
+      customAcp: { command: 'agent', args: [] },
+      workdir: sourceDir,
+    });
+    const createAgent = vi
+      .spyOn(Session.prototype, 'createAgent')
+      .mockRejectedValueOnce(
+        new Error('[ACP_RESUME_UNSUPPORTED] agent_did_not_advertise_resume_or_loadSession')
+      );
+
+    // The resume attempt fails after the instance was registered. A consumer
+    // that treats `terminated` as "the session running this turn died" would
+    // finalize the live turn here and lose the replacement agent's output.
+    await expect(
+      manager.createSession(config, { resumeSessionId: 'acp-old' as ACPSessionId })
+    ).rejects.toThrow('ACP_RESUME_UNSUPPORTED');
+    expect(createAgent).toHaveBeenCalledTimes(1);
+    expect(manager.getSession(sessionId)).toBeNull();
+    expect(terminated).not.toHaveBeenCalled();
+    expect(exit).not.toHaveBeenCalled();
+
+    // The replacement under the same id is a normal live session: it is the
+    // one in the map and its termination still reaches consumers.
+    createAgent.mockResolvedValueOnce('acp-replacement');
+    const sessionDoc = docs.get(sessionId) as FakeSessionDoc & {
+      setACPSessionId?: (id: ACPSessionId) => Promise<void>;
+    };
+    sessionDoc.setACPSessionId = vi.fn(async () => undefined);
+    const replacement = await manager.createSession(config);
+    expect(manager.getSession(sessionId)).toBe(replacement);
+    expect(terminated).not.toHaveBeenCalled();
+
+    await manager.terminateSession(sessionId, true);
+    expect(terminated).toHaveBeenCalledTimes(1);
+    expect(terminated).toHaveBeenCalledWith(expect.objectContaining({ sessionId }));
+    expect(manager.getSession(sessionId)).toBeNull();
   });
 });

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ClipboardEvent } from 'react';
+import { useCallback, useMemo, type ClipboardEvent } from 'react';
 import type { MessageTextSpan } from '@lody/shared';
 import {
   SESSION_IMAGE_MAX_COUNT,
@@ -7,20 +7,14 @@ import {
   type SessionInputBlock,
   type WorkspaceId,
 } from '@lody/shared';
+import { useAtom } from 'jotai';
 import { toast } from 'sonner';
 import { useTranslation } from 'react-i18next';
 import { usePostHog } from '@posthog/react';
+import { chatLandingPendingImagesAtomFamily, type PendingImage } from '@/atoms/chat-landing-draft';
+import { selectPastedClipboardFiles } from '@/lib/file-drop';
 import { capturePostHogEvent } from '@/lib/posthog-analytics';
 import { uploadSessionImage, validateSessionImageFile } from '@/lib/session-image-upload';
-type PendingImage = {
-  localId: string;
-  previewUrl: string;
-  file: File;
-  status: 'uploading' | 'uploaded' | 'failed';
-  progress: number;
-  error?: string;
-  uploaded?: SessionImagePayload;
-};
 
 export type ChatLandingImageDraftItem = {
   id: string;
@@ -49,6 +43,8 @@ const createLocalImageId = (): string => {
 };
 
 export function useChatLandingImageDraft(args: {
+  /** Scope shared with the sibling file draft and the reserved session id. */
+  draftKey: string;
   workspaceId: WorkspaceId | null;
   authToken: string | null;
   isMobile: boolean;
@@ -58,6 +54,7 @@ export function useChatLandingImageDraft(args: {
 }) {
   const { t } = useTranslation();
   const {
+    draftKey,
     workspaceId,
     authToken,
     isMobile,
@@ -66,7 +63,7 @@ export function useChatLandingImageDraft(args: {
     ensureSessionId,
   } = args;
   const postHog = usePostHog();
-  const [pendingImages, setPendingImages] = useState<PendingImage[]>([]);
+  const [pendingImages, setPendingImages] = useAtom(chatLandingPendingImagesAtomFamily(draftKey));
   const imageUploadFailedLabel = t('sessions.imageUploadFailed', 'Image upload failed');
   const imageUploadMissingAuthLabel = t(
     'sessions.imageUploadMissingAuth',
@@ -111,18 +108,12 @@ export function useChatLandingImageDraft(args: {
       }
       return [];
     });
-  }, []);
+  }, [setPendingImages]);
 
-  useEffect(() => {
-    return () => {
-      setPendingImages((prev) => {
-        for (const image of prev) {
-          URL.revokeObjectURL(image.previewUrl);
-        }
-        return [];
-      });
-    };
-  }, []);
+  // No unmount cleanup: the draft outlives the landing route (#242), so a
+  // preview URL is revoked only when its image is removed or the whole draft
+  // is cleared (send accepted / draft reset), never because the user navigated
+  // to another tab.
 
   const updatePendingImage = useCallback(
     (localId: string, updater: (image: PendingImage) => PendingImage) => {
@@ -130,7 +121,7 @@ export function useChatLandingImageDraft(args: {
         prev.map((image) => (image.localId === localId ? updater(image) : image))
       );
     },
-    []
+    [setPendingImages]
   );
 
   const startUpload = useCallback(
@@ -284,6 +275,7 @@ export function useChatLandingImageDraft(args: {
       ensureSessionId,
       imageCountLimitLabel,
       pendingImages.length,
+      setPendingImages,
       showImageSelectionIssues,
       startUpload,
     ]
@@ -294,10 +286,15 @@ export function useChatLandingImageDraft(args: {
       if (isMobile) {
         return;
       }
-      const fileItems = Array.from(event.clipboardData.items)
-        .filter((item) => item.type.startsWith('image/'))
-        .map((item) => item.getAsFile())
-        .filter((item): item is File => item !== null);
+      // A Word or PowerPoint copy carries a picture of the selection beside
+      // the text; the text is what the composer wants.
+      const { files: fileItems } = selectPastedClipboardFiles({
+        text: event.clipboardData.getData('text/plain'),
+        files: Array.from(event.clipboardData.items)
+          .filter((item) => item.type.startsWith('image/'))
+          .map((item) => item.getAsFile())
+          .filter((item): item is File => item !== null),
+      });
 
       if (fileItems.length === 0) {
         return;
@@ -309,17 +306,20 @@ export function useChatLandingImageDraft(args: {
     [handleAddFiles, isMobile]
   );
 
-  const handleRemoveImage = useCallback((localId: string) => {
-    // The landing owns the shared draft session id, so removing the last image
-    // cannot orphan file attachments or an in-flight ACP preparation.
-    setPendingImages((prev) => {
-      const target = prev.find((item) => item.localId === localId);
-      if (target) {
-        URL.revokeObjectURL(target.previewUrl);
-      }
-      return prev.filter((item) => item.localId !== localId);
-    });
-  }, []);
+  const handleRemoveImage = useCallback(
+    (localId: string) => {
+      // The landing owns the shared draft session id, so removing the last image
+      // cannot orphan file attachments or an in-flight ACP preparation.
+      setPendingImages((prev) => {
+        const target = prev.find((item) => item.localId === localId);
+        if (target) {
+          URL.revokeObjectURL(target.previewUrl);
+        }
+        return prev.filter((item) => item.localId !== localId);
+      });
+    },
+    [setPendingImages]
+  );
 
   const handleRetryImage = useCallback(
     (localId: string) => {

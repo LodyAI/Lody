@@ -1,3 +1,4 @@
+import { withHistoryPort } from '../../../tests/history-port-fixture';
 import { describe, expect, it, vi } from 'vitest';
 import {
   parseSessionNotification,
@@ -5,8 +6,10 @@ import {
   type SessionHistoryInput,
   type SessionId,
 } from '@lody/shared';
+import type { ApplyAgentBatchInput } from '../loro/session-agent-writes';
 import type { SessionDocument } from '@/lib/loro/doc';
 import type { Logger } from '@/utils/logger';
+import { applyMessageContentsBatch, applyNotificationOnHistory } from './history-apply';
 import {
   clearThreadGoalFromHistory,
   handleACPUpdateMessage,
@@ -18,7 +21,41 @@ const sid = (id: string) => id as SessionId;
 function createDoc(initialHistory: SessionHistoryInput[] = []) {
   let history: SessionHistoryInput[] = initialHistory;
 
-  const doc = {
+  // The bound ACP batch is a domain command now; the fake applies the same
+  // shared planners it used to call directly.
+  const applyAgentBatch = vi.fn(async (input: ApplyAgentBatchInput) => {
+    let next = history;
+    if (input.notifications?.length) {
+      next = applyNotificationOnHistory(next, input.notifications, input.model, {
+        ...(input.createId ? { createId: input.createId } : {}),
+        ...(input.now ? { now: input.now } : {}),
+        ...(input.targetAssistantEntryId
+          ? { targetAssistantEntryId: input.targetAssistantEntryId }
+          : {}),
+      });
+    }
+    if (input.contents?.length) {
+      next = applyMessageContentsBatch(next, input.contents, {
+        ...(input.createId ? { createId: input.createId } : {}),
+        ...(input.now ? { now: input.now } : {}),
+        ...(input.targetAssistantEntryId
+          ? { targetAssistantEntryId: input.targetAssistantEntryId }
+          : {}),
+        ...(input.model ? { model: input.model } : {}),
+      });
+    }
+    history = next;
+    return {
+      status: 'accepted' as const,
+      receipt: {
+        sessionId: sid('session-1'),
+        kind: 'apply-agent-batch' as const,
+        turnIds: input.targetAssistantEntryId ? [input.targetAssistantEntryId] : [],
+      },
+    };
+  });
+
+  const doc = withHistoryPort({
     sessionId: sid('session-1'),
     updateHistory: vi.fn(
       async (updater: (history: SessionHistoryInput[]) => SessionHistoryInput[]) => {
@@ -26,13 +63,66 @@ function createDoc(initialHistory: SessionHistoryInput[] = []) {
       }
     ),
     setPlan: vi.fn(async () => {}),
-    getHistory: vi.fn(async () => history),
-  } as unknown as SessionDocument;
+    getHistory: vi.fn(() => history),
+    agentWrites: { applyAgentBatch },
+    sessionData: {
+      commands: {},
+      history: {
+        count: async () => 0,
+        readAt: async () => ({ state: 'missing' as const }),
+        readTurn: async () => ({ state: 'missing' as const }),
+        readRange: async () => [],
+        readDirectory: async () => [],
+        observe: () => ({ initial: Promise.resolve([]), unsubscribe: () => {} }),
+      },
+      durability: { waitDurable: async () => {} },
+    },
+  }) as unknown as SessionDocument;
 
-  return { doc, readHistory: () => history };
+  return { doc, readHistory: () => history, applyAgentBatch };
 }
 
 describe('handleACPUpdateMessage', () => {
+  it('retains native task progress before completion and merges it into one task', async () => {
+    const { doc, readHistory } = createDoc();
+    for (const [index, status] of ['in_progress', 'in_progress', 'completed'].entries()) {
+      await handleACPUpdateMessage(
+        doc,
+        parseSessionNotification({
+          sessionId: 'acp-session',
+          update: {
+            sessionUpdate: index === 0 ? 'tool_call' : 'tool_call_update',
+            toolCallId: 'child-1',
+            title: 'Inspect files',
+            status,
+            _meta: {
+              lody: {
+                task: {
+                  version: 1,
+                  taskId: 'child-1',
+                  kind: 'subagent',
+                  status,
+                  description: 'Inspect files',
+                  ...(index > 0 ? { lastToolName: 'read' } : {}),
+                },
+              },
+            },
+          },
+        }),
+        { getCurrentSessionTurnId: () => 'turn-1' }
+      );
+      const tasks = readHistory()
+        .flatMap((entry) => entry.items ?? [])
+        .filter((item) => item.type === 'subagent_task');
+      expect(tasks).toHaveLength(1);
+      expect(tasks[0]).toMatchObject({
+        taskId: 'child-1',
+        status,
+        taskKind: 'subagent',
+        ...(index > 0 ? { lastToolName: 'read' } : {}),
+      });
+    }
+  });
   it('keeps running terminal output out of history and writes its tail once on completion', async () => {
     const { doc, readHistory } = createDoc();
     const callbacks = { getCurrentSessionTurnId: () => 'turn-1' };
@@ -86,7 +176,7 @@ describe('handleACPUpdateMessage', () => {
   });
 
   it('restores accumulated terminal output when the terminal history write is retried', async () => {
-    const { doc, readHistory } = createDoc();
+    const { doc, readHistory, applyAgentBatch } = createDoc();
     const callbacks = { getCurrentSessionTurnId: () => 'turn-retry' };
 
     await handleACPUpdateMessage(
@@ -116,7 +206,7 @@ describe('handleACPUpdateMessage', () => {
         status: 'completed',
       },
     });
-    vi.mocked(doc.updateHistory).mockRejectedValueOnce(new Error('transient doc failure'));
+    applyAgentBatch.mockRejectedValueOnce(new Error('transient doc failure'));
 
     await expect(handleACPUpdateMessage(doc, completed, callbacks)).rejects.toThrow(
       'transient doc failure'
@@ -133,7 +223,7 @@ describe('handleACPUpdateMessage', () => {
   });
 
   it('does not require a turn id for notifications that do not write history items', async () => {
-    const { doc } = createDoc();
+    const { doc, applyAgentBatch } = createDoc();
     const getCurrentSessionTurnId = vi.fn(() => 'turn-1');
     const warn = vi.fn();
 
@@ -179,7 +269,7 @@ describe('handleACPUpdateMessage', () => {
 
     expect(getCurrentSessionTurnId).not.toHaveBeenCalled();
     expect(warn).not.toHaveBeenCalled();
-    expect(doc.updateHistory).not.toHaveBeenCalled();
+    expect(applyAgentBatch).not.toHaveBeenCalled();
   });
 
   it('does not require a turn id for plan-only batches', async () => {

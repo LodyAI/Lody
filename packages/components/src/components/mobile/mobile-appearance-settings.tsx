@@ -1,17 +1,12 @@
 import { useCallback, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAtom } from 'jotai';
+import { usePostHog } from '@posthog/react';
 import type { SupportedLanguage } from '@lody/shared';
 import { Check, ChevronDown, Monitor, Moon, Sun } from 'lucide-react';
 import { motion } from 'framer-motion';
 
-import {
-  conversationFontSizeAtom,
-  CONVERSATION_FONT_SIZE_MAX,
-  CONVERSATION_FONT_SIZE_MIN,
-  languageAtom,
-  normalizeConversationFontSize,
-} from '@/atoms';
+import { conversationFontSizeAtom, fontLigaturesEnabledAtom, languageAtom } from '@/atoms';
 import {
   MobileInlineMenu,
   MobileInlinePickerCoordinator,
@@ -20,9 +15,12 @@ import {
 } from '@/components/mobile/mobile-inline-picker';
 import { MobileSettingsPickerTrigger } from '@/components/mobile/mobile-settings-picker-trigger';
 import { MobileSettingsRow, MobileSettingsSection } from '@/components/mobile/mobile-settings-row';
-import { Input } from '@/ui/input';
+import { MobileAppIconSettings } from '@/components/mobile/mobile-app-icon-settings';
+import { buildConversationFontSizeChoices } from '@/components/settings/conversation-font-size-options';
 import { currentSupportedLanguages, languageCodeToName } from '../../i18n';
 import { cn } from '@/lib/utils';
+import { Switch } from '@/ui/switch';
+import { capturePostHogEvent } from '@/lib/posthog-analytics';
 import { withOneSignal } from '@/lib/onesignal';
 import { useTheme, type Theme } from '../../theme-provider';
 
@@ -31,6 +29,8 @@ export function MobileAppearanceSettings() {
   const { theme, setTheme } = useTheme();
   const [language, setLanguage] = useAtom(languageAtom);
   const [conversationFontSize, setConversationFontSize] = useAtom(conversationFontSizeAtom);
+  const [fontLigaturesEnabled, setFontLigaturesEnabled] = useAtom(fontLigaturesEnabledAtom);
+  const postHog = usePostHog();
   const selectedThemeLabel =
     theme === 'light'
       ? t('settings.theme.light')
@@ -52,6 +52,28 @@ export function MobileAppearanceSettings() {
       searchText: languageCodeToName[lang],
     }));
   const selectedLanguageLabel = languageCodeToName[language] ?? language;
+
+  const fontSizeOptions: MobileInlinePickerOption<string>[] =
+    buildConversationFontSizeChoices().map(({ value, labelKey }) => {
+      const label = String(t(labelKey));
+      return { value, label, searchText: label };
+    });
+  const selectedFontSizeLabel =
+    fontSizeOptions.find((option) => option.value === String(conversationFontSize))?.label ??
+    String(conversationFontSize);
+  const handleFontSizeChange = useCallback(
+    (next: string) => {
+      const to = Number(next);
+      if (to !== conversationFontSize) {
+        capturePostHogEvent(postHog, 'settings/font_size_changed', {
+          from: conversationFontSize,
+          to,
+        });
+      }
+      setConversationFontSize(to);
+    },
+    [conversationFontSize, postHog, setConversationFontSize]
+  );
   const handleLanguageChange = useCallback(
     (next: SupportedLanguage) => {
       setLanguage(next);
@@ -96,29 +118,37 @@ export function MobileAppearanceSettings() {
       </MobileSettingsSection>
 
       <MobileSettingsSection>
+        <MobileInlinePickerRowSlot>
+          <MobileSettingsRow label={t('settings.conversationFontSize.label', 'Font size')}>
+            <MobileSettingsPickerTrigger
+              id="settings-conversation-font-size"
+              ariaLabel={String(t('settings.conversationFontSize.label', 'Font size'))}
+              value={String(conversationFontSize)}
+              options={fontSizeOptions}
+              onChange={handleFontSizeChange}
+              triggerLabel={selectedFontSizeLabel}
+            />
+          </MobileSettingsRow>
+        </MobileInlinePickerRowSlot>
+      </MobileSettingsSection>
+
+      <MobileSettingsSection>
         <MobileSettingsRow
-          label={t('settings.conversationFontSize.label', 'Conversation font size')}
+          label={t('settings.fontLigatures.label', 'Font ligatures')}
           helper={t(
-            'settings.conversationFontSize.helper',
-            'Adjusts message body text in conversations.'
+            'settings.fontLigatures.helper',
+            'Applies to conversation, code, and tool output.'
           )}
         >
-          <Input
-            type="number"
-            min={CONVERSATION_FONT_SIZE_MIN}
-            max={CONVERSATION_FONT_SIZE_MAX}
-            step={1}
-            value={conversationFontSize}
-            aria-label={t('settings.conversationFontSize.label', 'Conversation font size')}
-            className="h-8 w-20 text-center"
-            onChange={(event) => {
-              if (Number.isFinite(event.target.valueAsNumber)) {
-                setConversationFontSize(normalizeConversationFontSize(event.target.valueAsNumber));
-              }
-            }}
+          <Switch
+            checked={fontLigaturesEnabled}
+            onCheckedChange={setFontLigaturesEnabled}
+            aria-label={t('settings.fontLigatures.label', 'Font ligatures')}
           />
         </MobileSettingsRow>
       </MobileSettingsSection>
+
+      <MobileAppIconSettings />
     </MobileInlinePickerCoordinator>
   );
 }

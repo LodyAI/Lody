@@ -54,7 +54,7 @@ function SidePanelTabBarStory() {
 
   return (
     <div className="min-h-screen bg-background p-8 text-foreground">
-      <div className="flex h-[520px] w-[620px] flex-col overflow-hidden rounded-xl border border-sidebar-border/80 bg-sidebar shadow-[0_1px_4px_-1px_rgba(0,0,0,0.18)]">
+      <div className="flex h-[520px] w-[620px] flex-col overflow-hidden border-l border-border/70 bg-background">
         <SessionSidePanelTabBar
           tabs={tabs}
           activeTabId={activeTabId}
@@ -132,7 +132,7 @@ export const UnifiedTabs: Story = {
 export const EmptyState: Story = {
   render: () => (
     <div className="min-h-screen bg-background p-8 text-foreground">
-      <div className="flex h-[520px] w-[420px] flex-col overflow-hidden rounded-xl border border-sidebar-border/80 bg-background shadow-[0_1px_4px_-1px_rgba(0,0,0,0.18)]">
+      <div className="flex h-[520px] w-[420px] flex-col overflow-hidden border-l border-border/70 bg-background">
         <SessionSidePanelTabBar
           tabs={[]}
           activeTabId={null}
@@ -154,7 +154,6 @@ export const EmptyState: Story = {
             panels={ALL_PANELS}
             onPanelOpen={() => {}}
             title="Open a panel"
-            description="Choose what you want to see in this sidebar."
           />
         </div>
       </div>

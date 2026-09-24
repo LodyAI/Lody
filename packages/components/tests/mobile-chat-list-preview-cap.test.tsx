@@ -3,7 +3,6 @@
 import React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
-import { flushSync } from 'react-dom';
 import { createRoot, type Root } from 'react-dom/client';
 import { createStore, Provider } from 'jotai';
 import {
@@ -50,6 +49,17 @@ function makeProjectItems(
   );
 }
 
+/**
+ * Every commit goes through `act`, including the render and the unmount. A
+ * commit outside it leaves React's passive-effect flush queued on the real
+ * macrotask queue, and that callback reads `window.event` before it does
+ * anything else — so when this file finishes first, teardown removes `window`
+ * and the queued callback throws into the run as an unhandled error.
+ */
+(
+  globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
+).IS_REACT_ACT_ENVIRONMENT = true;
+
 let container: HTMLDivElement;
 let root: Root;
 let store: ReturnType<typeof createStore>;
@@ -62,16 +72,25 @@ beforeEach(async () => {
   store = createStore();
 });
 
-afterEach(() => {
-  flushSync(() => root.unmount());
+afterEach(async () => {
+  act(() => {
+    root.unmount();
+  });
   container.remove();
+  // Then let the macrotask queue run out. Anything React still had queued when
+  // this file ends fires into the next file, after Vitest has torn this jsdom
+  // environment down — and the first thing such a callback reads is
+  // `window.event`. Awaiting one `setImmediate` is an ordering barrier, not a
+  // sleep: the queue is FIFO, so every callback queued before this one has run
+  // by the time it resolves, while the DOM it expects is still here.
+  await new Promise((resolve) => setImmediate(resolve));
 });
 
 function render(
   chats: MobileConversationItem[],
   props: Partial<React.ComponentProps<typeof MobileChatList>> = {}
 ) {
-  flushSync(() => {
+  act(() => {
     root.render(
       <Provider store={store}>
         <MobileChatList chats={chats} groupBy="project" capGroupPreviews {...props} />
@@ -115,7 +134,6 @@ describe('mobile chat list group preview cap', () => {
     expect(rows()).toHaveLength(MOBILE_CHAT_PREVIEW_MAX_ROOTS);
     expect(toggleLabels()).toEqual(['Show all (9)']);
   });
-
 
   it('previews five rows per overflowing bucket and leaves the rest alone', () => {
     // Three boundary points in one list: over the cap (trimmed, toggle),
@@ -222,11 +240,7 @@ describe('mobile chat list group preview cap', () => {
     act(() => {
       toggles()[0]!.click();
     });
-    expect(titles().slice(5)).toEqual([
-      'Session opener',
-      'Session opened-a',
-      'Session opened-b',
-    ]);
+    expect(titles().slice(5)).toEqual(['Session opener', 'Session opened-a', 'Session opened-b']);
   });
 
   it('truncates the pinned-first order rather than reshuffling it', () => {

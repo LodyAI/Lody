@@ -197,7 +197,8 @@ export function selectSessionMentionCandidates(
  */
 export function buildSessionMentionInsertion(
   mentions: readonly { value: string; kind?: string }[],
-  item: Pick<SessionMentionItem, 'slug' | 'sessionId'>
+  item: Pick<SessionMentionItem, 'slug' | 'sessionId'>,
+  options: { at?: number; replaceEnd?: number } = {}
 ): MentionInsertRequest | null {
   const alreadyMentioned = mentions.some(
     (mention) => mention.kind === 'session' && mention.value === item.sessionId
@@ -210,7 +211,10 @@ export function buildSessionMentionInsertion(
     kind: 'session',
     // Appended, so the separator and the trailing space keep the token
     // whitespace-delimited — which is what the hydrator that recovers it from a
-    // reloaded draft scans for.
+    // reloaded draft scans for. Paste supplies `at`/`replaceEnd` to land on the
+    // caret (or replace the selection) instead.
+    ...(options.at === undefined ? {} : { at: options.at }),
+    ...(options.replaceEnd === undefined ? {} : { replaceEnd: options.replaceEnd }),
     separate: true,
     suffix: ' ',
   };
@@ -320,9 +324,36 @@ export function resolveSessionMentionIds(
 // Text: hydration and before-send expansion
 // ---------------------------------------------------------------------------
 
-export function buildSessionMentionPrompt(sessionId: string): string {
-  return `use lody mcp to query session[id: ${sessionId}] history`;
+export type SessionMentionPromptFields = {
+  sessionId: string;
+  /**
+   * Link label after `@`. Prefers the human title; callers fall back to the
+   * composer slug when the title is unknown.
+   */
+  title: string;
+};
+
+/** Escape characters that would break a markdown inline link label. */
+export function escapeSessionMentionLinkLabel(label: string): string {
+  return label.replace(/\\/gu, '\\\\').replace(/[[\]]/gu, '\\$&');
 }
+
+/**
+ * Machine-readable form the agent receives for a session mention.
+ *
+ * Markdown link with a `session://` URI so the transcript stays readable while
+ * Lody MCP can resolve the id via `lody_session_history`.
+ */
+export function buildSessionMentionPrompt(fields: SessionMentionPromptFields): string {
+  const title = fields.title.trim() || fields.sessionId;
+  const label = escapeSessionMentionLinkLabel(`@${title}`);
+  return `[${label}](session://${fields.sessionId})`;
+}
+
+export type SessionMentionRewriteContext = {
+  /** Live mention items — title comes from here when the range only carries an id. */
+  items?: readonly Pick<SessionMentionItem, 'sessionId' | 'title'>[];
+};
 
 /**
  * The session -> MCP-instruction rewrites these ranges imply.
@@ -339,17 +370,25 @@ export function buildSessionMentionPrompt(sessionId: string): string {
  */
 export function buildSessionMentionRewrites(
   text: string,
-  mentions: readonly { start: number; end: number; kind?: string; value: string }[]
+  mentions: readonly { start: number; end: number; kind?: string; value: string }[],
+  context: SessionMentionRewriteContext = {}
 ): TextRewrite[] {
+  const titleById = new Map<string, string>(
+    (context.items ?? []).map((item) => [item.sessionId, item.title])
+  );
   const rewrites: TextRewrite[] = [];
   for (const mention of mentions) {
     if (mention.kind !== 'session' || !mention.value) continue;
     const label = text.slice(mention.start, mention.end).replace(/^@/, '');
     if (!label) continue;
+    const title = titleById.get(mention.value)?.trim() || label;
     rewrites.push({
       start: mention.start,
       end: mention.end,
-      replacement: buildSessionMentionPrompt(mention.value),
+      replacement: buildSessionMentionPrompt({
+        sessionId: mention.value,
+        title,
+      }),
       span: { kind: 'session', label, target: mention.value },
     });
   }

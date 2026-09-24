@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { NodeRequest, sendNodeResponse } from 'srvx/node';
 import type { DevEnvironment, Plugin, RunnableDevEnvironment } from 'vite';
 import { defineConfig } from 'vite';
+import { resolveModulePreloadDependencies } from './lib/module-preload';
 import { collectSitePaths } from './scripts/site-paths.mjs';
 
 const dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -247,5 +248,13 @@ export default defineConfig({
   build: {
     outDir: 'out',
     emptyOutDir: true,
+    // HTML hosts: do not modulepreload every route chunk. JS hosts keep
+    // the lazy-import graph, including extracted route CSS, so client
+    // navigation to /price or legal pages is not unstyled. Post-prerender
+    // HTML finalize strips any leftover HTML preloads TanStack injects.
+    modulePreload: {
+      polyfill: false,
+      resolveDependencies: resolveModulePreloadDependencies,
+    },
   },
 });

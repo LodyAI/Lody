@@ -313,7 +313,7 @@ function OpenComment({
             <button
               type="button"
               aria-label="Collapse comment"
-              className="-mr-1 -mt-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-popover-foreground"
+              className="-mr-1 -mt-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-hover hover:text-popover-foreground"
               onClick={(event) => {
                 event.stopPropagation();
                 onCollapse(comment.id);
@@ -335,7 +335,7 @@ function OpenComment({
                     ? 'cursor-default text-muted-foreground'
                     : isStaged
                       ? 'text-emerald-700 hover:bg-emerald-50 dark:text-emerald-300 dark:hover:bg-emerald-500/10'
-                      : 'text-muted-foreground hover:bg-muted hover:text-popover-foreground'
+                      : 'text-muted-foreground hover:bg-hover hover:text-popover-foreground'
                 )}
                 disabled={isSubmitted}
                 onClick={(event) => {

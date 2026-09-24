@@ -33,6 +33,7 @@ import {
   makeLocalProbeClientAuto
 } from '@lody/shared/node/local-ipc'
 import { getLodyDataDir } from '@lody/shared/node/installation-profile'
+import { ACP_CAPABILITIES_REFRESH_CLIENT_BACKSTOP_MS } from '@lody/shared/acp-startup-budget'
 import type {
   LocalProjectControlRequest,
   LocalProjectControlResponse,
@@ -57,7 +58,8 @@ import {
   type PreparedLaunch
 } from '@lody/cli-supervisor'
 import type { BootstrapSession } from './auth-service'
-import { isLocalPlatform, mainPlatformKind } from '../platform'
+import { desktopInstallationProfile, isLocalPlatform, mainPlatformKind } from '../platform'
+import type { DesktopExecutionHost } from './desktop-execution-host'
 import { getUserShellEnvCached, shouldUseWindowsShell } from './shell-env'
 import { applyProxyEnvFallback, resolveSystemProxyEnv } from './system-proxy-env'
 import type { CliOutputEvent, CliRunResult } from '../types'
@@ -72,7 +74,12 @@ const CLI_ELECTRON_SESSION_TOKEN_ENV = 'LODY_ELECTRON_SESSION_TOKEN'
 // See apps/cli/src/commands/start.ts:ELECTRON_SESSION_USER_ID_ENV for rationale.
 const CLI_ELECTRON_SESSION_USER_ID_ENV = 'LODY_ELECTRON_SESSION_USER_ID'
 const LOCAL_SESSION_CONTROL_TIMEOUT_MS = 10_000
-const LOCAL_SESSION_CONTROL_ACP_REFRESH_TIMEOUT_MS = 120_000
+// The machine owns this deadline and answers with its own failure reason. This
+// is only a backstop for a daemon that died without replying, so it is derived
+// from the machine's worst case rather than set to a second, smaller number:
+// a 120s socket timeout here expired requests the CLI was still working on
+// (a cold `npx` init alone may run 300s) and reported them as our timeout.
+const LOCAL_SESSION_CONTROL_ACP_REFRESH_TIMEOUT_MS = ACP_CAPABILITIES_REFRESH_CLIENT_BACKSTOP_MS
 // Downloading + unpacking a registry agent binary can take minutes on a slow
 // link, so the local-control request must outlive the default before falling
 // back to Streams RPC.
@@ -114,6 +121,7 @@ type MachineIdLookupOptions = {
 
 type CliServiceOptions = {
   resolveBootstrapSession?: () => Promise<BootstrapSession | null>
+  executionHost?: DesktopExecutionHost
 }
 
 function resolveLocalProjectControlTimeoutMs(type: LocalProjectControlRequest['type']): number {
@@ -265,6 +273,9 @@ function buildCliRuntimeEnvOverrides(): NodeJS.ProcessEnv {
   assignEnvIfPresent(env, 'LODY_AUTH_URL', import.meta.env.VITE_CONVEX_DEPLOY_URL)
   assignEnvIfPresent(env, 'LODY_AUTH_SITE_URL', import.meta.env.VITE_CONVEX_SITE_URL)
   assignEnvIfPresent(env, 'LODY_SERVER_URL', import.meta.env.VITE_SERVER_URL)
+  // Always shadow any inherited value: an unset bundled gateway must fall back to
+  // LODY_SERVER_URL in the CLI, never to a user-provided control origin.
+  env.LODY_PREVIEW_GATEWAY_URL = import.meta.env.VITE_PREVIEW_GATEWAY_URL?.trim() ?? ''
   assignEnvIfPresent(env, 'SITE_URL', import.meta.env.VITE_SITE_URL)
 
   return env
@@ -366,12 +377,15 @@ export class CliService {
   private cliAutoStartEnabled = true
   private powerSaveBlockerId: number | null = null
   private supervisor: CliSupervisor | null = null
-  private readonly supervisorInstanceId = randomUUID()
+  private readonly supervisorInstanceId: string
+  private readonly executionHost: DesktopExecutionHost | undefined
   private readonly supervisorToken = `${randomUUID()}${randomUUID()}`
   private hostLease: LocalCliHostLease | null = null
 
   constructor(options: CliServiceOptions = {}) {
     this.resolveBootstrapSession = options.resolveBootstrapSession
+    this.executionHost = options.executionHost
+    this.supervisorInstanceId = options.executionHost?.instanceId ?? randomUUID()
     const settings = readElectronSettings()
     if (typeof settings.preventSleepEnabled === 'boolean') {
       this.preventSleepEnabled = settings.preventSleepEnabled
@@ -426,8 +440,9 @@ export class CliService {
               : `Electron-managed CLI exited with code ${result.code ?? 'signal'}`
         }
       },
-      existingRuntimePolicy: 'attach',
-      ownership: {
+      existingRuntimePolicy:
+        desktopInstallationProfile.releaseChannel === 'nightly' ? 'reject' : 'attach',
+      ownership: this.executionHost?.ownership ?? {
         acquire: async (signal) => {
           const result = await acquireLocalCliHostLease({
             instanceId: this.supervisorInstanceId,
@@ -658,12 +673,10 @@ export class CliService {
         this.localControlClient
           .sessionControl(message, { timeoutMs, onResponse: options.onResponse })
           .pipe(
-            Effect.map(
-              (responses): SendLocalSessionControlResult => ({
-                ok: true,
-                responses
-              })
-            ),
+            Effect.map((responses): SendLocalSessionControlResult => ({
+              ok: true,
+              responses
+            })),
             Effect.catchTag('IpcTimeoutError', () =>
               Effect.succeed({ ok: false as const, error: 'request_timeout' })
             ),

@@ -11,11 +11,13 @@ import {
   type FocusEvent as ReactFocusEvent,
 } from 'react';
 import { createPortal } from 'react-dom';
+import { usePostHog } from '@posthog/react';
 import { useTranslation } from 'react-i18next';
 import { cn } from '@/lib/utils';
 import { Popover, PopoverAnchor, PopoverContent } from '@/ui/popover';
 import type { ConversationOutlineEntry } from '@/lib/conversation-outline';
 import { useLatestRef } from '@/hooks/use-latest-ref';
+import { capturePostHogSampled } from '@/lib/posthog-analytics';
 import { observeResizeOnAnimationFrame } from '@/lib/resize-observer';
 import {
   NO_SCROLL_EDGE_OVERFLOW,
@@ -99,6 +101,11 @@ export interface ConversationOutlineRailProps {
   enableArrivalIntent?: boolean;
   /** Storybook/dev instrumentation only. The rail never persists or uploads it. */
   onArrivalIntentDebugEvent?: (event: ConversationOutlineArrivalIntentDebugEvent) => void;
+  /**
+   * The pointer reached this round's tick. The stream uses it to hydrate a
+   * round whose preview is still empty so the card can fill in.
+   */
+  onPreviewRound?: (index: number) => void;
   className?: string;
 }
 
@@ -259,6 +266,7 @@ export function ConversationOutlineRail({
   overlayRoot = null,
   enableArrivalIntent = false,
   onArrivalIntentDebugEvent,
+  onPreviewRound,
   className,
 }: ConversationOutlineRailProps) {
   const { t } = useTranslation();
@@ -278,8 +286,10 @@ export function ConversationOutlineRail({
 
   const activeIndexRef = useLatestRef(activeIndex);
   const arrivalIntentDebugRef = useLatestRef(onArrivalIntentDebugEvent);
+  const onPreviewRoundRef = useLatestRef(onPreviewRound);
   const arrivalIntentDetectorRef = useRef<ArrivalIntentDetector | null>(null);
   const tickCount = entries.length;
+  const postHog = usePostHog();
 
   const jumpLabel = useCallback(
     (entry: ConversationOutlineEntry) =>
@@ -441,6 +451,7 @@ export function ConversationOutlineRail({
       });
       if (isWarm || bypassWarmup) {
         if (bypassWarmup) warmBrowsingRef.current = false;
+        onPreviewRoundRef.current?.(index);
         setHoverCard({ index, element });
         setCardOpen(true);
         arrivalIntentDebugRef.current?.({ type: 'card-open', at: now, index, source });
@@ -451,6 +462,7 @@ export function ConversationOutlineRail({
         // Deliberately waiting out the fixed delay is what earns the old
         // rapid-browsing window. A predictor bypass never arms it.
         warmBrowsingRef.current = true;
+        onPreviewRoundRef.current?.(index);
         setHoverCard({ index, element });
         setCardOpen(true);
         arrivalIntentDebugRef.current?.({
@@ -461,7 +473,7 @@ export function ConversationOutlineRail({
         });
       }, HOVER_WARMUP_MS);
     },
-    [arrivalIntentDebugRef, cardOpenRef, clearOpenTimer]
+    [arrivalIntentDebugRef, cardOpenRef, clearOpenTimer, onPreviewRoundRef]
   );
 
   const handlePointerLeave = useCallback(() => {
@@ -499,10 +511,17 @@ export function ConversationOutlineRail({
       const index = readTickIndex(event.target);
       if (index === -1) return;
       clearOpenTimer();
+      const fromHoverPreview = cardOpenRef.current;
       if (cardOpenRef.current && warmBrowsingRef.current) {
         lastClosedAtRef.current = Date.now();
       }
       setCardOpen(false);
+      capturePostHogSampled(
+        postHog,
+        'outline/jumped',
+        { from_hover_preview: fromHoverPreview, entry_count: tickCount },
+        { tier: 'C' }
+      );
       arrivalIntentDebugRef.current?.({
         type: 'round-jump',
         at: performance.now(),
@@ -510,7 +529,7 @@ export function ConversationOutlineRail({
       });
       jumpTo(index);
     },
-    [arrivalIntentDebugRef, cardOpenRef, clearOpenTimer, jumpTo]
+    [arrivalIntentDebugRef, cardOpenRef, clearOpenTimer, jumpTo, postHog, tickCount]
   );
 
   const focusTick = useCallback((index: number) => {

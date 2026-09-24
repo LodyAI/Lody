@@ -270,9 +270,9 @@ export function useAppStoreReviewPrompt({
   const sessionKey = currentUserId ? `${currentUserId}:${sessionId}` : null;
   const bootstrappedSessionKeyRef = useRef<string | null>(null);
   const consumedTurnIdsRef = useRef<Set<string>>(new Set());
-  // A boolean, so the idle effect can depend on it directly: an identity-only
-  // history update recomputes the same value and cannot cancel a pending prompt.
   const hasRecentHardFailure = useMemo(() => hasRecentHardFailureOutcome(outcomes), [outcomes]);
+  const hasRecentHardFailureRef = useRef(hasRecentHardFailure);
+  hasRecentHardFailureRef.current = hasRecentHardFailure;
   const completedCandidateTurnId = useMemo(() => {
     if (!historyHydrated || !sessionCompleted || !lastCompletedAssistantMessageId) return null;
     const turnId = `${sessionId}:${lastCompletedAssistantMessageId}`;
@@ -352,7 +352,7 @@ export function useAppStoreReviewPrompt({
         state: promptState,
         appVersion,
         nowMs,
-        hasRecentHardFailure,
+        hasRecentHardFailure: hasRecentHardFailureRef.current,
       });
       if (blockReason) {
         captureReviewPromptBlocked(currentUserId, blockReason);
@@ -380,5 +380,5 @@ export function useAppStoreReviewPrompt({
         window.removeEventListener(event, cancel, { capture: true });
       }
     };
-  }, [completedCandidateTurnId, currentUserId, hasRecentHardFailure, sessionKey, sessionOwnerId]);
+  }, [completedCandidateTurnId, currentUserId, sessionKey, sessionOwnerId]);
 }

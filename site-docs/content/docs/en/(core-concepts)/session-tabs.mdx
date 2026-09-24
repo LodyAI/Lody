@@ -5,7 +5,7 @@ description: Keep the main chat, child chats, files, and diffs open inside one L
 
 # Session Tabs
 
-Session tabs let one task branch into several working surfaces without losing the shared context. A session always keeps its main tab, and you can open child chats, file previews, and diff views next to it.
+Session tabs let one task branch into several working surfaces without losing the shared context. You can open and close the main chat and child chats, and use file previews and diff views alongside them.
 
 ## When to use tabs
 
@@ -33,6 +33,7 @@ On desktop, viewer tabs create a split workspace: chat stays on the left, while 
 
 - Drag tabs to reorder them. The order is remembered in the current browser.
 - Double-click a chat tab to rename it.
-- Child chat tabs, file tabs, and diff tabs can be closed.
-- The main tab is pinned and cannot be closed.
-- Archived child tabs are available from the history button on the right side of the tab bar.
+- Main and child conversation tabs can be closed. Closing is shared across the workspace; it does not stop the agent, archive the conversation, or remove its worktree.
+- Closing the active conversation selects a neighbouring tab. When none remain, a local new-conversation draft opens in the same workspace; existing drafts retain their input. A real session is created only when you send. Closed conversations remain available to reopen.
+- The history button lists closed conversations, including previously archived tabs. Reopening an archived conversation also restores it from the archive.
+- Reopening makes the tab visible to everyone but only selects it for you. File and diff tabs keep their existing local behavior.

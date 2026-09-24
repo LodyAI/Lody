@@ -140,6 +140,34 @@ describe('MarkdownRenderer streaming rendering', () => {
     throw new Error(`Expected element matching ${selector}`);
   };
 
+  it('preserves the rest of a math document after a less-than comparison', async () => {
+    await renderMarkdown(String.raw`# Synthetic calculation
+
+Inline notation \(p<q\) stays in the document.
+
+\[
+ T(e_p\otimes e_q)=c_{pq}(e_q\otimes e_p)\quad(p<q),
+\]
+
+## Later section
+
+The entire document remains readable.
+
+\[
+\begin{aligned}
+ f_0&=b_0-c,\\
+ f_1&=b_1-c.
+\end{aligned}
+\]
+
+## References
+
+End of synthetic document.`);
+
+    expect(container?.textContent).toContain('End of synthetic document.');
+    expect(container?.querySelectorAll('.katex-display')).toHaveLength(2);
+  });
+
   it('uses the GFM autolink path for email literals', async () => {
     await renderMarkdown('Contact agent-000@example.com before checking https://example.com.');
 
@@ -364,7 +392,7 @@ describe('MarkdownRenderer streaming rendering', () => {
     expect(container?.querySelector('[data-streamdown="strong"]')?.textContent).toBe('raw');
   });
 
-  it('renders Streamdown native LaTeX and Mermaid blocks', async () => {
+  it('keeps inline LaTeX literal while rendering Mermaid blocks', async () => {
     await renderMarkdown(
       [
         'Inline LaTeX $E = mc^2$ should render.',
@@ -376,11 +404,12 @@ describe('MarkdownRenderer streaming rendering', () => {
       ].join('\n')
     );
 
-    expect(container?.querySelector('.katex')).not.toBeNull();
+    expect(container?.querySelector('.katex')).toBeNull();
+    expect(container?.textContent).toContain('$E = mc^2$');
     expect(await waitForElement('[data-streamdown="mermaid-block"]')).not.toBeNull();
   });
 
-  it('renders Codex-style parenthesis and bracket LaTeX delimiters', async () => {
+  it('keeps parenthesis LaTeX literal while rendering bracket display LaTeX', async () => {
     await renderMarkdown(
       [
         'Let \\(t_i\\) denote the token allocation.',
@@ -395,8 +424,9 @@ describe('MarkdownRenderer streaming rendering', () => {
       ].join('\n')
     );
 
-    expect(container?.querySelectorAll('.katex')).toHaveLength(3);
+    expect(container?.querySelectorAll('.katex')).toHaveLength(1);
     expect(container?.querySelectorAll('.katex-display')).toHaveLength(1);
+    expect(container?.textContent).toContain('(t_i)');
   });
 
   it('keeps Codex-style LaTeX delimiters literal inside Markdown code', async () => {
@@ -414,7 +444,7 @@ describe('MarkdownRenderer streaming rendering', () => {
       ].join('\n')
     );
 
-    expect(container?.querySelectorAll('.katex')).toHaveLength(1);
+    expect(container?.querySelectorAll('.katex')).toHaveLength(0);
     expect(container?.querySelector('code')?.textContent).toBe('\\(inline_code\\)');
     expect(container?.textContent).toContain('\\[fenced_code\\]');
   });
@@ -422,7 +452,7 @@ describe('MarkdownRenderer streaming rendering', () => {
   it('keeps LaTeX delimiters literal in indented code blocks', async () => {
     await renderMarkdown(['    \\(literal\\)', '', 'Outside \\(x_i\\) renders.'].join('\n'));
 
-    expect(container?.querySelectorAll('.katex')).toHaveLength(1);
+    expect(container?.querySelectorAll('.katex')).toHaveLength(0);
     expect(container?.querySelector('pre code')?.textContent).toContain('\\(literal\\)');
   });
 
@@ -449,7 +479,7 @@ describe('MarkdownRenderer streaming rendering', () => {
       ].join('\n')
     );
 
-    expect(container?.querySelectorAll('.katex')).toHaveLength(1);
+    expect(container?.querySelectorAll('.katex')).toHaveLength(0);
     expect(container?.textContent).toContain('\\(blockquote_literal\\)');
     expect(container?.textContent).toContain('\\[list_literal\\]');
     expect(container?.textContent).toContain('\\(nested_literal\\)');

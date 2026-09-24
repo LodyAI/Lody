@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Loader2 } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import { useCloudAction } from '@lody/platform/react';
 import { ConvexError } from 'convex/values';
 import { cloudOperations } from '@/lib/cloud-api-operations';
@@ -132,6 +132,10 @@ function CloudBillingSettings() {
     const owner = activeOrganization.members?.find((member) => member.role === 'owner');
     return owner?.user?.name?.trim() || owner?.user?.email?.trim() || null;
   }, [activeOrganization, workspaceId]);
+  const createBillingPortalSession = useCloudAction(
+    cloudOperations.billing.createBillingPortalSession
+  );
+  const portalInFlight = useRef(false);
   const createCheckoutSession = useCloudAction(cloudOperations.billing.createCheckoutSession);
   const reconcileWorkspaceCheckout = useCloudAction(
     cloudOperations.billing.reconcileWorkspaceCheckout
@@ -320,6 +324,25 @@ function CloudBillingSettings() {
     }
     window.location.assign(url);
     return 'in-app';
+  };
+
+  const handlePaymentMethod = async () => {
+    if (!workspaceId || !overview?.canManageBilling || portalInFlight.current) return;
+    portalInFlight.current = true;
+    setPendingAction('portal');
+    try {
+      const result = await createBillingPortalSession({
+        workspaceId,
+        ...(isDesktop ? { returnTarget: 'desktop' as const } : { returnUrl }),
+      });
+      await openCheckoutUrl(result.url);
+    } catch (error) {
+      const code = getBillingErrorCode(error);
+      toast.error(t((code && BILLING_ERROR_TOAST_KEYS[code]) || 'billing.paymentMethodError'));
+    } finally {
+      portalInFlight.current = false;
+      setPendingAction(null);
+    }
   };
 
   const handleUpgrade = async () => {
@@ -516,6 +539,7 @@ function CloudBillingSettings() {
         paymentProcessing={paymentProcessing}
         externalCheckoutPending={externalCheckoutPending}
         onIntervalChange={setInterval}
+        onPaymentMethod={() => void handlePaymentMethod()}
         onUpgrade={() => void handleUpgrade()}
         onSwitchInterval={() => setSwitchIntervalDialogOpen(true)}
         switchIntervalPending={switchIntervalPending}
@@ -540,7 +564,7 @@ function CloudBillingSettings() {
           </AlertDialogHeader>
           {intervalPreview === undefined ? (
             <div className="flex items-center gap-2 py-2 text-sm text-muted-foreground">
-              <Loader2 className="h-4 w-4 animate-spin" />
+              <Spinner className="h-4 w-4" />
               {t('billing.historyLoading')}
             </div>
           ) : intervalPreview === null ? (
@@ -600,7 +624,7 @@ function CloudBillingSettings() {
                 </div>
               ) : null}
               {/* Net charged today */}
-              <div className="mt-2 flex items-baseline justify-between gap-4 border-t border-border/60 pt-2 font-medium">
+              <div className="mt-2 flex items-baseline justify-between gap-4 border-t border-border/60 pt-2 font-normal">
                 <span className="text-foreground">{t('billing.switchLineDueNow')}</span>
                 <span className="tabular-nums text-foreground">
                   {formatUsd(intervalPreview.amountDueNow)}
@@ -635,7 +659,7 @@ function CloudBillingSettings() {
                 void handleSwitchInterval();
               }}
             >
-              {switchIntervalPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+              {switchIntervalPending ? <Spinner className="mr-2 h-4 w-4" /> : null}
               {t('billing.switchIntervalConfirm')}
             </AlertDialogAction>
           </AlertDialogFooter>

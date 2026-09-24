@@ -1,4 +1,13 @@
-import { normalizePersistedRateLimit } from '@lody/shared';
+import {
+  isAskUserQuestionPermissionRequest,
+  normalizePersistedRateLimit,
+  type AgentConfigCliType,
+} from '@lody/shared';
+import type {
+  RequestPermissionRequest,
+  RequestPermissionResponse,
+  SessionConfigOption,
+} from '@agentclientprotocol/sdk';
 import {
   LODY_EXTENSION_METHODS,
   normalizeLodyExtensionMethod,
@@ -8,7 +17,33 @@ import {
 } from 'acp-extension-core';
 import { z } from 'zod';
 
+/** Grok's official TUI owns this behavior in addition to the runtime YOLO flag. */
+export function getBuiltinToolPermissionOutcome(args: {
+  agentConfig?: { cliType: AgentConfigCliType; agentType: string };
+  configOptions: readonly SessionConfigOption[];
+  request: RequestPermissionRequest;
+  pending: boolean;
+}): RequestPermissionResponse['outcome'] | undefined {
+  if (
+    args.agentConfig?.cliType !== 'builtin' ||
+    args.agentConfig.agentType !== 'grok' ||
+    isAskUserQuestionPermissionRequest(args.request)
+  ) {
+    return undefined;
+  }
+  const permission = args.configOptions.find((option) => option.id === 'permission_mode');
+  if (permission?.type !== 'select' || permission.currentValue !== 'always-approve') {
+    return undefined;
+  }
+  const allowOnce = args.request.options.find((option) => option.kind === 'allow_once');
+  if (allowOnce) return { outcome: 'selected', optionId: allowOnce.optionId };
+  // Match the TUI's queue drain: never turn a mode toggle into a lasting grant.
+  // A new request with no AllowOnce remains interactive; an already queued one is cancelled.
+  return args.pending ? { outcome: 'cancelled' } : undefined;
+}
+
 const VersionOneSchema = z.object({ version: z.literal(1) });
+const GoalActionSchema = z.enum(['set', 'pause', 'resume', 'clear']);
 const LodyCapabilitiesSchema = z
   .object({
     usage: VersionOneSchema.optional(),
@@ -30,10 +65,16 @@ const LodyCapabilitiesSchema = z
       output: z.literal(true).optional(),
     }).optional(),
     goal: VersionOneSchema.extend({
-      actions: z.array(z.enum(['set', 'pause', 'resume', 'clear'])),
+      actions: z.array(GoalActionSchema),
+      // Which transport carries which action. `actions` alone cannot say, and
+      // sending a work-starting action out-of-band would produce turns Lody has
+      // nowhere to attribute.
+      controlActions: z.array(GoalActionSchema).optional(),
+      promptActions: z.array(GoalActionSchema).optional(),
     }).optional(),
     compaction: VersionOneSchema.optional(),
     sessionHistory: VersionOneSchema.optional(),
+    worktreeProject: VersionOneSchema.optional(),
   })
   .partial();
 
@@ -52,9 +93,16 @@ const SessionUsageUpdateSchema = z.object({
   sessionId: z.string().min(1),
   usage: ModelUsageSchema,
   modelUsage: z.record(z.string(), ModelUsageSchema).optional(),
+  delta: z
+    .object({
+      usage: ModelUsageSchema,
+      modelUsage: z.record(z.string(), ModelUsageSchema),
+    })
+    .optional(),
 });
 
 const RateLimitWindowSchema = z.object({
+  label: z.string().optional(),
   usedPercent: z.number().min(0).max(100),
   windowDurationSeconds: z.number().nonnegative().nullable(),
   resetsAtEpochSeconds: z.number().int().positive().nullable(),
@@ -107,7 +155,7 @@ const LEGACY_METHODS = {
 } as const;
 
 export type LodyExtensionEvent =
-  | { readonly type: 'usage'; readonly update: SessionUsageUpdate }
+  | { readonly type: 'usage'; readonly update: SessionUsageUpdate; readonly accountingId?: string }
   | { readonly type: 'rateLimits'; readonly snapshot: RateLimitsSnapshot }
   | {
       readonly type: 'legacyProposedPlan';
@@ -171,7 +219,22 @@ export function parseLodyExtensionMessage(args: {
 }): LodyExtensionEvent | null {
   const method = normalizeLodyExtensionMethod(args.method);
   if (method === LODY_EXTENSION_METHODS.sessionUsageUpdate) {
-    return { type: 'usage', update: SessionUsageUpdateSchema.parse(args.params) };
+    const update = SessionUsageUpdateSchema.parse(args.params);
+    // Codex turn totals use a stable per-turn identity; unmarked adapters retain their scope.
+    const scope = z
+      .object({
+        _meta: z.object({ codex: z.object({ usageTurnId: z.string().min(1).max(256) }) }),
+      })
+      .safeParse(args.params);
+    return {
+      type: 'usage',
+      update,
+      ...(args.provider === 'codex' && scope.success
+        ? {
+            accountingId: `${args.sessionId}:turn:${encodeURIComponent(scope.data._meta.codex.usageTurnId)}`,
+          }
+        : {}),
+    };
   }
   if (method === LODY_EXTENSION_METHODS.rateLimitsUpdate) {
     return { type: 'rateLimits', snapshot: parseRateLimitsSnapshot(args.params) };

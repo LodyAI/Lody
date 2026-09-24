@@ -1,11 +1,26 @@
 ---
 title: Mentions
-description: 'Use @ file mentions, # issue or pull request mentions, and $ Skill mentions to inject precise context into Lody prompts.'
+description: 'Use @ conversation and file mentions, # issue or pull request mentions, and $ Skill mentions to inject precise context into Lody prompts.'
 ---
 
 # Mentions
 
 Lody enhances the input box with mention support via `@`, `#`, and `$`.
+
+## Conversation Mentions
+
+Type `@` in a conversation and select another conversation to reference it. Ask the current agent
+to contact that session, read relevant context, exchange findings, or request a review. For example,
+mention an implementation session and ask the current agent to review its latest commit and send
+its findings back.
+
+The referenced session can use another agent or run on another connected machine. Access still
+follows workspace permissions, and the target machine must be online to run work. A mention
+identifies the session; include an instruction describing what context to exchange or work to do.
+
+See [Agent Session Control](/docs/session-orchestration/) for the available operations, or follow
+the [multi-agent collaboration guide](/docs/agent-collaboration/) to exchange context and request
+reviews across agents and machines.
 
 ## File Mentions
 

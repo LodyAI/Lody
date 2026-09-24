@@ -8,7 +8,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thanks for helping improve Lody. Please provide a small, reproducible report.
+        Thanks for helping improve Lody. Please provide a small, reproducible report. Analysis is welcome; do not open a community PR over 1000 changed lines unless a maintainer assigns you this Issue.
 
         Keep every required section and confirmation. Issues that bypass or remove the form are marked `status:needs-issue-body` until corrected; only repository owners and automated bots are exempt.
 

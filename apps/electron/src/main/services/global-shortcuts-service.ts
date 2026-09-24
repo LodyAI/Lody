@@ -3,6 +3,7 @@ import Conf from 'conf'
 import {
   GLOBAL_SHORTCUT_DEFAULTS,
   bindingToElectronAccelerator,
+  migrateLegacyShortcutBinding,
   type GlobalShortcutBinding,
   type GlobalShortcutId,
   type GlobalShortcutTriggeredPayload,
@@ -174,9 +175,10 @@ export class GlobalShortcutsService {
 
   private effectiveBinding(id: GlobalShortcutId): string | null {
     const overrides = this.store.get('overrides')
-    return Object.prototype.hasOwnProperty.call(overrides, id)
+    const binding = Object.prototype.hasOwnProperty.call(overrides, id)
       ? (overrides[id] ?? null)
       : GLOBAL_SHORTCUT_DEFAULTS[id]
+    return binding === null ? null : migrateLegacyShortcutBinding(binding)
   }
 
   private persistOverride(id: GlobalShortcutId, binding: string | null): void {

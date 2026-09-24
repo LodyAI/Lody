@@ -89,6 +89,34 @@ const ACP_NOTIFICATION_FIXTURES = [
 ] as const;
 
 describe('acp history apply', () => {
+  it('stores ACP markdown plans beside their mode-switch card without duplicating updates', () => {
+    const plan = (content: string) => makeNotification({
+      sessionUpdate: 'plan_update',
+      plan: { type: 'markdown', planId: '1:submit_plan', content },
+      _meta: { lody: { turnId: '0' } },
+    });
+    const history = applyNotificationOnHistory([], [
+      makeNotification({
+        sessionUpdate: 'tool_call', toolCallId: '1:submit_plan',
+        title: 'ExitPlanMode', kind: 'switch_mode', status: 'in_progress',
+      }),
+      plan('# Draft'),
+      plan('# Final plan\n\n- Verify the adapter.'),
+      makeNotification({
+        sessionUpdate: 'tool_call_update', toolCallId: '1:submit_plan', status: 'completed',
+      }),
+    ]);
+    expect(history).toHaveLength(1);
+    const items = history[0]!.items as unknown as MessageContent[];
+    expect(items.filter((item) => item.type === 'proposed_plan')).toEqual([{
+      type: 'proposed_plan', turnId: '1:submit_plan',
+      markdown: '# Final plan\n\n- Verify the adapter.', status: 'delta', isLatest: true,
+    }]);
+    expect(items.find((item) => item.type === 'tool_call')).toMatchObject({
+      toolCallId: '1:submit_plan', kind: 'switch_mode', status: 'completed',
+    });
+  });
+
   it('persists the provider turn id on the assistant entry', () => {
     const history = applyNotificationOnHistory(
       [],
@@ -725,6 +753,71 @@ describe('acp history apply', () => {
     expect(toolCall?.schedulingTimeZone?.length).toBeGreaterThan(0);
   });
 
+  it('stamps a scheduling tool call with its first-persisted time and never moves it', () => {
+    // The scheduled-tasks deriver anchors a one-shot cron at this stamp; the turn entry's
+    // endedAt cannot serve (merged cron-fire turns push it past the fire minute).
+    const t0 = '2026-09-03T03:18:43.000+08:00';
+    const t1 = '2026-09-04T03:39:15.000+08:00';
+    const readCall = (history: ReturnType<typeof applyNotificationOnHistory>) =>
+      ((history[0]?.items ?? []) as MessageContent[]).find((i) => i.type === 'tool_call') as
+        | Extract<MessageContent, { type: 'tool_call' }>
+        | undefined;
+
+    const created = applyNotificationOnHistory(
+      [],
+      [
+        makeNotification({
+          sessionUpdate: 'tool_call',
+          toolCallId: 'cron-tc-3',
+          title: 'Scheduling one-shot 33 3 3 9 *',
+          status: 'in_progress',
+          rawInput: { cron: '33 3 3 9 *', recurring: false, prompt: 'p' },
+          _meta: { lody: { toolName: 'CronCreate' } },
+        }),
+      ],
+      undefined,
+      { now: () => t0 }
+    );
+    expect(readCall(created)?.recordedAtMs).toBe(Date.parse(t0));
+
+    // A later replayed/retried update for the same call must keep the original stamp.
+    const updated = applyNotificationOnHistory(
+      created,
+      [
+        makeNotification({
+          sessionUpdate: 'tool_call_update',
+          toolCallId: 'cron-tc-3',
+          status: 'completed',
+        }),
+      ],
+      undefined,
+      { now: () => t1 }
+    );
+    expect(readCall(updated)?.recordedAtMs).toBe(Date.parse(t0));
+  });
+
+  it('does not stamp non-scheduling tool calls', () => {
+    const history = applyNotificationOnHistory(
+      [],
+      [
+        makeNotification({
+          sessionUpdate: 'tool_call',
+          toolCallId: 'read-tc-2',
+          kind: 'read',
+          status: 'in_progress',
+          title: 'Read',
+          _meta: { lody: { toolName: 'Read' } },
+        }),
+      ],
+      undefined,
+      { now: () => '2026-09-03T03:18:43.000+08:00' }
+    );
+    const toolCall = ((history[0]?.items ?? []) as MessageContent[]).find(
+      (i) => i.type === 'tool_call'
+    ) as Extract<MessageContent, { type: 'tool_call' }> | undefined;
+    expect(toolCall?.recordedAtMs).toBeUndefined();
+  });
+
   it('still strips rawInput/rawOutput for non-scheduling tools', () => {
     const notifications = [
       makeNotification({
@@ -880,4 +973,168 @@ describe('acp history apply', () => {
       }
     }
   );
+
+  describe('devin subagent internals', () => {
+    const started = (agentId: string) =>
+      makeNotification({
+        sessionUpdate: 'tool_call_update',
+        toolCallId: agentId,
+        status: 'in_progress',
+        _meta: {
+          'cognition.ai/subagent_started': { agentId, title: `Task ${agentId}` },
+        },
+      });
+    const context = (parentAgentId: string) => ({
+      'cognition.ai/subagent_context': { parentAgentId },
+    });
+
+    it('suppresses subagent output once its task row exists, on live and replayed batches', () => {
+      const notifications = [
+        started('agent-1'),
+        makeNotification({
+          sessionUpdate: 'agent_message_chunk',
+          content: { type: 'text', text: 'internal' },
+          _meta: context('agent-1'),
+        }),
+        makeNotification({
+          sessionUpdate: 'agent_message_chunk',
+          content: { type: 'text', text: 'visible' },
+        }),
+      ];
+      for (const history of [
+        applyNotificationOnHistory([], notifications),
+        replayInChunks(notifications, [1]),
+      ]) {
+        const items = (history[0] as { items?: MessageContent[] }).items ?? [];
+        expect(items).toEqual([
+          expect.objectContaining({ type: 'subagent_task', taskId: 'agent-1' }),
+          { type: 'text', text: 'visible' },
+        ]);
+      }
+    });
+
+    it('keeps context-tagged output when no task row names the owner', () => {
+      const history = applyNotificationOnHistory(
+        [],
+        [
+          makeNotification({
+            sessionUpdate: 'agent_message_chunk',
+            content: { type: 'text', text: 'unknown-owner' },
+            _meta: context('never-started'),
+          }),
+        ]
+      );
+      const items = (history[0] as { items?: MessageContent[] }).items ?? [];
+      expect(items).toEqual([{ type: 'text', text: 'unknown-owner' }]);
+    });
+
+    it('suppresses a subagent tool call but merges updates into a permission-written row', () => {
+      const seeded = applyNotificationOnHistory(
+        [],
+        [
+          makeNotification({
+            sessionUpdate: 'tool_call',
+            toolCallId: 'approved-tool',
+            title: 'Approved tool',
+            status: 'pending',
+          }),
+          started('agent-1'),
+        ]
+      );
+      const history = applyNotificationOnHistory(seeded, [
+        makeNotification({
+          sessionUpdate: 'tool_call',
+          toolCallId: 'silent-tool',
+          title: 'Silent tool',
+          status: 'in_progress',
+          _meta: context('agent-1'),
+        }),
+        makeNotification({
+          sessionUpdate: 'tool_call_update',
+          toolCallId: 'approved-tool',
+          status: 'completed',
+          _meta: context('agent-1'),
+        }),
+      ]);
+      const items = (history[0] as { items?: MessageContent[] }).items ?? [];
+      expect(items).toEqual([
+        expect.objectContaining({
+          type: 'tool_call',
+          toolCallId: 'approved-tool',
+          status: 'completed',
+        }),
+        expect.objectContaining({ type: 'subagent_task', taskId: 'agent-1' }),
+      ]);
+    });
+
+    it('materializes a tagged nested lifecycle row with parentTaskId', () => {
+      const history = applyNotificationOnHistory(
+        [],
+        [
+          started('parent'),
+          makeNotification({
+            sessionUpdate: 'tool_call_update',
+            toolCallId: 'child',
+            status: 'in_progress',
+            _meta: {
+              ...context('parent'),
+              'cognition.ai/subagent_started': { agentId: 'child', title: 'Nested' },
+            },
+          }),
+        ]
+      );
+      const items = (history[0] as { items?: MessageContent[] }).items ?? [];
+      expect(items).toEqual([
+        expect.objectContaining({ type: 'subagent_task', taskId: 'parent' }),
+        expect.objectContaining({
+          type: 'subagent_task',
+          taskId: 'child',
+          parentTaskId: 'parent',
+        }),
+      ]);
+    });
+
+    it('passes tagged updates carrying an unrecognized subagent payload through', () => {
+      const history = applyNotificationOnHistory(
+        [],
+        [
+          started('agent-1'),
+          makeNotification({
+            sessionUpdate: 'agent_message_chunk',
+            content: { type: 'text', text: 'new-protocol' },
+            _meta: { ...context('agent-1'), 'cognition.ai/subagent_future': { x: 1 } },
+          }),
+        ]
+      );
+      const items = (history[0] as { items?: MessageContent[] }).items ?? [];
+      expect(items).toContainEqual({ type: 'text', text: 'new-protocol' });
+    });
+
+    it('keeps a completed task terminal when a started row replays late', () => {
+      const history = applyNotificationOnHistory(
+        [],
+        [
+          started('agent-1'),
+          makeNotification({
+            sessionUpdate: 'tool_call_update',
+            toolCallId: 'agent-1',
+            status: 'completed',
+            _meta: {
+              'cognition.ai/subagent_completed': { agentId: 'agent-1', summary: 'done' },
+            },
+          }),
+          started('agent-1'),
+        ]
+      );
+      const items = (history[0] as { items?: MessageContent[] }).items ?? [];
+      expect(items).toEqual([
+        expect.objectContaining({
+          type: 'subagent_task',
+          taskId: 'agent-1',
+          status: 'completed',
+          summary: 'done',
+        }),
+      ]);
+    });
+  });
 });

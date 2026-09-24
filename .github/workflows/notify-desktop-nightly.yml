@@ -1,0 +1,44 @@
+name: Notify desktop Nightly
+
+on:
+  push:
+    branches: [main]
+
+permissions: {}
+
+jobs:
+  notify:
+    if: github.repository == 'LodyAI/Lody' && vars.NIGHTLY_DISPATCH_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate notification configuration
+        shell: bash
+        env:
+          DISPATCH_OWNER: ${{ vars.NIGHTLY_DISPATCH_OWNER }}
+          DISPATCH_REPOSITORY: ${{ vars.NIGHTLY_DISPATCH_REPOSITORY }}
+          APP_ID: ${{ vars.NIGHTLY_DISPATCH_APP_ID }}
+        run: |
+          set -euo pipefail
+          [[ "${DISPATCH_OWNER}" =~ ^[A-Za-z0-9][A-Za-z0-9-]*$ ]]
+          [[ "${DISPATCH_REPOSITORY}" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]
+          [[ "${APP_ID}" =~ ^[1-9][0-9]*$ ]]
+          [[ "${GITHUB_SHA}" =~ ^[a-f0-9]{40}$ ]]
+      - name: Create destination-scoped notification token
+        id: token
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
+        with:
+          app-id: ${{ vars.NIGHTLY_DISPATCH_APP_ID }}
+          private-key: ${{ secrets.NIGHTLY_DISPATCH_APP_PRIVATE_KEY }}
+          owner: ${{ vars.NIGHTLY_DISPATCH_OWNER }}
+          repositories: ${{ vars.NIGHTLY_DISPATCH_REPOSITORY }}
+          permission-actions: write
+      - name: Notify accepted source revision
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          DISPATCH_OWNER: ${{ vars.NIGHTLY_DISPATCH_OWNER }}
+          DISPATCH_REPOSITORY: ${{ vars.NIGHTLY_DISPATCH_REPOSITORY }}
+        run: |
+          set -euo pipefail
+          gh api --method POST "repos/${DISPATCH_OWNER}/${DISPATCH_REPOSITORY}/actions/workflows/nightly-electron.yml/dispatches" \
+            -f ref=main -f "inputs[source_repository]=${GITHUB_REPOSITORY}" -f "inputs[oss_sha]=${GITHUB_SHA}"

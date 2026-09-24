@@ -1,15 +1,12 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Loader2, CheckCircle2, AlertCircle, Download, ExternalLink } from 'lucide-react';
+import { CheckCircle2, AlertCircle, Download, ExternalLink } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import type { ElectronUpdaterPhase } from '@lody/shared';
 import { useAtom } from 'jotai';
 import { Button } from '@/ui/button';
 import { Switch } from '@/ui/switch';
-import {
-  developerModeEnabledAtom,
-  inboxBetaEnabledAtom,
-  tasksBetaEnabledAtom,
-} from '@/atoms/settings';
+import { developerModeEnabledAtom, inboxBetaEnabledAtom } from '@/atoms/settings';
 import { useElectronUpdaterState } from '@/hooks/use-electron-updater-state';
 import { OpenSourceAttributionsDialog } from '@/components/settings/open-source-attributions-dialog';
 import { JoinCommunityButton } from '@/components/settings/join-community-dialog';
@@ -78,7 +75,7 @@ function UpdateStatusText({
     const p = percent != null ? Math.round(percent) : 0;
     return (
       <span className="flex items-center gap-1 text-xs text-muted-foreground">
-        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+        <Spinner className="h-3.5 w-3.5" />
         {t('settings.about.downloading', { percent: String(p) })}
       </span>
     );
@@ -109,7 +106,6 @@ const DEVELOPER_MODE_REVEAL_TAPS = 7;
 export function MobileAboutSettings() {
   const { t, i18n } = useTranslation();
   const [developerModeEnabled, setDeveloperModeEnabled] = useAtom(developerModeEnabledAtom);
-  const [tasksBetaEnabled, setTasksBetaEnabled] = useAtom(tasksBetaEnabledAtom);
   const [inboxBetaEnabled, setInboxBetaEnabled] = useAtom(inboxBetaEnabledAtom);
   const [revealTaps, setRevealTaps] = useState(0);
   const updaterState = useElectronUpdaterState();
@@ -238,7 +234,7 @@ export function MobileAboutSettings() {
                 disabled={isInstalling}
               >
                 {isInstalling ? (
-                  <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+                  <Spinner className="mr-1 h-3.5 w-3.5" />
                 ) : (
                   <Download className="mr-1 h-3.5 w-3.5" />
                 )}
@@ -254,7 +250,7 @@ export function MobileAboutSettings() {
                 }}
                 disabled={isChecking || phase === 'downloading'}
               >
-                {isChecking ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : null}
+                {isChecking ? <Spinner className="mr-1 h-3.5 w-3.5" /> : null}
                 {t('settings.about.checkForUpdates')}
               </Button>
             )}
@@ -290,19 +286,6 @@ export function MobileAboutSettings() {
       {developerModeEnabled ? (
         <MobileSettingsSection title={t('settings.beta.title', 'Beta features')}>
           <MobileSettingsRowGroup>
-            <MobileSettingsRow
-              label={t('settings.beta.tasks', 'Tasks')}
-              helper={t(
-                'settings.beta.tasksHelper',
-                'Track work you are not starting yet, separately from chats. In development — expect rough edges.'
-              )}
-            >
-              <Switch
-                checked={tasksBetaEnabled}
-                onCheckedChange={setTasksBetaEnabled}
-                aria-label={t('settings.beta.tasks', 'Tasks')}
-              />
-            </MobileSettingsRow>
             <MobileSettingsRow
               label={t('settings.beta.inbox', 'Inbox')}
               helper={t(

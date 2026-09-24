@@ -6,7 +6,7 @@ export const POWER_DEMO_I18N = {
     'common.loading': 'Loading...',
     'common.refresh': 'Refresh',
     'common.retry': 'Retry',
-    'sessions.prTab.base': 'base',
+    'sessions.prTab.base': 'Base',
     'sessions.prTab.checking': 'Checking…',
     'sessions.prTab.checks': 'Checks',
     'sessions.prTab.checksCount': '{{count}} checks',
@@ -31,7 +31,7 @@ export const POWER_DEMO_I18N = {
     'sessions.prTab.deleteBranchError': 'Failed to delete branch',
     'sessions.prTab.draftBlocked': 'Draft — not mergeable',
     'sessions.prTab.filesChanged': '{{count}} files',
-    'sessions.prTab.head': 'head',
+    'sessions.prTab.head': 'Head',
     'sessions.prTab.loadError': 'Failed to load pull request',
     'sessions.prTab.mergeAction': 'Merge pull request',
     'sessions.prTab.mergeBlocked':

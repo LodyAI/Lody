@@ -9,9 +9,11 @@ function docsNavTitle() {
         alt=""
         aria-hidden="true"
         className="size-6 rounded-md"
+        decoding="async"
+        fetchPriority="high"
+        height={24}
         src="/_docs-assets/logo-96.png"
         width={24}
-        height={24}
       />
       <span>Lody</span>
     </span>

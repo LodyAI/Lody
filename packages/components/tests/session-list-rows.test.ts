@@ -1,3 +1,4 @@
+import { getEffectiveSessionActivitySummary as getTaskActivitySummary } from '../src/components/sessions/session-tasklist-mapping';
 import { describe, expect, test } from 'vitest';
 
 import type { MachineId, SessionId, SessionMeta, SessionStatus } from '@lody/shared';
@@ -429,3 +430,30 @@ describe('buildSessionListRows opened-by provenance', () => {
     expect(rows[0]?.latestMessageAt).toBe(5_000);
   });
 });
+
+describe.each([getEffectiveSessionActivitySummary, getTaskActivitySummary])(
+  'closed conversation activity',
+  (summarize) => {
+    test('ignores closed output while retaining live status and open child unread', () => {
+      const parent = makeSession({ id: 'parent', isTabClosed: true, lastMessageAt: 100 });
+      const child = makeSession({
+        id: 'child',
+        parentSessionId: parent.id,
+        isTabClosed: true,
+        lastMessageAt: 200,
+      });
+      const children = new Map([[parent.id, [child]]]);
+      const presence = new Map<string, SessionStatus>([[child.id, { type: 'requestPermission' }]]);
+      expect(summarize(parent, children, presence)).toMatchObject({
+        hasUnreadMessages: false,
+        isWorking: true,
+        isWaitingPermission: true,
+        latestMessageAt: 200,
+      });
+      child.isTabClosed = false;
+      expect(summarize(parent, children, presence).hasUnreadMessages).toBe(true);
+      child.lastReadAt = 200;
+      expect(summarize(parent, children, presence).hasUnreadMessages).toBe(false);
+    });
+  }
+);

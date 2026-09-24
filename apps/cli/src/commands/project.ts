@@ -19,6 +19,14 @@ import {
 import { renderTerminalTable } from '@/lib/terminal-table';
 import { getLogger, rootLogger } from '@/utils/logger';
 import { formatErrorMessage } from '@/utils/format-error';
+import {
+  getAuthContextOrThrow,
+  resolveWorkspaceOrThrow,
+  runOneShotCommand,
+  withWorkspaceManager,
+} from '@/lib/command-runtime';
+import { getCliPlatformKind } from '@/lib/cli-platform';
+import { listRemoteLocalProjects } from '@/lib/remote-local-project-list';
 
 type CommonOptions = {
   json?: boolean;
@@ -30,6 +38,11 @@ type AddProjectOptions = CommonOptions & {
   allWorkspaces?: boolean;
 };
 
+type ListProjectOptions = CommonOptions & {
+  workspace?: string;
+  machine?: string;
+};
+
 type SelectableProject = {
   workspaceId: WorkspaceId;
   workspaceName: string;
@@ -37,6 +50,13 @@ type SelectableProject = {
   name: string;
   rootPath: string;
 };
+
+export function shouldUseRemoteProjectCatalog(options: {
+  workspace?: string;
+  machine?: string;
+}): boolean {
+  return Boolean(options.workspace?.trim() || options.machine?.trim());
+}
 
 function setDebugIfEnabled(options: CommonOptions): void {
   if (options.debug) {
@@ -348,67 +368,101 @@ const projectDeleteCommand = new Command('delete')
 
 const projectListCommand = new Command('list')
   .description('List local projects')
+  .option('--workspace <selector>', 'Remote workspace id, slug, or name')
+  .option('--machine <selector>', 'Remote machine id or name')
   .option('--json', 'Output machine-readable JSON')
   .option('-d, --debug', 'enable debug output')
-  .action(async (options: CommonOptions) => {
+  .action(async (options: ListProjectOptions) => {
     setDebugIfEnabled(options);
+
+    const useRemoteCatalog = shouldUseRemoteProjectCatalog(options);
+    if (useRemoteCatalog && getCliPlatformKind() === 'local') {
+      const message = 'Remote project listing is not available on the local platform.';
+      if (options.json) {
+        process.stdout.write(`${JSON.stringify({ ok: false, error: message })}\n`);
+      } else {
+        getLogger('project').error(message);
+      }
+      process.exit(1);
+      return;
+    }
+
+    if (useRemoteCatalog) {
+      await runOneShotCommand('project', options, async () => {
+        const auth = getAuthContextOrThrow('project');
+        const workspace = await resolveWorkspaceOrThrow(auth, options.workspace);
+        const response = await withWorkspaceManager(
+          auth,
+          workspace,
+          'project',
+          async (manager) =>
+            await listRemoteLocalProjects({
+              manager,
+              auth,
+              workspace,
+              machineSelector: options.machine,
+            })
+        );
+        renderProjectListResponse(response, options);
+      });
+      return;
+    }
 
     const machineId = resolveMachineIdOrExit();
     const response = await sendLocalProjectControl({
       type: 'local-project/list',
       machineId,
     });
-
-    if (options.json) {
-      process.stdout.write(`${JSON.stringify(response, null, 2)}\n`);
-      if (!response.ok) {
-        process.exit(1);
-      }
-      return;
-    }
-
-    const logger = getLogger('project');
-    if (!response.ok) {
-      printProjectControlError('list projects', response);
-      process.exit(1);
-    }
-    if (response.type !== 'local-project/list') {
-      logger.error(`Unexpected response type: ${response.type}`);
-      process.exit(1);
-    }
-
-    const rows = response.result.workspaces
-      .flatMap((workspace) =>
-        workspace.projects.map((project) => [
-          workspace.workspaceName,
-          project.name,
-          project.rootPath,
-        ])
-      )
-      .sort((left, right) => {
-        const workspaceCompare = String(left[0]).localeCompare(String(right[0]));
-        if (workspaceCompare !== 0) {
-          return workspaceCompare;
-        }
-        const projectCompare = String(left[1]).localeCompare(String(right[1]));
-        if (projectCompare !== 0) {
-          return projectCompare;
-        }
-        return String(left[2]).localeCompare(String(right[2]));
-      });
-
-    if (rows.length === 0) {
-      logger.info('No local projects found.');
-      return;
-    }
-
-    console.log(
-      renderTerminalTable(
-        [{ header: 'Workspace' }, { header: 'Project' }, { header: 'Path' }],
-        rows
-      )
-    );
+    renderProjectListResponse(response, options);
   });
+
+function renderProjectListResponse(
+  response: LocalProjectControlResponse,
+  options: CommonOptions
+): void {
+  if (options.json) {
+    process.stdout.write(`${JSON.stringify(response, null, 2)}\n`);
+    if (!response.ok) {
+      process.exit(1);
+    }
+    return;
+  }
+
+  const logger = getLogger('project');
+  if (!response.ok) {
+    printProjectControlError('list projects', response);
+    process.exit(1);
+  }
+  if (response.type !== 'local-project/list') {
+    logger.error(`Unexpected response type: ${response.type}`);
+    process.exit(1);
+  }
+
+  const rows = response.result.workspaces
+    .flatMap((workspace) =>
+      workspace.projects.map((project) => [workspace.workspaceName, project.name, project.rootPath])
+    )
+    .sort((left, right) => {
+      const workspaceCompare = String(left[0]).localeCompare(String(right[0]));
+      if (workspaceCompare !== 0) {
+        return workspaceCompare;
+      }
+      const projectCompare = String(left[1]).localeCompare(String(right[1]));
+      if (projectCompare !== 0) {
+        return projectCompare;
+      }
+      return String(left[2]).localeCompare(String(right[2]));
+    });
+
+  if (rows.length === 0) {
+    logger.info('No local projects found.');
+    return;
+  }
+
+  console.log(
+    renderTerminalTable([{ header: 'Workspace' }, { header: 'Project' }, { header: 'Path' }], rows)
+  );
+}
 
 export const projectCommand = new Command('project')
   .description('Manage local projects')

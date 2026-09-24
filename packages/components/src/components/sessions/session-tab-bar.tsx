@@ -1,5 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Plus, Loader2, X, History, Undo2, Pin, FileDiff, Hand } from 'lucide-react';
+import { Plus, X, History, Undo2, FileDiff, Hand } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import { cn } from '@/lib/utils';
 import { WINDOW_DRAG_EXEMPT_CLASS, useWindowDragRegionClass } from '@/ui/window-drag-region';
 import { getSessionLaunchConfigLegacyFields, type SessionId, type SessionMeta } from '@lody/shared';
@@ -32,9 +33,14 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 import { isImeComposingKeyboardEvent } from '@/lib/ime';
 import { type DraftSessionTab, getDraftTabLabel } from '@/lib/session-draft-tabs';
-import { sessionHasUnreadMessages } from '@/lib/session-read-receipt';
+import {
+  closedSessionHasUnreadMessages,
+  sessionHasUnreadMessages,
+} from '@/lib/session-read-receipt';
+import { isSessionTabClosed } from '@/lib/session-tab-url';
 import { TAB_PILL_ACTIVE_CLASS, TAB_PILL_INACTIVE_CLASS } from '@/components/shared/tab-pill-strip';
 import { AdaptiveTabStrip, AdaptiveTabStripItem } from './adaptive-tab-strip';
+import { SESSION_PAGE_CONTAINER_CLASS } from './session-conversation-page';
 import {
   armSessionMentionDrag,
   clearSessionMentionDrag,
@@ -95,27 +101,11 @@ interface SessionTabBarProps {
 }
 
 /* One canvas: `bg-background` runs unbroken from this bar down through the
-   message list, and the tabs sit ON it without breaking it. The ACTIVE tab is
-   the heaviest thing in the row — it wears the app's floating-panel material
-   (`bg-sidebar` + `border-sidebar-border` + the same drop shadow as the side
-   panel and terminal dock), so "the one in a box" reads as the current page.
-   Inactive tabs get a flat borderless wash and dimmed text; they must stay
-   lighter-weight than the active tab, since chrome is what the eye scores as
-   selected among siblings.
-
-   Keep the surface ladder ordered — canvas → inactive → active — measured, not
-   assumed. `bg-sidebar` gives light that ladder for free (canvas 241 → active
-   229), but DARK needs the override: Vesper's sideBar is #161616, a mere 6
-   above the #101010 canvas and BELOW the inactive wash (26), so the active pill
-   rendered as a dent and only its border kept it legible. Hence the `dark:`
-   pair, which lands canvas 16 → inactive 26 → active 42, border 70.
-   `--tab-active`/`--tab-inactive` are useless here: both collapse onto
-   `--background` in dark, which is what forced the original `/[0.22]` vs
-   `/[0.12]` tints — a 10% gap that rendered as one gray.
-   `border-transparent` on the base keeps every state on the same box model, so
-   switching tabs never shifts a label by a pixel. */
+   message list. Active/inactive fills come from `TAB_PILL_*_CLASS` — the same
+   tokens as the right side-panel tab strip. `border-transparent` on the base
+   keeps every state on the same box model. */
 const TAB_ITEM_CLASS =
-  'group relative flex h-8 w-full min-w-0 items-center gap-1.5 overflow-hidden rounded-md border border-transparent px-3 text-[13px] transition-colors cursor-pointer';
+  'group relative flex h-8 w-full min-w-0 items-center gap-1.5 overflow-hidden rounded-md border border-transparent px-3 text-[0.9em] transition-colors cursor-default';
 const TAB_ITEM_ACTIVE_CLASS = TAB_PILL_ACTIVE_CLASS;
 const TAB_ITEM_INACTIVE_CLASS = TAB_PILL_INACTIVE_CLASS;
 const TAB_INLINE_ACTION_CLASS =
@@ -215,7 +205,9 @@ function TabContent({
      would be a flash between the click and the read receipt landing. */
   const isUnread = !isActive && sessionHasUnreadMessages(session);
   const label = getTabLabel(session, isParent, defaultTitle, t);
-  const showClose = !isParent && onTabClose && !isEditing;
+  // A lone tab has no close button: there is nothing to switch to, and closing
+  // it would only swap the conversation for an empty draft.
+  const showClose = onTabClose && !isEditing && !solo;
   const tabId = `session-tab-${session.id}`;
   const agentConfig = useAtomValue(getAgentMetaByIdAtomFamily(session.agentConfigId));
   const iconEnv = agentConfig?.env ?? getSessionLaunchConfigLegacyFields(session)?.env;
@@ -275,7 +267,7 @@ function TabContent({
         {isWaiting ? (
           <Hand className="h-3 w-3 text-status-warning" />
         ) : isWorking ? (
-          <Loader2 className="h-3 w-3 animate-spin text-tab-active-accent" />
+          <Spinner className="h-3 w-3 text-tab-active-accent" />
         ) : isUnread ? (
           <span
             data-session-tab-unread=""
@@ -303,22 +295,10 @@ function TabContent({
             if (e.key === 'Enter') commitRename();
             if (e.key === 'Escape') cancelRename();
           }}
-          className="w-full min-w-0 bg-transparent outline-hidden text-[13px]"
+          className="w-full min-w-0 bg-transparent outline-hidden text-[0.9em]"
         />
       ) : (
         <span className="truncate">{label}</span>
-      )}
-      {isParent && !isEditing && !solo && (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <span className={cn(TAB_INLINE_ACTION_CLASS, iconVisibility)}>
-              <Pin className="h-3 w-3" />
-            </span>
-          </TooltipTrigger>
-          <TooltipContent side="bottom">
-            {t('sessions.tabs.mainThread', 'Main thread — cannot be closed')}
-          </TooltipContent>
-        </Tooltip>
       )}
       {showClose && (
         <button
@@ -364,7 +344,7 @@ function DraftTabContent({
   onClose?: (tabId: string) => MaybePromiseVoid;
   t: (key: string, fallback: string) => string;
 }) {
-  const showClose = onClose;
+  const showClose = onClose && !solo;
   const closeIconVisibility = isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100';
   const label = getDraftTabLabel(draft, t('sessions.tabs.newTab', 'New Tab'));
   const tabId = `draft-tab-${draft.id}`;
@@ -443,7 +423,7 @@ function ViewerTabContent({
   onClose?: (tabId: string) => MaybePromiseVoid;
   t: (key: string, fallback: string, opts?: Record<string, unknown>) => string;
 }) {
-  const showClose = onClose;
+  const showClose = onClose && !solo;
   const closeIconVisibility = isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100';
   const tabId = `viewer-tab-${tab.id}`;
   const saveStateLabel = tab.saving
@@ -579,6 +559,7 @@ export const SessionTabBar = memo(function SessionTabBar({
   useListKeyboardNavigation({ scopeId: WORKSPACE_FOCUS_SCOPES.sessionConversation });
   const defaultTitle = t('sessions.untitled', 'Untitled session');
   const showSessionTabs = variant !== 'viewer';
+  const showParentTab = showSessionTabs && !isSessionTabClosed(parentSession);
   const showViewerTabs = variant !== 'session';
   const showNewTabButton = variant !== 'viewer';
   const showArchivedTabs = variant !== 'viewer';
@@ -590,7 +571,9 @@ export const SessionTabBar = memo(function SessionTabBar({
   const sortableItems = useMemo(() => {
     const sessionMap = showSessionTabs
       ? new Map<string, SortableItemData>(
-          childSessions.map((s) => [s.id, { kind: 'session', session: s }])
+          childSessions
+            .filter((s) => !isSessionTabClosed(s))
+            .map((s) => [s.id, { kind: 'session', session: s }])
         )
       : new Map<string, SortableItemData>();
     const draftMap = showSessionTabs
@@ -655,9 +638,8 @@ export const SessionTabBar = memo(function SessionTabBar({
   }, [sortableItems]);
 
   // A lone tab spans the whole row, so it drops the active fill — a full-width
-  // pill would paint the entire bar and break the one-canvas rule. It also has
-  // no sibling to switch to, so it hides the main-thread Pin marker.
-  const soloTab = (showSessionTabs ? 1 : 0) + sortableItems.length === 1;
+  // pill would paint the entire bar and break the one-canvas rule.
+  const soloTab = (showParentTab ? 1 : 0) + sortableItems.length === 1;
 
   useEffect(() => {
     if (editingTabId && inputRef.current) {
@@ -743,8 +725,8 @@ export const SessionTabBar = memo(function SessionTabBar({
   // In mixed mode, an active viewer tab deselects the session tabs.
   const hasActiveViewerTab = variant === 'mixed' && !!activeViewerTabId;
   const visibleTabIds = useMemo(
-    () => (showSessionTabs ? [parentSession.id, ...sortableIds] : sortableIds),
-    [parentSession.id, showSessionTabs, sortableIds]
+    () => (showParentTab ? [parentSession.id, ...sortableIds] : sortableIds),
+    [parentSession.id, showParentTab, sortableIds]
   );
   const activeTabId =
     showViewerTabs && activeViewerTabId
@@ -767,7 +749,14 @@ export const SessionTabBar = memo(function SessionTabBar({
   ) : null;
 
   return (
-    <div className={cn('flex min-w-0 items-center bg-background', windowDragClass, className)}>
+    <div
+      className={cn(
+        SESSION_PAGE_CONTAINER_CLASS,
+        'flex min-w-0 items-center bg-background',
+        windowDragClass,
+        className
+      )}
+    >
       {leftSlot ? (
         <div
           className={cn(
@@ -784,11 +773,14 @@ export const SessionTabBar = memo(function SessionTabBar({
         activeItemId={activeTabId}
         role="tablist"
         aria-label={t('sessions.tabs.label', 'Session tabs')}
-        className="h-11"
-        paddingLeft={variant === 'session' ? 4 : 8}
+        // max-h-full keeps the strip inside a padded h-11 bar (macOS row pad).
+        className="h-11 max-h-full"
+        // A little more than the 6px tab gap, so the first tab reads as part of
+        // the strip rather than attached to the sidebar edge.
+        paddingLeft={8}
         paddingRight={8}
       >
-        {showSessionTabs && (
+        {showParentTab && (
           <AdaptiveTabStripItem itemId={parentSession.id}>
             <TabContent
               session={parentSession}
@@ -852,7 +844,7 @@ export const SessionTabBar = memo(function SessionTabBar({
       <div className={cn('flex shrink-0 items-center', WINDOW_DRAG_EXEMPT_CLASS)}>
         {newTabButton}
         {showArchivedTabs && archivedChildSessions.length > 0 && onTabRestore && (
-          <ArchivedTabsPopover archivedSessions={archivedChildSessions} onRestore={onTabRestore} />
+          <ClosedTabsPopover archivedSessions={archivedChildSessions} onRestore={onTabRestore} />
         )}
         {rightSlot}
       </div>
@@ -860,7 +852,7 @@ export const SessionTabBar = memo(function SessionTabBar({
   );
 });
 
-function ArchivedTabsPopover({
+export function ClosedTabsPopover({
   archivedSessions,
   onRestore,
 }: {
@@ -872,6 +864,8 @@ function ArchivedTabsPopover({
     () => [...archivedSessions].sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
     [archivedSessions]
   );
+  const hasUnread = archivedSessions.some(closedSessionHasUnreadMessages);
+  const triggerLabel = t('sessions.tabs.closedTabs', 'Closed conversations');
 
   return (
     <Popover>
@@ -881,48 +875,55 @@ function ArchivedTabsPopover({
             <button
               type="button"
               className={cn(TAB_BAR_ACTION_CLASS, 'relative')}
-              aria-label={t('sessions.tabs.archivedTabs', 'Archived tabs')}
+              aria-label={
+                hasUnread
+                  ? `${triggerLabel}: ${t('sessions.unreadMessages', 'Unread messages')}`
+                  : triggerLabel
+              }
             >
               <History className="h-4 w-4" />
+              {hasUnread ? (
+                <span
+                  aria-hidden
+                  data-closed-tabs-unread=""
+                  className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-primary"
+                />
+              ) : null}
             </button>
           </PopoverTrigger>
         </TooltipTrigger>
         <TooltipContent side="bottom">
-          {t('sessions.tabs.archivedTabs', 'Archived tabs')}
+          {t('sessions.tabs.closedTabs', 'Closed conversations')}
         </TooltipContent>
       </Tooltip>
       <PopoverContent align="end" className="w-72 p-0" sideOffset={4}>
         <div className="border-b border-border px-3 py-2">
-          <p className="text-xs font-medium text-popover-foreground/70">
-            {t('sessions.tabs.archivedTabs', 'Archived tabs')}
+          <p className="text-[0.8em] font-medium text-popover-foreground/70">
+            {t('sessions.tabs.closedTabs', 'Closed conversations')}
           </p>
         </div>
-        <ScrollArea className="max-h-60">
+        <ScrollArea viewportClassName="max-h-60">
           <div className="py-1">
             {sorted.map((session) => {
               const label = session.title?.trim() || t('sessions.tabs.newTab', 'New Tab');
               const time = formatRelativeTime(session.lastMessageAt ?? session.createdAt, t);
               return (
-                <div
+                <button
                   key={session.id}
-                  className="flex items-center gap-2 px-3 py-1.5 text-xs transition-colors hover:bg-hover/60"
+                  type="button"
+                  className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[0.9em] transition-colors hover:bg-hover/60"
+                  onClick={() => {
+                    void onRestore(session.id);
+                  }}
+                  aria-label={`${t('sessions.tabs.reopenTab', 'Reopen conversation')}: ${label}`}
                 >
                   <span className="shrink-0 text-popover-foreground/65">
-                    <SessionAgentIcon session={session} className="h-3 w-3" />
+                    <ClosedConversationStatus session={session} />
                   </span>
                   <span className="min-w-0 flex-1 truncate">{label}</span>
                   <span className="shrink-0 text-popover-foreground/65">{time}</span>
-                  <button
-                    type="button"
-                    className="shrink-0 rounded-xs p-0.5 text-popover-foreground/70 transition-colors hover:bg-hover hover:text-hover-foreground"
-                    onClick={() => {
-                      void onRestore(session.id);
-                    }}
-                    aria-label={t('sessions.tabs.restoreTab', 'Restore tab')}
-                  >
-                    <Undo2 className="h-3.5 w-3.5" />
-                  </button>
-                </div>
+                  <Undo2 className="h-3.5 w-3.5 shrink-0 text-popover-foreground/70" />
+                </button>
               );
             })}
           </div>
@@ -930,4 +931,25 @@ function ArchivedTabsPopover({
       </PopoverContent>
     </Popover>
   );
+}
+
+function ClosedConversationStatus({ session }: { session: SessionMeta }) {
+  const { t } = useTranslation();
+  const status = useAtomValue(sessionLiveStatusAtomFamily(session.id));
+  if (status?.type === 'requestPermission')
+    return (
+      <Hand
+        className="h-3 w-3 text-status-warning"
+        aria-label={t('sessions.waitingPermission', 'Waiting for permission')}
+      />
+    );
+  if (status) return <Spinner className="h-3 w-3" />;
+  if (closedSessionHasUnreadMessages(session))
+    return (
+      <span
+        className="block h-2 w-2 rounded-full bg-primary"
+        aria-label={t('sessions.unreadMessages', 'Unread messages')}
+      />
+    );
+  return <SessionAgentIcon session={session} className="h-3 w-3" />;
 }

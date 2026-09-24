@@ -105,7 +105,7 @@ function MachineConnectedResourcesContent({
       <section className="space-y-2">
         <div className="flex items-center gap-2">
           <Folder className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />
-          <h3 className="text-xs font-semibold text-muted-foreground">
+          <h3 className="text-xs font-normal text-muted-foreground">
             {t('settings.machines.connectedFolders', 'Connected folders')}
           </h3>
         </div>
@@ -130,7 +130,7 @@ function MachineConnectedResourcesContent({
               return (
                 <div key={project.key} className="flex items-center gap-3 px-3 py-2.5">
                   <div className="min-w-0 flex-1">
-                    <div className="truncate text-sm font-medium">{project.name}</div>
+                    <div className="truncate text-sm font-normal">{project.name}</div>
                     <div className="truncate font-mono text-[11px] text-muted-foreground">
                       {project.rootPath}
                     </div>
@@ -161,7 +161,7 @@ function MachineConnectedResourcesContent({
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-2">
             <Bot className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />
-            <h3 className="text-xs font-semibold text-muted-foreground">
+            <h3 className="text-xs font-normal text-muted-foreground">
               {t('settings.machines.connectedAgents', 'Connected agents')}
             </h3>
           </div>

@@ -15,9 +15,9 @@ import {
   Cpu,
   Gauge,
   Hand,
-  Loader2,
   TerminalSquare,
 } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import { Button } from '@/ui/button';
 import { Card } from '@/ui/card';
 import {
@@ -93,7 +93,7 @@ export function DeviceResourceMonitor({
           sectionPadX
         )}
       >
-        <Loader2 className="h-4 w-4 animate-spin" />
+        <Spinner className="h-4 w-4" />
         {t('settings.devices.monitor.observing', 'Waiting for a resource sample')}
       </div>
     );
@@ -214,7 +214,7 @@ function StatRow({ label, value }: { label: string; value: ReactNode }) {
   return (
     <div className="mt-1 flex items-baseline gap-1.5 sm:gap-2">
       <span className="w-7 shrink-0 text-[10px] text-muted-foreground/70 sm:w-8">{label}</span>
-      <span className="min-w-0 truncate text-xs font-semibold tabular-nums text-foreground sm:text-sm">
+      <span className="min-w-0 truncate text-xs font-normal tabular-nums text-foreground sm:text-sm">
         {value}
       </span>
     </div>
@@ -272,7 +272,7 @@ function SessionTable({
   return (
     <>
       <div className="overflow-hidden rounded-lg border border-border/60 bg-background">
-        <div className="hidden grid-cols-[minmax(160px,40%)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_40px] gap-2.5 bg-muted/25 px-2 py-1.5 text-[11px] font-medium text-muted-foreground md:grid">
+        <div className="hidden grid-cols-[minmax(160px,40%)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_40px] gap-2.5 bg-muted/25 px-2 py-1.5 text-[11px] font-normal text-muted-foreground md:grid">
           <span>{t('settings.devices.sessions.session', 'Session')}</span>
           <span className="truncate text-center">
             {t('settings.devices.sessions.status', 'Status')}
@@ -329,7 +329,7 @@ function SessionTable({
                 <div className="min-w-0">
                   <Tooltip>
                     <TooltipTrigger asChild>
-                      <div className="truncate text-sm font-medium md:text-xs">{title}</div>
+                      <div className="truncate text-sm font-normal md:text-xs">{title}</div>
                     </TooltipTrigger>
                     <TooltipContent className="max-w-sm break-words">{title}</TooltipContent>
                   </Tooltip>
@@ -364,7 +364,7 @@ function SessionTable({
                     }}
                   >
                     {isTerminating ? (
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      <Spinner className="h-3.5 w-3.5" />
                     ) : (
                       <CircleStop className="h-3.5 w-3.5" />
                     )}
@@ -401,7 +401,7 @@ function SessionTable({
                       }}
                     >
                       {isTerminating ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
+                        <Spinner className="h-4 w-4" />
                       ) : (
                         <CircleStop className="h-4 w-4" />
                       )}
@@ -514,7 +514,7 @@ function StatusIcon({
   const icon = (() => {
     switch (status) {
       case 'running':
-        return <Loader2 className="h-3.5 w-3.5 animate-spin text-status-success" />;
+        return <Spinner className="h-3.5 w-3.5 text-status-success" />;
       case 'waiting_permission':
         return <Hand className="h-3.5 w-3.5 text-status-warning" />;
       case 'failed':
@@ -523,7 +523,7 @@ function StatusIcon({
         return <Circle className="h-3 w-3 text-muted-foreground/50" />;
       // initializing / finalizing / stopping — transitional states
       default:
-        return <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground/60" />;
+        return <Spinner className="h-3.5 w-3.5 text-muted-foreground/60" />;
     }
   })();
   if (showLabel) {

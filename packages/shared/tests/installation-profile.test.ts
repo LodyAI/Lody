@@ -1,11 +1,15 @@
+import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  ensureLodyDataDir,
   getInstallationProfile,
   getLodyDataDir,
+  LodyDataDirUnavailableError,
 } from '../src/node/installation-profile';
-import { getLocalCliHostEndpoint } from '../src/node/local-cli-host-lease';
+import { getE2eHostPipe, getLocalCliHostEndpoint } from '../src/node/local-cli-host-lease';
 import {
   getLocalControlSocketPath,
   getLocalDaemonRunDir,
@@ -15,6 +19,10 @@ import { getLocalTerminalSocketPath } from '../src/node/local-terminal';
 import { getLocalWorkspaceCatalogPath } from '../src/node/local-workspace-catalog';
 
 const require = createRequire(import.meta.url);
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
 describe('installation profile', () => {
   it('keeps cloud defaults backward compatible and gives local a disjoint namespace', () => {
@@ -34,6 +42,51 @@ describe('installation profile', () => {
     expect(getLodyDataDir('local', '/home/alice')).toBe(path.join('/home/alice', '.lody-oss'));
   });
 
+  it('creates the data directory a session workspace hangs off', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'lody-data-dir-'));
+    try {
+      const dataDir = path.join(root, 'nested', '.lody');
+      vi.stubEnv('LODY_DATA_DIR', dataDir);
+
+      expect(ensureLodyDataDir()).toBe(dataDir);
+      expect(fs.statSync(dataDir).isDirectory()).toBe(true);
+      // Idempotent: the daemon calls this on every worktree and chat session.
+      expect(ensureLodyDataDir()).toBe(dataDir);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('names its own directory when that directory cannot be created', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'lody-data-dir-'));
+    try {
+      // A regular file where the data root belongs: `mkdir` fails with ENOTDIR, which
+      // is what an unusable data root looks like to every caller downstream.
+      const blocker = path.join(root, 'blocker');
+      fs.writeFileSync(blocker, '');
+      const dataDir = path.join(blocker, '.lody');
+      vi.stubEnv('LODY_DATA_DIR', dataDir);
+
+      let caught: unknown;
+      try {
+        ensureLodyDataDir();
+      } catch (error) {
+        caught = error;
+      }
+
+      expect(caught).toBeInstanceOf(LodyDataDirUnavailableError);
+      const error = caught as LodyDataDirUnavailableError;
+      expect(error.dataDir).toBe(dataDir);
+      expect(error.code).toBe('lody_data_dir_unavailable');
+      // The raw cause stays reachable; the message is the part a user can act on.
+      expect(error.message).toContain(dataDir);
+      expect(error.message).toContain('LODY_DATA_DIR');
+      expect(error.cause).toBeDefined();
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it('uses disjoint local host lease endpoints', () => {
     const cloud = getLocalCliHostEndpoint('cloud');
     const local = getLocalCliHostEndpoint('local');
@@ -45,6 +98,48 @@ describe('installation profile', () => {
       expect(cloud).toEqual({ kind: 'tcp', host: '127.0.0.1', port: 17_788 });
       expect(local).toEqual({ kind: 'tcp', host: '127.0.0.1', port: 17_789 });
     }
+  });
+
+  it.runIf(process.platform !== 'win32')(
+    'uses an isolated host port only for an explicit E2E process',
+    () => {
+      vi.stubEnv('LODY_E2E', '1');
+      vi.stubEnv('LODY_E2E_LOCAL_CLI_HOST_PORT', '29471');
+
+      expect(getLocalCliHostEndpoint('local')).toEqual({
+        kind: 'tcp',
+        host: '127.0.0.1',
+        port: 29_471,
+      });
+
+      vi.stubEnv('LODY_E2E', '0');
+      expect(getLocalCliHostEndpoint('local')).toEqual({
+        kind: 'tcp',
+        host: '127.0.0.1',
+        port: 17_789,
+      });
+    }
+  );
+
+  it.runIf(process.platform !== 'win32')('rejects an invalid E2E host port', () => {
+    vi.stubEnv('LODY_E2E', '1');
+    vi.stubEnv('LODY_E2E_LOCAL_CLI_HOST_PORT', '17789junk');
+
+    expect(() => getLocalCliHostEndpoint('local')).toThrow(
+      'LODY_E2E_LOCAL_CLI_HOST_PORT must be an integer between 1024 and 65535'
+    );
+  });
+
+  it('accepts only an explicit E2E-scoped Windows pipe', () => {
+    vi.stubEnv('LODY_E2E', '1');
+    vi.stubEnv('LODY_E2E_LOCAL_CLI_HOST_PIPE', '\\\\.\\pipe\\lody-e2e-round-123');
+    expect(getE2eHostPipe('win32')).toBe('\\\\.\\pipe\\lody-e2e-round-123');
+    expect(getE2eHostPipe('darwin')).toBeNull();
+
+    vi.stubEnv('LODY_E2E_LOCAL_CLI_HOST_PIPE', '\\\\.\\pipe\\lody-agent-host-user');
+    expect(() => getE2eHostPipe('win32')).toThrow(
+      'LODY_E2E_LOCAL_CLI_HOST_PIPE must use the \\\\.\\pipe\\lody-e2e-<id> namespace'
+    );
   });
 
   it('keeps Electron main-process paths isolated without ambient LODY_PLATFORM', () => {
@@ -70,10 +165,11 @@ describe('installation profile', () => {
   });
 
   it('keeps the CommonJS installation profile in parity', () => {
-    const commonJs = require('../src/node/installation-profile.cjs') as typeof import('../src/node/installation-profile');
+    const commonJs =
+      require('../src/node/installation-profile.cjs') as typeof import('../src/node/installation-profile');
     expect(commonJs.getInstallationProfile('local')).toEqual(getInstallationProfile('local'));
     expect(commonJs.getLodyDataDir('local', '/home/alice')).toBe(
-      getLodyDataDir('local', '/home/alice'),
+      getLodyDataDir('local', '/home/alice')
     );
   });
 
@@ -81,8 +177,15 @@ describe('installation profile', () => {
     const commonJs = require('../src/node/local-terminal.cjs') as {
       getLocalTerminalSocketPath(platform?: 'local' | 'cloud'): string;
     };
-    expect(commonJs.getLocalTerminalSocketPath('local')).toBe(
-      getLocalTerminalSocketPath('local'),
-    );
+    expect(commonJs.getLocalTerminalSocketPath('local')).toBe(getLocalTerminalSocketPath('local'));
+  });
+
+  it('keeps the CommonJS E2E pipe parser in parity', () => {
+    vi.stubEnv('LODY_E2E', '1');
+    vi.stubEnv('LODY_E2E_LOCAL_CLI_HOST_PIPE', '\\\\.\\pipe\\lody-e2e-parity');
+    const commonJs = require('../src/node/local-cli-host-lease.cjs') as {
+      getE2eHostPipe(nodePlatform?: NodeJS.Platform): string | null;
+    };
+    expect(commonJs.getE2eHostPipe('win32')).toBe(getE2eHostPipe('win32'));
   });
 });

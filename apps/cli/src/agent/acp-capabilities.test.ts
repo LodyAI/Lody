@@ -36,6 +36,7 @@ function createSuccessfulStartupResult(sessionResponse?: Record<string, unknown>
     agentProcess: {} as never,
     client: {
       supportsAcknowledgedSteer: () => false,
+      getGoalCapability: () => undefined,
     } as never,
     acpSessionId: 'acp-session-1' as never,
     sessionResponse: sessionResponse ?? {
@@ -129,10 +130,32 @@ describe('fetchAcpCapabilities', () => {
     expect(result.availableCommands).toEqual([{ name: '/help', description: 'Help' }]);
   });
 
+  it('records the goal actions the live client advertised', async () => {
+    const startupResult = createSuccessfulStartupResult();
+    startupResult.client = {
+      supportsAcknowledgedSteer: () => false,
+      getGoalCapability: () => ({ version: 1, actions: ['pause', 'resume'] }),
+    } as never;
+    mocks.startLocalAcpAgent.mockResolvedValue(startupResult);
+
+    const result = await fetchAcpCapabilities('registry', 'goal-agent', createSilentLogger());
+
+    expect(result.goalActions).toEqual(['pause', 'resume']);
+  });
+
+  it('leaves goal actions absent for a runtime with no goal extension', async () => {
+    mocks.startLocalAcpAgent.mockResolvedValue(createSuccessfulStartupResult());
+
+    const result = await fetchAcpCapabilities('registry', 'plain-agent', createSilentLogger());
+
+    expect(result.goalActions).toBeUndefined();
+  });
+
   it('preserves acknowledged steering support discovered from the live client', async () => {
     const startupResult = createSuccessfulStartupResult();
     startupResult.client = {
       supportsAcknowledgedSteer: () => true,
+      getGoalCapability: () => undefined,
     } as never;
     mocks.startLocalAcpAgent.mockResolvedValue(startupResult);
 

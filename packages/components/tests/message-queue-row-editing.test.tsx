@@ -1,12 +1,22 @@
 // @vitest-environment jsdom
 
-import { act, createElement } from 'react';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { act, createElement, useState } from 'react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createRoot, type Root } from 'react-dom/client';
-import type { MessageQueueItem, SessionId } from '@lody/shared';
+import { createStore, Provider } from 'jotai';
+import type { MessageQueueItem, SessionId, WorkspaceId } from '@lody/shared';
 
 import { MessageQueueDisplay } from '../src/components/sessions/message-queue';
+import { currentWorkspaceIdAtom } from '../src/atoms';
+import { authTokenAtom } from '../src/atoms/runtime';
 import { initI18n } from '../src/i18n';
+
+// Each variant resolves to a distinct URL so the test can tell the row's
+// thumbnail from the full-size image the preview loads.
+vi.mock('../src/lib/session-image-cache', () => ({
+  getSessionImageBlobUrl: async ({ imageId, variant }: { imageId: string; variant: string }) =>
+    `blob:${variant}/${imageId}`,
+}));
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -133,6 +143,44 @@ describe('queued message editing commits', () => {
     expect(saved).toEqual([{ cid: 'cid-0', task: 'Rewrite the queue instead' }]);
   });
 
+  it('focuses the editor when the editing flag arrives before the start write completes', async () => {
+    let finishStart!: () => void;
+    function QueueWithEarlyUpdate() {
+      const [items, setItems] = useState([makeItem()]);
+      return createElement(MessageQueueDisplay, {
+        sessionId: 'session-test' as SessionId,
+        items,
+        onRemove: () => undefined,
+        onReorder: () => undefined,
+        onSteer: () => undefined,
+        onEditCancel: () => undefined,
+        onEditSave: (item, task) => {
+          saved.push({ cid: item.$cid, task });
+          setItems((current) => current.map((entry) => ({ ...entry, isEditing: false, task })));
+        },
+        onEditStart: (item) => {
+          setItems([{ ...item, isEditing: true }]);
+          return new Promise<void>((resolve) => {
+            finishStart = resolve;
+          });
+        },
+      });
+    }
+    await act(async () => root?.render(createElement(QueueWithEarlyUpdate)));
+    const textarea = await startEditing(container!);
+    expect(textarea.disabled).toBe(true);
+    expect(document.activeElement).not.toBe(textarea);
+
+    await act(async () => finishStart());
+    expect(textarea.disabled).toBe(false);
+    expect(document.activeElement).toBe(textarea);
+    expect(textarea.selectionStart).toBe(ORIGINAL_TASK.length);
+    expect(textarea.selectionEnd).toBe(ORIGINAL_TASK.length);
+    await act(async () => setTextareaValue(textarea, 'Clarified queued instruction'));
+    await pressEnter(textarea);
+    expect(saved).toEqual([{ cid: 'cid-0', task: 'Clarified queued instruction' }]);
+  });
+
   it('leaves Shift+Enter to the textarea as a newline', async () => {
     const view = await renderQueue();
     const textarea = await startEditing(view);
@@ -193,5 +241,77 @@ describe('queued message editing commits', () => {
 
     expect(saved).toEqual([]);
     expect(cancelled).toEqual(['cid-0']);
+  });
+});
+
+describe('queued message images', () => {
+  let root: Root | undefined;
+  let container: HTMLDivElement | undefined;
+  let editsStarted: string[];
+
+  beforeEach(async () => {
+    await initI18n('en');
+    editsStarted = [];
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+  });
+
+  afterEach(async () => {
+    await act(async () => root?.unmount());
+    container?.remove();
+  });
+
+  it('opens the full-size image in the viewer without editing the row', async () => {
+    const store = createStore();
+    store.set(currentWorkspaceIdAtom, 'workspace-test' as WorkspaceId);
+    store.set(authTokenAtom, 'token');
+    const item = {
+      ...makeItem(),
+      acpSessionConfig: {
+        ...makeItem().acpSessionConfig,
+        inputBlocks: [
+          { type: 'text', text: ORIGINAL_TASK },
+          {
+            type: 'image',
+            imageId: 'image-1',
+            mimeType: 'image/png',
+            sizeBytes: 1024,
+            fileName: 'screenshot.png',
+          },
+        ],
+      },
+    } as unknown as MessageQueueItem;
+    await act(async () => {
+      root?.render(
+        createElement(
+          Provider,
+          { store },
+          createElement(MessageQueueDisplay, {
+            sessionId: 'session-test' as SessionId,
+            items: [item],
+            onRemove: () => undefined,
+            onReorder: () => undefined,
+            onEditStart: (started: MessageQueueItem) => {
+              editsStarted.push(started.$cid);
+            },
+            onEditCancel: () => undefined,
+            onEditSave: () => undefined,
+            onSteer: () => undefined,
+          })
+        )
+      );
+    });
+
+    const thumbnail = container!.querySelector<HTMLButtonElement>(
+      '[aria-label="Preview screenshot.png"]'
+    );
+    expect(thumbnail?.querySelector('img')?.getAttribute('src')).toBe('blob:thumbnail/image-1');
+    await act(async () => thumbnail?.click());
+
+    const images = [...document.querySelectorAll('img')].map((img) => img.getAttribute('src'));
+    expect(images).toContain('blob:original/image-1');
+    expect(editsStarted).toEqual([]);
+    expect(container!.querySelector('textarea')).toBeNull();
   });
 });

@@ -1,5 +1,5 @@
 import type { CodeCollabContentUnavailableReason } from '@lody/shared';
-import { Copy, ExternalLink, FolderOpen } from 'lucide-react';
+import { Copy, ExternalLink, FolderOpen, Loader2, Share2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { cn } from '@/lib/utils';
 // The action model is shared with the file tree context menu and the side
@@ -284,7 +284,22 @@ export function SessionFileErrorState({
 }) {
   const { t } = useTranslation();
   const presentation = getSessionFileErrorPresentation(message, reason, t);
-  const actions = fileActions && offersFileActions(presentation.kind) ? fileActions : null;
+  const actions = fileActions && offersFileActions(presentation.kind) ? fileActions : undefined;
+  return <SessionFileNoticeCard presentation={presentation} fileActions={actions} />;
+}
+
+/** Shared presentation for files that cannot be displayed inline. */
+export function SessionFileNoticeCard({
+  presentation,
+  fileActions: actions,
+}: {
+  readonly presentation: Pick<
+    SessionFileErrorPresentation,
+    'title' | 'description' | 'technicalDetails'
+  >;
+  readonly fileActions?: SessionFileErrorActions;
+}) {
+  const { t } = useTranslation();
   const localHost = actions?.localHost;
 
   return (
@@ -301,6 +316,22 @@ export function SessionFileErrorState({
         </p>
         {actions ? (
           <div className="mt-3 flex flex-col gap-0.5">
+            {actions.onShare ? (
+              <Button
+                size="sm"
+                variant="secondary"
+                className={ACTION_BUTTON_CLASS}
+                onClick={actions.onShare}
+                disabled={actions.sharing}
+              >
+                {actions.sharing ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+                ) : (
+                  <Share2 className="h-3.5 w-3.5" aria-hidden="true" />
+                )}
+                {t('sessions.fileActions.share', 'Share file…')}
+              </Button>
+            ) : null}
             {localHost ? (
               <>
                 <Button
@@ -331,7 +362,7 @@ export function SessionFileErrorState({
               size="sm"
               // Without the local-host pair this is the only way out of the
               // card, so it leads instead of trailing them.
-              variant={localHost ? 'ghost' : 'secondary'}
+              variant={localHost || actions.onShare ? 'ghost' : 'secondary'}
               className={cn(ACTION_BUTTON_CLASS)}
               onClick={actions.onCopyPath}
               data-testid="session-file-error-copy-path"

@@ -197,6 +197,7 @@ export interface AddLocalProjectDialogContainerProps {
   initialMachineId?: MachineId | null;
   onAdded?: AddLocalProjectDialogProps['onAdded'];
   onLocated?: (info: { machineId: MachineId; localProjectId: LocalProjectId }) => void;
+  overlayClassName?: string;
 }
 
 export function AddLocalProjectDialogContainer({
@@ -205,6 +206,7 @@ export function AddLocalProjectDialogContainer({
   initialMachineId,
   onAdded,
   onLocated,
+  overlayClassName,
 }: AddLocalProjectDialogContainerProps) {
   const isMobile = useIsMobile();
   const controller = useAddLocalProjectController(onAdded, onLocated);
@@ -220,6 +222,7 @@ export function AddLocalProjectDialogContainer({
       ops={controller.ops}
       onAdded={controller.onAdded}
       onLocateRegistered={controller.onLocateRegistered}
+      overlayClassName={overlayClassName}
     />
   );
 }

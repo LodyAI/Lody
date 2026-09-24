@@ -1,4 +1,7 @@
+import { LocalFileResolutionSchema } from './local-file-preview';
+import { MachinePiExtensionsResponseSchema } from './pi-extensions';
 import { z } from 'zod';
+import { SESSION_GOAL_ACTIONS } from './goal';
 import {
   CodeCollabV2ErrorSchema,
   CodeCollabV2FileIndexRequestSchema,
@@ -28,6 +31,7 @@ import {
   SessionForkResponseSchema,
   SessionForkSpecSchema,
   SessionIdSchema,
+  AgentConfigIdSchema,
   SessionPreparationCancelSpecSchema,
   SessionPreparationSpecSchema,
   SessionPrepareCancelResponseSchema,
@@ -36,6 +40,7 @@ import {
   SessionPreviewEndpointReleaseResponseSchema,
   PreviewTargetSchema,
   SessionSteerResponseSchema,
+  SessionGoalResponseSchema,
   SessionTerminateResponseSchema,
 } from './message-schemas';
 
@@ -50,7 +55,38 @@ const BaseLocalMachineRpcRequestSchema = z
   })
   .strict();
 
+export const SessionActiveInvocationContextResultSchema = z.discriminatedUnion('active', [
+  z
+    .object({
+      type: z.literal('session/active-invocation-context'),
+      sessionId: SessionIdSchema,
+      active: z.literal(false),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal('session/active-invocation-context'),
+      sessionId: SessionIdSchema,
+      active: z.literal(true),
+      requesterUserId: z.string().trim().min(1),
+      sourceTurnId: z.string().trim().min(1),
+      inputConfig: z.record(z.string(), z.unknown()),
+    })
+    .strict(),
+]);
+export type SessionActiveInvocationContextResult = z.infer<
+  typeof SessionActiveInvocationContextResultSchema
+>;
+
 export const LocalMachineRpcRequestSchema = z.discriminatedUnion('method', [
+  BaseLocalMachineRpcRequestSchema.extend({
+    method: z.literal('session/get-active-invocation-context'),
+    params: z
+      .object({
+        sessionId: SessionIdSchema,
+      })
+      .strict(),
+  }).strict(),
   BaseLocalMachineRpcRequestSchema.extend({
     method: z.literal('code-collab/get-file-index'),
     params: CodeCollabV2FileIndexRequestSchema,
@@ -115,7 +151,7 @@ export const LocalMachineRpcRequestSchema = z.discriminatedUnion('method', [
   // Loro Streams counterpart: the desktop user may inspect any local file,
   // while remote requests retain File Preview v3's restricted-root policy.
   BaseLocalMachineRpcRequestSchema.extend({
-    method: z.literal('file/preview-local'),
+    method: z.literal('file/resolve-local'),
     params: FilePreviewV3RequestSchema,
   }).strict(),
   BaseLocalMachineRpcRequestSchema.extend({
@@ -124,6 +160,7 @@ export const LocalMachineRpcRequestSchema = z.discriminatedUnion('method', [
       .object({
         sessionId: SessionIdSchema,
         turnId: z.string().trim().min(1),
+        subagentTaskId: z.string().trim().min(1).optional(),
       })
       .strict(),
   }).strict(),
@@ -172,6 +209,17 @@ export const LocalMachineRpcRequestSchema = z.discriminatedUnion('method', [
       .strict(),
   }).strict(),
   BaseLocalMachineRpcRequestSchema.extend({
+    method: z.literal('session/goal'),
+    params: z
+      .object({
+        sessionId: SessionIdSchema,
+        action: z.enum(SESSION_GOAL_ACTIONS),
+        objective: z.string().trim().min(1).optional(),
+        userId: z.string().trim().min(1),
+      })
+      .strict(),
+  }).strict(),
+  BaseLocalMachineRpcRequestSchema.extend({
     method: z.literal('session/preview-endpoint-acquire'),
     params: z
       .object({
@@ -198,12 +246,21 @@ export const LocalMachineRpcRequestSchema = z.discriminatedUnion('method', [
       })
       .strict(),
   }).strict(),
+  BaseLocalMachineRpcRequestSchema.extend({
+    method: z.literal('machine/pi-extensions'),
+    params: z
+      .object({
+        configId: AgentConfigIdSchema.optional(),
+      })
+      .strict(),
+  }).strict(),
 ]);
 
 export type LocalMachineRpcRequest = z.infer<typeof LocalMachineRpcRequestSchema>;
 export type LocalMachineRpcRequestValidated = LocalMachineRpcRequest;
 
 export const LocalMachineRpcResultSchema = z.union([
+  SessionActiveInvocationContextResultSchema,
   CodeCollabV2FileIndexSnapshotSchema,
   CodeCollabV2OpenTextOkSchema,
   CodeCollabV2RefreshTextResponseSchema,
@@ -215,6 +272,7 @@ export const LocalMachineRpcResultSchema = z.union([
   CodeCollabV2LspUnsupportedSchema,
   CodeCollabV2ErrorSchema,
   FilePreviewV3ResponseSchema,
+  LocalFileResolutionSchema,
   SessionCancelResponseSchema,
   SessionDispatchTurnResponseSchema,
   SessionEditAndResendResponseSchema,
@@ -224,7 +282,9 @@ export const LocalMachineRpcResultSchema = z.union([
   SessionPreviewEndpointAcquireResponseSchema,
   SessionPreviewEndpointReleaseResponseSchema,
   SessionSteerResponseSchema,
+  SessionGoalResponseSchema,
   SessionTerminateResponseSchema,
+  MachinePiExtensionsResponseSchema,
 ]);
 export type LocalMachineRpcResult = z.infer<typeof LocalMachineRpcResultSchema>;
 
@@ -272,3 +332,5 @@ export function safeParseLocalMachineRpcRequest(
     };
   }
 }
+
+export { FilePreviewV3ErrorSchema } from './file-preview';

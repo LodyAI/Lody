@@ -1,4 +1,4 @@
-import { scoreFuzzy } from '@/components/mentions/vscode-fuzzy-score';
+import { scoreFuzzy } from './vscode-fuzzy-score';
 
 /**
  * Shared matching for file, session, Agent Role, issue, and PR candidates.

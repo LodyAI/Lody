@@ -76,6 +76,11 @@ const LODY_ALIAS_RULES: LodyAliasRule[] = [
   { cssVariable: '--background', colorIds: ['editor.background'] },
   { cssVariable: '--foreground', colorIds: ['foreground', 'editor.foreground'] },
   {
+    cssVariable: '--composer',
+    colorIds: ['editorWidget.background', 'quickInput.background', 'editor.background'],
+    compositeOverColorIds: WIDGET_ALIAS_BASE_COLOR_IDS,
+  },
+  {
     cssVariable: '--card',
     colorIds: ['sideBar.background', 'panel.background', 'editor.background'],
     compositeOverColorIds: SIDEBAR_ALIAS_BASE_COLOR_IDS,
@@ -184,20 +189,14 @@ const LODY_ALIAS_RULES: LodyAliasRule[] = [
   },
   {
     cssVariable: '--hover',
-    colorIds: [
-      'list.hoverBackground',
-      'menu.selectionBackground',
-      'quickInputList.focusBackground',
-      'list.inactiveSelectionBackground',
-      'list.focusBackground',
-      'editorWidget.background',
-      'sideBarSectionHeader.background',
-      'sideBar.background',
-    ],
+    // Page-level hover is a wash on the editor canvas. Do not reuse
+    // `list.hoverBackground` — that token is sized for the sidebar and reads
+    // as a heavy slab on the conversation/archive page.
+    colorIds: ['editor.background'],
     compositeOverColorIds: DEFAULT_ALIAS_BASE_COLOR_IDS,
     ensureVisibleAgainst: {
       colorIds: ['editor.background'],
-      fallbackBlendRatio: 0.08,
+      fallbackBlendRatio: 0.04,
     },
   },
   {
@@ -725,7 +724,7 @@ export const createLodyThemeCssVariables = (
  * A control the user can type into must never sit DARKER than the page it is
  * drawn on: on a light canvas a recessed gray rectangle reads as `disabled`.
  * VS Code themes are free to recess `input.background` (Lody Light does:
- * #E8EAED on a #FFFFFF editor background), so the field fill is the LIGHTER of
+ * #DCDEE4 on a #F9F9F9 editor background), so the field fill is the LIGHTER of
  * the field and page colors. Dark themes are unaffected — there
  * `input.background` is already the raised surface (Vesper: #1C1C1C on
  * #101010) — and light themes fall back onto the page color, where the field
@@ -860,22 +859,58 @@ export const createThemeCssVariables = (
   ...createLodyThemeCssVariables(theme),
 });
 
+const getTokenColorSelectors = (tokenColor: LodyResolvedVSCodeTheme['tokenColors'][number]) =>
+  Array.isArray(tokenColor.scope)
+    ? tokenColor.scope
+    : tokenColor.scope
+      ? tokenColor.scope.split(',').map((scope) => scope.trim())
+      : [];
+
+// TextMate matching: a selector applies to `scope` when it equals it or is a
+// dot-bounded prefix of it (`string` applies to `string.quoted`, while
+// `string.comment` does not apply to `string`). The most specific selector
+// wins; among equals the later rule wins, as in the editor.
+const findApplicableTokenForeground = (
+  theme: LodyResolvedVSCodeTheme,
+  scope: string
+): string | undefined => {
+  let best: { specificity: number; foreground: string } | undefined;
+  for (const tokenColor of theme.tokenColors) {
+    const foreground = tokenColor.settings.foreground;
+    if (!foreground) continue;
+    for (const selector of getTokenColorSelectors(tokenColor)) {
+      if (selector !== scope && !scope.startsWith(`${selector}.`)) continue;
+      if (!best || selector.length >= best.specificity) {
+        best = { specificity: selector.length, foreground };
+      }
+    }
+  }
+  return best?.foreground;
+};
+
+// Themes that only color specific sub-scopes (e.g. `string.quoted.double` but no
+// plain `string`) still get a representative color from the first such rule.
+const findDescendantTokenForeground = (
+  theme: LodyResolvedVSCodeTheme,
+  scope: string
+): string | undefined =>
+  theme.tokenColors.find(
+    (tokenColor) =>
+      tokenColor.settings.foreground &&
+      getTokenColorSelectors(tokenColor).some((selector) => selector.startsWith(`${scope}.`))
+  )?.settings.foreground;
+
 const findTokenForeground = (
   theme: LodyResolvedVSCodeTheme,
   desiredScopes: readonly string[]
 ): string | undefined => {
-  for (const tokenColor of theme.tokenColors) {
-    if (!tokenColor.settings.foreground) {
-      continue;
-    }
-    const scopes = Array.isArray(tokenColor.scope)
-      ? tokenColor.scope
-      : tokenColor.scope
-        ? tokenColor.scope.split(',').map((scope) => scope.trim())
-        : [];
-    if (scopes.some((scope) => desiredScopes.some((desired) => scope.startsWith(desired)))) {
-      return tokenColor.settings.foreground;
-    }
+  for (const scope of desiredScopes) {
+    const foreground = findApplicableTokenForeground(theme, scope);
+    if (foreground) return foreground;
+  }
+  for (const scope of desiredScopes) {
+    const foreground = findDescendantTokenForeground(theme, scope);
+    if (foreground) return foreground;
   }
   return undefined;
 };

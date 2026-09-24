@@ -22,7 +22,7 @@ type SessionSearchContextValue = {
 const SessionSearchContext = createContext<SessionSearchContextValue | null>(null);
 
 export const SEARCH_HIGHLIGHT_MARK_CLASS_NAME =
-  'rounded-xs bg-amber-200/75 px-0.5 text-foreground shadow-[inset_0_-1px_0_rgba(0,0,0,0.12)] dark:bg-amber-400/25';
+  'rounded-xs bg-amber-200/75 text-foreground shadow-[inset_0_-1px_0_rgba(0,0,0,0.12)] dark:bg-amber-400/25';
 
 export const SEARCH_HIGHLIGHT_ACTIVE_MARK_CLASS_NAME =
   'bg-amber-300 text-foreground ring-1 ring-amber-400/80 dark:bg-amber-300/55 dark:ring-amber-200/60';

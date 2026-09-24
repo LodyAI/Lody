@@ -403,13 +403,15 @@ function isACPSessionConfig(value: unknown): boolean {
   }
   const { cliType, agentType } = normalizedTarget;
   // This dependency-free validator has a hand-maintained CJS mirror and cannot
-  // import the ESM runtime table. Keep this literal aligned with ai.ts and the
-  // TS/CJS parity test.
+  // import the ESM runtime table. Keep builtin additions aligned with ai.ts and the TS/CJS
+  // parity test when changing this feature.
   const isBuiltinAgentType =
     agentType === 'claude' ||
     agentType === 'codex' ||
     agentType === 'kimi' ||
-    agentType === 'deepseek';
+    agentType === 'deepseek' ||
+    agentType === 'bub' ||
+    agentType === 'dimcode';
   if (
     typeof value.prompt !== 'string' ||
     (cliType === 'builtin' && !isBuiltinAgentType) ||
@@ -834,6 +836,7 @@ export function isLocalSessionControlResponse(
         value.status === 'auth-methods' ||
         value.status === 'authorization' ||
         value.status === 'input-required' ||
+        value.status === 'runtime-download' ||
         value.status === 'output' ||
         value.status === 'authenticated' ||
         value.status === 'cancelled' ||
@@ -860,6 +863,21 @@ export function isLocalSessionControlResponse(
         (typeof value.expiresInSeconds === 'number' &&
           Number.isInteger(value.expiresInSeconds) &&
           value.expiresInSeconds > 0)) &&
+      isOptionalString(value.runtimeName) &&
+      (typeof value.runtimePhase === 'undefined' ||
+        value.runtimePhase === 'downloading' ||
+        value.runtimePhase === 'verifying' ||
+        value.runtimePhase === 'extracting' ||
+        value.runtimePhase === 'publishing' ||
+        value.runtimePhase === 'complete') &&
+      (typeof value.runtimePercent === 'undefined' ||
+        (typeof value.runtimePercent === 'number' &&
+          value.runtimePercent >= 0 &&
+          value.runtimePercent <= 100)) &&
+      (value.status !== 'runtime-download' ||
+        (typeof value.runtimeName === 'string' &&
+          value.runtimeName.trim().length > 0 &&
+          typeof value.runtimePhase === 'string')) &&
       isOptionalString(value.output) &&
       isOptionalString(value.error)
     );

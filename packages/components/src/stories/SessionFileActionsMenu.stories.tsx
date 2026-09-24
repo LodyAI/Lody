@@ -4,9 +4,16 @@ import { fn } from 'storybook/test';
 import { SessionFileActionsMenu } from '@/components/sessions/session-file-actions-menu';
 import type { SessionFileMenuItem } from '@/hooks/use-session-file-actions';
 
-const copyPath: SessionFileMenuItem = {
-  id: 'copy-path',
-  label: 'Copy file path',
+const copyRelativePath: SessionFileMenuItem = {
+  id: 'copy-relative-path',
+  label: 'Copy relative path',
+  icon: Copy,
+  run: fn(),
+};
+
+const copyAbsolutePath: SessionFileMenuItem = {
+  id: 'copy-absolute-path',
+  label: 'Copy absolute path',
   icon: Copy,
   run: fn(),
 };
@@ -14,14 +21,16 @@ const copyPath: SessionFileMenuItem = {
 // What `useSessionFileActions` resolves in the desktop app for a file on this
 // machine: the shell actions, with the editor named after the user's pick.
 const LOCAL_ITEMS: SessionFileMenuItem[] = [
-  copyPath,
+  copyRelativePath,
+  copyAbsolutePath,
   { id: 'open-in-editor', label: 'Open in VS Code', icon: ExternalLink, run: fn() },
   { id: 'reveal', label: 'Show in Finder', icon: FolderOpen, run: fn() },
 ];
 
 // A browser tab, or a session whose machine is not this one.
 const REMOTE_ITEMS: SessionFileMenuItem[] = [
-  copyPath,
+  copyRelativePath,
+  copyAbsolutePath,
   { id: 'download', label: 'Download file', icon: Download, run: fn() },
 ];
 

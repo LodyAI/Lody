@@ -23,7 +23,6 @@ import {
   GitPullRequest,
   GripVertical,
   Link2,
-  Loader2,
   LockKeyhole,
   Pencil,
   Pin,
@@ -31,6 +30,7 @@ import {
   Plus,
   Users,
 } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import {
   memo,
   useCallback,
@@ -591,7 +591,7 @@ const TaskGroupSection = memo(function TaskGroupSection({
                 <ChevronDown
                   className={cn(
                     'absolute left-0 top-1/2 -translate-y-1/2 h-4 w-4',
-                    'transition-[opacity,translate,scale] duration-150 ease-out',
+                    'transition-[opacity,translate,scale,rotate] duration-150 ease-out',
                     isMobile ? 'opacity-100' : 'opacity-0 group-hover:opacity-100',
                     group.collapsed ? '-rotate-90' : 'rotate-0'
                   )}
@@ -604,7 +604,7 @@ const TaskGroupSection = memo(function TaskGroupSection({
             <ChevronDown
               className={cn(
                 'h-3.5 w-3.5 shrink-0 text-current',
-                'transition-[opacity,translate,scale] duration-150 ease-out',
+                'transition-[opacity,translate,scale,rotate] duration-150 ease-out',
                 group.collapsed || isMobile ? 'opacity-100' : 'opacity-0 group-hover:opacity-100',
                 // Chats is a top-level sidebar section, so its collapsed chevron
                 // stays visible without hover.
@@ -724,7 +724,7 @@ const TaskGroupSection = memo(function TaskGroupSection({
                     )}
                   />
                 ) : (
-                  <span className={cn('truncate', extraClassName)}>{task.title}</span>
+                  <span className={cn('truncate font-normal', extraClassName)}>{task.title}</span>
                 );
               const handleAnchorClick = useAnchor
                 ? (event: ReactMouseEvent<HTMLAnchorElement>) => {
@@ -777,7 +777,7 @@ const TaskGroupSection = memo(function TaskGroupSection({
                       !isMobile &&
                       'hover:bg-sidebar-hover hover:text-sidebar-hover-foreground',
                     showSelectedState &&
-                      'border-sidebar-foreground/10 bg-sidebar-foreground/10 text-sidebar-foreground hover:bg-sidebar-foreground/10',
+                      'bg-sidebar-selection text-sidebar-selection-foreground hover:bg-sidebar-selection',
                     // Keyboard-only focus ring. Plain :focus-within also matches
                     // after a mouse click (the overlay <a> keeps focus), which
                     // left a permanent inset ring on the selected row that read
@@ -819,9 +819,6 @@ const TaskGroupSection = memo(function TaskGroupSection({
                   ) : null}
                   <div className="flex min-w-0 items-center gap-1.5">
                     <SessionRowLeadingSlot
-                      isWaitingPermission={task.isWaitingPermission}
-                      isWorking={task.isWorking}
-                      hasUnreadMessages={task.hasUnreadMessages}
                       showMenuButton={hasMenuActions}
                       menuLabel={moreActionsLabel}
                     />
@@ -830,7 +827,7 @@ const TaskGroupSection = memo(function TaskGroupSection({
                         'min-w-0 flex-1 flex items-center gap-1 truncate text-sm',
                         showSelectedState
                           ? 'text-sidebar-selection-foreground'
-                          : 'text-sidebar-foreground dark:text-sidebar-foreground/75',
+                          : 'text-sidebar-foreground',
                         useAnchor && isEditingTitle && 'relative z-20'
                       )}
                       // Double-click to rename is scoped to the title only, so it can't
@@ -850,8 +847,11 @@ const TaskGroupSection = memo(function TaskGroupSection({
                       ) : null}
                       {renderTitle()}
                     </div>
-                    {/* Keep PR at the right edge, with All Changes totals immediately before it. */}
+                    {/* Keep PR at the right edge. Line totals stay in the hover card. */}
                     <SidebarRowEndSlot
+                      isWaitingPermission={task.isWaitingPermission}
+                      isWorking={task.isWorking}
+                      hasUnreadMessages={task.hasUnreadMessages}
                       restIcon={
                         isChatTask ? (
                           <span className={cn('flex items-center gap-1.5', useAnchor && 'z-20')}>
@@ -862,7 +862,6 @@ const TaskGroupSection = memo(function TaskGroupSection({
                             {task.sharing ? <SessionSharingIndicator state={task.sharing} /> : null}
                           </span>
                         ) : hasPr ||
-                          hasChanges ||
                           showMergeablePill ||
                           isMobile ||
                           task.sharing?.visibility === 'private' ? (
@@ -878,14 +877,7 @@ const TaskGroupSection = memo(function TaskGroupSection({
                                 className="text-muted-foreground"
                               />
                             ) : null}
-                            {showMergeablePill ? (
-                              <SessionMergeablePill />
-                            ) : hasChanges && !isMergeable ? (
-                              <span className="flex items-center gap-1">
-                                <span className="text-code-added">+{task.addedLines}</span>
-                                <span className="text-code-removed">-{task.deletedLines}</span>
-                              </span>
-                            ) : null}
+                            {showMergeablePill ? <SessionMergeablePill /> : null}
                             {hasPr ? (
                               <SessionPrIcon prStatus={prStatus} prCiState={task.prCiState} />
                             ) : null}
@@ -990,7 +982,7 @@ const TaskGroupSection = memo(function TaskGroupSection({
                         {shareMenuState === 'share' ? (
                           <Users />
                         ) : shareMenuState === 'loading' ? (
-                          <Loader2 className="animate-spin" />
+                          <Spinner />
                         ) : (
                           <LockKeyhole />
                         )}

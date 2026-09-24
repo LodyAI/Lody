@@ -1,6 +1,5 @@
+import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vitest/config';
-import tsconfigPaths from 'vite-tsconfig-paths';
-import topLevelAwait from 'vite-plugin-top-level-await';
 import wasm from 'vite-plugin-wasm';
 import { loroCrdtWasmUrlWorkaround, VITEST_INLINE_WASM_DEPS } from './vite-wasm-workarounds';
 
@@ -8,7 +7,22 @@ export default defineConfig({
   define: {
     'import.meta.env.VITE_PREVIEW_PUBLIC_BASE_DOMAIN': JSON.stringify('mylody.app'),
   },
-  plugins: [loroCrdtWasmUrlWorkaround(), tsconfigPaths(), wasm(), topLevelAwait()],
+  plugins: [loroCrdtWasmUrlWorkaround(), wasm()],
+  resolve: {
+    alias: [
+      // Must precede the general `@/` rule: Vite matches aliases in order
+      // against the raw specifier. 324 icon SVGs no test asserts on; see the
+      // stub's own comment for why they are worth aliasing away.
+      {
+        find: '@/components/icons/file-icons/asset-url',
+        replacement: fileURLToPath(
+          new URL('./tests/stubs/file-icon-asset-url.ts', import.meta.url)
+        ),
+      },
+      { find: /^@\//, replacement: `${fileURLToPath(new URL('./src', import.meta.url))}/` },
+      { find: '@pkg', replacement: fileURLToPath(new URL('../../package.json', import.meta.url)) },
+    ],
+  },
   test: {
     // `src/**` is included so a test written next to its module runs instead of
     // silently never running. Two such files had accumulated under `src/lib`,

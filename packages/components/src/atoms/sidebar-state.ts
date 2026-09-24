@@ -1,5 +1,6 @@
 import { atom } from 'jotai';
-import { atomWithStorage } from 'jotai/utils';
+import { isSessionWindow, windowStorage } from '@/lib/desktop-window';
+import { atomWithStorage, createJSONStorage } from 'jotai/utils';
 import { currentWorkspaceIdAtom } from './workspace-context';
 
 /**
@@ -176,6 +177,62 @@ export const localProjectCollapseStateAtom = atomWithStorage<LocalProjectCollaps
   {}
 );
 
+/**
+ * Per-workspace local-project ordering. Entries use the machine-qualified
+ * `${machineId}:${localProjectId}` key because project ids are only unique
+ * within their owning machine.
+ */
+const localProjectOrderByWorkspaceAtom = atomWithStorage<Record<string, string[]>>(
+  'lody-sidebar-local-project-order-by-workspace',
+  {}
+);
+
+const EMPTY_LOCAL_PROJECT_ORDER: readonly string[] = Object.freeze([]);
+
+/**
+ * Local-project order scoped to the current workspace. Reading outside a
+ * workspace returns an empty array; writing outside a workspace is a no-op.
+ */
+export const localProjectOrderAtom = atom<readonly string[], [readonly string[]], void>(
+  (get) => {
+    const workspaceId = get(currentWorkspaceIdAtom);
+    if (!workspaceId) return EMPTY_LOCAL_PROJECT_ORDER;
+    return get(localProjectOrderByWorkspaceAtom)[workspaceId] ?? EMPTY_LOCAL_PROJECT_ORDER;
+  },
+  (get, set, value) => {
+    const workspaceId = get(currentWorkspaceIdAtom);
+    if (!workspaceId) return;
+    const map = get(localProjectOrderByWorkspaceAtom);
+    set(localProjectOrderByWorkspaceAtom, {
+      ...map,
+      [workspaceId]: [...value],
+    });
+  }
+);
+
+/**
+ * Reorder the visible projects in one machine section while retaining saved
+ * entries that are currently absent or belong to another machine.
+ */
+export function moveLocalProjectOrder(
+  persistedOrder: readonly string[],
+  visibleKeys: readonly string[],
+  activeKey: string,
+  overKey: string
+): readonly string[] | null {
+  const fromIndex = visibleKeys.indexOf(activeKey);
+  const toIndex = visibleKeys.indexOf(overKey);
+  if (fromIndex < 0 || toIndex < 0 || fromIndex === toIndex) return null;
+
+  const nextVisibleOrder = [...visibleKeys];
+  const [moved] = nextVisibleOrder.splice(fromIndex, 1);
+  if (!moved) return null;
+  nextVisibleOrder.splice(toIndex, 0, moved);
+
+  const visibleSet = new Set(visibleKeys);
+  return [...nextVisibleOrder, ...persistedOrder.filter((key) => !visibleSet.has(key))];
+}
+
 // ============================================================================
 // Section Collapsed (Local Projects + GitHub Worktrees headers)
 // ============================================================================
@@ -205,7 +262,13 @@ export const githubWorktreesSectionCollapsedAtom = atomWithStorage<boolean>(
  * Whether the desktop left sidebar is collapsed (fully hidden). Persisted.
  * Mobile uses `mobileDrawerOpenAtom` and ignores this.
  */
-export const sidebarCollapsedAtom = atomWithStorage<boolean>('lody-sidebar-collapsed', false);
+export const sidebarCollapsedAtom: ReturnType<typeof atomWithStorage<boolean>> =
+  atomWithStorage<boolean>(
+    'lody-sidebar-collapsed',
+    isSessionWindow(),
+    createJSONStorage<boolean>(windowStorage),
+    { getOnInit: true }
+  );
 
 /**
  * Last expanded width in px. Restored when the user re-opens the sidebar so
@@ -227,6 +290,17 @@ export type SidebarOrganizeMode = 'workspace' | 'updated';
 export const sidebarOrganizeModeAtom = atomWithStorage<SidebarOrganizeMode>(
   'lody-sidebar-organize-mode',
   'workspace'
+);
+
+/**
+ * Updated mode mixes every project into one recency list. When true, top-level
+ * rows show the project mark and name under the title. Nested opened Sessions
+ * stay one line. Workspace mode ignores this preference because its group
+ * headers already identify each project.
+ */
+export const sidebarUpdatedShowProjectNamesAtom = atomWithStorage<boolean>(
+  'lody-sidebar-updated-show-project-names',
+  true
 );
 
 /**
@@ -261,5 +335,8 @@ export type ArchiveScopeValue = 'my' | 'team';
  * Archive scope filter - persisted to localStorage
  * 'my' = Show only current user's archived sessions
  * 'team' = Show all team archived sessions
+ *
+ * Default to the team view so a participant who has not chosen a scope sees
+ * the complete workspace archive. An explicit choice remains persisted below.
  */
-export const archiveScopeAtom = atomWithStorage<ArchiveScopeValue>('lody-archive-scope', 'my');
+export const archiveScopeAtom = atomWithStorage<ArchiveScopeValue>('lody-archive-scope', 'team');

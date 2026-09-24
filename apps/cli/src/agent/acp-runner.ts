@@ -56,6 +56,7 @@ import {
   createAcpStartupMonitor,
 } from './acp-startup-monitor';
 import { withLodyNpmCacheForNpx } from './npx-cache';
+import { resolveDeepSeekHarnessSpawn } from './deepseek-harness-runtime';
 import { runNpxStartupWithRecovery } from './acp-npx-startup-policy';
 import { truncateLogText } from '@/utils/log-format';
 import {
@@ -66,10 +67,12 @@ import {
   resolveAcpLauncher,
 } from './acp-analytics';
 import { withoutElectronBootstrapCredentials } from '@/electron-bootstrap-env';
+import { ACP_STARTUP_QUEUE_WAIT_TIMEOUT_MS } from '@lody/shared/acp-startup-budget';
 import { withLoopbackNoProxy } from '@lody/shared/proxy-env';
 import { withAcpSessionStartSlot } from './acp-session-start-gate';
 
 export type CreateAcpClientOptions = {
+  resolveWorktreeProject?: AgentClientOptions['resolveWorktreeProject'];
   stream: Stream;
   workdir: string;
   logger: Logger;
@@ -79,7 +82,6 @@ export type CreateAcpClientOptions = {
     agentType: string;
   };
   configOptionValues?: AgentClientOptions['configOptionValues'];
-  taskToolsEnabled?: boolean;
   /** Launcher family (npx/uvx/local) for ACP startup analytics; non-PII. */
   launcher?: AcpLauncher;
   resumeSessionId?: ACPSessionId;
@@ -127,7 +129,7 @@ export const createAcpClient = async (options: CreateAcpClientOptions) => {
     terminalManager: options.terminalManager,
     agentConfig: options.agentConfig,
     configOptionValues: options.configOptionValues,
-    taskToolsEnabled: options.taskToolsEnabled,
+    resolveWorktreeProject: options.resolveWorktreeProject,
     launcher: options.launcher,
     terminalEnabled: options.terminalEnabled,
     onStartupStage: options.onStartupStage,
@@ -257,7 +259,14 @@ export const spawnAcpProcess = (options: SpawnAcpProcessOptions): ChildProcess =
   }
   const spawnFn = options.spawnImpl ?? spawn;
 
-  return spawnFn(command, args, {
+  const executable = resolveDeepSeekHarnessSpawn({
+    command,
+    args,
+    env: options.env,
+    workdir: options.workdir,
+  });
+
+  return spawnFn(executable.command, executable.args, {
     cwd: options.workdir,
     env: options.env,
     stdio: ['pipe', 'pipe', 'pipe'],
@@ -595,6 +604,12 @@ export const startLocalAcpAgent = async (options: StartLocalAcpAgentOptions) => 
       label: `acp-startup:${options.agentType}`,
       logger: options.logger,
       abortSignal: options.signal,
+      // This path is a capability refresh or a title run: both sit inside a
+      // client-visible budget, and the queue ahead of them emits no progress
+      // frame. Without a deadline here that wait is silence the client counts
+      // against a machine that has not started working yet. Session restore
+      // deliberately has no such bound — see the gate's options.
+      waitTimeoutMs: ACP_STARTUP_QUEUE_WAIT_TIMEOUT_MS,
     },
     async () =>
       await runNpxStartupWithRecovery({

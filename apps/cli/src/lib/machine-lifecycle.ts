@@ -1,6 +1,6 @@
-import { spawn, type ChildProcess, type SpawnOptions } from 'node:child_process';
+import type { ChildProcess, SpawnOptions } from 'node:child_process';
+import spawn from 'cross-spawn';
 import * as fs from 'node:fs/promises';
-import * as os from 'node:os';
 import * as path from 'node:path';
 import { z } from 'zod';
 import {
@@ -18,6 +18,7 @@ import {
   CLI_EXIT_CODE_SUPERVISOR_CONTRACT_MISMATCH,
 } from '@lody/shared/node/local-cli-supervisor';
 import { LODY_AUTH_SITE_URL, LODY_AUTH_URL } from '@/utils/const';
+import { getLodyDataDir } from '@lody/shared/node/installation-profile';
 
 // The reserved Worker exit codes are part of the shared Supervisor<->Worker
 // contract; Electron consumes the same values from @lody/shared.
@@ -96,11 +97,7 @@ const DaemonUpgradeIntentSchema = z
 
 export type DaemonUpgradeIntent = z.infer<typeof DaemonUpgradeIntentSchema>;
 
-export const DAEMON_UPGRADE_INTENT_FILE = path.join(
-  os.homedir(),
-  '.lody',
-  'daemon-upgrade-intent.json'
-);
+export const DAEMON_UPGRADE_INTENT_FILE = path.join(getLodyDataDir(), 'daemon-upgrade-intent.json');
 
 const resolveConvexSiteUrl = (): string | null => {
   if (LODY_AUTH_SITE_URL) {

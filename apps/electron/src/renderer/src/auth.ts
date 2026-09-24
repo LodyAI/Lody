@@ -2,23 +2,27 @@ import { useCallback, useEffect, useSyncExternalStore } from 'react'
 import { electronProxyClient } from '@better-auth/electron/proxy'
 import {
   ElectronDevEmailPasswordSignInInputSchema,
-  isDevEmailPasswordLoginEnabled
+  isDevEmailPasswordLoginEnabled,
+  type ElectronLoginState
 } from '@lody/shared/electron-ipc'
 import {
   clearLocalAuthState,
   createLodyAuthClient,
   type LodyAuthClient
 } from '@lody/components/lib/auth'
-import { getAppWindowLocation } from '@lody/components/lib'
+import { jotaiStore } from '@lody/components/lib'
+import {
+  electronDeepLinkSignInInProgressAtom,
+  electronLoginErrorAtom,
+  electronLoginErrorDetailAtom,
+  electronLoginPhaseAtom
+} from '@lody/components/atoms/index'
 import { readStoredAuthToken } from '@lody/components/lib/auth-bootstrap'
-import { capturePostHogSingleton } from '@lody/components/lib/mobile-resume-analytics'
 import { persistNativeAuthSessionResult as persistAuthSessionResult } from '@lody/components/lib/native-auth-session-sync'
-import { getIpcServices } from '@lody/components/lib/electron-ipc-client'
-import { createAuthCallbackTransaction } from './auth-callback-transaction'
+import { getIpcServices, onIpcEvent } from '@lody/components/lib/electron-ipc-client'
 import { createAuthQueryGeneration } from './auth-query-generation'
 
 const ELECTRON_PROTOCOL_SCHEME = 'lody'
-const SAFE_TELEMETRY_STRING_PATTERN = /^[A-Za-z0-9_.: -]+$/
 const ELECTRON_ACCOUNT_AUTH_METHODS = [
   'listAccounts',
   'updateUser',
@@ -50,70 +54,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
-function getAppVersion(): string {
-  const appInfo = typeof window === 'undefined' ? undefined : window['__LODY_APP_INFO__']
-  const appInfoVersion = appInfo?.app_version ?? appInfo?.version
-  if (typeof appInfoVersion === 'string' && appInfoVersion.length > 0) {
-    return appInfoVersion
-  }
-  if (typeof __APP_VERSION__ === 'string' && __APP_VERSION__.length > 0) {
-    return __APP_VERSION__
-  }
-  return 'unknown'
-}
-
-function normalizeTelemetryString(value: unknown, fallback = 'unknown'): string {
-  if (typeof value !== 'string') {
-    return fallback
-  }
-
-  const normalized = value.trim()
-  if (!normalized) {
-    return fallback
-  }
-  const truncated = normalized.slice(0, 80)
-  return SAFE_TELEMETRY_STRING_PATTERN.test(truncated) ? truncated : fallback
-}
-
-function classifyCallbackURL(value: unknown): 'none' | 'electron_oauth' | 'relative' | 'absolute' {
-  if (typeof value !== 'string' || value.length === 0) {
-    return 'none'
-  }
-  if (value.includes('electron_oauth=1')) {
-    return 'electron_oauth'
-  }
-  if (value.startsWith('/')) {
-    return 'relative'
-  }
-  return 'absolute'
-}
-
-function getElectronAuthTelemetryBase() {
-  const platform = typeof window !== 'undefined' ? window['__LODY_PLATFORM__'] : undefined
-
-  return {
-    login_surface: 'electron_renderer',
-    launch_mode: 'electron',
-    electron_platform: platform?.os ?? 'unknown',
-    app_version: getAppVersion()
-  }
-}
-
-function captureElectronRequestAuthStarted(
-  options: Parameters<ReturnType<typeof getRequestAuthBridge>>[0],
-  usesLoginPageFlow: boolean
-): void {
-  const provider = normalizeTelemetryString(options?.provider, 'none')
-  capturePostHogSingleton('auth/electron_request_auth_started', {
-    ...getElectronAuthTelemetryBase(),
-    provider,
-    uses_login_page_flow: usesLoginPageFlow,
-    provider_forwarded_to_main: !usesLoginPageFlow && provider !== 'none',
-    callback_url_kind: classifyCallbackURL(options?.callbackURL),
-    has_callback_url: typeof options?.callbackURL === 'string' && options.callbackURL.length > 0
-  })
-}
-
 async function withAuthQueryTimeout<T>(label: string, promise: Promise<T>): Promise<T> {
   let timeoutId: ReturnType<typeof setTimeout> | null = null
   const timeoutPromise = new Promise<never>((_resolve, reject) => {
@@ -137,7 +77,8 @@ function getAuthApi() {
   }
   const auth = getIpcServices()!.auth
   return {
-    completeCallback: auth.completeCallback.bind(auth),
+    startLogin: auth.startLogin.bind(auth),
+    getLoginState: auth.getLoginState.bind(auth),
     signInWithDevEmailPassword: auth.signInWithDevEmailPassword.bind(auth),
     signOut: auth.signOut.bind(auth),
     getSession: auth.getSession.bind(auth),
@@ -165,13 +106,6 @@ function getAuthApi() {
       leave: auth.leaveOrganization.bind(auth)
     }
   }
-}
-
-function getRequestAuthBridge() {
-  if (typeof window.requestAuth !== 'function') {
-    throw new Error('window.requestAuth bridge is not available')
-  }
-  return window.requestAuth
 }
 
 function hasResponseError(response: unknown): boolean {
@@ -237,35 +171,6 @@ function withStoredSessionAuthorization(input?: unknown): unknown {
   }
 }
 
-function withSessionAuthorization(token: string): unknown {
-  return {
-    fetchOptions: {
-      headers: {
-        Authorization: `Bearer ${token}`
-      }
-    }
-  }
-}
-
-function readCallbackSessionToken(session: unknown): string {
-  const sessionRecord = isRecord(session)
-    ? isRecord(session.session)
-      ? session.session
-      : null
-    : null
-  const token = sessionRecord?.token
-  if (typeof token !== 'string' || token.length === 0) {
-    throw new Error('Authentication callback session token is missing')
-  }
-  return token
-}
-
-function assertSuccessfulAuthResponse(response: unknown, label: string): void {
-  if (hasResponseError(response)) {
-    throw new Error(`${label} failed during authentication`)
-  }
-}
-
 function createQueryStore<TData>(
   label: string,
   fetcher: () => Promise<unknown>,
@@ -281,6 +186,7 @@ function createQueryStore<TData>(
   let inFlight: Promise<void> | null = null
   let pendingRefetch = false
   let held = false
+  let beforePending: QuerySnapshot<TData> | null = null
   const generation = createAuthQueryGeneration()
   const listeners = new Set<() => void>()
 
@@ -386,6 +292,7 @@ function createQueryStore<TData>(
   }
 
   const beginPending = () => {
+    if (!held) beforePending = snapshot
     generation.advance()
     held = true
     hasLoaded = false
@@ -412,6 +319,13 @@ function createQueryStore<TData>(
       isRefetching: false,
       error: unwrapError(response)
     })
+  }
+
+  const releasePending = () => {
+    if (!held) return
+    const previous = beforePending
+    beforePending = null
+    reset(previous?.data)
   }
 
   const useQuery = (): QueryResult<TData> => {
@@ -445,6 +359,7 @@ function createQueryStore<TData>(
     refetch,
     reset,
     beginPending,
+    releasePending,
     commitResponse
   }
 }
@@ -479,68 +394,45 @@ const refetchAllAuthState = async () => {
   await refetchOrganizationState()
 }
 
-const authCallbackTransaction = createAuthCallbackTransaction(
-  {
-    begin: () => {
-      sessionStore.beginPending()
-      organizationsStore.beginPending()
-      activeOrganizationStore.beginPending()
-    },
-    exchange: async (token: string) => {
-      return await getAuthApi().completeCallback({ token })
-    },
-    persist: persistAuthSessionResult,
-    loadOrganizations: async (session) => {
-      const response = await withAuthQueryTimeout(
-        'listOrganizations',
-        getAuthApi().listOrganizations(withSessionAuthorization(readCallbackSessionToken(session)))
-      )
-      assertSuccessfulAuthResponse(response, 'listOrganizations')
-      return response
-    },
-    loadActiveOrganization: async (session) => {
-      const response = await withAuthQueryTimeout(
-        'getActiveOrganization',
-        getAuthApi().getActiveOrganization(
-          withSessionAuthorization(readCallbackSessionToken(session))
-        )
-      )
-      assertSuccessfulAuthResponse(response, 'getActiveOrganization')
-      return response
-    },
-    commitOrganizations: (organizations, activeOrganization) => {
-      organizationsStore.commitResponse(organizations)
-      activeOrganizationStore.commitResponse(activeOrganization)
-    },
-    commitSession: (session) => sessionStore.commitResponse(session),
-    rollback: () => {
-      sessionStore.reset()
-      organizationsStore.reset()
-      activeOrganizationStore.reset()
-    },
-    onFailure: () => {
-      clearLocalAuthState()
-      void getAuthApi()
-        .signOut()
-        .catch((error) => console.warn('[Auth] Failed to roll back authentication', error))
-    },
-    restartCli: () => {
-      void getIpcServices()
-        ?.cli.restart()
-        .catch((error) => {
-          console.warn('[Auth] Failed to restart CLI after authentication', error)
-        })
-    }
-  },
-  30_000
-)
+let loginRevision = -1
+let loginPhase: ElectronLoginState['phase'] = 'idle'
 
-export async function completeElectronAuthCallback(token: string): Promise<void> {
-  await authCallbackTransaction.complete(token)
-}
-
-export function isElectronAuthCallbackActive(): boolean {
-  return authCallbackTransaction.isActive()
+function applyLoginState(state: ElectronLoginState): void {
+  if (state.revision <= loginRevision) return
+  loginRevision = state.revision
+  loginPhase = state.phase
+  jotaiStore.set(electronLoginPhaseAtom, state.phase)
+  jotaiStore.set(electronLoginErrorAtom, state.error)
+  jotaiStore.set(electronLoginErrorDetailAtom, state.errorDetail)
+  // The initial idle snapshot must not erase a persisted login from a previous run.
+  if (state.revision === 0) return
+  if (state.phase === 'waiting' || state.phase === 'exchanging') {
+    jotaiStore.set(electronDeepLinkSignInInProgressAtom, true)
+    sessionStore.beginPending()
+    organizationsStore.beginPending()
+    activeOrganizationStore.beginPending()
+    return
+  }
+  if (state.session) {
+    organizationsStore.reset()
+    activeOrganizationStore.reset()
+    sessionStore.commitResponse(state.session)
+    // Organization failure is independently retryable; it never rolls back identity.
+    void refetchOrganizationState()
+  } else if (state.phase === 'idle') {
+    sessionStore.reset()
+    organizationsStore.reset()
+    activeOrganizationStore.reset()
+    clearLocalAuthState()
+  } else {
+    sessionStore.releasePending()
+    organizationsStore.releasePending()
+    activeOrganizationStore.releasePending()
+    // An exchange may have reached the server before a transport timeout. Resolve
+    // the durable session once; never redeem its one-time code again.
+    void refetchSessionState()
+  }
+  jotaiStore.set(electronDeepLinkSignInInProgressAtom, false)
 }
 
 let authListenersInitialized = false
@@ -553,6 +445,18 @@ function ensureAuthListeners() {
     return
   }
 
+  onIpcEvent('auth.loginState', applyLoginState)
+  void getAuthApi()
+    .getLoginState()
+    .then(applyLoginState)
+    .catch((error: unknown) => {
+      jotaiStore.set(electronLoginErrorAtom, 'exchange_failed')
+      jotaiStore.set(
+        electronLoginErrorDetailAtom,
+        `getLoginState: ${error instanceof Error ? error.message : String(error)}`
+      )
+    })
+
   window.onUserUpdated(() => {
     void refetchAllAuthState()
   })
@@ -564,65 +468,6 @@ function ensureAuthListeners() {
   }
 
   authListenersInitialized = true
-}
-
-function buildRequestAuthOptions(
-  input: unknown
-): Parameters<ReturnType<typeof getRequestAuthBridge>>[0] {
-  if (!isRecord(input)) {
-    return undefined
-  }
-
-  const result: NonNullable<Parameters<ReturnType<typeof getRequestAuthBridge>>[0]> = {}
-
-  if (typeof input.provider === 'string') {
-    result.provider = input.provider
-  }
-  if (typeof input.callbackURL === 'string') {
-    result.callbackURL = input.callbackURL
-  }
-  if (typeof input.newUserCallbackURL === 'string') {
-    result.newUserCallbackURL = input.newUserCallbackURL
-  }
-  if (typeof input.errorCallbackURL === 'string') {
-    result.errorCallbackURL = input.errorCallbackURL
-  }
-  if (typeof input.disableRedirect === 'boolean') {
-    result.disableRedirect = input.disableRedirect
-  }
-  if (typeof input.requestSignUp === 'boolean') {
-    result.requestSignUp = input.requestSignUp
-  }
-  if (Array.isArray(input.scopes) && input.scopes.every((scope) => typeof scope === 'string')) {
-    result.scopes = input.scopes
-  }
-  if (isRecord(input.additionalData)) {
-    result.additionalData = input.additionalData
-  }
-
-  return result
-}
-
-function shouldUseLoginPageAuthFlow(
-  options: Parameters<ReturnType<typeof getRequestAuthBridge>>[0]
-): boolean {
-  if (!options) {
-    return false
-  }
-
-  if (typeof options.callbackURL === 'string' && options.callbackURL.includes('electron_oauth=1')) {
-    return true
-  }
-
-  if (
-    typeof window !== 'undefined' &&
-    window.__LODY_ELECTRON__ === true &&
-    getAppWindowLocation().pathname === '/login'
-  ) {
-    return true
-  }
-
-  return false
 }
 
 function refetchAfterMutation(response: unknown) {
@@ -639,26 +484,16 @@ function createElectronAuthClientAdapter() {
   return {
     useSession: () => sessionStore.useQuery(),
     getSession: async (options?: unknown) => {
-      const generation = authCallbackTransaction.getGeneration()
+      const generation = loginRevision
       const response = await getAuthApi().getSession(withStoredSessionAuthorization(options))
-      if (authCallbackTransaction.isCurrent(generation)) {
+      if (generation === loginRevision && loginPhase !== 'waiting' && loginPhase !== 'exchanging') {
         persistAuthSessionResult(response)
       }
       return response
     },
     signIn: {
-      social: async (options?: unknown) => {
-        const requestAuth = getRequestAuthBridge()
-        const requestAuthOptions = buildRequestAuthOptions(options)
-        const usesLoginPageFlow = shouldUseLoginPageAuthFlow(requestAuthOptions)
-        captureElectronRequestAuthStarted(requestAuthOptions, usesLoginPageFlow)
-        if (usesLoginPageFlow) {
-          const { provider: _provider, ...restOptions } = requestAuthOptions ?? {}
-          const normalizedOptions = Object.keys(restOptions).length > 0 ? restOptions : undefined
-          await requestAuth(normalizedOptions)
-          return
-        }
-        await requestAuth(requestAuthOptions)
+      social: async (_options?: unknown) => {
+        await getAuthApi().startLogin()
       },
       email: async (input: unknown) => {
         if (
@@ -676,7 +511,6 @@ function createElectronAuthClientAdapter() {
       }
     },
     signOut: async () => {
-      authCallbackTransaction.cancel()
       try {
         await getAuthApi().signOut()
       } finally {

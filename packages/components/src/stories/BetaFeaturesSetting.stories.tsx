@@ -6,49 +6,45 @@ import {
   developerModeEnabledAtom,
   inboxBetaEnabledAtom,
   inboxFeatureEnabledAtom,
-  tasksBetaEnabledAtom,
-  tasksFeatureEnabledAtom,
+  semanticShortcutsBetaEnabledAtom,
+  semanticShortcutsFeatureEnabledAtom,
 } from '@/atoms/settings';
 import { settingContainerClass } from '@/components/settings';
 
 /**
  * The section is invisible unless Developer mode is on, so the interesting
- * states cover each independent beta opt-in plus the derived gates consumed by
- * their product surfaces.
+ * states cover the remaining independent beta opt-in plus its derived gate.
  */
 function GateReadout() {
-  const tasksEnabled = useAtomValue(tasksFeatureEnabledAtom);
   const inboxEnabled = useAtomValue(inboxFeatureEnabledAtom);
+  const semanticEnabled = useAtomValue(semanticShortcutsFeatureEnabledAtom);
   return (
     <div className="mt-3 space-y-1 text-xs text-muted-foreground">
-      <p>
-        <span className="font-mono">tasksFeatureEnabledAtom</span> ={' '}
-        <span className="font-mono font-semibold">{String(tasksEnabled)}</span>
-      </p>
       <p>
         <span className="font-mono">inboxFeatureEnabledAtom</span> ={' '}
         <span className="font-mono font-semibold">{String(inboxEnabled)}</span>
       </p>
+      <p>Pointer-aware close shortcut: {String(semanticEnabled)}</p>
     </div>
   );
 }
 
 function Harness({
   developerMode,
-  tasksBeta,
   inboxBeta,
+  semanticShortcuts = false,
 }: {
   developerMode: boolean;
-  tasksBeta: boolean;
   inboxBeta: boolean;
+  semanticShortcuts?: boolean;
 }) {
   // Seeded once per story: a store rebuilt on every render would throw away the
   // switch the viewer just clicked.
   const [store] = useState(() => {
     const next = createStore();
     next.set(developerModeEnabledAtom, developerMode);
-    next.set(tasksBetaEnabledAtom, tasksBeta);
     next.set(inboxBetaEnabledAtom, inboxBeta);
+    next.set(semanticShortcutsBetaEnabledAtom, semanticShortcuts);
     return next;
   });
 
@@ -71,24 +67,19 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 
-/** Developer mode off: the section and both beta features are absent. */
+/** Developer mode off: the section and remaining beta features are absent. */
 export const DeveloperModeOff: Story = {
-  args: { developerMode: false, tasksBeta: false, inboxBeta: false },
+  args: { developerMode: false, inboxBeta: false },
 };
 
-/** Developer mode on: both switches are offered, but both features stay hidden. */
+/** Developer mode on: the Inbox switch is offered, but the feature stays hidden. */
 export const AvailableNotEnabled: Story = {
-  args: { developerMode: true, tasksBeta: false, inboxBeta: false },
-};
-
-/** Developer mode and the Tasks opt-in are the only combination that enables Tasks. */
-export const TasksBetaEnabled: Story = {
-  args: { developerMode: true, tasksBeta: true, inboxBeta: false },
+  args: { developerMode: true, inboxBeta: false },
 };
 
 /** Inbox can be enabled independently while Developer mode stays on. */
 export const InboxBetaEnabled: Story = {
-  args: { developerMode: true, tasksBeta: false, inboxBeta: true },
+  args: { developerMode: true, inboxBeta: true },
 };
 
 /**
@@ -96,5 +87,9 @@ export const InboxBetaEnabled: Story = {
  * the choices are restored when Developer mode comes back.
  */
 export const OptInRetainedWhileHidden: Story = {
-  args: { developerMode: false, tasksBeta: true, inboxBeta: true },
+  args: { developerMode: false, inboxBeta: true },
+};
+
+export const SemanticShortcutsEnabled: Story = {
+  args: { developerMode: true, inboxBeta: false, semanticShortcuts: true },
 };

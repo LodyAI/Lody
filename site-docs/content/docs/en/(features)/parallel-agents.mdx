@@ -8,10 +8,9 @@ once, each with its own conversation. When a session uses a [worktree](/docs/wor
 for GitHub, and available for local projects — that session also gets its own working directory, so
 agents can change files side by side without colliding.
 
-People searching for a “Claude Code team” or “parallel coding agents” usually want that setup —
-several agents working at the same time, in one place teammates can see. Lody is that place, not a
-Claude-only product. You can run Claude Code next to Codex, Kimi, DeepSeek, or any
-[ACP](/docs/cli-runtimes) runtime in the same workspace.
+Run several Claude Code sessions, or use Claude Code alongside Codex, Kimi, Grok, DeepSeek,
+or another [ACP](/docs/cli-runtimes) runtime. To have agents delegate tasks, exchange context,
+and review each other's changes, follow the [multi-agent collaboration guide](/docs/agent-collaboration/).
 
 See also [Agent Config](/docs/agents), [Team Features](/docs/team),
 [Share a Coding Agent Session](/docs/session-handoff), and
@@ -109,8 +108,8 @@ never sync those conversations into other members' sidebars. See [Team Features]
 
 ### Can one agent start the others?
 
-Yes, through [Agent Session Control](/docs/session-orchestration), when **Developer mode** and the
-**Tasks** beta are on. Ask one conversation to create focused sessions, watch them, and summarize.
+Yes, through [Agent Session Control](/docs/session-orchestration). Ask one conversation to create
+focused sessions, exchange messages with other Agents, follow up on their work, and summarize.
 This is bounded to Lody conversation data — not a general background scheduler.
 
 ### When should I hand off instead of starting another agent?

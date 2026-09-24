@@ -1,15 +1,7 @@
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/ui/button';
-import {
-  AlertCircle,
-  Book,
-  CheckCircle2,
-  Github,
-  ArrowUpRight,
-  Loader2,
-  Lock,
-  Search,
-} from 'lucide-react';
+import { AlertCircle, Book, CheckCircle2, Github, ArrowUpRight, Lock, Search } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import { useCloudAction, useCloudMutation } from '@lody/platform/react';
 import { useAtomValue } from 'jotai';
 import { currentWorkspaceSlugAtom } from '@/atoms';
@@ -119,14 +111,14 @@ export function GitHubPersonalIdentitySettingsCard({
           )}
           <div className="min-w-0">
             {authorizationReady ? (
-              <p className="truncate text-[0.95rem] font-semibold tracking-tight text-foreground">
+              <p className="truncate text-[0.95rem] font-normal tracking-tight text-foreground">
                 {profile?.login
                   ? `@${profile.login}`
                   : t('settings.integrations.github.personalIdentityAuthorized', 'Connected')}
               </p>
             ) : (
               <>
-                <p className="text-[0.9rem] font-medium text-foreground">
+                <p className="text-[0.9rem] font-normal text-foreground">
                   {t(
                     'settings.integrations.github.personalIdentityNeedsAuth',
                     'Authorization needed'
@@ -150,11 +142,7 @@ export function GitHubPersonalIdentitySettingsCard({
             onClick={onAuthorize}
             disabled={!workspaceReady || authorizing}
           >
-            {authorizing ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            ) : (
-              <Github className="h-3.5 w-3.5" />
-            )}
+            {authorizing ? <Spinner className="h-3.5 w-3.5" /> : <Github className="h-3.5 w-3.5" />}
             {t('settings.integrations.github.personalIdentityAuthorize', 'Authorize')}
           </Button>
         )}
@@ -166,7 +154,7 @@ export function GitHubPersonalIdentitySettingsCard({
     <div className="pt-3">
       <div className="flex items-center justify-between gap-3">
         <div className="min-w-0">
-          <p className="text-sm font-medium leading-tight text-foreground">
+          <p className="text-sm font-normal leading-tight text-foreground">
             {t('settings.integrations.github.personalIdentityRowLabel', 'Act as you')}
           </p>
           <p className="mt-1 text-xs leading-tight text-muted-foreground">
@@ -178,7 +166,7 @@ export function GitHubPersonalIdentitySettingsCard({
         </div>
         <div className="flex shrink-0 items-center">
           {updating ? (
-            <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+            <Spinner className="h-4 w-4 text-muted-foreground" />
           ) : (
             <Switch
               checked={enabled}
@@ -215,14 +203,14 @@ export function GitHubPersonalIdentitySettingsCard({
             )}
             <div className="min-w-0">
               {authorizationReady ? (
-                <p className="truncate text-base font-semibold tracking-tight text-foreground">
+                <p className="truncate text-base font-normal tracking-tight text-foreground">
                   {profile?.login
                     ? `@${profile.login}`
                     : t('settings.integrations.github.personalIdentityAuthorized', 'Connected')}
                 </p>
               ) : (
                 <>
-                  <p className="text-sm font-medium text-foreground">
+                  <p className="text-sm font-normal text-foreground">
                     {t(
                       'settings.integrations.github.personalIdentityNeedsAuth',
                       'Authorization needed'
@@ -247,7 +235,7 @@ export function GitHubPersonalIdentitySettingsCard({
               disabled={!workspaceReady || authorizing}
             >
               {authorizing ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                <Spinner className="h-3.5 w-3.5" />
               ) : (
                 <Github className="h-3.5 w-3.5" />
               )}
@@ -309,7 +297,9 @@ function CloudIntegrationsSettings() {
   const setPersonalOperationPreference = useCloudMutation(
     cloudOperations.github.setPersonalOperationPreference
   );
-  const refreshPersonalGitHubProfile = useCloudAction(cloudOperations.github.refreshPersonalGitHubProfile);
+  const refreshPersonalGitHubProfile = useCloudAction(
+    cloudOperations.github.refreshPersonalGitHubProfile
+  );
   const [connectingToGitHub, setConnectingToGitHub] = useState(false);
   const [updatingPersonalPreference, setUpdatingPersonalPreference] = useState(false);
   const [authorizingPersonalGitHub, setAuthorizingPersonalGitHub] = useState(false);
@@ -558,7 +548,7 @@ function CloudIntegrationsSettings() {
               <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary/[0.15] text-primary">
                 <Github className="h-[1.05rem] w-[1.05rem]" />
               </div>
-              <p className="text-sm font-medium text-foreground">GitHub App</p>
+              <p className="text-sm font-normal text-foreground">GitHub App</p>
             </div>
             <div className="flex shrink-0 items-center gap-2">
               {canManage && (
@@ -571,9 +561,7 @@ function CloudIntegrationsSettings() {
                   }}
                   disabled={showGitHubConnectSpinner || !workspaceAuthReady}
                 >
-                  {showGitHubConnectSpinner ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  ) : null}
+                  {showGitHubConnectSpinner ? <Spinner className="h-3.5 w-3.5" /> : null}
                   {t('settings.integrations.github.connect')}
                   {!showGitHubConnectSpinner ? <ArrowUpRight className="h-3.5 w-3.5" /> : null}
                 </Button>
@@ -609,19 +597,19 @@ function CloudIntegrationsSettings() {
 
         <div className="rounded-lg bg-foreground/[0.03] p-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <span className="text-sm font-semibold text-foreground">
+            <span className="text-sm font-normal text-foreground">
               {t('settings.integrations.github.authorizedReposTitle', 'Authorized Repositories')}
             </span>
             {repos.length > 0 && (
               <span className="text-xs tabular-nums text-muted-foreground">
                 {searchQuery && filteredRepos.length !== repos.length ? (
                   <>
-                    <span className="font-medium text-foreground/80">{filteredRepos.length}</span>
+                    <span className="font-normal text-foreground/80">{filteredRepos.length}</span>
                     {` / ${repos.length} ${t('settings.integrations.github.repoBadge')}`}
                   </>
                 ) : (
                   <>
-                    <span className="font-medium text-foreground/80">{enabledCount}</span>
+                    <span className="font-normal text-foreground/80">{enabledCount}</span>
                     {` / ${repos.length} ${t('settings.integrations.github.repoBadge')}`}
                   </>
                 )}
@@ -649,7 +637,7 @@ function CloudIntegrationsSettings() {
             >
               {workspaceReposLoading ? (
                 <div className="flex items-center justify-center gap-2 p-6 text-sm text-muted-foreground">
-                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <Spinner className="h-4 w-4" />
                   {t('settings.integrations.github.loading')}
                 </div>
               ) : repos.length === 0 ? (
@@ -679,7 +667,7 @@ function CloudIntegrationsSettings() {
                           {repo.repoFullName}
                         </span>
                         {repo.private && (
-                          <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-border/60 px-1.5 py-0 text-[10px] font-medium text-muted-foreground">
+                          <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-border/60 px-1.5 py-0 text-[10px] font-normal text-muted-foreground">
                             <Lock className="h-2.5 w-2.5" />
                             {t('settings.integrations.github.private')}
                           </span>

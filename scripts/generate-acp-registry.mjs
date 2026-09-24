@@ -10,10 +10,11 @@ const EXCLUDED_REMOTE_REGISTRY_AGENT_IDS = new Set([
   'claude-p',
   'codex-acp',
   'grok-build',
+  'pi-acp',
 ]);
 const OFFICIAL_NPM_REGISTRY = 'https://registry.npmjs.org/';
 const MAX_REGISTRY_ICON_BYTES = 256 * 1024;
-const EXTRA_REMOTE_REGISTRY_ICON_IDS = ['grok-build'];
+const EXTRA_REMOTE_REGISTRY_ICON_IDS = ['grok-build', 'pi-acp'];
 const LOCAL_ONLY_REGISTRY_ICON_IDS = ['reasonix'];
 const INTERACTIVE_CLAUDE_ACP_VERSION = '0.1.5';
 const INTERACTIVE_CLAUDE_REGISTRY_AGENT = {
@@ -219,6 +220,12 @@ function normalizeRegistryAgent(agent) {
   if (!distribution) {
     console.log(`Skipping agent '${id}' due to invalid or missing supported distribution`);
     return null;
+  }
+
+  if (id === 'factory-droid' && distribution.npx?.args) {
+    distribution.npx.args = distribution.npx.args.map((arg) =>
+      arg === 'acp-daemon' ? 'acp' : arg
+    );
   }
 
   return {
@@ -489,7 +496,7 @@ import type { RegistryAcpAgent } from '../ai';
 
 export const ACP_REGISTRY_SOURCE_URL = '${REGISTRY_URL}';
 export const ACP_REGISTRY_GENERATED_AT = '${generatedAt}';
-export const EXCLUDED_REMOTE_REGISTRY_AGENT_IDS = ['claude-acp', 'claude-p', 'codex-acp', 'grok-build'] as const;
+export const EXCLUDED_REMOTE_REGISTRY_AGENT_IDS = ${JSON.stringify([...EXCLUDED_REMOTE_REGISTRY_AGENT_IDS])} as const;
 
 export const HARDCODED_REGISTRY_ACP_AGENTS: RegistryAcpAgent[] = ${toTsObjectLiteral([
     INTERACTIVE_CLAUDE_REGISTRY_AGENT,

@@ -114,6 +114,8 @@ FOO=from-file
     expect(inferAgentConfigCliType('codex')).toBe('builtin');
     expect(inferAgentConfigCliType('claude')).toBe('builtin');
     expect(inferAgentConfigCliType('grok')).toBe('builtin');
+    expect(inferAgentConfigCliType('bub')).toBe('builtin');
+    expect(inferAgentConfigCliType('dimcode')).toBe('builtin');
     expect(inferAgentConfigCliType('claude-p')).toBe('registry');
     expect(inferAgentConfigCliType('opencode')).toBe('registry');
     expect(inferAgentConfigCliType('kimi')).toBe('registry');

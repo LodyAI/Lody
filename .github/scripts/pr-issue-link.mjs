@@ -46,10 +46,25 @@ function parseIssueLine(line) {
   };
 }
 
-export function hasRelatedIssueLink(body) {
+export function relatedIssueNumbers(body) {
   const lines = (body ?? '').split(/\r?\n/);
   const range = relatedIssueSectionRange(lines);
-  return Boolean(range && lines.slice(range.start, range.end).some(parseIssueLine));
+  if (!range) {
+    return [];
+  }
+
+  const numbers = [];
+  for (const line of lines.slice(range.start, range.end)) {
+    const parsed = parseIssueLine(line);
+    if (parsed) {
+      numbers.push(parsed.issueNumber);
+    }
+  }
+  return numbers;
+}
+
+export function hasRelatedIssueLink(body) {
+  return relatedIssueNumbers(body).length > 0;
 }
 
 export function normalizeRelatedIssueLink(body) {

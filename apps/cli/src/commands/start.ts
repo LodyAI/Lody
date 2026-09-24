@@ -222,6 +222,7 @@ export const startCommand = new Command('start')
     const cliDetectionStartedAt = Date.now();
     const cliAvailability = {
       kimi: 'managed-runtime',
+      pi: 'managed-runtime',
       grok: 'managed-runtime',
       claude: checkClaude(),
       codex: checkCodex(),

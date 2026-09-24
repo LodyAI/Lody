@@ -11,6 +11,7 @@ import {
   getChatLandingHintType,
   getChatLandingInitialDataLoading,
   getChatLandingLocalProjectAvailability,
+  shouldReportLocalProjectUnavailable,
   getChatLandingProjectRecency,
   getChatLandingSelectedMachineProjectStatus,
   getChatLandingSubmitDisabled,
@@ -705,6 +706,41 @@ describe('getChatLandingLocalProjectAvailability', () => {
   });
 });
 
+describe('shouldReportLocalProjectUnavailable', () => {
+  it('suppresses the transient unavailable state while a project removal is active', () => {
+    expect(
+      shouldReportLocalProjectUnavailable({
+        availability: 'unavailable',
+        removalInProgress: true,
+      })
+    ).toBe(false);
+  });
+
+  it('still reports a genuinely unavailable project', () => {
+    expect(
+      shouldReportLocalProjectUnavailable({
+        availability: 'unavailable',
+        removalInProgress: false,
+      })
+    ).toBe(true);
+  });
+
+  it('does not report pending or available projects', () => {
+    expect(
+      shouldReportLocalProjectUnavailable({
+        availability: 'pending',
+        removalInProgress: false,
+      })
+    ).toBe(false);
+    expect(
+      shouldReportLocalProjectUnavailable({
+        availability: 'available',
+        removalInProgress: false,
+      })
+    ).toBe(false);
+  });
+});
+
 describe('getChatLandingBranchSelectorState', () => {
   it('shows the branch selector for github context', () => {
     expect(
@@ -1071,7 +1107,7 @@ describe('buildChatLandingPreSelectionKey', () => {
 });
 
 describe('parseChatLandingSearch', () => {
-  it('keeps the string search params the chat route understands', () => {
+  it('keeps selection params without reviving the removed draft-reset command', () => {
     expect(
       parseChatLandingSearch({
         context: 'local',
@@ -1085,7 +1121,6 @@ describe('parseChatLandingSearch', () => {
       machine: 'machine-1',
       project: 'local-project-1',
       repo: 'owner/repo',
-      resetDraftKey: 'r1',
     });
   });
 
@@ -1102,7 +1137,6 @@ describe('parseChatLandingSearch', () => {
       machine: undefined,
       project: undefined,
       repo: undefined,
-      resetDraftKey: undefined,
     });
   });
 });

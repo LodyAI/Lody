@@ -1,12 +1,11 @@
+import type { LocalFileResolution } from '@lody/shared/local-file-preview';
 import { createHash } from 'node:crypto';
 import { open } from 'node:fs/promises';
 import { promisify } from 'node:util';
 import { gzip } from 'node:zlib';
 import {
-  FILE_PREVIEW_LOCAL_PAYLOAD_BUDGET_BYTES,
   FILE_PREVIEW_PROTOCOL_VERSION,
   FILE_PREVIEW_V3_LIMITS,
-  FILE_PREVIEW_V3_LOCAL_LIMITS,
   filePreviewV3Error,
   getImageMimeTypeForPath,
   isBinaryImagePath,
@@ -58,22 +57,6 @@ export type FilePreviewServiceOptions = {
   readonly extraRoots?: readonly string[];
 };
 
-export type FilePreviewRequestOptions = {
-  /**
-   * Available exclusively to the Electron same-machine IPC handler. This is
-   * intentionally transport context, not part of File Preview v3's request
-   * schema, so a Loro Streams request can never widen its readable roots.
-   */
-  readonly allowArbitraryPaths?: boolean;
-  /**
-   * Same-machine IPC: the reply never crosses a network, so the transport-shaped
-   * budgets (gzip ceiling, 10 MiB text) are replaced by `FILE_PREVIEW_V3_LOCAL_LIMITS`
-   * and the text ships uncompressed. Same transport-only context as above — a
-   * Streams request must never be able to ask for it.
-   */
-  readonly sameMachine?: boolean;
-};
-
 /**
  * File Preview v3: read one file and return it.
  *
@@ -91,15 +74,32 @@ export class FilePreviewService {
     this.limits = { ...FILE_PREVIEW_V3_LIMITS, ...deps.limits };
   }
 
-  async previewFile(
-    request: FilePreviewV3Request,
-    options: FilePreviewRequestOptions = {}
-  ): Promise<FilePreviewV3Response> {
-    // Explicit per-request limits rather than a second service instance: the
-    // same session can be previewed over both transports.
-    const limits = options.sameMachine
-      ? { ...FILE_PREVIEW_V3_LOCAL_LIMITS, ...this.deps.limits }
-      : this.limits;
+  /** Local IPC resolves identity; Electron owns content IO and resource lifetime. */
+  async resolveLocalFile(
+    request: FilePreviewV3Request
+  ): Promise<LocalFileResolution | import('@lody/shared').FilePreviewV3Error> {
+    const workspace = await this.deps.resolveWorkspace(request.sessionId as SessionId);
+    if (!workspace.ok) return filePreviewV3Error(workspace.code, { message: workspace.message });
+    const resolution = resolveFilePreviewPath({
+      workspaceRoot: workspace.workspaceRoot,
+      requestedPath: request.path,
+      options: { ...this.deps.pathPolicy, allowArbitraryPaths: true },
+    });
+    if (!resolution.ok)
+      return filePreviewV3Error(resolution.rejection.code, {
+        message: resolution.rejection.message,
+        path: request.path,
+      });
+    return {
+      status: 'local-file',
+      path: resolution.resolved.reportedPath,
+      absolutePath: resolution.resolved.absolutePath,
+      external: resolution.resolved.external,
+    };
+  }
+
+  async previewFile(request: FilePreviewV3Request): Promise<FilePreviewV3Response> {
+    const limits = this.limits;
     const workspace = await this.deps.resolveWorkspace(request.sessionId as SessionId);
     if (!workspace.ok) {
       return filePreviewV3Error(workspace.code, {
@@ -115,7 +115,6 @@ export class FilePreviewService {
       ...(this.deps.extraRoots === undefined ? {} : { extraRoots: this.deps.extraRoots }),
       options: {
         ...this.deps.pathPolicy,
-        ...(options.allowArbitraryPaths ? { allowArbitraryPaths: true } : {}),
       },
     });
     if (!resolution.ok) {
@@ -197,7 +196,7 @@ export class FilePreviewService {
     // extension also forces the binary path so an image whose header happens to
     // avoid NULs still ships as bytes rather than as mojibake text.
     if (isImageByName || hasBinaryNul(bytes)) {
-      return this.binaryOk(resolved, bytes, digest, limits, options.sameMachine === true);
+      return this.binaryOk(resolved, bytes, digest, limits);
     }
 
     let text: string;
@@ -206,7 +205,7 @@ export class FilePreviewService {
     } catch {
       // Not valid UTF-8 and no NUL in the sniff window: still not previewable as
       // text, so hand it back as binary bytes and let the viewer decide.
-      return this.binaryOk(resolved, bytes, digest, limits, options.sameMachine === true);
+      return this.binaryOk(resolved, bytes, digest, limits);
     }
 
     let content: FilePreviewV3Content;
@@ -218,23 +217,6 @@ export class FilePreviewService {
         path: resolved.reportedPath,
         sizeBytes: bytes.byteLength,
         limitBytes: limits.maxCompressedBytes,
-      });
-    }
-
-    // The same-machine reply still crosses one transport, and its client
-    // DESTROYS a body past `FILE_PREVIEW_LOCAL_IPC_RESPONSE_LIMIT_BYTES` — which
-    // surfaces as a retryable I/O error, not as this honest verdict. Size caps
-    // cannot predict that for text (JSON escaping is data-dependent), so the
-    // encoded payload is measured.
-    const payloadOverflow = options.sameMachine
-      ? measurePayloadOverflow(content, FILE_PREVIEW_LOCAL_PAYLOAD_BUDGET_BYTES)
-      : null;
-    if (payloadOverflow !== null) {
-      return filePreviewV3Error('too_large', {
-        message: 'File is too large to preview.',
-        path: resolved.reportedPath,
-        sizeBytes: bytes.byteLength,
-        limitBytes: FILE_PREVIEW_LOCAL_PAYLOAD_BUDGET_BYTES,
       });
     }
 
@@ -258,8 +240,7 @@ export class FilePreviewService {
     resolved: ResolvedPreviewPath,
     bytes: Uint8Array,
     digest: FilePreviewV3Digest,
-    limits: FilePreviewV3Limits,
-    sameMachine: boolean
+    limits: FilePreviewV3Limits
   ): FilePreviewV3Response {
     if (bytes.byteLength > limits.maxBinaryBytes) {
       return filePreviewV3Error('too_large', {
@@ -270,14 +251,6 @@ export class FilePreviewService {
       });
     }
     const data = Buffer.from(bytes).toString('base64');
-    if (sameMachine && data.length > FILE_PREVIEW_LOCAL_PAYLOAD_BUDGET_BYTES) {
-      return filePreviewV3Error('too_large', {
-        message: 'Binary file is too large to preview.',
-        path: resolved.reportedPath,
-        sizeBytes: bytes.byteLength,
-        limitBytes: FILE_PREVIEW_LOCAL_PAYLOAD_BUDGET_BYTES,
-      });
-    }
     const mimeType = getImageMimeTypeForPath(resolved.reportedPath);
     return {
       status: 'ok',
@@ -312,23 +285,6 @@ export class FilePreviewService {
       compressedBytes: compressed.byteLength,
     };
   }
-}
-
-/**
- * How much the encoded content overruns `budgetBytes`, or `null` when it fits.
- *
- * Text is measured through `JSON.stringify` because that is exactly what the
- * transport will do to it, and escaping is data-dependent — a file of newlines
- * doubles, one of control bytes sextuples, so no raw-size cap can stand in for
- * this. Base64 payloads are already the encoded string, so their length is the
- * answer. Only the same-machine path pays for this measurement.
- */
-function measurePayloadOverflow(content: FilePreviewV3Content, budgetBytes: number): number | null {
-  const encodedBytes =
-    content.encoding === 'utf8-plain'
-      ? Buffer.byteLength(JSON.stringify(content.text), 'utf8')
-      : content.data.length;
-  return encodedBytes > budgetBytes ? encodedBytes - budgetBytes : null;
 }
 
 /**

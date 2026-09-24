@@ -6,10 +6,10 @@ import {
   Copy,
   Download,
   Laptop,
-  Loader2,
   Terminal,
   TerminalSquare,
 } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 import { useConvexErrorMessage } from '@/hooks/use-convex-error-message';
@@ -157,7 +157,7 @@ export function MachinePairingDialog({
 
             {creating ? (
               <div className="flex min-h-40 items-center justify-center text-muted-foreground">
-                <Loader2 className="h-5 w-5 animate-spin" aria-hidden="true" />
+                <Spinner className="h-5 w-5" aria-hidden="true" />
               </div>
             ) : createError ? (
               <div className="flex min-h-40 flex-col items-center justify-center gap-3 text-center">
@@ -257,10 +257,7 @@ export function MachinePairingDialog({
                     {t('machinePairing.preparingAgents', 'Preparing agent configuration…')}
                   </p>
                 </div>
-                <Loader2
-                  className="h-4 w-4 animate-spin text-muted-foreground"
-                  aria-hidden="true"
-                />
+                <Spinner className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
               </div>
             ) : (
               <div className="flex min-h-40 flex-col items-center justify-center gap-3 text-center">

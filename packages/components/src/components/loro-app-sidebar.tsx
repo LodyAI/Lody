@@ -1,5 +1,25 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { openSessionOnModifiedClick } from '@/lib/desktop-window';
+import { usePostHog } from '@posthog/react';
+import { capturePostHogEvent } from '@/lib/posthog-analytics';
+import { SessionWindowMenuItem } from './session-window-menu-item';
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { startSessionMentionDrag } from '@/lib/session-mention-drag';
+import {
+  closestCenter,
+  DndContext,
+  type DragEndEvent,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+} from '@dnd-kit/core';
+import {
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import { useSidebarKeyboardNav } from '@/hooks/use-sidebar-keyboard-nav';
 import { useLocation, useRouter } from '@tanstack/react-router';
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
@@ -54,8 +74,6 @@ import { docMetaCacheScopeAtom } from '@/atoms/doc-meta';
 import { useWorkspaceRouteTargetSlug } from '../providers/workspace-route-target';
 import { resolveWorkspaceDataScope } from '@/lib/workspace-data-scope';
 
-import { tasksFeatureEnabledAtom } from '@/atoms/settings';
-import { taskQuickAddOpenAtom, taskQuickAddStatusAtom } from '@/atoms/tasks';
 import { lodyConnectionUiStateAtom } from '@/atoms/control-connection';
 import { localMachineIdAtom } from '@/atoms/local-probe';
 import { getLocalProjectVisibilityKey } from '@/lib/visible-local-project-index';
@@ -67,6 +85,8 @@ import {
   chatsCollapsedAtom,
   githubWorktreesSectionCollapsedAtom,
   localProjectCollapseStateAtom,
+  localProjectOrderAtom,
+  moveLocalProjectOrder,
   localProjectsSectionCollapseStateAtom,
   pinnedSectionCollapsedAtom,
   repoCollapseStateAtom,
@@ -74,6 +94,7 @@ import {
   sidebarCollapsedAtom,
   sidebarLastWidthAtom,
   sidebarOrganizeModeAtom,
+  sidebarUpdatedShowProjectNamesAtom,
   sidebarUpdatedBucketCollapseStateAtom,
   sidebarUpdatedBucketShowFullStateAtom,
   type SidebarOrganizeMode,
@@ -97,6 +118,7 @@ import {
   type LoroSidebarLabels,
   type LoroSidebarWorkspace,
 } from '@/components/loro-sidebar';
+import { SidebarFilterPopover } from '@/components/sidebar-filter-popover';
 import {
   Dialog,
   DialogContent,
@@ -118,6 +140,8 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
 import { FocusScope, useListKeyboardNavigation } from '@/ui/focus-scope';
 import { SwipeActionRow } from '@/components/shared/swipe-action-row';
 import {
+  getSidebarGroupSpacingClass,
+  MAX_VISIBLE_SESSIONS,
   SessionList,
   shallowEqualExceptKeys,
   type SessionListPullRequestOpen,
@@ -148,9 +172,9 @@ import {
   FolderPlus,
   Link2,
   LockKeyhole,
-  Loader2,
   Mail,
   FolderOpen,
+  GripVertical,
   Monitor,
   MoreHorizontal,
   Settings2,
@@ -161,6 +185,7 @@ import {
   Trash2,
   Users,
 } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import { toast } from 'sonner';
 import { useOnlineMachineIds } from '@/hooks/use-machine-online-status';
 import { useStableNow } from '@/hooks/use-stable-now';
@@ -180,6 +205,7 @@ import {
 } from '@/components/sidebar-row-shared';
 import {
   buildOpenedBySessionTree,
+  countOpenedByTreeRoots,
   hasOpenedByTreeNesting,
   normalizeSessionRowId,
 } from '@/lib/session-opened-by-tree';
@@ -189,6 +215,7 @@ import type { SessionSharingState } from '@/lib/session-sharing';
 import { useSessionSharing } from '@/hooks/use-session-sharing';
 import {
   buildSidebarNavigationItems,
+  getLocalProjectSessionGroupKey,
   type SidebarNavigationLocalSection,
 } from '@/components/sidebar-navigation-model';
 import {
@@ -227,6 +254,8 @@ export type RemoveLocalProjectDialogProps = {
   onOpenChange: (open: boolean) => void;
   onPreflightCleanup: () => Promise<LocalProjectWorktreeCleanupPreflightResult>;
   onConfirm: (options: { cleanupWorktrees: boolean }) => void;
+  /** Nested inside another dialog (desktop settings). Matches MCP's overlay. */
+  overlayClassName?: string;
 };
 
 type PendingSessionShare = {
@@ -250,6 +279,7 @@ export function RemoveLocalProjectDialog({
   onOpenChange,
   onPreflightCleanup,
   onConfirm,
+  overlayClassName,
 }: RemoveLocalProjectDialogProps) {
   const { t } = useTranslation();
   const [cleanupWorktrees, setCleanupWorktrees] = useState(false);
@@ -297,7 +327,7 @@ export function RemoveLocalProjectDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className="sm:max-w-lg" overlayClassName={overlayClassName}>
         <DialogHeader>
           <DialogTitle>
             {t('sidebar.localProjects.remove.title', 'Remove “{{name}}” from Lody?', {
@@ -381,7 +411,7 @@ export function RemoveLocalProjectDialog({
               <div className="mt-3 border-t pt-3 text-xs">
                 {isPreflighting ? (
                   <p className="flex items-center gap-2">
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    <Spinner className="h-3.5 w-3.5" />
                     {t(
                       'sidebar.localProjects.remove.checkingWorktrees',
                       'Checking each worktree for changes…'
@@ -431,7 +461,7 @@ export function RemoveLocalProjectDialog({
             disabled={isRemoving || cleanupBlocked}
             onClick={() => onConfirm({ cleanupWorktrees })}
           >
-            {isRemoving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+            {isRemoving ? <Spinner className="h-4 w-4" /> : null}
             {isRemoving
               ? t('common.processing', 'Processing...')
               : t('sidebar.localProjects.remove.confirm', 'Remove project')}
@@ -491,16 +521,6 @@ function isHomeRoute(pathname: string, workspaceSlug: string | null): boolean {
       : pathname;
 
   return normalizedPath.startsWith('/chat');
-}
-
-function isTasksRoute(pathname: string, workspaceSlug: string | null): boolean {
-  const workspacePrefix = workspaceSlug ? `/${workspaceSlug}` : '';
-  const normalizedPath =
-    workspaceSlug && pathname.startsWith(workspacePrefix)
-      ? pathname.slice(workspacePrefix.length) || '/'
-      : pathname;
-
-  return normalizedPath.startsWith('/tasks');
 }
 
 function isArchiveRoute(pathname: string, workspaceSlug: string | null): boolean {
@@ -642,7 +662,7 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
     if (!canRename) return;
     setRenameTarget({ sessionId: session.id, initialTitle: title });
   }, [canRename, session.id, title]);
-  const titleContent = <span className="truncate">{title}</span>;
+  const titleContent = <span className="truncate font-normal">{title}</span>;
   // Copy URL is always available (a private link still works for the owner);
   // sharing is a separate menu item that only appears when the conversation
   // isn't already team-visible.
@@ -682,12 +702,11 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
           !isMobile &&
           'hover:bg-sidebar-hover data-[menu-open]:bg-sidebar-hover',
         showSelectedState &&
-          'border-sidebar-foreground/10 bg-sidebar-foreground/10 text-sidebar-foreground hover:bg-sidebar-foreground/10',
-        showSelectedState
-          ? 'text-sidebar-selection-foreground'
-          : 'text-sidebar-foreground dark:text-sidebar-foreground/75'
+          'bg-sidebar-selection text-sidebar-selection-foreground hover:bg-sidebar-selection',
+        showSelectedState ? 'text-sidebar-selection-foreground' : 'text-sidebar-foreground'
       )}
-      onClick={() => {
+      onClick={(event) => {
+        if (openSessionOnModifiedClick(event, session.id)) return;
         onNavigate(session.id);
       }}
       onKeyDown={(event) => {
@@ -698,15 +717,12 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
     >
       <div className="flex items-center gap-1.5">
         <SessionRowLeadingSlot
-          isWaitingPermission={isWaitingPermission}
-          isWorking={isWorking}
-          hasUnreadMessages={hasUnreadMessages}
           showMenuButton={hasContextMenuActions}
           menuLabel={moreActionsLabel}
           openedByTree={openedByTree}
         />
         <div
-          className="min-w-0 flex-1 flex items-center gap-1 truncate text-sm text-current"
+          className="min-w-0 flex-1 flex items-center gap-1 truncate text-[0.9em] text-current"
           // Double-click to rename is scoped to the title only, so it can't be
           // triggered by double-clicking the Archive confirm button.
           onDoubleClick={(event) => {
@@ -725,7 +741,7 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
         {/* ③ A relative time on mobile only (no hover info card on touch); on desktop
             the time / branch live in the hover info card, so nothing sits here. */}
         {isMobile ? (
-          <span className="ml-auto flex shrink-0 select-none items-center gap-1 text-xs tabular-nums text-muted-foreground">
+          <span className="ml-auto flex shrink-0 select-none items-center gap-1 text-[0.8em] tabular-nums text-muted-foreground">
             {relativeTime}
           </span>
         ) : null}
@@ -733,6 +749,9 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
             has one, with a faint worktree glyph just to its left; the Archive
             button replaces it on desktop hover. */}
         <SidebarRowEndSlot
+          isWaitingPermission={isWaitingPermission}
+          isWorking={isWorking}
+          hasUnreadMessages={hasUnreadMessages}
           restIcon={
             showPr || showWorktreeIcon ? (
               <span className="flex items-center gap-1.5">
@@ -761,18 +780,8 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
       <ContextMenuContent className="min-w-[180px]">
         <SessionRowOpenedByMenuItems
           opener={openedByOpener}
-          goToOpener={
-            openerSessionId
-              ? () => onNavigate(openerRootSessionId ?? openerSessionId, openerSessionId)
-              : undefined
-          }
           goToOpenerLabel={contextMenuLabels.goToOpenerSession}
         />
-        {canRename ? (
-          <ContextMenuItem icon={<Pencil />} onSelect={beginRename}>
-            {contextMenuLabels.rename}
-          </ContextMenuItem>
-        ) : null}
         {canTogglePinned ? (
           <ContextMenuItem
             icon={isPinned ? <PinOff /> : <Pin />}
@@ -793,15 +802,15 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
             {contextMenuLabels.markUnread}
           </ContextMenuItem>
         ) : null}
-        <ContextMenuItem
-          icon={<Archive />}
-          onSelect={() => {
-            onArchive(session.id);
-          }}
-        >
-          {contextMenuLabels.archive}
-        </ContextMenuItem>
-        {canCopyUrl || shareMenuState ? <ContextMenuSeparator /> : null}
+        {canRename ? (
+          <ContextMenuItem icon={<Pencil />} onSelect={beginRename}>
+            {contextMenuLabels.rename}
+          </ContextMenuItem>
+        ) : null}
+        {(openedByOpener || canTogglePinned || canMarkUnread || canRename) &&
+        (canCopyUrl || shareMenuState) ? (
+          <ContextMenuSeparator />
+        ) : null}
         {canCopyUrl ? (
           <ContextMenuItem
             icon={<Link2 />}
@@ -812,6 +821,7 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
             {contextMenuLabels.copyUrl}
           </ContextMenuItem>
         ) : null}
+
         {shareMenuState ? (
           <ContextMenuItem
             disabled={shareMenuState !== 'share'}
@@ -819,7 +829,7 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
               shareMenuState === 'share' ? (
                 <Users />
               ) : shareMenuState === 'loading' ? (
-                <Loader2 className="animate-spin" />
+                <Spinner />
               ) : (
                 <LockKeyhole />
               )
@@ -837,6 +847,44 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
                   : contextMenuLabels.loadingSharing}
           </ContextMenuItem>
         ) : null}
+        {(openedByOpener ||
+          canTogglePinned ||
+          canMarkUnread ||
+          canRename ||
+          canCopyUrl ||
+          shareMenuState) &&
+        (openerSessionId || isElectronRenderer()) ? (
+          <ContextMenuSeparator />
+        ) : null}
+
+        <SessionRowOpenedByMenuItems
+          goToOpener={
+            openerSessionId
+              ? () => onNavigate(openerRootSessionId ?? openerSessionId, openerSessionId)
+              : undefined
+          }
+          goToOpenerLabel={contextMenuLabels.goToOpenerSession}
+        />
+        <SessionWindowMenuItem sessionId={session.id} />
+        {(openedByOpener ||
+          canTogglePinned ||
+          canMarkUnread ||
+          canRename ||
+          canCopyUrl ||
+          shareMenuState ||
+          openerSessionId ||
+          isElectronRenderer()) &&
+        true ? (
+          <ContextMenuSeparator />
+        ) : null}
+        <ContextMenuItem
+          icon={<Archive />}
+          onSelect={() => {
+            onArchive(session.id);
+          }}
+        >
+          {contextMenuLabels.archive}
+        </ContextMenuItem>
       </ContextMenuContent>
     </ContextMenu>
   ) : (
@@ -915,9 +963,9 @@ export type LocalProjectItemProps = {
    * dispatched to the owning machine via the local-project control channel).
    */
   canRemoveProject: boolean;
-  canNavigateProject: boolean;
   removalState?: LocalProjectRemovalState | null;
   collapsed: boolean;
+  whetherShowFullList: boolean;
   isSelected: boolean;
   sessionsForProject: SessionMeta[];
   /**
@@ -965,7 +1013,9 @@ export type LocalProjectItemProps = {
    */
   resolveOpenerRowId?: (openerSessionId: string | null | undefined) => string | null;
   onToggleCollapsed: (machineId: MachineId, localProjectId: LocalProjectId) => void;
+  onToggleFullList: (groupKey: string) => void;
   onRequestRemoval: (info: LocalProjectRemovalRequest) => void;
+  dragHandle?: ReactNode;
 };
 
 const hoverActionClassName = cn(
@@ -1003,9 +1053,9 @@ export const LocalProjectItem = memo(function LocalProjectItem({
   machineName,
   project,
   canRemoveProject,
-  canNavigateProject,
   removalState = null,
   collapsed,
+  whetherShowFullList,
   isSelected,
   sessionsForProject,
   childSessionsByParent,
@@ -1039,29 +1089,48 @@ export const LocalProjectItem = memo(function LocalProjectItem({
   // Default: nest on the precise opener, which is correct whenever it is a root.
   resolveOpenerRowId = normalizeSessionRowId,
   onToggleCollapsed,
+  onToggleFullList,
   onRequestRemoval,
+  dragHandle,
 }: LocalProjectItemProps) {
   const { t } = useTranslation();
+  const groupKey = getLocalProjectSessionGroupKey(machineId, project.id);
   // Same opened-by presentation the GitHub/Chats groups use: MCP-opened
   // independent Sessions indent under the Session that created them, and a
   // list with no such relationship keeps its previous flat geometry.
-  const sessionNodes = useMemo(
-    () =>
-      buildOpenedBySessionTree(sessionsForProject, {
-        getId: (session) => session.id,
-        // Nest under the opener's sidebar ROW, not necessarily the precise
-        // opener: a Session created from a child Tab belongs under that Tab's
-        // root Session, because child Tabs have no row here.
-        getOpenedBySessionId: (session) =>
-          session.openedByRootSessionId ?? resolveOpenerRowId(session.openedBySessionId),
-        isCollapsed: (openerId) => collapsedOpenedBySessionIds[openerId] === true,
-        // Same contract as the other lists: this section is sorted by latest
-        // activity, so an opener is ranked by its freshest opened Session.
-        rootRank: (session) => getEffectiveLatestMessageAt(session, childSessionsByParent),
+  const { canToggleFullList, sessionNodes } = useMemo(() => {
+    const accessors = {
+      getId: (session: SessionMeta) => session.id,
+      // Nest under the opener's sidebar ROW, not necessarily the precise
+      // opener: a Session created from a child Tab belongs under that Tab's
+      // root Session, because child Tabs have no row here.
+      getOpenedBySessionId: (session: SessionMeta) =>
+        session.openedByRootSessionId ?? resolveOpenerRowId(session.openedBySessionId),
+      isCollapsed: (openerId: string) => collapsedOpenedBySessionIds[openerId] === true,
+      // Same contract as the other lists: this section is sorted by latest
+      // activity, so an opener is ranked by its freshest opened Session.
+      rootRank: (session: SessionMeta) =>
+        getEffectiveLatestMessageAt(session, childSessionsByParent),
+    } as const;
+    const canToggle = countOpenedByTreeRoots(sessionsForProject, accessors) > MAX_VISIBLE_SESSIONS;
+    return {
+      canToggleFullList: canToggle,
+      sessionNodes: buildOpenedBySessionTree(sessionsForProject, {
+        ...accessors,
+        ...(whetherShowFullList ? {} : { maxRoots: MAX_VISIBLE_SESSIONS }),
       }),
-    [childSessionsByParent, collapsedOpenedBySessionIds, resolveOpenerRowId, sessionsForProject]
-  );
+    };
+  }, [
+    childSessionsByParent,
+    collapsedOpenedBySessionIds,
+    resolveOpenerRowId,
+    sessionsForProject,
+    whetherShowFullList,
+  ]);
   const showTreeGutter = hasOpenedByTreeNesting(sessionNodes);
+  const toggleListLabel = whetherShowFullList
+    ? t('sessions.showLess', 'Show less')
+    : t('sessions.showAll', 'Show all ({{count}})', { count: sessionsForProject.length });
   const trimmedMachineName =
     typeof machineName === 'string' && machineName.trim() ? machineName.trim() : null;
   const baseAriaLabel = formattedPath
@@ -1078,10 +1147,12 @@ export const LocalProjectItem = memo(function LocalProjectItem({
   const ariaLabel = removalStateLabel ? `${baseAriaLabel} · ${removalStateLabel}` : baseAriaLabel;
   const showSelectedState = isSelected && !isMobile;
   const handleNavigate = useCallback(() => {
-    if (!canNavigateProject || removalState) return;
+    if (removalState) return;
     onNavigateProject(machineId, project.id);
-  }, [canNavigateProject, machineId, onNavigateProject, project.id, removalState]);
-  const projectCanNavigate = canNavigateProject && removalState === null;
+  }, [machineId, onNavigateProject, project.id, removalState]);
+  // A project being removed is inert; every other project row navigates,
+  // including projects on a teammate's shared machine.
+  const projectCanNavigate = removalState === null;
   // Mobile has no hover, so both row controls stay desktop-only, exactly like
   // the ⋯ on session rows.
   const [projectMenuOpen, setProjectMenuOpen] = useState(false);
@@ -1101,6 +1172,7 @@ export const LocalProjectItem = memo(function LocalProjectItem({
       Boolean(revealPath) ||
       Boolean(onArchiveProjectChats));
   const showNewChatButton = Boolean(onNewChatInProject) && projectCanNavigate && !isMobile;
+  const ProjectFolderIcon = collapsed ? Folder : FolderOpen;
 
   return (
     <div className="space-y-0.5">
@@ -1123,14 +1195,14 @@ export const LocalProjectItem = memo(function LocalProjectItem({
                   // `asChild`, so their `data-state` values collide here.
                   data-menu-open={projectMenuOpen ? '' : undefined}
                   className={cn(
-                    'group relative w-full rounded-md pl-2 pr-3 py-1 text-left',
+                    'group relative w-full rounded-md px-2 py-1 text-left',
                     'border border-transparent bg-transparent',
                     !showSelectedState &&
                       !isMobile &&
                       'hover:bg-sidebar-hover hover:text-sidebar-hover-foreground data-[menu-open]:bg-sidebar-hover data-[menu-open]:text-sidebar-hover-foreground',
                     showSelectedState &&
                       'border-sidebar-ring/30 bg-sidebar-selection hover:bg-sidebar-selection',
-                    'flex min-w-0 flex-1 select-none items-center gap-2 text-xs font-semibold transition-colors',
+                    'flex min-w-0 flex-1 select-none items-center gap-2 text-[0.9em] font-normal transition-colors',
                     projectCanNavigate ? 'cursor-pointer' : 'cursor-default',
                     removalState && 'text-muted-foreground',
                     showSelectedState
@@ -1159,7 +1231,8 @@ export const LocalProjectItem = memo(function LocalProjectItem({
                       onToggleCollapsed(machineId, project.id);
                     }}
                   >
-                    <Folder
+                    {/* Open folder while expanded, closed while collapsed. */}
+                    <ProjectFolderIcon
                       className={cn(
                         'absolute left-0 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-current transition-opacity duration-100',
                         // Mobile: chevron is always visible so the folder icon must hide
@@ -1170,7 +1243,7 @@ export const LocalProjectItem = memo(function LocalProjectItem({
                     <ChevronDown
                       className={cn(
                         'absolute left-0 top-1/2 h-4 w-4 -translate-y-1/2 text-current',
-                        'transition-[opacity,translate,scale] duration-100',
+                        'transition-[opacity,translate,scale,rotate] duration-100',
                         isMobile ? 'opacity-100' : 'opacity-0 group-hover:opacity-100',
                         collapsed ? '-rotate-90' : 'rotate-0'
                       )}
@@ -1185,14 +1258,14 @@ export const LocalProjectItem = memo(function LocalProjectItem({
                           {removalState === 'waiting_for_device' ? (
                             <Clock3 className="h-3 w-3 shrink-0" aria-hidden="true" />
                           ) : (
-                            <Loader2 className="h-3 w-3 shrink-0 animate-spin" aria-hidden="true" />
+                            <Spinner className="h-3 w-3 shrink-0" aria-hidden="true" />
                           )}
                           <span className="max-w-24 truncate">{removalStateLabel}</span>
                         </span>
                       </TooltipTrigger>
                       <TooltipContent side="right">{removalStateLabel}</TooltipContent>
                     </Tooltip>
-                  ) : showProjectMenu || showNewChatButton ? (
+                  ) : showProjectMenu || showNewChatButton || dragHandle ? (
                     <div className="flex shrink-0 items-center gap-0.5">
                       {showProjectMenu ? (
                         <button
@@ -1231,6 +1304,7 @@ export const LocalProjectItem = memo(function LocalProjectItem({
                           <SquarePen className="h-3.5 w-3.5" />
                         </button>
                       ) : null}
+                      {dragHandle}
                     </div>
                   ) : null}
                 </div>
@@ -1307,7 +1381,10 @@ export const LocalProjectItem = memo(function LocalProjectItem({
         </ContextMenu>
       </div>
 
-      {!collapsed ? (
+      {/* An expanded project with nothing to list renders no container: an empty
+          child of the space-y parent would still add its gap, so expanding an
+          empty folder would nudge everything below it. */}
+      {!collapsed && sessionNodes.length > 0 ? (
         <div className="flex flex-col gap-px">
           {sessionNodes.map((node) => {
             const session = node.item;
@@ -1354,11 +1431,90 @@ export const LocalProjectItem = memo(function LocalProjectItem({
               </SessionOpenedByTreeRow>
             );
           })}
+          {canToggleFullList ? (
+            <button
+              type="button"
+              data-id={`show-more:${groupKey}`}
+              data-scope-item="row"
+              data-sidebar-show-more={groupKey}
+              className={cn(
+                // Same 30px pitch as a conversation row (py-1 + 1px borders + 20px line).
+                'flex h-[30px] select-none items-center gap-2 rounded-md px-2 text-left text-[0.8em] text-sidebar-foreground-muted/80',
+                'transition-colors',
+                'hover:bg-sidebar-hover hover:text-sidebar-hover-foreground',
+                'focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-sidebar-ring/40'
+              )}
+              aria-label={toggleListLabel}
+              onClick={() => onToggleFullList(groupKey)}
+            >
+              <span className="flex h-4 w-4 items-center justify-center" aria-hidden="true" />
+              <span>{toggleListLabel}</span>
+            </button>
+          ) : null}
         </div>
       ) : null}
     </div>
   );
 }, localProjectItemPropsEqual);
+
+const SortableLocalProjectItem = memo(
+  function SortableLocalProjectItem({
+    sortableId,
+    canReorder,
+    ...props
+  }: LocalProjectItemProps & { sortableId: string; canReorder: boolean }) {
+    const { t } = useTranslation();
+    const {
+      attributes,
+      listeners,
+      setNodeRef,
+      setActivatorNodeRef,
+      transform,
+      transition,
+      isDragging,
+    } = useSortable({ id: sortableId, disabled: !canReorder });
+    const constrainedTransform = transform ? { ...transform, x: 0, scaleX: 1, scaleY: 1 } : null;
+    const dragHandle = canReorder ? (
+      <button
+        type="button"
+        ref={setActivatorNodeRef}
+        className={cn(hoverActionClassName, 'cursor-grab touch-none active:cursor-grabbing')}
+        aria-label={t('sidebar.localProjects.reorder', 'Reorder project')}
+        {...attributes}
+        {...listeners}
+        onClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+        }}
+      >
+        <GripVertical className="h-3.5 w-3.5" />
+      </button>
+    ) : undefined;
+
+    return (
+      <div
+        ref={setNodeRef}
+        style={{
+          transform: CSS.Transform.toString(constrainedTransform),
+          transition,
+        }}
+        className={cn('w-full', isDragging && 'z-10 opacity-60')}
+        data-local-project-sortable-id={sortableId}
+      >
+        <LocalProjectItem {...props} dragHandle={dragHandle} />
+      </div>
+    );
+  },
+  (prev, next) =>
+    prev.sortableId === next.sortableId &&
+    prev.canReorder === next.canReorder &&
+    localProjectItemPropsEqual(prev, next)
+);
+
+export const hasWorkspaceSidebarTopContent = (
+  localProjectSectionCount: number,
+  showGithubWorktrees: boolean
+): boolean => localProjectSectionCount > 0 || showGithubWorktrees;
 
 export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
   const { t, i18n } = useTranslation();
@@ -1495,7 +1651,6 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
 
   const activeNav = useMemo(() => {
     if (isArchiveRoute(location.pathname, workspaceSlug)) return 'archive';
-    if (isTasksRoute(location.pathname, workspaceSlug)) return 'tasks';
     if (
       isHomeRoute(location.pathname, workspaceSlug) &&
       !selectedSessionId &&
@@ -1530,6 +1685,9 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
     [scope, isMultiMemberWorkspace, membersByUserId]
   );
   const [organizeMode, setOrganizeMode] = useAtom(sidebarOrganizeModeAtom);
+  const [showUpdatedProjectNames, setShowUpdatedProjectNames] = useAtom(
+    sidebarUpdatedShowProjectNamesAtom
+  );
   const setSidebarCollapsed = useSetAtom(sidebarCollapsedAtom);
   const [sidebarLastWidth, setSidebarLastWidth] = useAtom(sidebarLastWidthAtom);
   const handleChatScopeChanged = useCallback(
@@ -1544,6 +1702,17 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
     },
     [setOrganizeMode]
   );
+  const postHog = usePostHog();
+  const handleShowUpdatedProjectNamesChange = useCallback(
+    (next: boolean) => {
+      capturePostHogEvent(postHog, 'settings/changed', {
+        key: 'sidebar_updated_show_project_names',
+        value: next,
+      });
+      setShowUpdatedProjectNames(next);
+    },
+    [postHog, setShowUpdatedProjectNames]
+  );
   const sessionSidebarCodeChangesOnly = useAtomValue(sessionSidebarCodeChangesOnlyAtom);
   const { archiveSession, markSessionUnread, setSessionPinned, updateSessionTitle } =
     useSessionActions();
@@ -1554,13 +1723,17 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
 
   const handleArchiveSession = useCallback(
     (sessionId: string) => {
-      void archiveSession(sessionId as SessionId);
-      if (!workspaceSlug) return;
-      if (selectedSessionId !== sessionId) return;
-      void router.navigate({
-        to: '/$workspaceName/chat',
-        params: { workspaceName: workspaceSlug },
-      });
+      void archiveSession(sessionId as SessionId)
+        .then(async () => {
+          if (!workspaceSlug || selectedSessionId !== sessionId) return;
+          await router.navigate({
+            to: '/$workspaceName/chat',
+            params: { workspaceName: workspaceSlug },
+          });
+        })
+        .catch((error: unknown) => {
+          toast.error(error instanceof Error ? error.message : String(error));
+        });
     },
     [archiveSession, router, selectedSessionId, workspaceSlug]
   );
@@ -1787,6 +1960,14 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
   const [localProjectCollapseState, setLocalProjectCollapseState] = useAtom(
     localProjectCollapseStateAtom
   );
+  const [localProjectOrder, setLocalProjectOrder] = useAtom(localProjectOrderAtom);
+  const localProjectOrderRef = useRef(localProjectOrder);
+  localProjectOrderRef.current = localProjectOrder;
+  const localProjectSensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
+  );
+  const [showFullSessionGroups, setShowFullSessionGroups] = useAtom(sidebarShowFullListAtom);
   // Shared with SessionList (same atom) so an opener collapsed in one sidebar
   // surface stays collapsed in the other, and with the keyboard nav model so
   // arrow keys never visit a hidden row.
@@ -1796,12 +1977,23 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
   const toggleLocalProjectCollapsed = useCallback(
     (machineId: MachineId, localProjectId: LocalProjectId) => {
       const key = `${machineId}:${localProjectId}`;
+      const groupKey = getLocalProjectSessionGroupKey(machineId, localProjectId);
       setLocalProjectCollapseState((prev) => ({
         ...prev,
         [key]: !(prev[key] ?? false),
       }));
+      if (!(localProjectCollapseState[key] ?? false)) {
+        setShowFullSessionGroups((prev) => ({ ...prev, [groupKey]: false }));
+      }
     },
-    [setLocalProjectCollapseState]
+    [localProjectCollapseState, setLocalProjectCollapseState, setShowFullSessionGroups]
+  );
+
+  const handleToggleLocalProjectFullList = useCallback(
+    (groupKey: string) => {
+      setShowFullSessionGroups((prev) => ({ ...prev, [groupKey]: !prev[groupKey] }));
+    },
+    [setShowFullSessionGroups]
   );
 
   const handleNavigateToProject = useCallback(
@@ -1816,26 +2008,6 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
         to: '/$workspaceName/chat',
         params: { workspaceName: workspaceSlug },
         search: { context: 'local' as const, machine: machineId, project: localProjectId },
-      });
-    },
-    [closeMobileDrawer, router, workspaceSlug]
-  );
-
-  // Unlike the row click, which keeps whatever draft the landing already holds,
-  // this starts the project's chat from scratch via the landing's reset lever.
-  const handleNewChatInProject = useCallback(
-    (machineId: MachineId, localProjectId: string) => {
-      if (!workspaceSlug) return;
-      closeMobileDrawer();
-      void router.navigate({
-        to: '/$workspaceName/chat',
-        params: { workspaceName: workspaceSlug },
-        search: {
-          context: 'local' as const,
-          machine: machineId,
-          project: localProjectId,
-          resetDraftKey: Date.now().toString(36),
-        },
       });
     },
     [closeMobileDrawer, router, workspaceSlug]
@@ -1856,16 +2028,16 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
     (sessionIds: string[]) => {
       void (async () => {
         for (const sessionId of sessionIds) {
-          // Sequential: archiveSession read-modify-writes the machine doc's
-          // needToArchiveSessions map, so concurrent calls drop entries.
           await archiveSession(sessionId as SessionId);
         }
-      })();
-      if (!workspaceSlug) return;
-      if (!selectedSessionId || !sessionIds.includes(selectedSessionId)) return;
-      void router.navigate({
-        to: '/$workspaceName/chat',
-        params: { workspaceName: workspaceSlug },
+        if (!workspaceSlug) return;
+        if (!selectedSessionId || !sessionIds.includes(selectedSessionId)) return;
+        await router.navigate({
+          to: '/$workspaceName/chat',
+          params: { workspaceName: workspaceSlug },
+        });
+      })().catch((error: unknown) => {
+        toast.error(error instanceof Error ? error.message : String(error));
       });
     },
     [archiveSession, router, selectedSessionId, workspaceSlug]
@@ -2103,7 +2275,6 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
                 ? localMachineMeta.name.trim()
                 : null,
             canImport: isElectron,
-            canNavigateProject: true,
             canRemoveProject: machineSupportsLocalProjectRemovalProtocol(localMachineMeta),
             projects: localProjects.map((entry) => entry.project),
           }
@@ -2125,7 +2296,6 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
           machineDisplayName:
             typeof machine.name === 'string' && machine.name.trim() ? machine.name.trim() : null,
           canImport: false,
-          canNavigateProject: isOwnMachine,
           // Only the machine owner can remove a remote device's projects; the
           // request is queued on that device's machine Flock doc.
           canRemoveProject: isOwnMachine && machineSupportsLocalProjectRemovalProtocol(machine),
@@ -2137,9 +2307,18 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
     // should not appear in the sidebar.
     const showLocalSection = localSection && localSection.projects.length > 0;
 
+    const savedRank = new Map(localProjectOrder.map((key, index) => [key, index]));
     return [...(showLocalSection ? [localSection] : []), ...remoteSections].map((section) => ({
       ...section,
       projects: [...section.projects].sort((a, b) => {
+        const machineId = section.machineId;
+        const aRank = machineId ? savedRank.get(`${machineId}:${a.id}`) : undefined;
+        const bRank = machineId ? savedRank.get(`${machineId}:${b.id}`) : undefined;
+        if (aRank !== undefined || bRank !== undefined) {
+          if (aRank === undefined) return 1;
+          if (bRank === undefined) return -1;
+          if (aRank !== bRank) return aRank - bRank;
+        }
         const aTime = typeof a.createdAtMs === 'number' ? a.createdAtMs : 0;
         const bTime = typeof b.createdAtMs === 'number' ? b.createdAtMs : 0;
         if (aTime !== bTime) return aTime - bTime;
@@ -2148,6 +2327,7 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
     }));
   }, [
     localMachineId,
+    localProjectOrder,
     machineMetaMap,
     pendingLocalProjectRemovals,
     sessionsListLoading,
@@ -2155,6 +2335,43 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
     userId,
     visibleLocalProjectMap,
   ]);
+
+  // Register newly visible projects without deleting saved entries. A project
+  // may disappear briefly while its machine reconnects; retaining the key
+  // keeps its chosen position when the catalog returns.
+  useEffect(() => {
+    if (sessionsListLoading) return;
+    const prevOrder = localProjectOrderRef.current;
+    const known = new Set(prevOrder);
+    const discovered: string[] = [];
+    for (const section of localProjectSections) {
+      if (!section.machineId) continue;
+      for (const project of section.projects) {
+        const key = `${section.machineId}:${project.id}`;
+        if (known.has(key)) continue;
+        known.add(key);
+        discovered.push(key);
+      }
+    }
+    if (discovered.length > 0) setLocalProjectOrder([...prevOrder, ...discovered]);
+  }, [localProjectSections, sessionsListLoading, setLocalProjectOrder]);
+
+  const handleMoveLocalProject = useCallback(
+    (sectionProjectKeys: readonly string[], event: DragEndEvent) => {
+      const overId = event.over?.id;
+      if (!overId) return;
+      const activeKey = String(event.active.id);
+      const overKey = String(overId);
+      const nextOrder = moveLocalProjectOrder(
+        localProjectOrderRef.current,
+        sectionProjectKeys,
+        activeKey,
+        overKey
+      );
+      if (nextOrder) setLocalProjectOrder(nextOrder);
+    },
+    [setLocalProjectOrder]
+  );
 
   // Build one complete, mode-independent row model first. Pinned sessions are
   // split from this model below so Workspace and Updated cannot accidentally
@@ -2333,19 +2550,54 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
   const filterLabels = useMemo(
     () => ({
       triggerAriaLabel: t('sidebar.filter.trigger', 'Filter sidebar'),
-      organizeHeading: t('sidebar.filter.organizeHeading', 'Organize'),
-      showHeading: t('sidebar.filter.showHeading', 'Show'),
-      organizeWorkspace: t('sidebar.filter.organizeWorkspace', 'Workspace'),
+      organizeHeading: t('sidebar.filter.organizeHeading', 'View'),
+      showHeading: t('sidebar.filter.showHeading', 'Tasks'),
+      organizeProject: t('sidebar.filter.organizeProject', 'Project'),
       organizeUpdated: t('sidebar.filter.organizeUpdated', 'Updated'),
+      updatedProjectNames: t('sidebar.filter.updatedProjectNames', 'Show Project'),
+      updatedProjectNamesUnavailable: t(
+        'sidebar.filter.updatedProjectNamesUnavailable',
+        'Available in Updated view'
+      ),
       showMyTasks: t('sessions.sidebar.my', 'My Tasks'),
       showAllTasks: t('sessions.sidebar.team', 'All Tasks'),
+      emptyMyTasks: t('sidebar.filter.emptyMyTasks', 'No tasks match this view'),
+      emptyMyTasksHint: t(
+        'sidebar.filter.emptyMyTasksHint',
+        'Try showing every task in this workspace.'
+      ),
+      emptyAllTasks: t('sidebar.filter.emptyAllTasks', 'No tasks yet'),
+      emptyAllTasksHint: t(
+        'sidebar.filter.emptyAllTasksHint',
+        'Tasks in this workspace will appear here.'
+      ),
+      showAllTasksAction: t('sidebar.filter.showAllTasks', 'Show all tasks'),
     }),
     [t]
   );
-  const sidebarFilterPlaceholder =
-    !isMobile && pinnedItems.length === 0 ? (
-      <span aria-hidden="true" className="block h-6 w-6" />
-    ) : null;
+  // The filter trigger renders in-flow as the action of whichever section
+  // header is first, so alignment comes from the header row itself — no
+  // overlay or placeholder. `open` is owned here, the common ancestor of every
+  // candidate slot, so remounting the one instance at a new slot does not
+  // close an open popover.
+  const [sidebarFilterOpen, setSidebarFilterOpen] = useState(false);
+  const sidebarFilterPopover = !isMobile ? (
+    <SidebarFilterPopover
+      organize={organizeMode}
+      scope={chatScope}
+      onOrganizeChange={handleOrganizeModeChange}
+      onScopeChange={handleChatScopeChanged}
+      showUpdatedProjectNames={showUpdatedProjectNames}
+      onShowUpdatedProjectNamesChange={handleShowUpdatedProjectNamesChange}
+      labels={filterLabels}
+      open={sidebarFilterOpen}
+      onOpenChange={setSidebarFilterOpen}
+      side="right"
+      align="start"
+      triggerClassName="h-5 w-5 [&_svg]:h-4 [&_svg]:w-4"
+    />
+  ) : null;
+  const firstSectionFilterAction = pinnedItems.length === 0 ? sidebarFilterPopover : null;
   const localProjectsTopContent =
     localProjectSections.length === 0 ? null : (
       // Sections carry their own bottom margin (see sidebarTopContent): 12px
@@ -2353,7 +2605,11 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
       <div>
         {localProjectSections.map((section, sectionIndex) => {
           const sectionCollapsed = localProjectsSectionCollapseState[section.sectionKey] ?? false;
-          const headerFilter = sectionIndex === 0 ? sidebarFilterPlaceholder : null;
+          const sectionProjectKeys = section.machineId
+            ? section.projects.map((project) => `${section.machineId}:${project.id}`)
+            : [];
+          const canReorderProjects = !isMobile && sectionProjectKeys.length > 1;
+          const headerFilter = sectionIndex === 0 ? firstSectionFilterAction : null;
           const dividerRight =
             section.canImport && isElectron ? (
               <button
@@ -2383,7 +2639,7 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
           return (
             <div
               key={section.sectionKey}
-              className={cn('space-y-0.5', sectionCollapsed ? 'mb-1 last:mb-0' : 'mb-3 last:mb-0')}
+              className={cn('space-y-0.5', getSidebarGroupSpacingClass(sectionCollapsed))}
             >
               <SidebarSectionHeader
                 icon={
@@ -2400,76 +2656,96 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
               />
 
               {sectionCollapsed ? null : (
-                <div className="space-y-1">
-                  {section.projects.map((project) => {
-                    const machineId = section.machineId;
-                    if (!machineId) return null;
-                    const projectKey = `${machineId}:${project.id}`;
-                    const collapsed = localProjectCollapseState[projectKey] ?? false;
-                    const sessionsForProject =
-                      workspaceLocalProjectSessionsByKey.get(projectKey) ?? [];
-                    const isSelected = projectKey === selectedLocalProjectKey;
-                    const rootPath =
-                      typeof project.rootPath === 'string' ? project.rootPath.trim() : '';
-                    const formattedPath = rootPath ? rootPath : null;
+                <DndContext
+                  sensors={localProjectSensors}
+                  collisionDetection={closestCenter}
+                  onDragEnd={(event) => handleMoveLocalProject(sectionProjectKeys, event)}
+                >
+                  <SortableContext
+                    items={sectionProjectKeys}
+                    strategy={verticalListSortingStrategy}
+                  >
+                    <div className="space-y-0.5">
+                      {section.projects.map((project) => {
+                        const machineId = section.machineId;
+                        if (!machineId) return null;
+                        const projectKey = `${machineId}:${project.id}`;
+                        const collapsed = localProjectCollapseState[projectKey] ?? false;
+                        const sessionGroupKey = getLocalProjectSessionGroupKey(
+                          machineId,
+                          project.id
+                        );
+                        const sessionsForProject =
+                          workspaceLocalProjectSessionsByKey.get(projectKey) ?? [];
+                        const isSelected = projectKey === selectedLocalProjectKey;
+                        const rootPath =
+                          typeof project.rootPath === 'string' ? project.rootPath.trim() : '';
+                        const formattedPath = rootPath ? rootPath : null;
 
-                    return (
-                      <LocalProjectItem
-                        key={project.id}
-                        machineId={machineId}
-                        machineName={section.machineDisplayName}
-                        project={project}
-                        canRemoveProject={section.canRemoveProject}
-                        canNavigateProject={section.canNavigateProject}
-                        removalState={
-                          pendingLocalProjectRemovals.has(projectKey)
-                            ? onlineMachineIds.has(machineId)
-                              ? 'removing'
-                              : 'waiting_for_device'
-                            : null
-                        }
-                        collapsed={collapsed}
-                        isSelected={isSelected}
-                        sessionsForProject={sessionsForProject}
-                        childSessionsByParent={childSessionsByParent}
-                        liveSessionStatuses={liveSessionStatuses}
-                        resolveSessionAuthor={resolveSessionAuthor}
-                        formattedPath={formattedPath}
-                        defaultSessionTitle={defaultSessionTitle}
-                        selectedSessionId={selectedSessionId}
-                        removeProjectLabel={removeProjectLabel}
-                        newChatLabel={newChatLabel}
-                        archiveTooltipLabel={archiveTooltipLabel}
-                        archiveActionLabel={archiveActionLabel}
-                        archiveConfirmLabel={archiveConfirmLabel}
-                        isMobile={isMobile}
-                        toggleLabel={toggleLabel}
-                        onNavigateProject={handleNavigateToProject}
-                        onNewChatInProject={handleNewChatInProject}
-                        onOpenProjectSettings={handleOpenProjectSettings}
-                        onRevealProject={
-                          isElectron && machineId === localMachineId
-                            ? handleRevealProject
-                            : undefined
-                        }
-                        onArchiveProjectChats={handleArchiveProjectChats}
-                        onNavigateSession={handleNavigateToSession}
-                        onArchive={handleArchiveSession}
-                        onMarkSessionUnread={handleMarkSessionUnread}
-                        onRenameSession={handleRenameSession}
-                        onToggleSessionPinned={handleTogglePinSession}
-                        onCopySessionUrl={handleCopySessionUrl}
-                        onShareSessionWithTeam={handleRequestShareSession}
-                        sessionSharingById={sessionSharingById}
-                        collapsedOpenedBySessionIds={collapsedOpenedBySessionIds}
-                        onToggleOpenedBySessions={handleToggleOpenedBySessions}
-                        resolveOpenerRowId={resolveOpenerRowId}
-                        onToggleCollapsed={toggleLocalProjectCollapsed}
-                        onRequestRemoval={handleRequestRemoval}
-                      />
-                    );
-                  })}
-                </div>
+                        return (
+                          <SortableLocalProjectItem
+                            key={project.id}
+                            sortableId={projectKey}
+                            canReorder={canReorderProjects}
+                            machineId={machineId}
+                            machineName={section.machineDisplayName}
+                            project={project}
+                            canRemoveProject={section.canRemoveProject}
+                            removalState={
+                              pendingLocalProjectRemovals.has(projectKey)
+                                ? onlineMachineIds.has(machineId)
+                                  ? 'removing'
+                                  : 'waiting_for_device'
+                                : null
+                            }
+                            collapsed={collapsed}
+                            whetherShowFullList={showFullSessionGroups[sessionGroupKey] ?? false}
+                            isSelected={isSelected}
+                            sessionsForProject={sessionsForProject}
+                            childSessionsByParent={childSessionsByParent}
+                            liveSessionStatuses={liveSessionStatuses}
+                            resolveSessionAuthor={resolveSessionAuthor}
+                            formattedPath={formattedPath}
+                            defaultSessionTitle={defaultSessionTitle}
+                            selectedSessionId={selectedSessionId}
+                            removeProjectLabel={removeProjectLabel}
+                            newChatLabel={newChatLabel}
+                            archiveTooltipLabel={archiveTooltipLabel}
+                            archiveActionLabel={archiveActionLabel}
+                            archiveConfirmLabel={archiveConfirmLabel}
+                            isMobile={isMobile}
+                            toggleLabel={toggleLabel}
+                            onNavigateProject={handleNavigateToProject}
+                            // New Chat selects a target; it must not fork or clear
+                            // the workspace-owned Chat Landing draft.
+                            onNewChatInProject={handleNavigateToProject}
+                            onOpenProjectSettings={handleOpenProjectSettings}
+                            onRevealProject={
+                              isElectron && machineId === localMachineId
+                                ? handleRevealProject
+                                : undefined
+                            }
+                            onArchiveProjectChats={handleArchiveProjectChats}
+                            onNavigateSession={handleNavigateToSession}
+                            onArchive={handleArchiveSession}
+                            onMarkSessionUnread={handleMarkSessionUnread}
+                            onRenameSession={handleRenameSession}
+                            onToggleSessionPinned={handleTogglePinSession}
+                            onCopySessionUrl={handleCopySessionUrl}
+                            onShareSessionWithTeam={handleRequestShareSession}
+                            sessionSharingById={sessionSharingById}
+                            collapsedOpenedBySessionIds={collapsedOpenedBySessionIds}
+                            onToggleOpenedBySessions={handleToggleOpenedBySessions}
+                            resolveOpenerRowId={resolveOpenerRowId}
+                            onToggleCollapsed={toggleLocalProjectCollapsed}
+                            onToggleFullList={handleToggleLocalProjectFullList}
+                            onRequestRemoval={handleRequestRemoval}
+                          />
+                        );
+                      })}
+                    </div>
+                  </SortableContext>
+                </DndContext>
               )}
             </div>
           );
@@ -2554,11 +2830,14 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
       .filter((org) => Boolean(org))
       .map((org) => ({
         id: org.id,
+        slug: org.slug,
         name: org.name,
         logo: resolveWorkspaceIdentityLogo(org.logo, multiWorkspaceAvailable),
         planTier: planTierByWorkspaceId.get(org.id) ?? null,
+        memberCount:
+          org.id === activeOrganization?.id ? (activeOrganization.members?.length ?? null) : null,
       }));
-  }, [multiWorkspaceAvailable, organizations, planTierByWorkspaceId]);
+  }, [activeOrganization, multiWorkspaceAvailable, organizations, planTierByWorkspaceId]);
 
   // Sidebar task rows render as real anchors on web so middle/Cmd-click open the
   // session in a new browser tab. Electron deliberately returns undefined here:
@@ -2616,39 +2895,6 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
       params: { workspaceName: workspaceSlug },
     });
   }, [activeNav, closeMobileDrawer, router, workspaceSlug]);
-
-  const tasksEnabled = useAtomValue(tasksFeatureEnabledAtom);
-
-  const handleTasksClicked = useCallback(() => {
-    if (!workspaceSlug) return;
-    closeMobileDrawer();
-    if (activeNav === 'tasks') {
-      if (typeof window !== 'undefined' && window.history.length > 1) {
-        window.history.back();
-        return;
-      }
-      void router.navigate({
-        to: '/$workspaceName/chat',
-        params: { workspaceName: workspaceSlug },
-      });
-      return;
-    }
-    void router.navigate({
-      to: '/$workspaceName/tasks',
-      params: { workspaceName: workspaceSlug },
-    });
-  }, [activeNav, closeMobileDrawer, router, workspaceSlug]);
-
-  // Capture without navigating: the dialog is global (MainLayout), so the `+`
-  // works from anywhere the sidebar is. Status is reset because the board's
-  // per-column `+` leaves its own status behind in that atom.
-  const openTaskQuickAdd = useSetAtom(taskQuickAddOpenAtom);
-  const setTaskQuickAddStatus = useSetAtom(taskQuickAddStatusAtom);
-  const handleNewTaskClicked = useCallback(() => {
-    closeMobileDrawer();
-    setTaskQuickAddStatus(null);
-    openTaskQuickAdd(true);
-  }, [closeMobileDrawer, openTaskQuickAdd, setTaskQuickAddStatus]);
 
   const handleDocsClicked = useCallback(() => {
     closeMobileDrawer();
@@ -2740,7 +2986,6 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
   const labels: Partial<LoroSidebarLabels> = useMemo(() => {
     return {
       home: t('sidebar.home', 'Home'),
-      newTask: t('tasks.newTask', 'New task'),
       docs: t('sidebar.docs', 'Docs'),
       joinCommunity: t('sidebar.joinCommunity', 'Join community'),
       feedback: t('sidebar.feedback', 'Feedback'),
@@ -2754,6 +2999,7 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
       connectGithubRepo: t('sidebar.connectGithubRepo', 'Connect GitHub repo'),
       planPlus: t('billing.plan.plus', 'Plus'),
       planEnterprise: t('billing.plan.enterprise', 'Enterprise'),
+      planFree: t('billing.plan.free', 'Free'),
       pinned: t('sidebar.pinned', 'Pinned'),
       connectionLoading: t('chat.mobileHome.connectionBanner.loading', 'Connecting…'),
       connectionReconnecting: t('chat.mobileHome.connectionBanner.reconnecting', 'Reconnecting…'),
@@ -2793,7 +3039,10 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
   ]);
 
   const githubWorktreesLabel = useMemo(() => t('sidebar.githubWorktrees', 'GitHub Worktrees'), [t]);
-  const sidebarTopContent = (
+  const sidebarTopContent = hasWorkspaceSidebarTopContent(
+    localProjectSections.length,
+    showGithubWorktrees
+  ) ? (
     // Sections carry their own bottom margin: 12px expanded (wider than the
     // 10px between repo groups and the 2-4px between a section header and its
     // content, so headers bind to the list below them), 4px collapsed so a
@@ -2810,12 +3059,12 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
           toggleLabel={toggleLabel}
           onToggleCollapsed={handleToggleGithubWorktreesSection}
           action={
-            localProjectSections.length === 0 ? (sidebarFilterPlaceholder ?? undefined) : undefined
+            localProjectSections.length === 0 ? (firstSectionFilterAction ?? undefined) : undefined
           }
         />
       ) : null}
     </div>
-  );
+  ) : null;
 
   // Chats renders after the GitHub Worktrees list so it reads as the last
   // section in Workspace mode.
@@ -2828,7 +3077,7 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
       chatsCollapsed={chatsCollapsed}
       headerAction={
         localProjectSections.length === 0 && !showGithubWorktrees
-          ? (sidebarFilterPlaceholder ?? undefined)
+          ? (firstSectionFilterAction ?? undefined)
           : undefined
       }
       selectedSessionId={selectedSessionId}
@@ -2974,6 +3223,8 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
           machineId,
           localProjectId: project.id,
           collapsed,
+          showFull:
+            showFullSessionGroups[getLocalProjectSessionGroupKey(machineId, project.id)] ?? false,
           // Mirror exactly what LocalProjectItem renders: same nesting target and
           // the same group ranking, or arrow keys drift from the visible order.
           sessions: sessionsForProject.map((s) => ({
@@ -2996,6 +3247,7 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
     localProjectCollapseState,
     localProjectsSectionCollapseState,
     resolveOpenerRowId,
+    showFullSessionGroups,
     workspaceLocalProjectSessionsByKey,
   ]);
 
@@ -3036,7 +3288,7 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
           for (const project of section.projects) {
             for (const session of project.sessions) {
               if (session.id === sessionId) {
-                return `${project.machineId}:${project.localProjectId}`;
+                return getLocalProjectSessionGroupKey(project.machineId, project.localProjectId);
               }
             }
           }
@@ -3059,7 +3311,6 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
     ]
   );
 
-  const showFullSessionGroups = useAtomValue(sidebarShowFullListAtom);
   const sidebarNavigationItems = useMemo(
     () =>
       buildSidebarNavigationItems({
@@ -3131,7 +3382,7 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
     <FocusScope
       id={WORKSPACE_FOCUS_SCOPES.sidebar}
       className={cn(
-        'relative flow-root bg-background data-[scope-active]:ring-2 data-[scope-active]:ring-ring/30 data-[scope-active]:ring-inset data-[scope-active]:rounded-2xl',
+        'relative flow-root bg-background data-[scope-active]:ring-2 data-[scope-active]:ring-ring/30 data-[scope-active]:ring-inset',
         className
       )}
     >
@@ -3139,8 +3390,8 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
       <LoroSidebar
         className={cn(
           isMobile
-            ? 'h-full w-full rounded-none border-0 shadow-none'
-            : 'mb-2 ml-2 mr-1 mt-2 h-[calc(100%_-_1rem)] rounded-xl border border-sidebar-border/80 bg-sidebar shadow-[0_1px_4px_-1px_rgba(0,0,0,0.18)]',
+            ? 'h-full w-full'
+            : 'h-full w-full border-r-[0.5px] border-sidebar-border/70 bg-sidebar',
           isElectron && !isElectronFullscreen && 'z-20'
         )}
         workspaceName={resolvedWorkspaceName}
@@ -3156,7 +3407,7 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
         isElectronMacOS={isElectronMacOS && !isElectronFullscreen}
         activeNav={activeNav}
         topContent={sidebarTopContent ?? undefined}
-        desktopFilterPlaceholder={sidebarFilterPlaceholder ?? undefined}
+        desktopFilterAction={sidebarFilterPopover ?? undefined}
         afterSessionListContent={sidebarChatsContent ?? undefined}
         bottomFloatingContent={sidebarBottomFloatingContent ?? undefined}
         labels={labels}
@@ -3171,6 +3422,8 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
         updatedShowFullBuckets={updatedBucketShowFullState}
         updatedIsLoading={organizeMode === 'updated' && sessionsListLoading}
         onOrganizeModeChange={handleOrganizeModeChange}
+        showUpdatedProjectNames={showUpdatedProjectNames}
+        onShowUpdatedProjectNamesChange={handleShowUpdatedProjectNamesChange}
         onChatScopeChange={handleChatScopeChanged}
         onSelectUpdatedItem={handleSelectUpdatedItem}
         onTogglePinnedSection={handleTogglePinnedSection}
@@ -3191,9 +3444,6 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
         onCreateWorkspaceClicked={handleCreateWorkspaceClicked}
         onHomeClicked={handleHomeClicked}
         onArchiveClicked={handleArchiveClicked}
-        onTasksClicked={handleTasksClicked}
-        onNewTaskClicked={handleNewTaskClicked}
-        showTasks={tasksEnabled}
         onDocsClicked={handleDocsClicked}
         onJoinCommunityClicked={handleJoinCommunityClicked}
         onFeedbackClicked={handleFeedbackClicked}

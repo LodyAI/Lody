@@ -129,9 +129,9 @@ function dateItem(entry: BlogEntry, locale: BlogLocale): ReactNode {
   );
 }
 
-function authorItem(entry: BlogEntry): ReactNode {
+function authorItem(entry: BlogEntry, linked = true): ReactNode {
   if (!hasText(entry.author)) return null;
-  if (!hasText(entry.authorLink)) return <span key="author">{entry.author}</span>;
+  if (!linked || !hasText(entry.authorLink)) return <span key="author">{entry.author}</span>;
 
   const external = isExternalLink(entry.authorLink);
   return (
@@ -228,7 +228,11 @@ export function BlogIndexPage({ entries, locale }: { entries: BlogEntry[]; local
               ) : null}
               <MetaLine
                 className="blog-lead__byline"
-                items={[tagItem(featured), authorItem(featured), readTimeItem(featured, locale)]}
+                items={[
+                  tagItem(featured),
+                  authorItem(featured, false),
+                  readTimeItem(featured, locale),
+                ]}
               />
               <span className="blog-lead__read">
                 {text.read}

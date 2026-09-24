@@ -19,6 +19,10 @@ export {
 export type { DesktopOnboardingProviderSelection } from '@/atoms/onboarding';
 export type { ProviderTestActivity } from './provider-test-state';
 export {
+  PROVIDER_WAIT_EXCEPTIONAL_AFTER_SECONDS,
+  PROVIDER_WAIT_MEASURED_AFTER_SECONDS,
+} from './provider-test-state';
+export {
   ProjectsScreen,
   ProjectsScreenView,
   type ProjectsScreenLocalEntry,

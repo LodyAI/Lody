@@ -1,7 +1,9 @@
 import { useState } from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
+import type { SessionHistoryParsed, SessionId } from '@lody/shared';
 
 import { UserMessageEditor } from '@/components/ai-gui/user-message-editor';
+import { MessageRowView } from '@/components/ai-gui/view';
 import type { ConversationFontSize } from '@/atoms/settings';
 
 const SHORT_TEXT = '你好';
@@ -48,6 +50,25 @@ type Story = StoryObj<typeof UserMessageEditor>;
 
 export const ShortMessage: Story = {
   render: () => <EditorHarness initialValue={SHORT_TEXT} />,
+};
+
+export const FromMessageEdit: Story = {
+  render: () => (
+    <MessageRowView
+      sessionId={'session-editor-story' as SessionId}
+      message={
+        {
+          id: 'editable-user-message',
+          role: 'user',
+          timestamp: '2026-09-12T10:00:00.000Z',
+          status: 'seen',
+          read: true,
+          items: [{ type: 'text', text: 'Clarify this instruction' }],
+        } satisfies SessionHistoryParsed
+      }
+      onEdit={async () => true}
+    />
+  ),
 };
 
 export const Empty: Story = {

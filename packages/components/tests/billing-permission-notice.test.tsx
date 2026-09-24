@@ -102,6 +102,50 @@ describe('BillingSettingsView upgrade permission', () => {
     ) as HTMLButtonElement | undefined;
   }
 
+  it.each([true, false])(
+    'gates changing cards on billing permission (%s)',
+    async (canManageBilling) => {
+      let opened = 0;
+      await renderView({
+        overview: {
+          ...freeOverview,
+          billingAccountId: 'billing_1',
+          effectivePlanTier: 'plus',
+          entitlementSource: 'stripe',
+          canManageBilling,
+        },
+        onPaymentMethod: () => {
+          opened += 1;
+        },
+      });
+      const button = Array.from(container!.querySelectorAll('button')).find(
+        (item) => item.textContent === 'Change payment method'
+      );
+      expect(Boolean(button)).toBe(canManageBilling);
+      if (button) {
+        await act(async () => button.click());
+        expect(opened).toBe(1);
+      }
+    }
+  );
+
+  it('disables the payment method action while opening Stripe', async () => {
+    await renderView({
+      overview: {
+        ...freeOverview,
+        billingAccountId: 'billing_1',
+        effectivePlanTier: 'plus',
+        entitlementSource: 'stripe',
+      },
+      pendingAction: 'portal',
+      onPaymentMethod: () => {},
+    });
+    const button = Array.from(container!.querySelectorAll('button')).find(
+      (item) => item.textContent === 'Opening…'
+    );
+    expect(button?.disabled).toBe(true);
+  });
+
   it('offers the upgrade action to a viewer who can manage billing', async () => {
     await renderView({});
 

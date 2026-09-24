@@ -1,0 +1,67 @@
+import { atom } from 'jotai';
+import { atomFamily } from 'jotai/utils';
+import type { SessionFilePayload, SessionId, SessionImagePayload } from '@lody/shared';
+import type { SessionFileTransferPhase } from '@/lib/session-file-upload';
+
+/**
+ * In-memory chat-landing draft state that must outlive the landing route's
+ * unmount. The prompt text already survives through
+ * `chatLandingSessionStateAtomFamily`; attachments and the reserved draft
+ * session id used to live in component state, so navigating to another tab and
+ * back silently dropped them (#242).
+ *
+ * Deliberately NOT `atomWithStorage`: a preview `blob:` URL and an in-flight
+ * upload's `AbortController` cannot be serialized. Surviving a route unmount is
+ * the whole requirement — losing a draft attachment when the app restarts is
+ * expected.
+ */
+
+export type PendingImage = {
+  localId: string;
+  previewUrl: string;
+  file: File;
+  status: 'uploading' | 'uploaded' | 'failed';
+  progress: number;
+  error?: string;
+  uploaded?: SessionImagePayload;
+};
+
+export type PendingFile = {
+  localId: string;
+  file: File;
+  status: SessionFileTransferPhase | 'uploaded' | 'failed';
+  progress: number;
+  error?: string;
+  uploaded?: SessionFilePayload;
+  abort?: AbortController;
+};
+
+/**
+ * The one home for a landing draft's complete scope. Attachments are
+ * uploaded into a specific workspace — an `imageId`/`fileId` from one workspace
+ * cannot be attached to a session in another — and prompt text must not appear
+ * in another workspace either, so every part uses this workspace-scoped key.
+ *
+ * Keyed on the workspace SLUG rather than the resolved id: the slug is a route
+ * param that is stable for the whole mount, while `useResolvedWorkspaceScope()`
+ * reports `null` until the workspace resolves. A key that flips mid-mount would
+ * strand whatever was added before it settled.
+ *
+ * `stateKey` identifies the user and landing surface. An alternate landing
+ * surface may suffix it so it does not clobber the main draft. Pass that, not a
+ * raw user id, or a suffixed surface would share this scope with the main landing.
+ */
+export const buildChatLandingDraftKey = (stateKey: string | null, workspaceSlug: string): string =>
+  `${stateKey ?? 'anonymous'}:${workspaceSlug}`;
+
+export const chatLandingPendingImagesAtomFamily = atomFamily((_draftKey: string) =>
+  atom<PendingImage[]>([])
+);
+
+export const chatLandingPendingFilesAtomFamily = atomFamily((_draftKey: string) =>
+  atom<PendingFile[]>([])
+);
+
+export const chatLandingDraftSessionIdAtomFamily = atomFamily((_draftKey: string) =>
+  atom<SessionId | null>(null)
+);

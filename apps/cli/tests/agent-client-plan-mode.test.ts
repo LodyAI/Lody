@@ -9,6 +9,8 @@ import type {
 import { parseAskUserQuestionPermissionMeta } from '@lody/shared';
 import type {
   CreateElicitationRequest,
+  PromptRequest,
+  PromptResponse,
   SessionNotification,
   RequestPermissionRequest,
 } from '@agentclientprotocol/sdk';
@@ -359,6 +361,93 @@ describe('AgentClient plan mode permission restoration', () => {
   });
 
   describe('ACP extension updates', () => {
+    it.each(['resolve', 'reject'] as const)(
+      'keeps cancelled raw prompts pending until they %s',
+      async (outcome) => {
+        const { client } = createTestClient();
+        const raw = Promise.withResolvers<PromptResponse>();
+        // @ts-expect-error - focused transport-boundary setup
+        client.connection = { prompt: () => raw.promise, cancel: async () => {} };
+        const controller = new AbortController();
+        const local = client.prompt('acp-test' as ACPSessionId, [], {
+          signal: controller.signal,
+        });
+        controller.abort();
+        await expect(local).rejects.toThrow('Agent prompt aborted');
+
+        const drain = client.pendingPromptCompletion;
+        expect(drain).not.toBeNull();
+        let drained = false;
+        void drain?.then(() => {
+          drained = true;
+        });
+        await Promise.resolve();
+        expect(drained).toBe(false);
+
+        if (outcome === 'resolve') raw.resolve({ stopReason: 'cancelled' });
+        else raw.reject(new Error('ACP connection closed'));
+        await drain;
+        expect(client.pendingPromptCompletion).toBeNull();
+      }
+    );
+
+    it.each(['original', 'steer'] as const)(
+      'drains both Claude handoff requests when %s finishes first',
+      async (first) => {
+        const { client } = createTestClient({ agentType: 'claude' });
+        const original = Promise.withResolvers<PromptResponse>();
+        const steered = Promise.withResolvers<PromptResponse>();
+        let steerId = '';
+        const sendPrompt = (request: PromptRequest) => {
+          const metadata = request._meta?.claudeCode as { steer?: { id: string } } | undefined;
+          if (metadata?.steer) {
+            steerId = metadata.steer.id;
+            return steered.promise;
+          }
+          return original.promise;
+        };
+        // @ts-expect-error - focused transport-boundary setup
+        client.connection = { prompt: sendPrompt };
+        // @ts-expect-error - focused capability-negotiation setup
+        client.acknowledgedSteerCapability = {
+          transport: 'prompt',
+          promptMetaNamespace: 'claudeCode',
+          appliedNotificationMethod: 'claude/steerApplied',
+          upstreamTurn: 'handoff',
+          configPolicy: 'apply',
+        };
+        const initial = client.prompt('acp-test' as ACPSessionId, []);
+        const steer = client.steerPrompt('acp-test' as ACPSessionId, []);
+        const application = client.extNotification?.('_claude/steerApplied', {
+          sessionId: 'acp-test',
+          steerId,
+        });
+        const outcome = await steer.outcome;
+        expect(outcome.outcome).toBe('applied');
+        if (outcome.outcome !== 'applied') throw new Error('Expected applied steer');
+        outcome.application.release();
+        await application;
+        const drain = client.pendingPromptCompletion;
+        let drained = false;
+        void drain?.then(() => {
+          drained = true;
+        });
+        if (first === 'original') {
+          original.resolve({ stopReason: 'end_turn' });
+          await initial;
+        } else {
+          steered.resolve({ stopReason: 'end_turn' });
+          await steer.completion;
+        }
+        expect(drained).toBe(false);
+        expect(client.pendingPromptCompletion).not.toBeNull();
+        original.resolve({ stopReason: 'end_turn' });
+        steered.resolve({ stopReason: 'end_turn' });
+        await Promise.all([initial, steer.completion, drain]);
+        expect(client.pendingPromptCompletion).toBeNull();
+      }
+    );
+
     it('holds the steer application notification until its ownership lease is released', async () => {
       const { client, onUpdateMessage } = createTestClient({ agentType: 'claude' });
       const prompt = vi.fn(() => new Promise(() => {}));
@@ -389,7 +478,9 @@ describe('AgentClient plan mode permission restoration', () => {
         .then(() => {
           notificationCompleted = true;
         });
-      const lease = await steerRun.applied;
+      const outcome = await steerRun.outcome;
+      expect(outcome.outcome).toBe('applied');
+      if (outcome.outcome !== 'applied') throw new Error('Expected applied steer');
       expect(notificationCompleted).toBe(false);
       const postApplicationUpdate = client.sessionUpdate({
         sessionId: 'acp-test',
@@ -401,7 +492,7 @@ describe('AgentClient plan mode permission restoration', () => {
       await Promise.resolve();
       expect(onUpdateMessage).not.toHaveBeenCalled();
 
-      lease.release();
+      outcome.application.release();
       await notification;
       await postApplicationUpdate;
       expect(notificationCompleted).toBe(true);
@@ -435,20 +526,17 @@ describe('AgentClient plan mode permission restoration', () => {
       return { client, request: requestSpy };
     };
 
-    it('reports an acknowledged steer the agent refused as not delivered', async () => {
-      // Codex answers `No active Codex turn to steer` once the turn the guide
-      // was aimed at has ended — inject-or-refuse, so nothing was taken.
-      const { client, request } = createSteerClient(async () => {
-        throw Object.assign(new Error('Invalid request: No active Codex turn to steer'), {
-          code: -32600,
-        });
-      });
+    it('maps the Codex adapter failed verdict to not-applied', async () => {
+      const { client, request } = createSteerClient(async () => ({ outcome: 'failed' }));
 
       const steerRun = client.steerPrompt('acp-test' as ACPSessionId, [
         { type: 'text', text: 'guide' },
       ]);
 
-      await expect(steerRun.applied).rejects.toBeInstanceOf(AgentSteerNotDeliveredError);
+      await expect(steerRun.outcome).resolves.toMatchObject({
+        outcome: 'not-applied',
+        error: expect.any(AgentSteerNotDeliveredError),
+      });
       expect(request).toHaveBeenCalledWith(
         '_session/steering',
         expect.objectContaining({ sessionId: 'acp-test', steerId: expect.any(String) })
@@ -467,12 +555,10 @@ describe('AgentClient plan mode permission restoration', () => {
         { type: 'text', text: 'guide' },
       ]);
 
-      const error = await steerRun.applied.then(
-        () => null,
-        (reason: unknown) => reason
-      );
-      expect(error).toBeInstanceOf(Error);
-      expect(error).not.toBeInstanceOf(AgentSteerNotDeliveredError);
+      await expect(steerRun.outcome).resolves.toMatchObject({
+        outcome: 'unknown',
+        error: expect.not.objectContaining({ name: 'AgentSteerNotDeliveredError' }),
+      });
     });
 
     it('lets the refusal win when the steered turn ends before the agent answers', async () => {
@@ -498,11 +584,24 @@ describe('AgentClient plan mode permission restoration', () => {
       ]);
       completeTurn();
       await Promise.resolve();
+      const drain = client.pendingPromptCompletion;
+      expect(drain).not.toBeNull();
+      let drained = false;
+      void drain?.then(() => {
+        drained = true;
+      });
+      await Promise.resolve();
+      expect(drained).toBe(false);
       refuse(
         Object.assign(new Error('Invalid request: No active Codex turn to steer'), { code: -32600 })
       );
 
-      await expect(steerRun.applied).rejects.toBeInstanceOf(AgentSteerNotDeliveredError);
+      await expect(steerRun.outcome).resolves.toMatchObject({
+        outcome: 'not-applied',
+        error: expect.any(AgentSteerNotDeliveredError),
+      });
+      await drain;
+      expect(client.pendingPromptCompletion).toBeNull();
     });
 
     it('handles rate limit extension notifications', async () => {
@@ -1255,6 +1354,53 @@ describe('unstable_createElicitation (AskUserQuestion bridge)', () => {
 
     await expect(client.unstable_createElicitation(askUserQuestionForm)).resolves.toEqual({
       action: 'cancel',
+    });
+  });
+
+  it('bridges separate selection and note fields through the real permission boundary', async () => {
+    const { client, onRequestPermission } = createTestClient();
+    onRequestPermission.mockResolvedValueOnce({
+      outcome: {
+        outcome: 'selected',
+        optionId: 'answer',
+        _meta: {
+          lody: {
+            elicitation: {
+              version: 1,
+              answers: { approach: 'Ship', context: 'Preserve compatibility' },
+            },
+          },
+        },
+      },
+    } as unknown as Awaited<ReturnType<typeof onRequestPermission>>);
+    const result = await client.unstable_createElicitation({
+      mode: 'form',
+      sessionId: 'acp-test',
+      message: 'What next?',
+      requestedSchema: {
+        type: 'object',
+        required: ['approach'],
+        properties: {
+          approach: { type: 'string', enum: ['Ship', 'None of the above'] },
+          context: {
+            type: 'string',
+            title: 'Context',
+            _meta: { lody: { elicitation: { version: 1, noteFor: 'approach', secret: true } } },
+          },
+        },
+      },
+    } as unknown as CreateElicitationRequest);
+    const request = (
+      onRequestPermission.mock.calls as unknown as [string, RequestPermissionRequest][]
+    )[0]?.[1];
+    expect(parseAskUserQuestionPermissionMeta(request?._meta)?.questions[0]).toMatchObject({
+      id: 'approach',
+      allowCustomAnswer: false,
+      note: { fieldId: 'context', title: 'Context', isSecret: true },
+    });
+    expect(result).toEqual({
+      action: 'accept',
+      content: { approach: 'Ship', context: 'Preserve compatibility' },
     });
   });
 

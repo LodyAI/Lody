@@ -114,3 +114,14 @@ void test('does not open the deeplink when a command launches', async () => {
   assert.equal(openedUrl, false)
   assert.deepEqual(result, { launched: true, method: 'command', command: 'code' })
 })
+
+import { localFileActionError } from './local-file-action-error.ts'
+
+void test('distinguishes missing files from denied access and other OS failures', () => {
+  assert.equal(localFileActionError({ code: 'ENOENT' }), 'not_found')
+  assert.equal(localFileActionError({ code: 'ENOTDIR' }), 'not_found')
+  assert.equal(localFileActionError({ code: 'EACCES' }), 'EACCES')
+  assert.equal(localFileActionError({ code: 'EPERM' }), 'EPERM')
+  assert.equal(localFileActionError({ code: 'EIO' }), 'EIO')
+  assert.equal(localFileActionError(new Error('System error')), 'System error')
+})

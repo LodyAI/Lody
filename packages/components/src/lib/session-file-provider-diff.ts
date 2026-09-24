@@ -47,6 +47,8 @@ function sessionFileProviderSnapshotToDiffSnapshot(
   switch (snapshot.kind) {
     case 'text':
       return { status: 'ready', snapshot: { kind: 'text', text: snapshot.text } };
+    case 'paged-text':
+      return { status: 'ready', snapshot: { kind: 'large' } };
     case 'binary':
       return { status: 'ready', snapshot: { kind: 'binary' } };
     case 'unavailable':

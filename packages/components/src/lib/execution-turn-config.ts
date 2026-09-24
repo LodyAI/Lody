@@ -1,4 +1,5 @@
 import {
+  LODY_PLAN_MODE_CONFIG_ID,
   ACP_COLLABORATION_MODE_CONFIG_ID,
   ACP_COLLABORATION_MODE_DEFAULT_VALUE,
   ACP_COLLABORATION_MODE_PLAN_VALUE,
@@ -35,6 +36,19 @@ export function buildExecutionTurnConfigOverrides(args: {
     selectedModeId === ACP_PLAN_PERMISSION_MODE_ID && nonPlanModeId
       ? nonPlanModeId
       : selectedModeId;
+  const corePlanSelector = configOptionSelectors.find(
+    (selector) => selector.configId === LODY_PLAN_MODE_CONFIG_ID && selector.type === 'boolean'
+  );
+  const corePlanValue =
+    configOptionValues[LODY_PLAN_MODE_CONFIG_ID] ?? corePlanSelector?.currentValue;
+  if (typeof corePlanValue === 'boolean') {
+    return {
+      modeIdOverride,
+      configOptionValuesOverride: corePlanValue
+        ? { ...configOptionValues, [LODY_PLAN_MODE_CONFIG_ID]: false }
+        : configOptionValues,
+    };
+  }
   const planSelector = configOptionSelectors.find(
     (selector) =>
       selector.type === 'select' &&

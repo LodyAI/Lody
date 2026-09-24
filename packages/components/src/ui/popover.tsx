@@ -2,7 +2,7 @@ import * as React from 'react';
 import * as PopoverPrimitive from '@radix-ui/react-popover';
 
 import { cn } from '@/lib/utils';
-import { useSafeAreaInsets } from '@/hooks/use-safe-area-insets';
+import { useSafeAreaCollisionPadding } from '@/hooks/use-safe-area-insets';
 
 const Popover = PopoverPrimitive.Root;
 
@@ -22,30 +22,7 @@ const PopoverContent = React.forwardRef<
     { className, align = 'center', sideOffset = 4, collisionPadding, portalContainer, ...props },
     ref
   ) => {
-    const safeArea = useSafeAreaInsets();
-    const baseCollisionPadding = { top: 8, right: 8, bottom: 8, left: 8 };
-    const safeAreaPadding = {
-      top: baseCollisionPadding.top + safeArea.top,
-      right: baseCollisionPadding.right + safeArea.right,
-      bottom: baseCollisionPadding.bottom + safeArea.bottom,
-      left: baseCollisionPadding.left + safeArea.left,
-    };
-    const mergedCollisionPadding =
-      typeof collisionPadding === 'number'
-        ? {
-            top: Math.max(safeAreaPadding.top, collisionPadding),
-            right: Math.max(safeAreaPadding.right, collisionPadding),
-            bottom: Math.max(safeAreaPadding.bottom, collisionPadding),
-            left: Math.max(safeAreaPadding.left, collisionPadding),
-          }
-        : collisionPadding
-          ? {
-              top: Math.max(safeAreaPadding.top, collisionPadding.top ?? 0),
-              right: Math.max(safeAreaPadding.right, collisionPadding.right ?? 0),
-              bottom: Math.max(safeAreaPadding.bottom, collisionPadding.bottom ?? 0),
-              left: Math.max(safeAreaPadding.left, collisionPadding.left ?? 0),
-            }
-          : safeAreaPadding;
+    const mergedCollisionPadding = useSafeAreaCollisionPadding(collisionPadding);
     return (
       <PopoverPrimitive.Portal container={portalContainer ?? undefined}>
         <PopoverPrimitive.Content

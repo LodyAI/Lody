@@ -1,5 +1,6 @@
 import { useId, useState, type FormEvent, type ReactNode } from 'react';
-import { KeyRound, Loader2, Plus, Trash2 } from 'lucide-react';
+import { KeyRound, Plus, Trash2 } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import { useTranslation } from 'react-i18next';
 import type { McpConnectionSpec, McpTransport, WorkspaceMcpServerMeta } from '@lody/shared';
 import {
@@ -49,9 +50,7 @@ const emptyConnectionFields = (transport: McpTransport) => ({
   headers: [] as KeyValueDraft[],
 });
 
-const createMcpConnectionFormDraft = (
-  entry?: WorkspaceMcpServerMeta
-): McpConnectionFormDraft => {
+const createMcpConnectionFormDraft = (entry?: WorkspaceMcpServerMeta): McpConnectionFormDraft => {
   const transport = entry?.transport ?? 'stdio';
   const connection = entry?.connection;
   return {
@@ -332,7 +331,7 @@ export function McpConnectionForm({
           {t('common.cancel')}
         </Button>
         <Button type="submit" size="sm" disabled={submitting || draft.name.trim().length === 0}>
-          {submitting ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : null}
+          {submitting ? <Spinner className="h-3.5 w-3.5" aria-hidden="true" /> : null}
           {submitting ? t('settings.mcp.form.saving') : t('common.save')}
         </Button>
       </footer>
@@ -366,7 +365,7 @@ function TransportToggle({
             aria-checked={selected}
             onClick={() => onChange(transport)}
             className={cn(
-              'flex min-w-20 items-center justify-center gap-1.5 rounded-full px-3 text-xs font-medium transition-colors',
+              'flex min-w-20 items-center justify-center gap-1.5 rounded-full px-3 text-xs font-normal transition-colors',
               'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60',
               selected
                 ? 'bg-background text-foreground shadow-sm'

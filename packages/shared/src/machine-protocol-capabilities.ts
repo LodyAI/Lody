@@ -8,16 +8,23 @@
 export type MachineProtocolCapabilities = Record<string, number>;
 
 export const MACHINE_PROTOCOL_CAPABILITIES = {
+  builtinPi: 'builtinPi',
+  subagentCancellation: 'subagentCancellation',
   acpAuthenticationInteractions: 'acpAuthenticationInteractions',
   localProjectRemoval: 'localProjectRemoval',
   providerSetup: 'providerSetup',
+  localFileResources: 'localFileResources',
   acpProtocolAuthentication: 'acpProtocolAuthentication',
+  piExtensions: 'piExtensions',
 } as const;
 
 export const ACP_AUTHENTICATION_INTERACTIONS_PROTOCOL_VERSION = 2;
+export const SUBAGENT_CANCELLATION_PROTOCOL_VERSION = 1;
 export const LOCAL_PROJECT_REMOVAL_PROTOCOL_VERSION = 1;
 export const PROVIDER_SETUP_PROTOCOL_VERSION = 1;
+export const LOCAL_FILE_RESOURCES_PROTOCOL_VERSION = 1;
 export const ACP_PROTOCOL_AUTHENTICATION_VERSION = 2;
+export const PI_EXTENSIONS_PROTOCOL_VERSION = 1;
 
 type MachineProtocolCapabilityCarrier = {
   protocolCapabilities?: MachineProtocolCapabilities;
@@ -39,6 +46,16 @@ export function machineSupportsProtocolCapability(
   return getMachineProtocolCapabilityVersion(machine, capability) >= minimumVersion;
 }
 
+export function machineSupportsSubagentCancellation(
+  machine: MachineProtocolCapabilityCarrier | null | undefined
+): boolean {
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.subagentCancellation,
+    SUBAGENT_CANCELLATION_PROTOCOL_VERSION
+  );
+}
+
 /**
  * The capability set this build advertises, and the checks that read it.
  *
@@ -47,10 +64,12 @@ export function machineSupportsProtocolCapability(
  * in the "supported" direction and there is no version fallback to catch it.
  */
 export const CURRENT_MACHINE_PROTOCOL_CAPABILITIES: MachineProtocolCapabilities = {
+  [MACHINE_PROTOCOL_CAPABILITIES.subagentCancellation]: SUBAGENT_CANCELLATION_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.acpAuthenticationInteractions]:
     ACP_AUTHENTICATION_INTERACTIONS_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.localProjectRemoval]: LOCAL_PROJECT_REMOVAL_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.providerSetup]: PROVIDER_SETUP_PROTOCOL_VERSION,
+  [MACHINE_PROTOCOL_CAPABILITIES.localFileResources]: LOCAL_FILE_RESOURCES_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.acpProtocolAuthentication]: ACP_PROTOCOL_AUTHENTICATION_VERSION,
 };
 
@@ -100,5 +119,25 @@ export function machineSupportsAcpProtocolAuthentication(
     machine,
     MACHINE_PROTOCOL_CAPABILITIES.acpProtocolAuthentication,
     ACP_PROTOCOL_AUTHENTICATION_VERSION
+  );
+}
+
+export function machineSupportsLocalFileResourcesProtocol(
+  machine: MachineProtocolCapabilityCarrier | null | undefined
+): boolean {
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.localFileResources,
+    LOCAL_FILE_RESOURCES_PROTOCOL_VERSION
+  );
+}
+
+export function machineSupportsPiExtensions(
+  machine: MachineProtocolCapabilityCarrier | null | undefined
+): boolean {
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.piExtensions,
+    PI_EXTENSIONS_PROTOCOL_VERSION
   );
 }

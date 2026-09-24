@@ -27,6 +27,7 @@ import type {
   MachineAcpCapabilitiesRefreshResponse,
   MachineBugReportResponse,
   MachineId,
+  MachinePiExtensionsResponse,
   MachinePingResponse,
   MachineRestartResponse,
   MachineStatusResponse,
@@ -45,6 +46,8 @@ import type {
   SessionForkResponse,
   SessionForkSpec,
   SessionSteerResponse,
+  SessionGoalAction,
+  SessionGoalResponse,
   SessionId,
   SessionPreviewCreateResponse,
   SessionPreviewRevokeResponse,
@@ -93,6 +96,7 @@ import {
 } from './rpc-secret';
 
 const JSON_RPC_VERSION = '2.0';
+const MACHINE_LIFECYCLE_ACK_TIMEOUT_MS = 5_000;
 
 // Upper bound on RPC handlers running at once on the shared per-machine request
 // loop. Requests are dispatched concurrently (see `handleRequestBatch`) so a slow
@@ -116,6 +120,7 @@ const CONTROL_METHODS: ReadonlySet<string> = new Set([
   'session/cancel',
   'session/live-status',
   'session/steer',
+  'session/goal',
   'session/terminate',
   'session/dispatch-turn',
   'session/prepare',
@@ -295,7 +300,8 @@ type RpcServerDeps = {
     requestId: string;
     targetVersion?: string;
   }) => Promise<MachineUpgradeResponse>;
-  onMachineLifecycleResponseAppended?: (
+  /** Accepted operations proceed after the ACK succeeds, fails, or reaches its deadline. */
+  onMachineLifecycleResponseSettled?: (
     args:
       | { action: 'restart'; response: MachineRestartResponse }
       | { action: 'upgrade'; response: MachineUpgradeResponse }
@@ -332,6 +338,9 @@ type RpcServerDeps = {
     agentType: string;
     onAcpBinaryProgress?: (message: MachineAcpBinaryProgressMessage) => void;
   }) => Promise<MachineAcpBinaryInstallResponse>;
+  listMachinePiExtensions?: (args: {
+    configId?: AgentConfigId;
+  }) => Promise<MachinePiExtensionsResponse>;
   submitBugReport?: (args: {
     description: string;
     reporterUserId: string;
@@ -340,6 +349,7 @@ type RpcServerDeps = {
   cancelSession?: (args: {
     sessionId: SessionId;
     turnId: string;
+    subagentTaskId?: string;
   }) => Promise<SessionCancelResponse>;
   getSessionLiveStatus?: (args: {
     sessionId: SessionId;
@@ -352,6 +362,12 @@ type RpcServerDeps = {
     timestamp: string;
     inputConfig: SessionTurnInputConfig;
   }) => Promise<SessionSteerResponse>;
+  controlSessionGoal?: (args: {
+    sessionId: SessionId;
+    action: SessionGoalAction;
+    objective?: string;
+    userId: string;
+  }) => Promise<SessionGoalResponse>;
   terminateSession?: (args: { sessionId: SessionId }) => Promise<SessionTerminateResponse>;
   forkSession?: (args: SessionForkSpec) => Promise<SessionForkResponse>;
   editAndResendSession?: (
@@ -769,8 +785,10 @@ export class LoroStreamsMachineRpcServer {
             requestToken: request.params.requestToken,
             requestId: request.params.requestId,
           });
-          await this.appendResultResponse(request.replyTo, request.id, request.method, response);
-          this.deps.onMachineLifecycleResponseAppended?.({ action: 'restart', response });
+          await this.settleMachineLifecycleResponse(request.replyTo, request.id, {
+            action: 'restart',
+            response,
+          });
           return;
         }
         case 'machine/upgrade': {
@@ -787,8 +805,10 @@ export class LoroStreamsMachineRpcServer {
             requestId: request.params.requestId,
             targetVersion: request.params.targetVersion,
           });
-          await this.appendResultResponse(request.replyTo, request.id, request.method, response);
-          this.deps.onMachineLifecycleResponseAppended?.({ action: 'upgrade', response });
+          await this.settleMachineLifecycleResponse(request.replyTo, request.id, {
+            action: 'upgrade',
+            response,
+          });
           return;
         }
         case 'machine/acp-capabilities-refresh': {
@@ -1018,6 +1038,20 @@ export class LoroStreamsMachineRpcServer {
           await this.appendResultResponse(request.replyTo, request.id, request.method, response);
           return;
         }
+        case 'machine/pi-extensions': {
+          if (!this.deps.listMachinePiExtensions) {
+            await this.appendErrorResponse(request.replyTo, request.id, request.method, {
+              code: LORO_STREAMS_RPC_ERROR_CODES.methodUnavailable,
+              message: 'Pi extension listing is not available on this machine.',
+            });
+            return;
+          }
+          const response = await this.deps.listMachinePiExtensions({
+            configId: request.params.configId as AgentConfigId | undefined,
+          });
+          await this.appendResultResponse(request.replyTo, request.id, request.method, response);
+          return;
+        }
         case 'machine/bug-report': {
           if (!this.deps.submitBugReport) {
             await this.appendErrorResponse(request.replyTo, request.id, request.method, {
@@ -1045,6 +1079,7 @@ export class LoroStreamsMachineRpcServer {
           const response = await this.deps.cancelSession({
             sessionId: request.params.sessionId,
             turnId: request.params.turnId,
+            subagentTaskId: request.params.subagentTaskId,
           });
           await this.appendResultResponse(request.replyTo, request.id, request.method, response);
           return;
@@ -1086,6 +1121,23 @@ export class LoroStreamsMachineRpcServer {
             userId: request.params.userId,
             timestamp: request.params.timestamp,
             inputConfig,
+          });
+          await this.appendResultResponse(request.replyTo, request.id, request.method, response);
+          return;
+        }
+        case 'session/goal': {
+          if (!this.deps.controlSessionGoal) {
+            await this.appendErrorResponse(request.replyTo, request.id, request.method, {
+              code: LORO_STREAMS_RPC_ERROR_CODES.methodUnavailable,
+              message: 'Session goal control is not available on this machine.',
+            });
+            return;
+          }
+          const response = await this.deps.controlSessionGoal({
+            sessionId: request.params.sessionId as SessionId,
+            action: request.params.action,
+            ...(request.params.objective ? { objective: request.params.objective } : {}),
+            userId: request.params.userId,
           });
           await this.appendResultResponse(request.replyTo, request.id, request.method, response);
           return;
@@ -1501,6 +1553,44 @@ export class LoroStreamsMachineRpcServer {
     }
   }
 
+  private async settleMachineLifecycleResponse(
+    replyTo: string,
+    requestId: string,
+    event:
+      | { action: 'restart'; response: MachineRestartResponse }
+      | { action: 'upgrade'; response: MachineUpgradeResponse }
+  ): Promise<void> {
+    const method = event.action === 'restart' ? 'machine/restart' : 'machine/upgrade';
+    if (!event.response.accepted) {
+      await this.appendResultResponse(replyTo, requestId, method, event.response);
+      return;
+    }
+
+    // Preparation already accepted the operation (including persisting upgrade
+    // intent). Delivery failure must not leave it pending forever. The race also
+    // observes a late append rejection without triggering the action a second time.
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([
+        this.appendResultResponse(replyTo, requestId, method, event.response),
+        new Promise<never>((_, reject) => {
+          timeout = setTimeout(
+            () => reject(new Error('Machine lifecycle ACK deadline exceeded')),
+            MACHINE_LIFECYCLE_ACK_TIMEOUT_MS
+          );
+        }),
+      ]);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.deps.logger.warn(
+        `[rpc-server:${this.deps.machineId}] ${event.action} ACK failed for ${requestId}; continuing accepted operation: ${message}`
+      );
+    } finally {
+      if (timeout !== undefined) clearTimeout(timeout);
+    }
+    this.deps.onMachineLifecycleResponseSettled?.(event);
+  }
+
   private async decryptCodeCollabV2RequestParams(
     value: unknown
   ): Promise<{ ownerSessionId: string; payload: unknown }> {
@@ -1541,9 +1631,11 @@ export class LoroStreamsMachineRpcServer {
       | MachineAcpBinaryInstallResponse
       | MachineAcpBinaryProgressMessage
       | MachineBugReportResponse
+      | MachinePiExtensionsResponse
       | SessionCancelResponse
       | LoroSessionLiveStatusRpcResponse
       | SessionSteerResponse
+      | SessionGoalResponse
       | SessionTerminateResponse
       | SessionForkResponse
       | SessionEditAndResendResponse

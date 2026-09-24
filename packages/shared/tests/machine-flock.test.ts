@@ -3,9 +3,8 @@ import { describe, expect, it } from 'vitest';
 import {
   applyMachineFlockRowEvents,
   applyProviderSetupCancellationToFlock,
-  buildMachineArchiveSessionCommand,
   buildMachineDeleteLocalProjectCommand,
-  buildMachineDeleteSessionCommand,
+  buildSessionLaunchConfig,
   deleteAgentConfigFromFlock,
   deleteMachineFlockRowFromFlock,
   getMachineFlockAcpCapabilities,
@@ -20,7 +19,6 @@ import {
   getMachineFlockSessionLaunchConfig,
   getSessionLaunchConfigLegacyFields,
   isMachineFlockDocId,
-  machineDeleteCommandToQueueItem,
   machineFlockKeys,
   mergeSessionLaunchConfig,
   parseMachineFlockDocId,
@@ -81,10 +79,6 @@ class FakeMachineFlock implements MachineFlockWritableFlock {
 
 describe('machine Flock helpers', () => {
   it('builds compact command values', () => {
-    expect(buildMachineArchiveSessionCommand({ requestedAt: 123 })).toEqual({
-      v: 1,
-      requestedAt: 123,
-    });
     expect(buildMachineDeleteLocalProjectCommand({ requestedAt: 234 })).toEqual({
       v: 1,
       requestedAt: 234,
@@ -102,63 +96,6 @@ describe('machine Flock helpers', () => {
       projectName: 'Lody',
       originalRootPath: '/Users/developer/Code/lody',
       cleanupWorktrees: true,
-    });
-
-    expect(
-      buildMachineDeleteSessionCommand({
-        session: {
-          repoFullName: 'owner/repo',
-          branchName: 'lody/session-1',
-          baseBranch: 'main',
-          isWorktree: true,
-        },
-        requestedAt: 456,
-      })
-    ).toEqual({
-      v: 1,
-      repoFullName: 'owner/repo',
-      branchName: 'lody/session-1',
-      baseBranchName: 'main',
-      isWorktree: true,
-      requestedAt: 456,
-    });
-
-    expect(
-      buildMachineDeleteSessionCommand({
-        session: {
-          repoFullName: 'owner/repo',
-          branchName: 'new-branch',
-          isWorktree: true,
-        },
-        requestedAt: 789,
-        existing: {
-          v: 1,
-          requestedAt: 456,
-          branchName: 'old-branch',
-          keptWorktreePath: '/tmp/kept',
-        },
-      })
-    ).toEqual({
-      v: 1,
-      repoFullName: 'owner/repo',
-      branchName: 'new-branch',
-      isWorktree: true,
-      requestedAt: 789,
-    });
-
-    expect(
-      buildMachineDeleteSessionCommand({
-        session: {
-          parentSessionId: 'parent-session' as SessionId,
-          repoFullName: 'owner/repo',
-          isWorktree: true,
-        },
-        requestedAt: 456,
-      })
-    ).toBeNull();
-
-    expect(machineDeleteCommandToQueueItem({ v: 1, requestedAt: 1 })).toEqual({
-      requestedAt: 1,
     });
   });
 
@@ -276,6 +213,7 @@ describe('machine Flock helpers', () => {
     const sessionId = 'session-1' as SessionId;
     const launchConfig = {
       customAcp: { command: 'node', args: ['agent.js'] },
+      runtimeOverrides: { piExtensions: ['/fixture/plugin.ts'] },
       env: { TOKEN: 'secret' },
       worktreeSetup: { scripts: { bash: 'pnpm install' }, timeoutMs: 30_000 },
     };
@@ -289,6 +227,7 @@ describe('machine Flock helpers', () => {
 
     const rows = readMachineFlockRowsFromFlock(flock);
     expect(getMachineFlockSessionLaunchConfig(rows, sessionId)).toEqual(launchConfig);
+    expect(buildSessionLaunchConfig(launchConfig)).toEqual(launchConfig);
     expect(
       mergeSessionLaunchConfig(getMachineFlockSessionLaunchConfig(rows, sessionId), {
         env: { FALLBACK: 'ignored' },

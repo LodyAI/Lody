@@ -1,3 +1,4 @@
+import { windowStorage } from './desktop-window';
 import type {
   AcpConfigOptionValue,
   AgentConfigMeta,
@@ -207,7 +208,7 @@ export const readPersistedDraftTabs = (parentSessionId: SessionId): DraftSession
   if (typeof window === 'undefined') {
     return [];
   }
-  return parseStoredDraftTabs(localStorage.getItem(getDraftTabsStorageKey(parentSessionId)));
+  return parseStoredDraftTabs(windowStorage().getItem(getDraftTabsStorageKey(parentSessionId)));
 };
 
 export const writePersistedDraftTabs = (
@@ -219,11 +220,14 @@ export const writePersistedDraftTabs = (
   }
 
   try {
+    const storage = windowStorage();
+    const key = getDraftTabsStorageKey(parentSessionId);
     const persistedDraftTabs = draftTabs.filter((draft) => draft.prompt.length > 0);
-    localStorage.setItem(
-      getDraftTabsStorageKey(parentSessionId),
-      JSON.stringify(persistedDraftTabs)
-    );
+    if (persistedDraftTabs.length === 0) {
+      storage.removeItem(key);
+      return;
+    }
+    storage.setItem(key, JSON.stringify(persistedDraftTabs));
   } catch {
     // ignore
   }
@@ -235,7 +239,7 @@ export const readStoredTabOrder = (parentSessionId: SessionId): string[] => {
   }
 
   try {
-    const raw = localStorage.getItem(getTabOrderStorageKey(parentSessionId));
+    const raw = windowStorage().getItem(getTabOrderStorageKey(parentSessionId));
     if (!raw) {
       return [];
     }
@@ -252,7 +256,7 @@ export const writeStoredTabOrder = (parentSessionId: SessionId, tabOrder: string
   }
 
   try {
-    localStorage.setItem(getTabOrderStorageKey(parentSessionId), JSON.stringify(tabOrder));
+    windowStorage().setItem(getTabOrderStorageKey(parentSessionId), JSON.stringify(tabOrder));
   } catch {
     // ignore
   }
@@ -266,7 +270,7 @@ export const readStoredLastActiveTabState = (
   }
 
   try {
-    const raw = localStorage.getItem(getLastActiveTabStorageKey(parentSessionId));
+    const raw = windowStorage().getItem(getLastActiveTabStorageKey(parentSessionId));
     if (!raw) {
       return null;
     }
@@ -286,7 +290,7 @@ export const writeStoredLastActiveTabState = (
   }
 
   try {
-    localStorage.setItem(getLastActiveTabStorageKey(parentSessionId), JSON.stringify(state));
+    windowStorage().setItem(getLastActiveTabStorageKey(parentSessionId), JSON.stringify(state));
   } catch {
     // ignore
   }

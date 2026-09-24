@@ -415,7 +415,7 @@ const VirtualFileTreeRow = memo(function VirtualFileTreeRow({
       aria-selected={selected}
       disabled={disabled}
       className={cn(
-        'group flex w-full items-center pr-2 text-left text-sm outline-none hover:bg-hover hover:text-hover-foreground focus-visible:bg-hover focus-visible:ring-1 focus-visible:ring-ring',
+        'group flex w-full items-center pr-2 text-left text-[0.9em] outline-none hover:bg-hover hover:text-hover-foreground focus-visible:bg-hover focus-visible:ring-1 focus-visible:ring-ring',
         // `w-full` resolves against the positioned ancestor once absolute, so
         // the hover/selection background still spans the full row.
         virtualStart !== undefined && 'absolute left-0 top-0',
@@ -465,13 +465,18 @@ const VirtualFileTreeRow = memo(function VirtualFileTreeRow({
   );
 
   // Only files get a menu, and only when the surface resolved actions for this
-  // session — no menu at all beats a menu that can only disappoint.
+  // session — no menu at all beats a menu that can only disappoint. An item can
+  // still decline a specific path, so filter before deciding to render.
   if (!isFile || !fileMenuItems || fileMenuItems.length === 0) return rowButton;
+  const visibleMenuItems = fileMenuItems.filter(
+    (menuItem) => menuItem.isAvailable?.(item.id) ?? true
+  );
+  if (visibleMenuItems.length === 0) return rowButton;
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>{rowButton}</ContextMenuTrigger>
       <ContextMenuContent className="min-w-[190px]">
-        {fileMenuItems.map((menuItem) => {
+        {visibleMenuItems.map((menuItem) => {
           const ItemIcon = menuItem.icon;
           return (
             <ContextMenuItem key={menuItem.id} onSelect={() => menuItem.run(item.id)}>
@@ -910,7 +915,7 @@ const AutoFileTreeView = ({
         />
 
         {shouldUseLocalFileList && localListTruncated ? (
-          <div className="pt-2 text-xs text-muted-foreground">{localTruncatedLabel}</div>
+          <div className="pt-2 text-[0.8em] text-muted-foreground">{localTruncatedLabel}</div>
         ) : null}
       </div>
     </ScrollArea>

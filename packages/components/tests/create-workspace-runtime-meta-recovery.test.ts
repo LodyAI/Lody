@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { MachineId, SessionId, WorkspaceId } from '@lody/shared';
+import { getSessionRoomId, type MachineId, type SessionId, type WorkspaceId } from '@lody/shared';
+import type { LoroRepo } from 'loro-repo';
 
 const mocks = vi.hoisted(() => {
   const setTransportAdapter = vi.fn(async () => {});
@@ -14,7 +15,7 @@ const mocks = vi.hoisted(() => {
   const flush = vi.fn(async () => {});
   const destroy = vi.fn(async () => {});
   const reconnect = vi.fn(async () => {});
-  const listDoc = vi.fn(async () => []);
+  const listDoc = vi.fn(async (): ReturnType<LoroRepo['listDoc']> => []);
   const watch = vi.fn(() => ({ unsubscribe: vi.fn() }));
   const joinMetaRoom = vi.fn();
   const remoteCursorDelete = vi.fn(async () => {});
@@ -37,8 +38,23 @@ const mocks = vi.hoisted(() => {
     run: () => void;
   }> = [];
   const streamClient = {};
+  // Identity for the Streams token provider and its auth callbacks, so tests can
+  // prove the eager-sync bridge holds ONE callback per provider instead of
+  // rebuilding one per invocation (a rebuilt callback forgets its last token).
+  const providerIdentity = { providers: 0, callbacks: 0 };
+  const authInvocations: Array<{
+    providerId: number;
+    callbackId: number;
+    context?: { reason: string; previousToken?: string };
+  }> = [];
+  const eagerSyncDeps: Array<{
+    auth(context?: { reason: string; previousToken?: string }): Promise<string | undefined>;
+  }> = [];
 
   return {
+    providerIdentity,
+    authInvocations,
+    eagerSyncDeps,
     setTransportAdapter,
     addTransport,
     removeTransport,
@@ -298,6 +314,18 @@ vi.mock('@lody/loro-streams-rpc', () => ({
   LORO_STREAMS_RPC_RETENTION_SECONDS: 60,
 }));
 
+vi.mock('../src/providers/eager-sync-worker-client', () => ({
+  createEagerSyncWorkerClient: vi.fn((deps: (typeof mocks.eagerSyncDeps)[number]) => {
+    mocks.eagerSyncDeps.push(deps);
+    return {
+      prefetch: vi.fn(async () => 'skipped' as const),
+      cancel: vi.fn(),
+      cancelAll: vi.fn(),
+      dispose: vi.fn(),
+    };
+  }),
+}));
+
 vi.mock('@lody/shared', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@lody/shared')>();
   return {
@@ -305,21 +333,37 @@ vi.mock('@lody/shared', async (importOriginal) => {
     buildLoroStreamsTokenEndpoint: vi.fn(
       () => 'https://tokens.example.test/api/loro-streams/token'
     ),
-    createLoroStreamsTokenProvider: vi.fn(() => ({
-      getToken: vi.fn(async () => 'streams-token'),
-      invalidate: mocks.tokenProviderInvalidate,
-      getGatewayBaseUrl: vi.fn(() => actual.DEFAULT_LORO_STREAMS_BASE_URL),
-      getShardHostSuffix: vi.fn(() => undefined),
-      createAuthCallback: vi.fn(() => async () => 'streams-token'),
-    })),
+    createLoroStreamsTokenProvider: vi.fn(() => {
+      const providerId = ++mocks.providerIdentity.providers;
+      return {
+        getToken: vi.fn(async () => 'streams-token'),
+        invalidate: mocks.tokenProviderInvalidate,
+        getGatewayBaseUrl: vi.fn(() => actual.DEFAULT_LORO_STREAMS_BASE_URL),
+        getShardHostSuffix: vi.fn(() => undefined),
+        createAuthCallback: vi.fn(() => {
+          const callbackId = ++mocks.providerIdentity.callbacks;
+          return async (context?: { reason: string; previousToken?: string }) => {
+            mocks.authInvocations.push({ providerId, callbackId, context });
+            return 'streams-token';
+          };
+        }),
+      };
+    }),
   };
 });
 
-import { createWorkspaceRuntime } from '../src/providers/create-workspace-runtime';
+import {
+  createWorkspaceRuntime,
+  resolveWorkspaceRuntimeCacheIdentity,
+} from '../src/providers/create-workspace-runtime';
 
 describe('createWorkspaceRuntime meta recovery lifecycle', () => {
   beforeEach(() => {
     vi.useFakeTimers();
+    mocks.providerIdentity.providers = 0;
+    mocks.providerIdentity.callbacks = 0;
+    mocks.authInvocations.length = 0;
+    mocks.eagerSyncDeps.length = 0;
     mocks.setTransportAdapter.mockClear();
     mocks.addTransport.mockClear();
     mocks.removeTransport.mockClear();
@@ -328,7 +372,8 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
     mocks.flush.mockClear();
     mocks.destroy.mockClear();
     mocks.reconnect.mockClear();
-    mocks.listDoc.mockClear();
+    mocks.listDoc.mockReset();
+    mocks.listDoc.mockResolvedValue([]);
     mocks.watch.mockClear();
     mocks.joinMetaRoom.mockReset();
     mocks.remoteCursorDelete.mockClear();
@@ -394,6 +439,21 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
     vi.unstubAllGlobals();
   });
 
+  it('binds every persistent runtime cache to the same window identity', () => {
+    const workspaceId = 'workspace-1' as WorkspaceId;
+
+    expect(resolveWorkspaceRuntimeCacheIdentity(workspaceId, '')).toEqual({
+      namespace: 'workspace-1',
+      repoDbName: 'lody-loro-repo-db-workspace-1',
+      remoteCursorDbName: 'lody-loro-stream-cursors-workspace-1',
+    });
+    expect(resolveWorkspaceRuntimeCacheIdentity(workspaceId, 'window-2')).toEqual({
+      namespace: 'workspace-1:window-2',
+      repoDbName: 'lody-loro-repo-db-workspace-1:window-2',
+      remoteCursorDbName: 'lody-loro-stream-cursors-workspace-1:window-2',
+    });
+  });
+
   it('keeps the runtime and presence alive when joining the meta room fails', async () => {
     mocks.joinMetaRoom.mockRejectedValueOnce(new Error('bootstrap meta timed out'));
 
@@ -409,6 +469,189 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
     expectNoPresenceStopAfterStart();
 
     await runtime.dispose();
+  });
+
+  it('keeps repeated token rotations inside one backoff-controlled meta recovery episode', async () => {
+    const random = vi.spyOn(Math, 'random').mockReturnValue(0.5);
+    const analyticsEvents: Array<{
+      name: string;
+      properties?: Record<string, unknown>;
+    }> = [];
+    mocks.joinMetaRoom.mockRejectedValue(new Error('transport connection failed'));
+
+    const runtime = await createWorkspaceRuntime({
+      workspaceSlug: 'workspace',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      apiBaseUrl: 'https://api.example.test',
+      onAnalyticsEvent: (event) => analyticsEvents.push(event),
+    });
+
+    // Reproduce the field incident without manufacturing an 800ms token loop:
+    // seven genuinely different auth tokens arrive over roughly two minutes
+    // while every meta-room join fails immediately with a transport error.
+    // A token may prompt one immediate recovery, but it must not turn the same
+    // outage back into a fresh initial-sync episode or forgive accumulated
+    // retry history.
+    for (let index = 0; index < 7; index += 1) {
+      await runtime.setAuthToken(`auth-token-${index}`);
+      await flushPromises();
+      if (index < 6) {
+        await vi.advanceTimersByTimeAsync(17_000);
+      }
+    }
+    await vi.advanceTimersByTimeAsync(18_000);
+    await flushPromises();
+
+    await runtime.dispose();
+    random.mockRestore();
+
+    const metaSyncFailures = analyticsEvents.filter(
+      (event) => event.name === 'workspace/meta_sync_failed'
+    );
+    const initialFailures = metaSyncFailures.filter(
+      (event) => event.properties?.phase === 'initial'
+    );
+
+    // One outage has one initial attempt. Everything after it is recovery,
+    // including retries prompted by a newly issued credential.
+    expect.soft(initialFailures).toHaveLength(1);
+    // With a 30s capped exponential backoff, seven external credential edges
+    // plus scheduled recovery cannot legitimately produce hundreds of joins
+    // in this two-minute window. Keep this assertion generous enough for
+    // jitter and boundary-aligned timers while still catching a reset storm.
+    expect(metaSyncFailures.length).toBeLessThanOrEqual(20);
+  });
+
+  it('shares an in-flight meta join across overlapping token rotations', async () => {
+    let resolveMetaJoin!: (sub: FakeMetaSub) => void;
+    const pendingMetaJoin = new Promise<FakeMetaSub>((resolve) => {
+      resolveMetaJoin = resolve;
+    });
+    mocks.joinMetaRoom.mockReturnValue(pendingMetaJoin);
+
+    const runtime = await createWorkspaceRuntime({
+      workspaceSlug: 'workspace',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      apiBaseUrl: 'https://api.example.test',
+    });
+
+    const initialAttach = runtime.setAuthToken('auth-token-1');
+    await flushPromises();
+    expect(mocks.joinMetaRoom).toHaveBeenCalledTimes(1);
+
+    const overlappingRotation = runtime.setAuthToken('auth-token-2');
+    await flushPromises();
+    expect(mocks.joinMetaRoom).toHaveBeenCalledTimes(1);
+
+    resolveMetaJoin(createMetaSub(Promise.resolve()));
+    await Promise.all([initialAttach, overlappingRotation]);
+    await flushPromises();
+
+    expect(mocks.joinMetaRoom).toHaveBeenCalledTimes(1);
+    await runtime.dispose();
+  });
+
+  it('reports first-sync failures after a rejoin as recovery', async () => {
+    let rejectInitialSync!: (error: Error) => void;
+    let rejectRecoverySync!: (error: Error) => void;
+    const initialSync = new Promise<void>((_resolve, reject) => {
+      rejectInitialSync = reject;
+    });
+    const recoverySync = new Promise<void>((_resolve, reject) => {
+      rejectRecoverySync = reject;
+    });
+    const analyticsEvents: Array<{
+      name: string;
+      properties?: Record<string, unknown>;
+    }> = [];
+    mocks.joinMetaRoom
+      .mockResolvedValueOnce(createMetaSub(initialSync))
+      .mockResolvedValueOnce(createMetaSub(recoverySync));
+
+    const runtime = await createWorkspaceRuntime({
+      workspaceSlug: 'workspace',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      apiBaseUrl: 'https://api.example.test',
+      token: 'auth-token',
+      onAnalyticsEvent: (event) => analyticsEvents.push(event),
+    });
+
+    rejectInitialSync(new Error('initial transport failure'));
+    await flushPromises();
+    await vi.advanceTimersByTimeAsync(0);
+    await flushPromises();
+    expect(mocks.joinMetaRoom).toHaveBeenCalledTimes(2);
+
+    rejectRecoverySync(new Error('recovery transport failure'));
+    await flushPromises();
+
+    const failurePhases = analyticsEvents
+      .filter((event) => event.name === 'workspace/meta_sync_failed')
+      .map((event) => event.properties?.phase);
+    expect(failurePhases).toEqual(['initial', 'recovery']);
+
+    await runtime.dispose();
+  });
+
+  it.each([false, true])(
+    'gates operation snapshots on the selected metadata source (local: %s)',
+    async (local) => {
+      const synced = Promise.withResolvers<void>();
+      mocks.joinMetaRoom.mockResolvedValueOnce(createMetaSub(synced.promise));
+      if (local) {
+        enableElectronLocalDataPlane();
+        vi.stubGlobal('navigator', { onLine: false });
+      }
+      const id = 'source-root' as SessionId;
+      mocks.listDoc.mockResolvedValue([
+        { docId: getSessionRoomId(id), meta: { id }, exists: true },
+      ]);
+      const runtime = await createWorkspaceRuntime({
+        workspaceSlug: 'workspace',
+        workspaceId: 'workspace-1' as WorkspaceId,
+        apiBaseUrl: 'https://api.example.test',
+        token: 'auth-token',
+      });
+      try {
+        for (const operation of ['archive', 'restore', 'delete'] as const) {
+          await expect(runtime.readSessionOperationTargets(id, operation)).rejects.toThrow(
+            'Session metadata is still loading'
+          );
+        }
+        synced.resolve();
+        await flushPromises();
+        for (const operation of ['archive', 'restore', 'delete'] as const) {
+          await expect(runtime.readSessionOperationTargets(id, operation)).resolves.toEqual([
+            { id },
+          ]);
+        }
+        if (local) expect(mocks.streamsTransportConstructors).not.toHaveBeenCalled();
+      } finally {
+        await runtime.dispose();
+      }
+      await expect(runtime.readSessionOperationTargets(id, 'archive')).rejects.toThrow(
+        'Runtime disposed'
+      );
+    }
+  );
+
+  it('rejects a snapshot if its runtime is disposed while the query is pending', async () => {
+    mocks.joinMetaRoom.mockResolvedValueOnce(createMetaSub(Promise.resolve()));
+    const runtime = await createWorkspaceRuntime({
+      workspaceSlug: 'workspace',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      apiBaseUrl: 'https://api.example.test',
+      token: 'auth-token',
+    });
+    await flushPromises();
+    const query = Promise.withResolvers<Awaited<ReturnType<LoroRepo['listDoc']>>>();
+    mocks.listDoc.mockReturnValueOnce(query.promise);
+    const id = 'disposed-root' as SessionId;
+    const result = runtime.readSessionOperationTargets(id, 'archive');
+    const rejected = expect(result).rejects.toThrow('Runtime disposed');
+    await runtime.dispose();
+    query.resolve([{ docId: getSessionRoomId(id), meta: { id }, exists: true }]);
+    await rejected;
   });
 
   it('delays ACP capability refresh until meta and presence stay synced', async () => {
@@ -774,6 +1017,62 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
     expect(mocks.presenceShouldRestartOnExternalWake).toHaveBeenCalledTimes(1);
     expect(mocks.presenceStop).toHaveBeenCalledTimes(presenceStopCallsAfterInitialAttach + 1);
     expect(mocks.presenceStart).toHaveBeenCalledTimes(2);
+
+    await runtime.dispose();
+  });
+  it('gives eager-sync one held auth callback per provider and forwards its context', async () => {
+    mocks.joinMetaRoom.mockResolvedValue(createMetaSub(Promise.resolve()));
+    const runtime = await createWorkspaceRuntime({
+      workspaceSlug: 'workspace',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      apiBaseUrl: 'https://api.example.test',
+      token: 'auth-token',
+    });
+    const bridge = mocks.eagerSyncDeps.at(-1);
+    expect(bridge).toBeDefined();
+
+    // A callback rebuilt per invocation starts with an empty last-token memory
+    // and makes the provider return a rejected JWT unchanged, so the bridge has
+    // to reuse one callback for the provider's lifetime.
+    expect(await bridge?.auth({ reason: 'request' })).toBe('streams-token');
+    expect(await bridge?.auth({ reason: 'unauthorized', previousToken: 'jwt-1' })).toBe(
+      'streams-token'
+    );
+    expect(await bridge?.auth({ reason: 'unauthorized' })).toBe('streams-token');
+    const callbackIds = new Set(mocks.authInvocations.map((entry) => entry.callbackId));
+    expect(callbackIds.size).toBe(1);
+    // The context reaches the provider unreduced, `previousToken` included.
+    expect(mocks.authInvocations.map((entry) => entry.context)).toEqual([
+      { reason: 'request' },
+      { reason: 'unauthorized', previousToken: 'jwt-1' },
+      { reason: 'unauthorized' },
+    ]);
+
+    await runtime.dispose();
+  });
+
+  it('rebinds the eager-sync auth callback when the token provider is replaced', async () => {
+    mocks.joinMetaRoom.mockResolvedValue(createMetaSub(Promise.resolve()));
+    const runtime = await createWorkspaceRuntime({
+      workspaceSlug: 'workspace',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      apiBaseUrl: 'https://api.example.test',
+      token: 'auth-token',
+    });
+    const bridge = mocks.eagerSyncDeps.at(-1);
+    await bridge?.auth({ reason: 'request' });
+    const firstProvider = mocks.authInvocations.at(-1)?.providerId;
+
+    // Signing out drops the provider; a stale callback must never be served.
+    await runtime.setAuthToken(null);
+    expect(await bridge?.auth({ reason: 'request' })).toBeUndefined();
+
+    // Signing back in builds a new provider, and the bridge follows it.
+    await runtime.setAuthToken('auth-token-2');
+    expect(await bridge?.auth({ reason: 'request' })).toBe('streams-token');
+    const rebound = mocks.authInvocations.at(-1);
+    expect(rebound?.providerId).not.toBe(firstProvider);
+    expect(rebound?.callbackId).not.toBe(mocks.authInvocations[0]?.callbackId);
 
     await runtime.dispose();
   });

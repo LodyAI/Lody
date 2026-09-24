@@ -1,6 +1,9 @@
 import { useMemo, useState, type ReactNode } from 'react';
 
+import { usePostHog } from '@posthog/react';
+
 import { filterFuzzyOptions, shouldOfferOptionSearch } from '@/lib/fuzzy-option-filter';
+import { capturePickerSearchSelected, type SearchPickerKind } from '@/lib/picker-search-analytics';
 import { DropdownMenuSearchInput } from '@/ui/dropdown-menu';
 
 export type MenuSearchableOption = {
@@ -22,6 +25,8 @@ export type MenuOptionSearchListProps<TOption extends MenuSearchableOption> = {
   onSelect: (option: TOption) => void;
   searchPlaceholder: string;
   emptyText: string;
+  /** Reports picks made after typing a search term (`picker/search_selected`). */
+  searchAnalyticsPicker?: SearchPickerKind;
 };
 
 /**
@@ -39,7 +44,9 @@ export function MenuOptionSearchList<TOption extends MenuSearchableOption>({
   onSelect,
   searchPlaceholder,
   emptyText,
+  searchAnalyticsPicker,
 }: MenuOptionSearchListProps<TOption>) {
+  const postHog = usePostHog();
   const [query, setQuery] = useState('');
   const searchable = shouldOfferOptionSearch(options.length);
 
@@ -54,9 +61,21 @@ export function MenuOptionSearchList<TOption extends MenuSearchableOption>({
     [options, query]
   );
 
+  const select = (option: TOption) => {
+    if (searchAnalyticsPicker) {
+      capturePickerSearchSelected(postHog, {
+        picker: searchAnalyticsPicker,
+        term: query,
+        rank: filtered.indexOf(option),
+        resultCount: filtered.length,
+      });
+    }
+    onSelect(option);
+  };
+
   const submitTopMatch = () => {
     const top = filtered.find((option) => !option.disabled);
-    if (top) onSelect(top);
+    if (top) select(top);
   };
 
   return (
@@ -76,7 +95,7 @@ export function MenuOptionSearchList<TOption extends MenuSearchableOption>({
         {filtered.length === 0 ? (
           <div className="px-2.5 py-2 text-[0.8rem] text-muted-foreground">{emptyText}</div>
         ) : (
-          filtered.map((option) => renderOption(option, () => onSelect(option)))
+          filtered.map((option) => renderOption(option, () => select(option)))
         )}
       </div>
     </div>

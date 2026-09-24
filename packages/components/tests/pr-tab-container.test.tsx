@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => {
 
   return {
     markReadyForReview: vi.fn(),
+    mergePullRequest: vi.fn(),
     refresh: vi.fn(),
     toastError: vi.fn(),
     useGitHubPrDetails: vi.fn(),
@@ -40,6 +41,8 @@ vi.mock('sonner', () => ({
 }));
 
 vi.mock('@/lib/github-token', () => ({
+  isGitHubOperationTokenConnectionLostError: (error: unknown) =>
+    error instanceof Error && error.message === 'Connection lost while action was in flight',
   isGitHubUnauthorizedTokenError: (error: unknown) =>
     Boolean(
       error &&
@@ -50,6 +53,8 @@ vi.mock('@/lib/github-token', () => ({
 }));
 
 vi.mock('../src/lib/github-token', () => ({
+  isGitHubOperationTokenConnectionLostError: (error: unknown) =>
+    error instanceof Error && error.message === 'Connection lost while action was in flight',
   isGitHubUnauthorizedTokenError: (error: unknown) =>
     Boolean(
       error &&
@@ -108,8 +113,44 @@ const checkRuns: GitHubCheckRunsSummary = {
   runs: [],
 };
 
+const mergeablePullRequest: GitHubPullRequestDetails = {
+  ...pullRequest,
+  draft: false,
+  mergeable: true,
+  mergeableState: 'clean',
+};
+
 function createAuthError(): Error {
   return new Error('Not authenticated. Please sign in.');
+}
+
+function createPrDetailsResult(pr: GitHubPullRequestDetails = pullRequest) {
+  return {
+    state: 'ready' as const,
+    data: {
+      pullRequest: pr,
+      reviewThreads: [],
+      reviews: [],
+      issueComments: [],
+      checkRuns,
+    },
+    error: null,
+    checksPermissionError: false,
+    isRevalidating: false,
+    refresh: mocks.refresh,
+    refreshCheckRuns: vi.fn().mockResolvedValue(null),
+    postComment: vi.fn(),
+    isPostingComment: false,
+    mergePullRequest: mocks.mergePullRequest,
+    isMerging: false,
+    setPullRequestState: vi.fn(),
+    isUpdatingState: false,
+    markReadyForReview: mocks.markReadyForReview,
+    isMarkingReady: false,
+    deleteBranch: vi.fn(),
+    isDeletingBranch: false,
+    branchExists: null,
+  };
 }
 
 async function flushPromises(): Promise<void> {
@@ -126,6 +167,7 @@ describe('PrTabContainer ready-for-review auth recovery', () => {
 
   beforeEach(() => {
     mocks.markReadyForReview.mockReset();
+    mocks.mergePullRequest.mockReset();
     mocks.refresh.mockReset();
     mocks.toastError.mockReset();
     mocks.useGitHubPrDetails.mockReset();
@@ -133,32 +175,7 @@ describe('PrTabContainer ready-for-review auth recovery', () => {
     store = createStore();
     store.set(currentWorkspaceIdAtom, 'workspace-1' as WorkspaceId);
     mocks.refresh.mockResolvedValue(null);
-    mocks.useGitHubPrDetails.mockReturnValue({
-      state: 'ready',
-      data: {
-        pullRequest,
-        reviewThreads: [],
-        reviews: [],
-        issueComments: [],
-        checkRuns,
-      },
-      error: null,
-      checksPermissionError: false,
-      isRevalidating: false,
-      refresh: mocks.refresh,
-      refreshCheckRuns: vi.fn().mockResolvedValue(null),
-      postComment: vi.fn(),
-      isPostingComment: false,
-      mergePullRequest: vi.fn(),
-      isMerging: false,
-      setPullRequestState: vi.fn(),
-      isUpdatingState: false,
-      markReadyForReview: mocks.markReadyForReview,
-      isMarkingReady: false,
-      deleteBranch: vi.fn(),
-      isDeletingBranch: false,
-      branchExists: null,
-    });
+    mocks.useGitHubPrDetails.mockReturnValue(createPrDetailsResult());
 
     container = document.createElement('div');
     document.body.appendChild(container);
@@ -197,6 +214,16 @@ describe('PrTabContainer ready-for-review auth recovery', () => {
     return button;
   }
 
+  function getMergeButton(): HTMLButtonElement {
+    const button = Array.from(container?.querySelectorAll<HTMLButtonElement>('button') ?? []).find(
+      (node) => node.textContent?.includes('Merge')
+    );
+    if (!button) {
+      throw new Error('Expected merge button');
+    }
+    return button;
+  }
+
   it('refreshes once and retries without showing a toast on the first auth failure', async () => {
     mocks.markReadyForReview
       .mockRejectedValueOnce(createAuthError())
@@ -229,5 +256,21 @@ describe('PrTabContainer ready-for-review auth recovery', () => {
     expect(mocks.toastError).toHaveBeenCalledWith('Failed to mark as ready for review', {
       description: 'still unauthorized',
     });
+  });
+
+  it('silently restores the merge action when Convex loses the token action result', async () => {
+    mocks.useGitHubPrDetails.mockReturnValue(createPrDetailsResult(mergeablePullRequest));
+    mocks.mergePullRequest.mockRejectedValueOnce(
+      new Error('Connection lost while action was in flight')
+    );
+    await renderContainer();
+
+    await act(async () => {
+      getMergeButton().click();
+    });
+    await flushPromises();
+
+    expect(mocks.mergePullRequest).toHaveBeenCalledWith('merge');
+    expect(mocks.toastError).not.toHaveBeenCalled();
   });
 });

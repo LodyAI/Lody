@@ -1,0 +1,20 @@
+---
+title: '20260907-0.92.1'
+version: 0.92.1
+date: 2026-09-07
+description: Improved session recovery and delivery reliability, fixed blocked session writes and symbol-font settings, and reduced repeated progress feedback.
+---
+
+Version 0.92.1
+
+### ✨ New
+
+- Improved session execution recovery and feedback for more reliable long-running tasks.
+
+### 🐛 Fixes and Improvements
+
+- Fixed session writes being blocked by validation failures in unrelated historical data.
+- Prevented completed operations from replaying and suppressed unchanged progress updates.
+- Improved metadata reconnect recovery to avoid repeated retries after connection failures.
+- Excluded symbol fonts from appearance settings so unreadable fonts are not applied.
+- Thanks to external contributor @Pleasure1234 for the symbol-font filtering fix.

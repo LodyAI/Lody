@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { CircleCheck, Loader2 } from 'lucide-react';
+import { CircleCheck } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import type { MachineId } from '@lody/shared';
 import {
   Dialog,
@@ -118,6 +119,12 @@ export function BugReportDialog({
                   "Describe the bug and pick the machine where it happened. Lody uploads that machine's logs from today and yesterday along with your description."
                 )}
               </DialogDescription>
+              <p className="text-sm text-muted-foreground">
+                {t(
+                  'bugReport.buildInfoIncluded',
+                  'Reports include the current app version and build information.'
+                )}
+              </p>
             </DialogHeader>
             <div className="grid gap-4">
               <div className="grid gap-2">
@@ -209,7 +216,7 @@ export function BugReportDialog({
               >
                 {submitting ? (
                   <>
-                    <Loader2 className="h-4 w-4 animate-spin" />
+                    <Spinner className="h-4 w-4" />
                     {machineId != null
                       ? t('bugReport.submitting', 'Uploading logs...')
                       : t('bugReport.submittingNoLogs', 'Submitting...')}

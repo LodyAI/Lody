@@ -17,6 +17,7 @@ import {
   X,
   type LucideIcon,
 } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import type { LocalProjectBrowseDirectoryEntry } from '@lody/shared';
 import { cn } from '@/lib/utils';
 import { Button } from '@/ui/button';
@@ -92,7 +93,7 @@ function MobileMachineList({ controller: c }: { controller: RemoteDirectoryPicke
     return (
       <MobileStatusPanel
         icon={Loader2}
-        iconClassName="animate-spin"
+        spinning
         title={t('workspace.machines.loadingVisibility', 'Loading machines')}
       />
     );
@@ -283,7 +284,7 @@ function MobileBrowse({ controller: c }: { controller: RemoteDirectoryPickerCont
             </div>
             {c.status === 'loading' ? (
               <div className="flex h-9 w-9 shrink-0 items-center justify-center">
-                <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" aria-hidden />
+                <Spinner className="h-4 w-4 text-muted-foreground" aria-hidden />
               </div>
             ) : (
               <button
@@ -367,7 +368,7 @@ function MobileBrowse({ controller: c }: { controller: RemoteDirectoryPickerCont
                 className="flex w-full items-center justify-center gap-2 px-4 py-3.5 text-[0.95rem] text-muted-foreground active:bg-muted/50"
               >
                 {c.loadingMore ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <Spinner className="h-4 w-4" />
                 ) : (
                   t('localProjects.add.loadMore', 'Load more')
                 )}
@@ -390,7 +391,7 @@ function MobileBrowse({ controller: c }: { controller: RemoteDirectoryPickerCont
           disabled={!c.current || c.status !== 'ready' || c.editingPath || c.adding}
           onClick={() => void c.addCurrentFolder()}
         >
-          {c.adding ? <Loader2 className="h-5 w-5 animate-spin" /> : null}
+          {c.adding ? <Spinner className="h-5 w-5" /> : null}
           {t('localProjects.add.useThisFolder', 'Add')}
         </Button>
       </div>
@@ -458,21 +459,29 @@ function MobileDirectorySkeleton() {
 
 function MobileStatusPanel({
   icon: Icon,
-  iconClassName,
+  spinning = false,
   title,
   description,
   action,
 }: {
   icon: LucideIcon;
-  iconClassName?: string;
+  /**
+   * Rotates the icon: the panel is a loading state. Defaults to false, and
+   * MUST keep a default here — `Spinner` treats an omitted `spinning` as a
+   * loading indicator, so forwarding this prop while it is `undefined` would
+   * spin the resting states' icons forever.
+   */
+  spinning?: boolean;
   title: React.ReactNode;
   description?: React.ReactNode;
   action?: React.ReactNode;
 }) {
   return (
     <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 p-10 text-center">
-      <Icon
-        className={cn('h-9 w-9 text-muted-foreground', iconClassName)}
+      <Spinner
+        icon={Icon}
+        spinning={spinning}
+        className="h-9 w-9 text-muted-foreground"
         aria-hidden
         strokeWidth={1.6}
       />

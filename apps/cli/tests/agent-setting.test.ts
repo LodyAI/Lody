@@ -44,11 +44,75 @@ function getRegistryAgent(agentType: string) {
 }
 
 describe('resolveBuiltinACPSetting', () => {
+  it('requires the current extension-aware Pi runtime and keys the selected catalog', async () => {
+    const support = vi
+      .spyOn(managedRuntime, 'PI_EXTENSIONS_SUPPORTED', 'get')
+      .mockReturnValue(true);
+    const manager = vi.spyOn(managedRuntime, 'getManagedAgentRuntimeManager').mockReturnValue({
+      ensureCurrentRuntime: async () => ({
+        runtimeName: 'pi',
+        version: '0.2.0',
+        platformArch: 'node',
+        command: '/managed/pi/index.js',
+      }),
+      resolveRuntimeForLaunch: async () => {
+        throw new Error('Older fallback must not be used');
+      },
+    } as ReturnType<typeof managedRuntime.getManagedAgentRuntimeManager>);
+    try {
+      const input = {
+        cliType: 'builtin' as const,
+        agentType: 'pi',
+        runtimeOverrides: { piExtensions: ['/fixture/plugin.ts'] },
+      };
+      expect(await resolveACPProcessLaunchAsync(input)).toEqual({
+        command: process.execPath,
+        args: ['/managed/pi/index.js', '-e', '/fixture/plugin.ts'],
+        capabilitySourceVersion:
+          'builtin-pi:0.2.0+override:{"piExtensions":["/fixture/plugin.ts"]}',
+      });
+      support.mockReturnValue(false);
+      await expect(resolveACPProcessLaunchAsync(input)).rejects.toThrow(
+        'does not support selected extensions'
+      );
+    } finally {
+      manager.mockRestore();
+      support.mockRestore();
+    }
+  });
+  it('keeps legacy Pi runnable outside the catalog until confirmation', () => {
+    expect(REGISTRY_ACP_AGENTS.some((agent) => agent.id === 'pi-acp')).toBe(false);
+    const launch = resolveACPSetting({ cliType: 'registry', agentType: 'pi-acp' });
+    expect(launch.exec.args).toContain('pi-acp@0.0.33');
+  });
+
+  it('launches the downloaded Pi closure with Node and its actual capability version', async () => {
+    const manager = vi.spyOn(managedRuntime, 'getManagedAgentRuntimeManager').mockReturnValue({
+      resolveRuntimeForLaunch: async () => ({
+        runtimeName: 'pi',
+        version: '0.1.0-local',
+        targetVersion: '0.1.0-local',
+        platformArch: 'node',
+        command: '/managed/pi/package/dist/index.js',
+        updateAvailable: false,
+      }),
+    } as ReturnType<typeof managedRuntime.getManagedAgentRuntimeManager>);
+    try {
+      expect(await resolveACPProcessLaunchAsync({ cliType: 'builtin', agentType: 'pi' })).toEqual({
+        command: process.execPath,
+        args: ['/managed/pi/package/dist/index.js'],
+        capabilitySourceVersion: 'builtin-pi:0.1.0-local',
+      });
+    } finally {
+      manager.mockRestore();
+    }
+  });
   it('requires the async launcher for managed builtin runtimes', () => {
     expect(() => resolveBuiltinACPSetting('claude')).toThrow(/resolveACPProcessLaunchAsync/);
     expect(() => resolveBuiltinACPSetting('codex')).toThrow(/resolveACPProcessLaunchAsync/);
     expect(() => resolveBuiltinACPSetting('kimi')).toThrow(/resolveACPProcessLaunchAsync/);
     expect(() => resolveBuiltinACPSetting('grok')).toThrow(/resolveACPProcessLaunchAsync/);
+    expect(() => resolveBuiltinACPSetting('bub')).toThrow(/resolveACPProcessLaunchAsync/);
   });
 
   it('keys builtin capability versions on the bundled adapter and managed runtime', () => {
@@ -103,7 +167,7 @@ describe('resolveBuiltinACPSetting', () => {
     );
   });
 
-  it('launches DeepSeek Harness through the pinned ACP npm composition', async () => {
+  it('launches DeepSeek Harness through the pinned profile launcher', async () => {
     const dshHome = await mkdtemp(join(tmpdir(), 'lody-deepseek-harness-test-'));
     vi.stubEnv(DEEPSEEK_HARNESS_HOME_ENV, dshHome);
     try {
@@ -120,48 +184,96 @@ describe('resolveBuiltinACPSetting', () => {
           '--prefer-offline',
           '-y',
           '--package',
-          `@deepseek-ai/dsh-acp-demo@${DEEPSEEK_HARNESS_VERSION}`,
+          `@deepseek-ai/dsh@${DEEPSEEK_HARNESS_VERSION}`,
           '--package',
-          `@deepseek-ai/dsh-agent-spine-demo@${DEEPSEEK_HARNESS_VERSION}`,
+          `@deepseek-ai/dsh-base@${DEEPSEEK_HARNESS_VERSION}`,
           '--package',
-          `@deepseek-ai/dsh-session-persistence-jsonl@${DEEPSEEK_HARNESS_VERSION}`,
+          `@deepseek-ai/dsh-agent-presets@${DEEPSEEK_HARNESS_VERSION}`,
           '--package',
-          `@deepseek-ai/dsh-llm-deepseek@${DEEPSEEK_HARNESS_VERSION}`,
-          '--package',
-          `@deepseek-ai/dsh-permission-presets@${DEEPSEEK_HARNESS_VERSION}`,
-          'dsh-acp-demo',
-          '--config',
+          `@deepseek-ai/dsh-mcp-client@${DEEPSEEK_HARNESS_VERSION}`,
+          'node',
+          '-e',
         ])
       );
+      expect(launch.env?.LODY_DSH_NODE_EXECUTABLE).toBe(process.execPath);
       expect(parseNpxPackageSpecFromArgs(launch.args)).toEqual({
-        name: '@deepseek-ai/dsh-acp-demo',
+        name: '@deepseek-ai/dsh',
         version: DEEPSEEK_HARNESS_VERSION,
       });
-      expect(launch.args).not.toContain(`@deepseek-ai/dsh@${DEEPSEEK_HARNESS_VERSION}`);
+      expect(launch.args).toContain(`@deepseek-ai/dsh@${DEEPSEEK_HARNESS_VERSION}`);
       expect(launch.env?.[ACP_EXTENSION_DSH_SESSION_ROOT_ENV]).toBe(join(dshHome, 'sessions'));
       expect(launch.env?.[ACP_EXTENSION_DSH_QUERY_PATH_ENV]).toBe(
         join(dshHome, 'sessions', 'session-query.db')
       );
       expect(launch.env?.[DEEPSEEK_HARNESS_HOME_ENV]).toBe(dshHome);
 
-      const configFlag = launch.args.indexOf('--config');
-      const configPath = launch.args[configFlag + 1];
-      expect(configPath).toBeTruthy();
-      const config = await readFile(configPath!, 'utf8');
-      expect(config).toContain('deepseek-acp.js');
-      expect(config).not.toContain("name: '@deepseek-ai/dsh-acp-demo'");
-      expect(config).toContain("name: '@deepseek-ai/dsh-agent-spine-demo'");
-      expect(config).toContain("name: '@deepseek-ai/dsh-session-persistence-jsonl'");
-      expect(config).toContain("name: '@deepseek-ai/dsh-session-checkpoint-policy'");
-      expect(config).toContain("name: '@deepseek-ai/dsh-session-query-sqlite'");
-      expect(config).toContain('compression: zstd');
-      expect(config).toContain('mode: workspace-write');
-      expect(config).toContain("name: '@deepseek-ai/dsh-permission-presets'");
-      expect(config).toContain('reasoningEffort: max');
+      const runtimeArgs: unknown = JSON.parse(
+        Buffer.from(launch.env?.LODY_DSH_NODE_ARGS ?? '', 'base64').toString()
+      );
+      expect(runtimeArgs).toEqual(expect.arrayContaining(['--profile']));
+      if (!Array.isArray(runtimeArgs)) throw new Error('Missing DSH runtime arguments');
+      const profileFlag = runtimeArgs.indexOf('--profile');
+      const profileName = runtimeArgs[profileFlag + 1];
+      expect(profileName).toBeTruthy();
+      const profileDir = join(dshHome, 'profiles', profileName!);
+      const packageJson = await readFile(join(profileDir, 'package.json'), 'utf8');
+      const patch = await readFile(join(profileDir, 'cordis.patch.yml'), 'utf8');
+      expect(packageJson).toContain('@deepseek-ai/dsh-base');
+      expect(patch).toContain('deepseek-acp.js');
+      expect(patch).not.toContain("name: '@deepseek-ai/dsh-agent-spine-demo'");
+      expect(patch).toContain("name: '@deepseek-ai/dsh-agent-presets'");
+      expect(patch).toContain("name: '@deepseek-ai/dsh-tool-subagent/model-selection-settings'");
+      expect(patch).toContain('compression: zstd');
+      expect(patch).toContain('defaultPreset: workspace-write');
+      expect(patch).toContain('reasoningEffort: "max"');
+      expect(patch).toContain('model: "deepseek-flash"');
     } finally {
       vi.unstubAllEnvs();
       await rm(dshHome, { recursive: true, force: true });
     }
+  });
+
+  it('resolves Dimcode to a pinned npx ACP launch understood by cache recovery', async () => {
+    for (const extraArgs of [undefined, ['--verbose']]) {
+      const input = { cliType: 'builtin' as const, agentType: 'dimcode', extraArgs };
+      const launch = await resolveACPProcessLaunchAsync(input);
+      expect(launch).toEqual({
+        command: 'npx',
+        args: ['--prefer-offline', '-y', 'dimcode@0.5.10', 'acp', ...(extraArgs ?? [])],
+        capabilitySourceVersion: getAcpCapabilitySourceVersion(input),
+      });
+      expect(parseNpxPackageSpecFromArgs(launch.args)).toEqual({
+        name: 'dimcode',
+        version: '0.5.10',
+      });
+      expect(launch.capabilitySourceVersion).toBe('builtin-dimcode:0.5.10');
+    }
+    expect(() => resolveBuiltinACPSetting('dimcode')).toThrow(/resolveACPProcessLaunchAsync/);
+  });
+
+  it('launches Bub through the user-installed `bub acp` command', async () => {
+    await expect(
+      resolveACPProcessLaunchAsync({
+        cliType: 'builtin',
+        agentType: 'bub',
+      })
+    ).resolves.toEqual({
+      command: 'bub',
+      args: ['acp'],
+      capabilitySourceVersion: 'builtin-bub:acp',
+    });
+
+    await expect(
+      resolveACPProcessLaunchAsync({
+        cliType: 'builtin',
+        agentType: 'bub',
+        extraArgs: ['--verbose'],
+      })
+    ).resolves.toEqual({
+      command: 'bub',
+      args: ['acp', '--verbose'],
+      capabilitySourceVersion: 'builtin-bub:acp',
+    });
   });
 
   it('launches an overridden Kimi executable in ACP login mode', async () => {
@@ -222,6 +334,23 @@ describe('resolveBuiltinACPSetting', () => {
       });
     }
   );
+
+  it('never launches another provider for Pi authentication', async () => {
+    await expect(
+      resolveBuiltinAuthenticationProcessLaunch({
+        cliType: 'builtin',
+        agentType: 'pi',
+        action: 'status',
+      })
+    ).resolves.toBeNull();
+    await expect(
+      resolveBuiltinAuthenticationProcessLaunch({
+        cliType: 'builtin',
+        agentType: 'pi',
+        action: 'login',
+      })
+    ).rejects.toThrow('Configure Pi credentials');
+  });
 
   it('uses Kimi ACP login and skips unsupported status probing', async () => {
     await expect(
@@ -361,6 +490,48 @@ describe('resolveBuiltinACPSetting', () => {
     });
   });
 
+  it('uses the direct ACP launch from the Factory Droid registry entry', () => {
+    const agent = getRegistryAgent('factory-droid');
+    const npx = agent.distribution.npx;
+    if (!npx) {
+      throw new Error('Expected Factory Droid to have an npx distribution');
+    }
+
+    expect(npx.package).toBe(`droid@${agent.version}`);
+    expect(npx.args).toEqual(expect.arrayContaining(['exec', '--output-format', 'acp']));
+    expect(npx.args).not.toContain('acp-daemon');
+    expect(resolveACPSetting({ cliType: 'registry', agentType: 'factory-droid' })).toEqual({
+      status: { agent: `Factory Droid@${agent.version}`, command: 'npx' },
+      exec: {
+        command: 'npx',
+        args: ['--prefer-offline', '-y', npx.package, ...(npx.args ?? [])],
+        env: npx.env,
+      },
+    });
+    expect(getAcpCapabilitySourceVersion({ cliType: 'registry', agentType: 'factory-droid' })).toBe(
+      `factory-droid@${agent.version}`
+    );
+  });
+
+  it('keeps Devin on the downloadable registry binary path', () => {
+    const agent = getRegistryAgent('devin');
+
+    expect(agent.distribution.local).toBeUndefined();
+    expect(Object.keys(agent.distribution.binary ?? {})).toEqual(
+      expect.arrayContaining([
+        'darwin-aarch64',
+        'darwin-x86_64',
+        'linux-aarch64',
+        'linux-x86_64',
+        'windows-aarch64',
+        'windows-x86_64',
+      ])
+    );
+    expect(() => resolveACPSetting({ cliType: 'registry', agentType: 'devin' })).toThrow(
+      /resolveACPProcessLaunchAsync/
+    );
+  });
+
   it('uses the hardcoded Interactive Claude registry provider with exact platform npx packages', () => {
     const agent = getRegistryAgent('claude-p');
     const npx = agent.distribution.npx;
@@ -460,6 +631,17 @@ describe('custom ACP resolution', () => {
     });
 
     expect(resolved.exec).toEqual({ command: 'my-acp', args: [] });
+  });
+
+  it('expands a leading ~ in the custom launch command', () => {
+    const resolved = resolveACPSetting({
+      cliType: 'custom',
+      agentType: 'custom-1234',
+      customAcp: { command: '~/bin/my-acp', args: ['--acp'] },
+    });
+
+    expect(resolved.exec).toEqual({ command: join(homedir(), 'bin/my-acp'), args: ['--acp'] });
+    expect(resolved.status.command).toBe(join(homedir(), 'bin/my-acp'));
   });
 
   it('throws when a custom provider has no launch command', () => {

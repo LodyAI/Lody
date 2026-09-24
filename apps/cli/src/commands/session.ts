@@ -1,3 +1,4 @@
+import { readSessionHistory } from '@lody/shared/session-data';
 import { Command } from 'commander';
 import { promises as fs } from 'node:fs';
 import { isDeepStrictEqual } from 'node:util';
@@ -23,11 +24,9 @@ import {
   MachineStatusResponseSchema,
   SessionCancelResponseSchema,
   SessionStatusFactory,
-  buildMachineArchiveSessionCommand,
-  buildMachineDeleteSessionCommand,
+  readSessionOperationTargets,
   type BillingQuotaAdmission,
   countBillableSessionTurns,
-  deleteMachineFlockRowFromFlock,
   evaluateBillingQuota,
   evaluateSessionCreateQuota,
   formatSessionQuotaRejection,
@@ -37,10 +36,6 @@ import {
   getBuiltinDefaultModeId,
   getMachineFlockAcpCapabilities,
   getMachineFlockDocId,
-  getMachineFlockLocalProjects,
-  getMachineRoomId,
-  machineFlockKeys,
-  machineDeleteCommandToQueueItem,
   readMachineFlockRowsFromFlock,
   resolveActiveAssistantTurnId,
   getServerNow,
@@ -49,6 +44,8 @@ import {
   isMachineDocRoomId,
   isSessionDocRoomId,
   hasAgentRunConfigSelection,
+  isAcpFastModeConfigId,
+  isAcpThoughtLevelConfigOption,
   resolveAgentRunConfigSelection,
   resolveBaseBranchPreference,
   resolveProjectGitHubRepo,
@@ -59,24 +56,19 @@ import {
   type AgentRoleId,
   type LocalProjectGitState,
   type LocalProjectId,
-  type MachineLegacyMetaFields,
   type MachineId,
   type MachineMeta,
   type ProjectRef,
-  type SessionDocMeta,
   type SessionHistory,
   type SessionHistoryInput,
   type SessionQuotaKind,
   type SessionTurnInputConfig,
   type SessionId,
   type SessionMeta,
-  type TaskId,
+  type SessionOperation,
   type WorkspaceId,
-  shouldQueueMachineDeleteSession,
-  writeMachineFlockRowToFlock,
-  type MachineFlockKey,
-  type MachineFlockRow,
 } from '@lody/shared';
+import type { SessionTurn } from '@lody/shared/session-data';
 import { prepareCliStreamsGatewayBaseUrl } from '@/lib/loro/streams-access';
 import { AuthClient } from '@/lib/auth';
 import {
@@ -100,6 +92,7 @@ import { LoroDocumentManager, type SessionDocument } from '@/lib/loro/doc';
 import { renderTerminalTable } from '@/lib/terminal-table';
 import {
   canRequestMachineForCliToken,
+  canUseMachineForCliToken,
   type WorkspaceBillingEntitlement,
   listWorkspaceGitHubRepositoriesForCliToken,
   listWorkspacesForToken,
@@ -107,7 +100,6 @@ import {
   type WorkspaceSummary,
 } from '@/lib/workspace';
 import { readMachineLocalProjects } from '@/lib/local-project-meta';
-import { linkTaskSessionFromCli } from '@/lib/task-doc';
 import { listMergedAgentConfigs } from '@/lib/agent-config-machine-flock';
 import { getLogger, rootLogger } from '@/utils/logger';
 import { parseEnvAssignments } from './agent-config';
@@ -123,8 +115,18 @@ import { captureSessionCommandEvent } from './analytics-events';
 import { LODY_AUTH_SITE_URL, LODY_AUTH_URL } from '@/utils/const';
 import { createCloudBillingPort, createCloudStreamsTokenPort } from '@/lib/cloud-cli-port';
 import { getCliHttpFetch } from '@/utils/http-transport';
+import { readMachineAccessWithBoundedRetry } from '@/session/session-access-retry';
 
 type CommonOptions = CommonCommandOptions;
+
+export type DelegatedSessionRequester = {
+  userId: string;
+};
+
+type ResolvedSessionRequester = {
+  userId: string;
+  isDelegated: boolean;
+};
 
 export const DEFAULT_SESSION_LIST_LIMIT = 50;
 export const MAX_MCP_SESSION_LIST_LIMIT = 200;
@@ -145,10 +147,8 @@ export type CreateOptions = CommonOptions &
     currentSessionId?: SessionId;
     defaultMachineId?: MachineId;
     requesterUserId?: string;
-    /**
-     * Trusted Session attribution supplied by an internal caller. Access checks
-     * must continue to use requesterUserId, which is bound to CLI auth.
-     */
+    /** Trusted human requester supplied by a delegated internal caller. */
+    delegatedRequester?: DelegatedSessionRequester;
     sessionOwnerUserId?: string;
     parent?: string;
     useCurrentSessionAsParent?: boolean;
@@ -170,14 +170,6 @@ export type CreateOptions = CommonOptions &
     /** Agent Role provenance frozen when the create Operation is accepted. */
     agentRoleId?: string;
     agentRoleRevision?: number;
-    /**
-     * Task this session belongs to. Inherited from the invoking session when it
-     * is itself working on a task, so an agent spawning helpers keeps the whole
-     * fan-out attached to the same task.
-     */
-    taskId?: string;
-    /** Provenance for the task link; automation starts are runs, spawns inherit. */
-    taskLinkOrigin?: 'run' | 'agent-spawn';
     /** Durable batch Operations intentionally bypass cooperative session quotas. */
     bypassSessionQuota?: boolean;
     /**
@@ -305,7 +297,6 @@ type ResolvedCreateContext = {
   parentSessionId?: SessionId;
   openedBySessionId?: SessionId;
   openedByRootSessionId?: SessionId;
-  taskId?: TaskId;
 };
 
 type SessionActivityTimestampManager = {
@@ -435,7 +426,7 @@ export function shouldWaitForSessionCompletion(options: {
   return options.wait === true;
 }
 
-function isTranscriptRole(role: SessionHistoryInput['role']): role is SessionTranscriptRole {
+function isTranscriptRole(role: SessionTurn['role']): role is SessionTranscriptRole {
   return role === 'user' || role === 'assistant' || role === 'system';
 }
 
@@ -464,6 +455,7 @@ function formatVisibleTranscriptItem(item: MessageContent): string | undefined {
       deliveryId: item.deliveryId,
       operationId: item.operationId,
       operationKind: item.operationKind,
+      ...(item.progressMessageId ? { progressMessageId: item.progressMessageId } : {}),
       completion: item.completion,
       ...(item.continuation ? { continuation: item.continuation } : {}),
     });
@@ -499,34 +491,52 @@ function extractTranscriptText(
   return text || undefined;
 }
 
+/**
+ * Whether a raw history row is part of the displayable transcript. Shared by the
+ * whole-history formatter and by bounded paging, so both agree on `limit`
+ * counting displayable entries while positions stay raw.
+ */
+export function isVisibleTranscriptTurn(
+  entry: SessionTurn
+): entry is SessionTurn & { role: SessionTranscriptRole } {
+  if (!isTranscriptRole(entry.role)) return false;
+  if (
+    entry.role === 'system' &&
+    !(entry.items as Array<{ type?: string }> | undefined)?.some(
+      (item) => item.type === 'operation_completion'
+    )
+  ) {
+    return false;
+  }
+  return (
+    extractTranscriptText(entry.items as MessageContent[] | undefined, entry.role) !== undefined
+  );
+}
+
+/** Format one raw row at its raw position, or `undefined` when not displayable. */
+export function toSessionTranscriptEntry(
+  index: number,
+  entry: SessionTurn
+): SessionTranscriptEntry | undefined {
+  if (!isVisibleTranscriptTurn(entry)) return undefined;
+  const text = extractTranscriptText(entry.items as MessageContent[] | undefined, entry.role);
+  if (!text) return undefined;
+  return {
+    index,
+    id: entry.id,
+    role: entry.role,
+    timestamp: entry.timestamp,
+    text,
+  };
+}
+
 export function toSessionTranscriptEntries(
-  history: SessionHistoryInput[]
+  history: readonly SessionTurn[]
 ): SessionTranscriptEntry[] {
   const entries: SessionTranscriptEntry[] = [];
-
   for (const [index, entry] of history.entries()) {
-    if (!isTranscriptRole(entry.role)) {
-      continue;
-    }
-    if (
-      entry.role === 'system' &&
-      !entry.items?.some((item) => item.type === 'operation_completion')
-    ) {
-      continue;
-    }
-
-    const text = extractTranscriptText(entry.items as MessageContent[] | undefined, entry.role);
-    if (!text) {
-      continue;
-    }
-
-    entries.push({
-      index,
-      id: entry.id,
-      role: entry.role,
-      timestamp: entry.timestamp,
-      text,
-    });
+    const formatted = toSessionTranscriptEntry(index, entry);
+    if (formatted) entries.push(formatted);
   }
 
   return entries;
@@ -928,7 +938,7 @@ async function checkSessionTurnQuotaAndReadHistory(args: {
   const entitlement = await getWorkspaceBillingEntitlementBestEffort(args.manager, args.workspace);
   if (!entitlement || isBillingQuotaExempt(entitlement)) return undefined;
   const [history, queue] = await Promise.all([
-    args.sessionDoc.getHistory(),
+    readSessionHistory(args.sessionDoc.sessionData.history),
     args.sessionDoc.getMessageQueue(),
   ]);
   if (
@@ -949,23 +959,34 @@ async function checkSessionTurnQuotaAndReadHistory(args: {
   return history;
 }
 
-export async function listChildSessionIds(
+export async function runSessionOperationWithSyncedMetadata(
   manager: LoroDocumentManager,
-  parentSessionId: SessionId
-): Promise<SessionId[]> {
-  return (await listSessionMetasForWorkspace(manager))
-    .filter(
-      (session) => session.parentSessionId === parentSessionId && session.id !== parentSessionId
-    )
-    .map((session) => session.id);
-}
-
-async function applySessionAndChildren(
   sessionId: SessionId,
-  childSessionIds: SessionId[],
-  apply: (sessionId: SessionId) => Promise<void>
-): Promise<void> {
-  await Promise.all([sessionId, ...childSessionIds].map(apply));
+  operation: SessionOperation
+): Promise<SessionId[]> {
+  const reason = `session.${operation}:${sessionId}`;
+  await syncWorkspaceMetaForRead(manager, `${reason}:prewrite`);
+  const targets = await readSessionOperationTargets(manager.repo, sessionId, operation);
+  const [root, ...descendants] = targets;
+  if (operation !== 'archive' && root.isArchived !== true) {
+    throw new Error(`Session ${sessionId} is not archived.`);
+  }
+  // Keep the root discoverable if deleting a child fails. Writes are not a
+  // transaction; each owning machine observes state and reconciles resources.
+  for (const target of operation === 'delete' ? [...targets].reverse() : targets) {
+    const roomId = getSessionRoomId(target.id);
+    if (operation === 'delete') {
+      await manager.repo.deleteDoc(roomId);
+      await manager.cleanSessionDoc(target.id);
+    } else {
+      await manager.repo.upsertDocMeta(
+        roomId,
+        operation === 'archive' ? buildSessionArchiveMetaPatch() : buildSessionRestoreMetaPatch()
+      );
+    }
+  }
+  await ensureWorkspaceMetaSynced(manager, reason);
+  return descendants.map((session) => session.id);
 }
 
 async function syncMachineFlockDocsForRead(
@@ -1270,7 +1291,7 @@ async function resolveRunningAssistantTurnId(
   sessionId: SessionId
 ): Promise<string | undefined> {
   const sessionDoc = await manager.getOrCreateSessionDoc(sessionId);
-  const history = await sessionDoc.getHistory();
+  const history = readSessionHistory(sessionDoc.sessionData.history);
   return resolveActiveAssistantTurnId(history)?.trim();
 }
 
@@ -1286,7 +1307,7 @@ async function appendUserPromptHistory(args: {
   const { sessionDoc, prompt, userId, inputConfig, preallocatedId } = args;
   const historyId = preallocatedId?.trim() || uuidV4();
   if (preallocatedId) {
-    const history = args.knownHistory ?? (await sessionDoc.getHistory());
+    const history = args.knownHistory ?? readSessionHistory(sessionDoc.sessionData.history);
     const existing = history.find((entry) => entry.id === historyId);
     if (existing) {
       const existingText = existing.items?.find((item) => item.type === 'text');
@@ -1318,7 +1339,7 @@ async function appendUserPromptHistory(args: {
     fileDiff: [],
     finished: true,
   };
-  await sessionDoc.updateHistory((history) => [...history, entry]);
+  await sessionDoc.sessionData.commands.appendTurn(entry);
   return {
     id: historyId,
     timestamp,
@@ -1333,7 +1354,6 @@ function buildCliHistoryInputConfig(args: {
   modeId?: string;
   modelId?: string;
   configOptionValues?: Record<string, string | boolean>;
-  taskToolsEnabled?: boolean;
   resume?: ACPSessionConfig['resume'];
   chainDepth?: number;
 }): NonNullable<SessionHistoryInput['inputConfig']> {
@@ -1347,7 +1367,6 @@ function buildCliHistoryInputConfig(args: {
       args.configOptionValues && Object.keys(args.configOptionValues).length > 0
         ? args.configOptionValues
         : undefined,
-    taskToolsEnabled: args.taskToolsEnabled === true,
     resume: args.resume,
     chainDepth: args.chainDepth,
   };
@@ -1357,8 +1376,6 @@ export type ResolvedTurnDispatchConfig = {
   modeId?: string;
   modelId?: string;
   configOptionValues?: Record<string, string | boolean>;
-  /** Frozen capability gate for the built-in Lody Task MCP tools. */
-  taskToolsEnabled?: boolean;
   /** Prevent create replay from re-reading mutable defaults from the requester history. */
   inheritSessionDefaults?: false;
   /**
@@ -1372,8 +1389,8 @@ export type ResolvedTurnDispatchConfig = {
    * only becomes concrete ACP ids once the target agent's capabilities are
    * known. Resolved by `applyAgentRunConfigSelection` before validation.
    *
-   * Session creation only: `sendSessionChatResult` does not resolve it, because
-   * a follow-up turn keeps the settings the session was created with.
+   * Session creation only. Chat follow-ups do not resolve it: omitted
+   * mode/model/options inherit from the target Session's last recorded turn.
    */
   runConfig?: AgentRunConfigSelection;
 };
@@ -1406,7 +1423,6 @@ export function applyAgentRunConfigSelection(
   };
   return {
     config: {
-      ...(rest.taskToolsEnabled !== undefined ? { taskToolsEnabled: rest.taskToolsEnabled } : {}),
       ...((resolved.modeId ?? rest.modeId) ? { modeId: resolved.modeId ?? rest.modeId } : {}),
       ...((resolved.modelId ?? rest.modelId) ? { modelId: resolved.modelId ?? rest.modelId } : {}),
       ...(Object.keys(configOptionValues).length > 0 ? { configOptionValues } : {}),
@@ -1460,15 +1476,45 @@ export function resolveTurnDispatchConfig(args: {
   };
 }
 
+function findTurnConfigOptionByCategory(
+  capability: AcpCapabilityCacheEntry | undefined,
+  category: 'mode' | 'model'
+): AcpConfigOptionSummary | undefined {
+  return capability?.configOptions?.find((option) => option.category === category);
+}
+
+function getTurnSelectorConfigOptionValue(
+  values: Record<string, string | boolean> | undefined,
+  capability: AcpCapabilityCacheEntry | undefined,
+  category: 'mode' | 'model'
+): string | undefined {
+  const optionId = findTurnConfigOptionByCategory(capability, category)?.id ?? category;
+  const value = values?.[optionId];
+  return typeof value === 'string' ? value : undefined;
+}
+
 export function withBuiltinDefaultTurnMode(
   config: ResolvedTurnDispatchConfig,
-  target: Pick<SessionMeta, 'cliType' | 'agentType'>
+  target: Pick<SessionMeta, 'cliType' | 'agentType'>,
+  capability?: AcpCapabilityCacheEntry
 ): ResolvedTurnDispatchConfig {
-  if (config.modeId || typeof config.configOptionValues?.mode === 'string') {
+  if (
+    config.modeId ||
+    getTurnSelectorConfigOptionValue(config.configOptionValues, capability, 'mode')
+  ) {
     return config;
   }
   const modeId = getBuiltinDefaultModeId(target.cliType, target.agentType);
-  return modeId ? { ...config, modeId } : config;
+  if (!modeId) {
+    return config;
+  }
+  // Match the UI selector: only apply Lody's builtin default when the adapter
+  // actually offers that mode. Grok used to inherit Codex `agent` and Role/MCP
+  // creates then failed with "Unsupported ACP mode for the selected agent".
+  if (capability && !getSupportedTurnSelectorIds(capability, 'mode').has(modeId)) {
+    return config;
+  }
+  return { ...config, modeId };
 }
 
 function mergeTurnDispatchConfig(
@@ -1479,7 +1525,6 @@ function mergeTurnDispatchConfig(
     modeId: explicitConfig.modeId ?? fallbackConfig?.modeId,
     modelId: explicitConfig.modelId ?? fallbackConfig?.modelId,
     configOptionValues: explicitConfig.configOptionValues ?? fallbackConfig?.configOptionValues,
-    taskToolsEnabled: explicitConfig.taskToolsEnabled ?? fallbackConfig?.taskToolsEnabled,
   };
 }
 
@@ -1533,27 +1578,82 @@ export function validateTurnConfigOptionValues(
   }
 }
 
+function validateModelDependentTurnConfigOptionValues(
+  values: Record<string, string | boolean> | undefined,
+  capability: AcpCapabilityCacheEntry | undefined,
+  targetModelId: string | undefined
+): ReadonlySet<string> {
+  const validatedIds = new Set<string>();
+  if (!values || !capability || !targetModelId) {
+    return validatedIds;
+  }
+  const probedModelId = findTurnConfigOptionByCategory(capability, 'model')?.currentValue;
+  const optionsById = new Map(
+    (capability.configOptions ?? []).map((option) => [option.id, option])
+  );
+  for (const [id, value] of Object.entries(values)) {
+    const option = optionsById.get(id);
+    const isEffort = isAcpThoughtLevelConfigOption(option ?? { id }) || id === 'effort';
+    if (isEffort) {
+      const efforts = capability.modelReasoningEfforts?.[targetModelId];
+      if (efforts !== undefined) {
+        if (typeof value !== 'string' || !efforts.includes(value)) {
+          throw new Error(
+            `Invalid reasoning effort for model ${targetModelId}: ${String(value)}. Allowed values: ${efforts.join(', ')}.`
+          );
+        }
+        validatedIds.add(id);
+      } else if (targetModelId !== probedModelId) {
+        validatedIds.add(id);
+      }
+    } else if (isAcpFastModeConfigId(id) && targetModelId !== probedModelId) {
+      validatedIds.add(id);
+    }
+  }
+  return validatedIds;
+}
+
 export function filterCompatibleTurnConfigOptionValues(
   values: Record<string, string | boolean> | undefined,
-  capability: AcpCapabilityCacheEntry | undefined
+  capability: AcpCapabilityCacheEntry | undefined,
+  targetModelId?: string
 ): Record<string, string | boolean> | undefined {
-  if (!values || !capability?.configOptions) {
+  if (!values || !capability) {
     return undefined;
   }
-  const optionsById = new Map(capability.configOptions.map((option) => [option.id, option]));
+  const optionsById = new Map(
+    (capability.configOptions ?? []).map((option) => [option.id, option])
+  );
+  const probedModelId = capability.configOptions?.find(
+    (option) => option.category === 'model'
+  )?.currentValue;
   const compatible = Object.fromEntries(
     Object.entries(values).filter(([id, value]) => {
       const option = optionsById.get(id);
+      if (targetModelId) {
+        const isEffort = isAcpThoughtLevelConfigOption(option ?? { id }) || id === 'effort';
+        if (isEffort) {
+          const efforts = capability.modelReasoningEfforts?.[targetModelId];
+          if (efforts !== undefined) return typeof value === 'string' && efforts.includes(value);
+        }
+        // A different (or unknown) probe model cannot invalidate the target's
+        // recorded controls. Without per-model data, preserve them for runtime.
+        if (targetModelId !== probedModelId) {
+          if (isEffort) return typeof value === 'string';
+          if (isAcpFastModeConfigId(id))
+            return typeof value === 'boolean' || value === 'on' || value === 'off';
+        }
+      }
       return option !== undefined && validateConfigOptionValue(option, value) === undefined;
     })
   );
   return Object.keys(compatible).length > 0 ? compatible : undefined;
 }
 
-const getSupportedTurnSelectorIds = (
+function getSupportedTurnSelectorIds(
   capability: AcpCapabilityCacheEntry | undefined,
   category: 'mode' | 'model'
-): Set<string> => {
+): Set<string> {
   const ids = new Set<string>(
     category === 'mode'
       ? (capability?.modes ?? []).map((mode) => mode.id)
@@ -1570,7 +1670,7 @@ const getSupportedTurnSelectorIds = (
     }
   }
   return ids;
-};
+}
 
 export function validateTurnModeAndModel(
   config: Pick<ResolvedTurnDispatchConfig, 'modeId' | 'modelId'>,
@@ -1601,7 +1701,6 @@ export function filterCompatibleInheritedTurnConfig(
     ...(config.modeId && supportedModes.has(config.modeId) ? { modeId: config.modeId } : {}),
     ...(config.modelId && supportedModels.has(config.modelId) ? { modelId: config.modelId } : {}),
     ...(configOptionValues ? { configOptionValues } : {}),
-    ...(config.taskToolsEnabled !== undefined ? { taskToolsEnabled: config.taskToolsEnabled } : {}),
   };
 }
 
@@ -1631,7 +1730,7 @@ async function readAgentAcpCapability(args: {
 
 export function resolveTurnDispatchConfigFromInputConfig(
   inputConfig: SessionTurnInputConfig | undefined,
-  agentConfig: AgentConfigMeta
+  agentConfig: Pick<AgentConfigMeta, 'cliType' | 'agentType'>
 ): ResolvedTurnDispatchConfig | undefined {
   if (
     inputConfig?.cliType !== agentConfig.cliType ||
@@ -1645,19 +1744,18 @@ export function resolveTurnDispatchConfigFromInputConfig(
     ...(inputConfig.configOptionValues
       ? { configOptionValues: inputConfig.configOptionValues }
       : {}),
-    ...(inputConfig.taskToolsEnabled !== undefined
-      ? { taskToolsEnabled: inputConfig.taskToolsEnabled }
-      : {}),
   };
 }
 
-async function resolveSessionTurnDispatchDefaults(
-  manager: LoroDocumentManager,
-  sessionId: SessionId,
-  agentConfig: AgentConfigMeta
-): Promise<ResolvedTurnDispatchConfig | undefined> {
-  const sessionDoc = await manager.getOrCreateSessionDoc(sessionId);
-  const history = await sessionDoc.getHistory();
+/**
+ * Last matching user turn that recorded a model, else the last matching turn.
+ * A model-less follow-up must not hide an earlier selected model.
+ */
+export function resolveTurnDispatchDefaultsFromHistory(
+  history: readonly Pick<SessionHistoryInput, 'role' | 'inputConfig'>[],
+  agent: Pick<AgentConfigMeta, 'cliType' | 'agentType'>
+): ResolvedTurnDispatchConfig | undefined {
+  let fallback: ResolvedTurnDispatchConfig | undefined;
   for (let index = history.length - 1; index >= 0; index -= 1) {
     const entry = history[index];
     if (entry?.role !== 'user') {
@@ -1665,13 +1763,89 @@ async function resolveSessionTurnDispatchDefaults(
     }
     const defaults = resolveTurnDispatchConfigFromInputConfig(
       entry.inputConfig as SessionTurnInputConfig | undefined,
-      agentConfig
+      agent
     );
-    if (defaults) {
+    if (!defaults) {
+      continue;
+    }
+    if (defaults.modelId) {
       return defaults;
     }
+    fallback ??= defaults;
   }
-  return undefined;
+  return fallback;
+}
+
+async function resolveSessionTurnDispatchDefaults(
+  manager: LoroDocumentManager,
+  sessionId: SessionId,
+  agentConfig: Pick<AgentConfigMeta, 'cliType' | 'agentType'>
+): Promise<ResolvedTurnDispatchConfig | undefined> {
+  const sessionDoc = await manager.getOrCreateSessionDoc(sessionId);
+  return resolveTurnDispatchDefaultsFromHistory(
+    readSessionHistory(sessionDoc.sessionData.history),
+    agentConfig
+  );
+}
+
+export function resolveEffectiveSessionChatDispatchConfig(args: {
+  dispatchConfig: ResolvedTurnDispatchConfig;
+  inheritedDispatchConfig?: ResolvedTurnDispatchConfig;
+  target: Pick<SessionMeta, 'cliType' | 'agentType'>;
+  capability?: AcpCapabilityCacheEntry;
+}): ResolvedTurnDispatchConfig {
+  const previous = args.inheritedDispatchConfig;
+  const explicitModeOption = getTurnSelectorConfigOptionValue(
+    args.dispatchConfig.configOptionValues,
+    args.capability,
+    'mode'
+  );
+  const explicitModelOption = getTurnSelectorConfigOptionValue(
+    args.dispatchConfig.configOptionValues,
+    args.capability,
+    'model'
+  );
+  // Inherit run selectors only. The probe's options describe its current
+  // model, so they cannot establish that old options are safe to carry across
+  // an explicit model switch.
+  const inherited = previous
+    ? {
+        modeId: explicitModeOption ? undefined : previous.modeId,
+        modelId: explicitModelOption ? undefined : previous.modelId,
+        configOptionValues:
+          args.dispatchConfig.modelId && args.dispatchConfig.modelId !== previous.modelId
+            ? undefined
+            : previous.configOptionValues,
+      }
+    : undefined;
+  const compatible = filterCompatibleInheritedTurnConfig(inherited, args.capability);
+  if (compatible) {
+    compatible.configOptionValues = filterCompatibleTurnConfigOptionValues(
+      inherited?.configOptionValues,
+      args.capability,
+      compatible.modelId
+    );
+  }
+  const effective = withBuiltinDefaultTurnMode(
+    mergeTurnDispatchConfig(args.dispatchConfig, compatible),
+    args.target,
+    args.capability
+  );
+  validateTurnModeAndModel(args.dispatchConfig, args.capability);
+  const targetModelId =
+    effective.modelId ??
+    getTurnSelectorConfigOptionValue(effective.configOptionValues, args.capability, 'model');
+  const validatedIds = validateModelDependentTurnConfigOptionValues(
+    args.dispatchConfig.configOptionValues,
+    args.capability,
+    targetModelId
+  );
+  validateTurnConfigOptionValues(
+    args.dispatchConfig.configOptionValues,
+    args.capability,
+    validatedIds
+  );
+  return effective;
 }
 
 function buildStructuredWaitError(
@@ -1708,7 +1882,10 @@ async function removeHistoryEntryById(
   sessionDoc: SessionDocument,
   historyId: string
 ): Promise<void> {
-  await sessionDoc.updateHistory((history) => history.filter((entry) => entry.id !== historyId));
+  await sessionDoc.sessionData.commands.applyHistoryAction({
+    kind: 'remove-turn',
+    turnId: historyId,
+  });
 }
 
 export async function updateSessionActivityTimestamps(
@@ -1923,32 +2100,59 @@ export async function readSessionMachineAccess(args: {
   workspaceId: WorkspaceId;
   machineId: MachineId;
   requesterUserId?: string;
+  delegatedRequester?: DelegatedSessionRequester;
   localProjectId?: string;
 }): Promise<MachineAccessCheckResult> {
-  const requesterUserId = resolveSessionCommandRequesterUserId(args.auth, args.requesterUserId);
-  try {
-    return await canRequestMachineForCliToken({
-      token: args.auth.token,
-      workspaceId: args.workspaceId,
-      machineId: args.machineId,
-      requesterUserId,
-      ...(args.localProjectId ? { localProjectId: args.localProjectId } : {}),
-    });
-  } catch (error) {
-    throw new Error(`Could not verify machine access: ${formatErrorMessage(error)}`, {
-      cause: error,
-    });
-  }
+  const requester = resolveSessionRequester(
+    args.auth,
+    args.requesterUserId,
+    args.delegatedRequester
+  );
+  return await readResolvedSessionMachineAccess({
+    auth: args.auth,
+    workspaceId: args.workspaceId,
+    machineId: args.machineId,
+    requester,
+    ...(args.localProjectId ? { localProjectId: args.localProjectId } : {}),
+  });
+}
+
+async function readResolvedSessionMachineAccess(args: {
+  auth: AuthContext;
+  workspaceId: WorkspaceId;
+  machineId: MachineId;
+  requester: ResolvedSessionRequester;
+  localProjectId?: string;
+}): Promise<MachineAccessCheckResult> {
+  const readAccess = args.requester.isDelegated
+    ? canUseMachineForCliToken
+    : canRequestMachineForCliToken;
+  return await readMachineAccessWithBoundedRetry({
+    verify: async () =>
+      await readAccess({
+        token: args.auth.token,
+        workspaceId: args.workspaceId,
+        machineId: args.machineId,
+        requesterUserId: args.requester.userId,
+        ...(args.localProjectId ? { localProjectId: args.localProjectId } : {}),
+      }),
+    onRetry: ({ attempt, maxAttempts, delayMs, error }) => {
+      getLogger('session').warn(
+        `Machine access verification unavailable; retrying ` +
+          `(attempt=${attempt}/${maxAttempts} delayMs=${delayMs}): ${error}`
+      );
+    },
+  });
 }
 
 async function assertMachineAccess(args: {
   auth: AuthContext;
   workspaceId: WorkspaceId;
   machineId: MachineId;
-  requesterUserId?: string;
+  requester: ResolvedSessionRequester;
   localProjectId?: string;
 }): Promise<void> {
-  const access = await readSessionMachineAccess(args);
+  const access = await readResolvedSessionMachineAccess(args);
   if (!access.allowed) {
     throw new Error(`Machine access denied for ${args.machineId}: ${access.reason}`);
   }
@@ -2097,6 +2301,28 @@ export function resolveSessionCommandRequesterUserId(
   return auth.userId;
 }
 
+export function resolveSessionRequester(
+  auth: Pick<AuthContext, 'userId'>,
+  requesterUserId?: string,
+  delegatedRequester?: DelegatedSessionRequester
+): ResolvedSessionRequester {
+  if (!delegatedRequester) {
+    return {
+      userId: resolveSessionCommandRequesterUserId(auth, requesterUserId),
+      isDelegated: false,
+    };
+  }
+  const delegatedUserId = normalizeCliValue(delegatedRequester.userId);
+  if (!delegatedUserId) {
+    throw new Error('Delegated Session requester must identify a user.');
+  }
+  const requested = normalizeCliValue(requesterUserId);
+  if (requested !== undefined && requested !== delegatedUserId) {
+    throw new Error('Requester identity must match the delegated Session requester.');
+  }
+  return { userId: delegatedUserId, isDelegated: true };
+}
+
 export function resolveSessionCreateOwnerUserId(
   requesterUserId: string,
   sessionOwnerUserId?: string
@@ -2133,16 +2359,16 @@ async function listAuthorizedMachineMetasForCreate(args: {
   auth: AuthContext;
   workspaceId: WorkspaceId;
   machines: readonly MachineMeta[];
-  requesterUserId?: string;
+  requester: ResolvedSessionRequester;
 }): Promise<MachineMeta[]> {
   const rows = await Promise.all(
     args.machines.map(async (machine) => ({
       machine,
-      access: await readSessionMachineAccess({
+      access: await readResolvedSessionMachineAccess({
         auth: args.auth,
         workspaceId: args.workspaceId,
         machineId: machine.id,
-        requesterUserId: args.requesterUserId,
+        requester: args.requester,
       }),
     }))
   );
@@ -2159,16 +2385,16 @@ async function filterAuthorizedLocalProjectsForCreate<
   workspaceId: WorkspaceId;
   machineId: MachineId;
   localProjects: readonly T[];
-  requesterUserId?: string;
+  requester: ResolvedSessionRequester;
 }): Promise<T[]> {
   const rows = await Promise.all(
     args.localProjects.map(async (project) => ({
       project,
-      access: await readSessionMachineAccess({
+      access: await readResolvedSessionMachineAccess({
         auth: args.auth,
         workspaceId: args.workspaceId,
         machineId: args.machineId,
-        requesterUserId: args.requesterUserId,
+        requester: args.requester,
         localProjectId: project.id,
       }),
     }))
@@ -2185,7 +2411,7 @@ async function resolveTargetMachineForCreate(args: {
   auth: AuthContext;
   machineSelector?: string;
   defaultMachineId?: MachineId;
-  requesterUserId?: string;
+  requester: ResolvedSessionRequester;
   parentSessionId?: SessionId;
 }): Promise<MachineMeta> {
   const machines = await listMachineMetasForWorkspace(args.manager);
@@ -2196,7 +2422,7 @@ async function resolveTargetMachineForCreate(args: {
     auth: args.auth,
     workspaceId: args.workspaceId,
     machines,
-    requesterUserId: args.requesterUserId,
+    requester: args.requester,
   });
   if (authorizedMachines.length === 0) {
     throw new Error('No authorized machines are available in this workspace.');
@@ -2300,12 +2526,12 @@ async function assertGitHubRepoAccess(args: {
   auth: AuthContext;
   workspaceId: WorkspaceId;
   repoFullName: string;
-  requesterUserId?: string;
+  requesterUserId: string;
 }): Promise<void> {
   const repos = await listWorkspaceGitHubRepositoriesForCliToken({
     token: args.auth.token,
     workspaceId: args.workspaceId,
-    requesterUserId: resolveSessionCommandRequesterUserId(args.auth, args.requesterUserId),
+    requesterUserId: args.requesterUserId,
     enabledOnly: true,
   });
   const normalized = args.repoFullName.toLowerCase();
@@ -2320,7 +2546,7 @@ export async function readLocalProjectGitStateOnMachine(args: {
   machineId: MachineId;
   localProjectId: string;
   localRootPath: string;
-  requesterUserId?: string;
+  requesterUserId: string;
 }): Promise<
   | { success: true; state: Awaited<ReturnType<typeof getLocalProjectGitStateAtRootPath>> }
   | { success: false; error: string; message?: string }
@@ -2341,7 +2567,7 @@ export async function readLocalProjectGitStateOnMachine(args: {
     async (client) =>
       await client.requestLocalProjectGitState({
         localProjectId: args.localProjectId as LocalProjectId,
-        requestedByUserId: resolveSessionCommandRequesterUserId(args.auth, args.requesterUserId),
+        requestedByUserId: args.requesterUserId,
         timeoutMs: 30_000,
       })
   );
@@ -2446,13 +2672,13 @@ export function resolveLocalProjectCreateGitContext(args: {
 async function listWorkspaceGitHubRepositoriesBestEffort(args: {
   auth: AuthContext;
   workspaceId: WorkspaceId;
-  requesterUserId?: string;
+  requesterUserId: string;
 }): Promise<{ fullName: string }[]> {
   try {
     return await listWorkspaceGitHubRepositoriesForCliToken({
       token: args.auth.token,
       workspaceId: args.workspaceId,
-      requesterUserId: resolveSessionCommandRequesterUserId(args.auth, args.requesterUserId),
+      requesterUserId: args.requesterUserId,
       enabledOnly: true,
     });
   } catch (error) {
@@ -2471,7 +2697,7 @@ async function resolveLocalProjectCreateGitContextOnMachine(args: {
   machineId: MachineId;
   localProjectId: string;
   localRootPath: string;
-  requesterUserId?: string;
+  requesterUserId: string;
   requestedBranch?: string;
   useWorktree?: boolean;
 }): Promise<LocalProjectCreateGitContext> {
@@ -2504,7 +2730,7 @@ async function resolveLocalProjectRefOnMachineOrThrow(
   auth: AuthContext,
   machineId: MachineId,
   selector: string,
-  requesterUserId: string | undefined,
+  requester: ResolvedSessionRequester,
   requestedBranch?: string,
   useWorktree?: boolean
 ): Promise<ProjectRef> {
@@ -2530,7 +2756,7 @@ async function resolveLocalProjectRefOnMachineOrThrow(
     workspaceId,
     machineId,
     localProjects,
-    requesterUserId,
+    requester,
   });
   if (authorizedLocalProjects.length === 0) {
     throw new Error('No authorized local projects are available on the target machine.');
@@ -2561,7 +2787,7 @@ async function resolveLocalProjectRefOnMachineOrThrow(
     machineId,
     localProjectId: project.id,
     localRootPath: project.rootPath,
-    requesterUserId,
+    requesterUserId: requester.userId,
     requestedBranch,
     useWorktree,
   });
@@ -2633,14 +2859,12 @@ async function resolveCreateContext(args: {
   workspace: WorkspaceSummary;
   manager: LoroDocumentManager;
   options: CreateOptions;
+  requester: ResolvedSessionRequester;
   skipMachineAvailabilityCheck?: boolean;
 }): Promise<ResolvedCreateContext> {
   const workspaceId = args.workspace.id as WorkspaceId;
   const agentSelector = resolveCreateAgentSelector(args.options);
-  const requesterUserId = resolveSessionCommandRequesterUserId(
-    args.auth,
-    args.options.requesterUserId
-  );
+  const requesterUserId = args.requester.userId;
   const parentSelector = normalizeCliValue(args.options.parent);
   const currentSessionId = resolveCreateCurrentSessionId(args.options);
   if (parentSelector && args.options.useCurrentSessionAsParent === true) {
@@ -2674,25 +2898,20 @@ async function resolveCreateContext(args: {
     : undefined;
   assertSupportedParentDepth(parentSession);
 
-  // An explicit taskId wins; otherwise inherit from the session that asked for
-  // this one, which is what keeps agent-spawned work on the same task.
-  const taskId = (normalizeCliValue(args.options.taskId) ?? currentSession?.taskId) as
-    | TaskId
-    | undefined;
   const targetMachine = await resolveTargetMachineForCreate({
     manager: args.manager,
     workspaceId,
     auth: args.auth,
     machineSelector: args.options.machine,
     defaultMachineId: args.options.defaultMachineId,
-    requesterUserId,
+    requester: args.requester,
     parentSessionId,
   });
   await assertMachineAccess({
     auth: args.auth,
     workspaceId,
     machineId: targetMachine.id,
-    requesterUserId,
+    requester: args.requester,
   });
   if (args.skipMachineAvailabilityCheck !== true) {
     await ensureTargetMachineOnline({
@@ -2749,7 +2968,7 @@ async function resolveCreateContext(args: {
       args.auth,
       targetMachine.id,
       normalizedLocalProject,
-      requesterUserId,
+      args.requester,
       requestedBranch,
       args.options.worktree === true
     );
@@ -2759,7 +2978,7 @@ async function resolveCreateContext(args: {
     auth: args.auth,
     workspaceId,
     machineId: targetMachine.id,
-    requesterUserId,
+    requester: args.requester,
     localProjectId: project?.kind === 'local' ? project.localProjectId : undefined,
   });
 
@@ -2769,7 +2988,6 @@ async function resolveCreateContext(args: {
     ...(project ? { project } : {}),
     ...(parentSessionId ? { parentSessionId } : {}),
     ...resolveOpenedBySessionRelation(currentSession),
-    ...(taskId ? { taskId } : {}),
   };
 }
 
@@ -2791,7 +3009,12 @@ export async function validateSessionCreateOptions(args: {
    */
   dispatchConfig?: ResolvedTurnDispatchConfig;
 }): Promise<ResolvedTurnDispatchConfig> {
-  const resolved = await resolveCreateContext(args);
+  const requester = resolveSessionRequester(
+    args.auth,
+    args.options.requesterUserId,
+    args.options.delegatedRequester
+  );
+  const resolved = await resolveCreateContext({ ...args, requester });
   return await resolveEffectiveSessionCreateDispatchConfig({
     manager: args.manager,
     workspaceId: args.workspace.id as WorkspaceId,
@@ -2819,7 +3042,16 @@ async function resolveEffectiveSessionCreateDispatchConfig(args: {
             args.agentConfig
           )
         : undefined;
+  // Builtin Role/MCP creates often have no modeId. Read capabilities before
+  // accepting so withBuiltinDefaultTurnMode cannot freeze an unoffered mode.
+  const mayApplyBuiltinDefault =
+    Boolean(getBuiltinDefaultModeId(args.agentConfig.cliType, args.agentConfig.agentType)) &&
+    dispatchConfig.modeId === undefined &&
+    typeof dispatchConfig.configOptionValues?.mode !== 'string' &&
+    inheritedDispatchConfig?.modeId === undefined &&
+    typeof inheritedDispatchConfig?.configOptionValues?.mode !== 'string';
   const needsCapability =
+    mayApplyBuiltinDefault ||
     dispatchConfig.modeId !== undefined ||
     dispatchConfig.modelId !== undefined ||
     dispatchConfig.configOptionValues !== undefined ||
@@ -2848,16 +3080,11 @@ async function resolveEffectiveSessionCreateDispatchConfig(args: {
         requested.config,
         filterCompatibleInheritedTurnConfig(inheritedDispatchConfig, capability)
       ),
-      args.agentConfig
+      args.agentConfig,
+      capability
     ),
     inheritSessionDefaults: false,
   };
-}
-
-export function shouldQueueMachineDelete(
-  session: Pick<SessionMeta, 'repoFullName' | 'project' | 'isWorktree' | 'parentSessionId'>
-): boolean {
-  return shouldQueueMachineDeleteSession(session);
 }
 
 export function buildSessionArchiveMetaPatch(): Partial<SessionMeta> {
@@ -2871,69 +3098,6 @@ export function buildSessionRestoreMetaPatch(): Partial<SessionMeta> {
   return {
     isArchived: false,
   };
-}
-
-export function buildLegacyMachineRestoreQueueCleanupPatch(
-  sessionId: SessionId,
-  machineMeta:
-    | Pick<MachineLegacyMetaFields, 'needToArchiveSessions' | 'needToDeleteSessions'>
-    | undefined
-): Pick<MachineLegacyMetaFields, 'needToArchiveSessions' | 'needToDeleteSessions'> | null {
-  const nextNeedToArchiveSessions = { ...(machineMeta?.needToArchiveSessions ?? {}) };
-  const nextNeedToDeleteSessions = { ...(machineMeta?.needToDeleteSessions ?? {}) };
-  let changed = false;
-
-  if (sessionId in nextNeedToArchiveSessions) {
-    delete nextNeedToArchiveSessions[sessionId];
-    changed = true;
-  }
-  if (sessionId in nextNeedToDeleteSessions) {
-    delete nextNeedToDeleteSessions[sessionId];
-    changed = true;
-  }
-
-  if (!changed) {
-    return null;
-  }
-  return {
-    needToArchiveSessions: nextNeedToArchiveSessions,
-    needToDeleteSessions: nextNeedToDeleteSessions,
-  };
-}
-
-async function writeMachineFlockCommandRow(
-  manager: LoroDocumentManager,
-  workspaceId: WorkspaceId,
-  machineId: MachineId,
-  row: MachineFlockRow,
-  nowMs: number
-): Promise<void> {
-  const handle = await manager.repo.openFlockDoc(getMachineFlockDocId(workspaceId, machineId));
-  const changed = writeMachineFlockRowToFlock(handle.flock, row, nowMs);
-  if (!changed) {
-    return;
-  }
-  await manager.repo.flush();
-  await handle.syncOnce();
-}
-
-async function deleteMachineFlockCommandRows(
-  manager: LoroDocumentManager,
-  workspaceId: WorkspaceId,
-  machineId: MachineId,
-  keys: MachineFlockKey[],
-  nowMs: number
-): Promise<void> {
-  const handle = await manager.repo.openFlockDoc(getMachineFlockDocId(workspaceId, machineId));
-  let changed = false;
-  for (const key of keys) {
-    changed = deleteMachineFlockRowFromFlock(handle.flock, key, nowMs) || changed;
-  }
-  if (!changed) {
-    return;
-  }
-  await manager.repo.flush();
-  await handle.syncOnce();
 }
 
 export async function createSessionResult(
@@ -2978,12 +3142,17 @@ export async function createSessionResult(
       sessionId: options.sessionId,
     });
   }
-  const requesterUserId = resolveSessionCommandRequesterUserId(auth, options.requesterUserId);
+  const requester = resolveSessionRequester(
+    auth,
+    options.requesterUserId,
+    options.delegatedRequester
+  );
+  const requesterUserId = requester.userId;
   const sessionOwnerUserId = resolveSessionCreateOwnerUserId(
     requesterUserId,
     options.sessionOwnerUserId
   );
-  const resolved = await resolveCreateContext({ auth, workspace, manager, options });
+  const resolved = await resolveCreateContext({ auth, workspace, manager, options, requester });
   const {
     targetMachine,
     agentConfig,
@@ -2991,7 +3160,6 @@ export async function createSessionResult(
     parentSessionId,
     openedBySessionId,
     openedByRootSessionId,
-    taskId,
   } = resolved;
   const effectiveDispatchConfig = await resolveEffectiveSessionCreateDispatchConfig({
     manager,
@@ -3028,7 +3196,6 @@ export async function createSessionResult(
     ...(options.agentRoleRevision !== undefined
       ? { agentRoleRevision: options.agentRoleRevision }
       : {}),
-    ...(taskId ? { taskId } : {}),
     // `agentRoleId`/`agentRoleRevision` are declared on `SessionMeta` now, so
     // the provenance fields no longer need a local intersection here.
   } satisfies SessionMeta);
@@ -3053,7 +3220,6 @@ export async function createSessionResult(
         modeId: modeId ?? undefined,
         modelId: modelId ?? undefined,
         configOptionValues: effectiveDispatchConfig.configOptionValues,
-        taskToolsEnabled: taskId ? true : effectiveDispatchConfig.taskToolsEnabled,
         chainDepth: options.chainDepth,
       }),
       preallocatedId: options.userTurnId,
@@ -3092,30 +3258,6 @@ export async function createSessionResult(
       timestamp: userTurn.timestamp,
       inputConfig: userTurn.inputConfig,
     });
-    if (taskId) {
-      // AFTER the fast path on purpose: this opens and syncs the task document,
-      // which is a network round trip, and the prompt must not wait on it
-      // (context/cli-prompt-hot-path.md). Best effort too — it runs past the
-      // dispatch point of no rollback, so a failure must never unwind a running
-      // session, and the reverse pointer on session meta is already durable.
-      // Still awaited rather than fired: this command's workspace transport is
-      // torn down on return, so an un-awaited write could be dropped.
-      await linkTaskSessionFromCli(
-        manager,
-        workspace.id as WorkspaceId,
-        taskId,
-        {
-          sessionId,
-          // A Run from the app authors its own session and links it there, so a
-          // taskId arriving here is either delegated automation (an explicit
-          // run) or an agent spawning helpers.
-          origin: options.taskLinkOrigin ?? 'agent-spawn',
-          ...(openedBySessionId ? { parentSessionId: openedBySessionId } : {}),
-        },
-        { agentConfigId: agentConfig.id }
-      ).catch(() => undefined);
-    }
-
     return {
       sessionId,
       machineId: targetMachine.id,
@@ -3126,7 +3268,6 @@ export async function createSessionResult(
       ...(parentSessionId ? { parentSessionId } : {}),
       ...(openedBySessionId ? { openedBySessionId } : {}),
       ...(openedByRootSessionId ? { openedByRootSessionId } : {}),
-      ...(taskId ? { taskId } : {}),
       completionPromise,
     };
   } catch (error) {
@@ -3150,12 +3291,30 @@ export async function validateSessionChatTarget(args: {
   manager: LoroDocumentManager;
   sessionId: SessionId;
   requesterUserIdOverride?: string;
+  delegatedRequester?: DelegatedSessionRequester;
+}): Promise<SessionMeta> {
+  const requester = resolveSessionRequester(
+    args.auth,
+    args.requesterUserIdOverride,
+    args.delegatedRequester
+  );
+  return await validateSessionChatTargetForRequester({
+    auth: args.auth,
+    workspace: args.workspace,
+    manager: args.manager,
+    sessionId: args.sessionId,
+    requester,
+  });
+}
+
+async function validateSessionChatTargetForRequester(args: {
+  auth: AuthContext;
+  workspace: WorkspaceSummary;
+  manager: LoroDocumentManager;
+  sessionId: SessionId;
+  requester: ResolvedSessionRequester;
 }): Promise<SessionMeta> {
   await syncWorkspaceMetaForRead(args.manager, `session.chat:${args.sessionId}:prewrite:meta`);
-  const requesterUserId = resolveSessionCommandRequesterUserId(
-    args.auth,
-    args.requesterUserIdOverride
-  );
   const session = await resolveSessionMetaOrThrow(args.manager, args.sessionId);
   if (session.isArchived) {
     throw new Error(`Session ${args.sessionId} is archived. Restore it before chatting.`);
@@ -3164,7 +3323,7 @@ export async function validateSessionChatTarget(args: {
     auth: args.auth,
     workspaceId: args.workspace.id as WorkspaceId,
     machineId: session.machineId,
-    requesterUserId,
+    requester: args.requester,
     localProjectId: session.project?.kind === 'local' ? session.project.localProjectId : undefined,
   });
   await ensureTargetMachineOnline({
@@ -3192,7 +3351,8 @@ export async function sendSessionChatResult(
     userTurnId: string;
     chainDepth: number;
     bypassSessionQuota?: boolean;
-  }
+  },
+  delegatedRequester?: DelegatedSessionRequester
 ): Promise<{
   sessionId: SessionId;
   machineId: MachineId;
@@ -3200,25 +3360,15 @@ export async function sendSessionChatResult(
   userTurnId: string;
   completionPromise?: Promise<Awaited<ReturnType<typeof waitForTurnCompletion>>>;
 }> {
-  const requesterUserId = resolveSessionCommandRequesterUserId(auth, requesterUserIdOverride);
-  const session = await validateSessionChatTarget({
+  const requester = resolveSessionRequester(auth, requesterUserIdOverride, delegatedRequester);
+  const requesterUserId = requester.userId;
+  const session = await validateSessionChatTargetForRequester({
     auth,
     workspace,
     manager,
     sessionId,
-    requesterUserIdOverride,
+    requester,
   });
-  if (dispatchConfig.modeId || dispatchConfig.modelId || dispatchConfig.configOptionValues) {
-    const capability = await readAgentAcpCapability({
-      manager,
-      workspaceId: workspace.id as WorkspaceId,
-      machineId: session.machineId,
-      agentConfigId: session.agentConfigId,
-    });
-    validateTurnModeAndModel(dispatchConfig, capability);
-    validateTurnConfigOptionValues(dispatchConfig.configOptionValues, capability);
-  }
-  const effectiveDispatchConfig = withBuiltinDefaultTurnMode(dispatchConfig, session);
 
   await syncDocForRead(
     manager,
@@ -3234,6 +3384,39 @@ export async function sendSessionChatResult(
         sessionDoc,
         userTurnId: orchestration?.userTurnId,
       });
+  const historyForDefaults =
+    quotaHistory ?? (await readSessionHistory(sessionDoc.sessionData.history));
+  const inheritedDispatchConfig = resolveTurnDispatchDefaultsFromHistory(
+    historyForDefaults,
+    session
+  );
+  const mayApplyBuiltinDefault =
+    Boolean(getBuiltinDefaultModeId(session.cliType, session.agentType)) &&
+    !dispatchConfig.modeId &&
+    typeof dispatchConfig.configOptionValues?.mode !== 'string' &&
+    inheritedDispatchConfig?.modeId === undefined &&
+    typeof inheritedDispatchConfig?.configOptionValues?.mode !== 'string';
+  const capability =
+    dispatchConfig.modeId ||
+    dispatchConfig.modelId ||
+    dispatchConfig.configOptionValues ||
+    inheritedDispatchConfig?.modeId !== undefined ||
+    inheritedDispatchConfig?.modelId !== undefined ||
+    inheritedDispatchConfig?.configOptionValues !== undefined ||
+    mayApplyBuiltinDefault
+      ? await readAgentAcpCapability({
+          manager,
+          workspaceId: workspace.id as WorkspaceId,
+          machineId: session.machineId,
+          agentConfigId: session.agentConfigId,
+        })
+      : undefined;
+  const effectiveDispatchConfig = resolveEffectiveSessionChatDispatchConfig({
+    dispatchConfig,
+    inheritedDispatchConfig,
+    target: session,
+    capability,
+  });
   const userTurn = await appendUserPromptHistory({
     sessionDoc,
     prompt,
@@ -3245,7 +3428,6 @@ export async function sendSessionChatResult(
       modeId: effectiveDispatchConfig.modeId,
       modelId: effectiveDispatchConfig.modelId,
       configOptionValues: effectiveDispatchConfig.configOptionValues,
-      taskToolsEnabled: effectiveDispatchConfig.taskToolsEnabled,
       resume: session.acpSessionId ?? undefined,
       chainDepth: orchestration?.chainDepth,
     }),
@@ -3320,15 +3502,17 @@ async function buildSessionShowResult(
 ): Promise<SessionShowResult> {
   const session = await resolveSessionMetaOrThrow(manager, sessionId);
   const sessionDoc = await manager.getOrCreateSessionDoc(sessionId);
-  const docState = (await sessionDoc.getDocState()) as SessionDocMeta | undefined;
-  const history = docState?.history ?? [];
+  const [directory, queue] = await Promise.all([
+    sessionDoc.sessionData.history.readDirectory(0, Number.MAX_SAFE_INTEGER),
+    sessionDoc.getMessageQueue(),
+  ]);
 
   return {
     workspace,
     session,
-    historyCount: history.length,
-    latestHistoryAt: history[history.length - 1]?.timestamp,
-    messageQueueCount: docState?.mq?.length ?? 0,
+    historyCount: directory.length,
+    latestHistoryAt: directory[directory.length - 1]?.scalars?.timestamp,
+    messageQueueCount: queue.length,
   };
 }
 
@@ -3499,7 +3683,7 @@ async function buildSessionStatusResult(
 ): Promise<SessionStatusResult> {
   const session = await resolveSessionMetaOrThrow(manager, sessionId);
   const sessionDoc = await manager.getOrCreateSessionDoc(sessionId);
-  const history = await sessionDoc.getHistory();
+  const history = readSessionHistory(sessionDoc.sessionData.history);
   const assistantTurnId = resolveActiveAssistantTurnId(history);
   const live = await readSessionLiveStatus({
     auth,
@@ -4033,6 +4217,7 @@ const sessionCancelCommand = new Command('cancel')
             auth,
             workspaceId,
             machineId: session.machineId,
+            requester: resolveSessionRequester(auth),
             localProjectId:
               session.project?.kind === 'local' ? session.project.localProjectId : undefined,
           });
@@ -4201,7 +4386,9 @@ const sessionHistoryCommand = new Command('history')
         );
         await resolveSessionMetaOrThrow(manager, sessionId);
         const sessionDoc = await manager.getOrCreateSessionDoc(sessionId);
-        const transcript = toSessionTranscriptEntries(await sessionDoc.getHistory());
+        const transcript = toSessionTranscriptEntries(
+          readSessionHistory(sessionDoc.sessionData.history)
+        );
         const entries = selectSessionTranscriptEntries(transcript, {
           all: options.all,
           limit: options.limit,
@@ -4370,42 +4557,16 @@ const sessionArchiveCommand = new Command('archive')
         throw new Error('Missing session ID. Pass one explicitly or set LODY_SESSION_ID.');
       }
 
-      const workspace = await resolveWorkspaceForSessionOrThrow(auth, sessionId, options.workspace);
+      const workspace = await resolveWorkspaceForSessionOrThrow(auth, sessionId, {
+        workspace: options.workspace,
+        reason: `session.archive:${sessionId}:resolve`,
+      });
       await withWorkspaceManager(auth, workspace, async (manager) => {
-        const session = await resolveSessionMetaOrThrow(manager, sessionId);
-        const childSessionIds = await listChildSessionIds(manager, sessionId);
-        await applySessionAndChildren(sessionId, childSessionIds, (id) =>
-          manager.repo.upsertDocMeta(getSessionRoomId(id), buildSessionArchiveMetaPatch())
+        const childSessionIds = await runSessionOperationWithSyncedMetadata(
+          manager,
+          sessionId,
+          'archive'
         );
-
-        if (
-          !session.parentSessionId &&
-          session.machineId !== undefined &&
-          session.machineId.length > 0
-        ) {
-          const requestedAt = getServerNow();
-          await writeMachineFlockCommandRow(
-            manager,
-            workspace.id as WorkspaceId,
-            session.machineId,
-            {
-              key: machineFlockKeys.archiveSessionCommand(sessionId),
-              value: buildMachineArchiveSessionCommand({ requestedAt }),
-            },
-            requestedAt
-          );
-          const machineRoomId = getMachineRoomId(session.machineId);
-          const machineMeta = (await manager.repo.getDocMeta(machineRoomId))?.meta as
-            | MachineLegacyMetaFields
-            | undefined;
-          await manager.repo.upsertDocMeta(machineRoomId, {
-            needToArchiveSessions: {
-              ...(machineMeta?.needToArchiveSessions ?? {}),
-              [sessionId]: true,
-            },
-          });
-        }
-        await ensureWorkspaceMetaSynced(manager, `session.archive:${sessionId}`);
 
         if (options.json) {
           printJson({ ok: true, sessionId, archivedChildSessionIds: childSessionIds });
@@ -4432,39 +4593,16 @@ const sessionRestoreCommand = new Command('restore')
         throw new Error('Missing session ID. Pass one explicitly or set LODY_SESSION_ID.');
       }
 
-      const workspace = await resolveWorkspaceForSessionOrThrow(auth, sessionId, options.workspace);
+      const workspace = await resolveWorkspaceForSessionOrThrow(auth, sessionId, {
+        workspace: options.workspace,
+        reason: `session.restore:${sessionId}:resolve`,
+      });
       await withWorkspaceManager(auth, workspace, async (manager) => {
-        const session = await resolveSessionMetaOrThrow(manager, sessionId);
-        if (session.isArchived !== true) {
-          throw new Error(`Session ${sessionId} is not archived.`);
-        }
-        const childSessionIds = await listChildSessionIds(manager, sessionId);
-        await applySessionAndChildren(sessionId, childSessionIds, (id) =>
-          manager.repo.upsertDocMeta(getSessionRoomId(id), buildSessionRestoreMetaPatch())
+        const childSessionIds = await runSessionOperationWithSyncedMetadata(
+          manager,
+          sessionId,
+          'restore'
         );
-
-        if (session.machineId !== undefined && session.machineId.length > 0) {
-          const nowMs = getServerNow();
-          const machineRoomId = getMachineRoomId(session.machineId);
-          const machineMeta = (await manager.repo.getDocMeta(machineRoomId))?.meta as
-            | MachineLegacyMetaFields
-            | undefined;
-          const machinePatch = buildLegacyMachineRestoreQueueCleanupPatch(sessionId, machineMeta);
-          if (machinePatch) {
-            await manager.repo.upsertDocMeta(machineRoomId, machinePatch);
-          }
-          await deleteMachineFlockCommandRows(
-            manager,
-            workspace.id as WorkspaceId,
-            session.machineId,
-            [
-              machineFlockKeys.archiveSessionCommand(sessionId),
-              machineFlockKeys.deleteSessionCommand(sessionId),
-            ],
-            nowMs
-          );
-        }
-        await ensureWorkspaceMetaSynced(manager, `session.restore:${sessionId}`);
 
         if (options.json) {
           printJson({ ok: true, sessionId, restoredChildSessionIds: childSessionIds });
@@ -4491,116 +4629,16 @@ const sessionDeleteCommand = new Command('delete')
         throw new Error('Missing session ID. Pass one explicitly or set LODY_SESSION_ID.');
       }
 
-      const workspace = await resolveWorkspaceForSessionOrThrow(auth, sessionId, options.workspace);
+      const workspace = await resolveWorkspaceForSessionOrThrow(auth, sessionId, {
+        workspace: options.workspace,
+        reason: `session.delete:${sessionId}:resolve`,
+      });
       await withWorkspaceManager(auth, workspace, async (manager) => {
-        const session = await resolveSessionMetaOrThrow(manager, sessionId);
-        if (session.isArchived !== true) {
-          throw new Error(`Session ${sessionId} is not archived. Archive it before deleting.`);
-        }
-        const childSessionIds = await listChildSessionIds(manager, sessionId);
-        const machineId =
-          session.machineId !== undefined && session.machineId.length > 0
-            ? session.machineId
-            : undefined;
-        const shouldQueueDelete = shouldQueueMachineDelete(session);
-
-        if (machineId && shouldQueueDelete) {
-          const requestedAt = getServerNow();
-          const machineRoomId = getMachineRoomId(machineId);
-          const machineMeta = (await manager.repo.getDocMeta(machineRoomId))?.meta as
-            | MachineLegacyMetaFields
-            | undefined;
-          const machineFlockHandle = await manager.repo.openFlockDoc(
-            getMachineFlockDocId(workspace.id as WorkspaceId, machineId)
-          );
-          const machineMetaForCleanup = {
-            ...(machineMeta ?? {}),
-            localProjects: {
-              ...(machineMeta?.localProjects ?? {}),
-              ...getMachineFlockLocalProjects(
-                readMachineFlockRowsFromFlock(machineFlockHandle.flock, {
-                  families: ['localProject'],
-                })
-              ),
-            },
-          } satisfies Pick<
-            MachineLegacyMetaFields,
-            'needToArchiveSessions' | 'needToDeleteSessions' | 'localProjects'
-          >;
-          let nextNeedToArchiveSessions: Record<SessionId, boolean> | undefined;
-          if (machineMetaForCleanup.needToArchiveSessions?.[sessionId] !== undefined) {
-            nextNeedToArchiveSessions = {
-              ...(machineMetaForCleanup.needToArchiveSessions ?? {}),
-            };
-            delete nextNeedToArchiveSessions[sessionId];
-          }
-          await deleteMachineFlockCommandRows(
-            manager,
-            workspace.id as WorkspaceId,
-            machineId,
-            [machineFlockKeys.archiveSessionCommand(sessionId)],
-            requestedAt
-          );
-          const deleteCommand = buildMachineDeleteSessionCommand({
-            session,
-            machineMeta: machineMetaForCleanup,
-            requestedAt,
-            existing: machineMeta?.needToDeleteSessions?.[sessionId],
-          });
-          if (nextNeedToArchiveSessions !== undefined || deleteCommand) {
-            await manager.repo.upsertDocMeta(machineRoomId, {
-              ...(nextNeedToArchiveSessions !== undefined
-                ? { needToArchiveSessions: nextNeedToArchiveSessions }
-                : {}),
-              ...(deleteCommand
-                ? {
-                    needToDeleteSessions: {
-                      ...(machineMeta?.needToDeleteSessions ?? {}),
-                      [sessionId]: machineDeleteCommandToQueueItem(deleteCommand),
-                    },
-                  }
-                : {}),
-            });
-          }
-          if (deleteCommand) {
-            await writeMachineFlockCommandRow(
-              manager,
-              workspace.id as WorkspaceId,
-              machineId,
-              {
-                key: machineFlockKeys.deleteSessionCommand(sessionId),
-                value: deleteCommand,
-              },
-              requestedAt
-            );
-          }
-        } else if (machineId) {
-          const requestedAt = getServerNow();
-          const machineRoomId = getMachineRoomId(machineId);
-          const machineMeta = (await manager.repo.getDocMeta(machineRoomId))?.meta as
-            | MachineLegacyMetaFields
-            | undefined;
-          const machinePatch = buildLegacyMachineRestoreQueueCleanupPatch(sessionId, machineMeta);
-          if (machinePatch) {
-            await manager.repo.upsertDocMeta(machineRoomId, machinePatch);
-          }
-          await deleteMachineFlockCommandRows(
-            manager,
-            workspace.id as WorkspaceId,
-            machineId,
-            [
-              machineFlockKeys.archiveSessionCommand(sessionId),
-              machineFlockKeys.deleteSessionCommand(sessionId),
-            ],
-            requestedAt
-          );
-        }
-
-        await applySessionAndChildren(sessionId, childSessionIds, async (id) => {
-          await manager.repo.deleteDoc(getSessionRoomId(id));
-          await manager.cleanSessionDoc(id);
-        });
-        await ensureWorkspaceMetaSynced(manager, `session.delete:${sessionId}`);
+        const childSessionIds = await runSessionOperationWithSyncedMetadata(
+          manager,
+          sessionId,
+          'delete'
+        );
 
         if (options.json) {
           printJson({ ok: true, sessionId, deletedChildSessionIds: childSessionIds });

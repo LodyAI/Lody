@@ -71,7 +71,7 @@ export function renderInlineMarkdown(text: string, keyPrefix: string): React.Rea
       );
     } else if (best.kind === 'bold') {
       nodes.push(
-        <strong key={key} className="font-semibold text-foreground">
+        <strong key={key} className="font-normal text-foreground">
           {renderInlineMarkdown(best.m[1] ?? '', key)}
         </strong>
       );
@@ -101,10 +101,10 @@ export function renderInlineMarkdown(text: string, keyPrefix: string): React.Rea
 }
 
 const HEADING_CLASS: Record<number, string> = {
-  1: 'mt-4 text-lg font-semibold text-foreground first:mt-0',
-  2: 'mt-4 text-base font-semibold text-foreground first:mt-0',
-  3: 'mt-3 text-sm font-semibold text-foreground first:mt-0',
-  4: 'mt-3 text-sm font-semibold text-muted-foreground first:mt-0',
+  1: 'mt-4 text-lg font-normal text-foreground first:mt-0',
+  2: 'mt-4 text-base font-normal text-foreground first:mt-0',
+  3: 'mt-3 text-sm font-normal text-foreground first:mt-0',
+  4: 'mt-3 text-sm font-normal text-muted-foreground first:mt-0',
 };
 
 const SPECIAL_LINE = /^(#{1,6}\s|```|>|[-*]\s|\d+\.\s)|^(-{3,}|\*{3,}|_{3,})\s*$/;

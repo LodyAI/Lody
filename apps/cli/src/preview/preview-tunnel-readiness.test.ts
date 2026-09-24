@@ -2,6 +2,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { PreviewTarget } from '@lody/shared';
 import {
   verifyPreviewTunnelRoundTrip,
+  PREVIEW_PROXY_RESPONSE_HEADER,
+  PREVIEW_PROXY_RESPONSE_VERSION,
   VISUAL_ANNOTATION_RUNTIME_RESPONSE_HEADER,
   VISUAL_ANNOTATION_RUNTIME_RESPONSE_VERSION,
 } from './preview-tunnel-readiness';
@@ -71,6 +73,28 @@ describe('verifyPreviewTunnelRoundTrip', () => {
     expect(redirectedUrl.searchParams.get('__lody_preview_token')).toBe('secret');
   });
 
+  it.each([200, 404, 500])(
+    'accepts a forwarded HTTP %i page without an annotation runtime',
+    async (status) => {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(
+          async () =>
+            new Response('plain page', {
+              status,
+              headers: { [PREVIEW_PROXY_RESPONSE_HEADER]: PREVIEW_PROXY_RESPONSE_VERSION },
+            })
+        )
+      );
+      await expect(
+        verifyPreviewTunnelRoundTrip({
+          publicUrl: 'https://session-grant.lody.uk/?__lody_preview_token=secret',
+          target,
+        })
+      ).resolves.toBeUndefined();
+    }
+  );
+
   it('fails explicitly when wildcard traffic does not reach the Preview Worker', async () => {
     vi.stubGlobal(
       'fetch',
@@ -89,7 +113,7 @@ describe('verifyPreviewTunnelRoundTrip', () => {
         target,
       })
     ).rejects.toThrow(
-      'Preview public route round-trip failed for session-grant.lody.uk: HTTP 522 did not return the injected annotation runtime marker'
+      'Preview public route round-trip failed for session-grant.lody.uk: HTTP 522 did not return the preview proxy marker'
     );
   });
 });

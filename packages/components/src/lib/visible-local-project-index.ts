@@ -1,6 +1,8 @@
 import type { LocalProjectId, LocalProjectMeta, MachineId, MachineViewMeta } from '@lody/shared';
 import type { MachineVisibilityAccess } from './visible-machine-index';
 
+export type { MachineVisibilityAccess };
+
 export type LocalProjectVisibilityAccess = {
   machineId: string;
   localProjectId: string;
@@ -30,6 +32,7 @@ type BuildArgs = {
 export type VisibleLocalProjectIndex = {
   projects: Map<string, VisibleLocalProjectEntry>;
   accessByProjectKey: Map<string, LocalProjectVisibilityAccess>;
+  accessByMachineId: ReadonlyMap<MachineId, MachineVisibilityAccess>;
   isLoading: boolean;
 };
 
@@ -109,6 +112,7 @@ export function buildVisibleLocalProjectIndex({
   return {
     projects,
     accessByProjectKey,
+    accessByMachineId: machineAccessByMachineId,
     isLoading,
   };
 }

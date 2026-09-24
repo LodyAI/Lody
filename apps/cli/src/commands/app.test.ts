@@ -6,6 +6,7 @@ import type {
   MachineId,
 } from '@lody/shared';
 import { resolveLocalProjectForApp } from './app';
+import { resolveAppResetCacheAction } from './app-reset-cache';
 import { buildOpenLocalProjectDeepLink } from '@/lib/desktop-deep-link';
 
 const MACHINE_ID = 'machine-1' as MachineId;
@@ -142,14 +143,12 @@ describe('resolveLocalProjectForApp', () => {
   });
 
   it('still resolves the deterministic project id when the daemon is down', async () => {
-    const send = vi.fn(
-      async (): Promise<LocalProjectControlResponse> => ({
-        ok: false,
-        type: 'local-project/add',
-        error: 'daemon_unavailable',
-        message: 'Local CLI daemon is not running.',
-      })
-    );
+    const send = vi.fn(async (): Promise<LocalProjectControlResponse> => ({
+      ok: false,
+      type: 'local-project/add',
+      error: 'daemon_unavailable',
+      message: 'Local CLI daemon is not running.',
+    }));
 
     const target = await resolveLocalProjectForApp({
       machineId: MACHINE_ID,
@@ -166,14 +165,12 @@ describe('resolveLocalProjectForApp', () => {
   });
 
   it('propagates other control failures', async () => {
-    const send = vi.fn(
-      async (): Promise<LocalProjectControlResponse> => ({
-        ok: false,
-        type: 'local-project/add',
-        error: 'path_invalid',
-        message: 'Selected path is not a directory',
-      })
-    );
+    const send = vi.fn(async (): Promise<LocalProjectControlResponse> => ({
+      ok: false,
+      type: 'local-project/add',
+      error: 'path_invalid',
+      message: 'Selected path is not a directory',
+    }));
 
     await expect(
       resolveLocalProjectForApp({
@@ -220,5 +217,22 @@ describe('buildOpenLocalProjectDeepLink', () => {
         workspaceSlug: 'acme',
       })
     ).toBe(`lody://chat/new?machine=${MACHINE_ID}&project=${LOCAL_PROJECT_ID}&workspaceSlug=acme`);
+  });
+});
+
+describe('lody app reset-cache', () => {
+  it('arms the recoverable cache level by default and the full wipe on --hard', () => {
+    expect(resolveAppResetCacheAction({})).toEqual({ type: 'arm', mode: 'cache' });
+    expect(resolveAppResetCacheAction({ hard: true })).toEqual({ type: 'arm', mode: 'hard' });
+  });
+
+  it('cancels instead of arming', () => {
+    expect(resolveAppResetCacheAction({ cancel: true })).toEqual({ type: 'cancel' });
+  });
+
+  it('refuses a run that both arms and cancels rather than picking one', () => {
+    expect(() => resolveAppResetCacheAction({ cancel: true, hard: true })).toThrow(
+      /--cancel or --hard/
+    );
   });
 });

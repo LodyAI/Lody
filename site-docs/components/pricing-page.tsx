@@ -13,6 +13,7 @@
  * when it passes, edit that copy, do not add a clock.
  */
 
+import '@site/app/pricing.css';
 import NumberFlow from '@number-flow/react';
 import { useMemo, useState, type CSSProperties, type ReactNode } from 'react';
 

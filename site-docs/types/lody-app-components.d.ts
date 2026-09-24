@@ -1364,6 +1364,8 @@ declare module '@/components/settings/stats-setting-pure' {
     tintMemberSeriesLabel?: boolean;
     /** USD fraction digits for the cost KPI (default 2). Landing uses 0. */
     costFractionDigits?: number;
+    /** Opt-in share-card entry (default false). The landing demo leaves it off. */
+    shareCard?: boolean;
   };
 
   export function StatsSettingsView(props: StatsSettingsViewProps): ReactElement;

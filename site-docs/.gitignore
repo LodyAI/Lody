@@ -10,3 +10,6 @@ public/rss.xml
 public/rss-zh.xml
 lib/blog-reading-time.generated.ts
 lib/docs-faq.generated.ts
+
+# Local review recordings / stills — never commit
+review-assets/

@@ -99,6 +99,7 @@ describe('supportsBuiltinAuthentication', () => {
   it('refuses the builtin login flow for registry and custom providers', () => {
     expect(supportsBuiltinAuthentication({ cliType: 'registry', agentType: 'gemini' })).toBe(false);
     expect(supportsBuiltinAuthentication({ cliType: 'custom', agentType: 'my-agent' })).toBe(false);
+    expect(supportsBuiltinAuthentication({ cliType: 'builtin', agentType: 'bub' })).toBe(false);
     expect(supportsBuiltinAuthentication({ cliType: 'builtin', agentType: 'auggie' })).toBe(false);
     expect(supportsBuiltinAuthentication({ cliType: undefined, agentType: undefined })).toBe(false);
   });

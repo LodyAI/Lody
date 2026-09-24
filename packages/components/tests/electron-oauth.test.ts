@@ -71,6 +71,24 @@ afterEach(() => {
 });
 
 describe('electron oauth helpers', () => {
+  it('preserves Nightly selection across browser login and selects only a fixed callback scheme', () => {
+    const query = {
+      client_id: 'electron',
+      state: 'state',
+      code_challenge: 'challenge',
+      desktop_channel: 'nightly' as const,
+    };
+    const callback = new URL(buildElectronWebLoginCallbackUrl(query, 'https://example.test/app/'));
+    expect(callback.searchParams.get('desktop_channel')).toBe('nightly');
+    expect(callback.searchParams.get('client_id')).toBe('electron');
+    expect(buildElectronRedirectUrl('code', 'state', 'nightly')).toMatch(
+      /^ai\.lody\.nightly:\/\/auth\/callback#token=/
+    );
+    expect(buildElectronRedirectUrl('code', 'state')).toMatch(/^lody:\/\/auth\/callback#token=/);
+    expect(() =>
+      buildElectronRedirectUrl('code', 'state', 'https://attacker.test' as 'nightly')
+    ).toThrow('Unsupported desktop callback channel');
+  });
   it('reads the Better Auth electron authorization code cookie', () => {
     installMockWindow('https://lody.ai/login');
     installMockDocument(`${ELECTRON_AUTHORIZATION_CODE_COOKIE_KEY}=auth-code-123%3D%3D`);

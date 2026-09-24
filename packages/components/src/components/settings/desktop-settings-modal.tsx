@@ -1,5 +1,5 @@
 import { useCallback, useId } from 'react';
-import { Bug } from 'lucide-react';
+import { Bug, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useAtom, useSetAtom } from 'jotai';
 import {
@@ -11,7 +11,13 @@ import {
 } from '@/atoms';
 import { cn } from '@/lib/utils';
 import { ScrollArea } from '@/ui';
-import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/ui/dialog';
+import {
+  Dialog,
+  DialogClose,
+  DialogContentWithoutClose,
+  DialogDescription,
+  DialogTitle,
+} from '@/ui/dialog';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { isNativeAppShell } from '@/lib/native-platform';
 import { useAppCapability } from '@/lib/app-platform';
@@ -35,7 +41,9 @@ import { IntegrationsSettingsComponent } from './integrations-setting';
 import { KeyboardShortcutsSetting } from './keyboard-shortcuts-setting';
 import { AboutSettingsComponent } from './about-setting';
 import { AgentRolesSetting } from './agent-roles-setting';
+import { PromptShortcutsSetting } from './prompt-shortcuts-setting';
 import { McpSetting } from './mcp-setting';
+import { ShareManagementSetting } from './share-management-setting';
 import { FocusScope, useListKeyboardNavigation } from '@/ui/focus-scope';
 
 /**
@@ -60,12 +68,12 @@ export function DesktopSettingsModal() {
         if (!next) setOpen(false);
       }}
     >
-      <DialogContent
+      <DialogContentWithoutClose
         noAnimation
         className="flex h-[min(90vh,950px)] w-[84vw] max-w-[1100px] flex-col gap-0 overflow-hidden p-0 sm:p-0"
       >
         <SettingsModalBody />
-      </DialogContent>
+      </DialogContentWithoutClose>
     </Dialog>
   );
 }
@@ -134,12 +142,12 @@ function SettingsModalBody() {
   return (
     <SettingsDataCacheProvider>
       <DialogDescription className="sr-only">{t('settings.title')}</DialogDescription>
-      <div className="flex min-h-0 flex-1 overflow-hidden">
+      <div className="flex min-h-0 flex-1 overflow-hidden [&_button]:font-normal">
         <FocusScope
           id={navigationScopeId}
           role="navigation"
           aria-label={t('settings.title')}
-          className="flex w-60 flex-col border-e bg-background"
+          className="flex w-52 flex-col border-e bg-background"
         >
           <nav className="min-h-0 flex-1 overflow-y-auto p-3">
             <div className="space-y-4">
@@ -149,7 +157,7 @@ function SettingsModalBody() {
                 if (tabs.length === 0 && !showsAccountEntry) return null;
                 return (
                   <section key={section.id} aria-label={section.label}>
-                    <h2 className="px-2.5 pb-1 text-xs font-medium text-muted-foreground/55">
+                    <h2 className="px-2.5 pb-1 text-[0.75em] font-normal text-foreground/50 dark:text-muted-foreground/70">
                       {section.label}
                     </h2>
                     <div className="space-y-0.5">
@@ -177,10 +185,10 @@ function SettingsModalBody() {
                             data-scope-item="row"
                             data-settings-tab-id={tab.id}
                             className={cn(
-                              'flex w-full items-center gap-2.5 rounded-md px-2.5 py-1 text-start text-sm font-medium transition-colors',
+                              'flex w-full items-center gap-2.5 rounded-md px-2.5 py-1 text-start text-[1em] font-normal transition-colors',
                               resolvedActiveTab === tab.id
-                                ? 'bg-secondary text-secondary-foreground'
-                                : 'text-muted-foreground hover:bg-secondary/50 hover:text-secondary-foreground'
+                                ? 'bg-foreground/[0.06] text-foreground'
+                                : 'text-foreground/80 hover:bg-foreground/[0.04] hover:text-foreground dark:text-muted-foreground'
                             )}
                             onClick={() => selectTab(tab.id)}
                           >
@@ -205,7 +213,7 @@ function SettingsModalBody() {
                 type="button"
                 data-id="settings:report-bug"
                 data-scope-item="row"
-                className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-1 text-start text-sm font-medium text-muted-foreground transition-colors hover:bg-secondary/50 hover:text-secondary-foreground"
+                className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-1 text-start text-[1em] font-normal text-foreground/80 transition-colors hover:bg-foreground/[0.04] hover:text-foreground dark:text-muted-foreground"
                 onClick={handleReportBug}
               >
                 <Bug className="h-4 w-4 shrink-0 opacity-80" strokeWidth={1.75} />
@@ -218,33 +226,44 @@ function SettingsModalBody() {
         <FocusScope
           id={contentScopeId}
           role="main"
-          className="flex min-h-0 min-w-0 flex-1 flex-col"
+          className="relative flex min-h-0 min-w-0 flex-1 flex-col"
         >
-          {selfTitledTab ? (
-            <DialogTitle className="sr-only">{t(activeTabConfig.labelKey)}</DialogTitle>
-          ) : (
-            <header className="mt-2 flex h-12 shrink-0 items-center px-8">
-              <DialogTitle className="text-xl font-semibold leading-none">
-                {t(activeTabConfig.labelKey)}
-              </DialogTitle>
-            </header>
-          )}
-          <div className="min-h-0 flex-1">
-            {usesInternalScrolling ? (
-              <div className="h-full px-6 pb-6 pt-6">
-                <div className="mx-auto h-full max-w-5xl">
-                  <SettingsTabContent tabId={resolvedActiveTab} />
-                </div>
-              </div>
+          <DialogClose
+            className="absolute top-2.5 right-2.5 z-10 flex h-5 w-5 items-center justify-center rounded-full bg-foreground/[0.06] text-muted-foreground transition-colors hover:bg-foreground/[0.12] hover:text-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
+            aria-label={t('common.close', 'Close')}
+          >
+            <X className="h-3 w-3" strokeWidth={2} aria-hidden="true" />
+          </DialogClose>
+          {/* `pr-10` keeps every right-pane control off the close button's
+              vertical column (10px inset + 20px control). It sits inside the
+              scroll area so the scrollbar stays flush with the pane edge. */}
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col pt-5" data-settings-surface="">
+            {selfTitledTab ? (
+              <DialogTitle className="sr-only">{t(activeTabConfig.labelKey)}</DialogTitle>
             ) : (
-              <ScrollArea className="h-full">
-                <div className={cn('px-6 pb-6', selfTitledTab ? 'pt-6' : 'pt-0')}>
-                  <div className="mx-auto max-w-5xl">
+              <header className="flex h-10 shrink-0 items-center pr-10 pl-8">
+                <DialogTitle className="text-xl font-normal leading-none">
+                  {t(activeTabConfig.labelKey)}
+                </DialogTitle>
+              </header>
+            )}
+            <div className="min-h-0 flex-1">
+              {usesInternalScrolling ? (
+                <div className="h-full pt-6 pr-10 pb-6 pl-6">
+                  <div className="mx-auto h-full max-w-5xl">
                     <SettingsTabContent tabId={resolvedActiveTab} />
                   </div>
                 </div>
-              </ScrollArea>
-            )}
+              ) : (
+                <ScrollArea className="h-full">
+                  <div className={cn('pr-10 pb-6 pl-6', selfTitledTab ? 'pt-6' : 'pt-0')}>
+                    <div className="mx-auto max-w-5xl">
+                      <SettingsTabContent tabId={resolvedActiveTab} />
+                    </div>
+                  </div>
+                </ScrollArea>
+              )}
+            </div>
           </div>
         </FocusScope>
       </div>
@@ -284,8 +303,12 @@ function SettingsTabContent({ tabId }: { tabId: SettingsTabId }) {
       );
     case 'agent-roles':
       return <AgentRolesSetting />;
+    case 'prompt-shortcuts':
+      return <PromptShortcutsSetting />;
     case 'mcp':
       return <McpSetting />;
+    case 'shares':
+      return <ShareManagementSetting />;
     case 'machines':
       return (
         <MachineAgentSettings

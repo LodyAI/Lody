@@ -20,18 +20,7 @@ import type {
   WorktreeCleanupScriptConfig,
   WorktreeSetupScriptConfig,
 } from './project';
-import {
-  buildNeedToDeleteSessionQueueItem,
-  mergeNeedToDeleteSessionQueueItem,
-  type NeedToDeleteSessionQueueRecord,
-} from './session-delete-queue';
-import type {
-  AgentConfigMeta,
-  MachineLegacyMetaFields,
-  NeedToDeleteSessionQueueItem,
-  SessionLaunchConfig,
-  SessionMeta,
-} from './schema';
+import type { AgentConfigMeta, SessionLaunchConfig, SessionMeta } from './schema';
 
 export const MACHINE_FLOCK_DOC_STREAM_SEGMENT = 'mf';
 
@@ -88,67 +77,6 @@ export type MachineDeleteLocalProjectCommand = {
   cleanupWorktrees?: true;
   status?: 'completed';
   cleanupResult?: LocalProjectWorktreeCleanupResult;
-};
-
-export const buildMachineArchiveSessionCommand = (options: {
-  requestedAt: number;
-  requestedBy?: string;
-}): MachineArchiveSessionCommand => ({
-  v: 1,
-  requestedAt: options.requestedAt,
-  ...(options.requestedBy ? { requestedBy: options.requestedBy } : {}),
-});
-
-export const shouldQueueMachineDeleteSession = (
-  session: Pick<SessionMeta, 'repoFullName' | 'project' | 'isWorktree' | 'parentSessionId'>
-): boolean => {
-  if (session.parentSessionId) {
-    return false;
-  }
-  return (
-    session.isWorktree === true ||
-    (session.project?.kind !== 'local' && nonEmptyString(session.repoFullName) !== undefined)
-  );
-};
-
-export const machineDeleteCommandToQueueItem = (
-  command: MachineDeleteSessionCommand
-): NeedToDeleteSessionQueueRecord => {
-  const { v: _v, ...queueItem } = command;
-  return queueItem;
-};
-
-export const buildMachineDeleteSessionCommand = (options: {
-  session: Pick<
-    SessionMeta,
-    'project' | 'repoFullName' | 'branchName' | 'baseBranch' | 'isWorktree' | 'parentSessionId'
-  >;
-  machineMeta?: Pick<MachineLegacyMetaFields, 'localProjects'>;
-  requestedAt: number;
-  existing?: NeedToDeleteSessionQueueItem | MachineDeleteSessionCommand;
-}): MachineDeleteSessionCommand | null => {
-  if (!shouldQueueMachineDeleteSession(options.session)) {
-    return null;
-  }
-  const existing =
-    options.existing && typeof options.existing === 'object' && 'v' in options.existing
-      ? machineDeleteCommandToQueueItem(options.existing)
-      : options.existing;
-  const queueItem = mergeNeedToDeleteSessionQueueItem(
-    existing,
-    buildNeedToDeleteSessionQueueItem({
-      session: options.session,
-      machineMeta: options.machineMeta,
-      requestedAt: options.requestedAt,
-    })
-  );
-  const { isWorktree, requestedAt, ...rest } = queueItem;
-  return {
-    v: 1,
-    ...rest,
-    requestedAt: requestedAt ?? options.requestedAt,
-    ...(isWorktree === true ? { isWorktree: true } : {}),
-  };
 };
 
 export const buildMachineDeleteLocalProjectCommand = (options: {
@@ -985,10 +913,7 @@ export function buildSessionLaunchConfig(
   if (input.customAcp) {
     config.customAcp = input.customAcp;
   }
-  if (
-    input.runtimeOverrides &&
-    Object.values(input.runtimeOverrides).some((value) => value && value.trim().length > 0)
-  ) {
+  if (hasBuiltinRuntimeOverrideValues(input.runtimeOverrides)) {
     config.runtimeOverrides = input.runtimeOverrides;
   }
   if (input.env && Object.keys(input.env).length > 0) {
@@ -1183,11 +1108,6 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 const isNonEmptyString = (value: unknown): value is string =>
   typeof value === 'string' && value.length > 0;
 
-const nonEmptyString = (value: string | undefined): string | undefined => {
-  const trimmed = value?.trim();
-  return trimmed ? trimmed : undefined;
-};
-
 const isMissing = (value: unknown): value is null | undefined =>
   value === undefined || value === null;
 
@@ -1259,11 +1179,7 @@ const normalizeSessionLaunchConfig = (value: unknown): SessionLaunchConfig | und
     if (!isBuiltinRuntimeOverrides(value.runtimeOverrides)) {
       return undefined;
     }
-    if (
-      Object.values(value.runtimeOverrides).some(
-        (override) => typeof override === 'string' && override.trim().length > 0
-      )
-    ) {
+    if (hasBuiltinRuntimeOverrideValues(value.runtimeOverrides)) {
       config.runtimeOverrides = value.runtimeOverrides;
     }
   }
@@ -1495,7 +1411,11 @@ const normalizeAgentConfigMeta = (value: unknown): AgentConfigMeta | undefined =
   }
   if (!isMissing(value.runtimeOverrides)) {
     if (!isBuiltinRuntimeOverrides(value.runtimeOverrides)) return undefined;
-    config.runtimeOverrides = value.runtimeOverrides;
+    const runtimeOverrides = { ...value.runtimeOverrides };
+    // piExtensions only applies to builtin Pi; a foreign key must not count as
+    // an override for other agent types.
+    if (config.agentType !== 'pi') delete runtimeOverrides.piExtensions;
+    config.runtimeOverrides = runtimeOverrides;
   }
   if (!isMissing(value.prompt)) {
     if (typeof value.prompt !== 'string') return undefined;

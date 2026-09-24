@@ -37,7 +37,7 @@ export function MobileSettingsSection({
         <header className="px-5 pb-1.5">
           <div className="flex items-center justify-between gap-2">
             {title ? (
-              <h2 className="min-w-0 text-[0.82rem] font-semibold text-muted-foreground">
+              <h2 className="min-w-0 text-[0.82rem] font-normal text-muted-foreground">
                 {title}
               </h2>
             ) : (
@@ -117,7 +117,7 @@ export function MobileSettingsRow({
     >
       <div className="min-w-0 flex-1">
         {typeof label === 'string' ? (
-          <p className="text-[0.95rem] font-medium leading-tight text-foreground">{label}</p>
+          <p className="text-[0.95rem] font-normal leading-tight text-foreground">{label}</p>
         ) : (
           label
         )}

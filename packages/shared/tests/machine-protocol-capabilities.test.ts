@@ -5,6 +5,7 @@ import {
   CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
   MACHINE_PROTOCOL_CAPABILITIES,
   machineSupportsAcpAuthenticationInteractionsProtocol,
+  machineSupportsLocalFileResourcesProtocol,
 } from '../src/machine-protocol-capabilities';
 
 describe('ACP authentication interaction protocol capability', () => {
@@ -32,4 +33,16 @@ describe('ACP authentication interaction protocol capability', () => {
       })
     ).toBe(false);
   });
+});
+
+it('requires an advertised local file resource protocol, independent of release version', () => {
+  expect(machineSupportsLocalFileResourcesProtocol(undefined)).toBe(false);
+  expect(
+    machineSupportsLocalFileResourcesProtocol({ protocolCapabilities: { localFileResources: 0 } })
+  ).toBe(false);
+  expect(
+    machineSupportsLocalFileResourcesProtocol({
+      protocolCapabilities: CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
+    })
+  ).toBe(true);
 });

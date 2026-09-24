@@ -1,3 +1,4 @@
+import { readSessionHistory } from '@lody/shared/session-data';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import {
@@ -18,8 +19,8 @@ import {
   type SessionMeta,
   type ProjectRef,
   resolveSessionMcpSelection,
-  resolveSessionTaskToolsEnabled,
 } from '@lody/shared';
+import type { SessionSnapshot, SessionTurn } from '@lody/shared/session-data';
 import type { Logger } from '@/utils/logger';
 import { formatErrorMessage } from '@/utils/format-error';
 import { mapWithConcurrency } from '@/lib/bounded-concurrency';
@@ -47,6 +48,7 @@ type WorktreeForkPreparedInput = {
   targetMeta: SessionMeta;
   marker: SessionForkOperationMarker;
   historyResult: NonNullable<ReturnType<typeof cloneHistoryThroughTurn>>;
+  sourceSnapshot: SessionSnapshot;
   agentConfig: NonNullable<Awaited<ReturnType<LoroDocumentManager['getAgentConfigById']>>>;
   user: { name: string; email: string };
   operation: SessionForkOperation;
@@ -120,7 +122,7 @@ export function cloneHistoryThroughTurn(
 
   const selected = history.slice(0, sourceIndex + 1);
   const warnings: ForkWarning[] = [];
-  if (selected.some((entry) => entry.fileDiff.length > 0)) {
+  if (selected.some((entry) => (entry.fileDiff?.length ?? 0) > 0)) {
     warnings.push({
       code: 'HISTORICAL_TURN_DIFF_UNAVAILABLE',
       message: 'Historical turn diff evidence is not copied in this version.',
@@ -326,7 +328,7 @@ export class SessionForkService {
       return;
     }
 
-    const history = await targetDoc.getHistory();
+    const history = readSessionHistory(targetDoc.sessionData.history);
     const hasOriginNotice = history.some((entry) =>
       (entry.items ?? []).some(
         (item) => item.type === 'system_notice' && item.name === 'session_fork_origin'
@@ -352,7 +354,6 @@ export class SessionForkService {
           agentCliType: marker.cleanup.cliType,
           agentType: marker.cleanup.agentType as never,
           mcpServerIds: resolveSessionMcpSelection(history),
-          taskToolsEnabled: false,
           project: marker.cleanup.project as ProjectRef,
           sessionId: targetSessionId,
           githubRepo: marker.cleanup.repoFullName,
@@ -469,9 +470,12 @@ export class SessionForkService {
     // agent-config lookup scans the machine flock and user resolution is a
     // Convex query. Awaiting them in sequence put their sum on the fork click
     // path; the rejection order below is unchanged.
-    const [targetExisting, sourceHistory, agentConfig, user] = await Promise.all([
+    // This detached capture belongs to the fork operation, which may outlive
+    // the cached source document while git creates the new worktree.
+    const sourceSnapshots = sourceDoc.sessionData.snapshots;
+    const [targetExisting, sourceSnapshot, agentConfig, user] = await Promise.all([
       this.deps.workspaceDocument.repo.getDocMeta(targetRoomId),
-      sourceDoc.getHistory(),
+      sourceSnapshots.capture(),
       this.deps.workspaceDocument.getAgentConfigById(source.agentConfigId, source.machineId),
       reusedUser ?? this.deps.userResolver.resolve(spec.requestedByUserId),
     ]);
@@ -547,7 +551,7 @@ export class SessionForkService {
     // repaired session can never drift from a normally-forked one's title.
     const forkTitle = `(fork) ${sourceTitle}`;
     const historyResult = cloneHistoryThroughTurn(
-      sourceHistory,
+      sourceSnapshot.history as SessionHistoryInput[],
       spec.sourceTurnId,
       sourceSessionId,
       sourceTitle,
@@ -761,6 +765,7 @@ export class SessionForkService {
         targetMeta,
         marker,
         historyResult,
+        sourceSnapshot,
         agentConfig,
         user,
         operation,
@@ -822,7 +827,6 @@ export class SessionForkService {
             agentCliType: source.cliType,
             agentType: source.agentType,
             mcpServerIds: resolveSessionMcpSelection(historyResult.history),
-            taskToolsEnabled: resolveSessionTaskToolsEnabled(historyResult.history),
             customAcp: agentConfig.customAcp,
             runtimeOverrides: agentConfig.runtimeOverrides,
             env: agentConfig.env,
@@ -862,7 +866,10 @@ export class SessionForkService {
           acpSessionId: targetSession.acpSessionId,
           status: SessionStatusFactory.idle(),
         });
-        await targetDoc.updateHistory(() => historyResult.history);
+        await targetDoc.sessionData.snapshots.copyFrom(
+          sourceSnapshot,
+          historyResult.history as unknown as readonly SessionTurn[]
+        );
         await this.deps.workspaceDocument.persistPendingChanges('session-fork-commit');
       } catch (error) {
         throw new SessionForkOperationError(
@@ -927,6 +934,7 @@ export class SessionForkService {
       targetMeta,
       marker,
       historyResult,
+      sourceSnapshot,
       agentConfig,
       user,
       operation,
@@ -943,7 +951,6 @@ export class SessionForkService {
       agentCliType: source.cliType,
       agentType: source.agentType,
       mcpServerIds: resolveSessionMcpSelection(historyResult.history),
-      taskToolsEnabled: resolveSessionTaskToolsEnabled(historyResult.history),
       customAcp: agentConfig.customAcp,
       runtimeOverrides: agentConfig.runtimeOverrides,
       env: agentConfig.env,
@@ -1000,7 +1007,10 @@ export class SessionForkService {
         // no-operation branch relies on flag-clear being flush-atomic with a
         // landed history), meta record LAST (repo flushes are whole-repo, so a
         // durable acpSessionId then implies the doc writes are durable too).
-        await targetDoc.updateHistory(() => historyResult.history);
+        await targetDoc.sessionData.snapshots.copyFrom(
+          sourceSnapshot,
+          historyResult.history as unknown as readonly SessionTurn[]
+        );
         targetDoc.setForkOperation(undefined);
         await this.deps.workspaceDocument.repo.upsertDocMeta(targetRoomId, {
           ...targetMeta,
@@ -1048,8 +1058,15 @@ export class SessionForkService {
             : String(publicError.detail ?? error)
         }`
       );
+      return;
     } finally {
       this.activeOperations.delete(operation.id);
+    }
+    // The fork is durable; a display projection cannot authorize compensation.
+    try {
+      await targetDoc.syncModelSummary();
+    } catch {
+      this.deps.logger.warn(`[${targetSessionId}] Failed to publish fork model summary`);
     }
   }
 }

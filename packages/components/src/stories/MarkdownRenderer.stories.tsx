@@ -1,6 +1,12 @@
+import { fn } from 'storybook/test';
 import type { Meta, StoryObj } from '@storybook/react';
 import { useEffect, useState, type ReactNode } from 'react';
-import { MarkdownRenderer } from '@/components/ai-gui/markdown-renderer';
+import { Copy, ExternalLink, FolderOpen } from 'lucide-react';
+import {
+  AgentFileLinkContextMenuItemsContext,
+  MarkdownRenderer,
+} from '@/components/ai-gui/markdown-renderer';
+import type { MarkdownAgentFileLinkMenuItem } from '@/hooks/use-session-file-actions';
 
 const meta = {
   title: 'AI/MarkdownRenderer',
@@ -31,6 +37,34 @@ const wrap = (children: ReactNode) => (
     </div>
   </div>
 );
+
+const LOCAL_FILE_LINK_MENU: readonly MarkdownAgentFileLinkMenuItem[] = [
+  { kind: 'action', id: 'copy-path', label: 'Copy Path', icon: Copy, run: fn() },
+  { kind: 'action', id: 'open-file', label: 'Open File', icon: ExternalLink, run: fn() },
+  { kind: 'action', id: 'open-in-editor', label: 'Open in VS Code', icon: ExternalLink, run: fn() },
+  {
+    kind: 'submenu',
+    id: 'open-with',
+    label: 'Open with',
+    icon: ExternalLink,
+    items: [
+      { kind: 'action', id: 'open-with:cursor', label: 'Cursor', icon: ExternalLink, run: fn() },
+    ],
+  },
+  { kind: 'action', id: 'reveal', label: 'Show in Finder', icon: FolderOpen, run: fn() },
+];
+
+export const AgentFileLinkContextMenu: Story = {
+  args: {
+    text: '[submit.ts](/Users/dev/project/src/ledger/submit.ts:366)',
+  },
+  render: (args) =>
+    wrap(
+      <AgentFileLinkContextMenuItemsContext.Provider value={() => LOCAL_FILE_LINK_MENU}>
+        <MarkdownRenderer {...args} />
+      </AgentFileLinkContextMenuItemsContext.Provider>
+    ),
+};
 
 export const Paragraphs: Story = {
   args: {
@@ -112,6 +146,12 @@ export const CodeBlocks: Story = {
       'export const hello = (name: string) => `Hello, ${name}`;',
       '```',
       '',
+      'Fenced code with a path:',
+      '',
+      '```ts src/lib/hello.ts',
+      'export const hello = (name: string) => `Hello, ${name}`;',
+      '```',
+      '',
       'Fenced code without language:',
       '',
       '```',
@@ -171,8 +211,7 @@ export const CodeBlockPaddingSymmetry: Story = {
   args: {
     size: 'default',
     text: [
-      'Single-line code blocks stay compact and vertically centered, with the',
-      'language label floating in the top-right corner.',
+      'Fenced blocks keep a toolbar row for language or path, wrap, and copy.',
       '',
       '```ts',
       'const answer = 42;',
@@ -330,7 +369,7 @@ const allMarkdownFormatsText = [
   '',
   '## Math',
   '',
-  'Inline math: $E = mc^2$ and $a^2 + b^2 = c^2$.',
+  'Inline math remains literal: $E = mc^2$ and $a^2 + b^2 = c^2$.',
   '',
   '$$',
   '\\frac{\\partial L}{\\partial q} - \\frac{d}{dt}\\frac{\\partial L}{\\partial \\dot q} = 0',
@@ -388,7 +427,7 @@ const streamdownDemoChunks = [
     '',
   ].join('\n'),
   [
-    'Inline math is rendered by KaTeX: $E = mc^2$, and display math works too:',
+    'Inline math remains literal: $E = mc^2$, while display math works too:',
     '',
     '$$',
     '\\int_0^\\infty e^{-x^2}\\,dx = \\frac{\\sqrt{\\pi}}{2}',
@@ -659,9 +698,10 @@ export const InlineCodeDensity: Story = {
 
 export const AgentFileLinks: Story = {
   args: {
+    onAgentFileLinkClick: fn(),
     size: 'default',
     text: [
-      'Agent filesystem links should not navigate inside the web app:',
+      'Updated files and build artifacts:',
       '',
       'A labeled worktree file: [markdown-renderer.tsx](/home/agent/.lody/repos/github---example---project/worktrees/5110aa94-b18b-43cf-afa7-369905c2515a/packages/components/src/components/ai-gui/markdown-renderer.tsx)',
       '',
@@ -670,6 +710,8 @@ export const AgentFileLinks: Story = {
       'A repo-relative line reference: [README.md:100](README.md:100)',
       '',
       'A raw path label: [/tmp/lody-output.log](/tmp/lody-output.log)',
+      '',
+      'Build artifacts: [Lody.zip](/tmp/lody-build/Lody.zip) and [Lody.dmg](/tmp/lody-build/Lody.dmg)',
       '',
       'A protocol-relative web URL stays a normal link: [CDN script](//cdn.example.com/app.js)',
     ].join('\n'),

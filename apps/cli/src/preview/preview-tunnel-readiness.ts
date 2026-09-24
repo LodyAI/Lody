@@ -10,6 +10,8 @@ const TUNNEL_ROUND_TRIP_MAX_REDIRECTS = 5;
 
 export const VISUAL_ANNOTATION_RUNTIME_RESPONSE_HEADER = 'x-lody-preview-runtime';
 export const VISUAL_ANNOTATION_RUNTIME_RESPONSE_VERSION = 'visual-annotation-v1';
+export const PREVIEW_PROXY_RESPONSE_HEADER = 'x-lody-preview-proxy';
+export const PREVIEW_PROXY_RESPONSE_VERSION = '1';
 
 const isRedirectResponse = (response: Response): boolean =>
   response.status >= 300 && response.status < 400;
@@ -52,8 +54,9 @@ export async function verifyPreviewTunnelRoundTrip(args: {
       }
 
       if (
+        response.headers.get(PREVIEW_PROXY_RESPONSE_HEADER) === PREVIEW_PROXY_RESPONSE_VERSION ||
         response.headers.get(VISUAL_ANNOTATION_RUNTIME_RESPONSE_HEADER) ===
-        VISUAL_ANNOTATION_RUNTIME_RESPONSE_VERSION
+          VISUAL_ANNOTATION_RUNTIME_RESPONSE_VERSION
       ) {
         await response.body?.cancel().catch(() => undefined);
         return;
@@ -87,7 +90,7 @@ export async function verifyPreviewTunnelRoundTrip(args: {
 
       await response.body?.cancel().catch(() => undefined);
       throw new Error(
-        `Preview public route round-trip failed for ${initialViewerUrl.host}: HTTP ${response.status} did not return the injected annotation runtime marker. Verify wildcard DNS and the Preview Worker route.`
+        `Preview public route round-trip failed for ${initialViewerUrl.host}: HTTP ${response.status} did not return the preview proxy marker. Verify wildcard DNS and the Preview Worker route.`
       );
     }
   } finally {

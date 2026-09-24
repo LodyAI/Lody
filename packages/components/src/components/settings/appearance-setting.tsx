@@ -1,12 +1,12 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAtom } from 'jotai';
+import { usePostHog } from '@posthog/react';
 import { Monitor, Moon, SquareTerminal, Sun } from 'lucide-react';
 
 import {
   conversationFontSizeAtom,
-  CONVERSATION_FONT_SIZE_MAX,
-  CONVERSATION_FONT_SIZE_MIN,
+  fontLigaturesEnabledAtom,
   interfaceFontFamilyAtom,
   normalizeConversationFontSize,
   normalizeTerminalFontSize,
@@ -17,15 +17,19 @@ import {
   type ConversationFontSize,
 } from '@/atoms';
 import { MobileAppearanceSettings } from '@/components/mobile/mobile-appearance-settings';
+import { MobileAppIconSettings } from '@/components/mobile/mobile-app-icon-settings';
 import { OptionSelector, type OptionSelectorOption } from '@/components/shared/option-selector';
 import { buildTerminalFontPreviewFamily } from '@/components/terminal/terminal-theme';
 import { useIsMobile } from '@/hooks/use-mobile';
-import { buildInterfaceFontFamily, listSystemFontFamilies } from '@/lib/local-fonts';
+import { listSystemFontFamilies } from '@/lib/local-fonts';
 import { Input } from '@/ui/input';
+import { Switch } from '@/ui/switch';
+import { capturePostHogEvent } from '@/lib/posthog-analytics';
 import { LanguageSelector } from '../../i18n';
 import { useTheme, type Theme } from '../../theme-provider';
 import { settingContainerClass } from '.';
 import { CompactRow, CompactSection } from './compact-layout';
+import { buildConversationFontSizeChoices } from './conversation-font-size-options';
 import { PreviewSelect, type PreviewSelectOption } from './preview-select';
 
 export type SystemFontLoadState = 'idle' | 'loading' | 'loaded' | 'error';
@@ -47,6 +51,8 @@ export interface AppearanceSettingsViewProps {
   onSystemFontMenuOpen: () => void;
   terminalFontSize: number;
   onTerminalFontSizeChange: (value: number) => void;
+  fontLigaturesEnabled: boolean;
+  onFontLigaturesEnabledChange: (value: boolean) => void;
 }
 
 function buildSystemFontOptions(
@@ -86,6 +92,8 @@ export function AppearanceSettingsView({
   onSystemFontMenuOpen,
   terminalFontSize,
   onTerminalFontSizeChange,
+  fontLigaturesEnabled,
+  onFontLigaturesEnabledChange,
 }: AppearanceSettingsViewProps) {
   const { t } = useTranslation();
 
@@ -118,6 +126,15 @@ export function AppearanceSettingsView({
       ),
     },
   ];
+
+  const conversationFontSizeOptions = useMemo<PreviewSelectOption<string>[]>(
+    () =>
+      buildConversationFontSizeChoices().map(({ value, labelKey }) => ({
+        value,
+        label: t(labelKey),
+      })),
+    [t]
+  );
 
   const defaultFontLabel = t('settings.terminal.fontFamily.placeholder', 'Default');
   const interfaceFontOptions = useMemo(
@@ -199,7 +216,7 @@ export function AppearanceSettingsView({
               )}
               emptyText={t('settings.terminal.fontFamily.empty', 'No matching fonts')}
               align="end"
-              className="w-full rounded-md border-input-border bg-input sm:w-[220px] hover:bg-input/80"
+              className="w-full rounded-md border-input-border bg-input-field text-input-foreground shadow-xs sm:w-[220px] hover:bg-hover"
               contentClassName="w-[320px]"
               onOpenChange={(open) => {
                 if (open) onSystemFontMenuOpen();
@@ -207,7 +224,7 @@ export function AppearanceSettingsView({
               renderTriggerValue={(option) => (
                 <span
                   className="truncate font-normal"
-                  style={{ fontFamily: buildInterfaceFontFamily(option?.value ?? '') }}
+                  style={{ fontFamily: 'var(--font-sans-default)' }}
                 >
                   {option?.label ?? interfaceFontFamily}
                 </span>
@@ -215,7 +232,7 @@ export function AppearanceSettingsView({
               renderOption={(option) => (
                 <span
                   className="min-w-0 flex-1 truncate"
-                  style={{ fontFamily: buildInterfaceFontFamily(option.value) }}
+                  style={{ fontFamily: 'var(--font-sans-default)' }}
                 >
                   {option.label}
                 </span>
@@ -223,28 +240,12 @@ export function AppearanceSettingsView({
             />
           </CompactRow>
         ) : null}
-        <CompactRow
-          label={t('settings.conversationFontSize.label', 'Conversation font size')}
-          helper={t(
-            'settings.conversationFontSize.helper',
-            'Adjusts message body text in conversations.'
-          )}
-        >
-          <Input
-            type="number"
-            min={CONVERSATION_FONT_SIZE_MIN}
-            max={CONVERSATION_FONT_SIZE_MAX}
-            step={1}
-            value={conversationFontSize}
-            aria-label={t('settings.conversationFontSize.label', 'Conversation font size')}
-            className="w-24"
-            onChange={(event) => {
-              if (Number.isFinite(event.target.valueAsNumber)) {
-                onConversationFontSizeChange(
-                  normalizeConversationFontSize(event.target.valueAsNumber)
-                );
-              }
-            }}
+        <CompactRow label={t('settings.conversationFontSize.label', 'Font size')}>
+          <PreviewSelect
+            value={String(normalizeConversationFontSize(conversationFontSize))}
+            options={conversationFontSizeOptions}
+            onCommit={(value) => onConversationFontSizeChange(Number(value))}
+            triggerClassName="w-full sm:w-[220px]"
           />
         </CompactRow>
       </CompactSection>
@@ -267,7 +268,7 @@ export function AppearanceSettingsView({
               )}
               emptyText={t('settings.terminal.fontFamily.empty', 'No matching fonts')}
               align="end"
-              className="w-full rounded-md border-input-border bg-input sm:w-[220px] hover:bg-input/80"
+              className="w-full rounded-md border-input-border bg-input-field text-input-foreground shadow-xs sm:w-[220px] hover:bg-hover"
               contentClassName="w-[320px]"
               onOpenChange={(open) => {
                 if (open) onSystemFontMenuOpen();
@@ -275,7 +276,7 @@ export function AppearanceSettingsView({
               renderTriggerValue={(option) => (
                 <span
                   className="truncate font-normal"
-                  style={{ fontFamily: buildTerminalFontPreviewFamily(option?.value ?? '') }}
+                  style={{ fontFamily: 'var(--font-sans-default)' }}
                 >
                   {option?.label ?? terminalFontFamily}
                 </span>
@@ -283,7 +284,7 @@ export function AppearanceSettingsView({
               renderOption={(option) => (
                 <span
                   className="min-w-0 flex-1 truncate"
-                  style={{ fontFamily: buildTerminalFontPreviewFamily(option.value) }}
+                  style={{ fontFamily: 'var(--font-sans-default)' }}
                 >
                   {option.label}
                 </span>
@@ -339,6 +340,22 @@ export function AppearanceSettingsView({
           </div>
         </CompactSection>
       ) : null}
+      <CompactSection>
+        <CompactRow
+          label={t('settings.fontLigatures.label', 'Font ligatures')}
+          helper={t(
+            'settings.fontLigatures.helper',
+            'Applies to conversation, code, and tool output.'
+          )}
+        >
+          <Switch
+            checked={fontLigaturesEnabled}
+            onCheckedChange={onFontLigaturesEnabledChange}
+            aria-label={t('settings.fontLigatures.label', 'Font ligatures')}
+          />
+        </CompactRow>
+      </CompactSection>
+      <MobileAppIconSettings layout={isElectron ? 'desktop' : 'mobile'} />
     </div>
   );
 }
@@ -349,10 +366,25 @@ function DesktopAppearanceSettings() {
   const [interfaceFontFamily, setInterfaceFontFamily] = useAtom(interfaceFontFamilyAtom);
   const [terminalFontFamily, setTerminalFontFamily] = useAtom(terminalFontFamilyAtom);
   const [terminalFontSize, setTerminalFontSize] = useAtom(terminalFontSizeAtom);
+  const [fontLigaturesEnabled, setFontLigaturesEnabled] = useAtom(fontLigaturesEnabledAtom);
   const [systemFontFamilies, setSystemFontFamilies] = useState<string[]>([]);
   const [systemFontLoadState, setSystemFontLoadState] = useState<SystemFontLoadState>('idle');
   const isElectron = typeof window !== 'undefined' && window.__LODY_ELECTRON__ === true;
   const savedThemeRef = useRef<Theme>(theme);
+  const postHog = usePostHog();
+
+  const handleConversationFontSizeChange = useCallback(
+    (next: ConversationFontSize) => {
+      if (next !== conversationFontSize) {
+        capturePostHogEvent(postHog, 'settings/font_size_changed', {
+          from: conversationFontSize,
+          to: next,
+        });
+      }
+      setConversationFontSize(next);
+    },
+    [conversationFontSize, postHog, setConversationFontSize]
+  );
 
   const handleThemePreview = useCallback(
     (value: Theme) => {
@@ -394,7 +426,7 @@ function DesktopAppearanceSettings() {
       onThemeCommit={handleThemeCommit}
       onThemeCancel={handleThemeCancel}
       conversationFontSize={conversationFontSize}
-      onConversationFontSizeChange={setConversationFontSize}
+      onConversationFontSizeChange={handleConversationFontSizeChange}
       isElectron={isElectron}
       interfaceFontFamily={interfaceFontFamily}
       onInterfaceFontFamilyChange={setInterfaceFontFamily}
@@ -405,6 +437,8 @@ function DesktopAppearanceSettings() {
       onSystemFontMenuOpen={handleSystemFontMenuOpen}
       terminalFontSize={terminalFontSize}
       onTerminalFontSizeChange={setTerminalFontSize}
+      fontLigaturesEnabled={fontLigaturesEnabled}
+      onFontLigaturesEnabledChange={setFontLigaturesEnabled}
     />
   );
 }

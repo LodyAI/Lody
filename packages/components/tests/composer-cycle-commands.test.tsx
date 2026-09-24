@@ -5,6 +5,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useComposerCycleCommands } from '../src/hooks/use-composer-cycle-commands';
 import { commands } from '../src/lib/commands';
+import { CommandShortcutHost } from '../src/lib/commands/shortcut-host';
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (_key: string, fallback: string) => fallback }),
@@ -21,6 +22,26 @@ type CycleCommandProbeProps = {
   onModelSelect: (value: string) => void;
   onThinkEffortSelect: (value: string) => void;
 };
+
+class MemoryStorage {
+  private store = new Map<string, string>();
+
+  getItem(key: string): string | null {
+    return this.store.get(key) ?? null;
+  }
+
+  setItem(key: string, value: string): void {
+    this.store.set(key, value);
+  }
+
+  removeItem(key: string): void {
+    this.store.delete(key);
+  }
+
+  clear(): void {
+    this.store.clear();
+  }
+}
 
 function CycleCommandProbe({
   id,
@@ -49,7 +70,7 @@ describe('composer cycle command ownership', () => {
   let root: Root;
 
   beforeEach(() => {
-    localStorage.clear();
+    vi.stubGlobal('localStorage', new MemoryStorage());
     commands.resetAllUserKeybindings();
     container = document.createElement('div');
     document.body.append(container);
@@ -57,11 +78,11 @@ describe('composer cycle command ownership', () => {
   });
 
   afterEach(() => {
-    commands.detach();
     commands.resetAllUserKeybindings();
     act(() => root.unmount());
     for (const command of commands.list()) commands.unregister(command.id);
     container.remove();
+    vi.unstubAllGlobals();
   });
 
   it('routes mode, model, and thinking commands to the enabled composer', () => {
@@ -79,6 +100,7 @@ describe('composer cycle command ownership', () => {
     const render = (active: 'first' | 'second') => {
       root.render(
         <>
+          <CommandShortcutHost />
           <CycleCommandProbe
             id="first"
             enabled={active === 'first'}
@@ -124,34 +146,38 @@ describe('composer cycle command ownership', () => {
     const mode = vi.fn();
     act(() => {
       root.render(
-        <CycleCommandProbe
-          id="composer"
-          enabled
-          onModeSelect={mode}
-          onModelSelect={vi.fn()}
-          onThinkEffortSelect={vi.fn()}
-        />
+        <>
+          <CommandShortcutHost />
+          <CycleCommandProbe
+            id="composer"
+            enabled
+            onModeSelect={mode}
+            onModelSelect={vi.fn()}
+            onThinkEffortSelect={vi.fn()}
+          />
+        </>
       );
     });
-    commands.attach(window);
 
     window.dispatchEvent(
       new KeyboardEvent('keydown', { key: 'Tab', code: 'Tab', shiftKey: true, bubbles: true })
     );
     expect(mode).not.toHaveBeenCalled();
 
-    commands.setUserKeybindings('session.cycleMode', ['Control+m']);
-    window.dispatchEvent(
-      new KeyboardEvent('keydown', {
-        key: 'm',
-        code: 'KeyM',
-        ctrlKey: true,
-        bubbles: true,
-      })
-    );
+    act(() => commands.setUserKeybindings('session.cycleMode', ['Control+m']));
+    act(() => {
+      window.dispatchEvent(
+        new KeyboardEvent('keydown', {
+          key: 'm',
+          code: 'KeyM',
+          ctrlKey: true,
+          bubbles: true,
+        })
+      );
+    });
     expect(mode).toHaveBeenCalledWith('auto');
 
-    commands.setUserKeybindings('session.cycleMode', null);
+    act(() => commands.setUserKeybindings('session.cycleMode', null));
     const composer = container.querySelector<HTMLTextAreaElement>('#composer');
     composer?.focus();
     composer?.dispatchEvent(

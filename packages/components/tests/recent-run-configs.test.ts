@@ -183,6 +183,18 @@ describe('applying a record to the current selectors', () => {
     ).toEqual([{ configId: 'reasoning_effort', value: 'high' }]);
   });
 
+  it('keeps the recorded effort when the entry also moves the model', () => {
+    // The selectors still carry the outgoing model's ladder, so `xhigh` is not
+    // theirs to reject — the incoming model may well offer it.
+    expect(
+      resolveApplicableConfigOptionValues(
+        { configOptionValues: { reasoning_effort: 'xhigh', gone: 'x' } },
+        [reasoning],
+        { switchesModel: true }
+      )
+    ).toEqual([{ configId: 'reasoning_effort', value: 'xhigh' }]);
+  });
+
   it('describes the selection the way the run-config trigger reads it', () => {
     const face = describeRunConfigSelection({
       modelOptions: [{ value: 'opus', label: 'Opus 5' }],

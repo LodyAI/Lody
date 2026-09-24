@@ -20,7 +20,12 @@ import {
 } from '@lody/shared';
 import type { LoroRepo } from 'loro-repo';
 import type { Logger } from '@/utils/logger';
-import { advanceReviewRun, readReviewRun, writeReviewPolicy, readReviewPolicy } from './review-automation-store';
+import {
+  advanceReviewRun,
+  readReviewRun,
+  writeReviewPolicy,
+  readReviewPolicy,
+} from './review-automation-store';
 import { nextStateForAction, planReviewStep, type ReviewAction } from './review-automation-plan';
 
 /**
@@ -28,10 +33,10 @@ import { nextStateForAction, planReviewStep, type ReviewAction } from './review-
  *
  * It lives on the machine, not in MCP, for two reasons that are both hard
  * constraints rather than preferences. The orchestration contract caps a chain
- * at `LODY_MAX_CHAIN_DEPTH` (5) hops from the last human input, so a loop that
- * can run a dozen rounds cannot be built out of MCP session calls at all. And
- * that same contract observes only Lody-owned state — GitHub, CI, and webhooks
- * are explicitly outside it, while this loop is mostly a reaction to them.
+ * at `LODY_MAX_CHAIN_DEPTH` (32) hops from the last human input, so a loop that
+ * may need more hops cannot depend on nested MCP session calls. That same
+ * contract observes only Lody-owned state — GitHub, CI, and webhooks are
+ * explicitly outside it, while this loop is mostly a reaction to them.
  *
  * Stepping around the chain-depth guard is what makes the run's own budgets
  * load-bearing: they are the replacement safety mechanism, not a convenience.
@@ -518,7 +523,11 @@ export class ReviewAutomationEngine {
         await advanceReviewRun(this.deps.repo, this.deps.workspaceId, run, {
           state: nextState,
           detail: `Asked the author to fix CI (attempt ${run.ciFixUsed + 1}).`,
-          patch: { ...basePatch, ciFixUsed: run.ciFixUsed + 1, lastEngineTurnId: dispatched.userTurnId },
+          patch: {
+            ...basePatch,
+            ciFixUsed: run.ciFixUsed + 1,
+            lastEngineTurnId: dispatched.userTurnId,
+          },
         });
         return;
       }
@@ -531,7 +540,11 @@ export class ReviewAutomationEngine {
         await advanceReviewRun(this.deps.repo, this.deps.workspaceId, run, {
           state: nextState,
           detail: `Asked the author to resolve conflicts (attempt ${run.conflictUsed + 1}).`,
-          patch: { ...basePatch, conflictUsed: run.conflictUsed + 1, lastEngineTurnId: dispatched.userTurnId },
+          patch: {
+            ...basePatch,
+            conflictUsed: run.conflictUsed + 1,
+            lastEngineTurnId: dispatched.userTurnId,
+          },
         });
         return;
       }

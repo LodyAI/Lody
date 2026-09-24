@@ -79,6 +79,19 @@ export function getChatComposerPromptPlaceholderKey({
   return 'composer.promptPlaceholder.base';
 }
 
+export const COMPOSER_COMPACT_PLACEHOLDER_MAX_PX = 440;
+
+export function getChatComposerCompactPlaceholder({ name }: { name?: string | null }): {
+  key: 'composer.promptPlaceholder.compactNamed' | 'composer.promptPlaceholder.compact';
+  name?: string;
+} {
+  const trimmed = name?.trim();
+  if (trimmed) {
+    return { key: 'composer.promptPlaceholder.compactNamed', name: trimmed };
+  }
+  return { key: 'composer.promptPlaceholder.compact' };
+}
+
 export function getChatComposerMobilePromptPlaceholderKey({
   mentionSource,
   skillAgent,

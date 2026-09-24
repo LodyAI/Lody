@@ -177,7 +177,7 @@ export function GitHubCommentThread({
           <Button
             variant="ghost"
             size="sm"
-            className="h-5 w-5 p-0 text-muted-foreground hover:text-foreground hover:bg-muted"
+            className="h-5 w-5 p-0 text-muted-foreground hover:text-foreground hover:bg-hover"
             onClick={(e) => {
               e.stopPropagation();
               handleSendToChat();

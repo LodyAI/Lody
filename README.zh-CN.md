@@ -165,4 +165,4 @@ Lody 仍在走向完整的 local-first 支持。
 - `packages/shared` — 共享 Schema、协议与工具
 - `site-docs` — 官网、文档与博客
 
-如果希望参与开发，请阅读 [CONTRIBUTING.md](./CONTRIBUTING.md)。
+如果希望参与开发，请阅读 [CONTRIBUTING.md](./CONTRIBUTING.md)（含社区 PR 规模限制）。

@@ -51,6 +51,11 @@ vi.mock('../src/lib/clipboard', () => ({
   writeTextToClipboard: vi.fn(async () => true),
 }));
 
+const downloadBytesAsFile = vi.fn();
+vi.mock('../src/lib/download-file', () => ({
+  downloadBytesAsFile: (...args: unknown[]) => downloadBytesAsFile(...args),
+}));
+
 const monacoMockState = vi.hoisted(() => ({
   mountCount: 0,
   unmountCount: 0,
@@ -1284,6 +1289,15 @@ describe('SessionFileContentView', () => {
 
     expect(view.querySelector('[data-testid="managed-html-preview"]')).not.toBeNull();
     expect(view.querySelector('[data-testid="monaco-viewer"]')).toBeNull();
+    expect(view.querySelector('button[aria-label="Reload"]')).not.toBeNull();
+    expect(view.querySelector('button[aria-label="Refresh"]')).toBeNull();
+
+    const openFile = vi.spyOn(provider, 'openFile');
+    await act(async () => {
+      view.querySelector<HTMLButtonElement>('button[aria-label="Reload"]')?.click();
+    });
+    await flushMicrotasks();
+    expect(openFile).toHaveBeenCalledWith('artifacts/result.html');
   });
 
   it('previews the latest editor text instead of the opened HTML snapshot', async () => {
@@ -1338,6 +1352,50 @@ describe('SessionFileContentView', () => {
     await flushMicrotasks();
     expect(view.querySelector('[data-testid="monaco-viewer"]')?.getAttribute('data-text')).toBe(
       '<h1>Edited</h1>'
+    );
+  });
+
+  it('renders a download action in the toolbar and downloads HTML file content', async () => {
+    downloadBytesAsFile.mockClear();
+    const provider = createFakeSessionFileProvider({
+      files: [
+        {
+          path: 'artifacts/result.html',
+          fileId: 't:result-html',
+          kind: 'text',
+          sourceState: 'live-readonly',
+        },
+      ],
+      snapshots: {
+        'artifacts/result.html': { kind: 'text', text: '<!doctype html><h1>Hello</h1>' },
+      },
+    });
+    const view = await render(
+      createElement(SessionFileContentView, {
+        sessionId: session.id,
+        session,
+        filePath: 'artifacts/result.html',
+        fileId: 't:result-html',
+        fileProvider: provider,
+        fileProviderPending: false,
+        htmlPreviewRequestSeq: 1,
+      })
+    );
+    await flushMicrotasks();
+
+    const downloadButton = view.querySelector<HTMLButtonElement>(
+      'button[aria-label="Download file"]'
+    );
+    expect(downloadButton).not.toBeNull();
+
+    await act(async () => {
+      downloadButton?.click();
+    });
+
+    expect(downloadBytesAsFile).toHaveBeenCalledTimes(1);
+    expect(downloadBytesAsFile).toHaveBeenCalledWith(
+      'artifacts/result.html',
+      new TextEncoder().encode('<!doctype html><h1>Hello</h1>')
     );
   });
 
@@ -1477,5 +1535,267 @@ describe('SessionFileContentView', () => {
     });
     expect(hasPreviewEye).toBe(false);
     expect(view.querySelector('[data-testid="monaco-viewer"]')).not.toBeNull();
+  });
+});
+
+describe('independent preview remount investigation', () => {
+  it.each([false, true])(
+    'preserves the actual native editor draft across preview after refresh=%s',
+    async (refreshFirst) => {
+      const provider = createFakeSessionFileProvider({
+        files: [
+          {
+            path: 'README.md',
+            fileId: 't:readme',
+            kind: 'text',
+            sourceState: 'live-collaborative',
+          },
+        ],
+        snapshots: { 'README.md': { kind: 'text', text: '# Original' } },
+      });
+      const states: SessionFileSaveViewState[] = [];
+      const view = await render(
+        createElement(SessionFileContentView, {
+          sessionId: session.id,
+          session,
+          filePath: 'README.md',
+          fileId: 't:readme',
+          fileProvider: provider,
+          fileProviderPending: false,
+          fileProviderRole: 'write',
+          preferNativeMarkdownSelection: true,
+          onSaveStateChange: (state) => states.push(state),
+        })
+      );
+      const click = async (label: string) => {
+        const button = view.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`);
+        expect(button).not.toBeNull();
+        expect(button?.disabled).toBe(false);
+        await act(async () => {
+          button?.click();
+        });
+      };
+      await click('Hide preview');
+      if (refreshFirst) await click('Refresh');
+      const textarea = () =>
+        view.querySelector<HTMLTextAreaElement>('textarea[aria-label="Markdown source"]');
+      expect(textarea()?.value).toBe('# Original');
+      expect(textarea()?.readOnly).toBe(false);
+      const draft = '# My unsaved work\n\nA whole paragraph written before preview.';
+      await act(async () => {
+        Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set?.call(
+          textarea(),
+          draft
+        );
+        textarea()?.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+      expect(textarea()?.value).toBe(draft);
+      expect(states.at(-1)).toMatchObject({ dirty: true, canSave: true });
+      await click('Preview');
+      expect(view.textContent).toContain('A whole paragraph written before preview.');
+      await click('Hide preview');
+      expect(textarea()?.value).toBe(draft);
+      expect(states.at(-1)).toMatchObject({ dirty: true, canSave: true });
+    }
+  );
+
+  it('retains acknowledged provider live text after preview remount', async () => {
+    const runtime = createCodeCollabRuntime({
+      previewFile: async () => ({
+        ...filePreviewResult('# Original', DIGEST_1),
+        path: 'README.md',
+      }),
+      saveText: async () => ({ status: 'ok', path: 'README.md', digest: DIGEST_2, rawBytes: 18 }),
+    });
+    const provider = new CodeCollabSessionFileProvider({
+      runtime,
+      role: 'write',
+      fileTree: { 'README.md': true },
+      textState: sharedCodeCollabTextState,
+    });
+    const states: SessionFileSaveViewState[] = [];
+    const view = await render(
+      createElement(SessionFileContentView, {
+        sessionId: session.id,
+        session,
+        filePath: 'README.md',
+        fileId: 'README.md',
+        fileProvider: provider,
+        fileProviderPending: false,
+        fileProviderRole: 'write',
+        preferNativeMarkdownSelection: true,
+        onSaveStateChange: (state) => states.push(state),
+      })
+    );
+    const click = async (label: string) => {
+      const button = view.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`);
+      expect(button).not.toBeNull();
+      expect(button?.disabled).toBe(false);
+      await act(async () => {
+        button?.click();
+      });
+    };
+    const textarea = () =>
+      view.querySelector<HTMLTextAreaElement>('textarea[aria-label="Markdown source"]');
+    await click('Hide preview');
+    expect(textarea()?.value).toBe('# Original');
+    await act(async () => {
+      await provider.saveText('README.md', '# Updated elsewhere');
+    });
+    expect(textarea()?.value).toBe('# Updated elsewhere');
+    expect(states.at(-1)).toMatchObject({ dirty: false, canSave: false });
+    await click('Preview');
+    expect(view.textContent).toContain('Updated elsewhere');
+    await click('Hide preview');
+    expect(textarea()?.value).toBe('# Updated elsewhere');
+    expect(states.at(-1)).toMatchObject({ dirty: false, canSave: false });
+  });
+
+  it('drops a stale live ack when a later open advances the snapshot', async () => {
+    const firstRuntime = createCodeCollabRuntime({
+      previewFile: async () => ({
+        ...filePreviewResult('# Original', DIGEST_1),
+        path: 'README.md',
+      }),
+      saveText: async () => ({ status: 'ok', path: 'README.md', digest: DIGEST_2, rawBytes: 18 }),
+    });
+    const secondRuntime = createCodeCollabRuntime({
+      previewFile: async () => ({
+        ...filePreviewResult('# From rebuild', DIGEST_2),
+        path: 'README.md',
+      }),
+      openText: async () => codeCollabTextResult('ok', '# From rebuild', DIGEST_2),
+    });
+    const firstProvider = new CodeCollabSessionFileProvider({
+      runtime: firstRuntime,
+      role: 'write',
+      fileTree: { 'README.md': true },
+      textState: sharedCodeCollabTextState,
+    });
+    const secondProvider = new CodeCollabSessionFileProvider({
+      runtime: secondRuntime,
+      role: 'write',
+      fileTree: { 'README.md': true },
+      textState: createCodeCollabSessionFileProviderTextState(),
+    });
+    const view = await render(
+      createElement(SessionFileContentView, {
+        sessionId: session.id,
+        session,
+        filePath: 'README.md',
+        fileId: 'README.md',
+        fileProvider: firstProvider,
+        fileProviderPending: false,
+        fileProviderRole: 'write',
+        preferNativeMarkdownSelection: true,
+      })
+    );
+    const click = async (label: string) => {
+      const button = view.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`);
+      expect(button).not.toBeNull();
+      expect(button?.disabled).toBe(false);
+      await act(async () => {
+        button?.click();
+      });
+    };
+    const textarea = () =>
+      view.querySelector<HTMLTextAreaElement>('textarea[aria-label="Markdown source"]');
+    await click('Hide preview');
+    expect(textarea()?.value).toBe('# Original');
+    await act(async () => {
+      await firstProvider.saveText('README.md', '# Updated elsewhere');
+    });
+    expect(textarea()?.value).toBe('# Updated elsewhere');
+    await rerender(
+      createElement(SessionFileContentView, {
+        sessionId: session.id,
+        session,
+        filePath: 'README.md',
+        fileId: 'README.md',
+        fileProvider: secondProvider,
+        fileProviderPending: false,
+        fileProviderRole: 'write',
+        preferNativeMarkdownSelection: true,
+      })
+    );
+    await flushMicrotasks();
+    await click('Preview');
+    expect(view.textContent).toContain('From rebuild');
+    await click('Hide preview');
+    expect(textarea()?.value).toBe('# From rebuild');
+  });
+
+  it('discards a live ack when a fresh open returns the original text', async () => {
+    const firstRuntime = createCodeCollabRuntime({
+      previewFile: async () => ({
+        ...filePreviewResult('# Original', DIGEST_1),
+        path: 'README.md',
+      }),
+      saveText: async () => ({ status: 'ok', path: 'README.md', digest: DIGEST_2, rawBytes: 18 }),
+    });
+    const secondRuntime = createCodeCollabRuntime({
+      previewFile: async () => ({
+        ...filePreviewResult('# Original', DIGEST_1),
+        path: 'README.md',
+      }),
+      openText: async () => codeCollabTextResult('ok', '# Original', DIGEST_1),
+    });
+    const firstProvider = new CodeCollabSessionFileProvider({
+      runtime: firstRuntime,
+      role: 'write',
+      fileTree: { 'README.md': true },
+      textState: sharedCodeCollabTextState,
+    });
+    const secondProvider = new CodeCollabSessionFileProvider({
+      runtime: secondRuntime,
+      role: 'write',
+      fileTree: { 'README.md': true },
+      textState: createCodeCollabSessionFileProviderTextState(),
+    });
+    const view = await render(
+      createElement(SessionFileContentView, {
+        sessionId: session.id,
+        session,
+        filePath: 'README.md',
+        fileId: 'README.md',
+        fileProvider: firstProvider,
+        fileProviderPending: false,
+        fileProviderRole: 'write',
+        preferNativeMarkdownSelection: true,
+      })
+    );
+    const click = async (label: string) => {
+      const button = view.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`);
+      expect(button).not.toBeNull();
+      expect(button?.disabled).toBe(false);
+      await act(async () => {
+        button?.click();
+      });
+    };
+    const textarea = () =>
+      view.querySelector<HTMLTextAreaElement>('textarea[aria-label="Markdown source"]');
+    await click('Hide preview');
+    expect(textarea()?.value).toBe('# Original');
+    await act(async () => {
+      await firstProvider.saveText('README.md', '# Updated elsewhere');
+    });
+    expect(textarea()?.value).toBe('# Updated elsewhere');
+    await rerender(
+      createElement(SessionFileContentView, {
+        sessionId: session.id,
+        session,
+        filePath: 'README.md',
+        fileId: 'README.md',
+        fileProvider: secondProvider,
+        fileProviderPending: false,
+        fileProviderRole: 'write',
+        preferNativeMarkdownSelection: true,
+      })
+    );
+    await flushMicrotasks();
+    await click('Preview');
+    expect(view.textContent).toContain('Original');
+    await click('Hide preview');
+    expect(textarea()?.value).toBe('# Original');
   });
 });

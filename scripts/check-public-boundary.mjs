@@ -21,12 +21,11 @@ const forbiddenPathPrefixes = [
   'docs/',
   'plans/',
   'site/',
-  'specs/',
   'tasks/',
 ];
 const sourceExtensions = new Set(['.cjs', '.cts', '.js', '.jsx', '.mjs', '.mts', '.ts', '.tsx']);
 const documentationExtensions = new Set(['.md', '.mdx']);
-const privateRecordPathPrefixes = ['context/', 'docs/', 'plans/', 'specs/', 'tasks/'];
+const privateRecordPathPrefixes = ['context/', 'docs/', 'plans/', 'tasks/'];
 const publishableTextExtensions = new Set([
   ...sourceExtensions,
   ...documentationExtensions,

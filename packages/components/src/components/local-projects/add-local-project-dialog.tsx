@@ -18,6 +18,7 @@ import {
   RefreshCw,
   type LucideIcon,
 } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import type {
   LocalProjectBrowseDirectoryEntry,
   LocalProjectBrowseDirectoryResult,
@@ -142,7 +143,7 @@ function MachineStep({
     return (
       <StatusPanel
         icon={Loader2}
-        iconClassName="animate-spin"
+        spinning
         title={t('workspace.machines.loadingVisibility', 'Loading machines')}
       />
     );
@@ -372,10 +373,7 @@ function BrowseStep({
               })}
             </div>
             {status === 'loading' ? (
-              <Loader2
-                className="h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground"
-                aria-hidden
-              />
+              <Spinner className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
             ) : null}
             <Button
               type="button"
@@ -478,7 +476,7 @@ function BrowseStep({
                   onClick={onLoadMore}
                 >
                   {loadingMore ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    <Spinner className="h-3.5 w-3.5" />
                   ) : (
                     t('localProjects.add.loadMore', 'Load more')
                   )}
@@ -529,11 +527,7 @@ function BrowseStep({
               disabled={!current || status !== 'ready' || adding}
               onClick={onAddCurrentFolder}
             >
-              {adding ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <FolderPlus className="h-4 w-4" />
-              )}
+              {adding ? <Spinner className="h-4 w-4" /> : <FolderPlus className="h-4 w-4" />}
               {t('localProjects.add.useThisFolder', 'Add')}
             </Button>
           </div>
@@ -600,14 +594,20 @@ function DirectorySkeleton() {
 
 function StatusPanel({
   icon: Icon,
-  iconClassName,
+  spinning = false,
   title,
   description,
   action,
   tone = 'muted',
 }: {
   icon: LucideIcon;
-  iconClassName?: string;
+  /**
+   * Rotates the icon: the panel is a loading state. Defaults to false, and
+   * MUST keep a default here — `Spinner` treats an omitted `spinning` as a
+   * loading indicator, so forwarding this prop while it is `undefined` would
+   * spin the resting states' icons forever.
+   */
+  spinning?: boolean;
   title: React.ReactNode;
   description?: React.ReactNode;
   action?: React.ReactNode;
@@ -620,7 +620,7 @@ function StatusPanel({
         tone === 'destructive' ? 'text-destructive' : 'text-muted-foreground'
       )}
     >
-      <Icon className={cn('h-7 w-7', iconClassName)} aria-hidden />
+      <Spinner icon={Icon} spinning={spinning} className="h-7 w-7" aria-hidden />
       <span className="text-sm font-medium text-foreground">{title}</span>
       {description ? <span className="max-w-xs text-[0.8125rem]">{description}</span> : null}
       {action ? <div className="mt-2">{action}</div> : null}
@@ -632,6 +632,8 @@ export interface AddLocalProjectDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   isMobile?: boolean;
+  /** Nested inside another dialog (desktop settings). Matches MCP's overlay. */
+  overlayClassName?: string;
   machines: RemoteDirectoryPickerMachine[];
   machinesLoading?: boolean;
   initialMachineId?: RemoteDirectoryPickerArgs['initialMachineId'];
@@ -654,6 +656,7 @@ export function AddLocalProjectDialog({
   ops,
   onAdded,
   onLocateRegistered,
+  overlayClassName,
 }: AddLocalProjectDialogProps) {
   const { t } = useTranslation();
   const close = useCallback(() => onOpenChange(false), [onOpenChange]);
@@ -692,7 +695,10 @@ export function AddLocalProjectDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="gap-0 overflow-hidden p-0 sm:max-w-lg">
+      <DialogContent
+        overlayClassName={overlayClassName}
+        className="gap-0 overflow-hidden p-0 sm:max-w-lg"
+      >
         <DialogTitle className="sr-only">{a11yTitle}</DialogTitle>
         <DialogDescription className="sr-only">{a11yDescription}</DialogDescription>
         <RemoteDirectoryPicker

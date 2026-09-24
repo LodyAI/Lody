@@ -12,21 +12,18 @@ import type {
   SessionToCreate,
   MachineId,
   MachineLegacyMetaFields,
-  SessionDocMeta,
   SessionTurnInputConfig,
   MachineFlockKey,
-  MachineFlockRow,
+  SessionGoalAction,
+  SessionGoalResponse,
 } from '@lody/shared';
 import {
-  buildMachineArchiveSessionCommand,
-  buildMachineDeleteSessionCommand,
   getMachineRoomId,
   getMachineFlockDocId,
   getMachineFlockDeleteLocalProjectIds,
   getMachineFlockLocalProjects,
   getSessionRoomId,
   machineFlockKeys,
-  machineDeleteCommandToQueueItem,
   SessionStatusFactory,
   getLocalProjectHistoryProviderKey,
   getServerNow,
@@ -37,7 +34,6 @@ import {
   normalizeSessionTurnInputConfig,
   readMachineFlockRowsFromFlock,
   sanitizeMessageTextSpans,
-  shouldQueueMachineDeleteSession,
 } from '@lody/shared';
 import { useAtomValue, useSetAtom, useStore } from 'jotai';
 import { usePostHog } from '@posthog/react';
@@ -57,7 +53,6 @@ import {
   rpcDeliveredTurnsAtom,
 } from '@/atoms/session-dispatch-delivery';
 import { resolveSessionCreateRepoFullName } from '@/lib/session-repo';
-import { collectSessionLifecycleIds } from '@/lib/session-lifecycle';
 import { capturePostHogEvent } from '@/lib/posthog-analytics';
 import { sendIpc } from '@/lib/electron-ipc-client';
 import { useAuthenticatedConvex } from './use-authenticated-convex';
@@ -255,31 +250,6 @@ async function assertArchivedLocalProjectCanRestore(
   }
 }
 
-async function writeMachineFlockRowBestEffort(
-  runtime: WorkspaceRuntime,
-  machineId: string,
-  row: MachineFlockRow,
-  reason: string
-): Promise<void> {
-  try {
-    await writeMachineFlockRowRequired(runtime, machineId, row);
-  } catch (error) {
-    log('[machine-flock] failed to write command row', { machineId, reason, error });
-  }
-}
-
-async function writeMachineFlockRowRequired(
-  runtime: WorkspaceRuntime,
-  machineId: string,
-  row: MachineFlockRow
-): Promise<void> {
-  await runtime.writer.flockRowPut(
-    getMachineFlockDocId(runtime.workspaceId, machineId as MachineId),
-    row.key,
-    row.value
-  );
-}
-
 async function deleteMachineFlockRowsBestEffort(
   runtime: WorkspaceRuntime,
   machineId: string,
@@ -294,54 +264,6 @@ async function deleteMachineFlockRowsBestEffort(
   } catch (error) {
     log('[machine-flock] failed to delete command row', { machineId, reason, error });
   }
-}
-
-async function cleanupMachineSessionCommandQueues(
-  runtime: WorkspaceRuntime,
-  machineId: string,
-  sessionId: SessionId,
-  reason: string
-): Promise<void> {
-  const machineRoomId = getMachineRoomId(machineId as MachineId);
-  const machineMeta = (await runtime.repo.getDocMeta(machineRoomId))?.meta as
-    | MachineLegacyMetaFields
-    | undefined;
-  const needToArchiveSessions = machineMeta?.needToArchiveSessions ?? {};
-  const needToDeleteSessions = machineMeta?.needToDeleteSessions ?? {};
-
-  let nextNeedToArchiveSessions: typeof needToArchiveSessions | undefined;
-  let nextNeedToDeleteSessions: typeof needToDeleteSessions | undefined;
-
-  if (needToArchiveSessions[sessionId] !== undefined) {
-    const { [sessionId]: _, ...rest } = needToArchiveSessions;
-    nextNeedToArchiveSessions = rest;
-  }
-
-  if (needToDeleteSessions[sessionId] !== undefined) {
-    const { [sessionId]: _, ...rest } = needToDeleteSessions;
-    nextNeedToDeleteSessions = rest;
-  }
-
-  if (nextNeedToArchiveSessions !== undefined || nextNeedToDeleteSessions !== undefined) {
-    await runtime.writer.upsertDocMeta(machineRoomId, {
-      ...(nextNeedToArchiveSessions !== undefined
-        ? { needToArchiveSessions: nextNeedToArchiveSessions }
-        : {}),
-      ...(nextNeedToDeleteSessions !== undefined
-        ? { needToDeleteSessions: nextNeedToDeleteSessions }
-        : {}),
-    } as unknown as RepoDocMetaPatch);
-  }
-
-  await deleteMachineFlockRowsBestEffort(
-    runtime,
-    machineId,
-    [
-      machineFlockKeys.archiveSessionCommand(sessionId),
-      machineFlockKeys.deleteSessionCommand(sessionId),
-    ],
-    reason
-  );
 }
 
 export type SessionActions = {
@@ -367,6 +289,17 @@ export type SessionActions = {
     userTurnId: string,
     options?: { machineId?: MachineId | null }
   ) => Promise<boolean>;
+  /**
+   * Run a goal action through the agent's control extension.
+   *
+   * Status-only actions reach a goal whose prompt is still open, which the chat
+   * path cannot do: that prompt is the session's only turn slot.
+   */
+  requestSessionGoal: (
+    sessionId: SessionId,
+    action: SessionGoalAction,
+    options?: { objective?: string; userId?: string; machineId?: MachineId | null }
+  ) => Promise<SessionGoalResponse | null>;
   touchSessionActivity: (sessionId: SessionId) => Promise<void>;
   updateSessionStatus: (sessionId: SessionId, status: SessionStatus) => Promise<void>;
   updateSessionTitle: (sessionId: SessionId, title: string) => Promise<void>;
@@ -374,8 +307,11 @@ export type SessionActions = {
   transferSessionOwner: (sessionId: SessionId, nextUserId: string) => Promise<void>;
   markSessionRead: (sessionId: SessionId, lastMessageAt?: number | null) => Promise<void>;
   markSessionUnread: (sessionId: SessionId) => Promise<void>;
+  /** Delete exactly the supplied Sessions without discovering related Sessions. */
   deleteSessions: (sessionIds: SessionId[]) => Promise<void>;
   archiveSession: (sessionId: SessionId) => Promise<void>;
+  setSessionTabClosed: (sessionId: SessionId, closed: boolean) => Promise<void>;
+  reopenSessionTab: (sessionId: SessionId) => Promise<void>;
   restoreSession: (sessionId: SessionId) => Promise<void>;
   deleteArchivedSession: (sessionId: SessionId) => Promise<void>;
   setSessionPinned: (sessionId: SessionId, isPinned: boolean) => Promise<void>;
@@ -561,22 +497,6 @@ export function useSessionActions(): SessionActions {
     [isConvexAuthenticated, recordMyWorkspaceDailyActiveUser, requestAuthRecovery]
   );
 
-  const getSessionLifecycleMetas = useCallback(
-    (sessionId: SessionId, rootMeta: SessionMeta): SessionMeta[] => {
-      const cache = store.get(sessionMetaCacheAtom);
-      const sessionsById = new Map(
-        Object.values(cache).map((session) => [session.id, session] as const)
-      );
-      sessionsById.set(sessionId, { ...rootMeta, id: rootMeta.id ?? sessionId });
-      return collectSessionLifecycleIds(sessionId, [...sessionsById.values()]).map((id) => {
-        const session = sessionsById.get(id);
-        if (!session) throw new Error(`Session metadata missing for lifecycle child ${id}`);
-        return session;
-      });
-    },
-    [store]
-  );
-
   const assertSessionCreateAllowed = useCallback(
     (sessionId: SessionId) => {
       if (!runtime?.workspaceId) return;
@@ -664,7 +584,7 @@ export function useSessionActions(): SessionActions {
       await runtime.writer.startSession(
         sessionId,
         sessionMeta as unknown as Record<string, unknown>,
-        historyEntry as unknown as Record<string, unknown>,
+        historyEntry,
         {
           userTurnId: historyEntry.id,
           userId,
@@ -744,11 +664,7 @@ export function useSessionActions(): SessionActions {
           inputConfig: inputConfig as unknown as Record<string, unknown>,
         };
       }
-      await runtime.writer.appendSessionTurn(
-        sessionId,
-        entry as unknown as Record<string, unknown>,
-        dispatch
-      );
+      await runtime.writer.appendSessionTurn(sessionId, entry, dispatch);
       // session/chat fires once for every user message dispatched through Lody —
       // the session-creating turn AND every follow-up — so it tracks active-use
       // frequency, unlike session/start_success which only covers creation. This
@@ -812,11 +728,10 @@ export function useSessionActions(): SessionActions {
       if (!runtime) {
         throw new Error('Runtime not ready');
       }
-      const entry = await runtime.withSessionStore(sessionId, (sessionStore) =>
-        sessionStore
-          .getState()
-          .history.find((item) => item.id === userTurnId && item.role === 'user')
-      );
+      const entry = await runtime.withSessionStore(sessionId, async (sessionStore) => {
+        const read = await sessionStore.sessionData.history.readTurn(userTurnId);
+        return read.state === 'ready' && read.turn.role === 'user' ? read.turn : undefined;
+      });
       const inputConfig =
         options?.inputConfig ?? normalizeSessionTurnInputConfig(entry?.inputConfig);
       const dispatchUserId = entry?.userId?.trim();
@@ -858,7 +773,6 @@ export function useSessionActions(): SessionActions {
       try {
         await runtime.writer.upsertDocMeta(roomId, {
           latestUserMsgId: userTurnId,
-          lastMissingHistoryUserMsgId: undefined,
         } as Partial<SessionMeta>);
       } catch (error) {
         // The RPC fast path may already have delivered this turn to the CLI; a
@@ -910,6 +824,35 @@ export function useSessionActions(): SessionActions {
     [runtime]
   );
 
+  const requestSessionGoal = useCallback(
+    async (
+      sessionId: SessionId,
+      action: SessionGoalAction,
+      options?: { objective?: string; userId?: string; machineId?: MachineId | null }
+    ): Promise<SessionGoalResponse | null> => {
+      if (!runtime) {
+        throw new Error('Runtime not ready');
+      }
+      const roomId = getSessionRoomId(sessionId);
+      const existing = await runtime.repo.getDocMeta(roomId);
+      const meta = isLoroRepoDocDeleted(existing)
+        ? undefined
+        : (existing?.meta as SessionMeta | undefined);
+      const machineId = options?.machineId ?? meta?.machineId ?? null;
+      const userId = options?.userId?.trim() || meta?.userId;
+      if (!machineId || !userId) {
+        return null;
+      }
+      return await runtime.requestSessionGoal(machineId, {
+        sessionId,
+        action,
+        ...(options?.objective ? { objective: options.objective } : {}),
+        userId,
+      });
+    },
+    [runtime]
+  );
+
   const requestSessionSteer = useCallback(
     async (
       sessionId: SessionId,
@@ -920,11 +863,10 @@ export function useSessionActions(): SessionActions {
       if (!runtime) {
         throw new Error('Runtime not ready');
       }
-      const entry = await runtime.withSessionStore(sessionId, (sessionStore) =>
-        sessionStore
-          .getState()
-          .history.find((item) => item.id === userTurnId && item.role === 'user')
-      );
+      const entry = await runtime.withSessionStore(sessionId, async (sessionStore) => {
+        const read = await sessionStore.sessionData.history.readTurn(userTurnId);
+        return read.state === 'ready' && read.turn.role === 'user' ? read.turn : undefined;
+      });
       const inputConfig = normalizeSessionTurnInputConfig(entry?.inputConfig);
       const userId = entry?.userId?.trim();
       const roomId = getSessionRoomId(sessionId);
@@ -939,43 +881,64 @@ export function useSessionActions(): SessionActions {
       if (!entry || !inputConfig || !userId || !machineId) {
         return false;
       }
-      const response = await runtime.requestSessionSteer(machineId, {
+      const steerRequest = {
         sessionId,
         expectedTurnId,
         userTurnId,
         userId,
         timestamp: entry.timestamp,
         inputConfig,
-      });
+      };
+      let response = await runtime.requestSessionSteer(machineId, steerRequest);
+      if (response?.recoveryOwned && response.disposition === 'promotion-failed') {
+        // This verdict proves non-delivery. Repair through the same owner once;
+        // a renderer pointer write could erase a newer producer activation.
+        response = await runtime.requestSessionSteer(machineId, steerRequest);
+        if (
+          !response ||
+          response.disposition === 'promotion-failed' ||
+          response.disposition === 'error'
+        ) {
+          throw new Error(response?.error ?? 'Could not recover the undelivered guidance');
+        }
+      }
       if (response?.applied) {
         store.set(rpcDeliveredTurnsAtom, (previous) =>
           addRpcDeliveredTurn(previous, getRpcDeliveredTurnKey(sessionId, userTurnId))
         );
         return true;
       }
-      if (response?.disposition === 'no-active-turn') {
-        // The target prompt ended before the CLI submitted the steer. Reuse
-        // the same user turn as a normal follow-up instead of leaving it stuck
-        // in pending_apply. Other failures must not fall back because the
-        // provider may already have committed the steer.
+      if (
+        !response?.recoveryOwned &&
+        (response?.disposition === 'no-active-turn' || response?.disposition === 'promotion-failed')
+      ) {
+        // The CLI proved the steer was not applied, either before submission
+        // or from the adapter's final verdict. Reuse the same user turn as an
+        // ordinary follow-up. Ambiguous legacy results must not be promoted:
+        // replay could deliver the input twice.
         // Re-acquire the store for the write: the steer RPC above can run long,
         // and we must not hold a store ref across it.
-        const promoted = await runtime.withSessionStore(sessionId, (sessionStore) => {
-          let didPromote = false;
-          sessionStore.setState((draft: SessionDocMeta) => {
-            const pendingEntry = draft.history.find(
-              (item) => item.id === userTurnId && item.role === 'user'
-            );
-            if (pendingEntry?.status === 'pending_apply') {
-              pendingEntry.status = 'pending';
-              pendingEntry.read = false;
-              didPromote = true;
-            }
-          });
-          return didPromote;
+        const promoted = await runtime.withSessionStore(sessionId, async (sessionStore) => {
+          const changed =
+            (
+              await sessionStore.sessionData.commands.applyHistoryAction({
+                kind: 'user-status',
+                turnId: userTurnId,
+                status: 'pending',
+                onlyPendingApply: true,
+              })
+            ).matched ?? false;
+          if (changed) return true;
+          // CLI promotion can write history before its activation pointer
+          // fails. Auto-seen may also have observed that pending entry.
+          const read = await sessionStore.sessionData.history.readTurn(userTurnId);
+          return (
+            read.state === 'ready' &&
+            read.turn.role === 'user' &&
+            (read.turn.status === 'pending' || read.turn.status === 'seen')
+          );
         });
-        // A duplicate response must not reset a turn that another request has
-        // already promoted, started, or completed.
+        // Pending promotion is repairable; a started, terminal, or removed turn is not.
         if (!promoted) {
           return false;
         }
@@ -1189,21 +1152,9 @@ export function useSessionActions(): SessionActions {
       if (!runtime) {
         throw new Error('Runtime not ready');
       }
-      const sessions = Object.values(store.get(sessionMetaCacheAtom));
-      const allIds = new Set(sessionIds);
-      for (const id of sessionIds) {
-        for (const lifecycleId of collectSessionLifecycleIds(id, sessions)) {
-          allIds.add(lifecycleId);
-        }
-      }
-      const uniqueIds = Array.from(allIds);
-      await Promise.all(
-        uniqueIds.map(async (id) => {
-          await deleteSessionDocuments(id);
-        })
-      );
+      await Promise.all(sessionIds.map((id) => deleteSessionDocuments(id)));
     },
-    [runtime, store, deleteSessionDocuments]
+    [runtime, deleteSessionDocuments]
   );
 
   const archiveSession = useCallback(
@@ -1212,66 +1163,32 @@ export function useSessionActions(): SessionActions {
       if (!runtime) {
         throw new Error('Runtime not ready');
       }
-
-      const sessionRoomId = getSessionRoomId(sessionId);
-      const repoMeta = (await runtime.repo.getDocMeta(sessionRoomId))?.meta as
-        | SessionMeta
-        | undefined;
-      // The repo read is preferred (freshest lifecycle fields), but it can lag
-      // a session the UI already renders. The archive write below is an
-      // idempotent patch, so the rendered meta cache is enough to proceed — a
-      // session the UI can show must also be closable.
-      const sessionMeta =
-        repoMeta ?? (store.get(sessionMetaCacheAtom)[sessionRoomId] as SessionMeta | undefined);
-      if (!sessionMeta) {
-        throw new Error(`Session metadata missing for ${sessionId}`);
+      const archiveTargets = await runtime.readSessionOperationTargets(sessionId, 'archive');
+      if (store.get(activeWorkspaceRuntimeAtom) !== runtime) {
+        throw new Error('Workspace changed before archiving');
       }
-      log('[session-archive] session meta loaded', {
-        sessionId,
-        machineId: sessionMeta.machineId,
-      });
-
-      const lifecycleSessions = getSessionLifecycleMetas(sessionId, sessionMeta);
-      for (const session of lifecycleSessions) {
-        if (typeof window !== 'undefined') {
-          sendIpc('terminal.closeSession', { sessionId: session.id });
-        }
+      for (const session of archiveTargets) {
+        // The archived state is the whole request: the owning machine observes
+        // it, releases the runtime, and reconciles the worktree directory.
         await runtime.writer.upsertDocMeta(getSessionRoomId(session.id), {
           isArchived: true,
           status: SessionStatusFactory.idle(),
         } as Partial<SessionMeta>);
-
-        // Child tabs share the owning Session's workspace and machine command.
-        if (session.parentSessionId) continue;
-
-        const machineId = session.machineId;
-        const requestedAt = getServerNow();
-        await writeMachineFlockRowBestEffort(
-          runtime,
-          machineId,
-          {
-            key: machineFlockKeys.archiveSessionCommand(session.id),
-            value: buildMachineArchiveSessionCommand({ requestedAt }),
-          },
-          'archiveSession'
-        );
-        const machineRoomId = getMachineRoomId(machineId);
-        const machineMeta = (await runtime.repo.getDocMeta(machineRoomId))?.meta as
-          | MachineLegacyMetaFields
-          | undefined;
-        await runtime.writer.upsertDocMeta(machineRoomId, {
-          needToArchiveSessions: {
-            ...(machineMeta?.needToArchiveSessions ?? {}),
-            [session.id]: true,
-          },
-        } as unknown as RepoDocMetaPatch);
+        if (typeof window !== 'undefined') {
+          // Cleanup failure cannot undo the accepted archive state.
+          try {
+            sendIpc('terminal.closeSession', { sessionId: session.id });
+          } catch (error) {
+            log('[session-archive] terminal cleanup failed', { sessionId: session.id, error });
+          }
+        }
       }
-      log('[session-archive] lifecycle archived', {
+      log('[session-archive] archived', {
         sessionId,
-        lifecycleSessionIds: lifecycleSessions.map((session) => session.id),
+        targetSessionIds: archiveTargets.map((session) => session.id),
       });
     },
-    [runtime, store, getSessionLifecycleMetas]
+    [runtime, store]
   );
 
   const restoreSession = useCallback(
@@ -1281,116 +1198,62 @@ export function useSessionActions(): SessionActions {
         throw new Error('Runtime not ready');
       }
 
-      const sessionRoomId = getSessionRoomId(sessionId);
-      const sessionMeta = (await runtime.repo.getDocMeta(sessionRoomId))?.meta as
-        | SessionMeta
-        | undefined;
-      if (!sessionMeta) {
-        throw new Error(`Session metadata missing for ${sessionId}`);
-      }
+      const restoreTargets = await runtime.readSessionOperationTargets(sessionId, 'restore');
+      const [sessionMeta] = restoreTargets;
       await assertArchivedLocalProjectCanRestore(runtime, sessionMeta);
-      const lifecycleSessions = getSessionLifecycleMetas(sessionId, sessionMeta);
-
-      for (const session of lifecycleSessions) {
+      if (store.get(activeWorkspaceRuntimeAtom) !== runtime) {
+        throw new Error('Workspace changed before restoring');
+      }
+      for (const session of restoreTargets) {
         await runtime.writer.upsertDocMeta(getSessionRoomId(session.id), {
           isArchived: false,
+          ...(session.id === sessionId ? { isTabClosed: false } : {}),
         } as Partial<SessionMeta>);
-        if (!session.parentSessionId) {
-          await cleanupMachineSessionCommandQueues(
-            runtime,
-            session.machineId,
-            session.id,
-            'restoreSession'
-          );
-        }
       }
-      log('[session-restore] lifecycle restored', {
+      log('[session-restore] restored', {
         sessionId,
-        lifecycleSessionIds: lifecycleSessions.map((session) => session.id),
+        targetSessionIds: restoreTargets.map((session) => session.id),
       });
     },
-    [runtime, getSessionLifecycleMetas]
+    [runtime, store]
+  );
+
+  const setSessionTabClosed = useCallback(
+    async (sessionId: SessionId, closed: boolean) => {
+      if (!runtime) throw new Error('Runtime not ready');
+      const roomId = getSessionRoomId(sessionId);
+      const entry = await runtime.repo.getDocMeta(roomId);
+      if (isLoroRepoDocDeleted(entry)) throw new Error('Session was deleted');
+      const meta = entry?.meta ?? store.get(sessionMetaCacheAtom)[roomId];
+      if (!meta) throw new Error('Session metadata is still loading');
+      await runtime.writer.upsertDocMeta(roomId, { isTabClosed: closed });
+    },
+    [runtime, store]
+  );
+
+  const reopenSessionTab = useCallback(
+    async (sessionId: SessionId) => {
+      if (!runtime) throw new Error('Runtime not ready');
+      const entry = await runtime.repo.getDocMeta(getSessionRoomId(sessionId));
+      if (!entry?.meta || isLoroRepoDocDeleted(entry)) {
+        throw new Error('Session metadata unavailable');
+      }
+      if ((entry.meta as SessionMeta).isArchived) {
+        // Legacy tab closes archived the session. Retain restoration checks and
+        // containment semantics rather than clearing the lifecycle bit directly.
+        await restoreSession(sessionId);
+      }
+      await setSessionTabClosed(sessionId, false);
+    },
+    [runtime, restoreSession, setSessionTabClosed]
   );
 
   const deleteArchivedSessionMeta = useCallback(
     async (sessionMeta: SessionMeta) => {
       if (!runtime) throw new Error('Runtime not ready');
-      const sessionId = sessionMeta.id;
-      const shouldQueueMachineCleanup = shouldQueueMachineDeleteSession(sessionMeta);
-
-      if (!shouldQueueMachineCleanup) {
-        if (sessionMeta.machineId) {
-          await cleanupMachineSessionCommandQueues(
-            runtime,
-            sessionMeta.machineId,
-            sessionId,
-            'deleteSession'
-          );
-        }
-        await deleteSessionDocuments(sessionId);
-        return;
-      }
-
-      const machineId = sessionMeta.machineId;
-      const machineRoomId = getMachineRoomId(machineId);
-      const machineMeta = (await runtime.repo.getDocMeta(machineRoomId))?.meta as
-        | MachineLegacyMetaFields
-        | undefined;
-      const machineFlockHandle = await runtime.repo.openFlockDoc(
-        getMachineFlockDocId(runtime.workspaceId, machineId)
-      );
-      const machineMetaForCleanup = {
-        localProjects: {
-          ...(machineMeta?.localProjects ?? {}),
-          ...getMachineFlockLocalProjects(
-            readMachineFlockRowsFromFlock(machineFlockHandle.flock, {
-              families: ['localProject'],
-            })
-          ),
-        },
-      } satisfies Pick<MachineLegacyMetaFields, 'localProjects'>;
-      const needToArchiveSessions = machineMeta?.needToArchiveSessions ?? {};
-      const needToDeleteSessions = machineMeta?.needToDeleteSessions ?? {};
-      const requestedAt = getServerNow();
-      let nextNeedToArchiveSessions: typeof needToArchiveSessions | undefined;
-      if (needToArchiveSessions[sessionId] !== undefined) {
-        const { [sessionId]: _, ...rest } = needToArchiveSessions;
-        nextNeedToArchiveSessions = rest;
-      }
-
-      const deleteCommand = buildMachineDeleteSessionCommand({
-        session: sessionMeta,
-        machineMeta: machineMetaForCleanup,
-        requestedAt,
-        existing: needToDeleteSessions[sessionId],
-      });
-
-      await deleteMachineFlockRowsBestEffort(
-        runtime,
-        machineId,
-        [machineFlockKeys.archiveSessionCommand(sessionId)],
-        'deleteSession'
-      );
-      await runtime.writer.upsertDocMeta(machineRoomId, {
-        ...(nextNeedToArchiveSessions !== undefined
-          ? { needToArchiveSessions: nextNeedToArchiveSessions }
-          : {}),
-        ...(deleteCommand
-          ? {
-              needToDeleteSessions: {
-                ...needToDeleteSessions,
-                [sessionId]: machineDeleteCommandToQueueItem(deleteCommand),
-              },
-            }
-          : {}),
-      } as unknown as RepoDocMetaPatch);
-      if (deleteCommand) {
-        await writeMachineFlockRowRequired(runtime, machineId, {
-          key: machineFlockKeys.deleteSessionCommand(sessionId),
-          value: deleteCommand,
-        });
-      }
-      await deleteSessionDocuments(sessionId, { cleanupLaunchConfig: false });
+      // Deleting the doc leaves a deletion marker the owning machine reconciles
+      // its worktree directory against; no machine command is needed.
+      await deleteSessionDocuments(sessionMeta.id);
     },
     [runtime, deleteSessionDocuments]
   );
@@ -1399,19 +1262,20 @@ export function useSessionActions(): SessionActions {
     async (sessionId: SessionId) => {
       log('[session-delete] start', { sessionId });
       if (!runtime) throw new Error('Runtime not ready');
-      const loadedMeta = (await runtime.repo.getDocMeta(getSessionRoomId(sessionId)))?.meta as
-        | SessionMeta
-        | undefined;
-      if (!loadedMeta) throw new Error(`Session metadata missing for ${sessionId}`);
-      const rootMeta = { ...loadedMeta, id: loadedMeta.id ?? sessionId };
-      const lifecycleSessions = getSessionLifecycleMetas(sessionId, rootMeta);
+      const deleteTargets = await runtime.readSessionOperationTargets(sessionId, 'delete');
+      if (store.get(activeWorkspaceRuntimeAtom) !== runtime) {
+        throw new Error('Workspace changed before deleting');
+      }
 
-      for (const session of lifecycleSessions.reverse()) {
+      for (const session of [...deleteTargets].reverse()) {
         await deleteArchivedSessionMeta(session);
       }
-      log('[session-delete] lifecycle deleted', { sessionId });
+      log('[session-delete] deleted', {
+        sessionId,
+        targetSessionIds: deleteTargets.map((session) => session.id),
+      });
     },
-    [runtime, getSessionLifecycleMetas, deleteArchivedSessionMeta]
+    [runtime, store, deleteArchivedSessionMeta]
   );
 
   const setSessionPinned = useCallback(
@@ -1436,9 +1300,12 @@ export function useSessionActions(): SessionActions {
     requestSessionDispatch,
     requestSessionCancel,
     requestSessionSteer,
+    requestSessionGoal,
     touchSessionActivity,
     updateSessionStatus,
     updateSessionTitle,
+    setSessionTabClosed,
+    reopenSessionTab,
     transferSessionOwner,
     markSessionRead,
     markSessionUnread,

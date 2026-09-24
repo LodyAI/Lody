@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { getServerNow } from './time-sync';
 
 export const LoroStreamsTokenRequestSchema = z.object({
+  rejectedToken: z.string().min(1).max(16384).optional(),
   workspaceId: z
     .string()
     .trim()
@@ -135,10 +136,7 @@ function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
   return buffer;
 }
 
-async function deriveTokenStorageKey(
-  workspaceId: string,
-  authToken: string
-) {
+async function deriveTokenStorageKey(workspaceId: string, authToken: string) {
   const subtle = getSubtleCrypto();
   if (!subtle) {
     return null;
@@ -258,7 +256,8 @@ async function readCachedTokenFromStorage(
 async function writeCachedTokenToStorage(
   workspaceId: string,
   authToken: string,
-  token: CachedLoroStreamsToken
+  token: CachedLoroStreamsToken,
+  shouldWrite: () => boolean
 ): Promise<void> {
   const storage = getLocalStorage();
   if (!storage) {
@@ -270,7 +269,7 @@ async function writeCachedTokenToStorage(
     if (!encrypted) {
       return;
     }
-    storage.setItem(getTokenStorageKey(workspaceId), encrypted);
+    if (shouldWrite()) storage.setItem(getTokenStorageKey(workspaceId), encrypted);
   } catch {
     // ignore cache write failures, including quota and WebCrypto errors
   }
@@ -364,255 +363,221 @@ export function createLoroStreamsTokenProvider(options: {
 }) {
   const fetchImpl = options.fetchImpl ?? fetch;
   const refreshSkewMs = options.refreshSkewMs ?? LORO_STREAMS_TOKEN_REFRESH_SKEW_MS;
+  // State belongs to this provider and one resolved credential, never a global cache.
+  const storageNamespace = JSON.stringify([options.endpoint, options.workspaceId]);
+  let credential: string | null | undefined;
+  let initialized = false;
+  let generation = 0;
   let cached: CachedLoroStreamsToken | null = null;
   let inFlight: Promise<CachedLoroStreamsToken> | null = null;
-  let storageReadInFlight: Promise<CachedLoroStreamsToken | null> | null = null;
-  let generation = 0;
-  // Cache permanent 401/403 rejections per-auth-token so a forbidden long-lived
-  // credential doesn't keep hammering /api/loro-streams/token. We retain the
-  // rejection until either (a) the resolved auth token changes (e.g. user
-  // re-authenticated) or (b) a `manual` invalidate(). `unauthorized` invalidation
-  // (driven by the streams-crdt callback) deliberately does NOT clear it — the
-  // same forbidden token would just trigger the same 401/403 again.
-  let terminalAuthFailure:
-    | {
-        authToken: string;
-        error: LoroStreamsTokenAuthError;
-      }
-    | null = null;
+  let terminalAuthFailure: LoroStreamsTokenAuthError | null = null;
+  let rejectedToken: string | undefined;
+  let hydrate = true;
 
-  const emit = (event: LoroStreamsTokenProviderEvent): void => {
-    options.onEvent?.(event);
-  };
+  const emit = (event: LoroStreamsTokenProviderEvent): void => options.onEvent?.(event);
+  const resolveAuthToken = async () =>
+    typeof options.authToken === 'function' ? await options.authToken() : options.authToken;
 
-  const resolveAuthToken = async (): Promise<string | null | undefined> => {
-    const { authToken } = options;
-    return typeof authToken === 'function' ? await authToken() : authToken;
-  };
-
-  const fetchToken = async (): Promise<CachedLoroStreamsToken> => {
-    // Resolve and check terminalAuthFailure *inside* fetchToken so that
-    // `inFlight = fetchToken()` is a single synchronous assignment — concurrent
-    // ensureFreshToken() callers reuse the same in-flight promise (and therefore
-    // share one resolveAuthToken() call) instead of each doing their own resolve
-    // before racing on `if (!inFlight)`.
-    const currentAuthToken = await resolveAuthToken();
-    if (terminalAuthFailure) {
-      if (terminalAuthFailure.authToken === currentAuthToken) {
-        throw terminalAuthFailure.error;
-      }
+  const reset = (reason: 'manual' | 'unauthorized') => {
+    cached = null;
+    hydrate = false;
+    clearCachedTokenFromStorage(storageNamespace);
+    if (reason === 'manual') {
+      generation++;
+      inFlight = null;
       terminalAuthFailure = null;
+      rejectedToken = undefined;
     }
-    emit({
-      type: 'fetch-start',
-      workspaceId: options.workspaceId,
-      endpoint: options.endpoint,
-    });
-    try {
-      if (!currentAuthToken) {
-        throw new LoroStreamsTokenAuthError('Missing Loro Streams token provider auth token', 401);
+    emit({ type: 'invalidate', workspaceId: options.workspaceId, reason });
+  };
+
+  const ensureFreshToken = async (failedToken?: string): Promise<CachedLoroStreamsToken> => {
+    // Even an in-memory hit must belong to the currently resolved login.
+    const authToken = await resolveAuthToken();
+    if (!initialized || credential !== authToken) {
+      if (initialized) reset('manual');
+      else clearCachedTokenFromStorage(options.workspaceId); // Remove the old endpoint-agnostic cache.
+      initialized = true;
+      credential = authToken;
+      hydrate = true;
+    }
+    if (!authToken) {
+      throw new LoroStreamsTokenAuthError('Missing Loro Streams token provider auth token', 401);
+    }
+    if (terminalAuthFailure) throw terminalAuthFailure;
+    // A callback from an older stream cannot invalidate a newer cached token.
+    // Never discard the refresh another callback has already started.
+    if (failedToken && cached?.token === failedToken) {
+      rejectedToken = failedToken;
+      reset('unauthorized');
+    }
+    if (inFlight) {
+      emit({ type: 'in-flight-reuse', workspaceId: options.workspaceId });
+      return inFlight;
+    }
+    if (cached && getServerNow() < cached.expiresAtMs - refreshSkewMs) {
+      emit({
+        type: 'cache-hit',
+        workspaceId: options.workspaceId,
+        expiresInMs: cached.expiresAtMs - getServerNow(),
+        hasGatewayBaseUrl: typeof cached.gatewayBaseUrl === 'string',
+      });
+      return cached;
+    }
+
+    const epoch = generation;
+    const isCurrent = () => generation === epoch && credential === authToken;
+    const assertCurrentGeneration = () => {
+      if (!isCurrent()) throw new Error('Loro Streams token request superseded by an auth change');
+    };
+    const assertCurrent = async () => {
+      if (!isCurrent() || (await resolveAuthToken()) !== authToken || !isCurrent()) {
+        throw new Error('Loro Streams token request superseded by an auth change');
       }
+    };
+    // One HTTP round trip. `sentRejectedToken` is fixed when the body is built,
+    // so a rejection that arrives later cannot be carried by this request.
+    const requestToken = async (
+      sentRejectedToken: string | undefined
+    ): Promise<CachedLoroStreamsToken> => {
+      emit({ type: 'fetch-start', workspaceId: options.workspaceId, endpoint: options.endpoint });
+      const startedAt = getServerNow();
       const response = await fetchImpl(options.endpoint, {
         method: 'POST',
-        headers: {
-          Authorization: `Bearer ${currentAuthToken}`,
-          'Content-Type': 'application/json',
-        },
+        headers: { Authorization: `Bearer ${authToken}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
           workspaceId: LoroStreamsTokenRequestSchema.shape.workspaceId.parse(options.workspaceId),
+          ...(sentRejectedToken ? { rejectedToken: sentRejectedToken } : {}),
         } satisfies LoroStreamsTokenRequest),
       });
-
+      await assertCurrent();
+      assertCurrentGeneration();
       if (!response.ok) {
-        const detail = await response.text().catch(() => '');
-        const message = `Failed to fetch Loro Streams token (status=${response.status}${detail ? ` detail=${detail}` : ''})`;
+        // Do not include a backend response body: it may contain credentials.
         if (response.status === 401 || response.status === 403) {
-          const authError = new LoroStreamsTokenAuthError(
-            message,
-            response.status,
-            detail || undefined
+          const error = new LoroStreamsTokenAuthError(
+            `Loro Streams token authorization failed (status=${response.status})`,
+            response.status
           );
-          terminalAuthFailure = {
-            authToken: currentAuthToken,
-            error: authError,
-          };
-          throw authError;
+          terminalAuthFailure = error;
+          throw error;
         }
-        throw new Error(message);
+        throw new Error(`Failed to fetch Loro Streams token (status=${response.status})`);
       }
-
-      const raw = await response.json().catch(() => null);
-      const parsed = LoroStreamsTokenResponseSchema.safeParse(raw);
-      if (!parsed.success) {
-        throw new Error('Invalid Loro Streams token response');
-      }
-
-      const nextToken = {
+      const parsed = LoroStreamsTokenResponseSchema.safeParse(await response.json());
+      if (!parsed.success) throw new Error('Invalid Loro Streams token response');
+      await assertCurrent();
+      assertCurrentGeneration();
+      return {
         token: parsed.data.token,
-        // Use calibrated server time so this expiry matches the
-        // gateway's `exp` claim regardless of local clock skew. A
-        // client clock that's slow by >refreshSkewMs would otherwise
-        // keep handing back an actually-expired token to the gateway,
-        // bouncing through 401s until the next refresh tick.
-        expiresAtMs: getServerNow() + parsed.data.expiresIn * 1000,
+        expiresAtMs: startedAt + parsed.data.expiresIn * 1000,
         gatewayBaseUrl: parsed.data.gatewayBaseUrl,
         shardHostSuffix: parsed.data.shardHostSuffix,
       };
+    };
+    const promise = (async (): Promise<CachedLoroStreamsToken> => {
+      if (hydrate) {
+        hydrate = false;
+        const stored = await readCachedTokenFromStorage(storageNamespace, authToken);
+        await assertCurrent();
+        assertCurrentGeneration();
+        if (
+          stored &&
+          stored.token !== rejectedToken &&
+          getServerNow() < stored.expiresAtMs - refreshSkewMs
+        ) {
+          cached = stored;
+          return stored;
+        }
+      }
       emit({
-        type: 'fetch-success',
+        type: 'cache-miss',
         workspaceId: options.workspaceId,
-        expiresInMs: parsed.data.expiresIn * 1000,
-        hasGatewayBaseUrl: typeof parsed.data.gatewayBaseUrl === 'string',
+        reason: cached ? 'expired-or-stale' : 'missing',
       });
-      terminalAuthFailure = null;
-      return nextToken;
-    } catch (error) {
-      emit({
-        type: 'fetch-failure',
-        workspaceId: options.workspaceId,
-        status: error instanceof LoroStreamsTokenAuthError ? error.status : undefined,
-        error,
-      });
-      throw error;
-    }
-  };
-
-  const isFresh = (token: CachedLoroStreamsToken, nowMs = getServerNow()): boolean =>
-    nowMs < token.expiresAtMs - refreshSkewMs;
-
-  const hydrateFromStorage = async (): Promise<void> => {
-    if (cached) {
-      return;
-    }
-    const currentAuthToken = await resolveAuthToken();
-    if (!currentAuthToken) {
-      return;
-    }
-    if (!storageReadInFlight) {
-      storageReadInFlight = readCachedTokenFromStorage(
-        options.workspaceId,
-        currentAuthToken
-      ).finally(() => {
-        storageReadInFlight = null;
-      });
-    }
-    const stored = await storageReadInFlight;
-    if (stored && !cached) {
-      cached = stored;
-    }
-  };
-
-  const ensureFreshToken = async (): Promise<CachedLoroStreamsToken> => {
-    let nowMs = getServerNow();
-    if (cached && isFresh(cached, nowMs)) {
-      emit({
-        type: 'cache-hit',
-        workspaceId: options.workspaceId,
-        expiresInMs: cached.expiresAtMs - nowMs,
-        hasGatewayBaseUrl: typeof cached.gatewayBaseUrl === 'string',
-      });
-      return cached;
-    }
-
-    if (!cached) {
-      await hydrateFromStorage();
-    }
-
-    nowMs = getServerNow();
-    if (cached && isFresh(cached, nowMs)) {
-      emit({
-        type: 'cache-hit',
-        workspaceId: options.workspaceId,
-        expiresInMs: cached.expiresAtMs - nowMs,
-        hasGatewayBaseUrl: typeof cached.gatewayBaseUrl === 'string',
-      });
-      return cached;
-    }
-
-    emit({
-      type: 'cache-miss',
-      workspaceId: options.workspaceId,
-      reason: cached ? 'expired-or-stale' : 'missing',
-    });
-    if (cached) {
-      clearCachedTokenFromStorage(options.workspaceId);
-    }
-
-    if (!inFlight) {
-      const fetchGeneration = generation;
-      inFlight = fetchToken()
-        .then(async (nextToken) => {
-          if (generation === fetchGeneration) {
-            cached = nextToken;
-            try {
-              const currentAuthToken = await resolveAuthToken();
-              if (currentAuthToken) {
-                await writeCachedTokenToStorage(options.workspaceId, currentAuthToken, nextToken);
-              }
-            } catch {
-              // The token is already valid in memory; persistent cache writes are best effort.
-            }
+      try {
+        const sent = rejectedToken;
+        let nextToken = await requestToken(sent);
+        if (rejectedToken !== undefined && rejectedToken !== sent) {
+          // An unauthorized callback joined this refresh after its body was
+          // already sent. If the issuer handed back the very token the gateway
+          // rejected, spend exactly one more request that does carry
+          // `rejectedToken`. Every caller awaiting this promise shares that
+          // retry, so a fan-out of callbacks still costs one extra round trip.
+          if (nextToken.token === rejectedToken) {
+            nextToken = await requestToken(rejectedToken);
           }
-          return nextToken;
-        })
-        .finally(() => {
-          if (generation === fetchGeneration) {
-            inFlight = null;
-          }
+        }
+        // Encryption uses the credential that authorized this request, never a
+        // later login. A stale encrypted write cannot be decrypted by that login.
+        // The gate also re-reads the rejection marker, because it runs
+        // synchronously just before `setItem` while the encryption above it is
+        // several async WebCrypto calls long: an unauthorized callback landing
+        // inside that window clears storage first, and an unguarded write would
+        // put the rejected JWT back for the next process to hydrate.
+        // `reset('unauthorized')` deliberately keeps the generation, so
+        // `isCurrent()` alone cannot see it.
+        await writeCachedTokenToStorage(
+          storageNamespace,
+          authToken,
+          nextToken,
+          () => isCurrent() && nextToken.token !== rejectedToken
+        );
+        await assertCurrent();
+        assertCurrentGeneration();
+        cached = nextToken;
+        // The marker only survives while the provider is still serving the
+        // rejected JWT, so a refresh that predates the rejection cannot clear it.
+        if (nextToken.token !== rejectedToken) rejectedToken = undefined;
+        emit({
+          type: 'fetch-success',
+          workspaceId: options.workspaceId,
+          expiresInMs: nextToken.expiresAtMs - getServerNow(),
+          hasGatewayBaseUrl: typeof nextToken.gatewayBaseUrl === 'string',
         });
-    } else {
-      emit({
-        type: 'in-flight-reuse',
-        workspaceId: options.workspaceId,
-      });
+        return nextToken;
+      } catch (error) {
+        emit({
+          type: 'fetch-failure',
+          workspaceId: options.workspaceId,
+          status: error instanceof LoroStreamsTokenAuthError ? error.status : undefined,
+          error,
+        });
+        throw error;
+      }
+    })();
+    inFlight = promise;
+    try {
+      return await promise;
+    } finally {
+      if (inFlight === promise) inFlight = null;
     }
-
-    return await inFlight;
-  };
-
-  const invalidate = (reason: 'manual' | 'unauthorized' = 'manual'): void => {
-    cached = null;
-    inFlight = null;
-    storageReadInFlight = null;
-    generation++;
-    if (reason === 'manual') {
-      terminalAuthFailure = null;
-    }
-    clearCachedTokenFromStorage(options.workspaceId);
-    emit({
-      type: 'invalidate',
-      workspaceId: options.workspaceId,
-      reason,
-    });
   };
 
   return {
-    getToken: async (): Promise<string> => {
-      const current = await ensureFreshToken();
-      return current.token;
+    getToken: async (): Promise<string> => (await ensureFreshToken()).token,
+    invalidate: (reason: 'manual' | 'unauthorized' = 'manual'): void => {
+      if (reason === 'unauthorized') rejectedToken = cached?.token ?? rejectedToken;
+      reset(reason);
     },
-    /** Force the next `getToken()` call to fetch a fresh token from the server. */
-    invalidate,
     getGatewayBaseUrl: (): string | undefined => cached?.gatewayBaseUrl,
-    /** Hosted shard topology from the token response; undefined until a token has been fetched. */
     getShardHostSuffix: (): string | undefined => cached?.shardHostSuffix,
-    /**
-     * Returns an auth callback compatible with `StreamsTransportAdapter` / `StreamsCrdt`.
-     * On `reason: "unauthorized"`, invalidates the cached token before fetching a fresh one.
-     */
-    createAuthCallback: (): ((context?: { reason: string }) => Promise<string | undefined>) => {
+    /** Each stream callback tracks the token it received, so delayed failures
+     * cannot invalidate a replacement obtained by another stream callback. */
+    createAuthCallback: (): ((context?: {
+      reason: string;
+      previousToken?: string;
+    }) => Promise<string | undefined>) => {
+      let lastToken: string | undefined;
       return async (context) => {
-        if (context?.reason === 'unauthorized') {
-          invalidate('unauthorized');
-        }
         try {
-          const current = await ensureFreshToken();
+          const current = await ensureFreshToken(
+            context?.reason === 'unauthorized' ? (context.previousToken ?? lastToken) : undefined
+          );
+          lastToken = current.token;
           return current.token;
         } catch (error) {
-          if (error instanceof LoroStreamsTokenAuthError) {
-            invalidate('unauthorized');
-            return undefined;
-          }
+          if (error instanceof LoroStreamsTokenAuthError) return undefined;
           throw error;
         }
       };

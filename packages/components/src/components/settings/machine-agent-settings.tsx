@@ -14,7 +14,8 @@ import {
   type SessionId,
   type WorkspaceId,
 } from '@lody/shared';
-import { Check, ChevronDown, ChevronRight, Loader2 } from 'lucide-react';
+import { Check, ChevronDown, ChevronRight } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import { toast } from 'sonner';
 import { activeWorkspaceRuntimeAtom, authTokenAtom, type WorkspaceRuntime } from '@/atoms/runtime';
 import { developerModeEnabledAtom, reviewAgentFeatureEnabledAtom } from '@/atoms/settings';
@@ -587,7 +588,8 @@ export function MachineAgentSettings({
   const [dialogMode, setDialogMode] = useState<AgentConfigDialogMode | null>(null);
   // The provider dialog targets whichever machine's accordion row opened it,
   // decoupled from any single "selected machine" now that desktop lists them all.
-  const [dialogMachine, setDialogMachine] = useState<MachineViewMeta | null>(null);
+  const [dialogMachineId, setDialogMachineId] = useState<MachineId | null>(null);
+  const dialogMachine = dialogMachineId ? machines.get(dialogMachineId) : undefined;
   const dialogOpen = dialogMode !== null;
   const [latestCliVersion, setLatestCliVersion] = useState<string | null>(null);
 
@@ -879,18 +881,18 @@ export function MachineAgentSettings({
   const { checkBinaryStatus, installBinary } = useMachineAcpBinaryActions(runtime, workspaceId);
 
   const openCreateDialog = useCallback((machine: MachineViewMeta) => {
-    setDialogMachine(machine);
+    setDialogMachineId(machine.id);
     setDialogMode({ kind: 'create' });
   }, []);
 
   const openEditDialog = useCallback((machine: MachineViewMeta, config: AgentConfigMeta) => {
-    setDialogMachine(machine);
+    setDialogMachineId(machine.id);
     setDialogMode({ kind: 'edit', config });
   }, []);
 
   const handleDialogSubmit = useCallback(
     async (payload: AgentConfigSubmitPayload) => {
-      if (!dialogMachine || !dialogMode) return;
+      if (!dialogMachineId || !dialogMode) return;
       try {
         if (dialogMode.kind === 'create') {
           const config: AgentConfigMeta = {
@@ -905,7 +907,7 @@ export function MachineAgentSettings({
             prompt: payload.prompt,
             titleGeneration: payload.titleGeneration,
             brandId: payload.brandId,
-            machineId: dialogMachine.id,
+            machineId: dialogMachineId,
           };
           if (payload.backgroundSetup) {
             await createSetup(config);
@@ -938,7 +940,7 @@ export function MachineAgentSettings({
         throw error;
       }
     },
-    [dialogMachine, dialogMode, createConfig, createSetup, updateConfig, t]
+    [dialogMachineId, dialogMode, createConfig, createSetup, updateConfig, t]
   );
 
   const handleRetrySetup = useCallback(
@@ -983,7 +985,7 @@ export function MachineAgentSettings({
 
   const banner = showBanner ? (
     <div className="flex items-center gap-2 rounded-md border border-border/60 bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
-      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+      <Spinner className="h-3.5 w-3.5" />
       {t('settings.agent.migration.banner', 'Upgrading agent configs to be per-machine…')}
     </div>
   ) : null;
@@ -1000,6 +1002,12 @@ export function MachineAgentSettings({
         machine={dialogMachine}
         onSubmit={handleDialogSubmit}
         onRefreshCapabilities={refreshCapabilities}
+        onScanPiExtensions={
+          runtime
+            ? ({ machineId, configId }) =>
+                runtime.requestMachinePiExtensions(machineId, { configId })
+            : undefined
+        }
         onCheckBinaryStatus={checkBinaryStatus}
         onInstallBinary={installBinary}
       />
@@ -1008,7 +1016,7 @@ export function MachineAgentSettings({
   if (isLoading && !hasMachines) {
     return (
       <div className="flex h-full items-center justify-center gap-2 p-4 text-sm text-muted-foreground">
-        <Loader2 className="h-4 w-4 animate-spin" />
+        <Spinner className="h-4 w-4" />
         {t('workspace.machines.loadingVisibility', 'Loading machines')}
       </div>
     );
@@ -1042,7 +1050,7 @@ export function MachineAgentSettings({
                           selectedIsOnline ? 'bg-status-success' : 'bg-muted-foreground/35'
                         )}
                       />
-                      <span className="truncate text-[0.95rem] font-medium leading-tight">
+                      <span className="truncate text-[0.95rem] font-normal leading-tight">
                         {resolvedSelectedMachine.name || resolvedSelectedMachine.id}
                       </span>
                     </div>
@@ -1124,7 +1132,7 @@ export function MachineAgentSettings({
                             )}
                           />
                           <span className="min-w-0 flex-1">
-                            <span className="block truncate text-[0.95rem] font-medium">
+                            <span className="block truncate text-[0.95rem] font-normal">
                               {item.machine.name || item.machine.id}
                             </span>
                             <span className="mt-0.5 block truncate text-[0.78rem] text-muted-foreground">
@@ -1283,7 +1291,7 @@ export function MachineAgentSettings({
   const header = (
     <div className="min-w-0">
       <div className="flex items-center gap-1.5">
-        <h2 className="text-base font-semibold text-foreground">{title}</h2>
+        <h2 className="text-base font-normal text-foreground">{title}</h2>
         {mode === 'machines' && remoteMachinesAvailable ? (
           <MachineListFilterButton filter={effectiveFilter} onFilterChange={setFilter} />
         ) : null}
@@ -1467,7 +1475,7 @@ export function MachineAgentSettings({
           <section className="space-y-3 pt-3">
             <div className="px-1">
               <div className="flex items-center gap-2">
-                <h3 className="text-sm font-semibold text-foreground">
+                <h3 className="text-sm font-normal text-foreground">
                   {t('settings.machines.yourPrivateMachines', 'Your private machines')}
                 </h3>
                 <span className="text-xs tabular-nums text-muted-foreground">
@@ -1552,7 +1560,7 @@ function OwnPrivateMachines({
         ) : (
           <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
         )}
-        <span className="min-w-0 flex-1 text-xs font-medium">
+        <span className="min-w-0 flex-1 text-xs font-normal">
           {t('settings.machines.yourPrivateMachines', 'Your private machines')}
         </span>
         <span className="text-[11px] text-muted-foreground">{items.length}</span>

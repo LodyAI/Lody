@@ -2,7 +2,6 @@
 export * from './accordion';
 export * from './badge';
 export * from './button';
-export * from './calendar';
 export * from './card';
 export * from './checkbox';
 export * from './collapsible';
@@ -22,6 +21,7 @@ export * from './sheet';
 // export * from './sidebar-resizer' // Has external dependencies - needs to be refactored
 // export * from './sidebar' // Has external dependencies - needs to be refactored
 export * from './skeleton';
+export * from './slider';
 export * from './switch';
 export * from './tabs';
 export * from './textarea';

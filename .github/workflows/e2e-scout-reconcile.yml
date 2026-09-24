@@ -1,0 +1,218 @@
+name: Desktop E2E Scout candidate
+
+on:
+  workflow_run:
+    workflows: [Desktop E2E Scout]
+    types: [completed]
+
+permissions:
+  actions: read
+  contents: read
+  issues: write
+
+concurrency:
+  group: desktop-e2e-scout-candidate
+  cancel-in-progress: false
+
+jobs:
+  reconcile:
+    name: Reconcile resource trend candidate
+    if: >-
+      github.event.workflow_run.head_repository.full_name == github.repository &&
+      github.event.workflow_run.head_branch == github.event.repository.default_branch &&
+      (github.event.workflow_run.event == 'schedule' || github.event.workflow_run.event == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Find Scout evidence
+        id: evidence
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const artifacts = await github.paginate(github.rest.actions.listWorkflowRunArtifacts, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              run_id: context.payload.workflow_run.id,
+              per_page: 100
+            })
+            const expectedName = `desktop-e2e-scout-${context.payload.workflow_run.id}`
+            const artifact = artifacts.find((candidate) =>
+              !candidate.expired && candidate.name === expectedName
+            )
+            core.setOutput('available', String(Boolean(artifact)))
+            if (!artifact) {
+              core.notice(`No unexpired ${expectedName} artifact is available; no Issue will be changed.`)
+            }
+
+      - name: Download Scout evidence
+        if: steps.evidence.outputs.available == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: desktop-e2e-scout-${{ github.event.workflow_run.id }}
+          path: scout-evidence
+          github-token: ${{ github.token }}
+          run-id: ${{ github.event.workflow_run.id }}
+
+      - name: Reconcile candidate Issue
+        if: steps.evidence.outputs.available == 'true'
+        uses: actions/github-script@v7
+        env:
+          SCOUT_EVIDENCE_ROOT: ${{ github.workspace }}/scout-evidence
+        with:
+          script: |
+            const fs = require('node:fs/promises')
+            const path = require('node:path')
+
+            const marker = '<!-- desktop-e2e-scout-candidate -->'
+            const title = '[Scout] Candidate desktop resource trend'
+            const root = path.resolve(process.env.SCOUT_EVIDENCE_ROOT)
+            const maxFiles = 10_000
+            const maxSummaryBytes = 2 * 1024 * 1024
+            const summaries = []
+            let visitedFiles = 0
+
+            async function collect(directory) {
+              for (const entry of await fs.readdir(directory, { withFileTypes: true })) {
+                const candidate = path.join(directory, entry.name)
+                if (entry.isDirectory()) {
+                  await collect(candidate)
+                  continue
+                }
+                if (!entry.isFile()) continue
+                visitedFiles += 1
+                if (visitedFiles > maxFiles) throw new Error('Scout artifact contains too many files')
+                if (entry.name !== 'summary.json') continue
+
+                const stat = await fs.stat(candidate)
+                if (stat.size > maxSummaryBytes) {
+                  core.warning(`Ignoring oversized summary: ${path.relative(root, candidate)}`)
+                  continue
+                }
+
+                try {
+                  const value = JSON.parse(await fs.readFile(candidate, 'utf8'))
+                  if (
+                    value?.schemaVersion !== 1 ||
+                    typeof value.roundId !== 'string' ||
+                    typeof value.createdAt !== 'string' ||
+                    typeof value.options !== 'object' ||
+                    value.options === null ||
+                    !Array.isArray(value.journeys) ||
+                    !Array.isArray(value.suspectedTrends)
+                  ) {
+                    core.warning(`Ignoring invalid summary: ${path.relative(root, candidate)}`)
+                    continue
+                  }
+                  const trendsAreValid = value.suspectedTrends.every((entry) =>
+                    entry !== null &&
+                    typeof entry === 'object' &&
+                    typeof entry.journey === 'string' &&
+                    typeof entry.metric === 'string' &&
+                    entry.trend !== null &&
+                    typeof entry.trend === 'object' &&
+                    typeof entry.reason === 'string'
+                  )
+                  if (!trendsAreValid) {
+                    core.warning(`Ignoring summary with invalid trends: ${path.relative(root, candidate)}`)
+                    continue
+                  }
+                  const createdAt = Date.parse(value.createdAt)
+                  if (!Number.isFinite(createdAt)) {
+                    core.warning(`Ignoring summary with invalid createdAt: ${path.relative(root, candidate)}`)
+                    continue
+                  }
+                  summaries.push({ createdAt, file: candidate, value })
+                } catch (error) {
+                  core.warning(`Ignoring unreadable summary: ${path.relative(root, candidate)} (${error.message})`)
+                }
+              }
+            }
+
+            await collect(root)
+            summaries.sort((left, right) =>
+              right.createdAt - left.createdAt || right.file.localeCompare(left.file)
+            )
+            const latest = summaries[0]?.value
+            if (!latest) {
+              core.notice('No valid Scout summary was found; no Issue will be changed.')
+              return
+            }
+            if (latest.suspectedTrends.length === 0) {
+              core.info(`Scout round ${latest.roundId} reported no suspected trends.`)
+              return
+            }
+
+            function cell(value, limit = 240) {
+              const text = typeof value === 'string' ? value : JSON.stringify(value)
+              return String(text ?? '')
+                .replaceAll('|', '\\|')
+                .replaceAll('\r', ' ')
+                .replaceAll('\n', ' ')
+                .replaceAll('<', '&lt;')
+                .replaceAll('>', '&gt;')
+                .replaceAll('`', "'")
+                .slice(0, limit)
+            }
+
+            const trends = latest.suspectedTrends.slice(0, 25).map((entry) => ({
+              journey: cell(entry.journey, 120),
+              metric: cell(entry.metric, 120),
+              trend: cell(entry.trend, 320),
+              reason: cell(entry.reason, 320)
+            }))
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.payload.workflow_run.id}`
+            const body = [
+              marker,
+              'The non-blocking desktop resource Scout found repeatable candidate trends. This Issue is evidence for triage, not a confirmed leak.',
+              '',
+              `- Latest round: \`${cell(latest.roundId, 120)}\``,
+              `- Captured: \`${new Date(Date.parse(latest.createdAt)).toISOString()}\``,
+              `- Workflow run: ${runUrl}`,
+              `- Options: \`${cell(latest.options, 500)}\``,
+              '',
+              '| Journey | Metric | Trend | Reason |',
+              '| --- | --- | --- | --- |',
+              ...trends.map((entry) =>
+                `| ${entry.journey} | ${entry.metric} | ${entry.trend} | ${entry.reason} |`
+              ),
+              '',
+              latest.suspectedTrends.length > trends.length
+                ? `Only the first ${trends.length} of ${latest.suspectedTrends.length} trends are shown. Download the artifact for the complete report.`
+                : 'Download the workflow artifact for metrics, traces, and heap diagnostics.',
+              '',
+              'A maintainer should confirm the slope across independent rounds before promoting a narrow regression to a blocking gate.'
+            ].join('\n')
+
+            const issues = await github.paginate(github.rest.issues.listForRepo, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              per_page: 100
+            })
+            const existing = issues
+              .filter((issue) =>
+                !issue.pull_request &&
+                issue.user?.login === 'github-actions[bot]' &&
+                issue.user?.type === 'Bot' &&
+                issue.body?.includes(marker)
+              )
+              .sort((left, right) => left.number - right.number)[0]
+
+            if (existing) {
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existing.number,
+                title,
+                body
+              })
+              core.info(`Updated candidate Issue #${existing.number}.`)
+              return
+            }
+
+            const created = await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title,
+              body
+            })
+            core.info(`Created candidate Issue #${created.data.number}.`)

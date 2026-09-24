@@ -1,6 +1,13 @@
 import type { CSSProperties } from 'react';
 import type { ConversationFontSize } from '@/atoms/settings';
 
+/** Document root token: settings 1em, compact chrome 0.9em. */
+export const UI_FONT_SIZE_CSS_VARIABLE = '--ui-font-size';
+
+export function applyUiFontSize(root: HTMLElement, fontSize: ConversationFontSize): void {
+  root.style.setProperty(UI_FONT_SIZE_CSS_VARIABLE, `${fontSize}px`);
+}
+
 // Single source of truth for the conversation font-size scale shared across the
 // ai-gui renderers (view.tsx, terminal-component.tsx). markdown-renderer.tsx keeps
 // its own map because it also scales heading selectors, not just body text.

@@ -1,6 +1,16 @@
 // @vitest-environment jsdom
 
 import React, { act } from 'react';
+import {
+  buildMentionFileIndex,
+  getSuggestions,
+} from '../src/components/mentions/file-search/engine';
+import type {
+  FileSearchRequest,
+  FileSearchResponse,
+} from '../src/components/mentions/file-search/client';
+
+let fileEntry: { paths: string[]; fetchedAt: number; truncated: boolean } | null = null;
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -17,7 +27,7 @@ const sessionItems: Array<{
 vi.mock('../src/components/mentions/mention-project-file-source', async (importOriginal) => ({
   ...(await importOriginal<object>()),
   useMentionProjectFiles: () => ({
-    fileData: { entry: null, status: 'ready' as const },
+    fileData: { entry: fileEntry, status: 'ready' as const },
     initializeLazyDirectory: async () => undefined,
     getKnownFileTokens: () => new Set<string>(),
   }),
@@ -64,6 +74,7 @@ describe('CombinedMentionTextarea mention enablement and activation', () => {
     await initI18n('en');
     originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
     HTMLElement.prototype.scrollIntoView = vi.fn();
+    fileEntry = null;
     skillScanEnabled.length = 0;
     sessionItems.length = 0;
     container = document.createElement('div');
@@ -88,6 +99,7 @@ describe('CombinedMentionTextarea mention enablement and activation', () => {
     skillAgent?: { machineId?: string; cliType?: string };
     mentionSource?: unknown;
     commandsEnabled?: boolean;
+    availableCommands?: Array<{ name: string; description: string }>;
   }) {
     function ControlledComposer() {
       const [value, setValue] = React.useState(props.value);
@@ -98,6 +110,7 @@ describe('CombinedMentionTextarea mention enablement and activation', () => {
           skillAgent={props.skillAgent as never}
           mentionSource={props.mentionSource as never}
           commandsEnabled={props.commandsEnabled}
+          availableCommands={props.availableCommands}
           resetOnEmpty={false}
         />
       );
@@ -142,6 +155,124 @@ describe('CombinedMentionTextarea mention enablement and activation', () => {
       input.dispatchEvent(new Event('input', { bubbles: true }));
     });
   }
+
+  it.each(['/', '、'])(
+    'opens and filters commands from %s, then commits the slash form',
+    async (trigger) => {
+      await render({
+        value: '',
+        availableCommands: [
+          { name: 'review', description: 'Review changes' },
+          { name: 'compact', description: 'Compact history' },
+        ],
+      });
+      await typeInto(trigger);
+      expect(document.body.textContent).toContain('Review changes');
+      expect(document.body.textContent).toContain('Compact history');
+      await typeInto(`${trigger}rev`);
+      expect(document.body.textContent).toContain('Review changes');
+      expect(document.body.textContent).not.toContain('Compact history');
+      await act(async () => {
+        textarea()!.dispatchEvent(
+          new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
+        );
+      });
+      expect(textarea()!.value.trimEnd()).toBe('/review');
+    }
+  );
+
+  it.each(['text 、rev', '、rev argument', 'text /rev', '/rev argument'])(
+    'does not offer commands for mixed prompt %s',
+    async (value) => {
+      await render({
+        value: '',
+        availableCommands: [{ name: 'review', description: 'Review changes' }],
+      });
+      await typeInto(value);
+      expect(document.querySelector('[data-slot="mention-item"]')).toBeNull();
+      expect(textarea()!.value).toBe(value);
+    }
+  );
+
+  it.each(['@file:', '@', '@other:'])(
+    'shows asynchronous file search state and commits %s results through the composer',
+    async (prefix) => {
+      vi.useFakeTimers({ toFake: ['requestAnimationFrame', 'cancelAnimationFrame'] });
+      let respond: ((data: FileSearchResponse) => void) | undefined;
+      let query: Extract<FileSearchRequest, { type: 'query' }> | undefined;
+      vi.stubGlobal(
+        'Worker',
+        class {
+          onmessage: ((event: { data: FileSearchResponse }) => void) | null = null;
+          onerror = null;
+          onmessageerror = null;
+          constructor() {
+            respond = (data) => this.onmessage?.({ data });
+          }
+          postMessage(message: FileSearchRequest) {
+            if (message.type === 'query') query = message;
+          }
+          terminate() {}
+        }
+      );
+      fileEntry = {
+        paths:
+          prefix === '@other:'
+            ? ['src/other:Composer.tsx', 'src/other:Other.ts']
+            : ['src/Composer.tsx', 'src/Other.ts'],
+        fetchedAt: 1,
+        truncated: false,
+      };
+      const selectedPath = prefix === '@other:' ? 'src/other:Other.ts' : 'src/Other.ts';
+      try {
+        await render({ value: '', mentionSource: { kind: 'local', localProjectId: 'project-1' } });
+        await typeInto(`${prefix}Composer`);
+        expect(document.body.textContent).toContain('Loading');
+        await act(async () => respond?.({ type: 'ready' }));
+        if (!query) throw new Error('Expected file query');
+        const initial = query;
+        await typeInto(`${prefix}Other`);
+        await act(async () =>
+          respond?.({
+            type: 'result',
+            id: initial.id,
+            term: initial.term,
+            items: getSuggestions(buildMentionFileIndex(fileEntry)!, initial.term),
+          })
+        );
+        expect(
+          document.querySelector('[data-slot="mention-item"]')?.textContent ?? ''
+        ).not.toContain('Composer.tsx');
+        const current = query;
+        await act(async () =>
+          respond?.({
+            type: 'result',
+            id: current.id,
+            term: current.term,
+            items: getSuggestions(buildMentionFileIndex(fileEntry)!, current.term),
+          })
+        );
+        const row = Array.from(
+          document.querySelectorAll<HTMLElement>('[data-slot="mention-item"]')
+        ).find((element) => element.textContent?.includes(selectedPath));
+        expect(row).toBeDefined();
+        await act(async () => vi.advanceTimersToNextFrame());
+        if (prefix === '@') {
+          expect(highlightedRowText()).toContain('src/Other.ts');
+          await act(async () =>
+            textarea()?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+          );
+        } else {
+          await act(async () => row?.click());
+        }
+        expect(textarea()?.value).toContain(`@${selectedPath}`);
+        expect(textarea()?.value).not.toContain('file:');
+      } finally {
+        vi.useRealTimers();
+        vi.unstubAllGlobals();
+      }
+    }
+  );
 
   it('renders a plain textarea when no mention type is reachable', async () => {
     await render({ value: '' });

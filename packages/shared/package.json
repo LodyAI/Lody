@@ -8,9 +8,37 @@
     "./src/visual-annotation-inspector-global.ts"
   ],
   "exports": {
+    "./streams-snapshot-codec": {
+      "types": "./src/streams-snapshot-codec.ts",
+      "import": "./src/streams-snapshot-codec.ts"
+    },
+    "./prompt-shortcuts": {
+      "types": "./src/prompt-shortcuts/index.ts",
+      "import": "./src/prompt-shortcuts/index.ts"
+    },
+    "./prompt-shortcuts/*": {
+      "types": "./src/prompt-shortcuts/*.ts",
+      "import": "./src/prompt-shortcuts/*.ts"
+    },
+    "./session-sharing": {
+      "types": "./src/session-sharing.ts",
+      "import": "./src/session-sharing.ts"
+    },
+    "./session-share-credentials": {
+      "types": "./src/session-share-credentials.ts",
+      "import": "./src/session-share-credentials.ts"
+    },
+    "./session-share-delivery": {
+      "types": "./src/session-share-delivery.ts",
+      "import": "./src/session-share-delivery.ts"
+    },
     ".": {
       "types": "./src/index.ts",
       "import": "./src/index.ts"
+    },
+    "./acp-startup-budget": {
+      "types": "./src/acp-startup-budget.ts",
+      "import": "./src/acp-startup-budget.ts"
     },
     "./visual-annotation-inspector": {
       "types": "./src/visual-annotation-inspector.ts",
@@ -31,6 +59,10 @@
     "./electron-ipc": {
       "types": "./src/electron-ipc.ts",
       "import": "./src/electron-ipc.ts"
+    },
+    "./devbar": {
+      "types": "./src/devbar.ts",
+      "import": "./src/devbar.ts"
     },
     "./proxy-env": {
       "types": "./src/proxy-env.ts",
@@ -56,6 +88,14 @@
       "types": "./src/local-loro-transport.ts",
       "import": "./src/local-loro-transport.ts"
     },
+    "./image-file-types": {
+      "types": "./src/image-file-types.ts",
+      "import": "./src/image-file-types.ts"
+    },
+    "./local-file-preview": {
+      "types": "./src/local-file-preview.ts",
+      "import": "./src/local-file-preview.ts"
+    },
     "./local-machine-rpc": {
       "types": "./src/local-machine-rpc.ts",
       "import": "./src/local-machine-rpc.ts"
@@ -63,6 +103,10 @@
     "./message-schemas": {
       "types": "./src/message-schemas.ts",
       "import": "./src/message-schemas.ts"
+    },
+    "./session-data": {
+      "types": "./src/session-data/index.ts",
+      "import": "./src/session-data/index.ts"
     },
     "./terminal-protocol": {
       "types": "./src/terminal-protocol.ts",
@@ -116,6 +160,8 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "immer": "^10.2.0",
+    "fzstd": "0.1.1",
     "@bokuweb/zstd-wasm": "^0.0.27",
     "@loro-dev/streams-crdt": "catalog:",
     "acp-extension-dsh": "workspace:*",

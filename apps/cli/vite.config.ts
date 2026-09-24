@@ -2,7 +2,6 @@ import { builtinModules } from 'node:module';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vite';
-import topLevelAwait from 'vite-plugin-top-level-await';
 import wasm from 'vite-plugin-wasm';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -37,7 +36,10 @@ const explicitlyExternal = new Set([
 ]);
 
 export default defineConfig({
-  plugins: [wasm(), topLevelAwait()],
+  // Node 22 supports native top-level await, including wasm initialization.
+  // The browser compatibility transform reparses every emitted chunk into an
+  // additional SWC AST and exhausts the 2 GB packaging heap on this bundle.
+  plugins: [wasm()],
   define: inlineEnv,
   resolve: {
     alias: {

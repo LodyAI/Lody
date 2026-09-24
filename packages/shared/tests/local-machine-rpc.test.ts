@@ -5,7 +5,39 @@ import {
 } from '../src/local-machine-rpc';
 
 describe('local Machine RPC', () => {
+  it('allows Pi discovery by saved config reference but never caller launch inputs', () => {
+    const request = {
+      machineId: 'machine-1',
+      workspaceId: 'workspace-1',
+      method: 'machine/pi-extensions',
+      params: { configId: 'pi-config' },
+    };
+    expect(safeParseLocalMachineRpcRequest(JSON.stringify(request)).success).toBe(true);
+    for (const fields of [
+      { command: 'pi' },
+      { env: { NODE_OPTIONS: '--require untrusted' } },
+      { path: '/untrusted' },
+    ]) {
+      expect(
+        safeParseLocalMachineRpcRequest(
+          JSON.stringify({ ...request, params: { ...request.params, ...fields } })
+        ).success
+      ).toBe(false);
+    }
+    const response = {
+      ok: true,
+      result: {
+        success: true,
+        discovery: { version: 1, agentDir: '/fixture', extensions: [], warnings: [] },
+      },
+    };
+    expect(LocalMachineRpcResponseSchema.parse(response)).toEqual(response);
+  });
   it.each([
+    {
+      method: 'session/get-active-invocation-context',
+      params: { sessionId: 'session-1' },
+    },
     {
       method: 'session/fork',
       params: {
@@ -82,7 +114,7 @@ describe('local Machine RPC', () => {
       params: { sessionId: 'session-1', endpointId: 'endpoint-1' },
     },
     {
-      method: 'file/preview-local',
+      method: 'file/resolve-local',
       params: { v: 3, sessionId: 'session-1', path: '/Users/me/Documents/notes.md' },
     },
   ])('accepts $method requests', ({ method, params }) => {
@@ -229,5 +261,32 @@ describe('local Machine RPC', () => {
       },
     };
     expect(LocalMachineRpcResponseSchema.safeParse(endpointWithoutTarget).success).toBe(false);
+  });
+
+  it('validates active invocation identity and its frozen input config', () => {
+    expect(
+      LocalMachineRpcResponseSchema.safeParse({
+        ok: true,
+        result: {
+          type: 'session/active-invocation-context',
+          sessionId: 'session-1',
+          active: true,
+          requesterUserId: 'user-b',
+          sourceTurnId: 'turn-b',
+          inputConfig: { chainDepth: 1, taskToolsEnabled: true },
+        },
+      }).success
+    ).toBe(true);
+    expect(
+      LocalMachineRpcResponseSchema.safeParse({
+        ok: true,
+        result: {
+          type: 'session/active-invocation-context',
+          sessionId: 'session-1',
+          active: true,
+          requesterUserId: 'user-b',
+        },
+      }).success
+    ).toBe(false);
   });
 });

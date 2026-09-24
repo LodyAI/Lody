@@ -1,7 +1,8 @@
-import { useLocation, useNavigate } from '@tanstack/react-router';
+import { Link as RouterLink, useLocation, useNavigate } from '@tanstack/react-router';
 import { RootProvider } from 'fumadocs-ui/provider/tanstack';
-import type { ReactNode } from 'react';
+import type { ComponentProps, ReactNode } from 'react';
 
+import { OptionalEnhancement } from './optional-enhancement';
 import { DocsSearchDialog } from './docs-search-dialog';
 import { MarketingAtmosphereHost } from './marketing-atmosphere';
 
@@ -41,6 +42,34 @@ function getLocalizedPath(pathname: string, targetLocale: string) {
   return cleanPath;
 }
 
+/**
+ * Paths `lody.ai` serves from the Lody web app instead of from this site. The
+ * client router matches none of them, so the Tanstack adapter Fumadocs installs
+ * by default would turn a link like `/login` into a client navigation that ends
+ * on the site's 404 page. The landing, pricing and download pages already reach
+ * the web app through hand-written anchors; this keeps Fumadocs-rendered links
+ * (docs Cards, MDX links) on the same real navigation.
+ */
+const APP_OWNED_PATHS = ['/login'];
+
+function isAppOwnedHref(href: string) {
+  const path = href.split(/[?#]/u)[0] ?? href;
+  return APP_OWNED_PATHS.some((owned) => path === owned || path.startsWith(`${owned}/`));
+}
+
+function SiteFrameworkLink({
+  href = '#',
+  prefetch = true,
+  ...props
+}: ComponentProps<'a'> & { prefetch?: boolean }) {
+  if (isAppOwnedHref(href)) return <a href={href} {...props} />;
+
+  // Mirrors fumadocs-core's Tanstack adapter for everything this site owns.
+  return <RouterLink preload={prefetch ? 'intent' : false} to={href as never} {...props} />;
+}
+
+const frameworkComponents = { Link: SiteFrameworkLink };
+
 export function SiteRootProvider({ children }: { children: ReactNode }) {
   const location = useLocation();
   const navigate = useNavigate();
@@ -49,6 +78,7 @@ export function SiteRootProvider({ children }: { children: ReactNode }) {
 
   return (
     <RootProvider
+      components={frameworkComponents}
       theme={{ defaultTheme: 'dark', disableTransitionOnChange: false }}
       search={{ SearchDialog: DocsSearchDialog }}
       i18n={{
@@ -61,7 +91,9 @@ export function SiteRootProvider({ children }: { children: ReactNode }) {
       }}
     >
       {/* Shared WebGL field for price / download / changelog — one compile per session. */}
-      <MarketingAtmosphereHost />
+      <OptionalEnhancement>
+        <MarketingAtmosphereHost />
+      </OptionalEnhancement>
       {children}
     </RootProvider>
   );

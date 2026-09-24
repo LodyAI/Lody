@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ChevronRight, Folder, FolderOpen, FolderPlus, Github, Loader2 } from 'lucide-react';
+import { ChevronRight, Folder, FolderOpen, FolderPlus, Github } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import type { MachineId } from '@lody/shared';
 import { Switch } from '@/ui/switch';
 import { TooltipProvider } from '@/ui/tooltip';
@@ -116,7 +117,7 @@ export function MobileProjectSettings({
     return (
       <MobileSettingsSection title={fallbackTitle}>
         <div className="flex items-center justify-center gap-2 px-4 py-6 text-sm text-muted-foreground">
-          <Loader2 className="h-4 w-4 animate-spin" />
+          <Spinner className="h-4 w-4" />
           {t('workspace.projects.loading', 'Loading projects')}
         </div>
       </MobileSettingsSection>
@@ -280,9 +281,7 @@ function MobileProjectRow({
 
   const shareControl = (
     <div className="flex items-center gap-2">
-      {row.isUpdating ? (
-        <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
-      ) : null}
+      {row.isUpdating ? <Spinner className="h-3.5 w-3.5 text-muted-foreground" /> : null}
       <Switch
         checked={row.sharedWithTeam}
         disabled={row.isUpdating || !row.canUpdateSharing || !onSharedWithTeamChange}

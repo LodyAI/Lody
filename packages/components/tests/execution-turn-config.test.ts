@@ -2,6 +2,37 @@ import { describe, expect, it } from 'vitest';
 import { buildExecutionTurnConfigOverrides } from '../src/lib/execution-turn-config';
 
 describe('execution turn config', () => {
+  it.each([undefined, true, false])(
+    'disables Core planning for execution with draft value %s',
+    (value) => {
+      const configOptionValues = {
+        reasoning_effort: 'high',
+        'fast-mode': true,
+        ...(value === undefined ? {} : { plan_mode: value }),
+      };
+      expect(
+        buildExecutionTurnConfigOverrides({
+          selectedModeId: 'agent',
+          defaultModeId: 'read-only',
+          modeOptions: [{ value: 'agent' }, { value: 'read-only' }],
+          configOptionSelectors: [
+            {
+              configId: 'plan_mode',
+              type: 'boolean',
+              currentValue: true,
+              options: [],
+            },
+          ],
+          configOptionValues,
+        })
+      ).toEqual({
+        modeIdOverride: 'agent',
+        configOptionValuesOverride: { ...configOptionValues, plan_mode: false },
+      });
+      expect(configOptionValues.plan_mode).toBe(value);
+    }
+  );
+
   it('freezes Codex execution as Default without changing other option values', () => {
     expect(
       buildExecutionTurnConfigOverrides({

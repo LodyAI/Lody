@@ -17,8 +17,21 @@ maintenance commands here.
   dependencies/imports, unresolved `workspace:` dependencies, closed-path
   documentation, internal absolute paths in any publishable text, and captured
   transcript fixtures.
+- Root `specs/` and the `.agents/` tree may contain public client and protocol
+  documentation and may be linked from other documents. Root `docs/` stays a
+  closed path. Their contents still undergo the same private-path, internal-path,
+  and hosted-preset checks as other public text.
 
 ## Generated artifacts
+
+- `docs/main.mjs` (exposed through `pnpm run docs <command>`) provides document queues and scoped content-hash
+  review. Errors fail `check`; warnings, such as an `AGENTS.md` above the 7000-byte
+  target but under the 8192-byte gate, never do. Status, check, and diff are read-only; only explicit `confirm` writes a
+  topic record. Confirmation requires recoverable committed inputs and evidence,
+  never changes Spec approval, and never auto-refreshes a stale baseline.
+  `docs/anchors.mjs` uses TypeScript to hash declarations below `@dec:`
+  markers. Check both directions against adjacent `.anchors.json` records;
+  unrelated declarations must not invalidate the reviewed block.
 
 - `generate-acp-registry.mjs` produces the public ACP registry and its bundled,
   generation-time-validated SVG icon map. Use `--icons-only` when refreshing
@@ -36,6 +49,14 @@ maintenance commands here.
   development-only and must never be uploaded to the managed-runtime channel.
 
 ## Install ownership
+
+- `package-pi-runtime.mjs` builds a frozen isolated Pi dependency closure, including
+  all supported optional platform packages. Windows Job binaries must be supplied
+  from successful CI for the exact source gitlink. Exclude pnpm installation metadata
+  from artifacts; it includes builder paths and timestamps. Validate the installed
+  closure with the adapter smoke and compare deterministic archive bytes.
+  Preserve relative dependency symlinks; reject absolute, escaping, or dangling
+  links. Exclude install-time `.bin` shims from the direct-entry runtime bundle.
 
 - `guard-nested-workspace-install.mjs` runs before a public-root install. If an
   ancestor lockfile already owns public package importers, fail with an explicit

@@ -10,7 +10,10 @@ import type { GitHubMergeMethod, PrStatus } from '@lody/shared';
 import { currentWorkspaceIdAtom } from '@/atoms';
 import { derivePrStatusFromDetails } from '@/lib/github-pr-details-state';
 import { getDurationSinceMs, getPerformanceNowMs } from '@/lib/posthog-analytics';
-import { isGitHubUnauthorizedTokenError } from '@/lib/github-token';
+import {
+  isGitHubOperationTokenConnectionLostError,
+  isGitHubUnauthorizedTokenError,
+} from '@/lib/github-token';
 import { ReadyForReviewStillDraftError, useGitHubPrDetails } from '@/hooks/use-github-pr-details';
 import { PrTabView, type PrTabViewData, type PrTabViewState } from './pr-tab-view';
 import { resolveConflictsActionAtomFamily } from './session-pr-agent-action';
@@ -159,6 +162,12 @@ export function PrTabContainer({
           errorKind: classifyMergeError(err, pr),
           durationMs: getDurationSinceMs(startedAt),
         });
+        // The request only obtains the credential used for the subsequent
+        // GitHub merge. If Convex disconnects here, the merge was never sent;
+        // the retry above has already had a chance to recover, so leave the
+        // action ready to try again instead of exposing a backend transport
+        // detail as a merge failure.
+        if (isGitHubOperationTokenConnectionLostError(err)) return;
         const message = err instanceof Error ? err.message : String(err);
         toast.error(t('sessions.prTab.mergeError', 'Failed to merge'), { description: message });
       }

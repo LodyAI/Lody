@@ -50,6 +50,7 @@ const deepseekAgentConfig: AgentConfigMeta = {
   agentType: 'deepseek',
 };
 const deepseekModels = [
+  { value: 'deepseek-flash', label: 'DeepSeek-V41-Flash' },
   { value: 'deepseek-v4-flash', label: 'DeepSeek-V4-Flash' },
   { value: 'deepseek-v4-pro', label: 'DeepSeek-V4-Pro' },
 ];
@@ -220,7 +221,18 @@ describe('composer model picker search', () => {
     expect(rows()).toHaveLength(fewModels.length);
   });
 
-  it('links the upstream delegation warning for a builtin DeepSeek non-Pro model', async () => {
+  it('sizes a short model list to a 108px floor instead of the 200px menu floor', async () => {
+    await openModelSubmenu({
+      modelOptions: fewModels,
+      selectedModelId: fewModels[0]?.value ?? null,
+    });
+    const submenu = [...document.querySelectorAll('[data-radix-menu-content]')].at(-1);
+    expect(submenu?.className).toMatch(/\bw-max\b/);
+    expect(submenu?.className).toMatch(/min-w-\[108px\]/);
+    expect(submenu?.className).not.toMatch(/min-w-\[200px\]/);
+  });
+
+  it('links the upstream delegation warning for a builtin DeepSeek non-default model', async () => {
     await act(async () => {
       root?.render(
         createElement(DesktopRunConfigMenu, {
@@ -245,7 +257,7 @@ describe('composer model picker search', () => {
     expect(warning?.textContent).toContain('Upstream discussion');
   });
 
-  it('does not warn when the builtin DeepSeek session already uses Pro', async () => {
+  it('does not warn when the builtin DeepSeek session already uses the default model', async () => {
     await act(async () => {
       root?.render(
         createElement(DesktopRunConfigMenu, {
@@ -253,7 +265,7 @@ describe('composer model picker search', () => {
           agentSelection: { agentId: deepseekAgentConfig.id, machineId },
           availableAgentConfigs: [deepseekAgentConfig],
           modelOptions: deepseekModels,
-          selectedModelId: 'deepseek-v4-pro',
+          selectedModelId: 'deepseek-flash',
         })
       );
     });

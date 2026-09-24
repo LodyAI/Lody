@@ -23,6 +23,13 @@ Policy state was duplicated.
 
 Use one policy state.
 
+## Visual explanation
+
+\`\`\`mermaid
+flowchart LR
+    Event --> Policy
+\`\`\`
+
 ## Test plan
 
 Run policy tests.
@@ -31,20 +38,16 @@ Run policy tests.
 
 <!-- context-handoff:begin -->
 
-### Instructions for reviewing agents
+### Original user prompt
 
-- **Review focus:** Check policy transitions.
-- **Decisions to challenge:** Confirm bypass semantics.
-- **Plausible failures / evidence gaps:** API calls use fakes.
+\`\`\`text
+Simplify the pull request contribution policy.
+\`\`\`
 
-### Authoring context
+### Shared conversation
 
-- **User goal / directives:** Simplify PR policy.
-- **Constraints / non-goals:** Never execute fork code.
-- **Risk-bearing decisions:** Repository identity classifies PRs.
-- **Destructive or irreversible behavior:** Expired PRs close.
-- **Deliberately not done or tested:** No live API writes.
-- **Unknowns / confidence:** Policy behavior is deterministic.
+Status: shared
+Link: https://lody.example/s/demo#access=v1.demo
 
 <!-- context-handoff:end -->
 `;
@@ -71,11 +74,12 @@ function apiError(status) {
   return Object.assign(new Error(`HTTP ${status}`), { status });
 }
 
-function createGithub({ comments = [], latestPullRequest = null } = {}) {
+function createGithub({ comments = [], latestPullRequest = null, issues = new Map() } = {}) {
   const activity = {
     addedLabels: [],
     createdComments: [],
     deletedComments: [],
+    issueReads: [],
     pullUpdates: [],
     removedLabels: [],
     updatedComments: [],
@@ -86,6 +90,14 @@ function createGithub({ comments = [], latestPullRequest = null } = {}) {
     paginate: async () => comments,
     rest: {
       issues: {
+        get: async (input) => {
+          activity.issueReads.push(input);
+          const issue = issues.get(input.issue_number);
+          if (!issue) {
+            throw apiError(404);
+          }
+          return { data: issue };
+        },
         addLabels: async (input) => activity.addedLabels.push(input),
         createComment: async (input) => {
           const comment = {
@@ -172,6 +184,45 @@ void describe('pull request validation', () => {
     assert.equal(result.state, 'invalid');
     assert.ok(result.validation.findings.some((finding) => finding.includes('PR body is empty')));
     assert.ok(result.validation.findings.some((finding) => finding.includes('changes 201 lines')));
+    assert.ok(
+      result.validation.findings.some((finding) =>
+        finding.includes('require the prior Lody Issue reference')
+      )
+    );
+  });
+
+  void it('rejects community PRs over 1000 lines without an Issue assignment', async () => {
+    const { activity, github } = createGithub();
+    const result = await reconcilePullRequest({
+      github,
+      owner: 'LodyAI',
+      repo: 'Lody',
+      pullRequest: { ...externalPullRequest, body: validBody, additions: 900, deletions: 101 },
+      defaultBranch: 'main',
+    });
+
+    assert.equal(result.state, 'invalid');
+    assert.ok(
+      result.validation.findings.some((finding) =>
+        finding.includes('require a maintainer assignment on the linked Issue')
+      )
+    );
+    assert.deepEqual(activity.issueReads, [{ owner: 'LodyAI', repo: 'Lody', issue_number: 121 }]);
+  });
+
+  void it('accepts community PRs over 1000 lines when the author is assigned', async () => {
+    const issues = new Map([[121, { assignees: [{ login: 'contributor' }] }]]);
+    const { github } = createGithub({ issues });
+    const result = await reconcilePullRequest({
+      github,
+      owner: 'LodyAI',
+      repo: 'Lody',
+      pullRequest: { ...externalPullRequest, body: validBody, additions: 900, deletions: 101 },
+      defaultBranch: 'main',
+    });
+
+    assert.equal(result.state, 'valid');
+    assert.equal(result.validation.ok, true);
   });
 });
 
@@ -192,6 +243,7 @@ void describe('pull request reconciliation', () => {
       addedLabels: [],
       createdComments: [],
       deletedComments: [],
+      issueReads: [],
       pullUpdates: [],
       removedLabels: [],
       updatedComments: [],
@@ -250,6 +302,26 @@ void describe('pull request reconciliation', () => {
     );
     assert.ok(activity.removedLabels.some((input) => input.name === NEEDS_ATTENTION_LABEL));
     assert.ok(activity.removedLabels.every((input) => input.name !== BYPASS_LABEL));
+  });
+
+  void it('routes omitted sharing disclosure through the existing attention policy', async () => {
+    const { activity, github } = createGithub();
+    const body = validBody.replace(
+      /### Shared conversation[\s\S]*?(?=<!-- context-handoff:end -->)/,
+      ''
+    );
+    const result = await reconcilePullRequest({
+      github,
+      owner: 'LodyAI',
+      repo: 'Lody',
+      pullRequest: { ...externalPullRequest, body },
+      defaultBranch: 'main',
+      now: new Date('2026-08-30T00:00:00.000Z'),
+    });
+    assert.equal(result.state, 'invalid');
+    assert.deepEqual(activity.addedLabels.at(-1).labels, [NEEDS_ATTENTION_LABEL]);
+    assert.match(activity.createdComments[0].body, /Shared conversation/);
+    assert.match(activity.createdComments[0].body, /invalid-since="2026-08-30T00:00:00.000Z"/);
   });
 
   void it('puts an invalid external PR into one attention state', async () => {

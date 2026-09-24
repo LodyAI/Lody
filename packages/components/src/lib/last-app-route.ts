@@ -1,3 +1,4 @@
+import { windowStorage } from './desktop-window';
 import { isValidWorkspaceSlug } from './workspace';
 
 const LAST_APP_ROUTE_STORAGE_KEY = 'lody:lastAppRoute';
@@ -79,20 +80,20 @@ export function readLastAppRoutePath(): string | null {
   }
 
   try {
-    const raw = localStorage.getItem(LAST_APP_ROUTE_STORAGE_KEY);
+    const raw = windowStorage().getItem(LAST_APP_ROUTE_STORAGE_KEY);
     if (!raw) {
       return null;
     }
 
     const parsed: unknown = JSON.parse(raw);
     if (!isStoredLastAppRoute(parsed)) {
-      localStorage.removeItem(LAST_APP_ROUTE_STORAGE_KEY);
+      windowStorage().removeItem(LAST_APP_ROUTE_STORAGE_KEY);
       return null;
     }
 
     const normalized = normalizeLastAppRoutePath(parsed.path);
     if (!normalized) {
-      localStorage.removeItem(LAST_APP_ROUTE_STORAGE_KEY);
+      windowStorage().removeItem(LAST_APP_ROUTE_STORAGE_KEY);
       return null;
     }
 
@@ -109,14 +110,14 @@ export function writeLastAppRoutePath(path: string | null): void {
 
   try {
     if (!path) {
-      localStorage.removeItem(LAST_APP_ROUTE_STORAGE_KEY);
+      windowStorage().removeItem(LAST_APP_ROUTE_STORAGE_KEY);
       return;
     }
 
     const normalized = normalizeLastAppRoutePath(path);
     if (!normalized) {
       if (parseRelativeAppPath(path)) {
-        localStorage.removeItem(LAST_APP_ROUTE_STORAGE_KEY);
+        windowStorage().removeItem(LAST_APP_ROUTE_STORAGE_KEY);
       }
       return;
     }
@@ -126,7 +127,7 @@ export function writeLastAppRoutePath(path: string | null): void {
       path: normalized,
       updatedAt: Date.now(),
     };
-    localStorage.setItem(LAST_APP_ROUTE_STORAGE_KEY, JSON.stringify(stored));
+    windowStorage().setItem(LAST_APP_ROUTE_STORAGE_KEY, JSON.stringify(stored));
   } catch {
     // ignore
   }
@@ -138,7 +139,7 @@ export function clearLastAppRoutePath(): void {
   }
 
   try {
-    localStorage.removeItem(LAST_APP_ROUTE_STORAGE_KEY);
+    windowStorage().removeItem(LAST_APP_ROUTE_STORAGE_KEY);
   } catch {
     // ignore
   }

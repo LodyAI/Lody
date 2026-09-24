@@ -23,8 +23,8 @@
  * overrides the auto left margin from `mx-auto` and pins that row to the
  * pane edge. Indent with padding or an inner wrapper instead.
  */
-/** Horizontal inset shared by header, stream rows, context strip, composer. */
-export const CONVERSATION_GUTTER_X_CLASS = 'px-3 sm:px-4';
+/** Horizontal inset shared by stream rows, context strip, composer. */
+export const CONVERSATION_GUTTER_X_CLASS = 'px-[14px] sm:px-[18px]';
 
 // 46rem (736px): the common chat-column measure — max-w-3xl (48rem) minus 1rem
 // side padding. Wide enough for code blocks, narrow enough to stay readable.

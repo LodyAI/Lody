@@ -1,0 +1,173 @@
+---
+title: Multi-Agent Collaboration with Claude Code
+description: Use Claude Code to coordinate Codex, Kimi, and Grok in Lody. Delegate PRs and issues, share context with @ mentions, and review fixes across repos and machines.
+---
+
+You have a queue of issues, several open PRs, and a bug that might involve three repositories. You want Claude Code to work through the queue, delegate fixes to Kimi, ask Codex to review them, and bring the results back.
+
+In Lody, you can organize that work from one conversation. A coding agent can create other sessions, send them instructions, read their progress, and follow up. Agents can also message each other: a reviewer can send findings to the agent writing the fix, which can ask for another review when the patch is ready.
+
+This guide shows how to use **Claude Code as an orchestrator** for that workflow. The examples are illustrative prompts you can adapt to your repositories; they are not results from a benchmark or a recorded production run.
+
+## What the orchestrator does
+
+The orchestrator keeps track of the overall task: what needs attention, which changes depend on each other, who is working on each part, and what still needs verification. The other agents carry out focused assignments in their own conversations.
+
+Here is one possible division of work:
+
+| Conversation | Assignment | What it returns |
+| --- | --- | --- |
+| Claude Code | Inspect the issue and PR queue, assign work, follow up | Current status, dependencies, and unresolved decisions |
+| Kimi | Implement a scoped fix | Patch, commit, and verification results |
+| Codex | Review that patch | Findings tied to the reviewed commit |
+| Grok | Investigate another affected repository | Findings and proposed interface changes |
+
+Those roles are choices for this task. You can switch them, use several instances of the same agent, or bring another compatible agent into the workspace. Grok can also implement a fix,
+review a patch, or coordinate other sessions when selected for that assignment.
+
+Lody provides the [cross-session tools](/docs/session-orchestration/) used to organize this work. This guide uses those tools across Claude Code, Kimi, Codex, and Grok sessions; it does not configure Claude Code's native Agent Teams feature.
+
+## Set up the workspace
+
+[Connect a machine to Lody](/docs/quickstart/) and make sure the [agent configurations](/docs/agents/) you want to use are available there. The target machines need to be online, and the agents need access to the repositories and any GitHub tools required for their assignments.
+
+The examples below use Claude Code for coordination and Kimi, Codex, or Grok for focused work.
+Start a Claude Code session for coordination. Tell it which repositories, PRs, or issues to inspect. Give editing tasks their own [Git worktrees](/docs/worktrees/) so parallel agents have separate working directories. A new worktree fork starts from committed `HEAD`; uncommitted changes in another directory will not appear there automatically.
+
+The first useful assignment is to understand the queue before changing code.
+
+## 1. Have Claude Code triage PRs and issues
+
+A queue often contains overlapping work. An issue may already have a PR, two PRs may solve the same problem, or an SDK change may need to land before a client update. Ask the coordinator to identify those relationships first.
+
+```text
+Use the Lody session tools to coordinate this work.
+
+Inspect these PRs and issues: [paste links].
+For each item, identify the affected repository, current state,
+existing implementation work, and dependencies on other items.
+
+Then delegate independent fixes to Kimi sessions and reviews to Codex
+sessions. Give each editing task a separate worktree. Include the
+issue, scope, expected behavior, and verification requirements
+in each assignment. Reuse an existing session when it already owns the work.
+
+Bring back the session links, findings, and anything that needs my decision.
+Keep merging and deployment for my review.
+```
+
+A useful assignment is concrete enough that the receiving agent can work without reconstructing the entire queue. For example: “Fix duplicate submissions in the client; preserve the existing retry behavior; reproduce the bug and verify the patch.” Include the relevant issue and repository, rather than relying on another session to know what “that bug” means.
+
+The coordinator should distinguish a task that finished from a change that is ready. A patch can be complete while its review, dependency, or integration check is still pending.
+
+## 2. Coordinate a fix across repositories
+
+Consider an illustrative bug: retrying a request can create the same record twice. The client starts the retry, the SDK constructs the request, and the server decides whether it has already handled it.
+
+You can start an investigation in each repository at the same time. Before implementation, have the agents compare their findings and agree on the behavior crossing repository boundaries.
+
+```text
+Investigate duplicate records after a request retry across these repositories:
+[client repo], [SDK repo], [server repo].
+
+Assign a Kimi session to the client, a Codex session to the SDK, and a Grok
+session to the server. Ask the agents to exchange
+findings about where retries originate and how duplicate requests are handled.
+Have them agree on the request contract before making dependent changes.
+
+Implement independent parts in parallel. Each agent should report its
+commit, checks run, and dependencies on changes in the other repositories.
+
+Collect the results and arrange an integration check using the updated
+components together. Report the required merge order and remaining gaps.
+```
+
+The important exchange might be a small detail: whether the client or SDK creates a request identifier, and whether retries preserve it. Sending that decision to the other sessions keeps the implementations aligned.
+
+Separate worktrees keep file edits apart. Cross-repository correctness still depends on checking the components together. Three passing test suites do not by themselves show that the client, SDK, and server agree on the same contract.
+
+## 3. Run a review and fix loop between agents
+
+Once a patch exists, give the reviewer an exact target. A branch can move while the review is running, so include the repository, base, and commit to inspect.
+
+You can ask the coordinator to arrange the exchange:
+
+```text
+Ask a Codex session to review the Kimi session's patch.
+Identify the repository, base commit, and current head commit first.
+The reviewer should inspect the diff without editing it and send actionable
+findings to the implementing session, including file locations and a reproduction
+where possible.
+
+Ask the implementing agent to fix those findings and reply with the new commit
+and verification results. Have the reviewer inspect that updated commit.
+
+Stop when no actionable findings remain, or after two review/fix rounds.
+If there is disagreement or a blocker, bring it back to me.
+Summarize the commits reviewed and anything still unverified.
+```
+
+You can also direct an agent to contact another existing session: “Send your findings to the implementation session and ask it to address them,” or “Ask the review session to check your latest commit.” Use a [session mention](/docs/mention/) to identify the conversation when composing the instruction.
+
+The exchange can go in both directions. The implementation agent can ask the reviewer to clarify a finding; the reviewer can request a missing reproduction. You can open either conversation to add context or change the assignment.
+
+The round limit in this example is part of the instruction you give. It provides a point to bring unresolved work back to you instead of repeatedly asking agents to settle a disagreement. An agent reporting no findings is useful evidence, but the diff and verification results still deserve inspection.
+
+## Mention another conversation to connect the work
+
+In a Lody conversation, type `@` and select another conversation to reference it in your message.
+You can then ask the current agent to contact that session, catch up on its findings, or give it a
+new assignment. This gives agents a direct way to exchange the context they need without you
+copying messages between chats.
+
+For example, select the SDK investigation conversation with `@`, then ask:
+
+```text
+Ask the mentioned session what it found about request retries.
+Send it our client-side findings, agree on the request identifier behavior,
+and use that agreement to update our implementation plan.
+```
+
+Or mention the review conversation and ask the implementation agent to send its latest commit and
+verification results there for another check. The mention identifies the conversation; your
+instruction tells the agent what information to request or send. The agents exchange relevant
+context through messages and available session history while keeping their own conversations.
+
+## Collaborate across machines and agents
+
+The participating sessions can run on different machines connected to Lody. For example, Claude
+Code on your laptop can coordinate a Kimi session working on the SDK on a workstation and a Codex
+session investigating the server on a remote development machine.
+
+| Machine | Agent | Work |
+| --- | --- | --- |
+| Laptop | Claude Code | Coordinate the investigation and collect results |
+| Workstation | Kimi | Investigate and fix the SDK |
+| Remote development machine | Codex | Investigate the server and review the shared contract |
+
+Use session mentions and messages to connect their work just as you would for sessions on one
+machine. Each agent uses the repository checkout, tools, and runtime available on its execution
+machine. The target machines must be online, with the necessary workspace access and compatible
+agent configurations.
+
+Messages can carry findings, interface decisions, commit references, and review requests. To test
+changes together, make the corresponding commits or artifacts available on the machine performing
+the integration check; exchanging conversation context does not transfer uncommitted files.
+
+## Keep the handoffs specific
+
+Agents working in separate sessions have their own conversation histories. Send the information needed for the next task explicitly:
+
+- **Before implementation:** the repository, issue, scope, expected behavior, and relevant interface decisions.
+- **Before review:** the base and head commits, the problem the patch addresses, and checks already run.
+- **After a fix:** the new commit, which findings it addresses, and any remaining limitations.
+
+These handoffs make the workflow easier for people to follow too. In Lody, you can inspect [diffs beside the conversation](/docs/diff-viewer/) and [share a session with a teammate](/docs/session-handoff/) who needs to continue the work. Team access follows machine and project sharing permissions.
+
+## Start with one issue and two agents
+
+Choose an issue you understand. Have Claude Code inspect it and delegate a focused fix to Kimi or Codex. Add a separate review session, ask the two agents to exchange findings, and inspect the resulting patch yourself.
+
+Once that workflow is useful, expand it to a queue or a bug spanning multiple repositories. The same operations—create a session, send a message, inspect progress, and follow up—support each case.
+
+[Get started with Lody](/docs/quickstart/) and use [Agent Session Control](/docs/session-orchestration/) to organize your first assignment.

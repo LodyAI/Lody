@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Loader2 } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import { toast } from 'sonner';
 import type { IconType } from 'react-icons';
 import { SiApple, SiDiscord, SiGithub } from 'react-icons/si';
@@ -49,10 +49,25 @@ const PROVIDERS: {
    * Kept as literal strings so Tailwind's JIT emits them. */
   hoverClassName?: string;
 }[] = [
-  { id: 'github', Icon: SiGithub, boundClassName: 'text-foreground', hoverClassName: 'group-hover:text-foreground' },
+  {
+    id: 'github',
+    Icon: SiGithub,
+    boundClassName: 'text-foreground',
+    hoverClassName: 'group-hover:text-foreground',
+  },
   { id: 'google', Icon: FcGoogle, flat: true },
-  { id: 'apple', Icon: SiApple, boundClassName: 'text-foreground', hoverClassName: 'group-hover:text-foreground' },
-  { id: 'discord', Icon: SiDiscord, boundClassName: 'text-[#5865F2]', hoverClassName: 'group-hover:text-[#5865F2]' },
+  {
+    id: 'apple',
+    Icon: SiApple,
+    boundClassName: 'text-foreground',
+    hoverClassName: 'group-hover:text-foreground',
+  },
+  {
+    id: 'discord',
+    Icon: SiDiscord,
+    boundClassName: 'text-[#5865F2]',
+    hoverClassName: 'group-hover:text-[#5865F2]',
+  },
 ];
 
 export function LinkedAccountsList({
@@ -67,7 +82,10 @@ export function LinkedAccountsList({
   const boundProviders = new Set(accounts.map((account) => account.providerId));
 
   const providerLabel = (providerId: string): string =>
-    t(`settings.profile.providers.${providerId}`, providerId.charAt(0).toUpperCase() + providerId.slice(1));
+    t(
+      `settings.profile.providers.${providerId}`,
+      providerId.charAt(0).toUpperCase() + providerId.slice(1)
+    );
 
   const iconClassName = (
     bound: boolean,
@@ -110,7 +128,7 @@ export function LinkedAccountsList({
   if (loading) {
     return (
       <div className={cn('flex items-center gap-2 text-[11px] text-muted-foreground', className)}>
-        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+        <Spinner className="h-3.5 w-3.5" />
         {t('settings.profile.bindings.loading')}
       </div>
     );
@@ -199,7 +217,7 @@ export function LinkedAccountsList({
               }}
               disabled={isConnecting}
             >
-              {isConnecting ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : null}
+              {isConnecting ? <Spinner className="mr-1.5 h-3.5 w-3.5" /> : null}
               {t('settings.profile.bindings.connectConfirm')}
             </Button>
           </DialogFooter>

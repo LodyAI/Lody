@@ -1,9 +1,10 @@
+import { PagedFileViewer } from './paged-file-viewer';
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   Copy,
+  Download,
   Eye,
   EyeClosed,
-  Loader2,
   MessageCircle,
   RefreshCw,
   Save,
@@ -11,6 +12,7 @@ import {
   ShieldAlert,
   WrapText,
 } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 import {
@@ -67,6 +69,9 @@ import {
   RecentLocalTextEchoTracker,
 } from '@/lib/code-collab-live-text-update';
 import { getSessionFileMonacoLanguageId, isSessionMarkdownPath } from '@/lib/session-file-language';
+import { downloadBytesAsFile } from '@/lib/download-file';
+import { usePostHog } from '@posthog/react';
+import { capturePostHogEvent, getAnalyticsFileKind } from '@/lib/posthog-analytics';
 import { useCodeCollabLiveText } from '@/hooks/use-code-collab-live-text';
 import { useMachineFlockRows } from '@/hooks/use-machine-flock-rows';
 import {
@@ -231,6 +236,7 @@ function SessionFileContentViewImpl({
   onToggleVisualAnnotationInChat,
 }: SessionFileContentViewProps) {
   const { t } = useTranslation();
+  const postHog = usePostHog();
   const tRef = useLatestRef(t);
   const onSaveStateChangeRef = useLatestRef(onSaveStateChange);
   const activeVSCodeTheme = useActiveVSCodeTheme();
@@ -641,6 +647,9 @@ function SessionFileContentViewImpl({
   >(undefined);
   const externalSeqRef = useRef(0);
   const latestEditorTextRef = useRef<string | undefined>(undefined);
+  const lastAckedExternalTextRef = useRef<
+    { text: string; snapshot: SessionFileContentSnapshot } | undefined
+  >(undefined);
   const latestStableSelectionRef = useRef<StableProviderEditorSelection | null>(null);
   const recentLocalTextEchoTrackerRef = useRef(new RecentLocalTextEchoTracker());
   const hasAcceptedLocalContentChangeRef = useRef(false);
@@ -672,20 +681,22 @@ function SessionFileContentViewImpl({
   useEffect(() => {
     setExternalTextUpdate(undefined);
     latestEditorTextRef.current = undefined;
+    lastAckedExternalTextRef.current = undefined;
     latestStableSelectionRef.current = null;
     recentLocalTextEchoTrackerRef.current.clear();
     hasAcceptedLocalContentChangeRef.current = false;
   }, [liveFileId]);
 
-  const openedLiveText =
+  const openedLiveSnapshot =
     shouldUseProviderFileContent && data.status === 'ready' && data.snapshot.kind === 'text'
-      ? data.snapshot.text
+      ? data.snapshot
       : undefined;
+  const openedLiveText = openedLiveSnapshot?.text;
 
   useEffect(() => {
-    if (openedLiveText === undefined) return;
-    latestEditorTextRef.current = openedLiveText;
-  }, [liveFileId, openedLiveText]);
+    if (openedLiveSnapshot === undefined) return;
+    latestEditorTextRef.current = openedLiveSnapshot.text;
+  }, [liveFileId, openedLiveSnapshot]);
 
   const liveTextUpdate = useCodeCollabLiveText(
     shouldUseProviderFileContent ? fileProvider : null,
@@ -751,9 +762,22 @@ function SessionFileContentViewImpl({
 
   const handleExternalTextUpdateApplied = useCallback(
     (result: 'applied' | 'no-op') => {
+      // An acknowledged snapshot must not replay when preview or tab switching
+      // remounts the editor. Preserve a newer update awaiting its own acknowledgement.
+      if (externalTextUpdate) {
+        setExternalTextUpdate((current) =>
+          current?.seq === externalTextUpdate.seq ? undefined : current
+        );
+      }
       if (result === 'applied') {
         if (externalTextUpdate) {
           latestEditorTextRef.current = externalTextUpdate.text;
+          if (data.status === 'ready') {
+            lastAckedExternalTextRef.current = {
+              text: externalTextUpdate.text,
+              snapshot: data.snapshot,
+            };
+          }
         }
         if (preservePendingOnNextExternalTextAppliedRef.current) {
           preservePendingOnNextExternalTextAppliedRef.current = false;
@@ -766,11 +790,17 @@ function SessionFileContentViewImpl({
       if (result === 'no-op') {
         if (externalTextUpdate) {
           latestEditorTextRef.current = externalTextUpdate.text;
+          if (data.status === 'ready') {
+            lastAckedExternalTextRef.current = {
+              text: externalTextUpdate.text,
+              snapshot: data.snapshot,
+            };
+          }
         }
         return;
       }
     },
-    [externalTextUpdate, handleExternalTextAppliedToSaveState]
+    [data, externalTextUpdate, handleExternalTextAppliedToSaveState]
   );
 
   const handleSaveConflictResolve = useCallback(
@@ -864,6 +894,16 @@ function SessionFileContentViewImpl({
     saveStatus.kind === 'error' ||
     saveStatus.kind === 'conflict_pending' ||
     saveStatus.kind === 'conflict';
+  const resolveProviderEditorMountText = (snapshot: { text: string }): string => {
+    if (hasAcceptedLocalContentChangeRef.current || isProviderEditorDirty) {
+      return latestEditorTextRef.current ?? snapshot.text;
+    }
+    const acked = lastAckedExternalTextRef.current;
+    if (acked && acked.snapshot === snapshot) {
+      return acked.text;
+    }
+    return snapshot.text;
+  };
   markProviderConflictPendingRef.current = markProviderConflictPending;
   useEffect(() => {
     if (saveStatus.kind === 'saved') {
@@ -934,6 +974,16 @@ function SessionFileContentViewImpl({
     lastCopyMarkdownRequestSeqRef.current = copyMarkdownRequestSeq;
     void handleCopyMarkdown();
   }, [copyMarkdownRequestSeq, data, handleCopyMarkdown, normalizedPath]);
+  const isHtmlFile = isHtmlPath(normalizedPath);
+  const handleDownloadHtml = useCallback(() => {
+    if (data.status !== 'ready' || data.snapshot.kind !== 'text') return;
+    const content = latestEditorTextRef.current ?? data.snapshot.text;
+    downloadBytesAsFile(normalizedPath, new TextEncoder().encode(content));
+    capturePostHogEvent(postHog, 'file_preview/downloaded', {
+      file_kind: getAnalyticsFileKind(normalizedPath),
+      source: 'file_viewer',
+    });
+  }, [data, normalizedPath, postHog]);
   const saveViewState = useMemo<SessionFileSaveViewState>(
     () => ({
       dirty: isProviderEditorDirty,
@@ -1004,6 +1054,16 @@ function SessionFileContentViewImpl({
     normalizedPath,
     shouldUseProviderFileContent,
   ]);
+
+  const handleReloadHtmlPreview = useCallback(() => {
+    setHtmlPreviewCommand((current) => ({
+      id: (current?.id ?? 0) + 1,
+      action: 'reload',
+    }));
+    if (shouldUseProviderFileContent) {
+      handleProviderRefresh();
+    }
+  }, [handleProviderRefresh, shouldUseProviderFileContent]);
 
   // LSP entry points. Enabled whenever the provider supplies content
   // for this view (including read-only mode — read roles can
@@ -1134,7 +1194,7 @@ function SessionFileContentViewImpl({
   if (showProviderConnecting) {
     body = (
       <div className="flex h-full flex-col items-center justify-center gap-2 p-3 text-sm text-muted-foreground text-center">
-        <Loader2 className="h-4 w-4 animate-spin" />
+        <Spinner className="h-4 w-4" />
         <span>
           {fileProviderMessage ??
             t('sessions.codeSession.connecting', 'Connecting to code session…')}
@@ -1144,7 +1204,7 @@ function SessionFileContentViewImpl({
   } else if (showLocalLoading || data.status === 'loading') {
     body = (
       <div className="flex h-full flex-col items-center justify-center gap-2 p-3 text-sm text-muted-foreground text-center">
-        <Loader2 className="h-4 w-4 animate-spin" />
+        <Spinner className="h-4 w-4" />
         <span>
           {shouldUseLocalFileContent
             ? localFileLoadingLabel
@@ -1160,8 +1220,24 @@ function SessionFileContentViewImpl({
         {...(fileErrorActions ? { fileActions: fileErrorActions } : {})}
       />
     );
+  } else if (data.snapshot.kind === 'paged-text') {
+    body = (
+      <PagedFileViewer
+        key={normalizedPath}
+        source={data.snapshot.source}
+        active={isActiveSurface}
+        onOpenExternal={fileErrorActions?.localHost?.onOpen}
+      />
+    );
   } else if (data.snapshot.kind === 'binary') {
-    body = <SessionFileBinaryPreview path={normalizedPath} bytes={data.snapshot.bytes} />;
+    body = (
+      <SessionFileBinaryPreview
+        path={normalizedPath}
+        bytes={data.snapshot.bytes}
+        url={data.snapshot.url}
+        fileActions={sessionFileActions.buildErrorActions(normalizedPath, data.snapshot)}
+      />
+    );
   } else if (data.snapshot.kind === 'missing') {
     body = (
       <SessionFileErrorState
@@ -1191,7 +1267,7 @@ function SessionFileContentViewImpl({
         />
         {htmlPreviewLoading ? (
           <div className="pointer-events-none absolute right-3 top-3 rounded bg-background/90 p-1.5 text-muted-foreground shadow-sm">
-            <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+            <Spinner className="h-3.5 w-3.5" aria-hidden="true" />
           </div>
         ) : null}
         {htmlRuntimeError ? (
@@ -1215,11 +1291,7 @@ function SessionFileContentViewImpl({
             {isMarkdownTextFile && preferNativeMarkdownSelection ? (
               <NativeMarkdownSource
                 key={liveFileId ?? normalizedPath}
-                text={
-                  hasAcceptedLocalContentChangeRef.current || isProviderEditorDirty
-                    ? (latestEditorTextRef.current ?? data.snapshot.text)
-                    : data.snapshot.text
-                }
+                text={resolveProviderEditorMountText(data.snapshot)}
                 readOnly={!isProviderFileEditable}
                 wordWrap={wordWrapEnabled}
                 selectedLines={selectedLines}
@@ -1236,11 +1308,7 @@ function SessionFileContentViewImpl({
             ) : (
               <LazyProviderTextMonacoViewer
                 key={lspModelUri?.toString() ?? liveFileId ?? normalizedPath}
-                text={
-                  hasAcceptedLocalContentChangeRef.current || isProviderEditorDirty
-                    ? (latestEditorTextRef.current ?? data.snapshot.text)
-                    : data.snapshot.text
-                }
+                text={resolveProviderEditorMountText(data.snapshot)}
                 language={getSessionFileMonacoLanguageId(normalizedPath)}
                 selectedLines={selectedLines}
                 resolvedTheme={resolvedTheme}
@@ -1320,6 +1388,11 @@ function SessionFileContentViewImpl({
   // button only appears when a Monaco editor is mounted — a rendered SVG/Markdown
   // preview has no editor to search.
   const showPreviewToggle = isSvgTextFile || isMarkdownTextFile || isHtmlTextFile;
+  const filePreviewActive = isSvgTextFile
+    ? svgRenderMode === 'rendered'
+    : isMarkdownTextFile
+      ? markdownRenderMode === 'rendered'
+      : htmlRenderMode === 'rendered';
   const showSearchButton =
     isTextFileReady &&
     !showSvgRendered &&
@@ -1329,10 +1402,11 @@ function SessionFileContentViewImpl({
   const showWordWrapButton =
     isTextFileReady && !showSvgRendered && !showMarkdownRendered && !showHtmlRendered;
   const showSaveButton = isProviderFileEditable && isTextFileReady;
-  const showRefreshButton = shouldUseProviderFileContent && isTextFileReady;
+  const showRefreshButton = shouldUseProviderFileContent && isTextFileReady && !showHtmlRendered;
   const showViewerTopBar =
     showPreviewToggle ||
     isMarkdownTextFile ||
+    (isHtmlFile && isTextFileReady) ||
     showSearchButton ||
     showSaveButton ||
     showRefreshButton;
@@ -1344,14 +1418,14 @@ function SessionFileContentViewImpl({
           <div className="ml-auto flex items-center gap-1">
             {showPreviewToggle ? (
               <FilePreviewToggle
-                active={
-                  isSvgTextFile
-                    ? svgRenderMode === 'rendered'
-                    : isMarkdownTextFile
-                      ? markdownRenderMode === 'rendered'
-                      : htmlRenderMode === 'rendered'
-                }
+                active={filePreviewActive}
                 onToggle={() => {
+                  if (!filePreviewActive) {
+                    capturePostHogEvent(postHog, 'file_preview/opened', {
+                      file_kind: getAnalyticsFileKind(normalizedPath),
+                      source: 'preview_toggle',
+                    });
+                  }
                   if (isSvgTextFile) {
                     setSvgRenderMode((mode) => (mode === 'rendered' ? 'code' : 'rendered'));
                   } else if (isMarkdownTextFile) {
@@ -1407,17 +1481,30 @@ function SessionFileContentViewImpl({
             {showHtmlRendered ? (
               <button
                 type="button"
-                onClick={() =>
-                  setHtmlPreviewCommand((current) => ({
-                    id: (current?.id ?? 0) + 1,
-                    action: 'reload',
-                  }))
-                }
+                onClick={handleReloadHtmlPreview}
+                disabled={isRefreshing}
                 title={t('sessions.browser.reload', 'Reload')}
                 aria-label={t('sessions.browser.reload', 'Reload')}
+                aria-busy={isRefreshing}
+                className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <Spinner
+                  icon={RefreshCw}
+                  spinning={isRefreshing}
+                  className="h-3.5 w-3.5"
+                  aria-hidden="true"
+                />
+              </button>
+            ) : null}
+            {isHtmlFile && isTextFileReady ? (
+              <button
+                type="button"
+                onClick={handleDownloadHtml}
+                title={t('sessions.fileActions.download', 'Download file')}
+                aria-label={t('sessions.fileActions.download', 'Download file')}
                 className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
               >
-                <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
+                <Download className="h-3.5 w-3.5" aria-hidden="true" />
               </button>
             ) : null}
             {showWordWrapButton ? (
@@ -1469,7 +1556,7 @@ function SessionFileContentViewImpl({
                 )}
               >
                 {saveStatus.kind === 'saving' ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+                  <Spinner className="h-3.5 w-3.5" aria-hidden="true" />
                 ) : (
                   <Save className="h-3.5 w-3.5" aria-hidden="true" />
                 )}
@@ -1492,8 +1579,10 @@ function SessionFileContentViewImpl({
                 aria-busy={isRefreshing}
                 className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
               >
-                <RefreshCw
-                  className={cn('h-3.5 w-3.5', isRefreshing && 'animate-spin')}
+                <Spinner
+                  icon={RefreshCw}
+                  spinning={isRefreshing}
+                  className="h-3.5 w-3.5"
                   aria-hidden="true"
                 />
               </button>

@@ -11,7 +11,6 @@ import {
   Folder,
   GitBranch,
   Github,
-  ListTodo,
   Pause,
   Play,
   Target,
@@ -29,6 +28,7 @@ import {
   type PrStatus,
   type SessionGoalCommand,
   type SessionGoalMessage,
+  type SessionPullRequestCiState,
   type SessionPullRequestMeta,
 } from '@lody/shared';
 import { cn } from '@/lib/utils';
@@ -48,9 +48,10 @@ import {
 } from '@/ui/dropdown-menu';
 import { GoalActionButton, formatTokensCompact } from './session-goal-banner';
 import { ScheduledTaskList, useResolvedScheduledTasks } from './scheduled-tasks-panel';
+import { SessionPrIcon } from '@/components/sidebar-row-shared';
 import { PR_STATUS_META } from './pull-request-badge';
 import { useSessionStatusPresentation, type SessionStatusStripState } from './session-status-strip';
-import { PrMergeButton } from './pr-merge-button';
+import { PrMergeButton, PrMergeMethodLabel } from './pr-merge-button';
 
 /**
  * Shared contract: the bar renders each item either collapsed in the cluster
@@ -60,43 +61,6 @@ import { PrMergeButton } from './pr-merge-button';
 export type InfoBarItemMode = { mode: 'cluster'; onPromote: () => void } | { mode: 'stage' };
 
 /* ── Status (offline / removed) ──────────────────────────────────────── */
-
-/**
- * The task this session belongs to.
- *
- * Ambient and neutral like the other context chips — a task link is not a status,
- * so it carries no semantic colour. Its one job is being the way back to the task
- * from inside the work.
- */
-export function TaskChip({
-  title,
-  onOpen,
-  ...itemMode
-}: { title: string; onOpen?: (() => void) | undefined } & InfoBarItemMode) {
-  const { t } = useTranslation();
-  const label = title.trim() || t('tasks.untitled', 'Untitled task');
-
-  if (itemMode.mode === 'cluster') {
-    return (
-      <ClusterChip
-        icon={ListTodo}
-        label={label}
-        textClassName="text-muted-foreground"
-        onPromote={itemMode.onPromote}
-      />
-    );
-  }
-
-  return (
-    <StageChip
-      icon={ListTodo}
-      label={label}
-      textClassName="text-muted-foreground"
-      summary={label}
-      {...(onOpen ? { detail: { kind: 'action', onAction: onOpen, ariaLabel: label } } : {})}
-    />
-  );
-}
 
 export function StatusChip({
   state,
@@ -368,7 +332,7 @@ export function ScheduleChip({
 
 const PR_STATUS_TEXT: Record<PrStatus, string> = {
   open: 'text-github-open',
-  merged: 'text-github-merged',
+  merged: 'text-pr-merged',
   closed: 'text-github-closed',
   draft: 'text-github-draft',
 };
@@ -426,10 +390,6 @@ function ContextChipActions({ actions }: { actions: readonly ContextChipAction[]
     );
   }
 
-  const standardOverflowActions = overflowActions.filter(
-    (action): action is ContextChipStandardAction => action.kind !== 'merge'
-  );
-
   return (
     <div className="flex shrink-0 items-center overflow-hidden rounded-md border border-foreground/[0.08] bg-foreground/[0.03] dark:border-transparent dark:bg-muted-foreground/[0.08]">
       <button
@@ -441,7 +401,7 @@ function ContextChipActions({ actions }: { actions: readonly ContextChipAction[]
       >
         <span className="truncate">{primaryAction.label}</span>
       </button>
-      {standardOverflowActions.length > 0 ? (
+      {overflowActions.length > 0 ? (
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <button
@@ -454,15 +414,34 @@ function ContextChipActions({ actions }: { actions: readonly ContextChipAction[]
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent side="top" align="end" sideOffset={6}>
-            {standardOverflowActions.map((action) => (
-              <DropdownMenuItem
-                key={action.id}
-                disabled={action.disabled}
-                onSelect={action.onClick}
-              >
-                {action.label}
-              </DropdownMenuItem>
-            ))}
+            {overflowActions.map((action) =>
+              // Merge can be demoted out of the primary slot (unpublished work
+              // outranks it) and must stay reachable rather than silently vanish.
+              // Here it collapses to one item performing the already-selected
+              // method; picking a different method remains the split button's
+              // job, which is back as soon as merge leads again.
+              action.kind === 'merge' ? (
+                <DropdownMenuItem
+                  key={action.id}
+                  disabled={action.disabled || action.isMerging}
+                  onSelect={() => void action.onMerge(action.method)}
+                >
+                  {action.isMerging ? (
+                    t('sessions.prTab.merging', 'Merging…')
+                  ) : (
+                    <PrMergeMethodLabel method={action.method} />
+                  )}
+                </DropdownMenuItem>
+              ) : (
+                <DropdownMenuItem
+                  key={action.id}
+                  disabled={action.disabled}
+                  onSelect={action.onClick}
+                >
+                  {action.label}
+                </DropdownMenuItem>
+              )
+            )}
           </DropdownMenuContent>
         </DropdownMenu>
       ) : null}
@@ -560,6 +539,7 @@ export function ContextChip({
   diffStat,
   prCiRuns,
   onOpenPrCiRun,
+  prCiState,
   ...itemMode
 }: {
   projectName?: string | null;
@@ -578,6 +558,8 @@ export function ContextChip({
   diffStat?: { add: number; del: number } | null;
   prCiRuns?: readonly PrCiRun[];
   onOpenPrCiRun?: (run: PrCiRun) => void;
+  /** Compact CI state from the session row; live runs override it when present. */
+  prCiState?: SessionPullRequestCiState | null;
 } & InfoBarItemMode) {
   const { t } = useTranslation();
   const hasDiff = diffStat != null && diffStat.add + diffStat.del > 0;
@@ -604,6 +586,15 @@ export function ContextChip({
   // cluster stays uniform-width (the "#1234" label lived only here and caused
   // the layout jump on hand-off).
   const StatusIcon = statusMeta?.icon ?? LocationIcon;
+  const liveCiOverall = prCiRuns?.length ? summarizePrCiRuns(prCiRuns) : null;
+  const compactCiState: SessionPullRequestCiState | null | undefined =
+    liveCiOverall === 'failing'
+      ? 'f'
+      : liveCiOverall === 'running'
+        ? 'p'
+        : liveCiOverall === 'passing'
+          ? 's'
+          : prCiState;
   const statusText = status ? PR_STATUS_TEXT[status] : '';
   const prNumber = pr
     ? (getSessionPullRequestLegacyFields(pr).number ?? parseGitHubPrNumber(pr.url))
@@ -639,14 +630,14 @@ export function ContextChip({
           statusText
         )}
       >
-        <StatusIcon className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+        <SessionPrIcon prStatus={status ?? 'open'} prCiState={compactCiState} />
         {value ? (
           <span className="hidden shrink-0 tabular-nums @[420px]:inline">{value}</span>
         ) : null}
       </button>
     ) : (
       <span className={cn('flex h-6 shrink-0 items-center gap-1 px-1 font-semibold', statusText)}>
-        <StatusIcon className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+        <SessionPrIcon prStatus={status ?? 'open'} prCiState={compactCiState} />
         {value ? (
           <span className="hidden shrink-0 tabular-nums @[420px]:inline">{value}</span>
         ) : null}

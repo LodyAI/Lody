@@ -11,11 +11,14 @@ import {
 } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
+import { usePostHog } from '@posthog/react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { Check, Loader2, Search, X } from 'lucide-react';
+import { Check, Search, X } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 
 import { filterFuzzyOptions } from '@/lib/fuzzy-option-filter';
+import { capturePickerSearchSelected, type SearchPickerKind } from '@/lib/picker-search-analytics';
 import { cn } from '@/lib/utils';
 
 // Above this many (filtered) options the dropdown list is virtualized — big branch
@@ -59,6 +62,8 @@ export type MobileInlinePickerProps<T extends string = string> = {
   /** Render a search input above the options list. */
   searchable?: boolean;
   searchPlaceholder?: string;
+  /** Reports picks made after typing a search term (`picker/search_selected`). */
+  searchAnalyticsPicker?: SearchPickerKind;
   /** Optional className for the trigger button. */
   triggerClassName?: string;
   /** Optional className for the expansion panel wrapper. */
@@ -166,6 +171,7 @@ export function MobileInlinePicker<T extends string = string>({
   loadingText,
   searchable = false,
   searchPlaceholder,
+  searchAnalyticsPicker,
   triggerClassName,
   expansionClassName,
   expansionPanelClassName,
@@ -242,7 +248,16 @@ export function MobileInlinePicker<T extends string = string>({
     [options, query]
   );
 
+  const postHog = usePostHog();
   const handleSelect = (next: T) => {
+    if (searchAnalyticsPicker) {
+      capturePickerSearchSelected(postHog, {
+        picker: searchAnalyticsPicker,
+        term: query,
+        rank: filteredOptions.findIndex((opt) => opt.value === next),
+        resultCount: filteredOptions.length,
+      });
+    }
     onChange(next);
     setOpen(false);
     // Return focus to the trigger so keyboard users stay in the flow (the search
@@ -474,7 +489,7 @@ export function MobileInlinePicker<T extends string = string>({
       <span className="flex min-w-0 flex-1 items-center gap-2">
         {loading ? (
           <>
-            <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin opacity-70" aria-hidden="true" />
+            <Spinner className="h-3.5 w-3.5 shrink-0 opacity-70" aria-hidden="true" />
             {loadingText ? <span className="truncate">{loadingText}</span> : triggerContent}
           </>
         ) : (

@@ -440,6 +440,16 @@ export function getChatLandingLocalProjectAvailability({
   return isMachineFlockRemoteSynced ? 'unavailable' : 'pending';
 }
 
+export function shouldReportLocalProjectUnavailable({
+  availability,
+  removalInProgress,
+}: {
+  availability: 'pending' | 'available' | 'unavailable';
+  removalInProgress: boolean;
+}): boolean {
+  return availability === 'unavailable' && !removalInProgress;
+}
+
 export function getChatLandingSelectedMachineProjectStatus({
   contextType,
   selectedMachineId,
@@ -599,7 +609,6 @@ export type ChatLandingSearch = {
   machine?: string;
   project?: string;
   repo?: string;
-  resetDraftKey?: string;
 };
 
 export function parseChatLandingSearch(search: Record<string, unknown>): ChatLandingSearch {
@@ -611,7 +620,6 @@ export function parseChatLandingSearch(search: Record<string, unknown>): ChatLan
     machine: typeof search.machine === 'string' ? search.machine : undefined,
     project: typeof search.project === 'string' ? search.project : undefined,
     repo: typeof search.repo === 'string' ? search.repo : undefined,
-    resetDraftKey: typeof search.resetDraftKey === 'string' ? search.resetDraftKey : undefined,
   };
 }
 

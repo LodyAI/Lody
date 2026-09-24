@@ -1,3 +1,4 @@
+import { withHistoryPort } from './history-port-fixture';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { MessageHandler } from '../src/lib/message-handler';
 import type { Logger } from '../src/utils/logger';
@@ -10,6 +11,7 @@ import {
 import type { SessionManager } from '../src/session/session-manager';
 import type { LoroDocumentManager } from '../src/lib/loro/doc';
 import { createTestCloudPort } from './test-cloud-port';
+import { fakeSessionData } from './session-data-test-double';
 
 const createSilentLogger = (): Logger => ({
   info: () => {},
@@ -38,19 +40,24 @@ describe('MessageHandler chat resume', () => {
     };
 
     let history: unknown[] = [];
-    const sessionDoc = {
+    const sessionDoc = withHistoryPort({
       getMetaState: vi.fn(async () => meta),
       setStatus: vi.fn(async () => {}),
       setBaseBranch: vi.fn(async () => {}),
       getStatus: vi.fn(async () => SessionStatusFactory.idle()),
       setLastMessageAt: vi.fn(async () => {}),
       popMessageQueue: vi.fn(async () => null),
-      getHistory: vi.fn(async () => history),
+      getHistory: vi.fn(() => history),
       updateHistory: vi.fn(async (updater: (prev: unknown[]) => unknown[]) => {
         history = updater(history);
       }),
       waitUntilSynced: vi.fn(async () => {}),
-    };
+    });
+    (sessionDoc as { sessionData?: unknown }).sessionData = fakeSessionData(
+      sessionDoc.updateHistory as never
+    );
+    Object.assign(sessionDoc, { agentWrites: (sessionDoc as any).sessionData.agentWrites });
+    withHistoryPort(sessionDoc);
 
     const workspaceDocument = {
       sessions: new Map<SessionId, unknown>(),

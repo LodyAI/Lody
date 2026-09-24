@@ -3,8 +3,11 @@
 import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createStore, Provider } from 'jotai';
 
+import { conversationFontSizeAtom } from '../src/atoms/settings';
 import { MobileAppearanceSettings } from '../src/components/mobile/mobile-appearance-settings';
+import type { AppIconBridge } from '../src/components/mobile/mobile-app-icon-settings';
 import { AppearanceSettingsView } from '../src/components/settings/appearance-setting';
 import type { Theme } from '../src/theme-provider';
 import { initI18n } from '../src/i18n';
@@ -28,6 +31,7 @@ function AppearanceHarness({ isElectron }: { isElectron: boolean }) {
   const [terminalFontFamily, setTerminalFontFamily] = useState('Maple Mono');
   const [conversationFontSize, setConversationFontSize] = useState(14);
   const [fontSize, setFontSize] = useState(13);
+  const [fontLigaturesEnabled, setFontLigaturesEnabled] = useState(true);
 
   return (
     <AppearanceSettingsView
@@ -47,6 +51,8 @@ function AppearanceHarness({ isElectron }: { isElectron: boolean }) {
       onSystemFontMenuOpen={vi.fn()}
       terminalFontSize={fontSize}
       onTerminalFontSizeChange={setFontSize}
+      fontLigaturesEnabled={fontLigaturesEnabled}
+      onFontLigaturesEnabledChange={setFontLigaturesEnabled}
     />
   );
 }
@@ -76,6 +82,7 @@ describe('AppearanceSettingsView', () => {
       await act(async () => root?.unmount());
     }
     container?.remove();
+    delete window.__LODY_APP_ICON__;
     vi.unstubAllGlobals();
     Element.prototype.scrollIntoView = originalScrollIntoView;
     root = undefined;
@@ -109,26 +116,98 @@ describe('AppearanceSettingsView', () => {
   it('shows theme and language while hiding Electron-only settings outside Electron', async () => {
     await act(async () => root?.render(<AppearanceHarness isElectron={false} />));
 
-    expect(container?.textContent).toContain('Conversation font size');
+    expect(container?.textContent).toContain('Font size');
     expect(container?.textContent).toContain('Theme');
     expect(container?.textContent).toContain('Language');
     expect(container?.textContent).not.toContain('Interface font');
     expect(container?.textContent).not.toContain('Terminal');
+    expect(container?.textContent).toContain('Font ligatures');
+    expect(container?.textContent).toContain('conversation, code, and tool output');
+    const ligaturesSwitch = container?.querySelector<HTMLButtonElement>(
+      'button[aria-label="Font ligatures"]'
+    );
+    expect(ligaturesSwitch?.getAttribute('aria-checked')).toBe('true');
+    await act(async () => {
+      ligaturesSwitch?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    expect(
+      container?.querySelector('button[aria-label="Font ligatures"]')?.getAttribute('aria-checked')
+    ).toBe('false');
   });
 
-  it('lets the user enter a custom conversation font size', async () => {
+  it('offers the five named font size tiers and commits the picked one', async () => {
     await act(async () => root?.render(<AppearanceHarness isElectron={false} />));
 
-    const sizeInput = container?.querySelector<HTMLInputElement>(
-      'input[aria-label="Conversation font size"]'
+    const sizeTrigger = Array.from(container?.querySelectorAll('button') ?? []).find((node) =>
+      node.textContent?.includes('Default')
     );
-    expect(sizeInput?.value).toBe('14');
+    expect(sizeTrigger).toBeTruthy();
 
     await act(async () => {
-      setInputValue(sizeInput!, '24');
+      sizeTrigger?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
 
-    expect(sizeInput?.value).toBe('24');
+    const items = Array.from(document.body.querySelectorAll('[data-preview-item]'));
+    expect(items.map((node) => node.textContent)).toEqual([
+      'Smaller',
+      'Small',
+      'Default',
+      'Large',
+      'Larger',
+    ]);
+
+    const larger = items.find((node) => node.textContent === 'Larger');
+    await act(async () => {
+      larger?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    expect(sizeTrigger?.textContent).toContain('Larger');
+  });
+
+  it('persists mobile font size picks, including both limits, across remounts', async () => {
+    const store = createStore();
+    store.set(conversationFontSizeAtom, 14);
+    const renderMobile = (settingsStore: ReturnType<typeof createStore>) => (
+      <Provider store={settingsStore}>
+        <MobileAppearanceSettings />
+      </Provider>
+    );
+    await act(async () => root?.render(renderMobile(store)));
+
+    const pickSize = async (label: string) => {
+      const trigger = container?.querySelector<HTMLButtonElement>('button[aria-label="Font size"]');
+      expect(trigger).toBeTruthy();
+      await act(async () => {
+        trigger?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      });
+      const option = Array.from(
+        container?.querySelectorAll<HTMLButtonElement>('[role="option"] button') ?? []
+      ).find((node) => node.textContent?.includes(label));
+      expect(option).toBeTruthy();
+      await act(async () => {
+        option?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      });
+    };
+
+    for (const [label, size] of [
+      ['Smaller', 12],
+      ['Larger', 16],
+      ['Default', 14],
+    ]) {
+      await pickSize(label!);
+      expect(store.get(conversationFontSizeAtom)).toBe(size);
+      expect(JSON.parse(localStorage.getItem('lody-conversation-font-size')!)).toBe(size);
+      expect(container?.querySelector('button[aria-label="Font size"]')?.textContent).toContain(
+        label
+      );
+    }
+
+    await act(async () => root?.render(null));
+    await act(async () => root?.render(renderMobile(createStore())));
+    expect(container?.querySelector('button[aria-label="Font size"]')?.textContent).toContain(
+      'Default'
+    );
+    localStorage.removeItem('lody-conversation-font-size');
   });
 
   it('shows theme and language in mobile appearance settings without terminal settings', async () => {
@@ -136,15 +215,53 @@ describe('AppearanceSettingsView', () => {
 
     expect(container?.textContent).toContain('Theme');
     expect(container?.textContent).toContain('Language');
-    expect(container?.textContent).toContain('Conversation font size');
+    expect(container?.textContent).toContain('Font size');
     expect(container?.textContent).not.toContain('Interface font');
     expect(container?.textContent).not.toContain('Terminal');
+    expect(container?.textContent).toContain('Font ligatures');
+    expect(container?.textContent).toContain('conversation, code, and tool output');
+    const ligaturesSwitch = container?.querySelector<HTMLButtonElement>(
+      'button[aria-label="Font ligatures"]'
+    );
+    expect(ligaturesSwitch?.getAttribute('aria-checked')).toBe('true');
+    await act(async () => {
+      ligaturesSwitch?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    expect(
+      container?.querySelector('button[aria-label="Font ligatures"]')?.getAttribute('aria-checked')
+    ).toBe('false');
+  });
+
+  it('places native app icon selection below font size in narrow and wide appearance layouts', async () => {
+    const bridge: AppIconBridge = {
+      icons: [
+        { name: 'default', previewUrl: '/default.png' },
+        { name: 'alternate', previewUrl: '/alternate.png' },
+      ],
+      getState: async () => ({ supported: true, name: 'default' }),
+      setIcon: async ({ name }) => ({ supported: true, name }),
+    };
+    window.__LODY_APP_ICON__ = bridge;
+
+    const expectIconAfterFontSize = () => {
+      const content = container?.textContent ?? '';
+      expect(content).toContain('App icon');
+      expect(content.indexOf('App icon')).toBeGreaterThan(content.indexOf('Font size'));
+    };
+
+    await act(async () => root?.render(<MobileAppearanceSettings />));
+    expectIconAfterFontSize();
+
+    await act(async () => root?.render(<AppearanceHarness isElectron={false} />));
+    expectIconAfterFontSize();
   });
 
   it('renders interface and terminal system font selectors in Electron', async () => {
     await act(async () => root?.render(<AppearanceHarness isElectron />));
 
-    const sizeInput = container?.querySelector<HTMLInputElement>('input[aria-label="Font size"]');
+    const sizeInput = container?.querySelector<HTMLInputElement>(
+      'input[type="number"][aria-label="Font size"]'
+    );
     const preview = Array.from(container?.querySelectorAll('code') ?? []).find(
       (node) => node.textContent === 'npx lody daemon start'
     );
@@ -164,6 +281,21 @@ describe('AppearanceSettingsView', () => {
     expect(preview?.parentElement?.style.fontFamily).toContain('Maple Mono');
     expect(preview?.style.fontFamily).toBe('inherit');
     expect(container?.textContent).toContain('$');
+    expect(container?.textContent).toContain('Font ligatures');
+    expect(container?.textContent).toContain('conversation, code, and tool output');
+    const content = container?.textContent ?? '';
+    expect(content.indexOf('Font ligatures')).toBeGreaterThan(content.indexOf('Terminal'));
+
+    const ligaturesSwitch = container?.querySelector<HTMLButtonElement>(
+      'button[aria-label="Font ligatures"]'
+    );
+    expect(ligaturesSwitch?.getAttribute('aria-checked')).toBe('true');
+    await act(async () => {
+      ligaturesSwitch?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    expect(
+      container?.querySelector('button[aria-label="Font ligatures"]')?.getAttribute('aria-checked')
+    ).toBe('false');
 
     await act(async () => {
       setInputValue(sizeInput!, '16');

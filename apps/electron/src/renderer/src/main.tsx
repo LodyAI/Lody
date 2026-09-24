@@ -1,3 +1,13 @@
+import { installWindowPreparationIntent } from '@lody/components/lib/window-preparation-intent'
+import { windowPreparationAtom } from '@lody/components/lib/window-preparation'
+import type { PreparedWindowTarget } from '@lody/shared/electron-ipc'
+import { observePreparedTarget, waitForTargetContentPainted } from './warm-window-reveal'
+import { preloadMainLayout } from '@lody/components/components/preloaded-main-layout'
+import {
+  isSessionWindow,
+  isWarmWindow,
+  clearWarmWindowFlag
+} from '@lody/components/lib/desktop-window'
 import { useLayoutEffect } from 'react'
 import { createRoot } from 'react-dom/client'
 import { createHashHistory, RouterProvider } from '@tanstack/react-router'
@@ -9,17 +19,20 @@ import {
   readStoredLanguagePreference
 } from '@lody/components/i18n'
 import { languageAtom } from '@lody/components/atoms/settings'
+import { sidebarCollapsedAtom } from '@lody/components/atoms/sidebar-state'
 import '@lody/components/tailwind/index.css'
 import { jotaiStore } from '@lody/components/lib'
 import { collectBootDiagnostics, renderBootFailure } from '@lody/components/lib/boot-failure'
 import { installResizeObserverLoopErrorHandler } from '@lody/components/lib/resize-observer'
-import { getIpcServices } from '@lody/components/lib/electron-ipc-client'
+import { getIpcServices, onIpcEvent, sendIpc } from '@lody/components/lib/electron-ipc-client'
 import { Provider } from 'jotai'
 
 import { ErrorBoundary } from '@/components/error-boundary'
-import { authClient, completeElectronAuthCallback, isElectronAuthCallbackActive } from './auth'
+import { authClient } from './auth'
 import { installNativeTabBehavior } from './native-tab-behavior'
 import { createRendererErrorReporting, type RendererFatalScope } from './renderer-error-reporting'
+import { DesktopDevbar } from './devbar/index'
+import { installAppIconBridge } from './app-icon'
 
 // Desktop windows should not Tab-cycle a focus ring through the whole UI like a web page.
 installNativeTabBehavior()
@@ -102,8 +115,85 @@ function markRendererCommitted(): void {
 function RendererCommitSentinel(): null {
   useLayoutEffect(() => {
     markRendererCommitted()
+    if (isWarmWindow()) {
+      // A hidden window can miss animation frames, so signal through a timer.
+      // The spare only needs its committed shell before main can claim it.
+      const timer = window.setTimeout(() => sendIpc('app.windowReady', null), 0)
+      return () => window.clearTimeout(timer)
+    }
+    return undefined
   }, [])
   return null
+}
+
+/**
+ * Binds a claimed warm window to a concrete route without a reload. The renderer
+ * is already booted; this reproduces the storage flags a fresh auxiliary window
+ * would derive from its URL, then navigates client-side.
+ */
+function installWarmWindowBinding(router: ReturnType<typeof createRouter>): void {
+  let preparation: PreparedWindowTarget | null = null
+  let stopObserving: (() => void) | undefined
+  const navigate = (
+    target: { workspace: string; sessionId?: string },
+    completed: () => void
+  ): void => {
+    sessionStorage.setItem('lody:auxiliaryWindow', '1')
+    sessionStorage.removeItem('lody:windowFocusConsumed')
+    if (target.sessionId) {
+      sessionStorage.setItem('lody:sessionWindow', '1')
+    }
+    jotaiStore.set(sidebarCollapsedAtom, Boolean(target.sessionId))
+
+    const navigation = target.sessionId
+      ? router.navigate({
+          to: '/$workspaceName/sessions/$sessionId',
+          params: { workspaceName: target.workspace, sessionId: target.sessionId },
+          search: { tab: `session:${target.sessionId}` },
+          state: { focusComposerSessionId: target.sessionId }
+        })
+      : router.navigate({
+          to: '/$workspaceName/chat',
+          params: { workspaceName: target.workspace }
+        })
+    // Main keeps the native window hidden until this exact target has painted.
+    void navigation.finally(() => {
+      clearWarmWindowFlag()
+      completed()
+    })
+  }
+  onIpcEvent('app.windowTarget', (target) => {
+    stopObserving?.()
+    preparation = null
+    jotaiStore.set(windowPreparationAtom, false)
+    navigate(target, () =>
+      waitForTargetContentPainted(rootElement!, target, () =>
+        sendIpc('app.windowContentReady', target)
+      )
+    )
+  })
+  onIpcEvent('app.prepareWindowTarget', (target) => {
+    stopObserving?.()
+    preparation = target
+    jotaiStore.set(windowPreparationAtom, true)
+    navigate(target, () => {
+      if (preparation !== target) return
+      stopObserving = observePreparedTarget(rootElement!, target, (ready) =>
+        sendIpc('app.preparedWindowState', { ...target, ready })
+      )
+    })
+  })
+  onIpcEvent('app.activatePreparedWindow', (target) => {
+    if (
+      preparation?.preparationId !== target.preparationId ||
+      preparation.workspace !== target.workspace ||
+      preparation.sessionId !== target.sessionId
+    )
+      return
+    stopObserving?.()
+    preparation = null
+    jotaiStore.set(windowPreparationAtom, false)
+  })
 }
 
 const rendererErrorReporting = createRendererErrorReporting({
@@ -127,6 +217,7 @@ window.addEventListener('unhandledrejection', (event) => {
 })
 
 try {
+  installAppIconBridge()
   // Resolve and persist the desktop's first-run language before React can
   // commit. AppInitializer keeps later changes synchronized; awaiting here
   // closes the window where onboarding could paint once in English first.
@@ -138,15 +229,33 @@ try {
     jotaiStore.set(languageAtom, detectedLanguage)
   }
 
-  const isFileProtocol = window.location.protocol === 'file:'
+  const usesHashHistory =
+    window.location.protocol === 'file:' || window.location.pathname.endsWith('/devbar.html')
+  const devbar = await getIpcServices()
+    ?.app.getDevbarConfig()
+    .catch(() => null)
+  if (devbar?.enabled) document.documentElement.setAttribute('data-desktop-devbar', '')
   const router = createRouter({
     authClient,
-    desktopAuth: {
-      completeCallback: completeElectronAuthCallback,
-      isCallbackActive: isElectronAuthCallbackActive
-    },
-    history: isFileProtocol ? createHashHistory() : undefined
+    history: usesHashHistory ? createHashHistory() : undefined
   })
+  installWarmWindowBinding(router)
+  installWindowPreparationIntent()
+  if (isWarmWindow()) {
+    void preloadMainLayout().catch((error) => {
+      console.warn('[Lody] Warm workspace layout preload failed', error)
+    })
+  }
+  if (isSessionWindow() && !sessionStorage.getItem('lody:windowFocusConsumed')) {
+    const sessionId = router.history.location.pathname.split('/sessions/')[1]?.split('/')[0]
+    if (sessionId) {
+      router.history.replace(router.history.location.href, {
+        ...router.history.location.state,
+        focusComposerSessionId: sessionId
+      })
+      sessionStorage.setItem('lody:windowFocusConsumed', '1')
+    }
+  }
   createRoot(rootElement, {
     // ErrorBoundary remains the single owner of caught-error UI and PostHog.
     // React 19 no longer rethrows render errors, so these root callbacks only
@@ -161,6 +270,13 @@ try {
           <RouterProvider router={router} />
         </Provider>
       </ErrorBoundary>
+      {devbar?.enabled && (
+        // A diagnostics footer must never take the app down with it: a crash
+        // here degrades to no bar, not to the fatal renderer path.
+        <ErrorBoundary name="DesktopDevbar" fallbackRender={() => null}>
+          <DesktopDevbar />
+        </ErrorBoundary>
+      )}
     </>
   )
 } catch (error) {

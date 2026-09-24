@@ -355,6 +355,94 @@ describe('Lody.registerAgent', () => {
     expect(updateAcpCapabilities).not.toHaveBeenCalled();
   });
 
+  it.each([
+    {
+      label: 'legacy Pi on this machine',
+      cliType: 'registry',
+      agentType: 'pi-acp',
+      machineId: 'machine-1',
+      createsPi: false,
+    },
+    {
+      label: 'already migrated Pi',
+      cliType: 'builtin',
+      agentType: 'pi',
+      machineId: 'machine-1',
+      createsPi: false,
+    },
+    {
+      label: 'legacy Pi on another machine',
+      cliType: 'registry',
+      agentType: 'pi-acp',
+      machineId: 'machine-2',
+      createsPi: true,
+    },
+    {
+      label: 'another registry provider',
+      cliType: 'registry',
+      agentType: 'other',
+      machineId: 'machine-1',
+      createsPi: true,
+    },
+  ])(
+    'preserves provider identity during registration with $label',
+    async ({ cliType, agentType, machineId, createsPi }) => {
+      const existing = { id: 'existing', cliType, agentType, machineId, name: 'My provider' };
+      const rows = [{ ...existing }];
+      const documentManager = {
+        hasCompletedInitialMetaSync: () => true,
+        syncMachineFlockDoc: async () => true,
+        getBuiltinAgentOptOuts: async () => new Set(),
+        hasAgentConfig: async (type: string, agent: string, machine: string) =>
+          rows.some(
+            (row) => row.cliType === type && row.agentType === agent && row.machineId === machine
+          ),
+        createAgentConfig: async (type: string, agent: string, machine: string, name: string) => {
+          const id = `created-${agent}`;
+          rows.push({ id, cliType: type, agentType: agent, machineId: machine, name });
+          return id;
+        },
+      } as unknown as LoroDocumentManager;
+      const { Lody } = await import('../src/lib/lody');
+      const lody = new Lody(
+        {
+          logger: createSilentLogger(),
+          workspaceId: 'workspace-1',
+          token: 'token',
+          userId: 'user-1',
+          machineId: 'machine-1',
+          machineName: 'machine-name',
+        },
+        documentManager
+      );
+
+      await lody.registerAgent(['pi', 'codex']);
+      await lody.registerAgent(['pi', 'codex']);
+
+      expect(rows).toEqual([
+        existing,
+        ...(createsPi
+          ? [
+              {
+                id: 'created-pi',
+                cliType: 'builtin',
+                agentType: 'pi',
+                machineId: 'machine-1',
+                name: 'Pi',
+              },
+            ]
+          : []),
+        {
+          id: 'created-codex',
+          cliType: 'builtin',
+          agentType: 'codex',
+          machineId: 'machine-1',
+          name: 'Codex',
+        },
+      ]);
+    }
+  );
+
   // A builtin provider the user removed on this machine must not come back through the next
   // startup auto-registration. It is not in the list, but that is the result of the removal,
   // not "never created".

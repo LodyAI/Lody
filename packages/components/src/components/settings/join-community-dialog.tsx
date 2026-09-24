@@ -57,7 +57,7 @@ export function JoinCommunityDialog({
               className="h-40 w-40 rounded-md bg-white object-contain"
             />
             <div className="text-center">
-              <p className="text-sm font-medium text-foreground">
+              <p className="text-sm font-normal text-foreground">
                 {t('settings.about.feishuGroup', 'Feishu group')}
               </p>
               <p className="mt-0.5 text-xs text-muted-foreground">
@@ -76,7 +76,7 @@ export function JoinCommunityDialog({
             <span className="flex h-14 w-14 items-center justify-center rounded-full bg-muted">
               <SiDiscord className="h-6 w-6 text-muted-foreground" />
             </span>
-            <span className="text-sm font-medium text-foreground">
+            <span className="text-sm font-normal text-foreground">
               {t('settings.about.joinDiscord', 'Join Discord')}
             </span>
             <span className="text-xs text-muted-foreground">

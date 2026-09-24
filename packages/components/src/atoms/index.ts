@@ -1,4 +1,5 @@
 import { atom } from 'jotai';
+import type { ElectronLoginState } from '@lody/shared/electron-ipc';
 import type { CurrentUser } from '@/lib/current-user';
 import { readBootstrappedCurrentUser } from '@/lib/auth-bootstrap';
 
@@ -23,13 +24,12 @@ export * from './join-community';
 
 export const userAtom = atom<CurrentUser | null>(readBootstrappedCurrentUser());
 
-// True while an Electron desktop sign-in is returning from the system browser
-// through the `lody://auth/callback#token=…` deep link and the session has not
-// finished resolving yet. The login page shows a spinner while this is set, and
-// the root auth-invalidation effect skips its "session expired" sign-out/toast
-// so the transient unauthenticated window mid-login is not mistaken for an
-// expired session and used to abort the in-flight login.
+// Fence root auth invalidation while waiting for the browser or exchanging its
+// callback. The phase atom separately controls progress and retry UI.
 export const electronDeepLinkSignInInProgressAtom = atom(false);
+export const electronLoginPhaseAtom = atom<ElectronLoginState['phase']>('idle');
+export const electronLoginErrorAtom = atom<ElectronLoginState['error']>(null);
+export const electronLoginErrorDetailAtom = atom<ElectronLoginState['errorDetail']>(null);
 
 // Native sign-in finishes in the same WebView lifecycle. Keep root session
 // invalidation fenced from sign-in start through the successful navigation so a

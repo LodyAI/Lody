@@ -1,30 +1,31 @@
-import { SESSION_GOAL_COMMANDS, type SessionGoalCommand } from '@lody/shared';
-
-const NO_GOAL_COMMANDS: readonly SessionGoalCommand[] = [];
+import {
+  SESSION_GOAL_COMMANDS,
+  type AcpCapabilityCacheEntry,
+  type SessionGoalCommand,
+} from '@lody/shared';
 
 /**
- * Commands supported by Lody's current `/goal …` prompt bridge.
+ * Goal commands the session's agent actually implements.
  *
- * Provider-neutral goal snapshots are displayable for every ACP agent, but the
- * prompt bridge itself is Codex-specific. Other providers remain read-only until
- * Lody routes their advertised `_session/goal` extension method.
+ * Read from the runtime's advertised capability rather than the agent's name:
+ * goal control is an ACP extension, so any agent that advertises it gets the
+ * controls, and one that does not stays read-only.
  */
-export const getPromptBridgeGoalCommands = (
-  agentType: string | null | undefined
+export const getSessionGoalCommands = (
+  capability: Pick<AcpCapabilityCacheEntry, 'goalActions'> | undefined
 ): readonly SessionGoalCommand[] =>
-  agentType === 'codex' ? SESSION_GOAL_COMMANDS : NO_GOAL_COMMANDS;
-
-export const canPauseGoalThroughPromptBridge = (
-  agentType: string | null | undefined
-): boolean => getPromptBridgeGoalCommands(agentType).includes('pause');
+  SESSION_GOAL_COMMANDS.filter((command) => capability?.goalActions?.includes(command));
 
 /**
- * Slash `/goal …` commands must never route through steer/guide submit paths.
- * Steer rejects slash input ("Slash commands cannot steer an active Codex turn")
- * and Stop's `/goal pause` side-effect would wedge the session when queued
- * message behavior is set to Steer.
+ * How long a goal command may sit in its pending state before the UI stops
+ * waiting.
+ *
+ * The command's real completion signal is the agent's own goal snapshot, and a
+ * queued action legitimately waits for a running turn to drain. Without a
+ * deadline a queued command would leave every goal button disabled forever,
+ * which is exactly the dead-end this control plane exists to remove.
  */
-export const GOAL_PROMPT_DISPATCH_OPTIONS = { forceDirect: true as const };
+export const GOAL_COMMAND_PENDING_TIMEOUT_MS = 60_000;
 
 export type SessionPromptActivity = {
   isDispatching: boolean;

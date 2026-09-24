@@ -1,6 +1,7 @@
 import { cn } from '@/lib/utils';
 import {
   isElectronRenderer,
+  isMacOSElectronRenderer,
   isWindowsElectronRenderer,
   useElectronFullscreen,
 } from '@/lib/electron';
@@ -21,6 +22,32 @@ export function useWindowsCaptionPadClass(): string | undefined {
   const fullscreen = useElectronFullscreen();
   if (!isWindowsElectronRenderer() || fullscreen) return undefined;
   return WINDOWS_CAPTION_PAD_CLASS;
+}
+
+// Windows caption buttons are OS-drawn in the `titleBarOverlay` strip
+// (`MAIN_WINDOW_TITLE_BAR_OVERLAY_HEIGHT` = 36 in
+// apps/electron/src/main/window-theme.ts), so their centerline is y=18. A
+// border-box h-11 row centers its controls at y=22 (21.5 with a 1px bottom
+// border); bottom padding lifts that center onto the buttons so every
+// window-top row lines up with them.
+export function useWindowsCaptionRowPadClass({
+  bottomBorder = false,
+}: { bottomBorder?: boolean } = {}): string | undefined {
+  const fullscreen = useElectronFullscreen();
+  if (!isWindowsElectronRenderer() || fullscreen) return undefined;
+  return bottomBorder ? 'pb-[7px]' : 'pb-2';
+}
+
+// macOS traffic lights are centered at y=23 (`trafficLightPosition.y` 16 + 7px
+// radius in apps/electron/src/main/window.ts). A border-box h-11 row centers its
+// controls at y=22 (21.5 with a 1px bottom border); top padding moves that
+// center onto the lights so every window-top row lines up with them.
+export function useMacTrafficLightRowPadClass({
+  bottomBorder = false,
+}: { bottomBorder?: boolean } = {}): string | undefined {
+  const fullscreen = useElectronFullscreen();
+  if (!isMacOSElectronRenderer() || fullscreen) return undefined;
+  return bottomBorder ? 'pt-[3px]' : 'pt-[2px]';
 }
 
 export function WindowDragStrip({
