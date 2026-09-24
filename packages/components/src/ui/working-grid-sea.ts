@@ -1,59 +1,66 @@
 /**
  * The shared "sea" behind every {@link WorkingGrid}.
  *
- * Two plane waves cross over the whole page. Every tile samples them at its own
- * page position, so all working marks on screen are windows onto the same water
- * and a crest visibly travels from one sidebar row into the next.
+ * One height field over the whole page, sampled by every tile at its own page
+ * position, so all working marks on screen are windows onto the same water.
  *
- * Positions are in "cells": one cell is a third of the grid's size (one tile
- * pitch). Phases are in turns, so `0.25` is a quarter period.
+ * The field is four long plane waves with fixed directions (down-right, down,
+ * down-slightly-left, down-left) whose strengths swell and fade slowly and out of
+ * step. At any moment roughly two dominate and interfere, and as dominance passes
+ * from one to another the flow appears to turn. Waves span several sidebar rows,
+ * so a crest visibly travels from one mark into the next.
+ *
+ * Positions are in "cells": one cell is a third of a mark's size. Time is in ms.
+ * Every period divides {@link WORKING_GRID_LOOP_MS}, so the field loops seamlessly
+ * and each tile's motion can be baked into one repeating keyframe animation.
  */
 
-export type WorkingGridDirection = 'across' | 'down';
-
-export interface WorkingGridWave {
-  /** Travel direction; roughly unit length. */
-  dir: readonly [number, number];
-  /** Distance between crests, in cells, before the wavelength multiplier. */
-  length: number;
-  periodMs: number;
-  /** Constant phase offset, in turns. */
-  phase: number;
-}
-
-// The first wave is shorter and faster than the second and their periods are
-// 19:27, so the interference pattern takes ~51s to repeat and never reads as a loop.
-const WAVES: Record<WorkingGridDirection, readonly [WorkingGridWave, WorkingGridWave]> = {
-  // 27° down-right and 60° down-left of horizontal.
-  across: [
-    { dir: [0.9, 0.45], length: 3.2, periodMs: 1900, phase: 0 },
-    { dir: [-0.5, 0.85], length: 4.4, periodMs: 2700, phase: 0.3 },
-  ],
-  // Within 15–20° of vertical: sweeps down a narrow list.
-  down: [
-    { dir: [0.34, 0.94], length: 3.2, periodMs: 1900, phase: 0 },
-    { dir: [-0.26, 0.97], length: 4.4, periodMs: 2700, phase: 0.3 },
-  ],
-};
+export const WORKING_GRID_LOOP_MS = 36_000;
 
 /**
- * Default wavelength multiplier. At 1.5 a trough of both waves could cover all
- * nine tiles and the whole mark faded out ~9% of the time; at 1 that drops below
- * 1% while the swell still reads as calm (0.8 never fades but looks choppy).
+ * Default wavelength multiplier. Neighbouring stitched marks sit 3 cells apart;
+ * the previous 3–4-cell waves put them almost in antiphase, so each mark looked
+ * like it ran on its own. At 1.3 the centre tiles of adjacent rows correlate
+ * ~0.7 over a loop while a whole mark still almost never sinks out of sight.
  */
-export const WORKING_GRID_WAVELENGTH = 1;
+export const WORKING_GRID_WAVELENGTH = 1.3;
 
-export function workingGridWaves(
-  direction: WorkingGridDirection
-): readonly [WorkingGridWave, WorkingGridWave] {
-  return WAVES[direction];
+interface SeaWave {
+  /** Travel direction, degrees from +x towards +y (down). */
+  angleDeg: number;
+  /** Crest spacing in cells, before the wavelength multiplier. */
+  length: number;
+  periodMs: number;
+  /** Period of the slow swell in this wave's strength. */
+  envelopeMs: number;
+  /** Phase of that swell, in turns, so the waves take turns dominating. */
+  envelopePhase: number;
 }
 
-const frac = (value: number) => value - Math.floor(value);
+const WAVES: readonly SeaWave[] = [
+  { angleDeg: 25, length: 14, periodMs: 3_000, envelopeMs: 36_000, envelopePhase: 0 },
+  { angleDeg: 80, length: 12, periodMs: 2_400, envelopeMs: 18_000, envelopePhase: 0.25 },
+  { angleDeg: 105, length: 13, periodMs: 2_250, envelopeMs: 12_000, envelopePhase: 0.55 },
+  { angleDeg: 155, length: 15, periodMs: 3_600, envelopeMs: 36_000, envelopePhase: 0.5 },
+];
 
-/** Phase of `wave` at sea point (x, y), in turns within [0, 1). */
-export function wavePhase(wave: WorkingGridWave, x: number, y: number, wavelength: number): number {
-  return frac((wave.dir[0] * x + wave.dir[1] * y) / (wave.length * wavelength) + wave.phase);
+const TAU = Math.PI * 2;
+const sin01 = (turns: number) => 0.5 + 0.5 * Math.sin(TAU * turns);
+
+/** Sea height in [0, 1] at cell point (x, y) and time `tMs`. */
+export function seaHeight(x: number, y: number, tMs: number, wavelength: number): number {
+  let sum = 0;
+  let weight = 0;
+  for (const wave of WAVES) {
+    const angle = (wave.angleDeg * Math.PI) / 180;
+    const along = Math.cos(angle) * x + Math.sin(angle) * y;
+    const height = sin01(along / (wave.length * wavelength) - tMs / wave.periodMs);
+    // Never fully silent, so the surface keeps some motion while a wave rests.
+    const strength = 0.15 + 0.85 * sin01(tMs / wave.envelopeMs + wave.envelopePhase) ** 2;
+    sum += strength * height;
+    weight += strength;
+  }
+  return sum / weight;
 }
 
 export interface WorkingGridPlacement {
@@ -82,13 +89,14 @@ export function tileSeaPoint(
   return [left / cell + i, (top / cell) * stitch + j];
 }
 
-/**
- * Animation delay (ms, never positive) for a loop whose keyframes start at the
- * crest, such that at document-timeline time 0 it shows `phase`. With every
- * loop's start time pinned to 0, marks mounted at different moments stay on
- * the same sea.
- */
-export function crestDelayMs(phase: number, periodMs: number): number {
-  const turns = frac(0.25 - phase);
-  return turns === 0 ? 0 : -turns * periodMs;
+/** Heights at a point over one loop: `samples` evenly spaced, plus the wrap-around sample. */
+export function seaHeightsOverLoop(
+  x: number,
+  y: number,
+  wavelength: number,
+  samples: number
+): number[] {
+  return Array.from({ length: samples + 1 }, (_, k) =>
+    seaHeight(x, y, (k / samples) * WORKING_GRID_LOOP_MS, wavelength)
+  );
 }
