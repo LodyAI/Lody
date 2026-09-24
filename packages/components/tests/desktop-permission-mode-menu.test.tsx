@@ -69,11 +69,20 @@ describe('DesktopPermissionModeButton menu', () => {
     });
     await act(async () => {
       container
-        ?.querySelector('button[aria-label="Permission"]')
+        ?.querySelector('button[aria-label^="Permission"]')
         ?.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button: 0 }));
     });
     return document.querySelector('[role="menu"]') as HTMLElement;
   };
+
+  it('shows the mode as an icon, naming the selected mode in its label and tooltip', async () => {
+    await openMenu();
+    const trigger = container?.querySelector('button[aria-label^="Permission"]');
+    expect(trigger?.getAttribute('aria-label')).toBe('Permission: Agent');
+    expect(trigger?.getAttribute('title')).toBe('Permission: Agent');
+    // No visible text: the icon carries the mode.
+    expect(trigger?.textContent?.trim()).toBe('');
+  });
 
   it('keeps the group label in sentence case and hides descriptions on the row', async () => {
     const menu = await openMenu();

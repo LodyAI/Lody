@@ -68,6 +68,10 @@ export function AcpSessionSelect({
   const label = selectedOption?.label ?? placeholder ?? '';
   const isMenuEnabled = !disabled && options.length > 1;
   const isDark = tone === 'dark';
+  // Icon-only triggers hide the selected label, so the tooltip and the
+  // accessible name carry it instead ("Permission mode: Plan").
+  const withSelectedLabel = (name: string | undefined) =>
+    iconOnly && label ? (name ? `${name}: ${label}` : label) : name;
 
   const trigger = (
     <Button
@@ -83,9 +87,9 @@ export function AcpSessionSelect({
         variant === 'text' && !iconOnly && 'rounded-md bg-transparent px-1 hover:bg-transparent',
         className
       )}
-      aria-label={ariaLabel}
+      aria-label={withSelectedLabel(ariaLabel)}
       disabled={disabled}
-      title={triggerTitle ?? label}
+      title={withSelectedLabel(triggerTitle) ?? label}
     >
       {icon ? <span className="flex shrink-0 items-center">{icon}</span> : null}
       {!iconOnly ? <span className="font-medium">{label}</span> : null}

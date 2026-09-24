@@ -17,7 +17,11 @@ import {
   togglePlanModeSelectorValue,
 } from './acp-selector-options';
 import { AcpSessionSelect, type AcpSessionSelectOption } from './acp-session-select';
-import { getModeIcon, getSelectorTagClassName } from '@/components/chat/chat-landing-selectors';
+import {
+  getModeIcon,
+  getSelectorTagClassName,
+  MODE_SELECTOR_ICON_ONLY_CLASS,
+} from '@/components/chat/chat-landing-selectors';
 import { orderAcpConfigOptionSelectors } from '@/lib/acp-selector-order';
 import { cn } from '@/lib/utils';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui';
@@ -350,7 +354,8 @@ export function AcpBottomBarModeSelector({
           align="start"
           showDescription
           icon={getModeIcon(selectedModeId ?? null)}
-          className={getSelectorTagClassName(tone)}
+          iconOnly
+          className={cn(getSelectorTagClassName(tone), MODE_SELECTOR_ICON_ONLY_CLASS)}
           ariaLabel="Permission mode"
           contentClassName={contentClassName}
           triggerTitle="Permission mode"
@@ -363,10 +368,11 @@ export function AcpBottomBarModeSelector({
               configOptionValues?.[permissionSelector.configId]
             ) as string) ?? null
           ),
+          iconOnly: true,
           placeholder: 'Mode',
           tone,
           variant: 'default',
-          className: getSelectorTagClassName(tone),
+          className: cn(getSelectorTagClassName(tone), MODE_SELECTOR_ICON_ONLY_CLASS),
           contentClassName,
           values: configOptionValues,
           onChange: onConfigOptionChange,

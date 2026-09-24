@@ -46,6 +46,13 @@ export const getModeIcon = (modeId: string | null): ReactNode => {
 /**
  * Get selector tag class name based on tone (no border, muted text).
  */
+/**
+ * The permission-mode selector shows only its icon (every mode has one), a
+ * square tag; the selected mode's name is the tooltip. A label such as
+ * "Bypass permissions" otherwise took most of the composer's control row.
+ */
+export const MODE_SELECTOR_ICON_ONLY_CLASS = 'w-6 justify-center px-0';
+
 export const getSelectorTagClassName = (_tone: ChatLandingTone): string => {
   return cn(
     'w-auto h-6 px-2 gap-1 rounded-[4px] [&_span]:text-[0.9em] [&_span]:leading-tight',
@@ -97,8 +104,10 @@ export function ModeSelector({
       disabled={disabled || options.length === 0}
       align="start"
       icon={getModeIcon(value)}
-      className={cn(selectorTagClassName, 'max-w-[12rem]')}
+      iconOnly
+      className={cn(selectorTagClassName, MODE_SELECTOR_ICON_ONLY_CLASS)}
       ariaLabel="Permission mode"
+      triggerTitle="Permission mode"
     />
   );
 }

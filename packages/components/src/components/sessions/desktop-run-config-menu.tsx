@@ -1134,12 +1134,17 @@ export function DesktopPermissionModeButton({
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <button type="button" className={TRIGGER_CLASS} aria-label={permissionLabel}>
+        {/* Icon only: every mode has an icon (warning modes the amber shield),
+            and a label such as "Bypass permissions" took most of the control
+            row. The mode's name is the tooltip and the accessible name. */}
+        <button
+          type="button"
+          className={cn(TRIGGER_CLASS, 'w-7 shrink-0 justify-center gap-0 px-0')}
+          aria-label={label ? `${permissionLabel}: ${label}` : permissionLabel}
+          title={label ? `${permissionLabel}: ${label}` : permissionLabel}
+        >
           <span className="flex h-4 w-4 shrink-0 items-center justify-center [&_svg]:h-4 [&_svg]:w-4 [&_svg]:stroke-[1.5]">
             {permissionModeIcon(value ?? null)}
-          </span>
-          <span className={cn('min-w-0 max-w-36 truncate', COMPOSER_FACE_LABEL_CLASS)}>
-            {label ?? permissionLabel}
           </span>
         </button>
       </DropdownMenuTrigger>
