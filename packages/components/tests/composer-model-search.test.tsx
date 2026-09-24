@@ -117,17 +117,21 @@ describe('composer model picker search', () => {
     await act(async () => {
       root?.render(createElement(DesktopRunConfigMenu, { ...desktopProps, ...props }));
     });
-    // Radix opens the menu on pointerdown, not click.
     await act(async () => {
       container
         ?.querySelector('button[aria-label="Run configuration"]')
-        ?.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button: 0 }));
+        ?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }));
+      await new Promise((resolve) => setTimeout(resolve, 40));
     });
     const modelRow = [...document.querySelectorAll('[role="menuitem"]')].find((node) =>
       node.textContent?.trim().startsWith('Model')
     );
     await act(async () => {
-      (modelRow as HTMLElement).dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      (modelRow as HTMLElement).dispatchEvent(
+        new MouseEvent('pointerover', { bubbles: true })
+      );
+      (modelRow as HTMLElement).dispatchEvent(new MouseEvent('mousemove', { bubbles: true }));
+      await new Promise((resolve) => setTimeout(resolve, 40));
     });
     const search = document.querySelector<HTMLInputElement>('input[aria-label="Search models"]');
     return {
@@ -136,8 +140,8 @@ describe('composer model picker search', () => {
       // different content element.
       rows: () => {
         const submenu = search
-          ? search.closest('[data-radix-menu-content]')
-          : [...document.querySelectorAll('[data-radix-menu-content]')].at(-1);
+          ? search.closest('[role="menu"]')
+          : [...document.querySelectorAll('[role="menu"]')].at(-1);
         return [...(submenu?.querySelectorAll('[role="menuitemradio"]') ?? [])].map((node) =>
           node.textContent?.trim()
         );
@@ -168,7 +172,7 @@ describe('composer model picker search', () => {
     const { search, rows } = await openModelSubmenu();
     await typeInto(search as HTMLInputElement, 'zzz');
     expect(rows()).toEqual([]);
-    const submenu = (search as HTMLInputElement).closest('[data-radix-menu-content]');
+    const submenu = (search as HTMLInputElement).closest('[role="menu"]');
     expect(submenu?.textContent).toContain('No models match');
   });
 
@@ -191,7 +195,7 @@ describe('composer model picker search', () => {
         new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })
       );
     });
-    const submenu = (search as HTMLInputElement).closest('[data-radix-menu-content]');
+    const submenu = (search as HTMLInputElement).closest('[role="menu"]');
     expect(document.activeElement).toBe(submenu?.querySelector('[role="menuitemradio"]'));
   });
 
@@ -200,7 +204,7 @@ describe('composer model picker search', () => {
      drives the menu's own typeahead and the search box looks broken. */
   it('keeps typing in the search field when focus has moved onto a row', async () => {
     const { search, rows } = await openModelSubmenu();
-    const submenu = (search as HTMLInputElement).closest('[data-radix-menu-content]');
+    const submenu = (search as HTMLInputElement).closest('[role="menu"]');
     const firstRow = submenu?.querySelector<HTMLElement>('[role="menuitemradio"]');
     await act(async () => {
       firstRow?.focus();
@@ -226,7 +230,7 @@ describe('composer model picker search', () => {
       modelOptions: fewModels,
       selectedModelId: fewModels[0]?.value ?? null,
     });
-    const submenu = [...document.querySelectorAll('[data-radix-menu-content]')].at(-1);
+    const submenu = [...document.querySelectorAll('[role="menu"]')].at(-1);
     expect(submenu?.className).toMatch(/\bw-max\b/);
     expect(submenu?.className).toMatch(/min-w-\[108px\]/);
     expect(submenu?.className).not.toMatch(/min-w-\[200px\]/);
@@ -247,7 +251,8 @@ describe('composer model picker search', () => {
     await act(async () => {
       container
         ?.querySelector('button[aria-label="Run configuration"]')
-        ?.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button: 0 }));
+        ?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }));
+      await new Promise((resolve) => setTimeout(resolve, 40));
     });
 
     const warning = document.querySelector<HTMLAnchorElement>(
@@ -272,7 +277,8 @@ describe('composer model picker search', () => {
     await act(async () => {
       container
         ?.querySelector('button[aria-label="Run configuration"]')
-        ?.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button: 0 }));
+        ?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }));
+      await new Promise((resolve) => setTimeout(resolve, 40));
     });
 
     expect(
@@ -299,13 +305,18 @@ describe('composer model picker search', () => {
     await act(async () => {
       container
         ?.querySelector('button[aria-label="Run configuration"]')
-        ?.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button: 0 }));
+        ?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }));
+      await new Promise((resolve) => setTimeout(resolve, 40));
     });
     const modelRow = [...document.querySelectorAll('[role="menuitem"]')].find((node) =>
       node.textContent?.trim().startsWith('Model')
     );
     await act(async () => {
-      (modelRow as HTMLElement).dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      (modelRow as HTMLElement).dispatchEvent(
+        new MouseEvent('pointerover', { bubbles: true })
+      );
+      (modelRow as HTMLElement).dispatchEvent(new MouseEvent('mousemove', { bubbles: true }));
+      await new Promise((resolve) => setTimeout(resolve, 40));
     });
     const search = document.querySelector<HTMLInputElement>('input[aria-label="Search models"]');
     expect(search).not.toBeNull();

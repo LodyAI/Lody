@@ -20,7 +20,7 @@ import {
   CollapsibleCardHeader,
   CollapsibleCardContent,
 } from '@/ui/collapsible-card';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { FileIcon } from '@/components/icons/file-icons';
 
 import { getSessionDiffErrorMessage } from '@/lib/session-diff-diagnostics';
@@ -370,11 +370,7 @@ function sampleTextForDiffParseKey(text: string): string {
 function CollapseToggle({ className }: { className?: string }) {
   return (
     <Collapsible.Trigger asChild>
-      <Button
-        variant="ghost"
-        size="icon"
-        className={cn('h-6 w-6 shrink-0 hover:bg-transparent', className)}
-      >
+      <Button variant="ghost" size="mini" icon className={cn('shrink-0', className)}>
         <ChevronDown className="h-4 w-4 transition-transform duration-200 [[data-state=closed]_&]:-rotate-90" />
       </Button>
     </Collapsible.Trigger>

@@ -327,11 +327,12 @@ describe('useMachineFlockRows', () => {
     );
     await flushMicrotasks();
 
-    await resyncMachineFlockRows(runtime, machineId, {
-      requireRemoteSync: true,
-      refreshedCapability: { configId, value: capability },
+    await act(async () => {
+      await resyncMachineFlockRows(runtime, machineId, {
+        requireRemoteSync: true,
+        refreshedCapability: { configId, value: capability },
+      });
     });
-    await flushMicrotasks();
 
     const capabilityRowId = serializeMachineFlockKey(machineFlockKeys.acpCapability(configId));
     expect(updates.at(-1)?.[capabilityRowId]?.value).toEqual(capability);

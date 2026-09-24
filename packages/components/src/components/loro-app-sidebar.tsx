@@ -119,24 +119,11 @@ import {
   type LoroSidebarWorkspace,
 } from '@/components/loro-sidebar';
 import { SidebarFilterPopover } from '@/components/sidebar-filter-popover';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/ui/dialog';
-import { Button } from '@/ui/button';
-import { Checkbox } from '@/ui/checkbox';
-import {
-  ContextMenu,
-  ContextMenuContent,
-  ContextMenuItem,
-  ContextMenuSeparator,
-  ContextMenuTrigger,
-} from '@/ui/context-menu';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
+import { Dialog } from '@/ui/dialog';
+import { Button } from '@lody/ui/button';
+import { Checkbox } from '@lody/ui/checkbox';
+import { ContextMenu } from '@lody/ui/context-menu';
+import { Tooltip } from '@lody/ui/tooltip';
 import { FocusScope, useListKeyboardNavigation } from '@/ui/focus-scope';
 import { SwipeActionRow } from '@/components/shared/swipe-action-row';
 import {
@@ -185,8 +172,8 @@ import {
   Trash2,
   Users,
 } from 'lucide-react';
-import { Spinner } from '@/ui/spinner';
-import { toast } from 'sonner';
+import { Spinner } from '@lody/ui/spinner';
+import { toast } from '@/lib/toast';
 import { useOnlineMachineIds } from '@/hooks/use-machine-online-status';
 import { useStableNow } from '@/hooks/use-stable-now';
 import { writePreferredWorkspaceSlug } from '@/lib/workspace';
@@ -255,7 +242,7 @@ export type RemoveLocalProjectDialogProps = {
   onPreflightCleanup: () => Promise<LocalProjectWorktreeCleanupPreflightResult>;
   onConfirm: (options: { cleanupWorktrees: boolean }) => void;
   /** Nested inside another dialog (desktop settings). Matches MCP's overlay. */
-  overlayClassName?: string;
+  backdropClassName?: string;
 };
 
 type PendingSessionShare = {
@@ -279,7 +266,7 @@ export function RemoveLocalProjectDialog({
   onOpenChange,
   onPreflightCleanup,
   onConfirm,
-  overlayClassName,
+  backdropClassName,
 }: RemoveLocalProjectDialogProps) {
   const { t } = useTranslation();
   const [cleanupWorktrees, setCleanupWorktrees] = useState(false);
@@ -326,15 +313,15 @@ export function RemoveLocalProjectDialog({
     t('sidebar.localProjects.remove.remoteFallbackDevice', 'the other device');
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg" overlayClassName={overlayClassName}>
-        <DialogHeader>
-          <DialogTitle>
+    <Dialog.Root open={open} onOpenChange={onOpenChange}>
+      <Dialog.Content className="sm:max-w-lg" backdropClassName={backdropClassName}>
+        <Dialog.Header>
+          <Dialog.Title>
             {t('sidebar.localProjects.remove.title', 'Remove “{{name}}” from Lody?', {
               name: target?.name ?? '',
             })}
-          </DialogTitle>
-          <DialogDescription>
+          </Dialog.Title>
+          <Dialog.Description>
             {isRemote
               ? t('sidebar.localProjects.remove.remoteDescription', { device })
               : t(
@@ -342,8 +329,8 @@ export function RemoveLocalProjectDialog({
                   'This removes the project from Lody.'
                 )}
             {isRemote && !deviceOnline ? ` ${t('sidebar.localProjects.remove.offline')}` : null}
-          </DialogDescription>
-        </DialogHeader>
+          </Dialog.Description>
+        </Dialog.Header>
 
         <div className="space-y-4 text-sm text-muted-foreground">
           <div className="space-y-1">
@@ -384,7 +371,7 @@ export function RemoveLocalProjectDialog({
                 className="mt-0.5"
                 checked={cleanupWorktrees}
                 disabled={!canCleanupWorktrees || isRemoving}
-                onCheckedChange={(checked) => void setCleanup(checked === true)}
+                onCheckedChange={(checked) => void setCleanup(checked)}
               />
               <span>
                 <span className="block font-medium text-foreground">
@@ -452,8 +439,8 @@ export function RemoveLocalProjectDialog({
           </div>
         </div>
 
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isRemoving}>
+        <Dialog.Footer>
+          <Button variant="secondary" onClick={() => onOpenChange(false)} disabled={isRemoving}>
             {t('common.cancel', 'Cancel')}
           </Button>
           <Button
@@ -466,9 +453,9 @@ export function RemoveLocalProjectDialog({
               ? t('common.processing', 'Processing...')
               : t('sidebar.localProjects.remove.confirm', 'Remove project')}
           </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        </Dialog.Footer>
+      </Dialog.Content>
+    </Dialog.Root>
   );
 }
 
@@ -775,55 +762,55 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
   );
 
   const menuRow = hasContextMenuActions ? (
-    <ContextMenu onOpenChange={setRowMenuOpen}>
-      <ContextMenuTrigger asChild>{row}</ContextMenuTrigger>
-      <ContextMenuContent className="min-w-[180px]">
+    <ContextMenu.Root onOpenChange={setRowMenuOpen}>
+      <ContextMenu.Trigger>{row}</ContextMenu.Trigger>
+      <ContextMenu.Content className="min-w-[180px]">
         <SessionRowOpenedByMenuItems
           opener={openedByOpener}
           goToOpenerLabel={contextMenuLabels.goToOpenerSession}
         />
         {canTogglePinned ? (
-          <ContextMenuItem
+          <ContextMenu.Item
             icon={isPinned ? <PinOff /> : <Pin />}
-            onSelect={() => {
+            onClick={() => {
               onTogglePinned?.(session.id, !isPinned);
             }}
           >
             {isPinned ? contextMenuLabels.unpin : contextMenuLabels.pin}
-          </ContextMenuItem>
+          </ContextMenu.Item>
         ) : null}
         {canMarkUnread ? (
-          <ContextMenuItem
+          <ContextMenu.Item
             icon={<Mail />}
-            onSelect={() => {
+            onClick={() => {
               onMarkUnread?.(session.id);
             }}
           >
             {contextMenuLabels.markUnread}
-          </ContextMenuItem>
+          </ContextMenu.Item>
         ) : null}
         {canRename ? (
-          <ContextMenuItem icon={<Pencil />} onSelect={beginRename}>
+          <ContextMenu.Item icon={<Pencil />} onClick={beginRename}>
             {contextMenuLabels.rename}
-          </ContextMenuItem>
+          </ContextMenu.Item>
         ) : null}
         {(openedByOpener || canTogglePinned || canMarkUnread || canRename) &&
         (canCopyUrl || shareMenuState) ? (
-          <ContextMenuSeparator />
+          <ContextMenu.Separator />
         ) : null}
         {canCopyUrl ? (
-          <ContextMenuItem
+          <ContextMenu.Item
             icon={<Link2 />}
-            onSelect={() => {
+            onClick={() => {
               onCopyUrl?.(session.id);
             }}
           >
             {contextMenuLabels.copyUrl}
-          </ContextMenuItem>
+          </ContextMenu.Item>
         ) : null}
 
         {shareMenuState ? (
-          <ContextMenuItem
+          <ContextMenu.Item
             disabled={shareMenuState !== 'share'}
             icon={
               shareMenuState === 'share' ? (
@@ -834,7 +821,7 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
                 <LockKeyhole />
               )
             }
-            onSelect={() => {
+            onClick={() => {
               onShareWithTeam?.(session.id);
             }}
           >
@@ -845,7 +832,7 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
                 : shareMenuState === 'owner-only'
                   ? contextMenuLabels.onlyOwnerCanShare
                   : contextMenuLabels.loadingSharing}
-          </ContextMenuItem>
+          </ContextMenu.Item>
         ) : null}
         {(openedByOpener ||
           canTogglePinned ||
@@ -854,7 +841,7 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
           canCopyUrl ||
           shareMenuState) &&
         (openerSessionId || isElectronRenderer()) ? (
-          <ContextMenuSeparator />
+          <ContextMenu.Separator />
         ) : null}
 
         <SessionRowOpenedByMenuItems
@@ -875,18 +862,18 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
           openerSessionId ||
           isElectronRenderer()) &&
         true ? (
-          <ContextMenuSeparator />
+          <ContextMenu.Separator />
         ) : null}
-        <ContextMenuItem
+        <ContextMenu.Item
           icon={<Archive />}
-          onSelect={() => {
+          onClick={() => {
             onArchive(session.id);
           }}
         >
           {contextMenuLabels.archive}
-        </ContextMenuItem>
-      </ContextMenuContent>
-    </ContextMenu>
+        </ContextMenu.Item>
+      </ContextMenu.Content>
+    </ContextMenu.Root>
   ) : (
     row
   );
@@ -1174,144 +1161,150 @@ export const LocalProjectItem = memo(function LocalProjectItem({
   const showNewChatButton = Boolean(onNewChatInProject) && projectCanNavigate && !isMobile;
   const ProjectFolderIcon = collapsed ? Folder : FolderOpen;
 
+  const projectRow = (
+    <div
+      role={projectCanNavigate ? 'button' : undefined}
+      tabIndex={projectCanNavigate ? 0 : -1}
+      aria-label={ariaLabel}
+      aria-current={isSelected ? 'page' : undefined}
+      aria-disabled={!projectCanNavigate ? true : undefined}
+      data-id={`project:${machineId}:${project.id}`}
+      data-scope-item="row"
+      data-sidebar-project-key={`${machineId}:${project.id}`}
+      // Own attribute rather than Radix's `data-state`: TooltipTrigger
+      // and ContextMenuTrigger both target this element through
+      // `asChild`, so their `data-state` values collide here.
+      data-menu-open={projectMenuOpen ? '' : undefined}
+      className={cn(
+        'group relative w-full rounded-md px-2 py-1 text-left',
+        'border border-transparent bg-transparent',
+        !showSelectedState &&
+          !isMobile &&
+          'hover:bg-sidebar-hover hover:text-sidebar-hover-foreground data-[menu-open]:bg-sidebar-hover data-[menu-open]:text-sidebar-hover-foreground',
+        showSelectedState &&
+          'border-sidebar-ring/30 bg-sidebar-selection hover:bg-sidebar-selection',
+        'flex min-w-0 flex-1 select-none items-center gap-2 text-[0.9em] font-normal transition-colors',
+        projectCanNavigate ? 'cursor-pointer' : 'cursor-default',
+        removalState && 'text-muted-foreground',
+        showSelectedState
+          ? 'text-sidebar-selection-foreground'
+          : cn(
+              // Project folder names are content rather than section chrome,
+              // but still recede behind the conversation in dark mode.
+              'text-sidebar-foreground dark:text-sidebar-foreground/75',
+              !isMobile && 'hover:text-sidebar-hover-foreground'
+            )
+      )}
+      onClick={handleNavigate}
+      onKeyDown={(event) => {
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+        event.preventDefault();
+        handleNavigate();
+      }}
+    >
+      <button
+        type="button"
+        className="relative -mr-1.5 flex h-5 w-5 shrink-0 items-center justify-center"
+        aria-label={toggleLabel}
+        onClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          onToggleCollapsed(machineId, project.id);
+        }}
+      >
+        {/* Open folder while expanded, closed while collapsed. */}
+        <ProjectFolderIcon
+          className={cn(
+            'absolute left-0 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-current transition-opacity duration-100',
+            // Mobile: chevron is always visible so the folder icon must hide
+            // permanently to avoid stacking. Desktop keeps the hover swap.
+            isMobile ? 'opacity-0' : 'opacity-80 group-hover:opacity-0'
+          )}
+        />
+        <ChevronDown
+          className={cn(
+            'absolute left-0 top-1/2 h-4 w-4 -translate-y-1/2 text-current',
+            'transition-[opacity,translate,scale,rotate] duration-100',
+            isMobile ? 'opacity-100' : 'opacity-0 group-hover:opacity-100',
+            collapsed ? '-rotate-90' : 'rotate-0'
+          )}
+        />
+      </button>
+      <span className="min-w-0 flex-1 truncate text-left">{project.name}</span>
+
+      {removalStateLabel ? (
+        <Tooltip.Root>
+          <Tooltip.Trigger
+            delay={300}
+            render={
+              <span className="inline-flex min-w-0 shrink-0 items-center gap-1 text-[10px] font-medium text-muted-foreground">
+                {removalState === 'waiting_for_device' ? (
+                  <Clock3 className="h-3 w-3 shrink-0" aria-hidden="true" />
+                ) : (
+                  <Spinner className="h-3 w-3 shrink-0" aria-hidden="true" />
+                )}
+                <span className="max-w-24 truncate">{removalStateLabel}</span>
+              </span>
+            }
+          />
+          <Tooltip.Content side="right">{removalStateLabel}</Tooltip.Content>
+        </Tooltip.Root>
+      ) : showProjectMenu || showNewChatButton || dragHandle ? (
+        <div className="flex shrink-0 items-center gap-0.5">
+          {showProjectMenu ? (
+            <button
+              type="button"
+              className={cn(hoverActionClassName, menuTriggerOpenClassName)}
+              aria-label={projectMenuLabel}
+              onClick={(event) => {
+                // Open the row's own right-click menu from a left click.
+                event.preventDefault();
+                event.stopPropagation();
+                const rect = event.currentTarget.getBoundingClientRect();
+                event.currentTarget.dispatchEvent(
+                  new MouseEvent('contextmenu', {
+                    bubbles: true,
+                    cancelable: true,
+                    clientX: Math.round(rect.left),
+                    clientY: Math.round(rect.bottom),
+                  })
+                );
+              }}
+            >
+              <MoreHorizontal className="h-3.5 w-3.5" />
+            </button>
+          ) : null}
+          {showNewChatButton ? (
+            <button
+              type="button"
+              className={hoverActionClassName}
+              aria-label={newChatLabel}
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                onNewChatInProject?.(machineId, project.id);
+              }}
+            >
+              <SquarePen className="h-3.5 w-3.5" />
+            </button>
+          ) : null}
+          {dragHandle}
+        </div>
+      ) : null}
+    </div>
+  );
+
   return (
     <div className="space-y-0.5">
       <div className="group flex items-center">
-        <ContextMenu onOpenChange={setProjectMenuOpen}>
-          <Tooltip delayDuration={500}>
-            <TooltipTrigger asChild>
-              <ContextMenuTrigger asChild disabled={!showProjectMenu}>
-                <div
-                  role={projectCanNavigate ? 'button' : undefined}
-                  tabIndex={projectCanNavigate ? 0 : -1}
-                  aria-label={ariaLabel}
-                  aria-current={isSelected ? 'page' : undefined}
-                  aria-disabled={!projectCanNavigate ? true : undefined}
-                  data-id={`project:${machineId}:${project.id}`}
-                  data-scope-item="row"
-                  data-sidebar-project-key={`${machineId}:${project.id}`}
-                  // Own attribute rather than Radix's `data-state`: TooltipTrigger
-                  // and ContextMenuTrigger both target this element through
-                  // `asChild`, so their `data-state` values collide here.
-                  data-menu-open={projectMenuOpen ? '' : undefined}
-                  className={cn(
-                    'group relative w-full rounded-md px-2 py-1 text-left',
-                    'border border-transparent bg-transparent',
-                    !showSelectedState &&
-                      !isMobile &&
-                      'hover:bg-sidebar-hover hover:text-sidebar-hover-foreground data-[menu-open]:bg-sidebar-hover data-[menu-open]:text-sidebar-hover-foreground',
-                    showSelectedState &&
-                      'border-sidebar-ring/30 bg-sidebar-selection hover:bg-sidebar-selection',
-                    'flex min-w-0 flex-1 select-none items-center gap-2 text-[0.9em] font-normal transition-colors',
-                    projectCanNavigate ? 'cursor-pointer' : 'cursor-default',
-                    removalState && 'text-muted-foreground',
-                    showSelectedState
-                      ? 'text-sidebar-selection-foreground'
-                      : cn(
-                          // Project folder names are content rather than section chrome,
-                          // but still recede behind the conversation in dark mode.
-                          'text-sidebar-foreground dark:text-sidebar-foreground/75',
-                          !isMobile && 'hover:text-sidebar-hover-foreground'
-                        )
-                  )}
-                  onClick={handleNavigate}
-                  onKeyDown={(event) => {
-                    if (event.key !== 'Enter' && event.key !== ' ') return;
-                    event.preventDefault();
-                    handleNavigate();
-                  }}
-                >
-                  <button
-                    type="button"
-                    className="relative -mr-1.5 flex h-5 w-5 shrink-0 items-center justify-center"
-                    aria-label={toggleLabel}
-                    onClick={(event) => {
-                      event.preventDefault();
-                      event.stopPropagation();
-                      onToggleCollapsed(machineId, project.id);
-                    }}
-                  >
-                    {/* Open folder while expanded, closed while collapsed. */}
-                    <ProjectFolderIcon
-                      className={cn(
-                        'absolute left-0 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-current transition-opacity duration-100',
-                        // Mobile: chevron is always visible so the folder icon must hide
-                        // permanently to avoid stacking. Desktop keeps the hover swap.
-                        isMobile ? 'opacity-0' : 'opacity-80 group-hover:opacity-0'
-                      )}
-                    />
-                    <ChevronDown
-                      className={cn(
-                        'absolute left-0 top-1/2 h-4 w-4 -translate-y-1/2 text-current',
-                        'transition-[opacity,translate,scale,rotate] duration-100',
-                        isMobile ? 'opacity-100' : 'opacity-0 group-hover:opacity-100',
-                        collapsed ? '-rotate-90' : 'rotate-0'
-                      )}
-                    />
-                  </button>
-                  <span className="min-w-0 flex-1 truncate text-left">{project.name}</span>
-
-                  {removalStateLabel ? (
-                    <Tooltip delayDuration={300}>
-                      <TooltipTrigger asChild>
-                        <span className="inline-flex min-w-0 shrink-0 items-center gap-1 text-[10px] font-medium text-muted-foreground">
-                          {removalState === 'waiting_for_device' ? (
-                            <Clock3 className="h-3 w-3 shrink-0" aria-hidden="true" />
-                          ) : (
-                            <Spinner className="h-3 w-3 shrink-0" aria-hidden="true" />
-                          )}
-                          <span className="max-w-24 truncate">{removalStateLabel}</span>
-                        </span>
-                      </TooltipTrigger>
-                      <TooltipContent side="right">{removalStateLabel}</TooltipContent>
-                    </Tooltip>
-                  ) : showProjectMenu || showNewChatButton || dragHandle ? (
-                    <div className="flex shrink-0 items-center gap-0.5">
-                      {showProjectMenu ? (
-                        <button
-                          type="button"
-                          className={cn(hoverActionClassName, menuTriggerOpenClassName)}
-                          aria-label={projectMenuLabel}
-                          onClick={(event) => {
-                            // Open the row's own right-click menu from a left click.
-                            event.preventDefault();
-                            event.stopPropagation();
-                            const rect = event.currentTarget.getBoundingClientRect();
-                            event.currentTarget.dispatchEvent(
-                              new MouseEvent('contextmenu', {
-                                bubbles: true,
-                                cancelable: true,
-                                clientX: Math.round(rect.left),
-                                clientY: Math.round(rect.bottom),
-                              })
-                            );
-                          }}
-                        >
-                          <MoreHorizontal className="h-3.5 w-3.5" />
-                        </button>
-                      ) : null}
-                      {showNewChatButton ? (
-                        <button
-                          type="button"
-                          className={hoverActionClassName}
-                          aria-label={newChatLabel}
-                          onClick={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            onNewChatInProject?.(machineId, project.id);
-                          }}
-                        >
-                          <SquarePen className="h-3.5 w-3.5" />
-                        </button>
-                      ) : null}
-                      {dragHandle}
-                    </div>
-                  ) : null}
-                </div>
-              </ContextMenuTrigger>
-            </TooltipTrigger>
+        <ContextMenu.Root onOpenChange={setProjectMenuOpen}>
+          <Tooltip.Root>
+            <Tooltip.Trigger
+              delay={500}
+              render={showProjectMenu ? <ContextMenu.Trigger render={projectRow} /> : projectRow}
+            />
             {formattedPath || trimmedMachineName ? (
-              <TooltipContent side="right" align="start" className="max-w-[420px] break-all">
+              <Tooltip.Content side="right" align="start" className="max-w-[420px] break-all">
                 <div className="flex flex-col gap-0.5 text-xs">
                   {trimmedMachineName ? (
                     <span className="text-muted-foreground">{trimmedMachineName}</span>
@@ -1320,50 +1313,50 @@ export const LocalProjectItem = memo(function LocalProjectItem({
                     <span className="font-mono text-[11px] leading-snug">{formattedPath}</span>
                   ) : null}
                 </div>
-              </TooltipContent>
+              </Tooltip.Content>
             ) : null}
-          </Tooltip>
+          </Tooltip.Root>
           {showProjectMenu ? (
-            <ContextMenuContent className="min-w-[180px]">
+            <ContextMenu.Content className="min-w-[180px]">
               {onOpenProjectSettings ? (
-                <ContextMenuItem
+                <ContextMenu.Item
                   icon={<Settings2 />}
-                  onSelect={() => {
+                  onClick={() => {
                     onOpenProjectSettings(machineId, project.id);
                   }}
                 >
                   {projectSettingsLabel}
-                </ContextMenuItem>
+                </ContextMenu.Item>
               ) : null}
               {revealPath ? (
-                <ContextMenuItem
+                <ContextMenu.Item
                   icon={<FolderOpen />}
-                  onSelect={() => {
+                  onClick={() => {
                     onRevealProject?.(revealPath);
                   }}
                 >
                   {revealProjectLabel}
-                </ContextMenuItem>
+                </ContextMenu.Item>
               ) : null}
               {onArchiveProjectChats ? (
-                <ContextMenuItem
+                <ContextMenu.Item
                   disabled={archivableSessionIds.length === 0}
                   icon={<Archive />}
-                  onSelect={() => {
+                  onClick={() => {
                     onArchiveProjectChats(archivableSessionIds);
                   }}
                 >
                   {archiveProjectChatsLabel}
-                </ContextMenuItem>
+                </ContextMenu.Item>
               ) : null}
               {canRemoveProject &&
               (onOpenProjectSettings || revealPath || onArchiveProjectChats) ? (
-                <ContextMenuSeparator />
+                <ContextMenu.Separator />
               ) : null}
               {canRemoveProject ? (
-                <ContextMenuItem
+                <ContextMenu.Item
                   icon={<Trash2 />}
-                  onSelect={() => {
+                  onClick={() => {
                     onRequestRemoval({
                       machineId,
                       localProjectId: project.id,
@@ -1374,11 +1367,11 @@ export const LocalProjectItem = memo(function LocalProjectItem({
                   }}
                 >
                   {removeProjectLabel}
-                </ContextMenuItem>
+                </ContextMenu.Item>
               ) : null}
-            </ContextMenuContent>
+            </ContextMenu.Content>
           ) : null}
-        </ContextMenu>
+        </ContextMenu.Root>
       </div>
 
       {/* An expanded project with nothing to list renders no container: an empty

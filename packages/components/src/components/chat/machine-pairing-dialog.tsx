@@ -9,22 +9,15 @@ import {
   Terminal,
   TerminalSquare,
 } from 'lucide-react';
-import { Spinner } from '@/ui/spinner';
+import { Spinner } from '@lody/ui/spinner';
 import { useTranslation } from 'react-i18next';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import { useConvexErrorMessage } from '@/hooks/use-convex-error-message';
 
 import { writeTextToClipboard } from '@/lib/clipboard';
-import { Button } from '@/ui/button';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/ui/dialog';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
+import { Button } from '@lody/ui/button';
+import { Dialog } from '@/ui/dialog';
+import { Tooltip } from '@lody/ui/tooltip';
 
 const LODY_DESKTOP_DOWNLOAD_URL = 'https://lody.ai/download';
 
@@ -112,24 +105,24 @@ export function MachinePairingDialog({
   const connected = status === 'registered' && machineId;
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-xl">
+    <Dialog.Root open={open} onOpenChange={onOpenChange}>
+      <Dialog.Content className="max-w-xl">
         {connected ? (
           <>
-            <DialogHeader>
-              <DialogTitle className="flex items-center gap-2">
+            <Dialog.Header>
+              <Dialog.Title className="flex items-center gap-2">
                 <CheckCircle2 className="h-5 w-5 text-status-success" aria-hidden="true" />
                 {t('machinePairing.connectedTitle', 'Machine connected')}
-              </DialogTitle>
-              <DialogDescription>
+              </Dialog.Title>
+              <Dialog.Description>
                 {t(
                   'machinePairing.configureDescription',
                   'Configure the coding agents available on {{machine}}.',
                   { machine: machineName ?? machineId }
                 )}
-              </DialogDescription>
-            </DialogHeader>
-            <DialogFooter>
+              </Dialog.Description>
+            </Dialog.Header>
+            <Dialog.Footer>
               <Button variant="ghost" onClick={() => onOpenChange(false)}>
                 {t('machinePairing.skipAgentSetup', 'Skip for now')}
               </Button>
@@ -141,19 +134,19 @@ export function MachinePairingDialog({
               >
                 {t('machinePairing.configureAgents', 'Configure agents')}
               </Button>
-            </DialogFooter>
+            </Dialog.Footer>
           </>
         ) : (
           <>
-            <DialogHeader>
-              <DialogTitle>{t('machinePairing.title', 'Connect a machine')}</DialogTitle>
-              <DialogDescription>
+            <Dialog.Header>
+              <Dialog.Title>{t('machinePairing.title', 'Connect a machine')}</Dialog.Title>
+              <Dialog.Description>
                 {t(
                   'machinePairing.description',
                   'Download the Lody desktop app, or run the command below on the machine you want to connect.'
                 )}
-              </DialogDescription>
-            </DialogHeader>
+              </Dialog.Description>
+            </Dialog.Header>
 
             {creating ? (
               <div className="flex min-h-40 items-center justify-center text-muted-foreground">
@@ -164,7 +157,7 @@ export function MachinePairingDialog({
                 <p className="text-sm text-destructive">
                   {t('machinePairing.createFailed', 'Could not create a connection request.')}
                 </p>
-                <Button variant="outline" onClick={onRetry}>
+                <Button variant="secondary" onClick={onRetry}>
                   {t('common.retry', 'Retry')}
                 </Button>
               </div>
@@ -187,7 +180,7 @@ export function MachinePairingDialog({
                       </p>
                     </div>
                   </div>
-                  <Button className="mt-3 w-full gap-2" onClick={downloadDesktop}>
+                  <Button className="mt-3 w-full" onClick={downloadDesktop}>
                     <Download className="h-4 w-4" aria-hidden="true" />
                     {t('machinePairing.downloadDesktop', 'Download Lody Desktop')}
                   </Button>
@@ -218,23 +211,21 @@ export function MachinePairingDialog({
                     <code className="block whitespace-pre-wrap break-words font-mono text-xs leading-5 text-foreground">
                       {command}
                     </code>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Button
+                    <Tooltip.Root>
+                      <Tooltip.Trigger render={<Button
                           type="button"
                           variant="ghost"
-                          size="icon"
-                          className="absolute right-1.5 top-1.5 h-8 w-8"
+                          icon
+                          className="absolute right-1.5 top-1.5"
                           onClick={() => void copyCommand()}
                           aria-label={t('machinePairing.copyCommand', 'Copy command')}
                         >
                           <Copy className="h-4 w-4" aria-hidden="true" />
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent>
+                        </Button>}/>
+                      <Tooltip.Content>
                         {t('machinePairing.copyCommand', 'Copy command')}
-                      </TooltipContent>
-                    </Tooltip>
+                      </Tooltip.Content>
+                    </Tooltip.Root>
                   </div>
                   <p className="mt-3 flex items-center gap-1.5 text-xs text-muted-foreground">
                     <Clock className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
@@ -266,22 +257,22 @@ export function MachinePairingDialog({
                     ? t('machinePairing.cancelled', 'This connection request was cancelled.')
                     : t('machinePairing.expired', 'This connection request has expired.')}
                 </p>
-                <Button variant="outline" onClick={onRetry}>
+                <Button variant="secondary" onClick={onRetry}>
                   {t('machinePairing.createNew', 'Create a new request')}
                 </Button>
               </div>
             )}
 
             {status === 'pending' || status === 'claimed' ? (
-              <DialogFooter>
+              <Dialog.Footer>
                 <Button variant="ghost" onClick={() => void cancel()}>
                   {t('machinePairing.cancelRequest', 'Cancel connection request')}
                 </Button>
-              </DialogFooter>
+              </Dialog.Footer>
             ) : null}
           </>
         )}
-      </DialogContent>
-    </Dialog>
+      </Dialog.Content>
+    </Dialog.Root>
   );
 }

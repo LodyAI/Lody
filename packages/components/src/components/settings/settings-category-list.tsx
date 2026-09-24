@@ -1,12 +1,14 @@
 import { useCallback, useId } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Bug, ChevronRight } from 'lucide-react';
-import { Card, CardContent } from '@/ui/card';
+import * as stylex from '@stylexjs/stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { duration, ease, space } from '@lody/ui/tokens/scales.stylex';
+import { Card } from '@lody/ui/card';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { useNavigate } from '@tanstack/react-router';
 import { bugReportDialogOpenAtom, currentWorkspaceSlugAtom, userAtom } from '@/atoms';
 import { isNativeAppShell } from '@/lib/native-platform';
-import { cn } from '@/lib/utils';
 import { useAppCapability } from '@/lib/app-platform';
 import { useOrganization } from '@/hooks/useOrganization';
 import {
@@ -16,6 +18,113 @@ import {
 } from './settings-tabs';
 import { SettingsAccountEntry } from './settings-account-entry';
 import { FocusScope, useListKeyboardNavigation } from '@/ui/focus-scope';
+import { settingsSurface as surface } from './surface';
+
+const styles = stylex.create({
+  list: {
+    display: 'flex',
+    flexDirection: 'column',
+    minHeight: '100%',
+    paddingTop: space[3],
+    paddingBottom: space[6],
+  },
+  groups: { display: 'flex', flexDirection: 'column', gap: '20px' },
+  inset: { marginInline: space[3] },
+  heading: {
+    margin: 0,
+    paddingInline: '20px',
+    paddingBottom: space[1.5],
+    fontSize: '0.82em',
+    fontWeight: 400,
+    color: colors.secondaryLabel,
+  },
+  footer: { marginTop: 'auto', paddingTop: '20px' },
+  /** A category is one line of the section's card; the whole line is the button. */
+  row: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: space[3],
+    width: '100%',
+    margin: 0,
+    paddingInline: space[4],
+    paddingBlock: space[3],
+    borderWidth: 0,
+    color: colors.label,
+    fontFamily: 'inherit',
+    fontSize: '1em',
+    textAlign: 'start',
+    cursor: 'pointer',
+  },
+  /** The whole line answers the pointer, and the finger on a phone. */
+  rowPressed: {
+    transitionProperty: 'background-color',
+    transitionDuration: duration.fast,
+    transitionTimingFunction: ease.standard,
+    backgroundColor: {
+      default: 'transparent',
+      ':hover': `color-mix(in oklab, ${colors.elevatedBackground}, ${colors.label} 4%)`,
+      ':active': `color-mix(in oklab, ${colors.elevatedBackground}, ${colors.label} 6%)`,
+    },
+  },
+  /** The category's glyph, a hint at rest like every other icon in a row. */
+  rowIcon: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+    width: '28px',
+    height: '28px',
+    color: colors.secondaryLabel,
+  },
+  glyph: { width: '18px', height: '18px' },
+  rowText: { flexGrow: 1, minWidth: 0 },
+  rowLabel: {
+    margin: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: '0.95em',
+    fontWeight: 400,
+    color: colors.label,
+  },
+  rowDescription: {
+    margin: 0,
+    marginTop: '2px',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: '0.78em',
+    color: colors.secondaryLabel,
+  },
+  chevron: { flexShrink: 0, width: '16px', height: '16px', color: colors.tertiaryLabel },
+  grid: {
+    display: 'grid',
+    gridTemplateColumns: {
+      default: 'minmax(0, 1fr)',
+      '@media (min-width: 640px)': 'repeat(2, minmax(0, 1fr))',
+    },
+    gap: space[4],
+    padding: space[6],
+  },
+  gridButton: {
+    display: 'block',
+    padding: 0,
+    borderWidth: 0,
+    backgroundColor: 'transparent',
+    fontFamily: 'inherit',
+    textAlign: 'start',
+    cursor: 'pointer',
+  },
+  gridCard: { height: '100%' },
+  gridIcon: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '24px',
+    height: '24px',
+    color: colors.secondaryLabel,
+  },
+});
 
 type SettingsCategoryListProps = {
   workspaceName?: string;
@@ -93,11 +202,11 @@ export function SettingsCategoryList({ workspaceName }: SettingsCategoryListProp
   if (!resolvedWorkspaceName) return null;
 
   return (
-    <FocusScope id={scopeId} className="flex min-h-full flex-col pb-6 pt-3">
-      <div className="flex flex-col gap-5">
+    <FocusScope id={scopeId} {...stylex.props(styles.list)}>
+      <div {...stylex.props(styles.groups)}>
         {accountTab ? (
           <div
-            className="mx-3"
+            {...stylex.props(styles.inset)}
             data-id="settings:account"
             data-scope-item="row"
             data-settings-tab-id={accountTab.id}
@@ -112,10 +221,10 @@ export function SettingsCategoryList({ workspaceName }: SettingsCategoryListProp
           if (sectionTabs.length === 0) return null;
           return (
             <section key={section.id} aria-label={t(section.headingKey, section.defaultHeading)}>
-              <h2 className="px-5 pb-1.5 text-[0.82rem] font-normal text-muted-foreground">
+              <h2 {...stylex.props(styles.heading)}>
                 {t(section.headingKey, section.defaultHeading)}
               </h2>
-              <div className="mx-3 overflow-hidden rounded-2xl border border-border/60 bg-card">
+              <div {...stylex.props(surface.card, styles.inset)}>
                 {sectionTabs.map((tab, index) => (
                   <SettingsCategoryRow
                     key={tab.id}
@@ -132,7 +241,7 @@ export function SettingsCategoryList({ workspaceName }: SettingsCategoryListProp
         })}
       </div>
       {canReportBug && (
-        <div className="mt-auto pt-5">
+        <div {...stylex.props(styles.footer)}>
           <SettingsActionRow
             icon={Bug}
             label={t('bugReport.title', 'Report a bug')}
@@ -169,25 +278,16 @@ function SettingsCategoryRow({
       data-scope-item="row"
       data-settings-tab-id={tab.id}
       onClick={onSelect}
-      className={cn(
-        'block w-full text-left transition-colors active:bg-muted/40',
-        hasDivider && 'border-t border-border'
-      )}
+      {...stylex.props(styles.row, styles.rowPressed, hasDivider && surface.lineRuled)}
     >
-      <div className="flex items-center gap-3 px-4 py-3">
-        {/* Icon plate matches the home screen's avatar treatment —
-           rounded primary-tinted square + icon in the primary color
-           so the settings rows feel like the same family as the home
-           Chat / Projects rows. */}
-        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary/10">
-          <Icon className="h-[1.05rem] w-[1.05rem] text-primary" aria-hidden="true" />
-        </div>
-        <div className="min-w-0 flex-1">
-          <h3 className="truncate text-[0.95rem] font-normal text-foreground">{label}</h3>
-          <p className="mt-0.5 truncate text-[0.78rem] text-muted-foreground">{description}</p>
-        </div>
-        <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/60" aria-hidden="true" />
+      <span {...stylex.props(styles.rowIcon)}>
+        <Icon {...stylex.props(styles.glyph)} aria-hidden="true" />
+      </span>
+      <div {...stylex.props(styles.rowText)}>
+        <h3 {...stylex.props(styles.rowLabel)}>{label}</h3>
+        <p {...stylex.props(styles.rowDescription)}>{description}</p>
       </div>
+      <ChevronRight {...stylex.props(styles.chevron)} aria-hidden="true" />
     </button>
   );
 }
@@ -204,22 +304,20 @@ function SettingsActionRow({
   onSelect: () => void;
 }) {
   return (
-    <div className="mx-3 overflow-hidden rounded-2xl border border-border/60 bg-card">
+    <div {...stylex.props(surface.card, styles.inset)}>
       <button
         type="button"
         data-id="settings:report-bug"
         data-scope-item="row"
         onClick={onSelect}
-        className="block w-full text-left transition-colors active:bg-muted/40"
+        {...stylex.props(styles.row, styles.rowPressed)}
       >
-        <div className="flex items-center gap-3 px-4 py-3">
-          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary/10">
-            <Icon className="h-[1.05rem] w-[1.05rem] text-primary" aria-hidden="true" />
-          </div>
-          <div className="min-w-0 flex-1">
-            <h3 className="truncate text-[0.95rem] font-normal text-foreground">{label}</h3>
-            <p className="mt-0.5 truncate text-[0.78rem] text-muted-foreground">{description}</p>
-          </div>
+        <span {...stylex.props(styles.rowIcon)}>
+          <Icon {...stylex.props(styles.glyph)} aria-hidden="true" />
+        </span>
+        <div {...stylex.props(styles.rowText)}>
+          <h3 {...stylex.props(styles.rowLabel)}>{label}</h3>
+          <p {...stylex.props(styles.rowDescription)}>{description}</p>
         </div>
       </button>
     </div>
@@ -249,33 +347,26 @@ export function SettingsCategoryGrid() {
   };
 
   return (
-    <div className="p-6">
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        {workspaceSlug &&
-          categories.map((category) => (
-            <button
-              key={category.id}
-              type="button"
-              onClick={() => openCategory(category)}
-              className="block text-left"
-            >
-              <Card className="h-full hover:bg-hover transition-colors cursor-pointer">
-                <CardContent className="p-6">
-                  <div className="flex flex-col gap-3">
-                    <div className="w-12 h-12 rounded-lg bg-primary/10 flex items-center justify-center">
-                      <category.icon className="h-6 w-6 text-primary" />
-                    </div>
-
-                    <div>
-                      <h3 className="font-normal text-lg mb-1">{category.label}</h3>
-                      <p className="text-sm text-muted-foreground">{category.description}</p>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            </button>
-          ))}
-      </div>
+    <div {...stylex.props(styles.grid)}>
+      {workspaceSlug &&
+        categories.map((category) => (
+          <button
+            key={category.id}
+            type="button"
+            onClick={() => openCategory(category)}
+            {...stylex.props(styles.gridButton)}
+          >
+            <Card.Root interactive {...stylex.props(styles.gridCard)}>
+              <span {...stylex.props(styles.gridIcon)}>
+                <category.icon {...stylex.props(styles.glyph)} aria-hidden="true" />
+              </span>
+              <Card.Header>
+                <Card.Title>{category.label}</Card.Title>
+                <Card.Description>{category.description}</Card.Description>
+              </Card.Header>
+            </Card.Root>
+          </button>
+        ))}
     </div>
   );
 }

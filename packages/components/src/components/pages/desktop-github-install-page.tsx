@@ -1,10 +1,10 @@
 import { useTranslation } from 'react-i18next';
 import { motion } from 'framer-motion';
 import { Github } from 'lucide-react';
-import { Spinner } from '@/ui/spinner';
+import { Spinner } from '@lody/ui/spinner';
 
-import { Button } from '@/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/ui/card';
+import { Button } from '@lody/ui/button';
+import { Card } from '@/ui/card';
 import lodyLogo from '@/assets/lody-icon.png';
 
 export interface DesktopGithubInstallPageProps {
@@ -23,35 +23,35 @@ export function DesktopGithubInstallPage({ deepLink }: DesktopGithubInstallPageP
         transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
         className="w-full max-w-md"
       >
-        <Card className="relative overflow-hidden rounded-2xl border-border/60 shadow-[0_20px_60px_-30px_rgba(0,0,0,0.25)]">
+        <Card.Root className="relative overflow-hidden rounded-2xl border-border/60 shadow-[0_20px_60px_-30px_rgba(0,0,0,0.25)]">
           <div
             aria-hidden="true"
             className="pointer-events-none absolute inset-x-12 top-0 h-px bg-gradient-to-r from-transparent via-primary/50 to-transparent"
           />
-          <CardHeader className="items-center gap-8 px-8 pt-11 pb-6 text-center">
+          <Card.Header className="items-center gap-8 px-8 pt-11 pb-6 text-center">
             <HandoffVisual />
             <div className="flex flex-col items-center gap-3.5">
-              <CardTitle className="text-2xl font-semibold tracking-tight">
+              <Card.Title className="text-2xl font-semibold tracking-tight">
                 {t('desktopGithubInstall.title', 'Continue in Lody Desktop')}
-              </CardTitle>
+              </Card.Title>
               <span className="inline-flex items-center gap-2 rounded-full border border-border/60 bg-muted/40 px-3 py-1 text-xs font-medium text-muted-foreground">
                 <Spinner className="h-3.5 w-3.5" aria-hidden="true" />
                 {t('desktopGithubInstall.opening', 'Opening Lody Desktop…')}
               </span>
             </div>
-          </CardHeader>
-          <CardContent className="px-8 pb-9">
+          </Card.Header>
+          <Card.Content>
             {deepLink ? (
-              <Button asChild className="h-11 w-full text-[0.9375rem]">
-                <a href={deepLink}>{openLabel}</a>
+              <Button render={<a href={deepLink} />} size="large" className="w-full">
+                {openLabel}
               </Button>
             ) : (
-              <Button className="h-11 w-full text-[0.9375rem]" disabled>
+              <Button size="large" className="w-full" disabled>
                 {openLabel}
               </Button>
             )}
-          </CardContent>
-        </Card>
+          </Card.Content>
+        </Card.Root>
       </motion.div>
     </div>
   );

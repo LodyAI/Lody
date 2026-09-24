@@ -274,7 +274,10 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
           },
           ...(telemetryEnabled
             ? {
-                onAnalyticsEvent: (event: { name: string; properties?: Record<string, unknown> }) => {
+                onAnalyticsEvent: (event: {
+                  name: string;
+                  properties?: Record<string, unknown>;
+                }) => {
                   capturePostHogEvent(postHogRef.current, event.name, event.properties);
                 },
               }

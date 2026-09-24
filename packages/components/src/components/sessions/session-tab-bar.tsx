@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Plus, X, History, Undo2, FileDiff, Hand } from 'lucide-react';
-import { Spinner } from '@/ui/spinner';
+import { Spinner } from '@lody/ui/spinner';
 import { cn } from '@/lib/utils';
 import { WINDOW_DRAG_EXEMPT_CLASS, useWindowDragRegionClass } from '@/ui/window-drag-region';
 import { getSessionLaunchConfigLegacyFields, type SessionId, type SessionMeta } from '@lody/shared';
@@ -9,10 +9,10 @@ import { useAtomValue } from 'jotai';
 import { getAgentMetaByIdAtomFamily } from '@/atoms/agents';
 import { WORKSPACE_FOCUS_SCOPES } from '@/atoms/focus-layer';
 import { sessionLiveStatusAtomFamily } from '@/atoms/presence';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
+import { Tooltip } from '@lody/ui/tooltip';
 import { useListKeyboardNavigation } from '@/ui/focus-scope';
 import { ScrollArea } from '@/ui/scroll-area';
-import { Popover, PopoverContent, PopoverTrigger } from '@/ui/popover';
+import { Popover } from '@lody/ui/popover';
 import { AgentIcon } from '@/components/icons/agent-icon';
 import { FileIcon } from '@/components/icons/file-icons';
 import {
@@ -868,11 +868,9 @@ export function ClosedTabsPopover({
   const triggerLabel = t('sessions.tabs.closedTabs', 'Closed conversations');
 
   return (
-    <Popover>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <PopoverTrigger asChild>
-            <button
+    <Popover.Root>
+      <Tooltip.Root>
+        <Tooltip.Trigger render={<Popover.Trigger render={<button
               type="button"
               className={cn(TAB_BAR_ACTION_CLASS, 'relative')}
               aria-label={
@@ -889,14 +887,12 @@ export function ClosedTabsPopover({
                   className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-primary"
                 />
               ) : null}
-            </button>
-          </PopoverTrigger>
-        </TooltipTrigger>
-        <TooltipContent side="bottom">
+            </button>}/>}/>
+        <Tooltip.Content side="bottom">
           {t('sessions.tabs.closedTabs', 'Closed conversations')}
-        </TooltipContent>
-      </Tooltip>
-      <PopoverContent align="end" className="w-72 p-0" sideOffset={4}>
+        </Tooltip.Content>
+      </Tooltip.Root>
+      <Popover.Content align="end" className="w-72 p-0" sideOffset={4}>
         <div className="border-b border-border px-3 py-2">
           <p className="text-[0.8em] font-medium text-popover-foreground/70">
             {t('sessions.tabs.closedTabs', 'Closed conversations')}
@@ -928,8 +924,8 @@ export function ClosedTabsPopover({
             })}
           </div>
         </ScrollArea>
-      </PopoverContent>
-    </Popover>
+      </Popover.Content>
+    </Popover.Root>
   );
 }
 

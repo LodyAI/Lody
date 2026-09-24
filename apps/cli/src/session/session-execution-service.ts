@@ -190,7 +190,6 @@ type TurnFinalizationEffects = {
   finalizeACPState: (sessionId: SessionId, turnId?: string) => Promise<void>;
   persistCodeCollabTurnDiffs?: (sessionId: SessionId, turnId: string) => Promise<boolean>;
   flushSessionUsage: (sessionId: SessionId) => Promise<void>;
-  syncSessionBranchName: (sessionId: SessionId, session: ISession) => Promise<string | null>;
   updateSessionDiffStats: (
     sessionId: SessionId,
     session: ISession,
@@ -567,6 +566,7 @@ export type SessionExecutionServiceDeps = {
     modelInfo: ModelInfo | undefined,
     userTurnId?: string
   ) => Promise<void>;
+  syncSessionBranchName: (sessionId: SessionId, session: ISession) => Promise<string | null>;
   turnFinalization: TurnFinalizationEffects;
   recordChatFailure: (
     sessionDoc: SessionDocument,
@@ -613,6 +613,7 @@ export type SessionExecutionServiceDeps = {
     availableCommands?: AcpCommandSummary[];
     sessionFork: boolean;
     acknowledgedSteer: boolean;
+    sessionTitle?: boolean;
     goalActions?: SessionGoalAction[];
     modelReasoningEfforts?: Record<string, string[]>;
     capabilitySourceVersion?: string;
@@ -2645,6 +2646,10 @@ export class SessionExecutionService {
       );
     }
 
+    if (options.runtime.session) {
+      // A best-effort observation must not delay publishing the turn failure.
+      void this.deps.syncSessionBranchName(options.sessionId, options.runtime.session);
+    }
     this.deps.logger.error(options.describe(options.error), options.error);
     if (options.userTurnId) {
       await this.markTurnFailed(options.sessionId, options.sessionDoc, options.userTurnId);
@@ -2904,6 +2909,7 @@ export class SessionExecutionService {
       runtime.workspaceGitStateSynced = true;
     }
     await this.runTurnFinalizationStage(sessionId, turnId, 'syncWorkspaceGitState', async () => {
+      await this.deps.syncSessionBranchName(sessionId, session);
       await this.deps.turnFinalization.syncWorkspaceGitState(sessionId, session);
     });
   }
@@ -3016,25 +3022,24 @@ export class SessionExecutionService {
       return;
     }
 
-    let branchName: string | null = null;
     let preferredStatsBaseBranch = project?.branch;
     if (project?.kind === 'local') {
       preferredStatsBaseBranch =
         (await sessionDoc.getMetaState())?.baseBranch?.trim() || preferredStatsBaseBranch;
     }
 
+    const branchName = await this.runTurnFinalizationStage(
+      sessionId,
+      turnId,
+      'syncSessionBranchName',
+      async () => await this.deps.syncSessionBranchName(sessionId, session)
+    );
+
+    if (await stopIfTurnCancelled('branch synchronization')) {
+      return;
+    }
+
     if (githubProject) {
-      branchName = await this.runTurnFinalizationStage(
-        sessionId,
-        turnId,
-        'syncSessionBranchName',
-        async () => await this.deps.turnFinalization.syncSessionBranchName(sessionId, session)
-      );
-
-      if (await stopIfTurnCancelled('branch synchronization')) {
-        return;
-      }
-
       try {
         const detectedPr = await this.runTurnFinalizationStage(
           sessionId,
@@ -3229,7 +3234,13 @@ export class SessionExecutionService {
               effectiveErrorContext = context;
             };
 
+            let branchObservedSession: ISession | undefined;
             const bindSession = (nextSession: ISession): void => {
+              if (branchObservedSession !== nextSession) {
+                branchObservedSession = nextSession;
+                // Presentation metadata never gates the first agent prompt.
+                void self.deps.syncSessionBranchName(sessionId, nextSession);
+              }
               runtime.session = nextSession;
               runtime.pendingSession = undefined;
             };
@@ -5112,16 +5123,6 @@ export class SessionExecutionService {
     );
     const startSessionStartedAtMs = getServerNow();
 
-    void this.deps.maybeGenerateAndStoreSessionTitle(
-      sessionId,
-      sessionConfig.agentCliType,
-      sessionConfig.agentType,
-      agentConfig.prompt,
-      env,
-      acpSessionConfig.customAcp,
-      acpSessionConfig.runtimeOverrides
-    );
-
     const self = this;
     const turnErrorContext: VisibleSessionTurnUnhandledErrorContext = {
       code: 'session_create_failed',
@@ -5274,6 +5275,18 @@ export class SessionExecutionService {
           bindSession(session);
           self.scheduleCreatedSessionCapabilityUpdate(session, sessionConfig);
           yield* abortIfCancelled({ terminateSession: true });
+          // Use the live initialize result, including on the first uncached launch.
+          if (session.getAcpCapabilities?.()?.sessionTitle !== true) {
+            void self.deps.maybeGenerateAndStoreSessionTitle(
+              sessionId,
+              sessionConfig.agentCliType,
+              sessionConfig.agentType,
+              agentConfig.prompt,
+              env,
+              acpSessionConfig.customAcp,
+              acpSessionConfig.runtimeOverrides
+            );
+          }
           // First-turn attachments are materialized under the session workspace.
           // Start this as soon as createSession has registered the workspace, but
           // do not start it earlier or attachments fall back to "unavailable".
@@ -5774,7 +5787,8 @@ export class SessionExecutionService {
         sourceVersion,
         capabilities.modelReasoningEfforts,
         capabilities.acknowledgedSteer,
-        capabilities.goalActions
+        capabilities.goalActions,
+        { sessionTitle: capabilities.sessionTitle }
       );
     })().catch((error: unknown) => {
       this.deps.logger.debug(
@@ -6106,6 +6120,7 @@ export class SessionExecutionService {
         availableCommands,
         sessionFork,
         acknowledgedSteer,
+        sessionTitle,
         goalActions,
         modelReasoningEfforts,
         capabilitySourceVersion,
@@ -6148,7 +6163,7 @@ export class SessionExecutionService {
         modelReasoningEfforts,
         acknowledgedSteer,
         goalActions,
-        { signal: options.signal }
+        { signal: options.signal, sessionTitle }
       );
 
       return {

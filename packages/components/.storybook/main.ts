@@ -1,9 +1,11 @@
 import { fileURLToPath } from 'node:url';
 import type { StorybookConfig } from '@storybook/react-vite';
+import stylex from '@stylexjs/unplugin';
 import tailwindcss from '@tailwindcss/vite';
 import { loadEnv } from 'vite';
 import wasm from 'vite-plugin-wasm';
 import { requirePreviewPublicBaseDomain } from '../../../scripts/preview-public-base-domain.mjs';
+import { stylexOptions } from '../../ui/stylex-options';
 import topLevelAwait from '../vite-top-level-await-fixed.cjs';
 import { loroCrdtWasmUrlWorkaround } from '../vite-wasm-workarounds.ts';
 
@@ -33,6 +35,7 @@ const config: StorybookConfig = {
       return true;
     });
     viteConfig.plugins.push(tailwindcss());
+    viteConfig.plugins.push(stylex.vite(stylexOptions));
 
     viteConfig.worker = {
       ...(viteConfig.worker ?? {}),

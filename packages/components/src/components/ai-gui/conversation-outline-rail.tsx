@@ -14,7 +14,7 @@ import { createPortal } from 'react-dom';
 import { usePostHog } from '@posthog/react';
 import { useTranslation } from 'react-i18next';
 import { cn } from '@/lib/utils';
-import { Popover, PopoverAnchor, PopoverContent } from '@/ui/popover';
+import { Popover } from '@lody/ui/popover';
 import type { ConversationOutlineEntry } from '@/lib/conversation-outline';
 import { useLatestRef } from '@/hooks/use-latest-ref';
 import { capturePostHogSampled } from '@/lib/posthog-analytics';
@@ -681,21 +681,23 @@ export function ConversationOutlineRail({
       {/* ONE popover for the whole rail, re-anchored to the hovered tick. A
           popover per tick would mount hundreds of Radix instances for a long
           session. */}
-      <Popover open={cardOpen && hoveredEntry !== null}>
-        <PopoverAnchor virtualRef={hoverCard ? { current: hoverCard.element } : undefined} />
-        <PopoverContent
+      <Popover.Root open={cardOpen && hoveredEntry !== null}>
+        <Popover.Content
+          anchor={hoverCard ? { current: hoverCard.element } : undefined}
           side="right"
           align="center"
           sideOffset={10}
           // Purely informational: it must never take focus from the rail, and
           // dismissing it is the pointer's job.
-          onOpenAutoFocus={(event) => event.preventDefault()}
-          onCloseAutoFocus={(event) => event.preventDefault()}
+          initialFocus={false}
+          finalFocus={false}
           className="pointer-events-none w-72 select-none p-3"
-          onAnimationEnd={(event) => {
+          onTransitionEnd={(event) => {
+            // The surface transitions out before Base UI unmounts it; clear the
+            // anchor's state only once that fade has ended.
             if (
-              event.target === event.currentTarget &&
-              event.currentTarget.dataset.state === 'closed' &&
+              event.target instanceof HTMLElement &&
+              'endingStyle' in event.target.dataset &&
               !cardOpenRef.current
             ) {
               setHoverCard(null);
@@ -715,8 +717,8 @@ export function ConversationOutlineRail({
               </div>
             </>
           )}
-        </PopoverContent>
-      </Popover>
+        </Popover.Content>
+      </Popover.Root>
     </nav>
   );
 

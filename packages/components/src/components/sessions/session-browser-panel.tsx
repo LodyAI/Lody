@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Globe2, ShieldAlert } from 'lucide-react';
-import { Spinner } from '@/ui/spinner';
+import { Spinner } from '@lody/ui/spinner';
 import { useAtomValue } from 'jotai';
 import { useTranslation } from 'react-i18next';
 import {
@@ -24,18 +24,9 @@ import {
 
 import { activeWorkspaceRuntimeAtom, userAtom } from '@/atoms';
 import { getMachineMetaByIdAtomFamily } from '@/atoms/machines';
-import { Button } from '@/ui/button';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/ui/alert-dialog';
-import { toast } from 'sonner';
+import { Button } from '@lody/ui/button';
+import { AlertDialog } from '@/ui/dialog';
+import { toast } from '@/lib/toast';
 import { writeTextToClipboard } from '@/lib/clipboard';
 import { isElectronRenderer } from '@/lib/electron';
 import { getPublicBrowserBridge } from '@/lib/electron-ipc-client';
@@ -1033,8 +1024,8 @@ function SessionBrowserPanelController({
           <Button
             type="button"
             variant="ghost"
-            size="sm"
-            className="ml-auto h-6 px-2"
+            size="small"
+            className="ml-auto"
             onClick={() => setError(null)}
           >
             {t('common.dismiss', 'Dismiss')}
@@ -1099,20 +1090,20 @@ function SessionBrowserPanelController({
         </div>
       )}
 
-      <AlertDialog
+      <AlertDialog.Root
         open={pendingAction !== null}
         onOpenChange={(open) => {
           if (!open && !busy) setPendingAction(null);
         }}
       >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
+        <AlertDialog.Content>
+          <AlertDialog.Header>
+            <AlertDialog.Title>
               {pendingAction?.kind === 'share'
                 ? t('sessions.browser.confirmShareTitle', 'Create a shareable preview?')
                 : t('sessions.browser.confirmRemoteTitle', 'Open a remote preview?')}
-            </AlertDialogTitle>
-            <AlertDialogDescription>
+            </AlertDialog.Title>
+            <AlertDialog.Description>
               {t(
                 'sessions.browser.confirmRemoteDescription',
                 'This creates an authenticated tunnel to {{target}} on the machine running this conversation.',
@@ -1122,16 +1113,16 @@ function SessionBrowserPanelController({
                     : '',
                 }
               )}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={busy}>{t('common.cancel', 'Cancel')}</AlertDialogCancel>
-            <AlertDialogAction disabled={busy} onClick={() => void confirmPendingAction()}>
+            </AlertDialog.Description>
+          </AlertDialog.Header>
+          <AlertDialog.Footer>
+            <AlertDialog.Cancel disabled={busy}>{t('common.cancel', 'Cancel')}</AlertDialog.Cancel>
+            <AlertDialog.Action disabled={busy} onClick={() => void confirmPendingAction()}>
               {t('common.confirm', 'Confirm')}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+            </AlertDialog.Action>
+          </AlertDialog.Footer>
+        </AlertDialog.Content>
+      </AlertDialog.Root>
     </div>
   );
 }

@@ -3,8 +3,8 @@ import { useTranslation } from 'react-i18next';
 import { usePlatform } from '@lody/platform/react';
 import { motion } from 'framer-motion';
 import { X } from 'lucide-react';
-import { Spinner } from '@/ui/spinner';
-import { Button } from '@/ui/button';
+import { Spinner } from '@lody/ui/spinner';
+import { Button } from '@lody/ui/button';
 import { useStuckConnectionHint } from '@/hooks/use-stuck-connection';
 import { ClearCacheConfirmDialog, useClearCache } from './settings/clear-cache';
 
@@ -59,7 +59,7 @@ export function StuckConnectionBanner({
           <p className="min-w-0 flex-1 truncate text-sm font-medium">{labels.title}</p>
           <Button
             variant="ghost"
-            size="icon"
+            icon
             className="-mr-1 h-6 w-6 shrink-0 text-muted-foreground"
             onClick={onDismiss}
             aria-label={labels.dismissAriaLabel}
@@ -75,7 +75,7 @@ export function StuckConnectionBanner({
             {labels.description}
           </p>
           <Button
-            size="sm"
+            size="small"
             className="h-7 shrink-0 rounded-full px-3 text-xs"
             onClick={onClearCache}
           >

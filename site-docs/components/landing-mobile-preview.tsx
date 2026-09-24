@@ -31,7 +31,7 @@ import {
 } from '@/components/mobile/mobile-inline-picker';
 import { MobileNewChatSheetContent } from '@/components/mobile/mobile-new-chat-sheet';
 import { ForceMobileLayoutProvider } from '@/hooks/use-mobile';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { cn } from '@/lib/utils';
 import type { LandingLocale } from './landing';
 
@@ -118,11 +118,10 @@ export function LandingMobilePreview({
              beside it — see chat-landing.tsx's sheet `primaryAction`. */
           <Button
             type="button"
-            size="icon"
             variant="ghost"
+            icon
             className={cn(
-              'h-8 w-8 rounded-md border shadow-xs transition-all',
-              'border-primary/[0.25] bg-primary/[0.15] text-foreground hover:bg-primary/[0.25] hover:text-foreground active:translate-y-[1px]'
+              'border-primary/[0.25] bg-primary/[0.15] hover:bg-primary/[0.25] active:translate-y-[1px]'
             )}
             disabled={promptValue.trim().length === 0}
             aria-label="Send"
@@ -143,156 +142,156 @@ export function LandingMobilePreview({
     // Force mobile layout hooks (composer rows, message chrome, no ⌘L) even
     // though the outer browser viewport is still desktop-wide.
     <ForceMobileLayoutProvider force>
-    {/* Phone design size matches the desktop stage height (760). Compact
+      {/* Phone design size matches the desktop stage height (760). Compact
         viewports fit the stage into the reveal slot via container units
         (see `.landing-phone-stage` in global.css / underwater.css). */}
-    <div
-      className="landing-phone-stage landing-phone-stage--narrowed mx-auto overflow-hidden bg-transparent"
-      // `narrowed` is kept for call-site compatibility; the stage is always the
-      // design phone size so enter/exit never paints a full-width dark plate.
-      data-narrowed={narrowed ? 'true' : 'false'}
-      style={
-        {
-          ['--lp-phone-w' as string]: `${PHONE_W}px`,
-          ['--lp-phone-h' as string]: `${PHONE_H}px`,
-          ['--lp-phone-ar' as string]: String(PHONE_AR),
-        } as CSSProperties
-      }
-    >
       <div
-        className="landing-phone-stage__device relative bg-transparent"
-        style={{ width: PHONE_W, height: PHONE_H }}
+        className="landing-phone-stage landing-phone-stage--narrowed mx-auto overflow-hidden bg-transparent"
+        // `narrowed` is kept for call-site compatibility; the stage is always the
+        // design phone size so enter/exit never paints a full-width dark plate.
+        data-narrowed={narrowed ? 'true' : 'false'}
+        style={
+          {
+            ['--lp-phone-w' as string]: `${PHONE_W}px`,
+            ['--lp-phone-h' as string]: `${PHONE_H}px`,
+            ['--lp-phone-ar' as string]: String(PHONE_AR),
+          } as CSSProperties
+        }
       >
-        {/* Screen content sits UNDER the device PNG; the opaque bezel masks its
+        <div
+          className="landing-phone-stage__device relative bg-transparent"
+          style={{ width: PHONE_W, height: PHONE_H }}
+        >
+          {/* Screen content sits UNDER the device PNG; the opaque bezel masks its
             edges/corners, exactly like a real screenshot inside the frame.
             `isolate` + translateZ(0) create a containing block so the home
             dock's `position: fixed` resolves to the screen — not the full-width
             scaled reveal frame (which left the FAB hanging outside the phone). */}
-        <div
-          className="absolute isolate overflow-hidden bg-background text-foreground"
-          data-landing-phone-frame
-          style={{
-            left: SCREEN.left,
-            top: SCREEN.top,
-            width: SCREEN.width,
-            height: SCREEN.height,
-            transform: 'translateZ(0)',
-            // Island inset is applied as real padding below; home-indicator
-            // inset flows into the dock via --k-safe-area-bottom.
-            ['--landing-phone-safe-bottom' as string]: `${SAFE_AREA_BOTTOM}px`,
-            ['--safe-area-bottom' as string]: `${SAFE_AREA_BOTTOM}px`,
-            ['--safe-area-top' as string]: '0px',
-            ['--k-safe-area-bottom' as string]: `${SAFE_AREA_BOTTOM}px`,
-            ['--k-safe-area-top' as string]: '0px',
-            ['--k-safe-area-left' as string]: '0px',
-            ['--k-safe-area-right' as string]: '0px',
-          }}
-        >
-          {/* Home: the all-conversations Chat tab. Stays mounted under the
+          <div
+            className="absolute isolate overflow-hidden bg-background text-foreground"
+            data-landing-phone-frame
+            style={{
+              left: SCREEN.left,
+              top: SCREEN.top,
+              width: SCREEN.width,
+              height: SCREEN.height,
+              transform: 'translateZ(0)',
+              // Island inset is applied as real padding below; home-indicator
+              // inset flows into the dock via --k-safe-area-bottom.
+              ['--landing-phone-safe-bottom' as string]: `${SAFE_AREA_BOTTOM}px`,
+              ['--safe-area-bottom' as string]: `${SAFE_AREA_BOTTOM}px`,
+              ['--safe-area-top' as string]: '0px',
+              ['--k-safe-area-bottom' as string]: `${SAFE_AREA_BOTTOM}px`,
+              ['--k-safe-area-top' as string]: '0px',
+              ['--k-safe-area-left' as string]: '0px',
+              ['--k-safe-area-right' as string]: '0px',
+            }}
+          >
+            {/* Home: the all-conversations Chat tab. Stays mounted under the
               other screens like the real always-mounted mobile home. */}
-          <div className="flex h-full flex-col" style={{ paddingTop: SAFE_AREA_TOP }}>
-            <MobileHomeScreen
-              theme="ios"
-              workspace={{
-                id: 'workspace-lody',
-                name: 'Lody',
-                avatarUrl: '/landing/icon-transparent.png',
-              }}
-              machines={machines}
-              connectionUiState="online"
-              selectedTab="chat"
-              localProjects={localProjects}
-              githubRepositories={githubRepositories}
-              chats={chats}
-              chatFilterPills={chatFilterPills}
-              chatGroupBy="none"
-              labels={labels}
-              onTabSelect={() => undefined}
-              onChatSelect={() => undefined}
-              onNewChat={() => undefined}
+            <div className="flex h-full flex-col" style={{ paddingTop: SAFE_AREA_TOP }}>
+              <MobileHomeScreen
+                theme="ios"
+                workspace={{
+                  id: 'workspace-lody',
+                  name: 'Lody',
+                  avatarUrl: '/landing/icon-transparent.png',
+                }}
+                machines={machines}
+                connectionUiState="online"
+                selectedTab="chat"
+                localProjects={localProjects}
+                githubRepositories={githubRepositories}
+                chats={chats}
+                chatFilterPills={chatFilterPills}
+                chatGroupBy="none"
+                labels={labels}
+                onTabSelect={() => undefined}
+                onChatSelect={() => undefined}
+                onNewChat={() => undefined}
+              />
+            </div>
+
+            {/* Dim behind the new-chat sheet. */}
+            <div
+              aria-hidden="true"
+              className={cn(
+                'absolute inset-0 z-30 bg-black/40 transition-opacity duration-300',
+                screen === 'compose' ? 'opacity-100' : 'pointer-events-none opacity-0'
+              )}
             />
-          </div>
 
-          {/* Dim behind the new-chat sheet. */}
-          <div
-            aria-hidden="true"
-            className={cn(
-              'absolute inset-0 z-30 bg-black/40 transition-opacity duration-300',
-              screen === 'compose' ? 'opacity-100' : 'pointer-events-none opacity-0'
-            )}
-          />
-
-          {/* New-chat bottom sheet: the REAL sheet content in a local slide-up
+            {/* New-chat bottom sheet: the REAL sheet content in a local slide-up
               (Vaul's Drawer portals to <body>, which would escape the phone). */}
-          <div
-            className={cn(
-              'absolute inset-x-0 bottom-0 z-40 rounded-t-2xl border-t border-border bg-background shadow-2xl transition-transform duration-300 ease-out',
-              screen === 'compose' ? 'translate-y-0' : 'translate-y-full'
-            )}
-          >
-            <MobileNewChatSheetContent
-              labels={SHEET_LABELS[locale]}
-              coordinator={MobileInlinePickerCoordinator}
-              machineNode={
-                <MobileInlinePicker
-                  id="landing-mobile-machine"
-                  value="mac-studio"
-                  onChange={() => undefined}
-                  options={[{ value: 'mac-studio', label: machineName }]}
-                  ariaLabel={isZh ? '机器' : 'Machine'}
-                  triggerContent={
-                    <span className="flex items-center gap-1.5">
-                      <Monitor className="h-3.5 w-3.5" />
-                      {machineName}
-                    </span>
-                  }
-                />
-              }
-              contextTypeNode={
-                <MobileInlinePicker
-                  id="landing-mobile-context"
-                  value="chat"
-                  onChange={() => undefined}
-                  options={[{ value: 'chat', label: isZh ? '对话' : 'Chat' }]}
-                  ariaLabel={isZh ? '类型' : 'Type'}
-                  triggerContent={
-                    <span className="flex items-center gap-1.5">
-                      <MessageCircle className="h-3.5 w-3.5" />
-                      {isZh ? '对话' : 'Chat'}
-                    </span>
-                  }
-                />
-              }
-              perTypeNode={null}
-              branchNode={null}
-              secondaryPerTypeNode={null}
-              composer={composer}
-              belowComposerNode={sheetBelowComposerNode}
-              showCloseButton={false}
-            />
+            <div
+              className={cn(
+                'absolute inset-x-0 bottom-0 z-40 rounded-t-2xl border-t border-border bg-background shadow-2xl transition-transform duration-300 ease-out',
+                screen === 'compose' ? 'translate-y-0' : 'translate-y-full'
+              )}
+            >
+              <MobileNewChatSheetContent
+                labels={SHEET_LABELS[locale]}
+                coordinator={MobileInlinePickerCoordinator}
+                machineNode={
+                  <MobileInlinePicker
+                    id="landing-mobile-machine"
+                    value="mac-studio"
+                    onChange={() => undefined}
+                    options={[{ value: 'mac-studio', label: machineName }]}
+                    ariaLabel={isZh ? '机器' : 'Machine'}
+                    triggerContent={
+                      <span className="flex items-center gap-1.5">
+                        <Monitor className="h-3.5 w-3.5" />
+                        {machineName}
+                      </span>
+                    }
+                  />
+                }
+                contextTypeNode={
+                  <MobileInlinePicker
+                    id="landing-mobile-context"
+                    value="chat"
+                    onChange={() => undefined}
+                    options={[{ value: 'chat', label: isZh ? '对话' : 'Chat' }]}
+                    ariaLabel={isZh ? '类型' : 'Type'}
+                    triggerContent={
+                      <span className="flex items-center gap-1.5">
+                        <MessageCircle className="h-3.5 w-3.5" />
+                        {isZh ? '对话' : 'Chat'}
+                      </span>
+                    }
+                  />
+                }
+                perTypeNode={null}
+                branchNode={null}
+                secondaryPerTypeNode={null}
+                composer={composer}
+                belowComposerNode={sheetBelowComposerNode}
+                showCloseButton={false}
+              />
+            </div>
+
+            {/* Session: slides over the home like the real push navigation. */}
+            <div
+              className={cn(
+                'absolute inset-0 z-40 flex flex-col bg-background transition-transform duration-300 ease-out',
+                screen === 'session' ? 'translate-x-0' : 'translate-x-full'
+              )}
+              style={{ paddingTop: SAFE_AREA_TOP }}
+            >
+              <div className="min-h-0 flex-1">{sessionNode}</div>
+            </div>
           </div>
 
-          {/* Session: slides over the home like the real push navigation. */}
-          <div
-            className={cn(
-              'absolute inset-0 z-40 flex flex-col bg-background transition-transform duration-300 ease-out',
-              screen === 'session' ? 'translate-x-0' : 'translate-x-full'
-            )}
-            style={{ paddingTop: SAFE_AREA_TOP }}
-          >
-            <div className="min-h-0 flex-1">{sessionNode}</div>
-          </div>
+          <img
+            src={PHONE_IMG}
+            alt=""
+            aria-hidden="true"
+            draggable={false}
+            className="pointer-events-none absolute inset-0 h-full w-full select-none"
+          />
         </div>
-
-        <img
-          src={PHONE_IMG}
-          alt=""
-          aria-hidden="true"
-          draggable={false}
-          className="pointer-events-none absolute inset-0 h-full w-full select-none"
-        />
       </div>
-    </div>
     </ForceMobileLayoutProvider>
   );
 }

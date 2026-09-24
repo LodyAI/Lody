@@ -1,4 +1,5 @@
 import { useRef, useState, type ReactNode } from 'react';
+import * as stylex from '@stylexjs/stylex';
 import { useTranslation } from 'react-i18next';
 import {
   type AcpSessionMonitorSnapshot,
@@ -24,30 +25,16 @@ import {
   UserRound,
   Users,
 } from 'lucide-react';
-import { Spinner } from '@/ui/spinner';
-import { Badge } from '@/ui/badge';
-import { Button } from '@/ui/button';
-import { Input } from '@/ui/input';
-import { Switch } from '@/ui/switch';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from '@/ui/dropdown-menu';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/ui/alert-dialog';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
-import { cn } from '@/lib/utils';
+import { Spinner } from '@lody/ui/spinner';
+import { Badge } from '@lody/ui/badge';
+import { Button } from '@lody/ui/button';
+import { Input } from '@lody/ui/input';
+import { Switch } from '@lody/ui/switch';
+import { Menu } from '@/ui/menu';
+import { AlertDialog } from '@/ui/dialog';
+import { Tooltip } from '@lody/ui/tooltip';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { corner, radius, space } from '@lody/ui/tokens/scales.stylex';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useMachineOnlineStatus } from '@/hooks/use-machine-online-status';
 import { useMachineActionState } from '@/hooks/use-machine-action-state';
@@ -56,13 +43,147 @@ import { MobileSettingsSection } from '@/components/mobile/mobile-settings-row';
 import { ProviderRow } from './provider-row';
 import { ProviderSetupRow } from './provider-setup-row';
 import { DeviceResourceMonitor } from './device-resource-monitor';
+import { CompactSection } from './compact-layout';
+import { settingsSurface as surface } from './surface';
 import type { MachineMonitorViewState } from '@/hooks/use-machine-monitor';
 import {
-  MACHINE_META_PILL_CLASS,
   WorkspaceMachineAccordionSummary,
   WorkspaceMachineOwnerAvatar,
   type WorkspaceMachineAccordionMeta,
 } from './workspace-machine-accordion';
+
+const MONO = 'var(--font-mono, ui-monospace, monospace)';
+
+const styles = stylex.create({
+  icon12: { width: '12px', height: '12px', flexShrink: 0 },
+  icon14: { width: '14px', height: '14px', flexShrink: 0 },
+  /** A glyph in a box that sizes it — a menu row's leading box, a badge's. */
+  iconFill: { width: '100%', height: '100%' },
+  mono: { fontFamily: MONO },
+  /** The section's card sits in from the pane's edge unless the caller is already inset. */
+  inset: { paddingInline: space[4] },
+  /** One line of a list: every line but the first is ruled from the one above. */
+  line: { minWidth: 0 },
+  lineRuled: { boxShadow: `inset 0 1px 0 ${colors.separator}` },
+  empty: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    gap: space[3],
+    paddingInline: space[6],
+    paddingBlock: space[8],
+    textAlign: 'center',
+  },
+  emptyIcon: { width: '24px', height: '24px', color: colors.tertiaryLabel },
+  emptyCopy: { margin: 0, fontSize: '0.875em', color: colors.secondaryLabel },
+  pane: {
+    display: 'flex',
+    flexDirection: 'column',
+    width: '100%',
+    minWidth: 0,
+    minHeight: 0,
+    height: '100%',
+  },
+  paneInAccordion: { height: 'auto' },
+  header: { paddingInline: space[4], paddingBlock: space[3] },
+  headerCompact: { paddingBlock: space[2] },
+  /**
+   * The accordion's own header stays in view while its body scrolls. It is the
+   * card's top, so it takes the card's fill and no rule under it.
+   */
+  headerSticky: {
+    position: 'sticky',
+    top: 0,
+    zIndex: 20,
+    backgroundColor: colors.elevatedBackground,
+    borderStartStartRadius: radius.large,
+    borderStartEndRadius: radius.large,
+    cornerShape: corner.shape,
+  },
+  toolbar: { display: 'flex', alignItems: 'center', gap: space[2], minWidth: 0 },
+  statusDot: {
+    flexShrink: 0,
+    width: '10px',
+    height: '10px',
+    borderRadius: radius.full,
+    cornerShape: corner.round,
+    backgroundColor: colors.tertiaryLabel,
+  },
+  statusDotSmall: { width: '8px', height: '8px', marginInline: space[1] },
+  statusDotOnline: {
+    backgroundColor: colors.success,
+    boxShadow: `0 0 0 4px color-mix(in oklab, ${colors.success} 20%, transparent)`,
+  },
+  titleGroup: { display: 'contents' },
+  titleGroupMobile: {
+    display: 'flex',
+    flexGrow: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minWidth: 0,
+  },
+  renameInput: { flexGrow: 1 },
+  title: {
+    minWidth: 0,
+    margin: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: '1em',
+    fontWeight: 400,
+    color: colors.label,
+  },
+  titleMobile: { fontSize: '1.125em', textAlign: 'center' },
+  ping: { display: 'flex', flexShrink: 0, alignItems: 'center', gap: space[1.5] },
+  pushEnd: { marginInlineStart: 'auto' },
+  latency: { fontFamily: MONO, fontSize: '0.75em', color: colors.secondaryLabel },
+  share: {
+    display: 'flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    gap: space[2],
+    marginInlineStart: 'auto',
+    paddingInlineStart: space[2],
+  },
+  shareLabel: { whiteSpace: 'nowrap', fontSize: '0.75em', color: colors.secondaryLabel },
+  /** Between the management actions and the destructive ones: one structural line. */
+  groupRule: {
+    flexShrink: 0,
+    width: '1px',
+    height: '16px',
+    marginInline: '2px',
+    backgroundColor: colors.separator,
+  },
+  /** Keeps the tooltip reachable over a disabled button, which takes no pointer. */
+  tooltipAnchor: { display: 'inline-flex', flexShrink: 0 },
+  switchInMenu: { pointerEvents: 'none' },
+  metaRow: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: space[1.5],
+    marginTop: space[1.5],
+  },
+  metaRowMobile: {
+    marginTop: 0,
+    paddingInline: space[4],
+    paddingBlock: space[1],
+  },
+  summaryRow: { display: 'flex', marginTop: space[1.5] },
+  update: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: space[2],
+    marginTop: space[3],
+  },
+  updateText: { minWidth: 0 },
+  updateTitle: { fontSize: '0.75em', color: colors.label },
+  updateVersion: { fontFamily: MONO, fontSize: '0.7em', color: colors.secondaryLabel },
+  body: { flexGrow: 1, minHeight: 0, overflowY: 'auto' },
+  bodyInAccordion: { overflowY: 'visible' },
+});
 
 export type MachineProvidersSectionProps = {
   machine: MachineViewMeta;
@@ -96,21 +217,46 @@ export function MachineProvidersSection({
 }: MachineProvidersSectionProps) {
   const { t } = useTranslation();
   const addButton = (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-7 w-7 text-muted-foreground hover:bg-muted/60 hover:text-foreground"
-          onClick={onAddConfig}
-          aria-label={t('settings.agent.provider.addProvider', 'Add provider')}
-        >
-          <Plus className="h-3.5 w-3.5" />
-        </Button>
-      </TooltipTrigger>
-      <TooltipContent>{t('settings.agent.provider.addProvider', 'Add provider')}</TooltipContent>
-    </Tooltip>
+    <Tooltip.Root>
+      <Tooltip.Trigger
+        render={
+          <Button
+            variant="ghost"
+            size="small"
+            icon
+            onClick={onAddConfig}
+            aria-label={t('settings.agent.provider.addProvider', 'Add provider')}
+          >
+            <Plus {...stylex.props(styles.icon14)} />
+          </Button>
+        }
+      />
+      <Tooltip.Content>{t('settings.agent.provider.addProvider', 'Add provider')}</Tooltip.Content>
+    </Tooltip.Root>
   );
+
+  const providerLines = [
+    ...setups.map((setup) => (
+      <ProviderSetupRow
+        key={setup.id}
+        setup={setup}
+        machine={machine}
+        onRetry={onRetrySetup ?? (async () => undefined)}
+        onDelete={onDeleteSetup ?? (async () => undefined)}
+      />
+    )),
+    ...configs.map((config) => (
+      <ProviderRow
+        key={config.id}
+        config={config}
+        machine={machine}
+        onEdit={onEditConfig}
+        onDelete={onDeleteConfig}
+        onRefresh={onRefreshConfig}
+        variant="list"
+      />
+    )),
+  ];
 
   if (variant === 'mobile-list') {
     return (
@@ -119,88 +265,33 @@ export function MachineProvidersSection({
         actions={addButton}
       >
         {configs.length === 0 && setups.length === 0 ? (
-          <div className="flex flex-col items-center px-6 py-8 text-center text-sm">
-            <Bot className="h-6 w-6 text-muted-foreground/70" />
-            <p className="mt-2 text-muted-foreground">
-              {t('settings.agent.provider.empty', 'No providers on this machine yet.')}
-            </p>
-            <Button size="sm" className="mt-3" onClick={onAddConfig}>
-              <Plus className="mr-1.5 h-3.5 w-3.5" />
-              {t('settings.agent.provider.addProvider', 'Add provider')}
-            </Button>
-          </div>
+          <EmptyProviders onAdd={onAddConfig} />
         ) : (
-          <>
-            {setups.map((setup, index) => (
-              <ProviderSetupRow
-                key={setup.id}
-                setup={setup}
-                machine={machine}
-                onRetry={onRetrySetup ?? (async () => undefined)}
-                onDelete={onDeleteSetup ?? (async () => undefined)}
-                className={cn(
-                  'rounded-none border-0 bg-transparent',
-                  index > 0 && 'border-t border-border'
-                )}
-              />
-            ))}
-            {configs.map((config, index) => (
-              <ProviderRow
-                key={config.id}
-                config={config}
-                machine={machine}
-                onEdit={onEditConfig}
-                onDelete={onDeleteConfig}
-                onRefresh={onRefreshConfig}
-                variant="list"
-                className={index === 0 && setups.length > 0 ? 'border-t border-border' : undefined}
-              />
-            ))}
-          </>
+          providerLines.map((line, index) => (
+            <div key={line.key} {...stylex.props(styles.line, index > 0 && styles.lineRuled)}>
+              {line}
+            </div>
+          ))
         )}
       </MobileSettingsSection>
     );
   }
 
+  // The providers are one list, so one card of ruled rows: the section rules
+  // the lines between them, and a provider is a row of it, not a card.
   return (
-    <section className="flex flex-col">
-      <div
-        className={cn(
-          'flex items-center justify-between gap-2 pb-1 pt-0.5',
-          flush ? 'px-0' : 'px-4'
-        )}
+    <div {...stylex.props(!flush && styles.inset)}>
+      <CompactSection
+        title={t('settings.agent.provider.title', 'Agent Provider')}
+        actions={addButton}
       >
-        <h3 className="text-xs font-normal text-muted-foreground">
-          {t('settings.agent.provider.title', 'Agent Provider')}
-        </h3>
-        {addButton}
-      </div>
-      {configs.length === 0 && setups.length === 0 ? (
-        <EmptyProviders onAdd={onAddConfig} flush={flush} />
-      ) : (
-        <div className={cn('space-y-2', flush ? '' : 'mx-4')}>
-          {setups.map((setup) => (
-            <ProviderSetupRow
-              key={setup.id}
-              setup={setup}
-              machine={machine}
-              onRetry={onRetrySetup ?? (async () => undefined)}
-              onDelete={onDeleteSetup ?? (async () => undefined)}
-            />
-          ))}
-          {configs.map((config) => (
-            <ProviderRow
-              key={config.id}
-              config={config}
-              machine={machine}
-              onEdit={onEditConfig}
-              onDelete={onDeleteConfig}
-              onRefresh={onRefreshConfig}
-            />
-          ))}
-        </div>
-      )}
-    </section>
+        {configs.length === 0 && setups.length === 0 ? (
+          <EmptyProviders onAdd={onAddConfig} />
+        ) : (
+          providerLines
+        )}
+      </CompactSection>
+    </div>
   );
 }
 
@@ -357,51 +448,41 @@ export function MachineDetailPane(props: MachineDetailPaneProps) {
 
   const metaBadges = (
     <>
-      {isLocal && (
-        <Badge variant="secondary" className={MACHINE_META_PILL_CLASS}>
-          {t('workspace.machines.thisDevice', 'This device')}
-        </Badge>
-      )}
+      {isLocal && <Badge>{t('workspace.machines.thisDevice', 'This device')}</Badge>}
       {ownerName && !isOwn && (
-        <Badge variant="secondary" className={cn('gap-1', MACHINE_META_PILL_CLASS)}>
-          <UserRound className="h-2.5 w-2.5" />
-          {ownerName}
-        </Badge>
+        <Badge icon={<UserRound {...stylex.props(styles.iconFill)} />}>{ownerName}</Badge>
       )}
       {isMobile && (
         <span
           aria-hidden
-          className={cn(
-            'mx-1 h-2 w-2 shrink-0 rounded-full ring-4',
-            isOnline
-              ? 'bg-status-success ring-status-success/20'
-              : 'bg-muted-foreground/50 ring-muted'
+          {...stylex.props(
+            styles.statusDot,
+            styles.statusDotSmall,
+            isOnline && styles.statusDotOnline
           )}
         />
       )}
-      <Badge variant="secondary" className={cn('gap-1', MACHINE_META_PILL_CLASS)}>
-        <Laptop className="h-2.5 w-2.5" />
-        {machine.os || '-'}
-      </Badge>
-      <Badge variant="secondary" className={cn('font-mono', MACHINE_META_PILL_CLASS)}>
-        {machine.cliVersion ? `v${machine.cliVersion}` : t('machines.never', 'Never')}
+      <Badge icon={<Laptop {...stylex.props(styles.iconFill)} />}>{machine.os || '-'}</Badge>
+      <Badge>
+        <span {...stylex.props(styles.mono)}>
+          {machine.cliVersion ? `v${machine.cliVersion}` : t('machines.never', 'Never')}
+        </span>
       </Badge>
     </>
   );
 
   return (
-    <div className={cn('flex min-h-0 w-full min-w-0 flex-col', accordion ? 'h-auto' : 'h-full')}>
+    <div {...stylex.props(styles.pane, accordion && styles.paneInAccordion)}>
       {detailToolbarVisible ? (
         <header
-          className={cn(
-            externalAccordionHeader ? 'px-4 py-2' : 'px-4 py-3',
-            accordion &&
-              !externalAccordionHeader &&
-              'sticky top-0 z-20 rounded-t-xl border-b border-border/60 bg-background/95 backdrop-blur'
+          {...stylex.props(
+            styles.header,
+            externalAccordionHeader && styles.headerCompact,
+            accordion && !externalAccordionHeader && styles.headerSticky
           )}
         >
           <MobileSettingsDetailHeader active={isMobile}>
-            <div className="flex min-w-0 items-center gap-2">
+            <div {...stylex.props(styles.toolbar)}>
               {accordion && !externalAccordionHeader ? (
                 <span
                   role="img"
@@ -410,25 +491,17 @@ export function MachineDetailPane(props: MachineDetailPaneProps) {
                       ? t('workspace.machines.online', 'Online')
                       : t('workspace.machines.offline', 'Offline')
                   }
-                  className={cn(
-                    'h-2.5 w-2.5 shrink-0 rounded-full ring-4',
-                    isOnline
-                      ? 'bg-status-success ring-status-success/20'
-                      : 'bg-muted-foreground/50 ring-muted'
-                  )}
+                  {...stylex.props(styles.statusDot, isOnline && styles.statusDotOnline)}
                 />
               ) : null}
-              <div
-                className={cn(
-                  isMobile ? 'flex min-w-0 flex-1 items-center justify-center' : 'contents'
-                )}
-              >
+              <div {...stylex.props(isMobile ? styles.titleGroupMobile : styles.titleGroup)}>
                 {renaming ? (
                   <Input
                     ref={inputRef}
                     value={renameDraft}
                     disabled={renameSaving}
-                    className="h-7 min-w-0 flex-1 px-1.5 py-0 text-base font-normal leading-snug"
+                    size="small"
+                    className={stylex.props(styles.renameInput).className}
                     onChange={(event) =>
                       setRenameDraft(event.target.value.replace(/[\r\n]+/g, ' '))
                     }
@@ -448,64 +521,48 @@ export function MachineDetailPane(props: MachineDetailPaneProps) {
                   />
                 ) : externalAccordionHeader ? (
                   manageableOwnMachine ? (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-7 gap-1.5 px-2 text-muted-foreground hover:text-foreground"
-                      onClick={() => setRenaming(true)}
-                    >
-                      <Pencil className="h-3 w-3" />
+                    <Button variant="ghost" size="small" onClick={() => setRenaming(true)}>
+                      <Pencil {...stylex.props(styles.icon12)} />
                       {t('workspace.machines.editName', 'Edit machine name')}
                     </Button>
                   ) : null
                 ) : (
                   <>
-                    <h2
-                      className={cn(
-                        'min-w-0 truncate font-normal',
-                        isMobile ? 'text-center text-lg' : 'text-base'
-                      )}
-                    >
+                    <h2 {...stylex.props(styles.title, isMobile && styles.titleMobile)}>
                       {machine.name || machine.id}
                     </h2>
-                    {renameSaving && <Spinner className="h-3.5 w-3.5" />}
+                    {renameSaving && <Spinner size="small" />}
                     {!isMobile && manageableOwnMachine && (
                       <Button
                         variant="ghost"
-                        size="icon"
-                        className="h-6 w-6 shrink-0 text-muted-foreground hover:text-foreground"
+                        size="mini"
+                        icon
                         aria-label={t('workspace.machines.editName', 'Edit machine name')}
                         onClick={() => setRenaming(true)}
                       >
-                        <Pencil className="h-3 w-3" />
+                        <Pencil {...stylex.props(styles.iconFill)} />
                       </Button>
                     )}
                   </>
                 )}
               </div>
               {onPing && !renaming && !isMobile && (
-                <div
-                  className={cn(
-                    'flex shrink-0 items-center gap-1.5',
-                    !shareControlVisible && 'ml-auto'
-                  )}
-                >
+                <div {...stylex.props(styles.ping, !shareControlVisible && styles.pushEnd)}>
                   <Button
                     variant="ghost"
-                    size="sm"
-                    className="h-7 bg-muted/40 px-2 text-muted-foreground hover:bg-muted/60 hover:text-foreground"
+                    size="small"
                     disabled={pinging}
                     onClick={() => void handlePing()}
                   >
                     {pinging ? (
-                      <Spinner className="mr-1 h-3.5 w-3.5" />
+                      <Spinner size="small" />
                     ) : (
-                      <Activity className="mr-1 h-3.5 w-3.5" />
+                      <Activity {...stylex.props(styles.icon14)} />
                     )}
                     {t('settings.agent.machinePing.button', 'Ping')}
                   </Button>
                   {pingLatencyMs !== null && (
-                    <span className="font-mono text-xs text-muted-foreground">
+                    <span {...stylex.props(styles.latency)}>
                       {t('settings.agent.machinePing.latency', '{{latency}} ms', {
                         latency: String(pingLatencyMs),
                       })}
@@ -514,12 +571,12 @@ export function MachineDetailPane(props: MachineDetailPaneProps) {
                 </div>
               )}
               {shareControlVisible && (
-                <div className="ml-auto flex shrink-0 items-center gap-2 pl-2">
-                  <span className="whitespace-nowrap text-xs text-muted-foreground">
+                <div {...stylex.props(styles.share)}>
+                  <span {...stylex.props(styles.shareLabel)}>
                     {t('workspace.machines.shareMachineLabel', 'Share machine')}
                   </span>
                   {sharing ? (
-                    <Spinner className="h-4 w-4 text-muted-foreground" />
+                    <Spinner size="small" />
                   ) : (
                     <Switch
                       checked={effectiveShared}
@@ -533,243 +590,250 @@ export function MachineDetailPane(props: MachineDetailPaneProps) {
                 </div>
               )}
               {restartVisible && (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-7 w-7 shrink-0 text-muted-foreground hover:text-foreground"
-                      aria-label={t(
-                        'settings.agent.machineLifecycle.restartButton',
-                        'Restart daemon'
-                      )}
-                      disabled={restartingDaemon || upgradingDaemon}
-                      onClick={() => void handleRestartDaemon()}
-                    >
-                      {restartingDaemon ? (
-                        <Spinner className="h-3.5 w-3.5" />
-                      ) : (
-                        <RotateCcw className="h-3.5 w-3.5" />
-                      )}
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>
-                    {t('settings.agent.machineLifecycle.restartButton', 'Restart daemon')}
-                  </TooltipContent>
-                </Tooltip>
-              )}
-              {managementGroupVisible && destructiveGroupVisible && (
-                <div aria-hidden className="mx-0.5 h-4 w-px shrink-0 bg-border" />
-              )}
-              {revokeVisible && (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-7 w-7 shrink-0 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-                      aria-label={t(
-                        'settings.devices.credentials.disconnect',
-                        'Revoke machine access'
-                      )}
-                      onClick={() => setRevokeOpen(true)}
-                    >
-                      <Unplug className="h-3.5 w-3.5" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>
-                    {t('settings.devices.credentials.disconnect', 'Revoke machine access')}
-                  </TooltipContent>
-                </Tooltip>
-              )}
-              {removeVisible ? (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <span className="inline-flex shrink-0">
+                <Tooltip.Root>
+                  <Tooltip.Trigger
+                    render={
                       <Button
                         variant="ghost"
-                        size="sm"
-                        className="h-7 gap-1.5 px-2 text-muted-foreground hover:bg-destructive/10 hover:text-destructive disabled:cursor-not-allowed"
+                        size="small"
+                        icon
                         aria-label={t(
-                          'workspace.machines.removeFromWorkspace',
-                          'Remove from workspace'
+                          'settings.agent.machineLifecycle.restartButton',
+                          'Restart daemon'
                         )}
-                        disabled={!canDelete}
-                        onClick={() => setDeleteOpen(true)}
+                        disabled={restartingDaemon || upgradingDaemon}
+                        onClick={() => void handleRestartDaemon()}
                       >
-                        <LogOut className="h-3.5 w-3.5" />
-                        {t('workspace.machines.removeFromWorkspace', 'Remove from workspace')}
+                        {restartingDaemon ? (
+                          <Spinner size="small" />
+                        ) : (
+                          <RotateCcw {...stylex.props(styles.iconFill)} />
+                        )}
                       </Button>
-                    </span>
-                  </TooltipTrigger>
+                    }
+                  />
+                  <Tooltip.Content>
+                    {t('settings.agent.machineLifecycle.restartButton', 'Restart daemon')}
+                  </Tooltip.Content>
+                </Tooltip.Root>
+              )}
+              {managementGroupVisible && destructiveGroupVisible && (
+                <div aria-hidden {...stylex.props(styles.groupRule)} />
+              )}
+              {revokeVisible && (
+                <Tooltip.Root>
+                  <Tooltip.Trigger
+                    render={
+                      <Button
+                        variant="ghost"
+                        size="small"
+                        icon
+                        tone="destructive"
+                        aria-label={t(
+                          'settings.devices.credentials.disconnect',
+                          'Revoke machine access'
+                        )}
+                        onClick={() => setRevokeOpen(true)}
+                      >
+                        <Unplug {...stylex.props(styles.iconFill)} />
+                      </Button>
+                    }
+                  />
+                  <Tooltip.Content>
+                    {t('settings.devices.credentials.disconnect', 'Revoke machine access')}
+                  </Tooltip.Content>
+                </Tooltip.Root>
+              )}
+              {removeVisible ? (
+                <Tooltip.Root>
+                  <Tooltip.Trigger
+                    render={
+                      <span {...stylex.props(styles.tooltipAnchor)}>
+                        <Button
+                          variant="ghost"
+                          size="small"
+                          tone="destructive"
+                          aria-label={t(
+                            'workspace.machines.removeFromWorkspace',
+                            'Remove from workspace'
+                          )}
+                          disabled={!canDelete}
+                          onClick={() => setDeleteOpen(true)}
+                        >
+                          <LogOut {...stylex.props(styles.icon14)} />
+                          {t('workspace.machines.removeFromWorkspace', 'Remove from workspace')}
+                        </Button>
+                      </span>
+                    }
+                  />
                   {!canDelete ? (
-                    <TooltipContent>
+                    <Tooltip.Content>
                       {t(
                         'workspace.machines.removeUnavailableOnline',
                         'Stop Lody on this machine before removing it from this workspace.'
                       )}
-                    </TooltipContent>
+                    </Tooltip.Content>
                   ) : null}
-                </Tooltip>
+                </Tooltip.Root>
               ) : null}
               {actionsMenuVisible && (
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-7 w-7 shrink-0"
-                      aria-label={t('workspace.machines.moreActions', 'Machine options')}
-                    >
-                      {sharing ? (
-                        <Spinner className="h-4 w-4" />
-                      ) : (
-                        <MoreHorizontal className="h-4 w-4" />
-                      )}
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent
+                <Menu.Root>
+                  <Menu.Trigger
+                    render={
+                      <Button
+                        variant="ghost"
+                        size="small"
+                        icon
+                        aria-label={t('workspace.machines.moreActions', 'Machine options')}
+                      >
+                        {sharing ? (
+                          <Spinner size="small" />
+                        ) : (
+                          <MoreHorizontal {...stylex.props(styles.iconFill)} />
+                        )}
+                      </Button>
+                    }
+                  />
+                  <Menu.Content
                     align="end"
-                    className="w-60"
-                    onCloseAutoFocus={(event) => {
-                      if (pendingRenameRef.current) {
-                        event.preventDefault();
-                        pendingRenameRef.current = false;
-                        requestAnimationFrame(() => {
-                          inputRef.current?.focus();
-                          inputRef.current?.select();
-                        });
-                      }
+                    finalFocus={() => {
+                      if (!pendingRenameRef.current) return undefined;
+                      pendingRenameRef.current = false;
+                      requestAnimationFrame(() => {
+                        inputRef.current?.focus();
+                        inputRef.current?.select();
+                      });
+                      return false;
                     }}
                   >
                     {isMobile && manageableOwnMachine && (
-                      <DropdownMenuItem
-                        onSelect={() => {
+                      <Menu.Item
+                        icon={<Pencil {...stylex.props(styles.iconFill)} />}
+                        onClick={() => {
                           pendingRenameRef.current = true;
                           setRenaming(true);
                         }}
                       >
-                        <Pencil className="h-3.5 w-3.5" />
-                        <span>{t('workspace.machines.editName', 'Edit machine name')}</span>
-                      </DropdownMenuItem>
+                        {t('workspace.machines.editName', 'Edit machine name')}
+                      </Menu.Item>
                     )}
                     {isMobile && manageableOwnMachine && onSharedWithTeamChange && (
-                      <DropdownMenuItem
-                        onSelect={(event) => {
-                          event.preventDefault();
+                      <Menu.Item
+                        closeOnClick={false}
+                        onClick={() => {
                           if (sharing) return;
                           void handleSharedToggle(!effectiveShared);
                         }}
                         disabled={sharing}
+                        icon={<Users {...stylex.props(styles.iconFill)} />}
+                        endContent={
+                          <Switch
+                            checked={effectiveShared}
+                            disabled={sharing}
+                            aria-hidden
+                            tabIndex={-1}
+                            className={stylex.props(styles.switchInMenu).className}
+                          />
+                        }
                       >
-                        <Users className="h-3.5 w-3.5" />
-                        <span className="min-w-0 flex-1">
-                          {t('workspace.machines.shareMachineLabel', 'Share machine')}
-                        </span>
-                        <Switch
-                          checked={effectiveShared}
-                          disabled={sharing}
-                          aria-hidden
-                          tabIndex={-1}
-                          className="pointer-events-none"
-                        />
-                      </DropdownMenuItem>
+                        {t('workspace.machines.shareMachineLabel', 'Share machine')}
+                      </Menu.Item>
                     )}
                     {isMobile &&
                       isOwn &&
                       (onPing || (updateVisible && daemonUpdate) || onRestartDaemon) && (
-                        <DropdownMenuSeparator />
+                        <Menu.Separator />
                       )}
                     {isMobile && onPing && (
-                      <DropdownMenuItem
-                        onSelect={(event) => {
-                          event.preventDefault();
+                      <Menu.Item
+                        closeOnClick={false}
+                        onClick={() => {
                           void handlePing();
                         }}
                         disabled={pinging}
+                        icon={
+                          pinging ? (
+                            <Spinner size="small" />
+                          ) : (
+                            <Activity {...stylex.props(styles.iconFill)} />
+                          )
+                        }
+                        shortcut={
+                          pingLatencyMs !== null ? (
+                            <span {...stylex.props(styles.mono)}>
+                              {t('settings.agent.machinePing.latency', '{{latency}} ms', {
+                                latency: String(pingLatencyMs),
+                              })}
+                            </span>
+                          ) : undefined
+                        }
                       >
-                        {pinging ? (
-                          <Spinner className="h-3.5 w-3.5" />
-                        ) : (
-                          <Activity className="h-3.5 w-3.5" />
-                        )}
-                        <span className="min-w-0 flex-1">
-                          {t('settings.agent.machinePing.button', 'Ping')}
-                        </span>
-                        {pingLatencyMs !== null && (
-                          <span className="font-mono text-[11px] text-muted-foreground">
-                            {t('settings.agent.machinePing.latency', '{{latency}} ms', {
-                              latency: String(pingLatencyMs),
-                            })}
-                          </span>
-                        )}
-                      </DropdownMenuItem>
+                        {t('settings.agent.machinePing.button', 'Ping')}
+                      </Menu.Item>
                     )}
                     {isMobile && updateVisible && daemonUpdate && (
-                      <DropdownMenuItem
-                        onSelect={() => void handleUpgradeDaemon()}
+                      <Menu.Item
+                        onClick={() => void handleUpgradeDaemon()}
                         disabled={restartingDaemon || upgradingDaemon}
+                        icon={
+                          upgradingDaemon ? (
+                            <Spinner size="small" />
+                          ) : (
+                            <Download {...stylex.props(styles.iconFill)} />
+                          )
+                        }
                       >
-                        {upgradingDaemon ? (
-                          <Spinner className="h-3.5 w-3.5" />
-                        ) : (
-                          <Download className="h-3.5 w-3.5" />
+                        {t(
+                          'settings.agent.machineLifecycle.upgradeAndRestartButton',
+                          'Update and restart'
                         )}
-                        <span>
-                          {t(
-                            'settings.agent.machineLifecycle.upgradeAndRestartButton',
-                            'Update and restart'
-                          )}
-                        </span>
-                      </DropdownMenuItem>
+                      </Menu.Item>
                     )}
                     {onRestartDaemon && (
-                      <DropdownMenuItem
-                        onSelect={() => void handleRestartDaemon()}
+                      <Menu.Item
+                        onClick={() => void handleRestartDaemon()}
                         disabled={restartingDaemon || upgradingDaemon}
+                        icon={
+                          restartingDaemon ? (
+                            <Spinner size="small" />
+                          ) : (
+                            <RotateCcw {...stylex.props(styles.iconFill)} />
+                          )
+                        }
                       >
-                        {restartingDaemon ? (
-                          <Spinner className="h-3.5 w-3.5" />
-                        ) : (
-                          <RotateCcw className="h-3.5 w-3.5" />
-                        )}
-                        <span>
-                          {t('settings.agent.machineLifecycle.restartButton', 'Restart daemon')}
-                        </span>
-                      </DropdownMenuItem>
+                        {t('settings.agent.machineLifecycle.restartButton', 'Restart daemon')}
+                      </Menu.Item>
                     )}
                     {isMobile && isOwn && (
                       <>
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem
-                          onSelect={(event) => {
-                            event.preventDefault();
+                        <Menu.Separator />
+                        <Menu.Item
+                          closeOnClick={false}
+                          onClick={() => {
                             setDeleteOpen(true);
                           }}
                           disabled={!canDelete}
-                          className="text-destructive focus:text-destructive"
+                          tone="destructive"
+                          icon={<LogOut {...stylex.props(styles.iconFill)} />}
                         >
-                          <LogOut className="h-3.5 w-3.5" />
-                          <span>
-                            {canDelete
-                              ? t('workspace.machines.removeFromWorkspace', 'Remove from workspace')
-                              : t(
-                                  'workspace.machines.removeUnavailableOnlineShort',
-                                  'Stop machine before removing'
-                                )}
-                          </span>
-                        </DropdownMenuItem>
+                          {canDelete
+                            ? t('workspace.machines.removeFromWorkspace', 'Remove from workspace')
+                            : t(
+                                'workspace.machines.removeUnavailableOnlineShort',
+                                'Stop machine before removing'
+                              )}
+                        </Menu.Item>
                       </>
                     )}
-                  </DropdownMenuContent>
-                </DropdownMenu>
+                  </Menu.Content>
+                </Menu.Root>
               )}
               {accordion && !externalAccordionHeader ? (
                 <Button
                   type="button"
                   variant="ghost"
-                  size="icon"
-                  className="h-7 w-7 shrink-0 text-muted-foreground hover:text-foreground"
+                  size="small"
+                  icon
                   aria-label={t('settings.machines.collapseMachine', {
                     machine: machine.name || machine.id,
                     defaultValue: 'Collapse {{machine}}',
@@ -777,7 +841,7 @@ export function MachineDetailPane(props: MachineDetailPaneProps) {
                   aria-expanded={true}
                   onClick={accordion.onCollapse}
                 >
-                  <ChevronUp className="h-4 w-4" aria-hidden />
+                  <ChevronUp {...stylex.props(styles.iconFill)} aria-hidden />
                 </Button>
               ) : null}
               {accordion && !externalAccordionHeader ? (
@@ -789,24 +853,20 @@ export function MachineDetailPane(props: MachineDetailPaneProps) {
             move to the first line of the content, flush with the body. */}
           {!isMobile && accordion ? (
             externalAccordionHeader ? null : (
-              <WorkspaceMachineAccordionSummary
-                meta={accordion.meta}
-                className="mt-1.5 justify-start"
-                showOwner={false}
-              />
+              <div {...stylex.props(styles.summaryRow)}>
+                <WorkspaceMachineAccordionSummary meta={accordion.meta} showOwner={false} />
+              </div>
             )
           ) : !isMobile ? (
-            <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
-              {metaBadges}
-            </div>
+            <div {...stylex.props(styles.metaRow)}>{metaBadges}</div>
           ) : null}
           {updateVisible && daemonUpdate && (
-            <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-md border border-primary/25 bg-primary/5 px-3 py-2">
-              <div className="min-w-0">
-                <div className="text-xs font-normal text-foreground">
+            <div {...stylex.props(surface.formBlock, styles.update)}>
+              <div {...stylex.props(styles.updateText)}>
+                <div {...stylex.props(styles.updateTitle)}>
                   {t('settings.agent.machineLifecycle.updateAvailable', 'Update available')}
                 </div>
-                <div className="font-mono text-[11px] text-muted-foreground">
+                <div {...stylex.props(styles.updateVersion)}>
                   {t(
                     'settings.agent.machineLifecycle.updateVersion',
                     'v{{current}} -> v{{latest}}',
@@ -817,34 +877,26 @@ export function MachineDetailPane(props: MachineDetailPaneProps) {
                   )}
                 </div>
               </div>
-              <div className="shrink-0">
-                <Button
-                  size="sm"
-                  className="h-8 px-3"
-                  disabled={restartingDaemon || upgradingDaemon}
-                  onClick={() => void handleUpgradeDaemon()}
-                >
-                  {upgradingDaemon ? (
-                    <Spinner className="mr-1 h-3.5 w-3.5" />
-                  ) : (
-                    <Download className="mr-1 h-3.5 w-3.5" />
-                  )}
-                  {t(
-                    'settings.agent.machineLifecycle.upgradeAndRestartButton',
-                    'Update and restart'
-                  )}
-                </Button>
-              </div>
+              <Button
+                size="small"
+                disabled={restartingDaemon || upgradingDaemon}
+                onClick={() => void handleUpgradeDaemon()}
+              >
+                {upgradingDaemon ? (
+                  <Spinner size="small" />
+                ) : (
+                  <Download {...stylex.props(styles.icon14)} />
+                )}
+                {t('settings.agent.machineLifecycle.upgradeAndRestartButton', 'Update and restart')}
+              </Button>
             </div>
           )}
         </header>
       ) : null}
 
-      <div className={cn('min-h-0 flex-1', accordion ? 'overflow-visible' : 'overflow-y-auto')}>
+      <div {...stylex.props(styles.body, accordion && styles.bodyInAccordion)}>
         {isMobile && (
-          <div className="flex flex-wrap items-center gap-1.5 px-4 pb-1 pt-1 text-[11px] text-muted-foreground">
-            {metaBadges}
-          </div>
+          <div {...stylex.props(styles.metaRow, styles.metaRowMobile)}>{metaBadges}</div>
         )}
         {mode === 'devices' ? (
           <>
@@ -873,61 +925,59 @@ export function MachineDetailPane(props: MachineDetailPaneProps) {
         )}
       </div>
 
-      <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
+      <AlertDialog.Root open={deleteOpen} onOpenChange={setDeleteOpen}>
+        <AlertDialog.Content>
+          <AlertDialog.Header>
+            <AlertDialog.Title>
               {t('workspace.machines.removeConfirmTitle', 'Remove machine from workspace?')}
-            </AlertDialogTitle>
-            <AlertDialogDescription>
+            </AlertDialog.Title>
+            <AlertDialog.Description>
               {t('workspace.machines.removeConfirmDescription', {
                 machineName: machine.name,
                 defaultValue:
                   'Remove {{machineName}} from this workspace. It can appear again if it reconnects to this workspace later.',
               })}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={deleting}>
+            </AlertDialog.Description>
+          </AlertDialog.Header>
+          <AlertDialog.Footer>
+            <AlertDialog.Cancel disabled={deleting}>
               {t('common.cancel', 'Cancel')}
-            </AlertDialogCancel>
-            <AlertDialogAction
+            </AlertDialog.Cancel>
+            <Button
               disabled={deleting}
-              onClick={(event) => {
-                event.preventDefault();
+              onClick={() => {
                 void handleDelete();
               }}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              variant="destructive"
             >
-              {deleting && <Spinner className="mr-2 h-4 w-4" />}
+              {deleting && <Spinner size="small" />}
               {t('workspace.machines.removeAction', 'Remove')}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+            </Button>
+          </AlertDialog.Footer>
+        </AlertDialog.Content>
+      </AlertDialog.Root>
 
-      <AlertDialog open={revokeOpen} onOpenChange={setRevokeOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
+      <AlertDialog.Root open={revokeOpen} onOpenChange={setRevokeOpen}>
+        <AlertDialog.Content>
+          <AlertDialog.Header>
+            <AlertDialog.Title>
               {t('settings.devices.credentials.confirmTitle', 'Revoke machine access?')}
-            </AlertDialogTitle>
-            <AlertDialogDescription>
+            </AlertDialog.Title>
+            <AlertDialog.Description>
               {t(
                 'settings.devices.credentials.confirmDescription',
                 '{{machine}} will be signed out of every workspace. To reconnect it, create a new machine connection request.',
                 { machine: machine.name }
               )}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={revoking}>
+            </AlertDialog.Description>
+          </AlertDialog.Header>
+          <AlertDialog.Footer>
+            <AlertDialog.Cancel disabled={revoking}>
               {t('common.cancel', 'Cancel')}
-            </AlertDialogCancel>
-            <AlertDialogAction
+            </AlertDialog.Cancel>
+            <Button
               disabled={revoking}
-              onClick={(event) => {
-                event.preventDefault();
+              onClick={() => {
                 setRevoking(true);
                 void onRevokeCredentials?.()
                   .then(() => setRevokeOpen(false))
@@ -937,33 +987,29 @@ export function MachineDetailPane(props: MachineDetailPaneProps) {
                   })
                   .finally(() => setRevoking(false));
               }}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              variant="destructive"
             >
-              {revoking ? <Spinner className="mr-2 h-4 w-4" /> : null}
+              {revoking ? <Spinner size="small" /> : null}
               {t('settings.devices.credentials.disconnect', 'Revoke machine access')}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+            </Button>
+          </AlertDialog.Footer>
+        </AlertDialog.Content>
+      </AlertDialog.Root>
     </div>
   );
 }
 
-function EmptyProviders({ onAdd, flush = false }: { onAdd: () => void; flush?: boolean }) {
+/** The empty list, standing in for the card's rows. */
+function EmptyProviders({ onAdd }: { onAdd: () => void }) {
   const { t } = useTranslation();
   return (
-    <div
-      className={cn(
-        'flex flex-col items-center justify-center rounded-lg border border-dashed border-border/60 bg-card/30 px-6 py-8 text-center text-sm',
-        flush ? '' : 'mx-4'
-      )}
-    >
-      <Bot className="h-6 w-6 text-muted-foreground/70" />
-      <p className="mt-2 text-muted-foreground">
+    <div {...stylex.props(styles.empty)}>
+      <Bot {...stylex.props(styles.emptyIcon)} />
+      <p {...stylex.props(styles.emptyCopy)}>
         {t('settings.agent.provider.empty', 'No providers on this machine yet.')}
       </p>
-      <Button size="sm" className="mt-3" onClick={onAdd}>
-        <Plus className="mr-1.5 h-3.5 w-3.5" />
+      <Button variant="secondary" size="small" onClick={onAdd}>
+        <Plus {...stylex.props(styles.icon14)} />
         {t('settings.agent.provider.addProvider', 'Add provider')}
       </Button>
     </div>

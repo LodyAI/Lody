@@ -1,21 +1,31 @@
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Check, ChevronRight, CircleDashed, Copy, X } from 'lucide-react';
-import { Spinner } from '@/ui/spinner';
-import { Button } from '@/ui/button';
-import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/ui/dialog';
+import * as stylex from '@stylexjs/stylex';
+import { Check, ChevronRight, Copy } from 'lucide-react';
+import { Spinner } from '@lody/ui/spinner';
+import { Button } from '@lody/ui/button';
+import { Popover } from '@lody/ui/popover';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { corner, radius, space } from '@lody/ui/tokens/scales.stylex';
 import type { MessageContent } from '@lody/shared';
 import { formatDurationCompact } from '@/lib/format-duration';
 import { writeTextToClipboard } from '@/lib/clipboard';
-import { cn } from '@/lib/utils';
+import { useStableNow } from '@/hooks/use-stable-now';
 
 /**
- * Renders the subagent/background tasks a turn spawned as a single grouped
- * panel, instead of leaking each lifecycle event into the inline transcript.
+ * The subagent and background tasks a turn spawned, as one group of the turn's
+ * process rather than each lifecycle event leaking into the transcript.
  *
  * Tasks are persisted as first-class `subagent_task` history items (merged by
- * `taskId`); this panel is a pure view-layer aggregation — it reads those items
- * off the assistant entry and never mutates persisted history.
+ * `taskId`); this is a pure view-layer aggregation — it reads those items off
+ * the assistant entry and never mutates persisted history.
+ *
+ * A task is read at two depths. Its row says what it is and how long it has
+ * been at it — enough to follow while waiting. Clicking the row PEEKS at the
+ * rest in a popover anchored to it: the full command or brief, the result or
+ * error, what it cost, and Cancel for a subagent. A task has no live output to
+ * show, so it never takes a dialog, and it never unfolds in place either: that
+ * would push the turn around for a few lines of detail.
  */
 
 export type SubagentTask = Extract<MessageContent, { type: 'subagent_task' }>;
@@ -53,146 +63,6 @@ const formatUsage = (usage: SubagentTask['usage']): string | null => {
   return parts.length ? parts.join(' · ') : null;
 };
 
-const StatusIcon = ({ task }: { task: SubagentTask }) => {
-  if (task.status === 'completed') {
-    return <Check className="h-3.5 w-3.5 flex-none shrink-0 text-status-success" />;
-  }
-  if (task.status === 'failed') {
-    return <X className="h-3.5 w-3.5 flex-none shrink-0 text-status-danger" />;
-  }
-  if (task.status === 'pending') {
-    return <CircleDashed className="h-3.5 w-3.5 flex-none shrink-0 text-muted-foreground" />;
-  }
-  return <Spinner className="h-3.5 w-3.5 flex-none shrink-0 text-muted-foreground" />;
-};
-
-const SubagentTaskRow = ({
-  task,
-  onCancel,
-}: {
-  task: SubagentTask;
-  onCancel?: (taskId: string) => Promise<void>;
-}) => {
-  const { t } = useTranslation();
-  const [cancelling, setCancelling] = useState(false);
-  const [error, setError] = useState<string>();
-  const [detailsOpen, setDetailsOpen] = useState(false);
-
-  const actor =
-    task.actor ||
-    task.subagentType ||
-    task.workflowName ||
-    (task.taskType === 'local_bash'
-      ? t('sessions.subagentTasks.bashActor', 'Bash')
-      : t('sessions.subagentTasks.defaultActor', 'Task'));
-
-  // A summary that just wraps the description (the synthesized background-command
-  // "…description… completed" text) is noise next to the description column — drop it.
-  const description = task.description?.trim();
-  const summary = task.summary?.trim();
-  const meaningfulSummary =
-    summary && (!description || !summary.includes(description)) ? summary : undefined;
-
-  // The leading status icon already says running/done/failed; the trailing text
-  // only carries information the icon cannot (an error, a summary, a live tool).
-  let action: string | undefined;
-  if (task.status === 'failed') {
-    action = task.error;
-  } else if (task.status === 'completed') {
-    action = meaningfulSummary;
-  } else if (task.lastToolName) {
-    action = t('sessions.subagentTasks.runningTool', 'Running {{tool}}', {
-      tool: task.lastToolName,
-    });
-  } else {
-    action = meaningfulSummary;
-  }
-
-  const usageLabel = task.status === 'completed' ? formatUsage(task.usage) : null;
-
-  return (
-    <div className="flex flex-col gap-0.5 py-0.5">
-      <div className="flex min-w-0 items-center gap-1">
-        <button
-          type="button"
-          className={cn(
-            'flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-1 py-1 text-left text-[13px] leading-tight',
-            'transition-colors hover:bg-hover focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring'
-          )}
-          aria-haspopup="dialog"
-          onClick={() => setDetailsOpen(true)}
-        >
-          <StatusIcon task={task} />
-          <span className="shrink-0 font-medium text-foreground">{actor}</span>
-          {task.description ? (
-            <>
-              <span className="shrink-0 text-muted-foreground/60">·</span>
-              <span className="min-w-0 flex-1 truncate text-muted-foreground">
-                {task.description}
-              </span>
-            </>
-          ) : (
-            <span className="min-w-0 flex-1" />
-          )}
-          {action ? (
-            <span
-              className={cn(
-                'max-w-[45%] shrink-0 truncate text-xs',
-                task.status === 'failed' ? 'text-status-danger' : 'text-muted-foreground'
-              )}
-            >
-              {action}
-            </span>
-          ) : null}
-        </button>
-        {onCancel && isRunning(task) && task.taskKind === 'subagent' ? (
-          <button
-            type="button"
-            disabled={cancelling}
-            className="shrink-0 rounded px-2 py-1 text-xs hover:bg-hover disabled:opacity-50"
-            aria-label={t('sessions.subagentTasks.cancelNamed', {
-              name: task.description || actor,
-            })}
-            onClick={() => {
-              void (async () => {
-                setCancelling(true);
-                setError(undefined);
-                try {
-                  await onCancel(task.taskId);
-                } catch (cause) {
-                  setError(cause instanceof Error ? cause.message : String(cause));
-                } finally {
-                  setCancelling(false);
-                }
-              })();
-            }}
-          >
-            {t(cancelling ? 'sessions.subagentTasks.cancelling' : 'common.cancel')}
-          </button>
-        ) : null}
-      </div>
-      {error ? (
-        <span role="alert" className="px-1 text-xs text-status-danger">
-          {error}
-        </span>
-      ) : null}
-      {usageLabel ? (
-        <span className="pl-6 text-[11px] font-mono tabular-nums text-muted-foreground/70">
-          {usageLabel}
-        </span>
-      ) : null}
-      <SubagentTaskDetailsDialog
-        open={detailsOpen}
-        onOpenChange={setDetailsOpen}
-        task={task}
-        actor={actor}
-        result={meaningfulSummary}
-        usageLabel={formatUsage(task.usage)}
-      />
-    </div>
-  );
-};
-
 const STATUS_LABEL_KEYS: Record<SubagentTask['status'], [string, string]> = {
   pending: ['sessions.subagentTasks.statusPending', 'Pending'],
   in_progress: ['sessions.subagentTasks.statusRunning', 'Running'],
@@ -200,110 +70,366 @@ const STATUS_LABEL_KEYS: Record<SubagentTask['status'], [string, string]> = {
   failed: ['sessions.subagentTasks.statusFailed', 'Failed'],
 };
 
-/** The full task: the row truncates its command/description to one line. */
-const SubagentTaskDetailsDialog = ({
-  open,
-  onOpenChange,
-  task,
-  actor,
-  result,
-  usageLabel,
-}: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  task: SubagentTask;
-  actor: string;
-  result?: string;
-  usageLabel: string | null;
-}) => {
-  const { t } = useTranslation();
-  const [copied, setCopied] = useState(false);
-  const isCommand = task.taskType === 'local_bash';
-  const body = task.description?.trim();
-  const [statusKey, statusFallback] = STATUS_LABEL_KEYS[task.status];
-  const durationMs =
-    typeof task.startedAtEpochSeconds === 'number' && typeof task.endedAtEpochSeconds === 'number'
-      ? Math.max(0, (task.endedAtEpochSeconds - task.startedAtEpochSeconds) * 1000)
-      : null;
-  const meta = [
-    t(statusKey, statusFallback),
-    durationMs === null
-      ? null
-      : formatDurationCompact(durationMs, {
-          hour: t('time.unitShort.hour', 'h'),
-          minute: t('time.unitShort.minute', 'm'),
-          second: t('time.unitShort.second', 's'),
-        }),
-    usageLabel,
-  ].filter(Boolean);
+const REGION = `color-mix(in oklab, transparent, ${colors.label} 5%)`;
+const MONO = 'var(--font-mono, ui-monospace, monospace)';
 
+const styles = stylex.create({
+  /** A group of the turn's process: its summary line, then its tasks. */
+  panel: { display: 'flex', flexDirection: 'column', minWidth: 0 },
+  header: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: space[1.5],
+    width: 'fit-content',
+    maxWidth: '100%',
+    margin: 0,
+    paddingInline: '4px',
+    paddingBlock: '2px',
+    borderWidth: 0,
+    backgroundColor: 'transparent',
+    fontFamily: 'inherit',
+    fontSize: '0.9em',
+    lineHeight: 1.5,
+    textAlign: 'start',
+    userSelect: 'none',
+    color: { default: colors.secondaryLabel, ':hover': colors.label },
+    cursor: 'default',
+    outlineStyle: 'none',
+  },
+  headerToggle: { cursor: 'pointer' },
+  chevron: {
+    width: '14px',
+    height: '14px',
+    flexShrink: 0,
+    transitionProperty: 'transform',
+    transitionDuration: '150ms',
+  },
+  chevronOpen: { transform: 'rotate(90deg)' },
+  glyph: { width: '14px', height: '14px', flexShrink: 0 },
+  rows: { display: 'flex', flexDirection: 'column' },
+
+  /** One task: as wide as its words, like every other step of the turn. */
+  row: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: space[1.5],
+    width: 'fit-content',
+    maxWidth: '100%',
+    minWidth: 0,
+    margin: 0,
+    paddingInline: '4px',
+    paddingBlock: '2px',
+    borderWidth: 0,
+    backgroundColor: 'transparent',
+    fontFamily: 'inherit',
+    fontSize: '12.5px',
+    lineHeight: 1.5,
+    textAlign: 'start',
+    userSelect: 'none',
+    color: colors.secondaryLabel,
+    cursor: 'pointer',
+    outlineStyle: 'none',
+  },
+  actor: {
+    flexShrink: 0,
+    color: { default: colors.label, ':hover': colors.label },
+  },
+  description: {
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  dot: { flexShrink: 0, color: colors.tertiaryLabel },
+  meta: {
+    flexShrink: 0,
+    color: colors.tertiaryLabel,
+    fontVariantNumeric: 'tabular-nums',
+    whiteSpace: 'nowrap',
+  },
+  danger: { color: colors.destructive },
+
+  /** The peek: the task at full depth, anchored to its row. */
+  peek: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: space[3],
+    width: 'min(440px, calc(100vw - 32px))',
+  },
+  peekHead: { display: 'flex', flexDirection: 'column', gap: '2px', minWidth: 0 },
+  peekTitle: {
+    margin: 0,
+    fontSize: '13px',
+    fontWeight: 600,
+    lineHeight: 1.35,
+    color: colors.label,
+  },
+  peekMeta: {
+    margin: 0,
+    fontSize: '12px',
+    lineHeight: 1.4,
+    color: colors.secondaryLabel,
+    fontVariantNumeric: 'tabular-nums',
+  },
+  bodyWrap: { position: 'relative', minWidth: 0 },
+  body: {
+    maxHeight: '240px',
+    overflowY: 'auto',
+    margin: 0,
+    paddingBlock: space[2],
+    paddingInlineStart: space[3],
+    // Room for the copy button in the corner.
+    paddingInlineEnd: '36px',
+    backgroundColor: REGION,
+    borderRadius: radius.medium,
+    cornerShape: corner.shape,
+    fontSize: '12px',
+    lineHeight: 1.5,
+    whiteSpace: 'pre-wrap',
+    overflowWrap: 'anywhere',
+    color: colors.label,
+  },
+  bodyMono: { fontFamily: MONO },
+  copy: { position: 'absolute', insetBlockStart: '4px', insetInlineEnd: '4px' },
+  section: { display: 'flex', flexDirection: 'column', gap: space[1] },
+  sectionLabel: { margin: 0, fontSize: '11px', color: colors.tertiaryLabel },
+  sectionText: {
+    margin: 0,
+    fontSize: '12.5px',
+    lineHeight: 1.5,
+    whiteSpace: 'pre-wrap',
+    overflowWrap: 'anywhere',
+    color: colors.label,
+  },
+  actions: { display: 'flex', justifyContent: 'flex-end', gap: space[2] },
+});
+
+const durationLabels = (t: (key: string, fallback: string) => string) => ({
+  hour: t('time.unitShort.hour', 'h'),
+  minute: t('time.unitShort.minute', 'm'),
+  second: t('time.unitShort.second', 's'),
+});
+
+/** How long a running task has been at it, ticking once a second. */
+function LiveElapsed({ startedAtEpochSeconds }: { startedAtEpochSeconds: number }) {
+  const { t } = useTranslation();
+  const now = useStableNow(1000);
+  const elapsed = Math.max(0, now.getTime() - startedAtEpochSeconds * 1000);
+  return <>{formatDurationCompact(elapsed, durationLabels(t))}</>;
+}
+
+const useActor = (task: SubagentTask): string => {
+  const { t } = useTranslation();
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex max-h-[80vh] max-w-2xl flex-col gap-0 p-0 sm:p-0">
-        <div className="flex min-w-0 items-center gap-2 border-b border-border/60 py-3 pl-5 pr-12">
-          <StatusIcon task={task} />
-          <div className="min-w-0 flex-1">
-            <DialogTitle className="truncate text-base font-medium">{actor}</DialogTitle>
-            <DialogDescription className="text-xs tabular-nums">
-              {meta.join(' · ')}
-            </DialogDescription>
-          </div>
-        </div>
-        <div className="flex min-h-0 flex-col gap-4 overflow-y-auto px-5 py-4 text-sm">
-          {body ? (
-            <section className="flex flex-col gap-1.5">
-              <div className="flex items-center justify-between gap-2">
-                <h3 className="text-xs font-medium text-muted-foreground">
-                  {isCommand
-                    ? t('sessions.subagentTasks.command', 'Command')
-                    : t('sessions.subagentTasks.description', 'Description')}
-                </h3>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="h-6 gap-1 px-1.5 text-xs text-muted-foreground hover:text-foreground"
-                  onClick={() => {
-                    void writeTextToClipboard(body).then((ok) => {
-                      if (ok) setCopied(true);
-                    });
-                  }}
-                >
-                  {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
-                  {copied ? t('common.copied', 'Copied') : t('common.copy', 'Copy')}
-                </Button>
-              </div>
-              <pre
-                className={cn(
-                  'scrollbar-pro max-h-[50vh] overflow-auto whitespace-pre-wrap break-words rounded-md border border-border/60 bg-muted/30 px-3 py-2 text-[12.5px] leading-relaxed',
-                  isCommand ? 'font-mono' : 'font-sans'
-                )}
-              >
-                {body}
-              </pre>
-            </section>
-          ) : null}
-          {task.status === 'failed' && task.error ? (
-            <section className="flex flex-col gap-1.5">
-              <h3 className="text-xs font-medium text-muted-foreground">
-                {t('sessions.subagentTasks.error', 'Error')}
-              </h3>
-              <p className="whitespace-pre-wrap break-words text-status-danger">{task.error}</p>
-            </section>
-          ) : null}
-          {result ? (
-            <section className="flex flex-col gap-1.5">
-              <h3 className="text-xs font-medium text-muted-foreground">
-                {t('sessions.subagentTasks.result', 'Result')}
-              </h3>
-              <p className="whitespace-pre-wrap break-words text-foreground">{result}</p>
-            </section>
-          ) : null}
-        </div>
-      </DialogContent>
-    </Dialog>
+    task.actor ||
+    task.subagentType ||
+    task.workflowName ||
+    (task.taskType === 'local_bash'
+      ? t('sessions.subagentTasks.bashActor', 'Bash')
+      : t('sessions.subagentTasks.defaultActor', 'Task'))
   );
 };
+
+const durationOf = (task: SubagentTask): number | null =>
+  typeof task.startedAtEpochSeconds === 'number' && typeof task.endedAtEpochSeconds === 'number'
+    ? Math.max(0, (task.endedAtEpochSeconds - task.startedAtEpochSeconds) * 1000)
+    : null;
+
+/** A summary that only wraps the description (the synthesized "… completed") is noise. */
+const meaningfulSummaryOf = (task: SubagentTask): string | undefined => {
+  const description = task.description?.trim();
+  const summary = task.summary?.trim();
+  return summary && (!description || !summary.includes(description)) ? summary : undefined;
+};
+
+function SubagentTaskRow({
+  task,
+  onCancel,
+}: {
+  task: SubagentTask;
+  onCancel?: (taskId: string) => Promise<void>;
+}) {
+  const { t } = useTranslation();
+  const actor = useActor(task);
+  const running = isRunning(task);
+  const duration = durationOf(task);
+
+  // The trailing word answers the question a reader has of a task in that state:
+  // how long so far, what it is doing, how long it took, or that it failed.
+  const meta = running ? (
+    task.lastToolName ? (
+      t('sessions.subagentTasks.runningTool', 'Running {{tool}}', { tool: task.lastToolName })
+    ) : typeof task.startedAtEpochSeconds === 'number' ? (
+      <LiveElapsed startedAtEpochSeconds={task.startedAtEpochSeconds} />
+    ) : null
+  ) : task.status === 'failed' ? (
+    t('sessions.subagentTasks.statusFailed', 'Failed')
+  ) : duration !== null ? (
+    formatDurationCompact(duration, durationLabels(t))
+  ) : null;
+
+  return (
+    <Popover.Root>
+      <Popover.Trigger
+        render={<button type="button" {...stylex.props(styles.row)} />}
+        aria-label={task.description ? `${actor} · ${task.description}` : actor}
+      >
+        {running ? <Spinner size="small" /> : null}
+        <span {...stylex.props(styles.actor)}>{actor}</span>
+        {task.description ? (
+          <>
+            <span aria-hidden="true" {...stylex.props(styles.dot)}>
+              ·
+            </span>
+            <span {...stylex.props(styles.description)}>{task.description}</span>
+          </>
+        ) : null}
+        {meta ? (
+          <span {...stylex.props(styles.meta, task.status === 'failed' && styles.danger)}>
+            {meta}
+          </span>
+        ) : null}
+      </Popover.Trigger>
+      <Popover.Content side="bottom" align="start">
+        <TaskPeek task={task} actor={actor} onCancel={onCancel} />
+      </Popover.Content>
+    </Popover.Root>
+  );
+}
+
+/** The task at full depth: what it is, the whole brief, its result, its cost. */
+function TaskPeek({
+  task,
+  actor,
+  onCancel,
+}: {
+  task: SubagentTask;
+  actor: string;
+  onCancel?: (taskId: string) => Promise<void>;
+}) {
+  const { t } = useTranslation();
+  const [copied, setCopied] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
+  const [cancelError, setCancelError] = useState<string>();
+  const running = isRunning(task);
+  const isCommand = task.taskType === 'local_bash';
+  const body = task.description?.trim();
+  const result = meaningfulSummaryOf(task);
+  const duration = durationOf(task);
+  const [statusKey, statusFallback] = STATUS_LABEL_KEYS[task.status];
+  const canCancel = Boolean(onCancel) && running && task.taskKind === 'subagent';
+
+  return (
+    <div {...stylex.props(styles.peek)}>
+      <div {...stylex.props(styles.peekHead)}>
+        <p {...stylex.props(styles.peekTitle)}>{actor}</p>
+        <p {...stylex.props(styles.peekMeta, task.status === 'failed' && styles.danger)}>
+          {t(statusKey, statusFallback)}
+          {running && typeof task.startedAtEpochSeconds === 'number' ? (
+            <>
+              {' · '}
+              <LiveElapsed startedAtEpochSeconds={task.startedAtEpochSeconds} />
+            </>
+          ) : duration !== null ? (
+            ` · ${formatDurationCompact(duration, durationLabels(t))}`
+          ) : null}
+          {running && task.lastToolName
+            ? ` · ${t('sessions.subagentTasks.runningTool', 'Running {{tool}}', {
+                tool: task.lastToolName,
+              })}`
+            : null}
+          {formatUsage(task.usage) ? ` · ${formatUsage(task.usage)}` : null}
+        </p>
+      </div>
+
+      {body ? (
+        <div {...stylex.props(styles.bodyWrap)}>
+          <pre
+            aria-label={
+              isCommand
+                ? t('sessions.subagentTasks.command', 'Command')
+                : t('sessions.subagentTasks.description', 'Description')
+            }
+            {...stylex.props(styles.body, isCommand && styles.bodyMono)}
+          >
+            {body}
+          </pre>
+          <span {...stylex.props(styles.copy)}>
+            <Button
+              type="button"
+              variant="ghost"
+              size="mini"
+              icon
+              aria-label={copied ? t('common.copied', 'Copied') : t('common.copy', 'Copy')}
+              onClick={() => {
+                void writeTextToClipboard(body).then((ok) => {
+                  if (ok) setCopied(true);
+                });
+              }}
+            >
+              {copied ? (
+                <Check {...stylex.props(styles.glyph)} />
+              ) : (
+                <Copy {...stylex.props(styles.glyph)} />
+              )}
+            </Button>
+          </span>
+        </div>
+      ) : null}
+
+      {task.status === 'failed' && task.error ? (
+        <div {...stylex.props(styles.section)}>
+          <p {...stylex.props(styles.sectionLabel)}>{t('sessions.subagentTasks.error', 'Error')}</p>
+          <p {...stylex.props(styles.sectionText, styles.danger)}>{task.error}</p>
+        </div>
+      ) : null}
+
+      {result ? (
+        <div {...stylex.props(styles.section)}>
+          <p {...stylex.props(styles.sectionLabel)}>
+            {t('sessions.subagentTasks.result', 'Result')}
+          </p>
+          <p {...stylex.props(styles.sectionText)}>{result}</p>
+        </div>
+      ) : null}
+
+      {canCancel ? (
+        <div {...stylex.props(styles.actions)}>
+          {cancelError ? (
+            <p role="alert" {...stylex.props(styles.sectionText, styles.danger)}>
+              {cancelError}
+            </p>
+          ) : null}
+          <Button
+            type="button"
+            variant="secondary"
+            size="small"
+            disabled={cancelling}
+            onClick={() => {
+              void (async () => {
+                setCancelling(true);
+                setCancelError(undefined);
+                try {
+                  await onCancel?.(task.taskId);
+                } catch (cause) {
+                  setCancelError(cause instanceof Error ? cause.message : String(cause));
+                } finally {
+                  setCancelling(false);
+                }
+              })();
+            }}
+          >
+            {cancelling ? <Spinner size="small" /> : null}
+            {t('sessions.subagentTasks.cancelNamed', {
+              name: task.description || actor,
+              defaultValue: 'Cancel {{name}}',
+            })}
+          </Button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
 
 export const SubagentTaskPanel = ({
   tasks,
@@ -319,12 +445,12 @@ export const SubagentTaskPanel = ({
 
   if (tasks.length === 0) return null;
 
-  // While work is in flight the panel stays open (live status). Once every task
-  // has settled it collapses to a one-line summary the user can expand.
+  // While work is in flight the group stays open (live status). Once every task
+  // has settled it folds to its summary line, which opens it again.
   const expanded = hasRunning || userExpanded;
   const canToggle = !hasRunning;
 
-  // Background-ness is stated once in the header rather than badged per row.
+  // Background-ness is stated once in the summary rather than badged per row.
   const backgroundCount = tasks.filter((task) => task.isBackgrounded).length;
   const allBackground = backgroundCount === tasks.length;
   const headerLabel = allBackground
@@ -340,38 +466,26 @@ export const SubagentTaskPanel = ({
       : null;
 
   return (
-    <div className="rounded-xl border border-border/60 bg-card/40 px-2 py-1.5">
+    <div {...stylex.props(styles.panel)}>
       <button
         type="button"
-        className={cn(
-          'group flex w-full items-center gap-1.5 rounded-md px-1 py-0.5 text-left text-muted-foreground transition-colors',
-          canToggle ? 'cursor-pointer hover:text-foreground' : 'cursor-default'
-        )}
+        {...stylex.props(styles.header, canToggle && styles.headerToggle)}
         onClick={canToggle ? () => setUserExpanded((prev) => !prev) : undefined}
         aria-expanded={canToggle ? expanded : undefined}
       >
-        {hasRunning ? (
-          <Spinner className="h-3.5 w-3.5 flex-none shrink-0" />
-        ) : (
-          <ChevronRight
-            className={cn(
-              'h-3.5 w-3.5 flex-none shrink-0 opacity-70 transition-transform duration-200 group-hover:opacity-100',
-              expanded ? 'rotate-90' : ''
-            )}
-          />
-        )}
-        <span className="min-w-0 flex-1 truncate text-[13px] font-medium">
+        <span>
           {headerLabel}
-          {mixedBackgroundLabel ? (
-            <span className="font-normal text-muted-foreground/70">
-              {' · '}
-              {mixedBackgroundLabel}
-            </span>
-          ) : null}
+          {mixedBackgroundLabel ? ` · ${mixedBackgroundLabel}` : null}
         </span>
+        {canToggle ? (
+          <ChevronRight
+            aria-hidden="true"
+            {...stylex.props(styles.chevron, expanded && styles.chevronOpen)}
+          />
+        ) : null}
       </button>
       {expanded ? (
-        <div className="scrollbar-pro mt-0.5 max-h-[22rem] divide-y divide-border/40 overflow-y-auto">
+        <div {...stylex.props(styles.rows)}>
           {tasks.map((task) => (
             <SubagentTaskRow key={task.taskId} task={task} onCancel={onCancel} />
           ))}

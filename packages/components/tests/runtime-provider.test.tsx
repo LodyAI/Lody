@@ -68,7 +68,9 @@ function runtimeFixture() {
     disposed: false,
     metadata: new Map([['session', 'already prepared']]),
     setAuthToken: async () => {},
-    async dispose() { this.disposed = true; },
+    async dispose() {
+      this.disposed = true;
+    },
   };
 }
 
@@ -76,9 +78,14 @@ describe('RuntimeProvider warm workspace preparation', () => {
   let root: Root;
   let store: ReturnType<typeof createStore>;
   let prepared: ReturnType<typeof runtimeFixture>;
-  const render = () => act(async () => {
-    root.render(<Provider store={store}><RuntimeProvider>{null}</RuntimeProvider></Provider>);
-  });
+  const render = () =>
+    act(async () => {
+      root.render(
+        <Provider store={store}>
+          <RuntimeProvider>{null}</RuntimeProvider>
+        </Provider>
+      );
+    });
 
   beforeEach(() => {
     Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
@@ -88,9 +95,13 @@ describe('RuntimeProvider warm workspace preparation', () => {
     store = createStore();
     root = createRoot(document.createElement('div'));
     prepared = runtimeFixture();
-    vi.mocked(createWorkspaceRuntime).mockReset().mockResolvedValue(prepared as never);
+    vi.mocked(createWorkspaceRuntime)
+      .mockReset()
+      .mockResolvedValue(prepared as never);
   });
-  afterEach(async () => { await act(async () => root.unmount()); });
+  afterEach(async () => {
+    await act(async () => root.unmount());
+  });
 
   it('prepares before routing and retains the populated runtime when claimed', async () => {
     await render();
@@ -107,7 +118,11 @@ describe('RuntimeProvider warm workspace preparation', () => {
 
   it('retains initialization already in flight when claimed early', async () => {
     let complete!: (runtime: never) => void;
-    vi.mocked(createWorkspaceRuntime).mockReturnValue(new Promise(resolve => { complete = resolve; }));
+    vi.mocked(createWorkspaceRuntime).mockReturnValue(
+      new Promise((resolve) => {
+        complete = resolve;
+      })
+    );
     await render();
     expect(store.get(runtimeAtom)).toBeNull();
     await act(async () => {
@@ -123,19 +138,24 @@ describe('RuntimeProvider warm workspace preparation', () => {
     await render();
     const replacement = runtimeFixture();
     vi.mocked(createWorkspaceRuntime).mockResolvedValue(replacement as never);
-    await act(async () => { store.set(currentWorkspaceSlugAtom, 'different'); });
+    await act(async () => {
+      store.set(currentWorkspaceSlugAtom, 'different');
+    });
     expect(prepared.disposed).toBe(true);
     expect(store.get(runtimeAtom)).toBe(replacement);
   });
 
-  it.each(['ordinary', 'cloud', 'missing identity'])('does not guess a workspace for %s', async kind => {
-    if (kind === 'ordinary') environment.warm = false;
-    if (kind === 'cloud') environment.mode = 'cloud';
-    if (kind === 'missing identity') environment.workspace = null;
-    await render();
-    expect(store.get(runtimeAtom)).toBeNull();
-    expect(store.get(currentWorkspaceSlugAtom)).toBeNull();
-  });
+  it.each(['ordinary', 'cloud', 'missing identity'])(
+    'does not guess a workspace for %s',
+    async (kind) => {
+      if (kind === 'ordinary') environment.warm = false;
+      if (kind === 'cloud') environment.mode = 'cloud';
+      if (kind === 'missing identity') environment.workspace = null;
+      await render();
+      expect(store.get(runtimeAtom)).toBeNull();
+      expect(store.get(currentWorkspaceSlugAtom)).toBeNull();
+    }
+  );
 
   it('waits for local identity and disposes when the spare unmounts', async () => {
     environment.workspace = null;
@@ -144,7 +164,9 @@ describe('RuntimeProvider warm workspace preparation', () => {
     environment.workspace = { id: 'local:workspace', slug: 'local' };
     await render();
     expect(store.get(runtimeAtom)).toBe(prepared);
-    await act(async () => { root.render(null); });
+    await act(async () => {
+      root.render(null);
+    });
     expect(prepared.disposed).toBe(true);
     expect(store.get(runtimeAtom)).toBeNull();
   });

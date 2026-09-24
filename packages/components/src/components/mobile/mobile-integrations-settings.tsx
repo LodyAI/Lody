@@ -1,18 +1,18 @@
 import { useTranslation } from 'react-i18next';
-import { Button } from '@/ui/button';
-import { Badge } from '@/ui/badge';
+import { Button } from '@lody/ui/button';
+import { Badge } from '@lody/ui/badge';
 import { ArrowUpRight, Book, Github, Search } from 'lucide-react';
-import { Spinner } from '@/ui/spinner';
+import { Spinner } from '@lody/ui/spinner';
 import { useCloudAction, useCloudMutation } from '@lody/platform/react';
 import { useAtomValue } from 'jotai';
 import { currentWorkspaceSlugAtom } from '@/atoms';
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import { cn } from '@/lib/utils';
 import { useAppCapability } from '@/lib/app-platform';
-import { Switch } from '@/ui/switch';
-import { Input } from '@/ui/input';
+import { Switch } from '@lody/ui/switch';
+import { Input } from '@lody/ui/input';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import {
   MobileSettingsRow,
   MobileSettingsRowGroup,
@@ -352,9 +352,7 @@ function MobileCloudIntegrationsSettings() {
           >
             {canManage ? (
               <Button
-                size="sm"
-                className="inline-flex items-center gap-1 whitespace-nowrap"
-                variant="default"
+                size="small"
                 onClick={() => {
                   void handleConnectGitHub();
                 }}
@@ -440,7 +438,7 @@ function MobileCloudIntegrationsSettings() {
         title={t('settings.integrations.github.authorizedReposTitle', 'Authorized Repositories')}
         actions={
           repos.length > 0 ? (
-            <Badge variant="outline" className="text-[11px]">
+            <Badge className="text-[11px]">
               {searchQuery && filteredRepos.length !== repos.length
                 ? `${filteredRepos.length} / ${repos.length}`
                 : `${enabledCount} / ${repos.length}`}{' '}
@@ -492,7 +490,7 @@ function MobileCloudIntegrationsSettings() {
                       {repo.repoFullName}
                     </span>
                     {repo.private && (
-                      <Badge variant="outline" className="px-1 py-0 text-[10px]">
+                      <Badge className="px-1 py-0 text-[10px]">
                         {t('settings.integrations.github.private')}
                       </Badge>
                     )}

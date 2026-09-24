@@ -177,9 +177,11 @@ describe('static publication client lifecycle', () => {
 
   it('blocks upload and publication on storage failure and reuses the deployment on retry', async () => {
     await render();
-    const write = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
-      throw new Error('Storage disabled');
-    });
+    const write = vi
+      .spyOn(Object.getPrototypeOf(localStorage) as Storage, 'setItem')
+      .mockImplementation(() => {
+        throw new Error('Storage disabled');
+      });
     try {
       await act(async () => control.onPublish());
       expect(control.error).toContain('Could not save the share link');

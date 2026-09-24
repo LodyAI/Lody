@@ -1,8 +1,9 @@
 import { useState, useEffect, useMemo } from 'react';
+import * as stylex from '@stylexjs/stylex';
 import { useTranslation } from 'react-i18next';
 import { ArrowUpRight, Github } from 'lucide-react';
-import { Badge } from '@/ui/badge';
-import { cn } from '@/lib/utils';
+import { Badge } from '@lody/ui/badge';
+import { withClassName } from '@/lib/stylex';
 import { useAtomValue, useSetAtom } from 'jotai';
 import {
   currentWorkspaceIdAtom,
@@ -10,10 +11,15 @@ import {
   setWorkspaceReposCacheAtom,
 } from '@/atoms';
 import { cloudOperations } from '@/lib/cloud-api-operations';
+import { composerSurface } from './composer-surface';
 import { OptionSelector } from './option-selector';
 import { useCloudQuery } from '@lody/platform/react';
 
 const CONNECT_GIT_REPO_OPTION_VALUE = '__connect_git_repo__';
+
+const styles = stylex.create({
+  badges: { display: 'flex', flexWrap: 'wrap', gap: '4px' },
+});
 
 interface GitHubReposSelectorProps {
   value?: string;
@@ -103,7 +109,7 @@ export function GitHubReposSelector({
           value: repo.fullName,
           label: repo.fullName,
           description: 'description' in repo ? (repo.description ?? undefined) : undefined,
-          startContent: <Github className="h-4 w-4 shrink-0 opacity-70" />,
+          startContent: <Github {...stylex.props(composerSurface.glyph16)} aria-hidden="true" />,
         })),
         ...(onConnectGitRepo && repositories?.length === 0
           ? [
@@ -113,7 +119,9 @@ export function GitHubReposSelector({
                 description: t('repos.connectHint', {
                   defaultValue: 'Go to Settings → Integrations',
                 }),
-                startContent: <ArrowUpRight className="h-4 w-4 shrink-0 opacity-70" />,
+                startContent: (
+                  <ArrowUpRight {...stylex.props(composerSurface.glyph16)} aria-hidden="true" />
+                ),
               },
             ]
           : []),
@@ -144,7 +152,8 @@ export function GitHubReposSelector({
       placeholder={placeholder || t('chat.repoPlaceholder', { defaultValue: 'Select repository' })}
       placeholderIcon={Github}
       tone={tone}
-      className={cn(className)}
+      appearance="field"
+      className={className}
       // Nothing to pick (no repos, and no "Connect repositories" affordance) → keep the
       // button disabled rather than opening an empty dropdown / jumping away.
       disabled={disabled || repoOptions.length === 0}
@@ -152,18 +161,21 @@ export function GitHubReposSelector({
       autoFocusSearch={false}
       searchPlaceholder={t('repos.search', { defaultValue: 'Search repositories' })}
       emptyText={t('repos.none', { defaultValue: 'No repositories found' })}
-      contentClassName="min-w-[16rem] max-w-[min(28rem,calc(100vw-2rem))] p-1"
+      contentClassName="min-w-[16rem] max-w-[min(28rem,calc(100vw-2rem))]"
       renderOption={(option) => (
         <>
-          {option.startContent}
-          <div className="flex min-w-0 flex-col">
-            <span className="whitespace-normal break-words leading-snug">{option.label}</span>
-            {option.description && (
-              <span className="line-clamp-2 text-xs text-muted-foreground">
-                {option.description}
-              </span>
+          <span {...stylex.props(composerSurface.rowIcon)}>{option.startContent}</span>
+          <span
+            {...stylex.props(
+              composerSurface.rowText,
+              !!option.description && composerSurface.rowTextStacked
             )}
-          </div>
+          >
+            <span {...stylex.props(composerSurface.rowLabelWrap)}>{option.label}</span>
+            {option.description && (
+              <span {...stylex.props(composerSurface.rowDescription)}>{option.description}</span>
+            )}
+          </span>
         </>
       )}
     />
@@ -177,11 +189,8 @@ export function GitHubRepoBadge({ repo, className }: { repo?: string; className?
   if (!repo) return null;
 
   return (
-    <div className={cn('flex flex-wrap gap-1', className)}>
-      <Badge variant="secondary" className="gap-1 text-xs">
-        <Github className="h-3 w-3" />
-        {repo}
-      </Badge>
+    <div {...withClassName(stylex.props(styles.badges), className)}>
+      <Badge icon={<Github size="100%" aria-hidden="true" />}>{repo}</Badge>
     </div>
   );
 }
