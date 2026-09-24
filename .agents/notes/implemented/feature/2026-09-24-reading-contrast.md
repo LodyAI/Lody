@@ -1,4 +1,4 @@
-# Reading contrast for long-form text
+# Reading contrast and a dark-theme brightness ceiling
 
 Status: implemented
 Translation: current
@@ -7,44 +7,57 @@ Translation: current
 
 ## Abstract
 
-Long conversations were tiring to read in dark themes whose foreground is pure white: in
-Vesper every prose line, heading, user bubble and sidebar title was #FFFFFF on #101010
-(19.7:1), so strokes halated, dense CJK text blurred and nothing marked the reading column
-as the brightest area. The theme layer now derives a contrast-capped reading color (13:1 in
-dark themes, still above WCAG AAA) for prose and user bubbles, keeps the full foreground for
-headings and bold, and caps all unselected sidebar text at 5.5:1, so
-only the selected row outshines the prose. Themes already below the caps and high-contrast
-themes are unchanged; a warm tint was not applied.
+Long sessions were tiring in dark themes whose foreground is pure white: in Vesper, prose,
+headings, menus, buttons, settings and every sidebar title were #FFFFFF on #101010 (19.7:1),
+so strokes halated, dense CJK text blurred and nothing marked the reading column. Dark themes
+now hold every text foreground under one brightness ceiling, the luminance of text at 13:1
+against the canvas (#D5D5D5 on Vesper, still above WCAG AAA). Only headings and bold, the
+selected sidebar row and the active tab go above it. Unselected sidebar text sits below the
+prose. Vesper uses hand-tuned warm grays for the sidebar (#BCBAB8) and the selected/active
+text (#F0EFED). High-contrast themes are unchanged, and light themes cap only long-form text.
 
 ## Decision
 
-- `vscode-theme-css.ts` derives `--reading-foreground` and `--sidebar-row-foreground` by
-  moving the foreground toward its background until the contrast meets the cap (dark 13:1
-  and 5.5:1, light 16:1 and 8:1). Unthemed builds fall back to the plain foregrounds.
-- Markdown body text and user bubbles use `text-reading`; headings and `strong` keep
-  `text-foreground`, so hierarchy reads by brightness.
-- Inline code: 7% fill instead of 14%, text in the reading color, so chips no longer read
-  as bright patches in a sentence.
-- Unselected session titles, group and project labels, section headers and the New chat /
-  Search items all use the sidebar row color; the selected row is unchanged. Hover changes a
-  row's fill only, not its text color. Row icons and avatars keep full opacity: dimming them
-  was tried and read as disabled or broken.
-- List items are 0.5rem apart, more than wrapped lines of one item; the outline rail rests
-  at /32 instead of /45 and lifts while the pointer is on it.
+- `vscode-theme-css.ts` (`applyReadingBrightness`), dark themes: every text foreground
+  token (`--foreground`, card, code, input, secondary and secondary-button, hover,
+  selection, bottom bar, tab, sidebar, plus `--code-added/-removed` and `--modified-file`)
+  is moved toward the canvas until its luminance is at most the ceiling. Hue is kept.
+  `--popover-foreground` and `--accent-foreground` are set from the ceiled foreground: the
+  stylesheet defaults for them were an unthemed near-white (`210 40% 96%`), which is why
+  dropdown menus stayed white.
+- Above the ceiling: `--foreground-strong` (16:1, headings and bold), and the selected
+  sidebar row and active tab foregrounds (capped at the same 16:1 step).
+- `--reading-foreground` for prose and user bubbles; `--sidebar-row-foreground` (11.3:1)
+  for unselected session titles, group and project labels, section headers and New chat /
+  Search, so the sidebar never outshines the prose. Hover changes a row's fill only.
+- Foregrounds on colored fills (`--primary-foreground`, `--destructive-foreground`,
+  highlight foregrounds) keep the theme value: they need contrast against the fill.
+- `READING_THEME_OVERRIDES` pins Vesper's sidebar (#BCBAB8) and selected/active text
+  (#F0EFED): warm grays its neutral palette cannot produce.
+- Literal colors outside the tokens: the dark Mermaid palette now stays under the ceiling,
+  and the green merge button uses `dark:text-background` like the PR tab's.
+- Inline code: 7% fill, reading color. List items 0.5rem apart. The outline rail rests at /32.
 
 ## Alternatives
 
-- Changing the bundled theme colors: the theme is the user's choice and other surfaces
-  (editor, terminals) rely on its values; derived reading tokens only touch long-form text.
-- A warm tint (for example #E4DFD6 on #151413): changes the theme's character; left as an
-  option.
-- Narrowing the column to 40em for CJK line length: a larger layout change, not done here.
+- Styling each surface (menus, settings, buttons, panels) one by one: a static scan found
+  no hard-coded white there; the white came from the tokens, so the ceiling belongs in the
+  theme layer where every surface inherits it.
+- Editing the bundled theme files: they are vendored and other surfaces read their raw
+  values; the derived tokens change only text.
+- Dimming row icons and avatars with opacity, and brightening titles on hover: tried and
+  rejected; faded icons and avatars read as disabled, and a color change under the pointer
+  looks unstable.
+- A warm tint for the whole theme, or a 40em CJK column: not done here.
 
 ## Verification and limits
 
-- `tests/vscode-theme-css.test.ts`: Vesper's reading color is at most 13:1 (foreground
-  still 19.7:1), sidebar text at most 5.5:1 (above AA) and below the reading color; a soft theme and a
-  high-contrast theme get no derived color. Components suite passes.
-- Local production build with Vesper: prose #D5D5D5, all unselected sidebar text #8D8D8D, unchanged on hover,
-  selected row unchanged. Other bundled themes were not inspected one by one.
-- File names in tool cards and other non-prose chrome still use the full foreground.
+- `tests/vscode-theme-css.test.ts`: a pure-white dark theme holds `--foreground`, popover
+  and sidebar foregrounds at or under 13:1, the strong step and active tab between 13 and
+  16:1, sidebar rows under the prose; Vesper gets its pinned colors; soft and high-contrast
+  themes are untouched. `tests/markdown-mermaid-plugin.test.ts` checks the dark diagram
+  text is under the ceiling. Components suite passes.
+- Local production build with Vesper: every foreground token at or under #D5D5D5 except
+  the three allowed; a page-wide scan of visible text found nothing else above it.
+- Only Vesper was inspected in the browser. Share images, terminals and colored-fill badges
+  keep their own colors.

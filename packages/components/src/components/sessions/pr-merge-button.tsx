@@ -73,7 +73,10 @@ export function PrMergeButton({
   // The full (non-compact) ready button uses GitHub's green so "merge" reads as
   // the positive terminal action, matching the compact info-bar merge control.
   const readyGreen = tone === 'ready' && !compact;
-  const greenClasses = 'bg-status-success text-white hover:bg-status-success/90';
+  // Dark themes brighten the green, where white text drops to ~2:1; use the
+  // canvas color on it there, as the PR tab's merge button does.
+  const greenClasses =
+    'bg-status-success text-white hover:bg-status-success/90 dark:text-background';
 
   const mainContent = (
     <>

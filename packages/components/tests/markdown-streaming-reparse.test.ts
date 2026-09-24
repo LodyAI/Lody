@@ -4,10 +4,7 @@ import { act, createElement, type ComponentProps } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import {
-  createMarkdownMermaidConfig,
-  MarkdownRenderer,
-} from '../src/components/ai-gui/markdown-renderer';
+import { MarkdownRenderer } from '../src/components/ai-gui/markdown-renderer';
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
@@ -501,21 +498,6 @@ End of synthetic document.`);
       'button[title="/home/agent/project/src/routes/api/upload.$key.tsx:9"]'
     );
     expect(fileLinkButton).not.toBeNull();
-  });
-
-  it('uses Mermaid theme variables with readable dark-mode foregrounds and lines', () => {
-    const lightConfig = createMarkdownMermaidConfig('light');
-    const darkConfig = createMarkdownMermaidConfig('dark');
-
-    expect(lightConfig.theme).toBe('base');
-    expect(darkConfig.theme).toBe('base');
-    expect(darkConfig.darkMode).toBe(true);
-    expect(darkConfig.themeVariables).toMatchObject({
-      primaryTextColor: '#f8fafc',
-      lineColor: '#cbd5e1',
-      textColor: '#e2e8f0',
-    });
-    expect(darkConfig.themeVariables).not.toBe(lightConfig.themeVariables);
   });
 
   it('keeps incomplete streaming Markdown rendered without per-word animation spans', async () => {

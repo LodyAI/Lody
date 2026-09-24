@@ -656,7 +656,7 @@ export function ContextChip({
           onClick={handleCopyBranch}
           aria-label={`${copyBranchLabel}: ${trimmedBranch}`}
           title={copyBranchLabel}
-          className="-mx-1 flex h-6 min-w-0 shrink items-center rounded-md px-1 text-foreground/85 transition-colors hover:bg-muted-foreground/10 hover:text-foreground"
+          className="-mx-1 flex h-6 min-w-0 shrink items-center rounded-md px-1 text-reading transition-colors hover:bg-muted-foreground/10"
         >
           <span className="truncate">{trimmedBranch}</span>
         </button>

@@ -91,6 +91,8 @@ module.exports = {
         border: 'hsl(var(--border) / <alpha-value>)',
         // Long-form conversation text: the foreground with its contrast capped.
         reading: 'hsl(var(--reading-foreground) / <alpha-value>)',
+        // The one step above the dark-theme brightness ceiling: headings, bold.
+        'foreground-strong': 'hsl(var(--foreground-strong) / <alpha-value>)',
         input: {
           DEFAULT: 'hsl(var(--input) / <alpha-value>)',
           // Fill of an editable control. Separate from `input.DEFAULT`, which

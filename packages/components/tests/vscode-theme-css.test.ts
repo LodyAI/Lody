@@ -23,6 +23,11 @@ const contrastRatio = (a: string, b: string): number => {
   return (light + 0.05) / (dark + 0.05);
 };
 
+// Dark themes hold every text foreground under the reading ceiling (13:1
+// against the canvas): on the fixture's #101010, pure white becomes #D5D5D5.
+const CEILED_ON_FIXTURE = hexColorToHslChannel('#D5D5D5');
+const STRONG_ON_FIXTURE = '0 0% 92.2%';
+
 const themeFixture: LodyResolvedVSCodeTheme = {
   schemaVersion: 1,
   id: 'vesper-like',
@@ -79,7 +84,7 @@ describe('createLodyThemeCssVariables', () => {
 
     expect(variables['--background']).toBe('0 0% 6.3%');
     expect(variables['--hover']).toBe('0 0% 10.2%');
-    expect(variables['--hover-foreground']).toBe('0 0% 100%');
+    expect(variables['--hover-foreground']).toBe(CEILED_ON_FIXTURE);
     expect(variables['--highlight']).toBe(warmAccent);
     expect(variables['--highlight-foreground']).toBe(buttonForeground);
     expect(variables['--selection']).toBe('0 0% 13.7%');
@@ -88,7 +93,11 @@ describe('createLodyThemeCssVariables', () => {
     expect(variables['--selection-inactive-foreground']).toBe(warmAccent);
     expect(variables['--secondary']).toBe('0 0% 13.7%');
     expect(variables['--button-secondary']).toBe(hexColorToHslChannel('#282A36'));
-    expect(variables['--button-secondary-foreground']).toBe(hexColorToHslChannel('#F8F8F2'));
+    // #F8F8F2 is above the ceiling too.
+    expect(variables['--button-secondary-foreground']).not.toBe(hexColorToHslChannel('#F8F8F2'));
+    expect(
+      contrastRatio(variables['--button-secondary-foreground']!, variables['--background']!)
+    ).toBeLessThanOrEqual(13);
     expect(variables['--button-secondary-hover']).toBe(hexColorToHslChannel('#343746'));
     expect(variables['--button-hover']).toBe(hexColorToHslChannel('#FFCFA8'));
     expect(variables['--input']).toBe(hexColorToHslChannel('#1C1C1C'));
@@ -97,11 +106,12 @@ describe('createLodyThemeCssVariables', () => {
     expect(variables['--input-field']).toBe(hexColorToHslChannel('#1C1C1C'));
     expect(variables['--tab-bar']).toBe('0 0% 6.3%');
     expect(variables['--tab-active']).toBe('0 0% 8.6%');
-    expect(variables['--tab-active-foreground']).toBe('0 0% 100%');
+    // The active tab takes the strong step (16:1), not the reading ceiling.
+    expect(variables['--tab-active-foreground']).toBe(STRONG_ON_FIXTURE);
     expect(variables['--tab-inactive']).toBe('0 0% 6.3%');
     expect(variables['--tab-inactive-foreground']).toBe('0 0% 49.4%');
     expect(variables['--tab-hover']).toBe('0 0% 15.7%');
-    expect(variables['--tab-hover-foreground']).toBe('0 0% 100%');
+    expect(variables['--tab-hover-foreground']).toBe(CEILED_ON_FIXTURE);
     expect(variables['--tab-border']).toBe('0 0% 6.3%');
     expect(variables['--tab-active-accent']).toBe(warmAccent);
     expect(variables['--destructive']).toBe('0 100% 50%');
@@ -112,7 +122,7 @@ describe('createLodyThemeCssVariables', () => {
     expect(variables['--status-danger']).toBe('0 100% 50%');
     expect(variables['--status-merged']).toBe('300 100% 50%');
     expect(variables['--sidebar-background']).toBe('0 0% 6.3%');
-    expect(variables['--sidebar-foreground']).toBe('0 0% 100%');
+    expect(variables['--sidebar-foreground']).toBe(CEILED_ON_FIXTURE);
     expect(variables['--sidebar-foreground-muted']).toBe('0 0% 62.7%');
     expect(variables['--sidebar-hover']).toBe('0 0% 15.7%');
     expect(variables['--sidebar-hover-foreground']).toBe(sidebarForeground);
@@ -122,7 +132,11 @@ describe('createLodyThemeCssVariables', () => {
     expect(variables['--sidebar-selection']).toBe('0 0% 13.7%');
     expect(variables['--sidebar-selection-foreground']).toBe(warmAccent);
     expect(variables['--sidebar-ring']).toBe(warmAccent);
-    expect(variables['--code-added']).toBe('120 100% 50%');
+    // #00FF00 is brighter than the dark text ceiling: same hue, dimmed.
+    expect(variables['--code-added']!.split(' ')[0]).toBe('120');
+    expect(
+      contrastRatio(variables['--code-added']!, variables['--background']!)
+    ).toBeLessThanOrEqual(13);
     expect(variables['--code-removed']).toBe('0 100% 50%');
     expect(variables['--modified-file']).toBe('300 100% 50%');
     expect(variables['--scrollbar-thumb']).toBe(
@@ -158,10 +172,11 @@ describe('createLodyThemeCssVariables', () => {
     });
 
     expect(variables['--button-secondary']).toBe('0 0% 11%');
-    expect(variables['--button-secondary-foreground']).toBe('0 0% 100%');
+    expect(variables['--button-secondary-foreground']).toBe(CEILED_ON_FIXTURE);
     expect(variables['--button-secondary-hover']).toBe('0 0% 15.7%');
     expect(variables['--tab-active']).toBe('0 0% 6.3%');
-    expect(variables['--tab-active-foreground']).toBe('0 0% 100%');
+    // The active tab takes the strong step (16:1), not the reading ceiling.
+    expect(variables['--tab-active-foreground']).toBe(STRONG_ON_FIXTURE);
     expect(variables['--tab-inactive']).toBe('0 0% 6.3%');
     expect(variables['--tab-inactive-foreground']).toBe('0 0% 62.7%');
     expect(variables['--tab-hover']).toBe('0 0% 15.7%');
@@ -177,11 +192,11 @@ describe('createLodyThemeCssVariables', () => {
       ...themeFixture,
       colors: {
         ...themeFixture.colors,
-        'list.foreground': '#DDDDDD',
+        'list.foreground': '#CCCCCC',
       },
     });
 
-    expect(variables['--sidebar-foreground']).toBe(hexColorToHslChannel('#DDDDDD'));
+    expect(variables['--sidebar-foreground']).toBe(hexColorToHslChannel('#CCCCCC'));
     expect(variables['--sidebar-foreground-muted']).toBe(hexColorToHslChannel('#A0A0A0'));
   });
 
@@ -244,25 +259,46 @@ describe('createLodyThemeCssVariables', () => {
     expect(contrastRatio(variables['--syntax-comment']!, background!)).toBeGreaterThanOrEqual(3.5);
   });
 
-  it('caps reading text at 13:1 on Vesper and leaves headings the full foreground', () => {
-    const theme = getBundledVSCodeThemeByIdSync('vesper');
-    expect(theme).toBeDefined();
-    const variables = createLodyThemeCssVariables(theme!);
+  it('holds dark-theme text under the reading ceiling, with one stronger step', () => {
+    // A pure-white theme that is not tuned by hand, so everything is derived.
+    const variables = createLodyThemeCssVariables(themeFixture);
     const background = variables['--background']!;
-    expect(contrastRatio(variables['--foreground']!, background)).toBeGreaterThan(19);
-
+    for (const name of ['--foreground', '--popover-foreground', '--sidebar-foreground']) {
+      expect({ name, ok: contrastRatio(variables[name]!, background) <= 13 }).toEqual({
+        name,
+        ok: true,
+      });
+    }
+    // Headings, the selected conversation and the active tab take the one step
+    // above the ceiling, still below pure white.
+    for (const name of ['--foreground-strong', '--tab-active-foreground']) {
+      const ratio = contrastRatio(variables[name]!, background);
+      expect({ name, above: ratio > 13, capped: ratio <= 16 }).toEqual({
+        name,
+        above: true,
+        capped: true,
+      });
+    }
     const reading = contrastRatio(variables['--reading-foreground']!, background);
-    expect(reading).toBeLessThanOrEqual(13);
     expect(reading).toBeGreaterThan(12.5);
     const sidebarRow = contrastRatio(
       variables['--sidebar-row-foreground']!,
       variables['--sidebar-background']!
     );
-    expect(sidebarRow).toBeLessThanOrEqual(5.5);
-    // Still above WCAG AA for normal text.
-    expect(sidebarRow).toBeGreaterThan(5);
+    expect(sidebarRow).toBeLessThanOrEqual(11.3);
     // The sidebar never outshines the reading column.
     expect(sidebarRow).toBeLessThan(reading);
+  });
+
+  it('uses the hand-tuned warm grays for Vesper', () => {
+    const variables = createLodyThemeCssVariables(getBundledVSCodeThemeByIdSync('vesper')!);
+    expect(variables['--sidebar-row-foreground']).toBe(hexColorToHslChannel('#BCBAB8'));
+    expect(variables['--sidebar-selection-foreground']).toBe(hexColorToHslChannel('#F0EFED'));
+    expect(variables['--tab-active-foreground']).toBe(hexColorToHslChannel('#F0EFED'));
+    // Everything else still follows the ceiling.
+    expect(
+      contrastRatio(variables['--foreground']!, variables['--background']!)
+    ).toBeLessThanOrEqual(13);
   });
 
   it('leaves a theme whose text is already below the cap, and high-contrast themes, alone', () => {

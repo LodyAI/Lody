@@ -166,10 +166,10 @@ const transformMdastChildren = (tree: unknown, transform: MdastChildTransformer)
 // `[&_h1]:mt-5` arbitrary variants — zeroing margin-top AND margin-bottom on
 // every block. `!` flips on `!important` so per-element margins survive.
 const MARKDOWN_BASE_CLASSNAME =
-  // Body text uses the contrast-capped reading color; headings and bold keep
-  // the full foreground, so hierarchy reads by brightness (see `--reading-foreground`).
+  // Body text uses the contrast-capped reading color; headings and bold take
+  // the one step above it, so hierarchy reads by brightness (`--foreground-strong`).
   'markdown-renderer max-w-none text-reading leading-[1.75] ' +
-  '[&_h1]:text-foreground [&_h2]:text-foreground [&_h3]:text-foreground [&_h4]:text-foreground [&_strong]:text-foreground ' +
+  '[&_h1]:text-foreground-strong [&_h2]:text-foreground-strong [&_h3]:text-foreground-strong [&_h4]:text-foreground-strong [&_strong]:text-foreground-strong ' +
   '[&_p]:!mt-0 [&_p]:!mb-3 [&_p:has(+ul)]:!mb-2 [&_p:last-child]:!mb-0 [&_p:first-child]:!mt-0 ' +
   '[&_ul]:!my-2 [&_ul]:pl-3 [&_ul]:list-disc ' +
   '[&_ul:not(.contains-task-list)]:pl-0 [&_ul:not(.contains-task-list)]:list-none ' +

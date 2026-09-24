@@ -1187,7 +1187,7 @@ export const LoroSidebar = memo(function LoroSidebar({
           ) : (
             <span
               aria-label="Lody"
-              className="select-none px-2 text-[18px] font-semibold leading-none tracking-[-0.03em] text-sidebar-foreground"
+              className="select-none px-2 text-[18px] font-semibold leading-none tracking-[-0.03em] text-reading"
               style={{ fontFamily: 'var(--font-wordmark)' }}
             >
               Lody

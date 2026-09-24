@@ -111,7 +111,7 @@ describe('VSCode theme aliases', () => {
         ...themeFixture.colors,
         'editor.background': '#101010',
         'input.background': '#1A1A1A',
-        'input.foreground': '#EEEEEE',
+        'input.foreground': '#CCCCCC',
         'input.placeholderForeground': '#777777',
         'input.border': '#3A3A3A',
         'editorWidget.border': '#444444',
@@ -119,7 +119,7 @@ describe('VSCode theme aliases', () => {
     });
 
     expect(variables['--input']).toBe(hexColorToHslChannel('#1A1A1A'));
-    expect(variables['--input-foreground']).toBe(hexColorToHslChannel('#EEEEEE'));
+    expect(variables['--input-foreground']).toBe(hexColorToHslChannel('#CCCCCC'));
     expect(variables['--input-placeholder']).toBe(hexColorToHslChannel('#777777'));
     expect(variables['--input-border']).toBe(hexColorToHslChannel('#3A3A3A'));
     expect(variables['--input-field']).toBe(hexColorToHslChannel('#1A1A1A'));
