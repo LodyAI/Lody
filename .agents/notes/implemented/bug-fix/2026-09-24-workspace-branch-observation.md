@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: [#953](https://github.com/LodyAI/Lody/pull/953)
 
 [中文](2026-09-24-workspace-branch-observation.zh.md)
 
