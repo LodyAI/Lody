@@ -2922,6 +2922,9 @@ describe('SessionExecutionService', () => {
       startSessionActivePresence: vi.fn(() => {
         events.push('active-start');
       }),
+      setSessionActivePresencePhase: vi.fn((_sessionId, phase) => {
+        events.push(`phase:${phase}`);
+      }),
       clearSessionActivePresence: vi.fn(() => {
         events.push('active-clear');
       }),
@@ -2965,6 +2968,10 @@ describe('SessionExecutionService', () => {
     expect(idleAfterPromptAt).toBeGreaterThan(promptResolvedAt);
     expect(finalizeStartedAt).toBeGreaterThan(idleAfterPromptAt);
     expect(activeClearedAt).toBeGreaterThan(finalizeStartedAt);
+    const finalizingAt = events.indexOf('phase:finalizing');
+    expect(finalizingAt).toBeGreaterThan(promptResolvedAt);
+    expect(idleAfterPromptAt).toBeGreaterThan(finalizingAt);
+    expect(events.filter((event) => event === 'phase:finalizing')).toEqual(['phase:finalizing']);
   });
 
   it.each([undefined, 'delivery'] as const)(

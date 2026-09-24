@@ -681,6 +681,15 @@ const resolveActivityFromSessionStatus = (
   return null;
 };
 
+/**
+ * History and presence arrive independently. A finished assistant row cannot
+ * hide a goal resume whose presence is already `running`. Only the execution
+ * owner's finalizing phase hides the activity row.
+ */
+export const shouldHideThinkingDuringFinalization = (
+  liveStatus: SessionStatus | null | undefined
+): boolean => liveStatus?.type === 'running' && liveStatus.phase === 'finalizing';
+
 const resolveToneByStatus = (status: SessionStatus['type']) => {
   switch (status) {
     case 'running':
@@ -3651,19 +3660,22 @@ export const SessionChatInterface = memo(
       sessionProject,
       workspaceId,
     ]);
+    const hideThinkingDuringFinalization = shouldHideThinkingDuringFinalization(liveSessionStatus);
     const agentActivityLabel =
       initStatusLabel && !isEmptyConversation
         ? initStatusLabel
         : isSessionActive
           ? liveSessionStatus?.type === 'requestPermission'
             ? t('sessions.statusIndicator.requestPermission')
-            : runningActivity === 'imageGenerating'
-              ? t('sessions.statusIndicator.imageGenerating')
-              : // Reading, running and editing all read as "Working"; the
-                // collapsed tool groups above already say which.
-                runningActivity === 'exploring' || runningActivity === 'writing'
-                ? t('sessions.working', 'Working')
-                : t('sessions.statusIndicator.thinking')
+            : hideThinkingDuringFinalization
+              ? null
+              : runningActivity === 'imageGenerating'
+                ? t('sessions.statusIndicator.imageGenerating')
+                : // Reading, running and editing all read as "Working"; the
+                  // collapsed tool groups above already say which.
+                  runningActivity === 'exploring' || runningActivity === 'writing'
+                  ? t('sessions.working', 'Working')
+                  : t('sessions.statusIndicator.thinking')
           : hasPendingDispatch && statusStripState == null
             ? // Pre-start only while the turn can actually start: any
               // connection/machine problem (browser offline, machine removed or
