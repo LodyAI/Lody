@@ -73,9 +73,16 @@
   create/edit/resume/run require the machine's protocol capability. Never fall
   back to a different Agent. Run history is ordinary Sessions with sparse
   `SessionMeta.scheduleId`.
-- List: one column template for header and rows, fixed-width actions column,
-  target column names the machine; cells align to their first line; row actions
-  are visible by default and hidden only behind `[@media(hover:hover)]`.
+- List (`schedule-list.tsx`): one column template for header and rows; Name,
+  Frequency and Next run are resizable from the header (pointer, arrow keys,
+  double-click resets), persisted per device in `scheduleListColumnWidthsAtom`,
+  as `minmax(72px, width)` so a narrow panel still fits. The header cell must
+  not clip — the handle hangs into the gap. A manual row's button is Run
+  (`Zap`); a timed row's is Pause/Resume (`Play` means Resume only). Every row
+  has a context menu (open, run, pause/resume, last run, delete). Run from the
+  list starts at once with a toast; delete always confirms. Cells align to their
+  first line; the target column names the machine; row actions are visible by
+  default and hidden only behind `[@media(hover:hover)]`.
 - Chrome follows `src/ui/AGENTS.md`: `em` of `--ui-font-size` sized on leaves
   (row labels and values 0.9em, hints 0.8em, section labels 0.8em), only two inks
   (`foreground`, `muted-foreground`), `font-normal`, 0.5px edges. Cards are

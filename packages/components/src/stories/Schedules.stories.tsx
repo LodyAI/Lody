@@ -156,6 +156,8 @@ const meta = {
     onOpen: () => {},
     onNew: () => {},
     onToggle: () => {},
+    onRun: () => {},
+    onDelete: () => {},
     onOpenSession: () => {},
   },
 } satisfies Meta<typeof ScheduleListView>;

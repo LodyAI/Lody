@@ -10,7 +10,8 @@ import {
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useCommand } from '@/lib/commands';
 import { useEffect, useMemo, useState } from 'react';
-import { useAtomValue } from 'jotai';
+import { useAtom, useAtomValue } from 'jotai';
+import { toast } from 'sonner';
 import { useNavigate } from '@tanstack/react-router';
 import { useTranslation } from 'react-i18next';
 import { v4 as uuid } from 'uuid';
@@ -43,6 +44,7 @@ import {
 } from '@/atoms';
 import { getAllAgentConfigAtom } from '@/atoms/agents';
 import { schedulesFeatureEnabledAtom } from '@/atoms/settings';
+import { scheduleListColumnWidthsAtom } from '@/atoms/schedules';
 import { useResolvedWorkspaceScope } from '@/hooks/use-resolved-workspace-scope';
 import {
   onlineMachineIdsAtom,
@@ -160,6 +162,41 @@ function SchedulesContent({ scheduleId }: { scheduleId?: string }) {
     // without reading. Ownership and machine capability are still enforced above.
     void mutate(apply);
   };
+  const requestRun = (id: string) => async () => {
+    if (!repository || !user) return;
+    await runtime!.withScheduleStore(id, () =>
+      repository.requestRun({
+        scheduleId: id,
+        actorId: user.id,
+        manualRunId: uuid(),
+        now: getServerNow(),
+      })
+    );
+  };
+  const deleteSchedule = (id: string) => async () => {
+    if (!repository || !user) return;
+    await runtime!.withScheduleStore(id, () => repository.delete(id, user.id, getServerNow()));
+    if (scheduleId === id) open();
+  };
+  // From the list there are no unsaved edits to warn about, so Run starts at
+  // once and says so; the detail dialog still confirms (its edits may be unsaved).
+  const runFromList = (item: ScheduleRegistryRow) =>
+    void mutate(async () => {
+      await requestRun(item.scheduleId)();
+      toast.success(
+        t('schedules.runStarted', 'Run requested for “{{title}}”.', { title: item.title })
+      );
+    });
+  const confirmDelete = (item: ScheduleRegistryRow) =>
+    setConfirmation({
+      title: t('schedules.deleteTitle', 'Delete “{{title}}”?', { title: item.title }),
+      description: t(
+        'schedules.deleteHelp',
+        'Future runs stop and the schedule is removed. Chats it already started are kept.'
+      ),
+      accept: deleteSchedule(item.scheduleId),
+    });
+  const [columnWidths, setColumnWidths] = useAtom(scheduleListColumnWidthsAtom);
   const row = registry.rows.find((r) => r.scheduleId === scheduleId);
   const isOwner = !!row && row.ownerId === user?.id;
   const canManage =
@@ -223,17 +260,7 @@ function SchedulesContent({ scheduleId }: { scheduleId?: string }) {
                 'schedules.runNowHelp',
                 'Run with the last saved prompt, Agent, Project and permission mode. Unsaved edits are excluded. This may run alongside existing work.'
               ),
-              accept: async () => {
-                if (repository && user)
-                  await runtime!.withScheduleStore(scheduleId, () =>
-                    repository.requestRun({
-                      scheduleId,
-                      actorId: user.id,
-                      manualRunId: uuid(),
-                      now: getServerNow(),
-                    })
-                  );
-              },
+              accept: requestRun(scheduleId),
             })
           }
         >
@@ -245,16 +272,7 @@ function SchedulesContent({ scheduleId }: { scheduleId?: string }) {
           variant="ghost"
           className="h-7 px-2 text-[0.9em] text-muted-foreground hover:text-destructive"
           disabled={!isOwner}
-          onClick={() =>
-            void mutate(async () => {
-              if (repository && user) {
-                await runtime!.withScheduleStore(scheduleId, () =>
-                  repository.delete(scheduleId, user.id, getServerNow())
-                );
-                open();
-              }
-            })
-          }
+          onClick={() => row && confirmDelete(row)}
         >
           <Trash2 className="size-3.5" />
           <span className="sr-only sm:not-sr-only">{t('schedules.delete', 'Delete')}</span>
@@ -352,6 +370,10 @@ function SchedulesContent({ scheduleId }: { scheduleId?: string }) {
           onOpen={open}
           onNew={() => open('new')}
           onToggle={toggle}
+          onRun={runFromList}
+          onDelete={confirmDelete}
+          columnWidths={columnWidths ?? undefined}
+          onColumnWidthsChange={setColumnWidths}
           onOpenSession={openSession}
           contextForRow={(item) => ({
             machine: machines.get(item.machineId as never)?.name ?? item.machineId,
@@ -369,6 +391,10 @@ function SchedulesContent({ scheduleId }: { scheduleId?: string }) {
               : presenceSync === 'synced'
                 ? 'offline'
                 : 'unknown',
+            canRun:
+              item.ownerId === user?.id &&
+              machineSupportsSchedulesProtocol(machines.get(item.machineId as never)),
+            canDelete: item.ownerId === user?.id,
             canToggle:
               item.ownerId === user?.id &&
               (item.enabled ||
