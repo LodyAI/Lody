@@ -80,6 +80,52 @@ describe('interaction-armed overlays', () => {
     expect(copyButton().getAttribute('data-state')).toBe('closed');
   });
 
+  it('keeps the pressed trigger until its click is dispatched', () => {
+    vi.useFakeTimers();
+    let clicks = 0;
+    act(() =>
+      root.render(
+        <Row>
+          <TooltipProvider>
+            <Tooltip delayDuration={0}>
+              <TooltipTrigger asChild>
+                <button type="button" className="copy" onClick={() => (clicks += 1)}>
+                  copy
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>Copy message</TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        </Row>
+      )
+    );
+    const pressed = copyButton();
+
+    // A press with no pointer entry first (a row scrolled under a still
+    // pointer): the focus it brings must not swap the node mid-press, or the
+    // browser drops the click.
+    act(() => {
+      pressed.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }));
+      pressed.focus();
+    });
+    expect(row().dataset.armed).toBe('false');
+    expect(copyButton()).toBe(pressed);
+
+    act(() => {
+      pressed.dispatchEvent(new MouseEvent('pointerup', { bubbles: true }));
+      pressed.click();
+    });
+    expect(clicks).toBe(1);
+    expect(copyButton()).toBe(pressed);
+
+    act(() => {
+      vi.runAllTimers();
+    });
+    expect(row().dataset.armed).toBe('true');
+    expect(copyButton().getAttribute('data-state')).toBe('closed');
+    vi.useRealTimers();
+  });
+
   it('hands a focus that armed the row back to the same trigger', () => {
     act(() =>
       root.render(

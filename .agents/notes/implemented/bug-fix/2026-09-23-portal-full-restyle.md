@@ -135,6 +135,13 @@ Measured in the same production build and workspace (9k nodes):
   pointer entry or focus (`ui/interaction-arm.tsx`); touch devices mount eagerly. Row mounts
   fell from ~944 to ~702 components per switch. An A/B over 20 switches between the same two
   conversations measured ~7% less main-thread time (noisy; about 5-8ms per switch).
+  Correction after review: arming remounts the triggers, and React schedules a
+  `pointerenter` update at continuous priority, so a click right after entering a row could
+  commit the remount between pointerdown and pointerup; Chromium then drops the click (0/5
+  first clicks on Copy in a real-Chromium harness, 5/5 on the base). Pointer entry now arms
+  with `flushSync`, and a press that starts on an unarmed row keeps the plain trigger until its
+  click has been dispatched (5/5 after the fix). A popover trigger pressed on a row that never
+  saw a pointer entry still needs a second click, as its Radix root mounts only after the press.
 
 - **Machine Flock freshness.** Each Machine Flock row consumer compared the Flock's version with
   the version its projection was materialized at, on every mount (twice with remote catch-up),

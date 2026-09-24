@@ -57,7 +57,8 @@ strings on i18n rather than the registry's inline English.
 - `Tooltip`, `Popover` and `ContextMenu` render only their trigger inside an unarmed
   `useInteractionArm` boundary (conversation rows) and mount on the first hover or focus.
   Keep that path when wrapping them: an owner-opened overlay still mounts, and a boundary
-  armed by focus hands it back to the same trigger (`ui/interaction-arm.tsx`).
+  armed by focus hands it back to the same trigger (`ui/interaction-arm.tsx`). Arming must
+  never commit inside a press: Chromium drops a click whose pressed node was replaced.
 - Overlay list hover (menus, command palette, mention, select) is
   `bg-foreground/[0.05]` in light and `bg-white/[0.10]` in dark. Do not use
   `--hover` on popovers — it is sized for the page/sidebar and vanishes on the
