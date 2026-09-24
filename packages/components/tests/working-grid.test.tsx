@@ -21,6 +21,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { SidebarRowEndSlot } from '../src/components/sidebar-row-shared';
 import { WorkingGrid } from '../src/ui/working-grid';
 import { WorkingGridCollapse } from '../src/ui/working-grid-collapse';
+import { WorkingStatusMark } from '../src/ui/working-status-mark';
 import { READING_IDLE_MS, setWorkingGridReadingPause } from '../src/ui/working-grid-reading';
 import {
   crestDelayMs,
@@ -431,11 +432,45 @@ describe('WorkingGridCollapse', () => {
       await Promise.resolve();
     });
     expect(container.querySelector('[data-session-done-transition]')).toBeNull();
-    expect(container.querySelector('.rounded-full.bg-primary')).not.toBeNull();
+    expect(container.querySelector('[data-session-unread-dot]')).not.toBeNull();
   });
 
   it('does not play for a session that was never working', () => {
     render(<SidebarRowEndSlot hasUnreadMessages />);
     expect(container.querySelector('[data-session-done-transition]')).toBeNull();
+  });
+});
+
+describe('WorkingStatusMark', () => {
+  const doneTransition = () => container.querySelector('[data-session-done-transition]');
+  const grid = () => container.querySelector('[data-session-working-indicator]');
+  const dot = () => container.querySelector('[data-session-unread-dot]');
+
+  it('collapses into the dot when unread lands before work stops (how a turn ends)', () => {
+    // The CLI writes the unread bump, then releases presence.
+    render(<WorkingStatusMark working unread={false} />);
+    render(<WorkingStatusMark working unread />);
+    expect(grid()).not.toBeNull();
+    render(<WorkingStatusMark working={false} unread />);
+    expect(doneTransition()).not.toBeNull();
+    expect(grid()).toBeNull();
+  });
+
+  it('shows the dot without the transition if work stops before unread lands', () => {
+    render(<WorkingStatusMark working unread={false} />);
+    render(<WorkingStatusMark working={false} unread={false} />);
+    expect(container.childElementCount).toBe(0);
+    render(<WorkingStatusMark working={false} unread />);
+    expect(doneTransition()).toBeNull();
+    expect(dot()).not.toBeNull();
+  });
+
+  it('goes back to the grid when the session starts working again', () => {
+    render(<WorkingStatusMark working unread={false} />);
+    render(<WorkingStatusMark working={false} unread />);
+    expect(doneTransition()).not.toBeNull();
+    render(<WorkingStatusMark working unread />);
+    expect(grid()).not.toBeNull();
+    expect(doneTransition()).toBeNull();
   });
 });

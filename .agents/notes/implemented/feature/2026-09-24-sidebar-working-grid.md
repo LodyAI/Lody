@@ -114,10 +114,19 @@ settling (400–1020ms). The first cut (300ms spin, 1.3× pop, one small bounce,
 fading sparks) read well magnified but was hard to see at the real 14px: the spin
 was slowed, the pop and bounces enlarged, and the sparks dropped as invisible. It uses the same
 compositor-only Web Animations; the hand-over to the plain dot comes from the dot
-animation's `finished` promise, not a timer. The indicator tracks the previous
-working flag as state adjusted during render, so the transition is on screen in
-the same commit that stops the grid; a row that remounts, or was never working,
-shows the dot directly. Reduced motion shows the dot at once. Known seam: the
+animation's `finished` promise, not a timer.
+
+`WorkingStatusMark` packages the grid, the transition and the dot behind two
+flags (`working`, `unread`); `SessionRowStatusIndicator` renders it for both
+states, so it stays mounted across the change. It tracks the previous `working`
+flag as state adjusted during render, so the transition is on screen in the same
+commit that stops the grid. It fires only when `unread` is already true as
+`working` turns false. The two flags travel separately — `working` from session
+presence, `unread` from durable doc meta (`lastMessageAt` vs `lastReadAt`) — and a
+normal turn end writes the unread bump before it releases presence, so that
+order holds. If presence lapses first (crash, expiry), the indicator empties and
+the dot later appears without the transition. A row that remounts, or was never
+working, shows the dot directly. Reduced motion shows the dot at once. Known seam: the
 collapse starts from evenly sized tiles, while the live grid's tiles differ.
 Verified by scrubbing the paused animations frame by frame in Storybook
 (`UI/WorkingGrid` → Completion; `Components/LodySidebar` → Sessions finishing).

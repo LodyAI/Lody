@@ -91,8 +91,9 @@ strings on i18n rather than the registry's inline English.
   drive frames from rAF, timers or React state. Only that module's reading pause may
   pause/resume them. Keep all nine tiles visible by default (tiles vanishing broke the
   grid into specks); the sidebar root keeps `data-working-grid-region`.
-  `working-grid-collapse.tsx` (working → unread) follows the same rules; hand over on the
-  dot animation's `finished` promise, never a timer.
+  `working-status-mark.tsx` is the one entry for working / unread marks: it owns the grid,
+  the working → unread collapse and the dot, and must stay mounted across that change. The
+  collapse hands over on the dot animation's `finished` promise, never a timer.
   Why: [working grid note](../../../../.agents/notes/implemented/feature/2026-09-24-sidebar-working-grid.md).
 
 ## Scroll area
