@@ -9,29 +9,24 @@ export type WorkingGridCollapseProps = Omit<ComponentPropsWithoutRef<'span'>, 'c
   gridSize?: number;
   /** Diameter of the dot it ends as, px (the unread dot is 8px). */
   dotSize?: number;
-  /** Throw a few sparks outwards as the dot lands. */
-  splash?: boolean;
   /** Called once the dot has settled. */
   onDone?: () => void;
 };
 
 const TILES = [0, 1, 2].flatMap((row) => [0, 1, 2].map((col) => [row, col] as const));
-const SPARKS = 6;
 // Timeline, ms.
 // Tuned at the real 14px size, where small moves are hard to see: a slow spin, a
-// big pop and two clear bounces.
+// big pop and two clear bounces. (Sparks were tried and dropped: invisible at 14px.)
 const GATHER_MS = 480;
 const DOT_START_MS = 400;
 const DOT_MS = 620;
-const SPARK_START_MS = 440;
-const SPARK_MS = 380;
 const EASE_IN = 'cubic-bezier(0.45, 0, 0.7, 0.2)';
 const EASE_OUT = 'cubic-bezier(0.2, 0.7, 0.3, 1)';
 
 /**
  * One-shot "done" transition from the working grid to the unread dot: the nine
- * tiles spin and gather into the centre, the dot pops out past its size and
- * settles with a small bounce, and a few sparks fly off.
+ * tiles spin and gather into the centre, then the dot pops out past its size and
+ * settles with two bounces.
  *
  * Like {@link WorkingGrid} it animates only `transform` and `opacity` with the
  * Web Animations API, so it runs on the compositor; `onDone` fires from the
@@ -42,7 +37,6 @@ export function WorkingGridCollapse({
   size = 14,
   gridSize = 12,
   dotSize = 8,
-  splash = true,
   onDone,
   className,
   style,
@@ -101,38 +95,16 @@ export function WorkingGridCollapse({
     const settle = dot.animate(
       [
         { transform: 'scale(0.35)', opacity: 0 },
-        { transform: 'scale(1.6)', opacity: 1, offset: 0.25 },
-        { transform: 'scale(0.78)', opacity: 1, offset: 0.45 },
-        { transform: 'scale(1.22)', opacity: 1, offset: 0.62 },
-        { transform: 'scale(0.92)', opacity: 1, offset: 0.78 },
-        { transform: 'scale(1.04)', opacity: 1, offset: 0.9 },
+        { transform: 'scale(1.75)', opacity: 1, offset: 0.25 },
+        { transform: 'scale(0.72)', opacity: 1, offset: 0.45 },
+        { transform: 'scale(1.3)', opacity: 1, offset: 0.62 },
+        { transform: 'scale(0.88)', opacity: 1, offset: 0.78 },
+        { transform: 'scale(1.06)', opacity: 1, offset: 0.9 },
         { transform: 'scale(1)', opacity: 1 },
       ],
       { duration: DOT_MS, delay: DOT_START_MS, easing: EASE_OUT, fill: 'both' }
     );
     animations.push(settle);
-
-    // 3. Sparks fly off radially and fade.
-    root.querySelectorAll<HTMLElement>('[data-collapse-spark]').forEach((spark, index) => {
-      const angle = ((index + 0.25) / SPARKS) * Math.PI * 2;
-      const reach = size / 2 + 2;
-      const x = Math.cos(angle) * reach;
-      const y = Math.sin(angle) * reach;
-      animations.push(
-        spark.animate(
-          [
-            { transform: 'translate(0, 0) scale(1)', opacity: 0 },
-            {
-              transform: `translate(${x * 0.35}px, ${y * 0.35}px) scale(1)`,
-              opacity: 1,
-              offset: 0.2,
-            },
-            { transform: `translate(${x}px, ${y}px) scale(0.3)`, opacity: 0 },
-          ],
-          { duration: SPARK_MS, delay: SPARK_START_MS, easing: EASE_OUT, fill: 'both' }
-        )
-      );
-    });
 
     let cancelled = false;
     settle.finished.then(
@@ -178,15 +150,6 @@ export function WorkingGridCollapse({
           />
         ))}
       </span>
-      {splash &&
-        Array.from({ length: SPARKS }, (_, index) => (
-          <span
-            key={index}
-            data-collapse-spark=""
-            className="absolute block rounded-full bg-current"
-            style={{ left: size / 2 - 1, top: size / 2 - 1, width: 2, height: 2, opacity: 0 }}
-          />
-        ))}
       <span
         data-collapse-dot=""
         className="absolute block rounded-full bg-current"

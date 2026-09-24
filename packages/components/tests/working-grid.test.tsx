@@ -397,18 +397,22 @@ describe('WorkingGrid', () => {
 });
 
 describe('WorkingGridCollapse', () => {
-  it('spins and gathers the tiles, pops the dot, and sparks, on the compositor', () => {
+  it('spins and gathers the tiles, then pops the dot, on the compositor', () => {
     render(<WorkingGridCollapse />);
     const targets = (selector: string) => recorded.filter((a) => a.target.matches(selector)).length;
     expect(targets('[data-collapse-grid]')).toBe(1);
     expect(targets('[data-collapse-tile]')).toBe(9);
     expect(targets('[data-collapse-dot]')).toBe(1);
-    expect(targets('[data-collapse-spark]')).toBeGreaterThan(0);
     expect(recorded.every((a) => a.keyframes.every(TRANSFORM_OR_OPACITY))).toBe(true);
     // The dot overshoots its size before settling: the bounce.
     const dot = recorded.find((a) => a.target.matches('[data-collapse-dot]'))!;
     const scales = dot.keyframes.map(scaleOf);
-    expect(Math.max(...scales)).toBeGreaterThan(1);
+    // Overshoots, dips below size, overshoots again (two bounces), then settles.
+    const peaks = scales.filter(
+      (v, i) => i > 0 && i < scales.length - 1 && v > 1 && v > scales[i - 1]! && v > scales[i + 1]!
+    );
+    expect(peaks.length).toBeGreaterThanOrEqual(2);
+    expect(Math.max(...scales)).toBeGreaterThan(1.5);
     expect(scales.at(-1)).toBe(1);
   });
 
