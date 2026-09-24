@@ -3977,7 +3977,7 @@ function ActivityProcessStep({
   children,
   className,
 }: {
-  icon: ReactNode;
+  icon?: ReactNode;
   children: ReactNode;
   className?: string;
 }) {
@@ -3985,12 +3985,12 @@ function ActivityProcessStep({
     <div
       className={cn(
         /* Keep the leading icon on the same inset as tool steps and prose. */
-        'flex w-full min-h-7 items-start gap-1.5 px-[4px] py-1',
+        'flex w-full min-h-6 items-start gap-1.5 px-[4px] py-0.5',
         ACTIVITY_PROCESS_TEXT_CLASS,
         className
       )}
     >
-      <span className="inline-flex shrink-0">{icon}</span>
+      {icon ? <span className="inline-flex shrink-0">{icon}</span> : null}
       <div className="min-w-0 flex-1">{children}</div>
     </div>
   );
@@ -4137,21 +4137,16 @@ const AssistantThoughtVirtualRow = memo(function AssistantThoughtVirtualRow({
   fontSize: ConversationFontSize;
 }) {
   const { t } = useTranslation();
-  /* Match tool-step layout: leading icon + body. Group header already
-     says "Thought", so we don't stack a second "思考过程" label. */
+  /* The thought is prose on the rail, with no glyph: it is the agent's own
+     words, and an icon beside every paragraph of it read as a list of
+     objects. The group header already says "Thought". */
   return (
-    <ActivityProcessStep
-      icon={
-        <Sparkles
-          className={ACTIVITY_STEP_ICON_CLASS}
-          aria-label={
-            isThinking
-              ? t('sessions.toolActivity.thinking', 'Thinking…')
-              : t('sessions.toolActivity.thought', 'Thought')
-          }
-        />
-      }
-    >
+    <ActivityProcessStep>
+      <span className="sr-only">
+        {isThinking
+          ? t('sessions.toolActivity.thinking', 'Thinking…')
+          : t('sessions.toolActivity.thought', 'Thought')}
+      </span>
       <MarkdownRenderer
         text={text}
         size={fontSize}
