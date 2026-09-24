@@ -34,3 +34,8 @@ host/runtime/CRDT capture implementation has been removed from this directory.
 - `code-collab-v2-diff-store.test.ts` — adapter tests for exact snapshots, path
   scoping, chaining, and retention GC. Package-level dedup/refcount/size-GC tests
   live in `packages/turn-diff-store/tests`.
+
+Checkout metadata observation is injected via `refreshWorkspaceMetadata` at the shared
+refresh queue, including initial local snapshots and refreshes with unchanged files.
+MessageHandler connects it to `WorkspaceBranchService` after workspace authorization;
+Git branch publication is independent of file-index Flock publication and does not delay RPC snapshots.

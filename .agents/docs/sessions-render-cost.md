@@ -73,3 +73,10 @@ materialization from UI execution, but does not remove foreground full-history
 import/Mirror cost or daemon-side document loading.
 
 Intent: [background prefetch](../../specs/session-background-prefetch.zh.md).
+
+Branch metadata comes from the owning machine’s `WorkspaceBranchService`, independently
+of GitHub/PR support. It observes local folders and worktrees on workspace activation/refresh,
+agent binding, and terminal turns. Child tabs publish to their workspace owner.
+The field retains the last named branch during detached HEAD or unavailable Git probes
+for restore/PR discovery; it is not a continuous filesystem subscription. See
+[checkout branch contract](../../specs/workspace-branch-state.md).

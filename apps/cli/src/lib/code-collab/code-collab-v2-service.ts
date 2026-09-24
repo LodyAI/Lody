@@ -291,6 +291,11 @@ export class CodeCollabV2Service {
   constructor(
     private readonly deps: {
       readonly resolveWorkspace: CodeCollabV2WorkspaceResolver;
+      /** Best-effort checkout metadata observation; never gates file snapshots. */
+      readonly refreshWorkspaceMetadata?: (workspace: {
+        readonly ownerSessionId: SessionId;
+        readonly workspaceRoot: string;
+      }) => Promise<void>;
       readonly publishFileIndex?: CodeCollabV2FileIndexPublisher;
       readonly publishFileIndexSignal?: CodeCollabV2FileIndexSignalPublisher;
       readonly maxRawTextBytes?: number;
@@ -752,6 +757,11 @@ export class CodeCollabV2Service {
       while (queue.pending) {
         const refresh = queue.pending;
         queue.pending = null;
+        void this.deps.refreshWorkspaceMetadata?.(refresh.resolved).catch((error) => {
+          this.logger.debug(
+            `[code-collab] Workspace metadata refresh failed: ${formatErrorMessage(error)}`
+          );
+        });
         try {
           if (refresh.kind === 'turn') {
             await this.refreshSharedStateAfterTurnNow(refresh.resolved);

@@ -132,6 +132,44 @@ function makeWorkspaceWatchCoordinator(): {
 }
 
 describe('CodeCollabV2Service text RPC boundary', () => {
+  it('activates checkout metadata independently of the initial file snapshot and refreshes it without file changes', async () => {
+    await withWorkspace(async (workspaceRoot) => {
+      let release: () => void = () => {};
+      const metadataReady = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      let currentBranch = 'feature/open';
+      let publishedBranch: string | undefined;
+      let publication: Promise<void> | undefined;
+      const service = new CodeCollabV2Service({
+        resolveWorkspace: makeResolver(workspaceRoot),
+        refreshWorkspaceMetadata: ({ ownerSessionId, workspaceRoot: root }) => {
+          expect(ownerSessionId).toBe(SESSION_ID);
+          expect(root).toBe(workspaceRoot);
+          publication = metadataReady.then(() => {
+            publishedBranch = currentBranch;
+          });
+          return publication;
+        },
+      });
+      try {
+        const snapshot = await service.getFileIndex({ sessionId: SESSION_ID });
+        expect(snapshot.status).toBe('ok');
+        expect(publishedBranch).toBeUndefined();
+        release();
+        await publication;
+        expect(publishedBranch).toBe('feature/open');
+        currentBranch = 'feature/switched';
+        await service.refreshSharedState({ sessionId: SESSION_ID });
+        await publication;
+        expect(publishedBranch).toBe('feature/switched');
+      } finally {
+        release();
+        service.dispose();
+      }
+    });
+  });
+
   it('opens text files with a sha256 digest and plain payload', async () => {
     await withWorkspace(async (workspaceRoot) => {
       await writeFile(path.join(workspaceRoot, 'hello.ts'), 'const value = 1;\n');
