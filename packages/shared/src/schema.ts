@@ -1235,6 +1235,12 @@ export type MachineMeta = {
   supportsLocalProjectHistoryRpc?: boolean;
   /** Versioned daemon protocols available to remote and local clients. */
   protocolCapabilities?: MachineProtocolCapabilities;
+  /**
+   * IANA zone of the machine's clock, e.g. `Asia/Shanghai` (under 50 bytes,
+   * rewritten only at registration). Schedules owned by this machine are
+   * authored on this clock; absent on older CLIs.
+   */
+  timeZone?: string;
 };
 
 /**

@@ -39,6 +39,7 @@ describe('Schedule editor', () => {
       },
       saving: false,
       now: NOW,
+      timeZone: 'Asia/Shanghai',
       onSave: vi.fn(),
     };
   });
@@ -54,8 +55,12 @@ describe('Schedule editor', () => {
         .querySelector('form')!
         .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
     });
-  const requirements = () =>
-    container.querySelector('form > div:last-of-type [aria-live="polite"]')!;
+  /** The problem marks next to fields; each names its reason. */
+  const marks = () =>
+    [...container.querySelectorAll('[role="img"][aria-label]')].map((mark) =>
+      mark.getAttribute('aria-label')
+    );
+  const footer = () => container.querySelector(`#${button().getAttribute('aria-describedby')}`)!;
   const field = (label: string) =>
     container.querySelector<HTMLInputElement | HTMLTextAreaElement>(`[aria-label="${label}"]`)!;
   const type = (label: string, text: string) =>
@@ -75,7 +80,7 @@ describe('Schedule editor', () => {
     render();
     expect(container.querySelector('input[type="checkbox"]')).toBeNull();
     expect(button().disabled).toBe(false);
-    expect(requirements().textContent).toBe('');
+    expect(marks()).toEqual([]);
     submit();
     expect(props.onSave).toHaveBeenCalledWith(props.initial);
   });
@@ -88,40 +93,65 @@ describe('Schedule editor', () => {
     expect(container.querySelectorAll('label')).toHaveLength(0);
   });
 
-  it('keeps permission and machine blockers visible and guards submission', () => {
-    props.saveBlockers = [en['schedules.choosePermission'], en['schedules.upgrade']];
+  it('has no time zone picker; the rule is read on the target machine clock', () => {
+    props.timeZone = 'America/New_York';
+    props.clockName = 'Studio';
     render();
+    expect(container.querySelector('[aria-label="Time zone"]')).toBeNull();
+    expect(container.textContent).toContain('Studio');
     submit();
-    expect(requirements().textContent).toContain(en['schedules.choosePermission']);
-    expect(requirements().textContent).toContain(en['schedules.upgrade']);
-    expect(button().disabled).toBe(true);
-    expect(button().getAttribute('aria-describedby')).toBe(requirements().id);
+    // Same wall time, moved onto the machine that runs it.
+    expect(vi.mocked(props.onSave).mock.calls[0]![0].trigger).toEqual({
+      kind: 'cron',
+      expression: '0 9 * * *',
+      timeZone: 'America/New_York',
+    });
+  });
+
+  it('marks unfinished fields only once the person tries to save, and focuses the first', () => {
+    props.initial = { ...props.initial, title: '', prompt: '' };
+    render();
+    expect(marks()).toEqual([]);
+    submit();
     expect(props.onSave).not.toHaveBeenCalled();
-    props.saveBlockers = [];
+    expect(marks()).toEqual([en['schedules.requireName'], en['schedules.requirePrompt']]);
+    expect(document.activeElement).toBe(field(en['schedules.name']));
+    // Nothing is listed at the bottom; the footer only points at the marks.
+    expect(footer().textContent).toBe(en['schedules.fixMarked']);
+    type(en['schedules.name'], 'Daily review');
+    expect(marks()).toEqual([en['schedules.requirePrompt']]);
+  });
+
+  it('marks a real conflict at once and keeps it off the footer', () => {
+    props.runBar = ({ revealMissing }) => (
+      <span data-testid="run-bar">{revealMissing ? 'revealed' : 'quiet'}</span>
+    );
+    props.issues = [{ field: 'agent', kind: 'invalid', message: en['schedules.choosePermission'] }];
     render();
     expect(button().disabled).toBe(false);
-    expect(requirements().textContent).toBe('');
+    expect(footer().textContent).toBe('');
+    submit();
+    expect(props.onSave).not.toHaveBeenCalled();
+    // The run bar owns the Agent mark and is told the person tried to save.
+    expect(container.querySelector('[data-testid="run-bar"]')!.textContent).toBe('revealed');
   });
 
-  it('explains empty content without requiring a submit', () => {
+  it('puts a reason that belongs to no control beside Save and blocks it', () => {
+    props.issues = [{ field: 'form', kind: 'invalid', message: en['schedules.workspaceNotReady'] }];
     render();
-    type(en['schedules.name'], ' ');
-    type(en['schedules.prompt'], '');
-    submit();
-    expect(requirements().textContent).toContain(en['schedules.requireName']);
-    expect(requirements().textContent).toContain(en['schedules.requirePrompt']);
     expect(button().disabled).toBe(true);
+    expect(footer().textContent).toContain(en['schedules.workspaceNotReady']);
+    submit();
     expect(props.onSave).not.toHaveBeenCalled();
   });
 
-  it('rejects an invalid custom expression it was opened with', () => {
+  it('rejects an invalid expression it was opened with', () => {
     props.initial = {
       ...props.initial,
       trigger: { kind: 'cron', expression: 'invalid', timeZone: 'Asia/Shanghai' },
     };
     render();
-    expect(requirements().textContent).toContain(en['schedules.invalidTime']);
-    expect(button().disabled).toBe(true);
+    expect(container.textContent).toContain(en['schedules.invalidTime']);
     submit();
     expect(props.onSave).not.toHaveBeenCalled();
   });
@@ -162,7 +192,10 @@ describe('Time rules a person opens', () => {
    * A fresh root per case: `initial` seeds uncontrolled editor state, so
    * re-rendering the same root would keep the previous rule's picker.
    */
-  const open = (trigger: ComponentProps<typeof ScheduleForm>['initial']['trigger']) => {
+  const open = (
+    trigger: ComponentProps<typeof ScheduleForm>['initial']['trigger'],
+    timeZone = 'Asia/Shanghai'
+  ) => {
     act(() => root.unmount());
     container.replaceChildren();
     root = createRoot(container);
@@ -172,6 +205,7 @@ describe('Time rules a person opens', () => {
           now={NOW}
           saving={false}
           onSave={onSave}
+          timeZone={timeZone}
           initial={{
             title: 'Daily review',
             prompt: 'Review recent changes.',
@@ -196,7 +230,6 @@ describe('Time rules a person opens', () => {
     open({ kind: 'cron', expression: '0 9 * * MON-FRI', timeZone: 'Asia/Shanghai' });
     expect(repeatValue()).toBe(en['schedules.repeat.weekdays']);
     expect(container.querySelector(`[aria-label="${en['schedules.expression']}"]`)).toBeNull();
-    expect(container.textContent).toContain('Asia/Shanghai');
   });
 
   it('opens each named rule under its own name', () => {
@@ -328,8 +361,11 @@ describe('Time rules a person opens', () => {
     expect(onSave.mock.calls[0]![0].prompt).toBe('Different prompt.');
   });
 
-  it('shows the preview in the rule’s own zone', () => {
-    open({ kind: 'cron', expression: '0 9 * * *', timeZone: 'America/New_York' });
+  it('shows the preview on the machine’s clock', () => {
+    open(
+      { kind: 'cron', expression: '0 9 * * *', timeZone: 'America/New_York' },
+      'America/New_York'
+    );
     const preview = container.querySelector('[aria-live="polite"]')!;
     expect(preview.textContent).toContain(en['schedules.nextRuns']);
     expect(preview.textContent).toContain('America/New_York');

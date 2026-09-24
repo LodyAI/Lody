@@ -9,6 +9,7 @@ import {
   getServerNow,
   resolveSessionConversationConfig,
   ScheduleRepository,
+  getDeviceTimeZone,
   scheduleProposalRuleToRecurrence,
   scheduleProposalRuleToTrigger,
   getSessionRoomId,
@@ -107,9 +108,14 @@ export function ScheduleProposalNotice({
       }),
     [agents, meta, roles, runConfig, session]
   );
-  const recurrence = useMemo(() => scheduleProposalRuleToRecurrence(meta.rule), [meta.rule]);
   const target = resolved.ok ? resolved.target : null;
   const machine = target ? machines.get(target.agentConfig.machineId) : undefined;
+  // A rule the agent proposed without a zone runs on the target machine's clock.
+  const machineTimeZone = machine?.timeZone ?? getDeviceTimeZone();
+  const recurrence = useMemo(
+    () => scheduleProposalRuleToRecurrence(meta.rule, machineTimeZone),
+    [machineTimeZone, meta.rule]
+  );
   const machineLocalProjectIds = useMemo(
     () =>
       new Set(
@@ -192,6 +198,7 @@ export function ScheduleProposalNotice({
           roles,
         });
         if (!final.ok) return;
+        const latestMachine = machines.get(final.target.agentConfig.machineId);
         const now = getServerNow();
         // The proposal id is the schedule id, so a double click or a retried
         // write cannot create two schedules.
@@ -209,7 +216,11 @@ export function ScheduleProposalNotice({
               draft: {
                 title: meta.title,
                 prompt: meta.prompt,
-                trigger: scheduleProposalRuleToTrigger(meta.rule, now),
+                trigger: scheduleProposalRuleToTrigger(
+                  meta.rule,
+                  now,
+                  latestMachine?.timeZone ?? getDeviceTimeZone()
+                ),
                 machineId: final.target.agentConfig.machineId,
                 agent: final.target.agent,
                 ...(final.target.project ? { project: final.target.project } : {}),
@@ -228,7 +239,7 @@ export function ScheduleProposalNotice({
         setBusy(false);
       }
     })();
-  }, [agents, meta, roles, runtime, session, sessionId, target, user, writeOutcome]);
+  }, [agents, machines, meta, roles, runtime, session, sessionId, target, user, writeOutcome]);
 
   const dismiss = useCallback(() => {
     void (async () => {

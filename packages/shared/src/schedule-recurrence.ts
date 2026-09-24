@@ -432,3 +432,71 @@ export function scheduleProposalRuleToTrigger(
   const recurrence = scheduleProposalRuleToRecurrence(rule, deviceTimeZone);
   return recurrence ? recurrenceToTrigger(recurrence, now) : { kind: 'manual' };
 }
+
+/**
+ * The same rule read on another machine's clock.
+ *
+ * Schedules run on the owning machine, so a wall-clock rule is authored in that
+ * machine's zone rather than the viewer's — there is no zone picker. Steps take
+ * the zone too (`0 *​/6` aligns to that clock). `once` is an instant and an
+ * `unsupported` rule is kept verbatim, so neither changes.
+ */
+export function withScheduleRecurrenceTimeZone(
+  recurrence: ScheduleRecurrence,
+  timeZone: string
+): ScheduleRecurrence {
+  if (recurrence.kind === 'once' || recurrence.kind === 'unsupported') return recurrence;
+  return recurrence.timeZone === timeZone ? recurrence : { ...recurrence, timeZone };
+}
+
+const wallClockParts = (ms: number, timeZone: string) => {
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat('en-US', {
+      timeZone,
+      hourCycle: 'h23',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    })
+      .formatToParts(ms)
+      .map((part) => [part.type, part.value])
+  ) as Record<string, string>;
+  return {
+    year: Number(parts.year),
+    month: Number(parts.month),
+    day: Number(parts.day),
+    hour: Number(parts.hour),
+    minute: Number(parts.minute),
+    second: Number(parts.second),
+  };
+};
+
+/** `YYYY-MM-DDTHH:mm` as the wall clock in `timeZone` shows `ms`. */
+export function instantToZonedLocalInput(ms: number, timeZone: string): string {
+  const p = wallClockParts(ms, timeZone);
+  const pad = (value: number) => String(value).padStart(2, '0');
+  return `${p.year}-${pad(p.month)}-${pad(p.day)}T${pad(p.hour)}:${pad(p.minute)}`;
+}
+
+/**
+ * The instant a `YYYY-MM-DDTHH:mm` wall time in `timeZone` names, or `null` for
+ * malformed input. A time skipped by a DST gap resolves forward, the same as a
+ * browser's local `datetime-local`.
+ */
+export function zonedLocalInputToInstant(value: string, timeZone: string): number | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/.exec(value);
+  if (!match) return null;
+  const [, y, mo, d, h, mi] = match.map(Number) as [number, number, number, number, number, number];
+  const asUtc = Date.UTC(y, mo - 1, d, h, mi);
+  const offsetAt = (ms: number) => {
+    const p = wallClockParts(ms, timeZone);
+    return Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second) - ms;
+  };
+  // Two passes settle the offset on either side of a DST transition.
+  let instant = asUtc - offsetAt(asUtc);
+  instant = asUtc - offsetAt(instant);
+  return Number.isFinite(instant) ? instant : null;
+}

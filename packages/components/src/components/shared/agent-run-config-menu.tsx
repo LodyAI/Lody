@@ -180,6 +180,8 @@ export type AgentRunConfigMenuProps = {
   disabled?: boolean;
   /** Presence badge on the property-row trigger. */
   trailing?: ReactNode;
+  /** Extra trigger classes, e.g. the warning ink when this choice blocks saving. */
+  triggerClassName?: string;
 };
 
 /**
@@ -193,6 +195,7 @@ export function AgentRunConfigMenu({
   onChange,
   disabled = false,
   trailing,
+  triggerClassName,
   menuClassName,
   menuStyle,
   requireExplicitPermission = false,
@@ -476,11 +479,14 @@ export function AgentRunConfigMenu({
         <button
           type="button"
           disabled={disabled}
+          aria-label={t('schedules.agent', 'Agent')}
           className={cn(
-            'flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-[1em] font-normal transition-colors',
+            // Composer-style ghost trigger: one line, muted until it names an
+            // Agent, sized by its content so it sits in a row of other pills.
+            'flex h-7 min-w-0 max-w-full shrink-0 items-center gap-1.5 rounded-md px-2 text-left text-[0.9em] font-normal transition-colors',
             'hover:bg-foreground/[0.05] data-[state=open]:bg-foreground/[0.05] dark:hover:bg-white/[0.08] dark:data-[state=open]:bg-white/[0.08]',
             'disabled:cursor-not-allowed disabled:opacity-50',
-            agentLabel ? 'text-foreground' : 'text-muted-foreground'
+            triggerClassName
           )}
         >
           {selectedConfig ? (
@@ -489,19 +495,24 @@ export function AgentRunConfigMenu({
               agentType={selectedConfig.agentType}
               brandId={selectedConfig.brandId}
               env={selectedConfig.env}
-              className="h-3.5 w-3.5 shrink-0 opacity-80"
+              className="h-3.5 w-3.5 shrink-0"
             />
           ) : (
-            <Bot className="h-3.5 w-3.5 shrink-0 opacity-70" />
+            <Bot className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
           )}
-          <span className="min-w-0 flex-1 truncate">
-            {agentLabel ?? t('agentRunConfig.chooseAgent', 'Choose agent')}
+          <span className="min-w-0 truncate">
+            <span className={agentLabel ? 'text-foreground' : 'text-muted-foreground'}>
+              {agentLabel ?? t('agentRunConfig.chooseAgent', 'Choose agent')}
+            </span>
             {triggerSecondary ? (
               <span className="text-muted-foreground"> · {triggerSecondary}</span>
             ) : null}
           </span>
+          <ChevronDown
+            className="size-3.5 shrink-0 text-muted-foreground opacity-60"
+            aria-hidden="true"
+          />
           {trailing}
-          <ChevronDown className="size-3.5 shrink-0 opacity-50" aria-hidden="true" />
         </button>
       </DropdownMenuTrigger>
 

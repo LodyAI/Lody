@@ -1,4 +1,4 @@
-import { useId, useMemo, useState, type ReactNode } from 'react';
+import { useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   AlertCircle,
@@ -14,9 +14,11 @@ import {
 import {
   applyScheduleRecurrence,
   defaultScheduleRecurrence,
+  getDeviceTimeZone,
   getServerNow,
   previewSchedule,
   triggerToRecurrence,
+  withScheduleRecurrenceTimeZone,
   type ScheduleRecurrence,
   type ScheduleRegistryRow,
   type ScheduleRuntimeRow,
@@ -38,6 +40,8 @@ import {
   type ScheduleStatus,
 } from './schedule-format';
 import { ScheduleSection } from './schedule-property-row';
+import { FieldIssueMark } from './schedule-run-bar';
+import type { ScheduleSaveIssue } from './schedule-save-blockers';
 import { ScheduleRecurrenceEditor } from './schedule-recurrence-editor';
 
 export function matchingScheduleRuntime(row: ScheduleRegistryRow, runtimes: ScheduleRuntimeRow[]) {
@@ -406,37 +410,68 @@ export type ScheduleFormValue = {
 
 type TriggerMode = 'timed' | 'manual';
 
+/** State the run bar needs to decide which problem marks to show. */
+export type ScheduleRunBarState = {
+  /** The person tried to save, so unfinished choices are marked too. */
+  revealMissing: boolean;
+};
+
 /**
  * The schedule editor.
  *
- * Three questions in the order a person answers them: what to run, when, and
- * where the result goes. Title and prompt carry their guidance in the
- * placeholder rather than in a label above an empty box — the accessible name
- * stays on the field. There is no confirmation checkbox and no "advanced"
- * drawer: misfire and overlap keep sensible defaults, and pressing Save with a
- * permission mode and a machine already chosen IS the decision.
+ * Laid out like the composer, because it is one: a box holding the name, the
+ * prompt and, along its bottom edge, the run bar — where it runs, with which
+ * Agent, in which project. The time rule follows in its own card. Title and
+ * prompt carry their guidance in the placeholder, and the accessible name
+ * stays on the field.
+ *
+ * Nothing is listed at the bottom. Each problem is an exclamation mark next to
+ * the control that fixes it; a missing value is marked once the person tries
+ * to save, a real conflict at once. Only a reason that belongs to no control
+ * (read-only, workspace still loading) sits beside Save.
+ *
+ * Wall times are read on the target machine's clock (`timeZone`); there is no
+ * zone picker.
  */
 export function ScheduleForm({
   initial,
-  runConfig,
-  saveBlockers = [],
+  timeZone = getDeviceTimeZone(),
+  clockName,
+  runBar,
+  runNote,
+  issues = [],
   saving,
   error,
+  autoFocus,
+  revealIssues = false,
   now = getServerNow(),
   onSave,
 }: {
   initial: ScheduleFormValue;
-  /** Destination / Agent / Project rows, owned by the workspace container. */
-  runConfig?: ReactNode;
-  saveBlockers?: string[];
+  /** IANA zone of the machine that runs the schedule. */
+  timeZone?: string;
+  /** That machine's name, for "Next runs … (MacBook Pro time)". */
+  clockName?: string;
+  /** Destination / Agent / Project pills, owned by the workspace container. */
+  runBar?: (state: ScheduleRunBarState) => ReactNode;
+  /** One muted line under the box: what the current run choice means. */
+  runNote?: ReactNode;
+  issues?: readonly ScheduleSaveIssue[];
   saving: boolean;
   error?: string;
+  /** Focus the name when the editor opens (a new schedule). */
+  autoFocus?: boolean;
+  /** Start with unfinished choices marked, as after a save attempt. */
+  revealIssues?: boolean;
   /** Injected so previews and tests are deterministic. */
   now?: number;
   onSave: (value: ScheduleFormValue) => void;
 }) {
   const { t, i18n } = useTranslation();
   const [value, setValue] = useState(initial);
+  const [attempted, setAttempted] = useState(revealIssues);
+  const titleRef = useRef<HTMLInputElement>(null);
+  const promptRef = useRef<HTMLTextAreaElement>(null);
   const [mode, setMode] = useState<TriggerMode>(
     initial.trigger.kind === 'manual' ? 'manual' : 'timed'
   );
@@ -444,193 +479,226 @@ export function ScheduleForm({
   // back does not reset a carefully chosen time.
   const [recurrence, setRecurrence] = useState<ScheduleRecurrence>(() =>
     initial.trigger.kind === 'manual'
-      ? defaultScheduleRecurrence()
+      ? defaultScheduleRecurrence(timeZone)
       : triggerToRecurrence(initial.trigger)
   );
+  // The rule always runs on the target machine's clock.
+  const onMachineClock = withScheduleRecurrenceTimeZone(recurrence, timeZone);
 
   // Reuse the stored trigger verbatim while the rule is untouched, so opening
   // and saving an existing schedule cannot rewrite its expression.
   const resolved = useMemo(() => {
     if (mode === 'manual') return { trigger: { kind: 'manual' } as ScheduleTrigger, times: [] };
     try {
-      const trigger = applyScheduleRecurrence(recurrence, now, initial.trigger);
+      const trigger = applyScheduleRecurrence(onMachineClock, now, initial.trigger);
       return { trigger, times: previewSchedule(trigger, 0, now) };
     } catch {
       return {
         error:
-          recurrence.kind === 'weekly' && recurrence.weekdays.length === 0
+          onMachineClock.kind === 'weekly' && onMachineClock.weekdays.length === 0
             ? t('schedules.requireWeekday', 'Choose at least one day of the week.')
-            : recurrence.kind === 'monthly' && recurrence.days.length === 0
+            : onMachineClock.kind === 'monthly' && onMachineClock.days.length === 0
               ? t('schedules.requireMonthDay', 'Choose at least one day of the month.')
               : t('schedules.invalidTime', 'Check the time rule and time zone.'),
       };
     }
-  }, [initial.trigger, mode, now, recurrence, t]);
+  }, [initial.trigger, mode, now, onMachineClock, t]);
 
-  const requirementsId = useId();
-  const blockers = [
-    ...(!value.title.trim() ? [t('schedules.requireName', 'Enter a schedule name.')] : []),
-    ...(!value.prompt.trim()
-      ? [t('schedules.requirePrompt', 'Describe what the Agent should do.')]
-      : []),
-    ...(resolved.error ? [resolved.error] : []),
-    ...saveBlockers,
-  ];
-  const canSave = !saving && blockers.length === 0;
+  const titleMissing = !value.title.trim();
+  const promptMissing = !value.prompt.trim();
+  const formIssues = issues.filter((issue) => issue.field === 'form');
+  const blocked = titleMissing || promptMissing || !!resolved.error || issues.length > 0;
   const zone = triggerTimeZone(resolved.trigger ?? initial.trigger);
+  const noteId = useId();
 
   return (
-    <form
-      // Light themes lift the grouped cards to the popover fill, like settings.
-      data-settings-surface=""
-      className="mx-auto flex w-full max-w-2xl flex-col gap-5 px-4 py-5 sm:px-6"
-      onSubmit={(event) => {
-        event.preventDefault();
-        if (canSave && resolved.trigger) onSave({ ...value, trigger: resolved.trigger });
-      }}
-    >
-      <div className="flex flex-col gap-1">
-        <Input
-          required
-          maxLength={200}
-          aria-label={t('schedules.name', 'Name')}
-          placeholder={t('schedules.namePlaceholder', 'Name this scheduled task')}
-          className="h-auto border-0 bg-transparent px-3 py-0.5 text-[1.1em] font-normal shadow-none placeholder:font-normal placeholder:text-muted-foreground/70 focus-visible:ring-0"
-          value={value.title}
-          onChange={(event) => setValue({ ...value, title: event.target.value })}
-        />
-        <Textarea
-          required
-          rows={3}
-          aria-label={t('schedules.prompt', 'What should the Agent do?')}
-          placeholder={t(
-            'schedules.promptPlaceholder',
-            'What should the agent do on every run? For example: review yesterday’s commits and summarise anything that looks risky.'
-          )}
-          className="min-h-16 resize-y border-0 bg-transparent px-3 text-[0.9em] leading-relaxed shadow-none placeholder:text-muted-foreground/70 focus-visible:ring-0"
-          value={value.prompt}
-          onChange={(event) => setValue({ ...value, prompt: event.target.value })}
-        />
-      </div>
-
-      <ScheduleSection
-        title={t('schedules.trigger.label', 'Trigger')}
-        action={
-          <div
-            role="radiogroup"
-            aria-label={t('schedules.trigger.label', 'Trigger')}
-            className="flex rounded-md bg-foreground/[0.05] p-0.5 dark:bg-white/[0.06]"
-          >
-            {(['timed', 'manual'] as const).map((option) => (
-              <button
-                key={option}
-                type="button"
-                role="radio"
-                aria-checked={mode === option}
-                onClick={() => setMode(option)}
-                className={cn(
-                  'rounded-[5px] px-2 py-0.5 text-[0.8em] font-normal transition-colors',
-                  mode === option
-                    ? 'bg-background text-foreground shadow-[0_0_0_0.5px_hsl(var(--border)),0_1px_1px_rgba(0,0,0,0.04)] dark:bg-white/[0.12] dark:shadow-none'
-                    : 'text-muted-foreground hover:text-foreground'
-                )}
-              >
-                {option === 'timed'
-                  ? t('schedules.trigger.timed', 'On a schedule')
-                  : t('schedules.trigger.manual', 'Manual')}
-              </button>
-            ))}
-          </div>
-        }
+    // Own the tooltip context: every problem mark explains itself in one.
+    <TooltipProvider>
+      <form
+        // Light themes lift the grouped cards to the popover fill, like settings.
+        data-settings-surface=""
+        noValidate
+        className="mx-auto flex w-full max-w-2xl flex-col gap-5 px-4 py-5 sm:px-6"
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (saving) return;
+          if (blocked) {
+            setAttempted(true);
+            if (titleMissing) titleRef.current?.focus();
+            else if (promptMissing) promptRef.current?.focus();
+            return;
+          }
+          if (resolved.trigger) onSave({ ...value, trigger: resolved.trigger });
+        }}
       >
-        {mode === 'manual' ? (
-          <p className="px-3 py-2.5 text-[0.9em] text-muted-foreground">
-            {t(
-              'schedules.trigger.manualHelp',
-              'Runs only when you press Run. Keep the prompt and target ready for whenever you need it.'
+        <div className="flex flex-col gap-1.5">
+          <div
+            className={cn(
+              'flex flex-col rounded-xl border border-foreground/[0.08] bg-card transition-colors',
+              'focus-within:border-foreground/[0.16] dark:border-white/[0.08] dark:bg-foreground/[0.03] dark:focus-within:border-white/[0.16]'
             )}
-          </p>
-        ) : (
-          <>
-            <ScheduleRecurrenceEditor value={recurrence} onChange={setRecurrence} now={now} />
-            <div
-              className="flex min-h-11 flex-wrap items-center gap-x-2 px-3 py-2 text-[0.8em] text-muted-foreground"
-              aria-live="polite"
-              aria-atomic="true"
-            >
-              {resolved.error ? (
-                <span className="text-status-warning" role="alert">
-                  {resolved.error}
-                </span>
-              ) : resolved.times?.length ? (
-                <>
-                  <span className="text-foreground/80">{t('schedules.nextRuns', 'Next runs')}</span>
-                  <span>
-                    {resolved.times
-                      .slice(0, 3)
-                      .map((at) => formatUpcoming(at, zone, now, i18n.language))
-                      .join(' · ')}
-                  </span>
-                  <span className="opacity-70">{zone}</span>
-                </>
-              ) : (
-                t('schedules.noFuture', 'No future run under this rule.')
-              )}
+          >
+            <div className="flex items-center gap-2 px-3 pt-2.5">
+              <input
+                ref={titleRef}
+                required
+                maxLength={200}
+                // eslint-disable-next-line jsx-a11y/no-autofocus -- a new schedule starts at its name
+                autoFocus={autoFocus}
+                aria-label={t('schedules.name', 'Name')}
+                aria-invalid={attempted && titleMissing ? true : undefined}
+                placeholder={t('schedules.namePlaceholder', 'Name this scheduled task')}
+                className="min-w-0 flex-1 bg-transparent text-[1.05em] font-normal text-foreground outline-hidden placeholder:text-muted-foreground/60 focus-visible:shadow-none"
+                value={value.title}
+                onChange={(event) => setValue({ ...value, title: event.target.value })}
+              />
+              {attempted && titleMissing ? (
+                <FieldIssueMark messages={[t('schedules.requireName', 'Enter a schedule name.')]} />
+              ) : null}
             </div>
-          </>
-        )}
-      </ScheduleSection>
-
-      {runConfig ? (
-        <ScheduleSection title={t('schedules.whereItRuns', 'Where it runs')}>
-          {runConfig}
-        </ScheduleSection>
-      ) : null}
-
-      {error ? (
-        <p className="px-3 text-[1em] text-destructive" role="alert">
-          {error}
-        </p>
-      ) : null}
-
-      <div className="flex flex-col gap-3 border-t-[0.5px] border-border pt-4 sm:flex-row sm:items-end sm:justify-between">
-        <div
-          id={requirementsId}
-          aria-live="polite"
-          aria-atomic="true"
-          className="min-w-0 flex-1 px-3"
-        >
-          {blockers.length > 0 ? (
-            <ul className="space-y-1">
-              {blockers.map((reason, index) => (
-                <li
-                  key={reason}
-                  className="flex items-start gap-1.5 text-[0.8em] text-muted-foreground"
-                >
-                  <AlertCircle
-                    className={cn(
-                      'mt-px size-3.5 shrink-0 text-status-warning',
-                      index > 0 && 'invisible'
-                    )}
-                    aria-hidden="true"
-                  />
-                  <span>{reason}</span>
-                </li>
-              ))}
-            </ul>
+            <div className="flex items-start gap-2 px-3 pb-1 pt-1.5">
+              <Textarea
+                ref={promptRef}
+                required
+                rows={3}
+                aria-label={t('schedules.prompt', 'What should the Agent do?')}
+                aria-invalid={attempted && promptMissing ? true : undefined}
+                placeholder={t(
+                  'schedules.promptPlaceholder',
+                  'What should the agent do on every run? For example: review yesterday’s commits and summarise anything that looks risky.'
+                )}
+                className="min-h-20 flex-1 resize-y rounded-none border-0 bg-transparent p-0 text-[0.95em] leading-relaxed text-foreground shadow-none placeholder:text-muted-foreground/60 focus-visible:shadow-none focus-visible:ring-0 dark:bg-transparent"
+                value={value.prompt}
+                onChange={(event) => setValue({ ...value, prompt: event.target.value })}
+              />
+              {attempted && promptMissing ? (
+                <FieldIssueMark
+                  className="mt-0.5"
+                  messages={[t('schedules.requirePrompt', 'Describe what the Agent should do.')]}
+                />
+              ) : null}
+            </div>
+            {runBar ? (
+              <div className="flex flex-wrap items-center gap-0.5 px-1.5 pb-1.5">
+                {runBar({ revealMissing: attempted })}
+              </div>
+            ) : null}
+          </div>
+          {runNote ? (
+            <p className="px-3 text-[0.8em] leading-snug text-muted-foreground">{runNote}</p>
           ) : null}
         </div>
-        <Button
-          type="submit"
-          size="sm"
-          className="h-8 shrink-0 self-start sm:self-auto"
-          disabled={!canSave}
-          aria-describedby={blockers.length ? requirementsId : undefined}
+
+        <ScheduleSection
+          title={t('schedules.trigger.label', 'Trigger')}
+          action={
+            <div
+              role="radiogroup"
+              aria-label={t('schedules.trigger.label', 'Trigger')}
+              className="flex rounded-md bg-foreground/[0.05] p-0.5 dark:bg-white/[0.06]"
+            >
+              {(['timed', 'manual'] as const).map((option) => (
+                <button
+                  key={option}
+                  type="button"
+                  role="radio"
+                  aria-checked={mode === option}
+                  onClick={() => setMode(option)}
+                  className={cn(
+                    'rounded-[5px] px-2 py-0.5 text-[0.8em] font-normal transition-colors',
+                    mode === option
+                      ? 'bg-background text-foreground shadow-[0_0_0_0.5px_hsl(var(--border)),0_1px_1px_rgba(0,0,0,0.04)] dark:bg-white/[0.12] dark:shadow-none'
+                      : 'text-muted-foreground hover:text-foreground'
+                  )}
+                >
+                  {option === 'timed'
+                    ? t('schedules.trigger.timed', 'On a schedule')
+                    : t('schedules.trigger.manual', 'Manual')}
+                </button>
+              ))}
+            </div>
+          }
         >
-          {saving ? t('schedules.saving', 'Saving…') : t('schedules.save', 'Save schedule')}
-        </Button>
-      </div>
-    </form>
+          {mode === 'manual' ? (
+            <p className="flex min-h-11 items-center px-3 py-2 text-[0.9em] text-muted-foreground">
+              {t(
+                'schedules.trigger.manualHelp',
+                'Runs only when you press Run. Keep the prompt and target ready for whenever you need it.'
+              )}
+            </p>
+          ) : (
+            <>
+              <ScheduleRecurrenceEditor
+                value={onMachineClock}
+                onChange={setRecurrence}
+                now={now}
+                timeZone={timeZone}
+              />
+              <div
+                className="flex min-h-11 flex-wrap items-center gap-x-2 gap-y-0.5 px-3 py-2 text-[0.85em] text-muted-foreground"
+                aria-live="polite"
+                aria-atomic="true"
+              >
+                {resolved.error ? (
+                  <span className="flex items-center gap-1.5 text-status-warning" role="alert">
+                    <AlertCircle className="size-3.5 shrink-0" aria-hidden="true" />
+                    {resolved.error}
+                  </span>
+                ) : resolved.times?.length ? (
+                  <>
+                    <span>{t('schedules.nextRuns', 'Next runs')}</span>
+                    <span className="text-foreground">
+                      {resolved.times
+                        .slice(0, 3)
+                        .map((at) => formatUpcoming(at, zone, now, i18n.language))
+                        .join(' · ')}
+                    </span>
+                    <span title={zone}>
+                      {clockName
+                        ? t('schedules.machineClock', '{{machine}} time', { machine: clockName })
+                        : zone}
+                    </span>
+                  </>
+                ) : (
+                  t('schedules.noFuture', 'No future run under this rule.')
+                )}
+              </div>
+            </>
+          )}
+        </ScheduleSection>
+
+        <div className="flex flex-col gap-2 border-t-[0.5px] border-border pt-4 sm:flex-row sm:items-center sm:justify-between">
+          <div id={noteId} aria-live="polite" className="min-w-0 flex-1 px-3">
+            {error ? (
+              <p className="text-[0.85em] text-destructive" role="alert">
+                {error}
+              </p>
+            ) : formIssues.length ? (
+              <p className="flex items-start gap-1.5 text-[0.85em] text-muted-foreground">
+                <AlertCircle
+                  className="mt-0.5 size-3.5 shrink-0 text-status-warning"
+                  aria-hidden="true"
+                />
+                <span>{formIssues.map((issue) => issue.message).join(' ')}</span>
+              </p>
+            ) : attempted && blocked ? (
+              <p className="text-[0.85em] text-muted-foreground">
+                {t('schedules.fixMarked', 'Fix the marked items to save.')}
+              </p>
+            ) : null}
+          </div>
+          <Button
+            type="submit"
+            size="sm"
+            className="h-8 shrink-0 self-end sm:self-auto"
+            disabled={saving || formIssues.length > 0}
+            aria-describedby={noteId}
+          >
+            {saving ? t('schedules.saving', 'Saving…') : t('schedules.save', 'Save schedule')}
+          </Button>
+        </div>
+      </form>
+    </TooltipProvider>
   );
 }
 

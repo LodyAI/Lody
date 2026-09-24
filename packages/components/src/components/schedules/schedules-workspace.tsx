@@ -18,6 +18,7 @@ import { AlertTriangle, ArrowLeft, Pause, Play, Trash2, X, Zap } from 'lucide-re
 import { useCloudQuery } from '@lody/platform/react';
 import {
   DEFAULT_SCHEDULE_DESTINATION,
+  getDeviceTimeZone,
   getServerNow,
   machineSupportsSchedulesProtocol,
   scheduleOwnSessionId,
@@ -56,7 +57,7 @@ import { AgentRunConfigMenu } from '@/components/shared/agent-run-config-menu';
 import { ProjectRefSelector } from '@/components/shared/project-ref-selector';
 import { Button } from '@/ui/button';
 import { cn } from '@/lib/utils';
-import { Switch } from '@/ui/switch';
+import { WorktreeCheckboxPill } from '@/components/shared/workdir-mode-selector';
 import {
   ScheduleForm,
   ScheduleListView,
@@ -64,9 +65,16 @@ import {
   newScheduleFormValue,
   type ScheduleFormValue,
 } from './schedule-view';
-import { PropertyRow, PropertyRowWide, scheduleCardClass } from './schedule-property-row';
-import { collectScheduleSaveBlockers } from './schedule-save-blockers';
-import { ScheduleDestinationRows, type PickableSession } from './schedule-destination-rows';
+import { scheduleCardClass } from './schedule-property-row';
+import { collectScheduleSaveIssues, type ScheduleIssueField } from './schedule-save-blockers';
+import {
+  RunBarItem,
+  ScheduleChatPill,
+  ScheduleDestinationPill,
+  runPillIssueClass,
+  runWorktreePillClass,
+  type PickableSession,
+} from './schedule-run-bar';
 
 export function SchedulesWorkspace({ scheduleId }: { scheduleId?: string }) {
   const enabled = useAtomValue(schedulesFeatureEnabledAtom);
@@ -517,7 +525,7 @@ function ScheduleEditor({
       ),
     [local.projects, selected?.machineId]
   );
-  const saveBlockers = collectScheduleSaveBlockers(
+  const issues = collectScheduleSaveIssues(
     {
       disabledReason,
       workspaceReady: !!runtime,
@@ -553,7 +561,7 @@ function ScheduleEditor({
     [document]
   );
   const save = async (value: ScheduleFormValue) => {
-    if (saving || saveBlockers.length || !runtime || !user || !selected || !agent) return;
+    if (saving || issues.length || !runtime || !user || !selected || !agent) return;
     setSaving(true);
     setError(undefined);
     try {
@@ -591,104 +599,154 @@ function ScheduleEditor({
       setSaving(false);
     }
   };
+  // A mark shows next to the control that fixes it; an unfinished choice only
+  // once the person tried to save.
+  const issuesFor = (field: ScheduleIssueField, revealMissing: boolean) =>
+    issues
+      .filter((issue) => issue.field === field && (issue.kind === 'invalid' || revealMissing))
+      .map((issue) => issue.message);
+  const ownSession =
+    destination.kind === 'own_session' && destinationMeta ? describeSession(destinationMeta) : null;
+  const pickedSession =
+    destination.kind === 'existing_session' && destinationMeta
+      ? describeSession(destinationMeta)
+      : null;
+  // One line saying what the current run choice means — the only prose left
+  // from what used to be four rows.
+  const runNote =
+    destination.kind === 'own_session'
+      ? ownSession
+        ? t(
+            'schedules.destination.ownSessionLockedHint',
+            'The Agent is now this chat’s Agent. Start a new chat to change it.'
+          )
+        : t(
+            'schedules.destination.ownSessionPendingHint',
+            'Created on the first run; every later run continues it.'
+          )
+      : destination.kind === 'existing_session'
+        ? pickedSession
+          ? t(
+              'schedules.destination.existingSessionHint',
+              'Runs use this chat’s Agent and workspace.'
+            )
+          : undefined
+        : project?.kind === 'local' && !project.useWorktree
+          ? t(
+              'schedules.originalDirectory',
+              'Runs share the original directory. Work from other Agents may overlap here.'
+            )
+          : !project
+            ? t(
+                'schedules.chatOnlyHelp',
+                'Without a project each run is a plain chat with the Agent — no repository is checked out.'
+              )
+            : undefined;
   return (
     <ScheduleForm
       initial={initial}
       saving={saving}
       error={error}
-      saveBlockers={saveBlockers}
+      issues={issues}
+      autoFocus={!document}
+      timeZone={machine?.timeZone ?? getDeviceTimeZone()}
+      clockName={machine?.name}
+      runNote={runNote}
       onSave={(value) => void save(value)}
-      runConfig={
-        <>
-          <ScheduleDestinationRows
-            value={destination}
-            onChange={chooseDestination}
-            sessions={pickableSessions}
-            ownSession={
-              destination.kind === 'own_session' && destinationMeta
-                ? describeSession(destinationMeta)
-                : null
-            }
-            pickedSession={
-              destination.kind === 'existing_session' && destinationMeta
-                ? describeSession(destinationMeta)
-                : null
-            }
-            onOpenSession={onOpenSession}
-            disabled={!!disabledReason}
-          />
-          <PropertyRowWide label={t('schedules.agent', 'Agent')}>
-            <AgentRunConfigMenu
-              requireExplicitPermission
-              value={agent}
-              onChange={(next) => {
-                setAgent(next);
-                if (
-                  agents.find((a) => a.id === next.agentConfigId)?.machineId !== selected?.machineId
-                )
-                  setProject(null);
-              }}
-              disabled={!!disabledReason}
-            />
-          </PropertyRowWide>
-          {destination.kind === 'new_session' ? (
-            <PropertyRowWide label={t('schedules.project', 'Project')}>
-              <ProjectRefSelector
-                triggerVariant="property-row"
-                value={project}
-                onChange={setProject}
-                localProjects={[...local.projects.values()]
-                  .filter((entry) => entry.machineId === selected?.machineId)
-                  .map((entry) => ({
-                    key: entry.key,
-                    machineId: entry.machineId,
-                    localProjectId: entry.project.id,
-                    name: entry.project.name,
-                    rootPath: entry.project.rootPath,
-                  }))}
-                repositories={(repos ?? []).flatMap((r) =>
-                  r.repoFullName || r.fullName
-                    ? [{ fullName: (r.repoFullName ?? r.fullName)! }]
-                    : []
-                )}
-                onAddLocalProject={() => openSettings('projects')}
-                onConnectGitRepo={() => openSettings('github')}
+      runBar={({ revealMissing }) => {
+        const destinationIssues = issuesFor('destination', revealMissing);
+        const agentIssues = issuesFor('agent', revealMissing);
+        const projectIssues = issuesFor('project', revealMissing);
+        const chatHoldsIssues = destination.kind === 'existing_session';
+        return (
+          <>
+            <RunBarItem issues={chatHoldsIssues ? [] : destinationIssues}>
+              <ScheduleDestinationPill
+                value={destination}
+                onChange={chooseDestination}
+                ownSession={ownSession}
+                onOpenSession={onOpenSession}
+                issues={chatHoldsIssues ? [] : destinationIssues}
+                disabled={!!disabledReason}
               />
-            </PropertyRowWide>
-          ) : null}
-          {project?.kind === 'local' ? (
-            <PropertyRow
-              label={t('schedules.worktreeLabel', 'Isolated worktree')}
-              hint={
-                project.useWorktree
-                  ? undefined
-                  : t(
-                      'schedules.originalDirectory',
-                      'Runs share the original directory. Work from other Agents may overlap here.'
-                    )
-              }
-            >
-              <Switch
+            </RunBarItem>
+            {destination.kind === 'existing_session' ? (
+              <RunBarItem issues={destinationIssues}>
+                <ScheduleChatPill
+                  sessions={pickableSessions}
+                  value={destination.sessionId}
+                  label={pickedSession?.title}
+                  onChange={(sessionId) =>
+                    chooseDestination({ kind: 'existing_session', sessionId })
+                  }
+                  issues={destinationIssues}
+                  disabled={!!disabledReason}
+                />
+              </RunBarItem>
+            ) : null}
+            <RunBarItem issues={agentIssues}>
+              <AgentRunConfigMenu
+                requireExplicitPermission
+                value={agent}
+                triggerClassName={agentIssues.length ? runPillIssueClass : undefined}
+                onChange={(next) => {
+                  setAgent(next);
+                  if (
+                    agents.find((a) => a.id === next.agentConfigId)?.machineId !==
+                    selected?.machineId
+                  )
+                    setProject(null);
+                }}
+                disabled={!!disabledReason}
+              />
+            </RunBarItem>
+            {destination.kind === 'new_session' ? (
+              <RunBarItem issues={projectIssues}>
+                <ProjectRefSelector
+                  triggerVariant="chip"
+                  className={runProjectPillClass}
+                  value={project}
+                  onChange={setProject}
+                  localProjects={[...local.projects.values()]
+                    .filter((entry) => entry.machineId === selected?.machineId)
+                    .map((entry) => ({
+                      key: entry.key,
+                      machineId: entry.machineId,
+                      localProjectId: entry.project.id,
+                      name: entry.project.name,
+                      rootPath: entry.project.rootPath,
+                    }))}
+                  repositories={(repos ?? []).flatMap((r) =>
+                    r.repoFullName || r.fullName
+                      ? [{ fullName: (r.repoFullName ?? r.fullName)! }]
+                      : []
+                  )}
+                  onAddLocalProject={() => openSettings('projects')}
+                  onConnectGitRepo={() => openSettings('github')}
+                />
+              </RunBarItem>
+            ) : null}
+            {project?.kind === 'local' && destination.kind === 'new_session' ? (
+              <WorktreeCheckboxPill
+                className={runWorktreePillClass}
                 checked={project.useWorktree === true}
                 disabled={!!disabledReason}
                 onCheckedChange={(checked) => setProject({ ...project, useWorktree: checked })}
-                aria-label={t('schedules.worktree', 'Use an isolated Git worktree (recommended)')}
               />
-            </PropertyRow>
-          ) : null}
-          {!project && destination.kind === 'new_session' ? (
-            <p className="px-3 py-2 text-[0.8em] text-muted-foreground">
-              {t(
-                'schedules.chatOnlyHelp',
-                'Without a project each run is a plain chat with the Agent — no repository is checked out.'
-              )}
-            </p>
-          ) : null}
-        </>
-      }
+            ) : null}
+          </>
+        );
+      }}
     />
   );
 }
+
+/**
+ * The composer's project chip, flattened into the run bar: no lifted surface,
+ * the same height, ink and hover as the other pills beside it.
+ */
+const runProjectPillClass =
+  'h-7 rounded-md border-0 bg-transparent px-2 text-[0.9em] text-muted-foreground shadow-none hover:bg-foreground/[0.05] hover:text-foreground data-[state=open]:bg-foreground/[0.05] dark:bg-transparent dark:hover:bg-white/[0.08] dark:data-[state=open]:bg-white/[0.08]';
 
 function ScheduleSessionHistory({ scheduleId }: { scheduleId: string }) {
   const { t } = useTranslation();

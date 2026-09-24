@@ -4,6 +4,7 @@ import { CURRENT_MACHINE_PROTOCOL_CAPABILITIES } from '@lody/shared';
 import en from '../../../locales/en.json';
 import {
   collectScheduleSaveBlockers,
+  collectScheduleSaveIssues,
   type ScheduleSaveContext,
 } from '../src/components/schedules/schedule-save-blockers';
 
@@ -139,5 +140,31 @@ describe('sending runs into a chat', () => {
     expect(
       collectScheduleSaveBlockers(ready({ destination: { kind: 'own_session', epoch: 0 } }), t)
     ).toEqual([]);
+  });
+});
+
+describe('where each reason is marked', () => {
+  it('puts every reason next to the control that fixes it', () => {
+    const issues = collectScheduleSaveIssues(
+      ready({
+        workspaceReady: false,
+        agent: { agentConfigId: 'agent' as never },
+        project: { kind: 'local', localProjectId: 'elsewhere' as never },
+        destination: { kind: 'existing_session', sessionId: '' },
+      }),
+      t
+    );
+    expect(issues.map(({ field, kind }) => `${field}:${kind}`)).toEqual([
+      'form:invalid',
+      'agent:invalid',
+      'project:invalid',
+      'destination:missing',
+    ]);
+  });
+
+  it('treats an unchosen Agent as unfinished, not as a conflict', () => {
+    expect(collectScheduleSaveIssues(ready({ agent: null, agentConfig: null }), t)).toEqual([
+      { field: 'agent', kind: 'missing', message: en['schedules.requireAgent'] },
+    ]);
   });
 });

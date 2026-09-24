@@ -27,7 +27,7 @@ export const scheduleCardClass = cn(
  * different x and the right edge read as ragged.
  */
 export const ghostValueClass =
-  'flex h-8 last:-mr-2 last:max-w-[calc(100%+0.5rem)] min-w-0 max-w-full items-center justify-end gap-1.5 rounded-md bg-transparent px-2 text-[1em] font-normal text-foreground transition-colors hover:bg-foreground/[0.05] dark:hover:bg-white/[0.08] focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 data-[state=open]:bg-foreground/[0.05] dark:data-[state=open]:bg-white/[0.08]';
+  'flex h-8 last:-mr-2 last:max-w-[calc(100%+0.5rem)] min-w-0 max-w-full items-center justify-end gap-1.5 rounded-md bg-transparent px-2 text-[0.9em] font-normal text-foreground transition-colors hover:bg-foreground/[0.05] dark:hover:bg-white/[0.08] focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 data-[state=open]:bg-foreground/[0.05] dark:data-[state=open]:bg-white/[0.08]';
 
 /** One chevron for every menu trigger in the editor, so the right edge is one line. */
 export const scheduleChevronClass = 'size-3.5 shrink-0 opacity-50';
@@ -51,7 +51,7 @@ export function ScheduleSection({
   return (
     <section className="flex flex-col gap-1.5">
       <div className="flex min-h-7 items-center gap-2 px-3">
-        <h2 className="text-[0.75em] font-normal text-muted-foreground">{title}</h2>
+        <h2 className="text-[0.8em] font-normal text-muted-foreground">{title}</h2>
         {action ? <div className="ml-auto">{action}</div> : null}
       </div>
       <div className={scheduleCardClass}>{children}</div>
@@ -102,7 +102,7 @@ export function PropertyRow({
     >
       <span
         className={cn(
-          'min-w-0 truncate text-[1em] text-muted-foreground',
+          'min-w-0 truncate text-[0.9em] text-muted-foreground',
           align === 'start' ? 'sm:pt-1' : hint ? 'sm:pt-1.5' : undefined
         )}
       >
@@ -133,7 +133,7 @@ export function PropertyRowWide({ label, children }: { label: string; children: 
   // label and chevron end on the same line as every other row.
   return (
     <div className="flex min-h-11 flex-col gap-1 py-1 pl-3 pr-1 sm:grid sm:grid-cols-[minmax(0,auto)_minmax(0,1fr)] sm:items-center sm:gap-3">
-      <span className="min-w-0 truncate text-[1em] text-muted-foreground">{label}</span>
+      <span className="min-w-0 truncate text-[0.9em] text-muted-foreground">{label}</span>
       <div className="flex min-w-0 justify-end [&>*]:min-w-0 [&>*]:max-w-full">{children}</div>
     </div>
   );

@@ -5,11 +5,19 @@ import {
   ScheduleListView,
   type ScheduleRowContext,
 } from '../components/schedules/schedule-view';
-import { PropertyRow, PropertyRowWide } from '../components/schedules/schedule-property-row';
-import { Switch } from '../ui/switch';
-import { ScheduleDestinationRows } from '../components/schedules/schedule-destination-rows';
+import {
+  RunBarItem,
+  ScheduleChatPill,
+  ScheduleDestinationPill,
+  runPillClass,
+  runPillIssueClass,
+  runWorktreePillClass,
+} from '../components/schedules/schedule-run-bar';
+import type { ScheduleSaveIssue } from '../components/schedules/schedule-save-blockers';
+import { WorktreeCheckboxPill } from '../components/shared/workdir-mode-selector';
 import type { ScheduleDestination, ScheduleRegistryRow, ScheduleRuntimeRow } from '@lody/shared';
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
+import { cn } from '../lib/utils';
 
 /** Frozen clock so "Next run" and the editor preview never drift. */
 const NOW = Date.parse('2026-09-06T09:12:00+08:00');
@@ -170,69 +178,103 @@ const chats = [
   { id: 'c3', title: 'Refactor auth module', detail: 'Code reviewer · Studio' },
 ];
 
-/** Run configuration rows are owned by the workspace; stories stand in for them. */
-function RunConfigFixture({
+/** The run bar is owned by the workspace; stories stand in for its pills. */
+function RunBarFixture({
   chatOnly = false,
   destination: initialDestination = { kind: 'new_session' },
   ownChatExists = false,
+  noAgent = false,
+  issues = [],
+  revealMissing,
 }: {
   chatOnly?: boolean;
   destination?: ScheduleDestination;
   ownChatExists?: boolean;
+  noAgent?: boolean;
+  issues?: readonly ScheduleSaveIssue[];
+  revealMissing: boolean;
 }) {
   const [destination, setDestination] = useState<ScheduleDestination>(initialDestination);
+  const [worktree, setWorktree] = useState(true);
+  const marks = (field: ScheduleSaveIssue['field']) =>
+    issues
+      .filter((issue) => issue.field === field && (issue.kind === 'invalid' || revealMissing))
+      .map((issue) => issue.message);
+  const agentIssues = marks('agent');
   return (
     <>
-      <ScheduleDestinationRows
-        value={destination}
-        onChange={setDestination}
-        sessions={chats}
-        ownSession={
-          destination.kind === 'own_session' && ownChatExists && destination.epoch === 0
-            ? chats[1]
-            : null
-        }
-        pickedSession={
-          destination.kind === 'existing_session'
-            ? (chats.find((chat) => chat.id === destination.sessionId) ?? null)
-            : null
-        }
-        onOpenSession={() => {}}
-      />
-      <PropertyRowWide label="Agent">
+      <RunBarItem issues={destination.kind === 'existing_session' ? [] : marks('destination')}>
+        <ScheduleDestinationPill
+          value={destination}
+          onChange={setDestination}
+          ownSession={
+            destination.kind === 'own_session' && ownChatExists && destination.epoch === 0
+              ? chats[1]
+              : null
+          }
+        />
+      </RunBarItem>
+      {destination.kind === 'existing_session' ? (
+        <RunBarItem issues={marks('destination')}>
+          <ScheduleChatPill
+            sessions={chats}
+            value={destination.sessionId}
+            label={chats.find((chat) => chat.id === destination.sessionId)?.title}
+            onChange={(sessionId) => setDestination({ kind: 'existing_session', sessionId })}
+          />
+        </RunBarItem>
+      ) : null}
+      <RunBarItem issues={agentIssues}>
         <button
           type="button"
-          className="flex h-8 w-full items-center justify-end gap-2 rounded-md px-2 text-[1em] font-normal hover:bg-foreground/[0.05]"
+          className={cn(runPillClass, agentIssues.length > 0 && runPillIssueClass)}
         >
-          <Bot className="size-3.5 opacity-70" />
-          Code reviewer · Sonnet · Ask each time
-          <ChevronDown className="size-3.5 shrink-0 opacity-50" />
+          <Bot />
+          {noAgent ? (
+            <span className="truncate">Choose agent</span>
+          ) : (
+            <span className="truncate">
+              <span className="text-foreground">Code reviewer</span> · Sonnet · Ask each time
+            </span>
+          )}
+          <ChevronDown className="opacity-60" />
         </button>
-      </PropertyRowWide>
+      </RunBarItem>
       {destination.kind === 'new_session' ? (
-        <PropertyRowWide label="Project">
-          <button
-            type="button"
-            className="flex h-8 w-full items-center justify-end gap-2 rounded-md px-2 text-[1em] font-normal hover:bg-foreground/[0.05]"
-          >
-            <FolderGit2 className="size-3.5 opacity-70" />
-            {chatOnly ? 'No project' : 'loro-dev/lody'}
-            <ChevronDown className="size-3.5 shrink-0 opacity-50" />
+        <RunBarItem issues={marks('project')}>
+          <button type="button" className={runPillClass}>
+            <FolderGit2 />
+            <span className={cn('truncate', !chatOnly && 'text-foreground')}>
+              {chatOnly ? 'Choose project' : 'loro-dev/lody'}
+            </span>
           </button>
-        </PropertyRowWide>
+        </RunBarItem>
       ) : null}
-      {destination.kind !== 'new_session' ? null : chatOnly ? (
-        <p className="px-3 py-2 text-[0.8em] text-muted-foreground">
-          Without a project each run is a plain chat with the Agent — no repository is checked out.
-        </p>
-      ) : (
-        <PropertyRow label="Isolated worktree">
-          <Switch checked aria-label="Use an isolated Git worktree" />
-        </PropertyRow>
-      )}
+      {destination.kind === 'new_session' && !chatOnly ? (
+        <WorktreeCheckboxPill
+          className={runWorktreePillClass}
+          checked={worktree}
+          onCheckedChange={setWorktree}
+        />
+      ) : null}
     </>
   );
 }
+
+const note = {
+  project: undefined,
+  chatOnly:
+    'Without a project each run is a plain chat with the Agent — no repository is checked out.',
+  ownPending: 'Created on the first run; every later run continues it.',
+  ownCreated: 'The Agent is now this chat’s Agent. Start a new chat to change it.',
+  existing: 'Runs use this chat’s Agent and workspace.',
+};
+
+const runBar =
+  (fixture: Omit<React.ComponentProps<typeof RunBarFixture>, 'revealMissing'> = {}) =>
+  ({ revealMissing }: { revealMissing: boolean }): ReactNode => (
+    <RunBarFixture {...fixture} revealMissing={revealMissing} />
+  );
 
 const editor = (
   props: Partial<React.ComponentProps<typeof ScheduleForm>> = {}
@@ -243,7 +285,9 @@ const editor = (
         now={NOW}
         saving={false}
         onSave={() => {}}
-        runConfig={<RunConfigFixture />}
+        timeZone="Asia/Shanghai"
+        clockName="MacBook Pro"
+        runBar={runBar()}
         initial={{
           title: 'Review the latest changes',
           prompt:
@@ -271,7 +315,9 @@ export const EditorInNarrowPanel: Story = {
           now={NOW}
           saving={false}
           onSave={() => {}}
-          runConfig={<RunConfigFixture />}
+          timeZone="Asia/Shanghai"
+          clockName="MacBook Pro"
+          runBar={runBar()}
           initial={{
             title: 'Review the latest changes',
             prompt: 'Review changes since the previous working day.',
@@ -290,6 +336,10 @@ export const EditorNarrow: Story = {
   parameters: { viewport: { defaultViewport: 'mobile1' } },
 };
 export const EditorNew: Story = editor({
+  autoFocus: true,
+  runBar: runBar({ noAgent: true, chatOnly: true }),
+  runNote: note.chatOnly,
+  issues: [{ field: 'agent', kind: 'missing', message: 'Choose an available Agent.' }],
   initial: {
     title: '',
     prompt: '',
@@ -299,7 +349,7 @@ export const EditorNew: Story = editor({
   },
 });
 export const EditorChatOnly: Story = {
-  ...editor({ runConfig: <RunConfigFixture chatOnly /> }),
+  ...editor({ runBar: runBar({ chatOnly: true }), runNote: note.chatOnly }),
 };
 export const EditorWeekly: Story = editor({
   initial: {
@@ -347,7 +397,8 @@ export const EditorManual: Story = editor({
   },
 });
 export const EditorOwnChatPending: Story = editor({
-  runConfig: <RunConfigFixture destination={{ kind: 'own_session', epoch: 0 }} />,
+  runBar: runBar({ destination: { kind: 'own_session', epoch: 0 } }),
+  runNote: note.ownPending,
   initial: {
     title: 'Daily journal',
     prompt: 'Ask me how the day went and note the answer.',
@@ -357,7 +408,8 @@ export const EditorOwnChatPending: Story = editor({
   },
 });
 export const EditorOwnChatCreated: Story = editor({
-  runConfig: <RunConfigFixture destination={{ kind: 'own_session', epoch: 0 }} ownChatExists />,
+  runBar: runBar({ destination: { kind: 'own_session', epoch: 0 }, ownChatExists: true }),
+  runNote: note.ownCreated,
   initial: {
     title: 'Daily journal',
     prompt: 'Ask me how the day went and note the answer.',
@@ -367,7 +419,8 @@ export const EditorOwnChatCreated: Story = editor({
   },
 });
 export const EditorExistingChat: Story = editor({
-  runConfig: <RunConfigFixture destination={{ kind: 'existing_session', sessionId: 'c1' }} />,
+  runBar: runBar({ destination: { kind: 'existing_session', sessionId: 'c1' } }),
+  runNote: note.existing,
 });
 /** A rule from an older version that the picker cannot name stays read-only. */
 export const EditorUnsupportedRule: Story = editor({
@@ -387,7 +440,30 @@ export const EditorMissingRequirements: Story = editor({
     misfire: 'run_once',
     overlap: 'queue_one',
   },
-  saveBlockers: ['Choose an available Agent.', 'Choose an explicit permission mode.'],
+  revealIssues: true,
+  runBar: runBar({
+    noAgent: true,
+    chatOnly: true,
+    issues: [{ field: 'agent', kind: 'missing', message: 'Choose an available Agent.' }],
+  }),
+  issues: [{ field: 'agent', kind: 'missing', message: 'Choose an available Agent.' }],
+});
+/** A real conflict is marked at once, before any save attempt. */
+export const EditorAgentConflict: Story = editor({
+  runBar: runBar({
+    issues: [{ field: 'agent', kind: 'invalid', message: 'Choose an explicit permission mode.' }],
+  }),
+  issues: [{ field: 'agent', kind: 'invalid', message: 'Choose an explicit permission mode.' }],
+});
+/** A reason that belongs to no control sits beside Save. */
+export const EditorWorkspaceLoading: Story = editor({
+  issues: [
+    {
+      field: 'form',
+      kind: 'invalid',
+      message: 'Wait for your workspace and account to finish loading.',
+    },
+  ],
 });
 export const EditorSaving: Story = editor({ saving: true });
 export const EditorError: Story = editor({ error: 'The schedule could not be saved.' });

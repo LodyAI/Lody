@@ -1,98 +1,22 @@
-import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
-import { Check, ChevronDown, Globe } from 'lucide-react';
 import {
   SCHEDULE_HOUR_STEPS,
   SCHEDULE_MINUTE_STEPS,
   SCHEDULE_RECURRENCE_KINDS,
   SCHEDULE_WEEKDAYS,
   changeScheduleRecurrenceKind,
-  getDeviceTimeZone,
+  instantToZonedLocalInput,
+  zonedLocalInputToInstant,
   normalizeScheduleWeekdays,
   type ScheduleRecurrence,
   type ScheduleRecurrenceKind,
   type ScheduleWeekday,
 } from '@lody/shared';
-import { Command, CommandEmpty, CommandInput, CommandItem, CommandList } from '@/ui/command';
-import { Popover, PopoverContent, PopoverTrigger } from '@/ui/popover';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/ui/select';
 import { cn } from '@/lib/utils';
 import { describeRecurrence, weekdayNames } from './schedule-format';
-import {
-  PropertyRow,
-  ghostSelectTriggerClass,
-  ghostValueClass,
-  scheduleChevronClass,
-} from './schedule-property-row';
-
-/** `<input type="datetime-local">` needs a wall-clock string, not an instant. */
-const toLocalInput = (iso: string): string => {
-  const at = new Date(iso);
-  return new Date(at.getTime() - at.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
-};
-
-function TimeZoneField({
-  value,
-  onChange,
-  disabled,
-  label,
-}: {
-  value: string;
-  onChange: (next: string) => void;
-  disabled?: boolean;
-  label: string;
-}) {
-  const { t } = useTranslation();
-  const [open, setOpen] = useState(false);
-  // `supportedValuesOf` is absent on a few runtimes; the device zone plus the
-  // authored zone always keeps the current value selectable.
-  const zones = useMemo(() => {
-    const supported =
-      typeof Intl.supportedValuesOf === 'function' ? Intl.supportedValuesOf('timeZone') : [];
-    return [...new Set([getDeviceTimeZone(), value, ...supported])].filter(Boolean);
-  }, [value]);
-  return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild disabled={disabled}>
-        <button
-          type="button"
-          aria-label={label}
-          disabled={disabled}
-          className={cn(
-            ghostValueClass,
-            'h-7 px-1.5 text-[0.8em] text-muted-foreground last:-mr-1.5'
-          )}
-        >
-          <Globe className="size-3 shrink-0 opacity-60" />
-          <span className="truncate">{value}</span>
-          <ChevronDown className={scheduleChevronClass} />
-        </button>
-      </PopoverTrigger>
-      <PopoverContent align="end" className="w-[min(20rem,calc(100vw-2rem))] p-0">
-        <Command>
-          <CommandInput placeholder={t('schedules.searchTimeZone', 'Search time zones')} />
-          <CommandList>
-            <CommandEmpty>{t('schedules.noTimeZone', 'No matching time zone')}</CommandEmpty>
-            {zones.map((zone) => (
-              <CommandItem
-                key={zone}
-                value={zone}
-                onSelect={() => {
-                  onChange(zone);
-                  setOpen(false);
-                }}
-              >
-                <span className="min-w-0 flex-1 truncate">{zone}</span>
-                {zone === value ? <Check className="size-4 shrink-0" /> : null}
-              </CommandItem>
-            ))}
-          </CommandList>
-        </Command>
-      </PopoverContent>
-    </Popover>
-  );
-}
+import { PropertyRow, ghostSelectTriggerClass, ghostValueClass } from './schedule-property-row';
 
 /** Small square toggles; one row of seven for weekdays, a 7-wide grid for dates. */
 function DayToggles({
@@ -182,11 +106,17 @@ export function ScheduleRecurrenceEditor({
   value,
   onChange,
   now,
+  timeZone,
   disabled,
 }: {
   value: ScheduleRecurrence;
   onChange: (next: ScheduleRecurrence) => void;
   now: number;
+  /**
+   * The target machine's clock. Every wall time here — including a one-off
+   * run — is read on it; there is no zone picker.
+   */
+  timeZone: string;
   disabled?: boolean;
 }) {
   const { t, i18n } = useTranslation();
@@ -220,7 +150,7 @@ export function ScheduleRecurrenceEditor({
         )}
       >
         <div className="flex items-center gap-2">
-          <span className="truncate text-[0.9em] text-muted-foreground">
+          <span className="truncate text-[0.9em] text-foreground">
             {describeRecurrence(value, t, i18n.language)}
           </span>
           <button
@@ -271,7 +201,7 @@ export function ScheduleRecurrenceEditor({
 
       <AnimatePresence initial={false} mode="popLayout">
         {value.kind === 'minutes' || value.kind === 'hours' ? (
-          <Reveal id="every">
+          <Reveal key="every" id="every">
             <PropertyRow label={t('schedules.repeat.every', 'Every')}>
               <Select
                 value={String(value.every)}
@@ -312,7 +242,7 @@ export function ScheduleRecurrenceEditor({
         ) : null}
 
         {value.kind === 'weekly' ? (
-          <Reveal id="weekdays">
+          <Reveal key="weekdays" id="weekdays">
             <PropertyRow label={t('schedules.repeat.on', 'On')}>
               <DayToggles
                 values={value.weekdays}
@@ -334,7 +264,7 @@ export function ScheduleRecurrenceEditor({
         ) : null}
 
         {value.kind === 'monthly' ? (
-          <Reveal id="days">
+          <Reveal key="days" id="days">
             <PropertyRow label={t('schedules.repeat.onDays', 'On days')} align="start">
               <DayToggles
                 grid
@@ -352,51 +282,38 @@ export function ScheduleRecurrenceEditor({
         ) : null}
 
         {hasWallClock ? (
-          <Reveal id="time">
+          <Reveal key="time" id="time">
             <PropertyRow label={t('schedules.repeat.at', 'At')}>
-              <div className="flex items-center gap-1">
-                <input
-                  type="time"
-                  required
-                  disabled={disabled}
-                  aria-label={t('schedules.repeat.at', 'At')}
-                  className={cn(ghostValueClass, 'w-auto')}
-                  value={timeValue}
-                  onChange={(event) => {
-                    const [hour, minute] = event.target.value.split(':');
-                    if (hour === undefined || minute === undefined) return;
-                    onChange({ ...value, hour: Number(hour), minute: Number(minute) });
-                  }}
-                />
-                <TimeZoneField
-                  value={value.timeZone}
-                  disabled={disabled}
-                  label={t('schedules.timeZone', 'Time zone')}
-                  onChange={(timeZone) => onChange({ ...value, timeZone })}
-                />
-              </div>
+              <input
+                type="time"
+                required
+                disabled={disabled}
+                aria-label={t('schedules.repeat.at', 'At')}
+                className={cn(ghostValueClass, 'w-auto')}
+                value={timeValue}
+                onChange={(event) => {
+                  const [hour, minute] = event.target.value.split(':');
+                  if (hour === undefined || minute === undefined) return;
+                  onChange({ ...value, hour: Number(hour), minute: Number(minute) });
+                }}
+              />
             </PropertyRow>
           </Reveal>
         ) : null}
 
         {value.kind === 'once' ? (
-          <Reveal id="once">
-            <PropertyRow
-              label={t('schedules.repeat.runAt', 'Run at')}
-              hint={t('schedules.deviceZone', 'This device’s time zone ({{zone}})', {
-                zone: getDeviceTimeZone(),
-              })}
-            >
+          <Reveal key="once" id="once">
+            <PropertyRow label={t('schedules.repeat.runAt', 'Run at')}>
               <input
                 type="datetime-local"
                 required
                 disabled={disabled}
                 aria-label={t('schedules.repeat.runAt', 'Run at')}
                 className={cn(ghostValueClass, 'w-auto')}
-                value={toLocalInput(value.at)}
+                value={instantToZonedLocalInput(Date.parse(value.at), timeZone)}
                 onChange={(event) => {
-                  if (!event.target.value) return;
-                  onChange({ ...value, at: new Date(event.target.value).toISOString() });
+                  const at = zonedLocalInputToInstant(event.target.value, timeZone);
+                  if (at !== null) onChange({ ...value, at: new Date(at).toISOString() });
                 }}
               />
             </PropertyRow>
