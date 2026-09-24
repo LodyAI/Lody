@@ -74,3 +74,26 @@ is unchanged; this change only supplies provider capabilities and turn markers.
   UI run was performed. The root documentation check still reports
   pre-existing broken links into other uninitialized ACP submodules; no
   protected content topic is registered for this change.
+
+## Ablation of PR-local redundancy
+
+Starting from adapter `58cff15`, each candidate was applied alone, run through
+`node scripts/test.mjs` with the original 82 tests unchanged, and restored before
+the next experiment. Passing tests alone did not justify deleting protocol guards.
+
+| Isolated change | Result | Decision |
+| --- | --- | --- |
+| Remove `turnBySession` writes | 80/82; live/replay boundaries and next-turn attribution fail | Retain |
+| Remove repeated-cursor check | 81/82; missing-source discovery keeps requesting a repeated page | Retain |
+| Remove speculative nested `result.result` fallback | 82/82 | Remove; source and native probes confirm direct response objects |
+| Remove duplicate child-ID callback argument | 82/82 | Derive it from the resume request's session ID |
+| Replace duplicate regex/range validation with canonical turn-ID round trip | 82/82 | Reuse the same formatter that emits IDs |
+| Remove the fork-specific request-ID allocator | 82/82 | Share `runtimeRequest` with context/billing requests |
+
+The combined changes also pass all 82 tests, syntax checks, and both native
+runtime probes. A deterministic comparison of the original and simplified
+validators produced identical acceptance/error codes for 269 inputs, including
+wrong prefixes, numeric aliases, range limits, non-strings and 200 canonical IDs.
+The existing invalid-input tests now also cover exponent/whitespace/negative-zero
+aliases and an undocumented nested native response. No tests were removed or
+weakened. Native persistence/continuation limits above remain unchanged.
