@@ -203,6 +203,13 @@ export type WorkspaceRuntime = {
   ) => Promise<T>;
   releaseSessionStore: (sessionId: SessionId) => Promise<void>;
   acquireSessionStore: (sessionId: SessionId) => Promise<SessionDocStore>;
+  /**
+   * The session's store if it is already open, synchronously, without taking a
+   * reference. Lets a newly mounted conversation render a cached session in
+   * its first commit; the consumer still acquires it to keep it alive.
+   * Optional: runtimes without a synchronous cache always open asynchronously.
+   */
+  peekSessionStore?: (sessionId: SessionId) => SessionDocStore | undefined;
   releaseSessionStoreRef: (sessionId: SessionId) => void;
   withPreviewVisualCommentStore: <T>(
     sessionId: SessionId,

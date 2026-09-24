@@ -4561,6 +4561,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     },
     releaseSessionStore: sessionStoreCache.release,
     acquireSessionStore: sessionStoreCache.acquire,
+    peekSessionStore: sessionStoreCache.peek,
     releaseSessionStoreRef: sessionStoreCache.releaseRef,
     withPreviewVisualCommentStore: async <T>(
       sessionId: SessionId,

@@ -1470,6 +1470,8 @@
   "sessions.tabs.reopenTab": "重新打开对话",
   "sessions.tabs.empty": "当前没有打开的对话",
   "sessions.tabWaitingForSync": "正在同步这个对话…",
+  "sessions.contentSync.updating": "正在更新",
+  "sessions.contentSync.loadingConversation": "正在加载对话",
   "sessions.usage.context": "上下文",
   "sessions.usage.compacting": "压缩中",
   "sessions.usage.compactingContext": "正在压缩上下文",

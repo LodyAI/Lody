@@ -23,15 +23,15 @@ Parent AGENTS apply. Edit `AGENTS.md`, not its `CLAUDE.md` symlink. Background: 
   detach on unmount, including empty-to-populated transitions. Never recover it from
   a `VList` handle, DOM query, item-count effect, observer retry or timer.
 - Handle viewport HEIGHT changes (composer, keyboard, docks) through ResizeObserver,
-  keeping the current mode's position; ignore width-only records. Mark own scrollTop
-  writes. No resize pumps, skip flags, guessed durations or stop timers.
-- A direct send glides (rAF, re-targeted per frame; reader input stops it) to its row
-  and reserves a reply-room sibling of `Virtualizer` (never a Virtua row); outside
-  `anchored` the room only shrinks. Queue/guide sends never scroll.
+  keeping the mode's position; ignore width-only records. Mark own scrollTop
+  writes. No resize pumps, skip flags or guessed timers.
+- A direct send glides (rAF, retargeted per frame; input stops it) to its row and
+  reserves a reply-room `Virtualizer` sibling; outside `anchored` it only shrinks.
+  Queue/guide sends never scroll.
 - Group toggles never scroll; a non-following reader is never pulled to the end.
-  No frame retries/settle timers.
-- Preserve per-session restoration, search/expansion suppression and viewport resizing
-  for keyboards and terminal docks.
+  No frame retries/settle timers. Keep per-session restore, search/expand suppression.
+- A cached session renders in the frame after its click: no promise tick,
+  effect-only state or deferred setState before reveal.
 
 ## Session, auth, and app shell
 

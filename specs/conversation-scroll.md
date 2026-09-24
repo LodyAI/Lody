@@ -26,6 +26,12 @@ for, and never move unless the user or the arrival of new output asks it to.
   as they scroll, never re-added, and scrolling down reaches the real end of the reply.
   A message taller than the viewport is shown from its end instead.
 - **Queued or steering messages** sent while the agent is working do not move the view.
+- **Loading.** A conversation that has messages but nothing on this device yet shows a
+  skeleton of messages in place of a blank pane. A saved copy is shown at once; while
+  this open is still catching up with the server, the info bar says "Updating". Nothing
+  is added to the conversation itself. Routine opens that catch up quickly show
+  neither (a status must persist briefly before it appears, and stays long enough not
+  to flash). A lost connection is not announced here: reconnecting is automatic.
 - **Opening** reveals the conversation only once it can be shown at its restored
   position; it must not flash through intermediate positions, and late row measurements
   must not leave it hidden

@@ -287,6 +287,9 @@ import {
 import { SessionPin } from './session-pin';
 import { SessionPinContext, type SessionPinContextValue } from './session-pin-context';
 import { SessionSyncingIndicator } from './session-syncing-indicator';
+import { ConversationSkeleton } from '@/components/ai-gui/conversation-sync-placeholders';
+import { useDisplayedContentSyncState } from '@/hooks/use-displayed-content-sync-state';
+import { resolveSessionContentSyncState } from '@/lib/session-content-sync-state';
 import { ChildTabEmptyState } from './child-tab-empty-state';
 import {
   SESSION_PAGE_HEADER_PILLS_CLASS,
@@ -2544,6 +2547,24 @@ export const SessionChatInterface = memo(
       TITLE_SYNCING_INDICATOR_DELAY_MS
     );
 
+    // How current the shown conversation is: a skeleton while nothing is cached,
+    // "Updating" in the info bar while a cached copy catches up. "Caught up"
+    // is sticky per open, so later sync blips (live output) stay quiet.
+    const contentCaughtUpRef = useRef({ sessionId: session.id, caughtUp: false });
+    if (contentCaughtUpRef.current.sessionId !== session.id) {
+      contentCaughtUpRef.current = { sessionId: session.id, caughtUp: false };
+    }
+    if (sessionDocSyncState === 'synced') contentCaughtUpRef.current.caughtUp = true;
+    const contentSyncState = useDisplayedContentSyncState(
+      resolveSessionContentSyncState({
+        docReady: sessionDocReady,
+        historyLength: sessionHistoryLength,
+        syncState: sessionDocSyncState,
+        hasCaughtUp: contentCaughtUpRef.current.caughtUp,
+        knownToHaveMessages: session.lastMessageAt != null,
+      })
+    );
+
     const mcpSelection = useSessionMcpSelection(sessionConversationConfig.mcpServerIds, {
       existingSession: true,
       disabled: isArchivedSession,
@@ -4355,12 +4376,14 @@ export const SessionChatInterface = memo(
     }, []);
     const chatStreamEmptyState = useMemo(
       () =>
-        isChildSession ? (
+        contentSyncState === 'cold' ? (
+          <ConversationSkeleton />
+        ) : isChildSession ? (
           <ChildTabEmptyState onSuggest={handleChildEmptyStateSuggest} />
         ) : (
           EMPTY_CHAT_STREAM_EMPTY_STATE
         ),
-      [handleChildEmptyStateSuggest, isChildSession]
+      [contentSyncState, handleChildEmptyStateSuggest, isChildSession]
     );
     const handleAgentConfigChange = useCallback(
       (selection: AgentSelection) => {
@@ -6217,7 +6240,15 @@ export const SessionChatInterface = memo(
                     }
                     diffStat={changesDiffStat}
                     // Desktop only: mobile already shows catch-up in its header.
-                    syncing={!isMobile && effectiveTitleSyncing}
+                    syncStatus={
+                      isMobile
+                        ? null
+                        : contentSyncState === 'catching-up'
+                          ? 'updating'
+                          : effectiveTitleSyncing
+                            ? 'syncing'
+                            : null
+                    }
                     // Mobile keeps the bar above the session drawer's z-30
                     // edge-back strip so its leading chip stays tappable.
                     protectFromEdgeBackZone={isMobile}

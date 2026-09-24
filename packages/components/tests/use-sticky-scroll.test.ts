@@ -402,6 +402,25 @@ describe('useStickyScroll Virtua adapter', () => {
     expect(latestResult?.initialScrollRestored).toBe(true);
   });
 
+  it('lets Virtua observe our own restore write in the same frame', async () => {
+    const sessionId = 'session-sync-offset' as SessionId;
+    saveScrollPosition(sessionId, { type: 'offset', scrollOffset: 96 });
+    const fixture = createScrollFixture();
+    const vlist = createMockVirtualizerHandle(fixture.scrollElement);
+    // Like Virtua: its offset only follows the viewport's scroll events.
+    let observedOffset = 0;
+    Object.defineProperty(vlist, 'scrollOffset', { get: () => observedOffset });
+    fixture.scrollElement.addEventListener('scroll', () => {
+      observedOffset = fixture.scrollElement.scrollTop;
+      latestResult?.handleScroll(observedOffset);
+    });
+    await renderHarness({ sessionId, vlist, scrollElement: fixture.scrollElement, itemCount: 4 });
+    expect(fixture.getScrollTop()).toBe(96);
+    expect(latestResult?.initialScrollRestored).toBe(true);
+    // Revealed on the DOM directly, not one React task later.
+    expect(fixture.scrollElement.style.visibility).toBe('visible');
+  });
+
   it('accepts the subpixel geometry of a measured tail', async () => {
     const fixture = createScrollFixture();
     const originalRect = fixture.lastRow.getBoundingClientRect;

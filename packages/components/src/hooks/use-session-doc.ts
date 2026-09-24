@@ -112,9 +112,6 @@ export function useSessionDoc(
   const syncEnabled = options.syncEnabled ?? enabled;
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
   const browserOnline = useAtomValue(browserOnlineAtom);
-  const [loadedStore, setLoadedStore] = useState<SessionDocStore | null>(null);
-  const [ready, setReady] = useState(false);
-  const [syncState, setSyncState] = useState<RoomSyncState>('idle');
   const fallbackDoc = useMemo<SessionDocInput>(
     () => ({
       session: { id: sessionId },
@@ -126,7 +123,18 @@ export function useSessionDoc(
     }),
     [sessionId]
   );
-  const [state, setState] = useState<SessionDocState>(fallbackDoc as SessionDocState);
+  // An already-open store renders in the first commit: switching to a cached
+  // conversation must not paint an empty frame while a promise settles.
+  const [loadedStore, setLoadedStore] = useState<SessionDocStore | null>(
+    () => (enabled && runtime?.peekSessionStore?.(sessionId)) || null
+  );
+  const [ready, setReady] = useState(() => loadedStore !== null);
+  const [syncState, setSyncState] = useState<RoomSyncState>(
+    () => loadedStore?.getSyncState() ?? 'idle'
+  );
+  const [state, setState] = useState<SessionDocState>(
+    () => loadedStore?.getState() ?? (fallbackDoc as SessionDocState)
+  );
   useEffect(() => {
     let cancelled = false;
     let acquiredStore = false;
@@ -136,9 +144,18 @@ export function useSessionDoc(
     // effect instance published so cleanup only clears its own values.
     let debugStore: SessionDocStore | null = null;
     let debugSessionState: SessionDocState | null = null;
-    setReady(false);
-    setSyncState('idle');
-    setState(fallbackDoc as SessionDocState);
+    const openStore = enabled && runtime ? runtime.peekSessionStore?.(sessionId) : undefined;
+    if (openStore) {
+      // Show the open store now; the acquire below only takes the reference.
+      setLoadedStore(openStore);
+      setState(openStore.getState());
+      setSyncState(openStore.getSyncState());
+      setReady(true);
+    } else {
+      setReady(false);
+      setSyncState('idle');
+      setState(fallbackDoc as SessionDocState);
+    }
 
     if (!enabled) {
       setLoadedStore(null);
