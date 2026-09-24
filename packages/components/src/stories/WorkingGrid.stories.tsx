@@ -1,8 +1,12 @@
 import type { Meta, StoryObj } from '@storybook/react';
 import { Archive, Hand } from 'lucide-react';
+import { useEffect, useState } from 'react';
+
+import { SidebarRowEndSlot } from '@/components/sidebar-row-shared';
 
 import { cn } from '@/lib/utils';
 import { WorkingGrid, type WorkingGridProps } from '@/ui/working-grid';
+import { WorkingGridCollapse } from '@/ui/working-grid-collapse';
 
 const SUPERELLIPSE_OPTIONS = ['none', '6', '5', '4', '3', '2.6'] as const;
 
@@ -177,4 +181,37 @@ export const SidebarSimulation: Story = {
       </main>
     </div>
   ),
+};
+
+/** Replays the done transition on a loop, at real size and magnified. */
+function CompletionDemo() {
+  const [working, setWorking] = useState(true);
+  const [replay, setReplay] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setWorking((value) => !value), 1800);
+    return () => clearInterval(id);
+  }, []);
+  useEffect(() => {
+    if (!working) setReplay((count) => count + 1);
+  }, [working]);
+  return (
+    <div className="flex items-center gap-16 p-10">
+      <div className="flex w-[260px] items-center gap-1.5 rounded-md bg-sidebar px-2 py-1 text-sm text-sidebar-foreground">
+        <span className="min-w-0 flex-1 truncate">Fix queue drain false failure</span>
+        <SidebarRowEndSlot isWorking={working} hasUnreadMessages={!working} />
+      </div>
+      <div className="origin-center scale-[6] text-primary">
+        {working ? <WorkingGrid rowPitch={null} /> : <WorkingGridCollapse key={replay} />}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The done transition: when a session stops working with new messages, the nine
+ * tiles spin and gather into the unread dot, which pops and settles with a
+ * bounce while a few sparks fly off. Loops every 1.8s.
+ */
+export const Completion: Story = {
+  render: () => <CompletionDemo />,
 };

@@ -17,6 +17,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { WorkingGrid } from '@/ui/working-grid';
+import { WorkingGridCollapse } from '@/ui/working-grid-collapse';
 import type { PrStatus, SessionPullRequestCiState } from '@lody/shared';
 import { cn } from '@/lib/utils';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
@@ -143,6 +144,18 @@ function SessionRowStatusIndicator({
   isWorking?: boolean;
   hasUnreadMessages?: boolean;
 }) {
+  // Working → unread is "done": play the grid collapsing into the dot once.
+  // Tracked as state adjusted during render (not an effect) so the collapse is
+  // on screen in the same commit that stops the grid.
+  const working = isWorking === true;
+  const unread = hasUnreadMessages === true;
+  const [wasWorking, setWasWorking] = useState(working);
+  const [collapsing, setCollapsing] = useState(false);
+  if (wasWorking !== working) {
+    setWasWorking(working);
+    setCollapsing(wasWorking && !working && unread);
+  }
+
   let icon: ReactNode = null;
 
   if (isWaitingPermission) {
@@ -152,6 +165,14 @@ function SessionRowStatusIndicator({
     // (primary tiles): calm and whole when still, readable as "working", and
     // distinct in shape from the unread dot. It holds still while the user reads.
     icon = <WorkingGrid data-session-working-indicator="" className="text-primary" />;
+  } else if (unread && collapsing) {
+    icon = (
+      <WorkingGridCollapse
+        data-session-done-transition=""
+        className="text-primary"
+        onDone={() => setCollapsing(false)}
+      />
+    );
   } else if (hasUnreadMessages) {
     icon = <span className="h-2 w-2 rounded-full bg-primary" />;
   }

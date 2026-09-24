@@ -104,6 +104,22 @@ The reading pause is what keeps the more visible final form from pulling at the
 reader. None of these effects has been measured on people; the numbers above are
 simulations and screenshots.
 
+## Done transition
+
+When a row goes from working to unread, `SessionRowStatusIndicator` plays
+`WorkingGridCollapse` once before the plain unread dot: the grid spins 135° while
+its nine tiles gather into the centre and fade (0–300ms, ease-in), the dot pops
+from 0.35× past its size to 1.3× and settles through 0.9× and 1.04× (240–580ms),
+and six 2px sparks fly out radially and fade (280–600ms). It uses the same
+compositor-only Web Animations; the hand-over to the plain dot comes from the dot
+animation's `finished` promise, not a timer. The indicator tracks the previous
+working flag as state adjusted during render, so the transition is on screen in
+the same commit that stops the grid; a row that remounts, or was never working,
+shows the dot directly. Reduced motion shows the dot at once. Known seam: the
+collapse starts from evenly sized tiles, while the live grid's tiles differ.
+Verified by scrubbing the paused animations frame by frame in Storybook
+(`UI/WorkingGrid` → Completion; `Components/LodySidebar` → Sessions finishing).
+
 ## Implementation choice
 
 | Option | Result |

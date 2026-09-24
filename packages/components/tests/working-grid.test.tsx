@@ -13,13 +13,14 @@
  * `Element.prototype.animate` and assert which elements animate which properties.
  */
 
-import React from 'react';
+import React, { act } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync } from 'react-dom';
 import { createRoot, type Root } from 'react-dom/client';
 
 import { SidebarRowEndSlot } from '../src/components/sidebar-row-shared';
 import { WorkingGrid } from '../src/ui/working-grid';
+import { WorkingGridCollapse } from '../src/ui/working-grid-collapse';
 import { READING_IDLE_MS, setWorkingGridReadingPause } from '../src/ui/working-grid-reading';
 import {
   crestDelayMs,
@@ -98,6 +99,7 @@ interface RecordedAnimation {
   startTime: number | null;
   paused: boolean;
   cancelled: boolean;
+  finish: () => void;
 }
 
 let recorded: RecordedAnimation[];
@@ -122,9 +124,14 @@ beforeEach(() => {
       startTime: null,
       paused: false,
       cancelled: false,
+      finish: () => {},
     };
+    const finished = new Promise<void>((resolve) => {
+      entry.finish = resolve;
+    });
     recorded.push(entry);
     return {
+      finished,
       set startTime(value: number | null) {
         entry.startTime = value;
         entry.paused = false;
@@ -386,5 +393,45 @@ describe('WorkingGrid', () => {
     const mark = container.querySelector('[data-session-working-indicator]');
     expect(mark?.matches('[data-working-grid]')).toBe(true);
     expect(mark?.closest('[data-session-row-indicator]')).not.toBeNull();
+  });
+});
+
+describe('WorkingGridCollapse', () => {
+  it('spins and gathers the tiles, pops the dot, and sparks, on the compositor', () => {
+    render(<WorkingGridCollapse />);
+    const targets = (selector: string) => recorded.filter((a) => a.target.matches(selector)).length;
+    expect(targets('[data-collapse-grid]')).toBe(1);
+    expect(targets('[data-collapse-tile]')).toBe(9);
+    expect(targets('[data-collapse-dot]')).toBe(1);
+    expect(targets('[data-collapse-spark]')).toBeGreaterThan(0);
+    expect(recorded.every((a) => a.keyframes.every(TRANSFORM_OR_OPACITY))).toBe(true);
+    // The dot overshoots its size before settling: the bounce.
+    const dot = recorded.find((a) => a.target.matches('[data-collapse-dot]'))!;
+    const scales = dot.keyframes.map(scaleOf);
+    expect(Math.max(...scales)).toBeGreaterThan(1);
+    expect(scales.at(-1)).toBe(1);
+  });
+
+  it('plays once when a session finishes, then shows the unread dot', async () => {
+    render(<SidebarRowEndSlot isWorking />);
+    expect(container.querySelector('[data-session-working-indicator]')).not.toBeNull();
+
+    recorded = [];
+    render(<SidebarRowEndSlot isWorking={false} hasUnreadMessages />);
+    expect(container.querySelector('[data-session-done-transition]')).not.toBeNull();
+
+    // When the dot's settle animation finishes, the plain unread dot takes over.
+    const dot = recorded.find((a) => a.target.matches('[data-collapse-dot]'))!;
+    await act(async () => {
+      dot.finish();
+      await Promise.resolve();
+    });
+    expect(container.querySelector('[data-session-done-transition]')).toBeNull();
+    expect(container.querySelector('.rounded-full.bg-primary')).not.toBeNull();
+  });
+
+  it('does not play for a session that was never working', () => {
+    render(<SidebarRowEndSlot hasUnreadMessages />);
+    expect(container.querySelector('[data-session-done-transition]')).toBeNull();
   });
 });
