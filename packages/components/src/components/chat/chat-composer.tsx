@@ -585,16 +585,24 @@ export function ChatComposer({
     const minHeight = lineHeight * effectivePromptRows + paddingTop + paddingBottom;
     const maxHeight = lineHeight * maxRows + paddingTop + paddingBottom;
 
-    // Reset height to auto to get accurate scrollHeight
-    textarea.style.height = 'auto';
-
-    // Calculate new height, clamped between min and max.
-    // When empty, ignore scrollHeight: Chromium includes the wrapped placeholder
-    // text in an empty textarea's scrollHeight, so a long placeholder would grow
-    // the box past minHeight and then visibly shrink on the first keystroke.
+    // When empty, the height is simply minHeight — and must be: Chromium includes
+    // the wrapped placeholder text in an empty textarea's scrollHeight, so a long
+    // placeholder would grow the box past minHeight and then visibly shrink on
+    // the first keystroke. Skipping the measurement also matters for speed: an
+    // `auto` reset followed by a scrollHeight read forces a synchronous layout
+    // of the whole page, and a session switch mounts an empty composer into a
+    // freshly committed conversation (~5ms per switch).
     const hasValue = (promptValue ?? '').length > 0;
+    if (!hasValue) {
+      textarea.style.height = `${minHeight}px`;
+      textarea.style.overflowY = 'hidden';
+      return;
+    }
+
+    // Reset height to auto to get an accurate scrollHeight, then clamp.
+    textarea.style.height = 'auto';
     const scrollHeight = textarea.scrollHeight;
-    const newHeight = hasValue ? Math.max(minHeight, Math.min(scrollHeight, maxHeight)) : minHeight;
+    const newHeight = Math.max(minHeight, Math.min(scrollHeight, maxHeight));
 
     textarea.style.height = `${newHeight}px`;
     textarea.style.overflowY = scrollHeight > maxHeight ? 'auto' : 'hidden';

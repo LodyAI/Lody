@@ -31,6 +31,14 @@ import {
   type UrlTransform,
 } from 'streamdown';
 import type { BundledLanguage } from 'shiki';
+import { getMarkdownHighlightWorker } from '@/lib/markdown-highlight-worker';
+import {
+  createMarkdownHighlighter,
+  MARKDOWN_CODE_LANGUAGES,
+  MARKDOWN_CODE_THEME_NAME,
+  tokenizeMarkdownCode,
+  type MarkdownHighlighter,
+} from '@/lib/markdown-highlighter';
 import { Check, Copy } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { DEFAULT_CONVERSATION_FONT_SIZE } from '@/atoms/settings';
@@ -662,31 +670,12 @@ const remarkLinkifyFilePaths = () => {
 
 const MARKDOWN_MATH_PLUGIN = createMathPlugin();
 
-type ShikiHighlighter = Awaited<ReturnType<(typeof import('shiki/core'))['createHighlighterCore']>>;
 type MarkdownHighlightResult = NonNullable<ReturnType<CodeHighlighterPlugin['highlight']>>;
 
-const MARKDOWN_CODE_THEME_NAME = 'lody-css-variables';
 // Streamdown's type does not model registered custom theme names, but Shiki accepts
 // them after createHighlighterCore() registers the matching theme object.
 const MARKDOWN_CODE_THEME_INPUT = MARKDOWN_CODE_THEME_NAME as unknown as ThemeInput;
 const MARKDOWN_CODE_THEMES = [MARKDOWN_CODE_THEME_INPUT, MARKDOWN_CODE_THEME_INPUT] as const;
-
-const MARKDOWN_CODE_LANGUAGES = [
-  'typescript',
-  'tsx',
-  'javascript',
-  'jsx',
-  'json',
-  'bash',
-  'shellscript',
-  'markdown',
-  'python',
-  'rust',
-  'go',
-  'yaml',
-  'html',
-  'css',
-] as const satisfies readonly BundledLanguage[];
 
 const MARKDOWN_CODE_LANGUAGE_ALIASES: Partial<Record<string, BundledLanguage>> = {
   js: 'javascript',
@@ -811,7 +800,7 @@ const writeHighlightCache = (
 };
 
 const highlightCode = (
-  highlighter: ShikiHighlighter,
+  highlighter: MarkdownHighlighter,
   options: HighlightOptions
 ): MarkdownHighlightResult => {
   const language = normalizeCodeLanguage(options.language);
@@ -827,13 +816,7 @@ const highlightCode = (
   }
 
   try {
-    const result = highlighter.codeToTokens(options.code, {
-      lang: language,
-      themes: {
-        light: MARKDOWN_CODE_THEMES[0],
-        dark: MARKDOWN_CODE_THEMES[1],
-      },
-    });
+    const result = tokenizeMarkdownCode(highlighter, options.code, language);
     if (cacheable) {
       writeHighlightCache(cacheKey, options.code.length, result);
     }
@@ -843,45 +826,42 @@ const highlightCode = (
   }
 };
 
+/**
+ * Code blocks are tokenized in a worker: a large block took 60–80ms of main
+ * thread on first display (e.g. opening a session), blocking input and paint.
+ * Streamdown renders the raw text until the result arrives through `callback`.
+ * Cache hits stay synchronous. Without a worker (tests, server rendering, or
+ * after the worker failed) the same highlighter runs on the main thread.
+ */
 const createLazyShikiCodePlugin = (): CodeHighlighterPlugin => {
-  let highlighter: ShikiHighlighter | null = null;
-  let highlighterPromise: Promise<ShikiHighlighter> | null = null;
+  let highlighter: MarkdownHighlighter | null = null;
+  let highlighterPromise: Promise<MarkdownHighlighter> | null = null;
 
   const loadHighlighter = async () => {
-    // @pierre/diffs already imports shiki's bundledLanguages catalog. Reuse it
-    // instead of a second shiki/langs/*.mjs graph (duplicate grammar chunks).
-    highlighterPromise ??= Promise.all([
-      import('shiki/core'),
-      import('shiki/engine/javascript'),
-      import('shiki'),
-    ]).then(
-      ([
-        { createCssVariablesTheme, createHighlighterCore },
-        { createJavaScriptRegexEngine },
-        shiki,
-      ]) =>
-        createHighlighterCore({
-          engine: createJavaScriptRegexEngine(),
-          langs: MARKDOWN_CODE_LANGUAGES.map((id) => {
-            const language = shiki.bundledLanguages[id];
-            if (!language) {
-              throw new Error(`Missing bundled shiki language: ${id}`);
-            }
-            return language;
-          }),
-          themes: [
-            createCssVariablesTheme({
-              name: MARKDOWN_CODE_THEME_NAME,
-              variablePrefix: '--lody-shiki-',
-            }),
-          ],
-        }).then((loadedHighlighter) => {
-          highlighter = loadedHighlighter;
-          return loadedHighlighter;
-        })
-    );
-
+    highlighterPromise ??= createMarkdownHighlighter().then((loadedHighlighter) => {
+      highlighter = loadedHighlighter;
+      return loadedHighlighter;
+    });
     return highlighterPromise;
+  };
+
+  const highlightOnMainThread = (
+    options: HighlightOptions,
+    callback?: (result: MarkdownHighlightResult) => void
+  ): MarkdownHighlightResult | null => {
+    if (highlighter) {
+      return highlightCode(highlighter, options);
+    }
+
+    void loadHighlighter()
+      .then((loadedHighlighter) => {
+        callback?.(highlightCode(loadedHighlighter, options));
+      })
+      .catch(() => {
+        callback?.(createPlainHighlightResult(options.code));
+      });
+
+    return null;
   };
 
   return {
@@ -890,18 +870,31 @@ const createLazyShikiCodePlugin = (): CodeHighlighterPlugin => {
     getSupportedLanguages: () => [...MARKDOWN_CODE_LANGUAGES],
     getThemes: () => [...MARKDOWN_CODE_THEMES],
     highlight: (options, callback) => {
-      if (highlighter) {
-        return highlightCode(highlighter, options);
+      const language = normalizeCodeLanguage(options.language);
+      if (!language) {
+        return createPlainHighlightResult(options.code);
+      }
+      const cacheable = options.code.length <= HIGHLIGHT_CACHE_MAX_CODE_CHARS;
+      const cacheKey = `${language}\0${options.code}`;
+      if (cacheable) {
+        const cached = readHighlightCache(cacheKey);
+        if (cached !== undefined) return cached;
       }
 
-      void loadHighlighter()
-        .then((loadedHighlighter) => {
-          callback?.(highlightCode(loadedHighlighter, options));
-        })
-        .catch(() => {
-          callback?.(createPlainHighlightResult(options.code));
-        });
+      const worker = getMarkdownHighlightWorker();
+      if (!worker) return highlightOnMainThread(options, callback);
 
+      worker.highlight(options.code, language).then(
+        (tokens) => {
+          if (cacheable) writeHighlightCache(cacheKey, options.code.length, tokens);
+          callback?.(tokens);
+        },
+        () => {
+          // The worker died: finish this block (and later ones) on the main thread.
+          const result = highlightOnMainThread(options, callback);
+          if (result) callback?.(result);
+        }
+      );
       return null;
     },
     supportsLanguage: (language) => normalizeCodeLanguage(language) !== null,

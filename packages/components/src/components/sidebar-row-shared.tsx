@@ -347,6 +347,17 @@ export function SessionRowOpenedByMenuItems({
 }
 
 /**
+ * The container of a sidebar session-row list. A workspace sidebar can mount
+ * hundreds of rows (244 in one "Chats" group, 94% of the page's DOM) while a
+ * dozen are visible. `content-visibility: auto` lets the browser skip style,
+ * layout and paint for rows scrolled out of the sidebar: a full-app restyle
+ * measured 25ms before and 8.6ms after. Rows must keep drawing inside their own
+ * box (focus rings are `ring-inset`), because the property also applies paint
+ * containment. The rule lives in `tailwind/index.css` (`sidebar-row-list`).
+ */
+export const SIDEBAR_ROW_LIST_CLASS = 'flex flex-col gap-px sidebar-row-list';
+
+/**
  * Marks one flat-list row with opened-by tree depth. `gutter={false}` leaves
  * a list with no nesting untouched. Connectors live in the leading slot.
  */

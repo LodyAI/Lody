@@ -45,8 +45,42 @@ Translation: current
 未采用"把弹层渲染到专用容器"作为主修复：Radix focus guard 总是直接插在 `<body>` 上，而且每个弹层
 调用点都要加 container 参数。既然已无任何引用，也无需覆写 Konsta 的工具类。
 
+## 后续削减
+
+同一生产构建、同一工作区（9k 节点）下测得：
+
+- **侧边栏 DOM。** 9,070 个节点中有 8,473 个来自一个 "Chats" 分组：它挂载了全部 244 行，可见的只有
+  12 行。行列表现使用 `content-visibility: auto`（`sidebar-row-list`），一次全应用样式和布局计算从
+  25ms 降到 10.6ms。暂不采用 JS 虚拟化：侧边栏的键盘导航、活动行滚动和分组排序都依赖已挂载的行。
+  固有尺寸估计值（50px）让首次渲染过程中的滚动高度误差保持在 2% 以内。
+- **GitHub 文件树。** `GitHubRepoFileProvider.searchFiles` 每次搜索都下载完整递归树（本仓库 1.7MB）。
+  现由 `lib/repo-file-paths-cache.ts` 与 @ 提及搜索共用一份按分支区分的内存/IndexedDB 缓存，每个键同时
+  只有一个请求。
+- **PR 读取。** 每个 `useGitHubPrDetails` 实例只对自己的请求去重，信息栏和 PR 标签页会把同一 PR 请求
+  两次。相同读取现在在模块级共享。
+- **空闲滚动。** 原生选区的滚动处理在没有选中时也会在每次滚动读取 `Selection` 并强制同步 React 刷新，
+  现在直接返回。吸底逻辑的 `scrollHeight` 读取保留：它是绘制前的修正，每次切换约 14ms，且主要是该帧
+  本来就要做的布局。
+- **doc-meta。** 同时完成的完整元数据读取按微任务合并为一次缓存写入，而不是每个文档一次；元数据对象
+  未变的列表项保持同一引用；值比较改为遍历 JSON，而不是序列化。
+
+- **切换渲染。** 之后的生产 trace 显示每次切换会话是一个约 100ms 的同步任务：render 约 49ms，passive
+  effect 约 16ms，DOM 更新约 14ms。工作区分组的行是 memo 分组内的内联 JSX，而分组接收
+  `selectedSessionId`，所以任何选中变化都会重新渲染整组的行（"Chats" 共 244 行），每行都带悬浮卡片、
+  右键菜单和 Tooltip。现在行是 memo 的 `SessionGroupRow`，接收 `isSelected`，切换时只重新渲染旧、新
+  选中两行。输入框自动撑高在内容为空时不再先设 `auto` 再读 `scrollHeight`，此前每次切换都会强制
+  一次整页同步布局（约 5ms）。
+
+- **启动时的元数据扫描。** 一个约 4,800 个文档（10.4 万条 meta 行）的工作区冷启动时，把整个 `['m']`
+  命名空间扫了三遍：doc-meta 初始化、后台 eager-sync 的种子、启动时的 ACP 能力刷新。每遍都是一次
+  550-900ms 的同步 Flock 调用，其后的缓存写入只要约 1ms。种子和能力刷新现在读取已就绪的 doc-meta
+  投影（`readReadyDocMetaCache`，通过 `RuntimeDeps.readDocMetaCache` 注入），只有当前 repo 没有
+  就绪投影时才扫描。投影由它自己的 watch 维持最新，因此至少和一次新扫描一样新。初始化扫描本身在
+  Flock 支持分页前仍是一次阻塞调用。
+
 ## 未决
 
 Konsta 的 `theme.css` 仍会导入全部 Konsta 样式；目前只证实这一条工具类有影响。还没有自动检查拒绝
-编译后 CSS 中未锚定的位置选择器。开发构建的 Safari 录制中看到的 doc-meta 重算在生产构建里不是主因，
-本次未改动。相关滚动工作：[对话跟随模式](../architecture/2026-09-23-conversation-follow-modes.md)。
+编译后 CSS 中未锚定的位置选择器。doc-meta 列表已变便宜（见上），但每次缓存更新仍以 O(会话数) 推导
+全部列表。侧边栏仍在 React 中渲染每一行，只是浏览器跳过了渲染工作。初始化的元数据扫描仍是一次同步 Flock 调用（这里约 700ms）；`scan` 没有
+limit/游标，无法在批次之间让出主线程。`includeRaw: false` 可省约 20%。相关滚动工作：[对话跟随模式](../architecture/2026-09-23-conversation-follow-modes.md)。

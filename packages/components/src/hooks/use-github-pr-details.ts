@@ -175,6 +175,23 @@ async function runPrSliceWithUnauthorizedRetry(
   });
 }
 
+/**
+ * One network request per identical GitHub read in flight, across every hook
+ * instance: the PR info bar and the PR tab mount their own hooks for the same
+ * pull request, and each used to send its own copy of every request.
+ */
+const sharedGitHubReads = new Map<string, Promise<unknown>>();
+
+function shareGitHubRead<T>(key: string, read: () => Promise<T>): Promise<T> {
+  const pending = sharedGitHubReads.get(key);
+  if (pending) return pending as Promise<T>;
+  const request: Promise<T> = read().finally(() => {
+    if (sharedGitHubReads.get(key) === request) sharedGitHubReads.delete(key);
+  });
+  sharedGitHubReads.set(key, request);
+  return request;
+}
+
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => {
     window.setTimeout(resolve, ms);
@@ -469,11 +486,15 @@ export function useGitHubPrDetails({
             if (cacheKeyRef.current !== targetCacheKey) return;
             switch (slice) {
               case 'prDetails': {
-                const fetchedPullRequest = await githubFetchPullRequestDetails(
-                  token,
-                  normalizedRepoFullName,
-                  prNumber,
-                  requestOptions
+                const fetchedPullRequest = await shareGitHubRead(
+                  `prDetails:${workspaceId}:${normalizedRepoFullName}#${prNumber}:${requestOptions?.cache ?? ''}`,
+                  () =>
+                    githubFetchPullRequestDetails(
+                      token,
+                      normalizedRepoFullName,
+                      prNumber,
+                      requestOptions
+                    )
                 );
                 if (cacheKeyRef.current !== targetCacheKey) return;
                 const prev = payloadRef.current ?? createEmptyPayload();
@@ -490,11 +511,15 @@ export function useGitHubPrDetails({
                 break;
               }
               case 'reviewComments': {
-                const reviewThreads = await githubFetchPRReviewComments(
-                  token,
-                  normalizedRepoFullName,
-                  prNumber,
-                  requestOptions
+                const reviewThreads = await shareGitHubRead(
+                  `reviewComments:${workspaceId}:${normalizedRepoFullName}#${prNumber}:${requestOptions?.cache ?? ''}`,
+                  () =>
+                    githubFetchPRReviewComments(
+                      token,
+                      normalizedRepoFullName,
+                      prNumber,
+                      requestOptions
+                    )
                 );
                 if (cacheKeyRef.current !== targetCacheKey) return;
                 const prev = payloadRef.current ?? createEmptyPayload();
@@ -507,11 +532,15 @@ export function useGitHubPrDetails({
                 break;
               }
               case 'reviews': {
-                const reviews = await githubFetchPullRequestReviews(
-                  token,
-                  normalizedRepoFullName,
-                  prNumber,
-                  requestOptions
+                const reviews = await shareGitHubRead(
+                  `reviews:${workspaceId}:${normalizedRepoFullName}#${prNumber}:${requestOptions?.cache ?? ''}`,
+                  () =>
+                    githubFetchPullRequestReviews(
+                      token,
+                      normalizedRepoFullName,
+                      prNumber,
+                      requestOptions
+                    )
                 );
                 if (cacheKeyRef.current !== targetCacheKey) return;
                 const prev = payloadRef.current ?? createEmptyPayload();
@@ -524,11 +553,15 @@ export function useGitHubPrDetails({
                 break;
               }
               case 'issueComments': {
-                const issueComments = await githubFetchPRIssueComments(
-                  token,
-                  normalizedRepoFullName,
-                  prNumber,
-                  requestOptions
+                const issueComments = await shareGitHubRead(
+                  `issueComments:${workspaceId}:${normalizedRepoFullName}#${prNumber}:${requestOptions?.cache ?? ''}`,
+                  () =>
+                    githubFetchPRIssueComments(
+                      token,
+                      normalizedRepoFullName,
+                      prNumber,
+                      requestOptions
+                    )
                 );
                 if (cacheKeyRef.current !== targetCacheKey) return;
                 const prev = payloadRef.current ?? createEmptyPayload();
@@ -545,11 +578,9 @@ export function useGitHubPrDetails({
                 const ref = payloadRef.current?.pullRequest?.headSha || headCommitSha?.trim() || '';
                 if (!ref) return;
                 try {
-                  const checkRuns = await githubFetchCheckRuns(
-                    token,
-                    normalizedRepoFullName,
-                    ref,
-                    requestOptions
+                  const checkRuns = await shareGitHubRead(
+                    `checkRuns:${workspaceId}:${normalizedRepoFullName}@${ref}:${requestOptions?.cache ?? ''}`,
+                    () => githubFetchCheckRuns(token, normalizedRepoFullName, ref, requestOptions)
                   );
                   if (cacheKeyRef.current !== targetCacheKey) return;
                   const prev = payloadRef.current ?? createEmptyPayload();
