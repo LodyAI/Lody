@@ -1581,12 +1581,6 @@ importers:
 
   site-docs:
     dependencies:
-      '@lody/components':
-        specifier: workspace:*
-        version: link:../packages/components
-      '@lody/shared':
-        specifier: workspace:*
-        version: link:../packages/shared
       '@number-flow/react':
         specifier: ^0.6.2
         version: 0.6.2(react-dom@19.2.0(react@19.2.0))(react@19.2.0)
@@ -1605,6 +1599,9 @@ importers:
       '@types/mdx':
         specifier: ^2.0.13
         version: 2.0.14
+      clsx:
+        specifier: ^2.1.1
+        version: 2.1.1
       fumadocs-core:
         specifier: 16.8.12
         version: 16.8.12(@mdx-js/mdx@3.1.1)(@tanstack/react-router@1.170.18(react-dom@19.2.0(react@19.2.0))(react@19.2.0))(@types/estree-jsx@1.0.5)(@types/hast@3.0.4)(@types/mdast@4.0.4)(@types/react@19.2.17)(lucide-react@0.523.0(react@19.2.0))(react-dom@19.2.0(react@19.2.0))(react-router@7.13.0(react-dom@19.2.0(react@19.2.0))(react@19.2.0))(react@19.2.0)(zod@4.3.6)
@@ -1614,12 +1611,6 @@ importers:
       fumadocs-ui:
         specifier: npm:@fumadocs/base-ui@16.8.12
         version: '@fumadocs/base-ui@16.8.12(@date-fns/tz@1.4.1)(@emotion/is-prop-valid@1.4.0)(@tailwindcss/oxide@4.3.3)(@types/mdx@2.0.14)(@types/react@19.2.17)(date-fns@4.1.0)(fumadocs-core@16.8.12(@mdx-js/mdx@3.1.1)(@tanstack/react-router@1.170.18(react-dom@19.2.0(react@19.2.0))(react@19.2.0))(@types/estree-jsx@1.0.5)(@types/hast@3.0.4)(@types/mdast@4.0.4)(@types/react@19.2.17)(lucide-react@0.523.0(react@19.2.0))(react-dom@19.2.0(react@19.2.0))(react-router@7.13.0(react-dom@19.2.0(react@19.2.0))(react@19.2.0))(react@19.2.0)(zod@4.3.6))(react-dom@19.2.0(react@19.2.0))(react@19.2.0)(tailwindcss@4.3.3)'
-      i18next:
-        specifier: ^25.3.1
-        version: 25.8.4(typescript@5.9.3)
-      jotai:
-        specifier: 'catalog:'
-        version: 2.17.1(@babel/core@7.29.0)(@babel/template@7.28.6)(@types/react@19.2.17)(react@19.2.0)
       lucide-react:
         specifier: 'catalog:'
         version: 0.523.0(react@19.2.0)
@@ -1632,12 +1623,12 @@ importers:
       react-dom:
         specifier: 'catalog:'
         version: 19.2.0(react@19.2.0)
-      react-i18next:
-        specifier: ^15.6.0
-        version: 15.7.4(i18next@25.8.4(typescript@5.9.3))(react-dom@19.2.0(react@19.2.0))(react@19.2.0)(typescript@5.9.3)
       srvx:
         specifier: ^0.11.9
         version: 0.11.22
+      tailwind-merge:
+        specifier: ^3.6.0
+        version: 3.6.0
       three:
         specifier: ^0.185.0
         version: 0.185.1
@@ -3616,42 +3607,6 @@ packages:
     resolution: {integrity: sha512-47dfpl2e8F47baSQTE+QaWzF/kKoOeR9YQ2fIBdRGzZZP2/QZ6D0uwLY2ZamS8ypov4UFtg92jZh8m+w65bsGg==}
     engines: {node: '>=16'}
     hasBin: true
-
-  '@openai/codex@0.156.0-darwin-arm64':
-    resolution: {integrity: sha512-43/9bryLjRA+g7z1AGeFS8AQiChmG52nIhzMkxjNAXcxEBMVsA88YGBosk0ndThjgTGB42vK82BQV3DR6OBsGQ==}
-    engines: {node: '>=16'}
-    cpu: [arm64]
-    os: [darwin]
-
-  '@openai/codex@0.156.0-darwin-x64':
-    resolution: {integrity: sha512-fD6Nxn7rxinrE6JRxN1liMH3rIV2j9HjcszwMprgs3Ka2p6rR60CmvN03RsWOT4vCcxnA7Evhpnm+bCTNVhH+g==}
-    engines: {node: '>=16'}
-    cpu: [x64]
-    os: [darwin]
-
-  '@openai/codex@0.156.0-linux-arm64':
-    resolution: {integrity: sha512-IfUrjxm8RAdzPgqlPhUXTJ4mGKKbuTKsNixiXoiRzNkd9kNLj/fUmOQYCcWu+3Dk77b4OH1itnoIRAcFimNzNQ==}
-    engines: {node: '>=16'}
-    cpu: [arm64]
-    os: [linux]
-
-  '@openai/codex@0.156.0-linux-x64':
-    resolution: {integrity: sha512-/PX399ISB715skgBBOtOX5aqLxmPQhYC7wDasZnAJhRrtzt3qgs6kjSnimN9T8OFKv4LDAp+uJdN896tQYaTrA==}
-    engines: {node: '>=16'}
-    cpu: [x64]
-    os: [linux]
-
-  '@openai/codex@0.156.0-win32-arm64':
-    resolution: {integrity: sha512-kDs2Sz+oDAcAm6n5C1TkN6qy7ZNWZiDPM7Uj0Z913I+SFLOYTkF/OB2SWYFG73jF/gKLrkIpWZFdIvFUaMBWfw==}
-    engines: {node: '>=16'}
-    cpu: [arm64]
-    os: [win32]
-
-  '@openai/codex@0.156.0-win32-x64':
-    resolution: {integrity: sha512-9y+shxtHJn7yrmZqF4gs9oK1Tte9Heshkda8TrTiAf3bPn24cgOq+avZ+Mad54I3M2R8AFeqt0hT/aS6s5cbAQ==}
-    engines: {node: '>=16'}
-    cpu: [x64]
-    os: [win32]
 
   '@opentelemetry/api@1.9.0':
     resolution: {integrity: sha512-3giAOQvZiH5F9bMlMiv8+GSPMeqg0dbaeo58/0SlA9sxSqZhnUtxzX9/2FzyhS9sWQf5S0GJE0AKBrFqjpeYcg==}
@@ -15966,32 +15921,7 @@ snapshots:
 
   '@oozcitak/util@10.0.0': {}
 
-  '@openai/codex@0.156.0':
-    optionalDependencies:
-      '@openai/codex-darwin-arm64': '@openai/codex@0.156.0-darwin-arm64'
-      '@openai/codex-darwin-x64': '@openai/codex@0.156.0-darwin-x64'
-      '@openai/codex-linux-arm64': '@openai/codex@0.156.0-linux-arm64'
-      '@openai/codex-linux-x64': '@openai/codex@0.156.0-linux-x64'
-      '@openai/codex-win32-arm64': '@openai/codex@0.156.0-win32-arm64'
-      '@openai/codex-win32-x64': '@openai/codex@0.156.0-win32-x64'
-
-  '@openai/codex@0.156.0-darwin-arm64':
-    optional: true
-
-  '@openai/codex@0.156.0-darwin-x64':
-    optional: true
-
-  '@openai/codex@0.156.0-linux-arm64':
-    optional: true
-
-  '@openai/codex@0.156.0-linux-x64':
-    optional: true
-
-  '@openai/codex@0.156.0-win32-arm64':
-    optional: true
-
-  '@openai/codex@0.156.0-win32-x64':
-    optional: true
+  '@openai/codex@0.156.0': {}
 
   '@opentelemetry/api@1.9.0':
     optional: true
@@ -23352,7 +23282,7 @@ snapshots:
 
   konsta@5.0.9:
     dependencies:
-      tailwind-merge: 3.4.0
+      tailwind-merge: 3.6.0
 
   kuler@2.0.0: {}
 
@@ -26262,7 +26192,7 @@ snapshots:
       remark-rehype: 11.1.2
       remend: 1.3.0(patch_hash=1dca30d74402e3a26ca417addef5ccc4f7b566116a0604122b032aa9744fa00c)
       shiki: 3.22.0
-      tailwind-merge: 3.4.0
+      tailwind-merge: 3.6.0
       unified: 11.0.5
       unist-util-visit: 5.1.0
       unist-util-visit-parents: 6.0.2

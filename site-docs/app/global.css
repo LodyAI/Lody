@@ -12,8 +12,6 @@
 @import './blog.css';
 @import './reading-theme.css';
 
-@source '../../packages/components/src/**/*.{ts,tsx}';
-
 @custom-variant dark (&:where(.dark, .dark *));
 
 @theme inline {
@@ -185,13 +183,13 @@
 }
 
 /* ---- Embedded product preview theme ---------------------------------------
-   The Hero/feature previews render REAL app components, which expect the app's
-   own design tokens. Scope those tokens to `.lody-app-preview` so they never
-   leak into (or collide with) the landing's `--landing-*` system, and key the
-   dark set off the page-level `.dark` class so the preview tracks the site theme
-   toggle. Values mirror packages/components/src/tailwind/index.css. */
-.lody-app-preview,
-.lody-app-preview-portal-light {
+   The landing's product replica (`components/landing-replica/`) paints with the
+   app's design token names. Scope those tokens to `.lody-app-preview` so they
+   never leak into (or collide with) the landing's `--landing-*` system, and key
+   the dark set off the page-level `.dark` class so the preview tracks the site
+   theme toggle. Values were copied from the app's tailwind tokens; the replica
+   owns them now and does not follow app palette changes automatically. */
+.lody-app-preview {
   color-scheme: light;
   --background: 0 0% 100%;
   --foreground: 0 0% 10%;
@@ -256,8 +254,7 @@
   --code-removed: var(--github-deletion);
 }
 
-.dark .lody-app-preview,
-.lody-app-preview-portal-dark {
+.dark .lody-app-preview {
   color-scheme: dark;
   --background: 222 55% 9.6%;
   --foreground: 210 40% 96%;
@@ -351,79 +348,6 @@
   --bottom-bar: 214 52% 4%;
 }
 
-/* Landing dive: Radix portals that DON'T carry the `.lody-app-preview-portal-*`
-   class (e.g. the real WorkdirModeSelector's DropdownMenuContent) still need the
-   app tokens, since they mount at <body> outside the scoped preview. Provide
-   defaults on the popper wrapper; classed popovers override them one level down. */
-html.underwater-landing-page [data-radix-popper-content-wrapper] {
-  --z-popover: 60;
-  --popover: 0 0% 100%;
-  --popover-foreground: 0 0% 10%;
-  --background: 0 0% 100%;
-  --foreground: 0 0% 10%;
-  --border: 214 32% 91%;
-  --hover: 212 100% 95%;
-  --hover-foreground: 0 0% 10%;
-  --muted: 210 40% 96%;
-  --muted-foreground: 215 16% 38%;
-}
-
-/* Menus use menuSurfaceStyle → hsl(var(--background)). Keep --background in
-   lockstep with the power-demo ocean surface so merge-method (and other) menus
-   match the PR card instead of the docs-shell slate. */
-html.underwater-landing-page.dark [data-radix-popper-content-wrapper] {
-  --background: 214 64% 3.5%;
-  --foreground: 205 30% 92%;
-  --popover: 214 52% 7%;
-  --popover-foreground: 205 30% 92%;
-  --card: 214 52% 7%;
-  --card-foreground: 205 30% 92%;
-  --border: 214 32% 16%;
-  --hover: 214 40% 12%;
-  --hover-foreground: 205 30% 92%;
-  --muted: 214 40% 10%;
-  --muted-foreground: 210 18% 68%;
-  --primary: 194 90% 60%;
-  --primary-foreground: 210 84% 8%;
-  --ring: 194 90% 60%;
-  --destructive: 0 72% 55%;
-  --destructive-foreground: 0 0% 98%;
-  --status-danger: 0 72% 55%;
-}
-
-/* Landing dive: the classed selector popovers (BranchSelector, model/machine
-   selectors) carry `.lody-app-preview-portal-dark`, whose slate tokens are too
-   light to sit in the abyss. Deepen them to the same deep-ocean palette as the
-   embedded preview so the dropdowns match the app. Scoped to the landing page.
-   Also apply without requiring html.dark — power demos force a dark shell even
-   when the marketing page is light. */
-html.underwater-landing-page.dark .lody-app-preview-portal-dark,
-html.underwater-landing-page .lody-app-preview-portal-dark {
-  --background: 214 64% 3.5%;
-  --foreground: 205 30% 92%;
-  --card: 214 52% 7%;
-  --card-foreground: 205 30% 92%;
-  --popover: 214 52% 7%;
-  --popover-foreground: 205 30% 92%;
-  --primary: 194 90% 60%;
-  --primary-foreground: 210 84% 8%;
-  --secondary: 214 38% 12%;
-  --secondary-foreground: 205 30% 92%;
-  --muted: 214 40% 10%;
-  --muted-foreground: 210 18% 68%;
-  --hover: 214 40% 12%;
-  --hover-foreground: 205 30% 92%;
-  --selection: 200 55% 16%;
-  --selection-foreground: 205 30% 92%;
-  --border: 214 32% 16%;
-  --input: 214 32% 16%;
-  --input-border: 214 32% 16%;
-  --ring: 194 90% 60%;
-  --destructive: 0 72% 55%;
-  --destructive-foreground: 0 0% 98%;
-  --status-danger: 0 72% 55%;
-}
-
 /* Landing preview conversation scroller: keep scroll-pro behavior, but make
    the native scrollbar fully transparent and zero-width so it never steals
    layout space inside the embedded session view. */
@@ -456,9 +380,8 @@ html.underwater-landing-page .lody-app-preview-portal-dark {
   background: transparent;
 }
 
-/* Landing preview mobile shell: MobileHomeScreen is a real app component whose
-   full app build gets these mobile-home rules from @lody/components/tailwind.
-   Keep only the embed-specific subset here, scoped to the preview. */
+/* Landing preview mobile shell: the replica keeps the app's mobile-home class
+   names, and these are the embed-specific rules for them, scoped to the preview. */
 
 /* Desktop-session embeds have no real notch — zero Konsta safe-area vars.
    Inside the phone frame those vars are set on [data-landing-phone-frame]
@@ -493,7 +416,6 @@ html.underwater-landing-page .lody-app-preview-portal-dark {
 
 .lody-app-preview .mobile-home-app {
   --mobile-tabbar-height: 3.75rem;
-  --mobile-home-header-height: calc(3.25rem + var(--k-safe-area-top, 0px));
 }
 
 @supports (backdrop-filter: blur(20px)) or (-webkit-backdrop-filter: blur(20px)) {
@@ -508,14 +430,6 @@ html.underwater-landing-page .lody-app-preview-portal-dark {
   .lody-app-preview .mobile-home-glass {
     background: hsl(var(--background) / 0.96);
   }
-}
-
-.lody-app-preview .mobile-home-shell .hide-scrollbar {
-  scrollbar-width: none;
-}
-
-.lody-app-preview .mobile-home-shell .hide-scrollbar::-webkit-scrollbar {
-  display: none;
 }
 
 .lody-app-preview .mobile-tabbar-glass {
@@ -614,38 +528,30 @@ html.underwater-landing-page .lody-app-preview-portal-dark {
   }
 
   /*
-   * Contain scale: fit 1120×760 fully inside the stage (no crop at rest).
-   * JS sets --ld-focus-tx/ty/total-s for Ken-Burns zoom with edge clamp.
-   * Pure-CSS fallback also centers the letterbox (not top-left 0,0) so the
-   * first paint before ResizeObserver matches the settled camera.
+   * Contain scale: fit 1120×760 fully inside the stage (no crop) and center the
+   * letterbox on both axes.
    *
    * Divisors MUST be lengths (`1120px`, not unitless `1120`): length/length
    * yields a unitless number for `scale()`. length/number stays a length and
    * invalidates the whole `transform` (computed as none) — which used to make
-   * tablet / ~1000px viewports clip instead of contain-scale. Phone demos
-   * masked the bug because JS always injected a numeric --ld-focus-total-s.
+   * tablet / ~1000px viewports clip instead of contain-scale.
    */
   .landing-desktop-demo-shell {
     --ld-base-s: min(calc(100cqw / 1120px), calc(100cqh / 760px));
-    --ld-total-s: var(--ld-focus-total-s, var(--ld-base-s));
     /* Center letterbox: (stage - design·s) / 2 on each axis. */
-    --ld-tx: var(--ld-focus-tx, calc((100cqw - 1120px * var(--ld-base-s)) / 2));
-    --ld-ty: var(--ld-focus-ty, calc((100cqh - 760px * var(--ld-base-s)) / 2));
+    --ld-tx: calc((100cqw - 1120px * var(--ld-base-s)) / 2);
+    --ld-ty: calc((100cqh - 760px * var(--ld-base-s)) / 2);
     position: absolute;
     left: 0;
     top: 0;
     width: var(--ld-design-w);
     height: var(--ld-design-h);
-    transform: translate(var(--ld-tx), var(--ld-ty)) scale(var(--ld-total-s));
+    transform: translate(var(--ld-tx), var(--ld-ty)) scale(var(--ld-base-s));
     transform-origin: top left;
     transition: transform 0.85s cubic-bezier(0.22, 0.61, 0.36, 1);
     will-change: transform;
     /* Shell paint is the app chrome only — no outer fill. */
     background: transparent;
-  }
-
-  .landing-app-preview-stage[data-focus-zoom='true'] .landing-desktop-demo-shell {
-    transition-timing-function: cubic-bezier(0.33, 0.1, 0.25, 1);
   }
 
   @media (prefers-reduced-motion: reduce) {

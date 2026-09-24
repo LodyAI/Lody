@@ -1,49 +1,31 @@
 'use client';
 
 /**
- * Live product-component demos for the landing "More power" section.
- * Uses pure views (StatsSettingsView, PrTabView) + deterministic mock data so
- * chrome tokens match the landing dark theme — no static screenshots.
+ * Live product demos for the landing "More power" section, rendered by the
+ * display-only replicas in `landing-replica/` (Usage settings view + embedded PR
+ * tab) with deterministic mock data — no static screenshots, no app imports.
  *
- * Usage legends use agent glyphs (by model/agent series) and avatar rings
- * (by member) instead of bare color swatches.
+ * Usage legends use agent glyphs (by model) and initials avatars (by member)
+ * instead of bare color swatches.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { createInstance } from 'i18next';
-import { I18nextProvider, initReactI18next } from 'react-i18next';
-import { StatsSettingsView } from '@/components/settings/stats-setting-pure';
-import type { SettingsUsageRange } from '@/components/settings/settings-data-cache';
-import type { StackedAreaSeriesDef } from '@/components/settings/usage-stacked-area-chart';
-import { PrTabView } from '@/components/sessions/pr-tab-view';
-import { TooltipProvider } from '@/ui/tooltip';
+import { useEffect, useMemo, useRef, useState, type ReactNode, type Ref } from 'react';
 import { LANDING_AGENTS } from './landing-agents.generated';
+import { Sparkles } from 'lucide-react';
 import {
   buildLandingUsageDay,
   buildLandingUsageDemo,
   LANDING_PR_DEMO_DATA,
-  LANDING_PR_DEMO_NUMBER,
-  LANDING_PR_DEMO_REPO,
   LANDING_USAGE_MEMBERS,
 } from './landing-power-demo-data';
-import { POWER_DEMO_I18N } from './landing-power-i18n';
-
-const powerI18n = createInstance();
-
-void powerI18n.use(initReactI18next).init({
-  lng: 'en',
-  fallbackLng: 'en',
-  defaultNS: 'translation',
-  ns: ['translation'],
-  resources: {
-    en: { translation: POWER_DEMO_I18N.en },
-    zh_CN: { translation: POWER_DEMO_I18N.zh_CN },
-  },
-  keySeparator: false,
-  interpolation: { escapeValue: false },
-  initImmediate: false,
-  react: { useSuspense: false },
-});
+import { POWER_DEMO_COPY, type PowerDemoCopy } from './landing-power-i18n';
+import { AnthropicIcon, OpenAIIcon } from './landing-replica/icons';
+import { PowerPrView } from './landing-replica/power-pr';
+import {
+  PowerUsageView,
+  type StackedAreaSeries,
+  type UsageRange,
+} from './landing-replica/power-usage';
 
 const MARK_BY_ID = new Map(LANDING_AGENTS.map((agent) => [agent.id, agent]));
 
@@ -77,8 +59,8 @@ function PowerDemoShell({
   pageScroll = false,
   manualScroll = false,
 }: {
-  children: React.ReactNode;
-  sceneRef?: React.Ref<HTMLDivElement>;
+  children: ReactNode;
+  sceneRef?: Ref<HTMLDivElement>;
   pageScroll?: boolean;
   manualScroll?: boolean;
 }) {
@@ -95,11 +77,8 @@ function PowerDemoShell({
   );
 }
 
-/**
- * Neutral agent glyph — series color is carried by the label text
- * (`tintSeriesLabel`), not a colored ring.
- */
-function AgentSeriesMarker({ series }: { series: StackedAreaSeriesDef }) {
+/** Neutral agent glyph — series color is carried by the tinted label text. */
+function renderModelSeriesMarker(series: StackedAreaSeries) {
   const markId = agentMarkIdForSeries(series.id);
   const mark = markId ? MARK_BY_ID.get(markId) : undefined;
   return (
@@ -121,8 +100,29 @@ function AgentSeriesMarker({ series }: { series: StackedAreaSeriesDef }) {
   );
 }
 
+const MODEL_ICON_CLASS = 'h-3 w-3 shrink-0 text-foreground/50';
+
+/** Monochrome provider mark for a day-breakdown model row (app `ModelBrandIcon`). */
+function renderModelIcon(modelId: string) {
+  const id = modelId.toLowerCase().split(/[:/]/).pop() ?? '';
+  if (/^(claude|anthropic)/.test(id)) return <AnthropicIcon className={MODEL_ICON_CLASS} />;
+  if (/^(gpt|codex|o[1-9]|chatgpt|openai)/.test(id)) {
+    return <OpenAIIcon className={MODEL_ICON_CLASS} />;
+  }
+  const markId = agentMarkIdForSeries(id);
+  const mark = markId ? MARK_BY_ID.get(markId) : undefined;
+  if (!mark) return <Sparkles className={MODEL_ICON_CLASS} />;
+  return (
+    <span
+      className="h-3 w-3 shrink-0 text-foreground/50 inline-flex items-center justify-center [&_svg]:h-full [&_svg]:w-full"
+      // Registry marks are trusted build-time assets.
+      dangerouslySetInnerHTML={{ __html: mark.svg }}
+    />
+  );
+}
+
 /** Neutral initials avatar — series color is on the label text. */
-function MemberSeriesMarker({ series }: { series: StackedAreaSeriesDef }) {
+function renderMemberSeriesMarker(series: StackedAreaSeries) {
   const initials = MEMBER_INITIALS.get(series.id) ?? series.label.slice(0, 1).toUpperCase();
   return (
     <span
@@ -135,19 +135,23 @@ function MemberSeriesMarker({ series }: { series: StackedAreaSeriesDef }) {
   );
 }
 
-function PowerUsageDemo() {
+function PowerUsageDemo({ copy }: { copy: PowerDemoCopy }) {
   const sceneRef = useRef<HTMLDivElement>(null);
-  const [range, setRange] = useState<SettingsUsageRange>('week');
+  const [range, setRange] = useState<UsageRange>('week');
   const [selectedUsageDay, setSelectedUsageDay] = useState<number | null>(null);
-  const data = useMemo(() => buildLandingUsageDemo(range), [range]);
+  const data = useMemo(() => buildLandingUsageDemo(range, copy), [range, copy]);
   const usageDay = useMemo(
     () => (selectedUsageDay === null ? undefined : buildLandingUsageDay(selectedUsageDay)),
     [selectedUsageDay]
   );
+  const dayOpen = selectedUsageDay !== null;
 
+  // Rotate ranges only while the frame is visible and motion is allowed, so the
+  // number/chart transitions never become permanent background work. An open day
+  // breakdown also holds the rotation: an hourly range switch would close it.
   useEffect(() => {
     const scene = sceneRef.current;
-    if (!scene) return undefined;
+    if (!scene || dayOpen) return undefined;
 
     const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
     let visible = false;
@@ -189,70 +193,38 @@ function PowerUsageDemo() {
       document.removeEventListener('visibilitychange', sync);
       reducedMotion.removeEventListener('change', sync);
     };
-  }, []);
-
-  const renderModelSeriesMarker = useCallback(
-    (series: StackedAreaSeriesDef) => <AgentSeriesMarker series={series} />,
-    []
-  );
-  const renderMemberSeriesMarker = useCallback(
-    (series: StackedAreaSeriesDef) => <MemberSeriesMarker series={series} />,
-    []
-  );
+  }, [dayOpen]);
 
   return (
     <PowerDemoShell sceneRef={sceneRef} manualScroll>
-      <StatsSettingsView
+      <PowerUsageView
+        labels={copy.usage}
+        intlLocale={copy.intlLocale}
         workspaceName="Lody"
         range={range}
         onRangeChange={setRange}
-        ready
         totals={data.totals}
         byModelBuckets={data.byModelBuckets}
         byMemberBuckets={data.byMemberBuckets}
-        usageCalendar={data.usageCalendar}
-        usageTimeline={data.usageTimeline}
-        usageDay={usageDay}
-        usageDayLoading={false}
-        onSelectedUsageDayChange={setSelectedUsageDay}
-        workspaceId="landing-ws"
-        loading={false}
+        calendar={data.calendar}
+        timeline={data.timeline}
         renderModelSeriesMarker={renderModelSeriesMarker}
         renderMemberSeriesMarker={renderMemberSeriesMarker}
         tintModelSeriesLabel
         tintMemberSeriesLabel
         costFractionDigits={0}
+        usageDay={usageDay}
+        onSelectedUsageDayChange={setSelectedUsageDay}
+        renderModelIcon={renderModelIcon}
       />
     </PowerDemoShell>
   );
 }
 
-function PowerPrDemo() {
+function PowerPrDemo({ copy }: { copy: PowerDemoCopy }) {
   return (
     <PowerDemoShell pageScroll>
-      <TooltipProvider delayDuration={200}>
-        <PrTabView
-          repoFullName={LANDING_PR_DEMO_REPO}
-          prNumber={LANDING_PR_DEMO_NUMBER}
-          state="ready"
-          data={LANDING_PR_DEMO_DATA}
-          mergeMethod="squash"
-          branchExists
-          embedded
-          onPostComment={async () => {
-            /* decorative */
-          }}
-          onSelectMergeMethod={() => {
-            /* decorative */
-          }}
-          onMerge={async () => {
-            /* decorative */
-          }}
-          onSetState={async () => {
-            /* decorative */
-          }}
-        />
-      </TooltipProvider>
+      <PowerPrView data={LANDING_PR_DEMO_DATA} labels={copy.pr} intlLocale={copy.intlLocale} />
     </PowerDemoShell>
   );
 }
@@ -260,14 +232,6 @@ function PowerPrDemo() {
 export type PowerDemoId = 'usage' | 'pr';
 
 export function LandingPowerDemo({ id, locale }: { id: PowerDemoId; locale: 'en' | 'zh' }) {
-  const lng = locale === 'zh' ? 'zh_CN' : 'en';
-  if (powerI18n.language !== lng) {
-    void powerI18n.changeLanguage(lng);
-  }
-
-  return (
-    <I18nextProvider i18n={powerI18n}>
-      {id === 'usage' ? <PowerUsageDemo /> : <PowerPrDemo />}
-    </I18nextProvider>
-  );
+  const copy = POWER_DEMO_COPY[locale];
+  return id === 'usage' ? <PowerUsageDemo copy={copy} /> : <PowerPrDemo copy={copy} />;
 }

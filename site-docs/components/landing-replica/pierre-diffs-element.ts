@@ -1,3 +1,5 @@
+/* Registers the `@pierre/diffs` container custom element with its core CSS in
+   an open shadow root. Import for its side effect before rendering `FileDiff`. */
 import { DIFFS_TAG_NAME, wrapCoreCSS } from '@pierre/diffs';
 
 let sharedSheet: CSSStyleSheet | undefined;

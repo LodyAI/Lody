@@ -5,7 +5,7 @@ Root `AGENTS.md` and `site-docs/AGENTS.md` also apply; the marketing-shell rules
 for pricing / download / changelog live in `site-docs/AGENTS.md`.
 File-by-file ownership and the visual-tuning shortcut are in
 [`site-docs/README.md`](../README.md); palette detail, cost measurements, history,
-and the replicated session shell's current shape are in
+and the product replica's recorded shape are in
 [landing and marketing internals](../../.agents/docs/site-landing-and-marketing.md).
 Demo sequencing and screenshot notes live in
 [context/landing-demos.md](../context/landing-demos.md).
@@ -97,20 +97,20 @@ Demo sequencing and screenshot notes live in
   `inert`. Hero word rotation and decorative CSS motion wait for the same load+idle
   gate (`uw-motion-ready`); `prefers-reduced-motion` still disables them.
 
-## Product replica fidelity
+## Product replica
 
-- The desktop session shell must track `packages/components/src/components/sessions`
-  1:1 — read that directory's `AGENTS.md` before touching it, and match the shape
-  recorded in
+- The stage is `landing-app-preview.tsx` (ghost scripts + state) over the
+  display-only replica in `landing-replica/`; demo copy and conversations live in
+  `landing-preview-data.ts`. The replica copies the app's markup and classes but
+  never imports the app (see `site-docs/AGENTS.md`). Model only states the scripts
+  reach — the frame is inert — and keep the recorded shapes in
   [landing and marketing internals](../../.agents/docs/site-landing-and-marketing.md).
-  The right panel starts CLOSED (`DEFAULT_SIDE_PANEL_STATE.open === false` in
-  `lib/session-detail-initial-state.ts`); only a demo that scripts the toggle opens it.
-- The desktop CHAT LANDING has no Local/GitHub/Chat `ContextSwitch` any more. One
-  `UnifiedProjectSelector` lists local projects and GitHub repos together and the
-  context type is DERIVED from the selection (clearing it is the plain-chat context);
-  the preview uses the platform-independent `UnifiedProjectSelectorView`. Its heading is
-  the app's rotating `chat.heading` / `chat.heading2` copy.
-- The mobile session shell is the `if (isMobile)` branch of `session-detail.tsx`, not a
-  narrow desktop; keep it matching the mobile shape recorded in
-  [landing and marketing internals](../../.agents/docs/site-landing-and-marketing.md)
-  and [context/landing-demos.md](../context/landing-demos.md).
+  The right panel starts CLOSED; only a demo that scripts it opens it.
+- Ghost scripts drive real DOM through these hooks; keep them when editing the
+  replica: `textarea`, `button[aria-label="Send"]`, `[data-demo="workdir"] label`,
+  `[data-slot="resizable-handle"]` (pointerdown on it, move/up on `body`),
+  `button[aria-label="Browser"]`, `button[aria-label="Annotate page"]`,
+  `[data-demo="pv-*"]`, `[data-message-role]`, and the mobile tab bar's
+  `MOBILE_NEW_CHAT_LABEL` button. `test:static` waits for the stage `textarea`.
+- Replica tokens are the `.lody-app-preview` scope in `app/global.css`; add a token
+  there when copied app classes need one instead of reaching for app CSS.

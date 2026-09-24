@@ -51,50 +51,51 @@ Waiting on `renderer.compileAsync` keeps shader compilation off the main thread
 for the first render.
 
 `landing-app-preview.tsx` deliberately does not use the same module-eval
-`import()`: it is the heaviest module on the landing (real product UI plus
-composer, markdown, and katex), so a plain `lazy()` keeps first-paint bandwidth
-for the hero and the WebGL scene.
+`import()`: the stage is below a 100dvh hero, so a plain `lazy()` behind the
+`previewArmed` latch keeps first-paint bandwidth for the hero and the WebGL
+scene. Since the stage became a site-owned replica it no longer pulls in the app's
+CRDT runtime, markdown renderer, or analytics module (measurements in the
+[standalone replica note](../notes/implemented/architecture/2026-09-24-landing-standalone-product-replica.md)).
 
-## Current shape of the replicated session shell
+## Recorded shape of the product replica
 
-The landing replica tracks `packages/components/src/components/sessions` 1:1.
-That directory is the authority; the snapshot below records what it looked like
-when this page was written, to save a reading, and defers to the source whenever
-the two disagree. Fix it in the same PR that makes it wrong.
+`components/landing-replica/` copies the app's markup as it looked when the
+replica was written (2026-09-24). It does not follow the app: when the app's
+look changes enough that the landing misrepresents it, copy the new markup and
+classes into the replica and compare screenshots. The record below is the shape
+the replica reproduces, so a later change can tell drift from intent.
 
-- ONE merged top row (`SessionTabBar` `mt-0.5 h-11` plus a right-slot toolbar);
+- ONE merged desktop top row (session tabs `h-11` plus a right-slot toolbar);
   no repo-title header row and no header PR badge.
-- The real `SessionInfoBar` glued above the composer: repo, branch, PR, ±diff,
-  actions, and the emerald Browser chip.
-- ONE floating right-panel card (`mx-2 mt-2 mb-2 rounded-xl
-  border-sidebar-border/80 bg-sidebar`) whose `SessionSidePanelTabBar` carries
-  Files / All Changes / conditional PR + Browser plus closeable diff tabs. File
-  and diff viewers live in that panel, never in a second pane.
+- The info bar glued above the composer: repo, branch, PR, ±diff, actions, and
+  the emerald Browser chip that appears once a dev server reports a preview.
+- ONE right panel (Files / All Changes / conditional PR + Browser, plus a
+  closeable diff tab) that starts closed; file and diff viewers live in it,
+  never in a second pane. The diff itself is `@pierre/diffs` used directly.
 - A composer with no bottom bar: machine → project → branch/worktree pill in the
-  top row, `DesktopRunConfigMenu` + `DesktopPermissionModeButton` in the footer.
-  Mobile keeps the single `MobileSessionRunConfig`.
+  top row on the chat landing, run config + permission chips in the footer.
+  Mobile keeps one run-config chip and a round send button.
+- The mobile session is a floating frosted header over the conversation, glass
+  chrome, no session tab bar, and the bottom info bar without the branch. The
+  new-chat sheet stacks title, Machine, Type, composer, then agent + permission.
 
-The mobile branch of `session-detail.tsx` is a floating frosted `BaseHeader` over
-the conversation, glass chrome, no `SessionTabBar`, no header PR badge, and the
-bottom `SessionInfoBar` with `branch={null}`. The new-chat sheet's slot stack is
-described in `site-docs/context/landing-demos.md`.
+## Why the landing stopped rendering app components
 
-## Why the hand-written component declarations matter
-
-There is no tsconfig path from `site-docs` to `packages/components/src`, so
-`types/lody-app-components.d.ts` is TypeScript's only view of every `@/*` import.
-A stale declaration silently hides a real API break: `DesktopSessionDetailLayout`
-once rendered with none of its props, and the whole top bar plus right panel
-vanished from the landing while `pnpm typecheck` stayed green.
+The stage used to import the real app components through an `@/*` alias, with
+Vite aliases swapping app-only modules for shims and a hand-written declaration
+file as TypeScript's only view of them. App changes kept breaking it: a stale
+declaration once hid a `DesktopSessionDetailLayout` API change (the top bar and
+right panel vanished with typecheck green), and a composer hook that needed an
+authenticated Convex provider blanked the whole stage (#937). The replica
+removed the alias, shims, declarations, and dependencies; `scripts/app-boundary.mjs`
+keeps them out. See the
+[standalone replica note](../notes/implemented/architecture/2026-09-24-landing-standalone-product-replica.md).
 
 ## Why the static check mounts the app preview
 
 The app preview renders inside an `OptionalEnhancement` boundary, so a crash
 blanks the product stage while the hero, copy, and every other check stay green.
-That happened when `ChatComposer` started calling `useMentionPromptExpansion`:
-Agent Role mentions reach `useVisibleMachineMetas`, which requires the app's
-`AuthenticatedConvexProvider`, and the landing showed only the seabed. The fix
-is `app-preview-shims/mention-expansion-shim.ts`; `test:static` now waits for the
-preview composer on `/` and `/zh` so the next app-only hook fails the build check
-instead of the landing. See the
-[bug-fix note](../notes/implemented/bug-fix/2026-09-24-landing-app-preview-mention-expansion.md).
+`test:static` therefore waits for the stage composer on `/` and `/zh`. It was
+added when an app composer hook crashed the stage (see the
+[bug-fix note](../notes/implemented/bug-fix/2026-09-24-landing-app-preview-mention-expansion.md));
+it still guards replica regressions.

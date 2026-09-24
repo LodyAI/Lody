@@ -11,60 +11,7 @@ import { resolveModulePreloadDependencies } from './lib/module-preload';
 import { collectSitePaths } from './scripts/site-paths.mjs';
 
 const dirname = path.dirname(fileURLToPath(import.meta.url));
-const componentsSrc = path.resolve(dirname, '../packages/components/src');
 const siteSrc = dirname;
-const loroCrdtBrowserEntry = path.resolve(
-  componentsSrc,
-  '../node_modules/loro-crdt/browser/index.js'
-);
-
-/**
- * packages/components peers React 18 for the product app. Landing imports its
- * source via `@/*`; a normal resolve walk from that tree can load react@18 +
- * react-i18next(react18) while the SSR renderer is react@19 → invalid hooks.
- *
- * Force listed packages (and their subpaths) to resolve as if imported from
- * site-docs — keeps Vite's package/CJS interop intact (unlike hard-aliasing
- * to package roots, which breaks `module is not defined` on react/index.js).
- */
-const SINGLETON_DEPS = [
-  'react',
-  'react-dom',
-  'i18next',
-  'react-i18next',
-  'next-themes',
-  'jotai',
-] as const;
-
-function forceSingletonDeps(): Plugin {
-  const importer = path.join(dirname, 'package.json');
-  return {
-    name: 'site-docs-force-singleton-deps',
-    enforce: 'pre',
-    async resolveId(source, _importer, options) {
-      const hit = SINGLETON_DEPS.some((dep) => source === dep || source.startsWith(`${dep}/`));
-      if (!hit) return null;
-      return this.resolve(source, importer, { ...options, skipSelf: true });
-    },
-  };
-}
-
-/**
- * `loro-crdt` exposes a bundler entry for development, but Vite's source
- * module graph can evaluate its Wasm glue twice. The browser entry owns a
- * single glue instance and loads the Wasm file explicitly. Keep SSR on its
- * normal entry because the browser build relies on XMLHttpRequest.
- */
-function createBrowserLoroBuildForClientPlugin(): Plugin {
-  return {
-    name: 'site-docs-client-loro-browser-build',
-    enforce: 'pre',
-    resolveId(source, _importer, options) {
-      if (source === 'loro-crdt' && !options?.ssr) return loroCrdtBrowserEntry;
-      return null;
-    },
-  };
-}
 
 const isStructurallyRunnableEnvironment = (
   environment: DevEnvironment | undefined
@@ -105,104 +52,29 @@ function installStartDevServerMiddleware(): Plugin {
 }
 
 const alias = [
-  {
-    find: '@/components/chat/chat-landing-selectors',
-    replacement: path.resolve(
-      dirname,
-      'components/app-preview-shims/chat-landing-selectors-shim.tsx'
-    ),
-  },
-  {
-    find: '@/components/mentions/combined-mention-textarea',
-    replacement: path.resolve(
-      dirname,
-      'components/app-preview-shims/combined-mention-textarea-shim.tsx'
-    ),
-  },
-  {
-    find: '@/components/mentions/mention-expansion',
-    replacement: path.resolve(dirname, 'components/app-preview-shims/mention-expansion-shim.ts'),
-  },
-  {
-    find: '@/hooks/use-online-machines',
-    replacement: path.resolve(dirname, 'components/app-preview-shims/use-online-machines-shim.ts'),
-  },
-  {
-    find: '@/lib/native-platform',
-    replacement: path.resolve(dirname, 'components/app-preview-shims/native-platform-shim.ts'),
-  },
-  {
-    find: '@/ui/diff-viewer/diff-render-worker',
-    replacement: path.resolve(dirname, 'components/app-preview-shims/diff-render-worker-shim.ts'),
-  },
-  {
-    find: '@/lib/diff-parse-worker',
-    replacement: path.resolve(dirname, 'components/app-preview-shims/diff-parse-worker-shim.ts'),
-  },
-  {
-    find: '@/ui/diff-viewer/diff-viewer-lazy',
-    replacement: path.resolve(dirname, 'components/app-preview-shims/diff-viewer-lazy-shim.tsx'),
-  },
-  {
-    find: '@/lib/session-image-cache',
-    replacement: path.resolve(dirname, 'components/app-preview-shims/session-image-cache-shim.ts'),
-  },
-  {
-    find: '@/lib/session-file-download',
-    replacement: path.resolve(
-      dirname,
-      'components/app-preview-shims/session-file-download-shim.ts'
-    ),
-  },
-  {
-    find: '@/lib/vscode-theme',
-    replacement: path.resolve(dirname, 'components/app-preview-shims/vscode-theme-shim.ts'),
-  },
+  // Base UI and TanStack Router import the CJS `use-sync-external-store` shims;
+  // serve React 19's built-in hook as ESM instead.
   {
     find: /^use-sync-external-store\/shim(?:\/index\.js)?$/,
-    replacement: path.resolve(
-      dirname,
-      'components/app-preview-shims/use-sync-external-store-shim.ts'
-    ),
+    replacement: path.resolve(dirname, 'lib/use-sync-external-store-shim.ts'),
   },
   {
     find: /^use-sync-external-store\/shim\/with-selector(?:\.js)?$/,
-    replacement: path.resolve(
-      dirname,
-      'components/app-preview-shims/use-sync-external-store-with-selector-shim.ts'
-    ),
+    replacement: path.resolve(dirname, 'lib/use-sync-external-store-with-selector-shim.ts'),
   },
   { find: '@site', replacement: siteSrc },
-  { find: '@', replacement: componentsSrc },
 ];
 
 export default defineConfig({
   server: {
     port: 3002,
-    fs: {
-      // The workspace's single pnpm store lives above `lody-oss`. Loro's Wasm
-      // sidecar must be served from that store when the landing preview imports
-      // product components.
-      allow: [path.resolve(dirname, '../..')],
-    },
   },
   resolve: {
     alias,
-    dedupe: [
-      'react',
-      'react-dom',
-      'react/jsx-runtime',
-      'react/jsx-dev-runtime',
-      'i18next',
-      'react-i18next',
-      'next-themes',
-      'jotai',
-    ],
+    dedupe: ['react', 'react-dom', 'react/jsx-runtime', 'react/jsx-dev-runtime', 'next-themes'],
     tsconfigPaths: true,
   },
   plugins: [
-    forceSingletonDeps(),
-    createBrowserLoroBuildForClientPlugin(),
     tanstackStart({
       prerender: {
         enabled: true,
@@ -224,30 +96,19 @@ export default defineConfig({
     react(),
   ],
   ssr: {
-    // Bundle packages that peer React so SSR never `require()`s the React 18
-    // copies nested under packages/components (invalid hooks / dual dispatcher).
+    // Bundle React-peer packages into the SSR build so they render with the
+    // same React instance as the app.
     noExternal: [
       '@tanstack/router-core',
       'next-themes',
-      'react-i18next',
-      'i18next',
       '@number-flow/react',
       /^@number-flow\//,
       /^@radix-ui\//,
       /^@floating-ui\//,
-      'jotai',
     ],
-    // CJS packages that appear on the landing preview graph. Keep named-export
-    // failures from breaking TanStack Start's module runner during prerender.
-    optimizeDeps: {
-      include: ['debug'],
-    },
   },
   optimizeDeps: {
-    // Do not flatten loro-mirror ahead of resolution: its pre-bundle follows
-    // its peer dependency directly to Loro's development bundler entry.
-    exclude: ['loro-mirror', 'loro-crdt'],
-    include: ['debug', 'next-themes', 'react-i18next', 'i18next', '@number-flow/react'],
+    include: ['next-themes', '@number-flow/react'],
   },
   build: {
     outDir: 'out',

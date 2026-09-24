@@ -38,3 +38,7 @@ expansion, and the production static check asserts that the preview mounts.
 still appears once on the dev server only (unchanged `underwater-background.tsx`,
 consistent with a StrictMode double mount); the production hydration checks
 record no page errors, and it is out of scope here.
+
+Later: the landing stopped rendering app components altogether, which removed
+this shim; see the
+[standalone replica note](../architecture/2026-09-24-landing-standalone-product-replica.md).
