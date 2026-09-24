@@ -2,10 +2,8 @@
 
 /**
  * `WorkingGrid` contracts:
- *  - every mark on the page samples one shared sea, so its motion depends only
- *    on page position and the document timeline, never on when a mark mounted;
- *  - a lone tile bobs on its own, while occasional sweeps roll through a column
- *    of marks in order, and a whole mark almost never sinks out of sight;
+ *  - every mark on the page samples one shared sea, so its phases depend only on
+ *    page position and the document timeline, never on when a mark mounted;
  *  - the animation stays on the compositor: Web Animations on HTML elements,
  *    touching only `transform` and `opacity`, cancelled on unmount.
  *
@@ -21,46 +19,32 @@ import { createRoot, type Root } from 'react-dom/client';
 import { SidebarRowEndSlot } from '../src/components/sidebar-row-shared';
 import { WorkingGrid } from '../src/ui/working-grid';
 import {
-  seaHeight,
-  sweepBand,
+  crestDelayMs,
   tileSeaPoint,
-  WORKING_GRID_LOOP_MS,
-  WORKING_GRID_SWEEP,
-  WORKING_GRID_SWEEPS,
+  wavePhase,
+  workingGridWaves,
 } from '../src/ui/working-grid-sea';
 
-/** The nine sea points of a 14px mark in the `row`-th 28px sidebar row. */
-function sidebarMark(row: number): [number, number][] {
-  const placement = { left: 240, top: row * 28, size: 14, rowPitch: 28 };
-  return [0, 1, 2].flatMap((j) => [0, 1, 2].map((i) => tileSeaPoint(placement, i, j)));
-}
+const sin01 = (turns: number) => 0.5 + 0.5 * Math.sin(2 * Math.PI * turns);
+const frac = (value: number) => value - Math.floor(value);
 
-function correlation(a: number[], b: number[]): number {
-  const mean = (xs: number[]) => xs.reduce((sum, x) => sum + x, 0) / xs.length;
-  const [ma, mb] = [mean(a), mean(b)];
-  let num = 0;
-  let da = 0;
-  let db = 0;
-  a.forEach((x, k) => {
-    num += (x - ma) * (b[k]! - mb);
-    da += (x - ma) ** 2;
-    db += (b[k]! - mb) ** 2;
-  });
-  return num / Math.sqrt(da * db);
+/** Height a crest-first sine loop shows at timeline time `t`, given its delay. */
+function loopHeightAt(t: number, delayMs: number, periodMs: number): number {
+  const progress = frac((t - delayMs) / periodMs);
+  return sin01(0.25 - progress);
 }
-
-const LOOP_TIMES = Array.from({ length: 180 }, (_, k) => (k / 180) * WORKING_GRID_LOOP_MS);
 
 describe('working grid sea', () => {
-  it('loops seamlessly, so a baked keyframe loop has no seam', () => {
-    for (const [x, y] of [
-      [0, 0],
-      [37.5, 12],
-      [80, 144.25],
-    ] as const) {
-      for (const t of [0, 1234, 20_000]) {
-        expect(seaHeight(x, y, t + WORKING_GRID_LOOP_MS, 0.55)).toBeCloseTo(
-          seaHeight(x, y, t, 0.55),
+  it('pins each loop to the sea phase at its position, whenever it mounted', () => {
+    const [wave] = workingGridWaves('across');
+    for (const phase of [0, 0.1, 0.25, 0.5, 0.73, 0.999]) {
+      const delay = crestDelayMs(phase, wave.periodMs);
+      expect(delay).toBeLessThanOrEqual(0);
+      expect(delay).toBeGreaterThan(-wave.periodMs);
+      for (const t of [0, 333, 1900, 4210]) {
+        // The travelling wave: height at time t is sin01(phase − t / period).
+        expect(loopHeightAt(t, delay, wave.periodMs)).toBeCloseTo(
+          sin01(phase - t / wave.periodMs),
           9
         );
       }
@@ -79,55 +63,14 @@ describe('working grid sea', () => {
     expect(tileSeaPoint(realLower, 0, 0)[1] - tileSeaPoint(realUpper, 0, 2)[1]).toBe(4);
   });
 
-  it('bobs each tile on its own between sweeps', () => {
-    // Watched alone, a tile should look random: between sweeps the nine tiles of a
-    // mark must not rise and fall together.
-    const tiles = sidebarMark(5);
-    const quiet = LOOP_TIMES.filter((t) => tiles.every(([x, y]) => sweepBand(x, y, t) < 0.05));
-    const series = tiles.map(([x, y]) => quiet.map((t) => seaHeight(x, y, t, WORKING_GRID_SWEEP)));
-    let total = 0;
-    let pairs = 0;
-    for (let i = 0; i < series.length; i += 1) {
-      for (let j = i + 1; j < series.length; j += 1) {
-        total += correlation(series[i]!, series[j]!);
-        pairs += 1;
-      }
-    }
-    expect(total / pairs).toBeLessThan(0.2);
-  });
-
-  it('rolls a downward sweep through the list top to bottom', () => {
-    // Squinting at the column, a sweep must reach each mark after the one above it.
-    const sweep = WORKING_GRID_SWEEPS.find((candidate) => candidate.angleDeg === 90)!;
-    const window = Array.from(
-      { length: 141 },
-      (_, k) => sweep.startMs + (k / 140) * sweep.durationMs
-    );
-    const peaks = [2, 4, 6, 8, 10, 12, 14, 16, 18, 20].map((row) => {
-      const tiles = sidebarMark(row);
-      const brightness = window.map(
-        (t) => tiles.reduce((sum, [x, y]) => sum + seaHeight(x, y, t, WORKING_GRID_SWEEP), 0) / 9
-      );
-      return window[brightness.indexOf(Math.max(...brightness))]!;
-    });
-    for (let k = 1; k < peaks.length; k += 1) expect(peaks[k]!).toBeGreaterThan(peaks[k - 1]!);
-  });
-
-  it('almost never lets a whole mark sink out of sight', () => {
-    // All nine tiles bottoming out at once would blank the mark; keep that rare.
-    let samples = 0;
-    let dark = 0;
-    for (let row = 0; row < 40; row += 1) {
-      const tiles = sidebarMark(row);
-      for (const t of LOOP_TIMES) {
-        const brightest = Math.max(
-          ...tiles.map(([x, y]) => seaHeight(x, y, t, WORKING_GRID_SWEEP))
-        );
-        samples += 1;
-        if (brightest < 0.15) dark += 1;
-      }
-    }
-    expect(dark / samples).toBeLessThan(0.012);
+  it('gives neighbouring tiles neighbouring phases', () => {
+    const [wave] = workingGridWaves('across');
+    const placement = { left: 0, top: 0, size: 14, rowPitch: 28 };
+    const [x0, y0] = tileSeaPoint(placement, 0, 0);
+    const [x1, y1] = tileSeaPoint(placement, 1, 0);
+    const step = Math.abs(wavePhase(wave, x1, y1, 1.5) - wavePhase(wave, x0, y0, 1.5));
+    // One tile apart is a small fraction of a wavelength, so the sea looks continuous.
+    expect(Math.min(step, 1 - step)).toBeLessThan(0.25);
   });
 });
 
@@ -194,20 +137,15 @@ function render(node: React.ReactElement) {
 const COMPOSITOR_KEYS = new Set(['transform', 'opacity', 'offset', 'easing']);
 
 describe('WorkingGrid', () => {
-  it('bakes one seamless loop per tile and plays it on the compositor', () => {
+  it('animates both wave layers of all nine tiles on the compositor', () => {
     render(<WorkingGrid />);
 
-    expect(recorded).toHaveLength(9);
+    expect(recorded).toHaveLength(18);
     for (const animation of recorded) {
       expect(animation.target.namespaceURI).toBe('http://www.w3.org/1999/xhtml');
       for (const frame of animation.keyframes) {
         for (const key of Object.keys(frame)) expect(COMPOSITOR_KEYS.has(key)).toBe(true);
       }
-      const first = animation.keyframes[0]!;
-      const last = animation.keyframes.at(-1)!;
-      expect([first.offset, last.offset]).toEqual([0, 1]);
-      expect([last.transform, last.opacity]).toEqual([first.transform, first.opacity]);
-      expect(animation.options.duration).toBe(WORKING_GRID_LOOP_MS);
       expect(animation.options.iterations).toBe(Infinity);
       // Pinned to the document timeline's origin: marks share one sea.
       expect(animation.startTime).toBe(0);
@@ -221,25 +159,14 @@ describe('WorkingGrid', () => {
     expect(recorded.every((animation) => animation.cancelled)).toBe(true);
   });
 
-  it('keeps every tile between minScale and maxScale of its cell', () => {
-    const size = 30;
-    const gap = 0.5;
-    render(
-      <WorkingGrid size={size} gap={gap} minScale={0.25} maxScale={0.8} brightness="steady" />
+  it('bottoms out a double trough at minScale', () => {
+    render(<WorkingGrid minScale={0.25} brightness="steady" />);
+    const scales = recorded.map((animation) =>
+      Number(/scale\(([\d.]+)\)/.exec(String(animation.keyframes[1]!.transform))![1])
     );
-    const cell = size / (3 + 2 * gap);
-    const tile = container.querySelector<HTMLElement>('[data-working-grid-tile]')!;
-    const drawn = parseFloat(tile.style.width);
-    // A tile box is drawn at maxScale of its cell; the animation only shrinks it.
-    expect(drawn).toBeCloseTo(cell * 0.8, 9);
-    for (const animation of recorded) {
-      for (const frame of animation.keyframes) {
-        const factor = Number(/scale\(([\d.]+)\)/.exec(String(frame.transform))![1]);
-        expect(drawn * factor).toBeGreaterThanOrEqual(cell * 0.25 - 1e-3);
-        expect(factor).toBeLessThanOrEqual(1);
-        expect('opacity' in frame).toBe(false);
-      }
-    }
+    // The two stacked layers multiply.
+    expect(scales[0]! * scales[1]!).toBeCloseTo(0.25, 9);
+    expect(recorded.every((a) => a.keyframes.every((frame) => !('opacity' in frame)))).toBe(true);
   });
 
   it('stays still when there is nothing to animate or motion is reduced', () => {

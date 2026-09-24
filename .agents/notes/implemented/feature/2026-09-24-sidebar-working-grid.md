@@ -10,12 +10,13 @@ Translation: current
 The sidebar marked a running session with a rotating `Loader2` arc, which reads
 as "loading" rather than "an agent is working", and five or six of them spin
 independently down the list. The mark is now `WorkingGrid`, a 3×3 grid of tiles
-that rise and sink with one sea shared by the whole page: each tile bobs on its
-own, so a single tile looks random, and now and then a band sweeps across the
-page in one direction, so a column of marks seen together rolls with one rhythm. On mount each tile's motion over the sea's 36-second loop is baked into
-one Web Animation of `transform` and `opacity`, pinned to the document timeline,
-which the compositor plays with no per-frame script. Unmeasured: the renderer
-cost of nine animated layers per mark in a packaged build.
+that rise and sink with two waves crossing the whole page; each tile samples the
+waves at its own page position, so marks in neighbouring rows look like one body
+of water. The animation runs on the compositor: every tile is two nested HTML
+layers, one per wave, animating only `transform` and `opacity` through Web
+Animations pinned to the document timeline's origin, with no per-frame script.
+The main unmeasured cost is layer count: 18 small animated layers per mark, which
+has not been profiled in a packaged build.
 
 ## Problem
 
@@ -35,41 +36,15 @@ pixel jellyfish and a dot "ocean patch" read as too cartoonish or too noisy;
 breathing dots, rings, bubbles and a click-ripple layer were tried and dropped.
 The kept form and its defaults:
 
-- 3×3 tiles, corner radius 30% of the tile, gap 0.35 of the tile, 14px overall.
-  Tiles are at most 0.8 of their cell and shrink to 0.3 of it in a trough;
-  opacity follows the sea down to 0.16.
-- Chop (the base): each tile bobs on its own — three sines of 1.8–4s whose
-  frequencies and phases are hashed from the tile's position — so tiles in one
-  mark are unrelated.
-- Sweeps (strength 0.55 of the height): five times per 36s loop, at irregular
-  times and in varying directions (down, down-left, down-right, diagonal), a bright
-  band crosses the page over 2.8s and lifts every tile it passes, fading in and
-  out so it never pops. In a sidebar it rolls through the column row by row.
-- Every period and sweep repeats within 36s, so the field loops seamlessly. One
-  sea for the page: a tile's height depends only on its page position; in a list
-  the sea between rows is skipped ("stitched", `rowPitch = 28`).
-
-### How the field was found
-
-The owner's target: watched alone, a tile should look like it bobs at random;
-squinting at all marks, a wave should now and then roll through them in one
-direction. Two earlier fields missed it in opposite ways, measured over 24
-stitched rows (within-mark spread: mean standard deviation of the nine tiles;
-rhythm: correlation of whole-mark brightness between adjacent rows):
-
-| Field | Within-mark spread | Adjacent-mark rhythm | Seen as |
-|---|---|---|---|
-| two short plane waves | 0.26 | −0.83 | marks in antiphase, each running on its own |
-| four long waves | 0.06 | 0.71 | all nine tiles of a mark moving as one block |
-| short ripples + long swells | 0.21 | 0.49 | a continuous texture, never random-looking |
-
-Continuous waves always make neighbouring tiles related, so a lone tile never
-looks random. Separating the two layers does: between sweeps the nine tiles of a
-mark correlate 0.06, and during a downward sweep whole-mark brightness peaks row
-after row, about eight rows a second, rising ~8σ above the chop. Tests pin all
-three: tiles independent between sweeps (fails when every tile shares one seed),
-sweep peaks strictly in row order (fails with sweeps off), and a whole mark
-almost never blanking.
+- 3×3 tiles, corner radius 40% of the tile, gap 0.18 of the tile, 14px overall.
+- Two plane waves, 3.2 and 4.4 cells long (× wavelength 1.5), periods 1.9s and
+  2.7s (19:27, so the pattern repeats only after ~51s), travelling down-right and
+  down-left. Tiles scale from their centre to a minimum of 0.3 and brightness
+  follows the wave down to 0.16 opacity.
+- One sea for the page: a tile's phase depends only on its page position. In a
+  list the sea between rows is skipped ("stitched", `rowPitch = 28`): the 14px
+  mark covers half of each 28px row, and without stitching a wave moves more than
+  a wavelength between rows, so neighbours looked unrelated.
 
 ## Implementation choice
 
@@ -77,38 +52,52 @@ almost never blanking.
 |---|---|
 | rAF loop writing styles (the prototype) | Rejected: per-frame main-thread work and repaint, the cost the spinner fix removed. |
 | CSS keyframes with per-tile `animation-delay` | Rejected: CSS animations start when an element mounts, so marks mounted at different moments would sit on different seas. |
-| Two nested sine layers per tile (first version) | Replaced: a product of two fixed-direction sines cannot express per-tile randomness or intermittent sweeps. |
-| **Bake each tile's height over the loop into one keyframe animation, `startTime = 0`** | Chosen: any periodic field, compositor-played, aligned to the document timeline regardless of mount time. |
+| **Web Animations, `startTime = 0`, per-tile delay from the phase** | Chosen: compositor-driven, and every loop is aligned to the document timeline regardless of mount time. |
 
-Each tile samples the field 10 times a second over the 36s loop (361 keyframes,
-linear between samples; the fastest bob still gets 18 samples per cycle).
-Baking costs a few thousand sine evaluations per mark at mount and nothing per
-frame.
+A sum of two sines cannot be one keyframe loop, so each tile nests two layers,
+one per wave, and their scales and opacities multiply. Each layer spans the
+square root of the full range, so a double trough lands exactly on the minimum.
+The product of two waves reads the same as the prototype's sum: crest on crest is
+largest, trough on trough smallest.
 
 `prefers-reduced-motion` and engines without `Element.animate` render the grid
 still. Superellipse tiles are available through CSS `corner-shape`
 (Chromium 139+, Electron 39 ships 142).
 
+## Explored and reverted
+
+After this shipped, several fields were tried in Storybook and the owner chose to
+return to the configuration above:
+
+- Softer defaults (20–30% corners, 0.25–0.35 gap, tiles capped at 0.8 of the
+  cell) and shorter or longer wavelengths (0.8–1.3) with faster waves.
+- Four long waves whose strengths took turns dominating: neighbouring marks moved
+  together, but all nine tiles of a mark moved as one block.
+- Short ripples plus long swells: varied tiles and a shared rhythm, but never a
+  random-looking single tile.
+- Per-tile random bobbing plus occasional bands sweeping across all marks.
+
+Those variants baked each tile's height over a 36s loop into one keyframe
+animation instead of two nested sine layers; that technique remains the route if
+the field changes again.
+
 ## Tuning surface
 
 `UI/WorkingGrid` in Storybook exposes every parameter as a control (shape,
-brightness, scale mode, minimum and maximum size, gap, sweep strength, stitching) and
+brightness, scale mode, minimum size, gap, wavelength, direction, stitching) and
 a `SidebarSimulation` story at production geometry: 28px rows, the trailing
 status slot that swaps to Archive on hover, waiting and unread marks beside
-working ones.
+working ones. `Components/LodySidebar` → All sessions working shows the real
+sidebar with every session running.
 
 ## Verification
 
-- `tests/working-grid.test.tsx`: the sea loops seamlessly; stitching makes
-  consecutive rows continuous; tiles bob independently between sweeps, a downward
-  sweep reaches rows in order, and a whole mark almost never disappears (each
-  checked against a field that should fail it); each of
-  the 9 animations targets HTML, touches only `transform`/`opacity`, is a seamless
-  loop pinned to `startTime = 0`, stays within `minScale`–`maxScale`, and is
-  cancelled on unmount; reduced motion stays still; the sidebar end slot shows the
-  grid while working.
-- Rendered in Storybook (`UI/WorkingGrid`, `Components/LodySidebar` → All sessions
-  working) and inspected by screenshot.
+- `tests/working-grid.test.tsx`: the delay reproduces the travelling wave at any
+  timeline time; stitching makes consecutive rows continuous; all 18 animations
+  target HTML, touch only `transform`/`opacity`, are pinned to `startTime = 0` and
+  are cancelled on unmount; reduced motion stays still; the sidebar end slot shows
+  the grid while working.
+- Rendered in Storybook and inspected by screenshot.
 - Not done: a renderer CPU / layer trace in the packaged Electron app with many
   sessions running. That is the check to run before widening the grid to other
   surfaces.

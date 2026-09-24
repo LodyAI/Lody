@@ -1,86 +1,52 @@
 /**
- * The shared "sea" behind every {@link WorkingGrid}, in two layers:
+ * The shared "sea" behind every {@link WorkingGrid}.
  *
- * - Chop: every tile wanders on its own — a few slow sines with frequencies and
- *   phases hashed from the tile's position — so a single tile looks like it bobs
- *   at random, unrelated to its neighbours.
- * - Sweeps: now and then a bright band passes across the whole page in one
- *   direction (down, or diagonally), lifting every tile it crosses. Squint at a
- *   column of marks and a wave rolls through them, top to bottom, in order.
+ * Two plane waves cross over the whole page. Every tile samples them at its own
+ * page position, so all working marks on screen are windows onto the same water
+ * and a crest visibly travels from one sidebar row into the next.
  *
- * Positions are in "cells": one cell is a third of a mark's size. Time is in ms.
- * Every period and sweep repeats within {@link WORKING_GRID_LOOP_MS}, so the field
- * loops seamlessly and each tile's motion bakes into one repeating animation.
+ * Positions are in "cells": one cell is a third of the grid's size (one tile
+ * pitch). Phases are in turns, so `0.25` is a quarter period.
  */
 
-export const WORKING_GRID_LOOP_MS = 36_000;
+export type WorkingGridDirection = 'across' | 'down';
 
-/** Default strength of the sweeps relative to the chop. */
-export const WORKING_GRID_SWEEP = 0.55;
-
-export interface WorkingGridSweep {
-  startMs: number;
-  /** Travel direction, degrees from +x towards +y (down). */
-  angleDeg: number;
-  durationMs: number;
+export interface WorkingGridWave {
+  /** Travel direction; roughly unit length. */
+  dir: readonly [number, number];
+  /** Distance between crests, in cells, before the wavelength multiplier. */
+  length: number;
+  periodMs: number;
+  /** Constant phase offset, in turns. */
+  phase: number;
 }
 
-/** Irregularly spaced, in varying directions, so they read as "now and then". */
-export const WORKING_GRID_SWEEPS: readonly WorkingGridSweep[] = [
-  { startMs: 1_500, angleDeg: 90, durationMs: 2_800 },
-  { startMs: 8_500, angleDeg: 60, durationMs: 2_800 },
-  { startMs: 15_000, angleDeg: 120, durationMs: 2_800 },
-  { startMs: 21_500, angleDeg: 90, durationMs: 2_800 },
-  { startMs: 28_500, angleDeg: 35, durationMs: 2_800 },
-];
+// The first wave is shorter and faster than the second and their periods are
+// 19:27, so the interference pattern takes ~51s to repeat and never reads as a loop.
+const WAVES: Record<WorkingGridDirection, readonly [WorkingGridWave, WorkingGridWave]> = {
+  // 27° down-right and 60° down-left of horizontal.
+  across: [
+    { dir: [0.9, 0.45], length: 3.2, periodMs: 1900, phase: 0 },
+    { dir: [-0.5, 0.85], length: 4.4, periodMs: 2700, phase: 0.3 },
+  ],
+  // Within 15–20° of vertical: sweeps down a narrow list.
+  down: [
+    { dir: [0.34, 0.94], length: 3.2, periodMs: 1900, phase: 0 },
+    { dir: [-0.26, 0.97], length: 4.4, periodMs: 2700, phase: 0.3 },
+  ],
+};
 
-// A sweep is a train of bands SPACING cells apart, so it crosses any page region;
-// each point is crossed once per sweep. WIDTH is the band's half-width in cells.
-const SPACING = 66;
-const WIDTH = 5;
-const CHOP_WEIGHT = 0.75;
+export function workingGridWaves(
+  direction: WorkingGridDirection
+): readonly [WorkingGridWave, WorkingGridWave] {
+  return WAVES[direction];
+}
 
-const TAU = Math.PI * 2;
-const sin01 = (turns: number) => 0.5 + 0.5 * Math.sin(TAU * turns);
-const clamp01 = (value: number) => Math.min(Math.max(value, 0), 1);
 const frac = (value: number) => value - Math.floor(value);
-/** Deterministic [0, 1) hash of an integer. */
-const hash = (n: number) => frac(Math.sin(n * 127.1 + 311.7) * 43_758.5453);
 
-/** A tile's own random bobbing: three sines, 9–20 cycles per loop (1.8–4s). */
-function chop(x: number, y: number, tMs: number): number {
-  const seed = Math.round(x * 8) * 7919 + Math.round(y * 8) * 104_729;
-  let sum = 0;
-  for (let m = 0; m < 3; m += 1) {
-    const cycles = 9 + Math.floor(hash(seed + m * 13) * 12);
-    sum += sin01((cycles * tMs) / WORKING_GRID_LOOP_MS + hash(seed + m * 29));
-  }
-  return sum / 3;
-}
-
-/** How strongly a passing sweep band lifts point (x, y) at `tMs`, in [0, 1]. */
-export function sweepBand(x: number, y: number, tMs: number): number {
-  let band = 0;
-  for (const sweep of WORKING_GRID_SWEEPS) {
-    const elapsed =
-      (((tMs - sweep.startMs) % WORKING_GRID_LOOP_MS) + WORKING_GRID_LOOP_MS) %
-      WORKING_GRID_LOOP_MS;
-    if (elapsed > sweep.durationMs) continue;
-    const progress = elapsed / sweep.durationMs;
-    const angle = (sweep.angleDeg * Math.PI) / 180;
-    const along = Math.cos(angle) * x + Math.sin(angle) * y;
-    const offset =
-      ((((along - SPACING * progress + SPACING / 2) % SPACING) + SPACING) % SPACING) - SPACING / 2;
-    // Fade the train in and out so a sweep never pops on or off.
-    const envelope = Math.sin(Math.PI * progress) ** 0.6;
-    band = Math.max(band, envelope * Math.exp(-((offset / WIDTH) ** 2)));
-  }
-  return band;
-}
-
-/** Sea height in [0, 1] at cell point (x, y) and time `tMs`. */
-export function seaHeight(x: number, y: number, tMs: number, sweep: number): number {
-  return clamp01(CHOP_WEIGHT * chop(x, y, tMs) + sweep * sweepBand(x, y, tMs) - 0.05);
+/** Phase of `wave` at sea point (x, y), in turns within [0, 1). */
+export function wavePhase(wave: WorkingGridWave, x: number, y: number, wavelength: number): number {
+  return frac((wave.dir[0] * x + wave.dir[1] * y) / (wave.length * wavelength) + wave.phase);
 }
 
 export interface WorkingGridPlacement {
@@ -109,9 +75,13 @@ export function tileSeaPoint(
   return [left / cell + i, (top / cell) * stitch + j];
 }
 
-/** Heights at a point over one loop: `samples` evenly spaced, plus the wrap-around sample. */
-export function seaHeightsOverLoop(x: number, y: number, sweep: number, samples: number): number[] {
-  return Array.from({ length: samples + 1 }, (_, k) =>
-    seaHeight(x, y, (k / samples) * WORKING_GRID_LOOP_MS, sweep)
-  );
+/**
+ * Animation delay (ms, never positive) for a loop whose keyframes start at the
+ * crest, such that at document-timeline time 0 it shows `phase`. With every
+ * loop's start time pinned to 0, marks mounted at different moments stay on
+ * the same sea.
+ */
+export function crestDelayMs(phase: number, periodMs: number): number {
+  const turns = frac(0.25 - phase);
+  return turns === 0 ? 0 : -turns * periodMs;
 }
