@@ -148,11 +148,10 @@ function SessionRowStatusIndicator({
   if (isWaitingPermission) {
     icon = <Hand className="h-3 w-3 text-status-warning" />;
   } else if (isWorking) {
-    // Muted, not the primary colour: working is the most common, longest-lived
-    // status, so it must be the quietest mark; blue stays for unread.
-    icon = (
-      <WorkingGrid data-session-working-indicator="" className="text-sidebar-foreground-muted" />
-    );
+    // The full 3×3 grid always shows (pale tiles), and a slow light crosses it
+    // (primary tiles): calm and whole when still, readable as "working", and
+    // distinct in shape from the unread dot. It holds still while the user reads.
+    icon = <WorkingGrid data-session-working-indicator="" className="text-primary" />;
   } else if (hasUnreadMessages) {
     icon = <span className="h-2 w-2 rounded-full bg-primary" />;
   }

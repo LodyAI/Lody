@@ -9,14 +9,14 @@ Translation: current
 
 The sidebar marked a running session with a rotating `Loader2` arc, which reads
 as "loading" rather than "an agent is working", and five or six of them spin
-independently down the list. The mark is now `WorkingGrid`, a 3×3 grid of tiles
-that rise and sink with two waves crossing the whole page; each tile samples the
-waves at its own page position, so marks in neighbouring rows look like one body
-of water. The animation runs on the compositor: every tile is two nested HTML
-layers, one per wave, animating only `transform` and `opacity` through Web
-Animations pinned to the document timeline's origin, with no per-frame script.
-The main unmeasured cost is layer count: 18 small animated layers per mark, which
-has not been profiled in a packaged build.
+independently down the list. The mark is now `WorkingGrid`: a whole 3×3 grid of
+tiles in the primary colour across which a slow light drifts, driven by two short
+waves crossing the page plus one long rhythm wave that brightens whole marks in
+turn down the list; every tile samples them at its own page position. Every mark
+holds still while the user reads outside the sidebar. The animation runs on the
+compositor through Web Animations of `transform` and `opacity` on one shared
+clock, with no per-frame script. Unmeasured: the renderer cost of 19 small
+animated layers per mark in a packaged build, and the effect on real readers.
 
 ## Problem
 
@@ -37,27 +37,16 @@ breathing dots, rings, bubbles and a click-ripple layer were tried and dropped.
 The kept form and its defaults:
 
 - 3×3 tiles, corner radius 40% of the tile, gap 0.18 of the tile, 12px overall
-  inside the 14px status slot, in the sidebar's muted foreground colour.
-- Texture: two plane waves, 3.2 and 4.4 cells long (× wavelength 1.2), travelling
-  down-right and down-left with periods 1.9s and 2.7s at speed 1 (19:27, so the
-  pattern repeats only after ~51s). Tiles are at most 0.9 of their cell and scale
-  from their centre with a minimum of -0.2: the inner wave layer's scale is
-  clamped at zero, so a tile empties when that wave is deep enough and stays
-  empty for part of the trough, while the outer layer only swells down to 0.7.
-  Clamping is not a sine, so the inner layer bakes its loop as 24 keyframes.
-  Letting either layer empty a tile left two or fewer of nine tiles showing ~11%
-  of the time (a whole mark empty ~0.4%), which reads as an idle session; with
-  one vanishing layer no tile count reaches zero. Counting tiles under 30% size
-  as invisible, though, a 12px mark at wavelength 1.2 still shows two or fewer
-  visible tiles ~29% of the time, because one trough covers most of a mark. At
-  wavelength 0.8 that falls to ~0.5% (0.6: none) while each tile is still empty
-  ~28% of the time. The owner earlier found 0.8 too busy, so the default stays at
-  1.2 pending their choice.
-- Rhythm: one long wave heading straight down, 36 cells (about twelve stitched
-  rows) crest to crest, 3.6s at speed 1, that dims and brightens whole marks in
-  turn. It carries 60% of the opacity range; the texture carries the rest.
-- Opacity stays between 0.5 and 0.8, and everything plays at speed 0.45
-  (periods of about 4.2s, 6s and 8s).
+  inside the 14px status slot, in the primary colour.
+- A whole grid with light crossing it: all nine tiles always show (size 0.8–0.9
+  of their cell), and opacity carries the motion, from 0.25 (pale tiles) to 1
+  (primary tiles). Still, it is a clean dot matrix; moving, a slow light drifts
+  across it.
+- Texture: two plane waves, 3.2 and 4.4 cells long (× wavelength 1.2), heading
+  down-right and down-left. Rhythm: one long wave straight down, 36 cells (about
+  twelve stitched rows) crest to crest, carrying 30% of the opacity range so
+  whole marks brighten in turn down the list. Everything plays at 0.6× (about
+  3.2s and 4.5s for the texture, 6s for the rhythm).
 - One sea for the page: a tile's phase depends only on its page position. In a
   list the sea between rows is skipped ("stitched", `rowPitch = 28`): the 14px
   mark covers half of each 28px row, and without stitching a wave moves more than
@@ -72,14 +61,15 @@ still by default, motion only for a change of state, accent colour only for what
 needs the reader. Peripheral vision is most sensitive to luminance change and
 motion, and many unrelated flickering points cannot be tuned out. So:
 
-- Luminance: opacity narrowed to 0.5–0.8 — the largest cause. Size was first
-  narrowed to 0.55–0.9 as well, but with the rest of this list the owner found
-  the marks too static to notice; tiles now shrink through zero again (minimum
-  -0.2) on a smaller 12px mark, trading some calm back for visible activity.
-- Colour: the mark uses the sidebar's muted foreground. Working is the most
-  common and longest-lived status, so it must be the quietest; blue stays for
-  unread.
-- Tempo: all loops play at 0.45×.
+- Luminance and colour, in three rounds. First: opacity 0.5–0.8, size 0.55–0.9,
+  muted grey, 0.45× — the owner found it too static to notice. Second: a 12px
+  mark whose tiles shrink through zero (minimum -0.2) — rendered, the grid broke
+  into scattered specks that looked like noise, were ugly when still, and were
+  not recognisable; counting tiles under 30% size as invisible, a mark showed two
+  or fewer tiles ~29% of the time. Final: keep the grid whole (size 0.8–0.9) and
+  move light instead (opacity 0.25–1), in the primary colour so it reads as
+  activity, at 0.6×. Candidates were compared in the production-geometry story
+  before choosing; the grid shape keeps it distinct from the unread dot.
 - Coherence: the whole-mark rhythm makes a column read as one pulse travelling
   down, instead of about a hundred independently changing tiles.
 - Reading pause: any wheel, key, pointer or touch press outside
@@ -89,8 +79,9 @@ motion, and many unrelated flickering points cannot be tuned out. So:
   scrolls itself. Pause and resume are the only script involved; all marks keep
   one clock offset, so they resume in step.
 
-These were proposed together and adopted as a set; their individual effect has
-not been measured.
+The reading pause is what keeps the more visible final form from pulling at the
+reader. None of these effects has been measured on people; the numbers above are
+simulations and screenshots.
 
 ## Implementation choice
 

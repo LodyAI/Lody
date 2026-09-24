@@ -89,8 +89,8 @@ strings on i18n rather than the registry's inline English.
   only `transform`/`opacity` via Web Animations on the shared clock in
   `working-grid-reading.ts`, so the compositor runs it and every mark shares one sea; never
   drive frames from rAF, timers or React state. Only that module's reading pause may
-  pause/resume them. Keep it muted in the sidebar; the sidebar root keeps
-  `data-working-grid-region`.
+  pause/resume them. Keep all nine tiles visible by default (tiles vanishing broke the
+  grid into specks); the sidebar root keeps `data-working-grid-region`.
   Why: [working grid note](../../../../.agents/notes/implemented/feature/2026-09-24-sidebar-working-grid.md).
 
 ## Scroll area
