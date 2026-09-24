@@ -3,7 +3,7 @@
   "productName": "Lody",
   "desktopName": "dev.loro.lody.oss.desktop",
   "private": true,
-  "version": "0.93.3",
+  "version": "0.100.0",
   "description": "Lody Desktop - Electron app",
   "main": "./out/main/index.js",
   "author": "LodyAI",
