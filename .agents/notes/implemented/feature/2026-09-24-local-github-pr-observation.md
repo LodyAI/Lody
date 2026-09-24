@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: https://github.com/LodyAI/Lody/pull/958
 
 [中文](2026-09-24-local-github-pr-observation.zh.md)
 
@@ -39,7 +40,7 @@ login is not an immediate-refresh guarantee. No remote means no discoverable PR.
 The focused CLI suites cover local discovery without association, hosted association
 failure, Git workspace backfill, login/rotation/logout, credential quotas and Git
 refresh triggers. A read-only live query confirmed PR access with a local credential
-whose `/user` request was denied. See the PR for final repository check results.
+whose `/user` request was denied. `pnpm check`, `pnpm format`, and `pnpm run docs check` passed; native desktop click-through was not performed.
 
 Contract: [Spec](../../../../specs/local-github-pr-observation.md).
 Branch behavior: [earlier decision](../bug-fix/2026-09-24-workspace-branch-observation.md).

@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: https://github.com/LodyAI/Lody/pull/958
 
 [English](2026-09-24-local-github-pr-observation.md)
 
@@ -31,7 +32,7 @@ WorkspaceGitService，在授权后的根目录激活或刷新时补齐缺失标�
 
 CLI 定向测试覆盖无关联的本地发现、托管关联失败、Git 工作目录补齐、登录/轮换/退出、
 凭据配额和 Git 刷新触发。只读实测确认一个不能请求 `/user` 的本地凭据仍能读取 PR。
-完整仓库检查结果见 PR。
+`pnpm check`、`pnpm format` 和 `pnpm run docs check` 通过；未进行原生桌面点击验证。
 
 约定：[Spec](../../../../specs/local-github-pr-observation.zh.md)。
 分支行为：[前序决策](../bug-fix/2026-09-24-workspace-branch-observation.zh.md)。
