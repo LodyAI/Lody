@@ -292,7 +292,7 @@ The process rows competed with the reply: group summaries ("Finished working",
 "Read 1 file") were body-sized, steps were medium-weight gray, some titles
 brightened their first word, file names switched to mono, and icons were as
 loud as their text. Now the reply is the text; a group summary is 0.9 of it,
-secondary, on the reply's line height; a step is 12.5px at regular weight with
+secondary, set close (1.5 leading, 2px between summaries); a step is 12.5px at regular weight with
 its icon a tone lighter; a step's file name stays in the sentence's type. The
 brightened first word stays, as the owner asked, but as a verb with tense: in
 progress while the tool runs ("Searching", shimmering), done once it has

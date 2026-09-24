@@ -3760,7 +3760,7 @@ const ACTIVITY_PROCESS_ICON_CLASS = 'h-3.5 w-3.5 shrink-0 text-muted-foreground/
 const ACTIVITY_STEP_ICON_CLASS = cn(ACTIVITY_PROCESS_ICON_CLASS, 'mt-0.5');
 /* Match the prose's fixed 4px inset, independent of the root font size. */
 const ACTIVITY_STEP_BUTTON_CLASS = cn(
-  'min-h-7 items-start rounded-md px-[4px] py-1 hover:bg-hover/40',
+  'min-h-6 items-start rounded-md px-[4px] py-0.5 hover:bg-hover/40',
   ACTIVITY_PROCESS_TEXT_CLASS
 );
 const ACTIVITY_STEP_TITLE_CLASS = cn('min-w-0 flex-1', ACTIVITY_PROCESS_TEXT_CLASS);
@@ -3778,9 +3778,9 @@ const ACTIVITY_GROUP_LABEL_CLASS = (isMobile: boolean) =>
     'min-w-0',
     isMobile
       ? cn('flex-1', ACTIVITY_PROCESS_TEXT_CLASS)
-      : /* A notch under the reply, on the reply's line height so the rhythm
-           between a summary and the prose around it does not jump. */
-        'text-[length:calc(var(--markdown-body-font-size,1em)*0.9)] font-normal leading-[1.75]'
+      : /* A notch under the reply, and set close: summaries and their steps
+           are one compact list between paragraphs, not paragraphs themselves. */
+        'text-[length:calc(var(--markdown-body-font-size,1em)*0.9)] font-normal leading-[1.5]'
   );
 
 /** Last intended rotate after a click. Survives Virtua remounting the row. */
@@ -4869,6 +4869,7 @@ const AssistantChatItem = memo(function AssistantChatItem({
         return cardSiblingGap;
       case 'worked_group_header':
       case 'activity_group_header':
+        return processSiblingGap;
       case 'subagent_tasks':
         return turnSiblingGap;
       case 'footer':
@@ -6819,7 +6820,8 @@ const ToolCallCard = memo(function ToolCallCard({
         >
           <KindIcon className={kindIconClass} />
           {isFileAction && fileName ? (
-            <div className="flex min-w-0 items-center gap-1.5">
+            /* One word space between the verb and its file, not a 6px gap. */
+            <div className="flex min-w-0 items-center gap-[0.3em]">
               <span
                 className={cn(
                   isActivityRow
