@@ -143,7 +143,7 @@ describe('CodeCollabV2Service text RPC boundary', () => {
       let publication: Promise<void> | undefined;
       const service = new CodeCollabV2Service({
         resolveWorkspace: makeResolver(workspaceRoot),
-        observeWorkspaceBranch: ({ ownerSessionId, workspaceRoot: root }) => {
+        observeWorkspaceGit: ({ ownerSessionId, workspaceRoot: root }) => {
           expect(ownerSessionId).toBe(SESSION_ID);
           expect(root).toBe(workspaceRoot);
           publication = metadataReady.then(() => {
@@ -190,7 +190,7 @@ describe('CodeCollabV2Service text RPC boundary', () => {
         const service = new CodeCollabV2Service({
           resolveWorkspace: makeResolver(workspaceRoot),
           workspaceWatchCoordinator: watch.coordinator,
-          observeWorkspaceBranch: async () => {
+          observeWorkspaceGit: async () => {
             publishedBranch = currentBranch;
           },
           publishFileIndex: async (state) => {

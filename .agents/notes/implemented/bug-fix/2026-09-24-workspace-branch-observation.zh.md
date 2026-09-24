@@ -21,7 +21,7 @@ Agent 绑定、回合终止，以及已授权的工作目录激活／显式根�
 
 ```text
 执行绑定／回合终止 ─┐
-已授权工作目录刷新 ─┴─> WorkspaceBranchService
+已授权工作目录刷新 ─┴─> WorkspaceGitService
                           └─> 所属会话 branchName → 现有界面
 GitHub PR 检测继续作为独立的可选消费者。
 ```

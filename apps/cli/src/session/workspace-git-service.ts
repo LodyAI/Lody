@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { getLocalProjectGitHubRepoAtRootPath } from '@lody/shared/node/local-project';
 import type { SessionId } from '@lody/shared';
 import { resolveGitBranch, type SessionExec } from '@/lib/git/resolve-git-branch-name';
 import type { LoroDocumentManager } from '@/lib/loro/doc';
@@ -9,8 +10,8 @@ import type { ISession } from './session-manager';
 
 const execFileAsync = promisify(execFile);
 
-/** Git checkout metadata, independent of agents, hosting providers, and PRs. */
-export class WorkspaceBranchService {
+/** Git checkout facts, without provider API calls or credentials. */
+export class WorkspaceGitService {
   private readonly pending = new Map<SessionId, Promise<string | null>>();
 
   constructor(
@@ -36,21 +37,27 @@ export class WorkspaceBranchService {
 
   /** The caller must resolve and authorize the host workspace before calling. */
   syncLocalWorkspace(ownerSessionId: SessionId, workspaceRoot: string): Promise<string | null> {
-    return this.sync(ownerSessionId, workspaceRoot, async (command, args, cwd) => {
-      const { stdout } = await execFileAsync(command, args, {
-        cwd,
-        encoding: 'utf8',
-        timeout: 10_000,
-        maxBuffer: 64 * 1024,
-      });
-      return stdout;
-    });
+    return this.sync(
+      ownerSessionId,
+      workspaceRoot,
+      async (command, args, cwd) => {
+        const { stdout } = await execFileAsync(command, args, {
+          cwd,
+          encoding: 'utf8',
+          timeout: 10_000,
+          maxBuffer: 64 * 1024,
+        });
+        return stdout;
+      },
+      true
+    );
   }
 
   private async sync(
     sessionId: SessionId,
     workdir: string,
-    exec: SessionExec
+    exec: SessionExec,
+    observeLocalRepository = false
   ): Promise<string | null> {
     try {
       const doc = await this.deps.workspaceDocument.getOrCreateSessionDoc(sessionId);
@@ -72,6 +79,21 @@ export class WorkspaceBranchService {
               : await this.deps.workspaceDocument.getOrCreateSessionDoc(ownerId);
           if ((await ownerDoc.getMetaState())?.branchName !== resolution.branch) {
             await ownerDoc.setBranchName(resolution.branch);
+          }
+          const project = (await ownerDoc.getMetaState())?.project;
+          if (observeLocalRepository && project?.kind === 'local' && !project.githubRepoFullName) {
+            const repoFullName = await getLocalProjectGitHubRepoAtRootPath(workdir);
+            const current = (await ownerDoc.getMetaState())?.project;
+            if (
+              repoFullName &&
+              current?.kind === 'local' &&
+              current.localProjectId === project.localProjectId &&
+              !current.githubRepoFullName
+            ) {
+              // Branch was published first. A newly discovered repository can never
+              // start PR discovery against the previous checkout's branch.
+              await ownerDoc.setProject({ ...current, githubRepoFullName: repoFullName });
+            }
           }
           return resolution.branch;
         } catch (error) {

@@ -84,7 +84,7 @@ execution/consent rules. These rules also bind CLI callers outside that director
 
 ## Agents, GitHub, and PR status
 
-- Checkout branch observations belong to `session/workspace-branch-service.ts`, independent of
+- Checkout branch observations belong to `session/workspace-git-service.ts`, independent of
   GitHub/PR support. Publish to the workspace owner, serialize probe plus write, and keep
   startup/file snapshot observation off the prompt/RPC critical path.
 

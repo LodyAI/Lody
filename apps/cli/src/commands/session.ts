@@ -2539,25 +2539,6 @@ type LocalProjectCreateGitContext = {
 };
 
 /**
- * A local project's `origin` only becomes a Session's repository identity when
- * the workspace actually enables that repository, which is exactly what desktop
- * creation does (`chat-landing.tsx`). Matching is case-insensitive and returns
- * the workspace's spelling so the persisted `repoFullName` is the same string
- * every repository lookup uses.
- */
-function selectWorkspaceRepoFullName(
-  githubRepoFullName: string | null | undefined,
-  workspaceRepositories: readonly { fullName: string }[]
-): string | undefined {
-  const repoFullName = normalizeCliValue(githubRepoFullName);
-  if (!repoFullName) {
-    return undefined;
-  }
-  const normalized = repoFullName.toLowerCase();
-  return workspaceRepositories.find((repo) => repo.fullName.toLowerCase() === normalized)?.fullName;
-}
-
-/**
  * Pure part of local create resolution: branch selection and GitHub identity
  * read off one git-state snapshot.
  *
@@ -2565,11 +2546,11 @@ function selectWorkspaceRepoFullName(
  * Session's repository is a property of the project rather than of the workdir
  * mode; without it `createSessionResult` persists no `repoFullName` and the
  * client hides `Create PR` / `Commit & Push` and skips post-turn PR detection.
- * An unauthorized or absent `origin` simply leaves the Session local.
+ * Origin identifies the repository; authenticated GitHub reads establish access.
+ * No product-cloud repository registration is required.
  */
 export function resolveLocalProjectCreateGitContext(args: {
   gitState: LocalProjectGitState;
-  workspaceRepositories: readonly { fullName: string }[];
   requestedBranch?: string;
   useWorktree?: boolean;
 }): LocalProjectCreateGitContext {
@@ -2583,10 +2564,7 @@ export function resolveLocalProjectCreateGitContext(args: {
     }
     return {};
   }
-  const githubRepoFullName = selectWorkspaceRepoFullName(
-    args.gitState.githubRepoFullName,
-    args.workspaceRepositories
-  );
+  const githubRepoFullName = normalizeCliValue(args.gitState.githubRepoFullName);
   const identity = githubRepoFullName ? { githubRepoFullName } : {};
   // Keep direct local sessions branchless. The target daemon must use the
   // directory as it exists at dispatch time rather than switching back to a
@@ -2614,32 +2592,6 @@ export function resolveLocalProjectCreateGitContext(args: {
   return { branch: selected, ...identity };
 }
 
-/**
- * Repository identity is best effort: a workspace whose repository list cannot
- * be read still creates the local Session, just without GitHub actions.
- */
-async function listWorkspaceGitHubRepositoriesBestEffort(args: {
-  auth: AuthContext;
-  workspaceId: WorkspaceId;
-  requesterUserId: string;
-}): Promise<{ fullName: string }[]> {
-  try {
-    return await listWorkspaceGitHubRepositoriesForCliToken({
-      token: args.auth.token,
-      workspaceId: args.workspaceId,
-      requesterUserId: args.requesterUserId,
-      enabledOnly: true,
-    });
-  } catch (error) {
-    getLogger('session').warn(
-      `Workspace GitHub repositories unavailable; creating the local session without repository identity: ${formatErrorMessage(
-        error
-      )}`
-    );
-    return [];
-  }
-}
-
 async function resolveLocalProjectCreateGitContextOnMachine(args: {
   auth: AuthContext;
   workspaceId: WorkspaceId;
@@ -2659,15 +2611,8 @@ async function resolveLocalProjectCreateGitContextOnMachine(args: {
     }
     return {};
   }
-  // Only a project that actually reports a GitHub `origin` needs the workspace
-  // repository list, so a purely local project stays off the network.
-  const workspaceRepositories =
-    response.state.git && normalizeCliValue(response.state.githubRepoFullName)
-      ? await listWorkspaceGitHubRepositoriesBestEffort(args)
-      : [];
   return resolveLocalProjectCreateGitContext({
     gitState: response.state,
-    workspaceRepositories,
     ...(args.requestedBranch ? { requestedBranch: args.requestedBranch } : {}),
     ...(args.useWorktree !== undefined ? { useWorktree: args.useWorktree } : {}),
   });

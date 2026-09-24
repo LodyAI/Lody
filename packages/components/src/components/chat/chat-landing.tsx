@@ -499,16 +499,8 @@ const warnWorkspaceRuntimeUnavailable = (message: string, context: string): void
 };
 
 const resolveLocalProjectGithubRepoFullName = (
-  gitState: LocalProjectGitState | null | undefined,
-  workspaceRepositories: { fullName: string }[] | null | undefined
-): string | null => {
-  if (!gitState?.git) return null;
-  const repoFullName = gitState.githubRepoFullName?.trim();
-  if (!repoFullName) return null;
-  return workspaceRepositories?.some((repo) => repo.fullName === repoFullName)
-    ? repoFullName
-    : null;
-};
+  gitState: LocalProjectGitState | null | undefined
+): string | null => (gitState?.git ? gitState.githubRepoFullName?.trim() || null : null);
 
 type LocalProjectGitStateEntry = {
   machineId: MachineId;
@@ -2749,9 +2741,9 @@ function WorkspaceChatLanding({
     (gitStateOverride?: LocalProjectGitState | null): string | null => {
       const effectiveLocalGitState = gitStateOverride ?? activeLocalGitState;
       if (!selectedLocalProject) return null;
-      return resolveLocalProjectGithubRepoFullName(effectiveLocalGitState, repositories);
+      return resolveLocalProjectGithubRepoFullName(effectiveLocalGitState);
     },
-    [activeLocalGitState, repositories, selectedLocalProject]
+    [activeLocalGitState, selectedLocalProject]
   );
 
   // ── Branch options (context-dependent) ──
@@ -4257,8 +4249,8 @@ function WorkspaceChatLanding({
   }, [freshRepositories, selectedRepo]);
   const selectedLocalProjectGithubRepoFullName = useMemo(() => {
     if (contextType !== 'local') return undefined;
-    return resolveLocalProjectGithubRepoFullName(activeLocalGitState, repositories) ?? undefined;
-  }, [activeLocalGitState, contextType, repositories]);
+    return resolveLocalProjectGithubRepoFullName(activeLocalGitState) ?? undefined;
+  }, [activeLocalGitState, contextType]);
 
   const preparationMachineId = useMemo(() => {
     if (!selectedAgent) return null;
