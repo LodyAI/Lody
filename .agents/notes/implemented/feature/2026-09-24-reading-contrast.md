@@ -25,8 +25,8 @@ themes are unchanged; a warm tint was not applied.
   `text-foreground`, so hierarchy reads by brightness.
 - Inline code: 7% fill instead of 14%, text in the reading color, so chips no longer read
   as bright patches in a sentence.
-- Unselected session rows use the row color and `SIDEBAR_ROW_REST_ICON_CLASS` (icons 55%,
-  avatars 60%, full on hover); the selected row is unchanged.
+- Unselected session rows use the row color and `SIDEBAR_ROW_REST_ICON_CLASS` (icons 55%, full
+  on hover; avatars keep full opacity, since a faded face reads as a disabled account); the selected row is unchanged.
 - List items are 0.5rem apart, more than wrapped lines of one item; the outline rail rests
   at /32 instead of /45 and lifts while the pointer is on it.
 
