@@ -36,15 +36,47 @@ pixel jellyfish and a dot "ocean patch" read as too cartoonish or too noisy;
 breathing dots, rings, bubbles and a click-ripple layer were tried and dropped.
 The kept form and its defaults:
 
-- 3×3 tiles, corner radius 40% of the tile, gap 0.18 of the tile, 14px overall.
-- Two plane waves, 3.2 and 4.4 cells long (× wavelength 1.2), periods 1.9s and
-  2.7s (19:27, so the pattern repeats only after ~51s), travelling down-right and
-  down-left. Tiles are at most 0.9 of their cell and scale from their centre
-  down to 0.3 of it; brightness follows the wave down to 0.16 opacity.
+- 3×3 tiles, corner radius 40% of the tile, gap 0.18 of the tile, 14px overall,
+  in the sidebar's muted foreground colour.
+- Texture: two plane waves, 3.2 and 4.4 cells long (× wavelength 1.2), travelling
+  down-right and down-left with periods 1.9s and 2.7s at speed 1 (19:27, so the
+  pattern repeats only after ~51s). Tiles are at most 0.9 of their cell and scale
+  from their centre down to 0.55 of it.
+- Rhythm: one long wave heading straight down, 36 cells (about twelve stitched
+  rows) crest to crest, 3.6s at speed 1, that dims and brightens whole marks in
+  turn. It carries 60% of the opacity range; the texture carries the rest.
+- Opacity stays between 0.5 and 0.8, and everything plays at speed 0.45
+  (periods of about 4.2s, 6s and 8s).
 - One sea for the page: a tile's phase depends only on its page position. In a
   list the sea between rows is skipped ("stitched", `rowPitch = 28`): the 14px
   mark covers half of each 28px row, and without stitching a wave moves more than
   a wavelength between rows, so neighbours looked unrelated.
+
+## Staying out of the reader's way
+
+In the first shipped form (primary blue, opacity 0.16–1, size 0.3–0.9, full
+speed, every mark moving) a sidebar of running sessions kept pulling the eye from
+the conversation. Reading apps keep their chrome in the background: low contrast,
+still by default, motion only for a change of state, accent colour only for what
+needs the reader. Peripheral vision is most sensitive to luminance change and
+motion, and many unrelated flickering points cannot be tuned out. So:
+
+- Luminance: opacity narrowed to 0.5–0.8 and size to 0.55–0.9 — the largest cause.
+- Colour: the mark uses the sidebar's muted foreground. Working is the most
+  common and longest-lived status, so it must be the quietest; blue stays for
+  unread.
+- Tempo: all loops play at 0.45×.
+- Coherence: the whole-mark rhythm makes a column read as one pulse travelling
+  down, instead of about a hundred independently changing tiles.
+- Reading pause: any wheel, key, pointer or touch press outside
+  `[data-working-grid-region]` (the sidebar root) freezes every mark on its
+  current frame; marks resume after 4s of quiet or when the pointer enters the
+  sidebar. `scroll` is deliberately not a signal: a streaming conversation
+  scrolls itself. Pause and resume are the only script involved; all marks keep
+  one clock offset, so they resume in step.
+
+These were proposed together and adopted as a set; their individual effect has
+not been measured.
 
 ## Implementation choice
 
@@ -83,8 +115,9 @@ the field changes again.
 
 ## Tuning surface
 
-`UI/WorkingGrid` in Storybook exposes every parameter as a control (shape,
-brightness, scale mode, minimum size, gap, wavelength, direction, stitching) and
+`UI/WorkingGrid` in Storybook exposes every parameter as a control (shape, scale
+mode, minimum and maximum size, opacity range, rhythm share, speed, gap,
+wavelength, direction, stitching, muted or primary colour) and
 a `SidebarSimulation` story at production geometry: 28px rows, the trailing
 status slot that swaps to Archive on hover, waiting and unread marks beside
 working ones. `Components/LodySidebar` → All sessions working shows the real
@@ -93,10 +126,13 @@ sidebar with every session running.
 ## Verification
 
 - `tests/working-grid.test.tsx`: the delay reproduces the travelling wave at any
-  timeline time; stitching makes consecutive rows continuous; all 18 animations
-  target HTML, touch only `transform`/`opacity`, are pinned to `startTime = 0` and
-  are cancelled on unmount; reduced motion stays still; the sidebar end slot shows
-  the grid while working.
+  timeline time; stitching makes consecutive rows continuous; the rhythm steps
+  down a list in small increments; all 19 animations (one rhythm, eighteen tile
+  layers) target HTML, touch only `transform`/`opacity`, share one start time,
+  follow the speed factor, stay within the size and opacity ranges, and are
+  cancelled on unmount; reduced motion stays still; input outside the sidebar
+  region pauses every loop until 4s of quiet or the pointer returns, and they
+  resume on one clock; the sidebar end slot shows the grid while working.
 - Rendered in Storybook and inspected by screenshot.
 - Not done: a renderer CPU / layer trace in the packaged Electron app with many
   sessions running. That is the check to run before widening the grid to other

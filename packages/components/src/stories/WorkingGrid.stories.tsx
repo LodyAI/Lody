@@ -13,15 +13,18 @@ const meta = {
   args: {
     size: 14,
     cornerRadius: 0.4,
-    brightness: 'wave',
     scale: 'center',
     maxScale: 0.9,
-    minScale: 0.3,
+    minScale: 0.55,
+    minOpacity: 0.5,
+    maxOpacity: 0.8,
+    rhythm: 0.6,
+    speed: 0.45,
     gap: 0.18,
     wavelength: 1.2,
     direction: 'across',
     rowPitch: 28,
-    className: 'text-primary',
+    className: 'muted',
   },
   argTypes: {
     size: { control: { type: 'range', min: 10, max: 96, step: 1 } },
@@ -32,18 +35,28 @@ const meta = {
       control: { type: 'select' },
       description: 'Superellipse exponent n; overrides cornerRadius (4 ≈ iOS squircle).',
     },
-    brightness: { options: ['wave', 'soft', 'steady'], control: { type: 'inline-radio' } },
     scale: { options: ['center', 'bottom', 'none'], control: { type: 'inline-radio' } },
     maxScale: { control: { type: 'range', min: 0.3, max: 1, step: 0.05 } },
     minScale: { control: { type: 'range', min: 0, max: 0.9, step: 0.05 } },
+    minOpacity: { control: { type: 'range', min: 0, max: 1, step: 0.05 } },
+    maxOpacity: { control: { type: 'range', min: 0.1, max: 1, step: 0.05 } },
+    rhythm: { control: { type: 'range', min: 0, max: 1, step: 0.05 } },
+    speed: { control: { type: 'range', min: 0.1, max: 1.5, step: 0.05 } },
     gap: { control: { type: 'range', min: 0.05, max: 0.5, step: 0.01 } },
-    wavelength: { control: { type: 'range', min: 1, max: 6, step: 0.1 } },
+    wavelength: { control: { type: 'range', min: 0.5, max: 3, step: 0.1 } },
     direction: { options: ['across', 'down'], control: { type: 'inline-radio' } },
     rowPitch: {
       options: ['stitched', 'real'],
       mapping: { stitched: 28, real: null },
       control: { type: 'inline-radio' },
       description: 'Stitched skips the sea between 28px sidebar rows.',
+    },
+    className: {
+      name: 'colour',
+      options: ['muted', 'primary'],
+      mapping: { muted: 'text-sidebar-foreground-muted', primary: 'text-primary' },
+      control: { type: 'inline-radio' },
+      description: 'Muted is the sidebar default; primary is kept for comparison.',
     },
   },
 } satisfies Meta<typeof WorkingGrid>;
@@ -113,12 +126,16 @@ function StatusMark({ status, grid }: { status: RowStatus; grid: WorkingGridProp
  * A full-height sidebar at production geometry (28px rows, 14px trailing status
  * slot that swaps to Archive on hover), so the controls can be judged on the
  * surface the mark actually ships in: many marks at once, one shared sea.
+ * Scroll or click in the content pane to see every mark hold still while reading.
  */
 export const SidebarSimulation: Story = {
   parameters: { layout: 'fullscreen' },
   render: (args) => (
     <div className="flex h-screen">
-      <aside className="flex w-[272px] flex-col overflow-y-auto border-r border-sidebar-border bg-sidebar px-1.5 py-2 text-sidebar-foreground">
+      <aside
+        data-working-grid-region=""
+        className="flex w-[272px] flex-col overflow-y-auto border-r border-sidebar-border bg-sidebar px-1.5 py-2 text-sidebar-foreground"
+      >
         {GROUPS.map((group) => (
           <section key={group.name}>
             <div className="px-2 pb-1 pt-3 text-xs text-sidebar-foreground-muted">{group.name}</div>
@@ -144,7 +161,7 @@ export const SidebarSimulation: Story = {
           </section>
         ))}
       </aside>
-      <main className="flex-1 bg-background p-8 text-sm text-muted-foreground">
+      <main className="flex-1 overflow-y-auto bg-background p-8 text-sm text-muted-foreground">
         <div className="flex items-center gap-2">
           <WorkingGrid {...args} rowPitch={null} />
           <span>Working · 2m 13s</span>

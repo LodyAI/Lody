@@ -148,7 +148,11 @@ function SessionRowStatusIndicator({
   if (isWaitingPermission) {
     icon = <Hand className="h-3 w-3 text-status-warning" />;
   } else if (isWorking) {
-    icon = <WorkingGrid data-session-working-indicator="" className="text-primary" />;
+    // Muted, not the primary colour: working is the most common, longest-lived
+    // status, so it must be the quietest mark; blue stays for unread.
+    icon = (
+      <WorkingGrid data-session-working-indicator="" className="text-sidebar-foreground-muted" />
+    );
   } else if (hasUnreadMessages) {
     icon = <span className="h-2 w-2 rounded-full bg-primary" />;
   }

@@ -42,6 +42,19 @@ export function workingGridWaves(
   return WAVES[direction];
 }
 
+/**
+ * The rhythm: one long, slow wave heading straight down, about twelve stitched
+ * sidebar rows from crest to crest. It dims and brightens whole marks in turn, so
+ * a column of marks reads as one calm pulse travelling down the list while the
+ * two shorter waves only texture the tiles inside each mark.
+ */
+export const WORKING_GRID_RHYTHM: WorkingGridWave = {
+  dir: [0, 1],
+  length: 36,
+  periodMs: 3600,
+  phase: 0,
+};
+
 const frac = (value: number) => value - Math.floor(value);
 
 /** Phase of `wave` at sea point (x, y), in turns within [0, 1). */

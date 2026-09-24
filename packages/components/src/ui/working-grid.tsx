@@ -2,18 +2,20 @@ import { useLayoutEffect, useRef, type ComponentPropsWithoutRef, type CSSPropert
 
 import { cn } from '@/lib/utils';
 
+import { trackWorkingGridAnimation } from './working-grid-reading';
 import {
   crestDelayMs,
   tileSeaPoint,
   wavePhase,
+  WORKING_GRID_RHYTHM,
   workingGridWaves,
   type WorkingGridDirection,
+  type WorkingGridWave,
 } from './working-grid-sea';
 
 export type { WorkingGridDirection } from './working-grid-sea';
+export { setWorkingGridReadingPause } from './working-grid-reading';
 
-/** How tile brightness follows the sea: fully, slightly, or not at all. */
-export type WorkingGridBrightness = 'wave' | 'soft' | 'steady';
 /** Where a tile scales from, or `none` to keep every tile full size. */
 export type WorkingGridScale = 'center' | 'bottom' | 'none';
 
@@ -28,15 +30,27 @@ export type WorkingGridProps = Omit<ComponentPropsWithoutRef<'span'>, 'children'
    * engines fall back to a circle.
    */
   superellipse?: number;
-  brightness?: WorkingGridBrightness;
   scale?: WorkingGridScale;
   /** Largest a tile gets, at a double crest, as a fraction of its cell (0–1). */
   maxScale?: number;
   /** Smallest tile size in a double trough, as a fraction of its cell (0–1). */
   minScale?: number;
+  /**
+   * Opacity range of a tile. A narrow range keeps the mark from flickering in
+   * peripheral vision; equal values hold brightness steady.
+   */
+  minOpacity?: number;
+  maxOpacity?: number;
+  /**
+   * Share of the opacity range carried by the rhythm: one long wave dimming whole
+   * marks in turn down the list. The rest textures the tiles inside a mark.
+   */
+  rhythm?: number;
+  /** Playback speed; 1 is the original 1.9s/2.7s waves, lower is calmer. */
+  speed?: number;
   /** Gap between tiles as a fraction of the tile edge. */
   gap?: number;
-  /** Multiplier on both wavelengths; larger reads as broader, slower swells. */
+  /** Multiplier on both tile wavelengths; larger reads as broader, slower swells. */
   wavelength?: number;
   direction?: WorkingGridDirection;
   /**
@@ -47,37 +61,23 @@ export type WorkingGridProps = Omit<ComponentPropsWithoutRef<'span'>, 'children'
   rowPitch?: number | null;
 };
 
-// Lowest opacity in a double trough for each brightness mode.
-const BRIGHTNESS_FLOOR: Record<WorkingGridBrightness, number> = {
-  wave: 0.16,
-  soft: 0.5,
-  steady: 1,
-};
-const STEADY_OPACITY = 0.82;
 // easeInOutSine: a half period of a sine between two keyframes.
 const SINE = 'cubic-bezier(0.37, 0, 0.63, 1)';
+const clamp01 = (value: number) => Math.min(Math.max(value, 0), 1);
 
 /**
- * Keyframes for one wave layer: crest → trough → crest. Each tile nests two
- * layers, one per wave, whose scales and opacities multiply; the per-layer
- * range is the square root of the whole range so a double trough lands exactly
- * on `minScale` and the brightness floor. The tile box is already drawn at
- * `maxScale`, so the layers scale relative to that.
+ * Crest → trough → crest loop: scale from 1 to `scaleLow`, opacity from
+ * `opacityHigh` to `opacityLow`. A `null` low leaves that property alone.
  */
-function layerKeyframes(
-  scale: WorkingGridScale,
-  brightness: WorkingGridBrightness,
-  minScale: number,
-  maxScale: number
+function loopKeyframes(
+  scaleLow: number | null,
+  opacityLow: number | null,
+  opacityHigh = 1
 ): Keyframe[] | null {
-  const animateScale = scale !== 'none';
-  const animateOpacity = brightness !== 'steady';
-  if (!animateScale && !animateOpacity) return null;
-  const low = Math.sqrt(Math.min(Math.max(minScale / maxScale, 0), 1));
-  const dim = Math.sqrt(BRIGHTNESS_FLOOR[brightness]);
+  if (scaleLow == null && opacityLow == null) return null;
   const frame = (atCrest: boolean): Keyframe => ({
-    ...(animateScale ? { transform: `scale(${atCrest ? 1 : low})` } : {}),
-    ...(animateOpacity ? { opacity: atCrest ? 1 : dim } : {}),
+    ...(scaleLow != null ? { transform: `scale(${atCrest ? 1 : scaleLow})` } : {}),
+    ...(opacityLow != null ? { opacity: atCrest ? opacityHigh : opacityLow } : {}),
   });
   return [
     { ...frame(true), easing: SINE },
@@ -98,26 +98,35 @@ function scrollOffset(el: Element): [number, number] {
 }
 
 /**
- * "Working" mark: a 3×3 grid of tiles rising and sinking with two waves that
- * cross the whole page. Every mounted grid samples the same sea at its own
- * position, so marks in neighbouring rows move as one body of water.
+ * "Working" mark: a 3×3 grid of tiles rising and sinking with a sea shared by the
+ * whole page. Two short waves texture the tiles of each mark; one long rhythm
+ * wave dims and brightens whole marks in turn, so a column of marks reads as one
+ * calm pulse travelling down the list.
  *
  * Colour comes from `currentColor`; pass a text colour class.
  *
- * Every tile animates only `transform` and `opacity` through the Web Animations
- * API with its start time pinned to the document timeline's origin, so the
- * compositor runs it: no per-frame script, React state or repaint while an agent
- * works. The animated elements are HTML, never SVG, for the compositor reason
- * documented in `spinner.tsx`.
+ * Built to stay in the periphery while someone reads: a narrow opacity range,
+ * slow waves, and every mark frozen while the user scrolls, types or clicks
+ * outside `[data-working-grid-region]` (see `working-grid-reading.ts`).
+ *
+ * Every animation touches only `transform` and `opacity` through the Web
+ * Animations API on the shared clock, so the compositor runs it: no per-frame
+ * script, React state or repaint while an agent works. Each tile nests two
+ * layers, one per short wave, whose scales and opacities multiply; the mark
+ * itself carries the rhythm. The animated elements are HTML, never SVG, for the
+ * compositor reason documented in `spinner.tsx`.
  */
 export function WorkingGrid({
   size = 14,
   cornerRadius = 0.4,
   superellipse,
-  brightness = 'wave',
   scale = 'center',
   maxScale = 0.9,
-  minScale = 0.3,
+  minScale = 0.55,
+  minOpacity = 0.5,
+  maxOpacity = 0.8,
+  rhythm = 0.6,
+  speed = 0.45,
   gap = 0.18,
   wavelength = 1.2,
   direction = 'across',
@@ -131,40 +140,93 @@ export function WorkingGrid({
   const pitch = cell * (1 + gap);
   // Tiles are drawn at maxScale inside their cell, centred (or bottom-aligned when
   // scaling from the bottom), so the grid's footprint and spacing stay fixed.
-  const tile = cell * Math.min(Math.max(maxScale, 0), 1);
+  const tile = cell * clamp01(maxScale);
   const inset = (cell - tile) / 2;
   const insetTop = scale === 'bottom' ? cell - tile : inset;
+  // Opacity range split between the mark-wide rhythm and the two tile layers so
+  // the deepest combined trough lands exactly on minOpacity.
+  const opacityRatio = maxOpacity > 0 ? clamp01(minOpacity / maxOpacity) : 1;
+  const rhythmShare = clamp01(rhythm);
 
   useLayoutEffect(() => {
     const root = rootRef.current;
     if (!root || typeof root.animate !== 'function') return undefined;
     if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return undefined;
-    const keyframes = layerKeyframes(scale, brightness, minScale, maxScale);
-    if (!keyframes) return undefined;
 
     const rect = root.getBoundingClientRect();
     const [scrollX, scrollY] = scrollOffset(root);
     const placement = { left: rect.left + scrollX, top: rect.top + scrollY, size, rowPitch };
-    const waves = workingGridWaves(direction);
+    const tempo = speed > 0 ? speed : 1;
+    const stops: (() => void)[] = [];
     const animations: Animation[] = [];
-    for (const outer of root.querySelectorAll<HTMLElement>('[data-working-grid-tile]')) {
-      const [x, y] = tileSeaPoint(placement, Number(outer.dataset.col), Number(outer.dataset.row));
-      const inner = outer.firstElementChild;
-      if (!(inner instanceof HTMLElement)) continue;
-      const layers = [outer, inner] as const;
-      layers.forEach((layer, index) => {
-        const wave = waves[index];
-        const animation = layer.animate(keyframes, {
-          duration: wave.periodMs,
-          iterations: Infinity,
-          delay: crestDelayMs(wavePhase(wave, x, y, wavelength), wave.periodMs),
-        });
-        animation.startTime = 0;
-        animations.push(animation);
+    const play = (
+      element: HTMLElement,
+      keyframes: Keyframe[],
+      wave: WorkingGridWave,
+      phase: number
+    ) => {
+      const duration = wave.periodMs / tempo;
+      const animation = element.animate(keyframes, {
+        duration,
+        iterations: Infinity,
+        delay: crestDelayMs(phase, duration),
       });
+      stops.push(trackWorkingGridAnimation(animation));
+      animations.push(animation);
+    };
+
+    // The rhythm: the whole mark's opacity, from the long wave at the mark's centre,
+    // between maxOpacity and its share of the trough.
+    const rhythmLow = opacityRatio ** rhythmShare;
+    const rhythmFrames = loopKeyframes(
+      null,
+      rhythmLow < 1 ? maxOpacity * rhythmLow : null,
+      maxOpacity
+    );
+    if (rhythmFrames) {
+      const [x, y] = tileSeaPoint(placement, 1, 1);
+      play(root, rhythmFrames, WORKING_GRID_RHYTHM, wavePhase(WORKING_GRID_RHYTHM, x, y, 1));
     }
-    return () => animations.forEach((animation) => animation.cancel());
-  }, [size, brightness, scale, minScale, maxScale, gap, wavelength, direction, rowPitch]);
+
+    // The texture: two stacked layers per tile, one per short wave.
+    const tileScaleLow = scale === 'none' ? null : Math.sqrt(clamp01(minScale / clamp01(maxScale)));
+    const tileOpacityLow = opacityRatio < 1 ? Math.sqrt(opacityRatio ** (1 - rhythmShare)) : null;
+    const tileFrames = loopKeyframes(tileScaleLow, tileOpacityLow === 1 ? null : tileOpacityLow);
+    if (tileFrames) {
+      const waves = workingGridWaves(direction);
+      for (const outer of root.querySelectorAll<HTMLElement>('[data-working-grid-tile]')) {
+        const inner = outer.firstElementChild;
+        if (!(inner instanceof HTMLElement)) continue;
+        const [x, y] = tileSeaPoint(
+          placement,
+          Number(outer.dataset.col),
+          Number(outer.dataset.row)
+        );
+        [outer, inner].forEach((layer, index) => {
+          const wave = waves[index];
+          play(layer, tileFrames, wave, wavePhase(wave, x, y, wavelength));
+        });
+      }
+    }
+
+    return () => {
+      stops.forEach((stop) => stop());
+      animations.forEach((animation) => animation.cancel());
+    };
+  }, [
+    size,
+    scale,
+    minScale,
+    maxScale,
+    maxOpacity,
+    opacityRatio,
+    rhythmShare,
+    speed,
+    gap,
+    wavelength,
+    direction,
+    rowPitch,
+  ]);
 
   const shape: CSSProperties =
     superellipse != null
@@ -181,7 +243,9 @@ export function WorkingGrid({
       data-working-grid=""
       aria-hidden="true"
       className={cn('relative inline-block shrink-0', className)}
-      style={{ width: size, height: size, ...style }}
+      // Tiles animate opacity between 1 and their trough; the mark's own opacity
+      // sets the ceiling, so the brightest tile reaches maxOpacity.
+      style={{ width: size, height: size, opacity: maxOpacity, ...style }}
       {...props}
     >
       {[0, 1, 2].map((row) =>
@@ -202,11 +266,7 @@ export function WorkingGrid({
           >
             <span
               className="block size-full bg-current"
-              style={{
-                ...shape,
-                transformOrigin: origin,
-                opacity: brightness === 'steady' ? STEADY_OPACITY : undefined,
-              }}
+              style={{ ...shape, transformOrigin: origin }}
             />
           </span>
         ))
