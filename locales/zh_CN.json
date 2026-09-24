@@ -4031,8 +4031,6 @@
   "schedules.upgrade": "请更新目标机器的 CLI，以管理定时任务。",
   "commands.schedules.pause": "暂停定时任务",
   "schedules.all": "全部定时任务",
-  "schedules.tabs": "定时任务标签页",
-  "schedules.closeTab": "关闭标签页",
   "schedules.notFound": "此定时任务不可用或已删除。",
   "schedules.enabled": "已启用",
   "schedules.runNow": "立即运行",

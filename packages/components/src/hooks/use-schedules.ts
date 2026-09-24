@@ -8,7 +8,7 @@ import {
 } from '@lody/shared';
 import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
 import { useResolvedWorkspaceScope } from './use-resolved-workspace-scope';
-import { openScheduleTabsAtom, scheduleRegistryAtom } from '@/atoms/schedules';
+import { scheduleRegistryAtom } from '@/atoms/schedules';
 
 /** Mounted once by the workspace shell, never once per list/detail consumer. */
 export function useScheduleRegistrySync(): void {
@@ -17,7 +17,6 @@ export function useScheduleRegistrySync(): void {
   const runtime =
     scope.enabled && scope.workspaceId === activeRuntime?.workspaceId ? activeRuntime : null;
   const setSnapshot = useSetAtom(scheduleRegistryAtom);
-  const setTabs = useSetAtom(openScheduleTabsAtom);
   useEffect(() => {
     let disposed = false;
     let off: (() => void) | undefined;
@@ -76,10 +75,9 @@ export function useScheduleRegistrySync(): void {
       disposed = true;
       off?.();
       leave?.();
-      setTabs([]);
       setSnapshot({ workspaceId: null, rows: [], runtimes: [], ready: false });
     };
-  }, [runtime, setSnapshot, setTabs]);
+  }, [runtime, setSnapshot]);
 }
 
 export function useSchedules() {

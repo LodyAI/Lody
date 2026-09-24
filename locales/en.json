@@ -4031,8 +4031,6 @@
   "schedules.upgrade": "Update the target machine’s CLI to edit schedules.",
   "commands.schedules.pause": "Pause Schedule",
   "schedules.all": "All schedules",
-  "schedules.tabs": "Schedule tabs",
-  "schedules.closeTab": "Close tab",
   "schedules.notFound": "This schedule is unavailable or deleted.",
   "schedules.enabled": "Enabled",
   "schedules.runNow": "Run now",

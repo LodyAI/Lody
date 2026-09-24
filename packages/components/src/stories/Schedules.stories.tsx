@@ -5,6 +5,7 @@ import {
   type ScheduleRowContext,
 } from '../components/schedules/schedule-view';
 import { ScheduleAgentControls } from '../components/schedules/schedule-agent-controls';
+import { ScheduleDialog } from '../components/schedules/schedule-dialog';
 import { ScheduleDestinationRows } from '../components/schedules/schedule-destination-rows';
 import { FieldIssueMark } from '../components/schedules/schedule-field-issue-mark';
 import type { ScheduleSaveIssue } from '../components/schedules/schedule-save-blockers';
@@ -234,8 +235,13 @@ function WithPlatform({ children }: { children: ReactNode }) {
  */
 function EditorStory({
   fixture = {},
+  bare = false,
   ...props
-}: Partial<React.ComponentProps<typeof ScheduleForm>> & { fixture?: EditorFixture }) {
+}: Partial<React.ComponentProps<typeof ScheduleForm>> & {
+  fixture?: EditorFixture;
+  /** Render without the page scroller, e.g. inside `ScheduleDialog`. */
+  bare?: boolean;
+}) {
   const [destination, setDestination] = useState<ScheduleDestination>(
     fixture.destination ?? { kind: 'new_session' }
   );
@@ -252,7 +258,7 @@ function EditorStory({
       .map((issue) => issue.message);
   const chat = (id: string) => chats.find((entry) => entry.id === id) ?? null;
   return (
-    <div className="h-dvh overflow-auto">
+    <div className={bare ? undefined : 'h-dvh overflow-auto'}>
       <ScheduleForm
         now={NOW}
         saving={false}
@@ -497,3 +503,18 @@ export const EditorWorkspaceLoading: Story = editor({
 });
 export const EditorSaving: Story = editor({ saving: true });
 export const EditorError: Story = editor({ error: 'The schedule could not be saved.' });
+
+/**
+ * Desktop: the list stays the page and a schedule opens over it in a Dialog —
+ * no tabs. Saving or closing returns to the list.
+ */
+export const EditorInDialog: Story = {
+  render: (args) => (
+    <WithPlatform>
+      <ScheduleListView {...args} />
+      <ScheduleDialog title="New schedule" open onClose={() => {}}>
+        <EditorStory bare autoFocus fixture={{ chatOnly: true }} />
+      </ScheduleDialog>
+    </WithPlatform>
+  ),
+};

@@ -18,6 +18,10 @@
   machine; never a project (none = plain chat, end to end). No consent checkbox,
   directory-scope checkbox, full-access warning or resume dialog — do not add one
   back in any shape; ownership, capability and permission still gate save/run.
+- The list is the page. There are no schedule tabs: on desktop `/schedules/new`
+  and `/schedules/$id` open over the list in `ScheduleDialog`; on mobile they
+  are a pushed page with a back button. Saving and closing both return to the
+  list. Keep the routes: links from a Session's info bar open the dialog.
 - The editor reuses the composer's parts: one box holds name, a hairline, the
   prompt and, along its bottom, the composer's own Agent controls
   (`ScheduleAgentControls` = `DesktopRunConfigMenu` + `DesktopPermissionModeButton`).

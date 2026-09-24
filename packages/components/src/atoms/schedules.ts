@@ -8,4 +8,3 @@ export const scheduleRegistryAtom = atom<{
   ready: boolean;
   error?: string;
 }>({ workspaceId: null, rows: [], runtimes: [], ready: false });
-export const openScheduleTabsAtom = atom<string[]>([]);

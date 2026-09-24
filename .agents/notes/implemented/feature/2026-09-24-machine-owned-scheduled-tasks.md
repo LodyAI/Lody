@@ -58,7 +58,8 @@ chat landing's machine, project and worktree pills sit under it; where runs go i
 its own card above the time rule. This replaced four property rows. A new
 schedule opens with the chat landing's last machine and Agent and that Agent's
 remembered model, options and permission, so nothing starts empty; times are
-typed, with no picker popup. There is no time zone control: the CLI publishes
+typed, with no picker popup. On desktop the editor and detail open in a dialog
+over the list instead of tabs, and saving returns to the list. There is no time zone control: the CLI publishes
 its IANA zone as `MachineMeta.timeZone` (under 50 bytes, written at registration),
 wall-clock rules and one-off times are read on that clock, and older CLIs fall
 back to the viewer's zone. Save problems are marked where they are fixed — an

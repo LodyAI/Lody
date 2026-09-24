@@ -10,11 +10,11 @@ import {
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useCommand } from '@/lib/commands';
 import { useEffect, useMemo, useState } from 'react';
-import { useAtom, useAtomValue } from 'jotai';
+import { useAtomValue } from 'jotai';
 import { useNavigate } from '@tanstack/react-router';
 import { useTranslation } from 'react-i18next';
 import { v4 as uuid } from 'uuid';
-import { AlertTriangle, ArrowLeft, Pause, Play, Trash2, X, Zap } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, Pause, Play, Trash2, Zap } from 'lucide-react';
 import { useCloudQuery } from '@lody/platform/react';
 import {
   DEFAULT_SCHEDULE_DESTINATION,
@@ -43,7 +43,6 @@ import {
 } from '@/atoms';
 import { getAllAgentConfigAtom } from '@/atoms/agents';
 import { schedulesFeatureEnabledAtom } from '@/atoms/settings';
-import { openScheduleTabsAtom } from '@/atoms/schedules';
 import { useResolvedWorkspaceScope } from '@/hooks/use-resolved-workspace-scope';
 import {
   onlineMachineIdsAtom,
@@ -68,6 +67,7 @@ import {
   type ScheduleFormValue,
 } from './schedule-view';
 import { scheduleCardClass } from './schedule-property-row';
+import { ScheduleDialog } from './schedule-dialog';
 import { collectScheduleSaveIssues, type ScheduleIssueField } from './schedule-save-blockers';
 import { ScheduleDestinationRows, type PickableSession } from './schedule-destination-rows';
 import { ScheduleAgentControls } from './schedule-agent-controls';
@@ -103,7 +103,6 @@ function SchedulesContent({ scheduleId }: { scheduleId?: string }) {
   };
   const mobile = useIsMobile();
   const detail = useScheduleDocument(scheduleId);
-  const [tabs, setTabs] = useAtom(openScheduleTabsAtom);
   const [error, setError] = useState<string>();
   const [confirmation, setConfirmation] = useState<{
     title: string;
@@ -126,10 +125,6 @@ function SchedulesContent({ scheduleId }: { scheduleId?: string }) {
           : { to: '/$workspaceName/schedules', params: { workspaceName: slug } }
       );
   };
-  useEffect(() => {
-    if (scheduleId)
-      setTabs((previous) => (previous.includes(scheduleId) ? previous : [...previous, scheduleId]));
-  }, [scheduleId, setTabs]);
   const mutate = async (action: () => Promise<void>) => {
     try {
       setError(undefined);
@@ -179,64 +174,138 @@ function SchedulesContent({ scheduleId }: { scheduleId?: string }) {
       if (row) toggle(row);
     },
   });
+  // Saving or closing always lands on the list: the list is the page, and a
+  // schedule is edited over it (a Dialog on desktop, a pushed page on mobile).
+  const body = !scheduleId ? null : scheduleId === 'new' ? (
+    <ScheduleEditor
+      key={`${runtime?.workspaceId}:new`}
+      onSaved={() => open()}
+      onOpenSession={openSession}
+    />
+  ) : !detail.ready ? (
+    <p className="p-5">{t('schedules.loading', 'Loading schedules…')}</p>
+  ) : !detail.document || !row ? (
+    <p className="p-5">{t('schedules.notFound', 'This schedule is unavailable or deleted.')}</p>
+  ) : (
+    <>
+      <div className="sticky top-0 z-10 flex flex-wrap items-center gap-1.5 border-b-[0.5px] border-border bg-background/95 px-4 py-2 backdrop-blur sm:pr-12">
+        {row.enabled ? (
+          <span className="mr-auto text-[0.9em] text-muted-foreground">
+            {t(
+              'schedules.pauseHelp',
+              'Pausing stops future runs. Cancel already submitted Sessions separately.'
+            )}
+          </span>
+        ) : (
+          <span className="mr-auto rounded-full border-[0.5px] px-2 py-px text-[0.75em] font-normal text-muted-foreground">
+            {t('schedules.paused', 'Paused')}
+          </span>
+        )}
+        <Button
+          size="sm"
+          variant="ghost"
+          className="h-7 px-2 text-[0.9em]"
+          disabled={row.enabled ? !isOwner : !canManage}
+          onClick={() => toggle(row)}
+        >
+          {row.enabled ? <Pause className="size-3.5" /> : <Play className="size-3.5" />}
+          {row.enabled ? t('schedules.pause', 'Pause') : t('schedules.resume', 'Resume')}
+        </Button>
+        <Button
+          size="sm"
+          variant="ghost"
+          className="h-7 px-2 text-[0.9em]"
+          disabled={!canManage}
+          onClick={() =>
+            setConfirmation({
+              title: t('schedules.runNow', 'Run now'),
+              description: t(
+                'schedules.runNowHelp',
+                'Run with the last saved prompt, Agent, Project and permission mode. Unsaved edits are excluded. This may run alongside existing work.'
+              ),
+              accept: async () => {
+                if (repository && user)
+                  await runtime!.withScheduleStore(scheduleId, () =>
+                    repository.requestRun({
+                      scheduleId,
+                      actorId: user.id,
+                      manualRunId: uuid(),
+                      now: getServerNow(),
+                    })
+                  );
+              },
+            })
+          }
+        >
+          <Zap className="size-3.5" />
+          {t('schedules.runNow', 'Run now')}
+        </Button>
+        <Button
+          size="sm"
+          variant="ghost"
+          className="h-7 px-2 text-[0.9em] text-muted-foreground hover:text-destructive"
+          disabled={!isOwner}
+          onClick={() =>
+            void mutate(async () => {
+              if (repository && user) {
+                await runtime!.withScheduleStore(scheduleId, () =>
+                  repository.delete(scheduleId, user.id, getServerNow())
+                );
+                open();
+              }
+            })
+          }
+        >
+          <Trash2 className="size-3.5" />
+          <span className="sr-only sm:not-sr-only">{t('schedules.delete', 'Delete')}</span>
+        </Button>
+      </div>
+      {!canManage ? (
+        <p className="mx-auto max-w-2xl px-4 pt-4 text-[0.9em] text-muted-foreground sm:px-6">
+          {t(
+            'schedules.readOnly',
+            'Only the owner can edit this schedule, using a machine with Schedule support.'
+          )}
+        </p>
+      ) : null}
+      {registry.runtimes
+        .filter((r) => r === matchingScheduleRuntime(row, registry.runtimes) && r.blockedCode)
+        .map((r) => (
+          <p
+            className="mx-auto mt-4 flex max-w-2xl items-start gap-2 rounded-lg border-[0.5px] border-status-warning/40 px-3 py-2 text-[0.9em] sm:px-4"
+            key={r.machineId}
+          >
+            <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-status-warning" />
+            <span>
+              {t(
+                `schedules.errors.${r.blockedCode}`,
+                'Check the target machine, Agent and Project, then save the schedule again.'
+              )}
+            </span>
+          </p>
+        ))}
+      <ScheduleEditor
+        key={`${runtime?.workspaceId}:${scheduleId}:${row.activationId}`}
+        document={detail.document}
+        disabledReason={
+          !isOwner
+            ? t('schedules.ownerOnly', 'Only the schedule owner can save changes.')
+            : !canManage
+              ? t('schedules.upgrade', 'Update the target machine’s CLI to edit schedules.')
+              : undefined
+        }
+        onSaved={() => open()}
+        onOpenSession={openSession}
+      />
+      <ScheduleSessionHistory scheduleId={scheduleId} />
+    </>
+  );
+  const dialogTitle =
+    scheduleId === 'new'
+      ? t('schedules.new', 'New schedule')
+      : (row?.title ?? t('schedules.title', 'Schedules'));
   return (
     <div className="flex h-full min-h-0 flex-col bg-background" data-settings-surface="">
-      {mobile ? (
-        scheduleId ? (
-          <Button className="self-start m-2" variant="ghost" onClick={() => open()}>
-            <ArrowLeft className="size-4" />
-            {t('schedules.all', 'All schedules')}
-          </Button>
-        ) : null
-      ) : (
-        <nav
-          className="flex shrink-0 items-center gap-0.5 overflow-x-auto border-b-[0.5px] border-border px-2 py-1.5"
-          aria-label={t('schedules.tabs', 'Schedule tabs')}
-        >
-          <Button
-            size="sm"
-            className="h-7 shrink-0 px-2 text-[0.9em] font-normal"
-            variant={!scheduleId ? 'secondary' : 'ghost'}
-            onClick={() => open()}
-          >
-            {t('schedules.all', 'All schedules')}
-          </Button>
-          {tabs.map((id) => (
-            <div
-              key={id}
-              className={cn(
-                'flex shrink-0 items-center rounded-md pr-0.5',
-                scheduleId === id && 'bg-secondary'
-              )}
-            >
-              <Button
-                size="sm"
-                variant="ghost"
-                className="h-7 max-w-40 px-2 text-[0.9em] font-normal hover:bg-transparent"
-                onClick={() => open(id)}
-              >
-                <span className="truncate">
-                  {id === 'new'
-                    ? t('schedules.new', 'New schedule')
-                    : (registry.rows.find((r) => r.scheduleId === id)?.title ??
-                      t('schedules.title', 'Schedules'))}
-                </span>
-              </Button>
-              <button
-                type="button"
-                className="rounded p-1 text-muted-foreground hover:bg-hover hover:text-foreground"
-                aria-label={t('schedules.closeTab', 'Close tab')}
-                onClick={() => {
-                  setTabs(tabs.filter((item) => item !== id));
-                  if (scheduleId === id) open();
-                }}
-              >
-                <X className="size-3" />
-              </button>
-            </div>
-          ))}
-        </nav>
-      )}
       <Dialog
         open={!!confirmation}
         onOpenChange={(isOpen) => {
@@ -269,7 +338,15 @@ function SchedulesContent({ scheduleId }: { scheduleId?: string }) {
           {error}
         </p>
       ) : null}
-      {!scheduleId ? (
+      {mobile && scheduleId ? (
+        <>
+          <Button className="m-2 self-start" variant="ghost" onClick={() => open()}>
+            <ArrowLeft className="size-4" />
+            {t('schedules.all', 'All schedules')}
+          </Button>
+          <div className="min-h-0 flex-1 overflow-auto">{body}</div>
+        </>
+      ) : (
         <ScheduleListView
           {...registry}
           onOpen={open}
@@ -298,132 +375,12 @@ function SchedulesContent({ scheduleId }: { scheduleId?: string }) {
                 machineSupportsSchedulesProtocol(machines.get(item.machineId as never))),
           })}
         />
-      ) : scheduleId === 'new' ? (
-        <div className="overflow-auto">
-          <ScheduleEditor
-            key={`${runtime?.workspaceId}:new`}
-            onSaved={open}
-            onOpenSession={openSession}
-          />
-        </div>
-      ) : !detail.ready ? (
-        <p className="p-5">{t('schedules.loading', 'Loading schedules…')}</p>
-      ) : !detail.document || !row ? (
-        <p className="p-5">{t('schedules.notFound', 'This schedule is unavailable or deleted.')}</p>
-      ) : (
-        <div className="min-h-0 flex-1 overflow-auto">
-          <div className="sticky top-0 z-10 flex flex-wrap items-center gap-1.5 border-b-[0.5px] border-border bg-background/95 px-4 py-2 backdrop-blur">
-            {row.enabled ? (
-              <span className="mr-auto text-[0.9em] text-muted-foreground">
-                {t(
-                  'schedules.pauseHelp',
-                  'Pausing stops future runs. Cancel already submitted Sessions separately.'
-                )}
-              </span>
-            ) : (
-              <span className="mr-auto rounded-full border-[0.5px] px-2 py-px text-[0.75em] font-normal text-muted-foreground">
-                {t('schedules.paused', 'Paused')}
-              </span>
-            )}
-            <Button
-              size="sm"
-              variant="ghost"
-              className="h-7 px-2 text-[0.9em]"
-              disabled={row.enabled ? !isOwner : !canManage}
-              onClick={() => toggle(row)}
-            >
-              {row.enabled ? <Pause className="size-3.5" /> : <Play className="size-3.5" />}
-              {row.enabled ? t('schedules.pause', 'Pause') : t('schedules.resume', 'Resume')}
-            </Button>
-            <Button
-              size="sm"
-              variant="ghost"
-              className="h-7 px-2 text-[0.9em]"
-              disabled={!canManage}
-              onClick={() =>
-                setConfirmation({
-                  title: t('schedules.runNow', 'Run now'),
-                  description: t(
-                    'schedules.runNowHelp',
-                    'Run with the last saved prompt, Agent, Project and permission mode. Unsaved edits are excluded. This may run alongside existing work.'
-                  ),
-                  accept: async () => {
-                    if (repository && user)
-                      await runtime!.withScheduleStore(scheduleId, () =>
-                        repository.requestRun({
-                          scheduleId,
-                          actorId: user.id,
-                          manualRunId: uuid(),
-                          now: getServerNow(),
-                        })
-                      );
-                  },
-                })
-              }
-            >
-              <Zap className="size-3.5" />
-              {t('schedules.runNow', 'Run now')}
-            </Button>
-            <Button
-              size="sm"
-              variant="ghost"
-              className="h-7 px-2 text-[0.9em] text-muted-foreground hover:text-destructive"
-              disabled={!isOwner}
-              onClick={() =>
-                void mutate(async () => {
-                  if (repository && user) {
-                    await runtime!.withScheduleStore(scheduleId, () =>
-                      repository.delete(scheduleId, user.id, getServerNow())
-                    );
-                    open();
-                  }
-                })
-              }
-            >
-              <Trash2 className="size-3.5" />
-              <span className="sr-only sm:not-sr-only">{t('schedules.delete', 'Delete')}</span>
-            </Button>
-          </div>
-          {!canManage ? (
-            <p className="mx-auto max-w-2xl px-4 pt-4 text-[0.9em] text-muted-foreground sm:px-6">
-              {t(
-                'schedules.readOnly',
-                'Only the owner can edit this schedule, using a machine with Schedule support.'
-              )}
-            </p>
-          ) : null}
-          {registry.runtimes
-            .filter((r) => r === matchingScheduleRuntime(row, registry.runtimes) && r.blockedCode)
-            .map((r) => (
-              <p
-                className="mx-auto mt-4 flex max-w-2xl items-start gap-2 rounded-lg border-[0.5px] border-status-warning/40 px-3 py-2 text-[0.9em] sm:px-4"
-                key={r.machineId}
-              >
-                <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-status-warning" />
-                <span>
-                  {t(
-                    `schedules.errors.${r.blockedCode}`,
-                    'Check the target machine, Agent and Project, then save the schedule again.'
-                  )}
-                </span>
-              </p>
-            ))}
-          <ScheduleEditor
-            key={`${runtime?.workspaceId}:${scheduleId}:${row.activationId}`}
-            document={detail.document}
-            disabledReason={
-              !isOwner
-                ? t('schedules.ownerOnly', 'Only the schedule owner can save changes.')
-                : !canManage
-                  ? t('schedules.upgrade', 'Update the target machine’s CLI to edit schedules.')
-                  : undefined
-            }
-            onSaved={open}
-            onOpenSession={openSession}
-          />
-          <ScheduleSessionHistory scheduleId={scheduleId} />
-        </div>
       )}
+      {!mobile ? (
+        <ScheduleDialog title={dialogTitle} open={!!scheduleId} onClose={() => open()}>
+          {body}
+        </ScheduleDialog>
+      ) : null}
     </div>
   );
 }
