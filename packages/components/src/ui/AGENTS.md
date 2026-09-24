@@ -83,6 +83,13 @@ strings on i18n rather than the registry's inline English.
   available" and "Files unavailable" icon.
   Evidence: [spinner note](../../../../.agents/notes/implemented/bug-fix/2026-09-13-spinner-off-svg-retina-composite.md).
 
+## Working grid
+
+- `ui/working-grid.tsx` is the session "working" mark (not a loading spinner). It animates
+  only `transform`/`opacity` via Web Animations with `startTime = 0`, so the compositor
+  runs it and every mark shares one sea; never drive it from rAF, timers or React state.
+  Why: [working grid note](../../../../.agents/notes/implemented/feature/2026-09-24-sidebar-working-grid.md).
+
 ## Scroll area
 
 - Keep the `@radix-ui/react-scroll-area` patch until an upstream version cancels

@@ -31,7 +31,6 @@ import { RefreshCw } from 'lucide-react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync } from 'react-dom';
 import { createRoot, type Root } from 'react-dom/client';
-import { SidebarRowEndSlot } from '../src/components/sidebar-row-shared';
 import { RemoteDirectoryPicker } from '../src/components/local-projects/add-local-project-dialog';
 import { MobileAddLocalProjectFlow } from '../src/components/local-projects/mobile-add-local-project-flow';
 import { MobileProjectFileBrowser } from '../src/components/files/mobile-project-file-browser';
@@ -102,22 +101,6 @@ function expectCompositableSpinner(): Element {
 }
 
 describe('spinners animate on a compositable wrapper and rotate in place', () => {
-  it('session row working indicator: the status slot animates a centered wrapper', () => {
-    // The status mark lives in the row's END slot (`sidebar-row-shared.tsx`).
-    // It is mounted for as long as a session runs, so it is the spinner that
-    // dominated the idle renderer profile.
-    render(React.createElement(SidebarRowEndSlot, { isWorking: true }));
-
-    const wrapper = expectCompositableSpinner();
-    expect(wrapper.hasAttribute('data-session-working-spinner')).toBe(true);
-
-    const indicator = wrapper.closest('[data-session-row-indicator]');
-    expect(indicator).not.toBeNull();
-    expect(indicator!.classList.contains('-top-px')).toBe(false);
-    expect(indicator!.classList.contains('items-center')).toBe(true);
-    expect(indicator!.classList.contains('justify-center')).toBe(true);
-  });
-
   it('session syncing indicator: the label stays outside the animated box', () => {
     render(React.createElement(SessionSyncingIndicator, {}));
 

@@ -16,7 +16,7 @@ import {
   X,
   type LucideIcon,
 } from 'lucide-react';
-import { Spinner } from '@/ui/spinner';
+import { WorkingGrid } from '@/ui/working-grid';
 import type { PrStatus, SessionPullRequestCiState } from '@lody/shared';
 import { cn } from '@/lib/utils';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
@@ -148,7 +148,7 @@ function SessionRowStatusIndicator({
   if (isWaitingPermission) {
     icon = <Hand className="h-3 w-3 text-status-warning" />;
   } else if (isWorking) {
-    icon = <Spinner data-session-working-spinner="" className="h-3 w-3 shrink-0 text-primary" />;
+    icon = <WorkingGrid data-session-working-indicator="" className="text-primary" />;
   } else if (hasUnreadMessages) {
     icon = <span className="h-2 w-2 rounded-full bg-primary" />;
   }
