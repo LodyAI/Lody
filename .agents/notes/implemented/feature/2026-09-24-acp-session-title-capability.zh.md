@@ -39,3 +39,15 @@ Core 0.1.7 已发布。Claude、Codex、Grok 已固定依赖该版本，两个 n
 - [Claude #33](https://github.com/LodyAI/acp-extension-claude/pull/33)
 - [Codex #53](https://github.com/LodyAI/acp-extension-codex/pull/53)
 - [Grok #19](https://github.com/LodyAI/acp-extension-grok/pull/19)
+
+Kimi 和 DSH 现在也通过相同能力声明接入。Kimi 检查原生托管 OAuth Provider
+配置，在 prompt 成功启动后请求生成；仅 API Key 配置保留客户端生成。元数据
+映射保留生成、自定义、预览标题的来源。DSH 保留上游基础配置的首条消息 LLM
+标题插件，通过会话有序输出队列转发持久化 session/title 事件。用户命名保护
+仍由原生服务负责。Pi 0.87.0 有命名 API，但没有内置自动标题生成器，继续使用
+现有客户端路径。本次不变更运行时发布版本。
+
+验证：Kimi 在 Node 24.15 的独立 checkout 中通过 ACP 188 项测试、类型检查和
+构建；范围内 lint 仅有已有警告。DSH 通过 36 项测试、构建和格式检查。已核对
+发布的基础配置中 session-title-llm 确实对应首条消息 LLM Provider；未调用真实
+标题服务或模型。[DSH PR #23](https://github.com/LodyAI/acp-extension-dsh/pull/23)。

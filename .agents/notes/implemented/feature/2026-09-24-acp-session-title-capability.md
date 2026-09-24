@@ -48,3 +48,18 @@ Core 0.1.7 is now published. Claude, Codex and Grok pin that release; the two np
 - [Claude #33](https://github.com/LodyAI/acp-extension-claude/pull/33)
 - [Codex #53](https://github.com/LodyAI/acp-extension-codex/pull/53)
 - [Grok #19](https://github.com/LodyAI/acp-extension-grok/pull/19)
+
+Kimi and DSH now opt in through the same capability. Kimi checks the native managed
+OAuth provider configuration and requests generation after an accepted prompt launch.
+API-key-only configurations retain client generation. Its metadata projection
+preserves generated/custom/replaceable provenance. DSH retains the upstream base
+bundle's first-prompt LLM plugin and forwards durable session/title events through
+the ordered session output queue. Native user-name protection remains authoritative.
+Pi 0.87.0 exposes naming APIs but no built-in automatic title generator, so it stays
+on the existing client path. Runtime release versions are unchanged.
+
+Validation: Kimi ACP's 188 tests, typecheck and build passed in a standalone
+checkout on Node 24.15; scoped lint reports only existing warnings. DSH's 36 tests,
+build and formatting check passed. The published base bundle confirms its
+session-title-llm row is the first-prompt LLM provider. No live title service or
+model request was made. [DSH PR #23](https://github.com/LodyAI/acp-extension-dsh/pull/23).
