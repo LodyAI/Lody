@@ -440,15 +440,17 @@ is about, so it takes the card rung; a Toast arrives over that page, so it takes
 the floating one. Neither is on the modal rung: a message does not have to be
 answered, and nothing behind it recedes.
 
-| part        | what it is                                                             |
-| ----------- | ---------------------------------------------------------------------- |
-| mark        | `feedback.markSize`, in the tone's colour, drawn by the part           |
-| title       | what happened, at the control step, weight 600, in `feedback.title`    |
-| description | the sentence under it, at the footnote step, in `feedback.description` |
-| actions     | what answers it: Buttons, whose variants are the surface's choice      |
-| viewport    | a toast lands at the top, clear of the safe area, above every popup    |
+| part        | what it is                                                                               |
+| ----------- | ---------------------------------------------------------------------------------------- |
+| mark        | `feedback.markSize`, in the tone's colour, drawn by the part                             |
+| title       | what happened, at the control step, in `feedback.title`: 600 on an Alert, 500 on a Toast |
+| description | the sentence under it, at the footnote step, in `feedback.description`                   |
+| actions     | what answers it: Buttons, whose variants are the surface's choice                        |
+| viewport    | a toast lands at the top, clear of the safe area, above every popup                      |
 
-A tone is a **tint and a mark, never a fill**. There are four — neutral,
+A tone is a **tint and a mark, never a fill** on an Alert, and **the mark alone**
+on a Toast: toasts stack, and a stack of green, white and red cards reads as three
+kinds of thing. Identical toasts collapse into one, and three show at most. There are four — neutral,
 success, warning and danger — and the tint is 8% of the tone mixed into the
 rung's own background, which is the mix a destructive menu row already uses. It
 is mixed in `feedback/surface.ts` rather than frozen into a token, because it is

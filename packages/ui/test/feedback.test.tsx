@@ -56,11 +56,7 @@ describe('Alert', () => {
     expect(danger).toContain('<circle');
   });
 
-  test('a tone tints the surface it is on, and the two rungs are two surfaces', () => {
-    // The tint is 8% of the tone mixed into the rung's own background, so an
-    // Alert on the card rung and a Toast on the floating one cannot share one
-    // token without one of them ceasing to look like its rung.
-    expect(classesFor(surface.noticeDanger)).not.toEqual(classesFor(surface.toastDanger));
+  test('an Alert’s tone tints the card it is on', () => {
     const html = renderToStaticMarkup(<Alert.Root tone="danger" />);
     for (const name of classesFor(surface.message, surface.notice, surface.noticeDanger)) {
       expect(html, `the danger alert is missing ${name}`).toContain(name);
@@ -172,15 +168,17 @@ describe('Toast', () => {
     expect(toast.textContent).toContain('No answer');
     // The same block an Alert is, on the other rung: one message, two surfaces.
     expect(classesOf(toast)).toEqual(
-      expect.arrayContaining(classesFor(surface.message, surface.toast, surface.toastDanger))
+      expect.arrayContaining(classesFor(surface.message, surface.toast))
     );
+    // A toast's tone is its mark alone: no tint, so a stack reads as one kind.
+    expect(classesOf(toast)).not.toEqual(expect.arrayContaining(classesFor(surface.noticeDanger)));
   });
 
   test('the title and the sentence under it are the Alert’s, not a second pair', async () => {
     const manager = Toast.createManager();
     mounted = await mount(<Toast.Provider manager={manager} />);
     await report(manager, { title: 'Session archived', description: 'It can be restored.' });
-    expect(classesOf(one('h2'))).toEqual(classesFor(surface.title));
+    expect(classesOf(one('h2'))).toEqual(classesFor(surface.title, surface.toastTitle));
     expect(classesOf(one('[data-base-ui-portal] p'))).toEqual(classesFor(surface.description));
   });
 

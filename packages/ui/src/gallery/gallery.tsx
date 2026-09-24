@@ -25,7 +25,7 @@ import { Skeleton } from '../feedback/skeleton';
 import { Spinner } from '../feedback/spinner';
 import { feedbackSurface } from '../feedback/surface';
 import { Toast } from '../feedback/toast';
-import { TONE_GLYPHS, TONE_MARKS, TOAST_TONES, type FeedbackTone } from '../feedback/tone';
+import { TONE_GLYPHS, TONE_MARKS, type FeedbackTone } from '../feedback/tone';
 import { Collapsible } from '../disclosure/collapsible';
 import { disclosure as disclosureTokens } from '../disclosure/disclosure.tokens.stylex';
 import { Tabs, type TabsSize } from '../disclosure/tabs';
@@ -2488,19 +2488,14 @@ function ToastReplica({ tone }: { tone: FeedbackTone }) {
     <Row>
       <LegendKey>{tone}</LegendKey>
       <Cluster>
-        <div
-          {...stylex.props(
-            feedbackSurface.message,
-            feedbackSurface.toast,
-            TOAST_TONES[tone],
-            styles.toastReplica
-          )}
-        >
+        <div {...stylex.props(feedbackSurface.message, feedbackSurface.toast, styles.toastReplica)}>
           <span {...stylex.props(feedbackSurface.mark, TONE_MARKS[tone])}>
             <Mark />
           </span>
           <div {...stylex.props(feedbackSurface.body)}>
-            <p {...stylex.props(feedbackSurface.title)}>Session archived</p>
+            <p {...stylex.props(feedbackSurface.title, feedbackSurface.toastTitle)}>
+              Session archived
+            </p>
             <p {...stylex.props(feedbackSurface.description)}>It can be restored from Archive.</p>
           </div>
         </div>

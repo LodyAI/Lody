@@ -32,13 +32,6 @@ export const NOTICE_TONES = {
   danger: surface.noticeDanger,
 } as const;
 
-export const TOAST_TONES = {
-  neutral: undefined,
-  success: surface.toastSuccess,
-  warning: surface.toastWarning,
-  danger: surface.toastDanger,
-} as const;
-
 /**
  * How urgently a screen reader is told. A failure or a warning interrupts what
  * is being read; a confirmation waits its turn. The two are different roles
