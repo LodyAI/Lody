@@ -110,7 +110,6 @@ import {
   Brain,
   BrushCleaning,
   Check,
-  X,
   CheckCircle2,
   ChevronRight,
   Circle,
@@ -118,10 +117,8 @@ import {
   Copy,
   FileText,
   Globe,
-  Hand,
   Info,
   ListChecks,
-  Loader2,
   MoveRight,
   PencilLine,
   Search,
@@ -3751,13 +3748,10 @@ const AssistantTurnConfigInfoButton = ({
 /* The turn reads on three steps: the reply is the text; a group summary
    ("Worked for 12s", "Read 2 files") is a notch smaller and secondary; a step
    under it is smaller again, at regular weight — a medium-weight gray reads as
-   a second, muddier kind of text. Icons sit a tone under their words so the
-   eye lands on what happened, not on the glyph beside it. */
+   a second, muddier kind of text. Steps carry no glyphs: the verb already says
+   what kind of step it is, and a column of icons was a second list beside it. */
 const ACTIVITY_PROCESS_TEXT_CLASS = 'text-[12.5px] font-normal leading-snug text-muted-foreground';
 const ACTIVITY_PROCESS_ICON_CLASS = 'h-3.5 w-3.5 shrink-0 text-muted-foreground/70';
-/* One tone for every icon in a turn — see `ACTIVITY_PROCESS_ICON_CLASS`. Only
-   the optical nudge is local; no per-icon opacity. */
-const ACTIVITY_STEP_ICON_CLASS = cn(ACTIVITY_PROCESS_ICON_CLASS, 'mt-0.5');
 /* Match the prose's fixed 4px inset, independent of the root font size. */
 const ACTIVITY_STEP_BUTTON_CLASS = cn(
   'min-h-6 items-start rounded-md px-[4px] py-0.5 hover:bg-hover/40',
@@ -6552,10 +6546,9 @@ const ToolCallCard = memo(function ToolCallCard({
   }
   if (toolCall.activityKind === 'context_compaction') {
     const isCompacting = toolCall.status === 'pending' || toolCall.status === 'in_progress';
-    const StatusIcon = isCompacting ? Loader2 : toolCall.status === 'failed' ? AlertCircle : Check;
     return (
       <div className="flex min-h-7 items-center gap-2 py-1 text-sm text-muted-foreground">
-        <Spinner icon={StatusIcon} spinning={isCompacting} className="h-4 w-4" aria-hidden="true" />
+        {isCompacting ? <Spinner className="h-4 w-4" aria-hidden="true" /> : null}
         <span>
           {isCompacting
             ? t('sessions.activity.compactingContext', 'Compacting context')
@@ -6567,11 +6560,7 @@ const ToolCallCard = memo(function ToolCallCard({
     );
   }
   const kindMeta = toolCall.kind ? TOOL_KIND_META[toolCall.kind] : undefined;
-  const KindIcon = kindMeta?.icon ?? Wrench;
   const isActivityRow = inlineOutput;
-  const kindIconClass = isActivityRow
-    ? ACTIVITY_STEP_ICON_CLASS
-    : 'h-3.5 w-3.5 flex-none shrink-0 text-current';
 
   const hasDiffContent = Boolean(toolCall.content?.some((block) => block.type === 'diff'));
   const hasTerminalContent = Boolean(
@@ -6813,7 +6802,6 @@ const ToolCallCard = memo(function ToolCallCard({
             isTerminalExecuteToolCall ? null : titleColorClass
           )}
         >
-          <KindIcon className={kindIconClass} />
           {isFileAction && fileName ? (
             /* One word space between the verb and its file, not a 6px gap. */
             <div className="flex min-w-0 items-center gap-[0.3em]">
@@ -7279,7 +7267,6 @@ const PermissionRequestBlock = ({ toolCall }: { toolCall: ToolCallMessage }) => 
       <div
         className={cn('flex min-h-7 w-full items-start gap-1.5 py-1', ACTIVITY_PROCESS_TEXT_CLASS)}
       >
-        <Hand className={cn(ACTIVITY_STEP_ICON_CLASS, 'text-status-warning')} aria-hidden="true" />
         <span className="min-w-0 flex-1 truncate">
           {readonly
             ? t('sharing.permissionPending', 'Waiting for the author')
@@ -7294,15 +7281,10 @@ const PermissionRequestBlock = ({ toolCall }: { toolCall: ToolCallMessage }) => 
     (record.allowed
       ? t('sessions.permissionApproved', 'Permission Approved')
       : t('sessions.permissionDenied', 'Permission Denied'));
-  const OutcomeIcon = record.allowed ? Check : X;
   return (
     <div
       className={cn('flex min-h-7 w-full items-start gap-1.5 py-1', ACTIVITY_PROCESS_TEXT_CLASS)}
     >
-      {/* Check vs cross already carries approved-vs-denied, so the icon keeps
-          the turn's one icon tone instead of introducing a hue no other icon
-          in the row has. */}
-      <OutcomeIcon className={ACTIVITY_STEP_ICON_CLASS} aria-hidden="true" />
       {/* Truncated like every other process row: an `allow_always` name runs
           to a full sentence, and the record must stay one line. */}
       <span className="min-w-0 flex-1 truncate" title={label}>

@@ -210,32 +210,19 @@ const styles = stylex.create({
   statusError: { color: colors.destructive },
 
   /**
-   * One row of answers. The two that answer this request — refuse once, and
-   * the suggestion — are small buttons at the end. Answers that change what
-   * the agent may do from now on keep the provider's words whole, as quiet
-   * ghost buttons at the start: available, and not competing.
+   * The answers: one column of small raised buttons, every answer the same
+   * kind of object in one place, in the provider's order. Their words read
+   * from the start like a list; the suggestion is the primary one.
    */
-  footer: {
-    display: 'flex',
-    flexWrap: 'wrap',
-    alignItems: 'center',
-    columnGap: space[2],
-    rowGap: space[1],
-    paddingTop: space[1],
-  },
-  standing: {
-    display: 'flex',
-    flexWrap: 'wrap',
-    alignItems: 'center',
-    gap: space[1],
+  answers: { display: 'flex', flexDirection: 'column', gap: space[1], paddingTop: space[1] },
+  answer: { width: '100%' },
+  answerLabel: {
+    flexGrow: 1,
     minWidth: 0,
-    marginInlineStart: `calc(-1 * ${space[2]})`,
-  },
-  direct: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: space[2],
-    marginInlineStart: 'auto',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    textAlign: 'start',
   },
 
   queueStrip: {
@@ -283,10 +270,9 @@ export interface PermissionPromptProps {
 
 /**
  * One permission request at the composer's scale: the question and why, what
- * it is about, and one row of answers — refuse once and the suggestion as small
- * buttons at the end (the suggestion primary, last), and any answer that changes
- * what the agent may do from now on as a ghost button at the start. The answers
- * are the provider's own words, never rewritten.
+ * it is about, and the answers as one column of small raised buttons in the
+ * provider's order, the suggestion primary. The answers are the provider's own
+ * words, never rewritten.
  *
  * Keyboard: the arrows walk the answers starting from the suggested one, Enter
  * or Space presses the one focused, and Escape refuses once. Enter on the card
@@ -318,24 +304,7 @@ export function PermissionPrompt({
   const dismissOptionId = resolveDismissOptionId(permission.options);
   const disabled = !isReady || sendingOptionId !== null;
 
-  // The two direct answers go to the end — refuse once, then the suggestion
-  // last; everything else (an "always", a second refusal, a mode choice) stands
-  // at the start in the provider's order.
-  const { standing, direct, answers } = useMemo(() => {
-    const byId = (id: string | null) =>
-      id ? permission.options.find((option) => option.optionId === id) : undefined;
-    const suggested = byId(suggestedOptionId);
-    const dismiss = dismissOptionId !== suggestedOptionId ? byId(dismissOptionId) : undefined;
-    const directAnswers = [dismiss, suggested].filter(
-      (option): option is PermissionOption => option !== undefined
-    );
-    const standingAnswers = permission.options.filter((option) => !directAnswers.includes(option));
-    return {
-      standing: standingAnswers,
-      direct: directAnswers,
-      answers: [...standingAnswers, ...directAnswers],
-    };
-  }, [permission.options, suggestedOptionId, dismissOptionId]);
+  const answers = permission.options;
 
   useEffect(() => {
     if (!autoFocus) return;
@@ -377,7 +346,7 @@ export function PermissionPrompt({
     focusAnswer(next?.optionId);
   };
 
-  const renderAnswer = (option: PermissionOption, variant: 'primary' | 'secondary' | 'ghost') => {
+  const renderAnswer = (option: PermissionOption) => {
     const sending = option.optionId === sendingOptionId;
     const description = resolvePermissionOptionDescription(option);
     return (
@@ -387,16 +356,17 @@ export function PermissionPrompt({
           if (node) answerRefs.current.set(option.optionId, node);
           else answerRefs.current.delete(option.optionId);
         }}
-        variant={variant}
+        variant={option.optionId === suggestedOptionId ? 'primary' : 'secondary'}
         size="small"
         disabled={disabled}
-        title={description ?? undefined}
+        title={description ?? option.name}
         aria-keyshortcuts={option.optionId === dismissOptionId ? 'Escape' : undefined}
         data-tone={resolvePermissionOptionTone(option)}
         onClick={() => onSelect(option.optionId)}
+        {...stylex.props(styles.answer)}
       >
+        <span {...stylex.props(styles.answerLabel)}>{option.name}</span>
         {sending ? <Spinner size="small" /> : null}
-        {option.name}
       </Button>
     );
   };
@@ -467,18 +437,7 @@ export function PermissionPrompt({
         </p>
       ) : null}
 
-      <div {...stylex.props(styles.footer)}>
-        {standing.length > 0 ? (
-          <div {...stylex.props(styles.standing)}>
-            {standing.map((option) => renderAnswer(option, 'ghost'))}
-          </div>
-        ) : null}
-        <div {...stylex.props(styles.direct)}>
-          {direct.map((option) =>
-            renderAnswer(option, option.optionId === suggestedOptionId ? 'primary' : 'secondary')
-          )}
-        </div>
-      </div>
+      <div {...stylex.props(styles.answers)}>{answers.map(renderAnswer)}</div>
     </div>
   );
 }

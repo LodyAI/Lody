@@ -86,6 +86,15 @@ small buttons — refuse once (secondary) and the suggestion (primary, last) at
 the end, and any standing answer ("Yes, and don't ask again for …") as a ghost
 button at the start, the provider's words whole but not competing.
 
+## Fourth review: one kind of answer, in one place
+
+Splitting the answers into a row of buttons and a line of ghost "standing"
+answers left the ghosts floating as loose text above the buttons, and the eye
+could not tell where the choices were. The answers are now one column of small
+secondary buttons in the provider's order, labels from the start, the
+suggestion primary: every answer the same object in one place. The conversation
+steps lost their icons in the same pass — the verb says what kind of step it is.
+
 ## Alternatives not taken
 
 - **Buttons in a row** (Allow / Always / Deny). Provider names are sentences; a
