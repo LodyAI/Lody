@@ -214,7 +214,7 @@ export function getChatComposerTextareaClassName({
           isMobile ? 'min-h-[24px]' : 'min-h-[48px]'
         ),
     'focus-visible:outline-hidden focus-visible:ring-0 focus-visible:ring-offset-0',
-    'text-input-foreground placeholder:text-input-placeholder/40'
+    'text-input-foreground placeholder:text-input-placeholder/85'
   );
 }
 
@@ -636,7 +636,7 @@ export function ChatComposer({
   const dialogTextareaClassName = cn(
     'input-scrollbar min-h-[120px] resize-none px-4 py-3 text-sm leading-6 transition-shadow sm:min-h-[120px]',
     'w-full rounded-2xl border-transparent bg-transparent focus-visible:ring-0 focus-visible:ring-offset-0',
-    'text-input-foreground placeholder:text-input-placeholder/40'
+    'text-input-foreground placeholder:text-input-placeholder/85'
   );
 
   const actionBaseClassName = cn(

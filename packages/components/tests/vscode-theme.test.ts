@@ -343,13 +343,15 @@ describe('VSCode theme adapter', () => {
         extensionId: 'raunofreiberg.vesper',
         extensionVersion: '0.0.40',
       },
-      // Lody's warm palette: neutral grays take a warm white point and dark
-      // surfaces lift one step; the #FFC799 accent keeps its value.
+      // Lody's deep-sea palette: graphite surfaces, a faint cool cast on the
+      // grays, and jellyfish cyan in place of the orange accent. Orange that
+      // means "warning" stays amber.
       colors: {
-        'button.background': '#FFC799',
-        'editor.background': '#141312',
-        'editor.foreground': '#FFF8EF',
-        'sideBar.background': '#1A1918',
+        'button.background': '#7CC4E8',
+        'editorWarning.foreground': '#FFC799',
+        'editor.background': '#131416',
+        'editor.foreground': '#FEFFFF',
+        'sideBar.background': '#191A1D',
       },
     });
     if (!vesper) {
@@ -358,8 +360,8 @@ describe('VSCode theme adapter', () => {
     expect(vesper.tokenColors.length).toBeGreaterThan(20);
     expect(toShikiTheme(vesper, 'vesper-test')).toMatchObject({
       name: 'vesper-test',
-      fg: '#FFF8EF',
-      bg: '#141312',
+      fg: '#FEFFFF',
+      bg: '#131416',
     });
     await expect(getBundledVSCodeThemeById('vesper')).resolves.toEqual(vesper);
     await expect(getBundledVSCodeThemeById('missing-theme')).resolves.toBeUndefined();
@@ -372,7 +374,7 @@ describe('VSCode theme adapter', () => {
       id: 'vesper',
       label: 'Vesper',
       colors: {
-        'editor.background': '#141312',
+        'editor.background': '#131416',
       },
     });
     expect(getCachedBundledVSCodeThemeById('vesper')).toBe(vesper);

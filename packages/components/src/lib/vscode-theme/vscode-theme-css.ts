@@ -827,6 +827,12 @@ const applyReadingBrightness = (
   }
   set('--popover-foreground', colorByCssVariable['--foreground']);
   set('--accent-foreground', colorByCssVariable['--foreground']);
+  // Menus and popovers are raised panels, the same surface as the composer
+  // and the info bar at the bottom (`dark:bg-input/90` over the canvas), not
+  // the canvas itself: themes such as Vesper set their widget background to
+  // the editor color, which left every dropdown sunk into the page.
+  const inputSurface = colorByCssVariable['--input'];
+  if (inputSurface) set('--popover', mixHexColors(inputSurface, background, 0.1));
 
   // The selected conversation and the active tab read at the prose level:
   // above the other sidebar text, never above the conversation itself. Their
@@ -852,17 +858,19 @@ const SELECTED_FOREGROUND_VARIABLES = [
 /**
  * Chosen reading colors for bundled themes whose look is tuned by hand rather
  * than derived: Vesper's sidebar titles and selected/active text, picked on
- * its warm palette (vesper-warm-palette.ts).
+ * its deep-sea palette (vesper-deep-sea-palette.ts).
  */
 const READING_THEME_OVERRIDES: Record<string, Partial<Record<string, string>>> = {
   vesper: {
-    // Prose at HSL lightness 93% on the warm hue (15.9:1); the selected
-    // conversation and the active tab use the same color. Sidebar titles at
-    // lightness 76% (10.6:1).
-    '--reading-foreground': '#EFEDEB',
-    '--sidebar-row-foreground': '#C7C3BD',
-    '--sidebar-selection-foreground': '#EFEDEB',
-    '--tab-active-foreground': '#EFEDEB',
+    // Prose at HSL lightness 90%, near-neutral (14.6:1 on the graphite
+    // canvas); the selected conversation and the active tab use the same
+    // color. Sidebar titles at lightness 75% (9.9:1). The selected row sits on
+    // a 12% jellyfish-cyan tint, one of the few places the brand blue shows.
+    '--reading-foreground': '#E4E5E7',
+    '--sidebar-row-foreground': '#BCBEC2',
+    '--sidebar-selection-foreground': '#E4E5E7',
+    '--tab-active-foreground': '#E4E5E7',
+    '--sidebar-selection': '#252E35',
   },
 };
 
@@ -902,7 +910,7 @@ const resolveLuminanceCappedColor = (
  * higher, where glare is milder.
  */
 const READING_CONTRAST_CAP = {
-  dark: { strong: 17.3, prose: 15.9, reading: 13, sidebarRow: 10.6 },
+  dark: { strong: 16.3, prose: 14.6, reading: 13, sidebarRow: 9.9 },
   light: { strong: 21, prose: 16, reading: 16, sidebarRow: 10 },
 } as const;
 

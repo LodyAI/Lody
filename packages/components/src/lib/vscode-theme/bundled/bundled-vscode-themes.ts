@@ -32,7 +32,7 @@ import {
   type VSCodeThemeSyncFileReader,
 } from '../vscode-theme-loader';
 import type { LodyResolvedVSCodeTheme } from '../vscode-theme-schemas';
-import { warmVesperTheme } from './vesper-warm-palette';
+import { deepSeaVesperTheme } from './vesper-deep-sea-palette';
 
 // The app ships exactly two themes: Lody Light (our fork of Vitesse Light Soft,
 // tuned for legible app chrome) and Vesper (dark). Only these are ever applied;
@@ -531,8 +531,8 @@ const resolveBundledThemeDescriptorSync = (
     },
     readFile: createBundledThemeSyncReader(descriptor.files, descriptor.extensionId),
   });
-  // Lody ships Vesper with a warm color temperature (see vesper-warm-palette.ts).
-  const theme = resolved.id === 'vesper' ? warmVesperTheme(resolved) : resolved;
+  // Lody ships Vesper as a deep-sea palette (see vesper-deep-sea-palette.ts).
+  const theme = resolved.id === 'vesper' ? deepSeaVesperTheme(resolved) : resolved;
   bundledThemesById.set(theme.id, theme);
   return theme;
 };

@@ -112,18 +112,25 @@ pre,
 }
 
 @layer utilities {
-  .text-markdown-link {
-    color: hsl(212 62% 40%);
+  /* Links are jellyfish cyan (the brand accent, #7CC4E8 in dark themes).
+     Markdown anchors take it from the `.markdown-renderer a` rule: a
+     hand-written class has no `[&_a]:` variant in Tailwind v4, so the
+     renderer's `[&_a]:text-markdown-link` never applied and links inherited
+     the prose color. */
+  .text-markdown-link,
+  .markdown-renderer a {
+    color: hsl(200 72% 34%);
   }
-  .dark .text-markdown-link {
-    color: hsl(211 56% 72%);
+  .dark .text-markdown-link,
+  .dark .markdown-renderer a {
+    color: hsl(200 69% 70%);
   }
   /* A link rendered as a reference label (GitHub PR / issue): a link-blue
      tinted chip (no border) instead of the prose underline, so it reads as
      clickable at a glance. The hue is the prose link's (`.text-markdown-link`). Outranks the
      renderer's `[&_a]:` link variants in this same layer. */
   .markdown-renderer a.markdown-reference-chip {
-    --reference-chip-hue: 212 62% 40%;
+    --reference-chip-hue: 200 72% 34%;
     color: hsl(var(--reference-chip-hue));
     background-color: hsl(var(--reference-chip-hue) / 0.12);
     text-decoration: none;
@@ -132,7 +139,7 @@ pre,
     background-color: hsl(var(--reference-chip-hue) / 0.18);
   }
   .dark .markdown-renderer a.markdown-reference-chip {
-    --reference-chip-hue: 211 56% 72%;
+    --reference-chip-hue: 200 69% 70%;
   }
   .text-pr-merged {
     color: hsl(var(--github-merged));
@@ -1213,7 +1220,7 @@ pre,
     --github-open: 128 49% 49%;
     --github-merged: 262 89% 71%;
     --github-closed: 3 93% 63%;
-    --github-draft: 36 6% 58%; /* warm gray: matches the dark palette */
+    --github-draft: 212 8% 58%;
     --github-addition: var(--github-open);
     --github-deletion: var(--github-closed);
     --primary-content: 210 40% 96%;

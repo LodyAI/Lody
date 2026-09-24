@@ -196,7 +196,7 @@ const MARKDOWN_BASE_CLASSNAME =
   // single inline runs — so between-item spacing must come from the <li> box
   // itself, not the inner <p>. `mt-2` on non-first items keeps list edges
   // flush with the `ul`/`ol` margins.
-  '[&_li]:!my-0 [&_li]:!py-0 [&_li:not(:first-child)]:!mt-2 [&_ul>li:not(:first-child)]:!mt-2 [&_ol>li:not(:first-child)]:!mt-2 [&_li>ul]:!my-1 [&_li>ol]:!my-1 ' +
+  '[&_li]:!my-0 [&_li]:!py-0 [&_li:not(:first-child)]:!mt-1 [&_ul>li:not(:first-child)]:!mt-1 [&_ol>li:not(:first-child)]:!mt-1 [&_li>ul]:!my-1 [&_li>ol]:!my-1 ' +
   // Streamdown's default blockquote class adds `italic`; override it so quoted
   // body text stays upright (explicit `*emphasis*` inside still renders italic
   // via the descendant <em>'s own font-style). The `[&_blockquote]` descendant
@@ -210,8 +210,9 @@ const MARKDOWN_BASE_CLASSNAME =
   '[&_h5]:!mt-3 [&_h5]:!mb-1.5 [&_h5]:font-semibold [&_h5]:uppercase [&_h5]:tracking-wide ' +
   '[&_h6]:!mt-3 [&_h6]:!mb-1.5 [&_h6]:font-semibold [&_h6]:uppercase [&_h6]:tracking-wide [&_h6]:text-muted-foreground ' +
   '[&_:is(h1,h2,h3,h4,h5,h6):first-child]:!mt-0 ' +
-  '[&_a]:text-markdown-link ' +
-  '[&_a]:underline [&_a]:underline-offset-2 [&_a]:decoration-current/35 [&_a:hover]:decoration-current/70 ' +
+  // Color marks a link; the underline appears on hover only (a standing one
+  // made dense CJK prose read as crowded).
+  '[&_a]:no-underline [&_a]:underline-offset-2 [&_a]:decoration-current/60 [&_a:hover]:underline ' +
   '[&_.katex-display]:!my-5 [&_.katex-display]:overflow-x-auto [&_.katex-display]:overflow-y-hidden [&_.katex-display]:py-1 ' +
   '[&_[data-streamdown="mermaid-block"]]:!my-5 ' +
   // Streamdown wraps every diagram in a pan/zoom canvas that claims the gesture

@@ -26,7 +26,7 @@ const contrastRatio = (a: string, b: string): number => {
 // Dark themes hold every text foreground under the reading ceiling (13:1
 // against the canvas): on the fixture's #101010, pure white becomes #D5D5D5.
 const CEILED_ON_FIXTURE = '0 0% 83.5%';
-const PROSE_ON_FIXTURE = '0 0% 91.8%';
+const PROSE_ON_FIXTURE = '0 0% 88.2%';
 // The #FFC799 accent used as selection text is already under the ceiling: unchanged.
 const CEILED_ACCENT_ON_FIXTURE = '27.1 100% 80%';
 
@@ -275,40 +275,43 @@ describe('createLodyThemeCssVariables', () => {
     // still below pure white.
     const reading = contrastRatio(variables['--reading-foreground']!, background);
     expect(reading).toBeGreaterThan(13);
-    expect(reading).toBeLessThanOrEqual(15.9);
+    expect(reading).toBeLessThanOrEqual(14.6);
     const strong = contrastRatio(variables['--foreground-strong']!, background);
     expect(strong).toBeGreaterThan(reading);
-    expect(strong).toBeLessThanOrEqual(17.3);
+    expect(strong).toBeLessThanOrEqual(16.3);
     // The active tab reads at the prose level, never above it.
     expect(variables['--tab-active-foreground']).toBe(variables['--reading-foreground']);
     const sidebarRow = contrastRatio(
       variables['--sidebar-row-foreground']!,
       variables['--sidebar-background']!
     );
-    expect(sidebarRow).toBeLessThanOrEqual(10.6);
+    expect(sidebarRow).toBeLessThanOrEqual(9.9);
     // The sidebar never outshines the reading column.
     expect(sidebarRow).toBeLessThan(reading);
   });
 
-  it('renders Vesper in its warm palette, with the hand-tuned sidebar grays', () => {
+  it('renders Vesper in its deep-sea palette, with the hand-tuned reading colors', () => {
     const variables = createLodyThemeCssVariables(getBundledVSCodeThemeByIdSync('vesper')!);
-    expect(variables['--background']).toBe(hexColorToHslChannel('#141312'));
-    expect(variables['--reading-foreground']).toBe(hexColorToHslChannel('#EFEDEB'));
-    expect(variables['--sidebar-row-foreground']).toBe(hexColorToHslChannel('#C7C3BD'));
-    expect(variables['--sidebar-selection-foreground']).toBe(hexColorToHslChannel('#EFEDEB'));
-    expect(variables['--tab-active-foreground']).toBe(hexColorToHslChannel('#EFEDEB'));
-    // Text follows the ceiling and keeps the warm hue; the accent is untouched.
+    expect(variables['--background']).toBe(hexColorToHslChannel('#131416'));
+    expect(variables['--reading-foreground']).toBe(hexColorToHslChannel('#E4E5E7'));
+    expect(variables['--sidebar-row-foreground']).toBe(hexColorToHslChannel('#BCBEC2'));
+    expect(variables['--sidebar-selection-foreground']).toBe(hexColorToHslChannel('#E4E5E7'));
+    expect(variables['--tab-active-foreground']).toBe(hexColorToHslChannel('#E4E5E7'));
+    // The selected row sits on a jellyfish-cyan tint.
+    expect(variables['--sidebar-selection']).toBe(hexColorToHslChannel('#252E35'));
+    // Text follows the ceiling; the grays stay near-neutral (a faint cool cast).
     expect(
       contrastRatio(variables['--foreground']!, variables['--background']!)
     ).toBeLessThanOrEqual(13);
     for (const name of ['--background', '--foreground', '--muted-foreground', '--border']) {
-      const [hue, saturation] = variables[name]!.split(' ').map((part) => Number.parseFloat(part));
-      expect({ name, warm: hue! >= 15 && hue! <= 50 && saturation! > 0 }).toEqual({
-        name,
-        warm: true,
-      });
+      const saturation = Number.parseFloat(variables[name]!.split(' ')[1]!);
+      expect({ name, quiet: saturation <= 10 }).toEqual({ name, quiet: true });
     }
-    expect(variables['--primary']).toBe(hexColorToHslChannel('#FFC799'));
+    // Jellyfish cyan is the accent; warnings stay amber.
+    expect(variables['--primary']).toBe(hexColorToHslChannel('#7CC4E8'));
+    expect(variables['--status-warning']).toBe(hexColorToHslChannel('#FFC799'));
+    // Menus and popovers are raised to the composer's surface, not the canvas.
+    expect(variables['--popover']).not.toBe(variables['--background']);
   });
 
   it('leaves a theme whose text is already below the cap, and high-contrast themes, alone', () => {
