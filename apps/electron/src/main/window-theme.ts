@@ -9,20 +9,21 @@ export function getInitialMainWindowThemeSource(
 
 const WINDOW_BACKGROUND_COLORS: Record<ResolvedWindowTheme, string> = {
   light: '#FFFFFF',
-  dark: '#101010'
+  dark: '#141413'
 }
 
 export const MAIN_WINDOW_TITLE_BAR_OVERLAY_HEIGHT = 36
 
 // Matches the bundled VS Code themes' `titleBar.*` colors
-// (`lody-light.json` / `Vesper-dark-color-theme.json`) so the OS-drawn
+// (`lody-light.json` / Vesper after Lody's warm palette,
+// `vesper-warm-palette.ts`) so the OS-drawn
 // caption buttons sit on the same canvas as the rest of the window.
 const TITLE_BAR_OVERLAY_COLORS: Record<
   ResolvedWindowTheme,
   { color: string; symbolColor: string }
 > = {
   light: { color: '#FFFFFF', symbolColor: '#3C4048' },
-  dark: { color: '#101010', symbolColor: '#7E7E7E' }
+  dark: { color: '#141413', symbolColor: '#7E7B76' }
 }
 
 export function getMainWindowBackgroundColor(theme: ResolvedWindowTheme): string {

@@ -58,7 +58,11 @@ const hslChannelToRgb = (channel: string | undefined): { r: number; g: number; b
             : h < 300
               ? [x, 0, c]
               : [c, 0, x];
-  return { r: Math.round((r + m) * 255), g: Math.round((g + m) * 255), b: Math.round((b + m) * 255) };
+  return {
+    r: Math.round((r + m) * 255),
+    g: Math.round((g + m) * 255),
+    b: Math.round((b + m) * 255),
+  };
 };
 
 describe('VSCode theme adapter', () => {
@@ -343,11 +347,13 @@ describe('VSCode theme adapter', () => {
         extensionId: 'raunofreiberg.vesper',
         extensionVersion: '0.0.40',
       },
+      // Lody's warm palette: neutral grays take a warm white point and dark
+      // surfaces lift one step; the #FFC799 accent keeps its value.
       colors: {
         'button.background': '#FFC799',
-        'editor.background': '#101010',
-        'editor.foreground': '#FFFFFF',
-        'sideBar.background': '#161616',
+        'editor.background': '#141312',
+        'editor.foreground': '#FFF8EF',
+        'sideBar.background': '#1A1918',
       },
     });
     if (!vesper) {
@@ -356,8 +362,8 @@ describe('VSCode theme adapter', () => {
     expect(vesper.tokenColors.length).toBeGreaterThan(20);
     expect(toShikiTheme(vesper, 'vesper-test')).toMatchObject({
       name: 'vesper-test',
-      fg: '#FFFFFF',
-      bg: '#101010',
+      fg: '#FFF8EF',
+      bg: '#141312',
     });
     await expect(getBundledVSCodeThemeById('vesper')).resolves.toEqual(vesper);
     await expect(getBundledVSCodeThemeById('missing-theme')).resolves.toBeUndefined();
@@ -370,7 +376,7 @@ describe('VSCode theme adapter', () => {
       id: 'vesper',
       label: 'Vesper',
       colors: {
-        'editor.background': '#101010',
+        'editor.background': '#141312',
       },
     });
     expect(getCachedBundledVSCodeThemeById('vesper')).toBe(vesper);

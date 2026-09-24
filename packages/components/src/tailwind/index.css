@@ -1196,7 +1196,7 @@ pre,
     --github-open: 128 49% 49%;
     --github-merged: 262 89% 71%;
     --github-closed: 3 93% 63%;
-    --github-draft: 212 8% 58%;
+    --github-draft: 36 6% 58%; /* warm gray: matches the dark palette */
     --github-addition: var(--github-open);
     --github-deletion: var(--github-closed);
     --primary-content: 210 40% 96%;

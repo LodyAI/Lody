@@ -312,7 +312,7 @@ export function SessionRowWorktreeIndicator({ isWorktree }: { isWorktree?: boole
     <Tooltip>
       <TooltipTrigger asChild>
         <span className="inline-flex shrink-0 items-center text-sidebar-foreground-muted/45">
-          <WorktreeIcon className="h-3.5 w-3.5" aria-label={label} />
+          <WorktreeIcon className="h-3 w-3" aria-label={label} />
         </span>
       </TooltipTrigger>
       <TooltipContent>{label}</TooltipContent>

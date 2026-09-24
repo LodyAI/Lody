@@ -850,14 +850,14 @@ const SELECTED_FOREGROUND_VARIABLES = [
 
 /**
  * Chosen reading colors for bundled themes whose look is tuned by hand rather
- * than derived: Vesper's sidebar titles and selected/active text are warm
- * grays that its neutral palette cannot produce.
+ * than derived: Vesper's sidebar titles and selected/active text, picked on
+ * its warm palette (vesper-warm-palette.ts).
  */
 const READING_THEME_OVERRIDES: Record<string, Partial<Record<string, string>>> = {
   vesper: {
-    '--sidebar-row-foreground': '#BCBAB8',
-    '--sidebar-selection-foreground': '#F0EFED',
-    '--tab-active-foreground': '#F0EFED',
+    '--sidebar-row-foreground': '#BAB6AE',
+    '--sidebar-selection-foreground': '#F0EAE1',
+    '--tab-active-foreground': '#F0EAE1',
   },
 };
 
@@ -889,13 +889,14 @@ const resolveLuminanceCappedColor = (
  * Contrast ceilings for reading surfaces. Body text far above WCAG AAA (7:1)
  * gains no legibility, but a pure-white glyph on a near-black canvas halates:
  * strokes bloom and dense text (CJK especially) blurs, most for readers with
- * astigmatism. Vesper's #FFFFFF on #101010 is 19:1. Conversation prose is
- * capped at 13:1 in dark themes (still AAA; headings keep the full
- * foreground), unselected sidebar text at 11.3:1 (#CCCCCC on Vesper) so the sidebar
- * always sits below the reading column and only the selected row stands out. Light themes are capped higher, where glare is milder.
+ * astigmatism. Vesper's #FFFFFF on #101010 is 19:1. In dark themes every text
+ * foreground is capped at 11.6:1 (still AAA; #D2CDC5 on the warm Vesper canvas),
+ * headings and the selected row at 15:1, and unselected sidebar text at 9.2:1
+ * so the sidebar always sits below the reading column. Light themes are capped
+ * higher, where glare is milder.
  */
 const READING_CONTRAST_CAP = {
-  dark: { strong: 16, reading: 13, sidebarRow: 11.3 },
+  dark: { strong: 15, reading: 11.6, sidebarRow: 9.2 },
   light: { strong: 21, reading: 16, sidebarRow: 10 },
 } as const;
 

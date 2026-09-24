@@ -24,9 +24,11 @@ const contrastRatio = (a: string, b: string): number => {
 };
 
 // Dark themes hold every text foreground under the reading ceiling (13:1
-// against the canvas): on the fixture's #101010, pure white becomes #D5D5D5.
-const CEILED_ON_FIXTURE = hexColorToHslChannel('#D5D5D5');
-const STRONG_ON_FIXTURE = '0 0% 92.2%';
+// against the canvas): on the fixture's #101010, pure white becomes #C9C9C9.
+const CEILED_ON_FIXTURE = '0 0% 78.8%';
+const STRONG_ON_FIXTURE = '0 0% 89.4%';
+// The #FFC799 accent used as selection text keeps its hue under the same ceiling.
+const CEILED_ACCENT_ON_FIXTURE = '26.9 83.1% 76.9%';
 
 const themeFixture: LodyResolvedVSCodeTheme = {
   schemaVersion: 1,
@@ -88,9 +90,9 @@ describe('createLodyThemeCssVariables', () => {
     expect(variables['--highlight']).toBe(warmAccent);
     expect(variables['--highlight-foreground']).toBe(buttonForeground);
     expect(variables['--selection']).toBe('0 0% 13.7%');
-    expect(variables['--selection-foreground']).toBe(warmAccent);
+    expect(variables['--selection-foreground']).toBe(CEILED_ACCENT_ON_FIXTURE);
     expect(variables['--selection-inactive']).toBe('0 0% 13.7%');
-    expect(variables['--selection-inactive-foreground']).toBe(warmAccent);
+    expect(variables['--selection-inactive-foreground']).toBe(CEILED_ACCENT_ON_FIXTURE);
     expect(variables['--secondary']).toBe('0 0% 13.7%');
     expect(variables['--button-secondary']).toBe(hexColorToHslChannel('#282A36'));
     // #F8F8F2 is above the ceiling too.
@@ -192,11 +194,11 @@ describe('createLodyThemeCssVariables', () => {
       ...themeFixture,
       colors: {
         ...themeFixture.colors,
-        'list.foreground': '#CCCCCC',
+        'list.foreground': '#C0C0C0',
       },
     });
 
-    expect(variables['--sidebar-foreground']).toBe(hexColorToHslChannel('#CCCCCC'));
+    expect(variables['--sidebar-foreground']).toBe(hexColorToHslChannel('#C0C0C0'));
     expect(variables['--sidebar-foreground-muted']).toBe(hexColorToHslChannel('#A0A0A0'));
   });
 
@@ -264,7 +266,7 @@ describe('createLodyThemeCssVariables', () => {
     const variables = createLodyThemeCssVariables(themeFixture);
     const background = variables['--background']!;
     for (const name of ['--foreground', '--popover-foreground', '--sidebar-foreground']) {
-      expect({ name, ok: contrastRatio(variables[name]!, background) <= 13 }).toEqual({
+      expect({ name, ok: contrastRatio(variables[name]!, background) <= 11.6 }).toEqual({
         name,
         ok: true,
       });
@@ -273,32 +275,41 @@ describe('createLodyThemeCssVariables', () => {
     // above the ceiling, still below pure white.
     for (const name of ['--foreground-strong', '--tab-active-foreground']) {
       const ratio = contrastRatio(variables[name]!, background);
-      expect({ name, above: ratio > 13, capped: ratio <= 16 }).toEqual({
+      expect({ name, above: ratio > 11.6, capped: ratio <= 15 }).toEqual({
         name,
         above: true,
         capped: true,
       });
     }
     const reading = contrastRatio(variables['--reading-foreground']!, background);
-    expect(reading).toBeGreaterThan(12.5);
+    expect(reading).toBeGreaterThan(11.2);
     const sidebarRow = contrastRatio(
       variables['--sidebar-row-foreground']!,
       variables['--sidebar-background']!
     );
-    expect(sidebarRow).toBeLessThanOrEqual(11.3);
+    expect(sidebarRow).toBeLessThanOrEqual(9.2);
     // The sidebar never outshines the reading column.
     expect(sidebarRow).toBeLessThan(reading);
   });
 
-  it('uses the hand-tuned warm grays for Vesper', () => {
+  it('renders Vesper in its warm palette, with the hand-tuned sidebar grays', () => {
     const variables = createLodyThemeCssVariables(getBundledVSCodeThemeByIdSync('vesper')!);
-    expect(variables['--sidebar-row-foreground']).toBe(hexColorToHslChannel('#BCBAB8'));
-    expect(variables['--sidebar-selection-foreground']).toBe(hexColorToHslChannel('#F0EFED'));
-    expect(variables['--tab-active-foreground']).toBe(hexColorToHslChannel('#F0EFED'));
-    // Everything else still follows the ceiling.
+    expect(variables['--background']).toBe(hexColorToHslChannel('#141312'));
+    expect(variables['--sidebar-row-foreground']).toBe(hexColorToHslChannel('#BAB6AE'));
+    expect(variables['--sidebar-selection-foreground']).toBe(hexColorToHslChannel('#F0EAE1'));
+    expect(variables['--tab-active-foreground']).toBe(hexColorToHslChannel('#F0EAE1'));
+    // Text follows the ceiling and keeps the warm hue; the accent is untouched.
     expect(
       contrastRatio(variables['--foreground']!, variables['--background']!)
-    ).toBeLessThanOrEqual(13);
+    ).toBeLessThanOrEqual(11.6);
+    for (const name of ['--background', '--foreground', '--muted-foreground', '--border']) {
+      const [hue, saturation] = variables[name]!.split(' ').map((part) => Number.parseFloat(part));
+      expect({ name, warm: hue! >= 15 && hue! <= 50 && saturation! > 0 }).toEqual({
+        name,
+        warm: true,
+      });
+    }
+    expect(variables['--primary']).toBe(hexColorToHslChannel('#FFC799'));
   });
 
   it('leaves a theme whose text is already below the cap, and high-contrast themes, alone', () => {

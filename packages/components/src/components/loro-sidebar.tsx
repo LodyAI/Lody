@@ -658,7 +658,9 @@ function NavButton({
         type="button"
         onClick={onClick}
         className={cn(
-          'group flex w-full select-none items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[0.9em] outline-hidden transition',
+          // Same size as the session titles below: a smaller label reads as
+          // undersized next to its 16px icon.
+          'group flex w-full select-none items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm outline-hidden transition',
           'focus-visible:ring-1 focus-visible:ring-sidebar-ring/30',
           active
             ? 'bg-sidebar-selection text-sidebar-selection-foreground'
@@ -1257,13 +1259,13 @@ export const LoroSidebar = memo(function LoroSidebar({
           <NavButton
             active={activeNav === 'home'}
             label={mergedLabels.home}
-            icon={<SquarePen className="h-4 w-4" />}
+            icon={<SquarePen className="h-4 w-4" strokeWidth={1.75} />}
             onClick={onHomeClicked}
           />
           <NavButton
             active={false}
             label={t('common.search', 'Search')}
-            icon={<Search className="h-4 w-4" />}
+            icon={<Search className="h-4 w-4" strokeWidth={1.75} />}
             onClick={() => setCommandPaletteOpen(true)}
           />
         </div>

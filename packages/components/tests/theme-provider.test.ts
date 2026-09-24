@@ -174,7 +174,7 @@ describe('ThemeProvider', () => {
     expect(document.documentElement.classList.contains('dark')).toBe(true);
     expect(document.documentElement.dataset.lodyVscodeTheme).toBe(FIXED_DARK_THEME_ID);
     expect(document.documentElement.style.getPropertyValue('--vscode-editor-background')).toBe(
-      '#101010'
+      '#141312'
     );
     expect(document.documentElement.style.getPropertyValue('--vscode-button-background')).toBe(
       '#FFC799'

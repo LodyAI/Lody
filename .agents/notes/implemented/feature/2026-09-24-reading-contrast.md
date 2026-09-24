@@ -10,11 +10,13 @@ Translation: current
 Long sessions were tiring in dark themes whose foreground is pure white: in Vesper, prose,
 headings, menus, buttons, settings and every sidebar title were #FFFFFF on #101010 (19.7:1),
 so strokes halated, dense CJK text blurred and nothing marked the reading column. Dark themes
-now hold every text foreground under one brightness ceiling, the luminance of text at 13:1
-against the canvas (#D5D5D5 on Vesper, still above WCAG AAA). Only headings and bold, the
+now hold every text foreground under one brightness ceiling, the luminance of text at 11.6:1
+against the canvas (#D2CDC5 on Vesper, still above WCAG AAA). Only headings and bold, the
 selected sidebar row and the active tab go above it. Unselected sidebar text sits below the
-prose. Vesper uses hand-tuned warm grays for the sidebar (#BCBAB8) and the selected/active
-text (#F0EFED). High-contrast themes are unchanged, and light themes cap only long-form text.
+prose. Lody ships Vesper with a warm color temperature: every neutral gray takes a warm
+white point (canvas #141312), and the sidebar (#BAB6AE) and selected/active text (#F0EAE1)
+are hand-tuned on it. High-contrast themes are unchanged, and light themes cap only
+long-form text.
 
 ## Decision
 
@@ -25,15 +27,22 @@ text (#F0EFED). High-contrast themes are unchanged, and light themes cap only lo
   `--popover-foreground` and `--accent-foreground` are set from the ceiled foreground: the
   stylesheet defaults for them were an unthemed near-white (`210 40% 96%`), which is why
   dropdown menus stayed white.
-- Above the ceiling: `--foreground-strong` (16:1, headings and bold), and the selected
-  sidebar row and active tab foregrounds (capped at the same 16:1 step).
-- `--reading-foreground` for prose and user bubbles; `--sidebar-row-foreground` (11.3:1)
+- Above the ceiling: `--foreground-strong` (15:1, headings and bold), and the selected
+  sidebar row and active tab foregrounds (capped at the same 15:1 step).
+- `--reading-foreground` for prose and user bubbles; `--sidebar-row-foreground` (9.2:1)
   for unselected session titles, group and project labels, section headers and New chat /
   Search, so the sidebar never outshines the prose. Hover changes a row's fill only.
 - Foregrounds on colored fills (`--primary-foreground`, `--destructive-foreground`,
   highlight foregrounds) keep the theme value: they need contrast against the fill.
-- `READING_THEME_OVERRIDES` pins Vesper's sidebar (#BCBAB8) and selected/active text
-  (#F0EFED): warm grays its neutral palette cannot produce.
+- Warm Vesper (`bundled/vesper-warm-palette.ts`), applied once when the bundled theme
+  resolves so app tokens, terminal, code highlighting and `--vscode-*` agree: every
+  neutral workbench color and syntax foreground takes the white point (1, 0.976, 0.938),
+  and opaque surfaces darker than #303030 lift 4 steps (canvas #101010 → #141312, sidebar
+  #161616 → #1A1918). Channels are floored so the canvas/sidebar step stays visible.
+  Accents and pure black keep their values. The dark `--github-draft` and the Electron
+  window/title-bar colors use the same warm grays.
+- `READING_THEME_OVERRIDES` pins Vesper's sidebar (#BAB6AE) and selected/active text
+  (#F0EAE1), hand-tuned on the warm palette.
 - Literal colors outside the tokens: the dark Mermaid palette now stays under the ceiling,
   and the green merge button uses `dark:text-background` like the PR tab's.
 - Inline code: 7% fill, reading color. List items 0.5rem apart. The outline rail rests at /32.
@@ -61,16 +70,18 @@ text (#F0EFED). High-contrast themes are unchanged, and light themes cap only lo
 - Dimming row icons and avatars with opacity, and brightening titles on hover: tried and
   rejected; faded icons and avatars read as disabled, and a color change under the pointer
   looks unstable.
-- A warm tint for the whole theme, or a 40em CJK column: not done here.
+- A 40em CJK column: not done here.
 
 ## Verification and limits
 
 - `tests/vscode-theme-css.test.ts`: a pure-white dark theme holds `--foreground`, popover
-  and sidebar foregrounds at or under 13:1, the strong step and active tab between 13 and
-  16:1, sidebar rows under the prose; Vesper gets its pinned colors; soft and high-contrast
+  and sidebar foregrounds at or under 11.6:1, the strong step and active tab between 11.6
+  and 15:1, sidebar rows under the prose; Vesper resolves warm (canvas #141312, warm hue on
+  surfaces and text, accent unchanged) with its pinned colors; soft and high-contrast
   themes are untouched. `tests/markdown-mermaid-plugin.test.ts` checks the dark diagram
   text is under the ceiling. Components suite passes.
-- Local production build with Vesper: every foreground token at or under #D5D5D5 except
-  the three allowed; a page-wide scan of visible text found nothing else above it.
+- Local production build with Vesper: prose renders #D1CBC4 (11.5:1); a scan of visible
+  backgrounds, text, borders and strokes on the conversation, settings and archive views
+  found no neutral or cool gray left.
 - Only Vesper was inspected in the browser. Share images, terminals and colored-fill badges
   keep their own colors.
