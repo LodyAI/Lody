@@ -46,20 +46,19 @@ describe('terminal appearance settings', () => {
 
 describe('conversation appearance settings', () => {
   it('offers a fixed scale and snaps every persisted value onto it', () => {
-    expect([...CONVERSATION_FONT_SIZES]).toEqual([13, 14, 15, 16, 18]);
-    expect(DEFAULT_CONVERSATION_FONT_SIZE).toBe(15);
+    expect([...CONVERSATION_FONT_SIZES]).toEqual([12, 13, 14, 15, 16]);
 
     // Sizes a previous build could persist keep the closest step the user picked
     // instead of being clamped into a range or reset to the default.
-    expect(normalizeConversationFontSize(24)).toBe(18);
+    expect(normalizeConversationFontSize(24)).toBe(16);
     expect(normalizeConversationFontSize(14.7)).toBe(15);
     expect(normalizeConversationFontSize(14.5)).toBe(15); // exact tie rounds up
-    expect(normalizeConversationFontSize(17)).toBe(18); // exact tie rounds up
-    expect(normalizeConversationFontSize(12)).toBe(13); // the old smallest step
-    expect(normalizeConversationFontSize(1)).toBe(13);
-    expect(normalizeConversationFontSize(400)).toBe(18);
+    expect(normalizeConversationFontSize(9)).toBe(12);
+    expect(normalizeConversationFontSize(30)).toBe(16);
+    expect(normalizeConversationFontSize(1)).toBe(12);
+    expect(normalizeConversationFontSize(400)).toBe(16);
 
-    expect(normalizeConversationFontSize('small')).toBe(13);
+    expect(normalizeConversationFontSize('small')).toBe(12);
     expect(normalizeConversationFontSize('default')).toBe(DEFAULT_CONVERSATION_FONT_SIZE);
     expect(normalizeConversationFontSize('large')).toBe(16);
     expect(normalizeConversationFontSize(undefined)).toBe(DEFAULT_CONVERSATION_FONT_SIZE);

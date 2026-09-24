@@ -60,11 +60,6 @@ long-form text.
   setting and diagrams. Bundling an open font (Noto Sans SC / Source Han Sans, SIL OFL)
   for uniform CJK on every platform was not done: it needs unicode-range subsets of a
   multi-megabyte family.
-- Font size tiers are 13 / 14 / **15** / 16 / 18px (were 12–16, default 14): 1px steps
-  around the default and a 2px step at the top, as in Discord's chat text scale and iOS
-  Dynamic Type; below 13px dense CJK glyphs lose legibility. Conversation text takes the
-  tier; `--ui-font-size` (the chrome) is 1px under it, so the default keeps the tuned 14px
-  interface while prose reads at 15px. A stored size still snaps to the nearest tier.
 
 ## Conversation details
 
@@ -87,6 +82,9 @@ long-form text.
 
 ## Alternatives
 
+- A 15px default (tiers 13–18px, chrome 1px under the prose): implemented, then reverted
+  after review in the app, where 15px prose read as too large. The default stays 14px on
+  the 12–16px scale, with chrome and prose at the same size.
 - Letting wide tables and Mermaid diagrams extend past the 768px column, centered on it:
   implemented, then reverted after review in the app, where blocks jutting out of the
   reading column looked odd. Wide blocks stay in the column (tables scroll, diagrams open

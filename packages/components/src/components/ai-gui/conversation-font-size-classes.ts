@@ -4,17 +4,8 @@ import type { ConversationFontSize } from '@/atoms/settings';
 /** Document root token: settings 1em, compact chrome 0.9em. */
 export const UI_FONT_SIZE_CSS_VARIABLE = '--ui-font-size';
 
-/**
- * Interface text (sidebar, toolbars, settings) sits 1px under the conversation
- * size: the chrome follows the user's size choice, but conversation prose is the
- * larger reading text. At the 15px default the chrome keeps its tuned 14px.
- */
-export function uiFontSizeForConversation(fontSize: ConversationFontSize): number {
-  return fontSize - 1;
-}
-
 export function applyUiFontSize(root: HTMLElement, fontSize: ConversationFontSize): void {
-  root.style.setProperty(UI_FONT_SIZE_CSS_VARIABLE, `${uiFontSizeForConversation(fontSize)}px`);
+  root.style.setProperty(UI_FONT_SIZE_CSS_VARIABLE, `${fontSize}px`);
 }
 
 // Single source of truth for the conversation font-size scale shared across the

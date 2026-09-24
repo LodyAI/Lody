@@ -128,7 +128,7 @@ describe('InterfaceFontController', () => {
     expect(document.documentElement.style.getPropertyValue(INTERFACE_FONT_CSS_VARIABLE)).toBe('');
   });
 
-  it('writes --ui-font-size 1px under the conversation size on every platform', async () => {
+  it('writes --ui-font-size from the appearance setting on every platform', async () => {
     const store = createStore();
     store.set(conversationFontSizeAtom, 16);
 
@@ -140,13 +140,12 @@ describe('InterfaceFontController', () => {
       );
     });
 
-    expect(document.documentElement.style.getPropertyValue(UI_FONT_SIZE_CSS_VARIABLE)).toBe('15px');
+    expect(document.documentElement.style.getPropertyValue(UI_FONT_SIZE_CSS_VARIABLE)).toBe('16px');
 
-    // The 15px default keeps the chrome at its tuned 14px.
     await act(async () => {
-      store.set(conversationFontSizeAtom, 15);
+      store.set(conversationFontSizeAtom, 12);
     });
-    expect(document.documentElement.style.getPropertyValue(UI_FONT_SIZE_CSS_VARIABLE)).toBe('14px');
+    expect(document.documentElement.style.getPropertyValue(UI_FONT_SIZE_CSS_VARIABLE)).toBe('12px');
   });
 
   it('treats non-boolean persisted ligature values as enabled', () => {
