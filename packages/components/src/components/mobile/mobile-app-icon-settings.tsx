@@ -2,7 +2,10 @@ import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Check } from 'lucide-react';
 import { Button } from '@lody/ui/button';
+import { deferredPostHog } from '@/lib/deferred-posthog';
+import { capturePostHogEvent } from '@/lib/posthog-analytics';
 import { MobileSettingsSection } from './mobile-settings-row';
+import { CompactSection } from '../settings/compact-layout';
 
 export type AppIconState = { supported: boolean; name: string };
 export type AppIconBridge = {
@@ -11,12 +14,22 @@ export type AppIconBridge = {
   setIcon: (options: { name: string }) => Promise<AppIconState>;
 };
 
+// Native icon identifiers differ per host (iOS `AppIconBlue`, macOS `aqua`);
+// analytics only reports the product-level enum, never an unknown raw name.
+function appIconAnalyticsValue(name: string): 'aqua' | 'default' | null {
+  if (name === 'default') return 'default';
+  if (name === 'AppIconBlue' || name === 'aqua') return 'aqua';
+  return null;
+}
+
 export function MobileAppIconSettings({
+  layout = 'mobile',
   bridge = typeof window === 'undefined'
     ? undefined
     : (window as Window & { __LODY_APP_ICON__?: AppIconBridge }).__LODY_APP_ICON__,
 }: {
   bridge?: AppIconBridge;
+  layout?: 'mobile' | 'desktop';
 }) {
   const { t } = useTranslation();
   const [state, setState] = useState<AppIconState | null>(null);
@@ -52,7 +65,12 @@ export function MobileAppIconSettings({
     setError(false);
     try {
       // Native state is authoritative; a rejected change must keep the old checkmark.
-      setState(await bridge.setIcon({ name }));
+      const next = await bridge.setIcon({ name });
+      setState(next);
+      const value = appIconAnalyticsValue(next.name);
+      if (value && next.name === name) {
+        capturePostHogEvent(deferredPostHog, 'settings/changed', { key: 'app_icon', value });
+      }
     } catch {
       setError(true);
     } finally {
@@ -61,8 +79,9 @@ export function MobileAppIconSettings({
     }
   }
 
+  const Section = layout === 'desktop' ? CompactSection : MobileSettingsSection;
   return (
-    <MobileSettingsSection title={t('settings.appIcon.title')}>
+    <Section title={t('settings.appIcon.title')}>
       <div className="flex flex-wrap gap-3 p-4" aria-busy={pending || (!state && !error)}>
         {bridge.icons.map((icon, index) => {
           const selected = state?.name === icon.name;
@@ -100,6 +119,6 @@ export function MobileAppIconSettings({
           ) : null}
         </div>
       ) : null}
-    </MobileSettingsSection>
+    </Section>
   );
 }

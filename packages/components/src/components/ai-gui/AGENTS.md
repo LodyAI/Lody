@@ -8,6 +8,8 @@ Edit `AGENTS.md`, not its `CLAUDE.md` symlink. Ownership: [README.md](README.md)
   markdown, including folded prose; matches open their groups. Never index tools
   (titles/JSON/output), terminals, diffs, plan checklists, goals, or worktree script
   output. Never wire `searchBlockId` to tool, terminal, or diff renderers.
+- Window stream readiness must use the same hydration/initial-scroll conditions as
+  viewport visibility; hydrated history alone cannot reveal a native window.
 - `SessionChatStreamView` uses one Virtua list with stable keys and `shift={false}`.
   Map history indexes to rows. Collapsed activity is one row; expanded details
   are siblings, never nested scrollers or fixed-height process panels.

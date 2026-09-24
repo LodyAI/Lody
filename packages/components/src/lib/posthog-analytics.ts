@@ -371,3 +371,33 @@ export function getAppLaunchPerformanceProperties(): Record<string, unknown> {
     first_contentful_paint_ms: roundMs(firstContentfulPaint?.startTime),
   };
 }
+
+export type AnalyticsFileKind = 'html' | 'md' | 'image' | 'pdf' | 'other';
+
+const ANALYTICS_IMAGE_EXTENSIONS = new Set([
+  'png',
+  'jpg',
+  'jpeg',
+  'gif',
+  'webp',
+  'svg',
+  'bmp',
+  'ico',
+  'avif',
+  'heic',
+]);
+
+/**
+ * Coarse file-type enum for analytics. File names and paths are never sent;
+ * only the bucket derived from the extension.
+ */
+export function getAnalyticsFileKind(fileNameOrPath: string): AnalyticsFileKind {
+  const base = fileNameOrPath.split(/[\\/]/).pop() ?? '';
+  const dot = base.lastIndexOf('.');
+  const ext = dot > 0 ? base.slice(dot + 1).toLowerCase() : '';
+  if (ext === 'html' || ext === 'htm') return 'html';
+  if (ext === 'md' || ext === 'markdown' || ext === 'mdx') return 'md';
+  if (ext === 'pdf') return 'pdf';
+  if (ANALYTICS_IMAGE_EXTENSIONS.has(ext)) return 'image';
+  return 'other';
+}

@@ -5,6 +5,9 @@ interface LocalFontMetadata {
 export type QueryLocalFonts = () => Promise<readonly LocalFontMetadata[]>;
 
 export const INTERFACE_FONT_CSS_VARIABLE = '--lody-interface-font-family';
+export const FONT_LIGATURES_CSS_VARIABLE = '--lody-font-ligatures';
+export const FONT_LIGATURES_ENABLED_VALUE = 'contextual';
+export const FONT_LIGATURES_DISABLED_VALUE = 'none';
 
 export function isSymbolFontFamily(family: string): boolean {
   return /^(?:Webdings|Wingdings(?:\s*[23])?|Symbol|Zapf\s*Dingbats)$/i.test(family.trim());
@@ -27,6 +30,13 @@ export function applyInterfaceFontFamily(root: HTMLElement, fontFamily: string):
   } else {
     root.style.removeProperty(INTERFACE_FONT_CSS_VARIABLE);
   }
+}
+
+export function applyFontLigaturesEnabled(root: HTMLElement, enabled: boolean): void {
+  root.style.setProperty(
+    FONT_LIGATURES_CSS_VARIABLE,
+    enabled ? FONT_LIGATURES_ENABLED_VALUE : FONT_LIGATURES_DISABLED_VALUE
+  );
 }
 
 function getBrowserFontQuery(): QueryLocalFonts {

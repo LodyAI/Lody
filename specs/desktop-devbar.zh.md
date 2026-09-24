@@ -29,8 +29,8 @@ Long Task 时长，以及 Electron 进程汇总 CPU 与常驻内存。`Heap xxxM
 
 选择 `DEVBAR` 会在用户应用内加载的 Devframe 官方 Hub UI 中激活 Main Thread。
 Hub 的 loopback 根地址也提供相同的独立 viewer，并包含 Main Thread、Devframe
-Inspector、Accessibility Inspector、命令面板、设置和 dock 控件。只有开启独立的 Agent
-与终端能力后才会出现 Terminals。Main Thread 使用 Devframe 官方 JSON-render renderer
+Inspector、Accessibility Inspector、Terminals、命令面板、设置和 dock 控件。
+Main Thread 使用 Devframe 官方 JSON-render renderer
 和 `@antfu/design` 组件；Lody 不维护另一套详细界面样式。
 
 性能视图首先展示当前 FPS、CPU、heap 和阻塞时间卡片，之后是可折叠的当前指标、
@@ -77,11 +77,12 @@ Inspector 组合。React 性能栏通过类型安全 RPC 发送校验后的样�
 发布最多 120 个样本的可重放 stream，并更新共享快照和 JSON-render view。node 端最多
 保留 120 个样本和 100 个 Long Tasks，同时在当前进程生命周期保留 Long Task 汇总。
 
-Devbar 运行时，Developer Mode 会显示第二个“Agent 与终端权限”开关。启用后 Hub 会重启，
-加入聚合 HTTP MCP endpoint 和官方 Terminals add-on。MCP 此时暴露只读性能查询、共享状态、
-Markdown resource、Inspector 工具和 Terminals 工具。浏览器样本写入不会暴露给 Agent。
-Terminals 支持交互式本地 shell 和子进程会话；任意 command 请求保持禁用，但 shell 本身仍是
-高权限能力。停止 Devbar 会同时移除这两项能力。
+启用中的 Hub 始终包含聚合 HTTP MCP endpoint 和官方 Terminals add-on；启用 Devbar
+即是这两项能力唯一的一次授权。MCP 暴露只读性能查询、共享状态、Markdown resource、
+Inspector 工具和 Terminals 工具。浏览器样本写入不会暴露给 Agent。Terminals 支持
+交互式本地 shell 和子进程会话；任意 command 请求保持禁用，但 shell 本身仍是高权限
+能力，因此 Devbar 开关同时向受信本地调用方授予该能力。停止 Devbar 会同时移除这
+两项能力。
 
 在这个单用户 loopback 模式下，Hub 用 gate 保护 RPC transport，而不是弹出 Devframe 浏览器
 信任提示。打包后的 `file://` renderer 使用经 IPC 下发的每进程 token 认证；嵌入的 dock
@@ -95,7 +96,7 @@ Electron host page 使用 `file://`，Hub iframe dock URL 会发布成完整 loo
 capability 决策与认证方案。
 
 编码 Agent host 应配置一次 stdio `devframe connect` connector，而不是固定 HTTP 端口。
-connector 会发现运行实例、补充 loopback Origin header，并代理二级 gate 启用的读取或终端
+connector 会发现运行实例、补充 loopback Origin header，并代理 Hub 的读取与终端
 工具。Lody 中由 Agent 写入的 MCP entry 在受信 UI 或 CLI 审核选择前保持禁用。
 
 Hub 启动失败时主窗口保留普通 renderer，并在 Settings 中显示错误。嵌入客户端后续断开时
@@ -113,5 +114,6 @@ Hub 启动失败时主窗口保留普通 renderer，并在 Settings 中显示错
 - [确定性测试](../apps/electron/src/devbar.test.mjs)
 - [Devframe bridge 决策](../.agents/notes/implemented/architecture/2026-09-16-devbar-devframe-bridge.zh.md)
 - [Devframe Hub UI 决策](../.agents/notes/implemented/feature/2026-09-16-devbar-hub-ui.zh.md)
+- [合并 Agent 权限开关](../.agents/notes/implemented/simplification/2026-09-23-devbar-agent-access-merged.zh.md)
 - [Electron metrics](https://www.electronjs.org/docs/latest/api/structures/process-metric)
 - [CLS 定义](https://web.dev/articles/cls)

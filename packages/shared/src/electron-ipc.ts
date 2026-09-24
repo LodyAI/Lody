@@ -39,6 +39,8 @@ export type ElectronWindowTarget = {
   sessionId?: string;
 };
 
+export type PreparedWindowTarget = ElectronWindowTarget & { preparationId: string };
+
 export type SessionControlSendInput = {
   requestId: string;
   message: LocalSessionControlRequest;

@@ -12,6 +12,8 @@ await test('prerender paths include the 404 documents', () => {
   assert.ok(paths.includes('/zh/404'));
   assert.ok(paths.includes('/'));
   assert.ok(paths.includes('/docs'));
+  assert.ok(paths.includes('/download/nightly'));
+  assert.ok(paths.includes('/zh/download/nightly'));
 });
 
 await test('sitemap omits compatibility homes and 404 documents', () => {

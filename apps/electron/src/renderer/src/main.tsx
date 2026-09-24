@@ -1,10 +1,14 @@
-import { waitForTargetContentPainted } from './warm-window-reveal'
+import { installWindowPreparationIntent } from '@lody/components/lib/window-preparation-intent'
+import { windowPreparationAtom } from '@lody/components/lib/window-preparation'
+import type { PreparedWindowTarget } from '@lody/shared/electron-ipc'
+import { observePreparedTarget, waitForTargetContentPainted } from './warm-window-reveal'
+import { preloadMainLayout } from '@lody/components/components/preloaded-main-layout'
 import {
   isSessionWindow,
   isWarmWindow,
   clearWarmWindowFlag
 } from '@lody/components/lib/desktop-window'
-import { useLayoutEffect, useState, type ReactElement } from 'react'
+import { useLayoutEffect } from 'react'
 import { createRoot } from 'react-dom/client'
 import { createHashHistory, RouterProvider } from '@tanstack/react-router'
 import { createRouter } from '@lody/components/router'
@@ -28,6 +32,7 @@ import { authClient } from './auth'
 import { installNativeTabBehavior } from './native-tab-behavior'
 import { createRendererErrorReporting, type RendererFatalScope } from './renderer-error-reporting'
 import { DesktopDevbar } from './devbar/index'
+import { installAppIconBridge } from './app-icon'
 
 // Desktop windows should not Tab-cycle a focus ring through the whole UI like a web page.
 installNativeTabBehavior()
@@ -122,48 +127,17 @@ function RendererCommitSentinel(): null {
 }
 
 /**
- * A warm renderer must never expose its router's transition state. The router
- * can briefly have no mounted route while it binds the claimed target, so keep
- * an opaque, theme-matched surface above it until the target has painted.
- *
- * This is deliberately text-free: showing a spinner makes an auxiliary window
- * feel like a second loading screen instead of a native window reveal.
- */
-function WarmWindowSurface(): ReactElement | null {
-  const [visible, setVisible] = useState(() => isWarmWindow())
-  useLayoutEffect(() => {
-    const onTargetPainted = () => setVisible(false)
-    window.addEventListener('lody:warm-window-target-painted', onTargetPainted)
-    return () => window.removeEventListener('lody:warm-window-target-painted', onTargetPainted)
-  }, [])
-  if (!visible) return null
-  return (
-    <div
-      id="lody-warm-window-surface"
-      aria-hidden="true"
-      data-warm-window-surface="visible"
-      style={{
-        position: 'fixed',
-        inset: 0,
-        zIndex: 2147483647,
-        backgroundColor: 'hsl(var(--background))',
-        pointerEvents: 'none',
-        isolation: 'isolate'
-      }}
-    />
-  )
-}
-
-/**
  * Binds a claimed warm window to a concrete route without a reload. The renderer
  * is already booted; this reproduces the storage flags a fresh auxiliary window
  * would derive from its URL, then navigates client-side.
  */
-function installWarmWindowBinding(
-  router: ReturnType<typeof createRouter>,
-  onTargetPainted: () => void
-): void {
-  onIpcEvent('app.windowTarget', (target) => {
+function installWarmWindowBinding(router: ReturnType<typeof createRouter>): void {
+  let preparation: PreparedWindowTarget | null = null
+  let stopObserving: (() => void) | undefined
+  const navigate = (
+    target: { workspace: string; sessionId?: string },
+    completed: () => void
+  ): void => {
     sessionStorage.setItem('lody:auxiliaryWindow', '1')
     sessionStorage.removeItem('lody:windowFocusConsumed')
     if (target.sessionId) {
@@ -182,13 +156,43 @@ function installWarmWindowBinding(
           to: '/$workspaceName/chat',
           params: { workspaceName: target.workspace }
         })
-    // Keep the opaque warm shell until the target route has committed and had
-    // two animation frames to paint. This covers both the router transition
-    // and the first layout/paint of the workspace surface.
+    // Main keeps the native window hidden until this exact target has painted.
     void navigation.finally(() => {
       clearWarmWindowFlag()
-      waitForTargetContentPainted(rootElement!, target, onTargetPainted)
+      completed()
     })
+  }
+  onIpcEvent('app.windowTarget', (target) => {
+    stopObserving?.()
+    preparation = null
+    jotaiStore.set(windowPreparationAtom, false)
+    navigate(target, () =>
+      waitForTargetContentPainted(rootElement!, target, () =>
+        sendIpc('app.windowContentReady', target)
+      )
+    )
+  })
+  onIpcEvent('app.prepareWindowTarget', (target) => {
+    stopObserving?.()
+    preparation = target
+    jotaiStore.set(windowPreparationAtom, true)
+    navigate(target, () => {
+      if (preparation !== target) return
+      stopObserving = observePreparedTarget(rootElement!, target, (ready) =>
+        sendIpc('app.preparedWindowState', { ...target, ready })
+      )
+    })
+  })
+  onIpcEvent('app.activatePreparedWindow', (target) => {
+    if (
+      preparation?.preparationId !== target.preparationId ||
+      preparation.workspace !== target.workspace ||
+      preparation.sessionId !== target.sessionId
+    )
+      return
+    stopObserving?.()
+    preparation = null
+    jotaiStore.set(windowPreparationAtom, false)
   })
 }
 
@@ -213,6 +217,7 @@ window.addEventListener('unhandledrejection', (event) => {
 })
 
 try {
+  installAppIconBridge()
   // Resolve and persist the desktop's first-run language before React can
   // commit. AppInitializer keeps later changes synchronized; awaiting here
   // closes the window where onboarding could paint once in English first.
@@ -234,9 +239,13 @@ try {
     authClient,
     history: usesHashHistory ? createHashHistory() : undefined
   })
-  installWarmWindowBinding(router, () =>
-    window.dispatchEvent(new Event('lody:warm-window-target-painted'))
-  )
+  installWarmWindowBinding(router)
+  installWindowPreparationIntent()
+  if (isWarmWindow()) {
+    void preloadMainLayout().catch((error) => {
+      console.warn('[Lody] Warm workspace layout preload failed', error)
+    })
+  }
   if (isSessionWindow() && !sessionStorage.getItem('lody:windowFocusConsumed')) {
     const sessionId = router.history.location.pathname.split('/sessions/')[1]?.split('/')[0]
     if (sessionId) {
@@ -256,7 +265,6 @@ try {
   }).render(
     <>
       <RendererCommitSentinel />
-      <WarmWindowSurface />
       <ErrorBoundary name="AppRoot" variant="page" showErrorDetails>
         <Provider store={jotaiStore}>
           <RouterProvider router={router} />

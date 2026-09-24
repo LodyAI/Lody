@@ -2,8 +2,8 @@ import { spawn } from 'child_process';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHash, randomUUID } from 'node:crypto';
 import path from 'path';
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { McpServer } from '@modelcontextprotocol/server';
+import { StdioServerTransport } from '@modelcontextprotocol/server/stdio';
 import { Effect } from 'effect';
 import { z } from 'zod';
 import { requestSessionShare } from '@/lib/session-share-delivery';
@@ -3617,7 +3617,7 @@ export function buildLodyMcpServer(): McpServer {
               sessionIds: [...new Set([ctx.sessionId, ...(args.sessionIds ?? [])])],
             },
             getCliAuthContextOrThrow('mcp').userId,
-            extra.signal
+            extra.mcpReq.signal
           )
         );
       } catch (error) {

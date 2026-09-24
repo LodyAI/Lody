@@ -11,7 +11,7 @@ import {
   createRecoveringAuthStorage,
   openAuthStorageBackend
 } from './auth-storage'
-import { isLocalPlatform } from './platform'
+import { isLocalPlatform, desktopInstallationProfile } from './platform'
 
 const DEV_PLAINTEXT_AUTH_STORAGE_ENV = 'LODY_ELECTRON_PLAINTEXT_AUTH_STORAGE'
 const DEV_USER_DATA_DIR_ENV = 'LODY_ELECTRON_USER_DATA_DIR'
@@ -176,7 +176,7 @@ export const authClient = createAuthClient({
     electronClient({
       signInURL: `${import.meta.env.VITE_SITE_URL || 'https://lody.ai'}/login`,
       protocol: {
-        scheme: 'lody'
+        scheme: desktopInstallationProfile.desktopProtocol
       },
       storage: authStorage
     })

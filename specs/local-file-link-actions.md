@@ -23,7 +23,10 @@ and Copy file path. On Electron with the session running on this machine, it off
 Open in default app and Reveal in Finder (or the host's file manager). Reveal
 selects the file without launching its associated application. The preview and
 More menu use the same system action and the same file identity, including local
-absolute and parent-relative paths outside the workspace. Remote sessions never open a path on the
+absolute and parent-relative paths outside the workspace. The Files tree and the
+side-panel More menu expose that identity as two copy rows — Copy relative path
+always, and Copy absolute path only once the machine path is known. Remote
+sessions never open a path on the
 viewer's machine. Clicking the assistant link itself only opens the preview;
 opening the OS application requires a separate user click.
 

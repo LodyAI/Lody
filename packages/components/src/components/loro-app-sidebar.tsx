@@ -1,4 +1,6 @@
 import { openSessionOnModifiedClick } from '@/lib/desktop-window';
+import { usePostHog } from '@posthog/react';
+import { capturePostHogEvent } from '@/lib/posthog-analytics';
 import { SessionWindowMenuItem } from './session-window-menu-item';
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { startSessionMentionDrag } from '@/lib/session-mention-drag';
@@ -761,7 +763,7 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
 
   const menuRow = hasContextMenuActions ? (
     <ContextMenu.Root onOpenChange={setRowMenuOpen}>
-      <ContextMenu.Trigger >{row}</ContextMenu.Trigger>
+      <ContextMenu.Trigger>{row}</ContextMenu.Trigger>
       <ContextMenu.Content className="min-w-[180px]">
         <SessionRowOpenedByMenuItems
           opener={openedByOpener}
@@ -1160,135 +1162,136 @@ export const LocalProjectItem = memo(function LocalProjectItem({
   const ProjectFolderIcon = collapsed ? Folder : FolderOpen;
 
   const projectRow = (
-<div
-                  role={projectCanNavigate ? 'button' : undefined}
-                  tabIndex={projectCanNavigate ? 0 : -1}
-                  aria-label={ariaLabel}
-                  aria-current={isSelected ? 'page' : undefined}
-                  aria-disabled={!projectCanNavigate ? true : undefined}
-                  data-id={`project:${machineId}:${project.id}`}
-                  data-scope-item="row"
-                  data-sidebar-project-key={`${machineId}:${project.id}`}
-                  // Own attribute rather than Radix's `data-state`: TooltipTrigger
-                  // and ContextMenuTrigger both target this element through
-                  // `asChild`, so their `data-state` values collide here.
-                  data-menu-open={projectMenuOpen ? '' : undefined}
-                  className={cn(
-                    'group relative w-full rounded-md px-2 py-1 text-left',
-                    'border border-transparent bg-transparent',
-                    !showSelectedState &&
-                      !isMobile &&
-                      'hover:bg-sidebar-hover hover:text-sidebar-hover-foreground data-[menu-open]:bg-sidebar-hover data-[menu-open]:text-sidebar-hover-foreground',
-                    showSelectedState &&
-                      'border-sidebar-ring/30 bg-sidebar-selection hover:bg-sidebar-selection',
-                    'flex min-w-0 flex-1 select-none items-center gap-2 text-[0.9em] font-normal transition-colors',
-                    projectCanNavigate ? 'cursor-pointer' : 'cursor-default',
-                    removalState && 'text-muted-foreground',
-                    showSelectedState
-                      ? 'text-sidebar-selection-foreground'
-                      : cn(
-                          // Project folder names are content rather than section chrome,
-                          // but still recede behind the conversation in dark mode.
-                          'text-sidebar-foreground dark:text-sidebar-foreground/75',
-                          !isMobile && 'hover:text-sidebar-hover-foreground'
-                        )
-                  )}
-                  onClick={handleNavigate}
-                  onKeyDown={(event) => {
-                    if (event.key !== 'Enter' && event.key !== ' ') return;
-                    event.preventDefault();
-                    handleNavigate();
-                  }}
-                >
-                  <button
-                    type="button"
-                    className="relative -mr-1.5 flex h-5 w-5 shrink-0 items-center justify-center"
-                    aria-label={toggleLabel}
-                    onClick={(event) => {
-                      event.preventDefault();
-                      event.stopPropagation();
-                      onToggleCollapsed(machineId, project.id);
-                    }}
-                  >
-                    {/* Open folder while expanded, closed while collapsed. */}
-                    <ProjectFolderIcon
-                      className={cn(
-                        'absolute left-0 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-current transition-opacity duration-100',
-                        // Mobile: chevron is always visible so the folder icon must hide
-                        // permanently to avoid stacking. Desktop keeps the hover swap.
-                        isMobile ? 'opacity-0' : 'opacity-80 group-hover:opacity-0'
-                      )}
-                    />
-                    <ChevronDown
-                      className={cn(
-                        'absolute left-0 top-1/2 h-4 w-4 -translate-y-1/2 text-current',
-                        'transition-[opacity,translate,scale,rotate] duration-100',
-                        isMobile ? 'opacity-100' : 'opacity-0 group-hover:opacity-100',
-                        collapsed ? '-rotate-90' : 'rotate-0'
-                      )}
-                    />
-                  </button>
-                  <span className="min-w-0 flex-1 truncate text-left">{project.name}</span>
+    <div
+      role={projectCanNavigate ? 'button' : undefined}
+      tabIndex={projectCanNavigate ? 0 : -1}
+      aria-label={ariaLabel}
+      aria-current={isSelected ? 'page' : undefined}
+      aria-disabled={!projectCanNavigate ? true : undefined}
+      data-id={`project:${machineId}:${project.id}`}
+      data-scope-item="row"
+      data-sidebar-project-key={`${machineId}:${project.id}`}
+      // Own attribute rather than Radix's `data-state`: TooltipTrigger
+      // and ContextMenuTrigger both target this element through
+      // `asChild`, so their `data-state` values collide here.
+      data-menu-open={projectMenuOpen ? '' : undefined}
+      className={cn(
+        'group relative w-full rounded-md px-2 py-1 text-left',
+        'border border-transparent bg-transparent',
+        !showSelectedState &&
+          !isMobile &&
+          'hover:bg-sidebar-hover hover:text-sidebar-hover-foreground data-[menu-open]:bg-sidebar-hover data-[menu-open]:text-sidebar-hover-foreground',
+        showSelectedState &&
+          'border-sidebar-ring/30 bg-sidebar-selection hover:bg-sidebar-selection',
+        'flex min-w-0 flex-1 select-none items-center gap-2 text-[0.9em] font-normal transition-colors',
+        projectCanNavigate ? 'cursor-pointer' : 'cursor-default',
+        removalState && 'text-muted-foreground',
+        showSelectedState
+          ? 'text-sidebar-selection-foreground'
+          : cn(
+              // Project folder names are content rather than section chrome,
+              // but still recede behind the conversation in dark mode.
+              'text-sidebar-foreground dark:text-sidebar-foreground/75',
+              !isMobile && 'hover:text-sidebar-hover-foreground'
+            )
+      )}
+      onClick={handleNavigate}
+      onKeyDown={(event) => {
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+        event.preventDefault();
+        handleNavigate();
+      }}
+    >
+      <button
+        type="button"
+        className="relative -mr-1.5 flex h-5 w-5 shrink-0 items-center justify-center"
+        aria-label={toggleLabel}
+        onClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          onToggleCollapsed(machineId, project.id);
+        }}
+      >
+        {/* Open folder while expanded, closed while collapsed. */}
+        <ProjectFolderIcon
+          className={cn(
+            'absolute left-0 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-current transition-opacity duration-100',
+            // Mobile: chevron is always visible so the folder icon must hide
+            // permanently to avoid stacking. Desktop keeps the hover swap.
+            isMobile ? 'opacity-0' : 'opacity-80 group-hover:opacity-0'
+          )}
+        />
+        <ChevronDown
+          className={cn(
+            'absolute left-0 top-1/2 h-4 w-4 -translate-y-1/2 text-current',
+            'transition-[opacity,translate,scale,rotate] duration-100',
+            isMobile ? 'opacity-100' : 'opacity-0 group-hover:opacity-100',
+            collapsed ? '-rotate-90' : 'rotate-0'
+          )}
+        />
+      </button>
+      <span className="min-w-0 flex-1 truncate text-left">{project.name}</span>
 
-                  {removalStateLabel ? (
-                    <Tooltip.Root>
-                      <Tooltip.Trigger delay={300}
-                        render={
-                          <span className="inline-flex min-w-0 shrink-0 items-center gap-1 text-[10px] font-medium text-muted-foreground">
-                            {removalState === 'waiting_for_device' ? (
-                              <Clock3 className="h-3 w-3 shrink-0" aria-hidden="true" />
-                            ) : (
-                              <Spinner className="h-3 w-3 shrink-0" aria-hidden="true" />
-                            )}
-                            <span className="max-w-24 truncate">{removalStateLabel}</span>
-                          </span>
-                        }
-                      />
-                      <Tooltip.Content side="right">{removalStateLabel}</Tooltip.Content>
-                    </Tooltip.Root>
-                  ) : showProjectMenu || showNewChatButton || dragHandle ? (
-                    <div className="flex shrink-0 items-center gap-0.5">
-                      {showProjectMenu ? (
-                        <button
-                          type="button"
-                          className={cn(hoverActionClassName, menuTriggerOpenClassName)}
-                          aria-label={projectMenuLabel}
-                          onClick={(event) => {
-                            // Open the row's own right-click menu from a left click.
-                            event.preventDefault();
-                            event.stopPropagation();
-                            const rect = event.currentTarget.getBoundingClientRect();
-                            event.currentTarget.dispatchEvent(
-                              new MouseEvent('contextmenu', {
-                                bubbles: true,
-                                cancelable: true,
-                                clientX: Math.round(rect.left),
-                                clientY: Math.round(rect.bottom),
-                              })
-                            );
-                          }}
-                        >
-                          <MoreHorizontal className="h-3.5 w-3.5" />
-                        </button>
-                      ) : null}
-                      {showNewChatButton ? (
-                        <button
-                          type="button"
-                          className={hoverActionClassName}
-                          aria-label={newChatLabel}
-                          onClick={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            onNewChatInProject?.(machineId, project.id);
-                          }}
-                        >
-                          <SquarePen className="h-3.5 w-3.5" />
-                        </button>
-                      ) : null}
-                      {dragHandle}
-                    </div>
-                  ) : null}
-                </div>
+      {removalStateLabel ? (
+        <Tooltip.Root>
+          <Tooltip.Trigger
+            delay={300}
+            render={
+              <span className="inline-flex min-w-0 shrink-0 items-center gap-1 text-[10px] font-medium text-muted-foreground">
+                {removalState === 'waiting_for_device' ? (
+                  <Clock3 className="h-3 w-3 shrink-0" aria-hidden="true" />
+                ) : (
+                  <Spinner className="h-3 w-3 shrink-0" aria-hidden="true" />
+                )}
+                <span className="max-w-24 truncate">{removalStateLabel}</span>
+              </span>
+            }
+          />
+          <Tooltip.Content side="right">{removalStateLabel}</Tooltip.Content>
+        </Tooltip.Root>
+      ) : showProjectMenu || showNewChatButton || dragHandle ? (
+        <div className="flex shrink-0 items-center gap-0.5">
+          {showProjectMenu ? (
+            <button
+              type="button"
+              className={cn(hoverActionClassName, menuTriggerOpenClassName)}
+              aria-label={projectMenuLabel}
+              onClick={(event) => {
+                // Open the row's own right-click menu from a left click.
+                event.preventDefault();
+                event.stopPropagation();
+                const rect = event.currentTarget.getBoundingClientRect();
+                event.currentTarget.dispatchEvent(
+                  new MouseEvent('contextmenu', {
+                    bubbles: true,
+                    cancelable: true,
+                    clientX: Math.round(rect.left),
+                    clientY: Math.round(rect.bottom),
+                  })
+                );
+              }}
+            >
+              <MoreHorizontal className="h-3.5 w-3.5" />
+            </button>
+          ) : null}
+          {showNewChatButton ? (
+            <button
+              type="button"
+              className={hoverActionClassName}
+              aria-label={newChatLabel}
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                onNewChatInProject?.(machineId, project.id);
+              }}
+            >
+              <SquarePen className="h-3.5 w-3.5" />
+            </button>
+          ) : null}
+          {dragHandle}
+        </div>
+      ) : null}
+    </div>
   );
 
   return (
@@ -1298,13 +1301,7 @@ export const LocalProjectItem = memo(function LocalProjectItem({
           <Tooltip.Root>
             <Tooltip.Trigger
               delay={500}
-              render={
-                showProjectMenu ? (
-                  <ContextMenu.Trigger render={projectRow} />
-                ) : (
-                  projectRow
-                )
-              }
+              render={showProjectMenu ? <ContextMenu.Trigger render={projectRow} /> : projectRow}
             />
             {formattedPath || trimmedMachineName ? (
               <Tooltip.Content side="right" align="start" className="max-w-[420px] break-all">
@@ -1697,6 +1694,17 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
       setOrganizeMode(nextMode);
     },
     [setOrganizeMode]
+  );
+  const postHog = usePostHog();
+  const handleShowUpdatedProjectNamesChange = useCallback(
+    (next: boolean) => {
+      capturePostHogEvent(postHog, 'settings/changed', {
+        key: 'sidebar_updated_show_project_names',
+        value: next,
+      });
+      setShowUpdatedProjectNames(next);
+    },
+    [postHog, setShowUpdatedProjectNames]
   );
   const sessionSidebarCodeChangesOnly = useAtomValue(sessionSidebarCodeChangesOnlyAtom);
   const { archiveSession, markSessionUnread, setSessionPinned, updateSessionTitle } =
@@ -2573,12 +2581,12 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
       onOrganizeChange={handleOrganizeModeChange}
       onScopeChange={handleChatScopeChanged}
       showUpdatedProjectNames={showUpdatedProjectNames}
-      onShowUpdatedProjectNamesChange={setShowUpdatedProjectNames}
+      onShowUpdatedProjectNamesChange={handleShowUpdatedProjectNamesChange}
       labels={filterLabels}
       open={sidebarFilterOpen}
       onOpenChange={setSidebarFilterOpen}
-      side="bottom"
-      align="end"
+      side="right"
+      align="start"
       triggerClassName="h-5 w-5 [&_svg]:h-4 [&_svg]:w-4"
     />
   ) : null;
@@ -3408,7 +3416,7 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
         updatedIsLoading={organizeMode === 'updated' && sessionsListLoading}
         onOrganizeModeChange={handleOrganizeModeChange}
         showUpdatedProjectNames={showUpdatedProjectNames}
-        onShowUpdatedProjectNamesChange={setShowUpdatedProjectNames}
+        onShowUpdatedProjectNamesChange={handleShowUpdatedProjectNamesChange}
         onChatScopeChange={handleChatScopeChanged}
         onSelectUpdatedItem={handleSelectUpdatedItem}
         onTogglePinnedSection={handleTogglePinnedSection}

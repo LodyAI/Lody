@@ -18,6 +18,11 @@ strings on i18n rather than the registry's inline English.
   a hashed `?url` asset cannot satisfy it and a host that forgets the plugin gets an
   empty picker. Keep the locale list in the plugin and `lib/emojibase-assets.ts` in
   step; each locale is ~750 KB.
+- `data.json` is emitted with every other bundled locale's `label` and `tags` folded
+  into `tags` (build-time merge keyed on `hexcode`), because frimousse searches only
+  the loaded locale. Do not revert to a verbatim copy — that is what lets one query
+  match in either product language. `label` and `messages.json` stay per-locale so
+  display names and category headers keep the UI language.
 - Anchor the URL on the Vite BASE, never on `document.baseURI` alone. The router uses
   browser history over http, so the document URL is a deep route and resolving against
   it asks for `…/settings/emojibase`, which the dev server answers with the SPA
@@ -72,9 +77,9 @@ strings on i18n rather than the registry's inline English.
 - Menu chrome lives in `menu-styles.ts`. Items are `0.9em` of `--ui-font-size`
   (the Appearance slider) / `py-1` / `min-h-7`. Settings chrome is `1em` of the
   same token. Do not go back to `text-[13px]` or `text-xs` for menu rows.
-  The hairline is a `0.5px` shadow ring (not a CSS border). Separators are
-  `foreground/10` in light and `white/18` in dark. Dark menus use a brighter
-  ring (`rgb(80 80 80)`) and a tighter, darker drop. Do not restore bulky
+  The hairline is a `0.5px` shadow ring (not a CSS border). The ring and
+  separators share the per-theme `--menu-edge-color` mix in both themes, never
+  a fixed gray. Do not restore bulky
   `min-h-8` rows or a 1px ring.
 
 ## Spinner

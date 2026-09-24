@@ -1,11 +1,4 @@
-import {
-  Fragment,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-  type ReactNode,
-} from 'react';
+import { Fragment, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
   ChevronRight,
@@ -15,7 +8,8 @@ import {
   LockKeyhole,
   MessageCircle,
 } from 'lucide-react';
-import { useAtomValue, useSetAtom } from 'jotai';
+import { atom, useAtom, useAtomValue, useSetAtom, type PrimitiveAtom } from 'jotai';
+import { atomFamily } from 'jotai/utils';
 import { useTranslation } from 'react-i18next';
 import { getServerNow } from '@lody/shared';
 import {
@@ -124,6 +118,26 @@ export type MobileChatPreviewState = {
   onToggle: () => void;
 };
 
+/* Group fold + "Show all" state for one list surface. Held in an atom, not
+   component state, because leaving the home screen (e.g. into Settings)
+   unmounts the list and would otherwise re-expand every folded group on
+   return. In-memory only: it survives navigation, not an app reload. */
+type MobileChatBucketUiState = {
+  collapsed: ReadonlySet<string>;
+  expanded: ReadonlySet<string>;
+};
+const createBucketUiStateAtom = () =>
+  atom<MobileChatBucketUiState>({ collapsed: new Set<string>(), expanded: new Set<string>() });
+const mobileChatBucketUiStateAtomFamily = atomFamily((_stateKey: string) =>
+  createBucketUiStateAtom()
+);
+const toggleInSet = (set: ReadonlySet<string>, id: string): ReadonlySet<string> => {
+  const next = new Set(set);
+  if (next.has(id)) next.delete(id);
+  else next.add(id);
+  return next;
+};
+
 /* Fixed date-bucket ids (ordered newest → oldest). Month buckets use
    `date:month:YYYY-MM` and sort after these named ones. */
 export const DATE_BUCKET_TODAY = 'date:today';
@@ -151,15 +165,10 @@ const GROUP_HEADING_X = 'ps-[18px] pe-4';
 
 /* Group label type size — slightly under session-row 15px so sections
    stay secondary, but large enough to scan. */
-const GROUP_HEADING_TEXT =
-  'text-[14px] font-semibold tracking-tight text-muted-foreground';
+const GROUP_HEADING_TEXT = 'text-[14px] font-semibold tracking-tight text-muted-foreground';
 
 export function MobileChatSectionHeading({ children }: { children: ReactNode }) {
-  return (
-    <div className={cn(GROUP_HEADING_X, 'pb-1.5 pt-5', GROUP_HEADING_TEXT)}>
-      {children}
-    </div>
-  );
+  return <div className={cn(GROUP_HEADING_X, 'pb-1.5 pt-5', GROUP_HEADING_TEXT)}>{children}</div>;
 }
 
 /* Chevron for group collapse state: points right when collapsed,
@@ -496,8 +505,7 @@ export function MobileChatListCard({
      one bit of it that matters may be read. */
   const overflowsPreview =
     previewEnabled &&
-    countOpenedByTreeRoots(chats, CHAT_OPENED_BY_TREE_ACCESSORS) >
-      MOBILE_CHAT_PREVIEW_MAX_ROOTS;
+    countOpenedByTreeRoots(chats, CHAT_OPENED_BY_TREE_ACCESSORS) > MOBILE_CHAT_PREVIEW_MAX_ROOTS;
   return (
     /* Flat list — no rounded card shell or inter-row dividers. Rows
        sit directly on the page canvas; `ConversationRow` supplies its
@@ -551,9 +559,7 @@ export function MobileChatListCard({
               onToggleSelect={
                 selection ? () => selection.onToggleSelect(conversation.id) : undefined
               }
-              onLongPress={
-                selection ? () => selection.onLongPress(conversation.id) : undefined
-              }
+              onLongPress={selection ? () => selection.onLongPress(conversation.id) : undefined}
               secondaryField={secondaryField}
             />
           );
@@ -591,11 +597,7 @@ export function MobileChatListCard({
                         ? () => rowActions.onRestore!(conversation.id)
                         : undefined
                     }
-                    onDelete={
-                      onRequestDelete
-                        ? () => onRequestDelete(conversation.id)
-                        : undefined
-                    }
+                    onDelete={onRequestDelete ? () => onRequestDelete(conversation.id) : undefined}
                   >
                     {row}
                   </MobileSwipeableRow>
@@ -608,8 +610,7 @@ export function MobileChatListCard({
                     isPinned={conversation.isPinned ?? false}
                     onTogglePin={
                       rowActions?.onTogglePin
-                        ? () =>
-                            rowActions.onTogglePin!(conversation.id, !conversation.isPinned)
+                        ? () => rowActions.onTogglePin!(conversation.id, !conversation.isPinned)
                         : undefined
                     }
                     onArchive={
@@ -789,9 +790,7 @@ export function dateBucketIdFor(
   nowMs: number = getServerNow()
 ): string {
   const t =
-    typeof latestMessageAt === 'number' && Number.isFinite(latestMessageAt)
-      ? latestMessageAt
-      : 0;
+    typeof latestMessageAt === 'number' && Number.isFinite(latestMessageAt) ? latestMessageAt : 0;
   if (t <= 0) return DATE_BUCKET_UNKNOWN;
 
   const startToday = startOfLocalDayMs(nowMs);
@@ -947,6 +946,7 @@ export function MobileChatList({
   privateLabel,
   privateHelpAriaLabel,
   onPrivateHelp,
+  bucketStateKey,
 }: {
   chats: MobileConversationItem[];
   groupBy?: MobileChatGroupBy;
@@ -996,6 +996,10 @@ export function MobileChatList({
      mode and the cap disappears. `groupBy` also defaults to `none`, so a new
      caller would silently opt out. */
   capGroupPreviews?: boolean;
+  /** Keeps group fold / "Show all" state across unmounts (navigating to
+     Settings and back). Surfaces sharing a key share that state; omit it to
+     scope the state to this mount. */
+  bucketStateKey?: string;
   /** Copy for the multi-select toolbar + confirmation alert-dialog.
      All keys are optional with reasonable Chinese defaults; callers
      can override to localize. */
@@ -1013,34 +1017,26 @@ export function MobileChatList({
   const selectionEnabled = archived && Boolean(onPermanentDelete);
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
-  /* Project-group collapse: ids in the set are collapsed (body hidden).
-     Default empty → every bucket starts expanded. */
-  const [collapsedBucketIds, setCollapsedBucketIds] = useState<Set<string>>(
-    () => new Set()
-  );
-  const toggleBucket = (bucketId: string) => {
-    setCollapsedBucketIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(bucketId)) next.delete(bucketId);
-      else next.add(bucketId);
-      return next;
-    });
-  };
-  /* Buckets the user expanded past the preview cap. Every bucket starts capped
-     at `MOBILE_CHAT_PREVIEW_MAX_ROOTS`, which is the whole point: without it a
+  /* Project-group collapse (ids in `collapsed` hide their body; default
+     empty → every bucket starts expanded) and buckets the user expanded past
+     the preview cap (`expanded`). Every bucket starts capped at
+     `MOBILE_CHAT_PREVIEW_MAX_ROOTS`, which is the whole point: without it a
      project with forty Sessions pushes every other project and worktree off
-     the screen. This is deliberately NOT the shared opener-fold atom — see
-     `MobileChatPreviewState`. */
-  const [expandedBucketIds, setExpandedBucketIds] = useState<Set<string>>(
-    () => new Set()
+     the screen. The preview flag is deliberately NOT the shared opener-fold
+     atom — see `MobileChatPreviewState`. With `bucketStateKey` the state
+     outlives this component; without it, it lives and dies with the mount. */
+  const [localBucketUiStateAtom] =
+    useState<PrimitiveAtom<MobileChatBucketUiState>>(createBucketUiStateAtom);
+  const [bucketUiState, setBucketUiState] = useAtom(
+    bucketStateKey ? mobileChatBucketUiStateAtomFamily(bucketStateKey) : localBucketUiStateAtom
   );
+  const collapsedBucketIds = bucketUiState.collapsed;
+  const expandedBucketIds = bucketUiState.expanded;
+  const toggleBucket = (bucketId: string) => {
+    setBucketUiState((prev) => ({ ...prev, collapsed: toggleInSet(prev.collapsed, bucketId) }));
+  };
   const toggleBucketPreview = (bucketId: string) => {
-    setExpandedBucketIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(bucketId)) next.delete(bucketId);
-      else next.add(bucketId);
-      return next;
-    });
+    setBucketUiState((prev) => ({ ...prev, expanded: toggleInSet(prev.expanded, bucketId) }));
   };
   /* Pending permanent-delete confirmation. Drives one shared
      alert-dialog for two entry points: the multi-select toolbar
@@ -1157,12 +1153,7 @@ export function MobileChatList({
       }
     />
   ) : flatHeading != null && groupBy === 'none' ? (
-    <div
-      className={cn(
-        'flex w-full items-center gap-2 pb-1.5 pt-5',
-        GROUP_HEADING_X
-      )}
-    >
+    <div className={cn('flex w-full items-center gap-2 pb-1.5 pt-5', GROUP_HEADING_X)}>
       <div className={cn('min-w-0 flex-1', GROUP_HEADING_TEXT)}>{flatHeading}</div>
       {firstGroupTrailing ? <div className="shrink-0">{firstGroupTrailing}</div> : null}
     </div>
@@ -1354,10 +1345,10 @@ export function MobileChatList({
               {selectionLabels?.confirmTitle ?? '彻底删除归档对话'}
             </AlertDialog.Title>
             <AlertDialog.Description>
-              {(selectionLabels?.confirmDescription ?? '将永久删除选中的 {count} 个对话，此操作不可恢复。').replace(
-                '{count}',
-                String(pendingDeleteCount)
-              )}
+              {(
+                selectionLabels?.confirmDescription ??
+                '将永久删除选中的 {count} 个对话，此操作不可恢复。'
+              ).replace('{count}', String(pendingDeleteCount))}
             </AlertDialog.Description>
           </AlertDialog.Header>
           <AlertDialog.Footer>

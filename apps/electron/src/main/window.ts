@@ -10,7 +10,8 @@ import {
   isAppQuitting,
   isWindowsTrayAvailable,
   setMainWindow,
-  registerProductWindow
+  registerProductWindow,
+  unmarkWarmWindow
 } from './window-state'
 import {
   getMainWindowConstructorOptions,
@@ -438,7 +439,7 @@ export function createMainWindow(options: CreateMainWindowOptions): BrowserWindo
   window.on('leave-full-screen', sendFullscreenState)
 
   window.on('ready-to-show', () => {
-    // A warm spare stays hidden until it is claimed for a concrete target.
+    // Warm windows are shown by the target-content readiness handshake.
     if (options.warm) {
       return
     }
@@ -608,14 +609,22 @@ export function createWarmWindow(options: { icon?: string } = {}): BrowserWindow
 }
 
 /**
- * Hands a claimed warm window its concrete route and presents it. The renderer
- * navigates client-side; the themed shell is already painted, so the window is
- * shown immediately without a blank frame.
+ * Hands a claimed warm window its concrete route. Native presentation waits
+ * for matching painted content or the recovery deadline.
  */
 export function bindMainWindowTarget(window: BrowserWindow, target: ElectronWindowTarget): void {
   presentWindowTarget(
     window,
     target,
+    resolveMainRendererTarget(getWindowTargetPath(target), isDevbarRendererEnabled(), true)
+  )
+}
+
+/** Adopt a prepared view without navigating or replacing its renderer. */
+export function adoptPreparedMainWindow(window: BrowserWindow, target: ElectronWindowTarget): void {
+  unmarkWarmWindow(window)
+  setReloadTarget(
+    window,
     resolveMainRendererTarget(getWindowTargetPath(target), isDevbarRendererEnabled(), true)
   )
 }

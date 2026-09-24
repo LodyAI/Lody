@@ -1,4 +1,5 @@
 import { assertProductWindowSender } from '../assert-sender'
+import { parseAppIconName } from '../../services/app-icon-core'
 import { productWindows } from '../../window-state'
 import { parseWindowTarget, openSessionWindow, type WindowTarget } from '../../session-windows'
 import { access } from 'node:fs/promises'
@@ -18,7 +19,13 @@ import {
 import { getIpcServiceDeps } from '../ipc-service-deps'
 import { parseDevbarControlInput } from '../../services/devbar/control'
 import { getDevbarConfig, getDevbarMetrics, setDevbarControl } from '../../services/devbar/service'
-import { getWindowWarmupMetrics, setWindowWarmupEnabled } from '../../window-warm-service'
+import {
+  prepareWindow,
+  cancelPreparedWindow,
+  getWindowWarmupMetrics,
+  isWindowWarmupEnabled,
+  setWindowWarmupEnabled
+} from '../../window-warm-service'
 import { setMenuLanguage } from '../../menu'
 import { localFileActionError } from '../../services/local-file-action-error'
 import { hasPathLauncher, launchLocalPath } from '../../services/local-path-launcher-service'
@@ -100,10 +107,42 @@ export class AppIpc extends IpcService {
   static override readonly groupName = 'app'
 
   @IpcMethod()
+  async getAppIconState() {
+    assertProductWindowSender(getIpcContext().event)
+    return getIpcServiceDeps().appIconService.getState()
+  }
+
+  @IpcMethod()
+  async setAppIcon(raw: { name: string }) {
+    assertProductWindowSender(getIpcContext().event)
+    const name = parseAppIconName(raw?.name)
+    return getIpcServiceDeps().appIconService.setIcon(name)
+  }
+
+  @IpcMethod()
   async openWindow(raw: WindowTarget) {
     const { event } = getIpcContext()
     assertProductWindowSender(event)
     openSessionWindow(parseWindowTarget(raw))
+  }
+
+  @IpcMethod()
+  async prepareWindow(raw: WindowTarget, requestId: string): Promise<void> {
+    const { event } = getIpcContext()
+    assertProductWindowSender(event)
+    if (typeof requestId !== 'string' || !/^[a-zA-Z0-9-]{1,64}$/.test(requestId))
+      throw new Error('Invalid preparation request')
+    const source = BrowserWindow.fromWebContents(event.sender)
+    if (source) prepareWindow(source, parseWindowTarget(raw), requestId)
+  }
+
+  @IpcMethod()
+  async cancelPreparedWindow(requestId: string): Promise<void> {
+    const { event } = getIpcContext()
+    assertProductWindowSender(event)
+    if (typeof requestId !== 'string' || requestId.length > 64)
+      throw new Error('Invalid preparation request')
+    cancelPreparedWindow(event.sender.id, requestId)
   }
 
   @IpcMethod()
@@ -150,10 +189,6 @@ export class AppIpc extends IpcService {
     }
 
     const result = await setDevbarControl(input)
-    if (result.ok) {
-      setWindowWarmupEnabled(input.warmupEnabled)
-      result.config = getDevbarConfig()
-    }
     const reload = (enabled: boolean): void => {
       setImmediate(() => {
         if (window.isDestroyed()) return
@@ -172,6 +207,24 @@ export class AppIpc extends IpcService {
     }
     reload(input.enabled)
     return { ok: true as const, config: result.config }
+  }
+
+  @IpcMethod()
+  async getWindowWarmup() {
+    return { enabled: isWindowWarmupEnabled() }
+  }
+
+  @IpcMethod()
+  async setWindowWarmup(raw: unknown) {
+    const { event } = getIpcContext()
+    assertProductWindowSender(event)
+    if (typeof raw !== 'boolean') {
+      return { ok: false as const, error: 'invalid_input' as const }
+    }
+    // The spare pool never changes the renderer entry, so toggling it must not
+    // reload the window the way setDevbarControl does.
+    setWindowWarmupEnabled(raw)
+    return { ok: true as const, enabled: isWindowWarmupEnabled() }
   }
 
   @IpcMethod()

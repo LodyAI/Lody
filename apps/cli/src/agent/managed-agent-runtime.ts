@@ -37,6 +37,7 @@ import {
   MACHINE_PROTOCOL_CAPABILITIES,
   getManagedBuiltinRuntimeByRuntimeName,
   type ManagedBuiltinRuntimeName,
+  PI_EXTENSIONS_PROTOCOL_VERSION,
 } from '@lody/shared';
 import { formatErrorWithCauses } from '@/utils/format-error';
 import { getLogger } from '@/utils/logger';
@@ -348,6 +349,9 @@ export const CODEX_ACP_ADAPTER_VERSION = codexPackageJson.version;
 export const CLAUDE_ACP_ADAPTER_VERSION = claudePackageJson.version;
 export const KIMI_CODE_VERSION = kimiRuntimeManifestJson.version;
 export const PI_RUNTIME_VERSION = piRuntimeManifestJson.version;
+export const PI_EXTENSIONS_SUPPORTED =
+  'piExtensionsProtocolVersion' in piRuntimeManifestJson &&
+  piRuntimeManifestJson.piExtensionsProtocolVersion === PI_EXTENSIONS_PROTOCOL_VERSION;
 export const GROK_ACP_ADAPTER_VERSION = grokPackageJson.version;
 export const GROK_BUILD_RUNTIME_VERSION = grokRuntimeManifestJson.officialRuntime.version;
 export const KIMI_CODE_MIN_NODE_VERSION = resolveMinimumNodeVersion(
@@ -575,6 +579,9 @@ export function getHostMachineProtocolCapabilities(
     isNodeVersionAtLeast(nodeVersion, piRuntimeManifestJson.minNodeVersion)
   ) {
     capabilities[MACHINE_PROTOCOL_CAPABILITIES.builtinPi] = 1;
+    if (PI_EXTENSIONS_SUPPORTED) {
+      capabilities[MACHINE_PROTOCOL_CAPABILITIES.piExtensions] = PI_EXTENSIONS_PROTOCOL_VERSION;
+    }
   }
   return capabilities;
 }

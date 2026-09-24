@@ -11,6 +11,7 @@ import { useTranslation } from 'react-i18next';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { v4 as uuidv4 } from 'uuid';
 import { toast } from '@/lib/toast';
+import { usePostHog } from '@posthog/react';
 import {
   computeTitleGenerationDefaults,
   DEEPSEEK_HARNESS_API_KEY_ENV,
@@ -21,7 +22,10 @@ import {
   getStaticBuiltinAcpCapabilities,
   getBuiltinTitleGenerationDefaults,
   getRegistryAcpLaunchKind,
+  hasBuiltinRuntimeOverrideValues,
   machineSupportsProviderSetupProtocol,
+  machineSupportsPiExtensions,
+  type MachinePiExtensionsResponse,
   isManagedBuiltinAgentType,
   isAcpCapabilityCacheEntryCurrent,
   parseCustomAcpCommandLine,
@@ -74,6 +78,7 @@ import {
 } from 'lucide-react';
 import { Spinner } from '@lody/ui/spinner';
 import { AgentIcon } from '@/components/icons/agent-icon';
+import { capturePostHogEvent } from '@/lib/posthog-analytics';
 import { useKeyboardAwareScrollIntoView } from '@/hooks/use-keyboard-aware-scroll-into-view';
 import { useMachineAcpBinaryProgress } from '@/hooks/use-machine-acp-binary-progress';
 import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
@@ -96,6 +101,7 @@ import { AcpAuthenticationPanel } from './acp-authentication-panel';
 import { Field } from './form-primitives';
 import { settingsCatalog as catalog, settingsSurface as surface } from './surface';
 import { BubInstallGuide } from './bub-install-guide';
+import { PiExtensionsField } from './pi-extensions-field';
 import { ProviderSetupRow } from './provider-setup-row';
 import {
   getAgentMetaByIdAtomFamily,
@@ -1142,6 +1148,10 @@ export type AgentConfigDialogProps = {
   machine: MachineViewMeta;
   onSubmit: (payload: AgentConfigSubmitPayload) => Promise<void>;
   onRefreshCapabilities: (args: RefreshArgs) => Promise<MachineAcpCapabilitiesRefreshResponse>;
+  onScanPiExtensions?: (args: {
+    machineId: MachineId;
+    configId?: AgentConfigId;
+  }) => Promise<MachinePiExtensionsResponse>;
   /** Check a registry binary or managed builtin runtime on the target machine. */
   onCheckBinaryStatus?: (
     args: BinaryActionArgs
@@ -1415,6 +1425,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
     machine,
     onSubmit,
     onRefreshCapabilities,
+    onScanPiExtensions,
     onCheckBinaryStatus,
     onInstallBinary,
     onManagedRuntimeSelected,
@@ -1681,11 +1692,20 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
   // than passed in: every host already gives us the target machine, and a
   // per-caller flag can disagree with the machine it travels with.
   const supportsProviderSetup = machineSupportsProviderSetupProtocol(machine);
+  // providerSetup rows only launch the default managed runtime; any override
+  // (a custom path or selected Pi extensions) must take the live-probe path.
   const backgroundBuiltinSetup =
     supportsProviderSetup &&
     requiresBuiltinCreationVerification &&
-    (usesDefaultManagedRuntime || isQueuedBuiltin);
+    (usesDefaultManagedRuntime || isQueuedBuiltin) &&
+    !hasBuiltinRuntimeOverrideValues(formData.runtimeOverrides);
   const lastPersistedPayloadKeyRef = useRef<string | null>(null);
+  const postHog = usePostHog();
+  // Analytics only: whether a custom DeepSeek Harness base URL is saved. The URL
+  // itself never leaves the client; only the boolean flip is reported.
+  const deepSeekCustomBaseUrlConfiguredRef = useRef(
+    isDeepSeekBuiltinForm(initialForm) && getDeepSeekEndpointMode(initialForm) === 'custom'
+  );
   const buildSubmitPayload = useCallback((): AgentConfigSubmitPayload => {
     let env = { ...formData.env };
     if (activePreset) {
@@ -1731,7 +1751,17 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
     if (lastPersistedPayloadKeyRef.current === payloadKey) return;
     await onSubmit(payload);
     lastPersistedPayloadKeyRef.current = payloadKey;
-  }, [buildSubmitPayload, onSubmit]);
+    if (isDeepSeekBuiltinForm(formData)) {
+      const configured = !isDeepSeekOfficialBaseUrl(payload.env[DEEPSEEK_HARNESS_BASE_URL_ENV]);
+      if (configured !== deepSeekCustomBaseUrlConfiguredRef.current) {
+        deepSeekCustomBaseUrlConfiguredRef.current = configured;
+        capturePostHogEvent(postHog, 'settings/changed', {
+          key: 'deepseek_harness_custom_base_url',
+          value: configured,
+        });
+      }
+    }
+  }, [buildSubmitPayload, formData, onSubmit, postHog]);
 
   useEffect(() => {
     if (
@@ -1940,6 +1970,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
     })();
     return () => {
       cancelled = true;
+      setProbing(false);
     };
   }, [
     open,
@@ -3030,6 +3061,37 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
               />
             </Section>
           </div>
+
+          {formData.cliType === 'builtin' && formData.agentType === 'pi' && (
+            <PiExtensionsField
+              key={`${machine.id}:${agentConfigId}:${mode.kind === 'edit' ? (mode.config.env?.PI_CODING_AGENT_DIR ?? '') : ''}`}
+              value={formData.runtimeOverrides?.piExtensions ?? []}
+              supported={machineSupportsPiExtensions(machine)}
+              onScan={
+                onScanPiExtensions
+                  ? () =>
+                      onScanPiExtensions({
+                        machineId: machine.id,
+                        configId: mode.kind === 'edit' ? mode.config.id : undefined,
+                      })
+                  : undefined
+              }
+              onChange={(paths) => {
+                invalidateBuiltinVerification();
+                setFormData((prev) => {
+                  const runtimeOverrides = { ...prev.runtimeOverrides };
+                  if (paths.length) runtimeOverrides.piExtensions = paths;
+                  else delete runtimeOverrides.piExtensions;
+                  return {
+                    ...prev,
+                    runtimeOverrides: Object.keys(runtimeOverrides).length
+                      ? runtimeOverrides
+                      : undefined,
+                  };
+                });
+              }}
+            />
+          )}
         </div>
       </div>
 

@@ -17,18 +17,21 @@ import { OpenSourceAttributionsDialog } from './open-source-attributions-dialog'
 import { JoinCommunityButton } from './join-community-dialog';
 import { openExternalUrl } from '@/lib/native-browser';
 import { getIpcServices } from '@/lib/electron-ipc-client';
-import { getDownloadPageUrl, getWebsiteUrl } from '@/lib/lody-urls';
+import { getDownloadPageUrl, getNightlyDownloadPageUrl, getWebsiteUrl } from '@/lib/lody-urls';
 import { developerModeEnabledAtom } from '@/atoms/settings';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { MobileAboutSettings } from '@/components/mobile/mobile-about-settings';
+import { collectClientBuildInfo } from '@/lib/client-build-info';
 
-const BUILD_DATE = typeof __BUILD_DATE__ !== 'undefined' ? __BUILD_DATE__ : 'development';
-const GIT_COMMIT = typeof __GIT_COMMIT__ !== 'undefined' ? __GIT_COMMIT__ : 'unknown';
+const buildInfo = collectClientBuildInfo();
+const BUILD_DATE = buildInfo.buildDate ?? 'development';
+const GIT_COMMIT = buildInfo.build ?? 'unknown';
+const OSS_GIT_COMMIT = buildInfo.ossCommit ?? null;
+const RELEASE_CHANNEL = buildInfo.releaseChannel ?? null;
 // Build-time linked client version, injected by the web build. Used when there
 // is no Electron updater state (i.e. on the web) so the About panel still shows
 // a version number.
-const APP_VERSION =
-  typeof __APP_VERSION__ !== 'undefined' && __APP_VERSION__.length > 0 ? __APP_VERSION__ : null;
+const APP_VERSION = buildInfo.appVersion || null;
 
 const MONO = 'var(--font-mono, ui-monospace, monospace)';
 
@@ -117,8 +120,10 @@ function UpdateStatusText({
 function DevbarSettingsControls() {
   const { t } = useTranslation();
   const [config, setConfig] = useState<DevbarConfig | null>(null);
+  const [warmup, setWarmup] = useState<{ enabled: boolean } | null>(null);
   const [supported, setSupported] = useState(true);
   const [pending, setPending] = useState(false);
+  const [warmupPending, setWarmupPending] = useState(false);
   const [failed, setFailed] = useState(false);
 
   useEffect(() => {
@@ -128,10 +133,11 @@ function DevbarSettingsControls() {
       return undefined;
     }
     let disposed = false;
-    void app
-      .getDevbarConfig()
-      .then((next) => {
-        if (!disposed) setConfig(next);
+    void Promise.all([app.getDevbarConfig(), app.getWindowWarmup()])
+      .then(([next, nextWarmup]) => {
+        if (disposed) return;
+        setConfig(next);
+        setWarmup(nextWarmup);
       })
       .catch(() => {
         if (!disposed) setFailed(true);
@@ -141,29 +147,40 @@ function DevbarSettingsControls() {
     };
   }, []);
 
-  const update = useCallback(
-    async (enabled: boolean, agentAccess: boolean, warmupEnabled: boolean) => {
-      const app = getIpcServices()?.app;
-      if (!app) return;
-      setPending(true);
-      setFailed(false);
-      try {
-        const result = await app.setDevbarControl({ enabled, agentAccess, warmupEnabled });
-        if (!result.ok) {
-          setFailed(true);
-          setPending(false);
-          return;
-        }
-        setConfig(result.config);
-        // The main process now reloads this window through the CSP-matched renderer
-        // entry. Keep the control busy so it cannot dispatch a conflicting toggle.
-      } catch {
+  const update = useCallback(async (enabled: boolean) => {
+    const app = getIpcServices()?.app;
+    if (!app) return;
+    setPending(true);
+    setFailed(false);
+    try {
+      const result = await app.setDevbarControl({ enabled });
+      if (!result.ok) {
         setFailed(true);
         setPending(false);
+        return;
       }
-    },
-    []
-  );
+      setConfig(result.config);
+      // The main process now reloads this window through the CSP-matched renderer
+      // entry. Keep the control busy so it cannot dispatch a conflicting toggle.
+    } catch {
+      setFailed(true);
+      setPending(false);
+    }
+  }, []);
+
+  const updateWarmup = useCallback(async (enabled: boolean) => {
+    const app = getIpcServices()?.app;
+    if (!app) return;
+    setWarmupPending(true);
+    try {
+      // Unlike the Devbar toggle this never reloads the window, so the pending
+      // state settles with the IPC call itself.
+      const result = await app.setWindowWarmup(enabled);
+      if (result.ok) setWarmup({ enabled: result.enabled });
+    } finally {
+      setWarmupPending(false);
+    }
+  }, []);
 
   if (!supported) return null;
 
@@ -180,7 +197,7 @@ function DevbarSettingsControls() {
           variant="secondary"
           size="small"
           disabled={!config || pending}
-          onClick={() => void update(!config?.enabled, false, config?.warmupEnabled ?? false)}
+          onClick={() => void update(!config?.enabled)}
         >
           {pending && <Spinner size="small" />}
           {config?.enabled
@@ -196,31 +213,13 @@ function DevbarSettingsControls() {
         )}
       >
         <Switch
-          checked={config?.warmupEnabled ?? false}
-          disabled={!config || pending}
-          onCheckedChange={(checked) =>
-            void update(config?.enabled ?? false, config?.agentAccess ?? false, checked)
-          }
+          checked={warmup?.enabled ?? false}
+          disabled={!warmup || pending || warmupPending}
+          onCheckedChange={(checked) => void updateWarmup(checked)}
           aria-label={t('settings.about.devbarWarmup', 'Auxiliary window warmup')}
         />
       </CompactRow>
-      {config?.enabled && (
-        <CompactRow
-          label={t('settings.about.devbarAgentAccess', 'Agent and terminal access')}
-          helper={t(
-            'settings.about.devbarAgentAccessHelper',
-            'Exposes local MCP and restricted subprocess tools until Devbar stops.'
-          )}
-        >
-          <Switch
-            checked={config.agentAccess}
-            disabled={pending}
-            onCheckedChange={(checked) => void update(true, checked, config.warmupEnabled)}
-            aria-label={t('settings.about.devbarAgentAccess', 'Agent and terminal access')}
-          />
-        </CompactRow>
-      )}
-      {config?.enabled && config.agentAccess && config.devframe && (
+      {config?.enabled && config.devframe && (
         <CompactRow
           label={t('settings.about.devbarAgentConnect', 'Agent connection')}
           helper={t(
@@ -303,14 +302,44 @@ export function AboutSettingsComponent() {
         <CompactRow label={t('settings.about.buildDate')}>
           <span {...stylex.props(styles.value)}>{formatBuildDate(BUILD_DATE)}</span>
         </CompactRow>
-        <CompactRow label={t('settings.about.commitHash')}>
-          <span {...stylex.props(styles.value)}>{GIT_COMMIT}</span>
+        {RELEASE_CHANNEL !== null && (
+          <CompactRow label={t('settings.about.releaseChannel')}>
+            <span {...stylex.props(styles.value)}>
+              {t(`settings.about.channel.${RELEASE_CHANNEL}`)}
+            </span>
+          </CompactRow>
+        )}
+        <CompactRow
+          label={t(
+            OSS_GIT_COMMIT !== null ? 'settings.about.cloudCommit' : 'settings.about.commitHash'
+          )}
+        >
+          <span {...stylex.props(styles.value)} title={GIT_COMMIT}>
+            {GIT_COMMIT.slice(0, 8)}
+          </span>
         </CompactRow>
+        {OSS_GIT_COMMIT !== null && (
+          <CompactRow label={t('settings.about.ossCommit')}>
+            <span {...stylex.props(styles.value)} title={OSS_GIT_COMMIT}>
+              {OSS_GIT_COMMIT.slice(0, 8)}
+            </span>
+          </CompactRow>
+        )}
         <CompactRow label={t('settings.about.community', 'Community')}>
           <JoinCommunityButton />
         </CompactRow>
         <CompactRow label={t('settings.about.downloadApps', 'Download apps')}>
           <Button variant="secondary" size="small" onClick={handleOpenDownloadPage}>
+            <ExternalLink {...stylex.props(styles.icon)} />
+            {t('settings.about.openDownloadPage', 'Open download page')}
+          </Button>
+        </CompactRow>
+        <CompactRow label={t('settings.about.downloadNightly')}>
+          <Button
+            variant="secondary"
+            size="small"
+            onClick={() => void openExternalUrl(getNightlyDownloadPageUrl(i18n.resolvedLanguage))}
+          >
             <ExternalLink {...stylex.props(styles.icon)} />
             {t('settings.about.openDownloadPage', 'Open download page')}
           </Button>
@@ -340,11 +369,8 @@ export function AboutSettingsComponent() {
                 setDeveloperModeEnabled(checked);
                 if (!checked) {
                   setDeveloperModeRevealed(false);
-                  void getIpcServices()?.app.setDevbarControl({
-                    enabled: false,
-                    agentAccess: false,
-                    warmupEnabled: false,
-                  });
+                  void getIpcServices()?.app.setDevbarControl({ enabled: false });
+                  void getIpcServices()?.app.setWindowWarmup(false);
                 }
               }}
               aria-label={t('settings.about.developerMode', 'Developer mode')}

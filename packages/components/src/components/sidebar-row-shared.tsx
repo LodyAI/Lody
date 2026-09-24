@@ -291,9 +291,13 @@ export function SessionRowWorktreeIndicator({ isWorktree }: { isWorktree?: boole
   const label = t('sessions.infoCard.worktree', 'Worktree');
   return (
     <Tooltip.Root>
-      <Tooltip.Trigger render={<span className="inline-flex shrink-0 items-center text-sidebar-foreground-muted/45">
-          <WorktreeIcon className="h-3.5 w-3.5" aria-label={label} />
-        </span>}/>
+      <Tooltip.Trigger
+        render={
+          <span className="inline-flex shrink-0 items-center text-sidebar-foreground-muted/45">
+            <WorktreeIcon className="h-3.5 w-3.5" aria-label={label} />
+          </span>
+        }
+      />
       <Tooltip.Content>{label}</Tooltip.Content>
     </Tooltip.Root>
   );
@@ -386,15 +390,20 @@ export function SidebarRowArchiveButton({
 }) {
   return (
     <Tooltip.Root>
-      <Tooltip.Trigger delay={500} render={<SidebarConfirmArchiveButton
-          label={label}
-          confirmLabel={confirmLabel}
-          className={cn(
-            'absolute right-0 top-0 z-20 opacity-0 pointer-events-none',
-            revealClassName
-          )}
-          onConfirm={onConfirm}
-        />}/>
+      <Tooltip.Trigger
+        delay={500}
+        render={
+          <SidebarConfirmArchiveButton
+            label={label}
+            confirmLabel={confirmLabel}
+            className={cn(
+              'absolute right-0 top-0 z-20 opacity-0 pointer-events-none',
+              revealClassName
+            )}
+            onConfirm={onConfirm}
+          />
+        }
+      />
       <Tooltip.Content side="top">{label}</Tooltip.Content>
     </Tooltip.Root>
   );
@@ -421,7 +430,7 @@ export function SidebarRowEndSlot({
   restIcon,
   archive,
   /** Fade the rest icon while hovering (match the row's group, e.g. 'group-hover/row:opacity-0'). */
-  fadeClassName = 'group-hover:opacity-0',
+  fadeClassName = 'group-hover:opacity-0 group-data-[menu-open]:opacity-0',
 }: {
   isWaitingPermission?: boolean;
   isWorking?: boolean;

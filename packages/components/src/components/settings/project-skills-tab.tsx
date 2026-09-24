@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { usePostHog } from '@posthog/react';
 import { formatDistanceToNow, type Locale } from 'date-fns';
 import { enUS } from 'date-fns/locale/en-US';
 import { zhCN } from 'date-fns/locale/zh-CN';
@@ -154,6 +155,7 @@ const styles = stylex.create({
   emptyTitle: { margin: 0, fontSize: '0.875em', color: colors.label },
   emptyBody: { margin: 0, maxWidth: '384px', fontSize: '0.75em', color: colors.secondaryLabel },
 });
+import { capturePickerSearchSelected } from '@/lib/picker-search-analytics';
 
 /**
  * Desktop "Skills" sub-tab for a project detail pane (local + GitHub).
@@ -218,6 +220,19 @@ export function ProjectSkillsView({
     });
   }, [groups, normalizedSearchQuery]);
   const hasMatches = filteredGroups.some((group) => group.skills.length > 0);
+  const postHog = usePostHog();
+  // Opening a skill's details is this list's only "selection"; it counts as a
+  // search pick only while a term narrows the list.
+  const handleSkillOpen = (skillId: string) => {
+    if (!normalizedSearchQuery) return;
+    const results = filteredGroups.flatMap((group) => group.skills);
+    capturePickerSearchSelected(postHog, {
+      picker: 'skill',
+      term: normalizedSearchQuery,
+      rank: results.findIndex((skill) => skill.id === skillId),
+      resultCount: results.length,
+    });
+  };
 
   const isInitialLoading = status === 'loading' && groups.length === 0;
   const isRefreshing = status === 'refreshing';
@@ -346,7 +361,11 @@ export function ProjectSkillsView({
       ) : (
         <div {...stylex.props(styles.groups)}>
           {filteredGroups.map((group) => (
-            <SkillGroupCard key={`${group.scope}:${group.dir}`} group={group} />
+            <SkillGroupCard
+              key={`${group.scope}:${group.dir}`}
+              group={group}
+              onSkillOpen={handleSkillOpen}
+            />
           ))}
         </div>
       )}
@@ -354,7 +373,13 @@ export function ProjectSkillsView({
   );
 }
 
-function SkillGroupCard({ group }: { group: ProjectSkillResolvedGroup }) {
+function SkillGroupCard({
+  group,
+  onSkillOpen,
+}: {
+  group: ProjectSkillResolvedGroup;
+  onSkillOpen?: (skillId: string) => void;
+}) {
   const { t } = useTranslation();
   return (
     <div {...stylex.props(styles.group)}>
@@ -377,7 +402,7 @@ function SkillGroupCard({ group }: { group: ProjectSkillResolvedGroup }) {
             key={skill.id}
             {...stylex.props(styles.line, (index > 0 || Boolean(group.error)) && styles.lineRuled)}
           >
-            <SkillRow skill={skill} scope={group.scope} />
+            <SkillRow skill={skill} scope={group.scope} onOpen={() => onSkillOpen?.(skill.id)} />
           </div>
         ))}
 
@@ -394,7 +419,15 @@ function SkillGroupCard({ group }: { group: ProjectSkillResolvedGroup }) {
   );
 }
 
-function SkillRow({ skill, scope }: { skill: ProjectSkill; scope: ProjectSkillScope }) {
+function SkillRow({
+  skill,
+  scope,
+  onOpen,
+}: {
+  skill: ProjectSkill;
+  scope: ProjectSkillScope;
+  onOpen?: () => void;
+}) {
   const { t } = useTranslation();
   const [detailOpen, setDetailOpen] = useState(false);
   return (
@@ -412,7 +445,10 @@ function SkillRow({ skill, scope }: { skill: ProjectSkill; scope: ProjectSkillSc
           variant="ghost"
           size="small"
           icon
-          onClick={() => setDetailOpen(true)}
+          onClick={() => {
+            setDetailOpen(true);
+            onOpen?.();
+          }}
           aria-label={t('workspace.projects.skills.viewDetails', 'View details')}
           title={t('workspace.projects.skills.viewDetails', 'View details')}
         >

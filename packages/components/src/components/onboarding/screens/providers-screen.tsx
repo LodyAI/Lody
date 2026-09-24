@@ -1352,6 +1352,12 @@ export function ProvidersScreen({
           machine={localMachine}
           onSubmit={handleDialogSubmit}
           onRefreshCapabilities={refreshCapabilities}
+          onScanPiExtensions={
+            runtime
+              ? ({ machineId, configId }) =>
+                  runtime.requestMachinePiExtensions(machineId, { configId })
+              : undefined
+          }
           onCheckBinaryStatus={checkBinaryStatus}
           onInstallBinary={installBinary}
           onManagedRuntimeSelected={onManagedRuntimeSelected}

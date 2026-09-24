@@ -3220,6 +3220,8 @@ export class MessageHandler {
             workspaceId: this.workspaceId,
             agentType,
           }),
+        listMachinePiExtensions: async ({ configId }) =>
+          await this.executionService.listMachinePiExtensions(configId),
         installMachineAcpBinary: async ({ agentType, onAcpBinaryProgress }) =>
           await this.executionService.installMachineAcpBinary(
             {
@@ -6325,6 +6327,10 @@ export class MessageHandler {
       }
       case 'session/terminate':
         return await this.terminateAcpSession(request.params.sessionId as SessionId);
+      case 'machine/pi-extensions':
+        return await this.executionService.listMachinePiExtensions(
+          request.params.configId as AgentConfigId | undefined
+        );
       case 'session/fork':
         return await this.forkSessionWithAccessCheck(request.params);
       case 'session/edit-and-resend': {

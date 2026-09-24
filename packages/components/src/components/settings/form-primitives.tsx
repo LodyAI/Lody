@@ -1,10 +1,11 @@
-import { useCallback, useLayoutEffect, useRef, type ReactNode } from 'react';
-import { AlertTriangle } from 'lucide-react';
+import { useCallback, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { AlertTriangle, ChevronDown } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
 import { withClassName } from '@/lib/stylex';
 import { observeResizeOnAnimationFrame } from '@/lib/resize-observer';
 import { colors } from '@lody/ui/tokens/colors.stylex';
-import { corner, radius, space } from '@lody/ui/tokens/scales.stylex';
+import { corner, duration, ease, radius, space } from '@lody/ui/tokens/scales.stylex';
+import { Collapsible } from '@lody/ui/collapsible';
 import { Field as UiField } from '@lody/ui/field';
 import { Textarea, type TextareaProps } from '@lody/ui/textarea';
 import { settingsSurface as surface } from './surface';
@@ -41,6 +42,77 @@ const styles = stylex.create({
   markError: { color: colors.destructive },
   markWarning: { color: colors.warning },
   messageBody: { minWidth: 0 },
+  /** A collapsible section stands alone, so it carries the region fill itself. */
+  collapsibleItem: {
+    backgroundColor: `color-mix(in oklab, transparent, ${colors.label} 3%)`,
+    borderRadius: radius.medium,
+    cornerShape: corner.shape,
+  },
+  collapsibleHead: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: space[1],
+    minHeight: '36px',
+    paddingInlineEnd: space[2],
+  },
+  collapsibleTrigger: {
+    display: 'flex',
+    flexGrow: 1,
+    alignItems: 'center',
+    gap: space[2],
+    minWidth: 0,
+    height: '36px',
+    margin: 0,
+    paddingInlineStart: space[3],
+    paddingInlineEnd: 0,
+    borderWidth: 0,
+    borderStyle: 'none',
+    backgroundColor: 'transparent',
+    fontFamily: 'inherit',
+    fontSize: '13px',
+    fontWeight: 500,
+    lineHeight: 1.25,
+    textAlign: 'start',
+    color: colors.label,
+    cursor: 'pointer',
+    outlineStyle: 'none',
+  },
+  collapsibleTitle: {
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  collapsibleCount: {
+    marginInlineStart: 'auto',
+    fontSize: '12px',
+    fontWeight: 400,
+    color: colors.tertiaryLabel,
+    fontVariantNumeric: 'tabular-nums',
+  },
+  collapsibleChevron: {
+    flexShrink: 0,
+    width: '12px',
+    height: '12px',
+    color: colors.tertiaryLabel,
+    transitionProperty: 'transform',
+    transitionDuration: duration.fast,
+    transitionTimingFunction: ease.standard,
+  },
+  collapsibleChevronOpen: { transform: 'rotate(180deg)' },
+  collapsibleBody: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: space[2],
+    paddingInline: space[3],
+    paddingBottom: space[3],
+  },
+  collapsibleHint: {
+    margin: 0,
+    paddingBlock: space[1],
+    fontSize: '12px',
+    color: colors.secondaryLabel,
+  },
 });
 
 /**
@@ -94,6 +166,59 @@ export function Field({
       </div>
       {children}
       {hint ? <p {...stylex.props(styles.fieldHint)}>{hint}</p> : null}
+    </div>
+  );
+}
+
+/**
+ * A section that collapses to its title row.
+ *
+ * Long optional groups stay reachable without dominating the dialog: `count`
+ * keeps the configured size visible while collapsed, and `action` sits in the
+ * header outside the toggle so it stays clickable in either state.
+ */
+export function CollapsibleSection({
+  title,
+  count,
+  children,
+  disabled,
+  disabledHint,
+  defaultOpen,
+  action,
+}: {
+  title: string;
+  count?: number;
+  children: ReactNode;
+  disabled?: boolean;
+  disabledHint?: string;
+  defaultOpen?: boolean;
+  action?: ReactNode;
+}) {
+  const [open, setOpen] = useState(!!defaultOpen);
+  return (
+    <div {...stylex.props(styles.collapsibleItem)}>
+      <Collapsible.Root open={open} onOpenChange={setOpen}>
+        <div {...stylex.props(styles.collapsibleHead)}>
+          <Collapsible.Trigger
+            render={<button type="button" {...stylex.props(styles.collapsibleTrigger)} />}
+          >
+            <span {...stylex.props(styles.collapsibleTitle)}>{title}</span>
+            {typeof count === 'number' && count > 0 ? (
+              <span {...stylex.props(styles.collapsibleCount)}>{count}</span>
+            ) : null}
+          </Collapsible.Trigger>
+          {action}
+          <ChevronDown
+            aria-hidden="true"
+            {...stylex.props(styles.collapsibleChevron, open && styles.collapsibleChevronOpen)}
+          />
+        </div>
+        <Collapsible.Panel>
+          <div {...stylex.props(styles.collapsibleBody)}>
+            {disabled ? <p {...stylex.props(styles.collapsibleHint)}>{disabledHint}</p> : children}
+          </div>
+        </Collapsible.Panel>
+      </Collapsible.Root>
     </div>
   );
 }

@@ -862,6 +862,7 @@ export function DesktopRunConfigMenu({
               <MenuOptionSearchList
                 options={modelPickerOptions}
                 onSelect={(opt) => handleModelSelect(opt.value)}
+                searchAnalyticsPicker="model"
                 searchPlaceholder={modelSearchPlaceholder}
                 emptyText={modelSearchEmptyLabel}
                 renderOption={(opt, select) => (

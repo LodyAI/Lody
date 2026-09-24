@@ -1,4 +1,5 @@
 import { LocalFileResolutionSchema } from './local-file-preview';
+import { MachinePiExtensionsResponseSchema } from './pi-extensions';
 import { z } from 'zod';
 import { SESSION_GOAL_ACTIONS } from './goal';
 import {
@@ -30,6 +31,7 @@ import {
   SessionForkResponseSchema,
   SessionForkSpecSchema,
   SessionIdSchema,
+  AgentConfigIdSchema,
   SessionPreparationCancelSpecSchema,
   SessionPreparationSpecSchema,
   SessionPrepareCancelResponseSchema,
@@ -244,6 +246,14 @@ export const LocalMachineRpcRequestSchema = z.discriminatedUnion('method', [
       })
       .strict(),
   }).strict(),
+  BaseLocalMachineRpcRequestSchema.extend({
+    method: z.literal('machine/pi-extensions'),
+    params: z
+      .object({
+        configId: AgentConfigIdSchema.optional(),
+      })
+      .strict(),
+  }).strict(),
 ]);
 
 export type LocalMachineRpcRequest = z.infer<typeof LocalMachineRpcRequestSchema>;
@@ -274,6 +284,7 @@ export const LocalMachineRpcResultSchema = z.union([
   SessionSteerResponseSchema,
   SessionGoalResponseSchema,
   SessionTerminateResponseSchema,
+  MachinePiExtensionsResponseSchema,
 ]);
 export type LocalMachineRpcResult = z.infer<typeof LocalMachineRpcResultSchema>;
 

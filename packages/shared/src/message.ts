@@ -479,6 +479,7 @@ export interface MachineAcpAuthenticationProgressMessage {
     | 'auth-methods'
     | 'authorization'
     | 'input-required'
+    | 'runtime-download'
     | 'output'
     | 'authenticated'
     | 'cancelled'
@@ -503,6 +504,10 @@ export interface MachineAcpAuthenticationProgressMessage {
   stream?: 'stdout' | 'stderr';
   output?: string;
   error?: string;
+  /** Managed runtime installed before the login process can spawn. */
+  runtimeName?: string;
+  runtimePhase?: 'downloading' | 'verifying' | 'extracting' | 'publishing' | 'complete';
+  runtimePercent?: number;
 }
 
 /**
