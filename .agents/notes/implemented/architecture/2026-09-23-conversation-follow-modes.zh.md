@@ -61,6 +61,16 @@ Translation: current
 （`window.__lodyScrollLog.dump()`），先证实或否定该假设再改水合路径。显示检查现在也在视口
 高度变化时运行，消除了一种面板一直隐藏的路径。
 
+## 上方行变化时的阅读位置
+
+2026-09-24 用逐帧记录器测量（行的屏幕位置、每次程序写 `scrollTop` 及其调用方、行尺寸变化），由真实滚轮输入驱动。
+
+- **`main` 上靠近底部**：每次小幅上滚再回滚，`use-stick-to-bottom`（70px 容差）都会重新锁定，并在一帧内跳到底部 67px。
+  上面的跟随模式在同一场景下完全不写 `scrollTop`。
+- **图片行**：没有已知尺寸的 Markdown 图片在加载完成前是 0px，而 Virtua 会卸载超出预渲染区域的行，
+  所以每次滚回来该行都会重新变高（Agent 本地路径如 `/tmp/x.png` 每次挂载都会失败：先 0px，再变成 25px 的替代文字行）。
+  现在图片按来源记住自然尺寸（下次挂载通过 `width`/`height` 预留）或失败状态（直接显示替代文字）。
+
 ## 验证与限制
 
 `packages/components/tests/use-sticky-scroll.test.ts` 覆盖 Composer 变高与带浏览器夹紧的变矮、

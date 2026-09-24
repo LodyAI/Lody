@@ -82,6 +82,20 @@ row composition and hydration windows (`window.__lodyScrollLog.dump()`), to conf
 refute this before changing the hydration path. The reveal check now also runs on
 viewport height changes, removing one way the pane could stay hidden.
 
+## Reading position while rows change above
+
+Measured on 2026-09-24 with a per-frame recorder (row screen positions, every programmatic
+`scrollTop` write with its caller, row resizes) driven by real wheel input.
+
+- **Near the bottom on `main`**: each small scroll up and back re-locked
+  `use-stick-to-bottom` (70px tolerance) and jumped 67px in one frame to the end. The
+  follow modes above do not write at all in the same scenario.
+- **Image rows**: a Markdown image without known dimensions renders at 0px until it
+  loads, and Virtua remounts rows outside its overscan, so each return grew the row again
+  (agent-local paths such as `/tmp/x.png` fail on every mount: 0px, then the 25px alt
+  line). Images now remember each source's natural size (reserved through `width`/`height`
+  on the next mount) or failure (rendered as alt text).
+
 ## Verification and limits
 
 `packages/components/tests/use-sticky-scroll.test.ts` covers composer growth and shrink
