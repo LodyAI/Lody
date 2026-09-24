@@ -8,7 +8,6 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   memo,
   type MouseEvent as ReactMouseEvent,
-  type MutableRefObject,
   type ReactNode,
   useCallback,
   useContext,
@@ -89,6 +88,7 @@ import { getAgentMetaByIdAtomFamily } from '@/atoms/agents';
 import { sessionMetaAtomFamily } from '@/atoms/doc-meta';
 import { authTokenAtom, runtimeAtom } from '@/atoms/runtime';
 import { machineSupportsSubagentCancellation } from '@lody/shared';
+import { scrollDebug } from '@/hooks/scroll-debug-log';
 import { useStickyScroll } from '@/hooks/use-sticky-scroll';
 import { buildResendInputBlocks, isUndeliveredUserTurnEntry } from '@/lib/undelivered-user-turn';
 import { ConversationOutlineRail } from './conversation-outline-rail';
@@ -423,6 +423,11 @@ type ChatVirtualRow = AssistantChatVirtualRow | StandardChatVirtualRow | Placeho
 export interface SessionChatStreamHandle {
   scrollToBottom: () => void;
   scrollToIndex: (index: number, smooth?: boolean) => void;
+  /**
+   * Hold the user message `messageId` at the top of the viewport, with room
+   * reserved below it for the reply, as soon as its row is rendered.
+   */
+  anchorMessage: (messageId: string) => void;
 }
 
 export type SessionChatUser =
@@ -529,8 +534,6 @@ export interface SessionChatStreamViewProps {
   /** The status is live work (not waiting on the user): shimmer it. */
   agentActivityShimmer?: boolean;
   conversationFontSize?: ConversationFontSize;
-  /** Skips one auto-follow caused by the session composer changing height. */
-  skipNextViewportResizeAutoScrollRef?: MutableRefObject<boolean>;
   /** Full-page overlay that keeps the conversation outline independent of composer height. */
   outlineOverlayRoot?: HTMLElement | null;
   /**
@@ -1372,7 +1375,6 @@ export const SessionChatStreamView = forwardRef<
       // Waiting on the user (warning tone) is not work in progress.
       agentActivityShimmer = agentActivityTone !== 'warning',
       conversationFontSize = DEFAULT_CONVERSATION_FONT_SIZE,
-      skipNextViewportResizeAutoScrollRef,
       suppressStickyAutoScrollRef,
       outlineOverlayRoot,
       onVisibleTurnRangeChange,
@@ -1573,12 +1575,27 @@ export const SessionChatStreamView = forwardRef<
     // before `Virtualizer` mounts, yet every hook above that return has already
     // run — including the one that reads the stored row measurements.
     const hasVirtualizedRows = virtualRows.length > 0;
+    const placeholderRowCount = useMemo(
+      () => virtualRows.reduce((count, row) => count + (row.type === 'placeholder' ? 1 : 0), 0),
+      [virtualRows]
+    );
+    // Placeholder turns turning into several body rows is the prime suspect for
+    // repeated open flicker; the scroll debug timeline records each change.
+    useEffect(() => {
+      scrollDebug('rows', {
+        total: virtualRows.length,
+        placeholders: placeholderRowCount,
+        leading: leadingContent != null,
+      });
+    }, [leadingContent, placeholderRowCount, virtualRows.length]);
 
     const {
       scrollRef: scrollContainerRef,
+      spacerRef: bottomSpacerRef,
       scrollElement: scrollViewportElement,
       isSticky,
-      scrollToBottom,
+      scrollToBottom: scrollStreamToBottom,
+      anchorToRow,
       initialScrollRestored,
       initialVirtualizerCache,
       persistVirtualizerCache,
@@ -1592,9 +1609,40 @@ export const SessionChatStreamView = forwardRef<
       // scroll otherwise targets an index short of the true bottom.
       itemCount: virtualRows.length + leadingRowCount + (shouldShowAgentActivityRow ? 1 : 0),
       onAtBottomChange,
-      skipNextViewportResizeAutoScrollRef,
       suppressAutoScrollRef: autoScrollSuppressedRef,
     });
+
+    /**
+     * A sent message waiting for its row. The send path learns the turn id
+     * before the conversation view renders it, so the anchor is resolved in
+     * the layout effect of the commit that first contains the row.
+     */
+    const pendingAnchorMessageIdRef = useRef<string | null>(null);
+    const resolvePendingAnchor = useCallback(() => {
+      const messageId = pendingAnchorMessageIdRef.current;
+      if (messageId === null) return;
+      const rowIndex = virtualRows.findIndex(
+        (row) =>
+          row.type === 'standard' &&
+          row.item.type === 'message' &&
+          row.item.message.id === messageId
+      );
+      if (rowIndex === -1) return;
+      pendingAnchorMessageIdRef.current = null;
+      anchorToRow(rowIndex + leadingRowCount);
+    }, [anchorToRow, leadingRowCount, virtualRows]);
+    useLayoutEffect(resolvePendingAnchor, [resolvePendingAnchor]);
+    const anchorMessage = useCallback(
+      (messageId: string) => {
+        pendingAnchorMessageIdRef.current = messageId;
+        resolvePendingAnchor();
+      },
+      [resolvePendingAnchor]
+    );
+    const scrollToBottom = useCallback(() => {
+      pendingAnchorMessageIdRef.current = null;
+      scrollStreamToBottom();
+    }, [scrollStreamToBottom]);
     const selectableRows = useMemo(
       () =>
         virtualRows.map((row) => ({
@@ -1919,9 +1967,10 @@ export const SessionChatStreamView = forwardRef<
       [activeSearchBlockId, items, scrollRowToTop, virtualRows]
     );
 
-    useImperativeHandle(ref, () => ({ scrollToBottom, scrollToIndex }), [
+    useImperativeHandle(ref, () => ({ scrollToBottom, scrollToIndex, anchorMessage }), [
       scrollToBottom,
       scrollToIndex,
+      anchorMessage,
     ]);
 
     const noMessagesLabel = t('sessions.noMessages');
@@ -2152,6 +2201,10 @@ export const SessionChatStreamView = forwardRef<
                   )}
                 </Virtualizer>
               </NativeSelectionRowsContext.Provider>
+              {/* Reply room below an anchored sent message; useStickyScroll
+                  owns its height. It must follow the Virtualizer: sticky scroll
+                  reads the virtualized content as the viewport's first child. */}
+              <div ref={bottomSpacerRef} aria-hidden data-conversation-reply-room="" />
               <MessageSelectionOverlay />
             </div>
             {/* Top fade into the bg-background canvas above (desktop only),

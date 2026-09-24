@@ -9,7 +9,6 @@ import {
   type ClipboardEvent,
   type DragEvent,
   type KeyboardEvent,
-  type MutableRefObject,
   type ReactNode,
   type Ref,
 } from 'react';
@@ -191,11 +190,6 @@ export interface ChatComposerProps {
   autoResize?: boolean;
   /** Maximum number of rows when autoResize is enabled (default: 12) */
   maxRows?: number;
-  /**
-   * Marks the next viewport resize as caused by this composer's height change,
-   * so a parent conversation can preserve the reader's scroll position.
-   */
-  skipNextViewportResizeAutoScrollRef?: MutableRefObject<boolean>;
   /** Focus the textarea when clicking the container background. */
   focusOnContainerClick?: boolean;
 }
@@ -293,7 +287,6 @@ export function ChatComposer({
   className,
   autoResize = false,
   maxRows = 12,
-  skipNextViewportResizeAutoScrollRef,
   focusOnContainerClick = false,
 }: ChatComposerProps) {
   const { t, i18n } = useTranslation();
@@ -340,8 +333,13 @@ export function ChatComposer({
     const update = (width: number) => {
       setUseCompactPlaceholder(width <= COMPOSER_COMPACT_PLACEHOLDER_MAX_PX);
     };
-    update(box.getBoundingClientRect().width);
-    if (typeof ResizeObserver === 'undefined') return undefined;
+    // No synchronous measurement here: a layout-effect read forces style and
+    // layout of the whole just-committed tree (a full conversation on a session
+    // switch). ResizeObserver delivers the first size before that frame paints.
+    if (typeof ResizeObserver === 'undefined') {
+      update(box.getBoundingClientRect().width);
+      return undefined;
+    }
     const observer = new ResizeObserver((entries) => {
       const width = entries[0]?.contentRect.width ?? 0;
       update(width);
@@ -587,8 +585,6 @@ export function ChatComposer({
     const minHeight = lineHeight * effectivePromptRows + paddingTop + paddingBottom;
     const maxHeight = lineHeight * maxRows + paddingTop + paddingBottom;
 
-    const previousHeight = textarea.style.height;
-
     // Reset height to auto to get accurate scrollHeight
     textarea.style.height = 'auto';
 
@@ -600,20 +596,9 @@ export function ChatComposer({
     const scrollHeight = textarea.scrollHeight;
     const newHeight = hasValue ? Math.max(minHeight, Math.min(scrollHeight, maxHeight)) : minHeight;
 
-    const nextHeight = `${newHeight}px`;
-    if (previousHeight && previousHeight !== nextHeight && skipNextViewportResizeAutoScrollRef) {
-      skipNextViewportResizeAutoScrollRef.current = true;
-    }
-    textarea.style.height = nextHeight;
+    textarea.style.height = `${newHeight}px`;
     textarea.style.overflowY = scrollHeight > maxHeight ? 'auto' : 'hidden';
-  }, [
-    autoResize,
-    promptValue,
-    promptRef,
-    effectivePromptRows,
-    maxRows,
-    skipNextViewportResizeAutoScrollRef,
-  ]);
+  }, [autoResize, promptValue, promptRef, effectivePromptRows, maxRows]);
 
   const boxTextareaClassName = getChatComposerTextareaClassName({ tone, variant, isMobile });
 
