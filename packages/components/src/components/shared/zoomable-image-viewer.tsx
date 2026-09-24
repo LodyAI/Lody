@@ -241,9 +241,11 @@ function OpenZoomableImageViewer({
   const isElectronFullscreen = useElectronFullscreen();
   useImagePreviewContextMenu(images);
 
-  // Native window controls are drawn ABOVE web content, so the top bar has to
-  // leave room for them or the counter lands behind the macOS traffic lights /
-  // the Windows caption buttons. Both hide themselves in native fullscreen.
+  // Native window controls are drawn ABOVE web content, so the top bar clears
+  // them horizontally and centers its own controls on their line (the y=23
+  // traffic-light row on macOS, the 36px caption strip on Windows — see the
+  // `--mac-controls`/`--win-controls` rules in the CSS). Both hide themselves
+  // in native fullscreen.
   const reservesWindowControls = !isElectronFullscreen;
   const sliderClassName = cn(
     'lody-photo-slider',
