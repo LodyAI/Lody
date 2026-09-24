@@ -27,6 +27,7 @@ import {
   type SessionMeta,
   type AgentConfigId,
   type MachineId,
+  type MachineViewMeta,
   type AgentConfigMeta,
   type ProjectRef,
   type ScheduleDestination,
@@ -71,6 +72,8 @@ import { collectScheduleSaveIssues, type ScheduleIssueField } from './schedule-s
 import { ScheduleDestinationRows, type PickableSession } from './schedule-destination-rows';
 import { ScheduleAgentControls } from './schedule-agent-controls';
 import { FieldIssueMark } from './schedule-field-issue-mark';
+import { pickScheduleAgent, seedScheduleAgentRunRef } from './schedule-agent-defaults';
+import { readChatLandingDefaults } from '@/lib/chat-landing-defaults';
 
 export function SchedulesWorkspace({ scheduleId }: { scheduleId?: string }) {
   const enabled = useAtomValue(schedulesFeatureEnabledAtom);
@@ -496,13 +499,43 @@ function ScheduleEditor({
         .sort((left, right) => left.name.localeCompare(right.name)),
     [agents, machineId]
   );
+  // The person's own machines, the only ones a schedule may run on.
+  const ownedMachines = useMemo(
+    () => new Map([...machines].filter(([, entry]) => entry.ownerUserId === user?.id)),
+    [machines, user?.id]
+  );
+  const seedAgentOn = (machineMeta: MachineViewMeta, preferredAgentId?: string | null) => {
+    const config = pickScheduleAgent({
+      landing: { agentId: preferredAgentId, machineId: machineMeta.id },
+      agents,
+      machines: new Map([[machineMeta.id, machineMeta]]),
+    });
+    setAgent(config ? seedScheduleAgentRunRef(config, machineMeta) : null);
+  };
   const chooseMachine = (next: MachineId) => {
     if (next === machineId) return;
     setPickedMachineId(next);
-    // An Agent and a local project belong to one machine; neither follows.
-    setAgent(null);
+    // A local project belongs to one machine; an Agent too, so the new machine
+    // gets the Agent the chat landing would pick there, already configured.
     if (project?.kind === 'local') setProject(null);
+    const nextMachine = machines.get(next);
+    if (nextMachine) seedAgentOn(nextMachine, agent?.agentConfigId);
+    else setAgent(null);
   };
+  // A new schedule opens as the chat landing last left things: its machine and
+  // Agent with that Agent's remembered model, options and permission. Seeded
+  // once, after the catalogs arrive (they can load after the editor mounts).
+  const [seeded, setSeeded] = useState(!!document);
+  useEffect(() => {
+    if (seeded || agent || !user?.id || ownedMachines.size === 0 || agents.length === 0) return;
+    setSeeded(true);
+    const config = pickScheduleAgent({
+      landing: readChatLandingDefaults(runtime?.workspaceId),
+      agents,
+      machines: ownedMachines,
+    });
+    if (config) setAgent(seedScheduleAgentRunRef(config, machines.get(config.machineId)));
+  }, [agent, agents, machines, ownedMachines, runtime?.workspaceId, seeded, user?.id]);
 
   // Chats runs may be appended to. Only the person's own, unarchived chats:
   // the daemon refuses any other owner, so offering them would only produce a
@@ -714,7 +747,6 @@ function ScheduleEditor({
                 onAddLocalProject={() => openSettings('projects')}
                 onConnectGitRepo={() => openSettings('github')}
               />
-              <FieldIssueMark messages={issuesFor('project', revealMissing)} />
             </>
           ) : null}
           {project?.kind === 'local' && destination.kind === 'new_session' ? (

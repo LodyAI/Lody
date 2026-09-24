@@ -55,11 +55,15 @@ builtin default mode, never another Agent's.
 parts instead of look-alikes: name and prompt (split by a hairline) share one box
 whose bottom edge carries the composer's Agent/model/permission controls; the
 chat landing's machine, project and worktree pills sit under it; where runs go is
-its own card above the time rule. This replaced four property rows. There is no time zone control: the CLI publishes
+its own card above the time rule. This replaced four property rows. A new
+schedule opens with the chat landing's last machine and Agent and that Agent's
+remembered model, options and permission, so nothing starts empty; times are
+typed, with no picker popup. There is no time zone control: the CLI publishes
 its IANA zone as `MachineMeta.timeZone` (under 50 bytes, written at registration),
 wall-clock rules and one-off times are read on that clock, and older CLIs fall
 back to the viewer's zone. Save problems are marked where they are fixed — an
-exclamation mark next to the field or pill — rather than listed; an unfinished
+exclamation mark next to the field or control (never on the optional project)
+— rather than listed; an unfinished
 choice is marked once the person tries to save, a real conflict at once, and only
 reasons that belong to no control (read-only, workspace loading) sit beside Save.
 

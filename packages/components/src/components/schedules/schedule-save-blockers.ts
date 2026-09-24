@@ -32,8 +32,13 @@ export type ScheduleSaveContext = {
   destinationSession?: { agentConfigId: string; machineId: string } | null;
 };
 
-/** Where a save blocker is shown: next to the control that fixes it. */
-export type ScheduleIssueField = 'form' | 'machine' | 'agent' | 'project' | 'destination';
+/**
+ * Where a save blocker is marked. There is deliberately no `project` mark: a
+ * mark beside the project chip reads as "a project is required", and none is.
+ * The one project problem (a local project not on the chosen machine) is a
+ * `form` reason beside Save.
+ */
+export type ScheduleIssueField = 'form' | 'machine' | 'agent' | 'destination';
 
 export type ScheduleSaveIssue = {
   field: ScheduleIssueField;
@@ -118,7 +123,7 @@ export function collectScheduleSaveIssues(
     !context.machineLocalProjectIds.has(context.project.localProjectId)
   )
     push(
-      'project',
+      'form',
       'invalid',
       t('schedules.projectMachine', 'Choose a Project on the selected machine.')
     );

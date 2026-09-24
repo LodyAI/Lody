@@ -18,6 +18,14 @@ import { cn } from '@/lib/utils';
 import { describeRecurrence, weekdayNames } from './schedule-format';
 import { PropertyRow, ghostSelectTriggerClass, ghostValueClass } from './schedule-property-row';
 
+/**
+ * Time and date are typed, not picked: the browser's picker button is hidden,
+ * so the field is only its editable segments (hours, minutes, …). Chromium is
+ * the product runtime; its `calendar-picker-indicator` is also what opens the
+ * popup on click, so hiding it removes the picker entirely.
+ */
+const manualTimeInputClass = 'w-auto tabular-nums [&::-webkit-calendar-picker-indicator]:hidden';
+
 /** Small square toggles; one row of seven for weekdays, a 7-wide grid for dates. */
 function DayToggles({
   values,
@@ -289,7 +297,7 @@ export function ScheduleRecurrenceEditor({
                 required
                 disabled={disabled}
                 aria-label={t('schedules.repeat.at', 'At')}
-                className={cn(ghostValueClass, 'w-auto')}
+                className={cn(ghostValueClass, manualTimeInputClass)}
                 value={timeValue}
                 onChange={(event) => {
                   const [hour, minute] = event.target.value.split(':');
@@ -309,7 +317,7 @@ export function ScheduleRecurrenceEditor({
                 required
                 disabled={disabled}
                 aria-label={t('schedules.repeat.runAt', 'Run at')}
-                className={cn(ghostValueClass, 'w-auto')}
+                className={cn(ghostValueClass, manualTimeInputClass)}
                 value={instantToZonedLocalInput(Date.parse(value.at), timeZone)}
                 onChange={(event) => {
                   const at = zonedLocalInputToInstant(event.target.value, timeZone);

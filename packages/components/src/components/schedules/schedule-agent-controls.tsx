@@ -11,6 +11,7 @@ import {
   DesktopPermissionModeButton,
   DesktopRunConfigMenu,
 } from '@/components/sessions/desktop-run-config-menu';
+import { seedScheduleAgentRunRef } from './schedule-agent-defaults';
 
 /**
  * Stored schedule option values are strings (the definition schema); the
@@ -33,9 +34,9 @@ const toSelectorValues = (
  * reasoning, plan, fast) and the permission button — bound to a schedule's
  * `AgentRunRef` on one machine.
  *
- * Picking an Agent deliberately leaves the permission mode unset: a schedule
- * runs unattended, so the mode must be chosen, not inherited from a default
- * (`collectScheduleSaveIssues` marks it until it is).
+ * Picking an Agent seeds it the way the chat landing does
+ * (`seedScheduleAgentRunRef`): the controls show a complete choice, permission
+ * included, which the person can read and change before saving.
  */
 export function ScheduleAgentControls({
   machine,
@@ -90,7 +91,14 @@ export function ScheduleAgentControls({
         emptyAgentLabel={t('agentRunConfig.chooseAgent', 'Choose agent')}
         disabledReason={disabledReason}
         onAgentConfigChange={
-          editable ? (selection) => onChange({ agentConfigId: selection.agentId }) : undefined
+          editable
+            ? (selection) => {
+                const config = agentConfigs.find((entry) => entry.id === selection.agentId);
+                // Like the chat landing, a newly picked Agent arrives with its
+                // remembered model, options and permission.
+                if (config) onChange(seedScheduleAgentRunRef(config, machine));
+              }
+            : undefined
         }
         modelOptions={options.modelOptions}
         selectedModelId={value?.modelId ?? options.defaultModelId ?? null}

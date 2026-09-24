@@ -25,16 +25,25 @@
   project chip, the worktree checkbox. The destination is its own card above the
   trigger card. Name autofocuses on a new schedule. Do not fork look-alikes of
   these controls; pass props to the shared ones.
-- The machine is its own choice (owned machines with agents; preselected when
-  there is one); the Agent is picked among that machine's agents. Changing the
-  machine clears the Agent and a local project. Picking an Agent leaves the
-  permission mode unset on purpose.
+- The machine is its own choice (owned machines with agents). A new schedule
+  opens as the chat landing left things: `pickScheduleAgent` over
+  `readChatLandingDefaults`, then `seedScheduleAgentRunRef` fills that Agent's
+  remembered model, options and permission (`agentDefaultsCache`). A new machine
+  or a newly picked Agent is seeded the same way, so the controls always show a
+  complete choice; the seed fills permission exactly where
+  `hasExplicitSchedulePermission` reads it and never carries credential options.
 - `collectScheduleSaveIssues` tags every blocker with the control that fixes it
-  (`form | machine | agent | project | destination`) and `missing | invalid`. Each is an
+  (`form | machine | agent | destination`) and `missing | invalid`. Each is an
   exclamation mark (`FieldIssueMark`) next to that control, never a list at the
   bottom; `missing` shows only after a save attempt, `invalid` at once. Only
   `form` reasons sit beside Save and disable it; everything else lets Save
-  run the guard, mark and focus the first empty field.
+  run the guard, mark and focus the first empty field. There is no project
+  mark: beside the project chip it reads as "a project is required".
+- Time and date are typed only: the native picker button is hidden
+  (`[&::-webkit-calendar-picker-indicator]:hidden`), which in Chromium also
+  removes the popup. The prompt has no resize handle: it grows with its text
+  from 4 to 8 lines (`[field-sizing:content]` + `lh` bounds), then scrolls.
+  Field marks float (`absolute`) so they never narrow the text.
 - No time zone control. Wall-clock rules and one-off times are read on the owning
   machine's clock (`MachineMeta.timeZone`, device zone for older CLIs) via
   `withScheduleRecurrenceTimeZone` / `zonedLocalInputToInstant`. The preview names

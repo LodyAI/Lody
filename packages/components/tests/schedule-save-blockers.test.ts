@@ -157,7 +157,8 @@ describe('where each reason is marked', () => {
     expect(issues.map(({ field, kind }) => `${field}:${kind}`)).toEqual([
       'form:invalid',
       'agent:invalid',
-      'project:invalid',
+      // Never marked on the project chip: that reads as "a project is required".
+      'form:invalid',
       'destination:missing',
     ]);
   });

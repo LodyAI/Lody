@@ -563,24 +563,30 @@ export function ScheduleForm({
               ) : null}
             </div>
             <div className="mx-3 border-t-[0.5px] border-foreground/[0.10] dark:border-white/[0.10]" />
-            <div className="flex items-start gap-2 px-3 pb-1 pt-2.5">
+            <div className="relative px-3 pb-1 pt-2.5">
               <Textarea
                 ref={promptRef}
                 required
-                rows={3}
+                rows={4}
                 aria-label={t('schedules.prompt', 'What should the Agent do?')}
                 aria-invalid={attempted && promptMissing ? true : undefined}
                 placeholder={t(
                   'schedules.promptPlaceholder',
                   'What should the agent do on every run? For example: review yesterday’s commits and summarise anything that looks risky.'
                 )}
-                className="min-h-20 flex-1 resize-y rounded-none border-0 bg-transparent p-0 text-[0.95em] leading-relaxed text-foreground shadow-none placeholder:text-muted-foreground/60 focus-visible:shadow-none focus-visible:ring-0 dark:bg-transparent"
+                // Grows with its text from 4 to 8 lines, then scrolls; no
+                // resize handle. `field-sizing` is CSS-only (Chromium).
+                className={cn(
+                  'min-h-[calc(4lh)] max-h-[calc(8lh)] w-full resize-none overflow-y-auto rounded-none border-0 bg-transparent p-0 text-[0.95em] leading-relaxed text-foreground shadow-none [field-sizing:content] placeholder:text-muted-foreground/60 focus-visible:shadow-none focus-visible:ring-0 dark:bg-transparent',
+                  attempted && promptMissing && 'pr-6'
+                )}
                 value={value.prompt}
                 onChange={(event) => setValue({ ...value, prompt: event.target.value })}
               />
               {attempted && promptMissing ? (
+                // Floats in the corner so it never narrows the text.
                 <FieldIssueMark
-                  className="mt-0.5"
+                  className="absolute right-3 top-3"
                   messages={[t('schedules.requirePrompt', 'Describe what the Agent should do.')]}
                 />
               ) : null}
