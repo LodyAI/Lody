@@ -15,13 +15,28 @@ export const scheduleCardClass = cn(
   'divide-y divide-border/60 overflow-hidden'
 );
 
-/** Right-aligned ghost control, matching the property-row triggers elsewhere. */
+/**
+ * Right-aligned ghost control, matching the property-row triggers elsewhere.
+ *
+ * Alignment contract for every row: the last VISIBLE mark (text, chevron, or a
+ * solid control such as a switch or the day toggles) ends on the row's inner
+ * padding line. A ghost control's own `px-2` is transparent, so when it ends a
+ * row it bleeds that padding into the gutter (`last:-mr-2`); a solid control
+ * does not. The bleed widens the `max-w-full` cap by the same amount, or the
+ * value truncates by exactly the bled 8px. Without this the chevrons, menu labels and switch each stopped at a
+ * different x and the right edge read as ragged.
+ */
 export const ghostValueClass =
-  'flex h-8 min-w-0 max-w-full items-center justify-end gap-1.5 rounded-md bg-transparent px-2 text-[1em] font-normal text-foreground transition-colors hover:bg-foreground/[0.05] dark:hover:bg-white/[0.08] focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 data-[state=open]:bg-foreground/[0.05] dark:data-[state=open]:bg-white/[0.08]';
+  'flex h-8 last:-mr-2 last:max-w-[calc(100%+0.5rem)] min-w-0 max-w-full items-center justify-end gap-1.5 rounded-md bg-transparent px-2 text-[1em] font-normal text-foreground transition-colors hover:bg-foreground/[0.05] dark:hover:bg-white/[0.08] focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 data-[state=open]:bg-foreground/[0.05] dark:data-[state=open]:bg-white/[0.08]';
+
+/** One chevron for every menu trigger in the editor, so the right edge is one line. */
+export const scheduleChevronClass = 'size-3.5 shrink-0 opacity-50';
 
 export const ghostSelectTriggerClass = cn(
   ghostValueClass,
-  'w-auto shrink-0 border-0 py-0 shadow-none data-placeholder:text-muted-foreground [&>span]:truncate'
+  // Radix renders a hidden native <select> after the trigger inside a form, so
+  // the trigger is never `:last-child`; it always ends its row, so bleed here.
+  '-mr-2 max-w-[calc(100%+0.5rem)] w-auto shrink-0 border-0 py-0 shadow-none data-placeholder:text-muted-foreground [&>span]:truncate [&>svg]:size-3.5 [&>svg]:opacity-50'
 );
 
 export function ScheduleSection({
@@ -35,7 +50,7 @@ export function ScheduleSection({
 }) {
   return (
     <section className="flex flex-col gap-1.5">
-      <div className="flex min-h-5 items-center gap-2 px-1">
+      <div className="flex min-h-7 items-center gap-2 px-3">
         <h2 className="text-[0.75em] font-normal text-muted-foreground">{title}</h2>
         {action ? <div className="ml-auto">{action}</div> : null}
       </div>
@@ -72,25 +87,33 @@ export function PropertyRow({
   children: ReactNode;
   align?: 'center' | 'start';
 }) {
+  // A hint or a multi-line control makes the row taller than its first line;
+  // centring the label then parks it between the control and the hint. Pin it
+  // to the control's first line instead: controls sit in a 32px (`min-h-8`)
+  // line, so `pt-1.5` centres a 1em label on it, and the 28px day toggles need
+  // `pt-1`.
+  const top = align === 'start' || !!hint;
   return (
     <div
       className={cn(
-        'flex flex-col gap-1 px-3 py-1.5 sm:grid sm:grid-cols-[minmax(0,auto)_minmax(0,1fr)] sm:gap-3',
-        align === 'center' ? 'sm:items-center' : 'sm:items-start'
+        'flex min-h-11 flex-col gap-1 px-3 py-1 sm:grid sm:grid-cols-[minmax(0,auto)_minmax(0,1fr)] sm:gap-3',
+        top ? 'sm:items-start' : 'sm:items-center'
       )}
     >
       <span
         className={cn(
           'min-w-0 truncate text-[1em] text-muted-foreground',
-          align === 'start' && 'sm:pt-2'
+          align === 'start' ? 'sm:pt-1' : hint ? 'sm:pt-1.5' : undefined
         )}
       >
         {label}
       </span>
       <div className="flex min-w-0 flex-col items-end gap-0.5">
-        <div className="flex min-w-0 max-w-full flex-wrap items-center justify-end">{children}</div>
+        <div className="flex min-h-8 min-w-0 max-w-full flex-wrap items-center justify-end">
+          {children}
+        </div>
         {hint ? (
-          <p className="text-right text-[0.8em] leading-tight text-muted-foreground">{hint}</p>
+          <p className="pb-1 text-right text-[0.8em] leading-tight text-muted-foreground">{hint}</p>
         ) : null}
       </div>
     </div>
@@ -106,8 +129,10 @@ export function PropertyRow({
  * name readable instead of clipped.
  */
 export function PropertyRowWide({ label, children }: { label: string; children: ReactNode }) {
+  // `pr-1`, not `pr-3`: the menu trigger's own `px-2` is the other 8px, so its
+  // label and chevron end on the same line as every other row.
   return (
-    <div className="flex flex-col gap-1 py-1.5 pl-3 pr-1 sm:grid sm:grid-cols-[minmax(0,auto)_minmax(0,1fr)] sm:items-center sm:gap-3">
+    <div className="flex min-h-11 flex-col gap-1 py-1 pl-3 pr-1 sm:grid sm:grid-cols-[minmax(0,auto)_minmax(0,1fr)] sm:items-center sm:gap-3">
       <span className="min-w-0 truncate text-[1em] text-muted-foreground">{label}</span>
       <div className="flex min-w-0 justify-end [&>*]:min-w-0 [&>*]:max-w-full">{children}</div>
     </div>

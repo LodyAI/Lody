@@ -7,7 +7,12 @@ import { Command, CommandEmpty, CommandInput, CommandItem, CommandList } from '@
 import { Popover, PopoverContent, PopoverTrigger } from '@/ui/popover';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/ui/select';
 import { cn } from '@/lib/utils';
-import { PropertyRow, ghostSelectTriggerClass, ghostValueClass } from './schedule-property-row';
+import {
+  PropertyRow,
+  ghostSelectTriggerClass,
+  ghostValueClass,
+  scheduleChevronClass,
+} from './schedule-property-row';
 
 export type PickableSession = {
   id: string;
@@ -127,7 +132,7 @@ export function ScheduleDestinationRows({
                   <button
                     type="button"
                     disabled={disabled}
-                    className="shrink-0 px-1.5 text-[0.8em] text-muted-foreground underline-offset-2 hover:text-foreground hover:underline disabled:opacity-50"
+                    className="shrink-0 px-1.5 text-[0.8em] text-muted-foreground underline-offset-2 last:-mr-1.5 hover:text-foreground hover:underline disabled:opacity-50"
                     onClick={() => onChange({ kind: 'own_session', epoch: value.epoch + 1 })}
                   >
                     {t('schedules.destination.startNewChat', 'Start a new chat')}
@@ -206,7 +211,7 @@ function SessionPicker({
           <span className="truncate">
             {label ?? t('schedules.destination.chooseChat', 'Choose a chat')}
           </span>
-          <ChevronDown className="size-3.5 shrink-0 opacity-50" />
+          <ChevronDown className={scheduleChevronClass} />
         </button>
       </PopoverTrigger>
       <PopoverContent align="end" className="w-[min(22rem,calc(100vw-2rem))] p-0">

@@ -669,7 +669,6 @@ function ScheduleEditor({
               }
             >
               <Switch
-                className="mr-2"
                 checked={project.useWorktree === true}
                 disabled={!!disabledReason}
                 onCheckedChange={(checked) => setProject({ ...project, useWorktree: checked })}

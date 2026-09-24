@@ -2,7 +2,7 @@ import type { AgentRunRef } from '@/components/shared/agent-run-ref';
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useAtom, useAtomValue } from 'jotai';
 import { atomWithStorage } from 'jotai/utils';
-import { Bot, Check, ListChecks, Monitor, ShieldAlert, Zap } from 'lucide-react';
+import { Bot, Check, ChevronDown, ListChecks, Monitor, ShieldAlert, Zap } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import {
   classifyPermissionModeFace,
@@ -237,7 +237,8 @@ export function AgentRunConfigMenu({
     return list.map((config) => ({
       config,
       machineName:
-        machines.get(config.machineId)?.name ?? t('agentRunConfig.unknownMachine', 'Unknown machine'),
+        machines.get(config.machineId)?.name ??
+        t('agentRunConfig.unknownMachine', 'Unknown machine'),
       online: onlineMachineIds.has(config.machineId),
     }));
   }, [agentConfigs, machineFilterId, machines, onlineMachineIds, t]);
@@ -476,8 +477,8 @@ export function AgentRunConfigMenu({
           type="button"
           disabled={disabled}
           className={cn(
-            'flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-[13px] transition-colors',
-            'hover:bg-hover data-[state=open]:bg-hover',
+            'flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-[1em] font-normal transition-colors',
+            'hover:bg-foreground/[0.05] data-[state=open]:bg-foreground/[0.05] dark:hover:bg-white/[0.08] dark:data-[state=open]:bg-white/[0.08]',
             'disabled:cursor-not-allowed disabled:opacity-50',
             agentLabel ? 'text-foreground' : 'text-muted-foreground'
           )}
@@ -500,6 +501,7 @@ export function AgentRunConfigMenu({
             ) : null}
           </span>
           {trailing}
+          <ChevronDown className="size-3.5 shrink-0 opacity-50" aria-hidden="true" />
         </button>
       </DropdownMenuTrigger>
 

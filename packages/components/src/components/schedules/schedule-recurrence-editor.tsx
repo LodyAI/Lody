@@ -19,7 +19,12 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/ui/popover';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/ui/select';
 import { cn } from '@/lib/utils';
 import { describeRecurrence, weekdayNames } from './schedule-format';
-import { PropertyRow, ghostSelectTriggerClass, ghostValueClass } from './schedule-property-row';
+import {
+  PropertyRow,
+  ghostSelectTriggerClass,
+  ghostValueClass,
+  scheduleChevronClass,
+} from './schedule-property-row';
 
 /** `<input type="datetime-local">` needs a wall-clock string, not an instant. */
 const toLocalInput = (iso: string): string => {
@@ -54,11 +59,14 @@ function TimeZoneField({
           type="button"
           aria-label={label}
           disabled={disabled}
-          className={cn(ghostValueClass, 'h-7 px-1.5 text-[0.8em] text-muted-foreground')}
+          className={cn(
+            ghostValueClass,
+            'h-7 px-1.5 text-[0.8em] text-muted-foreground last:-mr-1.5'
+          )}
         >
           <Globe className="size-3 shrink-0 opacity-60" />
           <span className="truncate">{value}</span>
-          <ChevronDown className="size-3 shrink-0 opacity-50" />
+          <ChevronDown className={scheduleChevronClass} />
         </button>
       </PopoverTrigger>
       <PopoverContent align="end" className="w-[min(20rem,calc(100vw-2rem))] p-0">

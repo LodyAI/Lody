@@ -130,7 +130,10 @@ function ScheduleListRow({
     <div
       className={cn(
         listGridClass,
-        'group relative items-center gap-y-0.5 border-b-[0.5px] border-border px-4 py-2.5 text-[0.9em] transition-colors hover:bg-hover sm:gap-y-0'
+        // Cells align to their FIRST line, not their middle: the Runs-with cell has
+        // a second line (machine · project), and centring every cell made its
+        // first line sit above the name and frequency beside it.
+        'group relative items-start gap-y-0.5 border-b-[0.5px] border-border px-4 py-2.5 text-[0.9em] leading-5 transition-colors hover:bg-hover sm:gap-y-0'
       )}
     >
       <button
@@ -179,7 +182,8 @@ function ScheduleListRow({
             </TooltipContent>
           </Tooltip>
         ) : null}
-        <span className="hidden sm:inline">
+        {/* A pill that starts the cell pulls its text back onto the column line. */}
+        <span className="hidden first:-ml-1.5 sm:inline">
           <StatusPill status={status} />
         </span>
       </div>
@@ -206,7 +210,7 @@ function ScheduleListRow({
         {/* The machine is what separates two same-named Agents, and two
             chat-only schedules that would otherwise read identically. */}
         <span
-          className="truncate text-[0.85em] text-muted-foreground/70"
+          className="truncate text-[0.85em] leading-4 text-muted-foreground/70"
           title={`${context?.machine ?? row.machineId} · ${project}`}
         >
           {context?.machine ?? row.machineId}
@@ -215,7 +219,8 @@ function ScheduleListRow({
         </span>
       </div>
 
-      <div className={cn(cell.actions, 'relative flex items-center justify-end gap-0.5')}>
+      {/* 28px buttons centred on the 20px first line. */}
+      <div className={cn(cell.actions, 'relative -my-1 flex items-center justify-end gap-0.5')}>
         {runtime?.lastDispatch && onOpenSession ? (
           <Tooltip>
             <TooltipTrigger asChild>
@@ -490,7 +495,7 @@ export function ScheduleForm({
           maxLength={200}
           aria-label={t('schedules.name', 'Name')}
           placeholder={t('schedules.namePlaceholder', 'Name this scheduled task')}
-          className="h-auto border-0 bg-transparent px-0 py-0.5 text-[1.1em] font-normal shadow-none placeholder:font-normal placeholder:text-muted-foreground/70 focus-visible:ring-0"
+          className="h-auto border-0 bg-transparent px-3 py-0.5 text-[1.1em] font-normal shadow-none placeholder:font-normal placeholder:text-muted-foreground/70 focus-visible:ring-0"
           value={value.title}
           onChange={(event) => setValue({ ...value, title: event.target.value })}
         />
@@ -502,7 +507,7 @@ export function ScheduleForm({
             'schedules.promptPlaceholder',
             'What should the agent do on every run? For example: review yesterday’s commits and summarise anything that looks risky.'
           )}
-          className="min-h-16 resize-y border-0 bg-transparent px-0 text-[0.9em] leading-relaxed shadow-none placeholder:text-muted-foreground/70 focus-visible:ring-0"
+          className="min-h-16 resize-y border-0 bg-transparent px-3 text-[0.9em] leading-relaxed shadow-none placeholder:text-muted-foreground/70 focus-visible:ring-0"
           value={value.prompt}
           onChange={(event) => setValue({ ...value, prompt: event.target.value })}
         />
@@ -549,7 +554,7 @@ export function ScheduleForm({
           <>
             <ScheduleRecurrenceEditor value={recurrence} onChange={setRecurrence} now={now} />
             <div
-              className="px-3 py-2 text-[0.8em] text-muted-foreground"
+              className="flex min-h-11 flex-wrap items-center gap-x-2 px-3 py-2 text-[0.8em] text-muted-foreground"
               aria-live="polite"
               aria-atomic="true"
             >
@@ -560,13 +565,13 @@ export function ScheduleForm({
               ) : resolved.times?.length ? (
                 <>
                   <span className="text-foreground/80">{t('schedules.nextRuns', 'Next runs')}</span>
-                  <span className="ml-2">
+                  <span>
                     {resolved.times
                       .slice(0, 3)
                       .map((at) => formatUpcoming(at, zone, now, i18n.language))
                       .join(' · ')}
                   </span>
-                  <span className="ml-2 opacity-70">{zone}</span>
+                  <span className="opacity-70">{zone}</span>
                 </>
               ) : (
                 t('schedules.noFuture', 'No future run under this rule.')
@@ -583,13 +588,18 @@ export function ScheduleForm({
       ) : null}
 
       {error ? (
-        <p className="text-[1em] text-destructive" role="alert">
+        <p className="px-3 text-[1em] text-destructive" role="alert">
           {error}
         </p>
       ) : null}
 
       <div className="flex flex-col gap-3 border-t-[0.5px] border-border pt-4 sm:flex-row sm:items-end sm:justify-between">
-        <div id={requirementsId} aria-live="polite" aria-atomic="true" className="min-w-0 flex-1">
+        <div
+          id={requirementsId}
+          aria-live="polite"
+          aria-atomic="true"
+          className="min-w-0 flex-1 px-3"
+        >
           {blockers.length > 0 ? (
             <ul className="space-y-1">
               {blockers.map((reason, index) => (

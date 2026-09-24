@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
-import { Bot, FolderGit2 } from 'lucide-react';
+import { Bot, ChevronDown, FolderGit2 } from 'lucide-react';
 import {
   ScheduleForm,
   ScheduleListView,
@@ -202,30 +202,32 @@ function RunConfigFixture({
       <PropertyRowWide label="Agent">
         <button
           type="button"
-          className="flex h-8 w-full items-center justify-end gap-2 rounded-md px-2 text-[13px] hover:bg-hover"
+          className="flex h-8 w-full items-center justify-end gap-2 rounded-md px-2 text-[1em] font-normal hover:bg-foreground/[0.05]"
         >
           <Bot className="size-3.5 opacity-70" />
           Code reviewer · Sonnet · Ask each time
+          <ChevronDown className="size-3.5 shrink-0 opacity-50" />
         </button>
       </PropertyRowWide>
       {destination.kind === 'new_session' ? (
         <PropertyRowWide label="Project">
           <button
             type="button"
-            className="flex h-8 w-full items-center justify-end gap-2 rounded-md px-2 text-[13px] hover:bg-hover"
+            className="flex h-8 w-full items-center justify-end gap-2 rounded-md px-2 text-[1em] font-normal hover:bg-foreground/[0.05]"
           >
             <FolderGit2 className="size-3.5 opacity-70" />
             {chatOnly ? 'No project' : 'loro-dev/lody'}
+            <ChevronDown className="size-3.5 shrink-0 opacity-50" />
           </button>
         </PropertyRowWide>
       ) : null}
       {destination.kind !== 'new_session' ? null : chatOnly ? (
-        <p className="px-3 py-2 text-xs text-muted-foreground">
+        <p className="px-3 py-2 text-[0.8em] text-muted-foreground">
           Without a project each run is a plain chat with the Agent — no repository is checked out.
         </p>
       ) : (
         <PropertyRow label="Isolated worktree">
-          <Switch className="mr-2" checked aria-label="Use an isolated Git worktree" />
+          <Switch checked aria-label="Use an isolated Git worktree" />
         </PropertyRow>
       )}
     </>

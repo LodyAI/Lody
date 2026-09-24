@@ -102,3 +102,10 @@
   lifts them to the popover fill in light themes; without it `--card` is gray
   and a grouped card reads as disabled. `em` compounds, so size leaves, not
   containers, and never put a 0.75em child inside a 0.9em row.
+- Alignment is one left line and one right line, measured not eyeballed. Title,
+  prompt, section labels and row labels share the rows' `px-3`. Every row ends
+  its last visible mark on the same inset: ghost triggers bleed their `px-2`
+  (`-mr-2` and widen `max-w` by the same 8px, or the value truncates), solid
+  controls do not, and every menu carries the same 14px chevron. Rows are 44px;
+  a row with a hint or a multi-line control pins its label to the control's
+  first line. List cells align to their first line, not their middle.
