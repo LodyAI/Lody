@@ -26,6 +26,7 @@ const meta = {
     wavelength: 1.2,
     direction: 'across',
     rowPitch: 28,
+    lightCompensation: true,
     className: 'primary',
   },
   argTypes: {

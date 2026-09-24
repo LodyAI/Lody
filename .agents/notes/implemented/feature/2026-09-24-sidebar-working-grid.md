@@ -55,6 +55,15 @@ The kept form and its defaults:
 - `waves = 2` keeps the earlier form for comparison: two crossing waves (3.2 and
   4.4 cells, 1.9s and 2.7s) on nested layers plus a long downward rhythm wave on
   the mark (36 cells, 3.6s, 30% of the opacity range).
+- Light themes compensate (`lightCompensation`, on by default). The same
+  parameters looked fuller in dark mode than in light: low opacity fades a tile
+  towards the background, which on a light page is near white, so dim small
+  tiles vanished and only the large bright ones remained; and dark shapes on a
+  light ground look smaller than light shapes on a dark ground (irradiation). In
+  a light theme the opacity floor moves 35% of the way to 1, a positive size
+  floor 20% of the way to 1, and tiles are drawn 8% larger (capped at the cell).
+  Screenshots of the same story in both themes showed whole 3×3 marks in both
+  after the change.
 - One sea for the page: a tile's phase depends only on its page position. In a
   list the sea between rows is skipped ("stitched", `rowPitch = 28`): the 14px
   mark covers half of each 28px row, and without stitching a wave moves more than

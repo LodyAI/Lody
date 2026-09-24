@@ -1,6 +1,7 @@
 import { useLayoutEffect, useRef, type ComponentPropsWithoutRef, type CSSProperties } from 'react';
 
 import { cn } from '@/lib/utils';
+import { useResolvedTheme } from '@/theme-provider';
 
 import { trackWorkingGridAnimation } from './working-grid-reading';
 import {
@@ -76,7 +77,21 @@ export type WorkingGridProps = Omit<ComponentPropsWithoutRef<'span'>, 'children'
    * real page distance.
    */
   rowPitch?: number | null;
+  /**
+   * Compensate in light themes (default on). Low opacity fades a tile towards the
+   * background, which on a light page means towards white, so dim small tiles
+   * vanish; and dark shapes on light ground look smaller than light shapes on
+   * dark ground (irradiation). Light themes therefore raise the opacity floor,
+   * the size floor, and the tile size a little.
+   */
+  lightCompensation?: boolean;
 };
+
+// Light-theme compensation: how far the opacity and size floors move towards 1,
+// and how much larger tiles are drawn.
+const LIGHT_OPACITY_LIFT = 0.35;
+const LIGHT_SCALE_LIFT = 0.2;
+const LIGHT_SIZE_BOOST = 1.08;
 
 // easeInOutSine: a half period of a sine between two keyframes.
 const SINE = 'cubic-bezier(0.37, 0, 0.63, 1)';
@@ -164,9 +179,9 @@ export function WorkingGrid({
   cornerRadius = 0.4,
   superellipse,
   scale = 'center',
-  maxScale = 0.9,
-  minScale = 0.3,
-  minOpacity = 0.25,
+  maxScale: maxScaleProp = 0.9,
+  minScale: minScaleProp = 0.3,
+  minOpacity: minOpacityProp = 0.25,
   maxOpacity = 1,
   rhythm = 0.3,
   speed = 1,
@@ -176,10 +191,21 @@ export function WorkingGrid({
   wavelength = 1.2,
   direction = 'across',
   rowPitch = 28,
+  lightCompensation = true,
   className,
   style,
   ...props
 }: WorkingGridProps) {
+  const compensate = useResolvedTheme() === 'light' && lightCompensation;
+  const minOpacity = compensate
+    ? minOpacityProp + (1 - minOpacityProp) * LIGHT_OPACITY_LIFT
+    : minOpacityProp;
+  // A negative floor (vanishing tiles) is a deliberate choice; leave it alone.
+  const minScale =
+    compensate && minScaleProp > 0
+      ? minScaleProp + (1 - minScaleProp) * LIGHT_SCALE_LIFT
+      : minScaleProp;
+  const maxScale = compensate ? Math.min(1, maxScaleProp * LIGHT_SIZE_BOOST) : maxScaleProp;
   const rootRef = useRef<HTMLSpanElement>(null);
   const cell = size / (3 + 2 * gap);
   const pitch = cell * (1 + gap);

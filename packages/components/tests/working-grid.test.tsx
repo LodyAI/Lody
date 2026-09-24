@@ -166,7 +166,7 @@ const scaleOf = (frame: Keyframe) => Number(/scale\(([\d.]+)\)/.exec(String(fram
 
 describe('WorkingGrid', () => {
   it('plays one main wave with a small interfering ripple by default', () => {
-    render(<WorkingGrid minScale={0.3} maxScale={0.9} />);
+    render(<WorkingGrid minScale={0.3} maxScale={0.9} lightCompensation={false} />);
 
     // Per tile: the main wave on the outer box, a smaller ripple on the face.
     const main = recorded.filter((a) => a.target.hasAttribute('data-working-grid-tile'));
@@ -187,6 +187,30 @@ describe('WorkingGrid', () => {
     const rippleLow = scaleOf(ripple[0]!.keyframes[1]!);
     expect(rippleLow).toBeGreaterThan(mainLow);
     expect(mainLow * rippleLow).toBeCloseTo(0.3 / 0.9, 9);
+  });
+
+  it('raises the floors and tile size in a light theme', () => {
+    // jsdom has no ThemeProvider, so the theme resolves to light.
+    const props = { size: 30, gap: 0.5, minScale: 0.3, maxScale: 0.9, ripple: 0 } as const;
+    const measure = (lightCompensation: boolean) => {
+      recorded = [];
+      render(
+        <WorkingGrid
+          key={String(lightCompensation)}
+          {...props}
+          lightCompensation={lightCompensation}
+        />
+      );
+      const tile = container.querySelector<HTMLElement>('[data-working-grid-tile]')!;
+      const drawn = parseFloat(tile.style.width);
+      const trough = recorded[0]!.keyframes[1]!;
+      return { drawn, smallest: drawn * scaleOf(trough), dimmest: Number(trough.opacity) };
+    };
+    const plain = measure(false);
+    const light = measure(true);
+    expect(light.drawn).toBeGreaterThan(plain.drawn);
+    expect(light.smallest).toBeGreaterThan(plain.smallest);
+    expect(light.dimmest).toBeGreaterThan(plain.dimmest);
   });
 
   it('drops the ripple layer when ripple is 0', () => {
@@ -232,6 +256,7 @@ describe('WorkingGrid', () => {
     render(
       <WorkingGrid
         waves={2}
+        lightCompensation={false}
         size={size}
         gap={gap}
         minScale={0.25}
@@ -254,7 +279,16 @@ describe('WorkingGrid', () => {
   });
 
   it('keeps brightness between minOpacity and maxOpacity', () => {
-    render(<WorkingGrid waves={2} minScale={0.3} minOpacity={0.4} maxOpacity={0.8} rhythm={0.5} />);
+    render(
+      <WorkingGrid
+        waves={2}
+        lightCompensation={false}
+        minScale={0.3}
+        minOpacity={0.4}
+        maxOpacity={0.8}
+        rhythm={0.5}
+      />
+    );
     const [rhythm, outer, inner] = recorded;
     const opacity = (animation: RecordedAnimation, at: number) =>
       Number(animation.keyframes[at]!.opacity);
