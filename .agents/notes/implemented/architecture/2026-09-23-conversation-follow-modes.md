@@ -84,6 +84,9 @@ viewport height changes, removing one way the pane could stay hidden.
 
 ## Reading position while rows change above
 
+Later on 2026-09-24 the hook-level anchor and the Virtua patch below were replaced by a
+keyed Virtua fork: [Fork Virtua with keyed rows](2026-09-24-virtua-keyed-fork.md).
+
 Measured on 2026-09-24 with a per-frame recorder (row screen positions, every programmatic
 `scrollTop` write with its caller, row resizes) driven by real wheel input.
 

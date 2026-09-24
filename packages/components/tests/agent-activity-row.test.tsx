@@ -10,7 +10,7 @@ import { SessionChatStreamView } from '../src/components/ai-gui/view';
 import { initI18n } from '../src/i18n';
 import { createConversationViewFromHistory } from '../src/lib/conversation-view';
 
-vi.mock('virtua', () => ({
+vi.mock('@lody/virtua', () => ({
   Virtualizer: ({ children }: { children: import('react').ReactNode }) => children,
 }));
 

@@ -63,6 +63,9 @@ Translation: current
 
 ## 上方行变化时的阅读位置
 
+2026-09-24 稍后，下面的 hook 层锚点和 Virtua 补丁被 keyed Virtua fork 取代：
+[Fork Virtua 并按 key 管理行](2026-09-24-virtua-keyed-fork.zh.md)。
+
 2026-09-24 用逐帧记录器测量（行的屏幕位置、每次程序写 `scrollTop` 及其调用方、行尺寸变化），由真实滚轮输入驱动。
 
 - **`main` 上靠近底部**：每次小幅上滚再回滚，`use-stick-to-bottom`（70px 容差）都会重新锁定，并在一帧内跳到底部 67px。

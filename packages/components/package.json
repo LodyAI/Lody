@@ -95,6 +95,7 @@
     "@lody/loro-streams-rpc": "workspace:*",
     "@lody/platform": "workspace:*",
     "@lody/shared": "workspace:*",
+    "@lody/virtua": "workspace:*",
     "@loro-dev/flock-wasm": "catalog:",
     "@loro-dev/streams-crdt": "catalog:",
     "@meowdown/core": "0.59.0",
@@ -195,8 +196,7 @@
     "uuid": "^11.0.5",
     "validator": "^13.15.35",
     "vaul": "^1.1.2",
-    "virtua": "^0.49.1",
-    "zod": "catalog:"
+        "zod": "catalog:"
   },
   "devDependencies": {
     "@lody/configs": "workspace:*",

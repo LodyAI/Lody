@@ -29,7 +29,7 @@ Parent AGENTS apply. Edit `AGENTS.md`, not its `CLAUDE.md` symlink. Background: 
   reserves a reply-room `Virtualizer` sibling; outside `anchored` it only shrinks.
   Queue/guide sends never scroll.
 - Group toggles never scroll; a non-following reader is never pulled to the end.
-  Rows inserted above a free reader keep it on the same row (by key), before paint.
+  `keyed` Virtua keeps the reader's row when rows change above; add no second writer.
   No frame retries/settle timers. Keep per-session restore, search/expand suppression.
 - A cached session renders in the frame after its click: no promise tick,
   effect-only state or deferred setState before reveal.

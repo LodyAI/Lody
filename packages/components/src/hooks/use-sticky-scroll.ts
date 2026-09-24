@@ -7,13 +7,12 @@ import {
   useRef,
   useState,
 } from 'react';
-import type { CacheSnapshot, VirtualizerHandle } from 'virtua';
+import type { CacheSnapshot, VirtualizerHandle } from '@lody/virtua';
 import type { SessionId } from '@lody/shared';
 import { describeViewport, isScrollDebugEnabled, scrollDebug } from './scroll-debug-log';
 import {
   countHiddenRowsInViewport,
   getContentExtentInScroll,
-  getContentTopInScroll,
   getInitialScrollLayoutBlocker,
   getScrollElementDistanceFromBottom,
   getScrollElementMaxOffset,
@@ -75,15 +74,6 @@ export interface UseStickyScrollOptions {
    * the list underneath it.
    */
   suppressAutoScrollRef?: RefObject<boolean>;
-  /**
-   * Stable identity of the row at a Virtua index, and back. With both, a free
-   * reader's row stays where it is on screen when rows are inserted or removed
-   * above it — older turns hydrating while the reader scrolls up.
-   */
-  rowKeyAt?: (index: number) => string | undefined;
-  findRowIndex?: (key: string) => number;
-  /** Any value that changes with the row list (its array identity). */
-  rowsVersion?: unknown;
 }
 
 export interface UseStickyScrollResult {
@@ -160,9 +150,6 @@ export function useStickyScroll({
   initialContentReady = true,
   onAtBottomChange,
   suppressAutoScrollRef,
-  rowKeyAt,
-  findRowIndex,
-  rowsVersion,
 }: UseStickyScrollOptions): UseStickyScrollResult {
   const cachedPositionAtMountRef = useRef(getScrollPosition(sessionId));
   /**
@@ -186,10 +173,9 @@ export function useStickyScroll({
    * across the correction — the blank flash on open.
    *
    * Taken on the first render that actually mounts the virtualizer, because
-   * `Virtualizer` reads `cache` only at mount and the snapshot is keyed by row
-   * count. Reading it during the empty state a session renders while its
-   * document is acquired would answer for a one-row list and then never ask
-   * again for the real conversation.
+   * `Virtualizer` reads `cache` only at mount. Reading it during the empty
+   * state a session renders while its document is acquired would hand an
+   * unkeyed caller a one-row answer and then never ask again.
    */
   const initialVirtualizerCacheRef = useRef<{ taken: boolean; value?: CacheSnapshot }>({
     taken: false,
@@ -234,16 +220,6 @@ export function useStickyScroll({
    * arrives, or as soon as the reader takes over (mode `free`).
    */
   const glideRef = useRef<{ from: number; startedAt: number | null; frame: number } | null>(null);
-  /**
-   * The row a free reader is looking at — the one under the viewport's middle,
-   * by key — and its distance from the viewport top, as of the last scroll.
-   * Virtua (`shift={false}`, index-keyed sizes) keeps pixel offsets when rows
-   * are inserted above; this puts the same row back instead.
-   */
-  const readingAnchorRef = useRef<{ key: string; index: number; offset: number } | null>(null);
-  const rowKeyAtRef = useRef(rowKeyAt);
-  rowKeyAtRef.current = rowKeyAt;
-  const captureReadingAnchorRef = useRef(() => {});
   const initialScrollRestoredRef = useRef(false);
   const initialPositionAppliedRef = useRef(false);
   const lastSettleBlockerRef = useRef<string | null>(null);
@@ -283,11 +259,10 @@ export function useStickyScroll({
   );
 
   const writeScrollTop = useCallback(
-    (viewport: HTMLElement, offset: number, syncVirtua = false) => {
+    (viewport: HTMLElement, offset: number) => {
       viewport.scrollTop = offset;
       expectedScrollTopRef.current = viewport.scrollTop;
       lastScrollTopRef.current = viewport.scrollTop;
-      captureReadingAnchorRef.current();
       // Before the reveal, let Virtua read the new offset now. Its only input is
       // the scroll event, which arrives next frame; until then it renders the
       // old range, so the reveal waits (`offset-mismatch`, then
@@ -295,7 +270,7 @@ export function useStickyScroll({
       // native event is then a no-op for it and is consumed as our own write.
       const virtualizer = vlistRef.current;
       if (
-        (syncVirtua || !initialScrollRestoredRef.current) &&
+        !initialScrollRestoredRef.current &&
         virtualizer &&
         Math.abs(virtualizer.scrollOffset - viewport.scrollTop) > 1
       ) {
@@ -506,29 +481,6 @@ export function useStickyScroll({
   }, [persistVirtualizerCache, suppressAutoScrollRef, vlistRef, writeScrollTop]);
   settleInitialLayoutRef.current = settleInitialLayout;
 
-  const captureReadingAnchor = useCallback(() => {
-    const viewport = scrollElementRef.current;
-    const virtualizer = vlistRef.current;
-    const keyAt = rowKeyAtRef.current;
-    const contentTop = viewport ? getContentTopInScroll(viewport) : null;
-    if (!viewport || !virtualizer || !keyAt || contentTop === null || itemCountRef.current <= 0) {
-      readingAnchorRef.current = null;
-      return;
-    }
-    const middle = viewport.scrollTop + viewport.clientHeight / 2 - contentTop;
-    const index = Math.min(virtualizer.findItemIndex(middle), itemCountRef.current - 1);
-    const key = keyAt(index);
-    readingAnchorRef.current =
-      key === undefined
-        ? null
-        : {
-            key,
-            index,
-            offset: contentTop + virtualizer.getItemOffset(index) - viewport.scrollTop,
-          };
-  }, [vlistRef]);
-  captureReadingAnchorRef.current = captureReadingAnchor;
-
   /** Every geometry change — rows, spacer commits, viewport height — lands here. */
   const onGeometryChange = useCallback(
     (source: string) => {
@@ -538,9 +490,6 @@ export function useStickyScroll({
       }
       if (modeRef.current === 'free') shrinkSpacer();
       settleInitialLayout();
-      // Virtua's own size compensation keeps the reader's row in place; follow
-      // the row under the middle as sizes settle.
-      if (modeRef.current === 'free') captureReadingAnchor();
       const viewport = scrollElementRef.current;
       if (initialScrollRestoredRef.current && viewport && isScrollDebugEnabled()) {
         const hidden = countHiddenRowsInViewport(viewport);
@@ -555,14 +504,7 @@ export function useStickyScroll({
         }
       }
     },
-    [
-      applyAnchor,
-      captureReadingAnchor,
-      scrollToRealBottom,
-      settleInitialLayout,
-      shrinkSpacer,
-      suppressAutoScrollRef,
-    ]
+    [applyAnchor, scrollToRealBottom, settleInitialLayout, shrinkSpacer, suppressAutoScrollRef]
   );
   const onGeometryChangeRef = useRef(onGeometryChange);
   onGeometryChangeRef.current = onGeometryChange;
@@ -587,7 +529,6 @@ export function useStickyScroll({
     expectedScrollTopRef.current = null;
     const previous = lastScrollTopRef.current;
     lastScrollTopRef.current = scrollTop;
-    captureReadingAnchor();
     if (expected !== null && Math.abs(scrollTop - expected) <= 1) return;
     // Scrollbar drags, selection auto-scroll and touch pans hold a pointer.
     // Upward movement without one is a clamp or a size correction.
@@ -605,7 +546,7 @@ export function useStickyScroll({
     ) {
       setMode('follow', 'reached-bottom');
     }
-  }, [captureReadingAnchor, release, setMode, shrinkSpacer, suppressAutoScrollRef]);
+  }, [release, setMode, shrinkSpacer, suppressAutoScrollRef]);
 
   const handlePointerDown = useCallback((event: PointerEvent) => {
     if (event.button === 0) pointerHeldRef.current = true;
@@ -758,31 +699,6 @@ export function useStickyScroll({
       mutationObserver.disconnect();
     };
   }, [scrollElement]);
-
-  // Rows inserted or removed above a free reader — a placeholder turn becoming
-  // its rows, older history loading — would move what they are reading by the
-  // inserted height. Put the same row back, before paint, and let Virtua render
-  // the range there in this frame.
-  useLayoutEffect(() => {
-    const anchor = readingAnchorRef.current;
-    const viewport = scrollElementRef.current;
-    const virtualizer = vlistRef.current;
-    if (!anchor || !viewport || !virtualizer || !findRowIndex) return;
-    if (modeRef.current !== 'free' || !initialScrollRestoredRef.current) return;
-    if (suppressAutoScrollRef?.current || glideRef.current) return;
-    const index = findRowIndex(anchor.key);
-    if (index < 0 || index === anchor.index) return;
-    const contentTop = getContentTopInScroll(viewport);
-    if (contentTop === null) return;
-    const target = contentTop + virtualizer.getItemOffset(index) - anchor.offset;
-    scrollDebug('reading-anchor', {
-      key: anchor.key,
-      from: anchor.index,
-      to: index,
-      shift: Math.round(target - viewport.scrollTop),
-    });
-    writeScrollTop(viewport, target, true);
-  }, [findRowIndex, rowsVersion, suppressAutoScrollRef, vlistRef, writeScrollTop]);
 
   // Restore before paint, and keep the same follow intent when a placeholder
   // becomes several Virtua rows. Waiting for the content ResizeObserver's RAF

@@ -6,7 +6,7 @@ import React, { act, useEffect, useLayoutEffect, useRef } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SessionId } from '@lody/shared';
-import type { CacheSnapshot, VirtualizerHandle } from 'virtua';
+import type { CacheSnapshot, VirtualizerHandle } from '@lody/virtua';
 import {
   clearAllScrollPositions,
   getScrollPosition,
@@ -85,8 +85,6 @@ type HarnessProps = {
   onAtBottomChange?: (atBottom: boolean) => void;
   spacerElement?: HTMLDivElement | null;
   suppressAutoScrollRef?: React.RefObject<boolean>;
-  /** Stable row keys by Virtua index. */
-  rowKeys?: readonly string[];
 };
 
 async function advanceAnimationFrames(): Promise<void> {
@@ -246,7 +244,6 @@ function HookHarness({
   onAtBottomChange,
   spacerElement = null,
   suppressAutoScrollRef,
-  rowKeys,
 }: HarnessProps) {
   const vlistRef = useRef<VirtualizerHandle | null>(vlist);
   vlistRef.current = vlist;
@@ -259,9 +256,6 @@ function HookHarness({
     initialContentReady,
     onAtBottomChange,
     suppressAutoScrollRef,
-    rowKeyAt: rowKeys ? (index) => rowKeys[index] : undefined,
-    findRowIndex: rowKeys ? (key) => rowKeys.indexOf(key) : undefined,
-    rowsVersion: rowKeys,
   });
   const { scrollRef, spacerRef } = result;
 
@@ -651,35 +645,6 @@ describe('useStickyScroll Virtua adapter', () => {
     fixture.setScrollHeight(1640);
     await renderHarness({ ...props, itemCount: 12 });
     expect(fixture.getScrollTop()).toBe(96);
-    expect(latestResult?.isSticky).toBe(false);
-  });
-
-  it('keeps a reader on the same row when rows are inserted above it', async () => {
-    const sessionId = 'session-hydrating-above' as SessionId;
-    const fixture = createScrollFixture();
-    const vlist = createMockVirtualizerHandle(fixture.scrollElement);
-    // The row under the viewport's middle is index 3 before and index 5 after.
-    let offsets: Record<number, number> = { 0: 0, 1: 100, 2: 200, 3: 516 };
-    vlist.getItemOffset.mockImplementation((index: number) => offsets[index] ?? 0);
-    let middleIndex = 3;
-    vlist.findItemIndex = () => middleIndex;
-    const props = { sessionId, vlist, scrollElement: fixture.scrollElement, itemCount: 4 };
-    await renderHarness({ ...props, rowKeys: ['a', 'b', 'c', 'd'] });
-    await act(async () => {
-      await advanceAnimationFrames();
-      fixture.scrollElement.dispatchEvent(new WheelEvent('wheel', { deltaY: -40 }));
-      fixture.setScrollTop(96);
-      fixture.scrollElement.dispatchEvent(new Event('scroll'));
-    });
-    // Row "d" is 420px below the viewport top.
-
-    // An older turn's placeholder above becomes three rows: "d" moves down 200px.
-    offsets = { 0: 0, 1: 100, 2: 150, 3: 300, 4: 400, 5: 716 };
-    middleIndex = 5;
-    fixture.setScrollHeight(1840);
-    await renderHarness({ ...props, itemCount: 6, rowKeys: ['a', 'x', 'y', 'b', 'c', 'd'] });
-
-    expect(fixture.getScrollTop()).toBe(296);
     expect(latestResult?.isSticky).toBe(false);
   });
 

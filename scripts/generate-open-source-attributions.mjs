@@ -28,6 +28,19 @@ const VENDORED_ATTRIBUTIONS = [
     noticePath: 'packages/components/src/components/mentions/vscode-fuzzy-score.LICENSE.txt',
   },
   {
+    id: 'vendored-virtua',
+    kind: 'vendored',
+    scope: 'vendored-source',
+    name: 'Virtua',
+    license: 'MIT',
+    homepage: 'https://github.com/inokawa/virtua/tree/0.52.7',
+    author: 'inokawa',
+    description:
+      'Forked list virtualizer (packages/virtua, @lody/virtua) with keyed item sizes and anchoring.',
+    assets: ['Virtua core and React bindings'],
+    noticePath: 'packages/virtua/LICENSE',
+  },
+  {
     id: 'bundled-theme-vscode-defaults',
     kind: 'vendored',
     scope: 'bundled-theme',

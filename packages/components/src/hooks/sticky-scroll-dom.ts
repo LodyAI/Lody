@@ -123,15 +123,6 @@ export function getContentExtentInScroll(
   };
 }
 
-/** Where the virtualized content starts, in the viewport's scroll coordinates. */
-export function getContentTopInScroll(viewport: HTMLElement): number | null {
-  const content = viewport.firstElementChild;
-  if (!(content instanceof HTMLElement)) return null;
-  return (
-    content.getBoundingClientRect().top - viewport.getBoundingClientRect().top + viewport.scrollTop
-  );
-}
-
 /**
  * Whether an upward wheel over `target` scrolls some element nested inside the
  * viewport (a code block, a terminal) rather than the viewport itself.

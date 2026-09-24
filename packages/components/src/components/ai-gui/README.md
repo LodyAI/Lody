@@ -63,9 +63,13 @@ footer actions, and task-summary expansion.
   "Exited Plan Mode" card may follow an answer, so the answer is not necessarily
   the final stream item.
 
-- **Virtua `shift={false}` and `bufferSize`.** Shifting reuses stale cumulative
-  heights, so rows overlap. `bufferSize` is a trade between blank space during a
-  fast scroll and keeping resizing rows mounted.
+- **Keyed `@lody/virtua` and `bufferSize`.** Upstream `shift` reuses stale
+  cumulative heights (rows overlap) and only covers rows added at the start;
+  placeholder turns expand in the middle. The keyed fork keeps sizes with row keys
+  and the row at the viewport start in place
+  ([note](../../../../../.agents/notes/implemented/architecture/2026-09-24-virtua-keyed-fork.md)).
+  `bufferSize` is a trade between blank space during a fast scroll and keeping
+  resizing rows mounted.
 - **`buildChatStreamItems()` filtering.** An empty assistant entry renders `null`,
   which Virtua cannot measure, and a duplicate history id produces a duplicate key
   that desyncs the list.
