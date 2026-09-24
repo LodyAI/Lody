@@ -349,5 +349,18 @@ sheets and the shared import panel.
 A conversation step's file name is now a link: the row is `select-none`, and
 only the name brightens and underlines under the pointer.
 
+## A background task is a peek
+
+Clicking a background or subagent task opened a full dialog that repeated the
+row — name, "Running", and the same sentence in a mono box. The owner asked
+for a zero-based answer, not a collapse. A task has no live output, so there
+is nothing a page is for: the row now says what the task is and the word its
+state needs (elapsed time ticking while it runs, the tool it is on, how long
+it took, or Failed), and clicking it opens a popover anchored to the row with
+the task at full depth — status and time, the whole command or brief with
+Copy, the result or error, what it cost, and Cancel for a subagent. The group
+lost its bordered card and reads as a step of the turn's process like the
+rest.
+
 Related: [token gallery](2026-09-09-ui-token-gallery.md),
 [call-site migration](2026-09-22-ui-radix-callsite-migration.md).
