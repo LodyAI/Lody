@@ -6,6 +6,7 @@ import { createRoot, type Root } from 'react-dom/client';
 
 import { DesktopPermissionModeButton } from '../src/components/sessions/desktop-run-config-menu';
 import { initI18n } from '../src/i18n';
+import { menuGroupLabelClassName } from '../src/ui/menu-styles';
 import { Tooltip } from '@lody/ui/tooltip';
 
 (
@@ -82,7 +83,8 @@ describe('DesktopPermissionModeButton menu', () => {
       (node) => node.childNodes.length === 1 && node.textContent === 'Permission'
     );
     expect(label).toBeDefined();
-    expect(label?.className).toContain('normal-case');
+    // The product's own sentence-case label, not the package's caps heading.
+    expect(label?.className).toContain(menuGroupLabelClassName);
     expect(menu.textContent).not.toContain('Requires approval');
     expect(menu.textContent).not.toContain('Exercise caution');
     const agent = [...menu.querySelectorAll('[role="menuitem"]')].find((node) =>

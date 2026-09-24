@@ -321,14 +321,15 @@ describe('AppearanceSettingsView', () => {
     expect(terminalFontTrigger?.textContent).toContain('Maple Mono');
     expect(sizeInput).toBeTruthy();
     expect(preview).toBeTruthy();
-    expect(preview?.parentElement?.style.fontFamily).toContain('Maple Mono');
-    expect(preview?.style.fontFamily).toBe('inherit');
+    // The preview line's face and size are StyleX function styles: the value
+    // rides the line's inline style as a custom property, not as `font-family`.
+    expect(preview?.parentElement?.getAttribute('style')).toContain('Maple Mono');
     expect(container?.textContent).toContain('$');
 
     await act(async () => {
       setInputValue(sizeInput!, '16');
     });
-    expect(preview?.parentElement?.style.fontSize).toBe('16px');
+    expect(preview?.parentElement?.getAttribute('style')).toContain('16px');
   });
 
   it('keeps the font menu inside a settings dialog so the list can scroll', async () => {

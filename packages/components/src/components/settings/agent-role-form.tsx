@@ -1,4 +1,5 @@
 import { useId, type FormEvent } from 'react';
+import * as stylex from '@stylexjs/stylex';
 import { Spinner } from '@lody/ui/spinner';
 import { useTranslation } from 'react-i18next';
 import {
@@ -17,15 +18,34 @@ import {
   type AgentRoleFormValue,
   type AgentRoleRunConfigIssue,
 } from '@/lib/agent-role-form';
-import { cn } from '@/lib/utils';
+import { withClassName } from '@/lib/stylex';
 import { Button } from '@lody/ui/button';
+import { Dialog } from '@lody/ui/dialog';
 import { Input } from '@lody/ui/input';
 import { Field as UiField } from '@lody/ui/field';
 import { Select } from '@lody/ui/select';
 import { Switch } from '@lody/ui/switch';
 import { Textarea } from '@lody/ui/textarea';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { space } from '@lody/ui/tokens/scales.stylex';
 import { EmojiField } from './emoji-field';
 import { Field, FormMessage, Section } from './form-primitives';
+import { settingsCatalog as catalog, settingsSurface as surface } from './surface';
+
+const styles = stylex.create({
+  offline: { fontSize: '10px', color: colors.secondaryLabel },
+  option: { display: 'flex', alignItems: 'center', gap: space[1.5] },
+  issuesTitle: { display: 'block' },
+  issues: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '2px',
+    margin: 0,
+    marginTop: space[1],
+    paddingInlineStart: space[4],
+    listStyleType: 'disc',
+  },
+});
 
 export type AgentRoleMachineOption = {
   machineId: MachineId;
@@ -102,11 +122,11 @@ export function AgentRoleForm({
   const hasError = (code: AgentRoleFormError) => errors.includes(code);
 
   return (
-    <form className={cn('flex min-h-0 flex-col', className)} onSubmit={submit}>
-      <div className="scrollbar-pro min-h-0 flex-1 space-y-3 overflow-y-auto px-5 py-4">
+    <form {...withClassName(stylex.props(catalog.editorForm), className)} onSubmit={submit}>
+      <div {...withClassName(stylex.props(catalog.editorBody), 'scrollbar-pro')}>
         {/* The Role's own label, shown as itself rather than inside a titled
             card: an emoji and a name need no section heading to be read. */}
-        <div className="space-y-1.5">
+        <div {...stylex.props(catalog.stack)}>
           <Input
             id={`${fieldId}-name`}
             autoComplete="off"
@@ -136,8 +156,8 @@ export function AgentRoleForm({
           <Textarea
             id={`${fieldId}-prompt`}
             rows={4}
+            resize="none"
             aria-label={t('settings.agentRoles.form.promptPrefix')}
-            className="resize-none font-mono text-xs"
             placeholder={t('settings.agentRoles.form.promptPrefixPlaceholder')}
             value={value.promptPrefix}
             onChange={(event) => update({ promptPrefix: event.target.value })}
@@ -148,7 +168,7 @@ export function AgentRoleForm({
           title={t('settings.agentRoles.form.sectionTarget')}
           hint={t('settings.agentRoles.form.sectionTargetHint')}
         >
-          <div className="grid gap-3 sm:grid-cols-2">
+          <div {...stylex.props(catalog.fieldPair)}>
             <Field label={t('settings.agentRoles.form.machine')}>
               <Select.Root
                 items={machines.map((machine) => ({
@@ -173,10 +193,10 @@ export function AgentRoleForm({
                 <Select.Content>
                   {machines.map((machine) => (
                     <Select.Item key={machine.machineId} value={machine.machineId}>
-                      <span className="flex items-center gap-1.5">
+                      <span {...stylex.props(styles.option)}>
                         {machine.label}
                         {machine.online ? null : (
-                          <span className="text-[10px] text-muted-foreground">
+                          <span {...stylex.props(styles.offline)}>
                             {t('settings.agentRoles.status.offline')}
                           </span>
                         )}
@@ -279,10 +299,10 @@ export function AgentRoleForm({
             )}
             {issues.length > 0 ? (
               <FormMessage tone="warning">
-                <span className="block font-normal">
+                <span {...stylex.props(styles.issuesTitle)}>
                   {t('settings.agentRoles.form.incompatibleTitle')}
                 </span>
-                <ul className="mt-1 list-disc space-y-0.5 pl-4">
+                <ul {...stylex.props(styles.issues)}>
                   {issues.map((issue, index) => (
                     <li key={`${issue.kind}-${index}`}>
                       <RunConfigIssueText issue={issue} />
@@ -297,21 +317,17 @@ export function AgentRoleForm({
         {/* Stated rather than left to be discovered: a Role looks like a
             standing assistant, so its owner has to be told the sessions it
             creates keep nothing between them. */}
-        <div className="rounded-[10px] bg-foreground/[0.03] px-3 py-2.5">
-          <p className="text-sm">{t('settings.agentRoles.form.memory')}</p>
-          <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground">
-            {t('settings.agentRoles.form.memoryHint')}
-          </p>
+        <div {...stylex.props(surface.formBlock)}>
+          <p {...stylex.props(catalog.blockTitle)}>{t('settings.agentRoles.form.memory')}</p>
+          <p {...stylex.props(catalog.blockHint)}>{t('settings.agentRoles.form.memoryHint')}</p>
         </div>
 
-        <div className="flex items-center justify-between gap-4 rounded-[10px] bg-foreground/[0.03] px-3 py-2.5">
-          <div className="min-w-0">
-            <UiField.Label htmlFor={`${fieldId}-share`} className="text-sm">
+        <div {...stylex.props(surface.formBlock, catalog.blockRow)}>
+          <div {...stylex.props(catalog.blockText)}>
+            <UiField.Label htmlFor={`${fieldId}-share`}>
               {t('settings.agentRoles.form.share')}
             </UiField.Label>
-            <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground">
-              {t('settings.agentRoles.form.shareHint')}
-            </p>
+            <p {...stylex.props(catalog.blockHint)}>{t('settings.agentRoles.form.shareHint')}</p>
           </div>
           <Switch
             id={`${fieldId}-share`}
@@ -323,21 +339,15 @@ export function AgentRoleForm({
         {error ? <FormMessage tone="error">{error}</FormMessage> : null}
       </div>
 
-      <footer className="flex shrink-0 items-center justify-end gap-2 border-t border-border/60 px-5 py-3">
-        <Button
-          type="button"
-          variant="secondary"
-          size="small"
-          disabled={submitting}
-          onClick={onCancel}
-        >
+      <Dialog.Footer>
+        <Button type="button" variant="secondary" disabled={submitting} onClick={onCancel}>
           {t('common.cancel')}
         </Button>
-        <Button type="submit" size="small" disabled={submitting || errors.length > 0}>
-          {submitting ? <Spinner className="h-3.5 w-3.5" aria-hidden="true" /> : null}
+        <Button type="submit" disabled={submitting || errors.length > 0}>
+          {submitting ? <Spinner size="small" aria-hidden="true" /> : null}
           {isEditing ? t('common.save') : t('settings.agentRoles.form.create')}
         </Button>
-      </footer>
+      </Dialog.Footer>
     </form>
   );
 }
@@ -428,15 +438,11 @@ function ConfigOptionField({
   const fieldId = useId();
   if (selector.type === 'boolean') {
     return (
-      <div className="flex items-center justify-between gap-4">
-        <div className="min-w-0">
-          <UiField.Label htmlFor={fieldId} className="text-xs font-normal">
-            {selector.label}
-          </UiField.Label>
+      <div {...stylex.props(catalog.blockRow)}>
+        <div {...stylex.props(catalog.blockText)}>
+          <UiField.Label htmlFor={fieldId}>{selector.label}</UiField.Label>
           {selector.description ? (
-            <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground">
-              {selector.description}
-            </p>
+            <p {...stylex.props(catalog.blockHint)}>{selector.description}</p>
           ) : null}
         </div>
         <Switch

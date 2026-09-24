@@ -222,5 +222,33 @@ the eye on white), black at 28% in Vesper, with a lighter top shadow — so a fi
 is the same small step under every rung. The owner picked this (B) from three
 Vesper variants: A (the fixed 4.5%), B (28%) and C (16%).
 
+## Business layer: StyleX, not a Tailwind bridge
+
+Syncing the new material into the business layer first went through a Tailwind
+"material bridge": utilities and `--shadow-*` values restating `@lody/ui`'s
+numbers. The owner stopped that. Styling that can move to StyleX moves to StyleX,
+reading `@lody/ui`'s own tokens, so there is one source of truth instead of two
+copies kept in step by hand.
+
+- `@lody/components` depends on `@stylexjs/stylex` (0.19.0, the version
+  `@lody/ui` pins). The unplugin already runs over every module in the Electron,
+  Storybook and Vitest builds, and `@lody/ui` already exports
+  `tokens/colors.stylex` and `tokens/scales.stylex`. The app's `ThemeRoot`
+  classes already carry the chosen palette to those tokens.
+- Structure mirrors `@lody/ui`. Styles live in the component's `stylex.create`,
+  and an area's shared look lives in its `surface.ts` (`settings/surface.ts`
+  first). `lib/stylex.ts`'s `withClassName` appends a caller's layout class.
+  Copy that follows the font-size tier keeps `em`. A StyleX or Tailwind visual
+  class is never passed into an `@lody/ui` part: two classes setting one property
+  are ordered by the stylesheet, not by the class list.
+- `CompactSection` / `CompactRow` / the form primitives are StyleX. A section
+  owns the rules between its lines (StyleX has no descendant selector, so it
+  wraps each child). The danger zone is `tone="danger"` rather than a caller's
+  ring class. Header actions are `@lody/ui` ghost icon buttons rather than
+  Radix-era props with a `shadow-xs` override.
+- The rest of the sweep is split by area: settings catalogs and editors,
+  account/workspace/general settings, composer selectors (`OptionSelector` and
+  the run-config menus), and the most visibly split surfaces elsewhere.
+
 Related: [token gallery](2026-09-09-ui-token-gallery.md),
 [call-site migration](2026-09-22-ui-radix-callsite-migration.md).

@@ -1,9 +1,59 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import * as stylex from '@stylexjs/stylex';
 import type { SessionFilePayload } from '@lody/shared';
 import type { SessionImageGalleryEntry } from '@/lib/session-image-gallery';
 import { ZoomableImageViewer } from '../shared/zoomable-image-viewer';
 import { SessionFileCard } from '../ai-gui/session-file-card';
+import { Button } from '@lody/ui/button';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { corner, radius, space, text } from '@lody/ui/tokens/scales.stylex';
+import { shareSurface } from './surface';
+
+const styles = stylex.create({
+  unavailable: {
+    margin: 0,
+    fontSize: text.bodySize,
+    lineHeight: text.bodyLeading,
+    color: colors.secondaryLabel,
+  },
+  unavailableAfterCard: { marginTop: space[1] },
+  /**
+   * A picture in the transcript opens the viewer. It is the picture, not a
+   * framed box: no border, the region fill only while it has not arrived.
+   */
+  image: {
+    display: 'block',
+    marginBlock: space[2],
+    padding: 0,
+    borderWidth: 0,
+    overflow: 'hidden',
+    backgroundColor: `color-mix(in oklab, transparent, ${colors.label} 3%)`,
+    borderRadius: radius.medium,
+    cornerShape: corner.shape,
+    cursor: { default: 'zoom-in', ':disabled': 'default' },
+  },
+  picture: { display: 'block', maxHeight: '320px', maxWidth: '100%', objectFit: 'contain' },
+  loading: {
+    display: 'block',
+    padding: space[4],
+    fontSize: text.bodySize,
+    lineHeight: text.bodyLeading,
+    color: colors.secondaryLabel,
+  },
+  /** The text preview is a block under the file card: the region rung, no border. */
+  preview: { display: 'flex', flexDirection: 'column', gap: space[2], marginBlock: space[2] },
+  previewActions: { display: 'flex', flexWrap: 'wrap', gap: space[1] },
+  previewText: {
+    maxHeight: '384px',
+    margin: 0,
+    overflow: 'auto',
+    whiteSpace: 'pre-wrap',
+    fontSize: text.footnoteSize,
+    lineHeight: text.footnoteLeading,
+    color: colors.label,
+  },
+});
 
 export type ShareAttachmentAccess = {
   read: (attachmentId: string, signal?: AbortSignal) => Promise<Blob>;
@@ -12,7 +62,7 @@ export type ShareAttachmentAccess = {
 export function SharedAttachmentUnavailable() {
   const { t } = useTranslation();
   return (
-    <p className="text-sm text-muted-foreground">
+    <p {...stylex.props(styles.unavailable)}>
       {t('sharing.attachmentUnavailable', 'Attachment unavailable or expired')}
     </p>
   );
@@ -60,16 +110,16 @@ export function SharedImage({
         type="button"
         disabled={url === undefined}
         onClick={() => setOpen(true)}
-        className="my-2 block overflow-hidden rounded-xl border border-border"
+        {...stylex.props(styles.image)}
       >
         {url !== undefined ? (
           <img
             src={url}
             alt={entry.alt ?? t('sessions.uploadedImage', 'Uploaded image')}
-            className="max-h-80 max-w-full object-contain"
+            {...stylex.props(styles.picture)}
           />
         ) : (
-          <span className="block p-4 text-sm text-muted-foreground">
+          <span {...stylex.props(styles.loading)}>
             {t('sharing.loadingAttachment', 'Loading attachment…')}
           </span>
         )}
@@ -159,28 +209,27 @@ export function SharedFile({
         }
       />
       {failed && (
-        <p role="status" className="mt-1 text-sm text-muted-foreground">
+        <p role="status" {...stylex.props(styles.unavailable, styles.unavailableAfterCard)}>
           {t('sharing.attachmentUnavailable', 'Attachment unavailable or expired')}
         </p>
       )}
       {preview !== null && (
-        <div className="my-2 rounded-lg border border-border p-3">
-          <button
-            type="button"
-            className="mb-2 mr-4 text-sm text-muted-foreground"
-            disabled={busy}
-            onClick={() => void download()}
-          >
-            {t('sessions.fileActions.download', 'Download file')}
-          </button>
-          <button
-            type="button"
-            className="mb-2 text-sm text-muted-foreground"
-            onClick={() => setPreview(null)}
-          >
-            {t('sharing.closePreview', 'Close preview')}
-          </button>
-          <pre className="max-h-96 overflow-auto whitespace-pre-wrap text-xs">{preview}</pre>
+        <div {...stylex.props(shareSurface.region, styles.preview)}>
+          <div {...stylex.props(styles.previewActions)}>
+            <Button
+              type="button"
+              variant="ghost"
+              size="small"
+              disabled={busy}
+              onClick={() => void download()}
+            >
+              {t('sessions.fileActions.download', 'Download file')}
+            </Button>
+            <Button type="button" variant="ghost" size="small" onClick={() => setPreview(null)}>
+              {t('sharing.closePreview', 'Close preview')}
+            </Button>
+          </div>
+          <pre {...stylex.props(styles.previewText)}>{preview}</pre>
         </div>
       )}
     </div>

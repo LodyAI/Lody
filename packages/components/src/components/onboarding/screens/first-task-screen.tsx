@@ -19,14 +19,28 @@ import type { DesktopOnboardingProjectSelection } from '@/atoms/onboarding';
 import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
 import { useSessionActions } from '@/hooks/use-session-actions';
 import { buildAgentPrompt } from '@/lib';
-import { cn } from '@/lib/utils';
 import { AgentIcon } from '@/components/icons/agent-icon';
+import * as stylex from '@stylexjs/stylex';
 import { Button } from '@lody/ui/button';
+import { Field as UiField } from '@lody/ui/field';
 import { Select } from '@lody/ui/select';
 import { Textarea } from '@lody/ui/textarea';
+import { space } from '@lody/ui/tokens/scales.stylex';
 import { getFirstTaskPrimaryAction } from '../first-task-primary-action';
 import { OnboardingBackButton, OnboardingNextButton, OnboardingShell } from '../onboarding-shell';
 import { useOnboardingAnalytics } from '../onboarding-analytics';
+import { onboardingSurface as surface } from './surface';
+
+const styles = stylex.create({
+  option: { display: 'flex', alignItems: 'center', gap: space[2], minWidth: 0 },
+  optionName: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    minWidth: 0,
+  },
+  seeds: { display: 'flex', flexWrap: 'wrap', gap: space[2] },
+});
 
 export function getFirstTaskAgentConfigs(
   configs: readonly AgentConfigMeta[],
@@ -247,7 +261,7 @@ export function FirstTaskScreen({
       }}
       secondaryAction={<OnboardingBackButton onClick={onBack} />}
       primaryAction={
-        <div className="flex items-center gap-2">
+        <div {...stylex.props(surface.actions)}>
           <Button variant="ghost" size="large" onClick={onSkip}>
             {t('onboarding.firstTask.skip', 'Skip for now')}
           </Button>
@@ -265,23 +279,20 @@ export function FirstTaskScreen({
         </div>
       }
     >
-      <div className="flex flex-col gap-4">
-        <div className="flex items-center gap-3 rounded-lg border border-border bg-muted/20 px-4 py-3">
-          <FolderGit2 className="size-5 text-muted-foreground" />
-          <div className="min-w-0 flex-1">
-            <div className="truncate text-sm font-medium">{project.name}</div>
-            <div className="truncate text-xs text-muted-foreground">
+      <div {...stylex.props(surface.stackLoose)}>
+        <div {...stylex.props(surface.card, surface.cardPadded)}>
+          <FolderGit2 {...stylex.props(surface.icon20, surface.iconMuted)} />
+          <div {...stylex.props(surface.textColumn)}>
+            <div {...stylex.props(surface.title)}>{project.name}</div>
+            <div {...stylex.props(surface.detail)}>
               {t('onboarding.firstTask.project', 'Project')}
             </div>
           </div>
         </div>
-        <div className="flex flex-col gap-1.5">
-          <label
-            htmlFor="onboarding-first-task-agent"
-            className="text-xs font-medium text-slate-700"
-          >
+        <div {...stylex.props(surface.stackTight)}>
+          <UiField.Label htmlFor="onboarding-first-task-agent">
             {t('onboarding.firstTask.agent', 'Agent')}
-          </label>
+          </UiField.Label>
           <Select.Root
             value={config?.id}
             onValueChange={(value) => {
@@ -298,15 +309,15 @@ export function FirstTaskScreen({
             >
               <Select.Value placeholder={t('onboarding.firstTask.selectAgent', 'Select an Agent')}>
                 {config ? (
-                  <span className="flex min-w-0 items-center gap-2">
+                  <span {...stylex.props(styles.option)}>
                     <AgentIcon
                       cliType={config.cliType}
                       agentType={config.agentType}
                       brandId={config.brandId}
                       env={config.env}
-                      className="size-4 shrink-0"
+                      className={stylex.props(surface.icon16).className}
                     />
-                    <span className="truncate">{config.name}</span>
+                    <span {...stylex.props(styles.optionName)}>{config.name}</span>
                   </span>
                 ) : undefined}
               </Select.Value>
@@ -314,27 +325,27 @@ export function FirstTaskScreen({
             <Select.Content>
               {availableConfigs.map((candidate) => (
                 <Select.Item key={candidate.id} value={candidate.id}>
-                  <span className="flex min-w-0 items-center gap-2">
+                  <span {...stylex.props(styles.option)}>
                     <AgentIcon
                       cliType={candidate.cliType}
                       agentType={candidate.agentType}
                       brandId={candidate.brandId}
                       env={candidate.env}
-                      className="size-4 shrink-0"
+                      className={stylex.props(surface.icon16).className}
                     />
-                    <span className="truncate">{candidate.name}</span>
+                    <span {...stylex.props(styles.optionName)}>{candidate.name}</span>
                   </span>
                 </Select.Item>
               ))}
             </Select.Content>
           </Select.Root>
           {!config ? (
-            <p className="text-xs text-muted-foreground">
+            <UiField.Description>
               {t(
                 'onboarding.firstTask.agentUnavailable',
                 'The selected Agent is no longer available on this machine.'
               )}
-            </p>
+            </UiField.Description>
           ) : null}
         </div>
         <Textarea
@@ -343,19 +354,18 @@ export function FirstTaskScreen({
           rows={4}
           placeholder={t('onboarding.firstTask.promptPlaceholder', 'What should Lody do first?')}
         />
-        <div className="flex flex-wrap gap-2">
+        <div {...stylex.props(styles.seeds)}>
           {seedPrompts.map((seed) => (
-            <button
+            <Button
               key={seed}
               type="button"
+              variant="secondary"
+              size="small"
+              shape="pill"
               onClick={() => setPrompt(seed)}
-              className={cn(
-                'rounded-full border border-border px-3 py-1 text-xs text-muted-foreground',
-                'hover:bg-hover hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring'
-              )}
             >
               {seed}
-            </button>
+            </Button>
           ))}
         </div>
       </div>

@@ -1,6 +1,9 @@
 import { useEffect, useState, type KeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { CreditCard, Shield, User } from 'lucide-react';
+import * as stylex from '@stylexjs/stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { space } from '@lody/ui/tokens/scales.stylex';
 import { Spinner } from '@lody/ui/spinner';
 import { Button } from '@lody/ui/button';
 import { Input } from '@lody/ui/input';
@@ -8,6 +11,36 @@ import { Field as UiField } from '@lody/ui/field';
 import { Select } from '@lody/ui/select';
 import { Dialog } from '@/ui/dialog';
 import { formatDate, formatUsd } from './billing-setting-pure';
+import { settingsSurface as surface } from './surface';
+
+const styles = stylex.create({
+  form: { display: 'flex', flexDirection: 'column', gap: space[4] },
+  field: { display: 'flex', flexDirection: 'column', gap: space[1.5] },
+  /** A note inside the dialog's form is the region rung: a fill, no edge. */
+  note: { margin: 0, fontSize: '12px', lineHeight: 1.5, color: colors.secondaryLabel },
+  loading: { display: 'flex', alignItems: 'center', gap: space[2] },
+  option: { display: 'flex', alignItems: 'center', gap: space[2] },
+  optionIcon: { width: '14px', height: '14px', flexShrink: 0, color: colors.tertiaryLabel },
+  icon: { width: '14px', height: '14px', flexShrink: 0 },
+  costLine: {
+    display: 'flex',
+    alignItems: 'baseline',
+    justifyContent: 'space-between',
+    gap: space[4],
+    fontSize: '13px',
+    color: colors.label,
+  },
+  amount: { fontVariantNumeric: 'tabular-nums' },
+  costNote: {
+    margin: 0,
+    marginTop: space[1],
+    fontSize: '12px',
+    lineHeight: 1.5,
+    color: colors.secondaryLabel,
+  },
+  /** The renewal is a second fact in the same block: set apart by space, not a rule. */
+  renewal: { marginTop: space[2] },
+});
 
 export type InviteMemberRole = 'member' | 'admin';
 
@@ -91,9 +124,9 @@ export function InviteMemberDialog({
 
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
-      <Dialog.Content className="max-w-md gap-0 overflow-hidden p-0 sm:p-0">
-        <Dialog.Header className="px-5 pb-4 pt-5">
-          <Dialog.Title className="pr-6 text-base">
+      <Dialog.Content>
+        <Dialog.Header>
+          <Dialog.Title>
             {memberLimitReached
               ? t(
                   billingUiAvailable
@@ -110,21 +143,17 @@ export function InviteMemberDialog({
         </Dialog.Header>
 
         {memberLimitReached ? (
-          <div className="px-5 pb-5">
-            <p className="rounded-lg border border-border/70 bg-muted/30 px-3 py-2.5 text-xs leading-relaxed text-muted-foreground">
-              {t(
-                billingUiAvailable
-                  ? 'workspace.invite.limitAlertDescription'
-                  : 'workspace.invite.mobileLimitAlertDescription'
-              )}
-            </p>
-          </div>
+          <p {...stylex.props(surface.formBlock, styles.note)}>
+            {t(
+              billingUiAvailable
+                ? 'workspace.invite.limitAlertDescription'
+                : 'workspace.invite.mobileLimitAlertDescription'
+            )}
+          </p>
         ) : (
-          <div className="space-y-4 px-5 pb-5">
-            <div className="space-y-1.5">
-              <UiField.Label htmlFor="invite-email" className="text-xs text-muted-foreground">
-                {t('workspace.invite.email')}
-              </UiField.Label>
+          <div {...stylex.props(styles.form)}>
+            <div {...stylex.props(styles.field)}>
+              <UiField.Label htmlFor="invite-email">{t('workspace.invite.email')}</UiField.Label>
               <Input
                 id="invite-email"
                 value={email}
@@ -139,10 +168,8 @@ export function InviteMemberDialog({
               />
             </div>
 
-            <div className="space-y-1.5">
-              <UiField.Label htmlFor="invite-role" className="text-xs text-muted-foreground">
-                {t('workspace.invite.role')}
-              </UiField.Label>
+            <div {...stylex.props(styles.field)}>
+              <UiField.Label htmlFor="invite-role">{t('workspace.invite.role')}</UiField.Label>
               <Select.Root
                 items={[
                   { value: 'member', label: t('organization.role.member') },
@@ -153,36 +180,36 @@ export function InviteMemberDialog({
                   if (value != null) setRole(value as InviteMemberRole);
                 }}
               >
-                <Select.Trigger id="invite-role" className="h-9 w-full">
+                <Select.Trigger id="invite-role">
                   <Select.Value />
                 </Select.Trigger>
                 <Select.Content>
                   <Select.Item value="member">
-                    <div className="flex items-center gap-2">
-                      <User className="h-3.5 w-3.5 text-muted-foreground" />
+                    <div {...stylex.props(styles.option)}>
+                      <User {...stylex.props(styles.optionIcon)} />
                       <span>{t('organization.role.member')}</span>
                     </div>
                   </Select.Item>
                   <Select.Item value="admin">
-                    <div className="flex items-center gap-2">
-                      <Shield className="h-3.5 w-3.5 text-muted-foreground" />
+                    <div {...stylex.props(styles.option)}>
+                      <Shield {...stylex.props(styles.optionIcon)} />
                       <span>{t('organization.role.admin')}</span>
                     </div>
                   </Select.Item>
                 </Select.Content>
               </Select.Root>
-              <p className="text-xs leading-relaxed text-muted-foreground">
+              <UiField.Description>
                 {role === 'admin'
                   ? t('workspace.invite.roleHintAdmin')
                   : t('workspace.invite.roleHintMember')}
-              </p>
+              </UiField.Description>
             </div>
 
             {billingUiAvailable && <SeatCostNotice preview={seatPreview} />}
           </div>
         )}
 
-        <Dialog.Footer className="gap-2 border-t border-border/60 bg-muted/20 px-5 py-3.5">
+        <Dialog.Footer>
           <Button
             variant="secondary"
             size="small"
@@ -202,13 +229,13 @@ export function InviteMemberDialog({
                   onOpenBilling();
                 }}
               >
-                <CreditCard className="mr-1.5 h-3.5 w-3.5" />
+                <CreditCard {...stylex.props(styles.icon)} />
                 {t('workspace.invite.upgradeButton')}
               </Button>
             )
           ) : (
             <Button size="small" onClick={submit} disabled={!email.trim() || inviting}>
-              {inviting && <Spinner className="mr-1.5 h-3.5 w-3.5" />}
+              {inviting && <Spinner size="small" />}
               {inviting ? t('common.inviting') : t('common.invite')}
             </Button>
           )}
@@ -230,8 +257,8 @@ function SeatCostNotice({ preview }: { preview?: SeatInvitePreview | null }) {
 
   if (preview === undefined) {
     return (
-      <div className="flex items-center gap-2 rounded-lg border border-border/70 bg-muted/30 px-3 py-2.5 text-xs text-muted-foreground">
-        <Spinner className="h-3.5 w-3.5" />
+      <div {...stylex.props(surface.formBlock, styles.note, styles.loading)}>
+        <Spinner size="small" />
         {t('workspace.invite.seat.loading')}
       </div>
     );
@@ -242,20 +269,16 @@ function SeatCostNotice({ preview }: { preview?: SeatInvitePreview | null }) {
     // adding an empty cost box below the form.
     if (preview.reason === 'free') return null;
     return (
-      <p className="rounded-lg border border-border/70 bg-muted/30 px-3 py-2.5 text-xs leading-relaxed text-muted-foreground">
-        {t('workspace.invite.seat.covered')}
-      </p>
+      <p {...stylex.props(surface.formBlock, styles.note)}>{t('workspace.invite.seat.covered')}</p>
     );
   }
 
   const yearly = preview.interval === 'year';
   return (
-    <div className="rounded-lg border border-border/70 bg-muted/30 p-3">
-      <div className="flex items-baseline justify-between gap-4">
-        <span className="text-sm font-normal text-foreground">
-          {t('workspace.invite.seat.addsSeat')}
-        </span>
-        <span className="text-sm font-normal tabular-nums text-foreground">
+    <div {...stylex.props(surface.formBlock)}>
+      <div {...stylex.props(styles.costLine)}>
+        <span>{t('workspace.invite.seat.addsSeat')}</span>
+        <span {...stylex.props(styles.amount)}>
           {preview.proratedAmount === null
             ? t('workspace.invite.seat.amountUnknown')
             : t('workspace.invite.seat.approxAmount', {
@@ -263,13 +286,13 @@ function SeatCostNotice({ preview }: { preview?: SeatInvitePreview | null }) {
               })}
         </span>
       </div>
-      <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+      <p {...stylex.props(styles.costNote)}>
         {yearly
           ? t('workspace.invite.seat.chargeNoteYear', { price: formatUsd(preview.unitAmount) })
           : t('workspace.invite.seat.chargeNoteMonth', { price: formatUsd(preview.unitAmount) })}
       </p>
       {preview.currentPeriodEnd !== null && (
-        <p className="mt-2 border-t border-border/60 pt-2 text-xs leading-relaxed text-muted-foreground">
+        <p {...stylex.props(styles.costNote, styles.renewal)}>
           {yearly
             ? t('workspace.invite.seat.renewalYear', {
                 date: formatDate(preview.currentPeriodEnd),

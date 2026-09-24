@@ -1,10 +1,54 @@
 import { lazy, Suspense, useRef, useState } from 'react';
+import * as stylex from '@stylexjs/stylex';
 import { Spinner } from '@lody/ui/spinner';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@lody/ui/button';
 import { Popover } from '@lody/ui/popover';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { corner, duration, ease, radius, space } from '@lody/ui/tokens/scales.stylex';
 
 const EmojiPickerPanel = lazy(() => import('./emoji-picker-panel'));
+
+const FILL = `color-mix(in oklab, transparent, ${colors.label} 6%)`;
+
+const styles = stylex.create({
+  /** Edgeless and filling the slot, at the well's radius less the slot's inset. */
+  trigger: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+    width: '100%',
+    height: '100%',
+    padding: 0,
+    margin: 0,
+    borderWidth: 0,
+    borderStyle: 'none',
+    borderRadius: `calc(${radius.medium} - ${space[1]})`,
+    cornerShape: corner.shape,
+    outline: 'none',
+    boxShadow: 'none',
+    backgroundColor: { default: 'transparent', ':hover': FILL, ':focus-visible': FILL },
+    color: 'inherit',
+    fontSize: '16px',
+    lineHeight: 1,
+    cursor: 'pointer',
+    transitionProperty: 'background-color',
+    transitionDuration: duration.fast,
+    transitionTimingFunction: ease.standard,
+  },
+  triggerOpen: { backgroundColor: FILL },
+  loading: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '288px',
+    height: '320px',
+    color: colors.secondaryLabel,
+  },
+  /** The reset is the popover's last line: the panel's gap sets it apart, not a rule. */
+  reset: { display: 'grid' },
+});
 
 /**
  * A catalog entry's glyph: the current emoji, and a picker behind it.
@@ -52,7 +96,7 @@ export function EmojiField({
             ref={triggerRef}
             type="button"
             aria-label={t('settings.emoji.label', 'Emoji')}
-            className="flex h-full w-full shrink-0 items-center justify-center rounded-md text-base leading-none shadow-none outline-hidden transition-colors hover:bg-foreground/[0.06] focus-visible:bg-foreground/[0.06] data-[popup-open]:bg-foreground/[0.06]"
+            {...stylex.props(styles.trigger, open && styles.triggerOpen)}
           >
             <span aria-hidden="true">{value || defaultEmoji}</span>
           </button>
@@ -60,7 +104,6 @@ export function EmojiField({
       />
       <Popover.Content
         align="start"
-        className="w-fit p-0"
         container={portalContainer}
         // The list is long and the search field wants the caret; taking focus to
         // the popover root would fight the picker's own keyboard handling.
@@ -68,8 +111,8 @@ export function EmojiField({
       >
         <Suspense
           fallback={
-            <div className="flex h-[320px] w-72 items-center justify-center">
-              <Spinner className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
+            <div {...stylex.props(styles.loading)}>
+              <Spinner size="small" aria-hidden="true" />
             </div>
           }
         >
@@ -81,12 +124,11 @@ export function EmojiField({
           />
         </Suspense>
         {value ? (
-          <div className="border-t border-border/60 p-1">
+          <div {...stylex.props(styles.reset)}>
             <Button
               type="button"
               variant="ghost"
               size="small"
-              className="h-7 w-full justify-start text-xs text-muted-foreground"
               onClick={() => {
                 onChange('');
                 setOpen(false);

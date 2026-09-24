@@ -182,5 +182,28 @@ Combobox 的触发器、数字框、密码框，以及复选框、单选、开�
 字段在每一层表面上都只低一小步。这是负责人从三个 Vesper 方案里选定的 B（A 为固定
 4.5%，B 为 28%，C 为 16%）。
 
+## 业务层：用 StyleX，而不是 Tailwind 材质桥
+
+把新材质同步到业务层，最初的做法是一座 Tailwind「材质桥」：用工具类和 `--shadow-*`
+把 `@lody/ui` 的数值再写一遍。负责人叫停了这个做法。能迁到 StyleX 的样式就迁到
+StyleX，直接读 `@lody/ui` 自己的 token。这样只有一个事实来源，而不是两份靠手工保持
+一致的拷贝。
+
+- `@lody/components` 新增依赖 `@stylexjs/stylex`（0.19.0，与 `@lody/ui` 锁定的版本
+  一致）。Electron、Storybook、Vitest 三处构建里，unplugin 本来就处理所有模块；
+  `@lody/ui` 也本来就导出了 `tokens/colors.stylex` 与 `tokens/scales.stylex`；应用的
+  `ThemeRoot` class 也已经把用户选择的配色传给这些 token。
+- 文件结构照搬 `@lody/ui`：样式写在组件自己的 `stylex.create` 里，一个区域共享的
+  外观放在该区域的 `surface.ts`（首个是 `settings/surface.ts`）。`lib/stylex.ts` 的
+  `withClassName` 用来追加调用方的布局 class。跟随字号档位的文字保留 `em`。永远不把
+  StyleX 或 Tailwind 的视觉 class 传进 `@lody/ui` 部件：两个 class 设置同一属性时，
+  生效顺序由样式表决定，而不是 class 列表的先后。
+- `CompactSection`、`CompactRow` 和表单基元都已是 StyleX。分组自己负责行与行之间的
+  分隔线（StyleX 没有后代选择器，所以由它包裹每个子元素）。危险区改成
+  `tone="danger"`，不再靠调用方传 ring class。标题栏上的操作改用 `@lody/ui` 的
+  ghost 图标按钮，不再是 Radix 时期的 props 加 `shadow-xs` 覆盖。
+- 其余迁移按区域分工：设置目录与编辑器，账户、工作区与通用设置，composer 选择器
+  （`OptionSelector` 和运行配置菜单），以及其他最明显割裂的界面。
+
 相关：[token gallery](2026-09-09-ui-token-gallery.md)、
 [调用点迁移](2026-09-22-ui-radix-callsite-migration.md)。

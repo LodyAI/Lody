@@ -1,24 +1,22 @@
 import { useTranslation } from 'react-i18next';
 import { Link2 } from 'lucide-react';
+import * as stylex from '@stylexjs/stylex';
 import type { ProjectSkillScope } from '@lody/shared';
-import { cn } from '@/lib/utils';
+import { Badge } from '@lody/ui/badge';
 
 /* Shared skill badges used by the desktop Skills tab, the mobile sheet, the `$`
-   mention detail panel, and the skill detail dialog. `size` controls only the
-   badge's padding density: 'sm' (px-1 py-0) for compact inline rows, 'md'
-   (px-1.5 py-0.5) for the roomier detail view. Pass `className` for layout-only
+   mention detail panel, and the skill detail dialog. They are `@lody/ui` badges,
+   which have one size: `size` is kept so callers that state a density still
+   compile, and no longer changes the chip. Pass `className` for layout-only
    tweaks (e.g. `shrink-0`). */
 type SkillBadgeSize = 'sm' | 'md';
 
-const SKILL_BADGE_BASE = 'rounded-sm border border-border/70 text-[10px] text-muted-foreground';
-const SKILL_BADGE_PADDING: Record<SkillBadgeSize, string> = {
-  sm: 'px-1 py-0',
-  md: 'px-1.5 py-0.5',
-};
+const styles = stylex.create({
+  version: { fontFamily: 'var(--font-mono, ui-monospace, monospace)' },
+});
 
 export function SkillScopeBadge({
   scope,
-  size = 'md',
   className,
 }: {
   scope: ProjectSkillScope;
@@ -27,19 +25,18 @@ export function SkillScopeBadge({
 }) {
   const { t } = useTranslation();
   return (
-    <span className={cn(SKILL_BADGE_BASE, SKILL_BADGE_PADDING[size], 'font-normal', className)}>
+    <Badge className={className}>
       {scope === 'system'
         ? t('workspace.projects.skills.scopeSystem', 'System')
         : scope === 'global'
           ? t('workspace.projects.skills.scopeGlobal', 'Global')
           : t('workspace.projects.skills.scopeProject', 'Project')}
-    </span>
+    </Badge>
   );
 }
 
 export function SkillVersionBadge({
   version,
-  size = 'md',
   className,
 }: {
   version: string;
@@ -47,22 +44,14 @@ export function SkillVersionBadge({
   className?: string;
 }) {
   return (
-    <span
-      className={cn(
-        SKILL_BADGE_BASE,
-        SKILL_BADGE_PADDING[size],
-        'font-mono tabular-nums',
-        className
-      )}
-    >
-      v{version}
-    </span>
+    <Badge className={className}>
+      <span {...stylex.props(styles.version)}>v{version}</span>
+    </Badge>
   );
 }
 
 export function SkillSymlinkBadge({
   symlinkTarget,
-  size = 'md',
   withTooltip = true,
   className,
 }: {
@@ -83,17 +72,8 @@ export function SkillSymlinkBadge({
         })
       : t('workspace.projects.skills.symlinkTitle', 'This skill is a symlink');
   return (
-    <span
-      className={cn(
-        SKILL_BADGE_BASE,
-        SKILL_BADGE_PADDING[size],
-        'inline-flex items-center gap-0.5',
-        className
-      )}
-      title={title}
-    >
-      <Link2 className="h-2.5 w-2.5" />
+    <Badge className={className} title={title} icon={<Link2 />}>
       {t('workspace.projects.skills.symlink', 'Symlink')}
-    </span>
+    </Badge>
   );
 }

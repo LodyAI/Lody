@@ -97,7 +97,7 @@ describe('AcpBottomBarModeSelector UI', () => {
       'button[aria-label="Collaboration mode"]'
     );
 
-    expect(fastModeButton?.className).toContain('bg-primary/[0.12]');
+    expect(fastModeButton?.getAttribute('aria-pressed')).toBe('true');
     expect(planModeButton?.textContent).toBe('Plan');
     expect(planModeButton?.className).not.toContain('border');
     expect(
@@ -136,7 +136,7 @@ describe('AcpBottomBarModeSelector UI', () => {
       'button[aria-label="Fast mode"]'
     );
 
-    expect(fastModeButton?.className).toContain('bg-primary/[0.12]');
+    expect(fastModeButton?.getAttribute('aria-pressed')).toBe('true');
     fastModeButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     expect(values).toEqual({ fast: 'off' });
   });

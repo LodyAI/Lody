@@ -13,10 +13,9 @@ rolls back — is in the root [AGENTS.md](../../../../../AGENTS.md).
 - Desktop overlay close is `absolute` on the RIGHT pane only, equal `top`/`right`
   inset, no close row. Right-pane `padding-right` keeps chrome off that column;
   apply it inside the scroll area so the scrollbar stays flush with the pane edge.
-- Light settings surfaces are white, not gray-on-gray: `data-settings-surface`
-  maps `--card` to `--popover`. Cards have no border: a group's title sits above
-  its card, rows split by a line, list rows use `SETTINGS_ROW_CARD_CLASS`; a form
-  is one surface. No new gray fills.
+- Settings style in StyleX from `surface.ts` / `compact-layout.tsx`: a card has no
+  border, its title sits above it, rows split by a line; a list is ONE card of ruled
+  rows, never stacked cards; a form is one surface. No new gray fills.
 
 - `share-management-setting.tsx` lists published static copies via the scoped cloud
   query. Ordinary members see their publications; admins see the workspace inventory.

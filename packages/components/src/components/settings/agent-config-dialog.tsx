@@ -45,6 +45,7 @@ import {
   type AcpConfigOptionValue,
 } from '@/components/shared/acp-selector-options';
 import {
+  AlertTriangle,
   ArrowLeft,
   Check,
   ChevronDown,
@@ -62,7 +63,6 @@ import {
 } from 'lucide-react';
 import { Spinner } from '@lody/ui/spinner';
 import { AgentIcon } from '@/components/icons/agent-icon';
-import { cn } from '@/lib/utils';
 import { useKeyboardAwareScrollIntoView } from '@/hooks/use-keyboard-aware-scroll-into-view';
 import { useMachineAcpBinaryProgress } from '@/hooks/use-machine-acp-binary-progress';
 import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
@@ -76,7 +76,14 @@ import { Select } from '@lody/ui/select';
 import { Tabs } from '@lody/ui/tabs';
 import { EnvVarsTextarea, envVarsToText } from './env-vars-textarea';
 import { Tooltip } from '@lody/ui/tooltip';
+import { Badge } from '@lody/ui/badge';
+import { Radio, RadioGroup } from '@lody/ui/radio';
+import * as stylex from '@stylexjs/stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { control, corner, duration, ease, radius, space } from '@lody/ui/tokens/scales.stylex';
 import { AcpAuthenticationPanel } from './acp-authentication-panel';
+import { Field } from './form-primitives';
+import { settingsCatalog as catalog, settingsSurface as surface } from './surface';
 import { BubInstallGuide } from './bub-install-guide';
 import { ProviderSetupRow } from './provider-setup-row';
 import {
@@ -87,6 +94,377 @@ import {
 } from '@/atoms/agents';
 
 type Translate = ReturnType<typeof useTranslation>['t'];
+
+// =============================================================================
+// Styles
+// =============================================================================
+
+const SM = '@media (min-width: 640px)';
+/** A block inside the dialog: the region rung, a fill with no edge. */
+const REGION = `color-mix(in oklab, transparent, ${colors.label} 3%)`;
+const MONO = 'var(--font-mono, ui-monospace, monospace)';
+
+const styles = stylex.create({
+  /** The picker and the form, side by side and set apart by space. */
+  layout: {
+    display: 'flex',
+    flexGrow: 1,
+    gap: space[4],
+    height: '100%',
+    minHeight: 0,
+    minWidth: 0,
+  },
+  layoutNarrow: { gap: 0 },
+
+  /** The type picker: a region of the panel, not a second surface with an edge. */
+  rail: {
+    boxSizing: 'border-box',
+    display: 'flex',
+    flexDirection: 'column',
+    flexShrink: 0,
+    width: '292px',
+    height: '100%',
+    minHeight: 0,
+    backgroundColor: REGION,
+    borderRadius: radius.medium,
+    cornerShape: corner.shape,
+  },
+  railNarrow: {
+    flexShrink: 1,
+    width: '100%',
+    backgroundColor: 'transparent',
+    borderRadius: 0,
+  },
+  railHeader: {
+    display: 'flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    gap: space[2],
+    minHeight: control.large,
+    paddingInline: space[4],
+  },
+  railHeaderNarrow: {
+    minHeight: '56px',
+    paddingInlineStart: space[2],
+    paddingInlineEnd: space[4],
+  },
+  railTitle: {
+    flexGrow: 1,
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: '14px',
+    lineHeight: 1.25,
+    color: colors.label,
+  },
+  search: { position: 'relative', flexShrink: 0, paddingInline: space[2] },
+  searchClear: {
+    position: 'absolute',
+    insetBlockStart: '50%',
+    insetInlineEnd: `calc(${space[2]} + ${space[1]})`,
+    display: 'flex',
+    transform: 'translateY(-50%)',
+  },
+  railList: {
+    flexGrow: 1,
+    minHeight: 0,
+    overflowY: 'auto',
+    marginTop: space[2],
+    paddingInline: space[2],
+    paddingBottom: space[3],
+  },
+  railGroup: { marginBottom: space[1] },
+  railGroupTitle: {
+    paddingInline: space[2],
+    paddingTop: space[3],
+    paddingBottom: space[1.5],
+    fontSize: '11px',
+    lineHeight: 1.25,
+    color: colors.tertiaryLabel,
+  },
+  railGroupItems: { display: 'flex', flexDirection: 'column', gap: '2px' },
+  railItem: { gap: '10px', fontSize: '13px' },
+  railItemNarrow: { paddingBlock: '10px', fontSize: '15px' },
+  railItemDisabled: {
+    opacity: 0.45,
+    cursor: 'not-allowed',
+    backgroundColor: { default: 'transparent', ':hover': 'transparent' },
+  },
+  railIcon: {
+    display: 'flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '24px',
+    height: '24px',
+    color: colors.secondaryLabel,
+  },
+  railIconNarrow: { width: '28px', height: '28px' },
+  railIconSelected: { color: colors.label },
+  optionIcon: { width: '14px', height: '14px' },
+  optionIconLarge: { width: '16px', height: '16px' },
+  railCheck: { flexShrink: 0, width: '12px', height: '12px', color: colors.accent },
+  railChevron: { flexShrink: 0, width: '16px', height: '16px', color: colors.tertiaryLabel },
+  railEmpty: {
+    paddingInline: space[2],
+    paddingBlock: space[6],
+    textAlign: 'center',
+    fontSize: '12px',
+    color: colors.secondaryLabel,
+  },
+
+  /** The form: its header, the scrolling groups and the answers, set apart by space. */
+  pane: { flexGrow: 1 },
+  paneNarrow: { gap: 0 },
+  header: {
+    display: 'flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: space[3],
+    minHeight: control.large,
+    // The panel's cross sits in this corner, out of the header's flow.
+    paddingInlineEnd: `calc(${control.small} + ${space[2]})`,
+  },
+  headerNarrow: {
+    minHeight: '56px',
+    paddingInlineStart: space[2],
+    paddingInlineEnd: space[4],
+  },
+  headerMain: { display: 'flex', alignItems: 'center', gap: space[2], minWidth: 0 },
+  headerGlyph: {
+    display: 'flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: control.large,
+    height: control.large,
+    borderRadius: radius.medium,
+    cornerShape: corner.shape,
+    backgroundColor: `color-mix(in oklab, transparent, ${colors.label} 5%)`,
+    color: colors.label,
+  },
+  headerText: { minWidth: 0 },
+  title: {
+    margin: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: '14px',
+    fontWeight: 400,
+    lineHeight: 1.25,
+    color: colors.label,
+  },
+  subtitle: {
+    margin: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: '12px',
+    lineHeight: 1.375,
+    color: colors.secondaryLabel,
+  },
+  bodyNarrow: {
+    marginInline: 0,
+    marginBlock: 0,
+    paddingInline: space[4],
+    paddingBlock: space[4],
+  },
+  /** The groups of the form, stacked and set apart by space. */
+  groups: { display: 'flex', flexDirection: 'column', gap: space[4], minWidth: 0 },
+  hidden: { display: 'none' },
+  stack: { display: 'flex', flexDirection: 'column', gap: space[3], minWidth: 0 },
+  stackTight: { display: 'flex', flexDirection: 'column', gap: space[2], minWidth: 0 },
+  actionRow: { display: 'flex', alignItems: 'center', gap: space[2] },
+  ready: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: space[1.5],
+    fontSize: '12px',
+    color: colors.success,
+  },
+  hint: { margin: 0, fontSize: '11px', lineHeight: 1.375, color: colors.secondaryLabel },
+  note: { margin: 0, fontSize: '12px', lineHeight: 1.375, color: colors.secondaryLabel },
+  /** A status inside the form: the region rung's fill, copy at the caption step. */
+  status: { display: 'flex', flexDirection: 'column', gap: space[2], fontSize: '12px' },
+  statusText: { margin: 0, lineHeight: 1.375, color: colors.secondaryLabel },
+  statusWarning: { margin: 0, lineHeight: 1.375, color: colors.warning },
+  statusBusy: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: space[2],
+    margin: 0,
+    lineHeight: 1.375,
+    color: colors.secondaryLabel,
+  },
+  /** A warning is a tint and a mark, never a box. */
+  warning: {
+    display: 'flex',
+    alignItems: 'flex-start',
+    gap: space[2],
+    paddingInline: space[3],
+    paddingBlock: space[2],
+    borderRadius: radius.medium,
+    cornerShape: corner.shape,
+    backgroundColor: `color-mix(in oklab, transparent, ${colors.warning} 10%)`,
+    fontSize: '12px',
+    lineHeight: 1.375,
+    color: colors.label,
+  },
+  warningMark: {
+    flexShrink: 0,
+    width: '14px',
+    height: '14px',
+    marginTop: '2px',
+    color: colors.warning,
+  },
+  warningBody: { minWidth: 0 },
+  answer: { alignSelf: 'flex-start' },
+  footerNarrow: { paddingInline: space[4], paddingBottom: space[3] },
+  footerNote: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    alignSelf: 'center',
+    gap: space[1],
+    minWidth: 0,
+    marginInlineEnd: 'auto',
+    fontSize: '12px',
+    color: colors.secondaryLabel,
+  },
+
+  /** What the header says about the capability probe. */
+  probing: {
+    display: 'inline-flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    gap: space[1.5],
+    whiteSpace: 'nowrap',
+    fontSize: '12px',
+    color: colors.secondaryLabel,
+  },
+  probeReady: { display: 'inline-flex', flexShrink: 0, alignItems: 'center', gap: space[2] },
+  /** A glyph in a box `@lody/ui` draws: an icon-only button's or a badge's. */
+  glyphFill: { width: '100%', height: '100%' },
+
+  /** A credential mode: the radio, then its name over what it is for. */
+  radioRow: { display: 'flex', alignItems: 'flex-start', gap: space[2], cursor: 'pointer' },
+  radioBox: { display: 'flex', flexShrink: 0, paddingTop: '1px' },
+  radioText: { display: 'flex', flexDirection: 'column', gap: '2px', minWidth: 0 },
+  radioLabel: { fontSize: '13px', lineHeight: 1.375, color: colors.label },
+  radioHint: { fontSize: '11px', lineHeight: 1.375, color: colors.secondaryLabel },
+  link: {
+    color: colors.accent,
+    textDecoration: { default: 'none', ':hover': 'underline' },
+    textUnderlineOffset: '2px',
+  },
+  disclosureIcon: {
+    flexShrink: 0,
+    width: '12px',
+    height: '12px',
+    transitionProperty: 'transform',
+    transitionDuration: duration.fast,
+    transitionTimingFunction: ease.standard,
+  },
+  disclosureIconOpen: { transform: 'rotate(180deg)' },
+  lockIcon: { flexShrink: 0, width: '12px', height: '12px', opacity: 0.7 },
+  /** The panel's padding rides on a child: Base UI animates a height that counts it. */
+  revealed: { paddingTop: space[2] },
+  envList: {
+    margin: 0,
+    overflow: 'hidden',
+    backgroundColor: REGION,
+    borderRadius: radius.medium,
+    cornerShape: corner.shape,
+    fontSize: '11px',
+  },
+  envRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: space[3],
+    paddingInline: space[3],
+    paddingBlock: space[1.5],
+  },
+  envKey: {
+    flexBasis: 0,
+    flexGrow: 1,
+    minWidth: 0,
+    margin: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontFamily: MONO,
+    color: colors.secondaryLabel,
+  },
+  envValue: {
+    flexBasis: 0,
+    flexGrow: 1,
+    minWidth: 0,
+    margin: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    textAlign: 'end',
+    fontFamily: MONO,
+    color: colors.label,
+  },
+
+  /** A group that folds: its name is the trigger, no bar and no box around it. */
+  sectionHead: { display: 'flex', alignItems: 'center', gap: space[1], minHeight: control.small },
+  sectionTrigger: {
+    display: 'flex',
+    flexGrow: 1,
+    alignItems: 'center',
+    gap: space[1.5],
+    minWidth: 0,
+    height: control.small,
+    margin: 0,
+    paddingInline: 0,
+    borderWidth: 0,
+    borderStyle: 'none',
+    borderRadius: radius.small,
+    cornerShape: corner.shape,
+    backgroundColor: 'transparent',
+    fontFamily: 'inherit',
+    fontSize: '12px',
+    fontWeight: 400,
+    lineHeight: 1.25,
+    textAlign: 'start',
+    color: { default: colors.secondaryLabel, ':hover': colors.label },
+    cursor: 'pointer',
+    transitionProperty: 'color',
+    transitionDuration: duration.fast,
+    transitionTimingFunction: ease.standard,
+  },
+  sectionTitle: {
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  sectionCount: {
+    marginInlineStart: 'auto',
+    fontSize: '11px',
+    color: colors.tertiaryLabel,
+    fontVariantNumeric: 'tabular-nums',
+  },
+  sectionBody: { display: 'flex', flexDirection: 'column', gap: space[2], paddingTop: space[1.5] },
+  sectionHint: {
+    margin: 0,
+    paddingBlock: space[2],
+    fontSize: '12px',
+    color: colors.secondaryLabel,
+  },
+
+  /** A title-generation option: its name, then the control that sets it. */
+  optionRow: {
+    display: 'grid',
+    gridTemplateColumns: { default: 'minmax(0, 1fr)', [SM]: '120px minmax(0, 1fr)' },
+    alignItems: { default: 'stretch', [SM]: 'center' },
+    gap: space[2],
+  },
+  optionList: { display: 'flex', flexDirection: 'column', gap: space[2], paddingTop: space[1] },
+});
 
 // =============================================================================
 // Preset definitions
@@ -1925,57 +2303,54 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
   const pickerPane = (
     <aside
       aria-label={t('agents.agentTypeList', 'Agent types')}
-      className={cn(
-        'flex h-full flex-col border-border/60 bg-muted/20',
-        isNarrowLayout ? 'w-full' : 'w-[292px] shrink-0 border-r'
-      )}
+      {...stylex.props(styles.rail, isNarrowLayout && styles.railNarrow)}
     >
-      <div
-        className={cn(
-          'flex h-[60px] items-center gap-2 border-b border-border/60',
-          isNarrowLayout ? 'pl-2 pr-4' : 'pl-5 pr-14'
-        )}
-      >
+      <div {...stylex.props(styles.railHeader, isNarrowLayout && styles.railHeaderNarrow)}>
         {isNarrowLayout && (
-          <button
+          <Button
             type="button"
+            variant="ghost"
+            size="medium"
+            icon
             onClick={() => onOpenChange(false)}
             aria-label={t('common.close', 'Close')}
-            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-hover/60 hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
           >
-            <ArrowLeft className="h-4 w-4" />
-          </button>
+            <ArrowLeft {...stylex.props(styles.glyphFill)} />
+          </Button>
         )}
-        <div className="min-w-0 flex-1 truncate text-sm font-normal tracking-tight">
+        <div {...stylex.props(styles.railTitle)}>
           {t('settings.agent.dialog.chooseType', 'Choose a type')}
         </div>
       </div>
-      <div className="px-3 pt-3">
-        <div className="relative">
-          <Search
-            className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground"
-            aria-hidden="true"
-          />
-          <Input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder={t('common.search', 'Search')}
-            className={cn('pl-7 pr-7', isNarrowLayout ? 'h-9 text-sm' : 'h-8 text-xs')}
-            aria-label={t('common.search', 'Search')}
-          />
-          {query && (
-            <button
+      <div {...stylex.props(styles.search)}>
+        <Input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder={t('common.search', 'Search')}
+          size={isNarrowLayout ? 'large' : 'medium'}
+          leading={<Search aria-hidden="true" {...stylex.props(catalog.icon)} />}
+          aria-label={t('common.search', 'Search')}
+        />
+        {query && (
+          <span {...stylex.props(styles.searchClear)}>
+            <Button
               type="button"
+              variant="ghost"
+              size="mini"
+              icon
               onClick={() => setQuery('')}
               aria-label={t('common.clear', 'Clear')}
-              className="absolute right-1.5 top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded-xs text-muted-foreground hover:bg-hover/50 hover:text-foreground"
             >
-              <X className="h-3 w-3" />
-            </button>
-          )}
-        </div>
+              <X {...stylex.props(styles.glyphFill)} />
+            </Button>
+          </span>
+        )}
       </div>
-      <nav className="scrollbar-pro mt-2 flex-1 overflow-y-auto px-2 pb-3" role="listbox">
+      <nav
+        role="listbox"
+        // `scrollbar-pro` is the product's thin scrollbar (index.css).
+        className={['scrollbar-pro', stylex.props(styles.railList).className].join(' ')}
+      >
         <RailGroup title={t('settings.agent.dialog.group.builtin', 'Built-in')}>
           {groupedOptions.builtin.map((opt) => (
             <RailItem
@@ -2031,7 +2406,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
           </RailGroup>
         )}
         {filteredOptions.length === 0 && (
-          <div className="px-2 py-6 text-center text-xs text-muted-foreground">
+          <div {...stylex.props(styles.railEmpty)}>
             {t('settings.agent.dialog.noResults', 'No agents match that search')}
           </div>
         )}
@@ -2040,41 +2415,39 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
   );
 
   const formPane = (
-    <section className="flex min-h-0 flex-1 flex-col">
-      <header
-        className={cn(
-          'flex h-[60px] shrink-0 items-center justify-between gap-3 border-b border-border/60',
-          isNarrowLayout ? 'pl-2 pr-4' : 'pl-5 pr-14'
-        )}
-      >
-        <div className="flex min-w-0 items-center gap-2">
+    <section
+      {...stylex.props(catalog.editorForm, styles.pane, isNarrowLayout && styles.paneNarrow)}
+    >
+      <header {...stylex.props(styles.header, isNarrowLayout && styles.headerNarrow)}>
+        <div {...stylex.props(styles.headerMain)}>
           {isNarrowLayout && (
-            <button
+            <Button
               type="button"
+              variant="ghost"
+              size="medium"
+              icon
               onClick={() => (canGoBack ? setMobileView('picker') : onOpenChange(false))}
               aria-label={
                 canGoBack
                   ? t('settings.agent.dialog.back', 'Back to type list')
                   : t('common.close', 'Close')
               }
-              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-hover/60 hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
             >
-              <ArrowLeft className="h-4 w-4" />
-            </button>
+              <ArrowLeft {...stylex.props(styles.glyphFill)} />
+            </Button>
           )}
-          <span
-            className={cn(
-              'flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-border/60 bg-muted/30 text-foreground/90'
-            )}
-          >
-            {selectedOption ? <OptionIcon option={selectedOption} className="h-4 w-4" /> : null}
+          <span {...stylex.props(styles.headerGlyph)}>
+            {selectedOption ? (
+              <OptionIcon
+                option={selectedOption}
+                className={stylex.props(styles.optionIconLarge).className}
+              />
+            ) : null}
           </span>
-          <div className="min-w-0">
-            <h2 className="truncate text-sm font-normal leading-tight">{dialogTitle}</h2>
+          <div {...stylex.props(styles.headerText)}>
+            <h2 {...stylex.props(styles.title)}>{dialogTitle}</h2>
             {selectedOptionDescription && (
-              <p className="line-clamp-1 text-xs text-muted-foreground">
-                {selectedOptionDescription}
-              </p>
+              <p {...stylex.props(styles.subtitle)}>{selectedOptionDescription}</p>
             )}
           </div>
         </div>
@@ -2109,7 +2482,13 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
         )}
       </header>
 
-      <div ref={formScrollRef} className="scrollbar-pro min-h-0 flex-1 overflow-y-auto px-5 py-5">
+      <div
+        ref={formScrollRef}
+        className={[
+          'scrollbar-pro',
+          stylex.props(catalog.editorBody, isNarrowLayout && styles.bodyNarrow).className,
+        ].join(' ')}
+      >
         {waitingForBuiltinSetup &&
           (builtinSetup ? (
             <ProviderSetupRow
@@ -2142,9 +2521,13 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
               }}
             />
           ) : (
-            <Spinner className="h-4 w-4" />
+            <Spinner size="medium" />
           ))}
-        <div className="space-y-5" hidden={waitingForBuiltinSetup}>
+        <div
+          hidden={waitingForBuiltinSetup}
+          // `hidden` alone loses to a stylesheet's `display`.
+          {...stylex.props(styles.groups, waitingForBuiltinSetup && styles.hidden)}
+        >
           <Field
             htmlFor="agent-config-name"
             label={t('agents.configName', 'Name')}
@@ -2158,7 +2541,6 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
               value={formData.name}
               onChange={(event) => setFormData({ ...formData, name: event.target.value })}
               placeholder={t('agents.configNamePlaceholder', 'Enter configuration name')}
-              className="h-9"
               autoComplete="off"
             />
           </Field>
@@ -2197,7 +2579,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
           ) : null}
 
           {isCustom && (
-            <div className="space-y-3 rounded-xl border border-primary/20 bg-primary/[0.04] p-4">
+            <div {...stylex.props(styles.stack)}>
               <Field
                 htmlFor="custom-acp-command"
                 label={t('settings.agent.dialog.custom.commandLabel', 'Launch command')}
@@ -2205,7 +2587,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
                   'settings.agent.dialog.custom.commandHint',
                   'The full command that starts an ACP-compatible agent over stdio, e.g. "npx -y my-acp-agent --flag". Quotes are supported for arguments with spaces; shell features like pipes or $VARS are not.'
                 )}
-                icon={<SquareTerminal className="h-3.5 w-3.5" aria-hidden="true" />}
+                icon={<SquareTerminal aria-hidden="true" {...stylex.props(catalog.icon)} />}
               >
                 <Input
                   id="custom-acp-command"
@@ -2219,10 +2601,9 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
                   )}
                   autoComplete="off"
                   spellCheck={false}
-                  className="h-9 font-mono"
                 />
               </Field>
-              <div className="flex items-center gap-2">
+              <div {...stylex.props(styles.actionRow)}>
                 <Button
                   type="button"
                   variant="secondary"
@@ -2231,22 +2612,22 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
                   onClick={() => void runCustomProbe()}
                 >
                   {probing ? (
-                    <Spinner className="h-3.5 w-3.5" />
+                    <Spinner size="small" />
                   ) : (
-                    <FlaskConical className="h-3.5 w-3.5" />
+                    <FlaskConical {...stylex.props(catalog.icon)} />
                   )}
                   {probing
                     ? t('settings.agent.dialog.custom.testing', 'Testing…')
                     : t('settings.agent.dialog.custom.test', 'Test command')}
                 </Button>
                 {customReady && !probing && (
-                  <span className="inline-flex items-center gap-1.5 text-xs font-normal text-status-success">
-                    <Check className="h-3.5 w-3.5" aria-hidden="true" />
+                  <span {...stylex.props(styles.ready)}>
+                    <Check aria-hidden="true" {...stylex.props(catalog.icon)} />
                     {t('settings.agent.dialog.ready', 'Ready')}
                   </span>
                 )}
               </div>
-              <p className="text-[11px] leading-snug text-muted-foreground">
+              <p {...stylex.props(styles.hint)}>
                 {t(
                   'settings.agent.dialog.custom.testHint',
                   'Custom providers are only probed when you click Test — re-test after changing the command.'
@@ -2256,7 +2637,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
           )}
 
           {builtinRuntimeOverrideKey && !activePreset ? (
-            <div className="rounded-xl border border-border/60 bg-muted/20 p-4">
+            <div {...stylex.props(styles.stack)}>
               <Field
                 htmlFor="builtin-runtime-path"
                 label={t('settings.agent.dialog.runtimeOverride.label', 'Runtime binary path')}
@@ -2264,7 +2645,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
                   'settings.agent.dialog.runtimeOverride.hint',
                   'Advanced: leave empty to let Lody install and verify the managed runtime. Filling this is not recommended unless you need a local enterprise mirror or are debugging runtime startup.'
                 )}
-                icon={<SquareTerminal className="h-3.5 w-3.5" aria-hidden="true" />}
+                icon={<SquareTerminal aria-hidden="true" {...stylex.props(catalog.icon)} />}
               >
                 <Input
                   id="builtin-runtime-path"
@@ -2293,10 +2674,9 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
                   }
                   autoComplete="off"
                   spellCheck={false}
-                  className="h-9 font-mono"
                 />
               </Field>
-              <div className="mt-3 flex items-center gap-2">
+              <div {...stylex.props(styles.actionRow)}>
                 <Button
                   type="button"
                   variant="secondary"
@@ -2310,17 +2690,17 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
                   }}
                 >
                   {probing ? (
-                    <Spinner className="h-3.5 w-3.5" />
+                    <Spinner size="small" />
                   ) : (
-                    <FlaskConical className="h-3.5 w-3.5" />
+                    <FlaskConical {...stylex.props(catalog.icon)} />
                   )}
                   {probing
                     ? t('settings.agent.dialog.runtimeOverride.testing', 'Testing…')
                     : t('settings.agent.dialog.runtimeOverride.test', 'Test runtime')}
                 </Button>
                 {capabilitiesReady && !probing && (
-                  <span className="inline-flex items-center gap-1.5 text-xs font-normal text-status-success">
-                    <Check className="h-3.5 w-3.5" aria-hidden="true" />
+                  <span {...stylex.props(styles.ready)}>
+                    <Check aria-hidden="true" {...stylex.props(catalog.icon)} />
                     {t('settings.agent.dialog.ready', 'Ready')}
                   </span>
                 )}
@@ -2329,71 +2709,70 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
           ) : null}
 
           {probeError && !isPreset && (
-            <div className="rounded-lg border border-status-warning/30 bg-status-warning/[0.08] px-3 py-2 text-xs text-status-warning">
-              {probeError}
+            <div {...stylex.props(styles.warning)}>
+              <AlertTriangle aria-hidden="true" {...stylex.props(styles.warningMark)} />
+              <div {...stylex.props(styles.warningBody)}>{probeError}</div>
             </div>
           )}
           {probeError && isBubBuiltin && <BubInstallGuide />}
 
           {showAuthenticationPanel ? (
-            <div className="rounded-xl border border-border/60 bg-muted/20 p-4">
-              <Field
-                label={t('settings.agent.dialog.section.account', 'Account')}
-                hint={
-                  authRequired
-                    ? t(
-                        'settings.agent.dialog.authRequiredHint',
-                        'This provider has no credentials on this machine yet.'
-                      )
-                    : t(
-                        'settings.agent.dialog.reauthenticateHint',
-                        'Sign in again if this provider stopped accepting your account.'
-                      )
-                }
-                icon={<KeyRound className="h-3.5 w-3.5" aria-hidden="true" />}
-              >
-                <AcpAuthenticationPanel
-                  machineId={machine.id}
-                  configId={agentConfigId}
-                  cliType={formData.cliType}
-                  agentType={formData.agentType}
-                  providerName={formData.name}
-                  customAcp={parsedCustomAcp ?? undefined}
-                  runtimeOverrides={formData.runtimeOverrides}
-                  env={formData.env}
-                  compact
-                  reauthentication={!authRequired}
-                  onBeforeStart={persistConfigBeforeMachineLaunch}
-                  onAuthenticated={() => {
-                    setAuthRequired(false);
-                    setProbeError(null);
-                    setManuallyTested(true);
-                    if (isCustom && parsedCustomAcp) {
-                      setTestedCustomKey(customAcpKey);
-                    }
-                    if (requiresBuiltinCreationVerification) {
-                      setVerifiedBuiltinContext(builtinVerificationContext);
-                    }
-                  }}
-                />
-              </Field>
-            </div>
+            <Field
+              label={t('settings.agent.dialog.section.account', 'Account')}
+              hint={
+                authRequired
+                  ? t(
+                      'settings.agent.dialog.authRequiredHint',
+                      'This provider has no credentials on this machine yet.'
+                    )
+                  : t(
+                      'settings.agent.dialog.reauthenticateHint',
+                      'Sign in again if this provider stopped accepting your account.'
+                    )
+              }
+              icon={<KeyRound aria-hidden="true" {...stylex.props(catalog.icon)} />}
+            >
+              <AcpAuthenticationPanel
+                machineId={machine.id}
+                configId={agentConfigId}
+                cliType={formData.cliType}
+                agentType={formData.agentType}
+                providerName={formData.name}
+                customAcp={parsedCustomAcp ?? undefined}
+                runtimeOverrides={formData.runtimeOverrides}
+                env={formData.env}
+                compact
+                reauthentication={!authRequired}
+                onBeforeStart={persistConfigBeforeMachineLaunch}
+                onAuthenticated={() => {
+                  setAuthRequired(false);
+                  setProbeError(null);
+                  setManuallyTested(true);
+                  if (isCustom && parsedCustomAcp) {
+                    setTestedCustomKey(customAcpKey);
+                  }
+                  if (requiresBuiltinCreationVerification) {
+                    setVerifiedBuiltinContext(builtinVerificationContext);
+                  }
+                }}
+              />
+            </Field>
           ) : null}
 
           {showBinaryPanel && (
-            <div className="rounded-lg border border-border/60 bg-muted/30 px-3 py-3 text-xs">
+            <div {...stylex.props(surface.formBlock, styles.status)}>
               {incompatibleHostMessage ? (
-                <p className="text-status-warning">{incompatibleHostMessage}</p>
+                <p {...stylex.props(styles.statusWarning)}>{incompatibleHostMessage}</p>
               ) : binaryStatus === 'unsupported-platform' ? (
-                <p className="text-status-warning">
+                <p {...stylex.props(styles.statusWarning)}>
                   {t(
                     'settings.agent.dialog.binaryUnsupported',
                     "This agent isn't available for this machine's platform."
                   )}
                 </p>
               ) : binaryStatus === 'unknown' || binaryProgressActive ? (
-                <p className="flex items-center gap-2 text-muted-foreground">
-                  <Spinner className="h-3.5 w-3.5" />
+                <p {...stylex.props(styles.statusBusy)}>
+                  <Spinner size="small" />
                   {formatBinaryStatusText(
                     t,
                     binaryStatus,
@@ -2402,8 +2781,8 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
                   )}
                 </p>
               ) : (
-                <div className="space-y-2">
-                  <p className="text-muted-foreground">
+                <div {...stylex.props(styles.status)}>
+                  <p {...stylex.props(styles.statusText)}>
                     {binaryStatus === 'error'
                       ? t(
                           'settings.agent.dialog.binaryDownloadFailed',
@@ -2425,33 +2804,35 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
                           )}
                   </p>
                   {(effectiveBinaryState?.error ?? binaryError) && (
-                    <p className="text-status-warning">
+                    <p {...stylex.props(styles.statusWarning)}>
                       {effectiveBinaryState?.error ?? binaryError}
                     </p>
                   )}
                   {onInstallBinary &&
                   (binaryStatus === 'not-installed' || binaryStatus === 'error') ? (
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      size="small"
-                      disabled={installingBinary || probing}
-                      onClick={() => void handleInstallBinary()}
-                    >
-                      {installingBinary ? (
-                        <>
-                          <Spinner className="h-3.5 w-3.5" />
-                          {t('settings.agent.dialog.binaryDownloading', 'Downloading…')}
-                        </>
-                      ) : (
-                        <>
-                          <Download className="h-3.5 w-3.5" />
-                          {binaryStatus === 'error'
-                            ? t('settings.agent.dialog.binaryRetryDownload', 'Retry download')
-                            : t('settings.agent.dialog.binaryDownload', 'Download agent')}
-                        </>
-                      )}
-                    </Button>
+                    <div {...stylex.props(styles.answer)}>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="small"
+                        disabled={installingBinary || probing}
+                        onClick={() => void handleInstallBinary()}
+                      >
+                        {installingBinary ? (
+                          <>
+                            <Spinner size="small" />
+                            {t('settings.agent.dialog.binaryDownloading', 'Downloading…')}
+                          </>
+                        ) : (
+                          <>
+                            <Download {...stylex.props(catalog.icon)} />
+                            {binaryStatus === 'error'
+                              ? t('settings.agent.dialog.binaryRetryDownload', 'Retry download')
+                              : t('settings.agent.dialog.binaryDownload', 'Download agent')}
+                          </>
+                        )}
+                      </Button>
+                    </div>
                   ) : null}
                 </div>
               )}
@@ -2533,7 +2914,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
             }
           >
             {activePreset ? (
-              <p className="mb-2 text-xs text-muted-foreground">
+              <p {...stylex.props(styles.note)}>
                 {t(
                   'settings.agent.dialog.presetEnvHint',
                   'Preset variables (shown above) are injected automatically and cannot be overridden here.'
@@ -2541,7 +2922,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
               </p>
             ) : null}
             {!activePreset && isDeepSeekBuiltin ? (
-              <p className="mb-2 text-xs text-muted-foreground">
+              <p {...stylex.props(styles.note)}>
                 {t(
                   'settings.agent.dialog.deepseek.envHint',
                   'DEEPSEEK_API_KEY and DEEPSEEK_BASE_URL are set above and cannot be overridden here.'
@@ -2568,16 +2949,14 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
         </div>
       </div>
 
-      <footer className="flex shrink-0 items-center justify-between gap-2 border-t border-border/60 px-5 py-3">
-        <div className="min-w-0 text-xs text-muted-foreground">
+      <div {...stylex.props(isNarrowLayout && styles.footerNarrow)}>
+        <Dialog.Footer>
           {selectedOption?.kind === 'registry' && (
-            <span className="inline-flex items-center gap-1">
-              <FlaskConical className="h-3 w-3" aria-hidden="true" />
+            <span {...stylex.props(styles.footerNote)}>
+              <FlaskConical aria-hidden="true" {...stylex.props(catalog.iconSmall)} />
               {t('settings.agent.dialog.registryNote', 'Experimental — uses ACP Providers.')}
             </span>
           )}
-        </div>
-        <div className="flex gap-2">
           <Button
             variant="secondary"
             size="small"
@@ -2587,29 +2966,33 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
             {t('common.cancel', 'Cancel')}
           </Button>
           <Tooltip.Root>
-            <Tooltip.Trigger render={<span>
-                <Button
-                  size="small"
-                  onClick={() => void submit()}
-                  disabled={
-                    !!disableReason ||
-                    submitting ||
-                    waitingForBuiltinSetup ||
-                    (builtinCreationPending && !probeError)
-                  }
-                >
-                  {(submitting || (builtinCreationPending && !authRequired && !probeError)) && (
-                    <Spinner className="mr-2 h-4 w-4" />
-                  )}
-                  {mode.kind === 'edit' || publishedSetupConfig
-                    ? t('common.save', 'Save')
-                    : t('common.create', 'Create')}
-                </Button>
-              </span>}/>
+            <Tooltip.Trigger
+              render={
+                <span>
+                  <Button
+                    size="small"
+                    onClick={() => void submit()}
+                    disabled={
+                      !!disableReason ||
+                      submitting ||
+                      waitingForBuiltinSetup ||
+                      (builtinCreationPending && !probeError)
+                    }
+                  >
+                    {(submitting || (builtinCreationPending && !authRequired && !probeError)) && (
+                      <Spinner size="small" />
+                    )}
+                    {mode.kind === 'edit' || publishedSetupConfig
+                      ? t('common.save', 'Save')
+                      : t('common.create', 'Create')}
+                  </Button>
+                </span>
+              }
+            />
             {disableReason && <Tooltip.Content>{disableReason}</Tooltip.Content>}
           </Tooltip.Root>
-        </div>
-      </footer>
+        </Dialog.Footer>
+      </div>
     </section>
   );
 
@@ -2623,29 +3006,27 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
               'z-[var(--z-dialog)] bg-black/20'
             : undefined
         }
-        className={cn(
-          'flex max-w-none flex-col gap-0 overflow-hidden p-0 sm:max-w-none md:p-0',
-          nestedInDialog && 'shadow-popover',
+        // On the narrow layout the picker and form headers carry their own
+        // left-aligned back button, which doubles as a close on the root step, so
+        // a corner cross would be redundant and easy to hit by accident.
+        closeButton={!isNarrowLayout}
+        // Keep keyboard height changes synchronous on the narrow sheet: the form
+        // scroll hook measures the container on the keyboard event.
+        noAnimation={isNarrowLayout}
+        // Sizing only: the panel's material is the dialog's own.
+        className={
           isNarrowLayout
-            ? cn(
-                // True full-screen sheet on mobile: override the safe-area-aware
-                // centering/max-height that Dialog.Content applies by default.
-                // Keep keyboard height changes synchronous: the form scroll hook
-                // measures the container on the keyboard event.
-                'h-[calc(100dvh-var(--native-keyboard-height,0px))] max-h-none w-screen rounded-none border-none top-0 translate-y-0 transition-none',
+            ? [
+                // A true full-screen sheet: override the safe-area-aware centring
+                // and max size the panel applies by default.
+                'h-[calc(100dvh-var(--native-keyboard-height,0px))] max-h-none w-screen max-w-none rounded-none top-0 translate-y-0',
                 // Inset content from the device safe area (notch, home indicator,
-                // landscape side cutouts). Padding pushes the inner picker/form
-                // panes — including their fixed-height headers and footers —
-                // away from the safe-area edges.
+                // landscape side cutouts), pushing the picker/form panes — their
+                // headers and footers included — away from the edges.
                 'pt-[var(--safe-area-top)] pb-[max(0px,var(--safe-area-bottom,0px)-var(--native-keyboard-height,0px))] pl-[var(--safe-area-left)] pr-[var(--safe-area-right)]',
-                // Hide the Radix-rendered X close button: on mobile the
-                // picker/form headers render their own left-aligned back
-                // button (which doubles as a close on the root step), so the
-                // top-right X would be redundant and easy to hit by accident.
-                '[&>button.absolute]:hidden'
-              )
-            : 'h-[min(680px,92dvh)] w-[min(1040px,96dvw)]'
-        )}
+              ].join(' ')
+            : 'h-[min(680px,92dvh)] w-[min(1040px,96dvw)] max-w-none'
+        }
       >
         <Dialog.Title className="sr-only">{dialogTitle}</Dialog.Title>
         <Dialog.Description className="sr-only">
@@ -2655,7 +3036,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
           )}
         </Dialog.Description>
 
-        <div className="flex h-full min-h-0 flex-1">
+        <div {...stylex.props(styles.layout, isNarrowLayout && styles.layoutNarrow)}>
           {showPicker && pickerPane}
           {showForm && formPane}
         </div>
@@ -2708,11 +3089,9 @@ function getOptionDescription(t: Translate, option: AgentTypeOption) {
 
 function RailGroup({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <div className="mb-1">
-      <div className="px-2 pt-3 pb-1.5 text-[11px] font-normal text-muted-foreground/80">
-        {title}
-      </div>
-      <div className="flex flex-col gap-0.5">{children}</div>
+    <div {...stylex.props(styles.railGroup)}>
+      <div {...stylex.props(styles.railGroupTitle)}>{title}</div>
+      <div {...stylex.props(styles.railGroupItems)}>{children}</div>
     </div>
   );
 }
@@ -2732,46 +3111,37 @@ function RailItem({
   chevron?: boolean;
 }) {
   const { t } = useTranslation();
+  const unavailable = !!disabled && !selected;
   return (
     <button
       type="button"
       role="option"
       aria-selected={selected}
-      disabled={disabled && !selected}
+      disabled={unavailable}
       onClick={onSelect}
-      className={cn(
-        'group relative flex w-full items-center gap-2.5 rounded-md text-left transition-colors',
-        chevron ? 'px-2 py-2.5 text-[15px]' : 'px-2 py-1.5 text-sm',
-        'focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-0',
-        selected
-          ? 'bg-primary/10 text-foreground'
-          : 'text-foreground/80 hover:bg-hover/50 hover:text-foreground',
-        disabled && !selected && 'cursor-not-allowed opacity-40'
+      {...stylex.props(
+        surface.listRow,
+        selected && surface.listRowSelected,
+        styles.railItem,
+        chevron && styles.railItemNarrow,
+        unavailable && styles.railItemDisabled
       )}
     >
       <span
-        aria-hidden="true"
-        className={cn(
-          'pointer-events-none absolute inset-y-1.5 left-0 w-[2px] rounded-r-full bg-primary transition-opacity',
-          selected ? 'opacity-100' : 'opacity-0'
-        )}
-      />
-      <span
-        className={cn(
-          'flex shrink-0 items-center justify-center rounded-md border border-transparent',
-          chevron ? 'h-7 w-7' : 'h-6 w-6',
-          selected ? 'text-foreground' : 'text-foreground/70'
+        {...stylex.props(
+          styles.railIcon,
+          chevron && styles.railIconNarrow,
+          selected && styles.railIconSelected
         )}
       >
-        <OptionIcon option={option} className={chevron ? 'h-4 w-4' : 'h-3.5 w-3.5'} />
+        <OptionIcon
+          option={option}
+          className={stylex.props(chevron ? styles.optionIconLarge : styles.optionIcon).className}
+        />
       </span>
-      <span className="min-w-0 flex-1 truncate leading-tight">{getOptionLabel(t, option)}</span>
-      {selected && !chevron && (
-        <Check className="h-3 w-3 shrink-0 text-primary" aria-hidden="true" />
-      )}
-      {chevron && (
-        <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/70" aria-hidden="true" />
-      )}
+      <span {...stylex.props(surface.listRowLabel)}>{getOptionLabel(t, option)}</span>
+      {selected && !chevron && <Check aria-hidden="true" {...stylex.props(styles.railCheck)} />}
+      {chevron && <ChevronRight aria-hidden="true" {...stylex.props(styles.railChevron)} />}
     </button>
   );
 }
@@ -2839,16 +3209,15 @@ function ProbeStatus({
   const { t } = useTranslation();
   if (isPreset) {
     return (
-      <span className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border border-primary/30 bg-primary/10 px-2.5 py-1 text-[11px] font-normal text-primary">
-        <Sparkles className="h-3 w-3" aria-hidden="true" />
+      <Badge icon={<Sparkles {...stylex.props(styles.glyphFill)} />}>
         {t('settings.agent.dialog.presetBadge', 'Preset')}
-      </span>
+      </Badge>
     );
   }
   if (probing) {
     return (
-      <span className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap text-xs text-muted-foreground">
-        <Spinner className="h-3 w-3" aria-hidden="true" />
+      <span {...stylex.props(styles.probing)}>
+        <Spinner size="small" aria-hidden="true" />
         {t('settings.agent.dialog.probing', 'Probing…')}
       </span>
     );
@@ -2859,32 +3228,37 @@ function ProbeStatus({
         type="button"
         variant="secondary"
         size="small"
-        className="text-status-warning"
         onClick={onRetry}
         disabled={disabled}
         aria-label={t('settings.agent.dialog.retryProbe', 'Retry capability probe')}
       >
-        <RefreshCw className="h-3 w-3" />
+        <RefreshCw {...stylex.props(catalog.iconSmall)} />
         {t('common.retry', 'Retry')}
       </Button>
     );
   }
   if (ready) {
     return (
-      <div className="inline-flex shrink-0 items-center gap-2">
+      <div {...stylex.props(styles.probeReady)}>
         <Tooltip.Root>
-          <Tooltip.Trigger render={<button
-              type="button"
-              onClick={onRetry}
-              disabled={disabled}
-              aria-label={t(
-                'settings.agent.dialog.refreshCapabilities',
-                'Refresh agent capabilities'
-              )}
-              className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-hover/60 hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
-            >
-              <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
-            </button>}/>
+          <Tooltip.Trigger
+            render={
+              <Button
+                type="button"
+                variant="ghost"
+                size="small"
+                icon
+                onClick={onRetry}
+                disabled={disabled}
+                aria-label={t(
+                  'settings.agent.dialog.refreshCapabilities',
+                  'Refresh agent capabilities'
+                )}
+              >
+                <RefreshCw aria-hidden="true" {...stylex.props(styles.glyphFill)} />
+              </Button>
+            }
+          />
           <Tooltip.Content>
             {t(
               'settings.agent.dialog.refreshCapabilitiesHint',
@@ -2892,10 +3266,9 @@ function ProbeStatus({
             )}
           </Tooltip.Content>
         </Tooltip.Root>
-        <span className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border border-status-success/30 bg-status-success/10 px-2.5 py-1 text-[11px] font-normal text-status-success">
-          <Check className="h-3 w-3" aria-hidden="true" />
+        <Badge tone="success" icon={<Check {...stylex.props(styles.glyphFill)} />}>
           {t('settings.agent.dialog.ready', 'Ready')}
-        </span>
+        </Badge>
       </div>
     );
   }
@@ -2911,7 +3284,7 @@ function ProbeStatus({
       disabled={disabled}
       aria-label={t('settings.agent.dialog.testCapabilities', 'Test agent capabilities')}
     >
-      <FlaskConical className="h-3 w-3" />
+      <FlaskConical {...stylex.props(catalog.iconSmall)} />
       {t('settings.agent.dialog.testCapabilitiesShort', 'Test')}
     </Button>
   );
@@ -2935,7 +3308,7 @@ function DeepSeekApiKeyField({
         'settings.agent.dialog.deepseek.apiKeyHelp',
         'Saved with this provider and injected as DEEPSEEK_API_KEY when DSH starts.'
       )}
-      icon={<KeyRound className="h-3.5 w-3.5" aria-hidden="true" />}
+      icon={<KeyRound aria-hidden="true" {...stylex.props(catalog.icon)} />}
     >
       <Input
         id="deepseek-api-key"
@@ -2945,7 +3318,6 @@ function DeepSeekApiKeyField({
         value={value}
         onChange={(event) => onChange(event.target.value)}
         placeholder={t('settings.agent.dialog.deepseek.apiKeyPlaceholder', 'sk-XXXXXXXXXXXX')}
-        className="h-9 font-mono"
       />
     </Field>
   );
@@ -2968,27 +3340,27 @@ function DeepSeekHarnessPanel({
 }) {
   const { t } = useTranslation();
   return (
-    <div className="space-y-3 rounded-xl border border-primary/20 bg-primary/[0.04] p-4">
-      <Tabs.Root
-        value={endpointMode}
-        onValueChange={(value) => {
-          if (value === 'official' || value === 'custom') {
-            onEndpointModeChange(value);
-          }
-        }}
-      >
-        <Tabs.List className="grid h-8 w-full grid-cols-2">
-          <Tabs.Tab value="official" className="px-2.5 text-xs">
-            {t('settings.agent.dialog.deepseek.officialTab', 'DeepSeek official')}
-          </Tabs.Tab>
-          <Tabs.Tab value="custom" className="px-2.5 text-xs">
-            {t('settings.agent.dialog.deepseek.customTab', 'Custom Endpoint')}
-          </Tabs.Tab>
-        </Tabs.List>
-        <Tabs.Panel value="official" className="mt-3">
-          <DeepSeekApiKeyField value={apiKey} onChange={onApiKeyChange} />
-        </Tabs.Panel>
-        <Tabs.Panel value="custom" className="mt-3 space-y-3">
+    <Tabs.Root
+      value={endpointMode}
+      onValueChange={(value) => {
+        if (value === 'official' || value === 'custom') {
+          onEndpointModeChange(value);
+        }
+      }}
+    >
+      <Tabs.List stretch>
+        <Tabs.Tab value="official">
+          {t('settings.agent.dialog.deepseek.officialTab', 'DeepSeek official')}
+        </Tabs.Tab>
+        <Tabs.Tab value="custom">
+          {t('settings.agent.dialog.deepseek.customTab', 'Custom Endpoint')}
+        </Tabs.Tab>
+      </Tabs.List>
+      <Tabs.Panel value="official">
+        <DeepSeekApiKeyField value={apiKey} onChange={onApiKeyChange} />
+      </Tabs.Panel>
+      <Tabs.Panel value="custom">
+        <div {...stylex.props(styles.stack)}>
           <Field
             htmlFor="deepseek-endpoint"
             label={t('settings.agent.dialog.deepseek.endpointLabel', 'API Endpoint')}
@@ -3008,10 +3380,9 @@ function DeepSeekHarnessPanel({
                 'settings.agent.dialog.deepseek.endpointPlaceholder',
                 'https://example.com'
               )}
-              className="h-9 font-mono"
             />
           </Field>
-          <p className="text-xs text-muted-foreground">
+          <p {...stylex.props(styles.note)}>
             {t(
               'settings.agent.dialog.deepseek.modelsDiscovered',
               'Available models are discovered automatically from the endpoint when this provider is verified.'
@@ -3022,9 +3393,9 @@ function DeepSeekHarnessPanel({
             onChange={onApiKeyChange}
             label={t('settings.agent.dialog.deepseek.customApiKeyLabel', 'API Key')}
           />
-        </Tabs.Panel>
-      </Tabs.Root>
-    </div>
+        </div>
+      </Tabs.Panel>
+    </Tabs.Root>
   );
 }
 
@@ -3060,8 +3431,9 @@ function PresetPanel({
   const showCustomBaseUrl =
     !!credentialMode?.baseUrlEnvKey && baseUrlOption?.id === credentialMode.customBaseUrlOptionId;
   const tokenEnvKey = getPresetTokenEnvKey(preset, credentialMode);
+  const [injectedOpen, setInjectedOpen] = useState(false);
   return (
-    <div className="space-y-3 rounded-xl border border-primary/20 bg-primary/[0.04] p-4">
+    <div {...stylex.props(styles.stack)}>
       {credentialModes.length > 0 ? (
         <Field
           label={t(
@@ -3074,33 +3446,28 @@ function PresetPanel({
               'Choose the MiMo credential type you copied from the console.'
           )}
         >
-          <div className="grid gap-2 sm:grid-cols-2" role="radiogroup">
-            {credentialModes.map((mode) => {
-              const selected = mode.id === credentialModeId;
-              return (
-                <button
-                  key={mode.id}
-                  type="button"
-                  role="radio"
-                  aria-checked={selected}
-                  onClick={() => onCredentialModeChange(mode.id)}
-                  className={cn(
-                    'rounded-lg border px-3 py-2 text-left transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring',
-                    selected
-                      ? 'border-primary/50 bg-primary/10 text-foreground'
-                      : 'border-border/60 bg-background/50 text-foreground/80 hover:bg-background'
-                  )}
-                >
-                  <span className="block text-xs font-normal">
+          <RadioGroup
+            value={credentialModeId ?? null}
+            onValueChange={(value) => {
+              if (typeof value === 'string') onCredentialModeChange(value);
+            }}
+          >
+            {credentialModes.map((mode) => (
+              <label key={mode.id} {...stylex.props(styles.radioRow)}>
+                <span {...stylex.props(styles.radioBox)}>
+                  <Radio value={mode.id} />
+                </span>
+                <span {...stylex.props(styles.radioText)}>
+                  <span {...stylex.props(styles.radioLabel)}>
                     {t(mode.labelKey, mode.labelDefault)}
                   </span>
-                  <span className="mt-1 block text-[11px] leading-snug text-muted-foreground">
+                  <span {...stylex.props(styles.radioHint)}>
                     {t(mode.descriptionKey, mode.descriptionDefault)}
                   </span>
-                </button>
-              );
-            })}
-          </div>
+                </span>
+              </label>
+            ))}
+          </RadioGroup>
         </Field>
       ) : null}
 
@@ -3123,7 +3490,7 @@ function PresetPanel({
                   href={preset.helpUrl}
                   target="_blank"
                   rel="noreferrer"
-                  className="font-normal text-primary underline-offset-2 hover:underline"
+                  {...stylex.props(styles.link)}
                 >
                   {t(
                     preset.helpLinkLabelKey ?? 'settings.agent.dialog.preset.helpLink',
@@ -3134,7 +3501,7 @@ function PresetPanel({
             ) : null}
           </>
         }
-        icon={<KeyRound className="h-3.5 w-3.5" aria-hidden="true" />}
+        icon={<KeyRound aria-hidden="true" {...stylex.props(catalog.icon)} />}
       >
         <Input
           id="preset-token"
@@ -3147,7 +3514,6 @@ function PresetPanel({
             credentialMode?.tokenPlaceholderKey ?? preset.tokenPlaceholderKey,
             credentialMode?.tokenPlaceholderDefault ?? preset.tokenPlaceholderDefault
           )}
-          className="h-9 font-mono"
         />
       </Field>
 
@@ -3163,7 +3529,7 @@ function PresetPanel({
             credentialMode.baseUrlHelpDefault ?? 'Select or enter the provider Base URL.'
           )}
         >
-          <div className="space-y-2">
+          <div {...stylex.props(styles.stackTight)}>
             <Select.Root
               items={credentialMode.baseUrlOptions.map((option) => ({
                 value: option.id,
@@ -3174,12 +3540,12 @@ function PresetPanel({
                 if (value != null) onBaseUrlOptionChange(value);
               }}
             >
-              <Select.Trigger className="h-9 text-xs">
+              <Select.Trigger>
                 <Select.Value />
               </Select.Trigger>
               <Select.Content>
                 {credentialMode.baseUrlOptions.map((option) => (
-                  <Select.Item key={option.id} value={option.id} className="text-xs">
+                  <Select.Item key={option.id} value={option.id}>
                     {t(option.labelKey, option.labelDefault)}
                   </Select.Item>
                 ))}
@@ -3198,42 +3564,41 @@ function PresetPanel({
                     'settings.agent.dialog.preset.baseUrlPlaceholderFallback',
                   credentialMode.baseUrlPlaceholderDefault ?? 'https://example.com/anthropic'
                 )}
-                className="h-9 font-mono"
               />
             ) : null}
           </div>
         </Field>
       ) : null}
 
-      <Collapsible.Root>
-        <Collapsible.Trigger
-          render={
-            <button
-              type="button"
-              className="group inline-flex items-center gap-1.5 rounded-md text-[11px] font-normal text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
+      <Collapsible.Root open={injectedOpen} onOpenChange={setInjectedOpen}>
+        <div {...stylex.props(styles.answer)}>
+          <Collapsible.Trigger render={<Button type="button" variant="ghost" size="small" />}>
+            <ChevronDown
+              {...stylex.props(styles.disclosureIcon, injectedOpen && styles.disclosureIconOpen)}
             />
-          }
-        >
-          <ChevronDown className="h-3 w-3 transition-transform group-data-[state=open]:rotate-180" />
-          {t('settings.agent.dialog.preset.showInjected', 'Show injected variables')}
-          <Lock className="h-3 w-3 opacity-70" aria-hidden="true" />
-        </Collapsible.Trigger>
-        <Collapsible.Panel className="mt-2">
-          <div className="rounded-md border border-border/60 bg-background/50">
-            <dl className="divide-y divide-border/40 text-[11px]">
-              {Object.entries(injectedEnv).map(([key, value]) => (
-                <div key={key} className="flex items-center gap-3 px-3 py-1.5">
-                  <dt className="min-w-0 flex-1 truncate font-mono text-muted-foreground">{key}</dt>
-                  <dd className="min-w-0 flex-1 truncate text-right font-mono text-foreground/80">
+            {t('settings.agent.dialog.preset.showInjected', 'Show injected variables')}
+            <Lock aria-hidden="true" {...stylex.props(styles.lockIcon)} />
+          </Collapsible.Trigger>
+        </div>
+        <Collapsible.Panel>
+          <div {...stylex.props(styles.revealed)}>
+            <dl {...stylex.props(styles.envList)}>
+              {Object.entries(injectedEnv).map(([key, value], index) => (
+                <div key={key} {...stylex.props(styles.envRow, index > 0 && surface.lineRuled)}>
+                  <dt {...stylex.props(styles.envKey)}>{key}</dt>
+                  <dd {...stylex.props(styles.envValue)}>
                     {value || t('settings.agent.dialog.required', '(required)')}
                   </dd>
                 </div>
               ))}
-              <div className="flex items-center gap-3 px-3 py-1.5">
-                <dt className="min-w-0 flex-1 truncate font-mono text-muted-foreground">
-                  {tokenEnvKey}
-                </dt>
-                <dd className="min-w-0 flex-1 truncate text-right font-mono text-primary/90">
+              <div
+                {...stylex.props(
+                  styles.envRow,
+                  Object.keys(injectedEnv).length > 0 && surface.lineRuled
+                )}
+              >
+                <dt {...stylex.props(styles.envKey)}>{tokenEnvKey}</dt>
+                <dd {...stylex.props(styles.envValue)}>
                   {token.trim() ? '••••••••' : t('settings.agent.dialog.required', '(required)')}
                 </dd>
               </div>
@@ -3241,33 +3606,6 @@ function PresetPanel({
           </div>
         </Collapsible.Panel>
       </Collapsible.Root>
-    </div>
-  );
-}
-
-function Field({
-  htmlFor,
-  label,
-  hint,
-  icon,
-  children,
-}: {
-  htmlFor?: string;
-  label: string;
-  hint?: ReactNode;
-  icon?: ReactNode;
-  children: ReactNode;
-}) {
-  return (
-    <div className="space-y-1.5">
-      <div className="flex items-center gap-1.5">
-        {icon && <span className="text-muted-foreground">{icon}</span>}
-        <UiField.Label htmlFor={htmlFor} className="text-xs font-normal">
-          {label}
-        </UiField.Label>
-      </div>
-      {children}
-      {hint && <p className="text-[11px] leading-snug text-muted-foreground">{hint}</p>}
     </div>
   );
 }
@@ -3289,34 +3627,26 @@ function Section({
   defaultOpen?: boolean;
   action?: ReactNode;
 }) {
+  const [open, setOpen] = useState(!!defaultOpen);
   return (
-    <Collapsible.Root defaultOpen={defaultOpen}>
-      <div className="flex h-9 items-center gap-1 rounded-md border border-border/60 bg-card/40 pr-1 hover:bg-card/70">
+    <Collapsible.Root open={open} onOpenChange={setOpen}>
+      <div {...stylex.props(styles.sectionHead)}>
         <Collapsible.Trigger
-          render={
-            <button
-              type="button"
-              className="group flex h-full min-w-0 flex-1 items-center gap-2 rounded-md px-3 text-left text-sm font-normal text-foreground/90 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
-            />
-          }
+          render={<button type="button" {...stylex.props(styles.sectionTrigger)} />}
         >
-          <ChevronDown className="h-3 w-3 shrink-0 transition-transform group-data-[state=open]:rotate-180" />
-          <span className="min-w-0 truncate">{title}</span>
+          <ChevronDown
+            {...stylex.props(styles.disclosureIcon, open && styles.disclosureIconOpen)}
+          />
+          <span {...stylex.props(styles.sectionTitle)}>{title}</span>
           {typeof count === 'number' && count > 0 ? (
-            <span className="ml-auto rounded-full bg-muted px-1.5 text-[10px] text-muted-foreground">
-              {count}
-            </span>
+            <span {...stylex.props(styles.sectionCount)}>{count}</span>
           ) : null}
         </Collapsible.Trigger>
         {action}
       </div>
-      <Collapsible.Panel className="mt-2">
-        <div className="pl-1">
-          {disabled ? (
-            <p className="px-1 py-2 text-xs text-muted-foreground">{disabledHint}</p>
-          ) : (
-            children
-          )}
+      <Collapsible.Panel>
+        <div {...stylex.props(styles.sectionBody)}>
+          {disabled ? <p {...stylex.props(styles.sectionHint)}>{disabledHint}</p> : children}
         </div>
       </Collapsible.Panel>
     </Collapsible.Root>
@@ -3331,7 +3661,6 @@ function InlineCopyButton({ value, ariaLabel }: { value: string; ariaLabel: stri
       variant="ghost"
       size="small"
       icon
-      className="shrink-0"
       aria-label={ariaLabel}
       onClick={(event) => {
         event.stopPropagation();
@@ -3341,7 +3670,11 @@ function InlineCopyButton({ value, ariaLabel }: { value: string; ariaLabel: stri
         setTimeout(() => setCopied(false), 1500);
       }}
     >
-      {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+      {copied ? (
+        <Check {...stylex.props(styles.glyphFill)} />
+      ) : (
+        <Copy {...stylex.props(styles.glyphFill)} />
+      )}
     </Button>
   );
 }
@@ -3358,38 +3691,33 @@ function TitleGenerationFields({
   const { t } = useTranslation();
   if (selectors.length === 0) return null;
   return (
-    <div className="space-y-2 pt-1">
+    <div {...stylex.props(styles.optionList)}>
       {selectors.map((sel) => {
         const stored = values?.[sel.configId];
         if (sel.type === 'boolean') {
           const isEnabled = (stored ?? sel.currentValue) === true;
           return (
-            <div
-              key={sel.configId}
-              className="grid gap-2 sm:grid-cols-[120px_minmax(0,1fr)] sm:items-center"
-            >
-              <UiField.Label className="text-xs text-muted-foreground">{sel.label}</UiField.Label>
-              <Button
-                type="button"
-                variant="secondary"
-                className="w-fit"
-                onClick={() => onChange(sel.configId, !isEnabled)}
-                aria-pressed={isEnabled}
-              >
-                {isEnabled ? <Check className="h-3 w-3" /> : null}
-                {isEnabled
-                  ? t('agents.booleanEnabled', 'Enabled')
-                  : t('agents.booleanDisabled', 'Disabled')}
-              </Button>
+            <div key={sel.configId} {...stylex.props(styles.optionRow)}>
+              <UiField.Label>{sel.label}</UiField.Label>
+              <div>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => onChange(sel.configId, !isEnabled)}
+                  aria-pressed={isEnabled}
+                >
+                  {isEnabled ? <Check {...stylex.props(catalog.iconSmall)} /> : null}
+                  {isEnabled
+                    ? t('agents.booleanEnabled', 'Enabled')
+                    : t('agents.booleanDisabled', 'Disabled')}
+                </Button>
+              </div>
             </div>
           );
         }
         return (
-          <div
-            key={sel.configId}
-            className="grid gap-2 sm:grid-cols-[120px_minmax(0,1fr)] sm:items-center"
-          >
-            <UiField.Label className="text-xs text-muted-foreground">{sel.label}</UiField.Label>
+          <div key={sel.configId} {...stylex.props(styles.optionRow)}>
+            <UiField.Label>{sel.label}</UiField.Label>
             <Select.Root
               items={sel.options}
               value={(stored as string | undefined) ?? sel.currentValue}
@@ -3397,12 +3725,12 @@ function TitleGenerationFields({
                 if (value != null) onChange(sel.configId, value);
               }}
             >
-              <Select.Trigger className="h-8 text-xs">
+              <Select.Trigger>
                 <Select.Value />
               </Select.Trigger>
               <Select.Content>
                 {sel.options.map((opt) => (
-                  <Select.Item key={opt.value} value={opt.value} className="text-xs">
+                  <Select.Item key={opt.value} value={opt.value}>
                     {opt.label}
                   </Select.Item>
                 ))}

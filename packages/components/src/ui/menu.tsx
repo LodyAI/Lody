@@ -1,11 +1,12 @@
 import * as React from 'react';
+import * as stylex from '@stylexjs/stylex';
 import { Menu as UiMenu } from '@lody/ui/menu';
 import { Search } from 'lucide-react';
 
-import { cn } from '@/lib/utils';
 import { restoreComposerFocusAfterMenu } from '@/lib/menu-focus';
+import { withClassName } from '@/lib/stylex';
 import { useSafeAreaCollisionPadding } from '@/hooks/use-safe-area-insets';
-import { menuGroupLabelClassName } from './menu-styles';
+import { menuStyles } from './menu-styles';
 
 type MenuRootProps = React.ComponentProps<typeof UiMenu.Root>;
 type MenuContentProps = React.ComponentProps<typeof UiMenu.Content>;
@@ -60,50 +61,51 @@ function MenuRoot({ onOpenChange, children, ...props }: MenuRootProps) {
   );
 }
 
-const MenuContent = React.forwardRef<HTMLDivElement, MenuContentProps>(
-  function MenuContent({ finalFocus, collisionPadding, ...props }, ref) {
-    const selection = React.useContext(MenuSelectionContext);
-    const mergedCollisionPadding = useSafeAreaCollisionPadding(collisionPadding);
-    const handleFinalFocus = React.useCallback(
-      (closeType: Parameters<Extract<MenuContentProps['finalFocus'], Function>>[0]) => {
-        const provided =
-          typeof finalFocus === 'function'
-            ? finalFocus(closeType)
-            : finalFocus && typeof finalFocus === 'object' && 'current' in finalFocus
-              ? finalFocus.current
-              : finalFocus;
-        if (provided === false) return false;
-        if (selection?.didSelectItemRef.current) {
-          selection.didSelectItemRef.current = false;
-          restoreComposerFocusAfterMenu();
-          return false;
-        }
-        /* Outside-press onto another control (including the prompt): the
+const MenuContent = React.forwardRef<HTMLDivElement, MenuContentProps>(function MenuContent(
+  { finalFocus, collisionPadding, ...props },
+  ref
+) {
+  const selection = React.useContext(MenuSelectionContext);
+  const mergedCollisionPadding = useSafeAreaCollisionPadding(collisionPadding);
+  const handleFinalFocus = React.useCallback(
+    (closeType: Parameters<Extract<MenuContentProps['finalFocus'], Function>>[0]) => {
+      const provided =
+        typeof finalFocus === 'function'
+          ? finalFocus(closeType)
+          : finalFocus && typeof finalFocus === 'object' && 'current' in finalFocus
+            ? finalFocus.current
+            : finalFocus;
+      if (provided === false) return false;
+      if (selection?.didSelectItemRef.current) {
+        selection.didSelectItemRef.current = false;
+        restoreComposerFocusAfterMenu();
+        return false;
+      }
+      /* Outside-press onto another control (including the prompt): the
            browser already moved focus there; leave it instead of pulling it
            back to the trigger. Focus still inside a menu means a keyboard
            close, where the default trigger restore is correct. */
-        const active = document.activeElement;
-        if (
-          active instanceof HTMLElement &&
-          active !== document.body &&
-          active.closest('[role="menu"]') === null
-        ) {
-          return false;
-        }
-        return provided;
-      },
-      [finalFocus, selection]
-    );
-    return (
-      <UiMenu.Content
-        ref={ref}
-        collisionPadding={mergedCollisionPadding}
-        finalFocus={handleFinalFocus}
-        {...props}
-      />
-    );
-  }
-);
+      const active = document.activeElement;
+      if (
+        active instanceof HTMLElement &&
+        active !== document.body &&
+        active.closest('[role="menu"]') === null
+      ) {
+        return false;
+      }
+      return provided;
+    },
+    [finalFocus, selection]
+  );
+  return (
+    <UiMenu.Content
+      ref={ref}
+      collisionPadding={mergedCollisionPadding}
+      finalFocus={handleFinalFocus}
+      {...props}
+    />
+  );
+});
 
 const MenuItem = React.forwardRef<HTMLDivElement, MenuItemProps>(function MenuItem(
   { onClick, closeOnClick, ...props },
@@ -125,21 +127,22 @@ const MenuItem = React.forwardRef<HTMLDivElement, MenuItemProps>(function MenuIt
   );
 });
 
-const MenuLinkItem = React.forwardRef<HTMLAnchorElement, MenuLinkItemProps>(
-  function MenuLinkItem({ onClick, ...props }, ref) {
-    const markSelected = useMarkMenuItemSelected();
-    return (
-      <UiMenu.LinkItem
-        ref={ref}
-        {...props}
-        onClick={(event) => {
-          markSelected();
-          onClick?.(event);
-        }}
-      />
-    );
-  }
-);
+const MenuLinkItem = React.forwardRef<HTMLAnchorElement, MenuLinkItemProps>(function MenuLinkItem(
+  { onClick, ...props },
+  ref
+) {
+  const markSelected = useMarkMenuItemSelected();
+  return (
+    <UiMenu.LinkItem
+      ref={ref}
+      {...props}
+      onClick={(event) => {
+        markSelected();
+        onClick?.(event);
+      }}
+    />
+  );
+});
 
 const MenuCheckboxItem = React.forwardRef<HTMLDivElement, MenuCheckboxItemProps>(
   function MenuCheckboxItem({ onCheckedChange, closeOnClick, ...props }, ref) {
@@ -159,36 +162,37 @@ const MenuCheckboxItem = React.forwardRef<HTMLDivElement, MenuCheckboxItemProps>
 );
 
 /* Picking one value answers the question the menu asked, so a radio row closes
-   * it — the way a native checkmark menu dismisses on selection. Base UI keeps
-   * checkable rows open (`closeOnClick` defaults false); a caller that wants
-   * the picker's menu to stay up states `closeOnClick={false}` itself. */
-const MenuRadioItem = React.forwardRef<HTMLDivElement, MenuRadioItemProps>(
-  function MenuRadioItem({ onClick, closeOnClick = true, ...props }, ref) {
-    const markSelected = useMarkMenuItemSelected();
-    return (
-      <UiMenu.RadioItem
-        ref={ref}
-        closeOnClick={closeOnClick}
-        {...props}
-        onClick={(event) => {
-          if (closeOnClick === false) markSelected();
-          onClick?.(event);
-        }}
-      />
-    );
-  }
-);
+ * it — the way a native checkmark menu dismisses on selection. Base UI keeps
+ * checkable rows open (`closeOnClick` defaults false); a caller that wants
+ * the picker's menu to stay up states `closeOnClick={false}` itself. */
+const MenuRadioItem = React.forwardRef<HTMLDivElement, MenuRadioItemProps>(function MenuRadioItem(
+  { onClick, closeOnClick = true, ...props },
+  ref
+) {
+  const markSelected = useMarkMenuItemSelected();
+  return (
+    <UiMenu.RadioItem
+      ref={ref}
+      closeOnClick={closeOnClick}
+      {...props}
+      onClick={(event) => {
+        if (closeOnClick === false) markSelected();
+        onClick?.(event);
+      }}
+    />
+  );
+});
 
 /**
  * Base UI's GroupLabel throws outside a `Menu.Group`, and these menus use a
  * label as a loose section header. A presentation div states the same thing.
  */
-const MenuGroupLabel = React.forwardRef<
-  HTMLDivElement,
-  React.ComponentPropsWithoutRef<'div'>
->(function MenuGroupLabel({ className, ...props }, ref) {
-  return <div ref={ref} className={cn(menuGroupLabelClassName, className)} {...props} />;
-});
+const MenuGroupLabel = React.forwardRef<HTMLDivElement, React.ComponentPropsWithoutRef<'div'>>(
+  function MenuGroupLabel({ className, style, ...props }, ref) {
+    const sx = withClassName(stylex.props(menuStyles.groupLabel), className);
+    return <div ref={ref} {...props} className={sx.className} style={{ ...sx.style, ...style }} />;
+  }
+);
 
 /** Same-frame hover open for submenus; Base UI's trigger `delay` defaults to 100ms. */
 function MenuSubmenu(props: MenuSubmenuProps) {
@@ -253,11 +257,13 @@ type MenuSearchInputProps = {
   ariaLabel?: string;
   /** Enter with focus still in the field — typically "take the top match". */
   onSubmit?: () => void;
+  /** Layout only (a width floor); the field is the recessed well. */
   className?: string;
 };
 
 /**
- * Search field for a menu whose list is too long to read at a glance.
+ * Search field for a menu whose list is too long to read at a glance. It is
+ * typed into, so it is the recessed well every value holder takes.
  *
  * A menu owns every keystroke inside its content: printable keys drive
  * typeahead (which jumps focus to a matching row) and the arrows drive roving
@@ -338,7 +344,7 @@ const MenuSearchInput = React.forwardRef<HTMLInputElement, MenuSearchInputProps>
 
     return (
       <div
-        className={cn('flex items-center gap-2 px-2.5 py-1.5', className)}
+        {...withClassName(stylex.props(menuStyles.searchShell), className)}
         onClick={(event) => {
           event.stopPropagation();
           inputRef.current?.focus();
@@ -347,7 +353,7 @@ const MenuSearchInput = React.forwardRef<HTMLInputElement, MenuSearchInputProps>
           event.stopPropagation();
         }}
       >
-        <Search className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+        <Search {...stylex.props(menuStyles.searchGlyph)} aria-hidden="true" />
         <input
           ref={(node) => {
             inputRef.current = node;
@@ -367,7 +373,7 @@ const MenuSearchInput = React.forwardRef<HTMLInputElement, MenuSearchInputProps>
           placeholder={placeholder}
           data-lody-menu-search=""
           aria-label={ariaLabel ?? placeholder}
-          className="min-w-0 flex-1 border-none bg-transparent text-[0.9em] leading-tight outline-none placeholder:text-muted-foreground focus:outline-none focus:ring-0"
+          {...stylex.props(menuStyles.searchInput)}
         />
       </div>
     );

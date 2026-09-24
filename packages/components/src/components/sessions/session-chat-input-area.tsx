@@ -10,6 +10,7 @@ import {
   useImperativeHandle,
   type MutableRefObject,
 } from 'react';
+import * as stylex from '@stylexjs/stylex';
 import { useAtomValue } from 'jotai';
 import { ArrowUp } from 'lucide-react';
 import { Spinner } from '@lody/ui/spinner';
@@ -34,6 +35,7 @@ import {
   DesktopPermissionModeButton,
   DesktopRunConfigMenu,
 } from '@/components/sessions/desktop-run-config-menu';
+import { composerSurface } from '@/components/shared/composer-surface';
 import {
   ChatComposer,
   type ChatComposerFileItem,
@@ -2538,9 +2540,11 @@ export const SessionChatInputArea = memo(
               disabled
               aria-label={t('chat.runConfig.buttonAriaLabel', 'Run configuration')}
               title={t('sessions.sendConfigLocked', 'Configuration is locked while sending')}
-              className="h-7 truncate px-2 text-sm text-muted-foreground opacity-70"
+              {...stylex.props(composerSurface.trigger)}
             >
-              {selectedModelLabel ?? t('chat.runConfig.buttonAriaLabel', 'Run configuration')}
+              <span {...stylex.props(composerSurface.truncate)}>
+                {selectedModelLabel ?? t('chat.runConfig.buttonAriaLabel', 'Run configuration')}
+              </span>
             </button>
           ) : (
             (mobileFooterSelectorNode ?? desktopFooterSelectorNode)
