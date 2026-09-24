@@ -142,7 +142,7 @@ type MobileChatBucketUiState = {
   expanded: ReadonlySet<string>;
 };
 const createBucketUiStateAtom = () =>
-  atom<MobileChatBucketUiState>({ collapsed: new Set(), expanded: new Set() });
+  atom<MobileChatBucketUiState>({ collapsed: new Set<string>(), expanded: new Set<string>() });
 const mobileChatBucketUiStateAtomFamily = atomFamily((_stateKey: string) =>
   createBucketUiStateAtom()
 );
