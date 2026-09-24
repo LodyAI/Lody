@@ -79,9 +79,8 @@ Edit `AGENTS.md`, not its `CLAUDE.md` symlink. Ownership: [README.md](README.md)
 
 - `--ui-font-size` (1px under the conversation size) is the chrome's 1em
   baseline; compact chrome is 0.9em. Conversation body/headings/mono/terminal
-  scale through `conversation-font-size-classes.ts`. Only conversation prose
-  (`wideBlocks`) lets tables and diagrams extend past the reading column. Streamdown stays streaming; never
-  word-level `animated`.
+  scale through `conversation-font-size-classes.ts`. Streamdown stays streaming;
+  never word-level `animated`.
 - A Mermaid diagram in a message is a still preview until a pointer click
   activates it, and an unmodified wheel is NEVER taken — activated or not.
   Deactivation preserves pan/zoom and activation adds no outline; see the

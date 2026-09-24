@@ -882,9 +882,9 @@ const READING_ANSWER = [
   '',
   '- 正文、选中项和激活标签使用同一个阅读色；界面文字低一档。',
   '- Git 状态图标在侧栏里降低饱和度，`Mergeable` 标签更醒目。',
-  '- 宽表格和 Mermaid 图可以超出 768px 的阅读栏：',
-  '  - 窄的内容仍然贴合阅读栏；',
-  '  - 宽的内容以阅读栏为中心向两侧展开。',
+  '- 宽表格和 Mermaid 图留在 768px 的阅读栏内：',
+  '  - 表格在内部横向滚动；',
+  '  - 图表可以点开全屏查看。',
   '',
   '> 引用块用于强调上下文，颜色比正文低一档，不会抢走注意力。',
   '',
@@ -1869,9 +1869,9 @@ export const DesktopIdle: Story = {
 
 /**
  * Reading review: every conversation reading surface in one finished turn —
- * prose at the default size, GitHub reference labels, a wide table and diagram
- * extending past the 768px column, process rows, the edited-files card and the
- * info bar. Resize the canvas to see wide blocks fall back to the column.
+ * prose at the default size, GitHub reference labels, wide and narrow tables
+ * and diagrams in the 768px column, process rows, the edited-files card and
+ * the info bar.
  */
 export const DesktopReadingReview: Story = {
   args: { state: 'reading', sessionTitle: '对话页阅读样式审查', branchName: 'fix/reading-comfort' },

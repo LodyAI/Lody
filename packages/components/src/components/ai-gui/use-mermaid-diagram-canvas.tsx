@@ -34,8 +34,6 @@ import {
 export const MERMAID_DIAGRAM_SELECTOR = '[data-streamdown="mermaid"]';
 const MERMAID_BLOCK_SELECTOR = '[data-streamdown="mermaid-block"]';
 const MERMAID_BLOCK_ACTIONS_SELECTOR = '[data-streamdown="mermaid-block-actions"]';
-/** Set on each block: the rendered SVG's viewBox width. */
-const MERMAID_NATURAL_WIDTH_VARIABLE = '--mermaid-natural-width';
 
 /** Marks the activated diagram; the grab cursor hangs off it in `index.css`. */
 const CANVAS_STATE_ATTRIBUTE = 'data-lody-canvas';
@@ -250,17 +248,6 @@ export function useMermaidDiagramCanvas({
           return;
         }
         present.add(diagram);
-        // The diagram's natural width, for `.markdown-wide-blocks` to widen the
-        // frame past the reading column when the diagram needs it. A style
-        // write is an attribute mutation, so it does not re-enter this
-        // child-list observer.
-        const naturalWidth = diagram.querySelector('svg')?.viewBox?.baseVal?.width;
-        if (naturalWidth) {
-          const value = `${Math.ceil(naturalWidth)}px`;
-          if (block.style.getPropertyValue(MERMAID_NATURAL_WIDTH_VARIABLE) !== value) {
-            block.style.setProperty(MERMAID_NATURAL_WIDTH_VARIABLE, value);
-          }
-        }
         // Only a diagram seen for the first time is written to. Re-marking one
         // that is already correct runs on every streamed mutation, and removing
         // `tabindex` from a focused element blurs it — which would drop an

@@ -6106,7 +6106,6 @@ export const MarkdownBlock = memo(function MarkdownBlock({
       isStreaming={isStreaming}
       onAgentFileLinkClick={onFilePathClick ? handleAgentFileLinkClick : undefined}
       searchBlockId={searchBlockId}
-      wideBlocks
     />
   );
 });

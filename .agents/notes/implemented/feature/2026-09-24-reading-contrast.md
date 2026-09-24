@@ -65,12 +65,6 @@ long-form text.
   Dynamic Type; below 13px dense CJK glyphs lose legibility. Conversation text takes the
   tier; `--ui-font-size` (the chrome) is 1px under it, so the default keeps the tuned 14px
   interface while prose reads at 15px. A stored size still snaps to the nearest tier.
-- Wide blocks: in conversation prose (`MarkdownRenderer wideBlocks`), a table or Mermaid
-  diagram wider than the column extends past it, centered on the column, up to the
-  conversation pane minus 64px per side (outline-rail clearance) and at most 1200px.
-  `cqw` resolves against the scroll root's `@container`. Tables size to `max-content`;
-  a diagram's frame follows its SVG viewBox width, which the Mermaid canvas scan writes
-  to `--mermaid-natural-width`. Narrow blocks keep the column width.
 
 ## Conversation details
 
@@ -91,6 +85,10 @@ long-form text.
 
 ## Alternatives
 
+- Letting wide tables and Mermaid diagrams extend past the 768px column, centered on it:
+  implemented, then reverted after review in the app, where blocks jutting out of the
+  reading column looked odd. Wide blocks stay in the column (tables scroll, diagrams open
+  full screen).
 - Styling each surface (menus, settings, buttons, panels) one by one: a static scan found
   no hard-coded white there; the white came from the tokens, so the ceiling belongs in the
   theme layer where every surface inherits it.

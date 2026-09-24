@@ -469,37 +469,6 @@ pre,
     color: var(--markdown-mermaid-foreground);
   }
 
-  /* Conversation prose (`MarkdownRenderer wideBlocks`): a table or diagram wider
-     than the 768px reading column extends past it, centered on the column, up
-     to the conversation pane minus a margin that keeps the outline rail clear
-     (and at most 1200px). Narrow ones keep the column width. `cqw` resolves
-     against the conversation scroll root, the nearest `@container`. */
-  .markdown-wide-blocks {
-    --markdown-wide-block-max: max(100%, min(calc(100cqw - 128px), 1200px));
-  }
-
-  .markdown-wide-blocks [data-markdown-table] {
-    position: relative;
-    left: 50%;
-    width: max-content;
-    min-width: 100%;
-    max-width: var(--markdown-wide-block-max);
-    transform: translateX(-50%);
-  }
-
-  .markdown-wide-blocks [data-streamdown='mermaid-block'] {
-    left: 50%;
-    /* The diagram plus the frame's 1rem padding on each side. */
-    /* `!important`: Streamdown puts `w-full` (utilities layer) on the block. */
-    width: clamp(
-      100%,
-      calc(var(--mermaid-natural-width, 0px) + 2rem + 1px),
-      var(--markdown-wide-block-max)
-    ) !important;
-    max-width: none;
-    transform: translateX(-50%);
-  }
-
   /* Streamdown's "mermaid" language header. `!important`: it carries a `flex`
      utility, which outranks this components-layer rule. */
   .markdown-renderer [data-streamdown='mermaid-block'] > div:first-child:not([data-streamdown]) {

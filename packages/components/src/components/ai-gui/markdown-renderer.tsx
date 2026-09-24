@@ -1326,17 +1326,10 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
   isStreaming = false,
   onAgentFileLinkClick,
   searchBlockId,
-  wideBlocks = false,
 }: {
   text: string;
   size?: MarkdownRendererSize;
   className?: string;
-  /**
-   * Conversation prose only: wide tables and Mermaid diagrams may extend past
-   * the reading column, centered on it, up to the conversation pane's width
-   * (`.markdown-wide-blocks` in `tailwind/index.css`).
-   */
-  wideBlocks?: boolean;
   /** Enable raw HTML rendering (sanitized). Use for GitHub comment bodies. */
   allowHtml?: boolean;
   /** Enables Streamdown's incremental animation while a turn is still streaming. */
@@ -1566,12 +1559,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
       <div
         ref={containerRef}
         data-search-block-id={searchBlockId}
-        className={cn(
-          MARKDOWN_BASE_CLASSNAME,
-          MARKDOWN_SIZE_CLASSNAME,
-          wideBlocks && 'markdown-wide-blocks',
-          className
-        )}
+        className={cn(MARKDOWN_BASE_CLASSNAME, MARKDOWN_SIZE_CLASSNAME, className)}
         style={markdownFontSizeStyle(normalizedSize)}
         onClick={handleContainerClick}
         onKeyDown={handleContainerKeyDown}
