@@ -778,9 +778,9 @@ const CEILED_FOREGROUND_VARIABLES = [
  * near-black canvas halates in long reading and makes every surface equally
  * loud. In dark themes every text foreground is held under one brightness
  * ceiling — the luminance of text at `READING_CONTRAST_CAP.dark.reading`
- * against the canvas — so menus, settings, buttons and panels are no brighter
- * than prose. `--foreground-strong` (headings, bold) is the only step above
- * it, and still below pure white. Popover and accent foregrounds are set from
+ * against the canvas — so menus, settings, buttons and panels share one level.
+ * Conversation prose (`--reading-foreground`) sits one step above it, and
+ * `--foreground-strong` (headings, bold) above that, still below pure white. Popover and accent foregrounds are set from
  * the ceiled foreground: the stylesheet defaults for them are not themed.
  * Light themes only cap long-form reading text; high-contrast themes are left
  * as they are.
@@ -803,8 +803,8 @@ const applyReadingBrightness = (
     '--foreground-strong',
     resolveContrastCappedColor(foreground, background, cap.strong) ?? foreground
   );
-  const reading = resolveContrastCappedColor(foreground, background, cap.reading);
-  set('--reading-foreground', reading);
+  // Conversation prose sits one step above the interface-text ceiling.
+  set('--reading-foreground', resolveContrastCappedColor(foreground, background, cap.prose));
   set(
     '--sidebar-row-foreground',
     resolveContrastCappedColor(
@@ -855,6 +855,8 @@ const SELECTED_FOREGROUND_VARIABLES = [
  */
 const READING_THEME_OVERRIDES: Record<string, Partial<Record<string, string>>> = {
   vesper: {
+    // Prose at HSL lightness 88% on the warm hue (14.2:1).
+    '--reading-foreground': '#E4E1DD',
     '--sidebar-row-foreground': '#BAB6AE',
     '--sidebar-selection-foreground': '#F0EAE1',
     '--tab-active-foreground': '#F0EAE1',
@@ -889,15 +891,16 @@ const resolveLuminanceCappedColor = (
  * Contrast ceilings for reading surfaces. Body text far above WCAG AAA (7:1)
  * gains no legibility, but a pure-white glyph on a near-black canvas halates:
  * strokes bloom and dense text (CJK especially) blurs, most for readers with
- * astigmatism. Vesper's #FFFFFF on #101010 is 19:1. In dark themes every text
- * foreground is capped at 11.6:1 (still AAA; #D2CDC5 on the warm Vesper canvas),
- * headings and the selected row at 15:1, and unselected sidebar text at 9.2:1
- * so the sidebar always sits below the reading column. Light themes are capped
+ * astigmatism. Vesper's #FFFFFF on #101010 is 19:1. In dark themes interface
+ * text is capped at 11.6:1 (#D2CDC5 on the warm Vesper canvas), conversation
+ * prose at 14.2:1 (#E4E1DD), headings and the selected row at 15:1, and
+ * unselected sidebar text at 9.2:1 so the sidebar always sits below the reading
+ * column. Light themes are capped
  * higher, where glare is milder.
  */
 const READING_CONTRAST_CAP = {
-  dark: { strong: 15, reading: 11.6, sidebarRow: 9.2 },
-  light: { strong: 21, reading: 16, sidebarRow: 10 },
+  dark: { strong: 15, prose: 14.2, reading: 11.6, sidebarRow: 9.2 },
+  light: { strong: 21, prose: 16, reading: 16, sidebarRow: 10 },
 } as const;
 
 /**

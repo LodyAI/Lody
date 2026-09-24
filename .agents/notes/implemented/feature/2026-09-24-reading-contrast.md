@@ -11,8 +11,9 @@ Long sessions were tiring in dark themes whose foreground is pure white: in Vesp
 headings, menus, buttons, settings and every sidebar title were #FFFFFF on #101010 (19.7:1),
 so strokes halated, dense CJK text blurred and nothing marked the reading column. Dark themes
 now hold every text foreground under one brightness ceiling, the luminance of text at 11.6:1
-against the canvas (#D2CDC5 on Vesper, still above WCAG AAA). Only headings and bold, the
-selected sidebar row and the active tab go above it. Unselected sidebar text sits below the
+against the canvas (#D2CDC5 on Vesper, still above WCAG AAA). Conversation prose sits one
+step above it (14.2:1, #E4E1DD: HSL lightness 88%), and only headings and bold, the selected
+sidebar row and the active tab go above that. Unselected sidebar text sits below the
 prose. Lody ships Vesper with a warm color temperature: every neutral gray takes a warm
 white point (canvas #141312), and the sidebar (#BAB6AE) and selected/active text (#F0EAE1)
 are hand-tuned on it. High-contrast themes are unchanged, and light themes cap only
@@ -29,7 +30,7 @@ long-form text.
   dropdown menus stayed white.
 - Above the ceiling: `--foreground-strong` (15:1, headings and bold), and the selected
   sidebar row and active tab foregrounds (capped at the same 15:1 step).
-- `--reading-foreground` for prose and user bubbles; `--sidebar-row-foreground` (9.2:1)
+- `--reading-foreground` for prose and user bubbles (14.2:1; Vesper pins #E4E1DD); `--sidebar-row-foreground` (9.2:1)
   for unselected session titles, group and project labels, section headers and New chat /
   Search, so the sidebar never outshines the prose. Hover changes a row's fill only.
 - Foregrounds on colored fills (`--primary-foreground`, `--destructive-foreground`,
@@ -80,7 +81,7 @@ long-form text.
   surfaces and text, accent unchanged) with its pinned colors; soft and high-contrast
   themes are untouched. `tests/markdown-mermaid-plugin.test.ts` checks the dark diagram
   text is under the ceiling. Components suite passes.
-- Local production build with Vesper: prose renders #D1CBC4 (11.5:1); a scan of visible
+- Local production build with Vesper: prose renders #E4E1DD (HSL L 88%, 14.2:1); a scan of visible
   backgrounds, text, borders and strokes on the conversation, settings and archive views
   found no neutral or cool gray left.
 - Only Vesper was inspected in the browser. Share images, terminals and colored-fill badges

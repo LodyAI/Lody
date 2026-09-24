@@ -281,8 +281,10 @@ describe('createLodyThemeCssVariables', () => {
         capped: true,
       });
     }
+    // Prose is one step above the interface text, still under the strong step.
     const reading = contrastRatio(variables['--reading-foreground']!, background);
-    expect(reading).toBeGreaterThan(11.2);
+    expect(reading).toBeGreaterThan(11.6);
+    expect(reading).toBeLessThanOrEqual(14.2);
     const sidebarRow = contrastRatio(
       variables['--sidebar-row-foreground']!,
       variables['--sidebar-background']!
@@ -295,6 +297,7 @@ describe('createLodyThemeCssVariables', () => {
   it('renders Vesper in its warm palette, with the hand-tuned sidebar grays', () => {
     const variables = createLodyThemeCssVariables(getBundledVSCodeThemeByIdSync('vesper')!);
     expect(variables['--background']).toBe(hexColorToHslChannel('#141312'));
+    expect(variables['--reading-foreground']).toBe(hexColorToHslChannel('#E4E1DD'));
     expect(variables['--sidebar-row-foreground']).toBe(hexColorToHslChannel('#BAB6AE'));
     expect(variables['--sidebar-selection-foreground']).toBe(hexColorToHslChannel('#F0EAE1'));
     expect(variables['--tab-active-foreground']).toBe(hexColorToHslChannel('#F0EAE1'));
