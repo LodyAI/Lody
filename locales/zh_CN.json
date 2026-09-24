@@ -2981,7 +2981,7 @@
   "settings.mcp.default": "默认",
   "settings.mcp.defaultToggle": "在新会话中默认选择 {{name}}",
   "settings.mcp.description": "维护此工作区共享的 MCP 目录；每个会话可单独选择要加载的服务器。",
-  "settings.mcp.dialogDescription": "该连接会与工作区共享；会话在 Agent 启动时选择要加载的服务器。",
+  "settings.mcp.dialogDescription": "此连接会与工作区共享。保存后会在本机运行所配置的命令或连接指定 URL，以读取工具列表。请仅保存你信任的配置。",
   "settings.mcp.editTitle": "编辑 MCP 服务器",
   "settings.mcp.empty": "此工作区还没有配置 MCP 服务器。",
   "settings.mcp.errors.duplicateName": "同一工作区内的服务器名称不能重复。",
@@ -4133,5 +4133,9 @@
   "settings.beta.promptShortcutsHelper": "创建可复用的提示词，通过 / 插入。功能开发中，体验可能不完善。",
   "settings.promptShortcuts.disabled": "请在设置 → 关于的开发者模式下开启 Prompt Shortcuts。",
   "sessions.prompts.createPrOrigin": "（此消息由 Lody 的「**创建 PR**」按钮发送）",
-  "sessions.prompts.createDraftPrOrigin": "（此消息由 Lody 的「**创建草稿 PR**」按钮发送）"
+  "sessions.prompts.createDraftPrOrigin": "（此消息由 Lody 的「**创建草稿 PR**」按钮发送）",
+  "settings.mcp.tools.failed": "连接失败，请检查配置后重试。",
+  "settings.mcp.tools.label": "可用工具",
+  "settings.mcp.tools.discover": "加载工具",
+  "settings.mcp.tools.empty": "未发现工具"
 }

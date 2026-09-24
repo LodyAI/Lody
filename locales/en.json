@@ -2981,7 +2981,7 @@
   "settings.mcp.default": "Default",
   "settings.mcp.defaultToggle": "Select {{name}} by default in new sessions",
   "settings.mcp.description": "Create the shared MCP catalog for this workspace. Each session can choose which servers to load.",
-  "settings.mcp.dialogDescription": "This connection is shared with the workspace. Sessions choose which servers to load when the agent starts.",
+  "settings.mcp.dialogDescription": "This connection is shared with the workspace. Saving runs the configured command or connects to the URL on this machine to list tools. Only save configurations you trust.",
   "settings.mcp.editTitle": "Edit MCP server",
   "settings.mcp.empty": "No MCP servers are configured for this workspace.",
   "settings.mcp.errors.duplicateName": "Server names must be unique in this workspace.",
@@ -4133,5 +4133,9 @@
   "settings.beta.promptShortcutsHelper": "Create reusable prompts and insert them with /. In development — expect rough edges.",
   "settings.promptShortcuts.disabled": "Enable Prompt Shortcuts under Developer mode in Settings → About to use this feature.",
   "sessions.prompts.createPrOrigin": "(Sent by the **Create PR** button in Lody.)",
-  "sessions.prompts.createDraftPrOrigin": "(Sent by the **Create Draft PR** button in Lody.)"
+  "sessions.prompts.createDraftPrOrigin": "(Sent by the **Create Draft PR** button in Lody.)",
+  "settings.mcp.tools.failed": "Connection failed. Check the configuration and try again.",
+  "settings.mcp.tools.label": "Available tools",
+  "settings.mcp.tools.discover": "Load tools",
+  "settings.mcp.tools.empty": "No tools found"
 }

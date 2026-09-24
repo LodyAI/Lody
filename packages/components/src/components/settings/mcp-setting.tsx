@@ -1,13 +1,16 @@
-import { useState } from 'react';
+import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
+import { localMachineIdAtom } from '@/atoms/local-probe';
+import { useEffect, useRef, useState } from 'react';
 import { useAtomValue } from 'jotai';
 import { usePostHog } from '@posthog/react';
-import { Plug, Plus, Trash2 } from 'lucide-react';
+import { Plug, Plus, RefreshCw, Trash2 } from 'lucide-react';
 import { Spinner } from '@/ui/spinner';
 import { useTranslation } from 'react-i18next';
 import {
   describeMcpConnection,
   getServerNow,
   type McpServerId,
+  type McpToolListResult,
   type WorkspaceMcpServerMeta,
 } from '@lody/shared';
 import { userAtom } from '@/atoms';
@@ -45,6 +48,8 @@ export function McpSetting() {
   const postHog = usePostHog();
   const isMobile = useIsMobile();
   const user = useAtomValue(userAtom);
+  const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
+  const localMachineId = useAtomValue(localMachineIdAtom);
   const { servers, synced } = useWorkspaceMcpCatalog();
   const { upsert, remove } = useWorkspaceMcpCatalogActions();
   const [editor, setEditor] = useState<EditorState | null>(null);
@@ -52,6 +57,40 @@ export function McpSetting() {
   const [error, setError] = useState<string>();
   const [pendingRemoval, setPendingRemoval] = useState<WorkspaceMcpServerMeta | null>(null);
   const [removing, setRemoving] = useState(false);
+
+  const [toolLists, setToolLists] = useState<
+    Record<string, { connection: WorkspaceMcpServerMeta['connection']; state: McpToolListState }>
+  >({});
+  const scope = useRef(0);
+  useEffect(() => {
+    setToolLists({});
+    return () => {
+      scope.current += 1;
+    };
+  }, [runtime, localMachineId]);
+
+  const discoverTools = async (entry: WorkspaceMcpServerMeta) => {
+    if (!runtime || !localMachineId || !entry.connection) return;
+    const requestScope = scope.current;
+    const pending = { connection: entry.connection, state: { status: 'loading' } as const };
+    setToolLists((current) => ({ ...current, [entry.id]: pending }));
+    try {
+      const { tools } = await runtime.requestLocalMcpTools(localMachineId, entry);
+      if (requestScope === scope.current)
+        setToolLists((current) =>
+          current[entry.id] === pending
+            ? { ...current, [entry.id]: { ...pending, state: { status: 'success', tools } } }
+            : current
+        );
+    } catch {
+      if (requestScope === scope.current)
+        setToolLists((current) =>
+          current[entry.id] === pending
+            ? { ...current, [entry.id]: { ...pending, state: { status: 'error' } } }
+            : current
+        );
+    }
+  };
 
   const openEditor = (next: EditorState) => {
     setError(undefined);
@@ -97,6 +136,7 @@ export function McpSetting() {
         });
       }
       setEditor(null);
+      if (entry.connection) void discoverTools(entry);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
@@ -179,7 +219,15 @@ export function McpSetting() {
             {servers.map((server) => (
               <McpServerRow
                 key={server.id}
+                toolList={
+                  JSON.stringify(toolLists[server.id]?.connection) ===
+                  JSON.stringify(server.connection)
+                    ? toolLists[server.id]?.state
+                    : undefined
+                }
                 server={server}
+                onDiscoverTools={() => void discoverTools(server)}
+                canDiscoverTools={Boolean(runtime && localMachineId && server.connection)}
                 onEdit={() => openEditor({ mode: 'edit', entry: server })}
                 onToggleDefault={(enabled) => void toggleDefault(server, enabled)}
                 onRemove={() => setPendingRemoval(server)}
@@ -273,7 +321,13 @@ export function McpServerRow({
   onEdit,
   onToggleDefault,
   onRemove,
+  onDiscoverTools,
+  canDiscoverTools,
+  toolList,
 }: {
+  toolList?: McpToolListState;
+  onDiscoverTools: () => void;
+  canDiscoverTools: boolean;
   server: WorkspaceMcpServerMeta;
   onEdit: () => void;
   onToggleDefault: (enabled: boolean) => void;
@@ -313,6 +367,21 @@ export function McpServerRow({
           </span>
         </button>
         <div className="flex shrink-0 items-center gap-2 py-2 pl-2 pr-2">
+          {server.connection ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className="h-7 gap-1 px-2 text-[11px] text-muted-foreground"
+              disabled={!canDiscoverTools || toolList?.status === 'loading'}
+              onClick={onDiscoverTools}
+            >
+              <RefreshCw
+                className={cn('h-3 w-3', toolList?.status === 'loading' && 'animate-spin')}
+              />
+              {t('settings.mcp.tools.discover')}
+            </Button>
+          ) : null}
           {/* The switch keeps its own Radix `data-state`, so the label sits
               beside it rather than wrapping it in a tooltip trigger. */}
           <label
@@ -338,6 +407,44 @@ export function McpServerRow({
           </Button>
         </div>
       </div>
+      {server.connection &&
+      toolList &&
+      (toolList.status !== 'success' || toolList.tools.length > 0) ? (
+        <div className="border-t border-border/50 px-3 py-2" aria-live="polite">
+          {toolList.status === 'loading' ? (
+            <Spinner className="h-3 w-3 text-muted-foreground" aria-label={t('common.loading')} />
+          ) : null}
+          {toolList.status === 'error' ? (
+            <span className="text-[11px] text-destructive">{t('settings.mcp.tools.failed')}</span>
+          ) : null}
+          {toolList?.status === 'success' && toolList.tools.length > 0 ? (
+            <div
+              className="flex min-w-0 flex-wrap gap-1.5"
+              aria-label={t('settings.mcp.tools.label')}
+            >
+              {toolList.tools.map((tool) => (
+                <Badge
+                  key={tool.name}
+                  variant="secondary"
+                  title={tool.description}
+                  className="max-w-full whitespace-normal break-all px-1.5 py-0.5 font-mono text-[11px] font-normal"
+                >
+                  {tool.name}
+                </Badge>
+              ))}
+            </div>
+          ) : null}
+          {toolList?.status === 'success' && toolList.tools.length === 0 ? (
+            <span className="text-[11px] text-muted-foreground">
+              {t('settings.mcp.tools.empty')}
+            </span>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   );
 }
+
+type McpToolListState =
+  | { status: 'loading' | 'error' }
+  | { status: 'success'; tools: McpToolListResult['tools'] };

@@ -55,6 +55,7 @@
     "@lody/turn-diff-store": "workspace:*",
     "@loro-dev/flock-wasm": "catalog:",
     "@loro-dev/streams-crdt": "catalog:",
+    "@modelcontextprotocol/client": "2.0.0",
     "@modelcontextprotocol/node": "2.0.0",
     "@modelcontextprotocol/sdk": "1.29.0",
     "@modelcontextprotocol/server": "2.0.0",

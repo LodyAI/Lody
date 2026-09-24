@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
   type MachineId,
+  type McpServerId,
   type SessionId,
   type WorkspaceId,
 } from '@lody/shared';
@@ -55,8 +56,8 @@ describe('createWorkspaceMachineRpcFacade', () => {
       workspaceId,
       getMachineProtocolCapabilities: async () => undefined,
       targetRouter: {
-        getPlaneForMachine: () => 'remote',
-        resolvePlaneForMachine: async () => 'remote',
+        getPlaneForMachine: () => 'cloud',
+        resolvePlaneForMachine: async () => 'cloud',
       },
       getMachineRpcClient: async () => {
         throw new Error('Unexpected RPC');
@@ -94,7 +95,7 @@ describe('createWorkspaceMachineRpcFacade', () => {
       getMachineProtocolCapabilities: async () => CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
       targetRouter: {
         getPlaneForMachine: () => 'local',
-        resolvePlaneForMachine: vi.fn(async () => 'local'),
+        resolvePlaneForMachine: vi.fn(async () => 'local' as const),
       },
       getMachineRpcClient,
     });
@@ -192,7 +193,7 @@ describe('createWorkspaceMachineRpcFacade', () => {
       getMachineProtocolCapabilities: async () => CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
       targetRouter: {
         getPlaneForMachine: () => 'local',
-        resolvePlaneForMachine: vi.fn(async () => 'local'),
+        resolvePlaneForMachine: vi.fn(async () => 'local' as const),
       },
       getMachineRpcClient,
     });
@@ -239,7 +240,7 @@ describe('createWorkspaceMachineRpcFacade', () => {
       getMachineProtocolCapabilities: async () => CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
       targetRouter: {
         getPlaneForMachine: () => 'local',
-        resolvePlaneForMachine: vi.fn(async () => 'local'),
+        resolvePlaneForMachine: vi.fn(async () => 'local' as const),
       },
       getMachineRpcClient,
     });
@@ -279,7 +280,7 @@ describe('createWorkspaceMachineRpcFacade', () => {
       getMachineProtocolCapabilities: async () => CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
       targetRouter: {
         getPlaneForMachine: () => 'cloud',
-        resolvePlaneForMachine: vi.fn(async () => 'cloud'),
+        resolvePlaneForMachine: vi.fn(async () => 'cloud' as const),
       },
       getMachineRpcClient,
     });
@@ -299,4 +300,45 @@ describe('createWorkspaceMachineRpcFacade', () => {
     });
     expect(invoke).not.toHaveBeenCalled();
   });
+});
+
+describe('local MCP discovery routing', () => {
+  const server = {
+    id: 'test' as McpServerId,
+    name: 'Test',
+    transport: 'stdio' as const,
+    connection: { transport: 'stdio' as const, command: 'synthetic' },
+    createdAt: 1,
+    updatedAt: 1,
+  };
+  it.each([true, false])(
+    'gates local inventory by daemon capability (supported=%s)',
+    async (supported) => {
+      const inventory = { type: 'mcp/tools', tools: [{ name: 'read_file' }] };
+      vi.stubGlobal('window', {
+        __LODY_ELECTRON__: true,
+        ipc: {
+          invoke: async () => {
+            if (!supported) throw new Error('Unexpected local RPC');
+            return { ok: true, result: inventory };
+          },
+        },
+      });
+      const facade = createWorkspaceMachineRpcFacade({
+        workspaceId,
+        getMachineProtocolCapabilities: async () =>
+          supported ? CURRENT_MACHINE_PROTOCOL_CAPABILITIES : undefined,
+        targetRouter: {
+          getPlaneForMachine: () => 'local',
+          resolvePlaneForMachine: async () => 'local',
+        },
+        getMachineRpcClient: async () => {
+          throw new Error('Unexpected remote RPC');
+        },
+      });
+      const result = facade.requestLocalMcpTools(localMachineId, server);
+      if (supported) await expect(result).resolves.toEqual(inventory);
+      else await expect(result).rejects.toThrow('requires a supported local daemon');
+    }
+  );
 });
