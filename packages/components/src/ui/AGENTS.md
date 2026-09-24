@@ -74,13 +74,10 @@ strings on i18n rather than the registry's inline English.
   `--hover` on popovers — it is sized for the page/sidebar and vanishes on the
   near-black dark menu fill. Kbd chips use the same 6% ink fill and muted text
   as the workspace Plus badge.
-- Menu chrome lives in `menu-styles.ts`. Items are `0.9em` of `--ui-font-size`
-  (the Appearance slider) / `py-1` / `min-h-7`. Settings chrome is `1em` of the
-  same token. Do not go back to `text-[13px]` or `text-xs` for menu rows.
-  The hairline is a `0.5px` shadow ring (not a CSS border). The ring and
-  separators share the per-theme `--menu-edge-color` mix in both themes, never
-  a fixed gray. Do not restore bulky
-  `min-h-8` rows or a 1px ring.
+- Product menu extras live in `menu-styles.ts` (group label, separator, search
+  shell); the surface and rows are `@lody/ui`'s popup surface. Rows track
+  `0.9em` of `--ui-font-size`; the edge is a `0.5px` shadow ring, never a 1px
+  border.
 
 ## Spinner
 
