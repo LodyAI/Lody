@@ -22,26 +22,26 @@ export interface WorkingGridWave {
 }
 
 // The first wave is shorter and faster than the second and their periods are
-// 33:47, so the interference pattern takes ~78s to repeat and never reads as a loop.
+// 19:27, so the interference pattern takes ~51s to repeat and never reads as a loop.
 const WAVES: Record<WorkingGridDirection, readonly [WorkingGridWave, WorkingGridWave]> = {
   // 27° down-right and 60° down-left of horizontal.
   across: [
-    { dir: [0.9, 0.45], length: 3.2, periodMs: 1650, phase: 0 },
-    { dir: [-0.5, 0.85], length: 4.4, periodMs: 2350, phase: 0.3 },
+    { dir: [0.9, 0.45], length: 3.2, periodMs: 1900, phase: 0 },
+    { dir: [-0.5, 0.85], length: 4.4, periodMs: 2700, phase: 0.3 },
   ],
   // Within 15–20° of vertical: sweeps down a narrow list.
   down: [
-    { dir: [0.34, 0.94], length: 3.2, periodMs: 1650, phase: 0 },
-    { dir: [-0.26, 0.97], length: 4.4, periodMs: 2350, phase: 0.3 },
+    { dir: [0.34, 0.94], length: 3.2, periodMs: 1900, phase: 0 },
+    { dir: [-0.26, 0.97], length: 4.4, periodMs: 2700, phase: 0.3 },
   ],
 };
 
 /**
- * Default wavelength multiplier. Kept below 1 so a wave is shorter than a mark:
- * at 1.5 a trough of both waves could cover all nine tiles and the whole mark
- * faded out for ~9% of the time.
+ * Default wavelength multiplier. At 1.5 a trough of both waves could cover all
+ * nine tiles and the whole mark faded out ~9% of the time; at 1 that drops below
+ * 1% while the swell still reads as calm (0.8 never fades but looks choppy).
  */
-export const WORKING_GRID_WAVELENGTH = 0.8;
+export const WORKING_GRID_WAVELENGTH = 1;
 
 export function workingGridWaves(
   direction: WorkingGridDirection

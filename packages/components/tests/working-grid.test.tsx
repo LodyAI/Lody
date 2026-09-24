@@ -88,7 +88,8 @@ describe('working grid sea', () => {
         }
       }
     }
-    expect(dimmest).toBeGreaterThan(0.2);
+    // 0.12 at the default wavelength; 0.03 at the old 1.5, where whole marks faded out.
+    expect(dimmest).toBeGreaterThan(0.1);
   });
 
   it('gives neighbouring tiles neighbouring phases', () => {

@@ -1460,3 +1460,21 @@ export const StressTest: Story = {
     sessionListProps: stressTaskListProps,
   },
 };
+
+/** Every session running at once: many working marks sharing one sea down the sidebar. */
+export const AllSessionsWorking: Story = {
+  name: 'All sessions working',
+  render: (args) => <WithProjectsLayout {...args} />,
+  args: {
+    ...Default.args!,
+    sessionListProps: {
+      ...demoTaskListProps,
+      sessions: demoTaskListProps.sessions.map((session) => ({
+        ...session,
+        isWorking: true,
+        isWaitingPermission: false,
+        hasUnreadMessages: false,
+      })),
+    },
+  },
+};
