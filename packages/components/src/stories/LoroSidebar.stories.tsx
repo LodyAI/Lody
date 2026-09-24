@@ -1279,6 +1279,13 @@ function WithProjectsLayout(args: Parameters<typeof LoroSidebar>[0]) {
   );
   const [chatsCollapsed, setChatsCollapsed] = useState(false);
   const [sessions, setTasks] = useState<SessionListRow[]>(baseSessionListProps.sessions);
+  // A story may drive the list over time (e.g. sessions finishing one by one);
+  // take a new list when the args hand one over.
+  const [argSessions, setArgSessions] = useState(baseSessionListProps.sessions);
+  if (argSessions !== baseSessionListProps.sessions) {
+    setArgSessions(baseSessionListProps.sessions);
+    setTasks(baseSessionListProps.sessions);
+  }
   const [repos, setRepos] = useState<SessionListRepoState[]>(baseSessionListProps.repos);
   const nextSessionIdRef = useRef(1);
 
@@ -1459,4 +1466,55 @@ export const StressTest: Story = {
     ...Default.args!,
     sessionListProps: stressTaskListProps,
   },
+};
+
+/** Every session running at once: many working marks sharing one sea down the sidebar. */
+export const AllSessionsWorking: Story = {
+  name: 'All sessions working',
+  render: (args) => <WithProjectsLayout {...args} />,
+  args: {
+    ...Default.args!,
+    sessionListProps: {
+      ...demoTaskListProps,
+      sessions: demoTaskListProps.sessions.map((session) => ({
+        ...session,
+        isWorking: true,
+        isWaitingPermission: false,
+        hasUnreadMessages: false,
+      })),
+    },
+  },
+};
+
+const FINISH_EVERY_MS = 1400;
+
+/** Starts every session working, then finishes one at a time, then starts over. */
+function SessionsFinishingLayout(args: Parameters<typeof LoroSidebar>[0]) {
+  const base = demoTaskListProps.sessions;
+  const [finished, setFinished] = useState(0);
+  useEffect(() => {
+    const id = setInterval(
+      () => setFinished((count) => (count > base.length + 1 ? 0 : count + 1)),
+      FINISH_EVERY_MS
+    );
+    return () => clearInterval(id);
+  }, [base.length]);
+  const sessions = useMemo(
+    () =>
+      base.map((session, index) => ({
+        ...session,
+        isWorking: index >= finished,
+        isWaitingPermission: false,
+        hasUnreadMessages: index < finished,
+      })),
+    [base, finished]
+  );
+  return <WithProjectsLayout {...args} sessionListProps={{ ...demoTaskListProps, sessions }} />;
+}
+
+/** Sessions finish one by one: each working grid spins and gathers into the unread dot. */
+export const SessionsFinishing: Story = {
+  name: 'Sessions finishing',
+  render: (args) => <SessionsFinishingLayout {...args} />,
+  args: { ...Default.args! },
 };

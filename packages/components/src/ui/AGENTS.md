@@ -18,20 +18,18 @@ strings on i18n rather than the registry's inline English.
   a hashed `?url` asset cannot satisfy it and a host that forgets the plugin gets an
   empty picker. Keep the locale list in the plugin and `lib/emojibase-assets.ts` in
   step; each locale is ~750 KB.
-- `data.json` is emitted with every other bundled locale's `label` and `tags` folded
-  into `tags` (build-time merge keyed on `hexcode`), because frimousse searches only
-  the loaded locale. Do not revert to a verbatim copy — that is what lets one query
-  match in either product language. `label` and `messages.json` stay per-locale so
-  display names and category headers keep the UI language.
+- `data.json` folds every bundled locale's `label` and `tags` into `tags`
+  (build-time merge keyed on `hexcode`), because frimousse searches only the
+  loaded locale — one query then matches in either product language. `label` and
+  `messages.json` stay per-locale so display names and category headers keep the
+  UI language.
 - Anchor the URL on the Vite BASE, never on `document.baseURI` alone. The router uses
   browser history over http, so the document URL is a deep route and resolving against
   it asks for `…/settings/emojibase`, which the dev server answers with the SPA
   fallback — the picker then parses HTML as JSON.
-- Keep `focus-visible:shadow-none` on its search input. The global "Pro focus style" in
-  `tailwind/index.css` puts an inset `--primary` ring on any focused input through a
-  zero-specificity `:where(…)` selector, so every input with its own `focus-visible:`
-  utility overrides it; this bare registry input had none and was the one field in the
-  app that showed it.
+- Keep `focus-visible:shadow-none` on its search input: `tailwind/index.css`'s
+  zero-specificity "Pro focus style" rings every focused input unless a
+  `focus-visible:` utility overrides it, and this bare registry input had none.
 
 ## Field colors
 
@@ -45,8 +43,8 @@ strings on i18n rather than the registry's inline English.
 
 ## Menus and viewers
 
-- Dialog overlays and content share one z rung; portal DOM order puts each
-  new overlay above earlier dialogs and below its own content.
+- Dialog overlays and content share one z rung: portal DOM order puts each new
+  overlay above earlier dialogs and below its own content.
 - Dialog-contained `OptionSelector` menus must portal into the nearest
   `[data-lody-dialog-content]`; a body portal is outside the modal's scroll and
   focus guards. `src/ui/dialog.tsx` emits that attribute on every panel.
@@ -92,12 +90,17 @@ strings on i18n rather than the registry's inline English.
   vsync: two idle sidebar spinners measured 40–50% renderer CPU on a Retina Mac.
   Both implementations obey this; any other infinite transform animation (the
   readiness orbit) follows the same rule.
-- `Spinner`'s `spinning` defaults to TRUE, so a component that forwards its OWN
-  optional `spinning`/`loading`/`spin` prop must give it a default of `false`.
-  Forwarding `undefined` reaches the primitive's default and spins the icon in
-  every non-loading state; that shipped as a permanently rotating "No machines
-  available" and "Files unavailable" icon.
+- `Spinner`'s `spinning` defaults to TRUE: a component forwarding its own optional
+  `spinning`/`loading`/`spin` prop must default it to `false` — `undefined` hits the
+  primitive's default and spins at rest ("No machines available" shipped that way).
   Evidence: [spinner note](../../../../.agents/notes/implemented/bug-fix/2026-09-13-spinner-off-svg-retina-composite.md).
+
+## Working grid
+
+- Session working/unread marks go through `working-status-mark.tsx`, mounted across the
+  change; animate only `transform`/`opacity` on the shared clock
+  (`working-grid-reading.ts`), never rAF, timers or React state. The sidebar root keeps
+  `data-working-grid-region`. [Note](../../../../.agents/notes/implemented/feature/2026-09-24-sidebar-working-grid.md).
 
 ## Scroll area
 
@@ -105,9 +108,8 @@ strings on i18n rather than the registry's inline English.
   thumb polling on effect cleanup. Verify both ESM and CommonJS with
   `tests/scroll-area-lifecycle.test.tsx` when upgrading; removing a thumb during
   the scroll-end debounce must not retain a frame loop or detached viewport.
-- The desktop left sidebar (`loro-sidebar.tsx`) uses `type="scroll"` so the
-  overlay thumb appears only while scrolling, not on pointer move. Do not
-  revert it to the Radix default `hover`.
+- `loro-sidebar.tsx` uses `type="scroll"` so the overlay thumb appears only while
+  scrolling; do not revert to the Radix default `hover`.
 
 ## Slider
 

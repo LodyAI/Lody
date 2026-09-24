@@ -31,7 +31,6 @@ import { RefreshCw } from 'lucide-react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync } from 'react-dom';
 import { createRoot, type Root } from 'react-dom/client';
-import { SidebarRowEndSlot } from '../src/components/sidebar-row-shared';
 import { RemoteDirectoryPicker } from '../src/components/local-projects/add-local-project-dialog';
 import { MobileAddLocalProjectFlow } from '../src/components/local-projects/mobile-add-local-project-flow';
 import { MobileProjectFileBrowser } from '../src/components/files/mobile-project-file-browser';
@@ -84,9 +83,7 @@ function render(node: React.ReactElement) {
  * animates a `[data-slot="spinner"]` one — both are the same contract.
  */
 function expectCompositableSpinner(): Element {
-  const animated = [
-    ...container.querySelectorAll('.animate-spin, [data-slot="spinner"]'),
-  ];
+  const animated = [...container.querySelectorAll('.animate-spin, [data-slot="spinner"]')];
   expect(animated.length).toBe(1);
   const wrapper = animated[0]!;
 
@@ -113,22 +110,6 @@ function expectCompositableSpinner(): Element {
 }
 
 describe('spinners animate on a compositable wrapper and rotate in place', () => {
-  it('session row working indicator: the status slot animates a centered wrapper', () => {
-    // The status mark lives in the row's END slot (`sidebar-row-shared.tsx`).
-    // It is mounted for as long as a session runs, so it is the spinner that
-    // dominated the idle renderer profile.
-    render(React.createElement(SidebarRowEndSlot, { isWorking: true }));
-
-    const wrapper = expectCompositableSpinner();
-    expect(wrapper.querySelector('[data-session-working-spinner]')).not.toBeNull();
-
-    const indicator = wrapper.closest('[data-session-row-indicator]');
-    expect(indicator).not.toBeNull();
-    expect(indicator!.classList.contains('-top-px')).toBe(false);
-    expect(indicator!.classList.contains('items-center')).toBe(true);
-    expect(indicator!.classList.contains('justify-center')).toBe(true);
-  });
-
   it('session syncing indicator: the label stays outside the animated box', () => {
     render(React.createElement(SessionSyncingIndicator, {}));
 
@@ -196,22 +177,24 @@ describe('status panels animate only their loading state', () => {
     onClose: () => {},
   } as unknown as React.ComponentProps<typeof RemoteDirectoryPicker>;
 
-  const panels: ReadonlyArray<
-    readonly [string, (loading: boolean) => React.ReactElement, string]
-  > = [
+  const panels: ReadonlyArray<readonly [string, (loading: boolean) => React.ReactElement, string]> =
     [
-      'desktop machine picker',
-      (loading) =>
-        React.createElement(RemoteDirectoryPicker, { ...pickerArgs, machinesLoading: loading }),
-      'No machines available',
-    ],
-    [
-      'mobile machine picker',
-      (loading) =>
-        React.createElement(MobileAddLocalProjectFlow, { ...pickerArgs, machinesLoading: loading }),
-      'No machines available',
-    ],
-  ];
+      [
+        'desktop machine picker',
+        (loading) =>
+          React.createElement(RemoteDirectoryPicker, { ...pickerArgs, machinesLoading: loading }),
+        'No machines available',
+      ],
+      [
+        'mobile machine picker',
+        (loading) =>
+          React.createElement(MobileAddLocalProjectFlow, {
+            ...pickerArgs,
+            machinesLoading: loading,
+          }),
+        'No machines available',
+      ],
+    ];
 
   for (const [name, element, restingText] of panels) {
     it(`${name}: the resting icon does not spin`, () => {

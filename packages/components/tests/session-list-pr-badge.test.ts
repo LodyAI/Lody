@@ -345,7 +345,7 @@ describe('SessionList PR badge', () => {
     expect(emittedRenderUpdateWarning).toBe(false);
   });
 
-  it('keeps the working animation on an active-only fixed wrapper', () => {
+  it('mounts the working mark only while the session works', () => {
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -358,15 +358,9 @@ describe('SessionList PR badge', () => {
       );
     });
 
-    // `@lody/ui`'s Spinner animates the `[data-slot="spinner"]` wrapper; the
-    // marker lands on the glyph inside it.
-    const mark = container.querySelector('[data-session-working-spinner]');
-    expect(mark?.tagName).toBe('svg');
-    const wrapper = mark?.closest('[data-slot="spinner"]');
-    expect(wrapper?.tagName).toBe('SPAN');
-    expect(mark?.classList.contains('h-3')).toBe(true);
-    expect(mark?.classList.contains('w-3')).toBe(true);
-    expect(mark?.classList.contains('shrink-0')).toBe(true);
+    const mark = container.querySelector('[data-session-working-indicator]');
+    expect(mark?.matches('[data-working-grid]')).toBe(true);
+    expect(mark?.querySelectorAll('[data-working-grid-tile]')).toHaveLength(9);
 
     flushSync(() => {
       root?.render(
@@ -377,7 +371,7 @@ describe('SessionList PR badge', () => {
       );
     });
 
-    expect(container.querySelector('[data-session-working-spinner]')).toBeNull();
-    expect(container.querySelector('[data-slot="spinner"]')).toBeNull();
+    expect(container.querySelector('[data-session-working-indicator]')).toBeNull();
+    expect(container.querySelector('[data-working-grid]')).toBeNull();
   });
 });

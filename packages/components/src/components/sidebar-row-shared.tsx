@@ -16,7 +16,7 @@ import {
   X,
   type LucideIcon,
 } from 'lucide-react';
-import { Spinner } from '@lody/ui/spinner';
+import { WorkingStatusMark } from '@/ui/working-status-mark';
 import type { PrStatus, SessionPullRequestCiState } from '@lody/shared';
 import { cn } from '@/lib/utils';
 import { Tooltip } from '@lody/ui/tooltip';
@@ -145,12 +145,18 @@ function SessionRowStatusIndicator({
 }) {
   let icon: ReactNode = null;
 
-  if (isWaitingPermission) {
+  if (isWaitingPermission === true) {
     icon = <Hand className="h-3 w-3 text-status-warning" />;
-  } else if (isWorking) {
-    icon = <Spinner data-session-working-spinner="" className="h-3 w-3 shrink-0 text-primary" />;
-  } else if (hasUnreadMessages) {
-    icon = <span className="h-2 w-2 rounded-full bg-primary" />;
+  } else if (isWorking === true || hasUnreadMessages === true) {
+    // Working grid, the working → unread "done" transition, and the unread dot
+    // are one component so it stays mounted across that change and can see it.
+    icon = (
+      <WorkingStatusMark
+        working={isWorking === true}
+        unread={hasUnreadMessages === true}
+        className="text-primary"
+      />
+    );
   }
 
   if (!icon) return null;
