@@ -1187,10 +1187,9 @@ const createMarkdownComponents = ({
           href={href}
           rel={rel}
           {...rest}
-          title={href}
           className={cn(
             rest.className,
-            'markdown-reference-chip mx-[0.1em] inline-flex max-w-full items-center rounded-md border border-border/80 bg-foreground/[0.04] px-[0.4em] align-[-0.12em] text-[0.92em] leading-[1.55] transition-colors hover:border-border hover:bg-foreground/[0.08]'
+            'markdown-reference-chip mx-[0.1em] inline-flex max-w-full items-center rounded-md border px-[0.4em] align-[-0.12em] text-[0.92em] leading-[1.55] transition-colors'
           )}
         >
           <GitHubReferenceChip reference={githubReference} />

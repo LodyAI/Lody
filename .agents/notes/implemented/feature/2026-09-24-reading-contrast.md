@@ -69,10 +69,12 @@ long-form text.
 ## Conversation details
 
 - GitHub references: a link whose text only names a pull request or issue (the URL
-  itself, `#123`, `repo#123`, `owner/repo#123`, `PR #123`) renders as a label with the
-  GitHub mark, `PR` / `Issue`, the repository and the number
-  (`github-reference-link.tsx`). A link with its own wording, or a number that does not
-  match its URL, stays an ordinary link. The anchor keeps the in-app PR interception.
+  itself, `#123`, `repo#123`, `owner/repo#123`, `PR #123`) renders as a link-blue chip,
+  `[icon] owner/repo #123`: the pull-request or issue icon names the kind (also spoken to
+  screen readers), and the tinted fill and border mark it as clickable
+  (`github-reference-link.tsx`, `.markdown-reference-chip`). A link with its own wording,
+  or a number that does not match its URL, stays an ordinary link. The anchor keeps the
+  in-app PR interception.
 - Process rows: "Context compacted" and "Retrying…" are process status lines, not cards,
   so they share the "Ran N commands" header's box and gap (34px rhythm; was 39 / 32px).
 - Info bar: the PR number is secondary text beside the colored PR icon; CI is a verdict

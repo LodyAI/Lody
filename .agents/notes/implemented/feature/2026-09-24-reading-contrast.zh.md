@@ -48,8 +48,9 @@ Translation: current
 ## 对话细节
 
 - GitHub 引用：链接文字只是在指代某个 PR 或 Issue 时（URL 本身、`#123`、`repo#123`、`owner/repo#123`、`PR #123`），渲染成
-  带 GitHub 图标、`PR` / `Issue`、仓库名和编号的小标签（`github-reference-link.tsx`）。有自己措辞的链接，或编号与 URL 不符的
-  链接，保持普通链接。锚点保留应用内打开 PR 的拦截。
+  链接蓝色的小标签 `[图标] owner/repo #123`：PR 或 Issue 图标表明类型（读屏软件也会读出），浅蓝底色和边框表明可以点击
+  （`github-reference-link.tsx`、`.markdown-reference-chip`）。有自己措辞的链接，或编号与 URL 不符的链接，保持普通链接。
+  锚点保留应用内打开 PR 的拦截。
 - 过程行：「Context compacted」和「Retrying…」是过程状态行而不是卡片，因此与「Ran N commands」标题共用同样的行框和间距
   （统一为 34px；之前是 39 / 32px）。
 - 信息栏：PR 号用次要文字色，旁边是带颜色的 PR 图标；CI 是结果图标（不再是带底色的「CI」标签）；行数统计放在最右侧带底色的

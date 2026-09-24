@@ -1,5 +1,5 @@
 import { Children, isValidElement, type ReactNode } from 'react';
-import { Github } from 'lucide-react';
+import { CircleDot, GitPullRequest } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { cn } from '@/lib/utils';
 
@@ -58,11 +58,11 @@ export function markdownLinkText(children: ReactNode): string {
 }
 
 /**
- * The inline body of a GitHub pull request / issue link: a small label with the
- * GitHub mark, the kind (`PR` / `Issue`), the repository and the number. The
- * caller keeps the `<a>` (and its in-app PR interception); this only replaces
- * the link text. `markdown-reference-chip` opts the anchor out of the prose
- * link underline and color (`tailwind/index.css`).
+ * The inline body of a GitHub pull request / issue link: `[icon] owner/repo #123`.
+ * The icon names the kind (pull request or issue); the kind is also spoken to
+ * screen readers. The caller keeps the `<a>` (and its in-app PR interception)
+ * and styles it as a link-blue chip (`markdown-reference-chip` in
+ * `tailwind/index.css`); this only replaces the link text.
  */
 export function GitHubReferenceChip({
   reference,
@@ -76,27 +76,18 @@ export function GitHubReferenceChip({
     reference.kind === 'pull'
       ? t('sessions.githubReference.pullRequest', 'PR')
       : t('sessions.githubReference.issue', 'Issue');
+  const KindIcon = reference.kind === 'pull' ? GitPullRequest : CircleDot;
   return (
     <span
       data-github-reference={reference.kind}
       className={cn('inline-flex max-w-full items-center gap-[0.35em] align-baseline', className)}
     >
-      <Github
-        className="h-[0.95em] w-[0.95em] shrink-0 self-center text-muted-foreground"
-        aria-hidden="true"
-      />
-      <span className="shrink-0 text-[0.78em] font-semibold uppercase tracking-[0.04em] text-muted-foreground">
-        {kindLabel}
+      <KindIcon className="h-[0.95em] w-[0.95em] shrink-0 self-center" aria-hidden="true" />
+      <span className="sr-only">{kindLabel} </span>
+      <span className="min-w-0 truncate">
+        {reference.owner}/{reference.repo}
       </span>
-      <span
-        className="min-w-0 truncate text-muted-foreground"
-        title={`${reference.owner}/${reference.repo}`}
-      >
-        {reference.repo}
-      </span>
-      <span className="shrink-0 font-medium tabular-nums text-foreground-strong">
-        #{reference.number}
-      </span>
+      <span className="shrink-0 font-medium tabular-nums">#{reference.number}</span>
     </span>
   );
 }

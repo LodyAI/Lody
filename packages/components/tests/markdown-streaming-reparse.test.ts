@@ -179,9 +179,9 @@ End of synthetic document.`);
       const url = 'https://github.com/LodyAI/Lody/pull/262';
       // The link ends exactly at the URL; a bare PR URL renders as its reference label.
       const link = container?.querySelector(`[data-streamdown="strong"] a[href="${url}"]`);
-      expect(link?.querySelector('[data-github-reference="pull"]')?.textContent).toBe('PRLody#262');
+      expect(link?.querySelector('[data-github-reference="pull"]')?.textContent).toBe('PR LodyAI/Lody#262');
       expect(container?.querySelector('[data-streamdown="strong"]')?.textContent).toBe(
-        'PRLody#262'
+        'PR LodyAI/Lody#262'
       );
       expect(container?.querySelector('code')?.textContent).toBe('fix/some-branch');
       expect(container?.textContent).toContain('fix/some-branch -> main');
@@ -263,9 +263,9 @@ End of synthetic document.`);
 
     const reference = (href: string) =>
       container?.querySelector(`a[href="${href}"] [data-github-reference]`) ?? null;
-    expect(reference('https://github.com/LodyAI/Lody/pull/954')?.textContent).toBe('PRLody#954');
-    expect(reference('https://github.com/acme/app/issues/12')?.textContent).toBe('Issueapp#12');
-    expect(reference('https://github.com/LodyAI/Lody/pull/7/files')?.textContent).toBe('PRLody#7');
+    expect(reference('https://github.com/LodyAI/Lody/pull/954')?.textContent).toBe('PR LodyAI/Lody#954');
+    expect(reference('https://github.com/acme/app/issues/12')?.textContent).toBe('Issue acme/app#12');
+    expect(reference('https://github.com/LodyAI/Lody/pull/7/files')?.textContent).toBe('PR LodyAI/Lody#7');
     // Descriptive text, or a number that does not match the URL, keeps the plain link.
     expect(reference('https://github.com/LodyAI/Lody/pull/955')).toBeNull();
     expect(
@@ -279,7 +279,7 @@ End of synthetic document.`);
 
     const url = 'https://github.com/LodyAI/Lody/pull/317';
     const link = container?.querySelector(`[data-streamdown="strong"] a[href="${url}"]`);
-    expect(link?.textContent).toBe('PRLody#317');
+    expect(link?.textContent).toBe('PR LodyAI/Lody#317');
     expect(container?.querySelector('code')?.textContent).toBe('fix/mobile-staged-background-sync');
     expect(container?.textContent).toContain('，分支');
     expect(container?.textContent).not.toContain('**');
