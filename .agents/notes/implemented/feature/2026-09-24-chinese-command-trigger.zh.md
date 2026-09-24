@@ -27,3 +27,5 @@ Shortcut 调用继续使用已有的 slash-menu 来源分类。
 输入框与菜单注册表的定向测试全部通过，共 37 项。`NODE_ENV=test pnpm check`、`pnpm format` 和 `pnpm run docs check` 均通过。
 组件包的 492 个测试文件、4015 项测试全部通过。
 原生输入法交互仍需手动验证。
+
+PR: [#934](https://github.com/LodyAI/Lody/pull/934).

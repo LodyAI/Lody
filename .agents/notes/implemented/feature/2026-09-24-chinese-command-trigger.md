@@ -30,3 +30,5 @@ needs manual verification; synthetic input tests do not establish OS behavior.
 The focused composer and registry suites pass all 37 tests. `NODE_ENV=test pnpm check`,
 `pnpm format`, and `pnpm run docs check` pass. The components suite passes all
 4015 tests across 492 files. Native IME testing remains manual.
+
+PR: [#934](https://github.com/LodyAI/Lody/pull/934).
