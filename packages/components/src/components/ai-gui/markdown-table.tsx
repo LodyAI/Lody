@@ -70,6 +70,14 @@ export function MarkdownTable({ node: _node, ...props }: MarkdownTableProps) {
     []
   );
 
+  const handleCopy = async () => {
+    const table = tableRef.current;
+    if (!table || !(await copyTable(table))) return;
+    setCopied(true);
+    if (resetTimer.current) clearTimeout(resetTimer.current);
+    resetTimer.current = setTimeout(() => setCopied(false), COPIED_FEEDBACK_MS);
+  };
+
   const label = copied ? t('common.copied', 'Copied') : t('common.copyTable', 'Copy table');
   return (
     <div data-markdown-table-frame="" className="group/table relative my-3">
@@ -83,12 +91,8 @@ export function MarkdownTable({ node: _node, ...props }: MarkdownTableProps) {
         type="button"
         aria-label={label}
         title={label}
-        onClick={async () => {
-          const table = tableRef.current;
-          if (!table || !(await copyTable(table))) return;
-          setCopied(true);
-          if (resetTimer.current) clearTimeout(resetTimer.current);
-          resetTimer.current = setTimeout(() => setCopied(false), COPIED_FEEDBACK_MS);
+        onClick={() => {
+          void handleCopy();
         }}
         className={cn(
           'absolute right-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded-md border border-foreground/[0.1] bg-background/90 text-muted-foreground backdrop-blur-sm transition-opacity hover:text-foreground',
