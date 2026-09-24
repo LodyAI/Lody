@@ -362,5 +362,18 @@ Copy, the result or error, what it cost, and Cancel for a subagent. The group
 lost its bordered card and reads as a step of the turn's process like the
 rest.
 
+## Owner review: a livelier project rail, clearer light cards, clickable steps
+
+- The project window's rail was plain. It now carries the project's face (the
+  GitHub owner's avatar, or the name's initial on a tint derived from the name),
+  a status dot beside the machine, a glyph per page (the current one in accent),
+  a selection fill that slides between pages, and count pills (amber for
+  conflicts).
+- Lody Light cards were hard to tell from the page: `shadow.card`'s hairline
+  goes from 7% to 12% ink and its contact shadow from 4% to 6%.
+- A file step with nothing to unfold (a read) opens its file when the row is
+  pressed, and the file name brightens with the row's hover; a step that
+  unfolds keeps the row for that and its file name is the link.
+
 Related: [token gallery](2026-09-09-ui-token-gallery.md),
 [call-site migration](2026-09-22-ui-radix-callsite-migration.md).

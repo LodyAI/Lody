@@ -21,6 +21,10 @@ import {
   Info,
   Plus,
   RefreshCw,
+  GitBranch,
+  MessagesSquare,
+  SlidersHorizontal,
+  Sparkles,
   Search,
   TerminalSquare,
   Wrench,
@@ -74,6 +78,8 @@ import { Tabs } from '@lody/ui/tabs';
 import { Badge } from '@lody/ui/badge';
 import { Textarea } from '@lody/ui/textarea';
 import { Input } from '@lody/ui/input';
+import { CachedAvatarImg } from '@/components/cached-avatar-img';
+import { getGitHubOwnerAvatarUrl } from '@/lib/github-avatar';
 import { VList } from 'virtua';
 
 import { AlertDialog } from '@/ui/dialog';
@@ -1709,45 +1715,79 @@ function ProjectWindow({
       <div {...stylex.props(win.window)}>
         <nav {...stylex.props(win.rail)} aria-label={t('settings.tabs.projects', 'Projects')}>
           <div {...stylex.props(win.identity)}>
-            <p
-              {...stylex.props(win.identityName)}
-              title={localRow?.project.name ?? githubRow?.name}
-            >
-              {localRow?.project.name ?? githubRow?.name}
-            </p>
-            <p {...stylex.props(win.identityMeta)}>
-              {localRow
-                ? [
-                    localRow.machineName,
-                    machineReachable
-                      ? t('workspace.machines.online', 'Online')
-                      : t('workspace.machines.offline', 'Offline'),
-                  ].join(' · ')
-                : [
-                    t('chat.contextSwitch.github', 'GitHub'),
-                    githubRow?.private
-                      ? t('workspace.projects.privateRepo', 'Private')
-                      : t('workspace.projects.window.public', 'Public'),
-                  ].join(' · ')}
-            </p>
-          </div>
-          <div {...stylex.props(win.nav)}>
-            {pages.map((entry) => (
-              <button
-                key={entry.id}
-                type="button"
-                aria-current={page === entry.id ? 'page' : undefined}
-                onClick={() => setPage(entry.id)}
-                {...stylex.props(surface.listRow, page === entry.id && surface.listRowSelected)}
+            <ProjectMark
+              name={localRow?.project.name ?? githubRow?.name ?? ''}
+              owner={githubRow?.owner}
+            />
+            <div {...stylex.props(win.identityText)}>
+              <p
+                {...stylex.props(win.identityName)}
+                title={localRow?.project.name ?? githubRow?.name}
               >
-                <span {...stylex.props(surface.listRowLabel)}>{entry.label}</span>
-                {entry.meta ? (
-                  <span {...stylex.props(surface.listRowMeta, entry.warn && win.navWarn)}>
-                    {entry.meta}
+                {localRow?.project.name ?? githubRow?.name}
+              </p>
+              <p {...stylex.props(win.identityMeta)}>
+                {localRow ? (
+                  <>
+                    <span
+                      aria-hidden="true"
+                      {...stylex.props(win.statusDot, machineReachable && win.statusDotOnline)}
+                    />
+                    <span {...stylex.props(win.identityMetaText)}>
+                      {localRow.machineName} ·{' '}
+                      {machineReachable
+                        ? t('workspace.machines.online', 'Online')
+                        : t('workspace.machines.offline', 'Offline')}
+                    </span>
+                  </>
+                ) : (
+                  <span {...stylex.props(win.identityMetaText)}>
+                    {githubRow?.repoFullName} ·{' '}
+                    {githubRow?.private
+                      ? t('workspace.projects.privateRepo', 'Private')
+                      : t('workspace.projects.window.public', 'Public')}
                   </span>
-                ) : null}
-              </button>
-            ))}
+                )}
+              </p>
+            </div>
+          </div>
+          {/* The current page's fill is one element that slides between rows,
+              so moving between pages reads as moving, not as two rows blinking. */}
+          <div {...stylex.props(win.nav)}>
+            <span
+              aria-hidden="true"
+              {...stylex.props(win.navIndicator)}
+              style={{
+                transform: `translateY(calc(${Math.max(
+                  0,
+                  pages.findIndex((entry) => entry.id === page)
+                )} * (${NAV_ROW_HEIGHT}px + ${NAV_ROW_GAP}px)))`,
+              }}
+            />
+            {pages.map((entry) => {
+              const Glyph = PAGE_GLYPHS[entry.id];
+              const current = page === entry.id;
+              return (
+                <button
+                  key={entry.id}
+                  type="button"
+                  aria-current={current ? 'page' : undefined}
+                  onClick={() => setPage(entry.id)}
+                  {...stylex.props(win.navRow, current && win.navRowCurrent)}
+                >
+                  <Glyph
+                    aria-hidden="true"
+                    {...stylex.props(win.navGlyph, current && win.navGlyphCurrent)}
+                  />
+                  <span {...stylex.props(surface.listRowLabel)}>{entry.label}</span>
+                  {entry.meta ? (
+                    <span {...stylex.props(win.navPill, entry.warn && win.navPillWarn)}>
+                      {entry.meta}
+                    </span>
+                  ) : null}
+                </button>
+              );
+            })}
           </div>
         </nav>
 
@@ -1970,6 +2010,54 @@ function ProjectWindow({
 }
 
 type ProjectWindowPage = 'general' | 'worktree' | 'skills' | 'conversations';
+
+const NAV_ROW_HEIGHT = 32;
+const NAV_ROW_GAP = 2;
+
+const PAGE_GLYPHS: Record<ProjectWindowPage, typeof SlidersHorizontal> = {
+  general: SlidersHorizontal,
+  worktree: GitBranch,
+  skills: Sparkles,
+  conversations: MessagesSquare,
+};
+
+/**
+ * The project's face in its window: the GitHub owner's avatar, or the name's
+ * first letter on a tint derived from the name, so two projects side by side
+ * are told apart at a glance and the same project always looks the same.
+ */
+function ProjectMark({ name, owner }: { readonly name: string; readonly owner?: string }) {
+  const [failed, setFailed] = useState(false);
+  if (owner && !failed) {
+    return (
+      <span {...stylex.props(win.mark)}>
+        <CachedAvatarImg
+          src={getGitHubOwnerAvatarUrl(owner)}
+          alt={owner}
+          loading="lazy"
+          {...stylex.props(win.markImage)}
+          onError={() => setFailed(true)}
+        />
+      </span>
+    );
+  }
+  let hash = 0;
+  for (const char of name) hash = (hash * 31 + char.codePointAt(0)!) >>> 0;
+  const hue = hash % 360;
+  const letter = [...name.trim()][0]?.toUpperCase() ?? '·';
+  return (
+    <span
+      aria-hidden="true"
+      {...stylex.props(win.mark)}
+      style={{
+        backgroundColor: `color-mix(in oklab, hsl(${hue} 70% 55%) 18%, transparent)`,
+        color: `color-mix(in oklab, hsl(${hue} 65% 45%) 75%, currentColor)`,
+      }}
+    >
+      {letter}
+    </span>
+  );
+}
 
 type HistoryStatus = 'available' | 'imported' | 'sync_conflict';
 type HistoryFilter = 'all' | HistoryStatus;
@@ -2384,9 +2472,9 @@ const win = stylex.create({
   },
   identity: {
     display: 'flex',
-    flexDirection: 'column',
-    gap: '2px',
-    paddingInline: space[2],
+    alignItems: 'center',
+    gap: '10px',
+    paddingInline: space[1],
     minWidth: 0,
   },
   identityName: {
@@ -2399,9 +2487,109 @@ const win = stylex.create({
     lineHeight: 1.3,
     color: colors.label,
   },
-  identityMeta: { margin: 0, fontSize: '12px', lineHeight: 1.4, color: colors.secondaryLabel },
-  nav: { display: 'flex', flexDirection: 'column', gap: '2px' },
-  navWarn: { color: colors.warning },
+  identityMeta: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+    minWidth: 0,
+    margin: 0,
+    fontSize: '12px',
+    lineHeight: 1.4,
+    color: colors.secondaryLabel,
+  },
+  nav: { position: 'relative', display: 'flex', flexDirection: 'column', gap: `${NAV_ROW_GAP}px` },
+  navIndicator: {
+    position: 'absolute',
+    insetInline: 0,
+    top: 0,
+    height: `${NAV_ROW_HEIGHT}px`,
+    backgroundColor: colors.selectedFill,
+    borderRadius: radius.small,
+    cornerShape: corner.shape,
+    transitionProperty: 'transform',
+    transitionDuration: '220ms',
+    transitionTimingFunction: 'cubic-bezier(0.2, 0.8, 0.2, 1)',
+  },
+  navRow: {
+    position: 'relative',
+    boxSizing: 'border-box',
+    display: 'flex',
+    alignItems: 'center',
+    gap: space[2],
+    width: '100%',
+    height: `${NAV_ROW_HEIGHT}px`,
+    margin: 0,
+    paddingInline: space[2],
+    borderWidth: 0,
+    borderRadius: radius.small,
+    cornerShape: corner.shape,
+    backgroundColor: {
+      default: 'transparent',
+      ':hover': `color-mix(in oklab, transparent, ${colors.label} 4%)`,
+    },
+    color: colors.secondaryLabel,
+    fontFamily: 'inherit',
+    fontSize: '13px',
+    textAlign: 'start',
+    cursor: 'pointer',
+    outlineStyle: 'none',
+    transitionProperty: 'color',
+    transitionDuration: '150ms',
+  },
+  navRowCurrent: {
+    color: colors.label,
+    fontWeight: 500,
+    backgroundColor: { default: 'transparent', ':hover': 'transparent' },
+  },
+  navGlyph: { width: '15px', height: '15px', flexShrink: 0, color: colors.tertiaryLabel },
+  navGlyphCurrent: { color: colors.accent },
+  navPill: {
+    flexShrink: 0,
+    minWidth: '18px',
+    paddingInline: '6px',
+    height: '18px',
+    lineHeight: '18px',
+    textAlign: 'center',
+    borderRadius: '9999px',
+    backgroundColor: `color-mix(in oklab, transparent, ${colors.label} 7%)`,
+    fontSize: '11px',
+    fontWeight: 500,
+    color: colors.secondaryLabel,
+    fontVariantNumeric: 'tabular-nums',
+  },
+  navPillWarn: {
+    backgroundColor: `color-mix(in oklab, transparent, ${colors.warning} 18%)`,
+    color: `color-mix(in oklab, ${colors.warning} 70%, ${colors.label})`,
+  },
+  identityText: { display: 'flex', flexDirection: 'column', gap: '2px', minWidth: 0 },
+  identityMetaText: {
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  statusDot: {
+    flexShrink: 0,
+    width: '6px',
+    height: '6px',
+    borderRadius: '9999px',
+    backgroundColor: colors.tertiaryLabel,
+  },
+  statusDotOnline: { backgroundColor: colors.success },
+  mark: {
+    display: 'flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '36px',
+    height: '36px',
+    overflow: 'hidden',
+    borderRadius: radius.medium,
+    cornerShape: corner.shape,
+    fontSize: '15px',
+    fontWeight: 600,
+  },
+  markImage: { width: '100%', height: '100%', objectFit: 'cover' },
   main: { display: 'flex', flexDirection: 'column', flexGrow: 1, minWidth: 0, minHeight: 0 },
   pageHeader: {
     flexShrink: 0,

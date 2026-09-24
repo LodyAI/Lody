@@ -60,7 +60,7 @@ export const shadow = stylex.defineVars({
   },
   card: {
     default:
-      '0 0 0 0.5px hsl(225 10% 11% / 0.07), 0 1px 2px hsl(225 10% 11% / 0.04), 0 8px 24px -6px hsl(225 10% 11% / 0.08)',
+      '0 0 0 0.5px hsl(225 10% 11% / 0.12), 0 1px 2px hsl(225 10% 11% / 0.06), 0 8px 24px -6px hsl(225 10% 11% / 0.09)',
     [DARK]:
       'inset 0 1px 0 hsl(0 0% 100% / 0.05), 0 0 0 0.5px hsl(0 0% 100% / 0.06), 0 8px 24px -6px hsl(0 0% 0% / 0.5)',
   },
@@ -181,7 +181,7 @@ export const lightShadowTheme = stylex.createTheme(shadow, {
   raised:
     '0 0 0 0.5px hsl(225 10% 11% / 0.16), 0 1px 1px hsl(225 10% 11% / 0.06), 0 2px 4px -1px hsl(225 10% 11% / 0.07)',
   inkEdge: 'inset 0 1px 0 hsl(0 0% 100% / 0.18), 0 1px 1.5px hsl(225 10% 11% / 0.18)',
-  card: '0 0 0 0.5px hsl(225 10% 11% / 0.07), 0 1px 2px hsl(225 10% 11% / 0.04), 0 8px 24px -6px hsl(225 10% 11% / 0.08)',
+  card: '0 0 0 0.5px hsl(225 10% 11% / 0.12), 0 1px 2px hsl(225 10% 11% / 0.06), 0 8px 24px -6px hsl(225 10% 11% / 0.09)',
   medium: '0 1px 2px hsl(225 10% 11% / 0.14), 0 4px 12px -2px hsl(225 10% 11% / 0.18)',
   popover:
     '0 0 0 0.5px hsl(225 10% 11% / 0.11), 0 2px 4px -1px hsl(225 10% 11% / 0.06), 0 12px 32px -6px hsl(225 10% 11% / 0.16)',

@@ -6112,6 +6112,7 @@ const CollapsibleCard = ({
   containerProps,
   buttonClassName,
   bodyClassName,
+  onActivate,
 }: {
   left: ReactNode;
   right?: ReactNode;
@@ -6125,6 +6126,8 @@ const CollapsibleCard = ({
   containerProps?: SearchContainerProps;
   buttonClassName?: string;
   bodyClassName?: string;
+  /** What pressing the header does when there is no body to open. */
+  onActivate?: () => void;
 }) => {
   const [uncontrolledExpanded, setUncontrolledExpanded] = useState(defaultExpanded);
   const hasBody = children !== null && children !== undefined;
@@ -6149,10 +6152,10 @@ const CollapsibleCard = ({
         type="button"
         className={cn(
           'group flex w-full items-center gap-1.5 rounded-md px-1 py-1 text-left text-muted-foreground transition-colors hover:text-foreground',
-          canToggle ? 'cursor-pointer' : 'cursor-default',
+          canToggle || onActivate ? 'cursor-pointer' : 'cursor-default',
           buttonClassName
         )}
-        onClick={canToggle ? () => setExpanded(!isExpanded) : undefined}
+        onClick={canToggle ? () => setExpanded(!isExpanded) : onActivate}
         aria-expanded={canToggle ? isExpanded : undefined}
       >
         <div className="flex min-w-0 flex-1 items-center gap-1.5">
@@ -6799,6 +6802,10 @@ const ToolCallCard = memo(function ToolCallCard({
             : 'space-y-2.5 px-0 pb-1 pt-1.5'
       )}
       right={runningIndicator}
+      /* A file step with nothing to open (a read) is the file: pressing the
+         row opens it. A step that unfolds keeps the row for that, and its
+         file name is the link. */
+      onActivate={isFilePathClickable ? triggerFilePathClick : undefined}
       left={
         <div
           className={cn(
@@ -6864,7 +6871,7 @@ const ToolCallCard = memo(function ToolCallCard({
                                   ACTIVITY_PROCESS_TEXT_CLASS,
                                   'transition-colors',
                                   isFilePathClickable &&
-                                    'underline-offset-2 hover:text-foreground hover:underline'
+                                    'underline-offset-2 group-hover:text-foreground hover:underline'
                                 )
                               : 'font-mono text-xs'
                           )}
