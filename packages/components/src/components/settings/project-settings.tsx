@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+} from 'react';
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
@@ -26,6 +34,7 @@ import {
   Wrench,
 } from 'lucide-react';
 import { toast } from '@/lib/toast';
+import { observeResizeOnAnimationFrame } from '@/lib/resize-observer';
 import { Spinner } from '@lody/ui/spinner';
 import {
   getLocalProjectHistoryProviderKey,
@@ -1650,62 +1659,17 @@ function ProjectWindow({
     };
   }, [localRow?.historyImports]);
 
-  const hasScript = (config: { scripts: Record<string, string | undefined> } | undefined) =>
-    Boolean(config && Object.values(config.scripts).some((script) => script?.trim()));
-  const setupScript = hasScript(localRow?.worktreeSetup ?? githubRow?.worktreeSetup);
-  const cleanupScript = hasScript(localRow?.worktreeCleanup ?? githubRow?.worktreeCleanup);
-  const historySynced = (localRow?.historyImports ?? []).some((state) => state.catalog !== null);
-
-  const pages: { id: ProjectWindowPage; label: string; meta?: string; warn?: boolean }[] = [
-    {
-      id: 'general',
-      label: t('workspace.projects.window.general', 'General'),
-      meta: localRow
-        ? localRow.sharedWithTeam
-          ? t('workspace.projects.sharedWithTeam', 'Shared with team')
-          : t('workspace.projects.private', 'Private to you')
-        : githubRow?.private
-          ? t('workspace.projects.privateRepo', 'Private')
-          : t('workspace.projects.window.public', 'Public'),
-    },
-    {
-      id: 'worktree',
-      label: t('workspace.projects.window.worktree', 'Worktree'),
-      meta:
-        setupScript && cleanupScript
-          ? t('workspace.projects.window.setupAndCleanup', 'Setup and cleanup')
-          : setupScript
-            ? t('workspace.projects.window.setupOnly', 'Setup only')
-            : cleanupScript
-              ? t('workspace.projects.window.cleanupOnly', 'Cleanup only')
-              : t('workspace.projects.window.noScripts', 'No scripts'),
-    },
-    {
-      id: 'skills',
-      label: t('workspace.projects.window.skills', 'Skills'),
-      meta:
-        localRow && !machineReachable
-          ? t('workspace.projects.window.whenOnline', 'Waits for the machine')
-          : t('workspace.projects.window.skillsState', 'From the project folder'),
-    },
+  const pages: { id: ProjectWindowPage; label: string; count?: number; warn?: boolean }[] = [
+    { id: 'general', label: t('workspace.projects.window.general', 'General') },
+    { id: 'worktree', label: t('workspace.projects.window.worktree', 'Worktree') },
+    { id: 'skills', label: t('workspace.projects.window.skills', 'Skills') },
     ...(isLocal
       ? [
           {
             id: 'conversations' as const,
             label: t('workspace.projects.window.conversations', 'Conversations'),
-            meta: !historySynced
-              ? t('workspace.projects.historyNotSyncedYet', 'Not synced yet')
-              : historyCounts.conflicts > 0
-                ? t(
-                    'workspace.projects.window.toImportAndConflicts',
-                    '{{available}} to import · {{conflicts}} in conflict',
-                    { available: historyCounts.available, conflicts: historyCounts.conflicts }
-                  )
-                : historyCounts.available > 0
-                  ? t('workspace.projects.window.toImport', '{{count}} to import', {
-                      count: historyCounts.available,
-                    })
-                  : t('workspace.projects.window.allImported', 'All imported'),
+            // What needs the person: conflicts first, else what waits to import.
+            count: historyCounts.conflicts || historyCounts.available || undefined,
             warn: historyCounts.conflicts > 0,
           },
         ]
@@ -1730,7 +1694,6 @@ function ProjectWindow({
       </p>
     ) : null;
 
-  const pageTitle = pages.find((entry) => entry.id === page)?.label ?? '';
   const pageDescription =
     page === 'general'
       ? t(
@@ -1755,80 +1718,51 @@ function ProjectWindow({
   return (
     <Tooltip.Provider delay={200}>
       <div {...stylex.props(win.window)}>
-        <nav {...stylex.props(win.rail)} aria-label={t('settings.tabs.projects', 'Projects')}>
-          {/* The project is named by its words: the name, then where it lives
-              with the last segment lit — the part a person recognises. */}
-          <div {...stylex.props(win.identity)}>
-            <p
-              {...stylex.props(win.identityName)}
-              title={localRow?.project.name ?? githubRow?.name}
-            >
-              {localRow?.project.name ?? githubRow?.name}
-            </p>
-            <p {...stylex.props(win.identityPath)} title={location}>
-              <span {...stylex.props(win.identityPathDim)}>{locationHead}</span>
+        {/* Four views of one project are a strip, not a sidebar: the name and
+            where it lives above, the views under it, the page at full width. */}
+        <header {...stylex.props(win.head)}>
+          <h2 {...stylex.props(win.headName)} title={localRow?.project.name ?? githubRow?.name}>
+            {localRow?.project.name ?? githubRow?.name}
+          </h2>
+          <p {...stylex.props(win.headMeta)}>
+            <span {...stylex.props(win.headPath)} title={location}>
+              <span {...stylex.props(win.headPathDim)}>{locationHead}</span>
               {locationTail}
-            </p>
+            </span>
             {localRow ? (
-              <p {...stylex.props(win.identityMeta)}>
+              <>
+                <span aria-hidden="true" {...stylex.props(win.headSep)}>
+                  ·
+                </span>
                 <span
                   aria-hidden="true"
                   {...stylex.props(win.statusDot, machineReachable && win.statusDotOnline)}
                 />
-                <span {...stylex.props(win.identityMetaText)}>
+                <span {...stylex.props(win.headMachine)}>
                   {localRow.machineName} ·{' '}
                   {machineReachable
                     ? t('workspace.machines.online', 'Online')
                     : t('workspace.machines.offline', 'Offline')}
                 </span>
-              </p>
-            ) : null}
-          </div>
-          {/* Each page says what state it is in, so the rail is the project at a
-              glance; the current one is marked by a hairline that slides. */}
-          <div {...stylex.props(win.nav)}>
-            <span
-              aria-hidden="true"
-              {...stylex.props(win.navMarker)}
-              style={{
-                transform: `translateY(${
-                  Math.max(
-                    0,
-                    pages.findIndex((entry) => entry.id === page)
-                  ) *
-                  (NAV_ROW_HEIGHT + NAV_ROW_GAP)
-                }px)`,
-              }}
-            />
-            {pages.map((entry) => {
-              const current = page === entry.id;
-              return (
-                <button
-                  key={entry.id}
-                  type="button"
-                  aria-current={current ? 'page' : undefined}
-                  onClick={() => setPage(entry.id)}
-                  {...stylex.props(win.navRow, current && win.navRowCurrent)}
-                >
-                  <span {...stylex.props(win.navLabel, current && win.navLabelCurrent)}>
-                    {entry.label}
-                  </span>
-                  {entry.meta ? (
-                    <span {...stylex.props(win.navState, entry.warn && win.navStateWarn)}>
-                      {entry.meta}
-                    </span>
-                  ) : null}
-                </button>
-              );
-            })}
-          </div>
-        </nav>
+              </>
+            ) : (
+              <>
+                <span aria-hidden="true" {...stylex.props(win.headSep)}>
+                  ·
+                </span>
+                <span {...stylex.props(win.headMachine)}>
+                  {githubRow?.private
+                    ? t('workspace.projects.privateRepo', 'Private')
+                    : t('workspace.projects.window.public', 'Public')}
+                </span>
+              </>
+            )}
+          </p>
+          <PageTabs pages={pages} current={page} onChange={setPage} />
+        </header>
 
         <section {...stylex.props(win.main)}>
-          <header {...stylex.props(win.pageHeader)}>
-            <h2 {...stylex.props(win.pageTitle)}>{pageTitle}</h2>
-            <p {...stylex.props(win.pageDescription)}>{pageDescription}</p>
-          </header>
+          <p {...stylex.props(win.pageDescription)}>{pageDescription}</p>
 
           {page === 'conversations' && localRow ? (
             <ConversationsPage
@@ -2044,8 +1978,85 @@ function ProjectWindow({
 
 type ProjectWindowPage = 'general' | 'worktree' | 'skills' | 'conversations';
 
-const NAV_ROW_HEIGHT = 46;
-const NAV_ROW_GAP = 2;
+/**
+ * The window's views: words with a line under the current one that travels to
+ * the next. They are the top of the window's hierarchy, so they are not the
+ * tray strips the pages use for their own choices (agent, state) — a strip over
+ * a strip reads as one level.
+ */
+function PageTabs({
+  pages,
+  current,
+  onChange,
+}: {
+  readonly pages: readonly {
+    id: ProjectWindowPage;
+    label: string;
+    count?: number;
+    warn?: boolean;
+  }[];
+  readonly current: ProjectWindowPage;
+  readonly onChange: (page: ProjectWindowPage) => void;
+}) {
+  const listRef = useRef<HTMLDivElement>(null);
+  const [line, setLine] = useState<{ left: number; width: number } | null>(null);
+
+  useLayoutEffect(() => {
+    const list = listRef.current;
+    if (!list) return undefined;
+    const measure = () => {
+      const tab = list.querySelector<HTMLElement>(`[data-page="${current}"]`);
+      if (tab) setLine({ left: tab.offsetLeft, width: tab.offsetWidth });
+    };
+    measure();
+    return observeResizeOnAnimationFrame(list, measure);
+  }, [current, pages]);
+
+  return (
+    <div ref={listRef} role="tablist" {...stylex.props(win.pageTabs)}>
+      {pages.map((entry) => {
+        const selected = entry.id === current;
+        return (
+          <button
+            key={entry.id}
+            type="button"
+            role="tab"
+            aria-selected={selected}
+            data-page={entry.id}
+            onClick={() => onChange(entry.id)}
+            onKeyDown={(event) => {
+              if (event.key !== 'ArrowRight' && event.key !== 'ArrowLeft') return;
+              event.preventDefault();
+              const index = pages.findIndex((page) => page.id === entry.id);
+              const next =
+                pages[
+                  (index + (event.key === 'ArrowRight' ? 1 : -1) + pages.length) % pages.length
+                ]!;
+              onChange(next.id);
+              listRef.current?.querySelector<HTMLElement>(`[data-page="${next.id}"]`)?.focus();
+            }}
+            tabIndex={selected ? 0 : -1}
+            {...stylex.props(win.pageTab, selected && win.pageTabCurrent)}
+          >
+            {entry.label}
+            {entry.count ? (
+              <span {...stylex.props(win.tabCount, entry.warn && win.tabCountWarn)}>
+                {entry.count}
+              </span>
+            ) : null}
+          </button>
+        );
+      })}
+      {line ? (
+        <span
+          aria-hidden="true"
+          {...stylex.props(win.pageTabLine)}
+          style={{ transform: `translateX(${line.left}px)`, width: `${line.width}px` }}
+        />
+      ) : null}
+    </div>
+  );
+}
 
 type HistoryStatus = 'available' | 'imported' | 'sync_conflict';
 type HistoryFilter = 'all' | HistoryStatus;
@@ -2444,121 +2455,98 @@ function ConversationsPage({
 
 /** The project window's own layout: a rail of pages beside the page. */
 const win = stylex.create({
-  window: { display: 'flex', height: '100%', minHeight: 0, minWidth: 0 },
-  rail: {
-    boxSizing: 'border-box',
+  window: { display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, minWidth: 0 },
+  head: {
     display: 'flex',
     flexDirection: 'column',
-    gap: space[4],
-    width: '220px',
+    gap: '4px',
     flexShrink: 0,
-    padding: space[3],
     paddingTop: space[4],
-    borderInlineEndWidth: '1px',
-    borderInlineEndStyle: 'solid',
-    borderInlineEndColor: colors.separator,
+    paddingInlineStart: space[6],
+    // The dialog's close cross sits in this corner.
+    paddingInlineEnd: '56px',
   },
-  identity: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '3px',
-    paddingInline: space[2],
-    minWidth: 0,
-  },
-  identityName: {
+  headName: {
     margin: 0,
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
-    fontSize: '15px',
+    fontSize: '17px',
     fontWeight: 600,
     lineHeight: 1.3,
     letterSpacing: '-0.01em',
     color: colors.label,
   },
-  identityPath: {
-    margin: 0,
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-    fontFamily: MONO,
-    fontSize: '11.5px',
-    lineHeight: 1.45,
-    color: colors.label,
-  },
-  identityPathDim: { color: colors.tertiaryLabel },
-  identityMeta: {
+  headMeta: {
     display: 'flex',
     alignItems: 'center',
     gap: '6px',
     minWidth: 0,
     margin: 0,
-    marginTop: '2px',
     fontSize: '12px',
     lineHeight: 1.4,
     color: colors.secondaryLabel,
   },
-  nav: { position: 'relative', display: 'flex', flexDirection: 'column', gap: `${NAV_ROW_GAP}px` },
-  /** The current page: a hairline on the rail's edge that slides to it. */
-  navMarker: {
-    position: 'absolute',
-    insetInlineStart: 0,
-    top: '10px',
-    width: '2px',
-    height: `${NAV_ROW_HEIGHT - 20}px`,
-    borderRadius: '9999px',
-    backgroundColor: colors.accent,
-    transitionProperty: 'transform',
-    transitionDuration: '240ms',
-    transitionTimingFunction: 'cubic-bezier(0.2, 0.8, 0.2, 1)',
-  },
-  navRow: {
-    boxSizing: 'border-box',
-    display: 'flex',
-    flexDirection: 'column',
-    justifyContent: 'center',
-    gap: '1px',
-    width: '100%',
-    height: `${NAV_ROW_HEIGHT}px`,
-    margin: 0,
-    paddingInlineStart: space[3],
-    paddingInlineEnd: space[2],
-    borderWidth: 0,
-    borderRadius: radius.small,
-    cornerShape: corner.shape,
-    backgroundColor: {
-      default: 'transparent',
-      ':hover': `color-mix(in oklab, transparent, ${colors.label} 4%)`,
-    },
-    fontFamily: 'inherit',
-    textAlign: 'start',
-    cursor: 'pointer',
-    outlineStyle: 'none',
-  },
-  navRowCurrent: { backgroundColor: { default: 'transparent', ':hover': 'transparent' } },
-  navLabel: {
-    fontSize: '13px',
-    lineHeight: 1.3,
-    color: colors.secondaryLabel,
-    transitionProperty: 'color',
-    transitionDuration: '150ms',
-  },
-  navLabelCurrent: { color: colors.label, fontWeight: 500 },
-  navState: {
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-    fontSize: '11.5px',
-    lineHeight: 1.3,
-    color: colors.tertiaryLabel,
-  },
-  navStateWarn: { color: `color-mix(in oklab, ${colors.warning} 80%, ${colors.label})` },
-  identityMetaText: {
+  headPath: {
     minWidth: 0,
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
+    fontFamily: MONO,
+    fontSize: '11.5px',
+    color: colors.label,
   },
+  headPathDim: { color: colors.tertiaryLabel },
+  headSep: { flexShrink: 0, color: colors.tertiaryLabel },
+  headMachine: { flexShrink: 0, whiteSpace: 'nowrap' },
+  pageTabs: {
+    position: 'relative',
+    display: 'flex',
+    alignItems: 'stretch',
+    gap: '20px',
+    marginTop: space[3],
+  },
+  pageTab: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '6px',
+    height: '36px',
+    margin: 0,
+    padding: 0,
+    borderWidth: 0,
+    backgroundColor: 'transparent',
+    fontFamily: 'inherit',
+    fontSize: '13.5px',
+    fontWeight: 500,
+    color: { default: colors.secondaryLabel, ':hover': colors.label },
+    cursor: 'pointer',
+    outlineStyle: 'none',
+    boxShadow: { default: 'none', ':focus-visible': `0 0 0 2px ${colors.accent}` },
+    borderRadius: '4px',
+    transitionProperty: 'color',
+    transitionDuration: '150ms',
+  },
+  pageTabCurrent: { color: { default: colors.label, ':hover': colors.label } },
+  /** The current view's line: it travels to the next rather than blinking. */
+  pageTabLine: {
+    position: 'absolute',
+    left: 0,
+    bottom: 0,
+    height: '2px',
+    borderRadius: '9999px',
+    backgroundColor: colors.label,
+    transitionProperty: 'transform, width',
+    transitionDuration: '240ms',
+    transitionTimingFunction: 'cubic-bezier(0.2, 0.8, 0.2, 1)',
+  },
+  tabCount: {
+    marginInlineStart: '2px',
+    fontSize: '11px',
+    fontWeight: 500,
+    color: colors.tertiaryLabel,
+    fontVariantNumeric: 'tabular-nums',
+  },
+  tabCountWarn: { color: `color-mix(in oklab, ${colors.warning} 80%, ${colors.label})` },
   statusDot: {
     flexShrink: 0,
     width: '6px',
@@ -2568,16 +2556,16 @@ const win = stylex.create({
   },
   statusDotOnline: { backgroundColor: colors.success },
   main: { display: 'flex', flexDirection: 'column', flexGrow: 1, minWidth: 0, minHeight: 0 },
-  pageHeader: {
+  pageDescription: {
     flexShrink: 0,
+    margin: 0,
     paddingTop: space[4],
     paddingBottom: space[3],
-    paddingInlineStart: space[6],
-    // The dialog's close cross sits in this corner.
-    paddingInlineEnd: '56px',
+    paddingInline: space[6],
+    fontSize: '12px',
+    lineHeight: 1.45,
+    color: colors.secondaryLabel,
   },
-  pageTitle: { margin: 0, fontSize: '16px', fontWeight: 600, lineHeight: 1.4, color: colors.label },
-  pageDescription: { margin: 0, fontSize: '12px', lineHeight: 1.45, color: colors.secondaryLabel },
   pageBody: {
     display: 'flex',
     flexDirection: 'column',

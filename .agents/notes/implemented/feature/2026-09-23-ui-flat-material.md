@@ -382,5 +382,13 @@ scripts", "2 to import · 1 in conflict" in amber), so the rail is the project
 at a glance. The identity is the name over its path with the last segment lit,
 then the machine; the current page is a 2px accent hairline that slides.
 
+Still not right, and the reason was the sidebar itself: four views of one
+project do not need a navigation column, and every version of it was a tall
+empty column with a few entries. The window is now a header — the name, the
+path with its last segment lit, the machine with its status dot — over text
+page tabs whose underline travels to the current one, and the page at full
+width. The page tabs are deliberately not tray strips: the pages use trays for
+their own choices (agent, state), and a strip over a strip read as one level.
+
 Related: [token gallery](2026-09-09-ui-token-gallery.md),
 [call-site migration](2026-09-22-ui-radix-callsite-migration.md).

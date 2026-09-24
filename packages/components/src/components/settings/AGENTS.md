@@ -29,7 +29,7 @@ rolls back — is in the root [AGENTS.md](../../../../../AGENTS.md).
 
 - Desktop Settings > Projects stacks every source (each machine, then GitHub
   owners) as a `CompactSection` of ruled project rows. Clicking a project opens
-  a nested modal of stacked `CompactSection`s — never inline the editor beside the list.
+  a nested project window (header, page tabs) — never inline the editor beside the list.
   Mobile keeps the previous stacked list. Local-project deletion reuses
   `useRemoveLocalProject` / `RemoveLocalProjectDialog` (nested overlay like MCP);
   do not add a second confirm. Pending removal stays listed until the owning
