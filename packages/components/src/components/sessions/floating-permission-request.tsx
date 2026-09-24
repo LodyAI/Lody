@@ -10,10 +10,9 @@ import * as stylex from '@stylexjs/stylex';
 import { ChevronLeft, ChevronRight, CircleStop } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@lody/ui/button';
-import { Kbd } from '@lody/ui/kbd';
 import { Spinner } from '@lody/ui/spinner';
 import { colors, shadow } from '@lody/ui/tokens/colors.stylex';
-import { corner, radius, space } from '@lody/ui/tokens/scales.stylex';
+import { corner, radius, space, text } from '@lody/ui/tokens/scales.stylex';
 import {
   createAskUserQuestionPermissionOutcome,
   isAskUserQuestionPermissionMeta,
@@ -111,33 +110,30 @@ export function hasPendingPermissionRequest(
 // Styles
 // =============================================================================
 
-/** A block inside the prompt that shows a value rather than holding one. */
-const REGION = `color-mix(in oklab, transparent, ${colors.label} 5%)`;
-const MONO = 'var(--font-mono, ui-monospace, monospace)';
-const RING = `0 0 0 2px ${colors.accent}`;
-/** Only a device with a keyboard and a pointer that hovers gets the key cap. */
-const HAS_KEYBOARD = '@media (hover: hover) and (pointer: fine)';
 /**
- * Every block's text starts on one edge: the card's padding plus this inset,
- * which is also where a row's fill begins, so a filled row and the heading
- * above it share a left edge.
+ * A block inside a card: the region rung. Its named token collapses into the
+ * card in Vesper, so it is the card mixed toward the ink, as the settings
+ * editors' blocks are.
  */
-const INSET = space[3];
+const REGION = `color-mix(in oklab, transparent, ${colors.label} 4%)`;
+const MONO = 'var(--font-mono, ui-monospace, monospace)';
+
+/** Answers fit on one line from the end only when every one of them is short. */
+const INLINE_ANSWER_MAX_LENGTH = 24;
+const INLINE_ANSWER_MAX_COUNT = 3;
 
 const styles = stylex.create({
   /**
-   * The prompt takes the composer's place, so it is the composer's rung: a
-   * card lifted off the conversation. One surface, three blocks — the
-   * question, what would happen, the answers — and nothing else.
+   * An AlertDialog that does not take the page: the same anatomy — a title and
+   * one sentence, what it is about, the answers from the end — on the card
+   * rung, which is the composer's, because it stands in the composer's place.
    */
   card: {
     boxSizing: 'border-box',
     display: 'flex',
     flexDirection: 'column',
-    gap: space[2],
-    paddingInline: space[1.5],
-    paddingTop: space[3],
-    paddingBottom: space[1.5],
+    gap: space[3],
+    padding: space[4],
     backgroundColor: colors.elevatedBackground,
     boxShadow: shadow.card,
     borderRadius: radius.large,
@@ -145,62 +141,62 @@ const styles = stylex.create({
     color: colors.label,
     outlineStyle: 'none',
   },
-  header: {
+  header: { display: 'flex', alignItems: 'flex-start', gap: space[2], minWidth: 0 },
+  /** The title and the sentence under it: one block. */
+  headerText: {
     display: 'flex',
-    alignItems: 'flex-start',
-    gap: space[2],
+    flexDirection: 'column',
+    gap: space[1.5],
+    flexGrow: 1,
     minWidth: 0,
-    paddingInline: INSET,
   },
-  headerText: { flexGrow: 1, minWidth: 0 },
-  heading: { margin: 0, fontSize: '0.95em', fontWeight: 500, lineHeight: '24px' },
-  /** Why the agent is asking, or what it named the call when it sent no code. */
-  detail: {
+  title: {
     margin: 0,
-    fontSize: '0.85em',
-    lineHeight: 1.4,
+    fontSize: text.headlineSize,
+    lineHeight: text.headlineLeading,
+    fontWeight: 600,
+  },
+  description: {
+    margin: 0,
+    fontSize: text.bodySize,
+    lineHeight: text.bodyLeading,
     color: colors.secondaryLabel,
     overflowWrap: 'anywhere',
   },
-  headerEnd: {
+  /** The corner: which request of how many, and the way out. */
+  corner: {
     display: 'flex',
     flexShrink: 0,
     alignItems: 'center',
     gap: '2px',
+    marginBlockStart: '-2px',
     marginInlineEnd: `calc(-1 * ${space[1.5]})`,
-    fontSize: '0.8em',
+    fontSize: text.footnoteSize,
     color: colors.tertiaryLabel,
     fontVariantNumeric: 'tabular-nums',
   },
   positionLabel: { paddingInline: '2px' },
 
-  /** Exactly what would run or be touched, as code: the one boxed thing. */
+  /** What would run or be touched, exactly: a block of the card, in code. */
   subject: {
     boxSizing: 'border-box',
     display: 'flex',
     alignItems: 'baseline',
     gap: space[3],
-    marginInline: space[1.5],
     maxHeight: '9.5em',
     overflowY: 'auto',
     overscrollBehavior: 'contain',
-    paddingInline: `calc(${INSET} - ${space[1.5]})`,
+    paddingInline: space[3],
     paddingBlock: space[2],
     backgroundColor: REGION,
     borderRadius: radius.medium,
     cornerShape: corner.shape,
     fontFamily: MONO,
-    fontSize: '0.85em',
-    lineHeight: 1.5,
+    fontSize: text.footnoteSize,
+    lineHeight: '18px',
   },
-  subjectBody: {
-    flexGrow: 1,
-    minWidth: 0,
-    whiteSpace: 'pre-wrap',
-    overflowWrap: 'anywhere',
-  },
+  subjectBody: { flexGrow: 1, minWidth: 0, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' },
   subjectLine: { display: 'block' },
-  /** Where it runs: the directory, trailing the command, quieter. */
   subjectWhere: {
     flexShrink: 0,
     maxWidth: '40%',
@@ -210,71 +206,24 @@ const styles = stylex.create({
     color: colors.tertiaryLabel,
   },
 
-  /** The answers: the provider's own sentences, one row each, no marks. */
-  options: { display: 'flex', flexDirection: 'column', gap: '1px' },
-  option: {
-    boxSizing: 'border-box',
-    display: 'flex',
-    alignItems: 'flex-start',
-    gap: space[3],
-    width: '100%',
-    minHeight: { default: '32px', '@media (pointer: coarse)': '44px' },
-    margin: 0,
-    paddingInline: INSET,
-    paddingBlock: '6px',
-    borderWidth: 0,
-    borderRadius: radius.medium,
-    cornerShape: corner.shape,
-    backgroundColor: {
-      default: 'transparent',
-      ':hover': colors.hoverFill,
-      ':focus-visible': colors.hoverFill,
-    },
-    boxShadow: { default: 'none', ':focus-visible': `inset ${RING}` },
-    outlineStyle: 'none',
-    color: colors.label,
-    fontFamily: 'inherit',
-    fontSize: '0.9em',
-    lineHeight: '20px',
-    textAlign: 'start',
-    cursor: { default: 'pointer', ':disabled': 'default' },
-    opacity: { default: 1, ':disabled': 0.45 },
-  },
-  /** The answer the request suggests: already lit, so it reads as the default. */
-  optionSuggested: {
-    backgroundColor: {
-      default: colors.selectedFill,
-      ':hover': colors.hoverFill,
-      ':focus-visible': colors.hoverFill,
-    },
-  },
-  /** The one being sent: full strength while the rest wait. */
-  optionSending: { opacity: { default: 1, ':disabled': 1 } },
-  optionText: { flexGrow: 1, minWidth: 0, overflowWrap: 'anywhere' },
-  optionDescription: {
-    display: 'block',
-    fontSize: '0.9em',
-    lineHeight: 1.4,
-    color: colors.secondaryLabel,
-  },
-  optionTrail: {
-    display: 'flex',
-    flexShrink: 0,
-    alignItems: 'center',
-    height: '20px',
-    color: colors.tertiaryLabel,
-  },
-  keyHint: { display: { default: 'none', [HAS_KEYBOARD]: 'inline-flex' } },
-
   status: {
     margin: 0,
-    paddingInline: INSET,
-    paddingBlock: space[1],
-    fontSize: '0.85em',
-    lineHeight: 1.4,
+    fontSize: text.footnoteSize,
+    lineHeight: text.footnoteLeading,
     color: colors.secondaryLabel,
   },
   statusError: { color: colors.destructive },
+
+  /** The answers, from the end, the suggested one last. */
+  footer: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    justifyContent: 'flex-end',
+    gap: space[2],
+  },
+  /** Stacked when they do not fit a line: full width, the suggestion nearest the thumb. */
+  footerStacked: { flexDirection: 'column', alignItems: 'stretch' },
+  answerStacked: { width: '100%' },
 
   queueStrip: {
     display: 'flex',
@@ -282,7 +231,7 @@ const styles = stylex.create({
     justifyContent: 'flex-end',
     gap: '2px',
     marginBottom: space[1],
-    fontSize: '0.8em',
+    fontSize: text.footnoteSize,
     color: colors.tertiaryLabel,
     fontVariantNumeric: 'tabular-nums',
   },
@@ -320,17 +269,16 @@ export interface PermissionPromptProps {
 }
 
 /**
- * One permission request, asked the way a person reads it: the question, then
- * exactly what would run or be touched, then the provider's own answers —
- * never rewritten, since "Yes, and don't ask again for `git` commands" says
- * more than any label Lody could put on it. The answers carry no marks: every
- * provider's answer already begins with what it is ("Yes", "No", "Allow").
+ * One permission request, in the design system's own anatomy for a question
+ * that needs an answer — an AlertDialog's, without taking the page: a title and
+ * one sentence, what it is about, and the answers as Buttons from the end. The
+ * suggested answer is the primary button and comes last; the rest are
+ * secondary. The answers are the provider's own words, never rewritten.
  *
  * Keyboard: the arrows walk the answers starting from the suggested one, Enter
- * or Space answers the one you are on, and Escape refuses once. Enter on the
- * prompt itself does nothing: a person who was typing a message when the
- * request replaced the composer must not approve it with the Enter meant for
- * their message, so an answer always takes a deliberate first step.
+ * or Space presses the one focused, and Escape refuses once. Enter on the card
+ * itself does nothing: a person typing a message when the request replaced the
+ * composer must not approve it with the Enter meant for their message.
  */
 export function PermissionPrompt({
   toolCall,
@@ -346,19 +294,28 @@ export function PermissionPrompt({
 }: PermissionPromptProps) {
   const { t } = useTranslation();
   const cardRef = useRef<HTMLDivElement>(null);
-  const optionRefs = useRef(new Map<string, HTMLButtonElement>());
-  const options = permission.options;
+  const answerRefs = useRef(new Map<string, HTMLButtonElement>());
   const questionKind = resolvePermissionQuestionKind(toolCall.kind);
   const heading = resolvePermissionHeading(permission) ?? t(QUESTION_KEYS[questionKind]);
   const reason = resolvePermissionReason(permission);
   const subject = resolvePermissionSubject(toolCall);
-  // Prose the agent titled the call with is a detail under the question, not
-  // code in a box; and it is dropped when it only restates the question.
   const subjectText =
     subject?.type === 'text' && !restates(subject.text, heading) ? subject.text : null;
   const suggestedOptionId = resolveSuggestedOptionId(permission);
-  const dismissOptionId = resolveDismissOptionId(options);
+  const dismissOptionId = resolveDismissOptionId(permission.options);
   const disabled = !isReady || sendingOptionId !== null;
+
+  // From the end, the suggestion last: the provider lists its answers most
+  // permissive first, so reading them from the end puts the refusal first and
+  // the suggested answer where the eye and the thumb finish.
+  const answers = useMemo(() => {
+    const reversed = [...permission.options].reverse();
+    const suggested = reversed.find((option) => option.optionId === suggestedOptionId);
+    return suggested ? [...reversed.filter((option) => option !== suggested), suggested] : reversed;
+  }, [permission.options, suggestedOptionId]);
+  const stacked =
+    answers.length > INLINE_ANSWER_MAX_COUNT ||
+    answers.some((option) => option.name.length > INLINE_ANSWER_MAX_LENGTH);
 
   useEffect(() => {
     if (!autoFocus) return;
@@ -369,9 +326,9 @@ export function PermissionPrompt({
     cardRef.current?.focus({ preventScroll: true });
   }, [autoFocus, permission.requestId]);
 
-  const focusOption = (optionId: string | null | undefined) => {
+  const focusAnswer = (optionId: string | null | undefined) => {
     if (!optionId) return;
-    optionRefs.current.get(optionId)?.focus();
+    answerRefs.current.get(optionId)?.focus();
   };
 
   const handleKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
@@ -383,19 +340,26 @@ export function PermissionPrompt({
       }
       return;
     }
-    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
-    event.preventDefault();
-    const currentIndex = options.findIndex(
-      (option) => optionRefs.current.get(option.optionId) === document.activeElement
+    const forward = stacked ? 'ArrowDown' : 'ArrowRight';
+    const backward = stacked ? 'ArrowUp' : 'ArrowLeft';
+    const isStep = event.key === forward || event.key === backward;
+    const isEntry = event.key === 'ArrowDown' || event.key === 'ArrowUp';
+    if (!isStep && !isEntry) return;
+    const currentIndex = answers.findIndex(
+      (option) => answerRefs.current.get(option.optionId) === document.activeElement
     );
     if (currentIndex === -1) {
+      if (!isEntry && !isStep) return;
+      event.preventDefault();
       // The first step lands on the suggestion, whichever arrow it was.
-      focusOption(suggestedOptionId);
+      focusAnswer(suggestedOptionId);
       return;
     }
-    const step = event.key === 'ArrowDown' ? 1 : -1;
-    const next = options[(currentIndex + step + options.length) % options.length];
-    focusOption(next?.optionId);
+    if (!isStep) return;
+    event.preventDefault();
+    const step = event.key === forward ? 1 : -1;
+    const next = answers[(currentIndex + step + answers.length) % answers.length];
+    focusAnswer(next?.optionId);
   };
 
   return (
@@ -409,12 +373,12 @@ export function PermissionPrompt({
     >
       <div {...stylex.props(styles.header)}>
         <div {...stylex.props(styles.headerText)}>
-          <p {...stylex.props(styles.heading)}>{heading}</p>
-          {reason ? <p {...stylex.props(styles.detail)}>{reason}</p> : null}
-          {subjectText ? <p {...stylex.props(styles.detail)}>{subjectText}</p> : null}
+          <p {...stylex.props(styles.title)}>{heading}</p>
+          {reason ? <p {...stylex.props(styles.description)}>{reason}</p> : null}
+          {subjectText ? <p {...stylex.props(styles.description)}>{subjectText}</p> : null}
         </div>
         {(position && position.total > 1) || onStop ? (
-          <div {...stylex.props(styles.headerEnd)}>
+          <div {...stylex.props(styles.corner)}>
             {position && position.total > 1 ? <PositionControl position={position} /> : null}
             {onStop ? (
               <Button
@@ -454,52 +418,6 @@ export function PermissionPrompt({
         </div>
       ) : null}
 
-      <div {...stylex.props(styles.options)}>
-        {options.map((option) => {
-          const description = resolvePermissionOptionDescription(option);
-          const suggested = option.optionId === suggestedOptionId;
-          const sending = option.optionId === sendingOptionId;
-          const isDismiss = option.optionId === dismissOptionId;
-          return (
-            <button
-              key={option.optionId}
-              ref={(node) => {
-                if (node) optionRefs.current.set(option.optionId, node);
-                else optionRefs.current.delete(option.optionId);
-              }}
-              type="button"
-              disabled={disabled}
-              aria-keyshortcuts={isDismiss ? 'Escape' : undefined}
-              data-tone={resolvePermissionOptionTone(option)}
-              onClick={() => onSelect(option.optionId)}
-              {...stylex.props(
-                styles.option,
-                suggested && styles.optionSuggested,
-                sending && styles.optionSending
-              )}
-            >
-              <span {...stylex.props(styles.optionText)}>
-                {option.name}
-                {description ? (
-                  <span {...stylex.props(styles.optionDescription)}>{description}</span>
-                ) : null}
-              </span>
-              {sending || isDismiss ? (
-                <span {...stylex.props(styles.optionTrail)}>
-                  {sending ? (
-                    <Spinner size="small" />
-                  ) : (
-                    <span aria-hidden="true" {...stylex.props(styles.keyHint)}>
-                      <Kbd>esc</Kbd>
-                    </span>
-                  )}
-                </span>
-              ) : null}
-            </button>
-          );
-        })}
-      </div>
-
       {error ? (
         <p role="alert" {...stylex.props(styles.status, styles.statusError)}>
           {error}
@@ -509,6 +427,32 @@ export function PermissionPrompt({
           {t('sessions.permission.connecting', 'Connecting to the workspace…')}
         </p>
       ) : null}
+
+      <div {...stylex.props(styles.footer, stacked && styles.footerStacked)}>
+        {answers.map((option) => {
+          const sending = option.optionId === sendingOptionId;
+          const description = resolvePermissionOptionDescription(option);
+          return (
+            <Button
+              key={option.optionId}
+              ref={(node: HTMLButtonElement | null) => {
+                if (node) answerRefs.current.set(option.optionId, node);
+                else answerRefs.current.delete(option.optionId);
+              }}
+              variant={option.optionId === suggestedOptionId ? 'primary' : 'secondary'}
+              disabled={disabled}
+              title={description ?? undefined}
+              aria-keyshortcuts={option.optionId === dismissOptionId ? 'Escape' : undefined}
+              data-tone={resolvePermissionOptionTone(option)}
+              onClick={() => onSelect(option.optionId)}
+              {...stylex.props(stacked && styles.answerStacked)}
+            >
+              {sending ? <Spinner size="small" /> : null}
+              {option.name}
+            </Button>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -528,9 +472,6 @@ const restates = (text: string, heading: string) => {
   const textWords = words(text);
   let shared = 0;
   for (const word of headingWords) if (textWords.has(word)) shared++;
-  // Everything the question names is in the line, and the line adds at most a
-  // word or two: "Allow network access?" over "https network access to host"
-  // still carries the host, so this is deliberately strict.
   return shared === headingWords.size && textWords.size <= headingWords.size;
 };
 

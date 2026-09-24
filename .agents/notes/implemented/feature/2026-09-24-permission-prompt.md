@@ -63,6 +63,19 @@ install` commands", "No, and block this host in the future"). Kinds are ACP's
   Allow); prose titles that restate the heading are dropped; the only key cap
   is `esc` on the refusal; Stop and "n/m" sit at the end of the heading line.
 
+## Second owner review: the system's own anatomy
+
+The owner found the prompt still unlike the design system. It was a bespoke
+card: answers as list rows with a selected fill, and type sizes of its own. The
+system already has the shape for a question that needs an answer — the
+AlertDialog: a `headline` title and one sentence, the body, and the answers as
+Buttons in a footer, from the end, affirmative last, stacked in reverse when
+narrow. The prompt is now that, on the card rung (the composer's): answers are
+Buttons (controls stand up), the suggestion is the primary one and comes last,
+the subject is a region block of the card, the type is the system's steps, and
+Stop is the corner icon a dismissible panel carries. Answers stack full width
+when any is longer than 24 characters or there are more than three.
+
 ## Alternatives not taken
 
 - **Buttons in a row** (Allow / Always / Deny). Provider names are sentences; a
