@@ -205,18 +205,17 @@ module.exports = {
         'accordion-up': 'accordion-up 0.2s ease-out',
       },
       fontFamily: {
+        // Same default stack as `--font-sans-default` in components' index.css.
         sans: [
-          'Inter',
+          'PingFang SC',
           '-apple-system',
           'BlinkMacSystemFont',
-          'Segoe UI',
-          'Roboto',
+          'Hiragino Sans GB',
+          'Microsoft YaHei',
           'Helvetica Neue',
           'Arial',
-          'system-ui',
-          'Noto Sans SC',
-          'PingFang SC',
-          'Microsoft YaHei',
+          'Apple Color Emoji',
+          'Segoe UI Emoji',
           'sans-serif',
         ],
         mono: [

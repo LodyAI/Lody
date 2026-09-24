@@ -1065,10 +1065,13 @@ pre,
     --terminal-ansi-bright-magenta: var(--vscode-terminal-ansiBrightMagenta, #bc05bc);
     --terminal-ansi-bright-cyan: var(--vscode-terminal-ansiBrightCyan, #0598bc);
     --terminal-ansi-bright-white: var(--vscode-terminal-ansiBrightWhite, #a5a5a5);
+    /* PingFang SC (macOS / iOS) first, for CJK and Latin alike; it is Apple's
+       system font and cannot be bundled. Windows falls back to Microsoft YaHei.
+       Inter stays self-hosted for the interface-font setting and diagrams. */
     --font-sans-default:
-      'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Helvetica Neue',
-      Arial, 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', 'Apple Color Emoji',
-      'Segoe UI Emoji', sans-serif;
+      'PingFang SC', -apple-system, BlinkMacSystemFont, 'Hiragino Sans GB',
+      'Microsoft YaHei', 'Helvetica Neue', Arial, 'Apple Color Emoji', 'Segoe UI Emoji',
+      sans-serif;
     --font-sans: var(--lody-interface-font-family, var(--font-sans-default));
     --font-serif: serif;
     --font-wordmark:

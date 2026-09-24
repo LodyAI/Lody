@@ -3,7 +3,7 @@
  * round highlighted, an opening-words card on hover.
  *
  * The rail is `position: absolute` inside the conversation pane and only
- * renders above an `@[860px]` container width, so every story wraps it in an
+ * renders above an `@[928px]` container width, so every story wraps it in an
  * `@container` box wide enough to satisfy that query — a narrower frame renders
  * nothing, which is the production behaviour, not a broken story.
  */
@@ -73,7 +73,7 @@ const longConversation: ConversationOutlineEntry[] = Array.from({ length: 140 },
 
 /**
  * The rail alone is invisible on an empty canvas, so every story paints a
- * stand-in conversation column beside it — matching production's 46rem centered
+ * stand-in conversation column beside it — matching production's centered
  * measure — to show where the rail sits relative to message content.
  */
 function RailFrame({

@@ -27,6 +27,15 @@ Translation: current
 - token 之外的字面颜色：深色 Mermaid 配色现在低于上限，绿色合并按钮和 PR 标签页一样使用 `dark:text-background`。
 - 行内代码：7% 底色，阅读色文字。列表项间距 0.5rem。大纲定位条静止时为 /32。
 
+## 阅读栏宽度与字体
+
+- 对话列的**内容**宽度上限为 768px（之前是 736px 列宽内的 700px）：`CONVERSATION_CONTENT_WIDTH_CLASS` 在最大宽度上加上
+  各断点的左右内边距；大纲定位条的容器阈值从 860px 调到 928px，保持原有的边距。
+- 默认无衬线字体栈为 `"PingFang SC", -apple-system, BlinkMacSystemFont, "Hiragino Sans GB", "Microsoft YaHei",
+"Helvetica Neue", Arial`，外加 emoji 字体。PingFang SC 是苹果的专有系统字体，不能打包：macOS 和 iOS 使用它，Windows
+  回退到 Microsoft YaHei。Inter 仍作为自托管字体保留，供界面字体设置和图表使用。为让所有平台中文字体一致而打包开源字体
+  （Noto Sans SC / 思源黑体，SIL OFL）本次未做：需要把数 MB 的字体族按 unicode-range 分片。
+
 ## 备选方案
 
 - 逐个调整各界面（菜单、设置、按钮、面板）：静态扫描显示这些地方没有写死白色，白色来自 token，因此上限应放在主题层，

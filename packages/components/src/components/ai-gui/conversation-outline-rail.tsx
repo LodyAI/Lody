@@ -617,11 +617,11 @@ export function ConversationOutlineRail({
       // be found before it becomes visible.
       className={cn(
         'group/rail pointer-events-none absolute inset-y-0 left-0 z-10 hidden items-center',
-        // The conversation column is 46rem wide and centered. Below this the
-        // rail would sit on top of message content, so it does not render at
-        // all. A container query keeps that decision in CSS — no JS
-        // measurement, no layout shift on mount.
-        '@[860px]:flex',
+        // The conversation column is 804px wide (768px of content plus its
+        // gutter) and centered. Below this the rail would sit on top of message
+        // content, so it does not render at all. A container query keeps that
+        // decision in CSS — no JS measurement, no layout shift on mount.
+        '@[928px]:flex',
         className
       )}
       style={{ width: RAIL_WIDTH }}

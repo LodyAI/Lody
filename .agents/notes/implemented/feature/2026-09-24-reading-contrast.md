@@ -38,6 +38,19 @@ text (#F0EFED). High-contrast themes are unchanged, and light themes cap only lo
   and the green merge button uses `dark:text-background` like the PR tab's.
 - Inline code: 7% fill, reading color. List items 0.5rem apart. The outline rail rests at /32.
 
+## Column and font
+
+- The conversation column caps its CONTENT at 768px (was 700px inside a 736px column):
+  `CONVERSATION_CONTENT_WIDTH_CLASS` adds the per-breakpoint gutter to the max width, and
+  the outline rail's container threshold moves from 860px to 928px to keep its margin.
+- The default sans stack is `"PingFang SC", -apple-system, BlinkMacSystemFont,
+"Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", Arial` plus emoji fonts. PingFang
+  SC is Apple's proprietary system font: it cannot be bundled, so macOS and iOS use it and
+  Windows falls back to Microsoft YaHei. Inter stays self-hosted for the interface-font
+  setting and diagrams. Bundling an open font (Noto Sans SC / Source Han Sans, SIL OFL)
+  for uniform CJK on every platform was not done: it needs unicode-range subsets of a
+  multi-megabyte family.
+
 ## Alternatives
 
 - Styling each surface (menus, settings, buttons, panels) one by one: a static scan found
