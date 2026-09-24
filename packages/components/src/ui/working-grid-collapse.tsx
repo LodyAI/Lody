@@ -18,12 +18,14 @@ export type WorkingGridCollapseProps = Omit<ComponentPropsWithoutRef<'span'>, 'c
 const TILES = [0, 1, 2].flatMap((row) => [0, 1, 2].map((col) => [row, col] as const));
 const SPARKS = 6;
 // Timeline, ms.
-const GATHER_MS = 300;
-const DOT_START_MS = 240;
-const DOT_MS = 340;
-const SPARK_START_MS = 280;
-const SPARK_MS = 320;
-const EASE_IN = 'cubic-bezier(0.5, 0, 0.75, 0)';
+// Tuned at the real 14px size, where small moves are hard to see: a slow spin, a
+// big pop and two clear bounces.
+const GATHER_MS = 480;
+const DOT_START_MS = 400;
+const DOT_MS = 620;
+const SPARK_START_MS = 440;
+const SPARK_MS = 380;
+const EASE_IN = 'cubic-bezier(0.45, 0, 0.7, 0.2)';
 const EASE_OUT = 'cubic-bezier(0.2, 0.7, 0.3, 1)';
 
 /**
@@ -99,9 +101,11 @@ export function WorkingGridCollapse({
     const settle = dot.animate(
       [
         { transform: 'scale(0.35)', opacity: 0 },
-        { transform: 'scale(1.3)', opacity: 1, offset: 0.35 },
-        { transform: 'scale(0.9)', opacity: 1, offset: 0.62 },
-        { transform: 'scale(1.04)', opacity: 1, offset: 0.82 },
+        { transform: 'scale(1.6)', opacity: 1, offset: 0.25 },
+        { transform: 'scale(0.78)', opacity: 1, offset: 0.45 },
+        { transform: 'scale(1.22)', opacity: 1, offset: 0.62 },
+        { transform: 'scale(0.92)', opacity: 1, offset: 0.78 },
+        { transform: 'scale(1.04)', opacity: 1, offset: 0.9 },
         { transform: 'scale(1)', opacity: 1 },
       ],
       { duration: DOT_MS, delay: DOT_START_MS, easing: EASE_OUT, fill: 'both' }
@@ -111,7 +115,7 @@ export function WorkingGridCollapse({
     // 3. Sparks fly off radially and fade.
     root.querySelectorAll<HTMLElement>('[data-collapse-spark]').forEach((spark, index) => {
       const angle = ((index + 0.25) / SPARKS) * Math.PI * 2;
-      const reach = size / 2 + 1;
+      const reach = size / 2 + 2;
       const x = Math.cos(angle) * reach;
       const y = Math.sin(angle) * reach;
       animations.push(

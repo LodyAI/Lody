@@ -108,9 +108,11 @@ simulations and screenshots.
 
 When a row goes from working to unread, `SessionRowStatusIndicator` plays
 `WorkingGridCollapse` once before the plain unread dot: the grid spins 135° while
-its nine tiles gather into the centre and fade (0–300ms, ease-in), the dot pops
-from 0.35× past its size to 1.3× and settles through 0.9× and 1.04× (240–580ms),
-and six 2px sparks fly out radially and fade (280–600ms). It uses the same
+its nine tiles gather into the centre and fade (0–480ms), the dot pops from 0.35×
+to 1.6× and bounces twice through 0.78×, 1.22×, 0.92× and 1.04× before settling
+(400–1020ms), and six 2px sparks fly out radially and fade (440–820ms). The first
+cut (300ms spin, 1.3× pop, one small bounce) read well magnified but was hard to
+see at the real 14px, so the spin was slowed and the pop and bounces enlarged. It uses the same
 compositor-only Web Animations; the hand-over to the plain dot comes from the dot
 animation's `finished` promise, not a timer. The indicator tracks the previous
 working flag as state adjusted during render, so the transition is on screen in
