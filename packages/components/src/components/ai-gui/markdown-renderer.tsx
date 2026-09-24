@@ -63,6 +63,12 @@ import type { ConversationFontSize } from '@/atoms/settings';
 import { MarkdownFencedCodeBlock } from './markdown-code-block';
 import { MarkdownDiffBlock } from './markdown-diff-block';
 import { createMarkdownMermaidConfig, createMarkdownMermaidPlugin } from './markdown-mermaid';
+import {
+  GitHubReferenceChip,
+  isGitHubReferenceLabel,
+  markdownLinkText,
+  parseGitHubReferenceUrl,
+} from './github-reference-link';
 import { MermaidDiagramViewer } from './mermaid-diagram-viewer';
 import { MermaidFullscreenButton, useMermaidDiagramCanvas } from './use-mermaid-diagram-canvas';
 import { SessionReadonlyContext } from './session-readonly-context';
@@ -1172,6 +1178,26 @@ const createMarkdownComponents = ({
       );
     }
 
+    // A link that only names a GitHub pull request or issue renders as a small
+    // reference label; one with its own wording stays an ordinary link.
+    const githubReference = parseGitHubReferenceUrl(href);
+    if (githubReference && isGitHubReferenceLabel(markdownLinkText(children), githubReference)) {
+      return (
+        <MarkdownExternalLink
+          href={href}
+          rel={rel}
+          {...rest}
+          title={href}
+          className={cn(
+            rest.className,
+            'markdown-reference-chip mx-[0.1em] inline-flex max-w-full items-center rounded-md border border-border/80 bg-foreground/[0.04] px-[0.4em] align-[-0.12em] text-[0.92em] leading-[1.55] transition-colors hover:border-border hover:bg-foreground/[0.08]'
+          )}
+        >
+          <GitHubReferenceChip reference={githubReference} />
+        </MarkdownExternalLink>
+      );
+    }
+
     return (
       <MarkdownExternalLink href={href} rel={rel} {...rest}>
         {children}
@@ -1300,10 +1326,17 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
   isStreaming = false,
   onAgentFileLinkClick,
   searchBlockId,
+  wideBlocks = false,
 }: {
   text: string;
   size?: MarkdownRendererSize;
   className?: string;
+  /**
+   * Conversation prose only: wide tables and Mermaid diagrams may extend past
+   * the reading column, centered on it, up to the conversation pane's width
+   * (`.markdown-wide-blocks` in `tailwind/index.css`).
+   */
+  wideBlocks?: boolean;
   /** Enable raw HTML rendering (sanitized). Use for GitHub comment bodies. */
   allowHtml?: boolean;
   /** Enables Streamdown's incremental animation while a turn is still streaming. */
@@ -1533,7 +1566,12 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
       <div
         ref={containerRef}
         data-search-block-id={searchBlockId}
-        className={cn(MARKDOWN_BASE_CLASSNAME, MARKDOWN_SIZE_CLASSNAME, className)}
+        className={cn(
+          MARKDOWN_BASE_CLASSNAME,
+          MARKDOWN_SIZE_CLASSNAME,
+          wideBlocks && 'markdown-wide-blocks',
+          className
+        )}
         style={markdownFontSizeStyle(normalizedSize)}
         onClick={handleContainerClick}
         onKeyDown={handleContainerKeyDown}

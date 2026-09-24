@@ -4135,5 +4135,7 @@
   "settings.beta.promptShortcutsHelper": "Create reusable prompts and insert them with /. In development — expect rough edges.",
   "settings.promptShortcuts.disabled": "Enable Prompt Shortcuts under Developer mode in Settings → About to use this feature.",
   "sessions.prompts.createPrOrigin": "(Sent by the **Create PR** button in Lody.)",
-  "sessions.prompts.createDraftPrOrigin": "(Sent by the **Create Draft PR** button in Lody.)"
+  "sessions.prompts.createDraftPrOrigin": "(Sent by the **Create Draft PR** button in Lody.)",
+  "sessions.githubReference.pullRequest": "PR",
+  "sessions.githubReference.issue": "Issue"
 }

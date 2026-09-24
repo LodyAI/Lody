@@ -58,11 +58,7 @@ const hslChannelToRgb = (channel: string | undefined): { r: number; g: number; b
             : h < 300
               ? [x, 0, c]
               : [c, 0, x];
-  return {
-    r: Math.round((r + m) * 255),
-    g: Math.round((g + m) * 255),
-    b: Math.round((b + m) * 255),
-  };
+  return { r: Math.round((r + m) * 255), g: Math.round((g + m) * 255), b: Math.round((b + m) * 255) };
 };
 
 describe('VSCode theme adapter', () => {

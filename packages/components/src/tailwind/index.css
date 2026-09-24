@@ -118,6 +118,13 @@ pre,
   .dark .text-markdown-link {
     color: hsl(211 56% 72%);
   }
+  /* A link rendered as a reference label (GitHub PR / issue): the label frame
+     replaces the prose link's color and underline. Outranks the renderer's
+     `[&_a]:` link variants in this same layer. */
+  .markdown-renderer a.markdown-reference-chip {
+    color: hsl(var(--reading-foreground));
+    text-decoration: none;
+  }
   .text-pr-merged {
     color: hsl(var(--github-merged));
   }
@@ -462,8 +469,41 @@ pre,
     color: var(--markdown-mermaid-foreground);
   }
 
+  /* Conversation prose (`MarkdownRenderer wideBlocks`): a table or diagram wider
+     than the 768px reading column extends past it, centered on the column, up
+     to the conversation pane minus a margin that keeps the outline rail clear
+     (and at most 1200px). Narrow ones keep the column width. `cqw` resolves
+     against the conversation scroll root, the nearest `@container`. */
+  .markdown-wide-blocks {
+    --markdown-wide-block-max: max(100%, min(calc(100cqw - 128px), 1200px));
+  }
+
+  .markdown-wide-blocks [data-markdown-table] {
+    position: relative;
+    left: 50%;
+    width: max-content;
+    min-width: 100%;
+    max-width: var(--markdown-wide-block-max);
+    transform: translateX(-50%);
+  }
+
+  .markdown-wide-blocks [data-streamdown='mermaid-block'] {
+    left: 50%;
+    /* The diagram plus the frame's 1rem padding on each side. */
+    /* `!important`: Streamdown puts `w-full` (utilities layer) on the block. */
+    width: clamp(
+      100%,
+      calc(var(--mermaid-natural-width, 0px) + 2rem + 1px),
+      var(--markdown-wide-block-max)
+    ) !important;
+    max-width: none;
+    transform: translateX(-50%);
+  }
+
+  /* Streamdown's "mermaid" language header. `!important`: it carries a `flex`
+     utility, which outranks this components-layer rule. */
   .markdown-renderer [data-streamdown='mermaid-block'] > div:first-child:not([data-streamdown]) {
-    display: none;
+    display: none !important;
   }
 
   .markdown-renderer
@@ -1069,9 +1109,8 @@ pre,
        system font and cannot be bundled. Windows falls back to Microsoft YaHei.
        Inter stays self-hosted for the interface-font setting and diagrams. */
     --font-sans-default:
-      'PingFang SC', -apple-system, BlinkMacSystemFont, 'Hiragino Sans GB',
-      'Microsoft YaHei', 'Helvetica Neue', Arial, 'Apple Color Emoji', 'Segoe UI Emoji',
-      sans-serif;
+      'PingFang SC', -apple-system, BlinkMacSystemFont, 'Hiragino Sans GB', 'Microsoft YaHei',
+      'Helvetica Neue', Arial, 'Apple Color Emoji', 'Segoe UI Emoji', sans-serif;
     --font-sans: var(--lody-interface-font-family, var(--font-sans-default));
     --font-serif: serif;
     --font-wordmark:

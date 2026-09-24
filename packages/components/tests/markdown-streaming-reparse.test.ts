@@ -177,9 +177,12 @@ End of synthetic document.`);
       await renderMarkdown(MALFORMED_BOLD_AUTOLINK_MARKDOWN, { isStreaming });
 
       const url = 'https://github.com/LodyAI/Lody/pull/262';
+      // The link ends exactly at the URL; a bare PR URL renders as its reference label.
       const link = container?.querySelector(`[data-streamdown="strong"] a[href="${url}"]`);
-      expect(link?.textContent).toBe(url);
-      expect(container?.querySelector('[data-streamdown="strong"]')?.textContent).toBe(url);
+      expect(link?.querySelector('[data-github-reference="pull"]')?.textContent).toBe('PRLody#262');
+      expect(container?.querySelector('[data-streamdown="strong"]')?.textContent).toBe(
+        'PRLody#262'
+      );
       expect(container?.querySelector('code')?.textContent).toBe('fix/some-branch');
       expect(container?.textContent).toContain('fix/some-branch -> main');
       expect(container?.textContent).not.toContain('**');
@@ -249,12 +252,34 @@ End of synthetic document.`);
     expect(container?.querySelector('code')).toBeNull();
   });
 
+  it('renders links that only name a GitHub PR or issue as reference labels', async () => {
+    await renderMarkdown(
+      [
+        'Opened https://github.com/LodyAI/Lody/pull/954 and [#12](https://github.com/acme/app/issues/12).',
+        'Also [LodyAI/Lody#7](https://github.com/LodyAI/Lody/pull/7/files).',
+        'But [the fix](https://github.com/LodyAI/Lody/pull/955) and [#13](https://github.com/acme/app/issues/99) stay links.',
+      ].join('\n\n')
+    );
+
+    const reference = (href: string) =>
+      container?.querySelector(`a[href="${href}"] [data-github-reference]`) ?? null;
+    expect(reference('https://github.com/LodyAI/Lody/pull/954')?.textContent).toBe('PRLody#954');
+    expect(reference('https://github.com/acme/app/issues/12')?.textContent).toBe('Issueapp#12');
+    expect(reference('https://github.com/LodyAI/Lody/pull/7/files')?.textContent).toBe('PRLody#7');
+    // Descriptive text, or a number that does not match the URL, keeps the plain link.
+    expect(reference('https://github.com/LodyAI/Lody/pull/955')).toBeNull();
+    expect(
+      container?.querySelector('a[href="https://github.com/LodyAI/Lody/pull/955"]')?.textContent
+    ).toBe('the fix');
+    expect(reference('https://github.com/acme/app/issues/99')).toBeNull();
+  });
+
   it('ends a bold autolink at full-width punctuation instead of swallowing the sentence', async () => {
     await renderMarkdown(BOLD_AUTOLINK_BEFORE_CJK_MARKDOWN);
 
     const url = 'https://github.com/LodyAI/Lody/pull/317';
     const link = container?.querySelector(`[data-streamdown="strong"] a[href="${url}"]`);
-    expect(link?.textContent).toBe(url);
+    expect(link?.textContent).toBe('PRLody#317');
     expect(container?.querySelector('code')?.textContent).toBe('fix/mobile-staged-background-sync');
     expect(container?.textContent).toContain('，分支');
     expect(container?.textContent).not.toContain('**');

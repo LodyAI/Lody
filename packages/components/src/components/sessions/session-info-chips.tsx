@@ -330,13 +330,6 @@ export function ScheduleChip({
 
 /* ── PR / repo context ───────────────────────────────────────────────── */
 
-const PR_STATUS_TEXT: Record<PrStatus, string> = {
-  open: 'text-github-open',
-  merged: 'text-pr-merged',
-  closed: 'text-github-closed',
-  draft: 'text-github-draft',
-};
-
 /**
  * The session's work context. Cluster = the PR status icon + "#1234" (the
  * icon alone conveys open/merged/closed — no state text); with no PR it
@@ -595,7 +588,6 @@ export function ContextChip({
         : liveCiOverall === 'passing'
           ? 's'
           : prCiState;
-  const statusText = status ? PR_STATUS_TEXT[status] : '';
   const prNumber = pr
     ? (getSessionPullRequestLegacyFields(pr).number ?? parseGitHubPrNumber(pr.url))
     : null;
@@ -625,10 +617,7 @@ export function ContextChip({
         onClick={onOpenPr}
         aria-label={t('sessions.pr.openTab', 'Open pull request')}
         title={t('sessions.pr.openTab', 'Open pull request')}
-        className={cn(
-          'flex h-6 shrink-0 select-none items-center gap-1 rounded-md px-1 text-xs font-semibold transition-colors hover:bg-muted-foreground/10',
-          statusText
-        )}
+        className="flex h-6 shrink-0 select-none items-center gap-1 rounded-md px-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted-foreground/10"
       >
         <SessionPrIcon prStatus={status ?? 'open'} prCiState={compactCiState} />
         {value ? (
@@ -636,7 +625,7 @@ export function ContextChip({
         ) : null}
       </button>
     ) : (
-      <span className={cn('flex h-6 shrink-0 items-center gap-1 px-1 font-semibold', statusText)}>
+      <span className="flex h-6 shrink-0 items-center gap-1 px-1 font-medium text-muted-foreground">
         <SessionPrIcon prStatus={status ?? 'open'} prCiState={compactCiState} />
         {value ? (
           <span className="hidden shrink-0 tabular-nums @[420px]:inline">{value}</span>
@@ -661,21 +650,31 @@ export function ContextChip({
           <span className="truncate">{trimmedBranch}</span>
         </button>
       ) : null}
-      {hasDiff ? (
-        <button
-          type="button"
-          onClick={onOpenAllChanges}
-          disabled={!onOpenAllChanges}
-          aria-label={t('sessions.detailTabs.allChanges', 'All Changes')}
-          title={t('sessions.detailTabs.allChanges', 'All Changes')}
-          className="-mx-1 flex h-6 shrink-0 items-center gap-1 rounded-md px-1 tabular-nums transition-colors enabled:hover:bg-muted-foreground/10 disabled:pointer-events-none"
-        >
-          <span className="text-code-added">+{diffStat.add}</span>
-          <span className="text-code-removed">−{diffStat.del}</span>
-        </button>
-      ) : null}
     </span>
   );
+
+  // The line totals sit on the right edge in their own tinted chip, colored
+  // like GitHub's (the PR's green and red), apart from the repo/branch text.
+  const diffChip = hasDiff ? (
+    <button
+      type="button"
+      onClick={onOpenAllChanges}
+      disabled={!onOpenAllChanges}
+      aria-label={t('sessions.detailTabs.allChanges', 'All Changes')}
+      title={t('sessions.detailTabs.allChanges', 'All Changes')}
+      className="flex h-5 shrink-0 items-center gap-1.5 rounded-md bg-foreground/[0.06] px-1.5 text-[11px] font-medium tabular-nums transition-colors enabled:hover:bg-foreground/[0.1] disabled:pointer-events-none"
+    >
+      <span className="text-github-addition">+{diffStat.add}</span>
+      <span className="text-github-deletion">−{diffStat.del}</span>
+    </button>
+  ) : null;
+  const trailing =
+    diffChip || actions?.length ? (
+      <>
+        {diffChip}
+        {actions?.length ? <ContextChipActions actions={actions} /> : null}
+      </>
+    ) : undefined;
 
   const locationControl = workspaceLocation ? (
     <LocationControl kind={workspaceLocation.kind} path={workspaceLocation.path} />
@@ -703,7 +702,7 @@ export function ContextChip({
           </>
         ) : undefined
       }
-      trailing={actions?.length ? <ContextChipActions actions={actions} /> : undefined}
+      trailing={trailing}
     />
   );
 }
@@ -755,15 +754,9 @@ export function usePrCiPresentation(runs: readonly PrCiRun[]) {
       : overall === 'failing'
         ? 'text-destructive'
         : 'text-status-warning';
-  const tintClassName =
-    overall === 'passing'
-      ? 'bg-status-success/12'
-      : overall === 'failing'
-        ? 'bg-destructive/12'
-        : 'bg-status-warning/12';
   const VerdictIcon =
     overall === 'passing' ? CircleCheck : overall === 'failing' ? CircleX : CircleDot;
-  return { overall, settled, overallLabel, toneClassName, tintClassName, VerdictIcon };
+  return { overall, settled, overallLabel, toneClassName, VerdictIcon };
 }
 
 function PrCiPopoverBody({
@@ -826,11 +819,11 @@ function PrCiPopoverBody({
 }
 
 /**
- * PR CI verdict as a compact "CI" text pill. It only appears INSIDE the PR
+ * PR CI verdict as a compact icon button. It only appears INSIDE the PR
  * context when that item is expanded on the stage (never a standalone cluster
- * icon). The pill is tinted by verdict (green passing / red failing / amber
- * running, with "done/total" while running); a single click opens the
- * check-run list.
+ * icon). The verdict icon carries the color (green passing / red failing /
+ * amber running, with a muted "done/total" while running); there is no tinted
+ * fill, so the bar stays quiet. A single click opens the check-run list.
  */
 export function PrCiPill({
   runs,
@@ -847,8 +840,7 @@ export function PrCiPill({
   const presentation = usePrCiPresentation(hasRuns ? runs! : []);
   if (!hasRuns) return null;
 
-  const { overall, settled, overallLabel, toneClassName, tintClassName, VerdictIcon } =
-    presentation;
+  const { overall, settled, overallLabel, toneClassName, VerdictIcon } = presentation;
   const label = `${t('sessions.prCi.label', 'CI checks')} · ${overallLabel}`;
 
   return (
@@ -863,22 +855,16 @@ export function PrCiPill({
           title={label}
           onClick={() => setOpen((value) => !value)}
           className={cn(
-            'flex h-5 shrink-0 select-none items-center gap-1 rounded px-1.5 text-[11px] font-semibold uppercase tracking-wide',
-            tintClassName,
-            toneClassName
+            'flex h-6 shrink-0 select-none items-center gap-1 rounded-md px-1 text-[11px] text-muted-foreground transition-colors hover:bg-muted-foreground/10',
+            open && 'bg-muted-foreground/10'
           )}
         >
-          <VerdictIcon className="h-3 w-3 shrink-0" aria-hidden="true" />
-          CI
+          <VerdictIcon className={cn('h-3.5 w-3.5 shrink-0', toneClassName)} aria-hidden="true" />
           {overall === 'running' ? (
             <span className="tabular-nums">
               {settled}/{runs!.length}
             </span>
           ) : null}
-          <ChevronDown
-            className={cn('h-3 w-3 shrink-0 opacity-60 transition-transform', open && 'rotate-180')}
-            aria-hidden="true"
-          />
         </button>
       </PopoverAnchor>
       <PopoverContent

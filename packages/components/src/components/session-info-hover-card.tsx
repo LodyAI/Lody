@@ -363,8 +363,8 @@ export function SessionInfoCard({
       label: t('sessions.infoCard.changes', 'Changes'),
       value: (
         <span className="inline-flex items-center gap-1.5 tabular-nums">
-          <span className="text-code-added">+{addedLines}</span>
-          <span className="text-code-removed">-{deletedLines}</span>
+          <span className="text-github-addition">+{addedLines}</span>
+          <span className="text-github-deletion">-{deletedLines}</span>
         </span>
       ),
     });

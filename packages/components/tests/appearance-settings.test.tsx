@@ -29,7 +29,7 @@ function AppearanceHarness({ isElectron }: { isElectron: boolean }) {
   const [theme, setTheme] = useState<Theme>('light');
   const [interfaceFontFamily, setInterfaceFontFamily] = useState('Atkinson Hyperlegible');
   const [terminalFontFamily, setTerminalFontFamily] = useState('Maple Mono');
-  const [conversationFontSize, setConversationFontSize] = useState(14);
+  const [conversationFontSize, setConversationFontSize] = useState(15);
   const [fontSize, setFontSize] = useState(13);
   const [fontLigaturesEnabled, setFontLigaturesEnabled] = useState(true);
 
@@ -166,7 +166,7 @@ describe('AppearanceSettingsView', () => {
 
   it('persists mobile font size picks, including both limits, across remounts', async () => {
     const store = createStore();
-    store.set(conversationFontSizeAtom, 14);
+    store.set(conversationFontSizeAtom, 15);
     const renderMobile = (settingsStore: ReturnType<typeof createStore>) => (
       <Provider store={settingsStore}>
         <MobileAppearanceSettings />
@@ -190,9 +190,9 @@ describe('AppearanceSettingsView', () => {
     };
 
     for (const [label, size] of [
-      ['Smaller', 12],
-      ['Larger', 16],
-      ['Default', 14],
+      ['Smaller', 13],
+      ['Larger', 18],
+      ['Default', 15],
     ]) {
       await pickSize(label!);
       expect(store.get(conversationFontSizeAtom)).toBe(size);

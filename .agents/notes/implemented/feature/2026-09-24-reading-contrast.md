@@ -12,11 +12,10 @@ headings, menus, buttons, settings and every sidebar title were #FFFFFF on #1010
 so strokes halated, dense CJK text blurred and nothing marked the reading column. Dark themes
 now hold every text foreground under one brightness ceiling, the luminance of text at 11.6:1
 against the canvas (#D2CDC5 on Vesper, still above WCAG AAA). Conversation prose sits one
-step above it (14.2:1, #E4E1DD: HSL lightness 88%), and only headings and bold, the selected
-sidebar row and the active tab go above that. Unselected sidebar text sits below the
-prose. Lody ships Vesper with a warm color temperature: every neutral gray takes a warm
-white point (canvas #141312), and the sidebar (#BAB6AE) and selected/active text (#F0EAE1)
-are hand-tuned on it. High-contrast themes are unchanged, and light themes cap only
+step above it (14.2:1, #E4E1DD: HSL lightness 88%), shared by the selected sidebar row and
+the active tab; only headings and bold go above that. Unselected sidebar text sits below
+the prose. Lody ships Vesper with a warm color temperature: every neutral gray takes a warm
+white point (canvas #141312), and the sidebar titles (#BAB6AE) are hand-tuned on it. High-contrast themes are unchanged, and light themes cap only
 long-form text.
 
 ## Decision
@@ -28,8 +27,9 @@ long-form text.
   `--popover-foreground` and `--accent-foreground` are set from the ceiled foreground: the
   stylesheet defaults for them were an unthemed near-white (`210 40% 96%`), which is why
   dropdown menus stayed white.
-- Above the ceiling: `--foreground-strong` (15:1, headings and bold), and the selected
-  sidebar row and active tab foregrounds (capped at the same 15:1 step).
+- Above the ceiling: `--foreground-strong` (15:1, headings and bold). The selected sidebar
+  row and the active tab are capped at the prose step, so they are brighter than the other
+  sidebar text but never brighter than the conversation; their fill marks the selection.
 - `--reading-foreground` for prose and user bubbles (14.2:1; Vesper pins #E4E1DD); `--sidebar-row-foreground` (9.2:1)
   for unselected session titles, group and project labels, section headers and New chat /
   Search, so the sidebar never outshines the prose. Hover changes a row's fill only.
@@ -42,8 +42,8 @@ long-form text.
   #161616 → #1A1918). Channels are floored so the canvas/sidebar step stays visible.
   Accents and pure black keep their values. The dark `--github-draft` and the Electron
   window/title-bar colors use the same warm grays.
-- `READING_THEME_OVERRIDES` pins Vesper's sidebar (#BAB6AE) and selected/active text
-  (#F0EAE1), hand-tuned on the warm palette.
+- `READING_THEME_OVERRIDES` pins Vesper's prose, selected and active text (#E4E1DD) and
+  sidebar titles (#BAB6AE), hand-tuned on the warm palette.
 - Literal colors outside the tokens: the dark Mermaid palette now stays under the ceiling,
   and the green merge button uses `dark:text-background` like the PR tab's.
 - Inline code: 7% fill, reading color. List items 0.5rem apart. The outline rail rests at /32.
@@ -60,6 +60,34 @@ long-form text.
   setting and diagrams. Bundling an open font (Noto Sans SC / Source Han Sans, SIL OFL)
   for uniform CJK on every platform was not done: it needs unicode-range subsets of a
   multi-megabyte family.
+- Font size tiers are 13 / 14 / **15** / 16 / 18px (were 12–16, default 14): 1px steps
+  around the default and a 2px step at the top, as in Discord's chat text scale and iOS
+  Dynamic Type; below 13px dense CJK glyphs lose legibility. Conversation text takes the
+  tier; `--ui-font-size` (the chrome) is 1px under it, so the default keeps the tuned 14px
+  interface while prose reads at 15px. A stored size still snaps to the nearest tier.
+- Wide blocks: in conversation prose (`MarkdownRenderer wideBlocks`), a table or Mermaid
+  diagram wider than the column extends past it, centered on the column, up to the
+  conversation pane minus 64px per side (outline-rail clearance) and at most 1200px.
+  `cqw` resolves against the scroll root's `@container`. Tables size to `max-content`;
+  a diagram's frame follows its SVG viewBox width, which the Mermaid canvas scan writes
+  to `--mermaid-natural-width`. Narrow blocks keep the column width.
+
+## Conversation details
+
+- GitHub references: a link whose text only names a pull request or issue (the URL
+  itself, `#123`, `repo#123`, `owner/repo#123`, `PR #123`) renders as a label with the
+  GitHub mark, `PR` / `Issue`, the repository and the number
+  (`github-reference-link.tsx`). A link with its own wording, or a number that does not
+  match its URL, stays an ordinary link. The anchor keeps the in-app PR interception.
+- Process rows: "Context compacted" and "Retrying…" are process status lines, not cards,
+  so they share the "Ran N commands" header's box and gap (34px rhythm; was 39 / 32px).
+- Info bar: the PR number is secondary text beside the colored PR icon; CI is a verdict
+  icon (no tinted "CI" pill); line totals sit in a tinted chip on the right edge.
+- Line totals everywhere (+/−) use `github-addition` / `github-deletion`, the PR's green
+  and red. `--code-added` keeps the theme's diff color for diff highlighting.
+- Sidebar: PR marks are desaturated (`saturate(0.55)`, a filter, not opacity); the
+  `Mergeable` pill is the one status meant to be noticed, with a real fill and semibold
+  label.
 
 ## Alternatives
 

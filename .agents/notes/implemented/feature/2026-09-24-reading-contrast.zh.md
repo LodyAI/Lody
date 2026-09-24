@@ -10,8 +10,8 @@ Translation: current
 在前景为纯白的深色主题中，长时间使用很累：Vesper 里正文、标题、菜单、按钮、设置页和每个侧栏标题都是 #101010 上的
 #FFFFFF（19.7:1），笔画产生光晕，密集的中文发虚，也没有任何东西把阅读栏标出来。现在深色主题下所有文字前景都受同一个
 亮度上限约束：相对画布 11.6:1 时的亮度（Vesper 上为 #D2CDC5，仍高于 WCAG AAA）。对话正文比它高一档（14.2:1，#E4E1DD，HSL 亮度 88%），
-再往上只有标题和粗体、选中的侧栏行和激活标签页；未选中的侧栏文字低于正文。Lody 内置的 Vesper 使用暖色温：所有中性灰都换成暖白点（画布 #141312），侧栏
-（#BAB6AE）和选中/激活文字（#F0EAE1）在此基础上手动指定。
+选中的侧栏行和激活标签页与正文同色，再往上只有标题和粗体；未选中的侧栏文字低于正文。Lody 内置的 Vesper 使用暖色温：
+所有中性灰都换成暖白点（画布 #141312），侧栏标题（#BAB6AE）在此基础上手动指定。
 高对比度主题不变，浅色主题只限制长文本。
 
 ## 决策
@@ -20,7 +20,8 @@ Translation: current
   secondary 与次要按钮、hover、selection、底栏、标签页、侧栏，以及 `--code-added/-removed` 和 `--modified-file`）都向画布
   移动，直到亮度不超过上限，色相保持不变。`--popover-foreground` 和 `--accent-foreground` 由限制后的前景色设置：它们在样式表里
   的默认值是不随主题变化的近白色（`210 40% 96%`），这就是下拉菜单一直发白的原因。
-- 允许超过上限的：`--foreground-strong`（15:1，标题和粗体），以及选中侧栏行和激活标签页的前景色（同样限制在 15:1 这一档）。
+- 允许超过上限的：`--foreground-strong`（15:1，标题和粗体）。选中的侧栏行和激活标签页限制在正文这一档：比其他侧栏文字亮，
+  但永远不比对话本身亮；选中状态由底色标出。
 - 正文和用户气泡用 `--reading-foreground`（14.2:1；Vesper 固定为 #E4E1DD）；未选中的会话标题、分组与项目名、分区标题以及 New chat / Search 用
   `--sidebar-row-foreground`（9.2:1），侧栏永远不比正文亮。悬停只改变行的背景。
 - 彩色底上的前景色（`--primary-foreground`、`--destructive-foreground`、highlight 前景色）保持主题值：它们需要的是相对彩色底的对比度。
@@ -28,7 +29,7 @@ Translation: current
   `--vscode-*` 变量一致。所有中性的 workbench 颜色和语法前景色乘以暖白点 (1, 0.976, 0.938)；比 #303030 暗的不透明表面
   提亮 4 级（画布 #101010 → #141312，侧栏 #161616 → #1A1918）。通道向下取整，保证画布与侧栏的层次仍然可见。强调色和纯黑
   保持原值。深色 `--github-draft` 和 Electron 窗口/标题栏颜色使用同一套暖灰。
-- `READING_THEME_OVERRIDES` 为 Vesper 指定侧栏（#BAB6AE）和选中/激活文字（#F0EAE1），在暖色调色板上手动调定。
+- `READING_THEME_OVERRIDES` 为 Vesper 指定正文、选中/激活文字（#E4E1DD）和侧栏标题（#BAB6AE），在暖色调色板上手动调定。
 - token 之外的字面颜色：深色 Mermaid 配色现在低于上限，绿色合并按钮和 PR 标签页一样使用 `dark:text-background`。
 - 行内代码：7% 底色，阅读色文字。列表项间距 0.5rem。大纲定位条静止时为 /32。
 
@@ -40,6 +41,27 @@ Translation: current
 "Helvetica Neue", Arial`，外加 emoji 字体。PingFang SC 是苹果的专有系统字体，不能打包：macOS 和 iOS 使用它，Windows
   回退到 Microsoft YaHei。Inter 仍作为自托管字体保留，供界面字体设置和图表使用。为让所有平台中文字体一致而打包开源字体
   （Noto Sans SC / 思源黑体，SIL OFL）本次未做：需要把数 MB 的字体族按 unicode-range 分片。
+- 字号五档为 13 / 14 / **15** / 16 / 18px（之前是 12–16，默认 14）：默认值附近每档 1px，最高一档 2px，与 Discord 的聊天字号
+  和 iOS 动态字体一致；低于 13px 时笔画多的汉字难以辨认。对话文字使用所选档位，`--ui-font-size`（界面）比它小 1px，所以默认档
+  下界面仍是调好的 14px，正文为 15px。已存储的字号仍会吸附到最近的档位。
+- 宽内容：在对话正文里（`MarkdownRenderer wideBlocks`），比阅读栏宽的表格或 Mermaid 图可以超出阅读栏，以阅读栏为中心向两侧
+  展开，最宽到对话区宽度减去每侧 64px（给大纲定位条留位置），且不超过 1200px。`cqw` 相对滚动根节点的 `@container` 计算。
+  表格按 `max-content` 取宽；图表的外框跟随 SVG viewBox 宽度，由 Mermaid 画布扫描写入 `--mermaid-natural-width`。窄的内容
+  保持阅读栏宽度。
+
+## 对话细节
+
+- GitHub 引用：链接文字只是在指代某个 PR 或 Issue 时（URL 本身、`#123`、`repo#123`、`owner/repo#123`、`PR #123`），渲染成
+  带 GitHub 图标、`PR` / `Issue`、仓库名和编号的小标签（`github-reference-link.tsx`）。有自己措辞的链接，或编号与 URL 不符的
+  链接，保持普通链接。锚点保留应用内打开 PR 的拦截。
+- 过程行：「Context compacted」和「Retrying…」是过程状态行而不是卡片，因此与「Ran N commands」标题共用同样的行框和间距
+  （统一为 34px；之前是 39 / 32px）。
+- 信息栏：PR 号用次要文字色，旁边是带颜色的 PR 图标；CI 是结果图标（不再是带底色的「CI」标签）；行数统计放在最右侧带底色的
+  小标签里。
+- 所有行数统计（+/−）都用 `github-addition` / `github-deletion`，即 PR 的绿色和红色。`--code-added` 仍保留主题的 diff 颜色，
+  用于 diff 高亮。
+- 侧栏：PR 图标降低饱和度（`saturate(0.55)`，用滤镜而不是透明度）；`Mergeable` 标签是行里唯一需要被注意到的状态，
+  使用实底色和半粗体。
 
 ## 备选方案
 

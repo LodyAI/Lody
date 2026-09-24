@@ -4135,5 +4135,7 @@
   "settings.beta.promptShortcutsHelper": "创建可复用的提示词，通过 / 插入。功能开发中，体验可能不完善。",
   "settings.promptShortcuts.disabled": "请在设置 → 关于的开发者模式下开启 Prompt Shortcuts。",
   "sessions.prompts.createPrOrigin": "（此消息由 Lody 的「**创建 PR**」按钮发送）",
-  "sessions.prompts.createDraftPrOrigin": "（此消息由 Lody 的「**创建草稿 PR**」按钮发送）"
+  "sessions.prompts.createDraftPrOrigin": "（此消息由 Lody 的「**创建草稿 PR**」按钮发送）",
+  "sessions.githubReference.pullRequest": "PR",
+  "sessions.githubReference.issue": "Issue"
 }

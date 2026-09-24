@@ -537,8 +537,8 @@ function DesktopArchivedSessionItem({
       <div className="flex w-20 shrink-0 items-center justify-end gap-1.5 text-xs tabular-nums">
         {hasChanges ? (
           <>
-            <span className="text-code-added">+{diffStats.allChange.add}</span>
-            <span className="text-code-removed">-{diffStats.allChange.del}</span>
+            <span className="text-github-addition">+{diffStats.allChange.add}</span>
+            <span className="text-github-deletion">-{diffStats.allChange.del}</span>
           </>
         ) : null}
       </div>
@@ -739,8 +739,8 @@ function MobileArchivedSessionItem({
             </span>
             {hasChanges && (
               <div className="flex items-center gap-1 tabular-nums shrink-0 text-xs">
-                <span className="text-code-added">+{diffStats.allChange.add}</span>
-                <span className="text-code-removed">-{diffStats.allChange.del}</span>
+                <span className="text-github-addition">+{diffStats.allChange.add}</span>
+                <span className="text-github-deletion">-{diffStats.allChange.del}</span>
               </div>
             )}
             <span className="shrink-0 text-xs text-muted-foreground tabular-nums">

@@ -7,18 +7,21 @@ import { SETTINGS_DEFAULT_TAB, type SettingsTabId } from '@/components/settings/
 
 export const languageAtom = atomWithStorage<SupportedLanguage>('lody-language', 'en');
 
-export const DEFAULT_CONVERSATION_FONT_SIZE = 14;
+export const DEFAULT_CONVERSATION_FONT_SIZE = 15;
 /**
  * The sizes settings offers, ascending — five named tiers (smaller, small, default,
  * large, larger). Free-form entry is deliberately gone: a number field silently rewrote
  * whatever the user typed (clamped into a range, rounded), which reads as the app
  * fighting the keystrokes. A short scale has one value per visible step.
+ *
+ * 1px steps around the 15px default and a 2px step at the top, like the chat text
+ * scales of Discord and iOS Dynamic Type; below 13px dense CJK glyphs lose legibility.
  */
-export const CONVERSATION_FONT_SIZES = [12, 13, 14, 15, 16] as const;
+export const CONVERSATION_FONT_SIZES = [13, 14, 15, 16, 18] as const;
 export type ConversationFontSize = number;
 
 const LEGACY_CONVERSATION_FONT_SIZES: Record<string, ConversationFontSize> = {
-  small: 12,
+  small: 13,
   default: DEFAULT_CONVERSATION_FONT_SIZE,
   large: 16,
 };

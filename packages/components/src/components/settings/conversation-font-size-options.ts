@@ -5,11 +5,11 @@ import {
 } from '@/atoms';
 
 const CONVERSATION_FONT_SIZE_LABEL_KEYS: Record<number, string> = {
-  12: 'settings.conversationFontSize.smaller',
-  13: 'settings.conversationFontSize.small',
+  13: 'settings.conversationFontSize.smaller',
+  14: 'settings.conversationFontSize.small',
   [DEFAULT_CONVERSATION_FONT_SIZE]: 'settings.conversationFontSize.default',
-  15: 'settings.conversationFontSize.large',
-  16: 'settings.conversationFontSize.larger',
+  16: 'settings.conversationFontSize.large',
+  18: 'settings.conversationFontSize.larger',
 };
 
 export interface ConversationFontSizeChoice {

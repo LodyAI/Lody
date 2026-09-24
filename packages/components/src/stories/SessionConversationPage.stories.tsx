@@ -148,7 +148,11 @@ const storyPlatform = createLocalPlatformProvider({
   }),
 });
 
-type PageState = 'idle' | 'working' | 'permission' | 'question' | 'plan';
+type PageState = 'idle' | 'working' | 'permission' | 'question' | 'plan' | 'reading';
+
+/** A finished conversation whose history is the point, not a pending state. */
+const isSettledState = (state: PageState) =>
+  state === 'idle' || state === 'plan' || state === 'reading';
 type DeviceFrame = 'desktop' | 'mobile';
 
 const action = fn();
@@ -326,7 +330,7 @@ const buildSession = (state: PageState, frame: DeviceFrame): SessionMeta => {
     // `plan` is a FINISHED plan-mode turn, so the session is idle like any
     // other completed turn — it is the history that is interesting, not a
     // pending state.
-    state === 'idle' || state === 'plan'
+    isSettledState(state)
       ? ({ type: 'idle' } as const)
       : state === 'working'
         ? ({ type: 'running' } as const)
@@ -862,6 +866,148 @@ const buildPlanHistory = (): SessionHistoryParsed[] => [
   }),
 ];
 
+const READING_ANSWER = [
+  '## 阅读样式审查结论',
+  '',
+  '这一轮把对话页的正文调整到 **15px**、阅读栏保持 `768px`，并统一了暖色调。长段中文在这个宽度下每行大约 50 个字，',
+  '配合 1.75 的行高，连续阅读时不会显得拥挤。English prose mixed into the same paragraph keeps the same rhythm, and',
+  'inline code such as `CONVERSATION_CONTENT_WIDTH_CLASS` stays readable without shouting.',
+  '',
+  '相关的 PR 和 Issue 会渲染成小标签：https://github.com/LodyAI/Lody/pull/954 已经合入，',
+  '[#951](https://github.com/LodyAI/Lody/pull/951) 还在 review，跟进的问题记在',
+  '[LodyAI/Lody#960](https://github.com/LodyAI/Lody/issues/960)。带描述文字的链接保持原样，比如',
+  '[这次调整的背景](https://github.com/LodyAI/Lody/pull/917)。',
+  '',
+  '### 改动要点',
+  '',
+  '- 正文、选中项和激活标签使用同一个阅读色；界面文字低一档。',
+  '- Git 状态图标在侧栏里降低饱和度，`Mergeable` 标签更醒目。',
+  '- 宽表格和 Mermaid 图可以超出 768px 的阅读栏：',
+  '  - 窄的内容仍然贴合阅读栏；',
+  '  - 宽的内容以阅读栏为中心向两侧展开。',
+  '',
+  '> 引用块用于强调上下文，颜色比正文低一档，不会抢走注意力。',
+  '',
+  '| Surface | Before | After | Contrast | Font | Line height | Width | Notes |',
+  '| --- | --- | --- | --- | --- | --- | --- | --- |',
+  '| Conversation prose | #D5D5D5 | #E4E1DD | 14.2:1 | 15px PingFang SC | 1.75 | 768px | Warm hue, HSL lightness 88% |',
+  '| Interface text | #FFFFFF | #D2CDC5 | 11.6:1 | 14px | 1.5 | — | Menus, settings, buttons share one level |',
+  '| Selected sidebar row | #F0EFED | #E4E1DD | 14.2:1 | 14px | 1.5 | — | Marked by its fill, not extra brightness |',
+  '| Headings and bold | #EBEBEB | #EDE7DE | 15:1 | 17–19px | 1.4 | 768px | One step above prose |',
+  '',
+  '一张窄表格仍然贴合阅读栏：',
+  '',
+  '| 档位 | 字号 |',
+  '| --- | --- |',
+  '| 默认 | 15px |',
+  '| 大 | 16px |',
+  '',
+  '```mermaid',
+  'flowchart LR',
+  '  theme[Vesper JSON] --> warm[Warm white point] --> alias[Lody aliases] --> ceiling[Brightness ceiling]',
+  '  ceiling --> prose[Prose 14.2:1] --> view[Conversation view]',
+  '  ceiling --> chrome[Interface 11.6:1] --> sidebar[Sidebar and menus]',
+  '  ceiling --> strong[Headings 15:1] --> view',
+  '  warm --> terminal[Terminal palette] --> shiki[Code highlighting] --> diff[Diff viewer]',
+  '```',
+  '',
+  '```mermaid',
+  'graph TD',
+  '  A[Setting] --> B[15px prose]',
+  '  A --> C[14px chrome]',
+  '```',
+  '',
+  '```ts',
+  'export const CONVERSATION_FONT_SIZES = [13, 14, 15, 16, 18] as const;',
+  'export const uiFontSizeForConversation = (fontSize: number) => fontSize - 1;',
+  '```',
+  '',
+  '需要的话，我可以继续把 Linear 和 Figma 链接也做成同样的小标签。',
+].join('\n');
+
+const readingCommand = (id: string, command: string): MessageContent => ({
+  type: 'tool_call',
+  toolCallId: `reading-${id}`,
+  title: command,
+  kind: 'execute',
+  status: 'completed',
+  content: [
+    { type: 'terminal_command', command: '/bin/bash', args: ['-lc', command], cwd: '/repo' },
+  ],
+});
+
+/**
+ * A finished review turn with every reading surface in one place: CJK and
+ * English prose, headings, lists, a quote, GitHub reference labels, wide and
+ * narrow tables and diagrams, code, the process rows (commands, a context
+ * compaction) and the edited-files card.
+ */
+const buildReadingHistory = (): SessionHistoryParsed[] => [
+  buildMessage({
+    id: 'reading-user-1',
+    role: 'user',
+    userId: STORY_USER_ID,
+    timestamp: '2026-07-09T09:31:00.000Z',
+    items: [
+      {
+        type: 'text',
+        text: '帮我审查一下对话页的阅读样式：字号、行宽、颜色，还有表格和图表在宽屏上的表现。',
+      },
+    ],
+  }),
+  buildMessage({
+    id: 'reading-assistant-1',
+    role: 'assistant',
+    timestamp: '2026-07-09T09:31:20.000Z',
+    finished: true,
+    endedAt: Date.parse('2026-07-09T09:38:15.000Z'),
+    modelInfo: { modelId: 'gpt-5', name: 'GPT-5', description: null, _meta: null },
+    fileDiff: [
+      { filePath: 'packages/components/src/lib/conversation-layout.ts', add: 4, del: 3 },
+      { filePath: 'packages/components/src/tailwind/index.css', add: 38, del: 2 },
+      { filePath: 'packages/components/src/atoms/settings.ts', add: 6, del: 3 },
+    ],
+    items: [
+      { type: 'text', text: '先看一下当前的布局和字号设置。' },
+      readingCommand('cmd-1', 'rg CONVERSATION_CONTENT_WIDTH_CLASS packages/components/src'),
+      readingCommand('cmd-2', 'rg --files packages/components/src/tailwind'),
+      readingCommand('cmd-3', 'pnpm --filter @lody/components test -- conversation-layout'),
+      {
+        type: 'tool_call',
+        toolCallId: 'reading-compaction',
+        title: 'Compact context',
+        kind: 'other',
+        status: 'completed',
+        activityKind: 'context_compaction',
+      },
+      readingCommand('cmd-4', 'pnpm --filter @lody/components exec tsgo --noEmit'),
+      readingCommand('cmd-5', 'pnpm run docs check'),
+      { type: 'text', text: READING_ANSWER },
+    ],
+  }),
+  buildMessage({
+    id: 'reading-user-2',
+    role: 'user',
+    userId: STORY_USER_ID,
+    timestamp: '2026-07-09T09:40:00.000Z',
+    items: [{ type: 'text', text: '宽表格在窄窗口下会怎样？' }],
+  }),
+  buildMessage({
+    id: 'reading-assistant-2',
+    role: 'assistant',
+    timestamp: '2026-07-09T09:40:10.000Z',
+    finished: true,
+    endedAt: Date.parse('2026-07-09T09:40:40.000Z'),
+    modelInfo: { modelId: 'gpt-5', name: 'GPT-5', description: null, _meta: null },
+    items: [
+      {
+        type: 'text',
+        text: '窗口变窄时，表格和图表收回到阅读栏宽度，超出的部分在表格内部横向滚动，不会撑开整个页面。',
+      },
+    ],
+  }),
+];
+
 const buildHistory = (
   state: PageState,
   streamChunkCount = 0,
@@ -872,6 +1018,9 @@ const buildHistory = (
   }
   if (state === 'plan') {
     return buildPlanHistory();
+  }
+  if (state === 'reading') {
+    return buildReadingHistory();
   }
   const messages = baseMessages();
   if (state === 'permission') {
@@ -988,7 +1137,7 @@ function createStoryStore(session: SessionMeta, state: PageState) {
   store.set(sessionMetaCacheAtom, {
     [getSessionRoomId(session.id)]: session,
   });
-  if (state !== 'idle' && state !== 'plan') {
+  if (!isSettledState(state)) {
     const instanceId = `storybook-${state}` as LodyPresenceInstanceId;
     const status =
       state === 'working'
@@ -1026,11 +1175,33 @@ const storyQueueItems = (): MessageQueueItem[] =>
 function StoryInfoBar({
   session,
   queued,
+  reading = false,
 }: {
   session: SessionMeta;
   /** Queued turns stacked on the bar, or on the composer when the bar is empty. */
   queued?: 'with-info-bar' | 'without-info-bar';
+  /** The reading review: a merged PR with passing CI and the line totals. */
+  reading?: boolean;
 }) {
+  if (reading) {
+    return (
+      <SessionInfoBar
+        status={null}
+        projectName={session.repoFullName}
+        branch={session.branchName}
+        pr={{ url: 'https://github.com/LodyAI/Lody/pull/3656', status: 'merged' }}
+        onOpenPr={action}
+        prCiRuns={[
+          { name: 'Static checks', status: 'success', durationMs: 184_000 },
+          { name: 'Tests', status: 'success', durationMs: 412_000 },
+          { name: 'Desktop E2E (smoke)', status: 'success', durationMs: 655_000 },
+        ]}
+        onOpenPrCiRun={action}
+        diffStat={{ add: 365, del: 102 }}
+        onOpenAllChanges={action}
+      />
+    );
+  }
   const withoutBar = queued === 'without-info-bar';
   const queue = queued ? (
     <MessageQueueDisplay
@@ -1205,7 +1376,7 @@ export function SessionConversationStoryHarness({
   );
   const permissionHistory = history as unknown as SessionDoc['history'];
   const liveStatus =
-    state === 'idle'
+    state === 'idle' || state === 'reading'
       ? undefined
       : state === 'working'
         ? ({ type: 'running' } as const)
@@ -1503,7 +1674,11 @@ export function SessionConversationStoryHarness({
                             <div hidden={selection.active}>
                               {/* Mirrors the production info bar (cluster + stage)
                               glued above the composer — desktop AND mobile. */}
-                              <StoryInfoBar session={session} queued={queued} />
+                              <StoryInfoBar
+                                session={session}
+                                queued={queued}
+                                reading={state === 'reading'}
+                              />
                               <StoryComposer
                                 session={session}
                                 isAgentBusy={isWorking}
@@ -1689,6 +1864,24 @@ type Story = StoryObj<typeof meta>;
 
 export const DesktopIdle: Story = {
   globals: { theme: 'dark' },
+  decorators: [withDesktopViewport],
+};
+
+/**
+ * Reading review: every conversation reading surface in one finished turn —
+ * prose at the default size, GitHub reference labels, a wide table and diagram
+ * extending past the 768px column, process rows, the edited-files card and the
+ * info bar. Resize the canvas to see wide blocks fall back to the column.
+ */
+export const DesktopReadingReview: Story = {
+  args: { state: 'reading', sessionTitle: '对话页阅读样式审查', branchName: 'fix/reading-comfort' },
+  globals: { theme: 'dark' },
+  decorators: [withDesktopViewport],
+};
+
+export const DesktopReadingReviewLight: Story = {
+  args: { state: 'reading', sessionTitle: '对话页阅读样式审查', branchName: 'fix/reading-comfort' },
+  globals: { theme: 'light' },
   decorators: [withDesktopViewport],
 };
 

@@ -26,7 +26,7 @@ const contrastRatio = (a: string, b: string): number => {
 // Dark themes hold every text foreground under the reading ceiling (13:1
 // against the canvas): on the fixture's #101010, pure white becomes #C9C9C9.
 const CEILED_ON_FIXTURE = '0 0% 78.8%';
-const STRONG_ON_FIXTURE = '0 0% 89.4%';
+const PROSE_ON_FIXTURE = '0 0% 87.1%';
 // The #FFC799 accent used as selection text keeps its hue under the same ceiling.
 const CEILED_ACCENT_ON_FIXTURE = '26.9 83.1% 76.9%';
 
@@ -109,7 +109,7 @@ describe('createLodyThemeCssVariables', () => {
     expect(variables['--tab-bar']).toBe('0 0% 6.3%');
     expect(variables['--tab-active']).toBe('0 0% 8.6%');
     // The active tab takes the strong step (16:1), not the reading ceiling.
-    expect(variables['--tab-active-foreground']).toBe(STRONG_ON_FIXTURE);
+    expect(variables['--tab-active-foreground']).toBe(PROSE_ON_FIXTURE);
     expect(variables['--tab-inactive']).toBe('0 0% 6.3%');
     expect(variables['--tab-inactive-foreground']).toBe('0 0% 49.4%');
     expect(variables['--tab-hover']).toBe('0 0% 15.7%');
@@ -178,7 +178,7 @@ describe('createLodyThemeCssVariables', () => {
     expect(variables['--button-secondary-hover']).toBe('0 0% 15.7%');
     expect(variables['--tab-active']).toBe('0 0% 6.3%');
     // The active tab takes the strong step (16:1), not the reading ceiling.
-    expect(variables['--tab-active-foreground']).toBe(STRONG_ON_FIXTURE);
+    expect(variables['--tab-active-foreground']).toBe(PROSE_ON_FIXTURE);
     expect(variables['--tab-inactive']).toBe('0 0% 6.3%');
     expect(variables['--tab-inactive-foreground']).toBe('0 0% 62.7%');
     expect(variables['--tab-hover']).toBe('0 0% 15.7%');
@@ -271,20 +271,16 @@ describe('createLodyThemeCssVariables', () => {
         ok: true,
       });
     }
-    // Headings, the selected conversation and the active tab take the one step
-    // above the ceiling, still below pure white.
-    for (const name of ['--foreground-strong', '--tab-active-foreground']) {
-      const ratio = contrastRatio(variables[name]!, background);
-      expect({ name, above: ratio > 11.6, capped: ratio <= 15 }).toEqual({
-        name,
-        above: true,
-        capped: true,
-      });
-    }
-    // Prose is one step above the interface text, still under the strong step.
+    // Prose is one step above the interface text; headings one above prose,
+    // still below pure white.
     const reading = contrastRatio(variables['--reading-foreground']!, background);
     expect(reading).toBeGreaterThan(11.6);
     expect(reading).toBeLessThanOrEqual(14.2);
+    const strong = contrastRatio(variables['--foreground-strong']!, background);
+    expect(strong).toBeGreaterThan(reading);
+    expect(strong).toBeLessThanOrEqual(15);
+    // The active tab reads at the prose level, never above it.
+    expect(variables['--tab-active-foreground']).toBe(variables['--reading-foreground']);
     const sidebarRow = contrastRatio(
       variables['--sidebar-row-foreground']!,
       variables['--sidebar-background']!
@@ -299,8 +295,8 @@ describe('createLodyThemeCssVariables', () => {
     expect(variables['--background']).toBe(hexColorToHslChannel('#141312'));
     expect(variables['--reading-foreground']).toBe(hexColorToHslChannel('#E4E1DD'));
     expect(variables['--sidebar-row-foreground']).toBe(hexColorToHslChannel('#BAB6AE'));
-    expect(variables['--sidebar-selection-foreground']).toBe(hexColorToHslChannel('#F0EAE1'));
-    expect(variables['--tab-active-foreground']).toBe(hexColorToHslChannel('#F0EAE1'));
+    expect(variables['--sidebar-selection-foreground']).toBe(hexColorToHslChannel('#E4E1DD'));
+    expect(variables['--tab-active-foreground']).toBe(hexColorToHslChannel('#E4E1DD'));
     // Text follows the ceiling and keeps the warm hue; the accent is untouched.
     expect(
       contrastRatio(variables['--foreground']!, variables['--background']!)

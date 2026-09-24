@@ -188,6 +188,9 @@ function hasSessionRowStatus({
  * same component at the end of its own metric cluster, so PR status tone and the
  * CI verdict badge read identically on both platforms.
  */
+/** A filter, not opacity: the mark keeps its full lightness, only its hue is muted. */
+const SIDEBAR_PR_ICON_COMPACT_CLASS = 'saturate-[0.55]';
+
 export function SessionPrIcon({
   prStatus,
   prCiState,
@@ -196,7 +199,10 @@ export function SessionPrIcon({
 }: {
   prStatus: PrStatus;
   prCiState?: SessionPullRequestCiState | null;
-  /** Sidebar rows: a 12px mark (14px with a CI verdict) so status stays secondary to the title. */
+  /**
+   * Sidebar rows: a 12px mark (14px with a CI verdict) at reduced saturation, so
+   * the GitHub status hues stay readable without outshining the titles.
+   */
   compact?: boolean;
   className?: string;
 }) {
@@ -229,6 +235,7 @@ export function SessionPrIcon({
         baseToneClassName={meta.iconColorClassName}
         verdict={verdict}
         className={cn(
+          compact && SIDEBAR_PR_ICON_COMPACT_CLASS,
           compact && 'h-3.5 w-3.5',
           prStatus === 'merged' && 'translate-x-px',
           className
@@ -239,7 +246,7 @@ export function SessionPrIcon({
   return (
     <BaseIcon
       className={cn(
-        compact ? 'h-3 w-3' : 'h-3.5 w-3.5',
+        compact ? ['h-3 w-3', SIDEBAR_PR_ICON_COMPACT_CLASS] : 'h-3.5 w-3.5',
         'shrink-0',
         meta.iconColorClassName,
         className
@@ -253,14 +260,16 @@ export function SessionPrIcon({
 /**
  * Passive readiness marker for an inactive session row. It intentionally owns
  * the former diff-stat slot: once a PR is ready, the next useful sidebar fact
- * is that it can be merged, not how many lines it changes.
+ * is that it can be merged, not how many lines it changes. It is the one
+ * status in the row meant to be noticed, so it carries a real fill and a
+ * semibold label while the PR icons beside it stay desaturated.
  */
 export function SessionMergeablePill() {
   const { t } = useTranslation();
   return (
     <span
       data-session-mergeable-pill=""
-      className="inline-flex h-5 shrink-0 items-center rounded-full border border-status-success/45 bg-status-success/[0.06] px-1.5 text-[10px] font-medium leading-none tracking-[0.01em] text-status-success"
+      className="inline-flex h-5 shrink-0 items-center rounded-full border border-status-success/70 bg-status-success/[0.16] px-1.5 text-[10.5px] font-semibold leading-none tracking-[0.01em] text-status-success"
     >
       {t('sessions.pr.mergeable', 'Mergeable')}
     </span>

@@ -77,9 +77,10 @@ Edit `AGENTS.md`, not its `CLAUDE.md` symlink. Ownership: [README.md](README.md)
 - Native child cancel requires subagentCancellation v1 and an exact parent turn;
   never use durable whole-turn Stop or invent a terminal state in the panel.
 
-- `--ui-font-size` is the 1em baseline; compact chrome is 0.9em. Conversation
-  body/headings/mono/terminal still scale through
-  `conversation-font-size-classes.ts`. Streamdown stays streaming; never
+- `--ui-font-size` (1px under the conversation size) is the chrome's 1em
+  baseline; compact chrome is 0.9em. Conversation body/headings/mono/terminal
+  scale through `conversation-font-size-classes.ts`. Only conversation prose
+  (`wideBlocks`) lets tables and diagrams extend past the reading column. Streamdown stays streaming; never
   word-level `animated`.
 - A Mermaid diagram in a message is a still preview until a pointer click
   activates it, and an unmodified wheel is NEVER taken — activated or not.

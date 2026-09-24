@@ -828,12 +828,13 @@ const applyReadingBrightness = (
   set('--popover-foreground', colorByCssVariable['--foreground']);
   set('--accent-foreground', colorByCssVariable['--foreground']);
 
-  // The selected conversation and the active tab are the elements allowed
-  // above the reading ceiling: they take the strong step, like headings.
-  const strongCeiling = luminanceAtContrast(background, cap.strong);
+  // The selected conversation and the active tab read at the prose level:
+  // above the other sidebar text, never above the conversation itself. Their
+  // selection fill, not extra brightness, marks them.
+  const proseCeiling = luminanceAtContrast(background, cap.prose);
   for (const name of SELECTED_FOREGROUND_VARIABLES) {
     const color = colorByCssVariable[name];
-    const ceiled = color && resolveLuminanceCappedColor(color, background, strongCeiling);
+    const ceiled = color && resolveLuminanceCappedColor(color, background, proseCeiling);
     if (ceiled) set(name, ceiled);
   }
 
@@ -842,7 +843,7 @@ const applyReadingBrightness = (
   }
 };
 
-/** Foregrounds of the selected / active element, capped at the strong step. */
+/** Foregrounds of the selected / active element, capped at the prose step. */
 const SELECTED_FOREGROUND_VARIABLES = [
   '--sidebar-selection-foreground',
   '--tab-active-foreground',
@@ -855,11 +856,12 @@ const SELECTED_FOREGROUND_VARIABLES = [
  */
 const READING_THEME_OVERRIDES: Record<string, Partial<Record<string, string>>> = {
   vesper: {
-    // Prose at HSL lightness 88% on the warm hue (14.2:1).
+    // Prose at HSL lightness 88% on the warm hue (14.2:1); the selected
+    // conversation and the active tab use the same color.
     '--reading-foreground': '#E4E1DD',
     '--sidebar-row-foreground': '#BAB6AE',
-    '--sidebar-selection-foreground': '#F0EAE1',
-    '--tab-active-foreground': '#F0EAE1',
+    '--sidebar-selection-foreground': '#E4E1DD',
+    '--tab-active-foreground': '#E4E1DD',
   },
 };
 
@@ -893,7 +895,7 @@ const resolveLuminanceCappedColor = (
  * strokes bloom and dense text (CJK especially) blurs, most for readers with
  * astigmatism. Vesper's #FFFFFF on #101010 is 19:1. In dark themes interface
  * text is capped at 11.6:1 (#D2CDC5 on the warm Vesper canvas), conversation
- * prose at 14.2:1 (#E4E1DD), headings and the selected row at 15:1, and
+ * prose, the selected row and the active tab at 14.2:1 (#E4E1DD), headings at 15:1, and
  * unselected sidebar text at 9.2:1 so the sidebar always sits below the reading
  * column. Light themes are capped
  * higher, where glare is milder.

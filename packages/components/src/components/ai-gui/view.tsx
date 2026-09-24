@@ -3861,6 +3861,15 @@ const ACTIVITY_STEP_BODY_CLASS =
 
 /* The collapsed activity group's label type; the live status row reuses it so
    "Working" reads as the next group label, not a separate widget. */
+/** A one-line process status ("Context compacted"): the group header's box and type. */
+const PROCESS_STATUS_LINE_CLASS = (isMobile: boolean) =>
+  cn(
+    'flex w-full items-center py-0.5 text-muted-foreground',
+    isMobile
+      ? cn('gap-1.5 pr-1', ACTIVITY_PROCESS_TEXT_CLASS)
+      : 'gap-1.5 px-[4px] text-[length:var(--markdown-body-font-size,1em)] leading-[1.75]'
+  );
+
 const ACTIVITY_GROUP_LABEL_CLASS = (isMobile: boolean) =>
   cn(
     'min-w-0',
@@ -4184,8 +4193,17 @@ const CARD_CONTENT_TYPES = new Set<MessageContent['type']>([
   'file',
 ]);
 
+/** Tool calls that render as a one-line process status (no card surface). */
+const isProcessStatusToolCall = (content: MessageContent): boolean =>
+  content.type === 'tool_call' &&
+  (content.activityKind === 'context_compaction' || content.activityKind === 'codex_retry');
+
 const isCardContentBlock = (block: AssistantTurnRenderBlock): boolean =>
-  block.kind === 'content' && CARD_CONTENT_TYPES.has(block.entry.content.type);
+  block.kind === 'content' &&
+  CARD_CONTENT_TYPES.has(block.entry.content.type) &&
+  // "Context compacted" / "Retrying…" sit in the process rhythm, spaced like
+  // the "Ran N commands" headers around them.
+  !isProcessStatusToolCall(block.entry.content);
 
 const isAssistantToolCallActivityEntry = (
   entry: AssistantActivityRenderItem
@@ -6088,6 +6106,7 @@ export const MarkdownBlock = memo(function MarkdownBlock({
       isStreaming={isStreaming}
       onAgentFileLinkClick={onFilePathClick ? handleAgentFileLinkClick : undefined}
       searchBlockId={searchBlockId}
+      wideBlocks
     />
   );
 });
@@ -6642,11 +6661,12 @@ const ToolCallCard = memo(function ToolCallCard({
   inlineOutput?: boolean;
 }) {
   const { t } = useTranslation();
+  const isMobile = useIsMobile();
   if (toolCall.activityKind === 'codex_retry') {
     if (toolCall.status !== 'pending' && toolCall.status !== 'in_progress') return null;
     return (
-      <div className="flex min-h-7 items-center gap-2 py-1 text-sm text-muted-foreground">
-        <Spinner className="h-4 w-4 shrink-0" aria-hidden="true" />
+      <div className={PROCESS_STATUS_LINE_CLASS(isMobile)}>
+        <Spinner className="h-[1em] w-[1em] shrink-0" aria-hidden="true" />
         <span>{t('sessions.activity.retrying', 'Retrying…')}</span>
       </div>
     );
@@ -6655,8 +6675,13 @@ const ToolCallCard = memo(function ToolCallCard({
     const isCompacting = toolCall.status === 'pending' || toolCall.status === 'in_progress';
     const StatusIcon = isCompacting ? Loader2 : toolCall.status === 'failed' ? AlertCircle : Check;
     return (
-      <div className="flex min-h-7 items-center gap-2 py-1 text-sm text-muted-foreground">
-        <Spinner icon={StatusIcon} spinning={isCompacting} className="h-4 w-4" aria-hidden="true" />
+      <div className={PROCESS_STATUS_LINE_CLASS(isMobile)}>
+        <Spinner
+          icon={StatusIcon}
+          spinning={isCompacting}
+          className="h-[1em] w-[1em] shrink-0"
+          aria-hidden="true"
+        />
         <span>
           {isCompacting
             ? t('sessions.activity.compactingContext', 'Compacting context')
