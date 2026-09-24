@@ -56,6 +56,12 @@ install` commands", "No, and block this host in the future"). Kinds are ACP's
   next. **Stop** is in the prompt. A failed answer shows an alert and the prompt
   stays answerable.
 - Presentation logic lives in `lib/permission-request-presentation.ts`.
+- **Owner review: less.** The first build stacked a kind icon, a mark on every
+  answer (✓ ✓✓ ⊘ ✕), a key-hint footer and a text Stop button, with three
+  different left edges. The owner found it redundant. Now every block shares
+  one text edge; answers carry no marks (each already starts with Yes / No /
+  Allow); prose titles that restate the heading are dropped; the only key cap
+  is `esc` on the refusal; Stop and "n/m" sit at the end of the heading line.
 
 ## Alternatives not taken
 

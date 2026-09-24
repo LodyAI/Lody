@@ -4,27 +4,10 @@ import {
   useMemo,
   useRef,
   useState,
-  type ComponentType,
   type KeyboardEvent as ReactKeyboardEvent,
 } from 'react';
 import * as stylex from '@stylexjs/stylex';
-import {
-  Ban,
-  BookOpen,
-  Check,
-  CheckCheck,
-  ChevronLeft,
-  ChevronRight,
-  Globe,
-  MoveRight,
-  PencilLine,
-  Search,
-  Terminal,
-  Trash2,
-  Workflow,
-  Wrench,
-  X,
-} from 'lucide-react';
+import { ChevronLeft, ChevronRight, CircleStop } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@lody/ui/button';
 import { Kbd } from '@lody/ui/kbd';
@@ -58,7 +41,6 @@ import {
   resolvePermissionSubject,
   resolveSuggestedOptionId,
   type PermissionOption,
-  type PermissionOptionTone,
   type PermissionQuestionKind,
   type PermissionRequest,
 } from '@/lib/permission-request-presentation';
@@ -133,21 +115,29 @@ export function hasPendingPermissionRequest(
 const REGION = `color-mix(in oklab, transparent, ${colors.label} 5%)`;
 const MONO = 'var(--font-mono, ui-monospace, monospace)';
 const RING = `0 0 0 2px ${colors.accent}`;
-/** Only a device with a keyboard and a pointer that hovers gets key hints. */
+/** Only a device with a keyboard and a pointer that hovers gets the key cap. */
 const HAS_KEYBOARD = '@media (hover: hover) and (pointer: fine)';
+/**
+ * Every block's text starts on one edge: the card's padding plus this inset,
+ * which is also where a row's fill begins, so a filled row and the heading
+ * above it share a left edge.
+ */
+const INSET = space[3];
 
 const styles = stylex.create({
   /**
    * The prompt takes the composer's place, so it is the composer's rung: a
-   * card lifted off the conversation. It is one surface — the question, what
-   * would happen, and the answers — with no band or rule inside it.
+   * card lifted off the conversation. One surface, three blocks — the
+   * question, what would happen, the answers — and nothing else.
    */
   card: {
     boxSizing: 'border-box',
     display: 'flex',
     flexDirection: 'column',
-    gap: space[3],
-    padding: space[3],
+    gap: space[2],
+    paddingInline: space[1.5],
+    paddingTop: space[3],
+    paddingBottom: space[1.5],
     backgroundColor: colors.elevatedBackground,
     boxShadow: shadow.card,
     borderRadius: radius.large,
@@ -155,75 +145,82 @@ const styles = stylex.create({
     color: colors.label,
     outlineStyle: 'none',
   },
-  header: { display: 'flex', alignItems: 'flex-start', gap: space[2], minWidth: 0 },
-  headerGlyph: {
+  header: {
     display: 'flex',
-    flexShrink: 0,
-    alignItems: 'center',
-    justifyContent: 'center',
-    width: '20px',
-    height: '20px',
-    color: colors.warning,
+    alignItems: 'flex-start',
+    gap: space[2],
+    minWidth: 0,
+    paddingInline: INSET,
   },
-  glyph: { width: '16px', height: '16px' },
   headerText: { flexGrow: 1, minWidth: 0 },
-  heading: { margin: 0, fontSize: '0.95em', fontWeight: 500, lineHeight: '20px' },
-  reason: {
+  heading: { margin: 0, fontSize: '0.95em', fontWeight: 500, lineHeight: '24px' },
+  /** Why the agent is asking, or what it named the call when it sent no code. */
+  detail: {
     margin: 0,
-    marginTop: '2px',
     fontSize: '0.85em',
     lineHeight: 1.4,
     color: colors.secondaryLabel,
     overflowWrap: 'anywhere',
   },
-  position: {
+  headerEnd: {
     display: 'flex',
     flexShrink: 0,
     alignItems: 'center',
     gap: '2px',
+    marginInlineEnd: `calc(-1 * ${space[1.5]})`,
     fontSize: '0.8em',
     color: colors.tertiaryLabel,
     fontVariantNumeric: 'tabular-nums',
   },
-  positionLabel: { paddingInline: space[1] },
+  positionLabel: { paddingInline: '2px' },
 
-  /** Exactly what would happen, in full: a command line or the paths touched. */
+  /** Exactly what would run or be touched, as code: the one boxed thing. */
   subject: {
     boxSizing: 'border-box',
+    display: 'flex',
+    alignItems: 'baseline',
+    gap: space[3],
+    marginInline: space[1.5],
     maxHeight: '9.5em',
     overflowY: 'auto',
     overscrollBehavior: 'contain',
-    margin: 0,
-    paddingInline: space[3],
+    paddingInline: `calc(${INSET} - ${space[1.5]})`,
     paddingBlock: space[2],
     backgroundColor: REGION,
     borderRadius: radius.medium,
     cornerShape: corner.shape,
+    fontFamily: MONO,
     fontSize: '0.85em',
     lineHeight: 1.5,
+  },
+  subjectBody: {
+    flexGrow: 1,
+    minWidth: 0,
     whiteSpace: 'pre-wrap',
     overflowWrap: 'anywhere',
   },
-  subjectMono: { fontFamily: MONO },
   subjectLine: { display: 'block' },
-  subjectMeta: {
-    display: 'block',
-    marginTop: space[1],
-    fontFamily: 'inherit',
+  /** Where it runs: the directory, trailing the command, quieter. */
+  subjectWhere: {
+    flexShrink: 0,
+    maxWidth: '40%',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
     color: colors.tertiaryLabel,
   },
 
-  /** The answers: the provider's own sentences, one row each. */
-  options: { display: 'flex', flexDirection: 'column', gap: '2px', margin: 0, padding: 0 },
+  /** The answers: the provider's own sentences, one row each, no marks. */
+  options: { display: 'flex', flexDirection: 'column', gap: '1px' },
   option: {
     boxSizing: 'border-box',
     display: 'flex',
     alignItems: 'flex-start',
-    gap: space[2],
+    gap: space[3],
     width: '100%',
     minHeight: { default: '32px', '@media (pointer: coarse)': '44px' },
     margin: 0,
-    paddingInline: space[2],
+    paddingInline: INSET,
     paddingBlock: '6px',
     borderWidth: 0,
     borderRadius: radius.medium,
@@ -250,25 +247,13 @@ const styles = stylex.create({
       ':hover': colors.hoverFill,
       ':focus-visible': colors.hoverFill,
     },
-    fontWeight: 500,
   },
   /** The one being sent: full strength while the rest wait. */
   optionSending: { opacity: { default: 1, ':disabled': 1 } },
-  optionMark: {
-    display: 'flex',
-    flexShrink: 0,
-    alignItems: 'center',
-    justifyContent: 'center',
-    width: '16px',
-    height: '20px',
-    color: colors.secondaryLabel,
-  },
-  optionMarkRefuse: { color: colors.destructive },
   optionText: { flexGrow: 1, minWidth: 0, overflowWrap: 'anywhere' },
   optionDescription: {
     display: 'block',
     fontSize: '0.9em',
-    fontWeight: 400,
     lineHeight: 1.4,
     color: colors.secondaryLabel,
   },
@@ -281,59 +266,31 @@ const styles = stylex.create({
   },
   keyHint: { display: { default: 'none', [HAS_KEYBOARD]: 'inline-flex' } },
 
-  footer: {
-    display: 'flex',
-    flexWrap: 'wrap',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: space[2],
-    minHeight: '28px',
+  status: {
+    margin: 0,
+    paddingInline: INSET,
+    paddingBlock: space[1],
+    fontSize: '0.85em',
+    lineHeight: 1.4,
+    color: colors.secondaryLabel,
   },
-  hints: {
-    display: { default: 'none', [HAS_KEYBOARD]: 'flex' },
-    alignItems: 'center',
-    columnGap: space[3],
-    rowGap: space[1],
-    flexWrap: 'wrap',
-    fontSize: '0.8em',
-    color: colors.tertiaryLabel,
-  },
-  hint: { display: 'inline-flex', alignItems: 'center', gap: space[1] },
-  status: { margin: 0, fontSize: '0.85em', lineHeight: 1.4, color: colors.secondaryLabel },
   statusError: { color: colors.destructive },
-  footerEnd: { display: 'flex', alignItems: 'center', gap: space[2], marginInlineStart: 'auto' },
 
   queueStrip: {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'flex-end',
+    gap: '2px',
     marginBottom: space[1],
+    fontSize: '0.8em',
+    color: colors.tertiaryLabel,
+    fontVariantNumeric: 'tabular-nums',
   },
 });
 
 // =============================================================================
 // The prompt
 // =============================================================================
-
-const QUESTION_GLYPHS: Record<PermissionQuestionKind, ComponentType<{ className?: string }>> = {
-  command: Terminal,
-  edit: PencilLine,
-  delete: Trash2,
-  move: MoveRight,
-  read: BookOpen,
-  search: Search,
-  fetch: Globe,
-  plan: Workflow,
-  tool: Wrench,
-};
-
-const TONE_GLYPHS: Record<PermissionOptionTone, ComponentType<{ className?: string }> | null> = {
-  allow: Check,
-  allowAlways: CheckCheck,
-  reject: X,
-  rejectAlways: Ban,
-  other: null,
-};
 
 export interface PermissionPromptPosition {
   /** Zero-based. */
@@ -363,10 +320,11 @@ export interface PermissionPromptProps {
 }
 
 /**
- * One permission request, asked the way a person reads it: what the agent
- * wants to do in plain words, exactly what that would run or touch, and the
- * provider's own answers — never rewritten, since "Yes, and don't ask again for
- * `git` commands" says more than any label Lody could put on it.
+ * One permission request, asked the way a person reads it: the question, then
+ * exactly what would run or be touched, then the provider's own answers —
+ * never rewritten, since "Yes, and don't ask again for `git` commands" says
+ * more than any label Lody could put on it. The answers carry no marks: every
+ * provider's answer already begins with what it is ("Yes", "No", "Allow").
  *
  * Keyboard: the arrows walk the answers starting from the suggested one, Enter
  * or Space answers the one you are on, and Escape refuses once. Enter on the
@@ -391,10 +349,13 @@ export function PermissionPrompt({
   const optionRefs = useRef(new Map<string, HTMLButtonElement>());
   const options = permission.options;
   const questionKind = resolvePermissionQuestionKind(toolCall.kind);
-  const QuestionGlyph = QUESTION_GLYPHS[questionKind];
   const heading = resolvePermissionHeading(permission) ?? t(QUESTION_KEYS[questionKind]);
   const reason = resolvePermissionReason(permission);
   const subject = resolvePermissionSubject(toolCall);
+  // Prose the agent titled the call with is a detail under the question, not
+  // code in a box; and it is dropped when it only restates the question.
+  const subjectText =
+    subject?.type === 'text' && !restates(subject.text, heading) ? subject.text : null;
   const suggestedOptionId = resolveSuggestedOptionId(permission);
   const dismissOptionId = resolveDismissOptionId(options);
   const disabled = !isReady || sendingOptionId !== null;
@@ -447,46 +408,54 @@ export function PermissionPrompt({
       {...withClassName(stylex.props(styles.card), className)}
     >
       <div {...stylex.props(styles.header)}>
-        <span aria-hidden="true" {...stylex.props(styles.headerGlyph)}>
-          <QuestionGlyph {...stylex.props(styles.glyph)} />
-        </span>
         <div {...stylex.props(styles.headerText)}>
           <p {...stylex.props(styles.heading)}>{heading}</p>
-          {reason ? <p {...stylex.props(styles.reason)}>{reason}</p> : null}
+          {reason ? <p {...stylex.props(styles.detail)}>{reason}</p> : null}
+          {subjectText ? <p {...stylex.props(styles.detail)}>{subjectText}</p> : null}
         </div>
-        {position && position.total > 1 ? <PositionControl position={position} /> : null}
+        {(position && position.total > 1) || onStop ? (
+          <div {...stylex.props(styles.headerEnd)}>
+            {position && position.total > 1 ? <PositionControl position={position} /> : null}
+            {onStop ? (
+              <Button
+                variant="ghost"
+                size="small"
+                icon
+                aria-label={t('sessions.permission.stop', 'Stop the agent')}
+                title={t('sessions.permission.stop', 'Stop the agent')}
+                onClick={onStop}
+              >
+                <CircleStop aria-hidden="true" />
+              </Button>
+            ) : null}
+          </div>
+        ) : null}
       </div>
 
-      {subject ? (
+      {subject && subject.type !== 'text' ? (
         <div
-          {...stylex.props(styles.subject, subject.type !== 'text' && styles.subjectMono)}
+          {...stylex.props(styles.subject)}
           aria-label={t('sessions.permission.subject', 'What the agent wants to do')}
         >
-          {subject.type === 'command' ? (
-            <>
-              <span {...stylex.props(styles.subjectLine)}>{subject.command}</span>
-              {subject.cwd ? (
-                <span {...stylex.props(styles.subjectMeta)}>
-                  {t('sessions.permission.inDirectory', 'in {{path}}', { path: subject.cwd })}
-                </span>
-              ) : null}
-            </>
-          ) : subject.type === 'paths' ? (
-            subject.paths.map((path) => (
-              <span key={path} {...stylex.props(styles.subjectLine)}>
-                {path}
-              </span>
-            ))
-          ) : (
-            subject.text
-          )}
+          <span {...stylex.props(styles.subjectBody)}>
+            {subject.type === 'command'
+              ? subject.command
+              : subject.paths.map((path) => (
+                  <span key={path} {...stylex.props(styles.subjectLine)}>
+                    {path}
+                  </span>
+                ))}
+          </span>
+          {subject.type === 'command' && subject.cwd ? (
+            <span {...stylex.props(styles.subjectWhere)} title={subject.cwd}>
+              {t('sessions.permission.inDirectory', 'in {{path}}', { path: subject.cwd })}
+            </span>
+          ) : null}
         </div>
       ) : null}
 
       <div {...stylex.props(styles.options)}>
         {options.map((option) => {
-          const tone = resolvePermissionOptionTone(option);
-          const ToneGlyph = TONE_GLYPHS[tone];
           const description = resolvePermissionOptionDescription(option);
           const suggested = option.optionId === suggestedOptionId;
           const sending = option.optionId === sendingOptionId;
@@ -501,6 +470,7 @@ export function PermissionPrompt({
               type="button"
               disabled={disabled}
               aria-keyshortcuts={isDismiss ? 'Escape' : undefined}
+              data-tone={resolvePermissionOptionTone(option)}
               onClick={() => onSelect(option.optionId)}
               {...stylex.props(
                 styles.option,
@@ -508,68 +478,61 @@ export function PermissionPrompt({
                 sending && styles.optionSending
               )}
             >
-              <span
-                aria-hidden="true"
-                {...stylex.props(
-                  styles.optionMark,
-                  (tone === 'reject' || tone === 'rejectAlways') && styles.optionMarkRefuse
-                )}
-              >
-                {ToneGlyph ? <ToneGlyph {...stylex.props(styles.glyph)} /> : null}
-              </span>
               <span {...stylex.props(styles.optionText)}>
                 {option.name}
                 {description ? (
                   <span {...stylex.props(styles.optionDescription)}>{description}</span>
                 ) : null}
               </span>
-              <span {...stylex.props(styles.optionTrail)}>
-                {sending ? (
-                  <Spinner size="small" />
-                ) : isDismiss ? (
-                  <span aria-hidden="true" {...stylex.props(styles.keyHint)}>
-                    <Kbd>esc</Kbd>
-                  </span>
-                ) : null}
-              </span>
+              {sending || isDismiss ? (
+                <span {...stylex.props(styles.optionTrail)}>
+                  {sending ? (
+                    <Spinner size="small" />
+                  ) : (
+                    <span aria-hidden="true" {...stylex.props(styles.keyHint)}>
+                      <Kbd>esc</Kbd>
+                    </span>
+                  )}
+                </span>
+              ) : null}
             </button>
           );
         })}
       </div>
 
-      <div {...stylex.props(styles.footer)}>
-        {error ? (
-          <p role="alert" {...stylex.props(styles.status, styles.statusError)}>
-            {error}
-          </p>
-        ) : !isReady ? (
-          <p {...stylex.props(styles.status)}>
-            {t('sessions.permission.connecting', 'Connecting to the workspace…')}
-          </p>
-        ) : (
-          <div aria-hidden="true" {...stylex.props(styles.hints)}>
-            <span {...stylex.props(styles.hint)}>
-              <Kbd>↑</Kbd>
-              <Kbd>↓</Kbd>
-              {t('sessions.permission.hintChoose', 'choose')}
-            </span>
-            <span {...stylex.props(styles.hint)}>
-              <Kbd>⏎</Kbd>
-              {t('sessions.permission.hintAnswer', 'answer')}
-            </span>
-          </div>
-        )}
-        {onStop ? (
-          <div {...stylex.props(styles.footerEnd)}>
-            <Button variant="ghost" size="small" onClick={onStop}>
-              {t('sessions.permission.stop', 'Stop the agent')}
-            </Button>
-          </div>
-        ) : null}
-      </div>
+      {error ? (
+        <p role="alert" {...stylex.props(styles.status, styles.statusError)}>
+          {error}
+        </p>
+      ) : !isReady ? (
+        <p {...stylex.props(styles.status)}>
+          {t('sessions.permission.connecting', 'Connecting to the workspace…')}
+        </p>
+      ) : null}
     </div>
   );
 }
+
+/** Whether a line only says again what the question already asked. */
+const restates = (text: string, heading: string) => {
+  const words = (value: string) =>
+    new Set(
+      value
+        .toLowerCase()
+        .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+        .split(/\s+/)
+        .filter((word) => word.length > 3)
+    );
+  const headingWords = words(heading);
+  if (headingWords.size === 0) return false;
+  const textWords = words(text);
+  let shared = 0;
+  for (const word of headingWords) if (textWords.has(word)) shared++;
+  // Everything the question names is in the line, and the line adds at most a
+  // word or two: "Allow network access?" over "https network access to host"
+  // still carries the host, so this is deliberately strict.
+  return shared === headingWords.size && textWords.size <= headingWords.size;
+};
 
 const QUESTION_KEYS: Record<PermissionQuestionKind, string> = {
   command: 'sessions.permission.question.command',
@@ -586,7 +549,7 @@ const QUESTION_KEYS: Record<PermissionQuestionKind, string> = {
 function PositionControl({ position }: { position: PermissionPromptPosition }) {
   const { t } = useTranslation();
   return (
-    <div {...stylex.props(styles.position)}>
+    <>
       <Button
         variant="ghost"
         size="small"
@@ -597,7 +560,7 @@ function PositionControl({ position }: { position: PermissionPromptPosition }) {
         <ChevronLeft aria-hidden="true" />
       </Button>
       <span {...stylex.props(styles.positionLabel)}>
-        {t('sessions.permission.position', '{{index}} of {{total}}', {
+        {t('sessions.permission.position', '{{index}}/{{total}}', {
           index: position.index + 1,
           total: position.total,
         })}
@@ -611,7 +574,7 @@ function PositionControl({ position }: { position: PermissionPromptPosition }) {
       >
         <ChevronRight aria-hidden="true" />
       </Button>
-    </div>
+    </>
   );
 }
 
