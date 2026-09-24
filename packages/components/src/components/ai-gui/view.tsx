@@ -5930,15 +5930,66 @@ const extractFilePathFromTitle = (title: string, label: string) => {
 };
 
 /**
- * A tool title as one run of text. Brightening its first word ("Find",
- * "Search") made those rows louder than their neighbours for no reason a
- * reader could see.
+ * The action a tool title opens with, as a verb with tense: in progress while
+ * the tool runs ("Searching"), done once it has ("Searched"). The verb is the
+ * one word that changes as the step happens, so it is the brightened word, and
+ * it shimmers while it is still going.
  */
-const ToolTitleWithHighlight = ({ title, className }: { title: string; className?: string }) => (
-  <span className={className} title={title}>
-    {title}
+const TOOL_VERB_FORMS: Record<string, { running: string; done: string }> = {
+  Read: { running: 'Reading', done: 'Read' },
+  Edit: { running: 'Editing', done: 'Edited' },
+  Write: { running: 'Writing', done: 'Wrote' },
+  Delete: { running: 'Deleting', done: 'Deleted' },
+  Move: { running: 'Moving', done: 'Moved' },
+  Search: { running: 'Searching', done: 'Searched' },
+  Grep: { running: 'Searching', done: 'Searched' },
+  Find: { running: 'Finding', done: 'Found' },
+  Glob: { running: 'Finding', done: 'Found' },
+  List: { running: 'Listing', done: 'Listed' },
+  Fetch: { running: 'Fetching', done: 'Fetched' },
+  Run: { running: 'Running', done: 'Ran' },
+  Execute: { running: 'Running', done: 'Ran' },
+  Bash: { running: 'Running', done: 'Ran' },
+};
+
+type ToolVerbStatus = 'running' | 'done';
+
+const toolVerbStatus = (status: ToolCallMessage['status']): ToolVerbStatus =>
+  status === 'pending' || status === 'in_progress' ? 'running' : 'done';
+
+/** The verb, brightened, shimmering while the step runs. */
+const ToolVerb = ({ word, status }: { word: string; status: ToolVerbStatus }) => (
+  <span className={cn('text-foreground/90', status === 'running' && 'agent-shimmer')}>
+    {TOOL_VERB_FORMS[word]?.[status] ?? word}
   </span>
 );
+
+/** A tool title whose opening verb, when it has one, follows the step's tense. */
+const ToolTitleWithHighlight = ({
+  title,
+  status,
+  className,
+}: {
+  title: string;
+  status: ToolVerbStatus;
+  className?: string;
+}) => {
+  const match = /^([A-Z][a-z]+)(?=[\s:(])/.exec(title);
+  if (match && TOOL_VERB_FORMS[match[1]!]) {
+    const word = match[1]!;
+    return (
+      <span className={className} title={title}>
+        <ToolVerb word={word} status={status} />
+        {title.slice(word.length)}
+      </span>
+    );
+  }
+  return (
+    <span className={className} title={title}>
+      {title}
+    </span>
+  );
+};
 
 // Exported for idle-rerender tests: this is the live memo boundary for assistant
 // markdown (used by `renderAssistantContent`), guarding both callback-identity
@@ -6776,7 +6827,11 @@ const ToolCallCard = memo(function ToolCallCard({
                     : 'text-[13px] font-semibold leading-tight'
                 )}
               >
-                {kindMeta?.label ?? title}
+                {kindMeta?.label && TOOL_VERB_FORMS[kindMeta.label] ? (
+                  <ToolVerb word={kindMeta.label} status={toolVerbStatus(toolCall.status)} />
+                ) : (
+                  (kindMeta?.label ?? title)
+                )}
               </span>
               <Tooltip.Provider>
                 <Tooltip.Root>
@@ -6825,6 +6880,7 @@ const ToolCallCard = memo(function ToolCallCard({
           ) : (
             <ToolTitleWithHighlight
               title={displayTitle}
+              status={toolVerbStatus(toolCall.status)}
               className={cn(
                 'truncate',
                 isActivityRow
