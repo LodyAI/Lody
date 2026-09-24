@@ -1,7 +1,6 @@
 import type { ElementType, ReactNode } from 'react';
 import { ArrowUpRight, GitBranchPlus } from 'lucide-react';
 
-import { Button } from '@/ui/button';
 import { cn } from '@/lib/utils';
 
 export function SessionRelationCard({
@@ -28,40 +27,32 @@ export function SessionRelationCard({
   /** Optional one-glance context under the title (a reply preview, an error). */
   detail?: ReactNode;
 }) {
+  // One line: the relations bar above the composer is the persistent index,
+  // so the in-stream record only needs what happened, to whom, and a way there.
   return (
-    <div
-      data-session-relation-card={relation}
-      className={cn(
-        'flex min-w-0 flex-col items-stretch gap-2.5 rounded-lg border border-border/70 bg-muted/25 px-3 py-2.5 sm:flex-row sm:items-center sm:gap-3',
-        className
-      )}
-    >
-      <div className="flex min-w-0 flex-1 items-center gap-3">
-        <Icon className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-        <div className="min-w-0 flex-1">
-          <div className="text-xs leading-4 text-muted-foreground">{label}</div>
-          <div className="truncate text-sm font-medium text-foreground" title={sessionTitle}>
-            {sessionTitle}
-          </div>
-          {detail ? (
-            <div className="mt-0.5 line-clamp-2 break-words text-xs leading-4 text-muted-foreground">
-              {detail}
-            </div>
-          ) : null}
-        </div>
-      </div>
-      {status}
-      <Button
+    <div data-session-relation-card={relation} className={cn('min-w-0', className)}>
+      <button
         type="button"
-        variant="outline"
-        size="sm"
-        className="h-7 shrink-0 self-end gap-1.5 px-2.5 text-xs sm:self-auto"
         disabled={!onAction}
         onClick={onAction}
+        title={sessionTitle}
+        aria-label={`${actionLabel}: ${sessionTitle}`}
+        className="group flex h-8 w-full min-w-0 items-center gap-2 rounded-md border border-border/60 bg-muted/20 px-2.5 text-left text-xs text-muted-foreground transition-colors hover:bg-muted/50 disabled:cursor-default disabled:hover:bg-muted/20"
       >
-        {actionLabel}
-        <ActionIcon className="h-3.5 w-3.5" aria-hidden="true" />
-      </Button>
+        <Icon className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+        <span className="shrink-0">{label}</span>
+        <span className="min-w-0 truncate font-medium text-foreground">{sessionTitle}</span>
+        {detail ? <span className="min-w-0 flex-1 truncate">· {detail}</span> : null}
+        <span className="ml-auto flex shrink-0 items-center gap-2">
+          {status}
+          {onAction ? (
+            <ActionIcon
+              className="h-3.5 w-3.5 opacity-60 transition-opacity group-hover:opacity-100"
+              aria-hidden="true"
+            />
+          ) : null}
+        </span>
+      </button>
     </div>
   );
 }

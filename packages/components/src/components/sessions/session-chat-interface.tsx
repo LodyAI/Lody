@@ -207,6 +207,7 @@ import { RenameSessionDialog, type RenameSessionDialogTarget } from './rename-se
 import { useResolvedTheme } from '../../theme-provider';
 import { PullRequestBadge } from './pull-request-badge';
 import { SessionInfoBar } from './session-info-bar';
+import { CurrentSessionRelationsBar, type SessionRelationsBarItem } from './session-relations-bar';
 import type { ContextChipAction, PrCiRun } from './session-info-chips';
 import {
   resolveSessionInfoBarGitHubActionIds,
@@ -4706,6 +4707,17 @@ export const SessionChatInterface = memo(
       openerSessionMeta?.title,
       t,
     ]);
+    const relationsBarParent = useMemo<SessionRelationsBarItem | null>(() => {
+      const openedBy = openedByRelations?.openedBy;
+      return openedBy
+        ? {
+            sessionId: openedBy.sessionId,
+            title: openedBy.title,
+            session: openerSessionMeta ?? null,
+            target: openedBy.target,
+          }
+        : null;
+    }, [openedByRelations, openerSessionMeta]);
     const openedByConversationStart = useMemo(() => {
       const openedBy = openedByRelations?.openedBy;
       if (!openedBy) return undefined;
@@ -6160,6 +6172,15 @@ export const SessionChatInterface = memo(
                       />
                     </ConversationColumn>
                   ) : null}
+
+                  {/* Opener + every Session/Tab created from here, pinned
+                      above the info bar: the in-stream creation cards scroll
+                      away with the conversation. */}
+                  <CurrentSessionRelationsBar
+                    sessionId={session.id}
+                    parent={relationsBarParent}
+                    onOpenSession={handleOpenRelatedSession}
+                  />
 
                   {/* Session info bar (desktop AND mobile): the canonical
                       cluster + fixed stage row merging status, goal, schedule,

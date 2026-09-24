@@ -9,6 +9,7 @@ import { getSessionRoomId, type SessionHistoryParsed, type SessionId } from '@lo
 import { setDocMetaByRoomIdAtom } from '../src/atoms/doc-meta';
 import { MessageRowView } from '../src/components/ai-gui/view';
 import { SessionRelationCard } from '../src/components/shared/session-relation-card';
+import { CurrentSessionRelationsBar } from '../src/components/sessions/session-relations-bar';
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -126,7 +127,7 @@ describe('Session relation cards', () => {
 
     await act(async () => {
       Array.from(container.querySelectorAll<HTMLButtonElement>('button'))
-        .find((button) => button.textContent?.includes('View session'))
+        .find((button) => button.getAttribute('aria-label')?.startsWith('View session:'))
         ?.click();
     });
     expect(onNavigateSession).toHaveBeenCalledWith({ sessionId: createdSessionId });
@@ -358,5 +359,72 @@ describe('Session relation cards', () => {
     const dialog = document.querySelector('[role="dialog"]');
     expect(dialog?.textContent).toContain('Detail paragraph 6.');
     expect(dialog?.textContent).toContain(conclusion);
+  });
+
+  it('pins the opener and every created Session or Tab in the relations bar', async () => {
+    const store = createStore();
+    const meta = (id: string, title: string, extra: Record<string, unknown> = {}) =>
+      store.set(setDocMetaByRoomIdAtom, getSessionRoomId(id as SessionId), {
+        id,
+        machineId: 'machine-1',
+        userId: 'user-1',
+        createdAt: '2026-08-14T12:00:00.000Z',
+        cliType: 'builtin',
+        agentType: 'codex',
+        title,
+        ...extra,
+      });
+    meta(openerSessionId, 'Opener');
+    meta(createdSessionId, 'Independent child', { openedBySessionId: openerSessionId });
+    meta('created-tab', 'Tab child', {
+      openedBySessionId: openerSessionId,
+      parentSessionId: openerSessionId,
+      createdAt: '2026-08-14T12:01:00.000Z',
+    });
+    meta('side-chat', 'Side chat', {
+      openedBySessionId: openerSessionId,
+      parentSessionId: openerSessionId,
+      childSessionPlacement: 'side-panel',
+    });
+    meta('archived-child', 'Archived child', {
+      openedBySessionId: openerSessionId,
+      isArchived: true,
+    });
+    const opened: unknown[] = [];
+
+    await act(async () => {
+      root.render(
+        <Provider store={store}>
+          <CurrentSessionRelationsBar
+            sessionId={openerSessionId}
+            parent={{
+              sessionId: 'grand-opener' as SessionId,
+              title: 'Grand opener',
+              session: null,
+              target: { sessionId: 'grand-opener' as SessionId },
+            }}
+            onOpenSession={(target) => opened.push(target)}
+          />
+        </Provider>
+      );
+    });
+
+    const toggle = container.querySelector<HTMLButtonElement>('button[aria-expanded]');
+    expect(toggle?.getAttribute('aria-expanded')).toBe('false');
+    expect(container.querySelector('[data-session-relation-row]')).toBeNull();
+
+    await act(async () => toggle?.click());
+    const rows = Array.from(container.querySelectorAll('[data-session-relation-row]')).map(
+      (row) => row.textContent
+    );
+    expect(rows).toEqual(['Grand openerParent', 'Independent childSession', 'Tab childTab']);
+    expect(container.querySelector('[role="separator"]')).not.toBeNull();
+
+    await act(async () =>
+      container
+        .querySelector<HTMLButtonElement>('[data-session-relation-row="created-tab"]')
+        ?.click()
+    );
+    expect(opened).toEqual([{ sessionId: openerSessionId, tabSessionId: 'created-tab' }]);
   });
 });
