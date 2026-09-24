@@ -1,4 +1,4 @@
-import { Download } from 'lucide-react';
+import { Download, Laptop, MonitorDown } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import {
   parseNightlyRelease,
@@ -8,8 +8,6 @@ import {
 
 const copy = {
   en: {
-    description:
-      'Try changes from main before the next stable release. Nightly is a separate app with its own updates. It uses your existing account and live cloud data.',
     switching:
       'Quit Lody before opening Nightly, and quit Nightly before switching back. Changes synced to your account also appear in Stable.',
     loading: 'Checking Nightly downloads…',
@@ -18,8 +16,6 @@ const copy = {
     noScript: 'Enable JavaScript to load the latest Nightly download links.',
   },
   zh: {
-    description:
-      '提前体验 main 分支的新功能。Nightly 是独立安装、独立更新的应用，使用现有账号和真实云端数据。',
     switching:
       '打开 Nightly 前请先退出 Lody，切回正式版前请先退出 Nightly。同步到账号的数据修改也会出现在正式版中。',
     loading: '正在获取 Nightly 下载…',
@@ -70,9 +66,6 @@ export function NightlyDownloads({ locale }: { locale: 'en' | 'zh' }) {
 
   return (
     <div className="download-group download-nightly" id="nightly">
-      <h2>Lody Nightly</h2>
-      <p className="download-nightly__description">{t.description}</p>
-      <p className="download-nightly__description">{t.switching}</p>
       <noscript>{t.noScript}</noscript>
       {release ? (
         <>
@@ -86,6 +79,11 @@ export function NightlyDownloads({ locale }: { locale: 'en' | 'zh' }) {
             {(['mac', 'win', 'linux'] as const).map((platform) => (
               <article className="download-card" key={platform}>
                 <div className="download-card__header">
+                  {platform === 'win' ? (
+                    <MonitorDown aria-hidden="true" />
+                  ) : (
+                    <Laptop aria-hidden="true" />
+                  )}
                   <h3>{platform === 'mac' ? 'macOS' : platform === 'win' ? 'Windows' : 'Linux'}</h3>
                 </div>
                 <div className="download-card__actions">
@@ -116,6 +114,7 @@ export function NightlyDownloads({ locale }: { locale: 'en' | 'zh' }) {
           )}
         </div>
       )}
+      <p className="download-nightly__switching">{t.switching}</p>
     </div>
   );
 }

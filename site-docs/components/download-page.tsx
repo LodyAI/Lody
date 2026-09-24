@@ -5,7 +5,6 @@ import { useEffect, useMemo, useState } from 'react';
 
 import { SiteFooter } from './site-footer';
 import { SiteNav } from './site-nav';
-import { NightlyDownloads } from './nightly-downloads';
 
 type DownloadLocale = 'en' | 'zh';
 type PlatformKey = 'mac' | 'win' | 'linux' | 'ios' | 'android' | 'browser';
@@ -293,9 +292,6 @@ export function DownloadPage({ locale }: { locale: DownloadLocale }) {
           </p>
           <h1>{t.title}</h1>
           <p className="download-subtitle">{t.subtitle}</p>
-          <p className="download-nightly__entry">
-            <a href="#nightly">{isZh ? '体验 Lody Nightly' : 'Try Lody Nightly'}</a>
-          </p>
           {version || releaseDate ? (
             <div className="download-meta">
               {version ? (
@@ -365,7 +361,6 @@ export function DownloadPage({ locale }: { locale: DownloadLocale }) {
             </div>
           </div>
         ))}
-        <NightlyDownloads locale={locale} />
       </section>
       <SiteFooter locale={locale} />
     </main>

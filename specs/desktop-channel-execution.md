@@ -39,12 +39,14 @@ remains local-only; channel identity must not enable cloud behavior in that buil
 
 ## Diagnostic provenance
 
-The public download page MUST distinguish Nightly from Stable, explain shared live
-data and manual switching, and use immutable installer links from a complete
-Nightly version manifest. Missing or invalid Nightly metadata MUST NOT produce
-Stable fallback links or guessed installer aliases.
-The manifest and download page MUST identify the verified minimum Stable version;
-this support floor requires packaged compatibility evidence, not just a version comparison.
+Desktop and Web Settings → About MUST offer Download Nightly directly below Download
+apps, opening the localized standalone `/download/nightly` page. The normal download
+page MUST NOT embed Nightly downloads. The standalone page MUST distinguish Nightly
+visually, explain shared live data and manual switching, and use immutable installer
+links from a complete Nightly manifest. Missing or invalid metadata MUST NOT produce
+Stable fallback links or guessed aliases. The manifest and download page MUST identify
+the verified minimum Stable version; this floor requires packaged compatibility evidence,
+not just a version comparison.
 
 About, copied crash reports and submitted bug reports MUST identify the reporting
 desktop's channel, version and both source revisions when injected by its distribution

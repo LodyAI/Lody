@@ -14,7 +14,7 @@ import { OpenSourceAttributionsDialog } from './open-source-attributions-dialog'
 import { JoinCommunityButton } from './join-community-dialog';
 import { openExternalUrl } from '@/lib/native-browser';
 import { getIpcServices } from '@/lib/electron-ipc-client';
-import { getDownloadPageUrl, getWebsiteUrl } from '@/lib/lody-urls';
+import { getDownloadPageUrl, getNightlyDownloadPageUrl, getWebsiteUrl } from '@/lib/lody-urls';
 import { developerModeEnabledAtom } from '@/atoms/settings';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { MobileAboutSettings } from '@/components/mobile/mobile-about-settings';
@@ -234,7 +234,7 @@ export function AboutSettingsComponent() {
   const isMobile = useIsMobile();
 
   const handleOpenDownloadPage = useCallback(() => {
-    const url = `${getDownloadPageUrl(i18n.resolvedLanguage)}${RELEASE_CHANNEL === 'nightly' ? '#nightly' : ''}`;
+    const url = getDownloadPageUrl(i18n.resolvedLanguage);
     void openExternalUrl(url);
   }, [i18n.resolvedLanguage]);
 
@@ -314,6 +314,17 @@ export function AboutSettingsComponent() {
             size="sm"
             className="h-7 px-2.5"
             onClick={handleOpenDownloadPage}
+          >
+            <ExternalLink className="mr-1 h-3.5 w-3.5" />
+            {t('settings.about.openDownloadPage', 'Open download page')}
+          </Button>
+        </CompactRow>
+        <CompactRow label={t('settings.about.downloadNightly')}>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 px-2.5"
+            onClick={() => void openExternalUrl(getNightlyDownloadPageUrl(i18n.resolvedLanguage))}
           >
             <ExternalLink className="mr-1 h-3.5 w-3.5" />
             {t('settings.about.openDownloadPage', 'Open download page')}

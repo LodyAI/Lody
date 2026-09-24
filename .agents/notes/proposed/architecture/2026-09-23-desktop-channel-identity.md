@@ -77,18 +77,16 @@ The intended contract is [desktop channel execution](../../../../specs/desktop-c
 
 ## Verification
 
-The download page has a separate Nightly section, with bilingual live-data and
-manual-switching guidance. Its public build-time distribution URL is optional;
-without valid metadata it shows no Nightly links. The manifest parser requires
-all six current-version installers, named `Lody-<version>-<arch>-nightly.<ext>`
-(Windows: `Lody-<version>-x64-setup-nightly.exe`), and only constructs links within that root,
-never using metadata-supplied URLs or Stable aliases. About links directly to the
-Nightly section. Browser smoke covers full manifests and 404 responses at desktop
-and mobile sizes; deployment URL/CORS and real artifact downloads remain unverified.
-The manifest must also name the verified minimum Stable version, displayed before
-installation links. Distribution automation checks that this operator-attested
-version has been published; numerical version comparison cannot prove compatibility.
-A compatible Stable rollout and real cross-platform acceptance remain prerequisites.
+Desktop and Web Settings → About expose Download Nightly below Download apps, linking
+to the localized standalone `/download/nightly` page. The regular download page no longer
+embeds Nightly. The new page reuses the download layout and the single marketing shader
+host, recoloring only its atmosphere layer to muted slate-lavender; it preserves both light/dark
+modes, the fallback gradient and shader sampling. The page explains live data, manual
+switching and the verified minimum Stable version. The parser requires all six immutable
+installers and constructs links inside the configured HTTPS root. Missing or invalid
+metadata shows an unavailable state with retry. The application itself does not fetch
+metadata, so its CSP and the download bucket's site-only CORS remain unchanged.
+Actual published downloads and packaged compatibility remain release gates.
 
 About accepts optional build-time desktop channel and source provenance. A
 distribution composition injects the frozen candidate time and source revisions;

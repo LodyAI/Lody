@@ -2401,6 +2401,7 @@
   "settings.about.communityDialogTitle": "加入 Lody 社区",
   "settings.about.dependencies": "依赖",
   "settings.about.downloadApps": "下载应用",
+  "settings.about.downloadNightly": "下载 Nightly 版本",
   "settings.about.downloading": "正在下载... {{percent}}%",
   "settings.about.generatedAt": "生成时间",
   "settings.about.joinCommunity": "加入社区",
