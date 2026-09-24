@@ -484,7 +484,7 @@ export function PermissionPrompt({
 }
 
 /** Whether a line only says again what the question already asked. */
-const restates = (text: string, heading: string) => {
+const restates = (line: string, heading: string) => {
   const words = (value: string) =>
     new Set(
       value
@@ -495,7 +495,7 @@ const restates = (text: string, heading: string) => {
     );
   const headingWords = words(heading);
   if (headingWords.size === 0) return false;
-  const textWords = words(text);
+  const textWords = words(line);
   let shared = 0;
   for (const word of headingWords) if (textWords.has(word)) shared++;
   return shared === headingWords.size && textWords.size <= headingWords.size;
