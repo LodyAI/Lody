@@ -1,6 +1,7 @@
 import { desktopInstallationProfile } from './platform'
 
 const DEEP_LINK_PROTOCOL = desktopInstallationProfile.desktopProtocol
+const PROTOCOL_PATTERN = DEEP_LINK_PROTOCOL.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 const DEEP_LINK_PREFIX = `${DEEP_LINK_PROTOCOL}://`
 const WINDOWS_CALLBACK_MARKER = `\\${DEEP_LINK_PROTOCOL}\\callback`
 
@@ -24,13 +25,10 @@ export function parseDeepLinkArg(arg: string): string | null {
     return null
   }
 
-  const directPattern = new RegExp(`${DEEP_LINK_PROTOCOL}:\\/\\/.+`, 'i')
+  const directPattern = new RegExp(`${PROTOCOL_PATTERN}:\\/\\/.+`, 'i')
   const directMatch = normalized.match(directPattern)
   if (directMatch && directMatch[0]) {
-    return directMatch[0].replace(
-      new RegExp(`^${DEEP_LINK_PROTOCOL}:\\/\\/`, 'i'),
-      DEEP_LINK_PREFIX
-    )
+    return directMatch[0].replace(new RegExp(`^${PROTOCOL_PATTERN}:\\/\\/`, 'i'), DEEP_LINK_PREFIX)
   }
 
   const windowsStyleArg = normalized.replace(/\//g, '\\')

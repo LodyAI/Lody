@@ -3,6 +3,7 @@ import { describe, expect, expectTypeOf, it } from 'vitest';
 import {
   MessageContentSchema,
   normalizeSessionTurnInputConfig,
+  SessionHistoryInputConfigSchema,
   LocalProjectControlRequestSchema,
   LocalProjectControlResponseSchema,
   LocalSessionControlResponseSchema,
@@ -262,6 +263,14 @@ describe('message-schemas image upload response', () => {
 });
 
 describe('message-schemas machine ACP capabilities refresh', () => {
+  it('validates bounded explicit Pi extension selections', () => {
+    expect(BuiltinRuntimeOverridesSchema.parse({ piExtensions: [' /fixture/plugin.ts '] })).toEqual(
+      { piExtensions: ['/fixture/plugin.ts'] }
+    );
+    for (const piExtensions of [[''], [false], 'plugin', Array(33).fill('/fixture/plugin.ts')]) {
+      expect(BuiltinRuntimeOverridesSchema.safeParse({ piExtensions }).success).toBe(false);
+    }
+  });
   it('accepts builtin Kimi runtime fields', () => {
     expect(CliTypeSchema.safeParse('kimi').success).toBe(true);
     expect(CliTypeSchema.safeParse('grok').success).toBe(true);
@@ -428,6 +437,16 @@ describe('message-schemas machine ACP authentication', () => {
         content: { code: 'one-time-code', account: 'work' },
       }),
     };
+    const runtimeDownloadProgress = {
+      type: 'machine/acp-authentication-progress',
+      machineId: 'machine-1',
+      requestId: 'auth-1',
+      agentType: 'codex',
+      status: 'runtime-download',
+      runtimeName: 'codex',
+      runtimePhase: 'downloading',
+      runtimePercent: 42,
+    };
 
     expect(MachineAcpAuthenticateRequestSchema.safeParse(request).success).toBe(true);
     expect(MachineAcpAuthenticateRequestSchema.safeParse(forgedStart).success).toBe(false);
@@ -451,6 +470,28 @@ describe('message-schemas machine ACP authentication', () => {
     expect(MachineAcpAuthenticationProgressMessageSchema.safeParse(formProgress).success).toBe(
       true
     );
+    expect(
+      MachineAcpAuthenticationProgressMessageSchema.safeParse(runtimeDownloadProgress).success
+    ).toBe(true);
+    // runtime-download progress requires the runtime identity it reports on.
+    expect(
+      MachineAcpAuthenticationProgressMessageSchema.safeParse({
+        ...runtimeDownloadProgress,
+        runtimeName: undefined,
+      }).success
+    ).toBe(false);
+    expect(
+      MachineAcpAuthenticationProgressMessageSchema.safeParse({
+        ...runtimeDownloadProgress,
+        runtimePhase: undefined,
+      }).success
+    ).toBe(false);
+    expect(
+      MachineAcpAuthenticationProgressMessageSchema.safeParse({
+        ...runtimeDownloadProgress,
+        runtimePercent: 101,
+      }).success
+    ).toBe(false);
     expect(MachineAcpAuthenticateResponseSchema.safeParse(response).success).toBe(true);
     expect(LocalSessionControlResponseSchema.safeParse(response).success).toBe(true);
     expect(safeParseLocalSessionControlRequest(JSON.stringify(request)).success).toBe(true);
@@ -928,6 +969,33 @@ describe('normalizeSessionTurnInputConfig', () => {
       },
       resume: 'acp-1',
       inputBlocks: [{ type: 'text', text: 'hello' }],
+    });
+  });
+
+  it('drops provider launch fields from turn input', () => {
+    const injected = {
+      prompt: 'hello',
+      cliType: 'builtin',
+      agentType: 'pi',
+      modelId: 'pi',
+      customAcp: { command: '/tmp/injected-acp' },
+      runtimeOverrides: { piExtensions: ['/tmp/injected.ts'] },
+    };
+
+    expect(normalizeSessionTurnInputConfig(injected)).toEqual({
+      prompt: 'hello',
+      cliType: 'builtin',
+      agentType: 'pi',
+      modelId: 'pi',
+    });
+
+    const stored = SessionHistoryInputConfigSchema.safeParse(injected);
+    expect(stored.success).toBe(true);
+    expect(stored.data).toEqual({
+      prompt: 'hello',
+      cliType: 'builtin',
+      agentType: 'pi',
+      modelId: 'pi',
     });
   });
 });

@@ -33,6 +33,20 @@ Builtin auto-registration checks for legacy Pi on the synced target machine befo
 checking for builtin Pi. This avoids creating a second durable provider before
 confirmation; unrelated machines and other builtin providers remain unaffected.
 
+## Extension follow-up (2026-09-20)
+
+[#780](https://github.com/LodyAI/Lody/issues/780#issuecomment-5712334027) approves
+explicit extensions and global discovery. The follow-up keeps the original migration
+unchanged and reuses Pi's read-only package resolver instead of copying its package
+layout. Discovery never grants consent; selected paths live only in Provider runtime
+overrides and propagate to native children. Capability refresh and launch normalization
+must preserve arrays, and clearing the list must invalidate the old plugin model catalog.
+
+Source implementation and synthetic checks do not publish a runtime. Release remains
+blocked on a checksummed artifact containing matching Windows CI binaries; the old
+manifest intentionally advertises no extension support. See the updated draft Spec
+for the contract. No new executor, profile copy or plugin sandbox is introduced.
+
 ## Verification limits
 
 The landing filters legacy providers by their own machine's `builtinPi` capability.

@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { useAtomValue } from 'jotai';
 import { useTranslation } from 'react-i18next';
+import { usePostHog } from '@posthog/react';
 import { useCloudQuery, usePlatformCapability } from '@lody/platform/react';
 import { getServerNow, type LocalProjectId, type MachineId, type WorkspaceId } from '@lody/shared';
 import {
@@ -17,6 +18,8 @@ import { promptShortcutsFeatureEnabledAtom } from '@/atoms/settings';
 import { getAllAgentConfigAtom } from '@/atoms/agents';
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import { withClassName } from '@/lib/stylex';
+import { capturePostHogEvent } from '@/lib/posthog-analytics';
+import { getPromptShortcutAnalyticsProperties } from '@/lib/prompt-shortcut-analytics';
 import { usePromptShortcuts } from '../../providers/prompt-shortcut-provider';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useVisibleMachineMetas } from '@/hooks/use-visible-machine-metas';
@@ -179,6 +182,7 @@ function PromptShortcutsSettingContent({
   state: ReturnType<typeof usePromptShortcuts>;
 }) {
   const { t } = useTranslation();
+  const postHog = usePostHog();
   const isMobile = useIsMobile();
   const { runtime, entries, loading } = state;
   const scope = useShortcutScopeOptions(runtime?.workspaceId);
@@ -298,6 +302,16 @@ function PromptShortcutsSettingContent({
                           ? crypto.randomUUID()
                           : editor.base.bodyDocId,
                     });
+                    capturePostHogEvent(
+                      postHog,
+                      editor.base ? 'prompt_shortcut/updated' : 'prompt_shortcut/created',
+                      {
+                        ...getPromptShortcutAnalyticsProperties(value, value.mentions.length),
+                        ...(editor.base
+                          ? { visibility_changed: editor.base.visibility !== value.visibility }
+                          : {}),
+                      }
+                    );
                     setEditor(null);
                   } finally {
                     setBusy(false);
@@ -342,9 +356,20 @@ function PromptShortcutsSettingContent({
               onClick={() => {
                 if (!runtime || !removal) return;
                 setBusy(true);
+                const deleted = removal;
                 void runtime
-                  .remove(removal)
-                  .then(() => setRemoval(null))
+                  .remove(deleted)
+                  .then(() => {
+                    capturePostHogEvent(
+                      postHog,
+                      'prompt_shortcut/deleted',
+                      getPromptShortcutAnalyticsProperties(
+                        deleted,
+                        deleted.dependencySummary.length
+                      )
+                    );
+                    setRemoval(null);
+                  })
                   .catch((error) => console.warn('Failed to delete Prompt Shortcut', error))
                   .finally(() => setBusy(false));
               }}

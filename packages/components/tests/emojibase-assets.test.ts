@@ -1,10 +1,27 @@
 // @vitest-environment jsdom
 
-import { readFile } from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
 
 import { buildEmojibaseAssets } from '../vite-emojibase-assets';
 import { getBundledEmojibaseUrl, resolveEmojibaseLocale } from '../src/lib/emojibase-assets';
+
+type DataEntry = { hexcode: string; label: string; tags?: string[] };
+
+const readAssetJson = async (fileName: string): Promise<DataEntry[]> => {
+  const asset = buildEmojibaseAssets().find((a) => a.fileName === fileName);
+  expect(asset, fileName).toBeTruthy();
+  return JSON.parse((await asset!.read()).toString('utf8'));
+};
+
+/** frimousse's matching: query `includes` against label, then each tag. */
+const searchMatches = (data: DataEntry[], query: string): DataEntry[] => {
+  const q = query.toLowerCase().trim();
+  return data.filter(
+    (entry) =>
+      entry.label.toLowerCase().includes(q) ||
+      (entry.tags ?? []).some((tag) => tag.toLowerCase().includes(q))
+  );
+};
 
 describe('bundled emojibase assets', () => {
   it('emits exactly the files the picker asks for, per product language', () => {
@@ -16,13 +33,30 @@ describe('bundled emojibase assets', () => {
     ]);
   });
 
-  it('resolves every source file out of the installed package', async () => {
+  it('resolves every emitted file to parseable JSON', async () => {
     // The URL contract is only as good as the files behind it: a renamed or
     // missing dataset would otherwise surface as an empty picker at runtime.
     for (const asset of buildEmojibaseAssets()) {
-      const contents = await readFile(asset.sourcePath, 'utf8');
-      expect(JSON.parse(contents)).toBeTruthy();
+      expect(JSON.parse((await asset.read()).toString('utf8'))).toBeTruthy();
     }
+  });
+
+  it('folds the other bundled locale into tags so search matches either language', async () => {
+    const [zh, en] = await Promise.all([
+      readAssetJson('emojibase/zh/data.json'),
+      readAssetJson('emojibase/en/data.json'),
+    ]);
+
+    // A Chinese-locale picker answers an English query and vice versa —
+    // frimousse only ever searches the one loaded dataset.
+    expect(searchMatches(zh, 'magnifying').length).toBeGreaterThan(0);
+    expect(searchMatches(en, '放大镜').length).toBeGreaterThan(0);
+
+    // Displayed names stay in the picker's own language: only `tags` merged.
+    const zhMagnifier = zh.find((entry) => entry.hexcode === '1F50D');
+    expect(zhMagnifier?.label).toMatch(/\p{Script=Han}/u);
+    const enMagnifier = en.find((entry) => entry.hexcode === '1F50D');
+    expect(enMagnifier?.label).toBe('magnifying glass tilted left');
   });
 
   it('maps a product language onto a bundled locale, never an unbundled one', () => {

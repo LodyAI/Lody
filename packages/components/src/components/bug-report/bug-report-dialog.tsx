@@ -203,6 +203,12 @@ export function BugReportDialog({
                   "Describe the bug and pick the machine where it happened. Lody uploads that machine's logs from today and yesterday along with your description."
                 )}
               </Dialog.Description>
+              <p {...stylex.props(styles.hint)}>
+                {t(
+                  'bugReport.buildInfoIncluded',
+                  'Reports include the current app version and build information.'
+                )}
+              </p>
             </Dialog.Header>
             <div {...stylex.props(styles.body)}>
               <div {...stylex.props(styles.field)}>

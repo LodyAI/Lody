@@ -22,10 +22,12 @@ this page is the full text of the rules summarised there.
     in `web-chat-landing-screen.tsx`) — re-derive those offsets if the Electron
     position or the card `mt-2`/border/`p-[2px]` stack changes. On Windows the native title bar is
     hidden (`titleBarStyle: 'hidden'` + theme-tinted `titleBarOverlay`, see
-    `apps/electron/src/main/window-theme.ts`); the window instead reserves ONE
-    36px drag band at the top — root drag strip `h-9` in `routes/__root.tsx` +
-    `pt-9` in `web-workspace-layout.tsx`, both gated the same way — so no page
-    (this bar included) reserves its own right-side inset for the caption buttons.
+    `apps/electron/src/main/window-theme.ts`): the OS draws the caption buttons
+    in a 36px strip (centerline y=18) OVER the window-top rows. Rows reaching
+    the right edge pad `pr-[144px]` (`useWindowsCaptionPadClass`, ~3 × 46px
+    buttons), and `useWindowsCaptionRowPadClass` (`pb-2`, or `pb-[7px]` with a
+    bottom border) lifts every h-11 row's controls from y=22 onto the caption
+    centerline — the Windows analog of the traffic-light row pad.
     Mobile never renders `SessionTabBar`; it uses `MobileSessionTabSheet` instead.
     Desktop session tabs (not drafts or file/diff viewers) are mention drag
     sources: the parent tab uses HTML5 drag, child session tabs arm the

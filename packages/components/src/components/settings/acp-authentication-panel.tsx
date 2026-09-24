@@ -4,6 +4,7 @@ import { Spinner } from '@lody/ui/spinner';
 import { useTranslation } from 'react-i18next';
 import {
   machineSupportsAcpAuthenticationInteractionsProtocol,
+  getManagedBuiltinRuntimeByRuntimeName,
   type AgentConfigCliType,
   type AgentConfigId,
   type BuiltinRuntimeOverrides,
@@ -165,6 +166,12 @@ type ActivePanelAuthentication = {
   ) => Promise<void>;
 };
 
+type RuntimeDownloadProgress = {
+  runtimeName: string;
+  phase: NonNullable<MachineAcpAuthenticationProgressMessage['runtimePhase']>;
+  percent?: number;
+};
+
 export function areAcpAuthenticationTargetsEqual(
   left: MachineAcpAuthenticationArgs,
   right: MachineAcpAuthenticationArgs
@@ -225,6 +232,7 @@ export function AcpAuthenticationPanel({
   const [authorizationCodeSubmitted, setAuthorizationCodeSubmitted] = useState(false);
   const [submittingAuthorizationCode, setSubmittingAuthorizationCode] = useState(false);
   const [userCodeCopied, setUserCodeCopied] = useState(false);
+  const [runtimeDownload, setRuntimeDownload] = useState<RuntimeDownloadProgress | null>(null);
   const pendingAuthorizationWindowRef = useRef<Window | null>(null);
   const openedAuthorizationUrlRef = useRef<string | null>(null);
   const interactionIdRef = useRef<string | null>(null);
@@ -339,6 +347,7 @@ export function AcpAuthenticationPanel({
     setAuthorizationCodeSubmitted(false);
     setSubmittingAuthorizationCode(false);
     setUserCodeCopied(false);
+    setRuntimeDownload(null);
     try {
       await onBeforeStart?.();
     } catch (nextError) {
@@ -354,7 +363,22 @@ export function AcpAuthenticationPanel({
         if (!startedRequestId || activeAuthenticationRef.current?.requestId !== startedRequestId) {
           return;
         }
-        if (progress.status === 'authorization' && progress.authorizationUrl) {
+        if (progress.status === 'starting') {
+          // Launch resolution finished; any managed-runtime download is done.
+          setRuntimeDownload(null);
+        } else if (progress.status === 'runtime-download') {
+          if (progress.runtimeName && progress.runtimePhase) {
+            setRuntimeDownload(
+              progress.runtimePhase === 'complete'
+                ? null
+                : {
+                    runtimeName: progress.runtimeName,
+                    phase: progress.runtimePhase,
+                    percent: progress.runtimePercent,
+                  }
+            );
+          }
+        } else if (progress.status === 'authorization' && progress.authorizationUrl) {
           const nextAuthorization: AcpAuthorizationDetails = {
             authorizationUrl: progress.authorizationUrl,
             userCode: progress.userCode,
@@ -424,12 +448,14 @@ export function AcpAuthenticationPanel({
           interactionIdRef.current = null;
           setFormValues({});
           setAuthorizationCode('');
+          setRuntimeDownload(null);
           setPhase('cancelled');
         } else if (progress.status === 'error') {
           closePendingAuthorizationWindow();
           interactionIdRef.current = null;
           setFormValues({});
           setAuthorizationCode('');
+          setRuntimeDownload(null);
           setError(progress.error ?? null);
           setPhase('error');
         }
@@ -655,6 +681,33 @@ export function AcpAuthenticationPanel({
     }
   };
 
+  let runtimeDownloadText: string | null = null;
+  if (phase === 'running' && runtimeDownload) {
+    const runtimeLabel =
+      getManagedBuiltinRuntimeByRuntimeName(runtimeDownload.runtimeName)?.displayName ??
+      runtimeDownload.runtimeName;
+    if (runtimeDownload.phase === 'downloading') {
+      runtimeDownloadText =
+        typeof runtimeDownload.percent === 'number'
+          ? t(
+              'agents.authentication.runtimeDownloadingPercent',
+              'Downloading the {{runtime}} runtime… {{percent}}%',
+              { runtime: runtimeLabel, percent: runtimeDownload.percent }
+            )
+          : t(
+              'agents.authentication.runtimeDownloading',
+              'Downloading the {{runtime}} runtime…',
+              { runtime: runtimeLabel }
+            );
+    } else {
+      runtimeDownloadText = t(
+        'agents.authentication.runtimePreparing',
+        'Preparing the {{runtime}} runtime…',
+        { runtime: runtimeLabel }
+      );
+    }
+  }
+
   return (
     <div {...stylex.props(styles.root, !compact && surface.formBlock)}>
       <div {...stylex.props(styles.actions)}>
@@ -702,6 +755,9 @@ export function AcpAuthenticationPanel({
             'Update the target Machine to use interactive authentication for this Provider.'
           )}
         </p>
+      ) : null}
+      {runtimeDownloadText ? (
+        <p className="text-xs text-muted-foreground">{runtimeDownloadText}</p>
       ) : null}
       {phase === 'running' && authorization ? (
         <AcpAuthenticationAuthorizationView

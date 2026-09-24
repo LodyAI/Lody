@@ -180,6 +180,10 @@ import {
   getPerformanceNowMs,
 } from '@/lib/posthog-analytics';
 import {
+  captureAgentRoleApplied,
+  captureAgentRoleMentionsApplied,
+} from '@/lib/agent-role-analytics';
+import {
   SESSION_ACP_CONFIG_USED_EVENT,
   buildSessionCreateAcpAnalyticsProperties,
 } from '@/lib/session-create-analytics';
@@ -3205,6 +3209,20 @@ function WorkspaceChatLanding({
         entrypoint: 'chat_landing',
         launch_mode: launchMode,
         submit_prepare_ms: getDurationSinceMs(submitStartedAtMs),
+        agent_role_used: activeAgentRole != null,
+      });
+      if (activeAgentRole) {
+        // The composer's Role picker only offers Roles bound to the machine the
+        // chat starts on, so a new-chat Role is never cross-machine.
+        captureAgentRoleApplied(postHog, activeAgentRole, {
+          source: 'new_chat',
+          crossMachine: false,
+        });
+      }
+      captureAgentRoleMentionsApplied(postHog, {
+        spans: expandedPrompt.spans,
+        roles: workspaceAgentRoles,
+        executionMachineId: selectedAgent.machineId,
       });
       capturePostHogEvent(postHog, SESSION_ACP_CONFIG_USED_EVENT, {
         user_id: userId,
@@ -6472,17 +6490,53 @@ function WorkspaceChatLanding({
             emptyChats: t('chat.mobileHome.emptyChatsAllMachines', '当前 workspace 还没有任何对话'),
             emptyFilteredChats: t('chat.mobileHome.emptyFilteredChats', '当前过滤条件下没有对话'),
             clearChatFilters: t('chat.mobileHome.clearFilters', '清除所有过滤'),
-            /* First-run hint (no machines + no chats): the user installed
-               the mobile app before starting the desktop client, so nudge
-               them to the download page. The mobile app can't run the agent
-               itself. Kept short on purpose. */
+            /* First-run guide (no machines + no chats): the user installed
+               the mobile app before ever connecting a computer, so walk them
+               through the two ways to connect one — the `lody daemon start`
+               one-liner on any machine, or the desktop app on their computer.
+               The mobile app can't run agents itself — and the phone never
+               opens the download page: both CTAs hand the command/link to the
+               computer via share sheet or clipboard instead. */
             onboarding: {
-              title: t('chat.mobileHome.onboarding.title', 'Lody runs on your computer'),
+              title: t('chat.mobileHome.onboarding.title', 'Connect a machine to start'),
               description: t(
                 'chat.mobileHome.onboarding.description',
-                'Download the desktop app to get started.'
+                'Agents run on a computer you own — this app is mission control.'
               ),
-              downloadButton: t('chat.mobileHome.onboarding.downloadButton', 'Download Lody'),
+              commandHeading: t(
+                'chat.mobileHome.onboarding.commandHeading',
+                'One command — on any machine'
+              ),
+              command: 'npx lody daemon start',
+              commandHint: t(
+                'chat.mobileHome.onboarding.commandHint',
+                'Run it on a server, VM, or your own computer (Node.js 22.14+). It signs the machine into your account — a machine without a browser prints a link you can open on this phone.'
+              ),
+              copyCommandLabel: t('chat.mobileHome.onboarding.copyCommand', 'Copy command'),
+              shareCommandLabel: t('chat.mobileHome.onboarding.shareCommand', 'Send to computer'),
+              desktopHeading: t('chat.mobileHome.onboarding.desktopHeading', 'Or on your computer'),
+              desktopHint: t(
+                'chat.mobileHome.onboarding.desktopHint',
+                'Install the desktop app and sign in — it starts the agent runtime automatically.'
+              ),
+              shareDownloadLabel: t('chat.mobileHome.onboarding.shareDownload', 'Send to computer'),
+              copyDownloadLabel: t('chat.mobileHome.onboarding.copyDownload', 'Copy download link'),
+              nextStepsHeading: t(
+                'chat.mobileHome.onboarding.nextStepsHeading',
+                'Once a machine is online'
+              ),
+              nextStepMachine: t(
+                'chat.mobileHome.onboarding.nextStepMachine',
+                'It shows up in this workspace automatically.'
+              ),
+              nextStepProject: t(
+                'chat.mobileHome.onboarding.nextStepProject',
+                'Add a project folder on it from Projects → +.'
+              ),
+              nextStepAgent: t(
+                'chat.mobileHome.onboarding.nextStepAgent',
+                'Pick an agent in Settings → Agents, then send your first task.'
+              ),
             },
           }}
           onWorkspaceMenuOpen={
@@ -6514,10 +6568,9 @@ function WorkspaceChatLanding({
           }}
           showArchived={mobileHomeShowArchived}
           onShowArchivedToggle={() => setMobileHomeShowArchived((prev) => !prev)}
-          /* First-run onboarding CTA — opens the localized download page in
-             the external browser (same handler the desktop no-machine hint
-             uses). */
-          onDownloadClient={handleDownloadClient}
+          /* The localized download URL is the payload the guide's share/copy
+             actions hand to the user's computer — the phone never opens it. */
+          onboardingDownloadUrl={getDownloadPageUrl(i18n.resolvedLanguage ?? i18n.language)}
         />
         {multiWorkspaceAvailable ? (
           <>

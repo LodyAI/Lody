@@ -295,6 +295,10 @@ export function selectMentionMenuView(
   };
 }
 
+export function isCommandMenuTrigger(trigger: string): boolean {
+  return trigger === '/' || trigger === '、';
+}
+
 /**
  * The view for the active trigger. `@` runs the full two-level contract; a
  * category with a `directTrigger` opens straight into its own level.
@@ -308,7 +312,7 @@ export function selectMentionMenuViewForTrigger(
   if (trigger === MENTION_TRIGGER) {
     return selectMentionMenuView(categories, search, options);
   }
-  if (trigger === '/') {
+  if (isCommandMenuTrigger(trigger)) {
     const directCategories = categories.filter((category) => category.directTrigger === '/');
     return {
       level: 'aggregate',

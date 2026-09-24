@@ -362,3 +362,54 @@
     transform: none;
   }
 }
+
+.download-page.download-page--nightly {
+  --landing-ink: 240 14% 18%;
+  --landing-ink-muted: 240 10% 36%;
+  --landing-border: 240 12% 64%;
+  --landing-primary: 245 24% 40%;
+  --landing-surface-1: 240 16% 96%;
+  --landing-surface-2: 240 14% 92%;
+  --mkt-panel-border-strong: hsl(245 20% 48% / 0.5);
+}
+html.dark .download-page.download-page--nightly {
+  --landing-ink: 240 18% 93%;
+  --landing-ink-muted: 240 12% 74%;
+  --landing-border: 240 12% 34%;
+  --landing-primary: 245 32% 78%;
+  --landing-surface-1: 240 14% 13%;
+  --landing-surface-2: 240 14% 17%;
+}
+.download-nightly__stable {
+  display: inline-block;
+  margin-top: 1.4rem;
+  color: var(--dl-primary);
+  text-underline-offset: 0.25em;
+  text-decoration: underline;
+}
+.download-nightly__description,
+.download-nightly__status,
+.download-nightly__switching {
+  color: var(--dl-ink-muted);
+  line-height: 1.65;
+  margin-bottom: 1.25rem;
+}
+.download-nightly__version {
+  font-family: var(--dl-mono);
+  margin-bottom: 0.75rem;
+  overflow-wrap: anywhere;
+}
+.download-nightly__switching {
+  margin-top: 1.5rem;
+  font-size: 0.875rem;
+}
+.download-nightly__status button {
+  width: fit-content;
+}
+
+html.marketing-atmosphere-active:has(.download-page--nightly) body {
+  background-color: rgb(160, 159, 173);
+}
+html.dark.marketing-atmosphere-active:has(.download-page--nightly) body {
+  background-color: rgb(26, 26, 34);
+}

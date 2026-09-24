@@ -20,6 +20,7 @@ import {
   WINDOW_DRAG_EXEMPT_CLASS,
   WINDOW_DRAG_HEADER_CLASS,
   useMacTrafficLightRowPadClass,
+  useWindowsCaptionRowPadClass,
 } from '@/ui/window-drag-region';
 import { useElectronFullscreen } from '@/lib/electron';
 import { Badge } from '@lody/ui/badge';
@@ -607,7 +608,7 @@ function SidebarHeaderIconButton({
   if (disabled) return button;
   return (
     <Tooltip.Root>
-      <Tooltip.Trigger render={button}/>
+      <Tooltip.Trigger render={button} />
       <Tooltip.Content side="bottom" className="flex items-center gap-1.5">
         <span>{label}</span>
         {shortcut ? <Kbd>{shortcut}</Kbd> : null}
@@ -756,6 +757,7 @@ export const LoroSidebar = memo(function LoroSidebar({
   const isMobile = useIsMobile();
   const isElectronFullscreen = useElectronFullscreen();
   const macTrafficLightRowPadClass = useMacTrafficLightRowPadClass();
+  const windowsCaptionRowPadClass = useWindowsCaptionRowPadClass();
   const { t } = useTranslation();
   const collapseShortcut = useCommandShortcutLabel('sidebar.toggle');
   const backShortcut = useCommandShortcutLabel('nav.back');
@@ -877,8 +879,8 @@ export const LoroSidebar = memo(function LoroSidebar({
           showUpdatedProjectNames={showUpdatedProjectNames}
           onShowUpdatedProjectNamesChange={onShowUpdatedProjectNamesChange}
           labels={mergedLabels.filter}
-          side="bottom"
-          align="end"
+          side="right"
+          align="start"
           triggerClassName="h-5 w-5 [&_svg]:h-4 [&_svg]:w-4"
         />
       ))
@@ -968,15 +970,19 @@ export const LoroSidebar = memo(function LoroSidebar({
     workspaceSwitcherEnabled ? (
       <Menu.Root modal={!isMobile}>
         <div className="min-w-0 flex-1">
-          <Menu.Trigger render={<button
-              type="button"
-              className={cn(workspaceIdentityClassName, windowDrag && WINDOW_DRAG_EXEMPT_CLASS)}
-              data-workspace-switcher-trigger
-              data-workspace-syncing={workspaceSyncing ? 'true' : 'false'}
-              aria-busy={workspaceSyncing || undefined}
-            >
-              {workspaceIdentity}
-            </button>}>
+          <Menu.Trigger
+            render={
+              <button
+                type="button"
+                className={cn(workspaceIdentityClassName, windowDrag && WINDOW_DRAG_EXEMPT_CLASS)}
+                data-workspace-switcher-trigger
+                data-workspace-syncing={workspaceSyncing ? 'true' : 'false'}
+                aria-busy={workspaceSyncing || undefined}
+              >
+                {workspaceIdentity}
+              </button>
+            }
+          >
             <button
               type="button"
               className={cn(workspaceIdentityClassName, windowDrag && WINDOW_DRAG_EXEMPT_CLASS)}
@@ -1027,7 +1033,7 @@ export const LoroSidebar = memo(function LoroSidebar({
                         className="gap-1.5 ps-2"
                         onClickCapture={(event) => {
                           if (!workspaceSlug || !isNewWindowClick(event)) return;
-                          if (openDesktopWindow(undefined, workspaceSlug)) {
+                          if (openDesktopWindow(undefined, workspaceSlug, 'modifier_click')) {
                             event.preventDefault();
                             event.stopPropagation();
                           }
@@ -1062,7 +1068,7 @@ export const LoroSidebar = memo(function LoroSidebar({
 
                     if (!isElectronRenderer() || !workspaceSlug) return row;
 
-                    const contextTrigger = <ContextMenu.Trigger >{row}</ContextMenu.Trigger>;
+                    const contextTrigger = <ContextMenu.Trigger>{row}</ContextMenu.Trigger>;
                     return (
                       <ContextMenu.Root key={ws.id}>
                         {ws.id === currentWorkspaceId ? (
@@ -1072,7 +1078,7 @@ export const LoroSidebar = memo(function LoroSidebar({
                           // beside the row. Tooltip and ContextMenu roots render no
                           // DOM, so both triggers' props land on the row element.
                           <Tooltip.Root>
-                            <Tooltip.Trigger render={contextTrigger}/>
+                            <Tooltip.Trigger render={contextTrigger} />
                             <Tooltip.Content side="right" sideOffset={8}>
                               {newWindowHint}
                             </Tooltip.Content>
@@ -1081,7 +1087,7 @@ export const LoroSidebar = memo(function LoroSidebar({
                         <ContextMenu.Content>
                           <ContextMenu.Item
                             onClick={() => {
-                              openDesktopWindow(undefined, workspaceSlug);
+                              openDesktopWindow(undefined, workspaceSlug, 'context_menu');
                             }}
                           >
                             <AppWindow />
@@ -1170,7 +1176,7 @@ export const LoroSidebar = memo(function LoroSidebar({
             'group/sidebar-header relative flex items-center justify-between gap-2',
             isMobile
               ? 'pl-[calc(12px+var(--safe-area-left))] pr-[calc(12px+var(--safe-area-right))] pt-[calc(12px+var(--safe-area-top))]'
-              : cn('h-11 px-1.5', macTrafficLightRowPadClass),
+              : cn('h-11 px-1.5', macTrafficLightRowPadClass, windowsCaptionRowPadClass),
             windowDrag && WINDOW_DRAG_HEADER_CLASS
           )}
         >
@@ -1458,9 +1464,13 @@ export const LoroSidebar = memo(function LoroSidebar({
             </IconButton>
 
             <Menu.Root>
-              <Menu.Trigger render={<IconButton label="Help">
-                  <CircleHelp strokeWidth={1.5} />
-                </IconButton>}>
+              <Menu.Trigger
+                render={
+                  <IconButton label="Help">
+                    <CircleHelp strokeWidth={1.5} />
+                  </IconButton>
+                }
+              >
                 <IconButton label="Help">
                   <CircleHelp strokeWidth={1.5} />
                 </IconButton>

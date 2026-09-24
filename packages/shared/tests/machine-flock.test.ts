@@ -4,6 +4,7 @@ import {
   applyMachineFlockRowEvents,
   applyProviderSetupCancellationToFlock,
   buildMachineDeleteLocalProjectCommand,
+  buildSessionLaunchConfig,
   deleteAgentConfigFromFlock,
   deleteMachineFlockRowFromFlock,
   getMachineFlockAcpCapabilities,
@@ -212,6 +213,7 @@ describe('machine Flock helpers', () => {
     const sessionId = 'session-1' as SessionId;
     const launchConfig = {
       customAcp: { command: 'node', args: ['agent.js'] },
+      runtimeOverrides: { piExtensions: ['/fixture/plugin.ts'] },
       env: { TOKEN: 'secret' },
       worktreeSetup: { scripts: { bash: 'pnpm install' }, timeoutMs: 30_000 },
     };
@@ -225,6 +227,7 @@ describe('machine Flock helpers', () => {
 
     const rows = readMachineFlockRowsFromFlock(flock);
     expect(getMachineFlockSessionLaunchConfig(rows, sessionId)).toEqual(launchConfig);
+    expect(buildSessionLaunchConfig(launchConfig)).toEqual(launchConfig);
     expect(
       mergeSessionLaunchConfig(getMachineFlockSessionLaunchConfig(rows, sessionId), {
         env: { FALLBACK: 'ignored' },

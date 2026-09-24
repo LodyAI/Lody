@@ -1,8 +1,11 @@
 import { useMemo, useState, type ReactNode } from 'react';
 import * as stylex from '@stylexjs/stylex';
 
+import { usePostHog } from '@posthog/react';
+
 import { filterFuzzyOptions, shouldOfferOptionSearch } from '@/lib/fuzzy-option-filter';
 import { withClassName } from '@/lib/stylex';
+import { capturePickerSearchSelected, type SearchPickerKind } from '@/lib/picker-search-analytics';
 import { MenuSearchInput } from '@/ui/menu';
 import { composerSurface } from './composer-surface';
 
@@ -38,6 +41,8 @@ export type MenuOptionSearchListProps<TOption extends MenuSearchableOption> = {
   onSelect: (option: TOption) => void;
   searchPlaceholder: string;
   emptyText: string;
+  /** Reports picks made after typing a search term (`picker/search_selected`). */
+  searchAnalyticsPicker?: SearchPickerKind;
 };
 
 /**
@@ -55,7 +60,9 @@ export function MenuOptionSearchList<TOption extends MenuSearchableOption>({
   onSelect,
   searchPlaceholder,
   emptyText,
+  searchAnalyticsPicker,
 }: MenuOptionSearchListProps<TOption>) {
+  const postHog = usePostHog();
   const [query, setQuery] = useState('');
   const searchable = shouldOfferOptionSearch(options.length);
 
@@ -70,9 +77,21 @@ export function MenuOptionSearchList<TOption extends MenuSearchableOption>({
     [options, query]
   );
 
+  const select = (option: TOption) => {
+    if (searchAnalyticsPicker) {
+      capturePickerSearchSelected(postHog, {
+        picker: searchAnalyticsPicker,
+        term: query,
+        rank: filtered.indexOf(option),
+        resultCount: filtered.length,
+      });
+    }
+    onSelect(option);
+  };
+
   const submitTopMatch = () => {
     const top = filtered.find((option) => !option.disabled);
-    if (top) onSelect(top);
+    if (top) select(top);
   };
 
   return (
@@ -93,7 +112,7 @@ export function MenuOptionSearchList<TOption extends MenuSearchableOption>({
         {filtered.length === 0 ? (
           <div {...stylex.props(composerSurface.empty)}>{emptyText}</div>
         ) : (
-          filtered.map((option) => renderOption(option, () => onSelect(option)))
+          filtered.map((option) => renderOption(option, () => select(option)))
         )}
       </div>
     </div>

@@ -70,6 +70,8 @@ import {
 } from '@/lib/code-collab-live-text-update';
 import { getSessionFileMonacoLanguageId, isSessionMarkdownPath } from '@/lib/session-file-language';
 import { downloadBytesAsFile } from '@/lib/download-file';
+import { usePostHog } from '@posthog/react';
+import { capturePostHogEvent, getAnalyticsFileKind } from '@/lib/posthog-analytics';
 import { useCodeCollabLiveText } from '@/hooks/use-code-collab-live-text';
 import { useMachineFlockRows } from '@/hooks/use-machine-flock-rows';
 import {
@@ -234,6 +236,7 @@ function SessionFileContentViewImpl({
   onToggleVisualAnnotationInChat,
 }: SessionFileContentViewProps) {
   const { t } = useTranslation();
+  const postHog = usePostHog();
   const tRef = useLatestRef(t);
   const onSaveStateChangeRef = useLatestRef(onSaveStateChange);
   const activeVSCodeTheme = useActiveVSCodeTheme();
@@ -644,6 +647,9 @@ function SessionFileContentViewImpl({
   >(undefined);
   const externalSeqRef = useRef(0);
   const latestEditorTextRef = useRef<string | undefined>(undefined);
+  const lastAckedExternalTextRef = useRef<
+    { text: string; snapshot: SessionFileContentSnapshot } | undefined
+  >(undefined);
   const latestStableSelectionRef = useRef<StableProviderEditorSelection | null>(null);
   const recentLocalTextEchoTrackerRef = useRef(new RecentLocalTextEchoTracker());
   const hasAcceptedLocalContentChangeRef = useRef(false);
@@ -675,20 +681,22 @@ function SessionFileContentViewImpl({
   useEffect(() => {
     setExternalTextUpdate(undefined);
     latestEditorTextRef.current = undefined;
+    lastAckedExternalTextRef.current = undefined;
     latestStableSelectionRef.current = null;
     recentLocalTextEchoTrackerRef.current.clear();
     hasAcceptedLocalContentChangeRef.current = false;
   }, [liveFileId]);
 
-  const openedLiveText =
+  const openedLiveSnapshot =
     shouldUseProviderFileContent && data.status === 'ready' && data.snapshot.kind === 'text'
-      ? data.snapshot.text
+      ? data.snapshot
       : undefined;
+  const openedLiveText = openedLiveSnapshot?.text;
 
   useEffect(() => {
-    if (openedLiveText === undefined) return;
-    latestEditorTextRef.current = openedLiveText;
-  }, [liveFileId, openedLiveText]);
+    if (openedLiveSnapshot === undefined) return;
+    latestEditorTextRef.current = openedLiveSnapshot.text;
+  }, [liveFileId, openedLiveSnapshot]);
 
   const liveTextUpdate = useCodeCollabLiveText(
     shouldUseProviderFileContent ? fileProvider : null,
@@ -754,9 +762,22 @@ function SessionFileContentViewImpl({
 
   const handleExternalTextUpdateApplied = useCallback(
     (result: 'applied' | 'no-op') => {
+      // An acknowledged snapshot must not replay when preview or tab switching
+      // remounts the editor. Preserve a newer update awaiting its own acknowledgement.
+      if (externalTextUpdate) {
+        setExternalTextUpdate((current) =>
+          current?.seq === externalTextUpdate.seq ? undefined : current
+        );
+      }
       if (result === 'applied') {
         if (externalTextUpdate) {
           latestEditorTextRef.current = externalTextUpdate.text;
+          if (data.status === 'ready') {
+            lastAckedExternalTextRef.current = {
+              text: externalTextUpdate.text,
+              snapshot: data.snapshot,
+            };
+          }
         }
         if (preservePendingOnNextExternalTextAppliedRef.current) {
           preservePendingOnNextExternalTextAppliedRef.current = false;
@@ -769,11 +790,17 @@ function SessionFileContentViewImpl({
       if (result === 'no-op') {
         if (externalTextUpdate) {
           latestEditorTextRef.current = externalTextUpdate.text;
+          if (data.status === 'ready') {
+            lastAckedExternalTextRef.current = {
+              text: externalTextUpdate.text,
+              snapshot: data.snapshot,
+            };
+          }
         }
         return;
       }
     },
-    [externalTextUpdate, handleExternalTextAppliedToSaveState]
+    [data, externalTextUpdate, handleExternalTextAppliedToSaveState]
   );
 
   const handleSaveConflictResolve = useCallback(
@@ -867,6 +894,16 @@ function SessionFileContentViewImpl({
     saveStatus.kind === 'error' ||
     saveStatus.kind === 'conflict_pending' ||
     saveStatus.kind === 'conflict';
+  const resolveProviderEditorMountText = (snapshot: { text: string }): string => {
+    if (hasAcceptedLocalContentChangeRef.current || isProviderEditorDirty) {
+      return latestEditorTextRef.current ?? snapshot.text;
+    }
+    const acked = lastAckedExternalTextRef.current;
+    if (acked && acked.snapshot === snapshot) {
+      return acked.text;
+    }
+    return snapshot.text;
+  };
   markProviderConflictPendingRef.current = markProviderConflictPending;
   useEffect(() => {
     if (saveStatus.kind === 'saved') {
@@ -942,7 +979,11 @@ function SessionFileContentViewImpl({
     if (data.status !== 'ready' || data.snapshot.kind !== 'text') return;
     const content = latestEditorTextRef.current ?? data.snapshot.text;
     downloadBytesAsFile(normalizedPath, new TextEncoder().encode(content));
-  }, [data, normalizedPath]);
+    capturePostHogEvent(postHog, 'file_preview/downloaded', {
+      file_kind: getAnalyticsFileKind(normalizedPath),
+      source: 'file_viewer',
+    });
+  }, [data, normalizedPath, postHog]);
   const saveViewState = useMemo<SessionFileSaveViewState>(
     () => ({
       dirty: isProviderEditorDirty,
@@ -1250,11 +1291,7 @@ function SessionFileContentViewImpl({
             {isMarkdownTextFile && preferNativeMarkdownSelection ? (
               <NativeMarkdownSource
                 key={liveFileId ?? normalizedPath}
-                text={
-                  hasAcceptedLocalContentChangeRef.current || isProviderEditorDirty
-                    ? (latestEditorTextRef.current ?? data.snapshot.text)
-                    : data.snapshot.text
-                }
+                text={resolveProviderEditorMountText(data.snapshot)}
                 readOnly={!isProviderFileEditable}
                 wordWrap={wordWrapEnabled}
                 selectedLines={selectedLines}
@@ -1271,11 +1308,7 @@ function SessionFileContentViewImpl({
             ) : (
               <LazyProviderTextMonacoViewer
                 key={lspModelUri?.toString() ?? liveFileId ?? normalizedPath}
-                text={
-                  hasAcceptedLocalContentChangeRef.current || isProviderEditorDirty
-                    ? (latestEditorTextRef.current ?? data.snapshot.text)
-                    : data.snapshot.text
-                }
+                text={resolveProviderEditorMountText(data.snapshot)}
                 language={getSessionFileMonacoLanguageId(normalizedPath)}
                 selectedLines={selectedLines}
                 resolvedTheme={resolvedTheme}
@@ -1355,6 +1388,11 @@ function SessionFileContentViewImpl({
   // button only appears when a Monaco editor is mounted — a rendered SVG/Markdown
   // preview has no editor to search.
   const showPreviewToggle = isSvgTextFile || isMarkdownTextFile || isHtmlTextFile;
+  const filePreviewActive = isSvgTextFile
+    ? svgRenderMode === 'rendered'
+    : isMarkdownTextFile
+      ? markdownRenderMode === 'rendered'
+      : htmlRenderMode === 'rendered';
   const showSearchButton =
     isTextFileReady &&
     !showSvgRendered &&
@@ -1380,14 +1418,14 @@ function SessionFileContentViewImpl({
           <div className="ml-auto flex items-center gap-1">
             {showPreviewToggle ? (
               <FilePreviewToggle
-                active={
-                  isSvgTextFile
-                    ? svgRenderMode === 'rendered'
-                    : isMarkdownTextFile
-                      ? markdownRenderMode === 'rendered'
-                      : htmlRenderMode === 'rendered'
-                }
+                active={filePreviewActive}
                 onToggle={() => {
+                  if (!filePreviewActive) {
+                    capturePostHogEvent(postHog, 'file_preview/opened', {
+                      file_kind: getAnalyticsFileKind(normalizedPath),
+                      source: 'preview_toggle',
+                    });
+                  }
                   if (isSvgTextFile) {
                     setSvgRenderMode((mode) => (mode === 'rendered' ? 'code' : 'rendered'));
                   } else if (isMarkdownTextFile) {

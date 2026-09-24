@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAtom } from 'jotai';
+import { usePostHog } from '@posthog/react';
 import { Monitor, Moon, SquareTerminal, Sun } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
@@ -8,6 +9,7 @@ import { space } from '@lody/ui/tokens/scales.stylex';
 
 import {
   conversationFontSizeAtom,
+  fontLigaturesEnabledAtom,
   interfaceFontFamilyAtom,
   normalizeConversationFontSize,
   normalizeTerminalFontSize,
@@ -24,6 +26,8 @@ import { useIsMobile } from '@/hooks/use-mobile';
 import { listSystemFontFamilies } from '@/lib/local-fonts';
 import { Combobox } from '@lody/ui/combobox';
 import { NumberField } from '@lody/ui/number-field';
+import { Switch } from '@lody/ui/switch';
+import { capturePostHogEvent } from '@/lib/posthog-analytics';
 import { LanguageSelector } from '../../i18n';
 import { useTheme, type Theme } from '../../theme-provider';
 import { settingContainerClass } from '.';
@@ -50,6 +54,8 @@ export interface AppearanceSettingsViewProps {
   onSystemFontMenuOpen: () => void;
   terminalFontSize: number;
   onTerminalFontSizeChange: (value: number) => void;
+  fontLigaturesEnabled: boolean;
+  onFontLigaturesEnabledChange: (value: boolean) => void;
 }
 
 function buildSystemFontOptions(
@@ -216,6 +222,8 @@ export function AppearanceSettingsView({
   onSystemFontMenuOpen,
   terminalFontSize,
   onTerminalFontSizeChange,
+  fontLigaturesEnabled,
+  onFontLigaturesEnabledChange,
 }: AppearanceSettingsViewProps) {
   const { t } = useTranslation();
 
@@ -356,8 +364,6 @@ export function AppearanceSettingsView({
         </CompactRow>
       </CompactSection>
 
-      <MobileAppIconSettings />
-
       {isElectron ? (
         <CompactSection title={t('settings.terminal.title', 'Terminal')}>
           <CompactRow
@@ -429,6 +435,22 @@ export function AppearanceSettingsView({
           </div>
         </CompactSection>
       ) : null}
+      <CompactSection>
+        <CompactRow
+          label={t('settings.fontLigatures.label', 'Font ligatures')}
+          helper={t(
+            'settings.fontLigatures.helper',
+            'Applies to conversation, code, and tool output.'
+          )}
+        >
+          <Switch
+            checked={fontLigaturesEnabled}
+            onCheckedChange={onFontLigaturesEnabledChange}
+            aria-label={t('settings.fontLigatures.label', 'Font ligatures')}
+          />
+        </CompactRow>
+      </CompactSection>
+      <MobileAppIconSettings layout={isElectron ? 'desktop' : 'mobile'} />
     </div>
   );
 }
@@ -439,10 +461,25 @@ function DesktopAppearanceSettings() {
   const [interfaceFontFamily, setInterfaceFontFamily] = useAtom(interfaceFontFamilyAtom);
   const [terminalFontFamily, setTerminalFontFamily] = useAtom(terminalFontFamilyAtom);
   const [terminalFontSize, setTerminalFontSize] = useAtom(terminalFontSizeAtom);
+  const [fontLigaturesEnabled, setFontLigaturesEnabled] = useAtom(fontLigaturesEnabledAtom);
   const [systemFontFamilies, setSystemFontFamilies] = useState<string[]>([]);
   const [systemFontLoadState, setSystemFontLoadState] = useState<SystemFontLoadState>('idle');
   const isElectron = typeof window !== 'undefined' && window.__LODY_ELECTRON__ === true;
   const savedThemeRef = useRef<Theme>(theme);
+  const postHog = usePostHog();
+
+  const handleConversationFontSizeChange = useCallback(
+    (next: ConversationFontSize) => {
+      if (next !== conversationFontSize) {
+        capturePostHogEvent(postHog, 'settings/font_size_changed', {
+          from: conversationFontSize,
+          to: next,
+        });
+      }
+      setConversationFontSize(next);
+    },
+    [conversationFontSize, postHog, setConversationFontSize]
+  );
 
   const handleThemePreview = useCallback(
     (value: Theme) => {
@@ -484,7 +521,7 @@ function DesktopAppearanceSettings() {
       onThemeCommit={handleThemeCommit}
       onThemeCancel={handleThemeCancel}
       conversationFontSize={conversationFontSize}
-      onConversationFontSizeChange={setConversationFontSize}
+      onConversationFontSizeChange={handleConversationFontSizeChange}
       isElectron={isElectron}
       interfaceFontFamily={interfaceFontFamily}
       onInterfaceFontFamilyChange={setInterfaceFontFamily}
@@ -495,6 +532,8 @@ function DesktopAppearanceSettings() {
       onSystemFontMenuOpen={handleSystemFontMenuOpen}
       terminalFontSize={terminalFontSize}
       onTerminalFontSizeChange={setTerminalFontSize}
+      fontLigaturesEnabled={fontLigaturesEnabled}
+      onFontLigaturesEnabledChange={setFontLigaturesEnabled}
     />
   );
 }
