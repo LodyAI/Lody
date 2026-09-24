@@ -40,6 +40,8 @@ notification. No live Claude/Grok title generation was invoked.
 
 Full `pnpm check`, `pnpm format`, and documentation checks passed before submission.
 
+Core 0.1.7 is now published. Claude, Codex and Grok pin that release; the two npm lockfiles record its registry integrity. Lody pins the Core release commit and retains its workspace override. The published package source matches that checkout.
+
 ## Companion PRs
 
 - [Core #13](https://github.com/LodyAI/acp-extension-core/pull/13)

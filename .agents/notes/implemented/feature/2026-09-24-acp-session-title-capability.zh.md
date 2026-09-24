@@ -31,6 +31,8 @@ Codex 初始化/事件测试、Grok 代理/运行时测试，以及 Claude 构�
 
 提交前完整 `pnpm check`、`pnpm format` 和文档检查通过。
 
+Core 0.1.7 已发布。Claude、Codex、Grok 已固定依赖该版本，两个 npm 锁文件记录对应发布包的完整性摘要。Lody 固定 Core 发布提交并保留 workspace 覆盖；已核对 npm 发布包源码与该提交一致。
+
 ## 配套 PR
 
 - [Core #13](https://github.com/LodyAI/acp-extension-core/pull/13)
