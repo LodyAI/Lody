@@ -700,8 +700,10 @@ export function getLoroSidebarFooterIconButtonClassName(isMobile: boolean, activ
       ? 'h-12 w-12 rounded-xl [&_svg]:h-5 [&_svg]:w-5'
       : 'h-6 w-6 rounded-md [&_svg]:h-3.5 [&_svg]:w-3.5',
     'transition-colors focus-visible:ring-1 focus-visible:ring-sidebar-ring/40',
+    // A 12% foreground fill: the row selection token is tuned for full-width
+    // rows and nearly vanishes behind a 24px icon.
     active
-      ? 'bg-sidebar-selection text-sidebar-selection-foreground'
+      ? 'bg-foreground/[0.12] text-sidebar-selection-foreground hover:bg-foreground/[0.16]'
       : 'text-sidebar-foreground dark:text-sidebar-foreground-muted hover:bg-sidebar-hover hover:text-sidebar-hover-foreground'
   );
 }
@@ -1462,38 +1464,63 @@ export const LoroSidebar = memo(function LoroSidebar({
             </IconButton>
 
             {/* Low-frequency places (Archive, Help) share one "More" menu so
-                the footer does not keep an always-visible archive icon. The
-                trigger reads as active while Archive is the open page. */}
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <IconButton label={t('common.more', 'More')} active={activeNav === 'archive'}>
-                  <LayoutGrid strokeWidth={1.5} />
-                </IconButton>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent side="top" align="end" className="min-w-[160px]">
-                <DropdownMenuItem onSelect={() => onArchiveClicked?.()}>
-                  <Archive className="h-4 w-4" />
-                  {t('archive.title', 'Archive')}
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onSelect={() => onDocsClicked?.()}>
-                  <BookOpen className="h-4 w-4" />
-                  {mergedLabels.docs}
-                </DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => onJoinCommunityClicked?.()}>
-                  <Users className="h-4 w-4" />
-                  {mergedLabels.joinCommunity}
-                </DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => onFeedbackClicked?.()}>
-                  <MessageSquareMore className="h-4 w-4" />
-                  {mergedLabels.feedback}
-                </DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => onBugReportClicked?.()}>
-                  <Bug className="h-4 w-4" />
-                  {mergedLabels.bugReport}
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+                the footer does not keep an always-visible archive icon. While
+                Archive is open, the same slot becomes its exit: the archive
+                icon, turning into a back arrow on hover, returns to where the
+                user came from (Home when there is no history). */}
+            {activeNav === 'archive' ? (
+              <IconButton
+                label={t('archive.leave', 'Leave Archive')}
+                title={t('archive.leave', 'Leave Archive')}
+                active
+                className="group"
+                onClick={() => {
+                  if (canGoBack && commands.execute('nav.back')) return;
+                  if (canGoBack) {
+                    window.history.back();
+                    return;
+                  }
+                  onHomeClicked?.();
+                }}
+              >
+                <Archive strokeWidth={1.5} className="group-hover:hidden group-focus-visible:hidden" />
+                <ArrowLeft
+                  strokeWidth={1.5}
+                  className="hidden group-hover:block group-focus-visible:block"
+                />
+              </IconButton>
+            ) : (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <IconButton label={t('common.more', 'More')}>
+                    <LayoutGrid strokeWidth={1.5} />
+                  </IconButton>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent side="top" align="end" className="min-w-[160px]">
+                  <DropdownMenuItem onSelect={() => onArchiveClicked?.()}>
+                    <Archive className="h-4 w-4" />
+                    {t('archive.title', 'Archive')}
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onSelect={() => onDocsClicked?.()}>
+                    <BookOpen className="h-4 w-4" />
+                    {mergedLabels.docs}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => onJoinCommunityClicked?.()}>
+                    <Users className="h-4 w-4" />
+                    {mergedLabels.joinCommunity}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => onFeedbackClicked?.()}>
+                    <MessageSquareMore className="h-4 w-4" />
+                    {mergedLabels.feedback}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => onBugReportClicked?.()}>
+                    <Bug className="h-4 w-4" />
+                    {mergedLabels.bugReport}
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
           </div>
 
           {isMobile ? (

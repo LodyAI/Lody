@@ -252,6 +252,29 @@ End of synthetic document.`);
     expect(container?.querySelector('code')).toBeNull();
   });
 
+  it('copies a table as Markdown from its copy button', async () => {
+    const writeText = vi.fn(async (_text: string) => undefined);
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    });
+    await renderMarkdown(
+      ['| Name | Notes |', '| --- | --- |', '| a | x \\| y |', '| b | plain |'].join('\n')
+    );
+
+    const copy = container?.querySelector<HTMLButtonElement>('button[aria-label="Copy table"]');
+    expect(copy).not.toBeNull();
+    await act(async () => {
+      copy?.click();
+    });
+
+    // No rich clipboard in the test DOM: the Markdown text is what is copied.
+    expect(writeText).toHaveBeenCalledWith(
+      ['| Name | Notes |', '| --- | --- |', '| a | x \\| y |', '| b | plain |'].join('\n')
+    );
+    expect(copy?.getAttribute('aria-label')).toBe('Copied');
+  });
+
   it('renders links that only name a GitHub PR or issue as reference labels', async () => {
     await renderMarkdown(
       [

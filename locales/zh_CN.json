@@ -4137,5 +4137,7 @@
   "sessions.prompts.createPrOrigin": "（此消息由 Lody 的「**创建 PR**」按钮发送）",
   "sessions.prompts.createDraftPrOrigin": "（此消息由 Lody 的「**创建草稿 PR**」按钮发送）",
   "sessions.githubReference.pullRequest": "PR",
-  "sessions.githubReference.issue": "Issue"
+  "sessions.githubReference.issue": "Issue",
+  "archive.leave": "退出归档",
+  "common.copyTable": "复制表格"
 }

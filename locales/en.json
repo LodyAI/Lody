@@ -4137,5 +4137,7 @@
   "sessions.prompts.createPrOrigin": "(Sent by the **Create PR** button in Lody.)",
   "sessions.prompts.createDraftPrOrigin": "(Sent by the **Create Draft PR** button in Lody.)",
   "sessions.githubReference.pullRequest": "PR",
-  "sessions.githubReference.issue": "Issue"
+  "sessions.githubReference.issue": "Issue",
+  "archive.leave": "Leave Archive",
+  "common.copyTable": "Copy table"
 }

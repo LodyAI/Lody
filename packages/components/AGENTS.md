@@ -64,8 +64,8 @@ mobile surfaces. Background for the rules below:
   `AnimatePresence` around such a subtree sets `presenceAffectsLayout={false}` unless it
   drives `layout` animations; otherwise its context changes on every parent render.
 - Dark-theme brightness ceiling (`vscode-theme-css.ts`): every text foreground token is
-  held at the interface ceiling (11.6:1 on the canvas); only prose (`text-reading`,
-  14.2:1), `text-foreground-strong` (headings, bold), the selected sidebar row and the
+  held at the interface ceiling (13:1 on the canvas); only prose (`text-reading`,
+  15.9:1), `text-foreground-strong` (headings, bold), the selected sidebar row and the
   active tab go above it. Unselected sidebar text uses `text-sidebar-row-foreground`. Never hard-code
   white text on theme surfaces. Hover changes a row's fill, never its text color.
 - Markdown code blocks tokenize in `lib/markdown-highlight.worker.ts`; the main thread

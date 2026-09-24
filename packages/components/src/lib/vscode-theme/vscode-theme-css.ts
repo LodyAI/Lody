@@ -856,12 +856,13 @@ const SELECTED_FOREGROUND_VARIABLES = [
  */
 const READING_THEME_OVERRIDES: Record<string, Partial<Record<string, string>>> = {
   vesper: {
-    // Prose at HSL lightness 88% on the warm hue (14.2:1); the selected
-    // conversation and the active tab use the same color.
-    '--reading-foreground': '#E4E1DD',
-    '--sidebar-row-foreground': '#BAB6AE',
-    '--sidebar-selection-foreground': '#E4E1DD',
-    '--tab-active-foreground': '#E4E1DD',
+    // Prose at HSL lightness 93% on the warm hue (15.9:1); the selected
+    // conversation and the active tab use the same color. Sidebar titles at
+    // lightness 76% (10.6:1).
+    '--reading-foreground': '#EFEDEB',
+    '--sidebar-row-foreground': '#C7C3BD',
+    '--sidebar-selection-foreground': '#EFEDEB',
+    '--tab-active-foreground': '#EFEDEB',
   },
 };
 
@@ -894,14 +895,14 @@ const resolveLuminanceCappedColor = (
  * gains no legibility, but a pure-white glyph on a near-black canvas halates:
  * strokes bloom and dense text (CJK especially) blurs, most for readers with
  * astigmatism. Vesper's #FFFFFF on #101010 is 19:1. In dark themes interface
- * text is capped at 11.6:1 (#D2CDC5 on the warm Vesper canvas), conversation
- * prose, the selected row and the active tab at 14.2:1 (#E4E1DD), headings at 15:1, and
- * unselected sidebar text at 9.2:1 so the sidebar always sits below the reading
- * column. Light themes are capped
+ * text is capped at 13:1 (about HSL lightness 84% on the warm Vesper canvas),
+ * conversation prose, the selected row and the active tab at 15.9:1 (#EFEDEB,
+ * lightness 93%), headings at 17.3:1, and unselected sidebar text at 10.6:1 so
+ * the sidebar always sits below the reading column. Light themes are capped
  * higher, where glare is milder.
  */
 const READING_CONTRAST_CAP = {
-  dark: { strong: 15, prose: 14.2, reading: 11.6, sidebarRow: 9.2 },
+  dark: { strong: 17.3, prose: 15.9, reading: 13, sidebarRow: 10.6 },
   light: { strong: 21, prose: 16, reading: 16, sidebarRow: 10 },
 } as const;
 

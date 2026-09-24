@@ -190,6 +190,24 @@ describe('LoroSidebar pinned section', () => {
     expect(onArchiveClicked).toHaveBeenCalledTimes(1);
   });
 
+  it('turns the More slot into the Archive exit while Archive is open', () => {
+    const onHomeClicked = vi.fn();
+    renderSidebar({ activeNav: 'archive', onHomeClicked });
+
+    const buttons = Array.from(container?.querySelectorAll('button') ?? []);
+    expect(buttons.some((button) => button.textContent?.trim() === 'More')).toBe(false);
+    const exit = buttons.find((button) => button.textContent?.trim() === 'Leave Archive');
+    expect(exit).toBeDefined();
+    expect(exit?.querySelector('svg.lucide-archive')).not.toBeNull();
+    expect(exit?.querySelector('svg.lucide-arrow-left')).not.toBeNull();
+
+    // No history to return to in the test window: leaving goes Home.
+    flushSync(() => {
+      exit?.click();
+    });
+    expect(onHomeClicked).toHaveBeenCalledTimes(1);
+  });
+
   it('renders back and forward next to the collapse toggle', () => {
     renderSidebar({ onRequestCollapse: vi.fn() });
 

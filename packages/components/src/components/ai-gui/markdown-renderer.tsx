@@ -69,6 +69,7 @@ import {
   markdownLinkText,
   parseGitHubReferenceUrl,
 } from './github-reference-link';
+import { MarkdownTable } from './markdown-table';
 import { MermaidDiagramViewer } from './mermaid-diagram-viewer';
 import { MermaidFullscreenButton, useMermaidDiagramCanvas } from './use-mermaid-diagram-canvas';
 import { SessionReadonlyContext } from './session-readonly-context';
@@ -227,11 +228,13 @@ const MARKDOWN_BASE_CLASSNAME =
   '[&_[data-streamdown="mermaid"]]:overflow-hidden ' +
   '[&_[data-streamdown="code-block"]]:!my-4 ' +
   '[&_table]:!my-0 [&_table]:w-full [&_table]:border-collapse [&_table]:text-[0.92em] [&_table]:leading-[1.5] ' +
-  '[&_th]:border-b [&_th]:border-border/70 [&_th]:bg-muted/20 [&_th]:px-2.5 [&_th]:py-1.5 [&_th]:text-left [&_th]:font-semibold [&_th]:text-foreground/80 dark:[&_th]:bg-muted/40 ' +
-  '[&_td]:border-b [&_td]:border-border/45 [&_td]:px-2.5 [&_td]:py-1.5 [&_td]:align-top ' +
-  '[&_tbody_tr:nth-child(even)]:bg-muted/15 [&_tbody_tr:last-child_td]:border-b-0 ' +
-  '[&_:is(th,td):first-child]:w-px [&_:is(th,td):first-child]:whitespace-nowrap ' +
-  '[&_tbody_td:first-child]:font-medium [&_tbody_td:first-child]:text-foreground/75 ' +
+  // Lines are foreground tints (the theme border melts into the canvas). No
+  // column or row is assumed to be a label: cells share one color and weight;
+  // only the header row, which Markdown always has, gets a faint band.
+  '[&_th]:border-b [&_th]:border-foreground/[0.14] [&_th]:bg-foreground/[0.035] [&_th]:px-2.5 [&_th]:py-1.5 [&_th]:text-left [&_th]:font-normal [&_th]:align-top ' +
+  '[&_td]:border-b [&_td]:border-foreground/[0.08] [&_td]:px-2.5 [&_td]:py-1.5 [&_td]:align-top ' +
+  '[&_:is(th,td)+:is(th,td)]:border-l [&_:is(th,td)+:is(th,td)]:border-l-foreground/[0.08] ' +
+  '[&_tbody_tr:last-child_td]:border-b-0 ' +
   '[&_table_code]:!bg-foreground/[0.08] [&_table_code]:!ring-0 dark:[&_table_code]:!bg-foreground/[0.14]';
 
 const MARKDOWN_SIZE_CLASSNAME =
@@ -1145,17 +1148,7 @@ const createMarkdownComponents = ({
       </code>
     );
   },
-  table: (props: MarkdownTableProps) => {
-    const { node: _node, ...rest } = props;
-    return (
-      <div
-        data-markdown-table
-        className="scrollbar-pro my-3 overflow-x-auto rounded-lg border border-border/70 bg-background"
-      >
-        <table {...rest} />
-      </div>
-    );
-  },
+  table: (props: MarkdownTableProps) => <MarkdownTable {...props} />,
   a: (props: MarkdownLinkProps) => {
     const { children, href, node: _node, rel, ...rest } = props;
     // Workspace resource links are display-only in a publication, not a second

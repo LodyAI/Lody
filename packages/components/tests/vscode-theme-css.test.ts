@@ -24,11 +24,11 @@ const contrastRatio = (a: string, b: string): number => {
 };
 
 // Dark themes hold every text foreground under the reading ceiling (13:1
-// against the canvas): on the fixture's #101010, pure white becomes #C9C9C9.
-const CEILED_ON_FIXTURE = '0 0% 78.8%';
-const PROSE_ON_FIXTURE = '0 0% 87.1%';
-// The #FFC799 accent used as selection text keeps its hue under the same ceiling.
-const CEILED_ACCENT_ON_FIXTURE = '26.9 83.1% 76.9%';
+// against the canvas): on the fixture's #101010, pure white becomes #D5D5D5.
+const CEILED_ON_FIXTURE = '0 0% 83.5%';
+const PROSE_ON_FIXTURE = '0 0% 91.8%';
+// The #FFC799 accent used as selection text is already under the ceiling: unchanged.
+const CEILED_ACCENT_ON_FIXTURE = '27.1 100% 80%';
 
 const themeFixture: LodyResolvedVSCodeTheme = {
   schemaVersion: 1,
@@ -266,7 +266,7 @@ describe('createLodyThemeCssVariables', () => {
     const variables = createLodyThemeCssVariables(themeFixture);
     const background = variables['--background']!;
     for (const name of ['--foreground', '--popover-foreground', '--sidebar-foreground']) {
-      expect({ name, ok: contrastRatio(variables[name]!, background) <= 11.6 }).toEqual({
+      expect({ name, ok: contrastRatio(variables[name]!, background) <= 13 }).toEqual({
         name,
         ok: true,
       });
@@ -274,18 +274,18 @@ describe('createLodyThemeCssVariables', () => {
     // Prose is one step above the interface text; headings one above prose,
     // still below pure white.
     const reading = contrastRatio(variables['--reading-foreground']!, background);
-    expect(reading).toBeGreaterThan(11.6);
-    expect(reading).toBeLessThanOrEqual(14.2);
+    expect(reading).toBeGreaterThan(13);
+    expect(reading).toBeLessThanOrEqual(15.9);
     const strong = contrastRatio(variables['--foreground-strong']!, background);
     expect(strong).toBeGreaterThan(reading);
-    expect(strong).toBeLessThanOrEqual(15);
+    expect(strong).toBeLessThanOrEqual(17.3);
     // The active tab reads at the prose level, never above it.
     expect(variables['--tab-active-foreground']).toBe(variables['--reading-foreground']);
     const sidebarRow = contrastRatio(
       variables['--sidebar-row-foreground']!,
       variables['--sidebar-background']!
     );
-    expect(sidebarRow).toBeLessThanOrEqual(9.2);
+    expect(sidebarRow).toBeLessThanOrEqual(10.6);
     // The sidebar never outshines the reading column.
     expect(sidebarRow).toBeLessThan(reading);
   });
@@ -293,14 +293,14 @@ describe('createLodyThemeCssVariables', () => {
   it('renders Vesper in its warm palette, with the hand-tuned sidebar grays', () => {
     const variables = createLodyThemeCssVariables(getBundledVSCodeThemeByIdSync('vesper')!);
     expect(variables['--background']).toBe(hexColorToHslChannel('#141312'));
-    expect(variables['--reading-foreground']).toBe(hexColorToHslChannel('#E4E1DD'));
-    expect(variables['--sidebar-row-foreground']).toBe(hexColorToHslChannel('#BAB6AE'));
-    expect(variables['--sidebar-selection-foreground']).toBe(hexColorToHslChannel('#E4E1DD'));
-    expect(variables['--tab-active-foreground']).toBe(hexColorToHslChannel('#E4E1DD'));
+    expect(variables['--reading-foreground']).toBe(hexColorToHslChannel('#EFEDEB'));
+    expect(variables['--sidebar-row-foreground']).toBe(hexColorToHslChannel('#C7C3BD'));
+    expect(variables['--sidebar-selection-foreground']).toBe(hexColorToHslChannel('#EFEDEB'));
+    expect(variables['--tab-active-foreground']).toBe(hexColorToHslChannel('#EFEDEB'));
     // Text follows the ceiling and keeps the warm hue; the accent is untouched.
     expect(
       contrastRatio(variables['--foreground']!, variables['--background']!)
-    ).toBeLessThanOrEqual(11.6);
+    ).toBeLessThanOrEqual(13);
     for (const name of ['--background', '--foreground', '--muted-foreground', '--border']) {
       const [hue, saturation] = variables[name]!.split(' ').map((part) => Number.parseFloat(part));
       expect({ name, warm: hue! >= 15 && hue! <= 50 && saturation! > 0 }).toEqual({
