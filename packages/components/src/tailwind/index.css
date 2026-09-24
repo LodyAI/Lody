@@ -964,6 +964,11 @@ pre,
        is delimited by `--input-border`. Themed builds compute the same rule in
        `vscode-theme-css.ts`. */
     --input-field: 0 0% 100%;
+    /* Long-form conversation text and unselected sidebar rows. Themed builds
+       cap their contrast in `vscode-theme-css.ts`; unthemed they are the plain
+       foregrounds. */
+    --reading-foreground: var(--foreground);
+    --sidebar-row-foreground: var(--sidebar-foreground);
     --switch-track: 220 9% 64%;
     --ring: 220 82% 65%;
     --chart-1: 220 82% 65%;

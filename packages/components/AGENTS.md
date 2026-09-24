@@ -63,6 +63,10 @@ mobile surfaces. Background for the rules below:
   sets keyed by content): each new value makes React walk the whole subtree. An
   `AnimatePresence` around such a subtree sets `presenceAffectsLayout={false}` unless it
   drives `layout` animations; otherwise its context changes on every parent render.
+- Reading brightness: conversation prose and user bubbles use `text-reading` (theme
+  foreground with capped contrast, `vscode-theme-css.ts`); headings and bold keep
+  `text-foreground`. Unselected sidebar rows use `text-sidebar-row-foreground` plus
+  `SIDEBAR_ROW_REST_ICON_CLASS`: nothing but the selected row outshines the prose.
 - Markdown code blocks tokenize in `lib/markdown-highlight.worker.ts`; the main thread
   keeps only cache hits and the no-worker fallback. Builds without an `es` worker format
   alias `@/lib/markdown-highlight-worker` to a null shim (see site-docs).

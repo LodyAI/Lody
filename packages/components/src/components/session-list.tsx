@@ -94,6 +94,7 @@ import {
   SidebarListSkeleton,
   buildSessionRowOpenedByTreeSlot,
   SIDEBAR_ROW_LIST_CLASS,
+  SIDEBAR_ROW_REST_ICON_CLASS,
 } from '@/components/sidebar-row-shared';
 import { SessionInfoHoverCard } from '@/components/session-info-hover-card';
 import type { SessionSharingState } from '@/lib/session-sharing';
@@ -731,6 +732,7 @@ const SessionGroupRow = memo(function SessionGroupRow({
           'hover:bg-sidebar-hover hover:text-sidebar-hover-foreground',
         showSelectedState &&
           'bg-sidebar-selection text-sidebar-selection-foreground hover:bg-sidebar-selection',
+        !showSelectedState && SIDEBAR_ROW_REST_ICON_CLASS,
         // Keyboard-only focus ring. Plain :focus-within also matches
         // after a mouse click (the overlay <a> keeps focus), which
         // left a permanent inset ring on the selected row that read
@@ -785,7 +787,7 @@ const SessionGroupRow = memo(function SessionGroupRow({
         <div
           className={cn(
             'min-w-0 flex-1 flex items-center gap-1 truncate text-[0.9em]',
-            showSelectedState ? 'text-sidebar-selection-foreground' : 'text-sidebar-foreground'
+            showSelectedState ? 'text-sidebar-selection-foreground' : 'text-sidebar-row-foreground'
           )}
           // Double-click to rename is scoped to the title only, so it can't
           // be triggered by double-clicking the Archive confirm button.

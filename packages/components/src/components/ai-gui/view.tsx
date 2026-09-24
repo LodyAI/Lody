@@ -6129,7 +6129,7 @@ const UserPlainTextBlock = ({
             // unbreakable token (e.g. a pasted log URL). `break-words`/`overflow-wrap:break-word`
             // wraps visually but does NOT shrink min-content, so it must not be set here —
             // it would win by source order and let the bubble overflow its column on every engine.
-            'min-w-0 max-w-full whitespace-pre-wrap text-foreground [overflow-wrap:anywhere]',
+            'min-w-0 max-w-full whitespace-pre-wrap text-reading [overflow-wrap:anywhere]',
             isLong && !isFullTextVisible ? 'overflow-hidden' : ''
           )}
           style={{

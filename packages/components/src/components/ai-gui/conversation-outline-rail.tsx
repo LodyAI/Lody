@@ -219,7 +219,9 @@ const OutlineTick = memo(function OutlineTick({
             // Resting contrast has to carry the edge fade: at /25 the ticks
             // were faint enough that a gradient over them had almost nothing
             // to take away, so a scrollable edge looked the same as a hard one.
-            'h-[2px] rounded-full bg-muted-foreground/45',
+            // /45 at rest read as a barcode beside the text in peripheral
+            // vision, so the rail rests at /32 and lifts while the pointer is on it.
+            'h-[2px] rounded-full bg-muted-foreground/32 group-hover/rail:bg-muted-foreground/50',
             // Ease-out so the swell tracks the cursor immediately and settles,
             // rather than lagging behind it.
             'transition-[background-color,width] duration-150 ease-out',

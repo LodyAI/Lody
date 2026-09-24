@@ -204,6 +204,7 @@ import {
   buildSessionRowOpenedByTreeSlot,
   type SessionRowOpenedByTreeSlot,
   SIDEBAR_ROW_LIST_CLASS,
+  SIDEBAR_ROW_REST_ICON_CLASS,
 } from '@/components/sidebar-row-shared';
 import {
   buildOpenedBySessionTree,
@@ -705,7 +706,8 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
           'hover:bg-sidebar-hover data-[menu-open]:bg-sidebar-hover',
         showSelectedState &&
           'bg-sidebar-selection text-sidebar-selection-foreground hover:bg-sidebar-selection',
-        showSelectedState ? 'text-sidebar-selection-foreground' : 'text-sidebar-foreground'
+        !showSelectedState && SIDEBAR_ROW_REST_ICON_CLASS,
+        showSelectedState ? 'text-sidebar-selection-foreground' : 'text-sidebar-row-foreground'
       )}
       onClick={(event) => {
         if (openSessionOnModifiedClick(event, session.id)) return;

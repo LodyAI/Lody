@@ -706,6 +706,29 @@ export const createLodyThemeCssVariables = (
     variables['--input-field'] = hexColorToHslChannel(inputFieldColor);
   }
 
+  // Reading comfort: long-form text on a theme whose foreground is (near) pure
+  // white or black on its canvas halates and tires the eye; see
+  // `resolveReadingForeground`. High-contrast themes keep their colors.
+  if (theme.type === 'dark' || theme.type === 'light') {
+    const cap = READING_CONTRAST_CAP[theme.type];
+    const readingColor = resolveContrastCappedColor(
+      colorByCssVariable['--foreground'],
+      colorByCssVariable['--background'],
+      cap.reading
+    );
+    if (readingColor) {
+      variables['--reading-foreground'] = hexColorToHslChannel(readingColor);
+    }
+    const sidebarRowColor = resolveContrastCappedColor(
+      colorByCssVariable['--sidebar-foreground'],
+      colorByCssVariable['--sidebar-background'],
+      cap.sidebarRow
+    );
+    if (sidebarRowColor) {
+      variables['--sidebar-row-foreground'] = hexColorToHslChannel(sidebarRowColor);
+    }
+  }
+
   for (const alias of SYNTAX_ALIAS_SCOPES) {
     const color = findTokenForeground(theme, alias.scopes);
     if (color) {
@@ -741,6 +764,60 @@ const resolveInputFieldColor = (
   return hexColorLightness(inputColor) >= hexColorLightness(backgroundColor)
     ? inputColor
     : backgroundColor;
+};
+
+/**
+ * Contrast ceilings for reading surfaces. Body text far above WCAG AAA (7:1)
+ * gains no legibility, but a pure-white glyph on a near-black canvas halates:
+ * strokes bloom and dense text (CJK especially) blurs, most for readers with
+ * astigmatism. Vesper's #FFFFFF on #101010 is 19:1. Conversation prose is
+ * capped at 13:1 in dark themes (still AAA; headings keep the full
+ * foreground), unselected sidebar titles at 6.5:1 (above AA) so the sidebar
+ * always sits below the reading column and only the selected row stands out. Light themes are capped higher, where glare is milder.
+ */
+const READING_CONTRAST_CAP = {
+  dark: { reading: 13, sidebarRow: 6.5 },
+  light: { reading: 16, sidebarRow: 9 },
+} as const;
+
+/**
+ * The foreground moved toward the background until its contrast is at most
+ * `cap`, or undefined when it already is (the theme's color is used as is).
+ */
+const resolveContrastCappedColor = (
+  foreground: string | undefined,
+  background: string | undefined,
+  cap: number
+): string | undefined => {
+  if (!foreground || !background) return undefined;
+  if (contrastRatio(foreground, background) <= cap) return undefined;
+  // Contrast falls monotonically as the foreground moves toward the background.
+  let low = 0;
+  let high = 1;
+  for (let step = 0; step < 16; step += 1) {
+    const middle = (low + high) / 2;
+    if (contrastRatio(mixHexColors(foreground, background, middle), background) > cap) {
+      low = middle;
+    } else {
+      high = middle;
+    }
+  }
+  return mixHexColors(foreground, background, high);
+};
+
+const relativeLuminance = (color: string): number => {
+  const { r, g, b } = hexColorToRgb(color);
+  const linear = (channel: number) => {
+    const value = channel / 255;
+    return value <= 0.03928 ? value / 12.92 : Math.pow((value + 0.055) / 1.055, 2.4);
+  };
+  return 0.2126 * linear(r) + 0.7152 * linear(g) + 0.0722 * linear(b);
+};
+
+const contrastRatio = (first: string, second: string): number => {
+  const a = relativeLuminance(first);
+  const b = relativeLuminance(second);
+  return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
 };
 
 const hexColorLightness = (color: string): number => {

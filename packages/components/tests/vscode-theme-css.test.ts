@@ -243,4 +243,40 @@ describe('createLodyThemeCssVariables', () => {
     }
     expect(contrastRatio(variables['--syntax-comment']!, background!)).toBeGreaterThanOrEqual(3.5);
   });
+
+  it('caps reading text at 13:1 on Vesper and leaves headings the full foreground', () => {
+    const theme = getBundledVSCodeThemeByIdSync('vesper');
+    expect(theme).toBeDefined();
+    const variables = createLodyThemeCssVariables(theme!);
+    const background = variables['--background']!;
+    expect(contrastRatio(variables['--foreground']!, background)).toBeGreaterThan(19);
+
+    const reading = contrastRatio(variables['--reading-foreground']!, background);
+    expect(reading).toBeLessThanOrEqual(13);
+    expect(reading).toBeGreaterThan(12.5);
+    const sidebarRow = contrastRatio(
+      variables['--sidebar-row-foreground']!,
+      variables['--sidebar-background']!
+    );
+    expect(sidebarRow).toBeLessThanOrEqual(6.5);
+    expect(sidebarRow).toBeGreaterThan(6);
+    // The sidebar never outshines the reading column.
+    expect(sidebarRow).toBeLessThan(reading);
+  });
+
+  it('leaves a theme whose text is already below the cap, and high-contrast themes, alone', () => {
+    const soft = createLodyThemeCssVariables({
+      ...themeFixture,
+      type: 'dark',
+      colors: { ...themeFixture.colors, 'editor.background': '#1E1E1E', foreground: '#C8C8C8' },
+    });
+    expect(soft['--reading-foreground']).toBeUndefined();
+
+    const highContrast = createLodyThemeCssVariables({
+      ...themeFixture,
+      type: 'hcDark',
+      colors: { ...themeFixture.colors, 'editor.background': '#000000', foreground: '#FFFFFF' },
+    });
+    expect(highContrast['--reading-foreground']).toBeUndefined();
+  });
 });

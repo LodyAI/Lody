@@ -358,6 +358,14 @@ export function SessionRowOpenedByMenuItems({
 export const SIDEBAR_ROW_LIST_CLASS = 'flex flex-col gap-px sidebar-row-list';
 
 /**
+ * An unselected session row's icons (PR, worktree, status marks) and avatars sit
+ * below the reading column's brightness; they recover on hover. Only the
+ * selected row is shown at full strength.
+ */
+export const SIDEBAR_ROW_REST_ICON_CLASS =
+  '[&_svg]:opacity-55 [&_img]:opacity-60 hover:[&_svg]:opacity-100 hover:[&_img]:opacity-100';
+
+/**
  * Marks one flat-list row with opened-by tree depth. `gutter={false}` leaves
  * a list with no nesting untouched. Connectors live in the leading slot.
  */

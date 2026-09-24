@@ -56,6 +56,7 @@ import {
   type SidebarRowKind,
   type SessionRowOpenedByTreeSlot,
   SIDEBAR_ROW_LIST_CLASS,
+  SIDEBAR_ROW_REST_ICON_CLASS,
 } from '@/components/sidebar-row-shared';
 import {
   sidebarCollapsedOpenedBySessionsAtom,
@@ -896,6 +897,8 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
           'hover:bg-sidebar-hover hover:text-sidebar-hover-foreground data-[menu-open]:bg-sidebar-hover data-[menu-open]:text-sidebar-hover-foreground',
         showSelectedState &&
           'bg-sidebar-selection text-sidebar-selection-foreground hover:bg-sidebar-selection',
+        // Unselected titles sit below the reading column's brightness.
+        !showSelectedState && ['text-sidebar-row-foreground', SIDEBAR_ROW_REST_ICON_CLASS],
         // Keyboard-only focus ring — see SessionList: plain :focus-within also
         // matches after mouse clicks via the overlay <a> and left a permanent
         // inset ring on the selected row.

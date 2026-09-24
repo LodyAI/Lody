@@ -166,7 +166,10 @@ const transformMdastChildren = (tree: unknown, transform: MdastChildTransformer)
 // `[&_h1]:mt-5` arbitrary variants — zeroing margin-top AND margin-bottom on
 // every block. `!` flips on `!important` so per-element margins survive.
 const MARKDOWN_BASE_CLASSNAME =
-  'markdown-renderer max-w-none text-foreground leading-[1.75] ' +
+  // Body text uses the contrast-capped reading color; headings and bold keep
+  // the full foreground, so hierarchy reads by brightness (see `--reading-foreground`).
+  'markdown-renderer max-w-none text-reading leading-[1.75] ' +
+  '[&_h1]:text-foreground [&_h2]:text-foreground [&_h3]:text-foreground [&_h4]:text-foreground [&_strong]:text-foreground ' +
   '[&_p]:!mt-0 [&_p]:!mb-3 [&_p:has(+ul)]:!mb-2 [&_p:last-child]:!mb-0 [&_p:first-child]:!mt-0 ' +
   '[&_ul]:!my-2 [&_ul]:pl-3 [&_ul]:list-disc ' +
   '[&_ul:not(.contains-task-list)]:pl-0 [&_ul:not(.contains-task-list)]:list-none ' +
@@ -186,7 +189,7 @@ const MARKDOWN_BASE_CLASSNAME =
   // single inline runs — so between-item spacing must come from the <li> box
   // itself, not the inner <p>. `mt-2` on non-first items keeps list edges
   // flush with the `ul`/`ol` margins.
-  '[&_li]:!my-0 [&_li]:!py-0 [&_li:not(:first-child)]:!mt-2 [&_ul>li:not(:first-child)]:!mt-1 [&_ol>li:not(:first-child)]:!mt-1 [&_li>ul]:!my-1 [&_li>ol]:!my-1 ' +
+  '[&_li]:!my-0 [&_li]:!py-0 [&_li:not(:first-child)]:!mt-2 [&_ul>li:not(:first-child)]:!mt-2 [&_ol>li:not(:first-child)]:!mt-2 [&_li>ul]:!my-1 [&_li>ol]:!my-1 ' +
   // Streamdown's default blockquote class adds `italic`; override it so quoted
   // body text stays upright (explicit `*emphasis*` inside still renders italic
   // via the descendant <em>'s own font-style). The `[&_blockquote]` descendant
@@ -1128,7 +1131,7 @@ const createMarkdownComponents = ({
       <code
         className={cn(
           className,
-          'rounded-sm bg-foreground/[0.08] px-1 py-px font-mono text-[0.85em] text-foreground ring-0 dark:bg-foreground/[0.14]'
+          'rounded-sm bg-foreground/[0.06] px-1 py-px font-mono text-[0.85em] text-reading ring-0 dark:bg-foreground/[0.07]'
         )}
         {...rest}
       >

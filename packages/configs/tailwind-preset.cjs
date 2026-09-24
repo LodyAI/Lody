@@ -89,6 +89,8 @@ module.exports = {
           foreground: 'hsl(var(--destructive-foreground) / <alpha-value>)',
         },
         border: 'hsl(var(--border) / <alpha-value>)',
+        // Long-form conversation text: the foreground with its contrast capped.
+        reading: 'hsl(var(--reading-foreground) / <alpha-value>)',
         input: {
           DEFAULT: 'hsl(var(--input) / <alpha-value>)',
           // Fill of an editable control. Separate from `input.DEFAULT`, which
@@ -111,6 +113,8 @@ module.exports = {
           DEFAULT: 'hsl(var(--sidebar-background) / <alpha-value>)',
           foreground: 'hsl(var(--sidebar-foreground) / <alpha-value>)',
           'foreground-muted': 'hsl(var(--sidebar-foreground-muted) / <alpha-value>)',
+          // Unselected session titles: dimmer than the reading column.
+          'row-foreground': 'hsl(var(--sidebar-row-foreground) / <alpha-value>)',
           primary: 'hsl(var(--sidebar-primary) / <alpha-value>)',
           'primary-foreground': 'hsl(var(--sidebar-primary-foreground) / <alpha-value>)',
           highlight: 'hsl(var(--sidebar-highlight) / <alpha-value>)',
