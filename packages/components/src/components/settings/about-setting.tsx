@@ -90,8 +90,10 @@ function UpdateStatusText({
 function DevbarSettingsControls() {
   const { t } = useTranslation();
   const [config, setConfig] = useState<DevbarConfig | null>(null);
+  const [warmup, setWarmup] = useState<{ enabled: boolean } | null>(null);
   const [supported, setSupported] = useState(true);
   const [pending, setPending] = useState(false);
+  const [warmupPending, setWarmupPending] = useState(false);
   const [failed, setFailed] = useState(false);
 
   useEffect(() => {
@@ -101,10 +103,11 @@ function DevbarSettingsControls() {
       return undefined;
     }
     let disposed = false;
-    void app
-      .getDevbarConfig()
-      .then((next) => {
-        if (!disposed) setConfig(next);
+    void Promise.all([app.getDevbarConfig(), app.getWindowWarmup()])
+      .then(([next, nextWarmup]) => {
+        if (disposed) return;
+        setConfig(next);
+        setWarmup(nextWarmup);
       })
       .catch(() => {
         if (!disposed) setFailed(true);
@@ -114,29 +117,40 @@ function DevbarSettingsControls() {
     };
   }, []);
 
-  const update = useCallback(
-    async (enabled: boolean, agentAccess: boolean, warmupEnabled: boolean) => {
-      const app = getIpcServices()?.app;
-      if (!app) return;
-      setPending(true);
-      setFailed(false);
-      try {
-        const result = await app.setDevbarControl({ enabled, agentAccess, warmupEnabled });
-        if (!result.ok) {
-          setFailed(true);
-          setPending(false);
-          return;
-        }
-        setConfig(result.config);
-        // The main process now reloads this window through the CSP-matched renderer
-        // entry. Keep the control busy so it cannot dispatch a conflicting toggle.
-      } catch {
+  const update = useCallback(async (enabled: boolean) => {
+    const app = getIpcServices()?.app;
+    if (!app) return;
+    setPending(true);
+    setFailed(false);
+    try {
+      const result = await app.setDevbarControl({ enabled });
+      if (!result.ok) {
         setFailed(true);
         setPending(false);
+        return;
       }
-    },
-    []
-  );
+      setConfig(result.config);
+      // The main process now reloads this window through the CSP-matched renderer
+      // entry. Keep the control busy so it cannot dispatch a conflicting toggle.
+    } catch {
+      setFailed(true);
+      setPending(false);
+    }
+  }, []);
+
+  const updateWarmup = useCallback(async (enabled: boolean) => {
+    const app = getIpcServices()?.app;
+    if (!app) return;
+    setWarmupPending(true);
+    try {
+      // Unlike the Devbar toggle this never reloads the window, so the pending
+      // state settles with the IPC call itself.
+      const result = await app.setWindowWarmup(enabled);
+      if (result.ok) setWarmup({ enabled: result.enabled });
+    } finally {
+      setWarmupPending(false);
+    }
+  }, []);
 
   if (!supported) return null;
 
@@ -154,7 +168,7 @@ function DevbarSettingsControls() {
           size="sm"
           className="h-7 px-2.5"
           disabled={!config || pending}
-          onClick={() => void update(!config?.enabled, false, config?.warmupEnabled ?? false)}
+          onClick={() => void update(!config?.enabled)}
         >
           {pending && <Spinner className="mr-1 h-3.5 w-3.5" />}
           {config?.enabled
@@ -170,31 +184,13 @@ function DevbarSettingsControls() {
         )}
       >
         <Switch
-          checked={config?.warmupEnabled ?? false}
-          disabled={!config || pending}
-          onCheckedChange={(checked) =>
-            void update(config?.enabled ?? false, config?.agentAccess ?? false, checked)
-          }
+          checked={warmup?.enabled ?? false}
+          disabled={!warmup || pending || warmupPending}
+          onCheckedChange={(checked) => void updateWarmup(checked)}
           aria-label={t('settings.about.devbarWarmup', 'Auxiliary window warmup')}
         />
       </CompactRow>
-      {config?.enabled && (
-        <CompactRow
-          label={t('settings.about.devbarAgentAccess', 'Agent and terminal access')}
-          helper={t(
-            'settings.about.devbarAgentAccessHelper',
-            'Exposes local MCP and restricted subprocess tools until Devbar stops.'
-          )}
-        >
-          <Switch
-            checked={config.agentAccess}
-            disabled={pending}
-            onCheckedChange={(checked) => void update(true, checked, config.warmupEnabled)}
-            aria-label={t('settings.about.devbarAgentAccess', 'Agent and terminal access')}
-          />
-        </CompactRow>
-      )}
-      {config?.enabled && config.agentAccess && config.devframe && (
+      {config?.enabled && config.devframe && (
         <CompactRow
           label={t('settings.about.devbarAgentConnect', 'Agent connection')}
           helper={t(
@@ -204,9 +200,7 @@ function DevbarSettingsControls() {
         >
           <div className="flex flex-col items-end gap-0.5 text-right">
             <code className="text-xs text-muted-foreground">{config.devframe.uiUrl}</code>
-            {config.devframe.mcpUrl && (
-              <code className="text-xs text-muted-foreground">{config.devframe.mcpUrl}</code>
-            )}
+            <code className="text-xs text-muted-foreground">{config.devframe.mcpUrl}</code>
           </div>
         </CompactRow>
       )}
@@ -321,11 +315,8 @@ export function AboutSettingsComponent() {
                 setDeveloperModeEnabled(checked);
                 if (!checked) {
                   setDeveloperModeRevealed(false);
-                  void getIpcServices()?.app.setDevbarControl({
-                    enabled: false,
-                    agentAccess: false,
-                    warmupEnabled: false,
-                  });
+                  void getIpcServices()?.app.setDevbarControl({ enabled: false });
+                  void getIpcServices()?.app.setWindowWarmup(false);
                 }
               }}
               aria-label={t('settings.about.developerMode', 'Developer mode')}

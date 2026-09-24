@@ -38,8 +38,8 @@ native-dependency, and OSS-composition rules stay in `apps/electron/AGENTS.md`.
   auxiliary windows must not overwrite the primary window's persisted view state.
 
 - Devbar is off by default; hidden Developer Mode enables it, while
-  `LODY_DEVBAR=true` is automation only. Keep data in memory and MCP/Terminals
-  behind `agentAccess`. GPU means process CPU/RSS, never hardware usage/VRAM.
+  `LODY_DEVBAR=true` is automation only. Keep data in memory; MCP/Terminals
+  share that switch. GPU means process CPU/RSS, never hardware usage/VRAM.
   Runtime heap is approximate; only the startup override enables precise readings.
 
 - Generic update metadata may carry localized Markdown under
