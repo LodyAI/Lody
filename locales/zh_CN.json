@@ -4138,5 +4138,14 @@
   "workspace.projects.history.filterConflicts": "冲突",
   "workspace.projects.history.selectShown": "全选当前 {{count}} 个",
   "workspace.projects.history.importCount": "导入 {{count}} 个",
-  "workspace.projects.history.noMatches": "没有匹配的对话。"
+  "workspace.projects.history.noMatches": "没有匹配的对话。",
+  "workspace.projects.window.setupAndCleanup": "准备与清理脚本",
+  "workspace.projects.window.setupOnly": "仅准备脚本",
+  "workspace.projects.window.cleanupOnly": "仅清理脚本",
+  "workspace.projects.window.noScripts": "未设置脚本",
+  "workspace.projects.window.whenOnline": "等机器上线",
+  "workspace.projects.window.skillsState": "来自项目文件夹",
+  "workspace.projects.window.toImportAndConflicts": "{{available}} 个待导入 · {{conflicts}} 个冲突",
+  "workspace.projects.window.toImport": "{{count}} 个待导入",
+  "workspace.projects.window.allImported": "已全部导入"
 }

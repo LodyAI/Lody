@@ -375,5 +375,12 @@ rest.
   pressed, and the file name brightens with the row's hover; a step that
   unfolds keeps the row for that and its file name is the link.
 
+The owner found that rail cheap — a tinted initial tile, coloured page glyphs
+and pills are the stock vocabulary. It is typographic now, and it does a job
+only it can: each page states its page's condition ("Shared with team", "No
+scripts", "2 to import · 1 in conflict" in amber), so the rail is the project
+at a glance. The identity is the name over its path with the last segment lit,
+then the machine; the current page is a 2px accent hairline that slides.
+
 Related: [token gallery](2026-09-09-ui-token-gallery.md),
 [call-site migration](2026-09-22-ui-radix-callsite-migration.md).

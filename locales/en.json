@@ -4138,5 +4138,14 @@
   "workspace.projects.history.filterConflicts": "Conflicts",
   "workspace.projects.history.selectShown": "Select all {{count}} shown",
   "workspace.projects.history.importCount": "Import {{count}}",
-  "workspace.projects.history.noMatches": "No conversations match."
+  "workspace.projects.history.noMatches": "No conversations match.",
+  "workspace.projects.window.setupAndCleanup": "Setup and cleanup",
+  "workspace.projects.window.setupOnly": "Setup only",
+  "workspace.projects.window.cleanupOnly": "Cleanup only",
+  "workspace.projects.window.noScripts": "No scripts",
+  "workspace.projects.window.whenOnline": "Waits for the machine",
+  "workspace.projects.window.skillsState": "From the project folder",
+  "workspace.projects.window.toImportAndConflicts": "{{available}} to import · {{conflicts}} in conflict",
+  "workspace.projects.window.toImport": "{{count}} to import",
+  "workspace.projects.window.allImported": "All imported"
 }

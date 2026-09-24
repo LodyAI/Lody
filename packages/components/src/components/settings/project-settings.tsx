@@ -21,10 +21,6 @@ import {
   Info,
   Plus,
   RefreshCw,
-  GitBranch,
-  MessagesSquare,
-  SlidersHorizontal,
-  Sparkles,
   Search,
   TerminalSquare,
   Wrench,
@@ -78,8 +74,6 @@ import { Tabs } from '@lody/ui/tabs';
 import { Badge } from '@lody/ui/badge';
 import { Textarea } from '@lody/ui/textarea';
 import { Input } from '@lody/ui/input';
-import { CachedAvatarImg } from '@/components/cached-avatar-img';
-import { getGitHubOwnerAvatarUrl } from '@/lib/github-avatar';
 import { VList } from 'virtua';
 
 import { AlertDialog } from '@/ui/dialog';
@@ -1656,26 +1650,74 @@ function ProjectWindow({
     };
   }, [localRow?.historyImports]);
 
+  const hasScript = (config: { scripts: Record<string, string | undefined> } | undefined) =>
+    Boolean(config && Object.values(config.scripts).some((script) => script?.trim()));
+  const setupScript = hasScript(localRow?.worktreeSetup ?? githubRow?.worktreeSetup);
+  const cleanupScript = hasScript(localRow?.worktreeCleanup ?? githubRow?.worktreeCleanup);
+  const historySynced = (localRow?.historyImports ?? []).some((state) => state.catalog !== null);
+
   const pages: { id: ProjectWindowPage; label: string; meta?: string; warn?: boolean }[] = [
-    { id: 'general', label: t('workspace.projects.window.general', 'General') },
-    { id: 'worktree', label: t('workspace.projects.window.worktree', 'Worktree') },
-    { id: 'skills', label: t('workspace.projects.window.skills', 'Skills') },
+    {
+      id: 'general',
+      label: t('workspace.projects.window.general', 'General'),
+      meta: localRow
+        ? localRow.sharedWithTeam
+          ? t('workspace.projects.sharedWithTeam', 'Shared with team')
+          : t('workspace.projects.private', 'Private to you')
+        : githubRow?.private
+          ? t('workspace.projects.privateRepo', 'Private')
+          : t('workspace.projects.window.public', 'Public'),
+    },
+    {
+      id: 'worktree',
+      label: t('workspace.projects.window.worktree', 'Worktree'),
+      meta:
+        setupScript && cleanupScript
+          ? t('workspace.projects.window.setupAndCleanup', 'Setup and cleanup')
+          : setupScript
+            ? t('workspace.projects.window.setupOnly', 'Setup only')
+            : cleanupScript
+              ? t('workspace.projects.window.cleanupOnly', 'Cleanup only')
+              : t('workspace.projects.window.noScripts', 'No scripts'),
+    },
+    {
+      id: 'skills',
+      label: t('workspace.projects.window.skills', 'Skills'),
+      meta:
+        localRow && !machineReachable
+          ? t('workspace.projects.window.whenOnline', 'Waits for the machine')
+          : t('workspace.projects.window.skillsState', 'From the project folder'),
+    },
     ...(isLocal
       ? [
           {
             id: 'conversations' as const,
             label: t('workspace.projects.window.conversations', 'Conversations'),
-            meta:
-              historyCounts.conflicts > 0
-                ? String(historyCounts.conflicts)
+            meta: !historySynced
+              ? t('workspace.projects.historyNotSyncedYet', 'Not synced yet')
+              : historyCounts.conflicts > 0
+                ? t(
+                    'workspace.projects.window.toImportAndConflicts',
+                    '{{available}} to import · {{conflicts}} in conflict',
+                    { available: historyCounts.available, conflicts: historyCounts.conflicts }
+                  )
                 : historyCounts.available > 0
-                  ? String(historyCounts.available)
-                  : undefined,
+                  ? t('workspace.projects.window.toImport', '{{count}} to import', {
+                      count: historyCounts.available,
+                    })
+                  : t('workspace.projects.window.allImported', 'All imported'),
             warn: historyCounts.conflicts > 0,
           },
         ]
       : []),
   ];
+
+  // Where the project lives, split so its last segment can be the lit part.
+  const location = localRow?.project.rootPath ?? githubRow?.repoFullName ?? '';
+  const trimmedLocation = location.replace(/[\\/]+$/, '');
+  const locationCut = trimmedLocation.search(/[^\\/]+$/);
+  const locationHead = locationCut > 0 ? trimmedLocation.slice(0, locationCut) : '';
+  const locationTail = locationCut > 0 ? trimmedLocation.slice(locationCut) : trimmedLocation;
 
   const offlineNote =
     localRow && !machineReachable ? (
@@ -1714,58 +1756,51 @@ function ProjectWindow({
     <Tooltip.Provider delay={200}>
       <div {...stylex.props(win.window)}>
         <nav {...stylex.props(win.rail)} aria-label={t('settings.tabs.projects', 'Projects')}>
+          {/* The project is named by its words: the name, then where it lives
+              with the last segment lit — the part a person recognises. */}
           <div {...stylex.props(win.identity)}>
-            <ProjectMark
-              name={localRow?.project.name ?? githubRow?.name ?? ''}
-              owner={githubRow?.owner}
-            />
-            <div {...stylex.props(win.identityText)}>
-              <p
-                {...stylex.props(win.identityName)}
-                title={localRow?.project.name ?? githubRow?.name}
-              >
-                {localRow?.project.name ?? githubRow?.name}
-              </p>
+            <p
+              {...stylex.props(win.identityName)}
+              title={localRow?.project.name ?? githubRow?.name}
+            >
+              {localRow?.project.name ?? githubRow?.name}
+            </p>
+            <p {...stylex.props(win.identityPath)} title={location}>
+              <span {...stylex.props(win.identityPathDim)}>{locationHead}</span>
+              {locationTail}
+            </p>
+            {localRow ? (
               <p {...stylex.props(win.identityMeta)}>
-                {localRow ? (
-                  <>
-                    <span
-                      aria-hidden="true"
-                      {...stylex.props(win.statusDot, machineReachable && win.statusDotOnline)}
-                    />
-                    <span {...stylex.props(win.identityMetaText)}>
-                      {localRow.machineName} ·{' '}
-                      {machineReachable
-                        ? t('workspace.machines.online', 'Online')
-                        : t('workspace.machines.offline', 'Offline')}
-                    </span>
-                  </>
-                ) : (
-                  <span {...stylex.props(win.identityMetaText)}>
-                    {githubRow?.repoFullName} ·{' '}
-                    {githubRow?.private
-                      ? t('workspace.projects.privateRepo', 'Private')
-                      : t('workspace.projects.window.public', 'Public')}
-                  </span>
-                )}
+                <span
+                  aria-hidden="true"
+                  {...stylex.props(win.statusDot, machineReachable && win.statusDotOnline)}
+                />
+                <span {...stylex.props(win.identityMetaText)}>
+                  {localRow.machineName} ·{' '}
+                  {machineReachable
+                    ? t('workspace.machines.online', 'Online')
+                    : t('workspace.machines.offline', 'Offline')}
+                </span>
               </p>
-            </div>
+            ) : null}
           </div>
-          {/* The current page's fill is one element that slides between rows,
-              so moving between pages reads as moving, not as two rows blinking. */}
+          {/* Each page says what state it is in, so the rail is the project at a
+              glance; the current one is marked by a hairline that slides. */}
           <div {...stylex.props(win.nav)}>
             <span
               aria-hidden="true"
-              {...stylex.props(win.navIndicator)}
+              {...stylex.props(win.navMarker)}
               style={{
-                transform: `translateY(calc(${Math.max(
-                  0,
-                  pages.findIndex((entry) => entry.id === page)
-                )} * (${NAV_ROW_HEIGHT}px + ${NAV_ROW_GAP}px)))`,
+                transform: `translateY(${
+                  Math.max(
+                    0,
+                    pages.findIndex((entry) => entry.id === page)
+                  ) *
+                  (NAV_ROW_HEIGHT + NAV_ROW_GAP)
+                }px)`,
               }}
             />
             {pages.map((entry) => {
-              const Glyph = PAGE_GLYPHS[entry.id];
               const current = page === entry.id;
               return (
                 <button
@@ -1775,13 +1810,11 @@ function ProjectWindow({
                   onClick={() => setPage(entry.id)}
                   {...stylex.props(win.navRow, current && win.navRowCurrent)}
                 >
-                  <Glyph
-                    aria-hidden="true"
-                    {...stylex.props(win.navGlyph, current && win.navGlyphCurrent)}
-                  />
-                  <span {...stylex.props(surface.listRowLabel)}>{entry.label}</span>
+                  <span {...stylex.props(win.navLabel, current && win.navLabelCurrent)}>
+                    {entry.label}
+                  </span>
                   {entry.meta ? (
-                    <span {...stylex.props(win.navPill, entry.warn && win.navPillWarn)}>
+                    <span {...stylex.props(win.navState, entry.warn && win.navStateWarn)}>
                       {entry.meta}
                     </span>
                   ) : null}
@@ -2011,53 +2044,8 @@ function ProjectWindow({
 
 type ProjectWindowPage = 'general' | 'worktree' | 'skills' | 'conversations';
 
-const NAV_ROW_HEIGHT = 32;
+const NAV_ROW_HEIGHT = 46;
 const NAV_ROW_GAP = 2;
-
-const PAGE_GLYPHS: Record<ProjectWindowPage, typeof SlidersHorizontal> = {
-  general: SlidersHorizontal,
-  worktree: GitBranch,
-  skills: Sparkles,
-  conversations: MessagesSquare,
-};
-
-/**
- * The project's face in its window: the GitHub owner's avatar, or the name's
- * first letter on a tint derived from the name, so two projects side by side
- * are told apart at a glance and the same project always looks the same.
- */
-function ProjectMark({ name, owner }: { readonly name: string; readonly owner?: string }) {
-  const [failed, setFailed] = useState(false);
-  if (owner && !failed) {
-    return (
-      <span {...stylex.props(win.mark)}>
-        <CachedAvatarImg
-          src={getGitHubOwnerAvatarUrl(owner)}
-          alt={owner}
-          loading="lazy"
-          {...stylex.props(win.markImage)}
-          onError={() => setFailed(true)}
-        />
-      </span>
-    );
-  }
-  let hash = 0;
-  for (const char of name) hash = (hash * 31 + char.codePointAt(0)!) >>> 0;
-  const hue = hash % 360;
-  const letter = [...name.trim()][0]?.toUpperCase() ?? '·';
-  return (
-    <span
-      aria-hidden="true"
-      {...stylex.props(win.mark)}
-      style={{
-        backgroundColor: `color-mix(in oklab, hsl(${hue} 70% 55%) 18%, transparent)`,
-        color: `color-mix(in oklab, hsl(${hue} 65% 45%) 75%, currentColor)`,
-      }}
-    >
-      {letter}
-    </span>
-  );
-}
 
 type HistoryStatus = 'available' | 'imported' | 'sync_conflict';
 type HistoryFilter = 'all' | HistoryStatus;
@@ -2472,9 +2460,9 @@ const win = stylex.create({
   },
   identity: {
     display: 'flex',
-    alignItems: 'center',
-    gap: '10px',
-    paddingInline: space[1],
+    flexDirection: 'column',
+    gap: '3px',
+    paddingInline: space[2],
     minWidth: 0,
   },
   identityName: {
@@ -2485,41 +2473,56 @@ const win = stylex.create({
     fontSize: '15px',
     fontWeight: 600,
     lineHeight: 1.3,
+    letterSpacing: '-0.01em',
     color: colors.label,
   },
+  identityPath: {
+    margin: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontFamily: MONO,
+    fontSize: '11.5px',
+    lineHeight: 1.45,
+    color: colors.label,
+  },
+  identityPathDim: { color: colors.tertiaryLabel },
   identityMeta: {
     display: 'flex',
     alignItems: 'center',
     gap: '6px',
     minWidth: 0,
     margin: 0,
+    marginTop: '2px',
     fontSize: '12px',
     lineHeight: 1.4,
     color: colors.secondaryLabel,
   },
   nav: { position: 'relative', display: 'flex', flexDirection: 'column', gap: `${NAV_ROW_GAP}px` },
-  navIndicator: {
+  /** The current page: a hairline on the rail's edge that slides to it. */
+  navMarker: {
     position: 'absolute',
-    insetInline: 0,
-    top: 0,
-    height: `${NAV_ROW_HEIGHT}px`,
-    backgroundColor: colors.selectedFill,
-    borderRadius: radius.small,
-    cornerShape: corner.shape,
+    insetInlineStart: 0,
+    top: '10px',
+    width: '2px',
+    height: `${NAV_ROW_HEIGHT - 20}px`,
+    borderRadius: '9999px',
+    backgroundColor: colors.accent,
     transitionProperty: 'transform',
-    transitionDuration: '220ms',
+    transitionDuration: '240ms',
     transitionTimingFunction: 'cubic-bezier(0.2, 0.8, 0.2, 1)',
   },
   navRow: {
-    position: 'relative',
     boxSizing: 'border-box',
     display: 'flex',
-    alignItems: 'center',
-    gap: space[2],
+    flexDirection: 'column',
+    justifyContent: 'center',
+    gap: '1px',
     width: '100%',
     height: `${NAV_ROW_HEIGHT}px`,
     margin: 0,
-    paddingInline: space[2],
+    paddingInlineStart: space[3],
+    paddingInlineEnd: space[2],
     borderWidth: 0,
     borderRadius: radius.small,
     cornerShape: corner.shape,
@@ -2527,41 +2530,29 @@ const win = stylex.create({
       default: 'transparent',
       ':hover': `color-mix(in oklab, transparent, ${colors.label} 4%)`,
     },
-    color: colors.secondaryLabel,
     fontFamily: 'inherit',
-    fontSize: '13px',
     textAlign: 'start',
     cursor: 'pointer',
     outlineStyle: 'none',
+  },
+  navRowCurrent: { backgroundColor: { default: 'transparent', ':hover': 'transparent' } },
+  navLabel: {
+    fontSize: '13px',
+    lineHeight: 1.3,
+    color: colors.secondaryLabel,
     transitionProperty: 'color',
     transitionDuration: '150ms',
   },
-  navRowCurrent: {
-    color: colors.label,
-    fontWeight: 500,
-    backgroundColor: { default: 'transparent', ':hover': 'transparent' },
+  navLabelCurrent: { color: colors.label, fontWeight: 500 },
+  navState: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: '11.5px',
+    lineHeight: 1.3,
+    color: colors.tertiaryLabel,
   },
-  navGlyph: { width: '15px', height: '15px', flexShrink: 0, color: colors.tertiaryLabel },
-  navGlyphCurrent: { color: colors.accent },
-  navPill: {
-    flexShrink: 0,
-    minWidth: '18px',
-    paddingInline: '6px',
-    height: '18px',
-    lineHeight: '18px',
-    textAlign: 'center',
-    borderRadius: '9999px',
-    backgroundColor: `color-mix(in oklab, transparent, ${colors.label} 7%)`,
-    fontSize: '11px',
-    fontWeight: 500,
-    color: colors.secondaryLabel,
-    fontVariantNumeric: 'tabular-nums',
-  },
-  navPillWarn: {
-    backgroundColor: `color-mix(in oklab, transparent, ${colors.warning} 18%)`,
-    color: `color-mix(in oklab, ${colors.warning} 70%, ${colors.label})`,
-  },
-  identityText: { display: 'flex', flexDirection: 'column', gap: '2px', minWidth: 0 },
+  navStateWarn: { color: `color-mix(in oklab, ${colors.warning} 80%, ${colors.label})` },
   identityMetaText: {
     minWidth: 0,
     overflow: 'hidden',
@@ -2576,20 +2567,6 @@ const win = stylex.create({
     backgroundColor: colors.tertiaryLabel,
   },
   statusDotOnline: { backgroundColor: colors.success },
-  mark: {
-    display: 'flex',
-    flexShrink: 0,
-    alignItems: 'center',
-    justifyContent: 'center',
-    width: '36px',
-    height: '36px',
-    overflow: 'hidden',
-    borderRadius: radius.medium,
-    cornerShape: corner.shape,
-    fontSize: '15px',
-    fontWeight: 600,
-  },
-  markImage: { width: '100%', height: '100%', objectFit: 'cover' },
   main: { display: 'flex', flexDirection: 'column', flexGrow: 1, minWidth: 0, minHeight: 0 },
   pageHeader: {
     flexShrink: 0,
