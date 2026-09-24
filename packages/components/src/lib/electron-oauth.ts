@@ -9,7 +9,14 @@ export type ElectronOAuthQuery = {
   state: string;
   code_challenge: string;
   code_challenge_method?: string;
+  desktop_channel?: 'stable' | 'nightly';
 };
+
+function desktopProtocol(channel: string | undefined): string {
+  if (channel === 'nightly') return 'ai.lody.nightly';
+  if (channel === undefined || channel === 'stable') return ELECTRON_PROTOCOL_SCHEME;
+  throw new Error('Unsupported desktop callback channel');
+}
 
 function encodeBase64Url(value: string): string {
   const bytes = new TextEncoder().encode(value);
@@ -25,6 +32,10 @@ function buildElectronOAuthSearch(query: ElectronOAuthQuery): URLSearchParams {
   search.set('client_id', query.client_id);
   search.set('state', query.state);
   search.set('code_challenge', query.code_challenge);
+  if (query.desktop_channel) {
+    desktopProtocol(query.desktop_channel);
+    search.set('desktop_channel', query.desktop_channel);
+  }
   if (query.code_challenge_method) {
     search.set('code_challenge_method', query.code_challenge_method);
   }
@@ -65,8 +76,11 @@ export function clearElectronAuthorizationCode(): void {
   document.cookie = `${ELECTRON_AUTHORIZATION_CODE_COOKIE_KEY}=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/`;
 }
 
-export function buildElectronAuthorizationCallbackUrl(token: string): string {
-  return `${ELECTRON_PROTOCOL_SCHEME}:/${ELECTRON_CALLBACK_PATH}#token=${encodeURIComponent(token)}`;
+export function buildElectronAuthorizationCallbackUrl(
+  token: string,
+  channel?: 'stable' | 'nightly'
+): string {
+  return `${desktopProtocol(channel)}:/${ELECTRON_CALLBACK_PATH}#token=${encodeURIComponent(token)}`;
 }
 
 // True when a `lody://` deep link is the auth callback that carries the
@@ -110,9 +124,14 @@ export function buildElectronRedirectToken(authorizationCode: string, state: str
   );
 }
 
-export function buildElectronRedirectUrl(authorizationCode: string, state: string): string {
+export function buildElectronRedirectUrl(
+  authorizationCode: string,
+  state: string,
+  channel?: 'stable' | 'nightly'
+): string {
   return buildElectronAuthorizationCallbackUrl(
-    buildElectronRedirectToken(authorizationCode, state)
+    buildElectronRedirectToken(authorizationCode, state),
+    channel
   );
 }
 

@@ -40,8 +40,7 @@ memory pages.
 Selecting `DEVBAR` activates Main Thread in the official Devframe Hub UI loaded
 inside the user app. The Hub's loopback root serves the same reference UI as a
 standalone viewer and includes Main Thread, Devframe Inspector, Accessibility
-Inspector, command palette, settings, and dock controls. Terminals appears only
-after the separate agent-and-terminal capability is enabled. The Main Thread
+Inspector, Terminals, command palette, settings, and dock controls. The Main Thread
 view uses Devframe's official JSON-render renderer and `@antfu/design` components;
 Lody does not own a parallel detailed UI stylesheet.
 
@@ -106,13 +105,14 @@ publishes a 120-sample replayable stream, and updates a shared snapshot and
 JSON-render view. The node side retains at most 120 samples and 100 Long Tasks
 while preserving aggregate Long Task totals for the current process lifetime.
 
-Developer Mode exposes a second `Agent and terminal access` switch only while
-Devbar is running. Enabling it restarts the Hub with the aggregate HTTP MCP endpoint
-and official Terminals add-on. MCP then exposes the read-only performance query,
-shared state, Markdown resource, Inspector tools, and Terminals tools. Browser
-sample ingestion is not agent-facing. Terminals allows an interactive local shell
-and subprocess sessions; arbitrary command requests stay disabled, but shell access
-is still privileged. Stopping Devbar removes both capabilities.
+The enabled Hub always includes the aggregate HTTP MCP endpoint and the official
+Terminals add-on; enabling Devbar is the one consent step for both. MCP exposes
+the read-only performance query, shared state, Markdown resource, Inspector
+tools, and Terminals tools. Browser sample ingestion is not agent-facing.
+Terminals allows an interactive local shell and subprocess sessions; arbitrary
+command requests stay disabled, but shell access is still privileged, so the
+Devbar control also grants that capability to trusted local callers. Stopping
+Devbar removes both capabilities.
 
 The Hub gates its RPC transport inside this single-user loopback mode instead of
 showing Devframe's browser trust prompt. The packaged `file://` renderer
@@ -132,8 +132,8 @@ separate capability decision and authentication plan.
 
 Coding-agent hosts should configure Devframe's stdio `devframe connect` connector
 once instead of pinning the HTTP port. The connector discovers the running instance
-registry, supplies the required loopback Origin header, and proxies the read-only
-or terminal tools enabled by the secondary gate. Agent-authored Lody MCP entries
+registry, supplies the required loopback Origin header, and proxies the Hub's
+read-only and terminal tools. Agent-authored Lody MCP entries
 remain disabled until reviewed and selected in trusted UI or CLI.
 
 Failure to start the Hub leaves the primary window on its normal renderer and
@@ -153,5 +153,6 @@ build. CPU profile capture remains a separate privileged phase.
 - [Deterministic tests](../apps/electron/src/devbar.test.mjs)
 - [Devframe bridge decision](../.agents/notes/implemented/architecture/2026-09-16-devbar-devframe-bridge.md)
 - [Devframe Hub UI decision](../.agents/notes/implemented/feature/2026-09-16-devbar-hub-ui.md)
+- [Merged agent-access gate](../.agents/notes/implemented/simplification/2026-09-23-devbar-agent-access-merged.md)
 - [Electron metrics](https://www.electronjs.org/docs/latest/api/structures/process-metric)
 - [CLS definition](https://web.dev/articles/cls)

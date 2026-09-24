@@ -115,3 +115,5 @@ component details.
   name, then calls the cloud mutation through `account-setting.tsx`. Refresh session
   and active organization after success; cache refresh failure must not claim transfer
   failed. Card changes use the billing Portal separately; transfer keeps the current card.
+
+- Nightly downloads live below Download apps in desktop/Web About.

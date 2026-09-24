@@ -9,6 +9,7 @@ import { useOnlineMachineIds } from '@/hooks/use-machine-online-status';
 import { readStoredAuthToken } from '@/lib/auth-bootstrap';
 import { readChatLandingDefaults } from '@/lib/chat-landing-defaults';
 import { mintBugReportRequestToken, submitWebBugReport } from '@/lib/bug-report-api';
+import { appendClientBuildInfo } from '@/lib/client-build-info';
 import {
   BugReportDialog,
   type BugReportMachineOption,
@@ -62,11 +63,12 @@ export function BugReportDialogContainer() {
         return;
       }
       setState({ status: 'submitting' });
+      const reportDescription = appendClientBuildInfo(description);
 
       if (machineId == null) {
         const result = await submitWebBugReport({
           workspaceId,
-          description,
+          description: reportDescription,
           sessionToken: readStoredAuthToken() ?? '',
         });
         if (result.ok) {
@@ -95,7 +97,7 @@ export function BugReportDialogContainer() {
       }
       const response = await runtime.requestMachineBugReport(
         machineId,
-        { description, reporterUserId, requestToken: minted.requestToken },
+        { description: reportDescription, reporterUserId, requestToken: minted.requestToken },
         { timeoutMs: 120_000 }
       );
       if (response?.success && response.bugReportId) {

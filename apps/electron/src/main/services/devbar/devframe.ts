@@ -26,7 +26,7 @@ export interface DevbarDevframeRuntime {
     connectionMeta: ConnectionMeta
     metaBaseUrl: string
   }
-  mcpUrl: string | null
+  mcpUrl: string
   uiUrl: string
   embeddedScriptUrl: string
   deepLink: string
@@ -101,7 +101,7 @@ function renderSnapshot(snapshot: DevbarSnapshot, deepLink: string): string {
 
 export async function startDevbarDevframe(
   deepLink: string,
-  options: { agentAccess: boolean; rendererOrigin?: string; authToken: string }
+  options: { rendererOrigin?: string; authToken: string }
 ): Promise<DevbarDevframeRuntime> {
   const recording = new DevbarRecording()
   let dashboardView: JsonRenderView | undefined
@@ -246,7 +246,7 @@ export async function startDevbarDevframe(
       import('@devframes/json-render-ui/hub'),
       import('@devframes/plugin-inspect'),
       import('@devframes/plugin-a11y'),
-      options.agentAccess ? import('@devframes/plugin-terminals') : Promise.resolve(null)
+      import('@devframes/plugin-terminals')
     ])
     hub = initHub({
       name: 'Lody DevTools',
@@ -264,7 +264,7 @@ export async function startDevbarDevframe(
         origin,
         ...(options.rendererOrigin ? [options.rendererOrigin] : [])
       ],
-      mcp: options.agentAccess,
+      mcp: true,
       register: true,
       ui: hubUi.createUi({
         branding: {
@@ -286,15 +286,11 @@ export async function startDevbarDevframe(
         },
         inspect.createInspectDevframe(),
         a11y.createA11yDevframe(),
-        ...(terminals
-          ? [
-              terminals.createTerminalsDevframe({
-                cwd: process.cwd(),
-                allowArbitraryCommands: false,
-                scrollback: 2_000
-              })
-            ]
-          : [])
+        terminals.createTerminalsDevframe({
+          cwd: process.cwd(),
+          allowArbitraryCommands: false,
+          scrollback: 2_000
+        })
       ],
       configure(ctx) {
         for (const dock of ctx.docks.views.values()) {
@@ -346,7 +342,7 @@ export async function startDevbarDevframe(
 
   return {
     connection,
-    mcpUrl: options.agentAccess ? `${origin}${DEVFRAMES_HUB_BASE}__mcp` : null,
+    mcpUrl: `${origin}${DEVFRAMES_HUB_BASE}__mcp`,
     uiUrl: `${origin}${DEVFRAMES_HUB_BASE}`,
     embeddedScriptUrl: `${origin}${DEVFRAMES_HUB_BASE}embedded.js`,
     deepLink,

@@ -119,6 +119,12 @@ export function BugReportDialog({
                   "Describe the bug and pick the machine where it happened. Lody uploads that machine's logs from today and yesterday along with your description."
                 )}
               </DialogDescription>
+              <p className="text-sm text-muted-foreground">
+                {t(
+                  'bugReport.buildInfoIncluded',
+                  'Reports include the current app version and build information.'
+                )}
+              </p>
             </DialogHeader>
             <div className="grid gap-4">
               <div className="grid gap-2">

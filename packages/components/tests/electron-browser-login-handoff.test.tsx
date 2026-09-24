@@ -226,6 +226,36 @@ describe('electron browser sign-in handoff', () => {
     expect(findButton(/Use a different account/i)).toBeDefined();
   });
 
+  it('returns Nightly authorization to Nightly and preserves its PKCE state', async () => {
+    window.history.replaceState({}, '', `/login${ELECTRON_QUERY}&desktop_channel=nightly`);
+    await renderLoginPage(
+      createAuthClient({
+        transferUser: async () => ({ data: { electron_authorization_code: 'nightly-code' } }),
+      })
+    );
+    await clickButton(/Continue with this account/i);
+    const url = handoffLink()?.getAttribute('href');
+    expect(url).toMatch(/^ai\.lody\.nightly:\/\/auth\/callback#token=/);
+    expect(readDeepLinkPayload(url!)).toEqual({ identifier: 'nightly-code', state: 'state-abc' });
+    expect(deepLinkNavigations).toEqual([url]);
+  });
+
+  it('does not offer a desktop handoff for an unrecognized callback channel', async () => {
+    window.history.replaceState(
+      {},
+      '',
+      `/login${ELECTRON_QUERY}&desktop_channel=https%3A%2F%2Fattacker.test`
+    );
+    await renderLoginPage(
+      createAuthClient({
+        transferUser: async () => ({ data: { electron_authorization_code: 'code' } }),
+      })
+    );
+    expect(findButton(/Continue with this account/i)).toBeUndefined();
+    expect(handoffLink()).toBeNull();
+    expect(deepLinkNavigations).toEqual([]);
+  });
+
   it('drops a transfer that lands after the user switched accounts', async () => {
     let resolveTransfer: ((code: string) => void) | undefined;
     const transferUser = vi.fn<TransferUser>(

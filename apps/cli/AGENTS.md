@@ -19,6 +19,8 @@ Root `AGENTS.md` applies; this file adds CLI context. Build, PR-poller, and adap
   `splitting: true`, and keep the no-hoisting assertion.
 - Import the CLI's own `version` from `@/pkg`, never a relative `../package.json`; the package
   `name` stays `lody` in every composition.
+- Optional desktop provenance comes from the compiled constant in `utils/desktop-build.ts`,
+  never runtime environment variables. File/hybrid log initialization records it at debug level.
 - Keep `prepare:acp-adapters` before `dev-build.mjs` and Vite: skipping it can silently launch old
   adapter capabilities from a stale `dist/`.
 - `engines.node` is pinned to `>=22.14.0 <23 || >=23.6.0` by better-sqlite3's

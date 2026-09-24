@@ -12,6 +12,26 @@ import {
 } from '../../main/services/desktop-login.ts'
 
 const session = { session: { token: 'synthetic-session' }, user: { id: 'synthetic-user' } }
+
+void test('Nightly login selects its callback channel and rejects callbacks addressed to Stable', async (t) => {
+  const { login, browser, callback } = harness(t, { channel: 'nightly' })
+  await login.start()
+  assert.equal(browser[0].client_id, 'electron')
+  assert.equal(browser[0].desktop_channel, 'nightly')
+  const token = callback()
+  assert.equal(
+    readDesktopLoginCallback(`lody://auth/callback#token=${token}`, 'ai.lody.nightly'),
+    null
+  )
+  assert.equal(readDesktopLoginCallback(`ai.lody.nightly://auth/callback#token=${token}`), null)
+  const accepted = readDesktopLoginCallback(
+    `ai.lody.nightly://auth/callback#token=${token}`,
+    'ai.lody.nightly'
+  )
+  assert.equal(accepted, token)
+  await login.complete(accepted)
+  assert.equal(login.getState().phase, 'authenticated')
+})
 function deferred() {
   let resolve, reject
   const promise = new Promise((yes, no) => {
@@ -60,50 +80,56 @@ void test('main completes PKCE without a renderer or any organization request', 
   assert.equal(login.getState(), snapshots.at(-1))
 })
 
-void test('the pinned Better Auth endpoint accepts our PKCE and returns a usable desktop session', async (t) => {
-  const server = betterAuth({
-    baseURL: 'https://auth.example.test',
-    secret: 'synthetic-test-secret-not-a-real-secret-123456789',
-    database: memoryAdapter({ user: [], session: [], account: [], verification: [] }),
-    emailAndPassword: { enabled: true },
-    plugins: [electron()]
+for (const channel of ['stable', 'nightly']) {
+  void test(`the pinned Better Auth endpoint accepts ${channel} PKCE and returns a usable desktop session`, async (t) => {
+    const server = betterAuth({
+      baseURL: 'https://auth.example.test',
+      secret: 'synthetic-test-secret-not-a-real-secret-123456789',
+      database: memoryAdapter({ user: [], session: [], account: [], verification: [] }),
+      emailAndPassword: { enabled: true },
+      plugins: [electron()]
+    })
+    const signup = await server.api.signUpEmail({
+      body: {
+        email: 'synthetic@example.test',
+        password: 'synthetic-password-123',
+        name: 'Synthetic'
+      },
+      returnHeaders: true
+    })
+    const headers = new Headers({
+      cookie: signup.headers
+        .getSetCookie()
+        .map((value) => value.split(';')[0])
+        .join('; ')
+    })
+    const { login, browser } = harness(t, {
+      channel,
+      exchange: async (body) => {
+        const result = await server.api.electronToken({ body })
+        return { session: { token: result.token }, user: result.user }
+      }
+    })
+    await login.start()
+    const transferred = await server.api.electronTransferUser({
+      body: {},
+      query: browser[0],
+      headers
+    })
+    const token = Buffer.from(
+      JSON.stringify({
+        identifier: transferred.electron_authorization_code,
+        state: browser[0].state
+      })
+    ).toString('base64url')
+    await login.complete(token)
+    assert.equal(login.getState().phase, 'authenticated')
+    assert.equal(login.getState().session.user.id, signup.response.user.id)
+    assert.ok(login.getState().session.session.token)
+    await login.complete(token)
+    assert.equal(login.getState().phase, 'authenticated')
   })
-  const signup = await server.api.signUpEmail({
-    body: {
-      email: 'synthetic@example.test',
-      password: 'synthetic-password-123',
-      name: 'Synthetic'
-    },
-    returnHeaders: true
-  })
-  const headers = new Headers({
-    cookie: signup.headers
-      .getSetCookie()
-      .map((value) => value.split(';')[0])
-      .join('; ')
-  })
-  const { login, browser } = harness(t, {
-    exchange: async (body) => {
-      const result = await server.api.electronToken({ body })
-      return { session: { token: result.token }, user: result.user }
-    }
-  })
-  await login.start()
-  const transferred = await server.api.electronTransferUser({
-    body: {},
-    query: browser[0],
-    headers
-  })
-  const token = Buffer.from(
-    JSON.stringify({ identifier: transferred.electron_authorization_code, state: browser[0].state })
-  ).toString('base64url')
-  await login.complete(token)
-  assert.equal(login.getState().phase, 'authenticated')
-  assert.equal(login.getState().session.user.id, signup.response.user.id)
-  assert.ok(login.getState().session.session.token)
-  await login.complete(token)
-  assert.equal(login.getState().phase, 'authenticated')
-})
+}
 
 void test('duplicate callbacks during and after completion keep the established identity', async (t) => {
   const gate = deferred()
