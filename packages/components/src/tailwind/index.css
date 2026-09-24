@@ -119,19 +119,17 @@ pre,
     color: hsl(211 56% 72%);
   }
   /* A link rendered as a reference label (GitHub PR / issue): a link-blue
-     tinted chip instead of the prose underline, so it reads as clickable at a
-     glance. The hue is the prose link's (`.text-markdown-link`). Outranks the
+     tinted chip (no border) instead of the prose underline, so it reads as
+     clickable at a glance. The hue is the prose link's (`.text-markdown-link`). Outranks the
      renderer's `[&_a]:` link variants in this same layer. */
   .markdown-renderer a.markdown-reference-chip {
     --reference-chip-hue: 212 62% 40%;
     color: hsl(var(--reference-chip-hue));
-    background-color: hsl(var(--reference-chip-hue) / 0.1);
-    border-color: hsl(var(--reference-chip-hue) / 0.28);
+    background-color: hsl(var(--reference-chip-hue) / 0.12);
     text-decoration: none;
   }
   .markdown-renderer a.markdown-reference-chip:hover {
-    background-color: hsl(var(--reference-chip-hue) / 0.17);
-    border-color: hsl(var(--reference-chip-hue) / 0.45);
+    background-color: hsl(var(--reference-chip-hue) / 0.18);
   }
   .dark .markdown-renderer a.markdown-reference-chip {
     --reference-chip-hue: 211 56% 72%;

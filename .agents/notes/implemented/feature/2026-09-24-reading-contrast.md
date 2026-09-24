@@ -71,7 +71,7 @@ long-form text.
 - GitHub references: a link whose text only names a pull request or issue (the URL
   itself, `#123`, `repo#123`, `owner/repo#123`, `PR #123`) renders as a link-blue chip,
   `[icon] owner/repo #123`: the pull-request or issue icon names the kind (also spoken to
-  screen readers), and the tinted fill and border mark it as clickable
+  screen readers), and the tinted fill (no border) marks it as clickable
   (`github-reference-link.tsx`, `.markdown-reference-chip`). A link with its own wording,
   or a number that does not match its URL, stays an ordinary link. The anchor keeps the
   in-app PR interception.
