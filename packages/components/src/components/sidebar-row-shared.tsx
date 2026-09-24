@@ -557,10 +557,25 @@ export function GitHubOwnerIcon({
 // section labels read identically (0.9em medium, in the sidebar row color — not
 // brighter than the session titles under them, and not a further /55 fade: that
 // made "Pinned"/"Chats" and the filter icon nearly illegible on light sidebars).
+/**
+ * Top-level group label (a machine, GitHub Worktrees, Chats). Projects and
+ * repos sit flush below it, so the header is told apart by type alone: about
+ * 11.5px bold, faint, a 26px row with no hover fill, above 14px regular rows
+ * with a hover fill. Every group label uses exactly this class — one size
+ * (from the interface font size, not the parent's `em`), one color — so the
+ * groups read as one consistent layer.
+ */
+export const SIDEBAR_GROUP_LABEL_COLOR_CLASS = 'text-sidebar-foreground-muted/70';
+export const SIDEBAR_GROUP_LABEL_CLASS = cn(
+  'text-[length:calc(var(--ui-font-size,14px)*0.82)] font-bold tracking-[0.01em]',
+  SIDEBAR_GROUP_LABEL_COLOR_CLASS
+);
+
 const SECTION_HEADER_BUTTON_CLASS = cn(
-  'relative flex h-7 min-w-0 flex-1 select-none items-center gap-1.5 rounded-md px-2 text-left',
+  'relative flex h-[26px] min-w-0 flex-1 select-none items-center gap-1.5 rounded-md px-2 text-left',
   'border border-transparent bg-transparent',
-  'text-[0.9em] font-medium text-sidebar-row-foreground transition-colors',
+  SIDEBAR_GROUP_LABEL_CLASS,
+  'transition-colors',
   // The outer row paints the focus ring; suppress the global :focus-visible
   // box-shadow here so the ring wraps the whole row (label + action).
   'focus-visible:shadow-none'
@@ -602,7 +617,7 @@ export function SidebarSectionHeader({
     if (canToggle) onToggleCollapsed?.();
   };
   return (
-    <div className="group flex h-7 items-center gap-1 rounded-md has-[[role=button]:focus-visible]:shadow-[inset_0_0_0_1px_hsl(var(--primary)/0.5)]">
+    <div className="group flex h-[26px] items-center gap-1 rounded-md has-[[role=button]:focus-visible]:shadow-[inset_0_0_0_1px_hsl(var(--primary)/0.5)]">
       <div
         role={canToggle ? 'button' : undefined}
         tabIndex={canToggle ? 0 : -1}

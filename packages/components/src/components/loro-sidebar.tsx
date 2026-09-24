@@ -1409,7 +1409,7 @@ export const LoroSidebar = memo(function LoroSidebar({
                           <li key={item.id}>
                             <div
                               className={cn(
-                                'flex items-center gap-2 rounded-lg px-2 py-2 text-[0.9em]',
+                                'flex items-center gap-2 rounded-lg px-2 py-2 text-[1em]',
                                 item.isSelected
                                   ? 'bg-sidebar-selection text-sidebar-selection-foreground'
                                   : 'text-sidebar-foreground-muted hover:bg-sidebar-hover hover:text-sidebar-hover-foreground'

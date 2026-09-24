@@ -94,6 +94,8 @@ import {
   SidebarListSkeleton,
   buildSessionRowOpenedByTreeSlot,
   SIDEBAR_ROW_LIST_CLASS,
+  SIDEBAR_GROUP_LABEL_CLASS,
+  SIDEBAR_GROUP_LABEL_COLOR_CLASS,
 } from '@/components/sidebar-row-shared';
 import { SessionInfoHoverCard } from '@/components/session-info-hover-card';
 import type { SessionSharingState } from '@/lib/session-sharing';
@@ -785,7 +787,8 @@ const SessionGroupRow = memo(function SessionGroupRow({
         />
         <div
           className={cn(
-            'min-w-0 flex-1 flex items-center gap-1 truncate text-[0.9em]',
+            // 1em: conversation titles match the prose size in every organize mode.
+            'min-w-0 flex-1 flex items-center gap-1 truncate text-[1em]',
             showSelectedState ? 'text-sidebar-selection-foreground' : 'text-sidebar-row-foreground'
           )}
           // Double-click to rename is scoped to the title only, so it can't
@@ -1167,19 +1170,34 @@ const SessionGroupSection = memo(function SessionGroupSection({
     ? t('sessions.showLess', 'Show less')
     : t('sessions.showAll', 'Show all ({{count}})', { count: group.sessions.length });
   const resolvedTrailingContent = trailingContent ?? (group.collapsed ? null : dragHandle);
-  // Group labels (a repo such as "loro-dev/loro", or "Chats") share the sidebar
-  // row color: nothing in the sidebar outshines the conversation, and hover
-  // changes a row's fill, not its text color.
-  const headerBaseColorClass = 'text-sidebar-row-foreground';
-  // Typography splits with color: repo headers read as content (regular weight,
-  // full foreground; the leading repo icon marks them as a group), the "Chats"
-  // header reads as section chrome (medium, muted) so section labels recede.
-  const headerTypographyClass =
-    group.kind === 'repo' ? 'text-[0.9em] font-normal' : 'text-[0.9em] font-medium';
+  // A repo ("loro-dev/loro") is a second-level row like a project: 14px
+  // regular in the sidebar row color with a 16px avatar and a hover fill.
+  // "Chats" is a top-level group label like a machine or GitHub Worktrees:
+  // the shared group label type (small, bold, faint, no icon), no hover fill,
+  // and it sticks while its conversations scroll.
+  const isGroupLabel = group.kind !== 'repo';
+  const headerBaseColorClass = isGroupLabel
+    ? SIDEBAR_GROUP_LABEL_COLOR_CLASS
+    : 'text-sidebar-row-foreground';
+  const headerTypographyClass = isGroupLabel
+    ? SIDEBAR_GROUP_LABEL_CLASS
+    : 'text-[1em] font-normal';
 
   return (
-    <div className={cn('flex flex-col gap-0.5', getSidebarGroupSpacingClass(group.collapsed))}>
-      <div className="group flex h-7 items-center">
+    <div
+      className={cn(
+        'flex flex-col gap-0.5',
+        getSidebarGroupSpacingClass(group.collapsed),
+        // 16px above a top-level group (the repo groups before it end in 12px).
+        isGroupLabel && 'mt-1 first:mt-0'
+      )}
+    >
+      <div
+        className={cn(
+          'group flex items-center',
+          isGroupLabel ? 'sticky top-0 z-10 h-[26px] bg-sidebar-background' : 'h-7'
+        )}
+      >
         <div
           role={canNavigate || canToggle ? 'button' : undefined}
           tabIndex={canNavigate || canToggle ? 0 : -1}
@@ -1187,7 +1205,8 @@ const SessionGroupSection = memo(function SessionGroupSection({
           data-scope-item="row"
           data-sidebar-group-key={group.key}
           className={cn(
-            'relative flex h-7 w-full select-none items-center gap-1 rounded-md px-2 text-left',
+            'relative flex w-full select-none items-center rounded-md px-2 text-left',
+            isGroupLabel ? 'h-[26px] gap-1.5' : 'h-7 gap-1',
             'border border-transparent',
             'min-w-0 flex-1 transition-colors',
             headerTypographyClass,
@@ -1197,7 +1216,8 @@ const SessionGroupSection = memo(function SessionGroupSection({
                 ? cn(
                     'cursor-pointer bg-transparent',
                     headerBaseColorClass,
-                    !isMobile && 'hover:bg-sidebar-hover'
+                    !isMobile &&
+                      (isGroupLabel ? 'hover:text-sidebar-foreground' : 'hover:bg-sidebar-hover')
                   )
                 : canToggle
                   ? cn('cursor-pointer bg-transparent', headerBaseColorClass)
@@ -1241,12 +1261,12 @@ const SessionGroupSection = memo(function SessionGroupSection({
                 className={cn(
                   // Left-anchored (not centered in the 20px button) so its left edge
                   // lines up with the session rows' leading status slot below.
-                  'absolute left-0 top-1/2 -translate-y-1/2 h-3.5 w-3.5 transition-opacity duration-100',
+                  'absolute left-0 top-1/2 -translate-y-1/2 h-4 w-4 transition-opacity duration-100',
                   // Mobile: chevron is always shown so the owner avatar must hide
                   // permanently to avoid the two icons overlapping.
                   canToggle && isMobile
                     ? 'opacity-0'
-                    : cn('opacity-80', canToggle && 'group-hover:opacity-0')
+                    : cn(canToggle && 'group-hover:opacity-0')
                 )}
               />
               {canToggle && (

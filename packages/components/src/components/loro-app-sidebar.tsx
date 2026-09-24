@@ -43,6 +43,11 @@ import { cloudOperations } from '@/lib/cloud-api-operations';
 import { useAppCapability } from '@/lib/app-platform';
 import { useCloudQuery } from '@lody/platform/react';
 import { resolveWorkspaceIdentityLogo } from '@/lib/workspace-identity';
+import {
+  SidebarMachineHoverCard,
+  SidebarMachineOfflinePill,
+  type SidebarMachineInfo,
+} from '@/components/sidebar-machine-card';
 import { cn } from '@/lib/utils';
 import { formatCompactRelativeTime } from '@/lib/format-relative-time';
 import { isElectronRenderer, useElectronFullscreen } from '@/lib/electron';
@@ -141,7 +146,6 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
 import { FocusScope, useListKeyboardNavigation } from '@/ui/focus-scope';
 import { SwipeActionRow } from '@/components/shared/swipe-action-row';
 import {
-  getSidebarGroupSpacingClass,
   MAX_VISIBLE_SESSIONS,
   SessionList,
   shallowEqualExceptKeys,
@@ -176,7 +180,6 @@ import {
   Mail,
   FolderOpen,
   GripVertical,
-  Monitor,
   MoreHorizontal,
   Settings2,
   Pencil,
@@ -224,6 +227,18 @@ import {
   RenameSessionDialogView,
   type RenameSessionDialogTarget,
 } from '@/components/sessions/rename-session-dialog';
+
+/** A machine's sidebar label: its name without the mDNS `.local` suffix. */
+const sidebarMachineLabel = (name: string): string => name.trim().replace(/\.local$/i, '');
+
+/**
+ * Space below a top-level group (a machine, GitHub Worktrees): 16px when open,
+ * wider than the 12px between repo groups inside a section and far wider than
+ * the 2px from a header to its first row, so each header binds to its rows.
+ */
+// No `last:mb-0`: the last machine group is followed by GitHub Worktrees and
+// Chats, which need the same gap as between machines.
+const SIDEBAR_TOP_GROUP_SPACING = (collapsed: boolean) => (collapsed ? 'mb-1' : 'mb-4');
 
 export type LoroAppSidebarProps = {
   className?: string;
@@ -724,7 +739,7 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
           openedByTree={openedByTree}
         />
         <div
-          className="min-w-0 flex-1 flex items-center gap-1 truncate text-[0.9em] text-current"
+          className="min-w-0 flex-1 flex items-center gap-1 truncate text-[1em] text-current"
           // Double-click to rename is scoped to the title only, so it can't be
           // triggered by double-clicking the Archive confirm button.
           onDoubleClick={(event) => {
@@ -1206,7 +1221,9 @@ export const LocalProjectItem = memo(function LocalProjectItem({
                       'hover:bg-sidebar-hover hover:text-sidebar-hover-foreground data-[menu-open]:bg-sidebar-hover data-[menu-open]:text-sidebar-hover-foreground',
                     showSelectedState &&
                       'border-sidebar-ring/30 bg-sidebar-selection hover:bg-sidebar-selection',
-                    'flex min-w-0 flex-1 select-none items-center gap-2 text-[0.9em] font-normal transition-colors',
+                    // A 14px row with a 16px icon under the 12px semibold group
+                    // label: the two share a left edge and differ by type.
+                    'flex min-w-0 flex-1 select-none items-center gap-2 text-[1em] font-normal transition-colors',
                     projectCanNavigate ? 'cursor-pointer' : 'cursor-default',
                     removalState && 'text-muted-foreground',
                     showSelectedState
@@ -1237,10 +1254,10 @@ export const LocalProjectItem = memo(function LocalProjectItem({
                     {/* Open folder while expanded, closed while collapsed. */}
                     <ProjectFolderIcon
                       className={cn(
-                        'absolute left-0 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-current transition-opacity duration-100',
+                        'absolute left-0 top-1/2 h-4 w-4 -translate-y-1/2 text-current transition-opacity duration-100',
                         // Mobile: chevron is always visible so the folder icon must hide
                         // permanently to avoid stacking. Desktop keeps the hover swap.
-                        isMobile ? 'opacity-0' : 'opacity-80 group-hover:opacity-0'
+                        isMobile ? 'opacity-0' : 'group-hover:opacity-0'
                       )}
                     />
                     <ChevronDown
@@ -2291,19 +2308,35 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
             kind: 'local' as const,
             sectionKey: localMachineId ?? 'local',
             machineId: localMachineId,
-            sectionLabel: t('sidebar.localProjects', 'Local Projects'),
+            // This device, by name like every other machine group (marked
+            // current by a dot in the header).
+            sectionLabel:
+              typeof localMachineMeta?.name === 'string' && localMachineMeta.name.trim()
+                ? sidebarMachineLabel(localMachineMeta.name)
+                : t('sidebar.localProjects', 'Local Projects'),
             machineDisplayName:
               typeof localMachineMeta?.name === 'string' && localMachineMeta.name.trim()
                 ? localMachineMeta.name.trim()
                 : null,
             canImport: isElectron,
             canRemoveProject: machineSupportsLocalProjectRemovalProtocol(localMachineMeta),
+            defaultCollapsed: false,
             projects: localProjects.map((entry) => entry.project),
           }
         : null;
 
+    // The user's own machines come first; a teammate's machine follows,
+    // folded by default, so the first screen shows the user's own projects.
+    const isTeammateMachine = (machine: { ownerUserId?: string | null }) =>
+      Boolean(userId) && Boolean(machine.ownerUserId) && machine.ownerUserId !== userId;
     const remoteSections = Array.from(remoteProjectsByMachineId.entries())
-      .sort((left, right) => left[1][0]!.machine.name.localeCompare(right[1][0]!.machine.name))
+      .sort((left, right) => {
+        const leftMachine = left[1][0]!.machine;
+        const rightMachine = right[1][0]!.machine;
+        const byOwner =
+          Number(isTeammateMachine(leftMachine)) - Number(isTeammateMachine(rightMachine));
+        return byOwner || leftMachine.name.localeCompare(rightMachine.name);
+      })
       .map(([machineId, entries]) => {
         const machine = entries[0]!.machine;
         const isOwnMachine = Boolean(userId) && machine.ownerUserId === userId;
@@ -2314,13 +2347,14 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
           // A machine grouping is labelled by the machine name alone — the leading
           // machine icon already conveys "these projects live on a machine", so we
           // drop the "projects"/"的项目" suffix the label used to carry.
-          sectionLabel: machine.name,
+          sectionLabel: sidebarMachineLabel(machine.name),
           machineDisplayName:
             typeof machine.name === 'string' && machine.name.trim() ? machine.name.trim() : null,
           canImport: false,
           // Only the machine owner can remove a remote device's projects; the
           // request is queued on that device's machine Flock doc.
           canRemoveProject: isOwnMachine && machineSupportsLocalProjectRemovalProtocol(machine),
+          defaultCollapsed: isTeammateMachine(machine),
           projects: entries.map((entry) => entry.project),
         };
       });
@@ -2567,10 +2601,10 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
     localProjectsSectionCollapseStateAtom
   );
   const handleToggleLocalProjectsSection = useCallback(
-    (sectionKey: string) => {
+    (sectionKey: string, defaultCollapsed: boolean) => {
       setLocalProjectsSectionCollapseState((prev) => ({
         ...prev,
-        [sectionKey]: !(prev[sectionKey] ?? false),
+        [sectionKey]: !(prev[sectionKey] ?? defaultCollapsed),
       }));
     },
     [setLocalProjectsSectionCollapseState]
@@ -2635,12 +2669,30 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
       // when expanded, 4px when collapsed so folded sections stack compactly.
       <div>
         {localProjectSections.map((section, sectionIndex) => {
-          const sectionCollapsed = localProjectsSectionCollapseState[section.sectionKey] ?? false;
+          const sectionCollapsed =
+            localProjectsSectionCollapseState[section.sectionKey] ?? section.defaultCollapsed;
           const sectionProjectKeys = section.machineId
             ? section.projects.map((project) => `${section.machineId}:${project.id}`)
             : [];
           const canReorderProjects = !isMobile && sectionProjectKeys.length > 1;
           const headerFilter = sectionIndex === 0 ? firstSectionFilterAction : null;
+          const machineMeta = section.machineId ? machineMetaMap.get(section.machineId) : undefined;
+          const sectionMachine: SidebarMachineInfo | null =
+            section.machineId && machineMeta
+              ? {
+                  machineId: section.machineId,
+                  name: machineMeta.name,
+                  owner: machineMeta.ownerUserId
+                    ? (membersByUserId.get(machineMeta.ownerUserId) ?? null)
+                    : null,
+                  isOwn:
+                    section.kind === 'local' ||
+                    (Boolean(userId) && machineMeta.ownerUserId === userId),
+                  isCurrent: section.kind === 'local',
+                  os: machineMeta.os,
+                  projectCount: section.projects.length,
+                }
+              : null;
           const dividerRight =
             section.canImport && isElectron ? (
               <button
@@ -2670,21 +2722,46 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
           return (
             <div
               key={section.sectionKey}
-              className={cn('space-y-0.5', getSidebarGroupSpacingClass(sectionCollapsed))}
+              className={cn('space-y-0.5', SIDEBAR_TOP_GROUP_SPACING(sectionCollapsed))}
             >
-              <SidebarSectionHeader
-                icon={
-                  section.kind === 'remote' ? (
-                    <Monitor className="h-3.5 w-3.5 shrink-0 opacity-80" aria-hidden="true" />
-                  ) : undefined
-                }
-                label={section.sectionLabel}
-                collapsed={sectionCollapsed}
-                action={headerAction}
-                isMobile={isMobile}
-                toggleLabel={toggleLabel}
-                onToggleCollapsed={() => handleToggleLocalProjectsSection(section.sectionKey)}
-              />
+              {/* The header sticks while its projects scroll under it, and the
+                  next group's header pushes it off: the machine a project
+                  belongs to stays in view. */}
+              <div className="sticky top-0 z-10 bg-sidebar-background">
+                {/* No icon: a machine group reads like GitHub Worktrees and
+                    Chats. "Offline" marks the exception, and hovering the
+                    header tells what the group is (owner, status, OS). */}
+                <SidebarMachineHoverCard
+                  disabled={isMobile || !sectionMachine}
+                  machine={
+                    sectionMachine ?? {
+                      machineId: '' as MachineId,
+                      name: section.sectionLabel,
+                      isOwn: true,
+                      isCurrent: true,
+                      projectCount: section.projects.length,
+                    }
+                  }
+                >
+                  <SidebarSectionHeader
+                    label={
+                      <span className="inline-flex min-w-0 items-center gap-1.5">
+                        <span className="min-w-0 truncate">{section.sectionLabel}</span>
+                        {section.machineId && section.kind === 'remote' ? (
+                          <SidebarMachineOfflinePill machineId={section.machineId} />
+                        ) : null}
+                      </span>
+                    }
+                    collapsed={sectionCollapsed}
+                    action={headerAction}
+                    isMobile={isMobile}
+                    toggleLabel={toggleLabel}
+                    onToggleCollapsed={() =>
+                      handleToggleLocalProjectsSection(section.sectionKey, section.defaultCollapsed)
+                    }
+                  />
+                </SidebarMachineHoverCard>
+              </div>
 
               {sectionCollapsed ? null : (
                 <DndContext
@@ -3267,7 +3344,8 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
         });
       }
       result.push({
-        collapsed: localProjectsSectionCollapseState[section.sectionKey] ?? false,
+        collapsed:
+          localProjectsSectionCollapseState[section.sectionKey] ?? section.defaultCollapsed,
         projects,
       });
     }

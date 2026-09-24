@@ -4139,5 +4139,14 @@
   "sessions.githubReference.pullRequest": "PR",
   "sessions.githubReference.issue": "Issue",
   "archive.leave": "退出归档",
-  "common.copyTable": "复制表格"
+  "common.copyTable": "复制表格",
+  "sidebar.thisDevice": "当前设备",
+  "sidebar.machineCard.yours": "你",
+  "sidebar.machineCard.unknownOwner": "团队成员",
+  "sidebar.machineCard.owner": "所有者",
+  "sidebar.machineCard.system": "系统",
+  "sidebar.machineCard.projects": "项目",
+  "sidebar.machineCard.projectCount_one": "{{count}} 个项目",
+  "sidebar.machineCard.projectCount_other": "{{count}} 个项目",
+  "sidebar.machineCard.projectCount": "{{count}} 个项目"
 }
