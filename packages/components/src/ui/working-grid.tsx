@@ -50,6 +50,13 @@ export type WorkingGridProps = Omit<ComponentPropsWithoutRef<'span'>, 'children'
    * marks in turn down the list. The rest textures the tiles inside a mark.
    */
   rhythm?: number;
+  /**
+   * `1`: one wave of one period and shape. Every tile — and every mark down a
+   * list — plays the same motion, each a little behind the one before, so marks
+   * differ yet read as delayed copies of each other. `2`: two crossing waves plus
+   * the rhythm, which vary more but can shrink every tile of a mark at once.
+   */
+  waves?: 1 | 2;
   /** Playback speed; 1 is the original 1.9s/2.7s waves, lower is calmer. */
   speed?: number;
   /** Gap between tiles as a fraction of the tile edge. */
@@ -157,6 +164,7 @@ export function WorkingGrid({
   maxOpacity = 1,
   rhythm = 0.3,
   speed = 1,
+  waves = 1,
   gap = 0.18,
   wavelength = 1.2,
   direction = 'across',
@@ -205,6 +213,32 @@ export function WorkingGrid({
       animations.push(animation);
     };
 
+    const relativeMin = minScale / clamp01(maxScale);
+    const vanishing = scale !== 'none' && relativeMin <= 0;
+
+    if (waves === 1) {
+      // One wave carries the whole range on a single layer per tile.
+      const opacityLow = opacityRatio < 1 ? opacityRatio : null;
+      const frames = vanishing
+        ? vanishingKeyframes(relativeMin, opacityLow)
+        : loopKeyframes(scale === 'none' ? null : clamp01(relativeMin), opacityLow);
+      if (frames) {
+        const [wave] = workingGridWaves(direction);
+        for (const outer of root.querySelectorAll<HTMLElement>('[data-working-grid-tile]')) {
+          const [x, y] = tileSeaPoint(
+            placement,
+            Number(outer.dataset.col),
+            Number(outer.dataset.row)
+          );
+          play(outer, frames, wave, wavePhase(wave, x, y, wavelength));
+        }
+      }
+      return () => {
+        stops.forEach((stop) => stop());
+        animations.forEach((animation) => animation.cancel());
+      };
+    }
+
     // The rhythm: the whole mark's opacity, from the long wave at the mark's centre,
     // between maxOpacity and its share of the trough.
     const rhythmLow = opacityRatio ** rhythmShare;
@@ -219,14 +253,12 @@ export function WorkingGrid({
     }
 
     // The texture: two stacked layers per tile, one per short wave.
-    const relativeMin = minScale / clamp01(maxScale);
     const tileOpacityLow = opacityRatio < 1 ? Math.sqrt(opacityRatio ** (1 - rhythmShare)) : null;
     const opacityLow = tileOpacityLow === 1 ? null : tileOpacityLow;
     // Above zero the two layers split the range (their product bottoms out at
     // minScale). At or below zero only the inner layer empties the tile; the outer
     // one keeps a gentle positive swell. Letting either layer empty it left ≤ 2 of
     // nine tiles showing ~11% of the time, so whole marks read as idle.
-    const vanishing = scale !== 'none' && relativeMin <= 0;
     const outerFrames = vanishing
       ? loopKeyframes(VANISH_OUTER_LOW, opacityLow)
       : loopKeyframes(scale === 'none' ? null : Math.sqrt(clamp01(relativeMin)), opacityLow);
@@ -266,6 +298,7 @@ export function WorkingGrid({
     opacityRatio,
     rhythmShare,
     speed,
+    waves,
     gap,
     wavelength,
     direction,

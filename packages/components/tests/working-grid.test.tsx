@@ -165,8 +165,21 @@ const TRANSFORM_OR_OPACITY = (frame: Keyframe) =>
 const scaleOf = (frame: Keyframe) => Number(/scale\(([\d.]+)\)/.exec(String(frame.transform))![1]);
 
 describe('WorkingGrid', () => {
-  it('animates the mark and both layers of every tile on the compositor', () => {
+  it('plays one wave of one shape on every tile by default', () => {
     render(<WorkingGrid />);
+
+    // One loop per tile, all the same keyframes and period: only the phase differs,
+    // so each tile (and each mark down a list) is a delayed copy of its neighbour.
+    expect(recorded).toHaveLength(9);
+    expect(recorded.every((a) => a.target.hasAttribute('data-working-grid-tile'))).toBe(true);
+    expect(new Set(recorded.map((a) => JSON.stringify(a.keyframes))).size).toBe(1);
+    expect(new Set(recorded.map((a) => a.options.duration)).size).toBe(1);
+    expect(new Set(recorded.map((a) => a.options.delay)).size).toBeGreaterThan(1);
+    expect(recorded.every((a) => a.keyframes.every(TRANSFORM_OR_OPACITY))).toBe(true);
+  });
+
+  it('animates the mark and both layers of every tile on the compositor', () => {
+    render(<WorkingGrid waves={2} />);
 
     // One rhythm loop on the mark, two wave layers on each of nine tiles.
     expect(recorded).toHaveLength(19);
@@ -181,7 +194,7 @@ describe('WorkingGrid', () => {
   });
 
   it('slows every loop by the speed factor', () => {
-    render(<WorkingGrid speed={0.5} />);
+    render(<WorkingGrid waves={2} speed={0.5} />);
     const durations = new Set(recorded.map((animation) => animation.options.duration));
     const [wave1, wave2] = workingGridWaves('across');
     expect(durations).toEqual(
@@ -201,6 +214,7 @@ describe('WorkingGrid', () => {
     const gap = 0.5;
     render(
       <WorkingGrid
+        waves={2}
         size={size}
         gap={gap}
         minScale={0.25}
@@ -223,7 +237,7 @@ describe('WorkingGrid', () => {
   });
 
   it('keeps brightness between minOpacity and maxOpacity', () => {
-    render(<WorkingGrid minScale={0.3} minOpacity={0.4} maxOpacity={0.8} rhythm={0.5} />);
+    render(<WorkingGrid waves={2} minScale={0.3} minOpacity={0.4} maxOpacity={0.8} rhythm={0.5} />);
     const [rhythm, outer, inner] = recorded;
     const opacity = (animation: RecordedAnimation, at: number) =>
       Number(animation.keyframes[at]!.opacity);
@@ -237,7 +251,7 @@ describe('WorkingGrid', () => {
     /** Share of one tile layer's loop spent fully empty. */
     const emptyShare = (minScale: number) => {
       recorded = [];
-      render(<WorkingGrid key={minScale} minScale={minScale} maxScale={0.8} />);
+      render(<WorkingGrid key={minScale} waves={2} minScale={minScale} maxScale={0.8} />);
       // The inner layer (the tile face) is the one allowed to empty the tile; the
       // outer layer only swells, so a whole mark never empties at once.
       const outers = recorded.filter((a) => a.target.hasAttribute('data-working-grid-tile'));

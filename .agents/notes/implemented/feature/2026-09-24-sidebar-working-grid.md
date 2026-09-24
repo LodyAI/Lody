@@ -42,11 +42,16 @@ The kept form and its defaults:
   between 0.3 and 0.9 of their cell (never to nothing) while opacity runs from
   0.25 (pale tiles) to 1 (primary tiles). Still, it is a dot matrix of varied
   dots; moving, light and size roll across it.
-- Texture: two plane waves, 3.2 and 4.4 cells long (× wavelength 1.2), heading
-  down-right and down-left. Rhythm: one long wave straight down, 36 cells (about
-  twelve stitched rows) crest to crest, carrying 30% of the opacity range so
-  whole marks brighten in turn down the list. Everything plays at the original
-  speed (1.9s and 2.7s for the texture, 3.6s for the rhythm).
+- One wave (`waves = 1`, the default): a single plane wave, 3.2 cells × 1.2 long,
+  heading down-right with a 1.9s period, drives every tile's size and opacity on
+  one layer. Every tile, and every mark down a list, plays the same loop; only
+  the phase differs, so each mark is a slightly delayed copy of the one above.
+  With two crossing waves their troughs could coincide and shrink every tile of
+  a mark at once; one wave shorter than the mark's diagonal always leaves some
+  tile near a crest.
+- `waves = 2` keeps the earlier form for comparison: two crossing waves (3.2 and
+  4.4 cells, 1.9s and 2.7s) on nested layers plus a long downward rhythm wave on
+  the mark (36 cells, 3.6s, 30% of the opacity range).
 - One sea for the page: a tile's phase depends only on its page position. In a
   list the sea between rows is skipped ("stitched", `rowPitch = 28`): the 14px
   mark covers half of each 28px row, and without stitching a wave moves more than
@@ -68,11 +73,13 @@ motion, and many unrelated flickering points cannot be tuned out. So:
   not recognisable; counting tiles under 30% size as invisible, a mark showed two
   or fewer tiles ~29% of the time. Third: keep the grid whole (size 0.8–0.9) and
   move light instead (opacity 0.25–1) in the primary colour at 0.6× — whole and
-  recognisable, but barely moving. Final: the same whole grid and colour with
-  scale restored to 0.3–0.9 (positive, so no tile vanishes) and the original
-  speed. The grid shape keeps it distinct from the unread dot.
-- Coherence: the whole-mark rhythm makes a column read as one pulse travelling
-  down, instead of about a hundred independently changing tiles.
+  recognisable, but barely moving. Fourth: scale restored to 0.3–0.9 (positive,
+  so no tile vanishes) at the original speed — lively, but two waves plus the
+  rhythm made marks look unrelated and sometimes all small. Final: the same
+  whole grid, colour and ranges driven by one wave, so marks differ only in
+  phase. The grid shape keeps it distinct from the unread dot.
+- Coherence: one wave of one shape makes a column read as the same motion
+  passing from mark to mark, instead of about a hundred unrelated tiles.
 - Reading pause: any wheel, key, pointer or touch press outside
   `[data-working-grid-region]` (the sidebar root) freezes every mark on its
   current frame; marks resume after 4s of quiet or when the pointer enters the
