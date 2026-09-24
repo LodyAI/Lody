@@ -162,6 +162,34 @@ describe('LoroSidebar pinned section', () => {
     }
   );
 
+  it('keeps Archive and Help behind one More menu in the footer', () => {
+    const onArchiveClicked = vi.fn();
+    const onDocsClicked = vi.fn();
+    renderSidebar({ onArchiveClicked, onDocsClicked });
+
+    // No standalone Archive or Help buttons: only Settings and More.
+    const footerButton = (name: string) =>
+      Array.from(container?.querySelectorAll('button') ?? []).find(
+        (button) => button.textContent?.trim() === name
+      );
+    expect(footerButton('Archive')).toBeUndefined();
+    expect(footerButton('Help')).toBeUndefined();
+    const more = footerButton('More');
+    expect(more).toBeDefined();
+
+    flushSync(() => {
+      more?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    });
+    const items = Array.from(document.querySelectorAll<HTMLElement>('[role="menuitem"]'));
+    expect(items[0]?.textContent).toBe('Archive');
+    expect(items.some((item) => item.textContent?.includes('Docs'))).toBe(true);
+
+    flushSync(() => {
+      items[0]?.click();
+    });
+    expect(onArchiveClicked).toHaveBeenCalledTimes(1);
+  });
+
   it('renders back and forward next to the collapse toggle', () => {
     renderSidebar({ onRequestCollapse: vi.fn() });
 

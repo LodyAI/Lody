@@ -48,9 +48,9 @@ import { ScrollArea } from '@/ui/scroll-area';
 import {
   AppWindow,
   Archive,
+  LayoutGrid,
   BookOpen,
   Bug,
-  CircleHelp,
   ClipboardList,
   Github,
   SquarePen,
@@ -1461,13 +1461,21 @@ export const LoroSidebar = memo(function LoroSidebar({
               <Settings strokeWidth={1.5} />
             </IconButton>
 
+            {/* Low-frequency places (Archive, Help) share one "More" menu so
+                the footer does not keep an always-visible archive icon. The
+                trigger reads as active while Archive is the open page. */}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <IconButton label="Help">
-                  <CircleHelp strokeWidth={1.5} />
+                <IconButton label={t('common.more', 'More')} active={activeNav === 'archive'}>
+                  <LayoutGrid strokeWidth={1.5} />
                 </IconButton>
               </DropdownMenuTrigger>
-              <DropdownMenuContent side="top" align="start" className="min-w-[140px]">
+              <DropdownMenuContent side="top" align="end" className="min-w-[160px]">
+                <DropdownMenuItem onSelect={() => onArchiveClicked?.()}>
+                  <Archive className="h-4 w-4" />
+                  {t('archive.title', 'Archive')}
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
                 <DropdownMenuItem onSelect={() => onDocsClicked?.()}>
                   <BookOpen className="h-4 w-4" />
                   {mergedLabels.docs}
@@ -1486,10 +1494,6 @@ export const LoroSidebar = memo(function LoroSidebar({
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
-
-            <IconButton label="Archive" active={activeNav === 'archive'} onClick={onArchiveClicked}>
-              <Archive strokeWidth={1.5} />
-            </IconButton>
           </div>
 
           {isMobile ? (
