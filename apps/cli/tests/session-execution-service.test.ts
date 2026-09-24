@@ -3275,144 +3275,154 @@ describe('SessionExecutionService', () => {
     expect(refreshCodeCollabSharedState).toHaveBeenCalledWith('session-1');
   });
 
-  it('starts a local project session creation', async () => {
-    const localProjectId = 'local-project-1' as LocalProjectId;
-    const machineId = 'machine-1' as MachineId;
-    const sessionDoc = withHistoryPort({
-      getMetaState: vi.fn(async () => ({ agentConfigId: capabilityConfigId })),
-      getHistory: vi.fn(() => []),
-      setStatus: vi.fn(async () => {}),
-      setProject: vi.fn(async () => {}),
-      setBaseBranch: vi.fn(async () => {}),
-      updateHistory: vi.fn(async () => {}),
-      roomId: 'session-session-local-code-collab',
-    });
-    const agentClient = {
-      isCreated: vi.fn(() => true),
-      cancel: vi.fn(async () => {}),
-      prompt: vi.fn(async () => ({})),
-      currentModel: undefined,
-    };
-    const createdSession = {
-      sessionId: 'session-local-code-collab' as SessionId,
-      acpSessionId: 'acp-local-code-collab' as ACPSessionId,
-      agentClient,
-      getAcpCapabilities: () => ({
-        modes: [{ id: 'agent', name: 'Agent' }],
-        models: [{ modelId: 'gpt-5', name: 'GPT-5' }],
-        configOptions: [
-          {
-            id: 'reasoning',
-            name: 'Reasoning',
-            category: 'thought_level',
-            type: 'select' as const,
-            currentValue: 'high',
-            options: [{ value: 'high', name: 'High' }],
-          },
-        ],
-        availableCommands: [{ name: 'review', description: 'Review changes' }],
-        sessionFork: false,
-        acknowledgedSteer: true,
-      }),
-      terminalManager: {} as unknown,
-      getWorkdir: () => '/local/repo',
-      getHostWorkdir: () => '/local/repo',
-      getParentSessionId: () => undefined,
-      exec: vi.fn(async () => ''),
-      terminate: vi.fn(async () => {}),
-      updateGitIdentity: vi.fn(),
-      createAgent: vi.fn(async () => 'acp-local-code-collab'),
-      applyExecutionPlaneLimits: vi.fn(async () => {}),
-    };
-    const sessionManager = {
-      getSession: vi.fn(() => null),
-      getPendingSession: vi.fn(() => null),
-      createSession: vi.fn(async () => createdSession as unknown),
-      setSessionError: vi.fn(),
-      terminateSession: vi.fn(),
-      refreshGhTokenForSession: vi.fn(async () => {}),
-    } as unknown as SessionManager;
-    const getDocMeta = vi.fn(async (roomId: string) => {
-      if (roomId !== getMachineRoomId(machineId)) return undefined;
-      return {
-        meta: {
-          localProjects: {
-            [localProjectId]: {
-              id: localProjectId,
-              name: 'Local Project',
-              rootPath: '/local/repo',
-              createdAtMs: 1,
+  it.each([true, false])(
+    'starts a local project session with title capability %s',
+    async (sessionTitle) => {
+      const generatedTitles: string[] = [];
+      const localProjectId = 'local-project-1' as LocalProjectId;
+      const machineId = 'machine-1' as MachineId;
+      const sessionDoc = withHistoryPort({
+        getMetaState: vi.fn(async () => ({ agentConfigId: capabilityConfigId })),
+        getHistory: vi.fn(() => []),
+        setStatus: vi.fn(async () => {}),
+        setProject: vi.fn(async () => {}),
+        setBaseBranch: vi.fn(async () => {}),
+        updateHistory: vi.fn(async () => {}),
+        roomId: 'session-session-local-code-collab',
+      });
+      const agentClient = {
+        isCreated: vi.fn(() => true),
+        cancel: vi.fn(async () => {}),
+        prompt: vi.fn(async () => ({})),
+        currentModel: undefined,
+      };
+      const createdSession = {
+        sessionId: 'session-local-code-collab' as SessionId,
+        acpSessionId: 'acp-local-code-collab' as ACPSessionId,
+        agentClient,
+        getAcpCapabilities: () => ({
+          modes: [{ id: 'agent', name: 'Agent' }],
+          models: [{ modelId: 'gpt-5', name: 'GPT-5' }],
+          configOptions: [
+            {
+              id: 'reasoning',
+              name: 'Reasoning',
+              category: 'thought_level',
+              type: 'select' as const,
+              currentValue: 'high',
+              options: [{ value: 'high', name: 'High' }],
+            },
+          ],
+          availableCommands: [{ name: 'review', description: 'Review changes' }],
+          sessionTitle,
+          sessionFork: false,
+          acknowledgedSteer: true,
+        }),
+        terminalManager: {} as unknown,
+        getWorkdir: () => '/local/repo',
+        getHostWorkdir: () => '/local/repo',
+        getParentSessionId: () => undefined,
+        exec: vi.fn(async () => ''),
+        terminate: vi.fn(async () => {}),
+        updateGitIdentity: vi.fn(),
+        createAgent: vi.fn(async () => 'acp-local-code-collab'),
+        applyExecutionPlaneLimits: vi.fn(async () => {}),
+      };
+      const sessionManager = {
+        getSession: vi.fn(() => null),
+        getPendingSession: vi.fn(() => null),
+        createSession: vi.fn(async () => createdSession as unknown),
+        setSessionError: vi.fn(),
+        terminateSession: vi.fn(),
+        refreshGhTokenForSession: vi.fn(async () => {}),
+      } as unknown as SessionManager;
+      const getDocMeta = vi.fn(async (roomId: string) => {
+        if (roomId !== getMachineRoomId(machineId)) return undefined;
+        return {
+          meta: {
+            localProjects: {
+              [localProjectId]: {
+                id: localProjectId,
+                name: 'Local Project',
+                rootPath: '/local/repo',
+                createdAtMs: 1,
+              },
             },
           },
-        },
-      };
-    });
-    const updateAcpCapabilities = vi.fn(async () => {});
-    const deps = createBaseDeps({
-      machineId,
-      sessionManager,
-      workspaceDocument: {
-        repo: {
-          upsertDocMeta: vi.fn(async () => {}),
-          getDocMeta,
-        },
-        getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
-        getAcpCapabilities: vi.fn(async () => undefined),
-        updateAcpCapabilities,
-      } as unknown as LoroDocumentManager,
-      buildAcpPromptBlocks: vi.fn(async () => [{ type: 'text', text: 'built prompt' }] as any),
-    });
-
-    const service = new SessionExecutionService(deps);
-    await service.startSession({
-      type: 'session/create',
-      sessionId: 'session-local-code-collab' as SessionId,
-      machineId,
-      workspaceId: 'workspace-1' as WorkspaceId,
-      project: { kind: 'local', localProjectId },
-      acpSessionConfig: { prompt: 'hello', cliType: 'builtin', agentType: 'codex' },
-      userTurnId: 'turn-local-code-collab',
-      userId: 'user-2',
-      userName: 'User 2',
-      userEmail: 'user2@example.com',
-    });
-
-    expect(sessionManager.createSession).toHaveBeenCalledWith(
-      expect.objectContaining({
-        workdir: '/local/repo',
-        project: { kind: 'local', localProjectId },
-      })
-    );
-    await vi.waitFor(() =>
-      expect(updateAcpCapabilities).toHaveBeenCalledWith(
+        };
+      });
+      const updateAcpCapabilities = vi.fn(async () => {});
+      const deps = createBaseDeps({
         machineId,
-        capabilityConfigId,
-        'builtin',
-        'codex',
-        [{ id: 'agent', name: 'Agent' }],
-        [{ modelId: 'gpt-5', name: 'GPT-5' }],
-        [
-          {
-            id: 'reasoning',
-            name: 'Reasoning',
-            category: 'thought_level',
-            type: 'select',
-            currentValue: 'high',
-            options: [{ value: 'high', name: 'High' }],
+        maybeGenerateAndStoreSessionTitle: async () => {
+          generatedTitles.push('Local title');
+        },
+        sessionManager,
+        workspaceDocument: {
+          repo: {
+            upsertDocMeta: vi.fn(async () => {}),
+            getDocMeta,
           },
-        ],
-        [{ name: 'review', description: 'Review changes' }],
-        false,
-        expect.any(String),
-        // Per-model reasoning efforts: absent for this agent, which publishes no
-        // legacy `model[effort]` combination list.
-        undefined,
-        true,
-        // Goal actions: the fixture client advertises no goal extension.
-        undefined
-      )
-    );
-  });
+          getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
+          getAcpCapabilities: vi.fn(async () => undefined),
+          updateAcpCapabilities,
+        } as unknown as LoroDocumentManager,
+        buildAcpPromptBlocks: vi.fn(async () => [{ type: 'text', text: 'built prompt' }] as any),
+      });
+
+      const service = new SessionExecutionService(deps);
+      await service.startSession({
+        type: 'session/create',
+        sessionId: 'session-local-code-collab' as SessionId,
+        machineId,
+        workspaceId: 'workspace-1' as WorkspaceId,
+        project: { kind: 'local', localProjectId },
+        acpSessionConfig: { prompt: 'hello', cliType: 'builtin', agentType: 'codex' },
+        userTurnId: 'turn-local-code-collab',
+        userId: 'user-2',
+        userName: 'User 2',
+        userEmail: 'user2@example.com',
+      });
+
+      expect(generatedTitles).toEqual(sessionTitle ? [] : ['Local title']);
+      expect(sessionManager.createSession).toHaveBeenCalledWith(
+        expect.objectContaining({
+          workdir: '/local/repo',
+          project: { kind: 'local', localProjectId },
+        })
+      );
+      await vi.waitFor(() =>
+        expect(updateAcpCapabilities).toHaveBeenCalledWith(
+          machineId,
+          capabilityConfigId,
+          'builtin',
+          'codex',
+          [{ id: 'agent', name: 'Agent' }],
+          [{ modelId: 'gpt-5', name: 'GPT-5' }],
+          [
+            {
+              id: 'reasoning',
+              name: 'Reasoning',
+              category: 'thought_level',
+              type: 'select',
+              currentValue: 'high',
+              options: [{ value: 'high', name: 'High' }],
+            },
+          ],
+          [{ name: 'review', description: 'Review changes' }],
+          false,
+          expect.any(String),
+          // Per-model reasoning efforts: absent for this agent, which publishes no
+          // legacy `model[effort]` combination list.
+          undefined,
+          true,
+          // Goal actions: the fixture client advertises no goal extension.
+          undefined,
+          { sessionTitle }
+        )
+      );
+    }
+  );
 
   it('rejects session creation before spawning an agent when memory pressure persists', async () => {
     let history: Array<Record<string, unknown>> = [

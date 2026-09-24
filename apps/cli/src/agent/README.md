@@ -228,25 +228,25 @@ override entries still apply only when their source-version suffix matches the s
 
 ### Session titles
 
-Builtin Claude, Codex and Grok own session title generation through ACP
-`session_info_update`; Kimi and the DeepSeek Harness still use `title-generator.ts` /
-`response-utils.ts` and the `titleGeneration` config. `BUILTIN_ACP_TITLE_OWNERSHIP` in
-`packages/shared/src/ai.ts` is the single table behind both facts, and its doc comment
-carries the per-adapter mechanism; the audit evidence and what each remaining gap would
-cost to close live in the [decision note](../../../../.agents/notes/implemented/architecture/2026-09-08-acp-owned-session-titles.md).
+Providers advertising Core `agentCapabilities._meta.lody.sessionTitle: { version: 1 }`
+own automatic title generation. After the main ACP session initializes, dispatch
+uses its live capability to skip `title-generator.ts`; capability cache freshness
+cannot cause a duplicate process on the first launch. Probes and normal session
+creation persist `sessionTitle` for the settings dialog, including runtime overrides
+and custom providers. A custom command's cached source must match before hiding
+its title settings.
 
-Two predicates read that table, and the difference between them is the part worth knowing.
-`acpOwnsSessionTitleGeneration()` keeps the isolated session out of an agent's title path
-and hides its obsolete title settings. `trustsUntaggedAcpSessionTitle()` is narrower: it
-answers whether a pushed title may be stored without a `_meta.lody.titleSource` tag, which
-is true only for the adapters that send no tag at all. Codex owns its generation but tags
-every title and previews the raw first prompt as `fallback`, so trusting it untagged would
-make that preview the session title.
+`session_info_update` with `_meta.lody.titleSource` `generated` or `explicit`
+feeds the existing sanitized, conditional title write. Fallback/unset or malformed
+tags are rejected; user titles are preserved. The generated tag requires the
+capability. Legacy explicit tags remain compatible. Failed provider generation
+leaves the draft title; there is no timeout-triggered duplicate generation.
 
-A runtime override revokes ownership. `BuiltinRuntimeOverrides` can aim the same
-`agentType` at an executable predating the title behaviour, and that session would otherwise
-get no title at all — generator skipped, nothing pushed, and the setting that would fix it
-hidden — so an overridden runtime keeps the local generator.
+The builtin Claude/Codex/Grok identity table remains compatibility for older
+managed runtimes. Overrides revoke that fallback, but can independently advertise
+the new capability. Only legacy Claude/Grok titles are trusted without a tag.
+See the [contract](../../../../specs/acp-session-titles.md) and
+[original compatibility decision](../../../../.agents/notes/implemented/architecture/2026-09-08-acp-owned-session-titles.md).
 
 The daemon does not name branches. A worktree session stays on the `session/<id>` branch
 `worktree-manager.ts` created for it, and `syncSessionBranchName` records whatever branch the

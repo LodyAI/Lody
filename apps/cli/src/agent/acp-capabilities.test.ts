@@ -35,6 +35,7 @@ function createSuccessfulStartupResult(sessionResponse?: Record<string, unknown>
   return {
     agentProcess: {} as never,
     client: {
+      supportsSessionTitleGeneration: () => false,
       supportsAcknowledgedSteer: () => false,
       getGoalCapability: () => undefined,
     } as never,
@@ -130,9 +131,18 @@ describe('fetchAcpCapabilities', () => {
     expect(result.availableCommands).toEqual([{ name: '/help', description: 'Help' }]);
   });
 
+  it('records provider title ownership from the live initialization', async () => {
+    const startup = createSuccessfulStartupResult();
+    Object.assign(startup.client, { supportsSessionTitleGeneration: () => true });
+    mocks.startLocalAcpAgent.mockResolvedValue(startup);
+    const result = await fetchAcpCapabilities('custom', 'title-agent', createSilentLogger());
+    expect(result.sessionTitle).toBe(true);
+  });
+
   it('records the goal actions the live client advertised', async () => {
     const startupResult = createSuccessfulStartupResult();
     startupResult.client = {
+      supportsSessionTitleGeneration: () => false,
       supportsAcknowledgedSteer: () => false,
       getGoalCapability: () => ({ version: 1, actions: ['pause', 'resume'] }),
     } as never;
@@ -154,6 +164,7 @@ describe('fetchAcpCapabilities', () => {
   it('preserves acknowledged steering support discovered from the live client', async () => {
     const startupResult = createSuccessfulStartupResult();
     startupResult.client = {
+      supportsSessionTitleGeneration: () => false,
       supportsAcknowledgedSteer: () => true,
       getGoalCapability: () => undefined,
     } as never;

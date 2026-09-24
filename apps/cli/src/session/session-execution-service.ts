@@ -613,6 +613,7 @@ export type SessionExecutionServiceDeps = {
     availableCommands?: AcpCommandSummary[];
     sessionFork: boolean;
     acknowledgedSteer: boolean;
+    sessionTitle?: boolean;
     goalActions?: SessionGoalAction[];
     modelReasoningEfforts?: Record<string, string[]>;
     capabilitySourceVersion?: string;
@@ -5112,16 +5113,6 @@ export class SessionExecutionService {
     );
     const startSessionStartedAtMs = getServerNow();
 
-    void this.deps.maybeGenerateAndStoreSessionTitle(
-      sessionId,
-      sessionConfig.agentCliType,
-      sessionConfig.agentType,
-      agentConfig.prompt,
-      env,
-      acpSessionConfig.customAcp,
-      acpSessionConfig.runtimeOverrides
-    );
-
     const self = this;
     const turnErrorContext: VisibleSessionTurnUnhandledErrorContext = {
       code: 'session_create_failed',
@@ -5274,6 +5265,18 @@ export class SessionExecutionService {
           bindSession(session);
           self.scheduleCreatedSessionCapabilityUpdate(session, sessionConfig);
           yield* abortIfCancelled({ terminateSession: true });
+          // Use the live initialize result, including on the first uncached launch.
+          if (session.getAcpCapabilities?.()?.sessionTitle !== true) {
+            void self.deps.maybeGenerateAndStoreSessionTitle(
+              sessionId,
+              sessionConfig.agentCliType,
+              sessionConfig.agentType,
+              agentConfig.prompt,
+              env,
+              acpSessionConfig.customAcp,
+              acpSessionConfig.runtimeOverrides
+            );
+          }
           // First-turn attachments are materialized under the session workspace.
           // Start this as soon as createSession has registered the workspace, but
           // do not start it earlier or attachments fall back to "unavailable".
@@ -5774,7 +5777,8 @@ export class SessionExecutionService {
         sourceVersion,
         capabilities.modelReasoningEfforts,
         capabilities.acknowledgedSteer,
-        capabilities.goalActions
+        capabilities.goalActions,
+        { sessionTitle: capabilities.sessionTitle }
       );
     })().catch((error: unknown) => {
       this.deps.logger.debug(
@@ -6106,6 +6110,7 @@ export class SessionExecutionService {
         availableCommands,
         sessionFork,
         acknowledgedSteer,
+        sessionTitle,
         goalActions,
         modelReasoningEfforts,
         capabilitySourceVersion,
@@ -6148,7 +6153,7 @@ export class SessionExecutionService {
         modelReasoningEfforts,
         acknowledgedSteer,
         goalActions,
-        { signal: options.signal }
+        { signal: options.signal, sessionTitle }
       );
 
       return {

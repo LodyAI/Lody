@@ -1082,11 +1082,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
 
   const activePreset = formData.presetId ? PRESETS_BY_ID[formData.presetId] : undefined;
   const isPreset = !!activePreset;
-  const acpProvidesSessionTitle = acpOwnsSessionTitleGeneration(
-    formData.cliType,
-    formData.agentType,
-    formData.runtimeOverrides
-  );
+
   const activeCredentialMode = activePreset
     ? getPresetCredentialMode(activePreset, formData.presetCredentialModeId)
     : undefined;
@@ -1180,6 +1176,17 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
       ? configCapability
       : undefined,
     formData.runtimeOverrides
+  );
+  const acpProvidesSessionTitle = acpOwnsSessionTitleGeneration(
+    formData.cliType,
+    formData.agentType,
+    formData.runtimeOverrides,
+    cachedCapabilityAuthority !== 'unavailable' &&
+      (!isCustom ||
+        (!!parsedCustomAcp &&
+          configCapability?.sourceVersion ===
+            `custom:${serializeCustomAcpLaunchSpec(parsedCustomAcp)}`)) &&
+      configCapability?.sessionTitle === true
   );
   const hasCachedCaps =
     formData.cliType === 'builtin' && formData.agentType === 'kimi'
