@@ -478,6 +478,9 @@ const NativeSelectionRowsContext = createContext<{
   leading: number;
   held: ReadonlySet<string>;
 }>({ rows: [], leading: 0, held: new Set() });
+const LEADING_ROW_KEY = '\u0000leading';
+const AGENT_ACTIVITY_ROW_KEY = '\u0000agent-activity';
+
 function ConversationVirtualRow({ index, ...props }: CustomItemComponentProps) {
   const { rows, leading, held } = useContext(NativeSelectionRowsContext);
   const row = rows[index - leading];
@@ -1596,6 +1599,29 @@ export const SessionChatStreamView = forwardRef<
       });
     }, [leadingContent, placeholderRowCount, virtualRows.length]);
 
+    // Virtua index <-> stable row key, so sticky scroll can keep a free
+    // reader's row in place when rows are inserted above it.
+    const rowIndexByKey = useMemo(() => {
+      const byKey = new Map<string, number>();
+      virtualRows.forEach((row, index) => byKey.set(row.key, index + leadingRowCount));
+      return byKey;
+    }, [leadingRowCount, virtualRows]);
+    const rowKeyAt = useCallback(
+      (index: number): string | undefined => {
+        if (index < leadingRowCount) return LEADING_ROW_KEY;
+        return virtualRows[index - leadingRowCount]?.key ?? AGENT_ACTIVITY_ROW_KEY;
+      },
+      [leadingRowCount, virtualRows]
+    );
+    const findRowIndex = useCallback(
+      (key: string): number => {
+        if (key === LEADING_ROW_KEY) return leadingRowCount > 0 ? 0 : -1;
+        if (key === AGENT_ACTIVITY_ROW_KEY) return -1;
+        return rowIndexByKey.get(key) ?? -1;
+      },
+      [leadingRowCount, rowIndexByKey]
+    );
+
     const {
       scrollRef: scrollContainerRef,
       spacerRef: bottomSpacerRef,
@@ -1618,6 +1644,9 @@ export const SessionChatStreamView = forwardRef<
       itemCount: virtualRows.length + leadingRowCount + (shouldShowAgentActivityRow ? 1 : 0),
       onAtBottomChange,
       suppressAutoScrollRef: autoScrollSuppressedRef,
+      rowKeyAt,
+      findRowIndex,
+      rowsVersion: rowIndexByKey,
     });
 
     /**

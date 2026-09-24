@@ -82,6 +82,32 @@ row composition and hydration windows (`window.__lodyScrollLog.dump()`), to conf
 refute this before changing the hydration path. The reveal check now also runs on
 viewport height changes, removing one way the pane could stay hidden.
 
+## Reading position while rows change above
+
+Measured on 2026-09-24 with a per-frame recorder (row screen positions, every programmatic
+`scrollTop` write with its caller, row resizes) driven by real wheel input.
+
+- **Near the bottom on `main`**: each small scroll up and back re-locked
+  `use-stick-to-bottom` (70px tolerance) and jumped 67px in one frame to the end. The
+  follow modes above do not write at all in the same scenario.
+- **Scrolling up through a long conversation** (100 rows): the largest jumps (314px,
+  902px) were not measurement corrections but placeholder turns above the viewport
+  becoming several rows. With `shift={false}` and index-keyed sizes, Virtua keeps pixel
+  offsets, so the rows under the reader change. A free reader's row is now captured by
+  key (the row under the viewport's middle and its distance from the top) on every scroll
+  and own write, and when the row list changes the hook puts that row back in the same
+  commit, before paint, dispatching a scroll event so Virtua renders the new range in that
+  frame. Total visible jump over the same scroll fell from 1,370px to 344-479px.
+- **Rejected**: native scroll anchoring (`overflow-anchor`) has no effect on Virtua's
+  absolutely positioned rows (identical results on and off with Virtua's compensation
+  disabled). Patching Virtua to compensate rows wholly above the viewport's middle removed
+  a 30px jump in a synthetic harness but would move a group's header when it is expanded
+  in the top half, contradicting "group toggles never scroll"; the reverted patch was not
+  shipped. A continuous second writer (correcting drift on every geometry change) was
+  rejected because a programmatic jump whose scroll event has not arrived would be undone.
+- **Remaining**: smaller shifts (about 20-90px) when visible rows are re-measured, and
+  one −264px shift while newly inserted rows measured, are still under investigation.
+
 ## Verification and limits
 
 `packages/components/tests/use-sticky-scroll.test.ts` covers composer growth and shrink

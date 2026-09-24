@@ -29,6 +29,7 @@ Parent AGENTS apply. Edit `AGENTS.md`, not its `CLAUDE.md` symlink. Background: 
   reserves a reply-room `Virtualizer` sibling; outside `anchored` it only shrinks.
   Queue/guide sends never scroll.
 - Group toggles never scroll; a non-following reader is never pulled to the end.
+  Rows inserted above a free reader keep it on the same row (by key), before paint.
   No frame retries/settle timers. Keep per-session restore, search/expand suppression.
 - A cached session renders in the frame after its click: no promise tick,
   effect-only state or deferred setState before reveal.
@@ -108,15 +109,14 @@ Parent AGENTS apply. Edit `AGENTS.md`, not its `CLAUDE.md` symlink. Background: 
   `resolveAppStoreReviewBlockReason`, plus missing bridge, text entry, interaction
   cancel, hidden app) and is deduplicated per user AND per reason for the process
   lifetime. Keep both bounds when adding a gate.
-- `use-lody-live-activity.ts` throttles the summary INPUT; the bridge debounce cannot do
-  that job. EVERY summary input goes through one leading-edge throttle whose trailing
-  deadline is anchored to the last EMIT; one input left outside it restores starvation.
+- `use-lody-live-activity.ts` throttles the summary INPUT (the bridge debounce cannot):
+  EVERY summary input goes through one leading-edge throttle whose trailing deadline
+  is anchored to the last EMIT; one input left outside it restores starvation.
 - Nothing reaching the payload memo may carry a per-render identity: depend on the
-  permission candidate's key and title, not on the object.
+  permission candidate's key and title.
 - Keep the 250ms bridge debounce.
 - Scan a pending permission request from the UNTHROTTLED list and flush the window, so
-  the alert ships promptly with a summary that contains it; `shownPermissionAlertKeysRef`
-  still shows one alert per candidate key.
+  the alert ships promptly with it; `shownPermissionAlertKeysRef` shows one per key.
 - Compute nothing when the feature is off: `iosLiveActivitiesEnabledAtom` and the
   native iOS shell are BOTH required and are not equivalent. Derive the activity id
   separately from that gate so the disable and unmount paths can still end an activity
