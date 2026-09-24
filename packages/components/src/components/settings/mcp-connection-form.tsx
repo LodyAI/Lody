@@ -14,7 +14,7 @@ import { Button } from '@lody/ui/button';
 import { Dialog } from '@lody/ui/dialog';
 import { Input } from '@lody/ui/input';
 import { Field as UiField } from '@lody/ui/field';
-import { Radio, RadioGroup } from '@lody/ui/radio';
+import { Tabs } from '@lody/ui/tabs';
 import { Switch } from '@lody/ui/switch';
 import { Textarea } from '@lody/ui/textarea';
 import { colors } from '@lody/ui/tokens/colors.stylex';
@@ -23,16 +23,6 @@ import { Field, FormMessage, Section } from './form-primitives';
 import { settingsCatalog as catalog, settingsSurface as surface } from './surface';
 
 const styles = stylex.create({
-  transportOption: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: space[1.5],
-    minHeight: '32px',
-    fontSize: '13px',
-    color: colors.label,
-    cursor: 'pointer',
-  },
-  transportIcon: { display: 'inline-flex', color: colors.tertiaryLabel },
   list: { display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: space[1.5] },
   listRow: { display: 'flex', alignItems: 'center', gap: space[1.5], width: '100%' },
   keyValueRow: {
@@ -353,8 +343,9 @@ export function McpConnectionForm({
   );
 }
 
-/** Two-state transport choice: one radio per transport, each with its glyph and
- *  name, so it reads as one choice rather than a dropdown. */
+/** The transport is a mode that decides which fields follow, so it is a
+ *  segmented strip — one line, read as "which kind" — not a column of radios
+ *  spreading one decision over two rows. */
 function TransportToggle({
   value,
   onChange,
@@ -364,21 +355,16 @@ function TransportToggle({
 }) {
   const { t } = useTranslation();
   return (
-    <RadioGroup
-      aria-label={t('settings.mcp.form.transport')}
-      value={value}
-      onValueChange={(next) => onChange(next as McpTransport)}
-    >
-      {MCP_TRANSPORTS.map((transport) => (
-        <label key={transport} {...stylex.props(styles.transportOption)}>
-          <Radio value={transport} />
-          <span {...stylex.props(styles.transportIcon)}>
+    <Tabs.Root value={value} onValueChange={(next) => onChange(next as McpTransport)}>
+      <Tabs.List aria-label={t('settings.mcp.form.transport')}>
+        {MCP_TRANSPORTS.map((transport) => (
+          <Tabs.Tab key={transport} value={transport}>
             <McpTransportIcon transport={transport} />
-          </span>
-          {MCP_TRANSPORT_SHORT_LABELS[transport]}
-        </label>
-      ))}
-    </RadioGroup>
+            {MCP_TRANSPORT_SHORT_LABELS[transport]}
+          </Tabs.Tab>
+        ))}
+      </Tabs.List>
+    </Tabs.Root>
   );
 }
 

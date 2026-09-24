@@ -3754,10 +3754,15 @@ const ACTIVITY_PROCESS_TEXT_CLASS = 'text-[12.5px] font-normal leading-snug text
 const ACTIVITY_PROCESS_ICON_CLASS = 'h-3.5 w-3.5 shrink-0 text-muted-foreground/70';
 /* Match the prose's fixed 4px inset, independent of the root font size. */
 const ACTIVITY_STEP_BUTTON_CLASS = cn(
-  'min-h-6 items-start rounded-md px-[4px] py-0.5 hover:bg-hover/40',
+  /* As wide as its words: a step is a line of text, not a bar across the
+     column. Hover brightens the words (see the title class), not a fill. */
+  'w-fit max-w-full min-h-6 items-start rounded-md px-[4px] py-0.5',
   ACTIVITY_PROCESS_TEXT_CLASS
 );
-const ACTIVITY_STEP_TITLE_CLASS = cn('min-w-0 flex-1', ACTIVITY_PROCESS_TEXT_CLASS);
+const ACTIVITY_STEP_TITLE_CLASS = cn(
+  'min-w-0 flex-1 transition-colors group-hover:text-foreground',
+  ACTIVITY_PROCESS_TEXT_CLASS
+);
 const ACTIVITY_STEP_BODY_CLASS =
   'text-[12.5px] font-normal leading-[1.5] text-muted-foreground ' +
   '[&_:is(h1,h2,h3,h4,h5,h6)]:!my-1 [&_:is(h1,h2,h3,h4,h5,h6)]:!text-[12.5px] ' +
@@ -6848,7 +6853,12 @@ const ToolCallCard = memo(function ToolCallCard({
                             'min-w-0 truncate whitespace-nowrap',
                             /* A step is a sentence ("Read session-list.tsx"),
                                so its file name stays in the sentence's type. */
-                            isActivityRow ? ACTIVITY_PROCESS_TEXT_CLASS : 'font-mono text-xs'
+                            isActivityRow
+                              ? cn(
+                                  ACTIVITY_PROCESS_TEXT_CLASS,
+                                  'transition-colors group-hover:text-foreground'
+                                )
+                              : 'font-mono text-xs'
                           )}
                         >
                           {fileName}
