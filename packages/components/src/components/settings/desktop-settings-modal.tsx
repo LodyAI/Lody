@@ -185,12 +185,17 @@ function SettingsModalBody() {
                             data-scope-item="row"
                             data-settings-tab-id={tab.id}
                             className={cn(
-                              'flex w-full items-center gap-2.5 rounded-md px-2.5 py-1 text-start text-[1em] font-normal transition-colors',
+                              // Keyboard focus shows as the hover fill, not the
+                              // global accent ring: Radix focuses the first row
+                              // when the dialog opens, and from the keyboard that
+                              // focus is `:focus-visible`, which framed a row the
+                              // user never chose in orange.
+                              'flex w-full items-center gap-2.5 rounded-md px-2.5 py-1 text-start text-[1em] font-normal transition-colors focus-visible:shadow-none',
                               resolvedActiveTab === tab.id
                                 ? // 10%: the selected row must read against the
                                   // settings canvas, which shares the page color.
                                   'bg-foreground/[0.1] text-foreground'
-                                : 'text-foreground/80 hover:bg-foreground/[0.06] hover:text-foreground dark:text-muted-foreground'
+                                : 'text-foreground/80 hover:bg-foreground/[0.06] hover:text-foreground focus-visible:bg-foreground/[0.06] dark:text-muted-foreground'
                             )}
                             onClick={() => selectTab(tab.id)}
                           >
@@ -215,7 +220,7 @@ function SettingsModalBody() {
                 type="button"
                 data-id="settings:report-bug"
                 data-scope-item="row"
-                className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-1 text-start text-[1em] font-normal text-foreground/80 transition-colors hover:bg-foreground/[0.06] hover:text-foreground dark:text-muted-foreground"
+                className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-1 text-start text-[1em] font-normal text-foreground/80 transition-colors hover:bg-foreground/[0.06] hover:text-foreground focus-visible:bg-foreground/[0.06] focus-visible:shadow-none dark:text-muted-foreground"
                 onClick={handleReportBug}
               >
                 <Bug className="h-4 w-4 shrink-0 opacity-80" strokeWidth={1.75} />

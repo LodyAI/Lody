@@ -34,7 +34,9 @@ export function SettingsAccountEntry({
         'flex w-full min-w-0 items-center text-start transition-colors',
         mobile
           ? 'gap-3 rounded-2xl border border-border/40 bg-card px-4 py-3 active:bg-muted/40'
-          : 'gap-2.5 rounded-md px-2.5 py-1 hover:bg-foreground/[0.06]',
+          : // Focus shows as the hover fill, like the settings nav rows below it.
+            'gap-2.5 rounded-md px-2.5 py-1 hover:bg-foreground/[0.06] focus-visible:shadow-none',
+        !mobile && !active && 'focus-visible:bg-foreground/[0.06]',
         !mobile && active && 'bg-foreground/[0.1]'
       )}
     >
