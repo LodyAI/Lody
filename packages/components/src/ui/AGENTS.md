@@ -90,16 +90,10 @@ strings on i18n rather than the registry's inline English.
 
 ## Working grid
 
-- `ui/working-grid.tsx` is the session "working" mark (not a loading spinner). It animates
-  only `transform`/`opacity` via Web Animations on the shared clock in
-  `working-grid-reading.ts`, so the compositor runs it and every mark shares one sea; never
-  drive frames from rAF, timers or React state. Only that module's reading pause may
-  pause/resume them. Keep all nine tiles visible by default (tiles vanishing broke the
-  grid into specks); the sidebar root keeps `data-working-grid-region`.
-  `working-status-mark.tsx` is the one entry for working / unread marks: it owns the grid,
-  the working → unread collapse and the dot, and must stay mounted across that change. The
-  collapse hands over on the dot animation's `finished` promise, never a timer.
-  Why: [working grid note](../../../../.agents/notes/implemented/feature/2026-09-24-sidebar-working-grid.md).
+- Session working/unread marks go through `working-status-mark.tsx`, mounted across the
+  change. Animate only `transform`/`opacity` via Web Animations on the shared clock
+  (`working-grid-reading.ts`); never rAF, timers or React state. The sidebar root keeps
+  `data-working-grid-region`. [Note](../../../../.agents/notes/implemented/feature/2026-09-24-sidebar-working-grid.md).
 
 ## Scroll area
 
