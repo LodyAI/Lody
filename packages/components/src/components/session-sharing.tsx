@@ -184,11 +184,15 @@ function getSessionShareActionLabel(
  * label's LINE BOX, and a line box shorter than the font's own leaves the
  * glyphs sitting ~1px above the icon beside them; at `normal` the half-leading
  * is zero and the ink lands where the font intends, for whatever interface
- * font is selected. */
+ * font is selected.
+ *
+ * The outline is a foreground tint, not `border-border`: the theme border is
+ * tuned for dividers and nearly vanishes as a transparent button's only edge
+ * on the dark canvas. */
 const SESSION_HEADER_STATUS_PILL_CLASS =
-  'inline-flex h-6 shrink-0 select-none items-center gap-1.5 rounded-md border border-border/70 bg-transparent px-2 ' +
+  'inline-flex h-6 shrink-0 select-none items-center gap-1.5 rounded-md border border-foreground/[0.16] bg-transparent px-2 ' +
   'text-[0.7rem] font-medium leading-[normal] text-muted-foreground transition-colors ' +
-  'hover:border-border hover:text-foreground ' +
+  'hover:border-foreground/[0.28] hover:text-foreground ' +
   'outline-hidden focus-visible:ring-2 focus-visible:ring-ring/50 ' +
   'text-foreground/80';
 

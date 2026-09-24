@@ -34,15 +34,18 @@ export function SettingsAccountEntry({
         'flex w-full min-w-0 items-center text-start transition-colors',
         mobile
           ? 'gap-3 rounded-2xl border border-border/40 bg-card px-4 py-3 active:bg-muted/40'
-          : 'gap-2.5 rounded-md px-2.5 py-1 hover:bg-foreground/[0.04]',
-        !mobile && active && 'bg-foreground/[0.06]'
+          : 'gap-2.5 rounded-md px-2.5 py-1 hover:bg-foreground/[0.06]',
+        !mobile && active && 'bg-foreground/[0.1]'
       )}
     >
       <UserAvatar
         user={user}
         className={cn(
           'shrink-0 text-xs',
-          mobile ? 'h-9 w-9' : 'h-6 w-6 text-[10px]'
+          // Desktop: sized to the nav rows' 16px icons (18px, overhanging its
+          // 16px slot by 1px a side) so the row keeps their 28px height and the
+          // name lines up with the other labels.
+          mobile ? 'h-9 w-9' : '-mx-px h-[18px] w-[18px] text-[9px]'
         )}
       />
       <span className="min-w-0 flex-1">
