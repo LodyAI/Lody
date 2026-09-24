@@ -5,7 +5,7 @@ import { parseNightlyRelease, resolveNightlyDownloadBase } from './nightly-downl
 const base = 'https://downloads.example.test/production/nightly';
 const version = '0.89.4-nightly.42';
 const files = ['arm64.dmg', 'x64.dmg', 'x64-setup.exe', 'x64.AppImage', 'x64.deb', 'x64.snap'].map(
-  (suffix) => `Lody-Nightly-${version}-${suffix}`
+  (suffix) => `Lody-${version}-${suffix.replace(/\.([^.]+)$/u, '-nightly.$1')}`
 );
 const manifest = {
   minimumStableVersion: '0.100.1',
@@ -35,7 +35,7 @@ void test('Nightly refuses missing, mixed, mutable or external installers', () =
     'https://evil.example/installer',
     '../latest.exe',
     'Lody-latest-x64.dmg',
-    `Lody-Nightly-0.89.4-nightly.41-arm64.dmg`,
+    `Lody-0.89.4-nightly.41-arm64-nightly.dmg`,
   ]) {
     assert.throws(() =>
       parseNightlyRelease(

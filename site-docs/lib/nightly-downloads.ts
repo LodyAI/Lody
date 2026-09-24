@@ -55,7 +55,7 @@ export function parseNightlyRelease(value: unknown, base: string): NightlyReleas
   ];
   const { downloads: mapping, files } = value;
   const downloads = targets.map(([platform, label, suffix]) => {
-    const file = `Lody-Nightly-${value.version}-${suffix}`;
+    const file = `Lody-${value.version}-${suffix.replace(/\.([^.]+)$/u, '-nightly.$1')}`;
     if (mapping[file] !== file || !files.includes(file)) {
       throw new Error('Incomplete Nightly release manifest');
     }

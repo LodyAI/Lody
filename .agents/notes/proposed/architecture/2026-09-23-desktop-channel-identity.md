@@ -80,7 +80,8 @@ The intended contract is [desktop channel execution](../../../../specs/desktop-c
 The download page has a separate Nightly section, with bilingual live-data and
 manual-switching guidance. Its public build-time distribution URL is optional;
 without valid metadata it shows no Nightly links. The manifest parser requires
-all six current-version installers and only constructs links within that root,
+all six current-version installers, named `Lody-<version>-<arch>-nightly.<ext>`
+(Windows: `Lody-<version>-x64-setup-nightly.exe`), and only constructs links within that root,
 never using metadata-supplied URLs or Stable aliases. About links directly to the
 Nightly section. Browser smoke covers full manifests and 404 responses at desktop
 and mobile sizes; deployment URL/CORS and real artifact downloads remain unverified.
@@ -125,5 +126,7 @@ main-process window/tray and development Dock assets to the same master. Builder
 converts it to native icon formats; Stable/local retain their existing assets.
 The icon was edited using the built-in image generation tool, then resized with
 `sips`. The color revision lowers saturation and brightness while preserving the
-silhouette and layout. Native conversion does not establish installed-shell or
+silhouette and layout. The padding revision brings the tile to approximately 10%
+transparent inset per side and reduces the jellyfish to match the Stable macOS icon.
+Native conversion does not establish installed-shell or
 small-size tray legibility; those remain packaged visual acceptance checks.
