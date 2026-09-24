@@ -1198,13 +1198,70 @@ function ConversationMarkdownImage(props: MarkdownImageProps) {
       </span>
     );
   }
-  const { node: _node, src, alt, ...rest } = props;
+  return <SizedMarkdownImage {...props} />;
+}
+
+type ImageOutcome = { width: number; height: number } | 'failed';
+
+/**
+ * What each image source did the last time it mounted. Virtua unmounts rows
+ * outside the overscan, and an image without known dimensions renders at 0px
+ * until it loads, so every remount changed its row's height after mount and
+ * moved the conversation. Known sizes are reserved up front; a source that
+ * failed (an agent-local path the page cannot reach) renders its alt text.
+ */
+const imageOutcomes = new Map<string, ImageOutcome>();
+const IMAGE_OUTCOME_LIMIT = 500;
+
+function rememberImageOutcome(src: string, outcome: ImageOutcome): void {
+  imageOutcomes.delete(src);
+  imageOutcomes.set(src, outcome);
+  if (imageOutcomes.size > IMAGE_OUTCOME_LIMIT) {
+    const oldest = imageOutcomes.keys().next().value;
+    if (oldest !== undefined) imageOutcomes.delete(oldest);
+  }
+}
+
+function SizedMarkdownImage(props: MarkdownImageProps) {
+  const { node: _node, src, alt, onLoad, onError, ...rest } = props;
+  const key = typeof src === 'string' ? src : undefined;
+  const [outcome, setOutcome] = useState(() =>
+    key === undefined ? undefined : imageOutcomes.get(key)
+  );
+  if (outcome === 'failed') {
+    return (
+      <span
+        role="img"
+        aria-label={alt || 'Image'}
+        className="my-2 block text-sm text-muted-foreground"
+      >
+        {alt || 'Image'}
+      </span>
+    );
+  }
   return (
     <img
       {...rest}
       src={src}
       alt={alt ?? ''}
+      // With `height: auto`, these reserve the image's aspect ratio before it loads.
+      width={outcome?.width ?? rest.width}
+      height={outcome?.height ?? rest.height}
       className={cn('my-2 max-h-[32rem] max-w-full rounded-md object-contain', rest.className)}
+      onLoad={(event) => {
+        const image = event.currentTarget;
+        if (key !== undefined && image.naturalWidth > 0) {
+          rememberImageOutcome(key, { width: image.naturalWidth, height: image.naturalHeight });
+        }
+        onLoad?.(event);
+      }}
+      onError={(event) => {
+        if (key !== undefined) {
+          rememberImageOutcome(key, 'failed');
+          setOutcome('failed');
+        }
+        onError?.(event);
+      }}
     />
   );
 }
