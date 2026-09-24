@@ -2,13 +2,14 @@
  * The shared "sea" behind every {@link WorkingGrid}.
  *
  * One height field over the whole page, sampled by every tile at its own page
- * position, so all working marks on screen are windows onto the same water.
+ * position, built from two scales:
  *
- * The field is four long plane waves with fixed directions (down-right, down,
- * down-slightly-left, down-left) whose strengths swell and fade slowly and out of
- * step. At any moment roughly two dominate and interfere, and as dominance passes
- * from one to another the flow appears to turn. Waves span several sidebar rows,
- * so a crest visibly travels from one mark into the next.
+ * - Ripples: short waves, about one mark long, so the nine tiles of a mark always
+ *   differ. Four fixed directions (down-right to down-left) swell and fade out of
+ *   step, so at any moment about two interfere and the heading they share keeps
+ *   turning — the same heading in every mark on the page at the same moment.
+ * - Swells: long waves, several sidebar rows long and mostly downward, that lift
+ *   and lower whole marks in turn, giving the list one rhythm.
  *
  * Positions are in "cells": one cell is a third of a mark's size. Time is in ms.
  * Every period divides {@link WORKING_GRID_LOOP_MS}, so the field loops seamlessly
@@ -17,50 +18,65 @@
 
 export const WORKING_GRID_LOOP_MS = 36_000;
 
-/**
- * Default wavelength multiplier. Neighbouring stitched marks sit 3 cells apart;
- * the previous 3–4-cell waves put them almost in antiphase, so each mark looked
- * like it ran on its own. At 1.3 the centre tiles of adjacent rows correlate
- * ~0.7 over a loop while a whole mark still almost never sinks out of sight.
- */
-export const WORKING_GRID_WAVELENGTH = 1.3;
+/** Default multiplier on the ripple wavelengths (tile-scale texture). */
+export const WORKING_GRID_WAVELENGTH = 1;
 
-interface SeaWave {
+interface Ripple {
   /** Travel direction, degrees from +x towards +y (down). */
   angleDeg: number;
   /** Crest spacing in cells, before the wavelength multiplier. */
   length: number;
   periodMs: number;
-  /** Period of the slow swell in this wave's strength. */
+  /** Period of the slow swell in this ripple's strength. */
   envelopeMs: number;
-  /** Phase of that swell, in turns, so the waves take turns dominating. */
+  /** Phase of that swell, in turns, so the ripples take turns dominating. */
   envelopePhase: number;
 }
 
-const WAVES: readonly SeaWave[] = [
-  { angleDeg: 25, length: 14, periodMs: 3_000, envelopeMs: 36_000, envelopePhase: 0 },
-  { angleDeg: 80, length: 12, periodMs: 2_400, envelopeMs: 18_000, envelopePhase: 0.25 },
-  { angleDeg: 105, length: 13, periodMs: 2_250, envelopeMs: 12_000, envelopePhase: 0.55 },
-  { angleDeg: 155, length: 15, periodMs: 3_600, envelopeMs: 36_000, envelopePhase: 0.5 },
+const RIPPLES: readonly Ripple[] = [
+  { angleDeg: 20, length: 3.2, periodMs: 1_800, envelopeMs: 36_000, envelopePhase: 0 },
+  { angleDeg: 70, length: 3.6, periodMs: 2_000, envelopeMs: 18_000, envelopePhase: 0.3 },
+  { angleDeg: 110, length: 3.4, periodMs: 2_250, envelopeMs: 12_000, envelopePhase: 0.6 },
+  { angleDeg: 160, length: 4, periodMs: 2_400, envelopeMs: 36_000, envelopePhase: 0.5 },
 ];
+
+const SWELLS: readonly { angleDeg: number; length: number; periodMs: number }[] = [
+  { angleDeg: 88, length: 18, periodMs: 6_000 },
+  { angleDeg: 100, length: 26, periodMs: 9_000 },
+];
+
+// Share of the height carried by ripples vs swells, and how much the averaged
+// ripples are stretched back to full contrast (averaging four waves flattens them).
+const RIPPLE_WEIGHT = 0.6;
+const RIPPLE_CONTRAST = 2;
 
 const TAU = Math.PI * 2;
 const sin01 = (turns: number) => 0.5 + 0.5 * Math.sin(TAU * turns);
+const clamp01 = (value: number) => Math.min(Math.max(value, 0), 1);
+const along = (angleDeg: number, x: number, y: number) => {
+  const angle = (angleDeg * Math.PI) / 180;
+  return Math.cos(angle) * x + Math.sin(angle) * y;
+};
 
 /** Sea height in [0, 1] at cell point (x, y) and time `tMs`. */
 export function seaHeight(x: number, y: number, tMs: number, wavelength: number): number {
   let sum = 0;
   let weight = 0;
-  for (const wave of WAVES) {
-    const angle = (wave.angleDeg * Math.PI) / 180;
-    const along = Math.cos(angle) * x + Math.sin(angle) * y;
-    const height = sin01(along / (wave.length * wavelength) - tMs / wave.periodMs);
-    // Never fully silent, so the surface keeps some motion while a wave rests.
-    const strength = 0.15 + 0.85 * sin01(tMs / wave.envelopeMs + wave.envelopePhase) ** 2;
+  for (const ripple of RIPPLES) {
+    const height = sin01(
+      along(ripple.angleDeg, x, y) / (ripple.length * wavelength) - tMs / ripple.periodMs
+    );
+    // Never fully silent, so the surface keeps some motion while a ripple rests.
+    const strength = 0.15 + 0.85 * sin01(tMs / ripple.envelopeMs + ripple.envelopePhase) ** 2;
     sum += strength * height;
     weight += strength;
   }
-  return sum / weight;
+  const ripples = clamp01(0.5 + RIPPLE_CONTRAST * (sum / weight - 0.5));
+  let swells = 0;
+  for (const swell of SWELLS) {
+    swells += sin01(along(swell.angleDeg, x, y) / swell.length - tMs / swell.periodMs);
+  }
+  return RIPPLE_WEIGHT * ripples + (1 - RIPPLE_WEIGHT) * (swells / SWELLS.length);
 }
 
 export interface WorkingGridPlacement {

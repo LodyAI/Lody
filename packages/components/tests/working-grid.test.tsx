@@ -70,17 +70,36 @@ describe('working grid sea', () => {
     expect(tileSeaPoint(realLower, 0, 0)[1] - tileSeaPoint(realUpper, 0, 2)[1]).toBe(4);
   });
 
-  it('moves neighbouring sidebar marks together', () => {
-    // Short waves put adjacent rows in antiphase and every mark looked like it
-    // ran on its own; the centre tiles of adjacent rows must rise and fall together.
+  it('keeps the nine tiles of a mark visibly different', () => {
+    // Long waves alone made every tile of a mark rise and fall as one block.
+    let spread = 0;
+    let samples = 0;
+    for (let row = 0; row < 12; row += 1) {
+      const tiles = sidebarMark(row);
+      for (const t of LOOP_TIMES) {
+        const heights = tiles.map(([x, y]) => seaHeight(x, y, t, WORKING_GRID_WAVELENGTH));
+        const mean = heights.reduce((sum, h) => sum + h, 0) / heights.length;
+        spread += Math.sqrt(heights.reduce((sum, h) => sum + (h - mean) ** 2, 0) / heights.length);
+        samples += 1;
+      }
+    }
+    expect(spread / samples).toBeGreaterThan(0.15);
+  });
+
+  it('gives neighbouring sidebar marks one rhythm', () => {
+    // Short waves alone put adjacent rows in antiphase and every mark looked like
+    // it ran on its own; whole marks must brighten and dim together with their neighbours.
     const series = Array.from({ length: 24 }, (_, row) => {
-      const [x, y] = sidebarMark(row)[4]!;
-      return LOOP_TIMES.map((t) => seaHeight(x, y, t, WORKING_GRID_WAVELENGTH));
+      const tiles = sidebarMark(row);
+      return LOOP_TIMES.map(
+        (t) =>
+          tiles.reduce((sum, [x, y]) => sum + seaHeight(x, y, t, WORKING_GRID_WAVELENGTH), 0) / 9
+      );
     });
     const adjacent =
       series.slice(1).reduce((sum, s, row) => sum + correlation(series[row]!, s), 0) /
       (series.length - 1);
-    expect(adjacent).toBeGreaterThan(0.6);
+    expect(adjacent).toBeGreaterThan(0.35);
   });
 
   it('almost never lets a whole mark sink out of sight', () => {

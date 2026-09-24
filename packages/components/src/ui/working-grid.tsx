@@ -33,7 +33,7 @@ export type WorkingGridProps = Omit<ComponentPropsWithoutRef<'span'>, 'children'
   minScale?: number;
   /** Gap between tiles as a fraction of the tile edge. */
   gap?: number;
-  /** Multiplier on every wavelength; larger reads as broader, more unified swells. */
+  /** Multiplier on the ripple wavelengths: the size of the texture inside a mark. */
   wavelength?: number;
   /**
    * Row pitch of the surrounding list, px. Stitches the sea across rows so a
@@ -45,12 +45,12 @@ export type WorkingGridProps = Omit<ComponentPropsWithoutRef<'span'>, 'children'
 
 // Opacity in the deepest trough for each brightness mode.
 const BRIGHTNESS_FLOOR: Record<WorkingGridBrightness, number> = {
-  wave: 0.35,
-  soft: 0.6,
+  wave: 0.16,
+  soft: 0.5,
   steady: 1,
 };
 const STEADY_OPACITY = 0.82;
-// 10 samples a second: the fastest wave (2.25s) gets >20 per cycle, so linear
+// 10 samples a second: the fastest ripple (1.8s) gets 18 per cycle, so linear
 // interpolation between keyframes stays visually a sine.
 const SAMPLES = WORKING_GRID_LOOP_MS / 100;
 
@@ -93,8 +93,9 @@ function scrollOffset(el: Element): [number, number] {
 
 /**
  * "Working" mark: a 3×3 grid of tiles rising and sinking with one sea shared by
- * the whole page. Long waves from several directions take turns dominating, so
- * the flow keeps turning, and marks in neighbouring rows move as one body of water.
+ * the whole page. Short ripples make the nine tiles of a mark differ and share one
+ * turning heading across every mark; long swells lift whole marks in turn, so the
+ * list reads as one rhythm.
  *
  * Colour comes from `currentColor`; pass a text colour class.
  *
@@ -112,7 +113,7 @@ export function WorkingGrid({
   brightness = 'wave',
   scale = 'center',
   maxScale = 0.8,
-  minScale = 0.45,
+  minScale = 0.3,
   gap = 0.35,
   wavelength = WORKING_GRID_WAVELENGTH,
   rowPitch = 28,
