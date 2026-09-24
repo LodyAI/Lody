@@ -177,9 +177,8 @@ export const surface = stylex.create({
     // from any host: the fill is how this system says where the keyboard is.
     boxShadow: 'none',
     scrollMarginBlock: popup.inset,
-    transitionProperty: 'background-color, opacity',
-    transitionDuration: duration.fast,
-    transitionTimingFunction: ease.standard,
+    // No transition: the highlight follows the pointer and the arrow keys, and
+    // a fade leaves it behind the row the pointer is already on.
   },
   /** The row that holds the value. */
   itemSelected: { backgroundColor: popup.selected },
@@ -309,9 +308,6 @@ export const surface = stylex.create({
     outlineStyle: 'none',
     boxShadow: 'none',
     opacity: { default: 1, ':disabled': 0.45 },
-    transitionProperty: 'background-color, opacity',
-    transitionDuration: duration.fast,
-    transitionTimingFunction: ease.standard,
   },
   /** Hovered, or holding the menu that is currently up: the same one fill. */
   barItemOpen: { backgroundColor: popup.highlight },

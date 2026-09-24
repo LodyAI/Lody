@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+} from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { v4 as uuidv4 } from 'uuid';
@@ -104,19 +112,57 @@ const SM = '@media (min-width: 640px)';
 const REGION = `color-mix(in oklab, transparent, ${colors.label} 3%)`;
 const MONO = 'var(--font-mono, ui-monospace, monospace)';
 
+/**
+ * The panel's own size and padding. The dialog panel sets its width, padding and
+ * gap itself, so a class could not reliably win over them; `style` is the
+ * panel's documented way to take a surface's layout. The panel has no padding:
+ * the picker meets its edge and the form pads itself.
+ */
+const PANEL_STYLE: CSSProperties = {
+  width: 'min(1040px, 96dvw)',
+  maxWidth: 'none',
+  height: 'min(680px, 92dvh)',
+  padding: 0,
+  gap: 0,
+  overflow: 'hidden',
+};
+
+/**
+ * A true full-screen sheet: no centring, no cap, no corners. The device safe
+ * area (notch, home indicator, landscape cutouts) is padding, so the picker and
+ * form headers and footers sit clear of it.
+ */
+const PANEL_STYLE_NARROW: CSSProperties = {
+  insetBlockStart: 0,
+  insetInlineStart: 0,
+  transform: 'none',
+  width: '100vw',
+  maxWidth: 'none',
+  height: 'calc(100dvh - var(--native-keyboard-height, 0px))',
+  maxHeight: 'none',
+  paddingTop: 'var(--safe-area-top)',
+  paddingBottom: 'max(0px, var(--safe-area-bottom, 0px) - var(--native-keyboard-height, 0px))',
+  paddingLeft: 'var(--safe-area-left)',
+  paddingRight: 'var(--safe-area-right)',
+  gap: 0,
+  borderRadius: 0,
+  overflow: 'hidden',
+};
+
 const styles = stylex.create({
-  /** The picker and the form, side by side and set apart by space. */
+  /** The picker and the form, side by side. */
   layout: {
     display: 'flex',
     flexGrow: 1,
-    gap: space[4],
     height: '100%',
     minHeight: 0,
     minWidth: 0,
   },
-  layoutNarrow: { gap: 0 },
 
-  /** The type picker: a region of the panel, not a second surface with an edge. */
+  /**
+   * The type picker: a sidebar that meets the panel's edge, with the one
+   * structural line of the dialog between it and the form.
+   */
   rail: {
     boxSizing: 'border-box',
     display: 'flex',
@@ -125,15 +171,18 @@ const styles = stylex.create({
     width: '292px',
     height: '100%',
     minHeight: 0,
+    paddingTop: space[4],
     backgroundColor: REGION,
-    borderRadius: radius.medium,
-    cornerShape: corner.shape,
+    borderInlineEndWidth: '1px',
+    borderInlineEndStyle: 'solid',
+    borderInlineEndColor: colors.separator,
   },
   railNarrow: {
     flexShrink: 1,
     width: '100%',
+    paddingTop: 0,
     backgroundColor: 'transparent',
-    borderRadius: 0,
+    borderInlineEndWidth: 0,
   },
   railHeader: {
     display: 'flex',
@@ -215,8 +264,8 @@ const styles = stylex.create({
   },
 
   /** The form: its header, the scrolling groups and the answers, set apart by space. */
-  pane: { flexGrow: 1 },
-  paneNarrow: { gap: 0 },
+  pane: { flexGrow: 1, padding: space[4] },
+  paneNarrow: { gap: 0, padding: 0 },
   header: {
     display: 'flex',
     flexShrink: 0,
@@ -3013,20 +3062,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
         // Keep keyboard height changes synchronous on the narrow sheet: the form
         // scroll hook measures the container on the keyboard event.
         noAnimation={isNarrowLayout}
-        // Sizing only: the panel's material is the dialog's own.
-        className={
-          isNarrowLayout
-            ? [
-                // A true full-screen sheet: override the safe-area-aware centring
-                // and max size the panel applies by default.
-                'h-[calc(100dvh-var(--native-keyboard-height,0px))] max-h-none w-screen max-w-none rounded-none top-0 translate-y-0',
-                // Inset content from the device safe area (notch, home indicator,
-                // landscape side cutouts), pushing the picker/form panes — their
-                // headers and footers included — away from the edges.
-                'pt-[var(--safe-area-top)] pb-[max(0px,var(--safe-area-bottom,0px)-var(--native-keyboard-height,0px))] pl-[var(--safe-area-left)] pr-[var(--safe-area-right)]',
-              ].join(' ')
-            : 'h-[min(680px,92dvh)] w-[min(1040px,96dvw)] max-w-none'
-        }
+        style={isNarrowLayout ? PANEL_STYLE_NARROW : PANEL_STYLE}
       >
         <Dialog.Title className="sr-only">{dialogTitle}</Dialog.Title>
         <Dialog.Description className="sr-only">
@@ -3036,7 +3072,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
           )}
         </Dialog.Description>
 
-        <div {...stylex.props(styles.layout, isNarrowLayout && styles.layoutNarrow)}>
+        <div {...stylex.props(styles.layout)}>
           {showPicker && pickerPane}
           {showForm && formPane}
         </div>

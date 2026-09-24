@@ -249,6 +249,14 @@ copies kept in step by hand.
 - The rest of the sweep is split by area: settings catalogs and editors,
   account/workspace/general settings, composer selectors (`OptionSelector` and
   the run-config menus), and the most visibly split surfaces elsewhere.
+- Owner corrections after the sweep. The panel's padding had wrapped
+  `AgentConfigDialog`'s type picker, so the picker no longer met the dialog's
+  edge. The panel now takes `padding: 0` through `style` (the settings modal
+  does the same): the picker is a flush sidebar with one separator line, and
+  the form pads itself. Settings editor forms have no padding of their own,
+  because the panel pads them, so their story frames pad like the panel does.
+  A popup row's highlight has no transition. It follows the pointer and the
+  arrow keys, and a fade left it lagging behind them.
 
 Related: [token gallery](2026-09-09-ui-token-gallery.md),
 [call-site migration](2026-09-22-ui-radix-callsite-migration.md).

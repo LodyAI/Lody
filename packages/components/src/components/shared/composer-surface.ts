@@ -318,9 +318,8 @@ export const composerSurface = stylex.create({
     outlineStyle: 'none',
     boxShadow: 'none',
     scrollMarginBlock: space[1],
-    transitionProperty: 'background-color, opacity',
-    transitionDuration: duration.fast,
-    transitionTimingFunction: ease.standard,
+    // No transition, like `@lody/ui`'s popup rows: the highlight follows the
+    // pointer and the arrow keys without lagging behind them.
   },
   /** Where the keyboard or the pointer is. */
   rowHighlighted: { backgroundColor: POPUP_HIGHLIGHT },

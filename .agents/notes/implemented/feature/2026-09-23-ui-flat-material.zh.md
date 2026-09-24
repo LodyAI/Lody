@@ -204,6 +204,12 @@ StyleX，直接读 `@lody/ui` 自己的 token。这样只有一个事实来源�
   ghost 图标按钮，不再是 Radix 时期的 props 加 `shadow-xs` 覆盖。
 - 其余迁移按区域分工：设置目录与编辑器，账户、工作区与通用设置，composer 选择器
   （`OptionSelector` 和运行配置菜单），以及其他最明显割裂的界面。
+- 迁移后 owner 的纠正：面板自带的 padding 把 `AgentConfigDialog` 的类型选择栏
+  包了进去，选择栏不再贴着对话框边缘。现在面板通过 `style` 设为 `padding: 0`
+  （设置弹窗也是这么做的）：选择栏是贴边的侧栏，与表单之间一条分隔线，表单自己
+  负责 padding。设置里的编辑表单本身没有 padding，由面板提供，所以它们的 story
+  外框要像面板一样加 padding。弹出列表行的高亮不加过渡：它跟随指针和方向键，
+  淡入淡出会让它落在后面。
 
 相关：[token gallery](2026-09-09-ui-token-gallery.md)、
 [调用点迁移](2026-09-22-ui-radix-callsite-migration.md)。

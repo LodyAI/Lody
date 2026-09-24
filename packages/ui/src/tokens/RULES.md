@@ -823,3 +823,5 @@ under the finger.
   and tone fills drop `shadow.inkEdge`; a secondary keeps its hairline.
 - Rise: popups from 4px below at opacity 0, `duration.regular`.
 - Colors and fills cross-fade at `duration.fast`. One easing: `ease.standard`.
+- Except a popup row's highlight: it is instant. It follows the pointer and the
+  arrow keys, and a fade leaves it behind the row they are already on.
