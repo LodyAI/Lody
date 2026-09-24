@@ -37,7 +37,7 @@ breathing dots, rings, bubbles and a click-ripple layer were tried and dropped.
 The kept form and its defaults:
 
 - 3×3 tiles, corner radius 40% of the tile, gap 0.18 of the tile, 14px overall.
-- Two plane waves, 3.2 and 4.4 cells long (× wavelength 1.5), periods 1.9s and
+- Two plane waves, 3.2 and 4.4 cells long (× wavelength 1.2), periods 1.9s and
   2.7s (19:27, so the pattern repeats only after ~51s), travelling down-right and
   down-left. Tiles scale from their centre to a minimum of 0.3 and brightness
   follows the wave down to 0.16 opacity.

@@ -17,7 +17,7 @@ const meta = {
     scale: 'center',
     minScale: 0.3,
     gap: 0.18,
-    wavelength: 1.5,
+    wavelength: 1.2,
     direction: 'across',
     rowPitch: 28,
     className: 'text-primary',
