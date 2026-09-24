@@ -113,6 +113,10 @@ contracts, and window/renderer integration rules live in
 
 ## Verification
 
+- Claimed warm windows stay hidden until matching content readiness. Main owns the
+  recovery deadline; do not cover a visible window with a blank surface. Restore
+  background throttling after preparation and replenish the spare after show.
+
 - Cloud browser login is owned by main: PKCE attempts, callback exchange and replay
   handling must not depend on a renderer. Organization failures never roll back
   authentication. Windows subscribe then read revisioned snapshots. Contract:

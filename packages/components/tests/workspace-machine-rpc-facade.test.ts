@@ -17,6 +17,39 @@ afterEach(() => {
 });
 
 describe('createWorkspaceMachineRpcFacade', () => {
+  it('keeps Pi discovery success and failure on the local machine route', async () => {
+    const discovery = { version: 1, agentDir: '/fixture/pi', extensions: [], warnings: [] };
+    let failed = false;
+    vi.stubGlobal('window', {
+      __LODY_ELECTRON__: true,
+      ipc: {
+        invoke: async () =>
+          failed
+            ? { ok: false, error: 'Local failure' }
+            : { ok: true, result: { success: true, discovery } },
+      },
+    });
+    const facade = createWorkspaceMachineRpcFacade({
+      workspaceId,
+      targetRouter: {
+        getPlaneForMachine: () => 'local',
+        resolvePlaneForMachine: async () => 'local',
+      },
+      getMachineProtocolCapabilities: async () => ({ piExtensions: 1 }),
+      getMachineRpcClient: async () => {
+        throw new Error('Unexpected cloud route');
+      },
+    });
+    expect(await facade.requestMachinePiExtensions(localMachineId)).toEqual({
+      success: true,
+      discovery,
+    });
+    failed = true;
+    expect(await facade.requestMachinePiExtensions(localMachineId)).toEqual({
+      success: false,
+      error: 'Local failure',
+    });
+  });
   it('never sends a scoped cancel to a daemon without the scoped-cancel protocol', async () => {
     const facade = createWorkspaceMachineRpcFacade({
       workspaceId,

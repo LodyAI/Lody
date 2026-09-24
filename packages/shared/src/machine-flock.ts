@@ -913,10 +913,7 @@ export function buildSessionLaunchConfig(
   if (input.customAcp) {
     config.customAcp = input.customAcp;
   }
-  if (
-    input.runtimeOverrides &&
-    Object.values(input.runtimeOverrides).some((value) => value && value.trim().length > 0)
-  ) {
+  if (hasBuiltinRuntimeOverrideValues(input.runtimeOverrides)) {
     config.runtimeOverrides = input.runtimeOverrides;
   }
   if (input.env && Object.keys(input.env).length > 0) {
@@ -1182,11 +1179,7 @@ const normalizeSessionLaunchConfig = (value: unknown): SessionLaunchConfig | und
     if (!isBuiltinRuntimeOverrides(value.runtimeOverrides)) {
       return undefined;
     }
-    if (
-      Object.values(value.runtimeOverrides).some(
-        (override) => typeof override === 'string' && override.trim().length > 0
-      )
-    ) {
+    if (hasBuiltinRuntimeOverrideValues(value.runtimeOverrides)) {
       config.runtimeOverrides = value.runtimeOverrides;
     }
   }
@@ -1418,7 +1411,11 @@ const normalizeAgentConfigMeta = (value: unknown): AgentConfigMeta | undefined =
   }
   if (!isMissing(value.runtimeOverrides)) {
     if (!isBuiltinRuntimeOverrides(value.runtimeOverrides)) return undefined;
-    config.runtimeOverrides = value.runtimeOverrides;
+    const runtimeOverrides = { ...value.runtimeOverrides };
+    // piExtensions only applies to builtin Pi; a foreign key must not count as
+    // an override for other agent types.
+    if (config.agentType !== 'pi') delete runtimeOverrides.piExtensions;
+    config.runtimeOverrides = runtimeOverrides;
   }
   if (!isMissing(value.prompt)) {
     if (typeof value.prompt !== 'string') return undefined;

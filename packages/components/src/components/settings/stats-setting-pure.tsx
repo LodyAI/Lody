@@ -12,6 +12,7 @@ import {
   type StackedAreaBucket,
   type StackedAreaSeriesMarkerRender,
 } from './usage-stacked-area-chart';
+import { UsageCalendarSkeleton } from './usage-calendar-skeleton';
 import type {
   SettingsUsageCalendarData,
   SettingsUsageDayData,
@@ -137,7 +138,9 @@ function StatTile({
     >
       <p className="text-[0.8rem] font-normal text-muted-foreground">{label}</p>
       <div className="mt-auto">
-        <div className="min-w-0 whitespace-nowrap text-3xl font-normal leading-none tracking-tight tabular-nums text-foreground text-[clamp(1.5rem,16cqw,2.75rem)]">
+        {/* NumberFlow measures ~68px tall at the clamp's 2.75rem cap; reserve
+           that height so the loading "—" cannot grow into it on resolve. */}
+        <div className="flex min-h-[4.25rem] min-w-0 items-center whitespace-nowrap text-3xl font-normal leading-none tracking-tight tabular-nums text-foreground text-[clamp(1.5rem,16cqw,2.75rem)]">
           {children}
         </div>
         {footer ? <div className="mt-2">{footer}</div> : null}
@@ -295,8 +298,12 @@ export function StatsSettingsView({
         </StatTile>
       </div>
 
+      {/* The calendar keeps its eventual footprint while either its data or the
+         lazy three.js chunk is still resolving; `undefined` after a workspace is
+         selected always means "query in flight" — an empty workspace still gets
+         a zeroed calendar object. */}
       {usageCalendar ? (
-        <Suspense fallback={null}>
+        <Suspense fallback={<UsageCalendarSkeleton range={range} />}>
           <UsageCalendarVisualization
             calendar={usageCalendar}
             timeline={usageTimeline}
@@ -306,6 +313,8 @@ export function StatsSettingsView({
             onSelectedDayChange={onSelectedUsageDayChange}
           />
         </Suspense>
+      ) : workspaceId ? (
+        <UsageCalendarSkeleton range={range} />
       ) : null}
 
       <UsageStackedAreaChart
@@ -316,6 +325,8 @@ export function StatsSettingsView({
         tooltipValueFormatter={tokensCompact}
         renderSeriesMarker={renderModelSeriesMarker}
         tintSeriesLabel={tintModelSeriesLabel}
+        loading={loading}
+        loadingText={t('workspace.usage.loading', 'Loading usage data...')}
       />
       <UsageStackedAreaChart
         title={t('workspace.usage.byUser')}
@@ -325,16 +336,13 @@ export function StatsSettingsView({
         tooltipValueFormatter={tokensCompact}
         renderSeriesMarker={renderMemberSeriesMarker}
         tintSeriesLabel={tintMemberSeriesLabel}
+        loading={loading}
+        loadingText={t('workspace.usage.loading', 'Loading usage data...')}
       />
 
       {!workspaceId && (
         <div className="rounded-md border border-dashed border-border p-4 text-sm text-muted-foreground">
           {t('workspace.usage.workspaceRequired', 'Select a workspace to view usage')}
-        </div>
-      )}
-      {workspaceId && loading && (
-        <div className="rounded-md border border-dashed border-border p-4 text-sm text-muted-foreground">
-          {t('workspace.usage.loading', 'Loading usage data...')}
         </div>
       )}
     </div>

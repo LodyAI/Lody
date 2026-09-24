@@ -9,6 +9,7 @@ import {
   useMacTrafficLightRowPadClass,
   useWindowDragRegionClass,
   useWindowsCaptionPadClass,
+  useWindowsCaptionRowPadClass,
 } from '@/ui/window-drag-region';
 import { isNativeAppShell } from '@/lib/native-platform';
 import { Button } from '@/ui/button';
@@ -59,6 +60,7 @@ export function WebArchiveScreen({
   const windowDragClass = useWindowDragRegionClass();
   const windowsCaptionPadClass = useWindowsCaptionPadClass();
   const macTrafficLightRowPadClass = useMacTrafficLightRowPadClass({ bottomBorder: true });
+  const windowsCaptionRowPadClass = useWindowsCaptionRowPadClass({ bottomBorder: true });
   // Traffic lights auto-hide in native fullscreen — no inset to reserve then.
   // Mirrors the same derivation in session-detail.tsx.
   const hasMacOSTitlebarInset =
@@ -77,6 +79,7 @@ export function WebArchiveScreen({
             isLeftSidebarHidden && hasMacOSTitlebarInset && 'pl-[100px]',
             windowDragClass,
             windowsCaptionPadClass,
+            windowsCaptionRowPadClass,
             macTrafficLightRowPadClass
           )}
         >

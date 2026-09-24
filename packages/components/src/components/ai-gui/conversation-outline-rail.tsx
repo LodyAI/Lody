@@ -11,11 +11,13 @@ import {
   type FocusEvent as ReactFocusEvent,
 } from 'react';
 import { createPortal } from 'react-dom';
+import { usePostHog } from '@posthog/react';
 import { useTranslation } from 'react-i18next';
 import { cn } from '@/lib/utils';
 import { Popover, PopoverAnchor, PopoverContent } from '@/ui/popover';
 import type { ConversationOutlineEntry } from '@/lib/conversation-outline';
 import { useLatestRef } from '@/hooks/use-latest-ref';
+import { capturePostHogSampled } from '@/lib/posthog-analytics';
 import { observeResizeOnAnimationFrame } from '@/lib/resize-observer';
 import {
   NO_SCROLL_EDGE_OVERFLOW,
@@ -287,6 +289,7 @@ export function ConversationOutlineRail({
   const onPreviewRoundRef = useLatestRef(onPreviewRound);
   const arrivalIntentDetectorRef = useRef<ArrivalIntentDetector | null>(null);
   const tickCount = entries.length;
+  const postHog = usePostHog();
 
   const jumpLabel = useCallback(
     (entry: ConversationOutlineEntry) =>
@@ -508,10 +511,17 @@ export function ConversationOutlineRail({
       const index = readTickIndex(event.target);
       if (index === -1) return;
       clearOpenTimer();
+      const fromHoverPreview = cardOpenRef.current;
       if (cardOpenRef.current && warmBrowsingRef.current) {
         lastClosedAtRef.current = Date.now();
       }
       setCardOpen(false);
+      capturePostHogSampled(
+        postHog,
+        'outline/jumped',
+        { from_hover_preview: fromHoverPreview, entry_count: tickCount },
+        { tier: 'C' }
+      );
       arrivalIntentDebugRef.current?.({
         type: 'round-jump',
         at: performance.now(),
@@ -519,7 +529,7 @@ export function ConversationOutlineRail({
       });
       jumpTo(index);
     },
-    [arrivalIntentDebugRef, cardOpenRef, clearOpenTimer, jumpTo]
+    [arrivalIntentDebugRef, cardOpenRef, clearOpenTimer, jumpTo, postHog, tickCount]
   );
 
   const focusTick = useCallback((index: number) => {

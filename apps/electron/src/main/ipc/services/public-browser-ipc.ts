@@ -80,7 +80,7 @@ export class PublicBrowserIpc extends IpcService {
   @IpcMethod()
   async setVisible(raw: ElectronPublicBrowserVisibilityInput) {
     const input = ElectronPublicBrowserVisibilityInputSchema.parse(raw)
-    return getWindowBrowser().setVisible(input.browserId, input.visible)
+    return getWindowBrowser().setVisible(input.browserId, input.visible, input.trackInteraction)
   }
 
   @IpcMethod()

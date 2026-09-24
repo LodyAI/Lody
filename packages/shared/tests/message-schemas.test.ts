@@ -3,6 +3,7 @@ import { describe, expect, expectTypeOf, it } from 'vitest';
 import {
   MessageContentSchema,
   normalizeSessionTurnInputConfig,
+  SessionHistoryInputConfigSchema,
   LocalProjectControlRequestSchema,
   LocalProjectControlResponseSchema,
   LocalSessionControlResponseSchema,
@@ -262,6 +263,14 @@ describe('message-schemas image upload response', () => {
 });
 
 describe('message-schemas machine ACP capabilities refresh', () => {
+  it('validates bounded explicit Pi extension selections', () => {
+    expect(BuiltinRuntimeOverridesSchema.parse({ piExtensions: [' /fixture/plugin.ts '] })).toEqual(
+      { piExtensions: ['/fixture/plugin.ts'] }
+    );
+    for (const piExtensions of [[''], [false], 'plugin', Array(33).fill('/fixture/plugin.ts')]) {
+      expect(BuiltinRuntimeOverridesSchema.safeParse({ piExtensions }).success).toBe(false);
+    }
+  });
   it('accepts builtin Kimi runtime fields', () => {
     expect(CliTypeSchema.safeParse('kimi').success).toBe(true);
     expect(CliTypeSchema.safeParse('grok').success).toBe(true);
@@ -928,6 +937,33 @@ describe('normalizeSessionTurnInputConfig', () => {
       },
       resume: 'acp-1',
       inputBlocks: [{ type: 'text', text: 'hello' }],
+    });
+  });
+
+  it('drops provider launch fields from turn input', () => {
+    const injected = {
+      prompt: 'hello',
+      cliType: 'builtin',
+      agentType: 'pi',
+      modelId: 'pi',
+      customAcp: { command: '/tmp/injected-acp' },
+      runtimeOverrides: { piExtensions: ['/tmp/injected.ts'] },
+    };
+
+    expect(normalizeSessionTurnInputConfig(injected)).toEqual({
+      prompt: 'hello',
+      cliType: 'builtin',
+      agentType: 'pi',
+      modelId: 'pi',
+    });
+
+    const stored = SessionHistoryInputConfigSchema.safeParse(injected);
+    expect(stored.success).toBe(true);
+    expect(stored.data).toEqual({
+      prompt: 'hello',
+      cliType: 'builtin',
+      agentType: 'pi',
+      modelId: 'pi',
     });
   });
 });

@@ -1,13 +1,16 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
+import { usePostHog } from '@posthog/react';
 import { getIpcServices, type IpcServices } from '@/lib/electron-ipc-client';
+import { capturePostHogEvent } from '@/lib/posthog-analytics';
 
 type PendingAutoLaunchOperation = 'read' | 'enabled' | 'hide-window' | null;
 type AutoLaunchStatus = Awaited<ReturnType<IpcServices['app']['getAutoLaunchStatus']>>;
 
 export function useElectronAutoLaunch(isElectron: boolean) {
   const { t } = useTranslation();
+  const postHog = usePostHog();
   const [supported, setSupported] = useState(false);
   const [enabled, setEnabled] = useState(false);
   const [hideWindowOnAutoLaunch, setHideWindowOnAutoLaunch] = useState(false);
@@ -71,7 +74,12 @@ export function useElectronAutoLaunch(isElectron: boolean) {
       try {
         const result = await services.app.setAutoLaunchEnabled(checked);
         updateStateFromResult(result);
-        if (!result.ok) {
+        if (result.ok) {
+          capturePostHogEvent(postHog, 'settings/changed', {
+            key: 'launch_at_login',
+            value: checked,
+          });
+        } else {
           toast.error(
             t('settings.general.autoLaunch.toggleFailed', 'Failed to update auto launch')
           );
@@ -83,7 +91,7 @@ export function useElectronAutoLaunch(isElectron: boolean) {
         setPendingOperation(null);
       }
     },
-    [enabled, isElectron, t, updateStateFromResult]
+    [enabled, isElectron, postHog, t, updateStateFromResult]
   );
 
   const updateHideWindow = useCallback(
@@ -97,7 +105,12 @@ export function useElectronAutoLaunch(isElectron: boolean) {
       try {
         const result = await services.app.setAutoLaunchHideWindow(checked);
         updateStateFromResult(result);
-        if (!result.ok) {
+        if (result.ok) {
+          capturePostHogEvent(postHog, 'settings/changed', {
+            key: 'launch_at_login_hidden',
+            value: checked,
+          });
+        } else {
           toast.error(
             t(
               'settings.general.autoLaunch.hideWindowToggleFailed',
@@ -117,7 +130,7 @@ export function useElectronAutoLaunch(isElectron: boolean) {
         setPendingOperation(null);
       }
     },
-    [hideWindowOnAutoLaunch, isElectron, t, updateStateFromResult]
+    [hideWindowOnAutoLaunch, isElectron, postHog, t, updateStateFromResult]
   );
 
   const loading = pendingOperation !== null;

@@ -153,7 +153,8 @@ export function DesktopSessionDetailLayout({
         >
           <FocusScope
             id={WORKSPACE_FOCUS_SCOPES.sessionConversation}
-            className="flex h-full flex-col bg-background"
+            data-lody-action-scope="conversation"
+            className="group/close-scope flex h-full flex-col bg-background"
           >
             {topBar}
             <div className="flex min-h-0 flex-1 flex-col">

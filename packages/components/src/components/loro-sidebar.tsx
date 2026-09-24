@@ -25,6 +25,7 @@ import {
   WINDOW_DRAG_EXEMPT_CLASS,
   WINDOW_DRAG_HEADER_CLASS,
   useMacTrafficLightRowPadClass,
+  useWindowsCaptionRowPadClass,
 } from '@/ui/window-drag-region';
 import { useElectronFullscreen } from '@/lib/electron';
 import { Badge } from '@/ui/badge';
@@ -770,6 +771,7 @@ export const LoroSidebar = memo(function LoroSidebar({
   const isMobile = useIsMobile();
   const isElectronFullscreen = useElectronFullscreen();
   const macTrafficLightRowPadClass = useMacTrafficLightRowPadClass();
+  const windowsCaptionRowPadClass = useWindowsCaptionRowPadClass();
   const { t } = useTranslation();
   const collapseShortcut = useCommandShortcutLabel('sidebar.toggle');
   const backShortcut = useCommandShortcutLabel('nav.back');
@@ -891,8 +893,8 @@ export const LoroSidebar = memo(function LoroSidebar({
           showUpdatedProjectNames={showUpdatedProjectNames}
           onShowUpdatedProjectNamesChange={onShowUpdatedProjectNamesChange}
           labels={mergedLabels.filter}
-          side="bottom"
-          align="end"
+          side="right"
+          align="start"
           triggerClassName="h-5 w-5 [&_svg]:h-4 [&_svg]:w-4"
         />
       ))
@@ -970,7 +972,6 @@ export const LoroSidebar = memo(function LoroSidebar({
     workspaceSwitcherEnabled &&
       'hover:bg-sidebar-hover hover:text-sidebar-hover-foreground focus-visible:outline-hidden focus-visible:bg-sidebar-hover'
   );
-  const currentWorkspace = workspaces.find((ws) => ws.id === currentWorkspaceId);
   const getPlanLabel = (planTier: LoroSidebarWorkspace['planTier']) =>
     planTier === 'enterprise'
       ? mergedLabels.planEnterprise
@@ -1001,33 +1002,6 @@ export const LoroSidebar = memo(function LoroSidebar({
             {userEmail}
           </DropdownMenuLabel>
           <DropdownMenuSeparator />
-          {currentWorkspace ? (
-            <>
-              <div className="flex min-w-0 items-center gap-2.5 px-2 py-2" data-current-workspace>
-                <WorkspaceAvatar
-                  workspace={{ name: currentWorkspace.name, logo: currentWorkspace.logo }}
-                  className="h-9 w-9 shrink-0 rounded-lg text-sm"
-                  fallbackClassName="rounded-lg"
-                />
-                <div className="flex min-w-0 flex-col gap-0.5">
-                  <span className="truncate text-[0.95em] font-medium leading-tight text-foreground">
-                    {currentWorkspace.name}
-                  </span>
-                  <span className="truncate text-xs leading-tight text-muted-foreground">
-                    {typeof currentWorkspace.memberCount === 'number'
-                      ? t('workspace.switcher.planAndMembers', {
-                          plan: getPlanLabel(currentWorkspace.planTier),
-                          count: currentWorkspace.memberCount,
-                        })
-                      : t('workspace.switcher.plan', {
-                          plan: getPlanLabel(currentWorkspace.planTier),
-                        })}
-                  </span>
-                </div>
-              </div>
-              <DropdownMenuSeparator />
-            </>
-          ) : null}
 
           {workspaces.length > 0 ? (
             <>
@@ -1042,15 +1016,21 @@ export const LoroSidebar = memo(function LoroSidebar({
                 <TooltipProvider delayDuration={400}>
                   {workspaces.map((ws) => {
                     const workspaceSlug = ws.slug;
+                    // The avatar carries identity, so the check moves to the
+                    // row's trailing edge. ps-2/pe-8 replace the ps-8 selection
+                    // indent: the 20px avatar and the action rows' 20px icon
+                    // boxes share one leading column, and gap-1.5 lands every
+                    // label on the same text column.
                     const row = (
                       <DropdownMenuRadioItem
                         key={ws.id}
                         value={ws.id}
                         indicator="check"
-                        className="gap-2"
+                        indicatorSide="end"
+                        className="gap-1.5 ps-2 pe-8"
                         onClickCapture={(event) => {
                           if (!workspaceSlug || !isNewWindowClick(event)) return;
-                          if (openDesktopWindow(undefined, workspaceSlug)) {
+                          if (openDesktopWindow(undefined, workspaceSlug, 'modifier_click')) {
                             event.preventDefault();
                             event.stopPropagation();
                           }
@@ -1061,7 +1041,21 @@ export const LoroSidebar = memo(function LoroSidebar({
                           className="h-5 w-5 shrink-0 text-[10px]"
                         />
                         <span className="min-w-0 truncate">{ws.name}</span>
-                        {ws.planTier ? (
+                        {ws.id === currentWorkspaceId ? (
+                          // The checked row is the current workspace — it
+                          // carries the richer plan/members line that used to
+                          // need a separate header card.
+                          <span className="ml-auto shrink-0 truncate text-[0.75em] text-muted-foreground">
+                            {typeof ws.memberCount === 'number'
+                              ? t('workspace.switcher.planAndMembers', {
+                                  plan: getPlanLabel(ws.planTier),
+                                  count: ws.memberCount,
+                                })
+                              : t('workspace.switcher.plan', {
+                                  plan: getPlanLabel(ws.planTier),
+                                })}
+                          </span>
+                        ) : ws.planTier ? (
                           <Badge
                             variant="secondary"
                             className="ml-auto shrink-0 border-transparent bg-foreground/[0.06] px-1.5 py-0 text-[10px] font-normal text-muted-foreground"
@@ -1095,7 +1089,7 @@ export const LoroSidebar = memo(function LoroSidebar({
                         <ContextMenuContent>
                           <ContextMenuItem
                             onSelect={() => {
-                              openDesktopWindow(undefined, workspaceSlug);
+                              openDesktopWindow(undefined, workspaceSlug, 'context_menu');
                             }}
                           >
                             <AppWindow />
@@ -1111,16 +1105,24 @@ export const LoroSidebar = memo(function LoroSidebar({
             </>
           ) : null}
 
-          <DropdownMenuItem onSelect={() => onCreateWorkspaceClicked?.()}>
-            <Plus className="h-4 w-4" />
+          {/* 20px icon boxes match the radio rows' 20px avatars, so both row
+              kinds share one leading column and one text column. */}
+          <DropdownMenuItem className="gap-1.5" onSelect={() => onCreateWorkspaceClicked?.()}>
+            <span className="flex h-5 w-5 shrink-0 items-center justify-center">
+              <Plus className="h-4 w-4" />
+            </span>
             {mergedLabels.createWorkspace}
           </DropdownMenuItem>
-          <DropdownMenuItem onSelect={() => onInviteClicked?.()}>
-            <Users className="h-4 w-4" />
+          <DropdownMenuItem className="gap-1.5" onSelect={() => onInviteClicked?.()}>
+            <span className="flex h-5 w-5 shrink-0 items-center justify-center">
+              <Users className="h-4 w-4" />
+            </span>
             {mergedLabels.inviteMembers}
           </DropdownMenuItem>
-          <DropdownMenuItem onSelect={() => onLinkRepoClicked?.()}>
-            <Link2 className="h-4 w-4" />
+          <DropdownMenuItem className="gap-1.5" onSelect={() => onLinkRepoClicked?.()}>
+            <span className="flex h-5 w-5 shrink-0 items-center justify-center">
+              <Link2 className="h-4 w-4" />
+            </span>
             {mergedLabels.connectGithubRepo}
           </DropdownMenuItem>
         </DropdownMenuContent>
@@ -1173,7 +1175,7 @@ export const LoroSidebar = memo(function LoroSidebar({
             'group/sidebar-header relative flex items-center justify-between gap-2',
             isMobile
               ? 'pl-[calc(12px+var(--safe-area-left))] pr-[calc(12px+var(--safe-area-right))] pt-[calc(12px+var(--safe-area-top))]'
-              : cn('h-11 px-1.5', macTrafficLightRowPadClass),
+              : cn('h-11 px-1.5', macTrafficLightRowPadClass, windowsCaptionRowPadClass),
             windowDrag && WINDOW_DRAG_HEADER_CLASS
           )}
         >

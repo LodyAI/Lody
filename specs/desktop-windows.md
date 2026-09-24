@@ -27,12 +27,38 @@ conversation, and focus its composer once. The sidebar can be expanded.
 Workspace windows retain full navigation. Navigation, draft tabs, and panel state
 are independent per window.
 
-The optional developer window warm-up prepares the shell, not target Session data.
-Keep its neutral cover until the target conversation has loaded and synced, the
-workspace landing is mounted, or absence is confirmed after the target Session’s
-metadata projection settles. Unrelated metadata failures must not block that decision. Loading text and sidebar content are not readiness signals. The cover
-expires after five seconds so slow/offline/error states retain their recovery UI;
-this fallback is not a promise of completed loading or instant opening.
+The optional developer window warm-up prepares the shell and, in local mode, the
+implicit workspace runtime, Repo, and metadata sync before a target is selected.
+A matching claim retains that runtime, including initialization still in flight.
+The neutral route does not mount target Session UI or publish a workspace route.
+Local-only windows reuse same-workspace peer metadata and already loaded Session
+snapshots without sharing persistence or sync cursors. Snapshot import merges local
+edits; authoritative synchronization continues independently.
+On macOS local mode, the same opt-in spare may become a target-specific prepared
+Session after row hover/keyboard focus or opening a Session menu. Main bounds this
+to one hidden view, expires it, and cancels it when its source closes or the intent
+changes. Before presentation, this view may render and synchronize but must not
+mark read, claim workspace notification ownership, autofocus, or refresh external
+history as an opening side effect. Preparation leaves the source view unchanged.
+A matching claim presents the existing renderer without navigation; only actual
+presentation activates these effects. Readiness belongs to the target, sender and
+preparation generation, and is revoked when content or viewport becomes invalid.
+A miss or an early click still pays unfinished preparation; this is not a universal
+instant-open guarantee. Other platforms retain neutral-shell warmup.
+
+A claimed warm window stays natively hidden until the matching target has painted:
+conversation history must be hydrated (an empty conversation must be synced), the
+workspace landing mounted, or absence confirmed after that Session's metadata
+projection settles. Nonempty conversations must also finish virtual-list hydration
+and initial scroll restoration, so a CSS-hidden message viewport cannot authorize
+presentation. Unrelated metadata failures must not block the decision.
+Loading/sidebar text and an index-only history count are not readiness signals.
+There is no opaque renderer cover. Main reveals the recovery UI after five seconds
+if readiness never arrives; this is not a completed-load signal or an instant-open
+guarantee. Keep rendering unthrottled while hidden preparation runs, then restore
+the previous policy. Prepare the replacement spare only after the claimed window
+is shown. Measure click-to-show separately from whether the first visible frame
+contains content.
 Once claimed, the window follows ordinary product-window lifetime rules and remains
 open when other windows close. Crash recovery reloads its bound target, never the
 neutral warm route. Closing it must not cancel a replacement spare's timeout.

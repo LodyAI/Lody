@@ -2,7 +2,10 @@ import { useAtomValue } from 'jotai';
 import { promptShortcutsFeatureEnabledAtom } from '@/atoms/settings';
 import { useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { usePostHog } from '@posthog/react';
 import { PromptShortcutError, type PromptShortcutScope } from '@lody/shared/prompt-shortcuts';
+import { capturePostHogEvent } from '@/lib/posthog-analytics';
+import { getPromptShortcutAnalyticsProperties } from '@/lib/prompt-shortcut-analytics';
 import { usePromptShortcuts } from '../../providers/prompt-shortcut-provider';
 import type { MentionCategorySources } from './mention-registry';
 import {
@@ -19,6 +22,7 @@ export function useShortcutMentionSource(
 ): MentionCategorySources['promptShortcut'] {
   const featureEnabled = useAtomValue(promptShortcutsFeatureEnabledAtom);
   const { t } = useTranslation();
+  const postHog = usePostHog();
   const { runtime, entries, loading } = usePromptShortcuts();
   const context = useMemo<ShortcutMentionContext | null>(
     () =>
@@ -80,6 +84,12 @@ export function useShortcutMentionSource(
                     isCurrent,
                   });
                   clear();
+                  if (result && !request.signal.aborted) {
+                    capturePostHogEvent(postHog, 'prompt_shortcut/invoked', {
+                      source: request.text[request.start] === '/' ? 'slash_menu' : 'mention_menu',
+                      ...getPromptShortcutAnalyticsProperties(entry, result.mentions.length),
+                    });
+                  }
                   return result;
                 } catch (error) {
                   if (!request.signal.aborted && isCurrent()) {
@@ -115,6 +125,6 @@ export function useShortcutMentionSource(
           }
         ),
     }),
-    [activeSelection, context, entries, loading, runtime, scopeKey, t]
+    [activeSelection, context, entries, loading, postHog, runtime, scopeKey, t]
   );
 }

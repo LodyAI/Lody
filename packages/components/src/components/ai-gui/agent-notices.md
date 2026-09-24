@@ -31,11 +31,13 @@ agent's answer and the agent's own warning about it.
 
 ## One banner, two tones
 
-- A tinted header line carrying the tone colour, a hairline rule, then the raw
-  error — always open, never behind a modal or a disclosure. The previous
+- A tinted header line carrying the tone colour, then the raw error in the same
+  band — always open, never behind a modal or a disclosure. The previous
   `chat_failed` modal put the payload one click away on a surface the reader had
   no reason to expect; `chat-failed-detail-dialog.tsx` is no longer reached from
   the conversation.
+- The block spans the conversation column. An earlier fit-content card left a
+  ragged right edge, and a header rule split one short message into two boxes.
 - The surface mixes the tone toward the neutral border rather than fading it, so
   the card still reads as "warning" or "failure" at a glance without a vivid
   slab competing with the answer it comments on.

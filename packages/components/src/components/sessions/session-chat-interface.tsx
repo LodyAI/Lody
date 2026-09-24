@@ -1,3 +1,4 @@
+import { windowPreparationAtom } from '@/lib/window-preparation';
 import { conversationCopyRange } from '@/lib/conversation-copy-range';
 import { describeCopiedConversation } from '@/lib/describe-copied-conversation';
 import { SessionShareRequestCards } from '../sharing/session-share-request-cards';
@@ -2006,6 +2007,7 @@ export const SessionChatInterface = memo(
       };
     }, [session.id]);
     const { t, i18n } = useTranslation();
+    const preparingWindow = useAtomValue(windowPreparationAtom);
     const isMobile = useIsMobile();
     const isNativeApp = isNativeAppShell();
     const hidesBillingUi = isMobile || isNativeApp;
@@ -2109,6 +2111,8 @@ export const SessionChatInterface = memo(
     } | null>(null);
     const pendingRemoteHtmlFileName =
       pendingRemoteHtmlFile?.sessionId === session.id ? pendingRemoteHtmlFile.fileName : null;
+    // Set by the confirm action so the dialog's close does not also count as a deny.
+    const remotePortAllowedRef = useRef(false);
     const {
       doc: sessionDoc,
       history: conversationView,
@@ -3493,6 +3497,10 @@ export const SessionChatInterface = memo(
             tool_calls_collapsed: stats.toolCallsCollapsed,
             tool_results_truncated: stats.toolResultsTruncated,
           });
+          capturePostHogEvent(postHog, 'export/context_markdown_copied', {
+            scope: throughMessageId ? 'through_message' : 'full',
+            history_count: turnCount,
+          });
           toast.success(describeCopiedConversation(stats, t));
         } catch (error) {
           console.error('Failed to copy conversation history', error);
@@ -3513,6 +3521,7 @@ export const SessionChatInterface = memo(
         conversationCopySource,
         session.title,
         conversationView,
+        postHog,
         t,
       ]
     );
@@ -3529,7 +3538,7 @@ export const SessionChatInterface = memo(
       if (
         !shouldMarkSessionRead({
           rendersConversation: !hideMessageArea,
-          isVisible,
+          isVisible: isVisible && !preparingWindow,
           lastMessageAt,
           lastReadAt: lastReadAtForReceiptRef.current,
         })
@@ -3543,7 +3552,14 @@ export const SessionChatInterface = memo(
       // a new message arrives. Deliberately do not depend on lastReadAt: moving
       // that receipt backwards is the user's explicit "Mark as unread" action,
       // which must remain visible until they leave and reopen the conversation.
-    }, [hideMessageArea, isVisible, markSessionRead, session.id, session.lastMessageAt]);
+    }, [
+      hideMessageArea,
+      isVisible,
+      preparingWindow,
+      markSessionRead,
+      session.id,
+      session.lastMessageAt,
+    ]);
 
     const isDispatching = inputActionState === 'dispatching';
     const isAgentBusy = isSessionPromptBusy({
@@ -4172,6 +4188,12 @@ export const SessionChatInterface = memo(
         await dispatchPrompt(
           t('sessions.capacityRetry.continuationPrompt', CAPACITY_RETRY_CONTINUATION_PROMPT)
         ),
+      onRetryAttempt: ({ trigger, attempt }) =>
+        captureSessionEvent('session/agent_busy_retry', { trigger, attempt }),
+      onAutoRetryCancelled: ({ pendingAttempt }) =>
+        captureSessionEvent('session/agent_busy_retry_cancelled', {
+          pending_attempt: pendingAttempt,
+        }),
     });
 
     // Resend a user turn the missing-history recovery negatively acknowledged:
@@ -4338,9 +4360,15 @@ export const SessionChatInterface = memo(
 
     const handleGoalCardCommand = useCallback(
       (command: GoalCommand, goal: Extract<MessageContent, { type: 'goal' }>) => {
+        if (command === 'resume' || command === 'clear') {
+          captureSessionEvent(
+            command === 'resume' ? 'session/goal_resume_requested' : 'session/goal_clear_requested',
+            { goal_thread_id: goal.threadId, cancel_turn_id: null }
+          );
+        }
         void handleGoalCommand(command, goal);
       },
-      [handleGoalCommand]
+      [captureSessionEvent, handleGoalCommand]
     );
 
     const handleDismissGoalBanner = useCallback(
@@ -5553,6 +5581,7 @@ export const SessionChatInterface = memo(
           return true;
         case 'confirm-reported-port':
           if (!onOpenBrowser) return false;
+          remotePortAllowedRef.current = false;
           setPendingRemoteHtmlFile({ sessionId: session.id, fileName: file.fileName });
           return true;
         case 'fallback':
@@ -5978,9 +6007,15 @@ export const SessionChatInterface = memo(
 
     return (
       <PrLinkProvider prUrl={latestPr?.url} onOpenPrTab={prLinkHandler}>
-        {isVisible && sessionDocReady && sessionDocSynced && (
-          <span hidden data-window-session-ready={session.id} />
-        )}
+        {isVisible &&
+          sessionDocReady &&
+          (sessionHistory.length > 0 || (sessionHistoryLength === 0 && sessionDocSynced)) && (
+            <span
+              hidden
+              data-window-session-ready={session.id}
+              data-window-requires-stream={sessionHistoryLength > 0 ? 'true' : undefined}
+            />
+          )}
         <SessionConversationPage
           className={className}
           dropActive={imageDropZone.isActive || sessionMentionOverlay}
@@ -6288,7 +6323,10 @@ export const SessionChatInterface = memo(
                   <div className={shareSelection.active ? 'hidden' : 'contents'}>
                     {shouldReplaceComposerWithPermission ? null : (
                       <SessionChatInputArea
-                        claimNavigationFocus={isVisible ? claimNavigationFocus : undefined}
+                        isVisible={isVisible && !shareSelection.active}
+                        claimNavigationFocus={
+                          isVisible && !preparingWindow ? claimNavigationFocus : undefined
+                        }
                         ref={inputAreaRef}
                         session={session}
                         sessionLocalProjectRootPath={resolvedLocalProjectMeta?.rootPath ?? null}
@@ -6359,7 +6397,12 @@ export const SessionChatInterface = memo(
           <AlertDialog
             open={pendingRemoteHtmlFileName !== null}
             onOpenChange={(open) => {
-              if (!open) setPendingRemoteHtmlFile(null);
+              if (open) return;
+              if (!remotePortAllowedRef.current && pendingRemoteHtmlFileName !== null) {
+                captureSessionEvent('file_preview/remote_port_confirmed', { decision: 'deny' });
+              }
+              remotePortAllowedRef.current = false;
+              setPendingRemoteHtmlFile(null);
             }}
           >
             <AlertDialogContent>
@@ -6379,6 +6422,10 @@ export const SessionChatInterface = memo(
                 <AlertDialogCancel>{t('common.cancel', 'Cancel')}</AlertDialogCancel>
                 <AlertDialogAction
                   onClick={() => {
+                    remotePortAllowedRef.current = true;
+                    captureSessionEvent('file_preview/remote_port_confirmed', {
+                      decision: 'allow',
+                    });
                     setPendingRemoteHtmlFile(null);
                     onOpenBrowser?.();
                   }}

@@ -32,6 +32,7 @@ import {
   getManagedAgentRuntimeManager,
   GROK_ACP_ADAPTER_VERSION,
   KIMI_CODE_VERSION,
+  PI_EXTENSIONS_SUPPORTED,
   PI_RUNTIME_VERSION,
   type ManagedRuntimeLaunch,
   type ManagedRuntimeName,
@@ -240,7 +241,7 @@ export function getAcpCapabilitySourceVersion(
           : `${BUILTIN_KIMI_CAPABILITY_SOURCE_VERSION}${runtimeOverrideSuffix}`;
       }
       if (input.agentType === 'pi') {
-        return `builtin-pi:${managedRuntimeVersion ?? PI_RUNTIME_VERSION}`;
+        return `builtin-pi:${managedRuntimeVersion ?? PI_RUNTIME_VERSION}${runtimeOverrideSuffix}`;
       }
       if (input.agentType === 'grok') {
         return managedRuntimeVersion
@@ -464,10 +465,25 @@ async function resolveBuiltinACPProcessLaunch(
     throw new Error(`Unsupported managed builtin ACP type: ${input.agentType}`);
   }
   if (input.agentType === 'pi') {
-    const runtime = await resolveManagedRuntimeForLaunch('pi', input);
+    const extensions = input.runtimeOverrides?.piExtensions ?? [];
+    if (extensions.length && !PI_EXTENSIONS_SUPPORTED) {
+      throw new Error(
+        'This Pi runtime does not support selected extensions. Update the managed runtime.'
+      );
+    }
+    const runtime = extensions.length
+      ? await getManagedAgentRuntimeManager().ensureCurrentRuntime('pi', {
+          onProgress: input.onManagedRuntimeProgress,
+          signal: input.signal,
+        })
+      : await resolveManagedRuntimeForLaunch('pi', input);
     return {
       command: process.execPath,
-      args: [runtime.command, ...(input.extraArgs ?? [])],
+      args: [
+        runtime.command,
+        ...extensions.flatMap((path) => ['-e', path]),
+        ...(input.extraArgs ?? []),
+      ],
       capabilitySourceVersion: getAcpCapabilitySourceVersion(input, runtime.version),
     };
   }

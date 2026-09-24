@@ -27,6 +27,8 @@ import type {
   SessionMeta,
   SessionOperation,
   MachineId,
+  AgentConfigId,
+  MachinePiExtensionsResponse,
   MachinePingResponse,
   MachineRestartResponse,
   MachineStatusResponse,
@@ -468,6 +470,10 @@ export type WorkspaceRuntime = {
     args: { description: string; reporterUserId: string; requestToken: string },
     options?: { timeoutMs?: number }
   ) => Promise<MachineBugReportResponse | null>;
+  requestMachinePiExtensions: (
+    machineId: MachineId,
+    options?: { configId?: AgentConfigId }
+  ) => Promise<MachinePiExtensionsResponse>;
   dispose: () => Promise<void>;
 };
 

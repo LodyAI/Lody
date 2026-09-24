@@ -21,6 +21,29 @@ const entry = (cacheVersion?: number): AcpCapabilityCacheEntry => ({
 });
 
 describe('ACP capability cache compatibility', () => {
+  it('invalidates Pi plugin catalogs when selections change or become empty', () => {
+    const capability: AcpCapabilityCacheEntry = {
+      ...entry(ACP_CAPABILITY_CACHE_VERSION),
+      agentType: 'pi',
+      sourceVersion: 'builtin-pi:test+override:{"piExtensions":["/fixture/plugin.ts"]}',
+    };
+    expect(
+      getReadableAcpCapabilityCacheEntryForRuntimeOverrides(capability, {
+        piExtensions: ['/fixture/plugin.ts'],
+      })
+    ).toEqual(capability);
+    for (const overrides of [
+      undefined,
+      { piExtensions: [] },
+      { piExtensions: ['/fixture/other.ts'] },
+    ]) {
+      expect(
+        getReadableAcpCapabilityCacheEntryForRuntimeOverrides(capability, overrides)
+      ).toBeUndefined();
+    }
+    const plain = { ...capability, sourceVersion: 'builtin-pi:test' };
+    expect(getReadableAcpCapabilityCacheEntryForRuntimeOverrides(plain, undefined)).toEqual(plain);
+  });
   it.each([undefined, ACP_CAPABILITY_CACHE_VERSION - 1, ACP_CAPABILITY_CACHE_VERSION + 1])(
     'keeps a parsed cache-version %s entry readable',
     (cacheVersion) => {

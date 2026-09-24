@@ -1,6 +1,17 @@
 const WINDOWS_ABSOLUTE_PATH = /^[A-Za-z]:[\\/]/u;
 
 /**
+ * True for host-absolute paths (POSIX, Windows drive, or Windows UNC). The
+ * session file surfaces use this to decide whether a path already carries its
+ * own absolute identity instead of one derived from the workspace root.
+ */
+export function isAbsoluteFilePath(path: string | null | undefined): boolean {
+  const trimmed = path?.trim();
+  if (!trimmed) return false;
+  return trimmed.startsWith('/') || trimmed.startsWith('\\') || WINDOWS_ABSOLUTE_PATH.test(trimmed);
+}
+
+/**
  * Joins a session workspace root with a workspace-relative viewer path so the
  * desktop bridge can reveal or open the real file.
  *
@@ -16,8 +27,7 @@ export function resolveLocalWorkspaceFilePath(
   const root = workspacePath?.trim();
   const relative = relativePath?.trim();
   if (!relative) return null;
-  if (relative.startsWith('/') || relative.startsWith('\\') || WINDOWS_ABSOLUTE_PATH.test(relative))
-    return allowExternalPaths ? relative : null;
+  if (isAbsoluteFilePath(relative)) return allowExternalPaths ? relative : null;
   if (!root) return null;
 
   const segments = relative.split(/[\\/]+/u).filter((segment) => segment && segment !== '.');

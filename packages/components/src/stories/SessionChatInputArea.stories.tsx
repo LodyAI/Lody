@@ -31,7 +31,10 @@ import type {
 import { currentWorkspaceIdAtom } from '@/atoms';
 import { machineMetaCacheAtom } from '@/atoms/doc-meta';
 import { authTokenAtom } from '@/atoms/runtime';
-import { SessionChatInputArea } from '@/components/sessions/session-chat-input-area';
+import {
+  SessionChatInputArea,
+  type SessionChatInputAreaProps,
+} from '@/components/sessions/session-chat-input-area';
 
 const STORY_WORKSPACE_ID = 'workspace-storybook' as WorkspaceId;
 const STORY_MACHINE_ID = 'machine-storybook' as MachineId;
@@ -64,7 +67,8 @@ type StoryShellProps = {
   isAgentBusy: boolean;
   initialInputText?: string;
   showFreeTurnLimitNotice?: boolean;
-  onSendMessage?: () => Promise<boolean>;
+  onSendMessage?: SessionChatInputAreaProps['onSendMessage'];
+  disableImageUpload?: boolean;
   claimNavigationFocus?: () => boolean;
 };
 
@@ -84,6 +88,7 @@ function StoryShell({
   showFreeTurnLimitNotice = false,
   onSendMessage = async () => true,
   claimNavigationFocus,
+  disableImageUpload = true,
 }: StoryShellProps) {
   const store = useMemo(() => createStoryStore(), []);
   const session = useMemo<SessionMeta>(
@@ -145,7 +150,7 @@ function StoryShell({
               onStop={() => {}}
               onRemoveQueueItem={async () => {}}
               initialInputText={initialInputText}
-              disableImageUpload
+              disableImageUpload={disableImageUpload}
             />
           </div>
         </div>
@@ -304,3 +309,30 @@ function NavigationStory() {
 }
 
 export const LandingNavigation: Story = { render: () => <NavigationStory /> };
+
+export const UploadingAttachments: Story = {
+  args: {
+    disableImageUpload: false,
+    onSendMessage: async (blocks, _role, options) => {
+      window.dispatchEvent(
+        new CustomEvent('storybook:attachments-submitted', { detail: { blocks, options } })
+      );
+      return true;
+    },
+  },
+};
+
+export const UploadingAttachmentsPendingAcceptance: Story = {
+  args: {
+    disableImageUpload: false,
+    onSendMessage: (blocks, _role, options) =>
+      new Promise<boolean>((resolve) => {
+        window.addEventListener('storybook:accept-attachments', () => resolve(true), {
+          once: true,
+        });
+        window.dispatchEvent(
+          new CustomEvent('storybook:attachments-submitted', { detail: { blocks, options } })
+        );
+      }),
+  },
+};

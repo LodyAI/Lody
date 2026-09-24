@@ -1,5 +1,5 @@
 import { createFileRoute, Navigate, Outlet, useLocation } from '@tanstack/react-router';
-import { lazy, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useOrganization } from '@/hooks/useOrganization';
 import { useAtomValue, useSetAtom } from 'jotai';
@@ -27,6 +27,7 @@ import {
 } from '@/lib/posthog-analytics';
 import { identifyPostHogUser } from '@/lib/posthog-identity';
 import { scheduleOneSignalTask } from '@/lib/onesignal';
+import { PreloadedMainLayout } from '@/components/preloaded-main-layout';
 import { RouteSuspense } from '@/components/route-suspense';
 import { RouteMessage } from '@/components/route-message';
 import { LoadingPlaceholder } from '@/components/loading-placeholder';
@@ -40,11 +41,6 @@ import { useResolvedWorkspaceScope } from '../../hooks/use-resolved-workspace-sc
 import { useBillingOverviewPreload } from '../../hooks/use-billing-overview-preload';
 
 const AUTH_ROUTE_ONESIGNAL_LOGIN_IDLE_TIMEOUT_MS = 10_000;
-
-const LazyMainLayout = lazy(async () => {
-  const module = await import('@/components/main-layout');
-  return { default: module.MainLayout };
-});
 
 function normalizeConvexSiteUrl(rawUrl: string | undefined): string | null {
   const trimmed = rawUrl?.trim();
@@ -84,9 +80,9 @@ function LocalPlatformLayoutContent({ workspaceName }: { workspaceName: string }
       {/* Same dock-badge / live-activity wiring as the cloud layout. */}
       <LodyLiveActivityHost workspaceName={workspaceName} />
       <RouteSuspense fallback={isChatLandingRoute ? <CriticalWorkspaceShell /> : null}>
-        <LazyMainLayout>
+        <PreloadedMainLayout>
           <AuthenticatedWorkspaceContent />
-        </LazyMainLayout>
+        </PreloadedMainLayout>
       </RouteSuspense>
     </>
   );
@@ -459,22 +455,22 @@ function AuthedLayoutRoutes({
     if (!currentWorkspaceId) {
       return (
         <RouteSuspense>
-          <LazyMainLayout workspaceReady={false}>
+          <PreloadedMainLayout workspaceReady={false}>
             <LoadingPlaceholder
               variant="content"
               title={t('workspace.route.switchingTitle')}
               description={t('workspace.route.switchingDescription')}
             />
-          </LazyMainLayout>
+          </PreloadedMainLayout>
         </RouteSuspense>
       );
     }
 
     return (
       <RouteSuspense>
-        <LazyMainLayout>
+        <PreloadedMainLayout>
           <AuthenticatedWorkspaceContent showWorkspaceCheckout />
-        </LazyMainLayout>
+        </PreloadedMainLayout>
       </RouteSuspense>
     );
   }
@@ -538,9 +534,9 @@ function AuthedLayoutRoutes({
 
   return (
     <RouteSuspense>
-      <LazyMainLayout>
+      <PreloadedMainLayout>
         <AuthenticatedWorkspaceContent showWorkspaceCheckout />
-      </LazyMainLayout>
+      </PreloadedMainLayout>
     </RouteSuspense>
   );
 }

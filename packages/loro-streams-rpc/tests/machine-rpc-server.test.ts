@@ -109,6 +109,53 @@ const createFakeStreamClient = () => {
 };
 
 describe('LoroStreamsMachineRpcServer', () => {
+  it('returns Pi discovery from the saved config through the machine RPC', async () => {
+    const fake = createFakeStreamClient();
+    const result = {
+      success: true as const,
+      discovery: { version: 1 as const, agentDir: '/fixture/pi', extensions: [], warnings: [] },
+    };
+    const server = new LoroStreamsMachineRpcServer({
+      logger: createSilentLogger(),
+      workspaceId: 'workspace-1' as WorkspaceId,
+      machineId: 'machine-1' as MachineId,
+      streamClient: fake.streamClient,
+      getMachineStatus: vi.fn(),
+      refreshMachineAcpCapabilities: vi.fn(),
+      listMachinePiExtensions: async ({ configId: selectedConfigId }) =>
+        selectedConfigId === 'pi-config' ? result : { success: false, error: 'Wrong provider' },
+    });
+    fake.pushBatch({
+      messages: [
+        {
+          jsonrpc: '2.0',
+          id: 'pi-scan',
+          method: 'machine/pi-extensions',
+          rpcVersion: '1',
+          machineId: 'machine-1',
+          workspaceId: 'workspace-1',
+          replyTo: 'workspace-1:rpc:res:client-1',
+          sentAt: 1,
+          expiresAt: Number.MAX_SAFE_INTEGER,
+          params: { configId: 'pi-config' },
+        },
+      ],
+      nextOffset: '1',
+      cursor: 'cursor-1',
+      upToDate: true,
+    });
+    await server.start();
+    try {
+      await fake.waitForAppendedCount(1);
+      expect(fake.appended[0]?.value).toMatchObject({
+        id: 'pi-scan',
+        method: 'machine/pi-extensions',
+        result,
+      });
+    } finally {
+      server.stop();
+    }
+  });
   it('redacts invalid authorization-code requests from warning logs', async () => {
     const fake = createFakeStreamClient();
     const logger = {
