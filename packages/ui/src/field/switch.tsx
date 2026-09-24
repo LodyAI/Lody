@@ -35,6 +35,7 @@ const styles = stylex.create({
     height: field.switchThumbSize,
     borderRadius: radius.full,
     backgroundColor: field.thumb,
+    backgroundImage: field.thumbSheen,
     boxShadow: field.thumbShadow,
     transform: 'translateX(0)',
     transitionProperty: 'transform',
@@ -65,6 +66,9 @@ export const Switch = forwardRef<HTMLButtonElement, SwitchProps>(function Switch
           stylex.props(
             well.box,
             styles.track,
+            // On is the whole track turning to the accent fill, cross-faded by
+            // the well's own transition while the thumb slides: the way every
+            // platform's switch reads, and no hard edge crossing a pill.
             state.checked && well.checked,
             isInvalid(state.valid, ariaInvalid) &&
               (state.checked ? well.checkedInvalid : well.invalid)

@@ -125,7 +125,7 @@ export const toggleSurface = stylex.create({
     color: toggle.activeLabel,
     boxShadow: {
       default: toggle.pressedWell,
-      ':focus-visible': `${toggle.pressedWell}, ${RING}`,
+      ':focus-visible': `${RING}, ${toggle.pressedWell}`,
     },
   },
 

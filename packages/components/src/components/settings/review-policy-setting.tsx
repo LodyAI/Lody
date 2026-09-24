@@ -2,6 +2,9 @@ import { useAtomValue } from 'jotai';
 import { Check, Monitor, Trash2 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
+import * as stylex from '@stylexjs/stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { space } from '@lody/ui/tokens/scales.stylex';
 import { toast } from '@/lib/toast';
 import {
   ACP_PLAN_PERMISSION_MODE_ID,
@@ -45,11 +48,88 @@ import { Input } from '@lody/ui/input';
 import { NumberField } from '@lody/ui/number-field';
 import { Switch } from '@lody/ui/switch';
 import { Textarea } from '@lody/ui/textarea';
-import { cn } from '@/lib/utils';
 import { CompactRow, CompactSection } from './compact-layout';
+import { settingsSurface as surface } from './surface';
 
 /** Long enough to coalesce typing, short enough to feel saved. */
 const POLICY_WRITE_DEBOUNCE_MS = 600;
+
+const WIDE = '@media (min-width: 640px)';
+const LINE = `inset 0 1px 0 ${colors.separator}`;
+const COLUMNS = 'minmax(150px, 0.75fr) minmax(0, 1.75fr)';
+
+const styles = stylex.create({
+  /** Mobile draws the table as its own card, inset from the screen edge. */
+  standalone: { marginInline: space[3] },
+  /** Every row but the first is ruled from the one above. */
+  ruled: { boxShadow: LINE },
+  /**
+   * The first machine row sits under the column heads, which only show on a
+   * wide panel: a line above it there, none on a narrow one.
+   */
+  ruledWide: { boxShadow: { default: 'none', [WIDE]: LINE } },
+  head: {
+    display: { default: 'none', [WIDE]: 'grid' },
+    gridTemplateColumns: COLUMNS,
+    gap: space[4],
+    paddingInline: space[4],
+    paddingBlock: space[1.5],
+    fontSize: '0.75em',
+    fontWeight: 400,
+    color: colors.secondaryLabel,
+  },
+  row: {
+    display: { default: 'flex', [WIDE]: 'grid' },
+    flexDirection: 'column',
+    gridTemplateColumns: { default: null, [WIDE]: COLUMNS },
+    alignItems: { default: 'stretch', [WIDE]: 'center' },
+    gap: { default: space[2], [WIDE]: space[4] },
+    paddingInline: space[4],
+    paddingBlock: '10px',
+  },
+  machine: { display: 'flex', minWidth: 0, alignItems: 'center', gap: '10px' },
+  machineIcon: { width: '16px', height: '16px', flexShrink: 0, color: colors.tertiaryLabel },
+  machineText: { minWidth: 0 },
+  truncate: {
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  machineName: { margin: 0, fontWeight: 400, lineHeight: 1.25, color: colors.label },
+  machineMeta: { margin: 0, fontSize: '0.75em', lineHeight: 1.25, color: colors.secondaryLabel },
+  reviewerCell: { minWidth: 0, paddingInlineStart: { default: 0, [WIDE]: space[4] } },
+  noAgents: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: space[2],
+  },
+  noAgentsText: { fontSize: '0.8em', color: colors.secondaryLabel },
+  actions: { display: 'flex', alignItems: 'center', gap: space[1] },
+  actionsEnd: { marginInlineStart: 'auto' },
+  pickers: {
+    display: 'flex',
+    minWidth: 0,
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: space[1.5],
+  },
+  status: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: space[1],
+    fontSize: '0.75em',
+    color: colors.secondaryLabel,
+  },
+  statusWarning: { color: colors.warning },
+  statusIcon: { width: '12px', height: '12px', flexShrink: 0 },
+  glyph: { width: '100%', height: '100%' },
+  /** A text value takes a fixed column on a wide panel and the row on a narrow one. */
+  wideField: { width: { default: '100%', [WIDE]: '288px' } },
+  numberField: { width: '80px' },
+});
 
 const workspacePolicyOnly = (policy: ReviewPolicy): ReviewPolicy => {
   const { reviewer: _frozenReviewer, ...workspacePolicy } = policy;
@@ -74,10 +154,13 @@ type ReviewerMachineRowProps = Omit<
 > & {
   machine: MachineViewMeta;
   reviewerConfig: MachineReviewerConfig | undefined;
+  /** The first row: under the column heads on a wide panel, the top of the card on a narrow one. */
+  first: boolean;
 };
 
 function ReviewerMachineRow({
   machine,
+  first,
   agentConfigs,
   reviewerConfig,
   onlineMachineIds,
@@ -168,15 +251,12 @@ function ReviewerMachineRow({
     : null;
 
   return (
-    <div
-      role="row"
-      className="flex flex-col gap-2 px-3 py-2.5 sm:grid sm:grid-cols-[minmax(150px,0.75fr)_minmax(0,1.75fr)] sm:items-center sm:gap-4"
-    >
-      <div role="cell" className="flex min-w-0 items-center gap-2.5">
-        <Monitor className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-        <div className="min-w-0">
-          <p className="truncate font-normal leading-tight text-foreground">{machine.name}</p>
-          <p className="truncate text-[11px] leading-tight text-muted-foreground">
+    <div role="row" {...stylex.props(styles.row, first ? styles.ruledWide : styles.ruled)}>
+      <div role="cell" {...stylex.props(styles.machine)}>
+        <Monitor {...stylex.props(styles.machineIcon)} aria-hidden="true" />
+        <div {...stylex.props(styles.machineText)}>
+          <p {...stylex.props(styles.machineName, styles.truncate)}>{machine.name}</p>
+          <p {...stylex.props(styles.machineMeta, styles.truncate)}>
             {online
               ? t('settings.review.machineOnline', 'Online')
               : t('settings.review.machineOffline', 'Offline')}
@@ -185,13 +265,13 @@ function ReviewerMachineRow({
         </div>
       </div>
 
-      <div role="cell" className="min-w-0 sm:pl-4">
+      <div role="cell" {...stylex.props(styles.reviewerCell)}>
         {machineAgentConfigs.length === 0 ? (
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <span className="text-xs text-muted-foreground">
+          <div {...stylex.props(styles.noAgents)}>
+            <span {...stylex.props(styles.noAgentsText)}>
               {t('settings.review.noAgentsOnMachine', 'No agents are configured on this machine.')}
             </span>
-            <div className="flex items-center gap-1">
+            <div {...stylex.props(styles.actions)}>
               <Button variant="secondary" size="small" onClick={onOpenAgentSettings}>
                 {t('settings.review.configureAgents', 'Configure agents')}
               </Button>
@@ -208,13 +288,13 @@ function ReviewerMachineRow({
                   icon
                   onClick={() => onDelete(machine.id)}
                 >
-                  <Trash2 className="h-3.5 w-3.5" />
+                  <Trash2 {...stylex.props(styles.glyph)} />
                 </Button>
               ) : null}
             </div>
           </div>
         ) : (
-          <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+          <div {...stylex.props(styles.pickers)}>
             <DesktopRunConfigMenu
               agentSelection={selection}
               allowedMachineIds={[machine.id]}
@@ -274,14 +354,11 @@ function ReviewerMachineRow({
               />
             ) : null}
 
-            <div className="ml-auto flex items-center gap-1">
-              <span
-                className={cn(
-                  'inline-flex items-center gap-1 text-[11px]',
-                  configured ? 'text-muted-foreground' : 'text-status-warning'
-                )}
-              >
-                {configured ? <Check className="h-3 w-3" aria-hidden="true" /> : null}
+            <div {...stylex.props(styles.actions, styles.actionsEnd)}>
+              <span {...stylex.props(styles.status, !configured && styles.statusWarning)}>
+                {configured ? (
+                  <Check {...stylex.props(styles.statusIcon)} aria-hidden="true" />
+                ) : null}
                 {configured
                   ? t('settings.review.configured', 'Configured')
                   : reviewerConfig
@@ -302,7 +379,7 @@ function ReviewerMachineRow({
                   icon
                   onClick={() => onDelete(machine.id)}
                 >
-                  <Trash2 className="h-3.5 w-3.5" />
+                  <Trash2 {...stylex.props(styles.glyph)} />
                 </Button>
               ) : null}
             </div>
@@ -331,34 +408,29 @@ export function ReviewerMachineConfigTable({
     <div
       role="table"
       aria-label={t('settings.review.machineTableLabel', 'Reviewer configuration by machine')}
-      className={cn(
-        'divide-y divide-border/60 overflow-hidden',
-        standalone && 'mx-3 rounded-2xl border border-border/40 bg-card'
-      )}
+      {...stylex.props(standalone && surface.card, standalone && styles.standalone)}
     >
-      <div
-        role="row"
-        className="hidden grid-cols-[minmax(150px,0.75fr)_minmax(0,1.75fr)] gap-4 bg-muted/25 px-3 py-1.5 text-[11px] font-normal text-muted-foreground sm:grid"
-      >
+      <div role="row" {...stylex.props(styles.head)}>
         <div role="columnheader">{t('settings.review.machineColumn', 'Machine')}</div>
-        <div role="columnheader" className="pl-4">
+        <div role="columnheader" {...stylex.props(styles.reviewerCell)}>
           {t('settings.review.reviewerColumn', 'Reviewer agent')}
         </div>
       </div>
 
       {loading ? (
-        <div className="px-3 py-4 text-center text-xs text-muted-foreground">
+        <p {...stylex.props(surface.cardNote, styles.ruledWide)}>
           {t('settings.review.loadingMachines', 'Loading reviewer configurations…')}
-        </div>
+        </p>
       ) : machines.length === 0 ? (
-        <div className="px-3 py-4 text-center text-xs text-muted-foreground">
+        <p {...stylex.props(surface.cardNote, styles.ruledWide)}>
           {t('settings.review.noMachines', 'No machines are available in this workspace.')}
-        </div>
+        </p>
       ) : (
-        machines.map((machine) => (
+        machines.map((machine, index) => (
           <ReviewerMachineRow
             key={machine.id}
             machine={machine}
+            first={index === 0}
             agentConfigs={agentConfigs}
             reviewerConfig={reviewerConfigs.get(machine.id)}
             onlineMachineIds={onlineMachineIds}
@@ -559,15 +631,16 @@ export function ReviewPolicySection() {
       ),
       stack: true,
       control: (
-        <Textarea
-          className="min-h-20 w-full text-xs sm:w-72"
-          value={current.requirements ?? ''}
-          placeholder={t(
-            'settings.review.requirementsPlaceholder',
-            'e.g. Flag any new dependency. Require tests for bug fixes.'
-          )}
-          onChange={(event) => persist({ ...current, requirements: event.target.value })}
-        />
+        <div {...stylex.props(styles.wideField)}>
+          <Textarea
+            value={current.requirements ?? ''}
+            placeholder={t(
+              'settings.review.requirementsPlaceholder',
+              'e.g. Flag any new dependency. Require tests for bug fixes.'
+            )}
+            onChange={(event) => persist({ ...current, requirements: event.target.value })}
+          />
+        </div>
       ),
     },
     {
@@ -579,6 +652,7 @@ export function ReviewPolicySection() {
       ),
       control: (
         <NumberField.Root
+          {...stylex.props(styles.numberField)}
           value={current.budget.reviewRounds}
           min={1}
           max={20}
@@ -592,10 +666,7 @@ export function ReviewPolicySection() {
             });
           }}
         >
-          <NumberField.Input
-            className="w-20"
-            aria-label={t('settings.review.reviewRounds', 'Review rounds')}
-          />
+          <NumberField.Input aria-label={t('settings.review.reviewRounds', 'Review rounds')} />
         </NumberField.Root>
       ),
     },
@@ -608,6 +679,7 @@ export function ReviewPolicySection() {
       ),
       control: (
         <NumberField.Root
+          {...stylex.props(styles.numberField)}
           value={current.budget.ciFixAttempts}
           min={0}
           max={10}
@@ -621,10 +693,7 @@ export function ReviewPolicySection() {
             });
           }}
         >
-          <NumberField.Input
-            className="w-20"
-            aria-label={t('settings.review.ciFixAttempts', 'CI fix attempts')}
-          />
+          <NumberField.Input aria-label={t('settings.review.ciFixAttempts', 'CI fix attempts')} />
         </NumberField.Root>
       ),
     },
@@ -637,6 +706,7 @@ export function ReviewPolicySection() {
       ),
       control: (
         <NumberField.Root
+          {...stylex.props(styles.numberField)}
           value={current.budget.conflictAttempts}
           min={0}
           max={10}
@@ -651,7 +721,6 @@ export function ReviewPolicySection() {
           }}
         >
           <NumberField.Input
-            className="w-20"
             aria-label={t('settings.review.conflictAttempts', 'Conflict attempts')}
           />
         </NumberField.Root>
@@ -681,19 +750,20 @@ export function ReviewPolicySection() {
       ),
       stack: true,
       control: (
-        <Input
-          className="h-8 w-full sm:w-72"
-          value={current.protectedPaths.join(', ')}
-          onChange={(event) =>
-            persist({
-              ...current,
-              protectedPaths: event.target.value
-                .split(',')
-                .map((entry) => entry.trim())
-                .filter(Boolean),
-            })
-          }
-        />
+        <div {...stylex.props(styles.wideField)}>
+          <Input
+            value={current.protectedPaths.join(', ')}
+            onChange={(event) =>
+              persist({
+                ...current,
+                protectedPaths: event.target.value
+                  .split(',')
+                  .map((entry) => entry.trim())
+                  .filter(Boolean),
+              })
+            }
+          />
+        </div>
       ),
     },
   ];

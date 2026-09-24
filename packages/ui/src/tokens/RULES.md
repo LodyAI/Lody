@@ -1,7 +1,8 @@
 # Token usage rules
 
 Construction: depth without lines. No border token exists. Surfaces separate by
-luminance step and shadow; controls are wells (sunken) or raised.
+luminance step and shadow; controls are wells (sunken) or raised. The material is
+flat with one light above it: see [Material](#material).
 
 ## Elevation ladder
 
@@ -21,9 +22,11 @@ One rung per component. The rung fixes background and shadow together.
 - `separator`: next row. Dividers between list and table rows only. Never
   around a surface, never under a header.
 - well: you can put something here. `wellBackground` + `shadow.inset`.
-- raised: you can press this. `raisedBackground` + `shadow.raised`. Primary and
-  destructive buttons are raised with `shadow.inkEdge` as their top highlight.
-- shadow: above the page. Strength by rung.
+- raised: you can press this. `raisedBackground` + `shadow.raised` +
+  `sheen.raised`. Primary and destructive buttons are raised with
+  `shadow.inkEdge` and `sheen.ink`: a top highlight and a contact shadow.
+- shadow: above the page. Strength by rung, and always a hairline, a contact
+  shadow and a lift — never one soft cloud.
 - ring: attention here. A 2px `box-shadow` composed with the control's own
   shadow, tight to it, no offset, no glow. `accent` on focus, `destructive` on
   invalid. Not an `outline`: the product shell resets outlines with `!important`.
@@ -44,29 +47,51 @@ One rung per component. The rung fixes background and shadow together.
 
 ## Fields
 
-A control is the well rung: `wellBackground` plus `shadow.inset`, never a
-border. One component token group, `field`, serves the whole family — input,
+**Everything that holds a value is one recessed material.** Input, textarea,
+Select and Combobox triggers, a number, a password, and the tracks a checkbox,
+radio or switch sits in all take the well: `wellBackground` under
+`shadow.inset`. In a system where cards lift and buttons stand up, the fields
+are material too, and they are all the same material — a column that mixes a
+recess with a raised or a flat field reads as two kinds of thing. The recess is
+shallow and lit from the same light as everything raised: a short shadow inside
+the top edge, one inner hairline, the light catching the lower lip. Its fill is
+a translucent darkening of whatever it sits on (`wellBackground` is ink or black
+at a few percent), so a field is the same small step under a card, a dialog or
+the page — never a fixed mid-gray, which read as a hole on white and as a deep
+black slot on a Vesper card.
+
+Never a border. One component token group, `field`, serves the whole family — input,
 textarea, checkbox, radio, switch and the Select and Combobox triggers — so a
 state has one colour in one place instead of one per component. The lists those
 triggers open are on the floating rung and read `popup` instead; see below.
 
-| state       | what it is                                                                     |
-| ----------- | ------------------------------------------------------------------------------ |
-| rest        | `field.background` and `field.well`; the value in `field.value`                |
-| placeholder | `field.placeholder`, the hint colour; it is a prompt, not a label              |
-| focus       | 2px `field.ring` (accent), tight to the control, no offset                     |
-| invalid     | 2px `field.invalidRing` (destructive), at rest and while focused               |
-| disabled    | 45% opacity on the control; the label and help dim with it                     |
+| state       | what it is                                                                        |
+| ----------- | --------------------------------------------------------------------------------- |
+| rest        | `field.background` and `field.well`; the value in `field.value`                   |
+| placeholder | `field.placeholder`, the hint colour; it is a prompt, not a label                 |
+| focus       | 2px `field.ring` (accent), tight to the control, no offset                        |
+| invalid     | 2px `field.invalidRing` (destructive), at rest and while focused                  |
+| disabled    | 45% opacity on the control; the label and help dim with it                        |
 | checked, on | accent: `field.checkedFill` under `field.checkedMark`, `field.checkedEdge` on top |
-| mixed       | the checked appearance with the dash, and it announces `mixed`                 |
-| selected    | the tick, and a quiet fill on the row that is current, not on the control      |
+| mixed       | the checked appearance with the dash, and it announces `mixed`                    |
+| selected    | the tick, and a quiet fill on the row that is current, not on the control         |
+
+**What belongs with a value is inside its well.** An emoji before a name or the
+`/` before a command goes in `Input`'s `leading` slot, not beside the control:
+two controls side by side are two edges and two rings for one fact. The slot is a
+square the well's height less a 4px inset, at the well's radius less that inset.
+A pressable glyph fills it and draws no edge, because the well rings on
+`:focus-within`; a character is centred in it in `field.icon`.
 
 A checkbox and a radio are the "16px things" the corner rule names: a
 `field.boxSize` box at `radius.mini`, round for a radio. A switch is a
 `field.switchWidth` by `field.switchHeight` track at `radius.full` holding a
 `field.thumb` thumb raised with `field.thumbShadow`, the same height as the box
-so a settings row carrying both lines up. Off is the well; on is the accent
-fill, which is where the well's shadow gives way to `field.checkedEdge`. Because CSS cannot
+so a settings row carrying both lines up. Off is the well. On, the whole track
+turns to the accent fill, cross-faded at `duration.fast` while the thumb slides
+— the way every platform's switch reads. A layer growing from the start edge
+was tried and dropped: its leading edge was a hard vertical line crossing a
+pill. On is also where the well's shadow gives way to `field.checkedEdge`. Because CSS cannot
 append to a box-shadow list, a control that changes its edge restates the ring
 with it, the way each Button variant does.
 
@@ -110,10 +135,10 @@ tick keeps saying which row is current when it lands there.
 
 Both fills are derived from the rung rather than taken from `hoverFill` and
 `selectedFill`, which this table names for a row but which were tuned against
-the page and card rungs at 100% lightness. Measured on the floating rung,
-`hoverFill` lands 2/255 from `raisedBackground` in the light palette and
-`selectedFill` resolves to exactly `raisedBackground` in the dark one, so one
-state is invisible in each. Mixing `raisedBackground` toward `label` steps away
+the page and card rungs. Measured on the floating rung, `selectedFill` resolves
+to exactly `raisedBackground` in the dark palette, so that state is invisible
+there — and while the light floating rung was gray, `hoverFill` landed 2/255
+from it too. A derivation keeps working whatever the rung's value is. Mixing `raisedBackground` toward `label` steps away
 from the surface in both directions at once, which is the derivation `Button`
 already uses for a secondary button's hover.
 
@@ -148,6 +173,12 @@ popup's own children.
 | submenu chevron | drawn by the part, so a caller cannot forget it                             |
 | destructive     | `popup.destructive` label, `popup.destructiveHighlight` under the keyboard  |
 | open            | the row owning an open submenu keeps the highlight fill                     |
+
+A row's label slot is a line, not a block: whatever a caller puts in it — a
+value beside the name, a mark, a switch — stays on the row's one line, and its
+words are boxed so they can take the ellipsis. The leading box, `shortcut` and
+`endContent` are still where an icon, a key and a trailing control belong. The
+line is what keeps a row migrated with its old markup from breaking in two.
 
 A row that holds no icon holds no box, so an icon-less menu is not indented for
 nothing; a row in a mixed list asks for the box with `inset` and lines up with
@@ -266,23 +297,29 @@ cannot become two decisions.
 
 None of the three holds a value. A tab picks what is shown rather than what is
 stored, so it takes no name, answers to no `Field.Root` and has no invalid
-state; it borrows the well the controls sit in because the ladder puts it there,
-not because it is one of them.
+state — and it takes no well either. A strip borrowing the field's recess read
+as a box with a second box in it: a rimmed slot in Lody Light, a black one in
+Vesper.
 
 ### The strip
 
-| part      | what it is                                                                       |
-| --------- | -------------------------------------------------------------------------------- |
-| track     | `disclosure.trackBackground` under `disclosure.trackWell`, inset by `trackInset` |
-| indicator | the one thing raised out of it: `disclosure.indicator` under `indicatorShadow`   |
-| tab       | the track's height less the inset on both sides, at the control type rule        |
-| panel     | what the strip swaps, `disclosure.panelGap` under it                             |
+| part      | what it is                                                                   |
+| --------- | ---------------------------------------------------------------------------- |
+| track     | a flat tray: `disclosure.trackBackground`, no shadow, inset by `trackInset`  |
+| indicator | the one thing standing on it: `disclosure.indicator` under `indicatorShadow` |
+| tab       | the track's height less the inset on both sides, at the control type rule    |
+| panel     | what the strip swaps, `disclosure.panelGap` under it                         |
 
-The strip is the ladder read twice over — a well with one raised thing in it,
-the same pair a Switch takes — and it says the same thing: the track is where
-something sits, and the thing sitting in it is the one you can press. Nested
-radius applies: a 28px track at `radius.small` holds a 4px tab, a 32 or 36px one
-at `radius.medium` holds a 6px tab, and neither is a token of its own.
+The strip is a tray with one key standing on it. The tray is `trayBackground`, a
+tint a step off whatever it sits on — ink at 6% in Lody Light, light at 6% in
+Vesper — with no rim and no inner shadow, so it reads as one control rather than
+as a box. The pill is `trayRaised`, the one raised thing, lighter than the tray
+in both palettes: white in Lody Light, 21% in Vesper, where the plain raised rung
+would sit level with a light tray. Any two-way strip a product builds itself
+reads these two tokens too. The inset is 2px, so the pill
+nearly fills the tray: a 32px strip holds a 28px pill, the small control height.
+Nested radius applies: a 28px track at `radius.small` holds a 6px tab, a 32 or
+36px one at `radius.medium` holds an 8px tab, and neither is a token of its own.
 
 The indicator is one element that moves rather than a fill on each tab, because
 the strip is one control and a pill sliding across it says so. It is drawn by
@@ -361,7 +398,7 @@ because both read the same scale, not because one reads the other's group.
 
 A `ToggleGroup` is **not** a `Tabs` strip, and the two cannot be folded
 together. A strip picks what a person _sees_: it is one control, so it is a
-sunken track with one thing raised out of it and one pill sliding between the
+tray with one thing standing on it and one pill sliding between the
 choices. A set stores what is _on_: two of its members can be pressed at once,
 which no sliding pill can say, so it has no track and each member sinks on its
 own. Asked for one choice out of several it still draws no track, because the
@@ -403,15 +440,17 @@ is about, so it takes the card rung; a Toast arrives over that page, so it takes
 the floating one. Neither is on the modal rung: a message does not have to be
 answered, and nothing behind it recedes.
 
-| part        | what it is                                                             |
-| ----------- | ---------------------------------------------------------------------- |
-| mark        | `feedback.markSize`, in the tone's colour, drawn by the part           |
-| title       | what happened, at the control step, weight 600, in `feedback.title`    |
-| description | the sentence under it, at the footnote step, in `feedback.description` |
-| actions     | what answers it: Buttons, whose variants are the surface's choice      |
-| viewport    | a toast lands at the top, clear of the safe area, above every popup    |
+| part        | what it is                                                                               |
+| ----------- | ---------------------------------------------------------------------------------------- |
+| mark        | `feedback.markSize`, in the tone's colour, drawn by the part                             |
+| title       | what happened, at the control step, in `feedback.title`: 600 on an Alert, 500 on a Toast |
+| description | the sentence under it, at the footnote step, in `feedback.description`                   |
+| actions     | what answers it: Buttons, whose variants are the surface's choice                        |
+| viewport    | a toast lands at the top, clear of the safe area, above every popup                      |
 
-A tone is a **tint and a mark, never a fill**. There are four — neutral,
+A tone is a **tint and a mark, never a fill** on an Alert, and **the mark alone**
+on a Toast: toasts stack, and a stack of green, white and red cards reads as three
+kinds of thing. Identical toasts collapse into one, and three show at most. There are four — neutral,
 success, warning and danger — and the tint is 8% of the tone mixed into the
 rung's own background, which is the mix a destructive menu row already uses. It
 is mixed in `feedback/surface.ts` rather than frozen into a token, because it is
@@ -731,6 +770,40 @@ group is how a surface tells what is inside it what it is standing on; StyleX
 has no descendant selector, and unlike one this also reaches a cap a caller
 wrapped in something of their own.
 
+## Material
+
+Flat, with a light above it. Nothing here is a picture of a material: no grain,
+no noise, no gloss, no reflection, no deep groove. What is physical is the logic
+of the light, and it takes four rules.
+
+- **Raised catches the light.** A thing you can press is at least as light as
+  what it rests on, never a mid-gray on a gray: in Lody Light `raisedBackground`
+  is white, the same white as the card and modal rungs, so a secondary button,
+  a switch thumb and a tab's pill read by their edge and their lift rather than
+  by a fill. A gray raised part under a soft shadow is what reads as grime.
+- **An edge is crisp; a lift is short.** Every lifted shadow is three layers: a
+  0.5px hairline, a contact shadow within 1–2px, and a lift whose negative
+  spread keeps it under the object instead of haloing round it. Dark palettes
+  draw the hairline in light (`white` at 6–10%) and keep the inset top highlight,
+  because a dark shadow does not read on a near-black page.
+- **A field is a shallow recess.** `shadow.inset` is a short shadow inside the
+  top edge, one inner hairline and a lit lower lip, over a fill just under the
+  surface. Depth comes from the light, not from a gray fill: a mid-gray well on a
+  white card read as a hole.
+- **Light falls off down a raised face.** `sheen.raised` and `sheen.ink` are that
+  fall-off as a `background-image` over the fill, a few percent at most, so a
+  hover that changes the fill keeps it. A press drops it: a thing pressed flush
+  faces the light no more than the surface around it.
+
+| token          | on                                                  |
+| -------------- | --------------------------------------------------- |
+| `sheen.raised` | secondary button, switch thumb, tab indicator       |
+| `sheen.ink`    | primary and destructive button, checked box / radio |
+
+A secondary button pressed keeps its hairline and gains a one-hair inset rather
+than dropping every edge: on the white card rung it is otherwise white on white
+under the finger.
+
 ## Corners
 
 - `corner.shape` (squircle) on every radius except `radius.full`. Round fallback
@@ -754,6 +827,9 @@ wrapped in something of their own.
 
 ## Motion
 
-- Press: `translateY(1px)` and drop `shadow.inkEdge`, `duration.fast`.
+- Press: `translateY(1px)`, drop the lift and the sheen, `duration.fast`. Ink
+  and tone fills drop `shadow.inkEdge`; a secondary keeps its hairline.
 - Rise: popups from 4px below at opacity 0, `duration.regular`.
 - Colors and fills cross-fade at `duration.fast`. One easing: `ease.standard`.
+- Except a popup row's highlight: it is instant. It follows the pointer and the
+  arrow keys, and a fade leaves it behind the row they are already on.

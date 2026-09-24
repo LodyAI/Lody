@@ -6,7 +6,7 @@ import { appendClassName } from '../internal/class-name';
 import { CrossGlyph } from '../internal/glyphs';
 import { useForcedThemeClassNames } from '../theme/theme';
 import { feedbackSurface as surface, isHidden } from './surface';
-import { TOAST_TONES, TONE_GLYPHS, TONE_MARKS, type FeedbackTone } from './tone';
+import { TONE_GLYPHS, TONE_MARKS, type FeedbackTone } from './tone';
 
 export interface ToastProviderProps {
   children?: ReactNode;
@@ -17,7 +17,7 @@ export interface ToastProviderProps {
   manager?: ReturnType<typeof BaseToast.createToastManager>;
   /** How long a toast stays. `0` keeps it until it is answered or closed. */
   timeout?: number;
-  /** How many are shown at once before the oldest are held back. */
+  /** How many are shown at once before the oldest are held back. Defaults to 3. */
   limit?: number;
   /** What the close button is called; the product's word, in its language. */
   closeLabel?: string;
@@ -54,7 +54,7 @@ function ToastList({ closeLabel = 'Close' }: { closeLabel?: string }) {
         const Mark = TONE_GLYPHS[tone];
         const mark = stylex.props(surface.mark, TONE_MARKS[tone]);
         const body = stylex.props(surface.body);
-        const title = stylex.props(surface.title);
+        const title = stylex.props(surface.title, surface.toastTitle);
         const description = stylex.props(surface.description);
         const actions = stylex.props(surface.actions);
         return (
@@ -65,7 +65,6 @@ function ToastList({ closeLabel = 'Close' }: { closeLabel?: string }) {
               stylex.props(
                 surface.message,
                 surface.toast,
-                TOAST_TONES[tone],
                 // StyleX cannot express `[data-starting-style]`, so which end of
                 // the arrival a toast is at is read off Base UI's status here,
                 // the way a popover's rise and an accordion's reveal are.
@@ -96,7 +95,13 @@ function ToastList({ closeLabel = 'Close' }: { closeLabel?: string }) {
             </div>
             <BaseToast.Close
               render={
-                <Button variant="ghost" size="small" icon aria-label={closeLabel}>
+                <Button
+                  variant="ghost"
+                  size="small"
+                  icon
+                  aria-label={closeLabel}
+                  {...stylex.props(surface.toastClose)}
+                >
                   <CrossGlyph />
                 </Button>
               }
@@ -140,7 +145,7 @@ export function ToastProvider({
   children,
   manager,
   timeout,
-  limit,
+  limit = 3,
   closeLabel,
   label,
 }: ToastProviderProps) {

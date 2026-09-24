@@ -513,7 +513,7 @@ export const TOUR_PERMISSION_REQUEST_ID = 'onboarding-tour-permission';
 /**
  * The permission the run asks for, as a real pending `tool_call`.
  *
- * Rendered by the product's own `PermissionRequestCard`, in the conversation,
+ * Answered in the product's own `PermissionPrompt`, in the composer's place,
  * with real option shapes — so the first time this appears during actual work
  * it is recognised rather than met cold. The scripted cursor presses the real
  * button on it; nothing about the answer is simulated except who pressed.
@@ -525,6 +525,7 @@ export function buildPermissionItem(answeredOptionId: string | null): MessageCon
     title: 'Bash(pnpm typecheck)',
     status: answeredOptionId === null ? 'pending' : 'completed',
     kind: 'execute',
+    content: [{ type: 'terminal_command', command: 'pnpm typecheck' }],
     permissionRequest: {
       requestId: TOUR_PERMISSION_REQUEST_ID,
       options: [

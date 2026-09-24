@@ -5,26 +5,26 @@ tokens. Product surfaces compose these primitives through
 `@lody/components`; the package does not contain product workflows or platform
 behavior.
 
-| Area                | Responsibility                                                                                                |
-| ------------------- | ------------------------------------------------------------------------------------------------------------- |
-| `src/tokens`        | Semantic color, type, spacing, motion, radius, and elevation tokens                                           |
-| `src/theme`         | Applies light or dark StyleX themes to a subtree                                                              |
-| `src/button`        | Base UI Button behavior and Lody variants, sizes, tones, and shapes                                           |
+| Area                | Responsibility                                                                                                                            |
+| ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/tokens`        | Semantic color, type, spacing, motion, radius, and elevation tokens                                                                       |
+| `src/theme`         | Applies light or dark StyleX themes to a subtree                                                                                          |
+| `src/button`        | Base UI Button behavior and Lody variants, sizes, tones, and shapes                                                                       |
 | `src/field`         | Base UI Field composition: label, Input, Textarea, NumberField, PasswordInput, Checkbox, Radio, Switch, Select, Combobox, help, and error |
-| `src/popup`         | The floating surface a list, a menu or a popover opens on, and its tokens                                     |
-| `src/menu`          | Menu, ContextMenu and Menubar: commands on that surface                                                       |
-| `src/popover`       | The same surface holding content rather than rows                                                             |
-| `src/dialog`        | Dialog and AlertDialog: the modal rung, and its tokens                                                        |
-| `src/drawer`        | The same rung, arriving from an edge and draggable back out                                                   |
-| `src/tooltip`       | The inverted chip that names what is under the pointer                                                        |
-| `src/disclosure`    | Tabs, Accordion and Collapsible: a trigger, and the thing it shows                                            |
-| `src/toggle`        | Toggle, ToggleGroup and Toolbar: a control that stays pressed, and the bar holding it                         |
-| `src/feedback`      | Alert, Toast, Progress, Skeleton and Spinner: what the system says back                                       |
-| `src/card`          | The card rung as a component: a block of a page, and its tokens                                               |
-| `src/badge`         | A standing fact about the thing beside it, on no rung at all                                                  |
-| `src/separator`     | The one line the rules allow: between the rows of a list or a table                                           |
-| `src/gallery`       | The token board: every token and primitive state, in both palettes                                            |
-| `stylex-options.ts` | Shared compiler configuration for source-consuming hosts                                                      |
+| `src/popup`         | The floating surface a list, a menu or a popover opens on, and its tokens                                                                 |
+| `src/menu`          | Menu, ContextMenu and Menubar: commands on that surface                                                                                   |
+| `src/popover`       | The same surface holding content rather than rows                                                                                         |
+| `src/dialog`        | Dialog and AlertDialog: the modal rung, and its tokens                                                                                    |
+| `src/drawer`        | The same rung, arriving from an edge and draggable back out                                                                               |
+| `src/tooltip`       | The inverted chip that names what is under the pointer                                                                                    |
+| `src/disclosure`    | Tabs, Accordion and Collapsible: a trigger, and the thing it shows                                                                        |
+| `src/toggle`        | Toggle, ToggleGroup and Toolbar: a control that stays pressed, and the bar holding it                                                     |
+| `src/feedback`      | Alert, Toast, Progress, Skeleton and Spinner: what the system says back                                                                   |
+| `src/card`          | The card rung as a component: a block of a page, and its tokens                                                                           |
+| `src/badge`         | A standing fact about the thing beside it, on no rung at all                                                                              |
+| `src/separator`     | The one line the rules allow: between the rows of a list or a table                                                                       |
+| `src/gallery`       | The token board: every token and primitive state, in both palettes                                                                        |
+| `stylex-options.ts` | Shared compiler configuration for source-consuming hosts                                                                                  |
 
 Consumers compile this package's source with `@stylexjs/unplugin` and its exported
 StyleX options. Visual choices use component props. `className` is available for
@@ -145,6 +145,24 @@ Whether the password is showing is the control's own state and never a prop: it
 is a glance, not a setting, and a surface that could set it could persist "show
 me the password". `className` lands on the shell, which is the control, and
 `inputClassName` on the value inside it.
+
+`Input` takes the same shell when something belongs with the value: a Role's
+emoji before its name, the `/` before a command. `leading` puts it inside the
+well at its start rather than beside it as a second control with a second edge.
+The slot is a square as tall as the well less its 4px inset, so a pressable
+glyph fills it and a character is centred where the value's padding would be.
+Whatever goes there states no edge of its own, because the well rings on
+`:focus-within`. As with `PasswordInput`, `className` then lands on the shell and
+`inputClassName` on the value.
+
+```tsx
+<Input
+  size="large"
+  aria-label={t('settings.agentRoles.form.name')}
+  leading={<EmojiField value={emoji} onChange={setEmoji} />}
+/>
+<Input size="large" leading="/" inputClassName="font-mono" />
+```
 
 A `Menu` is that same floating surface with commands on it. It is also the
 dropdown menu: Base UI has no separate part for one, so a second name would be a
@@ -308,8 +326,9 @@ strip lays the choices side by side and swaps the panel under them; an accordion
 stacks them and opens one in place; a collapsible is a single one of those rows
 with no list around it.
 
-A strip is the elevation ladder read twice over — a well-rung track with one
-thing raised out of it, the same pair a `Switch` takes. The pill under the
+A strip is a flat tray with one key standing on it. It is not a field's well —
+a tab picks what is shown, not what is stored — so the tray has no rim and no
+inner shadow, and the pill is the one raised thing. The pill under the
 selected tab is one element that slides rather than a fill on each tab, because
 the strip is one control, and `Tabs.List` draws it rather than the caller, the
 way a submenu's chevron is drawn by its row.
@@ -392,7 +411,7 @@ eight from reading as eight primary buttons.
 
 A `ToggleGroup` is a set of them answering to one value, and it is **not** a
 `Tabs` strip. A strip picks what a person _sees_: it is one control, so it is a
-sunken track with one pill sliding between the choices. A set stores what is
+tray with one pill sliding between the choices. A set stores what is
 _on_, and two of its members can be pressed at once — which no sliding pill can
 say — so it has no track and each member sinks on its own. The size and the
 shape are stated once on the set, the way a strip states them for its tabs.

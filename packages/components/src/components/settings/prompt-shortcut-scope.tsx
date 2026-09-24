@@ -1,8 +1,24 @@
+import type { CSSProperties } from 'react';
 import { Bot, FolderGit2, Monitor } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import * as stylex from '@stylexjs/stylex';
 import type { PromptShortcutScope } from '@lody/shared/prompt-shortcuts';
-import { cn } from '@/lib/utils';
+import { Badge } from '@lody/ui/badge';
+import { space } from '@lody/ui/tokens/scales.stylex';
+import { withClassName } from '@/lib/stylex';
 import type { ShortcutScopeOptions } from './prompt-shortcut-form';
+
+const styles = stylex.create({
+  pills: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: space[1],
+    minWidth: 0,
+  },
+  /** Layout only, for the badge: a long project name ends in an ellipsis inside the row. */
+  pill: { maxWidth: '100%', minWidth: 0 },
+});
 
 /**
  * The scope axes, shown the same way everywhere.
@@ -20,12 +36,14 @@ const AXIS_ICONS = { project: FolderGit2, machine: Monitor, agent: Bot } as cons
 export function ScopeAxisIcon({
   axis,
   className,
+  style,
 }: {
   axis: ShortcutScopeAxis;
   className?: string;
+  style?: CSSProperties;
 }) {
   const Icon = AXIS_ICONS[axis];
-  return <Icon className={className} aria-hidden="true" />;
+  return <Icon className={className} style={style} aria-hidden="true" />;
 }
 
 /** Human label for a saved project reference, falling back to what it stores. */
@@ -87,22 +105,22 @@ export function ScopePills({
   const pills = describeShortcutScope(scope, options);
   return (
     <span
-      className={cn('flex min-w-0 flex-wrap items-center gap-1', className)}
+      {...withClassName(stylex.props(styles.pills), className)}
       aria-label={t('settings.promptShortcuts.scope', 'Applies to')}
     >
       {pills.length === 0 ? (
-        <span className="inline-flex max-w-full items-center rounded-full border border-dashed border-border/60 px-2 py-0.5 text-[11px] leading-4 text-muted-foreground/70">
+        <Badge className={stylex.props(styles.pill).className}>
           {t('settings.promptShortcuts.workspaceScope', 'Workspace')}
-        </span>
+        </Badge>
       ) : (
         pills.map((pill) => (
-          <span
+          <Badge
             key={`${pill.axis}:${pill.label}`}
-            className="inline-flex max-w-full items-center gap-1 rounded-full border border-border/60 px-2 py-0.5 text-[11px] leading-4 text-muted-foreground"
+            className={stylex.props(styles.pill).className}
+            icon={<ScopeAxisIcon axis={pill.axis} />}
           >
-            <ScopeAxisIcon axis={pill.axis} className="size-3 shrink-0" />
-            <span className="min-w-0 truncate">{pill.label}</span>
-          </span>
+            {pill.label}
+          </Badge>
         ))
       )}
     </span>

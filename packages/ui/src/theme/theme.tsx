@@ -13,7 +13,14 @@ import { popupPaletteTheme } from '../popup/popup.tokens.stylex';
 import { tablePaletteTheme } from '../table/table.tokens.stylex';
 import { togglePaletteTheme } from '../toggle/toggle.tokens.stylex';
 import { tooltipPaletteTheme } from '../tooltip/tooltip.tokens.stylex';
-import { darkShadowTheme, darkTheme, lightShadowTheme, lightTheme } from '../tokens/colors.stylex';
+import {
+  darkShadowTheme,
+  darkSheenTheme,
+  darkTheme,
+  lightShadowTheme,
+  lightSheenTheme,
+  lightTheme,
+} from '../tokens/colors.stylex';
 
 export type ThemeMode = 'system' | 'light' | 'dark';
 
@@ -46,7 +53,10 @@ const styles = stylex.create({
 
 export function forcedThemeClassNames(mode: ThemeMode): string[] {
   if (mode === 'system') return [];
-  const palette = mode === 'dark' ? [darkTheme, darkShadowTheme] : [lightTheme, lightShadowTheme];
+  const palette =
+    mode === 'dark'
+      ? [darkTheme, darkShadowTheme, darkSheenTheme]
+      : [lightTheme, lightShadowTheme, lightSheenTheme];
   return (stylex.props(...palette, ...componentPaletteThemes).className ?? '')
     .split(' ')
     .filter(Boolean);
@@ -90,8 +100,10 @@ export function ThemeRoot({ mode, children }: { mode: ThemeMode; children: React
         {...stylex.props(
           mode === 'dark' && darkTheme,
           mode === 'dark' && darkShadowTheme,
+          mode === 'dark' && darkSheenTheme,
           mode === 'light' && lightTheme,
           mode === 'light' && lightShadowTheme,
+          mode === 'light' && lightSheenTheme,
           mode !== 'system' && componentPaletteThemes,
           styles[mode]
         )}

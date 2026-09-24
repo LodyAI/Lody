@@ -4,6 +4,7 @@ import { forwardRef, type ComponentProps, type ReactNode } from 'react';
 import { appendClassName } from '../internal/class-name';
 import { ChevronRightGlyph, DotGlyph, TickGlyph } from '../internal/glyphs';
 import { usePopupContainer, type PopupContainer } from '../popup/portal-container';
+import { rowLabel } from '../popup/row-label';
 import { hiddenSurfaceForSide, surface } from '../popup/surface';
 import { useForcedThemeClassNames } from '../theme/theme';
 
@@ -134,7 +135,7 @@ function Row({
   return (
     <>
       {leading}
-      <span {...stylex.props(surface.itemText)}>{children}</span>
+      <span {...stylex.props(surface.itemText)}>{rowLabel(children)}</span>
       {shortcut == null ? null : <span {...stylex.props(surface.itemShortcut)}>{shortcut}</span>}
       {endContent}
     </>

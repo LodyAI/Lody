@@ -306,6 +306,7 @@ export const dyn = stylex.create({
     backgroundColor: background,
     boxShadow: box,
   }),
+  sheen: (value: string) => ({ backgroundImage: value }),
   text: (value: string) => ({ color: value }),
   radius: (value: string, shape: string) => ({ borderRadius: value, cornerShape: shape }),
   height: (value: string) => ({ height: value }),

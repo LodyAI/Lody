@@ -2,6 +2,9 @@ import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { AnimatePresence, motion } from 'framer-motion';
 import { ArrowLeft } from 'lucide-react';
+import * as stylex from '@stylexjs/stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { space } from '@lody/ui/tokens/scales.stylex';
 import { Spinner } from '@lody/ui/spinner';
 import { toast } from '@/lib/toast';
 import { validateNewPassword } from '@lody/shared';
@@ -29,6 +32,15 @@ interface ChangePasswordButtonProps {
   onSetupPassword: () => Promise<void>;
   disabled?: boolean;
 }
+
+const styles = stylex.create({
+  /** Clips the step sliding out while the next one slides in. */
+  steps: { position: 'relative', overflow: 'hidden', paddingBlock: space[1] },
+  field: { display: 'flex', flexDirection: 'column', gap: space[1.5] },
+  fields: { display: 'flex', flexDirection: 'column', gap: space[3] },
+  error: { margin: 0, fontSize: '12px', lineHeight: 1.375, color: colors.destructive },
+  icon: { width: '14px', height: '14px', flexShrink: 0 },
+});
 
 const slideVariants = {
   enter: (direction: number) => ({ x: direction > 0 ? 28 : -28, opacity: 0 }),
@@ -148,13 +160,7 @@ export function ChangePasswordButton({
 
   return (
     <>
-      <Button
-        variant="ghost"
-        size="small"
-        className="bg-foreground/[0.06] font-normal hover:bg-foreground/[0.1]"
-        disabled={disabled}
-        onClick={() => setOpen(true)}
-      >
+      <Button variant="secondary" size="small" disabled={disabled} onClick={() => setOpen(true)}>
         {hasPassword
           ? t('settings.profile.password.changeButton')
           : t('settings.profile.password.setupButton')}
@@ -172,7 +178,7 @@ export function ChangePasswordButton({
                     : t('settings.profile.password.newStepHint')}
                 </Dialog.Description>
               </Dialog.Header>
-              <div className="relative overflow-hidden py-2">
+              <div {...stylex.props(styles.steps)}>
                 <AnimatePresence mode="wait" custom={direction} initial={false}>
                   {step === 0 ? (
                     <motion.div
@@ -183,7 +189,7 @@ export function ChangePasswordButton({
                       animate="center"
                       exit="exit"
                       transition={{ duration: 0.2, ease: 'easeInOut' }}
-                      className="space-y-1.5"
+                      className={stylex.props(styles.field).className}
                     >
                       <UiField.Label htmlFor="current-password">
                         {t('settings.profile.password.currentLabel')}
@@ -202,7 +208,7 @@ export function ChangePasswordButton({
                         autoFocus
                       />
                       {error ? (
-                        <p role="alert" className="text-[11px] text-destructive">
+                        <p role="alert" {...stylex.props(styles.error)}>
                           {error}
                         </p>
                       ) : null}
@@ -216,9 +222,9 @@ export function ChangePasswordButton({
                       animate="center"
                       exit="exit"
                       transition={{ duration: 0.2, ease: 'easeInOut' }}
-                      className="space-y-3"
+                      className={stylex.props(styles.fields).className}
                     >
-                      <div className="space-y-1.5">
+                      <div {...stylex.props(styles.field)}>
                         <UiField.Label htmlFor="new-password">
                           {t('settings.profile.password.newLabel')}
                         </UiField.Label>
@@ -230,7 +236,7 @@ export function ChangePasswordButton({
                           autoFocus
                         />
                       </div>
-                      <div className="space-y-1.5">
+                      <div {...stylex.props(styles.field)}>
                         <UiField.Label htmlFor="confirm-password">
                           {t('settings.profile.password.confirmLabel')}
                         </UiField.Label>
@@ -248,7 +254,7 @@ export function ChangePasswordButton({
                         />
                       </div>
                       {error ? (
-                        <p role="alert" className="text-[11px] text-destructive">
+                        <p role="alert" {...stylex.props(styles.error)}>
                           {error}
                         </p>
                       ) : null}
@@ -274,7 +280,7 @@ export function ChangePasswordButton({
                       }}
                       disabled={!currentPassword || isVerifying}
                     >
-                      {isVerifying ? <Spinner className="mr-1.5 h-3.5 w-3.5" /> : null}
+                      {isVerifying ? <Spinner size="small" /> : null}
                       {t('settings.profile.password.continueButton')}
                     </Button>
                   </>
@@ -286,7 +292,7 @@ export function ChangePasswordButton({
                       onClick={goBack}
                       disabled={isSubmitting}
                     >
-                      <ArrowLeft className="mr-1.5 h-3.5 w-3.5" />
+                      <ArrowLeft {...stylex.props(styles.icon)} />
                       {t('common.back')}
                     </Button>
                     <Button
@@ -296,7 +302,7 @@ export function ChangePasswordButton({
                       }}
                       disabled={isSubmitting || !newPassword || !confirmPassword}
                     >
-                      {isSubmitting ? <Spinner className="mr-1.5 h-3.5 w-3.5" /> : null}
+                      {isSubmitting ? <Spinner size="small" /> : null}
                       {t('settings.profile.password.submitButton')}
                     </Button>
                   </>
@@ -327,7 +333,7 @@ export function ChangePasswordButton({
                   }}
                   disabled={isSubmitting}
                 >
-                  {isSubmitting ? <Spinner className="mr-1.5 h-3.5 w-3.5" /> : null}
+                  {isSubmitting ? <Spinner size="small" /> : null}
                   {t('settings.profile.password.setupSubmitButton')}
                 </Button>
               </Dialog.Footer>

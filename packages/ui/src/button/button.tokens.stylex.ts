@@ -1,5 +1,5 @@
 import * as stylex from '@stylexjs/stylex';
-import { colors, shadow } from '../tokens/colors.stylex';
+import { colors, shadow, sheen } from '../tokens/colors.stylex';
 import { control, radius, text } from '../tokens/scales.stylex';
 
 export const button = stylex.defineVars({
@@ -28,8 +28,11 @@ export const button = stylex.defineVars({
   primaryBackground: colors.label,
   primaryLabel: colors.background,
   primaryEdge: shadow.inkEdge,
+  primarySheen: sheen.ink,
   secondaryBackground: colors.raisedBackground,
   secondaryShadow: shadow.raised,
+  secondarySheen: sheen.raised,
+  pressedEdge: `color-mix(in oklab, ${colors.label} 14%, transparent)`,
   ghostLabel: colors.secondaryLabel,
   ghostHover: colors.hoverFill,
   ring: colors.accent,
@@ -48,8 +51,11 @@ export const buttonPaletteTheme = stylex.createTheme(button, {
   primaryBackground: colors.label,
   primaryLabel: colors.background,
   primaryEdge: shadow.inkEdge,
+  primarySheen: sheen.ink,
   secondaryBackground: colors.raisedBackground,
   secondaryShadow: shadow.raised,
+  secondarySheen: sheen.raised,
+  pressedEdge: `color-mix(in oklab, ${colors.label} 14%, transparent)`,
   ghostLabel: colors.secondaryLabel,
   ghostHover: colors.hoverFill,
   ring: colors.accent,

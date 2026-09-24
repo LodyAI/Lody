@@ -118,6 +118,7 @@
     "@react-three/fiber": "^9.7.0",
     "@sqlite.org/sqlite-wasm": "3.50.1-build1",
     "@streamdown/math": "^1.0.2",
+    "@stylexjs/stylex": "0.19.0",
     "@tanstack/hotkeys": "0.8.0",
     "@tanstack/react-router": "catalog:",
     "@tanstack/react-router-devtools": "catalog:",

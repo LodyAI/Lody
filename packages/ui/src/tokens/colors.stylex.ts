@@ -5,9 +5,12 @@ const DARK = '@media (prefers-color-scheme: dark)';
 export const colors = stylex.defineVars({
   background: { default: 'hsl(0 0% 100%)', [DARK]: 'hsl(0 0% 6.3%)' },
   elevatedBackground: { default: 'hsl(0 0% 100%)', [DARK]: 'hsl(0 0% 8.6%)' },
-  raisedBackground: { default: 'hsl(216 17% 94.3%)', [DARK]: 'hsl(0 0% 13.7%)' },
+  raisedBackground: { default: 'hsl(0 0% 100%)', [DARK]: 'hsl(0 0% 13.7%)' },
   secondaryBackground: { default: 'hsl(220 23% 97.5%)', [DARK]: 'hsl(0 0% 8.6%)' },
-  wellBackground: { default: 'hsl(216 12% 92%)', [DARK]: 'hsl(0 0% 11%)' },
+  wellBackground: { default: 'hsl(225 10% 11% / 0.05)', [DARK]: 'hsl(0 0% 0% / 0.28)' },
+  // A segmented strip: a flat tray a tint off its surface, and the one key on it.
+  trayBackground: { default: 'hsl(225 10% 11% / 0.06)', [DARK]: 'hsl(0 0% 100% / 0.06)' },
+  trayRaised: { default: 'hsl(0 0% 100%)', [DARK]: 'hsl(0 0% 21%)' },
   label: { default: 'hsl(225 7% 11%)', [DARK]: 'hsl(0 0% 100%)' },
   secondaryLabel: { default: 'hsl(220 9% 46%)', [DARK]: 'hsl(0 0% 62.7%)' },
   tertiaryLabel: { default: 'hsl(220 8% 62%)', [DARK]: 'hsl(0 0% 45%)' },
@@ -34,33 +37,69 @@ export const colors = stylex.defineVars({
 });
 
 export const shadow = stylex.defineVars({
+  // A recess, lit from the same light as everything raised: a short shadow
+  // inside the top edge, one inner hairline, and the light catching the lower
+  // lip. Every place that holds a value — a field, a select, a track — takes
+  // it, so a column of them is one material. It is shallow and its fill sits
+  // just under the surface: a deep gray well read as a hole cut into the card.
   inset: {
-    default: 'inset 0 1px 2px hsl(225 10% 11% / 0.07)',
-    [DARK]: 'inset 0 1px 2px hsl(0 0% 0% / 0.7)',
+    default:
+      'inset 0 1px 1.5px hsl(225 10% 11% / 0.08), inset 0 0 0 1px hsl(225 10% 11% / 0.06), 0 1px 0 hsl(0 0% 100% / 0.8)',
+    [DARK]:
+      'inset 0 1px 2px hsl(0 0% 0% / 0.4), inset 0 0 0 1px hsl(0 0% 100% / 0.06), 0 1px 0 hsl(0 0% 100% / 0.04)',
   },
   raised: {
-    default: '0 1px 2px hsl(225 10% 11% / 0.12), 0 0 0 0.5px hsl(225 10% 11% / 0.05)',
-    [DARK]: 'inset 0 1px 0 hsl(0 0% 100% / 0.07), 0 1px 2px hsl(0 0% 0% / 0.5)',
+    default:
+      '0 0 0 0.5px hsl(225 10% 11% / 0.16), 0 1px 1px hsl(225 10% 11% / 0.06), 0 2px 4px -1px hsl(225 10% 11% / 0.07)',
+    [DARK]:
+      'inset 0 1px 0 hsl(0 0% 100% / 0.08), 0 0 0 0.5px hsl(0 0% 0% / 0.7), 0 1px 2px hsl(0 0% 0% / 0.5)',
   },
   inkEdge: {
-    default: 'inset 0 1px 0 hsl(0 0% 100% / 0.16)',
-    [DARK]: 'inset 0 1px 0 hsl(0 0% 100% / 0.55)',
+    default: 'inset 0 1px 0 hsl(0 0% 100% / 0.18), 0 1px 1.5px hsl(225 10% 11% / 0.18)',
+    [DARK]: 'inset 0 1px 0 hsl(0 0% 100% / 0.55), 0 1px 2px hsl(0 0% 0% / 0.5)',
   },
   card: {
-    default: '0 1px 2px hsl(225 10% 11% / 0.05), 0 10px 30px hsl(225 10% 11% / 0.06)',
-    [DARK]: 'inset 0 1px 0 hsl(0 0% 100% / 0.04), 0 10px 30px hsl(0 0% 0% / 0.45)',
+    default:
+      '0 0 0 0.5px hsl(225 10% 11% / 0.12), 0 1px 2px hsl(225 10% 11% / 0.06), 0 8px 24px -6px hsl(225 10% 11% / 0.09)',
+    [DARK]:
+      'inset 0 1px 0 hsl(0 0% 100% / 0.05), 0 0 0 0.5px hsl(0 0% 100% / 0.06), 0 8px 24px -6px hsl(0 0% 0% / 0.5)',
   },
   medium: {
-    default: '0 2px 6px hsl(225 10% 11% / 0.2)',
-    [DARK]: '0 2px 6px hsl(0 0% 0% / 0.5)',
+    default: '0 1px 2px hsl(225 10% 11% / 0.14), 0 4px 12px -2px hsl(225 10% 11% / 0.18)',
+    [DARK]: '0 0 0 0.5px hsl(0 0% 100% / 0.1), 0 2px 6px hsl(0 0% 0% / 0.5)',
   },
   popover: {
-    default: '0 2px 6px hsl(225 10% 11% / 0.06), 0 18px 50px hsl(225 10% 11% / 0.14)',
-    [DARK]: 'inset 0 1px 0 hsl(0 0% 100% / 0.06), 0 18px 50px hsl(0 0% 0% / 0.7)',
+    default:
+      '0 0 0 0.5px hsl(225 10% 11% / 0.11), 0 2px 4px -1px hsl(225 10% 11% / 0.06), 0 12px 32px -6px hsl(225 10% 11% / 0.16)',
+    [DARK]:
+      'inset 0 1px 0 hsl(0 0% 100% / 0.07), 0 0 0 0.5px hsl(0 0% 100% / 0.08), 0 12px 32px -4px hsl(0 0% 0% / 0.6)',
   },
   large: {
-    default: '0 24px 64px hsl(225 10% 11% / 0.24)',
-    [DARK]: 'inset 0 1px 0 hsl(0 0% 100% / 0.06), 0 24px 64px hsl(0 0% 0% / 0.8)',
+    default:
+      '0 0 0 0.5px hsl(225 10% 11% / 0.08), 0 2px 6px -2px hsl(225 10% 11% / 0.08), 0 24px 56px -12px hsl(225 10% 11% / 0.28)',
+    [DARK]:
+      'inset 0 1px 0 hsl(0 0% 100% / 0.06), 0 0 0 0.5px hsl(0 0% 100% / 0.08), 0 24px 56px -8px hsl(0 0% 0% / 0.7)',
+  },
+});
+
+/**
+ * The light falls from above, so a thing raised toward it is a shade brighter at
+ * its top edge than at its foot. A sheen is that fall-off laid over a fill as a
+ * `background-image`, never a fill of its own: a hover that changes the fill
+ * keeps it, and a press drops it, because a thing pressed flush faces the light
+ * no more than the surface around it. Each one spans a few percent at most; the
+ * point is that the eye reads a surface, not that it sees a gradient.
+ */
+export const sheen = stylex.defineVars({
+  // On a raised fill — a secondary button, a thumb, a tab's pill.
+  raised: {
+    default: 'linear-gradient(hsl(225 10% 11% / 0), hsl(225 10% 11% / 0.03))',
+    [DARK]: 'linear-gradient(hsl(0 0% 100% / 0.04), hsl(0 0% 100% / 0))',
+  },
+  // On an ink or tone fill — the primary and destructive buttons, a checked box.
+  ink: {
+    default: 'linear-gradient(hsl(0 0% 100% / 0.1), hsl(0 0% 100% / 0))',
+    [DARK]: 'linear-gradient(hsl(0 0% 0% / 0), hsl(0 0% 0% / 0.08))',
   },
 });
 
@@ -69,7 +108,9 @@ export const darkTheme = stylex.createTheme(colors, {
   elevatedBackground: 'hsl(0 0% 8.6%)',
   raisedBackground: 'hsl(0 0% 13.7%)',
   secondaryBackground: 'hsl(0 0% 8.6%)',
-  wellBackground: 'hsl(0 0% 11%)',
+  wellBackground: 'hsl(0 0% 0% / 0.28)',
+  trayBackground: 'hsl(0 0% 100% / 0.06)',
+  trayRaised: 'hsl(0 0% 21%)',
   label: 'hsl(0 0% 100%)',
   secondaryLabel: 'hsl(0 0% 62.7%)',
   tertiaryLabel: 'hsl(0 0% 45%)',
@@ -94,9 +135,11 @@ export const darkTheme = stylex.createTheme(colors, {
 export const lightTheme = stylex.createTheme(colors, {
   background: 'hsl(0 0% 100%)',
   elevatedBackground: 'hsl(0 0% 100%)',
-  raisedBackground: 'hsl(216 17% 94.3%)',
+  raisedBackground: 'hsl(0 0% 100%)',
   secondaryBackground: 'hsl(220 23% 97.5%)',
-  wellBackground: 'hsl(216 12% 92%)',
+  wellBackground: 'hsl(225 10% 11% / 0.05)',
+  trayBackground: 'hsl(225 10% 11% / 0.06)',
+  trayRaised: 'hsl(0 0% 100%)',
   label: 'hsl(225 7% 11%)',
   secondaryLabel: 'hsl(220 9% 46%)',
   tertiaryLabel: 'hsl(220 8% 62%)',
@@ -119,21 +162,39 @@ export const lightTheme = stylex.createTheme(colors, {
 });
 
 export const darkShadowTheme = stylex.createTheme(shadow, {
-  inset: 'inset 0 1px 2px hsl(0 0% 0% / 0.7)',
-  raised: 'inset 0 1px 0 hsl(0 0% 100% / 0.07), 0 1px 2px hsl(0 0% 0% / 0.5)',
-  inkEdge: 'inset 0 1px 0 hsl(0 0% 100% / 0.55)',
-  card: 'inset 0 1px 0 hsl(0 0% 100% / 0.04), 0 10px 30px hsl(0 0% 0% / 0.45)',
-  medium: '0 2px 6px hsl(0 0% 0% / 0.5)',
-  popover: 'inset 0 1px 0 hsl(0 0% 100% / 0.06), 0 18px 50px hsl(0 0% 0% / 0.7)',
-  large: 'inset 0 1px 0 hsl(0 0% 100% / 0.06), 0 24px 64px hsl(0 0% 0% / 0.8)',
+  inset:
+    'inset 0 1px 2px hsl(0 0% 0% / 0.4), inset 0 0 0 1px hsl(0 0% 100% / 0.06), 0 1px 0 hsl(0 0% 100% / 0.04)',
+  raised:
+    'inset 0 1px 0 hsl(0 0% 100% / 0.08), 0 0 0 0.5px hsl(0 0% 0% / 0.7), 0 1px 2px hsl(0 0% 0% / 0.5)',
+  inkEdge: 'inset 0 1px 0 hsl(0 0% 100% / 0.55), 0 1px 2px hsl(0 0% 0% / 0.5)',
+  card: 'inset 0 1px 0 hsl(0 0% 100% / 0.05), 0 0 0 0.5px hsl(0 0% 100% / 0.06), 0 8px 24px -6px hsl(0 0% 0% / 0.5)',
+  medium: '0 0 0 0.5px hsl(0 0% 100% / 0.1), 0 2px 6px hsl(0 0% 0% / 0.5)',
+  popover:
+    'inset 0 1px 0 hsl(0 0% 100% / 0.07), 0 0 0 0.5px hsl(0 0% 100% / 0.08), 0 12px 32px -4px hsl(0 0% 0% / 0.6)',
+  large:
+    'inset 0 1px 0 hsl(0 0% 100% / 0.06), 0 0 0 0.5px hsl(0 0% 100% / 0.08), 0 24px 56px -8px hsl(0 0% 0% / 0.7)',
 });
 
 export const lightShadowTheme = stylex.createTheme(shadow, {
-  inset: 'inset 0 1px 2px hsl(225 10% 11% / 0.07)',
-  raised: '0 1px 2px hsl(225 10% 11% / 0.12), 0 0 0 0.5px hsl(225 10% 11% / 0.05)',
-  inkEdge: 'inset 0 1px 0 hsl(0 0% 100% / 0.16)',
-  card: '0 1px 2px hsl(225 10% 11% / 0.05), 0 10px 30px hsl(225 10% 11% / 0.06)',
-  medium: '0 2px 6px hsl(225 10% 11% / 0.2)',
-  popover: '0 2px 6px hsl(225 10% 11% / 0.06), 0 18px 50px hsl(225 10% 11% / 0.14)',
-  large: '0 24px 64px hsl(225 10% 11% / 0.24)',
+  inset:
+    'inset 0 1px 1.5px hsl(225 10% 11% / 0.08), inset 0 0 0 1px hsl(225 10% 11% / 0.06), 0 1px 0 hsl(0 0% 100% / 0.8)',
+  raised:
+    '0 0 0 0.5px hsl(225 10% 11% / 0.16), 0 1px 1px hsl(225 10% 11% / 0.06), 0 2px 4px -1px hsl(225 10% 11% / 0.07)',
+  inkEdge: 'inset 0 1px 0 hsl(0 0% 100% / 0.18), 0 1px 1.5px hsl(225 10% 11% / 0.18)',
+  card: '0 0 0 0.5px hsl(225 10% 11% / 0.12), 0 1px 2px hsl(225 10% 11% / 0.06), 0 8px 24px -6px hsl(225 10% 11% / 0.09)',
+  medium: '0 1px 2px hsl(225 10% 11% / 0.14), 0 4px 12px -2px hsl(225 10% 11% / 0.18)',
+  popover:
+    '0 0 0 0.5px hsl(225 10% 11% / 0.11), 0 2px 4px -1px hsl(225 10% 11% / 0.06), 0 12px 32px -6px hsl(225 10% 11% / 0.16)',
+  large:
+    '0 0 0 0.5px hsl(225 10% 11% / 0.08), 0 2px 6px -2px hsl(225 10% 11% / 0.08), 0 24px 56px -12px hsl(225 10% 11% / 0.28)',
+});
+
+export const darkSheenTheme = stylex.createTheme(sheen, {
+  raised: 'linear-gradient(hsl(0 0% 100% / 0.04), hsl(0 0% 100% / 0))',
+  ink: 'linear-gradient(hsl(0 0% 0% / 0), hsl(0 0% 0% / 0.08))',
+});
+
+export const lightSheenTheme = stylex.createTheme(sheen, {
+  raised: 'linear-gradient(hsl(225 10% 11% / 0), hsl(225 10% 11% / 0.03))',
+  ink: 'linear-gradient(hsl(0 0% 100% / 0.1), hsl(0 0% 100% / 0))',
 });

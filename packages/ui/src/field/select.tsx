@@ -6,8 +6,9 @@ import { appendClassName } from '../internal/class-name';
 import { usePopupContainer, type PopupContainer } from '../popup/portal-container';
 import { useForcedThemeClassNames } from '../theme/theme';
 import { surface } from '../popup/surface';
-import { field } from './field.tokens.stylex';
+import { rowLabel } from '../popup/row-label';
 import { isInvalid } from './invalid';
+import { trigger, triggerSizes } from './trigger';
 import { well } from './well';
 
 /** The gap between a control and the list it opens; the rules' rise distance. */
@@ -66,66 +67,8 @@ export interface SelectSeparatorProps extends Omit<SeparatorBaseProps, 'classNam
   className?: string;
 }
 
-const styles = stylex.create({
-  trigger: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: field.triggerGap,
-    textAlign: 'start',
-    whiteSpace: 'nowrap',
-    lineHeight: 1,
-    userSelect: 'none',
-    // A trigger opens a list; it is not a button that acts, so it keeps the
-    // arrow the way a native select does rather than taking the hand.
-    cursor: { default: 'default', ':disabled': 'default' },
-  },
-  small: {
-    height: field.heightSmall,
-    paddingInline: field.paddingXSmall,
-    borderRadius: field.radiusSmall,
-    fontSize: field.text,
-  },
-  medium: {
-    height: field.heightMedium,
-    paddingInline: field.paddingXMedium,
-    borderRadius: field.radiusMedium,
-    fontSize: field.text,
-  },
-  large: {
-    height: field.heightLarge,
-    paddingInline: field.paddingXLarge,
-    borderRadius: field.radiusMedium,
-    fontSize: field.text,
-  },
-  /** The value takes the width the chevron leaves, so a long one truncates. */
-  value: {
-    flexGrow: 1,
-    flexShrink: 1,
-    minWidth: 0,
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-  },
-  /** An empty trigger reads as a prompt, in the same hint colour as a placeholder. */
-  placeholder: { color: field.placeholder },
-  icon: {
-    display: 'flex',
-    flexShrink: 0,
-    width: field.iconSize,
-    height: field.iconSize,
-    color: field.icon,
-  },
-});
-
-const sizeStyles = {
-  small: styles.small,
-  medium: styles.medium,
-  large: styles.large,
-};
-
 /**
- * The trigger: a control on the well rung that happens to open a list. It reads
+ * The trigger: a raised control in the field family that opens a list. It reads
  * validity and disabled from `Field.Root` the way every control in this family
  * does, and renders the chevron itself so a caller never draws one.
  */
@@ -170,8 +113,8 @@ export const SelectTrigger = forwardRef<HTMLButtonElement, SelectTriggerProps>(
           appendClassName(
             stylex.props(
               well.base,
-              styles.trigger,
-              sizeStyles[size],
+              trigger.base,
+              triggerSizes[size],
               isInvalid(state.valid, ariaInvalid) && well.invalid
             ).className,
             className
@@ -179,7 +122,7 @@ export const SelectTrigger = forwardRef<HTMLButtonElement, SelectTriggerProps>(
         }
       >
         {children}
-        <BaseSelect.Icon className={stylex.props(styles.icon).className}>
+        <BaseSelect.Icon className={stylex.props(trigger.icon).className}>
           <ChevronDownGlyph />
         </BaseSelect.Icon>
       </BaseSelect.Trigger>
@@ -198,7 +141,7 @@ export const SelectValue = forwardRef<HTMLSpanElement, SelectValueProps>(functio
       {...rest}
       className={(state) =>
         appendClassName(
-          stylex.props(styles.value, state.placeholder && styles.placeholder).className,
+          stylex.props(trigger.value, state.placeholder && trigger.placeholder).className,
           className
         )
       }
@@ -231,7 +174,7 @@ export const SelectItem = forwardRef<HTMLDivElement, SelectItemProps>(function S
       }
     >
       <BaseSelect.ItemText className={stylex.props(surface.itemText).className}>
-        {children}
+        {rowLabel(children)}
       </BaseSelect.ItemText>
       {endContent}
       <span {...stylex.props(surface.indicator)}>
@@ -367,7 +310,7 @@ export const SelectContent = forwardRef<HTMLDivElement, SelectContentProps>(func
 });
 
 /**
- * A select in the field family: a well-rung trigger and a floating list.
+ * A select in the field family: a raised trigger and a floating list.
  * `Select.Root` owns the value and the open state; the trigger reads validity
  * and disabled from `Field.Root` the way an `Input` does, and `Select.Content`
  * assembles the portal, positioner, popup, list and scroll arrows so a caller

@@ -177,9 +177,8 @@ export const surface = stylex.create({
     // from any host: the fill is how this system says where the keyboard is.
     boxShadow: 'none',
     scrollMarginBlock: popup.inset,
-    transitionProperty: 'background-color, opacity',
-    transitionDuration: duration.fast,
-    transitionTimingFunction: ease.standard,
+    // No transition: the highlight follows the pointer and the arrow keys, and
+    // a fade leaves it behind the row the pointer is already on.
   },
   /** The row that holds the value. */
   itemSelected: { backgroundColor: popup.selected },
@@ -204,9 +203,25 @@ export const surface = stylex.create({
   /**
    * The label of a row. It takes the remaining width so a long one truncates
    * instead of pushing the tick out of the popup.
+   *
+   * It is a line, not a block: whatever a caller put in it — a value beside
+   * the name, a mark, a switch — sits on the row's one line. As a block, a
+   * glyph there took a line of its own (the product's preflight makes every
+   * `svg` a block), and every row that carried more than its name broke in
+   * two. Its words ride in `itemTextRun`, which is what truncates.
    */
   itemText: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: popup.itemGap,
     flexGrow: 1,
+    flexShrink: 1,
+    minWidth: 0,
+    overflow: 'hidden',
+    whiteSpace: 'nowrap',
+  },
+  /** A row's words, inside `itemText`: the part that gives way to an ellipsis. */
+  itemTextRun: {
     flexShrink: 1,
     minWidth: 0,
     overflow: 'hidden',
@@ -293,9 +308,6 @@ export const surface = stylex.create({
     outlineStyle: 'none',
     boxShadow: 'none',
     opacity: { default: 1, ':disabled': 0.45 },
-    transitionProperty: 'background-color, opacity',
-    transitionDuration: duration.fast,
-    transitionTimingFunction: ease.standard,
   },
   /** Hovered, or holding the menu that is currently up: the same one fill. */
   barItemOpen: { backgroundColor: popup.highlight },

@@ -33,8 +33,8 @@ export interface ToggleGroupProps<Value extends string> extends Omit<
  * A set of toggles answering to one value.
  *
  * It is **not** a `Tabs` strip, and the two cannot be folded together. A strip
- * picks what a person *sees*: it is a single control, so it is a sunken track
- * with one thing raised out of it and one pill sliding between the choices. A
+ * picks what a person *sees*: it is a single control, so it is a tray with
+ * one thing standing on it and one pill sliding between the choices. A
  * set stores what is *on*: two members can be pressed at once, which no sliding
  * pill can say, so there is no track and each member sinks on its own. Asked
  * for one choice out of several — `multiple` left off — it still draws no

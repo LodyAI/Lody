@@ -101,9 +101,7 @@ const sessionMetas: SessionMeta[] = snapshot.sessions.map((session) => ({
 }));
 
 const mobileStatusRows = (): HTMLElement[] =>
-  Array.from(document.body.querySelectorAll<HTMLElement>('[class*="md:hidden"]')).filter(
-    (element) => element.className.includes('col-span-2')
-  );
+  Array.from(document.body.querySelectorAll<HTMLElement>('[data-session-compact-row]'));
 
 describe('DeviceResourceMonitor session status presentation', () => {
   let root: Root | undefined;

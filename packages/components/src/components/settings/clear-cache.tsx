@@ -2,10 +2,15 @@ import { useCallback, useState } from 'react';
 import { useNavigate, useParams } from '@tanstack/react-router';
 import { useTranslation } from 'react-i18next';
 import { Trash2 } from 'lucide-react';
+import * as stylex from '@stylexjs/stylex';
 import { Spinner } from '@lody/ui/spinner';
 import { Button } from '@lody/ui/button';
 import { AlertDialog } from '@/ui/dialog';
 import { markCacheClearPending, reloadApp } from '@/lib/clear-local-cache';
+
+const styles = stylex.create({
+  icon: { width: '14px', height: '14px', flexShrink: 0 },
+});
 
 /**
  * Shared logic for the "Clear cache" settings action. The actual delete runs at
@@ -72,11 +77,7 @@ export function ClearCacheConfirmDialog({
             disabled={isClearing}
             variant="destructive"
           >
-            {isClearing ? (
-              <Spinner className="mr-1.5 h-3.5 w-3.5" />
-            ) : (
-              <Trash2 className="mr-1.5 h-3.5 w-3.5" />
-            )}
+            {isClearing ? <Spinner size="small" /> : <Trash2 {...stylex.props(styles.icon)} />}
             {t('settings.cache.clearCache.confirmButton')}
           </Button>
         </AlertDialog.Footer>

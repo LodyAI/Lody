@@ -25,7 +25,7 @@ import { Skeleton } from '../feedback/skeleton';
 import { Spinner } from '../feedback/spinner';
 import { feedbackSurface } from '../feedback/surface';
 import { Toast } from '../feedback/toast';
-import { TONE_GLYPHS, TONE_MARKS, TOAST_TONES, type FeedbackTone } from '../feedback/tone';
+import { TONE_GLYPHS, TONE_MARKS, type FeedbackTone } from '../feedback/tone';
 import { Collapsible } from '../disclosure/collapsible';
 import { disclosure as disclosureTokens } from '../disclosure/disclosure.tokens.stylex';
 import { Tabs, type TabsSize } from '../disclosure/tabs';
@@ -71,7 +71,7 @@ import { table as tableTokens } from '../table/table.tokens.stylex';
 import { chip } from '../tooltip/chip';
 import { Tooltip } from '../tooltip/tooltip';
 import { tooltip as tooltipTokens } from '../tooltip/tooltip.tokens.stylex';
-import { colors, shadow } from '../tokens/colors.stylex';
+import { colors, shadow, sheen } from '../tokens/colors.stylex';
 import { control, corner, duration, ease, radius, space, text, z } from '../tokens/scales.stylex';
 import {
   Board,
@@ -196,6 +196,25 @@ const styles = stylex.create({
   },
   ringAccent: { outlineColor: colors.accent },
   ringDestructive: { outlineColor: colors.destructive },
+  leadingEmoji: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '100%',
+    height: '100%',
+    padding: 0,
+    borderWidth: 0,
+    borderRadius: '6px',
+    backgroundColor: {
+      default: 'transparent',
+      ':hover': `color-mix(in oklab, transparent, ${colors.label} 6%)`,
+    },
+    boxShadow: 'none',
+    outlineStyle: 'none',
+    fontSize: text.bodySize,
+    lineHeight: 1,
+    cursor: 'pointer',
+  },
   shadowChip: {
     height: '64px',
     borderRadius: radius.medium,
@@ -530,6 +549,7 @@ const styles = stylex.create({
     borderRadius: radius.medium,
     cornerShape: corner.round,
     backgroundColor: button.secondaryBackground,
+    backgroundImage: button.secondarySheen,
     boxShadow: `${button.secondaryShadow}, 0 0 0 ${button.ringWidth} ${button.ring}`,
     color: colors.label,
     fontSize: text.subheadlineSize,
@@ -559,6 +579,8 @@ const SURFACES = [
   { name: 'raisedBackground', value: colors.raisedBackground, note: 'secondary button, menu' },
   { name: 'secondaryBackground', value: colors.secondaryBackground, note: 'sidebar, footer band' },
   { name: 'wellBackground', value: colors.wellBackground, note: 'input, track, switch off' },
+  { name: 'trayBackground', value: colors.trayBackground, note: 'a segmented strip' },
+  { name: 'trayRaised', value: colors.trayRaised, note: 'the key on that strip' },
 ];
 
 const CONTENT_COLORS = [
@@ -607,21 +629,23 @@ const SHADOWS = [
     box: shadow.inset,
     fill: colors.wellBackground,
     ink: false,
-    note: 'wells',
+    note: 'fields and tracks: a shallow recess',
   },
   {
     name: 'shadow.raised',
     box: shadow.raised,
     fill: colors.raisedBackground,
     ink: false,
-    note: 'pressable',
+    note: 'pressable: a hairline, a contact shadow and a short lift',
+    sheen: sheen.raised,
   },
   {
     name: 'shadow.inkEdge',
     box: shadow.inkEdge,
     fill: colors.label,
     ink: true,
-    note: 'top highlight on ink fills',
+    note: 'top highlight and contact shadow on ink fills',
+    sheen: sheen.ink,
   },
   {
     name: 'shadow.card',
@@ -650,6 +674,26 @@ const SHADOWS = [
     fill: colors.elevatedBackground,
     ink: false,
     note: 'dialogs and drawers',
+  },
+];
+
+/** The fall-off of the light over a raised fill, laid over it as an image. */
+const SHEENS = [
+  {
+    name: 'sheen.raised',
+    box: shadow.raised,
+    fill: colors.raisedBackground,
+    ink: false,
+    note: 'a raised fill, a few percent darker at its foot',
+    sheen: sheen.raised,
+  },
+  {
+    name: 'sheen.ink',
+    box: shadow.inkEdge,
+    fill: colors.label,
+    ink: true,
+    note: 'an ink or tone fill, brighter at its top',
+    sheen: sheen.ink,
   },
 ];
 
@@ -769,12 +813,12 @@ const STRIP_COLORS = [
   {
     name: 'disclosure.trackBackground',
     value: disclosureTokens.trackBackground,
-    note: 'the well the strip sits in',
+    note: 'the flat tray the strip is',
   },
   {
     name: 'disclosure.indicator',
     value: disclosureTokens.indicator,
-    note: 'the one tab raised out of it',
+    note: 'the one tab standing on it',
   },
   { name: 'disclosure.tabLabel', value: disclosureTokens.tabLabel, note: 'a tab you are not on' },
   {
@@ -1064,18 +1108,33 @@ function PlusGlyph() {
   );
 }
 
+/**
+ * What a surface puts in an Input's leading slot when the slot is pressable: it
+ * fills the square, draws no edge — the well rings on `:focus-within` — and
+ * answers the pointer with a fill mixed toward the ink.
+ */
+function LeadingEmoji() {
+  return (
+    <button type="button" aria-label="Emoji" {...stylex.props(styles.leadingEmoji)}>
+      <span aria-hidden="true">🔍</span>
+    </button>
+  );
+}
+
 function ShadowChip({
   name,
   box,
   fill,
   ink,
   note,
+  sheen: image,
 }: {
   name: string;
   box: string;
   fill: string;
   ink: boolean;
   note: string;
+  sheen?: string;
 }) {
   const { ref, value } = useMeasured<HTMLDivElement>('box-shadow');
   return (
@@ -1085,7 +1144,8 @@ function ShadowChip({
         {...stylex.props(
           styles.shadowChip,
           dyn.raised(fill, box),
-          ink && dyn.ink(fill, colors.background)
+          ink && dyn.ink(fill, colors.background),
+          image != null && dyn.sheen(image)
         )}
       />
     </Sample>
@@ -1568,11 +1628,18 @@ function PopupReplica() {
 }
 
 /** A Combobox with the chevron beside its input, the shape a picker takes. */
-function LanguageCombobox({ children, ...rest }: ComponentProps<typeof Combobox.Root<string>>) {
+function LanguageCombobox({
+  children,
+  search,
+  ...rest
+}: ComponentProps<typeof Combobox.Root<string>> & { search?: ReactNode }) {
   return (
     <Combobox.Root items={LANGUAGES} {...rest}>
       {children}
-      <Combobox.Content empty={<Combobox.Empty>No language matches.</Combobox.Empty>}>
+      <Combobox.Content
+        search={search}
+        empty={<Combobox.Empty>No language matches.</Combobox.Empty>}
+      >
         {(item: string) => (
           <Combobox.Item key={item} value={item}>
             {item}
@@ -2421,19 +2488,14 @@ function ToastReplica({ tone }: { tone: FeedbackTone }) {
     <Row>
       <LegendKey>{tone}</LegendKey>
       <Cluster>
-        <div
-          {...stylex.props(
-            feedbackSurface.message,
-            feedbackSurface.toast,
-            TOAST_TONES[tone],
-            styles.toastReplica
-          )}
-        >
+        <div {...stylex.props(feedbackSurface.message, feedbackSurface.toast, styles.toastReplica)}>
           <span {...stylex.props(feedbackSurface.mark, TONE_MARKS[tone])}>
             <Mark />
           </span>
           <div {...stylex.props(feedbackSurface.body)}>
-            <p {...stylex.props(feedbackSurface.title)}>Session archived</p>
+            <p {...stylex.props(feedbackSurface.title, feedbackSurface.toastTitle)}>
+              Session archived
+            </p>
             <p {...stylex.props(feedbackSurface.description)}>It can be restored from Archive.</p>
           </div>
         </div>
@@ -3470,8 +3532,8 @@ function ToggleDisabledRow() {
  * The same three choices as a strip and as a set, which is the comparison this
  * section exists to make.
  *
- * A `Tabs` strip picks what a person *sees*: one control, so a sunken track
- * with one thing raised out of it and a pill that slides. A `ToggleGroup`
+ * A `Tabs` strip picks what a person *sees*: one control, so a tray with one
+ * thing standing on it and a pill that slides. A `ToggleGroup`
  * stores what is *on*: no track, and each member sinking on its own — because
  * two of them can be pressed at once, and a sliding pill cannot say that.
  */
@@ -3741,10 +3803,16 @@ export function UiGallery({ palettes = 'both' }: UiGalleryProps) {
         </PaletteSplit>
       </Section>
 
-      <Section title="Shadows" rule="Strength by rung. Dark palettes add an inset top highlight.">
+      <Section
+        title="Shadows"
+        rule="Strength by rung, light from above. Every lifted edge is a hairline, a tight contact shadow and a short, negatively spread lift rather than one soft cloud: the cloud is what reads as grime. Dark palettes add an inset top highlight and draw the hairline in light. A sheen is the light's fall-off over a raised fill, a few percent at most, and a press drops it."
+      >
         <PaletteSplit palettes={palettes}>
           <Grid>
             {SHADOWS.map((token) => (
+              <ShadowChip key={token.name} {...token} />
+            ))}
+            {SHEENS.map((token) => (
               <ShadowChip key={token.name} {...token} />
             ))}
           </Grid>
@@ -3985,13 +4053,25 @@ export function UiGallery({ palettes = 'both' }: UiGalleryProps) {
 
       <Section
         title="Field · sizes and Textarea"
-        rule="28 / 32 / 36, the same ladder as Button, with radius small at 28 and medium at 32 and 36. Textarea is the same well at the medium radius and grows downward."
+        rule="28 / 32 / 36, the same ladder as Button, with radius small at 28 and medium at 32 and 36. Textarea is the same well at the medium radius and grows downward. What a value belongs with — an emoji before a name, the / before a command — goes in the leading slot inside the same well, a square the well’s height less its inset, rather than beside it as a second control with a second edge."
       >
         <PaletteSplit palettes={palettes}>
           <Rows>
             {FIELD_SIZES.map((entry) => (
               <FieldSizeRow key={entry.size} {...entry} />
             ))}
+            <FieldRow legend="input · leading">
+              <Field.Root name="role">
+                <Field.Label>Role</Field.Label>
+                <Input size="large" leading={<LeadingEmoji />} defaultValue="Code Reviewer" />
+              </Field.Root>
+            </FieldRow>
+            <FieldRow legend="input · leading text">
+              <Field.Root name="command">
+                <Field.Label>Slash command</Field.Label>
+                <Input size="large" leading="/" placeholder="review-pr" />
+              </Field.Root>
+            </FieldRow>
             <FieldRow legend="textarea">
               <Field.Root name="summary">
                 <Field.Label>What should the agent do?</Field.Label>
@@ -4081,6 +4161,7 @@ export function UiGallery({ palettes = 'both' }: UiGalleryProps) {
               box={field.checkedEdge}
               fill={field.checkedFill}
               ink
+              sheen={field.checkedSheen}
               note="the ink highlight a checked control carries"
             />
             <ShadowChip
@@ -4088,7 +4169,24 @@ export function UiGallery({ palettes = 'both' }: UiGalleryProps) {
               box={field.thumbShadow}
               fill={field.thumb}
               ink={false}
+              sheen={field.thumbSheen}
               note="the thumb is raised on both tracks"
+            />
+            <ShadowChip
+              name="field.checkedSheen"
+              box={field.checkedEdge}
+              fill={field.checkedFill}
+              ink
+              sheen={field.checkedSheen}
+              note="the light falling off a checked fill"
+            />
+            <ShadowChip
+              name="field.thumbSheen"
+              box={field.thumbShadow}
+              fill={field.thumb}
+              ink={false}
+              sheen={field.thumbSheen}
+              note="the light falling off the thumb"
             />
           </Grid>
         </PaletteSplit>
@@ -4144,7 +4242,7 @@ export function UiGallery({ palettes = 'both' }: UiGalleryProps) {
 
       <Section
         title="Select · trigger and list"
-        rule="A trigger is a control on the well rung, so it takes the field family's size ladder, ring, invalid ring and disabled opacity; the list it opens is on the floating rung and reads the popup group instead. A row states two facts: selected is the row that holds the value, highlighted is where the keyboard or the pointer is, and the highlight wins the fill because it is the one that moves. The open list below is a stand-in built from the same rules the popup applies, because a board cannot show a popup without covering what is under it."
+        rule="A trigger is a field like the input above it — one flat material for every control that holds a value — so it takes the field family's size ladder, ring, invalid ring and disabled opacity; the list it opens is on the floating rung and reads the popup group instead. A row states two facts: selected is the row that holds the value, highlighted is where the keyboard or the pointer is, and the highlight wins the fill because it is the one that moves. The open list below is a stand-in built from the same rules the popup applies, because a board cannot show a popup without covering what is under it."
       >
         <PaletteSplit palettes={palettes}>
           <Rows>
@@ -4209,6 +4307,17 @@ export function UiGallery({ palettes = 'both' }: UiGalleryProps) {
                     <Combobox.Input placeholder="Search a language" />
                     <Combobox.Trigger aria-label="Open the language list" />
                   </Combobox.InputGroup>
+                </LanguageCombobox>
+              </Field.Root>
+            </FieldRow>
+            <FieldRow legend="button · search inside">
+              <Field.Root>
+                <Field.Label>Language</Field.Label>
+                <LanguageCombobox
+                  defaultValue="Rust"
+                  search={<Combobox.Search placeholder="Search a language" />}
+                >
+                  <Combobox.Button />
                 </LanguageCombobox>
               </Field.Root>
             </FieldRow>
@@ -4384,7 +4493,7 @@ export function UiGallery({ palettes = 'both' }: UiGalleryProps) {
       </Section>
       <Section
         title="Tabs · the choices side by side"
-        rule="A tab strip is the elevation ladder read twice over: a well-rung track with one thing raised out of it, which is the same pair a Switch takes and says the same thing — the track is where something sits, and the thing sitting in it is the one you can press. The pill is one element that slides rather than a fill on each tab, because the strip is one control. A tab carries no fill in any state; what changes when you take one is its colour, and the pill arriving under it. The size is stated once on the strip: the tabs take the track less its inset, and their corner is the track's less the same inset. Arrow keys move without taking, because a tab swaps a panel that may be expensive to build."
+        rule="A tab strip is a flat tray with one key standing on it. The tray is not a field's well: a tab picks what is shown rather than what is stored, so the strip has no rim and no inner shadow — only a tint a step off whatever it sits on — and the pill is the one thing raised, lighter than the tray in both palettes. The pill is one element that slides rather than a fill on each tab, because the strip is one control. A tab carries no fill in any state; what changes when you take one is its colour, and the pill arriving under it. The size is stated once on the strip: the tabs take the track less a 2px inset, so a 32px strip holds a 28px pill, and their corner is the track's less the same inset. Arrow keys move without taking, because a tab swaps a panel that may be expensive to build."
       >
         <PaletteSplit palettes={palettes}>
           <Rows>
@@ -4401,18 +4510,20 @@ export function UiGallery({ palettes = 'both' }: UiGalleryProps) {
               <Swatch key={token.name} {...token} />
             ))}
             <ShadowChip
-              name="disclosure.trackWell"
-              box={disclosureTokens.trackWell}
-              fill={disclosureTokens.trackBackground}
-              ink={false}
-              note="the track, sunken"
-            />
-            <ShadowChip
               name="disclosure.indicatorShadow"
               box={disclosureTokens.indicatorShadow}
               fill={disclosureTokens.indicator}
               ink={false}
+              sheen={disclosureTokens.indicatorSheen}
               note="the selected tab, raised"
+            />
+            <ShadowChip
+              name="disclosure.indicatorSheen"
+              box={disclosureTokens.indicatorShadow}
+              fill={disclosureTokens.indicator}
+              ink={false}
+              sheen={disclosureTokens.indicatorSheen}
+              note="the light falling off the pill"
             />
           </Grid>
         </PaletteSplit>

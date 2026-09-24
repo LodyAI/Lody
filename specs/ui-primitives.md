@@ -358,6 +358,13 @@ so a primitive responds without product code selecting raw palette values. Token
 names describe meaning and interaction role; component tokens derive from those
 semantic values or documented fixed dimensions.
 
+The material is flat with one light above it, in both palettes. A control a
+person can press is at least as light as what it rests on and is told apart by a
+crisp edge and a short lift, never by a gray fill under a soft cloud of shadow; a
+place to put something is recessed; and a raised face may carry a sheen of a few
+percent that a press takes away. No surface carries grain, noise, gloss, a
+reflection or a deep groove.
+
 A forced theme applies to the subtree it is placed on, including the primitives
 inside it. A component token that derives from a semantic colour resolves against
 the palette in force on that subtree, not the palette of the document root, so two

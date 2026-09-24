@@ -94,15 +94,18 @@ export const feedbackSurface = stylex.create({
     transitionDuration: duration.regular,
     transitionTimingFunction: ease.standard,
   },
-  toastSuccess: {
-    backgroundColor: `color-mix(in oklab, ${feedback.toastBackground}, ${feedback.success} ${TINT})`,
-  },
-  toastWarning: {
-    backgroundColor: `color-mix(in oklab, ${feedback.toastBackground}, ${feedback.warning} ${TINT})`,
-  },
-  toastDanger: {
-    backgroundColor: `color-mix(in oklab, ${feedback.toastBackground}, ${feedback.danger} ${TINT})`,
-  },
+  /**
+   * A toast's title is a report, not an alarm: medium weight. Its tone is the
+   * mark alone — toasts stack, and a stack of green, white and red cards reads
+   * as three kinds of thing where there is one.
+   */
+  toastTitle: { fontWeight: 500 },
+  /**
+   * The close button rides the title's line: pulled up and down by the
+   * difference between its 28px and the title's 18px line, so it neither sits
+   * below the words nor sets the toast's height.
+   */
+  toastClose: { flexShrink: 0, marginBlock: '-5px', marginInlineEnd: '-4px' },
   /**
    * The two ends of a toast's arrival, which is the rise rule applied from the
    * edge the toast appears at: 4px above, at opacity 0. It arrives from above

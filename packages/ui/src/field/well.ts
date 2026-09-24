@@ -11,6 +11,9 @@ import { field } from './field.tokens.stylex';
  * The ring rides in the same box-shadow as the control's own edge: 2px, tight
  * to the control, no offset, no glow. It is not an `outline` because the app
  * shell resets every outline with `!important`, which no layer order can beat.
+ * The ring comes FIRST in that list: earlier shadows paint on top, and the
+ * well's lit lower lip (a 1px light line under the field) otherwise covered the
+ * ring's bottom edge, so the ring read 2px at the sides and 1px below.
  * CSS cannot append to a box-shadow list, so a control that changes its edge —
  * a checked box swaps the well for the ink highlight — restates the ring with
  * it, the way each Button variant does.
@@ -37,7 +40,7 @@ export const well = stylex.create({
     borderStyle: 'none',
     backgroundColor: field.background,
     // A text control is always focus-visible, so this covers pointer focus too.
-    boxShadow: { default: field.well, ':focus-visible': `${field.well}, ${RING}` },
+    boxShadow: { default: field.well, ':focus-visible': `${RING}, ${field.well}` },
     color: field.value,
     fontFamily: 'inherit',
     // Controls are 13 at weight 500 with controlTracking; the size step sets
@@ -58,8 +61,8 @@ export const well = stylex.create({
   // ring the moment it takes focus.
   invalid: {
     boxShadow: {
-      default: `${field.well}, ${INVALID_RING}`,
-      ':focus-visible': `${field.well}, ${INVALID_RING}`,
+      default: `${INVALID_RING}, ${field.well}`,
+      ':focus-visible': `${INVALID_RING}, ${field.well}`,
     },
   },
   /**
@@ -80,7 +83,7 @@ export const well = stylex.create({
     borderWidth: 0,
     borderStyle: 'none',
     backgroundColor: field.background,
-    boxShadow: { default: field.well, ':focus-within': `${field.well}, ${RING}` },
+    boxShadow: { default: field.well, ':focus-within': `${RING}, ${field.well}` },
     color: field.value,
     cornerShape: corner.round,
     outlineStyle: 'none',
@@ -91,8 +94,8 @@ export const well = stylex.create({
   },
   shellInvalid: {
     boxShadow: {
-      default: `${field.well}, ${INVALID_RING}`,
-      ':focus-within': `${field.well}, ${INVALID_RING}`,
+      default: `${INVALID_RING}, ${field.well}`,
+      ':focus-within': `${INVALID_RING}, ${field.well}`,
     },
   },
   /** The control inside a shell: the shell already is the well. */
@@ -166,7 +169,7 @@ export const well = stylex.create({
     borderWidth: 0,
     borderStyle: 'none',
     backgroundColor: field.background,
-    boxShadow: { default: field.well, ':focus-visible': `${field.well}, ${RING}` },
+    boxShadow: { default: field.well, ':focus-visible': `${RING}, ${field.well}` },
     color: field.checkedMark,
     cornerShape: corner.round,
     outlineStyle: 'none',
@@ -179,13 +182,14 @@ export const well = stylex.create({
   /** Stored state: the ink fill and its top highlight in place of the well. */
   checked: {
     backgroundColor: field.checkedFill,
-    boxShadow: { default: field.checkedEdge, ':focus-visible': `${field.checkedEdge}, ${RING}` },
+    backgroundImage: field.checkedSheen,
+    boxShadow: { default: field.checkedEdge, ':focus-visible': `${RING}, ${field.checkedEdge}` },
   },
   /** The invalid ring on that ink edge, at rest and while focused. */
   checkedInvalid: {
     boxShadow: {
-      default: `${field.checkedEdge}, ${INVALID_RING}`,
-      ':focus-visible': `${field.checkedEdge}, ${INVALID_RING}`,
+      default: `${INVALID_RING}, ${field.checkedEdge}`,
+      ':focus-visible': `${INVALID_RING}, ${field.checkedEdge}`,
     },
   },
 });

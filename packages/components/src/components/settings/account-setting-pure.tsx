@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
-import { cn } from '@/lib/utils';
+import * as stylex from '@stylexjs/stylex';
 import type { Invitation } from 'better-auth/plugins';
 import type { AvatarKind, CliApiKeyRecord } from '@lody/shared';
 import {
@@ -21,6 +21,10 @@ import { Button } from '@lody/ui/button';
 import { Input } from '@lody/ui/input';
 import { Field as UiField } from '@lody/ui/field';
 import { Badge } from '@lody/ui/badge';
+import { Avatar } from '@lody/ui/avatar';
+import { Alert } from '@lody/ui/alert';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { space } from '@lody/ui/tokens/scales.stylex';
 import { Menu } from '@/ui/menu';
 import { UserAvatar } from '../user-avatar';
 import type { OrganizationMemberRef, OrganizationMemberRole } from '@/lib/organization-member-role';
@@ -37,7 +41,128 @@ import { ChangePasswordButton } from './change-password-button';
 import { LinkedAccountsList, type LinkedAccountInfo } from './linked-accounts-list';
 import { MobileAccountSettings } from '@/components/mobile/mobile-account-settings';
 import { useIsMobile } from '@/hooks/use-mobile';
-import { settingContainerClass } from '.';
+import { settingsSurface } from './surface';
+
+const WIDE = '@media (min-width: 640px)';
+
+const styles = stylex.create({
+  loading: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingBlock: space[8],
+  },
+  /** An editable value is a ghost button holding it; it may shrink to the row. */
+  valueButton: { maxWidth: '100%', minWidth: 0 },
+  value: {
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontWeight: 400,
+    color: colors.label,
+  },
+  valueText: {
+    display: 'block',
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    color: colors.label,
+  },
+  valueIcon: { width: '12px', height: '12px', flexShrink: 0, color: colors.tertiaryLabel },
+  icon: { width: '14px', height: '14px', flexShrink: 0 },
+  /** An icon-only button draws the glyph's box; the glyph fills it. */
+  glyph: { width: '100%', height: '100%' },
+
+  /** A record in a list card: its face, what it is, and what can be done to it. */
+  record: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: space[3],
+    paddingInline: space[4],
+    paddingBlock: '10px',
+  },
+  recordText: { flexGrow: 1, minWidth: 0 },
+  recordTitle: {
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    margin: 0,
+    lineHeight: 1.25,
+    color: colors.label,
+  },
+  recordMeta: {
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    margin: 0,
+    marginTop: '2px',
+    fontSize: '0.8em',
+    lineHeight: 1.25,
+    color: colors.secondaryLabel,
+  },
+  you: { marginInlineStart: space[1.5], fontSize: '0.75em', color: colors.secondaryLabel },
+  recordActions: { display: 'flex', flexShrink: 0, alignItems: 'center', gap: space[1] },
+  inviteMeta: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: space[2],
+    marginTop: '2px',
+    fontSize: '0.75em',
+    color: colors.secondaryLabel,
+  },
+  inviteStatus: { display: 'inline-flex', alignItems: 'center', gap: '2px' },
+  clock: { width: '10px', height: '10px', flexShrink: 0 },
+
+  noteLoading: { display: 'flex', alignItems: 'center', gap: space[2] },
+  apiKey: {
+    display: 'flex',
+    flexDirection: { default: 'column', [WIDE]: 'row' },
+    alignItems: { default: 'stretch', [WIDE]: 'center' },
+    justifyContent: 'space-between',
+    gap: space[3],
+    paddingInline: space[4],
+    paddingBlock: '10px',
+  },
+  apiKeyText: { display: 'flex', flexDirection: 'column', gap: space[1], minWidth: 0 },
+  apiKeyHead: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'baseline',
+    columnGap: space[2],
+    rowGap: space[1],
+    minWidth: 0,
+  },
+  apiKeyNote: {
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    margin: 0,
+    color: colors.label,
+  },
+  apiKeyTime: { flexShrink: 0, fontSize: '0.8em', color: colors.secondaryLabel },
+  apiKeyMeta: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    columnGap: space[3],
+    rowGap: space[1],
+    fontSize: '0.8em',
+    color: colors.secondaryLabel,
+  },
+  mono: { fontFamily: 'var(--font-mono, ui-monospace, monospace)' },
+  alignStart: { alignSelf: { default: 'flex-start', [WIDE]: 'center' } },
+
+  /** A dialog's body between its header and its answers. */
+  dialogBody: { display: 'flex', flexDirection: 'column', gap: space[3] },
+  dialogForm: { display: 'flex', flexDirection: 'column', gap: space[4] },
+  field: { display: 'flex', flexDirection: 'column', gap: space[1.5] },
+  prose: { margin: 0, fontSize: '13px', lineHeight: 1.5, color: colors.secondaryLabel },
+  alignSelfStart: { alignSelf: 'flex-start' },
+});
 
 function formatCliApiKeyTimestamp(
   value: number | null
@@ -440,8 +565,8 @@ export function AccountSettingsPure({
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center py-12">
-        <Spinner className="h-8 w-8" />
+      <div {...stylex.props(styles.loading)}>
+        <Spinner size="large" />
       </div>
     );
   }
@@ -500,7 +625,7 @@ export function AccountSettingsPure({
   }
 
   return (
-    <div className={settingContainerClass}>
+    <div {...stylex.props(settingsSurface.container)}>
       {/* Profile: user avatar, display name, connected accounts, password. */}
       {surface === 'account' ? (
         <CompactSection
@@ -522,29 +647,29 @@ export function AccountSettingsPure({
                   maxLength={120}
                   placeholder={t('settings.profile.namePlaceholder')}
                   disabled={isSavingUserName}
-                  className="h-8 w-full min-w-0 sm:max-w-md"
                   aria-label={t('settings.profile.name')}
                 />
               ) : (
-                <button
-                  type="button"
-                  className="flex min-w-0 max-w-full items-center gap-1.5 rounded-md px-2 py-1 text-left font-normal transition-colors hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 disabled:pointer-events-none disabled:opacity-60"
+                <Button
+                  variant="ghost"
+                  size="small"
+                  className={stylex.props(styles.valueButton).className}
                   onClick={beginUserNameEdit}
                   disabled={isSavingUserName}
                   aria-label={t('settings.profile.nameEditLabel')}
                 >
-                  <span className="min-w-0 truncate">
+                  <span {...stylex.props(styles.value)}>
                     {userNameBaseline || t('settings.profile.nameEmpty')}
                   </span>
                   {isSavingUserName ? (
-                    <Spinner className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                    <Spinner size="small" />
                   ) : (
-                    <Pencil className="h-3 w-3 shrink-0 text-muted-foreground" />
+                    <Pencil {...stylex.props(styles.valueIcon)} />
                   )}
-                </button>
+                </Button>
               )
             ) : (
-              <span className="truncate">{userNameBaseline || '—'}</span>
+              <span {...stylex.props(styles.valueText)}>{userNameBaseline || '—'}</span>
             )}
           </CompactRow>
           <CompactRow label={t('settings.profile.avatar.label')}>
@@ -585,14 +710,13 @@ export function AccountSettingsPure({
           ) : null}
           <CompactRow label={t('settings.account.signOut')}>
             <Button
-              variant="ghost"
+              variant="secondary"
               size="small"
-              className="bg-foreground/[0.06] font-normal hover:bg-foreground/[0.1]"
               onClick={() => {
                 void onSignOut();
               }}
             >
-              <LogOut className="mr-1.5 h-3.5 w-3.5" />
+              <LogOut {...stylex.props(styles.icon)} />
               {t('settings.account.signOut')}
             </Button>
           </CompactRow>
@@ -619,27 +743,27 @@ export function AccountSettingsPure({
                   maxLength={120}
                   placeholder={t('settings.account.workspaceNamePlaceholder')}
                   disabled={isRenamingOrganization}
-                  className="h-8 w-full min-w-0 sm:max-w-md"
                   aria-label={t('settings.account.workspaceName')}
                 />
               ) : (
-                <button
-                  type="button"
-                  className="flex min-w-0 max-w-full items-center gap-1.5 rounded-md px-2 py-1 text-left font-normal transition-colors hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 disabled:pointer-events-none disabled:opacity-60"
+                <Button
+                  variant="ghost"
+                  size="small"
+                  className={stylex.props(styles.valueButton).className}
                   onClick={beginWorkspaceNameEdit}
                   disabled={isRenamingOrganization}
                   aria-label={t('settings.account.workspaceNameEditLabel')}
                 >
-                  <span className="min-w-0 truncate">{workspaceNameBaseline}</span>
+                  <span {...stylex.props(styles.value)}>{workspaceNameBaseline}</span>
                   {isRenamingOrganization ? (
-                    <Spinner className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                    <Spinner size="small" />
                   ) : (
-                    <Pencil className="h-3 w-3 shrink-0 text-muted-foreground" />
+                    <Pencil {...stylex.props(styles.valueIcon)} />
                   )}
-                </button>
+                </Button>
               )
             ) : (
-              <span className="truncate">{organization.name}</span>
+              <span {...stylex.props(styles.valueText)}>{organization.name}</span>
             )}
           </CompactRow>
           <CompactRow label={t('settings.workspace.avatar.label')}>
@@ -670,22 +794,23 @@ export function AccountSettingsPure({
               </Dialog.Description>
             </Dialog.Header>
             {hasGeneratedCliApiKey ? (
-              <div className="space-y-3 py-4 text-sm">
-                <p className="text-muted-foreground">{t('settings.account.cliAuth.usageHint')}</p>
+              <div {...stylex.props(styles.dialogBody)}>
+                <p {...stylex.props(styles.prose)}>{t('settings.account.cliAuth.usageHint')}</p>
                 <Button
                   variant="secondary"
                   size="small"
+                  className={stylex.props(styles.alignSelfStart).className}
                   onClick={() => {
                     void onCopyGeneratedCliApiKey?.();
                   }}
                   disabled={!onCopyGeneratedCliApiKey}
                 >
-                  <Copy className="mr-1.5 h-3.5 w-3.5" />
+                  <Copy {...stylex.props(styles.icon)} />
                   {t('settings.account.cliAuth.copyGeneratedButton')}
                 </Button>
               </div>
             ) : (
-              <div className="space-y-2 py-4">
+              <div {...stylex.props(styles.field)}>
                 <UiField.Label htmlFor="cli-api-key-note">
                   {t('settings.account.cliAuth.noteLabel')}
                 </UiField.Label>
@@ -696,9 +821,9 @@ export function AccountSettingsPure({
                   maxLength={160}
                   placeholder={t('settings.account.cliAuth.notePlaceholder')}
                 />
-                <p className="text-xs text-muted-foreground">
+                <UiField.Description>
                   {t('settings.account.cliAuth.noteHelper')}
-                </p>
+                </UiField.Description>
               </div>
             )}
             <Dialog.Footer>
@@ -718,7 +843,7 @@ export function AccountSettingsPure({
                   }}
                   disabled={isCreatingCliApiKey || !onGenerateCliApiKey}
                 >
-                  {isCreatingCliApiKey && <Spinner className="mr-1.5 h-3.5 w-3.5" />}
+                  {isCreatingCliApiKey && <Spinner size="small" />}
                   {t('settings.account.cliAuth.createConfirmButton')}
                 </Button>
               )}
@@ -736,7 +861,9 @@ export function AccountSettingsPure({
         >
           <AlertDialog.Content>
             <AlertDialog.Header>
-              <AlertDialog.Title>{t('settings.account.cliAuth.revokeDialogTitle')}</AlertDialog.Title>
+              <AlertDialog.Title>
+                {t('settings.account.cliAuth.revokeDialogTitle')}
+              </AlertDialog.Title>
               <AlertDialog.Description>
                 {t('settings.account.cliAuth.revokeDialogDescription', {
                   note: cliApiKeyToRevoke?.note ?? t('settings.account.cliAuth.recordNoteFallback'),
@@ -756,12 +883,12 @@ export function AccountSettingsPure({
                   })();
                 }}
                 disabled={!cliApiKeyToRevoke || Boolean(revokingCliApiKeyId)}
-                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                variant="destructive"
               >
                 {revokingCliApiKeyId ? (
-                  <Spinner className="mr-1.5 h-3.5 w-3.5" />
+                  <Spinner size="small" />
                 ) : (
-                  <Trash2 className="mr-1.5 h-3.5 w-3.5" />
+                  <Trash2 {...stylex.props(styles.icon)} />
                 )}
                 {t('settings.account.cliAuth.revokeConfirmButton')}
               </AlertDialog.Action>
@@ -782,7 +909,7 @@ export function AccountSettingsPure({
                 aria-label={t('workspace.members.invite')}
                 onClick={() => setInviteDialogOpen(true)}
               >
-                <UserPlus className="h-4 w-4" />
+                <UserPlus {...stylex.props(styles.glyph)} />
               </Button>
             )
           }
@@ -792,78 +919,71 @@ export function AccountSettingsPure({
               hasAdminPermission && member.role !== 'owner' && member.userId !== currentUser?.id;
 
             return (
-              <div key={member.id} className="flex items-center gap-3 px-3 py-2.5 text-sm">
-                <UserAvatar user={member.user} size="large" className="shrink-0" />
-                <div className="min-w-0 flex-1">
-                  <p className="truncate leading-tight">
+              <div key={member.id} {...stylex.props(styles.record)}>
+                <UserAvatar user={member.user} size="large" />
+                <div {...stylex.props(styles.recordText)}>
+                  <p {...stylex.props(styles.recordTitle)}>
                     {member.user?.name || '—'}
                     {member.userId === currentUser?.id && (
-                      <span className="ml-1.5 text-[11px] font-normal text-muted-foreground">
+                      <span {...stylex.props(styles.you)}>
                         ({t('workspace.members.you', 'you')})
                       </span>
                     )}
                   </p>
-                  <p className="truncate text-xs leading-tight text-muted-foreground">
-                    {member.user?.email}
-                  </p>
+                  <p {...stylex.props(styles.recordMeta)}>{member.user?.email}</p>
                 </div>
-                <div className="flex shrink-0 items-center gap-1">
+                <div {...stylex.props(styles.recordActions)}>
                   {isEditable ? (
                     <Menu.Root>
-                      <Menu.Trigger render={<button className="inline-flex cursor-pointer items-center gap-1 rounded-md px-2 py-0.5 text-xs font-normal text-muted-foreground transition-colors hover:bg-hover hover:text-foreground">
-                          {t(`organization.role.${member.role}`)}
-                          <ChevronDown className="h-3 w-3 opacity-50" />
-                        </button>}>
-                        <button className="inline-flex cursor-pointer items-center gap-1 rounded-md px-2 py-0.5 text-xs font-normal text-muted-foreground transition-colors hover:bg-hover hover:text-foreground">
-                          {t(`organization.role.${member.role}`)}
-                          <ChevronDown className="h-3 w-3 opacity-50" />
-                        </button>
+                      <Menu.Trigger render={<Button variant="ghost" size="mini" />}>
+                        {t(`organization.role.${member.role}`)}
+                        <ChevronDown {...stylex.props(styles.valueIcon)} />
                       </Menu.Trigger>
                       <Menu.Content align="end">
                         <Menu.Item
+                          inset
+                          icon={
+                            member.role === 'member' ? (
+                              <Check {...stylex.props(styles.glyph)} />
+                            ) : undefined
+                          }
                           onClick={() => {
                             void onUpdateRole(member, 'member');
                           }}
                         >
-                          <Check
-                            className={cn(
-                              'mr-2 h-3.5 w-3.5',
-                              member.role === 'member' ? 'opacity-100' : 'opacity-0'
-                            )}
-                          />
                           {t('organization.role.member')}
                         </Menu.Item>
                         <Menu.Item
+                          inset
+                          icon={
+                            member.role === 'admin' ? (
+                              <Check {...stylex.props(styles.glyph)} />
+                            ) : undefined
+                          }
                           onClick={() => {
                             void onUpdateRole(member, 'admin');
                           }}
                         >
-                          <Check
-                            className={cn(
-                              'mr-2 h-3.5 w-3.5',
-                              member.role === 'admin' ? 'opacity-100' : 'opacity-0'
-                            )}
-                          />
                           {t('organization.role.admin')}
                         </Menu.Item>
                       </Menu.Content>
                     </Menu.Root>
                   ) : (
-                    <span className="px-2 py-0.5 text-xs font-normal text-muted-foreground">
-                      {t(`organization.role.${member.role}`)}
-                    </span>
+                    // A role nobody here can change is a standing fact about the member.
+                    <Badge>{t(`organization.role.${member.role}`)}</Badge>
                   )}
                   {isEditable && (
                     <Button
                       variant="ghost"
+                      size="small"
                       icon
-                      className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                      tone="destructive"
                       onClick={() => {
                         setUserToDelete(member.id);
                         setDeleteUserDialogOpen(true);
                       }}
                     >
-                      <Trash2 className="h-3.5 w-3.5" />
+                      <Trash2 {...stylex.props(styles.glyph)} />
                     </Button>
                   )}
                 </div>
@@ -877,38 +997,43 @@ export function AccountSettingsPure({
       {isWorkspaceSurface && pendingInvitations.length > 0 ? (
         <CompactSection title={t('workspace.invitations.title')}>
           {pendingInvitations.map((invitation) => (
-            <div key={invitation.id} className="flex items-center gap-3 px-3 py-2.5 text-sm">
-              <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-muted">
-                <Mail className="h-3.5 w-3.5 text-muted-foreground" />
-              </div>
-              <div className="min-w-0 flex-1">
-                <p className="truncate leading-tight">{invitation.email}</p>
-                <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
+            <div key={invitation.id} {...stylex.props(styles.record)}>
+              {/* The invitee has no face yet: the member's circle, holding a mark. */}
+              <Avatar.Root size="large">
+                <Avatar.Fallback>
+                  <Avatar.Glyph>
+                    <Mail {...stylex.props(styles.glyph)} />
+                  </Avatar.Glyph>
+                </Avatar.Fallback>
+              </Avatar.Root>
+              <div {...stylex.props(styles.recordText)}>
+                <p {...stylex.props(styles.recordTitle)}>{invitation.email}</p>
+                <div {...stylex.props(styles.inviteMeta)}>
                   <span>{t(`organization.role.${invitation.role}`)}</span>
-                  <span className="inline-flex items-center gap-0.5">
-                    <Clock className="h-2.5 w-2.5" />
+                  <span {...stylex.props(styles.inviteStatus)}>
+                    <Clock {...stylex.props(styles.clock)} />
                     {t(`workspace.invitations.${invitation.status.toLowerCase()}`)}
                   </span>
                 </div>
               </div>
               {invitation.status === 'pending' && (
-                <div className="flex shrink-0 items-center gap-1">
+                <div {...stylex.props(styles.recordActions)}>
                   <Button
                     variant="ghost"
                     size="small"
-                    className="h-7 text-xs text-muted-foreground hover:text-foreground"
                     onClick={() => {
                       void onCopyInviteLink(getInviteLink(invitation));
                     }}
                   >
-                    <Copy className="mr-1 h-3 w-3" />
+                    <Copy {...stylex.props(styles.icon)} />
                     {t('workspace.invitations.copyLink')}
                   </Button>
                   {hasAdminPermission && (
                     <Button
                       variant="ghost"
+                      size="small"
                       icon
-                      className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                      tone="destructive"
                       disabled={cancellingInvitationIds.has(invitation.id)}
                       onClick={() => {
                         void (async () => {
@@ -935,9 +1060,9 @@ export function AccountSettingsPure({
                       }}
                     >
                       {cancellingInvitationIds.has(invitation.id) ? (
-                        <Spinner className="h-3.5 w-3.5" />
+                        <Spinner size="small" />
                       ) : (
-                        <X className="h-3.5 w-3.5" />
+                        <X {...stylex.props(styles.glyph)} />
                       )}
                     </Button>
                   )}
@@ -955,29 +1080,31 @@ export function AccountSettingsPure({
           title={t('settings.account.cliAuth.title')}
           description={t('settings.account.cliAuth.description')}
           actions={
+            // A header action sits beside the group's name, so it is a ghost; this
+            // one keeps its word, because a key glyph alone does not say "generate".
             <Button
               variant="ghost"
               size="small"
-              className="h-7 w-auto bg-foreground/[0.06] px-2 font-normal text-foreground hover:bg-foreground/[0.1]"
+              icon={false}
               onClick={() => {
                 setCliApiKeyDialogOpen(true);
               }}
               disabled={!onGenerateCliApiKey}
             >
-              <KeyRound className="mr-1.5 h-3.5 w-3.5" />
+              <KeyRound {...stylex.props(styles.icon)} />
               {t('settings.account.cliAuth.generateButton')}
             </Button>
           }
         >
           {isLoadingCliApiKeys ? (
-            <div className="flex items-center gap-2 px-3 py-3 text-xs text-muted-foreground">
-              <Spinner className="h-3.5 w-3.5" />
+            <div {...stylex.props(settingsSurface.cardNote, styles.noteLoading)}>
+              <Spinner size="small" />
               {t('settings.account.cliAuth.loadingRecords')}
             </div>
           ) : cliApiKeys.length === 0 ? (
-            <div className="px-3 py-3 text-xs text-muted-foreground">
+            <p {...stylex.props(settingsSurface.cardNote)}>
               {t('settings.account.cliAuth.noRecords')}
-            </div>
+            </p>
           ) : (
             cliApiKeys.map((apiKey) => {
               const createdAt = formatCliApiKeyTimestamp(apiKey.createdAt);
@@ -991,31 +1118,23 @@ export function AccountSettingsPure({
                     : null;
 
               return (
-                <div
-                  key={apiKey.id}
-                  className="flex flex-col gap-3 px-3 py-3 text-sm sm:flex-row sm:items-center sm:justify-between"
-                >
-                  <div className="min-w-0 space-y-1">
-                    <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1">
-                      <p className="truncate">
+                <div key={apiKey.id} {...stylex.props(styles.apiKey)}>
+                  <div {...stylex.props(styles.apiKeyText)}>
+                    <div {...stylex.props(styles.apiKeyHead)}>
+                      <p {...stylex.props(styles.apiKeyNote)}>
                         {apiKey.note || t('settings.account.cliAuth.recordNoteFallback')}
                       </p>
-                      {sourceLabel && (
-                        <Badge className="h-5 rounded-md px-1.5 text-[10px]">{sourceLabel}</Badge>
-                      )}
+                      {sourceLabel && <Badge>{sourceLabel}</Badge>}
                       {createdAt && (
-                        <time
-                          dateTime={createdAt.dateTime}
-                          className="shrink-0 text-xs text-muted-foreground"
-                        >
+                        <time dateTime={createdAt.dateTime} {...stylex.props(styles.apiKeyTime)}>
                           {createdAt.label}
                         </time>
                       )}
                     </div>
                     {secondaryLine && (
-                      <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                      <div {...stylex.props(styles.apiKeyMeta)}>
                         {apiKey.keyPreview && (
-                          <span className="font-mono">{apiKey.keyPreview}</span>
+                          <span {...stylex.props(styles.mono)}>{apiKey.keyPreview}</span>
                         )}
                         {lastRequest && (
                           <span>
@@ -1028,14 +1147,15 @@ export function AccountSettingsPure({
                   <Button
                     variant="ghost"
                     size="small"
-                    className="bg-destructive/[0.06] text-destructive hover:bg-destructive/10 hover:text-destructive"
+                    tone="destructive"
+                    className={stylex.props(styles.alignStart).className}
                     onClick={() => setCliApiKeyToRevoke(apiKey)}
                     disabled={revokingCliApiKeyId === apiKey.id}
                   >
                     {revokingCliApiKeyId === apiKey.id ? (
-                      <Spinner className="mr-1.5 h-3.5 w-3.5" />
+                      <Spinner size="small" />
                     ) : (
-                      <Trash2 className="mr-1.5 h-3.5 w-3.5" />
+                      <Trash2 {...stylex.props(styles.icon)} />
                     )}
                     {t('settings.account.cliAuth.revokeButton')}
                   </Button>
@@ -1048,7 +1168,7 @@ export function AccountSettingsPure({
 
       {/* Danger Zone */}
       {isWorkspaceSurface ? (
-        <CompactSection title={t('workspace.danger.title')} className="border-destructive/20">
+        <CompactSection title={t('workspace.danger.title')} tone="danger">
           {role === 'owner' ? workspaceOwnershipSlot : null}
           {role !== 'owner' && (
             <CompactRow
@@ -1056,9 +1176,9 @@ export function AccountSettingsPure({
               helper={t('workspace.danger.leaveWorkspace.description')}
             >
               <Button
-                variant="ghost"
+                variant="secondary"
                 size="small"
-                className="bg-destructive/[0.06] text-destructive hover:bg-destructive/10 hover:text-destructive"
+                tone="destructive"
                 onClick={() => setLeaveDialogOpen(true)}
               >
                 {t('workspace.danger.leaveWorkspace.button')}
@@ -1071,9 +1191,9 @@ export function AccountSettingsPure({
               helper={t('workspace.danger.deleteWorkspace.description')}
             >
               <Button
-                variant="ghost"
+                variant="secondary"
                 size="small"
-                className="bg-destructive/[0.06] text-destructive hover:bg-destructive/10 hover:text-destructive"
+                tone="destructive"
                 onClick={() => {
                   // A live subscription blocks deletion outright; surface the
                   // guidance dialog instead of the type-to-confirm flow (the
@@ -1124,7 +1244,7 @@ export function AccountSettingsPure({
               onClick={() => {
                 void handleRemoveMember();
               }}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              variant="destructive"
             >
               {t('common.remove')}
             </AlertDialog.Action>
@@ -1136,7 +1256,9 @@ export function AccountSettingsPure({
       <AlertDialog.Root open={leaveDialogOpen} onOpenChange={setLeaveDialogOpen}>
         <AlertDialog.Content>
           <AlertDialog.Header>
-            <AlertDialog.Title>{t('workspace.danger.leaveWorkspace.confirmTitle')}</AlertDialog.Title>
+            <AlertDialog.Title>
+              {t('workspace.danger.leaveWorkspace.confirmTitle')}
+            </AlertDialog.Title>
             <AlertDialog.Description>
               {t('workspace.danger.leaveWorkspace.confirmDescription', {
                 workspace: organization.name,
@@ -1158,11 +1280,11 @@ export function AccountSettingsPure({
                 })();
               }}
               disabled={isLeaving}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              variant="destructive"
             >
               {isLeaving ? (
                 <>
-                  <Spinner className="mr-2 h-4 w-4" />
+                  <Spinner size="small" />
                   {t('common.processing')}
                 </>
               ) : (
@@ -1212,24 +1334,24 @@ export function AccountSettingsPure({
       <Dialog.Root open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
         <Dialog.Content>
           <Dialog.Header>
-            <Dialog.Title className="text-destructive">
-              {t('workspace.danger.deleteWorkspace.confirmTitle')}
-            </Dialog.Title>
+            <Dialog.Title>{t('workspace.danger.deleteWorkspace.confirmTitle')}</Dialog.Title>
             <Dialog.Description>
               {t('workspace.danger.deleteWorkspace.confirmDescription', {
                 workspace: organization.name,
               })}
             </Dialog.Description>
           </Dialog.Header>
-          <div className="space-y-4 py-4">
+          <div {...stylex.props(styles.dialogForm)}>
             {billingUiAvailable && deleteBillingGuard?.kind === 'cancel-scheduled' ? (
-              <p className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs font-normal text-amber-950 dark:text-amber-100">
-                {t('workspace.deleteCancelingWarning', {
-                  date: deleteBillingGuard.formattedPeriodEnd ?? '',
-                })}
-              </p>
+              <Alert.Root tone="warning">
+                <Alert.Description>
+                  {t('workspace.deleteCancelingWarning', {
+                    date: deleteBillingGuard.formattedPeriodEnd ?? '',
+                  })}
+                </Alert.Description>
+              </Alert.Root>
             ) : null}
-            <div className="space-y-2">
+            <div {...stylex.props(styles.field)}>
               <UiField.Label htmlFor="confirmText">
                 {t('workspace.danger.deleteWorkspace.typeToConfirm', {
                   workspace: organization.name,
@@ -1275,7 +1397,7 @@ export function AccountSettingsPure({
             >
               {isDeleting ? (
                 <>
-                  <Spinner className="mr-2 h-4 w-4" />
+                  <Spinner size="small" />
                   {t('common.processing')}
                 </>
               ) : (
@@ -1301,15 +1423,13 @@ export function AccountSettingsPure({
       >
         <Dialog.Content>
           <Dialog.Header>
-            <Dialog.Title className="text-destructive">
-              {t('settings.account.accountDeletion.confirmTitle')}
-            </Dialog.Title>
+            <Dialog.Title>{t('settings.account.accountDeletion.confirmTitle')}</Dialog.Title>
             <Dialog.Description>
               {t('settings.account.accountDeletion.confirmDescription')}
             </Dialog.Description>
           </Dialog.Header>
-          <div className="space-y-4 py-4">
-            <div className="space-y-2">
+          <div {...stylex.props(styles.dialogForm)}>
+            <div {...stylex.props(styles.field)}>
               <UiField.Label htmlFor="deleteAccountConfirmText">
                 {t('settings.account.accountDeletion.typeToConfirm', {
                   email: currentUser?.email ?? '',
@@ -1365,7 +1485,7 @@ export function AccountSettingsPure({
             >
               {isDeletingAccount ? (
                 <>
-                  <Spinner className="mr-2 h-4 w-4" />
+                  <Spinner size="small" />
                   {t('common.processing')}
                 </>
               ) : (

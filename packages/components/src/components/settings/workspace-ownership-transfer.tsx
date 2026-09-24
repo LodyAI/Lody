@@ -1,12 +1,22 @@
 import { useId, useMemo, useRef, useState } from 'react';
 import { ConvexError } from 'convex/values';
 import { useTranslation } from 'react-i18next';
+import * as stylex from '@stylexjs/stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { space } from '@lody/ui/tokens/scales.stylex';
 import { Button } from '@lody/ui/button';
 import { Input } from '@lody/ui/input';
 import { Field as UiField } from '@lody/ui/field';
 import { Dialog } from '@/ui/dialog';
 import { Select } from '@lody/ui/select';
 import type { AccountMember } from './account-setting-pure';
+import { CompactRow } from './compact-layout';
+
+const styles = stylex.create({
+  form: { display: 'flex', flexDirection: 'column', gap: space[4] },
+  field: { display: 'flex', flexDirection: 'column', gap: space[1.5] },
+  error: { margin: 0, fontSize: '12px', lineHeight: 1.375, color: colors.destructive },
+});
 
 const errorKeys: Record<string, string> = {
   workspace_transfer_not_owner: 'workspace.transfer.errors.notOwner',
@@ -86,16 +96,17 @@ export function WorkspaceOwnershipTransfer({
     }
   };
   return (
-    <div className="flex flex-wrap items-center justify-between gap-3 px-3 py-3">
-      <div className="min-w-0 flex-1">
-        <p className="text-sm font-normal">{t('workspace.transfer.title')}</p>
-        <p className="mt-1 text-xs text-muted-foreground">
-          {t(candidates.length ? 'workspace.transfer.description' : 'workspace.transfer.noMembers')}
-        </p>
-      </div>
+    // One line of the danger zone's card: the same row as leaving or deleting.
+    <CompactRow
+      label={t('workspace.transfer.title')}
+      helper={t(
+        candidates.length ? 'workspace.transfer.description' : 'workspace.transfer.noMembers'
+      )}
+    >
       <Button
         variant="secondary"
         size="small"
+        tone="destructive"
         disabled={!candidates.length}
         onClick={() => changeOpen(true)}
       >
@@ -107,8 +118,8 @@ export function WorkspaceOwnershipTransfer({
             <Dialog.Title>{t('workspace.transfer.title')}</Dialog.Title>
             <Dialog.Description>{t('workspace.transfer.warning')}</Dialog.Description>
           </Dialog.Header>
-          <div className="space-y-4">
-            <div className="space-y-2">
+          <div {...stylex.props(styles.form)}>
+            <div {...stylex.props(styles.field)}>
               <UiField.Label htmlFor={`${id}-member`}>
                 {t('workspace.transfer.newOwner')}
               </UiField.Label>
@@ -134,7 +145,7 @@ export function WorkspaceOwnershipTransfer({
                 </Select.Content>
               </Select.Root>
             </div>
-            <div className="space-y-2">
+            <div {...stylex.props(styles.field)}>
               <UiField.Label htmlFor={`${id}-confirm`}>
                 {t('workspace.transfer.confirmLabel', { workspace: workspaceName })}
               </UiField.Label>
@@ -147,12 +158,12 @@ export function WorkspaceOwnershipTransfer({
               />
             </div>
             {error ? (
-              <p role="alert" className="text-sm text-destructive">
+              <p role="alert" {...stylex.props(styles.error)}>
                 {t(error)}
               </p>
             ) : null}
           </div>
-          <Dialog.Footer className="gap-2">
+          <Dialog.Footer>
             <Button variant="secondary" disabled={busy} onClick={() => changeOpen(false)}>
               {t('common.cancel')}
             </Button>
@@ -162,6 +173,6 @@ export function WorkspaceOwnershipTransfer({
           </Dialog.Footer>
         </Dialog.Content>
       </Dialog.Root>
-    </div>
+    </CompactRow>
   );
 }

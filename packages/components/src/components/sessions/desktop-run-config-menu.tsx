@@ -1,4 +1,5 @@
 import { useMemo, type ReactNode } from 'react';
+import * as stylex from '@stylexjs/stylex';
 import { useAtomValue } from 'jotai';
 import { Bot, Check, ListChecks, LockKeyhole, Monitor, Plus, ShieldAlert, Zap } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
@@ -15,10 +16,6 @@ import {
 
 import { getAllAgentConfigAtom } from '@/atoms';
 import { getModeIcon as getPermissionModeIcon } from '@/components/chat/chat-landing-selectors';
-import {
-  CONTEXT_PILL_HOVER_CLASS,
-  CONTEXT_PILL_SURFACE_CLASS,
-} from '@/components/chat/context-pill-class';
 import { AgentIcon } from '@/components/icons/agent-icon';
 import { ComposerAgentRolePanel } from '@/components/sessions/composer-agent-role-panel';
 import {
@@ -37,6 +34,7 @@ import {
 } from '@/components/shared/acp-selector-options';
 import type { AcpSessionSelectOption } from '@/components/shared/acp-session-select';
 import type { AgentSelection } from '@/components/shared/agent-selector';
+import { composerSurface as surface } from '@/components/shared/composer-surface';
 import { MenuOptionSearchList } from '@/components/shared/menu-option-search-list';
 import {
   DEEPSEEK_DELEGATION_DISCUSSION_URL,
@@ -53,7 +51,10 @@ import {
 import { cn } from '@/lib/utils';
 import { useOnlineMachines } from '@/hooks/use-online-machines';
 import { Badge } from '@lody/ui/badge';
+import { Button } from '@lody/ui/button';
 import { Switch } from '@lody/ui/switch';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { space } from '@lody/ui/tokens/scales.stylex';
 import { Tooltip } from '@lody/ui/tooltip';
 import { Menu } from '@/ui/menu';
 
@@ -70,6 +71,49 @@ import { Menu } from '@/ui/menu';
  *
  * Both menus use the app-wide DropdownMenu surface.
  */
+
+const styles = stylex.create({
+  /** A row's current value, after its name: the secondary label, truncating. */
+  rowValue: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: space[1.5],
+    flexShrink: 1,
+    minWidth: 0,
+    maxWidth: '10rem',
+    marginInlineStart: 'auto',
+    paddingInlineStart: space[4],
+    color: colors.secondaryLabel,
+    fontWeight: 400,
+  },
+  agentValue: { maxWidth: '9rem' },
+  machineName: { maxWidth: '8rem' },
+  roleName: { maxWidth: '11rem' },
+  agentName: { maxWidth: '9rem' },
+  permissionName: { maxWidth: '9rem' },
+  /** The model keeps its tail when it truncates: `provider/model` loses the prefix. */
+  modelName: { maxWidth: '10rem', direction: 'rtl' },
+  /** The "create a Role" mark at the end of the empty Role row. */
+  createMark: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+    width: '20px',
+    height: '20px',
+    color: colors.tertiaryLabel,
+  },
+  /** A note in a menu: it wraps, so it is not a row's one line. */
+  note: {
+    display: 'flex',
+    alignItems: 'flex-start',
+    gap: space[2],
+    maxWidth: '18rem',
+    paddingBlock: space[1.5],
+    whiteSpace: 'normal',
+    fontWeight: 400,
+  },
+});
 
 /* Option-only submenus hug the longest label instead of inheriting the
    200px surface floor. 108px is the floor so a short name is not a sliver;
@@ -98,14 +142,10 @@ function OptionItem({
       aria-checked={selected}
       closeOnClick={false}
       onClick={onSelect}
-      className="h-7 min-h-0 items-center gap-2 py-0"
+      icon={icon}
+      endContent={selected ? <Check {...stylex.props(surface.glyph14)} aria-hidden="true" /> : null}
     >
-      {icon}
-      {/* nowrap (no min-w-0) so the submenu's max-content includes the label. */}
-      <span className="flex-1 overflow-hidden text-ellipsis whitespace-nowrap font-normal leading-tight">
-        {label}
-      </span>
-      {selected ? <Check className="h-3 w-3 shrink-0" aria-hidden="true" /> : null}
+      {label}
     </Menu.Item>
   );
 }
@@ -124,11 +164,11 @@ function ValueSubTrigger({
   disabled?: boolean;
 }) {
   return (
-    <Menu.SubmenuTrigger className="pr-1.5" disabled={disabled}>
-      <span className="min-w-0 flex-1 truncate">{label}</span>
-      <span className="ml-4 flex min-w-0 max-w-40 items-center gap-1.5 text-[0.9em] text-muted-foreground">
+    <Menu.SubmenuTrigger disabled={disabled}>
+      {label}
+      <span {...stylex.props(styles.rowValue)}>
         {icon}
-        <span className="min-w-0 truncate">{value}</span>
+        <span {...stylex.props(surface.truncate)}>{value}</span>
       </span>
     </Menu.SubmenuTrigger>
   );
@@ -153,39 +193,27 @@ function ToggleItem({
       aria-checked={checked}
       closeOnClick={false}
       onClick={onToggle}
-      className="h-7 min-h-0 py-0"
+      icon={icon}
+      endContent={
+        <Switch
+          checked={checked}
+          aria-hidden="true"
+          tabIndex={-1}
+          className="pointer-events-none shrink-0"
+        />
+      }
     >
-      <span
-        className={cn(
-          'flex h-3.5 w-3.5 shrink-0 items-center justify-center',
-          checked ? 'text-foreground' : 'text-muted-foreground'
-        )}
-      >
-        {icon}
-      </span>
-      <span className="min-w-0 flex-1 truncate">{label}</span>
-      <Switch
-        checked={checked}
-        aria-hidden="true"
-        tabIndex={-1}
-        className="pointer-events-none ml-2 h-3.5 w-6 shrink-0 [&>span]:h-3 [&>span]:w-3 [&>span]:data-[state=checked]:translate-x-2.5"
-      />
+      {label}
     </Menu.Item>
   );
 }
 
-/** Hide Mode/Model labels when the composer face slot is this narrow. */
-export const COMPOSER_FACE_LABEL_CLASS = '@max-[280px]/composer-face:hidden';
-
-/* Shared trigger chrome for both footer buttons. Compact (label-hidden) face
-   is a 28px square so plus / model / mode share the same hit box and gap. */
-const TRIGGER_CLASS = cn(
-  'inline-flex h-7 min-w-0 select-none items-center gap-1.5 rounded-[4px] px-2 text-[0.9em] leading-tight',
-  '@max-[280px]/composer-face:w-7 @max-[280px]/composer-face:shrink-0 @max-[280px]/composer-face:justify-center @max-[280px]/composer-face:gap-0 @max-[280px]/composer-face:px-0',
-  'text-muted-foreground transition-colors hover:bg-hover hover:text-foreground',
-  'data-[state=open]:bg-hover data-[state=open]:text-foreground',
-  'disabled:cursor-default disabled:opacity-70'
-);
+/* Shared trigger chrome for both footer buttons: the composer's ghost trigger.
+   Its compact (label-hidden) face is a 28px square so plus / model / mode share
+   the same hit box and gap. */
+const triggerClassName = (state: { open: boolean }) =>
+  stylex.props(surface.trigger, surface.triggerCompact, state.open && surface.triggerOpen)
+    .className ?? '';
 
 export type DesktopMachineMenuOption = {
   value: MachineId;
@@ -222,60 +250,18 @@ export function DesktopMachineMenu({
 
   return (
     <Menu.Root>
-      <Menu.Trigger render={<button
-          type="button"
-          className={cn(
-            'inline-flex h-6 min-w-0 select-none items-center gap-1.5 rounded-md px-2',
-            CONTEXT_PILL_SURFACE_CLASS,
-            'text-[0.9em] font-normal leading-tight text-foreground/80 transition-colors [&_svg]:text-current [&_svg]:opacity-100',
-            CONTEXT_PILL_HOVER_CLASS,
-            'disabled:cursor-default disabled:opacity-70'
-          )}
-          disabled={isDisabled}
-          title={disabledReason}
-          aria-label={t('chat.machineSelector.placeholder', 'Machine')}
-        >
-          <Monitor className="h-4 w-4 shrink-0" aria-hidden="true" />
-          <span className="max-w-32 truncate">{label}</span>
-          {selectedIsLocal ? (
-            <Badge className="shrink-0 border-transparent bg-foreground/[0.06] px-1.5 py-0 text-[10px] font-normal text-muted-foreground">
-              {t('chat.machineSelector.local', 'Local')}
-            </Badge>
-          ) : null}
-          {selectedOption?.isPrivate ? (
-            <LockKeyhole
-              className="h-3.5 w-3.5 shrink-0 text-muted-foreground"
-              aria-hidden="true"
-            />
-          ) : null}
-        </button>}>
-        <button
-          type="button"
-          className={cn(
-            'inline-flex h-6 min-w-0 select-none items-center gap-1.5 rounded-md px-2',
-            CONTEXT_PILL_SURFACE_CLASS,
-            'text-[0.9em] font-normal leading-tight text-foreground/80 transition-colors [&_svg]:text-current [&_svg]:opacity-100',
-            CONTEXT_PILL_HOVER_CLASS,
-            'disabled:cursor-default disabled:opacity-70'
-          )}
-          disabled={isDisabled}
-          title={disabledReason}
-          aria-label={t('chat.machineSelector.placeholder', 'Machine')}
-        >
-          <Monitor className="h-4 w-4 shrink-0" aria-hidden="true" />
-          <span className="max-w-32 truncate">{label}</span>
-          {selectedIsLocal ? (
-            <Badge className="shrink-0 border-transparent bg-foreground/[0.06] px-1.5 py-0 text-[10px] font-normal text-muted-foreground">
-              {t('chat.machineSelector.local', 'Local')}
-            </Badge>
-          ) : null}
-          {selectedOption?.isPrivate ? (
-            <LockKeyhole
-              className="h-3.5 w-3.5 shrink-0 text-muted-foreground"
-              aria-hidden="true"
-            />
-          ) : null}
-        </button>
+      <Menu.Trigger
+        disabled={isDisabled}
+        title={disabledReason}
+        aria-label={t('chat.machineSelector.placeholder', 'Machine')}
+        render={<Button type="button" variant="secondary" size="mini" />}
+      >
+        <Monitor {...stylex.props(surface.glyph14)} aria-hidden="true" />
+        <span {...stylex.props(surface.truncate, styles.machineName)}>{label}</span>
+        {selectedIsLocal ? <Badge>{t('chat.machineSelector.local', 'Local')}</Badge> : null}
+        {selectedOption?.isPrivate ? (
+          <LockKeyhole {...stylex.props(surface.glyph12, surface.hint)} aria-hidden="true" />
+        ) : null}
       </Menu.Trigger>
       <Menu.Content
         side="top"
@@ -283,33 +269,34 @@ export function DesktopMachineMenu({
         collisionAvoidance={{ side: 'none', align: 'none', fallbackAxisSide: 'none' }}
         className="min-w-52 max-w-72"
       >
-        <Menu.GroupLabel className="px-2.5 pb-1 pt-1.5 text-[0.68rem] font-medium tracking-wide text-muted-foreground/70">
-          {t('chat.machineSelector.placeholder', 'Machine')}
-        </Menu.GroupLabel>
+        <Menu.GroupLabel>{t('chat.machineSelector.placeholder', 'Machine')}</Menu.GroupLabel>
         {options.map((option) => (
           <Menu.Item
             key={option.value}
             disabled={option.disabled}
             onClick={() => onChange(option.value)}
+            icon={<Monitor {...stylex.props(surface.glyph16)} aria-hidden="true" />}
+            endContent={
+              option.value === value ? (
+                <Check {...stylex.props(surface.glyph14)} aria-hidden="true" />
+              ) : null
+            }
           >
-            <Monitor className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-            <span
-              className={cn('min-w-0 flex-1 truncate', option.value === value && 'font-medium')}
-            >
-              {option.label}
-            </span>
+            {option.label}
             {option.value === visibleLocalMachineId ? (
-              <Badge className="shrink-0 border-transparent bg-foreground/[0.06] px-1.5 py-0 text-[10px] font-normal text-muted-foreground">
-                {t('chat.machineSelector.local', 'Local')}
-              </Badge>
+              <Badge>{t('chat.machineSelector.local', 'Local')}</Badge>
             ) : null}
             {option.isPrivate ? (
               <Tooltip.Root>
-                <Tooltip.Trigger delay={250} render={<span className="inline-flex shrink-0 items-center gap-1 rounded border border-border/70 px-1.5 py-0.5 text-[0.64rem] font-medium text-muted-foreground">
-                    <LockKeyhole className="h-3 w-3" aria-hidden="true" />
-                    {t('sharing.private', 'Private')}
-                  </span>}/>
-                <Tooltip.Content side="right" className="max-w-64 text-[0.8em]">
+                <Tooltip.Trigger
+                  delay={250}
+                  render={
+                    <Badge icon={<LockKeyhole size="100%" aria-hidden="true" />}>
+                      {t('sharing.private', 'Private')}
+                    </Badge>
+                  }
+                />
+                <Tooltip.Content side="right" className="max-w-64">
                   {t(
                     'sharing.machinePrivateHelp',
                     'Only you can use this machine. Share it from machine settings so teammates can see its shared projects and conversations.'
@@ -317,19 +304,16 @@ export function DesktopMachineMenu({
                 </Tooltip.Content>
               </Tooltip.Root>
             ) : null}
-            {option.value === value ? (
-              <Check className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-            ) : null}
           </Menu.Item>
         ))}
         {onAddMachine ? (
           <>
             {options.length > 0 ? <Menu.Separator /> : null}
-            <Menu.Item onClick={onAddMachine}>
-              <Plus className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-              <span className="min-w-0 flex-1 truncate">
-                {t('machinePairing.addMachine', 'Add machine')}
-              </span>
+            <Menu.Item
+              onClick={onAddMachine}
+              icon={<Plus {...stylex.props(surface.glyph16)} aria-hidden="true" />}
+            >
+              {t('machinePairing.addMachine', 'Add machine')}
             </Menu.Item>
           </>
         ) : null}
@@ -555,41 +539,25 @@ export function DesktopRunConfigMenu({
   const configFaceParts: ReactNode[] = [];
   if (modelLabel) {
     configFaceParts.push(
-      <span
-        key="model"
-        className={cn(
-          'block min-w-0 max-w-40 truncate text-left [direction:rtl]',
-          COMPOSER_FACE_LABEL_CLASS
-        )}
-      >
+      <span key="model" {...stylex.props(surface.faceText, styles.modelName)}>
         <span dir="ltr">{modelLabel}</span>
       </span>
     );
   }
   if (thinkingLabel) {
     configFaceParts.push(
-      <span key="thinking" className={cn('shrink-0', COMPOSER_FACE_LABEL_CLASS)}>
+      <span key="thinking" {...stylex.props(surface.faceFixed)}>
         {thinkingLabel}
       </span>
     );
   }
   if (planOn) {
     configFaceParts.push(
-      <ListChecks
-        key="plan"
-        className={cn('h-3.5 w-3.5 shrink-0 text-primary', COMPOSER_FACE_LABEL_CLASS)}
-        aria-hidden="true"
-      />
+      <ListChecks key="plan" {...stylex.props(surface.faceLive)} aria-hidden="true" />
     );
   }
   if (fastOn) {
-    configFaceParts.push(
-      <Zap
-        key="fast"
-        className={cn('h-3.5 w-3.5 shrink-0 text-primary', COMPOSER_FACE_LABEL_CLASS)}
-        aria-hidden="true"
-      />
-    );
+    configFaceParts.push(<Zap key="fast" {...stylex.props(surface.faceLive)} aria-hidden="true" />);
   }
   /* Permission joins the face ONLY behind a Role, and only one the Role pins:
      otherwise the standalone permission button is showing the same value a step
@@ -612,18 +580,12 @@ export function DesktopRunConfigMenu({
     const warning = classifyPermissionModeFace(permissionFace.value);
     configFaceParts.push(
       warning.kind !== 'hidden' && warning.tone === 'warning' ? (
-        <span
-          key="permission"
-          className={cn(
-            'flex shrink-0 items-center gap-1 text-status-warning',
-            COMPOSER_FACE_LABEL_CLASS
-          )}
-        >
-          <ShieldAlert className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+        <span key="permission" {...stylex.props(surface.faceGroup, surface.faceWarning)}>
+          <ShieldAlert {...stylex.props(surface.glyph14)} aria-hidden="true" />
           {permissionFace.label}
         </span>
       ) : (
-        <span key="permission" className={cn('shrink-0', COMPOSER_FACE_LABEL_CLASS)}>
+        <span key="permission" {...stylex.props(surface.faceFixed)}>
           {permissionFace.label}
         </span>
       )
@@ -656,19 +618,11 @@ export function DesktopRunConfigMenu({
   if (!hasAnyRow) return null;
 
   const runConfigButtonAriaLabel = t('chat.runConfig.buttonAriaLabel', 'Run configuration');
-  const triggerButton = (
-    <button
-      type="button"
-      className={cn(
-        TRIGGER_CLASS,
-        disabledReason &&
-          'cursor-default opacity-70 hover:bg-transparent hover:text-muted-foreground'
-      )}
-      aria-label={runConfigButtonAriaLabel}
-      aria-disabled={disabledReason ? true : undefined}
-    >
+  /* The face, shared by the menu trigger and the inert (tooltip-only) button. */
+  const triggerFace = (
+    <>
       {selectedRole ? (
-        <span className="shrink-0 text-sm leading-none" aria-hidden="true">
+        <span {...stylex.props(surface.emoji)} aria-hidden="true">
           {getAgentRoleEmoji(selectedRole)}
         </span>
       ) : selectedAgentConfig ? (
@@ -677,39 +631,33 @@ export function DesktopRunConfigMenu({
           agentType={selectedAgentConfig.agentType}
           brandId={selectedAgentConfig.brandId}
           env={selectedAgentConfig.env}
-          className="h-4 w-4 shrink-0"
+          className={stylex.props(surface.glyph16).className}
         />
       ) : fallbackAgent?.cliType && fallbackAgent.agentType ? (
         <AgentIcon
           cliType={fallbackAgent.cliType}
           agentType={fallbackAgent.agentType}
-          className="h-4 w-4 shrink-0"
+          className={stylex.props(surface.glyph16).className}
         />
       ) : (
-        <Bot className="h-4 w-4 shrink-0" strokeWidth={1.5} aria-hidden="true" />
+        <Bot {...stylex.props(surface.glyph16)} strokeWidth={1.5} aria-hidden="true" />
       )}
       {/* A Role names itself and nothing else: it IS the whole run
           configuration, so its values belong beside the button rather than
           crowding the one thing there is to click. */}
       {selectedRole ? (
-        <span
-          className={cn('block min-w-0 max-w-44 truncate text-left', COMPOSER_FACE_LABEL_CLASS)}
-        >
-          {selectedRole.name}
-        </span>
+        <span {...stylex.props(surface.faceText, styles.roleName)}>{selectedRole.name}</span>
       ) : (
         <>
           {showAgentNameInTrigger ? (
-            <span
-              className={cn('block min-w-0 max-w-36 truncate text-left', COMPOSER_FACE_LABEL_CLASS)}
-            >
+            <span {...stylex.props(surface.faceText, styles.agentName)}>
               {selectedAgentConfig?.name ?? emptyAgentLabel ?? agentLabel}
             </span>
           ) : null}
           {withFaceDots(configFaceParts, showAgentNameInTrigger)}
         </>
       )}
-    </button>
+    </>
   );
 
   const menu = (
@@ -718,11 +666,29 @@ export function DesktopRunConfigMenu({
         <Tooltip.Root>
           {/* A native disabled button cannot reliably trigger hover/focus events.
               Keep this focusable but outside DropdownMenuTrigger so it stays inert. */}
-          <Tooltip.Trigger delay={300} render={triggerButton}/>
+          <Tooltip.Trigger
+            delay={300}
+            render={
+              <button
+                type="button"
+                aria-label={runConfigButtonAriaLabel}
+                aria-disabled
+                {...stylex.props(surface.trigger, surface.triggerCompact, surface.triggerInert)}
+              >
+                {triggerFace}
+              </button>
+            }
+          />
           <Tooltip.Content side="top">{disabledReason}</Tooltip.Content>
         </Tooltip.Root>
       ) : (
-        <Menu.Trigger render={triggerButton}>{triggerButton}</Menu.Trigger>
+        <Menu.Trigger
+          aria-label={runConfigButtonAriaLabel}
+          className={triggerClassName}
+          render={<button type="button" />}
+        >
+          {triggerFace}
+        </Menu.Trigger>
       )}
       <Menu.Content align="start" className="min-w-48">
         {onRecentRunConfigSelect ? (
@@ -739,26 +705,32 @@ export function DesktopRunConfigMenu({
             <Menu.Item
               disabled={!agentRoles.onCreate}
               onClick={() => agentRoles.onCreate?.()}
-              className="h-7 min-h-0"
-            >
-              <span className="min-w-0 flex-1 truncate">{roleLabel}</span>
-              <Tooltip.Root>
-                <Tooltip.Trigger delay={300} render={<span
-                    className="ml-2 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-sm text-muted-foreground"
-                    aria-label={t(
+              endContent={
+                <Tooltip.Root>
+                  <Tooltip.Trigger
+                    delay={300}
+                    render={
+                      <span
+                        {...stylex.props(styles.createMark)}
+                        aria-label={t(
+                          'chat.runConfig.roles.createFromSettings',
+                          'Create role from current settings'
+                        )}
+                      >
+                        <Plus {...stylex.props(surface.glyph14)} aria-hidden="true" />
+                      </span>
+                    }
+                  />
+                  <Tooltip.Content side="right">
+                    {t(
                       'chat.runConfig.roles.createFromSettings',
                       'Create role from current settings'
                     )}
-                  >
-                    <Plus className="h-3.5 w-3.5" aria-hidden="true" />
-                  </span>}/>
-                <Tooltip.Content side="right">
-                  {t(
-                    'chat.runConfig.roles.createFromSettings',
-                    'Create role from current settings'
-                  )}
-                </Tooltip.Content>
-              </Tooltip.Root>
+                  </Tooltip.Content>
+                </Tooltip.Root>
+              }
+            >
+              {roleLabel}
             </Menu.Item>
           ) : (
             <Menu.Submenu>
@@ -767,13 +739,13 @@ export function DesktopRunConfigMenu({
                 value={selectedRole?.name ?? t('chat.runConfig.roles.none', 'None')}
                 icon={
                   selectedRole ? (
-                    <span className="text-sm leading-none" aria-hidden="true">
+                    <span {...stylex.props(surface.emoji)} aria-hidden="true">
                       {getAgentRoleEmoji(selectedRole)}
                     </span>
                   ) : null
                 }
               />
-              <Menu.Content className="max-w-[min(29.5rem,var(--radix-popper-available-width,29.5rem))] overflow-x-hidden p-0">
+              <Menu.Content className="max-w-[min(29.5rem,var(--radix-popper-available-width,29.5rem))] overflow-x-hidden">
                 <ComposerAgentRolePanel
                   items={agentRoles.items}
                   machine={agentRoles.machine}
@@ -789,18 +761,18 @@ export function DesktopRunConfigMenu({
         {agentOptions.length > 0 || selectedAgentConfig ? (
           isAgentLocked ? (
             <Menu.Item disabled>
-              <span className="min-w-0 flex-1 truncate">{agentLabel}</span>
-              <span className="ml-4 flex max-w-36 items-center gap-1.5 text-[0.9em] text-muted-foreground">
+              {agentLabel}
+              <span {...stylex.props(styles.rowValue, styles.agentValue)}>
                 {selectedAgentConfig ? (
                   <AgentIcon
                     cliType={selectedAgentConfig.cliType}
                     agentType={selectedAgentConfig.agentType}
                     brandId={selectedAgentConfig.brandId}
                     env={selectedAgentConfig.env}
-                    className="h-3 w-3 shrink-0"
+                    className={stylex.props(surface.glyph12).className}
                   />
                 ) : null}
-                <span className="truncate">{selectedAgentConfig?.name}</span>
+                <span {...stylex.props(surface.truncate)}>{selectedAgentConfig?.name}</span>
               </span>
             </Menu.Item>
           ) : (
@@ -816,7 +788,7 @@ export function DesktopRunConfigMenu({
                         agentType={config.agentType}
                         brandId={config.brandId}
                         env={config.env}
-                        className="h-3.5 w-3.5 shrink-0"
+                        className={stylex.props(surface.glyph16).className}
                       />
                     }
                     label={config.name}
@@ -874,9 +846,9 @@ export function DesktopRunConfigMenu({
           <Menu.Submenu>
             <ValueSubTrigger label={modelRowLabel} value={modelLabel} />
             <Menu.Content
-              // `p-0` + column layout so the search row stays put while only the
-              // options scroll; the padding it drops moves onto the list itself.
-              className={cn(COMPACT_OPTION_SUBMENU_CLASS, 'flex flex-col overflow-y-hidden p-0')}
+              // The popup is already a column: holding its own overflow keeps the
+              // search row put while only the options under it scroll.
+              className={cn(COMPACT_OPTION_SUBMENU_CLASS, 'overflow-y-hidden')}
               // Cap the list so a long model list scrolls inside a compact menu
               // instead of running the full viewport height. Inline (not a max-h-*
               // class) so it reliably wins over the base content's max-h, and clamps
@@ -908,7 +880,6 @@ export function DesktopRunConfigMenu({
 
         {showDeepSeekDelegationWarning ? (
           <Menu.Item
-            className="mx-1 my-1 max-w-72 items-start gap-2 whitespace-normal border border-status-warning/30 bg-status-warning/[0.08] px-2.5 py-2 focus:bg-status-warning/[0.14]"
             render={
               <a
                 href={DEEPSEEK_DELEGATION_DISCUSSION_URL}
@@ -919,7 +890,9 @@ export function DesktopRunConfigMenu({
                   void openExternalUrl(DEEPSEEK_DELEGATION_DISCUSSION_URL);
                 }}
               >
-                <DeepSeekDelegationWarningContent />
+                <span {...stylex.props(styles.note)}>
+                  <DeepSeekDelegationWarningContent />
+                </span>
               </a>
             }
           />
@@ -972,7 +945,9 @@ export function DesktopRunConfigMenu({
         {planSelector || fastSelector ? <Menu.Separator /> : null}
         {planSelector ? (
           <ToggleItem
-            icon={<ListChecks className="h-3.5 w-3.5" strokeWidth={1.8} aria-hidden="true" />}
+            icon={
+              <ListChecks {...stylex.props(surface.glyph16)} strokeWidth={1.8} aria-hidden="true" />
+            }
             label={planRowLabel}
             checked={planOn}
             onToggle={() =>
@@ -988,7 +963,7 @@ export function DesktopRunConfigMenu({
         ) : null}
         {fastSelector ? (
           <ToggleItem
-            icon={<Zap className="h-3.5 w-3.5" strokeWidth={1.8} aria-hidden="true" />}
+            icon={<Zap {...stylex.props(surface.glyph16)} strokeWidth={1.8} aria-hidden="true" />}
             label={fastRowLabel}
             checked={fastOn}
             onToggle={() =>
@@ -1012,14 +987,7 @@ export function DesktopRunConfigMenu({
      The Detailed tab is where they are changed. */
   const roleConfigFace =
     selectedRole && configFaceParts.length > 0 ? (
-      <span
-        className={cn(
-          'pointer-events-none flex min-w-0 select-none items-center gap-1 text-[11px] leading-tight text-muted-foreground/60',
-          COMPOSER_FACE_LABEL_CLASS
-        )}
-      >
-        {withFaceDots(configFaceParts, false)}
-      </span>
+      <span {...stylex.props(surface.faceInert)}>{withFaceDots(configFaceParts, false)}</span>
     ) : null;
 
   return roleConfigFace ? (
@@ -1034,10 +1002,7 @@ export function DesktopRunConfigMenu({
 
 function FaceDot() {
   return (
-    <span
-      aria-hidden="true"
-      className={cn('shrink-0 select-none text-muted-foreground/60', COMPOSER_FACE_LABEL_CLASS)}
-    >
+    <span aria-hidden="true" {...stylex.props(surface.faceDot)}>
       ·
     </span>
   );
@@ -1058,24 +1023,17 @@ function PermissionModeItem({
     <Menu.Item
       disabled={option.disabled}
       onClick={onSelect}
-      className="h-7 min-h-0 items-center gap-1.5 py-0"
+      icon={permissionModeIcon(option.value)}
+      endContent={selected ? <Check {...stylex.props(surface.glyph14)} aria-hidden="true" /> : null}
     >
-      <span className="flex h-3.5 w-3.5 shrink-0 items-center justify-center [&_svg]:h-3.5 [&_svg]:w-3.5">
-        {permissionModeIcon(option.value)}
-      </span>
-      <span className="min-w-0 flex-1 truncate font-normal">{option.label}</span>
-      {selected ? <Check className="h-3.5 w-3.5 shrink-0" aria-hidden="true" /> : null}
+      {option.label}
     </Menu.Item>
   );
   if (!option.description) return item;
   return (
     <Tooltip.Root>
-      <Tooltip.Trigger delay={300} render={item}/>
-      <Tooltip.Content
-        side="right"
-        align="start"
-        className="max-w-72 whitespace-pre-wrap text-left text-[0.8em] font-normal leading-snug"
-      >
+      <Tooltip.Trigger delay={300} render={item} />
+      <Tooltip.Content side="right" align="start" className="max-w-72 whitespace-pre-wrap">
         {option.description}
       </Tooltip.Content>
     </Tooltip.Root>
@@ -1087,7 +1045,13 @@ function PermissionModeItem({
 function permissionModeIcon(modeId: string | null): ReactNode {
   const face = classifyPermissionModeFace(modeId);
   if (face.kind !== 'hidden' && face.tone === 'warning') {
-    return <ShieldAlert className="h-4 w-4 shrink-0 text-status-warning" strokeWidth={1.5} />;
+    return (
+      <ShieldAlert
+        {...stylex.props(surface.glyph14, surface.faceWarning)}
+        strokeWidth={1.5}
+        aria-hidden="true"
+      />
+    );
   }
   return getPermissionModeIcon(modeId);
 }
@@ -1135,21 +1099,17 @@ export function DesktopPermissionModeButton({
   return (
     <Menu.Root>
       <Menu.Trigger
-        render={
-          <button type="button" className={TRIGGER_CLASS} aria-label={permissionLabel}>
-            <span className="flex h-4 w-4 shrink-0 items-center justify-center [&_svg]:h-4 [&_svg]:w-4 [&_svg]:stroke-[1.5]">
-              {permissionModeIcon(value ?? null)}
-            </span>
-            <span className={cn('min-w-0 max-w-36 truncate', COMPOSER_FACE_LABEL_CLASS)}>
-              {label ?? permissionLabel}
-            </span>
-          </button>
-        }
-      />
+        aria-label={permissionLabel}
+        className={triggerClassName}
+        render={<button type="button" />}
+      >
+        <span {...stylex.props(surface.glyph)}>{permissionModeIcon(value ?? null)}</span>
+        <span {...stylex.props(surface.faceText, styles.permissionName)}>
+          {label ?? permissionLabel}
+        </span>
+      </Menu.Trigger>
       <Menu.Content align="start" className="w-max min-w-44 max-w-64">
-        <Menu.GroupLabel className="normal-case px-2.5 pb-1 pt-1.5 text-[0.68rem] font-medium tracking-normal text-muted-foreground/70">
-          {permissionLabel}
-        </Menu.GroupLabel>
+        <Menu.GroupLabel>{permissionLabel}</Menu.GroupLabel>
         {options.map((opt) => (
           <PermissionModeItem
             key={opt.value}

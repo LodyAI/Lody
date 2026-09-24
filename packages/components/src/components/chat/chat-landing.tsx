@@ -59,6 +59,7 @@ import {
   RefreshCw,
   X,
 } from 'lucide-react';
+import * as stylex from '@stylexjs/stylex';
 import { Spinner } from '@lody/ui/spinner';
 import { Button } from '@lody/ui/button';
 import { PiProviderMigrationCard } from './pi-provider-migration-card';
@@ -202,8 +203,8 @@ import { wrapPastedTextChipLabel } from '@/components/mentions/mention-chips';
 import { ErrorBoundary } from '@/components/error-boundary';
 import { ChatLandingView, type ChatLandingHintType } from './chat-landing-view';
 import { getSessionCreationNavigation } from './submission/use-composer-navigation-focus';
-import { BranchSelector, getSelectorTagClassName } from './chat-landing-selectors';
-import { CONTEXT_PILL_SURFACE_CLASS } from './context-pill-class';
+import { BranchSelector } from './chat-landing-selectors';
+import { composerSurface } from '@/components/shared/composer-surface';
 import {
   extractIssuePRMentionsFromText,
   useKnownIssuePrItems,
@@ -1586,8 +1587,6 @@ function WorkspaceChatLanding({
   ]);
 
   // ── Agent/Mode/Model config ──
-  const selectorTagClassName = getSelectorTagClassName(tone);
-
   const selectedConfig = useMemo<AgentConfigMeta | undefined>(
     () =>
       selectedAgent ? executorConfigs.find((cfg) => cfg.id === selectedAgent.agentId) : undefined,
@@ -3437,7 +3436,7 @@ function WorkspaceChatLanding({
         emptyText={t('chat.branchEmpty', { defaultValue: 'No branches found' })}
         loading={contextType === 'local' ? loadingLocalGitState || runtimeInitializing : undefined}
         loadingText={t('chat.branchLoading', { defaultValue: 'Loading branches...' })}
-        className="h-6 min-w-0 max-w-full gap-1.5 rounded-none border-none bg-transparent px-2 text-[0.9em] font-normal text-foreground/80 hover:bg-foreground/[0.06] hover:text-foreground disabled:opacity-100 [&_span]:text-[0.9em] [&_span]:leading-tight [&_svg]:text-current [&_svg]:opacity-100"
+        className="min-w-0 max-w-full"
         disabled={isBranchDisabled}
       />
     </span>
@@ -3448,16 +3447,22 @@ function WorkspaceChatLanding({
     localGitStateError &&
     !loadingLocalGitState ? (
       <Tooltip.Root>
-        <Tooltip.Trigger delay={300} render={<Button
-            type="button"
-            variant="ghost"
-            icon
-            className="h-6 w-6 rounded-md px-0 text-status-error hover:text-status-error [&_svg]:size-3.5"
-            onClick={handleLocalGitStateRetry}
-            aria-label={t('chat.localGitStateRetry', 'Retry loading branches')}
-          >
-            <RefreshCw aria-hidden="true" />
-          </Button>}/>
+        <Tooltip.Trigger
+          delay={300}
+          render={
+            <Button
+              type="button"
+              variant="ghost"
+              size="mini"
+              tone="destructive"
+              icon
+              onClick={handleLocalGitStateRetry}
+              aria-label={t('chat.localGitStateRetry', 'Retry loading branches')}
+            >
+              <RefreshCw {...stylex.props(composerSurface.glyph14)} aria-hidden="true" />
+            </Button>
+          }
+        />
         <Tooltip.Content side="bottom">
           {t('chat.localGitStateRetry', 'Retry loading branches')}
         </Tooltip.Content>
@@ -3493,15 +3498,10 @@ function WorkspaceChatLanding({
 
   const branchWorktreePill =
     branchSelectorNode || topWorktreeNode ? (
-      <div
-        className={cn(
-          'flex h-6 min-w-0 max-w-full items-center overflow-hidden rounded-md',
-          CONTEXT_PILL_SURFACE_CLASS
-        )}
-      >
+      <div {...stylex.props(composerSurface.contextPill)}>
         {branchSelectorNode}
         {branchSelectorNode && topWorktreeNode ? (
-          <span aria-hidden="true" className="h-4 w-px shrink-0 bg-border" />
+          <span aria-hidden="true" {...stylex.props(composerSurface.contextPillDivider)} />
         ) : null}
         {topWorktreeNode}
       </div>
@@ -3774,12 +3774,11 @@ function WorkspaceChatLanding({
         <Button
           type="button"
           variant="ghost"
-          size="small"
-          className={cn(selectorTagClassName, 'text-[0.9em] leading-tight')}
+          size="mini"
           onClick={resetErrorBoundary}
           aria-label={t('chat.retryTargetSelector', 'Retry target selector')}
         >
-          <RefreshCw aria-hidden="true" className="size-3" />
+          <RefreshCw {...stylex.props(composerSurface.glyph12)} aria-hidden="true" />
           {t('common.retry', 'Retry')}
         </Button>
       )}

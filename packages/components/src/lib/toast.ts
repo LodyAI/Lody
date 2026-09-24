@@ -29,7 +29,9 @@ const add =
       type,
       description: options?.description,
       timeout: options?.duration,
-      id: options?.id,
+      // The same message reported again updates the one already showing
+      // instead of stacking a copy: "Copied" five times is one fact.
+      id: options?.id ?? (typeof title === 'string' ? `${type}:${title}` : undefined),
       actionProps: options?.action
         ? { children: options.action.label, onClick: options.action.onClick }
         : undefined,
