@@ -103,3 +103,8 @@ execution/consent rules. These rules also bind CLI callers outside that director
   `lastMessageAt` rather than a turn-end hook, and keep only scheduling state (never PR status) in
   `~/.lody/pr-poller-state.json`. Spec: `specs/pr-status-reconciler.md`; invariants:
   `src/lib/pr-poller/AGENTS.md`.
+- Cloud sync reconnects are paced by `src/lib/cloud-sync-reconnect.ts` (the invariant lives here
+  because `src/lib/AGENTS.md` is at its size gate). The Convex client's own backoff caps at 16s
+  forever, so never hand `ConvexClient` the bare global WebSocket, and keep the gate's online
+  signal wired: the minute-scale ceiling is only safe while a recovery signal can cut it short.
+  Spec: `specs/cloud-sync-reconnect.md`.
