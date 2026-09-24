@@ -164,9 +164,10 @@ The owner's screenshots of the running app showed four more defects:
   `PreviewSelect` became a `@lody/ui` Select that previews the focused row and
   cancels when closed without a pick. Both font pickers became Comboboxes, and
   the terminal size became a `NumberField`.
-- **The switch.** On is now a layer that grows from the start edge with the
-  thumb, not a whole-track colour swap. The emoji slot gained a 6px gap before
-  the value.
+- **The switch.** On was briefly a layer growing from the start edge with the
+  thumb. The owner asked for it back: the whole track now turns to the accent
+  fill again, cross-faded while the thumb slides, the way platform switches
+  read. The emoji slot gained a 6px gap before the value.
 
 ## Correction: one flat material for every value, nothing sunken
 

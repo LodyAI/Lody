@@ -87,11 +87,11 @@ A checkbox and a radio are the "16px things" the corner rule names: a
 `field.boxSize` box at `radius.mini`, round for a radio. A switch is a
 `field.switchWidth` by `field.switchHeight` track at `radius.full` holding a
 `field.thumb` thumb raised with `field.thumbShadow`, the same height as the box
-so a settings row carrying both lines up. Off is the well. On, the accent is
-uncovered rather than switched: it is a layer over the well that grows from the
-start edge on the thumb's own duration and easing, so the colour is what the
-thumb has passed over, the way a physical switch shows its "on" side. It is
-also where the well's shadow gives way to `field.checkedEdge`. Because CSS cannot
+so a settings row carrying both lines up. Off is the well. On, the whole track
+turns to the accent fill, cross-faded at `duration.fast` while the thumb slides
+— the way every platform's switch reads. A layer growing from the start edge
+was tried and dropped: its leading edge was a hard vertical line crossing a
+pill. On is also where the well's shadow gives way to `field.checkedEdge`. Because CSS cannot
 append to a box-shadow list, a control that changes its edge restates the ring
 with it, the way each Button variant does.
 
