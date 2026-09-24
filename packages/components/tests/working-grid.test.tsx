@@ -22,6 +22,7 @@ import {
   crestDelayMs,
   tileSeaPoint,
   wavePhase,
+  WORKING_GRID_WAVELENGTH,
   workingGridWaves,
 } from '../src/ui/working-grid-sea';
 
@@ -61,6 +62,33 @@ describe('working grid sea', () => {
     const realUpper = { ...upper, rowPitch: null };
     const realLower = { ...lower, rowPitch: null };
     expect(tileSeaPoint(realLower, 0, 0)[1] - tileSeaPoint(realUpper, 0, 2)[1]).toBe(4);
+  });
+
+  it('always keeps some tile of a mark near a crest', () => {
+    // A tile's size and brightness follow the product of the two wave heights.
+    // With waves longer than a mark, a double trough covered all nine tiles and
+    // the whole mark faded out; the default wavelength must rule that out.
+    const waves = workingGridWaves('across');
+    let dimmest = 1;
+    for (let row = 0; row < 40; row += 1) {
+      for (let left = 0; left < 40; left += 3) {
+        const placement = { left, top: row * 28, size: 14, rowPitch: 28 };
+        const tiles = [0, 1, 2].flatMap((j) => [0, 1, 2].map((i) => tileSeaPoint(placement, i, j)));
+        for (let t = 0; t < 80_000; t += 50) {
+          const brightest = Math.max(
+            ...tiles.map(([x, y]) =>
+              waves.reduce(
+                (height, wave) =>
+                  height * sin01(wavePhase(wave, x, y, WORKING_GRID_WAVELENGTH) - t / wave.periodMs),
+                1
+              )
+            )
+          );
+          dimmest = Math.min(dimmest, brightest);
+        }
+      }
+    }
+    expect(dimmest).toBeGreaterThan(0.2);
   });
 
   it('gives neighbouring tiles neighbouring phases', () => {

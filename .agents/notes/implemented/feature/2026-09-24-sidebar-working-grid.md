@@ -37,10 +37,14 @@ breathing dots, rings, bubbles and a click-ripple layer were tried and dropped.
 The kept form and its defaults:
 
 - 3×3 tiles, corner radius 30% of the tile, gap 0.35 of the tile, 14px overall.
-- Two plane waves, 3.2 and 4.4 cells long (× wavelength 1.5), periods 1.9s and
-  2.7s (19:27, so the pattern repeats only after ~51s), travelling down-right and
+- Two plane waves, 3.2 and 4.4 cells long (× wavelength 0.8), periods 1.65s and
+  2.35s (33:47, so the pattern repeats only after ~78s), travelling down-right and
   down-left. Tiles are at most 0.8 of their cell and scale from their centre
   down to 0.3 of it; brightness follows the wave down to 0.16 opacity.
+- Waves shorter than a mark. At wavelength 1.5 a trough of both waves could cover
+  all nine tiles; a simulation over 40 stitched rows put the whole mark below a
+  quarter of full visibility ~9% of the time. At 0.8 some tile is always near a
+  crest, and a test guards that floor. Speed does not affect it.
 - One sea for the page: a tile's phase depends only on its page position. In a
   list the sea between rows is skipped ("stitched", `rowPitch = 28`): the 14px
   mark covers half of each 28px row, and without stitching a wave moves more than

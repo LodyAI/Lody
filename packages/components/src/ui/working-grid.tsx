@@ -6,6 +6,7 @@ import {
   crestDelayMs,
   tileSeaPoint,
   wavePhase,
+  WORKING_GRID_WAVELENGTH,
   workingGridWaves,
   type WorkingGridDirection,
 } from './working-grid-sea';
@@ -119,7 +120,7 @@ export function WorkingGrid({
   maxScale = 0.8,
   minScale = 0.3,
   gap = 0.35,
-  wavelength = 1.5,
+  wavelength = WORKING_GRID_WAVELENGTH,
   direction = 'across',
   rowPitch = 28,
   className,

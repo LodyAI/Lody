@@ -18,7 +18,7 @@ const meta = {
     maxScale: 0.8,
     minScale: 0.3,
     gap: 0.35,
-    wavelength: 1.5,
+    wavelength: 0.8,
     direction: 'across',
     rowPitch: 28,
     className: 'text-primary',
@@ -37,7 +37,7 @@ const meta = {
     maxScale: { control: { type: 'range', min: 0.3, max: 1, step: 0.05 } },
     minScale: { control: { type: 'range', min: 0, max: 0.9, step: 0.05 } },
     gap: { control: { type: 'range', min: 0.05, max: 0.5, step: 0.01 } },
-    wavelength: { control: { type: 'range', min: 1, max: 6, step: 0.1 } },
+    wavelength: { control: { type: 'range', min: 0.5, max: 6, step: 0.1 } },
     direction: { options: ['across', 'down'], control: { type: 'inline-radio' } },
     rowPitch: {
       options: ['stitched', 'real'],
