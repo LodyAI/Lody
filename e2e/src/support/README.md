@@ -28,7 +28,7 @@
 | `pages/session-fork-page.ts`                         | Native ACP fork, origin, worktree, and source isolation                    |
 | `pages/session-goal-page.ts`                         | Goal state machine, Session isolation, revisit, Archive, and wire evidence |
 | `pages/settings-appearance-page.ts`                  | Theme commit, live preview, cancellation, and persisted state              |
-| `pages/shortcut-page.ts`                             | Default shortcuts, cross-window rebinding, and renderer reload             |
+| `pages/shortcut-page.ts`                             | Default shortcuts, cross-window rebinding, renderer reload, and digit tabs |
 | `pages/sidebar-search-page.ts`                       | Query variants, rename reindexing, UI revisit, Archive, and cleanup        |
 | `pages/text-attachment-page.ts`                      | Picker cancel, multi-turn history, UI revisit, Archive, and isolation      |
 | `fixtures/work-session-fixture.ts`                   | Synthetic Git workspace and scripted ACP evidence                          |

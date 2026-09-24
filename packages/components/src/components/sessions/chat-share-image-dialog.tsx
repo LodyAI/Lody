@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
+import { usePostHog } from '@posthog/react';
 import { Check, Copy, Download, Slash, X } from 'lucide-react';
 import { Spinner } from '@/ui/spinner';
 import { estimateTokenCount, type SessionMeta, type ConversationMessage } from '@lody/shared';
@@ -13,6 +14,7 @@ import { Drawer, DrawerClose, DrawerContent, DrawerDescription, DrawerTitle } fr
 import { Button } from '@/ui/button';
 import { Slider } from '@/ui/slider';
 import { copyShareImage, exportShareImage } from '@/lib/share-image-export';
+import { capturePostHogEvent } from '@/lib/posthog-analytics';
 import {
   ChatShareCard,
   CHAT_SHARE_BACKDROPS,
@@ -392,6 +394,7 @@ export function ChatShareImageDialog({
   onCompleted,
 }: ChatShareImageDialogProps) {
   const { t, i18n } = useTranslation();
+  const postHog = usePostHog();
   const isMobile = useIsMobile();
   const intlLocale = toIntlLocaleOrEn(i18n.resolvedLanguage ?? i18n.language);
   const appTheme = useResolvedTheme() === 'dark' ? 'dark' : 'light';
@@ -457,7 +460,12 @@ export function ChatShareImageDialog({
         session?.title,
         'lody-conversation'
       );
-      if (saved) onCompleted?.('saved');
+      if (saved) {
+        capturePostHogEvent(postHog, 'export/chat_png_created', {
+          message_count: messages.length,
+        });
+        onCompleted?.('saved');
+      }
     } catch {
       setExportError(true);
     } finally {
@@ -476,6 +484,7 @@ export function ChatShareImageDialog({
     setCopied(false);
     try {
       await copyShareImage(exportRef.current);
+      capturePostHogEvent(postHog, 'export/chat_png_copied', { message_count: messages.length });
       setCopied(true);
       onCompleted?.('copied');
     } catch {

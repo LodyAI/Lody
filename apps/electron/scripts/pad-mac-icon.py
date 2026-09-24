@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 try:
-    from PIL import Image
+    from PIL import Image, ImageChops
 except Exception as exc:  # pragma: no cover
     raise SystemExit(
         'Missing dependency: Pillow\n'
@@ -68,6 +68,11 @@ def _parse_args() -> argparse.Namespace:
             'Padding fraction per side (0.10 means ~10%% border on each side, icon shrinks to ~80%%). '
             'Suggested range: 0.08–0.12.'
         ),
+    )
+    parser.add_argument(
+        '--mask-png',
+        default=None,
+        help='Optional same-size macOS icon whose alpha clips the padded output to its silhouette.',
     )
 
     return parser.parse_args()
@@ -156,6 +161,11 @@ def main() -> None:
 
     master = _load_square_rgba(input_png)
     padded = _shrink_with_padding(master, pad=float(args.pad))
+    if args.mask_png:
+        mask = _load_square_rgba(Path(args.mask_png).resolve())
+        if mask.size != padded.size:
+            raise SystemExit('--mask-png must have the same dimensions as the input')
+        padded.putalpha(ImageChops.multiply(padded.getchannel('A'), mask.getchannel('A')))
 
     if args.output_png:
         output_png = Path(args.output_png).resolve()

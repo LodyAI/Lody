@@ -108,6 +108,16 @@ describe('live agent status', () => {
   const shimmering = () =>
     Array.from(container.querySelectorAll('.agent-shimmer')).map((el) => el.textContent);
 
+  it('does not report populated but scroll-hidden conversation content as ready', async () => {
+    await render(liveTurn([{ type: 'text', text: 'Already hydrated answer.' }]), {
+      label: 'Working',
+    });
+    const viewport = container.querySelector<HTMLElement>('[data-message-selection-scroll]');
+    expect(viewport).not.toBeNull();
+    expect(viewport!.style.visibility).toBe('hidden');
+    expect(container.querySelector('[data-window-session-stream-ready]')).toBeNull();
+  });
+
   it('shimmers the collapsed tool group at the bottom of a working turn instead of adding a row', async () => {
     await render(liveTurn([{ type: 'text', text: 'Checking.' }, toolCall('a'), toolCall('b')]), {
       label: 'Working',

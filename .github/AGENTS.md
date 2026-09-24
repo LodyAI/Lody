@@ -111,6 +111,13 @@ their failures and perform expiry.
 
 ## Other automation
 
+- `notify-desktop-nightly.yml` sends accepted main SHA notifications only. It checks
+  out no source and receives no installer signing or storage credentials. Destination
+  configuration is operator-owned; its GitHub App token is scoped to one configured
+  repository with Actions write, and is revoked after the job. That permission can
+  control other Actions in the destination, so the App installation itself must be
+  limited to the intended repository. This does not publish the local-only desktop.
+
 - Issue Forms cover only components present in the public repository. Keep Bug
   and Feature title prefixes, issue types, and existing labels aligned; route
   product support and security reports out of public issues, and request only

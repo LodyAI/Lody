@@ -1,6 +1,8 @@
 import { z } from 'zod';
 import { SubagentTaskPayloadSchema } from './acp/claude-subagent-task';
 import {
+  PI_EXTENSION_PATH_MAX_LENGTH,
+  PI_EXTENSIONS_MAX_SELECTIONS,
   SESSION_FILE_MAX_COUNT,
   SESSION_FILE_MAX_SIZE_BYTES,
   SESSION_IMAGE_ALLOWED_MIME_TYPES,
@@ -77,6 +79,10 @@ export const BuiltinRuntimeOverridesSchema = z
     claudeCodeExecutable: z.string().optional(),
     kimiPath: z.string().optional(),
     grokPath: z.string().optional(),
+    piExtensions: z
+      .array(z.string().trim().min(1).max(PI_EXTENSION_PATH_MAX_LENGTH))
+      .max(PI_EXTENSIONS_MAX_SELECTIONS)
+      .optional(),
   })
   .strict();
 
@@ -356,14 +362,12 @@ export const SessionInputBlocksSchema = z
     }
   });
 
-export const ACPSessionConfigSchema = z
+export const ACPTurnConfigSchema = z
   .object({
     prompt: z.string(),
     inputBlocks: SessionInputBlocksSchema.optional(),
     cliType: AgentConfigCliTypeSchema,
     agentType: z.string().trim().min(1),
-    customAcp: CustomAcpLaunchSpecSchema.optional(),
-    runtimeOverrides: BuiltinRuntimeOverridesSchema.optional(),
     modeId: z.string().optional(),
     modelId: z.string().optional(),
     configOptionValues: AcpConfigOptionValuesSchema.optional(),
@@ -376,11 +380,17 @@ export const ACPSessionConfigSchema = z
   })
   .passthrough();
 
+/** Provider launch fields join only the durable session config, never per-turn input. */
+export const ACPSessionConfigSchema = ACPTurnConfigSchema.extend({
+  customAcp: CustomAcpLaunchSpecSchema.optional(),
+  runtimeOverrides: BuiltinRuntimeOverridesSchema.optional(),
+});
+
 /** Local history provenance, not an additional ACP request option. */
 export const SessionHistoryDeliveryKindSchema = z.literal('steer');
 export type SessionHistoryDeliveryKind = z.infer<typeof SessionHistoryDeliveryKindSchema>;
 
-export const SessionHistoryInputConfigSchema = ACPSessionConfigSchema.partial()
+export const SessionHistoryInputConfigSchema = ACPTurnConfigSchema.partial()
   .extend({ _lodyDeliveryKind: SessionHistoryDeliveryKindSchema.optional() })
   .strip();
 
@@ -437,16 +447,6 @@ export const normalizeSessionTurnInputConfig = (
   const agentType = trimOptionalString(record.agentType);
   if (agentType) {
     normalized.agentType = agentType;
-  }
-
-  const customAcp = maybeParseField(CustomAcpLaunchSpecSchema, record.customAcp);
-  if (customAcp) {
-    normalized.customAcp = customAcp;
-  }
-
-  const runtimeOverrides = maybeParseField(BuiltinRuntimeOverridesSchema, record.runtimeOverrides);
-  if (runtimeOverrides) {
-    normalized.runtimeOverrides = runtimeOverrides;
   }
 
   const modeId = trimOptionalString(record.modeId);
@@ -1451,6 +1451,7 @@ export const MachineAcpAuthenticationProgressMessageSchema = z
       'auth-methods',
       'authorization',
       'input-required',
+      'runtime-download',
       'output',
       'authenticated',
       'cancelled',
@@ -1481,6 +1482,11 @@ export const MachineAcpAuthenticationProgressMessageSchema = z
     stream: z.enum(['stdout', 'stderr']).optional(),
     output: z.string().max(16_384).optional(),
     error: z.string().max(65_536).optional(),
+    runtimeName: z.string().trim().min(1).max(ACP_AUTH_ID_MAX_LENGTH).optional(),
+    runtimePhase: z
+      .enum(['downloading', 'verifying', 'extracting', 'publishing', 'complete'])
+      .optional(),
+    runtimePercent: z.number().min(0).max(100).optional(),
   })
   .strict()
   .superRefine((value, context) => {
@@ -1489,6 +1495,13 @@ export const MachineAcpAuthenticationProgressMessageSchema = z
         code: 'custom',
         path: ['authorizationUrl'],
         message: 'authorizationUrl is required for authorization progress',
+      });
+    }
+    if (value.status === 'runtime-download' && (!value.runtimeName || !value.runtimePhase)) {
+      context.addIssue({
+        code: 'custom',
+        path: ['runtimeName'],
+        message: 'runtime-download progress requires a runtime name and phase',
       });
     }
     if (

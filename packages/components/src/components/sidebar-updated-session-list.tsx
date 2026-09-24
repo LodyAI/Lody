@@ -940,8 +940,8 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
             showMenuButton={hasMenuActions}
             menuLabel={contextMenuLabels.moreActions}
             openedByTree={openedByTree}
-            fadeClassName="group-hover/row:opacity-0"
-            restPointerClassName="group-hover/row:pointer-events-none"
+            fadeClassName="group-hover/row:opacity-0 group-data-[menu-open]/row:opacity-0"
+            restPointerClassName="group-hover/row:pointer-events-none group-data-[menu-open]/row:pointer-events-none"
             revealClassName="group-hover/row:opacity-100 group-hover/row:pointer-events-auto group-data-[menu-open]/row:opacity-100 group-data-[menu-open]/row:pointer-events-auto"
           />
         </div>
@@ -981,7 +981,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
             isWaitingPermission={item.isWaitingPermission}
             isWorking={item.isWorking}
             hasUnreadMessages={item.hasUnreadMessages}
-            fadeClassName="group-hover/row:opacity-0"
+            fadeClassName="group-hover/row:opacity-0 group-data-[menu-open]/row:opacity-0"
             restIcon={
               showPr ||
               showMergeablePill ||

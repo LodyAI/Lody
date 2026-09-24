@@ -36,6 +36,13 @@ Replacement contract: [shared rules](../../../shared/AGENTS.md#session-history).
 
 ## Workspace runtime
 
+- A neutral local warm spare may initialize the implicit workspace runtime without
+  publishing route context. A matching claim must retain that runtime or its in-flight
+  initialization. Do not infer a cloud workspace. Only the main-owned macOS local
+  prepared-window lifecycle may mount a speculative Session; it must gate read
+  receipts, workspace ownership, autofocus and external-history refresh until
+  presentation. Raw background prefetch never gains this exception.
+
 - Background Session prefetch must never acquire a UI Session store or create a
   Mirror. Its disposable worker owns raw Doc import/export and a separate,
   rebuildable snapshot cache. Keep one worker task per renderer, terminate before
@@ -51,6 +58,15 @@ Replacement contract: [shared rules](../../../shared/AGENTS.md#session-history).
 - `create-workspace-runtime.ts` maintains one Repo view. `WorkspaceTargetRouter` owns
   target ownership and transport selection; do not restore a second writer or a
   proxy-authoring/write-intent mirror.
+- Local-only window bootstrap may exchange same-workspace CRDT snapshots from
+  already owned documents. Merge into the receiving Repo; never treat peer state
+  as authoritative sync or open stores solely to answer bootstrap requests.
+  Check disk before requesting peer exports; Web Locks inventory bounds requests
+  to live runtimes, and negative replies must release missing-document waits.
+  Seed cold documents before Repo subscribes, persisting the merged snapshot before
+  adoption; storage-loaded versions must be durable before cursor advancement. Never
+  replace a live document. Import before constructing the history reader to avoid
+  replaying bulk-import events through an initialized projection.
 - Repo storage, durable Streams cursors, and eager-sync high-water state must use the
   same per-renderer cache namespace. A checkpoint must never be shared by independently
   persisted Repo views.

@@ -5,6 +5,7 @@ import {
   developerModeEnabledAtom,
   inboxBetaEnabledAtom,
   promptShortcutsBetaEnabledAtom,
+  semanticShortcutsBetaEnabledAtom,
 } from '@/atoms/settings';
 import { CompactRow, CompactSection } from './compact-layout';
 
@@ -25,6 +26,10 @@ export function BetaFeaturesSection() {
 
   const [promptShortcutsBetaEnabled, setPromptShortcutsBetaEnabled] = useAtom(
     promptShortcutsBetaEnabledAtom
+  );
+
+  const [semanticShortcutsEnabled, setSemanticShortcutsEnabled] = useAtom(
+    semanticShortcutsBetaEnabledAtom
   );
 
   if (!developerModeEnabled) return null;
@@ -55,6 +60,19 @@ export function BetaFeaturesSection() {
           checked={promptShortcutsBetaEnabled}
           onCheckedChange={setPromptShortcutsBetaEnabled}
           aria-label={t('settings.tabs.promptShortcuts', 'Prompt Shortcuts')}
+        />
+      </CompactRow>
+      <CompactRow
+        label={t('settings.beta.semanticShortcuts', 'Pointer-aware close shortcut')}
+        helper={t(
+          'settings.beta.semanticShortcutsHelper',
+          'On desktop, close the active tab in the conversation or right panel you last pointed at or used with the keyboard.'
+        )}
+      >
+        <Switch
+          checked={semanticShortcutsEnabled}
+          onCheckedChange={setSemanticShortcutsEnabled}
+          aria-label={t('settings.beta.semanticShortcuts', 'Pointer-aware close shortcut')}
         />
       </CompactRow>
     </CompactSection>

@@ -1,22 +1,19 @@
-import { app } from 'electron'
-import { extractDeepLinkFromArgv, parseDeepLinkArg } from './deep-link-url'
+import { desktopInstallationProfile } from './platform'
+import { parseDeepLinkArg } from './deep-link-url'
 import { consumePendingDeepLink, getMainWindow, setPendingDeepLink } from './window-state'
 import { readDesktopLoginCallback } from './services/desktop-login'
 import { focusMainWindow } from './window'
-import { publishDeepLinkToPrimary, startDeepLinkIpcListener } from './deep-link-ipc'
 import { describeDeepLinkForAuthDebug, describeUrlForAuthDebug, logAuthDebug } from './auth-debug'
 
-let stopIpcListener: (() => void) | null = null
 let lastHandledDeepLink: string | null = null
 let lastHandledAt = 0
-const USE_DEEP_LINK_IPC_FALLBACK = process.platform === 'win32'
 let authCallbackHandler: ((token: string) => Promise<void>) | null = null
 
 export function initializeAuthDeepLinks(handler: (token: string) => Promise<void>): void {
   authCallbackHandler = handler
   const pending = consumePendingDeepLink()
   if (!pending) return
-  const token = readDesktopLoginCallback(pending)
+  const token = readDesktopLoginCallback(pending, desktopInstallationProfile.desktopProtocol)
   if (token !== null) void handler(token)
   else setPendingDeepLink(pending)
 }
@@ -42,7 +39,10 @@ export function handleDeepLink(url: string): void {
     })
     return
   }
-  const authToken = readDesktopLoginCallback(parsedDeepLink)
+  const authToken = readDesktopLoginCallback(
+    parsedDeepLink,
+    desktopInstallationProfile.desktopProtocol
+  )
   if (authToken !== null && authCallbackHandler) {
     // Authentication belongs to main even if there is no mounted product page.
     void authCallbackHandler(authToken)
@@ -95,76 +95,4 @@ export function handleDeepLink(url: string): void {
   })
   contents.send('app.deepLink', parsedDeepLink)
   setPendingDeepLink(null)
-}
-
-export function acquireSingleInstanceLock(): boolean {
-  const deepLinkFromArgv = extractDeepLinkFromArgv(process.argv)
-  if (!app.isPackaged && process.env.LODY_E2E === '1') {
-    logAuthDebug('skipping single-instance lock for isolated Electron E2E')
-    return true
-  }
-  const gotSingleInstanceLock = app.requestSingleInstanceLock()
-  logAuthDebug('requestSingleInstanceLock completed', {
-    gotSingleInstanceLock,
-    deepLinkFromArgv: describeDeepLinkForAuthDebug(deepLinkFromArgv)
-  })
-  if (!gotSingleInstanceLock) {
-    if (USE_DEEP_LINK_IPC_FALLBACK && deepLinkFromArgv) {
-      logAuthDebug('publishing deep link to primary instance via IPC fallback', {
-        deepLink: describeDeepLinkForAuthDebug(deepLinkFromArgv)
-      })
-      publishDeepLinkToPrimary(deepLinkFromArgv)
-    }
-    app.quit()
-    return false
-  }
-
-  if (USE_DEEP_LINK_IPC_FALLBACK && !stopIpcListener) {
-    logAuthDebug('starting deep-link IPC listener for Windows fallback')
-    stopIpcListener = startDeepLinkIpcListener((url) => handleDeepLink(url))
-    app.on('will-quit', () => {
-      stopIpcListener?.()
-      stopIpcListener = null
-    })
-  }
-
-  app.on('second-instance', (_event, argv) => {
-    const urlArg = extractDeepLinkFromArgv(argv)
-    logAuthDebug('second-instance event received', {
-      urlArg: describeDeepLinkForAuthDebug(urlArg),
-      argvLength: argv.length
-    })
-    if (urlArg) {
-      handleDeepLink(urlArg)
-    }
-
-    const mainWindow = getMainWindow()
-    if (!mainWindow || mainWindow.isDestroyed()) {
-      return
-    }
-    focusMainWindow(mainWindow)
-  })
-
-  return true
-}
-
-export function registerOpenUrlHandler(): void {
-  app.on('open-url', (event, url) => {
-    logAuthDebug('open-url event received', {
-      deepLink: describeDeepLinkForAuthDebug(url)
-    })
-    const parsedDeepLink = parseDeepLinkArg(url)
-    if (!parsedDeepLink) {
-      logAuthDebug('open-url ignored because parseDeepLinkArg returned null', {
-        deepLink: describeDeepLinkForAuthDebug(url)
-      })
-      return
-    }
-
-    event.preventDefault()
-    logAuthDebug('open-url forwarding parsed deep link', {
-      deepLink: describeDeepLinkForAuthDebug(parsedDeepLink)
-    })
-    handleDeepLink(parsedDeepLink)
-  })
 }

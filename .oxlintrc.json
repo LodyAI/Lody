@@ -10,6 +10,7 @@
     "site-docs/scripts/**/*",
     "packages/acp-extension-claude/**/*",
     "packages/acp-extension-codex/**/*",
+    "packages/acp-extension-dsh/**/*",
     "packages/acp-extension-grok/**/*",
     "packages/acp-extension-core/test/**/*",
     "packages/acp-extension-kimi/**/*",

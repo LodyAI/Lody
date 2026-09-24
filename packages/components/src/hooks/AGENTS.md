@@ -4,11 +4,11 @@ Parent AGENTS apply. Edit `AGENTS.md`, not its `CLAUDE.md` symlink. Background: 
 
 ## Conversation scrolling
 
-- Render bodies only for viewport/tail/selection; background reads keep placeholders.
-- Reveal after initial data and destination layout agree; ignore early range reports.
-  Key readiness/window by `factSource ?? view`: projections retain them, new sources reset.
-  Restore before paint; hydration follows only with the follow lock, using DOM extent,
-  not evictable indices.
+- Only viewport/tail/selection render bodies; other reads keep placeholders.
+- Reveal when data and measured destination agree; ignore early range reports.
+  Reapply cached offsets until reveal; navigation supersedes them.
+  Key readiness/window by `factSource ?? view`; new sources reset both.
+  Restore before paint; hydration follows DOM extent only with the follow lock.
 - Correct content measurements in ResizeObserver before paint, even with unchanged
   row counts; no RAF deferral. Correct Virtua spacer-height commits in MutationObserver
   before deferred resize delivery. Observe spacer height and mounted row geometry

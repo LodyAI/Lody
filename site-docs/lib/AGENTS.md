@@ -17,5 +17,9 @@ Root `AGENTS.md` and `site-docs/AGENTS.md` also apply.
   can become LCP without WebGL, rotating copy, or below-fold preview chunks.
 - `module-preload.ts` is the HTML-only `modulepreload` allowlist. JS hosts keep
   extracted route CSS so client nav to `/price` or legal is not unstyled.
+- `nightly-downloads.ts` validates the complete Nightly installer manifest. The
+  download page reads `VITE_NIGHTLY_UPDATE_URL` at build time and fetches its live
+  manifest in the browser; missing/invalid metadata never falls back to Stable
+  or guessed latest aliases. Keep installer links inside the configured HTTPS root.
 - `blog-reading-time.generated.ts` and `docs-faq.generated.ts` are generated and
   ignored. Do not edit or format them.

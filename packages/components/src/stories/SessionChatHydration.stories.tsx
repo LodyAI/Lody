@@ -9,6 +9,7 @@ import {
   type ChatStreamItem,
 } from '@/components/ai-gui/view';
 import { Button } from '@/ui/button';
+import { clearScrollPosition, saveScrollPosition } from '@/hooks/use-scroll-position-cache';
 
 const sessionId = 'hydration-regression' as SessionId;
 const platform = createLocalPlatformProvider({
@@ -118,24 +119,38 @@ export const MobileLeadingContent: Story = {
 };
 
 /** Cold virtualizer mount with enough rows to expose estimated-height restoration. */
-function ColdTailStory() {
+function ColdTailStory({ cachedOffset = false }: { cachedOffset?: boolean }) {
   const [opened, setOpened] = useState(0);
-  const items: ChatStreamItem[] = Array.from({ length: 1000 }, (_, turnIndex) => ({
-    type: 'message',
-    turnIndex,
-    sessionId,
-    message: {
-      id: `cold-${turnIndex}`,
-      role: 'user',
-      timestamp: '2026-09-13T00:00:00.000Z',
-      items: [{ type: 'text', text: `Message ${turnIndex}` }],
-    },
-  }));
+  const items: ChatStreamItem[] = Array.from(
+    { length: cachedOffset ? 30 : 1000 },
+    (_, turnIndex) => ({
+      type: 'message',
+      turnIndex,
+      sessionId,
+      message: {
+        id: `cold-${turnIndex}`,
+        role: 'user',
+        timestamp: '2026-09-13T00:00:00.000Z',
+        items: [{ type: 'text', text: `Message ${turnIndex}` }],
+      },
+    })
+  );
   return (
     <PlatformContext.Provider value={platform}>
       <div className="flex h-screen flex-col">
-        <Button onClick={() => setOpened((n) => n + 1)}>Open conversation</Button>
-        <div className="min-h-0 flex-1">
+        <Button
+          onClick={() => {
+            // Every open is cold: a warm row cache already counts as measured.
+            clearScrollPosition(sessionId);
+            if (cachedOffset) {
+              saveScrollPosition(sessionId, { type: 'offset', scrollOffset: 1200 });
+            }
+            setOpened((n) => n + 1);
+          }}
+        >
+          Open conversation
+        </Button>
+        <div className={cachedOffset ? 'h-[400px] shrink-0' : 'min-h-0 flex-1'}>
           {opened > 0 && (
             <SessionChatStreamView
               key={opened}
@@ -146,7 +161,10 @@ function ColdTailStory() {
               renderMessageRow={({ message }) => (
                 <div
                   data-cold-tail={message.id === 'cold-999' ? '' : undefined}
-                  style={{ minHeight: message.id === 'cold-999' ? 420 : 80, padding: 16 }}
+                  style={{
+                    minHeight: cachedOffset ? 300 : message.id === 'cold-999' ? 420 : 80,
+                    padding: 16,
+                  }}
                 >
                   {message.id}
                 </div>
@@ -160,3 +178,4 @@ function ColdTailStory() {
 }
 
 export const ColdTail: Story = { render: () => <ColdTailStory /> };
+export const ColdCachedOffset: Story = { render: () => <ColdTailStory cachedOffset /> };

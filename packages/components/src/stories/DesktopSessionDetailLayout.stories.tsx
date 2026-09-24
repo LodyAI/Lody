@@ -2,6 +2,7 @@ import type { Meta, StoryObj } from '@storybook/react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { DesktopSessionDetailLayout } from '@/components/sessions/desktop-session-detail-layout';
 import { Button } from '@/ui/button';
+import { useSemanticActionRouter } from '@/lib/commands/use-semantic-action-router';
 
 /* The layout persists panel sizes under this key (autoSaveId); clear it so
    every story starts from its declared defaultSizes, not a previous drag. */
@@ -42,6 +43,7 @@ interface HarnessProps {
   containerWidthPx: number;
   /** Default sidebar split in percent (25 matches the app's fixed panel). */
   defaultSidebarSize?: number;
+  semanticShortcuts?: boolean;
 }
 
 /**
@@ -54,10 +56,48 @@ function LayoutHarness({
   startEmpty = false,
   containerWidthPx,
   defaultSidebarSize = 25,
+  semanticShortcuts = false,
 }: HarnessProps) {
+  const actionRootRef = useRef<HTMLDivElement>(null);
+  const [lastClosed, setLastClosed] = useState('none');
   const [sidebarOpen, setSidebarOpen] = useState(startOpen);
   const [empty, setEmpty] = useState(startEmpty);
   const [request, setRequest] = useState<{ seq: number; minWidthPx: number } | null>(null);
+
+  const router = useSemanticActionRouter({
+    rootRef: actionRootRef,
+    enabled: semanticShortcuts,
+    resetKey: 'story',
+    defaultScopeId: 'conversation',
+    scopes: {
+      conversation: {
+        close: () => {
+          setLastClosed('conversation');
+          return 'handled';
+        },
+      },
+      'side-panel': {
+        close: () => {
+          setLastClosed(empty ? 'empty panel' : 'panel tab');
+          setSidebarOpen(false);
+          router.current?.activate('conversation');
+          return 'handled';
+        },
+      },
+    },
+  });
+  useEffect(() => {
+    if (!semanticShortcuts) return undefined;
+    const onKey = (event: KeyboardEvent) => {
+      // Browser-safe substitute for the native close entry point in this story.
+      if (event.key === 'F8') {
+        event.preventDefault();
+        router.current?.dispatch('close');
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [semanticShortcuts, router]);
 
   const openPrTab = useCallback(() => {
     if (!sidebarOpen || empty) {
@@ -78,20 +118,34 @@ function LayoutHarness({
         </Button>
         <span className="text-xs text-muted-foreground">container: {containerWidthPx}px</span>
       </div>
+      {semanticShortcuts && (
+        <p className="text-sm">Point at a pane and press F8 to close. Last closed: {lastClosed}</p>
+      )}
       <div
+        ref={actionRootRef}
         className="min-h-0 flex-1 self-stretch"
         style={{ width: containerWidthPx, maxWidth: '100%' }}
       >
         <DesktopSessionDetailLayout
           defaultSizes={{ main: 100 - defaultSidebarSize, sidebar: defaultSidebarSize }}
           topBar={
-            <div className="flex h-11 items-center border-b border-border px-3 text-sm">
+            <div className="flex h-11 items-center border-b border-border px-3 text-sm group-data-[lody-action-active=true]/close-scope:border-primary">
               Session tabs
             </div>
           }
           chatSurfaces={<WidthReadout label="Conversation" />}
           terminalDock={null}
-          secondaryPanel={<WidthReadout label={empty ? 'Empty sidebar' : 'PR panel'} />}
+          secondaryPanel={
+            <div
+              data-lody-action-scope="side-panel"
+              className="group/close-scope flex h-full flex-col"
+            >
+              <div className="h-11 shrink-0 border-b border-border p-3 text-sm group-data-[lody-action-active=true]/close-scope:border-primary">
+                Panel tabs
+              </div>
+              <WidthReadout label={empty ? 'Empty sidebar' : 'PR panel'} />
+            </div>
+          }
           sidebarOpen={sidebarOpen}
           onSidebarCollapse={() => setSidebarOpen(false)}
           deleteConfirmDialog={null}
@@ -139,4 +193,12 @@ export const OpenPrKeepsWiderPanel: Story = {
  *  floor, so the request is dropped and the default split is restored. */
 export const OpenPrNarrowWindow: Story = {
   args: { startOpen: false, containerWidthPx: 900 },
+};
+
+export const SemanticCloseTarget: Story = {
+  args: { startOpen: true, containerWidthPx: 1200, semanticShortcuts: true },
+};
+
+export const SemanticCloseEmptyPanel: Story = {
+  args: { startOpen: true, startEmpty: true, containerWidthPx: 1200, semanticShortcuts: true },
 };

@@ -55,6 +55,8 @@ maintenance commands here.
   from successful CI for the exact source gitlink. Exclude pnpm installation metadata
   from artifacts; it includes builder paths and timestamps. Validate the installed
   closure with the adapter smoke and compare deterministic archive bytes.
+  Preserve relative dependency symlinks; reject absolute, escaping, or dangling
+  links. Exclude install-time `.bin` shims from the direct-entry runtime bundle.
 
 - `guard-nested-workspace-install.mjs` runs before a public-root install. If an
   ancestor lockfile already owns public package importers, fail with an explicit

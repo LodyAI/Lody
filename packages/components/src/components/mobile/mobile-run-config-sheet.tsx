@@ -567,6 +567,7 @@ function MobileRunConfigSheetRows({
                that most needs typing at — name the search and say when nothing
                matched rather than leaving an unlabelled field and a dash. */
             searchable={shouldOfferOptionSearch(modelPickerOptions.length)}
+            searchAnalyticsPicker="model"
             searchPlaceholder={modelSearchPlaceholder}
             emptyText={modelSearchEmptyLabel}
             triggerContent={<span className="truncate">{modelLabel ?? modelRowLabel}</span>}

@@ -197,3 +197,66 @@ test('opening and reopening never reveals an unmeasured tail', async ({ page }) 
       .toBeLessThanOrEqual(1);
   }
 });
+
+test('a cached reading position reveals after late virtual row measurements', async ({ page }) => {
+  // Install before importing Virtua: it captures the timer function at load.
+  await page.clock.install({ time: 0 });
+  await page.addInitScript(() => {
+    const NativeResizeObserver = window.ResizeObserver;
+    let paused = true;
+    let held: (() => void)[] = [];
+    Object.assign(window, {
+      heldReadingMeasurements: () => held.length,
+      releaseReadingMeasurements: () => {
+        paused = false;
+        const callbacks = held;
+        held = [];
+        callbacks.forEach((callback) => callback());
+      },
+    });
+    window.ResizeObserver = class extends NativeResizeObserver {
+      constructor(callback: ResizeObserverCallback) {
+        super((entries, observer) => {
+          const rows = entries.filter(({ target }) => target.hasAttribute('data-virtual-index'));
+          const other = entries.filter(({ target }) => !target.hasAttribute('data-virtual-index'));
+          // Virtua must learn its viewport while destination measurements wait.
+          if (other.length) callback(other, observer);
+          if (rows.length) {
+            if (paused) held.push(() => callback(rows, observer));
+            else callback(rows, observer);
+          }
+        });
+      }
+    };
+  });
+  await page.goto(
+    '/iframe.html?id=sessions-sessionchathydration--cold-cached-offset&viewMode=story'
+  );
+  const open = page.getByRole('button', { name: 'Open conversation', exact: true });
+  await open.waitFor({ state: 'visible' });
+  await page.clock.pauseAt(await page.evaluate(() => Date.now() + 1000));
+  await open.click();
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        (
+          window as typeof window & { heldReadingMeasurements: () => number }
+        ).heldReadingMeasurements()
+      )
+    )
+    .toBeGreaterThan(0);
+  const viewport = page.locator('[data-message-selection-scroll]');
+  await expect(viewport).toHaveCSS('visibility', 'hidden');
+  // Expire Virtua's 150ms scroll request using a fake clock, then deliver the
+  // held measurements. Geometry, not another request or a sleep, must recover.
+  await page.clock.runFor(200);
+  await page.evaluate(() =>
+    (
+      window as typeof window & { releaseReadingMeasurements: () => void }
+    ).releaseReadingMeasurements()
+  );
+  await page.clock.resume();
+  await expect(viewport).toHaveCSS('visibility', 'visible');
+  await expect.poll(() => viewport.evaluate((el) => el.scrollTop)).toBe(1200);
+  await expect(viewport.locator('[data-virtual-index="4"]')).toBeInViewport();
+});

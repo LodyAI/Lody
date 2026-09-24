@@ -12,6 +12,13 @@ this flow.
 
 ## Ownership and recovery
 
+Separately installed cloud desktop channels have distinct callback schemes and
+desktop credential directories. Each attempt carries a validated desktop channel selector and accepts only that
+application's callback scheme. Both channels use the same authentication client.
+Sharing an account service does not permit transferring an attempt to another
+installed application. Local execution data may remain shared; desktop credential
+isolation must not silently create a second CLI owner namespace.
+
 The main process owns one current browser-login attempt: random PKCE state and
 verifier, lifetime, exchange, and a revisioned result. React pages and product
 windows observe that result; they do not own the exchange. A newly mounted window

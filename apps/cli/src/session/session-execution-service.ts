@@ -23,6 +23,7 @@ import {
   type MachineAcpAuthenticateResponse,
   type MachineAcpAuthenticationProgressMessage,
   type MachineId,
+  type MachinePiExtensionsResponse,
   type MachinePingRequestValidated,
   type MachinePingResponse,
   type MachineLifecycleCapability,
@@ -92,6 +93,7 @@ import {
 } from '@/agent/managed-agent-runtime';
 import type { FetchAcpCapabilitiesOptions } from '@/agent/acp-capabilities';
 import { AcpAuthenticationRequiredError, type SteerOutcomeResult } from '@/agent/agent-client';
+import { discoverManagedPiExtensions } from '@/agent/pi-extensions';
 import type { GoalPromptControl } from '@/agent/goal-control';
 import {
   AcpAuthenticationManager,
@@ -5979,6 +5981,29 @@ export class SessionExecutionService {
     );
   }
 
+  async listMachinePiExtensions(configId?: AgentConfigId): Promise<MachinePiExtensionsResponse> {
+    try {
+      let env: Record<string, string> | undefined;
+      if (configId !== undefined) {
+        const config = await this.deps.workspaceDocument.getAgentConfigForMachineLaunch(
+          configId,
+          this.deps.machineId
+        );
+        if (!config || config.cliType !== 'builtin' || config.agentType !== 'pi') {
+          return {
+            success: false,
+            error: 'Provider config is not a builtin Pi provider on this machine.',
+          };
+        }
+        env = config.env;
+      }
+      const discovery = await discoverManagedPiExtensions(env);
+      return { success: true, discovery };
+    } catch (error) {
+      return { success: false, error: formatErrorMessage(error) };
+    }
+  }
+
   private async refreshMachineAcpCapabilitiesForConfig(
     message: ResolvedMachineAcpCapabilitiesRefreshRequest,
     options: AcpBinaryProgressOptions = {}
@@ -6498,9 +6523,13 @@ const computeAcpRefreshDedupeKey = (
   const customSerialized = customAcp ? serializeCustomAcpLaunchSpec(customAcp) : '';
   const runtimeOverrideSerialized = runtimeOverrides
     ? Object.entries(runtimeOverrides)
-        .filter(([, value]) => typeof value === 'string' && value.trim().length > 0)
+        .filter(([, value]) =>
+          Array.isArray(value)
+            ? value.length > 0
+            : typeof value === 'string' && value.trim().length > 0
+        )
         .sort(([a], [b]) => a.localeCompare(b))
-        .map(([key, value]) => `${key}=${value}`)
+        .map(([key, value]) => `${key}=${Array.isArray(value) ? JSON.stringify(value) : value}`)
         .join('\x01')
     : '';
   return `${configId}\x00${cliType}\x00${agentType}\x00${envSerialized}\x00${customSerialized}\x00${runtimeOverrideSerialized}`;

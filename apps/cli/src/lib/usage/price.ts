@@ -12,6 +12,16 @@ export const PRICE_DATA: { [key: string]: Price } = {
     cacheReadInputTokenCost: 1e-6,
     outputCostPerToken: 5e-5,
   },
+  'gpt-6-sol': {
+    inputCostPerToken: 2e-6,
+    cacheReadInputTokenCost: 2e-7,
+    outputCostPerToken: 1e-5,
+  },
+  'gpt-6-luna': {
+    inputCostPerToken: 1e-7,
+    cacheReadInputTokenCost: 1e-8,
+    outputCostPerToken: 5e-7,
+  },
   'gpt-5.6': {
     inputCostPerToken: 5e-6,
     cacheReadInputTokenCost: 5e-7,

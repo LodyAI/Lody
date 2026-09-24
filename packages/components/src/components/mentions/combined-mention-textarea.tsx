@@ -41,6 +41,7 @@ import {
 } from '@/components/mentions/mention-persistence';
 import { MentionTwoLevelMenu } from '@/components/mentions/mention-two-level-menu';
 import {
+  isCommandMenuTrigger,
   toFileCandidate,
   MENTION_TRIGGER,
   useMentionCategories,
@@ -332,7 +333,7 @@ function TwoLevelMentionMenu({
         session: sessionSource,
         agentRole: templateScope ? { ...agentRoleSource, enabled: true } : agentRoleSource,
         command:
-          context.trigger === '/' && !/^\/\S*$/.test(context.inputValue)
+          isCommandMenuTrigger(context.trigger) && !/^[/、]\S*$/.test(context.inputValue)
             ? undefined
             : commandSource,
         promptShortcut: templateScope ? undefined : promptShortcutSource,
@@ -999,16 +1000,17 @@ export const CombinedMentionTextarea = React.forwardRef<
       enableShortcutMentions ||
       hasExternalMentionSupport;
 
-    // `/` trigger is only active when the entire input is a slash command (e.g. "" or "/review")
-    const isSlashOnly = !value || /^\/\S*$/.test(value);
+    // Command triggers require the whole input; shortcuts can also appear inline.
+    const isSlashOnly = !value || /^[/、]\S*$/.test(value);
     const triggers = React.useMemo(() => {
       const nextTriggers: string[] = [];
       // Every mention type is reachable through `@`; skills also retain their
-      // direct `$` entry point, and slash commands retain `/` because they must
+      // direct `$` entry point, and commands accept `/` and `、` because they must
       // own the whole prompt.
       if (enableAtMentions) nextTriggers.push('@');
       if (enableSkillMentions) nextTriggers.push(SKILL_MENTION_TRIGGER);
-      if (enableShortcutMentions || (enableCommandMentions && isSlashOnly)) nextTriggers.push('/');
+      if (enableShortcutMentions || (enableCommandMentions && isSlashOnly))
+        nextTriggers.push('/', '、');
       return nextTriggers;
     }, [
       enableAtMentions,

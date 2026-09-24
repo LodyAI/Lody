@@ -1,6 +1,6 @@
 {
   "name": "lody",
-  "version": "0.93.3",
+  "version": "0.100.0",
   "description": "Lody Agent CLI tool for managing remote command execution",
   "type": "module",
   "main": "dist/index.js",
@@ -43,7 +43,7 @@
   },
   "devDependencies": {
     "@agentclientprotocol/sdk": "catalog:",
-    "@anthropic-ai/claude-agent-sdk": "0.3.274",
+    "@anthropic-ai/claude-agent-sdk": "0.3.280",
     "@better-auth/api-key": "catalog:",
     "@convex-dev/better-auth": "catalog:",
     "@lody/cli-supervisor": "workspace:*",
@@ -56,7 +56,9 @@
     "@loro-dev/flock-wasm": "catalog:",
     "@loro-dev/streams-crdt": "catalog:",
     "@modelcontextprotocol/client": "2.0.0",
+    "@modelcontextprotocol/node": "2.0.0",
     "@modelcontextprotocol/sdk": "1.29.0",
+    "@modelcontextprotocol/server": "2.0.0",
     "@types/better-sqlite3": "catalog:",
     "@types/cross-spawn": "^6.0.6",
     "@types/diff": "^7.0.0",

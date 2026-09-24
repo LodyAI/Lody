@@ -447,32 +447,49 @@ const DropdownMenuRadioItem = React.forwardRef<
   React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.RadioItem> & {
     /** Selected-row mark: a dot (default) or a check for list-style pickers. */
     indicator?: 'dot' | 'check';
+    /**
+     * Where the mark sits. `end` is for rows whose leading slot carries the
+     * item's own identity mark (e.g. a workspace avatar); callers then own
+     * the paddings — drop the `ps-8` selection indent and reserve `pe-8` so
+     * trailing content never slides under the mark.
+     */
+    indicatorSide?: 'start' | 'end';
   }
->(({ className, children, onSelect, indicator = 'dot', ...props }, ref) => {
-  const selectionContext = React.useContext(DropdownMenuSelectionContext);
-  return (
-    <DropdownMenuPrimitive.RadioItem
-      ref={ref}
-      className={cn(menuSelectionItemClassName, className)}
-      onSelect={(event) => {
-        selectionContext?.markItemSelected();
-        onSelect?.(event);
-      }}
-      {...props}
-    >
-      <span className="absolute start-3 flex h-3.5 w-3.5 items-center justify-center">
-        <DropdownMenuPrimitive.ItemIndicator>
-          {indicator === 'check' ? (
-            <Check className="size-3.5!" />
-          ) : (
-            <Circle className="size-2! fill-current" />
+>(
+  (
+    { className, children, onSelect, indicator = 'dot', indicatorSide = 'start', ...props },
+    ref
+  ) => {
+    const selectionContext = React.useContext(DropdownMenuSelectionContext);
+    return (
+      <DropdownMenuPrimitive.RadioItem
+        ref={ref}
+        className={cn(menuSelectionItemClassName, className)}
+        onSelect={(event) => {
+          selectionContext?.markItemSelected();
+          onSelect?.(event);
+        }}
+        {...props}
+      >
+        <span
+          className={cn(
+            'absolute flex h-3.5 w-3.5 items-center justify-center',
+            indicatorSide === 'end' ? 'end-3' : 'start-3'
           )}
-        </DropdownMenuPrimitive.ItemIndicator>
-      </span>
-      {children}
-    </DropdownMenuPrimitive.RadioItem>
-  );
-});
+        >
+          <DropdownMenuPrimitive.ItemIndicator>
+            {indicator === 'check' ? (
+              <Check className="size-3.5!" />
+            ) : (
+              <Circle className="size-2! fill-current" />
+            )}
+          </DropdownMenuPrimitive.ItemIndicator>
+        </span>
+        {children}
+      </DropdownMenuPrimitive.RadioItem>
+    );
+  }
+);
 DropdownMenuRadioItem.displayName = DropdownMenuPrimitive.RadioItem.displayName;
 
 const DropdownMenuLabel = React.forwardRef<

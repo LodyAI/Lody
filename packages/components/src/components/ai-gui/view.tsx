@@ -44,7 +44,9 @@ import {
   getVisibleAssistantTextContent,
   hasTextContentFromMessageItems,
 } from './message-copy';
-import { useAtomValue } from 'jotai';
+import { useAtomValue, useStore } from 'jotai';
+import { usePostHog } from '@posthog/react';
+import { capturePostHogEvent, getAnalyticsFileKind } from '@/lib/posthog-analytics';
 import { getRpcDeliveredTurnKey, rpcDeliveredTurnsAtom } from '@/atoms/session-dispatch-delivery';
 import { selectAtom } from 'jotai/utils';
 import { Virtualizer, type VirtualizerHandle, type CustomItemComponentProps } from 'virtua';
@@ -1981,6 +1983,7 @@ export const SessionChatStreamView = forwardRef<
             >
               <div
                 className="flex h-full flex-col overflow-y-auto"
+                data-window-session-stream-ready={initialWindowReady ? sessionId : undefined}
                 style={{ paddingTop: 'calc(var(--conversation-top-inset, 0px) + 1.5rem)' }}
               >
                 {leadingContent == null ? null : (
@@ -2022,6 +2025,9 @@ export const SessionChatStreamView = forwardRef<
             <div
               ref={scrollContainerRef}
               data-message-selection-scroll=""
+              data-window-session-stream-ready={
+                initialWindowReady && initialScrollRestored ? sessionId : undefined
+              }
               // Keep x overflow explicit: overflow-y:auto otherwise computes
               // the untouched x axis to auto too, letting any wide row pan the
               // entire conversation instead of its own nested scroller.
@@ -2517,11 +2523,10 @@ const DashedNoticeRule = () => (
  * filled, hairline-ringed block reads as part of the prose rather than as chrome
  * dropped on top of it.
  *
- * Always open, and only as wide as it needs to be. A notice is a short aside,
- * so hiding it behind a disclosure asked for a click to read two lines, and
- * stretching it across the column gave a subordinate message the same visual
- * weight as the answer it comments on. The width cap keeps a long payload to a
- * readable measure instead of one very wide line.
+ * Always open and the full width of the column. A notice is a short aside, so
+ * hiding it behind a disclosure asked for a click to read two lines, and a
+ * fit-content card left a ragged right edge against the column's otherwise
+ * straight rail.
  *
  * Tone is carried by the glyph and the leading sentence: amber is warning and
  * red is failure, by convention, over a ~6% fill that stays out of the way.
@@ -2563,35 +2568,30 @@ const AgentNoticeBanner = ({
         : 'hsl(var(--muted-foreground))';
   // A hairline: Chromium rounds a 0.5px BORDER up to 1px at any DPR, so every
   // `border-[0.5px]` in the app actually paints 1px. `ui/AGENTS.md` settled on
-  // this same shadow ring for menus. The rule under the header reuses it, so
-  // edge and divider are one material rather than two greys.
+  // this same shadow ring for menus.
   const ringColor = `color-mix(in srgb, ${toneColor} 14%, hsl(var(--border)))`;
   const fillColor = `color-mix(in srgb, ${toneColor} 3.5%, transparent)`;
 
   return (
     <div
       style={{ boxShadow: `0 0 0 0.5px ${ringColor}`, background: fillColor }}
-      className="w-fit max-w-full overflow-hidden rounded-lg"
+      className="w-full overflow-hidden rounded-lg"
     >
-      {/* Header band, rule, body — the same three-part split a fenced code block
-          uses, so the two read as the same kind of embedded object. The detail
-          is a sibling of the header rather than a child of the column beside the
-          glyph: hanging it off the label indented every line past the icon, which
-          cost width the card does not have. */}
+      {/* Header and body read as one continuous band. The detail is a sibling
+          of the header rather than a child of the column beside the glyph:
+          hanging it off the label indented every line past the icon, which cost
+          width the card does not have. An action rides the header's trailing
+          edge so a retry stays on the same line as the message it answers. */}
       <div className="flex items-center gap-2 px-2 py-1.5">
         <Icon className={cn('h-3.5 w-3.5 shrink-0', accentClass)} aria-hidden="true" />
         <span className={cn('min-w-0 text-xs font-medium leading-4', accentClass)}>{label}</span>
+        {action ? <div className="ml-auto shrink-0">{action}</div> : null}
       </div>
       {detail ? (
-        <div style={{ boxShadow: `inset 0 0.5px 0 ${ringColor}` }} className="px-2 py-1.5">
+        <div className="px-2 pb-1.5">
           <span className="block min-w-0 whitespace-pre-wrap break-words text-xs leading-5 text-muted-foreground">
             {detail}
           </span>
-        </div>
-      ) : null}
-      {action ? (
-        <div style={{ boxShadow: `inset 0 0.5px 0 ${ringColor}` }} className="px-2 py-1.5">
-          {action}
         </div>
       ) : null}
     </div>
@@ -5176,6 +5176,7 @@ const renderAssistantContent = (
           plan={content}
           messageId={messageId}
           itemIndex={itemIndex}
+          sessionId={sessionId}
           onFilePathClick={options?.onFilePathClick}
           fontSize={conversationFontSize}
           awaitingDecision={options?.planAwaitingDecision}
@@ -5676,6 +5677,7 @@ const WorkspaceSessionFileGroup = ({
   const workspaceId = useAtomValue(currentWorkspaceIdAtom) as WorkspaceId | null;
   const authToken = useAtomValue(authTokenAtom);
   const { openHtmlFile } = useContext(SessionChatActionContext);
+  const postHog = usePostHog();
   const [previewFile, setPreviewFile] = useState<SessionFilePayload | null>(null);
   const [previewStatus, setPreviewStatus] = useState<SessionFilePreviewStatus>({ kind: 'loading' });
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
@@ -5684,6 +5686,10 @@ const WorkspaceSessionFileGroup = ({
   const handleDownload = useCallback(
     (file: SessionFilePayload) => {
       if (!workspaceId || !authToken) return;
+      capturePostHogEvent(postHog, 'file_preview/downloaded', {
+        file_kind: getAnalyticsFileKind(file.fileName),
+        source: 'attachment',
+      });
       setDownloadingId(file.fileId);
       void downloadSessionFile({
         workspaceId,
@@ -5698,11 +5704,15 @@ const WorkspaceSessionFileGroup = ({
         })
         .finally(() => setDownloadingId((current) => (current === file.fileId ? null : current)));
     },
-    [authToken, sessionId, t, workspaceId]
+    [authToken, postHog, sessionId, t, workspaceId]
   );
 
   const handlePreview = useCallback(
     (file: SessionFilePayload) => {
+      capturePostHogEvent(postHog, 'file_preview/opened', {
+        file_kind: getAnalyticsFileKind(file.fileName),
+        source: 'attachment',
+      });
       if (isHtmlSessionFile(file) && openHtmlFile?.(file)) {
         return;
       }
@@ -5742,7 +5752,7 @@ const WorkspaceSessionFileGroup = ({
           });
         });
     },
-    [authToken, openHtmlFile, sessionId, t, workspaceId]
+    [authToken, openHtmlFile, postHog, sessionId, t, workspaceId]
   );
 
   // The send path caps at 8 files/message, but a block list synced from another
@@ -5880,6 +5890,7 @@ const renderUserContent = (
           plan={content}
           messageId={options.messageId}
           itemIndex={options.itemIndex}
+          sessionId={sessionId}
           fontSize={options.conversationFontSize}
         />
       );
@@ -6220,12 +6231,15 @@ const PlanPanel = ({
   searchBlockId,
   messageId,
   itemIndex,
+  sessionId,
   onFilePathClick,
   fontSize = DEFAULT_CONVERSATION_FONT_SIZE,
   awaitingDecision = false,
   isStreaming = false,
 }: {
   markdown: string;
+  /** Analytics only: resolves whether the plan belongs to a child (sub-agent) session. */
+  sessionId?: SessionId;
   searchBlockId: string;
   messageId: string;
   itemIndex: number;
@@ -6277,6 +6291,23 @@ const PlanPanel = ({
     },
     [itemIndex, messageId]
   );
+  const postHog = usePostHog();
+  const jotaiStore = useStore();
+  const toggleExpanded = useCallback(
+    (next: boolean) => {
+      if (next) {
+        // Read at click time so plan rows never subscribe to session meta.
+        const parentSessionId = sessionId
+          ? jotaiStore.get(sessionMetaAtomFamily(getSessionRoomId(sessionId)))?.parentSessionId
+          : null;
+        capturePostHogEvent(postHog, 'plan_panel/opened', {
+          is_subagent: Boolean(parentSessionId),
+        });
+      }
+      setExpanded(next);
+    },
+    [jotaiStore, postHog, sessionId, setExpanded]
+  );
   const [overflows, setOverflows] = useState(false);
   const bodyRef = useRef<HTMLDivElement>(null);
   const searchState = useSessionSearchBlockPrefix(searchBlockId);
@@ -6307,7 +6338,7 @@ const PlanPanel = ({
         <button
           type="button"
           className="-my-1 -ml-1 flex min-w-0 flex-1 items-center gap-2 rounded py-1 pl-1 text-left"
-          onClick={overflows || isOpen ? () => setExpanded(!isOpen) : undefined}
+          onClick={overflows || isOpen ? () => toggleExpanded(!isOpen) : undefined}
           aria-expanded={overflows || isOpen ? isOpen : undefined}
           disabled={!overflows && !isOpen}
         >
@@ -6370,6 +6401,7 @@ export const ProposedPlanBlock = ({
   plan,
   messageId,
   itemIndex,
+  sessionId,
   onFilePathClick,
   fontSize = DEFAULT_CONVERSATION_FONT_SIZE,
   awaitingDecision = false,
@@ -6377,6 +6409,7 @@ export const ProposedPlanBlock = ({
   plan: ProposedPlanMessage;
   messageId: string;
   itemIndex: number;
+  sessionId?: SessionId;
   onFilePathClick?: (filePath: string) => void;
   fontSize?: ConversationFontSize;
   awaitingDecision?: boolean;
@@ -6386,6 +6419,7 @@ export const ProposedPlanBlock = ({
     searchBlockId={getProposedPlanSearchBlockId(messageId, itemIndex)}
     messageId={messageId}
     itemIndex={itemIndex}
+    sessionId={sessionId}
     onFilePathClick={onFilePathClick}
     fontSize={fontSize}
     awaitingDecision={awaitingDecision}
@@ -7182,6 +7216,7 @@ const PlanExitBlock = ({
           searchBlockId={getProposedPlanSearchBlockId(messageId, itemIndex)}
           messageId={messageId}
           itemIndex={itemIndex}
+          sessionId={sessionId}
           onFilePathClick={onFilePathClick}
           fontSize={fontSize}
           awaitingDecision={awaitingDecision}

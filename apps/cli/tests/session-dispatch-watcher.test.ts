@@ -419,6 +419,92 @@ describe('SessionDispatchWatcher', () => {
     );
   });
 
+  it('drops caller-supplied launch fields from dispatched turn input config', async () => {
+    const startSession = vi.fn(async () => {});
+    const cancelSession = vi.fn(async () => ({ success: true }));
+    const sessionId = 'session-rpc-launch-fields' as SessionId;
+    const sessionMeta = {
+      id: sessionId,
+      machineId: 'machine-1',
+      userId: 'user-1',
+      createdAt: new Date().toISOString(),
+      cliType: 'builtin',
+      agentType: 'pi',
+      status: { type: 'idle' as const },
+    };
+
+    const sessionDoc = withHistoryPort({
+      mirror: {
+        subscribe: vi.fn(() => vi.fn()),
+      },
+      getMetaState: vi.fn(async () => sessionMeta),
+      getHistory: vi.fn(() => []),
+      updateHistory: vi.fn(async () => {}),
+      setStatus: vi.fn(async () => {}),
+      waitForRemoteSync: vi.fn(async () => {}),
+    });
+
+    const workspaceDocument = {
+      repo: {
+        getDocMeta: vi.fn(async () => ({ meta: sessionMeta })),
+        upsertDocMeta: vi.fn(async () => {}),
+        watch: vi.fn(() => ({ unsubscribe: vi.fn() })),
+      },
+      getOrCreateSessionDoc: vi.fn(async () => withSessionData(sessionDoc)),
+      onMetaRoomSynced: vi.fn(() => vi.fn()),
+    } as unknown as LoroDocumentManager;
+
+    const watcher = createWatcher({
+      logger: createSilentLogger(),
+      machineId: 'machine-1',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      workspaceDocument,
+      executionService: {
+        getExecutionSnapshot: vi.fn(() => ({
+          hasActiveTurn: false,
+          hasBlockingPendingCreate: false,
+          hasReusableSession: false,
+        })),
+        startSession,
+        cancelSession,
+      } as unknown as SessionExecutionService,
+      canUseMachine: createAllowMachineAccess(),
+    });
+
+    // Launch fields belong to the persisted config resolved by the daemon, not
+    // to whatever a dispatch caller writes into the turn input config.
+    const disposition = await watcher.offerRpcTurn({
+      sessionId,
+      userTurnId: 'rpc-turn-evil',
+      userId: 'user-1',
+      timestamp: new Date().toISOString(),
+      inputConfig: {
+        prompt: 'run it',
+        customAcp: { command: '/tmp/evil-acp' },
+        runtimeOverrides: { piExtensions: ['/tmp/evil-ext.ts'] },
+      },
+    });
+    expect(disposition).toBe('accepted');
+
+    await vi.waitFor(
+      () => {
+        expect(startSession).toHaveBeenCalledTimes(1);
+      },
+      { timeout: 3_000 }
+    );
+    expect(startSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'session/create',
+        acpSessionConfig: expect.objectContaining({
+          prompt: 'run it',
+          customAcp: undefined,
+          runtimeOverrides: undefined,
+        }),
+      }),
+      { dispatchSource: 'rpc' }
+    );
+  });
+
   it('keeps a stashed RPC turn while session meta is unknown and dispatches once meta syncs', async () => {
     const startSession = vi.fn(async () => {});
     const sessionId = 'session-rpc-before-meta' as SessionId;

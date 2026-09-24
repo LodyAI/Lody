@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { Readable, Writable } from 'node:stream';
 import * as tar from 'tar';
 import { compressStream } from 'zstd-stream';
+import { copyPiRuntimeFiles } from './pi-runtime-files.mjs';
 
 const execFile = promisify(execFileCallback);
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -61,14 +62,7 @@ try {
   );
   const packageDir = path.join(scratch, 'package');
   await mkdir(packageDir);
-  for (const entry of ['dist', 'node_modules', 'package.json', 'LICENSE']) {
-    await cp(path.join(build, entry), path.join(packageDir, entry), { recursive: true });
-  }
-  // Install bookkeeping embeds the build home, temporary paths and timestamps.
-  // It is not runtime input and must never enter the distributed archive.
-  for (const entry of ['.modules.yaml', '.pnpm-workspace-state-v1.json']) {
-    await rm(path.join(packageDir, 'node_modules', entry), { force: true });
-  }
+  await copyPiRuntimeFiles(build, packageDir);
   await mkdir(path.join(packageDir, 'native'));
   for (const arch of ['x64', 'arm64']) {
     await cp(
@@ -82,6 +76,10 @@ try {
     scratch
   );
   const pkg = JSON.parse(await readFile(path.join(packageDir, 'package.json'), 'utf8'));
+  const piExtensionsProtocolVersion = pkg.lody?.piExtensionsProtocolVersion;
+  if (piExtensionsProtocolVersion !== undefined && piExtensionsProtocolVersion !== 1) {
+    throw new Error('Unsupported Pi extension protocol version.');
+  }
   const minNodeVersion = /^>=(\d+\.\d+\.\d+)$/.exec(pkg.engines.node)?.[1];
   if (!minNodeVersion) throw new Error('Pi must declare an exact minimum Node version.');
   const version = `${pkg.version}-lody.${sourceCommit.slice(0, 12)}`;
@@ -125,6 +123,7 @@ try {
     publishable: true,
     kind: 'node-package',
     minNodeVersion,
+    ...(piExtensionsProtocolVersion === undefined ? {} : { piExtensionsProtocolVersion }),
     artifact: {
       fileName,
       sha256,

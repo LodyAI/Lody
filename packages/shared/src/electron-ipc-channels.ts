@@ -9,8 +9,10 @@ import type {
   ElectronLoginState,
   ElectronLocalSessionControlResponseEvent,
   ElectronPublicBrowserState,
+  ElectronPublicBrowserInteraction,
   ElectronUpdaterState,
   ElectronWindowTarget,
+  PreparedWindowTarget,
   GlobalShortcutTriggeredPayload,
   SessionCompletionNotificationClickPayload,
 } from './electron-ipc';
@@ -27,6 +29,7 @@ export type IpcPushMap = {
   'cli.state': ElectronCliState;
   'updater.state': ElectronUpdaterState;
   'publicBrowser.state': ElectronPublicBrowserState;
+  'publicBrowser.interaction': ElectronPublicBrowserInteraction;
   'sessionControl.response': ElectronLocalSessionControlResponseEvent;
   'app.deepLink': string;
   'auth.loginState': ElectronLoginState;
@@ -36,6 +39,8 @@ export type IpcPushMap = {
   'app.globalShortcut': GlobalShortcutTriggeredPayload;
   'app.sessionCompletionClick': SessionCompletionNotificationClickPayload;
   'app.windowTarget': ElectronWindowTarget;
+  'app.prepareWindowTarget': PreparedWindowTarget;
+  'app.activatePreparedWindow': PreparedWindowTarget;
 };
 
 export type IpcSendMap = {
@@ -48,6 +53,8 @@ export type IpcSendMap = {
   'loro.subscribe': null;
   'cli.subscribe': null;
   'app.windowReady': null;
+  'app.windowContentReady': ElectronWindowTarget;
+  'app.preparedWindowState': PreparedWindowTarget & { ready: boolean };
 };
 
 export const IPC_PUSH_CHANNELS = {
@@ -58,6 +65,7 @@ export const IPC_PUSH_CHANNELS = {
   cliState: 'cli.state',
   updaterState: 'updater.state',
   publicBrowserState: 'publicBrowser.state',
+  publicBrowserInteraction: 'publicBrowser.interaction',
   sessionControlResponse: 'sessionControl.response',
   appDeepLink: 'app.deepLink',
   authLoginState: 'auth.loginState',
@@ -67,6 +75,8 @@ export const IPC_PUSH_CHANNELS = {
   appGlobalShortcut: 'app.globalShortcut',
   appSessionCompletionClick: 'app.sessionCompletionClick',
   appWindowTarget: 'app.windowTarget',
+  appPrepareWindowTarget: 'app.prepareWindowTarget',
+  appActivatePreparedWindow: 'app.activatePreparedWindow',
 } as const satisfies { [K: string]: keyof IpcPushMap };
 
 export const IPC_SEND_CHANNELS = {
@@ -79,6 +89,8 @@ export const IPC_SEND_CHANNELS = {
   loroSubscribe: 'loro.subscribe',
   cliSubscribe: 'cli.subscribe',
   appWindowReady: 'app.windowReady',
+  appWindowContentReady: 'app.windowContentReady',
+  appPreparedWindowState: 'app.preparedWindowState',
 } as const satisfies { [K: string]: keyof IpcSendMap };
 
 const PUSH_CHANNEL_VALUES: readonly string[] = Object.values(IPC_PUSH_CHANNELS);

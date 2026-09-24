@@ -26,6 +26,8 @@ export function SessionFileActionsMenu({
 }) {
   const { t } = useTranslation();
   if (!filePath || items.length === 0) return null;
+  const visibleItems = items.filter((item) => item.isAvailable?.(filePath) ?? true);
+  if (visibleItems.length === 0) return null;
 
   return (
     <DropdownMenu>
@@ -42,7 +44,7 @@ export function SessionFileActionsMenu({
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="min-w-[190px]">
-        {items.map((item) => {
+        {visibleItems.map((item) => {
           const ItemIcon = item.icon;
           return (
             <DropdownMenuItem key={item.id} className="gap-2" onSelect={() => item.run(filePath)}>

@@ -8,6 +8,7 @@ import {
 import { parseBrowserAddress } from '@lody/shared/browser-url'
 import { formatUnknownError } from '../utils'
 import { isNavigationAbortError, mergePublicBrowserState } from './public-browser-state'
+import { observePublicBrowserInteraction } from './public-browser-interaction'
 
 type PublicBrowserRecord = {
   browserId: string
@@ -15,6 +16,7 @@ type PublicBrowserRecord = {
   window: BrowserWindow
   state: ElectronPublicBrowserState
   visible: boolean
+  trackInteraction: boolean
   lastUsedAt: number
   navigationSequence: number
 }
@@ -141,6 +143,7 @@ export class PublicBrowserService {
           canGoForward: false
         },
         visible: true,
+        trackInteraction: false,
         lastUsedAt: performance.now(),
         navigationSequence: 0
       }
@@ -243,11 +246,16 @@ export class PublicBrowserService {
     }
   }
 
-  setVisible(browserId: string, visible: boolean): ElectronPublicBrowserResult {
+  setVisible(
+    browserId: string,
+    visible: boolean,
+    trackInteraction?: boolean
+  ): ElectronPublicBrowserResult {
     const record = this.records.get(browserId)
     if (!record) return { ok: false, error: 'Public browser surface has not been created.' }
     record.view.setVisible(visible)
     record.visible = visible
+    if (trackInteraction !== undefined) record.trackInteraction = trackInteraction
     record.lastUsedAt = performance.now()
     return { ok: true, state: record.state }
   }
@@ -274,6 +282,20 @@ export class PublicBrowserService {
 
   private configureWebContents(record: PublicBrowserRecord): void {
     const contents = record.view.webContents
+    const stopObserving = observePublicBrowserInteraction(contents, (source) => {
+      if (
+        !record.trackInteraction ||
+        !record.visible ||
+        record.window.isDestroyed() ||
+        !record.window.isFocused()
+      )
+        return
+      record.window.webContents.send('publicBrowser.interaction', {
+        browserId: record.browserId,
+        source
+      })
+    })
+    contents.once('destroyed', stopObserving)
     contents.setWindowOpenHandler((details) => {
       void this.navigate(record.browserId, details.url)
       return { action: 'deny' }

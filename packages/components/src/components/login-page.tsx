@@ -111,6 +111,10 @@ const getElectronOAuthQuery = () => {
   const clientId = urlParams.get('client_id');
   const state = urlParams.get('state');
   const codeChallenge = urlParams.get('code_challenge');
+  const desktopChannel = urlParams.get('desktop_channel');
+  if (desktopChannel !== null && desktopChannel !== 'stable' && desktopChannel !== 'nightly') {
+    return undefined;
+  }
   if (clientId !== 'electron' || !state || !codeChallenge) {
     return undefined;
   }
@@ -119,6 +123,7 @@ const getElectronOAuthQuery = () => {
     client_id: clientId,
     state,
     code_challenge: codeChallenge,
+    ...(desktopChannel ? { desktop_channel: desktopChannel } : {}),
   };
   const codeChallengeMethod = urlParams.get('code_challenge_method');
   if (codeChallengeMethod) {
@@ -581,7 +586,7 @@ export function LoginPage({
   // this browser signed in as the previous account, so an automatic transfer
   // would mint an authorization code for the account the user is trying to
   // leave, with no way back. The user picks the account, then this holds the
-  // `lody://auth/callback#token=…` URL that both the automatic navigation and
+  // channel-specific auth callback URL that both the automatic navigation and
   // the visible fallback link use.
   const [electronHandoffUrl, setElectronHandoffUrl] = useState<string | null>(null);
   const [isPreparingElectronHandoff, setIsPreparingElectronHandoff] = useState(false);
@@ -1277,7 +1282,13 @@ export function LoginPage({
         login_surface: loginSurface,
         launch_mode: detectAppLaunchMode(isElectronRenderer),
       });
-      setElectronHandoffUrl(buildElectronRedirectUrl(authorizationCode, electronOAuthQuery.state));
+      setElectronHandoffUrl(
+        buildElectronRedirectUrl(
+          authorizationCode,
+          electronOAuthQuery.state,
+          electronOAuthQuery.desktop_channel
+        )
+      );
     } catch (err) {
       if (!isCurrentAccount()) {
         logElectronOAuthDebug('login page ignored transferUser failure after account switch');
@@ -1374,7 +1385,7 @@ export function LoginPage({
     [isNativeApp]
   );
 
-  // Attempt the `lody://` navigation from an effect rather than inline in the
+  // Attempt the app-scheme navigation from an effect rather than inline in the
   // transfer handler: the fallback link has to be painted before the attempt,
   // because a browser that refuses the custom scheme gives no callback and the
   // link is then the only way forward. Whether any given browser accepts this

@@ -1,7 +1,8 @@
 import { useCallback, useLayoutEffect, useRef, type ReactNode } from 'react';
-import { AlertTriangle } from 'lucide-react';
+import { AlertTriangle, ChevronDown } from 'lucide-react';
 import { observeResizeOnAnimationFrame } from '@/lib/resize-observer';
 import { cn } from '@/lib/utils';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/ui/collapsible';
 import { Label } from '@/ui/label';
 import { Textarea, type TextareaProps } from '@/ui/textarea';
 
@@ -61,6 +62,62 @@ export function Field({
       {children}
       {hint ? <p className="text-[11px] leading-snug text-muted-foreground">{hint}</p> : null}
     </div>
+  );
+}
+
+/**
+ * A section that collapses to its title row.
+ *
+ * Long optional groups stay reachable without dominating the dialog: `count`
+ * keeps the configured size visible while collapsed, and `action` sits in the
+ * header outside the toggle so it stays clickable in either state.
+ */
+export function CollapsibleSection({
+  title,
+  count,
+  children,
+  disabled,
+  disabledHint,
+  defaultOpen,
+  action,
+}: {
+  title: string;
+  count?: number;
+  children: ReactNode;
+  disabled?: boolean;
+  disabledHint?: string;
+  defaultOpen?: boolean;
+  action?: ReactNode;
+}) {
+  return (
+    <Collapsible defaultOpen={defaultOpen}>
+      <div className="flex h-9 items-center gap-1 rounded-md border border-border/60 bg-card/40 pr-1 hover:bg-card/70">
+        <CollapsibleTrigger asChild>
+          <button
+            type="button"
+            className="group flex h-full min-w-0 flex-1 items-center gap-2 rounded-md px-3 text-left text-sm font-normal text-foreground/90 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <ChevronDown className="h-3 w-3 shrink-0 transition-transform group-data-[state=open]:rotate-180" />
+            <span className="min-w-0 truncate">{title}</span>
+            {typeof count === 'number' && count > 0 ? (
+              <span className="ml-auto rounded-full bg-muted px-1.5 text-[10px] text-muted-foreground">
+                {count}
+              </span>
+            ) : null}
+          </button>
+        </CollapsibleTrigger>
+        {action}
+      </div>
+      <CollapsibleContent className="mt-2">
+        <div className="pl-1">
+          {disabled ? (
+            <p className="px-1 py-2 text-xs text-muted-foreground">{disabledHint}</p>
+          ) : (
+            children
+          )}
+        </div>
+      </CollapsibleContent>
+    </Collapsible>
   );
 }
 

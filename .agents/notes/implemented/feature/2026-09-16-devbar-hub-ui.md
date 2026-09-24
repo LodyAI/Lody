@@ -113,3 +113,6 @@ Current guarantees are owned by the draft
   method. Lody's own `/__lody/*` routes refuse `Origin: null` entirely. MCP
   keeps its existing `authorization: false` + Origin-gate posture; the token
   never enters the instance registry or agent-readable state.
+- 2026-09-23: The separate `Agent and terminal access` gate was removed; the
+  enabled Hub now always mounts aggregate MCP and Terminals. See
+  [the merge decision](../simplification/2026-09-23-devbar-agent-access-merged.md).
