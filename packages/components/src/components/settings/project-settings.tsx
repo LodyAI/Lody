@@ -1,12 +1,4 @@
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type CSSProperties,
-  type ReactNode,
-} from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
@@ -19,17 +11,15 @@ import { zhCN } from 'date-fns/locale/zh-CN';
 import {
   AlertCircle,
   BrushCleaning,
-  Clock3,
+  ChevronRight,
   Copy,
   Download,
   Ellipsis,
   ExternalLink,
-  Folder,
   FolderPlus,
   FolderOpen,
   Github,
   Info,
-  Users,
   Plus,
   RefreshCw,
   TerminalSquare,
@@ -82,9 +72,6 @@ import { Menu } from '@/ui/menu';
 import { Switch } from '@lody/ui/switch';
 import { Tabs } from '@lody/ui/tabs';
 import { Badge } from '@lody/ui/badge';
-import { Separator } from '@lody/ui/separator';
-import { CachedAvatarImg } from '@/components/cached-avatar-img';
-import { getGitHubOwnerAvatarUrl } from '@/lib/github-avatar';
 import { Textarea } from '@lody/ui/textarea';
 
 import { AlertDialog } from '@/ui/dialog';
@@ -272,7 +259,8 @@ const styles = stylex.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: space[3],
-    paddingInline: space[2],
+    // On the same edge as the section names and the rows' text below it.
+    paddingInline: space[4],
   },
   pageHeading: { minWidth: 0 },
   pageTitle: {
@@ -321,6 +309,60 @@ const styles = stylex.create({
     minHeight: 0,
     gap: space[3],
   },
+  /** Every source, stacked: one section each. */
+  sources: { display: 'flex', flexDirection: 'column', gap: space[6], minWidth: 0 },
+  /** One project: a line of its source's card. */
+  line: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: space[1],
+    minWidth: 0,
+    paddingInlineEnd: space[2],
+  },
+  lineButton: {
+    display: 'flex',
+    flexGrow: 1,
+    alignItems: 'center',
+    gap: space[3],
+    minWidth: 0,
+    margin: 0,
+    paddingInlineStart: space[4],
+    paddingInlineEnd: space[2],
+    paddingBlock: '10px',
+    borderWidth: 0,
+    backgroundColor: 'transparent',
+    color: 'inherit',
+    fontFamily: 'inherit',
+    fontSize: '1em',
+    textAlign: 'start',
+    cursor: 'pointer',
+    outlineStyle: 'none',
+  },
+  lineText: { display: 'flex', flexDirection: 'column', gap: '2px', flexGrow: 1, minWidth: 0 },
+  lineName: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    lineHeight: 1.25,
+    color: colors.label,
+  },
+  lineCaption: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontFamily: MONO,
+    fontSize: '0.75em',
+    lineHeight: 1.3,
+    color: colors.secondaryLabel,
+  },
+  lineMeta: {
+    flexShrink: 0,
+    fontSize: '0.8em',
+    color: colors.tertiaryLabel,
+    fontVariantNumeric: 'tabular-nums',
+    whiteSpace: 'nowrap',
+  },
+  lineChevron: { flexShrink: 0, width: '14px', height: '14px', color: colors.tertiaryLabel },
   sourcePane: {
     boxSizing: 'border-box',
     display: 'flex',
@@ -773,9 +815,6 @@ export function sortGithubProjectRows(
   return [...rows].sort((left, right) => left.repoFullName.localeCompare(right.repoFullName));
 }
 
-/** Source id for the GitHub group in the Projects catalog. */
-const GITHUB_PILL_ID = '__github__';
-
 function projectPathTail(path: string): string {
   const parts = path.split(/[/\\]/).filter(Boolean);
   if (parts.length <= 2) return path;
@@ -1163,44 +1202,6 @@ function ProjectSettingsDesktop({
     return [...byId.values()];
   }, [sections, addableMachines, onlineMachineIds]);
 
-  const sourceIds = useMemo(() => {
-    const ids: string[] = [];
-    if (githubSections.length > 0) ids.push(GITHUB_PILL_ID);
-    for (const machine of machineEntries) ids.push(machine.machineId);
-    return ids;
-  }, [githubSections.length, machineEntries]);
-
-  const [selectedSourceId, setSelectedSourceId] = useState<string | null>(() => {
-    if (initialMachineId) return initialMachineId;
-    if (initialProjectKey) {
-      const localSection = sections.find((section) =>
-        section.rows.some((row) => row.key === initialProjectKey)
-      );
-      if (localSection) return localSection.machineId;
-      if (
-        githubSections.some((section) => section.rows.some((row) => row.key === initialProjectKey))
-      ) {
-        return GITHUB_PILL_ID;
-      }
-    }
-    return null;
-  });
-  const resolvedSourceId =
-    selectedSourceId && sourceIds.includes(selectedSourceId)
-      ? selectedSourceId
-      : (sourceIds[0] ?? null);
-  const isGithubSource = resolvedSourceId === GITHUB_PILL_ID;
-
-  const currentSelections = useMemo<ProjectSettingsSelection[]>(() => {
-    if (resolvedSourceId === GITHUB_PILL_ID) {
-      return githubSections.flatMap((section) =>
-        section.rows.map((row) => ({ key: row.key, kind: 'github' as const, row }))
-      );
-    }
-    const section = sections.find((entry) => entry.machineId === resolvedSourceId);
-    return (section?.rows ?? []).map((row) => ({ key: row.key, kind: 'local' as const, row }));
-  }, [resolvedSourceId, sections, githubSections]);
-
   const allSelections = useMemo<ProjectSettingsSelection[]>(() => {
     const github = githubSections.flatMap((section) =>
       section.rows.map((row) => ({ key: row.key, kind: 'github' as const, row }))
@@ -1226,27 +1227,19 @@ function ProjectSettingsDesktop({
       />
     ) : null;
 
-  /* The selected pill scopes the add action: the picker opens straight on that
-     machine (its Back button still leads to the full machine list). */
   const addableMachineIds = useMemo(
     () => new Set((addableMachines ?? []).map((machine) => machine.machineId)),
     [addableMachines]
   );
-  const selectedMachine =
-    machineEntries.find((entry) => entry.machineId === resolvedSourceId) ?? null;
-  const selectedMachineAddTarget =
-    onAddLocalProject && selectedMachine && addableMachineIds.has(selectedMachine.machineId)
-      ? selectedMachine
-      : null;
-  const addToSelectedMachine = selectedMachineAddTarget
-    ? () => onAddLocalProject?.(selectedMachineAddTarget.machineId)
-    : null;
   const addFolderLabel = t('workspace.projects.addFolder', 'Add folder');
-  const addFolderToMachineTitle = selectedMachineAddTarget
-    ? t('workspace.projects.addFolderOnMachine', 'Add a folder on {{machine}}', {
-        machine: selectedMachineAddTarget.machineName,
-      })
-    : undefined;
+
+  /* Arriving for one machine (from its "Add folder" elsewhere) scrolls its
+     section into view rather than hiding every other source. */
+  const sectionRefs = useRef(new Map<string, HTMLElement>());
+  useEffect(() => {
+    if (!initialMachineId) return;
+    sectionRefs.current.get(initialMachineId)?.scrollIntoView({ block: 'start' });
+  }, [initialMachineId]);
 
   const detailHandlers = {
     onSharedWithTeamChange,
@@ -1265,10 +1258,6 @@ function ProjectSettingsDesktop({
     localMachineId,
     onlineMachineIds,
   };
-
-  const sourceTitle = isGithubSource
-    ? t('chat.contextSwitch.github', 'GitHub')
-    : (selectedMachine?.machineName ?? t('settings.tabs.projects', 'Projects'));
 
   return (
     <>
@@ -1299,135 +1288,110 @@ function ProjectSettingsDesktop({
             </p>
           </div>
         ) : (
-          <div {...stylex.props(styles.catalog)}>
-            <div {...withClassName(stylex.props(styles.sourcePane), SCROLLBAR_CLASS)}>
-              {githubSections.length > 0 ? (
-                <SourceRow
-                  selected={isGithubSource}
-                  icon={<Github {...stylex.props(styles.glyph)} />}
-                  title={t('chat.contextSwitch.github', 'GitHub')}
-                  subtitle={t('workspace.projects.projectCount', '{{count}} projects', {
-                    count: totalGithubProjects,
-                  })}
-                  onClick={() => setSelectedSourceId(GITHUB_PILL_ID)}
-                />
-              ) : null}
-              {machineEntries.map((machine) => {
-                const count =
-                  sections.find((section) => section.machineId === machine.machineId)?.rows
-                    .length ?? 0;
-                const offline =
-                  !machine.online && !(localMachineId && machine.machineId === localMachineId);
-                return (
-                  <SourceRow
-                    key={machine.machineId}
-                    selected={resolvedSourceId === machine.machineId}
-                    online={machine.online}
-                    title={machine.machineName}
-                    subtitle={t('workspace.projects.projectCount', '{{count}} projects', {
-                      count,
-                    })}
-                    offlineLabel={
-                      offline && resolvedSourceId === machine.machineId
-                        ? t('workspace.machines.offline', 'Offline')
-                        : null
+          /* Every source at once, each a section: its name above, its projects
+             as the ruled rows of one card. Nothing is hidden behind a picked
+             source, and a project opens its editor in place. */
+          <div {...stylex.props(styles.sources)}>
+            {machineEntries.map((machine) => {
+              const rows =
+                sections.find((section) => section.machineId === machine.machineId)?.rows ?? [];
+              const isThisMachine = Boolean(localMachineId && machine.machineId === localMachineId);
+              const online = machine.online || isThisMachine;
+              const canAdd = Boolean(onAddLocalProject && addableMachineIds.has(machine.machineId));
+              const status = [
+                isThisMachine
+                  ? t('workspace.projects.thisMachine', 'This machine')
+                  : online
+                    ? t('workspace.machines.online', 'Online')
+                    : t('workspace.machines.offline', 'Offline'),
+                machine.sharedWithTeam ? t('workspace.projects.sharedBadge', 'Shared') : null,
+              ]
+                .filter(Boolean)
+                .join(' · ');
+              return (
+                <div
+                  key={machine.machineId}
+                  ref={(node) => {
+                    if (node) sectionRefs.current.set(machine.machineId, node);
+                    else sectionRefs.current.delete(machine.machineId);
+                  }}
+                >
+                  <CompactSection
+                    title={`${machine.machineName} · ${status}`}
+                    headerRight={
+                      canAdd ? (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="small"
+                          title={t(
+                            'workspace.projects.addFolderOnMachine',
+                            'Add a folder on {{machine}}',
+                            { machine: machine.machineName }
+                          )}
+                          onClick={() => onAddLocalProject?.(machine.machineId)}
+                        >
+                          <FolderPlus {...stylex.props(styles.buttonIcon)} />
+                          {addFolderLabel}
+                        </Button>
+                      ) : null
                     }
-                    shared={machine.sharedWithTeam === true}
-                    onClick={() => setSelectedSourceId(machine.machineId)}
-                  />
-                );
-              })}
-            </div>
-            <Separator orientation="vertical" />
-            <div {...stylex.props(styles.folderPane)}>
-              <div {...stylex.props(styles.folderHeader)}>
-                <h3 {...stylex.props(styles.folderTitle)}>{sourceTitle}</h3>
-                {addToSelectedMachine ? (
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    size="small"
-                    title={addFolderToMachineTitle}
-                    onClick={addToSelectedMachine}
                   >
-                    <FolderPlus {...stylex.props(styles.buttonIcon)} />
-                    {addFolderLabel}
-                  </Button>
-                ) : isGithubSource && onOpenGitHubSettings ? (
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    size="small"
-                    onClick={onOpenGitHubSettings}
-                  >
-                    <Github {...stylex.props(styles.buttonIcon)} />
-                    {t('workspace.projects.manageInGithubSettings', 'Manage in GitHub settings')}
-                  </Button>
-                ) : null}
-              </div>
-              <div {...withClassName(stylex.props(styles.folderList), SCROLLBAR_CLASS)}>
-                {isGithubSource ? (
-                  githubSections.map((section, index) => (
-                    <div
-                      key={section.owner}
-                      {...stylex.props(styles.ownerGroup, index > 0 && styles.ownerGroupSpaced)}
-                    >
-                      <ProjectOwnerLabel owner={section.owner} />
-                      {section.rows.map((row) => (
-                        <ProjectMasterRow
+                    {rows.length === 0 ? (
+                      <p {...stylex.props(surface.cardNote)}>
+                        {t(
+                          'workspace.projects.machineEmpty',
+                          'No folders added on this machine yet.'
+                        )}
+                      </p>
+                    ) : (
+                      rows.map((row) => (
+                        <ProjectLine
                           key={row.key}
-                          selected={editingProjectKey === row.key}
-                          icon={<OwnerAvatar owner={section.owner} />}
-                          title={row.name}
-                          subtitle={row.repoFullName}
-                          privateRepo={row.private}
-                          onClick={() => setEditingProjectKey(row.key)}
+                          title={row.project.name}
+                          caption={projectPathTail(row.project.rootPath)}
+                          shared={row.sharedWithTeam}
+                          conversationCount={row.conversationCount}
+                          removalState={localProjectRemovalStateByKey?.get(row.key) ?? null}
+                          canRemove={canRemoveLocalProject?.(row) === true}
+                          onRemove={() => onRequestRemoveLocalProject?.(row)}
+                          onOpen={() => setEditingProjectKey(row.key)}
                         />
-                      ))}
-                    </div>
-                  ))
-                ) : currentSelections.length === 0 ? (
-                  <div {...stylex.props(styles.machineEmpty)}>
-                    <p {...stylex.props(styles.note)}>
-                      {t(
-                        'workspace.projects.machineEmpty',
-                        'No folders added on this machine yet.'
-                      )}
-                    </p>
-                    {addToSelectedMachine ? (
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        size="small"
-                        title={addFolderToMachineTitle}
-                        onClick={addToSelectedMachine}
-                      >
-                        <FolderPlus {...stylex.props(styles.buttonIcon)} />
-                        {addFolderLabel}
-                      </Button>
-                    ) : null}
-                  </div>
-                ) : (
-                  currentSelections.map((selection) =>
-                    selection.kind === 'local' ? (
-                      <ProjectMasterRow
-                        key={selection.key}
-                        selected={editingProjectKey === selection.key}
-                        icon={<Folder {...stylex.props(styles.glyph)} />}
-                        title={selection.row.project.name}
-                        subtitle={projectPathTail(selection.row.project.rootPath)}
-                        shared={selection.row.sharedWithTeam}
-                        conversationCount={selection.row.conversationCount}
-                        removalState={localProjectRemovalStateByKey?.get(selection.key) ?? null}
-                        canRemove={canRemoveLocalProject?.(selection.row) === true}
-                        onRemove={() => onRequestRemoveLocalProject?.(selection.row)}
-                        onClick={() => setEditingProjectKey(selection.key)}
-                      />
-                    ) : null
-                  )
-                )}
-              </div>
-            </div>
+                      ))
+                    )}
+                  </CompactSection>
+                </div>
+              );
+            })}
+            {githubSections.map((section, index) => (
+              <CompactSection
+                key={section.owner}
+                title={`${section.owner} · ${t('chat.contextSwitch.github', 'GitHub')}`}
+                headerRight={
+                  index === 0 && onOpenGitHubSettings ? (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="small"
+                      onClick={onOpenGitHubSettings}
+                    >
+                      <Github {...stylex.props(styles.buttonIcon)} />
+                      {t('workspace.projects.manageInGithubSettings', 'Manage in GitHub settings')}
+                    </Button>
+                  ) : null
+                }
+              >
+                {section.rows.map((row) => (
+                  <ProjectLine
+                    key={row.key}
+                    title={row.name}
+                    caption={row.repoFullName}
+                    privateRepo={row.private}
+                    onOpen={() => setEditingProjectKey(row.key)}
+                  />
+                ))}
+              </CompactSection>
+            ))}
           </div>
         )}
       </div>
@@ -1465,197 +1429,85 @@ function ProjectSettingsDesktop({
   );
 }
 
-function SourceRow({
-  selected,
-  icon,
+/**
+ * A project as one line of its source's card: its name, where it lives, what
+ * is true of it, and the way into its editor. The whole line opens it; the
+ * trailing menu holds the one destructive action.
+ */
+function ProjectLine({
   title,
-  subtitle,
-  online,
-  offlineLabel,
-  shared = false,
-  onClick,
-}: {
-  readonly selected: boolean;
-  readonly icon?: ReactNode;
-  readonly title: string;
-  readonly subtitle?: string;
-  readonly online?: boolean;
-  readonly offlineLabel?: string | null;
-  readonly shared?: boolean;
-  readonly onClick: () => void;
-}) {
-  const { t } = useTranslation();
-  const sharedLabel = t('workspace.projects.sharedBadge', 'Shared');
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      {...stylex.props(surface.listRow, selected && surface.listRowSelected)}
-    >
-      <span
-        {...stylex.props(
-          surface.listRowIcon,
-          styles.glyphBox,
-          selected && surface.listRowIconSelected
-        )}
-      >
-        {icon ?? (
-          <span aria-hidden {...stylex.props(styles.statusDot, online && styles.statusDotOnline)} />
-        )}
-      </span>
-      <span {...stylex.props(styles.rowText)}>
-        <span {...stylex.props(surface.listRowLabel)}>{title}</span>
-        {subtitle || offlineLabel ? (
-          <span {...stylex.props(styles.rowCaption)}>
-            {subtitle}
-            {offlineLabel ? (
-              <span {...stylex.props(styles.rowCaptionAside)}>
-                {subtitle ? ' · ' : null}
-                {offlineLabel}
-              </span>
-            ) : null}
-          </span>
-        ) : null}
-      </span>
-      {shared ? (
-        <span {...stylex.props(surface.listRowMeta, styles.metaItem)} title={sharedLabel}>
-          <Users {...stylex.props(styles.metaIcon)} aria-hidden="true" />
-          <span {...stylex.props(styles.srOnly)}>{sharedLabel}</span>
-        </span>
-      ) : null}
-    </button>
-  );
-}
-
-function ProjectMasterRow({
-  selected,
-  icon,
-  title,
-  subtitle,
+  caption,
   shared = false,
   privateRepo = false,
   conversationCount,
   removalState = null,
   canRemove = false,
   onRemove,
-  onClick,
+  onOpen,
 }: {
-  readonly selected: boolean;
-  readonly icon: ReactNode;
   readonly title: string;
-  readonly subtitle: string;
+  readonly caption: string;
   readonly shared?: boolean;
   readonly privateRepo?: boolean;
   readonly conversationCount?: number;
   readonly removalState?: LocalProjectRemovalState | null;
   readonly canRemove?: boolean;
   readonly onRemove?: () => void;
-  readonly onClick: () => void;
+  readonly onOpen: () => void;
 }) {
   const { t } = useTranslation();
-  const removalStateLabel =
+  const removalLabel =
     removalState === 'waiting_for_device'
       ? t('sidebar.localProjects.remove.waitingForDevice', 'Waiting for device…')
       : removalState === 'removing'
         ? t('sidebar.localProjects.remove.removing', 'Removing…')
         : null;
-
+  const meta = [
+    removalLabel,
+    shared ? t('workspace.projects.sharedBadge', 'Shared') : null,
+    privateRepo ? t('workspace.projects.privateRepo', 'Private') : null,
+    conversationCount != null && conversationCount > 0
+      ? t('workspace.projects.conversationCount', '{{count}} conversations', {
+          count: conversationCount,
+        })
+      : null,
+  ].filter(Boolean);
   return (
-    <div {...stylex.props(surface.listRow, styles.folderRow, selected && surface.listRowSelected)}>
-      <button type="button" onClick={onClick} {...stylex.props(styles.folderRowButton)}>
-        <span
-          {...stylex.props(
-            surface.listRowIcon,
-            styles.glyphBox,
-            selected && surface.listRowIconSelected
-          )}
-        >
-          {icon}
+    <div {...stylex.props(styles.line, surface.pressableLine)}>
+      <button type="button" onClick={onOpen} {...stylex.props(styles.lineButton)}>
+        <span {...stylex.props(styles.lineText)}>
+          <span {...stylex.props(styles.lineName)}>{title}</span>
+          <span {...stylex.props(styles.lineCaption)}>{caption}</span>
         </span>
-        <span {...stylex.props(styles.rowText)}>
-          <span {...stylex.props(surface.listRowLabel)}>{title}</span>
-          <span {...stylex.props(styles.rowCaption, styles.rowCaptionMono)}>{subtitle}</span>
-        </span>
-        {shared || privateRepo || conversationCount != null ? (
-          <span {...stylex.props(surface.listRowMeta, styles.metaGroup)}>
-            {shared ? (
-              <span {...stylex.props(styles.metaItem)}>
-                <Users {...stylex.props(styles.metaIcon)} aria-hidden="true" />
-                {t('workspace.projects.sharedBadge', 'Shared')}
-              </span>
-            ) : null}
-            {privateRepo ? <span>{t('workspace.projects.privateRepo', 'Private')}</span> : null}
-            {conversationCount != null ? (
-              <span>
-                {t('workspace.projects.conversationCount', '{{count}} conversations', {
-                  count: conversationCount,
-                })}
-              </span>
-            ) : null}
-          </span>
+        {meta.length > 0 ? (
+          <span {...stylex.props(styles.lineMeta)}>{meta.join(' · ')}</span>
         ) : null}
+        {removalState === 'removing' ? <Spinner size="small" /> : null}
+        <ChevronRight aria-hidden="true" {...stylex.props(styles.lineChevron)} />
       </button>
-      {removalStateLabel ? (
-        <span {...stylex.props(styles.removalMark)} title={removalStateLabel}>
-          {removalState === 'waiting_for_device' ? (
-            <Clock3 {...stylex.props(styles.buttonIcon)} aria-hidden="true" />
-          ) : (
-            <Spinner size="small" />
-          )}
-        </span>
-      ) : canRemove && onRemove ? (
+      {canRemove && onRemove && !removalLabel ? (
         <Menu.Root>
           <Menu.Trigger
             render={
               <Button
                 type="button"
                 variant="ghost"
-                size="mini"
+                size="small"
                 icon
                 aria-label={t('sessions.moreActions', 'More actions')}
-                onClick={(event) => event.stopPropagation()}
               />
             }
           >
             <Ellipsis {...stylex.props(styles.glyph)} />
           </Menu.Trigger>
           <Menu.Content align="end">
-            <Menu.Item
-              tone="destructive"
-              onClick={(event) => {
-                event.stopPropagation();
-                onRemove();
-              }}
-            >
+            <Menu.Item tone="destructive" onClick={() => onRemove()}>
               {t('workspace.projects.delete', 'Delete project')}
             </Menu.Item>
           </Menu.Content>
         </Menu.Root>
       ) : null}
     </div>
-  );
-}
-
-function ProjectOwnerLabel({ owner }: { readonly owner: string }) {
-  return <p {...stylex.props(styles.ownerLabel)}>{owner}</p>;
-}
-
-function OwnerAvatar({ owner }: { readonly owner: string }) {
-  // Use avatars.githubusercontent.com (CORS-enabled + already allowed by the
-  // Electron img-src CSP) rather than github.com/<owner>.png, whose CORS-mode
-  // cache fetch is rejected in Electron. Swap to the Github glyph on error.
-  const [failed, setFailed] = useState(false);
-  if (failed || !owner) {
-    return <Github {...stylex.props(styles.glyph)} />;
-  }
-  return (
-    <CachedAvatarImg
-      src={getGitHubOwnerAvatarUrl(owner)}
-      alt={owner}
-      loading="lazy"
-      {...stylex.props(styles.avatar)}
-      onError={() => setFailed(true)}
-    />
   );
 }
 

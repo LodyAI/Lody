@@ -316,5 +316,19 @@ progress while the tool runs ("Searching", shimmering), done once it has
   at the control step with its count and actions at the end and the chevron
   last, folding open in place.
 
+## Project settings: every source at once
+
+The owner rejected Settings > Projects outright. Its two-pane catalog hid all
+but one source behind a picked row, left a mostly empty right pane, and read
+"1 projects". It is now one page in the settings language: each machine (then
+each GitHub owner) is a `CompactSection` — its name and state ("MacBook Pro ·
+Offline · Shared") above, its "Add folder" or "Manage in GitHub settings" at
+the end — and its projects are the ruled rows of that card: name, path in mono,
+what is true of it, a chevron, and the delete menu. A project still opens its
+editor in the nested modal. `settings/AGENTS.md` records the new layout.
+Also: conversation steps are as wide as their words and brighten their file
+name on hover; the MCP transport is a segmented strip rather than two radio
+rows (radios stay where each option carries a sentence).
+
 Related: [token gallery](2026-09-09-ui-token-gallery.md),
 [call-site migration](2026-09-22-ui-radix-callsite-migration.md).

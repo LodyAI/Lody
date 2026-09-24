@@ -27,9 +27,9 @@ rolls back — is in the root [AGENTS.md](../../../../../AGENTS.md).
   settings overlay. Rationale:
   [share inventory jump](../../../../../.agents/notes/implemented/feature/2026-09-15-share-inventory-session-jump.md).
 
-- Desktop Settings > Projects is a two-pane catalog: left GitHub/machines,
-  right the folders on the selected source. Clicking a folder opens a nested
-  modal of stacked `CompactSection`s — never inline the editor beside the list.
+- Desktop Settings > Projects stacks every source (each machine, then GitHub
+  owners) as a `CompactSection` of ruled project rows. Clicking a project opens
+  a nested modal of stacked `CompactSection`s — never inline the editor beside the list.
   Mobile keeps the previous stacked list. Local-project deletion reuses
   `useRemoveLocalProject` / `RemoveLocalProjectDialog` (nested overlay like MCP);
   do not add a second confirm. Pending removal stays listed until the owning
