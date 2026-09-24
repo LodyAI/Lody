@@ -52,7 +52,10 @@ export function WebWorkspaceLayout({ children }: { children: ReactNode }) {
 
   return (
     <div className={getWebWorkspaceLayoutRootClassName()}>
-      <AnimatePresence initial={false}>
+      {/* presenceAffectsLayout gives the presence context a new value on every
+          render, which re-propagated it through the whole sidebar (~29k fibers)
+          on each session switch. The slide animates marginLeft, not `layout`. */}
+      <AnimatePresence initial={false} presenceAffectsLayout={false}>
         {!sidebarHidden && (
           <motion.div
             key="app-sidebar"

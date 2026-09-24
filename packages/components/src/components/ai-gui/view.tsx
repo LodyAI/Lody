@@ -18,6 +18,7 @@ import {
   useRef,
   useState,
 } from 'react';
+import { InteractionArmedProvider, useInteractionArm } from '@/ui/interaction-arm';
 import {
   MessageSelectionContext,
   MessageSelectionOverlay,
@@ -480,14 +481,20 @@ const NativeSelectionRowsContext = createContext<{
 function ConversationVirtualRow({ index, ...props }: CustomItemComponentProps) {
   const { rows, leading, held } = useContext(NativeSelectionRowsContext);
   const row = rows[index - leading];
+  // Row tooltips, popovers and context menus mount on the first hover or focus
+  // (see `ui/interaction-arm.tsx`): they were over a third of a switch's mounts.
+  const { armed, armHandlers } = useInteractionArm();
   return (
     <NativeTextSelectionHoldContext.Provider value={!!row && held.has(row.turnId)}>
-      <div
-        {...props}
-        data-virtual-index={index}
-        data-conversation-row-key={row?.key}
-        data-conversation-turn-id={row?.turnId}
-      />
+      <InteractionArmedProvider value={armed}>
+        <div
+          {...props}
+          {...armHandlers}
+          data-virtual-index={index}
+          data-conversation-row-key={row?.key}
+          data-conversation-turn-id={row?.turnId}
+        />
+      </InteractionArmedProvider>
     </NativeTextSelectionHoldContext.Provider>
   );
 }
@@ -1696,13 +1703,17 @@ export const SessionChatStreamView = forwardRef<
           )
         ),
     });
+    // Every row reads this context. `holds` is a fresh Map per render, so key the
+    // held set by its ids: a new set per render re-rendered every row, ~10 times
+    // per session switch.
+    const heldTurnIdsKey = [...nativeTextSelection.holds.keys()].join('\0');
+    const heldTurnIds = useMemo(
+      () => new Set(heldTurnIdsKey === '' ? [] : heldTurnIdsKey.split('\0')),
+      [heldTurnIdsKey]
+    );
     const nativeSelectionRows = useMemo(
-      () => ({
-        rows: selectableRows,
-        leading: leadingRowCount,
-        held: new Set(nativeTextSelection.holds.keys()),
-      }),
-      [selectableRows, leadingRowCount, nativeTextSelection.holds]
+      () => ({ rows: selectableRows, leading: leadingRowCount, held: heldTurnIds }),
+      [selectableRows, leadingRowCount, heldTurnIds]
     );
 
     // ---- Outline rail ------------------------------------------------------

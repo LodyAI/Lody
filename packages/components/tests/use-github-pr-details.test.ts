@@ -571,6 +571,28 @@ describe('useGitHubPrDetails target isolation', () => {
     expect(currentResult?.data?.pullRequest.mergeableState).toBe('clean');
   });
 
+  it("never presents the previous PR's details as the next one's while its cache read is pending", async () => {
+    await renderHook({ workspaceId: 'workspace-1', repoFullName: 'loro-dev/lody', prNumber: 1 });
+    await waitForResult((result) => result.data?.pullRequest.number === 1);
+    expect(currentResult?.state).toBe('ready');
+
+    const pendingRead = createDeferred<null>();
+    const pendingDetails = createDeferred<ReturnType<typeof createPullRequest>>();
+    cacheMocks.readPrCacheEntry.mockReturnValueOnce(pendingRead.promise);
+    githubMocks.githubFetchPullRequestDetails.mockReturnValueOnce(pendingDetails.promise);
+    await renderHook({ workspaceId: 'workspace-1', repoFullName: 'loro-dev/lody', prNumber: 2 });
+
+    // PR 1's checks and ready state must not render (or enable Merge) for PR 2.
+    expect(currentResult?.data).toBeNull();
+    expect(currentResult?.state).toBe('loading');
+
+    await act(async () => {
+      pendingRead.resolve(null);
+      pendingDetails.resolve(createPullRequest(2));
+    });
+    await waitForResult((result) => result.data?.pullRequest.number === 2);
+  });
+
   it('does not apply a completed merge to the PR opened after navigation', async () => {
     const mergeDeferred = createDeferred<GitHubMergeResult>();
     githubMocks.githubMergePullRequest.mockReturnValueOnce(mergeDeferred.promise);

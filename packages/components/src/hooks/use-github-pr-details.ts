@@ -273,6 +273,10 @@ export function useGitHubPrDetails({
   const canFetch = enabledWithInputs && canRunAuthedWorkspaceQuery(workspaceId, isAuthenticated);
 
   const [payload, setPayload] = useState<PrCachePayload | null>(null);
+  // The PR `payload`/`state` describe. A switched view keeps the previous PR's
+  // values until its cache read lands; they must not render (or enable Merge)
+  // as the new PR's.
+  const [loadedCacheKey, setLoadedCacheKey] = useState<string | null>(null);
   const [state, setState] = useState<GitHubPrDetailsState>(enabledWithInputs ? 'loading' : 'idle');
   const [isRevalidating, setIsRevalidating] = useState(false);
   const [error, setError] = useState<Error | null>(null);
@@ -326,6 +330,7 @@ export function useGitHubPrDetails({
   useEffect(() => {
     if (!enabledWithInputs || !workspaceId || !normalizedRepoFullName || !prNumber) {
       setPayload(null);
+      setLoadedCacheKey(null);
       payloadRef.current = null;
       versionsRef.current = EMPTY_PR_CACHE_VERSIONS;
       cacheKeyRef.current = null;
@@ -360,6 +365,7 @@ export function useGitHubPrDetails({
     void (async () => {
       const entry = await readPrCacheEntry(workspaceId, normalizedRepoFullName, prNumber);
       if (cancelled || cacheKeyRef.current !== cacheKey) return;
+      setLoadedCacheKey(cacheKey);
       if (entry) {
         payloadRef.current = entry.payload;
         versionsRef.current = entry.versions;
@@ -402,6 +408,7 @@ export function useGitHubPrDetails({
         payloadRef.current = nextPayload;
         versionsRef.current = nextVersions;
         setPayload(nextPayload);
+        setLoadedCacheKey(targetCacheKey);
       }
       const entry: PrCacheEntry = {
         workspaceId: targetWorkspaceId,
@@ -1078,12 +1085,18 @@ export function useGitHubPrDetails({
   // BetterAuth cookie is still valid. Keep that transition inside the loading
   // state: this hook owns token refresh + retry, while RootApp owns the only
   // confirmed-expiry redirect in the product.
-  const data = payloadToData(payload);
+  const payloadIsCurrent = loadedCacheKey === cacheKey;
+  const data = payloadToData(payloadIsCurrent ? payload : null);
   const settledUnauthenticated = enabledWithInputs && !isConvexAuthLoading && !isAuthenticated;
   const unauthedAndEmpty = settledUnauthenticated && !data;
   const hasUnauthorizedError = error !== null && isGitHubUnauthorizedTokenError(error);
   const recoverableAuthError = (unauthedAndEmpty || hasUnauthorizedError) && !data;
-  const effectiveState: GitHubPrDetailsState = recoverableAuthError ? 'loading' : state;
+  const currentState: GitHubPrDetailsState = payloadIsCurrent
+    ? state
+    : cacheKey !== null
+      ? 'loading'
+      : 'idle';
+  const effectiveState: GitHubPrDetailsState = recoverableAuthError ? 'loading' : currentState;
 
   // Silent recovery from an apparent session expiry. Each refresh goes through
   // runActionWithUnauthorizedRetry, which mints a fresh Convex JWT from the

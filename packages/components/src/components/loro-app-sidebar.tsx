@@ -1,4 +1,5 @@
 import { openSessionOnModifiedClick } from '@/lib/desktop-window';
+import { jsonValueEqual } from '@/lib/json-value-equal';
 import { usePostHog } from '@posthog/react';
 import { capturePostHogEvent } from '@/lib/posthog-analytics';
 import { SessionWindowMenuItem } from './session-window-menu-item';
@@ -1630,6 +1631,10 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
   const selectedSessionId = useMemo(() => {
     return getSelectedSessionId(location.pathname, workspaceSlug);
   }, [location.pathname, workspaceSlug]);
+  // Row handlers read the selection at call time: depending on it would hand
+  // every sidebar row a new callback on each switch and re-render all of them.
+  const selectedSessionIdRef = useRef(selectedSessionId);
+  selectedSessionIdRef.current = selectedSessionId;
   const selectedLocalProjectKey = useMemo(() => {
     return getSelectedLocalProjectKey(
       location.pathname,
@@ -1726,7 +1731,7 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
     (sessionId: string) => {
       void archiveSession(sessionId as SessionId)
         .then(async () => {
-          if (!workspaceSlug || selectedSessionId !== sessionId) return;
+          if (!workspaceSlug || selectedSessionIdRef.current !== sessionId) return;
           await router.navigate({
             to: '/$workspaceName/chat',
             params: { workspaceName: workspaceSlug },
@@ -1736,7 +1741,7 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
           toast.error(error instanceof Error ? error.message : String(error));
         });
     },
-    [archiveSession, router, selectedSessionId, workspaceSlug]
+    [archiveSession, router, workspaceSlug]
   );
 
   const handleTogglePinSession = useCallback(
@@ -1873,6 +1878,9 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
   const [pendingLocalProjectRemoval, setPendingLocalProjectRemoval] =
     useState<PendingLocalProjectRemoval | null>(null);
   const [isRemovingLocalProject, setIsRemovingLocalProject] = useState(false);
+  // Rebuilt on every presence tick; keep the previous map while no status
+  // changed, or every sidebar row is rebuilt and re-rendered several times a second.
+  const liveSessionStatusesRef = useRef<Map<string, SessionStatus> | null>(null);
   const liveSessionStatuses = useMemo(() => {
     const next = new Map<string, SessionStatus>();
     const seen = new Set<string>();
@@ -1888,8 +1896,20 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
         next.set(session.id, status);
       }
     }
+    const previous = liveSessionStatusesRef.current;
+    if (previous && previous.size === next.size) {
+      let unchanged = true;
+      for (const [sessionId, status] of next) {
+        if (!jsonValueEqual(previous.get(sessionId), status)) {
+          unchanged = false;
+          break;
+        }
+      }
+      if (unchanged) return previous;
+    }
     return next;
   }, [allActiveSessions, presenceNowMs, presenceStates, sessions]);
+  liveSessionStatusesRef.current = liveSessionStatuses;
   // `allActiveSessions` is the only view that still contains child Tabs, so it
   // is the only place an opener→sidebar-row mapping can be resolved. Shared by
   // every list plus the keyboard nav model so they agree on where a Session
@@ -2186,7 +2206,7 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
     (sessionId: string, tabSessionId?: string) => {
       if (!workspaceSlug) return;
       closeMobileDrawer();
-      if (selectedSessionId === sessionId && tabSessionId === undefined) return;
+      if (selectedSessionIdRef.current === sessionId && tabSessionId === undefined) return;
       void router.navigate({
         to: '/$workspaceName/sessions/$sessionId',
         params: { workspaceName: workspaceSlug, sessionId: sessionId as SessionId },
@@ -2199,7 +2219,7 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
           : {}),
       });
     },
-    [closeMobileDrawer, router, selectedSessionId, workspaceSlug]
+    [closeMobileDrawer, router, workspaceSlug]
   );
 
   const handleNavigateToNewSession = useCallback(
@@ -2377,6 +2397,10 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
   // Build one complete, mode-independent row model first. Pinned sessions are
   // split from this model below so Workspace and Updated cannot accidentally
   // disagree about which sessions belong in the dedicated top section.
+  // Items are rebuilt whenever any session changes (opening one marks it read).
+  // Rows are memoized, so an unchanged item keeps its previous object and only
+  // the rows whose data changed re-render.
+  const previousSidebarItemsRef = useRef<readonly SidebarUpdatedItem[]>([]);
   const allSidebarItems = useMemo<SidebarUpdatedItem[]>(() => {
     if (sessionsListLoading) return [];
 
@@ -2492,7 +2516,11 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
       }
     }
 
-    return items;
+    const previousById = new Map(previousSidebarItemsRef.current.map((item) => [item.id, item]));
+    return items.map((item) => {
+      const previous = previousById.get(item.id);
+      return previous && jsonValueEqual(previous, item) ? previous : item;
+    });
   }, [
     chatSessions,
     childSessionsByParent,
@@ -2508,6 +2536,7 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
     sessionSharingById,
     t,
   ]);
+  previousSidebarItemsRef.current = allSidebarItems;
   const pinnedItems = useMemo(
     () => sortUpdatedItems(allSidebarItems.filter((item) => item.isPinned)),
     [allSidebarItems]
@@ -3252,8 +3281,6 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
     workspaceLocalProjectSessionsByKey,
   ]);
 
-  const selectedSessionIdRef = useRef(selectedSessionId);
-  selectedSessionIdRef.current = selectedSessionId;
   const activeNavRef = useRef(activeNav);
   activeNavRef.current = activeNav;
   const activeNewSessionGroupRef = useRef(activeNewSessionGroup);

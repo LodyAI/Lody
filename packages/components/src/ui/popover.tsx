@@ -1,16 +1,54 @@
 import * as React from 'react';
 import * as PopoverPrimitive from '@radix-ui/react-popover';
 
+import { Slot } from '@radix-ui/react-slot';
+
 import { cn } from '@/lib/utils';
 import { useSafeAreaCollisionPadding } from '@/hooks/use-safe-area-insets';
+import { InteractionArmedProvider, useInteractionArmed } from './interaction-arm';
 
-const Popover = PopoverPrimitive.Root;
+// Inside an unarmed `useInteractionArm` boundary these render only the trigger
+// element; see `interaction-arm.tsx`.
 
-const PopoverTrigger = PopoverPrimitive.Trigger;
+function Popover(props: React.ComponentProps<typeof PopoverPrimitive.Root>) {
+  const armed = useInteractionArmed();
+  if (armed) return <PopoverPrimitive.Root {...props} />;
+  // Opened by its owner rather than by an interaction: mount it for real.
+  if (props.open === true || props.defaultOpen === true) {
+    return (
+      <InteractionArmedProvider value>
+        <PopoverPrimitive.Root {...props} />
+      </InteractionArmedProvider>
+    );
+  }
+  return <>{props.children}</>;
+}
+
+const PopoverTrigger = React.forwardRef<
+  React.ElementRef<typeof PopoverPrimitive.Trigger>,
+  React.ComponentPropsWithoutRef<typeof PopoverPrimitive.Trigger>
+>(({ asChild, ...props }, ref) => {
+  const armed = useInteractionArmed();
+  if (armed) return <PopoverPrimitive.Trigger ref={ref} asChild={asChild} {...props} />;
+  return asChild === true ? (
+    <Slot ref={ref} {...props} />
+  ) : (
+    <button type="button" ref={ref} {...props} />
+  );
+});
+PopoverTrigger.displayName = PopoverPrimitive.Trigger.displayName;
 
 /** Positions the popover without Trigger's open-on-click behavior — for
  *  controlled popovers whose anchor owns its own click semantics. */
-const PopoverAnchor = PopoverPrimitive.Anchor;
+const PopoverAnchor = React.forwardRef<
+  React.ElementRef<typeof PopoverPrimitive.Anchor>,
+  React.ComponentPropsWithoutRef<typeof PopoverPrimitive.Anchor>
+>(({ asChild, ...props }, ref) => {
+  const armed = useInteractionArmed();
+  if (armed) return <PopoverPrimitive.Anchor ref={ref} asChild={asChild} {...props} />;
+  return asChild === true ? <Slot ref={ref} {...props} /> : <div ref={ref} {...props} />;
+});
+PopoverAnchor.displayName = PopoverPrimitive.Anchor.displayName;
 
 const PopoverContent = React.forwardRef<
   React.ElementRef<typeof PopoverPrimitive.Content>,
@@ -23,6 +61,8 @@ const PopoverContent = React.forwardRef<
     ref
   ) => {
     const mergedCollisionPadding = useSafeAreaCollisionPadding(collisionPadding);
+    const armed = useInteractionArmed();
+    if (!armed) return null;
     return (
       <PopoverPrimitive.Portal container={portalContainer ?? undefined}>
         <PopoverPrimitive.Content

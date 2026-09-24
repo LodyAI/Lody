@@ -96,11 +96,83 @@ Measured in the same production build and workspace (9k nodes):
   exists. The projection is kept current by its own watch, so it is at least as fresh as a
   new scan. The bootstrap scan itself stays one blocking call until Flock can page a scan.
 
+- **Keyboard switching.** Switching by keyboard at ~6/s kept the CPU busy. A React
+  DevTools-hook commit census showed each switch as ~46 commits, five of them re-rendering
+  ~18k components (the whole layout). Causes:
+  - `useLodyLiveActivity` subscribed the top-level layout to every session, presence and its
+    clock, so each ~300ms tick re-rendered the app even on web, where the feature is off. It
+    now lives in the leaf `LodyLiveActivityHost`.
+  - `useKeyboardNavigation` subscribed the workspace layout to the sidebar's nav items; it
+    reads them at key time.
+  - All 248 "Updated" rows re-rendered on every switch and tick: the select/archive handlers
+    depended on the selection, and presence ticks rebuilt the live-status map and every item.
+    Handlers read the selection from a ref, and the status map and items keep their previous
+    objects while unchanged (`lib/json-value-equal.ts`).
+  - `Notification.permission` (~3ms, a browser round trip) was read on every prompt mount; the
+    latest-PR lookup is memoized per session meta; scroll debug geometry is not read while
+    logging is off.
+
+  Measured over 44 switches: main-thread tasks 6.6s → 4.3s, script 4.6s → 2.2s, blocking
+  time 2.1s → 0.5s; the switch commit renders ~2k components instead of ~18k.
+
+  Two follow-ups on the same benchmark (tasks 4.3s → 4.0s, blocking 0.49s → 0.24s):
+  - The router's own scroll restoration is off on conversation routes
+    (`shouldRouterRestoreScroll`): it recorded every scrolled element by CSS selector and wrote
+    `scrollTop` back after the next render, a second writer to a viewport the follow controller
+    owns. The web build's older router-core (1.159) still writes `sessionStorage` from its
+    throttled scroll listener; 1.171, used here, only records targets.
+  - The input area, composer and mention textarea each built the session mention items and
+    rewrote the slug cache on every switch; they now share one result
+    (`getSessionMentionItems`) and remember it once. The slug cache keeps the first 200
+    insertions in order, which are rarely the recent sessions; left as is.
+  - Markdown parsing is repeated per mount inside Streamdown (~1.6ms per switch); caching it
+    would need a patch to the library, not taken.
+
+- **Row overlays.** A mount census by region put ~78% of a switch's mounts in the
+  conversation rows, a third of them tooltips, popovers and context menus that only matter on
+  interaction. `Tooltip`, `Popover` and `ContextMenu` now render only their trigger inside an
+  unarmed `useInteractionArm` boundary, one per conversation row, which arms on the first
+  pointer entry or focus (`ui/interaction-arm.tsx`); touch devices mount eagerly. Row mounts
+  fell from ~944 to ~702 components per switch. An A/B over 20 switches between the same two
+  conversations measured ~7% less main-thread time (noisy; about 5-8ms per switch).
+  Correction after review: arming remounts the triggers, and React schedules a
+  `pointerenter` update at continuous priority, so a click right after entering a row could
+  commit the remount between pointerdown and pointerup; Chromium then drops the click (0/5
+  first clicks on Copy in a real-Chromium harness, 5/5 on the base). Pointer entry now arms
+  with `flushSync`, and a press that starts on an unarmed row keeps the plain trigger until its
+  click has been dispatched (5/5 after the fix). A popover trigger pressed on a row that never
+  saw a pointer entry still needs a second click, as its Radix root mounts only after the press.
+
+- **Machine Flock freshness.** Each Machine Flock row consumer compared the Flock's version with
+  the version its projection was materialized at, on every mount (twice with remote catch-up),
+  by exporting and encoding the whole version vector: ~5ms per switch. Every import and local
+  write emits a Flock event (Machine Flocks have no auto-debounce), so the version is now an
+  application-side change stamp: one subscription per Flock handle, opened with the handle,
+  takes a new number from a global sequence on each event. Equal stamps mean unchanged rows;
+  a reopened Flock never repeats a stamp. The loro-repo meta persister still reads the meta
+  version on each flush (~3.4ms per switch): there it is also the incremental-export bookmark.
+
+- **Context churn.** A census of context providers whose value changed during a switch found
+  framer-motion's `PresenceChild` around the sidebar (~29k fibers) changing on every render of
+  `WebWorkspaceLayout` (`presenceAffectsLayout` copies its value when it is reused), the PR link
+  context changing ~15 times per switch (an inline callback), and the conversation rows' context
+  ~12 times (a fresh `held` set per render). The sidebar presence no longer affects layout, the
+  callbacks are stable and the held set is keyed by its ids; context propagation fell from
+  ~1.6ms to ~0.5ms per switch.
+- **Overscan (rejected).** Deferring the conversation's 800px overscan until the reader engages
+  was expected to halve row mounts. It did not change them (~702 → ~696): Virtua ignores
+  `bufferSize` while it auto-estimates item size (no `itemSize`), which a restored measurement
+  cache keeps it doing, so cached conversations render no overscan on a switch anyway. The
+  change was reverted.
+
 ## Open
 
 Konsta's `theme.css` still imports all Konsta styles; only this utility was shown to matter. No
 automated guard rejects unanchored positional selectors in the compiled CSS yet. The doc-meta
 lists are cheaper (above) but each cache update still derives every list in O(sessions). The
-sidebar still renders every row in React; only the browser's rendering work is skipped. The
+sidebar still renders every row in React; only the browser's rendering work is skipped. A per-switch
+render of the new conversation (~50ms of script) remains; a clock atom of relative times still
+re-renders every sidebar row when it ticks, and machine Flock readers re-encode version vectors
+(~4ms) on every mount. The
 bootstrap meta scan is still one synchronous Flock call (~700ms here); `scan` has no
 limit/cursor, so it cannot yield between batches. `includeRaw: false` would cut ~20%. Related scrolling work: [conversation follow modes](../architecture/2026-09-23-conversation-follow-modes.md).

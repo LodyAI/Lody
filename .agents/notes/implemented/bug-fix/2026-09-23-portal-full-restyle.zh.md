@@ -78,9 +78,57 @@ Translation: current
   就绪投影时才扫描。投影由它自己的 watch 维持最新，因此至少和一次新扫描一样新。初始化扫描本身在
   Flock 支持分页前仍是一次阻塞调用。
 
+- **键盘切换。** 以每秒约 6 次的速度用键盘切换时 CPU 一直很忙。通过 React DevTools 钩子统计每次提交，
+  发现每次切换约有 46 次提交，其中 5 次重新渲染约 1.8 万个组件（整个布局）。原因：
+  - `useLodyLiveActivity` 让顶层布局订阅了所有会话、presence 及其时钟，因此即使在该功能关闭的 Web 上，
+    每约 300ms 一次跳动也会重新渲染整个应用。现在它位于叶子组件 `LodyLiveActivityHost` 中。
+  - `useKeyboardNavigation` 让工作区布局订阅了侧边栏导航项；现在在按键时读取。
+  - "Updated" 的全部 248 行在每次切换和每次跳动时都重新渲染：选择/归档回调依赖当前选中项，presence 跳动
+    会重建实时状态 Map 和每个条目。回调改为从 ref 读取选中项，状态 Map 和条目在内容未变时沿用之前的对象
+    （`lib/json-value-equal.ts`）。
+  - `Notification.permission`（约 3ms，一次浏览器往返）在提示组件每次挂载时读取；最新 PR 信息按会话 meta
+    缓存；关闭日志时不再读取滚动调试的几何信息。
+
+  44 次切换的实测：主线程任务 6.6s → 4.3s，脚本 4.6s → 2.2s，阻塞时间 2.1s → 0.5s；切换这次提交渲染约
+  2 千个组件，而不是约 1.8 万个。
+
+  在同一基准上的两项后续改动（任务 4.3s → 4.0s，阻塞 0.49s → 0.24s）：
+  - 对话路由关闭路由自带的滚动恢复（`shouldRouterRestoreScroll`）：它按 CSS 选择器记录所有滚动过的元素，
+    并在下一次渲染后写回 `scrollTop`，成为跟随控制器所拥有视口的第二个写入方。Web 构建使用的较老
+    router-core（1.159）仍会在节流的滚动监听中写 `sessionStorage`；这里使用的 1.171 只记录目标。
+  - 输入区、输入框和提及输入框在每次切换时各自构建会话提及候选并重写 slug 缓存；现在共享同一结果
+    （`getSessionMentionItems`）并只记录一次。slug 缓存按插入顺序保留前 200 条，很少是最近的会话；未改动。
+  - Markdown 解析在 Streamdown 内部每次挂载都会重复（每次切换约 1.6ms）；缓存它需要给库打补丁，未采用。
+
+- **行内浮层。** 按区域统计挂载数，每次切换约 78% 的挂载在对话行中，其中三分之一是只在交互时才有用的
+  Tooltip、Popover 和右键菜单。`Tooltip`、`Popover` 和 `ContextMenu` 现在在未激活的 `useInteractionArm`
+  边界（每个对话行一个）内只渲染触发元素，在首次指针进入或聚焦时激活（`ui/interaction-arm.tsx`）；触屏设备立即挂载。
+  每次切换的行挂载从约 944 个组件降到约 702 个。在同两个对话之间切换 20 次的 A/B 测得主线程时间少约 7%
+  （有噪声；约每次切换 5-8ms）。
+  审查后的更正：激活会重新挂载触发元素，而 React 以连续优先级调度 `pointerenter` 的更新，所以进入行后立即点击时，
+  重新挂载可能提交在 pointerdown 与 pointerup 之间，Chromium 随即丢弃这次点击（真实 Chromium 测试页中"复制"的首次点击
+  0/5 生效，基线 5/5）。现在指针进入时用 `flushSync` 同步激活；在未激活的行上开始的按压保留原触发元素，等它的 click
+  派发完再激活（修复后 5/5）。对于从未收到指针进入就被按下的 Popover 触发器，仍需第二次点击，因为它的 Radix 根节点
+  在按压结束后才挂载。
+
+- **Machine Flock 新鲜度。** 每个 Machine Flock 行的使用方在每次挂载时（有远端追平时两次）都要把 Flock 版本与其
+  投影物化时的版本比较，方式是导出并编码整个 version vector：每次切换约 5ms。每次导入和本地写入都会产生
+  Flock 事件（Machine Flock 未开启自动防抖），因此版本改为应用侧的变更戳：每个 Flock 句柄在打开时建立一个订阅，
+  每个事件从全局序列取一个新数字。戳相同即行未变；重新打开的 Flock 不会重复旧的戳。loro-repo 的 meta
+  持久化在每次落盘时仍读取 meta 版本（每次切换约 3.4ms）：那里它同时是增量导出的书签。
+
+- **Context 抖动。** 统计切换时 value 发生变化的 Context Provider，发现：侧边栏外 framer-motion 的
+  `PresenceChild`（约 2.9 万个 fiber）在 `WebWorkspaceLayout` 每次渲染时都变化（`presenceAffectsLayout` 会在复用时
+  拷贝其 value）；PR 链接的 Context 每次切换变化约 15 次（内联回调）；对话行的 Context 约 12 次（每次渲染新建
+  `held` 集合）。现在侧边栏的 presence 不影响布局，回调保持稳定，held 集合按 id 做 key；Context 传播从每次切换
+  约 1.6ms 降到约 0.5ms。
+- **Overscan（已否决）。** 原以为把对话的 800px overscan 推迟到读者有交互时再启用，可以把行挂载减半。实测没有
+  变化（约 702 → 约 696）：Virtua 在自动估算行高（未传 `itemSize`）时忽略 `bufferSize`，而恢复的测量缓存会让它
+  保持这一状态，所以已缓存的对话在切换时本来就不渲染 overscan。该改动已撤回。
+
 ## 未决
 
 Konsta 的 `theme.css` 仍会导入全部 Konsta 样式；目前只证实这一条工具类有影响。还没有自动检查拒绝
 编译后 CSS 中未锚定的位置选择器。doc-meta 列表已变便宜（见上），但每次缓存更新仍以 O(会话数) 推导
-全部列表。侧边栏仍在 React 中渲染每一行，只是浏览器跳过了渲染工作。初始化的元数据扫描仍是一次同步 Flock 调用（这里约 700ms）；`scan` 没有
+全部列表。侧边栏仍在 React 中渲染每一行，只是浏览器跳过了渲染工作。每次切换仍需渲染新对话（约 50ms 脚本）；相对时间的时钟 atom 跳动时仍会重新渲染所有侧边栏行；machine Flock 读取方在每次挂载时都会重新编码 version vector（约 4ms）。初始化的元数据扫描仍是一次同步 Flock 调用（这里约 700ms）；`scan` 没有
 limit/游标，无法在批次之间让出主线程。`includeRaw: false` 可省约 20%。相关滚动工作：[对话跟随模式](../architecture/2026-09-23-conversation-follow-modes.md)。

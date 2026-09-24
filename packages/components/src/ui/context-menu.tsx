@@ -1,5 +1,6 @@
 import * as React from 'react';
 import * as ContextMenuPrimitive from '@radix-ui/react-context-menu';
+import { Slot } from '@radix-ui/react-slot';
 import { CheckIcon, ChevronRightIcon, CircleIcon } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
@@ -15,15 +16,31 @@ import {
   menuSurfaceClassName,
   menuSurfaceStyle,
 } from './menu-styles';
+import { useInteractionArmed } from './interaction-arm';
 
+// Inside an unarmed `useInteractionArm` boundary the menu renders only its
+// trigger element; see `interaction-arm.tsx`.
 function ContextMenu({ ...props }: React.ComponentProps<typeof ContextMenuPrimitive.Root>) {
+  const armed = useInteractionArmed();
+  if (!armed) return <>{props.children}</>;
   return <ContextMenuPrimitive.Root data-slot="context-menu" {...props} />;
 }
 
 function ContextMenuTrigger({
+  asChild,
   ...props
 }: React.ComponentProps<typeof ContextMenuPrimitive.Trigger>) {
-  return <ContextMenuPrimitive.Trigger data-slot="context-menu-trigger" {...props} />;
+  const armed = useInteractionArmed();
+  if (armed) {
+    return (
+      <ContextMenuPrimitive.Trigger data-slot="context-menu-trigger" asChild={asChild} {...props} />
+    );
+  }
+  return asChild === true ? (
+    <Slot data-slot="context-menu-trigger" {...props} />
+  ) : (
+    <span data-slot="context-menu-trigger" {...props} />
+  );
 }
 
 function ContextMenuGroup({ ...props }: React.ComponentProps<typeof ContextMenuPrimitive.Group>) {
@@ -97,6 +114,8 @@ function ContextMenuContent({
   style,
   ...props
 }: React.ComponentProps<typeof ContextMenuPrimitive.Content>) {
+  const armed = useInteractionArmed();
+  if (!armed) return null;
   return (
     <ContextMenuPrimitive.Portal>
       <ContextMenuPrimitive.Content
