@@ -57,8 +57,8 @@ import {
   Link2,
   ListFilter,
   MessageSquareMore,
-  ChevronLeft,
-  ChevronRight,
+  ArrowLeft,
+  ArrowRight,
   PanelLeft,
   Plus,
   Search,
@@ -590,7 +590,6 @@ function SidebarHeaderIconButton({
   onClick,
   className,
   disabled = false,
-  compact = false,
   children,
 }: {
   label: string;
@@ -598,7 +597,6 @@ function SidebarHeaderIconButton({
   onClick?: () => void;
   className?: string;
   disabled?: boolean;
-  compact?: boolean;
   children: ReactNode;
 }) {
   const button = (
@@ -609,7 +607,7 @@ function SidebarHeaderIconButton({
       onClick={onClick}
       className={cn(
         'flex shrink-0 items-center justify-center rounded-md outline-hidden',
-        compact ? 'h-5 w-5' : 'h-7 w-7',
+        'h-7 w-7',
         disabled
           ? 'cursor-default text-sidebar-foreground-muted/40'
           : 'text-sidebar-foreground-muted hover:bg-sidebar-hover hover:text-sidebar-hover-foreground focus-visible:ring-1 focus-visible:ring-sidebar-ring/40',
@@ -1175,7 +1173,7 @@ export const LoroSidebar = memo(function LoroSidebar({
       <div className="relative flex h-full flex-col overflow-hidden">
         <div
           className={cn(
-            'group/sidebar-header relative flex items-center justify-between gap-2',
+            'relative flex items-center justify-between gap-2',
             isMobile
               ? 'pl-[calc(12px+var(--safe-area-left))] pr-[calc(12px+var(--safe-area-right))] pt-[calc(12px+var(--safe-area-top))]'
               : cn('h-11 px-1.5', macTrafficLightRowPadClass, windowsCaptionRowPadClass),
@@ -1199,7 +1197,9 @@ export const LoroSidebar = memo(function LoroSidebar({
             <TooltipProvider delayDuration={400}>
               <div
                 className={cn(
-                  'ml-auto flex shrink-0 items-center',
+                  // `gap-0.5` between full-size buttons keeps Back and Forward
+                  // apart as two targets instead of one fused control.
+                  'ml-auto flex shrink-0 items-center gap-0.5',
                   windowDrag && WINDOW_DRAG_EXEMPT_CLASS
                 )}
               >
@@ -1208,17 +1208,14 @@ export const LoroSidebar = memo(function LoroSidebar({
                     label={t('commands.sidebar.toggle', 'Toggle Sidebar')}
                     shortcut={collapseShortcut}
                     onClick={() => onRequestCollapse()}
-                    className={
-                      isElectron
-                        ? 'focus-visible:outline-hidden'
-                        : 'opacity-0 pointer-events-none group-hover/sidebar-header:opacity-100 group-hover/sidebar-header:pointer-events-auto focus-visible:opacity-100 focus-visible:pointer-events-auto transition-opacity duration-100'
-                    }
+                    // Always visible: the collapse control is found where it
+                    // was last seen, not revealed by hovering the header.
+                    className="focus-visible:outline-hidden"
                   >
                     <PanelLeft className="h-4 w-4" />
                   </SidebarHeaderIconButton>
                 ) : null}
                 <SidebarHeaderIconButton
-                  compact
                   disabled={!canGoBack}
                   label={t('commands.nav.back', 'Back')}
                   shortcut={backShortcut}
@@ -1227,10 +1224,9 @@ export const LoroSidebar = memo(function LoroSidebar({
                     if (!commands.execute('nav.back')) window.history.back();
                   }}
                 >
-                  <ChevronLeft className="h-3.5 w-3.5" />
+                  <ArrowLeft className="h-4 w-4" strokeWidth={1.75} />
                 </SidebarHeaderIconButton>
                 <SidebarHeaderIconButton
-                  compact
                   disabled={!canGoForward}
                   label={t('commands.nav.forward', 'Forward')}
                   shortcut={forwardShortcut}
@@ -1239,7 +1235,7 @@ export const LoroSidebar = memo(function LoroSidebar({
                     if (!commands.execute('nav.forward')) window.history.forward();
                   }}
                 >
-                  <ChevronRight className="h-3.5 w-3.5" />
+                  <ArrowRight className="h-4 w-4" strokeWidth={1.75} />
                 </SidebarHeaderIconButton>
               </div>
             </TooltipProvider>

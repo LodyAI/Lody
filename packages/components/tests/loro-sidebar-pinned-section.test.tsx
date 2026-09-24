@@ -150,25 +150,17 @@ describe('LoroSidebar pinned section', () => {
     expect(selected).toBe('second');
   });
 
-  it('keeps the desktop collapse toggle hover-revealed in browsers', () => {
-    renderSidebar({ onRequestCollapse: vi.fn() });
+  it.each([false, true])(
+    'keeps the desktop collapse toggle visible, not hover-revealed (Electron=%s)',
+    (isElectron) => {
+      renderSidebar({ isElectron, onRequestCollapse: vi.fn() });
 
-    const button = container?.querySelector('button[aria-label="Toggle Sidebar"]');
-    expect(button).not.toBeNull();
-    expect(button?.className).toContain('opacity-0');
-    expect(button?.className).toContain('pointer-events-none');
-    expect(button?.className).toContain('group-hover/sidebar-header:opacity-100');
-  });
-
-  it('shows the desktop collapse toggle by default in Electron', () => {
-    renderSidebar({ isElectron: true, onRequestCollapse: vi.fn() });
-
-    const button = container?.querySelector('button[aria-label="Toggle Sidebar"]');
-    expect(button).not.toBeNull();
-    expect(button?.className).not.toContain('opacity-0');
-    expect(button?.className).not.toContain('pointer-events-none');
-    expect(button?.className).toContain('focus-visible:outline-hidden');
-  });
+      const button = container?.querySelector('button[aria-label="Toggle Sidebar"]');
+      expect(button).not.toBeNull();
+      expect(button?.className).not.toContain('opacity-0');
+      expect(button?.className).not.toContain('pointer-events-none');
+    }
+  );
 
   it('renders back and forward next to the collapse toggle', () => {
     renderSidebar({ onRequestCollapse: vi.fn() });
@@ -184,8 +176,9 @@ describe('LoroSidebar pinned section', () => {
     expect(parent?.children[0]).toBe(collapse);
     expect(parent?.children[1]).toBe(back);
     expect(parent?.children[2]).toBe(forward);
-    expect(back?.className).toContain('h-5');
-    expect(forward?.className).toContain('h-5');
+    // Arrows with a shaft, not chevrons.
+    expect(back?.querySelector('svg.lucide-arrow-left')).not.toBeNull();
+    expect(forward?.querySelector('svg.lucide-arrow-right')).not.toBeNull();
   });
 
   it('renders pinned conversations before Workspace groups', () => {
