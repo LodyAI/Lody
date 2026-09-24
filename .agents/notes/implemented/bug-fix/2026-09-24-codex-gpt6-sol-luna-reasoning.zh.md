@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: https://github.com/LodyAI/Lody/pull/955
 
 [English](2026-09-24-codex-gpt6-sol-luna-reasoning.md)
 
