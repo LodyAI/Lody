@@ -1,6 +1,7 @@
 import { useCallback, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAtom } from 'jotai';
+import { usePostHog } from '@posthog/react';
 import type { SupportedLanguage } from '@lody/shared';
 import { Check, ChevronDown, Monitor, Moon, Sun } from 'lucide-react';
 import { motion } from 'framer-motion';
@@ -19,6 +20,7 @@ import { buildConversationFontSizeChoices } from '@/components/settings/conversa
 import { currentSupportedLanguages, languageCodeToName } from '../../i18n';
 import { cn } from '@/lib/utils';
 import { Switch } from '@/ui/switch';
+import { capturePostHogEvent } from '@/lib/posthog-analytics';
 import { withOneSignal } from '@/lib/onesignal';
 import { useTheme, type Theme } from '../../theme-provider';
 
@@ -28,6 +30,7 @@ export function MobileAppearanceSettings() {
   const [language, setLanguage] = useAtom(languageAtom);
   const [conversationFontSize, setConversationFontSize] = useAtom(conversationFontSizeAtom);
   const [fontLigaturesEnabled, setFontLigaturesEnabled] = useAtom(fontLigaturesEnabledAtom);
+  const postHog = usePostHog();
   const selectedThemeLabel =
     theme === 'light'
       ? t('settings.theme.light')
@@ -60,9 +63,16 @@ export function MobileAppearanceSettings() {
     String(conversationFontSize);
   const handleFontSizeChange = useCallback(
     (next: string) => {
-      setConversationFontSize(Number(next));
+      const to = Number(next);
+      if (to !== conversationFontSize) {
+        capturePostHogEvent(postHog, 'settings/font_size_changed', {
+          from: conversationFontSize,
+          to,
+        });
+      }
+      setConversationFontSize(to);
     },
-    [setConversationFontSize]
+    [conversationFontSize, postHog, setConversationFontSize]
   );
   const handleLanguageChange = useCallback(
     (next: SupportedLanguage) => {

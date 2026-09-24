@@ -403,14 +403,15 @@ function isACPSessionConfig(value: unknown): boolean {
   }
   const { cliType, agentType } = normalizedTarget;
   // This dependency-free validator has a hand-maintained CJS mirror and cannot
-  // import the ESM runtime table. Keep Bub aligned with ai.ts and the TS/CJS
+  // import the ESM runtime table. Keep builtin additions aligned with ai.ts and the TS/CJS
   // parity test when changing this feature.
   const isBuiltinAgentType =
     agentType === 'claude' ||
     agentType === 'codex' ||
     agentType === 'kimi' ||
     agentType === 'deepseek' ||
-    agentType === 'bub';
+    agentType === 'bub' ||
+    agentType === 'dimcode';
   if (
     typeof value.prompt !== 'string' ||
     (cliType === 'builtin' && !isBuiltinAgentType) ||

@@ -42,9 +42,9 @@ import {
   USAGE_CALENDAR_CELLS,
   USAGE_CALENDAR_COLUMNS,
   USAGE_CALENDAR_ROWS,
-  USAGE_SKYLINE_STL_BASE_HEIGHT,
   USAGE_SKYLINE_STL_BACK_MARGIN,
   USAGE_SKYLINE_STL_BASE_DEPTH,
+  USAGE_SKYLINE_STL_BASE_HEIGHT,
   USAGE_SKYLINE_STL_BASE_WIDTH,
   USAGE_SKYLINE_STL_CELL_SIZE,
   USAGE_SKYLINE_STL_COLUMN_HEIGHT_MULTIPLIER,
@@ -52,6 +52,10 @@ import {
   type UsageCalendarMetric,
   type UsageCalendarModel,
 } from './usage-calendar-model';
+import {
+  HEATMAP_COLUMN_TEMPLATE,
+  HEATMAP_MIN_TRACK_WIDTH,
+} from './usage-calendar-geometry';
 // Export generation remains available in code while the settings UI focuses on the active views.
 const SHOW_SKYLINE_EXPORTS = false;
 
@@ -150,17 +154,6 @@ function SegmentedControl<Value extends string>({
 const MIN_COLUMNS_BETWEEN_MONTH_LABELS = 3;
 /** Per-week delay of the reveal sweep; 53 weeks land in roughly 0.6s. */
 const CELL_REVEAL_STAGGER_MS = 11;
-/** Floor on a day's rendered size in a compact panel. */
-const CELL_MIN_SIZE_PX = 8;
-// One additional pixel keeps a wide 53-week calendar airy without making the
-// calendar itself narrower; the tracks still consume the entire container.
-const CELL_GAP_PX = 4;
-// The compact panel keeps its own minimum track width. Once its actual container
-// is wide enough, the grid itself owns all available width instead of introducing
-// a desktop scrollbar from an unrelated fixed width.
-const HEATMAP_COLUMN_TEMPLATE = `repeat(${USAGE_CALENDAR_COLUMNS}, minmax(0, 1fr))`;
-const HEATMAP_MIN_TRACK_WIDTH =
-  USAGE_CALENDAR_COLUMNS * CELL_MIN_SIZE_PX + (USAGE_CALENDAR_COLUMNS - 1) * CELL_GAP_PX;
 
 function useCalendarFormats() {
   const { i18n } = useTranslation();
@@ -1842,9 +1835,7 @@ function SummaryStat({ label, value, detail }: { label: string; value: string; d
   return (
     <div className="min-w-0">
       <dt className="truncate text-[11px] font-normal text-muted-foreground">{label}</dt>
-      <dd className="mt-0.5 truncate text-sm font-normal tabular-nums text-foreground">
-        {value}
-      </dd>
+      <dd className="mt-0.5 truncate text-sm font-normal tabular-nums text-foreground">{value}</dd>
       {detail ? <p className="truncate text-[11px] text-muted-foreground/80">{detail}</p> : null}
     </div>
   );

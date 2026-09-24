@@ -29,11 +29,16 @@ context/message-flow.md "Upstream".
   `newSession`/`loadSession` share `acp-session-start-gate.ts`.
 - `acp-session-start-gate.ts` — process-wide start semaphore used by
   `Session.createAgent`, `startLocalAcpAgent`, and history-catalog ACP spawn.
-- `setting.ts` — launch resolution for every agent kind.
+- `setting.ts` — launch resolution for every agent kind, including the pinned
+  `npx --prefer-offline -y dimcode@0.5.10 acp` builtin. Dimcode reuses the
+  profile-owned npm cache and startup recovery; credentials remain in its own
+  configuration or provider environment.
 - `deepseek-harness-runtime.ts` — Harness-home (`DSH_HOME`, then `~/.dsh`), atomic-config,
   and npx launch wrapper around the `packages/acp-extension-dsh` submodule. It converts
   the adapter entry to a file URL for Cordis ESM imports, including Windows drive paths,
-  while preset and session directories remain filesystem paths.
+  while preset and session directories remain filesystem paths. Its Windows bootstrap
+  suppresses child consoles inside npm and DSH, including the pinned native Job
+  runner; [compatibility scope and verification](../../../../.agents/notes/implemented/bug-fix/2026-09-22-dsh-windows-console-popups.md).
 - `managed-agent-runtime.ts` — pinned Codex/Claude Code/Grok native and Kimi Node-package
   `.tar.zst` artifacts, checksums, resumable downloads, the active installation profile's
   `agent-binaries` layout, and best-effort `bin` symlinks for complete native CLIs.

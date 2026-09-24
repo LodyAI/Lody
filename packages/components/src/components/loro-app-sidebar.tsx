@@ -1,4 +1,6 @@
 import { openSessionOnModifiedClick } from '@/lib/desktop-window';
+import { usePostHog } from '@posthog/react';
+import { capturePostHogEvent } from '@/lib/posthog-analytics';
 import { SessionWindowMenuItem } from './session-window-menu-item';
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { startSessionMentionDrag } from '@/lib/session-mention-drag';
@@ -1509,6 +1511,11 @@ const SortableLocalProjectItem = memo(
     localProjectItemPropsEqual(prev, next)
 );
 
+export const hasWorkspaceSidebarTopContent = (
+  localProjectSectionCount: number,
+  showGithubWorktrees: boolean
+): boolean => localProjectSectionCount > 0 || showGithubWorktrees;
+
 export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
   const { t, i18n } = useTranslation();
   const router = useRouter();
@@ -1694,6 +1701,17 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
       setOrganizeMode(nextMode);
     },
     [setOrganizeMode]
+  );
+  const postHog = usePostHog();
+  const handleShowUpdatedProjectNamesChange = useCallback(
+    (next: boolean) => {
+      capturePostHogEvent(postHog, 'settings/changed', {
+        key: 'sidebar_updated_show_project_names',
+        value: next,
+      });
+      setShowUpdatedProjectNames(next);
+    },
+    [postHog, setShowUpdatedProjectNames]
   );
   const sessionSidebarCodeChangesOnly = useAtomValue(sessionSidebarCodeChangesOnlyAtom);
   const { archiveSession, markSessionUnread, setSessionPinned, updateSessionTitle } =
@@ -2543,6 +2561,17 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
       ),
       showMyTasks: t('sessions.sidebar.my', 'My Tasks'),
       showAllTasks: t('sessions.sidebar.team', 'All Tasks'),
+      emptyMyTasks: t('sidebar.filter.emptyMyTasks', 'No tasks match this view'),
+      emptyMyTasksHint: t(
+        'sidebar.filter.emptyMyTasksHint',
+        'Try showing every task in this workspace.'
+      ),
+      emptyAllTasks: t('sidebar.filter.emptyAllTasks', 'No tasks yet'),
+      emptyAllTasksHint: t(
+        'sidebar.filter.emptyAllTasksHint',
+        'Tasks in this workspace will appear here.'
+      ),
+      showAllTasksAction: t('sidebar.filter.showAllTasks', 'Show all tasks'),
     }),
     [t]
   );
@@ -2559,12 +2588,12 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
       onOrganizeChange={handleOrganizeModeChange}
       onScopeChange={handleChatScopeChanged}
       showUpdatedProjectNames={showUpdatedProjectNames}
-      onShowUpdatedProjectNamesChange={setShowUpdatedProjectNames}
+      onShowUpdatedProjectNamesChange={handleShowUpdatedProjectNamesChange}
       labels={filterLabels}
       open={sidebarFilterOpen}
       onOpenChange={setSidebarFilterOpen}
-      side="bottom"
-      align="end"
+      side="right"
+      align="start"
       triggerClassName="h-5 w-5 [&_svg]:h-4 [&_svg]:w-4"
     />
   ) : null;
@@ -3010,7 +3039,10 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
   ]);
 
   const githubWorktreesLabel = useMemo(() => t('sidebar.githubWorktrees', 'GitHub Worktrees'), [t]);
-  const sidebarTopContent = (
+  const sidebarTopContent = hasWorkspaceSidebarTopContent(
+    localProjectSections.length,
+    showGithubWorktrees
+  ) ? (
     // Sections carry their own bottom margin: 12px expanded (wider than the
     // 10px between repo groups and the 2-4px between a section header and its
     // content, so headers bind to the list below them), 4px collapsed so a
@@ -3032,7 +3064,7 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
         />
       ) : null}
     </div>
-  );
+  ) : null;
 
   // Chats renders after the GitHub Worktrees list so it reads as the last
   // section in Workspace mode.
@@ -3391,7 +3423,7 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
         updatedIsLoading={organizeMode === 'updated' && sessionsListLoading}
         onOrganizeModeChange={handleOrganizeModeChange}
         showUpdatedProjectNames={showUpdatedProjectNames}
-        onShowUpdatedProjectNamesChange={setShowUpdatedProjectNames}
+        onShowUpdatedProjectNamesChange={handleShowUpdatedProjectNamesChange}
         onChatScopeChange={handleChatScopeChanged}
         onSelectUpdatedItem={handleSelectUpdatedItem}
         onTogglePinnedSection={handleTogglePinnedSection}

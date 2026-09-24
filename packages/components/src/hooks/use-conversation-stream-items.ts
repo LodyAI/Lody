@@ -13,7 +13,7 @@ import { useConversationVersion, useTurnRange } from './use-conversation-view';
 /** Per-turn render items survive a tab switch; 20 sessions is the working set. */
 const chatStreamItemsCacheBySessionId = new LRUCache<SessionId, BuildChatStreamItemsCache>(20);
 
-/** Turns hydrated before the viewport reports anything (the conversation opens at its end). */
+/** Tail turns retained by the renderer, including before the first viewport report. */
 const INITIAL_WINDOW_TURNS = 40;
 /** A viewport shorter than this many turns still prefetches as if it held this many. */
 const MIN_SCREEN_TURNS = 8;
@@ -24,9 +24,8 @@ const VISIBLE_RANGE_HYSTERESIS_TURNS = 4;
 
 /**
  * The hydrated window: the viewport plus `PREFETCH_SCREENS` screens on each
- * side, or the conversation's tail before the viewport has reported. The tail
- * itself stays hydrated regardless (the view owns that), so streaming never
- * waits on this window.
+ * side, or the conversation's tail before the viewport has reported. The hook
+ * also leases that tail independently, so moving this window cannot evict it.
  */
 export const resolveHydrationWindow = (
   turnCount: number,
@@ -43,6 +42,8 @@ export const resolveHydrationWindow = (
 export type ConversationStreamItems = BuildChatStreamItemsResult & {
   /** Initial window has settled; later window changes do not hide the stream. */
   initialWindowReady: boolean;
+  /** Native selection retains bodies outside the reading window. */
+  onRetainedTurnIdsChange: (ids: ReadonlySet<string>) => void;
   /** Feed to `SessionChatStreamView.onVisibleTurnRangeChange`. */
   onVisibleTurnRangeChange: (range: VisibleTurnRange) => void;
   /** Feed to `SessionChatStreamView.onOutlinePreviewRound`. */
@@ -94,11 +95,38 @@ export function useConversationStreamItems(
     () => resolveHydrationWindow(turnCount, visibleRange),
     [turnCount, visibleRange]
   );
-  const rangeReady = useTurnRange(view, hydrationWindow.from, hydrationWindow.to, {
+  // Keep the entry window leased after the first viewport report narrows it.
+  // Otherwise background eviction can remove rows above the already revealed tail.
+  const tailFrom = Math.max(0, turnCount - INITIAL_WINDOW_TURNS);
+  const tailReady = useTurnRange(view, tailFrom, turnCount, {
     extendToPrecedingUserTurn: true,
   });
-  if (rangeReady) initialRef.current.ready = true;
+  const rangeReady = useTurnRange(
+    visibleRange ? view : null,
+    hydrationWindow.from,
+    hydrationWindow.to,
+    { extendToPrecedingUserTurn: true }
+  );
+  if (tailReady && (!visibleRange || rangeReady)) initialRef.current.ready = true;
   const initialWindowReady = !!view && initialRef.current.ready;
+
+  const [retained, setRetained] = useState<{
+    source: ConversationView;
+    ids: ReadonlySet<string>;
+  } | null>(null);
+  const onRetainedTurnIdsChange = useCallback(
+    (ids: ReadonlySet<string>) => {
+      if (!source) return;
+      setRetained((current) =>
+        current?.source === source &&
+        current.ids.size === ids.size &&
+        [...ids].every((id) => current.ids.has(id))
+          ? current
+          : { source, ids: new Set(ids) }
+      );
+    },
+    [source]
+  );
 
   const previewRangeRef = useRef<ReturnType<ConversationView['acquireRange']> | null>(null);
   useEffect(
@@ -133,7 +161,14 @@ export function useConversationStreamItems(
   }
   const previousResultRef = useRef<BuildChatStreamItemsResult | null>(null);
   const result = useMemo(() => {
-    const next = buildChatStreamItems(view, sessionId, cacheRef.current);
+    const next = buildChatStreamItems(view, sessionId, cacheRef.current, (index) => {
+      if (index >= tailFrom) return true;
+      if (index >= hydrationWindow.from && index < hydrationWindow.to) return true;
+      const id = view?.index(index)?.id;
+      return (
+        retained !== null && retained.source === source && id !== undefined && retained.ids.has(id)
+      );
+    });
     // Virtual rows, the outline and its anchors all recompute on this array's
     // identity, and the view's version bumps at token rate. Per-turn items are
     // already memoized, so an unchanged conversation rebuilds an array of the
@@ -151,14 +186,26 @@ export function useConversationStreamItems(
     return settled;
     // `version` is the change signal for the view's contents.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [view, version, sessionId]);
+  }, [view, version, sessionId, tailFrom, hydrationWindow, retained, source]);
   cacheRef.current = result.cache;
   useEffect(() => {
     chatStreamItemsCacheBySessionId.set(sessionId, result.cache);
   }, [result.cache, sessionId]);
 
   return useMemo(
-    () => ({ ...result, initialWindowReady, onVisibleTurnRangeChange, onOutlinePreviewRound }),
-    [result, initialWindowReady, onVisibleTurnRangeChange, onOutlinePreviewRound]
+    () => ({
+      ...result,
+      initialWindowReady,
+      onVisibleTurnRangeChange,
+      onOutlinePreviewRound,
+      onRetainedTurnIdsChange,
+    }),
+    [
+      result,
+      initialWindowReady,
+      onVisibleTurnRangeChange,
+      onOutlinePreviewRound,
+      onRetainedTurnIdsChange,
+    ]
   );
 }

@@ -10,13 +10,23 @@ open it in the session's right-side preview. The inline link uses blue text and
 a matching file-type icon, without a pill background or border. Hover and keyboard
 focus remain visible, and line references retain their existing navigation behavior.
 
+When Electron opens a conversation on its own machine, file links may preview any
+readable regular local file, including files outside the session workspace and in
+another worktree. Worktree prefixes must not redirect these links into the current
+workspace. This applies to both Markdown links and tool file entries. External
+files remain readonly, and genuinely missing files still show a not-found error.
+Remote preview authorization remains restricted to its existing allowed roots.
+
 For a binary file without an inline viewer, the preview explains that it cannot
 render the file in the shared rounded notice card, with full-width stacked actions
 and Copy file path. On Electron with the session running on this machine, it offers
 Open in default app and Reveal in Finder (or the host's file manager). Reveal
 selects the file without launching its associated application. The preview and
 More menu use the same system action and the same file identity, including local
-absolute and parent-relative paths outside the workspace. Remote sessions never open a path on the
+absolute and parent-relative paths outside the workspace. The Files tree and the
+side-panel More menu expose that identity as two copy rows — Copy relative path
+always, and Copy absolute path only once the machine path is known. Remote
+sessions never open a path on the
 viewer's machine. Clicking the assistant link itself only opens the preview;
 opening the OS application requires a separate user click.
 

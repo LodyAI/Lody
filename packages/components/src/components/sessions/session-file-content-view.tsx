@@ -70,6 +70,8 @@ import {
 } from '@/lib/code-collab-live-text-update';
 import { getSessionFileMonacoLanguageId, isSessionMarkdownPath } from '@/lib/session-file-language';
 import { downloadBytesAsFile } from '@/lib/download-file';
+import { usePostHog } from '@posthog/react';
+import { capturePostHogEvent, getAnalyticsFileKind } from '@/lib/posthog-analytics';
 import { useCodeCollabLiveText } from '@/hooks/use-code-collab-live-text';
 import { useMachineFlockRows } from '@/hooks/use-machine-flock-rows';
 import {
@@ -234,6 +236,7 @@ function SessionFileContentViewImpl({
   onToggleVisualAnnotationInChat,
 }: SessionFileContentViewProps) {
   const { t } = useTranslation();
+  const postHog = usePostHog();
   const tRef = useLatestRef(t);
   const onSaveStateChangeRef = useLatestRef(onSaveStateChange);
   const activeVSCodeTheme = useActiveVSCodeTheme();
@@ -942,7 +945,11 @@ function SessionFileContentViewImpl({
     if (data.status !== 'ready' || data.snapshot.kind !== 'text') return;
     const content = latestEditorTextRef.current ?? data.snapshot.text;
     downloadBytesAsFile(normalizedPath, new TextEncoder().encode(content));
-  }, [data, normalizedPath]);
+    capturePostHogEvent(postHog, 'file_preview/downloaded', {
+      file_kind: getAnalyticsFileKind(normalizedPath),
+      source: 'file_viewer',
+    });
+  }, [data, normalizedPath, postHog]);
   const saveViewState = useMemo<SessionFileSaveViewState>(
     () => ({
       dirty: isProviderEditorDirty,
@@ -1355,6 +1362,11 @@ function SessionFileContentViewImpl({
   // button only appears when a Monaco editor is mounted — a rendered SVG/Markdown
   // preview has no editor to search.
   const showPreviewToggle = isSvgTextFile || isMarkdownTextFile || isHtmlTextFile;
+  const filePreviewActive = isSvgTextFile
+    ? svgRenderMode === 'rendered'
+    : isMarkdownTextFile
+      ? markdownRenderMode === 'rendered'
+      : htmlRenderMode === 'rendered';
   const showSearchButton =
     isTextFileReady &&
     !showSvgRendered &&
@@ -1380,14 +1392,14 @@ function SessionFileContentViewImpl({
           <div className="ml-auto flex items-center gap-1">
             {showPreviewToggle ? (
               <FilePreviewToggle
-                active={
-                  isSvgTextFile
-                    ? svgRenderMode === 'rendered'
-                    : isMarkdownTextFile
-                      ? markdownRenderMode === 'rendered'
-                      : htmlRenderMode === 'rendered'
-                }
+                active={filePreviewActive}
                 onToggle={() => {
+                  if (!filePreviewActive) {
+                    capturePostHogEvent(postHog, 'file_preview/opened', {
+                      file_kind: getAnalyticsFileKind(normalizedPath),
+                      source: 'preview_toggle',
+                    });
+                  }
                   if (isSvgTextFile) {
                     setSvgRenderMode((mode) => (mode === 'rendered' ? 'code' : 'rendered'));
                   } else if (isMarkdownTextFile) {

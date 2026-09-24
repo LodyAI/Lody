@@ -18,6 +18,6 @@
 | `session-fork.steps.ts`              | Forks a completed Session to a worktree and verifies origin and cleanup                          |
 | `session-goal.steps.ts`              | Drives isolated goal update, Pause, Resume, Clear, UI revisit, Archive, and cleanup              |
 | `settings-appearance.steps.ts`       | Commits, previews, cancels, and reopens a desktop theme selection                                |
-| `shortcuts.steps.ts`                 | Verifies default shortcuts, cross-window rebinding, and renderer reload                          |
+| `shortcuts.steps.ts`                 | Verifies default shortcuts, cross-window rebinding, renderer reload, and digit tab switching     |
 | `sidebar-search.steps.ts`            | Drives three Sessions through query variants, rename, UI revisit, Archive, and cleanup           |
 | `text-attachment.steps.ts`           | Drives picker cancel, attachment and plain turns, UI revisit, isolation, and cleanup             |

@@ -1,9 +1,10 @@
+import { useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { AppWindow } from 'lucide-react';
 import { ContextMenuItem } from '@/ui/context-menu';
 import { DropdownMenuItem } from '@/ui/dropdown-menu';
 import { isElectronRenderer } from '@/lib/electron';
-import { openDesktopWindow } from '@/lib/desktop-window';
+import { openDesktopWindow, prepareDesktopWindow } from '@/lib/desktop-window';
 
 export function SessionWindowMenuItem({
   sessionId,
@@ -13,12 +14,13 @@ export function SessionWindowMenuItem({
   dropdown?: boolean;
 }) {
   const { t } = useTranslation();
+  useEffect(() => prepareDesktopWindow(sessionId), [sessionId]);
   if (!isElectronRenderer()) return null;
   const Item = dropdown ? DropdownMenuItem : ContextMenuItem;
   return (
     <Item
       onSelect={() => {
-        openDesktopWindow(sessionId);
+        openDesktopWindow(sessionId, undefined, dropdown ? 'session_menu' : 'context_menu');
       }}
     >
       <AppWindow />

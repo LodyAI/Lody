@@ -32,6 +32,7 @@ import {
   getManagedAgentRuntimeManager,
   GROK_ACP_ADAPTER_VERSION,
   KIMI_CODE_VERSION,
+  PI_EXTENSIONS_SUPPORTED,
   PI_RUNTIME_VERSION,
   type ManagedRuntimeLaunch,
   type ManagedRuntimeName,
@@ -160,6 +161,8 @@ export const BuiltinACPSetting: Record<CliType, ACPSetting> = {
  */
 const BUILTIN_BUB_CAPABILITY_SOURCE_VERSION = 'builtin-bub:acp';
 
+const DIMCODE_VERSION = '0.5.10';
+
 // Serve npx launches from the local cache when the package is already
 // installed; go to the registry only on a cache miss. Registry agent specs are
 // exact-version pinned, so a cache hit is immutable and integrity-checked —
@@ -238,7 +241,7 @@ export function getAcpCapabilitySourceVersion(
           : `${BUILTIN_KIMI_CAPABILITY_SOURCE_VERSION}${runtimeOverrideSuffix}`;
       }
       if (input.agentType === 'pi') {
-        return `builtin-pi:${managedRuntimeVersion ?? PI_RUNTIME_VERSION}`;
+        return `builtin-pi:${managedRuntimeVersion ?? PI_RUNTIME_VERSION}${runtimeOverrideSuffix}`;
       }
       if (input.agentType === 'grok') {
         return managedRuntimeVersion
@@ -250,6 +253,9 @@ export function getAcpCapabilitySourceVersion(
         return baseUrl?.trim()
           ? `${DEEPSEEK_HARNESS_CAPABILITY_SOURCE_VERSION}+endpoint:${createHash('sha256').update(baseUrl).digest('hex').slice(0, 12)}`
           : DEEPSEEK_HARNESS_CAPABILITY_SOURCE_VERSION;
+      }
+      if (input.agentType === 'dimcode') {
+        return `builtin-dimcode:${DIMCODE_VERSION}`;
       }
       if (input.agentType === 'bub') {
         // Bub is a user-installed CLI whose version Lody does not own, so the
@@ -430,6 +436,19 @@ async function resolveBuiltinACPProcessLaunch(
       capabilitySourceVersion: getAcpCapabilitySourceVersion(input),
     };
   }
+  if (input.agentType === 'dimcode') {
+    return {
+      command: 'npx',
+      args: [
+        NPX_CACHE_MODE_ARG,
+        '-y',
+        `dimcode@${DIMCODE_VERSION}`,
+        'acp',
+        ...(input.extraArgs ?? []),
+      ],
+      capabilitySourceVersion: getAcpCapabilitySourceVersion(input),
+    };
+  }
   if (input.agentType === 'bub') {
     // Bub ships its own `bub acp` ACP server and is installed by the user
     // (`bub install bub-acp-server`). Lody neither downloads nor versions it;
@@ -446,10 +465,25 @@ async function resolveBuiltinACPProcessLaunch(
     throw new Error(`Unsupported managed builtin ACP type: ${input.agentType}`);
   }
   if (input.agentType === 'pi') {
-    const runtime = await resolveManagedRuntimeForLaunch('pi', input);
+    const extensions = input.runtimeOverrides?.piExtensions ?? [];
+    if (extensions.length && !PI_EXTENSIONS_SUPPORTED) {
+      throw new Error(
+        'This Pi runtime does not support selected extensions. Update the managed runtime.'
+      );
+    }
+    const runtime = extensions.length
+      ? await getManagedAgentRuntimeManager().ensureCurrentRuntime('pi', {
+          onProgress: input.onManagedRuntimeProgress,
+          signal: input.signal,
+        })
+      : await resolveManagedRuntimeForLaunch('pi', input);
     return {
       command: process.execPath,
-      args: [runtime.command, ...(input.extraArgs ?? [])],
+      args: [
+        runtime.command,
+        ...extensions.flatMap((path) => ['-e', path]),
+        ...(input.extraArgs ?? []),
+      ],
       capabilitySourceVersion: getAcpCapabilitySourceVersion(input, runtime.version),
     };
   }

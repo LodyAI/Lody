@@ -44,6 +44,42 @@ function getRegistryAgent(agentType: string) {
 }
 
 describe('resolveBuiltinACPSetting', () => {
+  it('requires the current extension-aware Pi runtime and keys the selected catalog', async () => {
+    const support = vi
+      .spyOn(managedRuntime, 'PI_EXTENSIONS_SUPPORTED', 'get')
+      .mockReturnValue(true);
+    const manager = vi.spyOn(managedRuntime, 'getManagedAgentRuntimeManager').mockReturnValue({
+      ensureCurrentRuntime: async () => ({
+        runtimeName: 'pi',
+        version: '0.2.0',
+        platformArch: 'node',
+        command: '/managed/pi/index.js',
+      }),
+      resolveRuntimeForLaunch: async () => {
+        throw new Error('Older fallback must not be used');
+      },
+    } as ReturnType<typeof managedRuntime.getManagedAgentRuntimeManager>);
+    try {
+      const input = {
+        cliType: 'builtin' as const,
+        agentType: 'pi',
+        runtimeOverrides: { piExtensions: ['/fixture/plugin.ts'] },
+      };
+      expect(await resolveACPProcessLaunchAsync(input)).toEqual({
+        command: process.execPath,
+        args: ['/managed/pi/index.js', '-e', '/fixture/plugin.ts'],
+        capabilitySourceVersion:
+          'builtin-pi:0.2.0+override:{"piExtensions":["/fixture/plugin.ts"]}',
+      });
+      support.mockReturnValue(false);
+      await expect(resolveACPProcessLaunchAsync(input)).rejects.toThrow(
+        'does not support selected extensions'
+      );
+    } finally {
+      manager.mockRestore();
+      support.mockRestore();
+    }
+  });
   it('keeps legacy Pi runnable outside the catalog until confirmation', () => {
     expect(REGISTRY_ACP_AGENTS.some((agent) => agent.id === 'pi-acp')).toBe(false);
     const launch = resolveACPSetting({ cliType: 'registry', agentType: 'pi-acp' });
@@ -195,6 +231,24 @@ describe('resolveBuiltinACPSetting', () => {
       vi.unstubAllEnvs();
       await rm(dshHome, { recursive: true, force: true });
     }
+  });
+
+  it('resolves Dimcode to a pinned npx ACP launch understood by cache recovery', async () => {
+    for (const extraArgs of [undefined, ['--verbose']]) {
+      const input = { cliType: 'builtin' as const, agentType: 'dimcode', extraArgs };
+      const launch = await resolveACPProcessLaunchAsync(input);
+      expect(launch).toEqual({
+        command: 'npx',
+        args: ['--prefer-offline', '-y', 'dimcode@0.5.10', 'acp', ...(extraArgs ?? [])],
+        capabilitySourceVersion: getAcpCapabilitySourceVersion(input),
+      });
+      expect(parseNpxPackageSpecFromArgs(launch.args)).toEqual({
+        name: 'dimcode',
+        version: '0.5.10',
+      });
+      expect(launch.capabilitySourceVersion).toBe('builtin-dimcode:0.5.10');
+    }
+    expect(() => resolveBuiltinACPSetting('dimcode')).toThrow(/resolveACPProcessLaunchAsync/);
   });
 
   it('launches Bub through the user-installed `bub acp` command', async () => {

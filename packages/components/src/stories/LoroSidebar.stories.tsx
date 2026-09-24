@@ -594,6 +594,31 @@ export const WorkspaceSyncing: Story = {
   },
 };
 
+/** My Tasks removed every Workspace section; the recovery action switches to All Tasks. */
+export const FilteredWorkspaceEmpty: Story = {
+  name: 'Workspace · filtered empty',
+  render: (args) => <StoryLayout {...args} />,
+  args: {
+    ...Default.args!,
+    chatScope: 'my',
+    pinnedItems: [],
+    sessionListProps: {
+      sessions: [],
+      repos: [],
+    },
+  },
+};
+
+/** All Tasks is selected, but the workspace genuinely has no tasks yet. */
+export const WorkspaceEmpty: Story = {
+  name: 'Workspace · empty',
+  render: (args) => <StoryLayout {...args} />,
+  args: {
+    ...FilteredWorkspaceEmpty.args!,
+    chatScope: 'team',
+  },
+};
+
 export const ElectronAlwaysVisibleCollapseToggle: Story = {
   render: (args) => <WithProjectsLayout {...args} />,
   args: {
@@ -1307,8 +1332,8 @@ function WithProjectsLayout(args: Parameters<typeof LoroSidebar>[0]) {
     <SidebarFilterPopover
       organize="workspace"
       scope="my"
-      side="bottom"
-      align="end"
+      side="right"
+      align="start"
       triggerClassName="h-5 w-5 [&_svg]:h-4 [&_svg]:w-4"
     />
   );

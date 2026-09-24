@@ -40,6 +40,7 @@ import { Session } from '../src/session/session';
 import { SessionEditAndResendService } from '../src/session/session-edit-and-resend-service';
 import { AcpAuthenticationRequiredError, AgentClient } from '../src/agent/agent-client';
 import { AcpAuthenticationManager } from '../src/agent/acp-authentication';
+import * as piDiscovery from '../src/agent/pi-extensions';
 import { GitExecutableNotFoundError } from '../src/session/worktree/git-process-error';
 import { LodyOperationStore } from '../src/orchestration/operation-store';
 import { markAssistantTurnFinished } from '../src/lib/assistant-turn-finalize';
@@ -244,6 +245,44 @@ const createBaseDeps = (
 };
 
 describe('SessionExecutionService', () => {
+  it('scans the saved Pi profile and rejects missing or non-Pi providers', async () => {
+    const deps = createBaseDeps({});
+    let config: AgentConfigMeta | null = createLaunchConfig({
+      cliType: 'builtin',
+      agentType: 'pi',
+      env: { PI_CODING_AGENT_DIR: '/saved/profile' },
+    });
+    deps.workspaceDocument.getAgentConfigForMachineLaunch = async () => config;
+    const scan = vi
+      .spyOn(piDiscovery, 'discoverManagedPiExtensions')
+      .mockImplementation(async (env) => ({
+        version: 1,
+        agentDir: env?.PI_CODING_AGENT_DIR ?? '/default/profile',
+        extensions: [],
+        warnings: [],
+      }));
+    const service = new SessionExecutionService(deps);
+    try {
+      expect(await service.listMachinePiExtensions(capabilityConfigId)).toMatchObject({
+        success: true,
+        discovery: { agentDir: '/saved/profile' },
+      });
+      config = createLaunchConfig();
+      expect(await service.listMachinePiExtensions(capabilityConfigId)).toMatchObject({
+        success: false,
+      });
+      config = null;
+      expect(await service.listMachinePiExtensions(capabilityConfigId)).toMatchObject({
+        success: false,
+      });
+      expect(await service.listMachinePiExtensions()).toMatchObject({
+        success: true,
+        discovery: { agentDir: '/default/profile' },
+      });
+    } finally {
+      scan.mockRestore();
+    }
+  });
   it('cancels only the named native child and rejects a stale parent turn', async () => {
     const runningChildren = new Set(['child-1', 'child-2']);
     const sessionManager = {

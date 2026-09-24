@@ -1,3 +1,4 @@
+import type { createElectronAppIconService } from '../services/app-icon-service'
 import type { BrowserWindow } from 'electron'
 import type { AppUpdaterService } from '../services/app-updater-service'
 import type { AuthService } from '../services/auth-service'
@@ -10,6 +11,7 @@ import type { TerminalRelay } from '../services/terminal-relay'
 import type { WindowBadgeService } from '../services/window-badge-service'
 
 export type IpcServiceDeps = {
+  appIconService: ReturnType<typeof createElectronAppIconService>
   cliService: CliService
   appUpdaterService: AppUpdaterService
   authService: AuthService

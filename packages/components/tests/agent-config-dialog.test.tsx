@@ -215,7 +215,8 @@ describe('AgentConfigDialog', () => {
       agentType: 'codex',
       success: true,
     }),
-    onManagedRuntimeSelected?: ComponentProps<typeof AgentConfigDialog>['onManagedRuntimeSelected']
+    onManagedRuntimeSelected?: ComponentProps<typeof AgentConfigDialog>['onManagedRuntimeSelected'],
+    onScanPiExtensions?: ComponentProps<typeof AgentConfigDialog>['onScanPiExtensions']
   ) => {
     await act(async () => {
       root?.render(
@@ -230,12 +231,202 @@ describe('AgentConfigDialog', () => {
               onRefreshCapabilities={onRefreshCapabilities}
               onCheckBinaryStatus={onCheckBinaryStatus}
               onManagedRuntimeSelected={onManagedRuntimeSelected}
+              onScanPiExtensions={onScanPiExtensions}
             />
           </TooltipProvider>
         </Provider>
       );
     });
   };
+
+  it('scans Pi without publishing or enabling candidates, then saves only selected paths', async () => {
+    const saved: AgentConfigSubmitPayload[] = [];
+    const mode: AgentConfigDialogMode = {
+      kind: 'edit',
+      config: {
+        id: 'pi-config' as AgentConfigId,
+        machineId,
+        name: 'Pi',
+        cliType: 'builtin',
+        agentType: 'pi',
+        env: {},
+      },
+    };
+    const scan = async () => ({
+      success: true as const,
+      discovery: {
+        version: 1 as const,
+        agentDir: '/fixture/pi',
+        warnings: [],
+        extensions: [{ path: '/fixture/plugin.ts', name: 'Plugin', source: 'directory' as const }],
+      },
+    });
+    await renderDialog(
+      mode,
+      createMachine('Pi machine', { piExtensions: 1 }),
+      vi.fn(async (payload: AgentConfigSubmitPayload) => {
+        saved.push(payload);
+      }),
+      undefined,
+      undefined,
+      undefined,
+      scan
+    );
+    const button = (text: string) =>
+      Array.from(document.querySelectorAll('button')).find((node) => node.textContent === text)!;
+    await act(async () => {
+      button('Scan extensions').click();
+    });
+    const field = document.querySelector('[aria-label="Pi extensions"]')!;
+    expect(field.textContent).toContain('/fixture/pi');
+    expect(field.querySelector('[role="checkbox"]')?.getAttribute('aria-checked')).toBe('false');
+    expect(saved).toEqual([]);
+    await act(async () => {
+      (field.querySelector('[role="checkbox"]') as HTMLButtonElement).click();
+    });
+    await act(async () => {
+      button('Rescan').click();
+    });
+    expect(field.querySelector('[role="checkbox"]')?.getAttribute('aria-checked')).toBe('true');
+    await act(async () => {
+      getPrimaryAction('Save').click();
+    });
+    expect(saved.at(-1)?.runtimeOverrides).toEqual({ piExtensions: ['/fixture/plugin.ts'] });
+    await act(async () => {
+      (field.querySelector('[role="checkbox"]') as HTMLButtonElement).click();
+    });
+    await act(async () => {
+      getPrimaryAction('Save').click();
+    });
+    expect(saved.at(-1)?.runtimeOverrides).toBeUndefined();
+  });
+
+  it('creates a Pi provider with selected extensions through the live-probe path', async () => {
+    const saved: AgentConfigSubmitPayload[] = [];
+    const scan = async () => ({
+      success: true as const,
+      discovery: {
+        version: 1 as const,
+        agentDir: '/fixture/pi',
+        warnings: [],
+        extensions: [{ path: '/fixture/plugin.ts', name: 'Plugin', source: 'directory' as const }],
+      },
+    });
+    await renderDialog(
+      { kind: 'create' },
+      createMachine('Pi machine', {
+        piExtensions: 1,
+        providerSetup: PROVIDER_SETUP_PROTOCOL_VERSION,
+      }),
+      vi.fn(async (payload: AgentConfigSubmitPayload) => {
+        saved.push(payload);
+      }),
+      undefined,
+      async (args) => ({
+        type: 'machine/acp-capabilities-refresh_response' as const,
+        machineId: args.machineId,
+        configId: args.configId,
+        cliType: 'builtin',
+        agentType: 'pi',
+        success: true,
+      }),
+      undefined,
+      scan
+    );
+    const button = (text: string) =>
+      Array.from(document.querySelectorAll('button')).find((node) => node.textContent === text)!;
+    await act(async () => {
+      getOptionByText('Pi').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await act(async () => {
+      button('Scan extensions').click();
+    });
+    const field = document.querySelector('[aria-label="Pi extensions"]')!;
+    await act(async () => {
+      (field.querySelector('[role="checkbox"]') as HTMLButtonElement).click();
+    });
+    await act(async () => {
+      getPrimaryAction('Create').click();
+    });
+    await vi.waitFor(() => {
+      expect(saved.at(-1)).toMatchObject({
+        agentType: 'pi',
+        runtimeOverrides: { piExtensions: ['/fixture/plugin.ts'] },
+      });
+    });
+    expect(saved.at(-1)?.backgroundSetup).toBeUndefined();
+  });
+
+  it('ignores an old Pi scan after changing providers and saves a manual path on the new provider', async () => {
+    const machine = createMachine('Pi machine', { piExtensions: 1 });
+    const config: AgentConfigMeta = {
+      id: 'old-pi' as AgentConfigId,
+      machineId,
+      name: 'Pi',
+      cliType: 'builtin',
+      agentType: 'pi',
+      env: {},
+    };
+    let finish!: (
+      result: Awaited<
+        ReturnType<NonNullable<ComponentProps<typeof AgentConfigDialog>['onScanPiExtensions']>>
+      >
+    ) => void;
+    const pending = new Promise<Parameters<typeof finish>[0]>((resolve) => {
+      finish = resolve;
+    });
+    const saved: AgentConfigSubmitPayload[] = [];
+    const submit = vi.fn(async (payload: AgentConfigSubmitPayload) => {
+      saved.push(payload);
+    });
+    await renderDialog(
+      { kind: 'edit', config },
+      machine,
+      submit,
+      undefined,
+      undefined,
+      undefined,
+      () => pending
+    );
+    const button = (text: string) =>
+      Array.from(document.querySelectorAll('button')).find((node) => node.textContent === text)!;
+    await act(async () => {
+      button('Scan extensions').click();
+    });
+    await renderDialog(
+      { kind: 'edit', config: { ...config, id: 'new-pi' as AgentConfigId } },
+      machine,
+      submit
+    );
+    await act(async () => {
+      finish({
+        success: true,
+        discovery: {
+          version: 1,
+          agentDir: '/old/profile',
+          warnings: [],
+          extensions: [{ path: '/old/plugin.ts', name: 'Old plugin', source: 'directory' }],
+        },
+      });
+    });
+    expect(document.body.textContent).not.toContain('Old plugin');
+    await act(async () => {
+      setNativeInputValue(
+        document.querySelector('input[aria-label="Extension path"]')!,
+        ' /fixture/manual.ts '
+      );
+    });
+    await act(async () => {
+      button('Add path').click();
+    });
+    await act(async () => {
+      getPrimaryAction('Save').click();
+    });
+    expect(saved.at(-1)).toMatchObject({
+      id: 'new-pi',
+      runtimeOverrides: { piExtensions: ['/fixture/manual.ts'] },
+    });
+  });
 
   it('does not reset the selected agent type when machine metadata refreshes while creating', async () => {
     const mode: AgentConfigDialogMode = { kind: 'create' };
@@ -323,7 +514,7 @@ describe('AgentConfigDialog', () => {
     expect(onSubmit).not.toHaveBeenCalled();
   });
 
-  it('tests Bub through durable setup, shows installation recovery, then refreshes the published provider', async () => {
+  it.each(['bub', 'dimcode'])('%s setup supports retry and refresh', async (agentType) => {
     const workspaceId = 'workspace-bub-test' as WorkspaceId;
     const workspaceSlug = 'workspace-bub-test';
     const mirrorRows = new Map<string, MachineFlockScanRow>();
@@ -362,11 +553,11 @@ describe('AgentConfigDialog', () => {
       type: 'machine/acp-capabilities-refresh_response',
       ...args,
       cliType: 'builtin',
-      agentType: 'bub',
+      agentType,
       success: true,
     }));
     await renderDialog(
-      { kind: 'create', initialForm: { agentType: 'bub', cliType: 'builtin', name: 'Bub' } },
+      { kind: 'create', initialForm: { agentType, cliType: 'builtin', name: agentType } },
       createMachine('Workstation', { providerSetup: PROVIDER_SETUP_PROTOCOL_VERSION }),
       onSubmit,
       vi.fn(async () => ({ status: 'installed' as const })),
@@ -378,7 +569,7 @@ describe('AgentConfigDialog', () => {
         .click();
     });
     let setup = store.get(getAllProviderSetupsAtom)[0]!;
-    expect(setup.config.agentType).toBe('bub');
+    expect(setup.config.agentType).toBe(agentType);
     expect(store.get(getAllAgentConfigAtom)).toEqual([]);
     expect(getPrimaryAction('Create').disabled).toBe(true);
     expect(getOptionByText('Claude').disabled).toBe(true);
@@ -415,15 +606,25 @@ describe('AgentConfigDialog', () => {
       });
       publishRows();
     });
-    expect(document.body.textContent).toContain('Bub or its ACP server is not installed');
-    expect(document.body.textContent).toContain(
-      'curl -fsSL https://bub.build/install.sh | bash -- --preset acp'
-    );
-    expect(document.body.textContent).toContain('Open install guide');
+    if (agentType === 'bub') {
+      expect(document.body.textContent).toContain('Bub or its ACP server is not installed');
+      expect(document.body.textContent).toContain(
+        'curl -fsSL https://bub.build/install.sh | bash -- --preset acp'
+      );
+      expect(document.body.textContent).toContain('Open install guide');
+    } else {
+      expect(document.body.textContent).toContain(
+        'This runtime is not available on the target machine.'
+      );
+      expect(document.body.textContent).not.toContain('Open install guide');
+    }
     await act(async () => {
       getPrimaryAction('Retry').click();
     });
-    expect(store.get(getAllProviderSetupsAtom)[0]).toMatchObject({ status: 'queued', attempt: 2 });
+    expect(store.get(getAllProviderSetupsAtom)[0]).toMatchObject({
+      status: 'queued',
+      attempt: 2,
+    });
     expect(document.body.textContent).not.toContain('Install it in one step:');
 
     await act(async () => {

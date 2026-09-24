@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import {
+  chmod,
   lstat,
   opendir,
   open,
@@ -2288,8 +2289,19 @@ async function writeFileAtomically(
   workspacePath: string
 ): Promise<void> {
   const temporaryPath = `${absolutePath}.lody-save-${process.pid}-${randomUUID()}.tmp`;
+  // writeFile's mode is still masked by umask. chmod the temp file before rename
+  // so an existing 0755 script does not become 0644/0664 and lose +x.
+  const preserveMode =
+    process.platform === 'win32'
+      ? undefined
+      : await lstat(absolutePath)
+          .then((existing) => (existing.isFile() ? existing.mode & 0o777 : undefined))
+          .catch(() => undefined);
   try {
     await writeFile(temporaryPath, bytes, { mode: 0o666 });
+    if (preserveMode !== undefined) {
+      await chmod(temporaryPath, preserveMode);
+    }
     await rename(temporaryPath, absolutePath);
   } catch (error) {
     await unlink(temporaryPath).catch(() => undefined);

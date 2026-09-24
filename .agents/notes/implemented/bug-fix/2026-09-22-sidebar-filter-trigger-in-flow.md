@@ -23,8 +23,16 @@ this replaces the overlay's original reason to exist.
 
 `loro-app-sidebar` creates one `SidebarFilterPopover` element with controlled
 `open`/`onOpenChange` and renders it in the first local-project section
-header (or the GitHub Worktrees / Chats headers when those are first),
-mirroring the previous placeholder gating exactly. The same element passes to
+header (or the GitHub Worktrees / Chats headers when those are first). When a
+filter removes every Workspace section, `topContent` stays absent so the empty
+main `SessionList` owns the same in-flow trigger and users can switch back to
+All Tasks. That filtered-empty state also explains why the list is empty and
+offers a direct “Show all tasks” recovery action. After switching, a genuinely
+empty All Tasks workspace renders its own neutral “No tasks yet” state without
+the recovery action, rather than repeating filter-specific copy. Both states use
+a compact icon, title, and supporting line sized for the sidebar. If Chats remains as the only
+section, its after-list content owns the trigger and `LoroSidebar` suppresses the
+empty main-list fallback, preserving exactly one mount. The same element passes to
 `LoroSidebar` as `desktopFilterAction` (renamed from `desktopFilterPlaceholder`)
 for the slots LoroSidebar owns — the Pinned and Updated list headers. Gating
 stays mutually exclusive, so exactly one mount point exists per render.
@@ -65,7 +73,10 @@ popover opens anchored to the trigger. `tsgo --noEmit` and `oxlint` pass on the
 changed files. Behavior when the first section changes while the popover is
 open (e.g. a pinned session appearing via sync) is covered by the lifted
 controlled state but was verified only by reasoning, not by a live app run.
+The `Workspace · filtered empty` and `Workspace · empty` stories verify the two
+empty-state variants and the former's recovery action switches to the latter.
 
 ## Integration
 
 - [Lody PR #884](https://github.com/LodyAI/Lody/pull/884)
+- [Lody PR #887](https://github.com/LodyAI/Lody/pull/887)

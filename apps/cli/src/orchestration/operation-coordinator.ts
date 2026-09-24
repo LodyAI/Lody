@@ -1197,8 +1197,6 @@ export class LodyOperationCoordinator {
           prompt: completionText(operation),
           cliType: frozen.cliType ?? meta.cliType,
           agentType: frozen.agentType ?? meta.agentType,
-          ...(frozen.customAcp ? { customAcp: frozen.customAcp } : {}),
-          ...(frozen.runtimeOverrides ? { runtimeOverrides: frozen.runtimeOverrides } : {}),
           ...(frozen.modeId ? { modeId: frozen.modeId } : {}),
           ...(frozen.modelId ? { modelId: frozen.modelId } : {}),
           ...(frozen.configOptionValues ? { configOptionValues: frozen.configOptionValues } : {}),

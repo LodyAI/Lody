@@ -281,9 +281,23 @@ function MobileHomeScreenStory({
             emptyChats: '当前 workspace 还没有对话',
             emptySearch: '没有匹配的结果',
             onboarding: {
-              title: 'Lody runs on your computer',
-              description: 'Download the desktop app to get started.',
-              downloadButton: 'Download Lody',
+              title: 'Connect a machine to start',
+              description: 'Agents run on a computer you own — this app is mission control.',
+              commandHeading: 'One command — on any machine',
+              command: 'npx lody daemon start',
+              commandHint:
+                'Run it on a server, VM, or your own computer (Node.js 22.14+). It signs the machine into your account — a machine without a browser prints a link you can open on this phone.',
+              copyCommandLabel: 'Copy command',
+              shareCommandLabel: 'Send to computer',
+              desktopHeading: 'Or on your computer',
+              desktopHint:
+                'Install the desktop app and sign in — it starts the agent runtime automatically.',
+              shareDownloadLabel: 'Send to computer',
+              copyDownloadLabel: 'Copy download link',
+              nextStepsHeading: 'Once a machine is online',
+              nextStepMachine: 'It shows up in this workspace automatically.',
+              nextStepProject: 'Add a project folder on it from Projects → +.',
+              nextStepAgent: 'Pick an agent in Settings → Agents, then send your first task.',
             },
           }}
           onWorkspaceSelect={fn()}
@@ -293,7 +307,7 @@ function MobileHomeScreenStory({
           onChatSelect={fn()}
           onSettingsOpen={fn()}
           onNewChat={fn()}
-          onDownloadClient={fn()}
+          onboardingDownloadUrl="https://lody.ai/download"
         />
       </div>
     </div>

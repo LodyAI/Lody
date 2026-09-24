@@ -18,6 +18,7 @@ import { useConversationStreamItems } from '@/hooks/use-conversation-stream-item
 import {
   createProjectedConversationView,
   createConversationSession,
+  createConversationDerivation,
   type ConversationView,
 } from '@/lib/conversation-view';
 
@@ -161,6 +162,7 @@ function WindowedStream({
     lastAssistantMessageId,
     lastCompletedAssistantMessageId,
     onVisibleTurnRangeChange,
+    onRetainedTurnIdsChange,
     onOutlinePreviewRound,
   } = useConversationStreamItems(view, streamSessionId);
   return (
@@ -175,6 +177,7 @@ function WindowedStream({
         showScrollToLatest={false}
         lastAssistantMessageId={lastAssistantMessageId}
         lastCompletedAssistantMessageId={lastCompletedAssistantMessageId}
+        onRetainedTurnIdsChange={onRetainedTurnIdsChange}
         onVisibleTurnRangeChange={onVisibleTurnRangeChange}
         onOutlinePreviewRound={onOutlinePreviewRound}
       />
@@ -199,7 +202,13 @@ export const ShortConversationWindowed: Story = {
  * `SessionChatStreamView` over a warm view. Frame-by-frame capture of that
  * mount is what reproduces the flash reported after #376.
  */
-function OpenFlickerStory({ rounds }: { rounds: number }) {
+function OpenFlickerStory({
+  rounds,
+  backgroundFacts = false,
+}: {
+  rounds: number;
+  backgroundFacts?: boolean;
+}) {
   const [view, setView] = useState<ConversationView | null>(null);
   const [openId, setOpenId] = useState(0);
   useEffect(() => {
@@ -228,6 +237,7 @@ function OpenFlickerStory({ rounds }: { rounds: number }) {
           Close
         </button>
         <span data-testid="view-ready">{view ? 'view-ready' : 'building'}</span>
+        {backgroundFacts && view && <BackgroundFactControls view={view} />}
       </div>
       <div className="min-h-0 flex-1" data-testid="conversation-slot">
         {view && openId > 0 && <OpenedStream key={openId} view={view} />}
@@ -255,6 +265,7 @@ function OpenedStream({
     lastAssistantMessageId,
     lastCompletedAssistantMessageId,
     onVisibleTurnRangeChange,
+    onRetainedTurnIdsChange,
     onOutlinePreviewRound,
   } = useConversationStreamItems(view, streamSessionId);
   return (
@@ -272,11 +283,65 @@ function OpenedStream({
       showScrollToLatest={false}
       lastAssistantMessageId={lastAssistantMessageId}
       lastCompletedAssistantMessageId={lastCompletedAssistantMessageId}
+      onRetainedTurnIdsChange={onRetainedTurnIdsChange}
       onVisibleTurnRangeChange={onVisibleTurnRangeChange}
       onOutlinePreviewRound={onOutlinePreviewRound}
     />
   );
 }
+
+function BackgroundFactControls({ view }: { view: ConversationView }) {
+  const scan = useRef<ReturnType<typeof createConversationDerivation<string>> | null>(null);
+  const advance = useRef<(() => void) | undefined>(undefined);
+  const unsubscribe = useRef<(() => void) | undefined>(undefined);
+  const [facts, setFacts] = useState(0);
+  useEffect(
+    () => () => {
+      unsubscribe.current?.();
+      scan.current?.dispose();
+      advance.current?.();
+    },
+    [view]
+  );
+  const start = () => {
+    if (scan.current) return;
+    const next = createConversationDerivation(view, (turn) => turn.id, {
+      yieldToEventLoop: () =>
+        new Promise<void>((resolve) => {
+          advance.current = resolve;
+        }),
+    });
+    scan.current = next;
+    const update = () => setFacts(next.facts.size);
+    unsubscribe.current = next.subscribe(update);
+    update();
+  };
+  return (
+    <>
+      <button type="button" onClick={start} disabled={!!scan.current}>
+        Start background scan
+      </button>
+      <button
+        type="button"
+        onClick={() => {
+          const next = advance.current;
+          advance.current = undefined;
+          next?.();
+        }}
+      >
+        Next fact batch
+      </button>
+      <span>
+        {facts} / {view.turnCount} facts
+      </span>
+    </>
+  );
+}
+
+/** Open first, then release background batches while observing the visible tail. */
+export const OpenWithBackgroundFacts: Story = {
+  render: () => <OpenFlickerStory rounds={150} backgroundFacts />,
+};
 
 /** Mount the stream over a warm 3,000-turn view — the reported open flicker. */
 export const OpenLongConversation: Story = {
@@ -562,6 +627,7 @@ function NativeTextSelectionStory() {
           items={stream.items}
           lastAssistantMessageId={stream.lastAssistantMessageId}
           lastCompletedAssistantMessageId={stream.lastCompletedAssistantMessageId}
+          onRetainedTurnIdsChange={stream.onRetainedTurnIdsChange}
           onVisibleTurnRangeChange={stream.onVisibleTurnRangeChange}
           onOutlinePreviewRound={stream.onOutlinePreviewRound}
           leadingContent={<div>Selection regression fixture</div>}

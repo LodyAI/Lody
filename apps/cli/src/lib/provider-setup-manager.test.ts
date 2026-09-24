@@ -177,54 +177,61 @@ describe('ProviderSetupManager', () => {
     harness.manager.stop();
   });
 
-  it('verifies user-installed Bub without treating it as a downloadable runtime', async () => {
+  it.each(['bub', 'dimcode'])('verifies %s without managed downloads', async (agentType) => {
     const harness = createHarness({
       getMachineAcpBinaryStatus: async () => {
-        throw new Error('Bub must not enter managed runtime preparation');
+        throw new Error('Non-managed builtin must not enter managed runtime preparation');
       },
       installMachineAcpBinary: async () => {
-        throw new Error('Bub must not enter managed runtime installation');
+        throw new Error('Non-managed builtin must not enter managed runtime installation');
       },
       refreshMachineAcpCapabilities: vi.fn(async () => ({
         type: 'machine/acp-capabilities-refresh_response' as const,
         machineId,
         configId: setupId,
         cliType: 'builtin' as const,
-        agentType: 'bub',
+        agentType,
         success: true,
         modes: [],
         models: [],
       })),
     });
-    seedSetup(harness.flock, createSetup('queued', { name: 'Bub', agentType: 'bub' }));
+    seedSetup(harness.flock, createSetup('queued', { name: 'Bub', agentType }));
 
     await harness.manager.kick();
 
-    expect(readState(harness.flock).config?.agentType).toBe('bub');
+    expect(readState(harness.flock).config?.agentType).toBe(agentType);
     expect(readState(harness.flock).setup).toBeUndefined();
     harness.manager.stop();
   });
 
   it.each([
-    ['spawn bub ENOENT', 'runtime-unavailable'],
+    ['bub', 'spawn bub ENOENT', 'runtime-unavailable'],
     [
+      'bub',
       "Failed to load plugin 'acp-server': No module named 'bub_acp_server'; No such command 'acp'",
       'runtime-unavailable',
     ],
-    ['ACP handshake timed out', 'verification-failed'],
-  ] as const)('classifies a failed Bub probe: %s', async (error, failureCode) => {
+    ['bub', 'ACP handshake timed out', 'verification-failed'],
+    ['dimcode', 'npm package could not be installed', 'verification-failed'],
+    [
+      'dimcode',
+      'Authentication required: Provider credentials are required',
+      'verification-failed',
+    ],
+  ] as const)('keeps failed %s probes unpublished: %s', async (agentType, error, failureCode) => {
     const harness = createHarness({
       refreshMachineAcpCapabilities: vi.fn(async () => ({
         type: 'machine/acp-capabilities-refresh_response' as const,
         machineId,
         configId: setupId,
         cliType: 'builtin' as const,
-        agentType: 'bub',
+        agentType,
         success: false,
         error,
       })),
     });
-    seedSetup(harness.flock, createSetup('queued', { name: 'Bub', agentType: 'bub' }));
+    seedSetup(harness.flock, createSetup('queued', { name: agentType, agentType }));
 
     await harness.manager.kick();
 

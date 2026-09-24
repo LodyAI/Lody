@@ -17,6 +17,7 @@ import {
 import { useIncrementalSearchBlocks } from '../src/hooks/use-incremental-search-blocks';
 import {
   createConversationSession,
+  createConversationDerivation,
   createProjectedConversationView,
   collectConversationConfigSources,
   type ConversationView,
@@ -50,12 +51,12 @@ afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
 });
-async function openView(rounds: number) {
+async function openView(rounds: number, maxHydrated = 4) {
   const doc = reimport(buildSessionDoc(buildFixtureHistory(rounds)));
   const idle = createManualIdle();
   const view = await openReaderView(doc, {
     sessionId: FIXTURE_SESSION_ID,
-    maxHydrated: 4,
+    maxHydrated,
     tailKeep: 2,
     scheduleIdle: idle.scheduleIdle,
     yieldToEventLoop: () => Promise.resolve(),
@@ -70,6 +71,98 @@ const flush = async () => {
 };
 
 describe('conversation view React readers', () => {
+  it('keeps render membership stable while background facts hydrate and evict older turns', async () => {
+    const { view } = await openView(150, 80);
+    let stream!: ReturnType<typeof useConversationStreamItems>;
+    function Probe() {
+      stream = useConversationStreamItems(view, FIXTURE_SESSION_ID);
+      return null;
+    }
+    await act(async () => root.render(<Probe />));
+    await flush();
+    expect(stream.initialWindowReady).toBe(true);
+    const membership = () =>
+      stream.items.map((item) =>
+        item.type === 'message'
+          ? `body:${item.message.id}`
+          : item.type === 'placeholder'
+            ? `placeholder:${item.row.id}`
+            : item.type
+      );
+    const initial = membership();
+    await act(async () => stream.onVisibleTurnRangeChange({ from: 296, to: 300 }));
+    await flush();
+    expect(membership()).toEqual(initial);
+
+    let advance!: () => void;
+    let reached!: () => void;
+    let boundary = new Promise<void>((resolve) => {
+      reached = resolve;
+    });
+    const derivation = createConversationDerivation(view, (turn) => turn.id, {
+      chunkSize: 32,
+      yieldToEventLoop: () =>
+        new Promise<void>((resolve) => {
+          advance = resolve;
+          reached();
+        }),
+    });
+    try {
+      for (let chunk = 0; chunk < 4; chunk++) {
+        await act(async () => {
+          await boundary;
+        });
+        await flush();
+        expect(derivation.facts.size).toBeGreaterThanOrEqual(40 + 32 * (chunk + 1));
+        expect(membership()).toEqual(initial);
+        expect(stream.initialWindowReady).toBe(true);
+        boundary = new Promise<void>((resolve) => {
+          reached = resolve;
+        });
+        if (chunk < 3) advance();
+      }
+    } finally {
+      derivation.dispose();
+      advance();
+    }
+  });
+
+  it('renders requested history and selected turns without promoting other cached bodies', async () => {
+    const { view } = await openView(150, 200);
+    let stream!: ReturnType<typeof useConversationStreamItems>;
+    function Probe() {
+      stream = useConversationStreamItems(view, FIXTURE_SESSION_ID);
+      return null;
+    }
+    await act(async () => root.render(<Probe />));
+    await flush();
+    const itemFor = (id: string) =>
+      stream.items.find((item) =>
+        item.type === 'message'
+          ? item.message.id === id
+          : item.type === 'placeholder' && item.row.id === id
+      );
+    await act(async () => stream.onVisibleTurnRangeChange({ from: 20, to: 28 }));
+    await flush();
+    expect(itemFor('a-10')?.type).toBe('message');
+    const selected = view.acquireRange(21, 22);
+    await selected.ready;
+    await act(async () => {
+      stream.onRetainedTurnIdsChange(new Set(['a-10']));
+      stream.onVisibleTurnRangeChange({ from: 100, to: 108 });
+    });
+    await flush();
+    expect(itemFor('a-10')?.type).toBe('message');
+    expect(itemFor('a-50')?.type).toBe('message');
+    expect(itemFor('a-149')?.type).toBe('message');
+    expect(itemFor('a-11')?.type).toBe('placeholder');
+    expect(view.isHydrated(23)).toBe(true);
+    await act(async () => stream.onRetainedTurnIdsChange(new Set()));
+    selected.release();
+    await flush();
+    expect(itemFor('a-10')?.type).toBe('placeholder');
+  });
+
   it('keeps revealed content and its reading window through projection refreshes', async () => {
     const { view } = await openView(150);
     let stream!: ReturnType<typeof useConversationStreamItems>;

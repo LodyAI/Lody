@@ -12,9 +12,11 @@ function preview(color: string) {
 function StoryShell({
   selected = 'default',
   mode = 'ready',
+  layout = 'mobile',
 }: {
   selected?: string;
   mode?: 'ready' | 'pending' | 'error';
+  layout?: 'mobile' | 'desktop';
 }) {
   const bridge = useMemo<AppIconBridge>(
     () => ({
@@ -33,7 +35,7 @@ function StoryShell({
   );
   return (
     <div className="max-w-[393px] bg-background py-4">
-      <MobileAppIconSettings bridge={bridge} />
+      <MobileAppIconSettings bridge={bridge} layout={layout} />
     </div>
   );
 }
@@ -49,3 +51,6 @@ export const Default: Story = {};
 export const AlternateSelected: Story = { args: { selected: 'alternate' } };
 export const ChangePending: Story = { args: { mode: 'pending' } };
 export const ChangeFailure: Story = { args: { mode: 'error' } };
+export const MacDesktop: Story = { args: { layout: 'desktop' } };
+export const MacDesktopAlternate: Story = { args: { layout: 'desktop', selected: 'alternate' } };
+export const MacDesktopFailure: Story = { args: { layout: 'desktop', mode: 'error' } };

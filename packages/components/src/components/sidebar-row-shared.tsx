@@ -431,7 +431,7 @@ export function SidebarRowEndSlot({
   restIcon,
   archive,
   /** Fade the rest icon while hovering (match the row's group, e.g. 'group-hover/row:opacity-0'). */
-  fadeClassName = 'group-hover:opacity-0',
+  fadeClassName = 'group-hover:opacity-0 group-data-[menu-open]:opacity-0',
 }: {
   isWaitingPermission?: boolean;
   isWorking?: boolean;

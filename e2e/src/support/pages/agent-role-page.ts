@@ -83,10 +83,9 @@ export class AgentRolePage {
     const roleMenu = this.page.getByRole('menuitem', { name: /^(Role|角色)(?:\s|$)/u });
     await roleMenu.focus();
     await roleMenu.press('ArrowRight');
-    const roleOption = this.page.getByRole('menuitemradio', {
-      name: this.fixture.roleName,
-      exact: true,
-    });
+    const roleOption = this.page
+      .getByRole('menuitemradio')
+      .filter({ has: this.page.getByText(this.fixture.roleName, { exact: true }) });
     await expect(roleOption).toBeEnabled();
     await roleOption.press('Enter');
     await expect(
