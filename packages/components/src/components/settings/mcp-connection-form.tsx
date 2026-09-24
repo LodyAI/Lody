@@ -17,7 +17,6 @@ import { Field as UiField } from '@lody/ui/field';
 import { Tabs } from '@lody/ui/tabs';
 import { Switch } from '@lody/ui/switch';
 import { Textarea } from '@lody/ui/textarea';
-import { colors } from '@lody/ui/tokens/colors.stylex';
 import { space } from '@lody/ui/tokens/scales.stylex';
 import { Field, FormMessage, Section } from './form-primitives';
 import { settingsCatalog as catalog, settingsSurface as surface } from './surface';
