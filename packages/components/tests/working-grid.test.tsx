@@ -165,17 +165,34 @@ const TRANSFORM_OR_OPACITY = (frame: Keyframe) =>
 const scaleOf = (frame: Keyframe) => Number(/scale\(([\d.]+)\)/.exec(String(frame.transform))![1]);
 
 describe('WorkingGrid', () => {
-  it('plays one wave of one shape on every tile by default', () => {
-    render(<WorkingGrid />);
+  it('plays one main wave with a small interfering ripple by default', () => {
+    render(<WorkingGrid minScale={0.3} maxScale={0.9} />);
 
-    // One loop per tile, all the same keyframes and period: only the phase differs,
-    // so each tile (and each mark down a list) is a delayed copy of its neighbour.
+    // Per tile: the main wave on the outer box, a smaller ripple on the face.
+    const main = recorded.filter((a) => a.target.hasAttribute('data-working-grid-tile'));
+    const ripple = recorded.filter((a) => a.target.classList.contains('bg-current'));
+    expect(main).toHaveLength(9);
+    expect(ripple).toHaveLength(9);
+    // Each wave has one shape and period everywhere; only the phase differs, so
+    // each mark down a list is a delayed copy of the one above.
+    for (const wave of [main, ripple]) {
+      expect(new Set(wave.map((a) => JSON.stringify(a.keyframes))).size).toBe(1);
+      expect(new Set(wave.map((a) => a.options.duration)).size).toBe(1);
+      expect(new Set(wave.map((a) => a.options.delay)).size).toBeGreaterThan(1);
+    }
+    expect(recorded.every((a) => a.keyframes.every(TRANSFORM_OR_OPACITY))).toBe(true);
+    // The ripple swings less than the main wave, and together they bottom out at
+    // minScale relative to the drawn (maxScale) tile.
+    const mainLow = scaleOf(main[0]!.keyframes[1]!);
+    const rippleLow = scaleOf(ripple[0]!.keyframes[1]!);
+    expect(rippleLow).toBeGreaterThan(mainLow);
+    expect(mainLow * rippleLow).toBeCloseTo(0.3 / 0.9, 9);
+  });
+
+  it('drops the ripple layer when ripple is 0', () => {
+    render(<WorkingGrid ripple={0} />);
     expect(recorded).toHaveLength(9);
     expect(recorded.every((a) => a.target.hasAttribute('data-working-grid-tile'))).toBe(true);
-    expect(new Set(recorded.map((a) => JSON.stringify(a.keyframes))).size).toBe(1);
-    expect(new Set(recorded.map((a) => a.options.duration)).size).toBe(1);
-    expect(new Set(recorded.map((a) => a.options.delay)).size).toBeGreaterThan(1);
-    expect(recorded.every((a) => a.keyframes.every(TRANSFORM_OR_OPACITY))).toBe(true);
   });
 
   it('animates the mark and both layers of every tile on the compositor', () => {

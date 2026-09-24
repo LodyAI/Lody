@@ -42,13 +42,16 @@ The kept form and its defaults:
   between 0.3 and 0.9 of their cell (never to nothing) while opacity runs from
   0.25 (pale tiles) to 1 (primary tiles). Still, it is a dot matrix of varied
   dots; moving, light and size roll across it.
-- One wave (`waves = 1`, the default): a single plane wave, 3.2 cells × 1.2 long,
-  heading down-right with a 1.9s period, drives every tile's size and opacity on
-  one layer. Every tile, and every mark down a list, plays the same loop; only
-  the phase differs, so each mark is a slightly delayed copy of the one above.
-  With two crossing waves their troughs could coincide and shrink every tile of
-  a mark at once; one wave shorter than the mark's diagonal always leaves some
-  tile near a crest.
+- Main wave plus ripple (`waves = 1`, the default): a main plane wave, 3.2 cells
+  × 1.2 long, heading down-right with a 1.9s period, drives most of each tile's
+  size and opacity on the outer layer. Every mark plays the same loop with only
+  the phase differing, so each is a slightly delayed copy of the one above; this
+  gives the list its rhythm. A smaller ripple (`ripple = 0.3`: the second wave,
+  4.4 cells, heading down-left, 2.7s) on the inner layer swings 30% of the range
+  and interferes with it, so marks are related but not identical. The ripple's
+  trough is divided out of the main wave's, so together they still bottom out at
+  `minScale` / `minOpacity`. Two equal crossing waves could coincide in troughs
+  and shrink every tile of a mark at once; a small ripple cannot.
 - `waves = 2` keeps the earlier form for comparison: two crossing waves (3.2 and
   4.4 cells, 1.9s and 2.7s) on nested layers plus a long downward rhythm wave on
   the mark (36 cells, 3.6s, 30% of the opacity range).
@@ -77,7 +80,8 @@ motion, and many unrelated flickering points cannot be tuned out. So:
   so no tile vanishes) at the original speed — lively, but two waves plus the
   rhythm made marks look unrelated and sometimes all small. Final: the same
   whole grid, colour and ranges driven by one wave, so marks differ only in
-  phase. The grid shape keeps it distinct from the unread dot.
+  phase. That looked cheap: too regular. Final: the same main wave with a small
+  interfering ripple on top. The grid shape keeps it distinct from the unread dot.
 - Coherence: one wave of one shape makes a column read as the same motion
   passing from mark to mark, instead of about a hundred unrelated tiles.
 - Reading pause: any wheel, key, pointer or touch press outside

@@ -57,6 +57,12 @@ export type WorkingGridProps = Omit<ComponentPropsWithoutRef<'span'>, 'children'
    * the rhythm, which vary more but can shrink every tile of a mark at once.
    */
   waves?: 1 | 2;
+  /**
+   * With one wave: strength (0–1) of a second, smaller wave in another direction
+   * and period, layered on top so the main wave's rhythm gains interference. The
+   * combined trough still lands on minScale / minOpacity.
+   */
+  ripple?: number;
   /** Playback speed; 1 is the original 1.9s/2.7s waves, lower is calmer. */
   speed?: number;
   /** Gap between tiles as a fraction of the tile edge. */
@@ -165,6 +171,7 @@ export function WorkingGrid({
   rhythm = 0.3,
   speed = 1,
   waves = 1,
+  ripple = 0.3,
   gap = 0.18,
   wavelength = 1.2,
   direction = 'across',
@@ -217,20 +224,36 @@ export function WorkingGrid({
     const vanishing = scale !== 'none' && relativeMin <= 0;
 
     if (waves === 1) {
-      // One wave carries the whole range on a single layer per tile.
-      const opacityLow = opacityRatio < 1 ? opacityRatio : null;
-      const frames = vanishing
-        ? vanishingKeyframes(relativeMin, opacityLow)
-        : loopKeyframes(scale === 'none' ? null : clamp01(relativeMin), opacityLow);
-      if (frames) {
-        const [wave] = workingGridWaves(direction);
+      // The main wave carries most of the range on the outer layer; an optional
+      // small ripple (another direction and period) on the inner layer adds
+      // interference. The ripple's trough is divided out of the main wave's so
+      // their product still bottoms out at minScale / minOpacity.
+      const share = clamp01(ripple);
+      const rippleScaleLow = scale === 'none' ? null : 1 - share;
+      const rippleOpacityLow = opacityRatio < 1 ? 1 - share * (1 - opacityRatio) : null;
+      const mainOpacityLow =
+        rippleOpacityLow == null ? null : clamp01(opacityRatio / rippleOpacityLow);
+      const mainFrames = vanishing
+        ? vanishingKeyframes(relativeMin, mainOpacityLow)
+        : loopKeyframes(
+            rippleScaleLow == null ? null : clamp01(relativeMin / rippleScaleLow),
+            mainOpacityLow
+          );
+      const rippleFrames =
+        share > 0 && !vanishing ? loopKeyframes(rippleScaleLow, rippleOpacityLow) : null;
+      if (mainFrames) {
+        const [main, small] = workingGridWaves(direction);
         for (const outer of root.querySelectorAll<HTMLElement>('[data-working-grid-tile]')) {
           const [x, y] = tileSeaPoint(
             placement,
             Number(outer.dataset.col),
             Number(outer.dataset.row)
           );
-          play(outer, frames, wave, wavePhase(wave, x, y, wavelength));
+          play(outer, mainFrames, main, wavePhase(main, x, y, wavelength));
+          const inner = outer.firstElementChild;
+          if (rippleFrames && inner instanceof HTMLElement) {
+            play(inner, rippleFrames, small, wavePhase(small, x, y, wavelength));
+          }
         }
       }
       return () => {
@@ -299,6 +322,7 @@ export function WorkingGrid({
     rhythmShare,
     speed,
     waves,
+    ripple,
     gap,
     wavelength,
     direction,
