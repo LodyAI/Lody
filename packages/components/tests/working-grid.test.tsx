@@ -223,7 +223,7 @@ describe('WorkingGrid', () => {
   });
 
   it('keeps brightness between minOpacity and maxOpacity', () => {
-    render(<WorkingGrid minOpacity={0.4} maxOpacity={0.8} rhythm={0.5} />);
+    render(<WorkingGrid minScale={0.3} minOpacity={0.4} maxOpacity={0.8} rhythm={0.5} />);
     const [rhythm, outer, inner] = recorded;
     const opacity = (animation: RecordedAnimation, at: number) =>
       Number(animation.keyframes[at]!.opacity);
@@ -231,6 +231,37 @@ describe('WorkingGrid', () => {
     expect(opacity(rhythm!, 0) * opacity(outer!, 0) * opacity(inner!, 0)).toBeCloseTo(0.8, 9);
     // Trough everywhere: the three loops multiply down to minOpacity.
     expect(opacity(rhythm!, 1) * opacity(outer!, 1) * opacity(inner!, 1)).toBeCloseTo(0.4, 9);
+  });
+
+  it('lets tiles vanish, longer the further minScale goes below zero', () => {
+    /** Share of one tile layer's loop spent fully empty. */
+    const emptyShare = (minScale: number) => {
+      recorded = [];
+      render(<WorkingGrid key={minScale} minScale={minScale} maxScale={0.8} />);
+      // The inner layer (the tile face) is the one allowed to empty the tile; the
+      // outer layer only swells, so a whole mark never empties at once.
+      const outers = recorded.filter((a) => a.target.hasAttribute('data-working-grid-tile'));
+      for (const outer of outers) expect(outer.keyframes.every((f) => scaleOf(f) > 0)).toBe(true);
+      const layer = recorded.find((a) => a.target.classList.contains('bg-current'))!;
+      const frames = layer.keyframes;
+      let empty = 0;
+      for (let k = 1; k < frames.length; k += 1) {
+        if (scaleOf(frames[k - 1]!) === 0 && scaleOf(frames[k]!) === 0) {
+          empty += frames[k]!.offset! - frames[k - 1]!.offset!;
+        }
+      }
+      // Always a seamless loop that starts at full size.
+      expect(scaleOf(frames[0]!)).toBe(1);
+      expect(scaleOf(frames.at(-1)!)).toBe(1);
+      expect(frames.every((frame) => scaleOf(frame) >= 0)).toBe(true);
+      return empty;
+    };
+    const atZero = emptyShare(0);
+    const atMinus02 = emptyShare(-0.2);
+    const atMinus04 = emptyShare(-0.4);
+    expect(atZero).toBe(0);
+    expect(atMinus02).toBeGreaterThan(0);
+    expect(atMinus04).toBeGreaterThan(atMinus02);
   });
 
   it('stays still when there is nothing to animate or motion is reduced', () => {

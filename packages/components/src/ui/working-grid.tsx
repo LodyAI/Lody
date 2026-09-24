@@ -33,7 +33,11 @@ export type WorkingGridProps = Omit<ComponentPropsWithoutRef<'span'>, 'children'
   scale?: WorkingGridScale;
   /** Largest a tile gets, at a double crest, as a fraction of its cell (0–1). */
   maxScale?: number;
-  /** Smallest tile size in a double trough, as a fraction of its cell (0–1). */
+  /**
+   * Smallest tile size in a double trough, as a fraction of its cell. At 0 a tile
+   * shrinks to nothing at the bottom of a trough; below 0 (down to about -0.4) the
+   * part of each trough under zero holds the tile empty for a while.
+   */
   minScale?: number;
   /**
    * Opacity range of a tile. A narrow range keeps the mark from flickering in
@@ -86,6 +90,32 @@ function loopKeyframes(
   ];
 }
 
+// Samples per loop when a tile can vanish: clamping at zero is not a sine, so the
+// curve is baked as keyframes with linear interpolation between them.
+const VANISH_SAMPLES = 24;
+// While tiles can vanish, the outer layer's trough scale: enough swell to keep
+// texture, never enough to empty a tile by itself.
+const VANISH_OUTER_LOW = 0.7;
+
+/**
+ * One tile layer's loop when tiles may vanish: its scale runs from 1 at the crest
+ * to `scaleLow` (≤ 0) at the trough and is held at 0 wherever that goes negative.
+ * Opacity follows the same crest-first sine between 1 and `opacityLow`.
+ */
+function vanishingKeyframes(scaleLow: number, opacityLow: number | null): Keyframe[] {
+  return Array.from({ length: VANISH_SAMPLES + 1 }, (_, k) => {
+    const progress = k / VANISH_SAMPLES;
+    // Crest-first, matching crestDelayMs: 1 at progress 0, 0 at progress 0.5.
+    const height = 0.5 + 0.5 * Math.cos(2 * Math.PI * progress);
+    const scaleAt = Math.max(0, scaleLow + (1 - scaleLow) * height);
+    return {
+      offset: progress,
+      transform: `scale(${scaleAt.toFixed(4)})`,
+      ...(opacityLow != null ? { opacity: opacityLow + (1 - opacityLow) * height } : {}),
+    };
+  });
+}
+
 /** Sum of scroll offsets of every scrolling ancestor, so positions are content-relative. */
 function scrollOffset(el: Element): [number, number] {
   let x = window.scrollX;
@@ -117,12 +147,12 @@ function scrollOffset(el: Element): [number, number] {
  * compositor reason documented in `spinner.tsx`.
  */
 export function WorkingGrid({
-  size = 14,
+  size = 12,
   cornerRadius = 0.4,
   superellipse,
   scale = 'center',
   maxScale = 0.9,
-  minScale = 0.55,
+  minScale = -0.2,
   minOpacity = 0.5,
   maxOpacity = 0.8,
   rhythm = 0.6,
@@ -189,10 +219,19 @@ export function WorkingGrid({
     }
 
     // The texture: two stacked layers per tile, one per short wave.
-    const tileScaleLow = scale === 'none' ? null : Math.sqrt(clamp01(minScale / clamp01(maxScale)));
+    const relativeMin = minScale / clamp01(maxScale);
     const tileOpacityLow = opacityRatio < 1 ? Math.sqrt(opacityRatio ** (1 - rhythmShare)) : null;
-    const tileFrames = loopKeyframes(tileScaleLow, tileOpacityLow === 1 ? null : tileOpacityLow);
-    if (tileFrames) {
+    const opacityLow = tileOpacityLow === 1 ? null : tileOpacityLow;
+    // Above zero the two layers split the range (their product bottoms out at
+    // minScale). At or below zero only the inner layer empties the tile; the outer
+    // one keeps a gentle positive swell. Letting either layer empty it left ≤ 2 of
+    // nine tiles showing ~11% of the time, so whole marks read as idle.
+    const vanishing = scale !== 'none' && relativeMin <= 0;
+    const outerFrames = vanishing
+      ? loopKeyframes(VANISH_OUTER_LOW, opacityLow)
+      : loopKeyframes(scale === 'none' ? null : Math.sqrt(clamp01(relativeMin)), opacityLow);
+    const innerFrames = vanishing ? vanishingKeyframes(relativeMin, opacityLow) : outerFrames;
+    if (outerFrames && innerFrames) {
       const waves = workingGridWaves(direction);
       for (const outer of root.querySelectorAll<HTMLElement>('[data-working-grid-tile]')) {
         const inner = outer.firstElementChild;
@@ -204,7 +243,12 @@ export function WorkingGrid({
         );
         [outer, inner].forEach((layer, index) => {
           const wave = waves[index];
-          play(layer, tileFrames, wave, wavePhase(wave, x, y, wavelength));
+          play(
+            layer,
+            index === 0 ? outerFrames : innerFrames,
+            wave,
+            wavePhase(wave, x, y, wavelength)
+          );
         });
       }
     }

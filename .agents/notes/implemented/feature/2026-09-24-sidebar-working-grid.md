@@ -36,12 +36,23 @@ pixel jellyfish and a dot "ocean patch" read as too cartoonish or too noisy;
 breathing dots, rings, bubbles and a click-ripple layer were tried and dropped.
 The kept form and its defaults:
 
-- 3×3 tiles, corner radius 40% of the tile, gap 0.18 of the tile, 14px overall,
-  in the sidebar's muted foreground colour.
+- 3×3 tiles, corner radius 40% of the tile, gap 0.18 of the tile, 12px overall
+  inside the 14px status slot, in the sidebar's muted foreground colour.
 - Texture: two plane waves, 3.2 and 4.4 cells long (× wavelength 1.2), travelling
   down-right and down-left with periods 1.9s and 2.7s at speed 1 (19:27, so the
   pattern repeats only after ~51s). Tiles are at most 0.9 of their cell and scale
-  from their centre down to 0.55 of it.
+  from their centre with a minimum of -0.2: the inner wave layer's scale is
+  clamped at zero, so a tile empties when that wave is deep enough and stays
+  empty for part of the trough, while the outer layer only swells down to 0.7.
+  Clamping is not a sine, so the inner layer bakes its loop as 24 keyframes.
+  Letting either layer empty a tile left two or fewer of nine tiles showing ~11%
+  of the time (a whole mark empty ~0.4%), which reads as an idle session; with
+  one vanishing layer no tile count reaches zero. Counting tiles under 30% size
+  as invisible, though, a 12px mark at wavelength 1.2 still shows two or fewer
+  visible tiles ~29% of the time, because one trough covers most of a mark. At
+  wavelength 0.8 that falls to ~0.5% (0.6: none) while each tile is still empty
+  ~28% of the time. The owner earlier found 0.8 too busy, so the default stays at
+  1.2 pending their choice.
 - Rhythm: one long wave heading straight down, 36 cells (about twelve stitched
   rows) crest to crest, 3.6s at speed 1, that dims and brightens whole marks in
   turn. It carries 60% of the opacity range; the texture carries the rest.
@@ -61,7 +72,10 @@ still by default, motion only for a change of state, accent colour only for what
 needs the reader. Peripheral vision is most sensitive to luminance change and
 motion, and many unrelated flickering points cannot be tuned out. So:
 
-- Luminance: opacity narrowed to 0.5–0.8 and size to 0.55–0.9 — the largest cause.
+- Luminance: opacity narrowed to 0.5–0.8 — the largest cause. Size was first
+  narrowed to 0.55–0.9 as well, but with the rest of this list the owner found
+  the marks too static to notice; tiles now shrink through zero again (minimum
+  -0.2) on a smaller 12px mark, trading some calm back for visible activity.
 - Colour: the mark uses the sidebar's muted foreground. Working is the most
   common and longest-lived status, so it must be the quietest; blue stays for
   unread.
