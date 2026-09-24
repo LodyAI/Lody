@@ -18,7 +18,7 @@ const meta = {
     maxScale: 0.8,
     minScale: 0.3,
     gap: 0.35,
-    wavelength: 1,
+    sweep: 0.55,
     rowPitch: 28,
     className: 'text-primary',
   },
@@ -36,7 +36,7 @@ const meta = {
     maxScale: { control: { type: 'range', min: 0.3, max: 1, step: 0.05 } },
     minScale: { control: { type: 'range', min: 0, max: 0.9, step: 0.05 } },
     gap: { control: { type: 'range', min: 0.05, max: 0.5, step: 0.01 } },
-    wavelength: { control: { type: 'range', min: 0.5, max: 2, step: 0.05 } },
+    sweep: { control: { type: 'range', min: 0, max: 1, step: 0.05 } },
     rowPitch: {
       options: ['stitched', 'real'],
       mapping: { stitched: 28, real: null },

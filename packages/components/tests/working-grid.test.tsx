@@ -4,8 +4,8 @@
  * `WorkingGrid` contracts:
  *  - every mark on the page samples one shared sea, so its motion depends only
  *    on page position and the document timeline, never on when a mark mounted;
- *  - neighbouring sidebar marks move together, and a whole mark almost never
- *    sinks out of sight;
+ *  - a lone tile bobs on its own, while occasional sweeps roll through a column
+ *    of marks in order, and a whole mark almost never sinks out of sight;
  *  - the animation stays on the compositor: Web Animations on HTML elements,
  *    touching only `transform` and `opacity`, cancelled on unmount.
  *
@@ -22,9 +22,11 @@ import { SidebarRowEndSlot } from '../src/components/sidebar-row-shared';
 import { WorkingGrid } from '../src/ui/working-grid';
 import {
   seaHeight,
+  sweepBand,
   tileSeaPoint,
   WORKING_GRID_LOOP_MS,
-  WORKING_GRID_WAVELENGTH,
+  WORKING_GRID_SWEEP,
+  WORKING_GRID_SWEEPS,
 } from '../src/ui/working-grid-sea';
 
 /** The nine sea points of a 14px mark in the `row`-th 28px sidebar row. */
@@ -51,9 +53,16 @@ const LOOP_TIMES = Array.from({ length: 180 }, (_, k) => (k / 180) * WORKING_GRI
 
 describe('working grid sea', () => {
   it('loops seamlessly, so a baked keyframe loop has no seam', () => {
-    for (const [x, y] of [[0, 0], [37.5, 12], [80, 144.25]] as const) {
+    for (const [x, y] of [
+      [0, 0],
+      [37.5, 12],
+      [80, 144.25],
+    ] as const) {
       for (const t of [0, 1234, 20_000]) {
-        expect(seaHeight(x, y, t + WORKING_GRID_LOOP_MS, 1.3)).toBeCloseTo(seaHeight(x, y, t, 1.3), 9);
+        expect(seaHeight(x, y, t + WORKING_GRID_LOOP_MS, 0.55)).toBeCloseTo(
+          seaHeight(x, y, t, 0.55),
+          9
+        );
       }
     }
   });
@@ -70,47 +79,49 @@ describe('working grid sea', () => {
     expect(tileSeaPoint(realLower, 0, 0)[1] - tileSeaPoint(realUpper, 0, 2)[1]).toBe(4);
   });
 
-  it('keeps the nine tiles of a mark visibly different', () => {
-    // Long waves alone made every tile of a mark rise and fall as one block.
-    let spread = 0;
-    let samples = 0;
-    for (let row = 0; row < 12; row += 1) {
-      const tiles = sidebarMark(row);
-      for (const t of LOOP_TIMES) {
-        const heights = tiles.map(([x, y]) => seaHeight(x, y, t, WORKING_GRID_WAVELENGTH));
-        const mean = heights.reduce((sum, h) => sum + h, 0) / heights.length;
-        spread += Math.sqrt(heights.reduce((sum, h) => sum + (h - mean) ** 2, 0) / heights.length);
-        samples += 1;
+  it('bobs each tile on its own between sweeps', () => {
+    // Watched alone, a tile should look random: between sweeps the nine tiles of a
+    // mark must not rise and fall together.
+    const tiles = sidebarMark(5);
+    const quiet = LOOP_TIMES.filter((t) => tiles.every(([x, y]) => sweepBand(x, y, t) < 0.05));
+    const series = tiles.map(([x, y]) => quiet.map((t) => seaHeight(x, y, t, WORKING_GRID_SWEEP)));
+    let total = 0;
+    let pairs = 0;
+    for (let i = 0; i < series.length; i += 1) {
+      for (let j = i + 1; j < series.length; j += 1) {
+        total += correlation(series[i]!, series[j]!);
+        pairs += 1;
       }
     }
-    expect(spread / samples).toBeGreaterThan(0.15);
+    expect(total / pairs).toBeLessThan(0.2);
   });
 
-  it('gives neighbouring sidebar marks one rhythm', () => {
-    // Short waves alone put adjacent rows in antiphase and every mark looked like
-    // it ran on its own; whole marks must brighten and dim together with their neighbours.
-    const series = Array.from({ length: 24 }, (_, row) => {
+  it('rolls a downward sweep through the list top to bottom', () => {
+    // Squinting at the column, a sweep must reach each mark after the one above it.
+    const sweep = WORKING_GRID_SWEEPS.find((candidate) => candidate.angleDeg === 90)!;
+    const window = Array.from(
+      { length: 141 },
+      (_, k) => sweep.startMs + (k / 140) * sweep.durationMs
+    );
+    const peaks = [2, 4, 6, 8, 10, 12, 14, 16, 18, 20].map((row) => {
       const tiles = sidebarMark(row);
-      return LOOP_TIMES.map(
-        (t) =>
-          tiles.reduce((sum, [x, y]) => sum + seaHeight(x, y, t, WORKING_GRID_WAVELENGTH), 0) / 9
+      const brightness = window.map(
+        (t) => tiles.reduce((sum, [x, y]) => sum + seaHeight(x, y, t, WORKING_GRID_SWEEP), 0) / 9
       );
+      return window[brightness.indexOf(Math.max(...brightness))]!;
     });
-    const adjacent =
-      series.slice(1).reduce((sum, s, row) => sum + correlation(series[row]!, s), 0) /
-      (series.length - 1);
-    expect(adjacent).toBeGreaterThan(0.35);
+    for (let k = 1; k < peaks.length; k += 1) expect(peaks[k]!).toBeGreaterThan(peaks[k - 1]!);
   });
 
   it('almost never lets a whole mark sink out of sight', () => {
-    // Long waves can put all nine tiles in one trough; keep that rare.
+    // All nine tiles bottoming out at once would blank the mark; keep that rare.
     let samples = 0;
     let dark = 0;
     for (let row = 0; row < 40; row += 1) {
       const tiles = sidebarMark(row);
       for (const t of LOOP_TIMES) {
         const brightest = Math.max(
-          ...tiles.map(([x, y]) => seaHeight(x, y, t, WORKING_GRID_WAVELENGTH))
+          ...tiles.map(([x, y]) => seaHeight(x, y, t, WORKING_GRID_SWEEP))
         );
         samples += 1;
         if (brightest < 0.15) dark += 1;

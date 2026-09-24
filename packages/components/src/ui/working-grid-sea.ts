@@ -1,82 +1,86 @@
 /**
- * The shared "sea" behind every {@link WorkingGrid}.
+ * The shared "sea" behind every {@link WorkingGrid}, in two layers:
  *
- * One height field over the whole page, sampled by every tile at its own page
- * position, built from two scales:
- *
- * - Ripples: short waves, about one mark long, so the nine tiles of a mark always
- *   differ. Four fixed directions (down-right to down-left) swell and fade out of
- *   step, so at any moment about two interfere and the heading they share keeps
- *   turning — the same heading in every mark on the page at the same moment.
- * - Swells: long waves, several sidebar rows long and mostly downward, that lift
- *   and lower whole marks in turn, giving the list one rhythm.
+ * - Chop: every tile wanders on its own — a few slow sines with frequencies and
+ *   phases hashed from the tile's position — so a single tile looks like it bobs
+ *   at random, unrelated to its neighbours.
+ * - Sweeps: now and then a bright band passes across the whole page in one
+ *   direction (down, or diagonally), lifting every tile it crosses. Squint at a
+ *   column of marks and a wave rolls through them, top to bottom, in order.
  *
  * Positions are in "cells": one cell is a third of a mark's size. Time is in ms.
- * Every period divides {@link WORKING_GRID_LOOP_MS}, so the field loops seamlessly
- * and each tile's motion can be baked into one repeating keyframe animation.
+ * Every period and sweep repeats within {@link WORKING_GRID_LOOP_MS}, so the field
+ * loops seamlessly and each tile's motion bakes into one repeating animation.
  */
 
 export const WORKING_GRID_LOOP_MS = 36_000;
 
-/** Default multiplier on the ripple wavelengths (tile-scale texture). */
-export const WORKING_GRID_WAVELENGTH = 1;
+/** Default strength of the sweeps relative to the chop. */
+export const WORKING_GRID_SWEEP = 0.55;
 
-interface Ripple {
+export interface WorkingGridSweep {
+  startMs: number;
   /** Travel direction, degrees from +x towards +y (down). */
   angleDeg: number;
-  /** Crest spacing in cells, before the wavelength multiplier. */
-  length: number;
-  periodMs: number;
-  /** Period of the slow swell in this ripple's strength. */
-  envelopeMs: number;
-  /** Phase of that swell, in turns, so the ripples take turns dominating. */
-  envelopePhase: number;
+  durationMs: number;
 }
 
-const RIPPLES: readonly Ripple[] = [
-  { angleDeg: 20, length: 3.2, periodMs: 1_800, envelopeMs: 36_000, envelopePhase: 0 },
-  { angleDeg: 70, length: 3.6, periodMs: 2_000, envelopeMs: 18_000, envelopePhase: 0.3 },
-  { angleDeg: 110, length: 3.4, periodMs: 2_250, envelopeMs: 12_000, envelopePhase: 0.6 },
-  { angleDeg: 160, length: 4, periodMs: 2_400, envelopeMs: 36_000, envelopePhase: 0.5 },
+/** Irregularly spaced, in varying directions, so they read as "now and then". */
+export const WORKING_GRID_SWEEPS: readonly WorkingGridSweep[] = [
+  { startMs: 1_500, angleDeg: 90, durationMs: 2_800 },
+  { startMs: 8_500, angleDeg: 60, durationMs: 2_800 },
+  { startMs: 15_000, angleDeg: 120, durationMs: 2_800 },
+  { startMs: 21_500, angleDeg: 90, durationMs: 2_800 },
+  { startMs: 28_500, angleDeg: 35, durationMs: 2_800 },
 ];
 
-const SWELLS: readonly { angleDeg: number; length: number; periodMs: number }[] = [
-  { angleDeg: 88, length: 18, periodMs: 6_000 },
-  { angleDeg: 100, length: 26, periodMs: 9_000 },
-];
-
-// Share of the height carried by ripples vs swells, and how much the averaged
-// ripples are stretched back to full contrast (averaging four waves flattens them).
-const RIPPLE_WEIGHT = 0.6;
-const RIPPLE_CONTRAST = 2;
+// A sweep is a train of bands SPACING cells apart, so it crosses any page region;
+// each point is crossed once per sweep. WIDTH is the band's half-width in cells.
+const SPACING = 66;
+const WIDTH = 5;
+const CHOP_WEIGHT = 0.75;
 
 const TAU = Math.PI * 2;
 const sin01 = (turns: number) => 0.5 + 0.5 * Math.sin(TAU * turns);
 const clamp01 = (value: number) => Math.min(Math.max(value, 0), 1);
-const along = (angleDeg: number, x: number, y: number) => {
-  const angle = (angleDeg * Math.PI) / 180;
-  return Math.cos(angle) * x + Math.sin(angle) * y;
-};
+const frac = (value: number) => value - Math.floor(value);
+/** Deterministic [0, 1) hash of an integer. */
+const hash = (n: number) => frac(Math.sin(n * 127.1 + 311.7) * 43_758.5453);
+
+/** A tile's own random bobbing: three sines, 9–20 cycles per loop (1.8–4s). */
+function chop(x: number, y: number, tMs: number): number {
+  const seed = Math.round(x * 8) * 7919 + Math.round(y * 8) * 104_729;
+  let sum = 0;
+  for (let m = 0; m < 3; m += 1) {
+    const cycles = 9 + Math.floor(hash(seed + m * 13) * 12);
+    sum += sin01((cycles * tMs) / WORKING_GRID_LOOP_MS + hash(seed + m * 29));
+  }
+  return sum / 3;
+}
+
+/** How strongly a passing sweep band lifts point (x, y) at `tMs`, in [0, 1]. */
+export function sweepBand(x: number, y: number, tMs: number): number {
+  let band = 0;
+  for (const sweep of WORKING_GRID_SWEEPS) {
+    const elapsed =
+      (((tMs - sweep.startMs) % WORKING_GRID_LOOP_MS) + WORKING_GRID_LOOP_MS) %
+      WORKING_GRID_LOOP_MS;
+    if (elapsed > sweep.durationMs) continue;
+    const progress = elapsed / sweep.durationMs;
+    const angle = (sweep.angleDeg * Math.PI) / 180;
+    const along = Math.cos(angle) * x + Math.sin(angle) * y;
+    const offset =
+      ((((along - SPACING * progress + SPACING / 2) % SPACING) + SPACING) % SPACING) - SPACING / 2;
+    // Fade the train in and out so a sweep never pops on or off.
+    const envelope = Math.sin(Math.PI * progress) ** 0.6;
+    band = Math.max(band, envelope * Math.exp(-((offset / WIDTH) ** 2)));
+  }
+  return band;
+}
 
 /** Sea height in [0, 1] at cell point (x, y) and time `tMs`. */
-export function seaHeight(x: number, y: number, tMs: number, wavelength: number): number {
-  let sum = 0;
-  let weight = 0;
-  for (const ripple of RIPPLES) {
-    const height = sin01(
-      along(ripple.angleDeg, x, y) / (ripple.length * wavelength) - tMs / ripple.periodMs
-    );
-    // Never fully silent, so the surface keeps some motion while a ripple rests.
-    const strength = 0.15 + 0.85 * sin01(tMs / ripple.envelopeMs + ripple.envelopePhase) ** 2;
-    sum += strength * height;
-    weight += strength;
-  }
-  const ripples = clamp01(0.5 + RIPPLE_CONTRAST * (sum / weight - 0.5));
-  let swells = 0;
-  for (const swell of SWELLS) {
-    swells += sin01(along(swell.angleDeg, x, y) / swell.length - tMs / swell.periodMs);
-  }
-  return RIPPLE_WEIGHT * ripples + (1 - RIPPLE_WEIGHT) * (swells / SWELLS.length);
+export function seaHeight(x: number, y: number, tMs: number, sweep: number): number {
+  return clamp01(CHOP_WEIGHT * chop(x, y, tMs) + sweep * sweepBand(x, y, tMs) - 0.05);
 }
 
 export interface WorkingGridPlacement {
@@ -106,13 +110,8 @@ export function tileSeaPoint(
 }
 
 /** Heights at a point over one loop: `samples` evenly spaced, plus the wrap-around sample. */
-export function seaHeightsOverLoop(
-  x: number,
-  y: number,
-  wavelength: number,
-  samples: number
-): number[] {
+export function seaHeightsOverLoop(x: number, y: number, sweep: number, samples: number): number[] {
   return Array.from({ length: samples + 1 }, (_, k) =>
-    seaHeight(x, y, (k / samples) * WORKING_GRID_LOOP_MS, wavelength)
+    seaHeight(x, y, (k / samples) * WORKING_GRID_LOOP_MS, sweep)
   );
 }

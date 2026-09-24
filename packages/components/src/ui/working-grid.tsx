@@ -6,7 +6,7 @@ import {
   seaHeightsOverLoop,
   tileSeaPoint,
   WORKING_GRID_LOOP_MS,
-  WORKING_GRID_WAVELENGTH,
+  WORKING_GRID_SWEEP,
 } from './working-grid-sea';
 
 /** How tile brightness follows the sea: fully, slightly, or not at all. */
@@ -33,8 +33,11 @@ export type WorkingGridProps = Omit<ComponentPropsWithoutRef<'span'>, 'children'
   minScale?: number;
   /** Gap between tiles as a fraction of the tile edge. */
   gap?: number;
-  /** Multiplier on the ripple wavelengths: the size of the texture inside a mark. */
-  wavelength?: number;
+  /**
+   * Strength of the occasional bands that sweep across all marks (0 = tiles only
+   * bob on their own).
+   */
+  sweep?: number;
   /**
    * Row pitch of the surrounding list, px. Stitches the sea across rows so a
    * crest passes continuously from one row's mark to the next. `null` samples
@@ -50,8 +53,8 @@ const BRIGHTNESS_FLOOR: Record<WorkingGridBrightness, number> = {
   steady: 1,
 };
 const STEADY_OPACITY = 0.82;
-// 10 samples a second: the fastest ripple (1.8s) gets 18 per cycle, so linear
-// interpolation between keyframes stays visually a sine.
+// 10 samples a second: the fastest bob (1.8s) gets 18 per cycle, so linear
+// interpolation between keyframes stays visually smooth.
 const SAMPLES = WORKING_GRID_LOOP_MS / 100;
 
 const lerp = (from: number, to: number, k: number) => from + (to - from) * k;
@@ -93,9 +96,9 @@ function scrollOffset(el: Element): [number, number] {
 
 /**
  * "Working" mark: a 3×3 grid of tiles rising and sinking with one sea shared by
- * the whole page. Short ripples make the nine tiles of a mark differ and share one
- * turning heading across every mark; long swells lift whole marks in turn, so the
- * list reads as one rhythm.
+ * the whole page. Each tile bobs on its own, so a single tile looks random; now
+ * and then a band sweeps across every mark on the page, so a column of marks
+ * reads as one rhythm when seen together.
  *
  * Colour comes from `currentColor`; pass a text colour class.
  *
@@ -115,7 +118,7 @@ export function WorkingGrid({
   maxScale = 0.8,
   minScale = 0.3,
   gap = 0.35,
-  wavelength = WORKING_GRID_WAVELENGTH,
+  sweep = WORKING_GRID_SWEEP,
   rowPitch = 28,
   className,
   style,
@@ -144,7 +147,7 @@ export function WorkingGrid({
       if (!(face instanceof HTMLElement)) continue;
       const [x, y] = tileSeaPoint(placement, Number(outer.dataset.col), Number(outer.dataset.row));
       const keyframes = tileKeyframes(
-        seaHeightsOverLoop(x, y, wavelength, SAMPLES),
+        seaHeightsOverLoop(x, y, sweep, SAMPLES),
         scale,
         brightness,
         minScale,
@@ -159,7 +162,7 @@ export function WorkingGrid({
       animations.push(animation);
     }
     return () => animations.forEach((animation) => animation.cancel());
-  }, [size, brightness, scale, minScale, maxScale, gap, wavelength, rowPitch]);
+  }, [size, brightness, scale, minScale, maxScale, gap, sweep, rowPitch]);
 
   const shape: CSSProperties =
     superellipse != null
