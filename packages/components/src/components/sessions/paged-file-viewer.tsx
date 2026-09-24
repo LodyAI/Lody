@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { VList } from 'virtua';
+import { VList } from '@lody/virtua';
 import type { PagedFileSource } from '@/lib/paged-file-source';
 import { Input } from '@/ui/input';
 import { Button } from '@/ui/button';

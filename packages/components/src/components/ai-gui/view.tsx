@@ -49,7 +49,7 @@ import { usePostHog } from '@posthog/react';
 import { capturePostHogEvent, getAnalyticsFileKind } from '@/lib/posthog-analytics';
 import { getRpcDeliveredTurnKey, rpcDeliveredTurnsAtom } from '@/atoms/session-dispatch-delivery';
 import { selectAtom } from 'jotai/utils';
-import { Virtualizer, type VirtualizerHandle, type CustomItemComponentProps } from 'virtua';
+import { Virtualizer, type VirtualizerHandle, type CustomItemComponentProps } from '@lody/virtua';
 import {
   type AgentConfigCliType,
   type ChatFailedCode,
@@ -478,6 +478,10 @@ const NativeSelectionRowsContext = createContext<{
   leading: number;
   held: ReadonlySet<string>;
 }>({ rows: [], leading: 0, held: new Set() });
+// Keys of the two Virtua rows that are not conversation rows (`keyed` needs one per row).
+const LEADING_ROW_KEY = '\u0000leading';
+const AGENT_ACTIVITY_ROW_KEY = '\u0000agent-activity';
+
 function ConversationVirtualRow({ index, ...props }: CustomItemComponentProps) {
   const { rows, leading, held } = useContext(NativeSelectionRowsContext);
   const row = rows[index - leading];
@@ -1338,11 +1342,11 @@ export const buildChatVirtualRows = ({
 };
 
 /**
- * Chat virtual scroll using Virtua library.
+ * Chat virtual scroll using the keyed Virtua fork (`@lody/virtua`).
  *
- * IMPORTANT: Do NOT dynamically toggle Virtua's `shift` prop — it causes
- * element overlap bugs (Virtua bug #284). We use shift={false} since chat
- * messages are appended to the end.
+ * Rows are keyed (`keyed`), not `shift`ed: sizes follow row keys, and rows
+ * inserted anywhere above the viewport (placeholder turns hydrating) keep the
+ * row at the viewport start in place.
  *
  * Sticky-to-bottom behavior (ResizeObserver, hysteresis, scroll position
  * caching) is encapsulated in the `useStickyScroll` hook.
@@ -2135,7 +2139,10 @@ export const SessionChatStreamView = forwardRef<
                   // the first layout is the real one instead of an estimate that
                   // has to be corrected before the conversation can be shown.
                   cache={initialVirtualizerCache}
-                  shift={false}
+                  // Rows are identified by key: sizes follow their rows, and a
+                  // placeholder turn becoming several rows above the reader
+                  // leaves what they are reading in place.
+                  keyed
                   onScroll={handleStreamScroll}
                   onScrollEnd={handleStreamScrollEnd}
                   // Pre-render extra items outside the viewport to reduce blank areas
@@ -2148,7 +2155,9 @@ export const SessionChatStreamView = forwardRef<
                   keepMounted={nativeTextSelection.keepMounted}
                 >
                   {leadingContent == null ? null : (
-                    <div data-conversation-leading-content="">{leadingContent}</div>
+                    <div key={LEADING_ROW_KEY} data-conversation-leading-content="">
+                      {leadingContent}
+                    </div>
                   )}
                   {virtualRows.map((row, rowIndex) => {
                     if (row.type === 'placeholder') {
@@ -2220,7 +2229,11 @@ export const SessionChatStreamView = forwardRef<
                     );
                   })}
                   {shouldShowAgentActivityRow && agentActivityLabel && (
-                    <div className="shrink-0 pt-1" data-agent-activity-row-spacer="">
+                    <div
+                      key={AGENT_ACTIVITY_ROW_KEY}
+                      className="shrink-0 pt-1"
+                      data-agent-activity-row-spacer=""
+                    >
                       <AgentActivityRow
                         label={agentActivityLabel}
                         tone={agentActivityTone}

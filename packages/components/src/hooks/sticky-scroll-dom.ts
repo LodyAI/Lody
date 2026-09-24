@@ -127,7 +127,10 @@ export function getContentExtentInScroll(
  * Whether an upward wheel over `target` scrolls some element nested inside the
  * viewport (a code block, a terminal) rather than the viewport itself.
  */
-export function wheelUpScrollsNestedElement(target: EventTarget | null, viewport: Element): boolean {
+export function wheelUpScrollsNestedElement(
+  target: EventTarget | null,
+  viewport: Element
+): boolean {
   let element = target instanceof Element ? target : null;
   while (element && element !== viewport) {
     if (element instanceof HTMLElement && element.scrollTop > 0) {

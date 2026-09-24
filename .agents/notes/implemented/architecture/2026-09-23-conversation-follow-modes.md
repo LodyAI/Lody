@@ -84,17 +84,46 @@ viewport height changes, removing one way the pane could stay hidden.
 
 ## Reading position while rows change above
 
+Later on 2026-09-24 the hook-level anchor and the Virtua patch below were replaced by a
+keyed Virtua fork: [Fork Virtua with keyed rows](2026-09-24-virtua-keyed-fork.md).
+
 Measured on 2026-09-24 with a per-frame recorder (row screen positions, every programmatic
 `scrollTop` write with its caller, row resizes) driven by real wheel input.
 
 - **Near the bottom on `main`**: each small scroll up and back re-locked
   `use-stick-to-bottom` (70px tolerance) and jumped 67px in one frame to the end. The
   follow modes above do not write at all in the same scenario.
+- **Scrolling up through a long conversation** (100 rows): the largest jumps (314px,
+  902px) were not measurement corrections but placeholder turns above the viewport
+  becoming several rows. With `shift={false}` and index-keyed sizes, Virtua keeps pixel
+  offsets, so the rows under the reader change. A free reader's row is now captured by
+  key (the row under the viewport's middle and its distance from the top) on every scroll
+  and own write, and when the row list changes the hook puts that row back in the same
+  commit, before paint, dispatching a scroll event so Virtua renders the new range in that
+  frame. Total visible jump over the same scroll fell from 1,370px to 344-479px.
+- **Rejected**: native scroll anchoring (`overflow-anchor`) has no effect on Virtua's
+  absolutely positioned rows (identical results on and off with Virtua's compensation
+  disabled). Patching Virtua to compensate rows wholly above the viewport's middle removed
+  a 30px jump in a synthetic harness but would move a group's header when it is expanded
+  in the top half, contradicting "group toggles never scroll"; the reverted patch was not
+  shipped. A continuous second writer (correcting drift on every geometry change) was
+  rejected because a programmatic jump whose scroll event has not arrived would be undone.
 - **Image rows**: a Markdown image without known dimensions renders at 0px until it
   loads, and Virtua remounts rows outside its overscan, so each return grew the row again
   (agent-local paths such as `/tmp/x.png` fail on every mount: 0px, then the 25px alt
   line). Images now remember each source's natural size (reserved through `width`/`height`
   on the next mount) or failure (rendered as alt text).
+- **Virtua bug, patched** (`patches/virtua@0.49.1.patch`): Virtua writes a size
+  compensation as `scrollTop = lastScrollEventOffset + jump`. Two compensations flushed in
+  one frame (ResizeObserver delivers a second round after the first changes layout) both
+  start from the same stale offset, so the second erased the first: an 88px compensation
+  followed by a 1px one left the content 88px off. The patch adds a compensation to the
+  previous one while the base offset and our last written position are unchanged; any
+  real scroll resets it. Worth reporting upstream.
+- **Result** (same 100-row conversation, same input): total visible jump 1,370px → 294-318px,
+  largest 902px → 128px. Remaining: visible text rows whose first measurement differs by
+  one line (20-24px), and newly inserted rows measured while inside the viewport (their
+  sizes are unknown at insertion).
 
 ## Verification and limits
 

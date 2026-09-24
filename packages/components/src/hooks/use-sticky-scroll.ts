@@ -7,7 +7,7 @@ import {
   useRef,
   useState,
 } from 'react';
-import type { CacheSnapshot, VirtualizerHandle } from 'virtua';
+import type { CacheSnapshot, VirtualizerHandle } from '@lody/virtua';
 import type { SessionId } from '@lody/shared';
 import { describeViewport, isScrollDebugEnabled, scrollDebug } from './scroll-debug-log';
 import {
@@ -173,10 +173,9 @@ export function useStickyScroll({
    * across the correction — the blank flash on open.
    *
    * Taken on the first render that actually mounts the virtualizer, because
-   * `Virtualizer` reads `cache` only at mount and the snapshot is keyed by row
-   * count. Reading it during the empty state a session renders while its
-   * document is acquired would answer for a one-row list and then never ask
-   * again for the real conversation.
+   * `Virtualizer` reads `cache` only at mount. Reading it during the empty
+   * state a session renders while its document is acquired would hand an
+   * unkeyed caller a one-row answer and then never ask again.
    */
   const initialVirtualizerCacheRef = useRef<{ taken: boolean; value?: CacheSnapshot }>({
     taken: false,

@@ -6,7 +6,7 @@ import React, { act, useEffect, useLayoutEffect, useRef } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SessionId } from '@lody/shared';
-import type { CacheSnapshot, VirtualizerHandle } from 'virtua';
+import type { CacheSnapshot, VirtualizerHandle } from '@lody/virtua';
 import {
   clearAllScrollPositions,
   getScrollPosition,
