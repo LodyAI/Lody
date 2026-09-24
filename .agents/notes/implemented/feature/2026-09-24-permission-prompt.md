@@ -1,0 +1,89 @@
+# A permission request is one prompt in the composer's place
+
+Status: implemented
+Translation: pending
+
+PR: https://github.com/LodyAI/Lody/pull/923
+
+## Abstract
+
+The permission UI asked every request the same way: a gray "Permission
+Required", the tool title in small type, and the options as identical dotted
+rows, so `rm -rf` read like "Read file". It showed each pending request twice —
+inline in the tool card and in the floating card — with both live, and it had no
+keyboard path, no focus handling, and no visible failure. The owner asked for a
+zero-based redesign from the user's side. A request is now one prompt in the
+composer's place: the provider's own heading and reason, exactly what would run
+or touch, and the provider's own answers, one request at a time. Contract:
+[answering a permission request](../../../../specs/permission-requests.md).
+
+## What the survey found
+
+- Claude and Codex send a heading ("Run command?", "Ready to code?", "Make
+  edits?") and a reason in `_meta.permission`, stored in history and never read.
+  Claude marks risky calls `defaultToNo`; Codex puts option descriptions in the
+  option `_meta.permission.description`.
+- Option names are long and specific ("Yes, and don't ask again for `pnpm
+install` commands", "No, and block this host in the future"). Kinds are ACP's
+  four plus Lody's `deny`.
+- `rawInput` is not stored, and edit requests lose their `diff` blocks before
+  storage (`acp/tool-call-history.ts`). Execute and search keep a
+  `terminal_command` block; file kinds keep `locations`.
+- Several requests can be pending (a set per session in the CLI); the composer
+  and queue are hidden while any is pending, which also hid Stop.
+- Answer failures only reached `console.error`.
+
+## Decision
+
+- **One live surface.** `FloatingPermissionRequest` is the only place a request
+  is answered. `PermissionRequestBlock` in the conversation renders a one-line
+  "Waiting for your answer" while pending (the share page keeps "Waiting for the
+  author"), and the settled one-line record afterwards. The old
+  `PermissionRequestCard` and its collapsible plan-approval variant are gone.
+- **`PermissionPrompt`**, presentational, shared with the onboarding tour: heading
+  (provider's, else a question from the tool kind), reason, subject (command with
+  directory, paths, or title; none for a plan), and the options as full-width
+  rows marked by kind (✓ once, ✓✓ always, ✕ refuse, ⊘ always refuse).
+- **Keyboard without accidents.** Arrows walk from the suggested answer; Enter or
+  Space answers the focused row; Escape refuses once. Enter on the prompt itself
+  does nothing: the prompt replaces the composer, and an Enter meant for a
+  message must not approve anything. Digit shortcuts were left out for the same
+  reason — a person mid-sentence types digits.
+- **The suggestion is never "always".** Widening what the agent may do from now
+  on is a deliberate choice, not a default; `defaultToNo` moves the suggestion to
+  the refusal.
+- **One at a time**, with "n of m" and previous/next; answering brings up the
+  next. **Stop** is in the prompt. A failed answer shows an alert and the prompt
+  stays answerable.
+- Presentation logic lives in `lib/permission-request-presentation.ts`.
+
+## Alternatives not taken
+
+- **Buttons in a row** (Allow / Always / Deny). Provider names are sentences; a
+  button row truncates exactly the words that say what "always" covers.
+- **Enter approves the suggestion immediately**, as terminal agents do. In a
+  terminal the prompt appears where you are already answering; here it replaces
+  a text field the person may be typing in.
+- **Keeping the composer with "reply instead"**. Sending a message while a
+  request is pending queues behind the blocked turn; there is no free-text
+  answer to a permission in ACP. Refusing (and Codex's "tell Codex what to do
+  differently") ends the wait, and the composer returns.
+
+## Follow-ups found, not done here
+
+- Store edit diffs (bounded) so the prompt can show the change, not just paths.
+- The iOS Live Activity picks `allow_always` when present
+  (`live-activity-permission-action.ts`), against this design's rule.
+- Lody's Grok "Always Approve" auto-answer does not skip `switch_mode`, though
+  the Grok README says plan decisions stay interactive
+  (`apps/cli/src/agent/lody-acp-extension.ts`).
+- The 20-minute timeout is invisible until the request is withdrawn.
+
+## Verification
+
+- `tests/permission-prompt.test.tsx` (12 tests): provider heading and subject,
+  kind fallback, Escape refuses once and never permanently, Enter on the prompt
+  answers nothing, arrows land on the suggestion, `defaultToNo`, focus is not
+  taken from a focused field, sending disables every answer, failure is shown.
+- Components typecheck. Not verified visually, at the owner's request; the
+  `Sessions/PermissionPrompt` stories cover each provider's real option set.

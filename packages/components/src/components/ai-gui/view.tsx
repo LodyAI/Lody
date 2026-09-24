@@ -79,7 +79,6 @@ import {
   SESSION_FILE_MAX_COUNT,
 } from '@lody/shared';
 import { AskUserQuestionCard } from '@/components/sessions/ask-user-question-card';
-import { PermissionRequestCard } from '@/components/sessions/floating-permission-request';
 import { CommentReferenceCard } from './comment-reference-card';
 import { VisualAnnotationReferenceCard } from './visual-annotation-reference-card';
 import { currentWorkspaceIdAtom } from '@/atoms';
@@ -119,6 +118,7 @@ import {
   Copy,
   FileText,
   Globe,
+  Hand,
   Info,
   ListChecks,
   Loader2,
@@ -222,7 +222,6 @@ import { useTranslation } from 'react-i18next';
 import { toast } from '@/lib/toast';
 import { SessionPlanBar } from '@/components/sessions/session-plan-bar';
 import { ContainerQueryProvider } from './container-query-provider';
-import { usePermissionResponse } from '@/hooks/use-permission-response';
 import { shouldRenderSystemRowItem } from './message-content-guards';
 import { getChatFailedDiagnosticCopy } from './chat-failed-diagnostic-copy';
 import { extractReadableChatFailedMessage } from './chat-failed-error-report';
@@ -2694,7 +2693,10 @@ const SystemNoticeView = ({
       <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-muted/50 border border-border/60">
         <Tooltip.Provider>
           <Tooltip.Root>
-            <Tooltip.Trigger delay={500} render={<Info className="h-4 w-4 text-muted-foreground cursor-help" />}/>
+            <Tooltip.Trigger
+              delay={500}
+              render={<Info className="h-4 w-4 text-muted-foreground cursor-help" />}
+            />
             <Tooltip.Content side="top" className="max-w-xs text-center">
               <p>{tooltipContent}</p>
               {meta?.terminalOmitted && (
@@ -3402,23 +3404,28 @@ const UserMessageRowView = ({
             {onEdit ? (
               <Tooltip.Provider>
                 <Tooltip.Root>
-                  <Tooltip.Trigger delay={500} render={<Button
-                      type="button"
-                      variant="ghost"
-                      icon
-                      className={cn(
-                        'h-7 w-7 text-muted-foreground hover:bg-hover hover:text-foreground transition-opacity',
-                        !isMobile &&
-                          'opacity-0 group-hover/usermsg:opacity-100 focus-visible:opacity-100'
-                      )}
-                      onClick={() => {
-                        setEditText(getTextContentFromMessageItems(message.items));
-                        setIsEditing(true);
-                      }}
-                      aria-label={t('sessions.editMessage', 'Edit message')}
-                    >
-                      <PencilLine className="h-3.5 w-3.5" />
-                    </Button>}/>
+                  <Tooltip.Trigger
+                    delay={500}
+                    render={
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        icon
+                        className={cn(
+                          'h-7 w-7 text-muted-foreground hover:bg-hover hover:text-foreground transition-opacity',
+                          !isMobile &&
+                            'opacity-0 group-hover/usermsg:opacity-100 focus-visible:opacity-100'
+                        )}
+                        onClick={() => {
+                          setEditText(getTextContentFromMessageItems(message.items));
+                          setIsEditing(true);
+                        }}
+                        aria-label={t('sessions.editMessage', 'Edit message')}
+                      >
+                        <PencilLine className="h-3.5 w-3.5" />
+                      </Button>
+                    }
+                  />
                   <Tooltip.Content>{t('sessions.editMessage', 'Edit message')}</Tooltip.Content>
                 </Tooltip.Root>
               </Tooltip.Provider>
@@ -3426,28 +3433,33 @@ const UserMessageRowView = ({
             {pinCtx ? (
               <Tooltip.Provider>
                 <Tooltip.Root>
-                  <Tooltip.Trigger delay={500} render={<Button
-                      type="button"
-                      variant="ghost"
-                      icon
-                      className={cn(
-                        'h-7 w-7 text-muted-foreground hover:bg-hover hover:text-foreground transition-opacity',
-                        !isMobile &&
-                          'opacity-0 group-hover/usermsg:opacity-100 focus-visible:opacity-100'
-                      )}
-                      onClick={handlePin}
-                      aria-label={
-                        isPinned
-                          ? t('sessions.pin.unpin', 'Unpin message')
-                          : t('sessions.pin.pin', 'Pin this message')
-                      }
-                    >
-                      {isPinned ? (
-                        <PinOff className="h-3.5 w-3.5" />
-                      ) : (
-                        <Pin className="h-3.5 w-3.5" />
-                      )}
-                    </Button>}/>
+                  <Tooltip.Trigger
+                    delay={500}
+                    render={
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        icon
+                        className={cn(
+                          'h-7 w-7 text-muted-foreground hover:bg-hover hover:text-foreground transition-opacity',
+                          !isMobile &&
+                            'opacity-0 group-hover/usermsg:opacity-100 focus-visible:opacity-100'
+                        )}
+                        onClick={handlePin}
+                        aria-label={
+                          isPinned
+                            ? t('sessions.pin.unpin', 'Unpin message')
+                            : t('sessions.pin.pin', 'Pin this message')
+                        }
+                      >
+                        {isPinned ? (
+                          <PinOff className="h-3.5 w-3.5" />
+                        ) : (
+                          <Pin className="h-3.5 w-3.5" />
+                        )}
+                      </Button>
+                    }
+                  />
                   <Tooltip.Content>
                     {isPinned
                       ? t('sessions.pin.unpin', 'Unpin message')
@@ -3458,22 +3470,31 @@ const UserMessageRowView = ({
             ) : null}
             <Tooltip.Provider>
               <Tooltip.Root>
-                <Tooltip.Trigger delay={500} render={<Button
-                    type="button"
-                    variant="ghost"
-                    icon
-                    className={cn(
-                      'h-7 w-7 text-muted-foreground hover:bg-hover hover:text-foreground transition-opacity',
-                      !isMobile &&
-                        'opacity-0 group-hover/usermsg:opacity-100 focus-visible:opacity-100'
-                    )}
-                    onClick={() => {
-                      void handleCopy();
-                    }}
-                    aria-label="Copy message"
-                  >
-                    {didCopy ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-                  </Button>}/>
+                <Tooltip.Trigger
+                  delay={500}
+                  render={
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      icon
+                      className={cn(
+                        'h-7 w-7 text-muted-foreground hover:bg-hover hover:text-foreground transition-opacity',
+                        !isMobile &&
+                          'opacity-0 group-hover/usermsg:opacity-100 focus-visible:opacity-100'
+                      )}
+                      onClick={() => {
+                        void handleCopy();
+                      }}
+                      aria-label="Copy message"
+                    >
+                      {didCopy ? (
+                        <Check className="h-3.5 w-3.5" />
+                      ) : (
+                        <Copy className="h-3.5 w-3.5" />
+                      )}
+                    </Button>
+                  }
+                />
                 <Tooltip.Content>{didCopy ? 'Copied' : 'Copy message'}</Tooltip.Content>
               </Tooltip.Root>
             </Tooltip.Provider>
@@ -3516,15 +3537,19 @@ function UserMessageAuthorAvatar({
 
   return (
     <Popover.Root>
-      <Popover.Trigger render={<button
-          type="button"
-          className="block rounded-full outline-hidden ring-offset-background transition-opacity hover:opacity-85 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-          aria-label={t('sessions.openSenderProfile', 'View profile for {{name}}', {
-            name: displayName,
-          })}
-        >
-          {avatar}
-        </button>}/>
+      <Popover.Trigger
+        render={
+          <button
+            type="button"
+            className="block rounded-full outline-hidden ring-offset-background transition-opacity hover:opacity-85 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+            aria-label={t('sessions.openSenderProfile', 'View profile for {{name}}', {
+              name: displayName,
+            })}
+          >
+            {avatar}
+          </button>
+        }
+      />
       <Popover.Content
         side="left"
         align="start"
@@ -3657,22 +3682,30 @@ const AssistantTurnConfigInfoButton = ({
     <Popover.Root open={configOpen} onOpenChange={setConfigOpen}>
       <Tooltip.Provider>
         <Tooltip.Root>
-          <Tooltip.Trigger render={<Popover.Trigger render={<button
-                type="button"
-                className={cn(
-                  'inline-flex shrink-0 items-center justify-center rounded-sm',
-                  /* Rest tone matches every other icon in the turn; hover is
+          <Tooltip.Trigger
+            render={
+              <Popover.Trigger
+                render={
+                  <button
+                    type="button"
+                    className={cn(
+                      'inline-flex shrink-0 items-center justify-center rounded-sm',
+                      /* Rest tone matches every other icon in the turn; hover is
                      what brightens. */
-                  'text-muted-foreground transition-colors',
-                  'hover:bg-hover/50 hover:text-foreground',
-                  'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
-                  className
-                )}
-                aria-label={t('sessions.turnConfig.open', 'Turn configuration')}
-                aria-expanded={configOpen}
-              >
-                <Info className={cn('h-3.5 w-3.5', iconClassName)} strokeWidth={2} />
-              </button>}/>}/>
+                      'text-muted-foreground transition-colors',
+                      'hover:bg-hover/50 hover:text-foreground',
+                      'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
+                      className
+                    )}
+                    aria-label={t('sessions.turnConfig.open', 'Turn configuration')}
+                    aria-expanded={configOpen}
+                  >
+                    <Info className={cn('h-3.5 w-3.5', iconClassName)} strokeWidth={2} />
+                  </button>
+                }
+              />
+            }
+          />
           {!configOpen ? (
             <Tooltip.Content side="top" className="max-w-xs">
               {tooltipPreview}
@@ -3960,13 +3993,11 @@ function ActivityProcessStep({
 
 const AssistantToolCallVirtualRow = memo(
   function AssistantToolCallVirtualRow({
-    sessionId,
     messageId,
     entry,
     onFilePathClick,
     fontSize,
   }: {
-    sessionId: SessionId;
     messageId: string;
     entry: AssistantToolCallRenderItem;
     onFilePathClick?: (filePath: string) => void;
@@ -3991,7 +4022,6 @@ const AssistantToolCallVirtualRow = memo(
 
     return (
       <ToolCallCard
-        sessionId={sessionId}
         toolCall={entry.content}
         expanded={expanded}
         onExpandedChange={setExpanded}
@@ -4007,7 +4037,6 @@ const AssistantToolCallVirtualRow = memo(
   // unchanged sub-trees. Comparing it keeps completed tool calls (and their
   // terminal-preview scans) out of the per-token render path.
   (prev, next) =>
-    prev.sessionId === next.sessionId &&
     prev.messageId === next.messageId &&
     prev.entry.content === next.entry.content &&
     prev.entry.itemIndex === next.entry.itemIndex &&
@@ -4420,16 +4449,21 @@ export const AssistantTurnFooter = ({
               {showStreamingContextCopy ? (
                 <Tooltip.Provider>
                   <Tooltip.Root>
-                    <Tooltip.Trigger delay={500} render={<Button
-                        type="button"
-                        variant="ghost"
-                        icon
-                        className="h-7 w-7 text-muted-foreground hover:bg-hover hover:text-foreground"
-                        onClick={() => copyContext?.(message.id)}
-                        aria-label={t('sessions.copyContextMarkdown', 'Copy context as Markdown')}
-                      >
-                        <Copy className="h-3.5 w-3.5" />
-                      </Button>}/>
+                    <Tooltip.Trigger
+                      delay={500}
+                      render={
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          icon
+                          className="h-7 w-7 text-muted-foreground hover:bg-hover hover:text-foreground"
+                          onClick={() => copyContext?.(message.id)}
+                          aria-label={t('sessions.copyContextMarkdown', 'Copy context as Markdown')}
+                        >
+                          <Copy className="h-3.5 w-3.5" />
+                        </Button>
+                      }
+                    />
                     <Tooltip.Content>
                       {t('sessions.copyContextMarkdown', 'Copy context as Markdown')}
                     </Tooltip.Content>
@@ -4438,22 +4472,27 @@ export const AssistantTurnFooter = ({
               ) : showFinishedMetadata && hasCopyableText ? (
                 <Tooltip.Provider>
                   <Tooltip.Root>
-                    <Tooltip.Trigger delay={500} render={<Button
-                        type="button"
-                        variant="ghost"
-                        icon
-                        className="h-7 w-7 text-muted-foreground hover:bg-hover hover:text-foreground"
-                        onClick={() => {
-                          void handleCopy();
-                        }}
-                        aria-label={t('sessions.copyResponse', 'Copy response')}
-                      >
-                        {didCopy ? (
-                          <Check className="h-3.5 w-3.5" />
-                        ) : (
-                          <Copy className="h-3.5 w-3.5" />
-                        )}
-                      </Button>}/>
+                    <Tooltip.Trigger
+                      delay={500}
+                      render={
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          icon
+                          className="h-7 w-7 text-muted-foreground hover:bg-hover hover:text-foreground"
+                          onClick={() => {
+                            void handleCopy();
+                          }}
+                          aria-label={t('sessions.copyResponse', 'Copy response')}
+                        >
+                          {didCopy ? (
+                            <Check className="h-3.5 w-3.5" />
+                          ) : (
+                            <Copy className="h-3.5 w-3.5" />
+                          )}
+                        </Button>
+                      }
+                    />
                     <Tooltip.Content>
                       {didCopy
                         ? t('common.copied', 'Copied')
@@ -4742,7 +4781,6 @@ const AssistantChatItem = memo(function AssistantChatItem({
            hierarchy — see `cardSiblingGap` above and `ai-gui/AGENTS.md`. */
         return isAssistantToolCallActivityEntry(entry) ? (
           <AssistantToolCallVirtualRow
-            sessionId={row.item.sessionId}
             messageId={message.id}
             entry={entry}
             onFilePathClick={onFilePathClick}
@@ -5160,7 +5198,6 @@ const renderAssistantContent = (
          What is left is the decision. */
       return content.kind === 'switch_mode' ? (
         <PlanExitBlock
-          sessionId={sessionId}
           toolCall={content}
           onFilePathClick={options?.onFilePathClick}
           fontSize={conversationFontSize}
@@ -5171,7 +5208,6 @@ const renderAssistantContent = (
         />
       ) : (
         <ToolCallCard
-          sessionId={sessionId}
           toolCall={content}
           onFilePathClick={options?.onFilePathClick}
           fontSize={conversationFontSize}
@@ -5856,13 +5892,7 @@ const renderUserContent = (
     case 'goal':
       return <GoalBlock goal={content} />;
     case 'tool_call':
-      return (
-        <ToolCallCard
-          sessionId={sessionId}
-          toolCall={content}
-          fontSize={options.conversationFontSize}
-        />
-      );
+      return <ToolCallCard toolCall={content} fontSize={options.conversationFontSize} />;
     case 'comment_reference':
       return (
         <div className="flex w-full justify-end px-2 pt-1">
@@ -6295,18 +6325,23 @@ const PlanPanel = ({
         </button>
         <Tooltip.Provider>
           <Tooltip.Root>
-            <Tooltip.Trigger delay={500} render={<Button
-                type="button"
-                variant="ghost"
-                icon
-                className="-mr-1 h-6 w-6 shrink-0 text-muted-foreground hover:bg-hover hover:text-foreground"
-                onClick={() => {
-                  void handleCopy();
-                }}
-                aria-label="Copy plan"
-              >
-                {didCopy ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-              </Button>}/>
+            <Tooltip.Trigger
+              delay={500}
+              render={
+                <Button
+                  type="button"
+                  variant="ghost"
+                  icon
+                  className="-mr-1 h-6 w-6 shrink-0 text-muted-foreground hover:bg-hover hover:text-foreground"
+                  onClick={() => {
+                    void handleCopy();
+                  }}
+                  aria-label="Copy plan"
+                >
+                  {didCopy ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+                </Button>
+              }
+            />
             <Tooltip.Content>{didCopy ? 'Copied' : 'Copy plan'}</Tooltip.Content>
           </Tooltip.Root>
         </Tooltip.Provider>
@@ -6455,7 +6490,6 @@ const PlanEntryRow = ({
 // items, so a shallow compare skips completed tool calls entirely.
 const ToolCallCard = memo(function ToolCallCard({
   toolCall,
-  sessionId,
   fontSize,
   expanded,
   onExpandedChange,
@@ -6463,7 +6497,6 @@ const ToolCallCard = memo(function ToolCallCard({
   inlineOutput = false,
 }: {
   toolCall: ToolCallMessage;
-  sessionId: SessionId;
   fontSize: ConversationFontSize;
   expanded?: boolean;
   onExpandedChange?: (expanded: boolean) => void;
@@ -6757,36 +6790,40 @@ const ToolCallCard = memo(function ToolCallCard({
               </span>
               <Tooltip.Provider>
                 <Tooltip.Root>
-                  <Tooltip.Trigger render={<span
-                      role={isFilePathClickable ? 'button' : undefined}
-                      tabIndex={isFilePathClickable ? 0 : undefined}
-                      onClick={isFilePathClickable ? handleFilePathClick : undefined}
-                      onKeyDown={isFilePathClickable ? handleFilePathKeyDown : undefined}
-                      className={cn(
-                        isActivityRow
-                          ? cn(
-                              'inline-flex min-w-0 max-w-[min(100%,20rem)] shrink items-center truncate font-mono',
-                              ACTIVITY_PROCESS_TEXT_CLASS
-                            )
-                          : 'inline-flex min-w-0 max-w-[240px] shrink items-center gap-1 rounded-md border border-border/60 px-2 py-0.5 text-[11px]',
-                        isFilePathClickable ? 'cursor-pointer hover:bg-hover/60' : ''
-                      )}
-                    >
-                      {normalizedFilePath && !isActivityRow ? (
-                        <FileIcon
-                          filePath={normalizedFilePath}
-                          className="h-3.5 w-3.5 shrink-0 grayscale"
-                        />
-                      ) : null}
+                  <Tooltip.Trigger
+                    render={
                       <span
+                        role={isFilePathClickable ? 'button' : undefined}
+                        tabIndex={isFilePathClickable ? 0 : undefined}
+                        onClick={isFilePathClickable ? handleFilePathClick : undefined}
+                        onKeyDown={isFilePathClickable ? handleFilePathKeyDown : undefined}
                         className={cn(
-                          'min-w-0 truncate whitespace-nowrap font-mono',
-                          isActivityRow ? ACTIVITY_PROCESS_TEXT_CLASS : 'text-xs'
+                          isActivityRow
+                            ? cn(
+                                'inline-flex min-w-0 max-w-[min(100%,20rem)] shrink items-center truncate font-mono',
+                                ACTIVITY_PROCESS_TEXT_CLASS
+                              )
+                            : 'inline-flex min-w-0 max-w-[240px] shrink items-center gap-1 rounded-md border border-border/60 px-2 py-0.5 text-[11px]',
+                          isFilePathClickable ? 'cursor-pointer hover:bg-hover/60' : ''
                         )}
                       >
-                        {fileName}
+                        {normalizedFilePath && !isActivityRow ? (
+                          <FileIcon
+                            filePath={normalizedFilePath}
+                            className="h-3.5 w-3.5 shrink-0 grayscale"
+                          />
+                        ) : null}
+                        <span
+                          className={cn(
+                            'min-w-0 truncate whitespace-nowrap font-mono',
+                            isActivityRow ? ACTIVITY_PROCESS_TEXT_CLASS : 'text-xs'
+                          )}
+                        >
+                          {fileName}
+                        </span>
                       </span>
-                    </span>}/>
+                    }
+                  />
                   {normalizedFilePath ? (
                     <Tooltip.Content>{normalizedFilePath}</Tooltip.Content>
                   ) : null}
@@ -6843,7 +6880,7 @@ const ToolCallCard = memo(function ToolCallCard({
 
           {hasContent ? <div className="space-y-2">{renderContentBlocks()}</div> : null}
 
-          {hasPermission && <PermissionRequestBlock sessionId={sessionId} toolCall={toolCall} />}
+          {hasPermission && <PermissionRequestBlock toolCall={toolCall} />}
         </Fragment>
       ) : null}
     </CollapsibleCard>
@@ -7110,7 +7147,6 @@ const StandardToolContentBlock = ({
  */
 const PlanExitBlock = ({
   toolCall,
-  sessionId,
   fontSize,
   onFilePathClick,
   messageId,
@@ -7119,7 +7155,6 @@ const PlanExitBlock = ({
   planRenderedSeparately = false,
 }: {
   toolCall: ToolCallMessage;
-  sessionId: SessionId;
   fontSize: ConversationFontSize;
   onFilePathClick?: (filePath: string) => void;
   messageId: string;
@@ -7145,26 +7180,21 @@ const PlanExitBlock = ({
           awaitingDecision={awaitingDecision}
         />
       ) : null}
-      <PermissionRequestBlock sessionId={sessionId} toolCall={toolCall} collapseByDefault />
+      <PermissionRequestBlock toolCall={toolCall} />
     </div>
   );
 };
 
-const PermissionRequestBlock = ({
-  toolCall,
-  sessionId,
-  collapseByDefault = false,
-}: {
-  toolCall: ToolCallMessage;
-  sessionId: SessionId;
-  /** Keep a duplicated in-conversation request compact when the composer owns the active action. */
-  collapseByDefault?: boolean;
-}) => {
+/**
+ * A permission request's place in the turn. While it is pending the answer is
+ * given in the prompt that stands in for the composer — the one live surface —
+ * so this line only says the turn is waiting there. Once answered it is the
+ * record: what was chosen, on one line.
+ */
+const PermissionRequestBlock = ({ toolCall }: { toolCall: ToolCallMessage }) => {
   const readonly = useContext(SessionReadonlyContext);
   const permission = toolCall.permissionRequest;
   const { t } = useTranslation();
-  const { respondToPermission, isReady } = usePermissionResponse();
-  const [pendingOptionId, setPendingOptionId] = useState<string | null>(null);
 
   const askQuestionMeta = useMemo(
     () => (permission ? parseAskUserQuestionPermissionMeta(permission._meta) : null),
@@ -7182,14 +7212,6 @@ const PermissionRequestBlock = ({
     return null;
   }
 
-  if (readonly && !permission.outcome) {
-    return (
-      <div className="text-sm text-muted-foreground">
-        {t('sharing.permissionPending', 'Waiting for the author')}
-      </div>
-    );
-  }
-
   if (askQuestionMeta && readonlyAnswers) {
     return (
       <AskUserQuestionCard
@@ -7199,10 +7221,6 @@ const PermissionRequestBlock = ({
     );
   }
 
-  const selectedOptionId =
-    permission.outcome?.outcome === 'selected' ? permission.outcome.optionId : undefined;
-  const isResolved = Boolean(permission.outcome);
-  const isCancelled = permission.outcome?.outcome === 'cancelled';
   const record = resolvePermissionRecord(permission);
 
   // `ToolCallCard` also drops the body for a withdrawn request, so this is the
@@ -7211,62 +7229,41 @@ const PermissionRequestBlock = ({
     return null;
   }
 
-  if (record.kind === 'settled') {
-    const label =
-      record.optionName ??
-      (record.allowed
-        ? t('sessions.permissionApproved', 'Permission Approved')
-        : t('sessions.permissionDenied', 'Permission Denied'));
-    const OutcomeIcon = record.allowed ? Check : X;
+  if (record.kind === 'pending') {
     return (
       <div
         className={cn('flex min-h-7 w-full items-start gap-1.5 py-1', ACTIVITY_PROCESS_TEXT_CLASS)}
       >
-        {/* Check vs cross already carries approved-vs-denied, so the icon keeps
-            the turn's one icon tone instead of introducing a hue no other icon
-            in the row has. */}
-        <OutcomeIcon className={ACTIVITY_STEP_ICON_CLASS} aria-hidden="true" />
-        {/* Truncated like every other process row: an `allow_always` name runs
-            to a full sentence, and the record must stay one line. */}
-        <span className="min-w-0 flex-1 truncate" title={label}>
-          {label}
+        <Hand className={cn(ACTIVITY_STEP_ICON_CLASS, 'text-status-warning')} aria-hidden="true" />
+        <span className="min-w-0 flex-1 truncate">
+          {readonly
+            ? t('sharing.permissionPending', 'Waiting for the author')
+            : t('sessions.permission.waitingInline', 'Waiting for your answer')}
         </span>
       </div>
     );
   }
 
-  const handleSelect = async (optionId: string) => {
-    if (isResolved || isCancelled || !isReady) {
-      return;
-    }
-    setPendingOptionId(optionId);
-    try {
-      await respondToPermission(sessionId, permission.requestId, {
-        outcome: 'selected',
-        optionId,
-      });
-    } catch (error) {
-      console.error('Failed to respond to permission request:', error);
-      setPendingOptionId(null);
-    }
-  };
-
+  const label =
+    record.optionName ??
+    (record.allowed
+      ? t('sessions.permissionApproved', 'Permission Approved')
+      : t('sessions.permissionDenied', 'Permission Denied'));
+  const OutcomeIcon = record.allowed ? Check : X;
   return (
-    <PermissionRequestCard
-      options={permission.options}
-      defaultCollapsed={collapseByDefault}
-      isResolved={isResolved}
-      isCancelled={isCancelled}
-      isReady={isReady}
-      pendingOptionId={pendingOptionId}
-      selectedOptionId={selectedOptionId}
-      /* On the rail with the rest of its tool call's body. A private `ml-4`
-         used to put it 16px right of its own siblings. */
-      className="w-full max-w-[43rem]"
-      onSelect={(optionId) => {
-        void handleSelect(optionId);
-      }}
-    />
+    <div
+      className={cn('flex min-h-7 w-full items-start gap-1.5 py-1', ACTIVITY_PROCESS_TEXT_CLASS)}
+    >
+      {/* Check vs cross already carries approved-vs-denied, so the icon keeps
+          the turn's one icon tone instead of introducing a hue no other icon
+          in the row has. */}
+      <OutcomeIcon className={ACTIVITY_STEP_ICON_CLASS} aria-hidden="true" />
+      {/* Truncated like every other process row: an `allow_always` name runs
+          to a full sentence, and the record must stay one line. */}
+      <span className="min-w-0 flex-1 truncate" title={label}>
+        {label}
+      </span>
+    </div>
   );
 };
 

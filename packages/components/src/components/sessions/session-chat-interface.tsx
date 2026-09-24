@@ -1120,14 +1120,18 @@ export function SessionHeaderMenu({
           if (open) onForkMenuOpen?.();
         }}
       >
-        <Menu.Trigger render={<Button
-            variant="ghost"
-            icon
-            className="h-7 w-7 shrink-0 text-muted-foreground"
-            aria-label={t('sessions.moreActions', 'More actions')}
-          >
-            <Ellipsis className="h-4 w-4" />
-          </Button>}>
+        <Menu.Trigger
+          render={
+            <Button
+              variant="ghost"
+              icon
+              className="h-7 w-7 shrink-0 text-muted-foreground"
+              aria-label={t('sessions.moreActions', 'More actions')}
+            >
+              <Ellipsis className="h-4 w-4" />
+            </Button>
+          }
+        >
           <Button
             variant="ghost"
             icon
@@ -1233,18 +1237,23 @@ export function SessionHeaderMenu({
 
               {sharing ? (
                 <Tooltip.Root>
-                  <Tooltip.Trigger delay={300} render={<div className={SESSION_HEADER_MENU_STATIC_ROW_CLASS}>
-                      {sharing.visibility === 'team' ? (
-                        <Users className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                      ) : sharing.visibility === 'private' ? (
-                        <LockKeyhole className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                      ) : (
-                        <Spinner className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                      )}
-                      <span className="min-w-0 flex-1 truncate font-normal">
-                        {getSessionSharingLabel(t, sharing)}
-                      </span>
-                    </div>}/>
+                  <Tooltip.Trigger
+                    delay={300}
+                    render={
+                      <div className={SESSION_HEADER_MENU_STATIC_ROW_CLASS}>
+                        {sharing.visibility === 'team' ? (
+                          <Users className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                        ) : sharing.visibility === 'private' ? (
+                          <LockKeyhole className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                        ) : (
+                          <Spinner className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                        )}
+                        <span className="min-w-0 flex-1 truncate font-normal">
+                          {getSessionSharingLabel(t, sharing)}
+                        </span>
+                      </div>
+                    }
+                  />
                   <Tooltip.Content side="left" className="max-w-64 px-2.5 py-2 text-xs">
                     {getSessionSharingDescription(t, sharing)}
                   </Tooltip.Content>
@@ -1620,7 +1629,7 @@ export function SessionSearchBar({
     if (!hasResults) return button;
     return (
       <Tooltip.Root>
-        <Tooltip.Trigger delay={400} render={button}/>
+        <Tooltip.Trigger delay={400} render={button} />
         <Tooltip.Content side="bottom" className="flex items-center gap-1.5 px-2 py-1 text-[11px]">
           <span>{label}</span>
           <span className="rounded-sm border border-border/70 bg-muted px-1 font-mono text-[10px] leading-none text-muted-foreground">
@@ -1701,16 +1710,21 @@ export function SessionSearchBar({
           )}
           {renderNavButton(ArrowDown, t('sessions.nextResult', 'Next result'), '↵', onNext)}
           <Tooltip.Root>
-            <Tooltip.Trigger delay={400} render={<Button
-                type="button"
-                variant="ghost"
-                icon
-                className="h-6 w-6 shrink-0 rounded-md text-muted-foreground transition-colors hover:bg-hover hover:text-foreground"
-                onClick={onClose}
-                aria-label={t('common.close', 'Close')}
-              >
-                <X className="h-3.5 w-3.5" strokeWidth={2} />
-              </Button>}/>
+            <Tooltip.Trigger
+              delay={400}
+              render={
+                <Button
+                  type="button"
+                  variant="ghost"
+                  icon
+                  className="h-6 w-6 shrink-0 rounded-md text-muted-foreground transition-colors hover:bg-hover hover:text-foreground"
+                  onClick={onClose}
+                  aria-label={t('common.close', 'Close')}
+                >
+                  <X className="h-3.5 w-3.5" strokeWidth={2} />
+                </Button>
+              }
+            />
             <Tooltip.Content
               side="bottom"
               className="flex items-center gap-1.5 px-2 py-1 text-[11px]"
@@ -5755,10 +5769,7 @@ export const SessionChatInterface = memo(
           <div className={cn(SESSION_PAGE_HEADER_PILLS_CLASS, 'items-center')}>
             <button
               type="button"
-              className={cn(
-                SESSION_HEADER_STATUS_PILL_CLASS,
-                'gap-1 rounded-r-none border-r-0'
-              )}
+              className={cn(SESSION_HEADER_STATUS_PILL_CLASS, 'gap-1 rounded-r-none border-r-0')}
               onClick={handleOpenInIde}
             >
               <SelectedPathLauncherIcon className="h-3.5 w-3.5" />
@@ -6065,11 +6076,14 @@ export const SessionChatInterface = memo(
                     </div>
                   )}
 
-                  {/* Floating permission request - shown when session is waiting for permission */}
+                  {/* The one place a pending permission request is answered; it stands in for the composer. */}
                   <FloatingPermissionRequest
                     sessionId={session.id}
                     sessionStatus={liveSessionStatus ?? undefined}
                     sessionHistory={permissionSessionHistory}
+                    onStop={() => {
+                      void handleStop();
+                    }}
                   />
 
                   {/* Notification permission prompt - shown when session becomes idle (turn completed) */}
