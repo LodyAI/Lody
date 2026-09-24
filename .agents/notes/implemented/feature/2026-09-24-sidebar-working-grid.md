@@ -38,15 +38,15 @@ The kept form and its defaults:
 
 - 3×3 tiles, corner radius 40% of the tile, gap 0.18 of the tile, 12px overall
   inside the 14px status slot, in the primary colour.
-- A whole grid with light crossing it: all nine tiles always show (size 0.8–0.9
-  of their cell), and opacity carries the motion, from 0.25 (pale tiles) to 1
-  (primary tiles). Still, it is a clean dot matrix; moving, a slow light drifts
-  across it.
+- A whole grid that swells and brightens: all nine tiles always show, scaling
+  between 0.3 and 0.9 of their cell (never to nothing) while opacity runs from
+  0.25 (pale tiles) to 1 (primary tiles). Still, it is a dot matrix of varied
+  dots; moving, light and size roll across it.
 - Texture: two plane waves, 3.2 and 4.4 cells long (× wavelength 1.2), heading
   down-right and down-left. Rhythm: one long wave straight down, 36 cells (about
   twelve stitched rows) crest to crest, carrying 30% of the opacity range so
-  whole marks brighten in turn down the list. Everything plays at 0.6× (about
-  3.2s and 4.5s for the texture, 6s for the rhythm).
+  whole marks brighten in turn down the list. Everything plays at the original
+  speed (1.9s and 2.7s for the texture, 3.6s for the rhythm).
 - One sea for the page: a tile's phase depends only on its page position. In a
   list the sea between rows is skipped ("stitched", `rowPitch = 28`): the 14px
   mark covers half of each 28px row, and without stitching a wave moves more than
@@ -66,10 +66,11 @@ motion, and many unrelated flickering points cannot be tuned out. So:
   mark whose tiles shrink through zero (minimum -0.2) — rendered, the grid broke
   into scattered specks that looked like noise, were ugly when still, and were
   not recognisable; counting tiles under 30% size as invisible, a mark showed two
-  or fewer tiles ~29% of the time. Final: keep the grid whole (size 0.8–0.9) and
-  move light instead (opacity 0.25–1), in the primary colour so it reads as
-  activity, at 0.6×. Candidates were compared in the production-geometry story
-  before choosing; the grid shape keeps it distinct from the unread dot.
+  or fewer tiles ~29% of the time. Third: keep the grid whole (size 0.8–0.9) and
+  move light instead (opacity 0.25–1) in the primary colour at 0.6× — whole and
+  recognisable, but barely moving. Final: the same whole grid and colour with
+  scale restored to 0.3–0.9 (positive, so no tile vanishes) and the original
+  speed. The grid shape keeps it distinct from the unread dot.
 - Coherence: the whole-mark rhythm makes a column read as one pulse travelling
   down, instead of about a hundred independently changing tiles.
 - Reading pause: any wheel, key, pointer or touch press outside
