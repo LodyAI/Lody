@@ -46,6 +46,8 @@ const codexModelAndReasoningOptions = (
     currentValue: 'gpt-5.6-sol',
     options: [
       { value: 'gpt-6-astra', name: 'GPT-6 Astra' },
+      { value: 'gpt-6-sol', name: 'GPT-6 Sol' },
+      { value: 'gpt-6-luna', name: 'GPT-6 Luna' },
       { value: 'gpt-5.6-sol', name: 'GPT-5.6 Sol' },
       { value: 'gpt-5.6-terra', name: 'GPT-5.6 Terra' },
       { value: 'gpt-5.6-luna', name: 'GPT-5.6 Luna' },
@@ -994,7 +996,7 @@ describe('buildAcpSelectorOptions', () => {
     expect(selector?.options.map((option) => option.value)).toEqual(['low', 'high']);
   });
 
-  it.each(['gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.6-terra'])(
+  it.each(['gpt-6-astra', 'gpt-6-sol', 'gpt-5.6-sol', 'gpt-5.6-terra'])(
     'adds missing max and ultra options for %s',
     (selectedModelId) => {
       const options = buildAcpSelectorOptions({
@@ -1030,14 +1032,18 @@ describe('buildAcpSelectorOptions', () => {
     }
   );
 
-  it.each(['medium', 'max', 'ultra'])(
-    'offers only max for Luna when the cached effort is %s',
-    (currentValue) => {
+  it.each(
+    ['gpt-5.6-luna', 'gpt-6-luna'].flatMap((selectedModelId) =>
+      ['medium', 'max', 'ultra'].map((currentValue) => ({ selectedModelId, currentValue }))
+    )
+  )(
+    'offers only max for $selectedModelId when the cached effort is $currentValue',
+    ({ selectedModelId, currentValue }) => {
       const target = {
         configId: agentConfigId,
         cliType: 'builtin' as const,
         agentType: 'codex',
-        selectedModelId: 'gpt-5.6-luna',
+        selectedModelId,
         machine: codexMachineWithConfigOptions(
           codexModelAndReasoningOptions(currentValue, [
             { value: 'medium', name: 'medium' },
@@ -1056,7 +1062,7 @@ describe('buildAcpSelectorOptions', () => {
     }
   );
 
-  it.each(['gpt-6-astra', 'gpt-5.6-sol'])(
+  it.each(['gpt-6-astra', 'gpt-6-sol', 'gpt-5.6-sol'])(
     'preserves advertised extended effort metadata for %s and appends only missing options',
     (selectedModelId) => {
       const selectors = buildAllConfigOptionSelectors({
