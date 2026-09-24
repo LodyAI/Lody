@@ -36,7 +36,9 @@ builds to `site-docs/out/client`. Binding rules live in
   public-site bundle. `use-online-machines-shim.ts` is the machine source for
   `DesktopRunConfigMenu` (the real hook needs an installed platform); the preview
   seeds its `landingPreviewMachinesAtom` alongside `agentConfigMetaCacheAtom` in
-  `previewStore`.
+  `previewStore`. `mention-expansion-shim.ts` makes the composer's before-send
+  mention expansion the identity, because the real one resolves Agent Roles
+  through Convex-backed machine visibility.
 
 Demo sequencing and screenshot notes live in
 [context/landing-demos.md](context/landing-demos.md). Measurements, history, and

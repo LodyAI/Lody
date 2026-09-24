@@ -28,6 +28,14 @@ export interface CombinedMentionTextareaProps extends Omit<
   externalMentions?: MentionRange[];
   onExternalMentionsChange?: (mentions: MentionRange[]) => void;
   onMentionClick?: (mention: MentionRange) => void;
+  enablePromptShortcuts?: boolean;
+  commandsEnabled?: boolean;
+  currentSessionId?: string | null;
+  getMentionChip?: unknown;
+  onMentionRangesChange?: (mentions: MentionRange[]) => void;
+  persistedMentions?: unknown;
+  draftKey?: string;
+  mentionActionsRef?: unknown;
 }
 
 export const CombinedMentionTextarea = forwardRef<
@@ -52,6 +60,14 @@ export const CombinedMentionTextarea = forwardRef<
       externalMentions: _externalMentions,
       onExternalMentionsChange: _onExternalMentionsChange,
       onMentionClick: _onMentionClick,
+      enablePromptShortcuts: _enablePromptShortcuts,
+      commandsEnabled: _commandsEnabled,
+      currentSessionId: _currentSessionId,
+      getMentionChip: _getMentionChip,
+      onMentionRangesChange: _onMentionRangesChange,
+      persistedMentions: _persistedMentions,
+      draftKey: _draftKey,
+      mentionActionsRef: _mentionActionsRef,
       ...props
     },
     ref

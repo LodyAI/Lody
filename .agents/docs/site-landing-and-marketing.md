@@ -86,3 +86,15 @@ There is no tsconfig path from `site-docs` to `packages/components/src`, so
 A stale declaration silently hides a real API break: `DesktopSessionDetailLayout`
 once rendered with none of its props, and the whole top bar plus right panel
 vanished from the landing while `pnpm typecheck` stayed green.
+
+## Why the static check mounts the app preview
+
+The app preview renders inside an `OptionalEnhancement` boundary, so a crash
+blanks the product stage while the hero, copy, and every other check stay green.
+That happened when `ChatComposer` started calling `useMentionPromptExpansion`:
+Agent Role mentions reach `useVisibleMachineMetas`, which requires the app's
+`AuthenticatedConvexProvider`, and the landing showed only the seabed. The fix
+is `app-preview-shims/mention-expansion-shim.ts`; `test:static` now waits for the
+preview composer on `/` and `/zh` so the next app-only hook fails the build check
+instead of the landing. See the
+[bug-fix note](../notes/implemented/bug-fix/2026-09-24-landing-app-preview-mention-expansion.md).
