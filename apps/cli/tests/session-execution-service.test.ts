@@ -5666,7 +5666,11 @@ describe('SessionExecutionService', () => {
   );
 
   it('marks chat dispatch as failed when prompt execution throws after processing starts', async () => {
-    const upsertDocMeta = vi.fn(async () => {});
+    const branchProbe = createDeferred<string | null>();
+    const persisted: Record<string, unknown> = {};
+    const upsertDocMeta = vi.fn(async (_id: string, patch: Record<string, unknown>) => {
+      Object.assign(persisted, patch);
+    });
     const sessionDoc = withHistoryPort({
       getMetaState: vi.fn(async () => ({ isArchived: false })),
       setStatus: vi.fn(async () => {}),
@@ -5705,6 +5709,7 @@ describe('SessionExecutionService', () => {
     } as unknown as SessionManager;
 
     const deps = createBaseDeps({
+      syncSessionBranchName: () => branchProbe.promise,
       sessionManager,
       workspaceDocument: {
         repo: {
@@ -5730,11 +5735,12 @@ describe('SessionExecutionService', () => {
       userEmail: 'user@example.com',
     });
 
-    expect(upsertDocMeta).toHaveBeenCalledWith('session-session-chat-1', {
+    // Failure must settle while the optional branch probe is still blocked.
+    expect(persisted).toMatchObject({
       lastHandledUserMsgId: 'turn-chat-1',
       processingUserMsgId: undefined,
     });
-    expect(deps.turnFinalization.finalizeACPState).toHaveBeenCalledTimes(1);
+    branchProbe.resolve(null);
   });
 
   it.each([

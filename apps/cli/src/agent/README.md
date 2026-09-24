@@ -249,9 +249,9 @@ See the [contract](../../../../specs/acp-session-titles.md) and
 [original compatibility decision](../../../../.agents/notes/implemented/architecture/2026-09-08-acp-owned-session-titles.md).
 
 The daemon does not name branches. A worktree session stays on the `session/<id>` branch
-`worktree-manager.ts` created for it, and `syncSessionBranchName` records whatever branch the
-session is actually on after every turn, so an agent that renames the branch itself is picked
-up. For GitHub projects the agent is asked to do exactly that — see
+`worktree-manager.ts` created for it. [WorkspaceBranchService](../session/workspace-branch-service.ts)
+observes branch changes independently of GitHub; its lifecycle and activation triggers are
+defined by the [checkout branch contract](../../../../specs/workspace-branch-state.md). For GitHub projects the agent is asked to do exactly that — see
 `GITHUB_WORKTREE_SYSTEM_COMMANDS` in `session/session-execution-helpers.ts`.
 
 This used to be an automatic prompt-to-branch rename, removed because it could not be made

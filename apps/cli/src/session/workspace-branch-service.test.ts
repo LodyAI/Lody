@@ -108,6 +108,25 @@ describe('WorkspaceBranchService', () => {
     }
   });
 
+  it('preserves branch metadata when a deleted or inaccessible workdir throws before probing', async () => {
+    const { service, meta } = fixture();
+    meta.set(owner, { branchName: 'feature/known' });
+    await expect(
+      service.syncSession(owner, {
+        getWorkdir: () => {
+          throw new Error('ENOENT');
+        },
+        exec: async () => 'feature/unreachable',
+      })
+    ).resolves.toBeNull();
+    expect(meta.get(owner)?.branchName).toBe('feature/known');
+    await service.syncSession(owner, {
+      getWorkdir: () => '/restored',
+      exec: async () => 'feature/restored',
+    });
+    expect(meta.get(owner)?.branchName).toBe('feature/restored');
+  });
+
   it('serializes startup and child-turn observations so the final metadata is the newer branch', async () => {
     const { service, meta } = fixture();
     let release: (branch: string) => void = () => {

@@ -2875,7 +2875,7 @@ export class MessageHandler {
       workspaceDocument: this.workspaceDocument,
     });
     this.codeCollabV2Service = new CodeCollabV2Service({
-      refreshWorkspaceMetadata: async ({ ownerSessionId, workspaceRoot }) => {
+      observeWorkspaceBranch: async ({ ownerSessionId, workspaceRoot }) => {
         await workspaceBranchService.syncLocalWorkspace(ownerSessionId, workspaceRoot);
       },
       resolveWorkspace: this.resolveCodeCollabV2Workspace,

@@ -16,11 +16,13 @@ is independent of repository hosting, PR association, and agent provider. Child
 Tabs share their parent’s workspace and publish branch observations to that owner.
 Independent worktree Sessions retain independent branches.
 
-Observe when activating or refreshing workspace contents, binding an agent Session,
+Observe when activating or explicitly refreshing root workspace contents, binding an agent Session,
 and completing, cancelling, or failing a running turn. Startup and file snapshot
 responses do not wait for presentation metadata. Serialize observations and writes
 per owner so an earlier slow read cannot overwrite a later checkout observation.
 Only publish changes; no remote Git or authenticated cloud operation is required.
+Ordinary file watcher and terminal diff refreshes do not repeat branch observation.
+A failed turn must publish its failure without awaiting optional branch observation.
 
 `SessionMeta.branchName` remains the last successfully observed named branch.
 Detached HEAD and failed Git probes preserve it for worktree restoration and PR

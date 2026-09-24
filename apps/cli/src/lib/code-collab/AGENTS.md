@@ -31,8 +31,9 @@ File-by-file responsibilities: [README.md](README.md).
   invalidate and refresh its Machine RPC snapshot. Both streams have 180-day TTL and
   must not enter repo meta. Root activation and terminal turn refresh may mirror only
   compact aggregate add/del `diffStats`; file/diff watcher refreshes stay Flock-only, and PR
-  sessions retain committed compare totals. The injected `refreshWorkspaceMetadata` observer
-  may update checkout metadata independently; it must never gate file snapshots.
+  sessions retain committed compare totals. The injected `observeWorkspaceBranch` observer
+  runs only on activation/explicit root refresh, never file watcher or terminal diff refresh;
+  it must not gate file snapshots.
 - A file-index row whose path key carries U+FFFD came from a byte stream decoded
   across a chunk boundary, not from a scan; it is its own LWW key, so a correct
   republish cannot overwrite it. The shared helpers hide it on read and delete it on

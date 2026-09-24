@@ -74,9 +74,6 @@ import/Mirror cost or daemon-side document loading.
 
 Intent: [background prefetch](../../specs/session-background-prefetch.zh.md).
 
-Branch metadata comes from the owning machine’s `WorkspaceBranchService`, independently
-of GitHub/PR support. It observes local folders and worktrees on workspace activation/refresh,
-agent binding, and terminal turns. Child tabs publish to their workspace owner.
-The field retains the last named branch during detached HEAD or unavailable Git probes
-for restore/PR discovery; it is not a continuous filesystem subscription. See
-[checkout branch contract](../../specs/workspace-branch-state.md).
+The owning machine publishes branch observations independently of GitHub/PR support.
+See the [checkout branch contract](../../specs/workspace-branch-state.md) for ownership,
+activation/explicit refresh and turn triggers, and last-known-branch semantics.

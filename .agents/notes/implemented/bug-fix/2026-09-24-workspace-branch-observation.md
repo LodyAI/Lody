@@ -11,7 +11,7 @@ PR: [#953](https://github.com/LodyAI/Lody/pull/953)
 Local Git conversations could have no branch display because branch synchronization
 ran only inside GitHub turn finalization. A workspace branch service now owns Git
 observation and owner-session publication, independently of PR processing. Agent
-binding, terminal turns, and authorized workspace activation/refresh use the same
+binding, terminal turns, and authorized workspace activation/explicit root refresh use the same
 serialized service. Existing last-known-branch semantics remain; continuous idle
 HEAD watching is outside this change.
 
@@ -21,7 +21,7 @@ The UI already consumes branch metadata for local projects, so adding another UI
 Git reader would duplicate state and move machine filesystem knowledge into the
 renderer. Merely widening the GitHub condition would leave initial, cancelled, and
 idle restored Sessions uncovered. Extract observation from turn post-processing
-instead, and inject it into execution plus the workspace refresh boundary.
+instead, and inject it into execution plus the workspace activation/explicit refresh boundary.
 
 ```text
 Execution bind / terminal turn ─┐
@@ -43,7 +43,7 @@ detached HEAD and unreadable/non-Git directories do not replace existing metadat
 
 ## Verification
 
-200 tests passed across branch observation, execution, post-processing, Code
+200 initial tests passed across branch observation, execution, post-processing, Code
 Collab, and MessageHandler integration suites. Real temporary Git repositories cover remote-free/unborn branches,
 checkout changes, worktrees, and detached HEAD. Deterministic barriers cover
 concurrent parent/child observations and nonblocking workspace activation.
@@ -56,3 +56,16 @@ An idle external checkout with no workspace refresh is not a live update guarant
 No UI redesign or release is included.
 
 Full repository `pnpm check` and `pnpm format` also passed before PR creation.
+
+## Review refinements
+
+Independent review found no P0/P1 blockers, but identified repeated probes when
+execution finalization also refreshed Code Collab, and on ordinary file watcher
+events. Narrow the injected observer to branch observation at activation and explicit
+root refresh; terminal observation stays with execution. Failure publication no
+longer awaits this optional probe. A throwing workdir resolver is caught before
+probing and preserves the last branch. Behavioral regressions cover watcher/turn
+refresh exclusion, nonblocking failure settlement, and unavailable workdirs.
+
+Post-review validation: 187 targeted regression tests, full `pnpm check`,
+`pnpm format`, and `pnpm run docs check` passed.

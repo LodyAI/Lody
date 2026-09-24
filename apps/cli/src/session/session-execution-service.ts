@@ -2647,7 +2647,8 @@ export class SessionExecutionService {
     }
 
     if (options.runtime.session) {
-      await this.deps.syncSessionBranchName(options.sessionId, options.runtime.session);
+      // A best-effort observation must not delay publishing the turn failure.
+      void this.deps.syncSessionBranchName(options.sessionId, options.runtime.session);
     }
     this.deps.logger.error(options.describe(options.error), options.error);
     if (options.userTurnId) {

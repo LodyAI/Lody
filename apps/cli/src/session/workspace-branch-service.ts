@@ -20,11 +20,18 @@ export class WorkspaceBranchService {
     }
   ) {}
 
-  syncSession(
+  async syncSession(
     sessionId: SessionId,
     session: Pick<ISession, 'exec' | 'getWorkdir'>
   ): Promise<string | null> {
-    return this.sync(sessionId, session.getWorkdir(), session.exec.bind(session));
+    try {
+      return await this.sync(sessionId, session.getWorkdir(), session.exec.bind(session));
+    } catch (error) {
+      this.deps.logger.debug(
+        `[${sessionId}] Failed to observe session workspace branch: ${formatErrorMessage(error)}`
+      );
+      return null;
+    }
   }
 
   /** The caller must resolve and authorize the host workspace before calling. */

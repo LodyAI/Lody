@@ -35,7 +35,8 @@ host/runtime/CRDT capture implementation has been removed from this directory.
   scoping, chaining, and retention GC. Package-level dedup/refcount/size-GC tests
   live in `packages/turn-diff-store/tests`.
 
-Checkout metadata observation is injected via `refreshWorkspaceMetadata` at the shared
-refresh queue, including initial local snapshots and refreshes with unchanged files.
-MessageHandler connects it to `WorkspaceBranchService` after workspace authorization;
-Git branch publication is independent of file-index Flock publication and does not delay RPC snapshots.
+Checkout branch observation is injected via `observeWorkspaceBranch` on initial local
+activation and explicit root refresh. Watcher and terminal diff refreshes do not repeat
+this work. MessageHandler connects the authorized workspace to
+[WorkspaceBranchService](../../session/workspace-branch-service.ts); see its
+[contract](../../../../../specs/workspace-branch-state.md).
