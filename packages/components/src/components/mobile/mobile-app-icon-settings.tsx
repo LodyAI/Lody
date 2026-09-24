@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Check } from 'lucide-react';
 import { Button } from '@/ui/button';
+import { deferredPostHog } from '@/lib/deferred-posthog';
+import { capturePostHogEvent } from '@/lib/posthog-analytics';
 import { MobileSettingsSection } from './mobile-settings-row';
 import { CompactSection } from '../settings/compact-layout';
 
@@ -11,6 +13,14 @@ export type AppIconBridge = {
   getState: () => Promise<AppIconState>;
   setIcon: (options: { name: string }) => Promise<AppIconState>;
 };
+
+// Native icon identifiers differ per host (iOS `AppIconBlue`, macOS `aqua`);
+// analytics only reports the product-level enum, never an unknown raw name.
+function appIconAnalyticsValue(name: string): 'aqua' | 'default' | null {
+  if (name === 'default') return 'default';
+  if (name === 'AppIconBlue' || name === 'aqua') return 'aqua';
+  return null;
+}
 
 export function MobileAppIconSettings({
   layout = 'mobile',
@@ -55,7 +65,12 @@ export function MobileAppIconSettings({
     setError(false);
     try {
       // Native state is authoritative; a rejected change must keep the old checkmark.
-      setState(await bridge.setIcon({ name }));
+      const next = await bridge.setIcon({ name });
+      setState(next);
+      const value = appIconAnalyticsValue(next.name);
+      if (value && next.name === name) {
+        capturePostHogEvent(deferredPostHog, 'settings/changed', { key: 'app_icon', value });
+      }
     } catch {
       setError(true);
     } finally {

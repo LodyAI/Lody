@@ -1,4 +1,6 @@
 import { openSessionOnModifiedClick } from '@/lib/desktop-window';
+import { usePostHog } from '@posthog/react';
+import { capturePostHogEvent } from '@/lib/posthog-analytics';
 import { SessionWindowMenuItem } from './session-window-menu-item';
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { startSessionMentionDrag } from '@/lib/session-mention-drag';
@@ -1700,6 +1702,17 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
     },
     [setOrganizeMode]
   );
+  const postHog = usePostHog();
+  const handleShowUpdatedProjectNamesChange = useCallback(
+    (next: boolean) => {
+      capturePostHogEvent(postHog, 'settings/changed', {
+        key: 'sidebar_updated_show_project_names',
+        value: next,
+      });
+      setShowUpdatedProjectNames(next);
+    },
+    [postHog, setShowUpdatedProjectNames]
+  );
   const sessionSidebarCodeChangesOnly = useAtomValue(sessionSidebarCodeChangesOnlyAtom);
   const { archiveSession, markSessionUnread, setSessionPinned, updateSessionTitle } =
     useSessionActions();
@@ -2575,7 +2588,7 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
       onOrganizeChange={handleOrganizeModeChange}
       onScopeChange={handleChatScopeChanged}
       showUpdatedProjectNames={showUpdatedProjectNames}
-      onShowUpdatedProjectNamesChange={setShowUpdatedProjectNames}
+      onShowUpdatedProjectNamesChange={handleShowUpdatedProjectNamesChange}
       labels={filterLabels}
       open={sidebarFilterOpen}
       onOpenChange={setSidebarFilterOpen}
@@ -3410,7 +3423,7 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
         updatedIsLoading={organizeMode === 'updated' && sessionsListLoading}
         onOrganizeModeChange={handleOrganizeModeChange}
         showUpdatedProjectNames={showUpdatedProjectNames}
-        onShowUpdatedProjectNamesChange={setShowUpdatedProjectNames}
+        onShowUpdatedProjectNamesChange={handleShowUpdatedProjectNamesChange}
         onChatScopeChange={handleChatScopeChanged}
         onSelectUpdatedItem={handleSelectUpdatedItem}
         onTogglePinnedSection={handleTogglePinnedSection}

@@ -20,7 +20,7 @@ export function SessionWindowMenuItem({
   return (
     <Item
       onSelect={() => {
-        openDesktopWindow(sessionId);
+        openDesktopWindow(sessionId, undefined, dropdown ? 'session_menu' : 'context_menu');
       }}
     >
       <AppWindow />

@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAtom } from 'jotai';
+import { usePostHog } from '@posthog/react';
 import { Monitor, Moon, SquareTerminal, Sun } from 'lucide-react';
 
 import {
@@ -21,6 +22,7 @@ import { buildTerminalFontPreviewFamily } from '@/components/terminal/terminal-t
 import { useIsMobile } from '@/hooks/use-mobile';
 import { listSystemFontFamilies } from '@/lib/local-fonts';
 import { Input } from '@/ui/input';
+import { capturePostHogEvent } from '@/lib/posthog-analytics';
 import { LanguageSelector } from '../../i18n';
 import { useTheme, type Theme } from '../../theme-provider';
 import { settingContainerClass } from '.';
@@ -347,6 +349,20 @@ function DesktopAppearanceSettings() {
   const [systemFontLoadState, setSystemFontLoadState] = useState<SystemFontLoadState>('idle');
   const isElectron = typeof window !== 'undefined' && window.__LODY_ELECTRON__ === true;
   const savedThemeRef = useRef<Theme>(theme);
+  const postHog = usePostHog();
+
+  const handleConversationFontSizeChange = useCallback(
+    (next: ConversationFontSize) => {
+      if (next !== conversationFontSize) {
+        capturePostHogEvent(postHog, 'settings/font_size_changed', {
+          from: conversationFontSize,
+          to: next,
+        });
+      }
+      setConversationFontSize(next);
+    },
+    [conversationFontSize, postHog, setConversationFontSize]
+  );
 
   const handleThemePreview = useCallback(
     (value: Theme) => {
@@ -388,7 +404,7 @@ function DesktopAppearanceSettings() {
       onThemeCommit={handleThemeCommit}
       onThemeCancel={handleThemeCancel}
       conversationFontSize={conversationFontSize}
-      onConversationFontSizeChange={setConversationFontSize}
+      onConversationFontSizeChange={handleConversationFontSizeChange}
       isElectron={isElectron}
       interfaceFontFamily={interfaceFontFamily}
       onInterfaceFontFamilyChange={setInterfaceFontFamily}

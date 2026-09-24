@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { v4 as uuidv4 } from 'uuid';
 import { toast } from 'sonner';
+import { usePostHog } from '@posthog/react';
 import {
   computeTitleGenerationDefaults,
   DEEPSEEK_HARNESS_API_KEY_ENV,
@@ -66,6 +67,7 @@ import {
 import { Spinner } from '@/ui/spinner';
 import { AgentIcon } from '@/components/icons/agent-icon';
 import { cn } from '@/lib/utils';
+import { capturePostHogEvent } from '@/lib/posthog-analytics';
 import { useKeyboardAwareScrollIntoView } from '@/hooks/use-keyboard-aware-scroll-into-view';
 import { useMachineAcpBinaryProgress } from '@/hooks/use-machine-acp-binary-progress';
 import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
@@ -1222,6 +1224,12 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
     (usesDefaultManagedRuntime || isQueuedBuiltin) &&
     !hasBuiltinRuntimeOverrideValues(formData.runtimeOverrides);
   const lastPersistedPayloadKeyRef = useRef<string | null>(null);
+  const postHog = usePostHog();
+  // Analytics only: whether a custom DeepSeek Harness base URL is saved. The URL
+  // itself never leaves the client; only the boolean flip is reported.
+  const deepSeekCustomBaseUrlConfiguredRef = useRef(
+    isDeepSeekBuiltinForm(initialForm) && getDeepSeekEndpointMode(initialForm) === 'custom'
+  );
   const buildSubmitPayload = useCallback((): AgentConfigSubmitPayload => {
     let env = { ...formData.env };
     if (activePreset) {
@@ -1267,7 +1275,17 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
     if (lastPersistedPayloadKeyRef.current === payloadKey) return;
     await onSubmit(payload);
     lastPersistedPayloadKeyRef.current = payloadKey;
-  }, [buildSubmitPayload, onSubmit]);
+    if (isDeepSeekBuiltinForm(formData)) {
+      const configured = !isDeepSeekOfficialBaseUrl(payload.env[DEEPSEEK_HARNESS_BASE_URL_ENV]);
+      if (configured !== deepSeekCustomBaseUrlConfiguredRef.current) {
+        deepSeekCustomBaseUrlConfiguredRef.current = configured;
+        capturePostHogEvent(postHog, 'settings/changed', {
+          key: 'deepseek_harness_custom_base_url',
+          value: configured,
+        });
+      }
+    }
+  }, [buildSubmitPayload, formData, onSubmit, postHog]);
 
   useEffect(() => {
     if (

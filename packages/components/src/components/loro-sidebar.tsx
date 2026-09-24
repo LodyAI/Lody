@@ -1028,7 +1028,7 @@ export const LoroSidebar = memo(function LoroSidebar({
                         className="gap-1.5 ps-2 pe-8"
                         onClickCapture={(event) => {
                           if (!workspaceSlug || !isNewWindowClick(event)) return;
-                          if (openDesktopWindow(undefined, workspaceSlug)) {
+                          if (openDesktopWindow(undefined, workspaceSlug, 'modifier_click')) {
                             event.preventDefault();
                             event.stopPropagation();
                           }
@@ -1087,7 +1087,7 @@ export const LoroSidebar = memo(function LoroSidebar({
                         <ContextMenuContent>
                           <ContextMenuItem
                             onSelect={() => {
-                              openDesktopWindow(undefined, workspaceSlug);
+                              openDesktopWindow(undefined, workspaceSlug, 'context_menu');
                             }}
                           >
                             <AppWindow />

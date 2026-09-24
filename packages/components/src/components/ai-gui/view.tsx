@@ -44,7 +44,9 @@ import {
   getVisibleAssistantTextContent,
   hasTextContentFromMessageItems,
 } from './message-copy';
-import { useAtomValue } from 'jotai';
+import { useAtomValue, useStore } from 'jotai';
+import { usePostHog } from '@posthog/react';
+import { capturePostHogEvent, getAnalyticsFileKind } from '@/lib/posthog-analytics';
 import { getRpcDeliveredTurnKey, rpcDeliveredTurnsAtom } from '@/atoms/session-dispatch-delivery';
 import { selectAtom } from 'jotai/utils';
 import { Virtualizer, type VirtualizerHandle, type CustomItemComponentProps } from 'virtua';
@@ -5174,6 +5176,7 @@ const renderAssistantContent = (
           plan={content}
           messageId={messageId}
           itemIndex={itemIndex}
+          sessionId={sessionId}
           onFilePathClick={options?.onFilePathClick}
           fontSize={conversationFontSize}
           awaitingDecision={options?.planAwaitingDecision}
@@ -5674,6 +5677,7 @@ const WorkspaceSessionFileGroup = ({
   const workspaceId = useAtomValue(currentWorkspaceIdAtom) as WorkspaceId | null;
   const authToken = useAtomValue(authTokenAtom);
   const { openHtmlFile } = useContext(SessionChatActionContext);
+  const postHog = usePostHog();
   const [previewFile, setPreviewFile] = useState<SessionFilePayload | null>(null);
   const [previewStatus, setPreviewStatus] = useState<SessionFilePreviewStatus>({ kind: 'loading' });
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
@@ -5682,6 +5686,10 @@ const WorkspaceSessionFileGroup = ({
   const handleDownload = useCallback(
     (file: SessionFilePayload) => {
       if (!workspaceId || !authToken) return;
+      capturePostHogEvent(postHog, 'file_preview/downloaded', {
+        file_kind: getAnalyticsFileKind(file.fileName),
+        source: 'attachment',
+      });
       setDownloadingId(file.fileId);
       void downloadSessionFile({
         workspaceId,
@@ -5696,11 +5704,15 @@ const WorkspaceSessionFileGroup = ({
         })
         .finally(() => setDownloadingId((current) => (current === file.fileId ? null : current)));
     },
-    [authToken, sessionId, t, workspaceId]
+    [authToken, postHog, sessionId, t, workspaceId]
   );
 
   const handlePreview = useCallback(
     (file: SessionFilePayload) => {
+      capturePostHogEvent(postHog, 'file_preview/opened', {
+        file_kind: getAnalyticsFileKind(file.fileName),
+        source: 'attachment',
+      });
       if (isHtmlSessionFile(file) && openHtmlFile?.(file)) {
         return;
       }
@@ -5740,7 +5752,7 @@ const WorkspaceSessionFileGroup = ({
           });
         });
     },
-    [authToken, openHtmlFile, sessionId, t, workspaceId]
+    [authToken, openHtmlFile, postHog, sessionId, t, workspaceId]
   );
 
   // The send path caps at 8 files/message, but a block list synced from another
@@ -5878,6 +5890,7 @@ const renderUserContent = (
           plan={content}
           messageId={options.messageId}
           itemIndex={options.itemIndex}
+          sessionId={sessionId}
           fontSize={options.conversationFontSize}
         />
       );
@@ -6218,12 +6231,15 @@ const PlanPanel = ({
   searchBlockId,
   messageId,
   itemIndex,
+  sessionId,
   onFilePathClick,
   fontSize = DEFAULT_CONVERSATION_FONT_SIZE,
   awaitingDecision = false,
   isStreaming = false,
 }: {
   markdown: string;
+  /** Analytics only: resolves whether the plan belongs to a child (sub-agent) session. */
+  sessionId?: SessionId;
   searchBlockId: string;
   messageId: string;
   itemIndex: number;
@@ -6275,6 +6291,23 @@ const PlanPanel = ({
     },
     [itemIndex, messageId]
   );
+  const postHog = usePostHog();
+  const jotaiStore = useStore();
+  const toggleExpanded = useCallback(
+    (next: boolean) => {
+      if (next) {
+        // Read at click time so plan rows never subscribe to session meta.
+        const parentSessionId = sessionId
+          ? jotaiStore.get(sessionMetaAtomFamily(getSessionRoomId(sessionId)))?.parentSessionId
+          : null;
+        capturePostHogEvent(postHog, 'plan_panel/opened', {
+          is_subagent: Boolean(parentSessionId),
+        });
+      }
+      setExpanded(next);
+    },
+    [jotaiStore, postHog, sessionId, setExpanded]
+  );
   const [overflows, setOverflows] = useState(false);
   const bodyRef = useRef<HTMLDivElement>(null);
   const searchState = useSessionSearchBlockPrefix(searchBlockId);
@@ -6305,7 +6338,7 @@ const PlanPanel = ({
         <button
           type="button"
           className="-my-1 -ml-1 flex min-w-0 flex-1 items-center gap-2 rounded py-1 pl-1 text-left"
-          onClick={overflows || isOpen ? () => setExpanded(!isOpen) : undefined}
+          onClick={overflows || isOpen ? () => toggleExpanded(!isOpen) : undefined}
           aria-expanded={overflows || isOpen ? isOpen : undefined}
           disabled={!overflows && !isOpen}
         >
@@ -6368,6 +6401,7 @@ export const ProposedPlanBlock = ({
   plan,
   messageId,
   itemIndex,
+  sessionId,
   onFilePathClick,
   fontSize = DEFAULT_CONVERSATION_FONT_SIZE,
   awaitingDecision = false,
@@ -6375,6 +6409,7 @@ export const ProposedPlanBlock = ({
   plan: ProposedPlanMessage;
   messageId: string;
   itemIndex: number;
+  sessionId?: SessionId;
   onFilePathClick?: (filePath: string) => void;
   fontSize?: ConversationFontSize;
   awaitingDecision?: boolean;
@@ -6384,6 +6419,7 @@ export const ProposedPlanBlock = ({
     searchBlockId={getProposedPlanSearchBlockId(messageId, itemIndex)}
     messageId={messageId}
     itemIndex={itemIndex}
+    sessionId={sessionId}
     onFilePathClick={onFilePathClick}
     fontSize={fontSize}
     awaitingDecision={awaitingDecision}
@@ -7180,6 +7216,7 @@ const PlanExitBlock = ({
           searchBlockId={getProposedPlanSearchBlockId(messageId, itemIndex)}
           messageId={messageId}
           itemIndex={itemIndex}
+          sessionId={sessionId}
           onFilePathClick={onFilePathClick}
           fontSize={fontSize}
           awaitingDecision={awaitingDecision}

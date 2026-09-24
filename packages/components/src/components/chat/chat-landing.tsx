@@ -179,6 +179,10 @@ import {
   getPerformanceNowMs,
 } from '@/lib/posthog-analytics';
 import {
+  captureAgentRoleApplied,
+  captureAgentRoleMentionsApplied,
+} from '@/lib/agent-role-analytics';
+import {
   SESSION_ACP_CONFIG_USED_EVENT,
   buildSessionCreateAcpAnalyticsProperties,
 } from '@/lib/session-create-analytics';
@@ -3206,6 +3210,20 @@ function WorkspaceChatLanding({
         entrypoint: 'chat_landing',
         launch_mode: launchMode,
         submit_prepare_ms: getDurationSinceMs(submitStartedAtMs),
+        agent_role_used: activeAgentRole != null,
+      });
+      if (activeAgentRole) {
+        // The composer's Role picker only offers Roles bound to the machine the
+        // chat starts on, so a new-chat Role is never cross-machine.
+        captureAgentRoleApplied(postHog, activeAgentRole, {
+          source: 'new_chat',
+          crossMachine: false,
+        });
+      }
+      captureAgentRoleMentionsApplied(postHog, {
+        spans: expandedPrompt.spans,
+        roles: workspaceAgentRoles,
+        executionMachineId: selectedAgent.machineId,
       });
       capturePostHogEvent(postHog, SESSION_ACP_CONFIG_USED_EVENT, {
         user_id: userId,
