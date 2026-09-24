@@ -15,7 +15,8 @@ import {
   LockKeyhole,
   MessageCircle,
 } from 'lucide-react';
-import { useAtomValue, useSetAtom } from 'jotai';
+import { atom, useAtom, useAtomValue, useSetAtom, type PrimitiveAtom } from 'jotai';
+import { atomFamily } from 'jotai/utils';
 import { useTranslation } from 'react-i18next';
 import { getServerNow } from '@lody/shared';
 import {
@@ -130,6 +131,26 @@ export type MobileChatPreviewState = {
   /** True once the user expanded this bucket past the preview cap. */
   showAll: boolean;
   onToggle: () => void;
+};
+
+/* Group fold + "Show all" state for one list surface. Held in an atom, not
+   component state, because leaving the home screen (e.g. into Settings)
+   unmounts the list and would otherwise re-expand every folded group on
+   return. In-memory only: it survives navigation, not an app reload. */
+type MobileChatBucketUiState = {
+  collapsed: ReadonlySet<string>;
+  expanded: ReadonlySet<string>;
+};
+const createBucketUiStateAtom = () =>
+  atom<MobileChatBucketUiState>({ collapsed: new Set<string>(), expanded: new Set<string>() });
+const mobileChatBucketUiStateAtomFamily = atomFamily((_stateKey: string) =>
+  createBucketUiStateAtom()
+);
+const toggleInSet = (set: ReadonlySet<string>, id: string): ReadonlySet<string> => {
+  const next = new Set(set);
+  if (next.has(id)) next.delete(id);
+  else next.add(id);
+  return next;
 };
 
 /* Fixed date-bucket ids (ordered newest → oldest). Month buckets use
@@ -955,6 +976,7 @@ export function MobileChatList({
   privateLabel,
   privateHelpAriaLabel,
   onPrivateHelp,
+  bucketStateKey,
 }: {
   chats: MobileConversationItem[];
   groupBy?: MobileChatGroupBy;
@@ -1004,6 +1026,10 @@ export function MobileChatList({
      mode and the cap disappears. `groupBy` also defaults to `none`, so a new
      caller would silently opt out. */
   capGroupPreviews?: boolean;
+  /** Keeps group fold / "Show all" state across unmounts (navigating to
+     Settings and back). Surfaces sharing a key share that state; omit it to
+     scope the state to this mount. */
+  bucketStateKey?: string;
   /** Copy for the multi-select toolbar + confirmation alert-dialog.
      All keys are optional with reasonable Chinese defaults; callers
      can override to localize. */
@@ -1021,34 +1047,27 @@ export function MobileChatList({
   const selectionEnabled = archived && Boolean(onPermanentDelete);
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
-  /* Project-group collapse: ids in the set are collapsed (body hidden).
-     Default empty → every bucket starts expanded. */
-  const [collapsedBucketIds, setCollapsedBucketIds] = useState<Set<string>>(
-    () => new Set()
-  );
-  const toggleBucket = (bucketId: string) => {
-    setCollapsedBucketIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(bucketId)) next.delete(bucketId);
-      else next.add(bucketId);
-      return next;
-    });
-  };
-  /* Buckets the user expanded past the preview cap. Every bucket starts capped
-     at `MOBILE_CHAT_PREVIEW_MAX_ROOTS`, which is the whole point: without it a
+  /* Project-group collapse (ids in `collapsed` hide their body; default
+     empty → every bucket starts expanded) and buckets the user expanded past
+     the preview cap (`expanded`). Every bucket starts capped at
+     `MOBILE_CHAT_PREVIEW_MAX_ROOTS`, which is the whole point: without it a
      project with forty Sessions pushes every other project and worktree off
-     the screen. This is deliberately NOT the shared opener-fold atom — see
-     `MobileChatPreviewState`. */
-  const [expandedBucketIds, setExpandedBucketIds] = useState<Set<string>>(
-    () => new Set()
+     the screen. The preview flag is deliberately NOT the shared opener-fold
+     atom — see `MobileChatPreviewState`. With `bucketStateKey` the state
+     outlives this component; without it, it lives and dies with the mount. */
+  const [localBucketUiStateAtom] = useState<PrimitiveAtom<MobileChatBucketUiState>>(
+    createBucketUiStateAtom
   );
+  const [bucketUiState, setBucketUiState] = useAtom(
+    bucketStateKey ? mobileChatBucketUiStateAtomFamily(bucketStateKey) : localBucketUiStateAtom
+  );
+  const collapsedBucketIds = bucketUiState.collapsed;
+  const expandedBucketIds = bucketUiState.expanded;
+  const toggleBucket = (bucketId: string) => {
+    setBucketUiState((prev) => ({ ...prev, collapsed: toggleInSet(prev.collapsed, bucketId) }));
+  };
   const toggleBucketPreview = (bucketId: string) => {
-    setExpandedBucketIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(bucketId)) next.delete(bucketId);
-      else next.add(bucketId);
-      return next;
-    });
+    setBucketUiState((prev) => ({ ...prev, expanded: toggleInSet(prev.expanded, bucketId) }));
   };
   /* Pending permanent-delete confirmation. Drives one shared
      alert-dialog for two entry points: the multi-select toolbar

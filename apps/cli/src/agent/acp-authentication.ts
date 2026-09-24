@@ -36,6 +36,7 @@ import {
   BuiltinAuthenticationOutputParser,
 } from './acp-authentication-output';
 import { shutdownLocalAcpAgent, spawnAcpProcess } from './acp-runner';
+import type { ManagedRuntimeProgressEvent } from './managed-agent-runtime';
 import { createStdinWritableStream, createStdoutReadableStream } from '@/utils/stream';
 import { getLoginShellEnv } from './login-shell-env';
 import { appendStderrTail, createAcpStartupMonitor } from './acp-startup-monitor';
@@ -70,6 +71,16 @@ export type AcpAuthenticationProgressEvent =
       interactionId: string;
       message: string;
       form: MachineAcpAuthenticationForm;
+    }
+  | {
+      /**
+       * The builtin login command needs a managed runtime that is not
+       * installed yet; it is being downloaded before the process can spawn.
+       */
+      status: 'runtime-download';
+      runtimeName: string;
+      runtimePhase: ManagedRuntimeProgressEvent['phase'];
+      runtimePercent?: number;
     }
   | { status: 'output'; stream: 'stdout' | 'stderr'; output: string }
   | { status: 'authenticated' }
@@ -167,6 +178,7 @@ type AcpAuthenticationManagerOptions = {
   terminationGraceMs?: number;
   spawnProcess?: typeof spawn;
   resolveLoginShellEnv?: typeof getLoginShellEnv;
+  resolveAuthenticationProcessLaunch?: typeof resolveBuiltinAuthenticationProcessLaunch;
 };
 
 export type BuiltinAuthenticationProbeResult =
@@ -511,6 +523,7 @@ export class AcpAuthenticationManager {
   private readonly terminationGraceMs: number;
   private readonly spawnProcess: typeof spawn;
   private readonly resolveLoginShellEnv: typeof getLoginShellEnv;
+  private readonly resolveAuthenticationProcessLaunch: typeof resolveBuiltinAuthenticationProcessLaunch;
 
   constructor(
     private readonly logger: Logger,
@@ -526,6 +539,8 @@ export class AcpAuthenticationManager {
     );
     this.spawnProcess = options.spawnProcess ?? spawn;
     this.resolveLoginShellEnv = options.resolveLoginShellEnv ?? getLoginShellEnv;
+    this.resolveAuthenticationProcessLaunch =
+      options.resolveAuthenticationProcessLaunch ?? resolveBuiltinAuthenticationProcessLaunch;
   }
 
   async authenticate(options: {
@@ -596,11 +611,24 @@ export class AcpAuthenticationManager {
         return await this.authenticateProtocolDrivenAcp(options, running);
       }
       const agentType = options.agentType as BuiltinCliType;
-      const launch = await resolveBuiltinAuthenticationProcessLaunch({
+      // Resolving the launch can download a managed runtime first. Wire the
+      // abort signal so cancel/timeout interrupt that download, and surface
+      // its progress instead of sitting silent until the login errors out.
+      const launch = await this.resolveAuthenticationProcessLaunch({
         cliType: options.cliType,
         agentType: options.agentType,
         runtimeOverrides: options.runtimeOverrides,
         action: 'login',
+        signal: running.abortController.signal,
+        onManagedRuntimeProgress: (event) => {
+          if (running.abortController.signal.aborted) return;
+          options.onProgress?.({
+            status: 'runtime-download',
+            runtimeName: event.runtimeName,
+            runtimePhase: event.phase,
+            ...(event.percent === undefined ? {} : { runtimePercent: event.percent }),
+          });
+        },
       });
       if (!launch) {
         throw new Error(`${displayName} authentication is unavailable`);

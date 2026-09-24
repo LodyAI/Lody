@@ -6,8 +6,10 @@ import type {
 import {
   getServerNow,
   machineSupportsLocalFileResourcesProtocol,
+  machineSupportsPiExtensions,
   machineSupportsSubagentCancellation,
   type MachineProtocolCapabilities,
+  type AgentConfigId,
   type CodeCollabV2Error,
   type CodeCollabV2FileIndexRequest,
   type CodeCollabV2FileIndexSnapshot,
@@ -37,6 +39,7 @@ import {
   type LocalProjectId,
   type MachineBugReportResponse,
   type MachineId,
+  type MachinePiExtensionsResponse,
   type SendLocalMachineRpcResult,
   type SessionCancelResponse,
   type SessionDispatchTurnResponse,
@@ -1149,6 +1152,53 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
     }
   };
 
+  const requestMachinePiExtensions = async (
+    machineId: MachineId,
+    options?: { configId?: AgentConfigId }
+  ): Promise<MachinePiExtensionsResponse> => {
+    const fail = (error: string): MachinePiExtensionsResponse => ({ success: false, error });
+    try {
+      await targetRouter.resolvePlaneForMachine(machineId, {
+        timeoutMs: LOCAL_MACHINE_ID_READY_TIMEOUT_MS,
+      });
+      const plane = targetRouter.getPlaneForMachine(machineId);
+      if (plane === null) {
+        return fail('Machine RPC routing is not available.');
+      }
+      const protocolCapabilities = await deps.getMachineProtocolCapabilities(machineId);
+      if (!machineSupportsPiExtensions({ protocolCapabilities })) {
+        return fail('This machine does not support Pi extension scanning. Update the local agent.');
+      }
+      if (plane === 'local') {
+        const sender = getLocalMachineRpcSender();
+        if (!sender) {
+          return fail('Local Machine RPC is not available.');
+        }
+        const response = await sender({
+          machineId,
+          workspaceId,
+          method: 'machine/pi-extensions',
+          params: { configId: options?.configId },
+          // Above the daemon's worst case: 120 s runtime ensure + 30 s scan.
+          timeoutMs: 180_000,
+        });
+        if (!response.ok) {
+          return fail(response.error);
+        }
+        return response.result as MachinePiExtensionsResponse;
+      }
+      const result = await (
+        await getMachineRpcClient(machineId)
+      ).requestMachinePiExtensions({ configId: options?.configId, timeoutMs: 180_000 });
+      if (result === null) {
+        return fail('Pi extension scan request timed out.');
+      }
+      return result;
+    } catch (error) {
+      return fail(error instanceof Error ? error.message : String(error));
+    }
+  };
+
   const requestMachineBugReport = async (
     machineId: MachineId,
     args: { description: string; reporterUserId: string; requestToken: string },
@@ -1200,5 +1250,6 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
     requestLocalProjectGitState,
     requestLocalProjectControl,
     requestMachineBugReport,
+    requestMachinePiExtensions,
   };
 }

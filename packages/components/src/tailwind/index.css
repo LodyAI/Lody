@@ -89,12 +89,12 @@ code,
 pre,
 .font-mono {
   font-family: var(--font-mono);
-  font-variant-ligatures: contextual;
+  font-variant-ligatures: var(--lody-font-ligatures, contextual);
 }
 
 .font-terminal {
   font-family: var(--font-terminal);
-  font-variant-ligatures: contextual;
+  font-variant-ligatures: var(--lody-font-ligatures, contextual);
 }
 
 @layer utilities {
@@ -328,7 +328,7 @@ pre,
        it scales with the user's font-size setting. */
     font-size: 0.9em;
     line-height: 1.4;
-    font-variant-ligatures: contextual;
+    font-variant-ligatures: var(--lody-font-ligatures, contextual);
   }
 
   .markdown-renderer [data-streamdown='code-block-body'] pre > code > span {

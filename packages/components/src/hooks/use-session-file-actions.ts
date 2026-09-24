@@ -19,7 +19,9 @@ import {
 import { getMachineMetaByIdAtomFamily } from '@/atoms';
 import { localHomeDirAtom, localMachineIdAtom } from '@/atoms/local-probe';
 import { useMachineFlockRows } from '@/hooks/use-machine-flock-rows';
+import { usePostHog } from '@posthog/react';
 import { writeTextToClipboard } from '@/lib/clipboard';
+import { capturePostHogEvent, getAnalyticsFileKind } from '@/lib/posthog-analytics';
 import { downloadBytesAsFile, getDownloadFileName } from '@/lib/download-file';
 import { isNativeAppShell } from '@/lib/native-platform';
 import { shareFileBytesNatively } from '@/lib/session-file-native-save';
@@ -108,6 +110,16 @@ export type MarkdownAgentFileLinkMenuItem =
   | MarkdownAgentFileLinkMenuAction
   | MarkdownAgentFileLinkMenuSubmenu;
 
+type SessionFileAnalyticsAction =
+  | 'open_external'
+  | 'open_in_editor'
+  | 'open_with'
+  | 'reveal'
+  | 'download'
+  | 'native_share'
+  | 'copy_path';
+type SessionFileAnalyticsSource = 'file_fallback' | 'md_link_context_menu' | 'file_menu';
+
 export type SessionFileActions = {
   /** Absolute path on the machine that owns the file, when it resolves. */
   readonly resolveHostPath: (filePath: string) => string | null;
@@ -155,8 +167,21 @@ export function useSessionFileActions({
   } | null;
 }): SessionFileActions {
   const { t } = useTranslation();
+  const postHog = usePostHog();
   const nativeShell = isNativeAppShell();
   const exportingRef = useRef(false);
+  // `session/file_action`: one event per user-invoked file action. Only the
+  // extension bucket leaves the client, never the path.
+  const trackFileAction = useCallback(
+    (action: SessionFileAnalyticsAction, source: SessionFileAnalyticsSource, filePath: string) => {
+      capturePostHogEvent(postHog, 'session/file_action', {
+        action,
+        source,
+        file_kind: getAnalyticsFileKind(filePath),
+      });
+    },
+    [postHog]
+  );
   const [sharing, setSharing] = useState(false);
   const [pathLauncherPreference, setPathLauncherPreference] = useState(
     readStoredPathLauncherPreference
@@ -623,12 +648,21 @@ export function useSessionFileActions({
     ): SessionFileErrorActions | undefined => {
       const trimmed = filePath.trim();
       if (!session || !trimmed) return undefined;
-      const onCopyPath = () => copyPath(trimmed);
+      const onCopyPath = () => {
+        trackFileAction('copy_path', 'file_fallback', trimmed);
+        copyPath(trimmed);
+      };
       if (!localHost || !resolveHostPath(trimmed))
         return {
           onCopyPath,
           ...(nativeShell && download && snapshot?.bytes
-            ? { onShare: () => download(trimmed), sharing }
+            ? {
+                onShare: () => {
+                  trackFileAction('native_share', 'file_fallback', trimmed);
+                  download(trimmed);
+                },
+                sharing,
+              }
             : {}),
         };
       return {
@@ -636,12 +670,18 @@ export function useSessionFileActions({
         localHost: {
           openTarget: resolveOpenFileTarget(trimmed),
           revealLabel: localHost.revealLabel,
-          onOpen: () => localHost.openInDefaultApp(trimmed),
-          onReveal: () => localHost.reveal(trimmed),
+          onOpen: () => {
+            trackFileAction('open_external', 'file_fallback', trimmed);
+            localHost.openInDefaultApp(trimmed);
+          },
+          onReveal: () => {
+            trackFileAction('reveal', 'file_fallback', trimmed);
+            localHost.reveal(trimmed);
+          },
         },
       };
     },
-    [copyPath, download, localHost, nativeShell, resolveHostPath, session, sharing]
+    [copyPath, download, localHost, nativeShell, resolveHostPath, session, sharing, trackFileAction]
   );
 
   const resolveMarkdownLinkFilePath = useCallback(
@@ -669,7 +709,10 @@ export function useSessionFileActions({
           id: 'copy-path',
           label: t('sessions.fileActions.copyPath', 'Copy Path'),
           icon: Copy,
-          run: () => copyPath(filePath),
+          run: () => {
+            trackFileAction('copy_path', 'md_link_context_menu', filePath);
+            copyPath(filePath);
+          },
         },
       ];
 
@@ -683,7 +726,10 @@ export function useSessionFileActions({
         id: 'open-file',
         label: t('sessions.fileActions.openFile', 'Open File'),
         icon: ExternalLink,
-        run: () => localHost.openInDefaultApp(filePath),
+        run: () => {
+          trackFileAction('open_external', 'md_link_context_menu', filePath);
+          localHost.openInDefaultApp(filePath);
+        },
       });
       if (availableEditorLaunchers) {
         items.push({
@@ -693,7 +739,10 @@ export function useSessionFileActions({
             editor: availableEditorLaunchers.selected.label,
           }),
           icon: ExternalLink,
-          run: () => runEditorAction(availableEditorLaunchers.selected, filePath),
+          run: () => {
+            trackFileAction('open_in_editor', 'md_link_context_menu', filePath);
+            runEditorAction(availableEditorLaunchers.selected, filePath);
+          },
         });
       }
 
@@ -709,7 +758,10 @@ export function useSessionFileActions({
             id: `open-with:${getPathLauncherId(launcher)}`,
             label: launcher.label,
             icon: ExternalLink,
-            run: () => runEditorAction(launcher, filePath),
+            run: () => {
+              trackFileAction('open_with', 'md_link_context_menu', filePath);
+              runEditorAction(launcher, filePath);
+            },
           })),
         });
       }
@@ -719,7 +771,10 @@ export function useSessionFileActions({
         id: 'reveal',
         label: localHost.revealLabel,
         icon: FolderOpen,
-        run: () => localHost.reveal(filePath),
+        run: () => {
+          trackFileAction('reveal', 'md_link_context_menu', filePath);
+          localHost.reveal(filePath);
+        },
       });
       return items;
     },
@@ -731,6 +786,7 @@ export function useSessionFileActions({
       resolveMarkdownLinkFilePath,
       runEditorAction,
       t,
+      trackFileAction,
     ]
   );
 
@@ -741,14 +797,20 @@ export function useSessionFileActions({
         id: 'copy-relative-path',
         label: t('sessions.fileViewer.copyRelativePath', 'Copy relative path'),
         icon: Copy,
-        run: copyRelativePath,
+        run: (filePath) => {
+          trackFileAction('copy_path', 'file_menu', filePath);
+          copyRelativePath(filePath);
+        },
         isAvailable: (filePath) => !isAbsoluteFilePath(filePath),
       },
       {
         id: 'copy-absolute-path',
         label: t('sessions.fileViewer.copyAbsolutePath', 'Copy absolute path'),
         icon: Copy,
-        run: copyAbsolutePath,
+        run: (filePath) => {
+          trackFileAction('copy_path', 'file_menu', filePath);
+          copyAbsolutePath(filePath);
+        },
         isAvailable: (filePath) => resolveAbsoluteFilePath(filePath) !== null,
       },
     ];
@@ -758,7 +820,10 @@ export function useSessionFileActions({
         id: 'open-in-editor',
         label: editor.label,
         icon: ExternalLink,
-        run: editor.open,
+        run: (filePath) => {
+          trackFileAction('open_in_editor', 'file_menu', filePath);
+          editor.open(filePath);
+        },
       });
     }
     if (localHost) {
@@ -766,7 +831,10 @@ export function useSessionFileActions({
         id: 'reveal',
         label: localHost.revealLabel,
         icon: FolderOpen,
-        run: localHost.reveal,
+        run: (filePath) => {
+          trackFileAction('reveal', 'file_menu', filePath);
+          localHost.reveal(filePath);
+        },
       });
     }
     if (download) {
@@ -776,7 +844,10 @@ export function useSessionFileActions({
           ? t('sessions.fileActions.share', 'Share file…')
           : t('sessions.fileActions.download', 'Download file'),
         icon: nativeShell ? Share2 : Download,
-        run: download,
+        run: (filePath) => {
+          trackFileAction(nativeShell ? 'native_share' : 'download', 'file_menu', filePath);
+          download(filePath);
+        },
       });
     }
     return items;
@@ -789,6 +860,7 @@ export function useSessionFileActions({
     resolveAbsoluteFilePath,
     session,
     t,
+    trackFileAction,
   ]);
 
   return {

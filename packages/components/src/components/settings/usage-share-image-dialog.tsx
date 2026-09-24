@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
+import { usePostHog } from '@posthog/react';
 import { Check, Copy, Download } from 'lucide-react';
 import { Spinner } from '@/ui/spinner';
 import { cn } from '@/lib/utils';
@@ -9,6 +10,7 @@ import { Button } from '@/ui/button';
 import { Switch } from '@/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/ui/select';
 import { copyShareImage, exportShareImage } from '@/lib/share-image-export';
+import { capturePostHogEvent } from '@/lib/posthog-analytics';
 import { stripRecommended } from '@/components/shared/acp-selector-options';
 import { createUsageCalendarModel, type UsageCalendarMetric } from './usage-calendar-model';
 import {
@@ -111,6 +113,7 @@ export function UsageShareImageDialog({
   workspaceName,
 }: UsageShareImageDialogProps) {
   const { t } = useTranslation();
+  const postHog = usePostHog();
   const [aspect, setAspect] = useState<UsageShareCardAspect>('portrait');
   const [subject, setSubject] = useState<UsageShareCardSubject>('personal');
   const [backdrop, setBackdrop] = useState<UsageShareCardBackdrop>('lody');
@@ -173,15 +176,25 @@ export function UsageShareImageDialog({
     setExportError(false);
     setCopied(false);
     try {
+      const orientation = aspect === 'wide' ? 'landscape' : 'portrait';
       if (operationKind === 'copy') {
         await copyShareImage(exportRef.current);
+        capturePostHogEvent(postHog, 'export/usage_image_created', {
+          orientation,
+          action: 'copied',
+        });
         setCopied(true);
       } else {
-        await exportShareImage(
+        const { saved } = await exportShareImage(
           exportRef.current,
           workspaceName ? `${workspaceName} usage` : undefined,
           'lody-usage'
         );
+        if (saved)
+          capturePostHogEvent(postHog, 'export/usage_image_created', {
+            orientation,
+            action: 'saved',
+          });
       }
     } catch {
       setExportError(true);

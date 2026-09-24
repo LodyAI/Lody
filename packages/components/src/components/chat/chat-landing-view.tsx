@@ -1,5 +1,6 @@
 import { useCallback, useRef } from 'react';
 import type { ClipboardEvent, KeyboardEvent, ReactNode, Ref } from 'react';
+import { usePostHog } from '@posthog/react';
 import type { Mention as MentionRange } from '@/ui/mention/index';
 import type { CombinedMentionTextareaHandle } from '@/components/mentions/combined-mention-textarea';
 import type { PersistedMentionRange } from '@/components/mentions/mention-persistence';
@@ -21,6 +22,7 @@ import { Spinner } from '@/ui/spinner';
 import type { PastedTextDraft } from '@/lib/pasted-text-draft';
 import { getDroppedFileLocalPath, toPathMentionInsertion } from '@/lib/dropped-local-path';
 import { isPlainLinkPasteShortcut, parseAppSessionUrl } from '@/lib/session-app-url';
+import { capturePostHogEvent } from '@/lib/posthog-analytics';
 import { MobileChatLandingScreen } from '@/components/mobile/mobile-chat-landing-screen';
 import { WebChatLandingScreen } from './web-chat-landing-screen';
 
@@ -247,6 +249,7 @@ export function ChatLandingView({
   errorLabels = {},
 }: ChatLandingViewProps) {
   const isDark = tone === 'dark';
+  const postHog = usePostHog();
   const { mentionActionsRef, dropZone, overlayActive } = useSessionMentionDrop(
     !isMobile && !submissionPending
   );
@@ -266,9 +269,14 @@ export function ChatLandingView({
     (event: ClipboardEvent<HTMLTextAreaElement>) => {
       const text = event.clipboardData.getData('text/plain');
       // Cmd/Ctrl+Shift+V keeps a conversation URL as a plain link.
-      if (text && !isPlainLinkPasteShortcut(event)) {
-        const sessionUrl = parseAppSessionUrl(text);
-        if (sessionUrl) {
+      const sessionUrl = text ? parseAppSessionUrl(text) : null;
+      if (sessionUrl) {
+        if (isPlainLinkPasteShortcut(event)) {
+          capturePostHogEvent(postHog, 'mention/session_link_pasted', {
+            converted: false,
+            surface: 'chat_landing',
+          });
+        } else {
           const target = event.currentTarget;
           const at = target.selectionStart ?? target.value.length;
           const replaceEnd = target.selectionEnd ?? at;
@@ -278,6 +286,10 @@ export function ChatLandingView({
               replaceEnd,
             })
           ) {
+            capturePostHogEvent(postHog, 'mention/session_link_pasted', {
+              converted: true,
+              surface: 'chat_landing',
+            });
             event.preventDefault();
             return;
           }
@@ -285,7 +297,7 @@ export function ChatLandingView({
       }
       onPromptPaste?.(event);
     },
-    [mentionActionsRef, onPromptPaste]
+    [mentionActionsRef, onPromptPaste, postHog]
   );
 
   const {

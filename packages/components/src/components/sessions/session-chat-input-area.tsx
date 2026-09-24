@@ -62,6 +62,7 @@ import {
   getDurationSinceMs,
   getPerformanceNowMs,
 } from '@/lib/posthog-analytics';
+import { captureAgentRoleMentionsApplied } from '@/lib/agent-role-analytics';
 import { IMAGE_UPLOAD_REASONS, type ImageUploadReason } from '@lody/shared';
 import type {
   AcpCommandSummary,
@@ -612,6 +613,8 @@ export const SessionChatInputArea = memo(
     }, [claimNavigationFocus, usesMobileKeyboardAction]);
     const agentRoleTurnSelectionRef = useRef<SessionTurnAgentRoleSelection>(undefined);
     const selectedAgentRoleRef = useRef<AgentRole | undefined>(undefined);
+    /** Readable Roles, for attributing accepted `@Role` mentions in analytics. */
+    const workspaceAgentRolesRef = useRef<readonly AgentRole[]>([]);
     const agentRoleRunConfigRef = useRef({
       modeId: selectedModeId,
       modelId: selectedModelId,
@@ -1675,13 +1678,22 @@ export const SessionChatInputArea = memo(
         const text = event.clipboardData.getData('text/plain');
 
         // Cmd/Ctrl+Shift+V keeps a conversation URL as a plain link.
-        if (text && !isPlainLinkPasteShortcut(event)) {
-          const sessionUrl = parseAppSessionUrl(text);
-          if (sessionUrl) {
+        const sessionUrl = text ? parseAppSessionUrl(text) : null;
+        if (sessionUrl) {
+          if (isPlainLinkPasteShortcut(event)) {
+            capturePostHogEvent(postHog, 'mention/session_link_pasted', {
+              converted: false,
+              surface: 'session_chat',
+            });
+          } else {
             const target = event.currentTarget;
             const at = target.selectionStart ?? target.value.length;
             const replaceEnd = target.selectionEnd ?? at;
             if (insertSessionMention(sessionUrl.sessionId, { at, replaceEnd })) {
+              capturePostHogEvent(postHog, 'mention/session_link_pasted', {
+                converted: true,
+                surface: 'session_chat',
+              });
               event.preventDefault();
               return;
             }
@@ -1742,7 +1754,14 @@ export const SessionChatInputArea = memo(
         event.preventDefault();
         attachPastedFiles(pastedFiles);
       },
-      [attachPastedFiles, insertLargePastedTextAtSelection, insertSessionMention, isArchived, t]
+      [
+        attachPastedFiles,
+        insertLargePastedTextAtSelection,
+        insertSessionMention,
+        isArchived,
+        postHog,
+        t,
+      ]
     );
     const handleImageDrop = useCallback(
       (files: File[]) => {
@@ -2050,6 +2069,11 @@ export const SessionChatInputArea = memo(
             options
           );
           if (accepted) {
+            captureAgentRoleMentionsApplied(postHog, {
+              spans: trimmedSpans,
+              roles: workspaceAgentRolesRef.current,
+              executionMachineId: session.machineId,
+            });
             if (submission.isCurrent()) {
               // External actions can replace a disabled draft while acceptance is pending.
               // Retire only the fields that still belong to this accepted submission.
@@ -2102,6 +2126,7 @@ export const SessionChatInputArea = memo(
         publishVisualAnnotationReferences,
         postHog,
         session.id,
+        session.machineId,
         sessionProjectKind,
         updatePastedTextDraftsForSession,
         userInput,
@@ -2338,6 +2363,7 @@ export const SessionChatInputArea = memo(
        values stay changeable every turn in an existing conversation too. */
     const [agentRoleEditor, setAgentRoleEditor] = useState<AgentRoleEditorState | null>(null);
     const { roles: accessibleAgentRoles } = useWorkspaceAgentRoles();
+    workspaceAgentRolesRef.current = accessibleAgentRoles;
     const sessionAgentRole = useSessionAgentRole({
       sessionId: session.id,
       provenanceRoleId: session.agentRoleId,

@@ -55,11 +55,10 @@ rolls back — is in the root [AGENTS.md](../../../../../AGENTS.md).
 - Usage day details persist bounded snapshots per auth session, workspace, and
   date. Reuse for one hour; refresh expired selections without blanking cached
   data. Preserve auth/capability gates; see [contract](../../../../../specs/usage-detail-cache.md).
-- Interface and terminal font choices exclude the known symbol families in
-  `lib/local-fonts.ts`; persisted selections use the same filter. Font option names
-  use the default interface font so they remain readable.
-- Font size is five named tiers in `conversation-font-size-options.ts` writing
-  `--ui-font-size` (settings 1em; compact chrome 0.9em). No free-form number.
+- Interface/terminal fonts exclude symbol families in `lib/local-fonts.ts`; option
+  names stay on the default interface font. Font size is five named tiers writing
+  `--ui-font-size`. Font ligatures is a boolean after the Terminal section, writing
+  `--lody-font-ligatures` for conversation, code, and tool output.
 - The Codex reset forecast chip in the provider row must not fetch on mount and must
   pass `nestedInDialog` for its dialog: [../codex-reset/AGENTS.md](../codex-reset/AGENTS.md).
 - The usage share card is a fixed-format report, not a second `ChatShareCard`:

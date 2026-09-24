@@ -1,9 +1,8 @@
 # Electron contributor guidelines
 
 `CLAUDE.md` is a symlink to this file. Edit `AGENTS.md` only.
-Root `AGENTS.md` also applies. Main/preload/renderer module boundaries, IPC
-contracts, and window/renderer integration rules live in
-[`src/AGENTS.md`](src/AGENTS.md) and are read whenever `src/**` changes.
+Root rules apply. For `src/**`, read module, IPC and window contracts in
+[`src/AGENTS.md`](src/AGENTS.md).
 
 ## Local OSS composition
 
@@ -52,8 +51,8 @@ contracts, and window/renderer integration rules live in
 
 ## Embedded CLI and native dependencies
 
-- The embedded CLI launches built JavaScript only; there is no source-loader/Jiti
-  fallback. Development and packaged builds must use the same output layout.
+- The embedded CLI runs built JavaScript, never source-loader/Jiti. Development
+  and packaged builds share the output layout.
 - `better-sqlite3`, `@lydell/node-pty`, and `loro-crdt` remain external and must be
   staged under `resources/cli/node_modules` by `scripts/sync-cli-dist.mjs` and
   `scripts/cli-native-deps.mjs`.
@@ -116,6 +115,10 @@ contracts, and window/renderer integration rules live in
 - `snap` stays in the target list for local builds and needs snapcraft on the machine.
 
 ## Verification
+
+- Claimed warm windows stay hidden until matching content readiness. Main owns the
+  recovery deadline; do not cover a visible window with a blank surface. Restore
+  background throttling after preparation and replenish the spare after show.
 
 - Cloud browser login is owned by main: PKCE attempts, callback exchange and replay
   handling must not depend on a renderer. Organization failures never roll back

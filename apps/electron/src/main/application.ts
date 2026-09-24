@@ -1,3 +1,4 @@
+import { handleWindowContentReady } from './window-target'
 import { installLocalFileResourceProtocol } from './services/local-file-resource-protocol'
 import { app, BrowserWindow, dialog, ipcMain, safeStorage } from 'electron'
 import { electronApp, optimizer } from '@electron-toolkit/utils'
@@ -5,6 +6,8 @@ import dns from 'node:dns'
 import { writeHeapSnapshot } from 'node:v8'
 import icon from '../../resources/icon.png?asset'
 import macIcon from '../../build/icon-mac.padded.png?asset'
+import aquaIcon from '../../resources/app-icons/aqua.png?asset'
+import { createElectronAppIconService } from './services/app-icon-service'
 import { handleDeepLink, initializeAuthDeepLinks } from './deep-link'
 import type { DesktopLaunchEvent } from './services/desktop-launch-buffer'
 import { registerLodyProtocolClient } from './protocol-client'
@@ -52,7 +55,7 @@ import { mainPlatformKind } from './platform'
 import { getLocalLoroDataPlaneSocketPath } from '@lody/shared/node/local-ipc'
 import { getLocalTerminalSocketPath } from '@lody/shared/node/local-terminal'
 import { getInitialDesktopPath, markOnboardingCompleted } from './onboarding-state'
-import { handleWindowWarmReady } from './window-warm-service'
+import { handlePreparedWindowState, handleWindowWarmReady } from './window-warm-service'
 import { extractDeepLinkFromArgv } from './deep-link-url'
 import { shouldHideMainWindowOnAutoLaunch } from './auto-launch-policy'
 import {
@@ -163,6 +166,14 @@ export function startApplication(executionHost?: DesktopExecutionHost): void {
     await startDevbarDevframeService()
     recordE2EBootDiagnostic('initializing-services')
     if (process.platform === 'darwin' && !app.isPackaged) app.dock?.setIcon(macIcon)
+    const appIconService = createElectronAppIconService(macIcon, aquaIcon)
+    if (process.platform === 'darwin' && app.isPackaged) {
+      void Promise.resolve()
+        .then(() => appIconService.getState())
+        .catch((error: unknown) => {
+          console.warn('[Electron] Failed to restore app icon', error)
+        })
+    }
 
     logDeepLinkDebug('app.whenReady resolved', {
       isDefaultProtocolClient: app.isDefaultProtocolClient(LODY_PROTOCOL),
@@ -260,6 +271,7 @@ export function startApplication(executionHost?: DesktopExecutionHost): void {
       setMainWindowProductReloadTarget(window)
     }
     registerIpcServices({
+      appIconService,
       cliService,
       appUpdaterService,
       authService,
@@ -294,6 +306,14 @@ export function startApplication(executionHost?: DesktopExecutionHost): void {
     // enabled, session-windows primes the spare after an auxiliary request so
     // ordinary single-window sessions never pay an idle renderer cost.
     ipcMain.on(IPC_SEND_CHANNELS.appWindowReady, (event) => handleWindowWarmReady(event.sender.id))
+    ipcMain.on(IPC_SEND_CHANNELS.appPreparedWindowState, (event, state) => {
+      if (event.senderFrame === event.sender.mainFrame)
+        handlePreparedWindowState(event.sender.id, state)
+    })
+    ipcMain.on(IPC_SEND_CHANNELS.appWindowContentReady, (event, target) => {
+      if (event.senderFrame === event.sender.mainFrame)
+        handleWindowContentReady(event.sender.id, target)
+    })
     console.info('[Electron] Initial desktop surface selected', {
       initialPath,
       hideWindowOnAutoLaunch

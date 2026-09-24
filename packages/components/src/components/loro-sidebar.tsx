@@ -25,6 +25,7 @@ import {
   WINDOW_DRAG_EXEMPT_CLASS,
   WINDOW_DRAG_HEADER_CLASS,
   useMacTrafficLightRowPadClass,
+  useWindowsCaptionRowPadClass,
 } from '@/ui/window-drag-region';
 import { useElectronFullscreen } from '@/lib/electron';
 import { Badge } from '@/ui/badge';
@@ -770,6 +771,7 @@ export const LoroSidebar = memo(function LoroSidebar({
   const isMobile = useIsMobile();
   const isElectronFullscreen = useElectronFullscreen();
   const macTrafficLightRowPadClass = useMacTrafficLightRowPadClass();
+  const windowsCaptionRowPadClass = useWindowsCaptionRowPadClass();
   const { t } = useTranslation();
   const collapseShortcut = useCommandShortcutLabel('sidebar.toggle');
   const backShortcut = useCommandShortcutLabel('nav.back');
@@ -1028,7 +1030,7 @@ export const LoroSidebar = memo(function LoroSidebar({
                         className="gap-1.5 ps-2 pe-8"
                         onClickCapture={(event) => {
                           if (!workspaceSlug || !isNewWindowClick(event)) return;
-                          if (openDesktopWindow(undefined, workspaceSlug)) {
+                          if (openDesktopWindow(undefined, workspaceSlug, 'modifier_click')) {
                             event.preventDefault();
                             event.stopPropagation();
                           }
@@ -1087,7 +1089,7 @@ export const LoroSidebar = memo(function LoroSidebar({
                         <ContextMenuContent>
                           <ContextMenuItem
                             onSelect={() => {
-                              openDesktopWindow(undefined, workspaceSlug);
+                              openDesktopWindow(undefined, workspaceSlug, 'context_menu');
                             }}
                           >
                             <AppWindow />
@@ -1173,7 +1175,7 @@ export const LoroSidebar = memo(function LoroSidebar({
             'group/sidebar-header relative flex items-center justify-between gap-2',
             isMobile
               ? 'pl-[calc(12px+var(--safe-area-left))] pr-[calc(12px+var(--safe-area-right))] pt-[calc(12px+var(--safe-area-top))]'
-              : cn('h-11 px-1.5', macTrafficLightRowPadClass),
+              : cn('h-11 px-1.5', macTrafficLightRowPadClass, windowsCaptionRowPadClass),
             windowDrag && WINDOW_DRAG_HEADER_CLASS
           )}
         >
