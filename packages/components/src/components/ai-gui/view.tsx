@@ -3748,10 +3748,13 @@ const AssistantTurnConfigInfoButton = ({
   );
 };
 
-/* Shared type/icon for the activity group header AND every tool/thought
-   step under it — one size, one color so the stack reads as one list. */
-const ACTIVITY_PROCESS_TEXT_CLASS = 'text-[12.5px] font-medium leading-snug text-muted-foreground';
-const ACTIVITY_PROCESS_ICON_CLASS = 'h-3.5 w-3.5 shrink-0 text-muted-foreground';
+/* The turn reads on three steps: the reply is the text; a group summary
+   ("Worked for 12s", "Read 2 files") is a notch smaller and secondary; a step
+   under it is smaller again, at regular weight — a medium-weight gray reads as
+   a second, muddier kind of text. Icons sit a tone under their words so the
+   eye lands on what happened, not on the glyph beside it. */
+const ACTIVITY_PROCESS_TEXT_CLASS = 'text-[12.5px] font-normal leading-snug text-muted-foreground';
+const ACTIVITY_PROCESS_ICON_CLASS = 'h-3.5 w-3.5 shrink-0 text-muted-foreground/70';
 /* One tone for every icon in a turn — see `ACTIVITY_PROCESS_ICON_CLASS`. Only
    the optical nudge is local; no per-icon opacity. */
 const ACTIVITY_STEP_ICON_CLASS = cn(ACTIVITY_PROCESS_ICON_CLASS, 'mt-0.5');
@@ -3762,7 +3765,7 @@ const ACTIVITY_STEP_BUTTON_CLASS = cn(
 );
 const ACTIVITY_STEP_TITLE_CLASS = cn('min-w-0 flex-1', ACTIVITY_PROCESS_TEXT_CLASS);
 const ACTIVITY_STEP_BODY_CLASS =
-  'text-[12.5px] font-medium leading-[1.5] text-muted-foreground ' +
+  'text-[12.5px] font-normal leading-[1.5] text-muted-foreground ' +
   '[&_:is(h1,h2,h3,h4,h5,h6)]:!my-1 [&_:is(h1,h2,h3,h4,h5,h6)]:!text-[12.5px] ' +
   '[&_:is(h1,h2,h3,h4,h5,h6)]:!font-medium [&_:is(h1,h2,h3,h4,h5,h6)]:!text-muted-foreground ' +
   '[&_:is(h1,h2,h3,h4,h5,h6):first-child]:!mt-0 ' +
@@ -3775,7 +3778,9 @@ const ACTIVITY_GROUP_LABEL_CLASS = (isMobile: boolean) =>
     'min-w-0',
     isMobile
       ? cn('flex-1', ACTIVITY_PROCESS_TEXT_CLASS)
-      : 'text-[length:var(--markdown-body-font-size,1em)] font-normal leading-[1.75]'
+      : /* A notch under the reply, on the reply's line height so the rhythm
+           between a summary and the prose around it does not jump. */
+        'text-[length:calc(var(--markdown-body-font-size,1em)*0.9)] font-normal leading-[1.75]'
   );
 
 /** Last intended rotate after a click. Survives Virtua remounting the row. */
@@ -5924,31 +5929,16 @@ const extractFilePathFromTitle = (title: string, label: string) => {
   return path.trim() || null;
 };
 
-/** Action words that should be highlighted in tool titles */
-const TOOL_ACTION_WORDS = ['Find', 'Search', 'Grep', 'Glob'];
-
 /**
- * Renders a tool title with the action word (e.g., "Find", "Search") slightly brighter.
- * If no action word is found at the start, renders the title as-is.
+ * A tool title as one run of text. Brightening its first word ("Find",
+ * "Search") made those rows louder than their neighbours for no reason a
+ * reader could see.
  */
-const ToolTitleWithHighlight = ({ title, className }: { title: string; className?: string }) => {
-  for (const action of TOOL_ACTION_WORDS) {
-    if (title.startsWith(action + ' ')) {
-      const rest = title.slice(action.length);
-      return (
-        <span className={className} title={title}>
-          <span className="text-foreground/90">{action}</span>
-          {rest}
-        </span>
-      );
-    }
-  }
-  return (
-    <span className={className} title={title}>
-      {title}
-    </span>
-  );
-};
+const ToolTitleWithHighlight = ({ title, className }: { title: string; className?: string }) => (
+  <span className={className} title={title}>
+    {title}
+  </span>
+);
 
 // Exported for idle-rerender tests: this is the live memo boundary for assistant
 // markdown (used by `renderAssistantContent`), guarding both callback-identity
@@ -6800,7 +6790,7 @@ const ToolCallCard = memo(function ToolCallCard({
                         className={cn(
                           isActivityRow
                             ? cn(
-                                'inline-flex min-w-0 max-w-[min(100%,20rem)] shrink items-center truncate font-mono',
+                                'inline-flex min-w-0 max-w-[min(100%,20rem)] shrink items-center truncate',
                                 ACTIVITY_PROCESS_TEXT_CLASS
                               )
                             : 'inline-flex min-w-0 max-w-[240px] shrink items-center gap-1 rounded-md border border-border/60 px-2 py-0.5 text-[11px]',
@@ -6815,8 +6805,10 @@ const ToolCallCard = memo(function ToolCallCard({
                         ) : null}
                         <span
                           className={cn(
-                            'min-w-0 truncate whitespace-nowrap font-mono',
-                            isActivityRow ? ACTIVITY_PROCESS_TEXT_CLASS : 'text-xs'
+                            'min-w-0 truncate whitespace-nowrap',
+                            /* A step is a sentence ("Read session-list.tsx"),
+                               so its file name stays in the sentence's type. */
+                            isActivityRow ? ACTIVITY_PROCESS_TEXT_CLASS : 'font-mono text-xs'
                           )}
                         >
                           {fileName}

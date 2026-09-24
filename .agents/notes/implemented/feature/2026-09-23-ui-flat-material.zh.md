@@ -234,5 +234,13 @@ Billing（`billing-setting-pure.tsx`）之前还是 Tailwind。它的卡片用�
 `CompactRow`，付费周期切换是 `Tabs` 条，它的面板就是价格。创建工作区页面仍有自己
 手写的周期切换。
 
+## 对话按三级阅读
+
+owner 觉得回合里视觉混乱、重心不对。过程行在和回复抢注意力：分组摘要（"Finished
+working"、"Read 1 file"）和正文一样大，步骤是中等字重的灰字，部分标题把第一个词
+提亮，文件名切成等宽字体，图标和文字一样重。现在回复是正文；分组摘要是正文的 0.9
+倍、次级色、沿用正文行高；步骤是 12.5px 常规字重，图标比文字浅一级；步骤里的文件名
+保持句子本身的字体。
+
 相关：[token gallery](2026-09-09-ui-token-gallery.md)、
 [调用点迁移](2026-09-22-ui-radix-callsite-migration.md)。

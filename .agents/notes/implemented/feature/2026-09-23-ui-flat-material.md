@@ -285,5 +285,15 @@ their cards, invoices as ruled rows, the redeem and payment rows as
 `CompactRow`s, and the interval switch a `Tabs` strip whose panel is the price.
 The workspace-creation page still has its own hand-built interval switch.
 
+## The conversation reads on three steps
+
+The owner found the turn visually confused, the weight in the wrong places.
+The process rows competed with the reply: group summaries ("Finished working",
+"Read 1 file") were body-sized, steps were medium-weight gray, some titles
+brightened their first word, file names switched to mono, and icons were as
+loud as their text. Now the reply is the text; a group summary is 0.9 of it,
+secondary, on the reply's line height; a step is 12.5px at regular weight with
+its icon a tone lighter; a step's file name stays in the sentence's type.
+
 Related: [token gallery](2026-09-09-ui-token-gallery.md),
 [call-site migration](2026-09-22-ui-radix-callsite-migration.md).
