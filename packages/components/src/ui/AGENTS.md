@@ -18,6 +18,11 @@ strings on i18n rather than the registry's inline English.
   a hashed `?url` asset cannot satisfy it and a host that forgets the plugin gets an
   empty picker. Keep the locale list in the plugin and `lib/emojibase-assets.ts` in
   step; each locale is ~750 KB.
+- `data.json` is emitted with every other bundled locale's `label` and `tags` folded
+  into `tags` (build-time merge keyed on `hexcode`), because frimousse searches only
+  the loaded locale. Do not revert to a verbatim copy — that is what lets one query
+  match in either product language. `label` and `messages.json` stay per-locale so
+  display names and category headers keep the UI language.
 - Anchor the URL on the Vite BASE, never on `document.baseURI` alone. The router uses
   browser history over http, so the document URL is a deep route and resolving against
   it asks for `…/settings/emojibase`, which the dev server answers with the SPA
