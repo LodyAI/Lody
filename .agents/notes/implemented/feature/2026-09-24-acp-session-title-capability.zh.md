@@ -39,6 +39,8 @@ Core 0.1.7 已发布。Claude、Codex、Grok 已固定依赖该版本，两个 n
 - [Claude #33](https://github.com/LodyAI/acp-extension-claude/pull/33)
 - [Codex #53](https://github.com/LodyAI/acp-extension-codex/pull/53)
 - [Grok #19](https://github.com/LodyAI/acp-extension-grok/pull/19)
+- [Kimi #15](https://github.com/LodyAI/acp-extension-kimi/pull/15)
+- [DSH #23](https://github.com/LodyAI/acp-extension-dsh/pull/23)
 
 Kimi 和 DSH 现在也通过相同能力声明接入。Kimi 检查原生托管 OAuth Provider
 配置，在 prompt 成功启动后请求生成；仅 API Key 配置保留客户端生成。元数据
