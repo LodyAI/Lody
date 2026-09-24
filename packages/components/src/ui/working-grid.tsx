@@ -108,7 +108,7 @@ function scrollOffset(el: Element): [number, number] {
  */
 export function WorkingGrid({
   size = 14,
-  cornerRadius = 0.2,
+  cornerRadius = 0.3,
   superellipse,
   brightness = 'wave',
   scale = 'center',

@@ -36,7 +36,7 @@ pixel jellyfish and a dot "ocean patch" read as too cartoonish or too noisy;
 breathing dots, rings, bubbles and a click-ripple layer were tried and dropped.
 The kept form and its defaults:
 
-- 3×3 tiles, corner radius 20% of the tile, gap 0.35 of the tile, 14px overall.
+- 3×3 tiles, corner radius 30% of the tile, gap 0.35 of the tile, 14px overall.
 - Two plane waves, 3.2 and 4.4 cells long (× wavelength 1.5), periods 1.9s and
   2.7s (19:27, so the pattern repeats only after ~51s), travelling down-right and
   down-left. Tiles scale from their centre to a minimum of 0.3 and brightness

@@ -12,7 +12,7 @@ const meta = {
   tags: ['autodocs'],
   args: {
     size: 14,
-    cornerRadius: 0.2,
+    cornerRadius: 0.3,
     brightness: 'wave',
     scale: 'center',
     minScale: 0.3,
