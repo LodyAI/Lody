@@ -362,7 +362,7 @@ describe('Session relation cards', () => {
     expect(dialog?.textContent).toContain(conclusion);
   });
 
-  it('lists the opener and every created Session or Tab from the relations chip', async () => {
+  it('opens the whole related-Sessions tree from the info-bar chip and routes Tabs by root', async () => {
     const store = createStore();
     const meta = (id: string, title: string, extra: Record<string, unknown> = {}) =>
       store.set(setDocMetaByRoomIdAtom, getSessionRoomId(id as SessionId), {
@@ -375,21 +375,17 @@ describe('Session relation cards', () => {
         title,
         ...extra,
       });
-    meta(openerSessionId, 'Opener');
-    meta(createdSessionId, 'Independent child', { openedBySessionId: openerSessionId });
-    meta('created-tab', 'Tab child', {
-      openedBySessionId: openerSessionId,
+    // top ─ opener[tab] ─ created (current)
+    meta('top', 'Top');
+    meta(openerSessionId, 'Opener', { openedBySessionId: 'top' });
+    meta('opener-tab', 'Opener tab', {
       parentSessionId: openerSessionId,
+      openedBySessionId: openerSessionId,
       createdAt: '2026-08-14T12:01:00.000Z',
     });
-    meta('side-chat', 'Side chat', {
-      openedBySessionId: openerSessionId,
-      parentSessionId: openerSessionId,
-      childSessionPlacement: 'side-panel',
-    });
-    meta('archived-child', 'Archived child', {
-      openedBySessionId: openerSessionId,
-      isArchived: true,
+    meta(createdSessionId, 'Created', {
+      openedBySessionId: 'opener-tab',
+      openedByRootSessionId: openerSessionId,
     });
     const opened: unknown[] = [];
 
@@ -400,13 +396,7 @@ describe('Session relation cards', () => {
             status={null}
             relations={
               <CurrentSessionRelationsChip
-                sessionId={openerSessionId}
-                parent={{
-                  sessionId: 'grand-opener' as SessionId,
-                  title: 'Grand opener',
-                  session: null,
-                  target: { sessionId: 'grand-opener' as SessionId },
-                }}
+                sessionId={createdSessionId}
                 onOpenSession={(target) => opened.push(target)}
               />
             }
@@ -415,22 +405,21 @@ describe('Session relation cards', () => {
       );
     });
 
-    const chip = container.querySelector<HTMLButtonElement>('button[aria-expanded]');
-    expect(chip?.textContent).toBe('2');
-    expect(document.querySelector('[data-session-relation-row]')).toBeNull();
-
+    const chip = container.querySelector<HTMLButtonElement>('button[aria-haspopup="dialog"]');
+    expect(chip?.textContent).toBe('3');
     await act(async () => chip?.click());
-    const rows = Array.from(document.querySelectorAll('[data-session-relation-row]')).map(
-      (row) => row.textContent
-    );
-    expect(rows).toEqual(['Grand openerParent', 'Independent childSession', 'Tab childTab']);
-    expect(document.querySelector('[role="separator"]')).not.toBeNull();
+
+    const rows = Array.from(document.querySelectorAll('[data-session-relation-row]'));
+    expect(rows.map((row) => row.textContent)).toEqual(['Top', 'Opener', 'Opener tab', 'Created']);
+    expect(
+      document
+        .querySelector(`[data-session-relation-row="${createdSessionId}"]`)
+        ?.getAttribute('aria-current')
+    ).toBe('page');
 
     await act(async () =>
-      document
-        .querySelector<HTMLButtonElement>('[data-session-relation-row="created-tab"]')
-        ?.click()
+      document.querySelector<HTMLButtonElement>('[data-session-relation-row="opener-tab"]')?.click()
     );
-    expect(opened).toEqual([{ sessionId: openerSessionId, tabSessionId: 'created-tab' }]);
+    expect(opened).toEqual([{ sessionId: openerSessionId, tabSessionId: 'opener-tab' }]);
   });
 });

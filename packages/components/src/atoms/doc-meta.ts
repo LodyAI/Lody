@@ -388,21 +388,6 @@ export const openedSessionsAtomFamily = createChildSessionsAtomFamily(
   byCreatedAtAscending
 );
 
-/**
- * Every Session or top Tab this Session created (`openedBySessionId`), for the
- * info bar's related-Sessions chip. Unlike {@link openedSessionsAtomFamily}
- * this keeps Tab children: the chip labels each row Tab or Session. Side chats
- * are excluded; they already live in this Session's right panel.
- */
-export const createdSessionsAtomFamily = createChildSessionsAtomFamily(
-  (session, openerId) =>
-    session.openedBySessionId === openerId &&
-    session.id !== openerId &&
-    session.childSessionPlacement !== 'side-panel' &&
-    !session.isArchived,
-  byCreatedAtAscending
-);
-
 // Durable side-session conversations share the parent workspace like ordinary
 // child tabs, but are projected only into the right panel.
 export const sideSessionsAtomFamily = createChildSessionsAtomFamily(

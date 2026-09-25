@@ -165,16 +165,19 @@ labelClassName`) so the stage diffstat never clips. Wired from
 
 ## Related-Sessions chip
 
-`session-relations-chip.tsx` renders a `MessagesSquare` chip (with the created
-count) in the info bar's cluster zone, via the bar's `relations` slot, whenever
-the Session has a precise opener (`openedBySessionId`) or has created
-Sessions/Tabs (`createdSessionsAtomFamily`: same `openedBySessionId`, side
-chats and archived rows excluded). Like Preview it is a plain action, never
-staged: one click toggles `PopoverActionChip`'s popover above the bar. Inside
-the bar the popover anchors to the pill (Radix `virtualRef` resolving the
-enclosing `[data-info-bar-surface]`) and takes its width, so the panel shares the bar's edges. The list
-is agent icon, live title, and kind (Parent / Session / Tab), with a divider
-after the parent row. Tab rows navigate with root + exact tab ids. The page
-reads only a boolean (`useHasCreatedSessions`); the chip subscribes to the list
-in the leaf, so child status churn never re-renders the page.
+`session-relations-chip.tsx` renders a `MessagesSquare` chip in the info bar's
+cluster zone, via the bar's `relations` slot, whenever the current Session sits
+in an opened-by tree (`lib/session-relation-tree.ts`). Like Preview it is a
+plain action, never staged: one click toggles `PopoverActionChip`'s popover,
+which anchors to the pill (Radix `virtualRef` resolving the enclosing
+`[data-info-bar-surface]`) and takes its width.
+
+The popover shows the complete tree: every ancestor from the topmost live
+opener down, and every descendant. Edges connect rows (root Sessions); a Tab
+opener resolves to its root like the sidebar tree, without the sidebar's depth
+cap. A row is its root Session plus its top Tabs as equal pills; closed plain
+Tabs are hidden. Each pill is agent icon, live title, and the sidebar's
+`SessionRowStatusIndicator` (waiting > working > unread); the current Session is
+highlighted. Tab pills navigate with root + exact tab ids. The page reads only
+a boolean (`useHasSessionRelations`); the chip builds the tree in the leaf.
 Decision: [relations note](../notes/implemented/feature/2026-09-24-session-relations-chip.md).

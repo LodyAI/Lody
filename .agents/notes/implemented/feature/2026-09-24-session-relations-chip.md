@@ -1,4 +1,4 @@
-# Related-Sessions chip keeps MCP-created Sessions reachable
+# Related-Sessions tree keeps MCP-created Sessions reachable
 
 Status: implemented
 Translation: current
@@ -10,44 +10,47 @@ Translation: current
 Sessions and Tabs created through `lody_session_create` were only visible as
 in-stream "Session created" cards, which scroll away with the conversation, so
 after a few turns the user lost track of what the Session had spawned and where
-it came from. The composer info bar now carries a Related-Sessions chip (icon
-plus created count); one click opens a popover above the bar listing the
-opener, a divider, then every created Session or Tab with its agent icon, title,
-and kind. A first version used a separate pinned bar; it was dropped because it
-cost a full extra row of vertical space. The in-stream cards stay as a record
-but shrink to one clickable line. Verified with a jsdom behavior test and
-Storybook screenshots; not yet exercised in the packaged desktop app.
+it came from. The composer info bar now carries a Related-Sessions chip; one
+click opens a panel above the bar with the complete opened-by tree the current
+Session belongs to: every ancestor and descendant, one row per Session with its
+Tabs as pills, each showing the same live status mark as the sidebar. Earlier
+iterations (a pinned bar, then a flat opener/children list) were replaced; the
+in-stream cards stay as a record but shrink to one clickable line. Verified with
+unit and jsdom tests and Storybook screenshots; not yet exercised in the
+packaged desktop app.
 
 ## Decision
 
-- Source of truth is `SessionMeta.openedBySessionId`. MCP-created Tabs carry
-  both `parentSessionId` and `openedBySessionId`, so a new
-  `createdSessionsAtomFamily` keeps them (unlike `openedSessionsAtomFamily`,
-  which serves the `⋯` menu and drops Tabs). Side chats are excluded because
-  they already live in the right panel; archived rows are excluded like every
-  other active relation list.
-- Kind is `parentSessionId ? Tab : Session`. Tab rows navigate with
-  `{ sessionId: root, tabSessionId }` so a Tab in another workspace restores
-  precisely.
+- Source of truth is `SessionMeta.openedBySessionId`. The pure builder
+  `lib/session-relation-tree.ts` walks up from the current row to the topmost
+  live opener, then includes every descendant, so the panel is the same tree
+  from any member. Tree edges connect rows (root Sessions): a precise opener
+  that is a Tab resolves to its root through the sidebar's
+  `resolveSidebarOpenerRowId`, but without the sidebar's one-level depth cap.
+- A row is a root Session plus its top Tabs rendered as equal pills, matching
+  the tab strip the user sees in that Session. Closed Tabs are hidden unless
+  current or part of an opened-by relation; side chats and archived Sessions
+  are excluded, so an archived opener ends the upward walk. Cycles stop at the
+  first repeated row.
+- The trailing kind badge (Parent / Session / Tab) was replaced by live status:
+  the sidebar's `SessionRowStatusIndicator` (waiting > working > unread), so a
+  status reads the same everywhere. The tree shape already says what is a Tab.
+- Tab pills navigate with `{ sessionId: root, tabSessionId }`, so a Tab in
+  another workspace restores precisely.
 - The chip is a plain cluster action, like Preview: it never takes the stage,
-  because the stage holds exactly one summary item and a navigation list has
-  no summary form. `PopoverActionChip` in `info-chip.tsx` is the reusable shape
-  (one click toggles a `side="top"` popover with the bar's popover chrome).
-  Inside the bar it anchors to the whole pill via a Radix `virtualRef` that
-  resolves the enclosing `[data-info-bar-surface]`, taking the pill's width, so the panel reads as the bar
-  growing upward rather than a chip-sized dropdown.
-  A React context carrying the pill ref was tried and removed: it forced a
-  Provider around the whole pill for one consumer, while the DOM lookup needs
-  only a data attribute and degrades to anchoring on the chip itself.
-- Rejected: a separate pinned bar above the info bar (the first iteration). It
-  was always visible, but it doubled the chrome above the composer.
-- The chip shows when either direction exists, not only when children exist: a
-  created Session with no children of its own still needs a persistent way back
-  to its opener. The count shows only created Sessions.
-- Render cost: the page reads only a boolean (`useHasCreatedSessions`, a
-  `selectAtom` over the created list) to decide whether to pass the chip, so an
-  otherwise empty bar still hides. The chip subscribes to the list itself in the
-  leaf; created Sessions change status often and the page must not re-render.
+  because the stage holds exactly one summary item and a tree has no summary
+  form. `PopoverActionChip` in `info-chip.tsx` anchors its popover to the whole
+  bar pill via a Radix `virtualRef` that resolves the enclosing
+  `[data-info-bar-surface]`, so the panel reads as the bar growing upward. A
+  React context carrying the pill ref was tried and removed: it forced a
+  Provider around the whole pill for one consumer.
+- Rejected: a separate pinned bar above the info bar (first iteration), because
+  it doubled the chrome above the composer; and a flat opener + created list
+  (second iteration), because it showed only one level in each direction.
+- Render cost: the page reads only a boolean (`useHasSessionRelations`, a
+  `selectAtom` over the active-Session list) to decide whether to pass the chip,
+  so an otherwise empty bar still hides. The chip builds the tree in the leaf;
+  related Sessions change status often and the page must not re-render.
 - `SessionRelationCard` (created-Session progress/completion and the
   "automatically created by" start card) is one `h-8` row button. The action
   label moved into the accessible name `"<action>: <title>"`, so selectors
@@ -55,8 +58,10 @@ Storybook screenshots; not yet exercised in the packaged desktop app.
 
 ## Verification and limits
 
-`tests/session-relation-card.test.tsx` renders the connected chip over a real
-metadata store, opens the popover, and checks inclusion (independent Session +
-Tab), exclusion (side chat, archived), the divider, and the exact Tab
-navigation target. `Sessions/SessionRelationsChip` stories cover closed/open
-states. Not verified in the packaged app with a live MCP fan-out.
+`tests/session-relation-tree.test.ts` covers the same tree from every member,
+Tab openers, archived/side-chat exclusion, the closed-Tab rule, and cycles.
+`tests/session-relation-card.test.tsx` opens the chip inside the real info bar
+and checks rows, the current marker, and the exact Tab navigation target.
+`Sessions/SessionRelationsChip` stories render the tree with faked live status.
+Not verified in the packaged app with a live MCP fan-out. Tab order follows
+creation time, not a user's local tab reordering.

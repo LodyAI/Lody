@@ -207,7 +207,7 @@ import { RenameSessionDialog, type RenameSessionDialogTarget } from './rename-se
 import { useResolvedTheme } from '../../theme-provider';
 import { PullRequestBadge } from './pull-request-badge';
 import { SessionInfoBar } from './session-info-bar';
-import { CurrentSessionRelationsChip, useHasCreatedSessions } from './session-relations-chip';
+import { CurrentSessionRelationsChip, useHasSessionRelations } from './session-relations-chip';
 import type { ContextChipAction, PrCiRun } from './session-info-chips';
 import {
   resolveSessionInfoBarGitHubActionIds,
@@ -4707,7 +4707,7 @@ export const SessionChatInterface = memo(
       openerSessionMeta?.title,
       t,
     ]);
-    const hasCreatedSessions = useHasCreatedSessions(session.id);
+    const hasSessionRelations = useHasSessionRelations(session.id);
     const openedByConversationStart = useMemo(() => {
       const openedBy = openedByRelations?.openedBy;
       if (!openedBy) return undefined;
@@ -6204,17 +6204,9 @@ export const SessionChatInterface = memo(
                     // Opener + every Session/Tab created here: the in-stream
                     // creation cards scroll away with the conversation.
                     relations={
-                      openedByRelations?.openedBy || hasCreatedSessions ? (
+                      hasSessionRelations ? (
                         <CurrentSessionRelationsChip
                           sessionId={session.id}
-                          parent={
-                            openedByRelations?.openedBy
-                              ? {
-                                  ...openedByRelations.openedBy,
-                                  session: openerSessionMeta ?? null,
-                                }
-                              : null
-                          }
                           onOpenSession={handleOpenRelatedSession}
                         />
                       ) : undefined
