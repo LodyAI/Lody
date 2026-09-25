@@ -70,6 +70,13 @@ writer for list changes. The snapshot cache keeps keyed snapshots across row-cou
   back restores the same row at the same offset.
 - Upstream's jsdom snapshot suites (real sleeps) and browser suites are not carried; `src/`
   is excluded from repository lint to stay close to upstream.
+- A jump the fork cannot see: Streamdown gives every code block an inline
+  `content-visibility: auto` with a 200px placeholder, so a block rendering for the first
+  time changed its row's height from inside (a one-line block shrank ~158px), and when that
+  row straddled the viewport top nothing compensated. Climbing a conversation with code
+  blocks: 2 jumps of 158px on each of two runs. The markdown renderer now forces those blocks
+  to `content-visibility: visible` (the rows are already virtualized): 0 jumps on two runs,
+  and switching away and back restored the same row at the same offset.
 - Syncing with upstream is manual (`packages/virtua/README.md`).
 - Rows never measured before still start at the estimated size; only rows seen before in
   the session start at their real size. Sizes live in memory for the page's life.
