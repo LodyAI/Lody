@@ -14,10 +14,10 @@ rolls back — is in the root [AGENTS.md](../../../../../AGENTS.md).
   inset, no close row); the pane's `padding-right`, set inside the scroll area,
   keeps chrome off that column with the scrollbar flush to the edge.
 - Settings style in StyleX from `surface.ts`/`compact-layout.tsx`: `surface.pageTitle`,
-  then sections: a heading over one white card (`surface.card`) of ruled rows, on
-  `surface.canvas`; the nav is `surface.nav`. Split master/detail by fill, not a
-  line; no new gray fills. Type: `type.stylex.ts` — none below `caption`, stacked
-  at `leading`, weight only for headings.
+  then sections of a heading and rows (`surface.card`). A group is a card by default
+  (mobile, dialogs) and flat under a section rule inside `settingsFlat` (desktop pane,
+  project window): `material.stylex.ts`. Split master/detail by fill, not a line; no
+  new gray fills. Type: `type.stylex.ts`, nothing below `caption`, weight for headings.
 - `share-management-setting.tsx` lists published static copies via the scoped cloud
   query. Ordinary members see their publications; admins see the workspace inventory.
   Draft uploads are not published shares. Reuse `useSessionShareLinkActions` for
@@ -41,7 +41,7 @@ rolls back — is in the root [AGENTS.md](../../../../../AGENTS.md).
 - A settings row (`compact-layout.tsx`) is one grid: the label column takes the rest,
   the control column hugs its content. Never size a column from a viewport breakpoint:
   the panel is narrower than the window and clips overflow, so a `md:` label column
-  hides the control. Row copy is `font-normal`; only titles and headings take weight.
+  hides the control.
 - Agent configuration lives in `agent-config-dialog.tsx` plus `env-vars-textarea.tsx`.
   DeepSeek Harness official vs custom endpoint is dialog form state only: persist
   `DEEPSEEK_API_KEY` / `DEEPSEEK_BASE_URL` (official always writes

@@ -15,7 +15,8 @@ within a row; and every group was a white card on a white panel held apart only
 by a shadow halo. Settings now has one type scale (a 12px floor, 1.45 leading,
 two weights plus a semibold title) and a three-step material chosen from four
 rendered variants: a nav, a neutral gray canvas, and white cards on it, split
-by fill rather than lines. A card flush with the top of a scroller also lost its
+by fill rather than lines. A fourth review made the desktop pane flat: headings
+and rows on a white page, a rule above each section, no cards. A card flush with the top of a scroller also lost its
 top edge, which is fixed, and the composer's image lightbox became a popover
 card that springs out of the thumbnail. Tooltips stopped inverting in the same
 change; that reversal is recorded in the
@@ -180,6 +181,37 @@ no query the commands are grouped under their category; with one, the list stays
 ordered by relevance. A shortcut is quiet trailing text like a menu's, and the
 highlight is an ink wash driven by cmdk's controlled value so it can be StyleX.
 
+## Fourth review: flat groups on the desktop pane
+
+The owner found the page "all lines" and asked for the nav's mix toward black
+at 3.5% and for the content to read like Linear's settings. At 3.5% the nav
+matches the old canvas, so the content became the panel's own fill
+(`surface.canvas` is `elevatedBackground`) and the nav stays a step below it in
+both palettes.
+
+Linear's arrangement was built first: each group as a tray (a 2% ink film, one
+1px border, no shadow), row rules stopping at the row's copy, and title,
+headings and trays on one left edge. The owner rejected it as not good-looking
+and asked what the page would be without boxed cards. Two flat variants were
+rendered in both palettes: A, a rule above each section and none between rows;
+B, the same with inset rules between rows. The owner picked A.
+
+A group is now a heading and rows on the page. A thin rule above each section
+is the only line, so a group without a heading still ends where the next
+begins. Rows bleed 16px past the column so their copy meets the headings and
+the pointer's fill has room, with rounded corners. A danger group names itself
+in red, having no edge to mark. Row padding, section gaps and the type scale
+are unchanged.
+
+The flat look is scoped rather than global. `surface.card` and
+`surface.lineRuled` also draw the mobile settings screens and rows inside
+settings dialogs, which keep the card. `settings/material.stylex.ts` holds a
+group's drawing as variables (fill, shadow, radius, bleed, row rule, heading
+inset, section rule, danger edge, empty-region fill) whose defaults are the
+card, and `settingsFlat` is the theme the desktop pane and the project window
+apply. Hand-drawn row rules in the machine and skills lists moved onto
+`surface.lineRuled`, so they follow the theme too.
+
 ## Verification
 
 - Storybook screenshots before and after, in Chinese, for the preferences
@@ -196,5 +228,9 @@ highlight is an ink wash driven by cmdk's controlled value so it can be StyleX.
 - `packages/ui/test/focus-modality.test.tsx` covers the modality switches, and
   `tests/command-palette-view.test.tsx` covers group headings, arrow-key
   highlight, Enter, and the empty state.
+- Fourth review: the settings overlay (Preferences, Appearance, MCP, Projects,
+  Keyboard Shortcuts, About) in both palettes, Chinese, for the tray version
+  and both flat variants; the material study, outside `settingsFlat`, still
+  draws cards.
 - Not verified in the packaged Electron app. Storybook renders the same
   components, but outside the app shell.

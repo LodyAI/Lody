@@ -48,7 +48,16 @@ export function CompactSection({
       {title || headerRight ? (
         <header {...stylex.props(surface.sectionHeader)}>
           <div {...stylex.props(surface.sectionHeading)}>
-            {title ? <p {...stylex.props(surface.sectionTitle)}>{title}</p> : null}
+            {title ? (
+              <p
+                {...stylex.props(
+                  surface.sectionTitle,
+                  tone === 'danger' && surface.sectionTitleDanger
+                )}
+              >
+                {title}
+              </p>
+            ) : null}
             {description ? (
               <p {...stylex.props(surface.sectionDescription)}>{description}</p>
             ) : null}

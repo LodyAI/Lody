@@ -205,7 +205,6 @@ const styles = stylex.create({
     transitionDuration: duration.fast,
     transitionTimingFunction: ease.standard,
   },
-  ruled: { boxShadow: `inset 0 1px 0 ${colors.separator}` },
   pickerText: { flexGrow: 1, minWidth: 0 },
   pickerName: { ...TRUNCATE, display: 'block', fontSize: '0.95em' },
   pickerMeta: {
@@ -249,8 +248,17 @@ const styles = stylex.create({
   privateHeading: { paddingInline: space[1] },
   privateTitleLine: { display: 'flex', alignItems: 'center', gap: space[2] },
   privateTitle: { margin: 0, fontSize: type.caption, fontWeight: 400, color: colors.label },
-  count: { fontSize: type.caption, fontVariantNumeric: 'tabular-nums', color: colors.secondaryLabel },
-  privateHint: { margin: 0, marginTop: '2px', fontSize: type.caption, color: colors.secondaryLabel },
+  count: {
+    fontSize: type.caption,
+    fontVariantNumeric: 'tabular-nums',
+    color: colors.secondaryLabel,
+  },
+  privateHint: {
+    margin: 0,
+    marginTop: '2px',
+    fontSize: type.caption,
+    color: colors.secondaryLabel,
+  },
   selectPrompt: {
     paddingInline: space[1],
     paddingBlock: space[8],
@@ -1326,7 +1334,7 @@ export function MachineAgentSettings({
                         <button
                           key={item.machine.id}
                           type="button"
-                          {...stylex.props(styles.pickerRow, index > 0 && styles.ruled)}
+                          {...stylex.props(styles.pickerRow, index > 0 && surface.lineRuled)}
                           onClick={() => {
                             onSelectedMachineChange(item.machine.id);
                             setMobileMachinePickerOpen(false);
@@ -1778,7 +1786,7 @@ function OwnPrivateMachines({
             <button
               key={item.machine.id}
               type="button"
-              {...stylex.props(styles.privateRow, surface.pressableLine, styles.ruled)}
+              {...stylex.props(styles.privateRow, surface.pressableLine, surface.lineRuled)}
               onClick={() => onOpen(item.machine.id)}
             >
               <span {...stylex.props(styles.truncate)}>{item.machine.name || item.machine.id}</span>

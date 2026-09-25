@@ -42,6 +42,7 @@ import { PromptShortcutsSetting } from './prompt-shortcuts-setting';
 import { McpSetting } from './mcp-setting';
 import { ShareManagementSetting } from './share-management-setting';
 import { FocusScope, useListKeyboardNavigation } from '@/ui/focus-scope';
+import { settingsFlat } from './material.stylex';
 import { settingsSurface as surface } from './surface';
 import { settingsType as type } from './type.stylex';
 
@@ -137,8 +138,8 @@ const styles = stylex.create({
     height: '40px',
   },
   /**
-   * The title sits in the same centred column as the page under it, inset like
-   * a row, so it starts where the section text does at any pane width.
+   * The title sits in the same centred column as the page under it, at the
+   * edge its section trays start from, at any pane width.
    */
   headerFlush: { paddingBottom: 0 },
   headerColumn: {
@@ -146,7 +147,7 @@ const styles = stylex.create({
     width: '100%',
     maxWidth: '760px',
     marginInline: 'auto',
-    paddingInline: space[6],
+    paddingInline: space[4],
   },
   paneBody: { flexGrow: 1, minHeight: 0 },
   fill: { height: '100%' },
@@ -350,7 +351,10 @@ function SettingsModalBody() {
           >
             <X {...stylex.props(styles.closeGlyph)} aria-hidden="true" />
           </Dialog.Close>
-          <div {...stylex.props(styles.surface, surface.canvas)} data-settings-surface="">
+          <div
+            {...stylex.props(settingsFlat, styles.surface, surface.canvas)}
+            data-settings-surface=""
+          >
             {selfTitledTab ? (
               <Dialog.Title {...stylex.props(styles.srOnly)}>
                 {t(activeTabConfig.labelKey)}

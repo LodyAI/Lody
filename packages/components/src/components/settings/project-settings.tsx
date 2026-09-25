@@ -91,6 +91,7 @@ import { toIntlLocale } from '@/lib/intl-locale';
 import { openExternalUrl } from '@/lib/native-browser';
 import { withClassName } from '@/lib/stylex';
 import { MobileProjectSettings } from '@/components/mobile/mobile-project-settings';
+import { settingsFlat, settingsMaterial as material } from './material.stylex';
 import { settingsSurface as surface } from './surface';
 import { AgentIcon, getAgentDisplayName } from '@/components/icons/agent-icon';
 import { useSettingsDataCache } from './settings-data-cache';
@@ -272,8 +273,8 @@ const styles = stylex.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: space[3],
-    // On the same edge as the section names and the rows' text below it.
-    paddingInline: space[4],
+    // On the edge the section names start from.
+    paddingInline: material.headingInset,
   },
   pageHeading: { minWidth: 0 },
   pageSubtitle: {
@@ -1710,7 +1711,7 @@ function ProjectWindow({
 
   return (
     <Tooltip.Provider delay={200}>
-      <div {...stylex.props(win.window, surface.canvas)}>
+      <div {...stylex.props(settingsFlat, win.window, surface.canvas)}>
         {/* Four views of one project are a strip, not a sidebar: the name and
             where it lives above, the views under it, the page at full width. */}
         <header {...stylex.props(win.head)}>

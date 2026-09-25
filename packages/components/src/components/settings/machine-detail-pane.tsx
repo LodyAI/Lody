@@ -65,7 +65,6 @@ const styles = stylex.create({
   inset: { paddingInline: space[4] },
   /** One line of a list: every line but the first is ruled from the one above. */
   line: { minWidth: 0 },
-  lineRuled: { boxShadow: `inset 0 1px 0 ${colors.separator}` },
   empty: {
     display: 'flex',
     flexDirection: 'column',
@@ -269,7 +268,7 @@ export function MachineProvidersSection({
           <EmptyProviders onAdd={onAddConfig} />
         ) : (
           providerLines.map((line, index) => (
-            <div key={line.key} {...stylex.props(styles.line, index > 0 && styles.lineRuled)}>
+            <div key={line.key} {...stylex.props(styles.line, index > 0 && surface.lineRuled)}>
               {line}
             </div>
           ))

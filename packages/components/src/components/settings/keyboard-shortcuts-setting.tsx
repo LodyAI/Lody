@@ -25,6 +25,7 @@ import type { GlobalShortcutBinding } from '@lody/shared';
 import { useGlobalShortcuts } from '@/hooks/use-global-shortcuts';
 import { Kbd } from '@/components/commands/kbd';
 import { CompactRow, CompactSection } from './compact-layout';
+import { settingsMaterial as material } from './material.stylex';
 import { settingsSurface as surface } from './surface';
 import { settingContainerClass } from '.';
 import { settingsType as type } from './type.stylex';
@@ -51,7 +52,7 @@ const styles = stylex.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: space[4],
-    paddingInline: space[4],
+    paddingInline: material.headingInset,
   },
   introText: { margin: 0, fontSize: type.caption, color: colors.secondaryLabel },
   error: { color: colors.destructive },
