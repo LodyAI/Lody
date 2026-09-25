@@ -196,6 +196,12 @@ const MARKDOWN_BASE_CLASSNAME =
   '[&_a]:underline [&_a]:underline-offset-2 [&_a]:decoration-current/35 [&_a:hover]:decoration-current/70 ' +
   '[&_.katex-display]:!my-5 [&_.katex-display]:overflow-x-auto [&_.katex-display]:overflow-y-hidden [&_.katex-display]:py-1 ' +
   '[&_[data-streamdown="mermaid-block"]]:!my-5 ' +
+  // Streamdown gives every code block an inline `content-visibility: auto`
+  // with a 200px placeholder. Conversation rows are already virtualized, and
+  // that placeholder turns into the block's real height the first time the
+  // block renders: a one-line block shrank by ~158px under a reader climbing
+  // the conversation, too late for Virtua to compensate. Render them normally.
+  '[&_[data-streamdown="code-block"]]:![content-visibility:visible] ' +
   // Streamdown wraps every diagram in a pan/zoom canvas that claims the gesture
   // through inline styles: `touch-action: none` stops a finger resting on a
   // diagram from scrolling the conversation, and its transform moves the preview
