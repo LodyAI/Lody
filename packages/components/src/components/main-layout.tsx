@@ -2,9 +2,10 @@ import { useWorkspaceBadge } from '@/hooks/use-workspace-badge';
 import { useAgentRoleSchemaReconciliation } from '@/hooks/use-agent-role-schema-reconciliation';
 import { currentWorkspaceSlugAtom } from '@/atoms/workspace-context';
 import { useWorkspaceWindowOwner, WorkspaceWindowOwnerContext } from '@/lib/desktop-window';
-import { type ReactNode } from 'react';
-import { useAtomValue } from 'jotai';
-import { useIsMobile } from '../hooks/use-mobile';
+import { type ReactNode, useLayoutEffect } from 'react';
+import { useAtomValue, useSetAtom } from 'jotai';
+import { useIsCompactDesktop, useIsMobile } from '../hooks/use-mobile';
+import { syncCompactDesktopLayoutAtom } from '@/atoms/layout-state';
 import { MobileWorkspaceLayout } from './mobile/mobile-workspace-layout';
 import { WebWorkspaceLayout } from './web-workspace-layout';
 import { BugReportDialogContainer } from './bug-report/bug-report-dialog-container';
@@ -44,6 +45,21 @@ function AgentRoleSchemaReconciliation() {
   return null;
 }
 
+/**
+ * Bridges the viewport's compact-desktop flag into atom state so commands and
+ * derived visibility (which cannot call hooks) see the same presentation.
+ * Runs in a layout effect so the compact sidebar suppression applies before
+ * first paint — no open-overlay flash when a narrow window mounts.
+ */
+function CompactDesktopLayoutSync() {
+  const compact = useIsCompactDesktop();
+  const syncCompact = useSetAtom(syncCompactDesktopLayoutAtom);
+  useLayoutEffect(() => {
+    syncCompact(compact);
+  }, [compact, syncCompact]);
+  return null;
+}
+
 export function MainLayout({
   children,
   workspaceReady = true,
@@ -61,6 +77,7 @@ export function MainLayout({
   return (
     <WorkspaceWindowOwnerContext value={owner}>
       <PromptShortcutProvider enabled={workspaceReady}>
+        <CompactDesktopLayoutSync />
         <WorkspaceRuntimeShell workspaceReady={workspaceReady}>
           {children}
           {owner && workspaceReady ? <WorkspaceBadge /> : null}

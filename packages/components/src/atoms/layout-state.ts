@@ -18,6 +18,50 @@ export const navigationSidebarHiddenAtom = atom(
   (get) => get(zenLayoutModeAtom) || get(sidebarCollapsedAtom)
 );
 
+/**
+ * Whether the desktop renderer is in its compact presentation: the desktop
+ * layout family at a viewport below MOBILE_LAYOUT_BREAKPOINT. Written only by
+ * `syncCompactDesktopLayoutAtom` (a mounted layout bridges the viewport hook
+ * into atom state); always false while the mobile renderer is active.
+ */
+export const compactDesktopLayoutAtom = atom(false);
+
+/**
+ * Ephemeral auto-hide marker: the nav sidebar was on screen when compact
+ * started, so it was suppressed rather than left covering a narrow window.
+ * An explicit sidebar action clears it, and leaving compact clears it too —
+ * `sidebarCollapsedAtom`, the persisted preference, is never rewritten for
+ * presentation reasons.
+ */
+export const compactSidebarSuppressedAtom = atom(false);
+
+/**
+ * Effective on-screen visibility of the nav sidebar: the persisted/zen state
+ * minus the compact auto-suppression. Surfaces use this (not
+ * `navigationSidebarHiddenAtom`) for expand affordances and chrome insets so
+ * they respond to what is actually on screen.
+ */
+export const navigationSidebarVisibleAtom = atom(
+  (get) =>
+    !get(navigationSidebarHiddenAtom) &&
+    !(get(compactDesktopLayoutAtom) && get(compactSidebarSuppressedAtom))
+);
+
+/**
+ * Viewport → state bridge for the compact desktop presentation. Entering
+ * compact auto-hides a visible sidebar instead of letting it cover the
+ * window; leaving compact restores whatever the persisted sidebar state says.
+ */
+export const syncCompactDesktopLayoutAtom = atom(null, (get, set, compact: boolean) => {
+  if (get(compactDesktopLayoutAtom) === compact) return;
+  set(compactDesktopLayoutAtom, compact);
+  if (compact) {
+    if (!get(navigationSidebarHiddenAtom)) set(compactSidebarSuppressedAtom, true);
+  } else {
+    set(compactSidebarSuppressedAtom, false);
+  }
+});
+
 export type ZenAwarePanelState = {
   zenMode: boolean;
   panelOpen: boolean;
@@ -49,14 +93,18 @@ export const toggleZenLayoutModeAtom = atom(null, (get, set) => {
 
 export const showNavigationSidebarAtom = atom(null, (_get, set) => {
   set(zenLayoutModeAtom, false);
+  set(compactSidebarSuppressedAtom, false);
   set(sidebarCollapsedAtom, false);
 });
 
 export const toggleNavigationSidebarAtom = atom(null, (get, set) => {
   const next = getZenAwarePanelToggleState({
     zenMode: get(zenLayoutModeAtom),
-    panelOpen: !get(sidebarCollapsedAtom),
+    // Effective visibility: while compact auto-hide is in effect, toggling
+    // reveals the sidebar overlay rather than collapsing it one level deeper.
+    panelOpen: get(navigationSidebarVisibleAtom),
   });
   set(zenLayoutModeAtom, next.zenMode);
+  set(compactSidebarSuppressedAtom, false);
   set(sidebarCollapsedAtom, !next.panelOpen);
 });
