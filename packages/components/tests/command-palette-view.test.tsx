@@ -35,12 +35,12 @@ describe('CommandPaletteView', () => {
     run: () => ran.push(key),
   });
 
-  const render = async (results: PaletteResult[]) => {
+  const render = async (results: PaletteResult[], onOpenChange = () => undefined) => {
     await act(async () => {
       root.render(
         createElement(CommandPaletteView, {
           open: true,
-          onOpenChange: () => undefined,
+          onOpenChange,
           query: '',
           onQueryChange: () => undefined,
           results,
@@ -104,5 +104,12 @@ describe('CommandPaletteView', () => {
   it('says so when nothing matches', async () => {
     await render([]);
     expect(document.body.textContent).toContain('Nothing here');
+  });
+
+  it('closes when Escape is pressed from the command input', async () => {
+    const openChanges: boolean[] = [];
+    await render([result('back')], (open) => openChanges.push(open));
+    await press('Escape');
+    expect(openChanges).toContain(false);
   });
 });

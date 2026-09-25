@@ -229,6 +229,14 @@ export function CommandPaletteView({
           loop
           value={active}
           onValueChange={setActive}
+          onKeyDownCapture={(event) => {
+            // The command input/list may own Escape before the outer dialog sees it.
+            // The palette's visible hint promises that Escape closes this surface.
+            if (event.key === 'Escape' && !event.nativeEvent.isComposing) {
+              event.preventDefault();
+              onOpenChange(false);
+            }
+          }}
           {...stylex.props(styles.root)}
         >
           <div {...stylex.props(styles.field)}>
