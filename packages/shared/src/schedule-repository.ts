@@ -44,6 +44,42 @@ export type ScheduleRepositoryPort = {
   flush: () => Promise<void>;
 };
 
+/**
+ * A Schedule document from Mirror state, or `null` when it is not this
+ * schedule's valid definition.
+ *
+ * Mirror tags the nested maps it hands back with their container id, `$cid`,
+ * as an inherited key. `JSON.stringify` never shows it, but Zod's record parser
+ * walks inherited keys and copies it into `agent.configOptionValues`. Left
+ * there, the owning machine's fingerprint never matches the Registry's (every
+ * schedule with Agent options stays blocked on `DEFINITION_NOT_COMMITTED`), and
+ * re-saving would store `$cid` as an Agent option. Rebuilding plain own-key
+ * objects before parsing drops it; every Mirror read of a Schedule goes here.
+ */
+export function scheduleDocumentFromMirrorState(
+  state: { definition?: unknown; prompt: string; timeline: ScheduleDocument['timeline'] },
+  scheduleId: string
+): ScheduleDocument | null {
+  const parsed = ScheduleDefinitionSchema.safeParse(withoutContainerIds(state.definition));
+  if (!parsed.success || parsed.data.scheduleId !== scheduleId) return null;
+  return {
+    definition: parsed.data,
+    prompt: state.prompt,
+    timeline: withoutContainerIds(state.timeline) as ScheduleDocument['timeline'],
+  };
+}
+
+function withoutContainerIds(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(withoutContainerIds);
+  if (value === null || typeof value !== 'object') return value;
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter(([key]) => key !== CID_KEY)
+      .map(([key, entry]) => [key, withoutContainerIds(entry)])
+  );
+}
+const CID_KEY = '$cid';
+
 /** Transport-neutral domain writes, shared by app and human CLI. */
 export class ScheduleRepository {
   constructor(
@@ -66,10 +102,7 @@ export class ScheduleRepository {
       ignoreUnknownProperties: true,
     });
     try {
-      const state = mirror.getState();
-      const parsed = ScheduleDefinitionSchema.safeParse(state.definition);
-      if (!parsed.success || parsed.data.scheduleId !== scheduleId) return null;
-      return { definition: parsed.data, prompt: state.prompt, timeline: state.timeline };
+      return scheduleDocumentFromMirrorState(mirror.getState(), scheduleId);
     } finally {
       mirror.dispose();
     }

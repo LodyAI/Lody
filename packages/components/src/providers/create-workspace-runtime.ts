@@ -1,5 +1,9 @@
 import { waitForScheduleWriteSync, withScheduleWrite } from './schedule-write-sync';
-import { getScheduleRoomId, scheduleDocSchema, ScheduleDefinitionSchema } from '@lody/shared';
+import {
+  getScheduleRoomId,
+  scheduleDocSchema,
+  scheduleDocumentFromMirrorState,
+} from '@lody/shared';
 import type { ScheduleDocStore } from '@/atoms/runtime';
 import {
   createLocalWindowBootstrap,
@@ -4085,13 +4089,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       return {
         roomId,
         firstSynced,
-        getState: () => {
-          const state = mirror.getState();
-          const parsed = ScheduleDefinitionSchema.safeParse(state.definition);
-          return parsed.success && parsed.data.scheduleId === id
-            ? { definition: parsed.data, prompt: state.prompt, timeline: state.timeline }
-            : null;
-        },
+        getState: () => scheduleDocumentFromMirrorState(mirror.getState(), id),
         subscribe: (listener) => mirror.subscribe(listener),
         waitUntilSynced: async () => {
           await firstSynced.catch(() => {});

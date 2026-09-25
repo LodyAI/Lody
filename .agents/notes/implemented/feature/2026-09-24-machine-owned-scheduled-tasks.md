@@ -81,6 +81,10 @@ Deterministic tests cover the engine (owned chat reuses one session across runs,
 manual triggers are never planned), the Sunday `0-7` weekday range across edits,
 production `prepareSessionInput` for chat-only schedules, machine-clock
 conversion across a DST change, save-issue placement, and the proposal target
-rules. Storybook screenshots were checked in light and dark, English and Chinese,
+rules, and a definition read back on another peer keeping the Registry's
+fingerprint. That last one is a correction: Mirror hands nested maps back with
+an inherited `$cid` that Zod's record parser copied into Agent options, so every
+schedule with Agent options sat on `DEFINITION_NOT_COMMITTED`, even on the
+machine that saved it; reads now rebuild plain objects before parsing. Storybook screenshots were checked in light and dark, English and Chinese,
 and a narrow panel. Not verified: a packaged desktop run against a live daemon,
 and the hosted account-deletion purge of schedule streams (private repository).

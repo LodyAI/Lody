@@ -220,6 +220,67 @@ describe('Schedule persistence contract', () => {
   });
 });
 
+it('reads a saved definition back with the fingerprint the Registry published, on another peer', async () => {
+  // Nested maps (Agent options) come back from Mirror tagged with `$cid`; the
+  // owning machine must still see the same definition, or the schedule stays
+  // blocked on DEFINITION_NOT_COMMITTED forever.
+  const docs = new Map<string, LoroDoc>();
+  const rows = new Map<string, unknown>();
+  const port: ScheduleRepositoryPort = {
+    openPersistedDoc: async (id) => {
+      if (!docs.has(id)) docs.set(id, new LoroDoc());
+      return { doc: docs.get(id)! };
+    },
+    openFlockDoc: async () => ({
+      flock: {
+        scan: () => [...rows].map(([key, value]) => ({ key: JSON.parse(key), value })),
+        get: (key) => rows.get(JSON.stringify(key)),
+        set: (key, value) => rows.set(JSON.stringify(key), JSON.parse(JSON.stringify(value))),
+      },
+    }),
+    flush: async () => {},
+  };
+  const author = new ScheduleRepository(port, 'workspace' as never);
+  const d = definition();
+  await author.save({
+    scheduleId: 'test',
+    draft: {
+      title: d.title,
+      machineId: d.machineId,
+      trigger: d.trigger,
+      agent: {
+        agentConfigId: d.agent.agentConfigId,
+        modelId: 'model',
+        configOptionValues: { _permission: 'workspace-write', effort: 'high' },
+      },
+      project: { kind: 'local', localProjectId: 'project' as never, useWorktree: true },
+      destination: { kind: 'own_session', epoch: 0 },
+      misfirePolicy: d.misfirePolicy,
+      overlapPolicy: d.overlapPolicy,
+      retryPolicy: d.retryPolicy,
+      prompt: 'hello',
+    },
+    actorId: 'owner',
+    now: 1,
+    activationId: 'activation',
+    activityId: 'created',
+    create: true,
+  });
+  const [row] = await author.list();
+  const machineDoc = new LoroDoc();
+  machineDoc.import(docs.get('schedule-test')!.export({ mode: 'snapshot' }));
+  const machine = new ScheduleRepository(
+    { ...port, openPersistedDoc: async () => ({ doc: machineDoc }) },
+    'workspace' as never
+  );
+  const read = await machine.read('test');
+  expect(read?.definition.agent.configOptionValues).toEqual({
+    _permission: 'workspace-write',
+    effort: 'high',
+  });
+  expect(scheduleDefinitionFingerprint(read!)).toBe(row!.definitionFingerprint);
+});
+
 it('uses explicit advertised permission categories, rejecting unrelated modes and credential options', () => {
   const permission = {
     id: 'arbitrary_provider_option',
