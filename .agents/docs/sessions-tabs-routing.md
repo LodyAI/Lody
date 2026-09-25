@@ -156,14 +156,16 @@ this page is the full text of the rules summarised there.
   has not delivered yet stays ACTIVE behind a pending surface, because
   treating a transient replica gap as "this tab does not exist" is what
   bounced a just-promoted draft back to the parent (#199 regression). Only
-  positive evidence resolves away from the named tab (an archived/closed conversation,
-  side-panel child, or a device-local draft that is provably gone). A confirmed
+  positive evidence resolves away from the named tab (a closed conversation, which
+  includes an archived child of a live workspace but not the open tabs of an archived
+  workspace; a side-panel child; or a device-local draft that is provably gone). A confirmed
   shared close replaces only the still-current URL choice with an open neighbour
   or `empty` (materialized into a local draft); this narrow invalidation never reopens the parent or mirrors selection
   into React state. The old broad `shouldClearSessionUrlTab` normalizer remains dead.
   In-conversation created-Session cards can carry only the child Session id. When that id is
   already a known tab in the mounted workspace, navigation stays local; a closed target goes
-  through the lifecycle-aware reopen action and waits for its open metadata projection before
+  through the closed-list action (Reopen; Restore for an archived child of a live
+  workspace) and waits for its open metadata projection before
   selection instead of routing through the child root URL or letting stale close metadata
   redirect the explicit request to an open sibling.
   The pending request is keyed by its source Session as well as its URL tab value, so

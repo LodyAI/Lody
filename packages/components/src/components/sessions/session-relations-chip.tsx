@@ -19,6 +19,7 @@ import {
   type SessionRelationTreeNode,
 } from '@/lib/session-relation-tree';
 import { cn } from '@/lib/utils';
+import { useWorkingHandOver } from '@/ui/working-status-mark';
 import { PopoverActionChip } from './info-chip';
 
 /**
@@ -166,6 +167,8 @@ function RelationPill({
   const liveStatus = useAtomValue(sessionLiveStatusAtomFamily(session.id));
   const agentConfig = useAtomValue(getAgentMetaByIdAtomFamily(session.agentConfigId));
   const title = session.title?.trim() || t('sessions.untitled', 'Untitled session');
+  const unread = !isCurrent && sessionHasUnreadMessages(session);
+  const working = useWorkingHandOver(liveStatus != null, unread);
   return (
     <button
       type="button"
@@ -190,8 +193,8 @@ function RelationPill({
       {/* `waiting > working > unread`, tested in that order. */}
       <SessionRowStatusIndicator
         isWaitingPermission={liveStatus?.type === 'requestPermission'}
-        isWorking={liveStatus != null}
-        hasUnreadMessages={!isCurrent && sessionHasUnreadMessages(session)}
+        isWorking={working}
+        hasUnreadMessages={unread}
       />
     </button>
   );

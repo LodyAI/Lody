@@ -75,3 +75,6 @@ iframe 鉴权、Browser 恢复测试、二进制生命周期验证，以及独�
 
 证据：[CLI Preview](../apps/cli/src/preview/AGENTS.md)、
 [Annotation 契约](preview-annotation-availability.zh.md)。
+
+新分配路由的启动公网验证最多等待 90 秒，已连接路由的健康检查仍限于 5 秒。
+创建 RPC 的默认调用方为资源获取与启动预留 8 分钟。

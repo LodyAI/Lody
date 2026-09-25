@@ -269,6 +269,12 @@ export interface LoroSidebarProps {
    * hover-reveal button on the workspace row, or keyboard shortcut at parent).
    */
   onRequestCollapse?: () => void;
+  /**
+   * Overlay presentation for the compact desktop layout: fluid width owned by
+   * the caller's wrapper, no resize sash. Desktop chrome stays desktop —
+   * unlike `isMobile`, which swaps in touch chrome and safe-area insets.
+   */
+  overlay?: boolean;
 }
 
 /**
@@ -747,6 +753,7 @@ export const LoroSidebar = memo(function LoroSidebar({
   onWidthChange,
   collapsed = false,
   onRequestCollapse,
+  overlay = false,
 }: LoroSidebarProps) {
   const isMobile = useIsMobile();
   const isElectronFullscreen = useElectronFullscreen();
@@ -1136,33 +1143,34 @@ export const LoroSidebar = memo(function LoroSidebar({
       // so its hit area straddles the edge; the inner content div clips instead.
       className={cn('relative h-full select-none bg-sidebar text-sidebar-foreground', className)}
       style={
-        isMobile
+        isMobile || overlay
           ? undefined
           : { width: sidebarWidth, minWidth: resolvedMinWidth, maxWidth: resolvedMaxWidth }
       }
     >
-      {!isMobile && (
-        // VSCode-style sash: a 12px pointer hit area straddling the border
-        // (6px inside + 6px outside, so hovering ON or just past the edge
-        // still triggers); the visible affordance is a thin 2px line covering
-        // the border itself. Slight hover delay so it doesn't flash when the
-        // cursor merely passes over the edge.
-        <div
-          className={cn(
-            'absolute -right-1.5 top-0 z-20 h-full w-3 cursor-col-resize bg-transparent',
-            // 2px line covers the panel's `border-r` for the full height.
-            'after:absolute after:right-[5px] after:top-0 after:bottom-0 after:w-[2px]',
-            'after:bg-transparent after:transition-colors after:duration-150',
-            isResizing
-              ? 'after:bg-sidebar-ring/70'
-              : 'hover:after:bg-sidebar-ring/50 hover:after:delay-150'
-          )}
-          onPointerDown={handleResizeStart}
-          onPointerMove={handleResizeMove}
-          onPointerUp={handleResizeEnd}
-          onPointerCancel={handleResizeEnd}
-        />
-      )}
+      {!isMobile &&
+        !overlay && (
+          // VSCode-style sash: a 12px pointer hit area straddling the border
+          // (6px inside + 6px outside, so hovering ON or just past the edge
+          // still triggers); the visible affordance is a thin 2px line covering
+          // the border itself. Slight hover delay so it doesn't flash when the
+          // cursor merely passes over the edge.
+          <div
+            className={cn(
+              'absolute -right-1.5 top-0 z-20 h-full w-3 cursor-col-resize bg-transparent',
+              // 2px line covers the panel's `border-r` for the full height.
+              'after:absolute after:right-[5px] after:top-0 after:bottom-0 after:w-[2px]',
+              'after:bg-transparent after:transition-colors after:duration-150',
+              isResizing
+                ? 'after:bg-sidebar-ring/70'
+                : 'hover:after:bg-sidebar-ring/50 hover:after:delay-150'
+            )}
+            onPointerDown={handleResizeStart}
+            onPointerMove={handleResizeMove}
+            onPointerUp={handleResizeEnd}
+            onPointerCancel={handleResizeEnd}
+          />
+        )}
 
       <div className="relative flex h-full flex-col overflow-hidden">
         <div
