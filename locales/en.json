@@ -2,6 +2,8 @@
   "settings.beta.semanticShortcuts": "Pointer-aware close shortcut",
   "settings.beta.semanticShortcutsHelper": "On desktop, close the active tab in the conversation or right panel you last pointed at or used with the keyboard.",
   "sessions.cancelSend": "Cancel send",
+  "sessions.prTab.showLess": "Show less",
+  "sessions.prTab.showMore": "Show more",
   "sessions.sendConfigLocked": "Configuration is locked while sending",
   "sessions.selectionCopyUnavailable": "The selected text is still loading or could not be loaded. Wait and try copying again.",
   "sharing.request.purpose": "Purpose: {{purpose}}",
@@ -637,6 +639,8 @@
   "comments.cancel": "Cancel",
   "comments.collapse": "Collapse",
   "comments.comment": "Comment",
+  "comments.count": "{{count}} comments",
+  "comments.countOne": "1 comment",
   "comments.delete": "Delete",
   "comments.edit": "Edit",
   "comments.edited": "edited",
@@ -2073,7 +2077,7 @@
   "sessions.prTab.resolveConflicts": "Resolve conflicts",
   "sessions.prTab.retry": "Retry",
   "sessions.prTab.reviewApproved": "approved",
-  "sessions.prTab.reviewChangesRequested": "changes requested",
+  "sessions.prTab.reviewChangesRequested": "requested changes",
   "sessions.prTab.reviewCommented": "commented",
   "sessions.prTab.reviewDismissed": "dismissed",
   "sessions.prTab.timeDaysAgo": "{{count}}d ago",
@@ -4223,5 +4227,9 @@
   "settings.integrations.github.appNotInstalled": "Not installed",
   "settings.integrations.github.appSummary": "{{enabled}} of {{total}} repositories enabled",
   "settings.integrations.github.install": "Install GitHub App",
-  "settings.integrations.github.personalIdentityActingAsPrefix": "Acting as"
+  "settings.integrations.github.personalIdentityActingAsPrefix": "Acting as",
+  "sessions.prTab.verdictBlocked": "Merging is blocked",
+  "sessions.prTab.verdictConflict": "Conflicts with the base branch",
+  "sessions.prTab.verdictDraft": "Draft — not ready for review",
+  "sessions.prTab.verdictReady": "Ready to merge"
 }

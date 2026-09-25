@@ -3,6 +3,7 @@
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import {
   AlertCircle,
+  ArrowLeft,
   CheckCircle2,
   ChevronDown,
   CircleDashed,
@@ -10,8 +11,8 @@ import {
   GitMerge,
   GitPullRequestArrow,
   GitPullRequestClosed,
+  GitPullRequestDraft,
   Github,
-  MessageSquare,
   MinusCircle,
   RefreshCcw,
   ShieldAlert,
@@ -42,14 +43,16 @@ import {
 import { colors, shadow } from '@lody/ui/tokens/colors.stylex';
 import { corner, duration, ease, focus, radius, space } from '@lody/ui/tokens/scales.stylex';
 import { Avatar, type AvatarSize } from '@lody/ui/avatar';
-import { Badge } from '@lody/ui/badge';
-import { Button } from '@lody/ui/button';
+import { Button, ButtonGroup } from '@lody/ui/button';
 import { ScrollArea } from '@/ui/scroll-area';
 import { Skeleton } from '@lody/ui/skeleton';
 import { Textarea } from '@lody/ui/textarea';
 import { SessionCommentMarkdown } from '@/ui/diff-viewer/session-comment-markdown';
-import { GitHubCommentThread } from '@/ui/diff-viewer/github-comment-thread';
-import { PullRequestBadge } from '@/components/sessions/pull-request-badge';
+import {
+  GitHubCommentThread,
+  formatGitHubRelativeTime,
+} from '@/ui/diff-viewer/github-comment-thread';
+import { PR_STATUS_META, PullRequestBadge } from '@/components/sessions/pull-request-badge';
 import { Menu } from '@/ui/menu';
 
 /** The tab's own width, not the window's: the PR tab lives in a resizable side panel. */
@@ -58,6 +61,10 @@ const TINY = '@container pr-tab (width < 280px)';
 const MONO = 'var(--font-mono)';
 /** One column, centred, however wide the panel is dragged. */
 const COLUMN = '48rem';
+/** Where an activity row's text starts: its padding, the 20px avatar and the gap. */
+const ENTRY_GUTTER = 'calc(12px + 20px + 8px)';
+/** Descriptions taller than this fold behind "Show more". */
+const DESCRIPTION_FOLD = '22rem';
 const FOCUS_RING = `0 0 0 ${focus.ringWidth} ${colors.accent}`;
 
 const styles = stylex.create({
@@ -83,16 +90,26 @@ const styles = stylex.create({
     paddingInline: space[4],
     paddingTop: 'var(--safe-area-top)',
   },
-  headerRow: { display: 'flex', alignItems: 'center', gap: space[2] },
+  headerRow: { display: 'flex', minWidth: 0, alignItems: 'center', gap: space[2] },
+  /** Where this PR lives, as a path: the repository, then the number. */
+  crumbs: {
+    display: 'flex',
+    minWidth: 0,
+    alignItems: 'baseline',
+    gap: space[1],
+    fontSize: '0.9em',
+    fontVariantNumeric: 'tabular-nums',
+  },
   repoName: {
     display: { default: 'block', [TINY]: 'none' },
     minWidth: 0,
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
-    fontSize: '0.9em',
-    color: colors.label,
+    color: colors.secondaryLabel,
   },
+  crumbSeparator: { display: { default: 'inline', [TINY]: 'none' }, color: colors.tertiaryLabel },
+  crumbNumber: { flexShrink: 0, fontWeight: 500, color: colors.label },
   headerActions: {
     display: 'flex',
     flexShrink: 0,
@@ -122,18 +139,55 @@ const styles = stylex.create({
   },
   shrink: { flexShrink: 0 },
 
-  branchRow: { paddingInline: space[4], paddingBlock: space[2] },
-  branchColumn: { display: 'flex', flexDirection: 'column', gap: space[1] },
-  branchRef: {
-    display: 'grid',
-    gridTemplateColumns: '2.75rem minmax(0, 1fr)',
+  /** The PR's state, then where it goes: `main ← feat/x`. */
+  stateLine: {
+    display: 'flex',
+    flexWrap: 'wrap',
     alignItems: 'center',
+    rowGap: space[1.5],
     columnGap: space[2],
     minWidth: 0,
   },
-  branchLabel: { fontSize: '0.8em', color: colors.secondaryLabel },
+  statePill: {
+    boxSizing: 'border-box',
+    display: 'inline-flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    gap: space[1],
+    height: '22px',
+    paddingInline: '8px 9px',
+    borderRadius: radius.full,
+    cornerShape: corner.round,
+    fontSize: '0.8em',
+    fontWeight: 500,
+    lineHeight: 1,
+    whiteSpace: 'nowrap',
+  },
+  stateOpen: {
+    backgroundColor: 'hsl(var(--github-open) / 0.14)',
+    color: 'hsl(var(--github-open))',
+  },
+  stateMerged: {
+    backgroundColor: 'hsl(var(--github-merged) / 0.16)',
+    color: 'hsl(var(--github-merged))',
+  },
+  stateClosed: {
+    backgroundColor: 'hsl(var(--github-closed) / 0.14)',
+    color: 'hsl(var(--github-closed))',
+  },
+  stateDraft: {
+    backgroundColor: `color-mix(in oklab, transparent, ${colors.label} 8%)`,
+    color: colors.secondaryLabel,
+  },
+  refs: {
+    display: 'flex',
+    minWidth: 0,
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: space[1],
+  },
+  refArrow: { flexShrink: 0, width: '12px', height: '12px', color: colors.tertiaryLabel },
   branchChip: {
-    justifySelf: 'start',
     minWidth: 0,
     maxWidth: '100%',
     overflow: 'hidden',
@@ -161,6 +215,8 @@ const styles = stylex.create({
     transitionDuration: duration.fast,
     transitionTimingFunction: ease.standard,
   },
+  /** The base is where it lands, so it reads quieter than the branch it takes. */
+  branchChipBase: { color: colors.secondaryLabel },
 
   scroll: { flexGrow: 1, flexBasis: 0, minHeight: 0 },
   body: {
@@ -169,62 +225,58 @@ const styles = stylex.create({
     flexDirection: 'column',
     gap: '20px',
     paddingInline: space[4],
-    paddingTop: '20px',
+    // The header bar's own lower half is already the space above the title.
+    paddingTop: space[1],
     paddingBottom: 'calc(1.25rem + var(--safe-area-bottom))',
   },
-  bodyEmbedded: { gap: '14px', paddingInline: '20px', paddingBottom: '20px' },
+  bodyEmbedded: { gap: '14px', paddingInline: '20px', paddingTop: '20px', paddingBottom: '20px' },
   skeleton: { display: 'flex', flexDirection: 'column', gap: space[3] },
 
-  titleSection: { display: 'flex', flexDirection: 'column', gap: '10px' },
-  titleSectionEmbedded: { gap: space[1] },
+  // A document, not a band of chips: the title leads, one line says what state
+  // the PR is in and where it goes, one line says who and how much.
+  titleSection: { display: 'flex', flexDirection: 'column', gap: space[3] },
+  titleSectionEmbedded: { gap: space[2] },
   title: {
     margin: 0,
-    fontSize: '1.15em',
+    fontSize: '1.4em',
     fontWeight: 600,
-    lineHeight: 1.375,
+    lineHeight: 1.3,
+    letterSpacing: '-0.012em',
     textWrap: 'pretty',
   },
-  titleEmbedded: { fontSize: '1em' },
-  number: {
-    marginInlineStart: space[2],
-    fontSize: '1em',
-    fontWeight: 400,
-    color: colors.secondaryLabel,
-  },
-  numberEmbedded: { fontSize: '0.9em' },
+  titleEmbedded: { fontSize: '1.1em' },
   meta: {
     display: 'flex',
-    flexDirection: { default: 'row', [NARROW]: 'column' },
-    flexWrap: { default: 'wrap', [NARROW]: 'nowrap' },
-    alignItems: { default: 'center', [NARROW]: 'flex-start' },
-    rowGap: space[1],
-    columnGap: space[2],
-    fontSize: '0.8em',
-    color: colors.secondaryLabel,
-  },
-  metaGroup: {
-    display: 'inline-flex',
     flexWrap: 'wrap',
     alignItems: 'center',
+    rowGap: space[1],
     columnGap: space[1.5],
-    rowGap: '2px',
-    minWidth: 0,
-  },
-  metaStats: {
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: space[1.5],
+    fontSize: '0.8em',
+    color: colors.secondaryLabel,
     fontVariantNumeric: 'tabular-nums',
   },
-  author: { color: colors.label },
+  metaDot: { color: colors.tertiaryLabel },
+  author: { color: colors.label, fontWeight: 500 },
   additions: { color: colors.success },
   deletions: { color: colors.destructive },
   description: {
+    position: 'relative',
+    marginTop: space[1],
     paddingInlineEnd: space[1],
     fontSize: '1em',
     lineHeight: 1.625,
     color: colors.label,
   },
+  /**
+   * A long PR template would push checks and reviews — what the panel is
+   * opened for — below the fold, so a tall description is clipped until asked.
+   */
+  descriptionFolded: {
+    maxHeight: DESCRIPTION_FOLD,
+    overflow: 'hidden',
+    maskImage: 'linear-gradient(to bottom, black calc(100% - 4.5rem), transparent)',
+  },
+  descriptionToggle: { display: 'flex', marginTop: `calc(-1 * ${space[1]})` },
   descriptionEmbedded: { paddingInlineEnd: 0, fontSize: '0.9em' },
   noDescription: {
     margin: 0,
@@ -286,14 +338,14 @@ const styles = stylex.create({
   checksToggle: {
     boxSizing: 'border-box',
     display: 'flex',
-    width: '100%',
+    flexGrow: 1,
+    minWidth: 0,
     alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: space[2],
+    gap: '10px',
     margin: 0,
     borderWidth: 0,
     paddingInline: space[3],
-    paddingBlock: space[2],
+    paddingBlock: '10px',
     fontFamily: 'inherit',
     fontSize: 'inherit',
     color: 'inherit',
@@ -309,23 +361,28 @@ const styles = stylex.create({
     transitionDuration: duration.fast,
     transitionTimingFunction: ease.standard,
   },
-  checksLabel: {
+  /** A card without check runs has nothing to expand: same row, no pointer. */
+  checksStatic: { cursor: 'default', backgroundColor: 'transparent' },
+  mergeRow: { display: 'flex', alignItems: 'center', gap: space[2], minWidth: 0 },
+  verdict: {
     display: 'flex',
+    flexDirection: 'column',
+    gap: '2px',
+    flexGrow: 1,
     minWidth: 0,
-    alignItems: 'center',
-    gap: space[2],
-    fontSize: '0.9em',
-    fontWeight: 500,
   },
-  checksCount: {
+  verdictTitle: { fontSize: '0.9em', fontWeight: 500, lineHeight: 1.35 },
+  verdictDetail: {
     display: 'flex',
-    flexShrink: 0,
     alignItems: 'center',
-    gap: space[1.5],
+    gap: space[1],
+    minWidth: 0,
     fontSize: '0.8em',
-    fontVariantNumeric: 'tabular-nums',
+    lineHeight: 1.35,
     color: colors.secondaryLabel,
+    fontVariantNumeric: 'tabular-nums',
   },
+  merged: { color: 'hsl(var(--github-merged))' },
   chevron: {
     transitionProperty: 'transform',
     transitionDuration: duration.fast,
@@ -358,46 +415,61 @@ const styles = stylex.create({
   pushEnd: { marginInlineStart: 'auto' },
 
   // One conversation, one card: each comment, review or thread is a ruled row.
+  // A row reads as a sentence — who, did what, when — and what they wrote sits
+  // under their name, not under their avatar.
   entry: { display: 'flex', flexDirection: 'column', minWidth: 0 },
   entryHeader: {
     display: 'flex',
-    flexWrap: 'wrap',
     alignItems: 'center',
     gap: space[2],
+    minWidth: 0,
     paddingInline: space[3],
-    paddingBlock: '10px',
+    paddingTop: space[3],
+    paddingBottom: space[1.5],
   },
-  entryAuthor: { fontSize: '0.9em', fontWeight: 500, lineHeight: 1 },
-  entryMeta: { fontSize: '0.8em', lineHeight: 1, color: colors.secondaryLabel },
-  entryBody: { paddingInline: space[3], paddingBottom: '10px' },
+  entrySentence: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'baseline',
+    columnGap: space[1.5],
+    rowGap: '2px',
+    minWidth: 0,
+  },
+  entryAuthor: { fontSize: '0.9em', fontWeight: 500 },
+  entryVerb: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    alignSelf: 'center',
+    gap: space[1],
+    fontSize: '0.8em',
+    color: colors.secondaryLabel,
+  },
+  entryMeta: { fontSize: '0.8em', color: colors.tertiaryLabel },
+  entryBody: {
+    paddingInlineStart: ENTRY_GUTTER,
+    paddingInlineEnd: space[3],
+    paddingBottom: space[3],
+  },
   entryThreads: {
     display: 'flex',
     flexDirection: 'column',
     gap: space[2],
     margin: 0,
-    paddingInline: space[3],
+    paddingInlineStart: ENTRY_GUTTER,
+    paddingInlineEnd: space[3],
     paddingTop: 0,
     paddingBottom: space[3],
     listStyle: 'none',
   },
-  /** A review's thread sits inside its row as a region: a fill, no edge. */
-  threadRegion: {
-    backgroundColor: `color-mix(in oklab, transparent, ${colors.label} 3%)`,
-    borderRadius: radius.medium,
-    cornerShape: corner.shape,
+  /** A thread with no review to sit under is its own row. */
+  orphanThread: { padding: space[3] },
+  revealOnRowHover: {
+    opacity: {
+      default: 0,
+      [stylex.when.ancestor(':hover')]: 1,
+      ':focus-visible': 1,
+    },
   },
-  threadHeader: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: space[2],
-    paddingInline: space[3],
-    paddingTop: space[2],
-    fontSize: '0.8em',
-    color: colors.secondaryLabel,
-  },
-  threadPath: { flexGrow: 1, fontFamily: MONO },
-  threadLine: { marginInlineStart: space[1], color: colors.tertiaryLabel },
-  threadBody: { padding: space[1] },
   sectionStack: { display: 'flex', flexDirection: 'column', gap: space[3] },
   sectionStackEmbedded: { gap: space[2] },
 
@@ -411,8 +483,6 @@ const styles = stylex.create({
     backgroundColor: colors.background,
   },
 
-  /** A split action: the command and its chevron, two buttons of one variant. */
-  split: { display: 'flex', alignItems: 'stretch', gap: '2px' },
   /** The labelled and the icon-only form of one action; the tab's width picks. */
   wideOnly: { display: { default: 'contents', [NARROW]: 'none' } },
   narrowOnly: { display: { default: 'none', [NARROW]: 'contents' } },
@@ -472,19 +542,7 @@ export interface PrTabViewProps {
 
 type RelativeTimeT = (key: string, fallback: string, opts?: Record<string, unknown>) => string;
 
-function formatRelativeTime(isoString: string, t: RelativeTimeT): string {
-  const date = new Date(isoString);
-  const diff = Date.now() - date.getTime();
-  const minutes = Math.floor(diff / 60000);
-  const hours = Math.floor(minutes / 60);
-  const days = Math.floor(hours / 24);
-
-  if (minutes < 1) return t('sessions.prTab.timeJustNow', 'just now');
-  if (minutes < 60) return t('sessions.prTab.timeMinutesAgo', '{{count}}m ago', { count: minutes });
-  if (hours < 24) return t('sessions.prTab.timeHoursAgo', '{{count}}h ago', { count: hours });
-  if (days < 30) return t('sessions.prTab.timeDaysAgo', '{{count}}d ago', { count: days });
-  return date.toLocaleDateString();
-}
+const formatRelativeTime = formatGitHubRelativeTime;
 
 function prToBadgeMeta(pr: GitHubPullRequestDetails): SessionPullRequestMeta {
   return {
@@ -510,29 +568,37 @@ function UserAvatar({
 }
 
 /** "Open on GitHub": a quiet glyph link at the end of a row. */
-function GitHubLink({ href, label, pushEnd }: { href: string; label: string; pushEnd?: boolean }) {
+function GitHubLink({
+  href,
+  label,
+  pushEnd,
+  revealOnHover,
+}: {
+  href: string;
+  label: string;
+  pushEnd?: boolean;
+  /** Show only while the row is hovered or the link focused. */
+  revealOnHover?: boolean;
+}) {
   return (
     <a
       href={href}
       target="_blank"
       rel="noreferrer"
       aria-label={label}
-      {...stylex.props(styles.iconLink, pushEnd && styles.pushEnd)}
+      {...stylex.props(
+        styles.iconLink,
+        pushEnd && styles.pushEnd,
+        revealOnHover && styles.revealOnRowHover
+      )}
     >
       <Github {...stylex.props(styles.glyph12)} />
     </a>
   );
 }
 
-function BranchRefChip({
-  label,
-  value,
-  copyLabel,
-}: {
-  label: string;
-  value: string;
-  copyLabel: string;
-}) {
+/** A branch name that copies itself; `role` names which end of the PR it is. */
+function BranchChip({ role, value }: { role: 'base' | 'head'; value: string }) {
   const { t } = useTranslation();
   const [copied, setCopied] = useState(false);
   const handleCopy = useCallback(() => {
@@ -541,19 +607,142 @@ function BranchRefChip({
     setCopied(true);
     window.setTimeout(() => setCopied(false), 1500);
   }, [value]);
+  const roleLabel =
+    role === 'base' ? t('sessions.prTab.base', 'Base') : t('sessions.prTab.head', 'Head');
+  const copyLabel = `${roleLabel} · ${t('sessions.prTab.copyBranch', 'Copy branch name')}`;
   return (
-    <div {...stylex.props(styles.branchRef)}>
-      <span {...stylex.props(styles.branchLabel)}>{label}</span>
-      <button
-        type="button"
-        onClick={handleCopy}
-        title={copied ? t('common.copied', 'Copied') : copyLabel}
-        aria-label={copied ? t('common.copied', 'Copied') : copyLabel}
-        {...stylex.props(styles.branchChip)}
-      >
-        {copied ? t('common.copied', 'Copied') : value}
-      </button>
+    <button
+      type="button"
+      onClick={handleCopy}
+      title={copied ? t('common.copied', 'Copied') : `${roleLabel}: ${value}`}
+      aria-label={copied ? t('common.copied', 'Copied') : copyLabel}
+      {...stylex.props(styles.branchChip, role === 'base' && styles.branchChipBase)}
+    >
+      {copied ? t('common.copied', 'Copied') : value}
+    </button>
+  );
+}
+
+const STATE_PILL_STYLES = {
+  open: styles.stateOpen,
+  merged: styles.stateMerged,
+  closed: styles.stateClosed,
+  draft: styles.stateDraft,
+} as const;
+
+/** The one place the PR's state is a word; everywhere else it is a colour. */
+function PrStateLine({ pr }: { pr: GitHubPullRequestDetails }) {
+  const { t } = useTranslation();
+  const status = derivePrStatusFromDetails(pr);
+  const meta = PR_STATUS_META[status] ?? PR_STATUS_META.open;
+  const Icon = meta.icon;
+  return (
+    <div {...stylex.props(styles.stateLine)}>
+      <span data-pr-state={status} {...stylex.props(styles.statePill, STATE_PILL_STYLES[status])}>
+        <Icon {...stylex.props(styles.glyph12)} strokeWidth={2.25} aria-hidden />
+        {t(meta.labelKey, meta.labelFallback)}
+      </span>
+      <span {...stylex.props(styles.refs)}>
+        <BranchChip role="base" value={pr.baseRef} />
+        <ArrowLeft {...stylex.props(styles.refArrow)} aria-hidden />
+        <BranchChip role="head" value={pr.headRef} />
+      </span>
     </div>
+  );
+}
+
+function PrMetaLine({ pr }: { pr: GitHubPullRequestDetails }) {
+  const { t } = useTranslation();
+  const dot = (
+    <span aria-hidden {...stylex.props(styles.metaDot)}>
+      ·
+    </span>
+  );
+  return (
+    <div {...stylex.props(styles.meta)}>
+      {pr.user && (
+        <>
+          <UserAvatar user={{ login: pr.user.login, avatarUrl: pr.user.avatarUrl }} size="mini" />
+          <span {...stylex.props(styles.author)}>{pr.user.login}</span>
+        </>
+      )}
+      <span>
+        {t('sessions.prTab.opened', 'opened {{when}}', {
+          when: formatRelativeTime(pr.createdAt, t),
+        })}
+      </span>
+      {dot}
+      <span>
+        {t('sessions.prTab.commitsSummary', '{{count}} commits', {
+          count: pr.commits,
+        })}
+      </span>
+      {dot}
+      <span {...stylex.props(styles.additions)}>+{pr.additions}</span>
+      <span {...stylex.props(styles.deletions)}>−{pr.deletions}</span>
+      {dot}
+      <span>
+        {t('sessions.prTab.filesChanged', '{{count}} files', {
+          count: pr.changedFiles,
+        })}
+      </span>
+    </div>
+  );
+}
+
+/**
+ * The PR body, folded when it is taller than {@link DESCRIPTION_FOLD}. The fold
+ * is measured, not guessed from the text: a short body with one big image is tall.
+ */
+function PrDescription({ body }: { body: string }) {
+  const { t } = useTranslation();
+  const contentRef = useRef<HTMLDivElement>(null);
+  const [overflows, setOverflows] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+
+  useEffect(() => {
+    const el = contentRef.current;
+    if (!el) return undefined;
+    const measure = () => {
+      const limit = parseFloat(window.getComputedStyle(el).fontSize) * 22;
+      // Fold only when it hides a meaningful amount, never a line or two.
+      setOverflows(el.scrollHeight > limit * 1.25);
+    };
+    measure();
+    return observeResizeOnAnimationFrame(el, measure);
+  }, []);
+
+  const folded = overflows && !expanded;
+  return (
+    <>
+      <div
+        data-pr-description=""
+        {...stylex.props(styles.description, folded && styles.descriptionFolded)}
+      >
+        <div ref={contentRef}>
+          <SessionCommentMarkdown body={body} allowHtml />
+        </div>
+      </div>
+      {overflows && (
+        <div {...stylex.props(styles.descriptionToggle)}>
+          <Button
+            type="button"
+            size="mini"
+            variant="ghost"
+            aria-expanded={expanded}
+            onClick={() => setExpanded((v) => !v)}
+          >
+            <ChevronDown
+              {...stylex.props(styles.glyph12, styles.chevron, expanded && styles.chevronOpen)}
+              aria-hidden
+            />
+            {expanded
+              ? t('sessions.prTab.showLess', 'Show less')
+              : t('sessions.prTab.showMore', 'Show more')}
+          </Button>
+        </div>
+      )}
+    </>
   );
 }
 
@@ -592,72 +781,6 @@ const CheckRunRow = memo(function CheckRunRow({ run }: { run: GitHubCheckRun }) 
   );
 });
 
-const ChecksSection = memo(function ChecksSection({
-  summary,
-}: {
-  summary: GitHubCheckRunsSummary;
-}) {
-  const { t } = useTranslation();
-  const running = summary.status === 'in_progress' || summary.status === 'queued';
-  const passed = !running && summary.conclusion === 'success';
-  // Collapse the run list once everything is green — the summary line already
-  // says "all passed"; expand by default when something needs attention.
-  const [open, setOpen] = useState(!passed);
-  if (summary.total === 0) {
-    return null;
-  }
-  const headerLabel = running
-    ? t('sessions.prTab.checksRunning', 'Checks running')
-    : summary.conclusion === 'success'
-      ? t('sessions.prTab.checksPassed', 'All checks passed')
-      : summary.conclusion === 'failure'
-        ? t('sessions.prTab.checksFailed', 'Some checks failed')
-        : t('sessions.prTab.checks', 'Checks');
-  const headerIcon = running ? (
-    <Spinner {...stylex.props(styles.glyph16, styles.warning)} />
-  ) : summary.conclusion === 'success' ? (
-    <CheckCircle2 {...stylex.props(styles.glyph16, styles.success)} />
-  ) : summary.conclusion === 'failure' ? (
-    <XCircle {...stylex.props(styles.glyph16, styles.danger)} />
-  ) : (
-    <CircleDashed {...stylex.props(styles.glyph16, styles.muted)} />
-  );
-  const countLabel =
-    summary.total === 1
-      ? t('sessions.prTab.checksCountOne', '1 check')
-      : t('sessions.prTab.checksCount', '{{count}} checks', { count: summary.total });
-
-  return (
-    <section {...stylex.props(styles.card)}>
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        aria-expanded={open}
-        {...stylex.props(styles.checksToggle)}
-      >
-        <span {...stylex.props(styles.checksLabel)}>
-          {headerIcon}
-          <span {...stylex.props(styles.truncate)}>{headerLabel}</span>
-        </span>
-        <span {...stylex.props(styles.checksCount)}>
-          {countLabel}
-          <ChevronDown
-            {...stylex.props(styles.glyph14, styles.chevron, open && styles.chevronOpen)}
-            aria-hidden
-          />
-        </span>
-      </button>
-      {open && (
-        <ul {...stylex.props(styles.list)}>
-          {summary.runs.map((run) => (
-            <CheckRunRow key={run.id} run={run} />
-          ))}
-        </ul>
-      )}
-    </section>
-  );
-});
-
 function ChecksPermissionNotice({
   onGrantChecksPermission,
 }: {
@@ -688,45 +811,34 @@ function ChecksPermissionNotice({
   );
 }
 
-/**
- * Explains why the header merge action is disabled for the non-ready open states.
- * The action itself lives in the header; this is the "why" beneath it.
- */
-function MergeStatusNotice({ kind }: { kind: 'conflict' | 'blocked' | 'checking' }) {
+function EntryHeader({
+  user,
+  verb,
+  when,
+  href,
+}: {
+  user: { login: string; avatarUrl: string } | null;
+  verb: React.ReactNode;
+  when: string;
+  href: string;
+}) {
   const { t } = useTranslation();
-  if (kind === 'conflict') {
-    return (
-      <section {...stylex.props(styles.notice, styles.noticeDanger)}>
-        <AlertCircle {...stylex.props(styles.mark, styles.danger)} />
-        <p {...stylex.props(styles.noticeBody)}>
-          {t(
-            'sessions.prTab.mergeConflictNotice',
-            'This branch has conflicts with the base branch — resolve them before it can be merged.'
-          )}
-        </p>
-      </section>
-    );
-  }
-  if (kind === 'blocked') {
-    return (
-      <section {...stylex.props(styles.notice, styles.noticeWarning)}>
-        <ShieldAlert {...stylex.props(styles.mark, styles.warning)} />
-        <p {...stylex.props(styles.noticeBody)}>
-          {t(
-            'sessions.prTab.mergeBlockedNotice',
-            'Merging is blocked until required reviews and checks pass.'
-          )}
-        </p>
-      </section>
-    );
-  }
+  const login = user?.login ?? 'ghost';
   return (
-    <section {...stylex.props(styles.notice, styles.noticeQuiet)}>
-      <Spinner {...stylex.props(styles.mark, styles.markCentered)} />
-      <p {...stylex.props(styles.noticeBody)}>
-        {t('sessions.prTab.mergeCheckingNotice', 'Checking whether this branch can be merged…')}
-      </p>
-    </section>
+    <header {...stylex.props(styles.entryHeader)}>
+      <UserAvatar user={user} size="small" />
+      <span {...stylex.props(styles.entrySentence)}>
+        <span {...stylex.props(styles.entryAuthor)}>{login}</span>
+        {verb}
+        {when && <span {...stylex.props(styles.entryMeta)}>{formatRelativeTime(when, t)}</span>}
+      </span>
+      <GitHubLink
+        href={href}
+        label={t('sessions.prTab.openOnGitHub', 'Open on GitHub')}
+        pushEnd
+        revealOnHover
+      />
+    </header>
   );
 }
 
@@ -736,24 +848,20 @@ const IssueCommentItem = memo(function IssueCommentItem({
   comment: GitHubIssueComment;
 }) {
   const { t } = useTranslation();
-  const login = comment.user?.login ?? 'ghost';
   return (
-    <article {...stylex.props(styles.entry)}>
-      <header {...stylex.props(styles.entryHeader)}>
-        <UserAvatar
-          user={comment.user ? { login, avatarUrl: comment.user.avatarUrl } : null}
-          size="medium"
-        />
-        <span {...stylex.props(styles.entryAuthor)}>{login}</span>
-        <span {...stylex.props(styles.entryMeta)}>
-          {t('sessions.prTab.commented', 'commented')} · {formatRelativeTime(comment.createdAt, t)}
-        </span>
-        <GitHubLink
-          href={comment.htmlUrl}
-          label={t('sessions.prTab.openOnGitHub', 'Open on GitHub')}
-          pushEnd
-        />
-      </header>
+    <article {...stylex.props(stylex.defaultMarker(), styles.entry)}>
+      <EntryHeader
+        user={
+          comment.user ? { login: comment.user.login, avatarUrl: comment.user.avatarUrl } : null
+        }
+        verb={
+          <span {...stylex.props(styles.entryVerb)}>
+            {t('sessions.prTab.commented', 'commented')}
+          </span>
+        }
+        when={comment.createdAt}
+        href={comment.htmlUrl}
+      />
       <div {...stylex.props(styles.entryBody)}>
         <SessionCommentMarkdown body={comment.body} allowHtml />
       </div>
@@ -761,57 +869,36 @@ const IssueCommentItem = memo(function IssueCommentItem({
   );
 });
 
-const ReviewThreadCard = memo(function ReviewThreadCard({
-  thread,
-  nested = false,
-}: {
-  thread: GitHubReviewThread;
-  /** Inside a review submission the thread is a region of that row, not a row
-   *  of its own, so it takes the region fill. */
-  nested?: boolean;
-}) {
-  const { t } = useTranslation();
-  return (
-    <article {...stylex.props(styles.entry, nested && styles.threadRegion)}>
-      <header {...stylex.props(styles.threadHeader)}>
-        <span {...stylex.props(styles.truncate, styles.threadPath)} title={thread.anchor.path}>
-          {thread.anchor.path}
-          <span {...stylex.props(styles.threadLine)}>:{thread.anchor.line}</span>
-        </span>
-        {thread.outdated && <Badge>{t('sessions.prTab.outdated', 'outdated')}</Badge>}
-      </header>
-      <GitHubCommentThread thread={thread} className={stylex.props(styles.threadBody).className} />
-    </article>
-  );
-});
-
-function ReviewStateBadge({ state }: { state: GitHubReview['state'] }) {
+/** What a review did, as the verb of its row. Only a verdict takes a colour. */
+function ReviewVerb({ state }: { state: GitHubReview['state'] }) {
   const { t } = useTranslation();
   if (state === 'approved') {
     return (
-      <Badge tone="success" icon={<CheckCircle2 {...stylex.props(styles.fill)} />}>
+      <span {...stylex.props(styles.entryVerb, styles.success)}>
+        <CheckCircle2 {...stylex.props(styles.glyph12)} aria-hidden />
         {t('sessions.prTab.reviewApproved', 'approved')}
-      </Badge>
+      </span>
     );
   }
   if (state === 'changes_requested') {
     return (
-      <Badge tone="danger" icon={<CircleDot {...stylex.props(styles.fill)} />}>
-        {t('sessions.prTab.reviewChangesRequested', 'changes requested')}
-      </Badge>
+      <span {...stylex.props(styles.entryVerb, styles.danger)}>
+        <CircleDot {...stylex.props(styles.glyph12)} aria-hidden />
+        {t('sessions.prTab.reviewChangesRequested', 'requested changes')}
+      </span>
     );
   }
   if (state === 'dismissed') {
     return (
-      <Badge icon={<MinusCircle {...stylex.props(styles.fill)} />}>
+      <span {...stylex.props(styles.entryVerb)}>
         {t('sessions.prTab.reviewDismissed', 'dismissed')}
-      </Badge>
+      </span>
     );
   }
   return (
-    <Badge icon={<MessageSquare {...stylex.props(styles.fill)} />}>
+    <span {...stylex.props(styles.entryVerb)}>
       {t('sessions.prTab.reviewCommented', 'commented')}
-    </Badge>
+    </span>
   );
 }
 
@@ -822,26 +909,15 @@ const ReviewSubmissionItem = memo(function ReviewSubmissionItem({
   review: GitHubReview;
   threads: GitHubReviewThread[];
 }) {
-  const { t } = useTranslation();
-  const login = review.user?.login ?? 'ghost';
-  const when = review.submittedAt ?? '';
   const hasBody = review.body.trim().length > 0;
   return (
-    <article {...stylex.props(styles.entry)}>
-      <header {...stylex.props(styles.entryHeader)}>
-        <UserAvatar
-          user={review.user ? { login, avatarUrl: review.user.avatarUrl } : null}
-          size="medium"
-        />
-        <span {...stylex.props(styles.entryAuthor)}>{login}</span>
-        <ReviewStateBadge state={review.state} />
-        {when && <span {...stylex.props(styles.entryMeta)}>{formatRelativeTime(when, t)}</span>}
-        <GitHubLink
-          href={review.htmlUrl}
-          label={t('sessions.prTab.openOnGitHub', 'Open on GitHub')}
-          pushEnd
-        />
-      </header>
+    <article {...stylex.props(stylex.defaultMarker(), styles.entry)}>
+      <EntryHeader
+        user={review.user ? { login: review.user.login, avatarUrl: review.user.avatarUrl } : null}
+        verb={<ReviewVerb state={review.state} />}
+        when={review.submittedAt ?? ''}
+        href={review.htmlUrl}
+      />
       {hasBody && (
         <div {...stylex.props(styles.entryBody)}>
           <SessionCommentMarkdown body={review.body} allowHtml />
@@ -851,7 +927,7 @@ const ReviewSubmissionItem = memo(function ReviewSubmissionItem({
         <ul {...stylex.props(styles.entryThreads)}>
           {threads.map((thread) => (
             <li key={`thread-${thread.id}`}>
-              <ReviewThreadCard thread={thread} nested />
+              <GitHubCommentThread thread={thread} surface="inset" showAnchor />
             </li>
           ))}
         </ul>
@@ -952,7 +1028,7 @@ function mergeMethodShortLabel(method: GitHubMergeMethod, t: RelativeTimeT): str
   return t('sessions.prTab.mergeShortMerge', 'Merge');
 }
 
-interface PrHeaderActionProps {
+interface PrPrimaryActionProps {
   pr: GitHubPullRequestDetails;
   mergeMethod?: GitHubMergeMethod;
   isMerging?: boolean;
@@ -971,51 +1047,35 @@ interface PrHeaderActionProps {
   menuContentClassName?: string;
 }
 
-/** The chevron half of a split action: the same variant as the command it belongs to. */
-function MoreActionsMenu({
-  variant,
-  disabled,
-  menuContentClassName,
-  children,
-}: {
-  variant: 'primary' | 'secondary';
-  disabled: boolean;
-  menuContentClassName?: string;
-  children: React.ReactNode;
-}) {
-  const { t } = useTranslation();
-  return (
-    <Menu.Root>
-      <Menu.Trigger
-        render={
-          <Button
-            type="button"
-            size="small"
-            variant={variant}
-            icon
-            disabled={disabled}
-            aria-label={t('sessions.prTab.moreActions', 'More actions')}
-          />
-        }
-      >
-        <ChevronDown {...stylex.props(styles.fill)} />
-      </Menu.Trigger>
-      <Menu.Content align="end" className={menuContentClassName}>
-        {children}
-      </Menu.Content>
-    </Menu.Root>
-  );
+function isPrBusy(
+  p: Pick<
+    PrPrimaryActionProps,
+    'isMerging' | 'isUpdatingState' | 'isMarkingReady' | 'isDeletingBranch'
+  >
+): boolean {
+  return Boolean(p.isMerging || p.isUpdatingState || p.isMarkingReady || p.isDeletingBranch);
+}
+
+/** The checks' say on a merge, as the colour of the merge glyph. */
+function mergeGlyphTone(checks: GitHubCheckRunsSummary | null) {
+  if (!checks || checks.total === 0) return styles.muted;
+  if (checks.status === 'in_progress' || checks.status === 'queued') return styles.warning;
+  if (checks.conclusion === 'failure') return styles.danger;
+  if (checks.conclusion === 'success') return styles.success;
+  return styles.muted;
 }
 
 /**
- * The single primary-action control for a PR, rendered in the header top-right.
- * Consolidates merge (with method switch), close, reopen, ready-for-review and
- * delete-branch into one split button so the body never carries an action box.
- * Only an action that moves the PR forward (merge, ready for review) is primary;
- * a disabled or corrective one is secondary.
+ * The PR's next step, top right, as one quiet joined control: the command and
+ * its chevron are segments of one `ButtonGroup`, secondary, so it stands up
+ * like every control without being the loudest thing on the page. The merge
+ * glyph takes the checks' colour, so the button says whether merging is wise
+ * before the card below says why. The chevron carries the merge method and
+ * Close — closing is never the next step, so it never gets a button of its own.
  */
-function PrHeaderActionButton({
+function PrPrimaryAction({
   pr,
+  checks,
   mergeMethod = 'merge',
   isMerging,
   isUpdatingState,
@@ -1030,12 +1090,11 @@ function PrHeaderActionButton({
   onResolveConflicts,
   isResolvingConflicts,
   menuContentClassName,
-}: PrHeaderActionProps) {
+}: PrPrimaryActionProps & { checks: GitHubCheckRunsSummary | null }) {
   const { t } = useTranslation();
   const kind = resolveMergeKind(pr);
-  const busy = Boolean(isMerging || isUpdatingState || isMarkingReady || isDeletingBranch);
+  const busy = isPrBusy({ isMerging, isUpdatingState, isMarkingReady, isDeletingBranch });
   const canClose = Boolean(onSetState) && !pr.merged && pr.state !== 'closed';
-  const canReopen = Boolean(onSetState) && pr.state === 'closed' && !pr.merged;
 
   const closeItem = canClose ? (
     <Menu.Item
@@ -1047,164 +1106,161 @@ function PrHeaderActionButton({
     </Menu.Item>
   ) : null;
 
-  // Ready to merge — split button with a method switch + Close.
+  const chevron = (children: React.ReactNode) => (
+    <Menu.Root>
+      <Menu.Trigger
+        render={
+          <Button
+            type="button"
+            size="small"
+            variant="secondary"
+            icon
+            disabled={busy}
+            aria-label={t('sessions.prTab.moreActions', 'More actions')}
+          />
+        }
+      >
+        <ChevronDown {...stylex.props(styles.fill)} />
+      </Menu.Trigger>
+      <Menu.Content align="end" className={menuContentClassName}>
+        {children}
+      </Menu.Content>
+    </Menu.Root>
+  );
+
+  /** A command with, when there is anything to put there, its chevron. */
+  const split = (command: React.ReactNode, menu: React.ReactNode, attr?: boolean) =>
+    menu ? (
+      <ButtonGroup data-pr-merge-action={attr ? '' : undefined}>
+        {command}
+        {chevron(menu)}
+      </ButtonGroup>
+    ) : (
+      command
+    );
+
   if (kind === 'ready' && onMerge) {
-    return (
-      <div data-pr-merge-action="" {...stylex.props(styles.split)}>
-        <Button
-          type="button"
-          size="small"
-          variant="primary"
-          onClick={() => void onMerge(mergeMethod)}
-          disabled={busy}
+    return split(
+      <Button
+        type="button"
+        size="small"
+        variant="secondary"
+        onClick={() => void onMerge(mergeMethod)}
+        disabled={busy}
+      >
+        {isMerging ? (
+          <Spinner {...stylex.props(styles.glyph14)} />
+        ) : (
+          <GitMerge {...stylex.props(styles.glyph14, mergeGlyphTone(checks))} />
+        )}
+        {mergeMethodShortLabel(mergeMethod, t)}
+      </Button>,
+      <>
+        <Menu.GroupLabel>
+          {t('sessions.prTab.chooseMergeMethod', 'Choose merge method')}
+        </Menu.GroupLabel>
+        <Menu.RadioGroup
+          value={mergeMethod}
+          onValueChange={(value) => onSelectMergeMethod?.(value as GitHubMergeMethod)}
         >
-          {isMerging ? (
-            <Spinner {...stylex.props(styles.glyph14)} />
-          ) : (
-            <GitMerge {...stylex.props(styles.glyph14)} />
-          )}
-          {mergeMethodShortLabel(mergeMethod, t)}
-        </Button>
-        <MoreActionsMenu
-          variant="primary"
-          disabled={busy}
-          menuContentClassName={menuContentClassName}
-        >
-          <Menu.GroupLabel>
-            {t('sessions.prTab.chooseMergeMethod', 'Choose merge method')}
-          </Menu.GroupLabel>
-          <Menu.RadioGroup
-            value={mergeMethod}
-            onValueChange={(value) => onSelectMergeMethod?.(value as GitHubMergeMethod)}
-          >
-            {HEADER_MERGE_METHODS.map((method) => (
-              <Menu.RadioItem key={method.value} value={method.value}>
-                {t(method.labelKey, method.labelFallback)}
-              </Menu.RadioItem>
-            ))}
-          </Menu.RadioGroup>
-          {closeItem && (
-            <>
-              <Menu.Separator />
-              {closeItem}
-            </>
-          )}
-        </MoreActionsMenu>
-      </div>
+          {HEADER_MERGE_METHODS.map((method) => (
+            <Menu.RadioItem key={method.value} value={method.value}>
+              {t(method.labelKey, method.labelFallback)}
+            </Menu.RadioItem>
+          ))}
+        </Menu.RadioGroup>
+        {closeItem && (
+          <>
+            <Menu.Separator />
+            {closeItem}
+          </>
+        )}
+      </>,
+      true
     );
   }
 
   // Conflict — the agent-driven "Resolve conflicts" action. Clickable when the
   // owning session offers it (shared 1:1 with the info-bar button, same prompt +
-  // pending); a disabled indicator otherwise, with the reason in the body notice.
+  // pending); a disabled indicator otherwise.
   if (kind === 'conflict') {
     const resolving = Boolean(isResolvingConflicts);
     const canResolve = Boolean(onResolveConflicts) && !resolving;
-    const tip = t(
-      'sessions.prTab.mergeConflictBody',
-      'This branch has conflicts that must be resolved on GitHub or your local repo before merging.'
-    );
-    return (
-      <div {...stylex.props(styles.split)}>
-        <Button
-          type="button"
-          size="small"
-          variant="secondary"
-          onClick={canResolve ? onResolveConflicts : undefined}
-          disabled={!canResolve}
-          title={tip}
-        >
-          {resolving ? (
-            <Spinner {...stylex.props(styles.glyph14)} />
-          ) : (
-            <AlertCircle {...stylex.props(styles.glyph14)} />
-          )}
-          {t('sessions.prTab.resolveConflicts', 'Resolve conflicts')}
-        </Button>
-        {closeItem && (
-          <MoreActionsMenu
-            variant="secondary"
-            disabled={busy}
-            menuContentClassName={menuContentClassName}
-          >
-            {closeItem}
-          </MoreActionsMenu>
+    return split(
+      <Button
+        type="button"
+        size="small"
+        variant="secondary"
+        onClick={canResolve ? onResolveConflicts : undefined}
+        disabled={!canResolve}
+        title={t(
+          'sessions.prTab.mergeConflictBody',
+          'This branch has conflicts that must be resolved on GitHub or your local repo before merging.'
         )}
-      </div>
+      >
+        {resolving ? (
+          <Spinner {...stylex.props(styles.glyph14)} />
+        ) : (
+          <AlertCircle {...stylex.props(styles.glyph14, styles.danger)} />
+        )}
+        {t('sessions.prTab.resolveConflicts', 'Resolve conflicts')}
+      </Button>,
+      closeItem
     );
   }
 
-  // Blocked / still checking — merge disabled, Close via the chevron.
+  // Blocked / still checking — merge stays in place, disabled, so the header
+  // keeps its shape while GitHub decides; the card below says why.
   if ((kind === 'blocked' || kind === 'checking') && onMerge) {
-    const tip =
-      kind === 'blocked'
-        ? t(
-            'sessions.prTab.mergeBlocked',
-            'Merging is blocked — required reviews, failing checks, or the branch is behind.'
-          )
-        : t('sessions.prTab.mergeChecking', 'Checking if the branch can be merged…');
-    return (
-      <div {...stylex.props(styles.split)}>
-        <Button type="button" size="small" variant="secondary" disabled title={tip}>
-          {kind === 'checking' ? (
-            <Spinner {...stylex.props(styles.glyph14)} />
-          ) : (
-            <GitMerge {...stylex.props(styles.glyph14)} />
-          )}
-          {mergeMethodShortLabel(mergeMethod, t)}
-        </Button>
-        {closeItem && (
-          <MoreActionsMenu
-            variant="secondary"
-            disabled={busy}
-            menuContentClassName={menuContentClassName}
-          >
-            {closeItem}
-          </MoreActionsMenu>
-        )}
-      </div>
+    return split(
+      <Button
+        type="button"
+        size="small"
+        variant="secondary"
+        disabled
+        title={
+          kind === 'blocked'
+            ? t(
+                'sessions.prTab.mergeBlocked',
+                'Merging is blocked — required reviews, failing checks, or the branch is behind.'
+              )
+            : t('sessions.prTab.mergeChecking', 'Checking if the branch can be merged…')
+        }
+      >
+        <GitMerge {...stylex.props(styles.glyph14)} />
+        {mergeMethodShortLabel(mergeMethod, t)}
+      </Button>,
+      closeItem
     );
   }
 
-  // Draft — mark ready for review, Close via the chevron.
   if (kind === 'draft' && onMarkReadyForReview) {
-    return (
-      <div {...stylex.props(styles.split)}>
-        <Button
-          type="button"
-          size="small"
-          variant="primary"
-          onClick={() => void onMarkReadyForReview()}
-          disabled={busy}
-        >
-          {isMarkingReady ? (
-            <Spinner {...stylex.props(styles.glyph14)} />
-          ) : (
-            <GitPullRequestArrow {...stylex.props(styles.glyph14)} />
-          )}
-          {t('sessions.prTab.readyForReview', 'Ready for review')}
-        </Button>
-        {closeItem && (
-          <MoreActionsMenu
-            variant="primary"
-            disabled={busy}
-            menuContentClassName={menuContentClassName}
-          >
-            {closeItem}
-          </MoreActionsMenu>
+    return split(
+      <Button
+        type="button"
+        size="small"
+        variant="secondary"
+        onClick={() => void onMarkReadyForReview()}
+        disabled={busy}
+      >
+        {isMarkingReady ? (
+          <Spinner {...stylex.props(styles.glyph14)} />
+        ) : (
+          <GitPullRequestArrow {...stylex.props(styles.glyph14)} />
         )}
-      </div>
+        {t('sessions.prTab.readyForReview', 'Ready for review')}
+      </Button>,
+      closeItem
     );
   }
 
-  // Closed — offer Reopen when allowed.
-  if (kind === 'closed' && canReopen) {
+  if (kind === 'closed' && onSetState) {
     return (
       <Button
         type="button"
         size="small"
         variant="secondary"
-        onClick={() => void onSetState?.('open')}
+        onClick={() => void onSetState('open')}
         disabled={busy}
       >
         {isUpdatingState ? (
@@ -1288,6 +1344,160 @@ function PrHeaderActionButton({
   }
 
   return null;
+}
+
+type Verdict = { mark: React.ReactNode; title: string };
+
+function mergeVerdict(kind: MergeKind, t: RelativeTimeT): Verdict {
+  switch (kind) {
+    case 'ready':
+      return {
+        mark: <CheckCircle2 {...stylex.props(styles.glyph16, styles.success)} />,
+        title: t('sessions.prTab.verdictReady', 'Ready to merge'),
+      };
+    case 'conflict':
+      return {
+        mark: <AlertCircle {...stylex.props(styles.glyph16, styles.danger)} />,
+        title: t('sessions.prTab.verdictConflict', 'Conflicts with the base branch'),
+      };
+    case 'blocked':
+      return {
+        mark: <ShieldAlert {...stylex.props(styles.glyph16, styles.warning)} />,
+        title: t('sessions.prTab.verdictBlocked', 'Merging is blocked'),
+      };
+    case 'checking':
+      return {
+        mark: <Spinner {...stylex.props(styles.glyph16, styles.muted)} />,
+        title: t('sessions.prTab.mergeChecking', 'Checking if the branch can be merged…'),
+      };
+    case 'draft':
+      return {
+        mark: <GitPullRequestDraft {...stylex.props(styles.glyph16, styles.muted)} />,
+        title: t('sessions.prTab.verdictDraft', 'Draft — not ready for review'),
+      };
+    case 'merged':
+      return {
+        mark: <GitMerge {...stylex.props(styles.glyph16, styles.merged)} />,
+        title: t('sessions.prTab.mergedAlready', 'Pull request merged'),
+      };
+    case 'closed':
+      return {
+        mark: <GitPullRequestClosed {...stylex.props(styles.glyph16, styles.danger)} />,
+        title: t('sessions.prTab.closed', 'Closed without merging'),
+      };
+  }
+}
+
+/**
+ * "Can this merge, and what is left?" answered in one place: the verdict and
+ * the checks behind it. It replaces a checks card and a separate conflict /
+ * blocked notice; the action it allows stays in the header, where it is
+ * reachable without scrolling.
+ */
+function MergeCard({
+  pr,
+  checks,
+}: {
+  pr: GitHubPullRequestDetails;
+  checks: GitHubCheckRunsSummary | null;
+}) {
+  const { t } = useTranslation();
+  const kind = resolveMergeKind(pr);
+  const total = checks?.total ?? 0;
+  const running = checks?.status === 'in_progress' || checks?.status === 'queued';
+  const failed = !running && checks?.conclusion === 'failure';
+  const passed = !running && checks?.conclusion === 'success';
+  const base = mergeVerdict(kind, t);
+  // GitHub lets a PR merge past checks that are not required; the verdict still
+  // says it can merge, but its mark must not be a green tick beside a red line.
+  const verdict: Verdict =
+    kind === 'ready' && failed
+      ? { ...base, mark: <AlertCircle {...stylex.props(styles.glyph16, styles.warning)} /> }
+      : kind === 'ready' && running
+        ? { ...base, mark: <CircleDashed {...stylex.props(styles.glyph16, styles.muted)} /> }
+        : base;
+  // Collapse the run list once everything is green — the detail line already
+  // says so; expand by default when something needs attention.
+  const [open, setOpen] = useState(!passed);
+
+  const countLabel =
+    total === 1
+      ? t('sessions.prTab.checksCountOne', '1 check')
+      : t('sessions.prTab.checksCount', '{{count}} checks', { count: total });
+  const detail =
+    total === 0
+      ? null
+      : `${
+          running
+            ? t('sessions.prTab.checksRunning', 'Checks running')
+            : passed
+              ? t('sessions.prTab.checksPassed', 'All checks passed')
+              : failed
+                ? t('sessions.prTab.checksFailed', 'Some checks failed')
+                : t('sessions.prTab.checks', 'Checks')
+        } · ${countLabel}`;
+  const detailMark =
+    total === 0 ? null : running ? (
+      <Spinner {...stylex.props(styles.glyph12, styles.warning)} />
+    ) : passed ? (
+      <CheckCircle2 {...stylex.props(styles.glyph12, styles.success)} />
+    ) : failed ? (
+      <XCircle {...stylex.props(styles.glyph12, styles.danger)} />
+    ) : (
+      <CircleDashed {...stylex.props(styles.glyph12, styles.muted)} />
+    );
+
+  const summary = (
+    <>
+      {verdict.mark}
+      <span {...stylex.props(styles.verdict)}>
+        <span {...stylex.props(styles.verdictTitle)}>{verdict.title}</span>
+        {detail && (
+          <span {...stylex.props(styles.verdictDetail, failed && styles.danger)}>
+            {detailMark}
+            <span {...stylex.props(styles.truncate)}>{detail}</span>
+          </span>
+        )}
+      </span>
+      {total > 0 && (
+        <ChevronDown
+          {...stylex.props(
+            styles.glyph14,
+            styles.muted,
+            styles.chevron,
+            open && styles.chevronOpen
+          )}
+          aria-hidden
+        />
+      )}
+    </>
+  );
+
+  return (
+    <section data-pr-merge-card={kind} {...stylex.props(styles.card)}>
+      <div {...stylex.props(styles.mergeRow)}>
+        {total > 0 ? (
+          <button
+            type="button"
+            onClick={() => setOpen((v) => !v)}
+            aria-expanded={open}
+            {...stylex.props(styles.checksToggle)}
+          >
+            {summary}
+          </button>
+        ) : (
+          <div {...stylex.props(styles.checksToggle, styles.checksStatic)}>{summary}</div>
+        )}
+      </div>
+      {open && total > 0 && checks && (
+        <ul {...stylex.props(styles.list)}>
+          {checks.runs.map((run) => (
+            <CheckRunRow key={run.id} run={run} />
+          ))}
+        </ul>
+      )}
+    </section>
+  );
 }
 
 function PrBodySkeleton() {
@@ -1400,27 +1610,6 @@ function resolveMergeKind(pr: GitHubPullRequestDetails): MergeKind {
   return 'ready';
 }
 
-function BranchRow({ pr }: { pr: GitHubPullRequestDetails }) {
-  const { t } = useTranslation();
-  const copyLabel = t('sessions.prTab.copyBranch', 'Copy branch name');
-  return (
-    <div {...stylex.props(styles.branchRow)}>
-      <div {...stylex.props(styles.column, styles.branchColumn)}>
-        <BranchRefChip
-          label={t('sessions.prTab.base', 'Base')}
-          value={pr.baseRef}
-          copyLabel={copyLabel}
-        />
-        <BranchRefChip
-          label={t('sessions.prTab.head', 'Head')}
-          value={pr.headRef}
-          copyLabel={copyLabel}
-        />
-      </div>
-    </div>
-  );
-}
-
 export const PrTabView = memo(function PrTabView({
   repoFullName,
   prNumber,
@@ -1452,7 +1641,6 @@ export const PrTabView = memo(function PrTabView({
 }: PrTabViewProps) {
   const { t } = useTranslation();
   const pr = data?.pullRequest;
-  const mergeKind = pr ? resolveMergeKind(pr) : null;
   const conversation = data
     ? buildConversation(data.issueComments, data.reviewThreads, data.reviews)
     : [];
@@ -1462,6 +1650,28 @@ export const PrTabView = memo(function PrTabView({
         url: `https://github.com/${repoFullName}/pull/${prNumber}`,
         status: 'open',
       };
+
+  const primaryAction =
+    pr != null ? (
+      <PrPrimaryAction
+        pr={pr}
+        checks={checksPermissionError ? null : (data?.checkRuns ?? null)}
+        mergeMethod={mergeMethod}
+        isMerging={isMerging}
+        isUpdatingState={isUpdatingState}
+        isMarkingReady={isMarkingReady}
+        isDeletingBranch={isDeletingBranch}
+        branchExists={branchExists}
+        onMerge={onMerge}
+        onSelectMergeMethod={onSelectMergeMethod}
+        onSetState={onSetState}
+        onMarkReadyForReview={onMarkReadyForReview}
+        onDeleteBranch={onDeleteBranch}
+        onResolveConflicts={onResolveConflicts}
+        isResolvingConflicts={isResolvingConflicts}
+        menuContentClassName={embedded ? 'lody-app-preview-portal-dark' : undefined}
+      />
+    ) : null;
 
   const body = (
     <div {...stylex.props(styles.column, styles.body, embedded && styles.bodyEmbedded)}>
@@ -1489,55 +1699,16 @@ export const PrTabView = memo(function PrTabView({
       {pr && (
         <>
           <section {...stylex.props(styles.titleSection, embedded && styles.titleSectionEmbedded)}>
-            <h2 {...stylex.props(styles.title, embedded && styles.titleEmbedded)}>
-              {pr.title}
-              <span {...stylex.props(styles.number, embedded && styles.numberEmbedded)}>
-                #{pr.number}
-              </span>
-            </h2>
-            <div {...stylex.props(styles.meta)}>
-              <span {...stylex.props(styles.metaGroup)}>
-                {pr.user && (
-                  <>
-                    <UserAvatar
-                      user={{ login: pr.user.login, avatarUrl: pr.user.avatarUrl }}
-                      size="mini"
-                    />
-                    <span {...stylex.props(styles.author)}>{pr.user.login}</span>
-                  </>
-                )}
-                <span>
-                  {t('sessions.prTab.opened', 'opened {{when}}', {
-                    when: formatRelativeTime(pr.createdAt, t),
-                  })}
-                </span>
-                <span aria-hidden>·</span>
-                <span>
-                  {t('sessions.prTab.commitsSummary', '{{count}} commits', {
-                    count: pr.commits,
-                  })}
-                </span>
-              </span>
-              <span {...stylex.props(styles.metaStats)}>
-                <span {...stylex.props(styles.additions)}>+{pr.additions}</span>
-                <span {...stylex.props(styles.deletions)}>-{pr.deletions}</span>
-                <span aria-hidden>·</span>
-                <span>
-                  {t('sessions.prTab.filesChanged', '{{count}} files', {
-                    count: pr.changedFiles,
-                  })}
-                </span>
-              </span>
-            </div>
+            <h2 {...stylex.props(styles.title, embedded && styles.titleEmbedded)}>{pr.title}</h2>
+            <PrStateLine pr={pr} />
+            <PrMetaLine pr={pr} />
             {pr.body ? (
               embedded ? (
                 <div {...stylex.props(styles.description, styles.descriptionEmbedded)}>
                   <SessionCommentMarkdown body={pr.body} allowHtml />
                 </div>
               ) : (
-                <div data-pr-description="" {...stylex.props(styles.description)}>
-                  <SessionCommentMarkdown body={pr.body} allowHtml />
-                </div>
+                <PrDescription body={pr.body} />
               )
             ) : (
               <p {...stylex.props(styles.noDescription)}>
@@ -1546,15 +1717,11 @@ export const PrTabView = memo(function PrTabView({
             )}
           </section>
 
-          {checksPermissionError ? (
+          {checksPermissionError && (
             <ChecksPermissionNotice onGrantChecksPermission={onGrantChecksPermission} />
-          ) : (
-            data && <ChecksSection summary={data.checkRuns} />
           )}
 
-          {(mergeKind === 'conflict' || mergeKind === 'blocked' || mergeKind === 'checking') && (
-            <MergeStatusNotice kind={mergeKind} />
-          )}
+          <MergeCard pr={pr} checks={checksPermissionError ? null : (data?.checkRuns ?? null)} />
 
           <section {...stylex.props(styles.sectionStack, embedded && styles.sectionStackEmbedded)}>
             {conversation.length > 0 && (
@@ -1571,7 +1738,9 @@ export const PrTabView = memo(function PrTabView({
                   if (item.kind === 'review-thread') {
                     return (
                       <li key={`thread-${item.thread.id}`} {...row}>
-                        <ReviewThreadCard thread={item.thread} />
+                        <div {...stylex.props(styles.orphanThread)}>
+                          <GitHubCommentThread thread={item.thread} surface="inset" showAnchor />
+                        </div>
                       </li>
                     );
                   }
@@ -1595,44 +1764,30 @@ export const PrTabView = memo(function PrTabView({
     </div>
   );
 
-  const mergeAction =
-    pr != null ? (
-      <PrHeaderActionButton
-        pr={pr}
-        mergeMethod={mergeMethod}
-        isMerging={isMerging}
-        isUpdatingState={isUpdatingState}
-        isMarkingReady={isMarkingReady}
-        isDeletingBranch={isDeletingBranch}
-        branchExists={branchExists}
-        onMerge={onMerge}
-        onSelectMergeMethod={onSelectMergeMethod}
-        onSetState={onSetState}
-        onMarkReadyForReview={onMarkReadyForReview}
-        onDeleteBranch={onDeleteBranch}
-        onResolveConflicts={onResolveConflicts}
-        isResolvingConflicts={isResolvingConflicts}
-        menuContentClassName={embedded ? 'lody-app-preview-portal-dark' : undefined}
-      />
-    ) : null;
-
   return (
     <div {...withClassName(stylex.props(styles.root), className)}>
       {embedded ? (
-        /* Landing: slim bar — badge + merge only (no branch row / github chrome). */
+        /* Landing: slim bar — badge + next step only (no github chrome). */
         <div {...stylex.props(styles.embeddedBar)}>
           <div {...stylex.props(styles.embeddedLead)}>
             <PullRequestBadge pr={badgeMeta} size="sm" />
             <span {...stylex.props(styles.embeddedRepo)}>{repoFullName}</span>
           </div>
-          <div {...stylex.props(styles.shrink)}>{mergeAction}</div>
+          <div {...stylex.props(styles.shrink)}>{primaryAction}</div>
         </div>
       ) : (
         <header {...stylex.props(styles.header)}>
           <div {...stylex.props(styles.column, styles.headerRow)}>
             {leadingSlot}
-            <PullRequestBadge pr={badgeMeta} size="md" />
-            <span {...stylex.props(styles.repoName)}>{repoFullName}</span>
+            <span {...stylex.props(styles.crumbs)}>
+              <span {...stylex.props(styles.repoName)} title={repoFullName}>
+                {repoFullName}
+              </span>
+              <span aria-hidden {...stylex.props(styles.crumbSeparator)}>
+                /
+              </span>
+              <span {...stylex.props(styles.crumbNumber)}>#{prNumber}</span>
+            </span>
             <div {...stylex.props(styles.headerActions)}>
               {onRefresh && (
                 <Button
@@ -1667,13 +1822,11 @@ export const PrTabView = memo(function PrTabView({
               >
                 <Github {...stylex.props(styles.fill)} />
               </Button>
-              {mergeAction}
+              {primaryAction}
             </div>
           </div>
         </header>
       )}
-
-      {!embedded && pr && <BranchRow pr={pr} />}
 
       <ScrollArea data-pr-content-scroll-area="" {...stylex.props(styles.scroll)}>
         {body}
