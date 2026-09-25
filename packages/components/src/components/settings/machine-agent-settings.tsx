@@ -62,7 +62,6 @@ import { useMachineMonitor } from '@/hooks/use-machine-monitor';
 import { useMachineLifecycleCapability } from '@/hooks/use-machine-lifecycle-capability';
 import { useOpenSettings } from '@/hooks/use-open-settings';
 import { Button } from '@lody/ui/button';
-import { Select } from '@lody/ui/select';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { corner, duration, ease, radius, space } from '@lody/ui/tokens/scales.stylex';
 import { Drawer, DrawerContent, DrawerDescription, DrawerTitle } from '@/ui/drawer';
@@ -97,6 +96,7 @@ import {
   type WorkspaceMachineAccordionMeta,
 } from './workspace-machine-accordion';
 import { SettingsPageActions, useInSettingsPane } from './settings-page-header';
+import { SettingsLineTabs } from './settings-line-tabs';
 import { settingsSurface as surface } from './surface';
 import { settingsType as type } from './type.stylex';
 
@@ -229,15 +229,6 @@ const styles = stylex.create({
   },
   page: { display: 'flex', flexDirection: 'column', gap: space[4], width: '100%', minWidth: 0 },
   heading: { minWidth: 0 },
-  machineChoice: { width: '200px' },
-  machineOption: { display: 'flex', alignItems: 'center', gap: space[2], minWidth: 0 },
-  machineOptionLabel: {
-    minWidth: 0,
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-  },
-  machineOptionMeta: { flexShrink: 0, color: colors.tertiaryLabel },
   machineDot: {
     flexShrink: 0,
     width: '6px',
@@ -1738,42 +1729,27 @@ export function MachineAgentSettings({
     );
   }
 
-  // In the pane the header carries the page's choices: which machine (only when
-  // there is more than one to choose) and adding a provider to it. The list
-  // under it is the machine's providers and nothing else.
-  const machineChoice =
-    machinePills.length > 1 ? (
-      <Select.Root
-        items={machinePills.map((pill) => ({ value: pill.id, label: pill.label }))}
-        value={resolvedSelectedMachine?.id ?? null}
-        onValueChange={(value) => {
-          if (value != null) onSelectedMachineChange(value as MachineId);
-        }}
-      >
-        <div {...stylex.props(styles.machineChoice)}>
-          <Select.Trigger aria-label={t('settings.agent.machineTabs.machine', 'Machine')}>
-            <Select.Value />
-          </Select.Trigger>
-        </div>
-        <Select.Content>
-          {machinePills.map((pill) => (
-            <Select.Item key={pill.id} value={pill.id}>
-              <span {...stylex.props(styles.machineOption)}>
-                <span
-                  aria-hidden="true"
-                  {...stylex.props(styles.machineDot, pill.online && styles.machineDotOnline)}
-                />
-                <span {...stylex.props(styles.machineOptionLabel)}>{pill.label}</span>
-                {pill.online ? null : (
-                  <span {...stylex.props(styles.machineOptionMeta)}>
-                    {t('workspace.machines.offline', 'Offline')}
-                  </span>
-                )}
-              </span>
-            </Select.Item>
-          ))}
-        </Select.Content>
-      </Select.Root>
+  // In the pane the header carries adding a provider; the machines are tabs
+  // under the title, shown only when there is more than one to choose, so the
+  // list under them is the chosen machine's providers and nothing else.
+  const machineTabs =
+    machinePills.length > 1 && resolvedSelectedMachine ? (
+      <SettingsLineTabs
+        ruled
+        label={t('settings.agent.machineTabs.machine', 'Machine')}
+        current={resolvedSelectedMachine.id as string}
+        onChange={(id) => onSelectedMachineChange(id as MachineId)}
+        tabs={machinePills.map((pill) => ({
+          id: pill.id,
+          label: pill.label,
+          leading: (
+            <span
+              aria-hidden="true"
+              {...stylex.props(styles.machineDot, pill.online && styles.machineDotOnline)}
+            />
+          ),
+        }))}
+      />
     ) : null;
 
   return (
@@ -1783,7 +1759,6 @@ export function MachineAgentSettings({
 
       {inSettingsPane ? (
         <SettingsPageActions>
-          {machineChoice}
           {resolvedSelectedMachine ? (
             <Button
               variant="secondary"
@@ -1802,6 +1777,7 @@ export function MachineAgentSettings({
           onSelect={(id) => onSelectedMachineChange(id as MachineId)}
         />
       )}
+      {inSettingsPane ? machineTabs : null}
 
       {resolvedSelectedMachine ? (
         <MachineProvidersSection

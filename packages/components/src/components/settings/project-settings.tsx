@@ -1,7 +1,6 @@
 import {
   useCallback,
   useEffect,
-  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -10,7 +9,7 @@ import {
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
-import { corner, duration, ease, focus, radius, space } from '@lody/ui/tokens/scales.stylex';
+import { corner, duration, ease, radius, space } from '@lody/ui/tokens/scales.stylex';
 import { useOpenSettings } from '@/hooks/use-open-settings';
 import type { TFunction } from 'i18next';
 import { formatDistanceToNow, type Locale } from 'date-fns';
@@ -34,7 +33,6 @@ import {
   Wrench,
 } from 'lucide-react';
 import { toast } from '@/lib/toast';
-import { observeResizeOnAnimationFrame } from '@/lib/resize-observer';
 import { Spinner } from '@lody/ui/spinner';
 import {
   getLocalProjectHistoryProviderKey,
@@ -93,6 +91,7 @@ import { withClassName } from '@/lib/stylex';
 import { MobileProjectSettings } from '@/components/mobile/mobile-project-settings';
 import { settingsFlat, settingsMaterial as material } from './material.stylex';
 import { SettingsPageActions, useInSettingsPane } from './settings-page-header';
+import { SettingsLineTabs } from './settings-line-tabs';
 import { settingsSurface as surface } from './surface';
 import { AgentIcon, getAgentDisplayName } from '@/components/icons/agent-icon';
 import { useSettingsDataCache } from './settings-data-cache';
@@ -1754,7 +1753,9 @@ function ProjectWindow({
               </>
             )}
           </p>
-          <PageTabs pages={pages} current={page} onChange={setPage} />
+          <div {...stylex.props(win.pageTabsSlot)}>
+            <SettingsLineTabs tabs={pages} current={page} onChange={setPage} />
+          </div>
         </header>
 
         <section {...stylex.props(win.main)}>
@@ -1964,80 +1965,6 @@ type ProjectWindowPage = 'general' | 'worktree' | 'skills' | 'conversations';
  * tray strips the pages use for their own choices (agent, state) — a strip over
  * a strip reads as one level.
  */
-function PageTabs({
-  pages,
-  current,
-  onChange,
-}: {
-  readonly pages: readonly {
-    id: ProjectWindowPage;
-    label: string;
-    count?: number;
-    warn?: boolean;
-  }[];
-  readonly current: ProjectWindowPage;
-  readonly onChange: (page: ProjectWindowPage) => void;
-}) {
-  const listRef = useRef<HTMLDivElement>(null);
-  const [line, setLine] = useState<{ left: number; width: number } | null>(null);
-
-  useLayoutEffect(() => {
-    const list = listRef.current;
-    if (!list) return undefined;
-    const measure = () => {
-      const tab = list.querySelector<HTMLElement>(`[data-page="${current}"]`);
-      if (tab) setLine({ left: tab.offsetLeft, width: tab.offsetWidth });
-    };
-    measure();
-    return observeResizeOnAnimationFrame(list, measure);
-  }, [current, pages]);
-
-  return (
-    <div ref={listRef} role="tablist" {...stylex.props(win.pageTabs)}>
-      {pages.map((entry) => {
-        const selected = entry.id === current;
-        return (
-          <button
-            key={entry.id}
-            type="button"
-            role="tab"
-            aria-selected={selected}
-            data-page={entry.id}
-            onClick={() => onChange(entry.id)}
-            onKeyDown={(event) => {
-              if (event.key !== 'ArrowRight' && event.key !== 'ArrowLeft') return;
-              event.preventDefault();
-              const index = pages.findIndex((page) => page.id === entry.id);
-              const next =
-                pages[
-                  (index + (event.key === 'ArrowRight' ? 1 : -1) + pages.length) % pages.length
-                ]!;
-              onChange(next.id);
-              listRef.current?.querySelector<HTMLElement>(`[data-page="${next.id}"]`)?.focus();
-            }}
-            tabIndex={selected ? 0 : -1}
-            {...stylex.props(win.pageTab, selected && win.pageTabCurrent)}
-          >
-            {entry.label}
-            {entry.count ? (
-              <span {...stylex.props(win.tabCount, entry.warn && win.tabCountWarn)}>
-                {entry.count}
-              </span>
-            ) : null}
-          </button>
-        );
-      })}
-      {line ? (
-        <span
-          aria-hidden="true"
-          {...stylex.props(win.pageTabLine)}
-          style={{ transform: `translateX(${line.left}px)`, width: `${line.width}px` }}
-        />
-      ) : null}
-    </div>
-  );
-}
-
 type HistoryStatus = 'available' | 'imported' | 'sync_conflict';
 type HistoryFilter = 'all' | HistoryStatus;
 
@@ -2479,54 +2406,7 @@ const win = stylex.create({
   headPathDim: { color: colors.tertiaryLabel },
   headSep: { flexShrink: 0, color: colors.tertiaryLabel },
   headMachine: { flexShrink: 0, whiteSpace: 'nowrap' },
-  pageTabs: {
-    position: 'relative',
-    display: 'flex',
-    alignItems: 'stretch',
-    gap: '20px',
-    marginTop: space[3],
-  },
-  pageTab: {
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: '6px',
-    height: '36px',
-    margin: 0,
-    padding: 0,
-    borderWidth: 0,
-    backgroundColor: 'transparent',
-    fontFamily: 'inherit',
-    fontSize: '13.5px',
-    fontWeight: 500,
-    color: { default: colors.secondaryLabel, ':hover': colors.label },
-    cursor: 'pointer',
-    outlineStyle: 'none',
-    boxShadow: { default: 'none', ':focus-visible': `0 0 0 ${focus.ringWidth} ${colors.accent}` },
-    borderRadius: '4px',
-    transitionProperty: 'color',
-    transitionDuration: '150ms',
-  },
-  pageTabCurrent: { color: { default: colors.label, ':hover': colors.label } },
-  /** The current view's line: it travels to the next rather than blinking. */
-  pageTabLine: {
-    position: 'absolute',
-    left: 0,
-    bottom: 0,
-    height: '2px',
-    borderRadius: '9999px',
-    backgroundColor: colors.label,
-    transitionProperty: 'transform, width',
-    transitionDuration: '240ms',
-    transitionTimingFunction: 'cubic-bezier(0.2, 0.8, 0.2, 1)',
-  },
-  tabCount: {
-    marginInlineStart: '2px',
-    fontSize: '11px',
-    fontWeight: 500,
-    color: colors.tertiaryLabel,
-    fontVariantNumeric: 'tabular-nums',
-  },
-  tabCountWarn: { color: `color-mix(in oklab, ${colors.warning} 80%, ${colors.label})` },
+  pageTabsSlot: { marginTop: space[3] },
   statusDot: {
     flexShrink: 0,
     width: '6px',

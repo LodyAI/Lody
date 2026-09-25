@@ -249,8 +249,10 @@ meters hidden, since only the compact row shows them. The pane now draws the
 compact row (`MachineProvidersSection bare`): a 24px glyph, 8px block padding,
 and the meters beside the name. Refresh and delete appear only under the pointer
 or keyboard focus, so a list at rest shows what is true of each provider rather
-than a column of red bins. The machine pills became a Select in the page header,
-shown only when there is more than one machine, beside an "Add provider" button.
+than a column of red bins. The machine pills became the page's tabs under its title
+(`SettingsLineTabs`, the project window's sliding-line tabs made shared), shown
+only when there is more than one machine; "Add provider" sits in the page header.
+A header Select was tried first and rejected.
 The "Agent Provider" heading that repeated the page is gone.
 
 Compacted, a machine with two or three providers left the page mostly empty.
