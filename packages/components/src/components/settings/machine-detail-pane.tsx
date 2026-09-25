@@ -277,13 +277,14 @@ export function MachineProvidersSection({
     );
   }
 
-  // The providers are one list, so one card of ruled rows: the section rules
-  // the lines between them, and a provider is a row of it, not a card.
+  // The providers are one list of records, so one card of ruled rows, even on
+  // the flat pane: a provider is a row of it, not a card.
   return (
     <div {...stylex.props(!flush && styles.inset)}>
       <CompactSection
         title={t('settings.agent.provider.title', 'Agent Provider')}
         actions={addButton}
+        boxed
       >
         {configs.length === 0 && setups.length === 0 ? (
           <EmptyProviders onAdd={onAddConfig} />

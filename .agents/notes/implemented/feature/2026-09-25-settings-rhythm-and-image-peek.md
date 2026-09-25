@@ -15,8 +15,9 @@ within a row; and every group was a white card on a white panel held apart only
 by a shadow halo. Settings now has one type scale (a 12px floor, 1.45 leading,
 two weights plus a semibold title) and a three-step material chosen from four
 rendered variants: a nav, a neutral gray canvas, and white cards on it, split
-by fill rather than lines. A fourth review made the desktop pane flat: headings
-and rows on a white page, a rule above each section, no cards. A card flush with the top of a scroller also lost its
+by fill rather than lines. A fourth review found the real cause was content, not
+material: one page frame, groups by meaning, fewer sentences, flat preferences
+and boxed records. A card flush with the top of a scroller also lost its
 top edge, which is fixed, and the composer's image lightbox became a popover
 card that springs out of the thumbnail. Tooltips stopped inverting in the same
 change; that reversal is recorded in the
@@ -181,36 +182,61 @@ no query the commands are grouped under their category; with one, the list stays
 ordered by relevance. A shortcut is quiet trailing text like a menu's, and the
 highlight is an ink wash driven by cmdk's controlled value so it can be StyleX.
 
-## Fourth review: flat groups on the desktop pane
+## Fourth review: one frame, content first, flat preferences, boxed records
 
-The owner found the page "all lines" and asked for the nav's mix toward black
-at 3.5% and for the content to read like Linear's settings. At 3.5% the nav
-matches the old canvas, so the content became the panel's own fill
-(`surface.canvas` is `elevatedBackground`) and the nav stays a step below it in
-both palettes.
+The owner found the page "all lines" and asked for the nav's mix toward black at
+3.5% and for Linear's settings. At 3.5% the nav matches the old canvas, so the
+content became the panel's own fill (`surface.canvas` is `elevatedBackground`);
+the nav stays a step below it in both palettes.
 
-Linear's arrangement was built first: each group as a tray (a 2% ink film, one
-1px border, no shadow), row rules stopping at the row's copy, and title,
-headings and trays on one left edge. The owner rejected it as not good-looking
-and asked what the page would be without boxed cards. Two flat variants were
-rendered in both palettes: A, a rule above each section and none between rows;
-B, the same with inset rules between rows. The owner picked A.
+**Material, three tries.** Linear's bordered trays with inset row rules were
+rejected as not good-looking. Two flat variants followed (a rule above each
+section only; and the same with inset rules between rows), and the owner picked
+the first. On the GitHub page the owner then saw that some groups need a box and
+some do not. The package rule already said so: "a list of records is one card
+with ruled rows". So preferences (each row a question) are flat and records a
+person manages (repositories, servers, roles, providers, projects, machines,
+members, tokens, shares) keep a card. `settings/material.stylex.ts` holds a
+group's drawing as variables whose defaults are the card; `settingsFlat` is the
+theme the desktop pane and the project window apply, `settingsBoxed` puts a
+records group back on its card (`CompactSection boxed`, `settingsRecordsCard`).
+Mobile settings and settings dialogs are unchanged. A flat group's rows bleed
+16px past the column so their copy meets the headings; the first section on a
+page takes no rule, since the title opens it.
 
-A group is now a heading and rows on the page. A thin rule above each section
-is the only line, so a group without a heading still ends where the next
-begins. Rows bleed 16px past the column so their copy meets the headings and
-the pointer's fill has room, with rounded corners. A danger group names itself
-in red, having no edge to mark. Row padding, section gaps and the type scale
-are unchanged.
+**Content was the real problem.** The owner asked whether the issue was density,
+arrangement and needless description rather than boxes. Measured and read, it
+was:
 
-The flat look is scoped rather than global. `surface.card` and
-`surface.lineRuled` also draw the mobile settings screens and rows inside
-settings dialogs, which keep the card. `settings/material.stylex.ts` holds a
-group's drawing as variables (fill, shadow, radius, bleed, row rule, heading
-inset, section rule, danger edge, empty-region fill) whose defaults are the
-card, and `settingsFlat` is the theme the desktop pane and the project window
-apply. Hand-drawn row rules in the machine and skills lists moved onto
-`surface.lineRuled`, so they follow the theme too.
+- Three page frames. Most pages had the pane's title; Projects, Agents and
+  Machines drew their own (23px lower, a different inset, Agents 40px wider).
+  Now the pane header names every page and holds its actions and one-line lead
+  (`settings-page-header.tsx` portals `SettingsPageActions` / `SettingsPageLead`
+  into it); no page draws its own title in the pane.
+- Groups cut by component, not meaning: Preferences was 3 groups for 5 rows (7
+  in the desktop app, with two one-row groups), Appearance 3 for 4. Preferences
+  is now Conversations (queue behaviour, Open with, code-only line counts,
+  notifications), This computer (local agent, daemon, launch at startup, hide
+  window, prevent sleep), auto-archive, and Advanced (experimental, clear cache).
+  Appearance is theme and language, Text (interface font, size, ligatures),
+  Terminal, App icon.
+- Helpers that repeated their label (launch at startup, hide window,
+  experimental) are gone; long ones are one clause. Notifications speak only when
+  something blocks them, instead of restating the switch. Prevent sleep gained
+  the helper it lacked: it keeps the computer awake while Lody runs.
+- About: version, channel, build date and commits are one row with the update
+  check beside them; the two download rows are one row with two destinations.
+- Catalogs (MCP, Agent Roles, Prompt Shortcuts): the add action moved into the
+  page header, a section heading that repeated the page title went, the empty
+  state no longer repeats the add button, and a private record is no longer
+  badged on every row (only shared ones are).
+- Projects: a machine or GitHub owner section is titled by its name with its
+  state underneath; GitHub rows no longer repeat the owner. The project window
+  dropped the Machine and Visibility rows its header already states, and the
+  General, Worktree and Skills leads that restated their tabs; a pending removal
+  is said on the Delete row.
+
+Row padding, section gaps and the type scale are unchanged.
 
 ## Verification
 
@@ -228,9 +254,11 @@ apply. Hand-drawn row rules in the machine and skills lists moved onto
 - `packages/ui/test/focus-modality.test.tsx` covers the modality switches, and
   `tests/command-palette-view.test.tsx` covers group headings, arrow-key
   highlight, Enter, and the empty state.
-- Fourth review: the settings overlay (Preferences, Appearance, MCP, Projects,
-  Keyboard Shortcuts, About) in both palettes, Chinese, for the tray version
-  and both flat variants; the material study, outside `settingsFlat`, still
-  draws cards.
+- Fourth review: the settings overlay in both palettes, in Chinese, with the
+  desktop-app sections forced on (Preferences, Appearance, MCP, Agent Roles,
+  Keyboard Shortcuts, About), and Projects, Agents providers and Account rows from
+  their data stories inside the pane frame. The title and first content now sit
+  at the same place on every page (measured). The material study, outside
+  `settingsFlat`, still draws cards.
 - Not verified in the packaged Electron app. Storybook renders the same
   components, but outside the app shell.

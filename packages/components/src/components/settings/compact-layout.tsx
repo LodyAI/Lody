@@ -1,6 +1,7 @@
 import React, { type ReactNode } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { withClassName } from '@/lib/stylex';
+import { settingsBoxed } from './material.stylex';
 import { settingsSurface as surface } from './surface';
 
 /**
@@ -9,6 +10,14 @@ import { settingsSurface as surface } from './surface';
  * caller's layout classes compose rather than restating the material.
  */
 export const settingsCard = surface.card;
+
+/**
+ * A group of records a person manages (servers, roles, repositories, machines,
+ * projects) rather than questions about a preference: it keeps its card even
+ * on a flat page, since the box says "this set" and the rules between records
+ * carry the eye from a name to its controls.
+ */
+export const settingsRecordsCard = [settingsBoxed, surface.card] as const;
 
 interface CompactSectionProps {
   title?: string;
@@ -19,6 +28,8 @@ interface CompactSectionProps {
   headerRight?: ReactNode;
   /** A group that destroys something — leave, transfer, delete — says so on its card. */
   tone?: 'default' | 'danger';
+  /** A collection of records rather than preferences keeps its card on a flat page. */
+  boxed?: boolean;
   children: ReactNode;
   className?: string;
 }
@@ -37,6 +48,7 @@ export function CompactSection({
   actions,
   headerRight,
   tone = 'default',
+  boxed = false,
   children,
   className,
 }: CompactSectionProps) {
@@ -44,7 +56,7 @@ export function CompactSection({
   // the card whether or not it is a `CompactRow`.
   const lines = React.Children.toArray(children);
   return (
-    <section {...stylex.props(surface.section)}>
+    <section {...stylex.props(surface.section, boxed && surface.sectionBoxed)}>
       {title || headerRight ? (
         <header {...stylex.props(surface.sectionHeader)}>
           <div {...stylex.props(surface.sectionHeading)}>
@@ -85,7 +97,11 @@ export function CompactSection({
       ) : null}
       <div
         {...withClassName(
-          stylex.props(surface.card, tone === 'danger' && surface.cardDanger),
+          stylex.props(
+            boxed && settingsBoxed,
+            surface.card,
+            tone === 'danger' && surface.cardDanger
+          ),
           className
         )}
       >

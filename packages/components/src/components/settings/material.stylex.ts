@@ -36,6 +36,27 @@ export const settingsMaterial = stylex.defineVars({
   emptyFill: `color-mix(in oklab, transparent, ${colors.label} 3%)`,
 });
 
+/**
+ * A collection inside a flat page — a group whose rows are records a person
+ * manages (repositories, servers, machines) rather than questions about one
+ * preference — keeps its card: the box says "this set", and the rules between
+ * records carry the eye from a name to its control. Applied to the group
+ * itself, so its heading stays on the page's edge.
+ */
+export const settingsBoxed = stylex.createTheme(settingsMaterial, {
+  groupFill: colors.raisedBackground,
+  groupShadow: shadow.card,
+  groupRadius: radius.large,
+  groupBleed: '0px',
+  rowRule: `inset 0 1px 0 ${RULE}`,
+  rowRadius: '0px',
+  headingInset: space[4],
+  sectionRule: 'none',
+  sectionRuleGap: '0px',
+  dangerShadow: `0 0 0 0.5px color-mix(in oklab, ${colors.destructive} 45%, transparent), ${shadow.card}`,
+  emptyFill: `color-mix(in oklab, transparent, ${colors.label} 3%)`,
+});
+
 export const settingsFlat = stylex.createTheme(settingsMaterial, {
   groupFill: 'transparent',
   groupShadow: 'none',

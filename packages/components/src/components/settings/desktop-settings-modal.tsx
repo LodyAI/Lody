@@ -1,4 +1,4 @@
-import { useCallback, useId, type CSSProperties } from 'react';
+import { useCallback, useId, useMemo, useState, type CSSProperties } from 'react';
 import { Bug, X } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
@@ -43,6 +43,7 @@ import { McpSetting } from './mcp-setting';
 import { ShareManagementSetting } from './share-management-setting';
 import { FocusScope, useListKeyboardNavigation } from '@/ui/focus-scope';
 import { settingsFlat } from './material.stylex';
+import { SettingsPaneHeaderProvider } from './settings-page-header';
 import { settingsSurface as surface } from './surface';
 import { settingsType as type } from './type.stylex';
 
@@ -131,11 +132,23 @@ const styles = stylex.create({
     minWidth: 0,
     paddingTop: '20px',
   },
-  header: {
+  header: { flexShrink: 0 },
+  /** The page's name and its actions, on one line. */
+  headerRow: {
     display: 'flex',
     alignItems: 'center',
-    flexShrink: 0,
-    height: '40px',
+    justifyContent: 'space-between',
+    gap: space[3],
+    minHeight: '40px',
+  },
+  headerActions: { display: 'flex', flexShrink: 0, alignItems: 'center', gap: space[2] },
+  /** The page's lead, under its name; empty on a page without one. */
+  headerLead: {
+    margin: 0,
+    fontSize: type.caption,
+    lineHeight: type.leading,
+    color: colors.secondaryLabel,
+    ':empty': { display: 'none' },
   },
   /**
    * The title sits in the same centred column as the page under it, at the
@@ -161,7 +174,6 @@ const styles = stylex.create({
     paddingInlineEnd: '40px',
     paddingBottom: space[6],
   },
-  paneInsetTop: { paddingTop: space[6] },
   paneColumn: { marginInline: 'auto', maxWidth: '1024px' },
 });
 /**
@@ -246,13 +258,14 @@ function SettingsModalBody() {
     { id: 'workspace', label: t('settings.sections.workspace', 'Workspace') },
     { id: 'other', label: t('settings.sections.misc', 'Other') },
   ];
-  // These tabs render their own in-content header (title + per-tab actions like
-  // "add project"), so we drop the chrome title to avoid showing it twice.
-  const selfTitledTab =
-    resolvedActiveTab === 'projects' ||
-    resolvedActiveTab === 'machines' ||
-    resolvedActiveTab === 'agents';
   const usesInternalScrolling = resolvedActiveTab === 'projects';
+  // Every page's actions and lead are drawn in this one header.
+  const [actionsSlot, setActionsSlot] = useState<HTMLElement | null>(null);
+  const [leadSlot, setLeadSlot] = useState<HTMLElement | null>(null);
+  const headerSlots = useMemo(
+    () => ({ actions: actionsSlot, lead: leadSlot }),
+    [actionsSlot, leadSlot]
+  );
 
   return (
     <SettingsDataCacheProvider>
@@ -355,38 +368,38 @@ function SettingsModalBody() {
             {...stylex.props(settingsFlat, styles.surface, surface.canvas)}
             data-settings-surface=""
           >
-            {selfTitledTab ? (
-              <Dialog.Title {...stylex.props(styles.srOnly)}>
-                {t(activeTabConfig.labelKey)}
-              </Dialog.Title>
-            ) : (
-              <header {...stylex.props(styles.header, styles.paneInset, styles.headerFlush)}>
-                <div {...stylex.props(styles.headerColumn)}>
+            <header {...stylex.props(styles.header, styles.paneInset, styles.headerFlush)}>
+              <div {...stylex.props(styles.headerColumn)}>
+                <div {...stylex.props(styles.headerRow)}>
                   {/* The dialog's title style would tie with this one on the same
                     element; the page title's size lives on its own box. */}
                   <Dialog.Title>
                     <span {...stylex.props(surface.pageTitle)}>{t(activeTabConfig.labelKey)}</span>
                   </Dialog.Title>
+                  <div ref={setActionsSlot} {...stylex.props(styles.headerActions)} />
                 </div>
-              </header>
-            )}
-            <div {...stylex.props(styles.paneBody)}>
-              {usesInternalScrolling ? (
-                <div {...stylex.props(styles.fill, styles.paneInset, styles.paneInsetTop)}>
-                  <div {...stylex.props(styles.fill, styles.paneColumn)}>
-                    <SettingsTabContent tabId={resolvedActiveTab} />
-                  </div>
-                </div>
-              ) : (
-                <ScrollArea {...stylex.props(styles.fill)}>
-                  <div {...stylex.props(styles.paneInset, selfTitledTab && styles.paneInsetTop)}>
-                    <div {...stylex.props(styles.paneColumn)}>
+                <p ref={setLeadSlot} {...stylex.props(styles.headerLead)} />
+              </div>
+            </header>
+            <SettingsPaneHeaderProvider value={headerSlots}>
+              <div {...stylex.props(styles.paneBody)}>
+                {usesInternalScrolling ? (
+                  <div {...stylex.props(styles.fill, styles.paneInset)}>
+                    <div {...stylex.props(styles.fill, styles.paneColumn)}>
                       <SettingsTabContent tabId={resolvedActiveTab} />
                     </div>
                   </div>
-                </ScrollArea>
-              )}
-            </div>
+                ) : (
+                  <ScrollArea {...stylex.props(styles.fill)}>
+                    <div {...stylex.props(styles.paneInset)}>
+                      <div {...stylex.props(styles.paneColumn)}>
+                        <SettingsTabContent tabId={resolvedActiveTab} />
+                      </div>
+                    </div>
+                  </ScrollArea>
+                )}
+              </div>
+            </SettingsPaneHeaderProvider>
           </div>
         </FocusScope>
       </div>

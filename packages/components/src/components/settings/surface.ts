@@ -29,10 +29,13 @@ export const settingsSurface = stylex.create({
     flexDirection: 'column',
     gap: space[2],
     minWidth: 0,
-    paddingTop: material.sectionRuleGap,
-    boxShadow: material.sectionRule,
+    // The page's title opens the page; only a section after another is ruled.
+    paddingTop: { default: material.sectionRuleGap, ':first-child': 0 },
+    boxShadow: { default: material.sectionRule, ':first-child': 'none' },
     fontSize: '1em',
   },
+  /** A boxed collection is set apart by its box; a rule above it would be a second edge. */
+  sectionBoxed: { paddingTop: 0, boxShadow: 'none' },
   /**
    * A group's name, above its rows: on a flat page it starts where the title
    * and the rows' copy do; over a card it is inset to the rows' copy.

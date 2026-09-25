@@ -94,6 +94,7 @@ import {
   WorkspaceMachineExpandedSection,
   type WorkspaceMachineAccordionMeta,
 } from './workspace-machine-accordion';
+import { SettingsPageActions, useInSettingsPane } from './settings-page-header';
 import { settingsSurface as surface } from './surface';
 import { settingsType as type } from './type.stylex';
 
@@ -123,6 +124,7 @@ const styles = stylex.create({
   bannerSlot: { paddingInline: space[3], paddingTop: space[3] },
   centered: {
     display: 'flex',
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: space[2],
@@ -395,6 +397,7 @@ export function MachineAgentSettings({
   mode = 'agents',
 }: MachineAgentSettingsProps) {
   const { t } = useTranslation();
+  const inSettingsPane = useInSettingsPane();
   const { openSettings } = useOpenSettings();
   const navigate = useNavigate();
   const isMobile = useIsMobile();
@@ -1237,7 +1240,7 @@ export function MachineAgentSettings({
 
   if (isLoading && !hasMachines) {
     return (
-      <div {...stylex.props(styles.centered)}>
+      <div {...stylex.props(inSettingsPane && surface.container, styles.centered)}>
         <Spinner size="small" />
         {t('workspace.machines.loadingVisibility', 'Loading machines')}
       </div>
@@ -1246,7 +1249,7 @@ export function MachineAgentSettings({
 
   if (!hasMachines) {
     return (
-      <div {...stylex.props(styles.centered)}>
+      <div {...stylex.props(inSettingsPane && surface.container, styles.centered)}>
         {t('workspace.machines.empty', 'No machines connected')}
       </div>
     );
@@ -1501,13 +1504,18 @@ export function MachineAgentSettings({
           'AI agent configurations available in this workspace.'
         );
 
-  const header = (
+  const filterButton =
+    mode === 'machines' && remoteMachinesAvailable ? (
+      <MachineListFilterButton filter={effectiveFilter} onFilterChange={setFilter} />
+    ) : null;
+  // In the pane the header names the page; only the filter is this page's to add.
+  const header = inSettingsPane ? (
+    <SettingsPageActions>{filterButton}</SettingsPageActions>
+  ) : (
     <div {...stylex.props(styles.heading)}>
       <div {...stylex.props(styles.headingLine)}>
         <h2 {...stylex.props(surface.pageTitle)}>{title}</h2>
-        {mode === 'machines' && remoteMachinesAvailable ? (
-          <MachineListFilterButton filter={effectiveFilter} onFilterChange={setFilter} />
-        ) : null}
+        {filterButton}
       </div>
       <p {...stylex.props(styles.headingSubtitle)}>{subtitle}</p>
     </div>
@@ -1595,7 +1603,7 @@ export function MachineAgentSettings({
   if (mode !== 'agents') {
     if (!remoteMachinesAvailable) {
       return (
-        <div {...stylex.props(styles.page)}>
+        <div {...stylex.props(inSettingsPane && surface.container, styles.page)}>
           {banner}
           {header}
           {resolvedSelectedMachine ? (
@@ -1653,7 +1661,7 @@ export function MachineAgentSettings({
     }
 
     return (
-      <div {...stylex.props(styles.page)}>
+      <div {...stylex.props(inSettingsPane && surface.container, styles.page)}>
         {banner}
         {header}
 
@@ -1708,7 +1716,7 @@ export function MachineAgentSettings({
   }
 
   return (
-    <div {...stylex.props(styles.page)}>
+    <div {...stylex.props(inSettingsPane && surface.container, styles.page)}>
       {banner}
       {header}
 

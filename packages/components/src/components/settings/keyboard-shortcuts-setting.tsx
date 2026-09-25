@@ -2,8 +2,9 @@ import { type ReactNode, useCallback, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Trash2 } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
+import { SettingsPageActions, SettingsPageLead } from './settings-page-header';
 import { colors } from '@lody/ui/tokens/colors.stylex';
-import { corner, radius, space } from '@lody/ui/tokens/scales.stylex';
+import { corner, radius } from '@lody/ui/tokens/scales.stylex';
 import {
   globalShortcutBindingHasModifier,
   type GlobalShortcutId,
@@ -25,7 +26,6 @@ import type { GlobalShortcutBinding } from '@lody/shared';
 import { useGlobalShortcuts } from '@/hooks/use-global-shortcuts';
 import { Kbd } from '@/components/commands/kbd';
 import { CompactRow, CompactSection } from './compact-layout';
-import { settingsMaterial as material } from './material.stylex';
 import { settingsSurface as surface } from './surface';
 import { settingContainerClass } from '.';
 import { settingsType as type } from './type.stylex';
@@ -47,14 +47,6 @@ const pulse = stylex.keyframes({
 });
 
 const styles = stylex.create({
-  intro: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: space[4],
-    paddingInline: material.headingInset,
-  },
-  introText: { margin: 0, fontSize: type.caption, color: colors.secondaryLabel },
   error: { color: colors.destructive },
   controls: { display: 'flex', alignItems: 'center' },
   // Fixed widths so the shortcut and trash columns line up across rows. The shortcut
@@ -133,12 +125,12 @@ export function KeyboardShortcutsSetting() {
 
   return (
     <div className={settingContainerClass}>
-      <div {...stylex.props(styles.intro)}>
-        <p {...stylex.props(styles.introText)}>{t('settings.keyboardShortcuts.description')}</p>
+      <SettingsPageLead>{t('settings.keyboardShortcuts.description')}</SettingsPageLead>
+      <SettingsPageActions>
         <Button variant="secondary" size="small" disabled={!anyOverridden} onClick={handleResetAll}>
           {t('settings.keyboardShortcuts.resetAll')}
         </Button>
-      </div>
+      </SettingsPageActions>
 
       {grouped.length === 0 && (
         <CompactSection>

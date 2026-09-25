@@ -11,13 +11,13 @@ rolls back — is in the root [AGENTS.md](../../../../../AGENTS.md).
 ## Layout and components
 
 - Desktop overlay close is `absolute` on the RIGHT pane only (equal `top`/`right`
-  inset, no close row); the pane's `padding-right`, set inside the scroll area,
-  keeps chrome off that column with the scrollbar flush to the edge.
-- Settings style in StyleX from `surface.ts`/`compact-layout.tsx`: `surface.pageTitle`,
-  then sections of a heading and rows (`surface.card`). A group is a card by default
-  (mobile, dialogs) and flat under a section rule inside `settingsFlat` (desktop pane,
-  project window): `material.stylex.ts`. Split master/detail by fill, not a line; no
-  new gray fills. Type: `type.stylex.ts`, nothing below `caption`, weight for headings.
+  inset); the pane's in-scroll `padding-right` keeps chrome off that column.
+- Settings style in StyleX from `surface.ts`/`compact-layout.tsx`. The desktop pane
+  header names every page; a page hands it actions and a one-line lead through
+  `settings-page-header.tsx`, never its own title. Inside `settingsFlat` (pane, project
+  window) preferences are flat under a section rule and managed records keep a card
+  (`boxed`); elsewhere groups are cards. Group by meaning, no one-row groups; a
+  helper says what the label cannot. Split master/detail by fill; type: `type.stylex.ts`.
 - `share-management-setting.tsx` lists published static copies via the scoped cloud
   query. Ordinary members see their publications; admins see the workspace inventory.
   Draft uploads are not published shares. Reuse `useSessionShareLinkActions` for
@@ -57,7 +57,7 @@ rolls back — is in the root [AGENTS.md](../../../../../AGENTS.md).
   data. Preserve auth/capability gates; see [contract](../../../../../specs/usage-detail-cache.md).
 - Interface/terminal fonts exclude symbol families in `lib/local-fonts.ts`; option
   names stay on the default interface font. Font size is five named tiers writing
-  `--ui-font-size`. Font ligatures is a boolean after the Terminal section, writing
+  `--ui-font-size`. Font ligatures is a boolean in the Text group, writing
   `--lody-font-ligatures` for conversation, code, and tool output.
 - The Codex reset forecast chip in the provider row must not fetch on mount and must
   pass `nestedInDialog` for its dialog: [../codex-reset/AGENTS.md](../codex-reset/AGENTS.md).
@@ -70,9 +70,9 @@ rolls back — is in the root [AGENTS.md](../../../../../AGENTS.md).
   Both share cards use `lib/share-image-export.ts` and
   `components/share-theme-scope.ts`; do not fork either.
   `StatsSettingsView` keeps the entry behind the opt-in `shareCard` prop with a lazy
-  dialog, because the public landing reuses that view. Typography and spacing come
-  from the card's own `TEXT`, `PAD_X`, and `RHYTHM` constants — never a fresh
-  `text-[…]` or an off-grid padding. `PAD_X` binds the footer too, so every band
+  dialog, because the public landing reuses that view. Type and spacing come
+  from the card's `TEXT`, `PAD_X`, and `RHYTHM` constants, never fresh `text-[…]`
+  or off-grid padding. `PAD_X` binds the footer too, so every band
   shares one left edge. `ASPECT_SIZE` includes the backdrop; size against the
   48px-shorter framed case. Keep every band but the headline `shrink-0`.
   The graphic follows the range

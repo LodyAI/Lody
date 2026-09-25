@@ -92,6 +92,7 @@ import { openExternalUrl } from '@/lib/native-browser';
 import { withClassName } from '@/lib/stylex';
 import { MobileProjectSettings } from '@/components/mobile/mobile-project-settings';
 import { settingsFlat, settingsMaterial as material } from './material.stylex';
+import { SettingsPageActions, useInSettingsPane } from './settings-page-header';
 import { settingsSurface as surface } from './surface';
 import { AgentIcon, getAgentDisplayName } from '@/components/icons/agent-icon';
 import { useSettingsDataCache } from './settings-data-cache';
@@ -1225,6 +1226,7 @@ function ProjectSettingsDesktop({
   const editingProject =
     allSelections.find((selection) => selection.key === editingProjectKey) ?? null;
 
+  const inSettingsPane = useInSettingsPane();
   const addProjectActions =
     onAddLocalProject || onAddGitHubProject ? (
       <ProjectAddMenu
@@ -1269,18 +1271,25 @@ function ProjectSettingsDesktop({
   return (
     <>
       <div {...stylex.props(surface.container, styles.page)}>
-        <div {...stylex.props(styles.pageHeader)}>
-          <div {...stylex.props(styles.pageHeading)}>
-            <h2 {...stylex.props(surface.pageTitle)}>{t('settings.tabs.projects', 'Projects')}</h2>
-            <p {...stylex.props(styles.pageSubtitle)}>
-              {t(
-                'workspace.projects.settingsSubtitle',
-                'Local folders and GitHub repositories available in this workspace.'
-              )}
-            </p>
+        {inSettingsPane ? (
+          // The pane names the page; the sources below say what it holds.
+          <SettingsPageActions>{addProjectActions}</SettingsPageActions>
+        ) : (
+          <div {...stylex.props(styles.pageHeader)}>
+            <div {...stylex.props(styles.pageHeading)}>
+              <h2 {...stylex.props(surface.pageTitle)}>
+                {t('settings.tabs.projects', 'Projects')}
+              </h2>
+              <p {...stylex.props(styles.pageSubtitle)}>
+                {t(
+                  'workspace.projects.settingsSubtitle',
+                  'Local folders and GitHub repositories available in this workspace.'
+                )}
+              </p>
+            </div>
+            {addProjectActions}
           </div>
-          {addProjectActions}
-        </div>
+        )}
 
         {isAnyLoading && totalCount === 0 ? (
           <div {...stylex.props(styles.loading)}>
@@ -1324,7 +1333,9 @@ function ProjectSettingsDesktop({
                   }}
                 >
                   <CompactSection
-                    title={`${machine.machineName} · ${status}`}
+                    title={machine.machineName}
+                    description={status}
+                    boxed
                     headerRight={
                       canAdd ? (
                         <Button
@@ -1373,7 +1384,9 @@ function ProjectSettingsDesktop({
             {githubSections.map((section, index) => (
               <CompactSection
                 key={section.owner}
-                title={`${section.owner} · ${t('chat.contextSwitch.github', 'GitHub')}`}
+                title={section.owner}
+                description={t('chat.contextSwitch.github', 'GitHub')}
+                boxed
                 headerRight={
                   index === 0 && onOpenGitHubSettings ? (
                     <Button
@@ -1392,7 +1405,6 @@ function ProjectSettingsDesktop({
                   <ProjectLine
                     key={row.key}
                     title={row.name}
-                    caption={row.repoFullName}
                     privateRepo={row.private}
                     onOpen={() => setEditingProjectKey(row.key)}
                   />
@@ -1455,7 +1467,8 @@ function ProjectLine({
   onOpen,
 }: {
   readonly title: string;
-  readonly caption: string;
+  /** Where it lives, when its section does not already say. */
+  readonly caption?: string;
   readonly shared?: boolean;
   readonly privateRepo?: boolean;
   readonly conversationCount?: number;
@@ -1486,7 +1499,7 @@ function ProjectLine({
       <button type="button" onClick={onOpen} {...stylex.props(styles.lineButton)}>
         <span {...stylex.props(styles.lineText)}>
           <span {...stylex.props(styles.lineName)}>{title}</span>
-          <span {...stylex.props(styles.lineCaption)}>{caption}</span>
+          {caption ? <span {...stylex.props(styles.lineCaption)}>{caption}</span> : null}
         </span>
         {meta.length > 0 ? (
           <span {...stylex.props(styles.lineMeta)}>{meta.join(' · ')}</span>
@@ -1688,26 +1701,15 @@ function ProjectWindow({
       </p>
     ) : null;
 
+  // Only Conversations needs a lead: the other pages' tab names and their
+  // editors' own descriptions already say what each holds.
   const pageDescription =
-    page === 'general'
+    page === 'conversations'
       ? t(
-          'workspace.projects.window.generalDescription',
-          'Where this project lives and who can use it.'
+          'workspace.projects.window.conversationsDescription',
+          'Bring conversations you had with an agent outside Lody into this workspace.'
         )
-      : page === 'worktree'
-        ? t(
-            'workspace.projects.window.worktreeDescription',
-            'Scripts that run when a conversation gets its own worktree, and when it is archived.'
-          )
-        : page === 'skills'
-          ? t(
-              'workspace.projects.window.skillsDescription',
-              'Skills the agent finds in this project.'
-            )
-          : t(
-              'workspace.projects.window.conversationsDescription',
-              'Bring conversations you had with an agent outside Lody into this workspace.'
-            );
+      : null;
 
   return (
     <Tooltip.Provider delay={200}>
@@ -1756,7 +1758,7 @@ function ProjectWindow({
         </header>
 
         <section {...stylex.props(win.main)}>
-          <p {...stylex.props(win.pageDescription)}>{pageDescription}</p>
+          {pageDescription ? <p {...stylex.props(win.pageDescription)}>{pageDescription}</p> : null}
 
           {page === 'conversations' && localRow ? (
             <ConversationsPage
@@ -1795,39 +1797,30 @@ function ProjectWindow({
                         </Button>
                       ) : null}
                     </CompactRow>
-                    <CompactRow
-                      label={t('workspace.projects.window.machine', 'Machine')}
-                      helper={
-                        removalState === 'waiting_for_device'
-                          ? t(
-                              'sidebar.localProjects.remove.waitingForDevice',
-                              'Waiting for device…'
-                            )
-                          : removalState === 'removing'
-                            ? t('sidebar.localProjects.remove.removing', 'Removing…')
-                            : undefined
-                      }
-                    >
-                      <span {...stylex.props(win.value)}>
-                        {localRow.machineName} ·{' '}
-                        {machineReachable
-                          ? t('workspace.machines.online', 'Online')
-                          : t('workspace.machines.offline', 'Offline')}
-                      </span>
-                    </CompactRow>
                   </CompactSection>
                   <ProjectShareControl
                     row={localRow}
                     onSharedWithTeamChange={onSharedWithTeamChange}
                   />
                   {canRemoveLocalProject?.(localRow) && onRequestRemoveLocalProject ? (
+                    // The header already names the machine and whether it is
+                    // online; a pending removal is said where the removal is.
                     <CompactSection tone="danger">
                       <CompactRow
                         label={t('workspace.projects.delete', 'Delete project')}
-                        helper={t(
-                          'sidebar.localProjects.remove.originalDirectorySafe',
-                          'Lody never deletes the original project folder or its files.'
-                        )}
+                        helper={
+                          removalState === 'waiting_for_device'
+                            ? t(
+                                'sidebar.localProjects.remove.waitingForDevice',
+                                'Waiting for device…'
+                              )
+                            : removalState === 'removing'
+                              ? t('sidebar.localProjects.remove.removing', 'Removing…')
+                              : t(
+                                  'sidebar.localProjects.remove.originalDirectorySafe',
+                                  'Lody never deletes the original project folder or its files.'
+                                )
+                        }
                       >
                         <Button
                           type="button"
@@ -1863,13 +1856,6 @@ function ProjectWindow({
                         )}
                       </Button>
                     ) : null}
-                  </CompactRow>
-                  <CompactRow label={t('workspace.projects.window.visibility', 'Visibility')}>
-                    <span {...stylex.props(win.value)}>
-                      {githubRow.private
-                        ? t('workspace.projects.privateRepo', 'Private')
-                        : t('workspace.projects.window.public', 'Public')}
-                    </span>
                   </CompactRow>
                 </CompactSection>
               ) : null}
