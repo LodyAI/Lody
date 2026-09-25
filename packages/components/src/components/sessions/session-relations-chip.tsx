@@ -80,7 +80,6 @@ export function SessionRelationsChip({
   defaultOpen?: boolean;
 }) {
   const { t } = useTranslation();
-  if (!parent && created.length === 0) return null;
   return (
     <PopoverActionChip
       icon={MessagesSquare}
@@ -95,7 +94,7 @@ export function SessionRelationsChip({
 }
 
 /** Opener, a divider, then every created Session/Tab: agent icon, title, kind. */
-export function SessionRelationsList({
+function SessionRelationsList({
   parent,
   created,
   onOpenSession,

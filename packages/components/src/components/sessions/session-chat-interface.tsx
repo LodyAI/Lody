@@ -207,11 +207,7 @@ import { RenameSessionDialog, type RenameSessionDialogTarget } from './rename-se
 import { useResolvedTheme } from '../../theme-provider';
 import { PullRequestBadge } from './pull-request-badge';
 import { SessionInfoBar } from './session-info-bar';
-import {
-  CurrentSessionRelationsChip,
-  useHasCreatedSessions,
-  type SessionRelationsItem,
-} from './session-relations-chip';
+import { CurrentSessionRelationsChip, useHasCreatedSessions } from './session-relations-chip';
 import type { ContextChipAction, PrCiRun } from './session-info-chips';
 import {
   resolveSessionInfoBarGitHubActionIds,
@@ -4712,17 +4708,6 @@ export const SessionChatInterface = memo(
       t,
     ]);
     const hasCreatedSessions = useHasCreatedSessions(session.id);
-    const relationsParent = useMemo<SessionRelationsItem | null>(() => {
-      const openedBy = openedByRelations?.openedBy;
-      return openedBy
-        ? {
-            sessionId: openedBy.sessionId,
-            title: openedBy.title,
-            session: openerSessionMeta ?? null,
-            target: openedBy.target,
-          }
-        : null;
-    }, [openedByRelations, openerSessionMeta]);
     const openedByConversationStart = useMemo(() => {
       const openedBy = openedByRelations?.openedBy;
       if (!openedBy) return undefined;
@@ -6219,10 +6204,17 @@ export const SessionChatInterface = memo(
                     // Opener + every Session/Tab created here: the in-stream
                     // creation cards scroll away with the conversation.
                     relations={
-                      relationsParent || hasCreatedSessions ? (
+                      openedByRelations?.openedBy || hasCreatedSessions ? (
                         <CurrentSessionRelationsChip
                           sessionId={session.id}
-                          parent={relationsParent}
+                          parent={
+                            openedByRelations?.openedBy
+                              ? {
+                                  ...openedByRelations.openedBy,
+                                  session: openerSessionMeta ?? null,
+                                }
+                              : null
+                          }
                           onOpenSession={handleOpenRelatedSession}
                         />
                       ) : undefined

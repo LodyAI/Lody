@@ -27,7 +27,7 @@ export function SessionRelationCard({
   /** Optional one-glance context under the title (a reply preview, an error). */
   detail?: ReactNode;
 }) {
-  // One line: the relations bar above the composer is the persistent index,
+  // One line: the info bar's related-Sessions chip is the persistent index,
   // so the in-stream record only needs what happened, to whom, and a way there.
   return (
     <div data-session-relation-card={relation} className={cn('min-w-0', className)}>

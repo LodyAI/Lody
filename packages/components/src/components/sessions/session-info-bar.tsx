@@ -12,7 +12,7 @@ import { sanitizeGoalObjective } from '@lody/shared';
 import { INFO_BAR_ELEVATION_CLASS } from '@/components/chat/composer-surface';
 import { ConversationColumn } from '@/components/shared/conversation-column';
 import { cn } from '@/lib/utils';
-import { ActionChip, InfoBarSurfaceContext } from './info-chip';
+import { ActionChip } from './info-chip';
 import {
   ContextChip,
   GoalChip,
@@ -164,7 +164,6 @@ export function SessionInfoBar({
     (['context', 'status', 'goal', 'schedule'] as const).find((key) => present[key]) ?? null;
 
   const [stage, setStage] = useState<InfoBarItemKey | null>(initialStage ?? defaultKey);
-  const surfaceRef = useRef<HTMLDivElement>(null);
 
   // ── Recency-driven focus ─────────────────────────────────────────────
   // Each item has a change signature; when it changes after mount, that item
@@ -305,70 +304,68 @@ export function SessionInfoBar({
           input box share edges. */}
       <ConversationColumn>
         {queue ? <div className={QUEUE_SHEET_INSET_CLASS}>{queue}</div> : null}
-        <InfoBarSurfaceContext.Provider value={surfaceRef}>
-          <div
-            ref={surfaceRef}
-            className={cn(
-              '@container flex h-8 w-full min-w-0 select-none items-center gap-1.5 rounded-lg border-[0.5px] border-foreground/[0.10] bg-[hsl(var(--composer))] px-2.5 text-xs dark:border-input-border/45 dark:bg-input/70',
-              INFO_BAR_ELEVATION_CLASS,
-              // With the queue sheet seated on top, clip the shadow's upward bleed
-              // (its 1px spread) at the top edge only; sides and bottom keep it.
-              queue && '[clip-path:inset(0_-6px_-6px_-6px)]'
-            )}
-          >
-            {privateAccessStatus ? (
-              <button
-                type="button"
-                className="inline-flex h-6 max-w-[11rem] shrink-0 items-center gap-1 rounded-md px-1 text-amber-700 transition-colors hover:bg-muted-foreground/10 dark:text-amber-300"
-                title={privateAccessStatus.description}
-                aria-label={privateAccessStatus.description}
-                onClick={privateAccessStatus.onAction}
-              >
-                <LockKeyhole className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-                <span className="truncate font-medium">{privateAccessStatus.label}</span>
-              </button>
-            ) : null}
-            {privateAccessStatus &&
-            (clusterKeys.length > 0 || relations || onOpenBrowser || stagedKey) ? (
-              <span aria-hidden="true" className="h-3.5 w-px shrink-0 bg-muted-foreground/25" />
-            ) : null}
-            {clusterKeys.map((key) => renderItem(key, 'cluster'))}
-            {/* Relations and Browser are plain actions with no stage form. */}
-            {relations}
-            {onOpenBrowser ? (
-              <ActionChip
-                icon={MonitorPlay}
-                label={t('sessions.browser.openPreview', 'Open preview')}
-                textClassName="text-emerald-600 dark:text-emerald-400"
-                onAction={onOpenBrowser}
-              />
-            ) : null}
-            {/* The divider is what marks the staged item as active (the stage
+        <div
+          data-info-bar-surface=""
+          className={cn(
+            '@container flex h-8 w-full min-w-0 select-none items-center gap-1.5 rounded-lg border-[0.5px] border-foreground/[0.10] bg-[hsl(var(--composer))] px-2.5 text-xs dark:border-input-border/45 dark:bg-input/70',
+            INFO_BAR_ELEVATION_CLASS,
+            // With the queue sheet seated on top, clip the shadow's upward bleed
+            // (its 1px spread) at the top edge only; sides and bottom keep it.
+            queue && '[clip-path:inset(0_-6px_-6px_-6px)]'
+          )}
+        >
+          {privateAccessStatus ? (
+            <button
+              type="button"
+              className="inline-flex h-6 max-w-[11rem] shrink-0 items-center gap-1 rounded-md px-1 text-amber-700 transition-colors hover:bg-muted-foreground/10 dark:text-amber-300"
+              title={privateAccessStatus.description}
+              aria-label={privateAccessStatus.description}
+              onClick={privateAccessStatus.onAction}
+            >
+              <LockKeyhole className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+              <span className="truncate font-medium">{privateAccessStatus.label}</span>
+            </button>
+          ) : null}
+          {privateAccessStatus &&
+          (clusterKeys.length > 0 || relations || onOpenBrowser || stagedKey) ? (
+            <span aria-hidden="true" className="h-3.5 w-px shrink-0 bg-muted-foreground/25" />
+          ) : null}
+          {clusterKeys.map((key) => renderItem(key, 'cluster'))}
+          {/* Relations and Browser are plain actions with no stage form. */}
+          {relations}
+          {onOpenBrowser ? (
+            <ActionChip
+              icon={MonitorPlay}
+              label={t('sessions.browser.openPreview', 'Open preview')}
+              textClassName="text-emerald-600 dark:text-emerald-400"
+              onAction={onOpenBrowser}
+            />
+          ) : null}
+          {/* The divider is what marks the staged item as active (the stage
               icon has no highlight bg), so it must stay clearly visible —
               plain bg-border melts into the pill in light theme. */}
-            {stagedKey && clusterNonEmpty ? (
-              <span aria-hidden="true" className="h-3.5 w-px shrink-0 bg-muted-foreground/25" />
-            ) : null}
-            {/* key remounts the stage per item so any open popover state resets
+          {stagedKey && clusterNonEmpty ? (
+            <span aria-hidden="true" className="h-3.5 w-px shrink-0 bg-muted-foreground/25" />
+          ) : null}
+          {/* key remounts the stage per item so any open popover state resets
               on hand-off. */}
-            {stagedKey ? (
-              <div key={stagedKey} className="flex min-w-0 flex-1 items-center">
-                {renderItem(stagedKey, 'stage')}
-              </div>
-            ) : null}
-            {/* Ambient sync state hugs the right edge, outside the
+          {stagedKey ? (
+            <div key={stagedKey} className="flex min-w-0 flex-1 items-center">
+              {renderItem(stagedKey, 'stage')}
+            </div>
+          ) : null}
+          {/* Ambient sync state hugs the right edge, outside the
               cluster/stage model. Under squeeze the label yields first
               (spinner stays) so the stage's diffstat never clips. In
               sync-only mode nothing else consumes the row's free space, so
               ml-auto keeps the spinner pinned right; with a stage present
               its flex-1 has already eaten the space (no-op). */}
-            {syncing ? (
-              <span className="ml-auto inline-flex shrink-0 items-center">
-                <SessionSyncingIndicator labelClassName="hidden @[560px]:inline" />
-              </span>
-            ) : null}
-          </div>
-        </InfoBarSurfaceContext.Provider>
+          {syncing ? (
+            <span className="ml-auto inline-flex shrink-0 items-center">
+              <SessionSyncingIndicator labelClassName="hidden @[560px]:inline" />
+            </span>
+          ) : null}
+        </div>
       </ConversationColumn>
     </div>
   );

@@ -1,11 +1,9 @@
 import {
-  createContext,
-  useContext,
+  useMemo,
   useRef,
   useState,
   type ComponentType,
   type ReactNode,
-  type RefObject,
   type SVGProps,
 } from 'react';
 import { ArrowUpRight } from 'lucide-react';
@@ -76,12 +74,6 @@ export function ActionChip({
 }
 
 /**
- * The info bar's pill element. A {@link PopoverActionChip} inside the bar
- * anchors its popover to the whole pill so the panel shares the bar's edges.
- */
-export const InfoBarSurfaceContext = createContext<RefObject<HTMLDivElement | null> | null>(null);
-
-/**
  * Action chip whose one click toggles a popover above the bar (e.g. related
  * Sessions). Like {@link ActionChip} it never takes the stage.
  */
@@ -101,39 +93,40 @@ export function PopoverActionChip({
 }) {
   const [open, setOpen] = useState(defaultOpen);
   const buttonRef = useRef<HTMLButtonElement>(null);
-  const surfaceRef = useContext(InfoBarSurfaceContext);
-  const button = (
-    <button
-      ref={buttonRef}
-      type="button"
-      aria-label={label}
-      aria-haspopup="dialog"
-      aria-expanded={open}
-      title={label}
-      onClick={() => setOpen((value_) => !value_)}
-      className={cn(
-        CHIP_BUTTON_CLASS,
-        'text-muted-foreground',
-        open && 'bg-muted-foreground/10 text-foreground'
-      )}
-    >
-      <ChipFace icon={icon} value={value} />
-    </button>
+  // Anchor to the enclosing info-bar pill so the panel shares its edges.
+  // Radix reads `current` after mount, when `closest` can resolve.
+  const surfaceRef = useMemo(
+    () => ({
+      get current() {
+        const button = buttonRef.current!;
+        return button.closest('[data-info-bar-surface]') ?? button;
+      },
+    }),
+    []
   );
   return (
     <Popover open={open} onOpenChange={setOpen}>
-      {surfaceRef ? (
-        <>
-          <PopoverAnchor virtualRef={surfaceRef as RefObject<HTMLDivElement>} />
-          {button}
-        </>
-      ) : (
-        <PopoverAnchor asChild>{button}</PopoverAnchor>
-      )}
+      <PopoverAnchor virtualRef={surfaceRef} />
+      <button
+        ref={buttonRef}
+        type="button"
+        aria-label={label}
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        title={label}
+        onClick={() => setOpen((value_) => !value_)}
+        className={cn(
+          CHIP_BUTTON_CLASS,
+          'text-muted-foreground',
+          open && 'bg-muted-foreground/10 text-foreground'
+        )}
+      >
+        <ChipFace icon={icon} value={value} />
+      </button>
       <PopoverContent
         side="top"
         align="start"
-        sideOffset={surfaceRef ? 4 : 8}
+        sideOffset={4}
         aria-label={label}
         onPointerDownOutside={(event) => {
           const target = event.target as Node | null;
@@ -141,11 +134,8 @@ export function PopoverActionChip({
             event.preventDefault();
           }
         }}
-        className={cn(
-          'border-border/60 p-0 shadow-xl',
-          // Inside the bar the panel spans the pill, edge to edge.
-          surfaceRef ? 'w-[var(--radix-popover-trigger-width)]' : 'w-96 max-w-[min(24rem,90vw)]'
-        )}
+        // The panel spans the pill, edge to edge.
+        className="w-[var(--radix-popover-trigger-width)] border-border/60 p-0 shadow-xl"
       >
         {content}
       </PopoverContent>

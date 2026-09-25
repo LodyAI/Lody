@@ -390,8 +390,8 @@ export const openedSessionsAtomFamily = createChildSessionsAtomFamily(
 
 /**
  * Every Session or top Tab this Session created (`openedBySessionId`), for the
- * relations bar above the composer. Unlike {@link openedSessionsAtomFamily}
- * this keeps Tab children: the bar labels each row Tab or Session. Side chats
+ * info bar's related-Sessions chip. Unlike {@link openedSessionsAtomFamily}
+ * this keeps Tab children: the chip labels each row Tab or Session. Side chats
  * are excluded; they already live in this Session's right panel.
  */
 export const createdSessionsAtomFamily = createChildSessionsAtomFamily(

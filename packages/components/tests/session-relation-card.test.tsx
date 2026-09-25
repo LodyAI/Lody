@@ -9,6 +9,7 @@ import { getSessionRoomId, type SessionHistoryParsed, type SessionId } from '@lo
 import { setDocMetaByRoomIdAtom } from '../src/atoms/doc-meta';
 import { MessageRowView } from '../src/components/ai-gui/view';
 import { SessionRelationCard } from '../src/components/shared/session-relation-card';
+import { SessionInfoBar } from '../src/components/sessions/session-info-bar';
 import { CurrentSessionRelationsChip } from '../src/components/sessions/session-relations-chip';
 
 (
@@ -395,15 +396,20 @@ describe('Session relation cards', () => {
     await act(async () => {
       root.render(
         <Provider store={store}>
-          <CurrentSessionRelationsChip
-            sessionId={openerSessionId}
-            parent={{
-              sessionId: 'grand-opener' as SessionId,
-              title: 'Grand opener',
-              session: null,
-              target: { sessionId: 'grand-opener' as SessionId },
-            }}
-            onOpenSession={(target) => opened.push(target)}
+          <SessionInfoBar
+            status={null}
+            relations={
+              <CurrentSessionRelationsChip
+                sessionId={openerSessionId}
+                parent={{
+                  sessionId: 'grand-opener' as SessionId,
+                  title: 'Grand opener',
+                  session: null,
+                  target: { sessionId: 'grand-opener' as SessionId },
+                }}
+                onOpenSession={(target) => opened.push(target)}
+              />
+            }
           />
         </Provider>
       );

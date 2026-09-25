@@ -171,8 +171,8 @@ the Session has a precise opener (`openedBySessionId`) or has created
 Sessions/Tabs (`createdSessionsAtomFamily`: same `openedBySessionId`, side
 chats and archived rows excluded). Like Preview it is a plain action, never
 staged: one click toggles `PopoverActionChip`'s popover above the bar. Inside
-the bar the popover anchors to the pill (`InfoBarSurfaceContext` + Radix
-`virtualRef`) and takes its width, so the panel shares the bar's edges. The list
+the bar the popover anchors to the pill (Radix `virtualRef` resolving the
+enclosing `[data-info-bar-surface]`) and takes its width, so the panel shares the bar's edges. The list
 is agent icon, live title, and kind (Parent / Session / Tab), with a divider
 after the parent row. Tab rows navigate with root + exact tab ids. The page
 reads only a boolean (`useHasCreatedSessions`); the chip subscribes to the list
