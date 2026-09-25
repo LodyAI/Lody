@@ -161,7 +161,7 @@ describe('QuickTunnelSession ownership and idle expiry', () => {
       },
     });
     await expect(session.ready).rejects.toThrow(
-      'last cloudflared error: Failed to dial edge: connection timeout'
+      'cloudflared: Failed to dial edge: connection timeout'
     );
     const outcome = await session.closed;
     expect(outcome.error?.cause).toBe(original);

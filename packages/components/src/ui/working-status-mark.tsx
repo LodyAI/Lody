@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import { cn } from '@/lib/utils';
 
@@ -24,13 +24,11 @@ export type WorkingStatusMarkProps = {
  * - neither → nothing.
  *
  * The transition fires only when `unread` is already true in the render where
- * `working` turns false. That matches how a turn ends: the CLI records the new
- * message (unread, a durable doc-meta write) before it releases the session's
- * presence (working). If presence lapses first — a crash or an expiry — the dot
- * simply appears later without the transition. The previous `working` value is
- * state adjusted during render, so the transition lands in the same commit that
- * removes the grid; keep this component mounted across both states for it to see
- * the change.
+ * `working` turns false. The two arrive on different transports, so pass
+ * `working` through {@link useWorkingHandOver} first; it holds the grid until the
+ * unread write lands. The previous `working` value is state adjusted during
+ * render, so the transition lands in the same commit that removes the grid; keep
+ * this component mounted across both states for it to see the change.
  */
 export function WorkingStatusMark({ working, unread, className }: WorkingStatusMarkProps) {
   const [wasWorking, setWasWorking] = useState(working);
@@ -61,4 +59,36 @@ export function WorkingStatusMark({ working, unread, className }: WorkingStatusM
     );
   }
   return null;
+}
+
+/** How long a finished row keeps its grid while it waits for the unread write. */
+export const WORKING_HAND_OVER_MS = 1_500;
+
+/**
+ * The `working` value to draw, holding the grid briefly after work stops so the
+ * done transition can still play when `unread` lands after `working` clears.
+ *
+ * A turn's end reaches the renderer on two transports with no ordering between
+ * them: presence (working) is ephemeral and applied at once, while the unread
+ * bump is a doc-meta write that the projection flushes a task later
+ * (`atoms/doc-meta.ts`). Presence therefore usually clears first; without the
+ * hold the mark unmounts and the dot later appears without the transition.
+ * When `unread` never comes (the user is reading the session) the hold simply
+ * lapses after {@link WORKING_HAND_OVER_MS}. Call it where the row stays mounted.
+ */
+export function useWorkingHandOver(working: boolean, unread: boolean): boolean {
+  const [wasWorking, setWasWorking] = useState(working);
+  const [holding, setHolding] = useState(false);
+  if (wasWorking !== working) {
+    setWasWorking(working);
+    setHolding(wasWorking && !working && !unread);
+  } else if (holding && unread) {
+    setHolding(false);
+  }
+  useEffect(() => {
+    if (!holding) return undefined;
+    const timer = setTimeout(() => setHolding(false), WORKING_HAND_OVER_MS);
+    return () => clearTimeout(timer);
+  }, [holding]);
+  return working || holding;
 }

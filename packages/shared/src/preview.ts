@@ -426,3 +426,6 @@ export const applyPreviewEmbeddingHeaders = (headers: Headers): Headers => {
   headers.set('Cross-Origin-Resource-Policy', PREVIEW_RESOURCE_POLICY);
   return headers;
 };
+
+// Allow managed binary acquisition, connector startup, and public route propagation.
+export const DEFAULT_PREVIEW_CREATE_TIMEOUT_MS = 8 * 60_000;

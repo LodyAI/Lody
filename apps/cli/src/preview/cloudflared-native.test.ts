@@ -61,6 +61,11 @@ describe('cloudflared process ownership', () => {
     child.stderr.write(`${line.slice(19)}\n`);
     const handle = await run.result;
     expect(handle.origin).toBe('https://fixture-quick.trycloudflare.com');
+    expect(handle.diagnostic()).toContain('connection=not registered');
+    child.stderr.write(
+      `${JSON.stringify({ message: 'Registered tunnel connection', protocol: 'quic' })}\n`
+    );
+    expect(handle.diagnostic()).toContain('connection=registered (quic)');
     child.log(
       'Unable to reach edge https://example.test/?token=secret',
       'error',

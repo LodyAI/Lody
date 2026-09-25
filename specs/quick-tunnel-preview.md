@@ -96,3 +96,7 @@ performance measurements. Passing proxy tests alone does not establish completio
 
 Evidence: [CLI preview](../apps/cli/src/preview/AGENTS.md),
 [annotation contract](preview-annotation-availability.md).
+
+Startup public-route verification allows up to 90 seconds for a newly allocated
+route to propagate; active-route health checks remain bounded to five seconds.
+Default create RPC callers allow eight minutes for acquisition and startup.
