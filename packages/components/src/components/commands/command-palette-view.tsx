@@ -217,22 +217,6 @@ export function CommandPaletteView({
     if (!results.some((result) => result.key === active)) setActive(results[0]?.key ?? '');
   }, [results, active]);
 
-  useEffect(() => {
-    if (!open) return;
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape' || isImeComposingNativeKeyboardEvent(event)) return;
-      event.preventDefault();
-      event.stopPropagation();
-      onOpenChange(false);
-    };
-
-    // Base UI can keep focus on the dialog surface instead of the cmdk subtree
-    // when opened from a global shortcut. Listen only while this palette is open.
-    window.addEventListener('keydown', handleKeyDown, true);
-    return () => window.removeEventListener('keydown', handleKeyDown, true);
-  }, [open, onOpenChange]);
-
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Content
@@ -240,6 +224,16 @@ export function CommandPaletteView({
         noAnimation
         style={PANEL_STYLE}
         backdropClassName="z-[var(--z-command-palette,85)] bg-black/30"
+        onKeyDownCapture={(event) => {
+          // Base UI can focus the popup itself, outside the cmdk subtree. Handle
+          // Escape at the dialog boundary so dismissal does not depend on focus.
+          if (event.key !== 'Escape' || isImeComposingNativeKeyboardEvent(event.nativeEvent)) {
+            return;
+          }
+          event.preventDefault();
+          event.stopPropagation();
+          onOpenChange(false);
+        }}
       >
         <Cmdk
           shouldFilter={false}

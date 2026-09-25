@@ -70,11 +70,10 @@ describe('CommandPaletteView', () => {
       input.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
     });
   };
-  const pressOutsidePalette = async (key: string, isComposing = false) => {
+  const pressOnDialogSurface = async (key: string, isComposing = false) => {
+    const dialog = document.body.querySelector<HTMLElement>('[data-lody-dialog-content]')!;
     await act(async () => {
-      document.body.dispatchEvent(
-        new KeyboardEvent('keydown', { key, bubbles: true, isComposing })
-      );
+      dialog.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, isComposing }));
     });
   };
 
@@ -132,11 +131,11 @@ describe('CommandPaletteView', () => {
 
     const input = document.body.querySelector<HTMLInputElement>('[cmdk-input]')!;
     input.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }));
-    await pressOutsidePalette('Escape', true);
+    await pressOnDialogSurface('Escape', true);
     expect(document.body.querySelector('[cmdk-input]')).not.toBeNull();
     input.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true }));
 
-    await pressOutsidePalette('Escape');
+    await pressOnDialogSurface('Escape');
     expect(document.body.querySelector('[cmdk-input]')).toBeNull();
   });
 });
