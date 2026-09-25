@@ -1,6 +1,6 @@
 import * as stylex from '@stylexjs/stylex';
 import { colors } from '../tokens/colors.stylex';
-import { control, space, text } from '../tokens/scales.stylex';
+import { control, focus, space, text } from '../tokens/scales.stylex';
 
 /**
  * One token group for a table and the pager under it.
@@ -82,7 +82,7 @@ export const table = stylex.defineVars({
   hover: colors.hoverFill,
   selected: colors.selectedFill,
   ring: colors.accent,
-  ringWidth: '2px',
+  ringWidth: focus.ringWidth,
   // The pager. The buttons in it are `Button`s and bring their own tokens; what
   // is left is the room between them and the parts that are not controls — the
   // gap the pages are missing, and the count beside the page you are on.

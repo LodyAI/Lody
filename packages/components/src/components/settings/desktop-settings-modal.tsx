@@ -43,6 +43,7 @@ import { McpSetting } from './mcp-setting';
 import { ShareManagementSetting } from './share-management-setting';
 import { FocusScope, useListKeyboardNavigation } from '@/ui/focus-scope';
 import { settingsSurface as surface } from './surface';
+import { settingsType as type } from './type.stylex';
 
 /**
  * The overlay's own size. The dialog panel sets its width, padding and gap
@@ -79,18 +80,12 @@ const styles = stylex.create({
     minHeight: 0,
     overflow: 'hidden',
   },
-  /**
-   * The nav is a sidebar on the panel: no fill of its own, and the one
-   * structural line of the overlay between it and the content.
-   */
+  /** The nav: its fill (`surface.nav`) is what splits it from the page. */
   nav: {
     display: 'flex',
     flexDirection: 'column',
     flexShrink: 0,
-    width: '208px',
-    borderInlineEndWidth: '1px',
-    borderInlineEndStyle: 'solid',
-    borderInlineEndColor: colors.separator,
+    width: '240px',
   },
   navScroll: {
     display: 'flex',
@@ -105,9 +100,9 @@ const styles = stylex.create({
     margin: 0,
     paddingInline: space[2],
     paddingBottom: space[1],
-    fontSize: '0.75em',
+    fontSize: type.caption,
     fontWeight: 400,
-    lineHeight: 1.25,
+    lineHeight: type.leading,
     color: colors.tertiaryLabel,
   },
   navGroupRows: { display: 'flex', flexDirection: 'column', gap: '2px' },
@@ -140,8 +135,18 @@ const styles = stylex.create({
     alignItems: 'center',
     flexShrink: 0,
     height: '40px',
-    paddingInlineStart: space[8],
-    paddingInlineEnd: '40px',
+  },
+  /**
+   * The title sits in the same centred column as the page under it, inset like
+   * a row, so it starts where the section text does at any pane width.
+   */
+  headerFlush: { paddingBottom: 0 },
+  headerColumn: {
+    boxSizing: 'border-box',
+    width: '100%',
+    maxWidth: '760px',
+    marginInline: 'auto',
+    paddingInline: space[6],
   },
   paneBody: { flexGrow: 1, minHeight: 0 },
   fill: { height: '100%' },
@@ -258,7 +263,7 @@ function SettingsModalBody() {
           id={navigationScopeId}
           role="navigation"
           aria-label={t('settings.title')}
-          {...stylex.props(styles.nav)}
+          {...stylex.props(styles.nav, surface.nav)}
         >
           <nav {...stylex.props(styles.navScroll)}>
             {groupedSections.map((section) => {
@@ -345,14 +350,20 @@ function SettingsModalBody() {
           >
             <X {...stylex.props(styles.closeGlyph)} aria-hidden="true" />
           </Dialog.Close>
-          <div {...stylex.props(styles.surface)} data-settings-surface="">
+          <div {...stylex.props(styles.surface, surface.canvas)} data-settings-surface="">
             {selfTitledTab ? (
               <Dialog.Title {...stylex.props(styles.srOnly)}>
                 {t(activeTabConfig.labelKey)}
               </Dialog.Title>
             ) : (
-              <header {...stylex.props(styles.header)}>
-                <Dialog.Title>{t(activeTabConfig.labelKey)}</Dialog.Title>
+              <header {...stylex.props(styles.header, styles.paneInset, styles.headerFlush)}>
+                <div {...stylex.props(styles.headerColumn)}>
+                  {/* The dialog's title style would tie with this one on the same
+                    element; the page title's size lives on its own box. */}
+                  <Dialog.Title>
+                    <span {...stylex.props(surface.pageTitle)}>{t(activeTabConfig.labelKey)}</span>
+                  </Dialog.Title>
+                </div>
               </header>
             )}
             <div {...stylex.props(styles.paneBody)}>

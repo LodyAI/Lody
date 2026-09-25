@@ -4,7 +4,7 @@ import { Pencil } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
 import { Spinner } from '@lody/ui/spinner';
 import { colors } from '@lody/ui/tokens/colors.stylex';
-import { corner, duration, ease, radius } from '@lody/ui/tokens/scales.stylex';
+import { corner, duration, ease, focus, radius } from '@lody/ui/tokens/scales.stylex';
 import { toast } from '@/lib/toast';
 import type { AvatarKind } from '@lody/shared';
 import { withClassName } from '@/lib/stylex';
@@ -33,7 +33,7 @@ const styles = stylex.create({
     backgroundColor: 'transparent',
     cursor: { default: 'pointer', ':disabled': 'default' },
     outlineStyle: 'none',
-    boxShadow: { default: 'none', ':focus-visible': `0 0 0 2px ${colors.accent}` },
+    boxShadow: { default: 'none', ':focus-visible': `0 0 0 ${focus.ringWidth} ${colors.accent}` },
   },
   person: { borderRadius: radius.full, cornerShape: corner.round },
   tile: { borderRadius: radius.medium, cornerShape: corner.shape },

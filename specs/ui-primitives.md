@@ -120,13 +120,15 @@ that wants the page itself to recede while such a panel is open says so around
 its own interface; the panel does not reach out and do it.
 
 A person may also be told what a control is without acting on it. That label is
-not a surface a person visits: it is a mark over the thing it names, so it reads
-inverted rather than raised, it never takes the pointer, and it sits above every
-other floating thing because what it names may itself be on one. It is offered
-to sighted people using a pointer or a keyboard and reaches neither touch nor a
-screen reader, so it never carries a control's name — every control it describes
-states its own name, and a surface that groups several of them lets the second
-appear without the wait the first had.
+not a surface a person visits, but it floats like one: it is drawn in the same
+material as the other floating surfaces, so it is light in a light palette and
+dark in a dark one and never inverts against the surface under it, including
+under a palette a surface forced. It never takes the pointer, and it sits above
+every other floating thing because what it names may itself be on one. It is
+offered to sighted people using a pointer or a keyboard and reaches neither
+touch nor a screen reader, so it never carries a control's name — every control
+it describes states its own name, and a surface that groups several of them lets
+the second appear without the wait the first had.
 
 A surface may also show one thing out of several, and there are three ways it
 does so: the choices side by side with the thing under them, the choices stacked
@@ -259,6 +261,12 @@ on focus, a destructive ring while invalid that persists when the control is
 focused, and reduced opacity on the whole control when disabled. The states are
 defined once for the family, so a control added later inherits them rather than
 choosing its own.
+
+A focus ring shows where keyboard navigation is, and only then. A person using a
+pointer never sees a ring on a control they did not move to — including the one
+a dialog or menu hands focus back to after Escape — while Tab or an arrow key
+brings rings back at once. A text field is the exception: whoever is typing sees
+which field has the caret, however they got there.
 
 A control that stores a value — a ticked checkbox, the selected radio option, a
 switch that is on — shows that as the accent fill, the one hue this system
@@ -416,7 +424,7 @@ The menu family that shares that surface, the one declaration it replaces, and
 the migration of the Radix menus still owed to it are recorded in the
 [UI menu primitives note](../.agents/notes/implemented/feature/2026-09-11-ui-menu-primitives.md).
 The popover on that same surface, the modal rung the dialog family shares, the
-inverted tooltip, and the migration still owed to them are recorded in the
+tooltip, and the migration still owed to them are recorded in the
 [UI overlay primitives note](../.agents/notes/implemented/feature/2026-09-12-ui-overlay-primitives.md).
 The three disclosures and the five parts that report are recorded in the
 [UI disclosure primitives note](../.agents/notes/implemented/feature/2026-09-12-ui-disclosure-primitives.md)

@@ -20,6 +20,7 @@
     "./dialog": "./src/dialog/dialog.tsx",
     "./drawer": "./src/drawer/drawer.tsx",
     "./field": "./src/field/field.tsx",
+    "./focus-modality": "./src/focus/focus-modality.ts",
     "./gallery": "./src/gallery/gallery.tsx",
     "./input": "./src/field/input.tsx",
     "./kbd": "./src/kbd/kbd.tsx",

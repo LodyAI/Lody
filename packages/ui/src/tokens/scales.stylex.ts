@@ -68,3 +68,14 @@ export const z = stylex.defineConsts({
   tooltip: '90',
   toast: '100',
 });
+
+/**
+ * How wide a focus ring is drawn. Every family's `ringWidth` reads this, and
+ * `installFocusModality` sets it to zero while the person is using a pointer:
+ * `:focus-visible` also matches focus a dialog hands back after Escape, and a
+ * ring there marks a control nobody navigated to. A text field keeps its own
+ * width — whoever is typing needs to see where.
+ */
+export const focus = stylex.defineVars({
+  ringWidth: '2px',
+});

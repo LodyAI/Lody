@@ -58,11 +58,14 @@ export const shadow = stylex.defineVars({
     default: 'inset 0 1px 0 hsl(0 0% 100% / 0.18), 0 1px 1.5px hsl(225 10% 11% / 0.18)',
     [DARK]: 'inset 0 1px 0 hsl(0 0% 100% / 0.55), 0 1px 2px hsl(0 0% 0% / 0.5)',
   },
+  // A card rests on the page rather than floating over it: an edge and a
+  // contact shadow, no lift. A wide blur under every block of a settings page
+  // drew a halo whose outline read as a second layer behind each card.
   card: {
     default:
-      '0 0 0 0.5px hsl(225 10% 11% / 0.12), 0 1px 2px hsl(225 10% 11% / 0.06), 0 8px 24px -6px hsl(225 10% 11% / 0.09)',
+      '0 0 0 0.5px hsl(225 10% 11% / 0.1), 0 1px 1.5px hsl(225 10% 11% / 0.04), 0 2px 6px -2px hsl(225 10% 11% / 0.04)',
     [DARK]:
-      'inset 0 1px 0 hsl(0 0% 100% / 0.05), 0 0 0 0.5px hsl(0 0% 100% / 0.06), 0 8px 24px -6px hsl(0 0% 0% / 0.5)',
+      'inset 0 1px 0 hsl(0 0% 100% / 0.04), 0 0 0 0.5px hsl(0 0% 100% / 0.07), 0 1px 2px hsl(0 0% 0% / 0.35)',
   },
   medium: {
     default: '0 1px 2px hsl(225 10% 11% / 0.14), 0 4px 12px -2px hsl(225 10% 11% / 0.18)',
@@ -167,7 +170,7 @@ export const darkShadowTheme = stylex.createTheme(shadow, {
   raised:
     'inset 0 1px 0 hsl(0 0% 100% / 0.08), 0 0 0 0.5px hsl(0 0% 0% / 0.7), 0 1px 2px hsl(0 0% 0% / 0.5)',
   inkEdge: 'inset 0 1px 0 hsl(0 0% 100% / 0.55), 0 1px 2px hsl(0 0% 0% / 0.5)',
-  card: 'inset 0 1px 0 hsl(0 0% 100% / 0.05), 0 0 0 0.5px hsl(0 0% 100% / 0.06), 0 8px 24px -6px hsl(0 0% 0% / 0.5)',
+  card: 'inset 0 1px 0 hsl(0 0% 100% / 0.04), 0 0 0 0.5px hsl(0 0% 100% / 0.07), 0 1px 2px hsl(0 0% 0% / 0.35)',
   medium: '0 0 0 0.5px hsl(0 0% 100% / 0.1), 0 2px 6px hsl(0 0% 0% / 0.5)',
   popover:
     'inset 0 1px 0 hsl(0 0% 100% / 0.07), 0 0 0 0.5px hsl(0 0% 100% / 0.08), 0 12px 32px -4px hsl(0 0% 0% / 0.6)',
@@ -181,7 +184,7 @@ export const lightShadowTheme = stylex.createTheme(shadow, {
   raised:
     '0 0 0 0.5px hsl(225 10% 11% / 0.16), 0 1px 1px hsl(225 10% 11% / 0.06), 0 2px 4px -1px hsl(225 10% 11% / 0.07)',
   inkEdge: 'inset 0 1px 0 hsl(0 0% 100% / 0.18), 0 1px 1.5px hsl(225 10% 11% / 0.18)',
-  card: '0 0 0 0.5px hsl(225 10% 11% / 0.12), 0 1px 2px hsl(225 10% 11% / 0.06), 0 8px 24px -6px hsl(225 10% 11% / 0.09)',
+  card: '0 0 0 0.5px hsl(225 10% 11% / 0.1), 0 1px 1.5px hsl(225 10% 11% / 0.04), 0 2px 6px -2px hsl(225 10% 11% / 0.04)',
   medium: '0 1px 2px hsl(225 10% 11% / 0.14), 0 4px 12px -2px hsl(225 10% 11% / 0.18)',
   popover:
     '0 0 0 0.5px hsl(225 10% 11% / 0.11), 0 2px 4px -1px hsl(225 10% 11% / 0.06), 0 12px 32px -6px hsl(225 10% 11% / 0.16)',

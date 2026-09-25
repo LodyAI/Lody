@@ -109,6 +109,7 @@ import {
   cmdRetryProviderSetupAtom,
   deleteProviderSetupAtom,
 } from '@/atoms/agents';
+import { settingsType as type } from './type.stylex';
 
 type Translate = ReturnType<typeof useTranslation>['t'];
 
@@ -213,7 +214,7 @@ const styles = stylex.create({
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
     fontSize: '14px',
-    lineHeight: 1.25,
+    lineHeight: type.leading,
     color: colors.label,
   },
   search: { position: 'relative', flexShrink: 0, paddingInline: space[2] },
@@ -245,7 +246,7 @@ const styles = stylex.create({
     paddingTop: space[3],
     paddingBottom: space[1.5],
     fontSize: '11px',
-    lineHeight: 1.25,
+    lineHeight: type.leading,
     color: colors.tertiaryLabel,
   },
   railGroupItems: { display: 'flex', flexDirection: 'column', gap: '2px' },
@@ -318,7 +319,7 @@ const styles = stylex.create({
     whiteSpace: 'nowrap',
     fontSize: '14px',
     fontWeight: 400,
-    lineHeight: 1.25,
+    lineHeight: type.leading,
     color: colors.label,
   },
   subtitle: {
@@ -527,7 +528,7 @@ const styles = stylex.create({
     fontFamily: 'inherit',
     fontSize: '13px',
     fontWeight: 500,
-    lineHeight: 1.25,
+    lineHeight: type.leading,
     textAlign: 'start',
     color: colors.label,
     cursor: 'pointer',

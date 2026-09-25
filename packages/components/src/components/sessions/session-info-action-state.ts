@@ -32,6 +32,7 @@ export function shouldDisableSessionInfoBarGitHubActionForHydration(
 
 export function resolveSessionInfoBarGitHubActionIds({
   canShowGitHubActions,
+  canMutatePr,
   hasExistingPr,
   workspaceDirty,
   workspaceUnpushed,
@@ -43,6 +44,8 @@ export function resolveSessionInfoBarGitHubActionIds({
   prStatus,
 }: {
   canShowGitHubActions: boolean;
+  /** Direct GitHub mutation API is available, independently of summary observation. */
+  canMutatePr: boolean;
   hasExistingPr: boolean;
   /** Uncommitted changes in the working tree. */
   workspaceDirty: boolean;
@@ -85,7 +88,7 @@ export function resolveSessionInfoBarGitHubActionIds({
     }
     if (prStatus === 'draft') {
       // A draft PR has no merge gate to clear; readiness is the user's call.
-      actions.push('ready-for-review');
+      if (canMutatePr) actions.push('ready-for-review');
       return actions;
     }
     if (prMergeState === 'd') {
@@ -94,7 +97,7 @@ export function resolveSessionInfoBarGitHubActionIds({
     if (prCiState === 'f' || prCiState === 'e') {
       actions.push('fix-ci-errors');
     }
-    if (prReadiness === 'y') {
+    if (canMutatePr && prReadiness === 'y') {
       actions.push('merge');
     }
     return actions;

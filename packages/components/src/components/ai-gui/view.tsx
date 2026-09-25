@@ -6633,9 +6633,7 @@ const PlanEntryRow = ({
           <StatusIcon className={cn('h-4 w-4 flex-none shrink-0', statusMeta.className)} />
           <span className="break-words">{entry.content}</span>
         </div>
-        <Badge tone={priorityMeta.tone} className="uppercase">
-          {priorityMeta.label}
-        </Badge>
+        <Badge tone={priorityMeta.tone}>{priorityMeta.label}</Badge>
       </div>
     </div>
   );
