@@ -20,6 +20,7 @@ import { WorkingStatusMark } from '@/ui/working-status-mark';
 import type { PrStatus, SessionPullRequestCiState } from '@lody/shared';
 import { cn } from '@/lib/utils';
 import { Tooltip } from '@lody/ui/tooltip';
+import { Badge } from '@lody/ui/badge';
 import { ContextMenu } from '@lody/ui/context-menu';
 import { Skeleton } from '@lody/ui/skeleton';
 import { PR_STATUS_META } from '@/components/sessions/pull-request-badge';
@@ -251,12 +252,9 @@ export function SessionPrIcon({
 export function SessionMergeablePill() {
   const { t } = useTranslation();
   return (
-    <span
-      data-session-mergeable-pill=""
-      className="inline-flex h-5 shrink-0 items-center rounded-full border border-status-success/45 bg-status-success/[0.06] px-1.5 text-[10px] font-medium leading-none tracking-[0.01em] text-status-success"
-    >
+    <Badge tone="success" data-session-mergeable-pill="">
       {t('sessions.pr.mergeable', 'Mergeable')}
-    </span>
+    </Badge>
   );
 }
 

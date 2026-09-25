@@ -444,23 +444,14 @@ function ConnectionPill({
           ? labels.connectionLoading
           : labels.connectionOffline;
   return (
-    <span
-      className={cn(
-        'inline-flex shrink-0 items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-medium',
-        isLoading
-          ? 'bg-sidebar-hover text-sidebar-foreground-muted'
-          : 'bg-status-danger/[0.12] text-status-danger ring-1 ring-status-danger/20'
-      )}
+    <Badge
+      tone={isLoading ? 'running' : 'danger'}
+      icon={isLoading ? <Spinner className="h-3 w-3" label={null} /> : undefined}
       aria-label={label}
       data-workspace-status={state}
     >
-      {isLoading ? (
-        <Spinner className="h-3 w-3 shrink-0" aria-hidden />
-      ) : (
-        <span className="h-1.5 w-1.5 rounded-full bg-status-danger" aria-hidden />
-      )}
-      <span>{label}</span>
-    </span>
+      {label}
+    </Badge>
   );
 }
 
@@ -1054,7 +1045,7 @@ export const LoroSidebar = memo(function LoroSidebar({
                                   })}
                             </span>
                           ) : ws.planTier ? (
-                            <Badge className="shrink-0 border-transparent bg-foreground/[0.06] px-1.5 py-0 text-[10px] font-normal text-muted-foreground">
+                            <Badge>
                               {ws.planTier === 'enterprise'
                                 ? mergedLabels.planEnterprise
                                 : mergedLabels.planPlus}

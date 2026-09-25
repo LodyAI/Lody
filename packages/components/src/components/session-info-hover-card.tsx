@@ -25,6 +25,7 @@ import {
   Users,
 } from 'lucide-react';
 import { Spinner } from '@/ui/spinner';
+import { Badge } from '@lody/ui/badge';
 import { useTranslation } from 'react-i18next';
 import type { PrStatus, SessionPullRequestCiState } from '@lody/shared';
 import { cn } from '@/lib/utils';
@@ -346,9 +347,7 @@ export function SessionInfoCard({
           {isWorktree ? (
             // The icon glyph alone is easy to miss; a small pill makes the
             // isolated-worktree mode unmistakable in the details surface.
-            <span className="shrink-0 rounded-sm bg-muted-foreground/10 px-1 py-px text-[10px] font-medium text-muted-foreground">
-              {t('sessions.infoCard.worktree', 'Worktree')}
-            </span>
+            <Badge>{t('sessions.infoCard.worktree', 'Worktree')}</Badge>
           ) : null}
         </span>
       ),

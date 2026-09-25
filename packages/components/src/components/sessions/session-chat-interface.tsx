@@ -1228,11 +1228,11 @@ export function SessionHeaderMenu({
                   <span className="sr-only">{t('sessions.machineLabel', 'Machine')}: </span>
                   <span className="min-w-0 flex-1 truncate">{machineName}</span>
                   {project?.kind === 'local' ? (
-                    <span className="ml-auto shrink-0 rounded border border-border/70 px-1 py-px text-[0.62rem] font-medium leading-none text-muted-foreground">
+                    <Badge className="ml-auto">
                       {session.isWorktree
                         ? t('chat.workdir.worktree', 'Worktree')
                         : t('chat.workdir.local', 'Local')}
-                    </span>
+                    </Badge>
                   ) : null}
                 </div>
               ) : null}

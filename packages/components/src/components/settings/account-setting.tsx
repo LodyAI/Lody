@@ -34,9 +34,10 @@ import {
 import { WorkspaceJoinRequestsSettings } from './workspace-join-requests-settings';
 import { WorkspaceOwnershipTransfer } from './workspace-ownership-transfer';
 import { AccountMachinesOverview } from './account-machines-overview';
+import { settingsType as type } from './type.stylex';
 
 const styles = stylex.create({
-  empty: { margin: 0, fontSize: '0.875em', color: colors.secondaryLabel },
+  empty: { margin: 0, fontSize: type.caption, color: colors.secondaryLabel },
 });
 
 const getInviteLink = (invitation: Invitation) => getAppShareUrl(`/invite/${invitation.id}`);

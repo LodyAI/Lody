@@ -114,6 +114,10 @@ uses to carry a forced palette across a portal. The theme re-declares exactly
 two values — the film and the letters — so a cap on a chip is the same cap,
 made of different things, rather than a second cap.
 
+Superseded 2026-09-25: the tooltip stopped inverting and `kbdOnInvertedTheme`
+was deleted; see the follow-up in the
+[UI overlay primitives note](2026-09-12-ui-overlay-primitives.md).
+
 **The face is the UI font.** `<kbd>` defaults to monospace, and `⌘`, `⇧` and `↵`
 are drawn by the product font here; a cap that fell back to the mono stack
 would render a different glyph from the identical character in the label beside
