@@ -424,7 +424,8 @@ export function ScheduleListView({
           schedule — closes the schedule. Close and Escape stay the keyboard path. */}
       {/* eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-noninteractive-element-interactions */}
       <section
-        className="flex h-full min-h-0 flex-col"
+        // Positioning context for the open schedule, which covers the header.
+        className="relative flex h-full min-h-0 flex-col overflow-hidden"
         style={columnVars(widths)}
         onClick={(event) => {
           const target = event.target as Element;

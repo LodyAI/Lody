@@ -41,9 +41,10 @@ function useElementWidth<T extends HTMLElement>() {
 /**
  * The list and one schedule on the same level, never stacked.
  *
- * It sits under the list's header, which never moves. With nothing open the
- * table is the page; opening a schedule slides it in from the trailing edge
- * like a sidebar while the table gives up the room; closing reverses both. The boundary between them is a drag handle, and the list
+ * The table sits under the list's header, which never moves. Opening a
+ * schedule slides it in from the trailing edge like a sidebar, full height
+ * over the header's trailing end, while the table gives up the room; closing
+ * reverses both. The boundary between them is a drag handle, and the list
  * keeps its full table (scrolling sideways) at any width.
  *
  * It animates only because the route keeps it mounted: `/schedules` is a
@@ -82,7 +83,9 @@ export function ScheduleSplitView({
   };
   const transition = reduce || dragging ? { duration: 0 } : { duration: 0.3, ease };
   return (
-    <div ref={containerRef} className="relative flex min-h-0 flex-1 overflow-hidden">
+    // Not `relative`: the panel is placed against the page (the list view's
+    // section), so it rises over the header while the header itself stays put.
+    <div ref={containerRef} className="flex min-h-0 flex-1 overflow-hidden">
       <motion.div
         className="h-full min-w-0 shrink-0 overflow-hidden"
         initial={false}
@@ -96,7 +99,7 @@ export function ScheduleSplitView({
           <motion.section
             key="detail"
             data-schedule-detail=""
-            className="absolute inset-y-0 right-0 flex min-w-0 flex-col border-l-[0.5px] border-border bg-background shadow-[-8px_0_24px_-16px_rgba(0,0,0,0.25)]"
+            className="absolute inset-y-0 right-0 z-30 flex min-w-0 flex-col border-l-[0.5px] border-border bg-background shadow-[-8px_0_24px_-16px_rgba(0,0,0,0.25)]"
             style={{ left: width }}
             initial={{ x: '100%' }}
             animate={{ x: 0 }}

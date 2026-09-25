@@ -22,7 +22,8 @@
   layout route that mounts `SchedulesWorkspace` once (its index and `$scheduleId`
   children render nothing), so opening a schedule animates instead of
   remounting. On desktop it slides in beside the table (`ScheduleSplitView`,
-  under the list header via `renderBody`, so title/search/New never move); the
+  under the list header via `renderBody`, so title/search/New never move; the
+  panel itself rises full height over the header's trailing end); the
   table keeps every column, scrolling sideways; the boundary is a drag handle
   (`scheduleSplitListWidthAtom`). A click on blank page space closes it
   (`onBlankClick`; rows, controls, the panel and portalled popups excluded).
