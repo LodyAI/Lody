@@ -469,17 +469,26 @@ describe('CodeCollabV2Service text RPC boundary', () => {
       const publishStarted = new Promise<void>((resolve) => {
         resolvePublishStarted = resolve;
       });
+      let releasePublish: (() => void) | undefined;
+      const publishGate = new Promise<void>((resolve) => {
+        releasePublish = resolve;
+      });
+      let published = false;
+      let publication: Promise<void> | undefined;
       const service = new CodeCollabV2Service({
         resolveWorkspace: makeResolver(workspaceRoot),
-        publishFileIndex: async () => {
+        publishFileIndex: () => {
+          publication = publishGate.then(() => {
+            published = true;
+          });
           resolvePublishStarted?.();
-          await new Promise<void>(() => undefined);
+          return publication;
         },
       });
-      const opened = await service.openText({ sessionId: SESSION_ID, path: 'hello.ts' });
-
-      const saved = await Promise.race([
-        service.saveText({
+      let save: ReturnType<CodeCollabV2Service['saveText']> | undefined;
+      try {
+        const opened = await service.openText({ sessionId: SESSION_ID, path: 'hello.ts' });
+        save = service.saveText({
           sessionId: SESSION_ID,
           requestedByUserId: 'user-1',
           path: 'hello.ts',
@@ -489,22 +498,30 @@ describe('CodeCollabV2Service text RPC boundary', () => {
             text: 'new\n',
             rawBytes: Buffer.byteLength('new\n'),
           },
-        }),
-        new Promise<never>((_, reject) => {
-          setTimeout(() => {
-            reject(new Error('saveText did not return after writing to disk'));
-          }, 250);
-        }),
-      ]);
-
-      expect(saved).toEqual({
-        status: 'ok',
-        path: 'hello.ts',
-        digest: digestText('new\n'),
-        rawBytes: Buffer.byteLength('new\n'),
-      });
-      expect(await readFile(filePath, 'utf8')).toBe('new\n');
-      await publishStarted;
+        });
+        const saved = await save;
+        expect(saved).toEqual({
+          status: 'ok',
+          path: 'hello.ts',
+          digest: digestText('new\n'),
+          rawBytes: Buffer.byteLength('new\n'),
+        });
+        expect(await readFile(filePath, 'utf8')).toBe('new\n');
+        await publishStarted;
+        expect(published).toBe(false);
+        releasePublish?.();
+        await publication;
+        expect(published).toBe(true);
+      } finally {
+        releasePublish?.();
+        // Never remove the workspace while the durable save is still writing.
+        try {
+          await save;
+          await publication;
+        } finally {
+          service.dispose();
+        }
+      }
     });
   });
 
