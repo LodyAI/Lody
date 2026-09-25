@@ -134,6 +134,26 @@ describe('Spinner', () => {
     expect(html).toContain('stroke-opacity="0.25"');
   });
 
+  test("a caller's classes land on the turning box, never the glyph inside it", () => {
+    const html = renderToStaticMarkup(<Spinner size="large" className="mb-4 size-6" />);
+    const span = attrOf(html, 'span', 'class') ?? '';
+    const svg = attrOf(html, 'svg', 'class') ?? '';
+    // The wrapper rotates about its own centre, so its box must be the glyph's
+    // box: a margin or a size reaching the svg would grow the animated box
+    // asymmetrically — `mb-4` on the invitation page moved the origin off the
+    // ring and turned the spin into an orbit.
+    expect(span).toContain('mb-4');
+    expect(span).toContain('size-6');
+    expect(svg).not.toContain('mb-4');
+    expect(svg).not.toContain('size-6');
+    for (const name of classesFor(surface.spinnerSpin, surface.spinnerLarge)) {
+      expect(span, `the turning box is missing ${name}`).toContain(name);
+    }
+    for (const name of classesFor(surface.spinner)) {
+      expect(svg, `the glyph is missing ${name}`).toContain(name);
+    }
+  });
+
   test('it names itself, unless the surface has already named the wait', () => {
     expect(attrOf(renderToStaticMarkup(<Spinner />), 'svg', 'aria-label')).toBe('Loading');
     const silent = renderToStaticMarkup(<Spinner label={null} />);

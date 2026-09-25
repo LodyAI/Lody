@@ -87,6 +87,12 @@ never pushed to renderers as local room health.
   Bind the baseline to the doc cursor, not metadata; compare existing content exactly,
   never sanitize it to hide edits. Write history and capture its baseline without an
   async gap, before publishing meta. Legacy history without a baseline is not migrated.
+- History import lists and imports through the machine's only same-type Provider
+  (`agentConfigId`), binding new imports and earlier unbound ones it lists; with none
+  or several they stay unbound. Never replace a binding. Refresh loads an existing
+  import through its own binding, else the default launch, exactly as continuation does.
+  Every import write also records the load-reported selection as the runtime config of
+  the last imported user turn through `applyAcpRuntimeConfigPatch`.
 - Removing a local project archives every unarchived Session for that machine/project
   before deleting the project row, found through the existence and metadata indexes
   rather than by opening every Session document; a failed archive keeps the delete

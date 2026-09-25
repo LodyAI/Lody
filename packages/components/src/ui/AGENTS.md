@@ -89,7 +89,8 @@ strings on i18n rather than the registry's inline English.
   so an svg spinner re-runs style, pre-paint and layerize on the main thread every
   vsync: two idle sidebar spinners measured 40–50% renderer CPU on a Retina Mac.
   Both implementations obey this; any other infinite transform animation (the
-  readiness orbit) follows the same rule.
+  readiness orbit) follows the same rule. Both land the caller's `className`
+  on that box; a margin spaces it, not the origin.
 - `Spinner`'s `spinning` defaults to TRUE: a component forwarding its own optional
   `spinning`/`loading`/`spin` prop must default it to `false` — `undefined` hits the
   primitive's default and spins at rest ("No machines available" shipped that way).

@@ -65,6 +65,40 @@ require that pinned runtime rather than an older cached fallback. The currently
 pinned artifact predates this protocol; enabling the UI requires publishing the
 new artifact with Windows binaries built from the same source revision.
 
+## Native history import
+
+Local project history sync can import Pi sessions created on the same machine,
+including those started in Pi's own terminal UI. The adapter lists Pi's native
+session files for the project directory without starting Pi, and loading one
+replays its current branch: user text and images, assistant text and thinking,
+tool calls with their final status, and todo checklists where they occurred. The
+importer keeps user text only and counts user images as dropped. Compaction summaries
+and abandoned branches are not replayed. The imported session keeps the native
+file path as its identity, so continuing it resumes that file; a missing file
+fails the resume rather than starting an empty session.
+
+Continuing a builtin Pi chat uses session resume, never load, so an ordinary
+resume does not replay history. Import requires a published runtime containing
+the adapter revision that advertises session list and load.
+
+A new import binds to the machine's only Provider of the same type, and listing
+and importing use that Provider's launch settings; an earlier unbound import binds
+when that Provider lists it on a later sync. With none or several it stays unbound,
+and an existing binding is never replaced. Refreshing an imported session loads it
+the way continuing does: through its bound Provider, else the default launch.
+Every import write records the model, mode and options that `session/load`
+reports as the runtime selection of the last imported user turn; a newer Lody turn
+keeps its own. An earlier import records it only when its source next changes. A
+recorded model the bound Provider's catalog does not list still falls back to the
+catalog default. This applies to every provider's history import; Codex's
+read-only history method reports no selection.
+
+Known limit: syncing again after continuing an imported session in Lody, or
+while Pi is mid-turn, can report a sync conflict. Refresh requires the replay to
+reproduce Lody's stored turns, but Lody-side attachments, subagent task cards,
+retry and compaction activity, and locally handled commands are not in Pi's file.
+This follows the shared importer design and also applies to other providers.
+
 ## Evidence
 
 - `packages/shared/src/pi-provider-migration.ts`

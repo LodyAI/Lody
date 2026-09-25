@@ -6,14 +6,21 @@ import {
   getSessionRoomId,
   sessionDocSchema,
   parseSessionNotification,
+  resolveSessionAcpRuntimeConfig,
   type AcpSessionNotification,
+  type AgentConfigMeta,
   type LocalProjectId,
   type MachineId,
   type SessionId,
   type SessionMeta,
   type WorkspaceId,
 } from '@lody/shared';
-import { HASH_VERSION_V1, hashHistoryEntryForVersion, hashText } from '@lody/shared/session-data';
+import {
+  HASH_VERSION_V1,
+  hashHistoryEntryForVersion,
+  hashText,
+  readSessionHistory,
+} from '@lody/shared/session-data';
 import type { SessionHistoryInput } from '@lody/shared';
 
 import { LocalProjectHistorySyncService } from '../src/lib/local-project-history-sync-service';
@@ -101,16 +108,23 @@ async function createHarness() {
       return doc;
     },
     cleanSessionDoc: async () => {},
+    findSoleAgentConfig: async () => agentConfigs.sole,
+    getAgentConfigById: async (id: string) =>
+      agentConfigs.all.find((config) => config.id === id) ?? null,
   };
-  const service = new LocalProjectHistorySyncService(
-    manager as unknown as LoroDocumentManager,
-    logger,
-    { workspaceId, machineId, userId: 'synthetic-user' },
-    provider
-  );
+  const agentConfigs: { sole?: AgentConfigMeta; all: AgentConfigMeta[] } = { all: [] };
+  // Production builds a service per request.
+  const createService = () =>
+    new LocalProjectHistorySyncService(
+      manager as unknown as LoroDocumentManager,
+      logger,
+      { workspaceId, machineId, userId: 'synthetic-user' },
+      provider
+    );
+  const service = createService();
 
   let revision = 0;
-  async function importTurns(turns: number) {
+  async function importTurns(turns: number, modelId?: string) {
     revision += 1;
     providerMocks.list.mockResolvedValue({
       sessions: [
@@ -121,8 +135,11 @@ async function createHarness() {
         },
       ],
     });
-    providerMocks.replay.mockResolvedValue(notifications(turns));
-    return service.importLocalProjectSessions({
+    providerMocks.replay.mockResolvedValue({
+      notifications: notifications(turns),
+      runtimeConfig: modelId && { acpSessionId, modelId, configOptionValues: { model: modelId } },
+    });
+    return createService().importLocalProjectSessions({
       localProjectId,
       rootPath,
       acpSessionIds: [acpSessionId],
@@ -168,7 +185,7 @@ async function createHarness() {
     });
     return loro;
   }
-  return { repo, service, importTurns, getOnlyDoc, getMeta, rawDoc, makeLegacy };
+  return { repo, service, agentConfigs, importTurns, getOnlyDoc, getMeta, rawDoc, makeLegacy };
 }
 
 function location(doc: LoroDoc): LoroMap {
@@ -197,6 +214,36 @@ describe('history import through the real SessionDocument writer', () => {
       expect((await doc.getExternalHistoryCursor())?.importedTurnHashes).toHaveLength(4);
     }
   );
+
+  it("keeps the source session's model as the composer baseline across import and refresh", async () => {
+    const h = await createHarness();
+    await h.importTurns(1, 'model-a');
+    const { doc } = h.getOnlyDoc();
+    const baselineModel = () =>
+      resolveSessionAcpRuntimeConfig(
+        readSessionHistory(doc.sessionData.history),
+        [],
+        doc.mirror?.getState().acpRuntimeConfig
+      )?.modelId;
+    expect(baselineModel()).toBe('model-a');
+
+    expect((await h.importTurns(2, 'model-b')).summary.refreshed).toBe(1);
+    expect(baselineModel()).toBe('model-b');
+  });
+
+  it('refreshes a bound session through its own Provider after the sole one changes', async () => {
+    const h = await createHarness();
+    const bound = { id: 'config-a', env: { CODEX_HOME: '/a' } } as unknown as AgentConfigMeta;
+    h.agentConfigs.all.push(bound);
+    h.agentConfigs.sole = bound;
+    await h.importTurns(1);
+    expect((await h.getMeta(h.getOnlyDoc().sessionId)).agentConfigId).toBe('config-a');
+
+    // A second same-type Provider appears, so there is no sole Provider any more.
+    h.agentConfigs.sole = undefined;
+    expect((await h.importTurns(2)).summary.refreshed).toBe(1);
+    expect(providerMocks.replay.mock.lastCall?.[0].provider.env).toEqual({ CODEX_HOME: '/a' });
+  });
 
   it('does not advance the cursor when the new history command fails validation', async () => {
     const h = await createHarness();
