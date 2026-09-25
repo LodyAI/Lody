@@ -249,7 +249,7 @@ See the [contract](../../../../specs/acp-session-titles.md) and
 [original compatibility decision](../../../../.agents/notes/implemented/architecture/2026-09-08-acp-owned-session-titles.md).
 
 The daemon does not name branches. A worktree session stays on the `session/<id>` branch
-`worktree-manager.ts` created for it. [WorkspaceBranchService](../session/workspace-branch-service.ts)
+`worktree-manager.ts` created for it. [WorkspaceGitService](../session/workspace-git-service.ts)
 observes branch changes independently of GitHub; its lifecycle and activation triggers are
 defined by the [checkout branch contract](../../../../specs/workspace-branch-state.md). For GitHub projects the agent is asked to do exactly that — see
 `GITHUB_WORKTREE_SYSTEM_COMMANDS` in `session/session-execution-helpers.ts`.

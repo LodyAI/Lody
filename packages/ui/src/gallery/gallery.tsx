@@ -46,7 +46,7 @@ import {
   TickGlyph,
 } from '../internal/glyphs';
 import { Kbd, KbdGroup } from '../kbd/kbd';
-import { kbd as kbdTokens, kbdOnInvertedTheme } from '../kbd/kbd.tokens.stylex';
+import { kbd as kbdTokens } from '../kbd/kbd.tokens.stylex';
 import { ContextMenu } from '../menu/context-menu';
 import { Menu } from '../menu/menu';
 import { Menubar } from '../menu/menubar';
@@ -659,7 +659,7 @@ const SHADOWS = [
     box: shadow.medium,
     fill: colors.elevatedBackground,
     ink: false,
-    note: 'tooltip',
+    note: 'between a card and a popover; no rung names it',
   },
   {
     name: 'shadow.popover',
@@ -803,8 +803,8 @@ const DIALOG_COLORS = [
 ];
 
 const TOOLTIP_COLORS = [
-  { name: 'tooltip.background', value: tooltipTokens.background, note: 'inverted: the label ink' },
-  { name: 'tooltip.label', value: tooltipTokens.label, note: 'the page background, as ink' },
+  { name: 'tooltip.background', value: tooltipTokens.background, note: 'the floating rung' },
+  { name: 'tooltip.label', value: tooltipTokens.label, note: 'the page ink, as on a menu' },
 ];
 
 const DRAWER_SIDES: DrawerSide[] = ['top', 'end', 'bottom', 'start'];
@@ -2217,10 +2217,10 @@ function TooltipReplica() {
       </Cluster>
       <div {...stylex.props(styles.replicaCaption)}>
         <span {...stylex.props(styles.rungUse)}>
-          The one floating thing that inverts rather than rising off the page: the ladder puts a
-          menu, a popover and a list on the raised background under the popover shadow, and names
-          the tooltip apart as label with shadow.medium. It is a label over a control rather than a
-          place to act, so it never takes the pointer.
+          The floating rung's material in a smaller chip: the raised background under the popover
+          shadow, with the page's own ink, so it is light in a light palette and dark in a dark one
+          like a menu is. It is a label over a control rather than a place to act, so it never takes
+          the pointer.
         </span>
         <dl {...stylex.props(styles.constList)}>
           {metrics.map((entry) => (
@@ -3313,27 +3313,20 @@ function KbdRow() {
 }
 
 /**
- * The same caps standing on the one surface that inverts.
+ * The same caps standing on a tooltip.
  *
- * This is the row that would catch the regression: a cap carrying the page's
- * own gray onto a tooltip is a light chip on a dark one with the letters gone.
- * `Tooltip.Content` declares `kbdOnInvertedTheme` on its popup, and the board
- * composes the very same two styles rather than describing them, so a chip this
- * package no longer draws cannot be reported here.
+ * A tooltip is on the floating rung, so a cap on one is a cap on a raised
+ * surface like any other and carries nothing of its own for it. The board
+ * composes the very style `Tooltip.Content` applies rather than describing it,
+ * so a chip this package no longer draws cannot be reported here, and a chip
+ * that stopped following the palette would show up as a patch of the wrong one.
  */
 function KbdOnChipRow() {
   return (
     <Row>
       <LegendKey>on a tooltip</LegendKey>
       <Cluster>
-        <div
-          {...stylex.props(
-            chip.popup,
-            kbdOnInvertedTheme,
-            styles.tooltipReplica,
-            styles.tooltipReplicaRow
-          )}
-        >
+        <div {...stylex.props(chip.popup, styles.tooltipReplica, styles.tooltipReplicaRow)}>
           <span>Open the command palette</span>
           <KbdGroup>
             <Kbd>&#8984;</Kbd>
@@ -3342,9 +3335,9 @@ function KbdOnChipRow() {
         </div>
       </Cluster>
       <span {...stylex.props(styles.rungUse)}>
-        A component token group is how a surface tells what is inside it what it is standing on.
-        StyleX has no descendant selector, and unlike the one the deleted implementation used it
-        also reaches a cap a caller wrapped in something of their own.
+        The same cap as anywhere else. A tooltip follows the palette like every floating surface, so
+        the gray that reads on a menu or a palette reads on the chip too, and nothing has to tell
+        the cap what it is standing on.
       </span>
     </Row>
   );
@@ -4470,7 +4463,7 @@ export function UiGallery({ palettes = 'both' }: UiGalleryProps) {
 
       <Section
         title="Tooltip · the name of the thing under the pointer"
-        rule="The one floating part that does not read the popup group. The ladder puts a menu, a popover and a list on the raised background under the popover shadow, and then names the tooltip apart: label with shadow.medium. That is a deliberate inversion — a popup is a place to act, a tooltip only names one — so a tooltip carries the page's text colour as its fill and the page's background as its ink, the same pair a primary button and a checked box take. It never takes the pointer, and one that names a control inside a popup still sits above it."
+        rule="A tooltip stands on the floating rung with a menu, a popover and a list: the raised background under the popover shadow, with the page's own ink, so it is light in a light palette and dark in a dark one and never a foreign patch over the surface it names. It keeps a token group of its own because its geometry is a chip's — a smaller corner, tighter padding, the footnote step and a width past which it would be prose — and a popup is a place to act while a tooltip only names one. It never takes the pointer, and one that names a control inside a popup still sits above it."
       >
         <PaletteSplit palettes={palettes}>
           <Rows>
@@ -4486,7 +4479,7 @@ export function UiGallery({ palettes = 'both' }: UiGalleryProps) {
               box={tooltipTokens.shadow}
               fill={tooltipTokens.background}
               ink={false}
-              note="tight, because it sits on what it names"
+              note="the popover shadow, because it floats like one"
             />
           </Grid>
         </PaletteSplit>

@@ -49,6 +49,7 @@ import {
   settingsCatalog as catalog,
   settingsSurface as surface,
 } from './surface';
+import { settingsType as type } from './type.stylex';
 
 /** The well's ink without its alpha, for the chip cover below. */
 const WELL_INK = `rgb(from ${colors.wellBackground} r g b)`;
@@ -62,7 +63,7 @@ const styles = stylex.create({
   slug: {
     flexShrink: 0,
     fontFamily: 'var(--font-mono, ui-monospace, monospace)',
-    fontSize: '0.7em',
+    fontSize: type.caption,
     color: colors.secondaryLabel,
   },
   scope: { flexShrink: 0, marginInlineStart: 'auto' },
@@ -77,8 +78,8 @@ const styles = stylex.create({
   warning: {
     flexShrink: 0,
     marginInlineStart: 'auto',
-    fontSize: '0.7em',
-    lineHeight: 1.25,
+    fontSize: type.caption,
+    lineHeight: type.leading,
     color: colors.warning,
   },
   /** The read-only view's identity line: the glyph, the name, the command. */

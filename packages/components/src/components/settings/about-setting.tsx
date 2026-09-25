@@ -22,6 +22,7 @@ import { developerModeEnabledAtom } from '@/atoms/settings';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { MobileAboutSettings } from '@/components/mobile/mobile-about-settings';
 import { collectClientBuildInfo } from '@/lib/client-build-info';
+import { settingsType as type } from './type.stylex';
 
 const buildInfo = collectClientBuildInfo();
 const BUILD_DATE = buildInfo.buildDate ?? 'development';
@@ -37,12 +38,12 @@ const MONO = 'var(--font-mono, ui-monospace, monospace)';
 
 const styles = stylex.create({
   /** A fact the build states: read, not set, so it is quiet and fixed-width. */
-  value: { fontSize: '0.875em', fontFamily: MONO, color: colors.secondaryLabel },
+  value: { fontSize: type.caption, fontFamily: MONO, color: colors.secondaryLabel },
   status: {
     display: 'inline-flex',
     alignItems: 'center',
     gap: space[1],
-    fontSize: '0.8em',
+    fontSize: type.caption,
     color: colors.secondaryLabel,
   },
   statusError: { color: colors.destructive },
@@ -56,7 +57,7 @@ const styles = stylex.create({
     gap: '2px',
     textAlign: 'end',
   },
-  endpoint: { fontSize: '0.75em', fontFamily: MONO, color: colors.secondaryLabel },
+  endpoint: { fontSize: type.caption, fontFamily: MONO, color: colors.secondaryLabel },
 });
 
 type AppIpc = NonNullable<ReturnType<typeof getIpcServices>>['app'];

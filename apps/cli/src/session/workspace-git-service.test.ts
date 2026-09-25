@@ -8,23 +8,29 @@ import type { SessionId } from '@lody/shared';
 import type { LoroDocumentManager } from '@/lib/loro/doc';
 import type { Logger } from '@/utils/logger';
 import type { SessionExec } from '@/lib/git/resolve-git-branch-name';
-import { WorkspaceBranchService } from './workspace-branch-service';
+import { WorkspaceGitService } from './workspace-git-service';
 
 const exec = promisify(execFile);
 const owner = 'owner' as SessionId;
 const child = 'child' as SessionId;
 function fixture() {
-  const meta = new Map<SessionId, { branchName?: string; parentSessionId?: SessionId }>([
+  const meta = new Map<
+    SessionId,
+    { branchName?: string; parentSessionId?: SessionId; project?: ProjectRef }
+  >([
     [owner, {}],
     [child, { parentSessionId: owner }],
   ]);
-  const service = new WorkspaceBranchService({
+  const service = new WorkspaceGitService({
     logger: { debug() {} } as unknown as Logger,
     workspaceDocument: {
       async getOrCreateSessionDoc(id: SessionId) {
         return {
           async getMetaState() {
             return meta.get(id);
+          },
+          async setProject(project: ProjectRef) {
+            meta.set(id, { ...meta.get(id), project });
           },
           async setBranchName(branchName: string) {
             meta.set(id, { ...meta.get(id), branchName });
@@ -48,7 +54,7 @@ async function withRepo(
   }
 }
 
-describe('WorkspaceBranchService', () => {
+describe('WorkspaceGitService', () => {
   it('publishes a local repository without a remote, including its unborn branch and later checkout', async () => {
     await withRepo(async (cwd, git) => {
       const { service, meta } = fixture();
@@ -57,6 +63,23 @@ describe('WorkspaceBranchService', () => {
       await git(['checkout', '-b', 'feature/next']);
       await service.syncLocalWorkspace(owner, cwd);
       expect(meta.get(owner)?.branchName).toBe('feature/next');
+    });
+  });
+
+  it('backfills an existing local owner from its GitHub remote without changing project identity', async () => {
+    await withRepo(async (cwd, git) => {
+      const { service, meta } = fixture();
+      const project: ProjectRef = { kind: 'local', localProjectId: 'local-1' as never };
+      meta.set(owner, { project });
+      await git(['remote', 'add', 'origin', 'git@github.com:owner/repo.git']);
+      await service.syncLocalWorkspace(owner, cwd);
+      expect(meta.get(owner)).toEqual({
+        branchName: 'feature/local',
+        project: { ...project, githubRepoFullName: 'owner/repo' },
+      });
+      await git(['remote', 'set-url', 'origin', 'git@github.com:another/repo.git']);
+      await service.syncLocalWorkspace(owner, cwd);
+      expect(meta.get(owner)?.project).toEqual({ ...project, githubRepoFullName: 'owner/repo' });
     });
   });
 

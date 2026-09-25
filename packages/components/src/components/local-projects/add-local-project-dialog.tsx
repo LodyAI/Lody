@@ -20,7 +20,7 @@ import {
 } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
-import { corner, duration, ease, radius, space, text } from '@lody/ui/tokens/scales.stylex';
+import { corner, duration, ease, focus, radius, space, text } from '@lody/ui/tokens/scales.stylex';
 import { withClassName } from '@/lib/stylex';
 import { Spinner } from '@/ui/spinner';
 import type {
@@ -150,7 +150,7 @@ const styles = stylex.create({
       default: REGION,
       ':hover': `color-mix(in oklab, transparent, ${colors.label} 6%)`,
     },
-    boxShadow: { default: 'none', ':focus-visible': `0 0 0 2px ${colors.accent}` },
+    boxShadow: { default: 'none', ':focus-visible': `0 0 0 ${focus.ringWidth} ${colors.accent}` },
     outlineStyle: 'none',
     color: colors.label,
     fontFamily: 'inherit',

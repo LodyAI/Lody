@@ -9,6 +9,7 @@ import { Collapsible } from '@lody/ui/collapsible';
 import { Field as UiField } from '@lody/ui/field';
 import { Textarea, type TextareaProps } from '@lody/ui/textarea';
 import { settingsSurface as surface } from './surface';
+import { settingsType as type } from './type.stylex';
 
 const styles = stylex.create({
   field: { display: 'flex', flexDirection: 'column', gap: space[1.5] },
@@ -71,7 +72,7 @@ const styles = stylex.create({
     fontFamily: 'inherit',
     fontSize: '13px',
     fontWeight: 500,
-    lineHeight: 1.25,
+    lineHeight: type.leading,
     textAlign: 'start',
     color: colors.label,
     cursor: 'pointer',
