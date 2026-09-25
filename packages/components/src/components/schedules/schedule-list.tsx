@@ -1,4 +1,11 @@
-import { useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent } from 'react';
+import {
+  useRef,
+  useState,
+  type CSSProperties,
+  type KeyboardEvent,
+  type PointerEvent,
+  type ReactNode,
+} from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   CalendarClock,
@@ -56,7 +63,7 @@ export type ScheduleRowContext = {
 
 /** Pixel widths of the resizable columns; "Runs with" takes the rest. */
 export type ScheduleColumnWidths = { name: number; frequency: number; next: number };
-const DEFAULT_COLUMN_WIDTHS: ScheduleColumnWidths = { name: 300, frequency: 200, next: 200 };
+const DEFAULT_COLUMN_WIDTHS: ScheduleColumnWidths = { name: 300, frequency: 150, next: 140 };
 const MIN_COLUMN_WIDTH = 72;
 const MAX_COLUMN_WIDTH = 720;
 const clampWidth = (value: number) =>
@@ -157,6 +164,7 @@ function ScheduleListRow({
   const toggleLabel = row.enabled ? t('schedules.pause', 'Pause') : t('schedules.resume', 'Resume');
   const rowElement = (
     <div
+      data-schedule-row=""
       aria-current={selected ? 'true' : undefined}
       className={cn(
         listGridClass,
@@ -348,6 +356,9 @@ function ScheduleListRow({
   );
 }
 
+const BLANK_CLICK_EXCLUDE =
+  'button, a, input, textarea, select, label, [role="separator"], [role="tab"], [data-schedule-row], [data-schedule-detail]';
+
 export function ScheduleListView({
   rows,
   runtimes,
@@ -363,6 +374,8 @@ export function ScheduleListView({
   columnWidths: controlledWidths,
   onColumnWidthsChange,
   selectedId,
+  renderBody,
+  onBlankClick,
   now = getServerNow(),
 }: {
   rows: ScheduleRegistryRow[];
@@ -379,6 +392,11 @@ export function ScheduleListView({
   columnWidths?: ScheduleColumnWidths;
   onColumnWidthsChange?: (next: ScheduleColumnWidths) => void;
   onOpenSession?: (id: string) => void;
+  /** Wraps the table under the header — the split view places the open
+   *  schedule beside it there, so the header never moves. */
+  renderBody?: (table: ReactNode) => ReactNode;
+  /** A click on the page's empty space (the open schedule does not count). */
+  onBlankClick?: () => void;
   /** The schedule open beside the list, highlighted. */
   selectedId?: string;
   /** Injected so stories and tests render a fixed "next run" column. */
@@ -402,7 +420,20 @@ export function ScheduleListView({
     // tooltips carry the exact next-run instant and the offline reason, which
     // must not be what makes this list crash where it is mounted.
     <Tooltip.Provider>
-      <section className="flex h-full min-h-0 flex-col" style={columnVars(widths)}>
+      {/* A click on nothing in particular — not a row, a control or the open
+          schedule — closes the schedule. Close and Escape stay the keyboard path. */}
+      {/* eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-noninteractive-element-interactions */}
+      <section
+        className="flex h-full min-h-0 flex-col"
+        style={columnVars(widths)}
+        onClick={(event) => {
+          const target = event.target as Element;
+          // Popups portal out of this DOM; their clicks must not count.
+          if (!onBlankClick || !event.currentTarget.contains(target)) return;
+          if (target.closest(BLANK_CLICK_EXCLUDE)) return;
+          onBlankClick();
+        }}
+      >
         {/* Joins the Electron window's drag strip, which would otherwise swallow
             clicks on the search and New button under it. */}
         <header className={cn('flex shrink-0 items-center gap-2 px-4 py-3', windowDrag)}>
@@ -431,99 +462,101 @@ export function ScheduleListView({
           </Button>
         </header>
 
-        {/* Header and rows scroll together, sideways too when the columns do
-            not fit the pane: each column keeps its width instead of squeezing. */}
-        <div className="min-h-0 flex-1 overflow-auto">
-          <div className="sm:min-w-[var(--schedule-table-min)]">
-            {ready && !error && filtered.length > 0 ? (
-              <div
-                className={cn(
-                  listGridClass,
-                  'sticky top-0 z-20 hidden border-b-[0.5px] border-border bg-background px-4 py-1.5 text-[0.75em] font-normal text-muted-foreground sm:grid'
-                )}
-              >
-                {(
-                  [
-                    ['name', t('schedules.column.name', 'Name')],
-                    ['frequency', t('schedules.column.frequency', 'Frequency')],
-                    ['next', t('schedules.column.next', 'Next run')],
-                  ] as const
-                ).map(([key, label]) => (
-                  // The cell must not clip: the handle hangs into the column gap.
-                  <span key={key} className="relative min-w-0">
-                    <span className="block truncate">{label}</span>
-                    <ColumnResizeHandle
-                      label={t('schedules.resizeColumn', 'Resize {{column}}', { column: label })}
-                      value={widths[key]}
-                      onChange={(value) => resize(key, value)}
-                      onReset={() => resize(key, DEFAULT_COLUMN_WIDTHS[key])}
-                    />
-                  </span>
-                ))}
-                <span>{t('schedules.column.target', 'Runs with')}</span>
-                <span />
-              </div>
-            ) : null}
-            {!ready ? (
-              <div className="space-y-px" aria-busy="true">
-                <span className="sr-only">{t('schedules.loading', 'Loading schedules…')}</span>
-                {[0, 1, 2].map((index) => (
-                  <div
-                    key={index}
-                    className="flex items-center gap-3 border-b-[0.5px] border-border px-4 py-3"
-                  >
-                    <Skeleton shape="line" width={192} />
-                    <Skeleton shape="line" width={96} className="ml-auto" />
-                    <Skeleton shape="line" width={80} />
-                  </div>
-                ))}
-              </div>
-            ) : error ? (
-              <p className="px-4 py-8 text-[1em] text-destructive" role="alert">
-                {t('schedules.loadError', 'Schedules could not be loaded.')}
-              </p>
-            ) : filtered.length === 0 ? (
-              <div className="mx-auto flex max-w-sm flex-col items-center gap-2 px-6 py-16 text-center">
-                <CalendarClock className="size-5 text-muted-foreground" aria-hidden="true" />
-                <p className="text-[1em] font-normal">
-                  {query
-                    ? t('schedules.noMatches', 'No schedules match your search')
-                    : t('schedules.empty', 'No schedules yet')}
+        {(renderBody ?? ((table: ReactNode) => table))(
+          // Header and rows scroll together, sideways too when the columns do
+          // not fit the pane: each column keeps its width instead of squeezing.
+          <div className="h-full min-h-0 flex-1 overflow-auto">
+            <div className="sm:min-w-[var(--schedule-table-min)]">
+              {ready && !error && filtered.length > 0 ? (
+                <div
+                  className={cn(
+                    listGridClass,
+                    'sticky top-0 z-20 hidden border-b-[0.5px] border-border bg-background px-4 py-1.5 text-[0.75em] font-normal text-muted-foreground sm:grid'
+                  )}
+                >
+                  {(
+                    [
+                      ['name', t('schedules.column.name', 'Name')],
+                      ['frequency', t('schedules.column.frequency', 'Frequency')],
+                      ['next', t('schedules.column.next', 'Next run')],
+                    ] as const
+                  ).map(([key, label]) => (
+                    // The cell must not clip: the handle hangs into the column gap.
+                    <span key={key} className="relative min-w-0">
+                      <span className="block truncate">{label}</span>
+                      <ColumnResizeHandle
+                        label={t('schedules.resizeColumn', 'Resize {{column}}', { column: label })}
+                        value={widths[key]}
+                        onChange={(value) => resize(key, value)}
+                        onReset={() => resize(key, DEFAULT_COLUMN_WIDTHS[key])}
+                      />
+                    </span>
+                  ))}
+                  <span>{t('schedules.column.target', 'Runs with')}</span>
+                  <span />
+                </div>
+              ) : null}
+              {!ready ? (
+                <div className="space-y-px" aria-busy="true">
+                  <span className="sr-only">{t('schedules.loading', 'Loading schedules…')}</span>
+                  {[0, 1, 2].map((index) => (
+                    <div
+                      key={index}
+                      className="flex items-center gap-3 border-b-[0.5px] border-border px-4 py-3"
+                    >
+                      <Skeleton shape="line" width={192} />
+                      <Skeleton shape="line" width={96} className="ml-auto" />
+                      <Skeleton shape="line" width={80} />
+                    </div>
+                  ))}
+                </div>
+              ) : error ? (
+                <p className="px-4 py-8 text-[1em] text-destructive" role="alert">
+                  {t('schedules.loadError', 'Schedules could not be loaded.')}
                 </p>
-                {query ? null : (
-                  <>
-                    <p className="text-[0.9em] text-muted-foreground">
-                      {t(
-                        'schedules.emptyHelp',
-                        'Choose a prompt and a time. Your machine will start a new chat for each run.'
-                      )}
-                    </p>
-                    <Button variant="secondary" size="small" className="mt-2" onClick={onNew}>
-                      <Plus className="size-3.5" />
-                      {t('schedules.new', 'New schedule')}
-                    </Button>
-                  </>
-                )}
-              </div>
-            ) : (
-              filtered.map((row) => (
-                <ScheduleListRow
-                  key={row.scheduleId}
-                  row={row}
-                  now={now}
-                  runtime={matchingScheduleRuntime(row, runtimes)}
-                  context={contextForRow?.(row)}
-                  onOpen={() => onOpen(row.scheduleId)}
-                  onToggle={onToggle ? () => onToggle(row) : undefined}
-                  onRun={onRun ? () => onRun(row) : undefined}
-                  onDelete={onDelete ? () => onDelete(row) : undefined}
-                  onOpenSession={onOpenSession}
-                  selected={row.scheduleId === selectedId}
-                />
-              ))
-            )}
+              ) : filtered.length === 0 ? (
+                <div className="mx-auto flex max-w-sm flex-col items-center gap-2 px-6 py-16 text-center">
+                  <CalendarClock className="size-5 text-muted-foreground" aria-hidden="true" />
+                  <p className="text-[1em] font-normal">
+                    {query
+                      ? t('schedules.noMatches', 'No schedules match your search')
+                      : t('schedules.empty', 'No schedules yet')}
+                  </p>
+                  {query ? null : (
+                    <>
+                      <p className="text-[0.9em] text-muted-foreground">
+                        {t(
+                          'schedules.emptyHelp',
+                          'Choose a prompt and a time. Your machine will start a new chat for each run.'
+                        )}
+                      </p>
+                      <Button variant="secondary" size="small" className="mt-2" onClick={onNew}>
+                        <Plus className="size-3.5" />
+                        {t('schedules.new', 'New schedule')}
+                      </Button>
+                    </>
+                  )}
+                </div>
+              ) : (
+                filtered.map((row) => (
+                  <ScheduleListRow
+                    key={row.scheduleId}
+                    row={row}
+                    now={now}
+                    runtime={matchingScheduleRuntime(row, runtimes)}
+                    context={contextForRow?.(row)}
+                    onOpen={() => onOpen(row.scheduleId)}
+                    onToggle={onToggle ? () => onToggle(row) : undefined}
+                    onRun={onRun ? () => onRun(row) : undefined}
+                    onDelete={onDelete ? () => onDelete(row) : undefined}
+                    onOpenSession={onOpenSession}
+                    selected={row.scheduleId === selectedId}
+                  />
+                ))
+              )}
+            </div>
           </div>
-        </div>
+        )}
       </section>
     </Tooltip.Provider>
   );

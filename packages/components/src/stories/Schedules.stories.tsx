@@ -521,40 +521,42 @@ export const EditorBesideList: Story = {
     return (
       <WithPlatform>
         <div className="h-dvh">
-          <ScheduleSplitView
-            open={open}
-            list={
-              <ScheduleListView
-                {...args}
-                selectedId={open ? 'daily-review' : undefined}
-                onOpen={() => setOpen(true)}
+          <ScheduleListView
+            {...args}
+            selectedId={open ? 'daily-review' : undefined}
+            onOpen={() => setOpen(true)}
+            onBlankClick={open ? () => setOpen(false) : undefined}
+            renderBody={(table) => (
+              <ScheduleSplitView
+                open={open}
+                list={table}
+                detail={
+                  <>
+                    <ScheduleDetailToolbar
+                      onClose={() => setOpen(false)}
+                      actions={{
+                        enabled: true,
+                        canToggle: true,
+                        canRun: true,
+                        canDelete: true,
+                        onToggle: () => {},
+                        onRun: () => {},
+                        onDelete: () => {},
+                        onHistory: () => setHistory(true),
+                      }}
+                    />
+                    <ScheduleHistoryDrawer open={history} onOpenChange={setHistory}>
+                      <p className="px-3 py-3 text-[0.9em] text-muted-foreground">
+                        No Sessions have been created yet.
+                      </p>
+                    </ScheduleHistoryDrawer>
+                    <div data-settings-surface="" className="min-h-0 flex-1 overflow-auto">
+                      <EditorStory bare fixture={{ chatOnly: true }} />
+                    </div>
+                  </>
+                }
               />
-            }
-            detail={
-              <>
-                <ScheduleDetailToolbar
-                  onClose={() => setOpen(false)}
-                  actions={{
-                    enabled: true,
-                    canToggle: true,
-                    canRun: true,
-                    canDelete: true,
-                    onToggle: () => {},
-                    onRun: () => {},
-                    onDelete: () => {},
-                    onHistory: () => setHistory(true),
-                  }}
-                />
-                <ScheduleHistoryDrawer open={history} onOpenChange={setHistory}>
-                  <p className="px-3 py-3 text-[0.9em] text-muted-foreground">
-                    No Sessions have been created yet.
-                  </p>
-                </ScheduleHistoryDrawer>
-                <div data-settings-surface="" className="min-h-0 flex-1 overflow-auto">
-                  <EditorStory bare fixture={{ chatOnly: true }} />
-                </div>
-              </>
-            }
+            )}
           />
         </div>
       </WithPlatform>

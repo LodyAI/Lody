@@ -21,9 +21,12 @@
 - The list is the page; no tabs, no dialog. `routes/…/schedules.tsx` is a
   layout route that mounts `SchedulesWorkspace` once (its index and `$scheduleId`
   children render nothing), so opening a schedule animates instead of
-  remounting. On desktop it slides in beside the list (`ScheduleSplitView`); the
-  list keeps its full table, scrolling sideways, and the boundary is a drag
-  handle (`scheduleSplitListWidthAtom`). Mobile pushes a page. The header
+  remounting. On desktop it slides in beside the table (`ScheduleSplitView`,
+  under the list header via `renderBody`, so title/search/New never move); the
+  table keeps every column, scrolling sideways; the boundary is a drag handle
+  (`scheduleSplitListWidthAtom`). A click on blank page space closes it
+  (`onBlankClick`; rows, controls, the panel and portalled popups excluded).
+  Mobile pushes a page. The header
   (`ScheduleDetailToolbar`) is close plus compact icon actions, history last
   (a trailing `Drawer`). Top-of-pane headers join the Electron drag strip
   (`useWindowDragRegionClass`) with buttons `WINDOW_DRAG_EXEMPT_CLASS`, or the

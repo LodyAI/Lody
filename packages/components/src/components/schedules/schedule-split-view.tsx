@@ -41,9 +41,9 @@ function useElementWidth<T extends HTMLElement>() {
 /**
  * The list and one schedule on the same level, never stacked.
  *
- * With nothing open the list is the page. Opening a schedule slides it in from
- * the trailing edge like a sidebar while the list gives up the room; closing
- * reverses both. The boundary between them is a drag handle, and the list
+ * It sits under the list's header, which never moves. With nothing open the
+ * table is the page; opening a schedule slides it in from the trailing edge
+ * like a sidebar while the table gives up the room; closing reverses both. The boundary between them is a drag handle, and the list
  * keeps its full table (scrolling sideways) at any width.
  *
  * It animates only because the route keeps it mounted: `/schedules` is a
@@ -82,7 +82,7 @@ export function ScheduleSplitView({
   };
   const transition = reduce || dragging ? { duration: 0 } : { duration: 0.3, ease };
   return (
-    <div ref={containerRef} className="relative flex h-full min-h-0 overflow-hidden">
+    <div ref={containerRef} className="relative flex min-h-0 flex-1 overflow-hidden">
       <motion.div
         className="h-full min-w-0 shrink-0 overflow-hidden"
         initial={false}
@@ -95,6 +95,7 @@ export function ScheduleSplitView({
         {open ? (
           <motion.section
             key="detail"
+            data-schedule-detail=""
             className="absolute inset-y-0 right-0 flex min-w-0 flex-col border-l-[0.5px] border-border bg-background shadow-[-8px_0_24px_-16px_rgba(0,0,0,0.25)]"
             style={{ left: width }}
             initial={{ x: '100%' }}
@@ -263,8 +264,8 @@ export function ScheduleDetailToolbar({
   };
 }) {
   const { t } = useTranslation();
-  // In Electron the window's drag strip lies over the top 44px; the toolbar
-  // joins the drag region above it and its buttons opt out, or none is clickable.
+  // On mobile the toolbar is the page's top edge, where Electron's window drag
+  // strip lies; joining the drag region with its buttons exempt keeps them clickable.
   const windowDrag = useWindowDragRegionClass();
   return (
     <Tooltip.Provider>

@@ -305,6 +305,20 @@ function SchedulesContent({ scheduleId }: { scheduleId?: string }) {
   const list = (
     <ScheduleListView
       {...registry}
+      onBlankClick={scheduleId && !mobile ? () => open() : undefined}
+      renderBody={
+        mobile
+          ? undefined
+          : (table) => (
+              <ScheduleSplitView
+                open={!!scheduleId}
+                list={table}
+                detail={detailPane}
+                listWidth={splitListWidth ?? undefined}
+                onListWidthChange={setSplitListWidth}
+              />
+            )
+      }
       selectedId={scheduleId}
       onOpen={open}
       onNew={() => open('new')}
@@ -373,20 +387,10 @@ function SchedulesContent({ scheduleId }: { scheduleId?: string }) {
         </p>
       ) : null}
       <div className="min-h-0 flex-1">
-        {mobile ? (
-          scheduleId ? (
-            <div className="flex h-full min-h-0 flex-col">{detailPane}</div>
-          ) : (
-            list
-          )
+        {mobile && scheduleId ? (
+          <div className="flex h-full min-h-0 flex-col">{detailPane}</div>
         ) : (
-          <ScheduleSplitView
-            open={!!scheduleId}
-            list={list}
-            detail={detailPane}
-            listWidth={splitListWidth ?? undefined}
-            onListWidthChange={setSplitListWidth}
-          />
+          list
         )}
       </div>
     </div>
