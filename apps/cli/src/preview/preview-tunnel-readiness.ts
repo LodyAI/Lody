@@ -5,7 +5,8 @@ import {
 } from '@lody/shared';
 import { formatErrorMessage } from '@/utils/format-error';
 
-const TUNNEL_ROUND_TRIP_TIMEOUT_MS = 20_000;
+// Fresh Quick Tunnel routes can take over a minute to accept TLS after allocation.
+const TUNNEL_ROUND_TRIP_TIMEOUT_MS = 90_000;
 const TUNNEL_HEALTH_TIMEOUT_MS = 5_000;
 const TUNNEL_ROUND_TRIP_MAX_REDIRECTS = 5;
 
@@ -14,6 +15,26 @@ export const VISUAL_ANNOTATION_RUNTIME_RESPONSE_VERSION = 'visual-annotation-v1'
 export const PREVIEW_PROXY_RESPONSE_HEADER = 'x-lody-preview-proxy';
 export const PREVIEW_PROXY_RESPONSE_VERSION = '1';
 export const PREVIEW_PROBE_HEADER = 'x-lody-preview-probe';
+
+// Error messages can contain the capability-bearing request URL. Only retain
+// bounded errno codes from the cause chain, never arbitrary messages or headers.
+function networkErrorCodes(error: unknown): string {
+  const codes: string[] = [];
+  const seen = new Set<unknown>();
+  let current = error;
+  while (current instanceof Error && !seen.has(current) && seen.size < 8) {
+    seen.add(current);
+    if (
+      'code' in current &&
+      typeof current.code === 'string' &&
+      /^[A-Z0-9_]{1,80}$/.test(current.code)
+    ) {
+      codes.push(current.code);
+    }
+    current = current.cause;
+  }
+  return codes.join(' -> ') || 'network error (no code)';
+}
 
 function isTransientNetworkError(error: unknown): boolean {
   if (!(error instanceof Error)) return false;
@@ -53,10 +74,12 @@ async function fetchReadyRoute(
   url: URL,
   signal: AbortSignal,
   fetcher: typeof fetch,
-  waitForPropagation: boolean
+  waitForPropagation: boolean,
+  observe: (outcome: string, completed: boolean) => void
 ): Promise<Response> {
   while (true) {
     signal.throwIfAborted();
+    observe('request pending', false);
     try {
       const response = await fetcher(url, {
         method: 'GET',
@@ -64,6 +87,10 @@ async function fetchReadyRoute(
         redirect: 'manual',
         signal,
       });
+      observe(
+        `HTTP ${response.status}; proxyMarker=${response.headers.get(PREVIEW_PROXY_RESPONSE_HEADER) === PREVIEW_PROXY_RESPONSE_VERSION}; cloudflare=${response.headers.get('server') === 'cloudflare'}`,
+        true
+      );
       if (
         !waitForPropagation ||
         response.headers.get(PREVIEW_PROXY_RESPONSE_HEADER) === PREVIEW_PROXY_RESPONSE_VERSION ||
@@ -74,6 +101,7 @@ async function fetchReadyRoute(
       await response.body?.cancel();
     } catch (error) {
       signal.throwIfAborted();
+      observe(networkErrorCodes(error), true);
       if (!waitForPropagation || !isTransientNetworkError(error)) throw error;
     }
     await waitForReadiness(signal);
@@ -89,11 +117,24 @@ export async function verifyPreviewTunnelRoundTrip(args: {
   signal?: AbortSignal;
   fetch?: typeof fetch;
   mode?: 'readiness' | 'health';
+  onDiagnostic?: (message: string) => void;
 }): Promise<void> {
   const gateway = new URL(args.publicUrl);
   const initialViewerUrl = buildManagedPreviewViewerUrl(gateway, args.target);
   const authorizationParams = [...gateway.searchParams.entries()];
   const controller = new AbortController();
+  const startedAt = performance.now();
+  let attempts = 0;
+  let lastOutcome = 'none';
+  let pending = false;
+  const diagnostic = () =>
+    `attempts=${attempts}; elapsedMs=${Math.round(performance.now() - startedAt)}; pending=${pending}; lastOutcome=${lastOutcome}`;
+  const observe = (outcome: string, completed: boolean) => {
+    pending = !completed;
+    if (completed) lastOutcome = outcome;
+    else attempts += 1;
+    args.onDiagnostic?.(`${args.mode ?? 'readiness'} host=${gateway.host}; ${diagnostic()}`);
+  };
   const waitForPropagation = args.mode !== 'health';
   const timeoutMs = waitForPropagation ? TUNNEL_ROUND_TRIP_TIMEOUT_MS : TUNNEL_HEALTH_TIMEOUT_MS;
   const timeout = setTimeout(() => {
@@ -117,11 +158,12 @@ export async function verifyPreviewTunnelRoundTrip(args: {
           viewerUrl,
           signal,
           args.fetch ?? fetch,
-          waitForPropagation
+          waitForPropagation,
+          observe
         );
       } catch (error) {
         throw new Error(
-          `Preview public route round-trip failed for ${initialViewerUrl.host}: ${formatErrorMessage(error)}`,
+          `Preview public route round-trip failed for ${initialViewerUrl.host}: ${signal.aborted ? formatErrorMessage(signal.reason) : networkErrorCodes(error)}; ${diagnostic()}`,
           { cause: error }
         );
       }

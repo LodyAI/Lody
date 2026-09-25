@@ -298,3 +298,29 @@ added to its filesystem allowlist.
 Deployed control integration, artifact publication, actual iframe/WS credentials,
 real-network health behavior and broad acceptance checks remain required. This record stays proposed until implementation and
 evidence cover the full contract.
+
+
+## Startup readiness fix (2026-09-25)
+
+Two source-level runs registered QUIC successfully but exhausted the old 20-second
+public probe budget with nested ECONNRESET errors. Keeping diagnostic connectors
+alive instead of closing at that deadline allowed the same endpoints to become
+reachable after approximately 61.5 and 63.7 seconds. Fixed-IP TLS and normal HTTP
+proxy requests recovered together; the fixed-IP route still crossed a system TUN,
+so these measurements do not distinguish Cloudflare propagation from network effects.
+
+Startup readiness now allows 90 seconds. Browser and Streams create callers share
+an eight-minute default budget for acquisition and startup; active health remains
+five seconds. Cancellation, authentication, proxy-marker verification and cleanup
+are unchanged. Retaining the same endpoint avoids restarting propagation on retry.
+Diagnostics report attempt counts, pending state, elapsed time, last HTTP status or
+bounded cause-chain error codes, and native registration/protocol progress. Request
+queries, fetch error messages and response bodies are excluded to protect credentials.
+
+The corrected full proxy/session source path reached ready at 63.4 seconds after
+allocation and passed its subsequent health probe. All 76 Preview tests and 57 RPC
+tests passed, including fake-clock delayed readiness, deadline, cancellation and
+response coverage. CLI production build passed. The outer full build hit the
+mobile Vite build's Node heap limit; this is not a successful full-product build.
+Running application processes were not replaced. These observations do not complete
+the broader Quick Tunnel acceptance gates above.

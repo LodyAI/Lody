@@ -25,6 +25,9 @@ Managed preview tunnels and the local proxy. [apps/cli/AGENTS.md](../../AGENTS.m
   All CLI builds emit a sibling `cloudflared-worker.js`; no source-loader fallback.
   Native logs use the pinned release's `--output json`.
   Allocating an origin is not readiness. Public probes do not renew idle time.
+  Readiness diagnostics retain attempt counts, pending state, last HTTP status or
+  nested network error codes, and connector registration progress. Never log
+  capability-bearing request URLs, arbitrary fetch error messages or response bodies.
   Status reads check active public routes within five seconds; concurrent reads
   share a probe. Unlike startup readiness, health failures are not retried: fail
   and clean up this endpoint, never a replacement created while the probe awaited.

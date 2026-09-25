@@ -37,6 +37,7 @@ const LogLine = z.object({
   message: z.string(),
   level: z.string().optional(),
   error: z.string().optional(),
+  protocol: z.enum(['quic', 'http2']).optional().catch(undefined),
 });
 const QUICK_ORIGIN = /^https:\/\/[a-z0-9]+(?:-[a-z0-9]+)*\.trycloudflare\.com$/;
 const START_TIMEOUT_MS = 30_000;
@@ -135,6 +136,10 @@ export async function startCloudflaredNative(options: {
   let exited = false;
   let exitError: CloudflaredError | null = null;
   let lastDiagnostic = '';
+  let connectionState = 'not registered';
+  const startedAt = performance.now();
+  const diagnostic = () =>
+    `connection=${connectionState}; elapsedMs=${Math.round(performance.now() - startedAt)}${lastDiagnostic ? `; lastError=${lastDiagnostic}` : ''}`;
   let resolveExit: (error: CloudflaredError | null) => void = () => {};
   const closed = new Promise<CloudflaredError | null>((resolve) => {
     resolveExit = resolve;
@@ -208,7 +213,14 @@ export async function startCloudflaredNative(options: {
         try {
           const log = LogLine.parse(JSON.parse(line));
           const origin = parseQuickTunnelOrigin(log.message);
-          if (origin) resolveOrigin(origin);
+          if (origin) {
+            resolveOrigin(origin);
+            options.onDiagnostic?.(diagnostic());
+          }
+          if (log.message === 'Registered tunnel connection') {
+            connectionState = `registered (${log.protocol ?? 'unknown'})`;
+            options.onDiagnostic?.(diagnostic());
+          }
           if (log.level === 'error' || log.level === 'fatal') {
             // Never retain arbitrary URLs, tokens or the full process log.
             lastDiagnostic = [log.message, log.error]
@@ -216,7 +228,7 @@ export async function startCloudflaredNative(options: {
               .join(': ')
               .replace(/https?:\/\/\S+/g, '[url]')
               .slice(0, 300);
-            options.onDiagnostic?.(lastDiagnostic);
+            options.onDiagnostic?.(diagnostic());
           }
         } catch (error) {
           rejectOrigin(new CloudflaredError('start', 'Invalid cloudflared JSON output', error));
@@ -243,7 +255,7 @@ export async function startCloudflaredNative(options: {
     const origin = await originPromise;
     options.signal.throwIfAborted();
     if (exited) throw exitError ?? new CloudflaredError('start', 'cloudflared already exited');
-    return { origin, closed, stop, diagnostic: () => lastDiagnostic || undefined };
+    return { origin, closed, stop, diagnostic };
   } catch (error) {
     await stop();
     throw error;
