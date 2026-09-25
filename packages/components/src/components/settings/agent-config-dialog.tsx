@@ -1143,8 +1143,8 @@ export type BinaryActionArgs = {
 export type AgentConfigDialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  /** Render above an already-open dialog, such as the desktop settings modal. */
-  nestedInDialog?: boolean;
+  /** Fires when the open/close transition finishes — the caller's cleanup hook. */
+  onOpenChangeComplete?: (open: boolean) => void;
   mode: AgentConfigDialogMode;
   machine: MachineViewMeta;
   onSubmit: (payload: AgentConfigSubmitPayload) => Promise<void>;
@@ -1421,7 +1421,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
   const {
     open,
     onOpenChange,
-    nestedInDialog = false,
+    onOpenChangeComplete,
     mode,
     machine,
     onSubmit,
@@ -3151,15 +3151,12 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
   );
 
   return (
-    <Dialog.Root open={open} onOpenChange={onOpenChange}>
+    <Dialog.Root
+      open={open}
+      onOpenChange={onOpenChange}
+      onOpenChangeComplete={onOpenChangeComplete}
+    >
       <Dialog.Content
-        backdropClassName={
-          nestedInDialog
-            ? // Radix portals are siblings under body. Matching the parent content's
-              // z-index lets this later overlay cover it without stacking another /80 veil.
-              'z-[var(--z-dialog)] bg-black/20'
-            : undefined
-        }
         // On the narrow layout the picker and form headers carry their own
         // left-aligned back button, which doubles as a close on the root step, so
         // a corner cross would be redundant and easy to hit by accident.
