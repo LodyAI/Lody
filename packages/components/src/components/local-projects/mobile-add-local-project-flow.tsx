@@ -20,6 +20,7 @@ import {
 import { Spinner } from '@/ui/spinner';
 import type { LocalProjectBrowseDirectoryEntry } from '@lody/shared';
 import { cn } from '@/lib/utils';
+import { Badge } from '@lody/ui/badge';
 import { Button } from '@lody/ui/button';
 import { Input } from '@lody/ui/input';
 import { Skeleton } from '@lody/ui/skeleton';
@@ -432,10 +433,9 @@ function MobileEntryRow({
         {entry.name}
       </span>
       {registered ? (
-        <span className="flex shrink-0 items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[0.75rem] font-medium text-emerald-600 dark:text-emerald-400">
-          <Check className="h-3.5 w-3.5" />
+        <Badge tone="success" icon={<Check size="100%" />}>
           {t('localProjects.add.added', 'Added')}
-        </span>
+        </Badge>
       ) : unreadable ? (
         <Lock className="h-5 w-5 shrink-0 text-muted-foreground/40" aria-hidden />
       ) : (

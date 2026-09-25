@@ -33,6 +33,7 @@ import {
   settingsCatalog as catalog,
   settingsSurface as surface,
 } from './surface';
+import { settingsType as type } from './type.stylex';
 
 const styles = stylex.create({
   actions: { gap: space[2] },
@@ -40,7 +41,7 @@ const styles = stylex.create({
     display: 'flex',
     alignItems: 'center',
     gap: space[1.5],
-    fontSize: '0.7em',
+    fontSize: type.caption,
     color: colors.secondaryLabel,
     cursor: 'pointer',
   },

@@ -7,10 +7,11 @@ import { SiApple, SiDiscord, SiGithub } from 'react-icons/si';
 import { FcGoogle } from 'react-icons/fc';
 import * as stylex from '@stylexjs/stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
-import { corner, duration, ease, radius, space } from '@lody/ui/tokens/scales.stylex';
+import { corner, duration, ease, focus, radius, space } from '@lody/ui/tokens/scales.stylex';
 import { withClassName } from '@/lib/stylex';
 import { Button } from '@lody/ui/button';
 import { Dialog } from '@/ui/dialog';
+import { settingsType as type } from './type.stylex';
 
 export interface LinkedAccountInfo {
   id: string;
@@ -36,7 +37,7 @@ const styles = stylex.create({
     display: 'flex',
     alignItems: 'center',
     gap: space[2],
-    fontSize: '0.75em',
+    fontSize: type.caption,
     color: colors.secondaryLabel,
   },
   /**
@@ -59,7 +60,7 @@ const styles = stylex.create({
   pressable: {
     cursor: 'pointer',
     outlineStyle: 'none',
-    boxShadow: { default: 'none', ':focus-visible': `0 0 0 2px ${colors.accent}` },
+    boxShadow: { default: 'none', ':focus-visible': `0 0 0 ${focus.ringWidth} ${colors.accent}` },
   },
   icon: { width: '20px', height: '20px', flexShrink: 0 },
   /** An unbound monochrome mark is a hint. */

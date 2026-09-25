@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, describe, expect, test } from 'vitest';
 import { Button } from '../src/button/button';
 import { Kbd, KbdGroup } from '../src/kbd/kbd';
-import { kbd, kbdOnInvertedTheme, kbdPaletteTheme } from '../src/kbd/kbd.tokens.stylex';
+import { kbd, kbdPaletteTheme } from '../src/kbd/kbd.tokens.stylex';
 import { forcedThemeClassNames } from '../src/theme/theme';
 import { Tooltip } from '../src/tooltip/tooltip';
 import { all, classesOf, mount, one, type Mounted } from './dom';
@@ -73,13 +73,11 @@ describe('Kbd', () => {
     }
   });
 
-  test('a cap standing on a tooltip is told what it is standing on', async () => {
-    // The tooltip is the one surface in this system that inverts, so a cap
-    // carrying the page's own gray lands as a light chip on a dark one with its
-    // letters gone. StyleX has no descendant selector — the shape the deleted
-    // implementation used — and it does not need one: a component token group
-    // re-declared on the popup reaches every cap under it, however deeply a
-    // caller wrapped one.
+  test('a cap standing on a tooltip is the same cap, made of the same things', async () => {
+    // A tooltip is on the floating rung and follows the palette, so a cap on
+    // one stands on a raised surface like a cap in a command palette does.
+    // Nothing between the chip and the cap re-declares what a cap is made of:
+    // a theme of the `kbd` group on the chip would be a second, inverted cap.
     mounted = await mount(
       <Tooltip.Root defaultOpen>
         <Tooltip.Trigger delay={0} render={<Button aria-label="Palette" />}>
@@ -96,26 +94,14 @@ describe('Kbd', () => {
     );
     const chip = all('[data-base-ui-portal] [data-side] > *')[0];
     expect(chip).toBeDefined();
-    for (const className of classesFor(kbdOnInvertedTheme)) {
-      expect(classesOf(chip)).toContain(className);
-    }
-    // And the cap under it is the same cap: only what it is made of changed,
-    // not which classes it carries.
+    // `createTheme` emits one class naming the group and one carrying the
+    // values, so the class two themes of `kbd` share is the group's own.
+    const probe = stylex.createTheme(kbd, { background: 'transparent' });
+    const group = classesFor(kbdPaletteTheme).filter((name) => classesFor(probe).includes(name));
+    expect(group).toHaveLength(1);
+    expect(classesOf(chip)).not.toContain(group[0]);
     const cap = one('kbd kbd');
     expect(classesOf(cap)).toEqual(capClasses());
-  });
-
-  test('the inversion replaces exactly what a cap is made of', () => {
-    // Two declarations and no more: the film and the letters. A theme that also
-    // moved the height or the corner would be a second cap rather than the same
-    // one on another surface.
-    expect(Object.keys(kbd).filter((name) => !name.startsWith('__'))).toContain('background');
-    const inverted = classesFor(kbdOnInvertedTheme);
-    const palette = classesFor(kbdPaletteTheme);
-    // `createTheme` emits one class naming the group and one carrying the
-    // values, so two themes of one group share the first and differ in the
-    // second.
-    expect(inverted.filter((name) => palette.includes(name))).toHaveLength(1);
   });
 
   test('the colour tokens are re-declared under a forced palette', () => {

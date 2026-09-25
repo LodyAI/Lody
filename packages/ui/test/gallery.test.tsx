@@ -234,7 +234,7 @@ describe('UiGallery', () => {
     }
   });
 
-  test('shows the tooltip, and names every token it inverts', () => {
+  test('shows the tooltip, and names every token it reads', () => {
     expect(board).toContain('Rerun this turn');
     for (const name of tokenNames(tooltip)) {
       expect(board, `tooltip.${name} is missing from the board`).toContain(`tooltip.${name}`);
@@ -344,12 +344,13 @@ describe('UiGallery', () => {
     }
   });
 
-  test('shows a key cap, a chord, and the same cap on the surface that inverts', () => {
+  test('shows a key cap, a chord, and the same cap on a tooltip', () => {
     // Nothing here is a stand-in for the cap; the chip is, because a tooltip is
     // portalled and opens on a pointer the board has not got. It is composed
-    // from the very styles `Tooltip.Content` applies, so a chip this package no
+    // from the very style `Tooltip.Content` applies, so a chip this package no
     // longer draws cannot be reported here.
     expect(board).toContain('<kbd');
+    expect(board).toContain('Open the command palette');
     // A chord is a kbd around kbds, which is the shape HTML gives one gesture.
     expect(board).toMatch(/<kbd[^>]*>\s*<kbd/);
     for (const name of tokenNames(kbd)) {

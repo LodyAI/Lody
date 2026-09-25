@@ -3,9 +3,8 @@
 `CLAUDE.md` is a symlink to this file. Edit `AGENTS.md` only.
 
 Machine-side reconciler for PR discovery/association, lifecycle, CI rollup,
-and merge/conflict state. Compensation path for the hosted GitHub webhook →
-Streams fan-out. Spec (normative):
-`specs/pr-status-reconciler.md`.
+and merge/conflict state. Local observation path and compensation for hosted webhook updates.
+Local authorization contract: [Spec](../../../../../specs/local-github-pr-observation.md).
 
 ## Architecture: pure decisions, thin effects
 
@@ -46,9 +45,10 @@ Effect adapters: `pr-poller-workspace.ts` (Loro repo + presence + credentials
 
 ## Invariants (expensive to rediscover — do not break)
 
-- **Association before local write.** Discovered PRs go through
-  `github:associatePullRequestForCli` and only then into meta — the backend
-  hosted association is what the webhook fan-out keys on.
+- **Hosted association before local write.** When the association port exists, discovered
+  PRs must associate successfully before metadata publication for webhook fan-out. Without
+  that port, publish successful authenticated GitHub observations directly; never call product
+  cloud or require its repository registry. Tokens remain machine-local.
 - **Fresh-meta is the write predicate.** Every write re-reads owner meta and
   diffs; there is no persistent status cache. Write never happens when nothing
   changed. `t` bumps only on `s`/`m` semantic changes. The re-read also
@@ -78,6 +78,9 @@ Effect adapters: `pr-poller-workspace.ts` (Loro repo + presence + credentials
   `machineId` matches the local machine; archived owners are excluded.
 - **Deleted sessions get nothing.** Missing/tombstoned meta stops both writes
   and associations (the endpoint does not validate session existence).
+- **Ambient authentication is recoverable.** Recheck local `gh` credentials on a bounded cadence,
+  including missing/logout results. `/user` failure is not repository denial; unidentified
+  credentials share a conservative quota scope.
 - **Credential scope boundary.** Quota/cooldowns are charged to a stable
   GitHub user/installation scope, never token bytes; token rotation must not
   reset freeze/cooldown/bucket state. A token-invalid retry must pass the

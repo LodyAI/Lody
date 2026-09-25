@@ -197,9 +197,7 @@ export function GitHubCommentThread({
         <span className="text-[10px] text-muted-foreground">
           {commentCount} {commentCount === 1 ? 'comment' : 'comments'}
         </span>
-        {thread.outdated && (
-          <Badge className="ml-1 h-4 text-[9px] px-1">{t('comments.outdated', 'Outdated')}</Badge>
-        )}
+        {thread.outdated && <Badge className="ml-1">{t('comments.outdated', 'Outdated')}</Badge>}
         {isCollapsed && (
           <span className="truncate text-xs text-muted-foreground ml-1">
             — {firstComment?.body.slice(0, 40)}

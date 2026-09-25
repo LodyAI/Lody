@@ -74,15 +74,23 @@
   padding-right: 4px;
 }
 
-/* Native window controls are drawn above web content, so the bar has to yield
-   its own space to them: macOS traffic lights on the left (matching the `pl-20`
-   inset used by the session header), Windows caption buttons on the right
-   (3 × 46px, `MAIN_WINDOW_TITLE_BAR_OVERLAY_HEIGHT`'s strip). */
+/* Native window controls are drawn above web content, so the bar hands them
+   its top strip and centers its own controls on THEIR line instead of its own
+   middle. macOS traffic lights center at y=23 (`trafficLightPosition.y` 16 +
+   7px radius): the same line every window-top row in the app lands on with
+   `h-11` + `pt-[2px]` (`useMacTrafficLightRowPadClass`), so this bar gets the
+   same 44px + 2px geometry and the `pl-20` inset the session header uses. The
+   Windows caption overlay is a 36px strip (`MAIN_WINDOW_TITLE_BAR_OVERLAY_HEIGHT`)
+   with buttons centered at y=18 on the right, so the bar IS that strip and
+   clears 3 × 46px for it. */
 .lody-photo-slider--desktop.lody-photo-slider--mac-controls .PhotoView-Slider__BannerWrap {
+  height: 44px;
+  padding-top: 2px;
   padding-left: 80px;
 }
 
 .lody-photo-slider--desktop.lody-photo-slider--win-controls .PhotoView-Slider__BannerWrap {
+  height: 36px;
   padding-right: 144px;
 }
 
@@ -96,10 +104,19 @@
 .lody-photo-slider--desktop .PhotoView-Slider__toolbarIcon {
   border-radius: 8px;
   margin: 6px;
-  padding: 8px;
+  padding: 4px;
   transition:
     background-color 0.15s linear,
     opacity 0.2s linear;
+}
+
+/* The library ships a 44px toolbar svg — a mobile touch target, not a desktop
+   icon. Sized down, the ✕ glyph lands at ~14px inside a 32px box; anything
+   taller would also clip at the window's top edge once the bar centers on the
+   native-control line above. */
+.lody-photo-slider--desktop .PhotoView-Slider__toolbarIcon svg {
+  height: 24px;
+  width: 24px;
 }
 
 .lody-photo-slider--desktop .PhotoView-Slider__toolbarIcon:hover {

@@ -133,37 +133,44 @@ function CloudOrganizationSwitcher() {
     <>
       <div className="flex items-center gap-1 w-full">
         <Menu.Root modal={!isMobile} open={open} onOpenChange={setOpen}>
-          <Menu.Trigger render={<Button variant="ghost" className="flex-1 justify-between" disabled={loading}>
-              <div className="flex items-center gap-3">
-                <WorkspaceAvatar
-                  workspace={{
-                    name: activeOrganization.name,
-                    logo: activeOrganization.logo,
-                  }}
-                  size="large"
-                />
-                <div className="flex flex-col items-start">
-                  <span className="text-lg font-semibold truncate max-w-[120px]">
-                    {activeOrganization.name}
-                  </span>
-                </div>
-                <div className="flex items-center gap-1 pl-2">
-                  {/* {loroConnect ? (
+          <Menu.Trigger
+            render={
+              <Button variant="ghost" className="flex-1 justify-between" disabled={loading}>
+                <div className="flex items-center gap-3">
+                  <WorkspaceAvatar
+                    workspace={{
+                      name: activeOrganization.name,
+                      logo: activeOrganization.logo,
+                    }}
+                    size="large"
+                  />
+                  <div className="flex flex-col items-start">
+                    <span className="text-lg font-semibold truncate max-w-[120px]">
+                      {activeOrganization.name}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1 pl-2">
+                    {/* {loroConnect ? (
                     <Tooltip.Root>
                       <Tooltip.Trigger delay={500} render={<div className="h-2 w-2 rounded-full bg-status-success" />}/>
                       <Tooltip.Content>{t('common.connected')}</Tooltip.Content>
                     </Tooltip.Root>
                   ) :  */}
-                  {/*  TODO:  ws state */}
-                  <Tooltip.Root>
-                    <Tooltip.Trigger delay={500} render={<div className="h-2 w-2 rounded-full bg-status-danger" />}/>
-                    <Tooltip.Content>{t('common.disconnected')}</Tooltip.Content>
-                  </Tooltip.Root>
+                    {/*  TODO:  ws state */}
+                    <Tooltip.Root>
+                      <Tooltip.Trigger
+                        delay={500}
+                        render={<div className="h-2 w-2 rounded-full bg-status-danger" />}
+                      />
+                      <Tooltip.Content>{t('common.disconnected')}</Tooltip.Content>
+                    </Tooltip.Root>
+                  </div>
                 </div>
-              </div>
 
-              <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-            </Button>}>
+                <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+              </Button>
+            }
+          >
             <Button variant="ghost" className="flex-1 justify-between" disabled={loading}>
               <div className="flex items-center gap-3">
                 <WorkspaceAvatar
@@ -187,7 +194,10 @@ function CloudOrganizationSwitcher() {
                   ) :  */}
                   {/*  TODO:  ws state */}
                   <Tooltip.Root>
-                    <Tooltip.Trigger delay={500} render={<div className="h-2 w-2 rounded-full bg-status-danger" />}/>
+                    <Tooltip.Trigger
+                      delay={500}
+                      render={<div className="h-2 w-2 rounded-full bg-status-danger" />}
+                    />
                     <Tooltip.Content>{t('common.disconnected')}</Tooltip.Content>
                   </Tooltip.Root>
                 </div>
@@ -222,7 +232,7 @@ function CloudOrganizationSwitcher() {
                     />
                     <span className="truncate text-sm">{org.name}</span>
                     {planTierByWorkspaceId.has(org.id) ? (
-                      <Badge className="shrink-0 border-transparent bg-foreground/[0.06] px-1.5 py-0 text-[10px] font-normal text-muted-foreground">
+                      <Badge>
                         {planTierByWorkspaceId.get(org.id) === 'enterprise'
                           ? t('billing.plan.enterprise')
                           : t('billing.plan.plus')}
@@ -269,7 +279,9 @@ function CloudOrganizationSwitcher() {
         <Dialog.Content>
           <Dialog.Header>
             <Dialog.Title>{t('organization.createNewWorkspace')}</Dialog.Title>
-            <Dialog.Description>{t('organization.createNewWorkspaceDescription')}</Dialog.Description>
+            <Dialog.Description>
+              {t('organization.createNewWorkspaceDescription')}
+            </Dialog.Description>
           </Dialog.Header>
           <div className="space-y-4 py-4">
             <div className="space-y-2">

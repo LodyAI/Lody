@@ -26,7 +26,7 @@ Worktree 会话保留各自的分支。
 
 ## 证据
 
-- [分支状态归属](../apps/cli/src/session/workspace-branch-service.ts)
+- [分支状态归属](../apps/cli/src/session/workspace-git-service.ts)
 - [执行生命周期](../apps/cli/src/session/session-execution-service.ts)
 - [工作目录刷新](../apps/cli/src/lib/code-collab/code-collab-v2-service.ts)
 - [决策与验证](../.agents/notes/implemented/bug-fix/2026-09-24-workspace-branch-observation.zh.md)

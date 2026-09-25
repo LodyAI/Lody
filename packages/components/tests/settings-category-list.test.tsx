@@ -107,6 +107,12 @@ describe('SettingsCategoryList', () => {
     expect(store?.get(bugReportDialogOpenAtom)).toBe(false);
   });
 
+  it('does not expose desktop-only keyboard shortcuts', async () => {
+    await renderList();
+
+    expect(container?.textContent).not.toContain('Keyboard Shortcuts');
+  });
+
   it('routes workspace member management through General', async () => {
     await renderList();
 

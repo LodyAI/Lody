@@ -12,6 +12,7 @@ import {
   X,
 } from 'lucide-react';
 import { Spinner } from '@lody/ui/spinner';
+import { Badge } from '@lody/ui/badge';
 import { useTranslation } from 'react-i18next';
 import { getServerNow } from '@lody/shared';
 
@@ -367,11 +368,7 @@ function ConversationRow({
         >
           {label}
         </span>
-        {mainChip ? (
-          <span className="shrink-0 rounded border border-border/70 px-1 py-px text-[0.62rem] font-medium leading-none text-muted-foreground">
-            {mainChip}
-          </span>
-        ) : null}
+        {mainChip ? <Badge>{mainChip}</Badge> : null}
       </span>
       {elapsed ? (
         <span className="shrink-0 text-xs tabular-nums text-muted-foreground">{elapsed}</span>

@@ -53,29 +53,3 @@ export const kbdPaletteTheme = stylex.createTheme(kbd, {
   background: colors.gray5,
   label: colors.secondaryLabel,
 });
-
-/**
- * What a key cap is made of when it is standing on a tooltip.
- *
- * The tooltip is the one surface in this system that inverts — `tooltip.background`
- * is `label` and `tooltip.label` is `background` — so a cap carrying the page's
- * own gray lands as a light chip on a dark one, or the reverse, and the letters
- * on it disappear. The cap has to be told what it is sitting on.
- *
- * The deleted implementation said this with a descendant selector
- * (`[[data-slot=tooltip-content]_&]:bg-background/20`), which StyleX has no way
- * to express. It does not need one: a component token group **is** the channel
- * a surface uses to tell what is inside it what it is standing on. `Tooltip`
- * declares this theme on its own popup and every cap under it inherits, which
- * is the same mechanism `ThemeRoot` already uses to carry a forced palette into
- * a portalled subtree — and unlike the selector it also reaches a cap a caller
- * wrapped in something of their own.
- *
- * The film is of `background` rather than a gray, for the reason a badge's fill
- * is a film: what it has to read against is the inverted chip, and mixing the
- * chip's own ink colour steps away from it in both palettes at once.
- */
-export const kbdOnInvertedTheme = stylex.createTheme(kbd, {
-  background: `color-mix(in oklab, ${colors.background} 20%, transparent)`,
-  label: colors.background,
-});
