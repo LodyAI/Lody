@@ -6,6 +6,7 @@ import { zhCN } from 'date-fns/locale/zh-CN';
 import { formatDistanceToNow } from 'date-fns';
 import { AlertCircle, Check, Download, RefreshCw, X } from 'lucide-react';
 import { Spinner } from '@lody/ui/spinner';
+import { Badge } from '@lody/ui/badge';
 import type { LocalProjectHistoryCatalogItem, LocalProjectHistoryProvider } from '@lody/shared';
 
 import { Drawer, DrawerClose, DrawerContent, DrawerDescription, DrawerTitle } from '@/ui/drawer';
@@ -370,13 +371,11 @@ export function MobileAcpHistorySheet({
                               </p>
                             </div>
                             {imported ? (
-                              <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-[0.65rem] font-medium uppercase tracking-wide text-muted-foreground">
-                                {t('workspace.projects.historyImported', 'Imported')}
-                              </span>
+                              <Badge>{t('workspace.projects.historyImported', 'Imported')}</Badge>
                             ) : conflict ? (
-                              <span className="shrink-0 rounded-full bg-destructive/12 px-2 py-0.5 text-[0.65rem] font-medium uppercase tracking-wide text-destructive">
+                              <Badge tone="danger">
                                 {t('workspace.projects.historyConflict', 'Conflict')}
-                              </span>
+                              </Badge>
                             ) : null}
                           </button>
                           {conflict ? (
@@ -466,9 +465,7 @@ export function MobileAcpHistorySheet({
           </AlertDialog.Header>
           <AlertDialog.Footer>
             <AlertDialog.Cancel>{t('common.cancel', 'Cancel')}</AlertDialog.Cancel>
-            <AlertDialog.Action
-              onClick={confirmConflictReplace} variant="destructive"
-            >
+            <AlertDialog.Action onClick={confirmConflictReplace} variant="destructive">
               {t('workspace.projects.resolveHistoryConflict', 'Re-import')}
             </AlertDialog.Action>
           </AlertDialog.Footer>

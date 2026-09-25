@@ -75,11 +75,10 @@ Command entrypoints, the daemon runner, and session dispatch from the CLI/MCP bo
 - `--local-project … --worktree` sets `ProjectRef.useWorktree`; daemon startup consumes it in
   `../session/session-execution-service.ts` and worktree creation happens in
   `../session/session-manager.ts`.
-- Local create resolves `ProjectRef.githubRepoFullName` from the project's `origin` for direct AND
-  worktree sessions, exactly like desktop creation, because `repoFullName`, PR actions, and
-  post-turn PR detection all read it. Bind only a repository the workspace enables, recording the
-  workspace's spelling; an unauthorized, absent, or unreadable one leaves the Session local rather
-  than failing create.
+- Local create records the GitHub repository identified by the local Git remote for both direct
+  and worktree sessions, matching desktop creation. Remote identity is not authorization:
+  the machine PR reconciler verifies access through authenticated GitHub reads, without a
+  product-cloud repository registry. An absent/unreadable remote leaves creation local.
 - Dispatch point-of-no-rollback (`createSessionResult` / `sendSessionChatResult`):
   `writeDispatchPointer` commits `latestUserMsgId` locally, after which the daemon may already be
   executing the turn. `confirmDispatchSyncedBestEffort` is AWAITED so the push completes before

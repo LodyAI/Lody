@@ -25,7 +25,7 @@ instead, and inject it into execution plus the workspace activation/explicit ref
 
 ```text
 Execution bind / terminal turn ─┐
-Authorized workspace refresh ──┴─> WorkspaceBranchService
+Authorized workspace refresh ──┴─> WorkspaceGitService
                                      └─> owner SessionMeta.branchName → existing UI
 GitHub PR detection remains a separate optional consumer.
 ```

@@ -6,6 +6,7 @@ import {
   corner,
   duration,
   ease,
+  focus,
   radius,
   space,
   text,
@@ -13,7 +14,7 @@ import {
 import type { QueuedMessageBehavior } from '@/atoms';
 import { withClassName } from '@/lib/stylex';
 
-const RING = `0 0 0 2px ${colors.accent}`;
+const RING = `0 0 0 ${focus.ringWidth} ${colors.accent}`;
 
 /**
  * A two-way choice is a segmented strip, as `@lody/ui`'s Tabs draw one: a flat
@@ -43,8 +44,9 @@ const styles = stylex.create({
     outlineStyle: 'none',
     color: { default: colors.secondaryLabel, ':hover': colors.label },
     fontFamily: 'inherit',
-    fontSize: text.footnoteSize,
-    fontWeight: 400,
+    // A control in a settings row: the size and weight every @lody/ui control takes.
+    fontSize: text.subheadlineSize,
+    fontWeight: 500,
     letterSpacing: text.controlTracking,
     whiteSpace: 'nowrap',
     cursor: 'pointer',

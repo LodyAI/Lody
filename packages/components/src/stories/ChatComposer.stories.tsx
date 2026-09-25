@@ -14,6 +14,7 @@ import { Button } from '@lody/ui/button';
 import { cn } from '@/lib/utils';
 import { getPastedTextCharacterCount, type PastedTextDraft } from '@/lib/pasted-text-draft';
 import { registerBuiltInCommands } from '@/lib/commands';
+import { SettingsStoryProviders } from './settings-story-shell';
 
 // So session.focusInput has a binding — the desktop ⌘L focus hint reads it.
 registerBuiltInCommands();
@@ -24,6 +25,14 @@ const meta = {
   parameters: {
     layout: 'fullscreen',
   },
+  // The composer's add menu reads cloud queries, which need a platform.
+  decorators: [
+    (Story) => (
+      <SettingsStoryProviders>
+        <Story />
+      </SettingsStoryProviders>
+    ),
+  ],
   tags: ['autodocs'],
   args: {
     title: undefined,

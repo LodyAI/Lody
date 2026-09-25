@@ -2126,6 +2126,8 @@
   "sessions.preview.annotation.placeholder": "Describe what should change here...",
   "sessions.preview.annotation.resolveFailed": "Failed to update preview comment",
   "sessions.preview.annotation.send": "Send",
+  "sessions.preview.annotation.statusDraft": "Draft",
+  "sessions.preview.annotation.statusSent": "Sent",
   "sessions.preview.annotation.submitStateFailed": "Failed to update preview comment status",
   "sessions.previousImage": "Previous image",
   "sessions.previousResult": "Previous result",
@@ -4187,5 +4189,9 @@
   "workspace.projects.window.skillsState": "From the project folder",
   "workspace.projects.window.toImportAndConflicts": "{{available}} to import · {{conflicts}} in conflict",
   "workspace.projects.window.toImport": "{{count}} to import",
-  "workspace.projects.window.allImported": "All imported"
+  "workspace.projects.window.allImported": "All imported",
+  "settings.integrations.github.appNotInstalled": "Not installed",
+  "settings.integrations.github.appSummary": "{{enabled}} of {{total}} repositories enabled",
+  "settings.integrations.github.install": "Install GitHub App",
+  "settings.integrations.github.personalIdentityActingAsPrefix": "Acting as"
 }

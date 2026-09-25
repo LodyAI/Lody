@@ -129,3 +129,74 @@ describe('ChatComposer focusOnContainerClick', () => {
     expect(document.activeElement).not.toBe(promptRef.current);
   });
 });
+
+describe('ChatComposer image attachment peek', () => {
+  let root: Root;
+  let container: HTMLDivElement;
+
+  const drainFrames = () =>
+    act(async () => {
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+    });
+
+  const peekImage = () => document.body.querySelector<HTMLImageElement>('img[alt="Image preview"]');
+
+  beforeEach(async () => {
+    await initI18n('en');
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => {
+      root.render(
+        createElement(ChatComposer, {
+          promptValue: '',
+          onPromptChange: () => undefined,
+          imageItems: [
+            {
+              id: 'image-1',
+              name: 'mockup.png',
+              previewUrl: 'blob:mockup',
+              status: 'uploaded',
+              progress: 100,
+            },
+          ],
+        })
+      );
+    });
+  });
+
+  afterEach(async () => {
+    await act(async () => {
+      root.unmount();
+    });
+    container.remove();
+  });
+
+  it('opens a non-modal card beside the thumbnail and closes it on Escape', async () => {
+    const thumbnail = container.querySelector<HTMLButtonElement>('button[aria-label="mockup.png"]');
+    expect(thumbnail).not.toBeNull();
+    expect(peekImage()).toBeNull();
+
+    await act(async () => {
+      thumbnail!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await drainFrames();
+
+    const image = peekImage();
+    expect(image?.getAttribute('src')).toBe('blob:mockup');
+    expect(thumbnail!.getAttribute('aria-expanded')).toBe('true');
+    // A peek, not a lightbox: nothing modal covers the draft.
+    expect(document.body.querySelector('[aria-modal="true"]')).toBeNull();
+    expect(image!.parentElement?.textContent).toContain('mockup.png');
+
+    await act(async () => {
+      document.activeElement?.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })
+      );
+    });
+    await drainFrames();
+
+    expect(thumbnail!.getAttribute('aria-expanded')).toBe('false');
+  });
+});

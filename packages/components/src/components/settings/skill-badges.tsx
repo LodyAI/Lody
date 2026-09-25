@@ -72,7 +72,7 @@ export function SkillSymlinkBadge({
         })
       : t('workspace.projects.skills.symlinkTitle', 'This skill is a symlink');
   return (
-    <Badge className={className} title={title} icon={<Link2 />}>
+    <Badge className={className} title={title} icon={<Link2 size="100%" />}>
       {t('workspace.projects.skills.symlink', 'Symlink')}
     </Badge>
   );

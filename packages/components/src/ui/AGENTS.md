@@ -98,9 +98,9 @@ strings on i18n rather than the registry's inline English.
 ## Working grid
 
 - Session working/unread marks go through `working-status-mark.tsx`, mounted across the
-  change; animate only `transform`/`opacity` on the shared clock
-  (`working-grid-reading.ts`), never rAF, timers or React state. The sidebar root keeps
-  `data-working-grid-region`. [Note](../../../../.agents/notes/implemented/feature/2026-09-24-sidebar-working-grid.md).
+  change; animate only `transform`/`opacity`, loops pinned to `startTime = 0` (the shared
+  sea), never rAF, timers or React state.
+  [Note](../../../../.agents/notes/implemented/feature/2026-09-24-sidebar-working-grid.md).
 
 ## Scroll area
 
