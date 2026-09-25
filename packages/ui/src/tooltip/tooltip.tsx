@@ -2,7 +2,6 @@ import { Tooltip as BaseTooltip } from '@base-ui/react/tooltip';
 import * as stylex from '@stylexjs/stylex';
 import { forwardRef, type ComponentProps, type ReactNode } from 'react';
 import { appendClassName } from '../internal/class-name';
-import { kbdOnInvertedTheme } from '../kbd/kbd.tokens.stylex';
 import { usePopupContainer, type PopupContainer } from '../popup/portal-container';
 import { useForcedThemeClassNames } from '../theme/theme';
 import { chip, hiddenChipForSide } from './chip';
@@ -44,8 +43,8 @@ export const TooltipContent = forwardRef<HTMLDivElement, TooltipContentProps>(
     const inheritedContainer = usePopupContainer();
     // A portalled popup leaves the subtree whose palette it should be using, so
     // the classes that declare that palette travel with it and land on the
-    // positioner. A tooltip inverts, so getting this wrong is the one case that
-    // is unreadable rather than merely wrong: light ink on a light chip.
+    // positioner. Without them a chip under a forced palette would be drawn in
+    // the document's palette instead — a dark chip over a light surface.
     const palette = useForcedThemeClassNames();
     const mountPoint = container ?? inheritedContainer;
     // See `Select.Content`: a container that centres itself with `translate` is
@@ -70,17 +69,7 @@ export const TooltipContent = forwardRef<HTMLDivElement, TooltipContentProps>(
               const hidden =
                 state.transitionStatus === 'starting' || state.transitionStatus === 'ending';
               return appendClassName(
-                stylex.props(
-                  chip.popup,
-                  // A tooltip inverts, so anything with a surface of its own
-                  // that lands on it has to be told what it is standing on. A
-                  // key cap is the one such part, and the theme is how it is
-                  // told: StyleX has no descendant selector, and a component
-                  // token group re-declared here reaches a cap however deeply a
-                  // caller wrapped it.
-                  kbdOnInvertedTheme,
-                  hidden && hiddenChipForSide(state.side)
-                ).className,
+                stylex.props(chip.popup, hidden && hiddenChipForSide(state.side)).className,
                 className
               );
             }}
@@ -96,11 +85,12 @@ export const TooltipContent = forwardRef<HTMLDivElement, TooltipContentProps>(
 /**
  * A tooltip: the name of the thing under the pointer.
  *
- * It is the one floating part that does not read `popup`. The elevation ladder
- * puts a menu, a popover and a list on the raised background under the popover
- * shadow and then names the tooltip apart — `label` with `shadow.medium` — an
- * inversion, because a tooltip is not a place to act but a label over one, and
- * it has to read at a glance without becoming another surface.
+ * It stands on the floating rung with every other floating part — the raised
+ * background under the popover shadow — so it follows the palette: light in a
+ * light palette, dark in a dark one. It reads a token group of its own rather
+ * than `popup` because it is a label over a place to act rather than one, and
+ * its corner, padding and type are a chip's; anything that lands on it, such
+ * as a key cap, is standing on a raised surface like any other.
  *
  * `Tooltip.Provider` groups them: once one tooltip has opened, the next opens
  * without its delay, so a row of icon buttons reads like one strip rather than

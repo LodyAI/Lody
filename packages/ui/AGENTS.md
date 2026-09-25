@@ -14,10 +14,11 @@ with this package's `stylex-options.ts`.
   `@lody/components`, `@lody/platform` or a cloud package.
 - No border token exists. Edges are wells, raised shadows, elevation shadows
   and the focus ring. Read `src/tokens/RULES.md` before adding a token or style.
-- A focus or invalid ring is a 2px `box-shadow` composed with the control's own
-  shadow, never an `outline`: the shell resets every outline with `!important`,
-  which no layer order overrides. A control whose edge changes with its state
-  restates the ring; CSS cannot append to a box-shadow.
+- A focus or invalid ring is a `box-shadow` composed with the control's own
+  shadow, never an `outline` (the shell resets outlines with `!important`); a
+  control whose edge changes with state restates it. Focus rings read
+  `focus.ringWidth`, zero under `installFocusModality`'s pointer mode; fields
+  keep 2px.
 - Checkbox, Radio and Switch render a real `<button>` through Base UI's
   `nativeButton`, so `:disabled`, `:focus-visible` and a `<label>` reach them.
 - Controls in the field family read validity and disabled from `Field.Root`
@@ -61,8 +62,8 @@ with this package's `stylex-options.ts`.
 - There is no `Sheet`: a panel arriving from an edge is Base UI's `Drawer`, whose
   viewport lays it out so the panel's `transform` carries the drag. `side` is
   the writing direction's edge, `inset` the second axis.
-- `Tooltip` is the one floating part not reading `popup`: the ladder inverts
-  it, `label` under `shadow.medium`. Base UI makes it visual-only — no
+- `Tooltip` is on the floating rung (popup's colours, its own geometry) and
+  **never inverts**: light in light, dark in dark. It is visual-only — no
   role, no `aria-describedby` — so every trigger states its `aria-label`.
 - Tabs, Accordion and Collapsible are one `disclosure` family sharing
   `disclosure/surface.ts`. `Tabs.List` draws its own indicator and states the
@@ -90,8 +91,7 @@ with this package's `stylex-options.ts`.
 - Avatar and Kbd stand for something outside the interface, so both take a
   gray. **An avatar's rung picks its letters**; its box is a ceiling too, or a
   flex minimum widens a 16px circle. Identity colour is a `style`. A `Kbd` is
-  never a menu row's shortcut; `Tooltip.Content`'s `kbdOnInvertedTheme` inverts
-  a cap on a chip.
+  never a menu row's shortcut.
 - A forced palette travels to a portalled popup: `ThemeRoot` publishes its mode
   and `Content` re-declares it on the positioner, since a popup mounts outside
   the subtree declaring it — a light panel would otherwise open a dark list.

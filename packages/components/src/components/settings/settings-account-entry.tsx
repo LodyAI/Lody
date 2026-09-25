@@ -5,6 +5,7 @@ import { colors } from '@lody/ui/tokens/colors.stylex';
 import { duration, ease, space } from '@lody/ui/tokens/scales.stylex';
 import { UserAvatar } from '@/components/user-avatar';
 import { settingsSurface as surface } from './surface';
+import { settingsType as type } from './type.stylex';
 
 const styles = stylex.create({
   /**
@@ -52,7 +53,7 @@ const styles = stylex.create({
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
-    fontSize: '0.78em',
+    fontSize: type.caption,
     color: colors.secondaryLabel,
   },
   chevron: { flexShrink: 0, width: '16px', height: '16px', color: colors.tertiaryLabel },

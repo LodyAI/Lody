@@ -27,6 +27,7 @@ import { Kbd } from '@/components/commands/kbd';
 import { CompactRow, CompactSection } from './compact-layout';
 import { settingsSurface as surface } from './surface';
 import { settingContainerClass } from '.';
+import { settingsType as type } from './type.stylex';
 
 const CATEGORY_ORDER: CommandCategory[] = [
   'Navigation',
@@ -52,7 +53,7 @@ const styles = stylex.create({
     gap: space[4],
     paddingInline: space[4],
   },
-  introText: { margin: 0, fontSize: '0.8em', color: colors.secondaryLabel },
+  introText: { margin: 0, fontSize: type.caption, color: colors.secondaryLabel },
   error: { color: colors.destructive },
   controls: { display: 'flex', alignItems: 'center' },
   // Fixed widths so the shortcut and trash columns line up across rows. The shortcut
@@ -61,7 +62,12 @@ const styles = stylex.create({
   shortcutSlot: { display: 'flex', justifyContent: 'flex-end', width: '144px' },
   trashSlot: { display: 'flex', justifyContent: 'center', width: '36px' },
   glyph: { width: '100%', height: '100%' },
-  unbound: { fontSize: '0.8em', fontStyle: 'italic', fontWeight: 400, color: colors.tertiaryLabel },
+  unbound: {
+    fontSize: type.caption,
+    fontStyle: 'italic',
+    fontWeight: 400,
+    color: colors.tertiaryLabel,
+  },
   recordingLabel: { fontWeight: 400 },
   /** The capture is live, so its mark is the accent, and it breathes while it listens. */
   recordingDot: {

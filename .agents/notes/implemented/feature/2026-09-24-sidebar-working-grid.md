@@ -71,6 +71,10 @@ The kept form and its defaults:
 
 ## Staying out of the reader's way
 
+> Update (2026-09-25): the reading pause described in this section was removed;
+> marks animate continuously. See
+> [the removal note](../simplification/2026-09-25-working-grid-reading-pause-removed.md).
+
 In the first shipped form (primary blue, opacity 0.16–1, size 0.3–0.9, full
 speed, every mark moving) a sidebar of running sessions kept pulling the eye from
 the conversation. Reading apps keep their chrome in the background: low contrast,

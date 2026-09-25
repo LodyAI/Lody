@@ -1,12 +1,12 @@
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
-import { Check, ChevronRight, Copy } from 'lucide-react';
+import { Check, ChevronRight, CircleDashed, Copy, X } from 'lucide-react';
 import { Spinner } from '@lody/ui/spinner';
 import { Button } from '@lody/ui/button';
 import { Popover } from '@lody/ui/popover';
 import { colors } from '@lody/ui/tokens/colors.stylex';
-import { corner, radius, space } from '@lody/ui/tokens/scales.stylex';
+import { corner, focus, radius, space } from '@lody/ui/tokens/scales.stylex';
 import type { MessageContent } from '@lody/shared';
 import { formatDurationCompact } from '@/lib/format-duration';
 import { writeTextToClipboard } from '@/lib/clipboard';
@@ -71,20 +71,35 @@ const STATUS_LABEL_KEYS: Record<SubagentTask['status'], [string, string]> = {
 };
 
 const REGION = `color-mix(in oklab, transparent, ${colors.label} 5%)`;
+/** The leading column every line of the group shares: a state mark, 14px. */
+const MARK = '14px';
+const MARK_GAP = space[1.5];
 const MONO = 'var(--font-mono, ui-monospace, monospace)';
 
 const styles = stylex.create({
-  /** A group of the turn's process: its summary line, then its tasks. */
-  panel: { display: 'flex', flexDirection: 'column', minWidth: 0 },
+  /**
+   * The group is a card of its own: tasks run beside the turn rather than as
+   * one of its steps, and a reader waiting on them needs one place to look.
+   */
+  panel: {
+    display: 'flex',
+    flexDirection: 'column',
+    minWidth: 0,
+    paddingInline: space[1.5],
+    paddingBlock: space[1],
+    backgroundColor: `color-mix(in oklab, ${colors.elevatedBackground} 55%, transparent)`,
+    boxShadow: `inset 0 0 0 1px ${colors.separator}`,
+    borderRadius: radius.large,
+    cornerShape: corner.shape,
+  },
   header: {
     display: 'flex',
     alignItems: 'center',
-    gap: space[1.5],
-    width: 'fit-content',
-    maxWidth: '100%',
+    gap: MARK_GAP,
+    width: '100%',
     margin: 0,
     paddingInline: '4px',
-    paddingBlock: '2px',
+    paddingBlock: '3px',
     borderWidth: 0,
     backgroundColor: 'transparent',
     fontFamily: 'inherit',
@@ -106,35 +121,67 @@ const styles = stylex.create({
   },
   chevronOpen: { transform: 'rotate(90deg)' },
   glyph: { width: '14px', height: '14px', flexShrink: 0 },
-  rows: { display: 'flex', flexDirection: 'column' },
+  /**
+   * Every line starts with a mark in one column, so a finished task does not
+   * sit a spinner's width to the left of a running one, and the header's mark
+   * says whether the group is still live.
+   */
+  mark: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+    width: MARK,
+    height: MARK,
+  },
+  markDone: { color: colors.success },
+  markFailed: { color: colors.destructive },
+  markPending: { color: colors.tertiaryLabel },
+  /** The tasks, ruled apart; a long run scrolls inside the card. */
+  rows: {
+    display: 'flex',
+    flexDirection: 'column',
+    maxHeight: '22rem',
+    overflowY: 'auto',
+    marginTop: '2px',
+  },
+  rowRuled: { borderTopWidth: '1px', borderTopStyle: 'solid', borderTopColor: colors.separator },
 
-  /** One task: as wide as its words, like every other step of the turn. */
+  /** One task, the width of the card: its state, what it is, and its time at the end. */
   row: {
     display: 'flex',
     alignItems: 'center',
-    gap: space[1.5],
-    width: 'fit-content',
-    maxWidth: '100%',
+    gap: MARK_GAP,
+    width: '100%',
     minWidth: 0,
     margin: 0,
     paddingInline: '4px',
-    paddingBlock: '2px',
+    paddingBlock: '4px',
     borderWidth: 0,
-    backgroundColor: 'transparent',
+    borderRadius: radius.small,
+    cornerShape: corner.shape,
+    backgroundColor: { default: 'transparent', ':hover': colors.hoverFill },
     fontFamily: 'inherit',
-    fontSize: '12.5px',
+    fontSize: '0.9em',
     lineHeight: 1.5,
     textAlign: 'start',
     userSelect: 'none',
     color: colors.secondaryLabel,
     cursor: 'pointer',
     outlineStyle: 'none',
+    boxShadow: {
+      default: 'none',
+      ':focus-visible': `inset 0 0 0 ${focus.ringWidth} ${colors.accent}`,
+    },
+    transitionProperty: 'background-color',
+    transitionDuration: '120ms',
   },
   actor: {
     flexShrink: 0,
     color: { default: colors.label, ':hover': colors.label },
   },
   description: {
+    flexGrow: 1,
     minWidth: 0,
     overflow: 'hidden',
     textOverflow: 'ellipsis',
@@ -274,7 +321,7 @@ function SubagentTaskRow({
         render={<button type="button" {...stylex.props(styles.row)} />}
         aria-label={task.description ? `${actor} · ${task.description}` : actor}
       >
-        {running ? <Spinner size="small" /> : null}
+        <TaskMark status={task.status} />
         <span {...stylex.props(styles.actor)}>{actor}</span>
         {task.description ? (
           <>
@@ -294,6 +341,28 @@ function SubagentTaskRow({
         <TaskPeek task={task} actor={actor} onCancel={onCancel} />
       </Popover.Content>
     </Popover.Root>
+  );
+}
+
+/** A task's state as a mark: live, done, failed, or not started. */
+function TaskMark({ status }: { status: SubagentTask['status'] }) {
+  if (status === 'in_progress') {
+    return (
+      <span {...stylex.props(styles.mark)}>
+        <Spinner size="small" />
+      </span>
+    );
+  }
+  const [Glyph, tone] =
+    status === 'completed'
+      ? [Check, styles.markDone]
+      : status === 'failed'
+        ? [X, styles.markFailed]
+        : [CircleDashed, styles.markPending];
+  return (
+    <span aria-hidden="true" {...stylex.props(styles.mark, tone)}>
+      <Glyph {...stylex.props(styles.glyph)} />
+    </span>
   );
 }
 
@@ -473,21 +542,27 @@ export const SubagentTaskPanel = ({
         onClick={canToggle ? () => setUserExpanded((prev) => !prev) : undefined}
         aria-expanded={canToggle ? expanded : undefined}
       >
+        <span {...stylex.props(styles.mark)}>
+          {canToggle ? (
+            <ChevronRight
+              aria-hidden="true"
+              {...stylex.props(styles.chevron, expanded && styles.chevronOpen)}
+            />
+          ) : (
+            <Spinner size="small" />
+          )}
+        </span>
         <span>
           {headerLabel}
           {mixedBackgroundLabel ? ` · ${mixedBackgroundLabel}` : null}
         </span>
-        {canToggle ? (
-          <ChevronRight
-            aria-hidden="true"
-            {...stylex.props(styles.chevron, expanded && styles.chevronOpen)}
-          />
-        ) : null}
       </button>
       {expanded ? (
         <div {...stylex.props(styles.rows)}>
-          {tasks.map((task) => (
-            <SubagentTaskRow key={task.taskId} task={task} onCancel={onCancel} />
+          {tasks.map((task, index) => (
+            <div key={task.taskId} {...stylex.props(index > 0 && styles.rowRuled)}>
+              <SubagentTaskRow task={task} onCancel={onCancel} />
+            </div>
           ))}
         </div>
       ) : null}

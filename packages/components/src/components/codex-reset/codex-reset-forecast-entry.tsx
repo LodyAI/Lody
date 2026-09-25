@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { TimerReset } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
-import { corner, duration, ease, radius, space, text } from '@lody/ui/tokens/scales.stylex';
+import { corner, duration, ease, focus, radius, space, text } from '@lody/ui/tokens/scales.stylex';
 import { Button } from '@lody/ui/button';
 
 import { useIsMobile } from '@/hooks/use-mobile';
@@ -34,7 +34,7 @@ const styles = stylex.create({
       default: 'transparent',
       ':hover': `color-mix(in oklab, transparent, ${colors.label} 6%)`,
     },
-    boxShadow: { default: 'none', ':focus-visible': `0 0 0 2px ${colors.accent}` },
+    boxShadow: { default: 'none', ':focus-visible': `0 0 0 ${focus.ringWidth} ${colors.accent}` },
     outlineStyle: 'none',
     color: colors.label,
     fontFamily: 'inherit',

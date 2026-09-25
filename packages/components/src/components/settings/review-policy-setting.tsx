@@ -50,6 +50,7 @@ import { Switch } from '@lody/ui/switch';
 import { Textarea } from '@lody/ui/textarea';
 import { CompactRow, CompactSection } from './compact-layout';
 import { settingsSurface as surface } from './surface';
+import { settingsType as type } from './type.stylex';
 
 /** Long enough to coalesce typing, short enough to feel saved. */
 const POLICY_WRITE_DEBOUNCE_MS = 600;
@@ -74,7 +75,7 @@ const styles = stylex.create({
     gap: space[4],
     paddingInline: space[4],
     paddingBlock: space[1.5],
-    fontSize: '0.75em',
+    fontSize: type.caption,
     fontWeight: 400,
     color: colors.secondaryLabel,
   },
@@ -85,7 +86,7 @@ const styles = stylex.create({
     alignItems: { default: 'stretch', [WIDE]: 'center' },
     gap: { default: space[2], [WIDE]: space[4] },
     paddingInline: space[4],
-    paddingBlock: '10px',
+    paddingBlock: '8px',
   },
   machine: { display: 'flex', minWidth: 0, alignItems: 'center', gap: '10px' },
   machineIcon: { width: '16px', height: '16px', flexShrink: 0, color: colors.tertiaryLabel },
@@ -96,8 +97,8 @@ const styles = stylex.create({
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
   },
-  machineName: { margin: 0, fontWeight: 400, lineHeight: 1.25, color: colors.label },
-  machineMeta: { margin: 0, fontSize: '0.75em', lineHeight: 1.25, color: colors.secondaryLabel },
+  machineName: { margin: 0, fontWeight: 400, lineHeight: type.leading, color: colors.label },
+  machineMeta: { margin: 0, fontSize: type.caption, lineHeight: type.leading, color: colors.secondaryLabel },
   reviewerCell: { minWidth: 0, paddingInlineStart: { default: 0, [WIDE]: space[4] } },
   noAgents: {
     display: 'flex',
@@ -106,7 +107,7 @@ const styles = stylex.create({
     justifyContent: 'space-between',
     gap: space[2],
   },
-  noAgentsText: { fontSize: '0.8em', color: colors.secondaryLabel },
+  noAgentsText: { fontSize: type.caption, color: colors.secondaryLabel },
   actions: { display: 'flex', alignItems: 'center', gap: space[1] },
   actionsEnd: { marginInlineStart: 'auto' },
   pickers: {
@@ -120,7 +121,7 @@ const styles = stylex.create({
     display: 'inline-flex',
     alignItems: 'center',
     gap: space[1],
-    fontSize: '0.75em',
+    fontSize: type.caption,
     color: colors.secondaryLabel,
   },
   statusWarning: { color: colors.warning },

@@ -78,3 +78,7 @@ directory index. Stories: `src/stories/Mobile*.stories.tsx`.
   `mobile-integrations-settings.tsx`, `mobile-stats-settings.tsx`,
   `mobile-project-settings.tsx`, `mobile-local-project-settings.tsx`,
   `mobile-github-project-settings.tsx`.
+
+`mobile-about-settings.tsx` exposes Inbox and Prompt Shortcuts opt-ins under
+Developer mode. Both use the shared feature gates; disabling Developer mode
+retains the saved opt-ins while making the features unavailable.

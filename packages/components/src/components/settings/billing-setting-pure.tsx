@@ -19,6 +19,7 @@ import { SubscribeConsentNotice } from '../shared/subscribe-consent-notice';
 import { CompactRow, CompactSection } from './compact-layout';
 import { settingsSurface as surface } from './surface';
 import { settingContainerClass } from '.';
+import { settingsType as type } from './type.stylex';
 
 const WIDE = '@media (min-width: 640px)';
 
@@ -41,7 +42,7 @@ const styles = stylex.create({
   bannerText: { flexGrow: 1, minWidth: 0 },
 
   planHeading: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: space[2] },
-  planName: { margin: 0, fontSize: '1.125em', lineHeight: 1.25, color: colors.label },
+  planName: { margin: 0, fontSize: '1.125em', lineHeight: type.leading, color: colors.label },
   statusLine: {
     display: 'flex',
     flexWrap: 'wrap',
@@ -49,7 +50,7 @@ const styles = stylex.create({
     columnGap: space[2],
     rowGap: '2px',
     marginTop: space[1],
-    fontSize: '0.8em',
+    fontSize: type.caption,
     lineHeight: 1.375,
     color: colors.secondaryLabel,
   },
@@ -84,20 +85,20 @@ const styles = stylex.create({
   helper: {
     margin: 0,
     marginTop: space[2],
-    fontSize: '0.8em',
+    fontSize: type.caption,
     lineHeight: 1.375,
     color: colors.secondaryLabel,
   },
   helperFlush: {
     margin: 0,
-    fontSize: '0.8em',
+    fontSize: type.caption,
     lineHeight: 1.375,
     color: colors.secondaryLabel,
   },
 
   /** The offer: its heading, the strip, the price and the action, one column. */
   offer: { display: 'flex', flexDirection: 'column', gap: space[4], paddingBlock: space[4] },
-  offerTitle: { margin: 0, lineHeight: 1.25, color: colors.label },
+  offerTitle: { margin: 0, lineHeight: type.leading, color: colors.label },
   strip: { display: 'flex' },
   checkoutInterval: { display: 'flex', alignItems: 'center', gap: space[1] },
   pricePanel: { display: 'flex', flexDirection: 'column', paddingTop: space[2] },
@@ -109,7 +110,7 @@ const styles = stylex.create({
     color: colors.label,
     fontVariantNumeric: 'tabular-nums',
   },
-  priceUnit: { fontSize: '0.85em', color: colors.secondaryLabel },
+  priceUnit: { fontSize: type.caption, color: colors.secondaryLabel },
   promise: { color: colors.label },
   action: { display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: space[2] },
   perks: {
@@ -120,7 +121,7 @@ const styles = stylex.create({
     margin: 0,
     padding: 0,
     listStyleType: 'none',
-    fontSize: '0.8em',
+    fontSize: type.caption,
     color: colors.secondaryLabel,
   },
   perk: { display: 'flex', alignItems: 'center', gap: space[1.5], minWidth: 0 },
@@ -159,7 +160,7 @@ const styles = stylex.create({
     alignItems: 'baseline',
     justifyContent: 'space-between',
     gap: space[4],
-    fontSize: '0.8em',
+    fontSize: type.caption,
     color: colors.secondaryLabel,
   },
   truncate: { minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
@@ -177,7 +178,7 @@ const styles = stylex.create({
   },
   invoiceText: { minWidth: 0 },
   link: {
-    fontSize: '0.8em',
+    fontSize: type.caption,
     color: colors.accent,
     textDecoration: { default: 'none', ':hover': 'underline' },
   },
@@ -193,7 +194,7 @@ const styles = stylex.create({
     backgroundColor: 'transparent',
     color: { default: colors.secondaryLabel, ':hover': colors.label },
     fontFamily: 'inherit',
-    fontSize: '0.8em',
+    fontSize: type.caption,
     cursor: { default: 'pointer', ':disabled': 'default' },
     opacity: { default: 1, ':disabled': 0.6 },
   },

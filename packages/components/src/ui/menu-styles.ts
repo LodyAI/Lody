@@ -29,7 +29,7 @@ export const menuStyles = stylex.create({
   separator: {
     height: '1px',
     flexShrink: 0,
-    marginBlock: space[1],
+    marginBlock: '2px',
     backgroundColor: colors.separator,
   },
   /**

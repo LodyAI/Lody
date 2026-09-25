@@ -3,7 +3,9 @@ import { afterEach, describe, expect, test } from 'vitest';
 import { Button } from '../src/button/button';
 import { chip } from '../src/tooltip/chip';
 import { Tooltip } from '../src/tooltip/tooltip';
+import { tooltip, tooltipPaletteTheme } from '../src/tooltip/tooltip.tokens.stylex';
 import { ThemeRoot, forcedThemeClassNames } from '../src/theme/theme';
+import { colors, shadow } from '../src/tokens/colors.stylex';
 import { all, classesOf, mount, one, press, step, type Mounted } from './dom';
 
 /** See `menu.test.tsx`: the same loosened call the primitives make. */
@@ -107,15 +109,36 @@ describe('Tooltip', () => {
     }
   });
 
+  test('is drawn in the floating rung’s material, not an inversion of it', () => {
+    // The owner's rule: a tooltip is light in a light palette and dark in a dark
+    // one. It stands on the floating rung — the raised background, the page's
+    // own ink, the popover shadow — which is what a menu is made of. A theme
+    // restating those three values compiles to the very class the forced
+    // palette declares, so a chip that drifted back to `label` on `background`
+    // (or onto any other rung) no longer matches.
+    const floating = stylex.createTheme(tooltip, {
+      background: colors.raisedBackground,
+      label: colors.label,
+      shadow: shadow.popover,
+    });
+    expect(classesFor(tooltipPaletteTheme)).toEqual(classesFor(floating));
+    const inverted = stylex.createTheme(tooltip, {
+      background: colors.label,
+      label: colors.background,
+      shadow: shadow.medium,
+    });
+    expect(classesFor(tooltipPaletteTheme)).not.toEqual(classesFor(inverted));
+  });
+
   test('carries a forced palette across the portal', async () => {
     mounted = await mount(
       <ThemeRoot mode="dark">
         <Rerun defaultOpen />
       </ThemeRoot>
     );
-    // A tooltip inverts, so a chip that inherited the document's palette is the
-    // one case that is unreadable rather than merely wrong: light ink on a
-    // light fill.
+    // A tooltip follows the palette it is opened in. A chip that inherited the
+    // document's palette instead would be a dark patch over a surface forced
+    // light, or the reverse — the foreign chip this rule exists to rule out.
     const positioner = chips()[0].parentElement;
     expect(positioner).not.toBeNull();
     for (const className of forcedThemeClassNames('dark')) {
