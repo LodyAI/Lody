@@ -1,10 +1,10 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ChevronRight, Folder, FolderOpen, FolderPlus, Github } from 'lucide-react';
-import { Spinner } from '@/ui/spinner';
+import { Spinner } from '@lody/ui/spinner';
 import type { MachineId } from '@lody/shared';
-import { Switch } from '@/ui/switch';
-import { TooltipProvider } from '@/ui/tooltip';
+import { Switch } from '@lody/ui/switch';
+import { Tooltip } from '@lody/ui/tooltip';
 import { cn } from '@/lib/utils';
 import { useOnlineMachineIds } from '@/hooks/use-machine-online-status';
 import { MobileSettingsRow, MobileSettingsSection } from '@/components/mobile/mobile-settings-row';
@@ -140,7 +140,7 @@ export function MobileProjectSettings({
   }
 
   return (
-    <TooltipProvider delayDuration={200}>
+    <Tooltip.Provider delay={200}>
       {machineGroups.map((group) => (
         <MobileSettingsSection
           key={group.machineId}
@@ -229,7 +229,7 @@ export function MobileProjectSettings({
           ))}
         </MobileSettingsSection>
       ))}
-    </TooltipProvider>
+    </Tooltip.Provider>
   );
 }
 

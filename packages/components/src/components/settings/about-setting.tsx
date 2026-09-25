@@ -2,10 +2,13 @@ import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAtom } from 'jotai';
 import { CheckCircle2, AlertCircle, Download, ExternalLink } from 'lucide-react';
-import { Spinner } from '@/ui/spinner';
+import * as stylex from '@stylexjs/stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { space } from '@lody/ui/tokens/scales.stylex';
+import { Spinner } from '@lody/ui/spinner';
 import type { ElectronUpdaterPhase } from '@lody/shared';
-import { Button } from '@/ui/button';
-import { Switch } from '@/ui/switch';
+import { Button } from '@lody/ui/button';
+import { Switch } from '@lody/ui/switch';
 import { BetaFeaturesSection } from './beta-features-setting';
 import { CompactRow, CompactSection } from './compact-layout';
 import { settingContainerClass } from '.';
@@ -29,6 +32,32 @@ const RELEASE_CHANNEL = buildInfo.releaseChannel ?? null;
 // is no Electron updater state (i.e. on the web) so the About panel still shows
 // a version number.
 const APP_VERSION = buildInfo.appVersion || null;
+
+const MONO = 'var(--font-mono, ui-monospace, monospace)';
+
+const styles = stylex.create({
+  /** A fact the build states: read, not set, so it is quiet and fixed-width. */
+  value: { fontSize: '0.875em', fontFamily: MONO, color: colors.secondaryLabel },
+  status: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: space[1],
+    fontSize: '0.8em',
+    color: colors.secondaryLabel,
+  },
+  statusError: { color: colors.destructive },
+  statusIcon: { width: '14px', height: '14px', flexShrink: 0 },
+  statusIconSuccess: { color: colors.success },
+  icon: { width: '14px', height: '14px', flexShrink: 0 },
+  endpoints: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'flex-end',
+    gap: '2px',
+    textAlign: 'end',
+  },
+  endpoint: { fontSize: '0.75em', fontFamily: MONO, color: colors.secondaryLabel },
+});
 
 type AppIpc = NonNullable<ReturnType<typeof getIpcServices>>['app'];
 type DevbarConfig = Awaited<ReturnType<AppIpc['getDevbarConfig']>>;
@@ -55,8 +84,8 @@ function UpdateStatusText({
 }) {
   if (phase === 'up_to_date') {
     return (
-      <span className="flex items-center gap-1 text-xs text-muted-foreground">
-        <CheckCircle2 className="h-3.5 w-3.5 text-status-success" />
+      <span {...stylex.props(styles.status)}>
+        <CheckCircle2 {...stylex.props(styles.statusIcon, styles.statusIconSuccess)} />
         {t('settings.about.upToDate')}
       </span>
     );
@@ -64,8 +93,8 @@ function UpdateStatusText({
 
   if (phase === 'error') {
     return (
-      <span className="flex items-center gap-1 text-xs text-destructive">
-        <AlertCircle className="h-3.5 w-3.5" />
+      <span {...stylex.props(styles.status, styles.statusError)}>
+        <AlertCircle {...stylex.props(styles.statusIcon)} />
         {t('settings.about.updateError')}
       </span>
     );
@@ -74,17 +103,15 @@ function UpdateStatusText({
   if (phase === 'downloading') {
     const p = percent != null ? Math.round(percent) : 0;
     return (
-      <span className="flex items-center gap-1 text-xs text-muted-foreground">
-        <Spinner className="h-3.5 w-3.5" />
+      <span {...stylex.props(styles.status)}>
+        <Spinner size="small" />
         {t('settings.about.downloading', { percent: String(p) })}
       </span>
     );
   }
 
   if (phase === 'disabled') {
-    return (
-      <span className="text-xs text-muted-foreground">{t('settings.about.updaterDisabled')}</span>
-    );
+    return <span {...stylex.props(styles.status)}>{t('settings.about.updaterDisabled')}</span>;
   }
 
   return null;
@@ -167,13 +194,12 @@ function DevbarSettingsControls() {
         )}
       >
         <Button
-          variant={config?.enabled ? 'outline' : 'default'}
-          size="sm"
-          className="h-7 px-2.5"
+          variant="secondary"
+          size="small"
           disabled={!config || pending}
           onClick={() => void update(!config?.enabled)}
         >
-          {pending && <Spinner className="mr-1 h-3.5 w-3.5" />}
+          {pending && <Spinner size="small" />}
           {config?.enabled
             ? t('settings.about.devbarStop', 'Stop Devbar')
             : t('settings.about.devbarStart', 'Open Devbar')}
@@ -201,16 +227,18 @@ function DevbarSettingsControls() {
             'Run `devframe connect` to proxy this Hub to coding agents over stdio MCP, or use the endpoints below directly.'
           )}
         >
-          <div className="flex flex-col items-end gap-0.5 text-right">
-            <code className="text-xs text-muted-foreground">{config.devframe.uiUrl}</code>
-            <code className="text-xs text-muted-foreground">{config.devframe.mcpUrl}</code>
+          <div {...stylex.props(styles.endpoints)}>
+            <code {...stylex.props(styles.endpoint)}>{config.devframe.uiUrl}</code>
+            {config.devframe.mcpUrl && (
+              <code {...stylex.props(styles.endpoint)}>{config.devframe.mcpUrl}</code>
+            )}
           </div>
         </CompactRow>
       )}
       {failed && (
         <CompactRow label={t('settings.about.devbar', 'Lody Devbar')}>
-          <span className="flex items-center gap-1 text-xs text-destructive">
-            <AlertCircle className="h-3.5 w-3.5" />
+          <span {...stylex.props(styles.status, styles.statusError)}>
+            <AlertCircle {...stylex.props(styles.statusIcon)} />
             {t('settings.about.devbarError', 'Devbar could not be started.')}
           </span>
         </CompactRow>
@@ -268,17 +296,15 @@ export function AboutSettingsComponent() {
       <CompactSection>
         {displayVersion && (
           <CompactRow label={t('settings.about.version')}>
-            <span className="text-sm text-muted-foreground font-mono">{displayVersion}</span>
+            <span {...stylex.props(styles.value)}>{displayVersion}</span>
           </CompactRow>
         )}
         <CompactRow label={t('settings.about.buildDate')}>
-          <span className="text-sm text-muted-foreground font-mono">
-            {formatBuildDate(BUILD_DATE)}
-          </span>
+          <span {...stylex.props(styles.value)}>{formatBuildDate(BUILD_DATE)}</span>
         </CompactRow>
         {RELEASE_CHANNEL !== null && (
           <CompactRow label={t('settings.about.releaseChannel')}>
-            <span className="text-sm text-muted-foreground">
+            <span {...stylex.props(styles.value)}>
               {t(`settings.about.channel.${RELEASE_CHANNEL}`)}
             </span>
           </CompactRow>
@@ -288,13 +314,13 @@ export function AboutSettingsComponent() {
             OSS_GIT_COMMIT !== null ? 'settings.about.cloudCommit' : 'settings.about.commitHash'
           )}
         >
-          <span className="text-sm text-muted-foreground font-mono" title={GIT_COMMIT}>
+          <span {...stylex.props(styles.value)} title={GIT_COMMIT}>
             {GIT_COMMIT.slice(0, 8)}
           </span>
         </CompactRow>
         {OSS_GIT_COMMIT !== null && (
           <CompactRow label={t('settings.about.ossCommit')}>
-            <span className="text-sm text-muted-foreground font-mono" title={OSS_GIT_COMMIT}>
+            <span {...stylex.props(styles.value)} title={OSS_GIT_COMMIT}>
               {OSS_GIT_COMMIT.slice(0, 8)}
             </span>
           </CompactRow>
@@ -303,30 +329,24 @@ export function AboutSettingsComponent() {
           <JoinCommunityButton />
         </CompactRow>
         <CompactRow label={t('settings.about.downloadApps', 'Download apps')}>
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-7 px-2.5"
-            onClick={handleOpenDownloadPage}
-          >
-            <ExternalLink className="mr-1 h-3.5 w-3.5" />
+          <Button variant="secondary" size="small" onClick={handleOpenDownloadPage}>
+            <ExternalLink {...stylex.props(styles.icon)} />
             {t('settings.about.openDownloadPage', 'Open download page')}
           </Button>
         </CompactRow>
         <CompactRow label={t('settings.about.downloadNightly')}>
           <Button
-            variant="outline"
-            size="sm"
-            className="h-7 px-2.5"
+            variant="secondary"
+            size="small"
             onClick={() => void openExternalUrl(getNightlyDownloadPageUrl(i18n.resolvedLanguage))}
           >
-            <ExternalLink className="mr-1 h-3.5 w-3.5" />
+            <ExternalLink {...stylex.props(styles.icon)} />
             {t('settings.about.openDownloadPage', 'Open download page')}
           </Button>
         </CompactRow>
         <CompactRow label={t('settings.about.website', 'Website')}>
-          <Button variant="outline" size="sm" className="h-7 px-2.5" onClick={handleOpenWebsite}>
-            <ExternalLink className="mr-1 h-3.5 w-3.5" />
+          <Button variant="secondary" size="small" onClick={handleOpenWebsite}>
+            <ExternalLink {...stylex.props(styles.icon)} />
             {t('settings.about.visitWebsite', 'Visit website')}
           </Button>
         </CompactRow>
@@ -362,41 +382,36 @@ export function AboutSettingsComponent() {
           <CompactRow label={t('settings.about.checkForUpdates')}>
             {showStatus && <UpdateStatusText phase={phase} percent={updaterState.percent} t={t} />}
             {isDownloaded && updaterState.error && (
-              <span
-                className="flex items-center gap-1 text-xs text-destructive"
-                title={updaterState.error}
-              >
-                <AlertCircle className="h-3.5 w-3.5" />
+              <span {...stylex.props(styles.status, styles.statusError)} title={updaterState.error}>
+                <AlertCircle {...stylex.props(styles.statusIcon)} />
                 {t('settings.about.updateError')}
               </span>
             )}
             {isDownloaded ? (
               <Button
-                size="sm"
-                className="h-7 px-2.5"
+                size="small"
                 onClick={() => {
                   void handleQuitAndInstall();
                 }}
                 disabled={isInstalling}
               >
                 {isInstalling ? (
-                  <Spinner className="mr-1 h-3.5 w-3.5" />
+                  <Spinner size="small" />
                 ) : (
-                  <Download className="mr-1 h-3.5 w-3.5" />
+                  <Download {...stylex.props(styles.icon)} />
                 )}
                 {t('settings.about.updateAndRestart')}
               </Button>
             ) : (
               <Button
-                variant="outline"
-                size="sm"
-                className="h-7 px-2.5"
+                variant="secondary"
+                size="small"
                 onClick={() => {
                   void handleCheckForUpdates();
                 }}
                 disabled={isChecking || phase === 'downloading'}
               >
-                {isChecking && <Spinner className="mr-1 h-3.5 w-3.5" />}
+                {isChecking && <Spinner size="small" />}
                 {t('settings.about.checkForUpdates')}
               </Button>
             )}

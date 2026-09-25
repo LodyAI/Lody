@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useRouter } from '@tanstack/react-router';
+import * as stylex from '@stylexjs/stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import { useCloudMutation, useCloudQuery } from '@lody/platform/react';
 import { Invitation } from 'better-auth/plugins';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import type { AvatarKind, CliApiKeyRecord, WorkspaceId } from '@lody/shared';
 import { uploadAvatarImage } from '@/lib/avatar-upload';
 import { verifyCurrentPassword } from '@/lib/verify-password';
@@ -32,6 +34,10 @@ import {
 import { WorkspaceJoinRequestsSettings } from './workspace-join-requests-settings';
 import { WorkspaceOwnershipTransfer } from './workspace-ownership-transfer';
 import { AccountMachinesOverview } from './account-machines-overview';
+
+const styles = stylex.create({
+  empty: { margin: 0, fontSize: '0.875em', color: colors.secondaryLabel },
+});
 
 const getInviteLink = (invitation: Invitation) => getAppShareUrl(`/invite/${invitation.id}`);
 const FREE_WORKSPACE_MEMBER_LIMIT_REACHED_CODE = 'free_workspace_member_limit_reached';
@@ -664,7 +670,7 @@ function CloudAccountSettings({ surface }: { surface: AccountSettingsSurface }) 
   }
 
   if (!activeOrganization) {
-    return <p className="text-sm text-muted-foreground">No organization</p>;
+    return <p {...stylex.props(styles.empty)}>No organization</p>;
   }
 
   return (

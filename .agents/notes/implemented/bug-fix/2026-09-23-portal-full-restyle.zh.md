@@ -108,8 +108,12 @@ Translation: current
   审查后的更正：激活会重新挂载触发元素，而 React 以连续优先级调度 `pointerenter` 的更新，所以进入行后立即点击时，
   重新挂载可能提交在 pointerdown 与 pointerup 之间，Chromium 随即丢弃这次点击（真实 Chromium 测试页中"复制"的首次点击
   0/5 生效，基线 5/5）。现在指针进入时用 `flushSync` 同步激活；在未激活的行上开始的按压保留原触发元素，等它的 click
-  派发完再激活（修复后 5/5）。对于从未收到指针进入就被按下的 Popover 触发器，仍需第二次点击，因为它的 Radix 根节点
+  派发完再激活（修复后 5/5）。对于从未收到指针进入就被按下的 Popover 触发器，仍需第二次点击，因为它的根节点
   在按压结束后才挂载。
+  `@lody/ui`（#913）替换 Radix 组件后，在 jsdom 中挂载 300 个关闭状态的行（每行一个 Tooltip、一个 Popover、一个
+  右键菜单）仍需每行约 34 个 fiber、约 60ms，Radix 版本约 70ms，纯触发元素约 8ms，因此保留延迟挂载。`@lody/ui`
+  不能依赖产品代码，所以对话行里的组件改从 `ui/armed-overlays.tsx` 引入这层封装；未激活时渲染触发器的 `render`
+  元素或 Base UI 的默认标签，带上调用方的属性，去掉 Base UI 自己消费的属性。
 
 - **Machine Flock 新鲜度。** 每个 Machine Flock 行的使用方在每次挂载时（有远端追平时两次）都要把 Flock 版本与其
   投影物化时的版本比较，方式是导出并编码整个 version vector：每次切换约 5ms。每次导入和本地写入都会产生

@@ -15,7 +15,7 @@ import {
 } from '@dnd-kit/sortable';
 import { useTranslation } from 'react-i18next';
 import type { MessageQueueItem, SessionId } from '@lody/shared';
-import { TooltipProvider } from '@/ui/tooltip';
+import { Tooltip } from '@lody/ui/tooltip';
 import { cn } from '@/lib/utils';
 import { observeResizeOnAnimationFrame } from '@/lib/resize-observer';
 import {
@@ -117,7 +117,7 @@ export function MessageQueueDisplay({
   // fill and hairline so the stack reads as one piece rather than a gray slab.
   // Rows use divide-y so the list feels continuous rather than stacked cards.
   return (
-    <TooltipProvider>
+    <Tooltip.Provider>
       <div
         className={cn(
           'overflow-hidden rounded-t-lg rounded-b-none border-[0.5px] border-b-0',
@@ -186,6 +186,6 @@ export function MessageQueueDisplay({
           </DndContext>
         </div>
       </div>
-    </TooltipProvider>
+    </Tooltip.Provider>
   );
 }

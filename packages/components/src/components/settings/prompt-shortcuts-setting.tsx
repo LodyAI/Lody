@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react';
+import * as stylex from '@stylexjs/stylex';
 import { useAtomValue } from 'jotai';
 import { useTranslation } from 'react-i18next';
 import { usePostHog } from '@posthog/react';
@@ -12,13 +13,13 @@ import {
   type PromptShortcutIndexEntry,
 } from '@lody/shared/prompt-shortcuts';
 import { Plus, SquareSlash, Trash2 } from 'lucide-react';
-import { Spinner } from '@/ui/spinner';
+import { Spinner } from '@lody/ui/spinner';
 import { promptShortcutsFeatureEnabledAtom } from '@/atoms/settings';
 import { getAllAgentConfigAtom } from '@/atoms/agents';
 import { cloudOperations } from '@/lib/cloud-api-operations';
+import { withClassName } from '@/lib/stylex';
 import { capturePostHogEvent } from '@/lib/posthog-analytics';
 import { getPromptShortcutAnalyticsProperties } from '@/lib/prompt-shortcut-analytics';
-import { cn } from '@/lib/utils';
 import { usePromptShortcuts } from '../../providers/prompt-shortcut-provider';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useVisibleMachineMetas } from '@/hooks/use-visible-machine-metas';
@@ -28,21 +29,14 @@ import { CombinedMentionTextarea } from '@/components/mentions/combined-mention-
 import { getComposerMentionChip } from '@/components/mentions/mention-chips';
 import { toPersistedMentionRanges } from '@/components/mentions/mention-persistence';
 import type { MentionProjectSource } from '@/components/mentions/mention-project-file-source';
-import { Badge } from '@/ui/badge';
-import { Button } from '@/ui/button';
-import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/ui/dialog';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/ui/alert-dialog';
-import { settingContainerClass } from '.';
+import { Badge } from '@lody/ui/badge';
+import { Button } from '@lody/ui/button';
+import { Dialog } from '@/ui/dialog';
+import { Dialog as UiDialog } from '@lody/ui/dialog';
+import { Tooltip } from '@lody/ui/tooltip';
+import { AlertDialog } from '@/ui/dialog';
+import { colors, shadow } from '@lody/ui/tokens/colors.stylex';
+import { corner, radius, space } from '@lody/ui/tokens/scales.stylex';
 import { Section } from './form-primitives';
 import {
   PromptShortcutForm,
@@ -50,13 +44,114 @@ import {
   type ShortcutScopeOptions,
 } from './prompt-shortcut-form';
 import { ScopePills } from './prompt-shortcut-scope';
+import {
+  SETTINGS_EDITOR_DIALOG_LAYOUT,
+  settingsCatalog as catalog,
+  settingsSurface as surface,
+} from './surface';
+
+/** The well's ink without its alpha, for the chip cover below. */
+const WELL_INK = `rgb(from ${colors.wellBackground} r g b)`;
+
+const styles = stylex.create({
+  /** The row's body is two columns that wrap, so its glyph sits on the first line. */
+  rowMainTop: { alignItems: 'flex-start', paddingBlock: '10px' },
+  actionsTop: { alignSelf: 'flex-start', paddingBlock: space[2] },
+  body: { gap: space[1] },
+  titleLine: { rowGap: space[1] },
+  slug: {
+    flexShrink: 0,
+    fontFamily: 'var(--font-mono, ui-monospace, monospace)',
+    fontSize: '0.7em',
+    color: colors.secondaryLabel,
+  },
+  scope: { flexShrink: 0, marginInlineStart: 'auto' },
+  statusLine: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    columnGap: space[3],
+    rowGap: space[1],
+    minWidth: 0,
+  },
+  warning: {
+    flexShrink: 0,
+    marginInlineStart: 'auto',
+    fontSize: '0.7em',
+    lineHeight: 1.25,
+    color: colors.warning,
+  },
+  /** The read-only view's identity line: the glyph, the name, the command. */
+  identity: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    columnGap: space[2],
+    rowGap: space[1],
+    minWidth: 0,
+  },
+  identityGlyph: { fontSize: '14px', lineHeight: 1 },
+  identityName: {
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: '14px',
+    color: colors.label,
+  },
+  description: { margin: 0, fontSize: '12px', lineHeight: 1.375, color: colors.secondaryLabel },
+  /** A saved prompt read back: the region rung, the editor's own type, no edge. */
+  promptText: {
+    whiteSpace: 'pre-wrap',
+    overflowWrap: 'break-word',
+    fontSize: '14px',
+    lineHeight: '24px',
+    color: colors.label,
+  },
+  /**
+   * The prompt field is the composer's mention textarea, so it is given the
+   * well by hand: the recess, and the ring on `:focus-within` because the
+   * element that takes focus is the textarea inside it.
+   *
+   * A mention chip covers the textarea's glyphs with `--mention-chip-surface`,
+   * which has to be opaque and equal to what shows through the well. The well is
+   * translucent ink over the dialog, so the cover is that ink mixed into the
+   * page at the well's own strength — close in both palettes, where a raw
+   * surface colour would leave a faint box under every chip.
+   */
+  promptWell: {
+    boxSizing: 'border-box',
+    width: '100%',
+    paddingInline: space[3],
+    paddingBlock: '10px',
+    backgroundColor: colors.wellBackground,
+    boxShadow: {
+      default: shadow.inset,
+      ':focus-within': `${shadow.inset}, 0 0 0 2px ${colors.accent}`,
+    },
+    borderRadius: radius.medium,
+    cornerShape: corner.round,
+    '--mention-chip-surface': `color-mix(in srgb, ${colors.background} 95%, ${WELL_INK})`,
+  },
+  promptInput: {
+    minHeight: '112px',
+    width: '100%',
+    padding: 0,
+    borderWidth: 0,
+    outline: 'none',
+    fontSize: '14px',
+    lineHeight: '24px',
+    color: colors.label,
+    '::placeholder': { color: colors.tertiaryLabel },
+  },
+});
 
 export function PromptShortcutsSetting() {
   const enabled = useAtomValue(promptShortcutsFeatureEnabledAtom);
   const { t } = useTranslation();
   if (!enabled)
     return (
-      <p className={settingContainerClass} role="status">
+      <p {...stylex.props(surface.container)} role="status">
         {t(
           'settings.promptShortcuts.disabled',
           'Enable Prompt Shortcuts under Developer mode in Settings → About to use this feature.'
@@ -132,8 +227,8 @@ function PromptShortcutsSettingContent({
   };
   const owned = editor ? editor.value.ownerUserId === runtime?.userId : false;
   return (
-    <div className={settingContainerClass}>
-      <p className="text-xs leading-snug text-muted-foreground">
+    <div {...stylex.props(surface.container)}>
+      <p {...stylex.props(catalog.intro)}>
         {t(
           'settings.promptShortcuts.intro',
           'Saved Prompts you can call with a slash command. Each one says where it applies; a Shortcut with nothing set works anywhere in this workspace. Private until you share it.'
@@ -152,32 +247,29 @@ function PromptShortcutsSettingContent({
         onDelete={setRemoval}
       />
 
-      <Dialog
+      <Dialog.Root
         open={!!editor && !!runtime}
         onOpenChange={(open) => {
           if (!open && !busy) setEditor(null);
         }}
       >
-        <DialogContent
-          overlayClassName={
+        <Dialog.Content
+          backdropClassName={
             // Desktop settings is itself a dialog; match its z-index so this
             // later overlay covers it without stacking a second /80 veil.
             isMobile ? undefined : 'z-[var(--z-dialog)] bg-black/20'
           }
-          className={cn(
-            'flex max-h-[min(680px,88dvh)] w-[min(620px,96dvw)] max-w-none flex-col gap-0 overflow-hidden p-0 sm:max-w-none sm:p-0',
-            !isMobile && 'shadow-popover'
-          )}
+          className={SETTINGS_EDITOR_DIALOG_LAYOUT}
         >
-          <header className="shrink-0 border-b border-border/60 px-5 py-3 pr-12">
-            <DialogTitle className="text-sm font-normal">
+          <Dialog.Header>
+            <Dialog.Title>
               {!editor?.base
                 ? t('settings.promptShortcuts.new', 'New Prompt Shortcut')
                 : owned
                   ? t('settings.promptShortcuts.edit', 'Edit Prompt Shortcut')
                   : t('settings.promptShortcuts.view', 'Prompt Shortcut')}
-            </DialogTitle>
-            <DialogDescription className="mt-0.5 text-xs leading-snug text-muted-foreground">
+            </Dialog.Title>
+            <Dialog.Description>
               {owned
                 ? t(
                     'settings.promptShortcuts.editorHelp',
@@ -187,13 +279,12 @@ function PromptShortcutsSettingContent({
                     'settings.promptShortcuts.readOnlyHelp',
                     'Shared by another member. Only its author can change it.'
                   )}
-            </DialogDescription>
-          </header>
+            </Dialog.Description>
+          </Dialog.Header>
           {editor && runtime ? (
             owned ? (
               <ShortcutEditor
                 key={editor.value.id}
-                className="min-h-0 flex-1"
                 initial={editor.value}
                 isNew={!editor.base}
                 canShare={runtime.canShare}
@@ -229,42 +320,40 @@ function PromptShortcutsSettingContent({
               />
             ) : (
               <PromptShortcutReadOnlyView
-                className="min-h-0 flex-1"
                 shortcut={editor.value}
                 options={scope.options}
                 onClose={() => setEditor(null)}
               />
             )
           ) : null}
-        </DialogContent>
-      </Dialog>
+        </Dialog.Content>
+      </Dialog.Root>
 
-      <AlertDialog
+      <AlertDialog.Root
         open={!!removal}
         onOpenChange={(open) => {
           if (!open && !busy) setRemoval(null);
         }}
       >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
+        <AlertDialog.Content>
+          <AlertDialog.Header>
+            <AlertDialog.Title>
               {t('settings.promptShortcuts.deleteTitle', 'Delete Prompt Shortcut')}
-            </AlertDialogTitle>
-            <AlertDialogDescription>
+            </AlertDialog.Title>
+            <AlertDialog.Description>
               {t('settings.promptShortcuts.deleteHelp', {
                 defaultValue:
                   'Delete “{{name}}”? Prompts already inserted into drafts or sent messages are unchanged.',
                 name: removal?.name ?? '',
               })}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={busy}>{t('common.cancel', 'Cancel')}</AlertDialogCancel>
-            <AlertDialogAction
+            </AlertDialog.Description>
+          </AlertDialog.Header>
+          <AlertDialog.Footer>
+            <AlertDialog.Cancel disabled={busy}>{t('common.cancel', 'Cancel')}</AlertDialog.Cancel>
+            <Button
               disabled={busy}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              onClick={(event) => {
-                event.preventDefault();
+              variant="destructive"
+              onClick={() => {
                 if (!runtime || !removal) return;
                 setBusy(true);
                 const deleted = removal;
@@ -285,12 +374,12 @@ function PromptShortcutsSettingContent({
                   .finally(() => setBusy(false));
               }}
             >
-              {busy ? <Spinner className="mr-2 h-4 w-4" aria-hidden="true" /> : null}
+              {busy ? <Spinner size="small" aria-hidden="true" /> : null}
               {t('common.delete', 'Delete')}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+            </Button>
+          </AlertDialog.Footer>
+        </AlertDialog.Content>
+      </AlertDialog.Root>
     </div>
   );
 }
@@ -326,70 +415,77 @@ export function PromptShortcutsList({
   const { t } = useTranslation();
   const addLabel = t('settings.promptShortcuts.new', 'New Prompt Shortcut');
   return (
-    <section className="flex flex-col">
-      <div className="flex items-center justify-between gap-2 pb-1 pt-0.5">
-        <div className="flex min-w-0 items-center gap-2">
-          <h3 className="text-xs font-normal text-muted-foreground">
+    <section {...stylex.props(surface.section)}>
+      <header {...stylex.props(surface.sectionHeader)}>
+        <div {...stylex.props(catalog.heading)}>
+          <h3 {...stylex.props(surface.sectionTitle)}>
             {t('settings.tabs.promptShortcuts', 'Prompt Shortcuts')}
           </h3>
           {entries.length > 0 ? (
-            <span className="text-xs tabular-nums text-muted-foreground/70">{entries.length}</span>
+            <span {...stylex.props(catalog.count)}>{entries.length}</span>
           ) : null}
           {loading ? (
-            <span
-              role="status"
-              className="flex items-center gap-1 text-[11px] text-muted-foreground/70"
-            >
-              <Spinner className="h-3 w-3" aria-hidden="true" />
+            <span role="status" {...stylex.props(catalog.syncing)}>
+              <Spinner size="small" aria-hidden="true" />
               {t('common.loading', 'Loading…')}
             </span>
           ) : null}
         </div>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-7 w-7 text-muted-foreground hover:bg-muted/60 hover:text-foreground"
-              aria-label={addLabel}
-              disabled={!canCreate || busy}
-              onClick={onCreate}
-            >
-              <Plus className="h-3.5 w-3.5" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>{addLabel}</TooltipContent>
-        </Tooltip>
-      </div>
+        <div {...stylex.props(surface.sectionActions)}>
+          <Tooltip.Root>
+            <Tooltip.Trigger
+              render={
+                <Button
+                  variant="ghost"
+                  size="small"
+                  icon
+                  aria-label={addLabel}
+                  disabled={!canCreate || busy}
+                  onClick={onCreate}
+                >
+                  <Plus {...stylex.props(catalog.icon)} />
+                </Button>
+              }
+            />
+            <Tooltip.Content>{addLabel}</Tooltip.Content>
+          </Tooltip.Root>
+        </div>
+      </header>
 
       {entries.length === 0 ? (
         loading ? null : (
-          <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-border/60 bg-card/30 px-6 py-8 text-center text-sm">
-            <SquareSlash className="h-6 w-6 text-muted-foreground/70" aria-hidden="true" />
-            <p className="mt-2 text-muted-foreground">
+          <div {...stylex.props(catalog.empty)}>
+            <SquareSlash {...stylex.props(catalog.emptyIcon)} aria-hidden="true" />
+            <p {...stylex.props(catalog.emptyText)}>
               {t(
                 'settings.promptShortcuts.empty',
                 'No Prompt Shortcuts yet. Save a Prompt you retype often and call it with /.'
               )}
             </p>
-            <Button size="sm" className="mt-3" disabled={!canCreate || busy} onClick={onCreate}>
-              <Plus className="mr-1.5 h-3.5 w-3.5" />
+            <Button
+              size="small"
+              variant="secondary"
+              disabled={!canCreate || busy}
+              onClick={onCreate}
+            >
+              <Plus {...stylex.props(catalog.icon)} />
               {addLabel}
             </Button>
           </div>
         )
       ) : (
-        <div className="space-y-2">
-          {entries.map((entry) => (
-            <PromptShortcutRow
-              key={entry.id}
-              entry={entry}
-              options={options}
-              canManage={entry.ownerUserId === currentUserId}
-              busy={busy}
-              onOpen={() => onOpen(entry)}
-              onDelete={() => onDelete(entry)}
-            />
+        <div {...stylex.props(surface.card)}>
+          {entries.map((entry, index) => (
+            <div key={entry.id} {...stylex.props(surface.line, index > 0 && surface.lineRuled)}>
+              <PromptShortcutRow
+                entry={entry}
+                options={options}
+                canManage={entry.ownerUserId === currentUserId}
+                busy={busy}
+                onOpen={() => onOpen(entry)}
+                onDelete={() => onDelete(entry)}
+              />
+            </div>
           ))}
         </div>
       )}
@@ -398,7 +494,7 @@ export function PromptShortcutsList({
 }
 
 /**
- * One catalog row.
+ * One catalog row: a line of the catalog's card, not a card of its own.
  *
  * States what the author decided — the command, who can read it, where it
  * applies, how many values a caller has to fill in — and, separately, anything
@@ -428,89 +524,79 @@ export function PromptShortcutRow({
     (target) => getShortcutMentionScopeIssues(entry.scope, target).length > 0
   );
   return (
-    <div className="overflow-hidden rounded-lg bg-foreground/[0.04]">
-      <div className="flex w-full min-w-0 items-center transition-colors hover:bg-hover/40">
-        <button
-          type="button"
-          onClick={onOpen}
-          disabled={busy}
-          aria-label={canManage ? t('common.edit', 'Edit') : t('common.view', 'View')}
-          className="flex min-w-0 flex-1 items-start gap-2.5 rounded-lg px-3 py-2.5 text-left focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
-        >
-          <span
-            aria-hidden="true"
-            className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-foreground/[0.05] text-sm leading-none"
-          >
-            {getShortcutEmoji(entry)}
-          </span>
-          {/* Two columns, not one stack: identity reads down the left, and what
-              the author set plus what is happening to it sit against the right
-              edge. Both halves wrap instead of relying on a viewport breakpoint —
-              settings render in a panel far narrower than the window. */}
-          <span className="flex min-w-0 flex-1 flex-col gap-1">
-            <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-              <span className="min-w-0 truncate text-sm font-normal leading-tight">
-                {entry.name}
-              </span>
-              <span className="shrink-0 font-mono text-[11px] text-muted-foreground">
-                /{entry.slug}
-              </span>
-              {/* Visibility, not scope: the pills say where it can be called,
-                  this says who can read it. */}
-              <Badge variant="secondary" className="shrink-0 px-1.5 py-0 text-[10px]">
-                {entry.visibility === 'workspace'
-                  ? t('settings.promptShortcuts.shared', 'Shared')
-                  : t('settings.promptShortcuts.private', 'Private')}
-              </Badge>
-              {/* Owned by someone else: the missing delete button is the only
-                  other sign, and an absence is not a signal. */}
-              {canManage ? null : (
-                <Badge variant="outline" className="shrink-0 px-1.5 py-0 text-[10px] font-normal">
-                  {t('settings.promptShortcuts.readOnly', 'Read-only')}
-                </Badge>
-              )}
-              <span className="ms-auto shrink-0">
-                <ScopePills scope={entry.scope} options={options} />
-              </span>
+    <div {...stylex.props(catalog.row, surface.pressableLine)}>
+      <button
+        type="button"
+        onClick={onOpen}
+        disabled={busy}
+        aria-label={canManage ? t('common.edit', 'Edit') : t('common.view', 'View')}
+        {...stylex.props(catalog.rowMain, styles.rowMainTop)}
+      >
+        <span aria-hidden="true" {...stylex.props(catalog.glyph)}>
+          {getShortcutEmoji(entry)}
+        </span>
+        {/* Two columns, not one stack: identity reads down the left, and what
+            the author set plus what is happening to it sit against the right
+            edge. Both halves wrap instead of relying on a viewport breakpoint —
+            settings render in a panel far narrower than the window. */}
+        <span {...stylex.props(catalog.body, styles.body)}>
+          <span {...stylex.props(catalog.titleLine, styles.titleLine)}>
+            <span {...stylex.props(catalog.name)}>{entry.name}</span>
+            <span {...stylex.props(styles.slug)}>/{entry.slug}</span>
+            {/* Visibility, not scope: the pills say where it can be called,
+                this says who can read it. */}
+            <Badge>
+              {entry.visibility === 'workspace'
+                ? t('settings.promptShortcuts.shared', 'Shared')
+                : t('settings.promptShortcuts.private', 'Private')}
+            </Badge>
+            {/* Owned by someone else: the missing delete button is the only
+                other sign, and an absence is not a signal. */}
+            {canManage ? null : (
+              <Badge>{t('settings.promptShortcuts.readOnly', 'Read-only')}</Badge>
+            )}
+            <span {...stylex.props(styles.scope)}>
+              <ScopePills scope={entry.scope} options={options} />
             </span>
-            {entry.description || outOfScope ? (
-              <span className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
-                {entry.description ? (
-                  <span className="min-w-0 truncate text-[11px] leading-tight text-muted-foreground">
-                    {entry.description}
-                  </span>
-                ) : null}
-                {/* The one status worth a row: the Shortcut's own references no
-                    longer fit the scope it was saved with, which only its author
-                    can repair. Publication state is deliberately absent — a local
-                    save is already durable and the runtime retries on its own. */}
-                {outOfScope ? (
-                  <span className="ms-auto shrink-0 text-[11px] leading-tight text-status-warning">
-                    {t(
-                      'settings.promptShortcuts.needsAttention',
-                      'A reference is outside this scope'
-                    )}
-                  </span>
-                ) : null}
-              </span>
-            ) : null}
           </span>
-        </button>
-        <div className="flex shrink-0 items-center gap-1 self-start py-2 pl-2 pr-2">
-          {canManage ? (
-            <Button
-              type="button"
-              size="icon"
-              variant="ghost"
-              className="h-7 w-7 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-              disabled={busy}
-              aria-label={t('settings.promptShortcuts.delete', 'Delete shortcut')}
-              onClick={onDelete}
-            >
-              <Trash2 className="h-3.5 w-3.5" />
-            </Button>
+          {entry.description || outOfScope ? (
+            <span {...stylex.props(styles.statusLine)}>
+              {entry.description ? (
+                <span {...stylex.props(catalog.meta)}>
+                  <span {...stylex.props(catalog.truncate)}>{entry.description}</span>
+                </span>
+              ) : null}
+              {/* The one status worth a row: the Shortcut's own references no
+                  longer fit the scope it was saved with, which only its author
+                  can repair. Publication state is deliberately absent — a local
+                  save is already durable and the runtime retries on its own. */}
+              {outOfScope ? (
+                <span {...stylex.props(styles.warning)}>
+                  {t(
+                    'settings.promptShortcuts.needsAttention',
+                    'A reference is outside this scope'
+                  )}
+                </span>
+              ) : null}
+            </span>
           ) : null}
-        </div>
+        </span>
+      </button>
+      <div {...stylex.props(catalog.actions, styles.actionsTop)}>
+        {canManage ? (
+          <Button
+            type="button"
+            size="small"
+            icon
+            variant="ghost"
+            tone="destructive"
+            disabled={busy}
+            aria-label={t('settings.promptShortcuts.delete', 'Delete shortcut')}
+            onClick={onDelete}
+          >
+            <Trash2 {...stylex.props(catalog.icon)} />
+          </Button>
+        ) : null}
       </div>
     </div>
   );
@@ -536,20 +622,18 @@ export function PromptShortcutReadOnlyView({
 }) {
   const { t } = useTranslation();
   return (
-    <div className={cn('flex min-h-0 flex-col', className)}>
-      <div className="scrollbar-pro min-h-0 flex-1 space-y-3 overflow-y-auto px-5 py-4">
-        <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-          <span aria-hidden="true" className="text-sm leading-none">
+    <div {...withClassName(stylex.props(catalog.editorForm), className)}>
+      <div {...withClassName(stylex.props(catalog.editorBody), 'scrollbar-pro')}>
+        <div {...stylex.props(styles.identity)}>
+          <span aria-hidden="true" {...stylex.props(styles.identityGlyph)}>
             {getShortcutEmoji(shortcut)}
           </span>
-          <span className="min-w-0 truncate text-sm font-normal">{shortcut.name}</span>
-          <span className="font-mono text-[11px] text-muted-foreground">/{shortcut.slug}</span>
-          <Badge variant="secondary" className="px-1.5 py-0 text-[10px]">
-            {t('settings.promptShortcuts.shared', 'Shared')}
-          </Badge>
+          <span {...stylex.props(styles.identityName)}>{shortcut.name}</span>
+          <span {...stylex.props(styles.slug)}>/{shortcut.slug}</span>
+          <Badge>{t('settings.promptShortcuts.shared', 'Shared')}</Badge>
         </div>
         {shortcut.description ? (
-          <p className="text-xs leading-snug text-muted-foreground">{shortcut.description}</p>
+          <p {...stylex.props(styles.description)}>{shortcut.description}</p>
         ) : null}
         <Section title={t('settings.promptShortcuts.scope', 'Applies to')}>
           <ScopePills scope={shortcut.scope} options={options} />
@@ -557,16 +641,14 @@ export function PromptShortcutReadOnlyView({
         <Section title={t('settings.promptShortcuts.prompt', 'Prompt')}>
           {/* Same type as the editor's own prompt field: one Shortcut should not
               look like two different things depending on who opened it. */}
-          <div className="whitespace-pre-wrap break-words rounded-md border border-border/60 bg-background/60 p-2.5 text-sm leading-6">
-            {shortcut.prompt}
-          </div>
+          <div {...stylex.props(surface.formBlock, styles.promptText)}>{shortcut.prompt}</div>
         </Section>
       </div>
-      <footer className="flex shrink-0 items-center justify-end gap-2 border-t border-border/60 px-5 py-3">
-        <Button type="button" variant="outline" size="sm" onClick={onClose}>
+      <UiDialog.Footer>
+        <Button type="button" variant="secondary" onClick={onClose}>
           {t('common.close', 'Close')}
         </Button>
-      </footer>
+      </UiDialog.Footer>
     </div>
   );
 }
@@ -692,14 +774,6 @@ function ShortcutEditor({
   );
 }
 
-/** Kept in step with the composer's box: border, radius, chip cover colour. */
-const SHORTCUT_PROMPT_SURFACE_CLASS_NAME = cn(
-  'w-full rounded-xl border border-foreground/[0.10] bg-background px-3 py-2.5',
-  'focus-within:outline-hidden focus-within:ring-1 focus-within:ring-ring/30',
-  'dark:border-input-border/70 dark:bg-input/90',
-  '[--mention-chip-surface:hsl(var(--background))] dark:[--mention-chip-surface:color-mix(in_srgb,hsl(var(--input))_90%,hsl(var(--background)))]'
-);
-
 /**
  * The prompt field: the composer's own mention textarea, in template mode.
  *
@@ -739,10 +813,9 @@ export function ShortcutPromptField({
       commandsEnabled={false}
       disabled={disabled}
       rows={4}
-      // The composer's own surface: the field where a template is written and
-      // the field where a message is written are the same kind of field.
-      containerClassName={SHORTCUT_PROMPT_SURFACE_CLASS_NAME}
-      className="input-scrollbar min-h-28 resize-none border-transparent bg-transparent px-0 py-0 text-sm leading-6 text-input-foreground placeholder:text-input-placeholder focus-visible:ring-0 focus-visible:ring-offset-0"
+      // A value holder, so the well every other field in the form is.
+      containerClassName={stylex.props(styles.promptWell).className}
+      className={withClassName(stylex.props(styles.promptInput), 'input-scrollbar').className}
       skillAgent={skillAgent}
       onMentionRangesChange={(ranges) => editor.onRangesChange(toPersistedMentionRanges(ranges))}
     />

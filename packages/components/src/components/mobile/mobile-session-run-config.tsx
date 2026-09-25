@@ -1,9 +1,11 @@
 import { useMemo, useState, type ReactNode } from 'react';
+import * as stylex from '@stylexjs/stylex';
 import { useAtomValue } from 'jotai';
 import { useTranslation } from 'react-i18next';
 
 import { getAllAgentConfigAtom } from '@/atoms';
 import { AgentIcon } from '@/components/icons/agent-icon';
+import { composerSurface } from '@/components/shared/composer-surface';
 import type {
   AcpConfigOptionSelector,
   AcpConfigOptionValue,
@@ -88,7 +90,7 @@ export function MobileSessionRunConfig(props: MobileSessionRunConfigProps) {
             agentType={cfg.agentType}
             brandId={cfg.brandId}
             env={cfg.env}
-            className="h-4 w-4"
+            className={stylex.props(composerSurface.glyph16).className}
           />
         );
       }
@@ -98,7 +100,7 @@ export function MobileSessionRunConfig(props: MobileSessionRunConfigProps) {
         <AgentIcon
           cliType={fallbackAgent.cliType}
           agentType={fallbackAgent.agentType}
-          className="h-4 w-4"
+          className={stylex.props(composerSurface.glyph16).className}
         />
       );
     }

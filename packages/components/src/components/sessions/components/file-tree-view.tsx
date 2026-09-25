@@ -5,12 +5,7 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 import { ChevronRight, CloudOff, FileWarning, FolderOpen, RefreshCw } from 'lucide-react';
 import { getMachineFlockLocalProjects, type FileTreeItem, type SessionMeta } from '@lody/shared';
 import { type TreeDataItem } from '@/components/tree-view';
-import {
-  ContextMenu,
-  ContextMenuContent,
-  ContextMenuItem,
-  ContextMenuTrigger,
-} from '@/ui/context-menu';
+import { ContextMenu } from '@lody/ui/context-menu';
 import { useSessionFileActions, type SessionFileMenuItem } from '@/hooks/use-session-file-actions';
 import { FileTreeSkeleton, FileTreeStatePanel } from './file-tree-states';
 import { useFileWorkspaceTree } from '@/hooks/use-code-session';
@@ -473,20 +468,20 @@ const VirtualFileTreeRow = memo(function VirtualFileTreeRow({
   );
   if (visibleMenuItems.length === 0) return rowButton;
   return (
-    <ContextMenu>
-      <ContextMenuTrigger asChild>{rowButton}</ContextMenuTrigger>
-      <ContextMenuContent className="min-w-[190px]">
+    <ContextMenu.Root>
+      <ContextMenu.Trigger>{rowButton}</ContextMenu.Trigger>
+      <ContextMenu.Content className="min-w-[190px]">
         {visibleMenuItems.map((menuItem) => {
           const ItemIcon = menuItem.icon;
           return (
-            <ContextMenuItem key={menuItem.id} onSelect={() => menuItem.run(item.id)}>
+            <ContextMenu.Item key={menuItem.id} onClick={() => menuItem.run(item.id)}>
               <ItemIcon className="h-3.5 w-3.5" aria-hidden="true" />
               {menuItem.label}
-            </ContextMenuItem>
+            </ContextMenu.Item>
           );
         })}
-      </ContextMenuContent>
-    </ContextMenu>
+      </ContextMenu.Content>
+    </ContextMenu.Root>
   );
 });
 
@@ -869,7 +864,7 @@ const AutoFileTreeView = ({
           localError ?? t('sessions.localProject.files.loadFailed', 'Failed to load files.')
         }
         action={
-          <Button variant="outline" size="sm" className="gap-1.5" onClick={handleRetryLocalFiles}>
+          <Button variant="secondary" size="small" onClick={handleRetryLocalFiles}>
             <RefreshCw className="h-3.5 w-3.5" />
             {t('sessions.codeSession.files.retry', 'Try again')}
           </Button>

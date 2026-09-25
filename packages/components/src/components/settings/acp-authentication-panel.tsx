@@ -1,6 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { Check, Copy, ExternalLink, LogIn, Square } from 'lucide-react';
-import { Spinner } from '@/ui/spinner';
+import { Spinner } from '@lody/ui/spinner';
 import { useTranslation } from 'react-i18next';
 import {
   machineSupportsAcpAuthenticationInteractionsProtocol,
@@ -25,13 +25,98 @@ import {
   type MachineAcpAuthenticationArgs,
 } from '@/hooks/use-machine-acp-authentication';
 import { resyncMachineFlockRows } from '@/hooks/use-machine-flock-rows';
-import { Button } from '@/ui/button';
-import { Input } from '@/ui/input';
-import { Label } from '@/ui/label';
+import { Button } from '@lody/ui/button';
+import { Input } from '@lody/ui/input';
+import { Field as UiField } from '@lody/ui/field';
+import { Select } from '@lody/ui/select';
+import * as stylex from '@stylexjs/stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { control, space } from '@lody/ui/tokens/scales.stylex';
 import { isElectronRenderer } from '@/lib/electron';
 import { openExternalUrl } from '@/lib/native-browser';
 import { isNativeAppShell } from '@/lib/native-platform';
-import { cn } from '@/lib/utils';
+import { settingsCatalog as catalog, settingsSurface as surface } from './surface';
+
+const SM = '@media (min-width: 640px)';
+
+const styles = stylex.create({
+  root: { display: 'flex', flexDirection: 'column', gap: space[2], minWidth: 0 },
+  actions: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: space[2] },
+  /** A step of the sign-in: the region rung, set apart from the form by its fill. */
+  block: { display: 'flex', flexDirection: 'column', gap: space[3], minWidth: 0 },
+  blockHead: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: space[2],
+  },
+  text: { minWidth: 0 },
+  title: { margin: 0, fontSize: '14px', lineHeight: 1.375, color: colors.label },
+  hint: {
+    margin: 0,
+    fontSize: '12px',
+    lineHeight: 1.375,
+    color: colors.secondaryLabel,
+  },
+  titleHint: { marginTop: '2px' },
+  success: { fontSize: '12px', lineHeight: 1.375, color: colors.success },
+  error: { margin: 0, fontSize: '12px', lineHeight: 1.375, color: colors.destructive },
+  url: {
+    display: 'block',
+    margin: 0,
+    fontFamily: 'var(--font-mono, ui-monospace, monospace)',
+    fontSize: '12px',
+    lineHeight: 1.375,
+    wordBreak: 'break-all',
+    color: colors.secondaryLabel,
+  },
+  codeRow: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: space[2],
+  },
+  codeLabel: {
+    margin: 0,
+    fontSize: '11px',
+    lineHeight: 1.375,
+    letterSpacing: '0.04em',
+    textTransform: 'uppercase',
+    color: colors.tertiaryLabel,
+  },
+  code: {
+    display: 'block',
+    marginTop: space[1],
+    fontFamily: 'var(--font-mono, ui-monospace, monospace)',
+    fontSize: '16px',
+    lineHeight: 1.375,
+    letterSpacing: '0.14em',
+    userSelect: 'all',
+    color: colors.label,
+  },
+  stack: { display: 'flex', flexDirection: 'column', gap: space[1.5], minWidth: 0 },
+  submitRow: {
+    display: 'flex',
+    flexDirection: { default: 'column', [SM]: 'row' },
+    gap: space[2],
+  },
+  submitInput: { flexGrow: 1, minWidth: 0 },
+  /** An answer at the end of a column keeps its own width rather than the column's. */
+  answer: { alignSelf: 'flex-start' },
+  methods: { display: 'flex', flexDirection: 'column', gap: '2px' },
+  /** A method is a row a person picks, its name above what it does. */
+  method: {
+    alignItems: 'flex-start',
+    minHeight: control.large,
+    paddingBlock: space[1.5],
+  },
+  methodDisabled: { opacity: 0.45, cursor: 'not-allowed' },
+  methodBody: { display: 'flex', flexDirection: 'column', gap: '2px', minWidth: 0 },
+  methodName: { fontSize: '13px', lineHeight: 1.375, color: colors.label },
+  methodDescription: { fontSize: '12px', lineHeight: 1.375, color: colors.secondaryLabel },
+});
 
 type AuthenticationPhase = 'idle' | 'running' | 'authenticated' | 'cancelled' | 'error';
 export type AcpAuthorizationDetails = Pick<
@@ -609,11 +694,9 @@ export function AcpAuthenticationPanel({
               'Downloading the {{runtime}} runtime… {{percent}}%',
               { runtime: runtimeLabel, percent: runtimeDownload.percent }
             )
-          : t(
-              'agents.authentication.runtimeDownloading',
-              'Downloading the {{runtime}} runtime…',
-              { runtime: runtimeLabel }
-            );
+          : t('agents.authentication.runtimeDownloading', 'Downloading the {{runtime}} runtime…', {
+              runtime: runtimeLabel,
+            });
     } else {
       runtimeDownloadText = t(
         'agents.authentication.runtimePreparing',
@@ -624,30 +707,30 @@ export function AcpAuthenticationPanel({
   }
 
   return (
-    <div className={cn('flex min-w-0 flex-col gap-2', !compact && 'rounded-lg border p-3')}>
-      <div className="flex flex-wrap items-center gap-2">
+    <div {...stylex.props(styles.root, !compact && surface.formBlock)}>
+      <div {...stylex.props(styles.actions)}>
         {phase === 'running' ? (
           <>
-            <Button type="button" size="sm" variant="outline" disabled>
-              <Spinner className="h-3.5 w-3.5" />
+            <Button type="button" size="small" variant="secondary" disabled>
+              <Spinner size="small" />
               {t('agents.authentication.waiting', 'Waiting for {{provider}} sign-in', {
                 provider,
               })}
             </Button>
-            <Button type="button" size="sm" variant="ghost" onClick={handleCancel}>
-              <Square className="h-3.5 w-3.5" />
+            <Button type="button" size="small" variant="ghost" onClick={handleCancel}>
+              <Square {...stylex.props(catalog.icon)} />
               {t('common.cancel', 'Cancel')}
             </Button>
           </>
         ) : (
           <Button
             type="button"
-            size="sm"
-            variant="outline"
+            size="small"
+            variant="secondary"
             disabled={!authArgs || !interactiveProtocolSupported}
             onClick={handleStart}
           >
-            <LogIn className="h-3.5 w-3.5" />
+            <LogIn {...stylex.props(catalog.icon)} />
             {phase === 'error' || phase === 'cancelled'
               ? t('agents.authentication.retry', 'Retry {{provider}} sign-in', { provider })
               : phase === 'authenticated' || reauthentication
@@ -656,7 +739,7 @@ export function AcpAuthenticationPanel({
           </Button>
         )}
         {phase === 'authenticated' ? (
-          <span className="text-xs text-primary">
+          <span {...stylex.props(styles.success)}>
             {t('agents.authentication.succeeded', '{{provider}} sign-in completed', {
               provider,
             })}
@@ -664,7 +747,7 @@ export function AcpAuthenticationPanel({
         ) : null}
       </div>
       {!interactiveProtocolSupported ? (
-        <p className="text-xs text-muted-foreground">
+        <p {...stylex.props(styles.hint)}>
           {t(
             'agents.authentication.machineUpgradeRequired',
             'Update the target Machine to use interactive authentication for this Provider.'
@@ -698,7 +781,7 @@ export function AcpAuthenticationPanel({
           onSubmit={(input) => void handleSubmitInteraction(interaction.interactionId, input)}
         />
       ) : null}
-      {error ? <p className="text-xs text-destructive">{error}</p> : null}
+      {error ? <p {...stylex.props(styles.error)}>{error}</p> : null}
     </div>
   );
 }
@@ -735,15 +818,15 @@ export function AcpAuthenticationAuthorizationView({
     : null;
 
   return (
-    <div className="rounded-md border bg-muted/20 p-3">
-      <div className="flex flex-wrap items-start justify-between gap-2">
-        <div className="min-w-0">
-          <p className="text-sm font-normal">
+    <div {...stylex.props(surface.formBlock, styles.block)}>
+      <div {...stylex.props(styles.blockHead)}>
+        <div {...stylex.props(styles.text)}>
+          <p {...stylex.props(styles.title)}>
             {t('agents.authentication.finishInBrowser', 'Finish signing in to {{provider}}', {
               provider,
             })}
           </p>
-          <p className="mt-0.5 text-xs text-muted-foreground">
+          <p {...stylex.props(styles.hint, styles.titleHint)}>
             {authorization.message ??
               t(
                 'agents.authentication.browserOpened',
@@ -753,15 +836,15 @@ export function AcpAuthenticationAuthorizationView({
         </div>
         <Button
           type="button"
-          size="sm"
-          variant="outline"
+          size="small"
+          variant="secondary"
           disabled={authorizationConsentPending}
           onClick={onOpenAuthorization}
         >
           {authorizationConsentPending ? (
-            <Spinner className="h-3.5 w-3.5" />
+            <Spinner size="small" />
           ) : (
-            <ExternalLink className="h-3.5 w-3.5" />
+            <ExternalLink {...stylex.props(catalog.icon)} />
           )}
           {authorization.requiresAuthorizationConsent
             ? t('agents.authentication.authorizeAndOpen', 'Authorize and open page')
@@ -770,34 +853,30 @@ export function AcpAuthenticationAuthorizationView({
       </div>
 
       {authorization.requiresAuthorizationConsent ? (
-        <code className="mt-3 block break-all rounded border bg-background px-2 py-1.5 text-xs">
-          {authorization.authorizationUrl}
-        </code>
+        <code {...stylex.props(styles.url)}>{authorization.authorizationUrl}</code>
       ) : null}
 
       {authorization.userCode ? (
-        <div className="mt-3 rounded-md border bg-background px-3 py-2.5">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div>
-              <p className="text-[11px] font-normal uppercase tracking-wide text-muted-foreground">
+        <div {...stylex.props(styles.stack)}>
+          <div {...stylex.props(styles.codeRow)}>
+            <div {...stylex.props(styles.text)}>
+              <p {...stylex.props(styles.codeLabel)}>
                 {t('agents.authentication.oneTimeCode', 'One-time code')}
               </p>
-              <code className="mt-1 block select-all font-mono text-base font-normal tracking-[0.14em]">
-                {authorization.userCode}
-              </code>
+              <code {...stylex.props(styles.code)}>{authorization.userCode}</code>
             </div>
-            <Button type="button" size="sm" variant="ghost" onClick={onCopyUserCode}>
+            <Button type="button" size="small" variant="ghost" onClick={onCopyUserCode}>
               {userCodeCopied ? (
-                <Check className="h-3.5 w-3.5" />
+                <Check {...stylex.props(catalog.icon)} />
               ) : (
-                <Copy className="h-3.5 w-3.5" />
+                <Copy {...stylex.props(catalog.icon)} />
               )}
               {userCodeCopied
                 ? t('agents.authentication.codeCopied', 'Copied')
                 : t('agents.authentication.copyCode', 'Copy code')}
             </Button>
           </div>
-          <p className="mt-1.5 text-xs text-muted-foreground">
+          <p {...stylex.props(styles.hint)}>
             {expiryMinutes
               ? t(
                   'agents.authentication.enterCodeWithExpiry',
@@ -810,32 +889,34 @@ export function AcpAuthenticationAuthorizationView({
       ) : null}
 
       {authorization.acceptsAuthorizationCode ? (
-        <div className="mt-3 space-y-1.5">
-          <Label htmlFor={authorizationCodeInputId} className="text-xs">
+        <div {...stylex.props(styles.stack)}>
+          <UiField.Label htmlFor={authorizationCodeInputId}>
             {t('agents.authentication.authorizationCode', 'Authorization code')}
-          </Label>
-          <div className="flex flex-col gap-2 sm:flex-row">
-            <Input
-              id={authorizationCodeInputId}
-              value={authorizationCode}
-              disabled={authorizationCodeSubmitted}
-              autoComplete="one-time-code"
-              spellCheck={false}
-              placeholder={t(
-                'agents.authentication.authorizationCodePlaceholder',
-                'Paste the code from the browser'
-              )}
-              onChange={(event) => onAuthorizationCodeChange(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter' && authorizationCode.trim()) {
-                  event.preventDefault();
-                  onSubmitAuthorizationCode();
-                }
-              }}
-            />
+          </UiField.Label>
+          <div {...stylex.props(styles.submitRow)}>
+            <div {...stylex.props(styles.submitInput)}>
+              <Input
+                id={authorizationCodeInputId}
+                value={authorizationCode}
+                disabled={authorizationCodeSubmitted}
+                autoComplete="one-time-code"
+                spellCheck={false}
+                placeholder={t(
+                  'agents.authentication.authorizationCodePlaceholder',
+                  'Paste the code from the browser'
+                )}
+                onChange={(event) => onAuthorizationCodeChange(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' && authorizationCode.trim()) {
+                    event.preventDefault();
+                    onSubmitAuthorizationCode();
+                  }
+                }}
+              />
+            </div>
             <Button
               type="button"
-              size="sm"
+              size="medium"
               disabled={
                 authorizationCodeSubmitted ||
                 submittingAuthorizationCode ||
@@ -844,16 +925,16 @@ export function AcpAuthenticationAuthorizationView({
               onClick={onSubmitAuthorizationCode}
             >
               {submittingAuthorizationCode ? (
-                <Spinner className="h-3.5 w-3.5" />
+                <Spinner size="small" />
               ) : authorizationCodeSubmitted ? (
-                <Check className="h-3.5 w-3.5" />
+                <Check {...stylex.props(catalog.icon)} />
               ) : null}
               {authorizationCodeSubmitted
                 ? t('agents.authentication.codeSubmitted', 'Submitted')
                 : t('agents.authentication.submitCode', 'Continue')}
             </Button>
           </div>
-          <p className="text-xs text-muted-foreground">
+          <p {...stylex.props(styles.hint)}>
             {t(
               'agents.authentication.authorizationCodeHelp',
               'Only needed if the browser shows a code instead of returning automatically.'
@@ -889,29 +970,26 @@ export function AcpAuthenticationInteractionView({
         method.type === 'agent' && !!method.id
     );
     return (
-      <div className="space-y-2 rounded-md border bg-muted/20 p-3">
-        <p className="text-sm font-normal">
+      <div {...stylex.props(surface.formBlock, styles.block)}>
+        <p {...stylex.props(styles.title)}>
           {t('agents.authentication.chooseMethod', 'Choose a sign-in method')}
         </p>
-        <div className="flex flex-col gap-2">
+        <div {...stylex.props(styles.methods)}>
           {methods.map((method) => (
-            <Button
+            <button
               key={method.id}
               type="button"
-              variant="outline"
-              className="h-auto justify-start px-3 py-2 text-left"
               disabled={submitting}
               onClick={() => onSubmit({ action: 'accept', methodId: method.id })}
+              {...stylex.props(surface.listRow, styles.method, submitting && styles.methodDisabled)}
             >
-              <span className="min-w-0">
-                <span className="block text-sm font-normal">{method.name ?? method.id}</span>
+              <span {...stylex.props(styles.methodBody)}>
+                <span {...stylex.props(styles.methodName)}>{method.name ?? method.id}</span>
                 {method.description ? (
-                  <span className="block text-xs font-normal text-muted-foreground">
-                    {method.description}
-                  </span>
+                  <span {...stylex.props(styles.methodDescription)}>{method.description}</span>
                 ) : null}
               </span>
-            </Button>
+            </button>
           ))}
         </div>
       </div>
@@ -922,40 +1000,59 @@ export function AcpAuthenticationInteractionView({
     (field) => field.required && !(values[field.id] ?? '').trim()
   );
   return (
-    <div className="space-y-3 rounded-md border bg-muted/20 p-3">
-      <div>
-        <p className="text-sm font-normal">
+    <div {...stylex.props(surface.formBlock, styles.block)}>
+      <div {...stylex.props(styles.text)}>
+        <p {...stylex.props(styles.title)}>
           {interaction.form.title ??
             t('agents.authentication.additionalInformation', 'Additional information')}
         </p>
         {interaction.message || interaction.form.description ? (
-          <p className="mt-0.5 text-xs text-muted-foreground">
+          <p {...stylex.props(styles.hint, styles.titleHint)}>
             {interaction.message || interaction.form.description}
           </p>
         ) : null}
       </div>
       {interaction.form.fields.map((field) => (
-        <div key={field.id} className="space-y-1.5">
-          <Label className="text-xs">
+        <div key={field.id} {...stylex.props(styles.stack)}>
+          <UiField.Label>
             {field.label}
             {!field.required ? ` ${t('common.optional', '(optional)')}` : ''}
-          </Label>
+          </UiField.Label>
           {field.type === 'select' ? (
-            <select
-              className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
-              value={values[field.id] ?? ''}
+            <Select.Root
+              items={[
+                ...(field.required
+                  ? []
+                  : [
+                      {
+                        value: null,
+                        label: t('agents.authentication.selectOption', 'Select an option'),
+                      },
+                    ]),
+                ...field.options.map((option) => ({ value: option.value, label: option.label })),
+              ]}
+              value={values[field.id] || null}
               disabled={submitting}
-              onChange={(event) => onValuesChange({ ...values, [field.id]: event.target.value })}
+              onValueChange={(value) => onValuesChange({ ...values, [field.id]: value ?? '' })}
             >
-              <option value="" disabled={field.required}>
-                {t('agents.authentication.selectOption', 'Select an option')}
-              </option>
-              {field.options.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
+              <Select.Trigger>
+                <Select.Value
+                  placeholder={t('agents.authentication.selectOption', 'Select an option')}
+                />
+              </Select.Trigger>
+              <Select.Content>
+                {!field.required ? (
+                  <Select.Item value={null}>
+                    {t('agents.authentication.selectOption', 'Select an option')}
+                  </Select.Item>
+                ) : null}
+                {field.options.map((option) => (
+                  <Select.Item key={option.value} value={option.value}>
+                    {option.label}
+                  </Select.Item>
+                ))}
+              </Select.Content>
+            </Select.Root>
           ) : (
             <Input
               type={field.type === 'secret' ? 'password' : 'text'}
@@ -966,20 +1063,20 @@ export function AcpAuthenticationInteractionView({
               onChange={(event) => onValuesChange({ ...values, [field.id]: event.target.value })}
             />
           )}
-          {field.description ? (
-            <p className="text-xs text-muted-foreground">{field.description}</p>
-          ) : null}
+          {field.description ? <p {...stylex.props(styles.hint)}>{field.description}</p> : null}
         </div>
       ))}
-      <Button
-        type="button"
-        size="sm"
-        disabled={submitting || invalid}
-        onClick={() => onSubmit({ action: 'accept', content: values })}
-      >
-        {submitting ? <Spinner className="h-3.5 w-3.5" /> : null}
-        {t('common.continue', 'Continue')}
-      </Button>
+      <div {...stylex.props(styles.answer)}>
+        <Button
+          type="button"
+          size="small"
+          disabled={submitting || invalid}
+          onClick={() => onSubmit({ action: 'accept', content: values })}
+        >
+          {submitting ? <Spinner size="small" /> : null}
+          {t('common.continue', 'Continue')}
+        </Button>
+      </div>
     </div>
   );
 }

@@ -5,8 +5,8 @@ import { X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 import { UserAvatar } from '@/components/user-avatar';
-import { Button } from '@/ui/button';
-import { Textarea } from '@/ui/textarea';
+import { Button } from '@lody/ui/button';
+import { Textarea } from '@lody/ui/textarea';
 import { cn } from '@/lib/utils';
 import type { CommentAnchor, CommentUser } from './session-comment-types';
 
@@ -81,7 +81,8 @@ export function SessionCommentDraft({
               name: currentUser.name,
               image: currentUser.image,
             }}
-            className="h-5 w-5 shrink-0"
+            size="small"
+            className="shrink-0"
           />
         )}
         <span className="text-xs font-medium text-foreground truncate">
@@ -89,8 +90,9 @@ export function SessionCommentDraft({
         </span>
         <Button
           variant="ghost"
-          size="icon"
-          className="ml-auto h-5 w-5 shrink-0"
+          size="mini"
+          icon
+          className="ml-auto shrink-0"
           disabled={isSubmitting}
           onClick={onCancel}
         >
@@ -116,8 +118,7 @@ export function SessionCommentDraft({
         <div className="flex-1" />
         <span className="text-[10px] text-muted-foreground hidden sm:block">Ctrl+Enter</span>
         <Button
-          size="sm"
-          className="h-6 text-xs px-3"
+          size="small"
           disabled={!body.trim() || isSubmitting || !prLinked || !onSubmitToGitHub}
           onClick={() => void handleSubmit()}
         >

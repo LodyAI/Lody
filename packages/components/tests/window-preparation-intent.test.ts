@@ -15,7 +15,8 @@ import { installWindowPreparationIntent } from '../src/lib/window-preparation-in
 let stop: (() => void) | undefined;
 function setup() {
   vi.useFakeTimers();
-  document.body.innerHTML = '<div data-sidebar-session-id="a"><button>A</button></div><div data-sidebar-session-id="b">B</div>';
+  document.body.innerHTML =
+    '<div data-sidebar-session-id="a"><button>A</button></div><div data-sidebar-session-id="b">B</div>';
   stop = installWindowPreparationIntent();
   return [...document.body.children] as HTMLElement[];
 }
@@ -33,7 +34,7 @@ afterEach(() => {
 
 it('prepares a row despite stopped bubbling, ignores movement within it, and cancels on exit', () => {
   const [a] = setup();
-  a.addEventListener('pointerover', e => e.stopPropagation());
+  a.addEventListener('pointerover', (e) => e.stopPropagation());
   pointer(a, 'pointerover');
   vi.advanceTimersByTime(149);
   expect([...requests.active]).toEqual([]);

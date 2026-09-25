@@ -30,7 +30,7 @@ import {
   Plus,
   Users,
 } from 'lucide-react';
-import { Spinner } from '@/ui/spinner';
+import { Spinner } from '@lody/ui/spinner';
 import {
   memo,
   useCallback,
@@ -43,14 +43,8 @@ import {
 } from 'react';
 import { useAtom } from 'jotai';
 import { useTranslation } from 'react-i18next';
-import { TooltipProvider } from '@/ui/tooltip';
-import {
-  ContextMenu,
-  ContextMenuContent,
-  ContextMenuItem,
-  ContextMenuSeparator,
-  ContextMenuTrigger,
-} from '@/ui/context-menu';
+import { Tooltip } from '@lody/ui/tooltip';
+import { ContextMenu } from '@lody/ui/context-menu';
 import type {
   LocalProjectHistoryProvider,
   MachineId,
@@ -901,13 +895,13 @@ const TaskGroupSection = memo(function TaskGroupSection({
               // Desktop repo rows get a hover info card wrapping the whole row/menu.
               const showInfoCard = !isMobile;
               const menuRow = hasMenuActions ? (
-                <ContextMenu key={task.taskId}>
-                  <ContextMenuTrigger asChild>{row}</ContextMenuTrigger>
-                  <ContextMenuContent className="min-w-[180px]">
+                <ContextMenu.Root key={task.taskId}>
+                  <ContextMenu.Trigger >{row}</ContextMenu.Trigger>
+                  <ContextMenu.Content className="min-w-[180px]">
                     {onOpenPullRequest && prUrl ? (
                       <>
-                        <ContextMenuItem
-                          onSelect={() => {
+                        <ContextMenu.Item
+                          onClick={() => {
                             onOpenPullRequest({
                               taskId: task.taskId,
                               repoFullName: group.repoFullName,
@@ -918,64 +912,64 @@ const TaskGroupSection = memo(function TaskGroupSection({
                         >
                           <GitPullRequest />
                           {contextMenuLabels.openPr}
-                        </ContextMenuItem>
+                        </ContextMenu.Item>
                         {onRenameTask ||
                         onTogglePinTask ||
                         onArchiveTask ||
                         onCopySessionUrl ||
                         task.branchName ? (
-                          <ContextMenuSeparator />
+                          <ContextMenu.Separator />
                         ) : null}
                       </>
                     ) : null}
                     {onRenameTask ? (
-                      <ContextMenuItem
-                        onSelect={() => {
+                      <ContextMenu.Item
+                        onClick={() => {
                           beginRename(task.taskId, task.title);
                         }}
                       >
                         <Pencil />
                         {contextMenuLabels.rename}
-                      </ContextMenuItem>
+                      </ContextMenu.Item>
                     ) : null}
                     {onTogglePinTask ? (
-                      <ContextMenuItem
-                        onSelect={() => {
+                      <ContextMenu.Item
+                        onClick={() => {
                           onTogglePinTask(task.taskId, !task.isPinned);
                         }}
                       >
                         {task.isPinned ? <PinOff /> : <Pin />}
                         {task.isPinned ? contextMenuLabels.unpin : contextMenuLabels.pin}
-                      </ContextMenuItem>
+                      </ContextMenu.Item>
                     ) : null}
                     {onArchiveTask ? (
-                      <ContextMenuItem
-                        onSelect={() => {
+                      <ContextMenu.Item
+                        onClick={() => {
                           onArchiveTask(task.taskId);
                         }}
                       >
                         <Archive />
                         {contextMenuLabels.archive}
-                      </ContextMenuItem>
+                      </ContextMenu.Item>
                     ) : null}
                     {(onRenameTask || onTogglePinTask || onArchiveTask) &&
                     (onCopySessionUrl || task.branchName) ? (
-                      <ContextMenuSeparator />
+                      <ContextMenu.Separator />
                     ) : null}
                     {onCopySessionUrl ? (
-                      <ContextMenuItem
-                        onSelect={() => {
+                      <ContextMenu.Item
+                        onClick={() => {
                           onCopySessionUrl(task.taskId);
                         }}
                       >
                         <Link2 />
                         {contextMenuLabels.copyUrl}
-                      </ContextMenuItem>
+                      </ContextMenu.Item>
                     ) : null}
                     {shareMenuState ? (
-                      <ContextMenuItem
+                      <ContextMenu.Item
                         disabled={shareMenuState !== 'share'}
-                        onSelect={() => {
+                        onClick={() => {
                           onShareSessionWithTeam?.(task.taskId);
                         }}
                       >
@@ -993,20 +987,20 @@ const TaskGroupSection = memo(function TaskGroupSection({
                             : shareMenuState === 'owner-only'
                               ? contextMenuLabels.onlyOwnerCanShare
                               : contextMenuLabels.loadingSharing}
-                      </ContextMenuItem>
+                      </ContextMenu.Item>
                     ) : null}
                     {task.branchName ? (
-                      <ContextMenuItem
-                        onSelect={() => {
+                      <ContextMenu.Item
+                        onClick={() => {
                           void navigator.clipboard.writeText(task.branchName).catch(() => {});
                         }}
                       >
                         <GitBranch />
                         {contextMenuLabels.copyBranch}
-                      </ContextMenuItem>
+                      </ContextMenu.Item>
                     ) : null}
-                  </ContextMenuContent>
-                </ContextMenu>
+                  </ContextMenu.Content>
+                </ContextMenu.Root>
               ) : (
                 row
               );
@@ -1310,7 +1304,7 @@ export const TaskList = memo(function TaskList({
   }
 
   return (
-    <TooltipProvider>
+    <Tooltip.Provider>
       <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
         <SortableContext items={repoIds} strategy={verticalListSortingStrategy}>
           <div className={cn('flex flex-col', className)}>
@@ -1383,6 +1377,6 @@ export const TaskList = memo(function TaskList({
           </div>
         </SortableContext>
       </DndContext>
-    </TooltipProvider>
+    </Tooltip.Provider>
   );
 });

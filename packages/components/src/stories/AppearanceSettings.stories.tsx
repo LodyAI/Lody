@@ -5,7 +5,7 @@ import {
   AppearanceSettingsView,
   type AppearanceSettingsViewProps,
 } from '@/components/settings/appearance-setting';
-import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/ui/dialog';
+import { Dialog } from '@/ui/dialog';
 
 const systemFontFamilies = [
   'Fira Code',
@@ -72,13 +72,13 @@ export const ElectronInDialog: Story = {
     isElectron: true,
   },
   render: (args) => (
-    <Dialog open>
-      <DialogContent>
-        <DialogTitle>Appearance</DialogTitle>
-        <DialogDescription>Electron appearance settings</DialogDescription>
+    <Dialog.Root open>
+      <Dialog.Content>
+        <Dialog.Title>Appearance</Dialog.Title>
+        <Dialog.Description>Electron appearance settings</Dialog.Description>
         <ControlledAppearanceSettings {...args} />
-      </DialogContent>
-    </Dialog>
+      </Dialog.Content>
+    </Dialog.Root>
   ),
 };
 

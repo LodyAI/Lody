@@ -4,7 +4,7 @@ import {
   SessionFilePreviewPanel,
   type SessionFilePreviewStatus,
 } from '@/components/ai-gui/session-file-preview-dialog';
-import { Dialog, DialogContentWithoutClose } from '@/ui/dialog';
+import { Dialog } from '@/ui/dialog';
 
 const file = (overrides: Partial<SessionFilePayload>): SessionFilePayload => ({
   type: 'file',
@@ -78,15 +78,15 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 
-// The panel renders a `DialogTitle`, which requires a Dialog ancestor — mirror
-// the real composition (SessionFilePreviewDialog wraps it in Dialog/DialogContent)
+// The panel renders a `Dialog.Title`, which requires a Dialog.Root ancestor — mirror
+// the real composition (SessionFilePreviewDialog wraps it in Dialog.Root/Dialog.Content)
 // so the story exercises the panel exactly as users see it.
 const wrap = (content: React.ReactNode) => (
-  <Dialog open>
-    <DialogContentWithoutClose className="w-[calc(100vw-2rem)] max-w-3xl">
+  <Dialog.Root open>
+    <Dialog.Content closeButton={false} className="w-[calc(100vw-2rem)] max-w-3xl">
       {content}
-    </DialogContentWithoutClose>
-  </Dialog>
+    </Dialog.Content>
+  </Dialog.Root>
 );
 
 const loaded = (text: string, truncated = false): SessionFilePreviewStatus => ({

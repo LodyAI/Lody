@@ -7,7 +7,7 @@ import {
   type RemoteDirectoryOps,
   type RemoteDirectoryPickerMachine,
 } from '@/components/local-projects/add-local-project-dialog';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 
 type FakeEntry = {
   name: string;
