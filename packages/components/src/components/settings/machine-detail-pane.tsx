@@ -1167,14 +1167,9 @@ function AvailableProviders({
   );
   return (
     <section {...stylex.props(styles.availableSection)}>
-      <header>
-        <p {...stylex.props(surface.sectionTitle)}>
-          {t('settings.agent.provider.emptyTitle', 'No providers on this machine yet')}
-        </p>
-        <p {...stylex.props(surface.sectionDescription)}>
-          {t('settings.agent.provider.emptyPick', 'Pick one to start.')}
-        </p>
-      </header>
+      <p {...stylex.props(surface.sectionTitle)}>
+        {t('settings.agent.provider.emptyTitle', 'No providers on this machine yet')}
+      </p>
       <div {...stylex.props(styles.available)}>
         {available.map((provider) => (
           <button

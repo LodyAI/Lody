@@ -172,7 +172,8 @@ Token、分享）保留卡片。`settings/material.stylex.ts` 把分组的画法
 **Agents 重新设计。** 桌面 Agents 页用的是 Provider 的移动端宽松密度（`variant="list"`）：
 行高 56px、32px 图标方块，额度条被隐藏（只有紧凑行才显示）。现在窗口内使用紧凑行
 （`MachineProvidersSection bare`）：24px 图标、上下 8px 内边距，额度条显示在名称旁。刷新和删除
-只在指针悬停或键盘聚焦时出现，列表静止时只显示每个 Provider 的状态，而不是一列红色垃圾桶。
+只在指针悬停或键盘聚焦时出现，浮在行尾、铺行的悬停底色；列表静止时只显示每个 Provider 的状态并
+延伸到右边缘（隐藏时若仍占位，会留下一条空白，Owner 指出过）。
 机器胶囊改为标题下的标签页（`SettingsLineTabs`，即项目窗口的滑动细线标签页，抽成共享组件），
 只在多于一台机器时显示；“添加 Provider”在页头。先试过页头下拉框，被否决。删除了
 与页面标题重复的“Agent Provider”标题。
@@ -181,7 +182,7 @@ Token、分享）保留卡片。`settings/material.stylex.ts` 把分组的画法
 Provider 第二行写默认模型（来自 composer 同样读取的能力缓存；运行时叫 "default" 的模型不显示）、
 这台机器上使用它的未归档对话数和最近一次活动时间（来自内存中的会话索引），以及环境变量数。
 曾尝试在每个列表下方列出“可添加”，被否决：Owner 只希望在机器一个 Provider 都没有时出现。
-所以空机器的页面是“这台机器还没有 Provider”，下面两列列出内置运行时和预设，点击即打开已选中
+所以空机器的页面是标题“这台机器还没有 Provider”（无副标题），下面两列列出内置运行时和预设，点击即打开已选中
 该 Provider 的添加对话框（`agent-config-dialog.tsx` 的 `listAddableProviders`；实验性运行时、
 Registry Agent 和自定义命令仍只在对话框中）。以上都不发起请求。
 

@@ -36,13 +36,16 @@ import {
 } from '@/lib/session-usage';
 import { settingsType as type } from './type.stylex';
 
+/** The fill a pressable settings row takes under the pointer (`surface.pressableLine`). */
+const ROW_HOVER = `color-mix(in oklab, ${colors.elevatedBackground}, ${colors.label} 4%)`;
+
 /** Wide enough in its own container to set the meters beside the name. */
 const ROOMY = '@container (min-width: 24rem)';
 
 const styles = stylex.create({
   /** A line of the machine's provider card; the list draws the card and the rules. */
   root: { minWidth: 0, containerType: 'inline-size' },
-  row: { display: 'flex', alignItems: 'center', width: '100%', minWidth: 0 },
+  row: { position: 'relative', display: 'flex', alignItems: 'center', width: '100%', minWidth: 0 },
   main: { gap: '10px', paddingInline: space[4], paddingBlock: space[2] },
   mainList: { gap: space[3], paddingInline: space[4], paddingBlock: space[3] },
   icon: {
@@ -70,16 +73,33 @@ const styles = stylex.create({
     color: colors.secondaryLabel,
   },
   trailingList: { paddingBlock: space[3] },
+  /** The compact row's facts end on the rows' own inset. */
+  trailingCompact: { paddingInlineEnd: space[4] },
   /**
    * The row's own actions, shown to the pointer or keyboard that reaches the
    * row: at rest the row says only what is true of the provider.
    */
   actions: { display: 'flex', alignItems: 'center', gap: space[2] },
   reveal: {
+    // Laid over the row's end rather than kept in its flow, so at rest the
+    // row's own facts reach the edge instead of stopping short of two
+    // invisible buttons. The fill is the row's hover fill, faded at its start.
+    position: 'absolute',
+    insetInlineEnd: space[3],
+    top: '50%',
+    transform: 'translateY(-50%)',
+    paddingInlineStart: space[2],
+    backgroundColor: ROW_HOVER,
+    boxShadow: `-16px 0 12px -4px ${ROW_HOVER}`,
     opacity: {
       default: 0,
       [stylex.when.ancestor(':hover')]: 1,
       [stylex.when.ancestor(':focus-within')]: 1,
+    },
+    pointerEvents: {
+      default: 'none',
+      [stylex.when.ancestor(':hover')]: 'auto',
+      [stylex.when.ancestor(':focus-within')]: 'auto',
     },
   },
   /** The meters sit beside the name when the row has room, and under it when not. */
@@ -306,7 +326,9 @@ export function ProviderRow({
             ) : null}
           </div>
         </button>
-        <div {...stylex.props(styles.trailing, !compact && styles.trailingList)}>
+        <div
+          {...stylex.props(styles.trailing, compact ? styles.trailingCompact : styles.trailingList)}
+        >
           {/* Not mounted at all when ineligible, so a non-Codex row costs no
               store subscription and no clock tick. */}
           {showResetForecast ? <CodexResetForecastChip enabled /> : null}

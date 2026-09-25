@@ -248,8 +248,9 @@ density (`variant="list"`): 56px rows, a 32px icon tile, and the rate-limit
 meters hidden, since only the compact row shows them. The pane now draws the
 compact row (`MachineProvidersSection bare`): a 24px glyph, 8px block padding,
 and the meters beside the name. Refresh and delete appear only under the pointer
-or keyboard focus, so a list at rest shows what is true of each provider rather
-than a column of red bins. The machine pills became the page's tabs under its title
+or keyboard focus, laid over the row's end on its hover fill, so a list at rest
+shows what is true of each provider and reaches the edge (kept in the flow while
+hidden, they left an empty band the owner spotted). The machine pills became the page's tabs under its title
 (`SettingsLineTabs`, the project window's sliding-line tabs made shared), shown
 only when there is more than one machine; "Add provider" sits in the page header.
 A header Select was tried first and rejected.
@@ -262,8 +263,8 @@ the composer reads; a model the runtime calls "default" is left out), how many
 open conversations on this machine use it and when one last moved (from the
 session index in memory), and its environment variable count. A list of what the machine could still add
 was tried under every list and rejected: the owner wants it only when the
-machine has nothing. So an empty machine's page is "No providers on this machine
-yet", then the builtin runtimes and presets in two columns, each opening the add
+machine has nothing. So an empty machine's page is the title "No providers on this
+machine yet" (no subtitle), then the builtin runtimes and presets in two columns, each opening the add
 dialog already on that provider (`listAddableProviders` in
 `agent-config-dialog.tsx`; experimental runtimes, registry agents and custom
 commands stay behind the dialog's rail). None of this makes a request.
