@@ -67,21 +67,36 @@ class McpHttpHostSupervisor {
       const startedAtMs = Date.now();
       let handshaked = false;
       let exitCode: number | null = null;
+      let exitSignal: NodeJS.Signals | null = null;
+      let hostPid: number | undefined;
       try {
         const child = this.spawnChild(cliEntrypoint);
         this.child = child;
+        hostPid = child.pid;
         const port = await this.readHandshake(child);
         handshaked = true;
         this.lastPort = port;
         this.endpoint = { url: `http://127.0.0.1:${port}/mcp`, token: this.token };
-        this.logger.info(`[mcp-http] host serving on ${this.endpoint.url}`);
-        const [code] = (await once(child, 'exit')) as [number | null, NodeJS.Signals | null];
+        this.logger.info(`[mcp-http] host serving on ${this.endpoint.url} (pid=${hostPid})`);
+        const [code, signal] = (await once(child, 'exit')) as [
+          number | null,
+          NodeJS.Signals | null,
+        ];
         exitCode = code;
+        exitSignal = signal;
       } catch (error) {
         if (!this.stopping) {
           this.logger.warn(`[mcp-http] host start failed: ${formatErrorMessage(error)}`);
         }
         exitCode = this.child?.exitCode ?? null;
+        exitSignal = this.child?.signalCode ?? null;
+      }
+      if (!this.stopping) {
+        this.logger.warn(
+          `[mcp-http] host pid=${hostPid ?? '?'} ended (code=${exitCode} signal=${
+            exitSignal ?? 'none'
+          } handshaked=${handshaked} uptimeMs=${Date.now() - startedAtMs})`
+        );
       }
       this.endpoint = null;
       this.child = null;
@@ -167,12 +182,30 @@ class McpHttpHostSupervisor {
         child.removeListener('exit', onExit);
         fn();
       };
+      const armedAtMs = Date.now();
       const timer = setTimeout(() => {
+        // A timer that fires far past its deadline means THIS event loop was
+        // blocked: timers run before pending pipe I/O, so the host may already
+        // have answered. Record the lateness so a stalled parent is not misread
+        // as a broken host.
+        const elapsedMs = Date.now() - armedAtMs;
         child.kill('SIGKILL');
-        settle(() => rejectPromise(new Error('host handshake timed out')));
+        settle(() =>
+          rejectPromise(
+            new Error(
+              `host handshake timed out (pid=${child.pid ?? '?'} elapsedMs=${elapsedMs} timeoutMs=${HANDSHAKE_TIMEOUT_MS} timerLateMs=${
+                elapsedMs - HANDSHAKE_TIMEOUT_MS
+              } partialHandshakeBytes=${buffer.length}); killed with SIGKILL`
+            )
+          )
+        );
       }, HANDSHAKE_TIMEOUT_MS);
-      const onExit = (code: number | null) => {
-        settle(() => rejectPromise(new Error(`host exited before handshake (code=${code})`)));
+      const onExit = (code: number | null, signal: NodeJS.Signals | null) => {
+        settle(() =>
+          rejectPromise(
+            new Error(`host exited before handshake (code=${code} signal=${signal ?? 'none'})`)
+          )
+        );
       };
       const onData = (chunk: Buffer | string) => {
         buffer += chunk.toString();

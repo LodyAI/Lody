@@ -102,6 +102,7 @@ function launch(
   let reservedHostPort = hostPort
   const app = Object.assign(new EventEmitter(), {
     isPackaged: packaged,
+    getVersion: () => '0.0.0-test',
     commandLine: { getSwitchValue: () => '', appendSwitch() {} },
     getPath: (key) => paths.get(key),
     setPath: (key, value) => paths.set(key, value),
@@ -127,6 +128,7 @@ function launch(
   })
   const electron = {
     app,
+    powerMonitor: new EventEmitter(),
     protocol: { registerSchemesAsPrivileged: () => events.push(['scheme']) },
     dialog: {
       showMessageBox: async (options) => {
@@ -180,11 +182,18 @@ function launch(
         events.push(['error', ...args.map(String)])
       }
     },
-    process: { ...process, env: { LODY_E2E: e2e ? '1' : '0' }, argv: ['electron'] },
+    process: {
+      ...process,
+      // The desktop log writes under the data dir; keep it inside the fixture root.
+      env: { LODY_E2E: e2e ? '1' : '0', LODY_DATA_DIR: root },
+      argv: ['electron'],
+      on() {}
+    },
     URL,
     Buffer,
     setTimeout,
     clearTimeout,
+    setImmediate,
     setInterval(callback, delay, ...args) {
       const timer = setInterval(() => callback(...args), delay)
       timers.add(timer)
