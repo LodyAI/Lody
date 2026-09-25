@@ -1,5 +1,5 @@
 import { useTranslation } from 'react-i18next';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 
 export function PiProviderMigrationCard({
   count,
@@ -36,7 +36,7 @@ export function PiProviderMigrationCard({
           )}
         </p>
       )}
-      <Button className="mt-3" size="sm" disabled={busy || !canMigrate} onClick={onConfirm}>
+      <Button className="mt-3" size="small" disabled={busy || !canMigrate} onClick={onConfirm}>
         {busy
           ? t('chat.piMigration.running', 'Upgrading…')
           : t('chat.piMigration.confirm', 'Confirm upgrade')}

@@ -20,10 +20,10 @@ import {
   validateAgentRoleForm,
   type AgentRoleFormValue,
 } from '@/lib/agent-role-form';
-import { cn } from '@/lib/utils';
 import { capturePostHogEvent } from '@/lib/posthog-analytics';
-import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/ui/dialog';
+import { Dialog } from '@/ui/dialog';
 import { AgentRoleForm } from './agent-role-form';
+import { SETTINGS_EDITOR_DIALOG_LAYOUT } from './surface';
 
 /**
  * A `create` carries its id from the moment the form opens.
@@ -204,36 +204,30 @@ export function AgentRoleEditorDialog({
   };
 
   return (
-    <Dialog
+    <Dialog.Root
       open={editor !== null}
       onOpenChange={(open) => {
         if (!open) close();
       }}
     >
-      <DialogContent
-        overlayClassName={
+      <Dialog.Content
+        backdropClassName={
           // Desktop settings is itself a dialog; match its z-index so this
           // later overlay covers it without stacking a second /80 veil.
           isMobile ? undefined : 'z-[var(--z-dialog)] bg-black/20'
         }
-        className={cn(
-          'flex max-h-[min(680px,88dvh)] w-[min(620px,96dvw)] max-w-none flex-col gap-0 overflow-hidden p-0 sm:max-w-none sm:p-0',
-          !isMobile && 'shadow-popover'
-        )}
+        className={SETTINGS_EDITOR_DIALOG_LAYOUT}
       >
-        <header className="shrink-0 border-b border-border/60 px-5 py-3 pr-12">
-          <DialogTitle className="text-sm font-normal">
+        <Dialog.Header>
+          <Dialog.Title>
             {editor?.mode === 'edit'
               ? t('settings.agentRoles.editTitle')
               : t('settings.agentRoles.addTitle')}
-          </DialogTitle>
-          <DialogDescription className="mt-0.5 text-xs leading-snug text-muted-foreground">
-            {t('settings.agentRoles.dialogDescription')}
-          </DialogDescription>
-        </header>
+          </Dialog.Title>
+          <Dialog.Description>{t('settings.agentRoles.dialogDescription')}</Dialog.Description>
+        </Dialog.Header>
         {editor && editorValue ? (
           <AgentRoleForm
-            className="min-h-0 flex-1"
             value={editorValue}
             onChange={(value) => onChange({ ...editor, value })}
             machines={machineOptions}
@@ -251,7 +245,7 @@ export function AgentRoleEditorDialog({
             onCancel={close}
           />
         ) : null}
-      </DialogContent>
-    </Dialog>
+      </Dialog.Content>
+    </Dialog.Root>
   );
 }

@@ -1,7 +1,7 @@
 import { useTranslation } from 'react-i18next';
-import { Spinner } from '@/ui/spinner';
-import { Button } from '@/ui/button';
-import { Progress } from '@/ui/progress';
+import { Spinner } from '@lody/ui/spinner';
+import { Button } from '@lody/ui/button';
+import { Progress } from '@lody/ui/progress';
 import { cn } from '@/lib/utils';
 import type { UpdateBannerState } from '@/lib/electron-update-banner';
 
@@ -64,11 +64,11 @@ export function SidebarUpdateBanner({
         {t('sidebar.updateReady.changelog', 'View changelog')}
       </button>
       <div className="mt-2 flex items-center justify-end gap-2">
-        <Button type="button" variant="ghost" size="sm" className="h-7 px-2.5" onClick={onLater}>
+        <Button type="button" variant="ghost" size="small" className="h-7 px-2.5" onClick={onLater}>
           {t('sidebar.updateReady.later', 'Later')}
         </Button>
         {isDownloading ? null : (
-          <Button type="button" size="sm" className="h-7 px-2.5" onClick={onRestart}>
+          <Button type="button" size="small" className="h-7 px-2.5" onClick={onRestart}>
             {isRestarting ? <Spinner className="mr-1.5 h-3.5 w-3.5" /> : null}
             {t('sidebar.updateReady.restart', 'Update & Restart')}
           </Button>

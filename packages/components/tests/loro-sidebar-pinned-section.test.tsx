@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import React from 'react';
+import React, { act } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync } from 'react-dom';
 import { createRoot, type Root } from 'react-dom/client';
@@ -70,7 +70,13 @@ describe('LoroSidebar pinned section', () => {
     });
   }
 
-  it('offers workspace context actions without switching the selected workspace', () => {
+  // Base UI defers the menu's portal mount to a frame; jsdom's rAF is a real
+  // timer, so give it a beat after opening.
+  const flushFrame = async () => {
+    await new Promise((resolve) => setTimeout(resolve, 40));
+  };
+
+  it('offers workspace context actions without switching the selected workspace', async () => {
     const previous = window.__LODY_ELECTRON__;
     window.__LODY_ELECTRON__ = true;
     try {
@@ -86,8 +92,9 @@ describe('LoroSidebar pinned section', () => {
       });
       const trigger = container?.querySelector('[data-workspace-switcher-trigger]');
       flushSync(() => {
-        trigger?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+        trigger?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }));
       });
+      await flushFrame();
       const target = Array.from(
         document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')
       ).find((item) => item.textContent?.includes('Second workspace'));
@@ -102,6 +109,7 @@ describe('LoroSidebar pinned section', () => {
       flushSync(() => {
         target?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, button: 2 }));
       });
+      await flushFrame();
       expect(
         Array.from(document.querySelectorAll('[role="menuitem"]')).some(
           (item) => item.textContent === 'Open in new window'
@@ -122,7 +130,7 @@ describe('LoroSidebar pinned section', () => {
     }
   });
 
-  it('keeps workspace rows selectable in browsers', () => {
+  it('keeps workspace rows selectable in browsers', async () => {
     let selected = 'workspace';
     renderSidebar({
       workspaces: [
@@ -135,8 +143,9 @@ describe('LoroSidebar pinned section', () => {
     });
     const trigger = container?.querySelector('[data-workspace-switcher-trigger]');
     flushSync(() => {
-      trigger?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      trigger?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }));
     });
+    await flushFrame();
     const target = Array.from(
       document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')
     ).find((item) => item.textContent?.includes('Second workspace'));
@@ -162,7 +171,7 @@ describe('LoroSidebar pinned section', () => {
     }
   );
 
-  it('keeps Archive and Help behind one More menu in the footer', () => {
+  it('keeps Archive and Help behind one More menu in the footer', async () => {
     const onArchiveClicked = vi.fn();
     const onDocsClicked = vi.fn();
     renderSidebar({ onArchiveClicked, onDocsClicked });
@@ -177,16 +186,12 @@ describe('LoroSidebar pinned section', () => {
     const more = footerButton('More');
     expect(more).toBeDefined();
 
-    flushSync(() => {
-      more?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
-    });
+    await act(async () => more?.click());
     const items = Array.from(document.querySelectorAll<HTMLElement>('[role="menuitem"]'));
     expect(items[0]?.textContent).toBe('Archive');
     expect(items.some((item) => item.textContent?.includes('Docs'))).toBe(true);
 
-    flushSync(() => {
-      items[0]?.click();
-    });
+    await act(async () => items[0]?.click());
     expect(onArchiveClicked).toHaveBeenCalledTimes(1);
   });
 

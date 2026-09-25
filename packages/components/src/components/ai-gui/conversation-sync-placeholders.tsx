@@ -1,12 +1,12 @@
 import { useTranslation } from 'react-i18next';
 import { ConversationColumn } from '@/components/shared/conversation-column';
-import { Skeleton } from '@/ui/skeleton';
+import { Skeleton } from '@lody/ui/skeleton';
 
 /** Alternating user bubble / reply lines, sized like a real exchange. */
 const SKELETON_TURNS = [
-  { bubble: 'w-2/5', lines: ['w-11/12', 'w-4/5', 'w-3/5'] },
-  { bubble: 'w-1/3', lines: ['w-full', 'w-10/12', 'w-2/3', 'w-1/2'] },
-  { bubble: 'w-1/2', lines: ['w-11/12', 'w-3/4'] },
+  { bubble: '40%', lines: ['92%', '80%', '60%'] },
+  { bubble: '33%', lines: ['100%', '83%', '67%', '50%'] },
+  { bubble: '50%', lines: ['92%', '75%'] },
 ] as const;
 
 /**
@@ -26,11 +26,11 @@ export function ConversationSkeleton() {
       {SKELETON_TURNS.map((turn, index) => (
         // eslint-disable-next-line react/no-array-index-key
         <div key={index} className="flex flex-col gap-3">
-          <Skeleton className={`h-9 self-end rounded-2xl ${turn.bubble}`} />
+          <Skeleton shape="block" width={turn.bubble} height={36} className="self-end" />
           <div className="flex flex-col gap-2">
             {turn.lines.map((width, line) => (
               // eslint-disable-next-line react/no-array-index-key
-              <Skeleton key={line} className={`h-3.5 ${width}`} />
+              <Skeleton key={line} width={width} height={14} />
             ))}
           </div>
         </div>

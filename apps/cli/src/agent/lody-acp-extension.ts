@@ -46,6 +46,7 @@ const VersionOneSchema = z.object({ version: z.literal(1) });
 const GoalActionSchema = z.enum(['set', 'pause', 'resume', 'clear']);
 const LodyCapabilitiesSchema = z
   .object({
+    sessionTitle: VersionOneSchema.optional().catch(undefined),
     usage: VersionOneSchema.optional(),
     rateLimits: VersionOneSchema.extend({ query: z.literal(true).optional() }).optional(),
     forkAtTurn: VersionOneSchema.optional(),

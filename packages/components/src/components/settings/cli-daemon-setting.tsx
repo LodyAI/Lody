@@ -1,21 +1,48 @@
 import { Play, RotateCcw, Square } from 'lucide-react';
-import { Spinner } from '@/ui/spinner';
+import * as stylex from '@stylexjs/stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { corner, radius, space } from '@lody/ui/tokens/scales.stylex';
+import { Spinner } from '@lody/ui/spinner';
 import { useTranslation } from 'react-i18next';
 import type { ElectronCliState } from '@lody/shared';
-import { cn } from '@/lib/utils';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { useElectronCliDaemon } from '@/hooks/use-electron-cli-daemon';
 import { CompactRow } from './compact-layout';
 
-const PHASE_TONE: Record<ElectronCliState['phase'], string> = {
-  starting: 'bg-status-warning',
-  running: 'bg-status-success',
-  degraded: 'bg-status-warning',
-  reconnecting: 'bg-status-warning',
-  offline: 'bg-status-danger',
-  fatal: 'bg-status-danger',
-  stopping: 'bg-status-warning',
-  stopped: 'bg-muted-foreground/50',
+const styles = stylex.create({
+  anchor: { scrollMarginTop: '96px' },
+  status: {
+    display: 'inline-flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    gap: space[1.5],
+    whiteSpace: 'nowrap',
+    fontSize: '0.8em',
+    color: colors.secondaryLabel,
+  },
+  dot: {
+    width: '6px',
+    height: '6px',
+    flexShrink: 0,
+    borderRadius: radius.full,
+    cornerShape: corner.round,
+  },
+  success: { backgroundColor: colors.success },
+  warning: { backgroundColor: colors.warning },
+  danger: { backgroundColor: colors.destructive },
+  idle: { backgroundColor: colors.tertiaryLabel },
+  icon: { width: '14px', height: '14px', flexShrink: 0 },
+});
+
+const PHASE_TONE: Record<ElectronCliState['phase'], stylex.StyleXStyles> = {
+  starting: styles.warning,
+  running: styles.success,
+  degraded: styles.warning,
+  reconnecting: styles.warning,
+  offline: styles.danger,
+  fatal: styles.danger,
+  stopping: styles.warning,
+  stopped: styles.idle,
 };
 
 /**
@@ -43,7 +70,7 @@ export function CliDaemonSetting() {
   const localAgentEnabled = state?.localAgentEnabled === true;
 
   return (
-    <div id="cli-daemon" className="scroll-mt-24">
+    <div id="cli-daemon" {...stylex.props(styles.anchor)}>
       <CompactRow
         label={t('settings.general.cliDaemon.label', 'Daemon')}
         helper={t(
@@ -52,44 +79,37 @@ export function CliDaemonSetting() {
         )}
         alignTop
       >
-        <div className="flex flex-wrap items-center justify-end gap-2">
-          <span className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap text-xs text-muted-foreground">
-            <span className={cn('h-1.5 w-1.5 rounded-full', PHASE_TONE[phase])} />
-            {phaseLabels[phase]}
-          </span>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="h-7 gap-1.5 px-2 text-xs"
-            disabled={busy || !localAgentEnabled}
-            onClick={() => void restart()}
-          >
-            {isRestarting ? (
-              <Spinner className="h-3.5 w-3.5" />
-            ) : isStopped ? (
-              <Play className="h-3.5 w-3.5" />
-            ) : (
-              <RotateCcw className="h-3.5 w-3.5" />
-            )}
-            {isStopped ? t('sidebar.cli.start', 'Start') : t('sidebar.cli.restart', 'Restart')}
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="h-7 gap-1.5 border-status-danger/30 px-2 text-xs text-status-danger hover:bg-status-danger/10 hover:text-status-danger disabled:text-muted-foreground/60"
-            disabled={busy || isStopped}
-            onClick={() => void terminate()}
-          >
-            {isTerminating ? (
-              <Spinner className="h-3.5 w-3.5" />
-            ) : (
-              <Square className="h-3.5 w-3.5" />
-            )}
-            {t('sidebar.cli.terminate', 'Terminate')}
-          </Button>
-        </div>
+        <span {...stylex.props(styles.status)}>
+          <span {...stylex.props(styles.dot, PHASE_TONE[phase])} />
+          {phaseLabels[phase]}
+        </span>
+        <Button
+          type="button"
+          variant="secondary"
+          size="small"
+          disabled={busy || !localAgentEnabled}
+          onClick={() => void restart()}
+        >
+          {isRestarting ? (
+            <Spinner size="small" />
+          ) : isStopped ? (
+            <Play {...stylex.props(styles.icon)} />
+          ) : (
+            <RotateCcw {...stylex.props(styles.icon)} />
+          )}
+          {isStopped ? t('sidebar.cli.start', 'Start') : t('sidebar.cli.restart', 'Restart')}
+        </Button>
+        <Button
+          type="button"
+          variant="secondary"
+          size="small"
+          tone="destructive"
+          disabled={busy || isStopped}
+          onClick={() => void terminate()}
+        >
+          {isTerminating ? <Spinner size="small" /> : <Square {...stylex.props(styles.icon)} />}
+          {t('sidebar.cli.terminate', 'Terminate')}
+        </Button>
       </CompactRow>
     </div>
   );

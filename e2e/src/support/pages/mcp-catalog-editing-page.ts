@@ -21,9 +21,9 @@ export class McpCatalogEditingPage {
     await editor.getByLabel(/^(Command|命令)$/u).fill(this.fixture.command);
     await editor.locator('input[placeholder="--flag"]').fill(this.fixture.args[0]!);
     const enabledByDefault = editor.getByRole('switch');
-    await expect(enabledByDefault).toHaveAttribute('data-state', 'unchecked');
+    await expect(enabledByDefault).toHaveAttribute('aria-checked', 'false');
     await enabledByDefault.click();
-    await expect(enabledByDefault).toHaveAttribute('data-state', 'checked');
+    await expect(enabledByDefault).toHaveAttribute('aria-checked', 'true');
     await editor.getByRole('button', { name: /^(Save|保存)$/u }).click();
     await expect(settings.getByText(this.fixture.initialServerName, { exact: true })).toBeVisible({
       timeout: 30_000,
@@ -37,7 +37,7 @@ export class McpCatalogEditingPage {
     await expect(
       settings.getByText(this.fixture.initialDescription, { exact: true })
     ).toBeVisible();
-    await expect(settings.getByRole('switch')).toHaveAttribute('data-state', 'checked');
+    await expect(settings.getByRole('switch')).toHaveAttribute('aria-checked', 'true');
     await this.closeSettings(settings);
   }
 
@@ -62,30 +62,30 @@ export class McpCatalogEditingPage {
     await expect(settings.getByText(this.fixture.initialServerName, { exact: true })).toBeHidden();
     await expect(settings.getByText(this.fixture.editedServerName, { exact: true })).toBeVisible();
     await expect(settings.getByText(this.fixture.editedDescription, { exact: true })).toBeVisible();
-    await expect(settings.getByRole('switch')).toHaveAttribute('data-state', 'checked');
+    await expect(settings.getByRole('switch')).toHaveAttribute('aria-checked', 'true');
     await this.closeSettings(settings);
   }
 
   async disableAndReEnableServer(): Promise<void> {
     const settings = await this.openMcpSettings();
     const enabledByDefault = settings.getByRole('switch');
-    await expect(enabledByDefault).toHaveAttribute('data-state', 'checked');
+    await expect(enabledByDefault).toHaveAttribute('aria-checked', 'true');
     await enabledByDefault.click();
-    await expect(enabledByDefault).toHaveAttribute('data-state', 'unchecked');
+    await expect(enabledByDefault).toHaveAttribute('aria-checked', 'false');
     await this.closeSettings(settings);
 
     const reopened = await this.openMcpSettings();
     const persistedSwitch = reopened.getByRole('switch');
-    await expect(persistedSwitch).toHaveAttribute('data-state', 'unchecked');
+    await expect(persistedSwitch).toHaveAttribute('aria-checked', 'false');
     await persistedSwitch.click();
-    await expect(persistedSwitch).toHaveAttribute('data-state', 'checked');
+    await expect(persistedSwitch).toHaveAttribute('aria-checked', 'true');
     await this.closeSettings(reopened);
   }
 
   async expectReEnabledEntryPersisted(): Promise<void> {
     const settings = await this.openMcpSettings();
     await expect(settings.getByText(this.fixture.editedServerName, { exact: true })).toBeVisible();
-    await expect(settings.getByRole('switch')).toHaveAttribute('data-state', 'checked');
+    await expect(settings.getByRole('switch')).toHaveAttribute('aria-checked', 'true');
     await this.closeSettings(settings);
   }
 

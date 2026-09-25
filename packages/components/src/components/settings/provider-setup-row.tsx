@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import * as stylex from '@stylexjs/stylex';
 import { useTranslation } from 'react-i18next';
 import { useAtomValue } from 'jotai';
 import {
@@ -8,11 +9,13 @@ import {
   type ProviderSetupTask,
 } from '@lody/shared';
 import { RotateCcw, Trash2 } from 'lucide-react';
-import { Spinner } from '@/ui/spinner';
+import { Spinner } from '@lody/ui/spinner';
 
 import { AgentReadinessMark, type AgentReadiness } from '@/components/shared/agent-readiness-mark';
-import { Button } from '@/ui/button';
-import { cn } from '@/lib/utils';
+import { Button } from '@lody/ui/button';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { space } from '@lody/ui/tokens/scales.stylex';
+import { withClassName } from '@/lib/stylex';
 import { openExternalUrl } from '@/lib/native-browser';
 import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
 import { useMachineAcpBinaryProgress } from '@/hooks/use-machine-acp-binary-progress';
@@ -21,6 +24,68 @@ import { AcpAuthenticationPanel } from './acp-authentication-panel';
 import { labelForAgent } from './provider-row';
 import { ProviderProgressButton } from './provider-progress-button';
 import { BUB_ACP_INSTALL_DOCS_URL, BubInstallGuide } from './bub-install-guide';
+import { settingsCatalog as catalog } from './surface';
+
+/** Where the agent's text column starts: the mark, its gap, and the row's inset. */
+const TEXT_INSET = '52px';
+
+const styles = stylex.create({
+  root: { minWidth: 0 },
+  head: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: space[3],
+    minWidth: 0,
+    paddingBlock: space[3],
+    paddingInlineStart: space[3],
+  },
+  text: { flexGrow: 1, minWidth: 0 },
+  name: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: '0.875em',
+    color: colors.label,
+  },
+  agent: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: '0.75em',
+    color: colors.secondaryLabel,
+  },
+  /** The provider row's status column, reserved so the actions line up with it. */
+  statusSlot: { flexShrink: 0, minWidth: '80px' },
+  actions: {
+    display: 'flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    gap: space[1],
+    paddingInlineEnd: space[3],
+  },
+  editSlot: { flexShrink: 0, width: '48px' },
+  primarySlot: {
+    display: 'flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    width: '80px',
+  },
+  /** Layout only, for the button in the slot: it fills the slot. */
+  fill: { width: '100%' },
+  /** Aligned to the name above it, not to the edge: it is about this agent. */
+  detail: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: space[2],
+    paddingInlineStart: TEXT_INSET,
+    paddingInlineEnd: space[3],
+    paddingBottom: space[3],
+  },
+  status: { margin: 0, fontSize: '0.75em', color: colors.secondaryLabel },
+  /** A failure says so in its sentence; the row takes no border for it. */
+  statusFailed: { color: colors.destructive },
+});
 
 export type ProviderSetupRowProps = {
   setup: ProviderSetupTask;
@@ -28,6 +93,7 @@ export type ProviderSetupRowProps = {
   machine: MachineViewMeta | undefined;
   onRetry: (setup: ProviderSetupTask) => Promise<void>;
   onDelete: (setup: ProviderSetupTask) => Promise<void>;
+  /** Layout only. The row draws no surface: a list's card draws it. */
   className?: string;
 };
 
@@ -142,14 +208,8 @@ export function ProviderSetupRow({
         : 'ready';
 
   return (
-    <div
-      className={cn(
-        'rounded-lg border border-border/60 bg-card/40',
-        setup.status === 'failed' && 'border-status-error/30',
-        className
-      )}
-    >
-      <div className="flex min-w-0 items-center gap-3 py-3 pl-3">
+    <div {...withClassName(stylex.props(styles.root), className)}>
+      <div {...stylex.props(styles.head)}>
         <AgentReadinessMark
           cliType={config.cliType}
           agentType={config.agentType}
@@ -159,21 +219,21 @@ export function ProviderSetupRow({
           percent={downloadPercent}
           size="md"
         />
-        <div className="min-w-0 flex-1">
-          <div className="truncate text-sm font-normal">{config.name}</div>
-          <div className="truncate text-xs text-muted-foreground">
+        <div {...stylex.props(styles.text)}>
+          <div {...stylex.props(styles.name)}>{config.name}</div>
+          <div {...stylex.props(styles.agent)}>
             {labelForAgent(config.cliType, config.agentType)}
           </div>
         </div>
         {/* Reserve the provider row's status and edit columns so setup actions
             stay aligned with published providers. Failures are explained below. */}
-        <div className="min-w-20 shrink-0" aria-hidden="true" />
-        <div className="flex shrink-0 items-center gap-1 pr-3">
-          <div className="w-12 shrink-0" />
-          <div className="flex w-20 shrink-0 items-center justify-end">
+        <div {...stylex.props(styles.statusSlot)} aria-hidden="true" />
+        <div {...stylex.props(styles.actions)}>
+          <div {...stylex.props(styles.editSlot)} />
+          <div {...stylex.props(styles.primarySlot)}>
             {active ? (
               <ProviderProgressButton
-                className="w-full"
+                className={stylex.props(styles.fill).className}
                 percent={downloadPercent}
                 label={
                   downloadPercent !== null
@@ -187,16 +247,16 @@ export function ProviderSetupRow({
             ) : setup.status === 'failed' ? (
               <Button
                 type="button"
-                variant="outline"
-                size="sm"
-                className="w-full gap-1 px-0"
+                variant="secondary"
+                size="small"
+                className={stylex.props(styles.fill).className}
                 disabled={actionPending !== null}
                 onClick={() => void runAction('retry', onRetry)}
               >
                 {actionPending === 'retry' ? (
-                  <Spinner className="h-3.5 w-3.5" />
+                  <Spinner size="small" />
                 ) : (
-                  <RotateCcw className="h-3.5 w-3.5" />
+                  <RotateCcw {...stylex.props(catalog.icon)} />
                 )}
                 {t('common.retry', 'Retry')}
               </Button>
@@ -205,44 +265,44 @@ export function ProviderSetupRow({
           <Button
             type="button"
             variant="ghost"
-            size="icon"
-            className="h-8 w-8 shrink-0 text-muted-foreground hover:text-destructive"
+            size="small"
+            icon
+            tone="destructive"
             disabled={actionPending !== null}
             aria-label={t('common.delete', 'Delete')}
             onClick={() => void runAction('delete', onDelete)}
           >
             {actionPending === 'delete' ? (
-              <Spinner className="h-3.5 w-3.5" />
+              <Spinner size="small" />
             ) : (
-              <Trash2 className="h-3.5 w-3.5" />
+              <Trash2 {...stylex.props(catalog.icon)} />
             )}
           </Button>
         </div>
       </div>
-      {/* Aligned to the name above it, not to the card edge: the sentence is
-          about this agent, so it starts where the agent's text column starts. */}
-      <p className="ml-[3.25rem] pb-3 pr-3 text-xs text-muted-foreground">{statusText}</p>
-      {showBubInstallCommand ? (
-        <div className="ml-[3.25rem] space-y-2 pb-3 pr-3">
+      {/* Aligned to the name above it, not to the edge: the sentence is about
+          this agent, so it starts where the agent's text column starts. */}
+      <div {...stylex.props(styles.detail)}>
+        <p {...stylex.props(styles.status, setup.status === 'failed' && styles.statusFailed)}>
+          {statusText}
+        </p>
+        {showBubInstallCommand ? (
           <BubInstallGuide />
-        </div>
-      ) : setup.status === 'failed' && installDocsUrl ? (
-        <div className="ml-[3.25rem] pb-3 pr-3">
-          <Button
-            type="button"
-            variant="link"
-            size="sm"
-            className="h-auto p-0 text-xs"
-            onClick={() => {
-              void openExternalUrl(installDocsUrl);
-            }}
-          >
-            {t('settings.agent.dialog.bubInstallDocs', 'Open install guide')}
-          </Button>
-        </div>
-      ) : null}
-      {setup.status === 'awaiting-auth' ? (
-        <div className="ml-[3.25rem] pb-3 pr-3">
+        ) : setup.status === 'failed' && installDocsUrl ? (
+          <div>
+            <Button
+              type="button"
+              variant="link"
+              size="small"
+              onClick={() => {
+                void openExternalUrl(installDocsUrl);
+              }}
+            >
+              {t('settings.agent.dialog.bubInstallDocs', 'Open install guide')}
+            </Button>
+          </div>
+        ) : null}
+        {setup.status === 'awaiting-auth' ? (
           <AcpAuthenticationPanel
             machineId={setup.machineId}
             configId={config.id}
@@ -253,8 +313,8 @@ export function ProviderSetupRow({
             env={config.env}
             compact
           />
-        </div>
-      ) : null}
+        ) : null}
+      </div>
     </div>
   );
 }

@@ -1,22 +1,18 @@
 import { useCallback, useId, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ChevronRight, ListFilter, LockKeyhole, Users } from 'lucide-react';
+import * as stylex from '@stylexjs/stylex';
 import { type MachineId, type MachineViewMeta } from '@lody/shared';
 import type { MachineSettingsFilter } from '@/atoms/settings-machine-tab';
 import type { MachineVisibilityAccess } from '@/hooks/use-visible-machine-metas';
-import { Button } from '@/ui/button';
-import {
-  DropdownMenu,
-  DropdownMenuCheckboxItem,
-  DropdownMenuContent,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from '@/ui/dropdown-menu';
-import { cn } from '@/lib/utils';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/ui/tooltip';
+import { Button } from '@lody/ui/button';
+import { Menu } from '@/ui/menu';
+import { Tooltip } from '@lody/ui/tooltip';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { corner, radius, space } from '@lody/ui/tokens/scales.stylex';
 import { UserAvatar } from '@/components/user-avatar';
 import { FocusScope, useListKeyboardNavigation } from '@/ui/focus-scope';
+import { settingsSurface as surface } from './surface';
 
 export type MachineTabListVariant = 'compact' | 'detailed';
 
@@ -73,30 +69,37 @@ export function MachineTabList({
   const hiddenByFilter = Math.max(0, totalBeforeFilter - items.length);
 
   return (
-    <TooltipProvider delayDuration={250}>
-      <FocusScope id={scopeId} className="flex h-full min-h-0 w-full min-w-0 flex-col">
-        <div className="flex items-center justify-between gap-2 px-2 pb-2">
-          <p className="min-w-0 truncate text-xs font-normal text-muted-foreground">
-            {t('workspace.machines.title', 'Machines')}
-          </p>
+    <Tooltip.Provider delay={250}>
+      <FocusScope id={scopeId} {...stylex.props(styles.scope)}>
+        <div {...stylex.props(styles.header)}>
+          <p {...stylex.props(styles.title)}>{t('workspace.machines.title', 'Machines')}</p>
           {showFilter ? (
             <MachineListFilterButton filter={filter} onFilterChange={onFilterChange} />
           ) : null}
         </div>
 
-        <div className="min-h-0 min-w-0 flex-1 overflow-y-auto pr-1">
-          <ul className={cn('min-w-0', variant === 'detailed' ? 'space-y-2' : 'space-y-1')}>
-            {items.map((item) =>
-              variant === 'detailed' ? (
-                <DetailedMachineTab
-                  key={item.machine.id}
-                  item={item}
-                  isSelected={item.machine.id === selectedMachineId}
-                  onSelect={() => onSelect(item.machine.id)}
-                  showOwner={showOwner}
-                  ownerByUserId={ownerByUserId}
-                />
-              ) : (
+        <div {...stylex.props(styles.scroller)}>
+          {/* The detailed list is a list of records: one card of ruled rows. The
+              compact one is a sidebar list, rows with no edge of their own. */}
+          {variant === 'detailed' ? (
+            items.length > 0 ? (
+              <ul {...stylex.props(styles.list, surface.card)}>
+                {items.map((item, index) => (
+                  <DetailedMachineTab
+                    key={item.machine.id}
+                    item={item}
+                    ruled={index > 0}
+                    isSelected={item.machine.id === selectedMachineId}
+                    onSelect={() => onSelect(item.machine.id)}
+                    showOwner={showOwner}
+                    ownerByUserId={ownerByUserId}
+                  />
+                ))}
+              </ul>
+            ) : null
+          ) : (
+            <ul {...stylex.props(styles.list, styles.sidebarList)}>
+              {items.map((item) => (
                 <MachineTab
                   key={item.machine.id}
                   item={item}
@@ -105,11 +108,11 @@ export function MachineTabList({
                   showOwner={showOwner}
                   ownerByUserId={ownerByUserId}
                 />
-              )
-            )}
-          </ul>
+              ))}
+            </ul>
+          )}
           {items.length === 0 && (
-            <div className="px-2 py-4 text-center text-xs text-muted-foreground">
+            <div {...stylex.props(styles.empty)}>
               {totalBeforeFilter === 0
                 ? t('workspace.machines.empty', 'No machines connected')
                 : t(
@@ -117,11 +120,10 @@ export function MachineTabList({
                     'No machines match these filters.'
                   )}
               {hiddenByFilter > 0 && (
-                <div className="mt-2">
+                <div {...stylex.props(styles.emptyAction)}>
                   <Button
                     variant="link"
-                    size="sm"
-                    className="h-auto px-0 text-xs"
+                    size="small"
                     onClick={() => onFilterChange({ onlineOnly: false, mineOnly: false })}
                   >
                     {t('settings.agent.machineTabs.filter.reset', 'Clear filter')}
@@ -132,7 +134,7 @@ export function MachineTabList({
           )}
         </div>
       </FocusScope>
-    </TooltipProvider>
+    </Tooltip.Provider>
   );
 }
 
@@ -147,25 +149,24 @@ export function MachineListFilterButton({
   const isFilterActive = filter.onlineOnly || filter.mineOnly;
 
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button
-          variant="ghost"
-          size="icon"
-          className={cn(
-            'h-7 w-7 shrink-0 border-0 shadow-none',
-            isFilterActive && 'bg-hover text-foreground'
-          )}
-          aria-label={t('settings.agent.machineTabs.filter.label', 'Filter machines')}
-        >
-          <ListFilter className="h-3.5 w-3.5" />
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-44">
-        <DropdownMenuLabel className="font-normal text-muted-foreground">
+    <Menu.Root>
+      <Menu.Trigger
+        render={
+          <Button
+            variant={isFilterActive ? 'secondary' : 'ghost'}
+            size="small"
+            icon
+            aria-label={t('settings.agent.machineTabs.filter.label', 'Filter machines')}
+          >
+            <ListFilter {...stylex.props(styles.glyph)} />
+          </Button>
+        }
+      />
+      <Menu.Content align="end">
+        <Menu.GroupLabel>
           {t('settings.agent.machineTabs.filter.label', 'Filter machines')}
-        </DropdownMenuLabel>
-        <DropdownMenuSeparator />
+        </Menu.GroupLabel>
+        <Menu.Separator />
         <FilterItem
           label={t('settings.agent.machineTabs.filter.online', 'Online')}
           checked={filter.onlineOnly}
@@ -176,8 +177,8 @@ export function MachineListFilterButton({
           checked={filter.mineOnly}
           onSelect={() => onFilterChange({ ...filter, mineOnly: !filter.mineOnly })}
         />
-      </DropdownMenuContent>
-    </DropdownMenu>
+      </Menu.Content>
+    </Menu.Root>
   );
 }
 
@@ -196,7 +197,7 @@ function MachineTab({
 }) {
   const { t } = useTranslation();
   return (
-    <li className="min-w-0">
+    <li {...stylex.props(styles.item)}>
       <button
         type="button"
         aria-current={isSelected ? 'true' : undefined}
@@ -205,28 +206,18 @@ function MachineTab({
         data-settings-machine-id={item.machine.id}
         onClick={onSelect}
         aria-pressed={isSelected}
-        className={cn(
-          'group flex w-full min-w-0 items-center gap-2 rounded-md border border-transparent px-2 py-2 text-left text-sm transition-colors',
-          isSelected
-            ? 'border-border bg-hover/70 font-normal text-foreground'
-            : 'text-foreground/90 hover:bg-hover/40'
-        )}
+        {...stylex.props(surface.listRow, isSelected && surface.listRowSelected)}
       >
         <span
           aria-hidden
-          className={cn(
-            'h-2 w-2 shrink-0 rounded-full ring-4',
-            item.isOnline
-              ? 'bg-status-success ring-status-success/20'
-              : 'bg-muted-foreground/50 ring-muted'
-          )}
+          {...stylex.props(styles.dot, item.isOnline && styles.dotOnline)}
           title={
             item.isOnline
               ? t('workspace.machines.online', 'Online')
               : t('workspace.machines.offline', 'Offline')
           }
         />
-        <span className="min-w-0 flex-1 truncate">{item.machine.name || item.machine.id}</span>
+        <span {...stylex.props(surface.listRowLabel)}>{item.machine.name || item.machine.id}</span>
         {showOwner ? (
           <MachineOwnerAvatar item={item} ownerByUserId={ownerByUserId} />
         ) : (
@@ -239,12 +230,15 @@ function MachineTab({
 
 function DetailedMachineTab({
   item,
+  ruled,
   isSelected,
   onSelect,
   showOwner,
   ownerByUserId,
 }: {
   item: MachineTabItem;
+  /** Every row but the first is ruled from the one above. */
+  ruled: boolean;
   isSelected: boolean;
   onSelect: () => void;
   showOwner: boolean;
@@ -257,7 +251,7 @@ function DetailedMachineTab({
   const version = item.machine.cliVersion ? `v${item.machine.cliVersion}` : null;
   const os = item.machine.os || null;
   return (
-    <li className="min-w-0">
+    <li {...stylex.props(styles.item, ruled && surface.lineRuled)}>
       <button
         type="button"
         aria-current={isSelected ? 'true' : undefined}
@@ -266,23 +260,12 @@ function DetailedMachineTab({
         data-settings-machine-id={item.machine.id}
         onClick={onSelect}
         aria-pressed={isSelected}
-        className={cn(
-          'group flex w-full min-w-0 items-center gap-3 rounded-lg border border-border/60 bg-background/80 px-3 py-3 text-left transition-colors',
-          isSelected ? 'ring-2 ring-ring/60' : 'hover:bg-hover/30'
-        )}
+        {...stylex.props(styles.detailedRow, isSelected && styles.detailedRowSelected)}
       >
-        <span
-          aria-hidden
-          className={cn(
-            'mt-1 h-2 w-2 shrink-0 rounded-full ring-4',
-            item.isOnline
-              ? 'bg-status-success ring-status-success/20'
-              : 'bg-muted-foreground/50 ring-muted'
-          )}
-        />
-        <div className="min-w-0 flex-1 space-y-1">
-          <div className="flex min-w-0 items-center gap-2">
-            <span className="min-w-0 truncate text-sm font-normal">
+        <span aria-hidden {...stylex.props(styles.dot, item.isOnline && styles.dotOnline)} />
+        <div {...stylex.props(styles.detailedText)}>
+          <div {...stylex.props(styles.detailedNameLine)}>
+            <span {...stylex.props(styles.truncate, styles.detailedName)}>
               {item.machine.name || item.machine.id}
             </span>
             {showOwner ? (
@@ -291,30 +274,23 @@ function DetailedMachineTab({
               <MachineAccessStatus sharedWithTeam={item.sharedWithTeam} />
             )}
           </div>
-          <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-muted-foreground">
-            <span
-              className={cn(
-                'font-normal',
-                item.isOnline ? 'text-status-success' : 'text-muted-foreground'
-              )}
-            >
-              {onlineText}
-            </span>
+          <div {...stylex.props(styles.detailedMeta)}>
+            <span {...stylex.props(item.isOnline && styles.online)}>{onlineText}</span>
             {os && (
               <>
                 <span aria-hidden>·</span>
-                <span className="min-w-0 truncate">{os}</span>
+                <span {...stylex.props(styles.truncate)}>{os}</span>
               </>
             )}
             {version && (
               <>
                 <span aria-hidden>·</span>
-                <span className="font-mono">{version}</span>
+                <span {...stylex.props(styles.mono)}>{version}</span>
               </>
             )}
           </div>
         </div>
-        <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/60" aria-hidden />
+        <ChevronRight aria-hidden {...stylex.props(styles.chevron)} />
       </button>
     </li>
   );
@@ -333,30 +309,31 @@ function MachineOwnerAvatar({
   const ownerName = owner?.name || owner?.email || ownerUserId || t('common.unknown', 'Unknown');
 
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <span
-          className="inline-flex shrink-0 cursor-default rounded-full"
-          aria-label={t('workspace.machines.ownerTooltip', {
-            owner: ownerName,
-            defaultValue: 'Machine owner: {{owner}}',
-          })}
-        >
-          <UserAvatar
-            user={owner ?? (ownerUserId ? { id: ownerUserId, name: ownerName } : null)}
-            className="h-5 w-5 text-[9px]"
-            fallbackClassName="bg-muted text-muted-foreground"
-            showIcon={!ownerUserId}
-          />
-        </span>
-      </TooltipTrigger>
-      <TooltipContent side="right">
+    <Tooltip.Root>
+      <Tooltip.Trigger
+        render={
+          <span
+            aria-label={t('workspace.machines.ownerTooltip', {
+              owner: ownerName,
+              defaultValue: 'Machine owner: {{owner}}',
+            })}
+            {...stylex.props(styles.avatar)}
+          >
+            <UserAvatar
+              user={owner ?? (ownerUserId ? { id: ownerUserId, name: ownerName } : null)}
+              size="small"
+              showIcon={!ownerUserId}
+            />
+          </span>
+        }
+      />
+      <Tooltip.Content side="right">
         {t('workspace.machines.ownerTooltip', {
           owner: ownerName,
           defaultValue: 'Machine owner: {{owner}}',
         })}
-      </TooltipContent>
-    </Tooltip>
+      </Tooltip.Content>
+    </Tooltip.Root>
   );
 }
 
@@ -377,21 +354,20 @@ function MachineAccessStatus({ sharedWithTeam }: { sharedWithTeam: boolean }) {
       );
 
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <span
-          className="flex shrink-0 items-center gap-1 text-[10px] text-muted-foreground"
-          aria-label={`${label}. ${description}`}
-        >
-          <Icon className="h-3 w-3" strokeWidth={1.75} aria-hidden="true" />
-          <span>{label}</span>
-        </span>
-      </TooltipTrigger>
-      <TooltipContent side="right" className="max-w-64 leading-relaxed">
-        <p className="font-normal">{label}</p>
-        <p className="mt-0.5 text-muted-foreground">{description}</p>
-      </TooltipContent>
-    </Tooltip>
+    <Tooltip.Root>
+      <Tooltip.Trigger
+        render={
+          <span aria-label={`${label}. ${description}`} {...stylex.props(styles.access)}>
+            <Icon strokeWidth={1.75} aria-hidden="true" {...stylex.props(styles.accessIcon)} />
+            <span>{label}</span>
+          </span>
+        }
+      />
+      <Tooltip.Content side="right">
+        <p {...stylex.props(styles.tooltipTitle)}>{label}</p>
+        <p {...stylex.props(styles.tooltipHint)}>{description}</p>
+      </Tooltip.Content>
+    </Tooltip.Root>
   );
 }
 
@@ -405,17 +381,141 @@ function FilterItem({
   onSelect: () => void;
 }) {
   return (
-    <DropdownMenuCheckboxItem
-      checked={checked}
-      onSelect={(event) => {
-        event.preventDefault();
-        onSelect();
-      }}
-    >
-      <span className="min-w-0 truncate">{label}</span>
-    </DropdownMenuCheckboxItem>
+    <Menu.CheckboxItem checked={checked} closeOnClick={false} onCheckedChange={() => onSelect()}>
+      {label}
+    </Menu.CheckboxItem>
   );
 }
+
+const styles = stylex.create({
+  scope: {
+    display: 'flex',
+    flexDirection: 'column',
+    height: '100%',
+    minHeight: 0,
+    width: '100%',
+    minWidth: 0,
+  },
+  header: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: space[2],
+    paddingInline: space[2],
+    paddingBottom: space[2],
+  },
+  title: {
+    minWidth: 0,
+    margin: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: '0.75em',
+    fontWeight: 400,
+    color: colors.secondaryLabel,
+  },
+  scroller: {
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: 0,
+    minHeight: 0,
+    minWidth: 0,
+    overflowY: 'auto',
+    paddingInlineEnd: space[1],
+  },
+  list: { minWidth: 0, margin: 0, padding: 0, listStyle: 'none' },
+  sidebarList: { display: 'flex', flexDirection: 'column', gap: '2px' },
+  item: { minWidth: 0 },
+  empty: {
+    paddingInline: space[2],
+    paddingBlock: space[4],
+    textAlign: 'center',
+    fontSize: '0.8em',
+    color: colors.secondaryLabel,
+  },
+  emptyAction: { marginTop: space[2] },
+  glyph: { width: '100%', height: '100%' },
+  dot: {
+    flexShrink: 0,
+    width: '8px',
+    height: '8px',
+    borderRadius: radius.full,
+    cornerShape: corner.round,
+    backgroundColor: colors.tertiaryLabel,
+  },
+  dotOnline: {
+    backgroundColor: colors.success,
+    boxShadow: `0 0 0 3px color-mix(in oklab, ${colors.success} 20%, transparent)`,
+  },
+  /** A row of the detailed list: the whole line opens the machine. */
+  detailedRow: {
+    boxSizing: 'border-box',
+    display: 'flex',
+    alignItems: 'center',
+    gap: space[3],
+    width: '100%',
+    minWidth: 0,
+    margin: 0,
+    paddingInline: space[4],
+    paddingBlock: space[3],
+    borderWidth: 0,
+    backgroundColor: {
+      default: 'transparent',
+      ':hover': `color-mix(in oklab, ${colors.elevatedBackground}, ${colors.label} 4%)`,
+    },
+    color: colors.label,
+    fontFamily: 'inherit',
+    fontSize: '1em',
+    textAlign: 'start',
+    cursor: 'pointer',
+    outlineStyle: 'none',
+    boxShadow: { default: 'none', ':focus-visible': `inset 0 0 0 2px ${colors.accent}` },
+  },
+  detailedRowSelected: {
+    backgroundColor: { default: colors.selectedFill, ':hover': colors.selectedFill },
+  },
+  detailedText: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: space[1],
+    flexGrow: 1,
+    flexShrink: 1,
+    minWidth: 0,
+  },
+  detailedNameLine: { display: 'flex', alignItems: 'center', gap: space[2], minWidth: 0 },
+  detailedName: { minWidth: 0, fontSize: '0.875em', fontWeight: 400 },
+  detailedMeta: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    columnGap: space[2],
+    rowGap: '2px',
+    minWidth: 0,
+    fontSize: '11px',
+    color: colors.secondaryLabel,
+  },
+  online: { color: colors.success },
+  mono: { fontFamily: 'var(--font-mono, ui-monospace, monospace)' },
+  truncate: {
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  chevron: { flexShrink: 0, width: '16px', height: '16px', color: colors.tertiaryLabel },
+  avatar: { display: 'inline-flex', flexShrink: 0, cursor: 'default' },
+  access: {
+    display: 'flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    gap: space[1],
+    fontSize: '10px',
+    color: colors.secondaryLabel,
+  },
+  accessIcon: { width: '12px', height: '12px' },
+  tooltipTitle: { margin: 0 },
+  tooltipHint: { margin: 0, marginTop: '2px', opacity: 0.7 },
+});
 
 export function buildMachineTabItems(params: {
   machines: Map<MachineId, MachineViewMeta>;

@@ -1,21 +1,21 @@
 import type { Meta, StoryObj } from '@storybook/react';
 import type { LocalProjectId, MachineId } from '@lody/shared';
 import { SessionSharingIndicator } from '@/components/session-sharing';
-import { TooltipProvider } from '@/ui/tooltip';
+import { Tooltip } from '@lody/ui/tooltip';
 
 const meta = {
   title: 'Sessions/SessionSharingIndicator',
   component: SessionSharingIndicator,
   decorators: [
     (Story) => (
-      <TooltipProvider>
+      <Tooltip.Provider>
         <div className="w-64 rounded-lg bg-sidebar p-4 text-sidebar-foreground">
           <div className="flex items-center gap-2 rounded-md px-2 py-1 text-sm">
             <span className="min-w-0 flex-1 truncate">Fix team sharing</span>
             <Story />
           </div>
         </div>
-      </TooltipProvider>
+      </Tooltip.Provider>
     ),
   ],
   args: {

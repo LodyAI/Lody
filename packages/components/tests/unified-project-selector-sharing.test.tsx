@@ -15,7 +15,7 @@ import {
 import { UnifiedProjectSelector } from '../src/components/chat/unified-project-selector';
 import type { LocalProjectVisibilityAccess } from '../src/lib/visible-local-project-index';
 import type { MachineVisibilityAccess } from '../src/lib/visible-machine-index';
-import { TooltipProvider } from '../src/ui/tooltip';
+import { Tooltip } from '@lody/ui/tooltip';
 
 const mocks = vi.hoisted(() => ({
   requestAuthRecovery: vi.fn(),
@@ -36,7 +36,7 @@ vi.mock('react-i18next', () => ({
   }),
 }));
 
-vi.mock('sonner', () => ({
+vi.mock('@/lib/toast', () => ({
   toast: {
     error: mocks.toastError,
     success: mocks.toastSuccess,
@@ -168,7 +168,7 @@ describe('UnifiedProjectSelector project sharing', () => {
   } = {}) {
     await act(async () => {
       root.render(
-        <TooltipProvider>
+        <Tooltip.Provider>
           <UnifiedProjectSelector
             value={{ kind: 'local', machineId, localProjectId }}
             onChange={vi.fn()}
@@ -185,7 +185,7 @@ describe('UnifiedProjectSelector project sharing', () => {
                 : undefined
             }
           />
-        </TooltipProvider>
+        </Tooltip.Provider>
       );
     });
     return onShareWithTeam;
@@ -206,12 +206,10 @@ describe('UnifiedProjectSelector project sharing', () => {
   async function openProjectMenu() {
     await act(async () => {
       getProjectPickerTrigger().dispatchEvent(
-        new TestPointerEvent('pointerdown', {
-          bubbles: true,
-          button: 0,
-          pointerType: 'mouse',
-        })
+        new MouseEvent('mousedown', { bubbles: true, button: 0 })
       );
+      // Base UI schedules the open in an animation frame.
+      await new Promise((resolve) => setTimeout(resolve, 40));
     });
   }
 

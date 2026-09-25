@@ -19,7 +19,7 @@ vi.mock('../src/hooks/use-online-machines', () => ({ useOnlineMachines: () => []
 import { DesktopRunConfigMenu } from '../src/components/sessions/desktop-run-config-menu';
 import type { ComposerAgentRoleItem } from '../src/lib/composer-agent-roles';
 import { initI18n } from '../src/i18n';
-import { TooltipProvider } from '../src/ui/tooltip';
+import { Tooltip } from '@lody/ui/tooltip';
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -103,7 +103,7 @@ describe('DesktopRunConfigMenu role face', () => {
     await act(async () => {
       root?.render(
         createElement(
-          TooltipProvider,
+          Tooltip.Provider,
           { delayDuration: 0 },
           createElement(DesktopRunConfigMenu, { ...baseProps, ...props })
         )
@@ -126,8 +126,9 @@ describe('DesktopRunConfigMenu role face', () => {
     expect(trigger?.getAttribute('aria-disabled')).toBe('true');
 
     await act(async () => {
-      trigger?.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button: 0 }));
+      trigger?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }));
       trigger?.dispatchEvent(new MouseEvent('pointerup', { bubbles: true, button: 0 }));
+      await new Promise((resolve) => setTimeout(resolve, 40));
     });
     expect(document.querySelector('[role="menu"]')).toBeNull();
 
@@ -135,7 +136,9 @@ describe('DesktopRunConfigMenu role face', () => {
       trigger?.focus();
     });
     await vi.waitFor(() => {
-      expect(document.querySelector('[role="tooltip"]')?.textContent).toContain(disabledReason);
+      expect(
+        document.querySelector('[data-base-ui-portal] [data-side]')?.textContent
+      ).toContain(disabledReason);
     });
   });
 
@@ -186,7 +189,8 @@ describe('DesktopRunConfigMenu role face', () => {
     await act(async () => {
       view
         .querySelector('button[aria-label="Run configuration"]')
-        ?.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button: 0 }));
+        ?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }));
+      await new Promise((resolve) => setTimeout(resolve, 40));
     });
     return document.querySelector('[role="menu"]') as HTMLElement;
   };
@@ -221,6 +225,7 @@ describe('DesktopRunConfigMenu role face', () => {
     ).not.toBeNull();
     await act(async () => {
       (roleRow as HTMLElement).dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await new Promise((resolve) => setTimeout(resolve, 40));
     });
     expect(onCreate).toHaveBeenCalled();
   });

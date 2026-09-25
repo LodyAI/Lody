@@ -120,6 +120,41 @@ describe('MachineDocument ACP capabilities', () => {
     });
   });
 
+  it('persists title support changes even when all other capability fields are unchanged', async () => {
+    const flock = new FakeMachineFlock();
+    const repo = {
+      openFlockDoc: async () => ({ flock, syncOnce: async () => {} }),
+      flush: async () => {},
+    } as unknown as LoroRepo;
+    const document = new MachineDocument(
+      repo,
+      'workspace-1' as WorkspaceId,
+      'machine-1' as MachineId,
+      () => {}
+    );
+    const write = (sessionTitle: boolean) =>
+      document.updateAcpCapabilities(
+        'title-config' as AgentConfigId,
+        'custom',
+        'title-agent',
+        [],
+        [],
+        undefined,
+        undefined,
+        false,
+        'custom:test',
+        undefined,
+        false,
+        undefined,
+        { sessionTitle }
+      );
+    await write(false);
+    await write(true);
+    expect([...flock.rows.values()][0]?.value).toMatchObject({ sessionTitle: true });
+    await write(false);
+    expect([...flock.rows.values()][0]?.value).toMatchObject({ sessionTitle: false });
+  });
+
   it('does not write capabilities when cancelled while opening the Machine Flock', async () => {
     const flock = new FakeMachineFlock();
     let markOpenStarted!: () => void;

@@ -85,6 +85,11 @@ long-form text.
 - Sidebar: PR marks are desaturated (`saturate(0.55)`, a filter, not opacity); the
   `Mergeable` pill is the one status meant to be noticed, with a real fill and semibold
   label.
+- Settings navigation: after `@lody/ui` (#913) rebuilt it on `settings/surface.ts`, its rows
+  take the palette's `hoverFill` / `selectedFill` and the package's avatar, not this change's
+  10% selected fill and 18px account avatar. What carried over is the focus treatment: a
+  keyboard-focused row shows the hover fill instead of the accent ring, since the dialog
+  focuses a row when it opens.
 
 ## Alternatives
 

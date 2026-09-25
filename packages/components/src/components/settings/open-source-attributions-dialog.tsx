@@ -1,28 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
 import { Boxes, ExternalLink, FileCode2, FolderTree, Palette, ScrollText } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import * as stylex from '@stylexjs/stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { corner, radius, space, text } from '@lody/ui/tokens/scales.stylex';
 import { OPEN_SOURCE_ATTRIBUTION_BUNDLE } from '@/lib/open-source-attributions.generated';
 import type { OpenSourceAttributionEntry } from '@/lib/open-source-attributions';
-import {
-  Accordion,
-  AccordionContent,
-  AccordionItem,
-  AccordionTrigger,
-  Badge,
-  Button,
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-  ScrollArea,
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/ui';
+import { Badge, Button, ScrollArea, Dialog } from '@/ui';
+import { Accordion } from '@lody/ui/accordion';
+import { Select } from '@lody/ui/select';
 
 const allEntries = OPEN_SOURCE_ATTRIBUTION_BUNDLE.entries;
 const bundledEntries = allEntries.filter((entry) => entry.kind === 'vendored');
@@ -38,6 +24,89 @@ const dependencyLicenseOptions = Object.entries(dependencyEntriesByLicense)
       left.license.localeCompare(right.license, undefined, { sensitivity: 'base' })
   );
 const defaultDependencyLicense = dependencyLicenseOptions[0]?.license ?? '';
+// `Select.Value` reads the label of the current value from `items`, not from
+// the rows, so the list is stated once and drives both.
+const dependencyLicenseItems = dependencyLicenseOptions.map((option) => ({
+  value: option.license,
+  label: `${option.license} (${option.count})`,
+}));
+
+const WIDE = '@media (min-width: 640px)';
+/** A block inside the modal panel: the region rung, a fill with no edge. */
+const REGION = `color-mix(in oklab, transparent, ${colors.label} 3%)`;
+
+/**
+ * The panel's own width: a license list reads as a table of names and notes, so
+ * it takes a wider panel than a question does. The panel keeps its own cap
+ * against the window.
+ */
+const PANEL_STYLE = { width: '1024px' } as const;
+
+const styles = stylex.create({
+  summary: {
+    display: 'grid',
+    gridTemplateColumns: { default: '1fr', [WIDE]: 'repeat(3, minmax(0, 1fr))' },
+    gap: space[3],
+  },
+  summaryCard: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: space[2],
+    padding: space[3],
+    backgroundColor: REGION,
+    borderRadius: radius.medium,
+    cornerShape: corner.shape,
+  },
+  summaryLabel: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: space[2],
+    fontSize: text.footnoteSize,
+    color: colors.secondaryLabel,
+  },
+  summaryValue: { fontSize: text.titleSize, fontWeight: 400, color: colors.label },
+  icon: { width: '16px', height: '16px', flexShrink: 0, color: colors.tertiaryLabel },
+  smallIcon: { width: '14px', height: '14px', flexShrink: 0 },
+  scroll: { maxHeight: '70vh', minHeight: 0 },
+  triggerLabel: { display: 'flex', alignItems: 'center', gap: space[2] },
+  panelBody: { display: 'flex', flexDirection: 'column', gap: space[3] },
+  /** The records are one list: a region of the panel, its rows ruled apart. */
+  list: {
+    overflow: 'hidden',
+    backgroundColor: REGION,
+    borderRadius: radius.medium,
+    cornerShape: corner.shape,
+  },
+  item: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'flex-start',
+    gap: space[2],
+    padding: space[3],
+  },
+  itemRuled: { boxShadow: `inset 0 1px 0 ${colors.separator}` },
+  itemText: { flexGrow: 1, flexBasis: 0, minWidth: 0 },
+  itemHeading: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: space[2] },
+  itemName: { margin: 0, fontSize: text.bodySize, fontWeight: 400, color: colors.label },
+  itemMeta: {
+    margin: 0,
+    marginTop: space[1],
+    fontSize: text.footnoteSize,
+    lineHeight: 1.5,
+    color: colors.secondaryLabel,
+  },
+  licenseGroup: {
+    display: 'flex',
+    flexDirection: { default: 'column', [WIDE]: 'row' },
+    alignItems: { default: 'stretch', [WIDE]: 'center' },
+    justifyContent: 'space-between',
+    gap: space[2],
+  },
+  licenseGroupText: { minWidth: 0 },
+  licenseGroupTitle: { margin: 0, fontSize: text.bodySize, fontWeight: 400, color: colors.label },
+  licenseGroupHint: { margin: 0, fontSize: text.footnoteSize, color: colors.secondaryLabel },
+  licenseSelect: { flexShrink: 0, width: { default: '100%', [WIDE]: '320px' } },
+});
 
 function formatGeneratedAt(value: string): string {
   try {
@@ -57,69 +126,59 @@ function SummaryCard({
   value: string;
 }) {
   return (
-    <div className="rounded-md border border-border/70 bg-card/70 p-3">
-      <div className="flex items-center gap-2 text-muted-foreground">
-        <Icon className="h-4 w-4" />
-        <span className="text-xs font-normal">{label}</span>
+    <div {...stylex.props(styles.summaryCard)}>
+      <div {...stylex.props(styles.summaryLabel)}>
+        <Icon {...stylex.props(styles.icon)} />
+        <span>{label}</span>
       </div>
-      <div className="mt-2 text-lg font-normal text-foreground">{value}</div>
+      <div {...stylex.props(styles.summaryValue)}>{value}</div>
     </div>
   );
 }
 
-function AttributionItem({ entry }: { entry: OpenSourceAttributionEntry }) {
+function AttributionItem({ entry, ruled }: { entry: OpenSourceAttributionEntry; ruled: boolean }) {
   return (
-    <div className="rounded-md border border-border/70 bg-card/60 p-3">
-      <div className="flex flex-wrap items-start gap-2">
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <p className="font-normal text-foreground">{entry.name}</p>
-            <Badge variant="secondary" className="rounded-md">
-              {entry.license}
-            </Badge>
-            {entry.scope === 'bundled-theme' ? (
-              <Badge variant="outline" className="rounded-md">
-                Theme
-              </Badge>
-            ) : null}
-            {entry.scope === 'vendored-icon-set' ? (
-              <Badge variant="outline" className="rounded-md">
-                Icons
-              </Badge>
-            ) : null}
-          </div>
-          {entry.versions?.length ? (
-            <p className="mt-1 text-xs text-muted-foreground">
-              Versions: {entry.versions.join(', ')}
-            </p>
-          ) : null}
-          {entry.assets?.length ? (
-            <p className="mt-1 text-xs text-muted-foreground">Assets: {entry.assets.join(', ')}</p>
-          ) : null}
-          {entry.author ? (
-            <p className="mt-1 text-xs text-muted-foreground">Author: {entry.author}</p>
-          ) : null}
-          {entry.description ? (
-            <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-              {entry.description}
-            </p>
-          ) : null}
-          {entry.noticePath ? (
-            <p className="mt-1 text-xs text-muted-foreground">Notice file: {entry.noticePath}</p>
-          ) : null}
+    <div {...stylex.props(styles.item, ruled && styles.itemRuled)}>
+      <div {...stylex.props(styles.itemText)}>
+        <div {...stylex.props(styles.itemHeading)}>
+          <p {...stylex.props(styles.itemName)}>{entry.name}</p>
+          <Badge>{entry.license}</Badge>
+          {entry.scope === 'bundled-theme' ? <Badge>Theme</Badge> : null}
+          {entry.scope === 'vendored-icon-set' ? <Badge>Icons</Badge> : null}
         </div>
-        {entry.homepage ? (
-          <a
-            href={entry.homepage}
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex items-center gap-1 rounded-md border border-border/70 px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-hover hover:text-hover-foreground"
-          >
-            Source
-            <ExternalLink className="h-3.5 w-3.5" />
-          </a>
+        {entry.versions?.length ? (
+          <p {...stylex.props(styles.itemMeta)}>Versions: {entry.versions.join(', ')}</p>
+        ) : null}
+        {entry.assets?.length ? (
+          <p {...stylex.props(styles.itemMeta)}>Assets: {entry.assets.join(', ')}</p>
+        ) : null}
+        {entry.author ? <p {...stylex.props(styles.itemMeta)}>Author: {entry.author}</p> : null}
+        {entry.description ? <p {...stylex.props(styles.itemMeta)}>{entry.description}</p> : null}
+        {entry.noticePath ? (
+          <p {...stylex.props(styles.itemMeta)}>Notice file: {entry.noticePath}</p>
         ) : null}
       </div>
+      {entry.homepage ? (
+        <Button
+          variant="ghost"
+          size="mini"
+          nativeButton={false}
+          render={<a href={entry.homepage} target="_blank" rel="noreferrer" />}
+        >
+          Source
+          <ExternalLink {...stylex.props(styles.smallIcon)} />
+        </Button>
+      ) : null}
+    </div>
+  );
+}
+
+function AttributionList({ entries }: { entries: OpenSourceAttributionEntry[] }) {
+  return (
+    <div {...stylex.props(styles.list)}>
+      {entries.map((entry, index) => (
+        <AttributionItem key={entry.id} entry={entry} ruled={index > 0} />
+      ))}
     </div>
   );
 }
@@ -158,47 +217,48 @@ export function OpenSourceAttributionsDialog({
   useEffect(() => clearOpenTimer, []);
 
   return (
-    <Dialog
+    <Dialog.Root
       open={open}
       onOpenChange={(nextOpen) => {
         if (!nextOpen) clearOpenTimer();
         setOpen(nextOpen);
       }}
     >
-      <DialogTrigger asChild>
-        <Button
-          variant="outline"
-          size="sm"
-          className="h-7 px-2.5"
-          onClick={(event) => {
-            event.preventDefault();
-            clearOpenTimer();
-            openTimerRef.current = setTimeout(() => {
-              openTimerRef.current = null;
-              setOpen(true);
-            }, 400);
-          }}
-          onDoubleClick={(event) => {
-            event.preventDefault();
-            clearOpenTimer();
-            onTriggerDoubleClick?.();
-          }}
-        >
-          <ScrollText className="mr-1 h-3.5 w-3.5" />
-          {t('settings.about.viewAttributions', 'View notices')}
-        </Button>
-      </DialogTrigger>
-      <DialogContent className="max-w-5xl gap-0 overflow-hidden p-0">
-        <DialogHeader className="border-b border-border/70 px-4 py-4 sm:px-6">
-          <DialogTitle>
+      <Dialog.Trigger
+        render={
+          <Button
+            variant="secondary"
+            size="small"
+            onClick={(event) => {
+              event.preventDefault();
+              clearOpenTimer();
+              openTimerRef.current = setTimeout(() => {
+                openTimerRef.current = null;
+                setOpen(true);
+              }, 400);
+            }}
+            onDoubleClick={(event) => {
+              event.preventDefault();
+              clearOpenTimer();
+              onTriggerDoubleClick?.();
+            }}
+          />
+        }
+      >
+        <ScrollText {...stylex.props(styles.smallIcon)} />
+        {t('settings.about.viewAttributions', 'View notices')}
+      </Dialog.Trigger>
+      <Dialog.Content style={PANEL_STYLE}>
+        <Dialog.Header>
+          <Dialog.Title>
             {t('settings.about.openSourceAttributions', 'Open Source Licenses')}
-          </DialogTitle>
-          <DialogDescription>
+          </Dialog.Title>
+          <Dialog.Description>
             {t('settings.about.generatedAt', 'Generated at')}: {generatedAtLabel}
-          </DialogDescription>
-        </DialogHeader>
+          </Dialog.Description>
+        </Dialog.Header>
 
-        <div className="grid gap-3 border-b border-border/70 px-4 py-4 sm:grid-cols-3 sm:px-6">
+        <div {...stylex.props(styles.summary)}>
           <SummaryCard
             icon={Boxes}
             label={t('settings.about.dependencies', 'Dependencies')}
@@ -216,78 +276,71 @@ export function OpenSourceAttributionsDialog({
           />
         </div>
 
-        <ScrollArea className="max-h-[70vh]">
-          <div className="px-4 py-4 sm:px-6">
-            <Accordion type="multiple" defaultValue={['bundled-assets']} className="w-full">
-              <AccordionItem value="bundled-assets">
-                <AccordionTrigger className="py-3 text-sm">
-                  <span className="flex items-center gap-2">
-                    <Palette className="h-4 w-4 text-muted-foreground" />
-                    {t('settings.about.bundledAssets', 'Bundled assets')}
-                    <Badge variant="secondary" className="rounded-md">
-                      {bundledEntries.length}
-                    </Badge>
-                  </span>
-                </AccordionTrigger>
-                <AccordionContent>
-                  <div className="space-y-3">
-                    {bundledEntries.map((entry) => (
-                      <AttributionItem key={entry.id} entry={entry} />
-                    ))}
-                  </div>
-                </AccordionContent>
-              </AccordionItem>
+        <ScrollArea {...stylex.props(styles.scroll)}>
+          <Accordion.Root multiple defaultValue={['bundled-assets']}>
+            <Accordion.Item value="bundled-assets">
+              <Accordion.Trigger>
+                <span {...stylex.props(styles.triggerLabel)}>
+                  <Palette {...stylex.props(styles.icon)} />
+                  {t('settings.about.bundledAssets', 'Bundled assets')}
+                  <Badge>{bundledEntries.length}</Badge>
+                </span>
+              </Accordion.Trigger>
+              <Accordion.Panel>
+                <AttributionList entries={bundledEntries} />
+              </Accordion.Panel>
+            </Accordion.Item>
 
-              <AccordionItem value="dependencies">
-                <AccordionTrigger className="py-3 text-sm">
-                  <span className="flex items-center gap-2">
-                    <FileCode2 className="h-4 w-4 text-muted-foreground" />
-                    {t('settings.about.dependencies', 'Dependencies')}
-                    <Badge variant="secondary" className="rounded-md">
-                      {dependencyEntries.length}
-                    </Badge>
-                  </span>
-                </AccordionTrigger>
-                <AccordionContent>
-                  <div className="space-y-3">
-                    <div className="flex flex-col gap-2 rounded-md border border-border/70 bg-card/60 p-3 sm:flex-row sm:items-center sm:justify-between">
-                      <div className="min-w-0">
-                        <p className="text-sm font-normal text-foreground">
-                          {t('settings.about.licenseGroup', 'License group')}
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                          {t(
-                            'settings.about.licenseGroupHelper',
-                            'Showing one license expression at a time to keep the list usable.'
-                          )}
-                        </p>
-                      </div>
-                      <Select
-                        value={selectedDependencyLicense}
-                        onValueChange={setSelectedDependencyLicense}
-                      >
-                        <SelectTrigger className="w-full sm:w-[320px]">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {dependencyLicenseOptions.map((option) => (
-                            <SelectItem key={option.license} value={option.license}>
-                              {option.license} ({option.count})
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+            <Accordion.Item value="dependencies">
+              <Accordion.Trigger>
+                <span {...stylex.props(styles.triggerLabel)}>
+                  <FileCode2 {...stylex.props(styles.icon)} />
+                  {t('settings.about.dependencies', 'Dependencies')}
+                  <Badge>{dependencyEntries.length}</Badge>
+                </span>
+              </Accordion.Trigger>
+              <Accordion.Panel>
+                <div {...stylex.props(styles.panelBody)}>
+                  <div {...stylex.props(styles.licenseGroup)}>
+                    <div {...stylex.props(styles.licenseGroupText)}>
+                      <p {...stylex.props(styles.licenseGroupTitle)}>
+                        {t('settings.about.licenseGroup', 'License group')}
+                      </p>
+                      <p {...stylex.props(styles.licenseGroupHint)}>
+                        {t(
+                          'settings.about.licenseGroupHelper',
+                          'Showing one license expression at a time to keep the list usable.'
+                        )}
+                      </p>
                     </div>
-                    {selectedDependencyEntries.map((entry) => (
-                      <AttributionItem key={entry.id} entry={entry} />
-                    ))}
+                    <Select.Root
+                      items={dependencyLicenseItems}
+                      value={selectedDependencyLicense}
+                      onValueChange={(value) => {
+                        if (value != null) setSelectedDependencyLicense(value);
+                      }}
+                    >
+                      <div {...stylex.props(styles.licenseSelect)}>
+                        <Select.Trigger>
+                          <Select.Value />
+                        </Select.Trigger>
+                      </div>
+                      <Select.Content>
+                        {dependencyLicenseItems.map((option) => (
+                          <Select.Item key={option.value} value={option.value}>
+                            {option.label}
+                          </Select.Item>
+                        ))}
+                      </Select.Content>
+                    </Select.Root>
                   </div>
-                </AccordionContent>
-              </AccordionItem>
-            </Accordion>
-          </div>
+                  <AttributionList entries={selectedDependencyEntries} />
+                </div>
+              </Accordion.Panel>
+            </Accordion.Item>
+          </Accordion.Root>
         </ScrollArea>
-      </DialogContent>
-    </Dialog>
+      </Dialog.Content>
+    </Dialog.Root>
   );
 }

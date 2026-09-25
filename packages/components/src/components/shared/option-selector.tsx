@@ -9,26 +9,20 @@ import {
 } from 'react';
 import type { LucideIcon } from 'lucide-react';
 import { ChevronDown, Check } from 'lucide-react';
+import * as stylex from '@stylexjs/stylex';
+import { Command as CommandPrimitive } from 'cmdk';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { Button } from '@/ui/button';
-import { Popover, PopoverContent, PopoverTrigger } from '@/ui/popover';
-import {
-  Command,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-} from '@/ui/command';
+import { Popover } from '@lody/ui/popover';
 import { fuzzyMatch } from '@/components/commands/fuzzy-match';
-import { handleMenuCloseAutoFocus } from '@/lib/menu-focus';
+import { restoreComposerFocusAfterMenu } from '@/lib/menu-focus';
 import { observeResizeOnAnimationFrame } from '@/lib/resize-observer';
-import { cn } from '@/lib/utils';
+import { withClassName } from '@/lib/stylex';
+import { composerSurface as surface } from './composer-surface';
 
 // Above this many options the dropdown virtualizes (branch/project lists can be huge).
 // Below it, cmdk's built-in filtering renders all items — unchanged, zero risk.
 const OPTION_SELECTOR_VIRTUALIZE_THRESHOLD = 60;
-const OPTION_SELECTOR_ROW_ESTIMATE_PX = 36;
+const OPTION_SELECTOR_ROW_ESTIMATE_PX = 28;
 const OPTION_SELECTOR_OVERSCAN = 10;
 
 export interface OptionSelectorOption<TValue extends string | number = string> {
@@ -46,13 +40,27 @@ export interface OptionSelectorOption<TValue extends string | number = string> {
 type SelectorSize = 'sm' | 'md' | 'lg';
 type SelectorTone = 'light' | 'dark';
 
+/**
+ * The material the trigger takes from where it sits.
+ *
+ * - `toolbar`: a ghost control in the composer's toolbar and the context pills
+ *   above it — no fill or edge at rest, the hover fill under the pointer, the
+ *   type in `em` of the font-size tier.
+ * - `field`: a form value, so the one recessed well every value holder takes.
+ */
+export type OptionSelectorAppearance = 'toolbar' | 'field';
+
 export interface OptionSelectorProps<TValue extends string | number = string> {
   value?: TValue | null;
   options: OptionSelectorOption<TValue>[];
   onSelect: (option: OptionSelectorOption<TValue>) => void;
   placeholder?: string;
   placeholderIcon?: LucideIcon | ComponentType<{ className?: string }>;
+  /** Trigger material; see `OptionSelectorAppearance`. Defaults to `field`. */
+  appearance?: OptionSelectorAppearance;
+  /** Layout only (width, flex); the trigger's look is `appearance`'s. */
   className?: string;
+  /** Layout only (width); the popup's look is the floating rung's. */
   contentClassName?: string;
   disabled?: boolean;
   searchable?: boolean;
@@ -61,7 +69,12 @@ export interface OptionSelectorProps<TValue extends string | number = string> {
   align?: 'start' | 'center' | 'end';
   side?: 'top' | 'right' | 'bottom' | 'left';
   avoidCollisions?: boolean;
+  /**
+   * Control height. A `field` reads the field ladder (28 / 32 / 36); a
+   * `toolbar` trigger is 24px at `sm` (inside a context pill) and 28px above.
+   */
   size?: SelectorSize;
+  /** @deprecated The popup reads the palette in force; kept for callers. */
   tone?: SelectorTone;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
@@ -72,11 +85,19 @@ export interface OptionSelectorProps<TValue extends string | number = string> {
   autoFocusSearch?: boolean;
 }
 
-const sizeClassMap: Record<SelectorSize, string> = {
-  sm: 'h-8 text-xs',
-  md: 'h-9 text-sm',
-  lg: 'h-10 text-sm',
-};
+const styles = stylex.create({
+  // The list scrolls under the search field; the cap keeps it clear of the
+  // viewport edge the popup landed against.
+  scroll: { maxHeight: 'min(60vh, 320px, calc(var(--available-height) - 3rem))' },
+  virtualSizer: { position: 'relative', width: '100%' },
+  virtualRow: { position: 'absolute', top: 0, left: 0, width: '100%' },
+});
+
+const fieldSizes = {
+  sm: surface.fieldSmall,
+  md: surface.fieldMedium,
+  lg: surface.fieldLarge,
+} as const;
 
 const getOptionKey = <TValue extends string | number>(option: OptionSelectorOption<TValue>) =>
   option.key ?? String(option.value);
@@ -94,6 +115,7 @@ export function OptionSelector<TValue extends string | number = string>({
   onSelect,
   placeholder,
   placeholderIcon,
+  appearance = 'field',
   className,
   contentClassName,
   disabled = false,
@@ -104,7 +126,6 @@ export function OptionSelector<TValue extends string | number = string>({
   side,
   avoidCollisions,
   size = 'md',
-  tone = 'light',
   open,
   onOpenChange,
   renderTriggerValue,
@@ -118,10 +139,11 @@ export function OptionSelector<TValue extends string | number = string>({
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const didSelectItemRef = useRef(false);
   const [contentWidth, setContentWidth] = useState<number | undefined>(undefined);
-  const isDark = tone === 'dark';
-  const commandRef = useRef<HTMLDivElement>(null);
   // Tracks search input changes so we can reset scroll position.
   const [searchToken, setSearchToken] = useState(0);
+  // The row under the keyboard or pointer, as cmdk reports it: StyleX cannot read
+  // cmdk's `data-selected`, so the highlight is state rather than an attribute.
+  const [highlighted, setHighlighted] = useState('');
 
   // Focus into the dropdown (search input → cmdk ↑/↓ then work) on open, but only with a
   // precise pointer (desktop). Never on touch, where it would raise the soft keyboard.
@@ -134,6 +156,10 @@ export function OptionSelector<TValue extends string | number = string>({
     [autoFocusSearch]
   );
 
+  const [query, setQuery] = useState('');
+  const listViewportRef = useRef<HTMLDivElement>(null);
+  const virtualize = options.length > OPTION_SELECTOR_VIRTUALIZE_THRESHOLD;
+
   // cmdk schedules scrollIntoView via rAF inside its own useLayoutEffect.
   // Because React fires child layout effects before parent ones, registering
   // our rAF here (in the parent) guarantees it runs *after* cmdk's in the
@@ -141,7 +167,7 @@ export function OptionSelector<TValue extends string | number = string>({
   useLayoutEffect(() => {
     if (!searchable || searchToken === 0) return undefined;
     const id = requestAnimationFrame(() => {
-      const viewport = commandRef.current?.querySelector('[data-radix-scroll-area-viewport]');
+      const viewport = listViewportRef.current;
       if (viewport) viewport.scrollTop = 0;
     });
     return () => cancelAnimationFrame(id);
@@ -156,10 +182,6 @@ export function OptionSelector<TValue extends string | number = string>({
   const portalContainer = isOpen
     ? triggerRef.current?.closest<HTMLElement>('[data-lody-dialog-content]')
     : null;
-
-  const [query, setQuery] = useState('');
-  const listViewportRef = useRef<HTMLDivElement>(null);
-  const virtualize = options.length > OPTION_SELECTOR_VIRTUALIZE_THRESHOLD;
 
   // When virtualizing we filter ourselves (cmdk can't both filter AND hand us the result
   // to virtualize), reusing the command-palette's fuzzy scorer. Small lists keep cmdk's
@@ -239,15 +261,16 @@ export function OptionSelector<TValue extends string | number = string>({
     if (option?.startContent) return option.startContent;
     const Icon = option?.icon ?? placeholderIcon;
     if (!Icon) return null;
-    return <Icon className={cn('h-4 w-4 shrink-0', option?.iconClassName)} />;
+    return <Icon {...withClassName(stylex.props(surface.glyph16), option?.iconClassName)} />;
   };
 
+  const isField = appearance === 'field';
   const triggerContent = renderTriggerValue ? (
     renderTriggerValue(selectedOption)
   ) : (
     <>
       {renderIcon(selectedOption)}
-      <span className="truncate font-medium">{selectedOption?.label ?? placeholder ?? ''}</span>
+      <span {...stylex.props(surface.truncate)}>{selectedOption?.label ?? placeholder ?? ''}</span>
     </>
   );
 
@@ -259,137 +282,141 @@ export function OptionSelector<TValue extends string | number = string>({
     virtual?: { measureRef: (el: HTMLDivElement | null) => void; index: number; start: number }
   ) => {
     const optionKey = getOptionKey(option);
+    const itemValue = getOptionSearchText(option);
     const isSelected = Boolean(selectedOption && optionKey === getOptionKey(selectedOption));
+    const isHighlighted = highlighted !== '' && highlighted === itemValue.trim();
+    const rowProps = stylex.props(
+      surface.row,
+      virtual && styles.virtualRow,
+      isHighlighted && surface.rowHighlighted,
+      option.disabled && surface.rowDisabled
+    );
     return (
-      <CommandItem
+      <CommandPrimitive.Item
         key={optionKey}
         ref={virtual?.measureRef}
         data-index={virtual?.index}
-        value={getOptionSearchText(option)}
+        value={itemValue}
         onSelect={() => handleSelect(optionKey)}
         disabled={option.disabled}
+        className={rowProps.className}
         style={
-          virtual
-            ? {
-                position: 'absolute',
-                top: 0,
-                left: 0,
-                width: '100%',
-                transform: `translateY(${virtual.start}px)`,
-              }
-            : undefined
+          virtual ? { ...rowProps.style, transform: `translateY(${virtual.start}px)` } : undefined
         }
-        className={cn(
-          'flex cursor-pointer select-none items-center gap-2 rounded-none px-2 py-2 text-sm transition-colors',
-          'hover:bg-muted/60',
-          option.disabled && 'opacity-50 pointer-events-none'
-        )}
       >
         {renderOption ? (
           renderOption(option, isSelected)
         ) : (
           <>
-            {renderIcon(option)}
-            <div className="flex flex-col min-w-0">
-              <span className="truncate">{option.label}</span>
+            {option.startContent || option.icon || placeholderIcon ? (
+              <span {...stylex.props(surface.rowIcon)}>{renderIcon(option)}</span>
+            ) : null}
+            <span
+              {...stylex.props(surface.rowText, !!option.description && surface.rowTextStacked)}
+            >
+              <span {...stylex.props(surface.rowLabel)}>{option.label}</span>
               {option.description && (
-                <span className="text-xs text-muted-foreground">{option.description}</span>
+                <span {...stylex.props(surface.rowDescription)}>{option.description}</span>
               )}
-            </div>
+            </span>
             {option.endContent}
           </>
         )}
-        {isSelected && <Check className="ml-auto h-4 w-4 opacity-60" />}
-      </CommandItem>
+        <span {...stylex.props(surface.rowTick)}>
+          {isSelected ? <Check {...stylex.props(surface.glyph16)} aria-hidden="true" /> : null}
+        </span>
+      </CommandPrimitive.Item>
     );
   };
 
   return (
-    <Popover open={isOpen} onOpenChange={handleOpenChange}>
-      <PopoverTrigger asChild>
-        <Button
-          type="button"
-          variant="ghost"
-          className={cn(
-            'w-auto select-none justify-between gap-2 rounded-1 border border-transparent px-3 font-medium text-foreground hover:foreground/70',
-            sizeClassMap[size],
-            disabled && 'opacity-50 pointer-events-none',
+    <Popover.Root open={isOpen} onOpenChange={handleOpenChange}>
+      <Popover.Trigger
+        ref={triggerRef}
+        type="button"
+        disabled={disabled}
+        className={(state) =>
+          withClassName(
+            stylex.props(
+              isField ? surface.field : surface.trigger,
+              isField && fieldSizes[size],
+              !isField && size === 'sm' && surface.triggerSmall,
+              isField && !selectedOption && surface.fieldPlaceholder,
+              !isField && state.open && surface.triggerOpen
+            ),
             className
-          )}
-          ref={triggerRef}
-          disabled={disabled}
-        >
-          <span className="flex min-w-0 flex-1 items-center gap-2">{triggerContent}</span>
-          {showChevron ? <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-60" /> : null}
-        </Button>
-      </PopoverTrigger>
-      <PopoverContent
-        className={cn('max-w-[calc(100vw-1rem)] p-0', contentClassName)}
-        portalContainer={portalContainer}
+          ).className ?? ''
+        }
+      >
+        <span {...stylex.props(surface.value)}>{triggerContent}</span>
+        {showChevron ? <ChevronDown {...stylex.props(surface.chevron)} aria-hidden="true" /> : null}
+      </Popover.Trigger>
+      <Popover.Content
+        className={contentClassName}
+        container={portalContainer}
         align={align}
         side={side}
-        avoidCollisions={avoidCollisions}
-        sideOffset={8}
+        collisionAvoidance={
+          avoidCollisions === false
+            ? { side: 'none', align: 'none', fallbackAxisSide: 'none' }
+            : undefined
+        }
         style={{ minWidth: contentWidth ? `${contentWidth}px` : undefined }}
-        onOpenAutoFocus={!autoFocusOnOpen ? (e) => e.preventDefault() : undefined}
-        onCloseAutoFocus={(event) => {
+        initialFocus={!autoFocusOnOpen ? false : undefined}
+        finalFocus={() => {
           const didSelectItem = didSelectItemRef.current;
           didSelectItemRef.current = false;
-          handleMenuCloseAutoFocus(event, {
-            didSelectItem,
-            menuContent: event.currentTarget,
-          });
+          if (!didSelectItem) return undefined;
+          // A selection answers to the composer, never back to the trigger.
+          restoreComposerFocusAfterMenu();
+          return false;
         }}
       >
-        <Command ref={commandRef} className="bg-transparent" shouldFilter={!virtualize}>
+        <CommandPrimitive
+          shouldFilter={!virtualize}
+          value={highlighted}
+          onValueChange={setHighlighted}
+          {...stylex.props(surface.popupList)}
+        >
           {searchable && (
-            <CommandInput
+            <CommandPrimitive.Input
               placeholder={searchPlaceholder ?? 'Search...'}
-              className="h-8"
               value={query}
               onValueChange={(nextQuery: string) => {
                 setQuery(nextQuery);
                 setSearchToken((n) => n + 1);
               }}
+              {...stylex.props(surface.search)}
             />
           )}
-          <CommandList
-            viewportRef={listViewportRef}
-            containerClassName="max-h-[min(60vh,320px,calc(var(--radix-popover-content-available-height)-3rem))]"
-            viewportClassName="max-h-[min(60vh,320px,calc(var(--radix-popover-content-available-height)-3rem))] text-sm"
-            viewportStyle={{ WebkitOverflowScrolling: 'touch' }}
+          <CommandPrimitive.List
+            ref={listViewportRef}
+            {...stylex.props(surface.popupScroll, styles.scroll)}
           >
-            <CommandEmpty
-              className={cn(
-                'ml-4 mt-2',
-                isDark ? 'text-muted-foreground/80' : 'text-muted-foreground'
-              )}
-            >
+            <CommandPrimitive.Empty {...stylex.props(surface.empty)}>
               {emptyText ?? 'No results found'}
-            </CommandEmpty>
-            <CommandGroup className={virtualize ? 'p-0' : undefined}>
-              {virtualize ? (
-                <div
-                  className="relative w-full"
-                  style={{ height: `${rowVirtualizer.getTotalSize()}px` }}
-                >
-                  {rowVirtualizer.getVirtualItems().map((virtualItem) => {
-                    const option = filteredOptions[virtualItem.index];
-                    if (!option) return null;
-                    return renderOptionItem(option, {
-                      measureRef: rowVirtualizer.measureElement,
-                      index: virtualItem.index,
-                      start: virtualItem.start,
-                    });
-                  })}
-                </div>
-              ) : (
-                options.map((option) => renderOptionItem(option))
-              )}
-            </CommandGroup>
-          </CommandList>
-        </Command>
-      </PopoverContent>
-    </Popover>
+            </CommandPrimitive.Empty>
+            {virtualize ? (
+              <div
+                {...stylex.props(styles.virtualSizer)}
+                style={{ height: `${rowVirtualizer.getTotalSize()}px` }}
+              >
+                {rowVirtualizer.getVirtualItems().map((virtualItem) => {
+                  const option = filteredOptions[virtualItem.index];
+                  if (!option) return null;
+                  return renderOptionItem(option, {
+                    measureRef: rowVirtualizer.measureElement,
+                    index: virtualItem.index,
+                    start: virtualItem.start,
+                  });
+                })}
+              </div>
+            ) : (
+              options.map((option) => renderOptionItem(option))
+            )}
+          </CommandPrimitive.List>
+        </CommandPrimitive>
+      </Popover.Content>
+    </Popover.Root>
   );
 }

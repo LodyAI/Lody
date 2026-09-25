@@ -141,7 +141,13 @@ Measured in the same production build and workspace (9k nodes):
   first clicks on Copy in a real-Chromium harness, 5/5 on the base). Pointer entry now arms
   with `flushSync`, and a press that starts on an unarmed row keeps the plain trigger until its
   click has been dispatched (5/5 after the fix). A popover trigger pressed on a row that never
-  saw a pointer entry still needs a second click, as its Radix root mounts only after the press.
+  saw a pointer entry still needs a second click, as its root mounts only after the press.
+  After `@lody/ui` (#913) replaced the Radix primitives, a jsdom count of 300 closed rows (one
+  tooltip, one popover and one context menu each) still mounted ~34 fibers per row and took ~60ms,
+  against ~70ms for Radix and ~8ms for plain triggers, so the arming stayed. `@lody/ui` cannot
+  depend on the product, so row components import the wrappers from `ui/armed-overlays.tsx`
+  instead of the package; a plain trigger renders the trigger's `render` element or Base UI's
+  default tag with the caller's props, minus Base UI's own.
 
 - **Machine Flock freshness.** Each Machine Flock row consumer compared the Flock's version with
   the version its projection was materialized at, on every mount (twice with remote catch-up),
