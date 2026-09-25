@@ -4232,5 +4232,6 @@
   "settings.about.builtAt": "Built {{date}}",
   "settings.about.ossCommitShort": "Open source",
   "settings.about.downloadStable": "Stable",
-  "settings.about.downloadNightlyShort": "Nightly"
+  "settings.about.downloadNightlyShort": "Nightly",
+  "settings.agent.machineTabs.machine": "Machine"
 }

@@ -41,7 +41,7 @@ const styles = stylex.create({
   /** A line of the machine's provider card; the list draws the card and the rules. */
   root: { minWidth: 0, containerType: 'inline-size' },
   row: { display: 'flex', alignItems: 'center', width: '100%', minWidth: 0 },
-  main: { gap: space[2], paddingInline: space[3], paddingBlock: space[1.5] },
+  main: { gap: '10px', paddingInline: space[4], paddingBlock: space[2] },
   mainList: { gap: space[3], paddingInline: space[4], paddingBlock: space[3] },
   icon: {
     display: 'flex',
@@ -68,6 +68,18 @@ const styles = stylex.create({
     color: colors.secondaryLabel,
   },
   trailingList: { paddingBlock: space[3] },
+  /**
+   * The row's own actions, shown to the pointer or keyboard that reaches the
+   * row: at rest the row says only what is true of the provider.
+   */
+  actions: { display: 'flex', alignItems: 'center', gap: space[2] },
+  reveal: {
+    opacity: {
+      default: 0,
+      [stylex.when.ancestor(':hover')]: 1,
+      [stylex.when.ancestor(':focus-within')]: 1,
+    },
+  },
   /** The meters sit beside the name when the row has room, and under it when not. */
   metersInline: {
     display: { default: 'none', [ROOMY]: 'flex' },
@@ -223,7 +235,7 @@ export function ProviderRow({
   const compact = variant === 'card';
   return (
     <div {...withClassName(stylex.props(styles.root), className)}>
-      <div {...stylex.props(styles.row, surface.pressableLine)}>
+      <div {...stylex.props(stylex.defaultMarker(), styles.row, surface.pressableLine)}>
         <button
           type="button"
           onClick={() => onEdit(config)}
@@ -275,43 +287,45 @@ export function ProviderRow({
           {refreshing && binaryProgressText ? (
             <span {...stylex.props(styles.progress)}>{binaryProgressText}</span>
           ) : null}
-          {onRefresh && (
-            <Button
-              variant="ghost"
-              size="small"
-              icon
-              disabled={refreshing}
-              aria-label={t(
-                'agents.acpCapabilities.refreshModelsAndModes',
-                'Refresh models and modes'
-              )}
-              onClick={(event) => {
-                event.stopPropagation();
-                void handleRefresh();
-              }}
-            >
-              {refreshing ? (
-                <Spinner size="small" />
-              ) : (
-                <RefreshCw {...stylex.props(catalog.icon)} />
-              )}
-            </Button>
-          )}
-          {onDelete && (
-            <Button
-              variant="ghost"
-              aria-label={t('common.delete', 'Delete')}
-              size="small"
-              icon
-              tone="destructive"
-              onClick={(event) => {
-                event.stopPropagation();
-                setDeleteOpen(true);
-              }}
-            >
-              <Trash2 {...stylex.props(catalog.icon)} />
-            </Button>
-          )}
+          <span {...stylex.props(styles.actions, compact && !refreshing && styles.reveal)}>
+            {onRefresh && (
+              <Button
+                variant="ghost"
+                size="small"
+                icon
+                disabled={refreshing}
+                aria-label={t(
+                  'agents.acpCapabilities.refreshModelsAndModes',
+                  'Refresh models and modes'
+                )}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  void handleRefresh();
+                }}
+              >
+                {refreshing ? (
+                  <Spinner size="small" />
+                ) : (
+                  <RefreshCw {...stylex.props(catalog.icon)} />
+                )}
+              </Button>
+            )}
+            {onDelete && (
+              <Button
+                variant="ghost"
+                aria-label={t('common.delete', 'Delete')}
+                size="small"
+                icon
+                tone="destructive"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setDeleteOpen(true);
+                }}
+              >
+                <Trash2 {...stylex.props(catalog.icon)} />
+              </Button>
+            )}
+          </span>
         </div>
       </div>
       {rateLimitWindows.length > 0 && compact && (

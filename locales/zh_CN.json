@@ -4232,5 +4232,6 @@
   "settings.about.builtAt": "构建于 {{date}}",
   "settings.about.ossCommitShort": "开源",
   "settings.about.downloadStable": "正式版",
-  "settings.about.downloadNightlyShort": "Nightly 版"
+  "settings.about.downloadNightlyShort": "Nightly 版",
+  "settings.agent.machineTabs.machine": "机器"
 }

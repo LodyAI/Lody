@@ -43,8 +43,8 @@ import { MobileSettingsSection } from '@/components/mobile/mobile-settings-row';
 import { ProviderRow } from './provider-row';
 import { ProviderSetupRow } from './provider-setup-row';
 import { DeviceResourceMonitor } from './device-resource-monitor';
-import { CompactSection } from './compact-layout';
-import { settingsSurface as surface } from './surface';
+import { CompactSection, settingsRecordsCard } from './compact-layout';
+import { settingsCatalog as catalog, settingsSurface as surface } from './surface';
 import type { MachineMonitorViewState } from '@/hooks/use-machine-monitor';
 import {
   WorkspaceMachineAccordionSummary,
@@ -198,6 +198,11 @@ export type MachineProvidersSectionProps = {
   /** Desktop pills content is flush with the title — no extra horizontal inset. */
   flush?: boolean;
   variant?: 'default' | 'mobile-list';
+  /**
+   * The providers alone, as one card of compact rows: the page that holds them
+   * names them and carries the add action in its own header.
+   */
+  bare?: boolean;
 };
 
 /** "Agent Provider" list + add button — shared by the mobile detail pane and the
@@ -214,6 +219,7 @@ export function MachineProvidersSection({
   onDeleteSetup,
   flush = false,
   variant = 'default',
+  bare = false,
 }: MachineProvidersSectionProps) {
   const { t } = useTranslation();
   const addButton = (
@@ -253,10 +259,29 @@ export function MachineProvidersSection({
         onEdit={onEditConfig}
         onDelete={onDeleteConfig}
         onRefresh={onRefreshConfig}
-        variant="list"
+        variant={bare ? 'card' : 'list'}
       />
     )),
   ];
+
+  if (bare) {
+    return configs.length === 0 && setups.length === 0 ? (
+      <div {...stylex.props(catalog.empty)}>
+        <Bot {...stylex.props(catalog.emptyIcon)} aria-hidden="true" />
+        <p {...stylex.props(catalog.emptyText)}>
+          {t('settings.agent.provider.empty', 'No providers on this machine yet.')}
+        </p>
+      </div>
+    ) : (
+      <div {...stylex.props(settingsRecordsCard)}>
+        {providerLines.map((line, index) => (
+          <div key={line.key} {...stylex.props(surface.line, index > 0 && surface.lineRuled)}>
+            {line}
+          </div>
+        ))}
+      </div>
+    );
+  }
 
   if (variant === 'mobile-list') {
     return (

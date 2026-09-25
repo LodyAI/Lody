@@ -238,6 +238,28 @@ was:
 
 Row padding, section gaps and the type scale are unchanged.
 
+**A detour: the material came back, then went again.** After the owner said the
+flat version had "killed the highlight material", cards on a 2% canvas were
+rendered with full-width and inset row rules. The owner chose to keep the flat
+preferences with boxed records after all.
+
+**Agents, redesigned.** The desktop Agents tab used the providers' roomy mobile
+density (`variant="list"`): 56px rows, a 32px icon tile, and the rate-limit
+meters hidden, since only the compact row shows them. The pane now draws the
+compact row (`MachineProvidersSection bare`): a 24px glyph, 8px block padding,
+and the meters beside the name. Refresh and delete appear only under the pointer
+or keyboard focus, so a list at rest shows what is true of each provider rather
+than a column of red bins. The machine pills became a Select in the page header,
+shown only when there is more than one machine, beside an "Add provider" button.
+The "Agent Provider" heading that repeated the page is gone.
+
+**A rule halfway between sections.** On About the space above a section rule was
+the page gap plus the row's padding (32px) and below it 24px, so the two rules
+sat off-centre. Inside `settingsFlat` the page gap is now 16px, a rule is followed
+by 16px before a headless section's first row and by 24px before a heading, and a
+records card stands 8px further off. Text sits about 24px from the rule on both
+sides.
+
 ## Verification
 
 - Storybook screenshots before and after, in Chinese, for the preferences

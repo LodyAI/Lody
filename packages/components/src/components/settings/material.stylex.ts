@@ -27,9 +27,18 @@ export const settingsMaterial = stylex.defineVars({
   rowRadius: '0px',
   /** A heading's inset from the group's edge. */
   headingInset: space[4],
-  /** The rule above a section, as a box-shadow, and the space under it. */
+  /** The space between a page's blocks. */
+  pageGap: space[6],
+  /**
+   * The rule above a section, as a box-shadow, and the space under it: to the
+   * first row of a section without a heading, and to the heading of one with.
+   * With the page gap above, the rule sits halfway between two sections.
+   */
   sectionRule: 'none',
   sectionRuleGap: '0px',
+  sectionTitledGap: '0px',
+  /** A records card's section, set a step further from the one above. */
+  sectionBoxedGap: '0px',
   /** A group that destroys something, drawn on its edge. */
   dangerShadow: `0 0 0 0.5px color-mix(in oklab, ${colors.destructive} 45%, transparent), ${shadow.card}`,
   /** An empty catalog's region. */
@@ -51,8 +60,11 @@ export const settingsBoxed = stylex.createTheme(settingsMaterial, {
   rowRule: `inset 0 1px 0 ${RULE}`,
   rowRadius: '0px',
   headingInset: space[4],
+  pageGap: space[6],
   sectionRule: 'none',
   sectionRuleGap: '0px',
+  sectionTitledGap: '0px',
+  sectionBoxedGap: '0px',
   dangerShadow: `0 0 0 0.5px color-mix(in oklab, ${colors.destructive} 45%, transparent), ${shadow.card}`,
   emptyFill: `color-mix(in oklab, transparent, ${colors.label} 3%)`,
 });
@@ -65,8 +77,11 @@ export const settingsFlat = stylex.createTheme(settingsMaterial, {
   rowRule: 'none',
   rowRadius: radius.medium,
   headingInset: '0px',
+  pageGap: space[4],
   sectionRule: `inset 0 1px 0 ${RULE}`,
   sectionRuleGap: space[4],
+  sectionTitledGap: space[6],
+  sectionBoxedGap: space[2],
   dangerShadow: 'none',
   emptyFill: 'transparent',
 });

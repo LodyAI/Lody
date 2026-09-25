@@ -30,12 +30,19 @@ export const settingsSurface = stylex.create({
     gap: space[2],
     minWidth: 0,
     // The page's title opens the page; only a section after another is ruled.
+    // The page gap above the rule is paid back below it, so a rule sits
+    // halfway between the last row above and the first line below.
     paddingTop: { default: material.sectionRuleGap, ':first-child': 0 },
     boxShadow: { default: material.sectionRule, ':first-child': 'none' },
     fontSize: '1em',
   },
+  /** A section led by its heading: the heading has no padding of its own to lend. */
+  sectionTitled: { paddingTop: { default: material.sectionTitledGap, ':first-child': 0 } },
   /** A boxed collection is set apart by its box; a rule above it would be a second edge. */
-  sectionBoxed: { paddingTop: 0, boxShadow: 'none' },
+  sectionBoxed: {
+    paddingTop: { default: material.sectionBoxedGap, ':first-child': 0 },
+    boxShadow: 'none',
+  },
   /**
    * A group's name, above its rows: on a flat page it starts where the title
    * and the rows' copy do; over a card it is inset to the rows' copy.
@@ -266,7 +273,7 @@ export const settingsSurface = stylex.create({
     boxSizing: 'border-box',
     display: 'flex',
     flexDirection: 'column',
-    gap: space[6],
+    gap: material.pageGap,
     minWidth: 0,
     overflowX: 'hidden',
     paddingInline: space[4],

@@ -15,7 +15,7 @@ import {
   type SessionId,
   type WorkspaceId,
 } from '@lody/shared';
-import { Check, ChevronDown, ChevronRight } from 'lucide-react';
+import { Check, ChevronDown, ChevronRight, Plus } from 'lucide-react';
 import { Spinner } from '@lody/ui/spinner';
 import { toast } from '@/lib/toast';
 import { activeWorkspaceRuntimeAtom, authTokenAtom, type WorkspaceRuntime } from '@/atoms/runtime';
@@ -62,6 +62,7 @@ import { useMachineMonitor } from '@/hooks/use-machine-monitor';
 import { useMachineLifecycleCapability } from '@/hooks/use-machine-lifecycle-capability';
 import { useOpenSettings } from '@/hooks/use-open-settings';
 import { Button } from '@lody/ui/button';
+import { Select } from '@lody/ui/select';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { corner, duration, ease, radius, space } from '@lody/ui/tokens/scales.stylex';
 import { Drawer, DrawerContent, DrawerDescription, DrawerTitle } from '@/ui/drawer';
@@ -227,6 +228,24 @@ const styles = stylex.create({
   },
   page: { display: 'flex', flexDirection: 'column', gap: space[4], width: '100%', minWidth: 0 },
   heading: { minWidth: 0 },
+  machineChoice: { width: '200px' },
+  machineOption: { display: 'flex', alignItems: 'center', gap: space[2], minWidth: 0 },
+  machineOptionLabel: {
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  machineOptionMeta: { flexShrink: 0, color: colors.tertiaryLabel },
+  machineDot: {
+    flexShrink: 0,
+    width: '6px',
+    height: '6px',
+    borderRadius: radius.full,
+    backgroundColor: colors.tertiaryLabel,
+  },
+  machineDotOnline: { backgroundColor: colors.success },
+  addGlyph: { width: '14px', height: '14px' },
   headingLine: { display: 'flex', alignItems: 'center', gap: space[1.5] },
   headingSubtitle: {
     margin: 0,
@@ -1715,20 +1734,75 @@ export function MachineAgentSettings({
     );
   }
 
+  // In the pane the header carries the page's choices: which machine (only when
+  // there is more than one to choose) and adding a provider to it. The list
+  // under it is the machine's providers and nothing else.
+  const machineChoice =
+    machinePills.length > 1 ? (
+      <Select.Root
+        items={machinePills.map((pill) => ({ value: pill.id, label: pill.label }))}
+        value={resolvedSelectedMachine?.id ?? null}
+        onValueChange={(value) => {
+          if (value != null) onSelectedMachineChange(value as MachineId);
+        }}
+      >
+        <div {...stylex.props(styles.machineChoice)}>
+          <Select.Trigger aria-label={t('settings.agent.machineTabs.machine', 'Machine')}>
+            <Select.Value />
+          </Select.Trigger>
+        </div>
+        <Select.Content>
+          {machinePills.map((pill) => (
+            <Select.Item key={pill.id} value={pill.id}>
+              <span {...stylex.props(styles.machineOption)}>
+                <span
+                  aria-hidden="true"
+                  {...stylex.props(styles.machineDot, pill.online && styles.machineDotOnline)}
+                />
+                <span {...stylex.props(styles.machineOptionLabel)}>{pill.label}</span>
+                {pill.online ? null : (
+                  <span {...stylex.props(styles.machineOptionMeta)}>
+                    {t('workspace.machines.offline', 'Offline')}
+                  </span>
+                )}
+              </span>
+            </Select.Item>
+          ))}
+        </Select.Content>
+      </Select.Root>
+    ) : null;
+
   return (
     <div {...stylex.props(inSettingsPane && surface.container, styles.page)}>
       {banner}
       {header}
 
-      <MachinePills
-        pills={machinePills}
-        selectedId={resolvedSelectedMachine?.id ?? null}
-        onSelect={(id) => onSelectedMachineChange(id as MachineId)}
-      />
+      {inSettingsPane ? (
+        <SettingsPageActions>
+          {machineChoice}
+          {resolvedSelectedMachine ? (
+            <Button
+              variant="secondary"
+              size="small"
+              onClick={() => openCreateDialog(resolvedSelectedMachine)}
+            >
+              <Plus {...stylex.props(styles.addGlyph)} />
+              {t('settings.agent.provider.addProvider', 'Add provider')}
+            </Button>
+          ) : null}
+        </SettingsPageActions>
+      ) : (
+        <MachinePills
+          pills={machinePills}
+          selectedId={resolvedSelectedMachine?.id ?? null}
+          onSelect={(id) => onSelectedMachineChange(id as MachineId)}
+        />
+      )}
 
       {resolvedSelectedMachine ? (
         <MachineProvidersSection
           key={resolvedSelectedMachine.id}
+          bare={inSettingsPane}
           flush
           machine={resolvedSelectedMachine}
           configs={configsForMachine}

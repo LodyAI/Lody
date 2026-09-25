@@ -56,7 +56,13 @@ export function CompactSection({
   // the card whether or not it is a `CompactRow`.
   const lines = React.Children.toArray(children);
   return (
-    <section {...stylex.props(surface.section, boxed && surface.sectionBoxed)}>
+    <section
+      {...stylex.props(
+        surface.section,
+        Boolean(title || headerRight) && surface.sectionTitled,
+        boxed && surface.sectionBoxed
+      )}
+    >
       {title || headerRight ? (
         <header {...stylex.props(surface.sectionHeader)}>
           <div {...stylex.props(surface.sectionHeading)}>
