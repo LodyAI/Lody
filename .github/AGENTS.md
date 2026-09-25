@@ -111,7 +111,9 @@ their failures and perform expiry.
 
 ## Other automation
 
-- `notify-desktop-nightly.yml` sends accepted main SHA notifications only. It checks
+- `notify-desktop-nightly.yml` sends accepted main SHA notifications to the
+  designated release-PR maintenance workflow only. OSS pushes must not directly
+  authorize a desktop release: the receiving repository requires a merged release PR. It checks
   out no source and receives no installer signing or storage credentials. Destination
   configuration is operator-owned; its GitHub App token is scoped to one configured
   repository with Actions write, and is revoked after the job. That permission can

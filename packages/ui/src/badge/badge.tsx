@@ -106,8 +106,8 @@ const TONES = {
  * it: a page, a card, a menu row, a dialog panel. So its tone is a **film of
  * the tone over what is underneath** rather than a background of its own — one
  * declaration that reads on every rung and in both palettes — and its words
- * stay ink, because a badge always carries its word and the palette's `warning`
- * is a colour for a 16px mark rather than for 11px text.
+ * carry the tone pulled halfway to ink, because the palette's `warning` is a
+ * colour for a 16px mark rather than for 11px text.
  *
  * The old implementation's `default` variant filled the chip with the primary
  * colour, which this system's rules give to a stored value: a badge that looked
