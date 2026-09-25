@@ -6,7 +6,7 @@ import { colors } from '@lody/ui/tokens/colors.stylex';
 import { corner, duration, radius, space } from '@lody/ui/tokens/scales.stylex';
 import { Dialog } from '@/ui/dialog';
 import { formatKeyParts } from '@/lib/commands';
-import { isImeComposingKeyboardEvent } from '@/lib/ime';
+import { isImeComposingNativeKeyboardEvent } from '@/lib/ime';
 
 export type PaletteIcon = ComponentType<{ className?: string; strokeWidth?: number }>;
 
@@ -217,6 +217,22 @@ export function CommandPaletteView({
     if (!results.some((result) => result.key === active)) setActive(results[0]?.key ?? '');
   }, [results, active]);
 
+  useEffect(() => {
+    if (!open) return;
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || isImeComposingNativeKeyboardEvent(event)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      onOpenChange(false);
+    };
+
+    // Base UI can keep focus on the dialog surface instead of the cmdk subtree
+    // when opened from a global shortcut. Listen only while this palette is open.
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => window.removeEventListener('keydown', handleKeyDown, true);
+  }, [open, onOpenChange]);
+
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Content
@@ -230,15 +246,6 @@ export function CommandPaletteView({
           loop
           value={active}
           onValueChange={setActive}
-          onKeyDown={(event) => {
-            // The palette owns its Escape key. Keep dismissal on the focused
-            // command surface and leave an active IME composition undisturbed.
-            if (event.key === 'Escape' && !isImeComposingKeyboardEvent(event)) {
-              event.preventDefault();
-              event.stopPropagation();
-              onOpenChange(false);
-            }
-          }}
           {...stylex.props(styles.root)}
         >
           <div {...stylex.props(styles.field)}>

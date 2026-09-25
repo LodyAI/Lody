@@ -70,6 +70,13 @@ describe('CommandPaletteView', () => {
       input.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
     });
   };
+  const pressOutsidePalette = async (key: string, isComposing = false) => {
+    await act(async () => {
+      document.body.dispatchEvent(
+        new KeyboardEvent('keydown', { key, bubbles: true, isComposing })
+      );
+    });
+  };
 
   beforeEach(() => {
     Element.prototype.scrollIntoView = () => undefined;
@@ -125,15 +132,11 @@ describe('CommandPaletteView', () => {
 
     const input = document.body.querySelector<HTMLInputElement>('[cmdk-input]')!;
     input.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }));
-    await act(async () => {
-      input.dispatchEvent(
-        new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, isComposing: true })
-      );
-    });
+    await pressOutsidePalette('Escape', true);
     expect(document.body.querySelector('[cmdk-input]')).not.toBeNull();
     input.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true }));
 
-    await press('Escape');
+    await pressOutsidePalette('Escape');
     expect(document.body.querySelector('[cmdk-input]')).toBeNull();
   });
 });
