@@ -30,11 +30,11 @@ import { Textarea } from '@lody/ui/textarea';
 import { Dialog } from '@/ui/dialog';
 import { Tooltip } from '@lody/ui/tooltip';
 import { colors, shadow, sheen } from '@lody/ui/tokens/colors.stylex';
-import { corner, duration, ease, radius, space, text } from '@lody/ui/tokens/scales.stylex';
+import { corner, duration, ease, focus, radius, space, text } from '@lody/ui/tokens/scales.stylex';
 import { withClassName } from '@/lib/stylex';
 
 const REDUCED_MOTION = '@media (prefers-reduced-motion: reduce)';
-const RING = `0 0 0 2px ${colors.accent}`;
+const RING = `0 0 0 ${focus.ringWidth} ${colors.accent}`;
 const REGION = `color-mix(in oklab, transparent, ${colors.label} 3%)`;
 
 /** The card arrives from a hair below, the way a new block enters the conversation. */

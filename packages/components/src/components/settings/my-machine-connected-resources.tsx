@@ -11,6 +11,7 @@ import { colors } from '@lody/ui/tokens/colors.stylex';
 import { space } from '@lody/ui/tokens/scales.stylex';
 import { settingsSurface as surface } from './surface';
 import type { ProjectSettingsRow } from './project-settings';
+import { settingsType as type } from './type.stylex';
 
 export type MachineConnectedProject = {
   key: string;
@@ -213,21 +214,21 @@ const styles = stylex.create({
   },
   heading: { display: 'flex', alignItems: 'center', gap: space[2], minWidth: 0 },
   headingIcon: { flexShrink: 0, width: '14px', height: '14px', color: colors.tertiaryLabel },
-  title: { margin: 0, fontSize: '0.75em', fontWeight: 400, color: colors.secondaryLabel },
-  hint: { margin: 0, fontSize: '0.75em', lineHeight: 1.375, color: colors.secondaryLabel },
-  note: { margin: 0, fontSize: '0.8em', color: colors.secondaryLabel },
+  title: { margin: 0, fontSize: type.caption, fontWeight: 400, color: colors.secondaryLabel },
+  hint: { margin: 0, fontSize: type.caption, lineHeight: 1.375, color: colors.secondaryLabel },
+  note: { margin: 0, fontSize: type.caption, color: colors.secondaryLabel },
   /** The region fill holds rows that run edge to edge, so it drops its padding. */
   list: { paddingInline: 0, paddingBlock: 0, overflow: 'hidden' },
   row: {
     display: 'flex',
     alignItems: 'center',
     gap: space[3],
-    paddingInline: space[3],
-    paddingBlock: '10px',
+    paddingInline: space[4],
+    paddingBlock: '8px',
   },
   rowText: { flexGrow: 1, flexShrink: 1, minWidth: 0 },
   truncate: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
-  name: { fontSize: '0.875em', color: colors.label },
+  name: { fontSize: type.caption, color: colors.label },
   path: {
     fontFamily: 'var(--font-mono, ui-monospace, monospace)',
     fontSize: '11px',

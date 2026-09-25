@@ -18,11 +18,11 @@ export const chip = stylex.create({
    */
   positioner: { outlineStyle: 'none', zIndex: z.tooltip },
   /**
-   * The chip. It is the one floating thing that inverts rather than rising off
-   * the page: the ladder puts a tooltip at `label` with `shadow.medium`, so
-   * what a person reads is the page's own text colour carrying the page's own
-   * background as ink — the same two colours a primary button and a checked box
-   * take, in the same order.
+   * The chip. It rises off the page on the floating rung like a menu does —
+   * the raised background under the popover shadow, with the page's own ink —
+   * so it follows the palette rather than standing against it: a light chip in
+   * a light palette, a dark one in a dark palette. Only its geometry is
+   * smaller, because it names a control rather than holding any.
    */
   popup: {
     boxSizing: 'border-box',

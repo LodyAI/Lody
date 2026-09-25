@@ -70,7 +70,8 @@ File attachments use `file` blocks; the product contract is in
   full-bleed overlay; desktop (`useIsMobile() === false`) gets a lightbox — the
   photo inset by a `transform: scale()`, a translucent + blurred mask
   (`maskOpacity`), a gradient top bar padded clear of the macOS traffic lights /
-  Windows caption buttons, and no `1 / 1` counter for a single image. Never inset
+  Windows caption buttons with its controls centered on their line (y=23 / the
+  36px caption strip), and no `1 / 1` counter for a single image. Never inset
   the photo by capping `width`/`height` (PhotoView centers the box IT sized, so a
   capped box lands off center) or by padding (it erases an image smaller than the
   inset).

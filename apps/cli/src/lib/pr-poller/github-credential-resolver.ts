@@ -7,8 +7,7 @@ import { formatErrorMessage } from '@/utils/format-error';
  * Per-repo GitHub credential resolution for the poller (plan §3).
  *
  * Precedence mirrors `gh-token-injector.ts`: the managed workspace token
- * wins; the ambient `gh auth token` is only a fallback (harvested one-shot
- * and cached). Resolver instances are workspace-local, while credential
+ * wins; the ambient `gh auth token` is only a fallback (cached for one minute). Resolver instances are workspace-local, while credential
  * scopes intentionally converge across workspaces that use the same GitHub
  * user or App installation.
  */
@@ -22,7 +21,7 @@ export type ResolvedGitHubCredential = {
    * state-file keys. GitHub applies GraphQL quotas per authenticated user or
    * GitHub App installation — not per token string — so the scope must survive
    * token rotation. Managed credentials receive the exact scope from the
-   * backend; ambient gh auth resolves the GitHub user ID once per process.
+   * backend; ambient gh auth resolves the GitHub user ID for each cached credential.
    */
   credentialScope: string;
 };
@@ -34,22 +33,27 @@ type GhHarvest =
 
 const defaultHarvestGhToken = (): Promise<GhHarvest> =>
   new Promise((resolve) => {
-    execFile('gh', ['auth', 'token'], { timeout: 5000, windowsHide: true }, (error, stdout) => {
-      if (error) {
-        const code = (error as NodeJS.ErrnoException).code;
-        resolve({ outcome: code === 'ENOENT' ? 'gh-missing' : 'not-authed' });
-        return;
+    execFile(
+      'gh',
+      ['auth', 'token', '--hostname', 'github.com'],
+      { timeout: 5000, windowsHide: true },
+      (error, stdout) => {
+        if (error) {
+          const code = (error as NodeJS.ErrnoException).code;
+          resolve({ outcome: code === 'ENOENT' ? 'gh-missing' : 'not-authed' });
+          return;
+        }
+        const token = stdout.trim();
+        resolve(token ? { outcome: 'token', token } : { outcome: 'not-authed' });
       }
-      const token = stdout.trim();
-      resolve(token ? { outcome: 'token', token } : { outcome: 'not-authed' });
-    });
+    );
   });
 
 const defaultFetchGhUserId = (): Promise<string | null> =>
   new Promise((resolve) => {
     execFile(
       'gh',
-      ['api', 'user', '--jq', '.id'],
+      ['api', '--hostname', 'github.com', 'user', '--jq', '.id'],
       { timeout: 5000, windowsHide: true },
       (error, stdout) => {
         if (error) {
@@ -70,9 +74,10 @@ export type GitHubCredentialResolverDeps = {
   /** Workspace identity used only for the old-backend App-token fallback scope. */
   workspaceId: string;
   logger: Logger;
+  nowMs?: () => number;
   /** Injectable for tests. */
   harvestGhToken?: () => Promise<GhHarvest>;
-  /** Injectable for tests; defaults to one cached `gh api user --jq .id`. */
+  /** Injectable for tests; defaults to cached `gh api user --jq .id`. */
   fetchGhUserId?: () => Promise<string | null>;
 };
 
@@ -80,6 +85,7 @@ export class GitHubCredentialResolver {
   private readonly harvestGhToken: () => Promise<GhHarvest>;
   private readonly fetchGhUserId: () => Promise<string | null>;
   private ghHarvest: GhHarvest | null = null;
+  private ghRefreshAt = 0;
   private ghUserId: string | null | undefined;
   private loggedGhMissing = false;
   private loggedGhNotAuthed = false;
@@ -154,19 +160,18 @@ export class GitHubCredentialResolver {
   }
 
   private async resolveAmbientGh(): Promise<ResolvedGitHubCredential | null> {
-    if (this.ghHarvest?.outcome === 'gh-missing') {
-      return null;
-    }
-    if (this.ghHarvest?.outcome === 'not-authed') {
-      return null;
-    }
-    if (this.ghHarvest === null) {
+    const now = (this.deps.nowMs ?? Date.now)();
+    if (this.ghHarvest === null || now >= this.ghRefreshAt) {
+      const previousToken = this.ghHarvest?.outcome === 'token' ? this.ghHarvest.token : null;
       this.ghHarvest = await this.harvestGhToken();
+      this.ghRefreshAt = now + 60_000;
+      const nextToken = this.ghHarvest.outcome === 'token' ? this.ghHarvest.token : null;
+      if (previousToken !== nextToken || !this.ghUserId) this.ghUserId = undefined;
     }
     if (this.ghHarvest.outcome === 'gh-missing') {
       if (!this.loggedGhMissing) {
         this.loggedGhMissing = true;
-        this.deps.logger.debug('[pr-poller] gh CLI not found; ambient token harvest disabled');
+        this.deps.logger.debug('[pr-poller] gh CLI not found; ambient token harvest unavailable');
       }
       return null;
     }
@@ -174,7 +179,7 @@ export class GitHubCredentialResolver {
       if (!this.loggedGhNotAuthed) {
         this.loggedGhNotAuthed = true;
         this.deps.logger.debug(
-          '[pr-poller] gh CLI is not authenticated; ambient credential scope disabled'
+          '[pr-poller] gh CLI is not authenticated; ambient credential unavailable'
         );
       }
       return null;
@@ -185,19 +190,21 @@ export class GitHubCredentialResolver {
       if (!this.loggedGhIdentityUnavailable) {
         this.loggedGhIdentityUnavailable = true;
         this.deps.logger.debug(
-          '[pr-poller] Could not resolve the ambient GitHub user ID; polling with gh auth disabled'
+          '[pr-poller] Ambient GitHub user ID unavailable; using shared conservative credential quota'
         );
       }
-      return null;
     }
     return {
       token,
       source: 'gh',
-      credentialScope: `github:user:${userId}`,
+      // Installation tokens can read PRs while /user returns 403. Merge all
+      // unidentified local credentials into one conservative bucket instead of
+      // using token bytes or disabling otherwise-authorized repository reads.
+      credentialScope: userId ? `github:user:${userId}` : 'github:ambient:github.com',
     };
   }
 
-  /** One-shot, cached for the process; null disables ambient polling for safety. */
+  /** Cached with the credential; identity is quota scoping, not repository authorization. */
   private async resolveGhUserId(): Promise<string | null> {
     if (this.ghUserId !== undefined) {
       return this.ghUserId;

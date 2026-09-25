@@ -38,7 +38,7 @@ CLI/MCP orchestration contract is specs/session-orchestration.md.
   machine-local marker store.
 - `session-edit-and-resend-service.ts` — same-session replacement of the last normal User turn.
 - `session-launch-config-resolver.ts` — durable launch config resolution.
-- `workspace-branch-service.ts` — observes checkout branches for local folders and worktrees,
+- `workspace-git-service.ts` — observes checkout branches for local folders and worktrees,
   serializes reads/writes per owner Session, and publishes the last named branch. Execution
   binds, terminal turns, and authorized Code Collab activation/refresh use this service;
   observation requires neither a running agent nor a GitHub remote.

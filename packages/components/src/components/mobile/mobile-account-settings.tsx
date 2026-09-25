@@ -551,14 +551,9 @@ export function MobileAccountSettings({
                 <div className="flex shrink-0 items-center gap-1">
                   {isEditable ? (
                     <Menu.Root>
-                      <Menu.Trigger render={<button className="inline-flex cursor-pointer items-center gap-1 rounded-md border border-transparent px-2 py-0.5 text-xs font-medium text-muted-foreground transition-colors hover:border-border hover:bg-muted hover:text-foreground">
-                          {t(`organization.role.${member.role}`)}
-                          <ChevronDown className="h-3 w-3 opacity-50" />
-                        </button>}>
-                        <button className="inline-flex cursor-pointer items-center gap-1 rounded-md border border-transparent px-2 py-0.5 text-xs font-medium text-muted-foreground transition-colors hover:border-border hover:bg-muted hover:text-foreground">
-                          {t(`organization.role.${member.role}`)}
-                          <ChevronDown className="h-3 w-3 opacity-50" />
-                        </button>
+                      <Menu.Trigger render={<Button variant="ghost" size="mini" />}>
+                        {t(`organization.role.${member.role}`)}
+                        <ChevronDown className="h-3 w-3 opacity-50" />
                       </Menu.Trigger>
                       <Menu.Content align="end">
                         <Menu.Item
@@ -590,9 +585,7 @@ export function MobileAccountSettings({
                       </Menu.Content>
                     </Menu.Root>
                   ) : (
-                    <span className="px-2 py-0.5 text-xs font-medium text-muted-foreground">
-                      {t(`organization.role.${member.role}`)}
-                    </span>
+                    <Badge>{t(`organization.role.${member.role}`)}</Badge>
                   )}
                   {isEditable && (
                     <Button
@@ -757,9 +750,7 @@ export function MobileAccountSettings({
                       <p className="truncate text-[0.95rem] font-medium">
                         {apiKey.note || t('settings.account.cliAuth.recordNoteFallback')}
                       </p>
-                      {sourceLabel && (
-                        <Badge className="h-5 rounded-md px-1.5 text-[10px]">{sourceLabel}</Badge>
-                      )}
+                      {sourceLabel && <Badge>{sourceLabel}</Badge>}
                       {createdAt && (
                         <time
                           dateTime={createdAt.dateTime}
@@ -953,7 +944,9 @@ export function MobileAccountSettings({
         >
           <AlertDialog.Content>
             <AlertDialog.Header>
-              <AlertDialog.Title>{t('settings.account.cliAuth.revokeDialogTitle')}</AlertDialog.Title>
+              <AlertDialog.Title>
+                {t('settings.account.cliAuth.revokeDialogTitle')}
+              </AlertDialog.Title>
               <AlertDialog.Description>
                 {t('settings.account.cliAuth.revokeDialogDescription', {
                   note: cliApiKeyToRevoke?.note ?? t('settings.account.cliAuth.recordNoteFallback'),
@@ -1030,7 +1023,9 @@ export function MobileAccountSettings({
       <AlertDialog.Root open={leaveDialogOpen} onOpenChange={setLeaveDialogOpen}>
         <AlertDialog.Content>
           <AlertDialog.Header>
-            <AlertDialog.Title>{t('workspace.danger.leaveWorkspace.confirmTitle')}</AlertDialog.Title>
+            <AlertDialog.Title>
+              {t('workspace.danger.leaveWorkspace.confirmTitle')}
+            </AlertDialog.Title>
             <AlertDialog.Description>
               {t('workspace.danger.leaveWorkspace.confirmDescription', {
                 workspace: organization.name,

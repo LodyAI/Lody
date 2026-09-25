@@ -72,6 +72,8 @@ export type SettingsTabConfig = {
   capability?: PlatformCapability;
   /** The workspace machine inventory has no useful distinction in a solo workspace. */
   multiMemberOnly?: boolean;
+  /** Keyboard-centric surfaces are hidden from the mobile settings list. */
+  desktopOnly?: boolean;
   path: SettingsPath;
 };
 
@@ -109,6 +111,7 @@ export const SETTINGS_TAB_CONFIGS: SettingsTabConfig[] = [
     labelKey: 'settings.tabs.keyboardShortcuts',
     descriptionKey: 'settings.categories.keyboardShortcuts.description',
     icon: Keyboard,
+    desktopOnly: true,
     path: '/$workspaceName/settings/keyboard-shortcuts',
   },
   {

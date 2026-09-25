@@ -50,10 +50,10 @@ describe('createLodyPrPollerWorkspace', () => {
     const workspace = createLodyPrPollerWorkspace({
       documentManager: {} as LoroDocumentManager,
       workspaceId: 'workspace-1',
-      cliToken: 'cli-token',
+      githubTokens: null,
+      prAssociation: null,
       userId: 'user-1',
       machineId: machineId('machine-1'),
-      authBaseUrl: 'https://example.test',
       logger: createTestLogger(),
     });
 
@@ -80,10 +80,10 @@ describe('createLodyPrPollerWorkspace', () => {
     const workspace = createLodyPrPollerWorkspace({
       documentManager,
       workspaceId: 'workspace-1',
-      cliToken: 'cli-token',
+      githubTokens: null,
+      prAssociation: null,
       userId: 'user-1',
       machineId: machineId('machine-1'),
-      authBaseUrl: 'https://example.test',
       logger: createTestLogger(),
     });
     const listener = vi.fn();
