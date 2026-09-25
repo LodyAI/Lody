@@ -1,4 +1,13 @@
-import { useRef, useState, type ComponentType, type ReactNode, type SVGProps } from 'react';
+import {
+  createContext,
+  useContext,
+  useRef,
+  useState,
+  type ComponentType,
+  type ReactNode,
+  type RefObject,
+  type SVGProps,
+} from 'react';
 import { ArrowUpRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Popover, PopoverAnchor, PopoverContent } from '@/ui/popover';
@@ -67,6 +76,12 @@ export function ActionChip({
 }
 
 /**
+ * The info bar's pill element. A {@link PopoverActionChip} inside the bar
+ * anchors its popover to the whole pill so the panel shares the bar's edges.
+ */
+export const InfoBarSurfaceContext = createContext<RefObject<HTMLDivElement | null> | null>(null);
+
+/**
  * Action chip whose one click toggles a popover above the bar (e.g. related
  * Sessions). Like {@link ActionChip} it never takes the stage.
  */
@@ -85,39 +100,52 @@ export function PopoverActionChip({
   defaultOpen?: boolean;
 }) {
   const [open, setOpen] = useState(defaultOpen);
-  const anchorRef = useRef<HTMLButtonElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const surfaceRef = useContext(InfoBarSurfaceContext);
+  const button = (
+    <button
+      ref={buttonRef}
+      type="button"
+      aria-label={label}
+      aria-haspopup="dialog"
+      aria-expanded={open}
+      title={label}
+      onClick={() => setOpen((value_) => !value_)}
+      className={cn(
+        CHIP_BUTTON_CLASS,
+        'text-muted-foreground',
+        open && 'bg-muted-foreground/10 text-foreground'
+      )}
+    >
+      <ChipFace icon={icon} value={value} />
+    </button>
+  );
   return (
     <Popover open={open} onOpenChange={setOpen}>
-      <PopoverAnchor asChild>
-        <button
-          ref={anchorRef}
-          type="button"
-          aria-label={label}
-          aria-haspopup="dialog"
-          aria-expanded={open}
-          title={label}
-          onClick={() => setOpen((value_) => !value_)}
-          className={cn(
-            CHIP_BUTTON_CLASS,
-            'text-muted-foreground',
-            open && 'bg-muted-foreground/10 text-foreground'
-          )}
-        >
-          <ChipFace icon={icon} value={value} />
-        </button>
-      </PopoverAnchor>
+      {surfaceRef ? (
+        <>
+          <PopoverAnchor virtualRef={surfaceRef as RefObject<HTMLDivElement>} />
+          {button}
+        </>
+      ) : (
+        <PopoverAnchor asChild>{button}</PopoverAnchor>
+      )}
       <PopoverContent
         side="top"
         align="start"
-        sideOffset={8}
+        sideOffset={surfaceRef ? 4 : 8}
         aria-label={label}
         onPointerDownOutside={(event) => {
           const target = event.target as Node | null;
-          if (target && anchorRef.current?.contains(target)) {
+          if (target && buttonRef.current?.contains(target)) {
             event.preventDefault();
           }
         }}
-        className="w-96 max-w-[min(24rem,90vw)] border-border/60 p-0 shadow-xl"
+        className={cn(
+          'border-border/60 p-0 shadow-xl',
+          // Inside the bar the panel spans the pill, edge to edge.
+          surfaceRef ? 'w-[var(--radix-popover-trigger-width)]' : 'w-96 max-w-[min(24rem,90vw)]'
+        )}
       >
         {content}
       </PopoverContent>

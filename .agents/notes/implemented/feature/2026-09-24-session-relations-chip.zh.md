@@ -13,7 +13,7 @@ Translation: current
 
 - 数据来源是 `SessionMeta.openedBySessionId`。MCP 创建的 Tab 同时带有 `parentSessionId` 和 `openedBySessionId`，所以新增的 `createdSessionsAtomFamily` 会保留它们（不同于服务 `⋯` 菜单、会丢掉 Tab 的 `openedSessionsAtomFamily`）。侧边对话已在右侧面板，因此排除；已归档的与其他活动关系列表一样排除。
 - 类型为 `parentSessionId ? Tab : 对话`。Tab 行以 `{ sessionId: root, tabSessionId }` 导航，其他工作区里的 Tab 也能精确恢复。
-- 该图标和 Preview 一样是 cluster 区的普通操作，不会进入 stage：stage 只容纳一个摘要项，导航列表没有摘要形态。`info-chip.tsx` 中的 `PopoverActionChip` 是可复用的形态（单击切换一个 `side="top"`、与信息栏其他弹层同样外观的 popover）。
+- 该图标和 Preview 一样是 cluster 区的普通操作，不会进入 stage：stage 只容纳一个摘要项，导航列表没有摘要形态。`info-chip.tsx` 中的 `PopoverActionChip` 是可复用的形态（单击切换一个 `side="top"`、与信息栏其他弹层同样外观的 popover）。在信息栏内，它通过 `InfoBarSurfaceContext` 和 Radix `virtualRef` 锚定到整条信息栏并取其宽度，面板看起来是信息栏向上展开，而不是图标大小的下拉框。
 - 放弃的方案：信息栏上方的独立固定栏（第一版）。它始终可见，但让输入框上方的界面占用翻倍。
 - 只要任一方向存在就显示，而不只是有子对话时：没有子对话的被创建对话也需要一条固定的回到父对话的路径。数字只统计已创建的对话。
 - 渲染开销：页面只读取一个布尔值（`useHasCreatedSessions`，对已创建列表的 `selectAtom`）来决定是否传入该图标，因此原本为空的信息栏仍会隐藏。列表本身由图标这个叶子组件订阅；子对话状态变化频繁，对话页不应因此重渲染。

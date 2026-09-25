@@ -33,6 +33,9 @@ Storybook screenshots; not yet exercised in the packaged desktop app.
   because the stage holds exactly one summary item and a navigation list has
   no summary form. `PopoverActionChip` in `info-chip.tsx` is the reusable shape
   (one click toggles a `side="top"` popover with the bar's popover chrome).
+  Inside the bar it anchors to the whole pill via `InfoBarSurfaceContext` and
+  Radix `virtualRef`, taking the pill's width, so the panel reads as the bar
+  growing upward rather than a chip-sized dropdown.
 - Rejected: a separate pinned bar above the info bar (the first iteration). It
   was always visible, but it doubled the chrome above the composer.
 - The chip shows when either direction exists, not only when children exist: a
