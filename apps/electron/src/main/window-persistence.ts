@@ -5,14 +5,17 @@ import {
   type Rectangle
 } from 'electron'
 import Conf from 'conf'
-import { MOBILE_LAYOUT_BREAKPOINT } from '@lody/shared/layout'
+import { DESKTOP_WINDOW_MIN_WIDTH } from '@lody/shared/layout'
 
 const DEFAULT_MAIN_WINDOW_BOUNDS = {
   width: 900,
   height: 670
 } as const
 
-export const MAIN_WINDOW_MIN_WIDTH = MOBILE_LAYOUT_BREAKPOINT
+// The desktop shell keeps the desktop layout at every width — a narrow window
+// takes the compact presentation (overlay sidebars) rather than the mobile
+// renderer, so this floor only protects window chrome, not the layout switch.
+export const MAIN_WINDOW_MIN_WIDTH = DESKTOP_WINDOW_MIN_WIDTH
 export const MAIN_WINDOW_MIN_HEIGHT = 600
 
 const WINDOW_STATE_DEBOUNCE_MS = 150

@@ -32,6 +32,9 @@ import {
 } from '@/lib/cli-platform';
 import { normalizeCurrentProcessResourceProfile } from '@/utils/process-resource-profile';
 import { startEventLoopLagMonitor } from '@/utils/event-loop-lag-monitor';
+import { startEventLoopStallProfiler } from '@/utils/event-loop-stall-profiler';
+import { registerProcessExitTrace } from '@/utils/process-exit-trace';
+import { LODY_LOG_DIR } from '@/utils/log-retention';
 import { flushTelemetry } from '@/instrument';
 import { getRuntimeDiagnostics } from '@/utils/runtime-diagnostics';
 import {
@@ -118,6 +121,14 @@ export const startCommand = new Command('start')
   .action(async (options: StartOptions) => {
     createHybridLogger({ level: options.debug ? 'debug' : 'info' });
     const logger = getLogger('start');
+    registerProcessExitTrace({ scope: 'start' });
+    // Armed before startup work and never stopped: its unref'd worker watches
+    // startup and shutdown stalls too, and ends with the process.
+    startEventLoopStallProfiler({
+      logger,
+      logDir: LODY_LOG_DIR,
+      label: 'lody start',
+    });
     const commandActionStartedAt = Date.now();
     logger.debug(
       `[startup] Start action entered processUptimeMs=${Math.round(process.uptime() * 1_000)}`
