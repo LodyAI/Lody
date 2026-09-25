@@ -1138,9 +1138,6 @@ export const LoroSidebar = memo(function LoroSidebar({
 
   return (
     <div
-      // Interaction here is not "reading", so working marks keep moving
-      // (see ui/working-grid-reading.ts).
-      data-working-grid-region=""
       // No overflow-hidden here: the resize sash extends past the right border
       // so its hit area straddles the edge; the inner content div clips instead.
       className={cn('relative h-full select-none bg-sidebar text-sidebar-foreground', className)}
