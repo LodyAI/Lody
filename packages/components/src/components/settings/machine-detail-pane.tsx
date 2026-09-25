@@ -38,7 +38,7 @@ import { Switch } from '@lody/ui/switch';
 import { Menu } from '@/ui/menu';
 import { AlertDialog } from '@/ui/dialog';
 import { Tooltip } from '@lody/ui/tooltip';
-import { colors, shadow } from '@lody/ui/tokens/colors.stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
 import { corner, radius, space } from '@lody/ui/tokens/scales.stylex';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useMachineOnlineStatus } from '@/hooks/use-machine-online-status';
@@ -61,92 +61,40 @@ import { settingsType as type } from './type.stylex';
 const MONO = 'var(--font-mono, ui-monospace, monospace)';
 
 const styles = stylex.create({
-  availableSection: { display: 'flex', flexDirection: 'column', gap: space[6] },
-  hero: {
+  quietLine: {
+    margin: 0,
+    fontSize: type.caption,
+    lineHeight: type.leading,
+    color: colors.secondaryLabel,
+    textAlign: 'center',
+  },
+  wallSection: {
     display: 'flex',
     flexDirection: 'column',
     alignItems: 'center',
-    gap: space[4],
+    gap: space[3],
     paddingTop: space[8],
   },
-  heroMarks: { display: 'flex', alignItems: 'center' },
-  /** One mark: a raised disc, the card rung's fill, hairline and contact shadow. */
-  heroMark: {
-    position: 'relative',
+  wall: {
     display: 'flex',
-    flexShrink: 0,
-    alignItems: 'center',
+    flexWrap: 'wrap',
     justifyContent: 'center',
-    borderRadius: radius.full,
-    cornerShape: corner.round,
-    backgroundColor: colors.raisedBackground,
-    boxShadow: shadow.card,
-    color: colors.label,
+    gap: space[1],
+    maxWidth: '560px',
   },
-  heroMarkOverlap: { marginInlineStart: '-8px' },
-  heroMarkSize: (size: number, layer: number) => ({
-    width: `${size}px`,
-    height: `${size}px`,
-    zIndex: layer,
-  }),
-  heroGlyph: (size: number) => ({ width: `${size}px`, height: `${size}px` }),
-  heroTitle: {
-    margin: 0,
-    fontWeight: type.headingWeight,
-    lineHeight: type.leading,
-    color: colors.label,
-  },
-  /** The providers still to add: two columns of quiet, pressable entries. */
-  available: {
-    marginInline: `calc(-1 * ${space[4]})`,
-    display: 'grid',
-    gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
-    columnGap: space[2],
-    rowGap: '2px',
-  },
-  availableItem: {
-    boxSizing: 'border-box',
-    display: 'flex',
-    alignItems: 'center',
-    gap: '10px',
-    minWidth: 0,
-    margin: 0,
-    paddingInline: space[4],
-    paddingBlock: space[2],
-    borderWidth: 0,
-    color: 'inherit',
-    fontFamily: 'inherit',
-    fontSize: 'inherit',
-    textAlign: 'start',
-    cursor: 'pointer',
-  },
-  availableIcon: {
+  wallMark: {
     display: 'flex',
     flexShrink: 0,
     alignItems: 'center',
     justifyContent: 'center',
     width: '24px',
     height: '24px',
+    borderRadius: radius.full,
+    cornerShape: corner.round,
+    backgroundColor: `color-mix(in oklab, transparent, ${colors.label} 4%)`,
+    color: colors.secondaryLabel,
   },
-  availableGlyph: { width: '18px', height: '18px' },
-  availableText: { display: 'flex', flexDirection: 'column', flexGrow: 1, minWidth: 0 },
-  availableName: {
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-    fontSize: type.caption,
-    lineHeight: type.leading,
-    color: colors.label,
-  },
-  availableDescription: {
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-    fontSize: type.caption,
-    lineHeight: type.leading,
-    color: colors.tertiaryLabel,
-  },
-  availablePlus: { flexShrink: 0, width: '14px', height: '14px', color: colors.tertiaryLabel },
+  wallGlyph: { width: '14px', height: '14px' },
   icon12: { width: '12px', height: '12px', flexShrink: 0 },
   icon14: { width: '14px', height: '14px', flexShrink: 0 },
   /** A glyph in a box that sizes it — a menu row's leading box, a badge's. */
@@ -1180,9 +1128,6 @@ function useProviderUsage(machineId: string, enabled: boolean): Map<string, Prov
  * What an empty machine could run, one click from the dialog opened on each:
  * the empty state's own content rather than a sentence pointing at a button.
  */
-/** The marks that open an empty machine's page: an arc, largest at its centre. */
-const HERO_MARK_SIZES = [36, 42, 50, 42, 36] as const;
-
 function AvailableProviders({
   machineName,
   configs,
@@ -1208,65 +1153,35 @@ function AvailableProviders({
       ),
     [configs, t]
   );
+  // An empty machine is shown what it could run: the onboarding wall of marks,
+  // each opening the add dialog already on that agent.
   return (
-    <section {...stylex.props(styles.availableSection)}>
-      {/* The picture is the choice itself: the marks of what this machine could
-          run, raised on the card's material, over the machine's own name. */}
-      <div {...stylex.props(styles.hero)}>
-        <div aria-hidden="true" {...stylex.props(styles.heroMarks)}>
-          {available.slice(0, HERO_MARK_SIZES.length).map((provider, index, shown) => {
-            const size =
-              HERO_MARK_SIZES[index + Math.floor((HERO_MARK_SIZES.length - shown.length) / 2)]!;
-            const centre = Math.floor(shown.length / 2);
-            return (
-              <span
-                key={provider.key}
-                {...stylex.props(
-                  styles.heroMark,
-                  index > 0 && styles.heroMarkOverlap,
-                  styles.heroMarkSize(size, shown.length - Math.abs(index - centre))
-                )}
-              >
-                <AgentIcon
-                  cliType={provider.cliType}
-                  agentType={provider.agentType}
-                  brandId={provider.brandId}
-                  className={stylex.props(styles.heroGlyph(Math.round(size * 0.46))).className}
-                />
-              </span>
-            );
-          })}
-        </div>
-        <p {...stylex.props(styles.heroTitle)}>
-          {t('settings.agent.provider.emptyOnMachine', 'No agents on {{machine}} yet', {
-            machine: machineName,
-          })}
-        </p>
-      </div>
-      <div {...stylex.props(styles.available)}>
+    <section {...stylex.props(styles.wallSection)}>
+      <p {...stylex.props(styles.quietLine)}>
+        {t('settings.agent.provider.emptyOnMachine', 'No agents on {{machine}} yet', {
+          machine: machineName,
+        })}
+      </p>
+      <div {...stylex.props(styles.wall)}>
         {available.map((provider) => (
-          <button
+          <Button
             key={provider.key}
             type="button"
+            variant="ghost"
+            shape="pill"
+            title={provider.description}
             onClick={() => onAdd(provider.initialForm)}
-            {...stylex.props(styles.availableItem, surface.pressableLine)}
           >
-            <span {...stylex.props(styles.availableIcon)}>
+            <span {...stylex.props(styles.wallMark)}>
               <AgentIcon
                 cliType={provider.cliType}
                 agentType={provider.agentType}
                 brandId={provider.brandId}
-                className={stylex.props(styles.availableGlyph).className}
+                className={stylex.props(styles.wallGlyph).className}
               />
             </span>
-            <span {...stylex.props(styles.availableText)}>
-              <span {...stylex.props(styles.availableName)}>{provider.label}</span>
-              {provider.description ? (
-                <span {...stylex.props(styles.availableDescription)}>{provider.description}</span>
-              ) : null}
-            </span>
-            <Plus aria-hidden="true" {...stylex.props(styles.availablePlus)} />
-          </button>
+            {provider.label}
+          </Button>
         ))}
       </div>
     </section>

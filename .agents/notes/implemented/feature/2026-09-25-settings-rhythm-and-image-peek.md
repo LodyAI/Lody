@@ -263,13 +263,13 @@ the composer reads; a model the runtime calls "default" is left out), how many
 open conversations on this machine use it and when one last moved (from the
 session index in memory), and its environment variable count. A list of what the machine could still add
 was tried under every list and rejected: the owner wants it only when the
-machine has nothing. An empty machine's page opens on a picture made of the choice
-itself: the first five addable marks as raised discs (the card rung's fill,
-hairline and contact shadow) in an arc, largest at the centre, over "No agents
-on {machine} yet" (a bare heading read as hand-typed); then the builtin runtimes and presets in two columns, each opening the add
-dialog already on that provider (`listAddableProviders` in
-`agent-config-dialog.tsx`; experimental runtimes, registry agents and custom
-commands stay behind the dialog's rail). None of this makes a request.
+machine has nothing. An empty machine's page is a quiet line, "No agents on {machine} yet",
+over the onboarding's wall of agent marks as pills, each opening the add dialog
+already on that agent (`listAddableProviders` in `agent-config-dialog.tsx`;
+experimental runtimes, registry agents and custom commands stay behind the
+dialog's rail). A bare heading read as hand-typed and an arc of raised discs as
+cheap; of three rendered alternatives (a line icon over a two-column list, the
+wall, the list alone) the owner chose the wall.
 
 With many machines the tabs keep to one row: those that fit are tabs, the rest
 sit behind a last "N more" tab whose menu gains a search field past eight, and
