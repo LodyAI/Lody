@@ -97,8 +97,9 @@ long-form text.
   avatar rather than this change's 18px one.
 - `Mergeable` is a success `Badge` (#969). Its word is the success colour itself, not the
   package's half-way mix toward the ink, through a `createTheme` over the badge tokens
-  (`sidebar-mergeable-badge.stylex.ts`); the package tint (22%) is already stronger than this
-  change's 16%. The border and semibold weight have no token and were not kept.
+  (`sidebar-mergeable-badge.stylex.ts`), and its tint stays at this change's 16% where the
+  package's settled at 14% (#976). The border and semibold weight have no token and were not
+  kept.
 
 ## Alternatives
 
