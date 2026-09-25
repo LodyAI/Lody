@@ -5,6 +5,7 @@ import {
   corner,
   duration,
   ease,
+  focus,
   radius,
   space,
   text,
@@ -35,7 +36,7 @@ import {
 const COMPACT_FACE = '@container composer-face (max-width: 280px)';
 
 /** The focus ring every control here composes into its own shadow. */
-const RING = `0 0 0 2px ${colors.accent}`;
+const RING = `0 0 0 ${focus.ringWidth} ${colors.accent}`;
 
 /** The popup rows' highlight: the floating rung mixed toward the ink. */
 const POPUP_HIGHLIGHT = `color-mix(in oklab, ${colors.raisedBackground}, ${colors.label} 6%)`;

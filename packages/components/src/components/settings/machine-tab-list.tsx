@@ -9,10 +9,11 @@ import { Button } from '@lody/ui/button';
 import { Menu } from '@/ui/menu';
 import { Tooltip } from '@lody/ui/tooltip';
 import { colors } from '@lody/ui/tokens/colors.stylex';
-import { corner, radius, space } from '@lody/ui/tokens/scales.stylex';
+import { corner, focus, radius, space } from '@lody/ui/tokens/scales.stylex';
 import { UserAvatar } from '@/components/user-avatar';
 import { FocusScope, useListKeyboardNavigation } from '@/ui/focus-scope';
 import { settingsSurface as surface } from './surface';
+import { settingsType as type } from './type.stylex';
 
 export type MachineTabListVariant = 'compact' | 'detailed';
 
@@ -410,7 +411,7 @@ const styles = stylex.create({
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
-    fontSize: '0.75em',
+    fontSize: type.caption,
     fontWeight: 400,
     color: colors.secondaryLabel,
   },
@@ -430,7 +431,7 @@ const styles = stylex.create({
     paddingInline: space[2],
     paddingBlock: space[4],
     textAlign: 'center',
-    fontSize: '0.8em',
+    fontSize: type.caption,
     color: colors.secondaryLabel,
   },
   emptyAction: { marginTop: space[2] },
@@ -469,7 +470,10 @@ const styles = stylex.create({
     textAlign: 'start',
     cursor: 'pointer',
     outlineStyle: 'none',
-    boxShadow: { default: 'none', ':focus-visible': `inset 0 0 0 2px ${colors.accent}` },
+    boxShadow: {
+      default: 'none',
+      ':focus-visible': `inset 0 0 0 ${focus.ringWidth} ${colors.accent}`,
+    },
   },
   detailedRowSelected: {
     backgroundColor: { default: colors.selectedFill, ':hover': colors.selectedFill },
@@ -483,7 +487,7 @@ const styles = stylex.create({
     minWidth: 0,
   },
   detailedNameLine: { display: 'flex', alignItems: 'center', gap: space[2], minWidth: 0 },
-  detailedName: { minWidth: 0, fontSize: '0.875em', fontWeight: 400 },
+  detailedName: { minWidth: 0, fontSize: type.caption, fontWeight: 400 },
   detailedMeta: {
     display: 'flex',
     flexWrap: 'wrap',

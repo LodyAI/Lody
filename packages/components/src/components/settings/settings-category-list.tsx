@@ -19,6 +19,7 @@ import {
 import { SettingsAccountEntry } from './settings-account-entry';
 import { FocusScope, useListKeyboardNavigation } from '@/ui/focus-scope';
 import { settingsSurface as surface } from './surface';
+import { settingsType as type } from './type.stylex';
 
 const styles = stylex.create({
   list: {
@@ -34,7 +35,7 @@ const styles = stylex.create({
     margin: 0,
     paddingInline: '20px',
     paddingBottom: space[1.5],
-    fontSize: '0.82em',
+    fontSize: type.caption,
     fontWeight: 400,
     color: colors.secondaryLabel,
   },
@@ -93,7 +94,7 @@ const styles = stylex.create({
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
-    fontSize: '0.78em',
+    fontSize: type.caption,
     color: colors.secondaryLabel,
   },
   chevron: { flexShrink: 0, width: '16px', height: '16px', color: colors.tertiaryLabel },
@@ -173,7 +174,7 @@ export function SettingsCategoryList({ workspaceName }: SettingsCategoryListProp
   const user = useAtomValue(userAtom);
   const visibleTabs = useVisibleSettingsTabs({
     includeMultiMemberOnly: (activeOrganization?.members.length ?? 0) > 1,
-  });
+  }).filter((tab) => tab.desktopOnly !== true);
   const resolvedWorkspaceName = workspaceName ?? workspaceSlug ?? null;
   const isNativeApp = isNativeAppShell();
   const accountTab = visibleTabs.find((tab) => tab.section === 'account') ?? null;

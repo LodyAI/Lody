@@ -6,7 +6,11 @@ import type { ElectronUpdaterPhase } from '@lody/shared';
 import { useAtom } from 'jotai';
 import { Button } from '@lody/ui/button';
 import { Switch } from '@lody/ui/switch';
-import { developerModeEnabledAtom, inboxBetaEnabledAtom } from '@/atoms/settings';
+import {
+  developerModeEnabledAtom,
+  inboxBetaEnabledAtom,
+  promptShortcutsBetaEnabledAtom,
+} from '@/atoms/settings';
 import { useElectronUpdaterState } from '@/hooks/use-electron-updater-state';
 import { OpenSourceAttributionsDialog } from '@/components/settings/open-source-attributions-dialog';
 import { JoinCommunityButton } from '@/components/settings/join-community-dialog';
@@ -107,6 +111,9 @@ export function MobileAboutSettings() {
   const { t, i18n } = useTranslation();
   const [developerModeEnabled, setDeveloperModeEnabled] = useAtom(developerModeEnabledAtom);
   const [inboxBetaEnabled, setInboxBetaEnabled] = useAtom(inboxBetaEnabledAtom);
+  const [promptShortcutsBetaEnabled, setPromptShortcutsBetaEnabled] = useAtom(
+    promptShortcutsBetaEnabledAtom
+  );
   const [revealTaps, setRevealTaps] = useState(0);
   const updaterState = useElectronUpdaterState();
   const [isInstalling, setIsInstalling] = useState(false);
@@ -295,6 +302,19 @@ export function MobileAboutSettings() {
                 checked={inboxBetaEnabled}
                 onCheckedChange={setInboxBetaEnabled}
                 aria-label={t('settings.beta.inbox', 'Inbox')}
+              />
+            </MobileSettingsRow>
+            <MobileSettingsRow
+              label={t('settings.tabs.promptShortcuts', 'Prompt Shortcuts')}
+              helper={t(
+                'settings.beta.promptShortcutsHelper',
+                'Create reusable prompts and insert them with /. In development — expect rough edges.'
+              )}
+            >
+              <Switch
+                checked={promptShortcutsBetaEnabled}
+                onCheckedChange={setPromptShortcutsBetaEnabled}
+                aria-label={t('settings.tabs.promptShortcuts', 'Prompt Shortcuts')}
               />
             </MobileSettingsRow>
           </MobileSettingsRowGroup>

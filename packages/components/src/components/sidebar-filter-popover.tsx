@@ -106,8 +106,19 @@ function MenuOption({ label, icon: Icon, selected, onSelect }: MenuOptionProps) 
   );
 }
 
+// The menu's pre-v2 rhythm, kept on purpose: a heading hugs the rows under it
+// (6px above, 2px below) instead of taking a whole 28px row of its own.
 function SectionHeading({ children }: { children: ReactNode }) {
-  return <div className={menuGroupLabelClassName}>{children}</div>;
+  return (
+    <div
+      className={cn(
+        menuGroupLabelClassName,
+        'min-h-0 pb-0.5 pt-1.5 text-[0.75em] font-normal leading-tight'
+      )}
+    >
+      {children}
+    </div>
+  );
 }
 
 export function SidebarFilterPopover({
@@ -149,31 +160,37 @@ export function SidebarFilterPopover({
   };
   return (
     <Popover.Root open={open} onOpenChange={handleOpenChange}>
-      <Popover.Trigger render={trigger ?? (
-          <Button
-            type="button"
-            variant="ghost"
-            icon
-            aria-label={merged.triggerAriaLabel}
-            data-state-open={open || undefined}
-            className={cn(
-              // Match section-header muted chrome (Pinned / Chats); full
-              // contrast on hover/open so the control still feels interactive.
-              'h-7 w-7 rounded-md text-sidebar-foreground-muted',
-              'hover:bg-sidebar-hover hover:text-sidebar-hover-foreground',
-              'focus-visible:ring-1 focus-visible:ring-sidebar-ring/40',
-              'data-[state=open]:bg-sidebar-hover data-[state=open]:text-sidebar-hover-foreground',
-              triggerClassName
-            )}
-          >
-            <CarbonSettingsAdjust className="h-4 w-4" />
-          </Button>
-        )}/>
+      <Popover.Trigger
+        render={
+          trigger ?? (
+            <Button
+              type="button"
+              variant="ghost"
+              icon
+              aria-label={merged.triggerAriaLabel}
+              data-state-open={open || undefined}
+              className={cn(
+                // Match section-header muted chrome (Pinned / Chats); full
+                // contrast on hover/open so the control still feels interactive.
+                'h-7 w-7 rounded-md text-sidebar-foreground-muted',
+                'hover:bg-sidebar-hover hover:text-sidebar-hover-foreground',
+                'focus-visible:ring-1 focus-visible:ring-sidebar-ring/40',
+                'data-[state=open]:bg-sidebar-hover data-[state=open]:text-sidebar-hover-foreground',
+                triggerClassName
+              )}
+            >
+              <CarbonSettingsAdjust className="h-4 w-4" />
+            </Button>
+          )
+        }
+      />
       <Popover.Content
         side={side}
         align={align}
         sideOffset={6}
-        className={cn('w-max min-w-[200px] p-1', className)}
+        // A panel sets its children apart with a gap; this is a menu, whose
+        // sections are set apart by their headings and separators alone.
+        className={cn('w-max min-w-[200px] gap-0 p-0.5', className)}
       >
         <div data-sidebar-filter-section="view">
           <SectionHeading>{merged.organizeHeading}</SectionHeading>
@@ -212,50 +229,54 @@ export function SidebarFilterPopover({
             open={projectNamesAvailable ? false : projectHintOpen}
             onOpenChange={setProjectHintOpen}
           >
-            <Tooltip.Trigger render={<div
-                data-sidebar-filter-section="display"
-                data-disabled={projectNamesAvailable ? undefined : ''}
-                aria-disabled={projectNamesAvailable ? undefined : true}
-                tabIndex={projectNamesAvailable ? undefined : 0}
-                onPointerDownCapture={(event) => {
-                  if (projectNamesAvailable || event.pointerType !== 'touch') return;
-                  event.preventDefault();
-                  setProjectHintOpen((current) => !current);
-                }}
-                className={cn(
-                  'group flex min-h-7 items-center gap-2 rounded-md px-2 py-[3px]',
-                  projectNamesAvailable ? 'text-popover-foreground' : 'text-muted-foreground/55'
-                )}
-              >
-                <Eye
+            <Tooltip.Trigger
+              render={
+                <div
+                  data-sidebar-filter-section="display"
+                  data-disabled={projectNamesAvailable ? undefined : ''}
+                  aria-disabled={projectNamesAvailable ? undefined : true}
+                  tabIndex={projectNamesAvailable ? undefined : 0}
+                  onPointerDownCapture={(event) => {
+                    if (projectNamesAvailable || event.pointerType !== 'touch') return;
+                    event.preventDefault();
+                    setProjectHintOpen((current) => !current);
+                  }}
                   className={cn(
-                    'h-3.5 w-3.5 shrink-0',
-                    projectNamesAvailable ? 'text-muted-foreground' : 'text-muted-foreground/55'
-                  )}
-                  strokeWidth={1.75}
-                  aria-hidden="true"
-                />
-                <label
-                  htmlFor={projectNamesAvailable ? sourceLabelsSwitchId : undefined}
-                  className={cn(
-                    'min-w-0 flex-1 select-none truncate text-[0.9em] leading-tight',
-                    projectNamesAvailable ? 'cursor-pointer' : 'cursor-default'
+                    'group flex min-h-7 items-center gap-2 rounded-md px-2 py-[3px]',
+                    projectNamesAvailable ? 'text-popover-foreground' : 'text-muted-foreground/55'
                   )}
                 >
-                  {merged.updatedProjectNames}
-                </label>
-                <Switch
-                  id={sourceLabelsSwitchId}
-                  checked={showUpdatedProjectNames}
-                  disabled={!projectNamesAvailable}
-                  onCheckedChange={onShowUpdatedProjectNamesChange}
-                  aria-label={merged.updatedProjectNames}
-                  aria-description={
-                    projectNamesAvailable ? undefined : merged.updatedProjectNamesUnavailable
-                  }
-                  data-sidebar-filter-project-names=""
-                />
-              </div>}/>
+                  <Eye
+                    className={cn(
+                      'h-3.5 w-3.5 shrink-0',
+                      projectNamesAvailable ? 'text-muted-foreground' : 'text-muted-foreground/55'
+                    )}
+                    strokeWidth={1.75}
+                    aria-hidden="true"
+                  />
+                  <label
+                    htmlFor={projectNamesAvailable ? sourceLabelsSwitchId : undefined}
+                    className={cn(
+                      'min-w-0 flex-1 select-none truncate text-[0.9em] leading-tight',
+                      projectNamesAvailable ? 'cursor-pointer' : 'cursor-default'
+                    )}
+                  >
+                    {merged.updatedProjectNames}
+                  </label>
+                  <Switch
+                    id={sourceLabelsSwitchId}
+                    checked={showUpdatedProjectNames}
+                    disabled={!projectNamesAvailable}
+                    onCheckedChange={onShowUpdatedProjectNamesChange}
+                    aria-label={merged.updatedProjectNames}
+                    aria-description={
+                      projectNamesAvailable ? undefined : merged.updatedProjectNamesUnavailable
+                    }
+                    data-sidebar-filter-project-names=""
+                  />
+                </div>
+              }
+            />
             {!projectNamesAvailable ? (
               <Tooltip.Content side="right" sideOffset={8} className="max-w-48">
                 {merged.updatedProjectNamesUnavailable}

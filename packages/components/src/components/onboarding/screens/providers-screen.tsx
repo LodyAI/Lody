@@ -24,7 +24,7 @@ import { Button } from '@lody/ui/button';
 import { Badge } from '@lody/ui/badge';
 import { Tooltip } from '@lody/ui/tooltip';
 import { colors, shadow } from '@lody/ui/tokens/colors.stylex';
-import { corner, duration, ease, radius, space } from '@lody/ui/tokens/scales.stylex';
+import { corner, duration, ease, focus, radius, space } from '@lody/ui/tokens/scales.stylex';
 import { AlertDialog } from '@/ui/dialog';
 import { withClassName } from '@/lib/stylex';
 import {
@@ -85,6 +85,7 @@ import { useBuiltinRuntimeReadiness } from '../use-builtin-runtime-readiness';
 import { useOnboardingAnalytics } from '../onboarding-analytics';
 import { onboardingSurface as surface } from './surface';
 
+// Marks the chosen row, not focus: it stays whatever the input modality.
 const ROW_RING = `0 0 0 2px ${colors.accent}, ${shadow.card}`;
 
 const styles = stylex.create({
@@ -140,7 +141,10 @@ const styles = stylex.create({
     borderStyle: 'none',
     outlineStyle: 'none',
     backgroundColor: 'transparent',
-    boxShadow: { default: 'none', ':focus-visible': `inset 0 0 0 2px ${colors.accent}` },
+    boxShadow: {
+      default: 'none',
+      ':focus-visible': `inset 0 0 0 ${focus.ringWidth} ${colors.accent}`,
+    },
     borderStartStartRadius: radius.large,
     borderEndStartRadius: radius.large,
     cornerShape: corner.round,

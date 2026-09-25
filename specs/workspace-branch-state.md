@@ -33,7 +33,7 @@ watching. The existing mobile layout still omits branch text in its bottom bar.
 
 ## Evidence
 
-- [Branch owner](../apps/cli/src/session/workspace-branch-service.ts)
+- [Branch owner](../apps/cli/src/session/workspace-git-service.ts)
 - [Execution lifecycle](../apps/cli/src/session/session-execution-service.ts)
 - [Workspace refresh](../apps/cli/src/lib/code-collab/code-collab-v2-service.ts)
 - [Decision and verification](../.agents/notes/implemented/bug-fix/2026-09-24-workspace-branch-observation.md)

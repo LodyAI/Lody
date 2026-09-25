@@ -4,7 +4,7 @@ import { Users } from 'lucide-react';
 import { SiDiscord } from 'react-icons/si';
 import * as stylex from '@stylexjs/stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
-import { corner, duration, ease, radius, space, text } from '@lody/ui/tokens/scales.stylex';
+import { corner, duration, ease, focus, radius, space, text } from '@lody/ui/tokens/scales.stylex';
 import { Button, Dialog } from '@/ui';
 import { LODY_DISCORD_URL } from '@/lib/lody-urls';
 import { openExternalUrl } from '@/lib/native-browser';
@@ -47,7 +47,7 @@ const styles = stylex.create({
       default: `color-mix(in oklab, transparent, ${colors.label} 3%)`,
       ':hover': `color-mix(in oklab, transparent, ${colors.label} 7%)`,
     },
-    boxShadow: { default: 'none', ':focus-visible': `0 0 0 2px ${colors.accent}` },
+    boxShadow: { default: 'none', ':focus-visible': `0 0 0 ${focus.ringWidth} ${colors.accent}` },
     outlineStyle: 'none',
     cursor: 'pointer',
     transitionProperty: 'background-color, box-shadow',

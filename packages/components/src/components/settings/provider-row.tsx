@@ -32,6 +32,7 @@ import {
   getAgentRateLimitEntries,
   getAgentRateLimitWindows,
 } from '@/lib/session-usage';
+import { settingsType as type } from './type.stylex';
 
 /** Wide enough in its own container to set the meters beside the name. */
 const ROOMY = '@container (min-width: 24rem)';
@@ -63,7 +64,7 @@ const styles = stylex.create({
     gap: space[2],
     paddingInlineEnd: space[3],
     paddingBlock: space[1.5],
-    fontSize: '0.75em',
+    fontSize: type.caption,
     color: colors.secondaryLabel,
   },
   trailingList: { paddingBlock: space[3] },

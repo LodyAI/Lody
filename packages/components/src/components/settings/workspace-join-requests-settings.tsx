@@ -13,6 +13,7 @@ import { Button } from '@lody/ui/button';
 import { Select } from '@lody/ui/select';
 import { CompactSection } from './compact-layout';
 import { settingsSurface as surface } from './surface';
+import { settingsType as type } from './type.stylex';
 
 const WIDE = '@media (min-width: 640px)';
 
@@ -24,7 +25,7 @@ const styles = stylex.create({
     alignItems: 'center',
     gap: space[2],
     paddingInline: space[4],
-    paddingBlock: '10px',
+    paddingBlock: '8px',
   },
   link: {
     display: 'flex',
@@ -40,13 +41,13 @@ const styles = stylex.create({
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
-    fontSize: '0.8em',
+    fontSize: type.caption,
     color: colors.secondaryLabel,
   },
   expires: {
     display: { default: 'none', [WIDE]: 'inline' },
     flexShrink: 0,
-    fontSize: '0.75em',
+    fontSize: type.caption,
     color: colors.secondaryLabel,
   },
   controls: { display: 'flex', flexShrink: 0, alignItems: 'center', gap: space[2] },
@@ -58,7 +59,7 @@ const styles = stylex.create({
     alignItems: 'flex-start',
     gap: space[3],
     paddingInline: space[4],
-    paddingBlock: '10px',
+    paddingBlock: '8px',
   },
   requestText: { flexGrow: 1, minWidth: 0 },
   truncate: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
@@ -67,15 +68,15 @@ const styles = stylex.create({
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
-    lineHeight: 1.25,
+    lineHeight: type.leading,
     color: colors.label,
   },
-  meta: { margin: 0, fontSize: '0.8em', lineHeight: 1.375, color: colors.secondaryLabel },
+  meta: { margin: 0, fontSize: type.caption, lineHeight: 1.375, color: colors.secondaryLabel },
   reason: {
     margin: 0,
     marginTop: space[2],
     whiteSpace: 'pre-wrap',
-    fontSize: '0.875em',
+    fontSize: type.caption,
     lineHeight: 1.43,
     color: colors.label,
   },
