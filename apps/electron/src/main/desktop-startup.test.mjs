@@ -194,6 +194,7 @@ function launch(
     setTimeout,
     clearTimeout,
     setImmediate,
+    performance,
     setInterval(callback, delay, ...args) {
       const timer = setInterval(() => callback(...args), delay)
       timers.add(timer)

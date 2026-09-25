@@ -143,3 +143,34 @@ void test('the main-thread lag probe reports only stalls past the threshold', ()
     'event-loop main process timer fired 4000ms late (elapsed=5000ms cpu=4800ms cpuRatio=0.96)'
   ])
 })
+
+void test('a renderer console flood is rate-limited and the dropped count is reported', async (t) => {
+  const logDir = await withLogDir(t)
+  const { log } = manualLog(logDir)
+  const clock = { now: 0 }
+  const fakeConsole = { log() {}, info() {}, warn() {}, error() {}, debug() {} }
+  mirrorConsoleToDesktopLog(fakeConsole, log, {
+    now: () => clock.now,
+    maxLinesPerWindow: 2,
+    windowMs: 1_000
+  })
+  for (let index = 0; index < 5; index += 1) fakeConsole.warn(`renderer error ${index}`)
+  clock.now = 1_000
+  fakeConsole.warn('after the window')
+  log.flushSync()
+
+  const text = await readFile(
+    path.join(logDir, `${formatLocalLogDate(new Date('2026-09-24T05:01:04.000Z'))}.log`),
+    'utf8'
+  )
+  const messages = text
+    .trimEnd()
+    .split('\n')
+    .map((line) => line.replace(/^\S+ /, ''))
+  assert.deepEqual(messages, [
+    '[WARN] [desktop:44570] renderer error 0',
+    '[WARN] [desktop:44570] renderer error 1',
+    '[WARN] [desktop:44570:console] suppressed 3 console line(s) over the 1000ms rate limit of 2',
+    '[WARN] [desktop:44570] after the window'
+  ])
+})

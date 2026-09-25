@@ -13,8 +13,9 @@ of 60–90 seconds named no code, and lines written just before an exit were los
 Electron main now appends its console output, lifecycle, crashes, and embedded-CLI
 supervision to the CLI's daily log. The CLI gains a watchdog thread that profiles
 the main thread during a stall, plus synchronous exit and crash beacons. This adds
-evidence only; it changes no restart, kill, or timeout behavior, and a native crash
-still shows up only as a missing exit line.
+evidence, with one small behavior change: after a failed MCP host start, the CLI now
+waits for the killed host to exit before starting another. A native crash still shows
+up only as a missing exit line.
 
 ## Problem and evidence
 
@@ -48,10 +49,13 @@ is final):
   fixture data dir.
 - Mirrors `console` to the file under scope `desktop:<pid>`; the terminal still
   prints. Bearer tokens and credential-like query parameters are redacted as a
-  backstop only.
+  backstop only. Renderer console messages reach main through `console.warn`, so
+  the mirror keeps at most 500 lines per 10 s and reports how many it dropped;
+  explicit traces are not limited.
 - Logs a start banner, `before-quit`/`will-quit`/`quit`/`exit`,
   `render-process-gone`, `child-process-gone`, power suspend/resume, main-thread
-  timer lag ≥2 s, and `uncaughtExceptionMonitor`. The monitor variant leaves
+  timer lag ≥2 s on a monotonic clock (system sleep is not lag), and
+  `uncaughtExceptionMonitor`. The monitor variant leaves
   Electron's default crash handling unchanged.
 - Keeps a run record in `userData`, written only after the single-instance lock.
   A record without `cleanExit` at the next launch is logged as an unclean end.
@@ -64,19 +68,27 @@ is final):
 CLI:
 
 - `event-loop-stall-profiler.ts`: the main thread bumps a SharedArrayBuffer
-  heartbeat. A worker thread sees the heartbeat go stale (4 s), attaches with
-  `inspector.Session.connectToMainThread()`, samples the CPU for 3 s during the
-  stall, and appends self time, inclusive time, and the hottest stack. At most
-  one profile per stall and per minute, 20 per process. Armed at the top of
-  `lody start` so startup stalls count. `LODY_EVENT_LOOP_STALL_PROFILER=0`
-  disables it.
+  heartbeat once a second on `process.hrtime`, a process-wide monotonic clock,
+  so system sleep never reads as a stall. A worker thread sees the heartbeat go
+  stale (4 s), attaches with `inspector.Session.connectToMainThread()`, samples
+  the CPU for 3 s during the stall, and appends self time, inclusive time, and
+  the hottest stack. Inspector commands run only at a JavaScript interrupt point:
+  a stall in synchronous I/O or native code (`execSync`, sync fs, a native addon)
+  cannot be sampled. If attaching waits 2 s, the watchdog says so while the stall
+  lasts, and every profile carries `coverage=during-stall`, `partial`, or
+  `after-stall`, so post-stall samples are never mistaken for the culprit. At most
+  one profile per stall and per minute, 20 per process, after which the worker and
+  heartbeat stop. Armed at the top of `lody start` so startup stalls count.
+  `LODY_EVENT_LOOP_STALL_PROFILER=0` disables it.
 - The lag monitor adds the V8 heap limit to each stall line and warns once each
   at 70/85/95% of the limit. An OOM abort then has a recorded approach.
 - `process-exit-trace.ts`: synchronous `[process-exit]` lines for `lody start`
   and a `[process-fatal]` line before uncaught-exception cleanup in every CLI
   process, including the MCP host that otherwise logs to its own file.
 - MCP host handshake timeouts record pid, elapsed time, and timer lateness; host
-  exits record the signal and uptime.
+  exits record the signal and uptime. After a failed start the loop waits for the
+  SIGKILLed host's `exit` before logging and respawning, so the line reports the
+  real signal and two hosts never overlap.
 
 ## Alternatives
 
@@ -99,8 +111,11 @@ CLI:
 
 - `event-loop-stall-profiler.test.ts` blocks a real main thread until the worker
   has written its profile, then asserts that the blocking code and the live
-  rotation file are named. The lag-monitor and desktop-log tests use injected
-  clocks.
+  rotation file are named. A second case blocks in `spawnSync` of a child that
+  exits only when the watchdog's native-stall line appears, then asserts the
+  `after-stall` label. Both end on explicit signals; their deadlines only bound a
+  failure. (`Atomics.wait` is not a native block: V8 services interrupts inside
+  it.) The lag-monitor and desktop-log tests use injected clocks.
 - The profiler extracted from the Vite bundle ran under Node 24 and under
   Electron 39.5.1 with `ELECTRON_RUN_AS_NODE=1` (Node 22.22.0, the user's
   runtime). Both attached in about 30 ms and attributed the blocking frame. A
@@ -111,6 +126,14 @@ CLI:
   source for native stacks.
 - Several processes append to one file. Appends are line-sized and use
   `O_APPEND`; winston still owns rotation, and an external writer follows the
-  live rotation it finds.
+  live rotation it finds. At the instant winston rolls a 20 MB file, an external
+  batch can land in the file being gzipped and be lost, and external bytes are not
+  counted toward `maxSize`. Separate per-writer files would avoid that, but would
+  split the one-file story this change exists to provide.
+- The worker inlines three shared helpers through `Function.prototype.toString()`.
+  A future transform that injects references into function bodies (for example
+  esbuild `keepNames`) would make the worker fail at startup, which is logged as
+  a warning. The profiler test runs the inlined source under the test transform,
+  and the bundle was checked by hand.
 - The handshake timer can still kill a host that already answered. The trace
   makes that visible; changing the timeout behavior is a separate decision.

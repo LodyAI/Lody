@@ -147,7 +147,8 @@ function installDesktopLogUnsafe(): DesktopLog {
   const lagTimer = setInterval(
     createMainThreadLagProbe({
       log,
-      now: () => Date.now(),
+      // Monotonic: time the system spent asleep is not main-thread lag.
+      now: () => performance.now(),
       cpuMs,
       intervalMs: MAIN_LAG_INTERVAL_MS,
       warnThresholdMs: MAIN_LAG_WARN_THRESHOLD_MS

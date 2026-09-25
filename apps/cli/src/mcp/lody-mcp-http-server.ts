@@ -88,8 +88,16 @@ class McpHttpHostSupervisor {
         if (!this.stopping) {
           this.logger.warn(`[mcp-http] host start failed: ${formatErrorMessage(error)}`);
         }
-        exitCode = this.child?.exitCode ?? null;
-        exitSignal = this.child?.signalCode ?? null;
+        const failed = this.child;
+        // A handshake timeout or invalid handshake SIGKILLs the host and rejects
+        // at once: wait for its real exit, so the trace below reports how it
+        // ended and the next host never overlaps a dying one. A child that never
+        // spawned (no pid) emits no 'exit'.
+        if (failed?.pid !== undefined && failed.exitCode === null && failed.signalCode === null) {
+          await once(failed, 'exit');
+        }
+        exitCode = failed?.exitCode ?? null;
+        exitSignal = failed?.signalCode ?? null;
       }
       if (!this.stopping) {
         this.logger.warn(

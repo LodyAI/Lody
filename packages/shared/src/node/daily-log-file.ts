@@ -87,24 +87,3 @@ export function appendDailyLogSync(logDir: string, text: string, now: Date = new
     return false;
   }
 }
-
-export async function appendDailyLog(
-  logDir: string,
-  text: string,
-  now: Date = new Date()
-): Promise<boolean> {
-  try {
-    await fs.promises.mkdir(logDir, { recursive: true });
-    let names: string[] = [];
-    try {
-      names = await fs.promises.readdir(logDir);
-    } catch {
-      // Created above; a concurrent retention sweep may still race us.
-    }
-    const target = path.join(logDir, pickDailyLogAppendName(names, formatLocalLogDate(now)));
-    await fs.promises.appendFile(target, text, { mode: 0o600 });
-    return true;
-  } catch {
-    return false;
-  }
-}

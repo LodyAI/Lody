@@ -98,11 +98,56 @@ const CONSOLE_LEVELS: Record<ConsoleMethod, keyof Omit<DesktopLog, 'flushSync'>>
   debug: 'debug'
 }
 
+export type ConsoleMirrorOptions = {
+  now?: () => number
+  /** Console lines persisted per window; explicit traces are never limited. */
+  maxLinesPerWindow?: number
+  windowMs?: number
+}
+
+const CONSOLE_MIRROR_MAX_LINES = 500
+const CONSOLE_MIRROR_WINDOW_MS = 10_000
+
 /**
  * Tees main-process `console` output into the desktop log. The original method
- * still runs, so development terminals are unchanged.
+ * still runs, so development terminals are unchanged. Renderer console messages
+ * reach main through `console.warn`, so a renderer error loop is rate-limited
+ * here rather than filling the log and the main thread with synchronous writes;
+ * the dropped count is reported when the next window opens.
  */
-export function mirrorConsoleToDesktopLog(target: Console, log: DesktopLog): () => void {
+export function mirrorConsoleToDesktopLog(
+  target: Console,
+  log: DesktopLog,
+  options: ConsoleMirrorOptions = {}
+): () => void {
+  const now = options.now ?? (() => performance.now())
+  const maxLines = options.maxLinesPerWindow ?? CONSOLE_MIRROR_MAX_LINES
+  const windowMs = options.windowMs ?? CONSOLE_MIRROR_WINDOW_MS
+  let windowStartedAt = now()
+  let linesInWindow = 0
+  let dropped = 0
+
+  const admit = (): boolean => {
+    const at = now()
+    if (at - windowStartedAt >= windowMs) {
+      if (dropped > 0) {
+        log.warn(
+          'console',
+          `suppressed ${dropped} console line(s) over the ${windowMs}ms rate limit of ${maxLines}`
+        )
+      }
+      windowStartedAt = at
+      linesInWindow = 0
+      dropped = 0
+    }
+    if (linesInWindow >= maxLines) {
+      dropped += 1
+      return false
+    }
+    linesInWindow += 1
+    return true
+  }
+
   const originals = new Map<ConsoleMethod, Console[ConsoleMethod]>()
   for (const method of Object.keys(CONSOLE_LEVELS) as ConsoleMethod[]) {
     const original = target[method]
@@ -110,7 +155,7 @@ export function mirrorConsoleToDesktopLog(target: Console, log: DesktopLog): () 
     target[method] = (...args: unknown[]) => {
       original.apply(target, args)
       try {
-        log[CONSOLE_LEVELS[method]]('', formatConsoleArgs(args))
+        if (admit()) log[CONSOLE_LEVELS[method]]('', formatConsoleArgs(args))
       } catch {
         // Diagnostics must never break the caller.
       }
