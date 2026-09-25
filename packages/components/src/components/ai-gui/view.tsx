@@ -88,6 +88,9 @@ import { getAgentMetaByIdAtomFamily } from '@/atoms/agents';
 import { sessionMetaAtomFamily } from '@/atoms/doc-meta';
 import { authTokenAtom, runtimeAtom } from '@/atoms/runtime';
 import { machineSupportsSubagentCancellation } from '@lody/shared';
+import { readSessionTurnTokenUsage, type SessionTurnTokenUsage } from '@lody/shared/session-data';
+import { formatCompactNumber } from '@/lib/format-compact-number';
+import { toIntlLocaleOrEn } from '@/lib/intl-locale';
 import { useStickyScroll } from '@/hooks/use-sticky-scroll';
 import { buildResendInputBlocks, isUndeliveredUserTurnEntry } from '@/lib/undelivered-user-turn';
 import { ConversationOutlineRail } from './conversation-outline-rail';
@@ -881,6 +884,7 @@ const assistantGroupHasActiveSearch = (
 };
 
 const hasAssistantTurnConfigInfo = (message: SessionHistoryParsed): boolean =>
+  readSessionTurnTokenUsage(message.tokenUsage) !== undefined ||
   Boolean(message.modelInfo?.name) ||
   Boolean(message.inputConfig?.modeId) ||
   Boolean(message.inputConfig?.configOptionValues) ||
@@ -3626,6 +3630,62 @@ const ResendUndeliveredDialog = ({
   );
 };
 
+/** Tokens this turn consumed, in compact product-language units (1.2K / 1.2万). */
+const AssistantTurnTokenUsageRows = ({ usage }: { usage: SessionTurnTokenUsage }) => {
+  const { t, i18n } = useTranslation();
+  const locale = toIntlLocaleOrEn(i18n.resolvedLanguage ?? i18n.language);
+  const exact = new Intl.NumberFormat(locale);
+  const rows = [
+    {
+      key: 'input',
+      label: t('sessions.turnConfig.inputTokens', 'Input'),
+      value: usage.inputTokens,
+      detail: undefined,
+    },
+    {
+      key: 'output',
+      label: t('sessions.turnConfig.outputTokens', 'Output'),
+      // Stored output excludes reasoning; the turn's output is both.
+      value: usage.outputTokens + usage.reasoningOutputTokens,
+      detail:
+        usage.reasoningOutputTokens > 0
+          ? t('sessions.turnConfig.outputDetail', 'Reasoning {{reasoning}}', {
+              reasoning: exact.format(usage.reasoningOutputTokens),
+            })
+          : undefined,
+    },
+    {
+      key: 'cache',
+      label: t('sessions.turnConfig.cacheTokens', 'Cache'),
+      value: usage.cacheReadInputTokens + usage.cacheCreationInputTokens,
+      detail: t('sessions.turnConfig.cacheDetail', 'Read {{read}} · Write {{write}}', {
+        read: exact.format(usage.cacheReadInputTokens),
+        write: exact.format(usage.cacheCreationInputTokens),
+      }),
+    },
+  ];
+  return (
+    <div className="border-t border-border/60 px-3 py-2.5">
+      <div className="mb-1.5 text-[11px] font-medium text-foreground">
+        {t('sessions.turnConfig.tokens', 'Tokens')}
+      </div>
+      <dl className="space-y-1.5">
+        {rows.map((row) => (
+          <div key={row.key} className="flex items-start justify-between gap-3 text-[11px]">
+            <dt className="shrink-0 text-muted-foreground">{row.label}</dt>
+            <dd
+              className="text-right font-medium tabular-nums text-foreground"
+              title={[exact.format(row.value), row.detail].filter(Boolean).join(' · ')}
+            >
+              {formatCompactNumber(row.value, locale)}
+            </dd>
+          </div>
+        ))}
+      </dl>
+    </div>
+  );
+};
+
 /** Hover tooltip + click popover for turn model / run-config. */
 const AssistantTurnConfigInfoButton = ({
   message,
@@ -3658,7 +3718,11 @@ const AssistantTurnConfigInfoButton = ({
     [message.modelInfo, message.inputConfig]
   );
   const modelBaseName = message.modelInfo ? formatAssistantModelBaseName(message.modelInfo) : '';
-  if (configRows.length === 0 && !modelBaseName) {
+  const tokenUsage = useMemo(
+    () => readSessionTurnTokenUsage(message.tokenUsage),
+    [message.tokenUsage]
+  );
+  if (configRows.length === 0 && !modelBaseName && !tokenUsage) {
     return null;
   }
   const tooltipPreview = (() => {
@@ -3734,12 +3798,13 @@ const AssistantTurnConfigInfoButton = ({
               </dd>
             </div>
           ))}
-          {configRows.length === 0 ? (
+          {configRows.length === 0 && !tokenUsage ? (
             <p className="text-[11px] text-muted-foreground">
               {t('sessions.turnConfig.empty', 'No configuration recorded for this turn.')}
             </p>
           ) : null}
         </dl>
+        {tokenUsage ? <AssistantTurnTokenUsageRows usage={tokenUsage} /> : null}
       </Popover.Content>
     </Popover.Root>
   );

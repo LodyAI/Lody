@@ -76,6 +76,16 @@ Unknown routes, custom endpoints or missing timestamps do not receive invented
 prices. This dated list-price estimate is not an invoice; requests crossing a
 pricing boundary may differ from billing. Unreported runtime activity cannot be counted.
 
+## Per-turn display
+
+Each assistant history entry may carry `tokenUsage` (input, output, cache
+read/write, reasoning; disjoint like Core buckets): the sum of the `delta.usage`
+reports routed to that entry. The CLI writes a live turn's sum at finalization
+and adds late reports to the finished entry; a reopened turn keeps adding. It is
+display data only, never an accounting source, and adapters without `delta`
+leave it absent. The turn details popover shows input, output (including
+reasoning) and cache (read + write) in compact product-language units.
+
 ## Evidence and rollout
 
 - [Core contract](../packages/acp-extension-core/src/usage.ts)
