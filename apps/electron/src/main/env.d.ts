@@ -3,7 +3,6 @@ interface ImportMetaEnv {
   readonly VITE_CONVEX_SITE_URL?: string
   readonly VITE_CONVEX_DEPLOY_URL?: string
   readonly VITE_SERVER_URL?: string
-  readonly VITE_PREVIEW_GATEWAY_URL?: string
   readonly VITE_SITE_URL?: string
   readonly VITE_ELECTRON_UPDATE_URL?: string
   readonly VITE_ELECTRON_UPDATE_CHANNEL?: string

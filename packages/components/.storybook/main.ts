@@ -1,15 +1,15 @@
-import { fileURLToPath } from 'node:url';
 import type { StorybookConfig } from '@storybook/react-vite';
+import { createRequire } from 'node:module';
+import { dirname } from 'node:path';
+import { searchForWorkspaceRoot } from 'vite';
 import stylex from '@stylexjs/unplugin';
 import tailwindcss from '@tailwindcss/vite';
-import { loadEnv } from 'vite';
 import wasm from 'vite-plugin-wasm';
-import { requirePreviewPublicBaseDomain } from '../../../scripts/preview-public-base-domain.mjs';
 import { stylexOptions } from '../../ui/stylex-options';
 import topLevelAwait from '../vite-top-level-await-fixed.cjs';
 import { loroCrdtWasmUrlWorkaround } from '../vite-wasm-workarounds.ts';
 
-const packageRoot = fileURLToPath(new URL('..', import.meta.url));
+const require = createRequire(import.meta.url);
 
 const config: StorybookConfig = {
   stories: ['../src/stories/**/*.mdx', '../src/stories/**/*.stories.@(js|jsx|ts|tsx)'],
@@ -18,14 +18,18 @@ const config: StorybookConfig = {
     options: {},
   },
   async viteFinal(viteConfig) {
-    const mode = viteConfig.mode ?? 'development';
-    const previewPublicBaseDomain = requirePreviewPublicBaseDomain(
-      { ...loadEnv(mode, packageRoot, ''), ...process.env },
-      `@lody/components Storybook (${mode})`
-    );
-    viteConfig.define = {
-      ...viteConfig.define,
-      'import.meta.env.VITE_PREVIEW_PUBLIC_BASE_DOMAIN': JSON.stringify(previewPublicBaseDomain),
+    // In an embedded checkout pnpm stores these assets outside the public
+    // workspace. Allow only the resolved font packages, not the private repo.
+    viteConfig.server = {
+      ...viteConfig.server,
+      fs: {
+        ...viteConfig.server?.fs,
+        allow: [
+          ...(viteConfig.server?.fs?.allow ?? [searchForWorkspaceRoot(process.cwd())]),
+          dirname(require.resolve('@fontsource/inter/package.json')),
+          dirname(require.resolve('@fontsource/jetbrains-mono/package.json')),
+        ],
+      },
     };
     viteConfig.plugins = (viteConfig.plugins ?? []).filter((plugin) => {
       if (!plugin) return false;

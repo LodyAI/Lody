@@ -15,6 +15,7 @@ export const MACHINE_PROTOCOL_CAPABILITIES = {
   providerSetup: 'providerSetup',
   localFileResources: 'localFileResources',
   acpProtocolAuthentication: 'acpProtocolAuthentication',
+  previewControl: 'previewControl',
   piExtensions: 'piExtensions',
 } as const;
 
@@ -24,6 +25,7 @@ export const LOCAL_PROJECT_REMOVAL_PROTOCOL_VERSION = 1;
 export const PROVIDER_SETUP_PROTOCOL_VERSION = 1;
 export const LOCAL_FILE_RESOURCES_PROTOCOL_VERSION = 1;
 export const ACP_PROTOCOL_AUTHENTICATION_VERSION = 2;
+export const PREVIEW_CONTROL_PROTOCOL_VERSION = 1;
 export const PI_EXTENSIONS_PROTOCOL_VERSION = 1;
 
 type MachineProtocolCapabilityCarrier = {
@@ -71,7 +73,19 @@ export const CURRENT_MACHINE_PROTOCOL_CAPABILITIES: MachineProtocolCapabilities 
   [MACHINE_PROTOCOL_CAPABILITIES.providerSetup]: PROVIDER_SETUP_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.localFileResources]: LOCAL_FILE_RESOURCES_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.acpProtocolAuthentication]: ACP_PROTOCOL_AUTHENTICATION_VERSION,
+  [MACHINE_PROTOCOL_CAPABILITIES.previewControl]: PREVIEW_CONTROL_PROTOCOL_VERSION,
 };
+
+/** Whether the daemon supports the dedicated Quick Tunnel control handshake. */
+export function machineSupportsPreviewControlProtocol(
+  machine: MachineProtocolCapabilityCarrier | null | undefined
+): boolean {
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.previewControl,
+    PREVIEW_CONTROL_PROTOCOL_VERSION
+  );
+}
 
 /** Whether the target daemon supports interactive Custom/Registry ACP authentication. */
 export function machineSupportsAcpAuthenticationInteractionsProtocol(
