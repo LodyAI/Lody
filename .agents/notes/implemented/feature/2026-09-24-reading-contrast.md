@@ -76,6 +76,10 @@ long-form text.
   a back arrow on hover, returning to the previous page (Home without history). Active
   footer icons use a 12% foreground fill (16% on hover); the row selection token was
   nearly invisible behind a 24px icon.
+- Bottom fade (desktop): the last 40px of the conversation above the info bar fade into the
+  canvas while content continues below, the counterpart of the top fade. It is measured on the
+  scroll container, minus the reply room under an anchored message, and re-measured on resize
+  so a reply growing below the fold shows it without a scroll.
 - Process rows: "Context compacted" and "Retrying…" are process status lines, not cards,
   so they share the "Ran N commands" header's box and gap (34px rhythm; was 39 / 32px).
 - Info bar: the PR number is secondary text beside the colored PR icon; CI is a verdict

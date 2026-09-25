@@ -1937,15 +1937,45 @@ export const SessionChatStreamView = forwardRef<
       reportVisibleTurnRange();
     }, [initialScrollRestored, reportVisibleTurnRange, virtualRows.length]);
 
+    // The top fade's bottom counterpart, above the info bar: shown while
+    // conversation content continues past the bottom edge. The reply room under
+    // an anchored message is blank space, not content, so it does not count.
+    const [hasContentBelow, setHasContentBelow] = useState(false);
+    const syncHasContentBelow = useCallback(() => {
+      const viewport = scrollViewportElement;
+      if (!viewport) return;
+      const replyRoom = viewport.querySelector<HTMLElement>(
+        ':scope > [data-conversation-reply-room]'
+      );
+      const below =
+        viewport.scrollHeight -
+        viewport.scrollTop -
+        viewport.clientHeight -
+        (replyRoom?.offsetHeight ?? 0);
+      setHasContentBelow(below > 1);
+    }, [scrollViewportElement]);
+
     const handleStreamScroll = useCallback(
       (offset: number) => {
         handleScroll(offset);
         setIsScrolledFromTop(offset > 0);
+        syncHasContentBelow();
         syncActiveOutlineIndex();
         reportVisibleTurnRange();
       },
-      [handleScroll, reportVisibleTurnRange, syncActiveOutlineIndex]
+      [handleScroll, reportVisibleTurnRange, syncActiveOutlineIndex, syncHasContentBelow]
     );
+
+    // Content also grows or shrinks without a scroll (a streaming reply under
+    // an anchored message, a resized window); re-measure on those too.
+    useEffect(() => {
+      if (isMobile || !scrollViewportElement) return undefined;
+      const observer = new ResizeObserver(syncHasContentBelow);
+      observer.observe(scrollViewportElement);
+      const content = scrollViewportElement.firstElementChild;
+      if (content) observer.observe(content);
+      return () => observer.disconnect();
+    }, [isMobile, scrollViewportElement, syncHasContentBelow]);
 
     const handleOutlinePreview = useCallback(
       (outlineIndex: number) => {
@@ -2241,6 +2271,14 @@ export const SessionChatStreamView = forwardRef<
                 hinting that the conversation continues past the top edge. */}
             {!isMobile && isScrolledFromTop ? (
               <div className="pointer-events-none absolute inset-x-0 top-0 h-12 bg-gradient-to-b from-background to-transparent" />
+            ) : null}
+            {/* Bottom fade into the same canvas over the last 40px above the
+                info bar (desktop only): more conversation below. */}
+            {!isMobile && hasContentBelow ? (
+              <div
+                data-conversation-bottom-fade=""
+                className="pointer-events-none absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-background to-transparent"
+              />
             ) : null}
             {/* Round outline. Its visual layer portals to the full-page overlay
                 when supplied, so composer growth cannot move its centre. It is
