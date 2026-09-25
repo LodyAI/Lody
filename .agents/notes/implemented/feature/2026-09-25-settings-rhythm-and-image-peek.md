@@ -263,8 +263,10 @@ the composer reads; a model the runtime calls "default" is left out), how many
 open conversations on this machine use it and when one last moved (from the
 session index in memory), and its environment variable count. A list of what the machine could still add
 was tried under every list and rejected: the owner wants it only when the
-machine has nothing. So an empty machine's page is the title "No providers on this
-machine yet" (no subtitle), then the builtin runtimes and presets in two columns, each opening the add
+machine has nothing. An empty machine's page opens on a picture made of the choice
+itself: the first five addable marks as raised discs (the card rung's fill,
+hairline and contact shadow) in an arc, largest at the centre, over "No agents
+on {machine} yet" (a bare heading read as hand-typed); then the builtin runtimes and presets in two columns, each opening the add
 dialog already on that provider (`listAddableProviders` in
 `agent-config-dialog.tsx`; experimental runtimes, registry agents and custom
 commands stay behind the dialog's rail). None of this makes a request.

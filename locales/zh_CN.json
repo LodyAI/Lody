@@ -4241,5 +4241,5 @@
   "settings.agent.machineTabs.more_one": "另外 {{count}} 台",
   "settings.agent.machineTabs.more_other": "另外 {{count}} 台",
   "settings.agent.machineTabs.search": "搜索机器",
-  "settings.agent.provider.emptyTitle": "这台机器还没有 Provider"
+  "settings.agent.provider.emptyOnMachine": "{{machine}} 上还没有 Agent"
 }

@@ -4241,5 +4241,5 @@
   "settings.agent.machineTabs.more_one": "{{count}} more",
   "settings.agent.machineTabs.more_other": "{{count}} more",
   "settings.agent.machineTabs.search": "Search machines",
-  "settings.agent.provider.emptyTitle": "No providers on this machine yet"
+  "settings.agent.provider.emptyOnMachine": "No agents on {{machine}} yet"
 }

@@ -38,7 +38,7 @@ import { Switch } from '@lody/ui/switch';
 import { Menu } from '@/ui/menu';
 import { AlertDialog } from '@/ui/dialog';
 import { Tooltip } from '@lody/ui/tooltip';
-import { colors } from '@lody/ui/tokens/colors.stylex';
+import { colors, shadow } from '@lody/ui/tokens/colors.stylex';
 import { corner, radius, space } from '@lody/ui/tokens/scales.stylex';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useMachineOnlineStatus } from '@/hooks/use-machine-online-status';
@@ -61,7 +61,41 @@ import { settingsType as type } from './type.stylex';
 const MONO = 'var(--font-mono, ui-monospace, monospace)';
 
 const styles = stylex.create({
-  availableSection: { display: 'flex', flexDirection: 'column', gap: space[3] },
+  availableSection: { display: 'flex', flexDirection: 'column', gap: space[6] },
+  hero: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    gap: space[4],
+    paddingTop: space[8],
+  },
+  heroMarks: { display: 'flex', alignItems: 'center' },
+  /** One mark: a raised disc, the card rung's fill, hairline and contact shadow. */
+  heroMark: {
+    position: 'relative',
+    display: 'flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: radius.full,
+    cornerShape: corner.round,
+    backgroundColor: colors.raisedBackground,
+    boxShadow: shadow.card,
+    color: colors.label,
+  },
+  heroMarkOverlap: { marginInlineStart: '-8px' },
+  heroMarkSize: (size: number, layer: number) => ({
+    width: `${size}px`,
+    height: `${size}px`,
+    zIndex: layer,
+  }),
+  heroGlyph: (size: number) => ({ width: `${size}px`, height: `${size}px` }),
+  heroTitle: {
+    margin: 0,
+    fontWeight: type.headingWeight,
+    lineHeight: type.leading,
+    color: colors.label,
+  },
   /** The providers still to add: two columns of quiet, pressable entries. */
   available: {
     marginInline: `calc(-1 * ${space[4]})`,
@@ -331,7 +365,11 @@ export function MachineProvidersSection({
       // An empty machine's page is what it could run, each one click from the
       // dialog opened on it.
       return onAddProvider ? (
-        <AvailableProviders configs={configs} onAdd={onAddProvider} />
+        <AvailableProviders
+          machineName={machine.name || machine.id}
+          configs={configs}
+          onAdd={onAddProvider}
+        />
       ) : (
         <div {...stylex.props(catalog.empty)}>
           <Bot {...stylex.props(catalog.emptyIcon)} aria-hidden="true" />
@@ -1142,10 +1180,15 @@ function useProviderUsage(machineId: string, enabled: boolean): Map<string, Prov
  * What an empty machine could run, one click from the dialog opened on each:
  * the empty state's own content rather than a sentence pointing at a button.
  */
+/** The marks that open an empty machine's page: an arc, largest at its centre. */
+const HERO_MARK_SIZES = [36, 42, 50, 42, 36] as const;
+
 function AvailableProviders({
+  machineName,
   configs,
   onAdd,
 }: {
+  machineName: string;
   configs: AgentConfigMeta[];
   onAdd: (initialForm: Partial<AgentConfigFormData>) => void;
 }) {
@@ -1167,9 +1210,39 @@ function AvailableProviders({
   );
   return (
     <section {...stylex.props(styles.availableSection)}>
-      <p {...stylex.props(surface.sectionTitle)}>
-        {t('settings.agent.provider.emptyTitle', 'No providers on this machine yet')}
-      </p>
+      {/* The picture is the choice itself: the marks of what this machine could
+          run, raised on the card's material, over the machine's own name. */}
+      <div {...stylex.props(styles.hero)}>
+        <div aria-hidden="true" {...stylex.props(styles.heroMarks)}>
+          {available.slice(0, HERO_MARK_SIZES.length).map((provider, index, shown) => {
+            const size =
+              HERO_MARK_SIZES[index + Math.floor((HERO_MARK_SIZES.length - shown.length) / 2)]!;
+            const centre = Math.floor(shown.length / 2);
+            return (
+              <span
+                key={provider.key}
+                {...stylex.props(
+                  styles.heroMark,
+                  index > 0 && styles.heroMarkOverlap,
+                  styles.heroMarkSize(size, shown.length - Math.abs(index - centre))
+                )}
+              >
+                <AgentIcon
+                  cliType={provider.cliType}
+                  agentType={provider.agentType}
+                  brandId={provider.brandId}
+                  className={stylex.props(styles.heroGlyph(Math.round(size * 0.46))).className}
+                />
+              </span>
+            );
+          })}
+        </div>
+        <p {...stylex.props(styles.heroTitle)}>
+          {t('settings.agent.provider.emptyOnMachine', 'No agents on {{machine}} yet', {
+            machine: machineName,
+          })}
+        </p>
+      </div>
       <div {...stylex.props(styles.available)}>
         {available.map((provider) => (
           <button
