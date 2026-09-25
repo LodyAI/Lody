@@ -1203,39 +1203,38 @@ describe('useSessionActions', () => {
     expect(metaRepo.getSession(rootSession.id)).toEqual({ ...rootSession, isTabClosed: true });
     expect(metaRepo.getSession(tree.tabSession.id)).toEqual(tree.tabSession);
     expect(metaRepo.getSession(tree.openedSession.id)).toEqual(tree.openedSession);
-    await actions.reopenSessionTab(rootSession.id);
+    await actions.setSessionTabClosed(rootSession.id, false);
     expect(metaRepo.getSession(rootSession.id)).toEqual({ ...rootSession, isTabClosed: false });
   });
 
-  it('reopens a historical archived child without restoring the root or opened sessions', async () => {
-    const tree = createContainmentSessions('legacy-close', true);
+  it('reopens a closed tab of an archived workspace without restoring it', async () => {
+    const tree = createContainmentSessions('archived-reopen', true);
+    const archivedRoot = { ...tree.rootSession, isTabClosed: true };
     const child = { ...tree.tabSession, isTabClosed: true };
-    const metaRepo = createSessionMetaRepo([tree.rootSession, child, tree.openedSession]);
+    const metaRepo = createSessionMetaRepo([archivedRoot, child, tree.openedSession]);
     const actions = await renderActions(createRuntime({ repo: metaRepo.repo }), {
       sessionMetaCache: tree.sessionMetaCache,
     });
-    await actions.reopenSessionTab(child.id);
-    expect(metaRepo.getSession(child.id)).toEqual({
-      ...child,
-      isArchived: false,
+    await actions.setSessionTabClosed(archivedRoot.id, false);
+    expect(metaRepo.getSession(archivedRoot.id)).toEqual({
+      ...archivedRoot,
+      isArchived: true,
       isTabClosed: false,
     });
-    expect(metaRepo.getSession(tree.rootSession.id)).toEqual(tree.rootSession);
+    expect(metaRepo.getSession(child.id)).toEqual(child);
     expect(metaRepo.getSession(tree.openedSession.id)).toEqual(tree.openedSession);
   });
 
-  it('restores root containment but retains independent child close flags', async () => {
-    const tree = createContainmentSessions('root-reopen', true);
+  it('restores root containment without changing any close flag', async () => {
+    const tree = createContainmentSessions('root-restore', true);
+    const archivedRoot = { ...tree.rootSession, isTabClosed: true };
     const child = { ...tree.tabSession, isTabClosed: true };
-    const metaRepo = createSessionMetaRepo([tree.rootSession, child, tree.openedSession]);
+    const metaRepo = createSessionMetaRepo([archivedRoot, child, tree.openedSession]);
     const actions = await renderActions(createRuntime({ repo: metaRepo.repo }), {
       sessionMetaCache: tree.sessionMetaCache,
     });
-    await actions.reopenSessionTab(tree.rootSession.id);
-    expect(metaRepo.getSession(tree.rootSession.id)).toMatchObject({
-      isArchived: false,
-      isTabClosed: false,
-    });
+    await actions.restoreSession(archivedRoot.id);
+    expect(metaRepo.getSession(archivedRoot.id)).toEqual({ ...archivedRoot, isArchived: false });
     expect(metaRepo.getSession(child.id)).toEqual({ ...child, isArchived: false });
     expect(metaRepo.getSession(tree.openedSession.id)).toEqual(tree.openedSession);
   });
@@ -1252,7 +1251,6 @@ describe('useSessionActions', () => {
     await expect(actions.setSessionTabClosed(tree.rootSession.id, true)).rejects.toThrow(
       'disk full'
     );
-    await expect(actions.reopenSessionTab(tree.rootSession.id)).rejects.toThrow('disk full');
     expect(metaRepo.getSession(tree.rootSession.id)).toEqual(tree.rootSession);
   });
 
@@ -1300,7 +1298,7 @@ describe('useSessionActions', () => {
       await actions.restoreSession(tree.rootSession.id);
       expect((await repo.getDocMeta(getSessionRoomId(tree.rootSession.id)))?.meta).toMatchObject({
         isArchived: false,
-        isTabClosed: false,
+        isTabClosed: true,
       });
       expect((await repo.getDocMeta(getSessionRoomId(tree.tabSession.id)))?.meta).toMatchObject({
         isArchived: false,

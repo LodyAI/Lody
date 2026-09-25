@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Plus, X, History, Undo2, FileDiff, Hand } from 'lucide-react';
+import { Plus, X, History, Undo2, FileDiff, Hand, ArchiveRestore } from 'lucide-react';
 import { Spinner } from '@lody/ui/spinner';
 import { cn } from '@/lib/utils';
 import { WINDOW_DRAG_EXEMPT_CLASS, useWindowDragRegionClass } from '@/ui/window-drag-region';
@@ -37,7 +37,7 @@ import {
   closedSessionHasUnreadMessages,
   sessionHasUnreadMessages,
 } from '@/lib/session-read-receipt';
-import { isSessionTabClosed } from '@/lib/session-tab-url';
+import { isArchivedOutsideWorkspace, isSessionTabClosed } from '@/lib/session-tab-url';
 import { TAB_PILL_ACTIVE_CLASS, TAB_PILL_INACTIVE_CLASS } from '@/components/shared/tab-pill-strip';
 import { AdaptiveTabStrip, AdaptiveTabStripItem } from './adaptive-tab-strip';
 import { SESSION_PAGE_CONTAINER_CLASS } from './session-conversation-page';
@@ -559,9 +559,11 @@ export const SessionTabBar = memo(function SessionTabBar({
   useListKeyboardNavigation({ scopeId: WORKSPACE_FOCUS_SCOPES.sessionConversation });
   const defaultTitle = t('sessions.untitled', 'Untitled session');
   const showSessionTabs = variant !== 'viewer';
-  const showParentTab = showSessionTabs && !isSessionTabClosed(parentSession);
+  const workspaceArchived = parentSession.isArchived === true;
+  const showParentTab = showSessionTabs && !isSessionTabClosed(parentSession, workspaceArchived);
   const showViewerTabs = variant !== 'session';
-  const showNewTabButton = variant !== 'viewer';
+  // An archived workspace is review-only: no new conversation until Restore.
+  const showNewTabButton = variant !== 'viewer' && !workspaceArchived;
   const showArchivedTabs = variant !== 'viewer';
   const [editingTabId, setEditingTabId] = useState<SessionId | null>(null);
   const [editDraft, setEditDraft] = useState('');
@@ -572,7 +574,7 @@ export const SessionTabBar = memo(function SessionTabBar({
     const sessionMap = showSessionTabs
       ? new Map<string, SortableItemData>(
           childSessions
-            .filter((s) => !isSessionTabClosed(s))
+            .filter((s) => !isSessionTabClosed(s, workspaceArchived))
             .map((s) => [s.id, { kind: 'session', session: s }])
         )
       : new Map<string, SortableItemData>();
@@ -626,7 +628,15 @@ export const SessionTabBar = memo(function SessionTabBar({
     }
 
     return result;
-  }, [childSessions, draftTabs, showSessionTabs, showViewerTabs, tabOrder, viewerTabs]);
+  }, [
+    childSessions,
+    draftTabs,
+    showSessionTabs,
+    showViewerTabs,
+    tabOrder,
+    viewerTabs,
+    workspaceArchived,
+  ]);
 
   const sortableIds = useMemo(() => sortableItems.map((i) => i.id), [sortableItems]);
   const sessionIdByTabId = useMemo(() => {
@@ -844,7 +854,11 @@ export const SessionTabBar = memo(function SessionTabBar({
       <div className={cn('flex shrink-0 items-center', WINDOW_DRAG_EXEMPT_CLASS)}>
         {newTabButton}
         {showArchivedTabs && archivedChildSessions.length > 0 && onTabRestore && (
-          <ClosedTabsPopover archivedSessions={archivedChildSessions} onRestore={onTabRestore} />
+          <ClosedTabsPopover
+            archivedSessions={archivedChildSessions}
+            workspaceArchived={workspaceArchived}
+            onRestore={onTabRestore}
+          />
         )}
         {rightSlot}
       </div>
@@ -854,9 +868,12 @@ export const SessionTabBar = memo(function SessionTabBar({
 
 export function ClosedTabsPopover({
   archivedSessions,
+  workspaceArchived,
   onRestore,
 }: {
   archivedSessions: SessionMeta[];
+  /** Reopening a tab never unarchives; only archived children of a live workspace restore. */
+  workspaceArchived: boolean;
   onRestore: (sessionId: SessionId) => MaybePromiseVoid;
 }) {
   const { t } = useTranslation();
@@ -903,6 +920,11 @@ export function ClosedTabsPopover({
             {sorted.map((session) => {
               const label = session.title?.trim() || t('sessions.tabs.newTab', 'New Tab');
               const time = formatRelativeTime(session.lastMessageAt ?? session.createdAt, t);
+              const restoresArchive = isArchivedOutsideWorkspace(session, workspaceArchived);
+              const ActionIcon = restoresArchive ? ArchiveRestore : Undo2;
+              const actionLabel = restoresArchive
+                ? t('archive.restore', 'Restore session')
+                : t('sessions.tabs.reopenTab', 'Reopen conversation');
               return (
                 <button
                   key={session.id}
@@ -911,14 +933,14 @@ export function ClosedTabsPopover({
                   onClick={() => {
                     void onRestore(session.id);
                   }}
-                  aria-label={`${t('sessions.tabs.reopenTab', 'Reopen conversation')}: ${label}`}
+                  aria-label={`${actionLabel}: ${label}`}
                 >
                   <span className="shrink-0 text-popover-foreground/65">
                     <ClosedConversationStatus session={session} />
                   </span>
                   <span className="min-w-0 flex-1 truncate">{label}</span>
                   <span className="shrink-0 text-popover-foreground/65">{time}</span>
-                  <Undo2 className="h-3.5 w-3.5 shrink-0 text-popover-foreground/70" />
+                  <ActionIcon className="h-3.5 w-3.5 shrink-0 text-popover-foreground/70" />
                 </button>
               );
             })}

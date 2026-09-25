@@ -73,6 +73,7 @@ export class QuickTunnelSession {
       signal: this.controller.signal,
       fetch: getCliHttpFetch({ logger: this.options.logger }),
       mode: 'health',
+      onDiagnostic: (message) => this.options.logger.debug(`[preview-tunnel] ${message}`),
     })
       .catch((error: unknown) => {
         this.controller.abort(
@@ -138,6 +139,8 @@ export class QuickTunnelSession {
         binary,
         proxyOrigin: new URL(local.viewerUrl).origin,
         signal,
+        onDiagnostic: (message) =>
+          this.options.logger.debug(`[preview-tunnel] cloudflared ${message}`),
       });
       void child.closed.then((error) => {
         if (!signal.aborted)
@@ -150,6 +153,7 @@ export class QuickTunnelSession {
         target: this.options.target,
         signal,
         fetch: getCliHttpFetch({ logger: this.options.logger }),
+        onDiagnostic: (message) => this.options.logger.debug(`[preview-tunnel] ${message}`),
       });
       signal.throwIfAborted();
       this.endpoint = endpoint;
@@ -168,7 +172,7 @@ export class QuickTunnelSession {
           ? { reason: error.reason }
           : {
               error: diagnostic
-                ? new Error(`${failure.message}; last cloudflared error: ${diagnostic}`, {
+                ? new Error(`${failure.message}; cloudflared: ${diagnostic}`, {
                     cause: failure,
                   })
                 : failure,

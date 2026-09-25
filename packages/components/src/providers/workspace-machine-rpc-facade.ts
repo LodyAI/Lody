@@ -6,6 +6,7 @@ import type {
   LocalProjectGitStateRpcResponse,
 } from '@lody/loro-streams-rpc';
 import {
+  DEFAULT_PREVIEW_CREATE_TIMEOUT_MS,
   getServerNow,
   machineSupportsLocalFileResourcesProtocol,
   machineSupportsPiExtensions,
@@ -934,7 +935,7 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
           machineId,
           workspaceId,
           params: { sessionId, requestedByUserId, target, approval, restart: options?.restart },
-          timeoutMs: options?.timeoutMs ?? 360_000,
+          timeoutMs: options?.timeoutMs ?? DEFAULT_PREVIEW_CREATE_TIMEOUT_MS,
         });
         if (!response) throw new Error('Local preview control is unavailable.');
         if (!response.ok) throw new Error(response.error);
@@ -953,7 +954,7 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
         target,
         approval,
         restart: options?.restart,
-        timeoutMs: options?.timeoutMs ?? 360_000,
+        timeoutMs: options?.timeoutMs ?? DEFAULT_PREVIEW_CREATE_TIMEOUT_MS,
       });
     } catch (error) {
       return {

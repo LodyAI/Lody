@@ -1,4 +1,8 @@
-import { PreviewControlProofSchema, type PreviewControlProof } from '@lody/shared';
+import {
+  DEFAULT_PREVIEW_CREATE_TIMEOUT_MS,
+  PreviewControlProofSchema,
+  type PreviewControlProof,
+} from '@lody/shared';
 import { z } from 'zod';
 import {
   StreamsClient,
@@ -3099,7 +3103,7 @@ export class LoroStreamsMachineRpcClient {
   }): Promise<SessionPreviewCreateResponse | null> {
     return (await this.sendRequest({
       method: 'session/preview-create',
-      timeoutMs: options.timeoutMs ?? 30_000,
+      timeoutMs: options.timeoutMs ?? DEFAULT_PREVIEW_CREATE_TIMEOUT_MS,
       params: {
         sessionId: options.sessionId,
         requestedByUserId: options.requestedByUserId,

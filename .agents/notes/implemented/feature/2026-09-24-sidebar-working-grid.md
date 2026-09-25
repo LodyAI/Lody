@@ -12,11 +12,10 @@ as "loading" rather than "an agent is working", and five or six of them spin
 independently down the list. The mark is now `WorkingGrid`: a whole 3×3 grid of
 tiles in the primary colour across which a slow light drifts, driven by two short
 waves crossing the page plus one long rhythm wave that brightens whole marks in
-turn down the list; every tile samples them at its own page position. Every mark
-holds still while the user reads outside the sidebar. The animation runs on the
-compositor through Web Animations of `transform` and `opacity` on one shared
-clock, with no per-frame script. Unmeasured: the renderer cost of 19 small
-animated layers per mark in a packaged build, and the effect on real readers.
+turn down the list; every tile samples them at its own page position. The
+animation runs on the compositor through Web Animations of `transform` and
+`opacity` on one shared clock, with no per-frame script. Unmeasured: the
+renderer cost of 19 small animated layers per mark in a packaged build, and the effect on real readers.
 
 ## Problem
 
@@ -97,15 +96,15 @@ motion, and many unrelated flickering points cannot be tuned out. So:
   interfering ripple on top. The grid shape keeps it distinct from the unread dot.
 - Coherence: one wave of one shape makes a column read as the same motion
   passing from mark to mark, instead of about a hundred unrelated tiles.
-- Reading pause: any wheel, key, pointer or touch press outside
-  `[data-working-grid-region]` (the sidebar root) freezes every mark on its
-  current frame; marks resume after 4s of quiet or when the pointer enters the
-  sidebar. `scroll` is deliberately not a signal: a streaming conversation
-  scrolls itself. Pause and resume are the only script involved; all marks keep
-  one clock offset, so they resume in step.
+- No reading pause (removed 2026-09-25, #968). The first cut froze every mark on any
+  wheel, key, pointer or touch press outside the sidebar, resuming after 4s of
+  quiet. In use it read as broken: scrolling the conversation stopped the
+  "working" status, so a running session looked stalled exactly when the owner
+  glanced at it. Marks now always move; calm comes only from the ranges and
+  speeds above, and every loop starts at timeline zero so all marks share one
+  clock.
 
-The reading pause is what keeps the more visible final form from pulling at the
-reader. None of these effects has been measured on people; the numbers above are
+None of these effects has been measured on people; the numbers above are
 simulations and screenshots.
 
 ## Done transition
@@ -126,10 +125,17 @@ states, so it stays mounted across the change. It tracks the previous `working`
 flag as state adjusted during render, so the transition is on screen in the same
 commit that stops the grid. It fires only when `unread` is already true as
 `working` turns false. The two flags travel separately — `working` from session
-presence, `unread` from durable doc meta (`lastMessageAt` vs `lastReadAt`) — and a
-normal turn end writes the unread bump before it releases presence, so that
-order holds. If presence lapses first (crash, expiry), the indicator empties and
-the dot later appears without the transition. A row that remounts, or was never
+presence, `unread` from durable doc meta (`lastMessageAt` vs `lastReadAt`). The
+CLI writes the unread bump before it releases presence, but the renderer receives
+them on different transports with no ordering, and the doc-meta projection
+applies patches a task later (`setTimeout(0)` in `atoms/doc-meta.ts`) while
+presence applies at once. So presence usually cleared first: the indicator
+emptied, the dot appeared later, and the transition never played in the app
+although Storybook (both flags flipped in one render) showed it. Fixed
+2026-09-25: `SidebarRowEndSlot` (which outlives the mark) and the related-session
+chip run `useWorkingHandOver`, which keeps the grid up to 1.5s after `working` clears; an
+unread write inside that window gets the transition, otherwise the hold lapses
+(the user was reading the session). A row that remounts, or was never
 working, shows the dot directly. Reduced motion shows the dot at once. Known seam: the
 collapse starts from evenly sized tiles, while the live grid's tiles differ.
 Verified by scrubbing the paused animations frame by frame in Storybook
@@ -187,9 +193,9 @@ sidebar with every session running.
   down a list in small increments; all 19 animations (one rhythm, eighteen tile
   layers) target HTML, touch only `transform`/`opacity`, share one start time,
   follow the speed factor, stay within the size and opacity ranges, and are
-  cancelled on unmount; reduced motion stays still; input outside the sidebar
-  region pauses every loop until 4s of quiet or the pointer returns, and they
-  resume on one clock; the sidebar end slot shows the grid while working.
+  cancelled on unmount; reduced motion stays still; the sidebar end slot shows
+  the grid while working, holds it for a late unread write so the transition
+  still plays, and lets it go when none arrives.
 - Rendered in Storybook and inspected by screenshot.
 - Not done: a renderer CPU / layer trace in the packaged Electron app with many
   sessions running. That is the check to run before widening the grid to other

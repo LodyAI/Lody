@@ -16,7 +16,7 @@ import {
   X,
   type LucideIcon,
 } from 'lucide-react';
-import { WorkingStatusMark } from '@/ui/working-status-mark';
+import { useWorkingHandOver, WorkingStatusMark } from '@/ui/working-status-mark';
 import type { PrStatus, SessionPullRequestCiState } from '@lody/shared';
 import { cn } from '@/lib/utils';
 import { Tooltip } from '@lody/ui/tooltip';
@@ -443,14 +443,16 @@ export function SidebarRowEndSlot({
   archive?: ReactNode;
   fadeClassName?: string;
 }) {
+  // The end slot outlives the status mark, so the hand-over hold lives here.
+  const drawWorking = useWorkingHandOver(isWorking === true, hasUnreadMessages === true);
   const restContent = hasSessionRowStatus({
     isWaitingPermission,
-    isWorking,
+    isWorking: drawWorking,
     hasUnreadMessages,
   }) ? (
     <SessionRowStatusIndicator
       isWaitingPermission={isWaitingPermission}
-      isWorking={isWorking}
+      isWorking={drawWorking}
       hasUnreadMessages={hasUnreadMessages}
     />
   ) : (
