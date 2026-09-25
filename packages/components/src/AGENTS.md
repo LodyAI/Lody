@@ -93,10 +93,10 @@ Performance comparisons must use the current full-Mirror baseline.
 ## ACP selectors
 
 - Built-in Codex reasoning selectors normalize cached options against exact model support
-  in `components/shared/acp-selector-options.ts`: Astra, Sol, and Terra expose Max/Ultra;
-  Luna exposes Max only. Keep this aligned with the ACP model catalog; a model version
-  threshold cannot represent per-model differences, and cached efforts may belong to
-  a different selected model.
+  in `components/shared/acp-selector-options.ts`: GPT-6 Astra/Sol and GPT-5.6 Sol/Terra
+  expose Max/Ultra; GPT-6 Luna and GPT-5.6 Luna expose Max only. Keep this aligned with
+  the ACP model catalog; a model version threshold cannot represent per-model differences,
+  and cached efforts may belong to a different selected model.
 
 ## ACP authentication
 

@@ -1,7 +1,62 @@
 import { ChevronRight } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { cn } from '@/lib/utils';
+import * as stylex from '@stylexjs/stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { duration, ease, space } from '@lody/ui/tokens/scales.stylex';
 import { UserAvatar } from '@/components/user-avatar';
+import { settingsSurface as surface } from './surface';
+
+const styles = stylex.create({
+  /**
+   * On mobile the entry is a card of its own above the settings list, and the
+   * whole card is the row a person opens. It restates the card's fill under
+   * the pointer's, since a hover fill set elsewhere would replace the card's.
+   */
+  mobile: {
+    boxSizing: 'border-box',
+    display: 'flex',
+    alignItems: 'center',
+    gap: space[3],
+    width: '100%',
+    minWidth: 0,
+    paddingInline: space[4],
+    paddingBlock: space[3],
+    margin: 0,
+    borderWidth: 0,
+    backgroundColor: {
+      default: colors.elevatedBackground,
+      ':hover': `color-mix(in oklab, ${colors.elevatedBackground}, ${colors.label} 4%)`,
+    },
+    color: colors.label,
+    fontFamily: 'inherit',
+    fontSize: '1em',
+    textAlign: 'start',
+    cursor: 'pointer',
+    transitionProperty: 'background-color',
+    transitionDuration: duration.fast,
+    transitionTimingFunction: ease.standard,
+  },
+  mobileText: { flexGrow: 1, minWidth: 0 },
+  mobileName: {
+    display: 'block',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: '0.95em',
+    fontWeight: 400,
+    color: colors.label,
+  },
+  mobileEmail: {
+    display: 'block',
+    marginTop: '2px',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: '0.78em',
+    color: colors.secondaryLabel,
+  },
+  chevron: { flexShrink: 0, width: '16px', height: '16px', color: colors.tertiaryLabel },
+});
 
 type SettingsAccountUser = {
   id?: string | null;
@@ -24,38 +79,38 @@ export function SettingsAccountEntry({
   const { t } = useTranslation();
   if (!user) return null;
 
+  const name = user.name || user.email || t('settings.tabs.account');
+
+  if (mobile) {
+    return (
+      <button
+        type="button"
+        onClick={onSelect}
+        aria-pressed={active}
+        aria-label={t('settings.account.open', 'Open account settings')}
+        {...stylex.props(surface.card, styles.mobile)}
+      >
+        <UserAvatar user={user} size="large" />
+        <span {...stylex.props(styles.mobileText)}>
+          <span {...stylex.props(styles.mobileName)}>{name}</span>
+          {user.email ? <span {...stylex.props(styles.mobileEmail)}>{user.email}</span> : null}
+        </span>
+        <ChevronRight {...stylex.props(styles.chevron)} aria-hidden="true" />
+      </button>
+    );
+  }
+
+  // On desktop the entry is one row of the settings nav, so it is that row.
   return (
     <button
       type="button"
       onClick={onSelect}
       aria-pressed={active}
       aria-label={t('settings.account.open', 'Open account settings')}
-      className={cn(
-        'flex w-full min-w-0 items-center text-start transition-colors',
-        mobile
-          ? 'gap-3 rounded-2xl border border-border/40 bg-card px-4 py-3 active:bg-muted/40'
-          : 'gap-2.5 rounded-md px-2.5 py-1 hover:bg-foreground/[0.04]',
-        !mobile && active && 'bg-foreground/[0.06]'
-      )}
+      {...stylex.props(surface.listRow, active && surface.listRowSelected)}
     >
-      <UserAvatar
-        user={user}
-        className={cn(
-          'shrink-0 text-xs',
-          mobile ? 'h-9 w-9' : 'h-6 w-6 text-[10px]'
-        )}
-      />
-      <span className="min-w-0 flex-1">
-        <span className="block truncate text-sm font-normal text-foreground">
-          {user.name || user.email || t('settings.tabs.account')}
-        </span>
-        {mobile && user.email ? (
-          <span className="mt-0.5 block truncate text-xs text-muted-foreground">{user.email}</span>
-        ) : null}
-      </span>
-      {mobile ? (
-        <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/60" aria-hidden="true" />
-      ) : null}
+      <UserAvatar user={user} size="medium" />
+      <span {...stylex.props(surface.listRowLabel)}>{name}</span>
     </button>
   );
 }

@@ -1,16 +1,204 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import * as stylex from '@stylexjs/stylex';
 import { FREE_SESSION_LIMIT_PER_WORKSPACE, FREE_WORKSPACE_MEMBER_LIMIT } from '@lody/shared';
 import { ArrowLeftRight, Check } from 'lucide-react';
-import { Spinner } from '@/ui/spinner';
-import { Badge, Button, Card, Input } from '@/ui';
-import { Progress } from '@/ui/progress';
-import { Skeleton } from '@/ui/skeleton';
-import { cn } from '@/lib/utils';
+import { Badge } from '@lody/ui/badge';
+import { Button } from '@lody/ui/button';
+import { Input } from '@lody/ui/input';
+import { Progress } from '@lody/ui/progress';
+import { Skeleton } from '@lody/ui/skeleton';
+import { Spinner } from '@lody/ui/spinner';
+import { Tabs } from '@lody/ui/tabs';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { space } from '@lody/ui/tokens/scales.stylex';
+import { withClassName } from '@/lib/stylex';
 import { PricingPageLink } from '../shared/pricing-page-link';
 import { FounderCallLink } from '../shared/founder-call-link';
 import { SubscribeConsentNotice } from '../shared/subscribe-consent-notice';
+import { CompactRow, CompactSection } from './compact-layout';
+import { settingsSurface as surface } from './surface';
 import { settingContainerClass } from '.';
+
+const WIDE = '@media (min-width: 640px)';
+
+/**
+ * Billing is settings cards like every other page: one card rung, one 16px
+ * inset shared by every line, a group's name above its card rather than in a
+ * band inside it, and records as ruled rows.
+ */
+const styles = stylex.create({
+  /** A line of a card that is not a `CompactRow`: the row's own inset. */
+  block: { paddingInline: space[4], paddingBlock: space[3], minWidth: 0 },
+  banner: {
+    display: 'flex',
+    alignItems: 'flex-start',
+    gap: space[3],
+    paddingInline: space[4],
+    paddingBlock: space[3],
+  },
+  bannerMark: { marginTop: '2px', color: colors.accent },
+  bannerText: { flexGrow: 1, minWidth: 0 },
+
+  planHeading: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: space[2] },
+  planName: { margin: 0, fontSize: '1.125em', lineHeight: 1.25, color: colors.label },
+  statusLine: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    columnGap: space[2],
+    rowGap: '2px',
+    marginTop: space[1],
+    fontSize: '0.8em',
+    lineHeight: 1.375,
+    color: colors.secondaryLabel,
+  },
+  statusInterval: { display: 'inline-flex', alignItems: 'center', gap: space[1.5] },
+  statusDot: { color: colors.tertiaryLabel },
+  inlineAction: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: space[1],
+    margin: 0,
+    padding: 0,
+    borderWidth: 0,
+    backgroundColor: 'transparent',
+    color: colors.accent,
+    fontFamily: 'inherit',
+    fontSize: 'inherit',
+    cursor: { default: 'pointer', ':disabled': 'default' },
+    opacity: { default: 1, ':hover': 0.8, ':disabled': 0.6 },
+  },
+  glyphSmall: { width: '12px', height: '12px', flexShrink: 0 },
+  danger: { color: colors.destructive },
+
+  metric: {
+    display: 'flex',
+    alignItems: 'baseline',
+    justifyContent: 'space-between',
+    gap: space[2],
+  },
+  metricValue: { color: colors.secondaryLabel, fontVariantNumeric: 'tabular-nums' },
+  metricStrong: { color: colors.label },
+  meter: { marginTop: space[3] },
+  helper: {
+    margin: 0,
+    marginTop: space[2],
+    fontSize: '0.8em',
+    lineHeight: 1.375,
+    color: colors.secondaryLabel,
+  },
+  helperFlush: {
+    margin: 0,
+    fontSize: '0.8em',
+    lineHeight: 1.375,
+    color: colors.secondaryLabel,
+  },
+
+  /** The offer: its heading, the strip, the price and the action, one column. */
+  offer: { display: 'flex', flexDirection: 'column', gap: space[4], paddingBlock: space[4] },
+  offerTitle: { margin: 0, lineHeight: 1.25, color: colors.label },
+  strip: { display: 'flex' },
+  checkoutInterval: { display: 'flex', alignItems: 'center', gap: space[1] },
+  pricePanel: { display: 'flex', flexDirection: 'column', paddingTop: space[2] },
+  price: { display: 'flex', flexWrap: 'wrap', alignItems: 'baseline', gap: space[2] },
+  priceValue: {
+    fontSize: '2em',
+    lineHeight: 1.1,
+    letterSpacing: '-0.02em',
+    color: colors.label,
+    fontVariantNumeric: 'tabular-nums',
+  },
+  priceUnit: { fontSize: '0.85em', color: colors.secondaryLabel },
+  promise: { color: colors.label },
+  action: { display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: space[2] },
+  perks: {
+    display: 'grid',
+    gridTemplateColumns: { default: 'minmax(0, 1fr)', [WIDE]: 'repeat(2, minmax(0, 1fr))' },
+    columnGap: space[4],
+    rowGap: space[1.5],
+    margin: 0,
+    padding: 0,
+    listStyleType: 'none',
+    fontSize: '0.8em',
+    color: colors.secondaryLabel,
+  },
+  perk: { display: 'flex', alignItems: 'center', gap: space[1.5], minWidth: 0 },
+  perkMark: { width: '14px', height: '14px', flexShrink: 0, color: colors.accent },
+  links: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    columnGap: space[4],
+    rowGap: space[1],
+  },
+
+  redeemField: { width: '220px', maxWidth: '100%' },
+  srOnly: {
+    position: 'absolute',
+    width: '1px',
+    height: '1px',
+    margin: '-1px',
+    padding: 0,
+    overflow: 'hidden',
+    clipPath: 'inset(50%)',
+    whiteSpace: 'nowrap',
+    borderWidth: 0,
+  },
+
+  amountDue: { color: colors.label, fontVariantNumeric: 'tabular-nums' },
+  breakdown: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: space[1],
+    margin: 0,
+    listStyleType: 'none',
+  },
+  breakdownLine: {
+    display: 'flex',
+    alignItems: 'baseline',
+    justifyContent: 'space-between',
+    gap: space[4],
+    fontSize: '0.8em',
+    color: colors.secondaryLabel,
+  },
+  truncate: { minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  tabular: { flexShrink: 0, fontVariantNumeric: 'tabular-nums', color: colors.label },
+
+  inlineRow: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: space[3] },
+  history: { maxHeight: '320px', overflowY: 'auto', margin: 0, padding: 0, listStyleType: 'none' },
+  invoice: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    columnGap: space[4],
+    rowGap: space[1],
+  },
+  invoiceText: { minWidth: 0 },
+  link: {
+    fontSize: '0.8em',
+    color: colors.accent,
+    textDecoration: { default: 'none', ':hover': 'underline' },
+  },
+
+  trailing: { display: 'flex', justifyContent: 'flex-end', paddingInline: space[4] },
+  quietAction: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: space[1.5],
+    margin: 0,
+    padding: 0,
+    borderWidth: 0,
+    backgroundColor: 'transparent',
+    color: { default: colors.secondaryLabel, ':hover': colors.label },
+    fontFamily: 'inherit',
+    fontSize: '0.8em',
+    cursor: { default: 'pointer', ':disabled': 'default' },
+    opacity: { default: 1, ':disabled': 0.6 },
+  },
+  quietActionDanger: { color: { default: colors.secondaryLabel, ':hover': colors.destructive } },
+});
 
 export type BillingInterval = 'month' | 'year';
 export type BillingPendingAction = 'checkout' | 'portal' | null;
@@ -186,7 +374,9 @@ export function BillingSettingsView({
   if (overview === null) {
     return (
       <div className={settingContainerClass}>
-        <Card className="p-6 text-sm text-muted-foreground">{t('billing.unavailable')}</Card>
+        <CompactSection>
+          <p {...stylex.props(surface.cardNote)}>{t('billing.unavailable')}</p>
+        </CompactSection>
       </div>
     );
   }
@@ -281,272 +471,292 @@ export function BillingSettingsView({
                 ? t('billing.freeTagline')
                 : null;
 
+  const offerTitle = checkoutInProgress
+    ? overview.subscriptionSetupPending
+      ? t('billing.completeSubscriptionSetupTitle')
+      : t('billing.completeCheckoutTitle')
+    : canScheduleAfterGift
+      ? t('billing.subscribeAfterGiftTitle')
+      : t('billing.upgradeTitle');
+  const offerSubtitle = checkoutInProgress
+    ? overview.subscriptionSetupPending
+      ? t('billing.subscriptionSetupPendingDescription')
+      : t('billing.checkoutPendingDescription')
+    : canScheduleAfterGift
+      ? t('billing.subscribeAfterGiftSubtitle', { date: formatDate(giftEnd) })
+      : t('billing.upgradeSubtitle');
+  const breakdown = upcomingInvoice
+    ? [
+        upcomingInvoice.renewal
+          ? {
+              key: 'renewal',
+              label:
+                upcomingInvoice.renewal.quantity != null
+                  ? t('billing.upcomingRenewalWithSeats', {
+                      count: upcomingInvoice.renewal.quantity,
+                    })
+                  : t('billing.upcomingRenewal'),
+              amount: upcomingInvoice.renewal.amount,
+            }
+          : null,
+        upcomingInvoice.discount
+          ? {
+              key: 'discount',
+              // The invoice discount line is offer-agnostic; only name the
+              // campaign when this account's offer actually is early bird.
+              label: t(
+                overview.offerKey === 'early_bird_yearly_6000_forever'
+                  ? 'billing.upcomingDiscountEarlyBird'
+                  : 'billing.upcomingDiscount'
+              ),
+              amount: upcomingInvoice.discount.amount,
+            }
+          : null,
+        upcomingInvoice.adjustment
+          ? {
+              key: 'adjustment',
+              label: t('billing.upcomingAdjustment'),
+              amount: upcomingInvoice.adjustment.amount,
+            }
+          : null,
+        upcomingInvoice.creditApplied
+          ? {
+              key: 'credit',
+              label: t('billing.upcomingCreditApplied'),
+              amount: upcomingInvoice.creditApplied.amount,
+            }
+          : null,
+      ].filter((line) => line !== null)
+    : [];
+
   return (
     <div className={settingContainerClass}>
       {/* Desktop: checkout opened in the system browser, awaiting payment */}
       {externalCheckoutPending ? (
-        <Card className="flex items-start gap-3 border-primary/30 bg-primary/5 p-4">
-          <Spinner className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
-          <div className="min-w-0 flex-1">
-            <p className="text-sm font-normal text-foreground">
-              {canScheduleAfterGift || overview.subscriptionSetupPending
-                ? t('billing.externalSetupTitle')
-                : t('billing.externalCheckoutTitle')}
-            </p>
-            <p className="mt-0.5 text-xs text-muted-foreground">
-              {canScheduleAfterGift || overview.subscriptionSetupPending
-                ? t('billing.externalSetupDescription')
-                : t('billing.externalCheckoutDescription')}
-            </p>
+        <CompactSection>
+          <div {...stylex.props(styles.banner)}>
+            <Spinner size="small" {...stylex.props(styles.bannerMark)} />
+            <div {...stylex.props(styles.bannerText)}>
+              <p {...stylex.props(surface.rowLabel)}>
+                {canScheduleAfterGift || overview.subscriptionSetupPending
+                  ? t('billing.externalSetupTitle')
+                  : t('billing.externalCheckoutTitle')}
+              </p>
+              <p {...stylex.props(surface.rowHelper)}>
+                {canScheduleAfterGift || overview.subscriptionSetupPending
+                  ? t('billing.externalSetupDescription')
+                  : t('billing.externalCheckoutDescription')}
+              </p>
+            </div>
+            {onCancelExternalCheckout ? (
+              <Button variant="ghost" size="small" onClick={onCancelExternalCheckout}>
+                {t('billing.externalCheckoutDismiss')}
+              </Button>
+            ) : null}
           </div>
-          {onCancelExternalCheckout ? (
-            <Button size="sm" variant="ghost" onClick={onCancelExternalCheckout}>
-              {t('billing.externalCheckoutDismiss')}
-            </Button>
-          ) : null}
-        </Card>
+        </CompactSection>
       ) : null}
 
       {/* Payment received, activation in flight */}
       {paymentProcessing && !externalCheckoutPending ? (
-        <Card className="flex items-start gap-3 border-primary/30 bg-primary/5 p-4">
-          <Spinner className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
-          <div className="min-w-0">
-            <p className="text-sm font-normal text-foreground">
-              {overview.subscriptionSetupPending
-                ? t('billing.subscriptionSetupProcessingTitle')
-                : t('billing.paymentProcessingTitle')}
-            </p>
-            <p className="mt-0.5 text-xs text-muted-foreground">
-              {overview.subscriptionSetupPending
-                ? t('billing.subscriptionSetupProcessingDescription')
-                : t('billing.paymentProcessingDescription')}
-            </p>
+        <CompactSection>
+          <div {...stylex.props(styles.banner)}>
+            <Spinner size="small" {...stylex.props(styles.bannerMark)} />
+            <div {...stylex.props(styles.bannerText)}>
+              <p {...stylex.props(surface.rowLabel)}>
+                {overview.subscriptionSetupPending
+                  ? t('billing.subscriptionSetupProcessingTitle')
+                  : t('billing.paymentProcessingTitle')}
+              </p>
+              <p {...stylex.props(surface.rowHelper)}>
+                {overview.subscriptionSetupPending
+                  ? t('billing.subscriptionSetupProcessingDescription')
+                  : t('billing.paymentProcessingDescription')}
+              </p>
+            </div>
           </div>
-        </Card>
+        </CompactSection>
       ) : null}
 
       {/* Plan status */}
-      <Card className="p-5">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="text-lg font-normal leading-tight text-foreground">{planName}</span>
-          {/* A gift always ends at its schedule boundary; its status line says
-              so already, and a cancel badge would read as an error state. */}
-          {overview.cancelAtPeriodEnd && !isPromotional ? (
-            <Badge variant="outline" className="font-normal">
-              {t('billing.cancelAtPeriodEnd')}
-            </Badge>
-          ) : null}
-          {checkoutInProgress ? (
-            <Badge variant="secondary" className="font-normal">
-              {t('billing.checkoutPending')}
-            </Badge>
-          ) : null}
-          {hasGiftTimeline && overview.autoRenewAfterGift ? (
-            <Badge variant="secondary" className="font-normal">
-              {t('billing.postGiftBillingScheduled')}
-            </Badge>
-          ) : null}
-          {overview.yearlyEarlyBirdEligible ? (
-            <Badge variant="secondary" className="font-normal">
-              {t('billing.yearlyPromoPrice')}
-            </Badge>
-          ) : null}
+      <CompactSection>
+        <div {...stylex.props(styles.block)}>
+          <div {...stylex.props(styles.planHeading)}>
+            <p {...stylex.props(styles.planName)}>{planName}</p>
+            {/* A gift always ends at its schedule boundary; its status line says
+                so already, and a cancel badge would read as an error state. */}
+            {overview.cancelAtPeriodEnd && !isPromotional ? (
+              <Badge>{t('billing.cancelAtPeriodEnd')}</Badge>
+            ) : null}
+            {checkoutInProgress ? <Badge>{t('billing.checkoutPending')}</Badge> : null}
+            {hasGiftTimeline && overview.autoRenewAfterGift ? (
+              <Badge>{t('billing.postGiftBillingScheduled')}</Badge>
+            ) : null}
+            {overview.yearlyEarlyBirdEligible ? (
+              <Badge>{t('billing.yearlyPromoPrice')}</Badge>
+            ) : null}
+          </div>
+          <div {...stylex.props(styles.statusLine)}>
+            {planIntervalLabel ? (
+              <span {...stylex.props(styles.statusInterval)}>
+                {planIntervalLabel}
+                {showIntervalSwitch ? (
+                  <button
+                    type="button"
+                    disabled={switchIntervalPending || !overview.billingAccountId}
+                    onClick={onSwitchInterval}
+                    {...stylex.props(styles.inlineAction)}
+                  >
+                    {switchIntervalPending ? (
+                      <Spinner size="small" />
+                    ) : (
+                      <ArrowLeftRight aria-hidden="true" {...stylex.props(styles.glyphSmall)} />
+                    )}
+                    {overview.billingInterval === 'month'
+                      ? t('billing.switchToYearly')
+                      : t('billing.switchToMonthly')}
+                  </button>
+                ) : null}
+              </span>
+            ) : null}
+            {planIntervalLabel && planStatusDetail ? (
+              <span aria-hidden="true" {...stylex.props(styles.statusDot)}>
+                ·
+              </span>
+            ) : null}
+            {planStatusDetail ? (
+              <span {...stylex.props(isPastDue && styles.danger)}>{planStatusDetail}</span>
+            ) : null}
+          </div>
         </div>
-        <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs">
-          {planIntervalLabel ? (
-            <span className="inline-flex items-center gap-1.5 text-muted-foreground">
-              {planIntervalLabel}
-              {showIntervalSwitch ? (
-                <button
-                  type="button"
-                  disabled={switchIntervalPending || !overview.billingAccountId}
-                  onClick={onSwitchInterval}
-                  className="inline-flex items-center gap-1 font-normal text-primary transition-colors hover:text-primary/80 disabled:opacity-60"
-                >
-                  {switchIntervalPending ? (
-                    <Spinner className="h-3 w-3" />
-                  ) : (
-                    <ArrowLeftRight className="h-3 w-3" />
-                  )}
-                  {overview.billingInterval === 'month'
-                    ? t('billing.switchToYearly')
-                    : t('billing.switchToMonthly')}
-                </button>
-              ) : null}
-            </span>
-          ) : null}
-          {planIntervalLabel && planStatusDetail ? (
-            <span className="text-muted-foreground/50">·</span>
-          ) : null}
-          {planStatusDetail ? (
-            <span className={isPastDue ? 'text-destructive' : 'text-muted-foreground'}>
-              {planStatusDetail}
-            </span>
-          ) : null}
-        </div>
-      </Card>
+      </CompactSection>
 
       {/* Session usage */}
       {!paidCheckoutPending ? (
-        <Card className="p-5">
-          <div className="flex items-baseline justify-between gap-2">
-            <span className="text-sm font-normal text-foreground">{t('billing.sessions')}</span>
-            <div className="text-sm tabular-nums text-muted-foreground">
-              {sessionLimit === null ? (
-                t('billing.unlimited')
-              ) : sessionCount === null ? (
-                <Skeleton className="h-4 w-14" />
-              ) : (
-                <>
-                  <span
-                    className={cn(
-                      'font-normal',
-                      nearLimit ? 'text-destructive' : 'text-foreground'
-                    )}
-                  >
-                    {sessionCount}
-                  </span>
-                  {' / '}
-                  {sessionLimit}
-                </>
-              )}
+        <CompactSection>
+          <div {...stylex.props(styles.block)}>
+            <div {...stylex.props(styles.metric)}>
+              <p {...stylex.props(surface.rowLabel)}>{t('billing.sessions')}</p>
+              <div {...stylex.props(styles.metricValue)}>
+                {sessionLimit === null ? (
+                  t('billing.unlimited')
+                ) : sessionCount === null ? (
+                  <Skeleton width="56px" height="16px" />
+                ) : (
+                  <>
+                    <span {...stylex.props(styles.metricStrong, nearLimit && styles.danger)}>
+                      {sessionCount}
+                    </span>
+                    {' / '}
+                    {sessionLimit}
+                  </>
+                )}
+              </div>
+            </div>
+            {sessionLimit !== null ? (
+              <div {...stylex.props(styles.meter)}>
+                {sessionCount === null ? (
+                  <Skeleton width="100%" height="8px" />
+                ) : (
+                  <Progress
+                    value={sessionCount}
+                    max={sessionLimit}
+                    tone={nearLimit ? 'danger' : 'running'}
+                  />
+                )}
+              </div>
+            ) : null}
+            {sessionLimit !== null ? (
+              <p {...stylex.props(styles.helper)}>{t('billing.sessionsHelp')}</p>
+            ) : null}
+          </div>
+          <div {...stylex.props(styles.block)}>
+            <div {...stylex.props(styles.metric)}>
+              <p {...stylex.props(surface.rowLabel)}>{t('billing.members')}</p>
+              <span {...stylex.props(styles.metricValue)}>
+                <span {...stylex.props(styles.metricStrong)}>{overview.seatCount}</span>
+                {!isPaid ? ` / ${FREE_WORKSPACE_MEMBER_LIMIT}` : null}
+              </span>
             </div>
           </div>
-          {sessionLimit !== null && sessionCount === null ? (
-            <Skeleton className="mt-3 h-2 w-full" />
-          ) : sessionLimit !== null && sessionCount !== null ? (
-            <Progress
-              value={sessionCount}
-              max={sessionLimit}
-              className={cn('mt-3', nearLimit && '[&>div]:bg-destructive')}
-            />
-          ) : null}
-          {sessionLimit !== null ? (
-            <p className="mt-2 text-xs text-muted-foreground">{t('billing.sessionsHelp')}</p>
-          ) : null}
-          <div className="mt-4 flex items-baseline justify-between gap-2 border-t border-border/60 pt-4">
-            <span className="text-sm font-normal text-foreground">{t('billing.members')}</span>
-            <span className="text-sm tabular-nums text-muted-foreground">
-              <span className="font-normal text-foreground">{overview.seatCount}</span>
-              {!isPaid ? ` / ${FREE_WORKSPACE_MEMBER_LIMIT}` : null}
-            </span>
-          </div>
-        </Card>
+        </CompactSection>
       ) : null}
 
       {/* Upgrade */}
       {showSubscriptionOffer ? (
-        <Card className="overflow-hidden">
-          <div className="border-b border-border/70 dark:bg-muted/30 px-5 py-3">
-            <p className="text-sm font-normal text-foreground">
-              {checkoutInProgress
-                ? overview.subscriptionSetupPending
-                  ? t('billing.completeSubscriptionSetupTitle')
-                  : t('billing.completeCheckoutTitle')
-                : canScheduleAfterGift
-                  ? t('billing.subscribeAfterGiftTitle')
-                  : t('billing.upgradeTitle')}
-            </p>
-            <p className="mt-0.5 text-xs text-muted-foreground">
-              {checkoutInProgress
-                ? overview.subscriptionSetupPending
-                  ? t('billing.subscriptionSetupPendingDescription')
-                  : t('billing.checkoutPendingDescription')
-                : canScheduleAfterGift
-                  ? t('billing.subscribeAfterGiftSubtitle', {
-                      date: formatDate(giftEnd),
-                    })
-                  : t('billing.upgradeSubtitle')}
-            </p>
-          </div>
-          <div className="space-y-4 p-5">
-            {checkoutInProgress ? (
-              /* Awaiting payment: present the plan the checkout was created
-                 for instead of the two-option selector. The small toggle
-                 still lets the user switch (which supersedes the stored
-                 Stripe session server-side on continue). */
-              <div className="flex items-center gap-1">
-                <span className="text-sm font-normal text-foreground">
-                  {interval === 'year' ? t('billing.yearly') : t('billing.monthly')}
-                </span>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-7 w-7 text-muted-foreground hover:text-foreground"
-                  aria-label={t('billing.switchBillingInterval')}
-                  title={t('billing.switchBillingInterval')}
-                  onClick={() => onIntervalChange(interval === 'year' ? 'month' : 'year')}
-                >
-                  <ArrowLeftRight className="h-3.5 w-3.5" />
-                </Button>
-              </div>
-            ) : (
-              <div className="inline-flex rounded-lg border border-border bg-muted/40 p-0.5 text-sm">
-                {(['year', 'month'] as const).map((value) => (
-                  <button
-                    key={value}
-                    type="button"
-                    onClick={() => onIntervalChange(value)}
-                    className={cn(
-                      'rounded-md px-3 py-1 font-normal transition-colors',
-                      interval === value
-                        ? 'bg-background text-foreground shadow-xs'
-                        : 'text-muted-foreground hover:text-foreground'
-                    )}
-                  >
-                    {value === 'year' ? t('billing.yearly') : t('billing.monthly')}
-                  </button>
-                ))}
-              </div>
-            )}
-
-            <div className="flex flex-wrap items-end gap-2">
-              <span className="text-3xl font-normal tracking-tight text-foreground">
-                {interval === 'year' ? yearlyPerMonthPrice : monthlyPrice}
-              </span>
-              <span className="pb-1 text-sm text-muted-foreground">
-                {t('billing.perSeatMonth')}
-              </span>
-              {selectedOfferLabel ? (
-                <Badge variant="secondary" className="mb-1 font-normal">
-                  {selectedOfferLabel}
-                </Badge>
-              ) : null}
+        <CompactSection>
+          <div {...stylex.props(styles.block, styles.offer)}>
+            <div>
+              <p {...stylex.props(styles.offerTitle)}>{offerTitle}</p>
+              <p {...stylex.props(surface.rowHelper)}>{offerSubtitle}</p>
             </div>
 
-            <p
-              className={cn(
-                'text-xs',
-                yearlyEarlyBirdSelected ? 'font-normal text-foreground' : 'text-muted-foreground'
-              )}
+            <Tabs.Root
+              value={interval}
+              onValueChange={(value) => onIntervalChange(value as BillingInterval)}
             >
-              {yearlyEarlyBirdSelected
-                ? overview.yearlyEarlyBirdEligible
-                  ? t('billing.yearlyEarlyBirdAlreadyLocked')
-                  : t('billing.yearlyEarlyBirdCheckoutPromise')
-                : interval === 'year'
-                  ? t('billing.billedYearly')
-                  : t('billing.billedMonthly')}
-            </p>
+              {checkoutInProgress ? (
+                /* Awaiting payment: present the plan the checkout was created
+                   for instead of the two-option strip. The small toggle still
+                   lets the user switch (which supersedes the stored Stripe
+                   session server-side on continue). */
+                <div {...stylex.props(styles.checkoutInterval)}>
+                  <span {...stylex.props(surface.rowLabel)}>
+                    {interval === 'year' ? t('billing.yearly') : t('billing.monthly')}
+                  </span>
+                  <Button
+                    variant="ghost"
+                    aria-label={t('billing.switchBillingInterval')}
+                    title={t('billing.switchBillingInterval')}
+                    size="small"
+                    icon
+                    onClick={() => onIntervalChange(interval === 'year' ? 'month' : 'year')}
+                  >
+                    <ArrowLeftRight aria-hidden="true" />
+                  </Button>
+                </div>
+              ) : (
+                <div {...stylex.props(styles.strip)}>
+                  <Tabs.List>
+                    <Tabs.Tab value="year">{t('billing.yearly')}</Tabs.Tab>
+                    <Tabs.Tab value="month">{t('billing.monthly')}</Tabs.Tab>
+                  </Tabs.List>
+                </div>
+              )}
+              <Tabs.Panel value={interval} className={stylex.props(styles.pricePanel).className}>
+                <div {...stylex.props(styles.price)}>
+                  <span {...stylex.props(styles.priceValue)}>
+                    {interval === 'year' ? yearlyPerMonthPrice : monthlyPrice}
+                  </span>
+                  <span {...stylex.props(styles.priceUnit)}>{t('billing.perSeatMonth')}</span>
+                  {selectedOfferLabel ? <Badge>{selectedOfferLabel}</Badge> : null}
+                </div>
+                <p {...stylex.props(styles.helper, yearlyEarlyBirdSelected && styles.promise)}>
+                  {yearlyEarlyBirdSelected
+                    ? overview.yearlyEarlyBirdEligible
+                      ? t('billing.yearlyEarlyBirdAlreadyLocked')
+                      : t('billing.yearlyEarlyBirdCheckoutPromise')
+                    : interval === 'year'
+                      ? t('billing.billedYearly')
+                      : t('billing.billedMonthly')}
+                </p>
+              </Tabs.Panel>
+            </Tabs.Root>
 
             {permissionBlocked ? (
               /* The button is gone for members, so its slot has to say why —
                  and who to ask — instead of leaving a silent gap. */
-              <div className="rounded-lg border border-border/70 bg-muted/40 p-3">
-                <p className="text-sm font-normal text-foreground">
-                  {t('billing.permissionBlockedTitle')}
-                </p>
-                <p className="mt-1 text-xs text-muted-foreground">
+              <div {...stylex.props(surface.formBlock)}>
+                <p {...stylex.props(surface.rowLabel)}>{t('billing.permissionBlockedTitle')}</p>
+                <p {...stylex.props(surface.rowHelper)}>
                   {workspaceOwnerName
                     ? t('billing.permissionAskOwner', { owner: workspaceOwnerName })
                     : t('billing.permissionDescription')}
                 </p>
               </div>
             ) : (
-              <div className="space-y-2">
+              <div {...stylex.props(styles.action)}>
                 <Button
-                  className="w-full sm:w-auto"
                   disabled={
                     !canManage ||
                     pendingAction !== null ||
@@ -555,7 +765,7 @@ export function BillingSettingsView({
                   }
                   onClick={onUpgrade}
                 >
-                  {pendingAction === 'checkout' ? <Spinner className="h-4 w-4" /> : null}
+                  {pendingAction === 'checkout' ? <Spinner size="small" /> : null}
                   {yearlyEarlyBirdSelected
                     ? overview.yearlyEarlyBirdEligible
                       ? t('billing.subscribeLockedEarlyBird')
@@ -570,26 +780,26 @@ export function BillingSettingsView({
               </div>
             )}
 
-            <ul className="grid gap-1.5 pt-1 text-xs text-muted-foreground sm:grid-cols-2">
+            <ul {...stylex.props(styles.perks)}>
               {[
                 t('billing.perkUnlimitedSessions'),
                 t('billing.perkUnlimitedTurns'),
                 t('billing.perkUnlimitedMembers'),
                 t('billing.perkSeatBilling'),
               ].map((perk) => (
-                <li key={perk} className="flex items-center gap-1.5">
-                  <Check className="h-3.5 w-3.5 shrink-0 text-primary" />
+                <li key={perk} {...stylex.props(styles.perk)}>
+                  <Check aria-hidden="true" {...stylex.props(styles.perkMark)} />
                   <span>{perk}</span>
                 </li>
               ))}
             </ul>
 
-            <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+            <div {...stylex.props(styles.links)}>
               <PricingPageLink />
               <FounderCallLink />
             </div>
           </div>
-        </Card>
+        </CompactSection>
       ) : null}
 
       {/* Gift codes extend both free and paid Plus timelines. Keep redemption
@@ -597,227 +807,177 @@ export function BillingSettingsView({
       {canManage &&
       overview.effectivePlanTier !== 'enterprise' &&
       (!isPaid || overview.giftStackingSupported) ? (
-        <Card className="p-5">
-          <p className="text-sm font-normal text-foreground">{t('billing.redeemTitle')}</p>
-          <p className="mt-0.5 text-xs text-muted-foreground">{t('billing.redeemSubtitle')}</p>
-          <label htmlFor="billing-redemption-code" className="sr-only">
-            {t('billing.redeemLabel')}
-          </label>
-          <div className="mt-3 flex gap-2">
-            <Input
-              id="billing-redemption-code"
-              value={code}
-              onChange={(event) => setCode(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter' && code.trim() && !redeemPending && !checkoutInProgress) {
-                  onRedeemCode(code.trim());
-                }
-              }}
-              placeholder={t('billing.redeemPlaceholder')}
-              className="h-8 max-w-[220px]"
-              autoComplete="off"
-              spellCheck={false}
-            />
+        <CompactSection>
+          <CompactRow label={t('billing.redeemTitle')} helper={t('billing.redeemSubtitle')}>
+            <label htmlFor="billing-redemption-code" {...stylex.props(styles.srOnly)}>
+              {t('billing.redeemLabel')}
+            </label>
+            <div {...stylex.props(styles.redeemField)}>
+              <Input
+                id="billing-redemption-code"
+                size="small"
+                value={code}
+                onChange={(event) => setCode(event.target.value)}
+                onKeyDown={(event) => {
+                  if (
+                    event.key === 'Enter' &&
+                    code.trim() &&
+                    !redeemPending &&
+                    !checkoutInProgress
+                  ) {
+                    onRedeemCode(code.trim());
+                  }
+                }}
+                placeholder={t('billing.redeemPlaceholder')}
+                autoComplete="off"
+                spellCheck={false}
+              />
+            </div>
             <Button
-              size="sm"
-              variant="outline"
+              variant="secondary"
+              size="small"
               disabled={redeemPending || checkoutInProgress || !code.trim()}
               onClick={() => onRedeemCode(code.trim())}
             >
-              {redeemPending ? <Spinner className="h-4 w-4" /> : null}
+              {redeemPending ? <Spinner size="small" /> : null}
               {t('billing.redeemApply')}
             </Button>
-          </div>
-        </Card>
+          </CompactRow>
+        </CompactSection>
       ) : null}
 
       {/* Next charge preview: renewal + net seat proration, as its own card
           above the history so admins see the exact next amount right after
           inviting members. */}
       {canManage && overview.entitlementSource === 'stripe' && upcomingInvoice ? (
-        <Card className="overflow-hidden">
-          <div className="border-b border-border/70 dark:bg-muted/30 px-5 py-3">
-            <p className="text-sm font-normal text-foreground">{t('billing.upcomingTitle')}</p>
-          </div>
-          <div className="px-5 py-4">
-            <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-              {upcomingInvoice.expectedAt ? (
-                <p className="text-xs text-muted-foreground">
-                  {t('billing.upcomingChargeOn', {
-                    date: formatDate(upcomingInvoice.expectedAt),
-                  })}
-                </p>
-              ) : (
-                <span />
-              )}
-              <span className="text-base font-normal tabular-nums text-foreground">
+        <CompactSection title={t('billing.upcomingTitle')}>
+          <div {...stylex.props(styles.block)}>
+            <div {...stylex.props(styles.metric)}>
+              <p {...stylex.props(styles.helperFlush)}>
+                {upcomingInvoice.expectedAt
+                  ? t('billing.upcomingChargeOn', {
+                      date: formatDate(upcomingInvoice.expectedAt),
+                    })
+                  : null}
+              </p>
+              <span {...stylex.props(styles.amountDue)}>
                 {formatMoney(upcomingInvoice.amountDue, upcomingInvoice.currency)}
               </span>
             </div>
-            {upcomingInvoice.adjustment ||
-            upcomingInvoice.renewal ||
-            upcomingInvoice.discount ||
-            upcomingInvoice.creditApplied ? (
-              <ul className="mt-3 space-y-1 border-t border-border/60 pt-3">
-                {upcomingInvoice.renewal ? (
-                  <li className="flex items-baseline justify-between gap-4 text-xs text-muted-foreground">
-                    <span className="min-w-0 truncate">
-                      {upcomingInvoice.renewal.quantity != null
-                        ? t('billing.upcomingRenewalWithSeats', {
-                            count: upcomingInvoice.renewal.quantity,
-                          })
-                        : t('billing.upcomingRenewal')}
-                    </span>
-                    <span className="shrink-0 tabular-nums">
-                      {formatMoney(upcomingInvoice.renewal.amount, upcomingInvoice.currency)}
-                    </span>
-                  </li>
-                ) : null}
-                {upcomingInvoice.discount ? (
-                  <li className="flex items-baseline justify-between gap-4 text-xs text-muted-foreground">
-                    {/* The invoice discount line is offer-agnostic; only name the
-                        campaign when this account's offer actually is early bird. */}
-                    <span className="min-w-0 truncate">
-                      {t(
-                        overview.offerKey === 'early_bird_yearly_6000_forever'
-                          ? 'billing.upcomingDiscountEarlyBird'
-                          : 'billing.upcomingDiscount'
-                      )}
-                    </span>
-                    <span className="shrink-0 tabular-nums">
-                      {formatMoney(upcomingInvoice.discount.amount, upcomingInvoice.currency)}
-                    </span>
-                  </li>
-                ) : null}
-                {upcomingInvoice.adjustment ? (
-                  <li className="flex items-baseline justify-between gap-4 text-xs text-muted-foreground">
-                    <span className="min-w-0 truncate">{t('billing.upcomingAdjustment')}</span>
-                    <span className="shrink-0 tabular-nums">
-                      {formatMoney(upcomingInvoice.adjustment.amount, upcomingInvoice.currency)}
-                    </span>
-                  </li>
-                ) : null}
-                {upcomingInvoice.creditApplied ? (
-                  <li className="flex items-baseline justify-between gap-4 text-xs text-muted-foreground">
-                    <span className="min-w-0 truncate">{t('billing.upcomingCreditApplied')}</span>
-                    <span className="shrink-0 tabular-nums">
-                      {formatMoney(upcomingInvoice.creditApplied.amount, upcomingInvoice.currency)}
-                    </span>
-                  </li>
-                ) : null}
-              </ul>
-            ) : null}
           </div>
-        </Card>
+          {breakdown.length > 0 ? (
+            <ul {...stylex.props(styles.block, styles.breakdown)}>
+              {breakdown.map((line) => (
+                <li key={line.key} {...stylex.props(styles.breakdownLine)}>
+                  <span {...stylex.props(styles.truncate)}>{line.label}</span>
+                  <span {...stylex.props(styles.tabular)}>
+                    {formatMoney(line.amount, upcomingInvoice.currency)}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </CompactSection>
       ) : null}
 
       {/* Billing history */}
       {canManage && overview.billingAccountId ? (
-        <Card className="overflow-hidden">
-          <div className="border-b border-border/70 dark:bg-muted/30 px-5 py-3">
-            <p className="text-sm font-normal text-foreground">{t('billing.historyTitle')}</p>
-          </div>
-          <div className="px-5 py-4">
-            {invoicesError ? (
-              <div className="flex flex-wrap items-center gap-3">
-                <p className="text-sm text-muted-foreground">{t('billing.historyError')}</p>
-                <Button size="sm" variant="outline" onClick={onRetryInvoices}>
-                  {t('billing.historyRetry')}
-                </Button>
-              </div>
-            ) : invoices === undefined ? (
-              <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                <Spinner className="h-4 w-4" />
-                {t('billing.historyLoading')}
-              </div>
-            ) : invoices.length === 0 ? (
-              <p className="text-sm text-muted-foreground">{t('billing.historyEmpty')}</p>
-            ) : (
-              // Cap at roughly 6 rows; older invoices scroll.
-              <ul className="input-scrollbar max-h-80 divide-y divide-border/60 overflow-y-auto text-sm">
-                {invoices.map((invoice) => (
-                  <li
-                    key={invoice.id}
-                    className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 py-2.5 first:pt-0 last:pb-0"
-                  >
-                    <div className="min-w-0">
-                      <p className="font-normal text-foreground">
-                        {formatDate(invoice.periodStart ?? invoice.createdAt)}
-                      </p>
-                      <p className="text-xs text-muted-foreground">
-                        {invoice.kind === 'gift_redemption'
-                          ? invoice.giftDurationMonths
-                            ? t('billing.historyGiftPlusMonths', {
-                                count: invoice.giftDurationMonths,
-                              })
-                            : t('billing.historyGiftPlus')
-                          : invoice.interval === 'year'
-                            ? t('billing.historyPlanYearly')
-                            : invoice.interval === 'month'
-                              ? t('billing.historyPlanMonthly')
-                              : t('billing.plan.plus')}
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <span className="font-normal tabular-nums text-foreground">
-                        {formatMoney(invoice.amountPaid, invoice.currency)}
-                      </span>
-                      <Badge
-                        variant={invoice.status === 'paid' ? 'secondary' : 'outline'}
-                        className="capitalize font-normal"
+        <CompactSection title={t('billing.historyTitle')}>
+          {invoicesError ? (
+            <div {...stylex.props(styles.block, styles.inlineRow)}>
+              <p {...stylex.props(styles.helperFlush)}>{t('billing.historyError')}</p>
+              <Button variant="secondary" size="small" onClick={onRetryInvoices}>
+                {t('billing.historyRetry')}
+              </Button>
+            </div>
+          ) : invoices === undefined ? (
+            <div {...stylex.props(styles.block, styles.inlineRow)}>
+              <Spinner size="small" />
+              <p {...stylex.props(styles.helperFlush)}>{t('billing.historyLoading')}</p>
+            </div>
+          ) : invoices.length === 0 ? (
+            <p {...stylex.props(surface.cardNote)}>{t('billing.historyEmpty')}</p>
+          ) : (
+            // Cap at roughly 6 rows; older invoices scroll.
+            <ul {...withClassName(stylex.props(styles.history), 'input-scrollbar')}>
+              {invoices.map((invoice, index) => (
+                <li
+                  key={invoice.id}
+                  {...stylex.props(styles.block, styles.invoice, index > 0 && surface.lineRuled)}
+                >
+                  <div {...stylex.props(styles.invoiceText)}>
+                    <p {...stylex.props(surface.rowLabel)}>
+                      {formatDate(invoice.periodStart ?? invoice.createdAt)}
+                    </p>
+                    <p {...stylex.props(surface.rowHelper)}>
+                      {invoice.kind === 'gift_redemption'
+                        ? invoice.giftDurationMonths
+                          ? t('billing.historyGiftPlusMonths', {
+                              count: invoice.giftDurationMonths,
+                            })
+                          : t('billing.historyGiftPlus')
+                        : invoice.interval === 'year'
+                          ? t('billing.historyPlanYearly')
+                          : invoice.interval === 'month'
+                            ? t('billing.historyPlanMonthly')
+                            : t('billing.plan.plus')}
+                    </p>
+                  </div>
+                  <div {...stylex.props(styles.inlineRow)}>
+                    <span {...stylex.props(styles.tabular)}>
+                      {formatMoney(invoice.amountPaid, invoice.currency)}
+                    </span>
+                    <Badge>
+                      {invoice.status.charAt(0).toUpperCase() + invoice.status.slice(1)}
+                    </Badge>
+                    {invoice.hostedInvoiceUrl ? (
+                      <a
+                        href={invoice.hostedInvoiceUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        {...stylex.props(styles.link)}
                       >
-                        {invoice.status}
-                      </Badge>
-                      {invoice.hostedInvoiceUrl ? (
-                        <a
-                          href={invoice.hostedInvoiceUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-xs font-normal text-primary hover:underline"
-                        >
-                          {t('billing.historyView')}
-                        </a>
-                      ) : null}
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-        </Card>
+                        {t('billing.historyView')}
+                      </a>
+                    ) : null}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </CompactSection>
       ) : null}
 
       {canManage &&
       overview.billingAccountId &&
       ['stripe', 'stripe_gift'].includes(overview.entitlementSource) &&
       onPaymentMethod ? (
-        <Card className="flex flex-wrap items-center justify-between gap-3 p-5">
-          <div>
-            <p className="text-sm font-normal">{t('billing.paymentMethod')}</p>
-            <p className="mt-1 text-xs text-muted-foreground">
-              {t('billing.paymentMethodDescription')}
-            </p>
-          </div>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={onPaymentMethod}
-            disabled={
-              pendingAction !== null ||
-              cancelPending ||
-              switchIntervalPending ||
-              redeemPending ||
-              checkoutInProgress
-            }
+        <CompactSection>
+          <CompactRow
+            label={t('billing.paymentMethod')}
+            helper={t('billing.paymentMethodDescription')}
           >
-            {pendingAction === 'portal' ? <Spinner className="mr-1.5 h-3 w-3" /> : null}
-            {t(
-              pendingAction === 'portal'
-                ? 'billing.paymentMethodOpening'
-                : 'billing.changePaymentMethod'
-            )}
-          </Button>
-        </Card>
+            <Button
+              variant="secondary"
+              size="small"
+              onClick={onPaymentMethod}
+              disabled={
+                pendingAction !== null ||
+                cancelPending ||
+                switchIntervalPending ||
+                redeemPending ||
+                checkoutInProgress
+              }
+            >
+              {pendingAction === 'portal' ? <Spinner size="small" /> : null}
+              {t(
+                pendingAction === 'portal'
+                  ? 'billing.paymentMethodOpening'
+                  : 'billing.changePaymentMethod'
+              )}
+            </Button>
+          </CompactRow>
+        </CompactSection>
       ) : null}
 
       {/* Cancel / resume subscription: deliberately low-emphasis, tucked at the
@@ -827,15 +987,15 @@ export function BillingSettingsView({
       ((overview.entitlementSource === 'stripe' &&
         (!overview.scheduleManaged || overview.autoRenewAfterGift || overview.cancelAtPeriodEnd)) ||
         (isPromotional && (overview.autoRenewAfterGift || overview.canResumeAfterGift))) ? (
-        <div className="flex justify-end pt-1">
+        <div {...stylex.props(styles.trailing)}>
           {overview.cancelAtPeriodEnd ? (
             <button
               type="button"
               disabled={cancelPending}
               onClick={onResumeSubscription}
-              className="inline-flex items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground disabled:opacity-60"
+              {...stylex.props(styles.quietAction)}
             >
-              {cancelPending ? <Spinner className="h-3 w-3" /> : null}
+              {cancelPending ? <Spinner size="small" /> : null}
               {t('billing.resumeSubscription')}
             </button>
           ) : (
@@ -843,9 +1003,9 @@ export function BillingSettingsView({
               type="button"
               disabled={cancelPending}
               onClick={onCancelSubscription}
-              className="inline-flex items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-destructive disabled:opacity-60"
+              {...stylex.props(styles.quietAction, styles.quietActionDanger)}
             >
-              {cancelPending ? <Spinner className="h-3 w-3" /> : null}
+              {cancelPending ? <Spinner size="small" /> : null}
               {t('billing.cancelSubscription')}
             </button>
           )}

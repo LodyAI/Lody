@@ -1,17 +1,10 @@
-import { type ReactNode, useState } from 'react';
+import { type ReactElement, type ReactNode, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Copy, Folder } from 'lucide-react';
 
 import { WorktreeIcon } from '@/components/icons/worktree-icon';
-import { cn } from '@/lib/utils';
-import { Popover, PopoverContent, PopoverTrigger } from '@/ui/popover';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/ui/tooltip';
-import {
-  menuItemClassName,
-  menuSeparatorClassName,
-  menuSurfaceClassName,
-  menuSurfaceStyle,
-} from '@/ui/menu-styles';
+import { Menu } from '@/ui/menu';
+import { Tooltip } from '@lody/ui/tooltip';
 
 export type SessionForkDestination = 'shared' | 'new-worktree';
 
@@ -75,17 +68,17 @@ export function SessionForkOptionTooltip({
 }: {
   description: string;
   side?: 'top' | 'bottom' | 'left' | 'right';
-  children: ReactNode;
+  children: ReactElement;
 }) {
   return (
-    <TooltipProvider>
-      <Tooltip delayDuration={400}>
-        <TooltipTrigger asChild>{children}</TooltipTrigger>
-        <TooltipContent side={side} sideOffset={8} className="max-w-64 text-xs leading-snug">
+    <Tooltip.Provider>
+      <Tooltip.Root>
+        <Tooltip.Trigger delay={400} render={children} />
+        <Tooltip.Content side={side} sideOffset={8} className="max-w-64 text-xs leading-snug">
           {description}
-        </TooltipContent>
-      </Tooltip>
-    </TooltipProvider>
+        </Tooltip.Content>
+      </Tooltip.Root>
+    </Tooltip.Provider>
   );
 }
 
@@ -105,25 +98,16 @@ function DestinationRow({
   onSelect: () => void;
 }) {
   const row = (
-    <button
-      type="button"
-      role="menuitem"
+    <Menu.Item
+      icon={icon}
       disabled={disabled}
-      className={cn(
-        menuItemClassName,
-        // Popover auto-focuses the first button on open. The shared menu class
-        // paints `focus:bg-hover`, which made the first row look selected until
-        // the pointer moved. Highlight only on hover or keyboard focus.
-        'w-full focus:bg-transparent focus:text-inherit',
-        'hover:bg-hover hover:text-hover-foreground',
-        'focus-visible:bg-hover focus-visible:text-hover-foreground'
-      )}
+      endContent={
+        status ? <span className="text-xs text-muted-foreground">{status}</span> : undefined
+      }
       onClick={onSelect}
     >
-      <span className="flex h-4 shrink-0 items-center text-muted-foreground">{icon}</span>
-      <span className="min-w-0 flex-1 truncate text-left">{label}</span>
-      {status ? <span className="shrink-0 text-xs text-muted-foreground">{status}</span> : null}
-    </button>
+      {label}
+    </Menu.Item>
   );
   return disabled ? (
     row
@@ -146,7 +130,7 @@ export function SessionForkDestinationList({
   const { t } = useTranslation();
   const options = getSessionForkDestinationOptions(t, worktreeAvailability);
   return (
-    <div className="flex flex-col">
+    <>
       {nativeForkAvailable &&
         options.map((option) => (
           <DestinationRow
@@ -167,7 +151,7 @@ export function SessionForkDestinationList({
         ))}
       {onCopyContext && (
         <>
-          {nativeForkAvailable && <div className={cn(menuSeparatorClassName, 'my-1')} />}
+          {nativeForkAvailable && <Menu.Separator />}
           <DestinationRow
             icon={<Copy className="h-3.5 w-3.5" />}
             label={t('sessions.copyContextMarkdown', 'Copy context as Markdown')}
@@ -180,11 +164,11 @@ export function SessionForkDestinationList({
           />
         </>
       )}
-    </div>
+    </>
   );
 }
 
-export function SessionForkDestinationPopover({
+export function SessionForkDestinationMenu({
   children,
   open,
   onOpenChange,
@@ -197,7 +181,7 @@ export function SessionForkDestinationPopover({
   side = 'top',
   align = 'start',
 }: {
-  children: ReactNode;
+  children: ReactElement;
   onCopyContext?: () => void;
   nativeForkAvailable?: boolean;
   open?: boolean;
@@ -222,48 +206,21 @@ export function SessionForkDestinationPopover({
   };
 
   return (
-    <Popover open={resolvedOpen} onOpenChange={handleOpenChange}>
-      <TooltipProvider>
-        <Tooltip delayDuration={500} open={resolvedOpen ? false : undefined}>
-          <TooltipTrigger asChild>
-            <PopoverTrigger asChild disabled={disabled}>
-              {children}
-            </PopoverTrigger>
-          </TooltipTrigger>
-          <TooltipContent>{tooltipLabel}</TooltipContent>
-        </Tooltip>
-      </TooltipProvider>
-      <PopoverContent
-        align={align}
-        side={side}
-        sideOffset={6}
-        role="menu"
-        aria-label={t('sessions.forkDestination.title', 'Fork conversation')}
-        // Same surface as the dropdown menus: the 0.5px edge comes from
-        // `menuSurfaceStyle`, so drop Popover's own 1px border. Width follows
-        // the rows; 4px padding matches the separator's 4px margins, so every
-        // row sits the same distance from the edge or the divider next to it.
-        className={cn(menuSurfaceClassName, 'w-max min-w-0 border-0 p-1')}
-        style={menuSurfaceStyle}
-        onOpenAutoFocus={(event) => event.preventDefault()}
-      >
+    <Menu.Root open={resolvedOpen} onOpenChange={handleOpenChange}>
+      <Tooltip.Provider>
+        <Tooltip.Root open={resolvedOpen ? false : undefined}>
+          <Tooltip.Trigger delay={500} render={<Menu.Trigger render={children} disabled={disabled} />} />
+          <Tooltip.Content>{tooltipLabel}</Tooltip.Content>
+        </Tooltip.Root>
+      </Tooltip.Provider>
+      <Menu.Content align={align} side={side} sideOffset={6}>
         <SessionForkDestinationList
           worktreeAvailability={worktreeAvailability}
           nativeForkAvailable={nativeForkAvailable}
-          onCopyContext={
-            onCopyContext
-              ? () => {
-                  handleOpenChange(false);
-                  onCopyContext();
-                }
-              : undefined
-          }
-          onSelect={(destination) => {
-            handleOpenChange(false);
-            onSelect(destination);
-          }}
+          onCopyContext={onCopyContext}
+          onSelect={onSelect}
         />
-      </PopoverContent>
-    </Popover>
+      </Menu.Content>
+    </Menu.Root>
   );
 }

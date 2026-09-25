@@ -13,9 +13,9 @@ rolls back — is in the root [AGENTS.md](../../../../../AGENTS.md).
 - Desktop overlay close is `absolute` on the RIGHT pane only, equal `top`/`right`
   inset, no close row. Right-pane `padding-right` keeps chrome off that column;
   apply it inside the scroll area so the scrollbar stays flush with the pane edge.
-- Light settings surfaces are white, not gray-on-gray: `data-settings-surface`
-  maps `--card` to `--popover`; list rows use `SETTINGS_ROW_CARD_CLASS`; header
-  bands fill only in dark. No new gray card fills.
+- Settings style in StyleX from `surface.ts` / `compact-layout.tsx`: a card has no
+  border, its title sits above it, rows split by a line; a list is ONE card of ruled
+  rows, never stacked cards; a form is one surface. No new gray fills.
 
 - `share-management-setting.tsx` lists published static copies via the scoped cloud
   query. Ordinary members see their publications; admins see the workspace inventory.
@@ -27,9 +27,9 @@ rolls back — is in the root [AGENTS.md](../../../../../AGENTS.md).
   settings overlay. Rationale:
   [share inventory jump](../../../../../.agents/notes/implemented/feature/2026-09-15-share-inventory-session-jump.md).
 
-- Desktop Settings > Projects is a two-pane catalog: left GitHub/machines,
-  right the folders on the selected source. Clicking a folder opens a nested
-  modal of stacked `CompactSection`s — never inline the editor beside the list.
+- Desktop Settings > Projects stacks every source (each machine, then GitHub
+  owners) as a `CompactSection` of ruled project rows. Clicking a project opens
+  a nested project window (header, page tabs) — never inline the editor beside the list.
   Mobile keeps the previous stacked list. Local-project deletion reuses
   `useRemoveLocalProject` / `RemoveLocalProjectDialog` (nested overlay like MCP);
   do not add a second confirm. Pending removal stays listed until the owning

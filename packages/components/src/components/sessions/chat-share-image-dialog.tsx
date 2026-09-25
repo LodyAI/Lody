@@ -2,16 +2,26 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { usePostHog } from '@posthog/react';
 import { Check, Copy, Download, Slash, X } from 'lucide-react';
-import { Spinner } from '@/ui/spinner';
+import * as stylex from '@stylexjs/stylex';
+import { Spinner } from '@lody/ui/spinner';
 import { estimateTokenCount, type SessionMeta, type ConversationMessage } from '@lody/shared';
+import { colors, shadow, sheen } from '@lody/ui/tokens/colors.stylex';
+import {
+  control,
+  corner,
+  duration,
+  ease,
+  radius,
+  space,
+  text,
+} from '@lody/ui/tokens/scales.stylex';
 import { formatCompactNumber } from '@/lib/format-compact-number';
 import { toIntlLocaleOrEn } from '@/lib/intl-locale';
-import { cn } from '@/lib/utils';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useResolvedTheme } from '@/theme-provider';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/ui/dialog';
+import { Dialog } from '@/ui/dialog';
 import { Drawer, DrawerClose, DrawerContent, DrawerDescription, DrawerTitle } from '@/ui/drawer';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { Slider } from '@/ui/slider';
 import { copyShareImage, exportShareImage } from '@/lib/share-image-export';
 import { capturePostHogEvent } from '@/lib/posthog-analytics';
@@ -27,6 +37,264 @@ import {
   type ChatShareCardDestination,
 } from '@/components/share-card/chat-share-card';
 import { AgentIcon, getAgentDisplayName } from '@/components/icons/agent-icon';
+
+const RING = `0 0 0 2px ${colors.accent}`;
+const HOVER_RING = `0 0 0 2px color-mix(in oklab, transparent, ${colors.accent} 40%)`;
+const REGION = `color-mix(in oklab, transparent, ${colors.label} 3%)`;
+/** A segment's corner: the track's, less the inset it keeps from it. */
+const SEGMENT_RADIUS = `calc(${radius.medium} - 2px)`;
+
+const styles = stylex.create({
+  // The preview scrolls in its own column: a card taller than the surface is
+  // the ordinary case, so the column's height comes from the flex parent.
+  fitScroller: {
+    flexGrow: 1,
+    flexShrink: 1,
+    minHeight: 0,
+    width: '100%',
+    overflowX: 'hidden',
+    overflowY: 'auto',
+  },
+  fitSpacer: { position: 'relative', marginInline: 'auto' },
+  fitContent: {
+    position: 'absolute',
+    insetInlineStart: 0,
+    insetBlockStart: 0,
+    width: 'fit-content',
+    transformOrigin: 'top left',
+  },
+  exportFrame: { width: 'fit-content' },
+  agentIcon: { width: '20px', height: '20px' },
+
+  // A two-way choice is a strip, as `@lody/ui`'s Tabs draw one: a flat tray with
+  // the chosen one standing on it.
+  track: {
+    display: 'inline-grid',
+    gridTemplateColumns: '1fr 1fr',
+    flexShrink: 0,
+    boxSizing: 'border-box',
+    height: control.medium,
+    padding: '2px',
+    backgroundColor: colors.trayBackground,
+    borderRadius: radius.medium,
+    cornerShape: corner.shape,
+  },
+  segment: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    minWidth: '56px',
+    margin: 0,
+    paddingBlock: 0,
+    paddingInline: space[3],
+    borderWidth: 0,
+    borderStyle: 'none',
+    borderRadius: SEGMENT_RADIUS,
+    cornerShape: corner.round,
+    backgroundColor: 'transparent',
+    color: { default: colors.secondaryLabel, ':hover': colors.label },
+    fontFamily: 'inherit',
+    fontSize: text.subheadlineSize,
+    fontWeight: 500,
+    letterSpacing: text.controlTracking,
+    whiteSpace: 'nowrap',
+    cursor: { default: 'pointer', ':disabled': 'default' },
+    opacity: { default: 1, ':disabled': 0.45 },
+    outlineStyle: 'none',
+    boxShadow: { default: 'none', ':focus-visible': RING },
+    transitionProperty: 'color, background-color, box-shadow, opacity',
+    transitionDuration: duration.fast,
+    transitionTimingFunction: ease.standard,
+  },
+  segmentWide: { minWidth: '64px' },
+  segmentSelected: {
+    backgroundColor: colors.trayRaised,
+    backgroundImage: sheen.raised,
+    color: colors.label,
+    boxShadow: { default: shadow.raised, ':focus-visible': `${RING}, ${shadow.raised}` },
+  },
+
+  labelled: { display: 'flex', alignItems: 'center', gap: space[2] },
+  controlLabel: {
+    flexShrink: 0,
+    fontSize: text.footnoteSize,
+    lineHeight: text.footnoteLeading,
+    color: colors.secondaryLabel,
+    transitionProperty: 'opacity',
+    transitionDuration: duration.fast,
+    transitionTimingFunction: ease.standard,
+  },
+  dimmed: { opacity: 0.45 },
+
+  swatches: { display: 'flex', alignItems: 'center', gap: space[1.5] },
+  // A swatch is a pressable that paints its ground: raised, no edge of its own,
+  // and the accent ring says which one is chosen.
+  swatch: {
+    position: 'relative',
+    flexShrink: 0,
+    boxSizing: 'border-box',
+    width: control.small,
+    height: control.small,
+    margin: 0,
+    padding: 0,
+    overflow: 'hidden',
+    borderWidth: 0,
+    borderStyle: 'none',
+    borderRadius: radius.small,
+    cornerShape: corner.round,
+    backgroundColor: colors.raisedBackground,
+    cursor: { default: 'pointer', ':disabled': 'default' },
+    opacity: { default: 1, ':disabled': 0.45 },
+    outlineStyle: 'none',
+    boxShadow: {
+      default: shadow.raised,
+      ':hover': `${shadow.raised}, ${HOVER_RING}`,
+      ':focus-visible': `${RING}, ${shadow.raised}`,
+    },
+    transitionProperty: 'box-shadow, opacity',
+    transitionDuration: duration.fast,
+    transitionTimingFunction: ease.standard,
+  },
+  swatchSelected: {
+    boxShadow: {
+      default: `${RING}, ${shadow.raised}`,
+      ':hover': `${RING}, ${shadow.raised}`,
+      ':focus-visible': `${RING}, ${shadow.raised}`,
+    },
+  },
+  swatchNone: {
+    position: 'absolute',
+    inset: 0,
+    width: '14px',
+    height: '14px',
+    margin: 'auto',
+    color: colors.tertiaryLabel,
+  },
+  swatchCheck: {
+    position: 'absolute',
+    inset: 0,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'hsl(0 0% 0% / 0.15)',
+    color: 'white',
+  },
+  swatchCheckGlyph: {
+    width: '14px',
+    height: '14px',
+    filter: 'drop-shadow(0 1px 1px hsl(0 0% 0% / 0.35))',
+  },
+
+  mat: {
+    display: 'flex',
+    flexGrow: 1,
+    flexShrink: 1,
+    alignItems: 'center',
+    gap: space[3],
+    minWidth: '208px',
+  },
+  slider: { flexGrow: 1, flexShrink: 1, minWidth: '96px' },
+  matValue: {
+    flexShrink: 0,
+    width: '28px',
+    textAlign: 'end',
+    fontFamily: 'var(--font-mono)',
+    fontSize: text.footnoteSize,
+    fontVariantNumeric: 'tabular-nums',
+    color: colors.secondaryLabel,
+    transitionProperty: 'opacity',
+    transitionDuration: duration.fast,
+    transitionTimingFunction: ease.standard,
+  },
+
+  empty: {
+    display: 'flex',
+    flexGrow: 1,
+    minHeight: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    fontSize: text.bodySize,
+    color: colors.secondaryLabel,
+  },
+  status: {
+    margin: 0,
+    marginInlineEnd: 'auto',
+    alignSelf: 'center',
+    fontSize: text.subheadlineSize,
+    lineHeight: text.subheadlineLeading,
+  },
+  statusError: { color: colors.destructive },
+  statusInfo: { color: colors.secondaryLabel },
+  glyph16: { display: 'block', flexShrink: 0, width: '16px', height: '16px' },
+  glyphFill: { display: 'block', width: '100%', height: '100%' },
+
+  // The preview is a block inside the panel: the region fill, no edge, on the
+  // panel's own padding rather than a band bled to its edges.
+  preview: {
+    display: 'flex',
+    flexDirection: 'column',
+    flexGrow: 1,
+    flexShrink: 1,
+    minHeight: 0,
+    padding: space[6],
+    backgroundColor: REGION,
+    borderRadius: radius.medium,
+    cornerShape: corner.shape,
+  },
+  controls: { display: 'flex', flexDirection: 'column', gap: space[3], flexShrink: 0 },
+  controlRow: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    columnGap: '20px',
+    rowGap: space[3],
+  },
+  footer: { flexShrink: 0 },
+
+  // Drawer: the same preview, controls and actions, stacked for a thumb.
+  drawerBody: {
+    display: 'flex',
+    flexDirection: 'column',
+    flexGrow: 1,
+    gap: space[3],
+    minHeight: 0,
+    paddingInline: space[4],
+    paddingBottom: 'max(1rem, env(safe-area-inset-bottom))',
+  },
+  drawerHeader: {
+    position: 'relative',
+    display: 'flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: control.large,
+    paddingTop: space[2],
+  },
+  drawerTitle: { fontSize: text.headlineSize, lineHeight: text.headlineLeading },
+  drawerClose: { position: 'absolute', insetInlineEnd: '-4px', insetBlockStart: space[1] },
+  drawerPreview: { padding: space[4] },
+  drawerControls: { display: 'flex', flexDirection: 'column', gap: space[3], flexShrink: 0 },
+  drawerRow: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    justifyContent: 'center',
+    columnGap: space[4],
+    rowGap: space[3],
+  },
+  drawerActions: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: space[2] },
+  srOnly: {
+    position: 'absolute',
+    width: '1px',
+    height: '1px',
+    padding: 0,
+    margin: '-1px',
+    overflow: 'hidden',
+    clip: 'rect(0, 0, 0, 0)',
+    whiteSpace: 'nowrap',
+    borderWidth: 0,
+  },
+});
 
 /** Opening ground: the brand's own, so an untouched export is the signature card. */
 const DEFAULT_BACKDROP: ChatShareCardBackdrop = 'lody';
@@ -90,9 +358,9 @@ function FitPreview({ children }: { children: ReactNode }) {
   }, []);
 
   return (
-    <div ref={containerRef} className="min-h-0 w-full flex-1 overflow-y-auto overflow-x-hidden">
+    <div ref={containerRef} {...stylex.props(styles.fitScroller)}>
       <div
-        className="relative mx-auto"
+        className={stylex.props(styles.fitSpacer).className}
         style={
           scaledSize
             ? { width: scaledSize.width, height: scaledSize.height }
@@ -101,7 +369,7 @@ function FitPreview({ children }: { children: ReactNode }) {
       >
         <div
           ref={contentRef}
-          className="absolute left-0 top-0 w-fit origin-top-left"
+          className={stylex.props(styles.fitContent).className}
           style={{ transform: `scale(${scale})` }}
         >
           {children}
@@ -130,7 +398,7 @@ function PaletteToggle({
     <div
       role="radiogroup"
       aria-label={t('sessions.shareImage.theme', 'Theme')}
-      className="inline-grid h-9 grid-cols-2 rounded-full border border-border/70 bg-muted/60 p-0.5"
+      {...stylex.props(styles.track)}
     >
       {options.map((option) => {
         const selected = value === option.value;
@@ -142,13 +410,10 @@ function PaletteToggle({
             aria-checked={selected}
             disabled={disabled}
             onClick={() => onChange(option.value)}
-            className={cn(
-              'flex min-w-16 items-center justify-center rounded-full px-3 text-xs font-medium transition-colors',
-              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60',
-              'disabled:pointer-events-none disabled:opacity-60',
-              selected
-                ? 'bg-background text-foreground shadow-sm'
-                : 'text-muted-foreground hover:text-foreground'
+            {...stylex.props(
+              styles.segment,
+              styles.segmentWide,
+              selected && styles.segmentSelected
             )}
           >
             {option.label}
@@ -181,20 +446,17 @@ function DestinationToggle({
     { value: 'post' as const, label: t('sessions.shareImage.destinationPost', 'Post') },
   ];
   return (
-    <div className="flex items-center gap-2">
+    <div {...stylex.props(styles.labelled)}>
       <span
         id="chat-share-destination-label"
-        className={cn(
-          'shrink-0 text-xs text-muted-foreground transition-opacity',
-          disabled && 'opacity-60'
-        )}
+        {...stylex.props(styles.controlLabel, disabled && styles.dimmed)}
       >
         {label}
       </span>
       <div
         role="radiogroup"
         aria-labelledby="chat-share-destination-label"
-        className="inline-grid h-9 grid-cols-2 rounded-full border border-border/70 bg-muted/60 p-0.5"
+        {...stylex.props(styles.track)}
       >
         {options.map((option) => {
           const selected = value === option.value;
@@ -206,14 +468,7 @@ function DestinationToggle({
               aria-checked={selected}
               disabled={disabled}
               onClick={() => onChange(option.value)}
-              className={cn(
-                'flex min-w-14 items-center justify-center rounded-full px-3 text-xs font-medium transition-colors',
-                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60',
-                'disabled:pointer-events-none disabled:opacity-60',
-                selected
-                  ? 'bg-background text-foreground shadow-sm'
-                  : 'text-muted-foreground hover:text-foreground'
-              )}
+              {...stylex.props(styles.segment, selected && styles.segmentSelected)}
             >
               {option.label}
             </button>
@@ -244,7 +499,7 @@ function BackdropPicker({
     <div
       role="radiogroup"
       aria-label={t('sessions.shareImage.backdrop', 'Background')}
-      className="flex items-center gap-1.5"
+      {...stylex.props(styles.swatches)}
     >
       {CHAT_SHARE_BACKDROPS.map((backdrop) => {
         const selected = value === backdrop;
@@ -262,25 +517,15 @@ function BackdropPicker({
             title={label}
             disabled={disabled}
             onClick={() => onChange(backdrop)}
-            className={cn(
-              'relative size-7 shrink-0 overflow-hidden rounded-md border transition-shadow',
-              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60',
-              'disabled:pointer-events-none disabled:opacity-60',
-              selected
-                ? 'border-primary ring-2 ring-primary'
-                : 'border-border/70 hover:ring-2 hover:ring-primary/40'
-            )}
+            className={stylex.props(styles.swatch, selected && styles.swatchSelected).className}
             style={backdrop === 'none' ? undefined : CHAT_SHARE_BACKDROP_STYLES[backdrop]}
           >
             {backdrop === 'none' ? (
-              <Slash
-                className="absolute inset-0 m-auto size-3.5 text-muted-foreground"
-                aria-hidden="true"
-              />
+              <Slash {...stylex.props(styles.swatchNone)} aria-hidden="true" />
             ) : null}
             {selected ? (
-              <span className="absolute inset-0 flex items-center justify-center bg-black/15 text-white">
-                <Check className="size-3.5 drop-shadow" aria-hidden="true" />
+              <span {...stylex.props(styles.swatchCheck)}>
+                <Check {...stylex.props(styles.swatchCheckGlyph)} aria-hidden="true" />
               </span>
             ) : null}
           </button>
@@ -318,10 +563,14 @@ function MatSlider({
   const { t } = useTranslation();
   const label = t('sessions.shareImage.mat', 'Padding');
   return (
-    <div className={cn('flex min-w-52 flex-1 items-center gap-3', disabled && 'opacity-60')}>
-      <span id="chat-share-mat-label" className="shrink-0 text-xs text-muted-foreground">
+    <div {...stylex.props(styles.mat)}>
+      <span
+        id="chat-share-mat-label"
+        {...stylex.props(styles.controlLabel, disabled && styles.dimmed)}
+      >
         {label}
       </span>
+      {/* The slider dims itself when disabled; its label and readout dim beside it. */}
       <Slider
         aria-labelledby="chat-share-mat-label"
         min={MIN_MAT}
@@ -330,11 +579,9 @@ function MatSlider({
         value={value}
         onValueChange={onChange}
         disabled={disabled}
-        className="min-w-24 flex-1"
+        className={stylex.props(styles.slider).className}
       />
-      <span className="w-7 shrink-0 text-right font-mono text-xs tabular-nums text-muted-foreground">
-        {value}
-      </span>
+      <span {...stylex.props(styles.matValue, disabled && styles.dimmed)}>{value}</span>
     </div>
   );
 }
@@ -513,7 +760,11 @@ export function ChatShareImageDialog({
       date: formatShareImageDate(session?.createdAt),
       icon:
         session?.cliType && session.agentType ? (
-          <AgentIcon cliType={session.cliType} agentType={session.agentType} className="size-5" />
+          <AgentIcon
+            cliType={session.cliType}
+            agentType={session.agentType}
+            className={stylex.props(styles.agentIcon).className}
+          />
         ) : undefined,
     };
   }, [session, agentName, modelName, selectedTokenCount, intlLocale, t]);
@@ -523,7 +774,7 @@ export function ChatShareImageDialog({
 
   const preview = hasMessages ? (
     <FitPreview>
-      <div ref={exportRef} className="w-fit">
+      <div ref={exportRef} {...stylex.props(styles.exportFrame)}>
         <ChatShareCard
           messages={messages}
           title={session?.title?.trim() || undefined}
@@ -536,44 +787,42 @@ export function ChatShareImageDialog({
       </div>
     </FitPreview>
   ) : (
-    <div className="flex min-h-0 flex-1 items-center justify-center text-sm text-muted-foreground">
+    <div {...stylex.props(styles.empty)}>
       {t('sessions.shareImage.empty', 'No conversation to share')}
     </div>
   );
 
   const status = exportError ? (
-    <p role="alert" className="text-sm text-destructive">
+    <p role="alert" {...stylex.props(styles.status, styles.statusError)}>
       {t(
         'sessions.shareImage.exportFailed',
         'Could not complete the image action. Please try again.'
       )}
     </p>
   ) : copied ? (
-    <p role="status" className="text-sm text-muted-foreground">
+    <p role="status" {...stylex.props(styles.status, styles.statusInfo)}>
       {t('sessions.shareImage.copied', 'Image copied to clipboard')}
     </p>
   ) : null;
 
-  // `sm` is also `text-xs`, which every other control in this footer already uses:
-  // at the default size the two buttons are the only `text-sm` thing in it. The
-  // drawer keeps the default size instead — there they are the primary touch
-  // targets, and `h-9` is already under the 44pt guidance without shrinking it.
-  const actionSize = isMobile ? 'default' : 'sm';
-  const iconSize = isMobile ? 'size-4' : 'size-3.5';
+  // The dialog's actions take the small step, the one every other control around
+  // them is on. The drawer keeps the default step: there they are the primary
+  // touch targets.
+  const actionSize = isMobile ? 'medium' : 'small';
 
   const copyButton = (
     <Button
-      variant="outline"
+      variant="secondary"
       size={actionSize}
       onClick={() => void handleCopy()}
       disabled={exporting || !hasMessages}
     >
       {operation === 'copy' ? (
-        <Spinner className={iconSize} />
+        <Spinner size="small" label={null} />
       ) : copied ? (
-        <Check className={iconSize} />
+        <Check {...stylex.props(styles.glyph16)} />
       ) : (
-        <Copy className={iconSize} />
+        <Copy {...stylex.props(styles.glyph16)} />
       )}
       {operation === 'copy'
         ? t('sessions.shareImage.copying', 'Copying...')
@@ -583,14 +832,15 @@ export function ChatShareImageDialog({
 
   const exportButton = (
     <Button
+      variant="primary"
       size={actionSize}
       onClick={() => void handleExport()}
       disabled={exporting || !hasMessages}
     >
       {operation === 'export' ? (
-        <Spinner className={iconSize} />
+        <Spinner size="small" label={null} />
       ) : (
-        <Download className={iconSize} />
+        <Download {...stylex.props(styles.glyph16)} />
       )}
       {operation === 'export'
         ? t('sessions.shareImage.exporting', 'Exporting...')
@@ -623,29 +873,33 @@ export function ChatShareImageDialog({
   if (isMobile) {
     return (
       <Drawer open={open} onOpenChange={requestOpenChange}>
-        <DrawerContent className="h-[92dvh]! max-h-[92dvh]! rounded-t-2xl border-border/60">
-          <div className="flex h-full min-h-0 flex-col">
-            <header className="relative flex shrink-0 items-center px-4 pb-2 pt-2">
-              <DrawerTitle className="mx-auto text-[0.95rem] font-semibold tracking-tight">
+        {/* The sheet's height is a layout constraint over the primitive's own cap. */}
+        <DrawerContent style={{ height: '92dvh', maxHeight: '92dvh' }}>
+          <div {...stylex.props(styles.drawerBody)}>
+            <header {...stylex.props(styles.drawerHeader)}>
+              <DrawerTitle className={stylex.props(styles.drawerTitle).className}>
                 {dialogTitle}
               </DrawerTitle>
               <DrawerClose asChild>
-                <button
+                <Button
                   type="button"
+                  variant="ghost"
+                  size="large"
+                  icon
                   aria-label={t('common.close', 'Close')}
-                  className="absolute right-3 top-1.5 inline-flex size-9 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
+                  {...stylex.props(styles.drawerClose)}
                 >
-                  <X className="size-5" aria-hidden="true" strokeWidth={1.8} />
-                </button>
+                  <X {...stylex.props(styles.glyphFill)} aria-hidden="true" />
+                </Button>
               </DrawerClose>
             </header>
-            <DrawerDescription className="sr-only">
+            <DrawerDescription className={stylex.props(styles.srOnly).className}>
               {t('sessions.shareImage.dialogDescription', 'PNG image')}
             </DrawerDescription>
-            <div className="flex min-h-0 flex-1 flex-col bg-muted/40 px-4 py-4">{preview}</div>
-            <div className="shrink-0 space-y-3 border-t border-border/70 px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3">
+            <div {...stylex.props(styles.preview, styles.drawerPreview)}>{preview}</div>
+            <div {...stylex.props(styles.drawerControls)}>
               {status}
-              <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-3">
+              <div {...stylex.props(styles.drawerRow)}>
                 <DestinationToggle
                   value={destination}
                   onChange={chooseDestination}
@@ -657,10 +911,8 @@ export function ChatShareImageDialog({
                 onChange={setMat}
                 disabled={exporting || backdrop === 'none'}
               />
-              <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-3">
-                {surfaceControls}
-              </div>
-              <div className="grid grid-cols-2 gap-2 [&>button]:w-full">
+              <div {...stylex.props(styles.drawerRow)}>{surfaceControls}</div>
+              <div {...stylex.props(styles.drawerActions)}>
                 {copyButton}
                 {exportButton}
               </div>
@@ -672,36 +924,33 @@ export function ChatShareImageDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={requestOpenChange}>
-      <DialogContent className="flex max-h-[88vh] flex-col gap-0 overflow-hidden p-0 sm:max-w-[720px] sm:p-0">
-        <DialogHeader className="border-b border-border/70 px-5 py-3.5 pr-12 text-left">
-          <DialogTitle className="text-base">{dialogTitle}</DialogTitle>
-          <DialogDescription className="leading-5">
+    <Dialog.Root open={open} onOpenChange={requestOpenChange}>
+      {/* The preview is the card at a readable scale, so the panel is wider than a
+          dialog's column of prose. */}
+      <Dialog.Content style={{ width: '720px' }}>
+        <Dialog.Header>
+          <Dialog.Title>{dialogTitle}</Dialog.Title>
+          <Dialog.Description>
             {t('sessions.shareImage.dialogDescription', 'PNG image')}
-          </DialogDescription>
-        </DialogHeader>
+          </Dialog.Description>
+        </Dialog.Header>
 
-        <div className="flex min-h-0 flex-1 flex-col bg-muted/40 p-6">{preview}</div>
+        <div {...stylex.props(styles.preview)}>{preview}</div>
 
         {/* Controls above actions rather than one row: three fixed-width controls
             and two buttons do not share a line, and a status message sharing one
             would have to squeeze whatever is beside it. */}
-        <div className="flex shrink-0 flex-col border-t border-border/70">
-          <div className="flex flex-wrap items-center gap-x-5 gap-y-3 px-5 pt-3">
-            {shapeControls}
-          </div>
-          <div className="flex flex-wrap items-center gap-x-5 gap-y-3 px-5 pb-2.5 pt-3">
-            {surfaceControls}
-          </div>
-          <div className="flex items-center gap-3 px-5 pb-3">
-            {status}
-            <div className="ml-auto flex shrink-0 items-center gap-3">
-              {copyButton}
-              {exportButton}
-            </div>
-          </div>
+        <div {...stylex.props(styles.controls)}>
+          <div {...stylex.props(styles.controlRow)}>{shapeControls}</div>
+          <div {...stylex.props(styles.controlRow)}>{surfaceControls}</div>
         </div>
-      </DialogContent>
-    </Dialog>
+
+        <Dialog.Footer className={stylex.props(styles.footer).className}>
+          {status}
+          {copyButton}
+          {exportButton}
+        </Dialog.Footer>
+      </Dialog.Content>
+    </Dialog.Root>
   );
 }

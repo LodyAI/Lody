@@ -25,9 +25,10 @@ function isTextInputActive(): boolean {
 
 function isPopupOpen(): boolean {
   return (
-    document.querySelector('[data-radix-popper-content-wrapper]') !== null ||
     document.querySelector('[role="dialog"][data-state="open"]') !== null ||
-    document.querySelector('[data-radix-menu-content]') !== null
+    document.querySelector('[role="dialog"][data-open]') !== null ||
+    document.querySelector('[role="alertdialog"][data-open]') !== null ||
+    document.querySelector('[role="menu"]') !== null
   );
 }
 

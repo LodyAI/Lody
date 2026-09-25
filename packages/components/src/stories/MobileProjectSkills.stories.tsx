@@ -31,9 +31,7 @@ const LOADED_GROUPS: ProjectSkillResolvedGroup[] = [
         isSymlink: false,
         content: [
           '## When to use',
-          '',
           'Run this before opening a PR.',
-          '',
           '1. Diff the branch against `main`.',
           '2. Flag **correctness** issues first.',
         ].join('\n'),

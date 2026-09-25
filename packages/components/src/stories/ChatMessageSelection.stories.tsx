@@ -26,7 +26,7 @@ import {
   SessionConversationPageHeader,
 } from '@/components/sessions/session-conversation-page';
 import { ChatShareImageDialog } from '@/components/sessions/chat-share-image-dialog';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 
 const sessionId = 'share-selection-story' as SessionId;
 const session = {
@@ -128,7 +128,11 @@ function SelectionHarness({ long = false }: { long?: boolean }) {
         <SessionConversationPageHeader
           titleSlot={session.title}
           endSlot={
-            <Button variant="ghost" size="sm" onClick={() => selection.start(candidates, confirm)}>
+            <Button
+              variant="ghost"
+              size="small"
+              onClick={() => selection.start(candidates, confirm)}
+            >
               <ImageIcon className="size-4" />
               {t('sessions.shareImage.dialogTitle', 'Share as image')}
             </Button>

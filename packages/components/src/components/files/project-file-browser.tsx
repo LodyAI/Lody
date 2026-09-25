@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { FileText } from 'lucide-react';
-import { Spinner } from '@/ui/spinner';
+import { Spinner } from '@lody/ui/spinner';
 import { useTranslation } from 'react-i18next';
 import { FileTreeProviderView } from '@/components/sessions/components/file-tree-view';
 import type { FileWorkspaceProvider, FileWorkspaceSnapshot } from '@/lib/file-workspace-provider';

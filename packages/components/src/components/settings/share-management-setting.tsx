@@ -1,4 +1,5 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState, type ReactNode } from 'react';
+import * as stylex from '@stylexjs/stylex';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from '@tanstack/react-router';
@@ -15,24 +16,129 @@ import { useSessionShareLinkActions } from '@/hooks/use-session-share-management
 import { openExternalUrl } from '@/lib/native-browser';
 import { SessionShareDialog } from '@/components/sharing/session-share-dialog';
 import { UserAvatar } from '@/components/user-avatar';
-import {
-  AlertDialog,
-  AlertDialogContent,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogCancel,
-  AlertDialogAction,
-} from '@/ui/alert-dialog';
-import { Button } from '@/ui/button';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/ui/dialog';
-import { Popover, PopoverContent, PopoverTrigger } from '@/ui/popover';
-import { Skeleton } from '@/ui/skeleton';
-import { Switch } from '@/ui/switch';
-import { cn } from '@/lib/utils';
-import { SETTINGS_ROW_CARD_CLASS } from './compact-layout';
-import { settingContainerClass } from '.';
+import { AlertDialog } from '@/ui/dialog';
+import { Button } from '@lody/ui/button';
+import { Dialog } from '@/ui/dialog';
+import { Popover } from '@lody/ui/popover';
+import { Skeleton } from '@lody/ui/skeleton';
+import { Switch } from '@lody/ui/switch';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { radius, space } from '@lody/ui/tokens/scales.stylex';
+import { settingsCatalog as catalog, settingsSurface as surface } from './surface';
+
+const styles = stylex.create({
+  lead: { margin: 0, fontSize: '0.875em', color: colors.secondaryLabel },
+  notice: { margin: 0, fontSize: '0.875em', color: colors.label },
+  error: { margin: 0, fontSize: '0.875em', color: colors.destructive },
+  toolbar: { display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: space[2] },
+  toggleLabel: { fontSize: '0.75em', color: colors.secondaryLabel },
+  /**
+   * One share: the publisher's face, the title and when it was published. The
+   * row is the hit area of its title button, through the button's `::after`.
+   */
+  row: {
+    position: 'relative',
+    display: 'flex',
+    alignItems: 'flex-start',
+    gap: space[3],
+    paddingInline: space[4],
+    paddingBlock: '10px',
+  },
+  body: { flexGrow: 1, minWidth: 0 },
+  /** The title button: one focusable control per row, its hit area the whole row. */
+  open: {
+    display: 'block',
+    width: '100%',
+    margin: 0,
+    padding: 0,
+    borderWidth: 0,
+    backgroundColor: 'transparent',
+    color: 'inherit',
+    fontFamily: 'inherit',
+    fontSize: 'inherit',
+    textAlign: 'start',
+    cursor: 'pointer',
+    outline: 'none',
+    borderRadius: radius.mini,
+    boxShadow: { default: 'none', ':focus-visible': `0 0 0 2px ${colors.accent}` },
+    '::after': { content: '""', position: 'absolute', inset: 0 },
+  },
+  title: {
+    display: '-webkit-box',
+    WebkitBoxOrient: 'vertical',
+    WebkitLineClamp: 2,
+    overflow: 'hidden',
+    fontSize: '0.875em',
+    color: colors.label,
+  },
+  titleRevoked: { color: colors.secondaryLabel },
+  meta: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: space[1.5],
+    margin: 0,
+    marginTop: '2px',
+    fontSize: '0.75em',
+    color: colors.secondaryLabel,
+  },
+  /** Above the row's hit area, so the face opens its own popover. */
+  avatarTrigger: {
+    position: 'relative',
+    zIndex: 1,
+    display: 'block',
+    flexShrink: 0,
+    margin: 0,
+    padding: 0,
+    borderWidth: 0,
+    backgroundColor: 'transparent',
+    borderRadius: radius.full,
+    cursor: 'pointer',
+    outline: 'none',
+    opacity: { default: 1, ':hover': 0.85 },
+    boxShadow: { default: 'none', ':focus-visible': `0 0 0 2px ${colors.accent}` },
+  },
+  avatarStatic: { flexShrink: 0 },
+  profile: { display: 'flex', alignItems: 'center', gap: space[3], width: '232px' },
+  profileText: { minWidth: 0 },
+  profileName: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: '14px',
+    fontWeight: 600,
+    color: colors.label,
+  },
+  profileEmail: {
+    marginTop: '2px',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: '12px',
+    color: colors.secondaryLabel,
+  },
+  skeletonBody: {
+    display: 'flex',
+    flexDirection: 'column',
+    flexGrow: 1,
+    gap: space[2],
+    minWidth: 0,
+    paddingBlock: '2px',
+  },
+  /** The dialog's facts: label on the left, value on the right, ruled between. */
+  detailRow: {
+    display: 'flex',
+    alignItems: 'baseline',
+    justifyContent: 'space-between',
+    gap: space[4],
+    paddingBlock: space[1.5],
+    fontSize: '12px',
+  },
+  detailLabel: { flexShrink: 0, color: colors.secondaryLabel },
+  detailValue: { minWidth: 0, textAlign: 'end', color: colors.label },
+  linkNote: { margin: 0, fontSize: '12px', color: colors.secondaryLabel },
+  actions: { display: 'flex', flexWrap: 'wrap', gap: space[2] },
+  list: { margin: 0, padding: 0, listStyleType: 'none' },
+});
 
 const pad = (value: number) => String(value).padStart(2, '0');
 
@@ -103,53 +209,51 @@ function SharePublisherAvatar({
   // No `showIcon`: a publisher we know by name should fall back to initials, not
   // to the anonymous glyph. The generic person icon reads as "nobody", which is
   // wrong for a row that names who published it.
-  const avatar = <UserAvatar user={user} className="h-8 w-8" />;
-  if (!displayName) return <div className="shrink-0">{avatar}</div>;
+  const avatar = <UserAvatar user={user} size="large" />;
+  if (!displayName) return <div {...stylex.props(styles.avatarStatic)}>{avatar}</div>;
   return (
-    <Popover>
-      <PopoverTrigger asChild>
-        <button
-          type="button"
-          // The card behind this avatar is itself one big click target, so the
-          // profile must not also open the detail dialog.
-          onClick={(event) => event.stopPropagation()}
-          title={displayName}
-          aria-label={t('settings.shares.publisherProfile', 'View profile for {{name}}', {
-            name: displayName,
-          })}
-          className="relative z-10 block shrink-0 rounded-full outline-hidden ring-offset-background transition-opacity hover:opacity-85 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-        >
-          {avatar}
-        </button>
-      </PopoverTrigger>
-      <PopoverContent side="right" align="start" sideOffset={10} className="w-64 p-0">
-        <div className="flex items-center gap-3 p-3.5">
-          <UserAvatar
-            user={user}
-            className="h-12 w-12 shrink-0 text-lg"
-            fallbackClassName="bg-primary/10 text-primary"
-          />
-          <div className="min-w-0">
-            <div className="truncate text-sm font-semibold text-foreground">{displayName}</div>
+    <Popover.Root>
+      <Popover.Trigger
+        render={
+          <button
+            type="button"
+            // The row behind this avatar is itself one big click target, so the
+            // profile must not also open the detail dialog.
+            onClick={(event) => event.stopPropagation()}
+            title={displayName}
+            aria-label={t('settings.shares.publisherProfile', 'View profile for {{name}}', {
+              name: displayName,
+            })}
+            {...stylex.props(styles.avatarTrigger)}
+          >
+            {avatar}
+          </button>
+        }
+      />
+      <Popover.Content side="right" align="start" sideOffset={10}>
+        <div {...stylex.props(styles.profile)}>
+          <UserAvatar user={user} size="xlarge" />
+          <div {...stylex.props(styles.profileText)}>
+            <div {...stylex.props(styles.profileName)}>{displayName}</div>
             {user?.email ? (
-              <div className="mt-0.5 truncate text-xs text-muted-foreground" title={user.email}>
+              <div {...stylex.props(styles.profileEmail)} title={user.email}>
                 {user.email}
               </div>
             ) : null}
           </div>
         </div>
-      </PopoverContent>
-    </Popover>
+      </Popover.Content>
+    </Popover.Root>
   );
 }
 
-function ShareCardSkeleton() {
+function ShareRowSkeleton() {
   return (
-    <div className={cn(SETTINGS_ROW_CARD_CLASS, 'flex items-start gap-3 px-3 py-2.5')}>
-      <Skeleton className="h-8 w-8 shrink-0 rounded-full" />
-      <div className="min-w-0 flex-1 space-y-2 py-0.5">
-        <Skeleton className="h-3.5 w-[70%]" />
-        <Skeleton className="h-3 w-16" />
+    <div {...stylex.props(styles.row)}>
+      <Skeleton shape="circle" width={32} height={32} />
+      <div {...stylex.props(styles.skeletonBody)}>
+        <Skeleton width="70%" height={14} />
+        <Skeleton width={64} height={12} />
       </div>
     </div>
   );
@@ -211,39 +315,36 @@ function ShareManagementList({
   );
   const now = new Date();
   return (
-    <div className={settingContainerClass}>
-      <p className="text-sm text-muted-foreground">
+    <div {...stylex.props(surface.container)}>
+      <p {...stylex.props(styles.lead)}>
         {t(
           'settings.shares.description',
           'Static copies you have published. Admins see every share in the workspace.'
         )}
       </p>
       {actions.notice && (
-        <p role="status" className="text-sm">
+        <p role="status" {...stylex.props(styles.notice)}>
           {actions.notice}
         </p>
       )}
       {actions.error && (
-        <p role="alert" className="text-sm text-destructive">
+        <p role="alert" {...stylex.props(styles.error)}>
           {actions.error}
         </p>
       )}
       {result === undefined ? (
-        <div className="@container">
-          <div className="grid grid-cols-1 gap-2 @[34rem]:grid-cols-2">
-            {[0, 1, 2, 3].map((index) => (
-              <ShareCardSkeleton key={index} />
-            ))}
-          </div>
+        <div {...stylex.props(surface.card)}>
+          {[0, 1, 2, 3].map((index) => (
+            <div key={index} {...stylex.props(surface.line, index > 0 && surface.lineRuled)}>
+              <ShareRowSkeleton />
+            </div>
+          ))}
         </div>
       ) : (
         <>
           {revokedOnPage > 0 && (
-            <div className="flex items-center justify-end gap-2">
-              <label
-                htmlFor="share-show-revoked"
-                className="text-xs font-normal text-muted-foreground"
-              >
+            <div {...stylex.props(styles.toolbar)}>
+              <label htmlFor="share-show-revoked" {...stylex.props(styles.toggleLabel)}>
                 {t('settings.shares.showRevoked', 'Show revoked ({{count}})', {
                   count: revokedOnPage,
                 })}
@@ -256,49 +357,46 @@ function ShareManagementList({
             </div>
           )}
           {visible.length === 0 && (
-            <p className="py-8 text-center text-sm text-muted-foreground">
-              {t('settings.shares.empty', 'No published shares.')}
-            </p>
+            <div {...stylex.props(catalog.empty)}>
+              <p {...stylex.props(catalog.emptyText)}>
+                {t('settings.shares.empty', 'No published shares.')}
+              </p>
+            </div>
           )}
-          {/* Container query, never a viewport breakpoint: settings render in a
-              panel far narrower than the window. Two columns at most — these are
-              conversation titles, and a third column truncates every one of them. */}
-          <div className="@container">
-            <ul className="grid grid-cols-1 gap-2 @[34rem]:grid-cols-2">
-              {visible.map((entry) => {
+          {/* One card of ruled rows: a list of records is one surface, and a
+              title keeps the card's whole width instead of a column of it. */}
+          {visible.length > 0 && (
+            <ul {...stylex.props(surface.card, styles.list)}>
+              {visible.map((entry, index) => {
                 const isRevoked = entry.status !== 'active';
                 const publishedAt = new Date(entry.createdAt);
                 return (
                   <li
                     key={entry.shareId}
-                    className={cn(
-                      SETTINGS_ROW_CARD_CLASS,
-                      'relative flex items-start gap-3 px-3 py-2.5 transition-colors',
-                      'focus-within:border-ring/40 hover:bg-foreground/[0.02] dark:hover:bg-foreground/[0.04]'
+                    {...stylex.props(
+                      surface.line,
+                      index > 0 && surface.lineRuled,
+                      surface.pressableLine,
+                      styles.row
                     )}
                   >
                     <SharePublisherAvatar
                       publisherUserId={entry.publisherUserId}
                       workspaceId={workspaceId}
                     />
-                    <div className="min-w-0 flex-1">
-                      {/* `after:inset-0` turns the whole card into this button's
-                          hit area while keeping ONE focusable control per card. */}
+                    <div {...stylex.props(styles.body)}>
+                      {/* The button's `::after` turns the whole row into its hit
+                          area while keeping ONE focusable control per row. */}
                       <button
                         type="button"
                         onClick={() => setDetail(entry)}
-                        className="block w-full text-left outline-hidden after:absolute after:inset-0 after:rounded-lg after:content-['']"
+                        {...stylex.props(styles.open)}
                       >
-                        <span
-                          className={cn(
-                            'line-clamp-2 text-sm',
-                            isRevoked && 'text-muted-foreground'
-                          )}
-                        >
+                        <span {...stylex.props(styles.title, isRevoked && styles.titleRevoked)}>
                           {entry.title || t('sessions.untitled', 'Untitled session')}
                         </span>
                       </button>
-                      <p className="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
+                      <p {...stylex.props(styles.meta)}>
                         <time
                           dateTime={publishedAt.toISOString()}
                           title={publishedAt.toLocaleString()}
@@ -317,22 +415,22 @@ function ShareManagementList({
                 );
               })}
             </ul>
-          </div>
+          )}
           {/* Two permanently disabled buttons under a short list are pure chrome;
               paging only exists once there is somewhere to page to. */}
           {(cursors.length > 1 || !result.isDone) && (
-            <div className="flex items-center justify-end gap-2">
+            <div {...stylex.props(styles.toolbar)}>
               <Button
-                variant="outline"
-                size="sm"
+                variant="secondary"
+                size="small"
                 disabled={cursors.length === 1}
                 onClick={() => setCursors((value) => value.slice(0, -1))}
               >
                 {t('settings.shares.previous', 'Previous')}
               </Button>
               <Button
-                variant="outline"
-                size="sm"
+                variant="secondary"
+                size="small"
                 disabled={result.isDone}
                 onClick={() => setCursors((value) => [...value, result.continueCursor])}
               >
@@ -370,29 +468,29 @@ function ShareManagementList({
           onClose={() => setEditor(null)}
         />
       )}
-      <AlertDialog
+      <AlertDialog.Root
         open={confirmation !== null}
         onOpenChange={(open) => {
           if (!open) setConfirmation(null);
         }}
       >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
+        <AlertDialog.Content>
+          <AlertDialog.Header>
+            <AlertDialog.Title>
               {confirmation?.kind === 'reset'
                 ? t('sharing.static.reset', 'Reset link')
                 : t('sharing.static.revoke', 'Revoke')}
-            </AlertDialogTitle>
-            <AlertDialogDescription>
+            </AlertDialog.Title>
+            <AlertDialog.Description>
               {t(
                 'sharing.static.invalidateNotice',
                 'The previous link will stop working. Downloaded copies cannot be recalled.'
               )}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>{t('common.cancel', 'Cancel')}</AlertDialogCancel>
-            <AlertDialogAction
+            </AlertDialog.Description>
+          </AlertDialog.Header>
+          <AlertDialog.Footer>
+            <AlertDialog.Cancel>{t('common.cancel', 'Cancel')}</AlertDialog.Cancel>
+            <AlertDialog.Action
               disabled={
                 actions.busy ||
                 !confirmation ||
@@ -409,19 +507,28 @@ function ShareManagementList({
               }}
             >
               {t('common.confirm', 'Confirm')}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+            </AlertDialog.Action>
+          </AlertDialog.Footer>
+        </AlertDialog.Content>
+      </AlertDialog.Root>
     </div>
   );
 }
 
-function DetailRow({ label, children }: { label: string; children: React.ReactNode }) {
+function DetailRow({
+  label,
+  ruled,
+  children,
+}: {
+  label: string;
+  /** Every row but the first is ruled from the one above. */
+  ruled: boolean;
+  children: ReactNode;
+}) {
   return (
-    <div className="flex items-baseline justify-between gap-4 py-1.5">
-      <span className="shrink-0 text-xs text-muted-foreground">{label}</span>
-      <span className="min-w-0 text-right text-xs text-foreground">{children}</span>
+    <div {...stylex.props(styles.detailRow, ruled && surface.lineRuled)}>
+      <span {...stylex.props(styles.detailLabel)}>{label}</span>
+      <span {...stylex.props(styles.detailValue)}>{children}</span>
     </div>
   );
 }
@@ -474,15 +581,13 @@ function ShareDetailDialog({
             'Only the member who published this share holds its link.'
           );
   return (
-    <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-w-md">
-        <DialogHeader>
-          <DialogTitle className="pr-6 text-left text-base leading-snug">
-            {entry.title || t('sessions.untitled', 'Untitled session')}
-          </DialogTitle>
-        </DialogHeader>
-        <div className="divide-y divide-border/60">
-          <DetailRow label={t('settings.shares.publishedAt', 'Published')}>
+    <Dialog.Root open onOpenChange={(open) => !open && onClose()}>
+      <Dialog.Content>
+        <Dialog.Header>
+          <Dialog.Title>{entry.title || t('sessions.untitled', 'Untitled session')}</Dialog.Title>
+        </Dialog.Header>
+        <div>
+          <DetailRow ruled={false} label={t('settings.shares.publishedAt', 'Published')}>
             {/* Y-M-D reads the same in every locale; the exact clock time stays
                 reachable through the tooltip rather than cluttering the row. */}
             <time dateTime={publishedAt.toISOString()} title={publishedAt.toLocaleString()}>
@@ -490,35 +595,35 @@ function ShareDetailDialog({
             </time>
           </DetailRow>
           {wasUpdated && (
-            <DetailRow label={t('settings.shares.updatedAt', 'Last updated')}>
+            <DetailRow ruled label={t('settings.shares.updatedAt', 'Last updated')}>
               <time dateTime={updatedAt.toISOString()} title={updatedAt.toLocaleString()}>
                 {formatYmd(updatedAt)}
               </time>
             </DetailRow>
           )}
-          <DetailRow label={t('settings.shares.conversationsLabel', 'Conversations')}>
+          <DetailRow ruled label={t('settings.shares.conversationsLabel', 'Conversations')}>
             {entry.conversationCount}
           </DetailRow>
-          <DetailRow label={t('settings.shares.size', 'Size')}>
+          <DetailRow ruled label={t('settings.shares.size', 'Size')}>
             {formatBytes(entry.totalBytes)}
           </DetailRow>
-          <DetailRow label={t('settings.shares.statusLabel', 'Status')}>
+          <DetailRow ruled label={t('settings.shares.statusLabel', 'Status')}>
             {isRevoked
               ? t('settings.shares.revoked', 'Revoked')
               : t('settings.shares.active', 'Active')}
           </DetailRow>
         </div>
-        {linkNote && <p className="text-xs text-muted-foreground">{linkNote}</p>}
-        <div className="flex flex-wrap gap-2">
+        {linkNote && <p {...stylex.props(styles.linkNote)}>{linkNote}</p>}
+        <div {...stylex.props(styles.actions)}>
           {link && (
-            <Button size="sm" onClick={() => void openExternalUrl(link)}>
+            <Button size="small" onClick={() => void openExternalUrl(link)}>
               {t('settings.shares.openPublished', 'Open published page')}
             </Button>
           )}
           {link && (
             <Button
-              variant="outline"
-              size="sm"
+              variant="secondary"
+              size="small"
               disabled={actions.busy}
               onClick={() => void actions.copy(entry)}
             >
@@ -526,17 +631,17 @@ function ShareDetailDialog({
             </Button>
           )}
           {sourceSessionId && (
-            <Button variant="outline" size="sm" onClick={() => onOpenSession(sourceSessionId)}>
+            <Button variant="secondary" size="small" onClick={() => onOpenSession(sourceSessionId)}>
               {t('settings.shares.openConversation', 'Open conversation')}
             </Button>
           )}
         </div>
         {(entry.canManage || entry.canRevoke) && (
-          <div className="flex flex-wrap gap-2 border-t border-border/60 pt-3">
+          <div {...stylex.props(styles.actions)}>
             {entry.canManage && sourceSessionId && (
               <Button
-                variant="outline"
-                size="sm"
+                variant="secondary"
+                size="small"
                 disabled={actions.busy}
                 onClick={() => onUpdate(entry)}
               >
@@ -545,8 +650,8 @@ function ShareDetailDialog({
             )}
             {entry.canManage && (
               <Button
-                variant="outline"
-                size="sm"
+                variant="secondary"
+                size="small"
                 disabled={actions.busy}
                 onClick={() => onConfirm('reset', entry)}
               >
@@ -555,10 +660,10 @@ function ShareDetailDialog({
             )}
             {entry.canRevoke && (
               <Button
-                variant="outline"
-                size="sm"
+                variant="secondary"
+                size="small"
+                tone="destructive"
                 disabled={actions.busy}
-                className="text-destructive hover:text-destructive"
                 onClick={() => onConfirm('revoke', entry)}
               >
                 {t('sharing.static.revoke', 'Revoke')}
@@ -566,7 +671,7 @@ function ShareDetailDialog({
             )}
           </div>
         )}
-      </DialogContent>
-    </Dialog>
+      </Dialog.Content>
+    </Dialog.Root>
   );
 }

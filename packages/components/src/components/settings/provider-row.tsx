@@ -1,8 +1,9 @@
 import { useMemo, useState } from 'react';
+import * as stylex from '@stylexjs/stylex';
 import { useTranslation } from 'react-i18next';
 import { useAtomValue } from 'jotai';
 import { RefreshCw, Trash2 } from 'lucide-react';
-import { Spinner } from '@/ui/spinner';
+import { Spinner } from '@lody/ui/spinner';
 import {
   REGISTRY_ACP_AGENTS,
   type AgentConfigCliType,
@@ -11,21 +12,14 @@ import {
   type MachineViewMeta,
   parseRateLimitEntryKey,
 } from '@lody/shared';
-import { toast } from 'sonner';
-import { Badge } from '@/ui/badge';
-import { Button } from '@/ui/button';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/ui/alert-dialog';
-import { cn } from '@/lib/utils';
-import { SETTINGS_ROW_CARD_CLASS } from './compact-layout';
+import { toast } from '@/lib/toast';
+import { Badge } from '@lody/ui/badge';
+import { Button } from '@lody/ui/button';
+import { AlertDialog } from '@/ui/dialog';
+import { withClassName } from '@/lib/stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { space } from '@lody/ui/tokens/scales.stylex';
+import { settingsCatalog as catalog, settingsSurface as surface } from './surface';
 import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
 import { useMachineAcpBinaryProgress } from '@/hooks/use-machine-acp-binary-progress';
 import { AgentIcon } from '@/components/icons/agent-icon';
@@ -39,18 +33,112 @@ import {
   getAgentRateLimitWindows,
 } from '@/lib/session-usage';
 
+/** Wide enough in its own container to set the meters beside the name. */
+const ROOMY = '@container (min-width: 24rem)';
+
+const styles = stylex.create({
+  /** A line of the machine's provider card; the list draws the card and the rules. */
+  root: { minWidth: 0, containerType: 'inline-size' },
+  row: { display: 'flex', alignItems: 'center', width: '100%', minWidth: 0 },
+  main: { gap: space[2], paddingInline: space[3], paddingBlock: space[1.5] },
+  mainList: { gap: space[3], paddingInline: space[4], paddingBlock: space[3] },
+  icon: {
+    display: 'flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '24px',
+    height: '24px',
+    color: colors.label,
+  },
+  iconList: { width: '32px', height: '32px' },
+  glyph: { width: '16px', height: '16px' },
+  glyphList: { width: '20px', height: '20px' },
+  body: { flexGrow: 1, minWidth: 0 },
+  badge: { textTransform: 'capitalize' },
+  trailing: {
+    display: 'flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    gap: space[2],
+    paddingInlineEnd: space[3],
+    paddingBlock: space[1.5],
+    fontSize: '0.75em',
+    color: colors.secondaryLabel,
+  },
+  trailingList: { paddingBlock: space[3] },
+  /** The meters sit beside the name when the row has room, and under it when not. */
+  metersInline: {
+    display: { default: 'none', [ROOMY]: 'flex' },
+    alignItems: 'center',
+    gap: '10px',
+  },
+  metersBelow: {
+    display: { default: 'flex', [ROOMY]: 'none' },
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    columnGap: '20px',
+    rowGap: space[1],
+    paddingInline: space[3],
+    paddingTop: '2px',
+    paddingBottom: '10px',
+  },
+  progress: {
+    maxWidth: '9rem',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  meter: {
+    display: 'flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    gap: space[1.5],
+    fontSize: '11px',
+    color: colors.secondaryLabel,
+  },
+  /** A meter measures rather than progresses, so it is a gray track and fill. */
+  track: {
+    position: 'relative',
+    width: '40px',
+    height: '4px',
+    overflow: 'hidden',
+    borderRadius: '9999px',
+    backgroundColor: colors.gray5,
+  },
+  fill: {
+    position: 'absolute',
+    insetBlock: 0,
+    insetInlineStart: 0,
+    borderRadius: '9999px',
+    backgroundColor: colors.gray,
+  },
+  fillWidth: (percent: number) => ({ width: `${percent}%` }),
+  percent: {
+    fontFamily: 'var(--font-mono, ui-monospace, monospace)',
+    fontVariantNumeric: 'tabular-nums',
+  },
+});
+
 export type ProviderRowProps = {
   config: AgentConfigMeta;
   machine: MachineViewMeta | undefined;
   onEdit: (config: AgentConfigMeta) => void;
   onDelete?: (config: AgentConfigMeta) => Promise<void>;
   onRefresh?: (config: AgentConfigMeta) => Promise<void>;
+  /**
+   * Density: `card` is the compact line of the desktop provider card, `list`
+   * the roomier mobile one. Neither draws a surface: the list draws one card
+   * for all its providers and the rule between them.
+   */
   variant?: 'card' | 'list';
+  /** Layout only. */
   className?: string;
 };
 
-/** One provider entry. Signing in again lives in the provider's detail dialog
- *  (`AgentConfigDialog`), not here: only some providers can sign in at all. */
+/** One provider entry, as a line of its machine's provider card. Signing in
+ *  again lives in the provider's detail dialog (`AgentConfigDialog`), not here:
+ *  only some providers can sign in at all. */
 export function ProviderRow({
   config,
   machine,
@@ -131,62 +219,42 @@ export function ProviderRow({
     }
   };
 
+  const compact = variant === 'card';
   return (
-    <div
-      className={cn(
-        'overflow-hidden',
-        variant === 'card'
-          ? cn('@container', SETTINGS_ROW_CARD_CLASS)
-          : 'bg-transparent [&+&]:border-t [&+&]:border-border',
-        className
-      )}
-    >
-      <div className="flex w-full min-w-0 items-center transition-colors hover:bg-hover/40">
+    <div {...withClassName(stylex.props(styles.root), className)}>
+      <div {...stylex.props(styles.row, surface.pressableLine)}>
         <button
           type="button"
           onClick={() => onEdit(config)}
-          className={cn(
-            'flex min-w-0 flex-1 items-center text-left focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring',
-            variant === 'card' ? 'gap-2 rounded-md px-3 py-1.5' : 'gap-3 rounded-none px-4 py-3'
-          )}
+          {...stylex.props(catalog.rowMain, compact ? styles.main : styles.mainList)}
           aria-label={t('agents.editConfig', 'Edit config')}
         >
-          <div
-            className={cn(
-              'flex shrink-0 items-center justify-center text-foreground/80',
-              variant === 'card' ? 'h-6 w-6' : 'h-8 w-8'
-            )}
-          >
+          <div {...stylex.props(styles.icon, !compact && styles.iconList)}>
             <AgentIcon
               cliType={cliType}
               agentType={agentType}
               brandId={config.brandId}
               env={config.env}
-              className={variant === 'card' ? 'h-4 w-4' : 'h-5 w-5'}
+              className={stylex.props(compact ? styles.glyph : styles.glyphList).className}
             />
           </div>
-          <div className="min-w-0 flex-1">
-            <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
-              <span className="min-w-0 truncate text-sm font-normal">{config.name}</span>
+          <div {...stylex.props(styles.body)}>
+            <div {...stylex.props(catalog.titleLine)}>
+              <span {...stylex.props(catalog.name)}>{config.name}</span>
               {typeBadge ? (
-                <Badge variant="secondary" className="text-[10px] capitalize">
-                  {typeBadge}
+                <Badge>
+                  <span {...stylex.props(styles.badge)}>{typeBadge}</span>
                 </Badge>
               ) : null}
             </div>
           </div>
         </button>
-        <div
-          className={cn(
-            'flex shrink-0 items-center gap-2 pr-3 text-xs text-muted-foreground',
-            variant === 'card' ? 'py-1.5' : 'py-3'
-          )}
-        >
+        <div {...stylex.props(styles.trailing, !compact && styles.trailingList)}>
           {/* Not mounted at all when ineligible, so a non-Codex row costs no
               store subscription and no clock tick. */}
           {showResetForecast ? <CodexResetForecastChip enabled /> : null}
-          {rateLimitWindows.length > 0 && variant === 'card' && (
-            <div className="hidden items-center gap-2.5 @sm:flex">
+          {rateLimitWindows.length > 0 && compact && (
+            <div {...stylex.props(styles.metersInline)}>
               {rateLimitWindows.map((window, index) => (
                 <RateLimitMeter
                   key={`${window.windowDurationSeconds ?? 'unknown'}-${index}`}
@@ -204,13 +272,13 @@ export function ProviderRow({
             <span>{t('settings.agent.provider.envCount', { count: envCount })}</span>
           )}
           {refreshing && binaryProgressText ? (
-            <span className="max-w-[9rem] truncate whitespace-nowrap">{binaryProgressText}</span>
+            <span {...stylex.props(styles.progress)}>{binaryProgressText}</span>
           ) : null}
           {onRefresh && (
             <Button
               variant="ghost"
-              size="icon"
-              className="h-7 w-7 text-muted-foreground hover:text-foreground"
+              size="small"
+              icon
               disabled={refreshing}
               aria-label={t(
                 'agents.acpCapabilities.refreshModelsAndModes',
@@ -222,30 +290,31 @@ export function ProviderRow({
               }}
             >
               {refreshing ? (
-                <Spinner className="h-3.5 w-3.5" />
+                <Spinner size="small" />
               ) : (
-                <RefreshCw className="h-3.5 w-3.5" />
+                <RefreshCw {...stylex.props(catalog.icon)} />
               )}
             </Button>
           )}
           {onDelete && (
             <Button
               variant="ghost"
-              size="icon"
-              className="h-7 w-7 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
               aria-label={t('common.delete', 'Delete')}
+              size="small"
+              icon
+              tone="destructive"
               onClick={(event) => {
                 event.stopPropagation();
                 setDeleteOpen(true);
               }}
             >
-              <Trash2 className="h-3.5 w-3.5" />
+              <Trash2 {...stylex.props(catalog.icon)} />
             </Button>
           )}
         </div>
       </div>
-      {rateLimitWindows.length > 0 && variant === 'card' && (
-        <div className="flex flex-wrap items-center gap-x-5 gap-y-1 px-3 pb-2.5 pt-0.5 @sm:hidden">
+      {rateLimitWindows.length > 0 && compact && (
+        <div {...stylex.props(styles.metersBelow)}>
           {rateLimitWindows.map((window, index) => (
             <RateLimitMeter
               key={`${window.windowDurationSeconds ?? 'unknown'}-${index}`}
@@ -255,38 +324,37 @@ export function ProviderRow({
           ))}
         </div>
       )}
-      <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
+      <AlertDialog.Root open={deleteOpen} onOpenChange={setDeleteOpen}>
+        <AlertDialog.Content>
+          <AlertDialog.Header>
+            <AlertDialog.Title>
               {t('agents.deleteConfigConfirm', 'Delete Configuration')}
-            </AlertDialogTitle>
-            <AlertDialogDescription>
+            </AlertDialog.Title>
+            <AlertDialog.Description>
               {t('agents.deleteConfigConfirmDescription', {
                 name: config.name,
                 defaultValue:
                   'Are you sure you want to delete "{{name}}"? This action cannot be undone.',
               })}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={deleting}>
+            </AlertDialog.Description>
+          </AlertDialog.Header>
+          <AlertDialog.Footer>
+            <AlertDialog.Cancel disabled={deleting}>
               {t('common.cancel', 'Cancel')}
-            </AlertDialogCancel>
-            <AlertDialogAction
+            </AlertDialog.Cancel>
+            <Button
               disabled={deleting}
-              onClick={(event) => {
-                event.preventDefault();
+              onClick={() => {
                 void handleDelete();
               }}
-              className={cn('bg-destructive text-destructive-foreground hover:bg-destructive/90')}
+              variant="destructive"
             >
-              {deleting && <Spinner className="mr-2 h-4 w-4" />}
+              {deleting && <Spinner size="small" />}
               {t('common.delete', 'Delete')}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+            </Button>
+          </AlertDialog.Footer>
+        </AlertDialog.Content>
+      </AlertDialog.Root>
     </div>
   );
 }
@@ -301,18 +369,12 @@ function RateLimitMeter({
   const pct = remainingPercent == null ? 0 : Math.min(100, Math.max(0, remainingPercent));
   const percentText = remainingPercent == null ? '—' : `${Math.round(remainingPercent)}%`;
   return (
-    <span
-      className="flex shrink-0 items-center gap-1.5 text-[11px] text-muted-foreground"
-      title={`${label}: ${percentText}`}
-    >
-      <span className="font-normal">{label}</span>
-      <span className="relative h-1 w-10 overflow-hidden rounded-full bg-foreground/10">
-        <span
-          className="absolute inset-y-0 left-0 rounded-full bg-muted-foreground/60"
-          style={{ width: `${pct}%` }}
-        />
+    <span {...stylex.props(styles.meter)} title={`${label}: ${percentText}`}>
+      <span>{label}</span>
+      <span {...stylex.props(styles.track)}>
+        <span {...stylex.props(styles.fill, styles.fillWidth(pct))} />
       </span>
-      <span className="font-mono tabular-nums">{percentText}</span>
+      <span {...stylex.props(styles.percent)}>{percentText}</span>
     </span>
   );
 }

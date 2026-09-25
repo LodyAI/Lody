@@ -1,7 +1,8 @@
 import { useTranslation } from 'react-i18next';
 import { User } from 'lucide-react';
+import * as stylex from '@stylexjs/stylex';
 import type { ProjectSkill, ProjectSkillScope } from '@lody/shared';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/ui/dialog';
+import { Dialog } from '@/ui/dialog';
 import { MarkdownRenderer } from '@/components/ai-gui/markdown-renderer';
 import { ErrorBoundary } from '@/components/error-boundary';
 import { SkillMarkdownFallback } from '@/components/settings/skill-markdown';
@@ -10,12 +11,53 @@ import {
   SkillSymlinkBadge,
   SkillVersionBadge,
 } from '@/components/settings/skill-badges';
-import { cn } from '@/lib/utils';
+import { withClassName } from '@/lib/stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { space } from '@lody/ui/tokens/scales.stylex';
+
+const styles = stylex.create({
+  root: { display: 'flex', flexDirection: 'column', minHeight: 0 },
+  head: { flexShrink: 0 },
+  badges: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: space[1.5] },
+  description: {
+    margin: 0,
+    marginTop: space[2],
+    fontSize: '0.875em',
+    color: colors.secondaryLabel,
+  },
+  meta: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    columnGap: space[3],
+    rowGap: space[1],
+    marginTop: space[2],
+    fontSize: '0.75em',
+    color: colors.secondaryLabel,
+  },
+  author: { display: 'inline-flex', alignItems: 'center', gap: space[1] },
+  authorIcon: { width: '12px', height: '12px', flexShrink: 0, color: colors.tertiaryLabel },
+  path: {
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontFamily: 'var(--font-mono, ui-monospace, monospace)',
+  },
+  /** The body is set apart from the head by space, not a rule under it. */
+  body: { flexGrow: 1, minHeight: 0, overflowY: 'auto', marginTop: space[4] },
+  empty: { margin: 0, fontSize: '0.875em', color: colors.secondaryLabel },
+  title: { minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  fill: { flexGrow: 1, minHeight: 0 },
+});
+
+/** The panel reads a SKILL.md, so it keeps a reading width rather than a form's. */
+const SKILL_DIALOG_STYLE = { width: 'calc(100vw - 2rem)', maxWidth: '768px' } as const;
 
 /**
  * Shared skill detail body: badges + metadata + the rendered SKILL.md markdown
  * (`skill.content`, frontmatter already stripped by the scanner). The skill
- * name is the surrounding title (DialogTitle on desktop, the sheet header on
+ * name is the surrounding title (Dialog.Title on desktop, the sheet header on
  * mobile), so it is intentionally not repeated here.
  */
 export function SkillDetailContent({
@@ -29,28 +71,28 @@ export function SkillDetailContent({
 }) {
   const { t } = useTranslation();
   return (
-    <div className={cn('flex min-h-0 flex-col', className)}>
-      <div className="shrink-0">
-        <div className="flex flex-wrap items-center gap-1.5">
+    <div {...withClassName(stylex.props(styles.root), className)}>
+      <div {...stylex.props(styles.head)}>
+        <div {...stylex.props(styles.badges)}>
           {scope ? <SkillScopeBadge scope={scope} /> : null}
           {skill.version ? <SkillVersionBadge version={skill.version} /> : null}
           {skill.isSymlink ? <SkillSymlinkBadge symlinkTarget={skill.symlinkTarget} /> : null}
         </div>
         {skill.description ? (
-          <p className="mt-2 text-sm text-muted-foreground">{skill.description}</p>
+          <p {...stylex.props(styles.description)}>{skill.description}</p>
         ) : null}
-        <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+        <div {...stylex.props(styles.meta)}>
           {skill.author ? (
-            <span className="inline-flex items-center gap-1">
-              <User className="h-3 w-3" />
+            <span {...stylex.props(styles.author)}>
+              <User {...stylex.props(styles.authorIcon)} />
               {skill.author}
             </span>
           ) : null}
-          <span className="min-w-0 truncate font-mono">{skill.relativePath}</span>
+          <span {...stylex.props(styles.path)}>{skill.relativePath}</span>
         </div>
       </div>
 
-      <div className="scrollbar-pro mt-3 min-h-0 flex-1 overflow-y-auto border-t border-border/60 pt-3">
+      <div {...withClassName(stylex.props(styles.body), 'scrollbar-pro')}>
         {skill.content ? (
           /* Primary: the app's full Markdown renderer (Streamdown). It lazy-
              loads a Shiki code highlighter; if that dynamic import fails (e.g. a
@@ -66,7 +108,7 @@ export function SkillDetailContent({
             <MarkdownRenderer text={skill.content} size="sm" />
           </ErrorBoundary>
         ) : (
-          <p className="text-sm text-muted-foreground">
+          <p {...stylex.props(styles.empty)}>
             {t(
               'workspace.projects.skills.detailNoContent',
               'This skill has no additional content.'
@@ -91,15 +133,19 @@ export function SkillDetailDialog({
   onOpenChange: (open: boolean) => void;
 }) {
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex max-h-[85vh] w-[calc(100vw-2rem)] max-w-3xl flex-col gap-0 overflow-hidden">
-        <DialogHeader className="shrink-0 pb-3 pr-8 text-left">
-          <DialogTitle className="truncate">{skill?.name}</DialogTitle>
-        </DialogHeader>
+    <Dialog.Root open={open} onOpenChange={onOpenChange}>
+      <Dialog.Content style={SKILL_DIALOG_STYLE}>
+        <Dialog.Header>
+          <Dialog.Title {...stylex.props(styles.title)}>{skill?.name}</Dialog.Title>
+        </Dialog.Header>
         {skill ? (
-          <SkillDetailContent skill={skill} scope={scope} className="min-h-0 flex-1" />
+          <SkillDetailContent
+            skill={skill}
+            scope={scope}
+            className={stylex.props(styles.fill).className}
+          />
         ) : null}
-      </DialogContent>
-    </Dialog>
+      </Dialog.Content>
+    </Dialog.Root>
   );
 }

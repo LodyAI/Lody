@@ -177,6 +177,7 @@ describe('SessionSidePanelTabBar', () => {
     await act(async () => {
       (closeFilesButton as HTMLButtonElement).click();
       (closeFileButton as HTMLButtonElement).click();
+      await new Promise((resolve) => setTimeout(resolve, 40));
     });
     expect(onTabClose.mock.calls).toEqual([['files'], ['file:src/app.tsx']]);
     expect(onTabSelect).not.toHaveBeenCalled();
@@ -221,8 +222,9 @@ describe('SessionSidePanelTabBar', () => {
     expect(addButton).toBeInstanceOf(HTMLButtonElement);
     await act(async () => {
       addButton?.dispatchEvent(
-        new MouseEvent('pointerdown', { bubbles: true, cancelable: true, button: 0 })
+        new MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 0 })
       );
+      await new Promise((resolve) => setTimeout(resolve, 40));
     });
 
     const menuItems = Array.from(document.querySelectorAll<HTMLElement>('[role="menuitem"]'));

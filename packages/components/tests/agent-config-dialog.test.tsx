@@ -10,6 +10,7 @@ import {
   getAcpCapabilityCacheKey,
   machineFlockKeys,
   serializeMachineFlockKey,
+  serializeCustomAcpLaunchSpec,
   type AgentConfigId,
   type AgentConfigMeta,
   type MachineId,
@@ -33,7 +34,7 @@ import {
 } from '../src/components/settings/agent-config-dialog';
 import * as machineAuthenticationHook from '../src/hooks/use-machine-acp-authentication';
 import { initI18n } from '../src/i18n';
-import { TooltipProvider } from '../src/ui/tooltip';
+import { Tooltip } from '@lody/ui/tooltip';
 
 const machineId = 'machine-test' as MachineId;
 const claudeConfigId = 'claude-config' as AgentConfigId;
@@ -221,7 +222,7 @@ describe('AgentConfigDialog', () => {
     await act(async () => {
       root?.render(
         <Provider store={store}>
-          <TooltipProvider>
+          <Tooltip.Provider>
             <AgentConfigDialog
               open
               onOpenChange={vi.fn()}
@@ -233,7 +234,7 @@ describe('AgentConfigDialog', () => {
               onManagedRuntimeSelected={onManagedRuntimeSelected}
               onScanPiExtensions={onScanPiExtensions}
             />
-          </TooltipProvider>
+          </Tooltip.Provider>
         </Provider>
       );
     });
@@ -719,10 +720,15 @@ describe('AgentConfigDialog', () => {
   };
 
   const selectTab = async (name: string): Promise<void> => {
+    // A whole press, not just its first half: the strip is Base UI's now and a
+    // tab is taken on the click, while Radix took it on the mousedown.
     await act(async () => {
-      getTabByName(name).dispatchEvent(
-        new MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 0 })
-      );
+      const tab = getTabByName(name);
+      const press = { bubbles: true, cancelable: true, button: 0 };
+      tab.dispatchEvent(new MouseEvent('mousedown', press));
+      tab.focus();
+      tab.dispatchEvent(new MouseEvent('mouseup', press));
+      tab.click();
     });
   };
 
@@ -1478,6 +1484,46 @@ describe('AgentConfigDialog', () => {
       );
 
       expect(document.body.textContent).not.toContain('Title generation');
+    }
+  );
+
+  it.each([true, false])(
+    'uses advertised title ownership in settings: %s',
+    async (sessionTitle) => {
+      const machine = createTitleConfigMachine();
+      const entry = machine.acpCapabilities?.[getAcpCapabilityCacheKey(kimiConfigId)];
+      if (!entry) throw new Error('Missing capability fixture');
+      entry.sessionTitle = sessionTitle;
+      await renderDialog({ kind: 'edit', config: createBuiltinConfig() }, machine);
+      expect(document.body.textContent?.includes('Title generation')).toBe(!sessionTitle);
+    }
+  );
+
+  it.each([true, false])(
+    'only hides custom title settings for the matching command: %s',
+    async (matches) => {
+      const customAcp = { command: 'title-agent', args: ['--acp'] };
+      const machine = createTitleConfigMachine();
+      const entry = machine.acpCapabilities?.[getAcpCapabilityCacheKey(kimiConfigId)];
+      if (!entry) throw new Error('Missing capability fixture');
+      Object.assign(entry, {
+        cliType: 'custom',
+        agentType: 'custom-title',
+        sessionTitle: true,
+        sourceVersion: `custom:${serializeCustomAcpLaunchSpec(matches ? customAcp : { command: 'other-agent' })}`,
+      });
+      await renderDialog(
+        {
+          kind: 'edit',
+          config: createBuiltinConfig({
+            cliType: 'custom',
+            agentType: 'custom-title',
+            customAcp,
+          }),
+        },
+        machine
+      );
+      expect(document.body.textContent?.includes('Title generation')).toBe(!matches);
     }
   );
 

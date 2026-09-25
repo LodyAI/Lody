@@ -1,16 +1,125 @@
-import { useCallback, useLayoutEffect, useRef, type ReactNode } from 'react';
+import { useCallback, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { AlertTriangle, ChevronDown } from 'lucide-react';
+import * as stylex from '@stylexjs/stylex';
+import { withClassName } from '@/lib/stylex';
 import { observeResizeOnAnimationFrame } from '@/lib/resize-observer';
-import { cn } from '@/lib/utils';
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/ui/collapsible';
-import { Label } from '@/ui/label';
-import { Textarea, type TextareaProps } from '@/ui/textarea';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { corner, duration, ease, radius, space } from '@lody/ui/tokens/scales.stylex';
+import { Collapsible } from '@lody/ui/collapsible';
+import { Field as UiField } from '@lody/ui/field';
+import { Textarea, type TextareaProps } from '@lody/ui/textarea';
+import { settingsSurface as surface } from './surface';
+
+const styles = stylex.create({
+  field: { display: 'flex', flexDirection: 'column', gap: space[1.5] },
+  fieldHead: { display: 'flex', alignItems: 'center', gap: space[1.5] },
+  fieldIcon: { display: 'inline-flex', color: colors.secondaryLabel },
+  fieldHint: { margin: 0, fontSize: '11px', lineHeight: 1.375, color: colors.secondaryLabel },
+  /**
+   * A message is a tint and a mark, never a box: the tone mixed into the
+   * surface at the strength `@lody/ui` gives a message, no border around it.
+   */
+  message: {
+    display: 'flex',
+    alignItems: 'flex-start',
+    gap: space[2],
+    paddingInline: space[3],
+    paddingBlock: space[2],
+    borderRadius: radius.medium,
+    cornerShape: corner.shape,
+    fontSize: '12px',
+    lineHeight: 1.375,
+  },
+  messageError: {
+    backgroundColor: `color-mix(in oklab, transparent, ${colors.destructive} 10%)`,
+    color: colors.destructive,
+  },
+  messageWarning: {
+    backgroundColor: `color-mix(in oklab, transparent, ${colors.warning} 10%)`,
+    color: colors.label,
+  },
+  mark: { flexShrink: 0, width: '14px', height: '14px', marginTop: '2px' },
+  markError: { color: colors.destructive },
+  markWarning: { color: colors.warning },
+  messageBody: { minWidth: 0 },
+  /** A collapsible section stands alone, so it carries the region fill itself. */
+  collapsibleItem: {
+    backgroundColor: `color-mix(in oklab, transparent, ${colors.label} 3%)`,
+    borderRadius: radius.medium,
+    cornerShape: corner.shape,
+  },
+  collapsibleHead: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: space[1],
+    minHeight: '36px',
+    paddingInlineEnd: space[2],
+  },
+  collapsibleTrigger: {
+    display: 'flex',
+    flexGrow: 1,
+    alignItems: 'center',
+    gap: space[2],
+    minWidth: 0,
+    height: '36px',
+    margin: 0,
+    paddingInlineStart: space[3],
+    paddingInlineEnd: 0,
+    borderWidth: 0,
+    borderStyle: 'none',
+    backgroundColor: 'transparent',
+    fontFamily: 'inherit',
+    fontSize: '13px',
+    fontWeight: 500,
+    lineHeight: 1.25,
+    textAlign: 'start',
+    color: colors.label,
+    cursor: 'pointer',
+    outlineStyle: 'none',
+  },
+  collapsibleTitle: {
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  collapsibleCount: {
+    marginInlineStart: 'auto',
+    fontSize: '12px',
+    fontWeight: 400,
+    color: colors.tertiaryLabel,
+    fontVariantNumeric: 'tabular-nums',
+  },
+  collapsibleChevron: {
+    flexShrink: 0,
+    width: '12px',
+    height: '12px',
+    color: colors.tertiaryLabel,
+    transitionProperty: 'transform',
+    transitionDuration: duration.fast,
+    transitionTimingFunction: ease.standard,
+  },
+  collapsibleChevronOpen: { transform: 'rotate(180deg)' },
+  collapsibleBody: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: space[2],
+    paddingInline: space[3],
+    paddingBottom: space[3],
+  },
+  collapsibleHint: {
+    margin: 0,
+    paddingBlock: space[1],
+    fontSize: '12px',
+    color: colors.secondaryLabel,
+  },
+});
 
 /**
  * The shared grammar of the settings editors.
  *
  * Every settings form — MCP connection, Agent Role — is the same stack of
- * bordered sections holding labelled fields, so the spacing and typography live
+ * titled groups holding labelled fields, so the spacing and typography live
  * here once. A local copy per editor is how three dialogs that are supposed to
  * look like one surface drift apart one padding value at a time.
  */
@@ -25,12 +134,10 @@ export function Section({
   children: ReactNode;
 }) {
   return (
-    <section className="space-y-3 rounded-lg border border-border/70 bg-card/60 p-3">
+    <section {...stylex.props(surface.formGroup)}>
       <header>
-        <h3 className="text-xs font-normal text-muted-foreground">{title}</h3>
-        {hint ? (
-          <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground/90">{hint}</p>
-        ) : null}
+        <h3 {...stylex.props(surface.formGroupTitle)}>{title}</h3>
+        {hint ? <p {...stylex.props(surface.formGroupHint)}>{hint}</p> : null}
       </header>
       {children}
     </section>
@@ -52,15 +159,13 @@ export function Field({
   children: ReactNode;
 }) {
   return (
-    <div className="space-y-1.5">
-      <div className="flex items-center gap-1.5">
-        {icon ? <span className="text-muted-foreground">{icon}</span> : null}
-        <Label htmlFor={htmlFor} className="text-xs font-normal">
-          {label}
-        </Label>
+    <div {...stylex.props(styles.field)}>
+      <div {...stylex.props(styles.fieldHead)}>
+        {icon ? <span {...stylex.props(styles.fieldIcon)}>{icon}</span> : null}
+        <UiField.Label htmlFor={htmlFor}>{label}</UiField.Label>
       </div>
       {children}
-      {hint ? <p className="text-[11px] leading-snug text-muted-foreground">{hint}</p> : null}
+      {hint ? <p {...stylex.props(styles.fieldHint)}>{hint}</p> : null}
     </div>
   );
 }
@@ -89,35 +194,32 @@ export function CollapsibleSection({
   defaultOpen?: boolean;
   action?: ReactNode;
 }) {
+  const [open, setOpen] = useState(!!defaultOpen);
   return (
-    <Collapsible defaultOpen={defaultOpen}>
-      <div className="flex h-9 items-center gap-1 rounded-md border border-border/60 bg-card/40 pr-1 hover:bg-card/70">
-        <CollapsibleTrigger asChild>
-          <button
-            type="button"
-            className="group flex h-full min-w-0 flex-1 items-center gap-2 rounded-md px-3 text-left text-sm font-normal text-foreground/90 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
+    <div {...stylex.props(styles.collapsibleItem)}>
+      <Collapsible.Root open={open} onOpenChange={setOpen}>
+        <div {...stylex.props(styles.collapsibleHead)}>
+          <Collapsible.Trigger
+            render={<button type="button" {...stylex.props(styles.collapsibleTrigger)} />}
           >
-            <ChevronDown className="h-3 w-3 shrink-0 transition-transform group-data-[state=open]:rotate-180" />
-            <span className="min-w-0 truncate">{title}</span>
+            <span {...stylex.props(styles.collapsibleTitle)}>{title}</span>
             {typeof count === 'number' && count > 0 ? (
-              <span className="ml-auto rounded-full bg-muted px-1.5 text-[10px] text-muted-foreground">
-                {count}
-              </span>
+              <span {...stylex.props(styles.collapsibleCount)}>{count}</span>
             ) : null}
-          </button>
-        </CollapsibleTrigger>
-        {action}
-      </div>
-      <CollapsibleContent className="mt-2">
-        <div className="pl-1">
-          {disabled ? (
-            <p className="px-1 py-2 text-xs text-muted-foreground">{disabledHint}</p>
-          ) : (
-            children
-          )}
+          </Collapsible.Trigger>
+          {action}
+          <ChevronDown
+            aria-hidden="true"
+            {...stylex.props(styles.collapsibleChevron, open && styles.collapsibleChevronOpen)}
+          />
         </div>
-      </CollapsibleContent>
-    </Collapsible>
+        <Collapsible.Panel>
+          <div {...stylex.props(styles.collapsibleBody)}>
+            {disabled ? <p {...stylex.props(styles.collapsibleHint)}>{disabledHint}</p> : children}
+          </div>
+        </Collapsible.Panel>
+      </Collapsible.Root>
+    </div>
   );
 }
 
@@ -140,22 +242,19 @@ export function FormMessage({
   return (
     <div
       role={tone === 'error' ? 'alert' : 'status'}
-      className={cn(
-        'flex items-start gap-2 rounded-md border px-3 py-2 text-xs leading-snug',
-        tone === 'error'
-          ? 'border-destructive/30 bg-destructive/10 text-destructive'
-          : 'border-status-warning/30 bg-status-warning/10 text-foreground/90',
+      {...withClassName(
+        stylex.props(
+          styles.message,
+          tone === 'error' ? styles.messageError : styles.messageWarning
+        ),
         className
       )}
     >
       <AlertTriangle
-        className={cn(
-          'mt-0.5 h-3.5 w-3.5 shrink-0',
-          tone === 'error' ? 'text-destructive' : 'text-status-warning'
-        )}
+        {...stylex.props(styles.mark, tone === 'error' ? styles.markError : styles.markWarning)}
         aria-hidden="true"
       />
-      <div className="min-w-0">{children}</div>
+      <div {...stylex.props(styles.messageBody)}>{children}</div>
     </div>
   );
 }
@@ -179,13 +278,13 @@ export function AutoGrowTextarea({
     const element = ref.current;
     if (!element) return;
     element.style.height = 'auto';
-    const styles = window.getComputedStyle(element);
+    const computed = window.getComputedStyle(element);
     // A layout-less environment (jsdom) reports '' for these; a NaN height would
     // be written to the style attribute and silently dropped.
     const px = (style: string) => (Number.isFinite(parseFloat(style)) ? parseFloat(style) : 0);
-    const lineHeight = px(styles.lineHeight) || 16;
-    const paddingY = px(styles.paddingTop) + px(styles.paddingBottom);
-    const borderY = px(styles.borderTopWidth) + px(styles.borderBottomWidth);
+    const lineHeight = px(computed.lineHeight) || 16;
+    const paddingY = px(computed.paddingTop) + px(computed.paddingBottom);
+    const borderY = px(computed.borderTopWidth) + px(computed.borderBottomWidth);
     const maxHeight = lineHeight * maxRows + paddingY + borderY;
     const content = element.scrollHeight + borderY;
     if (content <= 0) return;
@@ -211,12 +310,6 @@ export function AutoGrowTextarea({
   }, [resize]);
 
   return (
-    <Textarea
-      ref={ref}
-      rows={1}
-      value={value}
-      className={cn('resize-none', className)}
-      {...props}
-    />
+    <Textarea ref={ref} rows={1} value={value} resize="none" className={className} {...props} />
   );
 }

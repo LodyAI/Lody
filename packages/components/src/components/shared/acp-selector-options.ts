@@ -63,6 +63,8 @@ export const CONFIG_OPTION_OFF_VALUE = ACP_CONFIG_OPTION_OFF_VALUE;
 // Keep model-specific support aligned with the Codex ACP model catalog.
 const CODEX_EXTENDED_REASONING_BY_MODEL = new Map<string, readonly string[]>([
   ['gpt-6-astra', ['max', 'ultra']],
+  ['gpt-6-sol', ['max', 'ultra']],
+  ['gpt-6-luna', ['max']],
   ['gpt-5.6-sol', ['max', 'ultra']],
   ['gpt-5.6-terra', ['max', 'ultra']],
   ['gpt-5.6-luna', ['max']],

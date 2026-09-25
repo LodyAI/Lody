@@ -8,7 +8,7 @@ import {
   SessionChatStreamView,
   type ChatStreamItem,
 } from '@/components/ai-gui/view';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { clearScrollPosition, saveScrollPosition } from '@/hooks/use-scroll-position-cache';
 
 const sessionId = 'hydration-regression' as SessionId;
