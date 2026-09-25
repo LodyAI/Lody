@@ -32,6 +32,7 @@ export const Route = createRootRoute({
         media: '(prefers-color-scheme: dark)',
       },
       { rel: 'apple-touch-icon', href: '/_docs-assets/logo-180.png' },
+      ...(import.meta.env.DEV ? [{ rel: 'stylesheet', href: '/virtual:stylex.css' }] : []),
     ],
     scripts: [
       {

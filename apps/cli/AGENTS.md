@@ -19,6 +19,8 @@ Root `AGENTS.md` applies; this file adds CLI context. Build, PR-poller, and adap
   `splitting: true`, and keep the no-hoisting assertion.
 - Import the CLI's own `version` from `@/pkg`, never a relative `../package.json`; the package
   `name` stays `lody` in every composition.
+- Optional desktop provenance comes from the compiled constant in `utils/desktop-build.ts`,
+  never runtime environment variables. File/hybrid log initialization records it at debug level.
 - Keep `prepare:acp-adapters` before `dev-build.mjs` and Vite: skipping it can silently launch old
   adapter capabilities from a stale `dist/`.
 - `engines.node` is pinned to `>=22.14.0 <23 || >=23.6.0` by better-sqlite3's
@@ -81,6 +83,10 @@ execution/consent rules. These rules also bind CLI callers outside that director
   history, or file contents. Keep obvious-secret rejection in the CLI and the hosted API boundary.
 
 ## Agents, GitHub, and PR status
+
+- Checkout branch observations belong to `session/workspace-git-service.ts`, independent of
+  GitHub/PR support. Publish to the workspace owner, serialize probe plus write, and keep
+  startup/file snapshot observation off the prompt/RPC critical path.
 
 - ACP authentication rules: [src/agent/AGENTS.md](src/agent/AGENTS.md). A capability refresh after
   login proves credentials became usable and must finish inside the renderer's 300-second deadline.

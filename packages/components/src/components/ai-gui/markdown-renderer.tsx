@@ -59,15 +59,7 @@ import { MermaidDiagramViewer } from './mermaid-diagram-viewer';
 import { MermaidFullscreenButton, useMermaidDiagramCanvas } from './use-mermaid-diagram-canvas';
 import { SessionReadonlyContext } from './session-readonly-context';
 import type { MarkdownAgentFileLinkMenuItem } from '@/hooks/use-session-file-actions';
-import {
-  ContextMenu,
-  ContextMenuContent,
-  ContextMenuItem,
-  ContextMenuSub,
-  ContextMenuSubContent,
-  ContextMenuSubTrigger,
-  ContextMenuTrigger,
-} from '@/ui/context-menu';
+import { ContextMenu } from '@lody/ui/context-menu';
 
 export { createMarkdownMermaidConfig } from './markdown-mermaid';
 
@@ -1062,46 +1054,46 @@ const AgentFileLink = ({
   if (contextMenuItems.length === 0) return link;
 
   return (
-    <ContextMenu>
-      <ContextMenuTrigger asChild>{link}</ContextMenuTrigger>
-      <ContextMenuContent className="min-w-[190px]">
+    <ContextMenu.Root>
+      <ContextMenu.Trigger >{link}</ContextMenu.Trigger>
+      <ContextMenu.Content className="min-w-[190px]">
         {contextMenuItems.map((item) => {
           const ItemIcon = item.icon;
           if (item.kind === 'submenu') {
             return (
-              <ContextMenuSub key={item.id}>
-                <ContextMenuSubTrigger icon={<ItemIcon className="h-3.5 w-3.5" />}>
+              <ContextMenu.Submenu key={item.id}>
+                <ContextMenu.SubmenuTrigger icon={<ItemIcon className="h-3.5 w-3.5" />}>
                   {item.label}
-                </ContextMenuSubTrigger>
-                <ContextMenuSubContent className="min-w-[190px]">
+                </ContextMenu.SubmenuTrigger>
+                <ContextMenu.SubmenuContent className="min-w-[190px]">
                   {item.items.map((child) => {
                     const ChildIcon = child.icon;
                     return (
-                      <ContextMenuItem
+                      <ContextMenu.Item
                         key={child.id}
                         icon={<ChildIcon className="h-3.5 w-3.5" />}
-                        onSelect={child.run}
+                        onClick={child.run}
                       >
                         {child.label}
-                      </ContextMenuItem>
+                      </ContextMenu.Item>
                     );
                   })}
-                </ContextMenuSubContent>
-              </ContextMenuSub>
+                </ContextMenu.SubmenuContent>
+              </ContextMenu.Submenu>
             );
           }
           return (
-            <ContextMenuItem
+            <ContextMenu.Item
               key={item.id}
               icon={<ItemIcon className="h-3.5 w-3.5" />}
-              onSelect={item.run}
+              onClick={item.run}
             >
               {item.label}
-            </ContextMenuItem>
+            </ContextMenu.Item>
           );
         })}
-      </ContextMenuContent>
-    </ContextMenu>
+      </ContextMenu.Content>
+    </ContextMenu.Root>
   );
 };
 

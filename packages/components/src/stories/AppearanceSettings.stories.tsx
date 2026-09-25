@@ -5,7 +5,7 @@ import {
   AppearanceSettingsView,
   type AppearanceSettingsViewProps,
 } from '@/components/settings/appearance-setting';
-import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/ui/dialog';
+import { Dialog } from '@/ui/dialog';
 
 const systemFontFamilies = [
   'Fira Code',
@@ -22,6 +22,7 @@ function ControlledAppearanceSettings({ isElectron }: { isElectron: boolean }) {
   const [interfaceFontFamily, setInterfaceFontFamily] = useState('Inter');
   const [terminalFontFamily, setTerminalFontFamily] = useState('');
   const [terminalFontSize, setTerminalFontSize] = useState(13);
+  const [fontLigaturesEnabled, setFontLigaturesEnabled] = useState(true);
 
   return (
     <div className="mx-auto max-w-4xl p-6">
@@ -42,6 +43,8 @@ function ControlledAppearanceSettings({ isElectron }: { isElectron: boolean }) {
         onSystemFontMenuOpen={() => undefined}
         terminalFontSize={terminalFontSize}
         onTerminalFontSizeChange={setTerminalFontSize}
+        fontLigaturesEnabled={fontLigaturesEnabled}
+        onFontLigaturesEnabledChange={setFontLigaturesEnabled}
       />
     </div>
   );
@@ -69,13 +72,13 @@ export const ElectronInDialog: Story = {
     isElectron: true,
   },
   render: (args) => (
-    <Dialog open>
-      <DialogContent>
-        <DialogTitle>Appearance</DialogTitle>
-        <DialogDescription>Electron appearance settings</DialogDescription>
+    <Dialog.Root open>
+      <Dialog.Content>
+        <Dialog.Title>Appearance</Dialog.Title>
+        <Dialog.Description>Electron appearance settings</Dialog.Description>
         <ControlledAppearanceSettings {...args} />
-      </DialogContent>
-    </Dialog>
+      </Dialog.Content>
+    </Dialog.Root>
   ),
 };
 

@@ -1,11 +1,6 @@
 import { useTranslation } from 'react-i18next';
 import { isElectronRenderer, isMacOSElectronRenderer } from '@/lib/electron';
-import {
-  ContextMenu,
-  ContextMenuTrigger,
-  ContextMenuContent,
-  ContextMenuItem,
-} from '@/ui/context-menu';
+import { ContextMenu } from '@lody/ui/context-menu';
 import { isNewWindowClick, openDesktopWindow } from '@/lib/desktop-window';
 import {
   type ComponentPropsWithoutRef,
@@ -25,24 +20,16 @@ import {
   WINDOW_DRAG_EXEMPT_CLASS,
   WINDOW_DRAG_HEADER_CLASS,
   useMacTrafficLightRowPadClass,
+  useWindowsCaptionRowPadClass,
 } from '@/ui/window-drag-region';
 import { useElectronFullscreen } from '@/lib/electron';
-import { Badge } from '@/ui/badge';
-import { Button } from '@/ui/button';
-import { Kbd } from '@/ui/kbd';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/ui/tooltip';
+import { Badge } from '@lody/ui/badge';
+import { Button } from '@lody/ui/button';
+import { Kbd } from '@lody/ui/kbd';
+import { Tooltip } from '@lody/ui/tooltip';
 import { commands, formatKeyBinding, type ShortcutCommandId } from '@/lib/commands';
 import { setCommandPaletteOpen } from '@/lib/commands/palette-state';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from '@/ui/dropdown-menu';
+import { Menu } from '@/ui/menu';
 import { ScrollArea } from '@/ui/scroll-area';
 import {
   AppWindow,
@@ -64,7 +51,7 @@ import {
   Settings,
   Users,
 } from 'lucide-react';
-import { Spinner } from '@/ui/spinner';
+import { Spinner } from '@lody/ui/spinner';
 import {
   SessionList,
   type SessionListProps,
@@ -457,23 +444,14 @@ function ConnectionPill({
           ? labels.connectionLoading
           : labels.connectionOffline;
   return (
-    <span
-      className={cn(
-        'inline-flex shrink-0 items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-medium',
-        isLoading
-          ? 'bg-sidebar-hover text-sidebar-foreground-muted'
-          : 'bg-status-danger/[0.12] text-status-danger ring-1 ring-status-danger/20'
-      )}
+    <Badge
+      tone={isLoading ? 'running' : 'danger'}
+      icon={isLoading ? <Spinner className="h-3 w-3" label={null} /> : undefined}
       aria-label={label}
       data-workspace-status={state}
     >
-      {isLoading ? (
-        <Spinner className="h-3 w-3 shrink-0" aria-hidden />
-      ) : (
-        <span className="h-1.5 w-1.5 rounded-full bg-status-danger" aria-hidden />
-      )}
-      <span>{label}</span>
-    </span>
+      {label}
+    </Badge>
   );
 }
 
@@ -497,7 +475,7 @@ const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(function IconB
       ref={ref}
       type="button"
       variant="ghost"
-      size="icon"
+      icon
       className={cn(getLoroSidebarFooterIconButtonClassName(isMobile, active), className)}
       {...buttonProps}
     >
@@ -620,13 +598,13 @@ function SidebarHeaderIconButton({
   );
   if (disabled) return button;
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>{button}</TooltipTrigger>
-      <TooltipContent side="bottom" className="flex items-center gap-1.5">
+    <Tooltip.Root>
+      <Tooltip.Trigger render={button} />
+      <Tooltip.Content side="bottom" className="flex items-center gap-1.5">
         <span>{label}</span>
         {shortcut ? <Kbd>{shortcut}</Kbd> : null}
-      </TooltipContent>
-    </Tooltip>
+      </Tooltip.Content>
+    </Tooltip.Root>
   );
 }
 
@@ -770,6 +748,7 @@ export const LoroSidebar = memo(function LoroSidebar({
   const isMobile = useIsMobile();
   const isElectronFullscreen = useElectronFullscreen();
   const macTrafficLightRowPadClass = useMacTrafficLightRowPadClass();
+  const windowsCaptionRowPadClass = useWindowsCaptionRowPadClass();
   const { t } = useTranslation();
   const collapseShortcut = useCommandShortcutLabel('sidebar.toggle');
   const backShortcut = useCommandShortcutLabel('nav.back');
@@ -927,8 +906,8 @@ export const LoroSidebar = memo(function LoroSidebar({
       {chatScope === 'my' && onChatScopeChange ? (
         <Button
           type="button"
-          variant="outline"
-          size="sm"
+          variant="secondary"
+          size="small"
           className="mt-3 h-7 rounded-full border-sidebar-border bg-sidebar px-3 text-xs font-medium text-sidebar-foreground shadow-none hover:bg-sidebar-hover hover:text-sidebar-hover-foreground"
           onClick={() => onChatScopeChange('team')}
         >
@@ -951,8 +930,7 @@ export const LoroSidebar = memo(function LoroSidebar({
           name: workspaceName,
           logo: workspaces.find((ws) => ws.id === currentWorkspaceId)?.logo,
         }}
-        className="h-5 w-5 text-[10px]"
-        fallbackClassName="bg-sidebar-hover/60 text-sidebar-foreground"
+        size="small"
       />
       <span className="min-w-0 flex flex-1 items-center gap-2">
         <span className="min-w-0 flex-1 truncate font-medium">{workspaceName}</span>
@@ -981,9 +959,21 @@ export const LoroSidebar = memo(function LoroSidebar({
   });
   const renderWorkspaceControl = (menuSide: 'top' | 'bottom') =>
     workspaceSwitcherEnabled ? (
-      <DropdownMenu modal={!isMobile}>
+      <Menu.Root modal={!isMobile}>
         <div className="min-w-0 flex-1">
-          <DropdownMenuTrigger asChild>
+          <Menu.Trigger
+            render={
+              <button
+                type="button"
+                className={cn(workspaceIdentityClassName, windowDrag && WINDOW_DRAG_EXEMPT_CLASS)}
+                data-workspace-switcher-trigger
+                data-workspace-syncing={workspaceSyncing ? 'true' : 'false'}
+                aria-busy={workspaceSyncing || undefined}
+              >
+                {workspaceIdentity}
+              </button>
+            }
+          >
             <button
               type="button"
               className={cn(workspaceIdentityClassName, windowDrag && WINDOW_DRAG_EXEMPT_CLASS)}
@@ -993,25 +983,25 @@ export const LoroSidebar = memo(function LoroSidebar({
             >
               {workspaceIdentity}
             </button>
-          </DropdownMenuTrigger>
+          </Menu.Trigger>
         </div>
-        <DropdownMenuContent align="start" side={menuSide} className="w-64">
-          <DropdownMenuLabel className="normal-case text-xs font-normal tracking-normal">
+        <Menu.Content align="start" side={menuSide} className="w-64">
+          <Menu.GroupLabel className="normal-case text-xs font-normal tracking-normal">
             {userEmail}
-          </DropdownMenuLabel>
-          <DropdownMenuSeparator />
+          </Menu.GroupLabel>
+          <Menu.Separator />
 
           {workspaces.length > 0 ? (
             <>
-              <DropdownMenuLabel className="text-xs font-medium">
+              <Menu.GroupLabel className="text-xs font-medium">
                 {mergedLabels.switchWorkspace}
-              </DropdownMenuLabel>
-              <DropdownMenuRadioGroup
+              </Menu.GroupLabel>
+              <Menu.RadioGroup
                 value={currentWorkspaceId}
                 onValueChange={(value) => onWorkspaceSelected?.(value)}
               >
                 {/* Local provider: hosts may render the sidebar without a root one. */}
-                <TooltipProvider delayDuration={400}>
+                <Tooltip.Provider delay={400}>
                   {workspaces.map((ws) => {
                     const workspaceSlug = ws.slug;
                     // The avatar carries identity, so the check moves to the
@@ -1020,111 +1010,115 @@ export const LoroSidebar = memo(function LoroSidebar({
                     // boxes share one leading column, and gap-1.5 lands every
                     // label on the same text column.
                     const row = (
-                      <DropdownMenuRadioItem
+                      <Menu.RadioItem
                         key={ws.id}
                         value={ws.id}
                         indicator="check"
                         indicatorSide="end"
-                        className="gap-1.5 ps-2 pe-8"
+                        icon={
+                          <WorkspaceAvatar
+                            workspace={{ name: ws.name, logo: ws.logo }}
+                            className="h-5 w-5 text-[10px]"
+                          />
+                        }
+                        className="gap-1.5 ps-2"
                         onClickCapture={(event) => {
                           if (!workspaceSlug || !isNewWindowClick(event)) return;
-                          if (openDesktopWindow(undefined, workspaceSlug)) {
+                          if (openDesktopWindow(undefined, workspaceSlug, 'modifier_click')) {
                             event.preventDefault();
                             event.stopPropagation();
                           }
                         }}
+                        endContent={
+                          ws.id === currentWorkspaceId ? (
+                            // The checked row is the current workspace — it
+                            // carries the richer plan/members line that used to
+                            // need a separate header card.
+                            <span className="truncate text-[0.75em] text-muted-foreground">
+                              {typeof ws.memberCount === 'number'
+                                ? t('workspace.switcher.planAndMembers', {
+                                    plan: getPlanLabel(ws.planTier),
+                                    count: ws.memberCount,
+                                  })
+                                : t('workspace.switcher.plan', {
+                                    plan: getPlanLabel(ws.planTier),
+                                  })}
+                            </span>
+                          ) : ws.planTier ? (
+                            <Badge>
+                              {ws.planTier === 'enterprise'
+                                ? mergedLabels.planEnterprise
+                                : mergedLabels.planPlus}
+                            </Badge>
+                          ) : null
+                        }
                       >
-                        <WorkspaceAvatar
-                          workspace={{ name: ws.name, logo: ws.logo }}
-                          className="h-5 w-5 shrink-0 text-[10px]"
-                        />
-                        <span className="min-w-0 truncate">{ws.name}</span>
-                        {ws.id === currentWorkspaceId ? (
-                          // The checked row is the current workspace — it
-                          // carries the richer plan/members line that used to
-                          // need a separate header card.
-                          <span className="ml-auto shrink-0 truncate text-[0.75em] text-muted-foreground">
-                            {typeof ws.memberCount === 'number'
-                              ? t('workspace.switcher.planAndMembers', {
-                                  plan: getPlanLabel(ws.planTier),
-                                  count: ws.memberCount,
-                                })
-                              : t('workspace.switcher.plan', {
-                                  plan: getPlanLabel(ws.planTier),
-                                })}
-                          </span>
-                        ) : ws.planTier ? (
-                          <Badge
-                            variant="secondary"
-                            className="ml-auto shrink-0 border-transparent bg-foreground/[0.06] px-1.5 py-0 text-[10px] font-normal text-muted-foreground"
-                          >
-                            {ws.planTier === 'enterprise'
-                              ? mergedLabels.planEnterprise
-                              : mergedLabels.planPlus}
-                          </Badge>
-                        ) : null}
-                      </DropdownMenuRadioItem>
+                        {ws.name}
+                      </Menu.RadioItem>
                     );
 
                     if (!isElectronRenderer() || !workspaceSlug) return row;
 
-                    const contextTrigger = <ContextMenuTrigger asChild>{row}</ContextMenuTrigger>;
+                    const contextTrigger = <ContextMenu.Trigger>{row}</ContextMenu.Trigger>;
                     return (
-                      <ContextMenu key={ws.id}>
+                      <ContextMenu.Root key={ws.id}>
                         {ws.id === currentWorkspaceId ? (
                           contextTrigger
                         ) : (
                           // Other workspaces explain the modifier-click on hover,
                           // beside the row. Tooltip and ContextMenu roots render no
                           // DOM, so both triggers' props land on the row element.
-                          <Tooltip>
-                            <TooltipTrigger asChild>{contextTrigger}</TooltipTrigger>
-                            <TooltipContent side="right" sideOffset={8}>
+                          <Tooltip.Root>
+                            <Tooltip.Trigger render={contextTrigger} />
+                            <Tooltip.Content side="right" sideOffset={8}>
                               {newWindowHint}
-                            </TooltipContent>
-                          </Tooltip>
+                            </Tooltip.Content>
+                          </Tooltip.Root>
                         )}
-                        <ContextMenuContent>
-                          <ContextMenuItem
-                            onSelect={() => {
-                              openDesktopWindow(undefined, workspaceSlug);
+                        <ContextMenu.Content>
+                          <ContextMenu.Item
+                            onClick={() => {
+                              openDesktopWindow(undefined, workspaceSlug, 'context_menu');
                             }}
                           >
                             <AppWindow />
                             {t('workspace.openInNewWindow')}
-                          </ContextMenuItem>
-                        </ContextMenuContent>
-                      </ContextMenu>
+                          </ContextMenu.Item>
+                        </ContextMenu.Content>
+                      </ContextMenu.Root>
                     );
                   })}
-                </TooltipProvider>
-              </DropdownMenuRadioGroup>
-              <DropdownMenuSeparator />
+                </Tooltip.Provider>
+              </Menu.RadioGroup>
+              <Menu.Separator />
             </>
           ) : null}
 
-          {/* 20px icon boxes match the radio rows' 20px avatars, so both row
-              kinds share one leading column and one text column. */}
-          <DropdownMenuItem className="gap-1.5" onSelect={() => onCreateWorkspaceClicked?.()}>
-            <span className="flex h-5 w-5 shrink-0 items-center justify-center">
-              <Plus className="h-4 w-4" />
-            </span>
+          {/* Icon boxes match the radio rows' avatars, so both row kinds
+              share one leading column and one text column. */}
+          <Menu.Item
+            className="gap-1.5"
+            icon={<Plus className="h-4 w-4" />}
+            onClick={() => onCreateWorkspaceClicked?.()}
+          >
             {mergedLabels.createWorkspace}
-          </DropdownMenuItem>
-          <DropdownMenuItem className="gap-1.5" onSelect={() => onInviteClicked?.()}>
-            <span className="flex h-5 w-5 shrink-0 items-center justify-center">
-              <Users className="h-4 w-4" />
-            </span>
+          </Menu.Item>
+          <Menu.Item
+            className="gap-1.5"
+            icon={<Users className="h-4 w-4" />}
+            onClick={() => onInviteClicked?.()}
+          >
             {mergedLabels.inviteMembers}
-          </DropdownMenuItem>
-          <DropdownMenuItem className="gap-1.5" onSelect={() => onLinkRepoClicked?.()}>
-            <span className="flex h-5 w-5 shrink-0 items-center justify-center">
-              <Link2 className="h-4 w-4" />
-            </span>
+          </Menu.Item>
+          <Menu.Item
+            className="gap-1.5"
+            icon={<Link2 className="h-4 w-4" />}
+            onClick={() => onLinkRepoClicked?.()}
+          >
             {mergedLabels.connectGithubRepo}
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+          </Menu.Item>
+        </Menu.Content>
+      </Menu.Root>
     ) : (
       <div className="min-w-0 flex-1">
         <div className={workspaceIdentityClassName} data-workspace-identity>
@@ -1173,7 +1167,7 @@ export const LoroSidebar = memo(function LoroSidebar({
             'group/sidebar-header relative flex items-center justify-between gap-2',
             isMobile
               ? 'pl-[calc(12px+var(--safe-area-left))] pr-[calc(12px+var(--safe-area-right))] pt-[calc(12px+var(--safe-area-top))]'
-              : cn('h-11 px-1.5', macTrafficLightRowPadClass),
+              : cn('h-11 px-1.5', macTrafficLightRowPadClass, windowsCaptionRowPadClass),
             windowDrag && WINDOW_DRAG_HEADER_CLASS
           )}
         >
@@ -1191,7 +1185,7 @@ export const LoroSidebar = memo(function LoroSidebar({
             </span>
           )}
           {!isMobile ? (
-            <TooltipProvider delayDuration={400}>
+            <Tooltip.Provider delay={400}>
               <div
                 className={cn(
                   'ml-auto flex shrink-0 items-center',
@@ -1237,7 +1231,7 @@ export const LoroSidebar = memo(function LoroSidebar({
                   <ChevronRight className="h-3.5 w-3.5" />
                 </SidebarHeaderIconButton>
               </div>
-            </TooltipProvider>
+            </Tooltip.Provider>
           ) : null}
         </div>
 
@@ -1460,31 +1454,37 @@ export const LoroSidebar = memo(function LoroSidebar({
               <Settings strokeWidth={1.5} />
             </IconButton>
 
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
+            <Menu.Root>
+              <Menu.Trigger
+                render={
+                  <IconButton label="Help">
+                    <CircleHelp strokeWidth={1.5} />
+                  </IconButton>
+                }
+              >
                 <IconButton label="Help">
                   <CircleHelp strokeWidth={1.5} />
                 </IconButton>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent side="top" align="start" className="min-w-[140px]">
-                <DropdownMenuItem onSelect={() => onDocsClicked?.()}>
+              </Menu.Trigger>
+              <Menu.Content side="top" align="start" className="min-w-[140px]">
+                <Menu.Item onClick={() => onDocsClicked?.()}>
                   <BookOpen className="h-4 w-4" />
                   {mergedLabels.docs}
-                </DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => onJoinCommunityClicked?.()}>
+                </Menu.Item>
+                <Menu.Item onClick={() => onJoinCommunityClicked?.()}>
                   <Users className="h-4 w-4" />
                   {mergedLabels.joinCommunity}
-                </DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => onFeedbackClicked?.()}>
+                </Menu.Item>
+                <Menu.Item onClick={() => onFeedbackClicked?.()}>
                   <MessageSquareMore className="h-4 w-4" />
                   {mergedLabels.feedback}
-                </DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => onBugReportClicked?.()}>
+                </Menu.Item>
+                <Menu.Item onClick={() => onBugReportClicked?.()}>
                   <Bug className="h-4 w-4" />
                   {mergedLabels.bugReport}
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+                </Menu.Item>
+              </Menu.Content>
+            </Menu.Root>
 
             <IconButton label="Archive" active={activeNav === 'archive'} onClick={onArchiveClicked}>
               <Archive strokeWidth={1.5} />

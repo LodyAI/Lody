@@ -1,4 +1,4 @@
-import { Spinner } from '@/ui/spinner';
+import { Spinner } from '@lody/ui/spinner';
 import { useTranslation } from 'react-i18next';
 
 export function SessionSyncingIndicator({ labelClassName }: { labelClassName?: string }) {

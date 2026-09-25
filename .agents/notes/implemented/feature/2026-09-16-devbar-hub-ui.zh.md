@@ -88,3 +88,5 @@ loopback iframe URL，并选中 `lody-main-thread`。静态导出、跨平台打
   会拒绝所有非 `anonymous:` 方法。Lody 自有的 `/__lody/*` 路由则直接拒绝 `Origin: null`。
   MCP 维持原有 `authorization: false` + Origin gate 姿态；token 不写入实例注册表或
   agent 可读的状态。
+- 2026-09-23：独立的“Agent 与终端权限”gate 已移除；启用中的 Hub 现在始终挂载聚合
+  MCP 和 Terminals。见[合并决策](../simplification/2026-09-23-devbar-agent-access-merged.zh.md)。

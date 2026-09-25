@@ -121,6 +121,7 @@ Parent rules apply. Read each heading’s linked context before edits.
 - A RESTORED side-panel state must not animate: bump `sidebarRestoreSeq` in the
   same commit as any non-user `isSidebarOpen` write.
 - "Current branch" copy uses `SessionMeta.branchName` only.
+- PR summaries do not enable hosted detail/mutation APIs; local PR links open externally.
 
 ## [File surfaces](../../../../../.agents/docs/sessions-file-surfaces.md)
 
@@ -138,5 +139,4 @@ Parent rules apply. Read each heading’s linked context before edits.
 
 - Stories mirror production and never own UI: a story may only mock data and
   render the real component; appearance lives in the component.
-  `SessionConversationPage.stories.tsx` hand-composes leaves and drifts — keep it
-  minimal and verify UI changes in the real app.
+  Keep stories minimal; verify UI changes in the app.

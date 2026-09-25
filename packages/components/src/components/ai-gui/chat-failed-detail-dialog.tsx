@@ -1,18 +1,10 @@
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import { AlertCircle, Check, Copy } from 'lucide-react';
 
-import { Button } from '@/ui/button';
-import {
-  Dialog,
-  DialogClose,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/ui/dialog';
+import { Button } from '@lody/ui/button';
+import { Dialog } from '@/ui/dialog';
 import {
   buildChatFailedErrorReport,
   type ChatFailedErrorReportInput,
@@ -76,30 +68,30 @@ export function ChatFailedDetailDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog.Root open={open} onOpenChange={onOpenChange}>
       {/* `w-[calc(100vw-2rem)]` keeps the raw error readable on phones, where the
           shared dialog default reserves 2rem of margin on each side. */}
-      <DialogContent className="w-[calc(100vw-2rem)] max-w-2xl gap-3">
-        <DialogHeader className="pr-6 text-left sm:text-left">
-          <DialogTitle className="flex items-start gap-2 text-base">
+      <Dialog.Content className="w-[calc(100vw-2rem)] max-w-2xl gap-3">
+        <Dialog.Header className="pr-6 text-left sm:text-left">
+          <Dialog.Title className="flex items-start gap-2 text-base">
             <AlertCircle className="mt-0.5 size-4 shrink-0 text-destructive" aria-hidden="true" />
             <span className="min-w-0 break-words">{title}</span>
-          </DialogTitle>
+          </Dialog.Title>
           {action ? (
-            <DialogDescription className="text-left [overflow-wrap:anywhere]">
+            <Dialog.Description className="text-left [overflow-wrap:anywhere]">
               {action}
-            </DialogDescription>
+            </Dialog.Description>
           ) : (
             // Radix always wires `aria-describedby`; without a description node
             // the dialog points at a missing id.
-            <DialogDescription className="sr-only">
+            <Dialog.Description className="sr-only">
               {t(
                 'sessions.systemNotices.chatFailed.detailsDescription',
                 'Full agent error details'
               )}
-            </DialogDescription>
+            </Dialog.Description>
           )}
-        </DialogHeader>
+        </Dialog.Header>
 
         {showSummary ? (
           <p className="min-w-0 text-sm leading-5 [overflow-wrap:anywhere]">{summary}</p>
@@ -126,13 +118,11 @@ export function ChatFailedDetailDialog({
           </div>
         ) : null}
 
-        <DialogFooter className="gap-2">
-          <DialogClose asChild>
-            <Button type="button" variant="ghost" size="sm">
-              {t('common.close', 'Close')}
-            </Button>
-          </DialogClose>
-          <Button type="button" variant="outline" size="sm" onClick={handleCopy}>
+        <Dialog.Footer className="gap-2">
+          <Dialog.Close render={<Button type="button" variant="ghost" size="small" />}>
+            {t('common.close', 'Close')}
+          </Dialog.Close>
+          <Button type="button" variant="secondary" size="small" onClick={handleCopy}>
             {copied ? (
               <Check className="size-3.5 text-emerald-500" aria-hidden="true" />
             ) : (
@@ -142,8 +132,8 @@ export function ChatFailedDetailDialog({
               ? t('sessions.systemNotices.chatFailed.copied', 'Copied')
               : t('sessions.systemNotices.chatFailed.copyError', 'Copy error')}
           </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        </Dialog.Footer>
+      </Dialog.Content>
+    </Dialog.Root>
   );
 }

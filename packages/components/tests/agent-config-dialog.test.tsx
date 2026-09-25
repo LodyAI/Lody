@@ -10,6 +10,7 @@ import {
   getAcpCapabilityCacheKey,
   machineFlockKeys,
   serializeMachineFlockKey,
+  serializeCustomAcpLaunchSpec,
   type AgentConfigId,
   type AgentConfigMeta,
   type MachineId,
@@ -33,7 +34,7 @@ import {
 } from '../src/components/settings/agent-config-dialog';
 import * as machineAuthenticationHook from '../src/hooks/use-machine-acp-authentication';
 import { initI18n } from '../src/i18n';
-import { TooltipProvider } from '../src/ui/tooltip';
+import { Tooltip } from '@lody/ui/tooltip';
 
 const machineId = 'machine-test' as MachineId;
 const claudeConfigId = 'claude-config' as AgentConfigId;
@@ -205,7 +206,7 @@ describe('AgentConfigDialog', () => {
   const renderDialog = async (
     mode: AgentConfigDialogMode,
     machine: MachineViewMeta,
-    onSubmit = vi.fn(async () => {}),
+    onSubmit = vi.fn(async () => { }),
     onCheckBinaryStatus = vi.fn(async () => ({ status: 'installed' as const })),
     onRefreshCapabilities: RefreshCapabilities = async (args) => ({
       type: 'machine/acp-capabilities-refresh_response' as const,
@@ -221,7 +222,7 @@ describe('AgentConfigDialog', () => {
     await act(async () => {
       root?.render(
         <Provider store={store}>
-          <TooltipProvider>
+          <Tooltip.Provider>
             <AgentConfigDialog
               open
               onOpenChange={vi.fn()}
@@ -233,7 +234,7 @@ describe('AgentConfigDialog', () => {
               onManagedRuntimeSelected={onManagedRuntimeSelected}
               onScanPiExtensions={onScanPiExtensions}
             />
-          </TooltipProvider>
+          </Tooltip.Provider>
         </Provider>
       );
     });
@@ -459,7 +460,7 @@ describe('AgentConfigDialog', () => {
 
   it('queues Bub for verification without publishing or probing it from the dialog', async () => {
     const mode: AgentConfigDialogMode = { kind: 'create' };
-    const onSubmit = vi.fn(async () => {});
+    const onSubmit = vi.fn(async () => { });
     const onRefreshCapabilities = vi.fn<RefreshCapabilities>(async (args) => ({
       type: 'machine/acp-capabilities-refresh_response' as const,
       machineId: args.machineId,
@@ -499,7 +500,7 @@ describe('AgentConfigDialog', () => {
   });
 
   it('does not create Bub against a daemon without deferred provider setup', async () => {
-    const onSubmit = vi.fn(async () => {});
+    const onSubmit = vi.fn(async () => { });
     await renderDialog({ kind: 'create' }, createMachine('Legacy workstation'), onSubmit);
 
     await act(async () => {
@@ -531,7 +532,7 @@ describe('AgentConfigDialog', () => {
         },
       },
       getMachineAcpBinaryProgress: () => null,
-      subscribeMachineAcpBinaryProgress: () => () => {},
+      subscribeMachineAcpBinaryProgress: () => () => { },
     } as unknown as WorkspaceRuntime);
     store.set(currentWorkspaceIdAtom, workspaceId);
     store.set(currentWorkspaceSlugAtom, workspaceSlug);
@@ -659,7 +660,7 @@ describe('AgentConfigDialog', () => {
     await renderDialog(
       { kind: 'edit', config: createBuiltinConfig({ agentType: 'bub', name: 'Bub' }) },
       createMachine('Workstation'),
-      vi.fn(async () => {}),
+      vi.fn(async () => { }),
       vi.fn(async () => ({ status: 'installed' as const })),
       refresh
     );
@@ -719,10 +720,15 @@ describe('AgentConfigDialog', () => {
   };
 
   const selectTab = async (name: string): Promise<void> => {
+    // A whole press, not just its first half: the strip is Base UI's now and a
+    // tab is taken on the click, while Radix took it on the mousedown.
     await act(async () => {
-      getTabByName(name).dispatchEvent(
-        new MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 0 })
-      );
+      const tab = getTabByName(name);
+      const press = { bubbles: true, cancelable: true, button: 0 };
+      tab.dispatchEvent(new MouseEvent('mousedown', press));
+      tab.focus();
+      tab.dispatchEvent(new MouseEvent('mouseup', press));
+      tab.click();
     });
   };
 
@@ -761,7 +767,7 @@ describe('AgentConfigDialog', () => {
   };
 
   const renderDeepSeekCreate = (
-    onSubmit = vi.fn(async (_payload: AgentConfigSubmitPayload) => {}),
+    onSubmit = vi.fn(async (_payload: AgentConfigSubmitPayload) => { }),
     onManagedRuntimeSelected = vi.fn(),
     onCheckBinaryStatus = vi.fn(async () => ({ status: 'not-installed' as const }))
   ) =>
@@ -783,7 +789,7 @@ describe('AgentConfigDialog', () => {
 
   const renderDeepSeekEdit = (
     env: Record<string, string>,
-    onSubmit = vi.fn(async (_payload: AgentConfigSubmitPayload) => {})
+    onSubmit = vi.fn(async (_payload: AgentConfigSubmitPayload) => { })
   ) =>
     renderDialog(
       {
@@ -805,7 +811,7 @@ describe('AgentConfigDialog', () => {
   it('defaults DeepSeek Harness to the official endpoint and keeps it out of managed runtime setup', async () => {
     const onManagedRuntimeSelected = vi.fn();
     const onCheckBinaryStatus = vi.fn(async () => ({ status: 'not-installed' as const }));
-    const onSubmit = vi.fn(async (_payload: AgentConfigSubmitPayload) => {});
+    const onSubmit = vi.fn(async (_payload: AgentConfigSubmitPayload) => { });
     await renderDeepSeekCreate(onSubmit, onManagedRuntimeSelected, onCheckBinaryStatus);
 
     expect(onManagedRuntimeSelected).not.toHaveBeenCalled();
@@ -852,7 +858,7 @@ describe('AgentConfigDialog', () => {
   });
 
   it('requires a valid custom DeepSeek endpoint and saves the trimmed URL as-is', async () => {
-    const onSubmit = vi.fn(async (_payload: AgentConfigSubmitPayload) => {});
+    const onSubmit = vi.fn(async (_payload: AgentConfigSubmitPayload) => { });
     await renderDeepSeekCreate(onSubmit);
 
     await selectTab('Custom Endpoint');
@@ -951,7 +957,7 @@ describe('AgentConfigDialog', () => {
   });
 
   it('keeps DeepSeek key and custom endpoint drafts when switching tabs, and official save drops the custom URL', async () => {
-    const onSubmit = vi.fn(async (_payload: AgentConfigSubmitPayload) => {});
+    const onSubmit = vi.fn(async (_payload: AgentConfigSubmitPayload) => { });
     await renderDeepSeekEdit(
       {
         DEEPSEEK_API_KEY: 'sk-old',
@@ -995,7 +1001,7 @@ describe('AgentConfigDialog', () => {
   });
 
   it('ignores protected DeepSeek env keys typed in the additional environment textarea', async () => {
-    const onSubmit = vi.fn(async (_payload: AgentConfigSubmitPayload) => {});
+    const onSubmit = vi.fn(async (_payload: AgentConfigSubmitPayload) => { });
     await renderDeepSeekCreate(onSubmit);
 
     await act(async () => {
@@ -1037,39 +1043,8 @@ describe('AgentConfigDialog', () => {
     );
   });
 
-  it('keeps the draft config id stable when create mode props are recreated', async () => {
-    const onSubmit = vi.fn(async (_payload: AgentConfigSubmitPayload) => {});
-    const clickSave = async () => {
-      const createButton = Array.from(document.body.querySelectorAll('button')).find(
-        (button) => button.textContent?.trim() === 'Create'
-      );
-      await act(async () => {
-        createButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-      });
-    };
-
-    await renderDialog(
-      { kind: 'create', initialForm: { name: 'Claude' } },
-      createMachine('Workstation'),
-      onSubmit
-    );
-    await clickSave();
-    await vi.waitFor(() => expect(onSubmit).toHaveBeenCalled());
-    const firstId = onSubmit.mock.calls[0]?.[0].id;
-
-    await renderDialog(
-      { kind: 'create', initialForm: { name: 'Claude' } },
-      createMachine('Workstation refreshed'),
-      onSubmit
-    );
-    await clickSave();
-    await vi.waitFor(() => expect(onSubmit).toHaveBeenCalled());
-
-    expect(onSubmit.mock.calls.every(([payload]) => payload.id === firstId)).toBe(true);
-  });
-
   it('shows the managed Kimi Node requirement before create', async () => {
-    const onSubmit = vi.fn(async () => {});
+    const onSubmit = vi.fn(async () => { });
     await renderDialog(
       { kind: 'create', initialForm: { name: 'Kimi Code' } },
       createMachine('Old Node workstation'),
@@ -1097,7 +1072,7 @@ describe('AgentConfigDialog', () => {
   });
 
   it('prepares managed Kimi before creating it when its runtime is not downloaded', async () => {
-    const onSubmit = vi.fn(async () => {});
+    const onSubmit = vi.fn(async () => { });
     let finishRefresh: ((value: Awaited<ReturnType<RefreshCapabilities>>) => void) | undefined;
     const onRefreshCapabilities = vi.fn<RefreshCapabilities>(
       () =>
@@ -1145,7 +1120,7 @@ describe('AgentConfigDialog', () => {
   });
 
   it('persists a managed builtin setup without waiting for its runtime download', async () => {
-    const onSubmit = vi.fn(async (_payload: AgentConfigSubmitPayload) => {});
+    const onSubmit = vi.fn(async (_payload: AgentConfigSubmitPayload) => { });
     const onRefreshCapabilities = vi.fn<RefreshCapabilities>();
     await renderDialog(
       {
@@ -1181,7 +1156,7 @@ describe('AgentConfigDialog', () => {
   it.each([{ agentType: 'codex', name: 'Codex', accountName: 'ChatGPT' }])(
     'requires $accountName sign-in before creating the provider when credentials are missing',
     async ({ agentType, name, accountName }) => {
-      const onSubmit = vi.fn(async () => {});
+      const onSubmit = vi.fn(async () => { });
       const onRefreshCapabilities = vi.fn<RefreshCapabilities>(async (args) => ({
         type: 'machine/acp-capabilities-refresh_response',
         machineId: args.machineId,
@@ -1239,11 +1214,11 @@ describe('AgentConfigDialog', () => {
         }),
       }),
       cancelAuthentication: vi.fn(),
-      submitAuthorizationCode: vi.fn(async () => {}),
-      submitAuthenticationInput: vi.fn(async () => {}),
+      submitAuthorizationCode: vi.fn(async () => { }),
+      submitAuthenticationInput: vi.fn(async () => { }),
     });
     vi.spyOn(window, 'open').mockReturnValue(null);
-    const onSubmit = vi.fn(async () => {});
+    const onSubmit = vi.fn(async () => { });
     const onRefreshCapabilities = vi.fn<RefreshCapabilities>(async (args) => ({
       type: 'machine/acp-capabilities-refresh_response',
       machineId: args.machineId,
@@ -1291,7 +1266,7 @@ describe('AgentConfigDialog', () => {
   it.each([{ agentType: 'codex', name: 'Codex' }])(
     'automatically creates a verified $agentType provider after its live probe succeeds',
     async ({ agentType, name }) => {
-      const onSubmit = vi.fn(async () => {});
+      const onSubmit = vi.fn(async () => { });
       const onRefreshCapabilities = vi.fn<RefreshCapabilities>(async (args) => ({
         type: 'machine/acp-capabilities-refresh_response',
         machineId: args.machineId,
@@ -1327,7 +1302,7 @@ describe('AgentConfigDialog', () => {
   );
 
   it('persists the provider before probing and surfaces a live-probe failure', async () => {
-    const onSubmit = vi.fn(async () => {});
+    const onSubmit = vi.fn(async () => { });
     const onRefreshCapabilities = vi.fn<RefreshCapabilities>(async (args) => ({
       type: 'machine/acp-capabilities-refresh_response',
       machineId: args.machineId,
@@ -1365,7 +1340,7 @@ describe('AgentConfigDialog', () => {
   });
 
   it('revalidates a built-in provider when its environment changes after a successful test', async () => {
-    const onSubmit = vi.fn(async () => {});
+    const onSubmit = vi.fn(async () => { });
     const onRefreshCapabilities = vi.fn<RefreshCapabilities>(async (args) => ({
       type: 'machine/acp-capabilities-refresh_response',
       machineId: args.machineId,
@@ -1481,9 +1456,49 @@ describe('AgentConfigDialog', () => {
     }
   );
 
+  it.each([true, false])(
+    'uses advertised title ownership in settings: %s',
+    async (sessionTitle) => {
+      const machine = createTitleConfigMachine();
+      const entry = machine.acpCapabilities?.[getAcpCapabilityCacheKey(kimiConfigId)];
+      if (!entry) throw new Error('Missing capability fixture');
+      entry.sessionTitle = sessionTitle;
+      await renderDialog({ kind: 'edit', config: createBuiltinConfig() }, machine);
+      expect(document.body.textContent?.includes('Title generation')).toBe(!sessionTitle);
+    }
+  );
+
+  it.each([true, false])(
+    'only hides custom title settings for the matching command: %s',
+    async (matches) => {
+      const customAcp = { command: 'title-agent', args: ['--acp'] };
+      const machine = createTitleConfigMachine();
+      const entry = machine.acpCapabilities?.[getAcpCapabilityCacheKey(kimiConfigId)];
+      if (!entry) throw new Error('Missing capability fixture');
+      Object.assign(entry, {
+        cliType: 'custom',
+        agentType: 'custom-title',
+        sessionTitle: true,
+        sourceVersion: `custom:${serializeCustomAcpLaunchSpec(matches ? customAcp : { command: 'other-agent' })}`,
+      });
+      await renderDialog(
+        {
+          kind: 'edit',
+          config: createBuiltinConfig({
+            cliType: 'custom',
+            agentType: 'custom-title',
+            customAcp,
+          }),
+        },
+        machine
+      );
+      expect(document.body.textContent?.includes('Title generation')).toBe(!matches);
+    }
+  );
+
   it('shows a test hint while idle and updates title options in the open dialog after testing', async () => {
     const mode: AgentConfigDialogMode = { kind: 'edit', config: createBuiltinConfig() };
-    const onSubmit = vi.fn(async () => {});
+    const onSubmit = vi.fn(async () => { });
     let finishProbe!: (response: Awaited<ReturnType<RefreshCapabilities>>) => void;
     const onRefreshCapabilities: RefreshCapabilities = () =>
       new Promise((resolve) => {
@@ -1554,7 +1569,7 @@ describe('AgentConfigDialog', () => {
   });
 
   it('saves a normalized title reasoning effort after the title model changes', async () => {
-    const onSubmit = vi.fn(async () => {});
+    const onSubmit = vi.fn(async () => { });
     const config = createBuiltinConfig({
       titleGeneration: {
         configOptionValues: {

@@ -1,5 +1,7 @@
 import { tanstackStart } from '@tanstack/react-start/plugin/vite';
 import tailwindcss from '@tailwindcss/vite';
+import stylex from '@stylexjs/unplugin';
+import { stylexOptions } from '../packages/ui/stylex-options';
 import react from '@vitejs/plugin-react';
 import mdx from 'fumadocs-mdx/vite';
 import path from 'node:path';
@@ -217,6 +219,7 @@ export default defineConfig({
     installStartDevServerMiddleware(),
     mdx(),
     tailwindcss(),
+    stylex.vite(stylexOptions),
     react(),
   ],
   ssr: {

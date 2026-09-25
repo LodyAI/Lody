@@ -51,6 +51,20 @@ const INITIALIZE_BODY = JSON.stringify({
   },
 });
 
+const modernRequest = (id: number, method: string, params: Record<string, unknown> = {}) =>
+  JSON.stringify({
+    jsonrpc: '2.0',
+    id,
+    method,
+    params: {
+      ...params,
+      _meta: {
+        'io.modelcontextprotocol/protocolVersion': '2026-07-28',
+        'io.modelcontextprotocol/clientCapabilities': {},
+      },
+    },
+  });
+
 describe('MCP HTTP host wire behavior', () => {
   let server: http.Server;
   let baseUrl: string;
@@ -102,6 +116,116 @@ describe('MCP HTTP host wire behavior', () => {
     expect(payload.jsonrpc).toBe('2.0');
     expect(payload.id).toBe(1);
     expect(payload.result?.serverInfo?.name).toBe('lody');
+  });
+
+  it('discovers the modern revision and lists tools without initialize', async () => {
+    const headers = {
+      accept: ACCEPT,
+      'content-type': 'application/json',
+      authorization: `Bearer ${TOKEN}`,
+      'mcp-protocol-version': '2026-07-28',
+      ...sessionContextHeaders(),
+    };
+    const discover = await fetch(`${baseUrl}/mcp`, {
+      method: 'POST',
+      headers: { ...headers, 'mcp-method': 'server/discover' },
+      body: modernRequest(1, 'server/discover'),
+    });
+    expect(discover.status).toBe(200);
+    expect(await discover.json()).toMatchObject({
+      id: 1,
+      result: {
+        resultType: 'complete',
+        supportedVersions: ['2026-07-28'],
+        capabilities: { tools: {} },
+      },
+    });
+
+    const list = await fetch(`${baseUrl}/mcp`, {
+      method: 'POST',
+      headers: { ...headers, 'mcp-method': 'tools/list' },
+      body: modernRequest(2, 'tools/list'),
+    });
+    expect(list.status).toBe(200);
+    expect(await list.json()).toMatchObject({
+      result: {
+        resultType: 'complete',
+        tools: expect.arrayContaining([expect.objectContaining({ name: 'lody_feedback' })]),
+      },
+    });
+  });
+
+  it.each(['2025-06-18', '2025-11-25'])(
+    'keeps %s tool results in the legacy wire shape',
+    async (version) => {
+      const response = await fetch(`${baseUrl}/mcp`, {
+        method: 'POST',
+        headers: {
+          accept: ACCEPT,
+          'content-type': 'application/json',
+          authorization: `Bearer ${TOKEN}`,
+          'mcp-protocol-version': version,
+          ...sessionContextHeaders(),
+        },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 4, method: 'tools/list', params: {} }),
+      });
+      expect(response.status).toBe(200);
+      const payload = await response.json();
+      expect(payload).toMatchObject({
+        result: {
+          tools: expect.arrayContaining([expect.objectContaining({ name: 'lody_feedback' })]),
+        },
+      });
+      expect(payload.result).not.toHaveProperty('resultType');
+    }
+  );
+
+  it('returns a modern tool validation error without executing the tool', async () => {
+    const response = await fetch(`${baseUrl}/mcp`, {
+      method: 'POST',
+      headers: {
+        accept: ACCEPT,
+        'content-type': 'application/json',
+        authorization: `Bearer ${TOKEN}`,
+        'mcp-protocol-version': '2026-07-28',
+        'mcp-method': 'tools/call',
+        'mcp-name': 'lody_feedback',
+        ...sessionContextHeaders(),
+      },
+      body: modernRequest(5, 'tools/call', { name: 'lody_feedback', arguments: {} }),
+    });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      id: 5,
+      result: {
+        resultType: 'complete',
+        isError: true,
+        content: [
+          expect.objectContaining({ type: 'text', text: expect.stringContaining('feedback') }),
+        ],
+        _meta: { 'io.modelcontextprotocol/serverInfo': { name: 'lody', version: '0.1.0' } },
+      },
+    });
+  });
+
+  it('rejects a mismatched modern method header before dispatch', async () => {
+    const response = await fetch(`${baseUrl}/mcp`, {
+      method: 'POST',
+      headers: {
+        accept: ACCEPT,
+        'content-type': 'application/json',
+        authorization: `Bearer ${TOKEN}`,
+        'mcp-protocol-version': '2026-07-28',
+        'mcp-method': 'tools/list',
+        ...sessionContextHeaders(),
+      },
+      body: modernRequest(3, 'tools/call', { name: 'lody_feedback', arguments: {} }),
+    });
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({
+      id: 3,
+      error: { code: -32020 },
+    });
   });
 
   it('rejects GET with 405 instead of holding a stream open', async () => {

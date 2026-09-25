@@ -1,5 +1,5 @@
-import { useCallback, useMemo, useRef, useState } from 'react';
-import { toast } from 'sonner';
+import { useCallback, useMemo, useState } from 'react';
+import { toast } from '@/lib/toast';
 import {
   AlarmClock,
   ChevronDown,
@@ -32,20 +32,15 @@ import {
   type SessionPullRequestMeta,
 } from '@lody/shared';
 import { cn } from '@/lib/utils';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { writeTextToClipboard } from '@/lib/clipboard';
 import { getGoalStatusPresentation } from '@/lib/session-goal-status';
 import { formatDurationCompact, type DurationUnitLabels } from '@/lib/format-duration';
 import { ClusterChip, StageChip } from './info-chip';
 import { WorktreeIcon } from '@/components/icons/worktree-icon';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/ui/tooltip';
-import { Popover, PopoverAnchor, PopoverContent } from '@/ui/popover';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/ui/dropdown-menu';
+import { Tooltip } from '@lody/ui/tooltip';
+import { Popover } from '@lody/ui/popover';
+import { Menu } from '@/ui/menu';
 import { GoalActionButton, formatTokensCompact } from './session-goal-banner';
 import { ScheduledTaskList, useResolvedScheduledTasks } from './scheduled-tasks-panel';
 import { SessionPrIcon } from '@/components/sidebar-row-shared';
@@ -237,11 +232,12 @@ export function GoalChip({
                   <Button
                     type="button"
                     variant="ghost"
-                    size="icon"
+                    size="small"
+                    icon
                     onClick={() => onDismiss?.(goal)}
                     aria-label={t('sessions.goal.actions.dismiss', 'Dismiss goal banner')}
                     title={t('sessions.goal.actions.dismiss', 'Dismiss goal banner')}
-                    className="h-7 w-7 shrink-0 text-muted-foreground hover:text-foreground"
+                    className="shrink-0"
                   >
                     <X className="h-3.5 w-3.5" aria-hidden="true" />
                   </Button>
@@ -402,8 +398,15 @@ function ContextChipActions({ actions }: { actions: readonly ContextChipAction[]
         <span className="truncate">{primaryAction.label}</span>
       </button>
       {overflowActions.length > 0 ? (
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
+        <Menu.Root>
+          <Menu.Trigger render={<button
+              type="button"
+              aria-label={t('sessions.moreActions', 'More actions')}
+              title={t('sessions.moreActions', 'More actions')}
+              className="relative flex w-5 shrink-0 self-stretch items-center justify-center text-muted-foreground/75 outline-none transition-colors before:absolute before:left-0 before:h-3 before:w-px before:bg-foreground/10 hover:bg-foreground/[0.05] hover:text-foreground focus:outline-none focus:ring-0 focus:ring-offset-0 focus:shadow-none focus-visible:bg-foreground/[0.05] focus-visible:text-foreground focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 dark:before:bg-muted-foreground/15 dark:hover:bg-muted-foreground/[0.08] dark:focus-visible:bg-muted-foreground/[0.08]"
+            >
+              <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />
+            </button>}>
             <button
               type="button"
               aria-label={t('sessions.moreActions', 'More actions')}
@@ -412,8 +415,8 @@ function ContextChipActions({ actions }: { actions: readonly ContextChipAction[]
             >
               <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />
             </button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent side="top" align="end" sideOffset={6}>
+          </Menu.Trigger>
+          <Menu.Content side="top" align="end" sideOffset={6}>
             {overflowActions.map((action) =>
               // Merge can be demoted out of the primary slot (unpublished work
               // outranks it) and must stay reachable rather than silently vanish.
@@ -421,29 +424,29 @@ function ContextChipActions({ actions }: { actions: readonly ContextChipAction[]
               // method; picking a different method remains the split button's
               // job, which is back as soon as merge leads again.
               action.kind === 'merge' ? (
-                <DropdownMenuItem
+                <Menu.Item
                   key={action.id}
                   disabled={action.disabled || action.isMerging}
-                  onSelect={() => void action.onMerge(action.method)}
+                  onClick={() => void action.onMerge(action.method)}
                 >
                   {action.isMerging ? (
                     t('sessions.prTab.merging', 'Merging…')
                   ) : (
                     <PrMergeMethodLabel method={action.method} />
                   )}
-                </DropdownMenuItem>
+                </Menu.Item>
               ) : (
-                <DropdownMenuItem
+                <Menu.Item
                   key={action.id}
                   disabled={action.disabled}
-                  onSelect={action.onClick}
+                  onClick={action.onClick}
                 >
                   {action.label}
-                </DropdownMenuItem>
+                </Menu.Item>
               )
             )}
-          </DropdownMenuContent>
-        </DropdownMenu>
+          </Menu.Content>
+        </Menu.Root>
       ) : null}
     </div>
   );
@@ -495,10 +498,9 @@ function LocationControl({
   const glyph = <Icon className={cn('h-3.5 w-3.5 shrink-0', className)} />;
 
   return (
-    <TooltipProvider delayDuration={300}>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          {canCopy ? (
+    <Tooltip.Provider delay={300}>
+      <Tooltip.Root>
+        <Tooltip.Trigger render={canCopy ? (
             <button
               type="button"
               onClick={handleCopy}
@@ -513,18 +515,17 @@ function LocationControl({
             <span className="flex h-6 shrink-0 select-none items-center px-1 text-muted-foreground">
               {glyph}
             </span>
-          )}
-        </TooltipTrigger>
-        <TooltipContent side="top">
+          )}/>
+        <Tooltip.Content side="top">
           <span className="font-medium text-foreground">{label}</span>
           {canCopy ? (
             <span className="ml-1.5 text-muted-foreground">
               {t('sessions.infoBar.copyPathHint', 'click to copy path')}
             </span>
           ) : null}
-        </TooltipContent>
-      </Tooltip>
-    </TooltipProvider>
+        </Tooltip.Content>
+      </Tooltip.Root>
+    </Tooltip.Provider>
   );
 }
 
@@ -842,7 +843,6 @@ export function PrCiPill({
 }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
-  const anchorRef = useRef<HTMLButtonElement>(null);
   const hasRuns = !!runs && runs.length > 0;
   const presentation = usePrCiPresentation(hasRuns ? runs! : []);
   if (!hasRuns) return null;
@@ -852,51 +852,46 @@ export function PrCiPill({
   const label = `${t('sessions.prCi.label', 'CI checks')} · ${overallLabel}`;
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverAnchor asChild>
-        <button
-          ref={anchorRef}
-          type="button"
-          aria-label={label}
-          aria-haspopup="dialog"
-          aria-expanded={open}
-          title={label}
-          onClick={() => setOpen((value) => !value)}
-          className={cn(
-            'flex h-5 shrink-0 select-none items-center gap-1 rounded px-1.5 text-[11px] font-semibold uppercase tracking-wide',
-            tintClassName,
-            toneClassName
-          )}
-        >
-          <VerdictIcon className="h-3 w-3 shrink-0" aria-hidden="true" />
-          CI
-          {overall === 'running' ? (
-            <span className="tabular-nums">
-              {settled}/{runs!.length}
-            </span>
-          ) : null}
-          <ChevronDown
-            className={cn('h-3 w-3 shrink-0 opacity-60 transition-transform', open && 'rotate-180')}
-            aria-hidden="true"
-          />
-        </button>
-      </PopoverAnchor>
-      <PopoverContent
+    <Popover.Root open={open} onOpenChange={setOpen}>
+      <Popover.Trigger
+        render={
+          <button
+            type="button"
+            aria-label={label}
+            title={label}
+            className={cn(
+              'flex h-5 shrink-0 select-none items-center gap-1 rounded px-1.5 text-[11px] font-semibold uppercase tracking-wide',
+              tintClassName,
+              toneClassName
+            )}
+          >
+            <VerdictIcon className="h-3 w-3 shrink-0" aria-hidden="true" />
+            CI
+            {overall === 'running' ? (
+              <span className="tabular-nums">
+                {settled}/{runs!.length}
+              </span>
+            ) : null}
+            <ChevronDown
+              className={cn(
+                'h-3 w-3 shrink-0 opacity-60 transition-transform',
+                open && 'rotate-180'
+              )}
+              aria-hidden="true"
+            />
+          </button>
+        }
+      />
+      <Popover.Content
         side="top"
         align="start"
         sideOffset={8}
         aria-label={t('sessions.prCi.label', 'CI checks')}
-        onPointerDownOutside={(event) => {
-          const target = event.target as Node | null;
-          if (target && anchorRef.current?.contains(target)) {
-            event.preventDefault();
-          }
-        }}
         className="w-96 max-w-[min(24rem,90vw)] border-border/60 p-0 shadow-xl"
       >
         <PrCiPopoverBody runs={runs!} onOpenRun={onOpenRun} />
-      </PopoverContent>
-    </Popover>
+      </Popover.Content>
+    </Popover.Root>
   );
 }
 

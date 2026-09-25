@@ -18,15 +18,18 @@ strings on i18n rather than the registry's inline English.
   a hashed `?url` asset cannot satisfy it and a host that forgets the plugin gets an
   empty picker. Keep the locale list in the plugin and `lib/emojibase-assets.ts` in
   step; each locale is ~750 KB.
+- `data.json` folds every bundled locale's `label` and `tags` into `tags`
+  (build-time merge keyed on `hexcode`), because frimousse searches only the
+  loaded locale — one query then matches in either product language. `label` and
+  `messages.json` stay per-locale so display names and category headers keep the
+  UI language.
 - Anchor the URL on the Vite BASE, never on `document.baseURI` alone. The router uses
   browser history over http, so the document URL is a deep route and resolving against
   it asks for `…/settings/emojibase`, which the dev server answers with the SPA
   fallback — the picker then parses HTML as JSON.
-- Keep `focus-visible:shadow-none` on its search input. The global "Pro focus style" in
-  `tailwind/index.css` puts an inset `--primary` ring on any focused input through a
-  zero-specificity `:where(…)` selector, so every input with its own `focus-visible:`
-  utility overrides it; this bare registry input had none and was the one field in the
-  app that showed it.
+- Keep `focus-visible:shadow-none` on its search input: `tailwind/index.css`'s
+  zero-specificity "Pro focus style" rings every focused input unless a
+  `focus-visible:` utility overrides it, and this bare registry input had none.
 
 ## Field colors
 
@@ -40,48 +43,64 @@ strings on i18n rather than the registry's inline English.
 
 ## Menus and viewers
 
-- Dialog overlays and content share `--z-dialog`; portal DOM order puts each
-  new overlay above earlier dialogs and below its own content.
+- Dialog overlays and content share one z rung: portal DOM order puts each new
+  overlay above earlier dialogs and below its own content.
 - Dialog-contained `OptionSelector` menus must portal into the nearest
-  `[data-lody-dialog-content]`; a body portal is outside Radix remove-scroll handling.
+  `[data-lody-dialog-content]`; a body portal is outside the modal's scroll and
+  focus guards. `src/ui/dialog.tsx` emits that attribute on every panel.
 - `DiffViewer` uses the shared `@pierre/diffs` worker pools for syntax work regardless
   of file size. Do not create or terminate a worker pool per viewer.
-- Every floating surface passes `useSafeAreaCollisionPadding` to Radix's
-  `collisionPadding`; Radix defaults it to 0, which parks a colliding surface flush
-  against the screen edge and caps `--radix-*-available-height` there too.
-- A submenu's `sideOffset` is measured from its trigger ROW, so it must also clear the
-  parent surface's `p-0.5` (2px) and the 0.5px ring each surface paints outside its border
-  box. Default is `7` so the rings sit 4px apart; `3` welds the two surfaces together.
-- Tooltips (`ui/tooltip.tsx`) use a `0.5px` border and
-  `0 0.5px 1px 1px rgba(0,0,0,0.04)`. Do not restore a 1px border.
+- Every floating surface passes `useSafeAreaCollisionPadding` as
+  `collisionPadding`; the default parks a colliding surface flush against the
+  screen edge and caps `--available-height` there too.
+- Menus, context menus, dialogs, alert dialogs, popovers and tooltips come from
+  `@lody/ui` through the adapters in `src/ui/{menu,dialog,card}.tsx` or direct
+  package imports. Base UI opens on `mousedown` (scheduled in a frame), exposes
+  `data-open` rather than `data-state`, and maps `asChild` to `render`, `onSelect`
+  to `onClick`, and `onOpenAutoFocus`/`onCloseAutoFocus` to `initialFocus`/`finalFocus`.
+  `ui/menu.tsx` also owns the composer-focus policy, the menu search input and a
+  standalone `Menu.Label`; `ui/dialog.tsx` owns `data-lody-dialog-content` and
+  the WindowDragStrip backdrop. An `AlertDialog` answer that must stay open
+  while work is in flight is a plain `Button`, never `Action`/`Cancel` —
+  those are `Close`, and `Close` always closes.
+- Tooltips come from `@lody/ui/tooltip` (Base UI): `Tooltip.Provider/Root/
+  Trigger/Content`, `render` instead of `asChild`, `delay` on the trigger or
+  provider. The chip is visual-only — no `role="tooltip"`, no
+  `aria-describedby` — so an icon-only trigger names itself with `aria-label`.
 - Overlay list hover (menus, command palette, mention, select) is
   `bg-foreground/[0.05]` in light and `bg-white/[0.10]` in dark. Do not use
   `--hover` on popovers — it is sized for the page/sidebar and vanishes on the
   near-black dark menu fill. Kbd chips use the same 6% ink fill and muted text
   as the workspace Plus badge.
-- Menu chrome lives in `menu-styles.ts`. Items are `0.9em` of `--ui-font-size`
-  (the Appearance slider) / `py-1` / `min-h-7`. Settings chrome is `1em` of the
-  same token. Do not go back to `text-[13px]` or `text-xs` for menu rows.
-  The hairline is a `0.5px` shadow ring (not a CSS border). The ring and
-  separators share the per-theme `--menu-edge-color` mix in both themes, never
-  a fixed gray. Do not restore bulky
-  `min-h-8` rows or a 1px ring.
+- Product menu extras live in `menu-styles.ts` (group label, separator, search
+  shell); the surface and rows are `@lody/ui`'s popup surface. Rows track
+  `0.9em` of `--ui-font-size`; the edge is a `0.5px` shadow ring, never a 1px
+  border.
 
 ## Spinner
 
-- `animate-spin` goes on `ui/spinner.tsx` only, never on an `<svg>`. Chromium will
+- Two spinners exist and they are not interchangeable. `@lody/ui`'s `Spinner`
+  (`@lody/ui/spinner`) is the loading MARK — `size`/`label`/`tone`, no glyph
+  prop. `ui/spinner.tsx` is the icon ANIMATOR — `icon`/`spinning` for a refresh
+  glyph that only turns while in flight. Use the mark for "work is under way";
+  use the animator for an existing icon that must spin.
+- `animate-spin` goes on an HTML wrapper only, never on an `<svg>`. Chromium will
   not composite a transform animation on an SVG target at DPR≠1 (crbug.com/1186312),
   so an svg spinner re-runs style, pre-paint and layerize on the main thread every
   vsync: two idle sidebar spinners measured 40–50% renderer CPU on a Retina Mac.
-  `Spinner` animates an HTML wrapper; put sizing, margin and colour classes on it and
-  use `icon` / `spinning` for a refresh glyph that only turns while in flight. Any
-  other infinite transform animation (the readiness orbit) follows the same rule.
-- `Spinner`'s `spinning` defaults to TRUE, so a component that forwards its OWN
-  optional `spinning`/`loading`/`spin` prop must give it a default of `false`.
-  Forwarding `undefined` reaches the primitive's default and spins the icon in
-  every non-loading state; that shipped as a permanently rotating "No machines
-  available" and "Files unavailable" icon.
+  Both implementations obey this; any other infinite transform animation (the
+  readiness orbit) follows the same rule.
+- `Spinner`'s `spinning` defaults to TRUE: a component forwarding its own optional
+  `spinning`/`loading`/`spin` prop must default it to `false` — `undefined` hits the
+  primitive's default and spins at rest ("No machines available" shipped that way).
   Evidence: [spinner note](../../../../.agents/notes/implemented/bug-fix/2026-09-13-spinner-off-svg-retina-composite.md).
+
+## Working grid
+
+- Session working/unread marks go through `working-status-mark.tsx`, mounted across the
+  change; animate only `transform`/`opacity`, loops pinned to `startTime = 0` (the shared
+  sea), never rAF, timers or React state.
+  [Note](../../../../.agents/notes/implemented/feature/2026-09-24-sidebar-working-grid.md).
 
 ## Scroll area
 
@@ -89,9 +108,8 @@ strings on i18n rather than the registry's inline English.
   thumb polling on effect cleanup. Verify both ESM and CommonJS with
   `tests/scroll-area-lifecycle.test.tsx` when upgrading; removing a thumb during
   the scroll-end debounce must not retain a frame loop or detached viewport.
-- The desktop left sidebar (`loro-sidebar.tsx`) uses `type="scroll"` so the
-  overlay thumb appears only while scrolling, not on pointer move. Do not
-  revert it to the Radix default `hover`.
+- `loro-sidebar.tsx` uses `type="scroll"` so the overlay thumb appears only while
+  scrolling; do not revert to the Radix default `hover`.
 
 ## Slider
 

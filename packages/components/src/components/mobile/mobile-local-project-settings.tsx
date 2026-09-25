@@ -3,9 +3,9 @@ import { useTranslation } from 'react-i18next';
 import { useAtomValue } from 'jotai';
 import { machineSupportsLocalProjectRemovalProtocol, type MachineId } from '@lody/shared';
 import { ChevronRight, Wrench } from 'lucide-react';
-import { Spinner } from '@/ui/spinner';
-import { Switch } from '@/ui/switch';
-import { TooltipProvider } from '@/ui/tooltip';
+import { Spinner } from '@lody/ui/spinner';
+import { Switch } from '@lody/ui/switch';
+import { Tooltip } from '@lody/ui/tooltip';
 import { currentWorkspaceIdAtom } from '@/atoms';
 import { getMachineMetaMapAtom } from '@/atoms/machines';
 import { useLocalProjectsAdmin } from '@/hooks/use-local-projects-admin';
@@ -143,7 +143,7 @@ export function MobileLocalProjectSettings({
   const projectPath = typeof row.project.rootPath === 'string' ? row.project.rootPath : null;
 
   return (
-    <TooltipProvider delayDuration={200}>
+    <Tooltip.Provider delay={200}>
       {teamSharingAvailable && (
         <MobileSettingsSection
           title={t('workspace.projects.workspaceShareTitle', '工作区共享')}
@@ -306,6 +306,6 @@ export function MobileLocalProjectSettings({
           onHistorySelectionChange={onHistorySelectionChange}
         />
       ) : null}
-    </TooltipProvider>
+    </Tooltip.Provider>
   );
 }

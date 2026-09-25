@@ -207,9 +207,7 @@ export class ContextCopyPage {
   }
 
   private async copyFromForkMenu(): Promise<void> {
-    const forkMenu = this.page.locator(
-      '[role="menu"][aria-label="Fork conversation"][data-state="open"]'
-    );
+    const forkMenu = this.page.locator('[role="menu"][data-open]');
     await expect(forkMenu).toBeVisible();
     await expect(
       forkMenu.getByRole('menuitem', { name: /^(Fork to new tab|分叉到新标签页)$/u })

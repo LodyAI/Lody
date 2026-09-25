@@ -49,8 +49,14 @@ export function useCapacityAutoRetry(options: {
   history: readonly CapacityRetryHistoryEntry[] | null | undefined;
   canRetry: boolean;
   onRetry: () => Promise<boolean>;
+  /** Analytics hook: fires once per retry dispatch the user or countdown starts. */
+  onRetryAttempt?: (event: { trigger: 'manual' | 'auto'; attempt: number }) => void;
+  /** Analytics hook: fires when the user cancels a running auto-retry countdown. */
+  onAutoRetryCancelled?: (event: { pendingAttempt: number }) => void;
 }): CapacityRetryControl | null {
   const { sessionId, history, canRetry, onRetry } = options;
+  const onRetryAttemptRef = useRef(options.onRetryAttempt);
+  const onAutoRetryCancelledRef = useRef(options.onAutoRetryCancelled);
   const noticeId = useMemo(() => findLatestCapacityFailureNoticeId(history), [history]);
   const handledNoticeIdsRef = useRef(new Set<string>());
   const automaticAttemptsRef = useRef(0);
@@ -63,7 +69,9 @@ export function useCapacityAutoRetry(options: {
 
   useEffect(() => {
     onRetryRef.current = onRetry;
-  }, [onRetry]);
+    onRetryAttemptRef.current = options.onRetryAttempt;
+    onAutoRetryCancelledRef.current = options.onAutoRetryCancelled;
+  }, [onRetry, options.onRetryAttempt, options.onAutoRetryCancelled]);
 
   useEffect(() => {
     handledNoticeIdsRef.current.clear();
@@ -80,6 +88,12 @@ export function useCapacityAutoRetry(options: {
       return;
     }
     retryInFlightRef.current = true;
+    onRetryAttemptRef.current?.({
+      trigger: automatic ? 'auto' : 'manual',
+      // Auto: 1-based index within the bounded budget. Manual: always 1 because
+      // a manual click renews the automatic budget.
+      attempt: automatic ? automaticAttemptsRef.current + 1 : 1,
+    });
     setPending(true);
     setRetryInSeconds(null);
     setRetryRemainingRatio(null);
@@ -113,10 +127,13 @@ export function useCapacityAutoRetry(options: {
   }, [canRetry, noticeId, performRetry]);
 
   const stopAutoRetry = useCallback(() => {
+    if (retryInSeconds !== null) {
+      onAutoRetryCancelledRef.current?.({ pendingAttempt: automaticAttemptsRef.current + 1 });
+    }
     setAutoRetryEnabled(false);
     setRetryInSeconds(null);
     setRetryRemainingRatio(null);
-  }, []);
+  }, [retryInSeconds]);
 
   const autoRetryExhausted = automaticAttemptsRef.current >= MAX_AUTOMATIC_RETRIES;
 

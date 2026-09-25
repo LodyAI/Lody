@@ -73,3 +73,7 @@ materialization from UI execution, but does not remove foreground full-history
 import/Mirror cost or daemon-side document loading.
 
 Intent: [background prefetch](../../specs/session-background-prefetch.zh.md).
+
+The owning machine publishes branch observations independently of GitHub/PR support.
+See the [checkout branch contract](../../specs/workspace-branch-state.md) for ownership,
+activation/explicit refresh and turn triggers, and last-known-branch semantics.

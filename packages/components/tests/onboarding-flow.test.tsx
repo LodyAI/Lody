@@ -22,7 +22,8 @@ const mocks = vi.hoisted(() => ({
   useVisibleLocalProjects: vi.fn(),
 }));
 
-vi.mock('convex/react', () => ({
+vi.mock('convex/react', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('convex/react')>()),
   useAction: () => mocks.createGitHubInstallState,
 }));
 

@@ -1,4 +1,5 @@
 interface ImportMetaEnv {
+  readonly VITE_LODY_RELEASE_CHANNEL?: string
   readonly VITE_CONVEX_SITE_URL?: string
   readonly VITE_CONVEX_DEPLOY_URL?: string
   readonly VITE_SERVER_URL?: string

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useAtomValue, useStore } from 'jotai';
+import { usePostHog } from '@posthog/react';
 import { useTranslation } from 'react-i18next';
 import { useCloudMutation, useCloudQuery } from '@lody/platform/react';
 import type { SessionShareView } from '@lody/cloud-api';
@@ -17,6 +18,7 @@ import { userAtom } from '@/atoms';
 import { activeWorkspaceRuntimeAtom, authTokenAtom } from '@/atoms/runtime';
 import { sessionMetaCacheAtom } from '@/atoms/doc-meta';
 import { cloudOperations } from '@/lib/cloud-api-operations';
+import { capturePostHogEvent } from '@/lib/posthog-analytics';
 import { captureSessionShare } from '@/lib/session-share-publisher';
 import {
   readSessionShareSecret,
@@ -36,6 +38,7 @@ export function useSessionShareLinkActions(workspaceId: WorkspaceId) {
   const userId = useAtomValue(userAtom)?.id ?? null;
   const store = useStore();
   const scope = useResolvedWorkspaceScope({ workspaceId });
+  const postHog = usePostHog();
   const [busy, setBusy] = useState(false);
   const busyRef = useRef(false);
   const mounted = useRef(false);
@@ -179,6 +182,7 @@ export function useSessionShareLinkActions(workspaceId: WorkspaceId) {
         const link = linkFor(entry);
         if (!link) throw new Error('Share credential unavailable');
         await navigator.clipboard.writeText(link);
+        capturePostHogEvent(postHog, 'share/link_copied');
         if (current()) setNotice(t('settings.shares.copied', 'Share link copied'));
       });
     },
@@ -195,7 +199,10 @@ export function useSessionShareLinkActions(workspaceId: WorkspaceId) {
     },
     revokeDeployment,
     revoke(entry: SessionShareView) {
-      return run(() => revokeDeployment(entry));
+      return run(async () => {
+        await revokeDeployment(entry);
+        capturePostHogEvent(postHog, 'share/revoked');
+      });
     },
   };
 }
@@ -263,6 +270,7 @@ export function useSessionShareManagement(
   const userId = useAtomValue(userAtom)?.id;
   const store = useStore();
   const meta = useAtomValue(sessionMetaCacheAtom);
+  const postHog = usePostHog();
   const actions = useSessionShareLinkActions(workspaceId);
   const queriedEntry = useCloudQuery(
     operations.getManagement,
@@ -402,6 +410,12 @@ export function useSessionShareManagement(
     if (readerSecret) actions.persistBeforePublish(deployment, readerSecret);
     setPhase('publishing');
     const updated = await publish({ deploymentId: deployment.deploymentId });
+    // A new link (not an update of an existing one) is a created share.
+    if (readerSecret)
+      capturePostHogEvent(postHog, 'share/created', {
+        child_session_count: Math.max(0, prepared.sourceIds.length - 1),
+        source: confirmation ? 'mcp' : 'ui',
+      });
     if (lifetime.current.signal.aborted) return;
     // Auto-copy is a convenience, never a claim: only a resolved write counts.
     const url = actions.linkFor(updated);
@@ -470,6 +484,7 @@ export function useSessionShareManagement(
         ? actions.run(async () => {
             if (!result.url) throw new Error('Share credential unavailable');
             await navigator.clipboard.writeText(result.url);
+            capturePostHogEvent(postHog, 'share/link_copied');
             setResult((value) => (value ? { ...value, copied: true } : value));
           })
         : entry && actions.copy(entry),

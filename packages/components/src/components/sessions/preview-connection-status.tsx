@@ -9,10 +9,10 @@ import {
   TriangleAlert,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { Button } from '@/ui/button';
-import { Popover, PopoverContent, PopoverTrigger } from '@/ui/popover';
-import { Spinner } from '@/ui/spinner';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/ui/tooltip';
+import { Button } from '@lody/ui/button';
+import { Popover } from '@lody/ui/popover';
+import { Spinner } from '@lody/ui/spinner';
+import { Tooltip } from '@lody/ui/tooltip';
 import { cn } from '@/lib/utils';
 
 export type PreviewConnectionStatusProps = {
@@ -214,10 +214,10 @@ function usePreviewStatusPresentation({
 function StatusGlyph({ kind, className }: { kind: PreviewStatusKind; className?: string }) {
   const glyphClassName = cn('shrink-0', className);
   if (kind === 'connecting') {
-    return <Spinner className={glyphClassName} />;
+    return <Spinner label={null} className={glyphClassName} />;
   }
   if (kind === 'checking') {
-    return <Spinner icon={RefreshCw} className={glyphClassName} />;
+    return <RefreshCw className={glyphClassName} aria-hidden />;
   }
   if (kind === 'local') return <Monitor className={glyphClassName} aria-hidden />;
   if (kind === 'active') return <RadioTower className={glyphClassName} aria-hidden />;
@@ -288,22 +288,15 @@ function PreviewStatusContent({
           )}
         >
           {showStopSharing ? (
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="h-7 px-2 text-[11px]"
-              onClick={onStopSharing}
-            >
+            <Button type="button" variant="secondary" size="mini" onClick={onStopSharing}>
               {t('sessions.browser.stopSharing', 'Stop sharing')}
             </Button>
           ) : null}
           {showRestore ? (
             <Button
               type="button"
-              variant="outline"
-              size="sm"
-              className="h-7 px-2 text-[11px]"
+              variant="secondary"
+              size="mini"
               disabled={restoreDisabled}
               onClick={onRestore}
             >
@@ -327,34 +320,40 @@ export function PreviewConnectionStatus(props: PreviewConnectionStatusProps) {
   );
 
   return (
-    <Popover>
-      <TooltipProvider delayDuration={250}>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <PopoverTrigger asChild>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                data-testid="preview-status-trigger"
-                aria-label={accessibleName}
-                className={cn(
-                  'h-6 w-6 shrink-0 rounded-sm text-muted-foreground hover:bg-hover hover:text-foreground',
-                  (presentation.kind === 'failed' || presentation.kind === 'unavailable') &&
-                    'text-destructive hover:text-destructive'
-                )}
-              >
-                <StatusGlyph kind={presentation.kind} className="h-3.5 w-3.5" />
-              </Button>
-            </PopoverTrigger>
-          </TooltipTrigger>
-          <TooltipContent side="bottom">{presentation.title}</TooltipContent>
-        </Tooltip>
-      </TooltipProvider>
-      <PopoverContent align="end" sideOffset={6} className="w-72 p-3" aria-label={accessibleName}>
+    <Popover.Root>
+      <Tooltip.Provider delay={250}>
+        <Tooltip.Root>
+          <Tooltip.Trigger
+            render={
+              <Popover.Trigger
+                render={
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="mini"
+                    icon
+                    tone={
+                      presentation.kind === 'failed' || presentation.kind === 'unavailable'
+                        ? 'destructive'
+                        : 'neutral'
+                    }
+                    data-testid="preview-status-trigger"
+                    aria-label={accessibleName}
+                  >
+                    <StatusGlyph kind={presentation.kind} className="h-full w-full" />
+                  </Button>
+                }
+              />
+            }
+          />
+          <Tooltip.Content side="bottom">{presentation.title}</Tooltip.Content>
+        </Tooltip.Root>
+      </Tooltip.Provider>
+      <Popover.Content align="end" sideOffset={6} className="w-72">
+        <Popover.Title className="sr-only">{accessibleName}</Popover.Title>
         <PreviewStatusContent presentation={presentation} />
-      </PopoverContent>
-    </Popover>
+      </Popover.Content>
+    </Popover.Root>
   );
 }
 

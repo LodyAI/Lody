@@ -99,6 +99,7 @@ describe('CombinedMentionTextarea mention enablement and activation', () => {
     skillAgent?: { machineId?: string; cliType?: string };
     mentionSource?: unknown;
     commandsEnabled?: boolean;
+    availableCommands?: Array<{ name: string; description: string }>;
   }) {
     function ControlledComposer() {
       const [value, setValue] = React.useState(props.value);
@@ -109,6 +110,7 @@ describe('CombinedMentionTextarea mention enablement and activation', () => {
           skillAgent={props.skillAgent as never}
           mentionSource={props.mentionSource as never}
           commandsEnabled={props.commandsEnabled}
+          availableCommands={props.availableCommands}
           resetOnEmpty={false}
         />
       );
@@ -153,6 +155,44 @@ describe('CombinedMentionTextarea mention enablement and activation', () => {
       input.dispatchEvent(new Event('input', { bubbles: true }));
     });
   }
+
+  it.each(['/', '、'])(
+    'opens and filters commands from %s, then commits the slash form',
+    async (trigger) => {
+      await render({
+        value: '',
+        availableCommands: [
+          { name: 'review', description: 'Review changes' },
+          { name: 'compact', description: 'Compact history' },
+        ],
+      });
+      await typeInto(trigger);
+      expect(document.body.textContent).toContain('Review changes');
+      expect(document.body.textContent).toContain('Compact history');
+      await typeInto(`${trigger}rev`);
+      expect(document.body.textContent).toContain('Review changes');
+      expect(document.body.textContent).not.toContain('Compact history');
+      await act(async () => {
+        textarea()!.dispatchEvent(
+          new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
+        );
+      });
+      expect(textarea()!.value.trimEnd()).toBe('/review');
+    }
+  );
+
+  it.each(['text 、rev', '、rev argument', 'text /rev', '/rev argument'])(
+    'does not offer commands for mixed prompt %s',
+    async (value) => {
+      await render({
+        value: '',
+        availableCommands: [{ name: 'review', description: 'Review changes' }],
+      });
+      await typeInto(value);
+      expect(document.querySelector('[data-slot="mention-item"]')).toBeNull();
+      expect(textarea()!.value).toBe(value);
+    }
+  );
 
   it.each(['@file:', '@', '@other:'])(
     'shows asynchronous file search state and commits %s results through the composer',

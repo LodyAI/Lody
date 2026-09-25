@@ -1,10 +1,10 @@
 import { useEffect, useRef, type ComponentProps, type FormEvent, type ReactNode } from 'react';
 import { ArrowLeft, ArrowRight, MessageCircle, Power, RefreshCw, Share2, X } from 'lucide-react';
-import { Spinner } from '@/ui/spinner';
+import { Spinner } from '@lody/ui/spinner';
 import { useTranslation } from 'react-i18next';
 
-import { Button } from '@/ui/button';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/ui/tooltip';
+import { Button } from '@lody/ui/button';
+import { Tooltip } from '@lody/ui/tooltip';
 import { cn } from '@/lib/utils';
 import {
   PreviewConnectionStatus,
@@ -44,21 +44,23 @@ function ToolbarButton({
   ...props
 }: ComponentProps<typeof Button> & { label: string }) {
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          className={cn('h-8 w-8 shrink-0', className)}
-          aria-label={label}
-          {...props}
-        >
-          {children}
-        </Button>
-      </TooltipTrigger>
-      <TooltipContent>{label}</TooltipContent>
-    </Tooltip>
+    <Tooltip.Root>
+      <Tooltip.Trigger
+        render={
+          <Button
+            type="button"
+            variant="ghost"
+            icon
+            className={cn('shrink-0', className)}
+            aria-label={label}
+            {...props}
+          >
+            {children}
+          </Button>
+        }
+      />
+      <Tooltip.Content>{label}</Tooltip.Content>
+    </Tooltip.Root>
   );
 }
 
@@ -99,7 +101,7 @@ export function SessionBrowserToolbar({
   };
 
   return (
-    <TooltipProvider delayDuration={350}>
+    <Tooltip.Provider delay={350}>
       {/* Pad for the notch on mobile full-screen drawers; desktop keeps
          `--safe-area-top: 0` so the bar height is unchanged. */}
       <div className="flex min-w-0 items-center gap-0.5 border-b border-border bg-background px-1.5 pb-1.5 pt-[calc(0.375rem+var(--safe-area-top))]">
@@ -188,7 +190,7 @@ export function SessionBrowserToolbar({
           disabled={!shareAvailable || busy}
           onClick={onShare}
         >
-          {sharing ? <Spinner className="h-4 w-4" /> : <Share2 className="h-4 w-4" />}
+          {sharing ? <Spinner label={null} className="h-4 w-4" /> : <Share2 className="h-4 w-4" />}
         </ToolbarButton>
         {hasShareUrl ? (
           <ToolbarButton
@@ -200,6 +202,6 @@ export function SessionBrowserToolbar({
           </ToolbarButton>
         ) : null}
       </div>
-    </TooltipProvider>
+    </Tooltip.Provider>
   );
 }

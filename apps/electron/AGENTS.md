@@ -1,9 +1,8 @@
 # Electron contributor guidelines
 
 `CLAUDE.md` is a symlink to this file. Edit `AGENTS.md` only.
-Root `AGENTS.md` also applies. Main/preload/renderer module boundaries, IPC
-contracts, and window/renderer integration rules live in
-[`src/AGENTS.md`](src/AGENTS.md) and are read whenever `src/**` changes.
+Root rules apply. For `src/**`, read module, IPC and window contracts in
+[`src/AGENTS.md`](src/AGENTS.md).
 
 ## Local OSS composition
 
@@ -36,6 +35,10 @@ contracts, and window/renderer integration rules live in
 
 ## Build toolchain and window identity
 
+- `desktop-bootstrap` must be the first main import: Nightly chooses its data
+  directory before auth stores open. `desktop-channel` changes desktop identity,
+  never the shared CLI namespace, data root, or Host endpoint.
+
 - Electron 39's Chromium supports native top-level await. Keep renderer and module
   worker builds on native TLA; do not add `vite-plugin-top-level-await` or an
   equivalent full-bundle AST compatibility rewrite. Reprocessing Rollup's complete
@@ -48,8 +51,8 @@ contracts, and window/renderer integration rules live in
 
 ## Embedded CLI and native dependencies
 
-- The embedded CLI launches built JavaScript only; there is no source-loader/Jiti
-  fallback. Development and packaged builds must use the same output layout.
+- The embedded CLI runs built JavaScript, never source-loader/Jiti. Development
+  and packaged builds share the output layout.
 - `better-sqlite3`, `@lydell/node-pty`, and `loro-crdt` remain external and must be
   staged under `resources/cli/node_modules` by `scripts/sync-cli-dist.mjs` and
   `scripts/cli-native-deps.mjs`.

@@ -1,8 +1,8 @@
 import type { ComponentProps, ReactNode } from 'react';
 import { Globe2, ShieldAlert } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { Button } from '@/ui/button';
-import { Spinner } from '@/ui/spinner';
+import { Button } from '@lody/ui/button';
+import { Spinner } from '@lody/ui/spinner';
 import { cn } from '@/lib/utils';
 import { SessionBrowserToolbar } from './session-browser-toolbar';
 import {
@@ -63,8 +63,8 @@ export function SessionBrowserPanelView({
           <Button
             type="button"
             variant="ghost"
-            size="sm"
-            className="ml-auto h-6 px-2"
+            size="mini"
+            className="ml-auto"
             onClick={onDismissError}
           >
             {t('common.dismiss', 'Dismiss')}
@@ -77,7 +77,7 @@ export function SessionBrowserPanelView({
           aria-live="polite"
           className="flex min-h-0 flex-1 items-center justify-center gap-2 bg-background text-sm text-muted-foreground"
         >
-          <Spinner className="h-4 w-4" aria-hidden />
+          <Spinner label={null} className="h-4 w-4" />
           <span>
             {navigationPhase === 'resolving-machine'
               ? t('sessions.browser.resolvingMachine', 'Resolving the session machine…')

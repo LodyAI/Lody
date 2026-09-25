@@ -10,8 +10,9 @@
 
 import { isConvexError } from '@lody/shared';
 import { isNativeAppShell } from './native-platform';
+import { collectClientBuildInfo, type ClientBuildInfo } from './client-build-info';
 
-export type ErrorBoundaryReportEnvironment = {
+export type ErrorBoundaryReportEnvironment = ClientBuildInfo & {
   url?: string;
   userAgent?: string;
   online?: boolean | null;
@@ -19,9 +20,6 @@ export type ErrorBoundaryReportEnvironment = {
   timestamp?: string;
   runtime?: string;
   os?: string;
-  appVersion?: string;
-  build?: string;
-  buildDate?: string;
   language?: string;
 };
 
@@ -82,17 +80,6 @@ export function describeErrorForReport(error: unknown): string {
   return String(error);
 }
 
-function readBuildConstant(read: () => string | undefined): string | undefined {
-  try {
-    const value = read();
-    return value && value.length > 0 ? value : undefined;
-  } catch {
-    // A build constant that was never injected throws on reference in some
-    // bundles; treat it as absent.
-    return undefined;
-  }
-}
-
 function resolveRuntime(): string {
   if (typeof window === 'undefined') return 'ssr';
   if (window.__LODY_ELECTRON__ === true) return 'electron';
@@ -103,6 +90,7 @@ function resolveRuntime(): string {
 /** Snapshot the ambient context a crash report should carry. Never throws. */
 export function collectErrorBoundaryEnvironment(): ErrorBoundaryReportEnvironment {
   const environment: ErrorBoundaryReportEnvironment = {
+    ...collectClientBuildInfo(),
     runtime: resolveRuntime(),
     timestamp: new Date().toISOString(),
   };
@@ -127,21 +115,6 @@ export function collectErrorBoundaryEnvironment(): ErrorBoundaryReportEnvironmen
     }
   }
 
-  const appVersion = readBuildConstant(() =>
-    typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : undefined
-  );
-  if (appVersion) environment.appVersion = appVersion;
-
-  const build = readBuildConstant(() =>
-    typeof __GIT_COMMIT__ !== 'undefined' ? __GIT_COMMIT__ : undefined
-  );
-  if (build) environment.build = build;
-
-  const buildDate = readBuildConstant(() =>
-    typeof __BUILD_DATE__ !== 'undefined' ? __BUILD_DATE__ : undefined
-  );
-  if (buildDate) environment.buildDate = buildDate;
-
   return environment;
 }
 
@@ -161,7 +134,9 @@ export function buildErrorBoundaryReport(input: ErrorBoundaryReportInput): Error
     ['Runtime', environment.runtime],
     ['OS', environment.os],
     ['App version', environment.appVersion],
+    ['Release channel', environment.releaseChannel],
     ['Build', environment.build],
+    ['Open-source commit', environment.ossCommit],
     ['Build date', environment.buildDate],
     ['Language', environment.language],
     ['User agent', environment.userAgent],

@@ -22,3 +22,19 @@ export function downloadHead(locale: SiteLocale): SiteHead {
 export function DownloadRoutePage({ locale }: { locale: SiteLocale }) {
   return <DownloadPage locale={locale} />;
 }
+
+export function nightlyDownloadHead(locale: SiteLocale): SiteHead {
+  return pageHead({
+    title: locale === 'zh' ? '下载 Lody Nightly' : 'Download Lody Nightly',
+    description:
+      locale === 'zh'
+        ? '下载 Lody Nightly，提前体验桌面端新功能。'
+        : 'Download Lody Nightly to try new desktop features early.',
+    path: locale === 'zh' ? '/zh/download/nightly' : '/download/nightly',
+    locale: localeCode(locale),
+    alternates: [
+      { lang: 'en-US', path: '/download/nightly' },
+      { lang: 'zh-CN', path: '/zh/download/nightly' },
+    ],
+  });
+}
