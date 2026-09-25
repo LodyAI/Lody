@@ -209,6 +209,7 @@ import { RenameSessionDialog, type RenameSessionDialogTarget } from './rename-se
 import { useResolvedTheme } from '../../theme-provider';
 import { PullRequestBadge } from './pull-request-badge';
 import { SessionInfoBar } from './session-info-bar';
+import { CurrentSessionRelationsChip, useHasSessionRelations } from './session-relations-chip';
 import type { ContextChipAction, PrCiRun } from './session-info-chips';
 import {
   resolveSessionInfoBarGitHubActionIds,
@@ -4723,6 +4724,7 @@ export const SessionChatInterface = memo(
       openerSessionMeta?.title,
       t,
     ]);
+    const hasSessionRelations = useHasSessionRelations(session.id);
     const openedByConversationStart = useMemo(() => {
       const openedBy = openedByRelations?.openedBy;
       if (!openedBy) return undefined;
@@ -6196,6 +6198,16 @@ export const SessionChatInterface = memo(
                     onOpenPr={prLinkHandler}
                     contextActions={infoBarContextActions}
                     onOpenAllChanges={onOpenAllChanges}
+                    // Opener + every Session/Tab created here: the in-stream
+                    // creation cards scroll away with the conversation.
+                    relations={
+                      hasSessionRelations ? (
+                        <CurrentSessionRelationsChip
+                          sessionId={session.id}
+                          onOpenSession={handleOpenRelatedSession}
+                        />
+                      ) : undefined
+                    }
                     onOpenBrowser={browserActionAvailable ? handleOpenBrowser : undefined}
                     privateAccessStatus={
                       isMobile && sharing?.visibility === 'private'

@@ -163,7 +163,12 @@ the adapter lockfile, regenerates all eight zstd archives after a version change
 the canonical production objects, and then atomically updates the manifest.
 
 Grok launches the pinned `acp-extension-grok` compatibility adapter with an official,
-unmodified R2-managed runtime in `GROK_PATH`; the submodule owns the private-wire contract
+unmodified R2-managed runtime in `GROK_PATH`. Archive, executable, and source integrity
+pins live in `grok-runtime-manifest.json`. Version changes regenerate all six targets
+from exact official npm metadata; the operator updates this manifest only after full
+production upload/readback. The CLI rejects adapter/manifest version drift. See the
+[automatic pin refresh decision](../../../../.agents/notes/implemented/process/2026-09-25-grok-pin-refresh.md).
+The submodule owns the private-wire contract
 and minimum official version. Kimi is different: `packages/acp-extension-kimi` owns the
 Lody-maintained runtime source and implements the shared `acp-extension-core` contract.
 

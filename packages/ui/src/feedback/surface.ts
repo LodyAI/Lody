@@ -298,6 +298,12 @@ export const feedbackSurface = stylex.create({
    * layerize on the main thread every vsync — two idle sidebar spinners
    * measured 40–50% renderer CPU on a Retina Mac. The same animation on an
    * HTML element composites.
+   *
+   * The wrapper's box is the glyph's box, so `transform-origin: 50% 50%` is the
+   * ring's own centre: the size styles and the caller's `className` land on the
+   * wrapper and the svg fills it. The same margin on the glyph instead would
+   * grow the animated box asymmetrically — the invitation page's `mb-4` moved
+   * the origin off the ring and turned the spin into an orbit.
    */
   spinnerSpin: {
     display: 'inline-flex',
@@ -310,6 +316,10 @@ export const feedbackSurface = stylex.create({
   },
   spinner: {
     display: 'block',
+    // The glyph fills the turning box rather than sizing it: like every glyph
+    // here it states 100%, so what a caller adds to the box sizes the mark.
+    width: '100%',
+    height: '100%',
     color: 'inherit',
     // A presentation attribute cannot hold a `var()`, so the one measurement
     // both the ring and the arc take is declared here instead.

@@ -90,24 +90,25 @@ export const badge = stylex.defineVars({
    * The films. `label` is far stronger against either palette's background than
    * any of the tones, so the neutral one stays thinner than the rest.
    *
-   * 12 and 22 rather than the 8 and 14 these started at. At the first strength
-   * the five tones were not far enough apart to be told apart: measured off the
-   * rendered board, the closest pair was 0.019 in oklab in the light palette
-   * (neutral against success) and 0.026 in the dark one (running against
-   * warning). At 12/22 those are 0.030 and 0.035. It is still a film — the word
-   * is what says which tone this is, and the tint only has to make that
-   * believable at a glance — but a film nobody can separate is a film doing
-   * nothing.
+   * These ran at 12 and 22 for a stretch, raised from the 8 and 14 they are
+   * back at: at the first strength the closest pair of tones measured 0.019
+   * apart in oklab in the light palette (neutral against success) and 0.026 in
+   * the dark one (running against warning), and the stronger wash reached
+   * 0.030 and 0.035. That was the right fix while the film alone had to tell
+   * the tones apart, and the wrong weight once the word took that job — the
+   * four words sit 0.097 and 0.048 apart at the closest where the films manage
+   * 0.019 and 0.026 — so the chip is back to the wash a standing note wants
+   * rather than the depth a signal needed.
    */
-  neutralFill: `color-mix(in oklab, ${colors.label} 12%, transparent)`,
+  neutralFill: `color-mix(in oklab, ${colors.label} 8%, transparent)`,
   // The one tone the message family does not have, and `Progress` does: a badge
   // marking something that is happening now takes the colour the rules give
   // live state by name. It is the film, not the words — the accent is never a
   // fill a person presses, and a badge is nothing a person presses.
-  runningFill: `color-mix(in oklab, ${colors.accent} 22%, transparent)`,
-  successFill: `color-mix(in oklab, ${colors.success} 22%, transparent)`,
-  warningFill: `color-mix(in oklab, ${colors.warning} 22%, transparent)`,
-  dangerFill: `color-mix(in oklab, ${colors.destructive} 22%, transparent)`,
+  runningFill: `color-mix(in oklab, ${colors.accent} 14%, transparent)`,
+  successFill: `color-mix(in oklab, ${colors.success} 14%, transparent)`,
+  warningFill: `color-mix(in oklab, ${colors.warning} 14%, transparent)`,
+  dangerFill: `color-mix(in oklab, ${colors.destructive} 14%, transparent)`,
 });
 
 /**
@@ -121,9 +122,9 @@ export const badgePaletteTheme = stylex.createTheme(badge, {
   successLabel: `color-mix(in oklab, ${colors.success} 50%, ${colors.label})`,
   warningLabel: `color-mix(in oklab, ${colors.warning} 50%, ${colors.label})`,
   dangerLabel: `color-mix(in oklab, ${colors.destructive} 50%, ${colors.label})`,
-  neutralFill: `color-mix(in oklab, ${colors.label} 12%, transparent)`,
-  runningFill: `color-mix(in oklab, ${colors.accent} 22%, transparent)`,
-  successFill: `color-mix(in oklab, ${colors.success} 22%, transparent)`,
-  warningFill: `color-mix(in oklab, ${colors.warning} 22%, transparent)`,
-  dangerFill: `color-mix(in oklab, ${colors.destructive} 22%, transparent)`,
+  neutralFill: `color-mix(in oklab, ${colors.label} 8%, transparent)`,
+  runningFill: `color-mix(in oklab, ${colors.accent} 14%, transparent)`,
+  successFill: `color-mix(in oklab, ${colors.success} 14%, transparent)`,
+  warningFill: `color-mix(in oklab, ${colors.warning} 14%, transparent)`,
+  dangerFill: `color-mix(in oklab, ${colors.destructive} 14%, transparent)`,
 });
