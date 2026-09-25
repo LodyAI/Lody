@@ -102,7 +102,7 @@ import {
 } from '@/ui/window-drag-region';
 import {
   getZenAwarePanelToggleState,
-  navigationSidebarHiddenAtom,
+  navigationSidebarVisibleAtom,
   showNavigationSidebarAtom,
   zenLayoutModeAtom,
   zenRightPanelAtom,
@@ -872,7 +872,7 @@ const SessionDetail = ({
   const atomWorkspaceSlug = useAtomValue(currentWorkspaceSlugAtom);
   const workspaceSlug = routeTargetWorkspaceSlug ?? atomWorkspaceSlug;
   const currentWorkspaceId = useAtomValue(currentWorkspaceIdAtom) as WorkspaceId | null;
-  const isLeftSidebarHidden = useAtomValue(navigationSidebarHiddenAtom);
+  const isLeftSidebarHidden = !useAtomValue(navigationSidebarVisibleAtom);
   const showNavigationSidebar = useSetAtom(showNavigationSidebarAtom);
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
   const runtimeInitializing = useAtomValue(runtimeInitializingAtom);

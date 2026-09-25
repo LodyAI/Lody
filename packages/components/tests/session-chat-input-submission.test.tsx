@@ -294,6 +294,7 @@ describe('SessionChatInputArea submission feedback', () => {
     getDefaultStore().set(currentWorkspaceIdAtom, null);
     vi.restoreAllMocks();
     Reflect.deleteProperty(window, '__LODY_NATIVE__');
+    Reflect.deleteProperty(window.navigator, 'userAgent');
     Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1024 });
     root = null;
     container?.remove();
@@ -1075,11 +1076,18 @@ describe('SessionChatInputArea submission feedback', () => {
     }
   );
 
-  for (const mobilePlatform of ['narrow-browser', 'wide-native'] as const) {
+  for (const mobilePlatform of ['mobile-browser', 'wide-native'] as const) {
     function setMobilePlatform() {
       if (mobilePlatform === 'wide-native') {
         Object.defineProperty(window, '__LODY_NATIVE__', { configurable: true, value: true });
       } else {
+        // A narrow desktop-class window stays in the desktop family now, so a
+        // mobile browser is simulated by the phone identity, not width alone.
+        Object.defineProperty(window.navigator, 'userAgent', {
+          configurable: true,
+          value:
+            'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148',
+        });
         Object.defineProperty(window, 'innerWidth', { configurable: true, value: 390 });
       }
     }
