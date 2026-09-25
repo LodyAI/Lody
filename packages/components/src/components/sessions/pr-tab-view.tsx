@@ -1386,6 +1386,11 @@ function mergeVerdict(kind: MergeKind, t: RelativeTimeT): Verdict {
         title: t('sessions.prTab.closed', 'Closed without merging'),
       };
   }
+  return assertNever(kind);
+}
+
+function assertNever(value: never): never {
+  throw new Error(`Unhandled merge kind: ${value}`);
 }
 
 /**
