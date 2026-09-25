@@ -141,7 +141,8 @@ describe.skipIf(process.platform === 'win32')('cloudflared lifecycle IPC', () =>
       socket.write('origin\n');
       const child = await pending;
       expect(child.origin).toBe('https://fixture-quick.trycloudflare.com');
-      expect(child.diagnostic()).toBe('edge [url] unavailable');
+      expect(child.diagnostic()).toContain('connection=not registered');
+      expect(child.diagnostic()).toContain('lastError=edge [url] unavailable');
       await child.stop();
       await child.stop();
       expect(await child.closed).toBeNull();

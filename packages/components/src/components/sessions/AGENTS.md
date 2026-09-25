@@ -15,7 +15,7 @@ Parent rules apply. Read each heading’s linked context before edits.
 - `?tab` owns selection; never mirror it in state (#193). Confirmed shared closure
   may replace the current choice with a neighbour or local draft. Close writes
   `isTabClosed`, never archive or delete.
-  Reopening archives restores lifecycle first.
+  Reopen clears only `isTabClosed`; it never unarchives.
 - Cmd/Ctrl+W ownership: [command rules](../../lib/commands/AGENTS.md).
 - `Change owner` writes the OWNER `SessionMeta.userId`, never sharing/visibility;
   they stay separate actions.
