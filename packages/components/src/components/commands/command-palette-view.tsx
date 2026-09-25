@@ -229,6 +229,12 @@ export function CommandPaletteView({
           loop
           value={active}
           onValueChange={setActive}
+          onKeyDown={(event) => {
+            if (event.key !== 'Escape') return;
+            event.preventDefault();
+            event.stopPropagation();
+            onOpenChange(false);
+          }}
           {...stylex.props(styles.root)}
         >
           <div {...stylex.props(styles.field)}>

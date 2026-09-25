@@ -24,6 +24,7 @@ describe('CommandPaletteView', () => {
   let root: Root;
   let container: HTMLDivElement;
   const ran: string[] = [];
+  const openChanges: boolean[] = [];
 
   const result = (key: string, group?: string): PaletteResult => ({
     kind: 'command',
@@ -40,7 +41,7 @@ describe('CommandPaletteView', () => {
       root.render(
         createElement(CommandPaletteView, {
           open: true,
-          onOpenChange: () => undefined,
+          onOpenChange: (open: boolean) => openChanges.push(open),
           query: '',
           onQueryChange: () => undefined,
           results,
@@ -67,6 +68,7 @@ describe('CommandPaletteView', () => {
       disconnect() {}
     } as unknown as typeof ResizeObserver;
     ran.length = 0;
+    openChanges.length = 0;
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -104,5 +106,11 @@ describe('CommandPaletteView', () => {
   it('says so when nothing matches', async () => {
     await render([]);
     expect(document.body.textContent).toContain('Nothing here');
+  });
+
+  it('closes when Escape is pressed', async () => {
+    await render([result('back', 'Navigation')]);
+    await press('Escape');
+    expect(openChanges).toContain(false);
   });
 });
