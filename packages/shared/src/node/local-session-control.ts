@@ -162,9 +162,14 @@ function isPreviewConnection(value: unknown): boolean {
   }
   return (
     typeof value.status === 'string' &&
-    isOptionalString(value.grantId) &&
+    ['creating', 'active', 'closed', 'failed'].includes(value.status) &&
+    isOptionalString(value.endpointId) &&
     isOptionalString(value.publicUrl) &&
-    isOptionalString(value.tunnelId) &&
+    (value.closedReason === undefined ||
+      (typeof value.closedReason === 'string' &&
+        ['idle_timeout', 'revoked', 'session_ended', 'replaced', 'runtime_lost'].includes(
+          value.closedReason
+        ))) &&
     (typeof value.target === 'undefined' || isPreviewTarget(value.target)) &&
     isOptionalString(value.approvedByUserId)
   );
@@ -631,7 +636,17 @@ export function isLocalSessionControlRequest(value: unknown): value is LocalSess
       typeof value.requestedByUserId === 'string' &&
       isPreviewTarget(value.target) &&
       isPreviewApproval(value.approval) &&
-      (typeof value.replaceExisting === 'undefined' || typeof value.replaceExisting === 'boolean')
+      (typeof value.restart === 'undefined' || typeof value.restart === 'boolean')
+    );
+  }
+
+  if (value.type === 'session/preview-status') {
+    return (
+      typeof value.machineId === 'string' &&
+      typeof value.workspaceId === 'string' &&
+      typeof value.sessionId === 'string' &&
+      typeof value.requestedByUserId === 'string' &&
+      isOptionalString(value.renewEndpointId)
     );
   }
 
@@ -1045,11 +1060,16 @@ export function isLocalSessionControlResponse(
 
   if (
     value.type === 'session/preview-create_response' ||
-    value.type === 'session/preview-revoke_response'
+    value.type === 'session/preview-revoke_response' ||
+    value.type === 'session/preview-status_response'
   ) {
     return (
       typeof value.sessionId === 'string' &&
       typeof value.success === 'boolean' &&
+      (value.expiresAt === undefined ||
+        (typeof value.expiresAt === 'number' &&
+          Number.isSafeInteger(value.expiresAt) &&
+          value.expiresAt >= 0)) &&
       (typeof value.connection === 'undefined' || isPreviewConnection(value.connection)) &&
       isOptionalString(value.error) &&
       isOptionalString(value.message)

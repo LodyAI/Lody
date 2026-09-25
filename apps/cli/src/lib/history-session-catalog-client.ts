@@ -13,6 +13,7 @@ import {
   mergeLoginShellEnv,
   resolveACPProcessLaunchAsync,
   withDefaultAcpPathEntries,
+  type ResolveACPSettingInput,
   type ResolvedACPProcessLaunch,
 } from '@/agent/setting';
 import { createStdinWritableStream, createStdoutReadableStream } from '@/utils/stream';
@@ -24,7 +25,9 @@ import {
   type ACPSessionId,
   getLocalProjectHistoryProviderKey,
   type LocalProjectHistoryProvider,
+  type SessionAcpRuntimeConfigPatch,
 } from '@lody/shared';
+import { getAcpRuntimeConfigPatchFromOptions } from '@/lib/acp/runtime-config';
 import { LODY_EXTENSION_METHODS } from 'acp-extension-core';
 
 const ACP_OPERATION_TIMEOUT_MS = 120_000;
@@ -126,8 +129,11 @@ type ResolvedHistoryACPProcessLaunch = Omit<ResolvedACPProcessLaunch, 'env'> & {
   env: NodeJS.ProcessEnv;
 };
 
+export type HistoryProviderLaunch = LocalProjectHistoryProvider &
+  Pick<ResolveACPSettingInput, 'customAcp' | 'runtimeOverrides' | 'env'>;
+
 export async function resolveHistoryACPProcessLaunch(args: {
-  provider: LocalProjectHistoryProvider;
+  provider: HistoryProviderLaunch;
   env?: NodeJS.ProcessEnv;
 }): Promise<ResolvedHistoryACPProcessLaunch> {
   const launch = await resolveACPProcessLaunchAsync(args.provider);
@@ -138,11 +144,14 @@ export async function resolveHistoryACPProcessLaunch(args: {
 }
 
 async function createHistoryAcpConnection(args: {
-  provider: LocalProjectHistoryProvider;
+  provider: HistoryProviderLaunch;
   workdir: string;
   logger: Logger;
 }): Promise<HistoryAcpConnection> {
-  const launch = await resolveHistoryACPProcessLaunch({ provider: args.provider });
+  const launch = await resolveHistoryACPProcessLaunch({
+    provider: args.provider,
+    env: { ...process.env, ...args.provider.env },
+  });
   // Same ENOENT trap as startLocalAcpAgent: a GUI/daemon launch inherits a
   // minimal PATH, so overlay the login-shell env (+ default fallback dirs) before
   // spawning the history-sync agent binary.
@@ -255,7 +264,7 @@ export async function requestHistorySessionReplay(args: {
   cwd: string;
   connection: HistoryReplayConnection;
   initResponse: acp.InitializeResponse;
-}): Promise<void> {
+}): Promise<SessionAcpRuntimeConfigPatch | undefined> {
   if (args.provider.cliType === 'builtin' && args.provider.agentType === 'codex') {
     const method = getLodyReadSessionHistoryMethod(args.initResponse);
     if (!method) {
@@ -270,13 +279,13 @@ export async function requestHistorySessionReplay(args: {
       }),
       `${getProviderLabel(args.provider)} ACP session history read (${args.acpSessionId})`
     );
-    return;
+    return undefined;
   }
 
   if (!args.initResponse.agentCapabilities?.loadSession) {
     throw new Error(`${getProviderLabel(args.provider)} ACP agent does not advertise loadSession`);
   }
-  await withTimeout(
+  const response = await withTimeout(
     args.connection.loadSession({
       sessionId: args.acpSessionId as unknown as acp.SessionId,
       cwd: args.cwd,
@@ -284,6 +293,7 @@ export async function requestHistorySessionReplay(args: {
     }),
     `${getProviderLabel(args.provider)} ACP loadSession (${args.acpSessionId})`
   );
+  return getAcpRuntimeConfigPatchFromOptions(args.acpSessionId, response.configOptions ?? []);
 }
 
 export async function listPaginatedHistorySessions(
@@ -327,7 +337,7 @@ export function dedupeHistorySessionsById(sessions: SessionInfo[]): SessionInfo[
 }
 
 export async function listHistorySessionsForLocalProject(args: {
-  provider: LocalProjectHistoryProvider;
+  provider: HistoryProviderLaunch;
   rootPath: string;
   logger: Logger;
   requiredSessionIds?: readonly string[];
@@ -376,11 +386,14 @@ export async function listHistorySessionsForLocalProject(args: {
 }
 
 export async function loadHistorySessionReplay(args: {
-  provider: LocalProjectHistoryProvider;
+  provider: HistoryProviderLaunch;
   rootPath: string;
   acpSessionId: ACPSessionId;
   logger: Logger;
-}): Promise<AcpSessionNotification[]> {
+}): Promise<{
+  notifications: AcpSessionNotification[];
+  runtimeConfig?: SessionAcpRuntimeConfigPatch;
+}> {
   const cwd = path.resolve(args.rootPath);
   const { agentProcess, connection, collector, initResponse } = await createHistoryAcpConnection({
     provider: args.provider,
@@ -389,14 +402,14 @@ export async function loadHistorySessionReplay(args: {
   });
 
   try {
-    await requestHistorySessionReplay({
+    const runtimeConfig = await requestHistorySessionReplay({
       provider: args.provider,
       acpSessionId: args.acpSessionId,
       cwd,
       connection,
       initResponse,
     });
-    return collector.notifications;
+    return { notifications: collector.notifications, runtimeConfig };
   } catch (error) {
     const message = `Failed to load ${getProviderLabel(args.provider)} session ${
       args.acpSessionId

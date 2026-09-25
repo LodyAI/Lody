@@ -1092,6 +1092,16 @@ export const MachineStatusResponseSchema = z
   })
   .strict();
 
+export const MachinePreviewControlResponseSchema = z
+  .object({
+    type: z.literal('machine/preview-control_response'),
+    machineId: MachineIdSchema,
+    success: z.boolean(),
+    runtimeNonce: z.string().uuid().optional(),
+    error: z.string().optional(),
+  })
+  .strict();
+
 export const MachinePingRequestSchema = z
   .object({
     type: z.literal('machine/ping'),
@@ -1795,9 +1805,7 @@ const PreviewCandidateSourceSchema = z
 
 const PreviewErrorCodeSchema = z.enum([
   'host_not_loopback',
-  'host_not_private',
   'host_prohibited',
-  'target_resolution_failed',
   'target_changed',
   'user_confirmation_required',
   'invalid_port',
@@ -1807,15 +1815,11 @@ const PreviewErrorCodeSchema = z.enum([
   'session_archived',
   'port_not_listening',
   'local_server_unreachable',
-  'process_not_owned_by_session',
   'preview_already_active',
   'resource_limit_exceeded',
-  'preview_expired',
-  'preview_idle_timeout',
   'grant_denied',
   'tunnel_not_configured',
   'tunnel_creation_failed',
-  'cloud_authorization_failed',
   'internal_error',
 ]);
 
@@ -1852,47 +1856,19 @@ const PreviewConnectionErrorSchema = z
   })
   .strict();
 
-const PreviewResourceLimitsSchema = z
+export const PreviewConnectionSchema = z
   .object({
-    maxRequestBodyBytes: z.number().int().positive(),
-    maxResponseBodyBytes: z.number().int().positive(),
-    maxRequestDurationMs: z.number().int().positive(),
-  })
-  .strict();
-
-const PreviewResourceUsageSchema = z
-  .object({
-    httpRequestCount: z.number().int().nonnegative().optional(),
-    webSocketOpenCount: z.number().int().nonnegative().optional(),
-    requestBytesIn: z.number().int().nonnegative().optional(),
-    responseBytesOut: z.number().int().nonnegative().optional(),
-    limitExceededCount: z.number().int().nonnegative().optional(),
-    lastLimitExceededAt: z.number().int().nonnegative().optional(),
-    lastCloseReason: z.string().optional(),
-  })
-  .strict();
-
-const PreviewConnectionSchema = z
-  .object({
-    status: z.enum(['idle', 'creating', 'active', 'failed', 'revoked', 'expired']),
-    grantId: z.string().optional(),
+    status: z.enum(['creating', 'active', 'closed', 'failed']),
+    endpointId: z.string().optional(),
     publicUrl: z.string().url().optional(),
-    tunnelId: z.string().optional(),
     target: PreviewTargetSchema.optional(),
-    viewerScope: z
-      .object({ type: z.literal('workspace') })
-      .strict()
-      .optional(),
     approvedByUserId: z.string().optional(),
     createdAt: z.number().int().nonnegative().optional(),
     updatedAt: z.number().int().nonnegative().optional(),
-    leaseExpiresAt: z.number().int().nonnegative().optional(),
     idleTimeoutMs: z.number().int().positive().optional(),
-    lastActiveAt: z.number().int().nonnegative().optional(),
-    revokedAt: z.number().int().nonnegative().optional(),
-    revokeReason: z.string().optional(),
-    resourceLimits: PreviewResourceLimitsSchema.optional(),
-    resourceUsage: PreviewResourceUsageSchema.optional(),
+    closedReason: z
+      .enum(['idle_timeout', 'revoked', 'session_ended', 'replaced', 'runtime_lost'])
+      .optional(),
     error: PreviewConnectionErrorSchema.optional(),
   })
   .strict();
@@ -1900,7 +1876,7 @@ const PreviewConnectionSchema = z
 const PreviewEndpointSchema = z
   .object({
     endpointId: z.string().trim().min(1),
-    kind: z.enum(['local-proxy', 'cloud-gateway']),
+    kind: z.enum(['local-proxy', 'quick-tunnel']),
     viewerUrl: z.string().url(),
     shareUrl: z.string().url().optional(),
     target: PreviewTargetSchema,
@@ -1954,7 +1930,7 @@ export const SessionPreviewCreateRequestSchema = z
         confirmedAt: z.number().int().nonnegative(),
       })
       .strict(),
-    replaceExisting: z.boolean().optional(),
+    restart: z.boolean().optional(),
   })
   .strict();
 
@@ -1964,6 +1940,29 @@ export const SessionPreviewCreateResponseSchema = z
     sessionId: SessionIdSchema,
     success: z.boolean(),
     connection: PreviewConnectionSchema.optional(),
+    error: PreviewErrorCodeSchema.optional(),
+    message: z.string().optional(),
+  })
+  .strict();
+
+export const SessionPreviewStatusRequestSchema = z
+  .object({
+    type: z.literal('session/preview-status'),
+    machineId: MachineIdSchema,
+    workspaceId: WorkspaceIdSchema,
+    sessionId: SessionIdSchema,
+    requestedByUserId: z.string().trim().min(1),
+    renewEndpointId: z.string().trim().min(1).optional(),
+  })
+  .strict();
+
+export const SessionPreviewStatusResponseSchema = z
+  .object({
+    type: z.literal('session/preview-status_response'),
+    sessionId: SessionIdSchema,
+    success: z.boolean(),
+    connection: PreviewConnectionSchema.optional(),
+    expiresAt: z.number().int().nonnegative().optional(),
     error: PreviewErrorCodeSchema.optional(),
     message: z.string().optional(),
   })
@@ -2033,6 +2032,7 @@ export const LocalSessionControlRequestSchema = z.discriminatedUnion('type', [
   PreviewCandidateReportRequestSchema,
   SessionPreviewCreateRequestSchema,
   SessionPreviewRevokeRequestSchema,
+  SessionPreviewStatusRequestSchema,
 ]);
 
 export const LocalSessionControlResponseSchema = z.discriminatedUnion('type', [
@@ -2060,6 +2060,7 @@ export const LocalSessionControlResponseSchema = z.discriminatedUnion('type', [
   PreviewCandidateReportResponseSchema,
   SessionPreviewCreateResponseSchema,
   SessionPreviewRevokeResponseSchema,
+  SessionPreviewStatusResponseSchema,
 ]);
 
 export const LocalProjectAddRequestSchema = z

@@ -120,8 +120,8 @@ as collapsing — `hoverFill` lands 2/255 from `raisedBackground` in the light
 palette, `selectedFill` resolves to exactly `raisedBackground` in the dark one —
 so a badge that took a background from the ladder would be invisible somewhere
 by construction. Its fill is a **film**: the tone at 8% of `label` or 14% of an
-outcome colour over whatever is underneath (12% and 22% since the follow-up
-below), which is the form
+outcome colour over whatever is underneath (12% and 22% for one stretch —
+the second follow-up below puts it back), which is the form
 `Button`'s destructive ghost hover already takes. One declaration, every rung,
 both palettes. The board carries the same five badges on the page, the card and
 the floating rung for exactly this reason.
@@ -292,6 +292,20 @@ now a peach word on a brown chip against a gold word on an olive one, which is
 told apart at a glance, rather than two brown chips which were not. Moving them
 properly apart means moving `accent`, which every focus ring, link and live
 indicator in the product reads — still not a decision a badge gets to make.
+
+## Follow-up, 2026-09-25: the film goes back to the wash
+
+The chip read darker than a standing note should, and the reason it had been
+left that way no longer held. The 12%/22% strength was bought for one job —
+telling the five tones apart on the film alone, where 8%/14% had measured
+0.019 and 0.026 apart in oklab at the closest pairs. Once the word carried the
+tone, that purchase was paying for a signal nobody reads: the four tone words
+sit 0.097 apart at the closest in the light palette and 0.048 in the dark,
+against what is again 0.019 and 0.026 for the films under them. The films are
+**8% of `label`** and **14% of the tone** again — dark enough to read as a chip
+on every rung, and no darker. Word contrast only improves on the thinner film,
+and `badge.label` stays `colors.label`: the measurement that sank
+`secondaryLabel` is untouched by the film's strength.
 
 ## Deliberately not done
 
