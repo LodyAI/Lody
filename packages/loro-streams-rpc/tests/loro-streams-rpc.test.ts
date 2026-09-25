@@ -1883,6 +1883,11 @@ describe('LoroStreamsMachineRpcClient', () => {
   });
 
   it('sends session preview create requests and resolves preview responses', async () => {
+    const proof = {
+      runtimeNonce: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      requestId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+      requestToken: 'synthetic-preview-proof',
+    };
     const fake = createFakeStreamClient();
     const client = new LoroStreamsMachineRpcClient({
       workspaceId: 'workspace-1',
@@ -1891,6 +1896,7 @@ describe('LoroStreamsMachineRpcClient', () => {
     });
 
     const responsePromise = client.requestSessionPreviewCreate({
+      proof,
       sessionId: 'session-1',
       requestedByUserId: 'user-1',
       target: { protocol: 'http', host: '127.0.0.1', port: 5173 },
@@ -1915,6 +1921,7 @@ describe('LoroStreamsMachineRpcClient', () => {
     };
     expect(request.method).toBe('session/preview-create');
     expect(request.params).toEqual({
+      proof,
       sessionId: 'session-1',
       requestedByUserId: 'user-1',
       target: { protocol: 'http', host: '127.0.0.1', port: 5173 },
@@ -1925,7 +1932,7 @@ describe('LoroStreamsMachineRpcClient', () => {
         confirmedByUserId: 'user-1',
         confirmedAt: 1000,
       },
-      replaceExisting: undefined,
+      restart: undefined,
     });
 
     fake.pushBatch({
@@ -1941,7 +1948,7 @@ describe('LoroStreamsMachineRpcClient', () => {
             sessionId: 'session-1',
             success: false,
             error: 'tunnel_not_configured',
-            message: 'Preview gateway is not configured.',
+            message: 'Remote preview is not configured.',
           },
         },
       ],

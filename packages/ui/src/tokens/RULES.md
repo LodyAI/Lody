@@ -651,12 +651,14 @@ hover already use, which steps away from the surface in both palettes at once.
 
 A standing fact about the thing beside it, and the one part of this system on
 **no rung**: it sits on a page, a card, a menu row or a modal panel, so it can
-take no background from the ladder. Its fill is a _film_ — the tone at 12% of
-`label` or 22% of a tone over whatever is underneath, the form a destructive
+take no background from the ladder. Its fill is a _film_ — the tone at 8% of
+`label` or 14% of a tone over whatever is underneath, the form a destructive
 ghost Button's hover already takes — so one declaration reads on every rung and
-in both palettes. Those two started at 8 and 14, which was a film too thin to
-tell apart: the closest pair of tones measured 0.019 apart in oklab in the light
-palette and 0.026 in the dark one, and is now 0.030 and 0.035.
+in both palettes. The pair ran at 12 and 22 for a stretch, when the film alone
+had to tell the tones apart: the closest pair then measured 0.019 apart in
+oklab in the light palette and 0.026 in the dark one, and the stronger wash
+reached 0.030 and 0.035. That job is the word's now, so the film is back to a
+wash — dark enough to read as a chip, and no darker.
 
 **The word carries the tone, and it is the tone pulled halfway to `label`.**
 The raw tone cannot: `warning` is 2.8:1 on a near-white surface, a colour tuned
@@ -668,7 +670,7 @@ measures 5.2:1 on its own chip, on every rung, in both palettes.
 The film alone could not do this. A 20px chip's tint is a wash a few percent off
 its surface; its word is the mark a person looks at. The four words land 0.097
 apart in oklab at the closest in the light palette and 0.048 in the dark one,
-against 0.030 and 0.035 for the films under them. The dark palette is where it
+against 0.019 and 0.026 for the films under them. The dark palette is where it
 earns its place: there `accent` is a pale peach and `warning` an amber, twenty-six
 degrees apart, so their films are two brown washes that no percentage separates,
 and their words are a peach and a gold at four times the chroma.

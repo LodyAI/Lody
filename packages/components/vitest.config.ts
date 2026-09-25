@@ -6,9 +6,7 @@ import { stylexOptions } from '../ui/stylex-options';
 import { loroCrdtWasmUrlWorkaround, VITEST_INLINE_WASM_DEPS } from './vite-wasm-workarounds';
 
 export default defineConfig({
-  define: {
-    'import.meta.env.VITE_PREVIEW_PUBLIC_BASE_DOMAIN': JSON.stringify('mylody.app'),
-  },
+  define: {},
   plugins: [stylex.rollup({ ...stylexOptions, dev: false }), loroCrdtWasmUrlWorkaround(), wasm()],
   resolve: {
     alias: [
