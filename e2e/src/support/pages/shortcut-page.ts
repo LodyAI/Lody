@@ -36,6 +36,9 @@ export class ShortcutPage {
       /^(Search commands and chats\.\.\.|搜索命令和对话\.\.\.)$/u
     );
     await expect(palette).toBeVisible();
+    // The dialog moves focus into its input a frame after it renders; until
+    // then Escape still reaches the composer. A person cannot press it sooner.
+    await expect(palette).toBeFocused();
     await page.keyboard.press('Escape');
     await expect(palette).toBeHidden();
 
