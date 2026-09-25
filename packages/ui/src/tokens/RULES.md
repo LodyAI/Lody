@@ -14,7 +14,7 @@ One rung per component. The rung fixes background and shadow together.
 | page     | `background`          | none                       | app ground                                                                        |
 | region   | `secondaryBackground` | none                       | sidebar, footer band, a block inside a card                                       |
 | card     | `elevatedBackground`  | `shadow.card`              | card, panel, composer, alert                                                      |
-| floating | `raisedBackground`    | `shadow.popover`           | menu, popover, select list, toast; tooltip is `label` with `shadow.medium`        |
+| floating | `raisedBackground`    | `shadow.popover`           | menu, popover, select list, toast, tooltip                                        |
 | modal    | `elevatedBackground`  | `shadow.large` + `overlay` | dialog, alert dialog, drawer                                                      |
 
 ## Edges
@@ -25,11 +25,18 @@ One rung per component. The rung fixes background and shadow together.
 - raised: you can press this. `raisedBackground` + `shadow.raised` +
   `sheen.raised`. Primary and destructive buttons are raised with
   `shadow.inkEdge` and `sheen.ink`: a top highlight and a contact shadow.
-- shadow: above the page. Strength by rung, and always a hairline, a contact
-  shadow and a lift — never one soft cloud.
+- shadow: above the page. Strength by rung, and always a hairline and a contact
+  shadow, plus a lift for anything that floats — never one soft cloud. A card
+  rests on the page and takes no lift: a wide blur under every block of a page
+  draws a halo that reads as a second layer behind each one.
 - ring: attention here. A 2px `box-shadow` composed with the control's own
   shadow, tight to it, no offset, no glow. `accent` on focus, `destructive` on
   invalid. Not an `outline`: the product shell resets outlines with `!important`.
+  A focus ring marks where keyboard navigation is, so its width is
+  `focus.ringWidth`, which `installFocusModality` zeroes while the person uses a
+  pointer — `:focus-visible` alone also lights the control a dialog hands focus
+  back to after Escape. A text field keeps its own 2px: whoever types there needs
+  to see where.
 
 ## Color
 
@@ -267,13 +274,15 @@ back as the drawer leaves, so a half-dismissed drawer reads as reversible.
 
 ## Tooltips
 
-The one floating thing that is not the popup surface: `tooltip.background` is
-`label` and `tooltip.label` is `background`, under `shadow.medium` at
-`radius.small`. That inversion is deliberate. A popup is a place to act; a
-tooltip only names what is already under the pointer, and it has to read at a
-glance over whatever it covers without becoming another surface competing for
-attention. A tooltip reaching for `popup.background` would be naming the wrong
-thing to get the wrong colour.
+A tooltip is on the floating rung: `tooltip.background` is `raisedBackground`
+and `tooltip.label` is `label`, under `shadow.popover` — the popup surface's
+material, so it is light in a light palette and dark in a dark one. It never
+inverts: a dark chip over a light surface reads as a foreign patch rather than
+as a name for what is under it. It keeps a token group of its own because its
+geometry is a chip's, not a popup's — `radius.small`, tighter padding, the
+footnote step and a maximum width — and a popup is a place to act while a
+tooltip only names one. Under a forced palette the colour tokens travel with
+the portalled chip like every other floating part's.
 
 It is a hint about something else, so it takes the footnote step the rules give
 help text rather than the control step its trigger takes, and it wraps at
@@ -763,12 +772,9 @@ metadata in `popup.hint`, because a column of chips down a menu's right edge
 turns a quiet list into a keyboard diagram. A cap is for where the keys are the
 subject.
 
-A cap on a tooltip inverts with it. `kbdOnInvertedTheme` re-declares the two
-things a cap is made of — the film and the letters — and `Tooltip.Content`
-declares it on its own popup, so every cap under it inherits. A component token
-group is how a surface tells what is inside it what it is standing on; StyleX
-has no descendant selector, and unlike one this also reaches a cap a caller
-wrapped in something of their own.
+A cap on a tooltip is the same cap. The tooltip is on the floating rung, so a
+cap there stands on a raised surface like a cap in a command palette does, and
+nothing re-declares what it is made of.
 
 ## Material
 

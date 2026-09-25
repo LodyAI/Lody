@@ -2,6 +2,7 @@ import * as React from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { corner, radius, space } from '@lody/ui/tokens/scales.stylex';
+import { settingsType as type } from './type.stylex';
 
 /**
  * A tiny, dependency-free Markdown renderer for the skill detail view.
@@ -37,7 +38,7 @@ const styles = stylex.create({
     backgroundColor: `color-mix(in oklab, transparent, ${colors.label} 6%)`,
     color: colors.label,
     fontFamily: MONO,
-    fontSize: '0.85em',
+    fontSize: type.caption,
   },
   strong: { fontWeight: 400, color: colors.label },
   italic: { fontStyle: 'italic' },
@@ -58,7 +59,7 @@ const styles = stylex.create({
     backgroundColor: `color-mix(in oklab, transparent, ${colors.label} 3%)`,
     color: colors.label,
     fontFamily: MONO,
-    fontSize: '0.75em',
+    fontSize: type.caption,
     lineHeight: 1.625,
   },
   heading: {
@@ -70,8 +71,8 @@ const styles = stylex.create({
   headingMinor: { marginTop: { default: space[3], ':first-child': 0 } },
   h1: { fontSize: '1.125em', lineHeight: 1.55 },
   h2: { fontSize: '1em', lineHeight: 1.5 },
-  h3: { fontSize: '0.875em', lineHeight: 1.43 },
-  h4: { fontSize: '0.875em', lineHeight: 1.43, color: colors.secondaryLabel },
+  h3: { fontSize: type.caption, lineHeight: 1.43 },
+  h4: { fontSize: type.caption, lineHeight: 1.43, color: colors.secondaryLabel },
   rule: {
     height: '1px',
     marginBlock: space[3],
@@ -85,14 +86,14 @@ const styles = stylex.create({
     marginInline: 0,
     paddingInlineStart: space[3],
     boxShadow: `inset 2px 0 0 ${colors.separator}`,
-    fontSize: '0.875em',
+    fontSize: type.caption,
     color: colors.secondaryLabel,
   },
   list: {
     marginTop: space[2],
     marginBottom: 0,
     paddingInlineStart: '20px',
-    fontSize: '0.875em',
+    fontSize: type.caption,
     color: colors.label,
   },
   bullets: { listStyleType: 'disc' },
@@ -101,7 +102,7 @@ const styles = stylex.create({
   paragraph: {
     marginTop: { default: space[2], ':first-child': 0 },
     marginBottom: 0,
-    fontSize: '0.875em',
+    fontSize: type.caption,
     lineHeight: 1.625,
     color: colors.label,
   },

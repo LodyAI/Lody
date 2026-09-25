@@ -705,7 +705,7 @@ export function DesktopRunConfigMenu({
           {triggerFace}
         </Menu.Trigger>
       )}
-      <Menu.Content align="start" className="min-w-48">
+      <Menu.Content align="start" className="min-w-60">
         {onRecentRunConfigSelect ? (
           <RecentRunConfigMenuGroup
             items={recentRunConfigs ?? []}
@@ -1126,7 +1126,6 @@ export function DesktopPermissionModeButton({
         <span {...stylex.props(surface.glyph)}>{permissionModeIcon(value ?? null)}</span>
       </Menu.Trigger>
       <Menu.Content align="start" className="w-max min-w-44 max-w-64">
-        <Menu.GroupLabel>{permissionLabel}</Menu.GroupLabel>
         {options.map((opt) => (
           <PermissionModeItem
             key={opt.value}

@@ -58,10 +58,12 @@ Translation: current
   用于 diff 高亮。
 - 侧栏：PR 图标降低饱和度（`saturate(0.55)`，用滤镜而不是透明度）；`Mergeable` 标签是行里唯一需要被注意到的状态，
   使用实底色和半粗体。
-- 设置导航：`@lody/ui`（#913）把它改建在 `settings/surface.ts` 上之后，行使用调色板的 `hoverFill` / `selectedFill` 和组件库的
-  头像，不再使用本次改动的 10% 选中底色和 18px 账户头像。保留下来的是焦点处理：键盘聚焦的行显示悬停底色而不是强调色描边，
-  因为对话框打开时会自动聚焦一行。深海配色改动让组件库调色板改读主题变量后，这两种底色又变回文字色的 6% / 10%
-  （[note](2026-09-25-deep-sea-palette-and-sidebar-groups.zh.md)）。
+- 设置导航：`@lody/ui`（#913、#969）把它改建在 `settings/surface.ts` 上，行底色是文字色的淡染。保留本次改动的强度：悬停 6%、
+  当前行 10%（#969 选的是 5% / 8%）；键盘聚焦的行显示悬停底色而不是强调色描边，因为对话框打开时会自动聚焦一行。账户行使用
+  组件库的头像，不再使用本次改动的 18px 头像。
+- `Mergeable` 改为 success `Badge`（#969）。通过对 badge token 的 `createTheme`（`sidebar-mergeable-badge.stylex.ts`），
+  它的文字直接使用 success 色，而不是组件库默认向文字色混合一半的颜色；组件库的底色（22%）已比本次改动的 16% 更强。
+  边框和半粗体没有对应 token，未保留。
 
 ## 备选方案
 

@@ -42,6 +42,7 @@ import { LinkedAccountsList, type LinkedAccountInfo } from './linked-accounts-li
 import { MobileAccountSettings } from '@/components/mobile/mobile-account-settings';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { settingsSurface } from './surface';
+import { settingsType as type } from './type.stylex';
 
 const WIDE = '@media (min-width: 640px)';
 
@@ -81,7 +82,7 @@ const styles = stylex.create({
     alignItems: 'center',
     gap: space[3],
     paddingInline: space[4],
-    paddingBlock: '10px',
+    paddingBlock: '8px',
   },
   recordText: { flexGrow: 1, minWidth: 0 },
   recordTitle: {
@@ -90,7 +91,7 @@ const styles = stylex.create({
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
     margin: 0,
-    lineHeight: 1.25,
+    lineHeight: type.leading,
     color: colors.label,
   },
   recordMeta: {
@@ -100,18 +101,18 @@ const styles = stylex.create({
     whiteSpace: 'nowrap',
     margin: 0,
     marginTop: '2px',
-    fontSize: '0.8em',
-    lineHeight: 1.25,
+    fontSize: type.caption,
+    lineHeight: type.leading,
     color: colors.secondaryLabel,
   },
-  you: { marginInlineStart: space[1.5], fontSize: '0.75em', color: colors.secondaryLabel },
+  you: { marginInlineStart: space[1.5], fontSize: type.caption, color: colors.secondaryLabel },
   recordActions: { display: 'flex', flexShrink: 0, alignItems: 'center', gap: space[1] },
   inviteMeta: {
     display: 'flex',
     alignItems: 'center',
     gap: space[2],
     marginTop: '2px',
-    fontSize: '0.75em',
+    fontSize: type.caption,
     color: colors.secondaryLabel,
   },
   inviteStatus: { display: 'inline-flex', alignItems: 'center', gap: '2px' },
@@ -125,7 +126,7 @@ const styles = stylex.create({
     justifyContent: 'space-between',
     gap: space[3],
     paddingInline: space[4],
-    paddingBlock: '10px',
+    paddingBlock: '8px',
   },
   apiKeyText: { display: 'flex', flexDirection: 'column', gap: space[1], minWidth: 0 },
   apiKeyHead: {
@@ -144,13 +145,13 @@ const styles = stylex.create({
     margin: 0,
     color: colors.label,
   },
-  apiKeyTime: { flexShrink: 0, fontSize: '0.8em', color: colors.secondaryLabel },
+  apiKeyTime: { flexShrink: 0, fontSize: type.caption, color: colors.secondaryLabel },
   apiKeyMeta: {
     display: 'flex',
     flexWrap: 'wrap',
     columnGap: space[3],
     rowGap: space[1],
-    fontSize: '0.8em',
+    fontSize: type.caption,
     color: colors.secondaryLabel,
   },
   mono: { fontFamily: 'var(--font-mono, ui-monospace, monospace)' },

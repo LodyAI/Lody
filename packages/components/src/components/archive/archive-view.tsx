@@ -26,7 +26,7 @@ import {
 import type { LucideIcon } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
 import { colors, shadow } from '@lody/ui/tokens/colors.stylex';
-import { corner, duration, ease, radius, space, text } from '@lody/ui/tokens/scales.stylex';
+import { corner, duration, ease, focus, radius, space, text } from '@lody/ui/tokens/scales.stylex';
 import { Badge } from '@lody/ui/badge';
 import { Button } from '@lody/ui/button';
 import { Checkbox } from '@lody/ui/checkbox';
@@ -91,7 +91,7 @@ type PrStatusMeta = {
 
 const WIDE = '@media (min-width: 640px)';
 const ROW_HOVER = `color-mix(in oklab, ${colors.elevatedBackground}, ${colors.label} 4%)`;
-const ROW_FOCUS_RING = `inset 0 0 0 2px ${colors.accent}`;
+const ROW_FOCUS_RING = `inset 0 0 0 ${focus.ringWidth} ${colors.accent}`;
 const ROW_RULE = `inset 0 1px 0 ${colors.separator}`;
 
 const styles = stylex.create({
@@ -339,7 +339,7 @@ const styles = stylex.create({
     backgroundColor: 'transparent',
     cursor: 'pointer',
     outlineStyle: 'none',
-    boxShadow: { default: 'none', ':focus-visible': `0 0 0 2px ${colors.accent}` },
+    boxShadow: { default: 'none', ':focus-visible': `0 0 0 ${focus.ringWidth} ${colors.accent}` },
   },
   mobileBranch: {
     minWidth: 0,
@@ -384,7 +384,7 @@ const styles = stylex.create({
     textAlign: 'start',
     cursor: 'pointer',
     outlineStyle: 'none',
-    boxShadow: { default: 'none', ':focus-visible': `0 0 0 2px ${colors.accent}` },
+    boxShadow: { default: 'none', ':focus-visible': `0 0 0 ${focus.ringWidth} ${colors.accent}` },
     transitionProperty: 'background-color',
     transitionDuration: duration.fast,
     transitionTimingFunction: ease.standard,

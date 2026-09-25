@@ -8,6 +8,7 @@ import type { ElectronCliState } from '@lody/shared';
 import { Button } from '@lody/ui/button';
 import { useElectronCliDaemon } from '@/hooks/use-electron-cli-daemon';
 import { CompactRow } from './compact-layout';
+import { settingsType as type } from './type.stylex';
 
 const styles = stylex.create({
   anchor: { scrollMarginTop: '96px' },
@@ -17,7 +18,7 @@ const styles = stylex.create({
     alignItems: 'center',
     gap: space[1.5],
     whiteSpace: 'nowrap',
-    fontSize: '0.8em',
+    fontSize: type.caption,
     color: colors.secondaryLabel,
   },
   dot: {

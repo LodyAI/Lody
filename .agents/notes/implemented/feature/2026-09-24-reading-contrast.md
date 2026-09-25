@@ -85,13 +85,15 @@ long-form text.
 - Sidebar: PR marks are desaturated (`saturate(0.55)`, a filter, not opacity); the
   `Mergeable` pill is the one status meant to be noticed, with a real fill and semibold
   label.
-- Settings navigation: after `@lody/ui` (#913) rebuilt it on `settings/surface.ts`, its rows
-  take the palette's `hoverFill` / `selectedFill` and the package's avatar, not this change's
-  10% selected fill and 18px account avatar. What carried over is the focus treatment: a
-  keyboard-focused row shows the hover fill instead of the accent ring, since the dialog
-  focuses a row when it opens. The deep-sea palette change points the package's palette at
-  the theme, which makes those fills the ink at 6% / 10% again
-  ([note](2026-09-25-deep-sea-palette-and-sidebar-groups.md)).
+- Settings navigation: `@lody/ui` (#913, #969) rebuilt it on `settings/surface.ts`, where rows
+  are washes of the ink. They keep this change's strength, 6% on hover and 10% when current
+  (#969 chose 5% / 8%), and a keyboard-focused row shows the hover wash instead of the accent
+  ring, since the dialog focuses a row when it opens. The account row takes the package's
+  avatar rather than this change's 18px one.
+- `Mergeable` is a success `Badge` (#969). Its word is the success colour itself, not the
+  package's half-way mix toward the ink, through a `createTheme` over the badge tokens
+  (`sidebar-mergeable-badge.stylex.ts`); the package tint (22%) is already stronger than this
+  change's 16%. The border and semibold weight have no token and were not kept.
 
 ## Alternatives
 

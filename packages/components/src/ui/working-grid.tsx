@@ -3,7 +3,6 @@ import { useLayoutEffect, useRef, type ComponentPropsWithoutRef, type CSSPropert
 import { cn } from '@/lib/utils';
 import { useResolvedTheme } from '@/theme-provider';
 
-import { trackWorkingGridAnimation } from './working-grid-reading';
 import {
   crestDelayMs,
   tileSeaPoint,
@@ -15,7 +14,6 @@ import {
 } from './working-grid-sea';
 
 export type { WorkingGridDirection } from './working-grid-sea';
-export { setWorkingGridReadingPause } from './working-grid-reading';
 
 /** Where a tile scales from, or `none` to keep every tile full size. */
 export type WorkingGridScale = 'center' | 'bottom' | 'none';
@@ -163,9 +161,8 @@ function scrollOffset(el: Element): [number, number] {
  *
  * Colour comes from `currentColor`; pass a text colour class.
  *
- * Built to stay in the periphery while someone reads: a narrow opacity range,
- * slow waves, and every mark frozen while the user scrolls, types or clicks
- * outside `[data-working-grid-region]` (see `working-grid-reading.ts`).
+ * Built to stay in the periphery while someone reads: a narrow opacity range
+ * and slow waves.
  *
  * Every animation touches only `transform` and `opacity` through the Web
  * Animations API on the shared clock, so the compositor runs it: no per-frame
@@ -228,7 +225,6 @@ export function WorkingGrid({
     const [scrollX, scrollY] = scrollOffset(root);
     const placement = { left: rect.left + scrollX, top: rect.top + scrollY, size, rowPitch };
     const tempo = speed > 0 ? speed : 1;
-    const stops: (() => void)[] = [];
     const animations: Animation[] = [];
     const play = (
       element: HTMLElement,
@@ -242,7 +238,9 @@ export function WorkingGrid({
         iterations: Infinity,
         delay: crestDelayMs(phase, duration),
       });
-      stops.push(trackWorkingGridAnimation(animation));
+      // Pin every loop to the document timeline's zero so marks mounted at
+      // different moments sample the same sea.
+      animation.startTime = 0;
       animations.push(animation);
     };
 
@@ -283,7 +281,6 @@ export function WorkingGrid({
         }
       }
       return () => {
-        stops.forEach((stop) => stop());
         animations.forEach((animation) => animation.cancel());
       };
     }
@@ -335,7 +332,6 @@ export function WorkingGrid({
     }
 
     return () => {
-      stops.forEach((stop) => stop());
       animations.forEach((animation) => animation.cancel());
     };
   }, [

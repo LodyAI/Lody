@@ -483,6 +483,10 @@ async function probeGitHubRemoteAtRootPath(rootPath) {
   return null;
 }
 
+async function getLocalProjectGitHubRepoAtRootPath(rootPath) {
+  return (await probeGitHubRemoteAtRootPath(normalizeLocalProjectRootPath(rootPath)))?.repoFullName ?? null;
+}
+
 async function listLocalProjectBranchesAtRootPath(rootPath) {
   await assertGitRepository(rootPath);
   const remotes = await listGitRemotes(rootPath);
@@ -878,6 +882,7 @@ async function checkoutLocalProjectBranchAtRootPath(rootPath, branchName) {
 }
 
 module.exports = {
+  getLocalProjectGitHubRepoAtRootPath,
   normalizeLocalProjectRootPath,
   ensureLocalProjectRootPath,
   getLocalProjectNameFromRootPath,

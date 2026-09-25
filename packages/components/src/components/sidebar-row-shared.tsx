@@ -20,6 +20,9 @@ import { WorkingStatusMark } from '@/ui/working-status-mark';
 import type { PrStatus, SessionPullRequestCiState } from '@lody/shared';
 import { cn } from '@/lib/utils';
 import { Tooltip } from '@lody/ui/tooltip';
+import * as stylex from '@stylexjs/stylex';
+import { Badge } from '@lody/ui/badge';
+import { mergeableBadgeTheme } from './sidebar-mergeable-badge.stylex';
 import { ContextMenu } from '@lody/ui/context-menu';
 import { Skeleton } from '@lody/ui/skeleton';
 import { PR_STATUS_META } from '@/components/sessions/pull-request-badge';
@@ -263,21 +266,27 @@ export function SessionPrIcon({
   );
 }
 
+const styles = stylex.create({
+  contents: { display: 'contents' },
+});
+
 /**
  * Passive readiness marker for an inactive session row. It intentionally owns
  * the former diff-stat slot: once a PR is ready, the next useful sidebar fact
  * is that it can be merged, not how many lines it changes. It is the one
- * status in the row meant to be noticed, so it carries a real fill and a
- * semibold label while the PR icons beside it stay desaturated.
+ * status in the row meant to be noticed: a success Badge whose word is the
+ * success colour itself (`sidebar-mergeable-badge.stylex.ts`), while the PR
+ * icons beside it stay desaturated.
  */
 export function SessionMergeablePill() {
   const { t } = useTranslation();
   return (
-    <span
-      data-session-mergeable-pill=""
-      className="inline-flex h-5 shrink-0 items-center rounded-full border border-status-success/70 bg-status-success/[0.16] px-1.5 text-[10.5px] font-semibold leading-none tracking-[0.01em] text-status-success"
-    >
-      {t('sessions.pr.mergeable', 'Mergeable')}
+    // The theme sits on a layout-less wrapper: a Badge reads its tokens from
+    // whatever holds it.
+    <span {...stylex.props(styles.contents, mergeableBadgeTheme)}>
+      <Badge tone="success" data-session-mergeable-pill="">
+        {t('sessions.pr.mergeable', 'Mergeable')}
+      </Badge>
     </span>
   );
 }

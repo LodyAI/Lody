@@ -138,16 +138,12 @@ function StatusMark({ status, grid }: { status: RowStatus; grid: WorkingGridProp
  * A full-height sidebar at production geometry (28px rows, 14px trailing status
  * slot that swaps to Archive on hover), so the controls can be judged on the
  * surface the mark actually ships in: many marks at once, one shared sea.
- * Scroll or click in the content pane to see every mark hold still while reading.
  */
 export const SidebarSimulation: Story = {
   parameters: { layout: 'fullscreen' },
   render: (args) => (
     <div className="flex h-screen">
-      <aside
-        data-working-grid-region=""
-        className="flex w-[272px] flex-col overflow-y-auto border-r border-sidebar-border bg-sidebar px-1.5 py-2 text-sidebar-foreground"
-      >
+      <aside className="flex w-[272px] flex-col overflow-y-auto border-r border-sidebar-border bg-sidebar px-1.5 py-2 text-sidebar-foreground">
         {GROUPS.map((group) => (
           <section key={group.name}>
             <div className="px-2 pb-1 pt-3 text-xs text-sidebar-foreground-muted">{group.name}</div>
