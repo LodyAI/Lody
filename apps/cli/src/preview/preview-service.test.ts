@@ -1,593 +1,439 @@
 import http from 'node:http';
-import net, { type AddressInfo } from 'node:net';
-import { Agent, getGlobalDispatcher, setGlobalDispatcher } from 'undici';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { once } from 'node:events';
+import {
+  Agent,
+  MockAgent,
+  getGlobalDispatcher,
+  setGlobalDispatcher,
+  fetch as directFetch,
+} from 'undici';
+import { WebSocket, WebSocketServer } from 'ws';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   LocalSessionControlResponseSchema,
+  DEFAULT_PREVIEW_IDLE_TIMEOUT_MS,
+  DEFAULT_PREVIEW_MAX_ACTIVE_TUNNELS_PER_MACHINE,
+  PREVIEW_ACCESS_TOKEN_QUERY_PARAM,
   type MachineId,
   type SessionId,
   type SessionMeta,
-  type SessionMetaWithLegacyPreview,
+  type SessionPreviewCreateRequest,
+  type SessionPreviewDocState,
   type WorkspaceId,
 } from '@lody/shared';
+import { createLogger } from '@/utils/logger';
 import { PreviewService } from './preview-service';
-import { startPreviewTunnel } from './preview-tunnel-client';
+import { ensureCloudflaredBinary } from './cloudflared-binary';
+import { CloudflaredError, startCloudflaredProcess } from './cloudflared-process';
+import { verifyPreviewTunnelRoundTrip } from './preview-tunnel-readiness';
 
-vi.mock('./preview-tunnel-client', () => ({
-  startPreviewTunnel: vi.fn(),
+vi.mock('./cloudflared-binary', () => ({ ensureCloudflaredBinary: vi.fn() }));
+vi.mock('./cloudflared-process', async (original) => ({
+  ...(await original<typeof import('./cloudflared-process')>()),
+  startCloudflaredProcess: vi.fn(),
+}));
+vi.mock('./preview-tunnel-readiness', async (original) => ({
+  ...(await original<typeof import('./preview-tunnel-readiness')>()),
+  verifyPreviewTunnelRoundTrip: vi.fn(),
 }));
 
 const machineId = 'machine-preview' as MachineId;
 const workspaceId = 'workspace-preview' as WorkspaceId;
+const sessionId = 'session-preview' as SessionId;
 const userId = 'user-preview';
+const logger = createLogger({ level: 'silent', transports: 'console' });
 
-const createLogger = () => ({
-  debug: vi.fn(),
-  info: vi.fn(),
-  warn: vi.fn(),
-  error: vi.fn(),
-  success: vi.fn(),
-  setDebug: vi.fn(),
-  child: vi.fn(),
-  close: vi.fn(),
-});
+function fixture(workspace = workspaceId) {
+  let preview: SessionPreviewDocState = {};
+  let meta: SessionMeta = {
+    id: sessionId,
+    machineId,
+    userId,
+    createdAt: '2026-09-21',
+    cliType: 'builtin',
+    agentType: 'codex',
+  };
+  const changes: SessionPreviewDocState[] = [];
+  const service = new PreviewService({
+    logger,
+    machineId,
+    workspaceId: workspace,
+    userId,
+    now: () => Date.now(),
+    runtimeBaseUrl: 'https://runtime.example.test',
+    remotePreview: {
+      verifyControl: async ({ intent }) => ({
+        requesterUserId: intent.requesterUserId,
+        expiresAt: Date.now() + 120_000,
+      }),
+    },
+    workspaceDocument: {
+      getOrCreateSessionDoc: async () => ({
+        getPreviewState: async () => preview,
+        setPreviewState: async (next) => {
+          preview = next;
+          changes.push(next);
+        },
+      }),
+      repo: {
+        getDocMeta: async () => ({ meta }),
+        upsertDocMeta: async (_room, patch) => {
+          meta = { ...meta, ...patch };
+        },
+      },
+    },
+  });
+  return { service, changes, state: () => preview, meta: () => meta };
+}
 
-const listenOnLoopback = async (): Promise<{ server: net.Server; port: number }> => {
-  const server = net.createServer((socket) => {
-    socket.end();
-  });
-  await new Promise<void>((resolve, reject) => {
-    server.once('error', reject);
-    server.listen(0, '127.0.0.1', () => {
-      server.off('error', reject);
-      resolve();
-    });
-  });
-  const address = server.address();
-  if (!address || typeof address === 'string') {
-    throw new Error('Expected TCP server to listen on a port');
+describe('PreviewService Quick Tunnel lifecycle', () => {
+  const services: PreviewService[] = [];
+  let server: http.Server;
+  let port: number;
+  let proxyOrigin: string;
+
+  function createRequest(
+    overrides: Partial<SessionPreviewCreateRequest> = {}
+  ): SessionPreviewCreateRequest {
+    const target = { protocol: 'http' as const, host: '127.0.0.1', port };
+    return {
+      type: 'session/preview-create',
+      machineId,
+      workspaceId,
+      sessionId,
+      requestedByUserId: userId,
+      target,
+      approval: {
+        source: 'browser_address',
+        targetClass: 'loopback',
+        target,
+        confirmedByUserId: userId,
+        confirmedAt: Date.now(),
+      },
+      ...overrides,
+    };
   }
-  return { server, port: (address as AddressInfo).port };
-};
 
-const listenHttpOnLoopback = async (): Promise<{ server: http.Server; port: number }> => {
-  const server = http.createServer((_request, response) => {
-    response.end('ok');
-  });
-  await new Promise<void>((resolve, reject) => {
-    server.once('error', reject);
-    server.listen(0, '127.0.0.1', () => {
-      server.off('error', reject);
-      resolve();
+  beforeEach(async () => {
+    vi.mocked(ensureCloudflaredBinary).mockResolvedValue('/synthetic/cloudflared');
+    vi.mocked(startCloudflaredProcess).mockImplementation(async (options) => {
+      proxyOrigin = options.proxyOrigin;
+      const exited = Promise.withResolvers<CloudflaredError | null>();
+      return {
+        origin: 'https://synthetic-preview.trycloudflare.com',
+        closed: exited.promise,
+        diagnostic: () => undefined,
+        stop: async () => {
+          exited.resolve(null);
+        },
+      };
     });
-  });
-  const address = server.address();
-  if (!address || typeof address === 'string') {
-    throw new Error('Expected HTTP server to listen on a port');
-  }
-  return { server, port: (address as AddressInfo).port };
-};
-
-const listenHttpOnIpv6Loopback = async (): Promise<{ server: http.Server; port: number }> => {
-  const server = http.createServer((_request, response) => {
-    response.end('ok');
-  });
-  await new Promise<void>((resolve, reject) => {
-    server.once('error', reject);
-    server.listen(0, '::1', () => {
-      server.off('error', reject);
-      resolve();
+    // Exercise the actual proxy; substitute only the Cloudflare network hop.
+    vi.mocked(verifyPreviewTunnelRoundTrip).mockImplementation(async ({ publicUrl }) => {
+      const url = new URL(publicUrl);
+      const response = await fetch(`${proxyOrigin}${url.pathname}${url.search}`, {
+        headers: { 'x-lody-preview-probe': '1' },
+      });
+      expect(response.headers.get('x-lody-preview-proxy')).toBe('1');
+      expect(await response.text()).toBe('development server');
     });
+    server = http.createServer((_request, response) => response.end('development server'));
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const address = server.address();
+    if (!address || typeof address === 'string') throw new Error('Expected loopback port');
+    port = address.port;
   });
-  const address = server.address();
-  if (!address || typeof address === 'string') {
-    throw new Error('Expected HTTP server to listen on an IPv6 port');
-  }
-  return { server, port: (address as AddressInfo).port };
-};
-
-describe('PreviewService', () => {
-  const servers: Array<net.Server | http.Server> = [];
 
   afterEach(async () => {
-    vi.clearAllMocks();
-    delete process.env.LODY_PREVIEW_GATEWAY_URL;
     await Promise.all(
-      servers.splice(0).map(
-        (server) =>
-          new Promise<void>((resolve) => {
-            server.close(() => resolve());
-          })
-      )
+      services.splice(0).map((service) => service.closeAllActiveTunnelsForCleanup('test cleanup'))
     );
+    server.closeAllConnections();
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve()))
+    );
+    vi.restoreAllMocks();
+    vi.clearAllMocks();
   });
 
-  it('returns integer timestamps that pass local-control response validation', async () => {
-    const { server, port } = await listenOnLoopback();
-    servers.push(server);
+  function setup(workspace = workspaceId) {
+    const result = fixture(workspace);
+    services.push(result.service);
+    return result;
+  }
 
-    const meta: SessionMetaWithLegacyPreview = {
-      id: 'session-preview',
-      machineId,
-      createdAt: '2026-04-30T00:00:00.000Z',
-      userId,
-      cliType: 'builtin',
-      agentType: 'codex',
-    };
+  it('shares the machine limit across workspaces and releases slots after revoke and failed creation', async () => {
+    const owners = [];
+    for (let index = 0; index < DEFAULT_PREVIEW_MAX_ACTIVE_TUNNELS_PER_MACHINE; index++) {
+      const workspace = `workspace-slot-${index}` as WorkspaceId;
+      const owner = setup(workspace);
+      const request = createRequest({ workspaceId: workspace });
+      expect((await owner.service.createPreview(request)).success).toBe(true);
+      owners.push({ ...owner, request });
+    }
+    const extraWorkspace = 'workspace-slot-extra' as WorkspaceId;
+    const extra = setup(extraWorkspace);
+    const request = createRequest({ workspaceId: extraWorkspace });
+    expect((await extra.service.createPreview(request)).error).toBe('resource_limit_exceeded');
 
-    const logger = createLogger();
-    const service = new PreviewService({
-      logger,
-      workspaceDocument: {
-        getOrCreateSessionDoc: vi.fn(async () => {
-          let previewState = {};
-          return {
-            getPreviewState: vi.fn(async () => previewState),
-            setPreviewState: vi.fn(async (next) => {
-              previewState = next;
-            }),
-          };
-        }),
-        repo: {
-          getDocMeta: vi.fn(async () => ({ meta })),
-          upsertDocMeta: vi.fn(async () => undefined),
-        },
-      },
-      machineId,
-      workspaceId,
-      userId,
-      now: () => 1_714_438_400_000.5,
-      authToken: () => 'token',
-      remoteGatewayUrl: null,
-    } as unknown as ConstructorParameters<typeof PreviewService>[0]);
+    const first = owners[0];
+    if (!first) throw new Error('Expected an active owner');
+    await first.service.revokePreview({ ...first.request, type: 'session/preview-revoke' });
+    expect(owners.slice(1).map((owner) => owner.state().connection?.status)).toEqual(
+      Array(DEFAULT_PREVIEW_MAX_ACTIVE_TUNNELS_PER_MACHINE - 1).fill('active')
+    );
+    vi.mocked(ensureCloudflaredBinary).mockRejectedValueOnce(new Error('Download unavailable'));
+    expect((await extra.service.createPreview(request)).error).toBe('tunnel_creation_failed');
+    expect((await extra.service.createPreview(request)).success).toBe(true);
+    expect(extra.state().connection?.status).toBe('active');
+    expect(await (await fetch(`http://127.0.0.1:${port}`)).text()).toBe('development server');
+  });
 
-    const response = await service.reportCandidate({
+  it('creates without an agent candidate and preserves local viewing and the dev server after revoke', async () => {
+    const { service, state } = setup();
+    const request = createRequest();
+    const local = await service.acquireEndpoint(request);
+    const remote = await service.createPreview(request);
+    expect(remote.success).toBe(true);
+    expect(remote.connection?.status).toBe('active');
+    const publicUrl = new URL(remote.connection?.publicUrl ?? '');
+    expect(publicUrl.origin).toBe('https://synthetic-preview.trycloudflare.com');
+    expect(publicUrl.searchParams.get(PREVIEW_ACCESS_TOKEN_QUERY_PARAM)).toBeTruthy();
+    expect((await fetch(proxyOrigin)).status).toBe(403);
+    expect(LocalSessionControlResponseSchema.safeParse(remote).success).toBe(true);
+    const revoked = await service.revokePreview({ ...request, type: 'session/preview-revoke' });
+    expect(revoked.success).toBe(true);
+    expect(state().connection?.status).toBe('closed');
+    await expect(fetch(proxyOrigin)).rejects.toThrow();
+    expect(await (await fetch(local.endpoint?.viewerUrl ?? '')).text()).toBe('development server');
+    expect(await (await fetch(`http://127.0.0.1:${port}`)).text()).toBe('development server');
+  });
+
+  it('rejects stale consent, changed origins, unsafe hosts, and unauthorized revoke without altering active state', async () => {
+    const { service, state } = setup();
+    const request = createRequest();
+    await service.createPreview(request);
+    const active = state().connection;
+    const stale = await service.createPreview({
+      ...request,
+      approval: { ...request.approval, confirmedAt: 0 },
+    });
+    expect(stale.error).toBe('user_confirmation_required');
+    const changed = await service.createPreview({
+      ...request,
+      target: { ...request.target, port: port + 1 },
+    });
+    expect(changed.error).toBe('target_changed');
+    for (const host of ['192.168.1.1', 'service.localhost', 'example.com']) {
+      expect(
+        (await service.createPreview({ ...request, target: { ...request.target, host } })).success
+      ).toBe(false);
+    }
+    const denied = await service.revokePreview({
+      ...request,
+      type: 'session/preview-revoke',
+      requestedByUserId: 'other-user',
+    });
+    expect(denied.error).toBe('grant_denied');
+    expect(state().connection).toEqual(active);
+  });
+
+  it('aborts pending readiness on revoke and never publishes a late active state', async () => {
+    const entered = Promise.withResolvers<void>();
+    vi.mocked(verifyPreviewTunnelRoundTrip).mockImplementation(async ({ signal }) => {
+      entered.resolve();
+      await new Promise<void>((_resolve, reject) =>
+        signal?.addEventListener('abort', () => reject(signal.reason), { once: true })
+      );
+    });
+    const { service, changes, state } = setup();
+    const request = createRequest();
+    const creating = service.createPreview(request);
+    await entered.promise;
+    const revoke = service.revokePreview({ ...request, type: 'session/preview-revoke' });
+    expect((await creating).success).toBe(false);
+    expect((await revoke).success).toBe(true);
+    expect(changes.some((change) => change.connection?.status === 'active')).toBe(false);
+    expect(state().connection?.status).toBe('closed');
+    await expect(fetch(proxyOrigin)).rejects.toThrow();
+  });
+
+  it('keeps timestamps integral and only status summaries in meta', async () => {
+    const { service, state, meta } = setup();
+    vi.spyOn(Date, 'now').mockReturnValue(1_800_000_000_000.5);
+    const reported = await service.reportCandidate({
+      ...createRequest(),
       type: 'session/preview-candidate-report',
-      machineId,
-      workspaceId,
-      sessionId: meta.id,
-      target: {
-        protocol: 'http',
-        host: '127.0.0.1',
-        port,
-      },
-      source: {
-        toolName: 'lody_report_preview_candidate',
-      },
     });
-
-    expect(response.success).toBe(true);
-    expect(response.candidate?.reportedAt).toBe(1_714_438_400_001);
-    expect(response.candidate?.updatedAt).toBe(1_714_438_400_001);
-    expect(response.candidate?.validation?.lastCheckedAt).toBe(1_714_438_400_001);
-    expect(LocalSessionControlResponseSchema.safeParse(response).success).toBe(true);
+    expect(reported.success).toBe(true);
+    expect(reported.candidate?.updatedAt).toBe(1_800_000_000_001);
+    expect(state().candidate?.target?.port).toBe(port);
+    expect(Object.keys(meta().previewCandidate ?? {}).sort()).toEqual(['status', 'updatedAt']);
+    expect(LocalSessionControlResponseSchema.safeParse(reported).success).toBe(true);
   });
 
-  it('acquires localhost endpoints for Vite servers listening only on IPv6 loopback', async () => {
-    const { server, port } = await listenHttpOnIpv6Loopback();
-    servers.push(server);
-    const sessionId = 'session-preview-ipv6-localhost' as SessionId;
-    const meta: SessionMeta = {
-      id: sessionId,
-      machineId,
-      createdAt: '2026-04-30T00:00:00.000Z',
-      userId,
-      cliType: 'builtin',
-      agentType: 'codex',
+  it('observes without extending the deadline and renews only the current endpoint', async () => {
+    let now = 1_800_000_000_000;
+    vi.spyOn(Date, 'now').mockImplementation(() => now);
+    const { service, changes } = setup();
+    const request = createRequest();
+    const created = await service.createPreview(request);
+    const statusRequest = { ...request, type: 'session/preview-status' as const };
+    const first = await service.getStatus(statusRequest);
+    expect(first.expiresAt).toBe(now + DEFAULT_PREVIEW_IDLE_TIMEOUT_MS);
+    const lifecycleWrites = changes.length;
+    now += 30 * 60_000;
+    expect((await service.getStatus(statusRequest)).expiresAt).toBe(first.expiresAt);
+    expect(
+      (await service.getStatus({ ...statusRequest, renewEndpointId: 'replaced-endpoint' }))
+        .expiresAt
+    ).toBe(first.expiresAt);
+    const renewed = await service.getStatus({
+      ...statusRequest,
+      renewEndpointId: created.connection?.endpointId,
+    });
+    expect(renewed.expiresAt).toBe(now + DEFAULT_PREVIEW_IDLE_TIMEOUT_MS);
+    expect(LocalSessionControlResponseSchema.safeParse(renewed).success).toBe(true);
+    expect(changes).toHaveLength(lifecycleWrites);
+    now += DEFAULT_PREVIEW_IDLE_TIMEOUT_MS;
+    const expired = await service.getStatus({
+      ...statusRequest,
+      renewEndpointId: created.connection?.endpointId,
+    });
+    expect(expired.connection?.status).toBe('closed');
+    expect(expired.connection?.closedReason).toBe('idle_timeout');
+    expect(expired.connection?.publicUrl).toBeUndefined();
+    await expect(fetch(proxyOrigin)).rejects.toThrow();
+  });
+
+  it('refuses an unauthorized heartbeat without extending access', async () => {
+    let now = 1_800_000_000_000;
+    vi.spyOn(Date, 'now').mockImplementation(() => now);
+    const { service } = setup();
+    const request = createRequest();
+    const created = await service.createPreview(request);
+    const statusRequest = {
+      ...request,
+      type: 'session/preview-status' as const,
+      renewEndpointId: created.connection?.endpointId,
     };
-    const logger = createLogger();
-    const service = new PreviewService({
-      logger,
-      workspaceDocument: {
-        getOrCreateSessionDoc: vi.fn(async () => ({
-          getPreviewState: vi.fn(async () => ({})),
-          setPreviewState: vi.fn(async () => undefined),
-        })),
-        repo: {
-          getDocMeta: vi.fn(async () => ({ meta })),
-          upsertDocMeta: vi.fn(async () => undefined),
-        },
-      },
-      machineId,
-      workspaceId,
-      userId,
-      authToken: () => 'token',
-      remoteGatewayUrl: null,
-    } as unknown as ConstructorParameters<typeof PreviewService>[0]);
-
-    try {
-      const response = await service.acquireEndpoint({
-        machineId,
-        workspaceId,
-        sessionId,
-        requestedByUserId: userId,
-        target: { protocol: 'http', host: 'localhost', port },
-      });
-
-      expect(response.success).toBe(true);
-      expect(response.endpoint?.target).toEqual({ protocol: 'http', host: 'localhost', port });
-    } finally {
-      await service.closeAllActiveTunnelsForCleanup('test cleanup');
-    }
+    now += 30 * 60_000;
+    const denied = await service.getStatus({ ...statusRequest, requestedByUserId: 'another-user' });
+    expect(denied.success).toBe(false);
+    expect(denied.connection).toBeUndefined();
+    now += 30 * 60_000;
+    expect((await service.getStatus(statusRequest)).connection?.closedReason).toBe('idle_timeout');
+    await expect(fetch(proxyOrigin)).rejects.toThrow();
   });
 
-  it('acquires localhost endpoints for IPv6 servers when the resolver answers IPv4 only', async () => {
-    // A Linux host with no routable IPv6 address resolves `localhost` to
-    // 127.0.0.1 only, while macOS answers `::1` first. Pin the resolver so the
-    // IPv4-first case is exercised on every platform instead of only on CI.
-    const { server, port } = await listenHttpOnIpv6Loopback();
-    servers.push(server);
-    const previousDispatcher = getGlobalDispatcher();
-    setGlobalDispatcher(
-      new Agent({
-        connect: {
-          lookup: (hostname, _options, callback) => {
-            callback(
-              null,
-              hostname === 'localhost' ? '127.0.0.1' : hostname,
-              hostname.includes(':') ? 6 : 4
-            );
-          },
-        },
-      })
+  it('reports a broken public route despite a live child, preserves local access, and permits explicit restore', async () => {
+    const { service } = setup();
+    const request = createRequest();
+    const local = await service.acquireEndpoint(request);
+    const created = await service.createPreview(request);
+    vi.mocked(verifyPreviewTunnelRoundTrip).mockRejectedValueOnce(
+      new Error('Public route disconnected')
     );
-
-    const sessionId = 'session-preview-ipv6-ipv4-resolver' as SessionId;
-    const meta: SessionMeta = {
-      id: sessionId,
-      machineId,
-      createdAt: '2026-04-30T00:00:00.000Z',
-      userId,
-      cliType: 'builtin',
-      agentType: 'codex',
-    };
-    const service = new PreviewService({
-      logger: createLogger(),
-      workspaceDocument: {
-        getOrCreateSessionDoc: vi.fn(async () => ({
-          getPreviewState: vi.fn(async () => ({})),
-          setPreviewState: vi.fn(async () => undefined),
-        })),
-        repo: {
-          getDocMeta: vi.fn(async () => ({ meta })),
-          upsertDocMeta: vi.fn(async () => undefined),
-        },
-      },
-      machineId,
-      workspaceId,
-      userId,
-      authToken: () => 'token',
-      remoteGatewayUrl: null,
-    } as unknown as ConstructorParameters<typeof PreviewService>[0]);
-
-    try {
-      const response = await service.acquireEndpoint({
-        machineId,
-        workspaceId,
-        sessionId,
-        requestedByUserId: userId,
-        target: { protocol: 'http', host: 'localhost', port },
-      });
-
-      expect(response.success).toBe(true);
-      expect(response.endpoint?.target).toEqual({ protocol: 'http', host: 'localhost', port });
-    } finally {
-      setGlobalDispatcher(previousDispatcher);
-      await service.closeAllActiveTunnelsForCleanup('test cleanup');
-    }
+    const observed = await service.getStatus({
+      ...request,
+      type: 'session/preview-status',
+      renewEndpointId: created.connection?.endpointId,
+    });
+    expect(observed.success).toBe(true);
+    expect(observed.connection?.status).toBe('failed');
+    expect(observed.connection?.error?.message).toContain('Public route disconnected');
+    expect(observed.connection?.publicUrl).toBeUndefined();
+    await expect(fetch(proxyOrigin)).rejects.toThrow();
+    expect(await (await fetch(local.endpoint?.viewerUrl ?? '')).text()).toBe('development server');
+    const restored = await service.createPreview({ ...request, restart: true });
+    expect(restored.connection?.status).toBe('active');
+    expect(restored.connection?.endpointId).not.toBe(created.connection?.endpointId);
+    expect(restored.connection?.publicUrl).not.toBe(created.connection?.publicUrl);
   });
 
-  it('closes active preview tunnels and marks the connection revoked during cleanup', async () => {
-    const sessionId = 'session-preview-cleanup' as SessionId;
-    const upsertDocMeta = vi.fn(async () => undefined);
-    let previewState = {};
-    const setPreviewState = vi.fn(async (next) => {
-      previewState = next;
+  it('does not report an old health result over an explicit replacement', async () => {
+    const { service } = setup();
+    const request = createRequest();
+    const created = await service.createPreview(request);
+    const oldProxyOrigin = proxyOrigin;
+    const entered = Promise.withResolvers<void>();
+    const checked = Promise.withResolvers<void>();
+    vi.mocked(verifyPreviewTunnelRoundTrip).mockImplementationOnce(async () => {
+      entered.resolve();
+      await checked.promise;
     });
-    const meta: SessionMeta = {
-      id: sessionId,
-      machineId,
-      createdAt: '2026-04-30T00:00:00.000Z',
-      userId,
-      cliType: 'builtin',
-      agentType: 'codex',
-      previewConnection: {
-        status: 'active',
-        grantId: 'grant-preview-cleanup',
-        tunnelId: 'session-grant',
-        publicUrl: 'https://session-grant.mylody.app',
-        target: {
-          protocol: 'http',
-          host: '127.0.0.1',
-          port: 5173,
-        },
-        createdAt: 1_714_438_300_000,
-        updatedAt: 1_714_438_300_000,
-      },
-    };
+    const observing = service.getStatus({ ...request, type: 'session/preview-status' });
+    await entered.promise;
+    const restored = await service.createPreview({ ...request, restart: true });
+    checked.resolve();
+    const observed = await observing;
+    expect(observed.connection?.status).toBe('active');
+    expect(observed.connection?.endpointId).toBe(restored.connection?.endpointId);
+    expect(observed.connection?.endpointId).not.toBe(created.connection?.endpointId);
+    await expect(fetch(oldProxyOrigin)).rejects.toThrow();
+  });
 
-    const service = new PreviewService({
-      logger: createLogger(),
-      workspaceDocument: {
-        getOrCreateSessionDoc: vi.fn(async () => ({
-          getPreviewState: vi.fn(async () => previewState),
-          setPreviewState,
-        })),
-        repo: {
-          getDocMeta: vi.fn(async () => ({ meta })),
-          upsertDocMeta,
-        },
-      },
-      machineId,
-      workspaceId,
-      userId,
-      now: () => 1_714_438_400_000,
-      authToken: () => 'token',
-      remoteGatewayUrl: null,
-    } as unknown as ConstructorParameters<typeof PreviewService>[0]);
-
-    const close = vi.fn(async () => undefined);
-    (
-      service as unknown as {
-        activeTunnels: Map<SessionId, { close: (reason?: string) => Promise<void> }>;
+  it.each(['127.0.0.1', '::1'])(
+    'pins localhost HTTP and WS to the probed %s address without global transport',
+    async (address) => {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+      server = http.createServer((request, response) => {
+        response.setHeader('content-type', 'application/json');
+        response.end(
+          JSON.stringify({ host: request.headers.host, address: request.socket.localAddress })
+        );
+      });
+      server.listen(0, address);
+      await once(server, 'listening');
+      const bound = server.address();
+      if (!bound || typeof bound === 'string') throw new Error('Missing fixture port');
+      port = bound.port;
+      const upstream = new WebSocketServer({ server });
+      upstream.on('connection', (client, request) => {
+        client.on('message', () =>
+          client.send(
+            JSON.stringify({ host: request.headers.host, address: request.socket.localAddress })
+          )
+        );
+      });
+      const previous = getGlobalDispatcher();
+      const blocked = new MockAgent();
+      blocked.disableNetConnect();
+      const viewer = new Agent();
+      let socket: WebSocket | undefined;
+      const { service } = setup();
+      try {
+        // The CLI may have a global proxy/dispatcher. Local probes and forwarding
+        // must work even when that dispatcher rejects every network request.
+        setGlobalDispatcher(blocked);
+        const target = { protocol: 'http' as const, host: 'localhost', port };
+        const request = createRequest();
+        const acquired = await service.acquireEndpoint({ ...request, target });
+        expect(acquired.success).toBe(true);
+        expect(acquired.endpoint?.target.host).toBe('localhost');
+        const url = new URL(acquired.endpoint?.viewerUrl ?? '');
+        const response = await directFetch(url, { dispatcher: viewer });
+        expect(await response.json()).toEqual({ host: `localhost:${port}`, address });
+        url.protocol = 'ws:';
+        socket = new WebSocket(url);
+        await once(socket, 'open');
+        const received = once(socket, 'message');
+        socket.send('observe peer');
+        const [message] = await received;
+        expect(JSON.parse(String(message))).toEqual({ host: `localhost:${port}`, address });
+        const disconnected = once(socket, 'close');
+        await service.closeAllActiveTunnelsForCleanup('test cleanup');
+        await disconnected;
+        await expect(
+          directFetch(acquired.endpoint?.viewerUrl ?? '', { dispatcher: viewer })
+        ).rejects.toThrow();
+      } finally {
+        setGlobalDispatcher(previous);
+        socket?.terminate();
+        for (const client of upstream.clients) client.terminate();
+        upstream.close();
+        await Promise.all([blocked.close(), viewer.destroy()]);
       }
-    ).activeTunnels.set(sessionId, { close });
-
-    await service.closeSessionPreviewForCleanup(sessionId, 'Session archived');
-
-    expect(close).toHaveBeenCalledWith('Session archived');
-    expect(setPreviewState).toHaveBeenCalledWith(
-      expect.objectContaining({
-        connection: expect.objectContaining({
-          status: 'revoked',
-          revokedAt: 1_714_438_400_000,
-          revokeReason: 'Session archived',
-        }),
-      })
-    );
-    expect(upsertDocMeta).toHaveBeenCalledWith(
-      expect.any(String),
-      expect.objectContaining({
-        previewConnection: {
-          status: 'revoked',
-          updatedAt: 1_714_438_400_000,
-        },
-      })
-    );
-  });
-
-  it('never tunnels to a LAN host, so the machine cannot become a pivot into its network', async () => {
-    // A user-approved request is the strongest input the create path accepts, and
-    // the approver sits on the OTHER side of the tunnel: they cannot know what a
-    // LAN address means on this machine. So even a fresh, matching approval must
-    // not open one. `startPreviewTunnel` staying uncalled is the observable
-    // guarantee; the error code is what the client renders.
-    const sessionId = 'session-preview-pivot' as SessionId;
-    const meta: SessionMetaWithLegacyPreview = {
-      id: sessionId,
-      machineId,
-      createdAt: '2026-04-30T00:00:00.000Z',
-      userId,
-      cliType: 'builtin',
-      agentType: 'codex',
-    };
-    const service = new PreviewService({
-      logger: createLogger(),
-      workspaceDocument: {
-        getOrCreateSessionDoc: vi.fn(async () => ({
-          getPreviewState: vi.fn(async () => ({})),
-          setPreviewState: vi.fn(async () => undefined),
-        })),
-        repo: { getDocMeta: vi.fn(async () => ({ meta })), upsertDocMeta: vi.fn() },
-      },
-      machineId,
-      workspaceId,
-      userId,
-      now: () => 1_714_438_400_000,
-      authToken: () => 'token',
-      remoteGatewayUrl: 'https://preview.example.com',
-    } as unknown as ConstructorParameters<typeof PreviewService>[0]);
-
-    for (const host of ['192.168.1.20', '10.0.0.5', '172.16.4.4', 'fc00::1', 'printer.local']) {
-      const target = { protocol: 'http' as const, host, port: 3000 };
-      const response = await service.createPreview({
-        type: 'session/preview-create',
-        machineId,
-        workspaceId,
-        sessionId,
-        requestedByUserId: userId,
-        target,
-        approval: {
-          source: 'browser_address',
-          targetClass: 'loopback',
-          target,
-          confirmedByUserId: userId,
-          confirmedAt: 1_714_438_400_000,
-        },
-      });
-      expect(response.success, host).toBe(false);
-      expect(response.error, host).toBe('host_not_loopback');
     }
-    expect(startPreviewTunnel).not.toHaveBeenCalled();
-  });
-
-  it('requires a loopback literal or the exact name localhost, not any *.localhost spelling', async () => {
-    // `classifyBrowserHostname` calls `foo.localhost` loopback by spelling, but nothing
-    // guarantees a resolver answers it from 127.0.0.0/8, and the probe substitutes
-    // literals only for the exact string `localhost`. Accepting the spelling would make
-    // the no-pivot invariant true of the name and false of the address.
-    const sessionId = 'session-preview-localhost-name' as SessionId;
-    const meta: SessionMetaWithLegacyPreview = {
-      id: sessionId,
-      machineId,
-      createdAt: '2026-04-30T00:00:00.000Z',
-      userId,
-      cliType: 'builtin',
-      agentType: 'codex',
-    };
-    const service = new PreviewService({
-      logger: createLogger(),
-      workspaceDocument: {
-        getOrCreateSessionDoc: vi.fn(async () => ({
-          getPreviewState: vi.fn(async () => ({})),
-          setPreviewState: vi.fn(async () => undefined),
-        })),
-        repo: { getDocMeta: vi.fn(async () => ({ meta })), upsertDocMeta: vi.fn() },
-      },
-      machineId,
-      workspaceId,
-      userId,
-      now: () => 1_714_438_400_000,
-      authToken: () => 'token',
-      remoteGatewayUrl: 'https://preview.example.com',
-    } as unknown as ConstructorParameters<typeof PreviewService>[0]);
-
-    for (const host of ['app.localhost', 'evil.localhost']) {
-      const target = { protocol: 'http' as const, host, port: 3000 };
-      const response = await service.createPreview({
-        type: 'session/preview-create',
-        machineId,
-        workspaceId,
-        sessionId,
-        requestedByUserId: userId,
-        target,
-        approval: {
-          source: 'browser_address',
-          targetClass: 'loopback',
-          target,
-          confirmedByUserId: userId,
-          confirmedAt: 1_714_438_400_000,
-        },
-      });
-      expect(response.success, host).toBe(false);
-      expect(response.error, host).toBe('host_not_loopback');
-    }
-    expect(startPreviewTunnel).not.toHaveBeenCalled();
-  });
-
-  it('creates a target-bound tunnel from explicit user input without a candidate', async () => {
-    const { server, port } = await listenHttpOnLoopback();
-    servers.push(server);
-    vi.mocked(startPreviewTunnel).mockResolvedValue({
-      tunnelId: 'mock-tunnel',
-      publicUrl: 'https://preview.example.com/mock-tunnel',
-      close: vi.fn(async () => undefined),
-      closed: Promise.resolve(),
-    });
-
-    const sessionId = 'session-preview-create' as SessionId;
-    let meta: SessionMetaWithLegacyPreview = {
-      id: sessionId,
-      machineId,
-      createdAt: '2026-04-30T00:00:00.000Z',
-      userId,
-      cliType: 'builtin',
-      agentType: 'codex',
-    };
-    let previewState = {};
-    const setPreviewState = vi.fn(async (next) => {
-      previewState = next;
-    });
-    const upsertDocMeta = vi.fn(async (_roomId: string, patch: Partial<SessionMeta>) => {
-      meta = { ...meta, ...patch };
-    });
-    const logger = createLogger();
-    const service = new PreviewService({
-      logger,
-      workspaceDocument: {
-        getOrCreateSessionDoc: vi.fn(async () => ({
-          getPreviewState: vi.fn(async () => previewState),
-          setPreviewState,
-        })),
-        repo: {
-          getDocMeta: vi.fn(async () => ({ meta })),
-          upsertDocMeta,
-        },
-      },
-      machineId,
-      workspaceId,
-      userId,
-      now: () => 1_714_438_400_000,
-      authToken: () => 'token',
-      remoteGatewayUrl: 'https://preview.example.com',
-    } as unknown as ConstructorParameters<typeof PreviewService>[0]);
-
-    const staleApprovalResponse = await service.createPreview({
-      type: 'session/preview-create',
-      machineId,
-      workspaceId,
-      sessionId,
-      requestedByUserId: userId,
-      target: { protocol: 'http', host: '127.0.0.1', port },
-      approval: {
-        source: 'browser_address',
-        targetClass: 'loopback',
-        target: { protocol: 'http', host: '127.0.0.1', port },
-        confirmedByUserId: userId,
-        confirmedAt: 1_714_437_000_000,
-      },
-    });
-    expect(staleApprovalResponse.success).toBe(false);
-    expect(staleApprovalResponse.error).toBe('user_confirmation_required');
-
-    const changedTargetResponse = await service.createPreview({
-      type: 'session/preview-create',
-      machineId,
-      workspaceId,
-      sessionId,
-      requestedByUserId: userId,
-      target: { protocol: 'http', host: '127.0.0.1', port },
-      approval: {
-        source: 'browser_address',
-        targetClass: 'loopback',
-        target: { protocol: 'http', host: '127.0.0.1', port: port + 1 },
-        confirmedByUserId: userId,
-        confirmedAt: 1_714_438_400_000,
-      },
-    });
-    expect(changedTargetResponse.success).toBe(false);
-    expect(changedTargetResponse.error).toBe('target_changed');
-
-    const response = await service.createPreview({
-      type: 'session/preview-create',
-      machineId,
-      workspaceId,
-      sessionId,
-      requestedByUserId: userId,
-      target: {
-        protocol: 'http',
-        host: '127.0.0.1',
-        port,
-      },
-      approval: {
-        source: 'browser_address',
-        targetClass: 'loopback',
-        target: { protocol: 'http', host: '127.0.0.1', port },
-        confirmedByUserId: userId,
-        confirmedAt: 1_714_438_400_000,
-      },
-    });
-
-    await service.closeSessionPreviewForCleanup(sessionId, 'test cleanup');
-
-    expect(response.success).toBe(true);
-    expect(response.connection?.status).toBe('active');
-    expect(setPreviewState).toHaveBeenCalledWith(
-      expect.objectContaining({
-        connection: expect.objectContaining({
-          status: 'active',
-          publicUrl: 'https://preview.example.com/mock-tunnel',
-        }),
-      })
-    );
-    expect(startPreviewTunnel).toHaveBeenCalledWith(
-      expect.objectContaining({
-        target: {
-          protocol: 'http',
-          host: '127.0.0.1',
-          port,
-        },
-      })
-    );
-  });
+  );
 });

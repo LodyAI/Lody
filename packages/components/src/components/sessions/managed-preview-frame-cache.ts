@@ -105,7 +105,7 @@ const createEntry = (
         "fullscreen 'none'; geolocation 'none'; gyroscope 'none'; microphone 'none'; midi 'none'"
     );
   } else {
-    // The managed application preview runs on an isolated gateway origin and
+    // The managed application preview runs on an isolated endpoint origin and
     // needs normal app semantics, so the sandbox stays permissive but explicit.
     iframe.setAttribute('sandbox', 'allow-forms allow-modals allow-same-origin allow-scripts');
     iframe.setAttribute('allow', 'clipboard-read; clipboard-write; fullscreen');

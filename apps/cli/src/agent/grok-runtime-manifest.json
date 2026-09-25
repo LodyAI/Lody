@@ -1,0 +1,54 @@
+{
+  "name": "grok-build",
+  "version": "1.0.40",
+  "artifacts": {
+    "darwin-arm64": {
+      "fileName": "xai-official-grok-darwin-arm64-1.0.40.tar.zst",
+      "sourceIntegrity": "sha512-F3bRv0W3Ud9mPyDOxTEAnFAfz5KSMQnJFmG+WYJ0gEBOzPSyVmQ/PJ422iAxRVlSVT39bDFWWF4pb3GwKb6jtQ==",
+      "sha256": "15c99e54532904f452a58717f1cf19de94030c56b904976b351356bd709068f2",
+      "size": 51521118,
+      "executableSha256": "3f2aef9618191a2c60d18a5044fa462c9c77bdc4187b02ed716b0394e8d4fef2",
+      "executableSize": 145308720
+    },
+    "darwin-x64": {
+      "fileName": "xai-official-grok-darwin-x64-1.0.40.tar.zst",
+      "sourceIntegrity": "sha512-CtmS40Jz/pHX7RjRXnoXM94EKibhiJ4lMJdT4+LjW55abUMvCL25vOMo0163uRKiXdsodKUQvVZRUTi5wyfTBQ==",
+      "sha256": "dacf51b674037e273faf1b75b7be54667cf47a84a827958bf813c9fb25fa3f4e",
+      "size": 56521318,
+      "executableSha256": "ccac66f3a6778a39f3a19e95c82254b2482349a6ded68ed8d2f8df5c26e2d939",
+      "executableSize": 162677920
+    },
+    "linux-arm64": {
+      "fileName": "xai-official-grok-linux-arm64-1.0.40.tar.zst",
+      "sourceIntegrity": "sha512-z+QMZ5L+O84X7WrnK9RxHjXebzvtCeoSEyNBonbesi83rY19fHsR+o1cw/QZ2pkVa9roy/Iaf7GWHXM+8g8Gdw==",
+      "sha256": "d544e3452ec8a3d0dd3ff9d852350828aa4935dd101ffd8f2481521a9acbb55b",
+      "size": 53769611,
+      "executableSha256": "a16d26cf06892ebb3eca9a702c65e031a053431ed4dde3b23bebc58a92b6117f",
+      "executableSize": 138263464
+    },
+    "linux-x64": {
+      "fileName": "xai-official-grok-linux-x64-1.0.40.tar.zst",
+      "sourceIntegrity": "sha512-vMD2GFDHrsViUg61G7Tc6/g6kz9IXYDn12yTMOhZy5J8E2qMxQaYsPJt2NSLjxy4Of8cTu8Zq7aws5xmZtTVEw==",
+      "sha256": "129b5ca9646ae014fd572f7ee4ebe812d9881549a4fb0a705c8aad59b2f1cb45",
+      "size": 56793870,
+      "executableSha256": "92c997dfd109c0672d40d5ae6fbd15835d53ffaf12cf9ea124d22aaef3ff23fc",
+      "executableSize": 165587968
+    },
+    "win32-arm64": {
+      "fileName": "xai-official-grok-win32-arm64-1.0.40.tar.zst",
+      "sourceIntegrity": "sha512-r5yt6YMENm54HLD+rwGakVaiE/5wbqEI/e51ecX+GFnSsJbxZhFe7ZMi08Q+nT7m/dyvBg2Anubr1xpva0FENg==",
+      "sha256": "5742bad3f4f52b7011180f5b7b7137e1f6887336486f6ecc3cc9cf96dcf1488c",
+      "size": 50197344,
+      "executableSha256": "86cb5aac59cfd21f26b77e1caa6b804b9058a8ce1ea9d072631df5d06f62ae15",
+      "executableSize": 132932096
+    },
+    "win32-x64": {
+      "fileName": "xai-official-grok-win32-x64-1.0.40.tar.zst",
+      "sourceIntegrity": "sha512-pP+N0bM2bmCk14BSTFADz9jg4dOwQSWaYm3U6ygulc1IPEt4eOIwgZBlxxfhfjMlkBlEP4aiCeD3lIfqlKutdQ==",
+      "sha256": "f7a2a162c64dbf4a1aa1d505bb12967e6c97c9974a0a9eecbd4eee318f468772",
+      "size": 53535773,
+      "executableSha256": "be64017f7f5f5b85cd10b59eebcb596af8d3dcde077aad08aa8eae8defdc5e2a",
+      "executableSize": 153720832
+    }
+  }
+}

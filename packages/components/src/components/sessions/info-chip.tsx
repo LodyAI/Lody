@@ -1,4 +1,4 @@
-import { useState, type ComponentType, type ReactNode, type SVGProps } from 'react';
+import { useRef, useState, type ComponentType, type ReactNode, type SVGProps } from 'react';
 import { ArrowUpRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Popover } from '@lody/ui/popover';
@@ -63,6 +63,62 @@ export function ActionChip({
     >
       <ChipFace icon={icon} />
     </button>
+  );
+}
+
+/**
+ * Action chip whose one click toggles a popover above the bar (e.g. related
+ * Sessions). Like {@link ActionChip} it never takes the stage.
+ */
+export function PopoverActionChip({
+  icon,
+  label,
+  value,
+  content,
+  defaultOpen = false,
+}: {
+  icon: InfoChipIcon;
+  label: string;
+  value?: string;
+  content: ReactNode;
+  /** Storybook/testing aid. */
+  defaultOpen?: boolean;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  return (
+    <Popover.Root open={open} onOpenChange={setOpen}>
+      <Popover.Trigger
+        render={
+          <button
+            ref={buttonRef}
+            type="button"
+            aria-label={label}
+            title={label}
+            className={cn(
+              CHIP_BUTTON_CLASS,
+              'text-muted-foreground',
+              open && 'bg-muted-foreground/10 text-foreground'
+            )}
+          >
+            <ChipFace icon={icon} value={value} />
+          </button>
+        }
+      />
+      <Popover.Content
+        side="top"
+        align="start"
+        // Anchor to the enclosing info-bar pill so the panel shares its edges.
+        anchor={() => {
+          const button = buttonRef.current;
+          return button?.closest('[data-info-bar-surface]') ?? button;
+        }}
+        aria-label={label}
+        className="w-[var(--anchor-width)] border-border/60 p-0 shadow-xl"
+      >
+        {content}
+      </Popover.Content>
+    </Popover.Root>
   );
 }
 

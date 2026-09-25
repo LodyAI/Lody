@@ -1962,9 +1962,11 @@ export class AgentClient implements acp.Client {
     const canResumeSession = this.supportsResume && hasResumeMethod;
     const canForkSession = this.supportsFork && hasForkMethod;
 
+    // Pi advertises loadSession only for history import; a live resume must not replay it.
     const preferResumeOverLoad =
       this.options.agentConfig?.cliType === 'builtin' &&
-      this.options.agentConfig.agentType === 'kimi';
+      (this.options.agentConfig.agentType === 'kimi' ||
+        this.options.agentConfig.agentType === 'pi');
     const shouldResume = Boolean(
       resumeSessionId && canResumeSession && (preferResumeOverLoad || !canLoadSession)
     );

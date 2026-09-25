@@ -6,6 +6,9 @@ import {
   type WorkspaceId,
 } from '@lody/shared';
 import { createWorkspaceMachineRpcFacade } from '../src/providers/workspace-machine-rpc-facade';
+import { mintPreviewControlProof } from '../src/lib/preview-control-api';
+
+vi.mock('../src/lib/preview-control-api', () => ({ mintPreviewControlProof: vi.fn() }));
 
 const workspaceId = 'workspace-1' as WorkspaceId;
 const localMachineId = 'machine-local' as MachineId;
@@ -14,9 +17,167 @@ const sessionId = 'session-1' as SessionId;
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.resetAllMocks();
 });
 
 describe('createWorkspaceMachineRpcFacade', () => {
+  it.each([undefined, {}, { previewControl: 0 }])(
+    'rejects unsupported remote preview control before handshake or authorization (%j)',
+    async (protocolCapabilities) => {
+      const facade = createWorkspaceMachineRpcFacade({
+        workspaceId,
+        getMachineProtocolCapabilities: async () => protocolCapabilities,
+        targetRouter: {
+          getPlaneForMachine: () => 'cloud',
+          resolvePlaneForMachine: async () => 'cloud',
+        },
+        getMachineRpcClient: async () =>
+          ({
+            requestPreviewControl: () => {
+              throw new Error('Unexpected handshake');
+            },
+            requestSessionPreviewStatus: () => {
+              throw new Error('Unexpected preview RPC');
+            },
+          }) as never,
+      });
+      await expect(
+        facade.requestSessionPreviewStatus(remoteMachineId, sessionId, 'owner')
+      ).resolves.toMatchObject({
+        success: false,
+        message: 'Update this machine to manage remote previews.',
+      });
+      expect(mintPreviewControlProof).not.toHaveBeenCalled();
+    }
+  );
+
+  it('uses the dedicated handshake nonce for remote preview proof, without machine status', async () => {
+    const runtimeNonce = '00000000-0000-4000-8000-000000000001';
+    vi.mocked(mintPreviewControlProof).mockImplementation(async (intent, token) => {
+      expect(token).toBe('test-login-token');
+      expect(intent).toMatchObject({
+        workspaceId,
+        machineId: remoteMachineId,
+        sessionId,
+        requesterUserId: 'owner',
+        runtimeNonce,
+        operation: { action: 'status', renewEndpointId: 'endpoint-1' },
+      });
+      return {
+        runtimeNonce: intent.runtimeNonce,
+        requestId: intent.requestId,
+        requestToken: 'test-proof',
+      };
+    });
+    const facade = createWorkspaceMachineRpcFacade({
+      workspaceId,
+      getSessionToken: () => 'test-login-token',
+      getMachineProtocolCapabilities: async () => CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
+      targetRouter: {
+        getPlaneForMachine: () => 'cloud',
+        resolvePlaneForMachine: async () => 'cloud',
+      },
+      getMachineRpcClient: async () =>
+        ({
+          requestMachineStatus: () => {
+            throw new Error('Unexpected machine status');
+          },
+          requestPreviewControl: async () => ({ success: true, runtimeNonce }),
+          requestSessionPreviewStatus: async (request: {
+            proof: { runtimeNonce: string; requestToken: string };
+          }) => {
+            expect(request.proof).toMatchObject({ runtimeNonce, requestToken: 'test-proof' });
+            return {
+              type: 'session/preview-status_response',
+              sessionId,
+              success: true,
+              connection: { status: 'closed', closedReason: 'idle_timeout' },
+            };
+          },
+        }) as never,
+    });
+    await expect(
+      facade.requestSessionPreviewStatus(remoteMachineId, sessionId, 'owner', {
+        renewEndpointId: 'endpoint-1',
+      })
+    ).resolves.toMatchObject({
+      success: true,
+      connection: { status: 'closed', closedReason: 'idle_timeout' },
+    });
+  });
+
+  it.each([null, { success: false, error: 'handshake unavailable' }])(
+    'does not mint authorization after a failed handshake (%j)',
+    async (handshake) => {
+      const facade = createWorkspaceMachineRpcFacade({
+        workspaceId,
+        getMachineProtocolCapabilities: async () => CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
+        targetRouter: {
+          getPlaneForMachine: () => 'cloud',
+          resolvePlaneForMachine: async () => 'cloud',
+        },
+        getMachineRpcClient: async () =>
+          ({
+            requestPreviewControl: async () => handshake,
+            requestSessionPreviewStatus: () => {
+              throw new Error('Unexpected preview RPC');
+            },
+          }) as never,
+      });
+      await expect(
+        facade.requestSessionPreviewStatus(remoteMachineId, sessionId, 'owner')
+      ).resolves.toMatchObject({
+        success: false,
+        message: handshake?.error ?? 'The machine did not provide preview control authorization.',
+      });
+      expect(mintPreviewControlProof).not.toHaveBeenCalled();
+    }
+  );
+
+  it('controls a local preview without a login token or cloud proof', async () => {
+    vi.stubGlobal('fetch', () => {
+      throw new Error('Unexpected cloud HTTP');
+    });
+    vi.stubGlobal('window', {
+      __LODY_ELECTRON__: true,
+      ipc: {
+        invoke: async (_channel: string, request: { method: string; params: object }) => {
+          expect(request.method).toBe('session/preview-status');
+          expect(request.params).toEqual({
+            sessionId,
+            requestedByUserId: 'local-owner',
+            renewEndpointId: undefined,
+          });
+          return {
+            ok: true,
+            result: {
+              type: 'session/preview-status_response',
+              sessionId,
+              success: true,
+              connection: { status: 'closed', closedReason: 'idle_timeout' },
+            },
+          };
+        },
+      },
+    });
+    const facade = createWorkspaceMachineRpcFacade({
+      workspaceId,
+      targetRouter: {
+        getPlaneForMachine: () => 'local',
+        resolvePlaneForMachine: async () => 'local',
+      },
+      getMachineRpcClient: async () => {
+        throw new Error('Unexpected cloud RPC');
+      },
+    });
+    await expect(
+      facade.requestSessionPreviewStatus(localMachineId, sessionId, 'local-owner')
+    ).resolves.toMatchObject({
+      success: true,
+      connection: { status: 'closed', closedReason: 'idle_timeout' },
+    });
+  });
+
   it('keeps Pi discovery success and failure on the local machine route', async () => {
     const discovery = { version: 1, agentDir: '/fixture/pi', extensions: [], warnings: [] };
     let failed = false;

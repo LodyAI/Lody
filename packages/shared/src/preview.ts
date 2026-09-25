@@ -2,10 +2,6 @@ import type { MachineId, SessionId, WorkspaceId } from './index';
 
 export type PreviewProtocol = 'http' | 'https';
 
-export type PreviewViewerScope = {
-  type: 'workspace';
-};
-
 export type PreviewTarget = {
   protocol: PreviewProtocol;
   host: string;
@@ -31,24 +27,19 @@ export const isLoopbackPreviewHost = (host: string): boolean => {
 
 export type PreviewCandidateStatus = 'none' | 'reported' | 'validating' | 'available' | 'invalid';
 
-export type PreviewConnectionStatus =
-  | 'idle'
-  | 'creating'
-  | 'active'
-  | 'failed'
+export type PreviewConnectionStatus = 'creating' | 'active' | 'closed' | 'failed';
+export type PreviewCloseReason =
+  | 'idle_timeout'
   | 'revoked'
-  | 'expired';
+  | 'session_ended'
+  | 'replaced'
+  | 'runtime_lost';
 
 export type PreviewValidationStage = 'report' | 'create' | 'connect' | 'revoke';
 
 export type PreviewErrorCode =
   | 'host_not_loopback'
-  // `host_not_private` and `target_resolution_failed` are no longer produced: a
-  // managed preview is loopback-only, so there is no private-LAN branch left to
-  // fail. They stay in the vocabulary so a response from an older CLI decodes.
-  | 'host_not_private'
   | 'host_prohibited'
-  | 'target_resolution_failed'
   | 'target_changed'
   | 'user_confirmation_required'
   | 'invalid_port'
@@ -58,15 +49,11 @@ export type PreviewErrorCode =
   | 'session_archived'
   | 'port_not_listening'
   | 'local_server_unreachable'
-  | 'process_not_owned_by_session'
   | 'preview_already_active'
   | 'resource_limit_exceeded'
-  | 'preview_expired'
-  | 'preview_idle_timeout'
   | 'grant_denied'
   | 'tunnel_not_configured'
   | 'tunnel_creation_failed'
-  | 'cloud_authorization_failed'
   | 'internal_error';
 
 export type PreviewValidationResult = {
@@ -108,33 +95,16 @@ export type PreviewResourceLimits = {
   maxRequestDurationMs: number;
 };
 
-export type PreviewResourceUsage = {
-  httpRequestCount?: number;
-  webSocketOpenCount?: number;
-  requestBytesIn?: number;
-  responseBytesOut?: number;
-  limitExceededCount?: number;
-  lastLimitExceededAt?: number;
-  lastCloseReason?: string;
-};
-
 export type PreviewConnection = {
   status: PreviewConnectionStatus;
-  grantId?: string;
+  endpointId?: string;
   publicUrl?: string;
-  tunnelId?: string;
   target?: PreviewTarget;
-  viewerScope?: PreviewViewerScope;
   approvedByUserId?: string;
   createdAt?: number;
   updatedAt?: number;
-  leaseExpiresAt?: number;
   idleTimeoutMs?: number;
-  lastActiveAt?: number;
-  revokedAt?: number;
-  revokeReason?: string;
-  resourceLimits?: PreviewResourceLimits;
-  resourceUsage?: PreviewResourceUsage;
+  closedReason?: PreviewCloseReason;
   error?: PreviewConnectionError;
 };
 
@@ -159,7 +129,7 @@ export const hasReportedPreviewTarget = (preview: {
   preview.connectionStatus === 'creating' ||
   preview.connectionStatus === 'active';
 
-export type PreviewEndpointKind = 'local-proxy' | 'cloud-gateway';
+export type PreviewEndpointKind = 'local-proxy' | 'quick-tunnel';
 
 export type PreviewEndpointCapabilities = {
   visualAnnotation: boolean;
@@ -227,7 +197,7 @@ export type SessionPreviewCreateRequest = {
   requestedByUserId: string;
   target: PreviewTarget;
   approval: PreviewTargetApproval;
-  replaceExisting?: boolean;
+  restart?: boolean;
 };
 
 export type PreviewTargetApproval = {
@@ -272,9 +242,28 @@ export type SessionPreviewRevokeResponse = {
   message?: string;
 };
 
-export const DEFAULT_PREVIEW_IDLE_TIMEOUT_MS = 45 * 60 * 1000;
-export const DEFAULT_PREVIEW_LEASE_MS = 8 * 60 * 60 * 1000;
-export const PREVIEW_PUBLIC_BASE_DOMAIN = 'mylody.app';
+export type SessionPreviewStatusRequest = {
+  type: 'session/preview-status';
+  machineId: MachineId;
+  workspaceId: WorkspaceId;
+  sessionId: SessionId;
+  requestedByUserId: string;
+  /** A heartbeat must name the exact live endpoint; a stale page cannot renew its replacement. */
+  renewEndpointId?: string;
+};
+
+export type SessionPreviewStatusResponse = {
+  type: 'session/preview-status_response';
+  sessionId: SessionId;
+  success: boolean;
+  connection?: PreviewConnection;
+  /** Observation only; never persisted on each request. */
+  expiresAt?: number;
+  error?: PreviewErrorCode;
+  message?: string;
+};
+
+export const DEFAULT_PREVIEW_IDLE_TIMEOUT_MS = 60 * 60 * 1000;
 export const DEFAULT_PREVIEW_MAX_ACTIVE_TUNNELS_PER_MACHINE = 3;
 export const PREVIEW_CREATE_RATE_LIMIT_WINDOW_MS = 60 * 1000;
 export const PREVIEW_CREATE_RATE_LIMIT_MAX = 5;
@@ -283,81 +272,25 @@ export const DEFAULT_PREVIEW_RESOURCE_LIMITS: PreviewResourceLimits = {
   maxResponseBodyBytes: 100 * 1024 * 1024,
   maxRequestDurationMs: 5 * 60 * 1000,
 };
-export const PREVIEW_TUNNEL_HTTP_BODY_BATCH_BYTES = 256 * 1024;
-export const PREVIEW_TUNNEL_RESPONSE_BODY_CREDIT_WINDOW_BYTES = 512 * 1024;
-export const PREVIEW_TUNNEL_SOCKET_BACKPRESSURE_HIGH_WATERMARK_BYTES = 2 * 1024 * 1024;
-export const PREVIEW_TUNNEL_SOCKET_BACKPRESSURE_LOW_WATERMARK_BYTES = 512 * 1024;
-
-const SHORT_ID_SAFE_CHARS = /[^a-z0-9]/gi;
-const PREVIEW_TUNNEL_ID_PATTERN = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
-const PREVIEW_PUBLIC_DOMAIN_LABEL_PATTERN = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
-
-export const normalizePreviewPublicBaseDomain = (value: string): string => {
-  const domain = value.trim().toLowerCase();
-  const labels = domain.split('.');
-  const hasValidLabels =
-    domain.length <= 253 &&
-    labels.length >= 2 &&
-    labels.every((label) => PREVIEW_PUBLIC_DOMAIN_LABEL_PATTERN.test(label)) &&
-    !/^\d+$/.test(labels[labels.length - 1] ?? '');
-
-  if (!hasValidLabels) {
-    throw new Error(
-      'Preview public base domain must be an ASCII public base domain without a scheme, wildcard, port, path, query, or trailing dot'
-    );
-  }
-
-  return domain;
-};
-
-export const toPreviewShortId = (value: string, fallback: string): string => {
-  const normalized = value.replace(SHORT_ID_SAFE_CHARS, '').toLowerCase();
-  return (normalized || fallback).slice(0, 7);
-};
-
-export const buildPreviewPublicUrl = (args: {
-  sessionId: SessionId;
-  grantId: string;
-  baseDomain?: string;
-}): string => {
-  const sessionShortId = toPreviewShortId(args.sessionId, 'session');
-  const grantShortId = toPreviewShortId(args.grantId, 'grant');
-  const baseDomain = normalizePreviewPublicBaseDomain(
-    args.baseDomain ?? PREVIEW_PUBLIC_BASE_DOMAIN
-  );
-  return `https://${sessionShortId}-${grantShortId}.${baseDomain}`;
-};
-
-export const isAllowedPreviewPublicUrl = (
-  value: string | undefined,
-  baseDomain: string = PREVIEW_PUBLIC_BASE_DOMAIN
-): value is string => {
-  if (!value) {
-    return false;
-  }
+export const PREVIEW_ACCESS_TOKEN_QUERY_PARAM = '__lody_preview_token';
+export const PREVIEW_ACCESS_TOKEN_COOKIE = 'lody_preview';
+/** Validate an endpoint returned by the CLI, not an arbitrary URL to auto-trust. */
+export const isQuickTunnelViewerUrl = (value: string | undefined): value is string => {
+  if (!value) return false;
   try {
     const url = new URL(value);
-    const normalizedBaseDomain = normalizePreviewPublicBaseDomain(baseDomain);
-    const hostname = url.hostname.toLowerCase();
-    const suffix = `.${normalizedBaseDomain}`;
-    const subdomain = hostname.endsWith(suffix) ? hostname.slice(0, -suffix.length) : '';
     return (
       url.protocol === 'https:' &&
-      !!subdomain &&
-      !subdomain.includes('.') &&
-      PREVIEW_TUNNEL_ID_PATTERN.test(subdomain) &&
       !url.username &&
       !url.password &&
-      (url.port === '' || url.port === '443')
+      !url.port &&
+      /^[a-z0-9]+(?:-[a-z0-9]+)*\.trycloudflare\.com$/.test(url.hostname) &&
+      Boolean(url.searchParams.get(PREVIEW_ACCESS_TOKEN_QUERY_PARAM))
     );
   } catch {
     return false;
   }
 };
-
-export const PREVIEW_TUNNELS_API_PATH = '/api/preview/tunnels';
-export const PREVIEW_ACCESS_TOKEN_QUERY_PARAM = '__lody_preview_token';
-export const PREVIEW_ACCESS_TOKEN_COOKIE = 'lody_preview';
 export const DEFAULT_PREVIEW_VIEWER_COOKIE_MAX_AGE_SECONDS = 8 * 60 * 60;
 export const MIN_PREVIEW_VIEWER_COOKIE_MAX_AGE_SECONDS = 60;
 
@@ -493,406 +426,3 @@ export const applyPreviewEmbeddingHeaders = (headers: Headers): Headers => {
   headers.set('Cross-Origin-Resource-Policy', PREVIEW_RESOURCE_POLICY);
   return headers;
 };
-
-export type PreviewTunnelCreateRequest = {
-  workspaceId: WorkspaceId;
-  machineId: MachineId;
-  sessionId: SessionId;
-  grantId: string;
-  approvedByUserId: string;
-  leaseExpiresAt: number;
-  idleTimeoutMs: number;
-};
-
-export type PreviewTunnelCreateResponse = {
-  tunnelId: string;
-  publicUrl: string;
-  websocketUrl: string;
-  sessionToken: string;
-  expiresAt: number;
-  resourceLimits?: PreviewResourceLimits;
-};
-
-export type PreviewTunnelRefreshResponse = {
-  websocketUrl: string;
-  sessionToken: string;
-  expiresAt: number;
-};
-
-export type PreviewTunnelReadyMessage = {
-  type: 'tunnel-ready';
-  tunnelId: string;
-  publicUrl: string;
-  protocolVersion?: number;
-  capabilities?: string[];
-};
-
-export type PreviewTunnelAcceptedMessage = {
-  type: 'tunnel-accepted';
-  tunnelId: string;
-  publicUrl: string;
-  protocolVersion: number;
-  capabilities: string[];
-};
-
-export type PreviewTunnelErrorMessage = {
-  type: 'error';
-  message: string;
-};
-
-export type PreviewTunnelRequestStartMessage = {
-  type: 'request-start';
-  requestId: string;
-  method: string;
-  url: string;
-  headers: HeaderEntry[];
-  hasBody: boolean;
-  binaryPayload?: boolean;
-  responseBodyCredit?: boolean;
-};
-
-export type PreviewTunnelRequestCancelMessage = {
-  type: 'request-cancel';
-  requestId: string;
-  reason: string;
-};
-
-export type PreviewTunnelRequestBodyMessage = {
-  type: 'request-body';
-  requestId: string;
-  chunk: string;
-};
-
-export type PreviewTunnelRequestEndMessage = {
-  type: 'request-end';
-  requestId: string;
-};
-
-export type PreviewTunnelResponseBodyCreditMessage = {
-  type: 'response-body-credit';
-  requestId: string;
-  credit: number;
-};
-
-export type PreviewTunnelBinaryPayloadStream = 'request-body' | 'response-body' | 'websocket-frame';
-
-export type PreviewTunnelBinaryPayloadMessage = {
-  type: 'binary-payload';
-  requestId: string;
-  stream: PreviewTunnelBinaryPayloadStream;
-};
-
-export type PreviewTunnelClientReadyMessage = {
-  type: 'client-ready';
-  protocolVersion: number;
-  capabilities: string[];
-};
-
-export type PreviewTunnelClientCapabilitiesMessage = {
-  type: 'client-capabilities';
-  capabilities: string[];
-};
-
-export type PreviewTunnelWebSocketConnectMessage = {
-  type: 'websocket-connect';
-  requestId: string;
-  url: string;
-  headers: HeaderEntry[];
-  protocols: string[];
-  binaryPayload?: boolean;
-};
-
-export type PreviewTunnelWebSocketAcceptMessage = {
-  type: 'websocket-accept';
-  requestId: string;
-  protocol?: string;
-};
-
-export type PreviewTunnelWebSocketRejectMessage = {
-  type: 'websocket-reject';
-  requestId: string;
-  message: string;
-};
-
-export type PreviewTunnelWebSocketFrameMessage = {
-  type: 'websocket-frame';
-  requestId: string;
-  chunk: string;
-  isBinary: boolean;
-};
-
-export type PreviewTunnelWebSocketCloseMessage = {
-  type: 'websocket-close';
-  requestId: string;
-  code?: number;
-  reason: string;
-};
-
-export type PreviewTunnelResponseStartMessage = {
-  type: 'response-start';
-  requestId: string;
-  status: number;
-  statusText: string;
-  headers: HeaderEntry[];
-  hasBody: boolean;
-};
-
-export type PreviewTunnelResponseBodyMessage = {
-  type: 'response-body';
-  requestId: string;
-  chunk: string;
-};
-
-export type PreviewTunnelResponseEndMessage = {
-  type: 'response-end';
-  requestId: string;
-};
-
-export type PreviewTunnelResponseErrorMessage = {
-  type: 'response-error';
-  requestId: string;
-  message: string;
-};
-
-export type PreviewTunnelServerMessage =
-  | PreviewTunnelReadyMessage
-  | PreviewTunnelAcceptedMessage
-  | PreviewTunnelErrorMessage
-  | PreviewTunnelRequestStartMessage
-  | PreviewTunnelRequestBodyMessage
-  | PreviewTunnelBinaryPayloadMessage
-  | PreviewTunnelRequestEndMessage
-  | PreviewTunnelRequestCancelMessage
-  | PreviewTunnelResponseBodyCreditMessage
-  | PreviewTunnelWebSocketConnectMessage
-  | PreviewTunnelWebSocketFrameMessage
-  | PreviewTunnelWebSocketCloseMessage;
-
-export type PreviewTunnelClientMessage =
-  | PreviewTunnelErrorMessage
-  | PreviewTunnelClientReadyMessage
-  | PreviewTunnelClientCapabilitiesMessage
-  | PreviewTunnelResponseStartMessage
-  | PreviewTunnelResponseBodyMessage
-  | PreviewTunnelBinaryPayloadMessage
-  | PreviewTunnelResponseEndMessage
-  | PreviewTunnelResponseErrorMessage
-  | PreviewTunnelWebSocketAcceptMessage
-  | PreviewTunnelWebSocketRejectMessage
-  | PreviewTunnelWebSocketFrameMessage
-  | PreviewTunnelWebSocketCloseMessage;
-
-export const PREVIEW_TUNNEL_PROTOCOL_VERSION = 3;
-export const PREVIEW_TUNNEL_BINARY_PAYLOAD_CAPABILITY = 'binary-payload';
-export const PREVIEW_TUNNEL_RESPONSE_BODY_CREDIT_CAPABILITY = 'response-body-credit';
-export const PREVIEW_TUNNEL_CAPABILITIES = [
-  PREVIEW_TUNNEL_BINARY_PAYLOAD_CAPABILITY,
-  PREVIEW_TUNNEL_RESPONSE_BODY_CREDIT_CAPABILITY,
-] as const;
-
-export const normalizePreviewTunnelId = (value: string): string | null => {
-  const normalized = value.trim().toLowerCase();
-  return PREVIEW_TUNNEL_ID_PATTERN.test(normalized) ? normalized : null;
-};
-
-export const buildPreviewTunnelId = (args: { sessionId: SessionId; grantId: string }): string =>
-  `${toPreviewShortId(args.sessionId, 'session')}-${toPreviewShortId(args.grantId, 'grant')}`;
-
-export const buildPreviewTunnelConnectPath = (tunnelId: string): string =>
-  `${PREVIEW_TUNNELS_API_PATH}/${encodeURIComponent(tunnelId)}/connect`;
-
-export const buildPreviewTunnelRefreshPath = (tunnelId: string): string =>
-  `${PREVIEW_TUNNELS_API_PATH}/${encodeURIComponent(tunnelId)}/refresh`;
-
-export const buildPreviewTunnelRevokePath = (tunnelId: string): string =>
-  `${PREVIEW_TUNNELS_API_PATH}/${encodeURIComponent(tunnelId)}/revoke`;
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null;
-
-const isString = (value: unknown): value is string => typeof value === 'string';
-
-const isOptionalString = (value: unknown): value is string | undefined =>
-  value === undefined || typeof value === 'string';
-
-const isOptionalNumber = (value: unknown): value is number | undefined =>
-  value === undefined || typeof value === 'number';
-
-const isOptionalBoolean = (value: unknown): value is boolean | undefined =>
-  value === undefined || typeof value === 'boolean';
-
-const isPositiveInteger = (value: unknown): value is number =>
-  typeof value === 'number' && Number.isInteger(value) && value > 0;
-
-const isStringArray = (value: unknown): value is string[] =>
-  Array.isArray(value) && value.every((item) => typeof item === 'string');
-
-const isHeaderEntries = (value: unknown): value is HeaderEntry[] =>
-  Array.isArray(value) &&
-  value.every(
-    (entry) =>
-      Array.isArray(entry) &&
-      entry.length === 2 &&
-      typeof entry[0] === 'string' &&
-      typeof entry[1] === 'string'
-  );
-
-const isPreviewTunnelBinaryPayloadStream = (
-  value: unknown
-): value is PreviewTunnelBinaryPayloadStream =>
-  value === 'request-body' || value === 'response-body' || value === 'websocket-frame';
-
-export const isPreviewResourceLimits = (value: unknown): value is PreviewResourceLimits =>
-  isRecord(value) &&
-  isPositiveInteger(value.maxRequestBodyBytes) &&
-  isPositiveInteger(value.maxResponseBodyBytes) &&
-  isPositiveInteger(value.maxRequestDurationMs);
-
-const parseJsonRecord = (raw: string): Record<string, unknown> | null => {
-  try {
-    const parsed: unknown = JSON.parse(raw);
-    return isRecord(parsed) ? parsed : null;
-  } catch {
-    return null;
-  }
-};
-
-const isPreviewTunnelServerMessage = (
-  value: Record<string, unknown>
-): value is PreviewTunnelServerMessage => {
-  switch (value.type) {
-    case 'tunnel-ready':
-      return (
-        isString(value.tunnelId) &&
-        isString(value.publicUrl) &&
-        isOptionalNumber(value.protocolVersion) &&
-        (value.protocolVersion === undefined || Number.isInteger(value.protocolVersion)) &&
-        (value.capabilities === undefined || isStringArray(value.capabilities))
-      );
-    case 'tunnel-accepted':
-      return (
-        isString(value.tunnelId) &&
-        isString(value.publicUrl) &&
-        typeof value.protocolVersion === 'number' &&
-        Number.isInteger(value.protocolVersion) &&
-        isStringArray(value.capabilities)
-      );
-    case 'error':
-      return isString(value.message);
-    case 'request-start':
-      return (
-        isString(value.requestId) &&
-        isString(value.method) &&
-        isString(value.url) &&
-        isHeaderEntries(value.headers) &&
-        typeof value.hasBody === 'boolean' &&
-        isOptionalBoolean(value.binaryPayload) &&
-        isOptionalBoolean(value.responseBodyCredit)
-      );
-    case 'request-body':
-      return isString(value.requestId) && isString(value.chunk);
-    case 'binary-payload':
-      return isString(value.requestId) && isPreviewTunnelBinaryPayloadStream(value.stream);
-    case 'request-end':
-      return isString(value.requestId);
-    case 'request-cancel':
-      return isString(value.requestId) && isString(value.reason);
-    case 'response-body-credit':
-      return (
-        isString(value.requestId) &&
-        typeof value.credit === 'number' &&
-        Number.isInteger(value.credit) &&
-        value.credit > 0
-      );
-    case 'websocket-connect':
-      return (
-        isString(value.requestId) &&
-        isString(value.url) &&
-        isHeaderEntries(value.headers) &&
-        isStringArray(value.protocols) &&
-        isOptionalBoolean(value.binaryPayload)
-      );
-    case 'websocket-frame':
-      return (
-        isString(value.requestId) && isString(value.chunk) && typeof value.isBinary === 'boolean'
-      );
-    case 'websocket-close':
-      return isString(value.requestId) && isOptionalNumber(value.code) && isString(value.reason);
-    default:
-      return false;
-  }
-};
-
-const isPreviewTunnelClientMessage = (
-  value: Record<string, unknown>
-): value is PreviewTunnelClientMessage => {
-  switch (value.type) {
-    case 'error':
-      return isString(value.message);
-    case 'client-ready':
-      return (
-        typeof value.protocolVersion === 'number' &&
-        Number.isInteger(value.protocolVersion) &&
-        isStringArray(value.capabilities)
-      );
-    case 'client-capabilities':
-      return isStringArray(value.capabilities);
-    case 'response-start':
-      return (
-        isString(value.requestId) &&
-        typeof value.status === 'number' &&
-        isString(value.statusText) &&
-        isHeaderEntries(value.headers) &&
-        typeof value.hasBody === 'boolean'
-      );
-    case 'response-body':
-      return isString(value.requestId) && isString(value.chunk);
-    case 'binary-payload':
-      return isString(value.requestId) && isPreviewTunnelBinaryPayloadStream(value.stream);
-    case 'response-end':
-      return isString(value.requestId);
-    case 'response-error':
-      return isString(value.requestId) && isString(value.message);
-    case 'websocket-accept':
-      return isString(value.requestId) && isOptionalString(value.protocol);
-    case 'websocket-reject':
-      return isString(value.requestId) && isString(value.message);
-    case 'websocket-frame':
-      return (
-        isString(value.requestId) && isString(value.chunk) && typeof value.isBinary === 'boolean'
-      );
-    case 'websocket-close':
-      return isString(value.requestId) && isOptionalNumber(value.code) && isString(value.reason);
-    default:
-      return false;
-  }
-};
-
-export const parsePreviewTunnelServerMessage = (raw: string): PreviewTunnelServerMessage | null => {
-  const parsed = parseJsonRecord(raw);
-  return parsed && isPreviewTunnelServerMessage(parsed) ? parsed : null;
-};
-
-export const parsePreviewTunnelClientMessage = (raw: string): PreviewTunnelClientMessage | null => {
-  const parsed = parseJsonRecord(raw);
-  return parsed && isPreviewTunnelClientMessage(parsed) ? parsed : null;
-};
-
-export const isPreviewTunnelCreateResponse = (
-  value: unknown
-): value is PreviewTunnelCreateResponse =>
-  isRecord(value) &&
-  isString(value.tunnelId) &&
-  isString(value.publicUrl) &&
-  isString(value.websocketUrl) &&
-  isString(value.sessionToken) &&
-  typeof value.expiresAt === 'number' &&
-  (value.resourceLimits === undefined || isPreviewResourceLimits(value.resourceLimits));
-
-export const isPreviewTunnelRefreshResponse = (
-  value: unknown
-): value is PreviewTunnelRefreshResponse =>
-  isRecord(value) &&
-  isString(value.websocketUrl) &&
-  isString(value.sessionToken) &&
-  typeof value.expiresAt === 'number';

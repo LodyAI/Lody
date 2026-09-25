@@ -47,6 +47,46 @@ blocked on a checksummed artifact containing matching Windows CI binaries; the o
 manifest intentionally advertises no extension support. See the updated draft Spec
 for the contract. No new executor, profile copy or plugin sandbox is introduced.
 
+## History import follow-up (2026-09-25)
+
+History sync failed with "does not advertise sessionCapabilities.list": the adapter
+implemented only resume. [LodyAI/acp-extension-pi#4](https://github.com/LodyAI/acp-extension-pi/pull/4)
+adds `session/list` through Pi's own read-only `SessionManager` and `session/load` as
+resume plus a replay of the current branch from `get_entries`. Standard ACP load was
+chosen over Codex's `_lody/session/history/read` because the importer already
+consumes it without provider branches. Advertising load would make ordinary chat
+resume replay the whole session, so the host prefers resume for builtin Pi as it
+already does for Kimi. Replay drops the resume-time checklist and emits todo
+snapshots in place; appending the current checklist would move it between turns
+and break prefix matching on later syncs. Release still needs a new runtime artifact.
+
+Adversarial review added two adapter rules: a missing session file fails
+resume/load, because Pi silently opens it as a new empty session; user images are
+replayed so the importer counts them as dropped, which blocks a lossy conflict
+replacement. Listing may leave an empty per-cwd directory in Pi's store: avoiding it
+meant copying Pi's private directory encoding, whose drift would silently list nothing. Re-syncing a
+continued or mid-turn session can still conflict: Lody-only items (attachments,
+task cards, retry/compaction activity) are absent from Pi's file. That is the shared
+importer's prefix model, not a Pi adapter gap, and is left for a separate change.
+
+[#972](https://github.com/LodyAI/Lody/issues/972) (imported Pi sessions show no model
+choices and lose their model) has one cause across providers: import creates a
+continuable session but skipped two facts a Lody-started session records while
+running, its Provider (`agentConfigId`) and native selection (`acpRuntimeConfig`),
+although listing and `session/load` already had both. New imports list, load and bind
+through the machine's only same-type Provider. With none or several they stay unbound,
+because guessing could move a native session to another account or endpoint. A
+session must be loaded with the launch it continues with, or a Provider-set data
+directory such as `CODEX_HOME` points refresh and continuation at different stores.
+So refresh loads through the session's own binding, not the current sole Provider,
+and an earlier unbound import is bound only when that Provider lists it; adversarial
+review found both gaps in the first version. Every import write,
+refresh included, records the load-reported selection for the last imported user turn
+through `applyAcpRuntimeConfigPatch`, whose fence keeps a newer Lody turn's selection;
+refresh must write because appended turns invalidate the old one. Unchanged: Codex's
+read-only history reports no selection, and a composer without a selection still sends
+its guessed defaults.
+
 ## Verification limits
 
 The landing filters legacy providers by their own machine's `builtinPi` capability.

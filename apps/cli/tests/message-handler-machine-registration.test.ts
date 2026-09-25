@@ -185,6 +185,7 @@ describe('MessageHandler machine registration', () => {
     expect(registeredMeta.protocolCapabilities).toEqual({
       ...(getHostMachineProtocolCapabilities().builtinPi ? { builtinPi: 1 } : {}),
       acpAuthenticationInteractions: 2,
+      previewControl: 1,
       localProjectRemoval: 1,
       localFileResources: 1,
       providerSetup: 1,

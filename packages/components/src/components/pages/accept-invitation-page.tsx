@@ -69,7 +69,7 @@ export function AcceptInvitationPage({
         <div className="flex flex-col items-center px-7 pb-7 pt-8 text-center">
           {state === 'loading' ? (
             <>
-              <Spinner className="mb-4 size-6 text-muted-foreground" aria-hidden="true" />
+              <Spinner size="large" className="mb-4 text-muted-foreground" aria-hidden="true" />
               <Title>{t('invite.processing.title', 'Processing invitation')}</Title>
               <Description>
                 {t('invite.processing.description', 'Hang tight, this only takes a moment.')}
