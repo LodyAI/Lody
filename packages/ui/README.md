@@ -678,7 +678,7 @@ the caller's, because what a press does is a product decision.
 A `Badge` is a standing fact about the thing beside it, and the one part of this
 system on **no rung**: it sits on a page, a card, a menu row or a modal panel,
 so it takes no background from the ladder. Its tone is a _film_ of that tone
-over whatever is underneath — 12% of `label` for neutral, 22% of its own colour
+over whatever is underneath — 8% of `label` for neutral, 14% of its own colour
 for the rest — **and its word carries that tone as well**, as the tone pulled
 halfway to `label`.
 
@@ -687,7 +687,7 @@ colour for a 16px mark rather than for 11px text. Half the distance to the ink
 keeps the hue and gains the contrast — 5.2:1 at the worst, on every rung in both
 palettes — and the word is the mark a person actually looks at on a 20px chip.
 The four words land 0.097 apart in oklab at the closest in the light palette and
-0.048 in the dark, against 0.030 and 0.035 for the films under them. In the dark
+0.048 in the dark, against 0.019 and 0.026 for the films under them. In the dark
 palette that is the whole difference: `accent` is a pale peach there and
 `warning` an amber, so their films are two brown washes and their words are a
 peach and a gold.
