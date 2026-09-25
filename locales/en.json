@@ -3926,7 +3926,7 @@
   "mention.category.pr.label": "Pull Requests",
   "mention.category.skill.label": "Skills",
   "mention.category.command.label": "Agent Commands",
-  "mention.menu.back": "Back",
+  "mention.menu.backFrom": "{{category}}, back to all categories",
   "mention.menu.noResults": "No results",
   "mention.menu.loading": "Loading…",
   "mention.file.loadError": "Failed to load files.",

@@ -67,7 +67,7 @@ strings on i18n rather than the registry's inline English.
   Trigger/Content`, `render` instead of `asChild`, `delay` on the trigger or
   provider. The chip is visual-only — no `role="tooltip"`, no
   `aria-describedby` — so an icon-only trigger names itself with `aria-label`.
-- Overlay list hover (menus, command palette, mention, select) is
+- Overlay list hover (menus, command palette, select) is
   `bg-foreground/[0.05]` in light and `bg-white/[0.10]` in dark. Do not use
   `--hover` on popovers — it is sized for the page/sidebar and vanishes on the
   near-black dark menu fill. Kbd chips use the same 6% ink fill and muted text

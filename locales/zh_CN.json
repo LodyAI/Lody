@@ -3926,7 +3926,7 @@
   "mention.category.pr.label": "Pull Requests",
   "mention.category.skill.label": "Skills",
   "mention.category.command.label": "Agent 命令",
-  "mention.menu.back": "返回",
+  "mention.menu.backFrom": "{{category}}，返回全部分类",
   "mention.menu.noResults": "没有结果",
   "mention.menu.loading": "加载中…",
   "mention.file.loadError": "加载文件列表失败。",
