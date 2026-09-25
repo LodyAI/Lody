@@ -1,18 +1,11 @@
-import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
-import { Check, ChevronDown, ExternalLink, MessageSquare } from 'lucide-react';
+import { ExternalLink, MessageSquare } from 'lucide-react';
 import type { ScheduleDestination } from '@lody/shared';
-import { Command, CommandEmpty, CommandInput, CommandItem, CommandList } from '@/ui/command';
-import { Popover, PopoverContent, PopoverTrigger } from '@/ui/popover';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/ui/select';
-import { cn } from '@/lib/utils';
-import {
-  PropertyRow,
-  ghostSelectTriggerClass,
-  ghostValueClass,
-  scheduleChevronClass,
-} from './schedule-property-row';
+import { Button } from '@lody/ui/button';
+import { Combobox } from '@lody/ui/combobox';
+import { Select } from '@lody/ui/select';
+import { PropertyRow } from './schedule-property-row';
 import { FieldIssueMark } from './schedule-field-issue-mark';
 
 export type PickableSession = {
@@ -70,11 +63,16 @@ export function ScheduleDestinationRows({
     <>
       <PropertyRow label={t('schedules.sendTo', 'Send to')}>
         <FieldIssueMark messages={sendToIssues} className="mr-1" />
-        <Select
+        <Select.Root
           value={value.kind}
           disabled={disabled}
+          items={DESTINATION_KINDS.map((kind) => ({ value: kind, label: labels[kind] }))}
           onValueChange={(kind) => {
-            if (kind === value.kind || !(DESTINATION_KINDS as readonly string[]).includes(kind))
+            if (
+              typeof kind !== 'string' ||
+              kind === value.kind ||
+              !(DESTINATION_KINDS as readonly string[]).includes(kind)
+            )
               return;
             onChange(
               kind === 'own_session'
@@ -85,20 +83,17 @@ export function ScheduleDestinationRows({
             );
           }}
         >
-          <SelectTrigger
-            aria-label={t('schedules.sendTo', 'Send to')}
-            className={ghostSelectTriggerClass}
-          >
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
+          <Select.Trigger size="small" aria-label={t('schedules.sendTo', 'Send to')}>
+            <Select.Value />
+          </Select.Trigger>
+          <Select.Content>
             {DESTINATION_KINDS.map((kind) => (
-              <SelectItem key={kind} value={kind}>
+              <Select.Item key={kind} value={kind}>
                 {labels[kind]}
-              </SelectItem>
+              </Select.Item>
             ))}
-          </SelectContent>
-        </Select>
+          </Select.Content>
+        </Select.Root>
       </PropertyRow>
 
       <AnimatePresence initial={false} mode="popLayout">
@@ -128,23 +123,26 @@ export function ScheduleDestinationRows({
             >
               {ownSession ? (
                 <div className="flex items-center gap-1">
-                  <button
+                  <Button
                     type="button"
-                    className={cn(ghostValueClass, 'max-w-56')}
+                    variant="ghost"
+                    size="small"
+                    className="max-w-56"
                     onClick={() => onOpenSession?.(ownSession.id)}
                   >
-                    <MessageSquare className="size-3.5 shrink-0 opacity-60" />
+                    <MessageSquare className="size-3.5 shrink-0" />
                     <span className="truncate">{ownSession.title}</span>
-                    <ExternalLink className="size-3 shrink-0 opacity-50" />
-                  </button>
-                  <button
+                    <ExternalLink className="size-3 shrink-0" />
+                  </Button>
+                  <Button
                     type="button"
+                    variant="link"
+                    size="small"
                     disabled={disabled}
-                    className="shrink-0 px-1.5 text-[0.8em] text-muted-foreground underline-offset-2 last:-mr-1.5 hover:text-foreground hover:underline disabled:opacity-50"
                     onClick={() => onChange({ kind: 'own_session', epoch: value.epoch + 1 })}
                   >
                     {t('schedules.destination.startNewChat', 'Start a new chat')}
-                  </button>
+                  </Button>
                 </div>
               ) : (
                 <span className="text-[0.9em] text-muted-foreground">
@@ -195,7 +193,6 @@ export function ScheduleDestinationRows({
 function SessionPicker({
   sessions,
   value,
-  label,
   onChange,
   disabled,
 }: {
@@ -206,51 +203,49 @@ function SessionPicker({
   disabled?: boolean;
 }) {
   const { t } = useTranslation();
-  const [open, setOpen] = useState(false);
+  const picked = sessions.find((session) => session.id === value) ?? null;
+  // Picking one chat from a list you can filter as you type is the Combobox.
   return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild disabled={disabled}>
-        <button
-          type="button"
-          aria-label={t('schedules.destination.chooseChat', 'Choose a chat')}
-          disabled={disabled}
-          className={cn(ghostValueClass, 'max-w-64', !label && 'text-muted-foreground')}
-        >
-          <MessageSquare className="size-3.5 shrink-0 opacity-60" />
-          <span className="truncate">
-            {label ?? t('schedules.destination.chooseChat', 'Choose a chat')}
-          </span>
-          <ChevronDown className={scheduleChevronClass} />
-        </button>
-      </PopoverTrigger>
-      <PopoverContent align="end" className="w-[min(22rem,calc(100vw-2rem))] p-0">
-        <Command>
-          <CommandInput placeholder={t('schedules.destination.searchChats', 'Search chats')} />
-          <CommandList>
-            <CommandEmpty>{t('schedules.destination.noChats', 'No chats found')}</CommandEmpty>
-            {sessions.map((session) => (
-              <CommandItem
-                key={session.id}
-                value={`${session.title} ${session.detail ?? ''} ${session.id}`}
-                onSelect={() => {
-                  onChange(session.id);
-                  setOpen(false);
-                }}
-              >
-                <span className="flex min-w-0 flex-1 flex-col">
-                  <span className="truncate">{session.title}</span>
-                  {session.detail ? (
-                    <span className="truncate text-[0.85em] text-muted-foreground">
-                      {session.detail}
-                    </span>
-                  ) : null}
+    <Combobox.Root
+      items={[...sessions]}
+      value={picked}
+      disabled={disabled}
+      itemToStringLabel={(session: PickableSession) => session.title}
+      isItemEqualToValue={(left: PickableSession, right: PickableSession) => left.id === right.id}
+      onValueChange={(session: PickableSession | null) => {
+        if (session) onChange(session.id);
+      }}
+    >
+      <Combobox.Button
+        size="small"
+        aria-label={t('schedules.destination.chooseChat', 'Choose a chat')}
+        placeholder={t('schedules.destination.chooseChat', 'Choose a chat')}
+        className="max-w-64"
+      />
+      <Combobox.Content
+        search={
+          <Combobox.Search
+            aria-label={t('schedules.destination.searchChats', 'Search chats')}
+            placeholder={t('schedules.destination.searchChats', 'Search chats')}
+          />
+        }
+        empty={
+          <Combobox.Empty>{t('schedules.destination.noChats', 'No chats found')}</Combobox.Empty>
+        }
+      >
+        {(session: PickableSession) => (
+          <Combobox.Item key={session.id} value={session}>
+            <span className="flex min-w-0 flex-col">
+              <span className="truncate">{session.title}</span>
+              {session.detail ? (
+                <span className="truncate text-[0.85em] text-muted-foreground">
+                  {session.detail}
                 </span>
-                {session.id === value ? <Check className="size-4 shrink-0" /> : null}
-              </CommandItem>
-            ))}
-          </CommandList>
-        </Command>
-      </PopoverContent>
-    </Popover>
+              ) : null}
+            </span>
+          </Combobox.Item>
+        )}
+      </Combobox.Content>
+    </Combobox.Root>
   );
 }

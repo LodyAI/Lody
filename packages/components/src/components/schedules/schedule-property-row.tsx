@@ -1,5 +1,7 @@
 import type { ReactNode } from 'react';
-import { SETTINGS_ROW_CARD_CLASS } from '@/components/settings/compact-layout';
+import * as stylex from '@stylexjs/stylex';
+import { settingsCard } from '@/components/settings/compact-layout';
+import { withClassName } from '@/lib/stylex';
 import { cn } from '@/lib/utils';
 
 /**
@@ -10,10 +12,13 @@ import { cn } from '@/lib/utils';
  * than as two unrelated forms. Rows appear only when they apply, which is what
  * keeps the surface short without hiding anything behind a mode switch.
  */
-export const scheduleCardClass = cn(
-  SETTINGS_ROW_CARD_CLASS,
-  'divide-y divide-border/60 overflow-hidden'
-);
+export function scheduleCardProps(className?: string) {
+  // The settings card material (its edge is its shadow), plus layout only.
+  return withClassName(
+    stylex.props(settingsCard),
+    cn('divide-y divide-border/60 overflow-hidden', className)
+  );
+}
 
 /**
  * Right-aligned ghost control, matching the property-row triggers elsewhere.
@@ -28,16 +33,6 @@ export const scheduleCardClass = cn(
  */
 export const ghostValueClass =
   'flex h-8 last:-mr-2 last:max-w-[calc(100%+0.5rem)] min-w-0 max-w-full items-center justify-end gap-1.5 rounded-md bg-transparent px-2 text-[0.9em] font-normal text-foreground transition-colors hover:bg-foreground/[0.05] dark:hover:bg-white/[0.08] focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 data-[state=open]:bg-foreground/[0.05] dark:data-[state=open]:bg-white/[0.08]';
-
-/** One chevron for every menu trigger in the editor, so the right edge is one line. */
-export const scheduleChevronClass = 'size-3.5 shrink-0 opacity-50';
-
-export const ghostSelectTriggerClass = cn(
-  ghostValueClass,
-  // Radix renders a hidden native <select> after the trigger inside a form, so
-  // the trigger is never `:last-child`; it always ends its row, so bleed here.
-  '-mr-2 max-w-[calc(100%+0.5rem)] w-auto shrink-0 border-0 py-0 shadow-none data-placeholder:text-muted-foreground [&>span]:truncate [&>svg]:size-3.5 [&>svg]:opacity-50'
-);
 
 export function ScheduleSection({
   title,
@@ -54,7 +49,7 @@ export function ScheduleSection({
         <h2 className="text-[0.8em] font-normal text-muted-foreground">{title}</h2>
         {action ? <div className="ml-auto">{action}</div> : null}
       </div>
-      <div className={scheduleCardClass}>{children}</div>
+      <div {...scheduleCardProps()}>{children}</div>
     </section>
   );
 }

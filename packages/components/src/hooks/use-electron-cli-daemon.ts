@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import type { ElectronCliState } from '@lody/shared';
 import { isElectronRenderer } from '@/lib/electron';
 import { getIpcServices, onIpcEvent, sendIpc } from '@/lib/electron-ipc-client';

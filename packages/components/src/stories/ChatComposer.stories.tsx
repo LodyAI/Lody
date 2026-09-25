@@ -9,8 +9,8 @@ import {
 } from '@/components/chat/chat-composer';
 import type { OptionSelectorOption } from '@/components/shared/option-selector';
 import { OptionSelector } from '@/components/shared/option-selector';
-import { Card, CardContent } from '@/ui/card';
-import { Button } from '@/ui/button';
+import { Card } from '@/ui/card';
+import { Button } from '@lody/ui/button';
 import { cn } from '@/lib/utils';
 import { getPastedTextCharacterCount, type PastedTextDraft } from '@/lib/pasted-text-draft';
 import { registerBuiltInCommands } from '@/lib/commands';
@@ -78,10 +78,8 @@ const repoOptions: OptionSelectorOption<string>[] = [
 
 const samplePastedText = [
   'Design brief:',
-  '',
   'Users often paste full logs or PR descriptions into the composer before asking a focused question.',
   'We should keep that context available without letting the textarea grow so tall that the actual prompt disappears.',
-  '',
   'Requirements:',
   '- Show a compact summary block with the pasted character count.',
   '- Let users inspect the full content on hover or tap.',
@@ -194,17 +192,11 @@ function DemoComposer({
       : []
   );
 
-  const primaryActionClassName = cn(
-    variant === 'dialog'
-      ? 'border font-semibold transition-all focus-visible:ring-2 focus-visible:ring-offset-2 h-10 rounded-lg px-5 text-sm'
-      : 'h-8 w-8 rounded-md border shadow-xs transition-all',
+  const dialogPrimaryActionClassName = cn(
+    'border font-semibold transition-all focus-visible:ring-2 focus-visible:ring-offset-2 h-10 rounded-lg px-5 text-sm',
     tone === 'dark'
-      ? variant !== 'dialog'
-        ? 'border-sky-200/20 bg-sky-300/15 text-white hover:bg-sky-300/25 active:translate-y-[1px] focus-visible:ring-white/40 focus-visible:ring-offset-[#050b1d]'
-        : 'border-white/25 bg-white/10 text-white hover:bg-white/15 active:translate-y-[1px] focus-visible:ring-white/30 focus-visible:ring-offset-[#050b1d]'
-      : variant !== 'dialog'
-        ? 'border-input-border/70 bg-input/70 text-input-foreground hover:bg-muted/60 active:translate-y-[1px] focus-visible:ring-ring'
-        : 'border-input-border/70 bg-input/60 text-input-foreground hover:bg-muted/60 active:translate-y-[1px] focus-visible:ring-ring'
+      ? 'border-white/25 bg-white/10 text-white hover:bg-white/15 active:translate-y-[1px] focus-visible:ring-white/30 focus-visible:ring-offset-[#050b1d]'
+      : 'border-input-border/70 bg-input/60 text-input-foreground hover:bg-muted/60 active:translate-y-[1px] focus-visible:ring-ring'
   );
 
   const selectorNode =
@@ -262,17 +254,11 @@ function DemoComposer({
 
   const primaryActionNode =
     variant !== 'dialog' ? (
-      <Button
-        type="button"
-        size="icon"
-        variant="ghost"
-        aria-label="Send"
-        className={cn(primaryActionClassName, 'h-6 w-6')}
-      >
+      <Button type="button" variant="primary" aria-label="Send" size="medium" shape="pill" icon>
         <ArrowUp className="h-4 w-4" />
       </Button>
     ) : (
-      <Button type="button" className={primaryActionClassName}>
+      <Button type="button" className={dialogPrimaryActionClassName}>
         Send
       </Button>
     );
@@ -341,11 +327,11 @@ export const LandingDark: Story = {
       <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-[#050b1d] via-[#081327] to-[#0b1a35]" />
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_20%_0%,rgba(88,166,255,0.2),transparent_55%),radial-gradient(circle_at_80%_10%,rgba(35,82,150,0.3),transparent_60%),radial-gradient(circle_at_50%_100%,rgba(8,30,58,0.9),transparent_60%)]" />
       <div className="relative mx-auto flex min-h-screen w-full max-w-3xl items-center px-4 py-12">
-        <Card className="w-full rounded-[32px] border-white/10 bg-white/5 shadow-[0_32px_100px_-48px_rgba(4,12,30,0.95)] ring-1 ring-white/10 backdrop-blur-2xl supports-[backdrop-filter]:bg-white/[0.06]">
-          <CardContent className="p-8">
+        <Card.Root className="w-full rounded-[32px] border-white/10 bg-white/5 shadow-[0_32px_100px_-48px_rgba(4,12,30,0.95)] ring-1 ring-white/10 backdrop-blur-2xl supports-[backdrop-filter]:bg-white/[0.06]">
+          <Card.Content>
             <DemoComposer tone="dark" variant="landing" title="Let's ship something" />
-          </CardContent>
-        </Card>
+          </Card.Content>
+        </Card.Root>
       </div>
     </div>
   ),
@@ -423,8 +409,8 @@ export const AttachmentUploadStatesDark: Story = {
     <div className="relative min-h-screen bg-[#050b1d] text-white">
       <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-[#050b1d] via-[#081327] to-[#0b1a35]" />
       <div className="relative mx-auto flex min-h-screen w-full max-w-3xl items-center px-4 py-12">
-        <Card className="w-full rounded-[32px] border-white/10 bg-white/5 ring-1 ring-white/10 backdrop-blur-2xl">
-          <CardContent className="p-8">
+        <Card.Root className="w-full rounded-[32px] border-white/10 bg-white/5 ring-1 ring-white/10 backdrop-blur-2xl">
+          <Card.Content>
             <DemoComposer
               tone="dark"
               variant="landing"
@@ -432,8 +418,8 @@ export const AttachmentUploadStatesDark: Story = {
               imageItems={sampleImageItems}
               fileItems={sampleFileItems}
             />
-          </CardContent>
-        </Card>
+          </Card.Content>
+        </Card.Root>
       </div>
     </div>
   ),
@@ -445,16 +431,16 @@ export const LandingWithPastedText: Story = {
       <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-[#050b1d] via-[#081327] to-[#0b1a35]" />
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_20%_0%,rgba(88,166,255,0.2),transparent_55%),radial-gradient(circle_at_80%_10%,rgba(35,82,150,0.3),transparent_60%),radial-gradient(circle_at_50%_100%,rgba(8,30,58,0.9),transparent_60%)]" />
       <div className="relative mx-auto flex min-h-screen w-full max-w-3xl items-center px-4 py-12">
-        <Card className="w-full rounded-[32px] border-white/10 bg-white/5 shadow-[0_32px_100px_-48px_rgba(4,12,30,0.95)] ring-1 ring-white/10 backdrop-blur-2xl supports-[backdrop-filter]:bg-white/[0.06]">
-          <CardContent className="p-8">
+        <Card.Root className="w-full rounded-[32px] border-white/10 bg-white/5 shadow-[0_32px_100px_-48px_rgba(4,12,30,0.95)] ring-1 ring-white/10 backdrop-blur-2xl supports-[backdrop-filter]:bg-white/[0.06]">
+          <Card.Content>
             <DemoComposer
               tone="dark"
               variant="landing"
               title="Let's ship something"
               showPastedText
             />
-          </CardContent>
-        </Card>
+          </Card.Content>
+        </Card.Root>
       </div>
     </div>
   ),

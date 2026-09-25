@@ -1,5 +1,16 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+} from 'react';
 import { useTranslation } from 'react-i18next';
+import * as stylex from '@stylexjs/stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { corner, duration, ease, radius, space } from '@lody/ui/tokens/scales.stylex';
 import { useOpenSettings } from '@/hooks/use-open-settings';
 import type { TFunction } from 'i18next';
 import { formatDistanceToNow, type Locale } from 'date-fns';
@@ -8,24 +19,23 @@ import { zhCN } from 'date-fns/locale/zh-CN';
 import {
   AlertCircle,
   BrushCleaning,
-  Clock3,
-  Copy,
+  ChevronRight,
   Download,
   Ellipsis,
   ExternalLink,
-  Folder,
   FolderPlus,
   FolderOpen,
   Github,
   Info,
-  Users,
   Plus,
   RefreshCw,
+  Search,
   TerminalSquare,
   Wrench,
 } from 'lucide-react';
-import { toast } from 'sonner';
-import { Spinner } from '@/ui/spinner';
+import { toast } from '@/lib/toast';
+import { observeResizeOnAnimationFrame } from '@/lib/resize-observer';
+import { Spinner } from '@lody/ui/spinner';
 import {
   getLocalProjectHistoryProviderKey,
   type LocalProjectHistoryCatalogItem,
@@ -64,37 +74,24 @@ import {
 } from '@/components/loro-app-sidebar';
 import { getIpcServices } from '@/lib/electron-ipc-client';
 import { CompactRow, CompactSection } from './compact-layout';
-import { Button, type ButtonProps } from '@/ui/button';
-import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/ui/dialog';
-import { Checkbox } from '@/ui/checkbox';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/ui/dropdown-menu';
-import { Switch } from '@/ui/switch';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/ui/tabs';
-import { CachedAvatarImg } from '@/components/cached-avatar-img';
-import { getGitHubOwnerAvatarUrl } from '@/lib/github-avatar';
-import { Textarea } from '@/ui/textarea';
+import { Button, type ButtonProps } from '@lody/ui/button';
+import { Dialog } from '@/ui/dialog';
+import { Checkbox } from '@lody/ui/checkbox';
+import { Menu } from '@/ui/menu';
+import { Switch } from '@lody/ui/switch';
+import { Tabs } from '@lody/ui/tabs';
+import { Badge } from '@lody/ui/badge';
+import { Textarea } from '@lody/ui/textarea';
+import { Input } from '@lody/ui/input';
+import { VList } from 'virtua';
 
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/ui/alert-dialog';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/ui/tooltip';
+import { AlertDialog } from '@/ui/dialog';
+import { Tooltip } from '@lody/ui/tooltip';
 import { toIntlLocale } from '@/lib/intl-locale';
 import { openExternalUrl } from '@/lib/native-browser';
-import { cn } from '@/lib/utils';
+import { withClassName } from '@/lib/stylex';
 import { MobileProjectSettings } from '@/components/mobile/mobile-project-settings';
-import { settingContainerClass } from '.';
+import { settingsSurface as surface } from './surface';
 import { AgentIcon, getAgentDisplayName } from '@/components/icons/agent-icon';
 import { useSettingsDataCache } from './settings-data-cache';
 import { useGithubProjectWorktreeSaves } from '@/hooks/use-github-project-worktree-admin';
@@ -232,7 +229,586 @@ export type ProjectSettingsViewProps = {
   localProjectRemovalStateByKey?: ReadonlyMap<string, LocalProjectRemovalState>;
 };
 
+/* Desktop settings is itself a dialog: a nested overlay restacks at its z-index
+   with a lighter veil. It is handed to the backdrop, which owns both of those
+   properties itself, so it stays the class string the other settings dialogs
+   (MCP, Agent Roles) pass there. */
 const NESTED_SETTINGS_DIALOG_OVERLAY = 'z-[var(--z-dialog)] bg-black/20';
+
+/** The global thin scrollbar; a `::-webkit-scrollbar` rule StyleX cannot state. */
+const SCROLLBAR_CLASS = 'scrollbar-pro';
+
+const MONO = 'var(--font-mono, ui-monospace, monospace)';
+
+/* The project editor is a wider panel than a dialog's default column, and its
+   body scrolls edge to edge, so the panel drops its own padding and gap. */
+/** A project is a window of its own: a rail of pages beside the page. */
+const EDITOR_PANEL_STYLE: CSSProperties = {
+  width: 'min(960px, 96vw)',
+  height: 'min(680px, 88dvh)',
+  maxWidth: 'none',
+  padding: 0,
+  gap: 0,
+  overflow: 'hidden',
+};
+
+/** A script is code: it reads in the monospace face, a step under the field text. */
+const SCRIPT_TEXTAREA_STYLE: CSSProperties = {
+  fontFamily: MONO,
+  fontSize: '12px',
+  lineHeight: 1.625,
+};
+
+const styles = stylex.create({
+  /* The page column, widened for the two panes and filling the panel height. */
+  page: {
+    height: '100%',
+    minHeight: 0,
+    maxWidth: { default: null, '@media (min-width: 768px)': '1152px' },
+  },
+  pageHeader: {
+    display: 'flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: space[3],
+    // On the same edge as the section names and the rows' text below it.
+    paddingInline: space[4],
+  },
+  pageHeading: { minWidth: 0 },
+  pageTitle: {
+    margin: 0,
+    fontSize: '1.125em',
+    fontWeight: 400,
+    lineHeight: 1.25,
+    color: colors.label,
+  },
+  pageSubtitle: {
+    margin: 0,
+    marginTop: '2px',
+    fontSize: '0.8em',
+    lineHeight: 1.375,
+    color: colors.secondaryLabel,
+  },
+  loading: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: space[2],
+    paddingInline: space[3],
+    paddingBlock: '40px',
+    fontSize: '0.875em',
+    color: colors.secondaryLabel,
+  },
+  empty: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: space[2],
+    paddingInline: space[3],
+    paddingBlock: '48px',
+    textAlign: 'center',
+  },
+  emptyIcon: { width: '20px', height: '20px', color: colors.tertiaryLabel },
+  emptyText: { margin: 0, fontSize: '0.875em', color: colors.secondaryLabel },
+
+  /* The two-pane catalog: sources on the left, the selected source's folders
+     on the right, both one sidebar list language; one structural line between. */
+  catalog: {
+    display: 'flex',
+    flexGrow: 1,
+    minWidth: 0,
+    minHeight: 0,
+    gap: space[3],
+  },
+  /** Every source, stacked: one section each. */
+  sources: { display: 'flex', flexDirection: 'column', gap: space[6], minWidth: 0 },
+  /** One project: a line of its source's card. */
+  line: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: space[1],
+    minWidth: 0,
+    paddingInlineEnd: space[2],
+  },
+  lineButton: {
+    display: 'flex',
+    flexGrow: 1,
+    alignItems: 'center',
+    gap: space[3],
+    minWidth: 0,
+    margin: 0,
+    paddingInlineStart: space[4],
+    paddingInlineEnd: space[2],
+    paddingBlock: '10px',
+    borderWidth: 0,
+    backgroundColor: 'transparent',
+    color: 'inherit',
+    fontFamily: 'inherit',
+    fontSize: '1em',
+    textAlign: 'start',
+    cursor: 'pointer',
+    outlineStyle: 'none',
+  },
+  lineText: { display: 'flex', flexDirection: 'column', gap: '2px', flexGrow: 1, minWidth: 0 },
+  lineName: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    lineHeight: 1.25,
+    color: colors.label,
+  },
+  lineCaption: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontFamily: MONO,
+    fontSize: '0.75em',
+    lineHeight: 1.3,
+    color: colors.secondaryLabel,
+  },
+  lineMeta: {
+    flexShrink: 0,
+    fontSize: '0.8em',
+    color: colors.tertiaryLabel,
+    fontVariantNumeric: 'tabular-nums',
+    whiteSpace: 'nowrap',
+  },
+  lineChevron: { flexShrink: 0, width: '14px', height: '14px', color: colors.tertiaryLabel },
+  sourcePane: {
+    boxSizing: 'border-box',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '2px',
+    width: '220px',
+    flexShrink: 0,
+    overflowY: 'auto',
+    paddingBlock: space[1],
+  },
+  folderPane: {
+    display: 'flex',
+    flexDirection: 'column',
+    flexGrow: 1,
+    minWidth: 0,
+    minHeight: 0,
+  },
+  folderHeader: {
+    display: 'flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: space[2],
+    minHeight: '36px',
+    paddingInline: space[2],
+    paddingBlock: space[1],
+  },
+  folderTitle: {
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    margin: 0,
+    fontSize: '0.875em',
+    fontWeight: 400,
+    lineHeight: 1.25,
+    color: colors.label,
+  },
+  folderList: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '2px',
+    flexGrow: 1,
+    minHeight: 0,
+    overflowY: 'auto',
+    paddingBottom: space[2],
+  },
+  ownerGroup: { display: 'flex', flexDirection: 'column', gap: '2px' },
+  ownerGroupSpaced: { marginTop: space[2] },
+  ownerLabel: {
+    margin: 0,
+    paddingInline: space[2],
+    paddingTop: space[1],
+    paddingBottom: '2px',
+    fontSize: '0.75em',
+    fontWeight: 400,
+    color: colors.secondaryLabel,
+  },
+  machineEmpty: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'flex-start',
+    gap: space[2],
+    paddingInline: space[2],
+    paddingBlock: space[4],
+  },
+  note: { margin: 0, fontSize: '0.8em', lineHeight: 1.375, color: colors.secondaryLabel },
+
+  /* What a list row holds beyond `surface.listRow*`: a caption under the name. */
+  rowText: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '1px',
+    flexGrow: 1,
+    minWidth: 0,
+  },
+  rowCaption: {
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: '0.85em',
+    lineHeight: 1.25,
+    color: colors.secondaryLabel,
+  },
+  rowCaptionMono: { fontFamily: MONO },
+  rowCaptionAside: { color: colors.tertiaryLabel },
+  glyphBox: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+    borderRadius: radius.mini,
+    cornerShape: corner.shape,
+  },
+  glyph: { width: '100%', height: '100%' },
+  avatar: { display: 'block', width: '100%', height: '100%', objectFit: 'cover' },
+  statusDot: {
+    width: '6px',
+    height: '6px',
+    borderRadius: radius.full,
+    cornerShape: corner.round,
+    backgroundColor: colors.tertiaryLabel,
+  },
+  statusDotOnline: { backgroundColor: colors.success },
+  metaGroup: { display: 'inline-flex', alignItems: 'center', gap: space[2] },
+  metaItem: { display: 'inline-flex', alignItems: 'center', gap: space[1] },
+  metaIcon: { width: '12px', height: '12px', flexShrink: 0 },
+  /* A folder row carries a menu beside its button, so the row is the fill and
+     the button inside it spans the row to the menu. */
+  folderRow: { paddingBlock: 0, paddingInlineStart: 0, paddingInlineEnd: space[1] },
+  folderRowButton: {
+    boxSizing: 'border-box',
+    display: 'flex',
+    alignItems: 'center',
+    alignSelf: 'stretch',
+    gap: space[2],
+    flexGrow: 1,
+    minWidth: 0,
+    margin: 0,
+    paddingInlineStart: space[2],
+    paddingInlineEnd: 0,
+    paddingBlock: space[1],
+    borderWidth: 0,
+    backgroundColor: 'transparent',
+    color: 'inherit',
+    fontFamily: 'inherit',
+    fontSize: 'inherit',
+    fontWeight: 'inherit',
+    lineHeight: 'inherit',
+    textAlign: 'start',
+    cursor: 'pointer',
+  },
+  removalMark: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    flexShrink: 0,
+    marginInlineEnd: space[1],
+    color: colors.tertiaryLabel,
+  },
+  srOnly: {
+    position: 'absolute',
+    width: '1px',
+    height: '1px',
+    overflow: 'hidden',
+    clip: 'rect(0 0 0 0)',
+    whiteSpace: 'nowrap',
+    margin: '-1px',
+    padding: 0,
+    borderWidth: 0,
+  },
+
+  /* Menu rows that say what they add under their name. */
+  menuText: { display: 'flex', flexDirection: 'column', minWidth: 0, paddingBlock: space[1] },
+  menuHint: { fontSize: '0.85em', color: colors.secondaryLabel },
+  buttonIcon: { width: '14px', height: '14px', flexShrink: 0 },
+
+  /* The project editor: a scroll body of stacked settings sections. */
+  editorBody: { flexGrow: 1, minHeight: 0, overflowY: 'auto' },
+  detail: { display: 'flex', flexDirection: 'column', gap: space[4], padding: space[4] },
+  /* The dialog's cross sits in this corner; the header keeps clear of it. */
+  detailHeader: {
+    display: 'flex',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: space[2],
+    minWidth: 0,
+    paddingInlineEnd: '36px',
+  },
+  detailHeading: { flexGrow: 1, minWidth: 0 },
+  detailTitleRow: { display: 'flex', alignItems: 'center', gap: space[2], minWidth: 0 },
+  detailTitle: {
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    margin: 0,
+    fontSize: '1em',
+    fontWeight: 400,
+    lineHeight: 1.25,
+    color: colors.label,
+  },
+  pathRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: space[1],
+    minWidth: 0,
+    marginTop: '2px',
+  },
+  path: {
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    margin: 0,
+    fontFamily: MONO,
+    fontSize: '0.75em',
+    color: colors.secondaryLabel,
+  },
+  detailNote: {
+    margin: 0,
+    marginTop: space[1],
+    fontSize: '0.75em',
+    lineHeight: 1.375,
+    color: colors.secondaryLabel,
+  },
+  cardLine: { paddingInline: space[4], paddingBlock: space[3] },
+  column: { display: 'flex', flexDirection: 'column', minWidth: 0 },
+  alignStart: { alignSelf: 'flex-start' },
+
+  /* Worktree script editor. */
+  editor: { display: 'flex', flexDirection: 'column', gap: space[3] },
+  editorTitle: {
+    margin: 0,
+    display: 'flex',
+    alignItems: 'center',
+    gap: space[1.5],
+    fontSize: '0.875em',
+    fontWeight: 400,
+    color: colors.label,
+  },
+  editorTitleIcon: { width: '16px', height: '16px', flexShrink: 0, color: colors.tertiaryLabel },
+  editorDescription: {
+    margin: 0,
+    marginTop: space[1],
+    fontSize: '0.8em',
+    lineHeight: 1.375,
+    color: colors.secondaryLabel,
+  },
+  /* A link inside prose: the accent, underlined under the pointer. */
+  docsLink: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '2px',
+    verticalAlign: 'baseline',
+    margin: 0,
+    padding: 0,
+    borderWidth: 0,
+    backgroundColor: 'transparent',
+    color: colors.accent,
+    fontFamily: 'inherit',
+    fontSize: 'inherit',
+    lineHeight: 'inherit',
+    textAlign: 'start',
+    textDecoration: { default: 'none', ':hover': 'underline' },
+    textUnderlineOffset: '4px',
+    cursor: 'pointer',
+  },
+  linkIcon: { width: '12px', height: '12px', flexShrink: 0 },
+  editorLoading: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: space[2],
+    paddingBlock: space[6],
+    fontSize: '0.8em',
+    color: colors.secondaryLabel,
+  },
+  stack: { display: 'flex', flexDirection: 'column', gap: space[2] },
+  scriptField: { display: 'flex', flexDirection: 'column', gap: space[1.5] },
+  envHint: {
+    margin: 0,
+    display: 'flex',
+    alignItems: 'flex-start',
+    gap: space[1.5],
+    fontSize: '0.75em',
+    lineHeight: 1.375,
+    color: colors.secondaryLabel,
+  },
+  hintIcon: { width: '14px', height: '14px', flexShrink: 0, marginTop: '1px' },
+  saving: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: space[1],
+    fontSize: '0.75em',
+    color: colors.secondaryLabel,
+  },
+  error: {
+    display: 'flex',
+    alignItems: 'flex-start',
+    gap: space[2],
+    fontSize: '0.8em',
+    lineHeight: 1.375,
+    color: colors.destructive,
+  },
+  breakWords: { minWidth: 0, overflowWrap: 'anywhere' },
+
+  /* Conversation sync: the providers as lines of the card, then the panel. */
+  providerRow: {
+    boxSizing: 'border-box',
+    display: 'flex',
+    alignItems: 'center',
+    gap: space[2],
+    width: '100%',
+    minWidth: 0,
+    margin: 0,
+    paddingInline: space[4],
+    paddingBlock: space[2],
+    borderWidth: 0,
+    backgroundColor: { default: 'transparent', ':hover': colors.hoverFill },
+    color: { default: colors.secondaryLabel, ':hover': colors.label },
+    fontFamily: 'inherit',
+    fontSize: '0.875em',
+    fontWeight: 400,
+    textAlign: 'start',
+    cursor: 'pointer',
+    transitionProperty: 'background-color, color',
+    transitionDuration: duration.fast,
+    transitionTimingFunction: ease.standard,
+  },
+  providerRowActive: {
+    backgroundColor: { default: colors.selectedFill, ':hover': colors.selectedFill },
+    color: { default: colors.label, ':hover': colors.label },
+  },
+  providerIcon: { width: '14px', height: '14px', flexShrink: 0, opacity: 0.7 },
+  providerLabel: {
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    flexGrow: 1,
+  },
+  panel: {
+    display: 'flex',
+    flexDirection: 'column',
+    flexGrow: 1,
+    minHeight: 0,
+    fontSize: '0.8em',
+  },
+  panelBar: {
+    display: 'flex',
+    flexShrink: 0,
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: space[2],
+    paddingInline: space[4],
+    paddingBlock: space[2],
+  },
+  panelStatus: {
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    color: colors.secondaryLabel,
+  },
+  panelActions: { display: 'flex', flexShrink: 0, alignItems: 'center', gap: space[2] },
+  panelError: {
+    display: 'flex',
+    flexShrink: 0,
+    alignItems: 'flex-start',
+    gap: space[2],
+    maxHeight: '112px',
+    overflowY: 'auto',
+    paddingInline: space[4],
+    paddingBlock: space[2],
+    color: colors.destructive,
+  },
+  panelSummary: {
+    flexShrink: 0,
+    paddingInline: space[4],
+    paddingBlock: space[1.5],
+    color: colors.secondaryLabel,
+  },
+  failureList: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '2px',
+    margin: 0,
+    marginTop: space[1],
+    paddingInlineStart: 0,
+    listStyleType: 'none',
+    color: colors.destructive,
+  },
+  panelLine: { flexShrink: 0, paddingInline: space[4], paddingBlock: space[2] },
+  selectAll: { display: 'flex', minWidth: 0, alignItems: 'center', gap: space[2] },
+  selectAllLabel: {
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    color: colors.secondaryLabel,
+  },
+  historyEmpty: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'flex-start',
+    gap: space[2],
+    paddingInline: space[4],
+    paddingBlock: '10px',
+  },
+  historyEmptyText: { margin: 0, lineHeight: 1.375, color: colors.secondaryLabel },
+  sessionList: {
+    flexGrow: 1,
+    minHeight: 0,
+    overflowY: 'auto',
+    overscrollBehavior: 'contain',
+  },
+  sessionRow: {
+    display: 'flex',
+    minWidth: 0,
+    alignItems: 'center',
+    gap: space[2],
+    paddingInline: space[4],
+    paddingBlock: space[2],
+    cursor: 'pointer',
+    backgroundColor: { default: 'transparent', ':hover': colors.hoverFill },
+    transitionProperty: 'background-color',
+    transitionDuration: duration.fast,
+    transitionTimingFunction: ease.standard,
+  },
+  sessionRowDisabled: {
+    cursor: 'default',
+    opacity: 0.7,
+    backgroundColor: { default: 'transparent', ':hover': 'transparent' },
+  },
+  sessionText: { flexGrow: 1, minWidth: 0 },
+  sessionTitle: {
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    color: colors.label,
+  },
+  sessionTime: {
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: '0.85em',
+    color: colors.secondaryLabel,
+  },
+  conflict: { display: 'flex', flexShrink: 0, alignItems: 'center', gap: space[1] },
+});
 
 const EMPTY_WORKTREE_SETUP: WorktreeSetupScriptConfig = {
   scripts: {},
@@ -251,9 +827,6 @@ export function sortGithubProjectRows(
 ): GithubProjectSettingsRow[] {
   return [...rows].sort((left, right) => left.repoFullName.localeCompare(right.repoFullName));
 }
-
-/** Source id for the GitHub group in the Projects catalog. */
-const GITHUB_PILL_ID = '__github__';
 
 function projectPathTail(path: string): string {
   const parts = path.split(/[/\\]/).filter(Boolean);
@@ -328,9 +901,6 @@ export function formatHistoryUpdatedAt(
   }
   return formatDistanceToNow(date, { addSuffix: true, locale });
 }
-
-const historyActionButtonClass =
-  'box-border h-7 min-h-7 bg-foreground/[0.06] px-2 py-0 text-xs leading-none text-foreground hover:bg-foreground/[0.1] [&_svg]:h-3.5 [&_svg]:w-3.5';
 
 export function historyStateKey(projectKey: string, provider: LocalProjectHistoryProvider): string {
   return `${getLocalProjectHistoryProviderKey(provider)}:${projectKey}`;
@@ -547,7 +1117,7 @@ export function ProjectSettingsComponent({
         open={addLocalProjectDialogOpen}
         onOpenChange={setAddLocalProjectDialogOpen}
         initialMachineId={addLocalProjectMachineId}
-        overlayClassName={NESTED_SETTINGS_DIALOG_OVERLAY}
+        backdropClassName={NESTED_SETTINGS_DIALOG_OVERLAY}
       />
       <RemoveLocalProjectDialog
         open={pendingRemoval != null}
@@ -563,7 +1133,7 @@ export function ProjectSettingsComponent({
           machineSupportsLocalProjectRemovalProtocol(machineMetaMap.get(pendingRemoval.machineId))
         }
         isRemoving={isRemovingLocalProject}
-        overlayClassName={NESTED_SETTINGS_DIALOG_OVERLAY}
+        backdropClassName={NESTED_SETTINGS_DIALOG_OVERLAY}
         onOpenChange={(open) => {
           if (!open && !isRemovingLocalProject) setPendingRemoval(null);
         }}
@@ -645,44 +1215,6 @@ function ProjectSettingsDesktop({
     return [...byId.values()];
   }, [sections, addableMachines, onlineMachineIds]);
 
-  const sourceIds = useMemo(() => {
-    const ids: string[] = [];
-    if (githubSections.length > 0) ids.push(GITHUB_PILL_ID);
-    for (const machine of machineEntries) ids.push(machine.machineId);
-    return ids;
-  }, [githubSections.length, machineEntries]);
-
-  const [selectedSourceId, setSelectedSourceId] = useState<string | null>(() => {
-    if (initialMachineId) return initialMachineId;
-    if (initialProjectKey) {
-      const localSection = sections.find((section) =>
-        section.rows.some((row) => row.key === initialProjectKey)
-      );
-      if (localSection) return localSection.machineId;
-      if (
-        githubSections.some((section) => section.rows.some((row) => row.key === initialProjectKey))
-      ) {
-        return GITHUB_PILL_ID;
-      }
-    }
-    return null;
-  });
-  const resolvedSourceId =
-    selectedSourceId && sourceIds.includes(selectedSourceId)
-      ? selectedSourceId
-      : (sourceIds[0] ?? null);
-  const isGithubSource = resolvedSourceId === GITHUB_PILL_ID;
-
-  const currentSelections = useMemo<ProjectSettingsSelection[]>(() => {
-    if (resolvedSourceId === GITHUB_PILL_ID) {
-      return githubSections.flatMap((section) =>
-        section.rows.map((row) => ({ key: row.key, kind: 'github' as const, row }))
-      );
-    }
-    const section = sections.find((entry) => entry.machineId === resolvedSourceId);
-    return (section?.rows ?? []).map((row) => ({ key: row.key, kind: 'local' as const, row }));
-  }, [resolvedSourceId, sections, githubSections]);
-
   const allSelections = useMemo<ProjectSettingsSelection[]>(() => {
     const github = githubSections.flatMap((section) =>
       section.rows.map((row) => ({ key: row.key, kind: 'github' as const, row }))
@@ -704,31 +1236,23 @@ function ProjectSettingsDesktop({
       <ProjectAddMenu
         onAddLocalProject={onAddLocalProject ? () => onAddLocalProject() : undefined}
         onAddGitHubProject={onAddGitHubProject}
-        className="h-8 w-8 shrink-0 bg-foreground/[0.06] text-foreground hover:bg-foreground/[0.1]"
+        variant="secondary"
       />
     ) : null;
 
-  /* The selected pill scopes the add action: the picker opens straight on that
-     machine (its Back button still leads to the full machine list). */
   const addableMachineIds = useMemo(
     () => new Set((addableMachines ?? []).map((machine) => machine.machineId)),
     [addableMachines]
   );
-  const selectedMachine =
-    machineEntries.find((entry) => entry.machineId === resolvedSourceId) ?? null;
-  const selectedMachineAddTarget =
-    onAddLocalProject && selectedMachine && addableMachineIds.has(selectedMachine.machineId)
-      ? selectedMachine
-      : null;
-  const addToSelectedMachine = selectedMachineAddTarget
-    ? () => onAddLocalProject?.(selectedMachineAddTarget.machineId)
-    : null;
   const addFolderLabel = t('workspace.projects.addFolder', 'Add folder');
-  const addFolderToMachineTitle = selectedMachineAddTarget
-    ? t('workspace.projects.addFolderOnMachine', 'Add a folder on {{machine}}', {
-        machine: selectedMachineAddTarget.machineName,
-      })
-    : undefined;
+
+  /* Arriving for one machine (from its "Add folder" elsewhere) scrolls its
+     section into view rather than hiding every other source. */
+  const sectionRefs = useRef(new Map<string, HTMLElement>());
+  useEffect(() => {
+    if (!initialMachineId) return;
+    sectionRefs.current.get(initialMachineId)?.scrollIntoView({ block: 'start' });
+  }, [initialMachineId]);
 
   const detailHandlers = {
     onSharedWithTeamChange,
@@ -748,19 +1272,13 @@ function ProjectSettingsDesktop({
     onlineMachineIds,
   };
 
-  const sourceTitle = isGithubSource
-    ? t('chat.contextSwitch.github', 'GitHub')
-    : (selectedMachine?.machineName ?? t('settings.tabs.projects', 'Projects'));
-
   return (
     <>
-      <div className={cn(settingContainerClass, 'flex h-full min-h-0 flex-col md:max-w-6xl')}>
-        <div className="flex items-center justify-between gap-3">
-          <div className="min-w-0">
-            <h2 className="text-base font-normal text-foreground">
-              {t('settings.tabs.projects', 'Projects')}
-            </h2>
-            <p className="mt-0.5 text-xs text-muted-foreground">
+      <div {...stylex.props(surface.container, styles.page)}>
+        <div {...stylex.props(styles.pageHeader)}>
+          <div {...stylex.props(styles.pageHeading)}>
+            <h2 {...stylex.props(styles.pageTitle)}>{t('settings.tabs.projects', 'Projects')}</h2>
+            <p {...stylex.props(styles.pageSubtitle)}>
               {t(
                 'workspace.projects.settingsSubtitle',
                 'Local folders and GitHub repositories available in this workspace.'
@@ -771,448 +1289,307 @@ function ProjectSettingsDesktop({
         </div>
 
         {isAnyLoading && totalCount === 0 ? (
-          <div className="flex items-center justify-center gap-2 px-3 py-10 text-sm text-muted-foreground">
-            <Spinner className="h-4 w-4" />
+          <div {...stylex.props(styles.loading)}>
+            <Spinner size="small" />
             {t('workspace.projects.loading', 'Loading projects')}
           </div>
         ) : totalCount === 0 && machineEntries.length === 0 ? (
-          <div className="flex flex-col items-center justify-center gap-2 px-3 py-12 text-center">
-            <div className="flex h-9 w-9 items-center justify-center rounded-full bg-muted/60">
-              <FolderOpen className="h-4 w-4 text-muted-foreground" />
-            </div>
-            <p className="text-sm text-muted-foreground">
+          <div {...stylex.props(styles.empty)}>
+            <FolderOpen {...stylex.props(styles.emptyIcon)} aria-hidden="true" />
+            <p {...stylex.props(styles.emptyText)}>
               {t('workspace.projects.empty', 'No projects yet')}
             </p>
           </div>
         ) : (
-          <div className="flex min-h-0 min-w-0 flex-1">
-            <div className="scrollbar-pro w-[220px] shrink-0 overflow-y-auto border-r border-border/60 py-1 pr-2">
-              {githubSections.length > 0 ? (
-                <SourceRow
-                  selected={isGithubSource}
-                  icon={<Github className="h-3.5 w-3.5" />}
-                  title={t('chat.contextSwitch.github', 'GitHub')}
-                  subtitle={t('workspace.projects.projectCount', '{{count}} projects', {
-                    count: totalGithubProjects,
-                  })}
-                  onClick={() => setSelectedSourceId(GITHUB_PILL_ID)}
-                />
-              ) : null}
-              {machineEntries.map((machine) => {
-                const count =
-                  sections.find((section) => section.machineId === machine.machineId)?.rows
-                    .length ?? 0;
-                const offline =
-                  !machine.online && !(localMachineId && machine.machineId === localMachineId);
-                return (
-                  <SourceRow
-                    key={machine.machineId}
-                    selected={resolvedSourceId === machine.machineId}
-                    online={machine.online}
-                    title={machine.machineName}
-                    subtitle={t('workspace.projects.projectCount', '{{count}} projects', {
-                      count,
-                    })}
-                    offlineLabel={
-                      offline && resolvedSourceId === machine.machineId
-                        ? t('workspace.machines.offline', 'Offline')
-                        : null
+          /* Every source at once, each a section: its name above, its projects
+             as the ruled rows of one card. Nothing is hidden behind a picked
+             source, and a project opens its editor in place. */
+          <div {...stylex.props(styles.sources)}>
+            {machineEntries.map((machine) => {
+              const rows =
+                sections.find((section) => section.machineId === machine.machineId)?.rows ?? [];
+              const isThisMachine = Boolean(localMachineId && machine.machineId === localMachineId);
+              const online = machine.online || isThisMachine;
+              const canAdd = Boolean(onAddLocalProject && addableMachineIds.has(machine.machineId));
+              const status = [
+                isThisMachine
+                  ? t('workspace.projects.thisMachine', 'This machine')
+                  : online
+                    ? t('workspace.machines.online', 'Online')
+                    : t('workspace.machines.offline', 'Offline'),
+                machine.sharedWithTeam ? t('workspace.projects.sharedBadge', 'Shared') : null,
+              ]
+                .filter(Boolean)
+                .join(' · ');
+              return (
+                <div
+                  key={machine.machineId}
+                  ref={(node) => {
+                    if (node) sectionRefs.current.set(machine.machineId, node);
+                    else sectionRefs.current.delete(machine.machineId);
+                  }}
+                >
+                  <CompactSection
+                    title={`${machine.machineName} · ${status}`}
+                    headerRight={
+                      canAdd ? (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="small"
+                          title={t(
+                            'workspace.projects.addFolderOnMachine',
+                            'Add a folder on {{machine}}',
+                            { machine: machine.machineName }
+                          )}
+                          onClick={() => onAddLocalProject?.(machine.machineId)}
+                        >
+                          <FolderPlus {...stylex.props(styles.buttonIcon)} />
+                          {addFolderLabel}
+                        </Button>
+                      ) : null
                     }
-                    shared={machine.sharedWithTeam === true}
-                    onClick={() => setSelectedSourceId(machine.machineId)}
-                  />
-                );
-              })}
-            </div>
-            <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-              <div className="flex shrink-0 items-center justify-between gap-2 px-3 py-2">
-                <div className="min-w-0">
-                  <h3 className="truncate text-sm font-normal text-foreground">{sourceTitle}</h3>
-                </div>
-                {addToSelectedMachine ? (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    title={addFolderToMachineTitle}
-                    className="h-7 shrink-0 gap-1 px-2 text-xs"
-                    onClick={addToSelectedMachine}
                   >
-                    <FolderPlus className="h-3.5 w-3.5" />
-                    {addFolderLabel}
-                  </Button>
-                ) : isGithubSource && onOpenGitHubSettings ? (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    className="h-7 shrink-0 gap-1 px-2 text-xs"
-                    onClick={onOpenGitHubSettings}
-                  >
-                    <Github className="h-3.5 w-3.5" />
-                    {t('workspace.projects.manageInGithubSettings', 'Manage in GitHub settings')}
-                  </Button>
-                ) : null}
-              </div>
-              <div className="scrollbar-pro min-h-0 flex-1 overflow-y-auto px-1 pb-2">
-                {isGithubSource ? (
-                  githubSections.map((section) => (
-                    <div key={section.owner} className="mb-2">
-                      <ProjectOwnerLabel owner={section.owner} />
-                      {section.rows.map((row) => (
-                        <ProjectMasterRow
+                    {rows.length === 0 ? (
+                      <p {...stylex.props(surface.cardNote)}>
+                        {t(
+                          'workspace.projects.machineEmpty',
+                          'No folders added on this machine yet.'
+                        )}
+                      </p>
+                    ) : (
+                      rows.map((row) => (
+                        <ProjectLine
                           key={row.key}
-                          selected={editingProjectKey === row.key}
-                          icon={<OwnerAvatar owner={section.owner} />}
-                          title={row.name}
-                          subtitle={row.repoFullName}
-                          privateRepo={row.private}
-                          onClick={() => setEditingProjectKey(row.key)}
+                          title={row.project.name}
+                          caption={projectPathTail(row.project.rootPath)}
+                          shared={row.sharedWithTeam}
+                          conversationCount={row.conversationCount}
+                          removalState={localProjectRemovalStateByKey?.get(row.key) ?? null}
+                          canRemove={canRemoveLocalProject?.(row) === true}
+                          onRemove={() => onRequestRemoveLocalProject?.(row)}
+                          onOpen={() => setEditingProjectKey(row.key)}
                         />
-                      ))}
-                    </div>
-                  ))
-                ) : currentSelections.length === 0 ? (
-                  <div className="flex flex-col items-start gap-2 px-3 py-6">
-                    <p className="text-xs text-muted-foreground">
-                      {t(
-                        'workspace.projects.machineEmpty',
-                        'No folders added on this machine yet.'
-                      )}
-                    </p>
-                    {addToSelectedMachine ? (
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        title={addFolderToMachineTitle}
-                        className="h-7 gap-1 px-2 text-xs"
-                        onClick={addToSelectedMachine}
-                      >
-                        <FolderPlus className="h-3.5 w-3.5" />
-                        {addFolderLabel}
-                      </Button>
-                    ) : null}
-                  </div>
-                ) : (
-                  currentSelections.map((selection) =>
-                    selection.kind === 'local' ? (
-                      <ProjectMasterRow
-                        key={selection.key}
-                        selected={editingProjectKey === selection.key}
-                        icon={<Folder className="h-3.5 w-3.5" />}
-                        title={selection.row.project.name}
-                        subtitle={projectPathTail(selection.row.project.rootPath)}
-                        shared={selection.row.sharedWithTeam}
-                        conversationCount={selection.row.conversationCount}
-                        removalState={localProjectRemovalStateByKey?.get(selection.key) ?? null}
-                        canRemove={canRemoveLocalProject?.(selection.row) === true}
-                        onRemove={() => onRequestRemoveLocalProject?.(selection.row)}
-                        onClick={() => setEditingProjectKey(selection.key)}
-                      />
-                    ) : null
-                  )
-                )}
-              </div>
-            </div>
+                      ))
+                    )}
+                  </CompactSection>
+                </div>
+              );
+            })}
+            {githubSections.map((section, index) => (
+              <CompactSection
+                key={section.owner}
+                title={`${section.owner} · ${t('chat.contextSwitch.github', 'GitHub')}`}
+                headerRight={
+                  index === 0 && onOpenGitHubSettings ? (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="small"
+                      onClick={onOpenGitHubSettings}
+                    >
+                      <Github {...stylex.props(styles.buttonIcon)} />
+                      {t('workspace.projects.manageInGithubSettings', 'Manage in GitHub settings')}
+                    </Button>
+                  ) : null
+                }
+              >
+                {section.rows.map((row) => (
+                  <ProjectLine
+                    key={row.key}
+                    title={row.name}
+                    caption={row.repoFullName}
+                    privateRepo={row.private}
+                    onOpen={() => setEditingProjectKey(row.key)}
+                  />
+                ))}
+              </CompactSection>
+            ))}
           </div>
         )}
       </div>
-      <Dialog
+      <Dialog.Root
         open={editingProject != null}
         onOpenChange={(open) => {
           if (!open) setEditingProjectKey(null);
         }}
       >
-        <DialogContent
-          overlayClassName={NESTED_SETTINGS_DIALOG_OVERLAY}
-          className="flex max-h-[min(88dvh,820px)] w-[min(640px,96vw)] max-w-none flex-col gap-0 overflow-hidden p-0 sm:max-w-none"
+        <Dialog.Content
+          backdropClassName={NESTED_SETTINGS_DIALOG_OVERLAY}
+          style={EDITOR_PANEL_STYLE}
         >
-          <DialogTitle className="sr-only">
+          <Dialog.Title className={stylex.props(styles.srOnly).className}>
             {editingProject?.kind === 'local'
               ? editingProject.row.project.name
               : editingProject?.kind === 'github'
                 ? editingProject.row.name
                 : t('settings.tabs.projects', 'Projects')}
-          </DialogTitle>
-          <DialogDescription className="sr-only">
+          </Dialog.Title>
+          <Dialog.Description className={stylex.props(styles.srOnly).className}>
             {t(
               'workspace.projects.settingsSubtitle',
               'Local folders and GitHub repositories available in this workspace.'
             )}
-          </DialogDescription>
-          <div className="scrollbar-pro min-h-0 flex-1 overflow-y-auto">
-            {editingProject ? (
-              <ProjectDetailPane selection={editingProject} {...detailHandlers} />
-            ) : null}
-          </div>
-        </DialogContent>
-      </Dialog>
+          </Dialog.Description>
+          {editingProject ? (
+            <ProjectWindow
+              key={editingProject.key}
+              selection={editingProject}
+              {...detailHandlers}
+            />
+          ) : null}
+        </Dialog.Content>
+      </Dialog.Root>
     </>
   );
 }
 
-function SourceRow({
-  selected,
-  icon,
+/**
+ * A project as one line of its source's card: its name, where it lives, what
+ * is true of it, and the way into its editor. The whole line opens it; the
+ * trailing menu holds the one destructive action.
+ */
+function ProjectLine({
   title,
-  subtitle,
-  online,
-  offlineLabel,
-  shared = false,
-  onClick,
-}: {
-  readonly selected: boolean;
-  readonly icon?: ReactNode;
-  readonly title: string;
-  readonly subtitle?: string;
-  readonly online?: boolean;
-  readonly offlineLabel?: string | null;
-  readonly shared?: boolean;
-  readonly onClick: () => void;
-}) {
-  const { t } = useTranslation();
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cn(
-        'mb-0.5 flex w-full min-w-0 items-center gap-2 rounded-md px-2 py-1.5 text-left',
-        selected ? 'bg-foreground/[0.08] text-foreground' : 'text-foreground/90 hover:bg-hover/50'
-      )}
-    >
-      <div className="flex h-6 w-6 shrink-0 items-center justify-center overflow-hidden rounded-md bg-foreground/[0.05] text-muted-foreground">
-        {icon ?? (
-          <span
-            aria-hidden
-            className={cn(
-              'h-1.5 w-1.5 rounded-full',
-              online ? 'bg-status-success' : 'bg-muted-foreground/40'
-            )}
-          />
-        )}
-      </div>
-      <div className="min-w-0 flex-1">
-        <div className="flex min-w-0 items-center gap-1.5">
-          <span className="truncate text-sm font-normal leading-tight">{title}</span>
-          {offlineLabel ? (
-            <span className="shrink-0 text-[10px] font-normal text-muted-foreground">
-              {offlineLabel}
-            </span>
-          ) : null}
-        </div>
-        {subtitle ? (
-          <div className="truncate text-[11px] leading-tight text-muted-foreground">{subtitle}</div>
-        ) : null}
-      </div>
-      {shared ? (
-        <span className="inline-flex shrink-0 items-center gap-1 text-[10px] font-normal text-muted-foreground">
-          <Users className="h-3 w-3" aria-hidden="true" />
-          {t('workspace.projects.sharedBadge', 'Shared')}
-        </span>
-      ) : null}
-    </button>
-  );
-}
-
-function ProjectMasterRow({
-  selected,
-  icon,
-  title,
-  subtitle,
+  caption,
   shared = false,
   privateRepo = false,
   conversationCount,
   removalState = null,
   canRemove = false,
   onRemove,
-  onClick,
+  onOpen,
 }: {
-  readonly selected: boolean;
-  readonly icon: ReactNode;
   readonly title: string;
-  readonly subtitle: string;
+  readonly caption: string;
   readonly shared?: boolean;
   readonly privateRepo?: boolean;
   readonly conversationCount?: number;
   readonly removalState?: LocalProjectRemovalState | null;
   readonly canRemove?: boolean;
   readonly onRemove?: () => void;
-  readonly onClick: () => void;
+  readonly onOpen: () => void;
 }) {
   const { t } = useTranslation();
-  const removalStateLabel =
+  const removalLabel =
     removalState === 'waiting_for_device'
       ? t('sidebar.localProjects.remove.waitingForDevice', 'Waiting for device…')
       : removalState === 'removing'
         ? t('sidebar.localProjects.remove.removing', 'Removing…')
         : null;
-
+  const meta = [
+    removalLabel,
+    shared ? t('workspace.projects.sharedBadge', 'Shared') : null,
+    privateRepo ? t('workspace.projects.privateRepo', 'Private') : null,
+    conversationCount != null && conversationCount > 0
+      ? t('workspace.projects.conversationCount', '{{count}} conversations', {
+          count: conversationCount,
+        })
+      : null,
+  ].filter(Boolean);
   return (
-    <div
-      className={cn(
-        'group mb-0.5 flex w-full min-w-0 items-center gap-1 rounded-md pr-1',
-        selected ? 'bg-foreground/[0.08] text-foreground' : 'text-foreground/90 hover:bg-hover/50'
-      )}
-    >
-      <button
-        type="button"
-        onClick={onClick}
-        className="flex min-w-0 flex-1 items-center gap-2 px-2 py-1.5 text-left"
-      >
-        <div className="flex h-6 w-6 shrink-0 items-center justify-center overflow-hidden rounded-md bg-foreground/[0.05] text-muted-foreground">
-          {icon}
-        </div>
-        <div className="min-w-0 flex-1">
-          <div className="truncate text-sm font-normal leading-tight">{title}</div>
-          <div className="truncate font-mono text-[11px] leading-tight text-muted-foreground">
-            {subtitle}
-          </div>
-          {shared || privateRepo || conversationCount != null ? (
-            <div className="mt-0.5 flex min-w-0 items-center gap-2 text-[10px] text-muted-foreground">
-              {shared ? (
-                <span className="inline-flex items-center gap-1">
-                  <Users className="h-3 w-3" aria-hidden="true" />
-                  {t('workspace.projects.sharedBadge', 'Shared')}
-                </span>
-              ) : null}
-              {privateRepo ? <span>{t('workspace.projects.privateRepo', 'Private')}</span> : null}
-              {conversationCount != null ? (
-                <span>
-                  {t('workspace.projects.conversationCount', '{{count}} conversations', {
-                    count: conversationCount,
-                  })}
-                </span>
-              ) : null}
-            </div>
-          ) : null}
-        </div>
-      </button>
-      {removalStateLabel ? (
-        <span
-          className="mr-1 inline-flex shrink-0 items-center gap-1 text-[10px] font-normal text-muted-foreground"
-          title={removalStateLabel}
-        >
-          {removalState === 'waiting_for_device' ? (
-            <Clock3 className="h-3 w-3 shrink-0" aria-hidden="true" />
-          ) : (
-            <Spinner className="h-3 w-3 shrink-0" />
-          )}
+    <div {...stylex.props(styles.line, surface.pressableLine)}>
+      <button type="button" onClick={onOpen} {...stylex.props(styles.lineButton)}>
+        <span {...stylex.props(styles.lineText)}>
+          <span {...stylex.props(styles.lineName)}>{title}</span>
+          <span {...stylex.props(styles.lineCaption)}>{caption}</span>
         </span>
-      ) : canRemove && onRemove ? (
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              className="h-6 w-6 shrink-0"
-              aria-label={t('sessions.moreActions', 'More actions')}
-              onClick={(event) => event.stopPropagation()}
-            >
-              <Ellipsis className="h-3.5 w-3.5" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="min-w-[10rem]">
-            <DropdownMenuItem
-              className="text-destructive focus:text-destructive"
-              onClick={(event) => {
-                event.stopPropagation();
-                onRemove();
-              }}
-            >
+        {meta.length > 0 ? (
+          <span {...stylex.props(styles.lineMeta)}>{meta.join(' · ')}</span>
+        ) : null}
+        {removalState === 'removing' ? <Spinner size="small" /> : null}
+        <ChevronRight aria-hidden="true" {...stylex.props(styles.lineChevron)} />
+      </button>
+      {canRemove && onRemove && !removalLabel ? (
+        <Menu.Root>
+          <Menu.Trigger
+            render={
+              <Button
+                type="button"
+                variant="ghost"
+                size="small"
+                icon
+                aria-label={t('sessions.moreActions', 'More actions')}
+              />
+            }
+          >
+            <Ellipsis {...stylex.props(styles.glyph)} />
+          </Menu.Trigger>
+          <Menu.Content align="end">
+            <Menu.Item tone="destructive" onClick={() => onRemove()}>
               {t('workspace.projects.delete', 'Delete project')}
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+            </Menu.Item>
+          </Menu.Content>
+        </Menu.Root>
       ) : null}
     </div>
-  );
-}
-
-function ProjectOwnerLabel({ owner }: { readonly owner: string }) {
-  return <div className="px-1 text-[11px] font-normal text-muted-foreground">{owner}</div>;
-}
-
-function OwnerAvatar({ owner }: { readonly owner: string }) {
-  // Use avatars.githubusercontent.com (CORS-enabled + already allowed by the
-  // Electron img-src CSP) rather than github.com/<owner>.png, whose CORS-mode
-  // cache fetch is rejected in Electron. Swap to the Github glyph on error.
-  const [failed, setFailed] = useState(false);
-  if (failed || !owner) {
-    return <Github className="h-3.5 w-3.5 text-muted-foreground" />;
-  }
-  return (
-    <CachedAvatarImg
-      src={getGitHubOwnerAvatarUrl(owner)}
-      alt={owner}
-      loading="lazy"
-      className="h-full w-full object-cover"
-      onError={() => setFailed(true)}
-    />
   );
 }
 
 function ProjectAddMenu({
   onAddLocalProject,
   onAddGitHubProject,
-  className,
   size,
   variant,
 }: {
   readonly onAddLocalProject?: () => void;
   readonly onAddGitHubProject?: () => void;
-  readonly className?: string;
   readonly size?: ButtonProps['size'];
   readonly variant?: ButtonProps['variant'];
 }) {
   const { t } = useTranslation();
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button
-          type="button"
-          variant={variant ?? 'ghost'}
-          size={size ?? 'icon'}
-          className={className}
-          aria-label={t('workspace.projects.addProjectMenu', 'Add project')}
-          title={t('workspace.projects.addProjectMenu', 'Add project')}
-        >
-          <Plus className="h-3.5 w-3.5" />
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="min-w-[220px]">
+    <Menu.Root>
+      <Menu.Trigger
+        render={
+          <Button
+            type="button"
+            variant={variant ?? 'ghost'}
+            size={size ?? 'small'}
+            icon
+            aria-label={t('workspace.projects.addProjectMenu', 'Add project')}
+            title={t('workspace.projects.addProjectMenu', 'Add project')}
+          />
+        }
+      >
+        <Plus {...stylex.props(styles.glyph)} />
+      </Menu.Trigger>
+      <Menu.Content align="end">
         {onAddLocalProject ? (
-          <DropdownMenuItem onSelect={() => onAddLocalProject()}>
-            <FolderPlus className="h-4 w-4" />
-            <span className="flex min-w-0 flex-col">
+          <Menu.Item
+            icon={<FolderPlus {...stylex.props(styles.glyph)} />}
+            onClick={() => onAddLocalProject()}
+          >
+            <span {...stylex.props(styles.menuText)}>
               <span>{t('chat.contextSwitch.addProject', 'Add a folder')}</span>
-              <span className="text-xs text-muted-foreground">
+              <span {...stylex.props(styles.menuHint)}>
                 {t(
                   'chat.contextSwitch.addLocalProjectHint',
                   'Browse the machine and pick a folder'
                 )}
               </span>
             </span>
-          </DropdownMenuItem>
+          </Menu.Item>
         ) : null}
         {onAddGitHubProject ? (
-          <DropdownMenuItem onSelect={() => onAddGitHubProject()}>
-            <Github className="h-4 w-4" />
-            <span className="flex min-w-0 flex-col">
+          <Menu.Item
+            icon={<Github {...stylex.props(styles.glyph)} />}
+            onClick={() => onAddGitHubProject()}
+          >
+            <span {...stylex.props(styles.menuText)}>
               <span>{t('chat.contextSwitch.addGitHubRepo', 'Add a GitHub repository')}</span>
-              <span className="text-xs text-muted-foreground">
+              <span {...stylex.props(styles.menuHint)}>
                 {t('chat.contextSwitch.addGitHubRepoHint', 'Connect a GitHub repository')}
               </span>
             </span>
-          </DropdownMenuItem>
+          </Menu.Item>
         ) : null}
-      </DropdownMenuContent>
-    </DropdownMenu>
+      </Menu.Content>
+    </Menu.Root>
   );
 }
 
-function ProjectDetailPane({
+function ProjectWindow({
   selection,
   onSharedWithTeamChange,
   onSyncHistory,
@@ -1247,37 +1624,1047 @@ function ProjectDetailPane({
     localMachineId?: MachineId | null;
     onlineMachineIds?: ReadonlySet<MachineId>;
   }) {
-  if (selection.kind === 'github') {
+  const { t } = useTranslation();
+  const workspaceId = useAtomValue(currentWorkspaceIdAtom);
+  const isLocal = selection.kind === 'local';
+  const localRow = selection.kind === 'local' ? selection.row : null;
+  const githubRow = selection.kind === 'github' ? selection.row : null;
+  const [page, setPage] = useState<ProjectWindowPage>('general');
+
+  const machineReachable = localRow
+    ? (localMachineId != null && localRow.machineId === localMachineId) ||
+      Boolean(onlineMachineIds?.has(localRow.machineId))
+    : true;
+  const removalState = localRow ? (localProjectRemovalStateByKey?.get(localRow.key) ?? null) : null;
+  const skillsSource: ProjectSkillsSource | null = workspaceId
+    ? localRow
+      ? {
+          kind: 'local',
+          workspaceId,
+          machineId: localRow.machineId,
+          localProjectId: localRow.project.id,
+        }
+      : githubRow
+        ? { kind: 'github', workspaceId, repoFullName: githubRow.repoFullName }
+        : null
+    : null;
+
+  const historyCounts = useMemo(() => {
+    const sessions = (localRow?.historyImports ?? []).flatMap(
+      (state) => state.catalog?.sessions ?? []
+    );
+    return {
+      available: sessions.filter((session) => historyStatusOf(session) === 'available').length,
+      conflicts: sessions.filter((session) => historyStatusOf(session) === 'sync_conflict').length,
+    };
+  }, [localRow?.historyImports]);
+
+  const pages: { id: ProjectWindowPage; label: string; count?: number; warn?: boolean }[] = [
+    { id: 'general', label: t('workspace.projects.window.general', 'General') },
+    { id: 'worktree', label: t('workspace.projects.window.worktree', 'Worktree') },
+    { id: 'skills', label: t('workspace.projects.window.skills', 'Skills') },
+    ...(isLocal
+      ? [
+          {
+            id: 'conversations' as const,
+            label: t('workspace.projects.window.conversations', 'Conversations'),
+            // What needs the person: conflicts first, else what waits to import.
+            count: historyCounts.conflicts || historyCounts.available || undefined,
+            warn: historyCounts.conflicts > 0,
+          },
+        ]
+      : []),
+  ];
+
+  // Where the project lives, split so its last segment can be the lit part.
+  const location = localRow?.project.rootPath ?? githubRow?.repoFullName ?? '';
+  const trimmedLocation = location.replace(/[\\/]+$/, '');
+  const locationCut = trimmedLocation.search(/[^\\/]+$/);
+  const locationHead = locationCut > 0 ? trimmedLocation.slice(0, locationCut) : '';
+  const locationTail = locationCut > 0 ? trimmedLocation.slice(locationCut) : trimmedLocation;
+
+  const offlineNote =
+    localRow && !machineReachable ? (
+      <p {...stylex.props(win.note)}>
+        {t(
+          'workspace.projects.selectedMachineOffline',
+          '{{name}} is offline. Worktree setup and skills will load when it comes online.',
+          { name: localRow.machineName }
+        )}
+      </p>
+    ) : null;
+
+  const pageDescription =
+    page === 'general'
+      ? t(
+          'workspace.projects.window.generalDescription',
+          'Where this project lives and who can use it.'
+        )
+      : page === 'worktree'
+        ? t(
+            'workspace.projects.window.worktreeDescription',
+            'Scripts that run when a conversation gets its own worktree, and when it is archived.'
+          )
+        : page === 'skills'
+          ? t(
+              'workspace.projects.window.skillsDescription',
+              'Skills the agent finds in this project.'
+            )
+          : t(
+              'workspace.projects.window.conversationsDescription',
+              'Bring conversations you had with an agent outside Lody into this workspace.'
+            );
+
+  return (
+    <Tooltip.Provider delay={200}>
+      <div {...stylex.props(win.window)}>
+        {/* Four views of one project are a strip, not a sidebar: the name and
+            where it lives above, the views under it, the page at full width. */}
+        <header {...stylex.props(win.head)}>
+          <h2 {...stylex.props(win.headName)} title={localRow?.project.name ?? githubRow?.name}>
+            {localRow?.project.name ?? githubRow?.name}
+          </h2>
+          <p {...stylex.props(win.headMeta)}>
+            <span {...stylex.props(win.headPath)} title={location}>
+              <span {...stylex.props(win.headPathDim)}>{locationHead}</span>
+              {locationTail}
+            </span>
+            {localRow ? (
+              <>
+                <span aria-hidden="true" {...stylex.props(win.headSep)}>
+                  ·
+                </span>
+                <span
+                  aria-hidden="true"
+                  {...stylex.props(win.statusDot, machineReachable && win.statusDotOnline)}
+                />
+                <span {...stylex.props(win.headMachine)}>
+                  {localRow.machineName} ·{' '}
+                  {machineReachable
+                    ? t('workspace.machines.online', 'Online')
+                    : t('workspace.machines.offline', 'Offline')}
+                </span>
+              </>
+            ) : (
+              <>
+                <span aria-hidden="true" {...stylex.props(win.headSep)}>
+                  ·
+                </span>
+                <span {...stylex.props(win.headMachine)}>
+                  {githubRow?.private
+                    ? t('workspace.projects.privateRepo', 'Private')
+                    : t('workspace.projects.window.public', 'Public')}
+                </span>
+              </>
+            )}
+          </p>
+          <PageTabs pages={pages} current={page} onChange={setPage} />
+        </header>
+
+        <section {...stylex.props(win.main)}>
+          <p {...stylex.props(win.pageDescription)}>{pageDescription}</p>
+
+          {page === 'conversations' && localRow ? (
+            <ConversationsPage
+              row={localRow}
+              onSyncHistory={onSyncHistory}
+              onImportHistory={onImportHistory}
+              onResolveHistoryConflict={onResolveHistoryConflict}
+              onHistorySelectionChange={onHistorySelectionChange}
+            />
+          ) : (
+            <div {...withClassName(stylex.props(win.pageBody), SCROLLBAR_CLASS)}>
+              {page === 'general' && localRow ? (
+                <>
+                  {offlineNote}
+                  <CompactSection>
+                    <CompactRow
+                      label={t('workspace.projects.window.folder', 'Folder')}
+                      helper={<span {...stylex.props(win.mono)}>{localRow.project.rootPath}</span>}
+                    >
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="small"
+                        onClick={() => copyProjectPath(localRow.project.rootPath, t)}
+                      >
+                        {t('sessions.copyPath', 'Copy path')}
+                      </Button>
+                      {getIpcServices() ? (
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          size="small"
+                          onClick={() => revealProjectPath(localRow.project.rootPath, t)}
+                        >
+                          {t('sidebar.localProjects.reveal', 'Reveal in file manager')}
+                        </Button>
+                      ) : null}
+                    </CompactRow>
+                    <CompactRow
+                      label={t('workspace.projects.window.machine', 'Machine')}
+                      helper={
+                        removalState === 'waiting_for_device'
+                          ? t(
+                              'sidebar.localProjects.remove.waitingForDevice',
+                              'Waiting for device…'
+                            )
+                          : removalState === 'removing'
+                            ? t('sidebar.localProjects.remove.removing', 'Removing…')
+                            : undefined
+                      }
+                    >
+                      <span {...stylex.props(win.value)}>
+                        {localRow.machineName} ·{' '}
+                        {machineReachable
+                          ? t('workspace.machines.online', 'Online')
+                          : t('workspace.machines.offline', 'Offline')}
+                      </span>
+                    </CompactRow>
+                  </CompactSection>
+                  <ProjectShareControl
+                    row={localRow}
+                    onSharedWithTeamChange={onSharedWithTeamChange}
+                  />
+                  {canRemoveLocalProject?.(localRow) && onRequestRemoveLocalProject ? (
+                    <CompactSection tone="danger">
+                      <CompactRow
+                        label={t('workspace.projects.delete', 'Delete project')}
+                        helper={t(
+                          'sidebar.localProjects.remove.originalDirectorySafe',
+                          'Lody never deletes the original project folder or its files.'
+                        )}
+                      >
+                        <Button
+                          type="button"
+                          variant="destructive"
+                          size="small"
+                          disabled={removalState != null}
+                          onClick={() => onRequestRemoveLocalProject(localRow)}
+                        >
+                          {t('workspace.projects.delete', 'Delete project')}
+                        </Button>
+                      </CompactRow>
+                    </CompactSection>
+                  ) : null}
+                </>
+              ) : null}
+
+              {page === 'general' && githubRow ? (
+                <CompactSection>
+                  <CompactRow
+                    label={t('workspace.projects.window.repository', 'Repository')}
+                    helper={<span {...stylex.props(win.mono)}>{githubRow.repoFullName}</span>}
+                  >
+                    {onOpenGitHubSettings ? (
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="small"
+                        onClick={onOpenGitHubSettings}
+                      >
+                        {t(
+                          'workspace.projects.manageInGithubSettings',
+                          'Manage in GitHub settings'
+                        )}
+                      </Button>
+                    ) : null}
+                  </CompactRow>
+                  <CompactRow label={t('workspace.projects.window.visibility', 'Visibility')}>
+                    <span {...stylex.props(win.value)}>
+                      {githubRow.private
+                        ? t('workspace.projects.privateRepo', 'Private')
+                        : t('workspace.projects.window.public', 'Public')}
+                    </span>
+                  </CompactRow>
+                </CompactSection>
+              ) : null}
+
+              {page === 'worktree' ? (
+                <>
+                  {offlineNote}
+                  <CompactSection>
+                    <div {...stylex.props(styles.cardLine)}>
+                      {localRow ? (
+                        <WorktreeSetupEditor
+                          phase="setup"
+                          config={localRow.worktreeSetup}
+                          shell={localRow.shell}
+                          isLoading={machineReachable && localRow.isWorktreeSetupLoading}
+                          isSaving={localRow.isWorktreeSetupSaving}
+                          errorMessage={
+                            machineReachable &&
+                            !isUnreachableMachineError(localRow.worktreeSetupError)
+                              ? localRow.worktreeSetupError
+                              : null
+                          }
+                          onSave={
+                            machineReachable
+                              ? (config) => onWorktreeSetupChange?.(localRow, config)
+                              : undefined
+                          }
+                        />
+                      ) : githubRow ? (
+                        <WorktreeSetupEditor
+                          phase="setup"
+                          config={githubRow.worktreeSetup}
+                          isSaving={githubRow.isWorktreeSetupSaving}
+                          errorMessage={githubRow.worktreeSetupError}
+                          onSave={(config) => onGithubWorktreeSetupChange?.(githubRow, config)}
+                        />
+                      ) : null}
+                    </div>
+                  </CompactSection>
+                  <CompactSection>
+                    <div {...stylex.props(styles.cardLine)}>
+                      {localRow ? (
+                        <WorktreeSetupEditor
+                          phase="cleanup"
+                          config={localRow.worktreeCleanup}
+                          shell={localRow.shell}
+                          isLoading={machineReachable && localRow.isWorktreeCleanupLoading}
+                          isSaving={localRow.isWorktreeCleanupSaving}
+                          errorMessage={
+                            machineReachable &&
+                            !isUnreachableMachineError(localRow.worktreeCleanupError)
+                              ? localRow.worktreeCleanupError
+                              : null
+                          }
+                          onSave={
+                            machineReachable
+                              ? (config) => onWorktreeCleanupChange?.(localRow, config)
+                              : undefined
+                          }
+                        />
+                      ) : githubRow ? (
+                        <WorktreeSetupEditor
+                          phase="cleanup"
+                          config={githubRow.worktreeCleanup}
+                          isSaving={githubRow.isWorktreeCleanupSaving}
+                          errorMessage={githubRow.worktreeCleanupError}
+                          onSave={(config) => onGithubWorktreeCleanupChange?.(githubRow, config)}
+                        />
+                      ) : null}
+                    </div>
+                  </CompactSection>
+                </>
+              ) : null}
+
+              {page === 'skills' ? (
+                localRow && !machineReachable ? (
+                  <CompactSection>
+                    <p {...stylex.props(surface.cardNote)}>
+                      {t(
+                        'workspace.projects.machineUnreachable',
+                        'This machine isn’t connected. Worktree setup and skills will load when it comes online.'
+                      )}
+                    </p>
+                  </CompactSection>
+                ) : (
+                  <CompactSection>
+                    <div {...stylex.props(styles.cardLine)}>
+                      <ProjectSkillsTab source={skillsSource} />
+                    </div>
+                  </CompactSection>
+                )
+              ) : null}
+            </div>
+          )}
+        </section>
+      </div>
+    </Tooltip.Provider>
+  );
+}
+
+type ProjectWindowPage = 'general' | 'worktree' | 'skills' | 'conversations';
+
+/**
+ * The window's views: words with a line under the current one that travels to
+ * the next. They are the top of the window's hierarchy, so they are not the
+ * tray strips the pages use for their own choices (agent, state) — a strip over
+ * a strip reads as one level.
+ */
+function PageTabs({
+  pages,
+  current,
+  onChange,
+}: {
+  readonly pages: readonly {
+    id: ProjectWindowPage;
+    label: string;
+    count?: number;
+    warn?: boolean;
+  }[];
+  readonly current: ProjectWindowPage;
+  readonly onChange: (page: ProjectWindowPage) => void;
+}) {
+  const listRef = useRef<HTMLDivElement>(null);
+  const [line, setLine] = useState<{ left: number; width: number } | null>(null);
+
+  useLayoutEffect(() => {
+    const list = listRef.current;
+    if (!list) return undefined;
+    const measure = () => {
+      const tab = list.querySelector<HTMLElement>(`[data-page="${current}"]`);
+      if (tab) setLine({ left: tab.offsetLeft, width: tab.offsetWidth });
+    };
+    measure();
+    return observeResizeOnAnimationFrame(list, measure);
+  }, [current, pages]);
+
+  return (
+    <div ref={listRef} role="tablist" {...stylex.props(win.pageTabs)}>
+      {pages.map((entry) => {
+        const selected = entry.id === current;
+        return (
+          <button
+            key={entry.id}
+            type="button"
+            role="tab"
+            aria-selected={selected}
+            data-page={entry.id}
+            onClick={() => onChange(entry.id)}
+            onKeyDown={(event) => {
+              if (event.key !== 'ArrowRight' && event.key !== 'ArrowLeft') return;
+              event.preventDefault();
+              const index = pages.findIndex((page) => page.id === entry.id);
+              const next =
+                pages[
+                  (index + (event.key === 'ArrowRight' ? 1 : -1) + pages.length) % pages.length
+                ]!;
+              onChange(next.id);
+              listRef.current?.querySelector<HTMLElement>(`[data-page="${next.id}"]`)?.focus();
+            }}
+            tabIndex={selected ? 0 : -1}
+            {...stylex.props(win.pageTab, selected && win.pageTabCurrent)}
+          >
+            {entry.label}
+            {entry.count ? (
+              <span {...stylex.props(win.tabCount, entry.warn && win.tabCountWarn)}>
+                {entry.count}
+              </span>
+            ) : null}
+          </button>
+        );
+      })}
+      {line ? (
+        <span
+          aria-hidden="true"
+          {...stylex.props(win.pageTabLine)}
+          style={{ transform: `translateX(${line.left}px)`, width: `${line.width}px` }}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+type HistoryStatus = 'available' | 'imported' | 'sync_conflict';
+type HistoryFilter = 'all' | HistoryStatus;
+
+const historyStatusOf = (session: LocalProjectHistoryCatalogItem): HistoryStatus =>
+  session.status === 'imported' || session.status === 'sync_conflict'
+    ? session.status
+    : 'available';
+
+/**
+ * A project's conversations in another agent's history, at any size: one
+ * agent at a time, found by search and narrowed by state, the list windowed so
+ * five thousand scroll like five. "Select all" means what is shown, and the
+ * import states how many it will bring in.
+ */
+function ConversationsPage({
+  row,
+  onSyncHistory,
+  onImportHistory,
+  onResolveHistoryConflict,
+  onHistorySelectionChange,
+}: Pick<
+  ProjectRowProps,
+  | 'row'
+  | 'onSyncHistory'
+  | 'onImportHistory'
+  | 'onResolveHistoryConflict'
+  | 'onHistorySelectionChange'
+>) {
+  const { t, i18n } = useTranslation();
+  const localeObj: Locale = i18n.language?.startsWith('zh') ? zhCN : enUS;
+  const intlLocale = toIntlLocale(i18n.resolvedLanguage ?? i18n.language);
+  const states = row.historyImports.filter((state) => state.canSync || state.catalog);
+  const [providerKey, setProviderKey] = useState<string | null>(states[0]?.providerKey ?? null);
+  const [query, setQuery] = useState('');
+  const [filter, setFilter] = useState<HistoryFilter>('all');
+  const [conflictToResolve, setConflictToResolve] = useState<LocalProjectHistoryCatalogItem | null>(
+    null
+  );
+  const state = states.find((entry) => entry.providerKey === providerKey) ?? states[0] ?? null;
+
+  const catalogSessions = state?.catalog?.sessions;
+  const sessions = useMemo(() => catalogSessions ?? [], [catalogSessions]);
+  const counts = useMemo(() => {
+    const byStatus = { available: 0, imported: 0, sync_conflict: 0 };
+    for (const session of sessions) byStatus[historyStatusOf(session)] += 1;
+    return byStatus;
+  }, [sessions]);
+  const shown = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    return sessions.filter(
+      (session) =>
+        (filter === 'all' || historyStatusOf(session) === filter) &&
+        (!needle || session.title.toLowerCase().includes(needle))
+    );
+  }, [sessions, query, filter]);
+
+  if (!state) {
     return (
-      <GithubProjectDetail
-        row={selection.row}
-        onWorktreeSetupChange={onGithubWorktreeSetupChange}
-        onWorktreeCleanupChange={onGithubWorktreeCleanupChange}
-        onOpenGitHubSettings={onOpenGitHubSettings}
-      />
+      <div {...stylex.props(win.pageBody)}>
+        <div {...stylex.props(win.empty)}>
+          <p {...stylex.props(win.emptyText)}>
+            {t(
+              'workspace.projects.historySyncEmptyHint',
+              'No agents detected on this machine yet. Conversation sync becomes available once an ACP agent has run here.'
+            )}
+          </p>
+        </div>
+      </div>
     );
   }
 
+  const providerLabel = getHistoryProviderLabel(state.provider);
+  const selected = new Set(state.selectedSessionIds);
+  const canManage = state.canSync && !state.isImporting;
+  const shownSelectable = canManage
+    ? shown.filter((session) => historyStatusOf(session) === 'available')
+    : [];
+  const allShownSelected =
+    shownSelectable.length > 0 &&
+    shownSelectable.every((session) => selected.has(session.acpSessionId));
+  const someShownSelected = shownSelectable.some((session) => selected.has(session.acpSessionId));
+  const setSelection = (ids: Iterable<string>) =>
+    onHistorySelectionChange?.(row, state.provider, [...new Set(ids)]);
+  const toggle = (id: string) => {
+    const next = new Set(selected);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    setSelection(next);
+  };
+  const toggleShown = () => {
+    const next = new Set(selected);
+    for (const session of shownSelectable) {
+      if (allShownSelected) next.delete(session.acpSessionId);
+      else next.add(session.acpSessionId);
+    }
+    setSelection(next);
+  };
+  const sync = () => void onSyncHistory?.(row, state.provider);
+  const lastListed =
+    typeof state.catalog?.lastListedAt === 'number' ? new Date(state.catalog.lastListedAt) : null;
+  const failures = state.syncSummary
+    ? getVisibleLocalProjectHistoryFailures(state.syncSummary)
+    : null;
+  const syncButton = state.canSync ? (
+    <Button
+      type="button"
+      variant="secondary"
+      size="small"
+      disabled={state.isSyncing || state.isImporting || !onSyncHistory}
+      onClick={sync}
+    >
+      {state.isSyncing ? (
+        <Spinner size="small" />
+      ) : (
+        <RefreshCw {...stylex.props(styles.buttonIcon)} />
+      )}
+      {state.catalog
+        ? t('workspace.projects.syncHistoryAgain', 'Sync again')
+        : t('workspace.projects.syncHistory', 'Sync')}
+    </Button>
+  ) : null;
+
   return (
-    <LocalProjectDetail
-      row={selection.row}
-      onSharedWithTeamChange={onSharedWithTeamChange}
-      onSyncHistory={onSyncHistory}
-      onImportHistory={onImportHistory}
-      onResolveHistoryConflict={onResolveHistoryConflict}
-      onHistorySelectionChange={onHistorySelectionChange}
-      onWorktreeSetupChange={onWorktreeSetupChange}
-      onWorktreeCleanupChange={onWorktreeCleanupChange}
-      canRemove={canRemoveLocalProject?.(selection.row) === true}
-      onRemove={() => onRequestRemoveLocalProject?.(selection.row)}
-      removalState={localProjectRemovalStateByKey?.get(selection.row.key) ?? null}
-      machineReachable={
-        (localMachineId != null && selection.row.machineId === localMachineId) ||
-        Boolean(onlineMachineIds?.has(selection.row.machineId))
-      }
-    />
+    <div {...stylex.props(win.conversations)}>
+      <div {...stylex.props(win.sourceRow)}>
+        {states.length > 1 ? (
+          <div {...stylex.props(win.hug)}>
+            <Tabs.Root
+              value={state.providerKey}
+              onValueChange={(value) => setProviderKey(String(value))}
+            >
+              <Tabs.List size="small">
+                {states.map((entry) => (
+                  <Tabs.Tab key={entry.providerKey} value={entry.providerKey}>
+                    <AgentIcon
+                      cliType={entry.provider.cliType}
+                      agentType={entry.provider.agentType}
+                      className={stylex.props(win.agentGlyph).className}
+                    />
+                    {getHistoryProviderLabel(entry.provider)}
+                  </Tabs.Tab>
+                ))}
+              </Tabs.List>
+            </Tabs.Root>
+          </div>
+        ) : null}
+        {sessions.length > 0 ? (
+          <div {...stylex.props(win.toolbarEnd)}>
+            <span {...stylex.props(win.status)}>
+              {lastListed
+                ? t('workspace.projects.historyLastSynced', {
+                    defaultValue: 'Last synced {{relative}}',
+                    relative: formatDistanceToNow(lastListed, {
+                      addSuffix: true,
+                      locale: localeObj,
+                    }),
+                  })
+                : t('workspace.projects.historyNotSyncedYet', 'Not synced yet')}
+            </span>
+            {syncButton}
+          </div>
+        ) : null}
+      </div>
+
+      {sessions.length === 0 ? (
+        <div {...stylex.props(win.empty)}>
+          <p {...stylex.props(win.emptyText)}>
+            {state.catalog
+              ? t('workspace.projects.historyEmptyHint', {
+                  defaultValue:
+                    'Start a conversation for this project in {{provider}}, then sync again.',
+                  provider: providerLabel,
+                })
+              : t('workspace.projects.historyInitialSyncHint', {
+                  defaultValue:
+                    "Find this project's conversations in {{provider}}, then choose which ones to import.",
+                  provider: providerLabel,
+                })}
+          </p>
+          {syncButton}
+          {state.errorMessage ? <p {...stylex.props(win.error)}>{state.errorMessage}</p> : null}
+        </div>
+      ) : (
+        <>
+          <div {...stylex.props(win.toolbar)}>
+            <div {...stylex.props(win.search)}>
+              <Input
+                size="small"
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder={t(
+                  'workspace.projects.history.searchPlaceholder',
+                  'Search conversations'
+                )}
+                leading={<Search aria-hidden="true" {...stylex.props(styles.buttonIcon)} />}
+              />
+            </div>
+            <Tabs.Root value={filter} onValueChange={(value) => setFilter(value as HistoryFilter)}>
+              <Tabs.List size="small">
+                <Tabs.Tab value="all">
+                  {t('workspace.projects.history.filterAll', 'All')} {sessions.length}
+                </Tabs.Tab>
+                <Tabs.Tab value="available">
+                  {t('workspace.projects.history.filterAvailable', 'To import')} {counts.available}
+                </Tabs.Tab>
+                <Tabs.Tab value="imported">
+                  {t('workspace.projects.history.filterImported', 'Imported')} {counts.imported}
+                </Tabs.Tab>
+                {counts.sync_conflict > 0 ? (
+                  <Tabs.Tab value="sync_conflict">
+                    {t('workspace.projects.history.filterConflicts', 'Conflicts')}{' '}
+                    {counts.sync_conflict}
+                  </Tabs.Tab>
+                ) : null}
+              </Tabs.List>
+            </Tabs.Root>
+          </div>
+
+          {state.errorMessage || state.syncSummary ? (
+            <div {...stylex.props(win.report, Boolean(state.errorMessage) && win.reportError)}>
+              {state.errorMessage ?? formatHistorySyncSummary(state.syncSummary!, t)}
+              {failures && failures.failures.length > 0 ? (
+                <ul {...stylex.props(styles.failureList)}>
+                  {failures.failures.map((failure) => (
+                    <li key={failure.acpSessionId} {...stylex.props(styles.breakWords)}>
+                      {failure.acpSessionId}: {failure.message}
+                    </li>
+                  ))}
+                  {failures.remaining > 0 ? (
+                    <li>
+                      {t('workspace.projects.historySyncMoreFailures', {
+                        defaultValue: '{{count}} more failures',
+                        count: failures.remaining,
+                      })}
+                    </li>
+                  ) : null}
+                </ul>
+              ) : null}
+            </div>
+          ) : null}
+
+          <div {...stylex.props(surface.card, win.listCard)}>
+            <div {...stylex.props(win.listHead)}>
+              <label {...stylex.props(win.selectShown)}>
+                <Checkbox
+                  checked={allShownSelected}
+                  indeterminate={someShownSelected && !allShownSelected}
+                  disabled={shownSelectable.length === 0}
+                  onCheckedChange={toggleShown}
+                />
+                {t('workspace.projects.history.selectShown', 'Select all {{count}} shown', {
+                  count: shownSelectable.length,
+                })}
+              </label>
+              <Button
+                type="button"
+                variant="primary"
+                size="small"
+                disabled={selected.size === 0 || !canManage || !onImportHistory}
+                onClick={() => void onImportHistory?.(row, state.provider)}
+              >
+                {state.isImporting ? <Spinner size="small" /> : null}
+                {selected.size > 0
+                  ? t('workspace.projects.history.importCount', 'Import {{count}}', {
+                      count: selected.size,
+                    })
+                  : t('workspace.projects.importSelectedHistory', 'Import')}
+              </Button>
+            </div>
+            {shown.length === 0 ? (
+              <p {...stylex.props(surface.cardNote, surface.lineRuled)}>
+                {t('workspace.projects.history.noMatches', 'No conversations match.')}
+              </p>
+            ) : (
+              <VList {...withClassName(stylex.props(win.list, surface.lineRuled), SCROLLBAR_CLASS)}>
+                {shown.map((session, index) => {
+                  const status = historyStatusOf(session);
+                  const selectable = status === 'available' && canManage;
+                  const isSelected = selected.has(session.acpSessionId);
+                  const resolving = state.resolvingSessionIds.includes(session.acpSessionId);
+                  const updated = parseHistoryUpdatedAt(session.updatedAt);
+                  return (
+                    <div
+                      key={session.acpSessionId}
+                      role="checkbox"
+                      aria-checked={status === 'imported' || isSelected}
+                      aria-disabled={!selectable}
+                      tabIndex={selectable ? 0 : -1}
+                      onClick={() => selectable && toggle(session.acpSessionId)}
+                      onKeyDown={(event) => {
+                        if (!selectable) return;
+                        if (event.key === 'Enter' || event.key === ' ') {
+                          event.preventDefault();
+                          toggle(session.acpSessionId);
+                        }
+                      }}
+                      {...stylex.props(
+                        win.session,
+                        index > 0 && surface.lineRuled,
+                        selectable && surface.pressableLine
+                      )}
+                    >
+                      <Checkbox
+                        checked={status === 'imported' || isSelected}
+                        disabled={!selectable}
+                        tabIndex={-1}
+                        onClick={(event) => event.stopPropagation()}
+                        onCheckedChange={() => selectable && toggle(session.acpSessionId)}
+                      />
+                      <span {...stylex.props(win.sessionText)}>
+                        <span {...stylex.props(win.sessionTitle)}>{session.title}</span>
+                        <span
+                          {...stylex.props(win.sessionTime)}
+                          title={updated ? updated.toLocaleString(intlLocale) : undefined}
+                        >
+                          {formatHistoryUpdatedAt(session.updatedAt, localeObj, t)}
+                        </span>
+                      </span>
+                      {status === 'imported' ? (
+                        <Badge>{t('workspace.projects.historyImported', 'Imported')}</Badge>
+                      ) : null}
+                      {status === 'sync_conflict' ? (
+                        <span {...stylex.props(win.conflict)}>
+                          <Badge tone="danger">
+                            {t('workspace.projects.historyConflict', 'Conflict')}
+                          </Badge>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="small"
+                            disabled={
+                              resolving ||
+                              !state.canSync ||
+                              state.isSyncing ||
+                              state.isImporting ||
+                              !session.importedSessionId ||
+                              !onResolveHistoryConflict
+                            }
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              setConflictToResolve(session);
+                            }}
+                          >
+                            {resolving ? <Spinner size="small" /> : null}
+                            {t('workspace.projects.resolveHistoryConflict', 'Re-import')}
+                          </Button>
+                        </span>
+                      ) : null}
+                    </div>
+                  );
+                })}
+              </VList>
+            )}
+          </div>
+        </>
+      )}
+
+      <AlertDialog.Root
+        open={conflictToResolve !== null}
+        onOpenChange={(open) => {
+          if (!open) setConflictToResolve(null);
+        }}
+      >
+        <AlertDialog.Content>
+          <AlertDialog.Header>
+            <AlertDialog.Title>
+              {t('workspace.projects.resolveHistoryConflictTitle', 'Re-import conversation?')}
+            </AlertDialog.Title>
+            <AlertDialog.Description>
+              {t('workspace.projects.resolveHistoryConflictConfirm', {
+                defaultValue:
+                  'Re-import this conversation from {{provider}}? This replaces the current imported history with the latest source history and may discard local-only turns.',
+                provider: providerLabel,
+              })}
+            </AlertDialog.Description>
+          </AlertDialog.Header>
+          <AlertDialog.Footer>
+            <AlertDialog.Cancel>{t('common.cancel', 'Cancel')}</AlertDialog.Cancel>
+            <AlertDialog.Action
+              variant="destructive"
+              onClick={() => {
+                const session = conflictToResolve;
+                setConflictToResolve(null);
+                if (session) void onResolveHistoryConflict?.(row, state.provider, session);
+              }}
+            >
+              {t('workspace.projects.resolveHistoryConflict', 'Re-import')}
+            </AlertDialog.Action>
+          </AlertDialog.Footer>
+        </AlertDialog.Content>
+      </AlertDialog.Root>
+    </div>
   );
 }
+
+/** The project window's own layout: a rail of pages beside the page. */
+const win = stylex.create({
+  window: { display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, minWidth: 0 },
+  head: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '4px',
+    flexShrink: 0,
+    paddingTop: space[4],
+    paddingInlineStart: space[6],
+    // The dialog's close cross sits in this corner.
+    paddingInlineEnd: '56px',
+  },
+  headName: {
+    margin: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: '17px',
+    fontWeight: 600,
+    lineHeight: 1.3,
+    letterSpacing: '-0.01em',
+    color: colors.label,
+  },
+  headMeta: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+    minWidth: 0,
+    margin: 0,
+    fontSize: '12px',
+    lineHeight: 1.4,
+    color: colors.secondaryLabel,
+  },
+  headPath: {
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontFamily: MONO,
+    fontSize: '11.5px',
+    color: colors.label,
+  },
+  headPathDim: { color: colors.tertiaryLabel },
+  headSep: { flexShrink: 0, color: colors.tertiaryLabel },
+  headMachine: { flexShrink: 0, whiteSpace: 'nowrap' },
+  pageTabs: {
+    position: 'relative',
+    display: 'flex',
+    alignItems: 'stretch',
+    gap: '20px',
+    marginTop: space[3],
+  },
+  pageTab: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '6px',
+    height: '36px',
+    margin: 0,
+    padding: 0,
+    borderWidth: 0,
+    backgroundColor: 'transparent',
+    fontFamily: 'inherit',
+    fontSize: '13.5px',
+    fontWeight: 500,
+    color: { default: colors.secondaryLabel, ':hover': colors.label },
+    cursor: 'pointer',
+    outlineStyle: 'none',
+    boxShadow: { default: 'none', ':focus-visible': `0 0 0 2px ${colors.accent}` },
+    borderRadius: '4px',
+    transitionProperty: 'color',
+    transitionDuration: '150ms',
+  },
+  pageTabCurrent: { color: { default: colors.label, ':hover': colors.label } },
+  /** The current view's line: it travels to the next rather than blinking. */
+  pageTabLine: {
+    position: 'absolute',
+    left: 0,
+    bottom: 0,
+    height: '2px',
+    borderRadius: '9999px',
+    backgroundColor: colors.label,
+    transitionProperty: 'transform, width',
+    transitionDuration: '240ms',
+    transitionTimingFunction: 'cubic-bezier(0.2, 0.8, 0.2, 1)',
+  },
+  tabCount: {
+    marginInlineStart: '2px',
+    fontSize: '11px',
+    fontWeight: 500,
+    color: colors.tertiaryLabel,
+    fontVariantNumeric: 'tabular-nums',
+  },
+  tabCountWarn: { color: `color-mix(in oklab, ${colors.warning} 80%, ${colors.label})` },
+  statusDot: {
+    flexShrink: 0,
+    width: '6px',
+    height: '6px',
+    borderRadius: '9999px',
+    backgroundColor: colors.tertiaryLabel,
+  },
+  statusDotOnline: { backgroundColor: colors.success },
+  main: { display: 'flex', flexDirection: 'column', flexGrow: 1, minWidth: 0, minHeight: 0 },
+  pageDescription: {
+    flexShrink: 0,
+    margin: 0,
+    paddingTop: space[4],
+    paddingBottom: space[3],
+    paddingInline: space[6],
+    fontSize: '12px',
+    lineHeight: 1.45,
+    color: colors.secondaryLabel,
+  },
+  pageBody: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: space[4],
+    flexGrow: 1,
+    minHeight: 0,
+    overflowY: 'auto',
+    paddingInline: space[6],
+    paddingBottom: space[6],
+  },
+  note: { margin: 0, fontSize: '12px', lineHeight: 1.45, color: colors.secondaryLabel },
+  mono: { fontFamily: MONO, overflowWrap: 'anywhere' },
+  value: { fontSize: '0.9em', color: colors.secondaryLabel },
+
+  conversations: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: space[3],
+    flexGrow: 1,
+    minHeight: 0,
+    paddingInline: space[6],
+    paddingBottom: space[6],
+  },
+  agentGlyph: { width: '14px', height: '14px' },
+  /** A strip hugs its tabs instead of taking the column. */
+  hug: { display: 'flex', alignSelf: 'flex-start' },
+  toolbar: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: space[2] },
+  search: { width: '220px', maxWidth: '100%' },
+  /** Which agent's history, and when it was last read, with the way to re-read it. */
+  sourceRow: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: space[2] },
+  toolbarEnd: { display: 'flex', alignItems: 'center', gap: space[2], marginInlineStart: 'auto' },
+  status: { fontSize: '12px', color: colors.tertiaryLabel, whiteSpace: 'nowrap' },
+  report: {
+    fontSize: '12px',
+    lineHeight: 1.45,
+    color: colors.secondaryLabel,
+    paddingInline: space[3],
+    paddingBlock: space[2],
+    backgroundColor: `color-mix(in oklab, transparent, ${colors.label} 3%)`,
+    borderRadius: radius.medium,
+    cornerShape: corner.shape,
+  },
+  reportError: { color: colors.destructive },
+  listCard: { display: 'flex', flexDirection: 'column', flexGrow: 1, minHeight: '160px' },
+  listHead: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: space[3],
+    paddingInline: space[4],
+    paddingBlock: space[2],
+  },
+  selectShown: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: space[2],
+    fontSize: '0.85em',
+    color: colors.secondaryLabel,
+    cursor: 'pointer',
+  },
+  list: { flexGrow: 1, minHeight: 0 },
+  session: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: space[3],
+    paddingInline: space[4],
+    paddingBlock: '10px',
+    cursor: 'default',
+    outlineStyle: 'none',
+  },
+  sessionText: { display: 'flex', flexDirection: 'column', gap: '2px', flexGrow: 1, minWidth: 0 },
+  sessionTitle: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    lineHeight: 1.3,
+    color: colors.label,
+  },
+  sessionTime: { fontSize: '0.8em', color: colors.tertiaryLabel },
+  conflict: { display: 'inline-flex', alignItems: 'center', gap: space[1], flexShrink: 0 },
+  empty: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: space[3],
+    flexGrow: 1,
+    minHeight: '200px',
+    textAlign: 'center',
+  },
+  emptyText: {
+    margin: 0,
+    maxWidth: '380px',
+    fontSize: '13px',
+    lineHeight: 1.5,
+    color: colors.secondaryLabel,
+  },
+  error: { margin: 0, maxWidth: '420px', fontSize: '12px', color: colors.destructive },
+});
 
 function isUnreachableMachineError(message: string | null | undefined): boolean {
   if (!message) return false;
@@ -1304,186 +2691,6 @@ function revealProjectPath(path: string, t: TFunction) {
       toast.error(t('sessions.fileActions.revealFailed', 'Unable to show this folder'));
     }
   });
-}
-
-function LocalProjectDetail({
-  row,
-  onSharedWithTeamChange,
-  onSyncHistory,
-  onImportHistory,
-  onResolveHistoryConflict,
-  onHistorySelectionChange,
-  onWorktreeSetupChange,
-  onWorktreeCleanupChange,
-  canRemove = false,
-  onRemove,
-  removalState = null,
-  machineReachable = true,
-}: ProjectRowProps & {
-  canRemove?: boolean;
-  onRemove?: () => void;
-  removalState?: LocalProjectRemovalState | null;
-  machineReachable?: boolean;
-}) {
-  const { t } = useTranslation();
-  const workspaceId = useAtomValue(currentWorkspaceIdAtom);
-  const skillsSource: ProjectSkillsSource | null = workspaceId
-    ? {
-        kind: 'local',
-        workspaceId,
-        machineId: row.machineId,
-        localProjectId: row.project.id,
-      }
-    : null;
-  const rootPath = typeof row.project.rootPath === 'string' ? row.project.rootPath : '';
-  const canReveal = Boolean(getIpcServices());
-  const removalStateLabel =
-    removalState === 'waiting_for_device'
-      ? t('sidebar.localProjects.remove.waitingForDevice', 'Waiting for device…')
-      : removalState === 'removing'
-        ? t('sidebar.localProjects.remove.removing', 'Removing…')
-        : null;
-
-  const worktreeSetupError =
-    machineReachable && !isUnreachableMachineError(row.worktreeSetupError)
-      ? row.worktreeSetupError
-      : null;
-  const worktreeCleanupError =
-    machineReachable && !isUnreachableMachineError(row.worktreeCleanupError)
-      ? row.worktreeCleanupError
-      : null;
-
-  return (
-    <TooltipProvider delayDuration={200}>
-      <div className="flex flex-col gap-3 p-4 pt-3">
-        <div className="flex min-w-0 items-start justify-between gap-2">
-          <div className="min-w-0 flex-1">
-            <h3 className="truncate text-sm font-normal text-foreground">{row.project.name}</h3>
-            {rootPath ? (
-              <div className="mt-0.5 flex min-w-0 items-center gap-1">
-                <p
-                  className="min-w-0 truncate font-mono text-[11px] text-muted-foreground"
-                  title={rootPath}
-                >
-                  {rootPath}
-                </p>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  className="h-6 w-6 shrink-0"
-                  aria-label={t('sessions.copyPath', 'Copy path')}
-                  onClick={() => copyProjectPath(rootPath, t)}
-                >
-                  <Copy className="h-3 w-3" />
-                </Button>
-                {canReveal ? (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    className="h-6 w-6 shrink-0"
-                    aria-label={t('sidebar.localProjects.reveal', 'Reveal in file manager')}
-                    onClick={() => revealProjectPath(rootPath, t)}
-                  >
-                    <FolderOpen className="h-3 w-3" />
-                  </Button>
-                ) : null}
-              </div>
-            ) : null}
-            {removalStateLabel ? (
-              <p className="mt-1 text-[11px] text-muted-foreground">{removalStateLabel}</p>
-            ) : null}
-            {!machineReachable ? (
-              <p className="mt-1 text-[11px] text-muted-foreground">
-                {t(
-                  'workspace.projects.selectedMachineOffline',
-                  '{{name}} is offline. Worktree setup and skills will load when it comes online.',
-                  { name: row.machineName }
-                )}
-              </p>
-            ) : null}
-          </div>
-        </div>
-
-        <ProjectShareControl row={row} onSharedWithTeamChange={onSharedWithTeamChange} />
-
-        <CompactSection title={t('workspace.projects.worktreeSetupTitle', 'Worktree')}>
-          <div className="flex flex-col gap-5 p-3">
-            <WorktreeSetupEditor
-              phase="setup"
-              config={row.worktreeSetup}
-              shell={row.shell}
-              isLoading={machineReachable && row.isWorktreeSetupLoading}
-              isSaving={row.isWorktreeSetupSaving}
-              errorMessage={worktreeSetupError}
-              onSave={
-                machineReachable ? (config) => onWorktreeSetupChange?.(row, config) : undefined
-              }
-            />
-            <WorktreeSetupEditor
-              phase="cleanup"
-              config={row.worktreeCleanup}
-              shell={row.shell}
-              isLoading={machineReachable && row.isWorktreeCleanupLoading}
-              isSaving={row.isWorktreeCleanupSaving}
-              errorMessage={worktreeCleanupError}
-              onSave={
-                machineReachable ? (config) => onWorktreeCleanupChange?.(row, config) : undefined
-              }
-            />
-          </div>
-        </CompactSection>
-
-        <CompactSection title={t('workspace.projects.skills.tabLabel', 'Skills')}>
-          <div className="p-3">
-            {machineReachable ? (
-              <ProjectSkillsTab source={skillsSource} />
-            ) : (
-              <p className="text-xs text-muted-foreground">
-                {t(
-                  'workspace.projects.machineUnreachable',
-                  'This machine isn’t connected. Worktree setup and skills will load when it comes online.'
-                )}
-              </p>
-            )}
-          </div>
-        </CompactSection>
-
-        <CompactSection title={t('workspace.projects.historySyncSection', 'Conversation sync')}>
-          <LocalHistorySection
-            row={row}
-            onSyncHistory={onSyncHistory}
-            onImportHistory={onImportHistory}
-            onResolveHistoryConflict={onResolveHistoryConflict}
-            onHistorySelectionChange={onHistorySelectionChange}
-          />
-        </CompactSection>
-
-        {canRemove && onRemove ? (
-          <CompactSection>
-            <CompactRow
-              label={t('workspace.projects.delete', 'Delete project')}
-              helper={t(
-                'sidebar.localProjects.remove.originalDirectorySafe',
-                'Lody never deletes the original project folder or its files.'
-              )}
-            >
-              <Button
-                type="button"
-                variant="destructive"
-                size="sm"
-                disabled={removalState != null}
-                onClick={onRemove}
-              >
-                {t('workspace.projects.delete', 'Delete project')}
-              </Button>
-            </CompactRow>
-          </CompactSection>
-        ) : null}
-      </div>
-    </TooltipProvider>
-  );
 }
 
 function ProjectShareControl({
@@ -1520,7 +2727,7 @@ function ProjectShareControl({
   return (
     <CompactSection title={t('workspace.projects.shareLabel', 'Share project')}>
       <CompactRow label={tooltipLabel} helper={scopeDescription}>
-        {row.isUpdating ? <Spinner className="h-3.5 w-3.5 text-muted-foreground" /> : null}
+        {row.isUpdating ? <Spinner size="small" /> : null}
         <Switch
           checked={row.sharedWithTeam}
           disabled={row.isUpdating || !row.canUpdateSharing || !onSharedWithTeamChange}
@@ -1563,168 +2770,6 @@ export type ProjectRowProps = {
     config: WorktreeCleanupScriptConfig
   ) => Promise<void>;
 };
-
-type LocalHistorySectionProps = Pick<
-  ProjectRowProps,
-  | 'row'
-  | 'onSyncHistory'
-  | 'onImportHistory'
-  | 'onResolveHistoryConflict'
-  | 'onHistorySelectionChange'
->;
-
-function LocalHistorySection({
-  row,
-  onSyncHistory,
-  onImportHistory,
-  onResolveHistoryConflict,
-  onHistorySelectionChange,
-}: LocalHistorySectionProps) {
-  const { t } = useTranslation();
-  const visibleHistoryImports = row.historyImports.filter(
-    (state) => state.canSync || state.catalog
-  );
-  const [activeProviderKey, setActiveProviderKey] = useState<string | null>(
-    visibleHistoryImports[0]?.providerKey ?? null
-  );
-  const activeHistoryState =
-    visibleHistoryImports.find((state) => state.providerKey === activeProviderKey) ??
-    visibleHistoryImports[0] ??
-    null;
-
-  if (!activeHistoryState) {
-    return (
-      <p className="px-3 py-2.5 text-xs text-muted-foreground">
-        {t(
-          'workspace.projects.historySyncEmptyHint',
-          'No agents detected on this machine yet. Conversation sync becomes available once an ACP agent has run here.'
-        )}
-      </p>
-    );
-  }
-
-  return (
-    <div className="flex min-w-0 flex-col">
-      {visibleHistoryImports.map((state) => {
-        const active = state.providerKey === activeHistoryState.providerKey;
-        const providerLabel = getHistoryProviderLabel(state.provider);
-        return (
-          <button
-            key={state.providerKey}
-            type="button"
-            className={cn(
-              'flex min-w-0 items-center gap-2 px-3 py-2 text-left text-sm transition-colors',
-              active
-                ? 'bg-foreground/[0.06] text-foreground'
-                : 'text-muted-foreground hover:bg-foreground/[0.04] hover:text-foreground'
-            )}
-            onClick={() => setActiveProviderKey(state.providerKey)}
-          >
-            <AgentIcon
-              cliType={state.provider.cliType}
-              agentType={state.provider.agentType}
-              className="h-3.5 w-3.5 shrink-0 opacity-70"
-            />
-            <span className="min-w-0 flex-1 truncate">{providerLabel}</span>
-          </button>
-        );
-      })}
-      <div className="border-t border-border/60">
-        <ProjectHistoryImportPanel
-          key={activeHistoryState.providerKey}
-          row={row}
-          state={activeHistoryState}
-          onSyncHistory={onSyncHistory}
-          onImportHistory={onImportHistory}
-          onResolveHistoryConflict={onResolveHistoryConflict}
-          onHistorySelectionChange={onHistorySelectionChange}
-        />
-      </div>
-    </div>
-  );
-}
-
-function GithubProjectDetail({
-  row,
-  onWorktreeSetupChange,
-  onWorktreeCleanupChange,
-  onOpenGitHubSettings,
-}: {
-  row: GithubProjectSettingsRow;
-  onWorktreeSetupChange?: (
-    row: GithubProjectSettingsRow,
-    config: WorktreeSetupScriptConfig
-  ) => Promise<void>;
-  onWorktreeCleanupChange?: (
-    row: GithubProjectSettingsRow,
-    config: WorktreeCleanupScriptConfig
-  ) => Promise<void>;
-  onOpenGitHubSettings?: () => void;
-}) {
-  const { t } = useTranslation();
-  const workspaceId = useAtomValue(currentWorkspaceIdAtom);
-  const skillsSource: ProjectSkillsSource | null = workspaceId
-    ? {
-        kind: 'github',
-        workspaceId,
-        repoFullName: row.repoFullName,
-      }
-    : null;
-  return (
-    <div className="flex flex-col gap-3 p-4 pt-3">
-      <div className="flex min-w-0 items-start justify-between gap-2">
-        <div className="min-w-0 flex-1">
-          <div className="flex min-w-0 items-center gap-2">
-            <h3 className="truncate text-sm font-normal text-foreground">{row.name}</h3>
-            <span className="shrink-0 rounded-sm bg-foreground/[0.06] px-2 py-0.5 text-[11px] text-muted-foreground">
-              {row.private ? t('workspace.projects.privateRepo', 'Private') : 'Public'}
-            </span>
-          </div>
-          <p className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground">
-            {row.repoFullName}
-          </p>
-        </div>
-        {onOpenGitHubSettings ? (
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="h-7 shrink-0 gap-1 px-2 text-xs"
-            onClick={onOpenGitHubSettings}
-          >
-            <Github className="h-3.5 w-3.5" />
-            {t('workspace.projects.manageInGithubSettings', 'Manage in GitHub settings')}
-          </Button>
-        ) : null}
-      </div>
-
-      <CompactSection title={t('workspace.projects.worktreeSetupTitle', 'Worktree')}>
-        <div className="flex flex-col gap-5 p-3">
-          <WorktreeSetupEditor
-            phase="setup"
-            config={row.worktreeSetup}
-            isSaving={row.isWorktreeSetupSaving}
-            errorMessage={row.worktreeSetupError}
-            onSave={(config) => onWorktreeSetupChange?.(row, config)}
-          />
-          <WorktreeSetupEditor
-            phase="cleanup"
-            config={row.worktreeCleanup}
-            isSaving={row.isWorktreeCleanupSaving}
-            errorMessage={row.worktreeCleanupError}
-            onSave={(config) => onWorktreeCleanupChange?.(row, config)}
-          />
-        </div>
-      </CompactSection>
-
-      <CompactSection title={t('workspace.projects.skills.tabLabel', 'Skills')}>
-        <div className="p-3">
-          <ProjectSkillsTab source={skillsSource} />
-        </div>
-      </CompactSection>
-    </div>
-  );
-}
 
 function buildWorktreeSetupConfig(args: {
   bash: string;
@@ -1869,13 +2914,13 @@ export function WorktreeSetupEditor({
     const setValue = target === 'powershell' ? setPowershell : setBash;
     const showsEphemeralEnvHint = scriptSetsEphemeralEnv(target, value);
     return (
-      <div className="flex flex-col gap-1.5">
+      <div {...stylex.props(styles.scriptField)}>
         <Textarea
           value={value}
           disabled={readOnly}
           rows={8}
           spellCheck={false}
-          className="resize-y font-mono text-xs leading-relaxed"
+          style={SCRIPT_TEXTAREA_STYLE}
           placeholder={getWorktreeShellPlaceholder(target, phase)}
           onChange={(event) => setValue(event.target.value)}
           onBlur={(event) =>
@@ -1887,9 +2932,9 @@ export function WorktreeSetupEditor({
           }
         />
         {showsEphemeralEnvHint ? (
-          <p className="flex items-start gap-1.5 text-[11px] text-muted-foreground">
-            <Info className="mt-px h-3.5 w-3.5 shrink-0" />
-            <span className="min-w-0">
+          <p {...stylex.props(styles.envHint)}>
+            <Info {...stylex.props(styles.hintIcon)} aria-hidden="true" />
+            <span {...stylex.props(styles.breakWords)}>
               {t(
                 'workspace.projects.worktreeSetupEnvHint',
                 "Environment variables set here only live inside this script — the agent process can't read them. Set the agent's environment variables in the agent config."
@@ -1902,78 +2947,67 @@ export function WorktreeSetupEditor({
   };
 
   return (
-    <div className="flex flex-col gap-3">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <p className="flex items-center gap-1.5 text-sm font-normal text-foreground">
-            <PhaseIcon className="h-4 w-4 shrink-0 text-muted-foreground" />
-            {title}
-          </p>
-          <p className="mt-1 text-xs text-muted-foreground">
-            {description}{' '}
-            <button
-              type="button"
-              className="inline-flex items-center gap-0.5 align-baseline text-foreground/80 underline-offset-4 hover:text-foreground hover:underline"
-              onClick={handleOpenEnvDocs}
-            >
-              {t(
-                'workspace.projects.worktreeScriptEnvDocsLink',
-                'Script environment variables are available'
-              )}
-              <ExternalLink className="h-3 w-3" />
-            </button>
-          </p>
-        </div>
+    <div {...stylex.props(styles.editor)}>
+      <div>
+        <p {...stylex.props(styles.editorTitle)}>
+          <PhaseIcon {...stylex.props(styles.editorTitleIcon)} aria-hidden="true" />
+          {title}
+        </p>
+        <p {...stylex.props(styles.editorDescription)}>
+          {description}{' '}
+          <button type="button" {...stylex.props(styles.docsLink)} onClick={handleOpenEnvDocs}>
+            {t(
+              'workspace.projects.worktreeScriptEnvDocsLink',
+              'Script environment variables are available'
+            )}
+            <ExternalLink {...stylex.props(styles.linkIcon)} aria-hidden="true" />
+          </button>
+        </p>
       </div>
 
       {isLoading ? (
-        <div className="flex items-center gap-2 rounded-md bg-foreground/[0.025] px-3 py-6 text-xs text-muted-foreground">
-          <Spinner className="h-3.5 w-3.5" />
+        <div {...stylex.props(surface.formBlock, styles.editorLoading)}>
+          <Spinner size="small" />
           {loadingLabel}
         </div>
       ) : shell ? (
-        <div className="flex flex-col gap-2">
-          <span className="inline-flex w-fit items-center gap-1.5 rounded-md bg-foreground/[0.05] px-2 py-1 text-xs font-normal text-foreground">
-            <TerminalSquare className="h-3.5 w-3.5" />
+        <div {...stylex.props(styles.stack)}>
+          <Badge
+            icon={<TerminalSquare {...stylex.props(styles.glyph)} />}
+            {...stylex.props(styles.alignStart)}
+          >
             {getWorktreeShellLabel(shell)}
-          </span>
+          </Badge>
           {renderShellTextarea(shell)}
         </div>
       ) : (
-        <Tabs defaultValue="bash" className="flex flex-col gap-2">
-          <TabsList className="h-8 self-start">
-            <TabsTrigger value="bash" className="gap-1.5 px-2.5 text-xs">
-              <TerminalSquare className="h-3.5 w-3.5" />
+        <Tabs.Root defaultValue="bash" {...stylex.props(styles.stack)}>
+          <Tabs.List size="small" {...stylex.props(styles.alignStart)}>
+            <Tabs.Tab value="bash">
+              <TerminalSquare {...stylex.props(styles.buttonIcon)} aria-hidden="true" />
               Bash
-            </TabsTrigger>
-            <TabsTrigger value="powershell" className="gap-1.5 px-2.5 text-xs">
-              <TerminalSquare className="h-3.5 w-3.5" />
+            </Tabs.Tab>
+            <Tabs.Tab value="powershell">
+              <TerminalSquare {...stylex.props(styles.buttonIcon)} aria-hidden="true" />
               PowerShell
-            </TabsTrigger>
-          </TabsList>
-          <TabsContent value="bash" className="mt-0">
-            {renderShellTextarea('bash')}
-          </TabsContent>
-          <TabsContent value="powershell" className="mt-0">
-            {renderShellTextarea('powershell')}
-          </TabsContent>
-        </Tabs>
+            </Tabs.Tab>
+          </Tabs.List>
+          <Tabs.Panel value="bash">{renderShellTextarea('bash')}</Tabs.Panel>
+          <Tabs.Panel value="powershell">{renderShellTextarea('powershell')}</Tabs.Panel>
+        </Tabs.Root>
       )}
 
       {isSaving ? (
-        <div
-          aria-live="polite"
-          className="flex items-center justify-end gap-1 text-[11px] text-muted-foreground"
-        >
-          <Spinner className="h-3 w-3" />
+        <div aria-live="polite" {...stylex.props(styles.saving)}>
+          <Spinner size="small" />
           {savingLabel}
         </div>
       ) : null}
 
       {errorMessage ? (
-        <div className="flex items-start gap-2 text-xs text-destructive">
-          <AlertCircle className="mt-px h-3.5 w-3.5 shrink-0" />
-          <span className="min-w-0 break-words">{errorMessage}</span>
+        <div {...stylex.props(styles.error)}>
+          <AlertCircle {...stylex.props(styles.hintIcon)} aria-hidden="true" />
+          <span {...stylex.props(styles.breakWords)}>{errorMessage}</span>
         </div>
       ) : null}
     </div>
@@ -2030,11 +3064,7 @@ export function ProjectHistoryImportPanel({
   const someSelectableSelected = selectableSessions.some((session) =>
     selectedSet.has(session.acpSessionId)
   );
-  const selectAllChecked = allSelectableSelected
-    ? true
-    : someSelectableSelected
-      ? 'indeterminate'
-      : false;
+  const someButNotAllSelected = someSelectableSelected && !allSelectableSelected;
   const lastListedAtDate =
     typeof state.catalog?.lastListedAt === 'number' ? new Date(state.catalog.lastListedAt) : null;
   const statusLabel = lastListedAtDate
@@ -2078,47 +3108,52 @@ export function ProjectHistoryImportPanel({
     updateSelection(selectableSessions.map((session) => session.acpSessionId));
   };
 
+  /* The panel's blocks are lines of one surface: each one after the first is
+     ruled from the one above it, never underlined. */
+  const hasError = state.errorMessage !== null && state.errorMessage.length > 0;
+  const hasSummary = state.syncSummary !== null;
+
   return (
     <>
-      <div className="flex min-h-0 flex-1 flex-col bg-tab-active text-xs">
+      <div {...stylex.props(styles.panel)}>
         {hasCatalogSessions ? (
-          <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-tab-border px-3 py-2">
-            <span className="truncate text-muted-foreground">{statusLabel}</span>
-            <div className="flex shrink-0 items-center gap-2">
+          <div {...stylex.props(styles.panelBar)}>
+            <span {...stylex.props(styles.panelStatus)}>{statusLabel}</span>
+            <div {...stylex.props(styles.panelActions)}>
               {state.canSync && (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      className={historyActionButtonClass}
-                      disabled={state.isSyncing || state.isImporting}
-                      onClick={() => {
-                        void onSyncHistory?.(row, state.provider);
-                      }}
-                    >
-                      {state.isSyncing ? (
-                        <Spinner className="h-3.5 w-3.5" />
-                      ) : (
-                        <RefreshCw className="h-3.5 w-3.5" />
-                      )}
-                      <span>{t('workspace.projects.syncHistory', 'Sync')}</span>
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent side="left">
+                <Tooltip.Root>
+                  <Tooltip.Trigger
+                    render={
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="mini"
+                        disabled={state.isSyncing || state.isImporting}
+                        onClick={() => {
+                          void onSyncHistory?.(row, state.provider);
+                        }}
+                      >
+                        {state.isSyncing ? (
+                          <Spinner size="small" />
+                        ) : (
+                          <RefreshCw {...stylex.props(styles.buttonIcon)} />
+                        )}
+                        <span>{t('workspace.projects.syncHistory', 'Sync')}</span>
+                      </Button>
+                    }
+                  />
+                  <Tooltip.Content side="left">
                     {t('workspace.projects.syncHistoryTooltip', {
                       defaultValue: 'Sync {{provider}} history',
                       provider: providerLabel,
                     })}
-                  </TooltipContent>
-                </Tooltip>
+                  </Tooltip.Content>
+                </Tooltip.Root>
               )}
               <Button
                 type="button"
-                variant="ghost"
-                size="sm"
-                className={historyActionButtonClass}
+                variant="secondary"
+                size="mini"
                 disabled={
                   state.selectedSessionIds.length === 0 || !canManageCatalog || !onImportHistory
                 }
@@ -2127,9 +3162,9 @@ export function ProjectHistoryImportPanel({
                 }}
               >
                 {state.isImporting ? (
-                  <Spinner className="h-3.5 w-3.5" />
+                  <Spinner size="small" />
                 ) : (
-                  <Download className="h-3.5 w-3.5" />
+                  <Download {...stylex.props(styles.buttonIcon)} />
                 )}
                 {t('workspace.projects.importSelectedHistory', {
                   defaultValue: 'Import',
@@ -2138,19 +3173,29 @@ export function ProjectHistoryImportPanel({
             </div>
           </div>
         ) : null}
-        {state.errorMessage !== null && state.errorMessage.length > 0 ? (
-          <div className="scrollbar-pro flex max-h-28 shrink-0 items-start gap-2 overflow-y-auto border-b border-tab-border bg-destructive/5 px-3 py-2 text-[11px] text-destructive">
-            <AlertCircle className="mt-px h-3.5 w-3.5 shrink-0" />
-            <span className="min-w-0 break-words">{state.errorMessage}</span>
+        {hasError ? (
+          <div
+            {...withClassName(
+              stylex.props(styles.panelError, hasCatalogSessions && surface.lineRuled),
+              SCROLLBAR_CLASS
+            )}
+          >
+            <AlertCircle {...stylex.props(styles.hintIcon)} aria-hidden="true" />
+            <span {...stylex.props(styles.breakWords)}>{state.errorMessage}</span>
           </div>
         ) : null}
         {state.syncSummary && (
-          <div className="shrink-0 border-b border-tab-border px-3 py-1.5 text-[11px] text-muted-foreground">
+          <div
+            {...stylex.props(
+              styles.panelSummary,
+              (hasCatalogSessions || hasError) && surface.lineRuled
+            )}
+          >
             <div>{formatHistorySyncSummary(state.syncSummary, t)}</div>
             {syncFailures && syncFailures.failures.length > 0 ? (
-              <ul className="mt-1 space-y-0.5 text-destructive">
+              <ul {...stylex.props(styles.failureList)}>
                 {syncFailures.failures.map((failure) => (
-                  <li key={failure.acpSessionId} className="break-words">
+                  <li key={failure.acpSessionId} {...stylex.props(styles.breakWords)}>
                     {failure.acpSessionId}: {failure.message}
                   </li>
                 ))}
@@ -2167,12 +3212,12 @@ export function ProjectHistoryImportPanel({
           </div>
         )}
         {hasCatalogSessions && (
-          <div className="shrink-0 border-b border-tab-border px-3 py-2">
+          <div {...stylex.props(styles.panelLine, surface.lineRuled)}>
             <div
               role="button"
               tabIndex={selectableSessions.length === 0 || !canManageCatalog ? -1 : 0}
               aria-disabled={selectableSessions.length === 0 || !canManageCatalog}
-              className="flex min-w-0 items-center gap-2 text-left"
+              {...stylex.props(styles.selectAll)}
               onClick={() => {
                 if (selectableSessions.length > 0 && canManageCatalog) {
                   toggleSelectAll();
@@ -2187,12 +3232,13 @@ export function ProjectHistoryImportPanel({
               }}
             >
               <Checkbox
-                checked={selectAllChecked}
+                checked={allSelectableSelected}
+                indeterminate={someButNotAllSelected}
                 disabled={selectableSessions.length === 0 || !canManageCatalog}
                 onCheckedChange={toggleSelectAll}
                 onClick={(event) => event.stopPropagation()}
               />
-              <span className="truncate text-muted-foreground">
+              <span {...stylex.props(styles.selectAllLabel)}>
                 {t('workspace.projects.selectAllHistory', {
                   defaultValue: 'Select all available ({{count}})',
                   count: selectableSessions.length,
@@ -2202,8 +3248,10 @@ export function ProjectHistoryImportPanel({
           </div>
         )}
         {!hasCatalogSessions ? (
-          <div className="flex flex-col gap-2 px-3 py-2.5">
-            <p className="text-xs text-muted-foreground">
+          <div
+            {...stylex.props(styles.historyEmpty, (hasError || hasSummary) && surface.lineRuled)}
+          >
+            <p {...stylex.props(styles.historyEmptyText)}>
               {hasSyncedCatalog
                 ? t('workspace.projects.historyEmptyHint', {
                     defaultValue:
@@ -2219,17 +3267,17 @@ export function ProjectHistoryImportPanel({
             {state.canSync ? (
               <Button
                 type="button"
-                size="sm"
-                className="h-7 self-start"
+                variant="secondary"
+                size="small"
                 disabled={state.isSyncing || state.isImporting || !onSyncHistory}
                 onClick={() => {
                   void onSyncHistory?.(row, state.provider);
                 }}
               >
                 {state.isSyncing ? (
-                  <Spinner className="h-3.5 w-3.5" />
+                  <Spinner size="small" />
                 ) : (
-                  <RefreshCw className="h-3.5 w-3.5" />
+                  <RefreshCw {...stylex.props(styles.buttonIcon)} />
                 )}
                 <span>
                   {hasSyncedCatalog
@@ -2240,8 +3288,10 @@ export function ProjectHistoryImportPanel({
             ) : null}
           </div>
         ) : (
-          <div className="scrollbar-pro min-h-0 flex-1 divide-y divide-tab-border overflow-y-auto overscroll-contain">
-            {catalogSessions.map((session) => {
+          <div
+            {...withClassName(stylex.props(styles.sessionList, surface.lineRuled), SCROLLBAR_CLASS)}
+          >
+            {catalogSessions.map((session, index) => {
               const imported = session.status === 'imported';
               const conflict = session.status === 'sync_conflict';
               const selectionDisabled = imported || conflict || !canManageCatalog;
@@ -2266,11 +3316,10 @@ export function ProjectHistoryImportPanel({
                   role="button"
                   tabIndex={selectionDisabled ? -1 : 0}
                   aria-disabled={selectionDisabled}
-                  className={cn(
-                    'flex min-w-0 items-center gap-2 px-3 py-2',
-                    selectionDisabled
-                      ? 'cursor-default opacity-70'
-                      : 'cursor-pointer hover:bg-tab-hover/40'
+                  {...stylex.props(
+                    styles.sessionRow,
+                    index > 0 && surface.lineRuled,
+                    selectionDisabled && styles.sessionRowDisabled
                   )}
                   onClick={() => {
                     if (!selectionDisabled) {
@@ -2293,30 +3342,22 @@ export function ProjectHistoryImportPanel({
                       if (!selectionDisabled) toggleSession(session.acpSessionId);
                     }}
                   />
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate font-normal text-foreground">{session.title}</div>
-                    <div
-                      className="truncate text-[10px] text-muted-foreground"
-                      title={updatedAtTitle}
-                    >
+                  <div {...stylex.props(styles.sessionText)}>
+                    <div {...stylex.props(styles.sessionTitle)}>{session.title}</div>
+                    <div {...stylex.props(styles.sessionTime)} title={updatedAtTitle}>
                       {updatedAtLabel}
                     </div>
                   </div>
-                  {imported && (
-                    <span className="shrink-0 rounded-sm bg-foreground/[0.06] px-1.5 py-0.5 text-[10px] text-muted-foreground">
-                      {t('workspace.projects.historyImported', 'Imported')}
-                    </span>
-                  )}
+                  {imported && <Badge>{t('workspace.projects.historyImported', 'Imported')}</Badge>}
                   {conflict && (
-                    <div className="flex shrink-0 items-center gap-1">
-                      <span className="rounded-sm border border-destructive/30 px-1.5 py-0.5 text-[10px] text-destructive">
+                    <div {...stylex.props(styles.conflict)}>
+                      <Badge tone="danger">
                         {t('workspace.projects.historyConflict', 'Conflict')}
-                      </span>
+                      </Badge>
                       <Button
                         type="button"
                         variant="ghost"
-                        size="sm"
-                        className={historyActionButtonClass}
+                        size="mini"
                         disabled={!canResolveConflict}
                         onClick={(event) => {
                           event.stopPropagation();
@@ -2325,9 +3366,9 @@ export function ProjectHistoryImportPanel({
                         }}
                       >
                         {resolving ? (
-                          <Spinner className="h-3.5 w-3.5" />
+                          <Spinner size="small" />
                         ) : (
-                          <RefreshCw className="h-3.5 w-3.5" />
+                          <RefreshCw {...stylex.props(styles.buttonIcon)} />
                         )}
                         <span>{t('workspace.projects.resolveHistoryConflict', 'Re-import')}</span>
                       </Button>
@@ -2339,38 +3380,35 @@ export function ProjectHistoryImportPanel({
           </div>
         )}
       </div>
-      <AlertDialog
+      <AlertDialog.Root
         open={conflictSessionToResolve !== null}
         onOpenChange={(open) => {
           if (!open) setConflictSessionToResolve(null);
         }}
       >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
+        <AlertDialog.Content>
+          <AlertDialog.Header>
+            <AlertDialog.Title>
               {t('workspace.projects.resolveHistoryConflictTitle', {
                 defaultValue: 'Re-import conversation?',
               })}
-            </AlertDialogTitle>
-            <AlertDialogDescription>
+            </AlertDialog.Title>
+            <AlertDialog.Description>
               {t('workspace.projects.resolveHistoryConflictConfirm', {
                 defaultValue:
                   'Re-import this conversation from {{provider}}? This replaces the current imported history with the latest source history and may discard local-only turns.',
                 provider: providerLabel,
               })}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>{t('common.cancel', 'Cancel')}</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={confirmConflictReplace}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-            >
+            </AlertDialog.Description>
+          </AlertDialog.Header>
+          <AlertDialog.Footer>
+            <AlertDialog.Cancel>{t('common.cancel', 'Cancel')}</AlertDialog.Cancel>
+            <AlertDialog.Action variant="destructive" onClick={confirmConflictReplace}>
               {t('workspace.projects.resolveHistoryConflict', 'Re-import')}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+            </AlertDialog.Action>
+          </AlertDialog.Footer>
+        </AlertDialog.Content>
+      </AlertDialog.Root>
     </>
   );
 }

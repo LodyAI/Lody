@@ -13,10 +13,10 @@ import {
   type ScheduleRecurrenceKind,
   type ScheduleWeekday,
 } from '@lody/shared';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/ui/select';
+import { Select } from '@lody/ui/select';
 import { cn } from '@/lib/utils';
 import { describeRecurrence, weekdayNames } from './schedule-format';
-import { PropertyRow, ghostSelectTriggerClass, ghostValueClass } from './schedule-property-row';
+import { PropertyRow, ghostValueClass } from './schedule-property-row';
 
 /**
  * Time and date are typed, not picked: the browser's picker button is hidden,
@@ -146,6 +146,16 @@ export function ScheduleRecurrenceEditor({
     ? `${String(value.hour).padStart(2, '0')}:${String(value.minute).padStart(2, '0')}`
     : '';
   const shortWeekdays = weekdayNames(i18n.language, 'narrow');
+  const stepItems =
+    value.kind === 'minutes' || value.kind === 'hours'
+      ? (value.kind === 'minutes' ? SCHEDULE_MINUTE_STEPS : SCHEDULE_HOUR_STEPS).map((step) => ({
+          value: String(step),
+          label:
+            value.kind === 'minutes'
+              ? t('schedules.everyMinutes', { count: step, defaultValue: '{{count}} minutes' })
+              : t('schedules.everyHours', { count: step, defaultValue: '{{count}} hours' }),
+        }))
+      : [];
   const longWeekdays = weekdayNames(i18n.language, 'long');
 
   if (value.kind === 'unsupported') {
@@ -177,11 +187,18 @@ export function ScheduleRecurrenceEditor({
   return (
     <>
       <PropertyRow label={t('schedules.repeat.label', 'Repeat')}>
-        <Select
+        <Select.Root
           value={value.kind}
           disabled={disabled}
+          items={SCHEDULE_RECURRENCE_KINDS.map((kind) => ({
+            value: kind,
+            label: kindLabels[kind],
+          }))}
           onValueChange={(kind) => {
-            if ((SCHEDULE_RECURRENCE_KINDS as readonly string[]).includes(kind))
+            if (
+              typeof kind === 'string' &&
+              (SCHEDULE_RECURRENCE_KINDS as readonly string[]).includes(kind)
+            )
               onChange(
                 changeScheduleRecurrenceKind(
                   value,
@@ -191,60 +208,45 @@ export function ScheduleRecurrenceEditor({
               );
           }}
         >
-          <SelectTrigger
-            aria-label={t('schedules.repeat.label', 'Repeat')}
-            className={ghostSelectTriggerClass}
-          >
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
+          <Select.Trigger size="small" aria-label={t('schedules.repeat.label', 'Repeat')}>
+            <Select.Value />
+          </Select.Trigger>
+          <Select.Content>
             {SCHEDULE_RECURRENCE_KINDS.map((kind) => (
-              <SelectItem key={kind} value={kind}>
+              <Select.Item key={kind} value={kind}>
                 {kindLabels[kind]}
-              </SelectItem>
+              </Select.Item>
             ))}
-          </SelectContent>
-        </Select>
+          </Select.Content>
+        </Select.Root>
       </PropertyRow>
 
       <AnimatePresence initial={false} mode="popLayout">
         {value.kind === 'minutes' || value.kind === 'hours' ? (
           <Reveal key="every" id="every">
             <PropertyRow label={t('schedules.repeat.every', 'Every')}>
-              <Select
+              <Select.Root
                 value={String(value.every)}
                 disabled={disabled}
-                // A controlled Select can emit '' while its option list is
-                // swapped (hours → minutes); that is not a choice.
+                items={stepItems}
+                // A controlled Select can emit an empty value while its option
+                // list is swapped (hours → minutes); that is not a choice.
                 onValueChange={(every) => {
                   const step = Number(every);
                   if (Number.isInteger(step) && step > 0) onChange({ ...value, every: step });
                 }}
               >
-                <SelectTrigger
-                  aria-label={t('schedules.repeat.every', 'Every')}
-                  className={ghostSelectTriggerClass}
-                >
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {(value.kind === 'minutes' ? SCHEDULE_MINUTE_STEPS : SCHEDULE_HOUR_STEPS).map(
-                    (step) => (
-                      <SelectItem key={step} value={String(step)}>
-                        {value.kind === 'minutes'
-                          ? t('schedules.everyMinutes', {
-                              count: step,
-                              defaultValue: '{{count}} minutes',
-                            })
-                          : t('schedules.everyHours', {
-                              count: step,
-                              defaultValue: '{{count}} hours',
-                            })}
-                      </SelectItem>
-                    )
-                  )}
-                </SelectContent>
-              </Select>
+                <Select.Trigger size="small" aria-label={t('schedules.repeat.every', 'Every')}>
+                  <Select.Value />
+                </Select.Trigger>
+                <Select.Content>
+                  {stepItems.map((item) => (
+                    <Select.Item key={item.value} value={item.value}>
+                      {item.label}
+                    </Select.Item>
+                  ))}
+                </Select.Content>
+              </Select.Root>
             </PropertyRow>
           </Reveal>
         ) : null}

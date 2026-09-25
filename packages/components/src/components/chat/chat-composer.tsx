@@ -48,17 +48,10 @@ import type { Mention as MentionRange } from '@/ui/mention/index';
 import type { PersistedMentionRange } from '@/components/mentions/mention-persistence';
 import { toIntlLocale } from '@/lib/intl-locale';
 import { useIsMobile } from '@/hooks/use-mobile';
-import { Button, type ButtonProps } from '@/ui/button';
-import {
-  Dialog,
-  DialogClose,
-  DialogContent,
-  DialogContentWithoutClose,
-  DialogDescription,
-  DialogTitle,
-} from '@/ui/dialog';
-import { Sheet, SheetContent, SheetDescription, SheetTitle } from '@/ui/sheet';
-import { Textarea, type TextareaProps } from '@/ui/textarea';
+import { Button, type ButtonProps } from '@lody/ui/button';
+import { Dialog } from '@/ui/dialog';
+import { Drawer } from '@lody/ui/drawer';
+import { Textarea, type TextareaProps } from '@lody/ui/textarea';
 import { hasFileTransfer, readDroppedTransfer } from '@/lib/file-drop';
 import {
   COMPOSER_COMPACT_PLACEHOLDER_MAX_PX,
@@ -827,8 +820,9 @@ export function ChatComposer({
                         <Button
                           type="button"
                           variant="secondary"
-                          size="icon"
-                          className={cn('rounded-full', isMobile ? 'h-6 w-6' : 'h-5 w-5')}
+                          size="mini"
+                          icon
+                          className={cn(isMobile ? '' : '')}
                           onClick={() => onImageRemove?.(image.id)}
                           aria-label={removeImageLabel}
                         >
@@ -923,8 +917,9 @@ export function ChatComposer({
                         <Button
                           type="button"
                           variant="secondary"
-                          size="icon"
-                          className={cn('rounded-full', isMobile ? 'h-6 w-6' : 'h-5 w-5')}
+                          size="mini"
+                          icon
+                          className={cn(isMobile ? '' : '')}
                           onClick={() => onFileRemove?.(file.id)}
                           aria-label={removeAttachmentLabel}
                         >
@@ -1107,7 +1102,7 @@ export function ChatComposer({
           </>
         )}
       </div>
-      <Dialog
+      <Dialog.Root
         open={previewImageUrl !== null}
         onOpenChange={(open) => {
           if (!open) {
@@ -1115,7 +1110,7 @@ export function ChatComposer({
           }
         }}
       >
-        <DialogContent className="max-w-3xl border-none bg-transparent p-2 shadow-none">
+        <Dialog.Content className="max-w-3xl border-none bg-transparent p-2 shadow-none">
           {previewImageUrl ? (
             <img
               src={previewImageUrl}
@@ -1123,8 +1118,8 @@ export function ChatComposer({
               className="max-h-[80vh] w-full rounded-lg object-contain"
             />
           ) : null}
-        </DialogContent>
-      </Dialog>
+        </Dialog.Content>
+      </Dialog.Root>
       {(() => {
         const handlePastedTextOpenChange = (open: boolean) => {
           if (!open) {
@@ -1145,8 +1140,12 @@ export function ChatComposer({
 
         if (isMobile) {
           return (
-            <Sheet open={previewPastedTextDraft !== null} onOpenChange={handlePastedTextOpenChange}>
-              <SheetContent
+            <Drawer.Root
+              side="bottom"
+              open={previewPastedTextDraft !== null}
+              onOpenChange={handlePastedTextOpenChange}
+            >
+              <Drawer.Content
                 side="bottom"
                 className="flex h-[85vh] flex-col gap-0 rounded-t-2xl p-0"
               >
@@ -1156,13 +1155,13 @@ export function ChatComposer({
                       <div className="h-1 w-9 rounded-full bg-muted-foreground/30" />
                     </div>
                     <div className="flex shrink-0 items-center justify-between gap-3 border-b border-border/60 px-4 py-2.5">
-                      <SheetTitle className="flex items-center gap-2 text-sm font-medium">
+                      <Drawer.Title className="flex items-center gap-2 text-sm font-medium">
                         <ClipboardPaste className="h-3.5 w-3.5 text-muted-foreground" />
                         {pastedTextDialogTitle}
-                      </SheetTitle>
-                      <SheetDescription className="text-xs text-muted-foreground tabular-nums">
+                      </Drawer.Title>
+                      <Drawer.Description className="text-xs text-muted-foreground tabular-nums">
                         {summaryText}
-                      </SheetDescription>
+                      </Drawer.Description>
                     </div>
                     <Textarea
                       aria-label={pastedTextEditorLabel}
@@ -1175,31 +1174,34 @@ export function ChatComposer({
                     />
                   </>
                 ) : null}
-              </SheetContent>
-            </Sheet>
+              </Drawer.Content>
+            </Drawer.Root>
           );
         }
 
         return (
-          <Dialog open={previewPastedTextDraft !== null} onOpenChange={handlePastedTextOpenChange}>
-            <DialogContentWithoutClose className="flex h-[85vh] max-h-[85vh] max-w-3xl flex-col gap-0 overflow-hidden p-0">
+          <Dialog.Root open={previewPastedTextDraft !== null} onOpenChange={handlePastedTextOpenChange}>
+            <Dialog.Content
+              closeButton={false}
+              className="flex h-[85vh] max-h-[85vh] max-w-3xl flex-col gap-0 overflow-hidden p-0"
+            >
               {previewPastedTextDraft ? (
                 <>
                   <div className="flex items-center justify-between gap-3 border-b border-border/60 px-5 py-3">
-                    <DialogTitle className="flex items-center gap-2 text-sm font-medium">
+                    <Dialog.Title className="flex items-center gap-2 text-sm font-medium">
                       <ClipboardPaste className="h-3.5 w-3.5 text-muted-foreground" />
                       {pastedTextDialogTitle}
-                    </DialogTitle>
+                    </Dialog.Title>
                     <div className="flex items-center gap-3">
-                      <DialogDescription className="text-xs text-muted-foreground tabular-nums">
+                      <Dialog.Description className="text-xs text-muted-foreground tabular-nums">
                         {summaryText}
-                      </DialogDescription>
-                      <DialogClose
+                      </Dialog.Description>
+                      <Dialog.Close
                         className="rounded-xs opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-hidden focus:ring-2 focus:ring-ring focus:ring-offset-2"
                         aria-label={t('common.close', 'Close')}
                       >
                         <X className="h-4 w-4" />
-                      </DialogClose>
+                      </Dialog.Close>
                     </div>
                   </div>
                   <div className="flex min-h-0 flex-1 px-5 py-4">
@@ -1214,8 +1216,8 @@ export function ChatComposer({
                   </div>
                 </>
               ) : null}
-            </DialogContentWithoutClose>
-          </Dialog>
+            </Dialog.Content>
+          </Dialog.Root>
         );
       })()}
     </>

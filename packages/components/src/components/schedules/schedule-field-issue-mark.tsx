@@ -1,5 +1,5 @@
 import { AlertCircle } from 'lucide-react';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
+import { Tooltip } from '@lody/ui/tooltip';
 import { cn } from '@/lib/utils';
 
 /**
@@ -17,21 +17,24 @@ export function FieldIssueMark({
   if (messages.length === 0) return null;
   const label = messages.join(' ');
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <span
-          role="img"
-          aria-label={label}
-          tabIndex={0}
-          className={cn(
-            'inline-flex size-4 shrink-0 items-center justify-center rounded-full text-status-warning focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring',
-            className
-          )}
-        >
-          <AlertCircle className="size-3.5" aria-hidden="true" />
-        </span>
-      </TooltipTrigger>
-      <TooltipContent className="max-w-72">
+    // Tooltips are visual-only in `@lody/ui`, so the mark names itself.
+    <Tooltip.Root>
+      <Tooltip.Trigger
+        render={
+          <span
+            role="img"
+            aria-label={label}
+            tabIndex={0}
+            className={cn(
+              'inline-flex size-4 shrink-0 items-center justify-center rounded-full text-status-warning',
+              className
+            )}
+          >
+            <AlertCircle className="size-3.5" aria-hidden="true" />
+          </span>
+        }
+      />
+      <Tooltip.Content>
         {messages.length === 1 ? (
           messages[0]
         ) : (
@@ -41,7 +44,7 @@ export function FieldIssueMark({
             ))}
           </ul>
         )}
-      </TooltipContent>
-    </Tooltip>
+      </Tooltip.Content>
+    </Tooltip.Root>
   );
 }

@@ -17,7 +17,7 @@ import {
   machineMetaCacheAtom,
   sessionMetaCacheAtom,
 } from '@/atoms/doc-meta';
-import { TooltipProvider } from '@/ui/tooltip';
+import { Tooltip } from '@lody/ui/tooltip';
 import { ScheduleProposalNotice } from '@/components/schedules/schedule-proposal-notice';
 
 /** Offline platform plus the three metas the card resolves its target from. */
@@ -78,11 +78,11 @@ const meta = {
   decorators: [
     (Story) => (
       <StoryShell>
-        <TooltipProvider>
+        <Tooltip.Provider>
           <div className="w-[640px] bg-background p-4">
             <Story />
           </div>
-        </TooltipProvider>
+        </Tooltip.Provider>
       </StoryShell>
     ),
   ],

@@ -9,7 +9,7 @@ import {
   DesktopMachineMenu,
   type DesktopMachineMenuOption,
 } from '../src/components/sessions/desktop-run-config-menu';
-import { TooltipProvider } from '../src/ui/tooltip';
+import { Tooltip } from '@lody/ui/tooltip';
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
@@ -65,14 +65,14 @@ describe('DesktopMachineMenu local machine label', () => {
   } = {}) {
     await act(async () => {
       root.render(
-        <TooltipProvider>
+        <Tooltip.Provider>
           <DesktopMachineMenu
             value={value}
             visibleLocalMachineId={visibleLocalMachineId}
             options={options}
             onChange={vi.fn()}
           />
-        </TooltipProvider>
+        </Tooltip.Provider>
       );
     });
   }
@@ -82,12 +82,13 @@ describe('DesktopMachineMenu local machine label', () => {
     expect(trigger).toBeInstanceOf(HTMLButtonElement);
     await act(async () => {
       trigger?.dispatchEvent(
-        new TestPointerEvent('pointerdown', {
+        new TestPointerEvent('mousedown', {
           bubbles: true,
           button: 0,
           pointerType: 'mouse',
         })
       );
+      await new Promise((resolve) => setTimeout(resolve, 40));
     });
   }
 

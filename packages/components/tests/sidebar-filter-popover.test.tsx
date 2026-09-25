@@ -140,7 +140,7 @@ describe('SidebarFilterPopover Updated project-name preference', () => {
     flushSync(() => {
       row?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
-    expect(onShowUpdatedProjectNamesChange).toHaveBeenCalledWith(false);
+    expect(onShowUpdatedProjectNamesChange.mock.calls[0]?.[0]).toBe(false);
     expect(
       container?.querySelector('button[aria-label="Filter sidebar"]')?.getAttribute('aria-expanded')
     ).toBe('true');

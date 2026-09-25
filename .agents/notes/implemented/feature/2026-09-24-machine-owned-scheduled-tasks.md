@@ -70,6 +70,8 @@ exclamation mark next to the field or control (never on the optional project)
 — rather than listed; an unfinished
 choice is marked once the person tries to save, a real conflict at once, and only
 reasons that belong to no control (read-only, workspace loading) sit beside Save.
+Every control is an `@lody/ui` primitive (2026-09-25 merge of the new design
+system); schedule code styles layout only.
 
 ## Verification and limits
 

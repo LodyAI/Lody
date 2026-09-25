@@ -242,7 +242,7 @@ describe('SidebarUpdatedSessionList opened-by rendering', () => {
 
     expect(
       rowOf('opened-1')?.querySelector(
-        '[data-session-row-end-slot] [data-session-working-spinner]'
+        '[data-session-row-end-slot] [data-session-working-indicator]'
       )
     ).not.toBeNull();
     expect(
@@ -300,7 +300,7 @@ describe('SidebarUpdatedSessionList opened-by rendering', () => {
   it('renders a working and an unread opened session with their own row state', () => {
     render(makeOpenerItems(), { selectedItemId: 'opened-2' });
     const working = container?.querySelector('[data-sidebar-updated-id="opened-1"]');
-    expect(working?.querySelector('[data-session-working-spinner]')).not.toBeNull();
+    expect(working?.querySelector('[data-session-working-indicator]')).not.toBeNull();
     const selected = container?.querySelector('[data-sidebar-updated-id="opened-2"]');
     expect(selected).not.toBeNull();
   });

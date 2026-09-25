@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { fn } from 'storybook/test';
 
 import { MobileSidebarDrawer } from '@/components/mobile/mobile-sidebar-drawer';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 
 function StoryShell({
   open,

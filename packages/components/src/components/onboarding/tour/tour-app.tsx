@@ -1,11 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Provider } from 'jotai';
 import { useTranslation } from 'react-i18next';
-import type { AgentBrandId, AgentConfigCliType, SessionId, SessionMeta } from '@lody/shared';
+import type {
+  AgentBrandId,
+  AgentConfigCliType,
+  MessageContent,
+  SessionId,
+  SessionMeta,
+} from '@lody/shared';
 import { MessageRowView, SessionChatStreamView } from '@/components/ai-gui/view';
 import { LoroSidebar } from '@/components/loro-sidebar';
 import { DesktopSessionDetailLayout } from '@/components/sessions/desktop-session-detail-layout';
-import { PermissionRequestCard } from '@/components/sessions/floating-permission-request';
+import { PermissionPrompt } from '@/components/sessions/floating-permission-request';
 import {
   SessionConversationPage,
   SessionConversationPageBody,
@@ -37,6 +43,7 @@ import {
   TOUR_PULL_REQUEST,
   TOUR_SESSION_ID,
   TOUR_TASKS,
+  buildPermissionItem,
   buildTourHistory,
   buildTourSession,
   buildTourStableSession,
@@ -51,7 +58,7 @@ import { TourCloudBoundary } from './tour-cloud-boundary';
 //
 // Not a drawing of it, not a "preview", not a fixed-size still life scaled into
 // a card. This is `LoroSidebar` beside `DesktopSessionDetailLayout`, holding
-// `SessionTabBar`, `SessionChatStreamView`, `PermissionRequestCard`,
+// `SessionTabBar`, `SessionChatStreamView`, `PermissionPrompt`,
 // `SessionInfoBar`, `SessionChatInputArea`, `SessionSidePanelTabBar`,
 // `SessionChangesSidebar` and `TerminalDock` — every one of them the component
 // production mounts, in the position production mounts it.
@@ -144,6 +151,12 @@ export type TourAppProps = {
   onMergePr?: () => void;
   className?: string;
 };
+
+/** The pending request the run stops on, as the product's prompt receives it. */
+const TOUR_PERMISSION_TOOL_CALL = buildPermissionItem(null) as Extract<
+  MessageContent,
+  { type: 'tool_call' }
+>;
 
 const TOUR_PROMPT = 'Have a look at the auth module and clean it up.';
 /** What the film types into the composer to start the second task. */
@@ -587,12 +600,9 @@ function TourWindow({
                         // scripted cursor presses the real button inside it; the
                         // resolution is this component resolving, not a flag.
                         <div data-tour-anchor="permission" className="px-3 pb-2">
-                          <PermissionRequestCard
-                            title="Bash(pnpm typecheck)"
-                            options={[
-                              { optionId: 'allow', name: 'Allow once', kind: 'allow_once' },
-                              { optionId: 'deny', name: 'Not this time', kind: 'reject_once' },
-                            ]}
+                          <PermissionPrompt
+                            toolCall={TOUR_PERMISSION_TOOL_CALL}
+                            permission={TOUR_PERMISSION_TOOL_CALL.permissionRequest!}
                             onSelect={onPermissionAnswer}
                           />
                         </div>

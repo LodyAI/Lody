@@ -1,15 +1,10 @@
 import { Check, ChevronDown, GitMerge } from 'lucide-react';
-import { Spinner } from '@/ui/spinner';
+import { Spinner } from '@lody/ui/spinner';
 import { useTranslation } from 'react-i18next';
 import type { GitHubMergeMethod } from '@lody/shared';
 import { cn } from '@/lib/utils';
-import { Button } from '@/ui/button';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/ui/dropdown-menu';
+import { Button } from '@lody/ui/button';
+import { Menu } from '@/ui/menu';
 
 const MERGE_METHODS: Array<{
   value: GitHubMergeMethod;
@@ -69,7 +64,7 @@ export function PrMergeButton({
   const { t } = useTranslation();
   const isDisabled = disabled || isMerging || !onMerge;
   const buttonVariant =
-    tone === 'ready' ? 'default' : tone === 'conflict' ? 'destructive' : 'outline';
+    tone === 'ready' ? 'primary' : tone === 'conflict' ? 'destructive' : 'secondary';
   // The full (non-compact) ready button uses GitHub's green so "merge" reads as
   // the positive terminal action, matching the compact info-bar merge control.
   const readyGreen = tone === 'ready' && !compact;
@@ -102,51 +97,53 @@ export function PrMergeButton({
       ) : (
         <Button
           type="button"
-          size="sm"
+          size="small"
           variant={buttonVariant}
           disabled={isDisabled}
           onClick={() => void onMerge?.(method)}
           className={cn(
             'h-8 gap-1 rounded-r-none',
-            buttonVariant === 'outline' ? 'border-r-0' : 'border-transparent',
+            buttonVariant === 'secondary' ? 'border-r-0' : 'border-transparent',
             readyGreen && greenClasses
           )}
         >
           {mainContent}
         </Button>
       )}
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          {compact ? (
-            <button
-              type="button"
-              disabled={isMerging || !onSelectMethod}
-              aria-label={t('sessions.prTab.chooseMergeMethod', 'Choose merge method')}
-              className="relative flex w-5 items-center justify-center border-l border-status-success/20 text-status-success outline-none transition-colors enabled:hover:bg-status-success/[0.10] focus-visible:bg-status-success/[0.12] disabled:opacity-50"
-            >
-              <ChevronDown className="h-3.5 w-3.5" />
-            </button>
-          ) : (
-            <Button
-              type="button"
-              size="sm"
-              variant={buttonVariant}
-              disabled={isMerging || !onSelectMethod}
-              aria-label={t('sessions.prTab.chooseMergeMethod', 'Choose merge method')}
-              className={cn(
-                'h-8 rounded-l-none border-l border-black/10 px-1.5',
-                readyGreen && cn(greenClasses, 'border-l-white/25')
-              )}
-            >
-              <ChevronDown className="h-3.5 w-3.5" />
-            </Button>
-          )}
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" side={compact ? 'top' : 'bottom'}>
+      <Menu.Root>
+        <Menu.Trigger
+          render={
+            compact ? (
+              <button
+                type="button"
+                disabled={isMerging || !onSelectMethod}
+                aria-label={t('sessions.prTab.chooseMergeMethod', 'Choose merge method')}
+                className="relative flex w-5 items-center justify-center border-l border-status-success/20 text-status-success outline-none transition-colors enabled:hover:bg-status-success/[0.10] focus-visible:bg-status-success/[0.12] disabled:opacity-50"
+              >
+                <ChevronDown className="h-3.5 w-3.5" />
+              </button>
+            ) : (
+              <Button
+                type="button"
+                size="small"
+                variant={buttonVariant}
+                disabled={isMerging || !onSelectMethod}
+                aria-label={t('sessions.prTab.chooseMergeMethod', 'Choose merge method')}
+                className={cn(
+                  'h-8 rounded-l-none border-l border-black/10 px-1.5',
+                  readyGreen && cn(greenClasses, 'border-l-white/25')
+                )}
+              >
+                <ChevronDown className="h-3.5 w-3.5" />
+              </Button>
+            )
+          }
+        />
+        <Menu.Content align="end" side={compact ? 'top' : 'bottom'}>
           {MERGE_METHODS.map((candidate) => {
             const isActive = candidate.value === method;
             return (
-              <DropdownMenuItem
+              <Menu.Item
                 key={candidate.value}
                 onClick={() => onSelectMethod?.(candidate.value)}
               >
@@ -154,11 +151,11 @@ export function PrMergeButton({
                   className={cn('shrink-0', isActive ? 'text-foreground' : 'text-transparent')}
                 />
                 {t(candidate.labelKey, candidate.labelFallback)}
-              </DropdownMenuItem>
+              </Menu.Item>
             );
           })}
-        </DropdownMenuContent>
-      </DropdownMenu>
+        </Menu.Content>
+      </Menu.Root>
     </div>
   );
 }

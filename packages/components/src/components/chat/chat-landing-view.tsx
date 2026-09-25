@@ -1,5 +1,6 @@
 import { useCallback, useRef } from 'react';
 import type { ClipboardEvent, KeyboardEvent, ReactNode, Ref } from 'react';
+import { usePostHog } from '@posthog/react';
 import type { Mention as MentionRange } from '@/ui/mention/index';
 import type { CombinedMentionTextareaHandle } from '@/components/mentions/combined-mention-textarea';
 import type { PersistedMentionRange } from '@/components/mentions/mention-persistence';
@@ -7,7 +8,7 @@ import type { PersistedMentionRange } from '@/components/mentions/mention-persis
 import type { AcpCommandSummary, AgentConfigCliType } from '@lody/shared';
 import { cn } from '@/lib/utils';
 import { useSessionMentionDropZone } from '@/hooks/use-session-mention-drag';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import {
   ChatComposer,
   type ChatComposerFileItem,
@@ -17,10 +18,11 @@ import type { AttachmentAddMenuMcp } from '@/components/chat/attachment-add-menu
 import { ErrorBoundary } from '@/components/error-boundary';
 import type { MentionProjectSource } from '@/components/mentions/mention-project-file-source';
 import { ArrowUp, Bug, Download, ExternalLink, Settings } from 'lucide-react';
-import { Spinner } from '@/ui/spinner';
+import { Spinner } from '@lody/ui/spinner';
 import type { PastedTextDraft } from '@/lib/pasted-text-draft';
 import { getDroppedFileLocalPath, toPathMentionInsertion } from '@/lib/dropped-local-path';
 import { isPlainLinkPasteShortcut, parseAppSessionUrl } from '@/lib/session-app-url';
+import { capturePostHogEvent } from '@/lib/posthog-analytics';
 import { MobileChatLandingScreen } from '@/components/mobile/mobile-chat-landing-screen';
 import { WebChatLandingScreen } from './web-chat-landing-screen';
 
@@ -247,6 +249,7 @@ export function ChatLandingView({
   errorLabels = {},
 }: ChatLandingViewProps) {
   const isDark = tone === 'dark';
+  const postHog = usePostHog();
   const { mentionActionsRef, dropZone, overlayActive } = useSessionMentionDrop(
     !isMobile && !submissionPending
   );
@@ -266,9 +269,14 @@ export function ChatLandingView({
     (event: ClipboardEvent<HTMLTextAreaElement>) => {
       const text = event.clipboardData.getData('text/plain');
       // Cmd/Ctrl+Shift+V keeps a conversation URL as a plain link.
-      if (text && !isPlainLinkPasteShortcut(event)) {
-        const sessionUrl = parseAppSessionUrl(text);
-        if (sessionUrl) {
+      const sessionUrl = text ? parseAppSessionUrl(text) : null;
+      if (sessionUrl) {
+        if (isPlainLinkPasteShortcut(event)) {
+          capturePostHogEvent(postHog, 'mention/session_link_pasted', {
+            converted: false,
+            surface: 'chat_landing',
+          });
+        } else {
           const target = event.currentTarget;
           const at = target.selectionStart ?? target.value.length;
           const replaceEnd = target.selectionEnd ?? at;
@@ -278,6 +286,10 @@ export function ChatLandingView({
               replaceEnd,
             })
           ) {
+            capturePostHogEvent(postHog, 'mention/session_link_pasted', {
+              converted: true,
+              surface: 'chat_landing',
+            });
             event.preventDefault();
             return;
           }
@@ -285,7 +297,7 @@ export function ChatLandingView({
       }
       onPromptPaste?.(event);
     },
-    [mentionActionsRef, onPromptPaste]
+    [mentionActionsRef, onPromptPaste, postHog]
   );
 
   const {
@@ -297,11 +309,6 @@ export function ChatLandingView({
   const hintButtonClassName = cn(
     'group flex w-fit items-center gap-2 rounded-md border px-3 py-1.5 text-sm transition-colors',
     'border-border bg-background/70 text-foreground hover:bg-muted/60'
-  );
-
-  const primaryActionButtonClassName = cn(
-    'h-8 w-8 rounded-full shadow-xs transition-all',
-    'bg-foreground text-background hover:bg-foreground/90 hover:text-background active:translate-y-[1px] focus-visible:ring-ring focus-visible:ring-offset-background'
   );
 
   // No-agent-config hint shown in scrollable area (not as overlay)
@@ -380,12 +387,13 @@ export function ChatLandingView({
     <ErrorBoundary name="ChatLandingPrimaryAction" variant="inline" resetKeys={resetKeys}>
       <Button
         type="button"
-        size="icon"
-        variant="ghost"
+        variant="primary"
+        size="medium"
+        shape="pill"
+        icon
         onClick={onSubmit}
         disabled={submitDisabled}
         aria-label={submissionPending ? submittingLabel : submitLabel}
-        className={cn(primaryActionButtonClassName, isMobile ? 'h-6 w-6' : 'h-7 w-7')}
       >
         {submissionPending ? <Spinner className="h-4 w-4" /> : <ArrowUp className="h-4 w-4" />}
       </Button>

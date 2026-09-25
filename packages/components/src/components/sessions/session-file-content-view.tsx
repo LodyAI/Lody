@@ -14,7 +14,7 @@ import {
 } from 'lucide-react';
 import { Spinner } from '@/ui/spinner';
 import { useTranslation } from 'react-i18next';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import {
   getMachineFlockLocalProjects,
   type CodeCollabContentUnavailableReason,
@@ -70,6 +70,8 @@ import {
 } from '@/lib/code-collab-live-text-update';
 import { getSessionFileMonacoLanguageId, isSessionMarkdownPath } from '@/lib/session-file-language';
 import { downloadBytesAsFile } from '@/lib/download-file';
+import { usePostHog } from '@posthog/react';
+import { capturePostHogEvent, getAnalyticsFileKind } from '@/lib/posthog-analytics';
 import { useCodeCollabLiveText } from '@/hooks/use-code-collab-live-text';
 import { useMachineFlockRows } from '@/hooks/use-machine-flock-rows';
 import {
@@ -81,8 +83,8 @@ import {
   type SessionFileLiveSyncStatus,
   type SessionFileSaveStatus,
 } from '@/hooks/use-code-collab-save-text';
-import { Button } from '@/ui/button';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
+import { Button } from '@lody/ui/button';
+import { Tooltip } from '@lody/ui/tooltip';
 import { useCodeCollabLsp, type CodeCollabLspState } from '@/hooks/use-code-collab-lsp';
 import { useLatestRef } from '@/hooks/use-latest-ref';
 import {
@@ -234,6 +236,7 @@ function SessionFileContentViewImpl({
   onToggleVisualAnnotationInChat,
 }: SessionFileContentViewProps) {
   const { t } = useTranslation();
+  const postHog = usePostHog();
   const tRef = useLatestRef(t);
   const onSaveStateChangeRef = useLatestRef(onSaveStateChange);
   const activeVSCodeTheme = useActiveVSCodeTheme();
@@ -644,6 +647,9 @@ function SessionFileContentViewImpl({
   >(undefined);
   const externalSeqRef = useRef(0);
   const latestEditorTextRef = useRef<string | undefined>(undefined);
+  const lastAckedExternalTextRef = useRef<
+    { text: string; snapshot: SessionFileContentSnapshot } | undefined
+  >(undefined);
   const latestStableSelectionRef = useRef<StableProviderEditorSelection | null>(null);
   const recentLocalTextEchoTrackerRef = useRef(new RecentLocalTextEchoTracker());
   const hasAcceptedLocalContentChangeRef = useRef(false);
@@ -675,20 +681,22 @@ function SessionFileContentViewImpl({
   useEffect(() => {
     setExternalTextUpdate(undefined);
     latestEditorTextRef.current = undefined;
+    lastAckedExternalTextRef.current = undefined;
     latestStableSelectionRef.current = null;
     recentLocalTextEchoTrackerRef.current.clear();
     hasAcceptedLocalContentChangeRef.current = false;
   }, [liveFileId]);
 
-  const openedLiveText =
+  const openedLiveSnapshot =
     shouldUseProviderFileContent && data.status === 'ready' && data.snapshot.kind === 'text'
-      ? data.snapshot.text
+      ? data.snapshot
       : undefined;
+  const openedLiveText = openedLiveSnapshot?.text;
 
   useEffect(() => {
-    if (openedLiveText === undefined) return;
-    latestEditorTextRef.current = openedLiveText;
-  }, [liveFileId, openedLiveText]);
+    if (openedLiveSnapshot === undefined) return;
+    latestEditorTextRef.current = openedLiveSnapshot.text;
+  }, [liveFileId, openedLiveSnapshot]);
 
   const liveTextUpdate = useCodeCollabLiveText(
     shouldUseProviderFileContent ? fileProvider : null,
@@ -754,9 +762,22 @@ function SessionFileContentViewImpl({
 
   const handleExternalTextUpdateApplied = useCallback(
     (result: 'applied' | 'no-op') => {
+      // An acknowledged snapshot must not replay when preview or tab switching
+      // remounts the editor. Preserve a newer update awaiting its own acknowledgement.
+      if (externalTextUpdate) {
+        setExternalTextUpdate((current) =>
+          current?.seq === externalTextUpdate.seq ? undefined : current
+        );
+      }
       if (result === 'applied') {
         if (externalTextUpdate) {
           latestEditorTextRef.current = externalTextUpdate.text;
+          if (data.status === 'ready') {
+            lastAckedExternalTextRef.current = {
+              text: externalTextUpdate.text,
+              snapshot: data.snapshot,
+            };
+          }
         }
         if (preservePendingOnNextExternalTextAppliedRef.current) {
           preservePendingOnNextExternalTextAppliedRef.current = false;
@@ -769,11 +790,17 @@ function SessionFileContentViewImpl({
       if (result === 'no-op') {
         if (externalTextUpdate) {
           latestEditorTextRef.current = externalTextUpdate.text;
+          if (data.status === 'ready') {
+            lastAckedExternalTextRef.current = {
+              text: externalTextUpdate.text,
+              snapshot: data.snapshot,
+            };
+          }
         }
         return;
       }
     },
-    [externalTextUpdate, handleExternalTextAppliedToSaveState]
+    [data, externalTextUpdate, handleExternalTextAppliedToSaveState]
   );
 
   const handleSaveConflictResolve = useCallback(
@@ -867,6 +894,16 @@ function SessionFileContentViewImpl({
     saveStatus.kind === 'error' ||
     saveStatus.kind === 'conflict_pending' ||
     saveStatus.kind === 'conflict';
+  const resolveProviderEditorMountText = (snapshot: { text: string }): string => {
+    if (hasAcceptedLocalContentChangeRef.current || isProviderEditorDirty) {
+      return latestEditorTextRef.current ?? snapshot.text;
+    }
+    const acked = lastAckedExternalTextRef.current;
+    if (acked && acked.snapshot === snapshot) {
+      return acked.text;
+    }
+    return snapshot.text;
+  };
   markProviderConflictPendingRef.current = markProviderConflictPending;
   useEffect(() => {
     if (saveStatus.kind === 'saved') {
@@ -942,7 +979,11 @@ function SessionFileContentViewImpl({
     if (data.status !== 'ready' || data.snapshot.kind !== 'text') return;
     const content = latestEditorTextRef.current ?? data.snapshot.text;
     downloadBytesAsFile(normalizedPath, new TextEncoder().encode(content));
-  }, [data, normalizedPath]);
+    capturePostHogEvent(postHog, 'file_preview/downloaded', {
+      file_kind: getAnalyticsFileKind(normalizedPath),
+      source: 'file_viewer',
+    });
+  }, [data, normalizedPath, postHog]);
   const saveViewState = useMemo<SessionFileSaveViewState>(
     () => ({
       dirty: isProviderEditorDirty,
@@ -1250,11 +1291,7 @@ function SessionFileContentViewImpl({
             {isMarkdownTextFile && preferNativeMarkdownSelection ? (
               <NativeMarkdownSource
                 key={liveFileId ?? normalizedPath}
-                text={
-                  hasAcceptedLocalContentChangeRef.current || isProviderEditorDirty
-                    ? (latestEditorTextRef.current ?? data.snapshot.text)
-                    : data.snapshot.text
-                }
+                text={resolveProviderEditorMountText(data.snapshot)}
                 readOnly={!isProviderFileEditable}
                 wordWrap={wordWrapEnabled}
                 selectedLines={selectedLines}
@@ -1271,11 +1308,7 @@ function SessionFileContentViewImpl({
             ) : (
               <LazyProviderTextMonacoViewer
                 key={lspModelUri?.toString() ?? liveFileId ?? normalizedPath}
-                text={
-                  hasAcceptedLocalContentChangeRef.current || isProviderEditorDirty
-                    ? (latestEditorTextRef.current ?? data.snapshot.text)
-                    : data.snapshot.text
-                }
+                text={resolveProviderEditorMountText(data.snapshot)}
                 language={getSessionFileMonacoLanguageId(normalizedPath)}
                 selectedLines={selectedLines}
                 resolvedTheme={resolvedTheme}
@@ -1355,6 +1388,11 @@ function SessionFileContentViewImpl({
   // button only appears when a Monaco editor is mounted — a rendered SVG/Markdown
   // preview has no editor to search.
   const showPreviewToggle = isSvgTextFile || isMarkdownTextFile || isHtmlTextFile;
+  const filePreviewActive = isSvgTextFile
+    ? svgRenderMode === 'rendered'
+    : isMarkdownTextFile
+      ? markdownRenderMode === 'rendered'
+      : htmlRenderMode === 'rendered';
   const showSearchButton =
     isTextFileReady &&
     !showSvgRendered &&
@@ -1380,14 +1418,14 @@ function SessionFileContentViewImpl({
           <div className="ml-auto flex items-center gap-1">
             {showPreviewToggle ? (
               <FilePreviewToggle
-                active={
-                  isSvgTextFile
-                    ? svgRenderMode === 'rendered'
-                    : isMarkdownTextFile
-                      ? markdownRenderMode === 'rendered'
-                      : htmlRenderMode === 'rendered'
-                }
+                active={filePreviewActive}
                 onToggle={() => {
+                  if (!filePreviewActive) {
+                    capturePostHogEvent(postHog, 'file_preview/opened', {
+                      file_kind: getAnalyticsFileKind(normalizedPath),
+                      source: 'preview_toggle',
+                    });
+                  }
                   if (isSvgTextFile) {
                     setSvgRenderMode((mode) => (mode === 'rendered' ? 'code' : 'rendered'));
                   } else if (isMarkdownTextFile) {
@@ -1705,31 +1743,34 @@ function FilePreviewToggle({
   const Icon = active ? EyeClosed : Eye;
   const label = active ? hideLabel : showLabel;
   return (
-    <Tooltip delayDuration={300}>
-      <TooltipTrigger asChild>
-        <button
-          type="button"
-          aria-pressed={active}
-          onClick={onToggle}
-          aria-label={label}
-          className={cn(
-            'flex h-6 w-6 shrink-0 items-center justify-center rounded transition-colors hover:bg-accent hover:text-foreground',
-            active ? 'text-foreground' : 'text-muted-foreground'
-          )}
-        >
-          {/* lucide's open Eye packs the iris + almond into 14px, so at stroke-width
+    <Tooltip.Root>
+      <Tooltip.Trigger
+        delay={300}
+        render={
+          <button
+            type="button"
+            aria-pressed={active}
+            onClick={onToggle}
+            aria-label={label}
+            className={cn(
+              'flex h-6 w-6 shrink-0 items-center justify-center rounded transition-colors hover:bg-accent hover:text-foreground',
+              active ? 'text-foreground' : 'text-muted-foreground'
+            )}
+          >
+            {/* lucide's open Eye packs the iris + almond into 14px, so at stroke-width
               2 it reads ~26% denser than the neighbouring Search glyph and looks
               darker at the same color. Thin it to 1.5 to match Search's optical
               weight (measured ink coverage 20.2% vs 20.9%). The closed Eye has no
               iris (already lighter) and is shown alone in the active color, so it
               keeps the default weight. */}
-          <Icon className="h-3.5 w-3.5" strokeWidth={active ? 2 : 1.5} aria-hidden="true" />
-        </button>
-      </TooltipTrigger>
-      <TooltipContent side="bottom" className="text-xs">
+            <Icon className="h-3.5 w-3.5" strokeWidth={active ? 2 : 1.5} aria-hidden="true" />
+          </button>
+        }
+      />
+      <Tooltip.Content side="bottom" className="text-xs">
         {label}
-      </TooltipContent>
-    </Tooltip>
+      </Tooltip.Content>
+    </Tooltip.Root>
   );
 }
 
@@ -1988,18 +2029,12 @@ export function SessionFileConflictActionRow({
       <span className="ml-auto flex gap-1.5">
         {pendingOverride ? (
           <>
-            <Button
-              size="sm"
-              variant="ghost"
-              className="h-6 px-2 text-[11px]"
-              onClick={() => setPendingOverride(false)}
-            >
+            <Button variant="ghost" size="small" onClick={() => setPendingOverride(false)}>
               {t('common.cancel', 'Cancel')}
             </Button>
             <Button
-              size="sm"
               variant="destructive"
-              className="h-6 px-2 text-[11px]"
+              size="small"
               onClick={() => {
                 setPendingOverride(false);
                 void onResolveConflict('override');
@@ -2011,37 +2046,33 @@ export function SessionFileConflictActionRow({
         ) : (
           <>
             <Button
-              size="sm"
               variant="ghost"
-              className="h-6 px-2 text-[11px]"
               title={t(
                 'sessions.fileSave.conflictDiscardHint',
                 'Throw away your local edits and reload from disk.'
               )}
+              size="small"
               onClick={() => void onResolveConflict('discard')}
             >
               {t('sessions.fileSave.conflictDiscard', 'Discard my edits')}
             </Button>
             <Button
-              size="sm"
               variant="ghost"
-              className="h-6 px-2 text-[11px]"
               title={t(
                 'sessions.fileSave.conflictMarkersHint',
                 'Reload with <<<<<<< / >>>>>>> conflict markers so you can resolve by hand.'
               )}
+              size="small"
               onClick={() => void onResolveConflict('load_with_conflicts')}
             >
               {t('sessions.fileSave.conflictMarkers', 'Insert conflict markers')}
             </Button>
             <Button
-              size="sm"
-              variant="default"
-              className="h-6 px-2 text-[11px]"
               title={t(
                 'sessions.fileSave.conflictOverrideHint',
                 'Replace the disk version with your edits. Concurrent changes will be lost.'
               )}
+              size="small"
               onClick={() => setPendingOverride(true)}
             >
               {t('sessions.fileSave.conflictOverride', 'Overwrite disk')}
@@ -2084,7 +2115,7 @@ function SessionFileLspPanel({
     <div className="flex flex-col gap-1 border-t border-border bg-muted/30 px-3 py-2 text-xs">
       <div className="flex items-center justify-between gap-2">
         <span className="font-medium text-foreground">{actionLabel}</span>
-        <Button size="sm" variant="ghost" onClick={onDismiss}>
+        <Button variant="ghost" size="small" onClick={onDismiss}>
           {t('sessions.lsp.dismiss', 'Dismiss')}
         </Button>
       </div>

@@ -1,6 +1,7 @@
 import winston from 'winston';
 import DailyRotateFile from 'winston-daily-rotate-file';
 import { formatLogArgs } from './log-format';
+import { getDesktopBuildDescription } from './desktop-build';
 import { cleanupExpiredLogs, LODY_LOG_DIR, LODY_LOG_RETENTION_MAX_FILES } from './log-retention';
 
 const cleanedLogDirs = new Set<string>();
@@ -203,6 +204,8 @@ export const createFileLogger = (filename?: string, dirname?: string): Logger =>
     },
   });
   rootLogger = logger;
+  const desktopBuild = getDesktopBuildDescription();
+  if (desktopBuild !== null) logger.debug(`[desktop-build] ${desktopBuild}`);
   return logger;
 };
 
@@ -225,6 +228,8 @@ export const createHybridLogger = (config: Partial<LoggerConfig> = {}): Logger =
     ...config,
   });
   rootLogger = logger;
+  const desktopBuild = getDesktopBuildDescription();
+  if (desktopBuild !== null) logger.debug(`[desktop-build] ${desktopBuild}`);
   return logger;
 };
 

@@ -3,7 +3,7 @@
 import React, { useState } from 'react';
 
 import { Check, Copy } from 'lucide-react';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { cn } from '@/lib/utils';
 
 export const CopyButton = ({
@@ -29,10 +29,10 @@ export const CopyButton = ({
   return (
     <Button
       variant="ghost"
-      size="sm"
       data-state={copied ? 'copied' : 'not-copied'}
+      size="small"
       {...props}
-      className={cn('transition-opacity relative shrink-0', className)}
+      className={cn('relative shrink-0', className)}
       onClick={handleCopy}
     >
       <span className="sr-only">Copy</span>

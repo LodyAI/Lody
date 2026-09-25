@@ -12,12 +12,11 @@ import {
   type ScheduleRecurrence,
   type ScheduleTrigger,
 } from '@lody/shared';
-import { Button } from '@/ui/button';
-import { Textarea } from '@/ui/textarea';
-import { TooltipProvider } from '@/ui/tooltip';
+import { Button } from '@lody/ui/button';
+import { Tooltip } from '@lody/ui/tooltip';
 import { cn } from '@/lib/utils';
 import { formatUpcoming, triggerTimeZone } from './schedule-format';
-import { ScheduleSection, scheduleCardClass } from './schedule-property-row';
+import { ScheduleSection, scheduleCardProps } from './schedule-property-row';
 import { FieldIssueMark } from './schedule-field-issue-mark';
 import type { ScheduleSaveIssue } from './schedule-save-blockers';
 import { ScheduleRecurrenceEditor } from './schedule-recurrence-editor';
@@ -148,7 +147,7 @@ export function ScheduleForm({
 
   return (
     // Own the tooltip context: every problem mark explains itself in one.
-    <TooltipProvider>
+    <Tooltip.Provider>
       <form
         // Light themes lift the grouped cards to the popover fill, like settings.
         data-settings-surface=""
@@ -193,7 +192,9 @@ export function ScheduleForm({
             </div>
             <div className="mx-3 border-t-[0.5px] border-foreground/[0.10] dark:border-white/[0.10]" />
             <div className="relative px-3 pb-1 pt-2.5">
-              <Textarea
+              {/* A bare field inside the composer-style box, like the title
+                  input: the box is the edge, so this is not a styled Textarea. */}
+              <textarea
                 ref={promptRef}
                 required
                 rows={4}
@@ -206,7 +207,7 @@ export function ScheduleForm({
                 // Grows with its text from 4 to 8 lines, then scrolls; no
                 // resize handle. `field-sizing` is CSS-only (Chromium).
                 className={cn(
-                  'min-h-[calc(4lh)] max-h-[calc(8lh)] w-full resize-none overflow-y-auto rounded-none border-0 bg-transparent p-0 text-[0.95em] leading-relaxed text-foreground shadow-none [field-sizing:content] placeholder:text-muted-foreground/60 focus-visible:shadow-none focus-visible:ring-0 dark:bg-transparent',
+                  'block min-h-[calc(4lh)] max-h-[calc(8lh)] w-full resize-none overflow-y-auto bg-transparent p-0 text-[0.95em] leading-relaxed text-foreground outline-hidden [field-sizing:content] placeholder:text-muted-foreground/60 focus-visible:shadow-none',
                   attempted && promptMissing && 'pr-6'
                 )}
                 value={value.prompt}
@@ -239,7 +240,7 @@ export function ScheduleForm({
         </div>
 
         {destination ? (
-          <div className={scheduleCardClass}>{destination({ revealMissing: attempted })}</div>
+          <div {...scheduleCardProps()}>{destination({ revealMissing: attempted })}</div>
         ) : null}
         <ScheduleSection
           title={t('schedules.trigger.label', 'Trigger')}
@@ -341,8 +342,9 @@ export function ScheduleForm({
           </div>
           <Button
             type="submit"
-            size="sm"
-            className="h-8 shrink-0 self-end sm:self-auto"
+            variant="primary"
+            size="small"
+            className="shrink-0 self-end sm:self-auto"
             disabled={saving || formIssues.length > 0}
             aria-describedby={noteId}
           >
@@ -350,7 +352,7 @@ export function ScheduleForm({
           </Button>
         </div>
       </form>
-    </TooltipProvider>
+    </Tooltip.Provider>
   );
 }
 

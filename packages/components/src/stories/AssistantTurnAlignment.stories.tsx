@@ -380,11 +380,8 @@ const planModeTurn: SessionHistoryParsed = {
       isLatest: true,
       markdown: [
         '## Goal',
-        '',
         'Keep every top-level row of a plan-mode turn on one left rail.',
-        '',
         '## Steps',
-        '',
         '1. No per-shell horizontal pad on the `switch_mode` card.',
         '2. The resolved permission card sits on the rail, not on its own `ml-4`.',
       ].join('\n'),
@@ -510,11 +507,8 @@ const planAwaitingDecisionTurn: SessionHistoryParsed = {
       isLatest: true,
       markdown: [
         '## Goal',
-        '',
         'Keep every top-level row of a plan-mode turn on one left rail.',
-        '',
         '## Steps',
-        '',
         '1. No per-shell horizontal pad on the `switch_mode` card.',
         '2. The resolved permission card sits on the rail.',
         '3. Attachments sort below the plan.',
@@ -552,11 +546,8 @@ const planAwaitingDecisionTurn: SessionHistoryParsed = {
  */
 const PARITY_PLAN = [
   '## Goal',
-  '',
   'Render the same plan panel whichever adapter produced it.',
-  '',
   '## Steps',
-  '',
   '1. Resolve the carrier in `plan-surface.ts`.',
   '2. Feed every carrier into one `PlanPanel`.',
 ].join('\n');

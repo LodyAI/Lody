@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { Dialog, DialogContent, DialogTitle } from '@/ui/dialog';
+import { Dialog } from '@/ui/dialog';
 
 /**
  * Desktop host for a schedule's editor or detail: a Dialog over the list, never
@@ -22,18 +22,19 @@ export function ScheduleDialog({
   children: ReactNode;
 }) {
   return (
-    <Dialog
+    <Dialog.Root
       open={open}
       onOpenChange={(isOpen) => {
         if (!isOpen) onClose();
       }}
     >
-      <DialogContent className="flex w-[min(46rem,calc(100vw-4rem))] max-w-none flex-col gap-0 overflow-hidden p-0 sm:p-0">
-        <DialogTitle className="sr-only">{title}</DialogTitle>
+      {/* Layout only: the width of a form, and a body that scrolls on its own. */}
+      <Dialog.Content className="flex w-[min(46rem,calc(100vw-4rem))] flex-col overflow-hidden p-0">
+        <Dialog.Title className="sr-only">{title}</Dialog.Title>
         <div data-settings-surface="" className="min-h-0 flex-1 overflow-auto">
           {children}
         </div>
-      </DialogContent>
-    </Dialog>
+      </Dialog.Content>
+    </Dialog.Root>
   );
 }

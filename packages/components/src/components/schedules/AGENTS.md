@@ -83,14 +83,14 @@
   list starts at once with a toast; delete always confirms. Cells align to their
   first line; the target column names the machine; row actions are visible by
   default and hidden only behind `[@media(hover:hover)]`.
-- Chrome follows `src/ui/AGENTS.md`: `em` of `--ui-font-size` sized on leaves
-  (row labels and values 0.9em, hints 0.8em, section labels 0.8em), only two inks
-  (`foreground`, `muted-foreground`), `font-normal`, 0.5px edges. Cards are
-  `SETTINGS_ROW_CARD_CLASS` inside `data-settings-surface`, or light themes
-  show them gray (disabled-looking).
+- Chrome: every control is an `@lody/ui` primitive (Button, Input, Select,
+  Combobox, Tooltip, ContextMenu, Skeleton, `@/ui/dialog`); `className` carries
+  layout only. Cards are `scheduleCardProps()` (the settings `settingsCard`
+  StyleX) inside `data-settings-surface`. Copy is `em` of `--ui-font-size`, two
+  inks (`foreground`, `muted-foreground`), `font-normal`.
 - Alignment is measured, not eyeballed: property rows are 44px, labels share
-  one left line, every row's last visible mark ends on one right inset (ghost
-  triggers bleed `-mr-2` and widen `max-w` by the same 8px); a row with a hint
+  one left line, every row's last visible mark ends on one right inset (selects
+  are solid `Select.Trigger`s; only the native time input bleeds `-mr-2`); a row with a hint
   or multi-line control pins its label to the first line. `PropertyRow` tracks
   are content-sized (`minmax(0,auto)` / `minmax(0,1fr)`), never from `sm:`;
   `EditorInNarrowPanel` catches regressions.

@@ -1022,20 +1022,23 @@ export class PrPollScheduler {
       });
       if (associationPlan) {
         const observation = discovered.find((pr) => pr.url === associationPlan.url);
-        const associated = await runtime.handle.associatePullRequest({
-          repoFullName,
-          prNumber: associationPlan.prNumber,
-          prUrl: associationPlan.url,
-          branch: freshContext.branch ?? '',
-          status: associationPlan.status,
-          ownerSessionId,
-        });
+        const associated =
+          !runtime.handle.associatePullRequest ||
+          (await runtime.handle.associatePullRequest({
+            repoFullName,
+            prNumber: associationPlan.prNumber,
+            prUrl: associationPlan.url,
+            branch: freshContext.branch ?? '',
+            status: associationPlan.status,
+            ownerSessionId,
+          }));
         if (associated && observation) {
           this.counters.discoveries += 1;
           logger.debug(
-            `[pr-poller] Discovered PR #${associationPlan.prNumber} (${associationPlan.status}) for session ${ownerSessionId}; association created`
+            `[pr-poller] Discovered PR #${associationPlan.prNumber} (${associationPlan.status}) for session ${ownerSessionId}; observation accepted`
           );
-          // Local meta write only AFTER backend association success.
+          // Hosted mode requires webhook association first; local mode publishes
+          // directly after the authenticated GitHub observation.
           freshMeta = await runtime.handle.readOwnerMeta(ownerSessionId);
           if (
             !freshMeta ||
@@ -1046,7 +1049,7 @@ export class PrPollScheduler {
           }
           newlyAssociated.push(observation);
         } else {
-          // Association must land before any local write; retry the whole
+          // A configured hosted association must land before any local write; retry the whole
           // round (query included) at the attempt floor.
           discoveryOk = false;
         }

@@ -1,17 +1,11 @@
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { useAtomValue } from 'jotai';
 import { useTranslation } from 'react-i18next';
-import {
-  Bot,
-  ChevronDown,
-  ChevronRight,
-  CircleHelp,
-  Folder,
-  LockKeyhole,
-  MonitorCog,
-  Users,
-} from 'lucide-react';
-import { Spinner } from '@/ui/spinner';
+import { Bot, ChevronDown, CircleHelp, Folder, LockKeyhole, MonitorCog, Users } from 'lucide-react';
+import * as stylex from '@stylexjs/stylex';
+import { Spinner } from '@lody/ui/spinner';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { corner, radius, space } from '@lody/ui/tokens/scales.stylex';
 import type { AgentConfigMeta, MachineId } from '@lody/shared';
 import { getAllAgentConfigAtom } from '@/atoms/agents';
 import { localMachineIdAtom } from '@/atoms/local-probe';
@@ -23,10 +17,12 @@ import { useOpenSettings } from '@/hooks/use-open-settings';
 import { useVisibleLocalProjectsFromMachineIndex } from '@/hooks/use-visible-local-projects';
 import { useVisibleMachineMetas } from '@/hooks/use-visible-machine-metas';
 import { isElectronRenderer } from '@/lib/electron';
-import { cn } from '@/lib/utils';
-import { Badge } from '@/ui/badge';
-import { Button } from '@/ui/button';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/ui/tooltip';
+import { Badge } from '@lody/ui/badge';
+import { Button, type ButtonSize, type ButtonVariant } from '@lody/ui/button';
+import { Menu } from '@lody/ui/menu';
+import { Tooltip } from '@lody/ui/tooltip';
+import { CompactSection } from './compact-layout';
+import { settingsSurface as surface } from './surface';
 
 export type AccountMachineDirectory = {
   key: string;
@@ -128,6 +124,140 @@ export function AccountMachinesOverview() {
   );
 }
 
+const styles = stylex.create({
+  /**
+   * One machine: who it is on the left, what can be done with it on the right.
+   * The two halves wrap onto two lines in a narrow panel rather than being
+   * laid out from a viewport breakpoint the settings panel does not follow.
+   */
+  row: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    columnGap: space[3],
+    rowGap: space[2],
+    paddingInline: space[4],
+    paddingBlock: '10px',
+  },
+  identity: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: space[3],
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '14em',
+    minWidth: 0,
+  },
+  identityText: { minWidth: 0 },
+  dot: {
+    flexShrink: 0,
+    width: '8px',
+    height: '8px',
+    borderRadius: radius.full,
+    cornerShape: corner.round,
+    backgroundColor: colors.tertiaryLabel,
+  },
+  dotOnline: {
+    backgroundColor: colors.success,
+    boxShadow: `0 0 0 3px color-mix(in oklab, ${colors.success} 20%, transparent)`,
+  },
+  nameLine: { display: 'flex', alignItems: 'center', gap: space[1.5], minWidth: 0 },
+  /** The machine's name opens its settings: a link in the row's own words. */
+  nameButton: {
+    minWidth: 0,
+    margin: 0,
+    padding: 0,
+    borderWidth: 0,
+    borderRadius: radius.mini,
+    cornerShape: corner.round,
+    backgroundColor: 'transparent',
+    color: colors.label,
+    fontFamily: 'inherit',
+    fontSize: '1em',
+    fontWeight: 400,
+    lineHeight: 1.25,
+    textAlign: 'start',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    cursor: 'pointer',
+    outlineStyle: 'none',
+    textDecoration: { default: 'none', ':hover': 'underline' },
+    boxShadow: { default: 'none', ':focus-visible': `0 0 0 2px ${colors.accent}` },
+  },
+  status: {
+    margin: 0,
+    fontSize: '0.8em',
+    lineHeight: 1.25,
+    color: colors.secondaryLabel,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  controls: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: space[1],
+    minWidth: 0,
+    marginInlineStart: 'auto',
+  },
+  note: { display: 'flex', alignItems: 'center', justifyContent: 'center', gap: space[2] },
+  icon: { flexShrink: 0, width: '14px', height: '14px' },
+  iconHint: { color: colors.tertiaryLabel },
+  /** A glyph inside a box that sizes it — an icon Button's, a Badge's, a menu row's. */
+  glyph: { width: '100%', height: '100%' },
+  truncate: {
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  /** The Agents a machine runs, overlapped like a stack of faces. */
+  stack: { display: 'flex', flexShrink: 0, alignItems: 'center' },
+  chip: {
+    boxSizing: 'border-box',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+    width: '20px',
+    minWidth: '20px',
+    height: '20px',
+    borderRadius: radius.full,
+    cornerShape: corner.round,
+    backgroundColor: colors.background,
+    color: colors.label,
+    boxShadow: `0 0 0 2px ${colors.elevatedBackground}`,
+  },
+  chipStacked: { marginInlineStart: '-6px' },
+  /** No Agent, or the ones past the third: a stand-in, so the gray ramp. */
+  chipStandIn: {
+    width: 'auto',
+    paddingInline: '4px',
+    backgroundColor: colors.gray5,
+    color: colors.secondaryLabel,
+    fontSize: '9px',
+    fontVariantNumeric: 'tabular-nums',
+  },
+  chipGlyph: { width: '12px', height: '12px' },
+  tooltipHint: { margin: 0, marginTop: '2px', opacity: 0.7 },
+  tooltipTitle: { margin: 0 },
+  /** A directory in the menu: its name, and where it is on disk under it. */
+  directory: {
+    display: 'flex',
+    flexDirection: 'column',
+    minWidth: 0,
+    paddingBlock: space[1],
+  },
+  directoryPath: {
+    fontFamily: 'var(--font-mono, ui-monospace, monospace)',
+    fontSize: '10px',
+    color: colors.secondaryLabel,
+  },
+});
+
 export function AccountMachinesOverviewView({
   items,
   loading = false,
@@ -146,232 +276,193 @@ export function AccountMachinesOverviewView({
   onOpenDirectories: (machineId: MachineId) => void;
 }) {
   const { t } = useTranslation();
-  const [expandedMachineIds, setExpandedMachineIds] = useState<Set<MachineId>>(() => new Set());
-
-  const toggleDirectories = (machineId: MachineId) => {
-    setExpandedMachineIds((previous) => {
-      const next = new Set(previous);
-      if (next.has(machineId)) next.delete(machineId);
-      else next.add(machineId);
-      return next;
-    });
-  };
 
   return (
-    <TooltipProvider delayDuration={250}>
-      <section className="mx-3 overflow-hidden rounded-xl border border-border/60 bg-card/60 md:mx-0 md:rounded-lg">
-        <header className="flex items-start justify-between gap-3 border-b border-border/60 dark:bg-muted/30 px-3 py-2.5">
-          <div className="min-w-0">
-            <h2 className="text-xs font-normal text-muted-foreground">
-              {t('settings.account.machines.title', 'My machines')}
-            </h2>
-            <p className="mt-0.5 text-[11px] leading-4 text-muted-foreground/85">
-              {t(
-                'settings.account.machines.description',
-                'Machines connected by you, with their Agents and shared directories.'
-              )}
-            </p>
-          </div>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className="h-7 w-7 shrink-0 text-muted-foreground"
-                aria-label={t('settings.account.machines.privacyHelpLabel', 'About private access')}
-              >
-                <CircleHelp className="h-3.5 w-3.5" strokeWidth={1.75} />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="left" className="max-w-72 leading-relaxed">
-              {t(
-                'settings.account.machines.privacyHelp',
-                'Conversations on a private machine, and conversations in private directories on a shared machine, are not visible to other workspace members.'
-              )}
-            </TooltipContent>
-          </Tooltip>
-        </header>
-
-        <div className="hidden cursor-default select-none grid-cols-[minmax(180px,1fr)_100px_180px_140px_32px] items-center gap-3 border-b border-border/50 px-3 py-1.5 text-[10px] font-normal text-muted-foreground/70 md:grid">
-          <span>{t('settings.account.machines.machineColumn', 'Machine')}</span>
-          <span>{t('settings.account.machines.accessColumn', 'Access')}</span>
-          <span>{t('settings.account.machines.agentsColumn', 'Agents')}</span>
-          <span>{t('settings.account.machines.directoriesColumn', 'Directories')}</span>
-          <span className="sr-only">{t('settings.account.machines.actionsColumn', 'Actions')}</span>
-        </div>
-
+    <Tooltip.Provider delay={250}>
+      <CompactSection
+        title={t('settings.account.machines.title', 'My machines')}
+        description={t(
+          'settings.account.machines.description',
+          'Machines connected by you, with their Agents and shared directories.'
+        )}
+        actions={<PrivacyHelp />}
+      >
         {loading && items.length === 0 ? (
-          <div className="flex items-center justify-center gap-2 px-3 py-8 text-xs text-muted-foreground">
-            <Spinner className="h-3.5 w-3.5" />
+          <p {...stylex.props(surface.cardNote, styles.note)}>
+            <Spinner size="small" label={null} />
             {t('workspace.machines.loadingVisibility', 'Loading machines')}
-          </div>
+          </p>
         ) : items.length === 0 ? (
-          <div className="px-3 py-8 text-center text-xs text-muted-foreground">
+          <p {...stylex.props(surface.cardNote, styles.note)}>
             {t('workspace.machines.empty', 'No machines connected')}
-          </div>
+          </p>
         ) : (
-          items.map((item, index) => {
-            const expanded = expandedMachineIds.has(item.id);
-            return (
-              <div key={item.id} className={cn(index > 0 && 'border-t border-border/50')}>
-                <div className="grid min-w-0 grid-cols-1 gap-3 px-3 py-3 md:grid-cols-[minmax(180px,1fr)_100px_180px_140px_32px] md:items-center">
-                  <div className="flex min-w-0 items-center gap-3.5">
-                    <span
-                      className={cn(
-                        'h-2 w-2 shrink-0 rounded-full ring-4',
-                        item.isOnline
-                          ? 'bg-status-success ring-status-success/20'
-                          : 'bg-muted-foreground/45 ring-muted'
-                      )}
-                      aria-hidden="true"
-                    />
-                    <div className="min-w-0">
-                      <div className="flex min-w-0 items-center gap-1.5">
-                        <button
-                          type="button"
-                          onClick={() => onManageMachine(item.id)}
-                          className="min-w-0 truncate rounded-sm text-start text-sm font-normal text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                        >
-                          {item.name}
-                        </button>
-                        {item.id === currentMachineId ? (
-                          <Badge
-                            variant="secondary"
-                            className="shrink-0 px-1.5 py-0 text-[10px] font-normal text-muted-foreground"
-                          >
-                            {t('settings.account.machines.localMachine', 'This machine')}
-                          </Badge>
-                        ) : null}
-                      </div>
-                      <p className="truncate text-[11px] text-muted-foreground">
-                        {item.isOnline
-                          ? t('workspace.machines.online', 'Online')
-                          : t('workspace.machines.offline', 'Offline')}
-                        {item.os ? ` · ${item.os}` : ''}
-                      </p>
-                    </div>
-                    <div className="ms-auto md:hidden">
-                      <AccessStatus sharedWithTeam={item.sharedWithTeam} scope="machine" />
-                    </div>
+          items.map((item) => (
+            <div key={item.id} {...stylex.props(styles.row)}>
+              <div {...stylex.props(styles.identity)}>
+                <span
+                  {...stylex.props(styles.dot, item.isOnline && styles.dotOnline)}
+                  aria-hidden="true"
+                />
+                <div {...stylex.props(styles.identityText)}>
+                  <div {...stylex.props(styles.nameLine)}>
+                    <button
+                      type="button"
+                      onClick={() => onManageMachine(item.id)}
+                      {...stylex.props(styles.nameButton)}
+                    >
+                      {item.name}
+                    </button>
+                    {item.id === currentMachineId ? (
+                      <Badge>{t('settings.account.machines.localMachine', 'This machine')}</Badge>
+                    ) : null}
                   </div>
+                  <p {...stylex.props(styles.status)}>
+                    {item.isOnline
+                      ? t('workspace.machines.online', 'Online')
+                      : t('workspace.machines.offline', 'Offline')}
+                    {item.os ? ` · ${item.os}` : ''}
+                  </p>
+                </div>
+              </div>
 
-                  <div className="hidden md:block">
-                    <AccessStatus sharedWithTeam={item.sharedWithTeam} scope="machine" />
-                  </div>
-
-                  <AgentStackButton
-                    agents={item.agents}
-                    onClick={() => onConfigureAgents(item.id)}
-                  />
-
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    className="h-8 justify-between gap-2 bg-foreground/[0.04] px-2 text-xs font-normal hover:bg-foreground/[0.08]"
-                    onClick={() => toggleDirectories(item.id)}
-                    aria-expanded={expanded}
-                  >
-                    <span className="flex min-w-0 items-center gap-1.5">
-                      <Folder className="h-3.5 w-3.5 shrink-0" strokeWidth={1.75} />
-                      <span className="truncate text-start">
-                        {t('settings.account.machines.directoryCount', {
-                          count: item.directories.length,
-                          defaultValue: '{{count}} directories',
-                        })}
-                      </span>
-                    </span>
-                    <ChevronDown
-                      className={cn(
-                        'h-3.5 w-3.5 shrink-0 transition-transform',
-                        expanded && 'rotate-180'
-                      )}
-                    />
-                  </Button>
-
-                  <Tooltip>
-                    <TooltipTrigger asChild>
+              <div {...stylex.props(styles.controls)}>
+                <AccessStatus sharedWithTeam={item.sharedWithTeam} />
+                <AgentStackButton agents={item.agents} onClick={() => onConfigureAgents(item.id)} />
+                <DirectoriesMenu
+                  directories={item.directories}
+                  onOpenDirectory={(projectKey) => onOpenDirectory(item.id, projectKey)}
+                  onOpenDirectories={() => onOpenDirectories(item.id)}
+                />
+                <Tooltip.Root>
+                  <Tooltip.Trigger
+                    render={
                       <Button
                         type="button"
                         variant="ghost"
-                        size="icon"
-                        className="hidden h-8 w-8 text-muted-foreground md:inline-flex"
+                        size="small"
+                        icon
                         onClick={() => onManageMachine(item.id)}
                         aria-label={t('settings.account.machines.manageMachine', {
                           name: item.name,
                           defaultValue: 'Manage {{name}}',
                         })}
                       >
-                        <MonitorCog className="h-4 w-4" strokeWidth={1.75} />
+                        <MonitorCog strokeWidth={1.75} {...stylex.props(styles.glyph)} />
                       </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      {t('settings.account.machines.manageMachineShort', 'Machine settings')}
-                    </TooltipContent>
-                  </Tooltip>
-                </div>
-
-                {expanded ? (
-                  <div className="border-t border-border/50 bg-foreground/[0.018] px-3 py-2.5">
-                    {item.directories.length === 0 ? (
-                      <div className="flex items-center justify-between gap-3 py-1 text-xs text-muted-foreground">
-                        <span>
-                          {t(
-                            'settings.machines.noConnectedFolders',
-                            'No connected folders on this machine.'
-                          )}
-                        </span>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-7 text-xs"
-                          onClick={() => onOpenDirectories(item.id)}
-                        >
-                          {t('settings.account.machines.openProjects', 'Open Projects')}
-                        </Button>
-                      </div>
-                    ) : (
-                      <div className="space-y-1">
-                        {item.directories.map((directory) => (
-                          <button
-                            key={directory.key}
-                            type="button"
-                            onClick={() => onOpenDirectory(item.id, directory.key)}
-                            className="flex w-full min-w-0 items-center gap-2.5 rounded-md px-2 py-1.5 text-start transition-colors hover:bg-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                          >
-                            <Folder
-                              className="h-3.5 w-3.5 shrink-0 text-muted-foreground"
-                              strokeWidth={1.75}
-                            />
-                            <span className="min-w-0 flex-1">
-                              <span className="block truncate text-xs font-normal text-foreground">
-                                {directory.name}
-                              </span>
-                              <span className="block truncate font-mono text-[10px] text-muted-foreground">
-                                {directory.rootPath}
-                              </span>
-                            </span>
-                            <AccessStatus
-                              sharedWithTeam={directory.sharedWithTeam}
-                              scope="directory"
-                            />
-                            <ChevronRight
-                              className="h-3.5 w-3.5 shrink-0 text-muted-foreground/60"
-                              aria-hidden="true"
-                            />
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                ) : null}
+                    }
+                  />
+                  <Tooltip.Content>
+                    {t('settings.account.machines.manageMachineShort', 'Machine settings')}
+                  </Tooltip.Content>
+                </Tooltip.Root>
               </div>
-            );
-          })
+            </div>
+          ))
         )}
-      </section>
-    </TooltipProvider>
+      </CompactSection>
+    </Tooltip.Provider>
+  );
+}
+
+/**
+ * The section's one header action. `CompactSection` hands a header action the
+ * ghost icon Button's props, so they are forwarded to the Button this wraps.
+ */
+function PrivacyHelp({
+  size = 'small',
+  variant = 'ghost',
+}: {
+  size?: ButtonSize;
+  variant?: ButtonVariant;
+  icon?: boolean;
+}) {
+  const { t } = useTranslation();
+  return (
+    <Tooltip.Root>
+      <Tooltip.Trigger
+        render={
+          <Button
+            type="button"
+            variant={variant}
+            size={size}
+            icon
+            aria-label={t('settings.account.machines.privacyHelpLabel', 'About private access')}
+          >
+            <CircleHelp strokeWidth={1.75} {...stylex.props(styles.glyph)} />
+          </Button>
+        }
+      />
+      <Tooltip.Content side="left">
+        {t(
+          'settings.account.machines.privacyHelp',
+          'Conversations on a private machine, and conversations in private directories on a shared machine, are not visible to other workspace members.'
+        )}
+      </Tooltip.Content>
+    </Tooltip.Root>
+  );
+}
+
+/** The directories a machine shares: a menu that lists them and opens one. */
+function DirectoriesMenu({
+  directories,
+  onOpenDirectory,
+  onOpenDirectories,
+}: {
+  directories: AccountMachineDirectory[];
+  onOpenDirectory: (projectKey: string) => void;
+  onOpenDirectories: () => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <Menu.Root>
+      <Menu.Trigger
+        render={
+          <Button type="button" variant="ghost" size="small">
+            <Folder strokeWidth={1.75} {...stylex.props(styles.icon)} />
+            <span {...stylex.props(styles.truncate)}>
+              {t('settings.account.machines.directoryCount', {
+                count: directories.length,
+                defaultValue: '{{count}} directories',
+              })}
+            </span>
+            <ChevronDown {...stylex.props(styles.icon, styles.iconHint)} />
+          </Button>
+        }
+      />
+      <Menu.Content align="end">
+        {directories.length === 0 ? (
+          <Menu.Group>
+            <Menu.GroupLabel>
+              {t('settings.machines.noConnectedFolders', 'No connected folders on this machine.')}
+            </Menu.GroupLabel>
+            <Menu.Item onClick={onOpenDirectories}>
+              {t('settings.account.machines.openProjects', 'Open Projects')}
+            </Menu.Item>
+          </Menu.Group>
+        ) : (
+          directories.map((directory) => (
+            <Menu.Item
+              key={directory.key}
+              icon={<Folder strokeWidth={1.75} {...stylex.props(styles.glyph)} />}
+              shortcut={
+                directory.sharedWithTeam
+                  ? t('workspace.machines.shared', 'Shared')
+                  : t('workspace.machines.private', 'Private')
+              }
+              onClick={() => onOpenDirectory(directory.key)}
+            >
+              <span {...stylex.props(styles.directory)}>
+                <span {...stylex.props(styles.truncate)}>{directory.name}</span>
+                <span {...stylex.props(styles.truncate, styles.directoryPath)}>
+                  {directory.rootPath}
+                </span>
+              </span>
+            </Menu.Item>
+          ))
+        )}
+      </Menu.Content>
+    </Menu.Root>
   );
 }
 
@@ -382,53 +473,52 @@ function AgentStackButton({ agents, onClick }: { agents: AgentConfigMeta[]; onCl
   const names = agents.map((agent) => agent.name).join(', ');
 
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          className="h-8 min-w-0 justify-between gap-2 bg-foreground/[0.04] px-2 font-normal hover:bg-foreground/[0.08]"
-          onClick={onClick}
-          aria-label={t('settings.account.machines.configureAgents', 'Configure Agents')}
-        >
-          <span className="flex shrink-0 -space-x-1.5" aria-hidden="true">
-            {visibleAgents.length === 0 ? (
-              <span className="flex h-6 w-6 items-center justify-center rounded-full border-2 border-card bg-muted text-muted-foreground">
-                <Bot className="h-3 w-3" strokeWidth={1.75} />
-              </span>
-            ) : (
-              visibleAgents.map((agent) => (
-                <span
-                  key={agent.id}
-                  className="flex h-6 w-6 items-center justify-center rounded-full border-2 border-card bg-background text-foreground"
-                >
-                  <AgentIcon
-                    cliType={agent.cliType}
-                    agentType={agent.agentType}
-                    brandId={agent.brandId}
-                    env={agent.env}
-                    className="h-3 w-3"
-                  />
+    <Tooltip.Root>
+      <Tooltip.Trigger
+        render={
+          <Button
+            type="button"
+            variant="ghost"
+            size="small"
+            onClick={onClick}
+            aria-label={t('settings.account.machines.configureAgents', 'Configure Agents')}
+          >
+            <span {...stylex.props(styles.stack)} aria-hidden="true">
+              {visibleAgents.length === 0 ? (
+                <span {...stylex.props(styles.chip, styles.chipStandIn)}>
+                  <Bot strokeWidth={1.75} {...stylex.props(styles.chipGlyph)} />
                 </span>
-              ))
-            )}
-            {hiddenCount > 0 ? (
-              <span className="flex h-6 min-w-6 items-center justify-center rounded-full border-2 border-card bg-muted px-1 text-[9px] font-normal text-muted-foreground">
-                +{hiddenCount}
-              </span>
-            ) : null}
-          </span>
-          <span className="ms-auto shrink-0 text-xs">
+              ) : (
+                visibleAgents.map((agent, index) => (
+                  <span
+                    key={agent.id}
+                    {...stylex.props(styles.chip, index > 0 && styles.chipStacked)}
+                  >
+                    <AgentIcon
+                      cliType={agent.cliType}
+                      agentType={agent.agentType}
+                      brandId={agent.brandId}
+                      env={agent.env}
+                      className={stylex.props(styles.chipGlyph).className}
+                    />
+                  </span>
+                ))
+              )}
+              {hiddenCount > 0 ? (
+                <span {...stylex.props(styles.chip, styles.chipStacked, styles.chipStandIn)}>
+                  +{hiddenCount}
+                </span>
+              ) : null}
+            </span>
             {t('settings.account.machines.configureAgentsShort', 'Configure')}
-          </span>
-        </Button>
-      </TooltipTrigger>
-      <TooltipContent className="max-w-64">
-        <p className="font-normal">
+          </Button>
+        }
+      />
+      <Tooltip.Content>
+        <p {...stylex.props(styles.tooltipTitle)}>
           {t('settings.account.machines.configureAgents', 'Configure Agents')}
         </p>
-        <p className="mt-0.5 text-muted-foreground">
+        <p {...stylex.props(styles.tooltipHint)}>
           {agents.length > 0
             ? names
             : t(
@@ -436,55 +526,41 @@ function AgentStackButton({ agents, onClick }: { agents: AgentConfigMeta[]; onCl
                 'No Agents are configured on this machine yet.'
               )}
         </p>
-      </TooltipContent>
-    </Tooltip>
+      </Tooltip.Content>
+    </Tooltip.Root>
   );
 }
 
-function AccessStatus({
-  sharedWithTeam,
-  scope,
-}: {
-  sharedWithTeam: boolean;
-  scope: 'machine' | 'directory';
-}) {
+/** Whether workspace members can reach a machine: a standing fact, so a badge. */
+function AccessStatus({ sharedWithTeam }: { sharedWithTeam: boolean }) {
   const { t } = useTranslation();
   const Icon = sharedWithTeam ? Users : LockKeyhole;
   const label = sharedWithTeam
     ? t('workspace.machines.shared', 'Shared')
     : t('workspace.machines.private', 'Private');
   const description = sharedWithTeam
-    ? scope === 'machine'
-      ? t(
-          'workspace.machines.sharedTooltip',
-          'Workspace members can access this machine. Only the machine owner can change sharing.'
-        )
-      : t(
-          'settings.account.machines.sharedDirectoryTooltip',
-          'Workspace members can access this directory.'
-        )
-    : scope === 'machine'
-      ? t(
-          'settings.account.machines.privateMachineTooltip',
-          'Only you can access this machine. Its conversations are not visible to other workspace members.'
-        )
-      : t(
-          'settings.account.machines.privateDirectoryTooltip',
-          'Only you can access this directory. Its conversations are not visible to other workspace members.'
-        );
+    ? t(
+        'workspace.machines.sharedTooltip',
+        'Workspace members can access this machine. Only the machine owner can change sharing.'
+      )
+    : t(
+        'settings.account.machines.privateMachineTooltip',
+        'Only you can access this machine. Its conversations are not visible to other workspace members.'
+      );
 
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <span
-          className="inline-flex shrink-0 cursor-default select-none items-center gap-1 rounded-md bg-foreground/[0.04] px-1.5 py-0.5 text-[10px] text-muted-foreground"
-          aria-label={`${label}. ${description}`}
-        >
-          <Icon className="h-3 w-3" strokeWidth={1.75} aria-hidden="true" />
-          {label}
-        </span>
-      </TooltipTrigger>
-      <TooltipContent className="max-w-64 leading-relaxed">{description}</TooltipContent>
-    </Tooltip>
+    <Tooltip.Root>
+      <Tooltip.Trigger
+        render={
+          <Badge
+            icon={<Icon strokeWidth={1.75} {...stylex.props(styles.glyph)} />}
+            aria-label={`${label}. ${description}`}
+          >
+            {label}
+          </Badge>
+        }
+      />
+      <Tooltip.Content>{description}</Tooltip.Content>
+    </Tooltip.Root>
   );
 }

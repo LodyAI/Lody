@@ -1,7 +1,6 @@
 import { app } from 'electron'
 import { randomBytes } from 'node:crypto'
 import { desktopInstallationProfile } from '../../platform'
-import { isWindowWarmupEnabled } from '../../window-warm-settings'
 import { initialDevbarControl, type DevbarControlInput } from './control'
 import { summarizeDevbarMetrics } from './metrics'
 
@@ -10,8 +9,6 @@ type DevbarMetrics = ReturnType<typeof summarizeDevbarMetrics>
 
 interface DevbarConfig {
   enabled: boolean
-  agentAccess: boolean
-  warmupEnabled: boolean
   preciseMemory: boolean
   devframe:
     | (Pick<DevbarRuntime, 'connection' | 'mcpUrl' | 'uiUrl' | 'embeddedScriptUrl'> & {
@@ -34,8 +31,6 @@ const devbarAuthToken = randomBytes(24).toString('base64url')
 export function getDevbarConfig(): DevbarConfig {
   return {
     enabled: control.enabled,
-    agentAccess: control.agentAccess,
-    warmupEnabled: isWindowWarmupEnabled(),
     preciseMemory,
     devframe: devframeRuntime
       ? {
@@ -46,13 +41,6 @@ export function getDevbarConfig(): DevbarConfig {
           authToken: devbarAuthToken
         }
       : null
-  }
-}
-
-export function configureDevbarDiagnostics(): void {
-  if (preciseMemory) {
-    // Avoid Chromium's bucketized, long-lived performance.memory cache.
-    app.commandLine.appendSwitch('enable-precise-memory-info')
   }
 }
 
@@ -72,7 +60,7 @@ async function createDevbarRuntime(): Promise<DevbarRuntime> {
   }
   return await startDevbarDevframe(
     `${desktopInstallationProfile.desktopProtocol}://devbar?view=main-thread`,
-    { agentAccess: control.agentAccess, rendererOrigin, authToken: devbarAuthToken }
+    { rendererOrigin, authToken: devbarAuthToken }
   )
 }
 
@@ -114,19 +102,15 @@ export async function setDevbarControl(next: DevbarControlInput): Promise<{
   ok: boolean
   config: DevbarConfig
 }> {
-  const previous = control
+  control = next
   if (!next.enabled) {
-    control = next
     await stopDevbarDevframeService()
     return { ok: true, config: getDevbarConfig() }
   }
 
-  const mustRestart = devframeRuntime != null && previous.agentAccess !== next.agentAccess
-  control = next
-  if (mustRestart) await stopDevbarDevframeService()
   const started = await startDevbarDevframeService()
   if (!started) {
-    control = { enabled: false, agentAccess: false, warmupEnabled: false }
+    control = { enabled: false }
   }
   return { ok: started, config: getDevbarConfig() }
 }

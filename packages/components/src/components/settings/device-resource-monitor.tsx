@@ -17,26 +17,262 @@ import {
   Hand,
   TerminalSquare,
 } from 'lucide-react';
-import { Spinner } from '@/ui/spinner';
-import { Button } from '@/ui/button';
-import { Card } from '@/ui/card';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/ui/alert-dialog';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
-import { toast } from 'sonner';
+import * as stylex from '@stylexjs/stylex';
+import { Spinner } from '@lody/ui/spinner';
+import { Button } from '@lody/ui/button';
+import { Tooltip } from '@lody/ui/tooltip';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { corner, radius, space } from '@lody/ui/tokens/scales.stylex';
+import { AlertDialog } from '@/ui/dialog';
+import { toast } from '@/lib/toast';
 import type { MachineMonitorViewState } from '@/hooks/use-machine-monitor';
-import { cn } from '@/lib/utils';
 import { AgentIcon, getAgentDisplayName } from '@/components/icons/agent-icon';
+import { settingsSurface as surface } from './surface';
 
 type SessionPresentationMeta = SessionMeta;
+
+/**
+ * The monitor lays itself out from its own width, not the window's: it renders
+ * inside a settings panel far narrower than the window, so a viewport
+ * breakpoint would put the table's columns into a panel with no room for them.
+ */
+const METRICS_WIDE = '@container (min-width: 420px)';
+const TABLE_WIDE = '@container (min-width: 560px)';
+const TABLE_COLUMNS = 'minmax(160px, 40%) repeat(4, minmax(0, 1fr)) 40px';
+
+const styles = stylex.create({
+  monitor: { containerType: 'inline-size', minWidth: 0 },
+  padded: { paddingInline: space[4] },
+  flush: { paddingInline: 0 },
+  notice: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    gap: space[2],
+    paddingBlock: space[8],
+    textAlign: 'center',
+    fontSize: '0.875em',
+    color: colors.secondaryLabel,
+  },
+  noticeMeta: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    justifyContent: 'center',
+    columnGap: space[2],
+    fontSize: '11px',
+  },
+  waiting: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: space[2],
+    paddingBlock: '40px',
+    fontSize: '0.875em',
+    color: colors.secondaryLabel,
+  },
+  mono: { fontFamily: 'var(--font-mono, ui-monospace, monospace)' },
+
+  metrics: { paddingBlock: space[3] },
+  metricGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+    gap: { default: space[2], [METRICS_WIDE]: space[3] },
+  },
+  /** A metric is a block inside the machine's card: a region fill, not a card. */
+  metric: {
+    minWidth: 0,
+    paddingInline: { default: space[2], [METRICS_WIDE]: space[3] },
+    paddingBlock: { default: space[2], [METRICS_WIDE]: '10px' },
+  },
+  metricHeader: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: { default: space[1], [METRICS_WIDE]: space[1.5] },
+    minWidth: 0,
+    fontSize: { default: '11px', [METRICS_WIDE]: '12px' },
+    color: colors.secondaryLabel,
+  },
+  metricIcon: {
+    flexShrink: 0,
+    width: { default: '12px', [METRICS_WIDE]: '14px' },
+    height: { default: '12px', [METRICS_WIDE]: '14px' },
+  },
+  truncate: {
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  hint: { color: colors.tertiaryLabel },
+  narrowOnly: { display: { default: 'inline', [METRICS_WIDE]: 'none' } },
+  wideOnly: { display: { default: 'none', [METRICS_WIDE]: 'inline' } },
+  stat: {
+    display: 'flex',
+    alignItems: 'baseline',
+    gap: { default: space[1.5], [METRICS_WIDE]: space[2] },
+    marginTop: space[1],
+  },
+  statLabel: {
+    flexShrink: 0,
+    width: { default: '28px', [METRICS_WIDE]: '32px' },
+    fontSize: '10px',
+    color: colors.tertiaryLabel,
+  },
+  statValue: {
+    fontSize: { default: '12px', [METRICS_WIDE]: '14px' },
+    fontVariantNumeric: 'tabular-nums',
+    color: colors.label,
+  },
+
+  sessions: {
+    paddingTop: { default: space[4], [TABLE_WIDE]: '20px' },
+    paddingBottom: { default: space[3], [TABLE_WIDE]: space[4] },
+  },
+  sessionsPadded: { paddingInline: { default: space[2], [TABLE_WIDE]: space[4] } },
+  truncated: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: space[1.5],
+    marginTop: space[2],
+    fontSize: '12px',
+    color: colors.warning,
+  },
+  truncatedIcon: { flexShrink: 0, width: '14px', height: '14px' },
+
+  /** The session list is a region inside the card, its rows ruled; no head band. */
+  table: { paddingInline: 0, paddingBlock: 0, overflow: 'hidden' },
+  head: {
+    display: { default: 'none', [TABLE_WIDE]: 'grid' },
+    gridTemplateColumns: TABLE_COLUMNS,
+    gap: '10px',
+    paddingInline: space[2],
+    paddingBlock: space[1.5],
+    fontSize: '11px',
+    color: colors.secondaryLabel,
+  },
+  center: { textAlign: 'center' },
+  row: {
+    display: 'grid',
+    gridTemplateColumns: { default: 'minmax(0, 1fr) auto', [TABLE_WIDE]: TABLE_COLUMNS },
+    alignItems: 'center',
+    columnGap: { default: space[2], [TABLE_WIDE]: '10px' },
+    rowGap: '2px',
+    minHeight: '56px',
+    paddingInline: { default: space[1], [TABLE_WIDE]: space[2] },
+    paddingBlock: space[2],
+  },
+  rowHovered: { backgroundColor: colors.hoverFill },
+  open: {
+    gridColumn: { default: 'span 2', [TABLE_WIDE]: 'span 1' },
+    display: 'flex',
+    alignItems: 'center',
+    gap: '10px',
+    minWidth: 0,
+    margin: 0,
+    paddingInline: space[1],
+    paddingBlock: { default: '2px', [TABLE_WIDE]: space[1] },
+    borderWidth: 0,
+    borderRadius: radius.small,
+    cornerShape: corner.round,
+    backgroundColor: 'transparent',
+    color: colors.label,
+    fontFamily: 'inherit',
+    fontSize: '1em',
+    textAlign: 'start',
+    cursor: { default: 'pointer', ':disabled': 'default' },
+    outlineStyle: 'none',
+    boxShadow: { default: 'none', ':focus-visible': `0 0 0 2px ${colors.accent}` },
+  },
+  /** The agent's mark: it stands for something outside the interface, so a gray. */
+  agentTile: {
+    display: 'flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '32px',
+    height: '32px',
+    borderRadius: radius.small,
+    cornerShape: corner.shape,
+    backgroundColor: colors.gray5,
+    color: colors.label,
+  },
+  agentGlyph: { width: '16px', height: '16px' },
+  sessionText: { minWidth: 0 },
+  sessionTitle: { fontSize: { default: '0.875em', [TABLE_WIDE]: '0.8em' }, fontWeight: 400 },
+  agentName: {
+    display: { default: 'none', [TABLE_WIDE]: 'block' },
+    fontSize: '11px',
+    color: colors.secondaryLabel,
+  },
+  cellStatus: {
+    display: { default: 'none', [TABLE_WIDE]: 'flex' },
+    justifyContent: 'center',
+    minWidth: 0,
+  },
+  cell: {
+    display: { default: 'none', [TABLE_WIDE]: 'block' },
+    fontSize: '12px',
+    fontVariantNumeric: 'tabular-nums',
+  },
+  cellActions: {
+    display: { default: 'none', [TABLE_WIDE]: 'flex' },
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: '2px',
+  },
+  /** Too narrow for columns: the figures follow the title on a line of their own. */
+  compact: {
+    gridColumn: 'span 2',
+    display: { default: 'flex', [TABLE_WIDE]: 'none' },
+    alignItems: 'center',
+    gap: { default: space[1], '@container (min-width: 360px)': space[2] },
+    minHeight: '32px',
+    minWidth: 0,
+    paddingInline: space[1],
+    fontSize: { default: '11px', '@container (min-width: 360px)': '12px' },
+    fontVariantNumeric: 'tabular-nums',
+    color: colors.secondaryLabel,
+  },
+  compactStatus: { flexGrow: 1, flexShrink: 1, minWidth: 0 },
+  compactFigure: { flexShrink: 0, whiteSpace: 'nowrap' },
+  compactActions: { display: 'flex', flexShrink: 0, gap: '2px' },
+  glyph: { width: '100%', height: '100%' },
+
+  status: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '20px',
+    height: '20px',
+    borderRadius: radius.mini,
+    cornerShape: corner.round,
+    outlineStyle: 'none',
+    boxShadow: { default: 'none', ':focus-visible': `0 0 0 2px ${colors.accent}` },
+  },
+  statusLabelled: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: space[1.5],
+    width: 'fit-content',
+    fontSize: '11px',
+    color: colors.secondaryLabel,
+  },
+  statusMark: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '14px',
+    height: '14px',
+  },
+  statusGlyph: { width: '14px', height: '14px' },
+  statusGlyphIdle: { width: '12px', height: '12px' },
+  toneSuccess: { color: colors.success },
+  toneWarning: { color: colors.warning },
+  toneDestructive: { color: colors.destructive },
+  toneIdle: { color: colors.tertiaryLabel },
+  toneTransition: { color: colors.tertiaryLabel },
+});
 
 export function DeviceResourceMonitor({
   snapshot,
@@ -62,20 +298,15 @@ export function DeviceResourceMonitor({
 }) {
   const { t } = useTranslation();
   const versionLabel = cliVersion ? `v${cliVersion}` : null;
-  const sectionPadX = flush ? 'px-0' : 'px-4';
+  const inset = flush ? styles.flush : styles.padded;
   if (state === 'disabled') {
     return (
-      <div
-        className={cn(
-          'flex flex-col items-center gap-2 py-8 text-center text-sm text-muted-foreground',
-          sectionPadX
-        )}
-      >
+      <div {...stylex.props(styles.notice, inset)}>
         {(os || versionLabel) && (
-          <div className="flex flex-wrap items-center justify-center gap-x-2 text-[11px]">
+          <div {...stylex.props(styles.noticeMeta)}>
             {os && <span>{os}</span>}
             {os && versionLabel && <span aria-hidden>·</span>}
-            {versionLabel && <span className="font-mono">{versionLabel}</span>}
+            {versionLabel && <span {...stylex.props(styles.mono)}>{versionLabel}</span>}
           </div>
         )}
         {t(
@@ -87,22 +318,22 @@ export function DeviceResourceMonitor({
   }
   if (!snapshot) {
     return (
-      <div
-        className={cn(
-          'flex items-center justify-center gap-2 py-10 text-sm text-muted-foreground',
-          sectionPadX
-        )}
-      >
-        <Spinner className="h-4 w-4" />
+      <div {...stylex.props(styles.waiting, inset)}>
+        <Spinner label={null} />
         {t('settings.devices.monitor.observing', 'Waiting for a resource sample')}
       </div>
     );
   }
 
+  const usedMemoryBytes = Math.max(
+    0,
+    snapshot.effectiveMemoryBytes - snapshot.availableMemoryBytes
+  );
+
   return (
-    <div>
-      <section className={cn('py-3', sectionPadX)}>
-        <div className="grid grid-cols-3 gap-2 sm:gap-3">
+    <div {...stylex.props(styles.monitor)}>
+      <section {...stylex.props(styles.metrics, inset)}>
+        <div {...stylex.props(styles.metricGrid)}>
           <ResourceMetric
             icon={TerminalSquare}
             label={t('settings.devices.resources.cli', 'CLI')}
@@ -115,17 +346,13 @@ export function DeviceResourceMonitor({
             mobileLabel="ACP"
             resource={snapshot.sessionsAggregate}
           />
-          <Card className="min-w-0 bg-card/40 p-2 shadow-none sm:p-3">
-            <div className="flex items-center gap-1 text-[11px] text-muted-foreground sm:gap-1.5 sm:text-xs">
-              <Gauge className="h-3 w-3 shrink-0 sm:h-3.5 sm:w-3.5" />
-              <span className="truncate">
+          <div {...stylex.props(surface.formBlock, styles.metric)}>
+            <div {...stylex.props(styles.metricHeader)}>
+              <Gauge {...stylex.props(styles.metricIcon)} />
+              <span {...stylex.props(styles.truncate)}>
                 {t('settings.devices.resources.deviceInfo', 'Device info')}
               </span>
-              {os && (
-                <span className="min-w-0 truncate font-normal text-muted-foreground/80">
-                  · {os}
-                </span>
-              )}
+              {os && <span {...stylex.props(styles.truncate, styles.hint)}>· {os}</span>}
             </div>
             <StatRow
               label={t('settings.devices.sessions.cpu', 'CPU')}
@@ -135,26 +362,21 @@ export function DeviceResourceMonitor({
               label={t('settings.devices.sessions.memoryShort', 'Mem')}
               value={
                 <>
-                  <span className="sm:hidden">
-                    {formatBytePair(
-                      Math.max(0, snapshot.effectiveMemoryBytes - snapshot.availableMemoryBytes),
-                      snapshot.effectiveMemoryBytes
-                    )}
+                  <span {...stylex.props(styles.narrowOnly)}>
+                    {formatBytePair(usedMemoryBytes, snapshot.effectiveMemoryBytes)}
                   </span>
-                  <span className="hidden sm:inline">
-                    {`${formatBytes(
-                      Math.max(0, snapshot.effectiveMemoryBytes - snapshot.availableMemoryBytes)
-                    )} / ${formatBytes(snapshot.effectiveMemoryBytes)}`}
+                  <span {...stylex.props(styles.wideOnly)}>
+                    {formatBytes(usedMemoryBytes)} / {formatBytes(snapshot.effectiveMemoryBytes)}
                   </span>
                 </>
               }
             />
-          </Card>
+          </div>
         </div>
       </section>
 
       {snapshot.sessions.length > 0 || snapshot.sessionsTruncated ? (
-        <section className={cn('pb-3 pt-4 md:pb-4 md:pt-5', flush ? 'px-0' : 'px-2 md:px-4')}>
+        <section {...stylex.props(styles.sessions, flush ? styles.flush : styles.sessionsPadded)}>
           {snapshot.sessions.length > 0 ? (
             <SessionTable
               sessions={snapshot.sessions}
@@ -165,8 +387,8 @@ export function DeviceResourceMonitor({
             />
           ) : null}
           {snapshot.sessionsTruncated ? (
-            <div className="mt-2 flex items-center gap-1.5 text-xs text-status-warning">
-              <AlertTriangle className="h-3.5 w-3.5" />
+            <div {...stylex.props(styles.truncated)}>
+              <AlertTriangle {...stylex.props(styles.truncatedIcon)} />
               {t('settings.devices.sessions.truncated', 'Only the first 100 sessions are shown.')}
             </div>
           ) : null}
@@ -191,13 +413,17 @@ function ResourceMetric({
 }) {
   const { t } = useTranslation();
   return (
-    <Card className="min-w-0 bg-card/40 p-2 shadow-none sm:p-3">
-      <div className="flex items-center gap-1 text-[11px] text-muted-foreground sm:gap-1.5 sm:text-xs">
-        <Icon className="h-3 w-3 shrink-0 sm:h-3.5 sm:w-3.5" />
-        {mobileLabel && <span className="truncate sm:hidden">{mobileLabel}</span>}
-        <span className={cn('truncate', mobileLabel && 'hidden sm:inline')}>{label}</span>
+    <div {...stylex.props(surface.formBlock, styles.metric)}>
+      <div {...stylex.props(styles.metricHeader)}>
+        <Icon {...stylex.props(styles.metricIcon)} />
+        {mobileLabel && (
+          <span {...stylex.props(styles.truncate, styles.narrowOnly)}>{mobileLabel}</span>
+        )}
+        <span {...stylex.props(styles.truncate, mobileLabel != null && styles.wideOnly)}>
+          {label}
+        </span>
         {trailing && (
-          <span className="min-w-0 truncate font-mono text-muted-foreground/80">{trailing}</span>
+          <span {...stylex.props(styles.truncate, styles.mono, styles.hint)}>{trailing}</span>
         )}
       </div>
       <StatRow label={t('settings.devices.sessions.cpu', 'CPU')} value={formatCpu(resource)} />
@@ -205,18 +431,16 @@ function ResourceMetric({
         label={t('settings.devices.sessions.memoryShort', 'Mem')}
         value={formatBytes(resource.memoryBytes)}
       />
-    </Card>
+    </div>
   );
 }
 
 /** Micro-label + prominent value pair used by the resource metric groups. */
 function StatRow({ label, value }: { label: string; value: ReactNode }) {
   return (
-    <div className="mt-1 flex items-baseline gap-1.5 sm:gap-2">
-      <span className="w-7 shrink-0 text-[10px] text-muted-foreground/70 sm:w-8">{label}</span>
-      <span className="min-w-0 truncate text-xs font-normal tabular-nums text-foreground sm:text-sm">
-        {value}
-      </span>
+    <div {...stylex.props(styles.stat)}>
+      <span {...stylex.props(styles.statLabel)}>{label}</span>
+      <span {...stylex.props(styles.truncate, styles.statValue)}>{value}</span>
     </div>
   );
 }
@@ -271,17 +495,21 @@ function SessionTable({
 
   return (
     <>
-      <div className="overflow-hidden rounded-lg border border-border/60 bg-background">
-        <div className="hidden grid-cols-[minmax(160px,40%)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_40px] gap-2.5 bg-muted/25 px-2 py-1.5 text-[11px] font-normal text-muted-foreground md:grid">
+      <div {...stylex.props(surface.formBlock, styles.table)}>
+        <div {...stylex.props(styles.head)}>
           <span>{t('settings.devices.sessions.session', 'Session')}</span>
-          <span className="truncate text-center">
+          <span {...stylex.props(styles.truncate, styles.center)}>
             {t('settings.devices.sessions.status', 'Status')}
           </span>
-          <span className="truncate text-center">
+          <span {...stylex.props(styles.truncate, styles.center)}>
             {t('settings.devices.sessions.memory', 'Memory')}
           </span>
-          <span className="truncate text-center">{t('settings.devices.sessions.cpu', 'CPU')}</span>
-          <span className="truncate">{t('settings.devices.sessions.processes', 'Processes')}</span>
+          <span {...stylex.props(styles.truncate, styles.center)}>
+            {t('settings.devices.sessions.cpu', 'CPU')}
+          </span>
+          <span {...stylex.props(styles.truncate)}>
+            {t('settings.devices.sessions.processes', 'Processes')}
+          </span>
           <span aria-label={t('settings.devices.sessions.actions', 'Actions')} />
         </div>
         {sessions.map((session, index) => {
@@ -294,148 +522,133 @@ function SessionTable({
           const title = meta?.title?.trim() || t('settings.devices.sessions.untitled', 'Untitled');
           const isTerminating = terminatingSessionId === session.sessionId;
           const isHovered = hoveredSessionId === session.sessionId;
+          const terminateButton = (
+            <SessionActionButton
+              label={t('settings.devices.sessions.terminate', 'Terminate ACP process')}
+              destructive
+              disabled={isTerminating}
+              onClick={() => {
+                if (isActiveSessionStatus(session.status)) setConfirmSession(session);
+                else void terminate(session);
+              }}
+            >
+              {isTerminating ? (
+                <Spinner size="small" label={null} />
+              ) : (
+                <CircleStop {...stylex.props(styles.glyph)} />
+              )}
+            </SessionActionButton>
+          );
           return (
             <div
               key={session.sessionId}
-              className={cn(
-                'grid min-h-14 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2 gap-y-0.5 border-t border-border/50 px-1 py-2 transition-colors md:grid-cols-[minmax(160px,40%)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_40px] md:gap-2.5 md:px-2',
-                index === 0 && 'border-t-0 md:border-t',
-                isHovered && 'bg-muted'
+              {...stylex.props(
+                styles.row,
+                index > 0 && surface.lineRuled,
+                isHovered && styles.rowHovered
               )}
             >
               <button
                 type="button"
                 disabled={!onOpenSession}
-                className="col-span-2 flex min-w-0 items-center gap-2.5 rounded-md px-1 py-0.5 text-left enabled:cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default md:col-span-1 md:p-1"
+                {...stylex.props(styles.open)}
                 onMouseEnter={() => {
                   if (onOpenSession) setHoveredSessionId(session.sessionId);
                 }}
                 onMouseLeave={() => setHoveredSessionId(null)}
                 onClick={() => onOpenSession?.(session, meta)}
               >
-                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-border/60 bg-muted/30 text-foreground">
+                <div {...stylex.props(styles.agentTile)}>
                   {cliType && agentType ? (
                     <AgentIcon
                       cliType={cliType}
                       agentType={agentType}
                       brandId={config?.brandId}
                       env={config?.env}
-                      className="h-4 w-4"
+                      className={stylex.props(styles.agentGlyph).className}
                     />
                   ) : (
-                    <Cpu className="h-4 w-4" />
+                    <Cpu {...stylex.props(styles.agentGlyph)} />
                   )}
                 </div>
-                <div className="min-w-0">
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <div className="truncate text-sm font-normal md:text-xs">{title}</div>
-                    </TooltipTrigger>
-                    <TooltipContent className="max-w-sm break-words">{title}</TooltipContent>
-                  </Tooltip>
-                  {/* Mobile devices view shows only the ACP logo + conversation
-                      title; the agent-type line stays on the wider desktop table. */}
-                  <div className="hidden truncate text-[11px] text-muted-foreground md:block">
-                    {agentName}
-                  </div>
+                <div {...stylex.props(styles.sessionText)}>
+                  <Tooltip.Root>
+                    <Tooltip.Trigger
+                      render={
+                        <div {...stylex.props(styles.truncate, styles.sessionTitle)}>{title}</div>
+                      }
+                    />
+                    <Tooltip.Content>{title}</Tooltip.Content>
+                  </Tooltip.Root>
+                  {/* Too narrow for columns, the row shows only the ACP logo and
+                      the conversation title; the agent-type line joins the columns. */}
+                  <div {...stylex.props(styles.truncate, styles.agentName)}>{agentName}</div>
                 </div>
               </button>
-              <div className="hidden min-w-0 justify-center md:flex">
+              <div {...stylex.props(styles.cellStatus)}>
                 <StatusIcon status={session.status} />
               </div>
-              <div className="hidden min-w-0 truncate text-center text-xs tabular-nums md:block">
+              <div {...stylex.props(styles.truncate, styles.cell, styles.center)}>
                 {formatBytes(session.resource.memoryBytes)}
               </div>
-              <div className="hidden min-w-0 truncate text-center text-xs tabular-nums md:block">
+              <div {...stylex.props(styles.truncate, styles.cell, styles.center)}>
                 {formatCpu(session.resource)}
               </div>
-              <div className="hidden min-w-0 truncate text-xs tabular-nums md:block">
+              <div {...stylex.props(styles.truncate, styles.cell)}>
                 {session.resource.processCount ?? '-'}
               </div>
-              <div className="hidden items-center justify-end gap-0.5 md:flex">
-                {onTerminateSession && (
-                  <SessionActionButton
-                    label={t('settings.devices.sessions.terminate', 'Terminate ACP process')}
-                    destructive
-                    disabled={isTerminating}
-                    onClick={() => {
-                      if (isActiveSessionStatus(session.status)) setConfirmSession(session);
-                      else void terminate(session);
-                    }}
-                  >
-                    {isTerminating ? (
-                      <Spinner className="h-3.5 w-3.5" />
-                    ) : (
-                      <CircleStop className="h-3.5 w-3.5" />
-                    )}
-                  </SessionActionButton>
-                )}
+              <div {...stylex.props(styles.cellActions)}>
+                {onTerminateSession && terminateButton}
               </div>
-              <div className="col-span-2 flex min-h-8 min-w-0 items-center gap-1 px-1 text-[11px] tabular-nums text-muted-foreground min-[360px]:gap-2 min-[360px]:text-xs md:hidden">
-                <div className="min-w-0 flex-1">
+              <div data-session-compact-row {...stylex.props(styles.compact)}>
+                <div {...stylex.props(styles.compactStatus)}>
                   <StatusIcon status={session.status} showLabel />
                 </div>
-                <span className="shrink-0 whitespace-nowrap">
+                <span {...stylex.props(styles.compactFigure)}>
                   {formatCpu(session.resource)} {t('settings.devices.sessions.cpu', 'CPU')}
                 </span>
-                <span className="shrink-0 whitespace-nowrap">
+                <span {...stylex.props(styles.compactFigure)}>
                   {formatBytes(session.resource.memoryBytes)}{' '}
                   {t('settings.devices.sessions.memoryShort', 'Mem')}
                 </span>
-                <span className="shrink-0 whitespace-nowrap">
+                <span {...stylex.props(styles.compactFigure)}>
                   {session.resource.processCount === null
                     ? '-'
                     : t('settings.devices.sessions.processCount', '{{count}} proc', {
                         count: session.resource.processCount,
                       })}
                 </span>
-                <span className="flex shrink-0 gap-0.5">
-                  {onTerminateSession && (
-                    <SessionActionButton
-                      label={t('settings.devices.sessions.terminate', 'Terminate ACP process')}
-                      destructive
-                      disabled={isTerminating}
-                      onClick={() => {
-                        if (isActiveSessionStatus(session.status)) setConfirmSession(session);
-                        else void terminate(session);
-                      }}
-                    >
-                      {isTerminating ? (
-                        <Spinner className="h-4 w-4" />
-                      ) : (
-                        <CircleStop className="h-4 w-4" />
-                      )}
-                    </SessionActionButton>
-                  )}
+                <span {...stylex.props(styles.compactActions)}>
+                  {onTerminateSession && terminateButton}
                 </span>
               </div>
             </div>
           );
         })}
       </div>
-      <AlertDialog
+      <AlertDialog.Root
         open={confirmSession !== null}
         onOpenChange={(open) => !open && setConfirmSession(null)}
       >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
+        <AlertDialog.Content>
+          <AlertDialog.Header>
+            <AlertDialog.Title>
               {t(
                 'settings.devices.sessions.terminateConfirmTitle',
                 'Terminate running ACP process?'
               )}
-            </AlertDialogTitle>
-            <AlertDialogDescription>
+            </AlertDialog.Title>
+            <AlertDialog.Description>
               {t(
                 'settings.devices.sessions.terminateConfirmDescription',
                 'The active agent turn will stop immediately. The session and its files will remain available.'
               )}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>{t('common.cancel', 'Cancel')}</AlertDialogCancel>
-            <AlertDialogAction
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            </AlertDialog.Description>
+          </AlertDialog.Header>
+          <AlertDialog.Footer>
+            <AlertDialog.Cancel>{t('common.cancel', 'Cancel')}</AlertDialog.Cancel>
+            <AlertDialog.Action
+              variant="destructive"
               disabled={!confirmSession}
               onClick={() => {
                 const session = confirmSession;
@@ -444,10 +657,10 @@ function SessionTable({
               }}
             >
               {t('settings.devices.sessions.terminateAction', 'Terminate')}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+            </AlertDialog.Action>
+          </AlertDialog.Footer>
+        </AlertDialog.Content>
+      </AlertDialog.Root>
     </>
   );
 }
@@ -466,25 +679,25 @@ function SessionActionButton({
   children: ReactNode;
 }) {
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Button
-          type="button"
-          size="icon"
-          variant="ghost"
-          className={cn(
-            'h-8 w-8 md:h-7 md:w-7',
-            destructive && 'text-destructive hover:text-destructive'
-          )}
-          disabled={disabled}
-          onClick={onClick}
-          aria-label={label}
-        >
-          {children}
-        </Button>
-      </TooltipTrigger>
-      <TooltipContent>{label}</TooltipContent>
-    </Tooltip>
+    <Tooltip.Root>
+      <Tooltip.Trigger
+        render={
+          <Button
+            type="button"
+            icon
+            variant="ghost"
+            size="small"
+            tone={destructive ? 'destructive' : 'neutral'}
+            disabled={disabled}
+            onClick={onClick}
+            aria-label={label}
+          >
+            {children}
+          </Button>
+        }
+      />
+      <Tooltip.Content>{label}</Tooltip.Content>
+    </Tooltip.Root>
   );
 }
 
@@ -511,25 +724,40 @@ function StatusIcon({
 }) {
   const { t } = useTranslation();
   const label = t(`settings.devices.status.${status}`, status.replace('_', ' '));
+  // The mark carries the tone; a Spinner draws in the colour it stands in.
+  const tone = (() => {
+    switch (status) {
+      case 'running':
+        return styles.toneSuccess;
+      case 'waiting_permission':
+        return styles.toneWarning;
+      case 'failed':
+        return styles.toneDestructive;
+      case 'idle':
+        return styles.toneIdle;
+      default:
+        return styles.toneTransition;
+    }
+  })();
   const icon = (() => {
     switch (status) {
       case 'running':
-        return <Spinner className="h-3.5 w-3.5 text-status-success" />;
+        return <Spinner size="small" label={null} />;
       case 'waiting_permission':
-        return <Hand className="h-3.5 w-3.5 text-status-warning" />;
+        return <Hand {...stylex.props(styles.statusGlyph)} />;
       case 'failed':
-        return <CircleX className="h-3.5 w-3.5 text-destructive" />;
+        return <CircleX {...stylex.props(styles.statusGlyph)} />;
       case 'idle':
-        return <Circle className="h-3 w-3 text-muted-foreground/50" />;
+        return <Circle {...stylex.props(styles.statusGlyphIdle)} />;
       // initializing / finalizing / stopping — transitional states
       default:
-        return <Spinner className="h-3.5 w-3.5 text-muted-foreground/60" />;
+        return <Spinner size="small" label={null} />;
     }
   })();
   if (showLabel) {
     return (
-      <span className="flex w-fit items-center gap-1.5 text-[11px] text-muted-foreground">
-        <span aria-hidden className="flex h-3.5 w-3.5 items-center justify-center">
+      <span {...stylex.props(styles.statusLabelled)}>
+        <span aria-hidden {...stylex.props(styles.statusMark, tone)}>
           {icon}
         </span>
         {label}
@@ -537,19 +765,16 @@ function StatusIcon({
     );
   }
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <span
-          role="img"
-          aria-label={label}
-          tabIndex={0}
-          className="flex h-5 w-5 items-center justify-center rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        >
-          {icon}
-        </span>
-      </TooltipTrigger>
-      <TooltipContent>{label}</TooltipContent>
-    </Tooltip>
+    <Tooltip.Root>
+      <Tooltip.Trigger
+        render={
+          <span role="img" aria-label={label} tabIndex={0} {...stylex.props(styles.status, tone)}>
+            {icon}
+          </span>
+        }
+      />
+      <Tooltip.Content>{label}</Tooltip.Content>
+    </Tooltip.Root>
   );
 }
 

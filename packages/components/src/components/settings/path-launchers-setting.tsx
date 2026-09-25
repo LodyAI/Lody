@@ -3,37 +3,18 @@ import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
 import { usePostHog } from '@posthog/react';
 import { Check, Pencil, Plus, Trash2 } from 'lucide-react';
-import { Button } from '@/ui/button';
-import { Input } from '@/ui/input';
-import { Label } from '@/ui/label';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/ui/dialog';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectSeparator,
-  SelectTrigger,
-  SelectValue,
-} from '@/ui/select';
+import * as stylex from '@stylexjs/stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { space, text } from '@lody/ui/tokens/scales.stylex';
+import { Button } from '@lody/ui/button';
+import { Input } from '@lody/ui/input';
+import { Field as UiField } from '@lody/ui/field';
+import { Dialog } from '@/ui/dialog';
+import { Select } from '@lody/ui/select';
 import { getPathLauncherIcon } from '@/components/icons/path-launcher-icon';
 import { capturePostHogEvent } from '@/lib/posthog-analytics';
-import { cn } from '@/lib/utils';
 import { useIsMobile } from '@/hooks/use-mobile';
-import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetFooter,
-  SheetHeader,
-  SheetTitle,
-} from '@/ui/sheet';
+import { Drawer } from '@lody/ui/drawer';
 import {
   createCustomPathLauncherId,
   DEFAULT_PATH_LAUNCHER_PREFERENCE,
@@ -64,6 +45,68 @@ type PathLauncherDraft =
       label: string;
       commandTemplate: string;
     };
+
+const MONO = 'var(--font-mono, ui-monospace, monospace)';
+
+/** A command is typed in the face it runs in; the input owns every other declaration. */
+const COMMAND_INPUT_STYLE = { fontFamily: MONO } as const;
+
+const styles = stylex.create({
+  /** A row's own action: hidden until the row is under the pointer or the keyboard. */
+  rowReveal: {
+    display: 'inline-flex',
+    opacity: {
+      default: 0,
+      [stylex.when.ancestor(':hover')]: 1,
+      [stylex.when.ancestor(':focus')]: 1,
+    },
+    pointerEvents: {
+      default: 'none',
+      [stylex.when.ancestor(':hover')]: 'auto',
+      [stylex.when.ancestor(':focus')]: 'auto',
+    },
+  },
+  /** A select takes a fixed column on a wide panel and the row on a narrow one. */
+  select: { width: { default: '100%', '@media (min-width: 640px)': '220px' } },
+  option: { display: 'flex', minWidth: 0, alignItems: 'center', gap: space[2] },
+  optionIcon: { width: '16px', height: '16px', flexShrink: 0 },
+  optionIconMuted: { color: colors.secondaryLabel },
+  optionLabel: {
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  addCustom: { color: colors.secondaryLabel },
+  glyph: { width: '100%', height: '100%' },
+  form: { display: 'flex', flexDirection: 'column', gap: space[4] },
+  field: { display: 'flex', flexDirection: 'column', gap: space[1.5] },
+  preview: {
+    margin: 0,
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontFamily: MONO,
+    fontSize: text.captionSize,
+    color: colors.secondaryLabel,
+  },
+  previewLabel: { color: colors.tertiaryLabel },
+  error: { margin: 0, fontSize: text.footnoteSize, color: colors.destructive },
+  /**
+   * The footer's one row: delete at the start, the answers at the end, on every
+   * width — the panel's own footer stacks its answers on a narrow one.
+   */
+  footerRow: {
+    display: 'flex',
+    flexGrow: 1,
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: space[2],
+  },
+  answers: { display: 'flex', alignItems: 'center', gap: space[2], marginInlineStart: 'auto' },
+  icon: { width: '14px', height: '14px', flexShrink: 0 },
+});
 
 const PREVIEW_SAMPLE_PATH = '~/code/my-project';
 const ADD_CUSTOM_LAUNCHER_VALUE = '__add_custom_launcher__';
@@ -183,7 +226,7 @@ export function PathLaunchersSettings({
 
   return (
     <>
-      <CompactSection className="overflow-hidden">
+      <CompactSection>
         <CompactRow
           label={t('settings.pathLaunchers.title', 'Path launchers')}
           helper={t(
@@ -191,70 +234,79 @@ export function PathLaunchersSettings({
             'Pick the app the Open button uses in session headers.'
           )}
         >
-          <Select
+          <Select.Root
             open={selectOpen}
             onOpenChange={setSelectOpen}
             value={selectedLauncherId}
-            onValueChange={handleSelectDefault}
+            onValueChange={(value) => {
+              if (value != null) handleSelectDefault(value);
+            }}
           >
-            <SelectTrigger
-              aria-label={t('settings.pathLaunchers.default.label', 'Default launcher')}
-              className="w-full sm:w-[220px]"
-            >
-              <SelectValue>
-                <LauncherOptionContent launcher={selectedLauncher} />
-              </SelectValue>
-            </SelectTrigger>
-            <SelectContent>
+            <div {...stylex.props(styles.select)}>
+              <Select.Trigger
+                aria-label={t('settings.pathLaunchers.default.label', 'Default launcher')}
+              >
+                <Select.Value>
+                  <LauncherOptionContent launcher={selectedLauncher} />
+                </Select.Value>
+              </Select.Trigger>
+            </div>
+            <Select.Content>
               {pathLauncherOptions.map((launcher) => {
                 const launcherId = getPathLauncherId(launcher);
                 const customLauncherId = launcher.kind === 'custom' ? launcher.id : null;
                 return (
-                  <SelectItem
+                  <Select.Item
                     key={launcherId}
                     value={launcherId}
-                    className={cn(customLauncherId && 'group/path-launcher pr-14')}
+                    // A marker, not a look: it lets the edit action show while this
+                    // row is under the pointer or the keyboard.
+                    className={stylex.props(stylex.defaultMarker()).className}
+                    endContent={
+                      customLauncherId ? (
+                        <span {...stylex.props(styles.rowReveal)}>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            tabIndex={-1}
+                            size="mini"
+                            icon
+                            aria-label={t('settings.pathLaunchers.editAction', 'Edit')}
+                            title={t('settings.pathLaunchers.editAction', 'Edit')}
+                            onPointerDown={(event) => {
+                              event.preventDefault();
+                              event.stopPropagation();
+                            }}
+                            onPointerUp={(event) => event.stopPropagation()}
+                            onClick={(event) => {
+                              event.preventDefault();
+                              event.stopPropagation();
+                              handleEditCustomLauncher(customLauncherId);
+                            }}
+                          >
+                            <Pencil {...stylex.props(styles.glyph)} />
+                          </Button>
+                        </span>
+                      ) : null
+                    }
                   >
                     <LauncherOptionContent launcher={launcher} />
-                    {customLauncherId ? (
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        tabIndex={-1}
-                        className="pointer-events-none absolute right-7 top-1/2 size-6 -translate-y-1/2 opacity-0 transition-opacity group-hover/path-launcher:pointer-events-auto group-hover/path-launcher:opacity-100 group-focus/path-launcher:pointer-events-auto group-focus/path-launcher:opacity-100"
-                        aria-label={t('settings.pathLaunchers.editAction', 'Edit')}
-                        title={t('settings.pathLaunchers.editAction', 'Edit')}
-                        onPointerDown={(event) => {
-                          event.preventDefault();
-                          event.stopPropagation();
-                        }}
-                        onPointerUp={(event) => event.stopPropagation()}
-                        onClick={(event) => {
-                          event.preventDefault();
-                          event.stopPropagation();
-                          handleEditCustomLauncher(customLauncherId);
-                        }}
-                      >
-                        <Pencil className="size-3.5" />
-                      </Button>
-                    ) : null}
-                  </SelectItem>
+                  </Select.Item>
                 );
               })}
               {isElectron ? (
                 <>
-                  <SelectSeparator />
-                  <SelectItem value={ADD_CUSTOM_LAUNCHER_VALUE}>
-                    <span className="flex items-center gap-2 text-muted-foreground">
-                      <Plus className="size-4 shrink-0" />
+                  <Select.Separator />
+                  <Select.Item value={ADD_CUSTOM_LAUNCHER_VALUE}>
+                    <span {...stylex.props(styles.option, styles.addCustom)}>
+                      <Plus {...stylex.props(styles.optionIcon)} />
                       <span>{t('settings.pathLaunchers.addCustom', 'Custom launcher')}</span>
                     </span>
-                  </SelectItem>
+                  </Select.Item>
                 </>
               ) : null}
-            </SelectContent>
-          </Select>
+            </Select.Content>
+          </Select.Root>
         </CompactRow>
       </CompactSection>
 
@@ -275,11 +327,15 @@ function LauncherOptionContent({ launcher }: { launcher: PathLauncherOption }) {
   const Icon = getPathLauncherIcon(launcher);
 
   return (
-    <span className="flex min-w-0 items-center gap-2">
+    <span {...stylex.props(styles.option)}>
+      {/* The launcher glyphs take a class only: some are an <img>. */}
       <Icon
-        className={cn('size-4 shrink-0', launcher.kind === 'custom' && 'text-muted-foreground')}
+        className={
+          stylex.props(styles.optionIcon, launcher.kind === 'custom' && styles.optionIconMuted)
+            .className
+        }
       />
-      <span className="truncate">{launcher.label}</span>
+      <span {...stylex.props(styles.optionLabel)}>{launcher.label}</span>
     </span>
   );
 }
@@ -308,10 +364,10 @@ function LauncherFormDialog({
     ? command.replaceAll(PATH_LAUNCHER_PATH_PLACEHOLDER, PREVIEW_SAMPLE_PATH)
     : '';
   const showPreview = validation.ok === true && previewCommand.length > 0;
-  const FormHeader = isMobile ? SheetHeader : DialogHeader;
-  const FormTitle = isMobile ? SheetTitle : DialogTitle;
-  const FormDescription = isMobile ? SheetDescription : DialogDescription;
-  const FormFooter = isMobile ? SheetFooter : DialogFooter;
+  const FormHeader = isMobile ? Drawer.Header : Dialog.Header;
+  const FormTitle = isMobile ? Drawer.Title : Dialog.Title;
+  const FormDescription = isMobile ? Drawer.Description : Dialog.Description;
+  const FormFooter = isMobile ? Drawer.Footer : Dialog.Footer;
 
   const handleOpenChange = (open: boolean) => {
     if (!open) onClose();
@@ -323,7 +379,7 @@ function LauncherFormDialog({
         event.preventDefault();
         if (canSave) onSave();
       }}
-      className="flex flex-col gap-4"
+      {...stylex.props(styles.form)}
     >
       <FormHeader>
         <FormTitle>
@@ -339,8 +395,10 @@ function LauncherFormDialog({
         </FormDescription>
       </FormHeader>
 
-      <div className="flex flex-col gap-1.5">
-        <Label htmlFor="path-launcher-name">{t('settings.pathLaunchers.nameLabel', 'Name')}</Label>
+      <div {...stylex.props(styles.field)}>
+        <UiField.Label htmlFor="path-launcher-name">
+          {t('settings.pathLaunchers.nameLabel', 'Name')}
+        </UiField.Label>
         <Input
           id="path-launcher-name"
           value={draft.label}
@@ -350,13 +408,13 @@ function LauncherFormDialog({
         />
       </div>
 
-      <div className="flex flex-col gap-1.5">
-        <Label htmlFor="path-launcher-command">
+      <div {...stylex.props(styles.field)}>
+        <UiField.Label htmlFor="path-launcher-command">
           {t('settings.pathLaunchers.commandLabel', 'Command')}
-        </Label>
+        </UiField.Label>
         <Input
           id="path-launcher-command"
-          className="font-mono text-sm"
+          style={COMMAND_INPUT_STYLE}
           value={draft.commandTemplate}
           spellCheck={false}
           autoCapitalize="off"
@@ -369,40 +427,42 @@ function LauncherFormDialog({
         />
         {validation.ok ? (
           showPreview && (
-            <p className="truncate font-mono text-[11px] text-muted-foreground">
-              <span className="text-muted-foreground/70">
+            <p {...stylex.props(styles.preview)}>
+              <span {...stylex.props(styles.previewLabel)}>
                 {t('settings.pathLaunchers.previewLabel', 'Runs')}:{' '}
               </span>
               {previewCommand}
             </p>
           )
         ) : (
-          <p className="text-xs text-destructive">{getTemplateValidationMessage(validation, t)}</p>
+          <p {...stylex.props(styles.error)}>{getTemplateValidationMessage(validation, t)}</p>
         )}
       </div>
 
-      <FormFooter className="flex-row items-center justify-between gap-2 sm:justify-between">
-        {onDelete ? (
-          <Button
-            type="button"
-            variant="destructive"
-            size="icon"
-            className="size-9 shrink-0"
-            aria-label={t('common.delete')}
-            title={t('common.delete')}
-            onClick={onDelete}
-          >
-            <Trash2 className="size-4" />
-          </Button>
-        ) : null}
-        <div className="ml-auto flex items-center gap-2">
-          <Button type="button" variant="ghost" onClick={onClose}>
-            {t('common.cancel')}
-          </Button>
-          <Button type="submit" disabled={!canSave}>
-            <Check className="size-3.5" />
-            {t('common.save')}
-          </Button>
+      <FormFooter>
+        <div {...stylex.props(styles.footerRow)}>
+          {onDelete ? (
+            <Button
+              type="button"
+              variant="secondary"
+              tone="destructive"
+              icon
+              aria-label={t('common.delete')}
+              title={t('common.delete')}
+              onClick={onDelete}
+            >
+              <Trash2 {...stylex.props(styles.glyph)} />
+            </Button>
+          ) : null}
+          <div {...stylex.props(styles.answers)}>
+            <Button type="button" variant="secondary" onClick={onClose}>
+              {t('common.cancel')}
+            </Button>
+            <Button type="submit" disabled={!canSave}>
+              <Check {...stylex.props(styles.icon)} />
+              {t('common.save')}
+            </Button>
+          </div>
         </div>
       </FormFooter>
     </form>
@@ -410,21 +470,16 @@ function LauncherFormDialog({
 
   if (isMobile) {
     return (
-      <Sheet open={draft !== null} onOpenChange={handleOpenChange}>
-        <SheetContent
-          side="bottom"
-          className="max-h-[calc(100dvh-1rem)] overflow-y-auto rounded-t-2xl pb-[calc(1.5rem+env(safe-area-inset-bottom,0px))]"
-        >
-          {form}
-        </SheetContent>
-      </Sheet>
+      <Drawer.Root side="bottom" open={draft !== null} onOpenChange={handleOpenChange}>
+        <Drawer.Content side="bottom">{form}</Drawer.Content>
+      </Drawer.Root>
     );
   }
 
   return (
-    <Dialog open={draft !== null} onOpenChange={handleOpenChange}>
-      <DialogContent className="sm:max-w-md">{form}</DialogContent>
-    </Dialog>
+    <Dialog.Root open={draft !== null} onOpenChange={handleOpenChange}>
+      <Dialog.Content>{form}</Dialog.Content>
+    </Dialog.Root>
   );
 }
 

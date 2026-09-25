@@ -1,4 +1,5 @@
 import { useMemo, type ReactNode } from 'react';
+import * as stylex from '@stylexjs/stylex';
 import { useTranslation } from 'react-i18next';
 import { useAtomValue } from 'jotai';
 import {
@@ -11,9 +12,32 @@ import { getAllAgentConfigAtom } from '@/atoms';
 import { cn } from '@/lib/utils';
 import { useOnlineMachines } from '@/hooks/use-online-machines';
 import { Bot } from 'lucide-react';
-import { Spinner } from '@/ui/spinner';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui';
+import { Spinner } from '@lody/ui/spinner';
+import { Tooltip } from '@lody/ui/tooltip';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { space, text } from '@lody/ui/tokens/scales.stylex';
+import { composerSurface } from './composer-surface';
 import { OptionSelector, type OptionSelectorOption } from './option-selector';
+
+const styles = stylex.create({
+  face: { display: 'flex', alignItems: 'center', gap: space[2], minWidth: 0 },
+  faceStart: { justifyContent: 'flex-start', textAlign: 'start' },
+  faceCenter: { justifyContent: 'center', textAlign: 'center' },
+  /** The agent's name, and the machine it runs on under it. */
+  lines: { display: 'flex', flexDirection: 'column', minWidth: 0, lineHeight: 1.25 },
+  machine: {
+    minWidth: 0,
+    maxWidth: '140px',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    color: colors.secondaryLabel,
+    fontSize: text.captionSize,
+    fontWeight: 400,
+  },
+  machineInRow: { maxWidth: '180px' },
+  fill: { width: '100%' },
+});
 
 export type AgentSelection = {
   agentId: AgentConfigId;
@@ -102,7 +126,7 @@ export function AgentSelector({
   const renderAgentIcon = (option?: OptionSelectorOption<string>) => {
     if (!showIcon) return null;
     if (option?.startContent) return option.startContent;
-    return <Bot className="h-3! w-3! shrink-0 opacity-70" />;
+    return <Bot {...stylex.props(composerSurface.glyph12, composerSurface.hint)} />;
   };
 
   const loadingText = t('sessions.filter.loadingAgent', 'Loading agent...');
@@ -117,6 +141,8 @@ export function AgentSelector({
       }}
       placeholder={t('sessions.filter.selectAgent')}
       placeholderIcon={showIcon ? Bot : undefined}
+      appearance="field"
+      size="lg"
       className={cn('w-full', className)}
       contentClassName="w-64"
       disabled={disabled || loading}
@@ -127,40 +153,36 @@ export function AgentSelector({
       open={open}
       onOpenChange={onOpenChange}
       renderTriggerValue={(option) => (
-        <div
-          className={cn(
-            'flex min-w-0 items-center gap-2',
-            align === 'left' ? 'justify-start text-left' : 'justify-center text-center'
-          )}
+        <span
+          {...stylex.props(styles.face, align === 'left' ? styles.faceStart : styles.faceCenter)}
         >
-          {loading ? (
-            <Spinner className="h-3! w-3! shrink-0 opacity-70" />
-          ) : (
-            renderAgentIcon(option)
-          )}
-          <div className="flex min-w-0 flex-col leading-tight">
-            <span className="truncate text-sm font-medium">
+          {loading ? <Spinner size="small" label={null} /> : renderAgentIcon(option)}
+          <span {...stylex.props(styles.lines)}>
+            <span {...stylex.props(composerSurface.truncate)}>
               {loading ? loadingText : (option?.label ?? t('sessions.filter.selectAgent'))}
             </span>
             {!loading && option?.description ? (
-              <span className="max-w-[140px] truncate text-[11px] text-muted-foreground/70">
-                {option.description}
-              </span>
+              <span {...stylex.props(styles.machine)}>{option.description}</span>
             ) : null}
-          </div>
-        </div>
+          </span>
+        </span>
       )}
       renderOption={(option) => (
         <>
           {renderAgentIcon(option)}
-          <div className="flex min-w-0 flex-col leading-tight text-left">
-            <span className="truncate text-sm font-medium">{option.label}</span>
+          <span
+            {...stylex.props(
+              composerSurface.rowText,
+              !!option.description && composerSurface.rowTextStacked
+            )}
+          >
+            <span {...stylex.props(composerSurface.rowLabel)}>{option.label}</span>
             {option.description ? (
-              <span className="max-w-[180px] truncate text-[11px] text-muted-foreground/70">
+              <span {...stylex.props(styles.machine, styles.machineInRow)}>
                 {option.description}
               </span>
             ) : null}
-          </div>
+          </span>
         </>
       )}
     />
@@ -170,12 +192,13 @@ export function AgentSelector({
   // reason ("Select a machine first") would be misleading in that window.
   if (disabledReason && !loading) {
     return (
-      <Tooltip delayDuration={500}>
-        <TooltipTrigger asChild>
-          <div className="w-full">{selectorNode}</div>
-        </TooltipTrigger>
-        <TooltipContent>{disabledReason}</TooltipContent>
-      </Tooltip>
+      <Tooltip.Root>
+        <Tooltip.Trigger
+          delay={500}
+          render={<div {...stylex.props(styles.fill)}>{selectorNode}</div>}
+        />
+        <Tooltip.Content>{disabledReason}</Tooltip.Content>
+      </Tooltip.Root>
     );
   }
 

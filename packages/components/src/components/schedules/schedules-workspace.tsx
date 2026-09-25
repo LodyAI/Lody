@@ -1,12 +1,5 @@
 import type { AgentRunRef } from '@/components/shared/agent-run-ref';
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-  DialogFooter,
-} from '@/ui/dialog';
+import { AlertDialog } from '@/ui/dialog';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useCommand } from '@/lib/commands';
 import { useEffect, useMemo, useState } from 'react';
@@ -58,8 +51,7 @@ import { useOpenSettings } from '@/hooks/use-open-settings';
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import { DesktopMachineMenu } from '@/components/sessions/desktop-run-config-menu';
 import { ProjectRefSelector } from '@/components/shared/project-ref-selector';
-import { Button } from '@/ui/button';
-import { cn } from '@/lib/utils';
+import { Button } from '@lody/ui/button';
 import { WorktreeCheckboxPill } from '@/components/shared/workdir-mode-selector';
 import {
   ScheduleForm,
@@ -68,7 +60,7 @@ import {
   newScheduleFormValue,
   type ScheduleFormValue,
 } from './schedule-view';
-import { scheduleCardClass } from './schedule-property-row';
+import { scheduleCardProps } from './schedule-property-row';
 import { ScheduleDialog } from './schedule-dialog';
 import { collectScheduleSaveIssues, type ScheduleIssueField } from './schedule-save-blockers';
 import { ScheduleDestinationRows, type PickableSession } from './schedule-destination-rows';
@@ -110,6 +102,9 @@ function SchedulesContent({ scheduleId }: { scheduleId?: string }) {
     title: string;
     description: string;
     accept: () => Promise<void>;
+    /** Red answer for an irreversible action. */
+    destructive?: boolean;
+    confirmLabel?: string;
   }>();
   const { machines } = useVisibleMachineMetas({ includeMachineFlock: true });
   const repository = useMemo(
@@ -195,6 +190,8 @@ function SchedulesContent({ scheduleId }: { scheduleId?: string }) {
         'Future runs stop and the schedule is removed. Chats it already started are kept.'
       ),
       accept: deleteSchedule(item.scheduleId),
+      destructive: true,
+      confirmLabel: t('schedules.delete', 'Delete'),
     });
   const [columnWidths, setColumnWidths] = useAtom(scheduleListColumnWidthsAtom);
   const row = registry.rows.find((r) => r.scheduleId === scheduleId);
@@ -239,9 +236,8 @@ function SchedulesContent({ scheduleId }: { scheduleId?: string }) {
           </span>
         )}
         <Button
-          size="sm"
           variant="ghost"
-          className="h-7 px-2 text-[0.9em]"
+          size="small"
           disabled={row.enabled ? !isOwner : !canManage}
           onClick={() => toggle(row)}
         >
@@ -249,9 +245,8 @@ function SchedulesContent({ scheduleId }: { scheduleId?: string }) {
           {row.enabled ? t('schedules.pause', 'Pause') : t('schedules.resume', 'Resume')}
         </Button>
         <Button
-          size="sm"
           variant="ghost"
-          className="h-7 px-2 text-[0.9em]"
+          size="small"
           disabled={!canManage}
           onClick={() =>
             setConfirmation({
@@ -268,9 +263,9 @@ function SchedulesContent({ scheduleId }: { scheduleId?: string }) {
           {t('schedules.runNow', 'Run now')}
         </Button>
         <Button
-          size="sm"
           variant="ghost"
-          className="h-7 px-2 text-[0.9em] text-muted-foreground hover:text-destructive"
+          size="small"
+          tone="destructive"
           disabled={!isOwner}
           onClick={() => row && confirmDelete(row)}
         >
@@ -324,33 +319,31 @@ function SchedulesContent({ scheduleId }: { scheduleId?: string }) {
       : (row?.title ?? t('schedules.title', 'Schedules'));
   return (
     <div className="flex h-full min-h-0 flex-col bg-background" data-settings-surface="">
-      <Dialog
+      <AlertDialog.Root
         open={!!confirmation}
         onOpenChange={(isOpen) => {
           if (!isOpen) setConfirmation(undefined);
         }}
       >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{confirmation?.title}</DialogTitle>
-            <DialogDescription>{confirmation?.description}</DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setConfirmation(undefined)}>
-              {t('schedules.cancel', 'Cancel')}
-            </Button>
-            <Button
+        <AlertDialog.Content>
+          <AlertDialog.Header>
+            <AlertDialog.Title>{confirmation?.title}</AlertDialog.Title>
+            <AlertDialog.Description>{confirmation?.description}</AlertDialog.Description>
+          </AlertDialog.Header>
+          <AlertDialog.Footer>
+            <AlertDialog.Cancel>{t('schedules.cancel', 'Cancel')}</AlertDialog.Cancel>
+            <AlertDialog.Action
+              variant={confirmation?.destructive ? 'destructive' : 'primary'}
               onClick={() => {
                 const action = confirmation?.accept;
-                setConfirmation(undefined);
                 if (action) void mutate(action);
               }}
             >
-              {t('schedules.confirm', 'Confirm')}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+              {confirmation?.confirmLabel ?? t('schedules.confirm', 'Confirm')}
+            </AlertDialog.Action>
+          </AlertDialog.Footer>
+        </AlertDialog.Content>
+      </AlertDialog.Root>
       {error ? (
         <p className="px-5 py-2 text-[1em] text-destructive" role="alert">
           {error}
@@ -358,7 +351,7 @@ function SchedulesContent({ scheduleId }: { scheduleId?: string }) {
       ) : null}
       {mobile && scheduleId ? (
         <>
-          <Button className="m-2 self-start" variant="ghost" onClick={() => open()}>
+          <Button className="m-2 self-start" variant="ghost" size="small" onClick={() => open()}>
             <ArrowLeft className="size-4" />
             {t('schedules.all', 'All schedules')}
           </Button>
@@ -772,11 +765,11 @@ function ScheduleSessionHistory({ scheduleId }: { scheduleId: string }) {
         {t('schedules.history', 'Run history')}
       </h2>
       {linked.length === 0 ? (
-        <p className={cn(scheduleCardClass, 'px-3 py-3 text-[0.9em] text-muted-foreground')}>
+        <p {...scheduleCardProps('px-3 py-3 text-[0.9em] text-muted-foreground')}>
           {t('schedules.noRuns', 'No Sessions have been created yet.')}
         </p>
       ) : (
-        <div className={scheduleCardClass}>
+        <div {...scheduleCardProps()}>
           {linked.slice(0, 100).map((s) => (
             <ScheduleHistoryRow
               key={s.id}

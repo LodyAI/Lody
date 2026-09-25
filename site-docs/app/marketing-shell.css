@@ -278,3 +278,9 @@ html.dark .marketing-shell .site-nav__menu {
   font-weight: 400;
   line-height: 1.65;
 }
+
+/* Reuse the same shader and fallback field, with a muted slate-lavender Nightly palette.
+   Only the atmosphere layer is recolored; text, logos and controls stay untouched. */
+.marketing-atmosphere--nightly {
+  filter: hue-rotate(38deg) saturate(0.32);
+}

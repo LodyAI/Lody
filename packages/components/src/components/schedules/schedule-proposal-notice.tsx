@@ -25,7 +25,7 @@ import { useResolvedWorkspaceScope } from '@/hooks/use-resolved-workspace-scope'
 import { useVisibleLocalProjects } from '@/hooks/use-visible-local-projects';
 import { useVisibleMachineMetas } from '@/hooks/use-visible-machine-metas';
 import { useWorkspaceAgentRoles } from '@/hooks/use-workspace-agent-roles';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { MarkdownRenderer } from '@/components/ai-gui/markdown-renderer';
 import { describeDestination, describeRecurrence } from './schedule-format';
 import {
@@ -33,8 +33,7 @@ import {
   type ProposalConversation,
   type ProposalTargetProblem,
 } from './schedule-proposal-target';
-import { SETTINGS_ROW_CARD_CLASS } from '@/components/settings/compact-layout';
-import { cn } from '@/lib/utils';
+import { scheduleCardProps } from './schedule-property-row';
 import { collectScheduleSaveBlockers } from './schedule-save-blockers';
 
 export type ScheduleProposalNoticeProps = {
@@ -262,7 +261,7 @@ export function ScheduleProposalNotice({
         <span>{t('schedules.proposal.created', 'Scheduled task created')}</span>
         <span className="min-w-0 flex-1 truncate text-foreground">{meta.title}</span>
         {meta.scheduleId ? (
-          <Button size="sm" variant="ghost" onClick={() => openSchedule(meta.scheduleId!)}>
+          <Button size="small" variant="ghost" onClick={() => openSchedule(meta.scheduleId!)}>
             {t('schedules.proposal.open', 'Open')}
           </Button>
         ) : null}
@@ -329,10 +328,7 @@ export function ScheduleProposalNotice({
   ];
 
   return (
-    <div
-      data-settings-surface=""
-      className={cn(SETTINGS_ROW_CARD_CLASS, 'flex flex-col gap-2.5 p-3')}
-    >
+    <div data-settings-surface="" {...scheduleCardProps('flex flex-col gap-2.5 divide-y-0 p-3')}>
       <div className="flex items-center gap-2 text-[0.8em] text-muted-foreground">
         <CalendarClock className="size-3.5" />
         <span>{t('schedules.proposal.title', 'Schedule this task?')}</span>
@@ -362,10 +358,15 @@ export function ScheduleProposalNotice({
         </ul>
       ) : null}
       <div className="flex items-center justify-end gap-2">
-        <Button size="sm" variant="ghost" disabled={busy} onClick={dismiss}>
+        <Button size="small" variant="ghost" disabled={busy} onClick={dismiss}>
           {t('schedules.proposal.dismiss', 'Ignore')}
         </Button>
-        <Button size="sm" disabled={busy || reasons.length > 0 || !target} onClick={create}>
+        <Button
+          size="small"
+          variant="primary"
+          disabled={busy || reasons.length > 0 || !target}
+          onClick={create}
+        >
           {t('schedules.proposal.create', 'Create')}
         </Button>
       </div>

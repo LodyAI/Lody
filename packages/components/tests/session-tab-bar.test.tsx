@@ -10,7 +10,7 @@ import { SessionTabBar } from '../src/components/sessions/session-tab-bar';
 import { allocateAdaptiveTabStripLayout } from '../src/components/sessions/adaptive-tab-strip';
 import { useEmptySessionDraft } from '../src/hooks/use-empty-session-draft';
 import { createDraftSessionTab, type DraftSessionTab } from '../src/lib/session-draft-tabs';
-import { TooltipProvider } from '../src/ui/tooltip';
+import { Tooltip } from '@lody/ui/tooltip';
 import { FocusScope } from '../src/ui/focus-scope';
 import { WORKSPACE_FOCUS_SCOPES } from '../src/atoms/focus-layer';
 
@@ -76,7 +76,7 @@ describe('SessionTabBar drag sources', () => {
     await act(async () => {
       root.render(
         <Provider store={createStore()}>
-          <TooltipProvider>
+          <Tooltip.Provider>
             <FocusScope id={WORKSPACE_FOCUS_SCOPES.sessionConversation}>
               <SessionTabBar
                 variant="session"
@@ -90,7 +90,7 @@ describe('SessionTabBar drag sources', () => {
                 onTabClose={onTabClose}
               />
             </FocusScope>
-          </TooltipProvider>
+          </Tooltip.Provider>
         </Provider>
       );
     });
@@ -150,11 +150,11 @@ describe('SessionTabBar drag sources', () => {
     await act(async () =>
       root.render(
         <Provider store={createStore()}>
-          <TooltipProvider>
+          <Tooltip.Provider>
             <StrictMode>
               <Harness />
             </StrictMode>
-          </TooltipProvider>
+          </Tooltip.Provider>
         </Provider>
       )
     );
@@ -560,13 +560,13 @@ describe('SessionTabBar rapid-close tab widths', () => {
     await act(async () =>
       root.render(
         <Provider store={createStore()}>
-          <TooltipProvider>
+          <Tooltip.Provider>
             <FocusScope id={WORKSPACE_FOCUS_SCOPES.sessionConversation}>
               <Profiler id="rapid-close" onRender={() => commits++}>
                 <Harness />
               </Profiler>
             </FocusScope>
-          </TooltipProvider>
+          </Tooltip.Provider>
         </Provider>
       )
     );

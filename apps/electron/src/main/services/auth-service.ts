@@ -2,7 +2,7 @@ import { app, safeStorage, shell } from 'electron'
 import { authClient } from '../auth'
 import { captureElectronMainException } from '../posthog-error-reporting'
 import { DesktopLogin, DesktopLoginFailure } from './desktop-login'
-import { isLocalPlatform } from '../platform'
+import { isLocalPlatform, desktopInstallationProfile } from '../platform'
 import {
   ElectronAuthCallbackSessionSchema,
   isDevEmailPasswordLoginEnabled,
@@ -413,6 +413,7 @@ export class AuthService {
     onAuthenticated: () => void = () => {}
   ) {
     this.login = new DesktopLogin({
+      channel: desktopInstallationProfile.releaseChannel === 'nightly' ? 'nightly' : 'stable',
       openBrowser: async (query) => {
         // The exchange response stores its session cookie through safeStorage.
         // Fail before the browser round trip instead of after the one-time code

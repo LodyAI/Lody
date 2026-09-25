@@ -1,7 +1,8 @@
 import http from 'node:http';
 import { writeSync } from 'node:fs';
 import { createHash, timingSafeEqual } from 'node:crypto';
-import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
+import { NodeStreamableHTTPServerTransport, toNodeHandler } from '@modelcontextprotocol/node';
+import { createMcpHandler } from '@modelcontextprotocol/server';
 import { SessionIdSchema } from '@lody/shared';
 import { getLocalControlSocketPath } from '@lody/shared/node/local-ipc';
 import { createFileLogger, type Logger } from '@/utils/logger';
@@ -293,12 +294,22 @@ async function handleRequest(
     return;
   }
 
+  if (req.headers['mcp-protocol-version'] === '2026-07-28') {
+    // The factory closes over this request's schedule-tool gate.
+    const handler = createMcpHandler(() =>
+      buildLodyMcpServer({ scheduleToolsEnabled: context.scheduleToolsEnabled })
+    );
+    res.on('close', () => void handler.close());
+    await runWithMcpSessionContext(context, () => toNodeHandler(handler)(req, res));
+    return;
+  }
+
   // Stateless streamable HTTP: one server + transport pair per request, torn
   // down when the response closes. The MCP client re-initializes per
   // connection, and every tool call carries its full context in headers, so no
   // cross-request state is needed and concurrent sessions cannot interleave.
   const server = buildLodyMcpServer({ scheduleToolsEnabled: context.scheduleToolsEnabled });
-  const transport = new StreamableHTTPServerTransport({
+  const transport = new NodeStreamableHTTPServerTransport({
     sessionIdGenerator: undefined,
     enableJsonResponse: true,
   });

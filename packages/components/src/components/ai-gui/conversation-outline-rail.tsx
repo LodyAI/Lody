@@ -11,11 +11,13 @@ import {
   type FocusEvent as ReactFocusEvent,
 } from 'react';
 import { createPortal } from 'react-dom';
+import { usePostHog } from '@posthog/react';
 import { useTranslation } from 'react-i18next';
 import { cn } from '@/lib/utils';
-import { Popover, PopoverAnchor, PopoverContent } from '@/ui/popover';
+import { Popover } from '@lody/ui/popover';
 import type { ConversationOutlineEntry } from '@/lib/conversation-outline';
 import { useLatestRef } from '@/hooks/use-latest-ref';
+import { capturePostHogSampled } from '@/lib/posthog-analytics';
 import { observeResizeOnAnimationFrame } from '@/lib/resize-observer';
 import {
   NO_SCROLL_EDGE_OVERFLOW,
@@ -287,6 +289,7 @@ export function ConversationOutlineRail({
   const onPreviewRoundRef = useLatestRef(onPreviewRound);
   const arrivalIntentDetectorRef = useRef<ArrivalIntentDetector | null>(null);
   const tickCount = entries.length;
+  const postHog = usePostHog();
 
   const jumpLabel = useCallback(
     (entry: ConversationOutlineEntry) =>
@@ -508,10 +511,17 @@ export function ConversationOutlineRail({
       const index = readTickIndex(event.target);
       if (index === -1) return;
       clearOpenTimer();
+      const fromHoverPreview = cardOpenRef.current;
       if (cardOpenRef.current && warmBrowsingRef.current) {
         lastClosedAtRef.current = Date.now();
       }
       setCardOpen(false);
+      capturePostHogSampled(
+        postHog,
+        'outline/jumped',
+        { from_hover_preview: fromHoverPreview, entry_count: tickCount },
+        { tier: 'C' }
+      );
       arrivalIntentDebugRef.current?.({
         type: 'round-jump',
         at: performance.now(),
@@ -519,7 +529,7 @@ export function ConversationOutlineRail({
       });
       jumpTo(index);
     },
-    [arrivalIntentDebugRef, cardOpenRef, clearOpenTimer, jumpTo]
+    [arrivalIntentDebugRef, cardOpenRef, clearOpenTimer, jumpTo, postHog, tickCount]
   );
 
   const focusTick = useCallback((index: number) => {
@@ -671,21 +681,23 @@ export function ConversationOutlineRail({
       {/* ONE popover for the whole rail, re-anchored to the hovered tick. A
           popover per tick would mount hundreds of Radix instances for a long
           session. */}
-      <Popover open={cardOpen && hoveredEntry !== null}>
-        <PopoverAnchor virtualRef={hoverCard ? { current: hoverCard.element } : undefined} />
-        <PopoverContent
+      <Popover.Root open={cardOpen && hoveredEntry !== null}>
+        <Popover.Content
+          anchor={hoverCard ? { current: hoverCard.element } : undefined}
           side="right"
           align="center"
           sideOffset={10}
           // Purely informational: it must never take focus from the rail, and
           // dismissing it is the pointer's job.
-          onOpenAutoFocus={(event) => event.preventDefault()}
-          onCloseAutoFocus={(event) => event.preventDefault()}
+          initialFocus={false}
+          finalFocus={false}
           className="pointer-events-none w-72 select-none p-3"
-          onAnimationEnd={(event) => {
+          onTransitionEnd={(event) => {
+            // The surface transitions out before Base UI unmounts it; clear the
+            // anchor's state only once that fade has ended.
             if (
-              event.target === event.currentTarget &&
-              event.currentTarget.dataset.state === 'closed' &&
+              event.target instanceof HTMLElement &&
+              'endingStyle' in event.target.dataset &&
               !cardOpenRef.current
             ) {
               setHoverCard(null);
@@ -705,8 +717,8 @@ export function ConversationOutlineRail({
               </div>
             </>
           )}
-        </PopoverContent>
-      </Popover>
+        </Popover.Content>
+      </Popover.Root>
     </nav>
   );
 

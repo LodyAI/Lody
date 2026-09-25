@@ -437,6 +437,16 @@ describe('message-schemas machine ACP authentication', () => {
         content: { code: 'one-time-code', account: 'work' },
       }),
     };
+    const runtimeDownloadProgress = {
+      type: 'machine/acp-authentication-progress',
+      machineId: 'machine-1',
+      requestId: 'auth-1',
+      agentType: 'codex',
+      status: 'runtime-download',
+      runtimeName: 'codex',
+      runtimePhase: 'downloading',
+      runtimePercent: 42,
+    };
 
     expect(MachineAcpAuthenticateRequestSchema.safeParse(request).success).toBe(true);
     expect(MachineAcpAuthenticateRequestSchema.safeParse(forgedStart).success).toBe(false);
@@ -460,6 +470,28 @@ describe('message-schemas machine ACP authentication', () => {
     expect(MachineAcpAuthenticationProgressMessageSchema.safeParse(formProgress).success).toBe(
       true
     );
+    expect(
+      MachineAcpAuthenticationProgressMessageSchema.safeParse(runtimeDownloadProgress).success
+    ).toBe(true);
+    // runtime-download progress requires the runtime identity it reports on.
+    expect(
+      MachineAcpAuthenticationProgressMessageSchema.safeParse({
+        ...runtimeDownloadProgress,
+        runtimeName: undefined,
+      }).success
+    ).toBe(false);
+    expect(
+      MachineAcpAuthenticationProgressMessageSchema.safeParse({
+        ...runtimeDownloadProgress,
+        runtimePhase: undefined,
+      }).success
+    ).toBe(false);
+    expect(
+      MachineAcpAuthenticationProgressMessageSchema.safeParse({
+        ...runtimeDownloadProgress,
+        runtimePercent: 101,
+      }).success
+    ).toBe(false);
     expect(MachineAcpAuthenticateResponseSchema.safeParse(response).success).toBe(true);
     expect(LocalSessionControlResponseSchema.safeParse(response).success).toBe(true);
     expect(safeParseLocalSessionControlRequest(JSON.stringify(request)).success).toBe(true);

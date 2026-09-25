@@ -14,17 +14,11 @@ import {
   Zap,
 } from 'lucide-react';
 import { getServerNow, type ScheduleRegistryRow, type ScheduleRuntimeRow } from '@lody/shared';
-import { Button } from '@/ui/button';
-import {
-  ContextMenu,
-  ContextMenuContent,
-  ContextMenuItem,
-  ContextMenuSeparator,
-  ContextMenuTrigger,
-} from '@/ui/context-menu';
-import { Input } from '@/ui/input';
-import { Skeleton } from '@/ui/skeleton';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/ui/tooltip';
+import { Button } from '@lody/ui/button';
+import { ContextMenu } from '@lody/ui/context-menu';
+import { Input } from '@lody/ui/input';
+import { Skeleton } from '@lody/ui/skeleton';
+import { Tooltip } from '@lody/ui/tooltip';
 import { cn } from '@/lib/utils';
 import {
   describeDestination,
@@ -186,29 +180,33 @@ function ScheduleListRow({
 
       <div className={cn(cell.next, 'flex min-w-0 items-center gap-2 text-muted-foreground')}>
         {next != null ? (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <span className="truncate text-foreground/80">
-                {formatUpcoming(next, zone, now, i18n.language)}
-              </span>
-            </TooltipTrigger>
-            <TooltipContent>
+          <Tooltip.Root>
+            <Tooltip.Trigger
+              render={
+                <span className="truncate text-foreground/80">
+                  {formatUpcoming(next, zone, now, i18n.language)}
+                </span>
+              }
+            />
+            <Tooltip.Content>
               {formatInstant(next, zone, i18n.language)} · {zone}
-            </TooltipContent>
-          </Tooltip>
+            </Tooltip.Content>
+          </Tooltip.Root>
         ) : manual ? (
           <span className="truncate">{t('schedules.trigger.onDemand', 'On demand')}</span>
         ) : row.enabled ? (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <span className="truncate">
-                {t('schedules.notScheduledYet', 'Not scheduled yet')}
-              </span>
-            </TooltipTrigger>
-            <TooltipContent>
+          <Tooltip.Root>
+            <Tooltip.Trigger
+              render={
+                <span className="truncate">
+                  {t('schedules.notScheduledYet', 'Not scheduled yet')}
+                </span>
+              }
+            />
+            <Tooltip.Content>
               {t('schedules.awaitingMachine', 'Waiting for the machine to check the schedule')}
-            </TooltipContent>
-          </Tooltip>
+            </Tooltip.Content>
+          </Tooltip.Root>
         ) : null}
         {/* A pill that starts the cell pulls its text back onto the column line. */}
         <span className="hidden first:-ml-1.5 sm:inline">
@@ -222,17 +220,17 @@ function ScheduleListRow({
             {context?.agent ?? row.agentConfigId}
           </span>
           {offline ? (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <CloudOff className="size-3.5 shrink-0 text-status-warning" />
-              </TooltipTrigger>
-              <TooltipContent>
+            <Tooltip.Root>
+              <Tooltip.Trigger
+                render={<CloudOff className="size-3.5 shrink-0 text-status-warning" />}
+              />
+              <Tooltip.Content>
                 {t(
                   'schedules.machineOfflineHint',
                   'The target machine is not connected right now.'
                 )}
-              </TooltipContent>
-            </Tooltip>
+              </Tooltip.Content>
+            </Tooltip.Root>
           ) : null}
         </span>
         {/* The machine is what separates two same-named Agents, and two
@@ -250,50 +248,57 @@ function ScheduleListRow({
       {/* 28px buttons centred on the 20px first line. */}
       <div className={cn(cell.actions, 'relative -my-1 flex items-center justify-end gap-0.5')}>
         {runtime?.lastDispatch && onOpenSession ? (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                // Visible by default; only a device that actually has hover is
-                // allowed to hide it until the row is hovered or focused.
-                className="size-7 shrink-0 text-muted-foreground [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:focus-visible:opacity-100 [@media(hover:hover)]:group-hover:opacity-100"
-                onClick={() => onOpenSession(runtime.lastDispatch!.sessionId)}
-                aria-label={t('schedules.lastRun', 'Last run')}
-              >
-                <History className="size-3.5" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>{t('schedules.lastRun', 'Last run')}</TooltipContent>
-          </Tooltip>
+          <Tooltip.Root>
+            <Tooltip.Trigger
+              render={
+                <Button
+                  variant="ghost"
+                  size="small"
+                  icon
+                  // Visible by default; only a device that actually has hover is
+                  // allowed to hide it until the row is hovered or focused.
+                  className="shrink-0 [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:focus-visible:opacity-100 [@media(hover:hover)]:group-hover:opacity-100"
+                  onClick={() => onOpenSession(runtime.lastDispatch!.sessionId)}
+                  aria-label={t('schedules.lastRun', 'Last run')}
+                >
+                  <History className="size-full" />
+                </Button>
+              }
+            />
+            <Tooltip.Content>{t('schedules.lastRun', 'Last run')}</Tooltip.Content>
+          </Tooltip.Root>
         ) : null}
         {/* A manual task's main action is running it; a timed one's is pausing.
             The other stays one right-click away. */}
         {manual && canRun ? (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="size-7 shrink-0"
-                onClick={onRun}
-                aria-label={t('schedules.runNow', 'Run now')}
-              >
-                {/* Zap, not Play: Play already means Resume on a paused row. */}
-                <Zap className="size-3.5" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>{t('schedules.runNow', 'Run now')}</TooltipContent>
-          </Tooltip>
+          <Tooltip.Root>
+            <Tooltip.Trigger
+              render={
+                <Button
+                  variant="ghost"
+                  size="small"
+                  icon
+                  className="shrink-0"
+                  onClick={onRun}
+                  aria-label={t('schedules.runNow', 'Run now')}
+                >
+                  {/* Zap, not Play: Play already means Resume on a paused row. */}
+                  <Zap className="size-full" />
+                </Button>
+              }
+            />
+            <Tooltip.Content>{t('schedules.runNow', 'Run now')}</Tooltip.Content>
+          </Tooltip.Root>
         ) : !manual && canToggle ? (
           <Button
             variant="ghost"
-            size="icon"
-            className="size-7 shrink-0"
+            size="small"
+            icon
+            className="shrink-0"
             onClick={onToggle}
             aria-label={toggleLabel}
           >
-            {row.enabled ? <Pause className="size-3.5" /> : <Play className="size-3.5" />}
+            {row.enabled ? <Pause className="size-full" /> : <Play className="size-full" />}
           </Button>
         ) : null}
         <ChevronRight className="size-3.5 shrink-0 text-muted-foreground/50" aria-hidden="true" />
@@ -301,42 +306,37 @@ function ScheduleListRow({
     </div>
   );
   return (
-    <ContextMenu>
-      <ContextMenuTrigger asChild>{rowElement}</ContextMenuTrigger>
-      <ContextMenuContent className="min-w-48">
-        <ContextMenuItem onSelect={onOpen}>
-          <ExternalLink />
+    <ContextMenu.Root>
+      <ContextMenu.Trigger render={rowElement} />
+      <ContextMenu.Content>
+        <ContextMenu.Item icon={<ExternalLink />} onClick={onOpen}>
           {t('schedules.open', 'Open')}
-        </ContextMenuItem>
+        </ContextMenu.Item>
         {canRun ? (
-          <ContextMenuItem onSelect={onRun}>
-            <Zap />
+          <ContextMenu.Item icon={<Zap />} onClick={onRun}>
             {t('schedules.runNow', 'Run now')}
-          </ContextMenuItem>
+          </ContextMenu.Item>
         ) : null}
         {canToggle ? (
-          <ContextMenuItem onSelect={onToggle}>
-            {row.enabled ? <Pause /> : <Play />}
+          <ContextMenu.Item icon={row.enabled ? <Pause /> : <Play />} onClick={onToggle}>
             {toggleLabel}
-          </ContextMenuItem>
+          </ContextMenu.Item>
         ) : null}
         {lastSessionId && onOpenSession ? (
-          <ContextMenuItem onSelect={() => onOpenSession(lastSessionId)}>
-            <History />
+          <ContextMenu.Item icon={<History />} onClick={() => onOpenSession(lastSessionId)}>
             {t('schedules.lastRun', 'Last run')}
-          </ContextMenuItem>
+          </ContextMenu.Item>
         ) : null}
         {canDelete ? (
           <>
-            <ContextMenuSeparator />
-            <ContextMenuItem variant="destructive" onSelect={onDelete}>
-              <Trash2 />
+            <ContextMenu.Separator />
+            <ContextMenu.Item tone="destructive" icon={<Trash2 />} onClick={onDelete}>
               {t('schedules.delete', 'Delete')}
-            </ContextMenuItem>
+            </ContextMenu.Item>
           </>
         ) : null}
-      </ContextMenuContent>
-    </ContextMenu>
+      </ContextMenu.Content>
+    </ContextMenu.Root>
   );
 }
 
@@ -389,25 +389,25 @@ export function ScheduleListView({
     // Own the tooltip context rather than depending on an ancestor: the row
     // tooltips carry the exact next-run instant and the offline reason, which
     // must not be what makes this list crash where it is mounted.
-    <TooltipProvider>
+    <Tooltip.Provider>
       <section className="flex h-full min-h-0 flex-col" style={columnVars(widths)}>
         <header className="flex shrink-0 items-center gap-2 px-4 py-3">
           <h1 className="mr-auto text-[1em] font-normal text-foreground">
             {t('schedules.title', 'Schedules')}
           </h1>
-          <div className="relative w-40 sm:w-56">
-            <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              aria-label={t('schedules.search', 'Search schedules')}
-              placeholder={t('schedules.search', 'Search schedules')}
-              className="h-8 pl-8 text-[0.9em] font-normal"
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-            />
-          </div>
+          <Input
+            size="small"
+            leading={<Search className="size-3.5 text-muted-foreground" aria-hidden="true" />}
+            aria-label={t('schedules.search', 'Search schedules')}
+            placeholder={t('schedules.search', 'Search schedules')}
+            className="w-40 sm:w-56"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+          />
           <Button
-            size="sm"
-            className="h-8 shrink-0"
+            variant="primary"
+            size="small"
+            className="shrink-0"
             onClick={onNew}
             // The label is the only text and it is hidden on narrow screens.
             aria-label={t('schedules.new', 'New schedule')}
@@ -456,9 +456,9 @@ export function ScheduleListView({
                   key={index}
                   className="flex items-center gap-3 border-b-[0.5px] border-border px-4 py-3"
                 >
-                  <Skeleton className="h-3.5 w-48" />
-                  <Skeleton className="ml-auto h-3.5 w-24" />
-                  <Skeleton className="h-3.5 w-20" />
+                  <Skeleton shape="line" width={192} />
+                  <Skeleton shape="line" width={96} className="ml-auto" />
+                  <Skeleton shape="line" width={80} />
                 </div>
               ))}
             </div>
@@ -482,7 +482,7 @@ export function ScheduleListView({
                       'Choose a prompt and a time. Your machine will start a new chat for each run.'
                     )}
                   </p>
-                  <Button size="sm" variant="outline" className="mt-2 h-8" onClick={onNew}>
+                  <Button variant="secondary" size="small" className="mt-2" onClick={onNew}>
                     <Plus className="size-3.5" />
                     {t('schedules.new', 'New schedule')}
                   </Button>
@@ -507,7 +507,7 @@ export function ScheduleListView({
           )}
         </div>
       </section>
-    </TooltipProvider>
+    </Tooltip.Provider>
   );
 }
 

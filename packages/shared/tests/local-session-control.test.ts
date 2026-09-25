@@ -133,6 +133,16 @@ describe('local session control node validators', () => {
         ],
       },
     };
+    const runtimeDownloadProgress = {
+      type: 'machine/acp-authentication-progress',
+      machineId: 'machine-1',
+      requestId: 'auth-1',
+      agentType: 'codex',
+      status: 'runtime-download',
+      runtimeName: 'codex',
+      runtimePhase: 'downloading',
+      runtimePercent: 42,
+    };
     const submitInput = {
       type: 'machine/acp-authenticate',
       machineId: 'machine-1',
@@ -172,6 +182,16 @@ describe('local session control node validators', () => {
     expect(isLocalSessionControlResponseCjs(progress)).toBe(true);
     expect(isLocalSessionControlResponse(inputProgress)).toBe(true);
     expect(isLocalSessionControlResponseCjs(inputProgress)).toBe(true);
+    expect(isLocalSessionControlResponse(runtimeDownloadProgress)).toBe(true);
+    expect(isLocalSessionControlResponseCjs(runtimeDownloadProgress)).toBe(true);
+    for (const validate of [isLocalSessionControlResponse, isLocalSessionControlResponseCjs]) {
+      // runtime-download progress requires the runtime identity it reports on.
+      const { runtimeName: _runtimeName, ...withoutRuntimeName } = runtimeDownloadProgress;
+      expect(validate(withoutRuntimeName)).toBe(false);
+      const { runtimePhase: _runtimePhase, ...withoutRuntimePhase } = runtimeDownloadProgress;
+      expect(validate(withoutRuntimePhase)).toBe(false);
+      expect(validate({ ...runtimeDownloadProgress, runtimePercent: 101 })).toBe(false);
+    }
     expect(isLocalSessionControlResponse(response)).toBe(true);
     expect(isLocalSessionControlResponseCjs(response)).toBe(true);
   });

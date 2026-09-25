@@ -95,9 +95,16 @@ class NativeWindow extends EventEmitter {
 }
 
 vi.mock('../../../apps/electron/src/main/window', () => ({
-  adoptPreparedMainWindow: (window: BrowserWindow, target: { workspace: string; sessionId?: string }) => {
+  adoptPreparedMainWindow: (
+    window: BrowserWindow,
+    target: { workspace: string; sessionId?: string }
+  ) => {
     unmarkWarmWindow(window);
-    setReloadTarget(window, { type: 'file', filePath: '/synthetic/index.html', hash: getWindowTargetPath(target) });
+    setReloadTarget(window, {
+      type: 'file',
+      filePath: '/synthetic/index.html',
+      hash: getWindowTargetPath(target),
+    });
   },
   createWarmWindow: () => {
     const window = new NativeWindow();
@@ -248,7 +255,7 @@ describe('macOS prepared targets', () => {
     registerProductWindow(source.native, false);
     setWindowWarmupEnabled(true);
     await vi.advanceTimersByTimeAsync(0);
-    const spare = [...nativeState.windows.values()].find(w => w !== source) as NativeWindow;
+    const spare = [...nativeState.windows.values()].find((w) => w !== source) as NativeWindow;
     handleWindowWarmReady(spare.id);
     const target = { workspace: 'local', sessionId: 'target' };
     prepareWindow(source.native, target, 'first');
@@ -273,7 +280,10 @@ describe('macOS prepared targets', () => {
     source.destroy();
     expect(spare.destroyed).toBe(false);
     await requestRendererReload(spare.native);
-    expect(spare.loaded).toEqual({ filePath: '/synthetic/index.html', hash: getWindowTargetPath(target) });
+    expect(spare.loaded).toEqual({
+      filePath: '/synthetic/index.html',
+      hash: getWindowTargetPath(target),
+    });
   });
 
   it('waits for current readiness after invalidation and ignores stale or foreign signals', async () => {
@@ -347,7 +357,7 @@ describe('macOS prepared targets', () => {
     const { source, spare } = await fixture();
     cancelPreparedWindow(source.id, 'first');
     await vi.advanceTimersByTimeAsync(2001);
-    const replacement = [...nativeState.windows.values()].find(w => w !== source) as NativeWindow;
+    const replacement = [...nativeState.windows.values()].find((w) => w !== source) as NativeWindow;
     expect(replacement).toBeDefined();
     expect(replacement).not.toBe(spare);
     expect(replacement.target).toBeNull();
@@ -360,7 +370,7 @@ describe('macOS prepared targets', () => {
     vi.stubGlobal('process', { ...process, platform: 'linux' });
     setWindowWarmupEnabled(true);
     await vi.advanceTimersByTimeAsync(0);
-    const neutral = [...nativeState.windows.values()].find(w => w !== source) as NativeWindow;
+    const neutral = [...nativeState.windows.values()].find((w) => w !== source) as NativeWindow;
     handleWindowWarmReady(neutral.id);
     prepareWindow(source.native, { workspace: 'local', sessionId: 'other' }, 'linux');
     expect(spare.destroyed).toBe(true);
@@ -374,7 +384,7 @@ describe('macOS prepared targets', () => {
     setWindowWarmupEnabled(false);
     setWindowWarmupEnabled(true);
     await vi.advanceTimersByTimeAsync(0);
-    const neutral = [...nativeState.windows.values()].find(w => w !== source) as NativeWindow;
+    const neutral = [...nativeState.windows.values()].find((w) => w !== source) as NativeWindow;
     const target = { workspace: 'local', sessionId: 'too-soon' };
     prepareWindow(source.native, target, 'queued');
     expect(claimWarmWindow(target)).toBeNull();

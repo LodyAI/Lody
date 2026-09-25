@@ -123,3 +123,5 @@ tuning shortcut are in [`README.md`](README.md).
   browser; typecheck alone cannot catch this class of drift. The failure that
   proved it is recorded in
   [landing and marketing internals](../.agents/docs/site-landing-and-marketing.md).
+
+- Nightly uses standalone `/download/nightly` pages and recolors the shared atmosphere.

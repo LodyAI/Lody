@@ -119,48 +119,6 @@ describe('TurnPostProcessingService', () => {
     expect(exec).toHaveBeenCalledTimes(1);
   });
 
-  it('syncs branch names to the parent session for child sessions', async () => {
-    const logger = createLogger();
-    const childSetBranchName = vi.fn();
-    const parentSetBranchName = vi.fn();
-    const childSessionDoc = {
-      getMetaState: vi.fn(async () => ({
-        parentSessionId,
-      })),
-      setBranchName: childSetBranchName,
-    } as unknown as SessionDocument;
-    const parentSessionDoc = {
-      getMetaState: vi.fn(async () => ({
-        branchName: 'old-branch',
-      })),
-      setBranchName: parentSetBranchName,
-    } as unknown as SessionDocument;
-    const workspaceDocument = {
-      getOrCreateSessionDoc: vi.fn(async (id: SessionId) => {
-        if (id === parentSessionId) {
-          return parentSessionDoc;
-        }
-        return childSessionDoc;
-      }),
-    } as unknown as LoroDocumentManager;
-    const service = createService({ logger, workspaceDocument });
-    const session = {
-      getWorkdir: () => '/repo',
-      exec: vi.fn(async (_command: string, args: string[]) => {
-        if (args.join(' ') === 'branch --show-current') return 'feature/fix\n';
-        throw new Error(`Unexpected git args: ${args.join(' ')}`);
-      }),
-    } as unknown as ISession;
-
-    const branchName = await service.syncSessionBranchName(sessionId, session);
-
-    expect(branchName).toBe('feature/fix');
-    expect(workspaceDocument.getOrCreateSessionDoc).toHaveBeenCalledWith(parentSessionId);
-    expect(parentSetBranchName).toHaveBeenCalledWith('feature/fix');
-    expect(childSetBranchName).not.toHaveBeenCalled();
-    expect(logger.debug).not.toHaveBeenCalled();
-  });
-
   it('publishes a child session\u2019s dirty worktree onto the owning parent meta', async () => {
     // A Side Chat / child Tab shares the parent's checkout, so the Info Bar's
     // Commit & Push decision has to read one dirty flag. Writing it to the child
