@@ -1,7 +1,7 @@
 import { useTranslation } from 'react-i18next';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { AlertCircle, Book, CheckCircle2, Github, ArrowUpRight, Lock, Search } from 'lucide-react';
-import { Spinner } from '@/ui/spinner';
+import { Spinner } from '@lody/ui/spinner';
 import { useCloudAction, useCloudMutation } from '@lody/platform/react';
 import { useAtomValue } from 'jotai';
 import { currentWorkspaceSlugAtom } from '@/atoms';
@@ -10,10 +10,10 @@ import { cloudOperations } from '@/lib/cloud-api-operations';
 import { cn } from '@/lib/utils';
 import { useAppCapability } from '@/lib/app-platform';
 import { ScrollArea } from '@/ui/scroll-area';
-import { Switch } from '@/ui/switch';
-import { Input } from '@/ui/input';
+import { Switch } from '@lody/ui/switch';
+import { Input } from '@lody/ui/input';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import { useSettingsDataCache, type SettingsWorkspaceRepoWithStatus } from './settings-data-cache';
 import { MobileIntegrationsSettings } from '@/components/mobile/mobile-integrations-settings';
 import { isElectronRenderer } from '@/lib/electron';
@@ -136,7 +136,7 @@ export function GitHubPersonalIdentitySettingsCard({
         </div>
         {!authorizationReady && canAuthorize && (
           <Button
-            size="sm"
+            size="small"
             variant="ghost"
             className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap bg-foreground/[0.06] self-start hover:bg-foreground/[0.1] sm:self-auto"
             onClick={onAuthorize}
@@ -228,7 +228,7 @@ export function GitHubPersonalIdentitySettingsCard({
           </div>
           {!authorizationReady && canAuthorize && (
             <Button
-              size="sm"
+              size="small"
               variant="ghost"
               className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap bg-foreground/[0.06] hover:bg-foreground/[0.1]"
               onClick={onAuthorize}
@@ -553,7 +553,7 @@ function CloudIntegrationsSettings() {
             <div className="flex shrink-0 items-center gap-2">
               {canManage && (
                 <Button
-                  size="sm"
+                  size="small"
                   className="inline-flex items-center gap-1 whitespace-nowrap bg-foreground/[0.05] text-foreground hover:bg-foreground/[0.08]"
                   variant="ghost"
                   onClick={() => {

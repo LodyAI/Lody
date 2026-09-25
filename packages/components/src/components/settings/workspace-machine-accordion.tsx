@@ -2,14 +2,15 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { MachineViewMeta } from '@lody/shared';
 import { Bot, ChevronDown, Folder, Laptop, LockKeyhole } from 'lucide-react';
-import { Badge } from '@/ui/badge';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
+import * as stylex from '@stylexjs/stylex';
+import { Badge } from '@lody/ui/badge';
+import { Tooltip } from '@lody/ui/tooltip';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { corner, duration, ease, radius, space } from '@lody/ui/tokens/scales.stylex';
 import { UserAvatar } from '@/components/user-avatar';
-import { cn } from '@/lib/utils';
+import { withClassName } from '@/lib/stylex';
+import { settingsSurface as surface } from './surface';
 import type { MachineTabOwner } from './machine-tab-list';
-
-export const MACHINE_META_PILL_CLASS =
-  'border-transparent bg-foreground/[0.06] px-1.5 py-0 text-[10px] font-normal text-muted-foreground';
 
 export type WorkspaceMachineAccordionMeta = {
   machine: MachineViewMeta;
@@ -21,52 +22,165 @@ export type WorkspaceMachineAccordionMeta = {
   agentCount: number;
 };
 
+const styles = stylex.create({
+  summary: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: space[1.5],
+    minWidth: 0,
+    fontSize: '11px',
+    color: colors.secondaryLabel,
+  },
+  /** In the row the summary shares one line with the name, and gives way first. */
+  summaryInRow: { flexWrap: 'nowrap', overflow: 'hidden', maxWidth: '70%' },
+  glyph: { width: '100%', height: '100%' },
+  os: { maxWidth: '6rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  count: {
+    display: 'inline-flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    gap: space[1],
+    paddingInline: space[1],
+  },
+  countIcon: { flexShrink: 0, width: '12px', height: '12px' },
+  avatar: { display: 'inline-flex', flexShrink: 0, cursor: 'default' },
+
+  /**
+   * A machine is a settings card; its row is the card's own first line. The
+   * expanded card clips rather than hides its overflow: `hidden` would make it
+   * the scroller its sticky row sticks to, and the row would never stick.
+   */
+  card: { overflow: 'clip' },
+  expandedCard: { position: 'relative' },
+  /** The whole row answers the pointer. */
+  row: {
+    backgroundColor: {
+      default: 'transparent',
+      ':hover': `color-mix(in oklab, ${colors.elevatedBackground}, ${colors.label} 4%)`,
+    },
+    transitionProperty: 'background-color',
+    transitionDuration: duration.fast,
+    transitionTimingFunction: ease.standard,
+  },
+  /** Expanded, the row stays in view over its detail, so it takes the card's fill. */
+  rowExpanded: {
+    position: 'sticky',
+    top: 0,
+    zIndex: 20,
+    backgroundColor: {
+      default: colors.elevatedBackground,
+      ':hover': `color-mix(in oklab, ${colors.elevatedBackground}, ${colors.label} 4%)`,
+    },
+  },
+  toggle: {
+    boxSizing: 'border-box',
+    display: 'flex',
+    alignItems: 'center',
+    gap: space[3],
+    width: '100%',
+    minWidth: 0,
+    minHeight: '48px',
+    margin: 0,
+    paddingInline: space[4],
+    paddingBlock: space[2],
+    borderWidth: 0,
+    borderRadius: radius.large,
+    cornerShape: corner.round,
+    backgroundColor: 'transparent',
+    color: 'inherit',
+    fontFamily: 'inherit',
+    fontSize: '1em',
+    textAlign: 'start',
+    cursor: 'pointer',
+    outlineStyle: 'none',
+    boxShadow: { default: 'none', ':focus-visible': `inset 0 0 0 2px ${colors.accent}` },
+  },
+  dot: {
+    flexShrink: 0,
+    width: '10px',
+    height: '10px',
+    borderRadius: radius.full,
+    cornerShape: corner.round,
+    backgroundColor: colors.tertiaryLabel,
+  },
+  dotOnline: {
+    backgroundColor: colors.success,
+    boxShadow: `0 0 0 3px color-mix(in oklab, ${colors.success} 20%, transparent)`,
+  },
+  name: {
+    flexGrow: 1,
+    flexShrink: 1,
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: '0.875em',
+    fontWeight: 400,
+    color: colors.label,
+  },
+  chevron: {
+    flexShrink: 0,
+    width: '16px',
+    height: '16px',
+    color: colors.tertiaryLabel,
+    transitionProperty: 'transform',
+    transitionDuration: duration.fast,
+    transitionTimingFunction: ease.standard,
+  },
+  chevronOpen: { transform: 'rotate(180deg)' },
+  detailPending: { minHeight: '96px' },
+});
+
 export function WorkspaceMachineAccordionSummary({
   meta,
   className,
   showOwner = true,
 }: {
   meta: WorkspaceMachineAccordionMeta;
+  /** Layout only: where the summary sits in its caller. */
   className?: string;
   showOwner?: boolean;
+}) {
+  return <Summary meta={meta} className={className} showOwner={showOwner} inRow={false} />;
+}
+
+function Summary({
+  meta,
+  className,
+  showOwner,
+  inRow,
+}: {
+  meta: WorkspaceMachineAccordionMeta;
+  className?: string;
+  showOwner: boolean;
+  inRow: boolean;
 }) {
   const { t } = useTranslation();
   const { machine, isLocal, isPrivate, owner, directoryCount, agentCount } = meta;
 
   return (
-    <div
-      className={cn(
-        'flex min-w-0 flex-wrap items-center justify-end gap-1.5 text-[11px] text-muted-foreground',
-        className
-      )}
-    >
-      {isLocal ? (
-        <Badge variant="secondary" className={MACHINE_META_PILL_CLASS}>
-          {t('workspace.machines.thisDevice', 'This device')}
-        </Badge>
-      ) : null}
+    <div {...withClassName(stylex.props(styles.summary, inRow && styles.summaryInRow), className)}>
+      {isLocal ? <Badge>{t('workspace.machines.thisDevice', 'This device')}</Badge> : null}
       {isPrivate ? (
-        <Badge variant="secondary" className={cn('gap-1', MACHINE_META_PILL_CLASS)}>
-          <LockKeyhole className="h-2.5 w-2.5" aria-hidden />
+        <Badge icon={<LockKeyhole aria-hidden {...stylex.props(styles.glyph)} />}>
           {t('workspace.machines.private', 'Private')}
         </Badge>
       ) : null}
-      <Badge variant="secondary" className={cn('gap-1', MACHINE_META_PILL_CLASS)}>
-        <Laptop className="h-2.5 w-2.5" aria-hidden />
-        <span className="max-w-24 truncate">{machine.os || '-'}</span>
+      <Badge icon={<Laptop aria-hidden {...stylex.props(styles.glyph)} />}>
+        <span {...stylex.props(styles.os)}>{machine.os || '-'}</span>
       </Badge>
-      <Badge variant="secondary" className={cn('font-mono', MACHINE_META_PILL_CLASS)}>
-        {machine.cliVersion ? `v${machine.cliVersion}` : t('machines.never', 'Never')}
-      </Badge>
-      <span className="inline-flex shrink-0 items-center gap-1 px-1">
-        <Folder className="h-3 w-3" aria-hidden />
+      <Badge>{machine.cliVersion ? `v${machine.cliVersion}` : t('machines.never', 'Never')}</Badge>
+      <span {...stylex.props(styles.count)}>
+        <Folder aria-hidden {...stylex.props(styles.countIcon)} />
         {t('settings.machines.directoryCountSummary', {
           count: directoryCount,
           defaultValue: '{{count}} directories',
         })}
       </span>
-      <span className="inline-flex shrink-0 items-center gap-1 px-1">
-        <Bot className="h-3 w-3" aria-hidden />
+      <span {...stylex.props(styles.count)}>
+        <Bot aria-hidden {...stylex.props(styles.countIcon)} />
         {t('settings.machines.agentCountSummary', {
           count: agentCount,
           defaultValue: '{{count}} Agents',
@@ -82,21 +196,21 @@ export function WorkspaceMachineOwnerAvatar({ owner }: { owner: MachineTabOwner 
   if (!owner) return null;
 
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <span
-          className="inline-flex shrink-0 cursor-default rounded-full"
-          aria-label={t('workspace.machines.ownerTooltip', { owner: owner.name })}
-        >
-          <UserAvatar
-            user={owner}
-            className="h-5 w-5 text-[9px]"
-            fallbackClassName="bg-muted text-muted-foreground"
-          />
-        </span>
-      </TooltipTrigger>
-      <TooltipContent>{t('workspace.machines.ownerTooltip', { owner: owner.name })}</TooltipContent>
-    </Tooltip>
+    <Tooltip.Root>
+      <Tooltip.Trigger
+        render={
+          <span
+            aria-label={t('workspace.machines.ownerTooltip', { owner: owner.name })}
+            {...stylex.props(styles.avatar)}
+          >
+            <UserAvatar user={owner} size="small" />
+          </span>
+        }
+      />
+      <Tooltip.Content>
+        {t('workspace.machines.ownerTooltip', { owner: owner.name })}
+      </Tooltip.Content>
+    </Tooltip.Root>
   );
 }
 
@@ -108,7 +222,7 @@ export function WorkspaceMachineCollapsedRow({
   onExpand: () => void;
 }) {
   return (
-    <section className="rounded-xl border border-border/60">
+    <section {...stylex.props(surface.card, styles.card)}>
       <WorkspaceMachineAccordionRow meta={meta} expanded={false} onToggle={onExpand} />
     </section>
   );
@@ -130,15 +244,10 @@ export function WorkspaceMachineAccordionRow({
     : t('workspace.machines.offline', 'Offline');
 
   return (
-    <div
-      className={cn(
-        'rounded-xl bg-card/20 transition-colors hover:bg-card/35',
-        expanded && 'sticky top-0 z-20 rounded-b-none backdrop-blur'
-      )}
-    >
+    <div {...stylex.props(styles.row, expanded && styles.rowExpanded)}>
       <button
         type="button"
-        className="flex min-h-12 w-full min-w-0 items-center gap-3 rounded-xl px-4 py-2 text-start focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+        {...stylex.props(styles.toggle)}
         aria-expanded={expanded}
         aria-label={
           expanded
@@ -156,24 +265,13 @@ export function WorkspaceMachineAccordionRow({
         <span
           role="img"
           aria-label={statusLabel}
-          className={cn(
-            'h-2.5 w-2.5 shrink-0 rounded-full ring-4',
-            meta.isOnline
-              ? 'bg-status-success ring-status-success/20'
-              : 'bg-muted-foreground/50 ring-muted'
-          )}
+          {...stylex.props(styles.dot, meta.isOnline && styles.dotOnline)}
         />
-        <span className="min-w-0 flex-1 truncate text-sm font-normal text-foreground">
-          {machineName}
-        </span>
-        <WorkspaceMachineAccordionSummary
-          meta={meta}
-          className="max-w-[70%] flex-nowrap overflow-hidden"
-          showOwner={false}
-        />
+        <span {...stylex.props(styles.name)}>{machineName}</span>
+        <Summary meta={meta} showOwner={false} inRow />
         <ChevronDown
-          className={cn('h-4 w-4 shrink-0 text-muted-foreground', expanded && 'rotate-180')}
           aria-hidden
+          {...stylex.props(styles.chevron, expanded && styles.chevronOpen)}
         />
         <WorkspaceMachineOwnerAvatar owner={meta.owner} />
       </button>
@@ -211,9 +309,12 @@ export function WorkspaceMachineExpandedSection({
   }, []);
 
   return (
-    <section className="relative rounded-xl border border-border/60">
+    <section {...stylex.props(surface.card, styles.card, styles.expandedCard)}>
       <WorkspaceMachineAccordionRow meta={meta} expanded onToggle={onCollapse} />
-      <div className={cn(!detailReady && 'min-h-24')} aria-busy={!detailReady || undefined}>
+      <div
+        {...stylex.props(!detailReady && styles.detailPending)}
+        aria-busy={!detailReady || undefined}
+      >
         {detailReady ? children : null}
       </div>
     </section>

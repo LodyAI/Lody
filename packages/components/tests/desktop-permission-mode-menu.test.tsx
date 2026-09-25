@@ -6,7 +6,8 @@ import { createRoot, type Root } from 'react-dom/client';
 
 import { DesktopPermissionModeButton } from '../src/components/sessions/desktop-run-config-menu';
 import { initI18n } from '../src/i18n';
-import { TooltipProvider } from '../src/ui/tooltip';
+import { menuGroupLabelClassName } from '../src/ui/menu-styles';
+import { Tooltip } from '@lody/ui/tooltip';
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -57,7 +58,7 @@ describe('DesktopPermissionModeButton menu', () => {
     await act(async () => {
       root?.render(
         createElement(
-          TooltipProvider,
+          Tooltip.Provider,
           null,
           createElement(DesktopPermissionModeButton, {
             modeOptions,
@@ -70,7 +71,8 @@ describe('DesktopPermissionModeButton menu', () => {
     await act(async () => {
       container
         ?.querySelector('button[aria-label="Permission"]')
-        ?.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button: 0 }));
+        ?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }));
+      await new Promise((resolve) => setTimeout(resolve, 40));
     });
     return document.querySelector('[role="menu"]') as HTMLElement;
   };
@@ -81,7 +83,8 @@ describe('DesktopPermissionModeButton menu', () => {
       (node) => node.childNodes.length === 1 && node.textContent === 'Permission'
     );
     expect(label).toBeDefined();
-    expect(label?.className).toContain('normal-case');
+    // The product's own sentence-case label, not the package's caps heading.
+    expect(label?.className).toContain(menuGroupLabelClassName);
     expect(menu.textContent).not.toContain('Requires approval');
     expect(menu.textContent).not.toContain('Exercise caution');
     const agent = [...menu.querySelectorAll('[role="menuitem"]')].find((node) =>

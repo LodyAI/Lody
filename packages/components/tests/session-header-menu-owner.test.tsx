@@ -78,8 +78,9 @@ describe('SessionHeaderMenu owner transfer', () => {
     );
     await act(async () => {
       trigger?.dispatchEvent(
-        new TestPointerEvent('pointerdown', { bubbles: true, button: 0, pointerType: 'mouse' })
+        new TestPointerEvent('mousedown', { bubbles: true, button: 0, pointerType: 'mouse' })
       );
+      await new Promise((resolve) => setTimeout(resolve, 40));
     });
   }
 

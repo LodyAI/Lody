@@ -2,7 +2,7 @@ import { resolveActiveAssistantTurnIdFromIndex } from '@/lib/conversation-view';
 import { useCallback, useEffect, useMemo } from 'react';
 import { useAtomValue } from 'jotai';
 import { useTranslation } from 'react-i18next';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import {
   buildMachineDeleteLocalProjectCommand,
   getMachineFlockDocId,

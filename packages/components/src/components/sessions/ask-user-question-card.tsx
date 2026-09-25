@@ -10,7 +10,8 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from 'react';
 import { ArrowUp, Check, ChevronLeft, ChevronRight, Clock3, Info, X } from 'lucide-react';
-import { Spinner } from '@/ui/spinner';
+import * as stylex from '@stylexjs/stylex';
+import { Spinner } from '@lody/ui/spinner';
 import { useTranslation } from 'react-i18next';
 import {
   getAskUserQuestionAnswerKey,
@@ -22,12 +23,257 @@ import {
   getServerNow,
 } from '@lody/shared';
 
-import { Button } from '@/ui/button';
-import { Input } from '@/ui/input';
-import { Textarea } from '@/ui/textarea';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/ui/dialog';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
-import { cn } from '@/lib/utils';
+import { Badge } from '@lody/ui/badge';
+import { Button } from '@lody/ui/button';
+import { Input } from '@lody/ui/input';
+import { Textarea } from '@lody/ui/textarea';
+import { Dialog } from '@/ui/dialog';
+import { Tooltip } from '@lody/ui/tooltip';
+import { colors, shadow, sheen } from '@lody/ui/tokens/colors.stylex';
+import { corner, duration, ease, radius, space, text } from '@lody/ui/tokens/scales.stylex';
+import { withClassName } from '@/lib/stylex';
+
+const REDUCED_MOTION = '@media (prefers-reduced-motion: reduce)';
+const RING = `0 0 0 2px ${colors.accent}`;
+const REGION = `color-mix(in oklab, transparent, ${colors.label} 3%)`;
+
+/** The card arrives from a hair below, the way a new block enters the conversation. */
+const cardIn = stylex.keyframes({
+  from: { opacity: 0, transform: 'translateY(8px)' },
+  to: { opacity: 1, transform: 'none' },
+});
+
+const styles = stylex.create({
+  // The card rung: it lifts off the conversation by its shadow, with no edge and
+  // no bands inside it — the question, the choices and the answers are set apart
+  // by space alone.
+  card: {
+    position: 'relative',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: space[2],
+    minWidth: 0,
+    padding: space[3],
+    backgroundColor: colors.elevatedBackground,
+    boxShadow: shadow.card,
+    borderRadius: radius.large,
+    cornerShape: corner.shape,
+    color: colors.label,
+    fontSize: text.bodySize,
+    lineHeight: text.bodyLeading,
+    touchAction: 'pan-y',
+    animationName: { default: cardIn, [REDUCED_MOTION]: 'none' },
+    animationDuration: duration.slow,
+    animationTimingFunction: ease.standard,
+  },
+
+  header: { display: 'flex', alignItems: 'flex-start', gap: space[2], minWidth: 0 },
+  question: {
+    flexGrow: 1,
+    flexShrink: 1,
+    minWidth: 0,
+    fontWeight: 600,
+    whiteSpace: 'pre-wrap',
+    overflowWrap: 'anywhere',
+  },
+  // Everything beside the question sits on its first line, however many it wraps to.
+  headerMeta: {
+    display: 'flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    gap: space[2],
+    height: text.bodyLeading,
+  },
+  count: {
+    fontSize: text.captionSize,
+    lineHeight: text.captionLeading,
+    fontWeight: 500,
+    fontVariantNumeric: 'tabular-nums',
+    color: colors.tertiaryLabel,
+  },
+  countdown: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: space[1],
+    fontSize: text.captionSize,
+    lineHeight: text.captionLeading,
+    color: colors.tertiaryLabel,
+  },
+  glyph12: { display: 'block', flexShrink: 0, width: '12px', height: '12px' },
+  glyph14: { display: 'block', flexShrink: 0, width: '14px', height: '14px' },
+  glyph16: { display: 'block', flexShrink: 0, width: '16px', height: '16px' },
+  glyphFill: { display: 'block', width: '100%', height: '100%' },
+  // A 24px icon button on a 20px line: it overhangs the line rather than growing it.
+  lineButton: { flexShrink: 0, marginBlock: '-2px' },
+
+  choices: { display: 'flex', flexDirection: 'column', gap: '2px' },
+  option: {
+    display: 'flex',
+    alignItems: 'flex-start',
+    gap: space[2],
+    width: '100%',
+    minWidth: 0,
+    boxSizing: 'border-box',
+    paddingBlock: space[1],
+    paddingInline: space[2],
+    borderRadius: radius.small,
+    cornerShape: corner.round,
+    fontSize: text.subheadlineSize,
+    lineHeight: text.bodyLeading,
+    textAlign: 'start',
+    whiteSpace: 'normal',
+    overflowWrap: 'anywhere',
+    userSelect: 'none',
+    color: colors.label,
+    backgroundColor: 'transparent',
+    outlineStyle: 'none',
+    boxShadow: { default: 'none', ':focus-visible': RING },
+    transitionProperty: 'background-color, opacity',
+    transitionDuration: duration.fast,
+    transitionTimingFunction: ease.standard,
+  },
+  optionInteractive: {
+    cursor: 'pointer',
+    backgroundColor: { default: 'transparent', ':hover': colors.hoverFill },
+  },
+  optionSelected: { backgroundColor: colors.selectedFill },
+  optionDisabled: { cursor: 'not-allowed' },
+  optionReadonly: { cursor: 'default' },
+  dimmed: { opacity: 0.45 },
+  optionLabel: { display: 'flex', flexGrow: 1, minWidth: 0, alignItems: 'center', gap: space[1] },
+  optionText: { minWidth: 0 },
+  // An inline (i) sits on the label's 20px line.
+  infoButton: { flexShrink: 0, marginBlock: '-2px' },
+  preWrap: { whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' },
+  breakWord: { overflowWrap: 'anywhere' },
+
+  // The mark a choice wears is drawn as a checkbox or radio is: an empty well
+  // until it holds the value, then the accent under the ink edge.
+  mark: {
+    display: 'flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    boxSizing: 'border-box',
+    width: '16px',
+    height: '16px',
+    marginTop: '2px',
+    backgroundColor: colors.wellBackground,
+    boxShadow: shadow.inset,
+    color: colors.background,
+    transitionProperty: 'background-color, box-shadow',
+    transitionDuration: duration.fast,
+    transitionTimingFunction: ease.standard,
+  },
+  markRadio: { borderRadius: radius.full, cornerShape: corner.round },
+  markCheckbox: { borderRadius: radius.mini, cornerShape: corner.round },
+  markChecked: {
+    backgroundColor: colors.accent,
+    backgroundImage: sheen.ink,
+    boxShadow: shadow.inkEdge,
+  },
+  markCentered: { marginTop: 0 },
+  dot: {
+    width: '6px',
+    height: '6px',
+    borderRadius: radius.full,
+    cornerShape: corner.round,
+    backgroundColor: 'currentColor',
+  },
+  checkGlyph: { display: 'block', width: '12px', height: '12px' },
+  customRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: space[2],
+    minWidth: 0,
+    paddingBlock: '2px',
+    paddingInline: space[2],
+  },
+
+  note: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: space[1.5],
+    minWidth: 0,
+    fontSize: text.footnoteSize,
+    lineHeight: text.footnoteLeading,
+  },
+  noteHeading: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'baseline',
+    columnGap: space[2],
+    rowGap: '2px',
+  },
+  noteTitle: { fontWeight: 500, color: colors.label },
+  noteHint: { color: colors.tertiaryLabel },
+
+  submitRow: { display: 'flex' },
+  pager: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: space[2],
+  },
+  dots: { display: 'flex', alignItems: 'center', gap: space[1.5] },
+  dotButton: {
+    flexShrink: 0,
+    height: '6px',
+    margin: 0,
+    padding: 0,
+    borderWidth: 0,
+    borderStyle: 'none',
+    borderRadius: radius.full,
+    cornerShape: corner.round,
+    cursor: { default: 'pointer', ':disabled': 'default' },
+    outlineStyle: 'none',
+    boxShadow: { default: 'none', ':focus-visible': RING },
+    transitionProperty: 'width, background-color',
+    transitionDuration: duration.regular,
+    transitionTimingFunction: ease.standard,
+  },
+  dotCurrent: { width: '20px', backgroundColor: colors.accent },
+  dotAnswered: {
+    width: '10px',
+    backgroundColor: `color-mix(in oklab, transparent, ${colors.accent} 55%)`,
+  },
+  dotPending: {
+    width: '6px',
+    backgroundColor: `color-mix(in oklab, transparent, ${colors.label} 15%)`,
+  },
+
+  // A notice is a tint and a mark: the region fill inside the card, no edge.
+  notice: {
+    display: 'flex',
+    alignItems: 'flex-start',
+    gap: space[1.5],
+    paddingBlock: space[1.5],
+    paddingInline: space[2],
+    backgroundColor: REGION,
+    borderRadius: radius.medium,
+    cornerShape: corner.shape,
+    fontSize: text.footnoteSize,
+    lineHeight: text.footnoteLeading,
+    color: colors.secondaryLabel,
+  },
+  noticeMark: { marginTop: '1px', color: colors.tertiaryLabel },
+
+  preview: {
+    maxHeight: '60vh',
+    margin: 0,
+    overflow: 'auto',
+    paddingBlock: space[2],
+    paddingInline: space[3],
+    backgroundColor: REGION,
+    borderRadius: radius.medium,
+    cornerShape: corner.shape,
+    fontFamily: 'var(--font-mono)',
+    fontSize: text.footnoteSize,
+    lineHeight: 1.625,
+    whiteSpace: 'pre',
+    color: colors.label,
+  },
+});
 
 type DraftAnswer = {
   selectedLabels: string[];
@@ -429,8 +675,6 @@ export function AskUserQuestionCard({ meta, mode, className }: AskUserQuestionCa
   const noteInputProps = {
     value: isReadonly && question.note?.isSecret && draft.note ? '••••••••' : (draft.note ?? ''),
     disabled,
-    className:
-      'min-w-0 rounded-md border border-border bg-input-field px-2 py-1.5 text-foreground disabled:bg-muted',
     onChange: (event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
       const note = event.target.value;
       setDrafts((current) =>
@@ -442,7 +686,7 @@ export function AskUserQuestionCard({ meta, mode, className }: AskUserQuestionCa
   const PaginationDots =
     total > 1 ? (
       <div
-        className="flex items-center gap-1.5"
+        {...stylex.props(styles.dots)}
         aria-label={t('sessions.askQuestion.progressLabel', 'Progress')}
       >
         {meta.questions.map((_, idx) => {
@@ -460,13 +704,9 @@ export function AskUserQuestionCard({ meta, mode, className }: AskUserQuestionCa
               aria-label={t('sessions.askQuestion.goToQuestion', 'Go to question {{n}}', {
                 n: idx + 1,
               })}
-              className={cn(
-                'h-1.5 rounded-full transition-all',
-                isCurrent
-                  ? 'w-5 bg-primary'
-                  : isAnswered
-                    ? 'w-2.5 bg-primary/55'
-                    : 'w-1.5 bg-border'
+              {...stylex.props(
+                styles.dotButton,
+                isCurrent ? styles.dotCurrent : isAnswered ? styles.dotAnswered : styles.dotPending
               )}
             />
           );
@@ -474,33 +714,36 @@ export function AskUserQuestionCard({ meta, mode, className }: AskUserQuestionCa
       </div>
     ) : null;
 
+  const submitIcon =
+    mode.kind === 'interactive' && mode.isPendingSubmit ? (
+      <Spinner size="small" label={null} />
+    ) : (
+      <ArrowUp {...stylex.props(styles.glyph16)} />
+    );
+
   return (
     <div
-      className={cn(
-        'relative overflow-hidden rounded-lg border border-border/60 bg-secondary/25 text-sm shadow-sm touch-pan-y',
-        'animate-in fade-in slide-in-from-bottom-2 duration-300',
-        className
-      )}
+      {...withClassName(stylex.props(styles.card), className)}
       onClickCapture={handleSwipeClickCapture}
       onPointerCancel={handleSwipePointerCancel}
       onPointerDown={handleSwipePointerDown}
       onPointerMove={handleSwipePointerMove}
       onPointerUp={finishSwipe}
     >
-      <div className="flex items-start justify-between gap-2 border-b border-border/40 bg-secondary/55 px-3 py-2">
-        <div className="flex min-w-0 flex-1 items-start gap-2 whitespace-pre-wrap break-words text-sm font-medium leading-snug text-foreground">
-          <span className="min-w-0 flex-1">{question.question}</span>
+      <div {...stylex.props(styles.header)}>
+        <span {...stylex.props(styles.question)}>{question.question}</span>
+        <div {...stylex.props(styles.headerMeta)}>
           {total > 1 ? (
-            <span className="mt-0.5 shrink-0 tabular-nums text-[11px] font-medium text-primary/70">
+            <span {...stylex.props(styles.count)}>
               {currentIndex + 1}/{total}
             </span>
           ) : null}
           {!isReadonly && autoResolveSeconds !== null ? (
-            <span className="mt-0.5 inline-flex shrink-0 items-center gap-1 text-[10px] font-normal text-muted-foreground">
+            <span {...stylex.props(styles.countdown)}>
               {isAutoResolveExpired ? (
-                <Spinner className="h-3 w-3" />
+                <Spinner size="small" label={null} />
               ) : (
-                <Clock3 className="h-3 w-3" />
+                <Clock3 {...stylex.props(styles.glyph12)} />
               )}
               {isAutoResolveExpired
                 ? t('sessions.askQuestion.continuing', 'Continuing')
@@ -510,291 +753,280 @@ export function AskUserQuestionCard({ meta, mode, className }: AskUserQuestionCa
             </span>
           ) : null}
           {isReadonly ? (
-            <span className="mt-0.5 inline-flex shrink-0 items-center gap-0.5 rounded-full border border-status-success/30 bg-status-success/[0.08] px-1.5 py-0 text-[9px] font-medium uppercase tracking-wide text-status-success">
-              <Check className="h-2.5 w-2.5" />
+            <Badge tone="success" icon={<Check {...stylex.props(styles.glyphFill)} />}>
               {t('sessions.askQuestion.answered', 'Answered')}
-            </span>
+            </Badge>
           ) : null}
-        </div>
-        {!isReadonly && mode.kind === 'interactive' ? (
-          <Button
-            type="button"
-            size="icon"
-            variant="ghost"
-            disabled={disabled && !mode.isPendingCancel}
-            onClick={mode.onCancel}
-            aria-label={t('sessions.cancel', 'Cancel')}
-            className="-mr-1 mt-0.5 h-5 w-5 shrink-0 rounded-md text-muted-foreground hover:text-foreground"
-          >
-            {mode.isPendingCancel ? <Spinner className="h-3 w-3" /> : <X className="h-3 w-3" />}
-          </Button>
-        ) : null}
-      </div>
-
-      <div className="px-3 py-2">
-        {question.options.length > 0 || allowCustomAnswer ? (
-          <div className="flex flex-col gap-0.5">
-            {question.options.map((option) => {
-              const isSelected = draft.selectedLabels.includes(option.label);
-              const isOptionDisabled = disabled || customAnswerActive;
-              const hasInfo = Boolean(option.description || option.preview);
-              const infoButton = (
-                <button
-                  type="button"
-                  aria-label={t('sessions.askQuestion.showDetails', 'Show details')}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    setInfoModalOption(option);
-                  }}
-                  className={cn(
-                    'inline-flex h-4 w-4 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors',
-                    'hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring'
-                  )}
-                >
-                  <Info className="h-3 w-3" />
-                </button>
-              );
-              // Option container is a div with role="button", not a real
-              // <button>, so the inline info button can nest next to the label
-              // text. Nesting a real <button> inside <button> is invalid HTML;
-              // a styled div sidesteps that and lets the (i) icon hug the
-              // label end (including across wrapped lines) instead of floating
-              // to the row's right edge where it gets overlooked.
-              return (
-                <div
-                  key={option.label}
-                  role="button"
-                  tabIndex={isOptionDisabled ? -1 : 0}
-                  aria-disabled={isOptionDisabled || undefined}
-                  aria-pressed={isSelected}
-                  onClick={() => {
-                    if (!isOptionDisabled) handleOptionClick(option.label);
-                  }}
-                  onKeyDown={(event) => {
-                    // Keydown on the inner info <button> bubbles here; without
-                    // this guard we would preventDefault the browser's native
-                    // Enter→click on that button and toggle the parent option
-                    // instead of opening the info dialog.
-                    if (event.target !== event.currentTarget) return;
-                    if ((event.key === 'Enter' || event.key === ' ') && !isOptionDisabled) {
-                      event.preventDefault();
-                      handleOptionClick(option.label);
-                    }
-                  }}
-                  className={cn(
-                    'flex w-full min-w-0 select-none items-start justify-start gap-2.5 rounded-md px-2.5 py-1 text-left text-xs leading-5 transition-colors',
-                    'whitespace-normal break-words',
-                    'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
-                    isSelected
-                      ? 'bg-hover text-foreground'
-                      : 'text-foreground/85 hover:bg-hover hover:text-foreground',
-                    isOptionDisabled ? 'cursor-not-allowed opacity-55' : 'cursor-pointer',
-                    isReadonly && !isSelected && 'opacity-55'
-                  )}
-                >
-                  <span
-                    className={cn(
-                      'mt-0.5 flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full border transition-colors',
-                      question.multiSelect ? 'rounded-[5px]' : '',
-                      isSelected
-                        ? 'border-primary bg-primary text-primary-foreground'
-                        : 'border-muted-foreground/40 bg-transparent'
-                    )}
-                  >
-                    {isSelected ? <Check className="h-2.5 w-2.5" /> : null}
-                  </span>
-                  <span className="flex min-w-0 flex-1 items-center gap-1">
-                    <span className="min-w-0 break-words">{option.label}</span>
-                    {hasInfo ? (
-                      // Tooltip only when the description adds information
-                      // beyond the button's aria-label; otherwise rendering
-                      // "Show details" twice (label + tooltip) is noise.
-                      option.description ? (
-                        <Tooltip>
-                          <TooltipTrigger asChild>{infoButton}</TooltipTrigger>
-                          <TooltipContent
-                            side="top"
-                            align="start"
-                            className="max-w-[260px] whitespace-pre-wrap"
-                          >
-                            {option.description}
-                          </TooltipContent>
-                        </Tooltip>
-                      ) : (
-                        infoButton
-                      )
-                    ) : null}
-                  </span>
-                </div>
-              );
-            })}
-            {allowCustomAnswer ? (
-              <div className="flex items-start gap-2.5 rounded-md px-2.5 py-1">
-                <span
-                  className={cn(
-                    'mt-0.5 flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full border transition-colors',
-                    customAnswerActive
-                      ? 'border-primary bg-primary text-primary-foreground'
-                      : 'border-muted-foreground/40 bg-transparent'
-                  )}
-                >
-                  {customAnswerActive ? <Check className="h-2.5 w-2.5" /> : null}
-                </span>
-                <input
-                  type={question.isSecret ? 'password' : 'text'}
-                  value={
-                    isReadonly && question.isSecret && draft.customAnswer
-                      ? '••••••••'
-                      : draft.customAnswer
-                  }
-                  disabled={disabled}
-                  placeholder={t('sessions.customAnswerPlaceholder', 'Type a custom answer...')}
-                  className="min-w-0 flex-1 border-0 bg-transparent p-0 text-xs leading-5 text-foreground shadow-none placeholder:text-muted-foreground/60 focus:outline-none focus-visible:outline-none focus-visible:ring-0 disabled:cursor-not-allowed"
-                  onChange={(event) => handleCustomAnswerChange(event.target.value)}
-                  onKeyDown={handleCustomAnswerKeyDown}
-                />
-              </div>
-            ) : null}
-          </div>
-        ) : null}
-
-        {question.note ? (
-          <label className="mt-2 flex flex-col gap-1 text-xs text-muted-foreground">
-            <span className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-              <span className="text-foreground/85">
-                {question.note.title ||
-                  t('sessions.askQuestion.noteLabel', 'Additional context (optional)')}
-              </span>
-              {question.note.description ? (
-                <span className="text-muted-foreground/70">{question.note.description}</span>
-              ) : null}
-            </span>
-            {question.note.isSecret ? (
-              <Input type="password" {...noteInputProps} />
-            ) : (
-              <Textarea rows={2} {...noteInputProps} />
-            )}
-          </label>
-        ) : null}
-
-        {/* Custom answer is an inline option row in the list above; Submit is a
-            small button (bottom-left), a discrete action rather than a full bar.
-            The footer below only renders for multi-question flows. */}
-        {!isReadonly && mode.kind === 'interactive' && total === 1 ? (
-          <div className="mt-2">
+          {!isReadonly && mode.kind === 'interactive' ? (
             <Button
               type="button"
-              size="sm"
-              variant="secondary"
-              disabled={disabled || !canSubmit}
-              onClick={() => mode.kind === 'interactive' && submit(drafts)}
-              className="h-8 gap-1.5 px-3 text-xs"
+              variant="ghost"
+              size="mini"
+              icon
+              disabled={disabled && !mode.isPendingCancel}
+              onClick={mode.onCancel}
+              aria-label={t('sessions.cancel', 'Cancel')}
+              {...stylex.props(styles.lineButton)}
             >
-              {mode.kind === 'interactive' && mode.isPendingSubmit ? (
-                <Spinner className="h-3.5 w-3.5" />
+              {mode.isPendingCancel ? (
+                <Spinner size="small" label={null} />
               ) : (
-                <ArrowUp className="h-3.5 w-3.5" />
+                <X {...stylex.props(styles.glyphFill)} />
               )}
-              {t('sessions.askQuestion.submit', 'Submit')}
             </Button>
-          </div>
-        ) : null}
+          ) : null}
+        </div>
       </div>
 
-      {total > 1 ? (
-        <div className="flex items-center justify-between gap-2 border-t border-border/40 bg-transparent px-3 py-1">
+      {question.options.length > 0 || allowCustomAnswer ? (
+        <div {...stylex.props(styles.choices)}>
+          {question.options.map((option) => {
+            const isSelected = draft.selectedLabels.includes(option.label);
+            const isOptionDisabled = disabled || customAnswerActive;
+            const hasInfo = Boolean(option.description || option.preview);
+            const infoButton = (
+              <Button
+                type="button"
+                variant="ghost"
+                size="mini"
+                icon
+                aria-label={t('sessions.askQuestion.showDetails', 'Show details')}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setInfoModalOption(option);
+                }}
+                {...stylex.props(styles.infoButton)}
+              >
+                <Info {...stylex.props(styles.glyphFill)} />
+              </Button>
+            );
+            // A replayed answer reads at full strength and the choices it did
+            // not take recede; a live row that cannot be pressed dims whole.
+            const isDimmed = isReadonly ? !isSelected : isOptionDisabled;
+            // Option container is a div with role="button", not a real
+            // <button>, so the inline info button can nest next to the label
+            // text. Nesting a real <button> inside <button> is invalid HTML;
+            // a styled div sidesteps that and lets the (i) icon hug the
+            // label end (including across wrapped lines) instead of floating
+            // to the row's right edge where it gets overlooked.
+            return (
+              <div
+                key={option.label}
+                role="button"
+                tabIndex={isOptionDisabled ? -1 : 0}
+                aria-disabled={isOptionDisabled || undefined}
+                aria-pressed={isSelected}
+                onClick={() => {
+                  if (!isOptionDisabled) handleOptionClick(option.label);
+                }}
+                onKeyDown={(event) => {
+                  // Keydown on the inner info <button> bubbles here; without
+                  // this guard we would preventDefault the browser's native
+                  // Enter→click on that button and toggle the parent option
+                  // instead of opening the info dialog.
+                  if (event.target !== event.currentTarget) return;
+                  if ((event.key === 'Enter' || event.key === ' ') && !isOptionDisabled) {
+                    event.preventDefault();
+                    handleOptionClick(option.label);
+                  }
+                }}
+                {...stylex.props(
+                  styles.option,
+                  !isOptionDisabled && styles.optionInteractive,
+                  isSelected && styles.optionSelected,
+                  isOptionDisabled && (isReadonly ? styles.optionReadonly : styles.optionDisabled),
+                  isDimmed && styles.dimmed
+                )}
+              >
+                <ChoiceMark multiple={Boolean(question.multiSelect)} checked={isSelected} />
+                <span {...stylex.props(styles.optionLabel)}>
+                  <span {...stylex.props(styles.optionText)}>{option.label}</span>
+                  {hasInfo ? (
+                    // Tooltip only when the description adds information
+                    // beyond the button's aria-label; otherwise rendering
+                    // "Show details" twice (label + tooltip) is noise.
+                    option.description ? (
+                      <Tooltip.Root>
+                        <Tooltip.Trigger render={infoButton} />
+                        <Tooltip.Content side="top" align="start">
+                          <span {...stylex.props(styles.preWrap)}>{option.description}</span>
+                        </Tooltip.Content>
+                      </Tooltip.Root>
+                    ) : (
+                      infoButton
+                    )
+                  ) : null}
+                </span>
+              </div>
+            );
+          })}
+          {allowCustomAnswer ? (
+            <div {...stylex.props(styles.customRow)}>
+              <ChoiceMark multiple={false} checked={customAnswerActive} centered />
+              <Input
+                size="small"
+                type={question.isSecret ? 'password' : 'text'}
+                value={
+                  isReadonly && question.isSecret && draft.customAnswer
+                    ? '••••••••'
+                    : draft.customAnswer
+                }
+                disabled={disabled}
+                placeholder={t('sessions.customAnswerPlaceholder', 'Type a custom answer...')}
+                onChange={(event) => handleCustomAnswerChange(event.target.value)}
+                onKeyDown={handleCustomAnswerKeyDown}
+              />
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
+      {question.note ? (
+        <label {...stylex.props(styles.note)}>
+          <span {...stylex.props(styles.noteHeading)}>
+            <span {...stylex.props(styles.noteTitle)}>
+              {question.note.title ||
+                t('sessions.askQuestion.noteLabel', 'Additional context (optional)')}
+            </span>
+            {question.note.description ? (
+              <span {...stylex.props(styles.noteHint)}>{question.note.description}</span>
+            ) : null}
+          </span>
+          {question.note.isSecret ? (
+            <Input type="password" {...noteInputProps} />
+          ) : (
+            <Textarea rows={2} {...noteInputProps} />
+          )}
+        </label>
+      ) : null}
+
+      {/* Custom answer is an inline option row in the list above; Submit is a
+          small button (bottom-left), a discrete action rather than a full bar.
+          The pager below only renders for multi-question flows. */}
+      {!isReadonly && mode.kind === 'interactive' && total === 1 ? (
+        <div {...stylex.props(styles.submitRow)}>
           <Button
             type="button"
-            size="sm"
-            variant="ghost"
-            disabled={isFirst}
-            onClick={goPrev}
-            className="h-6 gap-1 px-2 text-xs text-muted-foreground hover:text-foreground disabled:opacity-50"
+            variant="secondary"
+            size="small"
+            disabled={disabled || !canSubmit}
+            onClick={() => mode.kind === 'interactive' && submit(drafts)}
           >
-            <ChevronLeft className="h-3.5 w-3.5" />
+            {submitIcon}
+            {t('sessions.askQuestion.submit', 'Submit')}
+          </Button>
+        </div>
+      ) : null}
+
+      {total > 1 ? (
+        <div {...stylex.props(styles.pager)}>
+          <Button type="button" variant="ghost" size="small" disabled={isFirst} onClick={goPrev}>
+            <ChevronLeft {...stylex.props(styles.glyph16)} />
             {t('sessions.askQuestion.prev', 'Prev')}
           </Button>
 
           {PaginationDots}
 
           {isReadonly ? (
-            <Button
-              type="button"
-              size="sm"
-              variant="ghost"
-              disabled={isLast}
-              onClick={goNext}
-              className="h-6 gap-1 px-2 text-xs text-muted-foreground hover:text-foreground disabled:opacity-50"
-            >
+            <Button type="button" variant="ghost" size="small" disabled={isLast} onClick={goNext}>
               {t('sessions.askQuestion.next', 'Next')}
-              <ChevronRight className="h-3.5 w-3.5" />
+              <ChevronRight {...stylex.props(styles.glyph16)} />
             </Button>
           ) : isLast ? (
             <Button
               type="button"
-              size="sm"
               variant="secondary"
+              size="small"
               disabled={disabled || !canSubmit}
               onClick={() => mode.kind === 'interactive' && submit(drafts)}
-              className="h-6 gap-1.5 px-3 text-xs"
             >
-              {mode.kind === 'interactive' && mode.isPendingSubmit ? (
-                <Spinner className="h-3.5 w-3.5" />
-              ) : (
-                <ArrowUp className="h-3.5 w-3.5" />
-              )}
+              {submitIcon}
               {t('sessions.askQuestion.submit', 'Submit')}
             </Button>
           ) : (
             <Button
               type="button"
-              size="sm"
               variant="ghost"
+              size="small"
               disabled={!canGoNext}
               onClick={goNext}
-              className={cn(
-                'h-6 gap-1 px-2 text-xs',
-                canGoNext ? 'text-foreground hover:text-foreground' : 'text-muted-foreground'
-              )}
             >
               {t('sessions.askQuestion.next', 'Next')}
-              <ChevronRight className="h-3.5 w-3.5" />
+              <ChevronRight {...stylex.props(styles.glyph16)} />
             </Button>
           )}
         </div>
       ) : null}
 
       {mode.kind === 'interactive' && !mode.isReady ? (
-        <div className="border-t border-border/40 bg-transparent px-3 py-1 text-[11px] text-muted-foreground">
-          {t(
-            'sessions.permissionActionsDisabled',
-            'Permission actions are disabled in this environment.'
-          )}
+        <div {...stylex.props(styles.notice)}>
+          <Info {...stylex.props(styles.glyph14, styles.noticeMark)} aria-hidden="true" />
+          <span>
+            {t(
+              'sessions.permissionActionsDisabled',
+              'Permission actions are disabled in this environment.'
+            )}
+          </span>
         </div>
       ) : null}
 
-      <Dialog
+      <Dialog.Root
         open={infoModalOption !== null}
         onOpenChange={(open) => {
           if (!open) setInfoModalOption(null);
         }}
       >
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle className="break-words text-left">{infoModalOption?.label}</DialogTitle>
+        <Dialog.Content>
+          <Dialog.Header>
+            <Dialog.Title>
+              <span {...stylex.props(styles.breakWord)}>{infoModalOption?.label}</span>
+            </Dialog.Title>
             {infoModalOption?.description ? (
-              <DialogDescription className="whitespace-pre-wrap break-words text-left">
-                {infoModalOption.description}
-              </DialogDescription>
+              <Dialog.Description>
+                <span {...stylex.props(styles.preWrap)}>{infoModalOption.description}</span>
+              </Dialog.Description>
             ) : null}
-          </DialogHeader>
+          </Dialog.Header>
           {infoModalOption?.preview ? (
-            <pre className="max-h-[60vh] overflow-auto whitespace-pre rounded-md border border-border bg-muted/40 px-3 py-2 font-mono text-xs leading-relaxed text-foreground">
-              {infoModalOption.preview}
-            </pre>
+            <pre {...stylex.props(styles.preview)}>{infoModalOption.preview}</pre>
           ) : null}
-        </DialogContent>
-      </Dialog>
+        </Dialog.Content>
+      </Dialog.Root>
     </div>
+  );
+}
+
+/**
+ * What a choice wears: a radio's dot for one-of, a checkbox's tick for any-of.
+ * It is decoration on a row that is itself the pressable, so it is drawn rather
+ * than rendered as a second control inside the first.
+ */
+function ChoiceMark({
+  multiple,
+  checked,
+  centered = false,
+}: {
+  multiple: boolean;
+  checked: boolean;
+  centered?: boolean;
+}) {
+  return (
+    <span
+      aria-hidden="true"
+      {...stylex.props(
+        styles.mark,
+        multiple ? styles.markCheckbox : styles.markRadio,
+        checked && styles.markChecked,
+        centered && styles.markCentered
+      )}
+    >
+      {checked ? (
+        multiple ? (
+          <Check strokeWidth={3} {...stylex.props(styles.checkGlyph)} />
+        ) : (
+          <span {...stylex.props(styles.dot)} />
+        )
+      ) : null}
+    </span>
   );
 }

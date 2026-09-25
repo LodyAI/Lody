@@ -2,8 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { motion, AnimatePresence } from 'framer-motion';
+import * as stylex from '@stylexjs/stylex';
 import { CheckCircle2, ChevronDown, ChevronUp, Copy, Plus, Trash2, XCircle } from 'lucide-react';
-import { Spinner } from '@/ui/spinner';
+import { Spinner } from '@lody/ui/spinner';
 import {
   REGISTRY_ACP_AGENTS,
   getBuiltinAgentByAgentType,
@@ -18,21 +19,14 @@ import {
   type MachineViewMeta,
   type ProviderSetupTask,
 } from '@lody/shared';
-import { toast } from 'sonner';
-import { Button } from '@/ui/button';
-import { Badge } from '@/ui/badge';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/ui/tooltip';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/ui/alert-dialog';
-import { cn } from '@/lib/utils';
+import { toast } from '@/lib/toast';
+import { Button } from '@lody/ui/button';
+import { Badge } from '@lody/ui/badge';
+import { Tooltip } from '@lody/ui/tooltip';
+import { colors, shadow } from '@lody/ui/tokens/colors.stylex';
+import { corner, duration, ease, radius, space } from '@lody/ui/tokens/scales.stylex';
+import { AlertDialog } from '@/ui/dialog';
+import { withClassName } from '@/lib/stylex';
 import {
   cmdCreateAgentConfigAtom,
   cmdCreateProviderSetupAtom,
@@ -89,6 +83,118 @@ import {
 } from '../provider-test-state';
 import { useBuiltinRuntimeReadiness } from '../use-builtin-runtime-readiness';
 import { useOnboardingAnalytics } from '../onboarding-analytics';
+import { onboardingSurface as surface } from './surface';
+
+const ROW_RING = `0 0 0 2px ${colors.accent}, ${shadow.card}`;
+
+const styles = stylex.create({
+  scroller: {
+    maxHeight: 'calc(4 * 4.25rem + 0.75rem * 3)',
+    overflowY: 'auto',
+    overscrollBehavior: 'contain',
+    marginInline: '-4px',
+    marginBlock: '-4px',
+    paddingInline: '4px',
+    paddingBlock: '4px',
+  },
+  rows: { display: 'flex', flexDirection: 'column', gap: space[3] },
+  /**
+   * An agent is a choice on the card rung. The slots below are rem, not the
+   * package's px steps, because `ProviderSetupRow` states the same columns in
+   * rem and the two kinds of row share one grid.
+   */
+  row: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    minWidth: 0,
+    backgroundColor: colors.elevatedBackground,
+    boxShadow: shadow.card,
+    borderRadius: radius.large,
+    cornerShape: corner.shape,
+    transitionProperty: 'background-color, box-shadow',
+    transitionDuration: duration.fast,
+    transitionTimingFunction: ease.standard,
+  },
+  rowHover: {
+    backgroundColor: {
+      default: colors.elevatedBackground,
+      ':hover': `color-mix(in oklab, ${colors.elevatedBackground}, ${colors.label} 4%)`,
+    },
+  },
+  /** Only selection marks a row; the ring takes the round corner. */
+  rowSelected: { boxShadow: ROW_RING, cornerShape: corner.round },
+  select: {
+    boxSizing: 'border-box',
+    display: 'flex',
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: 0,
+    alignItems: 'center',
+    gap: space[3],
+    minWidth: 0,
+    margin: 0,
+    paddingBlock: space[3],
+    paddingInline: space[3],
+    borderWidth: 0,
+    borderStyle: 'none',
+    outlineStyle: 'none',
+    backgroundColor: 'transparent',
+    boxShadow: { default: 'none', ':focus-visible': `inset 0 0 0 2px ${colors.accent}` },
+    borderStartStartRadius: radius.large,
+    borderEndStartRadius: radius.large,
+    cornerShape: corner.round,
+    color: colors.label,
+    fontFamily: 'inherit',
+    textAlign: 'start',
+    cursor: 'pointer',
+  },
+  selectDisabled: { opacity: 0.45, cursor: 'not-allowed' },
+  statusSlot: { display: 'flex', flexShrink: 0, justifyContent: 'flex-end', minWidth: '5rem' },
+  cluster: {
+    display: 'flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    gap: space[1],
+    paddingBlock: space[3],
+    paddingInlineEnd: space[3],
+  },
+  editSlot: { display: 'flex', flexShrink: 0, justifyContent: 'center', width: '3rem' },
+  actionSlot: {
+    display: 'flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: space[1],
+    width: '5rem',
+  },
+  /** Layout only: the progress pill fills its slot, as it does in a setup row. */
+  fillSlot: { width: '100%' },
+  authPanel: {
+    flexBasis: '100%',
+    paddingBottom: space[3],
+    paddingInlineStart: '3.25rem',
+    paddingInlineEnd: space[3],
+  },
+  showcase: { display: 'flex', flexDirection: 'column', gap: space[3], paddingTop: space[2] },
+  wall: { display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: space[1] },
+  /** A brand at rest is a monochrome mark on the region fill. */
+  chipMark: {
+    display: 'flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '24px',
+    height: '24px',
+    borderRadius: radius.full,
+    cornerShape: corner.round,
+    backgroundColor: `color-mix(in oklab, transparent, ${colors.label} 4%)`,
+    color: colors.secondaryLabel,
+  },
+  /** A tooltip is one ink; its title and its sentence differ by weight alone. */
+  tipTitle: { fontWeight: 600 },
+  tipDetail: { marginTop: space[1], overflowWrap: 'anywhere' },
+});
 
 export type ProviderTestStatus = OnboardingProviderStatus | 'needs-auth';
 
@@ -308,13 +414,8 @@ export function ProvidersScreenView({
       }}
       secondaryAction={<OnboardingBackButton onClick={onBack} />}
       primaryAction={
-        <div className="flex items-center gap-2">
-          <Button
-            variant="ghost"
-            size="lg"
-            onClick={onSkip}
-            className="text-muted-foreground hover:text-foreground"
-          >
+        <div {...stylex.props(surface.actions)}>
+          <Button variant="ghost" size="large" onClick={onSkip}>
             {t('onboarding.providers.skip', 'Skip for now')}
           </Button>
           <OnboardingNextButton
@@ -324,19 +425,19 @@ export function ProvidersScreenView({
         </div>
       }
     >
-      <div className="flex flex-col gap-3">
+      <div {...stylex.props(surface.stack)}>
         {noLocalMachine ? (
-          <div className="flex items-center gap-3 rounded-lg border border-dashed border-border/60 bg-muted/30 p-4 text-sm text-muted-foreground">
-            <Spinner className="h-4 w-4" />
+          <div {...stylex.props(surface.message, surface.messageInline, surface.messageNeutral)}>
+            <Spinner size="small" />
             {t('onboarding.providers.waitingMachine', 'Waiting for the local agent to connect…')}
           </div>
         ) : null}
 
         {configs.length > 0 || setups.length > 0 ? (
-          // Cap at ~4 rows; longer lists scroll. -mx-1/px-1 keeps focus rings
-          // visible without clipping at the scroll edge.
-          <div className="scrollbar-pro -mx-1 max-h-[calc(4*4.25rem+0.75rem*3)] overflow-y-auto overscroll-contain px-1">
-            <div className="flex flex-col gap-3">
+          // Cap at ~4 rows; longer lists scroll. The scroller's negative margin
+          // and matching padding keep shadows and rings from clipping at its edge.
+          <div {...withClassName(stylex.props(styles.scroller), 'scrollbar-pro')}>
+            <div {...stylex.props(styles.rows)}>
               {setups.map((setup) => (
                 <ProviderSetupRow
                   key={setup.id}
@@ -366,34 +467,23 @@ export function ProvidersScreenView({
                       animate={{ opacity: 1, y: 0 }}
                       exit={{ opacity: 0, y: -8 }}
                       transition={{ duration: 0.25 }}
-                      className={cn(
-                        // Hover lives on the row, not the inner edit button,
-                        // so highlighting feels like one unit even though
-                        // Test/Delete are separate click targets.
-                        'group flex flex-wrap items-center rounded-lg border transition-colors',
-                        // Only selection is allowed to tint the row. A passed
-                        // row used to carry the same primary wash, which left
-                        // the list striped in two nearly identical blues and
-                        // the actual selection indistinguishable from status.
-                        // Status now lives in the badge column alone.
-                        selected
-                          ? 'border-primary bg-primary/[0.06]'
-                          : 'border-border/60 bg-card/40 hover:border-border hover:bg-hover/40'
-                      )}
+                      // Hover lives on the row, not the inner select button, so
+                      // highlighting reads as one unit even though Edit, Test and
+                      // Delete are separate click targets. Only selection marks
+                      // the row: a passed row used to carry the same wash, which
+                      // made the selection indistinguishable from status. Status
+                      // lives in the badge column alone.
+                      {...stylex.props(styles.row, selected ? styles.rowSelected : styles.rowHover)}
                     >
                       <button
                         type="button"
                         disabled={noLocalMachine}
-                        className={cn(
-                          'flex min-w-0 flex-1 items-center gap-3 rounded-l-lg py-3 pl-3 pr-2 text-left',
-                          'focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset',
-                          'disabled:cursor-not-allowed disabled:opacity-60'
-                        )}
                         aria-pressed={selected}
                         aria-label={t('onboarding.providers.selectConfig', 'Select {{name}}', {
                           name: config.name,
                         })}
                         onClick={() => (onSelect ? onSelect(config) : onEdit(config))}
+                        {...stylex.props(styles.select, noLocalMachine && styles.selectDisabled)}
                       >
                         {/* The mark carries the work, so the row needs no second
                             activity element. A published config reads as ready
@@ -409,56 +499,49 @@ export function ProvidersScreenView({
                           percent={rowReadiness.percent}
                           size="md"
                         />
-                        <div className="min-w-0 flex-1">
-                          <div className="truncate text-sm font-medium">{config.name}</div>
-                          <div className="truncate text-xs text-muted-foreground">
+                        <span {...stylex.props(surface.textColumn)}>
+                          <span {...stylex.props(surface.title)}>{config.name}</span>
+                          <span {...stylex.props(surface.detail)}>
                             {labelForAgent(config.cliType, config.agentType)}
-                          </div>
-                        </div>
+                          </span>
+                        </span>
                         {/* Sibling of the two-line text column, so the badge
                             centres against the whole row instead of riding the
                             name's baseline. The column is fixed and its
-                            contents right-aligned: every badge then shares one
+                            contents end-aligned: every badge then shares one
                             edge and one gutter to the actions, whatever word it
                             happens to carry. */}
-                        <div className="flex min-w-20 shrink-0 justify-end">
+                        <span {...stylex.props(styles.statusSlot)}>
                           <ProviderStatusBadge
                             status={status}
                             activity={activity}
                             failureReason={failureReasons[config.id]}
                           />
-                        </div>
+                        </span>
                       </button>
                       {/* Fixed-width slots, not intrinsic ones. Test/Re-test,
                           the progress pill and the needs-auth row all differ in
                           width, and an intrinsic cluster passed that difference
                           leftward: the badge and the name column landed at a
                           different x in every row, and jumped again the moment a
-                          test started. */}
-                      <div className="flex shrink-0 items-center gap-1 py-3 pr-3">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="w-12 shrink-0 px-0"
-                          onClick={() => onEdit(config)}
-                        >
-                          {t('common.edit', 'Edit')}
-                        </Button>
-                        <div className="flex w-20 shrink-0 items-center gap-1">
+                          test started. A control keeps its own size inside its
+                          slot; the slot is what never moves. */}
+                      <div {...stylex.props(styles.cluster)}>
+                        <div {...stylex.props(styles.editSlot)}>
+                          <Button variant="ghost" size="small" onClick={() => onEdit(config)}>
+                            {t('common.edit', 'Edit')}
+                          </Button>
+                        </div>
+                        <div {...stylex.props(styles.actionSlot)}>
                           {activity ? (
                             <ProviderActivityAction activity={activity} config={config} />
                           ) : status !== 'needs-auth' ? (
-                            // Always outline, passed or not. Ghosting the
-                            // button once a test succeeded emptied the slot of
-                            // everything but a word, so the one row that had
-                            // been verified read as a hole in the column while
-                            // its neighbours kept a bordered control. A fixed
-                            // slot only holds the column if what sits in it
-                            // keeps its shape too.
+                            // Keep the same visual role after success. Changing
+                            // the action to a ghost made the verified row read
+                            // as a hole in this fixed-width column.
                             <Button
-                              variant="outline"
-                              size="sm"
-                              className="w-full px-0"
+                              variant="secondary"
+                              size="small"
                               disabled={noLocalMachine}
                               onClick={() => onTest(config)}
                             >
@@ -470,18 +553,19 @@ export function ProvidersScreenView({
                         </div>
                         <Button
                           variant="ghost"
-                          size="icon"
-                          className="h-8 w-8 shrink-0 text-muted-foreground hover:text-destructive"
+                          size="small"
                           aria-label={t('common.delete', 'Delete')}
+                          icon
+                          tone="destructive"
                           onClick={() => onDelete(config)}
                         >
-                          <Trash2 className="h-3.5 w-3.5" />
+                          <Trash2 {...stylex.props(surface.icon16)} />
                         </Button>
                       </div>
                       {/* Indented to the agent's name, not the card edge: the
                           panel belongs to the agent named above it. */}
                       {status === 'needs-auth' ? (
-                        <div className="basis-full pb-3 pl-[3.25rem] pr-3">
+                        <div {...stylex.props(styles.authPanel)}>
                           <AcpAuthenticationPanel
                             machineId={localMachineId}
                             configId={config.id}
@@ -503,25 +587,21 @@ export function ProvidersScreenView({
           </div>
         ) : null}
 
-        <button
+        <Button
           type="button"
+          variant="secondary"
+          size="large"
           disabled={noLocalMachine}
           onClick={() => onAdd()}
-          className={cn(
-            'group flex items-center justify-center gap-2 rounded-lg border-2 border-dashed py-4 text-sm font-medium transition-all',
-            'border-border/60 text-muted-foreground hover:border-primary/60 hover:bg-primary/[0.04] hover:text-foreground',
-            'focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring',
-            'disabled:opacity-50 disabled:hover:border-border/60 disabled:hover:bg-transparent disabled:hover:text-muted-foreground'
-          )}
         >
-          <Plus className="h-4 w-4 transition-transform group-hover:rotate-90" />
+          <Plus {...stylex.props(surface.icon16)} />
           {configs.length + setups.length === 0
             ? t('onboarding.providers.addFirst', 'Add your first Agent')
             : t('onboarding.providers.addAnother', 'Add another Agent')}
-        </button>
+        </Button>
 
         {!noLocalMachine && !canProceed ? (
-          <p className="text-center text-xs text-muted-foreground/80">
+          <p {...stylex.props(surface.hint, surface.hintCentered)}>
             {t(
               'onboarding.providers.needTested',
               'Add an Agent to continue, or skip and configure later.'
@@ -574,12 +654,12 @@ function ShowcaseChipMark({
   }
 
   return (
-    <span className="flex h-6 w-6 items-center justify-center rounded-full bg-muted/50 text-foreground/70 transition-colors group-hover/chip:bg-background group-hover/chip:text-foreground">
+    <span {...stylex.props(styles.chipMark)}>
       <AgentIcon
         cliType={agent.icon.cliType}
         agentType={agent.icon.agentType}
         brandId={agent.icon.cliType === 'builtin' ? agent.icon.brandId : undefined}
-        className="h-3.5 w-3.5"
+        className={stylex.props(surface.icon14).className}
       />
     </span>
   );
@@ -608,59 +688,46 @@ function AgentShowcase({
     : FEATURED_SHOWCASE_AGENTS;
 
   return (
-    <div className="flex flex-col gap-3 pt-2">
-      <div className="flex items-center gap-3" aria-hidden>
-        <div className="h-px flex-1 bg-border/70" />
-        <span className="shrink-0 text-[11px] font-medium tracking-wide text-muted-foreground/70">
-          {t('onboarding.providers.moreLabel', 'Plus many more coding agents')}
-        </span>
-        <div className="h-px flex-1 bg-border/70" />
-      </div>
-      <div className="flex flex-wrap justify-center gap-2">
+    <div {...stylex.props(styles.showcase)}>
+      <p aria-hidden {...stylex.props(surface.hint, surface.hintCentered)}>
+        {t('onboarding.providers.moreLabel', 'Plus many more coding agents')}
+      </p>
+      <div {...stylex.props(styles.wall)}>
         {visible.map((agent) => (
-          <button
+          <Button
             key={showcasePickKey(agent.pick)}
             type="button"
+            variant="ghost"
+            shape="pill"
             disabled={disabled}
             title={agent.label}
             onClick={() => onPick(agent.pick)}
-            className={cn(
-              'group/chip inline-flex items-center gap-1.5 rounded-full border py-1 pl-1 pr-3',
-              'border-border/50 bg-card/30 text-xs font-medium text-muted-foreground',
-              'transition-all hover:border-primary/40 hover:bg-primary/[0.06] hover:text-foreground',
-              'focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring',
-              'disabled:pointer-events-none disabled:opacity-50'
-            )}
           >
             <ShowcaseChipMark agent={agent} runtimeReadiness={runtimeReadiness} />
             {agent.label}
-          </button>
+          </Button>
         ))}
 
         {moreCount > 0 ? (
-          <button
+          <Button
             type="button"
+            variant="ghost"
+            shape="pill"
             aria-expanded={expanded}
             onClick={() => setExpanded((v) => !v)}
-            className={cn(
-              'inline-flex items-center gap-1 rounded-full border border-dashed py-1 pl-3 pr-2.5',
-              'border-border/70 bg-transparent text-xs font-medium text-muted-foreground',
-              'transition-all hover:border-primary/50 hover:text-foreground',
-              'focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring'
-            )}
           >
             {expanded ? (
               <>
                 {t('onboarding.providers.showLess', 'Show less')}
-                <ChevronUp className="h-3.5 w-3.5" />
+                <ChevronUp {...stylex.props(surface.icon14)} />
               </>
             ) : (
               <>
                 {t('onboarding.providers.showMore', '+{{count}} more', { count: moreCount })}
-                <ChevronDown className="h-3.5 w-3.5" />
+                <ChevronDown {...stylex.props(surface.icon14)} />
               </>
             )}
-          </button>
+          </Button>
         ) : null}
       </div>
     </div>
@@ -1297,41 +1364,40 @@ export function ProvidersScreen({
         />
       ) : null}
 
-      <AlertDialog
+      <AlertDialog.Root
         open={pendingDelete !== null}
         onOpenChange={(open) => !open && setPendingDelete(null)}
       >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
+        <AlertDialog.Content>
+          <AlertDialog.Header>
+            <AlertDialog.Title>
               {t('agents.deleteConfigConfirm', 'Delete Configuration')}
-            </AlertDialogTitle>
-            <AlertDialogDescription>
+            </AlertDialog.Title>
+            <AlertDialog.Description>
               {t('agents.deleteConfigConfirmDescription', {
                 name: pendingDelete?.name ?? '',
                 defaultValue:
                   'Are you sure you want to delete "{{name}}"? This action cannot be undone.',
               })}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={deleting}>
+            </AlertDialog.Description>
+          </AlertDialog.Header>
+          <AlertDialog.Footer>
+            <AlertDialog.Cancel disabled={deleting}>
               {t('common.cancel', 'Cancel')}
-            </AlertDialogCancel>
-            <AlertDialogAction
+            </AlertDialog.Cancel>
+            <Button
               disabled={deleting}
-              onClick={(event) => {
-                event.preventDefault();
+              onClick={() => {
                 void handleConfirmDelete();
               }}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              variant="destructive"
             >
-              {deleting && <Spinner className="mr-2 h-4 w-4" />}
+              {deleting && <Spinner size="small" />}
               {t('common.delete', 'Delete')}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+            </Button>
+          </AlertDialog.Footer>
+        </AlertDialog.Content>
+      </AlertDialog.Root>
     </>
   );
 }
@@ -1448,10 +1514,10 @@ function ProviderActivityAction({
     <ProviderProgressButton
       percent={percent}
       label={label}
-      className="w-full"
+      className={stylex.props(styles.fillSlot).className}
       {...(copyable
         ? {
-            icon: <Copy className="h-3.5 w-3.5" />,
+            icon: <Copy {...stylex.props(surface.icon14)} />,
             ariaLabel: copyLabel,
             title: copyLabel,
             onClick: handleCopyReport,
@@ -1468,13 +1534,11 @@ function getProviderTestActivityPercent(activity?: ProviderTestActivity): number
 }
 
 /**
- * One chip geometry for every provider status. The words differ in length and
- * only some carry a glyph, so without a fixed height and a single padding the
- * column read as five different controls stacked on top of each other.
+ * Every provider status is one `Badge`, and the tone says which kind it is. The
+ * geometry is the primitive's — one height, one padding, one corner — which is
+ * what this column needed when it was five hand-built chips that read as five
+ * different controls stacked on top of each other.
  */
-const PROVIDER_STATUS_CHIP =
-  'h-5 shrink-0 gap-1 whitespace-nowrap rounded-full border px-2 py-0 text-[10px] font-medium';
-
 function ProviderStatusBadge({
   status,
   activity,
@@ -1528,44 +1592,32 @@ function ProviderStatusBadge({
     );
     const badge = (
       <Badge
-        variant="outline"
         // The badge is not focusable, so the tooltip is a hover-only detail.
         // The acknowledgement itself must reach assistive tech regardless.
         aria-label={exceptional ? slowDetail : undefined}
-        className={cn(
-          PROVIDER_STATUS_CHIP,
-          runtimeFailed
-            ? 'border-destructive/40 bg-destructive/8 text-destructive'
-            : exceptional
-              ? 'border-amber-500/40 bg-amber-500/10 text-amber-600 dark:text-amber-400'
-              : 'border-primary/35 bg-primary/8 text-primary'
-        )}
+        tone={runtimeFailed ? 'danger' : exceptional ? 'warning' : 'running'}
       >
         {exceptional ? t('onboarding.providers.activitySlow', 'Taking longer') : stageLabel}
       </Badge>
     );
     if (!exceptional) return badge;
     return (
-      <TooltipProvider delayDuration={200}>
-        <Tooltip>
-          <TooltipTrigger asChild>{badge}</TooltipTrigger>
-          <TooltipContent side="top" className="max-w-80 px-3 py-2">
-            <div className="font-medium">
+      <Tooltip.Provider delay={200}>
+        <Tooltip.Root>
+          <Tooltip.Trigger render={badge} />
+          <Tooltip.Content side="top">
+            <div {...stylex.props(styles.tipTitle)}>
               {t('onboarding.providers.slowWaitTitle', 'This is taking longer than usual')}
             </div>
-            <div className="mt-1 break-words text-xs text-muted-foreground">{slowDetail}</div>
-          </TooltipContent>
-        </Tooltip>
-      </TooltipProvider>
+            <div {...stylex.props(styles.tipDetail)}>{slowDetail}</div>
+          </Tooltip.Content>
+        </Tooltip.Root>
+      </Tooltip.Provider>
     );
   }
   if (status === 'passed') {
     return (
-      <Badge
-        variant="outline"
-        className={cn(PROVIDER_STATUS_CHIP, 'border-primary/40 bg-primary/10 text-primary')}
-      >
-        <CheckCircle2 className="h-2.5 w-2.5" />
+      <Badge tone="success" icon={<CheckCircle2 {...stylex.props(surface.iconFill)} />}>
         {t('onboarding.providers.statusPassed', 'Verified')}
       </Badge>
     );
@@ -1573,7 +1625,6 @@ function ProviderStatusBadge({
   if (status === 'failed') {
     const badge = (
       <Badge
-        variant="outline"
         aria-label={
           failureReason
             ? t('onboarding.providers.failureReasonA11y', 'Failed: {{reason}}', {
@@ -1581,49 +1632,29 @@ function ProviderStatusBadge({
               })
             : undefined
         }
-        className={cn(
-          PROVIDER_STATUS_CHIP,
-          'border-destructive/40 bg-destructive/8 text-destructive'
-        )}
+        tone="danger"
+        icon={<XCircle {...stylex.props(surface.iconFill)} />}
       >
-        <XCircle className="h-2.5 w-2.5" />
         {t('onboarding.providers.statusFailed', 'Failed')}
       </Badge>
     );
     if (!failureReason) return badge;
     return (
-      <TooltipProvider delayDuration={200}>
-        <Tooltip>
-          <TooltipTrigger asChild>{badge}</TooltipTrigger>
-          <TooltipContent side="top" className="max-w-80 px-3 py-2">
-            <div className="font-medium">
+      <Tooltip.Provider delay={200}>
+        <Tooltip.Root>
+          <Tooltip.Trigger render={badge} />
+          <Tooltip.Content side="top">
+            <div {...stylex.props(styles.tipTitle)}>
               {t('onboarding.providers.failureReasonTitle', 'Why it failed')}
             </div>
-            <div className="mt-1 break-words text-xs text-muted-foreground">{failureReason}</div>
-          </TooltipContent>
-        </Tooltip>
-      </TooltipProvider>
+            <div {...stylex.props(styles.tipDetail)}>{failureReason}</div>
+          </Tooltip.Content>
+        </Tooltip.Root>
+      </Tooltip.Provider>
     );
   }
   if (status === 'needs-auth') {
-    return (
-      <Badge
-        variant="outline"
-        className={cn(
-          PROVIDER_STATUS_CHIP,
-          'border-amber-500/40 bg-amber-500/10 text-amber-600 dark:text-amber-400'
-        )}
-      >
-        {t('onboarding.providers.statusNeedsAuth', 'Sign in')}
-      </Badge>
-    );
+    return <Badge tone="warning">{t('onboarding.providers.statusNeedsAuth', 'Sign in')}</Badge>;
   }
-  return (
-    <Badge
-      variant="outline"
-      className={cn(PROVIDER_STATUS_CHIP, 'border-border/70 bg-muted/40 text-muted-foreground')}
-    >
-      {t('onboarding.providers.statusUntested', 'Untested')}
-    </Badge>
-  );
+  return <Badge>{t('onboarding.providers.statusUntested', 'Untested')}</Badge>;
 }

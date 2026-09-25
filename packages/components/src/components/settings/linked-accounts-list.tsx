@@ -1,20 +1,16 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Spinner } from '@/ui/spinner';
-import { toast } from 'sonner';
+import { Spinner } from '@lody/ui/spinner';
+import { toast } from '@/lib/toast';
 import type { IconType } from 'react-icons';
 import { SiApple, SiDiscord, SiGithub } from 'react-icons/si';
 import { FcGoogle } from 'react-icons/fc';
-import { cn } from '@/lib/utils';
-import { Button } from '@/ui/button';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/ui/dialog';
+import * as stylex from '@stylexjs/stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { corner, duration, ease, radius, space } from '@lody/ui/tokens/scales.stylex';
+import { withClassName } from '@/lib/stylex';
+import { Button } from '@lody/ui/button';
+import { Dialog } from '@/ui/dialog';
 
 export interface LinkedAccountInfo {
   id: string;
@@ -34,41 +30,86 @@ interface LinkedAccountsListProps {
   onConnect?: (providerId: string) => Promise<void> | void;
 }
 
+const styles = stylex.create({
+  list: { display: 'flex', alignItems: 'center', gap: space[3] },
+  loading: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: space[2],
+    fontSize: '0.75em',
+    color: colors.secondaryLabel,
+  },
+  /**
+   * The box a mark sits in; the mark takes its colour from it, so a connectable
+   * mark previews its connected colour under the pointer by the box's own hover.
+   */
+  mark: {
+    display: 'inline-flex',
+    flexShrink: 0,
+    padding: 0,
+    margin: 0,
+    borderWidth: 0,
+    backgroundColor: 'transparent',
+    borderRadius: radius.mini,
+    cornerShape: corner.shape,
+    transitionProperty: 'color, opacity, filter',
+    transitionDuration: duration.fast,
+    transitionTimingFunction: ease.standard,
+  },
+  pressable: {
+    cursor: 'pointer',
+    outlineStyle: 'none',
+    boxShadow: { default: 'none', ':focus-visible': `0 0 0 2px ${colors.accent}` },
+  },
+  icon: { width: '20px', height: '20px', flexShrink: 0 },
+  /** An unbound monochrome mark is a hint. */
+  unbound: { color: colors.tertiaryLabel },
+  /** A flat multi-colour mark has its colours baked in, so it is grayed instead. */
+  flatUnbound: { opacity: 0.4, filter: 'grayscale(1)' },
+  flatUnboundConnectable: {
+    opacity: { default: 0.4, ':hover': 1 },
+    filter: { default: 'grayscale(1)', ':hover': 'none' },
+  },
+  ink: { color: colors.label },
+  inkConnectable: { color: { default: colors.tertiaryLabel, ':hover': colors.label } },
+  discord: { color: '#5865F2' },
+  discordConnectable: { color: { default: colors.tertiaryLabel, ':hover': '#5865F2' } },
+});
+
+type BrandTone = 'ink' | 'discord';
+
 /* Brand marks are sized on a shared grid so they read at the same optical size.
-   Monochrome simple-icons tint via `text-*` (foreground for GitHub/Apple so they
-   stay visible in dark mode); the flat-color Google mark (`FcGoogle`) has baked
-   colors, so it's grayed with a filter when unbound. */
+   Monochrome simple-icons draw in `currentColor` (the label ink for GitHub/Apple
+   so they stay visible in dark mode); the flat-colour Google mark (`FcGoogle`)
+   has baked colours, so it's grayed with a filter when unbound. */
 const PROVIDERS: {
   id: string;
   Icon: IconType;
   /** Flat multi-color mark (colors baked in) → gray via filter when unbound. */
   flat?: boolean;
-  boundClassName?: string;
-  /** `group-hover:` variant of the brand color, applied when the mark is a
-   * clickable (unbound) button so hovering previews the connected color.
-   * Kept as literal strings so Tailwind's JIT emits them. */
-  hoverClassName?: string;
+  /** The brand colour a bound (or hovered, connectable) monochrome mark takes. */
+  tone?: BrandTone;
 }[] = [
-  {
-    id: 'github',
-    Icon: SiGithub,
-    boundClassName: 'text-foreground',
-    hoverClassName: 'group-hover:text-foreground',
-  },
+  { id: 'github', Icon: SiGithub, tone: 'ink' },
   { id: 'google', Icon: FcGoogle, flat: true },
-  {
-    id: 'apple',
-    Icon: SiApple,
-    boundClassName: 'text-foreground',
-    hoverClassName: 'group-hover:text-foreground',
-  },
-  {
-    id: 'discord',
-    Icon: SiDiscord,
-    boundClassName: 'text-[#5865F2]',
-    hoverClassName: 'group-hover:text-[#5865F2]',
-  },
+  { id: 'apple', Icon: SiApple, tone: 'ink' },
+  { id: 'discord', Icon: SiDiscord, tone: 'discord' },
 ];
+
+const BOUND_TONES = { ink: styles.ink, discord: styles.discord } as const;
+const CONNECTABLE_TONES = {
+  ink: styles.inkConnectable,
+  discord: styles.discordConnectable,
+} as const;
+
+function markStyle(bound: boolean, connectable: boolean, flat?: boolean, tone?: BrandTone) {
+  if (flat) {
+    if (bound) return null;
+    return connectable ? styles.flatUnboundConnectable : styles.flatUnbound;
+  }
+  if (bound) return tone ? BOUND_TONES[tone] : null;
+  return connectable && tone ? CONNECTABLE_TONES[tone] : styles.unbound;
+}
 
 export function LinkedAccountsList({
   accounts,
@@ -85,28 +126,6 @@ export function LinkedAccountsList({
     t(
       `settings.profile.providers.${providerId}`,
       providerId.charAt(0).toUpperCase() + providerId.slice(1)
-    );
-
-  const iconClassName = (
-    bound: boolean,
-    connectable: boolean,
-    flat: boolean | undefined,
-    boundClassName?: string,
-    hoverClassName?: string
-  ) =>
-    cn(
-      'h-5 w-5 shrink-0 transition-all',
-      flat
-        ? bound
-          ? ''
-          : connectable
-            ? 'opacity-40 grayscale group-hover:opacity-100 group-hover:grayscale-0'
-            : 'opacity-40 grayscale'
-        : bound
-          ? boundClassName
-          : connectable
-            ? cn('text-muted-foreground/35', hoverClassName)
-            : 'text-muted-foreground/35'
     );
 
   const handleConfirmConnect = async () => {
@@ -127,8 +146,8 @@ export function LinkedAccountsList({
 
   if (loading) {
     return (
-      <div className={cn('flex items-center gap-2 text-[11px] text-muted-foreground', className)}>
-        <Spinner className="h-3.5 w-3.5" />
+      <div {...withClassName(stylex.props(styles.loading), className)}>
+        <Spinner size="small" />
         {t('settings.profile.bindings.loading')}
       </div>
     );
@@ -138,17 +157,13 @@ export function LinkedAccountsList({
 
   return (
     <>
-      <div className={cn('flex items-center gap-3', className)}>
-        {PROVIDERS.map(({ id, Icon, flat, boundClassName, hoverClassName }) => {
+      <div {...withClassName(stylex.props(styles.list), className)}>
+        {PROVIDERS.map(({ id, Icon, flat, tone }) => {
           const bound = boundProviders.has(id);
           const label = providerLabel(id);
           const connectable = !bound && Boolean(onConnect);
-          const icon = (
-            <Icon
-              aria-hidden
-              className={iconClassName(bound, connectable, flat, boundClassName, hoverClassName)}
-            />
-          );
+          const mark = markStyle(bound, connectable, flat, tone);
+          const icon = <Icon aria-hidden {...stylex.props(styles.icon)} />;
 
           if (connectable) {
             return (
@@ -158,7 +173,7 @@ export function LinkedAccountsList({
                 title={t('settings.profile.bindings.connectAction', { provider: label })}
                 aria-label={t('settings.profile.bindings.connectAction', { provider: label })}
                 onClick={() => setPendingProviderId(id)}
-                className="group cursor-pointer rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                {...stylex.props(styles.mark, styles.pressable, mark)}
               >
                 {icon}
               </button>
@@ -168,6 +183,7 @@ export function LinkedAccountsList({
           return (
             <span
               key={id}
+              {...stylex.props(styles.mark, mark)}
               title={
                 bound
                   ? t('settings.profile.bindings.connected', { provider: label })
@@ -185,44 +201,44 @@ export function LinkedAccountsList({
         })}
       </div>
 
-      <Dialog
+      <Dialog.Root
         open={pendingProviderId !== null}
         onOpenChange={(open) => {
           if (isConnecting) return;
           if (!open) setPendingProviderId(null);
         }}
       >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>
+        <Dialog.Content>
+          <Dialog.Header>
+            <Dialog.Title>
               {t('settings.profile.bindings.connectTitle', { provider: pendingLabel })}
-            </DialogTitle>
-            <DialogDescription>
+            </Dialog.Title>
+            <Dialog.Description>
               {t('settings.profile.bindings.connectDescription', { provider: pendingLabel })}
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
+            </Dialog.Description>
+          </Dialog.Header>
+          <Dialog.Footer>
             <Button
-              variant="outline"
-              size="sm"
+              variant="secondary"
+              size="small"
               onClick={() => setPendingProviderId(null)}
               disabled={isConnecting}
             >
               {t('common.cancel')}
             </Button>
             <Button
-              size="sm"
+              size="small"
               onClick={() => {
                 void handleConfirmConnect();
               }}
               disabled={isConnecting}
             >
-              {isConnecting ? <Spinner className="mr-1.5 h-3.5 w-3.5" /> : null}
+              {isConnecting ? <Spinner size="small" /> : null}
               {t('settings.profile.bindings.connectConfirm')}
             </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          </Dialog.Footer>
+        </Dialog.Content>
+      </Dialog.Root>
     </>
   );
 }

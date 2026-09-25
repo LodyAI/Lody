@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from
 import { Trans, useTranslation } from 'react-i18next';
 import { AnimatePresence, motion } from 'framer-motion';
 import { ArrowLeft, ArrowRight, ExternalLink, Github, Mail } from 'lucide-react';
-import { Spinner } from '@/ui/spinner';
+import { Spinner } from '@lody/ui/spinner';
 import { usePostHog } from '@posthog/react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import isEmail from 'validator/lib/isEmail';
@@ -12,10 +12,10 @@ import {
   electronLoginPhaseAtom,
   nativeSignInInProgressAtom,
 } from '@/atoms';
-import { Button } from '@/ui/button';
-import { Input } from '@/ui/input';
-import { Label } from '@/ui/label';
-import { PasswordInput } from '@/ui/password-input';
+import { Button } from '@lody/ui/button';
+import { Input } from '@lody/ui/input';
+import { Field as UiField } from '@lody/ui/field';
+import { PasswordInput } from '@lody/ui/password-input';
 import { isDevEmailPasswordLoginEnabled } from '@lody/shared/electron-ipc';
 import { setLoginHintCookie } from '@/lib/login-hint-cookie';
 import { formatPasswordValidationFailure, validateNewPassword } from '@/lib/password-validation';
@@ -495,35 +495,35 @@ const PROVIDER_CONFIG: {
   icon: React.ComponentType;
   labelKey: string;
   labelDefault: string;
-  variant: 'default' | 'outline';
+  variant: 'primary' | 'secondary';
 }[] = [
   {
     id: 'github',
     icon: GitHubIcon,
     labelKey: 'login.githubSignIn',
     labelDefault: 'Continue with GitHub',
-    variant: 'default',
+    variant: 'primary',
   },
   {
     id: 'google',
     icon: GoogleIcon,
     labelKey: 'login.googleSignIn',
     labelDefault: 'Continue with Google',
-    variant: 'outline',
+    variant: 'secondary',
   },
   {
     id: 'apple',
     icon: AppleIcon,
     labelKey: 'login.appleSignIn',
     labelDefault: 'Continue with Apple',
-    variant: 'outline',
+    variant: 'secondary',
   },
   {
     id: 'discord',
     icon: DiscordIcon,
     labelKey: 'login.discordSignIn',
     labelDefault: 'Continue with Discord',
-    variant: 'outline',
+    variant: 'secondary',
   },
 ];
 
@@ -1462,7 +1462,7 @@ export function LoginPage({
 
           <Button
             type="button"
-            variant="outline"
+            variant="secondary"
             onClick={handleEnterEmailView}
             className="h-10 w-full"
             disabled={isButtonsDisabled}
@@ -1578,9 +1578,9 @@ export function LoginPage({
                 className="overflow-hidden"
               >
                 <div className="grid gap-1.5 pb-3">
-                  <Label htmlFor="email-auth-name" className="text-xs font-medium">
+                  <UiField.Label htmlFor="email-auth-name" className="text-xs font-medium">
                     {t('login.nameLabel', 'Name')}
-                  </Label>
+                  </UiField.Label>
                   <Input
                     id="email-auth-name"
                     autoComplete="name"
@@ -1600,9 +1600,9 @@ export function LoginPage({
           </AnimatePresence>
 
           <div className="grid gap-1.5">
-            <Label htmlFor="email-auth-email" className="text-xs font-medium">
+            <UiField.Label htmlFor="email-auth-email" className="text-xs font-medium">
               {t('login.emailLabel', 'Email address')}
-            </Label>
+            </UiField.Label>
             <Input
               ref={emailInputRef}
               id="email-auth-email"
@@ -1623,9 +1623,9 @@ export function LoginPage({
 
           <div className="grid gap-1.5">
             <div className="flex items-center justify-between">
-              <Label htmlFor="email-auth-password" className="text-xs font-medium">
+              <UiField.Label htmlFor="email-auth-password" className="text-xs font-medium">
                 {t('login.passwordLabel', 'Password')}
-              </Label>
+              </UiField.Label>
             </div>
             <PasswordInput
               id="email-auth-password"
@@ -1643,8 +1643,10 @@ export function LoginPage({
                   : t('login.passwordPlaceholder', 'At least 8 characters')
               }
               className="h-10"
-              showPasswordLabel={t('login.showPassword', 'Show password')}
-              hidePasswordLabel={t('login.hidePassword', 'Hide password')}
+              labels={{
+                show: t('login.showPassword', 'Show password'),
+                hide: t('login.hidePassword', 'Hide password'),
+              }}
             />
             {!isSignUp ? (
               <div className="flex justify-end">
@@ -1773,7 +1775,7 @@ export function LoginPage({
       {isDevElectronEmailPasswordLoginEnabled ? (
         <Button
           type="button"
-          variant="outline"
+          variant="secondary"
           onClick={handleEnterEmailView}
           className="h-10 w-full"
           disabled={isButtonsDisabled}
@@ -1815,16 +1817,17 @@ export function LoginPage({
       ) : null}
 
       {electronHandoffUrl ? (
-        <Button asChild className="h-10 w-full">
+        <Button
+          render={<a href={electronHandoffUrl} data-electron-handoff-link />}
+          className="h-10 w-full"
+        >
           {/* A real link: the automatic navigation may be refused, and this is
               then the user's way to open the desktop app. */}
-          <a href={electronHandoffUrl} data-electron-handoff-link>
-            <SocialLoginButtonContent
-              icon={<ExternalLink />}
-              label={t('login.desktopHandoff.openApp', 'Open Lody Desktop')}
-              width={null}
-            />
-          </a>
+          <SocialLoginButtonContent
+            icon={<ExternalLink />}
+            label={t('login.desktopHandoff.openApp', 'Open Lody Desktop')}
+            width={null}
+          />
         </Button>
       ) : (
         <Button
@@ -1853,7 +1856,7 @@ export function LoginPage({
           late result is discarded by the account generation. */}
       <Button
         type="button"
-        variant="outline"
+        variant="secondary"
         onClick={() => void handleSwitchElectronAccount()}
         className="h-10 w-full"
         disabled={isSwitchingElectronAccount}

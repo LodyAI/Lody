@@ -1,4 +1,4 @@
-import { Spinner } from '@/ui/spinner';
+import { Spinner } from '@lody/ui/spinner';
 import { cn } from '@/lib/utils';
 
 export function LoadingPlaceholder({

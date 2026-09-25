@@ -1,5 +1,5 @@
 import { Archive, ChevronDown, LockKeyhole, Monitor, Share2, Users } from 'lucide-react';
-import { Spinner } from '@/ui/spinner';
+import { Spinner } from '@lody/ui/spinner';
 import { useTranslation } from 'react-i18next';
 import { cn } from '@/lib/utils';
 import {
@@ -7,24 +7,10 @@ import {
   type SessionPublicShareStatus,
   type SessionSharingState,
 } from '@/lib/session-sharing';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from '@/ui/dropdown-menu';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/ui/alert-dialog';
+import { Tooltip } from '@lody/ui/tooltip';
+import { Menu } from '@/ui/menu';
+import { Button } from '@lody/ui/button';
+import { AlertDialog } from '@/ui/dialog';
 
 export type SessionSharingTranslator = (
   key: string,
@@ -138,9 +124,8 @@ export function SessionSharingIndicator({
   const description = getSessionSharingDescription(t, state);
 
   return (
-    <Tooltip delayDuration={300}>
-      <TooltipTrigger asChild>
-        <span
+    <Tooltip.Root>
+      <Tooltip.Trigger delay={300} render={<span
           tabIndex={0}
           aria-label={`${label}: ${description}`}
           className={cn(
@@ -150,13 +135,12 @@ export function SessionSharingIndicator({
           )}
         >
           <LockKeyhole className="h-3.5 w-3.5" strokeWidth={2} aria-hidden="true" />
-        </span>
-      </TooltipTrigger>
-      <TooltipContent side="right" className="max-w-72 px-2.5 py-2">
+        </span>}/>
+      <Tooltip.Content side="right" className="max-w-72 px-2.5 py-2">
         <div className="font-medium">{label}</div>
         <div className="mt-0.5 text-xs text-muted-foreground">{description}</div>
-      </TooltipContent>
-    </Tooltip>
+      </Tooltip.Content>
+    </Tooltip.Root>
   );
 }
 
@@ -185,7 +169,7 @@ function getSessionShareActionLabel(
  * glyphs sitting ~1px above the icon beside them; at `normal` the half-leading
  * is zero and the ink lands where the font intends, for whatever interface
  * font is selected. */
-const SESSION_HEADER_STATUS_PILL_CLASS =
+export const SESSION_HEADER_STATUS_PILL_CLASS =
   'inline-flex h-6 shrink-0 select-none items-center gap-1.5 rounded-md border border-border/70 bg-transparent px-2 ' +
   'text-[0.7rem] font-medium leading-[normal] text-muted-foreground transition-colors ' +
   'hover:border-border hover:text-foreground ' +
@@ -202,22 +186,20 @@ export function SessionArchivedBadge({ className }: { className?: string }) {
   );
 
   return (
-    <Tooltip delayDuration={300}>
-      <TooltipTrigger asChild>
-        <span
+    <Tooltip.Root>
+      <Tooltip.Trigger delay={300} render={<span
           tabIndex={0}
           aria-label={`${label}: ${description}`}
           className={cn(SESSION_HEADER_STATUS_PILL_CLASS, className)}
         >
           <Archive className="h-3.5 w-3.5" aria-hidden="true" />
           <span>{label}</span>
-        </span>
-      </TooltipTrigger>
-      <TooltipContent side="bottom" align="end" className="max-w-72 px-2.5 py-2">
+        </span>}/>
+      <Tooltip.Content side="bottom" align="end" className="max-w-72 px-2.5 py-2">
         <div className="font-medium">{label}</div>
         <div className="mt-0.5 text-xs text-muted-foreground">{description}</div>
-      </TooltipContent>
-    </Tooltip>
+      </Tooltip.Content>
+    </Tooltip.Root>
   );
 }
 
@@ -275,9 +257,8 @@ export function SessionAccessControl({
 
   if (!isPrivate) {
     return (
-      <Tooltip delayDuration={300}>
-        <TooltipTrigger asChild>
-          <button
+      <Tooltip.Root>
+        <Tooltip.Trigger delay={300} render={<button
             type="button"
             aria-label={isShared ? `${sharedLabel}: ${sharedDescription}` : shareLabel}
             className={cn(SESSION_HEADER_STATUS_PILL_CLASS, className)}
@@ -287,12 +268,11 @@ export function SessionAccessControl({
           >
             <Share2 className="h-3.5 w-3.5" aria-hidden="true" />
             <span>{isShared ? sharedLabel : shareLabel}</span>
-          </button>
-        </TooltipTrigger>
-        <TooltipContent side="bottom" align="end" className="max-w-72 px-2.5 py-2">
+          </button>}/>
+        <Tooltip.Content side="bottom" align="end" className="max-w-72 px-2.5 py-2">
           {isShared ? sharedDescription : shareDescription}
-        </TooltipContent>
-      </Tooltip>
+        </Tooltip.Content>
+      </Tooltip.Root>
     );
   }
 
@@ -303,8 +283,26 @@ export function SessionAccessControl({
     !onShareWithTeam || state.privateReason === 'machine-not-registered' || !state.canManage;
 
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
+    <Menu.Root>
+      <Menu.Trigger render={<button
+          type="button"
+          aria-label={
+            isShared ? `${sharedLabel}: ${sharedDescription}` : `${title}: ${description}`
+          }
+          className={cn(
+            SESSION_HEADER_STATUS_PILL_CLASS,
+            'data-[state=open]:border-border data-[state=open]:text-foreground',
+            className
+          )}
+        >
+          {isShared ? (
+            <Share2 className="h-3.5 w-3.5" aria-hidden="true" />
+          ) : (
+            <LockKeyhole className="h-3.5 w-3.5" aria-hidden="true" />
+          )}
+          <span>{triggerLabel}</span>
+          <ChevronDown className="h-3 w-3 opacity-45" aria-hidden="true" />
+        </button>}>
         <button
           type="button"
           aria-label={
@@ -324,8 +322,8 @@ export function SessionAccessControl({
           <span>{triggerLabel}</span>
           <ChevronDown className="h-3 w-3 opacity-45" aria-hidden="true" />
         </button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-72 p-1.5">
+      </Menu.Trigger>
+      <Menu.Content align="end" className="w-72 p-1.5">
         <div className="flex items-start gap-2.5 px-2 py-2">
           <LockKeyhole
             className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground"
@@ -347,10 +345,10 @@ export function SessionAccessControl({
             </div>
           </div>
         ) : null}
-        <DropdownMenuSeparator />
-        <DropdownMenuItem
+        <Menu.Separator />
+        <Menu.Item
           disabled={shareDisabled}
-          onSelect={() => {
+          onClick={() => {
             void onShareWithTeam?.();
           }}
         >
@@ -364,19 +362,19 @@ export function SessionAccessControl({
           {state.canManage
             ? getSessionShareActionLabel(t, state)
             : t('sessions.sharing.onlyOwnerCanShare', 'Only the device owner can share')}
-        </DropdownMenuItem>
+        </Menu.Item>
         {publicShare ? (
-          <DropdownMenuItem
-            onSelect={() => {
+          <Menu.Item
+            onClick={() => {
               publicShare.onOpen();
             }}
           >
             <Share2 className="h-3.5 w-3.5 shrink-0" />
             {shareLabel}
-          </DropdownMenuItem>
+          </Menu.Item>
         ) : null}
-      </DropdownMenuContent>
-    </DropdownMenu>
+      </Menu.Content>
+    </Menu.Root>
   );
 }
 
@@ -400,27 +398,26 @@ function ShareConfirmationDialog({
   const { t } = useTranslation();
 
   return (
-    <AlertDialog open={open} onOpenChange={onOpenChange}>
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle className="line-clamp-2 break-words">{title}</AlertDialogTitle>
-          <AlertDialogDescription>{description}</AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel disabled={isSharing}>{t('common.cancel', 'Cancel')}</AlertDialogCancel>
-          <AlertDialogAction
+    <AlertDialog.Root open={open} onOpenChange={onOpenChange}>
+      <AlertDialog.Content>
+        <AlertDialog.Header>
+          <AlertDialog.Title className="line-clamp-2 break-words">{title}</AlertDialog.Title>
+          <AlertDialog.Description>{description}</AlertDialog.Description>
+        </AlertDialog.Header>
+        <AlertDialog.Footer>
+          <AlertDialog.Cancel disabled={isSharing}>{t('common.cancel', 'Cancel')}</AlertDialog.Cancel>
+          <Button
             disabled={isSharing}
-            onClick={(event) => {
-              event.preventDefault();
+            onClick={() => {
               onConfirm();
             }}
           >
             {isSharing ? <Spinner className="mr-1.5 h-4 w-4" /> : null}
             {actionLabel}
-          </AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
+          </Button>
+        </AlertDialog.Footer>
+      </AlertDialog.Content>
+    </AlertDialog.Root>
   );
 }
 

@@ -17,10 +17,10 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { Box, Copy, Download, FileText, MousePointerClick, X } from 'lucide-react';
 import i18next from 'i18next';
 import { useTranslation } from 'react-i18next';
-import { toast } from 'sonner';
-import { Avatar, AvatarFallback, AvatarImage } from '@/ui/avatar';
-import { Button } from '@/ui/button';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
+import { toast } from '@/lib/toast';
+import { Avatar } from '@lody/ui/avatar';
+import { Button } from '@lody/ui/button';
+import { Tooltip } from '@lody/ui/tooltip';
 import { formatCompactNumber, formatUsdAmount } from '@/lib/format-compact-number';
 import { toIntlLocaleOrEn } from '@/lib/intl-locale';
 import { cn } from '@/lib/utils';
@@ -1626,7 +1626,7 @@ function UsageDayDetailPanel({
         className="relative rounded-lg bg-muted/40 p-4"
       >
         <Button
-          size="icon"
+          icon
           variant="ghost"
           aria-label={t('common.close')}
           className="absolute right-2 top-2 h-6 w-6 text-muted-foreground"
@@ -1745,12 +1745,10 @@ function UsageDayDetailPanel({
                       label,
                       tokens: row.tokens,
                       icon: (
-                        <Avatar className="size-4 shrink-0">
-                          {user?.image ? <AvatarImage src={user.image} alt="" /> : null}
-                          <AvatarFallback className="bg-foreground/15 text-[8px] font-normal uppercase text-foreground/80">
-                            {label.slice(0, 2)}
-                          </AvatarFallback>
-                        </Avatar>
+                        <Avatar.Root size="mini">
+                          {user?.image ? <Avatar.Image src={user.image} alt="" /> : null}
+                          <Avatar.Fallback>{label.slice(0, 2).toUpperCase()}</Avatar.Fallback>
+                        </Avatar.Root>
                       ),
                     };
                   })}
@@ -2327,24 +2325,22 @@ export function UsageCalendarVisualization({
                 <span>{t('workspace.usage.skyline.asciiPreview')}</span>
               </div>
               <div className="flex flex-wrap items-center gap-1.5">
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      size="icon"
+                <Tooltip.Root>
+                  <Tooltip.Trigger render={<Button
+                      icon
                       variant="ghost"
                       onClick={() => void copyAscii()}
                       aria-label={t('workspace.usage.skyline.copyAscii')}
                     >
                       <Copy />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>{t('workspace.usage.skyline.copyAscii')}</TooltipContent>
-                </Tooltip>
-                <Button size="sm" variant="outline" onClick={exportAscii}>
+                    </Button>}/>
+                  <Tooltip.Content>{t('workspace.usage.skyline.copyAscii')}</Tooltip.Content>
+                </Tooltip.Root>
+                <Button size="small" variant="secondary" onClick={exportAscii}>
                   <Download className="h-4 w-4" />
                   {t('workspace.usage.skyline.downloadAscii')}
                 </Button>
-                <Button size="sm" onClick={exportStl}>
+                <Button size="small" onClick={exportStl}>
                   <Box className="h-4 w-4" />
                   {t('workspace.usage.skyline.downloadBinaryStl')}
                 </Button>

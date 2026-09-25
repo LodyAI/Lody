@@ -8,7 +8,7 @@ import type { LocalProjectMeta, MachineId, SessionId, SessionMeta } from '@lody/
 
 import { LocalProjectItem } from '../src/components/loro-app-sidebar';
 import { initI18n } from '../src/i18n';
-import { TooltipProvider } from '../src/ui/tooltip';
+import { Tooltip } from '@lody/ui/tooltip';
 
 // A project hosted on a machine a teammate shared with the workspace. The row
 // must behave exactly like one on this user's own device: clicking it steers the
@@ -64,7 +64,7 @@ describe('sidebar local project row', () => {
   }) {
     flushSync(() => {
       root?.render(
-        <TooltipProvider>
+        <Tooltip.Provider>
           <LocalProjectItem
             machineId={machineId}
             machineName="Teammate's Mac"
@@ -98,7 +98,7 @@ describe('sidebar local project row', () => {
             onToggleFullList={options.onToggleFullList ?? (() => undefined)}
             onRequestRemoval={() => undefined}
           />
-        </TooltipProvider>
+        </Tooltip.Provider>
       );
     });
     return container?.querySelector<HTMLElement>(`[data-id="project:${machineId}:${project.id}"]`);

@@ -11,8 +11,12 @@ import { enUS } from 'date-fns/locale/en-US';
 import { zhCN } from 'date-fns/locale/zh-CN';
 import { AnthropicIcon } from '@/components/icons/anthropic-icon';
 import { OpenAIIcon } from '@/components/icons/openai-icon';
-import { Badge } from '@/ui/badge';
-import { cn } from '@/lib/utils';
+import * as stylex from '@stylexjs/stylex';
+import { Badge } from '@lody/ui/badge';
+import { Progress } from '@lody/ui/progress';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { space } from '@lody/ui/tokens/scales.stylex';
+import { settingsSurface as surface } from './surface';
 import {
   FIVE_HOUR_WINDOW_SECONDS,
   SEVEN_DAY_WINDOW_SECONDS,
@@ -78,7 +82,7 @@ export function MachineQuotaCompact({ raceLimits, filterCliType }: MachineQuotaC
   if (entries.length === 0) return null;
 
   return (
-    <div className="w-full space-y-2">
+    <div {...stylex.props(styles.list)}>
       {entries.map(({ rawKey, parsed, windows }) => {
         const isCodexSpark = parsed.limitId === CODEX_SPARK_LIMIT_ID;
         const tierLabel = isCodexSpark ? t('machines.rateLimits.codexSpark') : null;
@@ -90,28 +94,19 @@ export function MachineQuotaCompact({ raceLimits, filterCliType }: MachineQuotaC
               : parsed.cliType;
         const cliIcon =
           parsed.cliType === 'codex' ? (
-            <OpenAIIcon className="h-3 w-3 text-foreground/80" />
+            <OpenAIIcon {...stylex.props(styles.cliIcon)} />
           ) : parsed.cliType === 'claude' ? (
-            <AnthropicIcon className="h-3 w-3 text-foreground/80" />
+            <AnthropicIcon {...stylex.props(styles.cliIcon)} />
           ) : null;
 
         const tierBadge = tierLabel ? (
-          <Badge
-            variant="secondary"
-            className="max-w-[180px] truncate px-1.5 py-0 text-[10px]"
-            title={tierLabel}
-          >
+          <Badge title={tierLabel} {...stylex.props(styles.tierBadge)}>
             {tierLabel}
           </Badge>
         ) : null;
 
         const windowMeters = (
-          <div
-            className={cn(
-              'grid gap-x-4 gap-y-1',
-              windows.length === 1 ? 'grid-cols-1' : 'grid-cols-2'
-            )}
-          >
+          <div {...stylex.props(styles.windows, windows.length > 1 && styles.windowsPaired)}>
             {windows.map((window, index) => {
               const shortLabel = formatRateLimitWindowShortLabel(window.windowDurationSeconds);
               const fullLabel =
@@ -135,25 +130,22 @@ export function MachineQuotaCompact({ raceLimits, filterCliType }: MachineQuotaC
         );
 
         // Per-provider (filtered): the parent provider row already supplies the
-        // card chrome, so render a flat, compact block — no extra border/bg.
+        // card, so the meters sit on it with nothing around them.
         if (filterCliType) {
           return (
-            <div key={rawKey} className="space-y-1.5">
+            <div key={rawKey} {...stylex.props(styles.flatEntry)}>
               {tierBadge}
               {windowMeters}
             </div>
           );
         }
 
-        // Aggregated (machine settings): keep a light card + cliType header so
-        // multiple providers stay visually grouped.
+        // Aggregated (machine settings): each provider is a block inside the
+        // machine's card — a region fill with its cliType heading, never a card.
         return (
-          <div
-            key={rawKey}
-            className="rounded-lg border border-border/70 bg-background/80 px-2.5 py-2"
-          >
-            <div className="mb-2 flex min-w-0 flex-wrap items-center justify-between gap-2">
-              <span className="inline-flex items-center gap-1.5 text-xs font-normal text-foreground">
+          <div key={rawKey} {...stylex.props(surface.formBlock)}>
+            <div {...stylex.props(styles.entryHeader)}>
+              <span {...stylex.props(styles.cliLabel)}>
                 {cliIcon}
                 {cliTypeLabel}
               </span>
@@ -189,45 +181,80 @@ function UsageQuotaWindow({
         });
 
   return (
-    <div className="min-w-0" title={`${fullLabel}: ${percentText}, ${resetText}`}>
-      <div className="flex items-baseline justify-between gap-2">
-        <span className="text-[11px] font-normal text-muted-foreground">{shortLabel}</span>
-        <span className="font-mono text-[11px] text-foreground">{percentText}</span>
+    <div {...stylex.props(styles.window)} title={`${fullLabel}: ${percentText}, ${resetText}`}>
+      <div {...stylex.props(styles.windowHeader)}>
+        <span {...stylex.props(styles.windowLabel)}>{shortLabel}</span>
+        <span {...stylex.props(styles.windowValue)}>{percentText}</span>
       </div>
-      <div className="mt-1">
-        <UsageProgressBar value={percent ?? 0} disabled={disabled || percent == null} />
-      </div>
-      <span
-        className="mt-0.5 block truncate text-[10px] text-muted-foreground/80"
-        title={resetText}
-      >
+      {/* A quota measures something rather than progressing through it, so the
+          bar takes the neutral tone and gives the accent back to live state. */}
+      <Progress
+        tone="neutral"
+        value={disabled || percent == null ? 0 : Math.min(100, Math.max(0, percent))}
+      />
+      <span {...stylex.props(styles.reset)} title={resetText}>
         {resetText}
       </span>
     </div>
   );
 }
 
-function UsageProgressBar({ value, disabled }: { value: number; disabled: boolean }) {
-  const pct = Math.min(100, Math.max(0, value));
-
-  return (
-    <div
-      role="progressbar"
-      aria-valuenow={disabled ? undefined : pct}
-      aria-valuemin={0}
-      aria-valuemax={100}
-      className={cn(
-        'relative h-1.5 w-full overflow-hidden rounded-full bg-foreground/10',
-        disabled && 'opacity-60'
-      )}
-    >
-      <div
-        className="h-full rounded-full bg-muted-foreground/60 transition-[width] duration-300 ease-out"
-        style={{
-          width: `${disabled ? 0 : pct}%`,
-          minWidth: !disabled && pct > 0 ? 2 : undefined,
-        }}
-      />
-    </div>
-  );
-}
+const styles = stylex.create({
+  list: { display: 'flex', flexDirection: 'column', gap: space[2], width: '100%' },
+  flatEntry: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'flex-start',
+    gap: space[1.5],
+  },
+  entryHeader: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: space[2],
+    minWidth: 0,
+    marginBottom: space[2],
+  },
+  cliLabel: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: space[1.5],
+    fontSize: '0.8em',
+    fontWeight: 400,
+    color: colors.label,
+  },
+  cliIcon: { width: '12px', height: '12px', color: colors.secondaryLabel },
+  /** A long tier name ends in an ellipsis: the surface caps its badge. */
+  tierBadge: { maxWidth: '180px' },
+  windows: {
+    display: 'grid',
+    gridTemplateColumns: 'minmax(0, 1fr)',
+    columnGap: space[4],
+    rowGap: space[1],
+    alignSelf: 'stretch',
+  },
+  windowsPaired: { gridTemplateColumns: 'repeat(2, minmax(0, 1fr))' },
+  window: { display: 'flex', flexDirection: 'column', gap: space[1], minWidth: 0 },
+  windowHeader: {
+    display: 'flex',
+    alignItems: 'baseline',
+    justifyContent: 'space-between',
+    gap: space[2],
+  },
+  windowLabel: { fontSize: '11px', color: colors.secondaryLabel },
+  windowValue: {
+    fontSize: '11px',
+    fontVariantNumeric: 'tabular-nums',
+    color: colors.label,
+  },
+  reset: {
+    display: 'block',
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: '10px',
+    color: colors.secondaryLabel,
+  },
+});

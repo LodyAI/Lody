@@ -10,7 +10,7 @@ import {
 import { useTranslation } from 'react-i18next';
 import { useAtomValue } from 'jotai';
 import { useCloudMutation } from '@lody/platform/react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import {
   getLocalProjectHistoryProviderKey,

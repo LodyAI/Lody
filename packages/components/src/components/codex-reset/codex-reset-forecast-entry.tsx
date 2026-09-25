@@ -1,11 +1,82 @@
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { TimerReset } from 'lucide-react';
+import * as stylex from '@stylexjs/stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { corner, duration, ease, radius, space, text } from '@lody/ui/tokens/scales.stylex';
+import { Button } from '@lody/ui/button';
 
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useCodexResetForecast } from '@/hooks/use-codex-reset-forecast';
 import { formatCodexResetExpiry } from '@/lib/codex-reset-forecast';
 import { CodexResetForecastDialog } from './codex-reset-forecast-dialog';
+
+const styles = stylex.create({
+  chipIcon: { flexShrink: 0, width: '14px', height: '14px' },
+  /** The row joins the meters above as the next line of their list. */
+  usage: {
+    marginTop: '10px',
+    paddingTop: space[2],
+    boxShadow: `inset 0 1px 0 ${colors.separator}`,
+  },
+  usageButton: {
+    boxSizing: 'border-box',
+    display: 'block',
+    width: `calc(100% + ${space[2]})`,
+    marginBlock: 0,
+    marginInline: `calc(-1 * ${space[1]})`,
+    paddingInline: space[1],
+    paddingBlock: space[1],
+    borderWidth: 0,
+    borderRadius: radius.small,
+    cornerShape: corner.shape,
+    backgroundColor: {
+      default: 'transparent',
+      ':hover': `color-mix(in oklab, transparent, ${colors.label} 6%)`,
+    },
+    boxShadow: { default: 'none', ':focus-visible': `0 0 0 2px ${colors.accent}` },
+    outlineStyle: 'none',
+    color: colors.label,
+    fontFamily: 'inherit',
+    textAlign: 'start',
+    cursor: 'pointer',
+    transitionProperty: 'background-color',
+    transitionDuration: duration.fast,
+    transitionTimingFunction: ease.standard,
+  },
+  usageLine: {
+    display: 'flex',
+    alignItems: 'baseline',
+    justifyContent: 'space-between',
+    gap: space[3],
+    fontSize: text.captionSize,
+    lineHeight: '16px',
+  },
+  usageLabel: {
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontWeight: 500,
+    color: colors.label,
+  },
+  usageChance: {
+    flexShrink: 0,
+    fontFamily: 'var(--font-mono, ui-monospace, monospace)',
+    fontVariantNumeric: 'tabular-nums',
+    color: colors.secondaryLabel,
+  },
+  usageExpiry: {
+    display: 'block',
+    marginTop: '2px',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: '10px',
+    lineHeight: '14px',
+    color: colors.tertiaryLabel,
+  },
+});
 
 /**
  * Entry points to the Codex reset forecast dialog. Both call sites gate on
@@ -43,8 +114,10 @@ export function CodexResetForecastChip({ enabled }: CodexResetForecastChipProps)
 
   return (
     <>
-      <button
+      <Button
         type="button"
+        variant="ghost"
+        size="mini"
         aria-haspopup="dialog"
         onClick={(event) => {
           event.stopPropagation();
@@ -53,11 +126,10 @@ export function CodexResetForecastChip({ enabled }: CodexResetForecastChipProps)
           forecast.revalidate();
           setOpen(true);
         }}
-        className="inline-flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] text-muted-foreground transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
       >
-        <TimerReset className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-        <span className="whitespace-nowrap">{label}</span>
-      </button>
+        <TimerReset {...stylex.props(styles.chipIcon)} aria-hidden="true" />
+        {label}
+      </Button>
       <CodexResetForecastDialog
         open={open}
         onOpenChange={setOpen}
@@ -105,24 +177,24 @@ export function CodexResetForecastUsageRow({ enabled, onOpen }: CodexResetForeca
   if (!enabled || !watch) return null;
 
   return (
-    <div className="mt-2.5 border-t border-border/60 pt-2">
+    <div {...stylex.props(styles.usage)}>
       <button
         type="button"
         aria-haspopup="dialog"
         onClick={onOpen}
-        className="-mx-1 block w-[calc(100%+0.5rem)] rounded-md px-1 py-1 text-left transition-colors hover:bg-hover focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
+        {...stylex.props(styles.usageButton)}
       >
         {/* Same two-line shape as the meters above: label and value on one
             baseline, the quieter detail underneath. */}
-        <span className="flex items-baseline justify-between gap-3 text-[11px] leading-4">
+        <span {...stylex.props(styles.usageLine)}>
           {/* No icon: the meters above carry none, and an inline SVG would take
               over this row's baseline and misalign the value beside it. */}
-          <span className="min-w-0 truncate font-medium text-foreground/85">
+          <span {...stylex.props(styles.usageLabel)}>
             {t('codexReset.entry', 'Reset forecast')}
           </span>
           {watch.chancePercent === null ? null : (
             // "65%" alone would read as "65% used" beside the meters above.
-            <span className="shrink-0 font-mono tabular-nums text-muted-foreground">
+            <span {...stylex.props(styles.usageChance)}>
               {t('codexReset.rowChance', '{{percent}}% chance', {
                 percent: watch.chancePercent,
               })}
@@ -130,7 +202,7 @@ export function CodexResetForecastUsageRow({ enabled, onOpen }: CodexResetForeca
           )}
         </span>
         {/* The API instant is formatted semantically in the browser/OS time zone. */}
-        <span className="mt-0.5 block truncate text-[10px] leading-3.5 text-muted-foreground/75">
+        <span {...stylex.props(styles.usageExpiry)}>
           {formatCodexResetExpiry(
             watch.expiresAtMs,
             forecast.nowMs,

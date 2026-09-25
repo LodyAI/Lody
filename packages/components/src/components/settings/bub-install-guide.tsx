@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Check, Copy } from 'lucide-react';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { writeTextToClipboard } from '@/lib/clipboard';
 import { openExternalUrl } from '@/lib/native-browser';
 
@@ -24,7 +24,7 @@ export function BubInstallGuide() {
         <Button
           type="button"
           variant="ghost"
-          size="sm"
+          size="small"
           className="h-7 shrink-0 gap-1 px-2 text-xs"
           aria-label={copied ? t('common.copied', 'Copied') : t('common.copy', 'Copy')}
           onClick={() => {
@@ -40,7 +40,7 @@ export function BubInstallGuide() {
       <Button
         type="button"
         variant="link"
-        size="sm"
+        size="small"
         className="h-auto p-0 text-xs"
         onClick={() => {
           void openExternalUrl(BUB_ACP_INSTALL_DOCS_URL);

@@ -1,6 +1,10 @@
 import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
-import { cn } from '@/lib/utils';
+import * as stylex from '@stylexjs/stylex';
+import { Button } from '@lody/ui/button';
+import { Toggle } from '@lody/ui/toggle';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { corner, radius, space } from '@lody/ui/tokens/scales.stylex';
 
 export type MachinePillItem = {
   id: string;
@@ -62,71 +66,102 @@ export function MachinePills({
   const clamp = overflow && !expanded;
 
   return (
-    <div className="flex items-start gap-1.5">
+    <div {...stylex.props(styles.root)}>
       <div
         ref={listRef}
-        className={cn(
-          'flex min-w-0 flex-1 flex-wrap items-center gap-1.5',
-          clamp && 'overflow-hidden'
+        {...stylex.props(
+          styles.list,
+          clamp && styles.clamped,
+          clamp && collapsedMaxH !== undefined && styles.maxHeight(`${collapsedMaxH}px`)
         )}
-        style={clamp ? { maxHeight: collapsedMaxH } : undefined}
       >
         {pills.map((pill) => {
           const selected = pill.id === selectedId;
           return (
-            <button
+            <Toggle
               key={pill.id}
               type="button"
+              size="mini"
+              shape="pill"
               data-pill="true"
-              aria-pressed={selected}
+              pressed={selected}
               onClick={() => onSelect(pill.id)}
-              className={cn(
-                'flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-xs transition-colors',
-                selected
-                  ? 'border-transparent bg-secondary font-normal text-secondary-foreground'
-                  : 'border-border/60 text-muted-foreground hover:bg-hover/50 hover:text-foreground'
-              )}
             >
               {pill.icon ? (
-                <span className="flex h-3 w-3 shrink-0 items-center justify-center">
-                  {pill.icon}
-                </span>
+                <span {...stylex.props(styles.glyph)}>{pill.icon}</span>
               ) : pill.online !== undefined ? (
-                <span
-                  aria-hidden
-                  className={cn(
-                    'h-1.5 w-1.5 shrink-0 rounded-full',
-                    pill.online ? 'bg-status-success' : 'bg-muted-foreground/40'
-                  )}
-                />
+                <span aria-hidden {...stylex.props(styles.dot, pill.online && styles.dotOnline)} />
               ) : null}
-              <span className="max-w-[9.5rem] truncate" title={pill.label}>
+              <span {...stylex.props(styles.label)} title={pill.label}>
                 {pill.label}
               </span>
               {selected && pill.online === false ? (
-                <span className="text-[10px] font-normal text-muted-foreground">
+                <span {...stylex.props(styles.meta)}>
                   {t('workspace.machines.offline', 'Offline')}
                 </span>
               ) : null}
               {pill.private ? (
-                <span className="text-[10px] font-normal text-muted-foreground/70">
+                <span {...stylex.props(styles.meta)}>
                   {t('workspace.machines.private', 'Private')}
                 </span>
               ) : null}
-            </button>
+            </Toggle>
           );
         })}
       </div>
       {overflow ? (
-        <button
+        <Button
           type="button"
+          variant="ghost"
+          size="mini"
+          shape="pill"
           onClick={() => setExpanded((value) => !value)}
-          className="shrink-0 rounded-full border border-border/60 px-2 py-0.5 text-xs text-muted-foreground transition-colors hover:bg-hover/50 hover:text-foreground"
         >
           {expanded ? t('common.showLess', 'Less') : t('common.showMore', 'More')}
-        </button>
+        </Button>
       ) : null}
-      {trailing ? <div className="shrink-0">{trailing}</div> : null}
+      {trailing ? <div {...stylex.props(styles.trailing)}>{trailing}</div> : null}
     </div>
   );
 }
+
+const styles = stylex.create({
+  root: { display: 'flex', alignItems: 'flex-start', gap: space[1.5] },
+  list: {
+    display: 'flex',
+    flexGrow: 1,
+    flexShrink: 1,
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: space[1.5],
+    minWidth: 0,
+  },
+  clamped: { overflow: 'hidden' },
+  maxHeight: (value: string) => ({ maxHeight: value }),
+  glyph: {
+    display: 'flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '12px',
+    height: '12px',
+  },
+  dot: {
+    flexShrink: 0,
+    width: '6px',
+    height: '6px',
+    borderRadius: radius.full,
+    cornerShape: corner.round,
+    backgroundColor: colors.tertiaryLabel,
+  },
+  dotOnline: { backgroundColor: colors.success },
+  label: {
+    maxWidth: '9.5rem',
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  meta: { fontSize: '10px', fontWeight: 400, color: colors.secondaryLabel },
+  trailing: { flexShrink: 0 },
+});

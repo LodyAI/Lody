@@ -32,7 +32,7 @@ describe('agent Markdown file-link context menu', () => {
     container?.remove();
     container = undefined;
     document
-      .querySelectorAll('[data-radix-popper-content-wrapper]')
+      .querySelectorAll('[role="menu"]')
       .forEach((node) => node.remove());
   });
 
@@ -93,7 +93,7 @@ describe('agent Markdown file-link context menu', () => {
       link.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
       await Promise.resolve();
     });
-    const menu = document.querySelector('[data-slot="context-menu-content"]');
+    const menu = document.querySelector('[role="menu"]');
     expect(menu?.textContent).toBe('Copy Path');
   });
 });

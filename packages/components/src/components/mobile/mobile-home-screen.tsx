@@ -32,7 +32,7 @@ import {
   Terminal,
   X,
 } from 'lucide-react';
-import { Spinner } from '@/ui/spinner';
+import { Spinner } from '@lody/ui/spinner';
 import { Drawer, DrawerContent, DrawerDescription, DrawerTitle } from '@/ui/drawer';
 import { MdChat, MdComputer, MdFolderCopy } from 'react-icons/md';
 import { FaGithub } from 'react-icons/fa';
@@ -508,19 +508,12 @@ export type MobileHomeScreenProps = {
 
 /* Home header workspace chip — shared `WorkspaceAvatar` so logo /
    first-letter fallback match the switcher sheet and desktop sidebar. */
-function HomeWorkspaceAvatar({
-  workspace,
-  size = 'sm',
-}: {
-  workspace: MobileHomeWorkspace;
-  size?: 'sm' | 'md';
-}) {
-  const sizeClass = size === 'sm' ? 'h-7 w-7 text-[0.72rem]' : 'h-9 w-9 text-[0.82rem]';
+function HomeWorkspaceAvatar({ workspace }: { workspace: MobileHomeWorkspace }) {
+  /* One rung: `@lody/ui`'s ladder has nothing between 32 and 64, and the
+     28-vs-36 split this used to carry was a size that had drifted rather than
+     two decisions about how big a workspace tile is. */
   return (
-    <WorkspaceAvatar
-      workspace={{ name: workspace.name, logo: workspace.avatarUrl }}
-      className={sizeClass}
-    />
+    <WorkspaceAvatar workspace={{ name: workspace.name, logo: workspace.avatarUrl }} size="large" />
   );
 }
 
@@ -1459,14 +1452,14 @@ export function MobileHomeScreen({
                   aria-haspopup="dialog"
                   onClick={onWorkspaceMenuOpen}
                 >
-                  <HomeWorkspaceAvatar workspace={workspace} size="sm" />
+                  <HomeWorkspaceAvatar workspace={workspace} />
                 </FloatingPill>
               ) : (
                 <div
                   className="flex h-9 w-9 items-center justify-center rounded-full border border-border/50 bg-muted text-foreground dark:border-white/12 dark:bg-white/10"
                   data-workspace-identity
                 >
-                  <HomeWorkspaceAvatar workspace={workspace} size="sm" />
+                  <HomeWorkspaceAvatar workspace={workspace} />
                 </div>
               )}
             </div>
