@@ -207,7 +207,11 @@ import { RenameSessionDialog, type RenameSessionDialogTarget } from './rename-se
 import { useResolvedTheme } from '../../theme-provider';
 import { PullRequestBadge } from './pull-request-badge';
 import { SessionInfoBar } from './session-info-bar';
-import { CurrentSessionRelationsBar, type SessionRelationsBarItem } from './session-relations-bar';
+import {
+  CurrentSessionRelationsChip,
+  useHasCreatedSessions,
+  type SessionRelationsItem,
+} from './session-relations-chip';
 import type { ContextChipAction, PrCiRun } from './session-info-chips';
 import {
   resolveSessionInfoBarGitHubActionIds,
@@ -4707,7 +4711,8 @@ export const SessionChatInterface = memo(
       openerSessionMeta?.title,
       t,
     ]);
-    const relationsBarParent = useMemo<SessionRelationsBarItem | null>(() => {
+    const hasCreatedSessions = useHasCreatedSessions(session.id);
+    const relationsParent = useMemo<SessionRelationsItem | null>(() => {
       const openedBy = openedByRelations?.openedBy;
       return openedBy
         ? {
@@ -6173,15 +6178,6 @@ export const SessionChatInterface = memo(
                     </ConversationColumn>
                   ) : null}
 
-                  {/* Opener + every Session/Tab created from here, pinned
-                      above the info bar: the in-stream creation cards scroll
-                      away with the conversation. */}
-                  <CurrentSessionRelationsBar
-                    sessionId={session.id}
-                    parent={relationsBarParent}
-                    onOpenSession={handleOpenRelatedSession}
-                  />
-
                   {/* Session info bar (desktop AND mobile): the canonical
                       cluster + fixed stage row merging status, goal, schedule,
                       and work context, glued to the composer shell. It
@@ -6220,6 +6216,17 @@ export const SessionChatInterface = memo(
                     onOpenPr={prLinkHandler}
                     contextActions={infoBarContextActions}
                     onOpenAllChanges={onOpenAllChanges}
+                    // Opener + every Session/Tab created here: the in-stream
+                    // creation cards scroll away with the conversation.
+                    relations={
+                      relationsParent || hasCreatedSessions ? (
+                        <CurrentSessionRelationsChip
+                          sessionId={session.id}
+                          parent={relationsParent}
+                          onOpenSession={handleOpenRelatedSession}
+                        />
+                      ) : undefined
+                    }
                     onOpenBrowser={browserActionAvailable ? handleOpenBrowser : undefined}
                     privateAccessStatus={
                       isMobile && sharing?.visibility === 'private'

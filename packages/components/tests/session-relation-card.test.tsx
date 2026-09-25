@@ -9,7 +9,7 @@ import { getSessionRoomId, type SessionHistoryParsed, type SessionId } from '@lo
 import { setDocMetaByRoomIdAtom } from '../src/atoms/doc-meta';
 import { MessageRowView } from '../src/components/ai-gui/view';
 import { SessionRelationCard } from '../src/components/shared/session-relation-card';
-import { CurrentSessionRelationsBar } from '../src/components/sessions/session-relations-bar';
+import { CurrentSessionRelationsChip } from '../src/components/sessions/session-relations-chip';
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -361,7 +361,7 @@ describe('Session relation cards', () => {
     expect(dialog?.textContent).toContain(conclusion);
   });
 
-  it('pins the opener and every created Session or Tab in the relations bar', async () => {
+  it('lists the opener and every created Session or Tab from the relations chip', async () => {
     const store = createStore();
     const meta = (id: string, title: string, extra: Record<string, unknown> = {}) =>
       store.set(setDocMetaByRoomIdAtom, getSessionRoomId(id as SessionId), {
@@ -395,7 +395,7 @@ describe('Session relation cards', () => {
     await act(async () => {
       root.render(
         <Provider store={store}>
-          <CurrentSessionRelationsBar
+          <CurrentSessionRelationsChip
             sessionId={openerSessionId}
             parent={{
               sessionId: 'grand-opener' as SessionId,
@@ -409,19 +409,19 @@ describe('Session relation cards', () => {
       );
     });
 
-    const toggle = container.querySelector<HTMLButtonElement>('button[aria-expanded]');
-    expect(toggle?.getAttribute('aria-expanded')).toBe('false');
-    expect(container.querySelector('[data-session-relation-row]')).toBeNull();
+    const chip = container.querySelector<HTMLButtonElement>('button[aria-expanded]');
+    expect(chip?.textContent).toBe('2');
+    expect(document.querySelector('[data-session-relation-row]')).toBeNull();
 
-    await act(async () => toggle?.click());
-    const rows = Array.from(container.querySelectorAll('[data-session-relation-row]')).map(
+    await act(async () => chip?.click());
+    const rows = Array.from(document.querySelectorAll('[data-session-relation-row]')).map(
       (row) => row.textContent
     );
     expect(rows).toEqual(['Grand openerParent', 'Independent childSession', 'Tab childTab']);
-    expect(container.querySelector('[role="separator"]')).not.toBeNull();
+    expect(document.querySelector('[role="separator"]')).not.toBeNull();
 
     await act(async () =>
-      container
+      document
         .querySelector<HTMLButtonElement>('[data-session-relation-row="created-tab"]')
         ?.click()
     );

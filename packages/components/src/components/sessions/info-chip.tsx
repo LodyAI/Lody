@@ -66,6 +66,65 @@ export function ActionChip({
   );
 }
 
+/**
+ * Action chip whose one click toggles a popover above the bar (e.g. related
+ * Sessions). Like {@link ActionChip} it never takes the stage.
+ */
+export function PopoverActionChip({
+  icon,
+  label,
+  value,
+  content,
+  defaultOpen = false,
+}: {
+  icon: InfoChipIcon;
+  label: string;
+  value?: string;
+  content: ReactNode;
+  /** Storybook/testing aid. */
+  defaultOpen?: boolean;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  const anchorRef = useRef<HTMLButtonElement>(null);
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverAnchor asChild>
+        <button
+          ref={anchorRef}
+          type="button"
+          aria-label={label}
+          aria-haspopup="dialog"
+          aria-expanded={open}
+          title={label}
+          onClick={() => setOpen((value_) => !value_)}
+          className={cn(
+            CHIP_BUTTON_CLASS,
+            'text-muted-foreground',
+            open && 'bg-muted-foreground/10 text-foreground'
+          )}
+        >
+          <ChipFace icon={icon} value={value} />
+        </button>
+      </PopoverAnchor>
+      <PopoverContent
+        side="top"
+        align="start"
+        sideOffset={8}
+        aria-label={label}
+        onPointerDownOutside={(event) => {
+          const target = event.target as Node | null;
+          if (target && anchorRef.current?.contains(target)) {
+            event.preventDefault();
+          }
+        }}
+        className="w-96 max-w-[min(24rem,90vw)] border-border/60 p-0 shadow-xl"
+      >
+        {content}
+      </PopoverContent>
+    </Popover>
+  );
+}
+
 /** Collapsed item in the cluster. Click promotes it onto the stage. */
 export function ClusterChip({
   icon,

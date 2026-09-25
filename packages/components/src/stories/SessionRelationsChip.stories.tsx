@@ -3,9 +3,9 @@ import { fn } from 'storybook/test';
 import type { MachineId, SessionId, SessionMeta } from '@lody/shared';
 import { SessionInfoBar } from '@/components/sessions/session-info-bar';
 import {
-  SessionRelationsBar,
-  type SessionRelationsBarItem,
-} from '@/components/sessions/session-relations-bar';
+  SessionRelationsChip,
+  type SessionRelationsItem,
+} from '@/components/sessions/session-relations-chip';
 
 const ROOT_ID = 'session-root' as SessionId;
 
@@ -14,7 +14,7 @@ const makeItem = (
   title: string,
   agentType: string,
   parentSessionId?: SessionId
-): SessionRelationsBarItem => {
+): SessionRelationsItem => {
   const sessionId = id as SessionId;
   const session = {
     id: sessionId,
@@ -46,27 +46,30 @@ const CREATED = [
 function StoryHarness({
   parent,
   created,
-  defaultExpanded,
+  defaultOpen,
 }: {
-  parent: SessionRelationsBarItem | null;
-  created: SessionRelationsBarItem[];
-  defaultExpanded?: boolean;
+  parent: SessionRelationsItem | null;
+  created: SessionRelationsItem[];
+  defaultOpen?: boolean;
 }) {
   return (
     <div className="flex max-w-full flex-col" style={{ width: 720 }}>
+      {/* Room above the bar so the popover (side=top) stays visible. */}
       <div className="h-56" />
-      <SessionRelationsBar
-        parent={parent}
-        created={created}
-        onOpenSession={fn()}
-        defaultExpanded={defaultExpanded}
-      />
       <SessionInfoBar
         status={null}
         projectName="LodyAI/Lody"
         branch="session/1bc529fc"
         diffStat={{ add: 525, del: 102 }}
         onOpenAllChanges={fn()}
+        relations={
+          <SessionRelationsChip
+            parent={parent}
+            created={created}
+            onOpenSession={fn()}
+            defaultOpen={defaultOpen}
+          />
+        }
       />
       <div className="h-14 rounded-lg border border-border/60 bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
         (composer placeholder)
@@ -76,7 +79,7 @@ function StoryHarness({
 }
 
 const meta = {
-  title: 'Sessions/SessionRelationsBar',
+  title: 'Sessions/SessionRelationsChip',
   component: StoryHarness,
   parameters: { layout: 'centered' },
   tags: ['autodocs'],
@@ -85,18 +88,16 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 
-export const CreatedCollapsed: Story = { args: { parent: null, created: CREATED } };
+export const Closed: Story = { args: { parent: PARENT, created: CREATED } };
 
-export const CreatedExpanded: Story = {
-  args: { parent: null, created: CREATED, defaultExpanded: true },
+export const ParentAndCreatedOpen: Story = {
+  args: { parent: PARENT, created: CREATED, defaultOpen: true },
 };
 
-export const ParentAndCreatedCollapsed: Story = { args: { parent: PARENT, created: CREATED } };
-
-export const ParentAndCreatedExpanded: Story = {
-  args: { parent: PARENT, created: CREATED, defaultExpanded: true },
+export const CreatedOnlyOpen: Story = {
+  args: { parent: null, created: CREATED, defaultOpen: true },
 };
 
-export const ParentOnlyExpanded: Story = {
-  args: { parent: PARENT, created: [], defaultExpanded: true },
+export const ParentOnlyOpen: Story = {
+  args: { parent: PARENT, created: [], defaultOpen: true },
 };

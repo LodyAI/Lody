@@ -163,16 +163,16 @@ labelClassName`) so the stage diffstat never clips. Wired from
   with the green bordered Mergeable pill; the active row hides both because the
   Info Bar owns the merge control.
 
-## Relations bar above the info bar
+## Related-Sessions chip
 
-`session-relations-bar.tsx` renders a separate pill directly above the info bar
-whenever the Session has a precise opener (`openedBySessionId`) or has created
+`session-relations-chip.tsx` renders a `MessagesSquare` chip (with the created
+count) in the info bar's cluster zone, via the bar's `relations` slot, whenever
+the Session has a precise opener (`openedBySessionId`) or has created
 Sessions/Tabs (`createdSessionsAtomFamily`: same `openedBySessionId`, side
-chats and archived rows excluded). It is not an info-bar item: the bar's
-cluster/stage model keeps exactly one staged item, and a navigation list does
-not fit it. Collapsed it is one info-bar-height row; expanded, the list grows
-upward so the toggle stays put. Rows are agent icon, live title, and a kind
-label (Parent / Session / Tab); the parent row is separated by a divider. Tab
-rows navigate with root + exact tab ids. The connected wrapper subscribes to
-the created list in the leaf so child status churn never re-renders the page.
-Decision: [relations bar note](../notes/implemented/feature/2026-09-24-session-relations-bar.md).
+chats and archived rows excluded). Like Preview it is a plain action, never
+staged: one click toggles `PopoverActionChip`'s popover above the bar. The list
+is agent icon, live title, and kind (Parent / Session / Tab), with a divider
+after the parent row. Tab rows navigate with root + exact tab ids. The page
+reads only a boolean (`useHasCreatedSessions`); the chip subscribes to the list
+in the leaf, so child status churn never re-renders the page.
+Decision: [relations note](../notes/implemented/feature/2026-09-24-session-relations-chip.md).
