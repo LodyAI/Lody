@@ -173,7 +173,7 @@ export function SettingsCategoryList({ workspaceName }: SettingsCategoryListProp
   const user = useAtomValue(userAtom);
   const visibleTabs = useVisibleSettingsTabs({
     includeMultiMemberOnly: (activeOrganization?.members.length ?? 0) > 1,
-  });
+  }).filter((tab) => tab.desktopOnly !== true);
   const resolvedWorkspaceName = workspaceName ?? workspaceSlug ?? null;
   const isNativeApp = isNativeAppShell();
   const accountTab = visibleTabs.find((tab) => tab.section === 'account') ?? null;
