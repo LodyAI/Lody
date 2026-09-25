@@ -23,6 +23,8 @@ import { settingsCatalog as catalog, settingsSurface as surface } from './surfac
 import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
 import { useMachineAcpBinaryProgress } from '@/hooks/use-machine-acp-binary-progress';
 import { AgentIcon } from '@/components/icons/agent-icon';
+import { useAcpSelectorOptions } from '@/hooks/use-acp-selector-options';
+import { formatCompactRelativeTime } from '@/lib/format-relative-time';
 import { CodexResetForecastChip } from '@/components/codex-reset/codex-reset-forecast-entry';
 import { canShowCodexResetForecast } from '@/lib/codex-reset-forecast';
 import {
@@ -145,6 +147,12 @@ export type ProviderRowProps = {
    * for all its providers and the rule between them.
    */
   variant?: 'card' | 'list';
+  /**
+   * How much the provider is used on its machine. A compact row states it on
+   * its second line, with the default model, so a short list still says what
+   * each provider is for and whether anyone reaches for it.
+   */
+  usage?: { conversations: number; lastUsedAt: number | null };
   /** Layout only. */
   className?: string;
 };
@@ -159,11 +167,26 @@ export function ProviderRow({
   onDelete,
   onRefresh,
   variant = 'card',
+  usage,
   className,
 }: ProviderRowProps) {
   const { t } = useTranslation();
   const { cliType, agentType } = config;
   const envCount = Object.keys(config.env || {}).length;
+  // The cached capabilities the composer also reads; nothing is fetched here.
+  const selector = useAcpSelectorOptions({
+    configId: config.id,
+    cliType,
+    agentType,
+    runtimeOverrides: config.runtimeOverrides,
+    machine,
+  });
+  // A model the runtime calls "default" names nothing, so the row leaves it out.
+  const defaultModel =
+    selector.defaultModelId && selector.defaultModelId.toLowerCase() !== 'default'
+      ? (selector.modelOptions.find((option) => option.value === selector.defaultModelId)?.label ??
+        null)
+      : null;
   const showRateLimits =
     canShowSubscriptionRateLimits({ cliType, agentType, config }) &&
     !!machine?.raceLimits &&
@@ -233,6 +256,22 @@ export function ProviderRow({
   };
 
   const compact = variant === 'card';
+  const facts = compact
+    ? [
+        defaultModel,
+        usage && usage.conversations > 0
+          ? t('settings.agent.provider.conversationCount', '{{count}} conversations', {
+              count: usage.conversations,
+            })
+          : null,
+        usage?.lastUsedAt != null
+          ? t('settings.agent.provider.lastUsed', 'Used {{ago}} ago', {
+              ago: formatCompactRelativeTime(usage.lastUsedAt),
+            })
+          : null,
+        envCount > 0 ? t('settings.agent.provider.envCount', { count: envCount }) : null,
+      ].filter((fact): fact is string => fact != null)
+    : [];
   return (
     <div {...withClassName(stylex.props(styles.root), className)}>
       <div {...stylex.props(stylex.defaultMarker(), styles.row, surface.pressableLine)}>
@@ -260,6 +299,11 @@ export function ProviderRow({
                 </Badge>
               ) : null}
             </div>
+            {facts.length > 0 ? (
+              <span {...stylex.props(catalog.meta)}>
+                <span {...stylex.props(catalog.truncate)}>{facts.join(' · ')}</span>
+              </span>
+            ) : null}
           </div>
         </button>
         <div {...stylex.props(styles.trailing, !compact && styles.trailingList)}>
@@ -281,7 +325,7 @@ export function ProviderRow({
               ))}
             </div>
           )}
-          {envCount > 0 && (
+          {envCount > 0 && !compact && (
             <span>{t('settings.agent.provider.envCount', { count: envCount })}</span>
           )}
           {refreshing && binaryProgressText ? (

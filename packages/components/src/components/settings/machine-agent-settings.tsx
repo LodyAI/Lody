@@ -88,6 +88,7 @@ import { ReviewPolicySection } from './review-policy-setting';
 import {
   AgentConfigDialog,
   type AgentConfigDialogMode,
+  type AgentConfigFormData,
   type AgentConfigSubmitPayload,
 } from './agent-config-dialog';
 import {
@@ -1124,10 +1125,13 @@ export function MachineAgentSettings({
 
   const { checkBinaryStatus, installBinary } = useMachineAcpBinaryActions(runtime, workspaceId);
 
-  const openCreateDialog = useCallback((machine: MachineViewMeta) => {
-    setDialogMachineId(machine.id);
-    setDialogMode({ kind: 'create' });
-  }, []);
+  const openCreateDialog = useCallback(
+    (machine: MachineViewMeta, initialForm?: Partial<AgentConfigFormData>) => {
+      setDialogMachineId(machine.id);
+      setDialogMode(initialForm ? { kind: 'create', initialForm } : { kind: 'create' });
+    },
+    []
+  );
 
   const openEditDialog = useCallback((machine: MachineViewMeta, config: AgentConfigMeta) => {
     setDialogMachineId(machine.id);
@@ -1803,6 +1807,11 @@ export function MachineAgentSettings({
         <MachineProvidersSection
           key={resolvedSelectedMachine.id}
           bare={inSettingsPane}
+          onAddProvider={
+            inSettingsPane
+              ? (initialForm) => openCreateDialog(resolvedSelectedMachine, initialForm)
+              : undefined
+          }
           flush
           machine={resolvedSelectedMachine}
           configs={configsForMachine}

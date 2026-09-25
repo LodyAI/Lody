@@ -1,4 +1,5 @@
-import { useRef, useState, type ReactNode } from 'react';
+import { useMemo, useRef, useState, type ReactNode } from 'react';
+import { useAtomValue } from 'jotai';
 import * as stylex from '@stylexjs/stylex';
 import { useTranslation } from 'react-i18next';
 import {
@@ -9,7 +10,11 @@ import {
   type MachineViewMeta,
   type ProviderSetupTask,
   type SessionMeta,
+  resolveAgentBrandId,
 } from '@lody/shared';
+import { AgentIcon } from '@/components/icons/agent-icon';
+import { sessionMetaCacheAtom } from '@/atoms/doc-meta';
+import { listAddableProviders, type AgentConfigFormData } from './agent-config-dialog';
 import {
   Activity,
   Bot,
@@ -56,6 +61,56 @@ import { settingsType as type } from './type.stylex';
 const MONO = 'var(--font-mono, ui-monospace, monospace)';
 
 const styles = stylex.create({
+  /** The providers still to add: two columns of quiet, pressable entries. */
+  available: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+    columnGap: space[2],
+    rowGap: '2px',
+  },
+  availableItem: {
+    boxSizing: 'border-box',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '10px',
+    minWidth: 0,
+    margin: 0,
+    paddingInline: space[4],
+    paddingBlock: space[2],
+    borderWidth: 0,
+    color: 'inherit',
+    fontFamily: 'inherit',
+    fontSize: 'inherit',
+    textAlign: 'start',
+    cursor: 'pointer',
+  },
+  availableIcon: {
+    display: 'flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '24px',
+    height: '24px',
+  },
+  availableGlyph: { width: '18px', height: '18px' },
+  availableText: { display: 'flex', flexDirection: 'column', flexGrow: 1, minWidth: 0 },
+  availableName: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: type.caption,
+    lineHeight: type.leading,
+    color: colors.label,
+  },
+  availableDescription: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: type.caption,
+    lineHeight: type.leading,
+    color: colors.tertiaryLabel,
+  },
+  availablePlus: { flexShrink: 0, width: '14px', height: '14px', color: colors.tertiaryLabel },
   icon12: { width: '12px', height: '12px', flexShrink: 0 },
   icon14: { width: '14px', height: '14px', flexShrink: 0 },
   /** A glyph in a box that sizes it — a menu row's leading box, a badge's. */
@@ -203,6 +258,8 @@ export type MachineProvidersSectionProps = {
    * names them and carries the add action in its own header.
    */
   bare?: boolean;
+  /** Opens the add dialog straight on one provider, from the "available" list. */
+  onAddProvider?: (initialForm: Partial<AgentConfigFormData>) => void;
 };
 
 /** "Agent Provider" list + add button — shared by the mobile detail pane and the
@@ -220,8 +277,10 @@ export function MachineProvidersSection({
   flush = false,
   variant = 'default',
   bare = false,
+  onAddProvider,
 }: MachineProvidersSectionProps) {
   const { t } = useTranslation();
+  const usageByConfig = useProviderUsage(machine.id, bare);
   const addButton = (
     <Tooltip.Root>
       <Tooltip.Trigger
@@ -260,26 +319,32 @@ export function MachineProvidersSection({
         onDelete={onDeleteConfig}
         onRefresh={onRefreshConfig}
         variant={bare ? 'card' : 'list'}
+        usage={bare ? (usageByConfig.get(config.id) ?? EMPTY_USAGE) : undefined}
       />
     )),
   ];
 
   if (bare) {
-    return configs.length === 0 && setups.length === 0 ? (
-      <div {...stylex.props(catalog.empty)}>
-        <Bot {...stylex.props(catalog.emptyIcon)} aria-hidden="true" />
-        <p {...stylex.props(catalog.emptyText)}>
-          {t('settings.agent.provider.empty', 'No providers on this machine yet.')}
-        </p>
-      </div>
-    ) : (
-      <div {...stylex.props(settingsRecordsCard)}>
-        {providerLines.map((line, index) => (
-          <div key={line.key} {...stylex.props(surface.line, index > 0 && surface.lineRuled)}>
-            {line}
+    return (
+      <>
+        {configs.length === 0 && setups.length === 0 ? (
+          <div {...stylex.props(catalog.empty)}>
+            <Bot {...stylex.props(catalog.emptyIcon)} aria-hidden="true" />
+            <p {...stylex.props(catalog.emptyText)}>
+              {t('settings.agent.provider.empty', 'No providers on this machine yet.')}
+            </p>
           </div>
-        ))}
-      </div>
+        ) : (
+          <div {...stylex.props(settingsRecordsCard)}>
+            {providerLines.map((line, index) => (
+              <div key={line.key} {...stylex.props(surface.line, index > 0 && surface.lineRuled)}>
+                {line}
+              </div>
+            ))}
+          </div>
+        )}
+        {onAddProvider ? <AvailableProviders configs={configs} onAdd={onAddProvider} /> : null}
+      </>
     );
   }
 
@@ -1039,5 +1104,93 @@ function EmptyProviders({ onAdd }: { onAdd: () => void }) {
         {t('settings.agent.provider.addProvider', 'Add provider')}
       </Button>
     </div>
+  );
+}
+
+type ProviderUsage = { conversations: number; lastUsedAt: number | null };
+const EMPTY_USAGE: ProviderUsage = { conversations: 0, lastUsedAt: null };
+
+/**
+ * How much each provider on a machine is used, from the session index already
+ * in memory: its open conversations, and when any of them last moved. No
+ * request is made; an empty index reads as unused.
+ */
+function useProviderUsage(machineId: string, enabled: boolean): Map<string, ProviderUsage> {
+  const sessions = useAtomValue(sessionMetaCacheAtom);
+  return useMemo(() => {
+    const usage = new Map<string, ProviderUsage>();
+    if (!enabled) return usage;
+    for (const session of Object.values(sessions)) {
+      if (session.machineId !== machineId || !session.agentConfigId) continue;
+      const entry = usage.get(session.agentConfigId) ?? { conversations: 0, lastUsedAt: null };
+      if (!session.isArchived) entry.conversations += 1;
+      const at = session.lastMessageAt ?? Date.parse(session.createdAt);
+      if (Number.isFinite(at) && (entry.lastUsedAt == null || at > entry.lastUsedAt)) {
+        entry.lastUsedAt = at;
+      }
+      usage.set(session.agentConfigId, entry);
+    }
+    return usage;
+  }, [enabled, machineId, sessions]);
+}
+
+/**
+ * The providers this machine does not have yet, one click from the dialog
+ * opened on them. It is what a short list leaves room for, and it shrinks as
+ * the list grows.
+ */
+function AvailableProviders({
+  configs,
+  onAdd,
+}: {
+  configs: AgentConfigMeta[];
+  onAdd: (initialForm: Partial<AgentConfigFormData>) => void;
+}) {
+  const { t } = useTranslation();
+  const available = useMemo(
+    () =>
+      listAddableProviders(t).filter(
+        (provider) =>
+          !configs.some((config) => {
+            const brandId = resolveAgentBrandId(config);
+            return provider.brandId
+              ? brandId === provider.brandId
+              : !brandId &&
+                  config.cliType === provider.cliType &&
+                  config.agentType === provider.agentType;
+          })
+      ),
+    [configs, t]
+  );
+  if (available.length === 0) return null;
+  return (
+    <CompactSection title={t('settings.agent.provider.available', 'Available to add')}>
+      <div {...stylex.props(styles.available)}>
+        {available.map((provider) => (
+          <button
+            key={provider.key}
+            type="button"
+            onClick={() => onAdd(provider.initialForm)}
+            {...stylex.props(styles.availableItem, surface.pressableLine)}
+          >
+            <span {...stylex.props(styles.availableIcon)}>
+              <AgentIcon
+                cliType={provider.cliType}
+                agentType={provider.agentType}
+                brandId={provider.brandId}
+                className={stylex.props(styles.availableGlyph).className}
+              />
+            </span>
+            <span {...stylex.props(styles.availableText)}>
+              <span {...stylex.props(styles.availableName)}>{provider.label}</span>
+              {provider.description ? (
+                <span {...stylex.props(styles.availableDescription)}>{provider.description}</span>
+              ) : null}
+            </span>
+            <Plus aria-hidden="true" {...stylex.props(styles.availablePlus)} />
+          </button>
+        ))}
+      </div>
+    </CompactSection>
   );
 }

@@ -958,6 +958,7 @@ const BUILTIN_OPTIONS: AgentTypeOption[] = [
     kind: 'builtin',
     value: 'builtin:grok',
     label: 'Grok',
+    descriptionKey: 'settings.agent.dialog.option.grok.description',
     descriptionDefault: 'xAI Grok coding agent runtime',
     cliType: 'builtin',
     agentType: 'grok',
@@ -1216,6 +1217,49 @@ export function buildPresetCreateForm(presetId: string): Partial<AgentConfigForm
     presetCredentialModeId: credentialMode?.id,
     presetBaseUrlOptionId: getDefaultBaseUrlOptionId(credentialMode),
   };
+}
+
+/** A provider a person can add from outside the dialog, opened pre-selected. */
+export type AddableProvider = {
+  key: string;
+  label: string;
+  description: string | undefined;
+  cliType: AgentConfigCliType;
+  agentType: string;
+  /** Set for a preset, whose config carries the brand rather than its own runtime. */
+  brandId: AgentBrandId | undefined;
+  initialForm: Partial<AgentConfigFormData>;
+};
+
+/**
+ * The builtin runtimes and the presets, in the dialog's order, each with the
+ * form that opens the dialog straight on it. Experimental runtimes, registry
+ * agents and custom commands stay behind the dialog's own rail.
+ */
+export function listAddableProviders(t: Translate): AddableProvider[] {
+  const builtins = BUILTIN_OPTIONS.filter((option) => !option.experimental).map((option) => ({
+    key: option.value,
+    label: getOptionLabel(t, option),
+    description: getOptionDescription(t, option) ?? option.descriptionDefault,
+    cliType: option.cliType,
+    agentType: option.agentType,
+    brandId: undefined,
+    initialForm: {
+      cliType: option.cliType,
+      agentType: option.agentType,
+      name: getOptionLabel(t, option),
+    },
+  }));
+  const presets = PRESETS.map((preset) => ({
+    key: `preset:${preset.id}`,
+    label: t(preset.labelKey, preset.label),
+    description: t(preset.descriptionKey, preset.descriptionDefault),
+    cliType: preset.cliType,
+    agentType: preset.agentType,
+    brandId: preset.brandId,
+    initialForm: buildPresetCreateForm(preset.id),
+  }));
+  return [...builtins, ...presets];
 }
 
 function resolveCredentialModeBaseUrl(

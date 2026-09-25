@@ -4233,5 +4233,10 @@
   "settings.about.ossCommitShort": "开源",
   "settings.about.downloadStable": "正式版",
   "settings.about.downloadNightlyShort": "Nightly 版",
-  "settings.agent.machineTabs.machine": "机器"
+  "settings.agent.machineTabs.machine": "机器",
+  "settings.agent.provider.available": "可添加",
+  "settings.agent.provider.conversationCount_one": "{{count}} 个对话",
+  "settings.agent.provider.conversationCount_other": "{{count}} 个对话",
+  "settings.agent.provider.lastUsed": "{{ago}} 前用过",
+  "settings.agent.dialog.option.grok.description": "xAI Grok 编程 Agent 运行时"
 }
