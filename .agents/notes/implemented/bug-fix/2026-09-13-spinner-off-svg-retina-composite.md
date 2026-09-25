@@ -125,6 +125,27 @@ instead. The constraint that a forwarding wrapper supplies its own default is
 recorded in `src/ui/AGENTS.md` and on the prop itself. The other nine forwards
 pass comparisons or required booleans and were verified unaffected.
 
+## Follow-up: caller classes grew the turning box on `@lody/ui`'s Spinner
+
+The `@lody/ui` migration carried the same constraint into a second
+implementation and then lost it at the API boundary: that `Spinner` forwarded
+the caller's `className` onto the `<svg>` inside the animated wrapper. Any
+margin a caller added — `mb-4` on the accept-invitation page, `mr-2` beside
+two dozen button labels — joined the rotating box, so `transform-origin: 50%
+50%` landed off the glyph's centre and the ring orbited the card instead of
+turning in place. `ml-auto` and `absolute` cases were wrong in the other
+direction, resolving against the inside of the wrapper rather than laying the
+mark out.
+
+`className` and the size styles now land on the wrapper itself and the glyph
+states 100%, the convention the rest of the package's glyphs already follow.
+The one change fixes every margin call site at once, and a caller class can no
+longer reach inside the turning box. The rule is recorded in
+`packages/ui/AGENTS.md` and on the `feedback` surface;
+`packages/ui/test/feedback.test.tsx` asserts a caller's classes stay on the
+span while the glyph keeps only its own, so a regression that put them back on
+the svg fails.
+
 ## Verification
 
 - Controlled trace in this workspace's Electron 39.5.1 / Chromium 142.0.7444.265,
