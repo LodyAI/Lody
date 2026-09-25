@@ -6,6 +6,7 @@ import { colors } from '@lody/ui/tokens/colors.stylex';
 import { corner, duration, radius, space } from '@lody/ui/tokens/scales.stylex';
 import { Dialog } from '@/ui/dialog';
 import { formatKeyParts } from '@/lib/commands';
+import { isImeComposingKeyboardEvent } from '@/lib/ime';
 
 export type PaletteIcon = ComponentType<{ className?: string; strokeWidth?: number }>;
 
@@ -229,6 +230,15 @@ export function CommandPaletteView({
           loop
           value={active}
           onValueChange={setActive}
+          onKeyDown={(event) => {
+            // The palette owns its Escape key. Keep dismissal on the focused
+            // command surface and leave an active IME composition undisturbed.
+            if (event.key === 'Escape' && !isImeComposingKeyboardEvent(event)) {
+              event.preventDefault();
+              event.stopPropagation();
+              onOpenChange(false);
+            }
+          }}
           {...stylex.props(styles.root)}
         >
           <div {...stylex.props(styles.field)}>

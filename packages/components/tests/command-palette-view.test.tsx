@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { act, createElement } from 'react';
+import { act, createElement, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
@@ -49,6 +49,18 @@ describe('CommandPaletteView', () => {
       );
     });
   };
+
+  function StatefulPalette({ results }: { results: PaletteResult[] }) {
+    const [open, setOpen] = useState(true);
+    return createElement(CommandPaletteView, {
+      open,
+      onOpenChange: setOpen,
+      query: '',
+      onQueryChange: () => {},
+      results,
+      labels: LABELS,
+    });
+  }
 
   const selectedTitle = () =>
     document.body.querySelector('[cmdk-item][aria-selected="true"]')?.textContent;
@@ -104,5 +116,24 @@ describe('CommandPaletteView', () => {
   it('says so when nothing matches', async () => {
     await render([]);
     expect(document.body.textContent).toContain('Nothing here');
+  });
+
+  it('closes on Escape but lets an active IME composition handle Escape first', async () => {
+    await act(async () => {
+      root.render(createElement(StatefulPalette, { results: [result('back')] }));
+    });
+
+    const input = document.body.querySelector<HTMLInputElement>('[cmdk-input]')!;
+    input.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }));
+    await act(async () => {
+      input.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, isComposing: true })
+      );
+    });
+    expect(document.body.querySelector('[cmdk-input]')).not.toBeNull();
+    input.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true }));
+
+    await press('Escape');
+    expect(document.body.querySelector('[cmdk-input]')).toBeNull();
   });
 });
