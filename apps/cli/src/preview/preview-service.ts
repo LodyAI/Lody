@@ -1,10 +1,11 @@
-import fs from 'fs/promises';
+import type { CloudRemotePreviewPort } from '@lody/platform';
+import { PreviewControlAuthority } from './preview-control-authority';
+import type { PreviewControlOperation, PreviewControlProof } from '@lody/shared';
 import net from 'net';
-import path from 'path';
 import { randomUUID } from 'crypto';
+import { z } from 'zod';
 import {
   DEFAULT_PREVIEW_IDLE_TIMEOUT_MS,
-  DEFAULT_PREVIEW_LEASE_MS,
   DEFAULT_PREVIEW_MAX_ACTIVE_TUNNELS_PER_MACHINE,
   PREVIEW_CREATE_RATE_LIMIT_MAX,
   PREVIEW_CREATE_RATE_LIMIT_WINDOW_MS,
@@ -30,17 +31,24 @@ import {
   type SessionPreviewCreateResponse,
   type SessionPreviewRevokeRequest,
   type SessionPreviewRevokeResponse,
+  type SessionPreviewStatusRequest,
+  type SessionPreviewStatusResponse,
   type WorkspaceId,
 } from '@lody/shared';
 import type { LoroDocumentManager } from '@/lib/loro/doc';
 import type { Logger } from '@/utils/logger';
 import { formatErrorMessage } from '@/utils/format-error';
-import { withFileLock } from '@/utils/file-lock';
 import { LocalPreviewProxyManager } from './local-preview-proxy';
-import { startPreviewTunnel, type PreviewTunnelHandle } from './preview-tunnel-client';
-import { getLodyDataDir } from '@lody/shared/node/installation-profile';
+import { QuickTunnelSession, type PreviewCloseReason } from './quick-tunnel-session';
+import { createPreviewTargetTransport, fetchPreviewTarget } from './preview-target-transport';
 
-type PreviewSessionMeta = Omit<SessionMeta, 'previewCandidate' | 'previewConnection'> & {
+const PreviewSessionOwner = z.object({
+  userId: z.string(),
+  machineId: z.string(),
+  isArchived: z.boolean().optional(),
+  localProjectId: z.string().optional(),
+});
+type PreviewSessionMeta = z.infer<typeof PreviewSessionOwner> & {
   previewCandidate?: PreviewCandidate;
   previewConnection?: PreviewConnection;
 };
@@ -52,12 +60,32 @@ type SessionPreviewStatePatch = {
 
 type PreviewServiceDeps = {
   logger: Logger;
-  workspaceDocument: LoroDocumentManager;
+  workspaceDocument: {
+    getOrCreateSessionDoc(
+      sessionId: SessionId
+    ): Promise<
+      Pick<
+        Awaited<ReturnType<LoroDocumentManager['getOrCreateSessionDoc']>>,
+        'getPreviewState' | 'setPreviewState'
+      >
+    >;
+    repo: {
+      getDocMeta(
+        roomId: ReturnType<typeof getSessionRoomId>
+      ): Promise<
+        { meta?: unknown; exists?: boolean; e?: boolean; deleted?: boolean } | undefined | null
+      >;
+      upsertDocMeta(
+        roomId: ReturnType<typeof getSessionRoomId>,
+        patch: Partial<SessionMeta>
+      ): Promise<unknown>;
+    };
+  };
   machineId: MachineId;
   workspaceId: WorkspaceId;
   userId: string;
-  authToken: () => string;
-  remoteGatewayUrl: string | null;
+  runtimeBaseUrl: string | null;
+  remotePreview: CloudRemotePreviewPort | null;
   now?: () => number;
 };
 
@@ -69,25 +97,14 @@ type ValidationFailure = {
 
 type ValidationSuccess = {
   normalizedTarget: PreviewTarget;
+  connectionAddress: string;
 };
 
-type PreviewRegistryEntry = {
-  key: string;
-  pid: number;
-  workspaceId: WorkspaceId;
-  machineId: MachineId;
-  sessionId: SessionId;
-  grantId: string;
-  updatedAt: number;
-};
+// The Host lease guarantees one Worker; slots span all of its workspaces.
+const machinePreviewSlots = new Map<MachineId, Set<string>>();
 
 const PREVIEW_TCP_TIMEOUT_MS = 2_000;
 const PREVIEW_HTTP_TIMEOUT_MS = 3_000;
-const PREVIEW_REGISTRY_LOCK_NAME = 'preview-tunnels';
-const PREVIEW_REGISTRY_FILE = path.join(getLodyDataDir(), 'preview-tunnels.json');
-// Reject registry entries whose `updatedAt` lies more than this far in the future:
-// such timestamps indicate a clock-skewed or corrupt writer, not a live tunnel.
-const PREVIEW_REGISTRY_FUTURE_SKEW_MS = 60_000;
 const PREVIEW_APPROVAL_MAX_AGE_MS = 5 * 60 * 1000;
 const PREVIEW_APPROVAL_FUTURE_SKEW_MS = 60 * 1000;
 
@@ -151,14 +168,9 @@ const normalizeTarget = (target: PreviewTarget): PreviewTarget | ValidationFailu
       retryable: false,
     };
   }
-  // `classifyBrowserHostname` reads the hostname TEXT, so it calls any `*.localhost`
-  // name loopback. RFC 6761 says a resolver should answer those from 127.0.0.0/8, but
-  // nothing makes it — a search domain or a rebinding record can point `foo.localhost`
-  // at a LAN host, and `probeHosts` only substitutes literals for the exact string
-  // `localhost`, so the probe and the forwarded request resolve separately. Requiring a
-  // literal or that exact name is what makes the invariant above true of the ADDRESS
-  // rather than of the spelling. Agents report `127.0.0.1` or `localhost`
-  // (`lody_report_preview_candidate`), so nothing legitimate is turned away.
+  // The UI classifier accepts *.localhost, but this network boundary accepts only
+  // exact localhost or a literal. HTTP probing selects a loopback address and the
+  // proxy pins HTTP/WS to it; neither can resolve an arbitrary DNS name.
   if (host !== 'localhost' && net.isIP(host) === 0) {
     return {
       code: 'host_not_loopback',
@@ -196,8 +208,8 @@ const isValidationFailure = (
 
 const toUrlHost = (host: string): string => (host.includes(':') ? `[${host}]` : host);
 
-const buildLocalPreviewUrl = (target: PreviewTarget, host: string = target.host): string =>
-  `${target.protocol}://${toUrlHost(host)}:${target.port}${target.path ?? '/'}`;
+const buildLocalPreviewUrl = (target: PreviewTarget): string =>
+  `${target.protocol}://${toUrlHost(target.host)}:${target.port}${target.path ?? '/'}`;
 
 // `localhost` resolves to a single family, and which one depends on the host's
 // resolver: macOS answers `::1` first, while a Linux box without a routable IPv6
@@ -245,33 +257,32 @@ const probeHttpHost = async (
 ): Promise<{ ok: true } | { ok: false; error: unknown }> => {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), PREVIEW_HTTP_TIMEOUT_MS);
+  const { dispatcher } = createPreviewTargetTransport(target, host);
   try {
-    const response = await fetch(buildLocalPreviewUrl(target, host), {
+    const response = await fetchPreviewTarget(buildLocalPreviewUrl(target), {
       method: 'GET',
       redirect: 'manual',
       signal: controller.signal,
+      dispatcher,
     });
-    await response.body?.cancel().catch(() => {});
+    await response.body?.cancel();
     return { ok: true };
   } catch (error) {
-    // TCP probing already proved something is listening; a response slower than
-    // the probe timeout is a cold dev server compiling its first request, not an
-    // unreachable one. Only connection-level failures should fail the probe.
-    if (controller.signal.aborted) {
-      return { ok: true };
-    }
     return { ok: false, error };
   } finally {
     clearTimeout(timeout);
+    await dispatcher.destroy();
   }
 };
 
-const probeHttp = async (target: PreviewTarget): Promise<ValidationFailure | null> => {
+const probeHttp = async (
+  target: PreviewTarget
+): Promise<ValidationFailure | { connectionAddress: string }> => {
   let lastError: unknown;
   for (const host of probeHosts(target.host)) {
     const result = await probeHttpHost(target, host);
     if (result.ok) {
-      return null;
+      return { connectionAddress: host };
     }
     lastError = result.error;
   }
@@ -282,81 +293,8 @@ const probeHttp = async (target: PreviewTarget): Promise<ValidationFailure | nul
   };
 };
 
-const isProcessAlive = (pid: number): boolean => {
-  if (!Number.isInteger(pid) || pid <= 0) {
-    return false;
-  }
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    return (error as NodeJS.ErrnoException).code === 'EPERM';
-  }
-};
-
-const isPreviewRegistryEntry = (value: unknown): value is PreviewRegistryEntry =>
-  typeof value === 'object' &&
-  value !== null &&
-  typeof (value as PreviewRegistryEntry).key === 'string' &&
-  Number.isInteger((value as PreviewRegistryEntry).pid) &&
-  typeof (value as PreviewRegistryEntry).workspaceId === 'string' &&
-  typeof (value as PreviewRegistryEntry).machineId === 'string' &&
-  typeof (value as PreviewRegistryEntry).sessionId === 'string' &&
-  typeof (value as PreviewRegistryEntry).grantId === 'string' &&
-  Number.isInteger((value as PreviewRegistryEntry).updatedAt);
-
-const readPreviewRegistryEntries = async (): Promise<PreviewRegistryEntry[]> => {
-  try {
-    const raw = await fs.readFile(PREVIEW_REGISTRY_FILE, 'utf8');
-    const parsed: unknown = JSON.parse(raw);
-    if (!Array.isArray(parsed)) {
-      return [];
-    }
-    return parsed.filter(isPreviewRegistryEntry);
-  } catch {
-    return [];
-  }
-};
-
-const writePreviewRegistryEntries = async (entries: PreviewRegistryEntry[]): Promise<void> => {
-  await fs.mkdir(path.dirname(PREVIEW_REGISTRY_FILE), { recursive: true });
-  const tmpPath = `${PREVIEW_REGISTRY_FILE}.${process.pid}.tmp`;
-  await fs.writeFile(tmpPath, `${JSON.stringify(entries)}\n`, 'utf8');
-  await fs.rename(tmpPath, PREVIEW_REGISTRY_FILE);
-};
-
-const filterLivePreviewRegistryEntries = (
-  entries: PreviewRegistryEntry[],
-  now: number
-): PreviewRegistryEntry[] =>
-  entries.filter(
-    (entry) => isProcessAlive(entry.pid) && entry.updatedAt <= now + PREVIEW_REGISTRY_FUTURE_SKEW_MS
-  );
-
-const classifyPreviewTunnelCloseError = (error: Error): PreviewErrorCode => {
-  const message = error.message.toLowerCase();
-  if (message.includes('idle timeout')) {
-    return 'preview_idle_timeout';
-  }
-  if (message.includes('lease expired') || message.includes('tunnel has expired')) {
-    return 'preview_expired';
-  }
-  if (
-    message.includes('resource limit') ||
-    message.includes('too many') ||
-    message.includes('exceeds') ||
-    message.includes('byte limit')
-  ) {
-    return 'resource_limit_exceeded';
-  }
-  return 'tunnel_creation_failed';
-};
-
 const shouldMarkPreviewClosedForCleanup = (connection: PreviewConnection | undefined): boolean =>
-  !!connection &&
-  connection.status !== 'idle' &&
-  connection.status !== 'revoked' &&
-  connection.status !== 'expired';
+  !!connection && connection.status !== 'closed';
 
 const hasPreviewPatchKey = <Key extends keyof SessionPreviewStatePatch>(
   patch: SessionPreviewStatePatch,
@@ -384,12 +322,19 @@ const summarizePreviewConnectionForMeta = (
     : undefined;
 
 export class PreviewService {
-  private readonly activeTunnels = new Map<SessionId, PreviewTunnelHandle>();
-  private readonly activeRegistryKeys = new Map<SessionId, string>();
+  private readonly activeTunnels = new Map<SessionId, QuickTunnelSession>();
+  private readonly operations = new Map<SessionId, Promise<unknown>>();
+  private readonly cancelled = new Map<SessionId, AbortController>();
+  private readonly slotIds = new Map<SessionId, string>();
   private readonly previewCreateAttempts: number[] = [];
   private readonly localProxyManager: LocalPreviewProxyManager;
 
+  readonly controlAuthority: PreviewControlAuthority;
+
   constructor(private readonly deps: PreviewServiceDeps) {
+    this.controlAuthority = new PreviewControlAuthority(deps.remotePreview?.verifyControl, () =>
+      this.now()
+    );
     this.localProxyManager = new LocalPreviewProxyManager({
       logger: deps.logger,
       now: deps.now,
@@ -453,10 +398,6 @@ export class PreviewService {
     };
     await this.patchSessionPreview(request.sessionId, {
       previewCandidate: candidate,
-      previewConnection:
-        session.meta.previewConnection?.status === 'active'
-          ? session.meta.previewConnection
-          : { status: 'idle', updatedAt: now },
     });
     return {
       type: 'session/preview-candidate-report_response',
@@ -467,6 +408,27 @@ export class PreviewService {
   }
 
   async createPreview(request: SessionPreviewCreateRequest): Promise<SessionPreviewCreateResponse> {
+    if (this.operations.has(request.sessionId))
+      return {
+        type: 'session/preview-create_response',
+        sessionId: request.sessionId,
+        success: false,
+        error: 'preview_already_active',
+        message: 'A preview lifecycle operation is already in progress.',
+      };
+    // Serialize all lifecycle writes. A revoke aborts the currently running create
+    // before joining this queue, so a slow download cannot delay invalidation.
+    const cancellation = new AbortController();
+    this.cancelled.set(request.sessionId, cancellation);
+    return this.serialize(request.sessionId, () =>
+      this.createPreviewExclusive(request, cancellation.signal)
+    ).finally(() => this.cancelled.delete(request.sessionId));
+  }
+
+  private async createPreviewExclusive(
+    request: SessionPreviewCreateRequest,
+    signal: AbortSignal
+  ): Promise<SessionPreviewCreateResponse> {
     const scopeFailure = this.validateRequestScope(request.machineId, request.workspaceId);
     if (scopeFailure) {
       return {
@@ -528,7 +490,9 @@ export class PreviewService {
       return this.failCreate(request.sessionId, failure, now, requestedTarget);
     }
 
+    signal.throwIfAborted();
     const validation = await this.validateTargetForCreate(requestedTarget);
+    signal.throwIfAborted();
     if ('failure' in validation) {
       return this.failCreate(request.sessionId, validation.failure, now, requestedTarget);
     }
@@ -536,9 +500,9 @@ export class PreviewService {
     const existing = session.meta.previewConnection;
     if (
       existing?.status === 'active' &&
-      !this.isConnectionLeaseExpired(existing) &&
+      !request.restart &&
       sameTargetOrigin(existing.target, validation.normalizedTarget) &&
-      this.activeTunnels.has(request.sessionId)
+      this.activeTunnels.get(request.sessionId)?.active
     ) {
       return {
         type: 'session/preview-create_response',
@@ -547,41 +511,26 @@ export class PreviewService {
         connection: existing,
       };
     }
-    if (
-      existing?.status === 'active' &&
-      !this.isConnectionLeaseExpired(existing) &&
-      !request.replaceExisting
-    ) {
-      const failure: ValidationFailure = {
-        code: 'preview_already_active',
-        message: 'This session already has an active preview. Revoke or replace it first.',
-        retryable: false,
-      };
-      return this.connectionResponse(request.sessionId, false, existing, failure);
-    }
 
     const rateLimitFailure = this.enforceCreateRateLimit(now);
     if (rateLimitFailure) {
       return this.failCreate(request.sessionId, rateLimitFailure, now);
     }
 
-    const grantId = randomUUID();
+    const endpointId = randomUUID();
     const creating: PreviewConnection = {
       status: 'creating',
-      grantId,
+      endpointId,
       target: validation.normalizedTarget,
-      viewerScope: { type: 'workspace' },
       approvedByUserId: request.requestedByUserId,
       createdAt: now,
       updatedAt: now,
-      leaseExpiresAt: now + DEFAULT_PREVIEW_LEASE_MS,
       idleTimeoutMs: DEFAULT_PREVIEW_IDLE_TIMEOUT_MS,
-      lastActiveAt: now,
     };
     await this.patchSessionPreview(request.sessionId, { previewConnection: creating });
 
-    const gatewayUrl = this.deps.remoteGatewayUrl;
-    if (!gatewayUrl) {
+    const runtimeBaseUrl = this.deps.runtimeBaseUrl;
+    if (!this.deps.remotePreview || !runtimeBaseUrl) {
       const failure: ValidationFailure = {
         code: 'tunnel_not_configured',
         message: 'Remote preview is unavailable on this platform.',
@@ -590,61 +539,61 @@ export class PreviewService {
       return this.failCreatingConnection(request.sessionId, creating, failure);
     }
 
-    if (request.replaceExisting) {
-      await this.closeActiveTunnel(request.sessionId, 'Preview tunnel replaced');
-    }
+    await this.closeActiveTunnel(request.sessionId, 'replaced');
+    signal.throwIfAborted();
 
-    const registryReservation = await this.reserveMachinePreviewSlot(
-      request.sessionId,
-      grantId,
-      now
-    );
-    if ('failure' in registryReservation) {
-      return this.failCreatingConnection(request.sessionId, creating, registryReservation.failure);
+    const slotFailure = this.reserveMachinePreviewSlot(request.sessionId, endpointId);
+    if (slotFailure) {
+      return this.failCreatingConnection(request.sessionId, creating, slotFailure);
     }
 
     try {
-      const handle = await startPreviewTunnel({
-        gatewayUrl,
-        authToken: this.deps.authToken(),
+      signal.throwIfAborted();
+      const handle = new QuickTunnelSession({
+        sessionId: request.sessionId,
         target: validation.normalizedTarget,
-        createRequest: {
-          workspaceId: this.deps.workspaceId,
-          machineId: this.deps.machineId,
-          sessionId: request.sessionId,
-          grantId,
-          approvedByUserId: request.requestedByUserId,
-          leaseExpiresAt: creating.leaseExpiresAt ?? now + DEFAULT_PREVIEW_LEASE_MS,
-          idleTimeoutMs: creating.idleTimeoutMs ?? DEFAULT_PREVIEW_IDLE_TIMEOUT_MS,
-        },
-        onClosed: async (error) => {
-          this.activeTunnels.delete(request.sessionId);
-          await this.releaseMachinePreviewSlot(request.sessionId);
-          if (!error) {
-            return;
-          }
-          await this.markTunnelClosedWithError(request.sessionId, creating, error);
-        },
+        connectionAddress: validation.connectionAddress,
+        runtimeBaseUrl,
+        logger: this.deps.logger,
+        now: () => this.now(),
       });
       this.activeTunnels.set(request.sessionId, handle);
+      const endpoint = await handle.ready;
+      signal.throwIfAborted();
+      if (!handle.active) throw new Error('Quick Tunnel closed before activation');
 
       const active: PreviewConnection = {
         ...creating,
         status: 'active',
-        tunnelId: handle.tunnelId,
-        publicUrl: handle.publicUrl,
-        resourceLimits: handle.resourceLimits,
-        resourceUsage: {
-          httpRequestCount: 0,
-          webSocketOpenCount: 0,
-          requestBytesIn: 0,
-          responseBytesOut: 0,
-          limitExceededCount: 0,
-        },
+        publicUrl: endpoint.viewerUrl,
         updatedAt: this.now(),
-        lastActiveAt: this.now(),
       };
       await this.patchSessionPreview(request.sessionId, { previewConnection: active });
+      signal.throwIfAborted();
+      // Completion updates share the same serialization boundary as create/revoke.
+      void handle.closed
+        .then((result) =>
+          this.serialize(request.sessionId, async () => {
+            if (this.activeTunnels.get(request.sessionId) !== handle) return;
+            this.activeTunnels.delete(request.sessionId);
+            this.releaseMachinePreviewSlot(request.sessionId);
+            if (result.error)
+              await this.markTunnelClosedWithError(request.sessionId, active, result.error);
+            else
+              await this.patchSessionPreview(request.sessionId, {
+                previewConnection: {
+                  ...active,
+                  status: 'closed',
+                  closedReason: result.reason,
+                  publicUrl: undefined,
+                  updatedAt: this.now(),
+                },
+              });
+          })
+        )
+        .catch((error: unknown) =>
+          this.deps.logger.error('Failed to publish Quick Tunnel closure', error)
+        );
       return {
         type: 'session/preview-create_response',
         sessionId: request.sessionId,
@@ -652,14 +601,24 @@ export class PreviewService {
         connection: active,
       };
     } catch (error) {
-      if (this.activeTunnels.has(request.sessionId)) {
-        await this.closeActiveTunnel(request.sessionId, 'Preview tunnel creation failed');
-      } else {
-        await this.releaseMachinePreviewSlot(request.sessionId);
+      let failureError = error;
+      try {
+        if (this.activeTunnels.has(request.sessionId)) {
+          await this.closeActiveTunnel(request.sessionId, 'revoked');
+        } else {
+          this.releaseMachinePreviewSlot(request.sessionId);
+        }
+      } catch (cleanupError) {
+        if (cleanupError !== error)
+          failureError = new AggregateError(
+            [error, cleanupError],
+            'Preview creation and cleanup failed',
+            { cause: error }
+          );
       }
       const failure: ValidationFailure = {
         code: 'tunnel_creation_failed',
-        message: `Preview tunnel creation failed: ${formatErrorMessage(error)}`,
+        message: `Preview tunnel creation failed: ${formatErrorMessage(failureError)}`,
         retryable: true,
       };
       const failed: PreviewConnection = {
@@ -732,14 +691,14 @@ export class PreviewService {
       session.meta.previewConnection?.status === 'active' &&
       typeof session.meta.previewConnection.publicUrl === 'string' &&
       sameTargetOrigin(session.meta.previewConnection.target, validation.normalizedTarget) &&
-      !this.isConnectionLeaseExpired(session.meta.previewConnection)
+      this.activeTunnels.get(request.sessionId)?.active
         ? session.meta.previewConnection.publicUrl
         : undefined;
     const endpoint = await this.localProxyManager.acquire({
       sessionId: request.sessionId,
       target: validation.normalizedTarget,
+      connectionAddress: validation.connectionAddress,
       shareUrl,
-      resourceLimits: session.meta.previewConnection?.resourceLimits,
     });
     return {
       type: 'session/preview-endpoint-acquire_response',
@@ -776,56 +735,49 @@ export class PreviewService {
   }
 
   async closeSessionPreviewForCleanup(sessionId: SessionId, reason: string): Promise<void> {
-    let current: PreviewConnection | undefined;
-    try {
-      const session = await this.getSessionMeta(sessionId);
-      if (session.ok) {
-        current = session.meta.previewConnection;
-      } else {
-        this.deps.logger.debug(
-          `[${sessionId}] Skipping preview metadata update during cleanup: ${session.failure.message}`
-        );
-      }
-    } catch (error) {
-      this.deps.logger.debug(
-        `[${sessionId}] Failed to read preview metadata during cleanup: ${formatErrorMessage(error)}`
-      );
-    }
+    this.cancelled.get(sessionId)?.abort(new Error(reason));
+    this.activeTunnels.get(sessionId)?.cancel('session_ended');
+    return this.serialize(sessionId, async () => {
+      await this.closeSessionPreviewExclusive(sessionId, reason);
+    });
+  }
 
-    await this.closeActiveTunnel(sessionId, reason);
-    await this.localProxyManager.closeSession(sessionId, reason);
-
-    if (!shouldMarkPreviewClosedForCleanup(current)) {
-      return;
-    }
-
+  private async closeSessionPreviewExclusive(sessionId: SessionId, reason: string): Promise<void> {
+    const [remote, local, session] = await Promise.allSettled([
+      this.closeActiveTunnel(sessionId, 'session_ended'),
+      this.localProxyManager.closeSession(sessionId, reason),
+      this.getSessionMeta(sessionId),
+    ]);
+    const failures = [remote, local, session].flatMap((result) =>
+      result.status === 'rejected' ? [result.reason] : []
+    );
+    if (failures.length) throw new AggregateError(failures, 'Session preview cleanup failed');
+    if (session.status !== 'fulfilled' || !session.value.ok) return;
+    const current = session.value.meta.previewConnection;
+    if (!shouldMarkPreviewClosedForCleanup(current)) return;
     const now = this.now();
-    try {
-      await this.patchSessionPreview(sessionId, {
-        previewConnection: {
-          ...current,
-          status: 'revoked',
-          updatedAt: now,
-          revokedAt: now,
-          revokeReason: reason,
-          error: undefined,
-        },
-      });
-    } catch (error) {
-      this.deps.logger.debug(
-        `[${sessionId}] Failed to mark preview closed during cleanup: ${formatErrorMessage(error)}`
-      );
-    }
+    await this.patchSessionPreview(sessionId, {
+      previewConnection: {
+        ...current,
+        status: 'closed',
+        publicUrl: undefined,
+        updatedAt: now,
+        closedReason: 'session_ended',
+        error: undefined,
+      },
+    });
   }
 
   async closeAllActiveTunnelsForCleanup(reason: string): Promise<void> {
-    const sessionIds = [...this.activeTunnels.keys()];
-    await Promise.allSettled(
-      sessionIds.map(async (sessionId) => {
-        await this.closeSessionPreviewForCleanup(sessionId, reason);
-      })
+    const sessionIds = new Set([...this.activeTunnels.keys(), ...this.operations.keys()]);
+    const results = await Promise.allSettled(
+      [...sessionIds].map((sessionId) => this.closeSessionPreviewForCleanup(sessionId, reason))
     );
-    await this.localProxyManager.closeAll(reason);
+    const local = await Promise.allSettled([this.localProxyManager.closeAll(reason)]);
+    const failures = [...results, ...local].flatMap((result) =>
+      result.status === 'rejected' ? [result.reason] : []
+    );
+    if (failures.length) throw new AggregateError(failures, 'Preview shutdown failed');
   }
 
   async revokePreview(request: SessionPreviewRevokeRequest): Promise<SessionPreviewRevokeResponse> {
@@ -847,23 +799,139 @@ export class PreviewService {
       return this.revokeResponse(request.sessionId, false, connection, session.failure);
     }
 
+    if (request.requestedByUserId !== session.meta.userId)
+      return {
+        type: 'session/preview-revoke_response',
+        sessionId: request.sessionId,
+        success: false,
+        error: 'grant_denied',
+        message: 'Only the session initiator can close this preview.',
+      };
+    this.cancelled.get(request.sessionId)?.abort(new Error('Preview revoked'));
+    this.activeTunnels.get(request.sessionId)?.cancel('revoked');
+    return this.serialize(request.sessionId, async () => {
+      const current = session.meta.previewConnection;
+      await this.closeActiveTunnel(request.sessionId, 'revoked');
+      const revoked: PreviewConnection = {
+        ...current,
+        status: 'closed',
+        publicUrl: undefined,
+        updatedAt: now,
+        closedReason: 'revoked',
+        error: undefined,
+      };
+      await this.patchSessionPreview(request.sessionId, { previewConnection: revoked });
+      return {
+        type: 'session/preview-revoke_response',
+        sessionId: request.sessionId,
+        success: true,
+        connection: revoked,
+      };
+    });
+  }
+
+  async authorizeRemoteControl(
+    sessionId: SessionId,
+    requesterUserId: string,
+    operation: PreviewControlOperation,
+    proof: PreviewControlProof
+  ): Promise<void> {
+    const session = await this.getSessionMeta(sessionId);
+    if (!session.ok) throw new Error(session.failure.message);
+    if (session.meta.userId !== requesterUserId)
+      throw new Error('Only the session initiator can manage this preview.');
+    await this.controlAuthority.authorize(
+      {
+        workspaceId: this.deps.workspaceId,
+        machineId: this.deps.machineId,
+        sessionId,
+        requesterUserId,
+        operation,
+      },
+      proof,
+      session.meta.localProjectId
+    );
+  }
+
+  async getStatus(request: SessionPreviewStatusRequest): Promise<SessionPreviewStatusResponse> {
+    const base = { type: 'session/preview-status_response' as const, sessionId: request.sessionId };
+    const scopeFailure = this.validateRequestScope(request.machineId, request.workspaceId);
+    if (scopeFailure)
+      return { ...base, success: false, error: scopeFailure.code, message: scopeFailure.message };
+    const session = await this.getSessionMeta(request.sessionId);
+    if (!session.ok)
+      return {
+        ...base,
+        success: false,
+        error: session.failure.code,
+        message: session.failure.message,
+      };
+    if (request.requestedByUserId !== session.meta.userId)
+      return {
+        ...base,
+        success: false,
+        error: 'grant_denied',
+        message: 'Only the session initiator can manage this preview.',
+      };
     const current = session.meta.previewConnection;
-    await this.closeActiveTunnel(request.sessionId, request.reason?.trim() || 'Preview revoked');
-    const revoked: PreviewConnection = {
-      ...(current ?? { status: 'idle' as const }),
-      status: 'revoked',
-      updatedAt: now,
-      revokedAt: now,
-      revokeReason: request.reason?.trim() || 'user_revoked',
-      error: undefined,
-    };
-    await this.patchSessionPreview(request.sessionId, { previewConnection: revoked });
-    return {
-      type: 'session/preview-revoke_response',
-      sessionId: request.sessionId,
-      success: true,
-      connection: revoked,
-    };
+    const handle = this.activeTunnels.get(request.sessionId);
+    if (!handle) {
+      const connection =
+        current &&
+        (current.status === 'active' || current.status === 'creating') &&
+        !this.operations.has(request.sessionId)
+          ? {
+              ...current,
+              status: 'closed' as const,
+              publicUrl: undefined,
+              closedReason: 'runtime_lost' as const,
+            }
+          : current;
+      return { ...base, success: true, connection };
+    }
+    if (current?.status === 'creating') return { ...base, success: true, connection: current };
+    await handle.checkHealth();
+    // A replacement/revoke can finish while the public check is pending. Never
+    // publish the checked owner's result over a different endpoint's state.
+    if (this.activeTunnels.get(request.sessionId) !== handle) {
+      await this.operations.get(request.sessionId);
+      const latest = await this.getSessionMeta(request.sessionId);
+      if (!latest.ok)
+        return {
+          ...base,
+          success: false,
+          error: latest.failure.code,
+          message: latest.failure.message,
+        };
+      return {
+        ...base,
+        success: true,
+        connection: latest.meta.previewConnection,
+        expiresAt: this.activeTunnels.get(request.sessionId)?.expiresAt,
+      };
+    }
+    if (request.renewEndpointId && request.renewEndpointId === current?.endpointId)
+      handle.activity(true);
+    if (handle.active)
+      return { ...base, success: true, connection: current, expiresAt: handle.expiresAt };
+    const outcome = await handle.closed;
+    const connection: PreviewConnection = outcome.error
+      ? {
+          ...current,
+          ...this.failedConnection(
+            'connect',
+            {
+              code: 'tunnel_creation_failed',
+              message: outcome.error.message,
+              retryable: true,
+            },
+            this.now(),
+            current?.target
+          ),
+          publicUrl: undefined,
+        }
+      : { ...current, status: 'closed', closedReason: outcome.reason, publicUrl: undefined };
+    return { ...base, success: true, connection };
   }
 
   private async validateTargetForCreate(
@@ -879,17 +947,18 @@ export class PreviewService {
       return { failure: tcpFailure };
     }
 
-    const httpFailure = await probeHttp(normalized);
-    if (httpFailure) {
-      return { failure: httpFailure };
+    const httpProbe = await probeHttp(normalized);
+    if ('code' in httpProbe) {
+      return { failure: httpProbe };
     }
 
     return {
       normalizedTarget: normalized,
+      connectionAddress: httpProbe.connectionAddress,
     };
   }
 
-  private async closeActiveTunnel(sessionId: SessionId, reason: string): Promise<void> {
+  private async closeActiveTunnel(sessionId: SessionId, reason: PreviewCloseReason): Promise<void> {
     const handle = this.activeTunnels.get(sessionId);
     if (!handle) {
       return;
@@ -897,12 +966,8 @@ export class PreviewService {
     this.activeTunnels.delete(sessionId);
     try {
       await handle.close(reason);
-    } catch (error) {
-      this.deps.logger.debug(
-        `[${sessionId}] Failed to close preview tunnel: ${formatErrorMessage(error)}`
-      );
     } finally {
-      await this.releaseMachinePreviewSlot(sessionId);
+      this.releaseMachinePreviewSlot(sessionId);
     }
   }
 
@@ -912,31 +977,23 @@ export class PreviewService {
     error: Error
   ): Promise<void> {
     const latest = await this.getSessionMeta(sessionId);
-    if (!latest.ok || latest.meta.previewConnection?.grantId !== previous.grantId) {
+    if (!latest.ok || latest.meta.previewConnection?.endpointId !== previous.endpointId) {
       return;
     }
     if (latest.meta.previewConnection?.status !== 'active') {
       return;
     }
     const failure: ValidationFailure = {
-      code: classifyPreviewTunnelCloseError(error),
+      code: 'tunnel_creation_failed',
       message: `Preview tunnel disconnected: ${error.message}`,
       retryable: true,
     };
-    const status =
-      failure.code === 'preview_expired' || failure.code === 'preview_idle_timeout'
-        ? 'expired'
-        : 'failed';
     await this.patchSessionPreview(sessionId, {
       previewConnection: {
         ...latest.meta.previewConnection,
-        status,
+        status: 'failed',
+        publicUrl: undefined,
         updatedAt: this.now(),
-        ...(status === 'expired' ? { revokeReason: failure.message } : {}),
-        resourceUsage: {
-          ...latest.meta.previewConnection.resourceUsage,
-          lastCloseReason: error.message,
-        },
         error: {
           stage: 'connect',
           errorCode: failure.code,
@@ -966,84 +1023,30 @@ export class PreviewService {
     return null;
   }
 
-  private getMachinePreviewRegistryKey(sessionId: SessionId, grantId: string): string {
-    return `${this.deps.machineId}:${this.deps.workspaceId}:${sessionId}:${grantId}`;
-  }
-
-  private async reserveMachinePreviewSlot(
+  private reserveMachinePreviewSlot(
     sessionId: SessionId,
-    grantId: string,
-    now: number
-  ): Promise<{ key: string } | { failure: ValidationFailure }> {
-    const key = this.getMachinePreviewRegistryKey(sessionId, grantId);
-    try {
-      const result = await withFileLock(
-        PREVIEW_REGISTRY_LOCK_NAME,
-        async (): Promise<{ key: string } | { failure: ValidationFailure }> => {
-          const entries = filterLivePreviewRegistryEntries(await readPreviewRegistryEntries(), now);
-          const machineEntries = entries.filter((entry) => entry.machineId === this.deps.machineId);
-          const hasExistingEntry = entries.some((entry) => entry.key === key);
-          if (
-            !hasExistingEntry &&
-            machineEntries.length >= DEFAULT_PREVIEW_MAX_ACTIVE_TUNNELS_PER_MACHINE
-          ) {
-            return {
-              failure: {
-                code: 'resource_limit_exceeded',
-                message: `This machine already has ${machineEntries.length} active previews. Close one before creating another.`,
-                retryable: true,
-              },
-            };
-          }
-
-          const nextEntries = entries.filter((entry) => entry.key !== key);
-          nextEntries.push({
-            key,
-            pid: process.pid,
-            workspaceId: this.deps.workspaceId,
-            machineId: this.deps.machineId,
-            sessionId,
-            grantId,
-            updatedAt: now,
-          });
-          await writePreviewRegistryEntries(nextEntries);
-          return { key };
-        },
-        { timeout: 2_000 }
-      );
-      if ('key' in result) {
-        this.activeRegistryKeys.set(sessionId, result.key);
-      }
-      return result;
-    } catch (error) {
+    endpointId: string
+  ): ValidationFailure | null {
+    const slots = machinePreviewSlots.get(this.deps.machineId) ?? new Set<string>();
+    if (slots.size >= DEFAULT_PREVIEW_MAX_ACTIVE_TUNNELS_PER_MACHINE)
       return {
-        failure: {
-          code: 'resource_limit_exceeded',
-          message: `Preview machine limit check failed: ${formatErrorMessage(error)}`,
-          retryable: true,
-        },
+        code: 'resource_limit_exceeded',
+        message: 'Close an active preview before creating another.',
+        retryable: true,
       };
-    }
+    slots.add(endpointId);
+    machinePreviewSlots.set(this.deps.machineId, slots);
+    this.slotIds.set(sessionId, endpointId);
+    return null;
   }
 
-  private async releaseMachinePreviewSlot(sessionId: SessionId): Promise<void> {
-    const key = this.activeRegistryKeys.get(sessionId);
-    if (!key) {
-      return;
-    }
-    this.activeRegistryKeys.delete(sessionId);
-    await withFileLock(
-      PREVIEW_REGISTRY_LOCK_NAME,
-      async () => {
-        const entries = await readPreviewRegistryEntries();
-        await writePreviewRegistryEntries(entries.filter((entry) => entry.key !== key));
-      },
-      { timeout: 2_000 }
-    ).catch((error: unknown) => {
-      this.deps.logger.debug(
-        `[${sessionId}] Failed to release preview machine slot: ${formatErrorMessage(error)}`
-      );
-    });
+  private releaseMachinePreviewSlot(sessionId: SessionId): void {
+    const key = this.slotIds.get(sessionId);
+    if (!key) return;
+    this.slotIds.delete(sessionId);
+    const slots = machinePreviewSlots.get(this.deps.machineId);
+    slots?.delete(key);
+    if (slots?.size === 0) machinePreviewSlots.delete(this.deps.machineId);
   }
 
   private async getSessionMeta(
@@ -1061,7 +1064,7 @@ export class PreviewService {
       };
     }
 
-    let meta = record.meta as PreviewSessionMeta;
+    const meta = PreviewSessionOwner.parse(record.meta);
     if (meta.machineId !== this.deps.machineId) {
       return {
         ok: false,
@@ -1084,23 +1087,16 @@ export class PreviewService {
       };
     }
 
-    try {
-      const sessionDoc = await this.deps.workspaceDocument.getOrCreateSessionDoc(sessionId);
-      const preview = await sessionDoc.getPreviewState();
-      if (preview?.candidate || preview?.connection) {
-        meta = {
-          ...meta,
-          previewCandidate: preview.candidate ?? meta.previewCandidate,
-          previewConnection: preview.connection ?? meta.previewConnection,
-        };
-      }
-    } catch (error) {
-      this.deps.logger.debug(
-        `[${sessionId}] Failed to read preview session doc state: ${formatErrorMessage(error)}`
-      );
-    }
-
-    return { ok: true, meta };
+    const sessionDoc = await this.deps.workspaceDocument.getOrCreateSessionDoc(sessionId);
+    const preview = await sessionDoc.getPreviewState();
+    return {
+      ok: true,
+      meta: {
+        ...meta,
+        previewCandidate: preview?.candidate,
+        previewConnection: preview?.connection,
+      },
+    };
   }
 
   private validateRequestScope(
@@ -1116,10 +1112,6 @@ export class PreviewService {
       message: 'Preview request does not match this CLI machine or workspace.',
       retryable: false,
     };
-  }
-
-  private isConnectionLeaseExpired(connection: PreviewConnection): boolean {
-    return typeof connection.leaseExpiresAt === 'number' && connection.leaseExpiresAt <= this.now();
   }
 
   private async patchSessionPreview(
@@ -1189,7 +1181,7 @@ export class PreviewService {
     };
   }
 
-  /** Persists a create failure raised before the `creating` state was written. */
+  /** Rejected inputs must not overwrite another user's preview or a live endpoint. */
   private async failCreate(
     sessionId: SessionId,
     failure: ValidationFailure,
@@ -1197,7 +1189,6 @@ export class PreviewService {
     target?: PreviewTarget
   ): Promise<SessionPreviewCreateResponse> {
     const connection = this.failedConnection('create', failure, now, target);
-    await this.patchSessionPreview(sessionId, { previewConnection: connection });
     return this.connectionResponse(sessionId, false, connection, failure);
   }
 
@@ -1272,5 +1263,16 @@ export class PreviewService {
 
   private now(): number {
     return Math.round(this.deps.now?.() ?? getServerNow());
+  }
+
+  private serialize<T>(sessionId: SessionId, action: () => Promise<T>): Promise<T> {
+    const previous = this.operations.get(sessionId) ?? Promise.resolve();
+    const operation = previous.then(action, action);
+    this.operations.set(sessionId, operation);
+    const clear = () => {
+      if (this.operations.get(sessionId) === operation) this.operations.delete(sessionId);
+    };
+    void operation.then(clear, clear);
+    return operation;
   }
 }

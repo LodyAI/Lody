@@ -9,9 +9,10 @@ import { usePostHog } from '@posthog/react';
 import AppInitializer from '@/components/AppInitializer';
 import { ThemeProvider } from '../theme-provider';
 import { LanguageProvider } from '../i18n';
-import { Toaster } from '@/ui/sonner';
+import { Toast } from '@lody/ui';
+import { toastManager } from '@/lib/toast';
 import { NotFound } from '@/components/not-found';
-import { TooltipProvider } from '@/ui';
+import { Tooltip } from '@lody/ui/tooltip';
 import { RuntimeProvider } from '../providers/runtime-provider';
 import { markStartupNavigationForEagerSync } from '../providers/startup-network-idle';
 import { trackDeferredPostHogPageView } from '../lib/deferred-posthog';
@@ -30,7 +31,7 @@ import { onIpcEvent } from '@/lib/electron-ipc-client';
 import { useStableSession } from '@/hooks/useStableSession';
 import { normalizeCurrentUserFromSessionUser } from '@/lib/current-user';
 import { writeAuthBootstrapSnapshot } from '@/lib/auth-bootstrap';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import { useAtomValue, useSetAtom } from 'jotai';
 import {
   authTokenAtom,
@@ -208,11 +209,11 @@ function RootApp() {
       {isElectron && <DesktopDeepLinkRouter />}
       <ThemeProvider>
         <InterfaceFontController enabled={isElectron} />
-        <TooltipProvider skipDelayDuration={0}>
+        <Tooltip.Provider timeout={0}>
           <AppInitializer>
             <LanguageProvider>
               <>
-                <Toaster />
+                <Toast.Provider manager={toastManager} closeLabel={i18next.t('common.close', 'Close')} />
                 <RuntimeProvider>
                   {/* Location-driven effects and the Outlet boundary subscribe to
                       router state in these two small components, so a navigation
@@ -224,7 +225,7 @@ function RootApp() {
               </>
             </LanguageProvider>
           </AppInitializer>
-        </TooltipProvider>
+        </Tooltip.Provider>
       </ThemeProvider>
     </LodyPostHogProvider>
   );

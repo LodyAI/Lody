@@ -15,7 +15,7 @@ Translation: current
 - 一行由一个根对话及其顶部 Tab 组成，Tab 以等宽胶囊并排，与用户在该对话中看到的标签栏一致。已关闭的 Tab 与标签栏一样隐藏，除非是当前对话（从已关闭 Tab 打开的对话仍挂在该行下）；侧边对话和已归档对话被排除，因此已归档的创建者会终止向上查找。遇到环时在第一个重复行停止。
 - 末尾的类型标签（父对话 / 对话 / Tab）改为实时状态：复用侧边栏的 `SessionRowStatusIndicator`（等待 > 运行中 > 未读），状态在各处读起来一致；树的形状本身已表明哪些是 Tab。
 - Tab 胶囊以 `{ sessionId: root, tabSessionId }` 导航，其他工作区里的 Tab 也能精确恢复。
-- 该图标和 Preview 一样是 cluster 区的普通操作，不会进入 stage：stage 只容纳一个摘要项，树没有摘要形态。`info-chip.tsx` 中的 `PopoverActionChip` 通过解析外层 `[data-info-bar-surface]` 的 Radix `virtualRef` 锚定到整条信息栏，面板看起来是信息栏向上展开。曾尝试用 React context 传递信息栏的 ref，后已移除：它为唯一的使用者在整条信息栏外包了一层 Provider。
+- 该图标和 Preview 一样是 cluster 区的普通操作，不会进入 stage：stage 只容纳一个摘要项，树没有摘要形态。`info-chip.tsx` 中的 `PopoverActionChip` 通过解析外层 `[data-info-bar-surface]` 的 `@lody/ui` Popover `anchor` 锚定到整条信息栏，面板看起来是信息栏向上展开。曾尝试用 React context 传递信息栏的 ref，后已移除：它为唯一的使用者在整条信息栏外包了一层 Provider。
 - 放弃的方案：信息栏上方的独立固定栏（第一版），因让输入框上方的界面占用翻倍；扁平的父对话 + 已创建列表（第二版），因每个方向只显示一层。
 - 渲染开销：页面只读取一个布尔值（`useHasSessionRelations`，对活动对话列表的 `selectAtom`）来决定是否传入该图标，因此原本为空的信息栏仍会隐藏。树在图标这个叶子组件中构建；相关对话状态变化频繁，对话页不应因此重渲染。
 - `SessionRelationCard`（创建对话的进度/完成卡片，以及“由…自动创建”开头卡片）改为一个 `h-8` 的整行按钮。操作文案移入可访问名称 `"<操作>: <标题>"`，选择器按前缀匹配；回复预览或错误信息仍内联并截断显示。

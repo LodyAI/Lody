@@ -2,15 +2,11 @@ import { useEffect, useState, type CSSProperties } from 'react';
 import { useTranslation } from 'react-i18next';
 import QRCode from 'qrcode';
 import { cn } from '@/lib/utils';
-import {
-  formatCompactNumber,
-  formatUsdCompact,
-  formatUsdTight,
-} from '@/lib/format-compact-number';
+import { formatCompactNumber, formatUsdCompact, formatUsdTight } from '@/lib/format-compact-number';
 import { toIntlLocaleOrEn } from '@/lib/intl-locale';
 import { ensureShareThemeScopes } from '@/components/share-theme-scope';
 import { ModelBrandIcon } from '@/components/icons/model-brand-icon';
-import { Avatar, AvatarFallback, AvatarImage } from '@/ui/avatar';
+import { Avatar } from '@lody/ui/avatar';
 import lodyLogo from '@/assets/lody-icon.png';
 import { createUsageHeatScale, type UsageCalendarModel } from './usage-calendar-model';
 import type { UsageShareGraphic, UsageShareSlice, UsageShareStats } from './usage-share-stats';
@@ -398,12 +394,10 @@ function UsageShareSplit({
               style={{ backgroundColor: `hsl(var(--chart-${(index % 5) + 1}))` }}
             />
             {subject === 'team' ? (
-              <Avatar className="size-4 shrink-0">
-                {slice.image ? <AvatarImage src={slice.image} alt="" /> : null}
-                <AvatarFallback className="text-[8px]">
-                  {slice.label.slice(0, 2).toUpperCase()}
-                </AvatarFallback>
-              </Avatar>
+              <Avatar.Root size="mini">
+                {slice.image ? <Avatar.Image src={slice.image} alt="" /> : null}
+                <Avatar.Fallback>{slice.label.slice(0, 2).toUpperCase()}</Avatar.Fallback>
+              </Avatar.Root>
             ) : (
               <ModelBrandIcon modelId={slice.id} className="size-3.5 shrink-0" />
             )}
@@ -763,7 +757,9 @@ export function UsageShareCard({
           />
         </div>
       ) : (
-        <div className={cn('relative flex min-h-0 flex-1 flex-col', rhythm.band, rhythm.padY, PAD_X)}>
+        <div
+          className={cn('relative flex min-h-0 flex-1 flex-col', rhythm.band, rhythm.padY, PAD_X)}
+        >
           {header}
           {/* The headline owns this band alone. The space beside and around it is
               deliberate: see the AGENTS note before filling it with anything. */}

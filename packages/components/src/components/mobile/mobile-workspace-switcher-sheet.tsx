@@ -163,7 +163,8 @@ function WorkspaceLeadingAvatar({
   return (
     <WorkspaceAvatar
       workspace={{ name: workspace.name, logo: workspace.avatarUrl }}
-      className="h-9 w-9 shrink-0 rounded-xl text-[0.82rem]"
+      size="large"
+      className="shrink-0"
     />
   );
 }

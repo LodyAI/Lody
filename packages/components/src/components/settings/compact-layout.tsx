@@ -1,12 +1,14 @@
-import React, { ReactNode } from 'react';
-import { cn } from '@/lib/utils';
+import React, { type ReactNode } from 'react';
+import * as stylex from '@stylexjs/stylex';
+import { withClassName } from '@/lib/stylex';
+import { settingsSurface as surface } from './surface';
 
 /**
- * A standalone settings list row (MCP server, Agent role, provider). Light: the
- * same lifted surface as a CompactSection; dark keeps a flat translucent fill.
+ * The settings card for a standalone catalog row (MCP server, Agent role,
+ * provider): the same card a section draws. Spread it with `stylex.props` so a
+ * caller's layout classes compose rather than restating the material.
  */
-export const SETTINGS_ROW_CARD_CLASS =
-  'rounded-lg border-[0.5px] border-border bg-card shadow-[0_0.5px_1px_1px_rgba(0,0,0,0.03)] dark:border-transparent dark:bg-foreground/[0.04] dark:shadow-none';
+export const settingsCard = surface.card;
 
 interface CompactSectionProps {
   title?: string;
@@ -15,9 +17,10 @@ interface CompactSectionProps {
   /** Free-form content on the right of the header (rendered as-is, unlike
    * `actions` which are coerced into icon buttons). */
   headerRight?: ReactNode;
+  /** A group that destroys something — leave, transfer, delete — says so on its card. */
+  tone?: 'default' | 'danger';
   children: ReactNode;
   className?: string;
-  contentClassName?: string;
 }
 
 interface CompactRowProps {
@@ -33,60 +36,59 @@ export function CompactSection({
   description,
   actions,
   headerRight,
+  tone = 'default',
   children,
   className,
-  contentClassName,
 }: CompactSectionProps) {
+  // The section owns the lines between its rows, so every child is one line of
+  // the card whether or not it is a `CompactRow`.
+  const lines = React.Children.toArray(children);
   return (
-    <section
-      className={cn(
-        'overflow-hidden rounded-lg border border-border/70 bg-card/60 text-[1em]',
-        // Light: a lifted white section (see the settings surface scope in
-        // tailwind/index.css); dark keeps the flat translucent fill.
-        'shadow-[0_0.5px_1px_1px_rgba(0,0,0,0.03)] dark:shadow-none',
-        className
-      )}
-    >
+    <section {...stylex.props(surface.section)}>
       {title || headerRight ? (
-        <header className="flex min-h-10 items-center justify-between gap-2 border-b border-border/70 px-3 py-1.5 dark:bg-muted/40">
-          <div className="min-w-0 flex-1 leading-tight">
-            {title ? (
-              <p className="text-[0.75em] font-normal text-muted-foreground">{title}</p>
+        <header {...stylex.props(surface.sectionHeader)}>
+          <div {...stylex.props(surface.sectionHeading)}>
+            {title ? <p {...stylex.props(surface.sectionTitle)}>{title}</p> : null}
+            {description ? (
+              <p {...stylex.props(surface.sectionDescription)}>{description}</p>
             ) : null}
-            {description && <p className="text-[0.8em] text-muted-foreground/90">{description}</p>}
           </div>
-          {headerRight ? (
-            <div className="min-w-0 shrink truncate text-right text-[0.8em] text-muted-foreground">
-              {headerRight}
-            </div>
-          ) : null}
+          {headerRight ? <div {...stylex.props(surface.sectionAside)}>{headerRight}</div> : null}
           {actions ? (
-            <div className="flex shrink-0 items-center gap-1.5">
+            <div {...stylex.props(surface.sectionActions)}>
               {React.Children.map(actions, (child) => {
                 if (
-                  !React.isValidElement<{
-                    size?: string;
-                    variant?: string;
-                    className?: string;
-                  }>(child)
+                  !React.isValidElement<{ size?: string; variant?: string; icon?: boolean }>(child)
                 ) {
                   return child;
                 }
-
+                // A header action is a ghost icon button: it sits beside the
+                // group's name, not on the card, so it takes no material.
                 return React.cloneElement(child, {
-                  size: child.props.size ?? 'icon',
-                  variant: child.props.variant ?? 'default',
-                  className: cn(
-                    'h-7 w-7 rounded-md font-normal shadow-xs focus-visible:ring-1 focus-visible:ring-ring/60',
-                    child.props.className
-                  ),
+                  size: child.props.size ?? 'small',
+                  variant: child.props.variant ?? 'ghost',
+                  icon: child.props.icon ?? true,
                 });
               })}
             </div>
           ) : null}
         </header>
       ) : null}
-      <div className={cn('divide-y divide-border/60', contentClassName)}>{children}</div>
+      <div
+        {...withClassName(
+          stylex.props(surface.card, tone === 'danger' && surface.cardDanger),
+          className
+        )}
+      >
+        {lines.map((line, index) => (
+          <div
+            key={React.isValidElement(line) && line.key != null ? line.key : index}
+            {...stylex.props(surface.line, index > 0 && surface.lineRuled)}
+          >
+            {line}
+          </div>
+        ))}
+      </div>
     </section>
   );
 }
@@ -99,26 +101,14 @@ export function CompactRow({
   alignTop = false,
 }: CompactRowProps) {
   return (
-    <div
-      className={cn(
-        // The control column hugs its content and the label column absorbs the rest. Settings
-        // render inside a panel that is much narrower than the window, so a column capped at a
-        // fixed px width (which a viewport breakpoint cannot see) would eat the whole row and
-        // push the control past the panel's clipped edge.
-        'flex flex-col gap-2 px-3 py-2 sm:grid sm:grid-cols-[minmax(0,1fr)_auto] sm:gap-4',
-        alignTop && 'sm:items-start sm:[&>div:last-child]:self-start',
-        !alignTop && 'sm:items-center',
-        className
-      )}
-    >
-      {/* Helper copy is capped so it stays readable on a wide panel; a bare label is free to
-          use the whole column, because long command names should not wrap early. */}
-      <div className={cn('min-w-0', helper && 'sm:max-w-[520px]')}>
-        <p className="leading-tight text-foreground">{label}</p>
-        {helper && <p className="text-[0.8em] text-muted-foreground leading-tight">{helper}</p>}
+    <div {...withClassName(stylex.props(surface.row, alignTop && surface.rowTop), className)}>
+      {/* A bare label may use the whole column: long command names should not wrap early. */}
+      <div {...stylex.props(surface.rowText, helper != null && surface.rowTextCapped)}>
+        <p {...stylex.props(surface.rowLabel)}>{label}</p>
+        {helper ? <p {...stylex.props(surface.rowHelper)}>{helper}</p> : null}
       </div>
       {children ? (
-        <div className="flex min-w-0 flex-wrap items-center gap-2 text-[1em] font-normal sm:justify-end sm:pl-4 [&_button]:font-normal">
+        <div {...stylex.props(surface.rowControl, alignTop && surface.rowControlTop)}>
           {children}
         </div>
       ) : null}

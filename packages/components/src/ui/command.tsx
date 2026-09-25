@@ -1,10 +1,9 @@
 import * as React from 'react';
-import { type DialogProps } from '@radix-ui/react-dialog';
 import { Command as CommandPrimitive } from 'cmdk';
 import { Search } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
-import { Dialog, DialogContentWithoutClose } from './dialog';
+import { Dialog } from './dialog';
 import { ScrollArea } from './scroll-area';
 
 const Command = React.forwardRef<
@@ -26,9 +25,12 @@ const CommandDialog = ({
   children,
   shouldFilter,
   ...props
-}: DialogProps & { shouldFilter?: boolean }) => {
+}: Omit<React.ComponentProps<typeof Dialog.Root>, 'children'> & {
+  children?: React.ReactNode;
+  shouldFilter?: boolean;
+}) => {
   return (
-    <Dialog {...props}>
+    <Dialog.Root {...props}>
       {/* The mention / slash-command popover in the chat composer carries a hardcoded
           z-index: 50 (from @diceui/shared's anchored positioner), and the shared dialog's
           `z-[var(--z-dialog)]` resolves to `auto` (that CSS var is never defined). Without
@@ -39,10 +41,11 @@ const CommandDialog = ({
       {/* Fixed, screen-relative height (flex column overrides the dialog's default grid)
           so the panel never resizes or shifts as the result list grows / shrinks / filters —
           the list scrolls inside instead. */}
-      <DialogContentWithoutClose
+      <Dialog.Content
+        closeButton={false}
         noAnimation
         className="z-[var(--z-command-palette,85)] flex h-[min(640px,72vh)] max-w-2xl flex-col gap-0 overflow-hidden border-0 bg-transparent p-0 shadow-none sm:p-0"
-        overlayClassName="z-[var(--z-command-palette,85)] bg-black/40 backdrop-blur-[2px]"
+        backdropClassName="z-[var(--z-command-palette,85)] bg-black/40 backdrop-blur-[2px]"
       >
         <Command
           shouldFilter={shouldFilter}
@@ -50,8 +53,8 @@ const CommandDialog = ({
         >
           {children}
         </Command>
-      </DialogContentWithoutClose>
-    </Dialog>
+      </Dialog.Content>
+    </Dialog.Root>
   );
 };
 

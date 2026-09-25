@@ -1509,9 +1509,7 @@ function SessionsFinishingLayout(args: Parameters<typeof LoroSidebar>[0]) {
       })),
     [base, finished]
   );
-  return (
-    <WithProjectsLayout {...args} sessionListProps={{ ...demoTaskListProps, sessions }} />
-  );
+  return <WithProjectsLayout {...args} sessionListProps={{ ...demoTaskListProps, sessions }} />;
 }
 
 /** Sessions finish one by one: each working grid spins and gathers into the unread dot. */

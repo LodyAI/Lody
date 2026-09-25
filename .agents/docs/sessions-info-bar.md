@@ -169,7 +169,7 @@ labelClassName`) so the stage diffstat never clips. Wired from
 cluster zone, via the bar's `relations` slot, whenever the current Session sits
 in an opened-by tree (`lib/session-relation-tree.ts`). Like Preview it is a
 plain action, never staged: one click toggles `PopoverActionChip`'s popover,
-which anchors to the pill (Radix `virtualRef` resolving the enclosing
+which anchors to the pill (the `@lody/ui` Popover `anchor` resolving the enclosing
 `[data-info-bar-surface]`) and takes its width.
 
 The popover shows the complete tree: every ancestor from the topmost live

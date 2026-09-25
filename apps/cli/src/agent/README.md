@@ -163,7 +163,12 @@ the adapter lockfile, regenerates all eight zstd archives after a version change
 the canonical production objects, and then atomically updates the manifest.
 
 Grok launches the pinned `acp-extension-grok` compatibility adapter with an official,
-unmodified R2-managed runtime in `GROK_PATH`; the submodule owns the private-wire contract
+unmodified R2-managed runtime in `GROK_PATH`. Archive, executable, and source integrity
+pins live in `grok-runtime-manifest.json`. Version changes regenerate all six targets
+from exact official npm metadata; the operator updates this manifest only after full
+production upload/readback. The CLI rejects adapter/manifest version drift. See the
+[automatic pin refresh decision](../../../../.agents/notes/implemented/process/2026-09-25-grok-pin-refresh.md).
+The submodule owns the private-wire contract
 and minimum official version. Kimi is different: `packages/acp-extension-kimi` owns the
 Lody-maintained runtime source and implements the shared `acp-extension-core` contract.
 
@@ -249,9 +254,9 @@ See the [contract](../../../../specs/acp-session-titles.md) and
 [original compatibility decision](../../../../.agents/notes/implemented/architecture/2026-09-08-acp-owned-session-titles.md).
 
 The daemon does not name branches. A worktree session stays on the `session/<id>` branch
-`worktree-manager.ts` created for it, and `syncSessionBranchName` records whatever branch the
-session is actually on after every turn, so an agent that renames the branch itself is picked
-up. For GitHub projects the agent is asked to do exactly that — see
+`worktree-manager.ts` created for it. [WorkspaceGitService](../session/workspace-git-service.ts)
+observes branch changes independently of GitHub; its lifecycle and activation triggers are
+defined by the [checkout branch contract](../../../../specs/workspace-branch-state.md). For GitHub projects the agent is asked to do exactly that — see
 `GITHUB_WORKTREE_SYSTEM_COMMANDS` in `session/session-execution-helpers.ts`.
 
 This used to be an automatic prompt-to-branch rename, removed because it could not be made

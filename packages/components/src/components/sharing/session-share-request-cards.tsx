@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useAtomValue } from 'jotai';
-import { Share2 } from 'lucide-react';
+import { AlertCircle, AlertTriangle, Share2 } from 'lucide-react';
+import * as stylex from '@stylexjs/stylex';
 import { useTranslation } from 'react-i18next';
 import { useCloudMutation, useCloudQuery } from '@lody/platform/react';
 import type { SessionShareRequest } from '@lody/cloud-api';
@@ -11,8 +12,79 @@ import { useAppCapability } from '@/lib/app-platform';
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import { useResolvedWorkspaceScope } from '@/hooks/use-resolved-workspace-scope';
 import { ErrorBoundary } from '@/components/error-boundary';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { useSessionShareManagement } from '@/hooks/use-session-share-management';
+import { colors, shadow } from '@lody/ui/tokens/colors.stylex';
+import { corner, radius, space, text } from '@lody/ui/tokens/scales.stylex';
+import { shareSurface } from './surface';
+
+const styles = stylex.create({
+  unavailable: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: space[2],
+    marginBlock: space[3],
+    fontSize: text.footnoteSize,
+    lineHeight: text.footnoteLeading,
+    color: colors.secondaryLabel,
+  },
+  /** The consent is a block of the conversation: the card rung, no border. */
+  card: {
+    boxSizing: 'border-box',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: space[3],
+    marginBlock: space[3],
+    padding: space[4],
+    backgroundColor: colors.elevatedBackground,
+    boxShadow: shadow.card,
+    borderRadius: radius.large,
+    cornerShape: corner.shape,
+    color: colors.label,
+  },
+  eyebrow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: space[1.5],
+    fontSize: text.footnoteSize,
+    lineHeight: text.footnoteLeading,
+    color: colors.secondaryLabel,
+  },
+  eyebrowIcon: { flexShrink: 0, width: '14px', height: '14px' },
+  purpose: {
+    margin: 0,
+    fontSize: text.bodySize,
+    lineHeight: text.bodyLeading,
+    fontWeight: 500,
+    whiteSpace: 'pre-wrap',
+    overflowWrap: 'anywhere',
+  },
+  prose: { margin: 0, fontSize: text.bodySize, lineHeight: text.bodyLeading },
+  /** The exact targets: a block inside the card, so the region rung. */
+  targets: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '2px',
+    margin: 0,
+    listStyle: 'none',
+    fontSize: text.footnoteSize,
+    lineHeight: text.footnoteLeading,
+    color: colors.secondaryLabel,
+  },
+  target: { overflowWrap: 'anywhere' },
+  ink: { color: colors.label },
+  targetId: {
+    marginInlineStart: space[2],
+    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+  },
+  status: {
+    margin: 0,
+    fontSize: text.footnoteSize,
+    lineHeight: text.footnoteLeading,
+    color: colors.secondaryLabel,
+  },
+  actions: { display: 'flex', justifyContent: 'flex-end', gap: space[2] },
+});
 
 /** Approval lives in authenticated cloud state, never in agent-writable history. */
 export function SessionShareRequestCards(props: {
@@ -48,11 +120,11 @@ export function SessionShareRequestCards(props: {
 function RequestsUnavailable({ onRetry }: { onRetry: () => void }) {
   const { t } = useTranslation();
   return (
-    <div className="my-3 flex items-center gap-2 text-xs text-muted-foreground">
+    <div {...stylex.props(styles.unavailable)}>
       <span role="status">
         {t('sharing.request.unavailable', 'Could not load pending share requests.')}
       </span>
-      <Button size="sm" variant="ghost" onClick={onRetry}>
+      <Button size="small" variant="ghost" onClick={onRetry}>
         {t('common.retry', 'Retry')}
       </Button>
     </div>
@@ -160,60 +232,74 @@ export function SessionShareConsent({
   if (published) return null;
   return (
     <section
-      className="my-3 flex flex-col gap-2 rounded-md border border-border bg-card p-3"
+      {...stylex.props(styles.card)}
       aria-label={t('sharing.request.title', 'Share this conversation?')}
     >
-      <div className="flex items-center gap-2 text-xs text-muted-foreground">
-        <Share2 className="h-3.5 w-3.5" aria-hidden />
+      <div {...stylex.props(styles.eyebrow)}>
+        <Share2 {...stylex.props(styles.eyebrowIcon)} aria-hidden />
         <span>{t('sharing.request.title', 'Share this conversation?')}</span>
       </div>
-      <p className="whitespace-pre-wrap break-words text-sm">
+      <p {...stylex.props(styles.purpose)}>
         {t('sharing.request.purpose', 'Purpose: {{purpose}}', { purpose: request.purpose })}
       </p>
-      <p className="text-sm leading-6">
+      <p {...stylex.props(styles.prose)}>
         {t(
           'sharing.request.deliveryDisclosure',
           'Approval publishes the selected conversations, including thinking, tool output and images, but not file attachments. Anyone with the link can read them without signing in. The complete access link will be returned to the requesting agent, which can use or forward it. You can revoke the link in Share management; downloaded copies cannot be recalled.'
         )}
       </p>
-      <ul className="space-y-0.5 text-xs text-muted-foreground">
+      <ul {...stylex.props(shareSurface.region, styles.targets)}>
         {request.sessionIds.map((id) => (
-          <li key={id} className="break-words">
-            {titles[id] || t('sessions.untitled', 'Untitled session')}
-            <span className="ml-2 font-mono">{id}</span>
+          <li key={id} {...stylex.props(styles.target)}>
+            <span {...stylex.props(styles.ink)}>
+              {titles[id] || t('sessions.untitled', 'Untitled session')}
+            </span>
+            <span {...stylex.props(styles.targetId)}>{id}</span>
           </li>
         ))}
       </ul>
       {management.busy && (
-        <p role="status" className="text-xs">
+        <p role="status" {...stylex.props(styles.status)}>
           {t('sharing.request.publishing', 'Publishing automatically…')}
           {management.phase === 'uploading' ? ` ${management.progress}%` : ''}
         </p>
       )}
       {(management.error || failed) && (
-        <p role="alert" className="text-sm text-destructive">
-          {management.error ||
-            t('sharing.request.failed', 'Could not dismiss the request. Try again.')}
-        </p>
+        <div role="alert" {...stylex.props(shareSurface.message, shareSurface.messageDestructive)}>
+          <AlertCircle
+            aria-hidden
+            {...stylex.props(shareSurface.mark, shareSurface.markDestructive)}
+          />
+          <p {...stylex.props(styles.status, shareSurface.messageBody, styles.ink)}>
+            {management.error ||
+              t('sharing.request.failed', 'Could not dismiss the request. Try again.')}
+          </p>
+        </div>
       )}
       {request.status === 'confirmed' && !management.hasPending && !busy && !published && (
-        <p className="text-xs">
-          {t(
-            'sharing.request.incomplete',
-            'This deployment is not published yet and cannot be resumed after the editor closes. Abandon it, then ask the agent for a new share request with a new requestId.'
-          )}
-        </p>
+        <div {...stylex.props(shareSurface.message, shareSurface.messageWarning)}>
+          <AlertTriangle
+            aria-hidden
+            {...stylex.props(shareSurface.mark, shareSurface.markWarning)}
+          />
+          <p {...stylex.props(styles.status, shareSurface.messageBody, styles.ink)}>
+            {t(
+              'sharing.request.incomplete',
+              'This deployment is not published yet and cannot be resumed after the editor closes. Abandon it, then ask the agent for a new share request with a new requestId.'
+            )}
+          </p>
+        </div>
       )}
       {!published && (
-        <div className="flex justify-end gap-2">
-          <Button size="sm" variant="ghost" disabled={busy} onClick={onDeny}>
+        <div {...stylex.props(styles.actions)}>
+          <Button size="small" variant="ghost" disabled={busy} onClick={onDeny}>
             {request.status === 'confirmed'
               ? t('sharing.request.abandon', 'Abandon deployment')
               : t('sharing.request.deny', 'Do not share')}
           </Button>
           {(request.status === 'pending' || management.hasPending) && (
             <Button
-              size="sm"
+              size="small"
               disabled={busy || !management.canCapture || management.conflict}
               onClick={onApprove}
             >

@@ -14,7 +14,7 @@ import {
 
 import { ComposerAgentRolePanel } from '../src/components/sessions/composer-agent-role-panel';
 import type { ComposerAgentRoleItem } from '../src/lib/composer-agent-roles';
-import { DropdownMenu, DropdownMenuContent } from '../src/ui/dropdown-menu';
+import { Menu } from '../src/ui/menu';
 import { initI18n } from '../src/i18n';
 
 (
@@ -80,10 +80,10 @@ describe('ComposerAgentRolePanel', () => {
     await act(async () => {
       root?.render(
         createElement(
-          DropdownMenu,
+          Menu.Root,
           { open: true },
           createElement(
-            DropdownMenuContent,
+            Menu.Content,
             null,
             createElement(ComposerAgentRolePanel, {
               items: [reviewer],

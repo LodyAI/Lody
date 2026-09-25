@@ -19,9 +19,10 @@ import {
 import { WorkingStatusMark } from '@/ui/working-status-mark';
 import type { PrStatus, SessionPullRequestCiState } from '@lody/shared';
 import { cn } from '@/lib/utils';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
-import { ContextMenuItem } from '@/ui/context-menu';
-import { Skeleton } from '@/ui/skeleton';
+import { Tooltip } from '@lody/ui/tooltip';
+import { Badge } from '@lody/ui/badge';
+import { ContextMenu } from '@lody/ui/context-menu';
+import { Skeleton } from '@lody/ui/skeleton';
 import { PR_STATUS_META } from '@/components/sessions/pull-request-badge';
 import { SidebarConfirmArchiveButton } from '@/components/sidebar-confirm-archive-button';
 import { CachedAvatarImg } from '@/components/cached-avatar-img';
@@ -251,12 +252,9 @@ export function SessionPrIcon({
 export function SessionMergeablePill() {
   const { t } = useTranslation();
   return (
-    <span
-      data-session-mergeable-pill=""
-      className="inline-flex h-5 shrink-0 items-center rounded-full border border-status-success/45 bg-status-success/[0.06] px-1.5 text-[10px] font-medium leading-none tracking-[0.01em] text-status-success"
-    >
+    <Badge tone="success" data-session-mergeable-pill="">
       {t('sessions.pr.mergeable', 'Mergeable')}
-    </span>
+    </Badge>
   );
 }
 
@@ -273,13 +271,7 @@ export function SessionRowAuthorAvatar({
   author?: { name?: string | null; image?: string | null } | null;
 }) {
   if (!author) return null;
-  return (
-    <UserAvatar
-      user={author}
-      className="h-[18px] w-[18px] shrink-0"
-      fallbackClassName="text-[9px] font-medium"
-    />
-  );
+  return <UserAvatar user={author} size="small" className="shrink-0" />;
 }
 
 /**
@@ -302,14 +294,16 @@ export function SessionRowWorktreeIndicator({ isWorktree }: { isWorktree?: boole
   if (!isWorktree) return null;
   const label = t('sessions.infoCard.worktree', 'Worktree');
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <span className="inline-flex shrink-0 items-center text-sidebar-foreground-muted/45">
-          <WorktreeIcon className="h-3.5 w-3.5" aria-label={label} />
-        </span>
-      </TooltipTrigger>
-      <TooltipContent>{label}</TooltipContent>
-    </Tooltip>
+    <Tooltip.Root>
+      <Tooltip.Trigger
+        render={
+          <span className="inline-flex shrink-0 items-center text-sidebar-foreground-muted/45">
+            <WorktreeIcon className="h-3.5 w-3.5" aria-label={label} />
+          </span>
+        }
+      />
+      <Tooltip.Content>{label}</Tooltip.Content>
+    </Tooltip.Root>
   );
 }
 
@@ -335,18 +329,18 @@ export function SessionRowOpenedByMenuItems({
   return (
     <>
       {goToOpener ? (
-        <ContextMenuItem onSelect={goToOpener}>
+        <ContextMenu.Item onClick={goToOpener}>
           <CornerLeftUp />
           {goToOpenerLabel}
-        </ContextMenuItem>
+        </ContextMenu.Item>
       ) : null}
       {opener ? (
-        <ContextMenuItem onSelect={opener.onToggle}>
+        <ContextMenu.Item onClick={opener.onToggle}>
           <ChevronDown
             className={cn('transition-transform', opener.expanded ? 'rotate-0' : '-rotate-90')}
           />
           {opener.label}
-        </ContextMenuItem>
+        </ContextMenu.Item>
       ) : null}
     </>
   );
@@ -399,20 +393,23 @@ export function SidebarRowArchiveButton({
   revealClassName?: string;
 }) {
   return (
-    <Tooltip delayDuration={500}>
-      <TooltipTrigger asChild>
-        <SidebarConfirmArchiveButton
-          label={label}
-          confirmLabel={confirmLabel}
-          className={cn(
-            'absolute right-0 top-0 z-20 opacity-0 pointer-events-none',
-            revealClassName
-          )}
-          onConfirm={onConfirm}
-        />
-      </TooltipTrigger>
-      <TooltipContent side="top">{label}</TooltipContent>
-    </Tooltip>
+    <Tooltip.Root>
+      <Tooltip.Trigger
+        delay={500}
+        render={
+          <SidebarConfirmArchiveButton
+            label={label}
+            confirmLabel={confirmLabel}
+            className={cn(
+              'absolute right-0 top-0 z-20 opacity-0 pointer-events-none',
+              revealClassName
+            )}
+            onConfirm={onConfirm}
+          />
+        }
+      />
+      <Tooltip.Content side="top">{label}</Tooltip.Content>
+    </Tooltip.Root>
   );
 }
 

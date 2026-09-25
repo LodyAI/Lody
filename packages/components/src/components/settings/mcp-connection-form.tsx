@@ -1,6 +1,7 @@
 import { useId, useState, type FormEvent, type ReactNode } from 'react';
+import * as stylex from '@stylexjs/stylex';
 import { KeyRound, Plus, Trash2 } from 'lucide-react';
-import { Spinner } from '@/ui/spinner';
+import { Spinner } from '@lody/ui/spinner';
 import { useTranslation } from 'react-i18next';
 import type { McpConnectionSpec, McpTransport, WorkspaceMcpServerMeta } from '@lody/shared';
 import {
@@ -8,13 +9,30 @@ import {
   MCP_TRANSPORTS,
   McpTransportIcon,
 } from '@/components/shared/mcp-transport';
-import { cn } from '@/lib/utils';
-import { Button } from '@/ui/button';
-import { Input } from '@/ui/input';
-import { Label } from '@/ui/label';
-import { Switch } from '@/ui/switch';
-import { Textarea } from '@/ui/textarea';
-import { Field, Section } from './form-primitives';
+import { withClassName } from '@/lib/stylex';
+import { Button } from '@lody/ui/button';
+import { Dialog } from '@lody/ui/dialog';
+import { Input } from '@lody/ui/input';
+import { Field as UiField } from '@lody/ui/field';
+import { Tabs } from '@lody/ui/tabs';
+import { Switch } from '@lody/ui/switch';
+import { Textarea } from '@lody/ui/textarea';
+import { space } from '@lody/ui/tokens/scales.stylex';
+import { Field, FormMessage, Section } from './form-primitives';
+import { settingsCatalog as catalog, settingsSurface as surface } from './surface';
+
+const styles = stylex.create({
+  list: { display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: space[1.5] },
+  listRow: { display: 'flex', alignItems: 'center', gap: space[1.5], width: '100%' },
+  keyValueRow: {
+    display: 'grid',
+    gridTemplateColumns: 'minmax(0, 0.8fr) minmax(0, 1.2fr) auto',
+    alignItems: 'center',
+    gap: space[1.5],
+    width: '100%',
+  },
+  grow: { flexGrow: 1, minWidth: 0 },
+});
 
 type KeyValueDraft = { key: string; value: string };
 
@@ -166,27 +184,24 @@ export function McpConnectionForm({
   const isStdio = draft.transport === 'stdio';
 
   return (
-    <form className={cn('flex min-h-0 flex-col', className)} onSubmit={submit}>
-      <div className="scrollbar-pro min-h-0 flex-1 space-y-3 overflow-y-auto px-5 py-4">
+    <form {...withClassName(stylex.props(catalog.editorForm), className)} onSubmit={submit}>
+      <div {...withClassName(stylex.props(catalog.editorBody), 'scrollbar-pro')}>
         <Section title={t('settings.mcp.form.sectionIdentity')}>
-          <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
-            <Field htmlFor={`${fieldId}-name`} label={t('settings.mcp.form.name')}>
-              <Input
-                id={`${fieldId}-name`}
-                required
-                autoComplete="off"
-                className="h-9"
-                placeholder={t('settings.mcp.form.namePlaceholder')}
-                value={draft.name}
-                onChange={(event) =>
-                  setDraft((current) => ({ ...current, name: event.target.value }))
-                }
-              />
-            </Field>
-            <Field label={t('settings.mcp.form.transport')}>
-              <TransportToggle value={draft.transport} onChange={setTransport} />
-            </Field>
-          </div>
+          <Field htmlFor={`${fieldId}-name`} label={t('settings.mcp.form.name')}>
+            <Input
+              id={`${fieldId}-name`}
+              required
+              autoComplete="off"
+              placeholder={t('settings.mcp.form.namePlaceholder')}
+              value={draft.name}
+              onChange={(event) =>
+                setDraft((current) => ({ ...current, name: event.target.value }))
+              }
+            />
+          </Field>
+          <Field label={t('settings.mcp.form.transport')}>
+            <TransportToggle value={draft.transport} onChange={setTransport} />
+          </Field>
           <Field
             htmlFor={`${fieldId}-description`}
             label={t('settings.mcp.form.description')}
@@ -195,7 +210,7 @@ export function McpConnectionForm({
             <Textarea
               id={`${fieldId}-description`}
               rows={2}
-              className="resize-none"
+              resize="none"
               value={draft.description}
               onChange={(event) =>
                 setDraft((current) => ({ ...current, description: event.target.value }))
@@ -219,7 +234,6 @@ export function McpConnectionForm({
                   id={`${fieldId}-command`}
                   autoComplete="off"
                   spellCheck={false}
-                  className="h-9 font-mono text-xs"
                   placeholder="/absolute/path/to/mcp-server"
                   value={draft.command}
                   onChange={(event) =>
@@ -262,7 +276,6 @@ export function McpConnectionForm({
                   id={`${fieldId}-url`}
                   autoComplete="off"
                   spellCheck={false}
-                  className="h-9 font-mono text-xs"
                   placeholder="https://mcp.example.com/mcp"
                   value={draft.url}
                   onChange={(event) =>
@@ -273,13 +286,12 @@ export function McpConnectionForm({
               <Field
                 htmlFor={`${fieldId}-token`}
                 label={t('settings.mcp.form.bearerToken')}
-                icon={<KeyRound className="h-3.5 w-3.5" aria-hidden="true" />}
+                icon={<KeyRound {...stylex.props(catalog.icon)} aria-hidden="true" />}
               >
                 <Input
                   id={`${fieldId}-token`}
                   autoComplete="off"
                   spellCheck={false}
-                  className="h-9 font-mono text-xs"
                   placeholder="${MCP_TOKEN}"
                   value={draft.bearerToken}
                   onChange={(event) =>
@@ -298,14 +310,12 @@ export function McpConnectionForm({
           )}
         </Section>
 
-        <div className="flex items-center justify-between gap-4 rounded-lg border border-border/70 bg-card/60 px-3 py-2.5">
-          <div className="min-w-0">
-            <Label htmlFor={`${fieldId}-default`} className="text-sm">
+        <div {...stylex.props(surface.formBlock, catalog.blockRow)}>
+          <div {...stylex.props(catalog.blockText)}>
+            <UiField.Label htmlFor={`${fieldId}-default`}>
               {t('settings.mcp.form.defaultEnabled')}
-            </Label>
-            <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground">
-              {t('settings.mcp.form.defaultEnabledHint')}
-            </p>
+            </UiField.Label>
+            <p {...stylex.props(catalog.blockHint)}>{t('settings.mcp.form.defaultEnabledHint')}</p>
           </div>
           <Switch
             id={`${fieldId}-default`}
@@ -316,31 +326,25 @@ export function McpConnectionForm({
           />
         </div>
 
-        {error ? (
-          <p
-            role="alert"
-            className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs leading-snug text-destructive"
-          >
-            {error}
-          </p>
-        ) : null}
+        {error ? <FormMessage tone="error">{error}</FormMessage> : null}
       </div>
 
-      <footer className="flex shrink-0 items-center justify-end gap-2 border-t border-border/60 px-5 py-3">
-        <Button type="button" variant="outline" size="sm" disabled={submitting} onClick={onCancel}>
+      <Dialog.Footer>
+        <Button type="button" variant="secondary" disabled={submitting} onClick={onCancel}>
           {t('common.cancel')}
         </Button>
-        <Button type="submit" size="sm" disabled={submitting || draft.name.trim().length === 0}>
-          {submitting ? <Spinner className="h-3.5 w-3.5" aria-hidden="true" /> : null}
+        <Button type="submit" disabled={submitting || draft.name.trim().length === 0}>
+          {submitting ? <Spinner size="small" aria-hidden="true" /> : null}
           {submitting ? t('settings.mcp.form.saving') : t('common.save')}
         </Button>
-      </footer>
+      </Dialog.Footer>
     </form>
   );
 }
 
-/** Two-state transport switch. Same segmented grammar as the other binary
- *  settings controls, so it reads as one control rather than a dropdown. */
+/** The transport is a mode that decides which fields follow, so it is a
+ *  segmented strip — one line, read as "which kind" — not a column of radios
+ *  spreading one decision over two rows. */
 function TransportToggle({
   value,
   onChange,
@@ -350,34 +354,16 @@ function TransportToggle({
 }) {
   const { t } = useTranslation();
   return (
-    <div
-      role="radiogroup"
-      aria-label={t('settings.mcp.form.transport')}
-      className="inline-grid h-9 grid-cols-2 rounded-full border border-border/70 bg-muted/60 p-0.5"
-    >
-      {MCP_TRANSPORTS.map((transport) => {
-        const selected = value === transport;
-        return (
-          <button
-            key={transport}
-            type="button"
-            role="radio"
-            aria-checked={selected}
-            onClick={() => onChange(transport)}
-            className={cn(
-              'flex min-w-20 items-center justify-center gap-1.5 rounded-full px-3 text-xs font-normal transition-colors',
-              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60',
-              selected
-                ? 'bg-background text-foreground shadow-sm'
-                : 'text-muted-foreground hover:text-foreground'
-            )}
-          >
+    <Tabs.Root value={value} onValueChange={(next) => onChange(next as McpTransport)}>
+      <Tabs.List aria-label={t('settings.mcp.form.transport')}>
+        {MCP_TRANSPORTS.map((transport) => (
+          <Tabs.Tab key={transport} value={transport}>
             <McpTransportIcon transport={transport} />
             {MCP_TRANSPORT_SHORT_LABELS[transport]}
-          </button>
-        );
-      })}
-    </div>
+          </Tabs.Tab>
+        ))}
+      </Tabs.List>
+    </Tabs.Root>
   );
 }
 
@@ -398,16 +384,10 @@ function ListEditor({
 }) {
   return (
     <Field label={label} hint={hint}>
-      <div className="space-y-1.5">
+      <div {...stylex.props(styles.list)}>
         {children}
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          className="h-7 gap-1 px-2 text-xs font-normal text-muted-foreground hover:text-foreground"
-          onClick={onAdd}
-        >
-          <Plus className="h-3.5 w-3.5" aria-hidden="true" />
+        <Button type="button" variant="ghost" size="small" onClick={onAdd}>
+          <Plus {...stylex.props(catalog.icon)} aria-hidden="true" />
           {addLabel}
         </Button>
       </div>
@@ -420,13 +400,14 @@ function RemoveRowButton({ onClick }: { onClick: () => void }) {
   return (
     <Button
       type="button"
-      size="icon"
+      size="small"
+      icon
       variant="ghost"
-      className="h-8 w-8 shrink-0 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+      tone="destructive"
       aria-label={t('common.remove')}
       onClick={onClick}
     >
-      <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+      <Trash2 {...stylex.props(catalog.icon)} aria-hidden="true" />
     </Button>
   );
 }
@@ -454,13 +435,13 @@ function StringListEditor({
       onAdd={() => onChange([...values, ''])}
     >
       {values.map((value, index) => (
-        <div key={index} className="flex items-center gap-1.5">
+        <div key={index} {...stylex.props(styles.listRow)}>
           <Input
             value={value}
             placeholder={placeholder}
             autoComplete="off"
             spellCheck={false}
-            className="h-8 font-mono text-xs"
+            className={stylex.props(styles.grow).className}
             onChange={(event) =>
               onChange(
                 values.map((item, itemIndex) => (itemIndex === index ? event.target.value : item))
@@ -497,17 +478,13 @@ function KeyValueEditor({
       onAdd={() => onChange([...rows, { key: '', value: '' }])}
     >
       {rows.map((row, index) => (
-        <div
-          key={index}
-          className="grid grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)_auto] items-center gap-1.5"
-        >
+        <div key={index} {...stylex.props(styles.keyValueRow)}>
           <Input
             aria-label={t('settings.mcp.form.key')}
             placeholder={keyPlaceholder ?? t('settings.mcp.form.key')}
             value={row.key}
             autoComplete="off"
             spellCheck={false}
-            className="h-8 font-mono text-xs"
             onChange={(event) =>
               onChange(
                 rows.map((item, itemIndex) =>
@@ -522,7 +499,6 @@ function KeyValueEditor({
             value={row.value}
             autoComplete="off"
             spellCheck={false}
-            className="h-8 font-mono text-xs"
             onChange={(event) =>
               onChange(
                 rows.map((item, itemIndex) =>

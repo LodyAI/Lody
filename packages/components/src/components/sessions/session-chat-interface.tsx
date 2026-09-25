@@ -53,8 +53,8 @@ import {
   Users,
   X,
 } from 'lucide-react';
-import { Spinner } from '@/ui/spinner';
-import { Button } from '@/ui/button';
+import { Spinner } from '@lody/ui/spinner';
+import { Button } from '@lody/ui/button';
 import { isMacOSElectronRenderer, useElectronFullscreen } from '@/lib/electron';
 import { getIpcServices } from '@/lib/electron-ipc-client';
 import { matchesKeyboardEvent } from '@/lib/commands/key-matcher';
@@ -71,7 +71,7 @@ import {
 import { useSessionMcpSelection } from '@/hooks/use-session-mcp-selection';
 import { MessageQueueDisplay, shouldRequestNativeQueueSteer } from './message-queue';
 import { useTranslation } from 'react-i18next';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import type {
   LocalProjectId,
   MessageContent,
@@ -154,7 +154,8 @@ import {
 } from '@/lib/session-conversation-preparation';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { cloudOperations } from '@/lib/cloud-api-operations';
-import { useCloudQuery } from '@lody/platform/react';
+import { useCloudQuery, usePlatformCapability } from '@lody/platform/react';
+import { openExternalUrl } from '@/lib/native-browser';
 import { ReadyForReviewStillDraftError, useGitHubPrDetails } from '@/hooks/use-github-pr-details';
 import { derivePrStatusFromDetails } from '@/lib/github-pr-details-state';
 import type { AgentSelection } from '@/components/shared/agent-selector';
@@ -188,16 +189,17 @@ import type { SessionSharingState } from '@/lib/session-sharing';
 import {
   SessionAccessControl,
   SessionArchivedBadge,
+  SESSION_HEADER_STATUS_PILL_CLASS,
   getSessionSharingDescription,
   getSessionSharingLabel,
   type SessionSharingTranslator,
 } from '@/components/session-sharing';
 
-import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/ui/sheet';
-import { Badge } from '@/ui/badge';
-import { Input } from '@/ui/input';
-import { Separator } from '@/ui/separator';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
+import { Drawer } from '@lody/ui/drawer';
+import { Badge } from '@lody/ui/badge';
+import { Input } from '@lody/ui/input';
+import { Separator } from '@lody/ui/separator';
+import { Tooltip } from '@lody/ui/tooltip';
 import { useSessionDoc } from '@/hooks/use-session-doc';
 import { useSessionActions } from '@/hooks/use-session-actions';
 import { useWorkspaceMembers, type WorkspaceMember } from '@/hooks/use-workspace-members';
@@ -255,16 +257,7 @@ import {
   resolveOpenedByNavigationTarget,
   type SessionNavigationTarget,
 } from '@/lib/session-navigation';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuSub,
-  DropdownMenuSubContent,
-  DropdownMenuSubTrigger,
-  DropdownMenuTrigger,
-} from '@/ui/dropdown-menu';
+import { Menu } from '@/ui/menu';
 import {
   isThoughtLevelSelector,
   type AcpConfigOptionValue,
@@ -329,16 +322,7 @@ import {
   schedulingEntriesFromFacts,
   useSessionTurnFacts,
 } from './session-turn-facts';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/ui/alert-dialog';
+import { AlertDialog } from '@/ui/dialog';
 import { resolveSessionHtmlAttachmentAction } from './session-html-attachment-action';
 
 function getErrorMessage(err: unknown): string {
@@ -739,9 +723,10 @@ export function SessionHistoryButton({
 
   const trigger = (
     <Button
-      variant={compact ? 'ghost' : 'outline'}
-      size={compact ? 'icon' : 'sm'}
-      className={cn('shrink-0', compact ? 'h-8 w-8' : '')}
+      variant={compact ? 'ghost' : 'secondary'}
+      size="small"
+      icon={compact}
+      className="shrink-0"
       disabled={historySessions.length === 0}
     >
       <History className={cn('h-4 w-4', compact ? '' : 'mr-2')} />
@@ -750,13 +735,13 @@ export function SessionHistoryButton({
   );
 
   return (
-    <Sheet open={open} onOpenChange={setOpen}>
-      <SheetTrigger asChild>{trigger}</SheetTrigger>
-      <SheetContent side={isMobile ? 'bottom' : 'right'} className="sm:max-w-md">
-        <SheetHeader>
-          <SheetTitle>{t('sessions.history', 'History')}</SheetTitle>
+    <Drawer.Root side={isMobile ? 'bottom' : 'end'} open={open} onOpenChange={setOpen}>
+      <Drawer.Trigger render={trigger} />
+      <Drawer.Content side={isMobile ? 'bottom' : 'end'} className="sm:max-w-md">
+        <Drawer.Header>
+          <Drawer.Title>{t('sessions.history', 'History')}</Drawer.Title>
           <p className="text-sm text-muted-foreground">{t('sessions.newSession.title')}</p>
-        </SheetHeader>
+        </Drawer.Header>
         <div className="mt-6 space-y-2">
           {historySessions.length === 0 ? (
             <div className="text-sm text-muted-foreground">{t('sessions.noSessions')}</div>
@@ -801,17 +786,15 @@ export function SessionHistoryButton({
                         <span className="truncate">{statusLabel}</span>
                       </div>
                     </div>
-                    {isActive && (
-                      <Badge variant="secondary">{t('common.current', 'Current')}</Badge>
-                    )}
+                    {isActive && <Badge>{t('common.current', 'Current')}</Badge>}
                   </div>
                 </button>
               );
             })
           )}
         </div>
-      </SheetContent>
-    </Sheet>
+      </Drawer.Content>
+    </Drawer.Root>
   );
 }
 
@@ -1039,7 +1022,7 @@ export function SessionHeaderMenu({
     openedByRelations && (openedBySession || openedSessions.length > 0) ? (
       <>
         {openedBySession ? (
-          <DropdownMenuItem
+          <Menu.Item
             disabled={!openedBySession.target}
             onClick={() => {
               if (openedBySession.target) {
@@ -1052,19 +1035,19 @@ export function SessionHeaderMenu({
             <span className="min-w-0 flex-1 truncate">
               {t('sessions.openedBy.openOpener', 'Opened by')}: {openedBySession.title}
             </span>
-          </DropdownMenuItem>
+          </Menu.Item>
         ) : null}
         {openedSessions.length > 0 ? (
-          <DropdownMenuSub>
-            <DropdownMenuSubTrigger>
+          <Menu.Submenu>
+            <Menu.SubmenuTrigger>
               <GitBranchPlus className="h-3.5 w-3.5 shrink-0" />
               <span className="min-w-0 flex-1 truncate">
                 {t('sessions.openedBy.openedSessions', 'Opened sessions')} ({openedSessions.length})
               </span>
-            </DropdownMenuSubTrigger>
-            <DropdownMenuSubContent className="max-h-72 min-w-[200px] max-w-[280px] overflow-y-auto">
+            </Menu.SubmenuTrigger>
+            <Menu.Content className="max-h-72 min-w-[200px] max-w-[280px] overflow-y-auto">
               {openedSessions.map((opened) => (
-                <DropdownMenuItem
+                <Menu.Item
                   key={opened.sessionId}
                   onClick={() => {
                     openedByRelations.onOpenSession(opened.target);
@@ -1072,12 +1055,12 @@ export function SessionHeaderMenu({
                   title={opened.title}
                 >
                   <span className="min-w-0 flex-1 truncate">{opened.title}</span>
-                </DropdownMenuItem>
+                </Menu.Item>
               ))}
-            </DropdownMenuSubContent>
-          </DropdownMenuSub>
+            </Menu.Content>
+          </Menu.Submenu>
         ) : null}
-        <DropdownMenuSeparator />
+        <Menu.Separator />
       </>
     ) : null;
 
@@ -1089,34 +1072,34 @@ export function SessionHeaderMenu({
     });
     if (openInIde.options.length === 1) {
       return (
-        <DropdownMenuItem onClick={openInIde.onOpen}>
+        <Menu.Item onClick={openInIde.onOpen}>
           <SelectedIcon className="h-3.5 w-3.5 shrink-0" />
           {openLabel}
-        </DropdownMenuItem>
+        </Menu.Item>
       );
     }
     return (
-      <DropdownMenuSub>
-        <DropdownMenuSubTrigger>
+      <Menu.Submenu>
+        <Menu.SubmenuTrigger>
           <SelectedIcon className="h-3.5 w-3.5 shrink-0" />
           <span className="min-w-0 flex-1 truncate">{openLabel}</span>
-        </DropdownMenuSubTrigger>
-        <DropdownMenuSubContent>
+        </Menu.SubmenuTrigger>
+        <Menu.Content>
           {openInIde.options.map((launcher) => {
             const launcherId = getPathLauncherId(launcher);
             const LauncherIcon = getPathLauncherIcon(launcher);
             return (
-              <DropdownMenuItem key={launcherId} onClick={() => openInIde.onSelect(launcher)}>
+              <Menu.Item key={launcherId} onClick={() => openInIde.onSelect(launcher)}>
                 <LauncherIcon className="h-3.5 w-3.5 shrink-0" />
                 {launcher.label}
                 {launcherId === getPathLauncherId(openInIde.selected) ? (
                   <Check className="ml-auto h-3.5 w-3.5 shrink-0" />
                 ) : null}
-              </DropdownMenuItem>
+              </Menu.Item>
             );
           })}
-        </DropdownMenuSubContent>
-      </DropdownMenuSub>
+        </Menu.Content>
+      </Menu.Submenu>
     );
   })();
 
@@ -1135,29 +1118,40 @@ export function SessionHeaderMenu({
 
   return (
     <>
-      <DropdownMenu
+      <Menu.Root
         onOpenChange={(open) => {
           if (open) onForkMenuOpen?.();
         }}
       >
-        <DropdownMenuTrigger asChild>
+        <Menu.Trigger
+          render={
+            <Button
+              variant="ghost"
+              icon
+              className="h-7 w-7 shrink-0 text-muted-foreground"
+              aria-label={t('sessions.moreActions', 'More actions')}
+            >
+              <Ellipsis className="h-4 w-4" />
+            </Button>
+          }
+        >
           <Button
             variant="ghost"
-            size="icon"
+            icon
             className="h-7 w-7 shrink-0 text-muted-foreground"
             aria-label={t('sessions.moreActions', 'More actions')}
           >
             <Ellipsis className="h-4 w-4" />
           </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className={SESSION_HEADER_MENU_CONTENT_CLASS}>
+        </Menu.Trigger>
+        <Menu.Content align="end" className={SESSION_HEADER_MENU_CONTENT_CLASS}>
           <SessionWindowMenuItem sessionId={session.id} dropdown />
           {/* Identity stays inline: a group label wastes a row, and a submenu hides
               repo/branch/machine behind another step. */}
           {!compact && showSessionContext ? (
             <>
               {isGitHub && repoFullName ? (
-                <DropdownMenuItem
+                <Menu.Item
                   onClick={() =>
                     copyToClipboard(
                       repoFullName,
@@ -1170,11 +1164,11 @@ export function SessionHeaderMenu({
                   <Github className="h-3.5 w-3.5 text-muted-foreground" />
                   <span className="min-w-0 flex-1 truncate">{repoFullName}</span>
                   <Copy className="ml-auto h-3 w-3 shrink-0 text-muted-foreground" />
-                </DropdownMenuItem>
+                </Menu.Item>
               ) : null}
 
               {showBranchInfo ? (
-                <DropdownMenuItem
+                <Menu.Item
                   className="items-start"
                   onClick={() =>
                     copyToClipboard(
@@ -1211,9 +1205,9 @@ export function SessionHeaderMenu({
                     ) : null}
                   </span>
                   <Copy className="ml-auto mt-0.5 h-3 w-3 shrink-0 text-muted-foreground" />
-                </DropdownMenuItem>
+                </Menu.Item>
               ) : showProjectPath ? (
-                <DropdownMenuItem
+                <Menu.Item
                   onClick={() =>
                     copyToClipboard(
                       localPath,
@@ -1226,7 +1220,7 @@ export function SessionHeaderMenu({
                   <Folder className="h-3.5 w-3.5 text-muted-foreground" />
                   <span className="min-w-0 flex-1 truncate">{localPath}</span>
                   <Copy className="ml-auto h-3 w-3 shrink-0 text-muted-foreground" />
-                </DropdownMenuItem>
+                </Menu.Item>
               ) : null}
 
               {machineName ? (
@@ -1235,38 +1229,41 @@ export function SessionHeaderMenu({
                   <span className="sr-only">{t('sessions.machineLabel', 'Machine')}: </span>
                   <span className="min-w-0 flex-1 truncate">{machineName}</span>
                   {project?.kind === 'local' ? (
-                    <span className="ml-auto shrink-0 rounded border border-border/70 px-1 py-px text-[0.62rem] font-medium leading-none text-muted-foreground">
+                    <Badge className="ml-auto">
                       {session.isWorktree
                         ? t('chat.workdir.worktree', 'Worktree')
                         : t('chat.workdir.local', 'Local')}
-                    </span>
+                    </Badge>
                   ) : null}
                 </div>
               ) : null}
 
               {sharing ? (
-                <Tooltip delayDuration={300}>
-                  <TooltipTrigger asChild>
-                    <div className={SESSION_HEADER_MENU_STATIC_ROW_CLASS}>
-                      {sharing.visibility === 'team' ? (
-                        <Users className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                      ) : sharing.visibility === 'private' ? (
-                        <LockKeyhole className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                      ) : (
-                        <Spinner className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                      )}
-                      <span className="min-w-0 flex-1 truncate font-normal">
-                        {getSessionSharingLabel(t, sharing)}
-                      </span>
-                    </div>
-                  </TooltipTrigger>
-                  <TooltipContent side="left" className="max-w-64 px-2.5 py-2 text-xs">
+                <Tooltip.Root>
+                  <Tooltip.Trigger
+                    delay={300}
+                    render={
+                      <div className={SESSION_HEADER_MENU_STATIC_ROW_CLASS}>
+                        {sharing.visibility === 'team' ? (
+                          <Users className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                        ) : sharing.visibility === 'private' ? (
+                          <LockKeyhole className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                        ) : (
+                          <Spinner className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                        )}
+                        <span className="min-w-0 flex-1 truncate font-normal">
+                          {getSessionSharingLabel(t, sharing)}
+                        </span>
+                      </div>
+                    }
+                  />
+                  <Tooltip.Content side="left" className="max-w-64 px-2.5 py-2 text-xs">
                     {getSessionSharingDescription(t, sharing)}
-                  </TooltipContent>
-                </Tooltip>
+                  </Tooltip.Content>
+                </Tooltip.Root>
               ) : null}
 
-              <DropdownMenuSeparator />
+              <Menu.Separator />
             </>
           ) : null}
 
@@ -1275,26 +1272,26 @@ export function SessionHeaderMenu({
           {openInIdeMenu}
 
           {onOpenPublicShare && (
-            <DropdownMenuItem onClick={onOpenPublicShare}>
+            <Menu.Item onClick={onOpenPublicShare}>
               <Share2 className="h-3.5 w-3.5 shrink-0" />
               {t('sharing.manager.title', 'Share')}
-            </DropdownMenuItem>
+            </Menu.Item>
           )}
 
           {onOpenSearch && (
-            <DropdownMenuItem
+            <Menu.Item
               onClick={() => {
                 void onOpenSearch();
               }}
             >
               <Search className="h-3.5 w-3.5 shrink-0" />
               {t('sessions.findInConversation', 'Find in session')}
-            </DropdownMenuItem>
+            </Menu.Item>
           )}
 
           {onFork || onCopyConversationHistory ? (
-            <DropdownMenuSub>
-              <DropdownMenuSubTrigger>
+            <Menu.Submenu>
+              <Menu.SubmenuTrigger>
                 {isForking ? (
                   <Spinner className="h-3.5 w-3.5 shrink-0" />
                 ) : (
@@ -1303,17 +1300,17 @@ export function SessionHeaderMenu({
                 <span className="min-w-0 flex-1 truncate">
                   {t('sessions.forkSession', 'Fork session')}
                 </span>
-              </DropdownMenuSubTrigger>
-              <DropdownMenuSubContent className="min-w-[13rem]">
+              </Menu.SubmenuTrigger>
+              <Menu.Content className="min-w-[13rem]">
                 {onFork &&
                   !isArchived &&
                   getSessionForkDestinationOptions(t, forkWorktreeAvailability).map((option) => {
                     const disabled = option.disabled || isForking;
                     const item = (
-                      <DropdownMenuItem
+                      <Menu.Item
                         key={option.id}
                         disabled={disabled}
-                        onSelect={() => {
+                        onClick={() => {
                           void onFork(option.id);
                         }}
                       >
@@ -1328,7 +1325,7 @@ export function SessionHeaderMenu({
                             {option.status}
                           </span>
                         ) : null}
-                      </DropdownMenuItem>
+                      </Menu.Item>
                     );
                     // The submenu usually opens toward the conversation, so the
                     // explanation sits on that side instead of over the parent menu.
@@ -1345,44 +1342,44 @@ export function SessionHeaderMenu({
                     );
                   })}
                 {onCopyConversationHistory && (
-                  <DropdownMenuItem
-                    onSelect={() => {
+                  <Menu.Item
+                    onClick={() => {
                       void onCopyConversationHistory();
                     }}
                   >
                     <Copy className="h-3.5 w-3.5" />
                     {t('sessions.copyContextMarkdown', 'Copy context as Markdown')}
-                  </DropdownMenuItem>
+                  </Menu.Item>
                 )}
-              </DropdownMenuSubContent>
-            </DropdownMenuSub>
+              </Menu.Content>
+            </Menu.Submenu>
           ) : null}
 
           {onRename && !isArchived && (
-            <DropdownMenuItem
+            <Menu.Item
               onClick={() => {
                 void onRename();
               }}
             >
               <Pencil className="h-3.5 w-3.5 shrink-0" />
               {t('sidebar.renameChat.title', 'Rename Chat')}
-            </DropdownMenuItem>
+            </Menu.Item>
           )}
 
           {owner && !isArchived ? (
-            <DropdownMenuSub>
-              <DropdownMenuSubTrigger>
+            <Menu.Submenu>
+              <Menu.SubmenuTrigger>
                 <UserRoundCog className="h-3.5 w-3.5 shrink-0" />
                 <span className="min-w-0 flex-1 truncate">
                   {t('sessions.owner.change', 'Change owner')}
                 </span>
-              </DropdownMenuSubTrigger>
-              <DropdownMenuSubContent className="max-h-72 min-w-[200px] max-w-[280px] overflow-y-auto">
+              </Menu.SubmenuTrigger>
+              <Menu.Content className="max-h-72 min-w-[200px] max-w-[280px] overflow-y-auto">
                 {owner.members.map((member) => {
                   const isOwner = member.userId === owner.ownerUserId;
                   const isPending = owner.pendingUserId === member.userId;
                   return (
-                    <DropdownMenuItem
+                    <Menu.Item
                       key={member.userId}
                       disabled={owner.pendingUserId != null}
                       onClick={() => {
@@ -1395,8 +1392,8 @@ export function SessionHeaderMenu({
                     >
                       <UserAvatar
                         user={{ id: member.userId, name: member.name, image: member.image }}
-                        className="h-4 w-4 shrink-0"
-                        fallbackClassName="text-[0.55rem]"
+                        size="mini"
+                        className="shrink-0"
                       />
                       <span className="min-w-0 flex-1 truncate">{member.name}</span>
                       {isPending ? (
@@ -1404,18 +1401,18 @@ export function SessionHeaderMenu({
                       ) : isOwner ? (
                         <Check className="ml-auto h-3.5 w-3.5 shrink-0" />
                       ) : null}
-                    </DropdownMenuItem>
+                    </Menu.Item>
                   );
                 })}
-              </DropdownMenuSubContent>
-            </DropdownMenuSub>
+              </Menu.Content>
+            </Menu.Submenu>
           ) : null}
 
           {/* Copy URL stays in the Copy submenu even for private sessions (the
               link still works for the owner); sharing is a separate action that
               only appears while the conversation isn't team-visible. */}
           {sharing && sharing.visibility !== 'team' ? (
-            <DropdownMenuItem
+            <Menu.Item
               disabled={shareActionDisabled}
               onClick={() => {
                 void onShareWithTeam?.();
@@ -1440,18 +1437,18 @@ export function SessionHeaderMenu({
                   : sharing.canManage
                     ? t('sessions.sharing.shareWithTeam', 'Share with team…')
                     : t('sessions.sharing.onlyOwnerCanShare', 'Only the device owner can share')}
-            </DropdownMenuItem>
+            </Menu.Item>
           ) : null}
 
-          <DropdownMenuSub>
-            <DropdownMenuSubTrigger>
+          <Menu.Submenu>
+            <Menu.SubmenuTrigger>
               <Copy className="h-3.5 w-3.5 shrink-0" />
               {t('sessions.copy', 'Copy')}
-            </DropdownMenuSubTrigger>
-            <DropdownMenuSubContent className="min-w-[200px]">
+            </Menu.SubmenuTrigger>
+            <Menu.Content className="min-w-[200px]">
               {showBaseBranchContext ? (
                 <>
-                  <DropdownMenuItem
+                  <Menu.Item
                     onClick={() =>
                       copyToClipboard(
                         baseBranch,
@@ -1462,11 +1459,11 @@ export function SessionHeaderMenu({
                   >
                     <GitBranch className="h-3.5 w-3.5 shrink-0" />
                     {t('sessions.copyBaseBranch', 'Copy base branch')}
-                  </DropdownMenuItem>
-                  <DropdownMenuSeparator />
+                  </Menu.Item>
+                  <Menu.Separator />
                 </>
               ) : null}
-              <DropdownMenuItem
+              <Menu.Item
                 onClick={() =>
                   copyToClipboard(
                     trimmedWorkspacePath,
@@ -1481,8 +1478,8 @@ export function SessionHeaderMenu({
               >
                 <Copy className="h-3.5 w-3.5 shrink-0" />
                 {t('sessions.copyPath', 'Copy path')}
-              </DropdownMenuItem>
-              <DropdownMenuItem
+              </Menu.Item>
+              <Menu.Item
                 onClick={() => {
                   void onCopyConversationHistory?.();
                 }}
@@ -1498,19 +1495,19 @@ export function SessionHeaderMenu({
               >
                 <Copy className="h-3.5 w-3.5 shrink-0" />
                 {t('sessions.copyAsMarkdown', 'Copy as Markdown')}
-              </DropdownMenuItem>
-              <DropdownMenuItem
+              </Menu.Item>
+              <Menu.Item
                 onClick={() => {
                   void onCopyUrl();
                 }}
               >
                 <Copy className="h-3.5 w-3.5 shrink-0" />
                 {t('sessions.copyUrl', 'Copy URL')}
-              </DropdownMenuItem>
-            </DropdownMenuSubContent>
-          </DropdownMenuSub>
+              </Menu.Item>
+            </Menu.Content>
+          </Menu.Submenu>
 
-          <DropdownMenuItem
+          <Menu.Item
             disabled={!onShareAsImage}
             onClick={() => {
               onShareAsImage?.();
@@ -1518,7 +1515,7 @@ export function SessionHeaderMenu({
           >
             <Image className="h-3.5 w-3.5 shrink-0" />
             {t('sessions.shareAsImage', 'Share as image…')}
-          </DropdownMenuItem>
+          </Menu.Item>
 
           <AutoReviewMenuItem
             sessionId={session.id}
@@ -1530,19 +1527,19 @@ export function SessionHeaderMenu({
           {isArchived
             ? (onRestore || onDelete) && (
                 <>
-                  <DropdownMenuSeparator />
+                  <Menu.Separator />
                   {onRestore && (
-                    <DropdownMenuItem
+                    <Menu.Item
                       onClick={() => {
                         void onRestore();
                       }}
                     >
                       <ArchiveRestore className="h-3.5 w-3.5 shrink-0" />
                       {t('archive.restore', 'Restore session')}
-                    </DropdownMenuItem>
+                    </Menu.Item>
                   )}
                   {onDelete && (
-                    <DropdownMenuItem
+                    <Menu.Item
                       onClick={() => {
                         void onDelete();
                       }}
@@ -1550,25 +1547,25 @@ export function SessionHeaderMenu({
                     >
                       <Trash2 className="h-3.5 w-3.5 shrink-0" />
                       {t('archive.delete', 'Delete permanently')}
-                    </DropdownMenuItem>
+                    </Menu.Item>
                   )}
                 </>
               )
             : onArchive && (
                 <>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem
+                  <Menu.Separator />
+                  <Menu.Item
                     onClick={() => {
                       void onArchive();
                     }}
                   >
                     <Archive className="h-3.5 w-3.5 shrink-0" />
                     {t('sessions.archive', 'Archive session')}
-                  </DropdownMenuItem>
+                  </Menu.Item>
                 </>
               )}
-        </DropdownMenuContent>
-      </DropdownMenu>
+        </Menu.Content>
+      </Menu.Root>
       <ReviewAgentSetupDialog
         open={reviewSetupOpen}
         onOpenChange={setReviewSetupOpen}
@@ -1623,7 +1620,7 @@ export function SessionSearchBar({
       <Button
         type="button"
         variant="ghost"
-        size="icon"
+        icon
         className="h-6 w-6 shrink-0 rounded-md text-muted-foreground transition-colors hover:bg-hover hover:text-foreground disabled:pointer-events-none disabled:text-muted-foreground/40"
         disabled={!hasResults}
         onClick={onClick}
@@ -1634,15 +1631,15 @@ export function SessionSearchBar({
     );
     if (!hasResults) return button;
     return (
-      <Tooltip delayDuration={400}>
-        <TooltipTrigger asChild>{button}</TooltipTrigger>
-        <TooltipContent side="bottom" className="flex items-center gap-1.5 px-2 py-1 text-[11px]">
+      <Tooltip.Root>
+        <Tooltip.Trigger delay={400} render={button} />
+        <Tooltip.Content side="bottom" className="flex items-center gap-1.5 px-2 py-1 text-[11px]">
           <span>{label}</span>
           <span className="rounded-sm border border-border/70 bg-muted px-1 font-mono text-[10px] leading-none text-muted-foreground">
             {shortcut}
           </span>
-        </TooltipContent>
-      </Tooltip>
+        </Tooltip.Content>
+      </Tooltip.Root>
     );
   };
 
@@ -1715,20 +1712,23 @@ export function SessionSearchBar({
             onPrevious
           )}
           {renderNavButton(ArrowDown, t('sessions.nextResult', 'Next result'), '↵', onNext)}
-          <Tooltip delayDuration={400}>
-            <TooltipTrigger asChild>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className="h-6 w-6 shrink-0 rounded-md text-muted-foreground transition-colors hover:bg-hover hover:text-foreground"
-                onClick={onClose}
-                aria-label={t('common.close', 'Close')}
-              >
-                <X className="h-3.5 w-3.5" strokeWidth={2} />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent
+          <Tooltip.Root>
+            <Tooltip.Trigger
+              delay={400}
+              render={
+                <Button
+                  type="button"
+                  variant="ghost"
+                  icon
+                  className="h-6 w-6 shrink-0 rounded-md text-muted-foreground transition-colors hover:bg-hover hover:text-foreground"
+                  onClick={onClose}
+                  aria-label={t('common.close', 'Close')}
+                >
+                  <X className="h-3.5 w-3.5" strokeWidth={2} />
+                </Button>
+              }
+            />
+            <Tooltip.Content
               side="bottom"
               className="flex items-center gap-1.5 px-2 py-1 text-[11px]"
             >
@@ -1736,8 +1736,8 @@ export function SessionSearchBar({
               <span className="rounded-sm border border-border/70 bg-muted px-1 font-mono text-[10px] leading-none text-muted-foreground">
                 Esc
               </span>
-            </TooltipContent>
-          </Tooltip>
+            </Tooltip.Content>
+          </Tooltip.Root>
         </div>
       </div>
     </div>
@@ -2338,15 +2338,28 @@ export const SessionChatInterface = memo(
       () => getSessionGitHubState(session, workspaceSession),
       [session, workspaceSession]
     );
+    const hasHostedGitHub = usePlatformCapability('githubIntegration');
     const latestPrNumber = getPullRequestNumber(latestPr);
     const latestPrRepoFullName = getPullRequestRepoFullName(latestPr) ?? repoFullName;
+    const prLinkHandler = latestPr
+      ? hasHostedGitHub && onOpenPrTab && latestPrRepoFullName && latestPrNumber
+        ? () =>
+            onOpenPrTab({
+              prNumber: latestPrNumber,
+              repoFullName: latestPrRepoFullName,
+              headCommitSha: getSessionPullRequestLegacyFields(latestPr).headCommitSha,
+            })
+        : () => {
+            void openExternalUrl(latestPr.url);
+          }
+      : undefined;
     const preferredMergeMethod = usePreferredPrMergeMethod();
     const activePrDetails = useGitHubPrDetails({
       workspaceId,
       repoFullName: latestPrRepoFullName,
       prNumber: latestPrNumber,
       headCommitSha: getSessionPullRequestLegacyFields(latestPr).headCommitSha,
-      enabled: canShowGitHubActions && hasExistingPr,
+      enabled: hasHostedGitHub && canShowGitHubActions && hasExistingPr,
     });
     const {
       data: activePrData,
@@ -4737,6 +4750,7 @@ export const SessionChatInterface = memo(
       const liveCiFailed = infoBarPrCiRuns?.some((run) => run.status === 'failure') ?? false;
       return resolveSessionInfoBarGitHubActionIds({
         canShowGitHubActions,
+        canMutatePr: hasHostedGitHub,
         hasExistingPr,
         workspaceDirty,
         workspaceUnpushed,
@@ -4814,6 +4828,7 @@ export const SessionChatInterface = memo(
       });
     }, [
       canShowGitHubActions,
+      hasHostedGitHub,
       handleCommitAndPush,
       handleCreateDraftPr,
       handleCreatePr,
@@ -5452,20 +5467,7 @@ export const SessionChatInterface = memo(
 
     const prBadge =
       canShowGitHubActions && latestPr ? (
-        <PullRequestBadge
-          pr={latestPr}
-          size="md"
-          onOpenTab={
-            onOpenPrTab && latestPrNumber && latestPrRepoFullName
-              ? () =>
-                  onOpenPrTab({
-                    prNumber: latestPrNumber,
-                    repoFullName: latestPrRepoFullName,
-                    headCommitSha: getSessionPullRequestLegacyFields(latestPr).headCommitSha,
-                  })
-              : undefined
-          }
-        />
+        <PullRequestBadge pr={latestPr} size="md" onOpenTab={prLinkHandler} />
       ) : null;
 
     const localProjectId = useMemo(() => {
@@ -5776,15 +5778,6 @@ export const SessionChatInterface = memo(
 
     const headerGitHubActions = headerActionsSlot !== undefined ? headerActionsSlot : prBadge;
 
-    const prLinkHandler =
-      onOpenPrTab && latestPr && latestPrRepoFullName && latestPrNumber
-        ? () =>
-            onOpenPrTab({
-              prNumber: latestPrNumber,
-              repoFullName: latestPrRepoFullName,
-              headCommitSha: getSessionPullRequestLegacyFields(latestPr).headCommitSha,
-            })
-        : undefined;
     // Pending permission requests live in the active (latest) assistant turn.
     const permissionSessionHistory = sessionHistory as unknown as Parameters<
       typeof FloatingPermissionRequest
@@ -5799,32 +5792,32 @@ export const SessionChatInterface = memo(
       <>
         {shouldShowOpenInIdeButton && isElectronRendererForPathLaunch && (
           <div className={cn(SESSION_PAGE_HEADER_PILLS_CLASS, 'items-center')}>
-            <Button
-              className="h-6 px-2 py-1 rounded-r-none border-r-0 gap-1 shadow-none"
-              variant="outline"
-              size="sm"
+            <button
+              type="button"
+              className={cn(SESSION_HEADER_STATUS_PILL_CLASS, 'gap-1 rounded-r-none border-r-0')}
               onClick={handleOpenInIde}
             >
               <SelectedPathLauncherIcon className="h-3.5 w-3.5" />
               <span className="text-xs">{selectedPathLauncher.label}</span>
-            </Button>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  className="h-6 px-1 py-1 rounded-l-none shadow-none"
-                  variant="outline"
-                  size="sm"
-                  aria-label={t('sessions.selectPathLauncher', 'Select launcher')}
-                >
-                  <ChevronDown className="h-3 w-3" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
+            </button>
+            <Menu.Root>
+              <Menu.Trigger
+                render={
+                  <button
+                    type="button"
+                    className={cn(SESSION_HEADER_STATUS_PILL_CLASS, 'rounded-l-none px-1')}
+                    aria-label={t('sessions.selectPathLauncher', 'Select launcher')}
+                  >
+                    <ChevronDown className="h-3 w-3" />
+                  </button>
+                }
+              />
+              <Menu.Content align="end">
                 {pathLauncherOptions.map((launcher) => {
                   const launcherId = getPathLauncherId(launcher);
                   const LauncherIcon = getPathLauncherIcon(launcher);
                   return (
-                    <DropdownMenuItem
+                    <Menu.Item
                       key={launcherId}
                       onClick={() => {
                         void handleSelectPathLauncher(launcher);
@@ -5835,12 +5828,12 @@ export const SessionChatInterface = memo(
                       {launcherId === getPathLauncherId(selectedPathLauncher) && (
                         <Check className="ml-auto h-3.5 w-3.5" />
                       )}
-                    </DropdownMenuItem>
+                    </Menu.Item>
                   );
                 })}
-                <DropdownMenuSeparator />
+                <Menu.Separator />
                 {ACTION_OPTIONS.map((action) => (
-                  <DropdownMenuItem
+                  <Menu.Item
                     key={action.id}
                     onClick={
                       action.id === 'copy-path'
@@ -5852,16 +5845,16 @@ export const SessionChatInterface = memo(
                   >
                     <action.Icon className="h-3.5 w-3.5" />
                     {t('sessions.copyPath', action.label)}
-                  </DropdownMenuItem>
+                  </Menu.Item>
                 ))}
                 {isElectronRendererForPathLaunch && (
-                  <DropdownMenuItem onClick={handleOpenPathLauncherSettings}>
+                  <Menu.Item onClick={handleOpenPathLauncherSettings}>
                     <Plus className="h-3.5 w-3.5" />
                     {t('sessions.managePathLaunchers', 'Add more…')}
-                  </DropdownMenuItem>
+                  </Menu.Item>
                 )}
-              </DropdownMenuContent>
-            </DropdownMenu>
+              </Menu.Content>
+            </Menu.Root>
           </div>
         )}
       </>
@@ -6114,11 +6107,14 @@ export const SessionChatInterface = memo(
                     </div>
                   )}
 
-                  {/* Floating permission request - shown when session is waiting for permission */}
+                  {/* The one place a pending permission request is answered; it stands in for the composer. */}
                   <FloatingPermissionRequest
                     sessionId={session.id}
                     sessionStatus={liveSessionStatus ?? undefined}
                     sessionHistory={permissionSessionHistory}
+                    onStop={() => {
+                      void handleStop();
+                    }}
                   />
 
                   {/* Notification permission prompt - shown when session becomes idle (turn completed) */}
@@ -6338,7 +6334,7 @@ export const SessionChatInterface = memo(
               onClose={() => setPublicShareSessionId(null)}
             />
           )}
-          <AlertDialog
+          <AlertDialog.Root
             open={pendingRemoteHtmlFileName !== null}
             onOpenChange={(open) => {
               if (open) return;
@@ -6349,22 +6345,22 @@ export const SessionChatInterface = memo(
               setPendingRemoteHtmlFileName(null);
             }}
           >
-            <AlertDialogContent>
-              <AlertDialogHeader>
-                <AlertDialogTitle>
+            <AlertDialog.Content>
+              <AlertDialog.Header>
+                <AlertDialog.Title>
                   {t('sessions.htmlAttachment.openReportedPortTitle', 'Open the reported port?')}
-                </AlertDialogTitle>
-                <AlertDialogDescription>
+                </AlertDialog.Title>
+                <AlertDialog.Description>
                   {t(
                     'sessions.htmlAttachment.openReportedPortDescription',
                     'To preview {{name}}, Lody will connect to the local port reported by the Agent and open it in Browser.',
                     { name: pendingRemoteHtmlFileName ?? '' }
                   )}
-                </AlertDialogDescription>
-              </AlertDialogHeader>
-              <AlertDialogFooter>
-                <AlertDialogCancel>{t('common.cancel', 'Cancel')}</AlertDialogCancel>
-                <AlertDialogAction
+                </AlertDialog.Description>
+              </AlertDialog.Header>
+              <AlertDialog.Footer>
+                <AlertDialog.Cancel>{t('common.cancel', 'Cancel')}</AlertDialog.Cancel>
+                <AlertDialog.Action
                   onClick={() => {
                     remotePortAllowedRef.current = true;
                     captureSessionEvent('file_preview/remote_port_confirmed', {
@@ -6375,10 +6371,10 @@ export const SessionChatInterface = memo(
                   }}
                 >
                   {t('sessions.htmlAttachment.openReportedPortAction', 'Connect and open')}
-                </AlertDialogAction>
-              </AlertDialogFooter>
-            </AlertDialogContent>
-          </AlertDialog>
+                </AlertDialog.Action>
+              </AlertDialog.Footer>
+            </AlertDialog.Content>
+          </AlertDialog.Root>
         </SessionConversationPage>
       </PrLinkProvider>
     );

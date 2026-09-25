@@ -1,8 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import type { ReactNode } from 'react';
-import { Check, ChevronDown } from 'lucide-react';
-import { Popover, PopoverContent, PopoverTrigger } from '@/ui/popover';
-import { cn } from '@/lib/utils';
+import { useRef, type ReactNode } from 'react';
+import { Select } from '@lody/ui/select';
 
 export interface PreviewSelectOption<T extends string> {
   value: T;
@@ -12,15 +9,25 @@ export interface PreviewSelectOption<T extends string> {
 interface PreviewSelectProps<T extends string> {
   value: T;
   options: PreviewSelectOption<T>[];
-  /** Live-preview the hovered/highlighted value. Omit when the option has no live preview. */
+  /** Live-preview the highlighted value. Omit when the option has no live preview. */
   onPreview?: (value: T) => void;
   onCommit: (value: T) => void;
-  /** Restore the original value when the popover closes without committing. */
+  /** Restore the original value when the list closes without a pick. */
   onCancel?: () => void;
   triggerClassName?: string;
-  renderValue?: (option: PreviewSelectOption<T> | undefined) => ReactNode;
+  'aria-label'?: string;
 }
 
+/**
+ * A `@lody/ui` Select whose highlighted row can be previewed before it is picked
+ * — a theme shown on the settings behind the list while the pointer or the arrow
+ * keys move down it.
+ *
+ * It was a hand-built popover with its own trigger, rows and key handling, which
+ * is why it looked like no other select in the product. Base UI moves focus onto
+ * the highlighted row, so a row taking focus is the preview; a pick commits it,
+ * and a list closed without one hands the original back through `onCancel`.
+ */
 export function PreviewSelect<T extends string>({
   value,
   options,
@@ -28,160 +35,38 @@ export function PreviewSelect<T extends string>({
   onCommit,
   onCancel,
   triggerClassName,
-  renderValue,
+  'aria-label': ariaLabel,
 }: PreviewSelectProps<T>) {
-  const [open, setOpen] = useState(false);
-  const [highlightedIndex, setHighlightedIndex] = useState(-1);
-  const [frozenWidth, setFrozenWidth] = useState<number | null>(null);
-  const triggerRef = useRef<HTMLButtonElement>(null);
-  const listRef = useRef<HTMLDivElement>(null);
-  const originalValueRef = useRef(value);
   const committedRef = useRef(false);
 
-  const selectedOption = options.find((o) => o.value === value);
-
-  const handleOpen = useCallback(() => {
-    originalValueRef.current = value;
-    committedRef.current = false;
-    const idx = options.findIndex((o) => o.value === value);
-    setHighlightedIndex(idx >= 0 ? idx : 0);
-    // Freeze the panel to the trigger width at open time. Hovering an option
-    // live-previews a theme, whose reflow can nudge the trigger width; pinning
-    // the panel to `--radix-popover-trigger-width` (re-measured live) would make
-    // it jump. A snapshot keeps the width stable for the popover's lifetime.
-    setFrozenWidth(triggerRef.current?.getBoundingClientRect().width ?? null);
-    setOpen(true);
-  }, [value, options]);
-
-  const handleCommit = useCallback(
-    (optionValue: T) => {
-      committedRef.current = true;
-      onCommit(optionValue);
-      setOpen(false);
-    },
-    [onCommit]
-  );
-
-  const handleCancel = useCallback(() => {
-    onCancel?.();
-    setOpen(false);
-  }, [onCancel]);
-
-  const handleOpenChange = useCallback(
-    (nextOpen: boolean) => {
-      if (nextOpen) {
-        handleOpen();
-      } else if (!committedRef.current) {
-        handleCancel();
-      } else {
-        setOpen(false);
-      }
-    },
-    [handleOpen, handleCancel]
-  );
-
-  const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent) => {
-      if (!open) return;
-
-      switch (e.key) {
-        case 'ArrowDown': {
-          e.preventDefault();
-          const nextIndex = Math.min(highlightedIndex + 1, options.length - 1);
-          setHighlightedIndex(nextIndex);
-          const opt = options[nextIndex];
-          if (opt) onPreview?.(opt.value);
-          break;
-        }
-        case 'ArrowUp': {
-          e.preventDefault();
-          const prevIndex = Math.max(highlightedIndex - 1, 0);
-          setHighlightedIndex(prevIndex);
-          const opt = options[prevIndex];
-          if (opt) onPreview?.(opt.value);
-          break;
-        }
-        case 'Enter': {
-          e.preventDefault();
-          const opt = options[highlightedIndex];
-          if (opt) handleCommit(opt.value);
-          break;
-        }
-        case 'Escape': {
-          e.preventDefault();
-          handleCancel();
-          break;
-        }
-      }
-    },
-    [open, highlightedIndex, options, onPreview, handleCommit, handleCancel]
-  );
-
-  // Scroll highlighted item into view
-  useEffect(() => {
-    if (!open || highlightedIndex < 0) return;
-    const list = listRef.current;
-    if (!list) return;
-    const items = list.querySelectorAll('[data-preview-item]');
-    const item = items[highlightedIndex];
-    if (item) {
-      item.scrollIntoView({ block: 'nearest' });
-    }
-  }, [open, highlightedIndex]);
-
   return (
-    <Popover open={open} onOpenChange={handleOpenChange}>
-      <PopoverTrigger asChild>
-        <button
-          ref={triggerRef}
-          type="button"
-          className={cn(
-            'flex h-9 w-full items-center justify-between whitespace-nowrap rounded-md border border-input-border bg-input-field px-3 py-2 text-sm text-input-foreground shadow-xs ring-offset-background focus:outline-hidden focus:ring-1 focus:ring-ring disabled:cursor-not-allowed disabled:bg-muted disabled:opacity-60',
-            triggerClassName
-          )}
-        >
-          <span className="line-clamp-1">
-            {renderValue ? renderValue(selectedOption) : selectedOption?.label}
-          </span>
-          <ChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-        </button>
-      </PopoverTrigger>
-      <PopoverContent
-        className="w-[var(--radix-popover-trigger-width)] p-1"
-        style={frozenWidth != null ? { width: frozenWidth } : undefined}
-        align="start"
-        onKeyDown={handleKeyDown}
-        onOpenAutoFocus={(e) => {
-          // Prevent auto-focus on first item; we manage focus ourselves
-          e.preventDefault();
-          listRef.current?.focus();
-        }}
-      >
-        <div ref={listRef} tabIndex={-1} className="outline-hidden">
-          {options.map((option, index) => (
-            <div
-              key={option.value}
-              data-preview-item
-              className={cn(
-                'relative flex w-full cursor-default select-none items-center rounded-xs py-1.5 pl-2 pr-8 text-sm outline-hidden',
-                index === highlightedIndex
-                  ? 'bg-hover text-hover-foreground'
-                  : 'hover:bg-hover hover:text-hover-foreground'
-              )}
-              onMouseEnter={() => {
-                setHighlightedIndex(index);
-                onPreview?.(option.value);
-              }}
-              onClick={() => handleCommit(option.value)}
-            >
-              <span className="absolute right-2 flex h-3.5 w-3.5 items-center justify-center">
-                {option.value === originalValueRef.current && <Check className="h-4 w-4" />}
-              </span>
-              {option.label}
-            </div>
-          ))}
-        </div>
-      </PopoverContent>
-    </Popover>
+    <Select.Root
+      items={options}
+      value={value}
+      onOpenChange={(open) => {
+        if (open) committedRef.current = false;
+        else if (!committedRef.current) onCancel?.();
+      }}
+      onValueChange={(next) => {
+        if (next == null) return;
+        committedRef.current = true;
+        onCommit(next as T);
+      }}
+    >
+      <Select.Trigger className={triggerClassName} aria-label={ariaLabel}>
+        <Select.Value />
+      </Select.Trigger>
+      <Select.Content>
+        {options.map((option) => (
+          <Select.Item
+            key={option.value}
+            value={option.value}
+            onFocus={onPreview ? () => onPreview(option.value) : undefined}
+          >
+            {option.label}
+          </Select.Item>
+        ))}
+      </Select.Content>
+    </Select.Root>
   );
 }

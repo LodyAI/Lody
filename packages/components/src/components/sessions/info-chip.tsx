@@ -1,14 +1,7 @@
-import {
-  useMemo,
-  useRef,
-  useState,
-  type ComponentType,
-  type ReactNode,
-  type SVGProps,
-} from 'react';
+import { useRef, useState, type ComponentType, type ReactNode, type SVGProps } from 'react';
 import { ArrowUpRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { Popover, PopoverAnchor, PopoverContent } from '@/ui/popover';
+import { Popover } from '@lody/ui/popover';
 
 export type InfoChipIcon = ComponentType<SVGProps<SVGSVGElement> & { className?: string }>;
 
@@ -93,53 +86,39 @@ export function PopoverActionChip({
 }) {
   const [open, setOpen] = useState(defaultOpen);
   const buttonRef = useRef<HTMLButtonElement>(null);
-  // Anchor to the enclosing info-bar pill so the panel shares its edges.
-  // Radix reads `current` after mount, when `closest` can resolve.
-  const surfaceRef = useMemo(
-    () => ({
-      get current() {
-        const button = buttonRef.current!;
-        return button.closest('[data-info-bar-surface]') ?? button;
-      },
-    }),
-    []
-  );
   return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverAnchor virtualRef={surfaceRef} />
-      <button
-        ref={buttonRef}
-        type="button"
-        aria-label={label}
-        aria-haspopup="dialog"
-        aria-expanded={open}
-        title={label}
-        onClick={() => setOpen((value_) => !value_)}
-        className={cn(
-          CHIP_BUTTON_CLASS,
-          'text-muted-foreground',
-          open && 'bg-muted-foreground/10 text-foreground'
-        )}
-      >
-        <ChipFace icon={icon} value={value} />
-      </button>
-      <PopoverContent
+    <Popover.Root open={open} onOpenChange={setOpen}>
+      <Popover.Trigger
+        render={
+          <button
+            ref={buttonRef}
+            type="button"
+            aria-label={label}
+            title={label}
+            className={cn(
+              CHIP_BUTTON_CLASS,
+              'text-muted-foreground',
+              open && 'bg-muted-foreground/10 text-foreground'
+            )}
+          >
+            <ChipFace icon={icon} value={value} />
+          </button>
+        }
+      />
+      <Popover.Content
         side="top"
         align="start"
-        sideOffset={4}
-        aria-label={label}
-        onPointerDownOutside={(event) => {
-          const target = event.target as Node | null;
-          if (target && buttonRef.current?.contains(target)) {
-            event.preventDefault();
-          }
+        // Anchor to the enclosing info-bar pill so the panel shares its edges.
+        anchor={() => {
+          const button = buttonRef.current;
+          return button?.closest('[data-info-bar-surface]') ?? button;
         }}
-        // The panel spans the pill, edge to edge.
-        className="w-[var(--radix-popover-trigger-width)] border-border/60 p-0 shadow-xl"
+        aria-label={label}
+        className="w-[var(--anchor-width)] border-border/60 p-0 shadow-xl"
       >
         {content}
-      </PopoverContent>
-    </Popover>
+      </Popover.Content>
+    </Popover.Root>
   );
 }
 
@@ -208,7 +187,6 @@ export function StageChip({
   trailing?: ReactNode;
 }) {
   const [popoverOpen, setPopoverOpen] = useState(false);
-  const anchorRef = useRef<HTMLButtonElement>(null);
 
   const iconBadge = iconOverride ?? (
     <span
@@ -258,41 +236,33 @@ export function StageChip({
     );
   } else {
     summaryNode = (
-      <Popover open={popoverOpen} onOpenChange={setPopoverOpen}>
-        <PopoverAnchor asChild>
-          <button
-            ref={anchorRef}
-            type="button"
-            aria-label={detail.ariaLabel}
-            aria-haspopup="dialog"
-            aria-expanded={popoverOpen}
-            title={detail.ariaLabel}
-            onClick={() => setPopoverOpen((value_) => !value_)}
-            className={cn(
-              summaryClassName,
-              'select-none transition-colors hover:bg-muted-foreground/10',
-              popoverOpen && 'bg-muted-foreground/10'
-            )}
-          >
-            {summaryInner}
-          </button>
-        </PopoverAnchor>
-        <PopoverContent
+      <Popover.Root open={popoverOpen} onOpenChange={setPopoverOpen}>
+        <Popover.Trigger
+          render={
+            <button
+              type="button"
+              aria-label={detail.ariaLabel}
+              title={detail.ariaLabel}
+              className={cn(
+                summaryClassName,
+                'select-none transition-colors hover:bg-muted-foreground/10',
+                popoverOpen && 'bg-muted-foreground/10'
+              )}
+            >
+              {summaryInner}
+            </button>
+          }
+        />
+        <Popover.Content
           side="top"
           align="start"
           sideOffset={8}
           aria-label={detail.ariaLabel}
-          onPointerDownOutside={(event) => {
-            const target = event.target as Node | null;
-            if (target && anchorRef.current?.contains(target)) {
-              event.preventDefault();
-            }
-          }}
           className="w-96 max-w-[min(24rem,90vw)] border-border/60 p-0 shadow-xl"
         >
           {detail.content}
-        </PopoverContent>
-      </Popover>
+        </Popover.Content>
+      </Popover.Root>
     );
   }
 

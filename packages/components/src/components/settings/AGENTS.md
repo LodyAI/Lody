@@ -10,13 +10,14 @@ rolls back — is in the root [AGENTS.md](../../../../../AGENTS.md).
 
 ## Layout and components
 
-- Desktop overlay close is `absolute` on the RIGHT pane only, equal `top`/`right`
-  inset, no close row. Right-pane `padding-right` keeps chrome off that column;
-  apply it inside the scroll area so the scrollbar stays flush with the pane edge.
-- Light settings surfaces are white, not gray-on-gray: `data-settings-surface`
-  maps `--card` to `--popover`; list rows use `SETTINGS_ROW_CARD_CLASS`; header
-  bands fill only in dark. No new gray card fills.
-
+- Desktop overlay close is `absolute` on the RIGHT pane only (equal `top`/`right`
+  inset, no close row); the pane's `padding-right`, set inside the scroll area,
+  keeps chrome off that column with the scrollbar flush to the edge.
+- Settings style in StyleX from `surface.ts`/`compact-layout.tsx`: `surface.pageTitle`,
+  then sections: a heading over one white card (`surface.card`) of ruled rows, on
+  `surface.canvas`; the nav is `surface.nav`. Split master/detail by fill, not a
+  line; no new gray fills. Type: `type.stylex.ts` — none below `caption`, stacked
+  at `leading`, weight only for headings.
 - `share-management-setting.tsx` lists published static copies via the scoped cloud
   query. Ordinary members see their publications; admins see the workspace inventory.
   Draft uploads are not published shares. Reuse `useSessionShareLinkActions` for
@@ -27,9 +28,9 @@ rolls back — is in the root [AGENTS.md](../../../../../AGENTS.md).
   settings overlay. Rationale:
   [share inventory jump](../../../../../.agents/notes/implemented/feature/2026-09-15-share-inventory-session-jump.md).
 
-- Desktop Settings > Projects is a two-pane catalog: left GitHub/machines,
-  right the folders on the selected source. Clicking a folder opens a nested
-  modal of stacked `CompactSection`s — never inline the editor beside the list.
+- Desktop Settings > Projects stacks every source (each machine, then GitHub
+  owners) as a `CompactSection` of ruled project rows. Clicking a project opens
+  a nested project window (header, page tabs) — never inline the editor beside the list.
   Mobile keeps the previous stacked list. Local-project deletion reuses
   `useRemoveLocalProject` / `RemoveLocalProjectDialog` (nested overlay like MCP);
   do not add a second confirm. Pending removal stays listed until the owning
@@ -37,11 +38,10 @@ rolls back — is in the root [AGENTS.md](../../../../../AGENTS.md).
   never surface `machine_rpc_unavailable` as an editor error. The GitHub source
   row must paint from `lody:githubReposCache` on first frame; do not wait on
   `listWorkspaceReposWithStatus` to decide whether GitHub exists.
-- A settings row (`compact-layout.tsx`) is one grid: the label column takes the
-  remaining space and the control column hugs its content. Never size either column
-  from a viewport breakpoint — settings render in a panel far narrower than the window,
-  and the panel clips its overflow, so a `md:`-width label column silently hides the
-  control. Copy is `font-normal` (size/muted, not weight).
+- A settings row (`compact-layout.tsx`) is one grid: the label column takes the rest,
+  the control column hugs its content. Never size a column from a viewport breakpoint:
+  the panel is narrower than the window and clips overflow, so a `md:` label column
+  hides the control. Row copy is `font-normal`; only titles and headings take weight.
 - Agent configuration lives in `agent-config-dialog.tsx` plus `env-vars-textarea.tsx`.
   DeepSeek Harness official vs custom endpoint is dialog form state only: persist
   `DEEPSEEK_API_KEY` / `DEEPSEEK_BASE_URL` (official always writes
@@ -50,8 +50,8 @@ rolls back — is in the root [AGENTS.md](../../../../../AGENTS.md).
   add a parallel manual catalog field. Additional env cannot override either connection
   key, and changing endpoint or credential invalidates the dialog's prior live
   verification.
-- Keep optional three.js/R3F usage behind the lazy usage-calendar module so lightweight
-  and SSR consumers do not evaluate its renderer graph.
+- Keep three.js/R3F behind the lazy usage-calendar module so lightweight and SSR
+  consumers never evaluate its renderer graph.
 - Usage day details persist bounded snapshots per auth session, workspace, and
   date. Reuse for one hour; refresh expired selections without blanking cached
   data. Preserve auth/capability gates; see [contract](../../../../../specs/usage-detail-cache.md).
@@ -75,10 +75,9 @@ rolls back — is in the root [AGENTS.md](../../../../../AGENTS.md).
   `text-[…]` or an off-grid padding. `PAD_X` binds the footer too, so every band
   shares one left edge. `ASPECT_SIZE` includes the backdrop; size against the
   48px-shorter framed case. Keep every band but the headline `shrink-0`.
-  The graphic follows the range —
-  hour skyline, day-by-hour grid, or the 53-week calendar, matching the Usage
-  screen — and every kind must fit the one `GRAPHIC_H` box so card height never
-  depends on range. Leave the space beside the headline empty.
+  The graphic follows the range
+  (hour skyline, day-by-hour grid, or 53-week calendar, as on the Usage screen);
+  every kind fits the one `GRAPHIC_H` box so card height never depends on range. Leave the space beside the headline empty.
 
 ## Agent Roles
 

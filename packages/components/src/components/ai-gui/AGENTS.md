@@ -46,8 +46,9 @@ Edit `AGENTS.md`, not its `CLAUDE.md` symlink. Ownership: [README.md](README.md)
   completion alone. A reused assistant entry that
   reopens upstream must clear `finished` and `endedAt` (see
   `apps/cli/src/session/AGENTS.md`).
-- Thought and tool rows share one compact transparent timeline, icon gutter, and
-  13px hierarchy. Execute calls are not cards. Desktop disclosure headers use
+- Thought and tool rows share one compact transparent timeline and 13px
+  hierarchy, with no glyphs: the verb says the kind of step. A background or
+  subagent task opens a popover peek from its row, never a dialog. Execute calls are not cards. Desktop disclosure headers use
   body type, a hover-only trailing chevron, no fill, and no thought rows.
   Turns are avatar-free and full-width; run config lives in the footer.
 - Duration has one owner: desktop uses `WorkedGroupHeader` for folded turns and
@@ -61,7 +62,7 @@ Edit `AGENTS.md`, not its `CLAUDE.md` symlink. Ownership: [README.md](README.md)
 - The gutter belongs to `ConversationColumn`, not Virtua. EVERY row shares one left rail with no shell pad, INCLUDING
   the contents of an expanded region: expanding reveals rows, it never shifts
   them right; the chevron carries the hierarchy. Prose, desktop group/status
-  labels, and step icons share a fixed 4px inset. Steps use `px-[4px]` with
+  labels, and steps share a fixed 4px inset. Steps use `px-[4px]` with
   no negative margin; the footer bleeds only on the trailing edge (`-mr-[7px]`).
   See `AssistantTurnAlignment.stories`.
 

@@ -41,7 +41,7 @@ packaged desktop app.
 - The chip is a plain cluster action, like Preview: it never takes the stage,
   because the stage holds exactly one summary item and a tree has no summary
   form. `PopoverActionChip` in `info-chip.tsx` anchors its popover to the whole
-  bar pill via a Radix `virtualRef` that resolves the enclosing
+  bar pill via the `@lody/ui` Popover `anchor` that resolves the enclosing
   `[data-info-bar-surface]`, so the panel reads as the bar growing upward. A
   React context carrying the pill ref was tried and removed: it forced a
   Provider around the whole pill for one consumer.

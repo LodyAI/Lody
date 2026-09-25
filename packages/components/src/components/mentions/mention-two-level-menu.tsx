@@ -13,6 +13,7 @@ import {
   Terminal,
   UserRoundCog,
 } from 'lucide-react';
+import { Badge } from '@lody/ui/badge';
 import { cn } from '@/lib/utils';
 import { useFireOnKeyChange, useFireOncePerCycle } from '@/hooks/use-fire-once';
 import { FileIcon, FolderIcon } from '@/components/icons/file-icons';
@@ -239,12 +240,9 @@ function CandidateDetailPane({ detail }: { detail: MentionCandidateDetail }) {
       {detail.badges?.length ? (
         <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
           {detail.badges.map((badge) => (
-            <span
-              key={badge}
-              className="rounded-sm border border-border px-1.5 py-px text-[10.5px] text-muted-foreground"
-            >
+            <Badge key={badge} className="max-w-full">
               {badge}
-            </span>
+            </Badge>
           ))}
         </div>
       ) : null}

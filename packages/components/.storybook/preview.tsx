@@ -15,7 +15,8 @@ import {
   type AuthenticatedConvexContextValue,
 } from '../src/hooks/use-authenticated-convex';
 import { ThemeProvider } from '../src/theme-provider';
-import { TooltipProvider } from '../src/ui/tooltip';
+import { Tooltip } from '@lody/ui/tooltip';
+import { installFocusModality } from '@lody/ui/focus-modality';
 import { I18nextProvider } from 'react-i18next';
 import i18next from 'i18next';
 import { initReactI18next } from 'react-i18next';
@@ -128,6 +129,9 @@ void i18next.use(initReactI18next).init({
   },
 });
 
+// The app installs this in AppInitializer; stories render outside it.
+installFocusModality();
+
 const preview: Preview = {
   decorators: [
     (Story, context) => {
@@ -148,11 +152,11 @@ const preview: Preview = {
                   defaultTheme={theme}
                   storageKey="storybook-theme"
                 >
-                  <TooltipProvider>
+                  <Tooltip.Provider>
                     <div className="h-full bg-background text-foreground">
                       <Story />
                     </div>
-                  </TooltipProvider>
+                  </Tooltip.Provider>
                 </ThemeProvider>
               </I18nextProvider>
             </RouterContextProvider>

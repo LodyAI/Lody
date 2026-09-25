@@ -101,6 +101,7 @@ class FakeWorkspace {
   /** When set, invalidateCredential swaps this in (token rotation / scope change). */
   replacementCredential: ResolvedGitHubCredential | null = null;
   associateResult = true;
+  hostedAssociation = true;
 
   readonly associateCalls: AssociatePullRequestArgs[] = [];
   readonly writtenPatches: Array<{ sessionId: SessionId; patch: PrPollMetaPatch }> = [];
@@ -145,10 +146,12 @@ class FakeWorkspace {
       waitForInitialSync: this.waitForInitialSync,
       resolveCredential: this.resolveCredential,
       invalidateCredential: this.invalidateCredential,
-      associatePullRequest: async (args) => {
-        this.associateCalls.push(args);
-        return this.associateResult;
-      },
+      associatePullRequest: !this.hostedAssociation
+        ? null
+        : async (args) => {
+            this.associateCalls.push(args);
+            return this.associateResult;
+          },
       dispose: async () => {},
     };
   }
@@ -813,6 +816,42 @@ describe('PrPollScheduler', () => {
         ownerSessionId: sid('s1'),
       },
     ]);
+    expect(workspace.metas.get(sid('s1'))?.pullRequests).toEqual([prMeta(55)]);
+    expect(scheduler.counters.discoveries).toBe(1);
+  });
+
+  it('discovers local PRs using ambient credentials without a product-cloud association', async () => {
+    const workspace = new FakeWorkspace('ws1');
+    workspace.hostedAssociation = false;
+    workspace.credential = {
+      token: 'local-token',
+      source: 'gh',
+      credentialScope: 'github:ambient:github.com',
+    };
+    workspace.metas.set(
+      sid('s1'),
+      makeMeta({
+        project: {
+          kind: 'local',
+          localProjectId: 'local-1',
+          githubRepoFullName: 'owner/repo',
+        } as SessionMeta['project'],
+        branchName: 'feat/x',
+      })
+    );
+    clientHandler = async (batch) => {
+      const outcome = successOutcome(batch);
+      if (outcome.kind === 'success') {
+        outcome.batch.discoveries = outcome.batch.discoveries.map((discovery) => ({
+          ...discovery,
+          prs: [observation(55)],
+        }));
+      }
+      return outcome;
+    };
+    await startWith([workspace]);
+
+    expect(workspace.associateCalls).toEqual([]);
     expect(workspace.metas.get(sid('s1'))?.pullRequests).toEqual([prMeta(55)]);
     expect(scheduler.counters.discoveries).toBe(1);
   });

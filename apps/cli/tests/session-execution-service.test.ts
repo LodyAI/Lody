@@ -181,10 +181,10 @@ const createBaseDeps = (
     buildAcpPromptBlocks: vi.fn(async () => [{ type: 'text', text: 'hello' }] as any),
     applyAcpModeAndModel: vi.fn(async () => {}),
     createAssistantEntryForTurn: vi.fn(async () => {}),
+    syncSessionBranchName: vi.fn(async () => null),
     turnFinalization: {
       finalizeACPState: vi.fn(async () => {}),
       flushSessionUsage: vi.fn(async () => {}),
-      syncSessionBranchName: vi.fn(async () => null),
       updateSessionDiffStats: vi.fn(async () => []),
       detectAndAssociatePR: vi.fn(async () => null),
       syncWorkspaceGitState: vi.fn(async () => {}),
@@ -3241,7 +3241,6 @@ describe('SessionExecutionService', () => {
       turnFinalization: {
         finalizeACPState: vi.fn(async () => {}),
         flushSessionUsage: vi.fn(async () => {}),
-        syncSessionBranchName: vi.fn(async () => 'feat/test'),
         updateSessionDiffStats: vi.fn(async () => [{ filePath: 'src/a.ts', add: 1, del: 0 }]),
         refreshCodeCollabSharedState,
         detectAndAssociatePR: vi.fn(async () => ({ baseBranch: 'release/v2' })),
@@ -3279,6 +3278,9 @@ describe('SessionExecutionService', () => {
     'starts a local project session with title capability %s',
     async (sessionTitle) => {
       const generatedTitles: string[] = [];
+      let checkoutBranch = 'feature/local-start';
+      let publishedBranch: string | undefined;
+      let branchAtPrompt: string | undefined;
       const localProjectId = 'local-project-1' as LocalProjectId;
       const machineId = 'machine-1' as MachineId;
       const sessionDoc = withHistoryPort({
@@ -3293,7 +3295,11 @@ describe('SessionExecutionService', () => {
       const agentClient = {
         isCreated: vi.fn(() => true),
         cancel: vi.fn(async () => {}),
-        prompt: vi.fn(async () => ({})),
+        prompt: vi.fn(async () => {
+          branchAtPrompt = publishedBranch;
+          checkoutBranch = 'feature/local-finished';
+          return {};
+        }),
         currentModel: undefined,
       };
       const createdSession = {
@@ -3354,6 +3360,10 @@ describe('SessionExecutionService', () => {
       const updateAcpCapabilities = vi.fn(async () => {});
       const deps = createBaseDeps({
         machineId,
+        syncSessionBranchName: async () => {
+          publishedBranch = checkoutBranch;
+          return publishedBranch;
+        },
         maybeGenerateAndStoreSessionTitle: async () => {
           generatedTitles.push('Local title');
         },
@@ -3384,6 +3394,8 @@ describe('SessionExecutionService', () => {
         userEmail: 'user2@example.com',
       });
 
+      expect(branchAtPrompt).toBe('feature/local-start');
+      expect(publishedBranch).toBe('feature/local-finished');
       expect(generatedTitles).toEqual(sessionTitle ? [] : ['Local title']);
       expect(sessionManager.createSession).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -5654,7 +5666,11 @@ describe('SessionExecutionService', () => {
   );
 
   it('marks chat dispatch as failed when prompt execution throws after processing starts', async () => {
-    const upsertDocMeta = vi.fn(async () => {});
+    const branchProbe = createDeferred<string | null>();
+    const persisted: Record<string, unknown> = {};
+    const upsertDocMeta = vi.fn(async (_id: string, patch: Record<string, unknown>) => {
+      Object.assign(persisted, patch);
+    });
     const sessionDoc = withHistoryPort({
       getMetaState: vi.fn(async () => ({ isArchived: false })),
       setStatus: vi.fn(async () => {}),
@@ -5693,6 +5709,7 @@ describe('SessionExecutionService', () => {
     } as unknown as SessionManager;
 
     const deps = createBaseDeps({
+      syncSessionBranchName: () => branchProbe.promise,
       sessionManager,
       workspaceDocument: {
         repo: {
@@ -5718,11 +5735,12 @@ describe('SessionExecutionService', () => {
       userEmail: 'user@example.com',
     });
 
-    expect(upsertDocMeta).toHaveBeenCalledWith('session-session-chat-1', {
+    // Failure must settle while the optional branch probe is still blocked.
+    expect(persisted).toMatchObject({
       lastHandledUserMsgId: 'turn-chat-1',
       processingUserMsgId: undefined,
     });
-    expect(deps.turnFinalization.finalizeACPState).toHaveBeenCalledTimes(1);
+    branchProbe.resolve(null);
   });
 
   it.each([
@@ -7258,8 +7276,14 @@ describe('SessionExecutionService', () => {
     const upsertDocMeta = vi.fn(async (_roomId: string, patch: Record<string, unknown>) => {
       meta = { ...meta, ...patch };
     });
+    let branchOnDisk = 'feature/before-cancel';
+    let publishedBranch: string | undefined;
     let service: SessionExecutionService;
     const deps = createBaseDeps({
+      syncSessionBranchName: async () => {
+        publishedBranch = branchOnDisk;
+        return publishedBranch;
+      },
       sessionManager,
       beginConversationTurn: vi.fn(() => 'assistant-finalizing-turn'),
       getActiveTurnId: vi.fn(() => undefined),
@@ -7276,6 +7300,7 @@ describe('SessionExecutionService', () => {
       buildAcpPromptBlocks: vi.fn(async () => [{ type: 'text', text: 'hello' }] as any),
       turnFinalization: {
         finalizeACPState: vi.fn(async () => {
+          branchOnDisk = 'feature/after-cancel';
           const result = await service.cancelSession({
             type: 'session/cancel',
             sessionId: 'session-finalizing-cancel' as SessionId,
@@ -7286,7 +7311,6 @@ describe('SessionExecutionService', () => {
           expect(result).toEqual({ success: true });
         }),
         flushSessionUsage: vi.fn(async () => {}),
-        syncSessionBranchName: vi.fn(async () => null),
         updateSessionDiffStats: vi.fn(async () => []),
         detectAndAssociatePR: vi.fn(async () => null),
         syncWorkspaceGitState: vi.fn(async () => {}),
@@ -7318,6 +7342,7 @@ describe('SessionExecutionService', () => {
     // The rest of finalization is skipped, but the interrupted turn may have
     // left unpublished work and nothing commits or pushes it now — the git-state
     // probe is the only thing that raises Commit & Push, so it still runs.
+    expect(publishedBranch).toBe('feature/after-cancel');
     expect(deps.turnFinalization.syncWorkspaceGitState).toHaveBeenCalledWith(
       'session-finalizing-cancel',
       expect.anything()

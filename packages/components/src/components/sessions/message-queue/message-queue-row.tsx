@@ -5,7 +5,7 @@ import { Check, GripVertical, Pencil, X, type LucideIcon } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { MessageQueueItem, SessionId } from '@lody/shared';
 import { normalizeSessionInputBlocks } from '@lody/shared';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
+import { Tooltip } from '@lody/ui/tooltip';
 import { isImeComposingKeyboardEvent } from '@/lib/ime';
 import { cn } from '@/lib/utils';
 import { QueuedImagePreview, type QueuedImageBlock } from './queued-image-preview';
@@ -137,9 +137,8 @@ function LeadingHandle({
   }
 
   return (
-    <Tooltip delayDuration={300}>
-      <TooltipTrigger asChild>
-        <button
+    <Tooltip.Root>
+      <Tooltip.Trigger delay={300} render={<button
           type="button"
           ref={sortable.setActivatorNodeRef}
           className={cn(
@@ -158,10 +157,9 @@ function LeadingHandle({
             {index + 1}
           </span>
           <GripVertical className="hidden h-3 w-3 group-hover/row:block group-focus-within/row:block" />
-        </button>
-      </TooltipTrigger>
-      <TooltipContent side="top">{label}</TooltipContent>
-    </Tooltip>
+        </button>}/>
+      <Tooltip.Content side="top">{label}</Tooltip.Content>
+    </Tooltip.Root>
   );
 }
 
@@ -393,9 +391,8 @@ function IconAction({
   onClick: () => void;
 }) {
   return (
-    <Tooltip delayDuration={300}>
-      <TooltipTrigger asChild>
-        <button
+    <Tooltip.Root>
+      <Tooltip.Trigger delay={300} render={<button
           type="button"
           aria-label={label}
           disabled={disabled}
@@ -410,9 +407,8 @@ function IconAction({
           onClick={onClick}
         >
           <Icon className="h-3 w-3" />
-        </button>
-      </TooltipTrigger>
-      <TooltipContent side="top">{label}</TooltipContent>
-    </Tooltip>
+        </button>}/>
+      <Tooltip.Content side="top">{label}</Tooltip.Content>
+    </Tooltip.Root>
   );
 }

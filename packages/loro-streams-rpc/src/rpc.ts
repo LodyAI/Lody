@@ -1,3 +1,4 @@
+import { PreviewControlProofSchema, type PreviewControlProof } from '@lody/shared';
 import { z } from 'zod';
 import {
   StreamsClient,
@@ -44,6 +45,7 @@ import type {
   MachinePingResponse,
   MachineRestartResponse,
   MachineStatusResponse,
+  MachinePreviewControlResponse,
   MachineUpgradeResponse,
   SessionCancelResponse,
   SessionGoalAction,
@@ -62,6 +64,7 @@ import type {
   SessionSteerResponse,
   SessionPreviewCreateResponse,
   SessionPreviewRevokeResponse,
+  SessionPreviewStatusResponse,
   SessionTurnInputConfig,
   FilePreviewV3Request,
   FilePreviewV3Response,
@@ -94,6 +97,7 @@ import {
   MachinePingResponseSchema,
   MachineRestartResponseSchema,
   MachineStatusResponseSchema,
+  MachinePreviewControlResponseSchema,
   MachineUpgradeResponseSchema,
   SessionCancelResponseSchema,
   SessionPreparationCancelSpecSchema,
@@ -114,6 +118,7 @@ import {
   SESSION_GOAL_ACTIONS,
   SessionPreviewCreateResponseSchema,
   SessionPreviewRevokeResponseSchema,
+  SessionPreviewStatusResponseSchema,
 } from '@lody/shared';
 import {
   encryptRpcSecret,
@@ -171,6 +176,7 @@ export const normalizeLoroGatewayBaseUrl = (baseUrl?: string | null): string => 
 
 export const LoroStreamsRpcMethodSchema = z.enum([
   'machine/status',
+  'machine/preview-control',
   'machine/ping',
   'machine/restart',
   'machine/upgrade',
@@ -205,6 +211,7 @@ export const LoroStreamsRpcMethodSchema = z.enum([
   'session/prepare-cancel',
   'session/preview-create',
   'session/preview-revoke',
+  'session/preview-status',
   'local-project/git-state',
   'local-project/control',
 ]);
@@ -236,6 +243,11 @@ const BaseRpcRequestSchema = z
 
 export const LoroMachineStatusRpcRequestSchema = BaseRpcRequestSchema.extend({
   method: z.literal('machine/status'),
+  params: z.object({}).strict(),
+}).strict();
+
+export const LoroMachinePreviewControlRpcRequestSchema = BaseRpcRequestSchema.extend({
+  method: z.literal('machine/preview-control'),
   params: z.object({}).strict(),
 }).strict();
 
@@ -543,6 +555,7 @@ export const LoroSessionPreviewCreateRpcRequestSchema = BaseRpcRequestSchema.ext
     .object({
       sessionId: z.string().trim().min(1),
       requestedByUserId: z.string().trim().min(1),
+      proof: PreviewControlProofSchema,
       target: PreviewTargetSchema,
       approval: z
         .object({
@@ -553,7 +566,19 @@ export const LoroSessionPreviewCreateRpcRequestSchema = BaseRpcRequestSchema.ext
           confirmedAt: z.number().int().nonnegative(),
         })
         .strict(),
-      replaceExisting: z.boolean().optional(),
+      restart: z.boolean().optional(),
+    })
+    .strict(),
+}).strict();
+
+export const LoroSessionPreviewStatusRpcRequestSchema = BaseRpcRequestSchema.extend({
+  method: z.literal('session/preview-status'),
+  params: z
+    .object({
+      sessionId: z.string().trim().min(1),
+      requestedByUserId: z.string().trim().min(1),
+      proof: PreviewControlProofSchema,
+      renewEndpointId: z.string().trim().min(1).optional(),
     })
     .strict(),
 }).strict();
@@ -564,6 +589,7 @@ export const LoroSessionPreviewRevokeRpcRequestSchema = BaseRpcRequestSchema.ext
     .object({
       sessionId: z.string().trim().min(1),
       requestedByUserId: z.string().trim().min(1),
+      proof: PreviewControlProofSchema,
       reason: z.string().trim().min(1).optional(),
     })
     .strict(),
@@ -590,6 +616,7 @@ export const LoroLocalProjectControlRpcRequestSchema = BaseRpcRequestSchema.exte
 
 export const LoroStreamsRpcRequestSchema = z.discriminatedUnion('method', [
   LoroMachineStatusRpcRequestSchema,
+  LoroMachinePreviewControlRpcRequestSchema,
   LoroMachinePingRpcRequestSchema,
   LoroMachineRestartRpcRequestSchema,
   LoroMachineUpgradeRpcRequestSchema,
@@ -622,6 +649,7 @@ export const LoroStreamsRpcRequestSchema = z.discriminatedUnion('method', [
   LoroSessionPrepareCancelRpcRequestSchema,
   LoroSessionPreviewCreateRpcRequestSchema,
   LoroSessionPreviewRevokeRpcRequestSchema,
+  LoroSessionPreviewStatusRpcRequestSchema,
   LoroLocalProjectGitStateRpcRequestSchema,
   LoroLocalProjectControlRpcRequestSchema,
 ]);
@@ -1443,6 +1471,7 @@ const base64UrlToBytes = (value: string): Uint8Array => {
 
 export type LoroMachineRpcResult =
   | MachineStatusResponse
+  | MachinePreviewControlResponse
   | MachinePingResponse
   | MachineRestartResponse
   | MachineUpgradeResponse
@@ -1469,6 +1498,7 @@ export type LoroMachineRpcResult =
   | SessionPrepareCancelResponse
   | SessionPreviewCreateResponse
   | SessionPreviewRevokeResponse
+  | SessionPreviewStatusResponse
   | LocalProjectGitStateRpcResponse
   | LocalProjectControlResponse;
 
@@ -1498,6 +1528,15 @@ const toLegacyRpcErrorResponse = (
   dispatchContext?: { sessionId: string; userTurnId: string },
   preparationContext?: { preparationId: string; sessionId: string }
 ): LoroMachineRpcResult => {
+  if (method === 'machine/preview-control') {
+    return {
+      type: 'machine/preview-control_response',
+      machineId: machineId as MachinePreviewControlResponse['machineId'],
+      success: false,
+      error: `${error.code}: ${error.message}`,
+    };
+  }
+
   if (method === 'machine/status') {
     return {
       type: 'machine/status_response',
@@ -1735,6 +1774,15 @@ const toLegacyRpcErrorResponse = (
     };
   }
 
+  if (method === 'session/preview-status')
+    return {
+      type: 'session/preview-status_response',
+      sessionId: (previewContext?.sessionId ?? '') as SessionId,
+      success: false,
+      error: 'internal_error',
+      message: `${error.code}: ${error.message}`,
+    };
+
   if (method === 'session/preview-create') {
     return {
       type: 'session/preview-create_response',
@@ -1796,6 +1844,11 @@ const parseRpcSuccessResult = async (
   if (response.method === 'machine/status') {
     const parsed = MachineStatusResponseSchema.safeParse(response.result);
     return parsed.success ? (parsed.data as MachineStatusResponse) : null;
+  }
+
+  if (response.method === 'machine/preview-control') {
+    const parsed = MachinePreviewControlResponseSchema.safeParse(response.result);
+    return parsed.success ? (parsed.data as MachinePreviewControlResponse) : null;
   }
   if (response.method === 'machine/ping') {
     const parsed = MachinePingResponseSchema.safeParse(response.result);
@@ -1887,6 +1940,10 @@ const parseRpcSuccessResult = async (
       return previewParsed.success ? previewParsed.data : null;
     }
     const parsed = CodeCollabV2RpcResponseSchema.safeParse(decrypted);
+    return parsed.success ? parsed.data : null;
+  }
+  if (response.method === 'session/preview-status') {
+    const parsed = SessionPreviewStatusResponseSchema.safeParse(response.result);
     return parsed.success ? parsed.data : null;
   }
   if (response.method === 'session/preview-create') {
@@ -2416,6 +2473,16 @@ export class LoroStreamsMachineRpcClient {
       timeoutMs: options?.timeoutMs ?? 30_000,
       params: {},
     })) as MachineStatusResponse | null;
+  }
+
+  async requestPreviewControl(options?: {
+    timeoutMs?: number;
+  }): Promise<MachinePreviewControlResponse | null> {
+    return (await this.sendRequest({
+      method: 'machine/preview-control',
+      timeoutMs: options?.timeoutMs ?? 15_000,
+      params: {},
+    })) as MachinePreviewControlResponse | null;
   }
 
   async requestMachinePing(options: {
@@ -3024,9 +3091,10 @@ export class LoroStreamsMachineRpcClient {
   async requestSessionPreviewCreate(options: {
     sessionId: string;
     requestedByUserId: string;
+    proof: PreviewControlProof;
     target: PreviewTarget;
     approval: PreviewTargetApproval;
-    replaceExisting?: boolean;
+    restart?: boolean;
     timeoutMs?: number;
   }): Promise<SessionPreviewCreateResponse | null> {
     return (await this.sendRequest({
@@ -3035,16 +3103,37 @@ export class LoroStreamsMachineRpcClient {
       params: {
         sessionId: options.sessionId,
         requestedByUserId: options.requestedByUserId,
+        proof: options.proof,
         target: options.target,
         approval: options.approval,
-        replaceExisting: options.replaceExisting,
+        restart: options.restart,
       },
     })) as SessionPreviewCreateResponse | null;
+  }
+
+  async requestSessionPreviewStatus(options: {
+    sessionId: string;
+    requestedByUserId: string;
+    proof: PreviewControlProof;
+    renewEndpointId?: string;
+    timeoutMs?: number;
+  }): Promise<SessionPreviewStatusResponse | null> {
+    return (await this.sendRequest({
+      method: 'session/preview-status',
+      timeoutMs: options.timeoutMs ?? 15_000,
+      params: {
+        sessionId: options.sessionId,
+        requestedByUserId: options.requestedByUserId,
+        proof: options.proof,
+        renewEndpointId: options.renewEndpointId,
+      },
+    })) as SessionPreviewStatusResponse | null;
   }
 
   async requestSessionPreviewRevoke(options: {
     sessionId: string;
     requestedByUserId: string;
+    proof: PreviewControlProof;
     reason?: string;
     timeoutMs?: number;
   }): Promise<SessionPreviewRevokeResponse | null> {
@@ -3054,6 +3143,7 @@ export class LoroStreamsMachineRpcClient {
       params: {
         sessionId: options.sessionId,
         requestedByUserId: options.requestedByUserId,
+        proof: options.proof,
         reason: options.reason,
       },
     })) as SessionPreviewRevokeResponse | null;
@@ -3107,7 +3197,7 @@ export class LoroStreamsMachineRpcClient {
   private async sendRequest(
     args:
       | {
-          method: 'machine/status';
+          method: 'machine/status' | 'machine/preview-control';
           timeoutMs: number;
           params: {};
         }
@@ -3337,17 +3427,29 @@ export class LoroStreamsMachineRpcClient {
           method: 'session/preview-create';
           timeoutMs: number;
           params: {
+            proof: PreviewControlProof;
             sessionId: string;
             requestedByUserId: string;
             target: PreviewTarget;
             approval: PreviewTargetApproval;
-            replaceExisting?: boolean;
+            restart?: boolean;
+          };
+        }
+      | {
+          method: 'session/preview-status';
+          timeoutMs: number;
+          params: {
+            proof: PreviewControlProof;
+            sessionId: string;
+            requestedByUserId: string;
+            renewEndpointId?: string;
           };
         }
       | {
           method: 'session/preview-revoke';
           timeoutMs: number;
           params: {
+            proof: PreviewControlProof;
             sessionId: string;
             requestedByUserId: string;
             reason?: string;
@@ -3464,7 +3566,9 @@ export class LoroStreamsMachineRpcClient {
             }
           : undefined,
       previewContext:
-        args.method === 'session/preview-create' || args.method === 'session/preview-revoke'
+        args.method === 'session/preview-create' ||
+        args.method === 'session/preview-revoke' ||
+        args.method === 'session/preview-status'
           ? { sessionId: args.params.sessionId }
           : undefined,
       localProjectContext:
@@ -3525,6 +3629,7 @@ export class LoroStreamsMachineRpcClient {
       let request: LoroStreamsRpcRequest;
       switch (args.method) {
         case 'machine/status':
+        case 'machine/preview-control':
           request = { ...envelope, method: args.method, params: {} };
           break;
         case 'machine/ping':
@@ -3658,6 +3763,7 @@ export class LoroStreamsMachineRpcClient {
           request = { ...envelope, method: args.method, params: args.params };
           break;
         case 'session/preview-revoke':
+        case 'session/preview-status':
           request = { ...envelope, method: args.method, params: args.params };
           break;
         case 'local-project/git-state':

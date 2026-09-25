@@ -64,7 +64,7 @@ import {
 import { getAgentRoleEmoji, type AcpCommandSummary } from '@lody/shared';
 import { Mention, MentionInput, MentionLabel, useMentionContext } from '@/ui/mention';
 import type { Mention as MentionRange, MentionChipResolver } from '@/ui/mention/index';
-import { Textarea, type TextareaProps } from '@/ui/textarea';
+import { Textarea, type TextareaProps } from '@lody/ui/textarea';
 import { parseMentionNamespaceSearch } from '@/ui/mention/mention-trigger';
 import { getCommandKeybindings, useCommand } from '@/lib/commands';
 import type { PromptShortcutScope } from '@lody/shared/prompt-shortcuts';

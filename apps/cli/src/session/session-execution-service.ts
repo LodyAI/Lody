@@ -190,7 +190,6 @@ type TurnFinalizationEffects = {
   finalizeACPState: (sessionId: SessionId, turnId?: string) => Promise<void>;
   persistCodeCollabTurnDiffs?: (sessionId: SessionId, turnId: string) => Promise<boolean>;
   flushSessionUsage: (sessionId: SessionId) => Promise<void>;
-  syncSessionBranchName: (sessionId: SessionId, session: ISession) => Promise<string | null>;
   updateSessionDiffStats: (
     sessionId: SessionId,
     session: ISession,
@@ -567,6 +566,7 @@ export type SessionExecutionServiceDeps = {
     modelInfo: ModelInfo | undefined,
     userTurnId?: string
   ) => Promise<void>;
+  syncSessionBranchName: (sessionId: SessionId, session: ISession) => Promise<string | null>;
   turnFinalization: TurnFinalizationEffects;
   recordChatFailure: (
     sessionDoc: SessionDocument,
@@ -2646,6 +2646,10 @@ export class SessionExecutionService {
       );
     }
 
+    if (options.runtime.session) {
+      // A best-effort observation must not delay publishing the turn failure.
+      void this.deps.syncSessionBranchName(options.sessionId, options.runtime.session);
+    }
     this.deps.logger.error(options.describe(options.error), options.error);
     if (options.userTurnId) {
       await this.markTurnFailed(options.sessionId, options.sessionDoc, options.userTurnId);
@@ -2905,6 +2909,7 @@ export class SessionExecutionService {
       runtime.workspaceGitStateSynced = true;
     }
     await this.runTurnFinalizationStage(sessionId, turnId, 'syncWorkspaceGitState', async () => {
+      await this.deps.syncSessionBranchName(sessionId, session);
       await this.deps.turnFinalization.syncWorkspaceGitState(sessionId, session);
     });
   }
@@ -3017,25 +3022,24 @@ export class SessionExecutionService {
       return;
     }
 
-    let branchName: string | null = null;
     let preferredStatsBaseBranch = project?.branch;
     if (project?.kind === 'local') {
       preferredStatsBaseBranch =
         (await sessionDoc.getMetaState())?.baseBranch?.trim() || preferredStatsBaseBranch;
     }
 
+    const branchName = await this.runTurnFinalizationStage(
+      sessionId,
+      turnId,
+      'syncSessionBranchName',
+      async () => await this.deps.syncSessionBranchName(sessionId, session)
+    );
+
+    if (await stopIfTurnCancelled('branch synchronization')) {
+      return;
+    }
+
     if (githubProject) {
-      branchName = await this.runTurnFinalizationStage(
-        sessionId,
-        turnId,
-        'syncSessionBranchName',
-        async () => await this.deps.turnFinalization.syncSessionBranchName(sessionId, session)
-      );
-
-      if (await stopIfTurnCancelled('branch synchronization')) {
-        return;
-      }
-
       try {
         const detectedPr = await this.runTurnFinalizationStage(
           sessionId,
@@ -3230,7 +3234,13 @@ export class SessionExecutionService {
               effectiveErrorContext = context;
             };
 
+            let branchObservedSession: ISession | undefined;
             const bindSession = (nextSession: ISession): void => {
+              if (branchObservedSession !== nextSession) {
+                branchObservedSession = nextSession;
+                // Presentation metadata never gates the first agent prompt.
+                void self.deps.syncSessionBranchName(sessionId, nextSession);
+              }
               runtime.session = nextSession;
               runtime.pendingSession = undefined;
             };
