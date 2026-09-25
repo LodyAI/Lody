@@ -60,7 +60,8 @@ Translation: current
   使用实底色和半粗体。
 - 设置导航：`@lody/ui`（#913）把它改建在 `settings/surface.ts` 上之后，行使用调色板的 `hoverFill` / `selectedFill` 和组件库的
   头像，不再使用本次改动的 10% 选中底色和 18px 账户头像。保留下来的是焦点处理：键盘聚焦的行显示悬停底色而不是强调色描边，
-  因为对话框打开时会自动聚焦一行。
+  因为对话框打开时会自动聚焦一行。深海配色改动让组件库调色板改读主题变量后，这两种底色又变回文字色的 6% / 10%
+  （[note](2026-09-25-deep-sea-palette-and-sidebar-groups.zh.md)）。
 
 ## 备选方案
 

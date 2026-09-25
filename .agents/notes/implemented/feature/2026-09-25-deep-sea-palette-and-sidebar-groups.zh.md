@@ -23,6 +23,10 @@ Translation: current
   选中行的底色是 12% 的青色（#252E35）。深色上限：界面 13:1、正文 14.6:1、标题 16.3:1、侧栏行 9.9:1。Electron 窗口和标题栏使用画布色。
 - 弹出层：深色主题下 `--popover` 使用输入框的表面（`--input` 以 90% 叠在画布上）。Vesper 的弹窗背景等于编辑器颜色，
   导致所有下拉菜单都像凹进页面里。
+- `@lody/ui`（#913）自带固定的浅色和深色调色板：纯白文字、Vesper 的橙色强调色、中性灰，并跟随系统外观。
+  `lib/vscode-theme/lody-ui-palette.stylex.ts` 用 `createTheme` 覆盖它的 `colors` token，改为读取主题变量（`--popover`、
+  `--foreground`、`--primary` 等），由 `theme-provider.tsx` 按应用自己的明暗模式挂在根元素上。菜单、弹出层和设置行因此使用
+  抬高的弹出层表面、阅读亮度上限和青色强调色；`hoverFill` / `selectedFill` 是文字色的 6% / 10%。凹槽、托盘、遮罩和灰阶保留组件库的值。
 - 链接为青色，只在悬停时显示下划线。颜色由 `.markdown-renderer a` 设置：渲染器里的 `[&_a]:text-markdown-link` 从未生效
   （Tailwind v4 不为手写类生成变体），链接一直继承正文颜色，只靠下划线区分。GitHub 引用小标签使用同一色相。
 - 列表项间距 4px（之前 8px）。输入框占位文字为其 token 的 85%（约 4.9:1；之前 40%，约 2.1:1）。

@@ -78,6 +78,9 @@ mobile surfaces. Background for the rules below:
   `SIDEBAR_GROUP_LABEL_CLASS`, with no leading icon; project, repo and conversation rows
   are 1em. A machine is identified by its Offline pill and hover card
   (`sidebar-machine-card.tsx`); never show "offline" while its status is unknown.
+- `@lody/ui` colours come from the VS Code theme: `theme-provider.tsx` puts
+  `lib/vscode-theme/lody-ui-palette.stylex.ts` on the root in the resolved mode. Override
+  its tokens there with `createTheme`, never with Tailwind classes on package parts.
 - Components rendered inside conversation rows take `Tooltip`, `Popover` and `ContextMenu`
   from `ui/armed-overlays.tsx`, not `@lody/ui`: inside an unarmed `useInteractionArm`
   boundary they render only the trigger element until the first hover or focus. An

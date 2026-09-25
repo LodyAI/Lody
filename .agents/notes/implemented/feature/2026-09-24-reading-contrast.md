@@ -89,7 +89,9 @@ long-form text.
   take the palette's `hoverFill` / `selectedFill` and the package's avatar, not this change's
   10% selected fill and 18px account avatar. What carried over is the focus treatment: a
   keyboard-focused row shows the hover fill instead of the accent ring, since the dialog
-  focuses a row when it opens.
+  focuses a row when it opens. The deep-sea palette change points the package's palette at
+  the theme, which makes those fills the ink at 6% / 10% again
+  ([note](2026-09-25-deep-sea-palette-and-sidebar-groups.md)).
 
 ## Alternatives
 

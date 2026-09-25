@@ -34,6 +34,13 @@ itself is in [reading contrast](2026-09-24-reading-contrast.md).
 - Popovers: in dark themes `--popover` is the composer's surface (`--input` at 90% over
   the canvas). Vesper's widget background equals the editor color, which sank every
   dropdown into the page.
+- `@lody/ui` (#913) ships fixed light and dark palettes: pure-white ink, Vesper's orange
+  accent, neutral grays, chosen by the OS appearance. `lib/vscode-theme/lody-ui-palette.stylex.ts`
+  is a `createTheme` over its `colors` group that reads the theme's variables (`--popover`,
+  `--foreground`, `--primary`, …), applied on the root in the app's resolved mode by
+  `theme-provider.tsx`. Menus, popovers and settings rows then take the raised popover, the
+  reading ceiling and the cyan accent; `hoverFill` / `selectedFill` are the ink at 6% / 10%.
+  Wells, trays, the overlay and the gray ramp keep the package's values.
 - Links are cyan with the underline on hover only. `.markdown-renderer a` sets the color:
   the renderer's `[&_a]:text-markdown-link` never applied (Tailwind v4 generates no
   variants for a hand-written class), so links used to inherit the prose color and were
