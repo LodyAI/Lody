@@ -92,6 +92,50 @@ describe('verifyPreviewTunnelRoundTrip', () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
+  it('accepts the same route when propagation takes 65 seconds', async () => {
+    vi.useFakeTimers();
+    let reachable = false;
+    let settled = false;
+    const ready = verifyPreviewTunnelRoundTrip({
+      publicUrl: 'https://test.trycloudflare.com',
+      target,
+      fetch: async () => {
+        if (!reachable)
+          throw new TypeError('fetch failed', {
+            cause: Object.assign(new Error('TLS reset'), { code: 'ECONNRESET' }),
+          });
+        return new Response(null, {
+          headers: { [PREVIEW_PROXY_RESPONSE_HEADER]: PREVIEW_PROXY_RESPONSE_VERSION },
+        });
+      },
+    }).then(() => {
+      settled = true;
+    });
+    await vi.advanceTimersByTimeAsync(65_000);
+    expect(settled).toBe(false);
+    reachable = true;
+    await vi.advanceTimersByTimeAsync(500);
+    await ready;
+    expect(settled).toBe(true);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('cancels propagation immediately without waiting for the extended deadline', async () => {
+    vi.useFakeTimers();
+    const controller = new AbortController();
+    const ready = verifyPreviewTunnelRoundTrip({
+      publicUrl: 'https://test.trycloudflare.com',
+      target,
+      signal: controller.signal,
+      fetch: async () => new Response(null, { status: 530, headers: { server: 'cloudflare' } }),
+    });
+    const failure = expect(ready).rejects.toThrow('user cancelled');
+    await vi.advanceTimersByTimeAsync(65_000);
+    controller.abort(new Error('user cancelled'));
+    await failure;
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   it('stops retrying at its deadline and never publishes a route without a proxy marker', async () => {
     vi.useFakeTimers();
     vi.stubGlobal('fetch', async () => {
@@ -102,10 +146,42 @@ describe('verifyPreviewTunnelRoundTrip', () => {
       target,
     });
     const failure = expect(ready).rejects.toThrow('round-trip failed');
-    await vi.advanceTimersByTimeAsync(20_000);
+    await vi.advanceTimersByTimeAsync(90_000);
     await failure;
     expect(vi.getTimerCount()).toBe(0);
   });
+
+  it.each(['ECONNRESET', 'HTTP 530'])(
+    'retains the last %s failure without leaking request credentials',
+    async (failureKind) => {
+      vi.useFakeTimers();
+      const diagnostics: string[] = [];
+      const ready = verifyPreviewTunnelRoundTrip({
+        publicUrl: 'https://test.trycloudflare.com/?__lody_preview_token=secret',
+        target,
+        onDiagnostic: (message) => diagnostics.push(message),
+        fetch: async () => {
+          if (failureKind === 'HTTP 530')
+            return new Response('secret response', {
+              status: 530,
+              headers: { server: 'cloudflare' },
+            });
+          throw new TypeError('fetch failed with secret', {
+            cause: Object.assign(new Error('secret request URL'), { code: 'ECONNRESET' }),
+          });
+        },
+      });
+      const failure = ready.catch((error: Error) => error);
+      await vi.advanceTimersByTimeAsync(90_000);
+      const error = await failure;
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).toContain('90000 ms limit');
+      expect((error as Error).message).toContain(`lastOutcome=${failureKind}`);
+      expect((error as Error).message).toMatch(/attempts=[1-9]/);
+      expect([...diagnostics, (error as Error).message].join('\n')).not.toContain('secret');
+      expect(vi.getTimerCount()).toBe(0);
+    }
+  );
 
   it('fails an active health check immediately without applying startup propagation retries', async () => {
     vi.useFakeTimers();

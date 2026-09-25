@@ -38,9 +38,12 @@ describe('KeyboardShortcutsSettingsRoute', () => {
   let container: HTMLDivElement;
 
   beforeEach(() => {
+    // The mobile route requires a mobile identity: a narrow desktop-class
+    // window keeps the desktop renderer instead.
     Object.defineProperty(window.navigator, 'userAgent', {
       configurable: true,
-      value: originalUserAgent,
+      value:
+        'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148',
     });
     Object.defineProperty(window, 'innerWidth', {
       configurable: true,
@@ -77,10 +80,10 @@ describe('KeyboardShortcutsSettingsRoute', () => {
     });
   });
 
-  it('renders the shortcut editor on desktop widths', () => {
-    Object.defineProperty(window, 'innerWidth', {
+  it('renders the shortcut editor on a narrow desktop-class window', () => {
+    Object.defineProperty(window.navigator, 'userAgent', {
       configurable: true,
-      value: 1024,
+      value: originalUserAgent,
     });
 
     act(() => root.render(createElement(KeyboardShortcutsSettingsRoute)));

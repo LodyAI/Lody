@@ -6,6 +6,23 @@ are built the way they are. The rules themselves live in that `AGENTS.md`; the
 directory index lives in its `README.md`. Read this before changing a gesture,
 a z-index, or the session drawer's lifecycle.
 
+## Which layout family renders
+
+`useIsMobile()` picks the renderer: a desktop-class device — Electron shell
+or desktop browser — keeps the desktop renderer at every width, and
+everything else (phones, tablets, unrecognized devices) follows the
+`MOBILE_LAYOUT_BREAKPOINT` viewport breakpoint — narrow is mobile, wide is
+the real desktop renderer (a phone rotated to landscape earns it). A narrow
+desktop window therefore never reaches this stack — it renders the desktop
+family in its compact presentation instead: the navigation sidebar and a
+Session's side panel stop consuming columns and become overlays
+(`useIsCompactDesktop()`, synced into `compactDesktopLayoutAtom` /
+`navigationSidebarVisibleAtom` for non-hook consumers). Width-driven
+adaptation inside a family belongs to local matchMedia/container queries,
+never to a second global breakpoint read.
+Decision record:
+[compact desktop layout](../notes/implemented/feature/2026-09-25-compact-desktop-layout.md).
+
 ## Two families of swipe-back
 
 Mobile surfaces animate in two different ways, and the back gesture follows the

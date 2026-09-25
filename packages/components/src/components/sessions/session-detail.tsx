@@ -102,7 +102,7 @@ import {
 } from '@/ui/window-drag-region';
 import {
   getZenAwarePanelToggleState,
-  navigationSidebarHiddenAtom,
+  navigationSidebarVisibleAtom,
   showNavigationSidebarAtom,
   zenLayoutModeAtom,
   zenRightPanelAtom,
@@ -200,7 +200,11 @@ import { Drawer as UiDrawer } from '@lody/ui/drawer';
 import { Drawer, DrawerContent, DrawerTitle } from '@/ui/drawer';
 import { VaulDrawerBody } from '@/components/mobile/vaul-drawer-edge-back-zone';
 import { Dialog } from '@/ui/dialog';
-import { SessionCreateBillingError, useSessionActions } from '@/hooks/use-session-actions';
+import {
+  isArchivedLocalProjectRestoreUnavailableError,
+  SessionCreateBillingError,
+  useSessionActions,
+} from '@/hooks/use-session-actions';
 import { useWorkspaceMembers } from '@/hooks/use-workspace-members';
 import { useResolvedMachineMeta } from '@/hooks/use-resolved-machine-meta';
 import { useOpenSettings } from '@/hooks/use-open-settings';
@@ -242,6 +246,7 @@ import {
 import {
   EMPTY_SESSION_TAB_ID,
   getSessionTabFallback,
+  isArchivedOutsideWorkspace,
   isSessionTabClosed,
   formatExplicitSessionTabSearch,
   formatSessionTabSearch,
@@ -872,7 +877,7 @@ const SessionDetail = ({
   const atomWorkspaceSlug = useAtomValue(currentWorkspaceSlugAtom);
   const workspaceSlug = routeTargetWorkspaceSlug ?? atomWorkspaceSlug;
   const currentWorkspaceId = useAtomValue(currentWorkspaceIdAtom) as WorkspaceId | null;
-  const isLeftSidebarHidden = useAtomValue(navigationSidebarHiddenAtom);
+  const isLeftSidebarHidden = !useAtomValue(navigationSidebarVisibleAtom);
   const showNavigationSidebar = useSetAtom(showNavigationSidebarAtom);
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
   const runtimeInitializing = useAtomValue(runtimeInitializingAtom);
@@ -986,21 +991,45 @@ const SessionDetail = ({
     [sessionId]
   );
   const archivedChildSessions = useAtomValue(archivedChildSessionsAtom);
-  const closedConversations = useMemo(
+  // Archive and tab closure are independent. Reviewing an archived workspace
+  // shows the tabs it had open; only a live workspace keeps archived children
+  // out of its strip (listed for an explicit Restore).
+  const isWorkspaceArchived = activeSession?.isArchived === true;
+  const tabChildSessions = useMemo(
     () =>
-      [
-        ...(activeSession ? [activeSession] : []),
-        ...childSessions,
-        ...archivedChildSessions,
-      ].filter(isSessionTabClosed),
-    [activeSession, childSessions, archivedChildSessions]
+      isWorkspaceArchived
+        ? [...childSessions, ...archivedChildSessions].sort((left, right) =>
+            left.createdAt < right.createdAt ? -1 : left.createdAt > right.createdAt ? 1 : 0
+          )
+        : childSessions,
+    [isWorkspaceArchived, childSessions, archivedChildSessions]
   );
+  const closedConversations = useMemo(() => {
+    const conversations = [
+      ...(activeSession ? [activeSession] : []),
+      ...childSessions,
+      ...archivedChildSessions,
+    ];
+    const closed = conversations.filter((meta) => isSessionTabClosed(meta, isWorkspaceArchived));
+    // An archived workspace is review-only and has no draft to fall back to:
+    // with every tab closed it still shows the main conversation.
+    if (isWorkspaceArchived && activeSession && closed.length === conversations.length) {
+      return closed.filter((meta) => meta.id !== activeSession.id);
+    }
+    return closed;
+  }, [activeSession, childSessions, archivedChildSessions, isWorkspaceArchived]);
   const closedConversationIds = useMemo(
     () => new Set<string>(closedConversations.map((s) => s.id)),
     [closedConversations]
   );
   const [draftTabs, setDraftTabsState] = useState<DraftSessionTab[]>(() =>
     readPersistedDraftTabs(sessionId)
+  );
+  // Drafts start new work, which an archived workspace cannot host. They stay
+  // stored (a restore brings them back) but are neither shown nor selectable.
+  const workspaceDraftTabs = useMemo(
+    () => (isWorkspaceArchived ? [] : draftTabs),
+    [draftTabs, isWorkspaceArchived]
   );
   const [pendingDraftChildSessionIds, setPendingDraftChildSessionIds] = useState<
     Partial<Record<DraftSessionTab['id'], SessionId>>
@@ -1099,11 +1128,11 @@ const SessionDetail = ({
   const visibleChildSessions = useMemo(
     () =>
       filterPendingPromotedChildSessions(
-        childSessions,
+        tabChildSessions,
         draftTabs,
         pendingDraftChildSessionIds
       ).filter((child) => !requestingForkTargetIds.has(child.id)),
-    [childSessions, draftTabs, pendingDraftChildSessionIds, requestingForkTargetIds]
+    [tabChildSessions, draftTabs, pendingDraftChildSessionIds, requestingForkTargetIds]
   );
   const visibleSideSessions = useMemo(
     () => sideSessions.filter((sideSession) => !requestingForkTargetIds.has(sideSession.id)),
@@ -1141,7 +1170,7 @@ const SessionDetail = ({
     const knownTabIds = new Set<string>([
       ...visibleChildSessions.map((childSession) => childSession.id),
       ...archivedChildSessions.map((childSession) => childSession.id),
-      ...draftTabs.map((draft) => draft.id),
+      ...workspaceDraftTabs.map((draft) => draft.id),
     ]);
     const seen = new Set<string>(orderedIds);
 
@@ -1159,14 +1188,14 @@ const SessionDetail = ({
         seen.add(childSession.id);
       }
     }
-    for (const draft of draftTabs) {
+    for (const draft of workspaceDraftTabs) {
       if (!seen.has(draft.id)) {
         orderedIds.push(draft.id);
       }
     }
 
     return orderedIds;
-  }, [draftTabs, sessionId, sessionTabOrder, visibleChildSessions, archivedChildSessions]);
+  }, [workspaceDraftTabs, sessionId, sessionTabOrder, visibleChildSessions, archivedChildSessions]);
   const orderedSessionTabIds = useMemo(
     () => allOrderedSessionTabIds.filter((id) => !closedConversationIds.has(id)),
     [allOrderedSessionTabIds, closedConversationIds]
@@ -1209,19 +1238,24 @@ const SessionDetail = ({
         // Side chats never own a top tab, so a URL addressing one (an
         // opened-by link to a side-chat session) renders the parent.
         childSessionIdsResolvedToParent: [...sideSessions.map((s) => s.id)],
-        draftTabIds: draftTabs.map((draft) => draft.id),
+        draftTabIds: workspaceDraftTabs.map((draft) => draft.id),
         promotedChildSessionIdsByDraftId: pendingDraftChildSessionIds,
       }),
-    [parsedUrlTab, draftTabs, pendingDraftChildSessionIds, sessionId, sideSessions]
+    [parsedUrlTab, workspaceDraftTabs, pendingDraftChildSessionIds, sessionId, sideSessions]
   );
-  const activeTabSessionId = closedConversationIds.has(requestedTabSessionId)
-    ? getSessionTabFallback(
-        requestedTabSessionId,
-        allOrderedSessionTabIds,
-        orderedSessionTabIds,
-        docMetaCacheReady
-      )
-    : requestedTabSessionId;
+  // A draft or `empty` URL resolves to an open conversation in an archived workspace.
+  const isArchivedDraftChoice =
+    isWorkspaceArchived && (parsedUrlTab.kind === 'draft' || parsedUrlTab.kind === 'empty');
+  const activeTabSessionId = isArchivedDraftChoice
+    ? (orderedSessionTabIds[0] ?? sessionId)
+    : closedConversationIds.has(requestedTabSessionId)
+      ? getSessionTabFallback(
+          requestedTabSessionId,
+          allOrderedSessionTabIds,
+          orderedSessionTabIds,
+          docMetaCacheReady
+        )
+      : requestedTabSessionId;
   const isEmptyConversation = activeTabSessionId === EMPTY_SESSION_TAB_ID;
   // A URL-named child the meta replica has not delivered yet: keep it active
   // and render a pending surface instead of silently showing the parent.
@@ -1764,13 +1798,15 @@ const SessionDetail = ({
   // exact choice, never a newer navigation, and never infer closure from a
   // missing replica row. This is not URL/local-selection mirroring. The close
   // itself is the feedback: no toast, whether this or another client closed it.
+  // A draft choice in an archived workspace is replaced the same way.
   useEffect(() => {
     if (!docMetaCacheReady) return;
-    if (!closedConversationIds.has(requestedTabSessionId)) return;
+    if (!isArchivedDraftChoice && !closedConversationIds.has(requestedTabSessionId)) return;
     if (router.state.location.search.tab !== urlTab) return;
     navigateToSessionTab(activeTabSessionId);
   }, [
     docMetaCacheReady,
+    isArchivedDraftChoice,
     closedConversationIds,
     requestedTabSessionId,
     activeTabSessionId,
@@ -1845,7 +1881,7 @@ const SessionDetail = ({
     updateSessionTitle,
     archiveSession,
     setSessionTabClosed,
-    reopenSessionTab,
+    restoreSession,
     deleteSessions,
     deleteArchivedSession,
     setSessionPinned,
@@ -2027,7 +2063,8 @@ const SessionDetail = ({
   );
 
   const handleNewTab = useCallback(() => {
-    if (!activeSession) return;
+    // An archived workspace is review-only; new work starts after Restore.
+    if (!activeSession || activeSession.isArchived) return;
     const draft = createDraftSessionTab({
       agentConfigId: activeSession.agentConfigId,
       cliType: activeSession.cliType,
@@ -2451,8 +2488,15 @@ const SessionDetail = ({
       captureSessionDetailEvent('session/tab_restore_requested', {
         tab_session_id: tabSessionId,
       });
+      // Reopening only clears the close flag; an archived workspace stays
+      // archived. An archived child of a live workspace is listed with an
+      // explicit Restore action, which unarchives it back into the strip.
+      const target = closedConversations.find((meta) => meta.id === tabSessionId);
+      const restoresArchivedChild =
+        target !== undefined && isArchivedOutsideWorkspace(target, isWorkspaceArchived);
       try {
-        await reopenSessionTab(tabSessionId);
+        if (restoresArchivedChild) await restoreSession(tabSessionId);
+        await setSessionTabClosed(tabSessionId, false);
         setPendingTabRestoreNavigation((current) =>
           current?.requestId === requestId ? { ...current, writeCompleted: true } : current
         );
@@ -2460,11 +2504,33 @@ const SessionDetail = ({
         setPendingTabRestoreNavigation((current) =>
           current?.requestId === requestId ? null : current
         );
+        if (isArchivedLocalProjectRestoreUnavailableError(error)) {
+          toast.info(
+            t(
+              'archive.localProject.restoreUnavailable',
+              'Re-add this local project to restore its conversations.'
+            )
+          );
+          return;
+        }
         console.error('Failed to reopen session tab', error);
-        toast.error(t('sessions.tabReopenFailed', 'Could not reopen this tab'));
+        toast.error(
+          restoresArchivedChild
+            ? t('archive.restoreFailed', 'Failed to restore conversation.')
+            : t('sessions.tabReopenFailed', 'Could not reopen this tab')
+        );
       }
     },
-    [captureSessionDetailEvent, reopenSessionTab, router, sessionId, t]
+    [
+      captureSessionDetailEvent,
+      closedConversations,
+      isWorkspaceArchived,
+      restoreSession,
+      router,
+      sessionId,
+      setSessionTabClosed,
+      t,
+    ]
   );
 
   useEffect(() => {
@@ -2550,11 +2616,26 @@ const SessionDetail = ({
     sessionId,
   ]);
 
-  // Restore the current archived session from the header menu
+  // Restore the current archived session from the header menu. Restore is a
+  // lifecycle action only; every tab keeps its close state.
   const handleRestoreCurrentSession = useCallback(async () => {
     if (!activeSession) return;
-    await handleTabRestore(activeSession.id);
-  }, [activeSession, handleTabRestore]);
+    try {
+      await restoreSession(activeSession.id);
+    } catch (error) {
+      if (isArchivedLocalProjectRestoreUnavailableError(error)) {
+        toast.info(
+          t(
+            'archive.localProject.restoreUnavailable',
+            'Re-add this local project to restore its conversations.'
+          )
+        );
+        return;
+      }
+      console.error('Failed to restore archived conversation', error);
+      toast.error(t('archive.restoreFailed', 'Failed to restore conversation.'));
+    }
+  }, [activeSession, restoreSession, t]);
 
   // Confirmation state for permanently deleting the current archived session
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
@@ -4757,7 +4838,8 @@ const SessionDetail = ({
     t,
   ]);
 
-  // Shared closed conversations include legacy archives and the main tab.
+  // Shared closed conversations include the main tab and, in a live workspace,
+  // archived children (restored rather than reopened).
   const mobileArchivedConversations = useMemo(
     () =>
       closedConversations
@@ -4775,13 +4857,14 @@ const SessionDetail = ({
               conversationLiveStatusMap[archivedSession.id]?.type === 'requestPermission',
             unread: sessionHasUnreadMessages(archivedSession),
             lastActivityAt: lastMessageAt ?? (Number.isFinite(createdAtMs) ? createdAtMs : null),
+            restoresArchive: isArchivedOutsideWorkspace(archivedSession, isWorkspaceArchived),
           };
         })
         .sort((a, b) => (b.lastActivityAt ?? 0) - (a.lastActivityAt ?? 0)),
-    [closedConversations, conversationLiveStatusMap]
+    [closedConversations, conversationLiveStatusMap, isWorkspaceArchived]
   );
 
-  // Reopen through the same lifecycle-aware action used by the desktop list.
+  // Same reopen/restore dispatch as the desktop closed-conversations list.
   const handleMobileRestoreConversation = useCallback(
     (id: string) => {
       void handleTabRestore(id as SessionId);
@@ -5502,7 +5585,7 @@ const SessionDetail = ({
           archivedConversations={mobileArchivedConversations}
           viewers={mobileViewers}
           onSelectConversation={handleSessionTabSelect}
-          onNewConversation={handleNewTab}
+          onNewConversation={isWorkspaceArchived ? undefined : handleNewTab}
           onSelectViewer={handleMobileViewerSelect}
           onRestoreConversation={handleMobileRestoreConversation}
           onCloseConversation={(id) => {
@@ -6158,12 +6241,17 @@ const SessionDetail = ({
   /* Single-row desktop top bar: [sidebar expand] [session tabs …] [toolbar].
      Replaces the old two-row header (repo title row + tab bar) — repo identity
      lives in the context strip above the composer and in the "…" menu. */
+  // The main tab shown by an all-closed archived workspace reads as open.
+  const tabBarParentSession =
+    activeSession.isTabClosed === true && !closedConversationIds.has(activeSession.id)
+      ? { ...activeSession, isTabClosed: false }
+      : activeSession;
   const tabBar = (
     <SessionTabBar
       variant="session"
-      parentSession={activeSession}
+      parentSession={tabBarParentSession}
       childSessions={visibleChildSessions}
-      draftTabs={draftTabs}
+      draftTabs={workspaceDraftTabs}
       tabOrder={sessionTabOrder}
       activeTabSessionId={activeTabSessionId}
       onTabSelect={handleSessionTabSelect}

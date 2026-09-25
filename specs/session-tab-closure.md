@@ -17,12 +17,21 @@ open. The main Session's flag closes only its conversation tab; children, sideba
 presence, running agent, pending work, terminal, and worktree remain intact. New close actions
 only write this flag; even persisted empty conversations are not deleted.
 
-The closed list includes `isTabClosed === true || isArchived === true`. This retains
-historical child tabs whose close operation archived them. Reopening an archived
-conversation runs the existing restoration checks and containment rules, then clears
-the selected conversation's close flag. Root restoration includes direct children,
-preserves their independent close flags, and excludes opened-by descendants. A failed
-restore is visible and retryable. No bulk migration guesses the reason for an archive.
+Archive and tab closure are orthogonal: closing never archives, reopening never
+restores, and restoring never changes a close flag. An archived workspace (its main
+Session archived) keeps the tabs it had open, so opening it from the archive list shows
+the archived conversation instead of a draft; its closed tabs reopen and stay archived.
+An archived workspace is review-only: local drafts stay stored but are hidden, there is
+no new-conversation action, a draft or `tab=empty` URL resolves to an open conversation,
+and with every tab closed it still shows the main conversation. Restore brings drafts
+and the new-conversation action back. Root restoration includes direct children and
+excludes opened-by descendants.
+
+In a live workspace, an archived child conversation stays out of the tab strip; this
+includes historical child tabs whose close operation archived them. The closed list
+shows such a child with an explicit Restore action, not Reopen: it runs the existing
+restoration checks, then clears that child's close flag. A failed restore is visible
+and retryable. No bulk migration guesses the reason for an archive.
 
 Closed and archived conversations do not contribute unread indicators to the desktop
 sidebar, the mobile session list, tabs, parent summaries, project counts, or window
@@ -65,11 +74,14 @@ their existing close lifecycle.
 ## Compatibility and evidence
 
 Older clients can read the additional metadata, but do not honor the new flag and
-may still archive when closing. Uniform behavior requires updated clients. Any hosted
-metadata allowlist must preserve the field; private backend compatibility cannot be
-established by this public repository alone.
+may still archive when closing. Clients predating orthogonal archive still hide an
+archived workspace's tabs and unarchive when reopening one. Uniform behavior requires
+updated clients. Any hosted metadata allowlist must preserve the field; private
+backend compatibility cannot be established by this public repository alone.
 
 Implementation owners: shared SessionMeta, components session actions, tab URL
 resolution, SessionDetail, SessionTabBar and the responsive mobile tab sheet.
-Tests cover close/reopen lifecycle isolation, neighbour/empty selection, and real
-LoroRepo replica convergence. See [relations](session-relations.md) for archive targets.
+Tests cover close/reopen lifecycle isolation, archived-workspace tab visibility, the
+Restore action for archived children of a live workspace, neighbour/empty selection,
+and real LoroRepo replica convergence. Desktop E2E `LODY-SESSION-004` opens archived
+Sessions by route and expects their opened-by provenance card. See [relations](session-relations.md) for archive targets.
