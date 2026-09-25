@@ -60,11 +60,7 @@ import {
   type ScheduleFormValue,
 } from './schedule-view';
 import { scheduleCardProps } from './schedule-property-row';
-import {
-  ScheduleDetailToolbar,
-  ScheduleHistoryDrawer,
-  ScheduleSplitView,
-} from './schedule-split-view';
+import { ScheduleDetailToolbar, ScheduleSplitView } from './schedule-split-view';
 import { collectScheduleSaveIssues, type ScheduleIssueField } from './schedule-save-blockers';
 import { ScheduleDestinationRows, type PickableSession } from './schedule-destination-rows';
 import { ScheduleAgentControls } from './schedule-agent-controls';
@@ -212,7 +208,6 @@ function SchedulesContent({ scheduleId }: { scheduleId?: string }) {
       if (row) toggle(row);
     },
   });
-  const [historyOpen, setHistoryOpen] = useState(false);
   // Saving or closing always lands on the list: the list is the page, and a
   // schedule opens beside it (a sliding panel on desktop, a pushed page on mobile).
   const content = !scheduleId ? null : scheduleId === 'new' ? (
@@ -264,9 +259,7 @@ function SchedulesContent({ scheduleId }: { scheduleId?: string }) {
         onSaved={() => open()}
         onOpenSession={openSession}
       />
-      <ScheduleHistoryDrawer open={historyOpen} onOpenChange={setHistoryOpen}>
-        <ScheduleSessionHistory scheduleId={scheduleId} />
-      </ScheduleHistoryDrawer>
+      <ScheduleSessionHistory scheduleId={scheduleId} />
     </>
   );
   const detailPane = (
@@ -292,7 +285,6 @@ function SchedulesContent({ scheduleId }: { scheduleId?: string }) {
                     accept: requestRun(row.scheduleId),
                   }),
                 onDelete: () => confirmDelete(row),
-                onHistory: () => setHistoryOpen(true),
               }
             : undefined
         }
@@ -752,26 +744,34 @@ function ScheduleSessionHistory({ scheduleId }: { scheduleId: string }) {
   const linked = [...sessions, ...archived]
     .filter((s) => s.scheduleId === scheduleId)
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-  return linked.length === 0 ? (
-    <p {...scheduleCardProps('px-3 py-3 text-[0.9em] text-muted-foreground')}>
-      {t('schedules.noRuns', 'No Sessions have been created yet.')}
-    </p>
-  ) : (
-    <div {...scheduleCardProps()}>
-      {linked.slice(0, 100).map((s) => (
-        <ScheduleHistoryRow
-          key={s.id}
-          session={s}
-          onOpen={() => {
-            if (slug)
-              void navigate({
-                to: '/$workspaceName/sessions/$sessionId',
-                params: { workspaceName: slug, sessionId: s.id },
-              });
-          }}
-        />
-      ))}
-    </div>
+  // Under the editor, at the bottom of the open schedule.
+  return (
+    <section className="mx-auto w-full max-w-2xl px-4 pb-8 sm:px-6">
+      <h2 className="mb-1.5 px-3 text-[0.8em] font-normal text-muted-foreground">
+        {t('schedules.history', 'Run history')}
+      </h2>
+      {linked.length === 0 ? (
+        <p {...scheduleCardProps('px-3 py-3 text-[0.9em] text-muted-foreground')}>
+          {t('schedules.noRuns', 'No Sessions have been created yet.')}
+        </p>
+      ) : (
+        <div {...scheduleCardProps()}>
+          {linked.slice(0, 100).map((s) => (
+            <ScheduleHistoryRow
+              key={s.id}
+              session={s}
+              onOpen={() => {
+                if (slug)
+                  void navigate({
+                    to: '/$workspaceName/sessions/$sessionId',
+                    params: { workspaceName: slug, sessionId: s.id },
+                  });
+              }}
+            />
+          ))}
+        </div>
+      )}
+    </section>
   );
 }
 

@@ -7,7 +7,6 @@ import {
 import { ScheduleAgentControls } from '../components/schedules/schedule-agent-controls';
 import {
   ScheduleDetailToolbar,
-  ScheduleHistoryDrawer,
   ScheduleSplitView,
 } from '../components/schedules/schedule-split-view';
 import { ScheduleDestinationRows } from '../components/schedules/schedule-destination-rows';
@@ -517,7 +516,6 @@ export const EditorError: Story = editor({ error: 'The schedule could not be sav
 export const EditorBesideList: Story = {
   render: function Render(args) {
     const [open, setOpen] = useState(true);
-    const [history, setHistory] = useState(false);
     return (
       <WithPlatform>
         <div className="h-dvh">
@@ -542,14 +540,8 @@ export const EditorBesideList: Story = {
                         onToggle: () => {},
                         onRun: () => {},
                         onDelete: () => {},
-                        onHistory: () => setHistory(true),
                       }}
                     />
-                    <ScheduleHistoryDrawer open={history} onOpenChange={setHistory}>
-                      <p className="px-3 py-3 text-[0.9em] text-muted-foreground">
-                        No Sessions have been created yet.
-                      </p>
-                    </ScheduleHistoryDrawer>
                     <div data-settings-surface="" className="min-h-0 flex-1 overflow-auto">
                       <EditorStory bare fixture={{ chatOnly: true }} />
                     </div>

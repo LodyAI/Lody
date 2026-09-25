@@ -9,15 +9,14 @@ import {
 } from 'react';
 import { useTranslation } from 'react-i18next';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
-import { History, Pause, Play, RotateCcw, Trash2, X } from 'lucide-react';
+import { Pause, Play, RotateCcw, Trash2, X } from 'lucide-react';
 import { Button } from '@lody/ui/button';
-import { Drawer } from '@lody/ui/drawer';
 import { Tooltip } from '@lody/ui/tooltip';
 import { cn } from '@/lib/utils';
 import { WINDOW_DRAG_EXEMPT_CLASS, useWindowDragRegionClass } from '@/ui/window-drag-region';
 
-/** Default width of the list while a schedule is open beside it. */
-export const SCHEDULE_LIST_DEFAULT_WIDTH = 560;
+/** Default width of the list while a schedule is open: the schedule gets the rest. */
+export const SCHEDULE_LIST_DEFAULT_WIDTH = 380;
 const MIN_LIST_WIDTH = 280;
 /** The editor's form needs about this much before its rows wrap badly. */
 const MIN_DETAIL_WIDTH = 440;
@@ -245,7 +244,7 @@ function ToolbarButton({
 
 /**
  * The open schedule's header: close on the leading side, a compact row of
- * icon actions on the trailing side, run history last. A new schedule has
+ * icon actions on the trailing side. A new schedule has
  * nothing to act on yet, so it shows only the close button.
  */
 export function ScheduleDetailToolbar({
@@ -263,7 +262,6 @@ export function ScheduleDetailToolbar({
     onToggle: () => void;
     onRun: () => void;
     onDelete: () => void;
-    onHistory: () => void;
   };
 }) {
   const { t } = useTranslation();
@@ -316,44 +314,9 @@ export function ScheduleDetailToolbar({
             >
               <Trash2 className="size-full" />
             </ToolbarButton>
-            <ToolbarButton
-              label={t('schedules.history', 'Run history')}
-              onClick={actions.onHistory}
-            >
-              <History className="size-full" />
-            </ToolbarButton>
           </div>
         ) : null}
       </div>
     </Tooltip.Provider>
-  );
-}
-
-/** Run history in a drawer from the trailing edge, off the editor's page. */
-export function ScheduleHistoryDrawer({
-  open,
-  onOpenChange,
-  children,
-}: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  children: ReactNode;
-}) {
-  const { t } = useTranslation();
-  return (
-    <Drawer.Root side="end" open={open} onOpenChange={onOpenChange}>
-      <Drawer.Content
-        side="end"
-        closeLabel={t('schedules.close', 'Close')}
-        className="flex w-[min(24rem,100vw)] flex-col p-0"
-      >
-        <Drawer.Header className="shrink-0 px-4 py-3">
-          <Drawer.Title>{t('schedules.history', 'Run history')}</Drawer.Title>
-        </Drawer.Header>
-        <div data-settings-surface="" className="min-h-0 flex-1 overflow-auto px-3 pb-4">
-          {children}
-        </div>
-      </Drawer.Content>
-    </Drawer.Root>
   );
 }

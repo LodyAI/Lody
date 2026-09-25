@@ -60,8 +60,8 @@ schedule opens with the chat landing's last machine and Agent and that Agent's
 remembered model, options and permission, so nothing starts empty; times are
 typed, with no picker popup. On desktop a schedule opens beside the list (revised
 2026-09-25, replacing a dialog): the schedule slides in like a sidebar
-beside the full table, which scrolls sideways, across a resizable boundary, with a compact icon header and run history in a
-drawer; saving returns to the list. Where runs go and when share one card. The list itself is
+beside the full table, which scrolls sideways, across a resizable boundary, with a compact icon header and run history at its
+bottom; saving returns to the list. Where runs go and when share one card. The list itself is
 worked from directly: manual rows carry a Run button, every row has a context menu
 (open, run, pause/resume, last run, delete — delete confirms), and columns resize
 from the header. There is no time zone control: the CLI publishes

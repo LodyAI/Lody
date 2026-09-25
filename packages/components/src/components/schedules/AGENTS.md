@@ -28,8 +28,8 @@
   (`scheduleSplitListWidthAtom`). A click on blank page space closes it
   (`onBlankClick`; rows, controls, the panel and portalled popups excluded).
   Mobile pushes a page. The header
-  (`ScheduleDetailToolbar`) is close plus compact icon actions, history last
-  (a trailing `Drawer`). Top-of-pane headers join the Electron drag strip
+  (`ScheduleDetailToolbar`) is close plus compact icon actions; run history is
+  the panel's last section, under the editor (no second drawer). Top-of-pane headers join the Electron drag strip
   (`useWindowDragRegionClass`) with buttons `WINDOW_DRAG_EXEMPT_CLASS`, or the
   strip swallows their clicks. Saving and closing return to the full list.
 - The editor reuses the composer's parts: one box holds name, a hairline, the
