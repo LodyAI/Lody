@@ -5,6 +5,7 @@ import { formatDistanceToNow, type Locale } from 'date-fns';
 import { enUS } from 'date-fns/locale/en-US';
 import { zhCN } from 'date-fns/locale/zh-CN';
 import { AlertCircle, Boxes, Info, PackageOpen, RefreshCw, Search, User } from 'lucide-react';
+import * as stylex from '@stylexjs/stylex';
 import { Spinner } from '@/ui/spinner';
 import { DEFAULT_PROJECT_SKILL_DIR, type ProjectSkill, type ProjectSkillScope } from '@lody/shared';
 import { SkillDetailDialog } from './skill-detail';
@@ -15,8 +16,145 @@ import {
   type ProjectSkillsSource,
   type ProjectSkillsStatus,
 } from '@/hooks/use-project-skills';
-import { Button } from '@/ui/button';
-import { Input } from '@/ui/input';
+import { Button } from '@lody/ui/button';
+import { Input } from '@lody/ui/input';
+import { Spinner as LoadingSpinner } from '@lody/ui/spinner';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { corner, radius, space } from '@lody/ui/tokens/scales.stylex';
+
+const MONO = 'var(--font-mono, ui-monospace, monospace)';
+const TRUNCATE = {
+  minWidth: 0,
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+  whiteSpace: 'nowrap',
+} as const;
+
+/*
+ * The tab renders inside a settings card, so nothing here is a card: a skill
+ * group is a region fill of ruled rows under its own name, and an empty or
+ * loading state is copy in the card, not a box drawn inside it.
+ */
+const styles = stylex.create({
+  note: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: space[2],
+    paddingBlock: space[8],
+    fontSize: '0.75em',
+    color: colors.secondaryLabel,
+  },
+  unreachable: { margin: 0, fontSize: '0.75em', color: colors.secondaryLabel },
+  view: { display: 'flex', flexDirection: 'column', gap: space[3] },
+  toolbar: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: space[3],
+  },
+  status: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: space[2],
+    minWidth: 0,
+    fontSize: '0.75em',
+    color: colors.secondaryLabel,
+  },
+  truncate: TRUNCATE,
+  icon12: { width: '12px', height: '12px', flexShrink: 0 },
+  icon14: { width: '14px', height: '14px', flexShrink: 0 },
+  icon16: { width: '16px', height: '16px', flexShrink: 0 },
+  hint: { color: colors.tertiaryLabel },
+  warning: { color: colors.warning },
+  destructive: { color: colors.destructive },
+  groups: { display: 'flex', flexDirection: 'column', gap: space[4] },
+  group: { display: 'flex', flexDirection: 'column', gap: space[1.5], minWidth: 0 },
+  /** The group's name sits above its rows, never in a band inside them. */
+  groupHeading: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: space[2],
+    minWidth: 0,
+    paddingInline: space[3],
+    color: colors.secondaryLabel,
+  },
+  groupDir: { ...TRUNCATE, fontFamily: MONO, fontSize: '0.75em', color: colors.label },
+  /** A block inside the card is the region rung: a fill with no edge. */
+  groupBody: {
+    minWidth: 0,
+    overflow: 'hidden',
+    backgroundColor: `color-mix(in oklab, transparent, ${colors.label} 3%)`,
+    borderRadius: radius.medium,
+    cornerShape: corner.shape,
+  },
+  line: { minWidth: 0 },
+  lineRuled: { boxShadow: `inset 0 1px 0 ${colors.separator}` },
+  groupError: {
+    display: 'flex',
+    alignItems: 'flex-start',
+    gap: space[2],
+    paddingInline: space[3],
+    paddingBlock: space[2],
+    fontSize: '0.75em',
+    color: colors.destructive,
+  },
+  groupErrorIcon: { marginTop: '1px' },
+  breakWords: { minWidth: 0, overflowWrap: 'break-word' },
+  groupFootnote: {
+    paddingInline: space[3],
+    paddingBlock: space[1.5],
+    fontSize: '0.75em',
+    color: colors.secondaryLabel,
+  },
+  row: { paddingInline: space[3], paddingBlock: '10px' },
+  rowHead: { display: 'flex', alignItems: 'center', gap: space[2] },
+  rowTitle: {
+    display: 'flex',
+    flexGrow: 1,
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    columnGap: space[2],
+    rowGap: space[1],
+    minWidth: 0,
+  },
+  rowName: { ...TRUNCATE, fontSize: '0.875em', color: colors.label },
+  rowDescription: {
+    display: '-webkit-box',
+    WebkitBoxOrient: 'vertical',
+    WebkitLineClamp: 2,
+    overflow: 'hidden',
+    margin: 0,
+    marginTop: '2px',
+    fontSize: '0.75em',
+    color: colors.secondaryLabel,
+  },
+  rowMeta: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    columnGap: space[3],
+    rowGap: '2px',
+    minWidth: 0,
+    marginTop: space[1],
+    fontSize: '0.75em',
+    color: colors.secondaryLabel,
+  },
+  author: { display: 'inline-flex', alignItems: 'center', gap: space[1] },
+  path: { ...TRUNCATE, fontFamily: MONO },
+  empty: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: space[2],
+    paddingInline: space[4],
+    paddingBlock: space[8],
+    textAlign: 'center',
+  },
+  emptyTitle: { margin: 0, fontSize: '0.875em', color: colors.label },
+  emptyBody: { margin: 0, maxWidth: '384px', fontSize: '0.75em', color: colors.secondaryLabel },
+});
 import { capturePickerSearchSelected } from '@/lib/picker-search-analytics';
 
 /**
@@ -101,8 +239,8 @@ export function ProjectSkillsView({
 
   if (isInitialLoading) {
     return (
-      <div className="flex items-center justify-center gap-2 rounded-md border border-border/60 bg-muted/15 px-3 py-10 text-xs text-muted-foreground">
-        <Spinner className="h-3.5 w-3.5" />
+      <div {...stylex.props(styles.note)}>
+        <LoadingSpinner size="small" label={null} />
         {t('workspace.projects.skills.loading', 'Loading skills')}
       </div>
     );
@@ -115,7 +253,7 @@ export function ProjectSkillsView({
         Boolean(error?.includes('CLI is not accepting RPC'));
       if (unreachable) {
         return (
-          <p className="text-xs text-muted-foreground">
+          <p {...stylex.props(styles.unreachable)}>
             {t(
               'workspace.projects.machineUnreachable',
               'This machine isn’t connected. Worktree setup and skills will load when it comes online.'
@@ -125,12 +263,12 @@ export function ProjectSkillsView({
       }
       return (
         <SkillsEmptyShell
-          icon={<AlertCircle className="h-4 w-4 text-destructive" />}
+          icon={<AlertCircle {...stylex.props(styles.icon16, styles.destructive)} />}
           title={t('workspace.projects.skills.errorTitle', "Couldn't load skills")}
           body={error}
           action={
-            <Button type="button" variant="outline" size="sm" className="mt-1" onClick={onRefresh}>
-              <RefreshCw className="h-3.5 w-3.5" />
+            <Button type="button" variant="secondary" size="small" onClick={onRefresh}>
+              <RefreshCw {...stylex.props(styles.icon14)} />
               {t('workspace.projects.skills.retry', 'Retry')}
             </Button>
           }
@@ -139,7 +277,7 @@ export function ProjectSkillsView({
     }
     return (
       <SkillsEmptyShell
-        icon={<PackageOpen className="h-4 w-4 text-muted-foreground" />}
+        icon={<PackageOpen {...stylex.props(styles.icon16, styles.hint)} />}
         title={t('workspace.projects.skills.empty', 'No skills found')}
         body={t('workspace.projects.skills.emptyHint', {
           defaultValue:
@@ -151,18 +289,18 @@ export function ProjectSkillsView({
   }
 
   return (
-    <div className="flex flex-col gap-3">
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
+    <div {...stylex.props(styles.view)}>
+      <div {...stylex.props(styles.toolbar)}>
+        <div {...stylex.props(styles.status)}>
           {isRefreshing ? (
             <>
-              <Spinner className="h-3.5 w-3.5 shrink-0" />
+              <LoadingSpinner size="small" label={null} />
               <span>{t('workspace.projects.skills.refreshing', 'Refreshing…')}</span>
             </>
           ) : status === 'error' && stale ? (
             <>
-              <AlertCircle className="h-3.5 w-3.5 shrink-0 text-status-warning" />
-              <span className="min-w-0 truncate">
+              <AlertCircle {...stylex.props(styles.icon14, styles.warning)} />
+              <span {...stylex.props(styles.truncate)}>
                 {t(
                   'workspace.projects.skills.staleNotice',
                   "Couldn't refresh — showing the last cached result."
@@ -170,7 +308,7 @@ export function ProjectSkillsView({
               </span>
             </>
           ) : (
-            <span className="min-w-0 truncate">
+            <span {...stylex.props(styles.truncate)}>
               {t('workspace.projects.skills.summary', {
                 defaultValue: '{{count}} skills',
                 count: totalSkills,
@@ -190,34 +328,30 @@ export function ProjectSkillsView({
         <Button
           type="button"
           variant="ghost"
-          size="sm"
-          className="h-7 shrink-0 gap-1.5 px-2 text-xs"
+          size="small"
           disabled={isRefreshing}
           onClick={onRefresh}
         >
-          <Spinner icon={RefreshCw} spinning={isRefreshing} className="h-3.5 w-3.5" />
+          <Spinner icon={RefreshCw} spinning={isRefreshing} {...stylex.props(styles.icon14)} />
           {t('workspace.projects.skills.refresh', 'Refresh')}
         </Button>
       </div>
 
-      <div className="relative">
-        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-        <Input
-          type="search"
-          value={searchQuery}
-          onChange={(event) => setSearchQuery(event.target.value)}
-          aria-label={t('workspace.projects.skills.searchLabel', 'Search skills')}
-          placeholder={t(
-            'workspace.projects.skills.searchPlaceholder',
-            'Search by name, description, author, or path'
-          )}
-          className="bg-input-field pl-9"
-        />
-      </div>
+      <Input
+        type="search"
+        value={searchQuery}
+        onChange={(event) => setSearchQuery(event.target.value)}
+        aria-label={t('workspace.projects.skills.searchLabel', 'Search skills')}
+        placeholder={t(
+          'workspace.projects.skills.searchPlaceholder',
+          'Search by name, description, author, or path'
+        )}
+        leading={<Search {...stylex.props(styles.icon16)} />}
+      />
 
       {normalizedSearchQuery && !hasMatches ? (
         <SkillsEmptyShell
-          icon={<Search className="h-4 w-4 text-muted-foreground" />}
+          icon={<Search {...stylex.props(styles.icon16, styles.hint)} />}
           title={t('workspace.projects.skills.noSearchResults', 'No matching skills')}
           body={t(
             'workspace.projects.skills.noSearchResultsHint',
@@ -225,7 +359,7 @@ export function ProjectSkillsView({
           )}
         />
       ) : (
-        <div className="flex flex-col gap-3">
+        <div {...stylex.props(styles.groups)}>
           {filteredGroups.map((group) => (
             <SkillGroupCard
               key={`${group.scope}:${group.dir}`}
@@ -248,41 +382,39 @@ function SkillGroupCard({
 }) {
   const { t } = useTranslation();
   return (
-    <div className="overflow-hidden rounded-md border border-tab-border">
-      <div className="flex items-center justify-between gap-2 border-b border-tab-border bg-tab-bar px-3 py-2">
-        <div className="flex min-w-0 items-center gap-2">
-          <Boxes className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-          <code className="min-w-0 truncate font-mono text-xs text-foreground">{group.dir}</code>
-          <SkillScopeBadge scope={group.scope} className="shrink-0" />
-        </div>
+    <div {...stylex.props(styles.group)}>
+      <div {...stylex.props(styles.groupHeading)}>
+        <Boxes {...stylex.props(styles.icon14, styles.hint)} />
+        <code {...stylex.props(styles.groupDir)}>{group.dir}</code>
+        <SkillScopeBadge scope={group.scope} />
       </div>
 
-      {group.error ? (
-        <div className="flex items-start gap-2 border-b border-tab-border bg-destructive/5 px-3 py-2 text-[11px] text-destructive">
-          <AlertCircle className="mt-px h-3.5 w-3.5 shrink-0" />
-          <span className="min-w-0 break-words">{group.error}</span>
-        </div>
-      ) : null}
+      <div {...stylex.props(styles.groupBody)}>
+        {group.error ? (
+          <div {...stylex.props(styles.groupError)}>
+            <AlertCircle {...stylex.props(styles.icon14, styles.groupErrorIcon)} />
+            <span {...stylex.props(styles.breakWords)}>{group.error}</span>
+          </div>
+        ) : null}
 
-      <div className="divide-y divide-tab-border">
-        {group.skills.map((skill) => (
-          <SkillRow
+        {group.skills.map((skill, index) => (
+          <div
             key={skill.id}
-            skill={skill}
-            scope={group.scope}
-            onOpen={() => onSkillOpen?.(skill.id)}
-          />
+            {...stylex.props(styles.line, (index > 0 || Boolean(group.error)) && styles.lineRuled)}
+          >
+            <SkillRow skill={skill} scope={group.scope} onOpen={() => onSkillOpen?.(skill.id)} />
+          </div>
         ))}
-      </div>
 
-      {group.skippedExternalSymlinks ? (
-        <div className="border-t border-tab-border px-3 py-1.5 text-[11px] text-muted-foreground">
-          {t('workspace.projects.skills.skippedSymlinks', {
-            defaultValue: '{{count}} external symlinks skipped',
-            count: group.skippedExternalSymlinks,
-          })}
-        </div>
-      ) : null}
+        {group.skippedExternalSymlinks ? (
+          <div {...stylex.props(styles.groupFootnote, styles.lineRuled)}>
+            {t('workspace.projects.skills.skippedSymlinks', {
+              defaultValue: '{{count}} external symlinks skipped',
+              count: group.skippedExternalSymlinks,
+            })}
+          </div>
+        ) : null}
+      </div>
     </div>
   );
 }
@@ -299,39 +431,41 @@ function SkillRow({
   const { t } = useTranslation();
   const [detailOpen, setDetailOpen] = useState(false);
   return (
-    <div className="px-3 py-2.5">
-      <div className="flex items-center gap-2">
-        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1">
-          <span className="truncate text-sm font-normal text-foreground">{skill.name}</span>
+    <div {...stylex.props(styles.row)}>
+      <div {...stylex.props(styles.rowHead)}>
+        <div {...stylex.props(styles.rowTitle)}>
+          <span {...stylex.props(styles.rowName)}>{skill.name}</span>
           {skill.version ? <SkillVersionBadge version={skill.version} size="sm" /> : null}
           {skill.isSymlink ? (
             <SkillSymlinkBadge symlinkTarget={skill.symlinkTarget} size="sm" />
           ) : null}
         </div>
-        <button
+        <Button
           type="button"
+          variant="ghost"
+          size="small"
+          icon
           onClick={() => {
             setDetailOpen(true);
             onOpen?.();
           }}
           aria-label={t('workspace.projects.skills.viewDetails', 'View details')}
           title={t('workspace.projects.skills.viewDetails', 'View details')}
-          className="-my-1 -mr-1 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-hover hover:text-foreground"
         >
-          <Info className="h-4 w-4" />
-        </button>
+          <Info {...stylex.props(styles.icon16)} />
+        </Button>
       </div>
       {skill.description ? (
-        <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{skill.description}</p>
+        <p {...stylex.props(styles.rowDescription)}>{skill.description}</p>
       ) : null}
-      <div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-muted-foreground">
+      <div {...stylex.props(styles.rowMeta)}>
         {skill.author ? (
-          <span className="inline-flex items-center gap-1">
-            <User className="h-3 w-3" />
+          <span {...stylex.props(styles.author)}>
+            <User {...stylex.props(styles.icon12, styles.hint)} />
             {skill.author}
           </span>
         ) : null}
-        <span className="min-w-0 truncate font-mono">{skill.relativePath}</span>
+        <span {...stylex.props(styles.path)}>{skill.relativePath}</span>
       </div>
       <SkillDetailDialog
         skill={skill}
@@ -355,12 +489,10 @@ function SkillsEmptyShell({
   action?: React.ReactNode;
 }) {
   return (
-    <div className="flex flex-col items-center justify-center gap-2 rounded-md border border-dashed border-border/60 px-4 py-10 text-center">
-      <div className="flex h-9 w-9 items-center justify-center rounded-full bg-muted/60">
-        {icon}
-      </div>
-      <p className="text-sm font-normal text-foreground">{title}</p>
-      {body ? <p className="max-w-sm text-xs text-muted-foreground">{body}</p> : null}
+    <div {...stylex.props(styles.empty)}>
+      {icon}
+      <p {...stylex.props(styles.emptyTitle)}>{title}</p>
+      {body ? <p {...stylex.props(styles.emptyBody)}>{body}</p> : null}
       {action}
     </div>
   );

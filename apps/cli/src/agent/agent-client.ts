@@ -1619,7 +1619,11 @@ export class AgentClient implements acp.Client {
     this.options.onUpdateMessage(result.notification);
   }
 
-  /** Forward native titles only when their source is authoritative. */
+  /** The live process, rather than its provider identity, advertised title ownership. */
+  supportsSessionTitleGeneration(): boolean {
+    return this.lodyExtensionCapabilities.sessionTitle?.version === 1;
+  }
+
   private handleAgentSessionTitleUpdate(notification: AcpSessionNotification): void {
     if (notification.update.sessionUpdate !== 'session_info_update') {
       return;
@@ -1635,11 +1639,19 @@ export class AgentClient implements acp.Client {
           .object({ titleSource: z.enum(['explicit', 'fallback', 'unset', 'unknown']) })
           .safeParse(notification.update._meta?.codex)
       : null;
-    const isExplicitProviderTitle =
-      (lodyTitleMeta.success && lodyTitleMeta.data.titleSource === 'explicit') ||
-      (legacyCodexTitleMeta?.success === true &&
-        legacyCodexTitleMeta.data.titleSource === 'explicit');
-    if (!trustsUntaggedTitle && !isExplicitProviderTitle) {
+    // Canonical tags win over legacy metadata and identity-based untagged trust.
+    const titleMeta = notification.update._meta?.lody;
+    const hasTitleSource =
+      typeof titleMeta === 'object' && titleMeta !== null && 'titleSource' in titleMeta;
+    const ownsTitle = this.supportsSessionTitleGeneration();
+    const isAuthoritativeTitle = hasTitleSource
+      ? lodyTitleMeta.success &&
+        (lodyTitleMeta.data.titleSource === 'explicit' ||
+          (ownsTitle && lodyTitleMeta.data.titleSource === 'generated'))
+      : (legacyCodexTitleMeta?.success === true &&
+          legacyCodexTitleMeta.data.titleSource === 'explicit') ||
+        (!ownsTitle && trustsUntaggedTitle);
+    if (!isAuthoritativeTitle) {
       return;
     }
 

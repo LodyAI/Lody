@@ -1,22 +1,59 @@
 import { Component, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Button } from '@/ui/button';
+import * as stylex from '@stylexjs/stylex';
+import { Button } from '@lody/ui/button';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { space, text } from '@lody/ui/tokens/scales.stylex';
+
+const styles = stylex.create({
+  page: {
+    boxSizing: 'border-box',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: '100dvh',
+    padding: space[8],
+    textAlign: 'center',
+    backgroundColor: colors.background,
+    color: colors.label,
+  },
+  content: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    gap: space[3],
+    maxWidth: '384px',
+  },
+  title: {
+    margin: 0,
+    fontSize: text.titleSize,
+    lineHeight: text.titleLeading,
+    fontWeight: 600,
+    color: colors.label,
+  },
+  detail: {
+    margin: 0,
+    fontSize: text.bodySize,
+    lineHeight: text.bodyLeading,
+    color: colors.secondaryLabel,
+  },
+});
 
 export function SessionShareReadError() {
   const { t } = useTranslation();
   return (
-    <main className="flex min-h-dvh items-center justify-center p-8 text-center" role="alert">
-      <div className="max-w-sm space-y-3">
-        <h1 className="text-lg font-medium">
+    <main {...stylex.props(styles.page)} role="alert">
+      <div {...stylex.props(styles.content)}>
+        <h1 {...stylex.props(styles.title)}>
           {t('sharing.renderError', 'This conversation could not be displayed')}
         </h1>
-        <p className="text-sm text-muted-foreground">
+        <p {...stylex.props(styles.detail)}>
           {t(
             'sharing.renderErrorDetail',
             'The shared document may contain unsupported content. Try reloading the page.'
           )}
         </p>
-        <Button variant="outline" onClick={() => window.location.reload()}>
+        <Button variant="secondary" onClick={() => window.location.reload()}>
           {t('sharing.reloadPage', 'Reload page')}
         </Button>
       </div>

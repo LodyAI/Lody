@@ -179,8 +179,8 @@ export function MobileSessionMenuSheet({
                       >
                         <UserAvatar
                           user={{ id: member.userId, name: member.name, image: member.image }}
-                          className="h-5 w-5 shrink-0"
-                          fallbackClassName="text-[0.6rem]"
+                          size="small"
+                          className="shrink-0"
                         />
                         <span className="min-w-0 flex-1 truncate text-foreground">
                           {member.name}

@@ -11,7 +11,7 @@ import type {
   AcpConfigOptionValue,
 } from '../src/components/shared/acp-selector-options';
 import { initI18n } from '../src/i18n';
-import { TooltipProvider } from '../src/ui/tooltip';
+import { Tooltip } from '@lody/ui/tooltip';
 
 const selectors: AcpConfigOptionSelector[] = [
   {
@@ -72,7 +72,7 @@ describe('AcpBottomBarModeSelector UI', () => {
     flushSync(() => {
       root?.render(
         createElement(
-          TooltipProvider,
+          Tooltip.Provider,
           null,
           createElement(AcpBottomBarModeSelector, {
             tone: 'light',
@@ -97,7 +97,7 @@ describe('AcpBottomBarModeSelector UI', () => {
       'button[aria-label="Collaboration mode"]'
     );
 
-    expect(fastModeButton?.className).toContain('bg-primary/[0.12]');
+    expect(fastModeButton?.getAttribute('aria-pressed')).toBe('true');
     expect(planModeButton?.textContent).toBe('Plan');
     expect(planModeButton?.className).not.toContain('border');
     expect(
@@ -136,7 +136,7 @@ describe('AcpBottomBarModeSelector UI', () => {
       'button[aria-label="Fast mode"]'
     );
 
-    expect(fastModeButton?.className).toContain('bg-primary/[0.12]');
+    expect(fastModeButton?.getAttribute('aria-pressed')).toBe('true');
     fastModeButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     expect(values).toEqual({ fast: 'off' });
   });

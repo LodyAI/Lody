@@ -73,7 +73,13 @@ export class WorkSessionPage {
     const agentOption = this.page.getByRole('menuitemradio', { name: agentName, exact: true });
     await agentOption.click();
     await expect(agentOption).toHaveAttribute('aria-checked', 'true');
-    await this.page.keyboard.press('Escape');
+    // Picking an option keeps this menu open on purpose, and Escape dismisses
+    // one level at a time — close the submenu, then the root menu.
+    const openMenus = this.page.getByRole('menu');
+    for (let i = 0; i < 4 && (await openMenus.count()) > 0; i++) {
+      await this.page.keyboard.press('Escape');
+    }
+    await expect(openMenus).toHaveCount(0);
   }
 
   async enableWorktree(): Promise<void> {

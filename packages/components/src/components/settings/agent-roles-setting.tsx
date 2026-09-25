@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react';
+import * as stylex from '@stylexjs/stylex';
 import { useAtomValue } from 'jotai';
 import { Plus, Trash2, UserRoundCog } from 'lucide-react';
-import { Spinner } from '@/ui/spinner';
+import { Spinner } from '@lody/ui/spinner';
 import { useTranslation } from 'react-i18next';
 import {
   canManageAgentRole,
@@ -23,22 +24,11 @@ import {
 import { AgentIcon } from '@/components/icons/agent-icon';
 import { buildAgentRoleRunConfigSummary, EMPTY_AGENT_ROLE_FORM_VALUE } from '@/lib/agent-role-form';
 import { AGENT_ROLE_UNAVAILABLE_REASON_KEYS } from '@/lib/composer-agent-roles';
-import { cn } from '@/lib/utils';
-import { SETTINGS_ROW_CARD_CLASS } from './compact-layout';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/ui/alert-dialog';
-import { Badge } from '@/ui/badge';
-import { Button } from '@/ui/button';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
-import { settingContainerClass } from '.';
+import { AlertDialog } from '@/ui/dialog';
+import { Badge } from '@lody/ui/badge';
+import { Button } from '@lody/ui/button';
+import { Tooltip } from '@lody/ui/tooltip';
+import { settingsCatalog as catalog, settingsSurface as surface } from './surface';
 import {
   AgentRoleEditorDialog,
   openAgentRoleEditorForCreate,
@@ -105,74 +95,70 @@ export function AgentRolesSetting() {
   const addLabel = t('settings.agentRoles.add');
 
   return (
-    <div className={settingContainerClass}>
-      <p className="text-xs leading-snug text-muted-foreground">
-        {t('settings.agentRoles.description')}
-      </p>
+    <div {...stylex.props(surface.container)}>
+      <p {...stylex.props(catalog.intro)}>{t('settings.agentRoles.description')}</p>
 
-      <section className="flex flex-col">
-        <div className="flex items-center justify-between gap-2 pb-1 pt-0.5">
-          <div className="flex min-w-0 items-center gap-2">
-            <h3 className="text-xs font-normal text-muted-foreground">
-              {t('settings.agentRoles.catalogTitle')}
-            </h3>
-            {roles.length > 0 ? (
-              <span className="text-xs tabular-nums text-muted-foreground/70">{roles.length}</span>
-            ) : null}
+      <section {...stylex.props(surface.section)}>
+        <header {...stylex.props(surface.sectionHeader)}>
+          <div {...stylex.props(catalog.heading)}>
+            <h3 {...stylex.props(surface.sectionTitle)}>{t('settings.agentRoles.catalogTitle')}</h3>
+            {roles.length > 0 ? <span {...stylex.props(catalog.count)}>{roles.length}</span> : null}
             {!synced ? (
-              <span className="flex items-center gap-1 text-[11px] text-muted-foreground/70">
-                <Spinner className="h-3 w-3" aria-hidden="true" />
+              <span {...stylex.props(catalog.syncing)}>
+                <Spinner size="small" aria-hidden="true" />
                 {t('settings.agentRoles.syncing')}
               </span>
             ) : null}
           </div>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-7 w-7 text-muted-foreground hover:bg-muted/60 hover:text-foreground"
-                aria-label={addLabel}
-                onClick={openAdd}
-              >
-                <Plus className="h-3.5 w-3.5" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>{addLabel}</TooltipContent>
-          </Tooltip>
-        </div>
+          <div {...stylex.props(surface.sectionActions)}>
+            <Tooltip.Root>
+              <Tooltip.Trigger
+                render={
+                  <Button variant="ghost" aria-label={addLabel} size="small" icon onClick={openAdd}>
+                    <Plus {...stylex.props(catalog.icon)} />
+                  </Button>
+                }
+              />
+              <Tooltip.Content>{addLabel}</Tooltip.Content>
+            </Tooltip.Root>
+          </div>
+        </header>
 
         {roles.length === 0 ? (
-          <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-border/60 bg-card/30 px-6 py-8 text-center text-sm">
-            <UserRoundCog className="h-6 w-6 text-muted-foreground/70" aria-hidden="true" />
-            <p className="mt-2 text-muted-foreground">{t('settings.agentRoles.empty')}</p>
-            <Button size="sm" className="mt-3" onClick={openAdd}>
-              <Plus className="mr-1.5 h-3.5 w-3.5" />
+          <div {...stylex.props(catalog.empty)}>
+            <UserRoundCog {...stylex.props(catalog.emptyIcon)} aria-hidden="true" />
+            <p {...stylex.props(catalog.emptyText)}>{t('settings.agentRoles.empty')}</p>
+            <Button size="small" variant="secondary" onClick={openAdd}>
+              <Plus {...stylex.props(catalog.icon)} />
               {addLabel}
             </Button>
           </div>
         ) : (
-          <div className="space-y-3">
+          <div {...stylex.props(catalog.groups)}>
             {roleGroups.map((group) => (
-              <div key={group.machineId} className="space-y-1.5">
+              <div key={group.machineId} {...stylex.props(catalog.group)}>
                 {/* The machine leads its group instead of repeating on every row:
                     a Role binds one machine exactly, so it is what the list is
                     grouped BY, not a fact about each entry. */}
-                <MachineGroupPill
+                <MachineGroupHeading
                   label={group.machineLabel}
                   online={onlineMachineIds.has(group.machineId)}
                 />
-                <div className="space-y-2">
-                  {group.roles.map((role) => (
-                    <AgentRoleRow
+                <div {...stylex.props(surface.card)}>
+                  {group.roles.map((role, index) => (
+                    <div
                       key={role.id}
-                      role={role}
-                      availability={resolve(role)}
-                      agentConfig={agentConfigs.find((entry) => entry.id === role.agentConfigId)}
-                      canManage={canManageAgentRole(role, currentUserId)}
-                      onEdit={() => openEdit(role)}
-                      onRemove={() => setPendingRemoval(role)}
-                    />
+                      {...stylex.props(surface.line, index > 0 && surface.lineRuled)}
+                    >
+                      <AgentRoleRow
+                        role={role}
+                        availability={resolve(role)}
+                        agentConfig={agentConfigs.find((entry) => entry.id === role.agentConfigId)}
+                        canManage={canManageAgentRole(role, currentUserId)}
+                        onEdit={() => openEdit(role)}
+                        onRemove={() => setPendingRemoval(role)}
+                      />
+                    </div>
                   ))}
                 </div>
               </div>
@@ -189,41 +175,41 @@ export function AgentRolesSetting() {
         source="settings"
       />
 
-      <AlertDialog
+      <AlertDialog.Root
         open={pendingRemoval !== null}
         onOpenChange={(open) => {
           if (!open && !removing) setPendingRemoval(null);
         }}
       >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t('settings.agentRoles.removeTitle')}</AlertDialogTitle>
-            <AlertDialogDescription>
+        <AlertDialog.Content>
+          <AlertDialog.Header>
+            <AlertDialog.Title>{t('settings.agentRoles.removeTitle')}</AlertDialog.Title>
+            <AlertDialog.Description>
               {t('settings.agentRoles.confirmRemove', { name: pendingRemoval?.name ?? '' })}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={removing}>{t('common.cancel')}</AlertDialogCancel>
-            <AlertDialogAction
+            </AlertDialog.Description>
+          </AlertDialog.Header>
+          <AlertDialog.Footer>
+            <AlertDialog.Cancel disabled={removing}>{t('common.cancel')}</AlertDialog.Cancel>
+            <Button
               disabled={removing}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              onClick={(event) => {
-                event.preventDefault();
+              variant="destructive"
+              onClick={() => {
                 void confirmRemoval();
               }}
             >
-              {removing ? <Spinner className="mr-2 h-4 w-4" /> : null}
+              {removing ? <Spinner size="small" /> : null}
               {t('common.remove')}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+            </Button>
+          </AlertDialog.Footer>
+        </AlertDialog.Content>
+      </AlertDialog.Root>
     </div>
   );
 }
 
 /**
- * One catalog row.
+ * One catalog row. It is a line of its machine's card, not a card of its own:
+ * the list draws the card and the rule between rows.
  *
  * States the whole binding — machine, provider, model, reasoning — because that
  * is what a Role IS, and says exactly why it cannot run when it cannot. A row
@@ -250,100 +236,91 @@ export function AgentRoleRow({
   const runConfig = buildAgentRoleRunConfigSummary(role.runConfig);
 
   return (
-    <div className={cn('overflow-hidden', SETTINGS_ROW_CARD_CLASS)}>
-      <div className="flex w-full min-w-0 items-center transition-colors hover:bg-hover/40">
-        <button
-          type="button"
-          onClick={onEdit}
-          aria-label={canManage ? t('common.edit') : t('common.view')}
-          className="flex min-w-0 flex-1 items-center gap-2.5 rounded-lg px-3 py-2 text-left focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
-        >
-          <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-foreground/[0.05] text-sm leading-none">
-            <span aria-hidden="true">{getAgentRoleEmoji(role)}</span>
+    <div {...stylex.props(catalog.row, surface.pressableLine)}>
+      <button
+        type="button"
+        onClick={onEdit}
+        aria-label={canManage ? t('common.edit') : t('common.view')}
+        {...stylex.props(catalog.rowMain)}
+      >
+        <span {...stylex.props(catalog.glyph)}>
+          <span aria-hidden="true">{getAgentRoleEmoji(role)}</span>
+        </span>
+        <span {...stylex.props(catalog.body)}>
+          <span {...stylex.props(catalog.titleLine)}>
+            {/* No `@token` here: it is derived from this very name, so printing
+                both says one thing twice. */}
+            <span {...stylex.props(catalog.name)}>{role.name}</span>
+            <Badge>
+              {role.visibility === 'workspace'
+                ? t('settings.agentRoles.visibility.workspace')
+                : t('settings.agentRoles.visibility.private')}
+            </Badge>
+            {role.promptPrefix ? <Badge>{t('settings.agentRoles.hasPrompt')}</Badge> : null}
           </span>
-          <span className="min-w-0 flex-1">
-            <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
-              {/* No `@token` here: it is derived from this very name, so printing
-                  both says one thing twice. */}
-              <span className="min-w-0 truncate text-sm font-normal leading-tight">
-                {role.name}
-              </span>
-              <Badge variant="secondary" className="shrink-0 px-1.5 py-0 text-[10px]">
-                {role.visibility === 'workspace'
-                  ? t('settings.agentRoles.visibility.workspace')
-                  : t('settings.agentRoles.visibility.private')}
-              </Badge>
-              {role.promptPrefix ? (
-                <Badge variant="outline" className="shrink-0 px-1.5 py-0 text-[10px]">
-                  {t('settings.agentRoles.hasPrompt')}
-                </Badge>
-              ) : null}
+          <span {...stylex.props(catalog.meta)}>
+            {agentConfig ? (
+              <AgentIcon
+                cliType={agentConfig.cliType}
+                agentType={agentConfig.agentType}
+                brandId={agentConfig.brandId}
+                env={agentConfig.env}
+                className={stylex.props(catalog.iconSmall).className}
+              />
+            ) : null}
+            <span {...stylex.props(catalog.truncate)}>
+              {runConfig.length > 0
+                ? runConfig.join(' · ')
+                : (agentConfig?.name ?? t('settings.agentRoles.unknownAgentConfig'))}
             </span>
-            <span className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[11px] leading-tight text-muted-foreground">
-              {agentConfig ? (
-                <AgentIcon
-                  cliType={agentConfig.cliType}
-                  agentType={agentConfig.agentType}
-                  brandId={agentConfig.brandId}
-                  env={agentConfig.env}
-                  className="h-3 w-3 shrink-0"
-                />
-              ) : null}
-              <span className="min-w-0 truncate">
-                {runConfig.length > 0
-                  ? runConfig.join(' · ')
-                  : (agentConfig?.name ?? t('settings.agentRoles.unknownAgentConfig'))}
-              </span>
-            </span>
-            <AgentRoleAvailabilityText availability={availability} />
           </span>
-        </button>
-        <div className="flex shrink-0 items-center gap-1 py-2 pl-2 pr-2">
-          {canManage ? (
-            <Button
-              type="button"
-              size="icon"
-              variant="ghost"
-              className="h-7 w-7 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-              aria-label={t('common.remove')}
-              onClick={onRemove}
-            >
-              <Trash2 className="h-3.5 w-3.5" />
-            </Button>
-          ) : null}
-        </div>
+          <AgentRoleAvailabilityText availability={availability} />
+        </span>
+      </button>
+      <div {...stylex.props(catalog.actions)}>
+        {canManage ? (
+          <Button
+            type="button"
+            variant="ghost"
+            aria-label={t('common.remove')}
+            size="small"
+            icon
+            tone="destructive"
+            onClick={onRemove}
+          >
+            <Trash2 {...stylex.props(catalog.icon)} />
+          </Button>
+        ) : null}
       </div>
     </div>
   );
 }
 
-/** The machine heading above a group of Roles: the pill grammar of the other
- *  settings surfaces, as a label rather than a selector. */
-function MachineGroupPill({ label, online }: { label: string; online: boolean }) {
+/** The machine's name above its card of Roles: a heading, not a bordered pill. */
+function MachineGroupHeading({ label, online }: { label: string; online: boolean }) {
   const { t } = useTranslation();
   return (
-    <div className="flex items-center gap-1.5 rounded-full border border-border/60 px-2 py-0.5 text-xs text-muted-foreground">
+    <h4 {...stylex.props(catalog.groupHeading)}>
       <span
         aria-hidden="true"
-        className={cn(
-          'h-1.5 w-1.5 shrink-0 rounded-full',
-          online ? 'bg-status-success' : 'bg-muted-foreground/40'
-        )}
+        {...stylex.props(catalog.statusDot, online && catalog.statusDotOnline)}
       />
-      <span className="min-w-0 truncate">{label}</span>
+      <span {...stylex.props(catalog.groupHeadingLabel)}>{label}</span>
       {/* The dot is the whole signal now that rows no longer repeat "its machine
           is offline", so it needs a text equivalent for anyone not seeing it. */}
-      {online ? null : <span className="sr-only">{t('settings.agentRoles.status.offline')}</span>}
-    </div>
+      {online ? null : (
+        <span {...stylex.props(catalog.srOnly)}>{t('settings.agentRoles.status.offline')}</span>
+      )}
+    </h4>
   );
 }
 
 /**
  * Why a Role cannot run, when the list does not already say so.
  *
- * `machine_offline` says nothing new: the Role sits under its machine's pill,
+ * `machine_offline` says nothing new: the Role sits under its machine's heading,
  * which carries that machine's status — repeating it on every row in the group
- * is the same sentence N times. The reasons that stay are the ones the pill
+ * is the same sentence N times. The reasons that stay are the ones the heading
  * cannot show, because they are about this Role's binding rather than the
  * machine's state.
  */
@@ -352,16 +329,18 @@ function AgentRoleAvailabilityText({ availability }: { availability: AgentRoleAv
   if (availability.kind === 'available') return null;
   if (availability.kind === 'unknown') {
     return (
-      <span className="mt-0.5 block truncate text-[11px] leading-tight text-muted-foreground/80">
-        {t('settings.agentRoles.status.checking')}
+      <span {...stylex.props(catalog.meta, catalog.metaHint)}>
+        <span {...stylex.props(catalog.truncate)}>{t('settings.agentRoles.status.checking')}</span>
       </span>
     );
   }
   if (availability.reason === 'machine_offline') return null;
   const reason = t(AGENT_ROLE_UNAVAILABLE_REASON_KEYS[availability.reason]);
   return (
-    <span className="mt-0.5 block truncate text-[11px] leading-tight text-status-warning">
-      {t('settings.agentRoles.unavailable.label', { reason })}
+    <span {...stylex.props(catalog.meta, catalog.metaWarning)}>
+      <span {...stylex.props(catalog.truncate)}>
+        {t('settings.agentRoles.unavailable.label', { reason })}
+      </span>
     </span>
   );
 }

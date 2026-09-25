@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
-import { Check, ListChecks, Zap, ZapOff } from 'lucide-react';
+import * as stylex from '@stylexjs/stylex';
+import { ListChecks, Zap, ZapOff } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 import type {
@@ -17,10 +18,16 @@ import {
   togglePlanModeSelectorValue,
 } from './acp-selector-options';
 import { AcpSessionSelect, type AcpSessionSelectOption } from './acp-session-select';
-import { getModeIcon, getSelectorTagClassName } from '@/components/chat/chat-landing-selectors';
+import { getModeIcon } from '@/components/chat/chat-landing-selectors';
 import { orderAcpConfigOptionSelectors } from '@/lib/acp-selector-order';
-import { cn } from '@/lib/utils';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui';
+import { Toggle } from '@lody/ui/toggle';
+import { Tooltip } from '@lody/ui/tooltip';
+import { composerSurface } from './composer-surface';
+
+const styles = stylex.create({
+  /** Holds a toggle for its tooltip, so a disabled toggle still explains itself. */
+  tooltipHost: { display: 'inline-flex', flexShrink: 0 },
+});
 
 type RenderConfigSelectorOptions = {
   icon?: ReactNode;
@@ -28,7 +35,6 @@ type RenderConfigSelectorOptions = {
   placeholder?: string;
   tone: 'light' | 'dark';
   variant?: 'default' | 'text' | 'compact';
-  className?: string;
   contentClassName?: string;
   values?: Record<string, AcpConfigOptionValue>;
   onChange?: (configId: string, value: AcpConfigOptionValue) => void;
@@ -42,7 +48,6 @@ const renderConfigSelector = (
     placeholder,
     tone,
     variant = 'compact',
-    className,
     contentClassName,
     values,
     onChange,
@@ -52,7 +57,6 @@ const renderConfigSelector = (
     key={selector.configId}
     tone={tone}
     variant={variant}
-    className={className}
     contentClassName={contentClassName}
     value={resolveConfigOptionValue(selector, values?.[selector.configId]) as string}
     onChange={(value) => onChange?.(selector.configId, value)}
@@ -82,23 +86,17 @@ const renderBooleanToggle = (
   const disabled = !onChange;
 
   return (
-    <button
+    <Toggle
       key={selector.configId}
-      type="button"
-      aria-pressed={value}
+      size="mini"
+      pressed={value}
+      onPressedChange={(pressed) => onChange?.(selector.configId, pressed)}
       aria-label={selector.label}
       title={selector.label}
       disabled={disabled}
-      onClick={() => onChange?.(selector.configId, !value)}
-      className={cn(
-        'inline-flex h-6 shrink-0 select-none items-center gap-1 rounded-[4px] px-2 text-xs font-medium leading-tight transition-colors',
-        'text-muted-foreground hover:bg-muted/60 hover:text-foreground',
-        disabled && 'cursor-not-allowed opacity-60 hover:bg-inherit hover:text-inherit'
-      )}
     >
-      {value ? <Check className="h-3 w-3 shrink-0" /> : null}
-      <span>{selector.label}</span>
-    </button>
+      {selector.label}
+    </Toggle>
   );
 };
 
@@ -119,34 +117,31 @@ const renderFastModeToggle = (
   const Icon = value ? Zap : ZapOff;
 
   return (
-    <Tooltip key={selector.configId} delayDuration={300}>
-      <TooltipTrigger asChild>
-        <span className="inline-flex shrink-0">
-          <button
-            type="button"
-            aria-pressed={value}
-            aria-label={selector.label}
-            disabled={disabled}
-            onClick={() =>
-              onChange?.(
-                selector.configId,
-                toggleOnOffConfigOptionValue(selector, values?.[selector.configId])
-              )
-            }
-            className={cn(
-              'inline-flex h-6 w-6 shrink-0 select-none items-center justify-center rounded-[4px] border transition-colors',
-              value
-                ? 'border-primary/45 bg-primary/[0.12] text-foreground hover:bg-primary/[0.18]'
-                : 'border-transparent text-muted-foreground hover:bg-muted/60 hover:text-foreground',
-              disabled && 'cursor-not-allowed opacity-60 hover:bg-inherit hover:text-inherit'
-            )}
-          >
-            <Icon className="h-3.5 w-3.5 shrink-0" />
-          </button>
-        </span>
-      </TooltipTrigger>
-      <TooltipContent side="top">{tooltip}</TooltipContent>
-    </Tooltip>
+    <Tooltip.Root key={selector.configId}>
+      <Tooltip.Trigger
+        delay={300}
+        render={
+          <span {...stylex.props(styles.tooltipHost)}>
+            <Toggle
+              size="mini"
+              icon
+              pressed={value}
+              onPressedChange={() =>
+                onChange?.(
+                  selector.configId,
+                  toggleOnOffConfigOptionValue(selector, values?.[selector.configId])
+                )
+              }
+              aria-label={selector.label}
+              disabled={disabled}
+            >
+              <Icon {...stylex.props(composerSurface.glyph14)} aria-hidden="true" />
+            </Toggle>
+          </span>
+        }
+      />
+      <Tooltip.Content side="top">{tooltip}</Tooltip.Content>
+    </Tooltip.Root>
   );
 };
 
@@ -165,35 +160,31 @@ const renderPlanModeToggle = (
   const displayLabel = 'Plan';
 
   return (
-    <Tooltip key={selector.configId} delayDuration={300}>
-      <TooltipTrigger asChild>
-        <span className="inline-flex shrink-0">
-          <button
-            type="button"
-            aria-pressed={value}
-            aria-label={selector.label}
-            disabled={disabled}
-            onClick={() =>
-              onChange?.(
-                selector.configId,
-                togglePlanModeSelectorValue(selector, values?.[selector.configId])
-              )
-            }
-            className={cn(
-              'inline-flex h-6 shrink-0 select-none items-center gap-1.5 rounded-[4px] px-2 text-xs font-medium leading-tight transition-colors',
-              value
-                ? 'bg-primary/[0.12] text-foreground hover:bg-primary/[0.18]'
-                : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground',
-              disabled && 'cursor-not-allowed opacity-60 hover:bg-inherit hover:text-inherit'
-            )}
-          >
-            <ListChecks className="h-3.5 w-3.5 shrink-0" />
-            <span>{displayLabel}</span>
-          </button>
-        </span>
-      </TooltipTrigger>
-      <TooltipContent side="top">{selector.description ?? selector.label}</TooltipContent>
-    </Tooltip>
+    <Tooltip.Root key={selector.configId}>
+      <Tooltip.Trigger
+        delay={300}
+        render={
+          <span {...stylex.props(styles.tooltipHost)}>
+            <Toggle
+              size="mini"
+              pressed={value}
+              onPressedChange={() =>
+                onChange?.(
+                  selector.configId,
+                  togglePlanModeSelectorValue(selector, values?.[selector.configId])
+                )
+              }
+              aria-label={selector.label}
+              disabled={disabled}
+            >
+              <ListChecks {...stylex.props(composerSurface.glyph14)} aria-hidden="true" />
+              <span>{displayLabel}</span>
+            </Toggle>
+          </span>
+        }
+      />
+      <Tooltip.Content side="top">{selector.description ?? selector.label}</Tooltip.Content>
+    </Tooltip.Root>
   );
 };
 
@@ -349,8 +340,8 @@ export function AcpBottomBarModeSelector({
           disabled={!onModeChange || modeOptions.length === 0}
           align="start"
           showDescription
+          variant="compact"
           icon={getModeIcon(selectedModeId ?? null)}
-          className={getSelectorTagClassName(tone)}
           ariaLabel="Permission mode"
           contentClassName={contentClassName}
           triggerTitle="Permission mode"
@@ -365,8 +356,6 @@ export function AcpBottomBarModeSelector({
           ),
           placeholder: 'Mode',
           tone,
-          variant: 'default',
-          className: getSelectorTagClassName(tone),
           contentClassName,
           values: configOptionValues,
           onChange: onConfigOptionChange,

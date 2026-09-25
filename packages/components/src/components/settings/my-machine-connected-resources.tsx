@@ -1,10 +1,15 @@
 import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Bot, Folder } from 'lucide-react';
+import * as stylex from '@stylexjs/stylex';
 import type { AgentConfigMeta, MachineId } from '@lody/shared';
 import { useLocalProjectsAdmin } from '@/hooks/use-local-projects-admin';
-import { Button } from '@/ui/button';
-import { Switch } from '@/ui/switch';
+import { Badge } from '@lody/ui/badge';
+import { Button } from '@lody/ui/button';
+import { Switch } from '@lody/ui/switch';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { space } from '@lody/ui/tokens/scales.stylex';
+import { settingsSurface as surface } from './surface';
 import type { ProjectSettingsRow } from './project-settings';
 
 export type MachineConnectedProject = {
@@ -101,16 +106,16 @@ function MachineConnectedResourcesContent({
   const { t } = useTranslation();
 
   return (
-    <div className="space-y-6 px-4 pb-4 pt-5">
-      <section className="space-y-2">
-        <div className="flex items-center gap-2">
-          <Folder className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />
-          <h3 className="text-xs font-normal text-muted-foreground">
+    <div {...stylex.props(styles.root)}>
+      <section {...stylex.props(styles.group)}>
+        <div {...stylex.props(styles.heading)}>
+          <Folder aria-hidden {...stylex.props(styles.headingIcon)} />
+          <h3 {...stylex.props(styles.title)}>
             {t('settings.machines.connectedFolders', 'Connected folders')}
           </h3>
         </div>
         {!readOnly ? (
-          <p className="text-[11px] leading-4 text-muted-foreground">
+          <p {...stylex.props(styles.hint)}>
             {t(
               'settings.machines.folderSharingHint',
               'Sharing a folder also makes this machine available to the workspace.'
@@ -118,24 +123,27 @@ function MachineConnectedResourcesContent({
           </p>
         ) : null}
         {projectsLoading ? (
-          <p className="text-xs text-muted-foreground">{t('common.loading', 'Loading...')}</p>
+          <p {...stylex.props(styles.note)}>{t('common.loading', 'Loading...')}</p>
         ) : projects.length === 0 ? (
-          <p className="text-xs text-muted-foreground">
+          <p {...stylex.props(styles.note)}>
             {t('settings.machines.noConnectedFolders', 'No connected folders on this machine.')}
           </p>
         ) : (
-          <div className="divide-y divide-border/50 rounded-lg border border-border/60">
-            {projects.map((project) => {
+          // Inside the machine's card, so the list is a region fill with ruled
+          // rows rather than a second card.
+          <div {...stylex.props(surface.formBlock, styles.list)}>
+            {projects.map((project, index) => {
               const adminRow = project.adminRow;
               return (
-                <div key={project.key} className="flex items-center gap-3 px-3 py-2.5">
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate text-sm font-normal">{project.name}</div>
-                    <div className="truncate font-mono text-[11px] text-muted-foreground">
-                      {project.rootPath}
-                    </div>
+                <div
+                  key={project.key}
+                  {...stylex.props(styles.row, index > 0 && surface.lineRuled)}
+                >
+                  <div {...stylex.props(styles.rowText)}>
+                    <div {...stylex.props(styles.truncate, styles.name)}>{project.name}</div>
+                    <div {...stylex.props(styles.truncate, styles.path)}>{project.rootPath}</div>
                   </div>
-                  <span className="shrink-0 text-[11px] text-muted-foreground">
+                  <span {...stylex.props(styles.access)}>
                     {project.sharedWithTeam
                       ? t('workspace.machines.shared', 'Shared')
                       : t('workspace.machines.private', 'Private')}
@@ -157,33 +165,28 @@ function MachineConnectedResourcesContent({
         )}
       </section>
 
-      <section className="space-y-2">
-        <div className="flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2">
-            <Bot className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />
-            <h3 className="text-xs font-normal text-muted-foreground">
+      <section {...stylex.props(styles.group)}>
+        <div {...stylex.props(styles.headingRow)}>
+          <div {...stylex.props(styles.heading)}>
+            <Bot aria-hidden {...stylex.props(styles.headingIcon)} />
+            <h3 {...stylex.props(styles.title)}>
               {t('settings.machines.connectedAgents', 'Connected agents')}
             </h3>
           </div>
           {!readOnly ? (
-            <Button variant="outline" size="sm" className="h-7 text-xs" onClick={onManageAgents}>
+            <Button variant="secondary" size="small" onClick={onManageAgents}>
               {t('settings.machines.manageAgents', 'Manage in Agents')}
             </Button>
           ) : null}
         </div>
         {configs.length === 0 ? (
-          <p className="text-xs text-muted-foreground">
+          <p {...stylex.props(styles.note)}>
             {t('settings.machines.noConnectedAgents', 'No agents configured for this machine.')}
           </p>
         ) : (
-          <div className="flex flex-wrap gap-1.5">
+          <div {...stylex.props(styles.chips)}>
             {configs.map((config) => (
-              <span
-                key={config.id}
-                className="rounded-md border border-border/60 bg-muted/30 px-2 py-1 text-xs"
-              >
-                {config.name}
-              </span>
+              <Badge key={config.id}>{config.name}</Badge>
             ))}
           </div>
         )}
@@ -191,3 +194,45 @@ function MachineConnectedResourcesContent({
     </div>
   );
 }
+
+const styles = stylex.create({
+  root: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: space[6],
+    paddingInline: space[4],
+    paddingTop: '20px',
+    paddingBottom: space[4],
+  },
+  group: { display: 'flex', flexDirection: 'column', gap: space[2], minWidth: 0 },
+  headingRow: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: space[3],
+  },
+  heading: { display: 'flex', alignItems: 'center', gap: space[2], minWidth: 0 },
+  headingIcon: { flexShrink: 0, width: '14px', height: '14px', color: colors.tertiaryLabel },
+  title: { margin: 0, fontSize: '0.75em', fontWeight: 400, color: colors.secondaryLabel },
+  hint: { margin: 0, fontSize: '0.75em', lineHeight: 1.375, color: colors.secondaryLabel },
+  note: { margin: 0, fontSize: '0.8em', color: colors.secondaryLabel },
+  /** The region fill holds rows that run edge to edge, so it drops its padding. */
+  list: { paddingInline: 0, paddingBlock: 0, overflow: 'hidden' },
+  row: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: space[3],
+    paddingInline: space[3],
+    paddingBlock: '10px',
+  },
+  rowText: { flexGrow: 1, flexShrink: 1, minWidth: 0 },
+  truncate: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  name: { fontSize: '0.875em', color: colors.label },
+  path: {
+    fontFamily: 'var(--font-mono, ui-monospace, monospace)',
+    fontSize: '11px',
+    color: colors.secondaryLabel,
+  },
+  access: { flexShrink: 0, fontSize: '11px', color: colors.secondaryLabel },
+  chips: { display: 'flex', flexWrap: 'wrap', gap: space[1.5] },
+});

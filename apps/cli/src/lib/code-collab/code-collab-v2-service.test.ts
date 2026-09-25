@@ -132,6 +132,89 @@ function makeWorkspaceWatchCoordinator(): {
 }
 
 describe('CodeCollabV2Service text RPC boundary', () => {
+  it('activates checkout metadata independently of the initial file snapshot and refreshes it without file changes', async () => {
+    await withWorkspace(async (workspaceRoot) => {
+      let release: () => void = () => {};
+      const metadataReady = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      let currentBranch = 'feature/open';
+      let publishedBranch: string | undefined;
+      let publication: Promise<void> | undefined;
+      const service = new CodeCollabV2Service({
+        resolveWorkspace: makeResolver(workspaceRoot),
+        observeWorkspaceBranch: ({ ownerSessionId, workspaceRoot: root }) => {
+          expect(ownerSessionId).toBe(SESSION_ID);
+          expect(root).toBe(workspaceRoot);
+          publication = metadataReady.then(() => {
+            publishedBranch = currentBranch;
+          });
+          return publication;
+        },
+      });
+      try {
+        const snapshot = await service.getFileIndex({ sessionId: SESSION_ID });
+        expect(snapshot.status).toBe('ok');
+        expect(publishedBranch).toBeUndefined();
+        release();
+        await publication;
+        expect(publishedBranch).toBe('feature/open');
+        currentBranch = 'feature/switched';
+        await service.refreshSharedStateAfterTurn({ sessionId: SESSION_ID });
+        expect(publishedBranch).toBe('feature/open');
+        await service.refreshSharedState({ sessionId: SESSION_ID });
+        await publication;
+        expect(publishedBranch).toBe('feature/switched');
+        currentBranch = 'feature/root-refresh';
+        await service.initDirectory({ sessionId: SESSION_ID, path: '.' });
+        await publication;
+        expect(publishedBranch).toBe('feature/root-refresh');
+      } finally {
+        release();
+        service.dispose();
+      }
+    });
+  });
+
+  it('refreshes watched files without repeating branch observation', async () => {
+    vi.useFakeTimers();
+    try {
+      await withWorkspace(async (workspaceRoot) => {
+        const watch = makeWorkspaceWatchCoordinator();
+        let currentBranch = 'feature/open';
+        let publishedBranch: string | undefined;
+        let finishRefresh: () => void = () => {};
+        const refreshed = new Promise<void>((resolve) => {
+          finishRefresh = resolve;
+        });
+        const service = new CodeCollabV2Service({
+          resolveWorkspace: makeResolver(workspaceRoot),
+          workspaceWatchCoordinator: watch.coordinator,
+          observeWorkspaceBranch: async () => {
+            publishedBranch = currentBranch;
+          },
+          publishFileIndex: async (state) => {
+            if (state.fileIndex['watched.txt']) finishRefresh();
+          },
+        });
+        try {
+          await service.getFileIndex({ sessionId: SESSION_ID });
+          expect(publishedBranch).toBe('feature/open');
+          currentBranch = 'feature/external';
+          await writeFile(path.join(workspaceRoot, 'watched.txt'), 'changed');
+          watch.dirty();
+          await vi.advanceTimersByTimeAsync(150);
+          await refreshed;
+          expect(publishedBranch).toBe('feature/open');
+        } finally {
+          service.dispose();
+        }
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('opens text files with a sha256 digest and plain payload', async () => {
     await withWorkspace(async (workspaceRoot) => {
       await writeFile(path.join(workspaceRoot, 'hello.ts'), 'const value = 1;\n');

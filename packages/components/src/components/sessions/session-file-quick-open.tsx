@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { Spinner } from '@/ui/spinner';
+import { Spinner } from '@lody/ui/spinner';
 import { useTranslation } from 'react-i18next';
 import { getBasename } from '@/lib';
 import type { SessionFileProvider, SessionFileProviderEntry } from '@/lib/session-file-provider';
-import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/ui/dialog';
+import { Dialog } from '@/ui/dialog';
 import {
   Command,
   CommandEmpty,
@@ -199,14 +199,14 @@ export function SessionFileQuickOpen({
   );
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="overflow-hidden p-0 sm:max-w-2xl">
-        <DialogTitle className="sr-only">
+    <Dialog.Root open={open} onOpenChange={onOpenChange}>
+      <Dialog.Content className="overflow-hidden p-0 sm:max-w-2xl">
+        <Dialog.Title className="sr-only">
           {t('sessions.fileQuickOpen.title', 'Quick open file')}
-        </DialogTitle>
-        <DialogDescription className="sr-only">
+        </Dialog.Title>
+        <Dialog.Description className="sr-only">
           {t('sessions.fileQuickOpen.description', 'Search indexed files and open one.')}
-        </DialogDescription>
+        </Dialog.Description>
         <Command shouldFilter={false}>
           <CommandInput
             value={query}
@@ -267,7 +267,7 @@ export function SessionFileQuickOpen({
             ) : null}
           </CommandList>
         </Command>
-      </DialogContent>
-    </Dialog>
+      </Dialog.Content>
+    </Dialog.Root>
   );
 }

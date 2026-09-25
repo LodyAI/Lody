@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Check, Copy } from 'lucide-react';
 import type { ErrorBoundaryFallbackProps } from '@/components/error-boundary';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { writeTextToClipboard } from '@/lib/clipboard';
 import {
   buildErrorBoundaryReport,
@@ -50,7 +50,7 @@ export function MessageListErrorFallback({
           </Button>
           <Button
             type="button"
-            variant="outline"
+            variant="secondary"
             onClick={() => {
               void writeTextToClipboard(report.text).then((ok) =>
                 setCopyState(ok ? 'copied' : 'failed')

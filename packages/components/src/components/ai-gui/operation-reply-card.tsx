@@ -5,8 +5,8 @@ import type { SessionId } from '@lody/shared';
 
 import type { SessionNavigationTarget } from '@/lib/session-navigation';
 import { cn } from '@/lib/utils';
-import { Button } from '@/ui/button';
-import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/ui/dialog';
+import { Button } from '@lody/ui/button';
+import { Dialog } from '@/ui/dialog';
 import { useOperationTargetTitle } from './created-session-operation-card';
 import { MarkdownRenderer } from './markdown-renderer';
 
@@ -111,7 +111,7 @@ export function OperationReplyCard(props: OperationReplyCardProps) {
       <Button
         type="button"
         variant="ghost"
-        size="sm"
+        size="small"
         className="h-7 shrink-0 gap-1 px-2 text-xs text-muted-foreground hover:text-foreground"
         disabled={!navigate}
         onClick={navigate}
@@ -121,22 +121,22 @@ export function OperationReplyCard(props: OperationReplyCardProps) {
       </Button>
 
       {reply ? (
-        <Dialog open={open} onOpenChange={setOpen}>
-          <DialogContent className="flex max-h-[80vh] max-w-2xl flex-col gap-0 p-0 sm:p-0">
+        <Dialog.Root open={open} onOpenChange={setOpen}>
+          <Dialog.Content className="flex max-h-[80vh] max-w-2xl flex-col gap-0 p-0 sm:p-0">
             <div className="flex min-w-0 items-center gap-3 border-b border-border/60 py-3 pl-5 pr-12">
               <div className="min-w-0 flex-1">
-                <DialogDescription className="text-xs">
+                <Dialog.Description className="text-xs">
                   {t('sessions.operationReply.received', 'Reply received')}
-                </DialogDescription>
-                <DialogTitle className="truncate text-base font-medium" title={title}>
+                </Dialog.Description>
+                <Dialog.Title className="truncate text-base font-medium" title={title}>
                   {title}
-                </DialogTitle>
+                </Dialog.Title>
               </div>
               {navigate ? (
                 <Button
                   type="button"
-                  variant="outline"
-                  size="sm"
+                  variant="secondary"
+                  size="small"
                   className="h-7 shrink-0 gap-1 px-2.5 text-xs"
                   onClick={() => {
                     setOpen(false);
@@ -151,8 +151,8 @@ export function OperationReplyCard(props: OperationReplyCardProps) {
             <div className="min-h-0 overflow-y-auto px-5 py-4 text-sm">
               <MarkdownRenderer text={reply} />
             </div>
-          </DialogContent>
-        </Dialog>
+          </Dialog.Content>
+        </Dialog.Root>
       ) : null}
     </div>
   );

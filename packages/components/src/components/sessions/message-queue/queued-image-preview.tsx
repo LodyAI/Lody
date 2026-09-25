@@ -3,7 +3,7 @@ import { useAtomValue } from 'jotai';
 import { Image as ImageIcon } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { SessionId, SessionInputBlock, WorkspaceId } from '@lody/shared';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
+import { Tooltip } from '@lody/ui/tooltip';
 import { currentWorkspaceIdAtom } from '@/atoms';
 import { authTokenAtom } from '@/atoms/runtime';
 import { getSessionImageBlobUrl } from '@/lib/session-image-cache';
@@ -102,9 +102,8 @@ export function QueuedImagePreview({
 
   return (
     <>
-      <Tooltip delayDuration={300}>
-        <TooltipTrigger asChild>
-          <button
+      <Tooltip.Root>
+        <Tooltip.Trigger delay={300} render={<button
             type="button"
             disabled={loadFailed}
             onClick={(event) => {
@@ -136,10 +135,9 @@ export function QueuedImagePreview({
             ) : (
               <div className="h-full w-full animate-pulse bg-muted/70" />
             )}
-          </button>
-        </TooltipTrigger>
-        <TooltipContent side="top">{label}</TooltipContent>
-      </Tooltip>
+          </button>}/>
+        <Tooltip.Content side="top">{label}</Tooltip.Content>
+      </Tooltip.Root>
       <ZoomableImageViewer
         open={previewOpen}
         onClose={() => setPreviewOpen(false)}
