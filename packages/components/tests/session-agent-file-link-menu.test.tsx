@@ -31,7 +31,7 @@ const writeTextToClipboard = vi.fn(async () => true);
 vi.mock('../src/lib/clipboard', () => ({
   writeTextToClipboard: (text: string) => writeTextToClipboard(text),
 }));
-vi.mock('sonner', () => ({
+vi.mock('@/lib/toast', () => ({
   toast: { error: vi.fn(), success: vi.fn() },
 }));
 
@@ -84,7 +84,7 @@ describe('SessionAgentFileLinkMenuProvider', () => {
     container?.remove();
     container = undefined;
     document
-      .querySelectorAll('[data-radix-popper-content-wrapper]')
+      .querySelectorAll('[role="menu"]')
       .forEach((node) => node.remove());
     delete (window as { __LODY_ELECTRON__?: boolean }).__LODY_ELECTRON__;
     delete (window as { __LODY_PLATFORM__?: { os: string } }).__LODY_PLATFORM__;
@@ -104,8 +104,8 @@ describe('SessionAgentFileLinkMenuProvider', () => {
       );
       await Promise.resolve();
     });
-    const openMenus = [...document.querySelectorAll<HTMLElement>('[data-slot="context-menu-content"]')]
-      .filter((menu) => menu.dataset.state === 'open');
+    const openMenus = [...document.querySelectorAll<HTMLElement>('[role="menu"]')]
+      .filter((menu) => menu.hasAttribute('data-open') || menu.dataset.state === 'open');
     const menu = openMenus[0];
     if (openMenus.length !== 1 || !menu) throw new Error('Exactly one context menu must be open');
     return menu;
@@ -117,8 +117,8 @@ describe('SessionAgentFileLinkMenuProvider', () => {
       await Promise.resolve();
     });
     expect(
-      [...document.querySelectorAll<HTMLElement>('[data-slot="context-menu-content"]')].filter(
-        (menu) => menu.dataset.state === 'open'
+      [...document.querySelectorAll<HTMLElement>('[role="menu"]')].filter(
+        (menu) => menu.hasAttribute('data-open') || menu.dataset.state === 'open'
       )
     ).toHaveLength(0);
   };

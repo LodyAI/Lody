@@ -15,7 +15,7 @@ import {
   type ProjectSettingsRow,
 } from '../src/components/settings/project-settings';
 import { initI18n } from '../src/i18n';
-import { TooltipProvider } from '../src/ui/tooltip';
+import { Tooltip } from '@lody/ui/tooltip';
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -92,9 +92,9 @@ describe('ProjectHistoryImportPanel empty states', () => {
     const row = makeRow(state);
     await act(async () => {
       root.render(
-        <TooltipProvider>
+        <Tooltip.Provider>
           <ProjectHistoryImportPanel row={row} state={state} onSyncHistory={async () => {}} />
-        </TooltipProvider>
+        </Tooltip.Provider>
       );
     });
   }

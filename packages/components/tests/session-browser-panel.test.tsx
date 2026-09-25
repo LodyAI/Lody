@@ -74,7 +74,7 @@ vi.mock('../src/lib/clipboard', () => ({
   writeTextToClipboard: vi.fn(async () => true),
 }));
 
-vi.mock('sonner', () => ({
+vi.mock('@/lib/toast', () => ({
   toast: { success: vi.fn(), error: vi.fn() },
 }));
 

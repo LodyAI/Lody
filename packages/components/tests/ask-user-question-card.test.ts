@@ -7,7 +7,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import type { AskUserQuestionPermissionMeta, AskUserQuestionAnswers } from '@lody/shared';
 
 import { AskUserQuestionCard } from '../src/components/sessions/ask-user-question-card';
-import { TooltipProvider } from '../src/ui/tooltip';
+import { Tooltip } from '@lody/ui/tooltip';
 import { initI18n } from '../src/i18n';
 import storyMeta, { SecretNote } from '../src/stories/AskUserQuestionCard.stories';
 
@@ -279,7 +279,7 @@ describe('AskUserQuestionCard info button keyboard a11y', () => {
     flushSync(() => {
       root?.render(
         createElement(
-          TooltipProvider,
+          Tooltip.Provider,
           { delayDuration: 0 },
           createElement(AskUserQuestionCard, {
             meta: metaWithInfo,

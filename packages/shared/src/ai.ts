@@ -85,11 +85,12 @@ const builtinAcpTitleOwnership = (
     : 'none';
 
 /**
- * Builtin ACP adapters that generate their own session titles, so Lody never
+ * Advertised title ownership or legacy builtin adapters that generate titles, so Lody never
  * starts its isolated title agent for them and hides the title-generation config
  * from their agent settings.
  *
- * A runtime override revokes this. The table describes the managed runtime each
+ * A runtime override revokes only the identity fallback; an advertised capability
+ * still owns generation. The table describes the managed runtime each
  * agent normally launches, but `BuiltinRuntimeOverrides` can point the same
  * `agentType` at any executable — including one predating the title behaviour.
  * Such a session would otherwise get no title at all: the isolated generator is
@@ -101,10 +102,12 @@ const builtinAcpTitleOwnership = (
 export const acpOwnsSessionTitleGeneration = (
   cliType: AgentConfigCliType | null | undefined,
   agentType: AgentType | null | undefined,
-  runtimeOverrides?: BuiltinRuntimeOverrides
+  runtimeOverrides?: BuiltinRuntimeOverrides,
+  sessionTitle?: boolean
 ): boolean =>
-  !hasBuiltinRuntimeOverrideValues(runtimeOverrides) &&
-  builtinAcpTitleOwnership(cliType, agentType) !== 'none';
+  sessionTitle === true ||
+  (!hasBuiltinRuntimeOverrideValues(runtimeOverrides) &&
+    builtinAcpTitleOwnership(cliType, agentType) !== 'none');
 
 /**
  * Adapters whose pushed titles are authoritative without a `titleSource` tag.
@@ -366,7 +369,7 @@ export type AcpCommandSummary = {
 // Codex-only carry a bogus ladder for every agent that spells other variants
 // with the same brackets — a Claude probe stored `{ opus: ['1m'] }` — and the
 // per-model effort picker would rebuild that model's ladder from it.
-export const ACP_CAPABILITY_CACHE_VERSION = 8;
+export const ACP_CAPABILITY_CACHE_VERSION = 9;
 
 export type AcpCapabilityAuthority = 'unavailable' | 'provisional' | 'authoritative';
 
@@ -398,6 +401,8 @@ export type AcpCapabilityCacheEntry = {
   availableCommands?: AcpCommandSummary[];
   /** True only when the runtime initialize response advertised `sessionCapabilities.fork`. */
   sessionFork?: boolean;
+  /** Runtime advertised Core sessionTitle v1 (automatic, tagged title updates). */
+  sessionTitle?: boolean;
   /** True only when the runtime advertised Lody's acknowledged steering extension. */
   acknowledgedSteer?: boolean;
   /**

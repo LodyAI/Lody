@@ -4,8 +4,7 @@ import { act, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { InteractionArmedProvider, useInteractionArm } from '../src/ui/interaction-arm';
-import { Popover, PopoverContent, PopoverTrigger } from '../src/ui/popover';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../src/ui/tooltip';
+import { ContextMenu, Popover, Tooltip } from '../src/ui/armed-overlays';
 
 let root: Root;
 let container: HTMLDivElement;
@@ -23,16 +22,17 @@ function Row({ children }: { children: ReactNode }) {
 
 function CopyButton() {
   return (
-    <TooltipProvider>
-      <Tooltip delayDuration={0}>
-        <TooltipTrigger asChild>
-          <button type="button" className="copy" aria-label="Copy message">
-            copy
-          </button>
-        </TooltipTrigger>
-        <TooltipContent>Copy message</TooltipContent>
-      </Tooltip>
-    </TooltipProvider>
+    <Tooltip.Provider>
+      <Tooltip.Root>
+        <Tooltip.Trigger
+          delay={0}
+          render={<button type="button" className="copy" aria-label="Copy message" />}
+        >
+          copy
+        </Tooltip.Trigger>
+        <Tooltip.Content>Copy message</Tooltip.Content>
+      </Tooltip.Root>
+    </Tooltip.Provider>
   );
 }
 
@@ -69,15 +69,16 @@ describe('interaction-armed overlays', () => {
       )
     );
     expect(copyButton().getAttribute('aria-label')).toBe('Copy message');
-    // Radix marks its triggers with their open state; the plain trigger has none.
-    expect(copyButton().hasAttribute('data-state')).toBe(false);
+    // Base UI marks its tooltip triggers; the plain trigger is only the button.
+    expect(copyButton().hasAttribute('data-base-ui-tooltip-trigger')).toBe(false);
+    expect(copyButton().hasAttribute('delay')).toBe(false);
 
     act(() => {
       // jsdom has no PointerEvent; React derives enter from `pointerover`.
       row().dispatchEvent(new MouseEvent('pointerover', { bubbles: true }));
     });
     expect(row().dataset.armed).toBe('true');
-    expect(copyButton().getAttribute('data-state')).toBe('closed');
+    expect(copyButton().hasAttribute('data-base-ui-tooltip-trigger')).toBe(true);
   });
 
   it('keeps the pressed trigger until its click is dispatched', () => {
@@ -86,16 +87,17 @@ describe('interaction-armed overlays', () => {
     act(() =>
       root.render(
         <Row>
-          <TooltipProvider>
-            <Tooltip delayDuration={0}>
-              <TooltipTrigger asChild>
-                <button type="button" className="copy" onClick={() => (clicks += 1)}>
-                  copy
-                </button>
-              </TooltipTrigger>
-              <TooltipContent>Copy message</TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
+          <Tooltip.Provider>
+            <Tooltip.Root>
+              <Tooltip.Trigger
+                delay={0}
+                render={<button type="button" className="copy" onClick={() => (clicks += 1)} />}
+              >
+                copy
+              </Tooltip.Trigger>
+              <Tooltip.Content>Copy message</Tooltip.Content>
+            </Tooltip.Root>
+          </Tooltip.Provider>
         </Row>
       )
     );
@@ -122,7 +124,7 @@ describe('interaction-armed overlays', () => {
       vi.runAllTimers();
     });
     expect(row().dataset.armed).toBe('true');
-    expect(copyButton().getAttribute('data-state')).toBe('closed');
+    expect(copyButton().hasAttribute('data-base-ui-tooltip-trigger')).toBe(true);
     vi.useRealTimers();
   });
 
@@ -143,7 +145,7 @@ describe('interaction-armed overlays', () => {
     });
 
     expect(row().dataset.armed).toBe('true');
-    // The trigger remounted under its Radix wrapper, and focus followed it.
+    // The trigger remounted as Base UI's trigger, and focus followed it.
     expect(copyButton()).not.toBe(before);
     expect(document.activeElement).toBe(copyButton());
   });
@@ -152,15 +154,65 @@ describe('interaction-armed overlays', () => {
     act(() =>
       root.render(
         <Row>
-          <Popover open>
-            <PopoverTrigger asChild>
-              <button type="button">config</button>
-            </PopoverTrigger>
-            <PopoverContent>Run configuration</PopoverContent>
-          </Popover>
+          <Popover.Root open>
+            <Popover.Trigger render={<button type="button" />}>config</Popover.Trigger>
+            <Popover.Content>Run configuration</Popover.Content>
+          </Popover.Root>
         </Row>
       )
     );
     expect(document.body.textContent).toContain('Run configuration');
+  });
+
+  it('keeps an unarmed context-menu region out of the layout and its menu unmounted', () => {
+    act(() =>
+      root.render(
+        <Row>
+          <ContextMenu.Root>
+            <ContextMenu.Trigger>
+              <a href="#ref" className="ref">
+                ref
+              </a>
+            </ContextMenu.Trigger>
+            <ContextMenu.Content>
+              <ContextMenu.Item>Open reference</ContextMenu.Item>
+            </ContextMenu.Content>
+          </ContextMenu.Root>
+        </Row>
+      )
+    );
+    const region = container.querySelector<HTMLElement>('a.ref')!.parentElement!;
+    expect(region.style.display).toBe('contents');
+    expect(document.body.textContent).not.toContain('Open reference');
+  });
+
+  it("passes a trigger's own props to the plain element and drops Base UI's", () => {
+    const onClick = vi.fn();
+    act(() =>
+      root.render(
+        <Row>
+          <Popover.Root>
+            <Popover.Trigger
+              openOnHover
+              delay={100}
+              aria-label="Run configuration"
+              className="config"
+              onClick={onClick}
+              render={<button type="button" className="chip" />}
+            >
+              config
+            </Popover.Trigger>
+            <Popover.Content>Run configuration</Popover.Content>
+          </Popover.Root>
+        </Row>
+      )
+    );
+    const trigger = container.querySelector<HTMLButtonElement>('button.chip')!;
+    expect(trigger.className).toBe('chip config');
+    expect(trigger.getAttribute('aria-label')).toBe('Run configuration');
+    expect(trigger.hasAttribute('delay')).toBe(false);
+    expect(trigger.hasAttribute('openonhover')).toBe(false);
+    act(() => trigger.click());
+    expect(onClick).toHaveBeenCalledTimes(1);
   });
 });

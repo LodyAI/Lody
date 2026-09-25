@@ -5,21 +5,12 @@ import { enUS } from 'date-fns/locale/en-US';
 import { zhCN } from 'date-fns/locale/zh-CN';
 import { formatDistanceToNow } from 'date-fns';
 import { AlertCircle, Check, Download, RefreshCw, X } from 'lucide-react';
-import { Spinner } from '@/ui/spinner';
+import { Spinner } from '@lody/ui/spinner';
 import type { LocalProjectHistoryCatalogItem, LocalProjectHistoryProvider } from '@lody/shared';
 
 import { Drawer, DrawerClose, DrawerContent, DrawerDescription, DrawerTitle } from '@/ui/drawer';
-import { Button } from '@/ui/button';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/ui/alert-dialog';
+import { Button } from '@lody/ui/button';
+import { AlertDialog } from '@/ui/dialog';
 import { cn } from '@/lib/utils';
 import { toIntlLocale } from '@/lib/intl-locale';
 import { getVisibleLocalProjectHistoryFailures } from '@/lib/local-project-history-catalog';
@@ -392,9 +383,9 @@ export function MobileAcpHistorySheet({
                             <div className="px-4 pb-3 pl-12">
                               <Button
                                 type="button"
-                                variant="outline"
-                                size="sm"
-                                className="h-8 rounded-full px-3 text-[0.75rem]"
+                                variant="secondary"
+                                size="small"
+                                shape="pill"
                                 disabled={!canResolveConflict}
                                 onClick={() => {
                                   if (!canResolveConflict) return;
@@ -430,8 +421,8 @@ export function MobileAcpHistorySheet({
               >
                 <Button
                   type="button"
-                  className="w-full gap-2"
-                  size="lg"
+                  size="large"
+                  className="w-full"
                   disabled={!importEnabled}
                   onClick={() => {
                     void onImportHistory(row, state.provider);
@@ -452,38 +443,37 @@ export function MobileAcpHistorySheet({
           </div>
         </DrawerContent>
       </Drawer>
-      <AlertDialog
+      <AlertDialog.Root
         open={conflictSessionToResolve !== null}
         onOpenChange={(nextOpen) => {
           if (!nextOpen) setConflictSessionToResolve(null);
         }}
       >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
+        <AlertDialog.Content>
+          <AlertDialog.Header>
+            <AlertDialog.Title>
               {t('workspace.projects.resolveHistoryConflictTitle', {
                 defaultValue: 'Re-import conversation?',
               })}
-            </AlertDialogTitle>
-            <AlertDialogDescription>
+            </AlertDialog.Title>
+            <AlertDialog.Description>
               {t('workspace.projects.resolveHistoryConflictConfirm', {
                 defaultValue:
                   'Re-import this conversation from {{provider}}? This replaces the current imported history with the latest source history and may discard local-only turns.',
                 provider: providerLabel,
               })}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>{t('common.cancel', 'Cancel')}</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={confirmConflictReplace}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            </AlertDialog.Description>
+          </AlertDialog.Header>
+          <AlertDialog.Footer>
+            <AlertDialog.Cancel>{t('common.cancel', 'Cancel')}</AlertDialog.Cancel>
+            <AlertDialog.Action
+              onClick={confirmConflictReplace} variant="destructive"
             >
               {t('workspace.projects.resolveHistoryConflict', 'Re-import')}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+            </AlertDialog.Action>
+          </AlertDialog.Footer>
+        </AlertDialog.Content>
+      </AlertDialog.Root>
     </>
   );
 }

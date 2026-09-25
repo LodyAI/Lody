@@ -191,3 +191,11 @@ describe('trustsUntaggedAcpSessionTitle', () => {
     expect(trustsUntaggedAcpSessionTitle('custom', 'claude')).toBe(false);
   });
 });
+
+it('uses advertised title ownership for custom providers and runtime overrides', () => {
+  expect(acpOwnsSessionTitleGeneration('custom', 'my-provider', undefined, true)).toBe(true);
+  expect(
+    acpOwnsSessionTitleGeneration('builtin', 'codex', { codexPath: '/opt/runtime' }, true)
+  ).toBe(true);
+  expect(acpOwnsSessionTitleGeneration('custom', 'my-provider', undefined, false)).toBe(false);
+});

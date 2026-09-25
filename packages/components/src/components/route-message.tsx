@@ -1,5 +1,5 @@
 import { useTranslation } from 'react-i18next';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 
 export function RouteMessage({
   title,
@@ -19,7 +19,7 @@ export function RouteMessage({
           <div className="text-xs leading-5 text-muted-foreground">{description}</div>
         ) : null}
         {onRetry ? (
-          <Button variant="outline" onClick={onRetry}>
+          <Button variant="secondary" onClick={onRetry}>
             {t('common.retry')}
           </Button>
         ) : null}

@@ -34,7 +34,7 @@ import {
   Plus,
   Users,
 } from 'lucide-react';
-import { Spinner } from '@/ui/spinner';
+import { Spinner } from '@lody/ui/spinner';
 import {
   memo,
   useCallback,
@@ -46,14 +46,8 @@ import {
 } from 'react';
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import { useTranslation } from 'react-i18next';
-import { TooltipProvider } from '@/ui/tooltip';
-import {
-  ContextMenu,
-  ContextMenuContent,
-  ContextMenuItem,
-  ContextMenuSeparator,
-  ContextMenuTrigger,
-} from '@/ui/context-menu';
+import { Tooltip } from '@lody/ui/tooltip';
+import { ContextMenu } from '@lody/ui/context-menu';
 import type {
   LocalProjectHistoryProvider,
   MachineId,
@@ -852,71 +846,71 @@ const SessionGroupRow = memo(function SessionGroupRow({
   // Desktop repo rows get a hover info card wrapping the whole row/menu.
   const showInfoCard = !isMobile;
   const menuRow = hasMenuActions ? (
-    <ContextMenu key={session.sessionId}>
-      <ContextMenuTrigger asChild>{row}</ContextMenuTrigger>
-      <ContextMenuContent className="min-w-[180px]">
+    <ContextMenu.Root key={session.sessionId}>
+      <ContextMenu.Trigger>{row}</ContextMenu.Trigger>
+      <ContextMenu.Content className="min-w-[180px]">
         <SessionRowOpenedByMenuItems
           opener={openedByOpener}
           goToOpenerLabel={contextMenuLabels.goToOpenerSession}
         />
         {onTogglePinSession ? (
-          <ContextMenuItem
-            onSelect={() => {
+          <ContextMenu.Item
+            onClick={() => {
               onTogglePinSession(session.sessionId, !session.isPinned);
             }}
           >
             {session.isPinned ? <PinOff /> : <Pin />}
             {session.isPinned ? contextMenuLabels.unpin : contextMenuLabels.pin}
-          </ContextMenuItem>
+          </ContextMenu.Item>
         ) : null}
         {canMarkUnread ? (
-          <ContextMenuItem
-            onSelect={() => {
+          <ContextMenu.Item
+            onClick={() => {
               onMarkSessionUnread?.(session.sessionId);
             }}
           >
             <Mail />
             {contextMenuLabels.markUnread}
-          </ContextMenuItem>
+          </ContextMenu.Item>
         ) : null}
         {onRenameSession ? (
-          <ContextMenuItem
-            onSelect={() => {
+          <ContextMenu.Item
+            onClick={() => {
               beginRename(session.sessionId, session.title);
             }}
           >
             <Pencil />
             {contextMenuLabels.rename}
-          </ContextMenuItem>
+          </ContextMenu.Item>
         ) : null}
         {(openedByOpener || onTogglePinSession || canMarkUnread || onRenameSession) &&
         (onCopySessionUrl || session.branchName || shareMenuState) ? (
-          <ContextMenuSeparator />
+          <ContextMenu.Separator />
         ) : null}
         {onCopySessionUrl ? (
-          <ContextMenuItem
-            onSelect={() => {
+          <ContextMenu.Item
+            onClick={() => {
               onCopySessionUrl(session.sessionId);
             }}
           >
             <Link2 />
             {contextMenuLabels.copyUrl}
-          </ContextMenuItem>
+          </ContextMenu.Item>
         ) : null}
         {session.branchName ? (
-          <ContextMenuItem
-            onSelect={() => {
+          <ContextMenu.Item
+            onClick={() => {
               void navigator.clipboard.writeText(session.branchName).catch(() => {});
             }}
           >
             <GitBranch />
             {contextMenuLabels.copyBranch}
-          </ContextMenuItem>
+          </ContextMenu.Item>
         ) : null}
         {shareMenuState ? (
-          <ContextMenuItem
+          <ContextMenu.Item
             disabled={shareMenuState !== 'share'}
-            onSelect={() => {
+            onClick={() => {
               onShareSessionWithTeam?.(session.sessionId);
             }}
           >
@@ -934,7 +928,7 @@ const SessionGroupRow = memo(function SessionGroupRow({
                 : shareMenuState === 'owner-only'
                   ? contextMenuLabels.onlyOwnerCanShare
                   : contextMenuLabels.loadingSharing}
-          </ContextMenuItem>
+          </ContextMenu.Item>
         ) : null}
         {(openedByOpener ||
           onTogglePinSession ||
@@ -946,11 +940,11 @@ const SessionGroupRow = memo(function SessionGroupRow({
         ((onOpenPullRequest && prUrl) ||
           (canGoToOpener && openerSessionId) ||
           isElectronRenderer()) ? (
-          <ContextMenuSeparator />
+          <ContextMenu.Separator />
         ) : null}
         {onOpenPullRequest && prUrl ? (
-          <ContextMenuItem
-            onSelect={() => {
+          <ContextMenu.Item
+            onClick={() => {
               onOpenPullRequest({
                 sessionId: session.sessionId,
                 repoFullName: groupRepoFullName,
@@ -961,7 +955,7 @@ const SessionGroupRow = memo(function SessionGroupRow({
           >
             <GitPullRequest />
             {contextMenuLabels.openPr}
-          </ContextMenuItem>
+          </ContextMenu.Item>
         ) : null}
         <SessionRowOpenedByMenuItems
           goToOpener={
@@ -989,20 +983,20 @@ const SessionGroupRow = memo(function SessionGroupRow({
           (canGoToOpener && openerSessionId) ||
           isElectronRenderer()) &&
         onArchiveSession ? (
-          <ContextMenuSeparator />
+          <ContextMenu.Separator />
         ) : null}
         {onArchiveSession ? (
-          <ContextMenuItem
-            onSelect={() => {
+          <ContextMenu.Item
+            onClick={() => {
               onArchiveSession(session.sessionId);
             }}
           >
             <Archive />
             {contextMenuLabels.archive}
-          </ContextMenuItem>
+          </ContextMenu.Item>
         ) : null}
-      </ContextMenuContent>
-    </ContextMenu>
+      </ContextMenu.Content>
+    </ContextMenu.Root>
   ) : (
     row
   );
@@ -1596,7 +1590,7 @@ export const SessionList = memo(function SessionList({
   }
 
   return (
-    <TooltipProvider>
+    <Tooltip.Provider>
       <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
         <SortableContext items={repoIds} strategy={verticalListSortingStrategy}>
           <div className={cn('flex flex-col', className)}>
@@ -1675,6 +1669,6 @@ export const SessionList = memo(function SessionList({
           </div>
         </SortableContext>
       </DndContext>
-    </TooltipProvider>
+    </Tooltip.Provider>
   );
 });

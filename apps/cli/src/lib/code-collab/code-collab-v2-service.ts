@@ -291,6 +291,11 @@ export class CodeCollabV2Service {
   constructor(
     private readonly deps: {
       readonly resolveWorkspace: CodeCollabV2WorkspaceResolver;
+      /** Observe branch on activation/explicit refresh without gating file snapshots. */
+      readonly observeWorkspaceBranch?: (workspace: {
+        readonly ownerSessionId: SessionId;
+        readonly workspaceRoot: string;
+      }) => Promise<void>;
       readonly publishFileIndex?: CodeCollabV2FileIndexPublisher;
       readonly publishFileIndexSignal?: CodeCollabV2FileIndexSignalPublisher;
       readonly maxRawTextBytes?: number;
@@ -356,6 +361,7 @@ export class CodeCollabV2Service {
     const hasActiveWatch = this.watchByOwnerSessionId.has(resolved.ownerSessionId);
     const activatedLocally = !hasState || !hasActiveWatch;
     if (activatedLocally) {
+      this.observeWorkspaceBranch(resolved);
       await this.enqueueSharedStateRefresh(resolved.ownerSessionId, {
         kind: 'full',
         resolved,
@@ -537,12 +543,32 @@ export class CodeCollabV2Service {
         path: resolved.workspacePath,
       });
     }
+    if (!resolved.workspacePath) this.observeWorkspaceBranch(resolved);
     const publishedEntries = await this.scanAndPublishDirectory(resolved);
     return {
       status: 'ok',
       path: resolved.workspacePath || ROOT_DIRECTORY_REQUEST_PATH,
       publishedEntries,
     };
+  }
+
+  private observeWorkspaceBranch(
+    workspace: Pick<ResolvedPath, 'ownerSessionId' | 'workspaceRoot'>
+  ): void {
+    // Observe activation and explicit refresh, not every file watcher event or
+    // terminal diff refresh. Execution already owns terminal branch observation.
+    void Promise.resolve()
+      .then(() =>
+        this.deps.observeWorkspaceBranch?.({
+          ownerSessionId: workspace.ownerSessionId,
+          workspaceRoot: workspace.workspaceRoot,
+        })
+      )
+      .catch((error) => {
+        this.logger.debug(
+          `[code-collab] Workspace branch observation failed: ${formatErrorMessage(error)}`
+        );
+      });
   }
 
   async refreshSharedState(
@@ -553,6 +579,7 @@ export class CodeCollabV2Service {
       request.sessionId,
       ROOT_DIRECTORY_REQUEST_PATH
     );
+    this.observeWorkspaceBranch(resolved);
     void this.ensureWorkspaceWatch(resolved).catch(() => undefined);
     await this.enqueueSharedStateRefresh(resolved.ownerSessionId, {
       kind: 'full',

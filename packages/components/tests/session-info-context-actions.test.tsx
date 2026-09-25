@@ -11,7 +11,7 @@ vi.mock('../src/lib/clipboard', () => ({
   writeTextToClipboard: vi.fn(() => Promise.resolve(true)),
 }));
 
-vi.mock('sonner', () => ({
+vi.mock('@/lib/toast', () => ({
   toast: { success: vi.fn() },
 }));
 
@@ -158,12 +158,13 @@ describe('ContextChip actions', () => {
 
     await act(async () => {
       menuButton?.dispatchEvent(
-        new TestPointerEvent('pointerdown', {
+        new TestPointerEvent('mousedown', {
           bubbles: true,
           button: 0,
           pointerType: 'mouse',
         })
       );
+      await new Promise((resolve) => setTimeout(resolve, 40));
     });
 
     const menuItems = Array.from(document.querySelectorAll<HTMLElement>('[role="menuitem"]'));
@@ -172,6 +173,7 @@ describe('ContextChip actions', () => {
     await act(async () => {
       menuItems[0]?.focus();
       menuItems[0]?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      await new Promise((resolve) => setTimeout(resolve, 40));
     });
 
     expect(onCommitAndPush).toHaveBeenCalledTimes(1);
@@ -248,12 +250,13 @@ describe('ContextChip actions', () => {
     );
     await act(async () => {
       menuButton?.dispatchEvent(
-        new TestPointerEvent('pointerdown', {
+        new TestPointerEvent('mousedown', {
           bubbles: true,
           button: 0,
           pointerType: 'mouse',
         })
       );
+      await new Promise((resolve) => setTimeout(resolve, 40));
     });
 
     const mergeItem = Array.from(document.querySelectorAll<HTMLElement>('[role="menuitem"]')).find(
@@ -310,12 +313,13 @@ describe('ContextChip actions', () => {
 
     await act(async () => {
       methodButton?.dispatchEvent(
-        new TestPointerEvent('pointerdown', {
+        new TestPointerEvent('mousedown', {
           bubbles: true,
           button: 0,
           pointerType: 'mouse',
         })
       );
+      await new Promise((resolve) => setTimeout(resolve, 40));
     });
     const squashItem = Array.from(document.querySelectorAll<HTMLElement>('[role="menuitem"]')).find(
       (item) => item.textContent?.includes('Squash and merge')

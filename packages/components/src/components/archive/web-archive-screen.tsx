@@ -2,7 +2,10 @@ import type { ReactNode } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { Archive, ChevronDown, PanelLeft, Trash2, Undo2, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { cn } from '@/lib/utils';
+import * as stylex from '@stylexjs/stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { space, text } from '@lody/ui/tokens/scales.stylex';
+import { withClassName } from '@/lib/stylex';
 import { navigationSidebarHiddenAtom, showNavigationSidebarAtom } from '@/atoms/layout-state';
 import { isMacOSElectronRenderer, useElectronFullscreen } from '@/lib/electron';
 import {
@@ -12,17 +15,78 @@ import {
   useWindowsCaptionRowPadClass,
 } from '@/ui/window-drag-region';
 import { isNativeAppShell } from '@/lib/native-platform';
-import { Button } from '@/ui/button';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
-  DropdownMenuTrigger,
-} from '@/ui/dropdown-menu';
-import { TooltipProvider } from '@/ui/tooltip';
+import { Button } from '@lody/ui/button';
+import { Menu } from '@/ui/menu';
+import { Tooltip } from '@lody/ui/tooltip';
 
 type ArchiveScope = 'my' | 'team';
+
+const styles = stylex.create({
+  screen: {
+    display: 'flex',
+    flexDirection: 'column',
+    width: '100%',
+    height: '100%',
+    minWidth: 0,
+    overflow: 'hidden',
+    backgroundColor: colors.background,
+  },
+  /* The session tab bar's 44px row, so the sidebar toggle sits at the same spot
+     across views. The page is flat: no rule under the header. */
+  header: {
+    boxSizing: 'border-box',
+    display: 'flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    gap: space[3],
+    width: '100%',
+    height: 'calc(2.75rem + var(--safe-area-top))',
+    paddingTop: 'var(--safe-area-top)',
+    paddingLeft: 'calc(16px + var(--safe-area-left))',
+    paddingRight: 'calc(16px + var(--safe-area-right))',
+    backgroundColor: colors.background,
+  },
+  // The show-sidebar button's -4px lands its left edge at 96px, matching Chat
+  // Landing and clearing the traffic lights by 24px.
+  headerBesideTrafficLights: { paddingLeft: '100px' },
+  sidebarToggle: { marginInlineStart: '-4px' },
+  glyph: { width: '16px', height: '16px' },
+  glyphSmall: { width: '14px', height: '14px' },
+  selectedCount: {
+    fontSize: text.subheadlineSize,
+    lineHeight: text.subheadlineLeading,
+    color: colors.secondaryLabel,
+  },
+  spacer: { flexGrow: 1 },
+  titleGroup: { display: 'flex', alignItems: 'center', gap: space[2] },
+  titleGlyph: { flexShrink: 0, width: '16px', height: '16px', color: colors.secondaryLabel },
+  title: {
+    margin: 0,
+    fontSize: text.bodySize,
+    fontWeight: 600,
+    lineHeight: text.bodyLeading,
+    color: colors.label,
+  },
+  scope: { minWidth: 0, marginInlineStart: space[2] },
+  scopeLabel: {
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  chevron: { flexShrink: 0, width: '14px', height: '14px', color: colors.tertiaryLabel },
+  body: {
+    display: 'flex',
+    flexDirection: 'column',
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+    width: '100%',
+    minWidth: 0,
+    minHeight: 0,
+    overflow: 'hidden',
+  },
+});
 
 export type WebArchiveScreenProps = {
   archiveScope: ArchiveScope;
@@ -59,107 +123,106 @@ export function WebArchiveScreen({
   const isElectronFullscreen = useElectronFullscreen();
   const windowDragClass = useWindowDragRegionClass();
   const windowsCaptionPadClass = useWindowsCaptionPadClass();
-  const macTrafficLightRowPadClass = useMacTrafficLightRowPadClass({ bottomBorder: true });
-  const windowsCaptionRowPadClass = useWindowsCaptionRowPadClass({ bottomBorder: true });
+  const macTrafficLightRowPadClass = useMacTrafficLightRowPadClass();
+  const windowsCaptionRowPadClass = useWindowsCaptionRowPadClass();
   // Traffic lights auto-hide in native fullscreen — no inset to reserve then.
   // Mirrors the same derivation in session-detail.tsx.
   const hasMacOSTitlebarInset =
     !isNativeAppShell() && isMacOSElectronRenderer() && !isElectronFullscreen;
 
+  const scopeLabel =
+    archiveScope === 'my'
+      ? t('sessions.sidebar.my', 'My Tasks')
+      : t('sessions.sidebar.team', 'All Tasks');
+  const chromeClassName = [
+    windowDragClass,
+    windowsCaptionPadClass,
+    windowsCaptionRowPadClass,
+    macTrafficLightRowPadClass,
+  ]
+    .filter(Boolean)
+    .join(' ');
+
   return (
-    <TooltipProvider>
-      <div className="flex h-full w-full min-w-0 flex-col overflow-hidden bg-background">
-        {/* h-11 row: matches the session tab-bar header height so the collapse /
-            expand affordance sits at the same spot across views. */}
+    <Tooltip.Provider>
+      <div {...stylex.props(styles.screen)}>
         <header
-          className={cn(
-            'flex h-[calc(2.75rem+var(--safe-area-top))] w-full shrink-0 items-center gap-3 border-b border-border bg-background pl-[calc(16px+var(--safe-area-left))] pr-[calc(16px+var(--safe-area-right))] pt-[var(--safe-area-top)]',
-            // Compensate for the button's -ml-1: its left edge sits at 96px,
-            // matching Chat Landing and clearing the traffic lights by 24px.
-            isLeftSidebarHidden && hasMacOSTitlebarInset && 'pl-[100px]',
-            windowDragClass,
-            windowsCaptionPadClass,
-            windowsCaptionRowPadClass,
-            macTrafficLightRowPadClass
+          {...withClassName(
+            stylex.props(
+              styles.header,
+              isLeftSidebarHidden && hasMacOSTitlebarInset && styles.headerBesideTrafficLights
+            ),
+            chromeClassName
           )}
         >
           {isLeftSidebarHidden ? (
             <Button
               type="button"
               variant="ghost"
-              size="icon"
+              size="small"
+              icon
               onClick={() => showNavigationSidebar()}
               aria-label={t('sessions.leftSidebar.show', 'Show navigation sidebar')}
-              className="-ml-1 h-7 w-7 shrink-0 text-muted-foreground"
+              className={stylex.props(styles.sidebarToggle).className}
             >
-              <PanelLeft className="h-4 w-4" />
+              <PanelLeft {...stylex.props(styles.glyph)} />
             </Button>
           ) : null}
           {isMultiSelectMode ? (
             <>
               <Button
                 variant="ghost"
-                size="icon"
-                className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                size="small"
+                icon
+                aria-label={t('archive.multiSelect.exit', 'Exit selection')}
                 onClick={onExitMultiSelect}
               >
-                <X className="h-4 w-4" />
-                <span className="sr-only">{t('archive.multiSelect.exit', 'Exit selection')}</span>
+                <X {...stylex.props(styles.glyph)} />
               </Button>
-              <span className="text-sm text-muted-foreground">
+              <span {...stylex.props(styles.selectedCount)}>
                 {t('archive.multiSelect.selected', '{{count}} selected', {
                   count: selectedCount,
                 })}
               </span>
-              <div className="flex-1" />
+              <div {...stylex.props(styles.spacer)} />
               <Button
-                variant="outline"
-                size="sm"
+                variant="secondary"
+                size="small"
                 disabled={selectedCount === 0 || isBulkActionBusy || bulkRestoreDisabled}
                 title={bulkRestoreDisabled ? bulkRestoreDisabledReason : undefined}
                 onClick={onBulkRestore}
-                className="gap-1.5"
               >
-                <Undo2 className="h-3.5 w-3.5" />
+                <Undo2 {...stylex.props(styles.glyphSmall)} />
                 {t('archive.multiSelect.restore', 'Restore')}
               </Button>
               <Button
                 variant="destructive"
-                size="sm"
+                size="small"
                 disabled={selectedCount === 0 || isBulkActionBusy}
                 onClick={onRequestBulkDelete}
-                className="gap-1.5"
               >
-                <Trash2 className="h-3.5 w-3.5" />
+                <Trash2 {...stylex.props(styles.glyphSmall)} />
                 {t('archive.multiSelect.delete', 'Delete')}
               </Button>
             </>
           ) : (
             <>
-              <div className="flex items-center gap-2">
-                <Archive className="h-4 w-4 text-muted-foreground" />
-                <h1 className="text-sm font-semibold">{t('archive.title', 'Archive')}</h1>
+              <div {...stylex.props(styles.titleGroup)}>
+                <Archive {...stylex.props(styles.titleGlyph)} />
+                <h1 {...stylex.props(styles.title)}>{t('archive.title', 'Archive')}</h1>
               </div>
-              <div className="ml-2">
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <button
-                      type="button"
-                      className={cn(
-                        'inline-flex min-w-0 max-w-full select-none items-center gap-1.5 rounded-lg px-2 py-1.5 text-[12px] font-medium',
-                        'text-muted-foreground hover:bg-hover/50 focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring/30'
-                      )}
-                    >
-                      <span className="min-w-0 truncate">
-                        {archiveScope === 'my'
-                          ? t('sessions.sidebar.my', 'My Tasks')
-                          : t('sessions.sidebar.team', 'All Tasks')}
-                      </span>
-                      <ChevronDown className="h-4 w-4 text-muted-foreground" />
-                    </button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="start" className="w-44">
-                    <DropdownMenuRadioGroup
+              <div {...stylex.props(styles.scope)}>
+                <Menu.Root>
+                  <Menu.Trigger
+                    render={
+                      <Button type="button" variant="ghost" size="small">
+                        <span {...stylex.props(styles.scopeLabel)}>{scopeLabel}</span>
+                        <ChevronDown {...stylex.props(styles.chevron)} />
+                      </Button>
+                    }
+                  />
+                  <Menu.Content align="start">
+                    <Menu.RadioGroup
                       value={archiveScope}
                       onValueChange={(value) => {
                         if (value === 'my' || value === 'team') {
@@ -167,15 +230,15 @@ export function WebArchiveScreen({
                         }
                       }}
                     >
-                      <DropdownMenuRadioItem value="my">
+                      <Menu.RadioItem value="my">
                         {t('sessions.sidebar.my', 'My Tasks')}
-                      </DropdownMenuRadioItem>
-                      <DropdownMenuRadioItem value="team">
+                      </Menu.RadioItem>
+                      <Menu.RadioItem value="team">
                         {t('sessions.sidebar.team', 'All Tasks')}
-                      </DropdownMenuRadioItem>
-                    </DropdownMenuRadioGroup>
-                  </DropdownMenuContent>
-                </DropdownMenu>
+                      </Menu.RadioItem>
+                    </Menu.RadioGroup>
+                  </Menu.Content>
+                </Menu.Root>
               </div>
             </>
           )}
@@ -183,11 +246,9 @@ export function WebArchiveScreen({
 
         {/* The archive list owns its own scrollport so virtualization can attach
             to a sibling node instead of this chrome ancestor. */}
-        <div className="flex min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden">
-          {children}
-        </div>
+        <div {...stylex.props(styles.body)}>{children}</div>
         {dialogs}
       </div>
-    </TooltipProvider>
+    </Tooltip.Provider>
   );
 }

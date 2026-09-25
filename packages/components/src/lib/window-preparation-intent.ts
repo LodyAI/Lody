@@ -7,15 +7,23 @@ export function installWindowPreparationIntent(root: Document = document): () =>
   let row: Element | null = null;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let release: (() => void) | undefined;
-  const clear = () => { clearTimeout(timer); release?.(); release = undefined; row = null; };
+  const clear = () => {
+    clearTimeout(timer);
+    release?.();
+    release = undefined;
+    row = null;
+  };
   const enter = (event: Event) => {
-    const next = event.target instanceof Element
-      ? event.target.closest('[data-sidebar-session-id]') : null;
+    const next =
+      event.target instanceof Element ? event.target.closest('[data-sidebar-session-id]') : null;
     if (next === row) return;
     clear();
     row = next;
     const id = next?.getAttribute('data-sidebar-session-id');
-    if (id) timer = setTimeout(() => { if (next?.isConnected) release = prepareDesktopWindow(id); }, 150);
+    if (id)
+      timer = setTimeout(() => {
+        if (next?.isConnected) release = prepareDesktopWindow(id);
+      }, 150);
   };
   const leave = (event: Event) => {
     const destination = (event as MouseEvent | FocusEvent).relatedTarget;

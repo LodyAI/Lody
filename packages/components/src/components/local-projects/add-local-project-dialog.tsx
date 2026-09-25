@@ -18,17 +18,21 @@ import {
   RefreshCw,
   type LucideIcon,
 } from 'lucide-react';
+import * as stylex from '@stylexjs/stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { corner, duration, ease, radius, space, text } from '@lody/ui/tokens/scales.stylex';
+import { withClassName } from '@/lib/stylex';
 import { Spinner } from '@/ui/spinner';
 import type {
   LocalProjectBrowseDirectoryEntry,
   LocalProjectBrowseDirectoryResult,
   LocalProjectBrowseRootsResult,
 } from '@lody/shared';
-import { cn } from '@/lib/utils';
-import { Button } from '@/ui/button';
-import { Input } from '@/ui/input';
-import { Skeleton } from '@/ui/skeleton';
-import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/ui/dialog';
+import { Badge } from '@lody/ui/badge';
+import { Button } from '@lody/ui/button';
+import { Input } from '@lody/ui/input';
+import { Skeleton } from '@lody/ui/skeleton';
+import { Dialog } from '@/ui/dialog';
 import { Drawer, DrawerContent, DrawerDescription, DrawerTitle } from '@/ui/drawer';
 import {
   describeBrowseError,
@@ -49,6 +53,330 @@ export type {
   RemoteDirectoryPickerMachine,
 } from './use-remote-directory-picker';
 
+/** Inside the panel a block is the region rung: a fill with no edge. */
+const REGION = `color-mix(in oklab, transparent, ${colors.label} 3%)`;
+/** A row's answer to the pointer, a film over whatever it sits on. */
+const ROW_HOVER = `color-mix(in oklab, transparent, ${colors.label} 5%)`;
+const LIST_MAX_HEIGHT = 'min(52vh, 420px)';
+
+const styles = stylex.create({
+  srOnly: {
+    position: 'absolute',
+    width: '1px',
+    height: '1px',
+    padding: 0,
+    margin: '-1px',
+    overflow: 'hidden',
+    clipPath: 'inset(50%)',
+    whiteSpace: 'nowrap',
+    borderWidth: 0,
+  },
+  truncate: {
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  icon14: { flexShrink: 0, width: '14px', height: '14px' },
+  icon16: { flexShrink: 0, width: '16px', height: '16px' },
+  icon20: { flexShrink: 0, width: '20px', height: '20px' },
+  iconFill: { width: '100%', height: '100%' },
+  hint: { color: colors.tertiaryLabel },
+  secondary: { color: colors.secondaryLabel },
+  invisible: { visibility: 'hidden' },
+
+  picker: {
+    display: 'flex',
+    flexDirection: 'column',
+    flexGrow: 1,
+    gap: space[3],
+    width: '100%',
+    minWidth: 0,
+    minHeight: 0,
+  },
+  /** Clears the panel's close cross, which sits in this row's end corner. */
+  header: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: space[2],
+    minHeight: '28px',
+    paddingInlineEnd: '36px',
+  },
+  headerText: { flexGrow: 1, minWidth: 0 },
+  headerTitle: {
+    margin: 0,
+    fontSize: text.headlineSize,
+    lineHeight: text.headlineLeading,
+    fontWeight: 600,
+    color: colors.label,
+  },
+  headerSubtitle: {
+    margin: 0,
+    fontSize: text.footnoteSize,
+    lineHeight: text.footnoteLeading,
+    color: colors.secondaryLabel,
+  },
+
+  scroll: { maxHeight: LIST_MAX_HEIGHT, overflowY: 'auto' },
+  machineStep: { display: 'flex', flexDirection: 'column', gap: space[2] },
+  stepHint: {
+    margin: 0,
+    fontSize: text.footnoteSize,
+    lineHeight: text.footnoteLeading,
+    color: colors.secondaryLabel,
+  },
+  list: {
+    display: 'flex',
+    flexDirection: 'column',
+    margin: 0,
+    padding: 0,
+    listStyleType: 'none',
+  },
+  machineList: { gap: space[1.5] },
+  /** A machine is an option inside the panel: a region fill, no card. */
+  machineRow: {
+    boxSizing: 'border-box',
+    display: 'flex',
+    alignItems: 'center',
+    gap: space[3],
+    width: '100%',
+    margin: 0,
+    paddingInline: space[3],
+    paddingBlock: '10px',
+    borderWidth: 0,
+    borderRadius: radius.medium,
+    cornerShape: corner.shape,
+    backgroundColor: {
+      default: REGION,
+      ':hover': `color-mix(in oklab, transparent, ${colors.label} 6%)`,
+    },
+    boxShadow: { default: 'none', ':focus-visible': `0 0 0 2px ${colors.accent}` },
+    outlineStyle: 'none',
+    color: colors.label,
+    fontFamily: 'inherit',
+    textAlign: 'start',
+    cursor: 'pointer',
+    transitionProperty: 'background-color',
+    transitionDuration: duration.fast,
+    transitionTimingFunction: ease.standard,
+  },
+  machineRowDisabled: {
+    backgroundColor: { default: REGION, ':hover': REGION },
+    opacity: 0.45,
+    cursor: 'not-allowed',
+  },
+  machineText: { display: 'flex', flexDirection: 'column', flexGrow: 1, minWidth: 0 },
+  machineName: { fontSize: text.bodySize, lineHeight: text.bodyLeading, fontWeight: 500 },
+  machineMeta: {
+    fontSize: text.footnoteSize,
+    lineHeight: text.footnoteLeading,
+    color: colors.secondaryLabel,
+  },
+  machineStatus: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'flex-end',
+    gap: space[1],
+    flexShrink: 0,
+  },
+  machineOnline: { fontSize: text.footnoteSize, color: colors.success },
+  machineOffline: { fontSize: text.footnoteSize, color: colors.secondaryLabel },
+  ownerOnly: { fontSize: text.captionSize, color: colors.secondaryLabel },
+
+  /** A message is a tint and a mark, never a bordered box. */
+  message: {
+    display: 'flex',
+    alignItems: 'flex-start',
+    gap: space[2],
+    margin: 0,
+    paddingInline: space[3],
+    paddingBlock: space[2],
+    borderRadius: radius.medium,
+    cornerShape: corner.shape,
+    fontSize: text.footnoteSize,
+    lineHeight: text.footnoteLeading,
+  },
+  messageWarning: {
+    backgroundColor: `color-mix(in oklab, transparent, ${colors.warning} 10%)`,
+    color: colors.label,
+  },
+  messageError: {
+    backgroundColor: `color-mix(in oklab, transparent, ${colors.destructive} 10%)`,
+    color: colors.destructive,
+  },
+  messageMark: { marginTop: '1px' },
+  markWarning: { color: colors.warning },
+
+  pathBar: { display: 'flex', alignItems: 'center', gap: space[1], minHeight: '28px' },
+  pathInput: { flexGrow: 1, minWidth: 0 },
+  crumbs: {
+    display: 'flex',
+    flexGrow: 1,
+    alignItems: 'center',
+    gap: '2px',
+    minWidth: 0,
+    overflow: 'hidden',
+    whiteSpace: 'nowrap',
+    fontSize: text.footnoteSize,
+    color: colors.secondaryLabel,
+  },
+  crumbEllipsis: {
+    flexShrink: 0,
+    paddingInline: space[1],
+    paddingBlock: '2px',
+    color: colors.tertiaryLabel,
+  },
+  crumb: { display: 'flex', alignItems: 'center', minWidth: 0 },
+  crumbSeparator: { flexShrink: 0, paddingInline: '2px', color: colors.tertiaryLabel },
+  crumbButton: {
+    display: 'flex',
+    alignItems: 'center',
+    minWidth: 0,
+    maxWidth: '112px',
+    margin: 0,
+    paddingInline: space[1],
+    paddingBlock: '2px',
+    borderWidth: 0,
+    borderRadius: radius.mini,
+    cornerShape: corner.shape,
+    backgroundColor: { default: 'transparent', ':hover': ROW_HOVER },
+    color: { default: 'inherit', ':hover': colors.label },
+    fontFamily: 'inherit',
+    fontSize: 'inherit',
+    cursor: 'pointer',
+    transitionProperty: 'background-color, color',
+    transitionDuration: duration.fast,
+    transitionTimingFunction: ease.standard,
+  },
+  crumbCurrent: { maxWidth: '144px', fontWeight: 500, color: colors.label },
+  drives: { display: 'flex', flexWrap: 'wrap', gap: space[1] },
+
+  /** The folder list: one region inside the panel, its rows set apart by fill. */
+  directory: {
+    borderRadius: radius.medium,
+    cornerShape: corner.shape,
+    backgroundColor: REGION,
+  },
+  entries: {
+    padding: space[1],
+    opacity: 1,
+    transitionProperty: 'opacity',
+    transitionDuration: duration.fast,
+    transitionTimingFunction: ease.standard,
+  },
+  entriesNavigating: { pointerEvents: 'none', opacity: 0.5 },
+  entryRow: {
+    boxSizing: 'border-box',
+    display: 'flex',
+    alignItems: 'center',
+    gap: space[3],
+    width: '100%',
+    margin: 0,
+    paddingInline: space[3],
+    paddingBlock: space[2],
+    borderWidth: 0,
+    borderRadius: radius.small,
+    cornerShape: corner.shape,
+    backgroundColor: {
+      default: 'transparent',
+      ':hover': ROW_HOVER,
+      ':focus-visible': ROW_HOVER,
+    },
+    outlineStyle: 'none',
+    color: colors.label,
+    fontFamily: 'inherit',
+    fontSize: text.bodySize,
+    lineHeight: text.bodyLeading,
+    textAlign: 'start',
+    cursor: 'pointer',
+    transitionProperty: 'background-color',
+    transitionDuration: duration.fast,
+    transitionTimingFunction: ease.standard,
+  },
+  entryRowDisabled: {
+    backgroundColor: { default: 'transparent', ':hover': 'transparent' },
+    opacity: 0.45,
+    cursor: 'not-allowed',
+  },
+  entryName: { flexGrow: 1 },
+  emptyFolder: {
+    paddingInline: space[4],
+    paddingBlock: '40px',
+    textAlign: 'center',
+    fontSize: text.bodySize,
+    color: colors.secondaryLabel,
+  },
+  loadMore: { paddingInline: space[3], paddingBlock: space[2] },
+  fullWidth: { width: '100%' },
+
+  footer: { display: 'flex', flexDirection: 'column', gap: space[2], minWidth: 0 },
+  footerRow: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: space[3],
+    minWidth: 0,
+  },
+  currentFolder: { flexGrow: 1, minWidth: 0, overflow: 'hidden' },
+  currentFolderLabel: {
+    margin: 0,
+    fontSize: text.captionSize,
+    letterSpacing: '0.025em',
+    color: colors.tertiaryLabel,
+  },
+  currentPath: {
+    display: 'flex',
+    alignItems: 'center',
+    minWidth: 0,
+    margin: 0,
+    overflow: 'hidden',
+    fontSize: text.footnoteSize,
+    fontWeight: 500,
+    color: colors.label,
+  },
+  currentPathEmpty: { display: 'block' },
+  pathHead: { flexShrink: 1, minWidth: '1ch' },
+  pathTail: { flexShrink: 0 },
+  actions: { display: 'flex', flexShrink: 0, alignItems: 'center', gap: space[2] },
+
+  skeleton: { display: 'flex', flexDirection: 'column', gap: space[1], padding: space[2] },
+  skeletonRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: space[3],
+    paddingInline: space[2],
+    paddingBlock: space[2],
+  },
+  skeletonLine: (maxWidth: string) => ({ flexGrow: 1, minWidth: 0, maxWidth }),
+
+  status: {
+    display: 'flex',
+    flexGrow: 1,
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: space[2],
+    minHeight: 0,
+    padding: space[8],
+    textAlign: 'center',
+    color: colors.secondaryLabel,
+  },
+  statusDestructive: { color: colors.destructive },
+  statusIcon: { width: '28px', height: '28px' },
+  statusTitle: {
+    fontSize: text.bodySize,
+    lineHeight: text.bodyLeading,
+    fontWeight: 500,
+    color: colors.label,
+  },
+  statusDescription: {
+    maxWidth: '320px',
+    fontSize: text.subheadlineSize,
+    lineHeight: text.subheadlineLeading,
+  },
+  statusAction: { marginTop: space[2] },
+});
+
 /**
  * Desktop directory picker: a compact dialog body (machine select → browse →
  * confirm). Mobile uses `MobileAddLocalProjectFlow`; both drive the shared
@@ -68,25 +396,29 @@ export function RemoteDirectoryPicker(props: RemoteDirectoryPickerArgs) {
       : t('localProjects.add.title', 'Add a folder');
 
   return (
-    <div className="flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden">
+    <div {...stylex.props(styles.picker)}>
       {/* Header */}
-      <div className="flex items-center gap-2 border-b border-border/60 px-4 py-3">
+      <div {...stylex.props(styles.header)}>
         {showBack ? (
-          <button
+          <Button
             type="button"
+            variant="ghost"
+            size="small"
+            icon
             onClick={c.back}
-            className="-ml-1 rounded-md p-1 text-muted-foreground transition-colors hover:bg-hover hover:text-foreground"
             aria-label={t('common.back', 'Back')}
           >
-            <ArrowLeft className="h-4 w-4" />
-          </button>
+            <ArrowLeft {...stylex.props(styles.iconFill)} />
+          </Button>
         ) : (
-          <FolderPlus className="h-4 w-4 text-muted-foreground" />
+          <FolderPlus {...stylex.props(styles.icon16, styles.secondary)} />
         )}
-        <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-semibold leading-tight">{headerTitle}</p>
+        <div {...stylex.props(styles.headerText)}>
+          <p {...stylex.props(styles.headerTitle, styles.truncate)}>{headerTitle}</p>
           {c.phase === 'browse' && c.selectedMachine ? (
-            <p className="truncate text-xs text-muted-foreground">{c.selectedMachine.name}</p>
+            <p {...stylex.props(styles.headerSubtitle, styles.truncate)}>
+              {c.selectedMachine.name}
+            </p>
           ) : null}
         </div>
       </div>
@@ -161,75 +493,70 @@ function MachineStep({
     );
   }
   return (
-    <div className="scrollbar-pro max-h-[min(52vh,420px)] overflow-y-auto p-2">
-      <p className="px-2 py-2 text-xs text-muted-foreground">
+    // `scrollbar-pro` is the global sheet's scrollbar skin (pseudo-elements).
+    <div {...withClassName(stylex.props(styles.machineStep, styles.scroll), 'scrollbar-pro')}>
+      <p {...stylex.props(styles.stepHint)}>
         {t('localProjects.add.pickMachineHint', 'Pick where the folder lives.')}
       </p>
       {blockedMachine ? <MachineOwnerNotice machine={blockedMachine} /> : null}
-      <ul className="flex flex-col gap-1">
-        {machines.map((machine) => (
-          <li key={machine.id}>
-            <button
-              type="button"
-              disabled={machine.canAddProjects && !machine.online}
-              aria-disabled={machine.canAddProjects && !machine.online}
-              onClick={() => onSelect(machine.id)}
-              className={cn(
-                'flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-colors',
-                machine.canAddProjects && machine.online
-                  ? 'hover:bg-hover focus-visible:bg-hover focus-visible:outline-none'
-                  : machine.canAddProjects
-                    ? 'cursor-not-allowed opacity-50'
-                    : 'hover:bg-hover focus-visible:bg-hover focus-visible:outline-none'
-              )}
-            >
-              <MonitorSmartphone className="h-5 w-5 shrink-0 text-muted-foreground" />
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-sm font-medium">{machine.name}</span>
-                <span className="block truncate text-xs text-muted-foreground">
-                  {machine.canAddProjects
-                    ? t('localProjects.add.yourMachine', 'Your machine')
-                    : machine.ownerName
-                      ? t('localProjects.add.ownedBy', 'Owned by {{owner}}', {
-                          owner: machine.ownerName,
-                        })
-                      : t(
-                          'localProjects.add.ownedByWorkspaceMember',
-                          'Owned by another workspace member'
-                        )}
-                </span>
-              </span>
-              <span className="flex shrink-0 flex-col items-end gap-1">
-                <span
-                  className={cn(
-                    'text-xs',
-                    machine.online ? 'text-emerald-500' : 'text-muted-foreground'
-                  )}
-                >
-                  {machine.online
-                    ? t('localProjects.add.online', 'Online')
-                    : t('localProjects.add.offline', 'Offline')}
-                </span>
-                {!machine.canAddProjects ? (
-                  <span className="text-[0.6875rem] text-muted-foreground">
-                    {t('localProjects.add.ownerOnly', 'Owner only')}
+      <ul {...stylex.props(styles.list, styles.machineList)}>
+        {machines.map((machine) => {
+          const unavailable = machine.canAddProjects && !machine.online;
+          return (
+            <li key={machine.id}>
+              <button
+                type="button"
+                disabled={unavailable}
+                aria-disabled={unavailable}
+                onClick={() => onSelect(machine.id)}
+                {...stylex.props(styles.machineRow, unavailable && styles.machineRowDisabled)}
+              >
+                <MonitorSmartphone {...stylex.props(styles.icon20, styles.secondary)} />
+                <span {...stylex.props(styles.machineText)}>
+                  <span {...stylex.props(styles.machineName, styles.truncate)}>{machine.name}</span>
+                  <span {...stylex.props(styles.machineMeta, styles.truncate)}>
+                    {machine.canAddProjects
+                      ? t('localProjects.add.yourMachine', 'Your machine')
+                      : machine.ownerName
+                        ? t('localProjects.add.ownedBy', 'Owned by {{owner}}', {
+                            owner: machine.ownerName,
+                          })
+                        : t(
+                            'localProjects.add.ownedByWorkspaceMember',
+                            'Owned by another workspace member'
+                          )}
                   </span>
-                ) : null}
-              </span>
-              {machine.canAddProjects ? (
-                <ChevronRight
-                  className={cn(
-                    'h-4 w-4 shrink-0 text-muted-foreground/40',
-                    !machine.online && 'invisible'
-                  )}
-                  aria-hidden
-                />
-              ) : (
-                <Lock className="h-4 w-4 shrink-0 text-muted-foreground/50" aria-hidden />
-              )}
-            </button>
-          </li>
-        ))}
+                </span>
+                <span {...stylex.props(styles.machineStatus)}>
+                  <span
+                    {...stylex.props(machine.online ? styles.machineOnline : styles.machineOffline)}
+                  >
+                    {machine.online
+                      ? t('localProjects.add.online', 'Online')
+                      : t('localProjects.add.offline', 'Offline')}
+                  </span>
+                  {!machine.canAddProjects ? (
+                    <span {...stylex.props(styles.ownerOnly)}>
+                      {t('localProjects.add.ownerOnly', 'Owner only')}
+                    </span>
+                  ) : null}
+                </span>
+                {machine.canAddProjects ? (
+                  <ChevronRight
+                    {...stylex.props(
+                      styles.icon16,
+                      styles.hint,
+                      !machine.online && styles.invisible
+                    )}
+                    aria-hidden
+                  />
+                ) : (
+                  <Lock {...stylex.props(styles.icon16, styles.hint)} aria-hidden />
+                )}
+              </button>
+            </li>
+          );
+        })}
       </ul>
     </div>
   );
@@ -238,11 +565,8 @@ function MachineStep({
 function MachineOwnerNotice({ machine }: { machine: RemoteDirectoryPickerMachine }) {
   const { t } = useTranslation();
   return (
-    <div
-      role="alert"
-      className="mx-2 mb-2 flex gap-2 rounded-md bg-muted/60 px-3 py-2 text-xs text-muted-foreground"
-    >
-      <Lock className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+    <div role="alert" {...stylex.props(styles.message, styles.messageWarning)}>
+      <Lock {...stylex.props(styles.icon14, styles.messageMark, styles.markWarning)} aria-hidden />
       <span>
         {machine.ownerName
           ? t(
@@ -313,59 +637,60 @@ function BrowseStep({
     <>
       {/* Path bar: breadcrumb (root shown as a home icon) with an edit button
           on the far right that swaps the row for a single-line path input. */}
-      <div className="flex items-center gap-1 border-b border-border/40 px-3 py-2">
+      <div {...stylex.props(styles.pathBar)}>
         {editingPath ? (
           <>
-            <Input
-              value={pathDraft}
-              onChange={(e) => onPathDraftChange(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') onPathSubmit();
-                else if (e.key === 'Escape') onCancelEditPath();
-              }}
-              placeholder={t('localProjects.add.pathPlaceholder', 'Type an absolute path')}
-              className="h-7 flex-1 text-xs"
-              autoFocus
-            />
+            <div {...stylex.props(styles.pathInput)}>
+              <Input
+                size="small"
+                value={pathDraft}
+                onChange={(e) => onPathDraftChange(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') onPathSubmit();
+                  else if (e.key === 'Escape') onCancelEditPath();
+                }}
+                placeholder={t('localProjects.add.pathPlaceholder', 'Type an absolute path')}
+                autoFocus
+              />
+            </div>
             <Button
               type="button"
               variant="ghost"
-              size="icon"
-              className="h-7 w-7 shrink-0"
+              size="small"
+              icon
               title={t('localProjects.add.go', 'Go')}
               onClick={onPathSubmit}
             >
-              <Check className="h-4 w-4" />
+              <Check {...stylex.props(styles.iconFill)} />
             </Button>
           </>
         ) : (
           <>
-            <div className="flex min-w-0 flex-1 items-center gap-0.5 overflow-hidden whitespace-nowrap text-xs text-muted-foreground">
+            <div {...stylex.props(styles.crumbs)}>
               {breadcrumbTrail.hiddenPrefix ? (
-                <span className="shrink-0 px-1 py-0.5 text-muted-foreground/60">…</span>
+                <span {...stylex.props(styles.crumbEllipsis)}>…</span>
               ) : null}
               {breadcrumbTrail.visibleCrumbs.map((crumb, index) => {
                 const originalIndex = breadcrumbTrail.startIndex + index;
                 const isRoot = originalIndex === 0;
                 return (
-                  <span key={crumb.path} className="flex min-w-0 items-center">
+                  <span key={crumb.path} {...stylex.props(styles.crumb)}>
                     {index > 0 || breadcrumbTrail.hiddenPrefix ? (
-                      <span className="shrink-0 px-0.5 text-muted-foreground/40">/</span>
+                      <span {...stylex.props(styles.crumbSeparator)}>/</span>
                     ) : null}
                     <button
                       type="button"
                       onClick={() => onNavigate(crumb.path)}
                       aria-label={isRoot ? t('localProjects.add.root', 'Root') : undefined}
-                      className={cn(
-                        'flex min-w-0 max-w-28 items-center rounded px-1 py-0.5 transition-colors hover:bg-hover hover:text-foreground',
-                        originalIndex === crumbs.length - 1 &&
-                          'max-w-36 font-medium text-foreground'
+                      {...stylex.props(
+                        styles.crumbButton,
+                        originalIndex === crumbs.length - 1 && styles.crumbCurrent
                       )}
                     >
                       {isRoot ? (
-                        <Home className="h-3.5 w-3.5 shrink-0" />
+                        <Home {...stylex.props(styles.icon14)} />
                       ) : (
-                        <span className="truncate">{crumb.label}</span>
+                        <span {...stylex.props(styles.truncate)}>{crumb.label}</span>
                       )}
                     </button>
                   </span>
@@ -373,18 +698,18 @@ function BrowseStep({
               })}
             </div>
             {status === 'loading' ? (
-              <Spinner className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
+              <Spinner {...stylex.props(styles.icon14, styles.hint)} aria-hidden />
             ) : null}
             <Button
               type="button"
               variant="ghost"
-              size="icon"
-              className="h-7 w-7 shrink-0"
+              size="small"
+              icon
               title={t('localProjects.add.editPath', 'Edit path')}
               onClick={onStartEditPath}
               disabled={!current}
             >
-              <Pencil className="h-3.5 w-3.5" />
+              <Pencil {...stylex.props(styles.iconFill)} />
             </Button>
           </>
         )}
@@ -392,17 +717,16 @@ function BrowseStep({
 
       {/* Drives (Windows) */}
       {roots?.drives && roots.drives.length > 1 ? (
-        <div className="flex flex-wrap gap-1 border-b border-border/40 px-3 py-1.5">
+        <div {...stylex.props(styles.drives)}>
           {roots.drives.map((drive) => (
             <Button
               key={drive}
               type="button"
-              variant="outline"
-              size="sm"
-              className="h-6 gap-1 px-2 text-xs"
+              variant="ghost"
+              size="small"
               onClick={() => onNavigate(drive)}
             >
-              <HardDrive className="h-3 w-3" />
+              <HardDrive {...stylex.props(styles.icon14)} />
               {drive}
             </Button>
           ))}
@@ -410,7 +734,7 @@ function BrowseStep({
       ) : null}
 
       {/* List */}
-      <div className="scrollbar-pro max-h-[min(52vh,420px)] overflow-y-auto">
+      <div {...withClassName(stylex.props(styles.directory, styles.scroll), 'scrollbar-pro')}>
         {initialLoading ? (
           <DirectorySkeleton />
         ) : status === 'error' && errorView ? (
@@ -420,24 +744,15 @@ function BrowseStep({
             title={errorView.title}
             description={errorView.description}
             action={
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={onRetry}
-                className="gap-1.5"
-              >
-                <RefreshCw className="h-3.5 w-3.5" />
+              <Button type="button" variant="secondary" size="small" onClick={onRetry}>
+                <RefreshCw {...stylex.props(styles.icon14)} />
                 {t('common.retry', 'Retry')}
               </Button>
             }
           />
         ) : current ? (
           <ul
-            className={cn(
-              'py-1 transition-opacity',
-              navigating && 'pointer-events-none opacity-50'
-            )}
+            {...stylex.props(styles.list, styles.entries, navigating && styles.entriesNavigating)}
             aria-busy={navigating}
           >
             {current.parentPath ? (
@@ -445,17 +760,17 @@ function BrowseStep({
                 <button
                   type="button"
                   onClick={() => current.parentPath && onNavigate(current.parentPath)}
-                  className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm transition-colors hover:bg-hover"
+                  {...stylex.props(styles.entryRow)}
                 >
-                  <ArrowUp className="h-4 w-4 shrink-0 text-muted-foreground" />
-                  <span className="text-muted-foreground">
+                  <ArrowUp {...stylex.props(styles.icon16, styles.secondary)} />
+                  <span {...stylex.props(styles.secondary)}>
                     {t('localProjects.add.parent', '..')}
                   </span>
                 </button>
               </li>
             ) : null}
             {current.entries.length === 0 ? (
-              <li className="px-4 py-10 text-center text-sm text-muted-foreground">
+              <li {...stylex.props(styles.emptyFolder)}>
                 {t('localProjects.add.emptyFolder', 'This folder has no subfolders.')}
               </li>
             ) : (
@@ -466,17 +781,17 @@ function BrowseStep({
               ))
             )}
             {current.truncated ? (
-              <li className="px-4 py-2">
+              <li {...stylex.props(styles.loadMore)}>
                 <Button
                   type="button"
                   variant="ghost"
-                  size="sm"
-                  className="w-full text-muted-foreground"
+                  size="small"
+                  {...stylex.props(styles.fullWidth)}
                   disabled={loadingMore}
                   onClick={onLoadMore}
                 >
                   {loadingMore ? (
-                    <Spinner className="h-3.5 w-3.5" />
+                    <Spinner {...stylex.props(styles.icon14)} />
                   ) : (
                     t('localProjects.add.loadMore', 'Load more')
                   )}
@@ -490,44 +805,54 @@ function BrowseStep({
       </div>
 
       {/* Footer */}
-      <div className="flex w-full min-w-0 flex-col gap-2 overflow-hidden border-t border-border/60 px-4 py-3">
+      <div {...stylex.props(styles.footer)}>
         {addError ? (
-          <p className="flex items-center gap-1.5 text-xs text-destructive">
-            <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+          <p {...stylex.props(styles.message, styles.messageError)}>
+            <AlertTriangle {...stylex.props(styles.icon14, styles.messageMark)} />
             {addError}
           </p>
         ) : null}
-        <div className="flex w-full min-w-0 items-center justify-between gap-3 overflow-hidden">
-          <div className="min-w-0 flex-1 overflow-hidden">
-            <p className="text-[0.7rem] tracking-wide text-muted-foreground/70">
+        <div {...stylex.props(styles.footerRow)}>
+          <div {...stylex.props(styles.currentFolder)}>
+            <p {...stylex.props(styles.currentFolderLabel)}>
               {t('localProjects.add.currentFolder', 'Current folder')}
             </p>
             {currentPathParts ? (
-              <p
-                className="flex min-w-0 items-center overflow-hidden text-xs font-medium text-foreground"
-                title={current?.path}
-              >
+              <p {...stylex.props(styles.currentPath)} title={current?.path}>
                 {currentPathParts.head ? (
-                  <span className="min-w-[1ch] shrink truncate">{currentPathParts.head}</span>
+                  <span {...stylex.props(styles.truncate, styles.pathHead)}>
+                    {currentPathParts.head}
+                  </span>
                 ) : null}
-                <span className="shrink-0">{currentPathParts.tail}</span>
+                <span {...stylex.props(styles.pathTail)}>{currentPathParts.tail}</span>
               </p>
             ) : (
-              <p className="truncate text-xs font-medium text-foreground">…</p>
+              <p {...stylex.props(styles.currentPath, styles.currentPathEmpty, styles.truncate)}>
+                …
+              </p>
             )}
           </div>
-          <div className="flex shrink-0 items-center gap-2">
-            <Button type="button" variant="ghost" size="sm" onClick={onCancel} disabled={adding}>
+          <div {...stylex.props(styles.actions)}>
+            <Button
+              type="button"
+              variant="secondary"
+              size="small"
+              onClick={onCancel}
+              disabled={adding}
+            >
               {t('common.cancel', 'Cancel')}
             </Button>
             <Button
               type="button"
-              size="sm"
-              className="gap-1.5"
+              size="small"
               disabled={!current || status !== 'ready' || adding}
               onClick={onAddCurrentFolder}
             >
-              {adding ? <Spinner className="h-4 w-4" /> : <FolderPlus className="h-4 w-4" />}
+              {adding ? (
+                <Spinner {...stylex.props(styles.icon16)} />
+              ) : (
+                <FolderPlus {...stylex.props(styles.icon16)} />
+              )}
               {t('localProjects.add.useThisFolder', 'Add')}
             </Button>
           </div>
@@ -554,26 +879,20 @@ function EntryRow({
       type="button"
       onClick={onClick}
       disabled={unreadable}
-      className={cn(
-        'flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm transition-colors',
-        unreadable
-          ? 'cursor-not-allowed opacity-50'
-          : 'hover:bg-hover focus-visible:bg-hover focus-visible:outline-none'
-      )}
+      {...stylex.props(styles.entryRow, unreadable && styles.entryRowDisabled)}
     >
-      <Icon className="h-5 w-5 shrink-0 text-muted-foreground" />
-      <span className={cn('min-w-0 flex-1 truncate', entry.hidden && 'text-muted-foreground')}>
+      <Icon {...stylex.props(styles.icon20, styles.secondary)} />
+      <span {...stylex.props(styles.entryName, styles.truncate, entry.hidden && styles.secondary)}>
         {entry.name}
       </span>
       {registered ? (
-        <span className="flex shrink-0 items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[0.7rem] font-medium text-emerald-600 dark:text-emerald-400">
-          <Check className="h-3 w-3" />
+        <Badge tone="success" icon={<Check {...stylex.props(styles.iconFill)} />}>
           {t('localProjects.add.added', 'Added')}
-        </span>
+        </Badge>
       ) : unreadable ? (
-        <Lock className="h-4 w-4 shrink-0 text-muted-foreground/40" aria-hidden />
+        <Lock {...stylex.props(styles.icon16, styles.hint)} aria-hidden />
       ) : (
-        <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/40" aria-hidden />
+        <ChevronRight {...stylex.props(styles.icon16, styles.hint)} aria-hidden />
       )}
     </button>
   );
@@ -581,11 +900,13 @@ function EntryRow({
 
 function DirectorySkeleton() {
   return (
-    <div className="space-y-1 p-2">
+    <div {...stylex.props(styles.skeleton)}>
       {Array.from({ length: 7 }).map((_, index) => (
-        <div key={index} className="flex items-center gap-3 px-2 py-2">
-          <Skeleton className="h-5 w-5 rounded" />
-          <Skeleton className="h-4 flex-1 rounded" style={{ maxWidth: `${60 - index * 4}%` }} />
+        <div key={index} {...stylex.props(styles.skeletonRow)}>
+          <Skeleton width={20} height={20} />
+          <div {...stylex.props(styles.skeletonLine(`${60 - index * 4}%`))}>
+            <Skeleton width="100%" height={16} />
+          </div>
         </div>
       ))}
     </div>
@@ -614,16 +935,11 @@ function StatusPanel({
   tone?: 'muted' | 'destructive';
 }) {
   return (
-    <div
-      className={cn(
-        'flex min-h-0 flex-1 flex-col items-center justify-center gap-2 p-8 text-center',
-        tone === 'destructive' ? 'text-destructive' : 'text-muted-foreground'
-      )}
-    >
-      <Spinner icon={Icon} spinning={spinning} className="h-7 w-7" aria-hidden />
-      <span className="text-sm font-medium text-foreground">{title}</span>
-      {description ? <span className="max-w-xs text-[0.8125rem]">{description}</span> : null}
-      {action ? <div className="mt-2">{action}</div> : null}
+    <div {...stylex.props(styles.status, tone === 'destructive' && styles.statusDestructive)}>
+      <Spinner icon={Icon} spinning={spinning} {...stylex.props(styles.statusIcon)} aria-hidden />
+      <span {...stylex.props(styles.statusTitle)}>{title}</span>
+      {description ? <span {...stylex.props(styles.statusDescription)}>{description}</span> : null}
+      {action ? <div {...stylex.props(styles.statusAction)}>{action}</div> : null}
     </div>
   );
 }
@@ -633,7 +949,7 @@ export interface AddLocalProjectDialogProps {
   onOpenChange: (open: boolean) => void;
   isMobile?: boolean;
   /** Nested inside another dialog (desktop settings). Matches MCP's overlay. */
-  overlayClassName?: string;
+  backdropClassName?: string;
   machines: RemoteDirectoryPickerMachine[];
   machinesLoading?: boolean;
   initialMachineId?: RemoteDirectoryPickerArgs['initialMachineId'];
@@ -643,7 +959,7 @@ export interface AddLocalProjectDialogProps {
 }
 
 /**
- * Shell that renders the directory picker as a centered Dialog on desktop and a
+ * Shell that renders the directory picker as a centered Dialog.Root on desktop and a
  * full-height mobile flow inside a bottom Drawer on mobile.
  */
 export function AddLocalProjectDialog({
@@ -656,7 +972,7 @@ export function AddLocalProjectDialog({
   ops,
   onAdded,
   onLocateRegistered,
-  overlayClassName,
+  backdropClassName,
 }: AddLocalProjectDialogProps) {
   const { t } = useTranslation();
   const close = useCallback(() => onOpenChange(false), [onOpenChange]);
@@ -694,13 +1010,10 @@ export function AddLocalProjectDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent
-        overlayClassName={overlayClassName}
-        className="gap-0 overflow-hidden p-0 sm:max-w-lg"
-      >
-        <DialogTitle className="sr-only">{a11yTitle}</DialogTitle>
-        <DialogDescription className="sr-only">{a11yDescription}</DialogDescription>
+    <Dialog.Root open={open} onOpenChange={onOpenChange}>
+      <Dialog.Content backdropClassName={backdropClassName}>
+        <Dialog.Title {...stylex.props(styles.srOnly)}>{a11yTitle}</Dialog.Title>
+        <Dialog.Description {...stylex.props(styles.srOnly)}>{a11yDescription}</Dialog.Description>
         <RemoteDirectoryPicker
           machines={machines}
           machinesLoading={machinesLoading}
@@ -710,7 +1023,7 @@ export function AddLocalProjectDialog({
           onLocateRegistered={onLocateRegistered}
           onClose={close}
         />
-      </DialogContent>
-    </Dialog>
+      </Dialog.Content>
+    </Dialog.Root>
   );
 }

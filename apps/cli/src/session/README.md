@@ -38,9 +38,13 @@ CLI/MCP orchestration contract is specs/session-orchestration.md.
   machine-local marker store.
 - `session-edit-and-resend-service.ts` — same-session replacement of the last normal User turn.
 - `session-launch-config-resolver.ts` — durable launch config resolution.
+- `workspace-branch-service.ts` — observes checkout branches for local folders and worktrees,
+  serializes reads/writes per owner Session, and publishes the last named branch. Execution
+  binds, terminal turns, and authorized Code Collab activation/refresh use this service;
+  observation requires neither a running agent nor a GitHub remote.
 - `turn-post-processing-service.ts` — post-turn work (titles, notifications, diff stats,
   and the `workspaceDirty`/`workspaceUnpushed` probes that drive the Info Bar's
-  Commit & Push action; both cancellation routes run `syncWorkspaceGitState` alone,
+  Commit & Push action; both cancellation routes refresh the branch and run `syncWorkspaceGitState`,
   which self-gates on the session's GitHub binding).
 - `session-diff-stats-target.ts` — chooses which writer owns a session's `diffStats`.
 - `session-access-policy.ts` — local-first dispatch access precheck (optimistic-allow cache,

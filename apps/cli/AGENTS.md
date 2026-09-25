@@ -84,6 +84,10 @@ execution/consent rules. These rules also bind CLI callers outside that director
 
 ## Agents, GitHub, and PR status
 
+- Checkout branch observations belong to `session/workspace-branch-service.ts`, independent of
+  GitHub/PR support. Publish to the workspace owner, serialize probe plus write, and keep
+  startup/file snapshot observation off the prompt/RPC critical path.
+
 - ACP authentication rules: [src/agent/AGENTS.md](src/agent/AGENTS.md). A capability refresh after
   login proves credentials became usable and must finish inside the renderer's 300-second deadline.
 - Agent `gh` auth for GitHub repo sessions is set up in `src/session/session-manager.ts`; the

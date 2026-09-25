@@ -18,19 +18,13 @@ import {
   PinOff,
   Users,
 } from 'lucide-react';
-import { Spinner } from '@/ui/spinner';
+import { Spinner } from '@lody/ui/spinner';
 import { useTranslation } from 'react-i18next';
 
 import { cn } from '@/lib/utils';
 import { formatCompactRelativeTime } from '@/lib/format-relative-time';
-import { TooltipProvider } from '@/ui/tooltip';
-import {
-  ContextMenu,
-  ContextMenuContent,
-  ContextMenuItem,
-  ContextMenuSeparator,
-  ContextMenuTrigger,
-} from '@/ui/context-menu';
+import { Tooltip } from '@lody/ui/tooltip';
+import { ContextMenu } from '@lody/ui/context-menu';
 import { SwipeActionRow } from '@/components/shared/swipe-action-row';
 import {
   SessionPrIcon,
@@ -408,7 +402,7 @@ export const SidebarUpdatedTaskList = memo(function SidebarUpdatedTaskList({
   const canToggleFullBucket = typeof onToggleFullBucket === 'function';
 
   return (
-    <TooltipProvider>
+    <Tooltip.Provider>
       <div className={cn('flex flex-col', className)}>
         {buckets.map((bucket, bucketIndex) => {
           const bucketHeaderAction = bucketIndex === 0 ? headerAction : null;
@@ -498,7 +492,7 @@ export const SidebarUpdatedTaskList = memo(function SidebarUpdatedTaskList({
           );
         })}
       </div>
-    </TooltipProvider>
+    </Tooltip.Provider>
   );
 });
 
@@ -844,69 +838,69 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
   }
 
   const menuRow = hasMenuActions ? (
-    <ContextMenu onOpenChange={setRowMenuOpen}>
-      <ContextMenuTrigger asChild>{row}</ContextMenuTrigger>
-      <ContextMenuContent className="min-w-[180px]">
+    <ContextMenu.Root onOpenChange={setRowMenuOpen}>
+      <ContextMenu.Trigger>{row}</ContextMenu.Trigger>
+      <ContextMenu.Content className="min-w-[180px]">
         {handlePrOpen ? (
-          <ContextMenuItem
-            onSelect={() => {
+          <ContextMenu.Item
+            onClick={() => {
               handlePrOpen();
             }}
           >
             <GitPullRequest />
             {contextMenuLabels.openPr}
-          </ContextMenuItem>
+          </ContextMenu.Item>
         ) : null}
         {handlePrOpen && (canRename || canTogglePin || canArchive || canCopyUrl || branchName) ? (
-          <ContextMenuSeparator />
+          <ContextMenu.Separator />
         ) : null}
         {canRename ? (
-          <ContextMenuItem
-            onSelect={() => {
+          <ContextMenu.Item
+            onClick={() => {
               onBeginRename(item.id, item.title);
             }}
           >
             <Pencil />
             {contextMenuLabels.rename}
-          </ContextMenuItem>
+          </ContextMenu.Item>
         ) : null}
         {canTogglePin ? (
-          <ContextMenuItem
-            onSelect={() => {
+          <ContextMenu.Item
+            onClick={() => {
               onTogglePin?.(item.id, !item.isPinned);
             }}
           >
             {item.isPinned ? <PinOff /> : <Pin />}
             {item.isPinned ? contextMenuLabels.unpin : contextMenuLabels.pin}
-          </ContextMenuItem>
+          </ContextMenu.Item>
         ) : null}
         {canArchive ? (
-          <ContextMenuItem
-            onSelect={() => {
+          <ContextMenu.Item
+            onClick={() => {
               onArchive?.(item.id);
             }}
           >
             <Archive />
             {contextMenuLabels.archive}
-          </ContextMenuItem>
+          </ContextMenu.Item>
         ) : null}
         {(canRename || canTogglePin || canArchive) && (canCopyUrl || branchName) ? (
-          <ContextMenuSeparator />
+          <ContextMenu.Separator />
         ) : null}
         {canCopyUrl ? (
-          <ContextMenuItem
-            onSelect={() => {
+          <ContextMenu.Item
+            onClick={() => {
               onCopyUrl?.(item.id);
             }}
           >
             <Link2 />
             {contextMenuLabels.copyUrl}
-          </ContextMenuItem>
+          </ContextMenu.Item>
         ) : null}
         {shareMenuState ? (
-          <ContextMenuItem
+          <ContextMenu.Item
             disabled={shareMenuState !== 'share'}
-            onSelect={() => {
+            onClick={() => {
               onShareWithTeam?.(item.id);
             }}
           >
@@ -924,20 +918,20 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
                 : shareMenuState === 'owner-only'
                   ? contextMenuLabels.onlyOwnerCanShare
                   : contextMenuLabels.loadingSharing}
-          </ContextMenuItem>
+          </ContextMenu.Item>
         ) : null}
         {branchName ? (
-          <ContextMenuItem
-            onSelect={() => {
+          <ContextMenu.Item
+            onClick={() => {
               void navigator.clipboard.writeText(branchName).catch(() => {});
             }}
           >
             <GitBranch />
             {contextMenuLabels.copyBranch}
-          </ContextMenuItem>
+          </ContextMenu.Item>
         ) : null}
-      </ContextMenuContent>
-    </ContextMenu>
+      </ContextMenu.Content>
+    </ContextMenu.Root>
   ) : (
     row
   );

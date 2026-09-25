@@ -2,16 +2,7 @@ import { cloudOperations } from '@/lib/cloud-api-operations';
 import { atom, useAtom } from 'jotai';
 import { useTranslation } from 'react-i18next';
 import { useLocation } from '@tanstack/react-router';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/ui/alert-dialog';
+import { AlertDialog } from '@/ui/dialog';
 import { useOpenSettings } from '@/hooks/use-open-settings';
 import { useResolvedWorkspaceScope } from '@/hooks/use-resolved-workspace-scope';
 import { useCloudQuery } from '@lody/platform/react';
@@ -96,32 +87,32 @@ export function WorkspaceCheckoutPendingDialogView({
 }: WorkspaceCheckoutPendingDialogViewProps) {
   const { t } = useTranslation();
   return (
-    <AlertDialog
+    <AlertDialog.Root
       open
       onOpenChange={(open) => {
         if (!open) onDismiss();
       }}
     >
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle>{t('workspace.checkoutPendingDialog.title')}</AlertDialogTitle>
-          <AlertDialogDescription>
+      <AlertDialog.Content>
+        <AlertDialog.Header>
+          <AlertDialog.Title>{t('workspace.checkoutPendingDialog.title')}</AlertDialog.Title>
+          <AlertDialog.Description>
             {canManageBilling
               ? t('workspace.checkoutPendingDialog.description')
               : t('workspace.checkoutPendingDialog.memberDescription')}
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel onClick={onDismiss}>
+          </AlertDialog.Description>
+        </AlertDialog.Header>
+        <AlertDialog.Footer>
+          <AlertDialog.Cancel onClick={onDismiss}>
             {t('workspace.checkoutPendingDialog.later')}
-          </AlertDialogCancel>
+          </AlertDialog.Cancel>
           {canManageBilling ? (
-            <AlertDialogAction onClick={onGoToCheckout}>
+            <AlertDialog.Action onClick={onGoToCheckout}>
               {t('workspace.checkoutPendingDialog.goToCheckout')}
-            </AlertDialogAction>
+            </AlertDialog.Action>
           ) : null}
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
+        </AlertDialog.Footer>
+      </AlertDialog.Content>
+    </AlertDialog.Root>
   );
 }
