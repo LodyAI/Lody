@@ -4017,6 +4017,7 @@
   "schedules.destination.notCreatedYet": "Not created yet",
   "schedules.open": "Open",
   "schedules.resizeColumn": "Resize {{column}}",
+  "schedules.resizeList": "Resize list",
   "schedules.runStarted": "Run requested for “{{title}}”.",
   "schedules.deleteTitle": "Delete “{{title}}”?",
   "schedules.deleteHelp": "Future runs stop and the schedule is removed. Chats it already started are kept.",

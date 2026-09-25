@@ -37,7 +37,7 @@ import {
 } from '@/atoms';
 import { getAllAgentConfigAtom } from '@/atoms/agents';
 import { schedulesFeatureEnabledAtom } from '@/atoms/settings';
-import { scheduleListColumnWidthsAtom } from '@/atoms/schedules';
+import { scheduleListColumnWidthsAtom, scheduleSplitListWidthAtom } from '@/atoms/schedules';
 import { useResolvedWorkspaceScope } from '@/hooks/use-resolved-workspace-scope';
 import {
   onlineMachineIdsAtom,
@@ -197,6 +197,7 @@ function SchedulesContent({ scheduleId }: { scheduleId?: string }) {
       confirmLabel: t('schedules.delete', 'Delete'),
     });
   const [columnWidths, setColumnWidths] = useAtom(scheduleListColumnWidthsAtom);
+  const [splitListWidth, setSplitListWidth] = useAtom(scheduleSplitListWidthAtom);
   const row = registry.rows.find((r) => r.scheduleId === scheduleId);
   const isOwner = !!row && row.ownerId === user?.id;
   const canManage =
@@ -301,10 +302,9 @@ function SchedulesContent({ scheduleId }: { scheduleId?: string }) {
       </div>
     </>
   );
-  const list = (compact: boolean) => (
+  const list = (
     <ScheduleListView
       {...registry}
-      compact={compact}
       selectedId={scheduleId}
       onOpen={open}
       onNew={() => open('new')}
@@ -377,10 +377,16 @@ function SchedulesContent({ scheduleId }: { scheduleId?: string }) {
           scheduleId ? (
             <div className="flex h-full min-h-0 flex-col">{detailPane}</div>
           ) : (
-            list(false)
+            list
           )
         ) : (
-          <ScheduleSplitView open={!!scheduleId} list={list} detail={detailPane} />
+          <ScheduleSplitView
+            open={!!scheduleId}
+            list={list}
+            detail={detailPane}
+            listWidth={splitListWidth ?? undefined}
+            onListWidthChange={setSplitListWidth}
+          />
         )}
       </div>
     </div>

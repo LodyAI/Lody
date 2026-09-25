@@ -1,9 +1,6 @@
 import { createFileRoute } from '@tanstack/react-router';
-import { SchedulesWorkspace } from '@/components/schedules/schedules-workspace';
+
+// Rendered by the `schedules` layout route, which reads `scheduleId`.
 export const Route = createFileRoute('/$workspaceName/_auth/schedules/$scheduleId')({
-  component: ScheduleRoute,
+  component: () => null,
 });
-function ScheduleRoute() {
-  const { scheduleId } = Route.useParams();
-  return <SchedulesWorkspace scheduleId={scheduleId} />;
-}

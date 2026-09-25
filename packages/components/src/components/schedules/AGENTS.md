@@ -18,12 +18,16 @@
   machine; never a project (none = plain chat, end to end). No consent checkbox,
   directory-scope checkbox, full-access warning or resume dialog — do not add one
   back in any shape; ownership, capability and permission still gate save/run.
-- The list is the page; no tabs, no dialog. On desktop `/schedules/new` and
-  `/schedules/$id` open beside it (`ScheduleSplitView`): the list narrows to
-  names and the schedule slides in from the trailing edge; on mobile it is a
-  pushed page. Its header (`ScheduleDetailToolbar`) is close plus compact icon
-  actions, run history last; history opens in a trailing `Drawer`. Saving and
-  closing both return to the full list. Keep the routes.
+- The list is the page; no tabs, no dialog. `routes/…/schedules.tsx` is a
+  layout route that mounts `SchedulesWorkspace` once (its index and `$scheduleId`
+  children render nothing), so opening a schedule animates instead of
+  remounting. On desktop it slides in beside the list (`ScheduleSplitView`); the
+  list keeps its full table, scrolling sideways, and the boundary is a drag
+  handle (`scheduleSplitListWidthAtom`). Mobile pushes a page. The header
+  (`ScheduleDetailToolbar`) is close plus compact icon actions, history last
+  (a trailing `Drawer`). Top-of-pane headers join the Electron drag strip
+  (`useWindowDragRegionClass`) with buttons `WINDOW_DRAG_EXEMPT_CLASS`, or the
+  strip swallows their clicks. Saving and closing return to the full list.
 - The editor reuses the composer's parts: one box holds name, a hairline, the
   prompt and, along its bottom, the composer's own Agent controls
   (`ScheduleAgentControls` = `DesktopRunConfigMenu` + `DesktopPermissionModeButton`).

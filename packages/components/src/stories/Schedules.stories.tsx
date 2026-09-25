@@ -523,14 +523,13 @@ export const EditorBesideList: Story = {
         <div className="h-dvh">
           <ScheduleSplitView
             open={open}
-            list={(compact) => (
+            list={
               <ScheduleListView
                 {...args}
-                compact={compact}
                 selectedId={open ? 'daily-review' : undefined}
                 onOpen={() => setOpen(true)}
               />
-            )}
+            }
             detail={
               <>
                 <ScheduleDetailToolbar

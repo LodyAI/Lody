@@ -4017,6 +4017,7 @@
   "schedules.destination.notCreatedYet": "尚未创建",
   "schedules.open": "打开",
   "schedules.resizeColumn": "调整“{{column}}”列宽",
+  "schedules.resizeList": "调整列表宽度",
   "schedules.runStarted": "已请求运行“{{title}}”。",
   "schedules.deleteTitle": "删除“{{title}}”？",
   "schedules.deleteHelp": "之后不会再运行，任务将被删除。已经创建的对话会保留。",

@@ -16,3 +16,9 @@ export const scheduleListColumnWidthsAtom = atomWithStorage<ScheduleColumnWidths
   'lody:scheduleListColumnWidths',
   null
 );
+
+/** List width while a schedule is open beside it; `null` = default. Per device. */
+export const scheduleSplitListWidthAtom = atomWithStorage<number | null>(
+  'lody:scheduleSplitListWidth',
+  null
+);
