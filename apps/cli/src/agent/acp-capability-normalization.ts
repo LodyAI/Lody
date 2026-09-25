@@ -15,6 +15,7 @@ export type AcpCapabilitiesResult = {
   availableCommands?: AcpCommandSummary[];
   sessionFork: boolean;
   acknowledgedSteer: boolean;
+  sessionTitle?: boolean;
   goalActions?: SessionGoalAction[];
   modelReasoningEfforts?: Record<string, string[]>;
 };
@@ -192,6 +193,7 @@ export function normalizeAcpSessionCapabilities(
   lifecycleCapabilities: {
     sessionFork?: boolean;
     acknowledgedSteer?: boolean;
+    sessionTitle?: boolean;
     goalActions?: SessionGoalAction[];
     /** The agent that answered; decides whether legacy `model[effort]` ids apply. */
     agent?: { cliType: string; agentType: string };
@@ -230,6 +232,7 @@ export function normalizeAcpSessionCapabilities(
     availableCommands,
     sessionFork: lifecycleCapabilities.sessionFork === true,
     acknowledgedSteer: lifecycleCapabilities.acknowledgedSteer === true,
+    sessionTitle: lifecycleCapabilities.sessionTitle === true,
     ...(lifecycleCapabilities.goalActions?.length
       ? { goalActions: lifecycleCapabilities.goalActions }
       : {}),

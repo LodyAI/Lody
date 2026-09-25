@@ -1,15 +1,25 @@
 import { useTranslation } from 'react-i18next';
 import { ExternalLink } from 'lucide-react';
-import {
-  Button,
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/ui';
+import * as stylex from '@stylexjs/stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { text } from '@lody/ui/tokens/scales.stylex';
+import { Button } from '@lody/ui/button';
+import { Dialog } from '@/ui/dialog';
 import { MarkdownRenderer } from '@/components/ai-gui/markdown-renderer';
+
+/** Release notes read as a column of prose: wider than the default panel. */
+const PANEL_WIDTH = '576px';
+
+const styles = stylex.create({
+  notes: { maxHeight: '50vh', overflowY: 'auto', paddingInlineEnd: '4px' },
+  unavailable: {
+    margin: 0,
+    fontSize: text.bodySize,
+    lineHeight: text.bodyLeading,
+    color: colors.secondaryLabel,
+  },
+  icon: { flexShrink: 0, width: '14px', height: '14px' },
+});
 
 /**
  * Format the publisher's release date for display. The timezone is pinned to
@@ -54,42 +64,42 @@ export function UpdateChangelogDialog({
   const formattedDate = releaseDate ? formatReleaseDate(releaseDate, i18n.resolvedLanguage) : null;
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-xl">
-        <DialogHeader>
-          <DialogTitle>
+    <Dialog.Root open={open} onOpenChange={onOpenChange}>
+      <Dialog.Content style={{ width: PANEL_WIDTH }}>
+        <Dialog.Header>
+          <Dialog.Title>
             {t('updates.changelog.title', "What's new in {{version}}", { version })}
-          </DialogTitle>
-          <DialogDescription>
+          </Dialog.Title>
+          <Dialog.Description>
             {formattedDate
               ? t('updates.changelog.releasedOn', 'Released {{date}}', { date: formattedDate })
               : t('updates.changelog.subtitle', 'Changes included in this update.')}
-          </DialogDescription>
-        </DialogHeader>
+          </Dialog.Description>
+        </Dialog.Header>
         {notes ? (
-          <div className="max-h-[50vh] overflow-y-auto pr-1">
+          <div {...stylex.props(styles.notes)}>
             <MarkdownRenderer text={notes} size="sm" allowHtml={false} />
           </div>
         ) : (
-          <p className="text-sm text-muted-foreground">
+          <p {...stylex.props(styles.unavailable)}>
             {t(
               'updates.changelog.unavailable',
               'This update did not ship release notes. Open the changelog website to see what changed.'
             )}
           </p>
         )}
-        <DialogFooter>
+        <Dialog.Footer>
           {!notes ? (
-            <Button variant="outline" size="sm" onClick={onOpenChangelogSite}>
-              <ExternalLink className="mr-1 h-3.5 w-3.5" />
+            <Button variant="secondary" size="small" onClick={onOpenChangelogSite}>
+              <ExternalLink {...stylex.props(styles.icon)} />
               {t('updates.changelog.openWebsite', 'Open changelog website')}
             </Button>
           ) : null}
-          <Button size="sm" onClick={() => onOpenChange(false)}>
+          <Button size="small" onClick={() => onOpenChange(false)}>
             {t('common.close', 'Close')}
           </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        </Dialog.Footer>
+      </Dialog.Content>
+    </Dialog.Root>
   );
 }

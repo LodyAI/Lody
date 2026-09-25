@@ -2,13 +2,13 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { usePostHog } from '@posthog/react';
 import { Check, Copy, Download } from 'lucide-react';
-import { Spinner } from '@/ui/spinner';
+import { Spinner } from '@lody/ui/spinner';
 import { cn } from '@/lib/utils';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/ui/dialog';
-import { Label } from '@/ui/label';
-import { Button } from '@/ui/button';
-import { Switch } from '@/ui/switch';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/ui/select';
+import { Dialog } from '@/ui/dialog';
+import { Field as UiField } from '@lody/ui/field';
+import { Button } from '@lody/ui/button';
+import { Switch } from '@lody/ui/switch';
+import { Select } from '@lody/ui/select';
 import { copyShareImage, exportShareImage } from '@/lib/share-image-export';
 import { capturePostHogEvent } from '@/lib/posthog-analytics';
 import { stripRecommended } from '@/components/shared/acp-selector-options';
@@ -206,21 +206,21 @@ export function UsageShareImageDialog({
   };
 
   return (
-    <Dialog
+    <Dialog.Root
       open={open}
       onOpenChange={(next) => {
         if (!exportingRef.current) onOpenChange(next);
       }}
     >
-      <DialogContent className="flex max-h-[85vh] max-w-4xl flex-col gap-0 overflow-hidden p-0 sm:p-0">
-        <DialogHeader className="border-b border-border/70 px-4 py-3.5 pr-12 text-left sm:px-5 sm:pr-12">
-          <DialogTitle className="text-base">
+      <Dialog.Content className="flex max-h-[85vh] max-w-4xl flex-col gap-0 overflow-hidden p-0 sm:p-0">
+        <Dialog.Header className="border-b border-border/70 px-4 py-3.5 pr-12 text-left sm:px-5 sm:pr-12">
+          <Dialog.Title className="text-base">
             {t('workspace.usage.shareImage.dialogTitle')}
-          </DialogTitle>
-          <DialogDescription className="leading-5">
+          </Dialog.Title>
+          <Dialog.Description className="leading-5">
             {t('workspace.usage.shareImage.dialogDescription')}
-          </DialogDescription>
-        </DialogHeader>
+          </Dialog.Description>
+        </Dialog.Header>
 
         <div className="grid min-h-0 flex-1 grid-cols-1 sm:grid-cols-[280px_minmax(0,1fr)]">
           <fieldset
@@ -228,19 +228,27 @@ export function UsageShareImageDialog({
             className="min-h-0 min-w-0 space-y-5 overflow-y-auto border-b border-border/70 px-4 py-4 sm:border-b-0 sm:border-r sm:px-5"
           >
             <div className="space-y-2">
-              <Label htmlFor="usage-share-metric">{t('workspace.usage.shareImage.metric')}</Label>
-              <Select
+              <UiField.Label htmlFor="usage-share-metric">
+                {t('workspace.usage.shareImage.metric')}
+              </UiField.Label>
+              <Select.Root
+                items={[
+                  { value: 'tokens', label: t('workspace.usage.tokens') },
+                  { value: 'costUSD', label: t('workspace.usage.cost') },
+                ]}
                 value={metric}
-                onValueChange={(value) => setMetric(value as UsageCalendarMetric)}
+                onValueChange={(value) => {
+                  if (value != null) setMetric(value as UsageCalendarMetric);
+                }}
               >
-                <SelectTrigger id="usage-share-metric" className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="tokens">{t('workspace.usage.tokens')}</SelectItem>
-                  <SelectItem value="costUSD">{t('workspace.usage.cost')}</SelectItem>
-                </SelectContent>
-              </Select>
+                <Select.Trigger id="usage-share-metric" className="w-full">
+                  <Select.Value />
+                </Select.Trigger>
+                <Select.Content>
+                  <Select.Item value="tokens">{t('workspace.usage.tokens')}</Select.Item>
+                  <Select.Item value="costUSD">{t('workspace.usage.cost')}</Select.Item>
+                </Select.Content>
+              </Select.Root>
               {metric === 'costUSD' ? (
                 <p className="text-xs leading-snug text-muted-foreground">
                   {t('workspace.usage.shareImage.metricCostHint')}
@@ -249,41 +257,65 @@ export function UsageShareImageDialog({
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="usage-share-aspect">{t('workspace.usage.shareImage.aspect')}</Label>
-              <Select
+              <UiField.Label htmlFor="usage-share-aspect">
+                {t('workspace.usage.shareImage.aspect')}
+              </UiField.Label>
+              <Select.Root
+                items={[
+                  {
+                    value: 'portrait',
+                    label: t('workspace.usage.shareImage.aspectPortrait'),
+                  },
+                  { value: 'wide', label: t('workspace.usage.shareImage.aspectWide') },
+                ]}
                 value={aspect}
-                onValueChange={(value) => setAspect(value as UsageShareCardAspect)}
+                onValueChange={(value) => {
+                  if (value != null) setAspect(value as UsageShareCardAspect);
+                }}
               >
-                <SelectTrigger id="usage-share-aspect" className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="portrait">
+                <Select.Trigger id="usage-share-aspect" className="w-full">
+                  <Select.Value />
+                </Select.Trigger>
+                <Select.Content>
+                  <Select.Item value="portrait">
                     {t('workspace.usage.shareImage.aspectPortrait')}
-                  </SelectItem>
-                  <SelectItem value="wide">{t('workspace.usage.shareImage.aspectWide')}</SelectItem>
-                </SelectContent>
-              </Select>
+                  </Select.Item>
+                  <Select.Item value="wide">
+                    {t('workspace.usage.shareImage.aspectWide')}
+                  </Select.Item>
+                </Select.Content>
+              </Select.Root>
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="usage-share-subject">{t('workspace.usage.shareImage.subject')}</Label>
-              <Select
+              <UiField.Label htmlFor="usage-share-subject">
+                {t('workspace.usage.shareImage.subject')}
+              </UiField.Label>
+              <Select.Root
+                items={[
+                  {
+                    value: 'personal',
+                    label: t('workspace.usage.shareImage.subjectPersonal'),
+                  },
+                  { value: 'team', label: t('workspace.usage.shareImage.subjectTeam') },
+                ]}
                 value={subject}
-                onValueChange={(value) => setSubject(value as UsageShareCardSubject)}
+                onValueChange={(value) => {
+                  if (value != null) setSubject(value as UsageShareCardSubject);
+                }}
               >
-                <SelectTrigger id="usage-share-subject" className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="personal">
+                <Select.Trigger id="usage-share-subject" className="w-full">
+                  <Select.Value />
+                </Select.Trigger>
+                <Select.Content>
+                  <Select.Item value="personal">
                     {t('workspace.usage.shareImage.subjectPersonal')}
-                  </SelectItem>
-                  <SelectItem value="team" disabled={!teamAvailable}>
+                  </Select.Item>
+                  <Select.Item value="team" disabled={!teamAvailable}>
                     {t('workspace.usage.shareImage.subjectTeam')}
-                  </SelectItem>
-                </SelectContent>
-              </Select>
+                  </Select.Item>
+                </Select.Content>
+              </Select.Root>
               {subject === 'team' ? (
                 <p className="text-xs leading-snug text-muted-foreground">
                   {t('workspace.usage.shareImage.subjectTeamHint')}
@@ -292,45 +324,66 @@ export function UsageShareImageDialog({
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="usage-share-theme">{t('workspace.usage.shareImage.theme')}</Label>
-              <Select
+              <UiField.Label htmlFor="usage-share-theme">
+                {t('workspace.usage.shareImage.theme')}
+              </UiField.Label>
+              <Select.Root
+                items={[
+                  { value: 'app', label: t('workspace.usage.shareImage.themeApp') },
+                  { value: 'light', label: t('workspace.usage.shareImage.themeLight') },
+                  { value: 'dark', label: t('workspace.usage.shareImage.themeDark') },
+                ]}
                 value={theme}
-                onValueChange={(value) => setTheme(value as 'app' | 'light' | 'dark')}
+                onValueChange={(value) => {
+                  if (value != null) setTheme(value as 'app' | 'light' | 'dark');
+                }}
               >
-                <SelectTrigger id="usage-share-theme" className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="app">{t('workspace.usage.shareImage.themeApp')}</SelectItem>
-                  <SelectItem value="light">
+                <Select.Trigger id="usage-share-theme" className="w-full">
+                  <Select.Value />
+                </Select.Trigger>
+                <Select.Content>
+                  <Select.Item value="app">{t('workspace.usage.shareImage.themeApp')}</Select.Item>
+                  <Select.Item value="light">
                     {t('workspace.usage.shareImage.themeLight')}
-                  </SelectItem>
-                  <SelectItem value="dark">{t('workspace.usage.shareImage.themeDark')}</SelectItem>
-                </SelectContent>
-              </Select>
+                  </Select.Item>
+                  <Select.Item value="dark">
+                    {t('workspace.usage.shareImage.themeDark')}
+                  </Select.Item>
+                </Select.Content>
+              </Select.Root>
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="usage-share-footer">{t('workspace.usage.shareImage.footer')}</Label>
-              <Select
+              <UiField.Label htmlFor="usage-share-footer">
+                {t('workspace.usage.shareImage.footer')}
+              </UiField.Label>
+              <Select.Root
+                items={[
+                  { value: 'card', label: t('workspace.usage.shareImage.footerCard') },
+                  { value: 'canvas', label: t('workspace.usage.shareImage.footerCanvas') },
+                ]}
                 value={footer}
-                onValueChange={(value) => setFooter(value as UsageShareCardFooter)}
+                onValueChange={(value) => {
+                  if (value != null) setFooter(value as UsageShareCardFooter);
+                }}
                 disabled={backdrop === 'none'}
               >
-                <SelectTrigger id="usage-share-footer" className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="card">{t('workspace.usage.shareImage.footerCard')}</SelectItem>
-                  <SelectItem value="canvas">
+                <Select.Trigger id="usage-share-footer" className="w-full">
+                  <Select.Value />
+                </Select.Trigger>
+                <Select.Content>
+                  <Select.Item value="card">
+                    {t('workspace.usage.shareImage.footerCard')}
+                  </Select.Item>
+                  <Select.Item value="canvas">
                     {t('workspace.usage.shareImage.footerCanvas')}
-                  </SelectItem>
-                </SelectContent>
-              </Select>
+                  </Select.Item>
+                </Select.Content>
+              </Select.Root>
             </div>
 
             <div className="space-y-2">
-              <Label>{t('workspace.usage.shareImage.backdrop')}</Label>
+              <UiField.Label>{t('workspace.usage.shareImage.backdrop')}</UiField.Label>
               <div className="grid grid-cols-4 gap-2" role="group">
                 <button
                   type="button"
@@ -372,11 +425,14 @@ export function UsageShareImageDialog({
             </div>
 
             <div className="space-y-2">
-              <Label>{t('workspace.usage.shareImage.content')}</Label>
+              <UiField.Label>{t('workspace.usage.shareImage.content')}</UiField.Label>
               <div className="flex items-center justify-between gap-3">
-                <Label htmlFor="usage-share-qr" className="font-normal text-muted-foreground">
+                <UiField.Label
+                  htmlFor="usage-share-qr"
+                  className="font-normal text-muted-foreground"
+                >
                   {t('workspace.usage.shareImage.showQr')}
-                </Label>
+                </UiField.Label>
                 <Switch id="usage-share-qr" checked={showQr} onCheckedChange={setShowQr} />
               </div>
             </div>
@@ -417,7 +473,7 @@ export function UsageShareImageDialog({
             </p>
           ) : null}
           <Button
-            variant="outline"
+            variant="secondary"
             onClick={() => void run('copy')}
             disabled={exporting || !assetsReady}
           >
@@ -439,7 +495,7 @@ export function UsageShareImageDialog({
             {t('workspace.usage.shareImage.exportPng')}
           </Button>
         </div>
-      </DialogContent>
-    </Dialog>
+      </Dialog.Content>
+    </Dialog.Root>
   );
 }

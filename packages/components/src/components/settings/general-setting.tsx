@@ -5,11 +5,13 @@ import type {
   OpenSystemNotificationSettingsResult,
 } from '@lody/shared';
 import { Trash2 } from 'lucide-react';
-import { Loading } from '@/ui';
-import { Button } from '@/ui/button';
-import { Switch } from '@/ui/switch';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/ui/select';
-import { toast } from 'sonner';
+import * as stylex from '@stylexjs/stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { Spinner } from '@lody/ui/spinner';
+import { Button } from '@lody/ui/button';
+import { Switch } from '@lody/ui/switch';
+import { Select } from '@lody/ui/select';
+import { toast } from '@/lib/toast';
 import {
   electronSessionCompletionNotificationsEnabledAtom,
   mobileKeyboardActionAtom,
@@ -40,6 +42,24 @@ import { CliDaemonSetting } from './cli-daemon-setting';
 import { useAppCapability } from '@/lib/app-platform';
 import { getIpcServices } from '@/lib/electron-ipc-client';
 import { useElectronAutoLaunch } from '@/hooks/use-electron-auto-launch';
+
+const styles = stylex.create({
+  /** A row a deep link can land on, clear of the sticky header above it. */
+  anchor: { scrollMarginTop: '96px' },
+  /** A select takes a fixed column on a wide panel and the row on a narrow one. */
+  select: { width: { default: '100%', '@media (min-width: 640px)': '220px' } },
+  helperLines: { display: 'flex', flexDirection: 'column', gap: '2px' },
+  error: { color: colors.destructive },
+  /** Holds a switch's place while its state loads, so the row does not jump. */
+  switchSlot: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '36px',
+    height: '20px',
+  },
+  icon: { width: '14px', height: '14px', flexShrink: 0 },
+});
 
 type ElectronPlatform = 'darwin' | 'win32' | 'linux' | 'unknown';
 
@@ -128,6 +148,15 @@ export function GeneralSettingsComponent() {
   const selectedMobileKeyboardAction = isMobileKeyboardAction(mobileKeyboardAction)
     ? mobileKeyboardAction
     : 'send';
+  // `Select.Value` reads the label of the current value from `items`, not from
+  // the rows, so the list is stated once and drives both.
+  const mobileKeyboardActionOptions = useMemo(
+    () => [
+      { value: 'send', label: t('settings.input.mobileKeyboardAction.send') },
+      { value: 'newline', label: t('settings.input.mobileKeyboardAction.newline') },
+    ],
+    [t]
+  );
   const electronPlatform = useMemo(() => {
     if (!isElectron || typeof window === 'undefined') {
       return 'unknown';
@@ -617,7 +646,8 @@ export function GeneralSettingsComponent() {
               label={t('settings.input.mobileKeyboardAction.label')}
               helper={t('settings.input.mobileKeyboardAction.helper')}
             >
-              <Select
+              <Select.Root
+                items={mobileKeyboardActionOptions}
                 value={selectedMobileKeyboardAction}
                 onValueChange={(value) => {
                   if (isMobileKeyboardAction(value)) {
@@ -625,23 +655,24 @@ export function GeneralSettingsComponent() {
                   }
                 }}
               >
-                <SelectTrigger className="w-full sm:w-[220px]">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="send">
-                    {t('settings.input.mobileKeyboardAction.send')}
-                  </SelectItem>
-                  <SelectItem value="newline">
-                    {t('settings.input.mobileKeyboardAction.newline')}
-                  </SelectItem>
-                </SelectContent>
-              </Select>
+                <div {...stylex.props(styles.select)}>
+                  <Select.Trigger>
+                    <Select.Value />
+                  </Select.Trigger>
+                </div>
+                <Select.Content>
+                  {mobileKeyboardActionOptions.map((option) => (
+                    <Select.Item key={option.value} value={option.value}>
+                      {option.label}
+                    </Select.Item>
+                  ))}
+                </Select.Content>
+              </Select.Root>
             </CompactRow>
           </CompactSection>
         ) : null}
 
-        <div className="divide-y divide-border/60 overflow-hidden rounded-lg border border-border/70 bg-card/60 text-sm">
+        <CompactSection>
           <CompactRow
             label={t(
               'settings.general.sessions.queuedMessageBehavior.label',
@@ -681,12 +712,12 @@ export function GeneralSettingsComponent() {
                 : t('settings.notifications.enableToggle')
             }
             helper={
-              <span className="flex flex-col gap-0.5">
+              <span {...stylex.props(styles.helperLines)}>
                 <span>{permissionLabel}</span>
                 {disableReason && !isProcessing ? <span>{disableReason}</span> : null}
                 {isElectron && permissionStatus !== 'granted' ? <span>{desktopHint}</span> : null}
                 {!notificationSupported ? (
-                  <span className="text-destructive">
+                  <span {...stylex.props(styles.error)}>
                     {isElectron
                       ? t('settings.notifications.unsupportedDesktop')
                       : t('settings.notifications.unsupported')}
@@ -697,7 +728,9 @@ export function GeneralSettingsComponent() {
             alignTop
           >
             {isProcessing ? (
-              <Loading size="sm" className="h-5 w-9" />
+              <span {...stylex.props(styles.switchSlot)}>
+                <Spinner size="small" label={t('common.loading', 'Loading...')} />
+              </span>
             ) : (
               <Switch
                 id="notification-toggle"
@@ -709,7 +742,7 @@ export function GeneralSettingsComponent() {
               />
             )}
           </CompactRow>
-        </div>
+        </CompactSection>
         {isElectron && (
           <CompactSection title={t('settings.general.autoLaunch.title', 'Startup')}>
             <CliDaemonSetting />
@@ -721,7 +754,9 @@ export function GeneralSettingsComponent() {
               )}
             >
               {autoLaunch.enabledLoading ? (
-                <Loading size="sm" className="h-5 w-9" />
+                <span {...stylex.props(styles.switchSlot)}>
+                  <Spinner size="small" label={t('common.loading', 'Loading...')} />
+                </span>
               ) : (
                 <Switch
                   id="auto-launch-toggle"
@@ -741,7 +776,9 @@ export function GeneralSettingsComponent() {
               )}
             >
               {autoLaunch.hideWindowLoading ? (
-                <Loading size="sm" className="h-5 w-9" />
+                <span {...stylex.props(styles.switchSlot)}>
+                  <Spinner size="small" label={t('common.loading', 'Loading...')} />
+                </span>
               ) : (
                 <Switch
                   id="auto-launch-hide-window-toggle"
@@ -753,7 +790,7 @@ export function GeneralSettingsComponent() {
                 />
               )}
             </CompactRow>
-            <div id="cli-auto-start" className="scroll-mt-24">
+            <div id="cli-auto-start" {...stylex.props(styles.anchor)}>
               <CompactRow
                 label={t('settings.general.cliAutoStart.label', 'Run local agent')}
                 helper={t(
@@ -763,7 +800,9 @@ export function GeneralSettingsComponent() {
                 alignTop
               >
                 {cliAutoStartLoading ? (
-                  <Loading size="sm" className="h-5 w-9" />
+                  <span {...stylex.props(styles.switchSlot)}>
+                    <Spinner size="small" label={t('common.loading', 'Loading...')} />
+                  </span>
                 ) : (
                   <Switch
                     id="cli-auto-start-toggle"
@@ -775,7 +814,7 @@ export function GeneralSettingsComponent() {
                 )}
               </CompactRow>
             </div>
-            <div id="prevent-sleep" className="scroll-mt-24">
+            <div id="prevent-sleep" {...stylex.props(styles.anchor)}>
               <CompactRow label={t('settings.general.preventSleep.label', 'Prevent sleep')}>
                 <Switch
                   id="prevent-sleep-toggle"
@@ -800,23 +839,23 @@ export function GeneralSettingsComponent() {
         <ExperimentalFeaturesSection />
 
         {isElectron && (
-          <div id="path-launchers" className="scroll-mt-24">
+          <div id="path-launchers" {...stylex.props(styles.anchor)}>
             <PathLaunchersSettings isElectron={isElectron} platform={electronPlatform} />
           </div>
         )}
 
         {/* Clear local cache stays last in General settings. */}
-        <div className="divide-y divide-border/60 overflow-hidden rounded-lg border border-border/70 bg-card/60 text-sm">
+        <CompactSection>
           <CompactRow
             label={t('settings.cache.clearCache.label')}
             helper={t('settings.cache.clearCache.description')}
           >
-            <Button variant="outline" size="sm" onClick={() => clearCache.setDialogOpen(true)}>
-              <Trash2 className="mr-1.5 h-3.5 w-3.5" />
+            <Button variant="secondary" size="small" onClick={() => clearCache.setDialogOpen(true)}>
+              <Trash2 {...stylex.props(styles.icon)} />
               {t('settings.cache.clearCache.button')}
             </Button>
           </CompactRow>
-        </div>
+        </CompactSection>
       </div>
       <ClearCacheConfirmDialog
         open={clearCache.dialogOpen}

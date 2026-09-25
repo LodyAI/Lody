@@ -1,0 +1,4795 @@
+import * as stylex from '@stylexjs/stylex';
+import {
+  Fragment,
+  useEffect,
+  useRef,
+  useState,
+  type ComponentProps,
+  type ReactNode,
+  type Ref,
+  type RefObject,
+} from 'react';
+import { Avatar, type AvatarSize } from '../avatar/avatar';
+import { avatar as avatarTokens } from '../avatar/avatar.tokens.stylex';
+import { Badge, type BadgeTone } from '../badge/badge';
+import { badge as badgeTokens } from '../badge/badge.tokens.stylex';
+import { Button } from '../button/button';
+import { button } from '../button/button.tokens.stylex';
+import { Card } from '../card/card';
+import { card as cardTokens } from '../card/card.tokens.stylex';
+import { Accordion } from '../disclosure/accordion';
+import { Alert } from '../feedback/alert';
+import { feedback as feedbackTokens } from '../feedback/feedback.tokens.stylex';
+import { Progress } from '../feedback/progress';
+import { Skeleton } from '../feedback/skeleton';
+import { Spinner } from '../feedback/spinner';
+import { feedbackSurface } from '../feedback/surface';
+import { Toast } from '../feedback/toast';
+import { TONE_GLYPHS, TONE_MARKS, type FeedbackTone } from '../feedback/tone';
+import { Collapsible } from '../disclosure/collapsible';
+import { disclosure as disclosureTokens } from '../disclosure/disclosure.tokens.stylex';
+import { Tabs, type TabsSize } from '../disclosure/tabs';
+import { Checkbox } from '../field/checkbox';
+import { AlertDialog } from '../dialog/alert-dialog';
+import { Dialog } from '../dialog/dialog';
+import { dialog as dialogTokens } from '../dialog/dialog.tokens.stylex';
+import { Drawer, type DrawerSide } from '../drawer/drawer';
+import { modal } from '../dialog/surface';
+import { Combobox } from '../field/combobox';
+import { Field } from '../field/field';
+import { field } from '../field/field.tokens.stylex';
+import {
+  ChevronDownGlyph,
+  ChevronRightGlyph,
+  CrossGlyph as CloseGlyph,
+  DotGlyph,
+  TickGlyph,
+} from '../internal/glyphs';
+import { Kbd, KbdGroup } from '../kbd/kbd';
+import { kbd as kbdTokens, kbdOnInvertedTheme } from '../kbd/kbd.tokens.stylex';
+import { ContextMenu } from '../menu/context-menu';
+import { Menu } from '../menu/menu';
+import { Menubar } from '../menu/menubar';
+import { Input } from '../field/input';
+import { NumberField, type NumberFieldSize } from '../field/number-field';
+import { PasswordInput, type PasswordInputSize } from '../field/password-input';
+import { Radio, RadioGroup } from '../field/radio';
+import { Select } from '../field/select';
+import { Separator } from '../separator/separator';
+import { Switch } from '../field/switch';
+import { Textarea } from '../field/textarea';
+import { Toggle, type ToggleSize } from '../toggle/toggle';
+import { ToggleGroup } from '../toggle/toggle-group';
+import { toggle as toggleTokens } from '../toggle/toggle.tokens.stylex';
+import { Toolbar } from '../toggle/toolbar';
+import { Pagination } from '../table/pagination';
+import { Popover } from '../popover/popover';
+import { popup } from '../popup/popup.tokens.stylex';
+import { surface } from '../popup/surface';
+import { Table, type TableColumn, type TableSize, type TableSorting } from '../table/table';
+import { table as tableTokens } from '../table/table.tokens.stylex';
+import { chip } from '../tooltip/chip';
+import { Tooltip } from '../tooltip/tooltip';
+import { tooltip as tooltipTokens } from '../tooltip/tooltip.tokens.stylex';
+import { colors, shadow, sheen } from '../tokens/colors.stylex';
+import { control, corner, duration, ease, radius, space, text, z } from '../tokens/scales.stylex';
+import {
+  Board,
+  BoardHeader,
+  Cluster,
+  Grid,
+  LegendKey,
+  Note,
+  PaletteSplit,
+  Row,
+  Rows,
+  Sample,
+  Section,
+  Swatch,
+  dyn,
+  useMeasured,
+  type GalleryPalettes,
+} from './parts';
+
+export type { GalleryPalettes };
+
+export interface UiGalleryProps {
+  /** Which palettes every sample is rendered in. Defaults to both. */
+  palettes?: GalleryPalettes;
+}
+
+const styles = stylex.create({
+  /**
+   * The ground the ladder stands on, and it has to be the page.
+   *
+   * It was the region rung, and a rung can only be shown against a different
+   * one: in the dark palette `secondaryBackground` and `elevatedBackground` are
+   * both `rgb(22,22,22)`, so the `card` and `modal` chips were the same fill as
+   * the stage under them and a ladder could not show its own card step. On the
+   * page rung exactly one chip matches its ground — `page` — and that one is
+   * supposed to: the page rung *is* the page. A card that cannot be told from
+   * what it sits on is a lie; a page that cannot be is the truth.
+   */
+  stage: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'flex-end',
+    gap: space[3],
+    boxSizing: 'border-box',
+    padding: space[4],
+    backgroundColor: colors.background,
+    borderRadius: radius.large,
+    cornerShape: corner.shape,
+  },
+  rung: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: space[1],
+    justifyContent: 'center',
+    boxSizing: 'border-box',
+    minWidth: '148px',
+    padding: space[3],
+    borderRadius: radius.medium,
+    cornerShape: corner.shape,
+  },
+  rungName: {
+    fontSize: text.footnoteSize,
+    lineHeight: text.footnoteLeading,
+    fontWeight: 500,
+  },
+  rungUse: {
+    fontSize: text.captionSize,
+    lineHeight: text.captionLeading,
+    color: colors.secondaryLabel,
+  },
+  well: { backgroundColor: colors.wellBackground, boxShadow: shadow.inset },
+  page: { backgroundColor: colors.background },
+  region: { backgroundColor: colors.secondaryBackground },
+  card: { backgroundColor: colors.elevatedBackground, boxShadow: shadow.card },
+  floating: { backgroundColor: colors.raisedBackground, boxShadow: shadow.popover },
+  modal: { backgroundColor: colors.elevatedBackground, boxShadow: shadow.large },
+  textSample: { display: 'flex', flexDirection: 'column', gap: space[1] },
+  separatorRow: { display: 'flex', flexDirection: 'column', gap: 0 },
+  separatorText: {
+    paddingBlock: space[2],
+    fontSize: text.subheadlineSize,
+    lineHeight: text.subheadlineLeading,
+  },
+  hoverRow: {
+    paddingBlock: space[2],
+    paddingInline: space[3],
+    borderRadius: radius.medium,
+    cornerShape: corner.shape,
+    fontSize: text.subheadlineSize,
+    lineHeight: text.subheadlineLeading,
+  },
+  hoverFill: { backgroundColor: colors.hoverFill },
+  selectedFill: { backgroundColor: colors.selectedFill },
+  overlaySample: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: '72px',
+    backgroundColor: colors.overlay,
+    borderRadius: radius.medium,
+    cornerShape: corner.shape,
+    // The scrim is dark in both palettes, so its own label is not a token.
+    color: 'hsl(0 0% 100% / 0.92)',
+    fontSize: text.captionSize,
+    lineHeight: text.captionLeading,
+  },
+  ring: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: control.medium,
+    paddingInline: space[3],
+    backgroundColor: colors.wellBackground,
+    boxShadow: shadow.inset,
+    borderRadius: radius.medium,
+    cornerShape: corner.shape,
+    outlineStyle: 'solid',
+    outlineWidth: '2px',
+    outlineOffset: 0,
+    fontSize: text.subheadlineSize,
+    lineHeight: 1,
+  },
+  ringAccent: { outlineColor: colors.accent },
+  ringDestructive: { outlineColor: colors.destructive },
+  leadingEmoji: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '100%',
+    height: '100%',
+    padding: 0,
+    borderWidth: 0,
+    borderRadius: '6px',
+    backgroundColor: {
+      default: 'transparent',
+      ':hover': `color-mix(in oklab, transparent, ${colors.label} 6%)`,
+    },
+    boxShadow: 'none',
+    outlineStyle: 'none',
+    fontSize: text.bodySize,
+    lineHeight: 1,
+    cursor: 'pointer',
+  },
+  shadowChip: {
+    height: '64px',
+    borderRadius: radius.medium,
+    cornerShape: corner.shape,
+  },
+  radiusChip: {
+    height: '64px',
+    backgroundColor: colors.wellBackground,
+    boxShadow: shadow.inset,
+  },
+  controlBar: {
+    display: 'flex',
+    alignItems: 'center',
+    boxSizing: 'border-box',
+    minWidth: '96px',
+    paddingInline: space[3],
+    backgroundColor: colors.wellBackground,
+    boxShadow: shadow.inset,
+    borderRadius: radius.medium,
+    cornerShape: corner.shape,
+    fontSize: text.footnoteSize,
+    color: colors.secondaryLabel,
+  },
+  spaceBar: {
+    height: '24px',
+    backgroundColor: colors.gray4,
+    borderRadius: radius.mini,
+    cornerShape: corner.shape,
+  },
+  typeSample: {
+    margin: 0,
+    letterSpacing: text.controlTracking,
+  },
+  motionChip: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: '56px',
+    backgroundColor: colors.raisedBackground,
+    boxShadow: shadow.raised,
+    borderRadius: radius.medium,
+    cornerShape: corner.shape,
+    fontSize: text.captionSize,
+    color: colors.secondaryLabel,
+    transitionProperty: 'transform, background-color',
+    transitionTimingFunction: ease.standard,
+    transform: { default: 'none', ':hover': 'translateY(-4px)' },
+  },
+  constList: {
+    display: 'grid',
+    gap: space[2],
+    gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))',
+    margin: 0,
+  },
+  constRow: { display: 'flex', gap: space[2], alignItems: 'baseline' },
+  constName: {
+    fontSize: text.footnoteSize,
+    lineHeight: text.footnoteLeading,
+    fontWeight: 500,
+  },
+  constValue: {
+    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
+    fontSize: text.captionSize,
+    lineHeight: text.captionLeading,
+    color: colors.tertiaryLabel,
+  },
+  matrix: {
+    display: 'grid',
+    gap: space[3],
+    gridTemplateColumns: 'auto 1fr',
+    alignItems: 'center',
+  },
+  fieldSlot: {
+    flexGrow: 1,
+    flexShrink: 1,
+    minWidth: '200px',
+    maxWidth: '340px',
+  },
+  readout: {
+    flexGrow: 1,
+    flexShrink: 1,
+    minWidth: 0,
+    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
+    fontSize: text.captionSize,
+    lineHeight: text.captionLeading,
+    color: colors.tertiaryLabel,
+    overflowWrap: 'anywhere',
+  },
+  // A board cannot show an open popup without covering the samples under it, so
+  // the list is drawn once on a non-interactive stand-in. It composes the very
+  // rules Select and Combobox apply — `popup/surface.ts` — rather than copying
+  // them, so the board cannot report a list this package no longer draws.
+  popupReplica: {
+    position: 'static',
+    width: '260px',
+    maxHeight: 'none',
+    minWidth: 0,
+    zIndex: 'auto',
+  },
+  popupList: { overflowY: 'visible' },
+  // The menu stand-in keeps `popup.menuWidth` rather than neutralising it the
+  // way the list stand-in does: the width floor is the one declaration a menu
+  // states for itself, so the board has to be able to read it back.
+  menuReplica: { position: 'static', maxHeight: 'none', zIndex: 'auto' },
+  // The far end of the rise is invisible by definition, so it is a probe rather
+  // than a sample: it carries the real class and reports its transform into the
+  // metrics list instead of leaving a blank gap on the board.
+  riseProbe: { position: 'absolute', width: '1px', height: '1px', minWidth: 0, padding: 0 },
+  replicaCaption: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: space[2],
+    flexGrow: 1,
+    flexShrink: 1,
+    minWidth: '220px',
+  },
+  scrollArrowGlyph: { display: 'block', width: popup.indicatorSize, height: popup.indicatorSize },
+  /** Something to right-click: a context menu attaches to what is already there. */
+  contextArea: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    boxSizing: 'border-box',
+    minWidth: '220px',
+    height: control.large,
+    paddingInline: space[3],
+    backgroundColor: colors.secondaryBackground,
+    borderRadius: radius.medium,
+    cornerShape: corner.shape,
+    color: colors.secondaryLabel,
+    fontSize: text.footnoteSize,
+    userSelect: 'none',
+  },
+  // A row is picked, not pressed, so the board shows the two fills side by side
+  // rather than asking the reader to hover one.
+  replicaRow: { cursor: 'default' },
+  // A popover stand-in, for the same reason the list has one: the real popover
+  // above it covers whatever the reader was comparing it against. It keeps every
+  // declaration the popover states for itself — the panel padding and gap are
+  // the two it replaces on the shared surface — and only stops floating.
+  popoverReplica: { position: 'static', width: '260px', maxHeight: 'none', zIndex: 'auto' },
+  // The dialog stand-in drops what makes the panel own the window — the fixed
+  // position, the centring transform and the 512px width, which would overflow
+  // this board — and keeps the padding, the radius, the gap and the type, which
+  // are what a reader is here to see. `dialog.width`, `dialog.drawerSize` and
+  // `dialog.inset` are reported by probes instead, because a panel scaled to fit
+  // a board can no longer report its own width.
+  /**
+   * What a modal panel is shown standing on: the page, with the overlay over
+   * it. The rung states three things at once — the elevated background, the
+   * large shadow, and the overlay — and the stand-in was painting two of them,
+   * on the board's own panel, which is the card rung. In the dark palette that
+   * surface is the panel's own `rgb(22,22,22)`, so the third was not merely
+   * missing: the stand-in had no background step either.
+   *
+   * One element paints both, because `dialogReplica` needs this box to stay the
+   * containing block for the cross and a second positioned layer would take it:
+   * `background-image` puts the overlay over the page colour in place.
+   */
+  modalStage: {
+    boxSizing: 'border-box',
+    flexGrow: 1,
+    flexShrink: 1,
+    minWidth: '260px',
+    padding: space[4],
+    borderRadius: radius.medium,
+    cornerShape: corner.shape,
+    backgroundColor: colors.background,
+    backgroundImage: `linear-gradient(${colors.overlay}, ${colors.overlay})`,
+  },
+  dialogReplica: {
+    // `relative` rather than `static`: the cross is pinned to the panel's own
+    // padding box, so the stand-in has to stay the containing block for it.
+    // A positioned box also starts honouring the panel's own insets, and the
+    // panel centres itself with `inset-inline-start: 50%`, so all four are
+    // cleared here or the stand-in sits half a column to the right of itself.
+    position: 'relative',
+    insetInlineStart: 'auto',
+    insetInlineEnd: 'auto',
+    insetBlockStart: 'auto',
+    insetBlockEnd: 'auto',
+    // Not `width: 100%`: the stand-in is a flex item beside a legend and a
+    // caption, and a percentage width resolves against the whole row rather
+    // than the room left in it, so the panel ran off the end of the board. A
+    // `100%` flex-basis in a wrapping row means "a line of your own", which is
+    // what a 512px panel needs in a 340px column.
+    width: 'auto',
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '100%',
+    minWidth: 0,
+    maxWidth: 'none',
+    maxHeight: 'none',
+    transform: 'none',
+    zIndex: 'auto',
+  },
+  // The overlay, at its real colour, over something to see it against.
+  overlaySwatch: {
+    position: 'relative',
+    boxSizing: 'border-box',
+    height: '46px',
+    borderRadius: radius.small,
+    cornerShape: corner.shape,
+    backgroundColor: colors.background,
+    overflow: 'hidden',
+  },
+  overlayFill: { position: 'absolute', inset: 0, backgroundColor: dialogTokens.overlay },
+  // A dimension a stand-in cannot state — the panel is 512px and this board's
+  // columns are 340 — is reported by a probe carrying the token, the way the
+  // rise is. It is out of flow and hidden: a probe laid out inside the metrics
+  // row is a flex item, so it reports the width the row let it have rather than
+  // the width the token declares. Measured in flow, `dialog.width` read back as
+  // 167.5px.
+  /** A disclosure takes the width of what it is in; the board gives it one. */
+  disclosureBlock: { flexGrow: 1, flexShrink: 1, minWidth: '260px' },
+  /** The toast stand-in is out of its viewport, so it takes no fixed width. */
+  toastReplica: { position: 'static', maxWidth: '100%' },
+  narrowTable: { width: '320px', maxWidth: '100%' },
+  skeletonBlock: { display: 'flex', alignItems: 'center', gap: space[3], flexGrow: 1 },
+  /**
+   * The button an interactive card is inside. A Card marks itself pressable and
+   * does not render the control, so the board states the composition it expects
+   * rather than a picture of it: the button is the caller's, stripped to
+   * nothing, and the card is what a person sees.
+   */
+  cardButton: {
+    display: 'block',
+    width: '100%',
+    padding: 0,
+    margin: 0,
+    borderWidth: 0,
+    borderStyle: 'none',
+    backgroundColor: 'transparent',
+    font: 'inherit',
+    color: 'inherit',
+    textAlign: 'start',
+    cursor: 'pointer',
+  },
+  /**
+   * The page rung, for a sample that *is* a rung.
+   *
+   * The board's own palette panel is the card rung — `elevatedBackground` under
+   * `shadow.card` — so a Card dropped straight into it is the same fill twice
+   * under two shadows, which is the nesting the rules forbid by name. In the
+   * dark palette that reads as a card with no background at all: both surfaces
+   * are `rgb(22,22,22)` and the only thing left to separate them is a shadow
+   * already spent on the panel. A rung can only be shown on a different one, so
+   * these samples sit on the page.
+   */
+  pageRung: {
+    boxSizing: 'border-box',
+    padding: space[4],
+    borderRadius: radius.medium,
+    cornerShape: corner.shape,
+    backgroundColor: colors.background,
+  },
+  /** A badge is on no rung, so the board puts the same four on three of them. */
+  badgeRung: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: space[2],
+    flexWrap: 'wrap',
+    boxSizing: 'border-box',
+    padding: space[2],
+    borderRadius: radius.medium,
+    cornerShape: corner.shape,
+  },
+  /**
+   * How little room a badge may be given, so the ellipsis is on the board.
+   *
+   * The clamp goes on the badge itself and not on a box around it: a badge
+   * neither grows nor shrinks, so inside a flex row it keeps its content's
+   * width and overflows a narrow parent rather than ellipsing inside it. A
+   * surface that has to cap one caps the badge.
+   */
+  badgeClamp: { maxWidth: '96px' },
+  /** A row of controls with a line down it: the separator's other orientation. */
+  separatorToolbar: { display: 'flex', alignItems: 'center', gap: space[2] },
+  skeletonLines: { display: 'flex', flexDirection: 'column', gap: space[2], flexGrow: 1 },
+  collapsibleBody: {
+    margin: 0,
+    paddingBlockStart: space[2],
+    fontSize: text.bodySize,
+    lineHeight: text.bodyLeading,
+    color: colors.secondaryLabel,
+  },
+  widthProbe: {
+    position: 'absolute',
+    visibility: 'hidden',
+    height: '1px',
+    pointerEvents: 'none',
+  },
+  // The tooltip stand-in: the chip alone, with nothing to hover.
+  tooltipReplica: { position: 'static', zIndex: 'auto', pointerEvents: 'auto' },
+  /** A chip with something beside the words: the row that shows a cap on one. */
+  tooltipReplicaRow: { display: 'inline-flex', alignItems: 'center', gap: space[1.5] },
+  /** A caller's glyph states 100% of the box the fallback gave it. */
+  avatarGlyph: { display: 'block', width: '100%', height: '100%' },
+  // Something to point at, so the real tooltips above have an anchor that is not
+  // a control with opinions of its own.
+  tooltipAnchor: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    boxSizing: 'border-box',
+    height: control.small,
+    paddingInline: space[2],
+    backgroundColor: colors.secondaryBackground,
+    borderRadius: radius.small,
+    cornerShape: corner.shape,
+    color: colors.secondaryLabel,
+    fontSize: text.footnoteSize,
+    userSelect: 'none',
+  },
+  // A dialog's body, so the stand-in shows what the panel's gap separates.
+  dialogBody: {
+    margin: 0,
+    color: colors.secondaryLabel,
+    fontSize: text.bodySize,
+    lineHeight: text.bodyLeading,
+  },
+  // The cross, as the real panel draws it: a ghost icon button in the corner.
+  replicaCloseGlyph: { display: 'block', width: '16px', height: '16px' },
+  // A board cannot hold focus while it is read, so each focus ring is drawn once
+  // on a non-interactive stand-in built from the same tokens the control uses.
+  buttonFocusReplica: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    boxSizing: 'border-box',
+    height: control.medium,
+    paddingInline: '12px',
+    borderRadius: radius.medium,
+    cornerShape: corner.round,
+    backgroundColor: button.secondaryBackground,
+    backgroundImage: button.secondarySheen,
+    boxShadow: `${button.secondaryShadow}, 0 0 0 ${button.ringWidth} ${button.ring}`,
+    color: colors.label,
+    fontSize: text.subheadlineSize,
+    fontWeight: 500,
+    letterSpacing: text.controlTracking,
+  },
+  focusReplica: {
+    display: 'flex',
+    alignItems: 'center',
+    boxSizing: 'border-box',
+    height: field.heightMedium,
+    paddingInline: field.paddingXMedium,
+    backgroundColor: field.background,
+    boxShadow: `${field.well}, 0 0 0 ${field.ringWidth} ${field.ring}`,
+    borderRadius: field.radiusMedium,
+    cornerShape: corner.round,
+    color: field.value,
+    fontSize: field.text,
+    fontWeight: 500,
+    letterSpacing: text.controlTracking,
+  },
+});
+
+const SURFACES = [
+  { name: 'background', value: colors.background, note: 'app ground' },
+  { name: 'elevatedBackground', value: colors.elevatedBackground, note: 'card, panel, dialog' },
+  { name: 'raisedBackground', value: colors.raisedBackground, note: 'secondary button, menu' },
+  { name: 'secondaryBackground', value: colors.secondaryBackground, note: 'sidebar, footer band' },
+  { name: 'wellBackground', value: colors.wellBackground, note: 'input, track, switch off' },
+  { name: 'trayBackground', value: colors.trayBackground, note: 'a segmented strip' },
+  { name: 'trayRaised', value: colors.trayRaised, note: 'the key on that strip' },
+];
+
+const CONTENT_COLORS = [
+  { name: 'label', value: colors.label, note: 'the thing' },
+  { name: 'secondaryLabel', value: colors.secondaryLabel, note: 'about the thing' },
+  { name: 'tertiaryLabel', value: colors.tertiaryLabel, note: 'placeholder, hint, icon at rest' },
+];
+
+const FILLS = [
+  { name: 'hoverFill', value: colors.hoverFill, note: 'pointer over a row' },
+  { name: 'selectedFill', value: colors.selectedFill, note: 'current row' },
+  { name: 'separator', value: colors.separator, note: 'between rows only' },
+  { name: 'overlay', value: colors.overlay, note: 'dialog and drawer backdrop' },
+];
+
+const ROLE_COLORS = [
+  { name: 'accent', value: colors.accent, note: 'focus, link, live state' },
+  { name: 'onAccent', value: colors.onAccent, note: 'content on accent' },
+  { name: 'destructive', value: colors.destructive, note: 'destructive fill, invalid ring' },
+  { name: 'onDestructive', value: colors.onDestructive, note: 'content on destructive' },
+  { name: 'success', value: colors.success, note: 'an outcome that worked' },
+  { name: 'warning', value: colors.warning, note: 'one that still may not' },
+];
+
+const GRAYS = [
+  { name: 'gray', value: colors.gray },
+  { name: 'gray2', value: colors.gray2 },
+  { name: 'gray3', value: colors.gray3 },
+  { name: 'gray4', value: colors.gray4 },
+  { name: 'gray5', value: colors.gray5 },
+  { name: 'gray6', value: colors.gray6 },
+];
+
+const RUNGS = [
+  { name: 'well', style: styles.well, use: 'input, track, selected item' },
+  { name: 'page', style: styles.page, use: 'app ground' },
+  { name: 'region', style: styles.region, use: 'sidebar, footer band' },
+  { name: 'card', style: styles.card, use: 'card, panel, composer' },
+  { name: 'floating', style: styles.floating, use: 'menu, popover, select list' },
+  { name: 'modal', style: styles.modal, use: 'dialog, alert dialog, drawer' },
+];
+
+const SHADOWS = [
+  {
+    name: 'shadow.inset',
+    box: shadow.inset,
+    fill: colors.wellBackground,
+    ink: false,
+    note: 'fields and tracks: a shallow recess',
+  },
+  {
+    name: 'shadow.raised',
+    box: shadow.raised,
+    fill: colors.raisedBackground,
+    ink: false,
+    note: 'pressable: a hairline, a contact shadow and a short lift',
+    sheen: sheen.raised,
+  },
+  {
+    name: 'shadow.inkEdge',
+    box: shadow.inkEdge,
+    fill: colors.label,
+    ink: true,
+    note: 'top highlight and contact shadow on ink fills',
+    sheen: sheen.ink,
+  },
+  {
+    name: 'shadow.card',
+    box: shadow.card,
+    fill: colors.elevatedBackground,
+    ink: false,
+    note: 'cards',
+  },
+  {
+    name: 'shadow.medium',
+    box: shadow.medium,
+    fill: colors.elevatedBackground,
+    ink: false,
+    note: 'tooltip',
+  },
+  {
+    name: 'shadow.popover',
+    box: shadow.popover,
+    fill: colors.raisedBackground,
+    ink: false,
+    note: 'menus and popovers',
+  },
+  {
+    name: 'shadow.large',
+    box: shadow.large,
+    fill: colors.elevatedBackground,
+    ink: false,
+    note: 'dialogs and drawers',
+  },
+];
+
+/** The fall-off of the light over a raised fill, laid over it as an image. */
+const SHEENS = [
+  {
+    name: 'sheen.raised',
+    box: shadow.raised,
+    fill: colors.raisedBackground,
+    ink: false,
+    note: 'a raised fill, a few percent darker at its foot',
+    sheen: sheen.raised,
+  },
+  {
+    name: 'sheen.ink',
+    box: shadow.inkEdge,
+    fill: colors.label,
+    ink: true,
+    note: 'an ink or tone fill, brighter at its top',
+    sheen: sheen.ink,
+  },
+];
+
+const RADII = [
+  { name: 'radius.mini', value: radius.mini, shape: corner.shape, note: '16px things' },
+  {
+    name: 'radius.small',
+    value: radius.small,
+    shape: corner.shape,
+    note: '28px controls, tooltips',
+  },
+  {
+    name: 'radius.medium',
+    value: radius.medium,
+    shape: corner.shape,
+    note: '32 and 36px controls',
+  },
+  { name: 'radius.large', value: radius.large, shape: corner.shape, note: 'surfaces' },
+  // A squircle at this radius is a rounded rectangle, so a pill takes the round
+  // shape and the board shows the two side by side rather than claiming one.
+  {
+    name: 'radius.full',
+    value: radius.full,
+    shape: corner.round,
+    note: 'pills; the one round shape',
+  },
+];
+
+const CONTROL_SIZES = [
+  { name: 'control.small', value: control.small, size: 'small' as const },
+  { name: 'control.medium', value: control.medium, size: 'medium' as const },
+  { name: 'control.large', value: control.large, size: 'large' as const },
+];
+
+const TYPE_SCALE = [
+  { name: 'caption', size: text.captionSize, leading: text.captionLeading, note: 'measured value' },
+  { name: 'footnote', size: text.footnoteSize, leading: text.footnoteLeading, note: 'field label' },
+  {
+    name: 'subheadline',
+    size: text.subheadlineSize,
+    leading: text.subheadlineLeading,
+    note: 'controls, weight 500',
+  },
+  { name: 'body', size: text.bodySize, leading: text.bodyLeading, note: 'prose' },
+  {
+    name: 'headline',
+    size: text.headlineSize,
+    leading: text.headlineLeading,
+    note: 'dialog title',
+  },
+  { name: 'title', size: text.titleSize, leading: text.titleLeading, note: 'a full page' },
+];
+
+const SPACES = [
+  { name: 'space.1', value: space[1] },
+  { name: 'space.1.5', value: space[1.5] },
+  { name: 'space.2', value: space[2] },
+  { name: 'space.3', value: space[3] },
+  { name: 'space.4', value: space[4] },
+  { name: 'space.6', value: space[6] },
+  { name: 'space.8', value: space[8] },
+];
+
+const CONSTS = [
+  { name: 'corner.shape', value: corner.shape },
+  { name: 'ease.standard', value: ease.standard },
+  { name: 'z.dialogBackdrop', value: z.dialogBackdrop },
+  { name: 'z.dialog', value: z.dialog },
+  { name: 'z.popover', value: z.popover },
+  { name: 'z.tooltip', value: z.tooltip },
+  { name: 'z.toast', value: z.toast },
+];
+
+const FIELD_COLORS = [
+  { name: 'field.background', value: field.background, note: 'the control is a well' },
+  { name: 'field.value', value: field.value, note: 'what the person typed' },
+  { name: 'field.label', value: field.label, note: 'the field label' },
+  { name: 'field.placeholder', value: field.placeholder, note: 'the empty prompt' },
+  { name: 'field.hint', value: field.hint, note: 'help under the control' },
+  { name: 'field.icon', value: field.icon, note: 'the chevron on a trigger' },
+  { name: 'field.error', value: field.error, note: 'the error message' },
+  { name: 'field.ring', value: field.ring, note: 'focus' },
+  { name: 'field.invalidRing', value: field.invalidRing, note: 'invalid' },
+];
+
+const POPUP_COLORS = [
+  { name: 'popup.background', value: popup.background, note: 'the floating rung' },
+  { name: 'popup.label', value: popup.label, note: 'a row' },
+  { name: 'popup.indicator', value: popup.indicator, note: 'the tick on the current row' },
+  { name: 'popup.highlight', value: popup.highlight, note: 'where the keyboard or pointer is' },
+  { name: 'popup.selected', value: popup.selected, note: 'the row that holds the value' },
+  { name: 'popup.groupLabel', value: popup.groupLabel, note: 'a group heading' },
+  { name: 'popup.separator', value: popup.separator, note: 'between groups' },
+  { name: 'popup.hint', value: popup.hint, note: 'no matches, scroll arrows, a row icon' },
+  { name: 'popup.destructive', value: popup.destructive, note: 'a command that destroys' },
+  {
+    name: 'popup.destructiveHighlight',
+    value: popup.destructiveHighlight,
+    note: 'the keyboard on one',
+  },
+];
+
+const DIALOG_COLORS = [
+  { name: 'dialog.background', value: dialogTokens.background, note: 'the modal rung' },
+  { name: 'dialog.title', value: dialogTokens.title, note: 'the heading, and the panel text' },
+  { name: 'dialog.description', value: dialogTokens.description, note: 'the sentence under it' },
+];
+
+const TOOLTIP_COLORS = [
+  { name: 'tooltip.background', value: tooltipTokens.background, note: 'inverted: the label ink' },
+  { name: 'tooltip.label', value: tooltipTokens.label, note: 'the page background, as ink' },
+];
+
+const DRAWER_SIDES: DrawerSide[] = ['top', 'end', 'bottom', 'start'];
+
+const STRIP_COLORS = [
+  {
+    name: 'disclosure.trackBackground',
+    value: disclosureTokens.trackBackground,
+    note: 'the flat tray the strip is',
+  },
+  {
+    name: 'disclosure.indicator',
+    value: disclosureTokens.indicator,
+    note: 'the one tab standing on it',
+  },
+  { name: 'disclosure.tabLabel', value: disclosureTokens.tabLabel, note: 'a tab you are not on' },
+  {
+    name: 'disclosure.tabActiveLabel',
+    value: disclosureTokens.tabActiveLabel,
+    note: 'the one you are, and every hover',
+  },
+  { name: 'disclosure.ring', value: disclosureTokens.ring, note: 'where the keyboard is' },
+];
+
+const STACK_COLORS = [
+  { name: 'disclosure.label', value: disclosureTokens.label, note: "a row's own text" },
+  {
+    name: 'disclosure.chevron',
+    value: disclosureTokens.chevron,
+    note: 'the hint that there is more under it',
+  },
+  {
+    name: 'disclosure.separator',
+    value: disclosureTokens.separator,
+    note: 'the line to the next row, and nothing else',
+  },
+];
+
+const FEEDBACK_TONES: FeedbackTone[] = ['neutral', 'success', 'warning', 'danger'];
+
+const MESSAGE_COLORS = [
+  {
+    name: 'feedback.noticeBackground',
+    value: feedbackTokens.noticeBackground,
+    note: 'an Alert: the card rung',
+  },
+  {
+    name: 'feedback.toastBackground',
+    value: feedbackTokens.toastBackground,
+    note: 'a Toast: the floating rung',
+  },
+  { name: 'feedback.title', value: feedbackTokens.title, note: 'what the message is' },
+  {
+    name: 'feedback.description',
+    value: feedbackTokens.description,
+    note: 'the sentence under it',
+  },
+  { name: 'feedback.mark', value: feedbackTokens.mark, note: 'a neutral mark' },
+  { name: 'feedback.success', value: feedbackTokens.success, note: 'it worked' },
+  { name: 'feedback.warning', value: feedbackTokens.warning, note: 'it still may not' },
+  { name: 'feedback.danger', value: feedbackTokens.danger, note: 'it did not' },
+];
+
+const WAIT_COLORS = [
+  {
+    name: 'feedback.trackBackground',
+    value: feedbackTokens.trackBackground,
+    note: 'the well a bar runs in',
+  },
+  {
+    name: 'feedback.indicator',
+    value: feedbackTokens.indicator,
+    note: 'accent: the one live thing',
+  },
+  {
+    name: 'feedback.skeleton',
+    value: feedbackTokens.skeleton,
+    note: 'a gray, because it has no role yet',
+  },
+];
+
+const CARD_COLORS = [
+  {
+    name: 'card.background',
+    value: cardTokens.background,
+    note: 'the card rung, and no border',
+  },
+  {
+    name: 'card.hover',
+    value: cardTokens.hover,
+    note: 'a card a person can press, under the pointer',
+  },
+  { name: 'card.title', value: cardTokens.title, note: 'what the card is about' },
+  {
+    name: 'card.description',
+    value: cardTokens.description,
+    note: 'the sentence under it',
+  },
+];
+
+const BADGE_TONES: BadgeTone[] = ['neutral', 'running', 'success', 'warning', 'danger'];
+
+const BADGE_COLORS = [
+  { name: 'badge.label', value: badgeTokens.label, note: 'the neutral word, and the ink' },
+  {
+    name: 'badge.runningLabel',
+    value: badgeTokens.runningLabel,
+    note: 'the tone, halfway to the ink',
+  },
+  {
+    name: 'badge.successLabel',
+    value: badgeTokens.successLabel,
+    note: 'it worked, in its own hue',
+  },
+  {
+    name: 'badge.warningLabel',
+    value: badgeTokens.warningLabel,
+    note: 'the one the rules warn of',
+  },
+  { name: 'badge.dangerLabel', value: badgeTokens.dangerLabel, note: 'it did not, in its own hue' },
+  {
+    name: 'badge.neutralFill',
+    value: badgeTokens.neutralFill,
+    note: 'a film of label, not a rung',
+  },
+  { name: 'badge.runningFill', value: badgeTokens.runningFill, note: 'it is happening now' },
+  { name: 'badge.successFill', value: badgeTokens.successFill, note: 'it worked' },
+  { name: 'badge.warningFill', value: badgeTokens.warningFill, note: 'it still may not' },
+  { name: 'badge.dangerFill', value: badgeTokens.dangerFill, note: 'it did not' },
+];
+
+/**
+ * Where the board puts the same four badges. A badge is on no rung of the
+ * ladder — it sits on whatever holds it — so its fill is a film of the tone
+ * rather than a colour, and this is the row where that either holds on three
+ * different surfaces or does not.
+ */
+const BADGE_RUNGS = [
+  { name: 'on a page', style: styles.page, use: 'a row of a list, a settings line' },
+  { name: 'on a card', style: styles.card, use: 'the rung a Card is on' },
+  { name: 'on a menu', style: styles.floating, use: 'inside a popup, where named fills collapse' },
+];
+
+/**
+ * The rungs an avatar comes in, and what each one is for. The step inside the
+ * box follows from the box, which is the whole point of the ladder: the deleted
+ * implementation had one size and every call site restated both.
+ */
+const AVATAR_SIZES: { name: string; size: AvatarSize; use: string }[] = [
+  {
+    name: 'mini \u00b7 16',
+    size: 'mini',
+    use: 'in a line of text, where an icon would be: a picture or a mark first',
+  },
+  { name: 'small \u00b7 20', size: 'small', use: 'a sidebar row, a compact list' },
+  { name: 'medium \u00b7 24', size: 'medium', use: 'a list of people; the default' },
+  { name: 'large \u00b7 32', size: 'large', use: 'an account row, the avatar editor' },
+  { name: 'xlarge \u00b7 64', size: 'xlarge', use: 'the screen is about this person' },
+];
+
+const AVATAR_COLORS = [
+  {
+    name: 'avatar.fallbackBackground',
+    value: avatarTokens.fallbackBackground,
+    note: 'a gray: a stand-in for a face has no role',
+  },
+  {
+    name: 'avatar.fallbackLabel',
+    value: avatarTokens.fallbackLabel,
+    note: 'label: the letters are the person',
+  },
+];
+
+const KBD_COLORS = [
+  { name: 'kbd.background', value: kbdTokens.background, note: 'a gray: it is hardware' },
+  { name: 'kbd.label', value: kbdTokens.label, note: 'metadata about the command' },
+];
+
+/**
+ * A face the board can actually load. A remote avatar would leave the image row
+ * showing its fallback on a machine with no network, which is the one thing
+ * this row exists to tell apart.
+ */
+const SAMPLE_FACE =
+  'data:image/svg+xml;utf8,' +
+  encodeURIComponent(
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">' +
+      '<rect width="64" height="64" fill="hsl(220 82% 65%)"/>' +
+      '<circle cx="32" cy="25" r="11" fill="hsl(0 0% 100%)"/>' +
+      '<path d="M8 64c0-14 11-22 24-22s24 8 24 22z" fill="hsl(0 0% 100%)"/>' +
+      '</svg>'
+  );
+
+const STRIP_SIZES: { name: string; size: TabsSize }[] = [
+  { name: 'small · 28', size: 'small' },
+  { name: 'medium · 32', size: 'medium' },
+  { name: 'large · 36', size: 'large' },
+];
+
+const SELECT_SIZES = [
+  { name: 'small · 28', size: 'small' as const },
+  { name: 'medium · 32', size: 'medium' as const },
+  { name: 'large · 36', size: 'large' as const },
+];
+
+const FRUIT = [
+  { value: 'gala', label: 'Gala' },
+  { value: 'fuji', label: 'Fuji' },
+  { value: 'pink', label: 'Pink Lady' },
+];
+
+const LANGUAGES = ['TypeScript', 'Rust', 'Python', 'Ruby'];
+
+const TABLE_SIZES: { name: string; size: TableSize }[] = [
+  { name: 'small · 28', size: 'small' },
+  { name: 'medium · 32', size: 'medium' },
+  { name: 'large · 36', size: 'large' },
+];
+
+const TABLE_COLORS = [
+  { name: 'table.value', value: tableTokens.value, note: 'what is in a cell' },
+  { name: 'table.head', value: tableTokens.head, note: "a column's name: about the column" },
+  {
+    name: 'table.headActive',
+    value: tableTokens.headActive,
+    note: 'the one column it is sorted by',
+  },
+  {
+    name: 'table.line',
+    value: tableTokens.line,
+    note: 'separator: the one edge a list is given',
+  },
+  { name: 'table.hover', value: tableTokens.hover, note: 'where the pointer is, if it matters' },
+  { name: 'table.selected', value: tableTokens.selected, note: 'the row that holds the value' },
+  { name: 'table.caption', value: tableTokens.caption, note: 'what the table is, under it' },
+  { name: 'table.ring', value: tableTokens.ring, note: 'the keyboard, on a row or a name' },
+  {
+    name: 'table.headStickyBackground',
+    value: tableTokens.headStickyBackground,
+    note: 'a head that stays: the region rung',
+  },
+  { name: 'table.empty', value: tableTokens.empty, note: 'the row that says there is nothing' },
+];
+
+const PAGER_COLORS = [
+  {
+    name: 'table.pagerHint',
+    value: tableTokens.pagerHint,
+    note: 'the gap, and the count you are out of',
+  },
+];
+
+const CHOICE_COLORS = [
+  { name: 'field.checkedFill', value: field.checkedFill, note: 'a control that holds a value' },
+  { name: 'field.checkedMark', value: field.checkedMark, note: 'the tick and the dot on it' },
+  { name: 'field.thumb', value: field.thumb, note: 'the switch thumb, on both tracks' },
+];
+
+const FIELD_SIZES = [
+  { name: 'small · 28', size: 'small' as const },
+  { name: 'medium · 32', size: 'medium' as const },
+  { name: 'large · 36', size: 'large' as const },
+];
+
+const BUTTON_VARIANTS = ['primary', 'secondary', 'ghost', 'destructive', 'link'] as const;
+const BUTTON_SIZES = ['mini', 'small', 'medium', 'large'] as const;
+
+/** A stand-in for a caller's glyph on a row that removes something. */
+function CrossGlyph() {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      aria-hidden="true"
+    >
+      <path d="M4.5 4.5l7 7M11.5 4.5l-7 7" />
+    </svg>
+  );
+}
+
+/** The board's own mark, sized by the box the icon button gives it. */
+function PlusGlyph() {
+  return (
+    <svg
+      width="100%"
+      height="100%"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      aria-hidden="true"
+    >
+      <path d="M8 3.5v9M3.5 8h9" />
+    </svg>
+  );
+}
+
+/**
+ * What a surface puts in an Input's leading slot when the slot is pressable: it
+ * fills the square, draws no edge — the well rings on `:focus-within` — and
+ * answers the pointer with a fill mixed toward the ink.
+ */
+function LeadingEmoji() {
+  return (
+    <button type="button" aria-label="Emoji" {...stylex.props(styles.leadingEmoji)}>
+      <span aria-hidden="true">🔍</span>
+    </button>
+  );
+}
+
+function ShadowChip({
+  name,
+  box,
+  fill,
+  ink,
+  note,
+  sheen: image,
+}: {
+  name: string;
+  box: string;
+  fill: string;
+  ink: boolean;
+  note: string;
+  sheen?: string;
+}) {
+  const { ref, value } = useMeasured<HTMLDivElement>('box-shadow');
+  return (
+    <Sample name={name} note={note} measured={value}>
+      <div
+        ref={ref}
+        {...stylex.props(
+          styles.shadowChip,
+          dyn.raised(fill, box),
+          ink && dyn.ink(fill, colors.background),
+          image != null && dyn.sheen(image)
+        )}
+      />
+    </Sample>
+  );
+}
+
+function RadiusChip({
+  name,
+  value,
+  shape,
+  note,
+}: {
+  name: string;
+  value: string;
+  shape: string;
+  note: string;
+}) {
+  const { ref, value: measured } = useMeasured<HTMLDivElement>('border-radius');
+  return (
+    <Sample name={name} note={note} measured={measured}>
+      <div ref={ref} {...stylex.props(styles.radiusChip, dyn.radius(value, shape))} />
+    </Sample>
+  );
+}
+
+function ControlRow({
+  name,
+  value,
+  size,
+}: {
+  name: string;
+  value: string;
+  size: 'small' | 'medium' | 'large';
+}) {
+  const { ref, value: measured } = useMeasured<HTMLDivElement>('height');
+  return (
+    <Row>
+      <LegendKey>{name}</LegendKey>
+      <div ref={ref} {...stylex.props(styles.controlBar, dyn.height(value))}>
+        {measured}
+      </div>
+      <Button size={size} variant="secondary">
+        Secondary
+      </Button>
+      <Button size={size} icon aria-label={`Add at ${size}`}>
+        <PlusGlyph />
+      </Button>
+    </Row>
+  );
+}
+
+function TypeRow({
+  name,
+  size,
+  leading,
+  note,
+}: {
+  name: string;
+  size: string;
+  leading: string;
+  note: string;
+}) {
+  const { ref, value } = useMeasured<HTMLParagraphElement>('font-size');
+  return (
+    <Row>
+      <LegendKey>
+        {name} · {note}
+      </LegendKey>
+      <p ref={ref} {...stylex.props(styles.typeSample, dyn.type(size, leading))}>
+        Ship the visual system {value ? `· ${value}` : ''}
+      </p>
+    </Row>
+  );
+}
+
+function SpaceRow({ name, value }: { name: string; value: string }) {
+  const { ref, value: measured } = useMeasured<HTMLDivElement>('width');
+  return (
+    <Row>
+      <LegendKey>{name}</LegendKey>
+      <div ref={ref} {...stylex.props(styles.spaceBar, dyn.width(value))} />
+      <span {...stylex.props(styles.rungUse)}>{measured}</span>
+    </Row>
+  );
+}
+
+function FieldRow({
+  legend,
+  readout,
+  children,
+}: {
+  legend: string;
+  readout?: string;
+  children: ReactNode;
+}) {
+  return (
+    <Row>
+      <LegendKey>{legend}</LegendKey>
+      <div {...stylex.props(styles.fieldSlot)}>
+        {children}
+        {readout ? <span {...stylex.props(styles.readout)}>{readout}</span> : null}
+      </div>
+    </Row>
+  );
+}
+
+function FieldSizeRow({ name, size }: { name: string; size: 'small' | 'medium' | 'large' }) {
+  const { ref, value } = useMeasured<HTMLInputElement>('height');
+  return (
+    <FieldRow legend={name} readout={value}>
+      <Field.Root>
+        <Field.Label>Session title</Field.Label>
+        <Input ref={ref} size={size} placeholder="Describe the task" />
+      </Field.Root>
+    </FieldRow>
+  );
+}
+
+function InvalidFieldRow() {
+  const { ref, value } = useMeasured<HTMLInputElement>('box-shadow');
+  return (
+    <FieldRow legend="invalid" readout={value}>
+      <Field.Root invalid>
+        <Field.Label>Session title</Field.Label>
+        <Input ref={ref} placeholder="Describe the task" />
+        <Field.Error match>Enter a title before starting the session.</Field.Error>
+      </Field.Root>
+    </FieldRow>
+  );
+}
+
+const NUMBER_SIZES: { name: string; size: NumberFieldSize }[] = [
+  { name: 'small \u00b7 28', size: 'small' },
+  { name: 'large \u00b7 36', size: 'large' },
+];
+
+const PASSWORD_SIZES: { name: string; size: PasswordInputSize }[] = [
+  { name: 'password \u00b7 small \u00b7 28', size: 'small' },
+  { name: 'password \u00b7 large \u00b7 36', size: 'large' },
+];
+
+/** The number, with the steppers a person nudges it with. */
+function NumberStepperRow({ name, size }: { name: string; size: NumberFieldSize }) {
+  const { ref, value } = useMeasured<HTMLDivElement>('height');
+  return (
+    <FieldRow legend={name} readout={value}>
+      <Field.Root>
+        <Field.Label>Conversation font size</Field.Label>
+        <NumberField.Root defaultValue={14} min={8} max={32}>
+          <NumberField.Group ref={ref} size={size}>
+            <NumberField.Input />
+            <NumberField.Decrement />
+            <NumberField.Increment />
+          </NumberField.Group>
+        </NumberField.Root>
+      </Field.Root>
+    </FieldRow>
+  );
+}
+
+/**
+ * The same number with nothing beside it. A value somebody types once — a
+ * budget, a threshold — does not need a control for nudging it, and the input
+ * is then the whole well, the same one an `Input` is.
+ */
+function NumberBareRow() {
+  const { ref, value } = useMeasured<HTMLInputElement>('box-shadow');
+  return (
+    <FieldRow legend="bare" readout={value}>
+      <Field.Root>
+        <Field.Label>Review rounds</Field.Label>
+        <NumberField.Root defaultValue={3} min={1} max={20}>
+          <NumberField.Input ref={ref} />
+        </NumberField.Root>
+        <Field.Description>The reviewer hands work back this many times.</Field.Description>
+      </Field.Root>
+    </FieldRow>
+  );
+}
+
+/** The ring is the group's, because the group is the well. */
+function NumberInvalidRow() {
+  const { ref, value } = useMeasured<HTMLDivElement>('box-shadow');
+  return (
+    <FieldRow legend="invalid" readout={value}>
+      <Field.Root invalid>
+        <Field.Label>Conversation font size</Field.Label>
+        <NumberField.Root defaultValue={64} min={8} max={32}>
+          <NumberField.Group ref={ref}>
+            <NumberField.Input />
+            <NumberField.Decrement />
+            <NumberField.Increment />
+          </NumberField.Group>
+        </NumberField.Root>
+        <Field.Error match>Pick a size between 8 and 32.</Field.Error>
+      </Field.Root>
+    </FieldRow>
+  );
+}
+
+/**
+ * The password, and the control that reveals it. The eye is live on the board:
+ * whether a secret is showing is the control's own state, so the revealed row
+ * is one press away rather than a second sample.
+ */
+function PasswordRow({ legend, children }: { legend: string; children: ReactNode }) {
+  return (
+    <FieldRow legend={legend}>
+      <Field.Root>{children}</Field.Root>
+    </FieldRow>
+  );
+}
+
+/**
+ * The well around a control whose own ref points at the value inside it: a
+ * `PasswordInput` forwards its ref to the input, because that is the thing a
+ * surface focuses, and the shell is what the size ladder is read off.
+ */
+function useMeasuredShell(property: string) {
+  const ref = useRef<HTMLInputElement>(null);
+  const [value, setValue] = useState('');
+  useEffect(() => {
+    const shell = ref.current?.parentElement;
+    if (!shell) return;
+    setValue(window.getComputedStyle(shell).getPropertyValue(property).trim());
+  }, [property]);
+  return { ref, value };
+}
+
+function PasswordSizeRow({ name, size }: { name: string; size: PasswordInputSize }) {
+  const { ref, value } = useMeasuredShell('height');
+  return (
+    <FieldRow legend={name} readout={value}>
+      <Field.Root>
+        <Field.Label>Password</Field.Label>
+        <PasswordInput ref={ref} size={size} defaultValue="hunter2" />
+      </Field.Root>
+    </FieldRow>
+  );
+}
+
+/** A choice control with the label it belongs to, the way a surface writes it. */
+function ChoiceRow({
+  legend,
+  readout,
+  children,
+}: {
+  legend: string;
+  readout?: string;
+  children: ReactNode;
+}) {
+  return (
+    <Row>
+      <LegendKey>{legend}</LegendKey>
+      <Cluster>{children}</Cluster>
+      {readout ? <span {...stylex.props(styles.readout)}>{readout}</span> : null}
+    </Row>
+  );
+}
+
+function CheckedInkRow() {
+  const { ref, value } = useMeasured<HTMLButtonElement>('box-shadow');
+  return (
+    <ChoiceRow legend={'checked \u00b7 ink edge'} readout={value}>
+      <Field.Label>
+        <Checkbox ref={ref} defaultChecked />
+        Include diffs
+      </Field.Label>
+    </ChoiceRow>
+  );
+}
+
+function SwitchTrackRow() {
+  const { ref, value } = useMeasured<HTMLButtonElement>('width');
+  return (
+    <ChoiceRow legend="switch" readout={value}>
+      <Field.Label>
+        <Switch ref={ref} />
+        Auto review
+      </Field.Label>
+      <Field.Label>
+        <Switch defaultChecked />
+        Auto review
+      </Field.Label>
+    </ChoiceRow>
+  );
+}
+
+/**
+ * A Select, the way a surface writes one. Every state below is the real
+ * control; only the open list is a stand-in, because a board cannot show a
+ * popup without covering what is under it.
+ */
+function FruitSelect({
+  size = 'medium',
+  triggerRef,
+  ...rest
+}: {
+  size?: 'small' | 'medium' | 'large';
+  triggerRef?: Ref<HTMLButtonElement>;
+} & ComponentProps<typeof Select.Root<string>>) {
+  return (
+    <Select.Root items={FRUIT} {...rest}>
+      <Select.Trigger ref={triggerRef} size={size}>
+        <Select.Value placeholder="Pick a fruit" />
+      </Select.Trigger>
+      <Select.Content>
+        {FRUIT.map((item) => (
+          <Select.Item key={item.value} value={item.value}>
+            {item.label}
+          </Select.Item>
+        ))}
+      </Select.Content>
+    </Select.Root>
+  );
+}
+
+function SelectSizeRow({ name, size }: { name: string; size: 'small' | 'medium' | 'large' }) {
+  const { ref, value } = useMeasured<HTMLButtonElement>('height');
+  return (
+    <FieldRow legend={name} readout={value}>
+      <Field.Root>
+        <Field.Label>Fruit</Field.Label>
+        <FruitSelect triggerRef={ref} size={size} />
+      </Field.Root>
+    </FieldRow>
+  );
+}
+
+/** One row of the stand-in list, in whichever state the board is showing. */
+function ReplicaRow({
+  label,
+  selected,
+  highlighted,
+  disabled,
+  ticked,
+  rowRef,
+  tickRef,
+}: {
+  label: string;
+  selected?: boolean;
+  highlighted?: boolean;
+  disabled?: boolean;
+  ticked?: boolean;
+  rowRef?: Ref<HTMLDivElement>;
+  tickRef?: RefObject<HTMLSpanElement | null>;
+}) {
+  return (
+    <div
+      ref={rowRef}
+      {...stylex.props(
+        surface.item,
+        styles.replicaRow,
+        selected && surface.itemSelected,
+        highlighted && surface.itemHighlighted,
+        disabled && surface.itemDisabled
+      )}
+    >
+      <span {...stylex.props(surface.itemText)}>{label}</span>
+      <span ref={tickRef} {...stylex.props(surface.indicator)}>
+        {ticked ? (
+          <span {...stylex.props(surface.indicatorGlyph)}>
+            <TickGlyph />
+          </span>
+        ) : null}
+      </span>
+    </div>
+  );
+}
+
+/**
+ * The list every Select and Combobox opens, drawn from `popup/surface.ts` on a
+ * stand-in so all four row states can be read at once, with the metrics that
+ * shape it taken off the rendered parts rather than written down beside them.
+ */
+function PopupReplica() {
+  const surfaceShadow = useMeasured<HTMLDivElement>('box-shadow');
+  const surfaceRadius = useMeasured<HTMLDivElement>('border-radius');
+  const surfaceInset = useMeasured<HTMLDivElement>('padding-top');
+  const surfaceText = useMeasured<HTMLDivElement>('font-size');
+  const rowHeight = useMeasured<HTMLDivElement>('min-height');
+  const rowRadius = useMeasured<HTMLDivElement>('border-radius');
+  const rowPadding = useMeasured<HTMLDivElement>('padding-left');
+  const rowGap = useMeasured<HTMLDivElement>('column-gap');
+  const tickSize = useMeasured<HTMLSpanElement>('width');
+  const headingSize = useMeasured<HTMLDivElement>('font-size');
+  const headingLeading = useMeasured<HTMLDivElement>('line-height');
+  const arrowHeight = useMeasured<HTMLDivElement>('height');
+  const rise = useMeasured<HTMLDivElement>('transform');
+
+  const metrics = [
+    { name: 'popup.shadow', value: surfaceShadow.value },
+    { name: 'popup.radius', value: surfaceRadius.value },
+    { name: 'popup.inset', value: surfaceInset.value },
+    { name: 'popup.text', value: surfaceText.value },
+    { name: 'popup.itemHeight', value: rowHeight.value },
+    { name: 'popup.itemRadius', value: rowRadius.value },
+    { name: 'popup.itemPaddingX', value: rowPadding.value },
+    { name: 'popup.itemGap', value: rowGap.value },
+    { name: 'popup.indicatorSize', value: tickSize.value },
+    { name: 'popup.groupLabelSize', value: headingSize.value },
+    { name: 'popup.groupLabelLeading', value: headingLeading.value },
+    { name: 'popup.scrollArrowHeight', value: arrowHeight.value },
+    { name: 'popup.rise', value: rise.value },
+  ];
+
+  return (
+    <Row>
+      <LegendKey>{'list \u00b7 stand-in'}</LegendKey>
+      <div
+        ref={(node) => {
+          surfaceShadow.ref.current = node;
+          surfaceRadius.ref.current = node;
+          surfaceInset.ref.current = node;
+          surfaceText.ref.current = node;
+        }}
+        {...stylex.props(surface.popup, styles.popupReplica)}
+      >
+        <div
+          ref={(node) => {
+            headingSize.ref.current = node;
+            headingLeading.ref.current = node;
+          }}
+          {...stylex.props(surface.groupLabel)}
+        >
+          Apples
+        </div>
+        <div {...stylex.props(surface.list, styles.popupList)}>
+          <ReplicaRow
+            label="Gala"
+            selected
+            ticked
+            rowRef={(node) => {
+              rowHeight.ref.current = node;
+              rowRadius.ref.current = node;
+              rowPadding.ref.current = node;
+              rowGap.ref.current = node;
+            }}
+            tickRef={tickSize.ref}
+          />
+          <ReplicaRow label="Fuji" highlighted />
+          <ReplicaRow label="Pink Lady" />
+          <ReplicaRow label="Sold out" disabled />
+        </div>
+        <div {...stylex.props(surface.separator)} />
+        <div {...stylex.props(surface.empty)}>No fruit matches.</div>
+        <div ref={arrowHeight.ref} {...stylex.props(surface.scrollArrow)}>
+          <span {...stylex.props(styles.scrollArrowGlyph)}>
+            <ChevronDownGlyph />
+          </span>
+        </div>
+      </div>
+      {/*
+        A popup starts and ends 4px below at opacity 0. StyleX cannot express
+        `[data-starting-style]`, so the primitives read Base UI's transition
+        status in JS and apply this class; the board applies the same class here
+        and reports what it resolves to as `popup.rise`.
+      */}
+      <div
+        ref={rise.ref}
+        aria-hidden="true"
+        {...stylex.props(surface.popup, styles.popupReplica, styles.riseProbe, surface.popupHidden)}
+      />
+      <div {...stylex.props(styles.replicaCaption)}>
+        <span {...stylex.props(styles.rungUse)}>
+          Every row state at once, from the rules the real list applies. Open a trigger above and
+          the list that appears is this one, in this palette.
+        </span>
+        <dl {...stylex.props(styles.constList)}>
+          {metrics.map((entry) => (
+            <div key={entry.name} {...stylex.props(styles.constRow)}>
+              <dt {...stylex.props(styles.constName)}>{entry.name}</dt>
+              <dd {...stylex.props(styles.constValue)}>{entry.value}</dd>
+            </div>
+          ))}
+        </dl>
+      </div>
+    </Row>
+  );
+}
+
+/** A Combobox with the chevron beside its input, the shape a picker takes. */
+function LanguageCombobox({
+  children,
+  search,
+  ...rest
+}: ComponentProps<typeof Combobox.Root<string>> & { search?: ReactNode }) {
+  return (
+    <Combobox.Root items={LANGUAGES} {...rest}>
+      {children}
+      <Combobox.Content
+        search={search}
+        empty={<Combobox.Empty>No language matches.</Combobox.Empty>}
+      >
+        {(item: string) => (
+          <Combobox.Item key={item} value={item}>
+            {item}
+          </Combobox.Item>
+        )}
+      </Combobox.Content>
+    </Combobox.Root>
+  );
+}
+
+/** One row of the stand-in menu, in whichever state the board is showing. */
+function MenuReplicaRow({
+  label,
+  icon,
+  inset,
+  shortcut,
+  leading,
+  trailing,
+  tone,
+  highlighted,
+  open,
+  disabled,
+  rowRef,
+}: {
+  label: string;
+  icon?: ReactNode;
+  inset?: boolean;
+  shortcut?: string;
+  leading?: ReactNode;
+  trailing?: ReactNode;
+  tone?: 'destructive';
+  highlighted?: boolean;
+  open?: boolean;
+  disabled?: boolean;
+  rowRef?: Ref<HTMLDivElement>;
+}) {
+  const destructive = tone === 'destructive';
+  return (
+    <div
+      ref={rowRef}
+      {...stylex.props(
+        surface.item,
+        destructive && surface.itemDestructive,
+        open && surface.itemOpen,
+        highlighted && surface.itemHighlighted,
+        highlighted && destructive && surface.itemDestructiveHighlighted,
+        disabled && surface.itemDisabled
+      )}
+    >
+      {leading}
+      {icon ? (
+        <span {...stylex.props(surface.itemIcon, destructive && surface.itemIconInherit)}>
+          {icon}
+        </span>
+      ) : null}
+      {inset ? <span aria-hidden="true" {...stylex.props(surface.itemIcon)} /> : null}
+      <span {...stylex.props(surface.itemText)}>{label}</span>
+      {shortcut ? <span {...stylex.props(surface.itemShortcut)}>{shortcut}</span> : null}
+      {trailing}
+    </div>
+  );
+}
+
+/**
+ * The menu surface, drawn from `popup/surface.ts` on a stand-in so every row
+ * state can be read at once, with the metrics that shape it taken off the
+ * rendered parts rather than written down beside them. The real menus above it
+ * open over whatever is under them, which a board cannot hold still.
+ */
+function MenuReplica() {
+  const menuWidth = useMeasured<HTMLDivElement>('min-width');
+  const shortcutSize = useMeasured<HTMLSpanElement>('font-size');
+  const iconBox = useMeasured<HTMLSpanElement>('width');
+
+  const metrics = [
+    { name: 'popup.menuWidth', value: menuWidth.value },
+    { name: 'the row icon box', value: iconBox.value },
+    { name: 'a shortcut', value: shortcutSize.value },
+  ];
+
+  return (
+    <Row>
+      <LegendKey>{'menu \u00b7 stand-in'}</LegendKey>
+      <div
+        ref={menuWidth.ref}
+        {...stylex.props(surface.popup, surface.popupMenu, styles.menuReplica)}
+      >
+        <div {...stylex.props(surface.groupLabel)}>Session</div>
+        <MenuReplicaRow label="New task" icon={<PlusGlyph />} shortcut={'\u2318N'} />
+        <MenuReplicaRow
+          label="Rename"
+          inset
+          trailing={
+            <span ref={shortcutSize.ref} {...stylex.props(surface.itemShortcut)}>
+              {'\u2318\u21a9'}
+            </span>
+          }
+          highlighted
+        />
+        <MenuReplicaRow
+          label="Copy link"
+          leading={
+            <span ref={iconBox.ref} {...stylex.props(surface.indicator)}>
+              <span {...stylex.props(surface.indicatorGlyph)}>
+                <TickGlyph />
+              </span>
+            </span>
+          }
+        />
+        <MenuReplicaRow
+          label="Sort by name"
+          leading={
+            <span {...stylex.props(surface.indicator)}>
+              <span {...stylex.props(surface.indicatorGlyph)}>
+                <DotGlyph />
+              </span>
+            </span>
+          }
+        />
+        <MenuReplicaRow
+          label="Export"
+          inset
+          open
+          trailing={
+            <span {...stylex.props(surface.itemIcon, surface.itemSubmenuGlyph)}>
+              <ChevronRightGlyph />
+            </span>
+          }
+        />
+        <div {...stylex.props(surface.separator)} />
+        <MenuReplicaRow label="Delete" icon={<CrossGlyph />} tone="destructive" />
+        <MenuReplicaRow label="Delete" icon={<CrossGlyph />} tone="destructive" highlighted />
+        <MenuReplicaRow label="Archive" inset disabled />
+      </div>
+      <div {...stylex.props(styles.replicaCaption)}>
+        <span {...stylex.props(styles.rungUse)}>
+          Every row state at once: an icon row, the highlight, a tick, a dot, the row holding an
+          open submenu, a destructive command at rest and under the keyboard, and a disabled one.
+        </span>
+        <dl {...stylex.props(styles.constList)}>
+          {metrics.map((entry) => (
+            <div key={entry.name} {...stylex.props(styles.constRow)}>
+              <dt {...stylex.props(styles.constName)}>{entry.name}</dt>
+              <dd {...stylex.props(styles.constValue)}>{entry.value}</dd>
+            </div>
+          ))}
+        </dl>
+      </div>
+    </Row>
+  );
+}
+
+/** A menu a reader can actually open, written the way a surface writes one. */
+function SessionMenu() {
+  return (
+    <Menu.Root>
+      <Menu.Trigger render={<Button variant="secondary" />}>Session</Menu.Trigger>
+      <Menu.Content>
+        <Menu.Group>
+          <Menu.GroupLabel>Session</Menu.GroupLabel>
+          <Menu.Item icon={<PlusGlyph />} shortcut={'\u2318N'}>
+            New task
+          </Menu.Item>
+          <Menu.Item inset>Rename</Menu.Item>
+        </Menu.Group>
+        <Menu.CheckboxItem defaultChecked>Notify me when it finishes</Menu.CheckboxItem>
+        <Menu.RadioGroup defaultValue="recent">
+          <Menu.GroupLabel>Sort by</Menu.GroupLabel>
+          <Menu.RadioItem value="recent">Recent</Menu.RadioItem>
+          <Menu.RadioItem value="name">Name</Menu.RadioItem>
+        </Menu.RadioGroup>
+        <Menu.Submenu>
+          <Menu.SubmenuTrigger inset>Export</Menu.SubmenuTrigger>
+          <Menu.Content>
+            <Menu.Item>PDF</Menu.Item>
+            <Menu.Item>PNG</Menu.Item>
+          </Menu.Content>
+        </Menu.Submenu>
+        <Menu.Separator />
+        <Menu.Item inset disabled>
+          Archive
+        </Menu.Item>
+        <Menu.Item icon={<CrossGlyph />} tone="destructive">
+          Delete
+        </Menu.Item>
+      </Menu.Content>
+    </Menu.Root>
+  );
+}
+
+/**
+ * The popover surface, drawn from `popup/surface.ts` on a stand-in. The real
+ * popover above it opens over whatever is under it, which a board cannot hold
+ * still, so the two declarations a popover replaces on the shared surface —
+ * its padding and its gap — are read back off this one.
+ */
+function PopoverReplica() {
+  const padding = useMeasured<HTMLDivElement>('padding-top');
+  const gap = useMeasured<HTMLDivElement>('row-gap');
+  const titleSize = useMeasured<HTMLHeadingElement>('font-size');
+  const descriptionSize = useMeasured<HTMLParagraphElement>('font-size');
+
+  const metrics = [
+    { name: 'popup.panelPadding', value: padding.value },
+    { name: 'popup.panelGap', value: gap.value },
+    { name: 'the panel title', value: titleSize.value },
+    { name: 'popup.description', value: descriptionSize.value },
+  ];
+
+  return (
+    <Row>
+      <LegendKey>{'popover · stand-in'}</LegendKey>
+      <div
+        ref={(node) => {
+          padding.ref.current = node;
+          gap.ref.current = node;
+        }}
+        {...stylex.props(surface.popup, surface.popupPanel, styles.popoverReplica)}
+      >
+        <div {...stylex.props(surface.panelHeader)}>
+          <h3 ref={titleSize.ref} {...stylex.props(surface.panelTitle)}>
+            Filter sessions
+          </h3>
+          <p ref={descriptionSize.ref} {...stylex.props(surface.panelDescription)}>
+            Applies to the list under it.
+          </p>
+        </div>
+        <Field.Root>
+          <Field.Label>Name contains</Field.Label>
+          <Input size="small" placeholder="Search" />
+        </Field.Root>
+        <Cluster>
+          <Button size="small" variant="ghost">
+            Reset
+          </Button>
+          <Button size="small">Apply</Button>
+        </Cluster>
+      </div>
+      <div {...stylex.props(styles.replicaCaption)}>
+        <span {...stylex.props(styles.rungUse)}>
+          The same surface a Select list and a Menu open, holding content instead of rows. It
+          replaces five of a list&apos;s declarations: the width it takes from its control, the 4px
+          inset that lets a row reach the surface&apos;s edge, and the three that make its type a
+          control&apos;s rather than prose.
+        </span>
+        <dl {...stylex.props(styles.constList)}>
+          {metrics.map((entry) => (
+            <div key={entry.name} {...stylex.props(styles.constRow)}>
+              <dt {...stylex.props(styles.constName)}>{entry.name}</dt>
+              <dd {...stylex.props(styles.constValue)}>{entry.value}</dd>
+            </div>
+          ))}
+        </dl>
+      </div>
+    </Row>
+  );
+}
+
+/** A popover a reader can actually open, written the way a surface writes one. */
+function FilterPopover() {
+  return (
+    <Popover.Root>
+      <Popover.Trigger render={<Button variant="secondary" />}>Filter</Popover.Trigger>
+      <Popover.Content>
+        <Popover.Header>
+          <Popover.Title>Filter sessions</Popover.Title>
+          <Popover.Description>Applies to the list under it.</Popover.Description>
+        </Popover.Header>
+        <Field.Root>
+          <Field.Label>Name contains</Field.Label>
+          <Input size="small" placeholder="Search" />
+        </Field.Root>
+        <Cluster>
+          <Popover.Close render={<Button size="small" variant="ghost" />}>Reset</Popover.Close>
+          <Popover.Close render={<Button size="small" />}>Apply</Popover.Close>
+        </Cluster>
+      </Popover.Content>
+    </Popover.Root>
+  );
+}
+
+/**
+ * The modal panel, drawn from `dialog/surface.ts` on a stand-in: a dialog is
+ * portalled and unmounted while it is closed, and opening one would cover the
+ * board it is meant to be compared against.
+ *
+ * The stand-in keeps the padding, the radius, the gap and the type — what a
+ * reader is here to see — and drops what makes the panel own a window: the
+ * fixed position, the centring transform and the 512px width. Those are
+ * reported by probes below instead, by a bar as wide as the token, because a
+ * panel shrunk to fit a board can no longer state its own width.
+ */
+function DialogReplica() {
+  const padding = useMeasured<HTMLDivElement>('padding-top');
+  const gap = useMeasured<HTMLDivElement>('row-gap');
+  const panelRadius = useMeasured<HTMLDivElement>('border-radius');
+  const panelShadow = useMeasured<HTMLDivElement>('box-shadow');
+  const headerGap = useMeasured<HTMLDivElement>('row-gap');
+  const titleSize = useMeasured<HTMLHeadingElement>('font-size');
+  const titleLeading = useMeasured<HTMLHeadingElement>('line-height');
+  const descriptionSize = useMeasured<HTMLParagraphElement>('font-size');
+  const descriptionLeading = useMeasured<HTMLParagraphElement>('line-height');
+  const footerGap = useMeasured<HTMLDivElement>('column-gap');
+
+  const metrics = [
+    { name: 'dialog.shadow', value: panelShadow.value },
+    { name: 'dialog.radius', value: panelRadius.value },
+    { name: 'dialog.padding', value: padding.value },
+    { name: 'dialog.gap', value: gap.value },
+    { name: 'dialog.headerGap', value: headerGap.value },
+    { name: 'dialog.footerGap', value: footerGap.value },
+    { name: 'dialog.titleSize', value: titleSize.value },
+    { name: 'dialog.titleLeading', value: titleLeading.value },
+    { name: 'dialog.descriptionSize', value: descriptionSize.value },
+    { name: 'dialog.descriptionLeading', value: descriptionLeading.value },
+  ];
+
+  return (
+    <Row>
+      <LegendKey>{'dialog · stand-in'}</LegendKey>
+      <div {...stylex.props(styles.modalStage)}>
+        <div
+          ref={(node) => {
+            padding.ref.current = node;
+            gap.ref.current = node;
+            panelRadius.ref.current = node;
+            panelShadow.ref.current = node;
+          }}
+          {...stylex.props(modal.popup, styles.dialogReplica)}
+        >
+          <div ref={headerGap.ref} {...stylex.props(modal.header)}>
+            <h3
+              ref={(node) => {
+                titleSize.ref.current = node;
+                titleLeading.ref.current = node;
+              }}
+              {...stylex.props(modal.title)}
+            >
+              Delete this session?
+            </h3>
+            <p
+              ref={(node) => {
+                descriptionSize.ref.current = node;
+                descriptionLeading.ref.current = node;
+              }}
+              {...stylex.props(modal.description)}
+            >
+              Its transcript and every file it wrote go with it.
+            </p>
+          </div>
+          <p {...stylex.props(styles.dialogBody)}>
+            The body is whatever the surface writes; the panel states only the room around it.
+          </p>
+          <div ref={footerGap.ref} {...stylex.props(modal.footer)}>
+            <Button variant="secondary" size="small">
+              Keep
+            </Button>
+            <Button variant="destructive" size="small">
+              Delete
+            </Button>
+          </div>
+          <Button
+            variant="ghost"
+            size="small"
+            icon
+            aria-label="Close"
+            {...stylex.props(modal.close)}
+          >
+            <span {...stylex.props(styles.replicaCloseGlyph)}>
+              <CloseGlyph />
+            </span>
+          </Button>
+        </div>
+      </div>
+      <div {...stylex.props(styles.replicaCaption)}>
+        <span {...stylex.props(styles.rungUse)}>
+          The modal rung states three things at once: the elevated background, the large shadow, and
+          an overlay over the page. A Dialog, an AlertDialog and a Drawer are this one panel — they
+          differ in how they arrive and in what may dismiss them, not in what they are made of.
+        </span>
+        <dl {...stylex.props(styles.constList)}>
+          {metrics.map((entry) => (
+            <div key={entry.name} {...stylex.props(styles.constRow)}>
+              <dt {...stylex.props(styles.constName)}>{entry.name}</dt>
+              <dd {...stylex.props(styles.constValue)}>{entry.value}</dd>
+            </div>
+          ))}
+        </dl>
+      </div>
+    </Row>
+  );
+}
+
+/** A dimension has no appearance, so a bar as wide as it reports what it is. */
+function WidthProbeRow({ name, value }: { name: string; value: string }) {
+  const { ref, value: measured } = useMeasured<HTMLDivElement>('width');
+  return (
+    <div {...stylex.props(styles.constRow)}>
+      <dt {...stylex.props(styles.constName)}>{name}</dt>
+      <dd {...stylex.props(styles.constValue)}>{measured}</dd>
+      <div ref={ref} aria-hidden="true" {...stylex.props(styles.widthProbe, dyn.width(value))} />
+    </div>
+  );
+}
+
+/** The dimensions a stand-in cannot state, because stating them hides the board. */
+function ModalDimensions() {
+  const dimensions = [
+    { name: 'dialog.width', value: dialogTokens.width },
+    { name: 'dialog.drawerSize', value: dialogTokens.drawerSize },
+    { name: 'dialog.drawerInset', value: dialogTokens.drawerInset },
+    { name: 'dialog.inset', value: dialogTokens.inset },
+    { name: 'dialog.rise', value: dialogTokens.rise },
+  ];
+  return (
+    <Row>
+      <LegendKey>dimensions</LegendKey>
+      <div {...stylex.props(styles.replicaCaption)}>
+        <dl {...stylex.props(styles.constList)}>
+          {dimensions.map((entry) => (
+            <WidthProbeRow key={entry.name} {...entry} />
+          ))}
+        </dl>
+      </div>
+    </Row>
+  );
+}
+
+/**
+ * A drawer on one edge, flush or inset.
+ *
+ * A drawer arrives from somewhere, so the edge it came in on is one axis and
+ * all four belong on the board: each is laid out against a different side and
+ * swiped away in a different direction. Whether it meets that edge or floats
+ * off it is the second axis, and it changes the corners as well as the gap.
+ */
+function FilterDrawer({ side, inset }: { side: DrawerSide; inset?: boolean }) {
+  return (
+    <Drawer.Root side={side}>
+      <Drawer.Trigger render={<Button variant="secondary" size="small" />}>
+        {inset ? `${side} · inset` : side}
+      </Drawer.Trigger>
+      <Drawer.Content side={side} inset={inset}>
+        <Drawer.Header>
+          <Drawer.Title>Filters</Drawer.Title>
+          <Drawer.Description>They apply to the session list.</Drawer.Description>
+        </Drawer.Header>
+        <Field.Label>
+          <Checkbox name="running" defaultChecked />
+          Running only
+        </Field.Label>
+        <Drawer.Footer>
+          <Drawer.Close render={<Button variant="secondary" size="small" />}>Reset</Drawer.Close>
+          <Drawer.Close render={<Button size="small" />}>Apply</Drawer.Close>
+        </Drawer.Footer>
+      </Drawer.Content>
+    </Drawer.Root>
+  );
+}
+
+/** The three ways onto the modal rung, each one a reader can actually open. */
+function ModalTriggers() {
+  return (
+    <Rows>
+      <Row>
+        <LegendKey>dialog</LegendKey>
+        <Cluster>
+          <Dialog.Root>
+            <Dialog.Trigger render={<Button variant="secondary" />}>Rename session</Dialog.Trigger>
+            <Dialog.Content>
+              <Dialog.Header>
+                <Dialog.Title>Rename session</Dialog.Title>
+                <Dialog.Description>The name shows in the sidebar.</Dialog.Description>
+              </Dialog.Header>
+              <Field.Root>
+                <Field.Label>Name</Field.Label>
+                <Input placeholder="Describe the task" />
+              </Field.Root>
+              <Dialog.Footer>
+                <Dialog.Close render={<Button variant="secondary" />}>Cancel</Dialog.Close>
+                <Dialog.Close render={<Button />}>Save</Dialog.Close>
+              </Dialog.Footer>
+            </Dialog.Content>
+          </Dialog.Root>
+        </Cluster>
+      </Row>
+      <Row>
+        <LegendKey>alert dialog</LegendKey>
+        <Cluster>
+          <AlertDialog.Root>
+            <AlertDialog.Trigger render={<Button variant="secondary" tone="destructive" />}>
+              Delete session
+            </AlertDialog.Trigger>
+            <AlertDialog.Content>
+              <AlertDialog.Header>
+                <AlertDialog.Title>Delete this session?</AlertDialog.Title>
+                <AlertDialog.Description>
+                  Its transcript and every file it wrote go with it.
+                </AlertDialog.Description>
+              </AlertDialog.Header>
+              <AlertDialog.Footer>
+                <AlertDialog.Close render={<Button variant="secondary" />}>Keep</AlertDialog.Close>
+                <AlertDialog.Close render={<Button variant="destructive" />}>
+                  Delete
+                </AlertDialog.Close>
+              </AlertDialog.Footer>
+            </AlertDialog.Content>
+          </AlertDialog.Root>
+        </Cluster>
+      </Row>
+      <Row>
+        <LegendKey>drawer · flush</LegendKey>
+        <Cluster>
+          {DRAWER_SIDES.map((side) => (
+            <FilterDrawer key={side} side={side} />
+          ))}
+        </Cluster>
+      </Row>
+      <Row>
+        <LegendKey>drawer · inset</LegendKey>
+        <Cluster>
+          {DRAWER_SIDES.map((side) => (
+            <FilterDrawer key={side} side={side} inset />
+          ))}
+        </Cluster>
+      </Row>
+    </Rows>
+  );
+}
+
+/**
+ * The tooltip chip, drawn on a stand-in. A tooltip is portalled, unmounted
+ * while it is closed and opens on a delay, so the board shows the chip itself
+ * beside triggers a reader can point at.
+ */
+function TooltipReplica() {
+  const chipRadius = useMeasured<HTMLDivElement>('border-radius');
+  const chipPaddingX = useMeasured<HTMLDivElement>('padding-left');
+  const chipPaddingY = useMeasured<HTMLDivElement>('padding-top');
+  const chipText = useMeasured<HTMLDivElement>('font-size');
+  const chipLeading = useMeasured<HTMLDivElement>('line-height');
+  const chipShadow = useMeasured<HTMLDivElement>('box-shadow');
+
+  const metrics = [
+    { name: 'tooltip.shadow', value: chipShadow.value },
+    { name: 'tooltip.radius', value: chipRadius.value },
+    { name: 'tooltip.paddingX', value: chipPaddingX.value },
+    { name: 'tooltip.paddingY', value: chipPaddingY.value },
+    { name: 'tooltip.text', value: chipText.value },
+    { name: 'tooltip.leading', value: chipLeading.value },
+  ];
+
+  const dimensions = [
+    { name: 'tooltip.maxWidth', value: tooltipTokens.maxWidth },
+    { name: 'tooltip.rise', value: tooltipTokens.rise },
+  ];
+
+  return (
+    <Row>
+      <LegendKey>{'tooltip · stand-in'}</LegendKey>
+      <Cluster>
+        <div
+          ref={(node) => {
+            chipRadius.ref.current = node;
+            chipPaddingX.ref.current = node;
+            chipPaddingY.ref.current = node;
+            chipText.ref.current = node;
+            chipLeading.ref.current = node;
+            chipShadow.ref.current = node;
+          }}
+          {...stylex.props(chip.popup, styles.tooltipReplica)}
+        >
+          Rerun this turn
+        </div>
+      </Cluster>
+      <div {...stylex.props(styles.replicaCaption)}>
+        <span {...stylex.props(styles.rungUse)}>
+          The one floating thing that inverts rather than rising off the page: the ladder puts a
+          menu, a popover and a list on the raised background under the popover shadow, and names
+          the tooltip apart as label with shadow.medium. It is a label over a control rather than a
+          place to act, so it never takes the pointer.
+        </span>
+        <dl {...stylex.props(styles.constList)}>
+          {metrics.map((entry) => (
+            <div key={entry.name} {...stylex.props(styles.constRow)}>
+              <dt {...stylex.props(styles.constName)}>{entry.name}</dt>
+              <dd {...stylex.props(styles.constValue)}>{entry.value}</dd>
+            </div>
+          ))}
+          {dimensions.map((entry) => (
+            <WidthProbeRow key={entry.name} {...entry} />
+          ))}
+        </dl>
+      </div>
+    </Row>
+  );
+}
+
+/** Tooltips a reader can point at; one provider, so the second opens instantly. */
+function TooltipRow() {
+  return (
+    <Row>
+      <LegendKey>tooltips</LegendKey>
+      <Tooltip.Provider>
+        <Cluster>
+          <Tooltip.Root>
+            <Tooltip.Trigger render={<Button variant="ghost" icon aria-label="Rerun" />}>
+              <ChevronRightGlyph />
+            </Tooltip.Trigger>
+            <Tooltip.Content>Rerun this turn</Tooltip.Content>
+          </Tooltip.Root>
+          <Tooltip.Root>
+            <Tooltip.Trigger render={<span {...stylex.props(styles.tooltipAnchor)} />}>
+              Point at this
+            </Tooltip.Trigger>
+            <Tooltip.Content side="right">
+              A tooltip names what is under the pointer, and wraps at its own width rather than
+              trailing off into an ellipsis nobody can open.
+            </Tooltip.Content>
+          </Tooltip.Root>
+        </Cluster>
+      </Tooltip.Provider>
+    </Row>
+  );
+}
+
+function StripRow({ name, size }: { name: string; size: TabsSize }) {
+  const { ref, value } = useMeasured<HTMLDivElement>('height');
+  return (
+    <Row>
+      <LegendKey>{name}</LegendKey>
+      <Cluster>
+        <Tabs.Root defaultValue="rendered">
+          <Tabs.List ref={ref} size={size}>
+            <Tabs.Tab value="rendered">Rendered</Tabs.Tab>
+            <Tabs.Tab value="raw">Raw</Tabs.Tab>
+            <Tabs.Tab value="diff">Diff</Tabs.Tab>
+          </Tabs.List>
+        </Tabs.Root>
+      </Cluster>
+      <span {...stylex.props(styles.readout)}>{value}</span>
+    </Row>
+  );
+}
+
+/** A tab nobody can take, reporting the one opacity the family dims with. */
+function StripDisabledRow() {
+  const { ref, value } = useMeasured<HTMLButtonElement>('opacity');
+  return (
+    <Row>
+      <LegendKey>disabled</LegendKey>
+      <Cluster>
+        <Tabs.Root defaultValue="rendered">
+          <Tabs.List>
+            <Tabs.Tab value="rendered">Rendered</Tabs.Tab>
+            <Tabs.Tab ref={ref} value="raw" disabled>
+              Raw
+            </Tabs.Tab>
+          </Tabs.List>
+        </Tabs.Root>
+      </Cluster>
+      <span {...stylex.props(styles.readout)}>disclosure.disabledOpacity {value}</span>
+    </Row>
+  );
+}
+
+/** The strip taking the width it is given, with the tabs splitting it. */
+function StripStretchRow() {
+  return (
+    <Row>
+      <LegendKey>stretch</LegendKey>
+      <div {...stylex.props(styles.disclosureBlock)}>
+        <Tabs.Root defaultValue="local">
+          <Tabs.List stretch>
+            <Tabs.Tab value="local">Local</Tabs.Tab>
+            <Tabs.Tab value="github">GitHub</Tabs.Tab>
+            <Tabs.Tab value="chat">Chat</Tabs.Tab>
+          </Tabs.List>
+        </Tabs.Root>
+      </div>
+    </Row>
+  );
+}
+
+/** The strip with what it swaps, so the gap between the two is on the board. */
+function StripPanelRow() {
+  return (
+    <Row>
+      <LegendKey>panel</LegendKey>
+      <div {...stylex.props(styles.disclosureBlock)}>
+        <Tabs.Root defaultValue="sync">
+          <Tabs.List size="small">
+            <Tabs.Tab value="sync">Conversation sync</Tabs.Tab>
+            <Tabs.Tab value="worktree">Worktree setup</Tabs.Tab>
+          </Tabs.List>
+          <Tabs.Panel value="sync">Sessions on this project sync their history.</Tabs.Panel>
+          <Tabs.Panel value="worktree">Each session gets a worktree of its own.</Tabs.Panel>
+        </Tabs.Root>
+      </div>
+    </Row>
+  );
+}
+
+function StripDimensions() {
+  const dimensions = [
+    { name: 'disclosure.trackInset', value: disclosureTokens.trackInset },
+    { name: 'disclosure.trackRadiusSmall', value: disclosureTokens.trackRadiusSmall },
+    { name: 'disclosure.trackRadiusMedium', value: disclosureTokens.trackRadiusMedium },
+    { name: 'disclosure.tabPaddingX', value: disclosureTokens.tabPaddingX },
+    { name: 'disclosure.tabGap', value: disclosureTokens.tabGap },
+    { name: 'disclosure.tabText', value: disclosureTokens.tabText },
+    { name: 'disclosure.panelGap', value: disclosureTokens.panelGap },
+    { name: 'disclosure.ringWidth', value: disclosureTokens.ringWidth },
+  ];
+  return (
+    <Row>
+      <LegendKey>dimensions</LegendKey>
+      <div {...stylex.props(styles.replicaCaption)}>
+        <dl {...stylex.props(styles.constList)}>
+          {dimensions.map((entry) => (
+            <WidthProbeRow key={entry.name} {...entry} />
+          ))}
+        </dl>
+      </div>
+    </Row>
+  );
+}
+
+/** The stack, with its first row already open so both states are on the board. */
+function StackRow() {
+  return (
+    <Row>
+      <LegendKey>accordion</LegendKey>
+      <div {...stylex.props(styles.disclosureBlock)}>
+        <Accordion.Root defaultValue={['session']}>
+          <Accordion.Item value="session">
+            <Accordion.Trigger>What a session is</Accordion.Trigger>
+            <Accordion.Panel>One agent, one worktree, and every turn between them.</Accordion.Panel>
+          </Accordion.Item>
+          <Accordion.Item value="machine">
+            <Accordion.Trigger>What a machine is</Accordion.Trigger>
+            <Accordion.Panel>The computer a session runs its work on.</Accordion.Panel>
+          </Accordion.Item>
+          <Accordion.Item value="project">
+            <Accordion.Trigger>What a project is</Accordion.Trigger>
+            <Accordion.Panel>A repository, and the sessions opened against it.</Accordion.Panel>
+          </Accordion.Item>
+        </Accordion.Root>
+      </div>
+    </Row>
+  );
+}
+
+/** A lone disclosure, opened by a control the surface already had. */
+function CollapsibleRow() {
+  return (
+    <Row>
+      <LegendKey>collapsible</LegendKey>
+      <div {...stylex.props(styles.disclosureBlock)}>
+        <Collapsible.Root defaultOpen>
+          <Collapsible.Trigger render={<Button variant="secondary" size="small" />}>
+            3 files changed
+          </Collapsible.Trigger>
+          <Collapsible.Panel>
+            <p {...stylex.props(styles.collapsibleBody)}>
+              The panel is all this primitive owns: the height Base UI measured, the transition
+              between that and nothing, and the overflow that hides what is arriving.
+            </p>
+          </Collapsible.Panel>
+        </Collapsible.Root>
+      </div>
+    </Row>
+  );
+}
+
+function StackDimensions() {
+  const dimensions = [
+    { name: 'disclosure.rowPaddingY', value: disclosureTokens.rowPaddingY },
+    { name: 'disclosure.rowGap', value: disclosureTokens.rowGap },
+    { name: 'disclosure.rowText', value: disclosureTokens.rowText },
+    { name: 'disclosure.chevronSize', value: disclosureTokens.chevronSize },
+    { name: 'disclosure.panelText', value: disclosureTokens.panelText },
+    { name: 'disclosure.panelLeading', value: disclosureTokens.panelLeading },
+    { name: 'disclosure.panelPaddingBottom', value: disclosureTokens.panelPaddingBottom },
+  ];
+  return (
+    <Row>
+      <LegendKey>dimensions</LegendKey>
+      <div {...stylex.props(styles.replicaCaption)}>
+        <dl {...stylex.props(styles.constList)}>
+          {dimensions.map((entry) => (
+            <WidthProbeRow key={entry.name} {...entry} />
+          ))}
+        </dl>
+      </div>
+    </Row>
+  );
+}
+
+/** One message on the card rung, in each of the four things it can report. */
+function AlertRow({ tone }: { tone: FeedbackTone }) {
+  return (
+    <Row>
+      <LegendKey>{tone}</LegendKey>
+      <div {...stylex.props(styles.disclosureBlock, styles.pageRung)}>
+        <Alert.Root tone={tone}>
+          <Alert.Title>Worktree setup finished</Alert.Title>
+          <Alert.Description>
+            Two commands ran before the agent started; the second one printed nothing.
+          </Alert.Description>
+        </Alert.Root>
+      </div>
+    </Row>
+  );
+}
+
+/** A message that answers back, so the row of buttons is on the board too. */
+function AlertActionsRow() {
+  return (
+    <Row>
+      <LegendKey>answers</LegendKey>
+      <div {...stylex.props(styles.disclosureBlock, styles.pageRung)}>
+        <Alert.Root tone="danger">
+          <Alert.Title>Sync failed</Alert.Title>
+          <Alert.Description>The machine did not answer in time.</Alert.Description>
+          <Alert.Actions>
+            <Button size="small">Retry</Button>
+            <Button variant="ghost" size="small">
+              Dismiss
+            </Button>
+          </Alert.Actions>
+        </Alert.Root>
+      </div>
+    </Row>
+  );
+}
+
+/**
+ * The toast, standing still. A real one is portalled to the document and gone
+ * again in five seconds, so the board holds a stand-in built from the same
+ * styles — and the button beside it reports a real one.
+ */
+function ToastReplica({ tone }: { tone: FeedbackTone }) {
+  const Mark = TONE_GLYPHS[tone];
+  return (
+    <Row>
+      <LegendKey>{tone}</LegendKey>
+      <Cluster>
+        <div {...stylex.props(feedbackSurface.message, feedbackSurface.toast, styles.toastReplica)}>
+          <span {...stylex.props(feedbackSurface.mark, TONE_MARKS[tone])}>
+            <Mark />
+          </span>
+          <div {...stylex.props(feedbackSurface.body)}>
+            <p {...stylex.props(feedbackSurface.title, feedbackSurface.toastTitle)}>
+              Session archived
+            </p>
+            <p {...stylex.props(feedbackSurface.description)}>It can be restored from Archive.</p>
+          </div>
+        </div>
+      </Cluster>
+    </Row>
+  );
+}
+
+/** A real toast, reported the way a surface reports one: through the manager. */
+const galleryToasts = Toast.createManager();
+
+function ToastTriggerRow() {
+  return (
+    <Row>
+      <LegendKey>reported</LegendKey>
+      <Cluster>
+        <Toast.Provider manager={galleryToasts} limit={3}>
+          <Button
+            variant="secondary"
+            size="small"
+            onClick={() =>
+              galleryToasts.add({
+                title: 'Sync failed',
+                description: 'The machine did not answer in time.',
+                type: 'danger',
+              })
+            }
+          >
+            Report one
+          </Button>
+        </Toast.Provider>
+      </Cluster>
+      <span {...stylex.props(styles.rungUse)}>
+        A real toast, through the manager a surface outside React would use. It lands in the
+        viewport at the top of the window, above every popup.
+      </span>
+    </Row>
+  );
+}
+
+function ProgressRow({ name, value }: { name: string; value: number | null }) {
+  return (
+    <Row>
+      <LegendKey>{name}</LegendKey>
+      <div {...stylex.props(styles.disclosureBlock)}>
+        <Progress value={value} />
+      </div>
+    </Row>
+  );
+}
+
+function SkeletonRow() {
+  return (
+    <Row>
+      <LegendKey>skeleton</LegendKey>
+      <div {...stylex.props(styles.skeletonBlock)}>
+        <Skeleton shape="circle" width={32} height={32} />
+        <div {...stylex.props(styles.skeletonLines)}>
+          <Skeleton width="100%" />
+          <Skeleton width="60%" />
+        </div>
+      </div>
+    </Row>
+  );
+}
+
+function SpinnerRow() {
+  return (
+    <Row>
+      <LegendKey>spinner</LegendKey>
+      <Cluster>
+        <Spinner size="small" />
+        <Spinner size="medium" />
+        <Spinner size="large" />
+        <Button variant="secondary" size="small">
+          <Spinner size="small" label={null} />
+          Saving
+        </Button>
+      </Cluster>
+      <span {...stylex.props(styles.rungUse)}>
+        Drawn in currentColor, so the one inside a button takes the button's ink. The label is the
+        surface's: a spinner beside the word "Saving" states nothing, and says so with label=null.
+      </span>
+    </Row>
+  );
+}
+
+function MessageDimensions() {
+  const dimensions = [
+    { name: 'feedback.noticeRadius', value: feedbackTokens.noticeRadius },
+    { name: 'feedback.padding', value: feedbackTokens.padding },
+    { name: 'feedback.gap', value: feedbackTokens.gap },
+    { name: 'feedback.markSize', value: feedbackTokens.markSize },
+    { name: 'feedback.titleSize', value: feedbackTokens.titleSize },
+    { name: 'feedback.titleLeading', value: feedbackTokens.titleLeading },
+    { name: 'feedback.descriptionSize', value: feedbackTokens.descriptionSize },
+    { name: 'feedback.descriptionLeading', value: feedbackTokens.descriptionLeading },
+    { name: 'feedback.toastWidth', value: feedbackTokens.toastWidth },
+    { name: 'feedback.toastGap', value: feedbackTokens.toastGap },
+    { name: 'feedback.viewportInset', value: feedbackTokens.viewportInset },
+  ];
+  return (
+    <Row>
+      <LegendKey>dimensions</LegendKey>
+      <div {...stylex.props(styles.replicaCaption)}>
+        <dl {...stylex.props(styles.constList)}>
+          {dimensions.map((entry) => (
+            <WidthProbeRow key={entry.name} {...entry} />
+          ))}
+        </dl>
+      </div>
+    </Row>
+  );
+}
+
+function WaitDimensions() {
+  const dimensions = [
+    { name: 'feedback.trackHeight', value: feedbackTokens.trackHeight },
+    { name: 'feedback.spinnerSmall', value: feedbackTokens.spinnerSmall },
+    { name: 'feedback.spinnerMedium', value: feedbackTokens.spinnerMedium },
+    { name: 'feedback.spinnerLarge', value: feedbackTokens.spinnerLarge },
+    { name: 'feedback.spinnerWidth', value: feedbackTokens.spinnerWidth },
+  ];
+  return (
+    <Row>
+      <LegendKey>dimensions</LegendKey>
+      <div {...stylex.props(styles.replicaCaption)}>
+        <dl {...stylex.props(styles.constList)}>
+          {dimensions.map((entry) => (
+            <WidthProbeRow key={entry.name} {...entry} />
+          ))}
+        </dl>
+      </div>
+    </Row>
+  );
+}
+
+/** The records a board can show: short enough to read, long enough to be a table. */
+interface BoardSession {
+  id: string;
+  name: string;
+  agent: string;
+  turns: number;
+}
+
+const SESSIONS: BoardSession[] = [
+  { id: 'a', name: 'Worktree setup', agent: 'Claude', turns: 12 },
+  { id: 'b', name: 'Review the diff', agent: 'Codex', turns: 4 },
+  { id: 'c', name: 'Rename the package', agent: 'Claude', turns: 31 },
+];
+
+const BOARD_COLUMNS: TableColumn<BoardSession>[] = [
+  { key: 'name', header: 'Session', cell: (row) => row.name, width: 180 },
+  { key: 'agent', header: 'Agent', cell: (row) => row.agent, width: 100 },
+  { key: 'turns', header: 'Turns', cell: (row) => row.turns, numeric: true },
+];
+
+const sessionKey = (row: BoardSession) => row.id;
+
+/**
+ * A real table. Nothing here is a stand-in: a table draws no surface, has no
+ * open state and is not portalled, so the board holds the thing itself.
+ */
+function TableSizeRow({ name, size }: { name: string; size: TableSize }) {
+  return (
+    <Row>
+      <LegendKey>{name}</LegendKey>
+      <div {...stylex.props(styles.disclosureBlock)}>
+        <Table columns={BOARD_COLUMNS} rows={SESSIONS} rowKey={sessionKey} size={size} />
+      </div>
+    </Row>
+  );
+}
+
+/** Pressing a row does something, so the rows answer the pointer and the keyboard. */
+function TablePressRow() {
+  const [opened, setOpened] = useState<string | null>(null);
+  return (
+    <Row>
+      <LegendKey>pressable</LegendKey>
+      <div {...stylex.props(styles.disclosureBlock)}>
+        <Table
+          columns={BOARD_COLUMNS}
+          rows={SESSIONS}
+          rowKey={sessionKey}
+          onRowPress={(row) => setOpened(row.name)}
+        />
+      </div>
+      <Note>
+        The pointer is answered only where pressing a row does something, and a row that can be
+        pressed is reachable by the keyboard and rings where the keyboard is.{' '}
+        {opened ? `Opened ${opened}.` : 'Nothing opened yet.'}
+      </Note>
+    </Row>
+  );
+}
+
+/** The rows a bulk action would act on, and the box that takes them all. */
+function TableSelectRow() {
+  const [selected, setSelected] = useState<string[]>(['b']);
+  return (
+    <Row>
+      <LegendKey>selectable</LegendKey>
+      <div {...stylex.props(styles.disclosureBlock)}>
+        <Table
+          columns={BOARD_COLUMNS}
+          rows={SESSIONS}
+          rowKey={sessionKey}
+          selected={selected}
+          onSelectedChange={setSelected}
+          rowLabel={(row) => `Select ${row.name}`}
+        />
+      </div>
+      <Note>
+        The box in the head is derived, never passed: none, some — which is mixed — or all. The tick
+        is what says a row is taken; the fill is so a person can find them again.
+      </Note>
+    </Row>
+  );
+}
+
+/** One column at a time, with the arrow and `aria-sort` drawn by the part. */
+function TableSortRow() {
+  const [sort, setSort] = useState<TableSorting>({ column: 'turns', direction: 'descending' });
+  const ordered = [...SESSIONS].sort((left, right) => {
+    const way = sort.direction === 'ascending' ? 1 : -1;
+    return sort.column === 'turns'
+      ? (left.turns - right.turns) * way
+      : left.name.localeCompare(right.name) * way;
+  });
+  return (
+    <Row>
+      <LegendKey>sorted · totalled</LegendKey>
+      <div {...stylex.props(styles.disclosureBlock)}>
+        <Table
+          caption="Sessions this week"
+          columns={[
+            { ...BOARD_COLUMNS[0], sortable: true },
+            BOARD_COLUMNS[1],
+            { ...BOARD_COLUMNS[2], sortable: true, footer: 47 },
+          ]}
+          rows={ordered}
+          rowKey={sessionKey}
+          sort={sort}
+          onSortChange={setSort}
+        />
+      </div>
+      <Note>
+        One column wears the arrow, because two is a state a table cannot be in. The table never
+        reorders the rows — the order is the surface's, and here the board sorts its own.
+      </Note>
+    </Row>
+  );
+}
+
+/** A head that stays, which is a band over the rows rather than a row. */
+function TableStickyRow() {
+  const many = Array.from({ length: 12 }, (_, index) => ({
+    id: `s${index}`,
+    name: `Session ${index + 1}`,
+    agent: index % 2 ? 'Codex' : 'Claude',
+    turns: (index * 7) % 40,
+  }));
+  return (
+    <Row>
+      <LegendKey>a head that stays</LegendKey>
+      <div {...stylex.props(styles.disclosureBlock)}>
+        <Table columns={BOARD_COLUMNS} rows={many} rowKey={sessionKey} maxHeight={168} />
+      </div>
+      <Note>
+        A table told how tall it may be owns a scroll box, and its head stays in it. A head that
+        stays is no longer a row: it takes the region rung, because a transparent one is not a
+        quieter design — the records are painted through the column names.
+      </Note>
+    </Row>
+  );
+}
+
+/** Nothing to show, said across every column with the names still standing. */
+function TableEmptyRow() {
+  return (
+    <Row>
+      <LegendKey>nothing to show</LegendKey>
+      <div {...stylex.props(styles.disclosureBlock)}>
+        <Table
+          columns={BOARD_COLUMNS}
+          rows={[]}
+          rowKey={sessionKey}
+          selected={[]}
+          onSelectedChange={() => {}}
+          empty="No sessions on this machine"
+        />
+      </div>
+    </Row>
+  );
+}
+
+/** A value is one line; a column of sentences says so and wraps. */
+function TableWrapRow() {
+  return (
+    <Row>
+      <LegendKey>one line · wrapped</LegendKey>
+      <div {...stylex.props(styles.disclosureBlock)}>
+        <Table
+          layout="fixed"
+          columns={[
+            { key: 'name', header: 'Session', cell: (row) => row.name, width: 120 },
+            {
+              key: 'clipped',
+              header: 'One line',
+              width: 140,
+              cell: () => 'A value long enough to need the ellipsis it gets',
+            },
+            {
+              key: 'wrapped',
+              header: 'Sentences',
+              wrap: true,
+              cell: () => 'A column of sentences says wrap, and takes the room it needs.',
+            },
+          ]}
+          rows={SESSIONS.slice(0, 2)}
+          rowKey={sessionKey}
+        />
+      </div>
+    </Row>
+  );
+}
+
+/**
+ * The same table, in a box too narrow for its columns. Nothing here is a
+ * second copy: it is the markup above, asked about its own width.
+ */
+function TableStackRow() {
+  return (
+    <Row>
+      <LegendKey>too narrow for columns</LegendKey>
+      <div {...stylex.props(styles.narrowTable)}>
+        <Table columns={BOARD_COLUMNS} rows={SESSIONS.slice(0, 2)} rowKey={sessionKey} />
+      </div>
+      <Note>
+        A table narrower than its columns need is not a table with a scrollbar: it is a list of
+        records, each a stack of label-and-value lines. It asks about its own box rather than the
+        window, so a table in a narrow side panel stacks on a wide screen — and the labels are the
+        head's own words, which only a table that was told its columns can reach.
+      </Note>
+    </Row>
+  );
+}
+
+/** The elements, for a table that is not a list of records. */
+function TablePartsRow() {
+  return (
+    <Row>
+      <LegendKey>the parts</LegendKey>
+      <div {...stylex.props(styles.disclosureBlock)}>
+        <Table.Root size="large">
+          <Table.Body>
+            <Table.Row>
+              <Table.ColumnHeader scope="row">Agent</Table.ColumnHeader>
+              <Table.Cell>Claude</Table.Cell>
+            </Table.Row>
+            <Table.Row>
+              <Table.ColumnHeader scope="row">Project</Table.ColumnHeader>
+              <Table.Cell>Lody</Table.Cell>
+            </Table.Row>
+          </Table.Body>
+        </Table.Root>
+      </div>
+      <Note>
+        A two-column list of facts is not a list of records, so it reads its labels as row headers
+        and assembles the elements itself.
+      </Note>
+    </Row>
+  );
+}
+
+function TableDimensions() {
+  const dimensions = [
+    { name: 'table.rowHeightSmall', value: tableTokens.rowHeightSmall },
+    { name: 'table.rowHeightMedium', value: tableTokens.rowHeightMedium },
+    { name: 'table.rowHeightLarge', value: tableTokens.rowHeightLarge },
+    { name: 'table.cellPaddingXSmall', value: tableTokens.cellPaddingXSmall },
+    { name: 'table.cellPaddingXMedium', value: tableTokens.cellPaddingXMedium },
+    { name: 'table.cellPaddingXLarge', value: tableTokens.cellPaddingXLarge },
+    { name: 'table.cellPaddingY', value: tableTokens.cellPaddingY },
+    { name: 'table.selectWidth', value: tableTokens.selectWidth },
+    { name: 'table.emptyHeight', value: tableTokens.emptyHeight },
+    { name: 'table.text', value: tableTokens.text },
+    { name: 'table.leading', value: tableTokens.leading },
+    { name: 'table.headText', value: tableTokens.headText },
+    { name: 'table.headLeading', value: tableTokens.headLeading },
+    { name: 'table.sortMarkSize', value: tableTokens.sortMarkSize },
+    { name: 'table.sortGap', value: tableTokens.sortGap },
+    { name: 'table.captionText', value: tableTokens.captionText },
+    { name: 'table.captionLeading', value: tableTokens.captionLeading },
+    { name: 'table.captionGap', value: tableTokens.captionGap },
+    { name: 'table.ringWidth', value: tableTokens.ringWidth },
+  ];
+  return (
+    <Row>
+      <LegendKey>dimensions</LegendKey>
+      <div {...stylex.props(styles.replicaCaption)}>
+        <dl {...stylex.props(styles.constList)}>
+          {dimensions.map((entry) => (
+            <WidthProbeRow key={entry.name} {...entry} />
+          ))}
+        </dl>
+      </div>
+    </Row>
+  );
+}
+
+function PagerRow({
+  name,
+  pages,
+  start,
+  note,
+}: {
+  name: string;
+  pages: number;
+  start: number;
+  note?: string;
+}) {
+  const [page, setPage] = useState(start);
+  return (
+    <Row>
+      <LegendKey>{name}</LegendKey>
+      <Cluster>
+        <Pagination page={page} pages={pages} onPageChange={setPage} />
+      </Cluster>
+      {note ? <span {...stylex.props(styles.rungUse)}>{note}</span> : null}
+    </Row>
+  );
+}
+
+function CompactPagerRow({ jump }: { jump?: boolean }) {
+  const [page, setPage] = useState(4212);
+  return (
+    <Row>
+      <LegendKey>{jump ? 'compact · jump' : 'compact'}</LegendKey>
+      <Cluster>
+        <Pagination layout="compact" jump={jump} page={page} pages={9214} onPageChange={setPage} />
+      </Cluster>
+      <span {...stylex.props(styles.rungUse)}>
+        {jump
+          ? 'What it commits on is Enter or leaving the field, not every keystroke: typing 4-5 through a pager that navigates as you type visits page 4 on the way to page 45.'
+          : 'Nine thousand pages are not a list. The position is said to a screen reader as a sentence, because "4212 / 9214" is read as a slash.'}
+      </span>
+    </Row>
+  );
+}
+
+function PagerSizeRow() {
+  const [page, setPage] = useState(2);
+  return (
+    <Row>
+      <LegendKey>small · 28</LegendKey>
+      <Cluster>
+        <Pagination size="small" page={page} pages={6} onPageChange={setPage} />
+      </Cluster>
+    </Row>
+  );
+}
+
+function PagerDimensions() {
+  const dimensions = [
+    { name: 'table.pagerGap', value: tableTokens.pagerGap },
+    { name: 'table.pagerPositionGap', value: tableTokens.pagerPositionGap },
+    { name: 'table.pagerJumpWidth', value: tableTokens.pagerJumpWidth },
+  ];
+  return (
+    <Row>
+      <LegendKey>dimensions</LegendKey>
+      <div {...stylex.props(styles.replicaCaption)}>
+        <dl {...stylex.props(styles.constList)}>
+          {dimensions.map((entry) => (
+            <WidthProbeRow key={entry.name} {...entry} />
+          ))}
+        </dl>
+      </div>
+    </Row>
+  );
+}
+
+/** The block itself: a heading, the body a caller writes, and the answers. */
+function CardRow() {
+  return (
+    <Row>
+      <LegendKey>card</LegendKey>
+      <div {...stylex.props(styles.disclosureBlock, styles.pageRung)}>
+        <Card.Root>
+          <Card.Header>
+            <Card.Title as="h4">Worktree setup</Card.Title>
+            <Card.Description>
+              Commands that run once, before the agent takes the session.
+            </Card.Description>
+          </Card.Header>
+          <Field.Root name="setup">
+            <Field.Label>Setup command</Field.Label>
+            <Input size="small" placeholder="pnpm install" />
+          </Field.Root>
+          <Card.Footer>
+            <Button variant="ghost" size="small">
+              Reset
+            </Button>
+            <Button size="small">Save</Button>
+          </Card.Footer>
+        </Card.Root>
+      </div>
+    </Row>
+  );
+}
+
+/**
+ * A card that is the pressable thing. The button is the board's, because the
+ * primitive marks the card and leaves what a press does to the surface.
+ */
+function InteractiveCardRow() {
+  return (
+    <Row>
+      <LegendKey>interactive</LegendKey>
+      <div {...stylex.props(styles.disclosureBlock, styles.pageRung)}>
+        <button type="button" {...stylex.props(styles.cardButton)}>
+          <Card.Root interactive>
+            <Card.Header>
+              <Card.Title as="h4">Agents</Card.Title>
+              <Card.Description>Which agent answers, and with what tools.</Card.Description>
+            </Card.Header>
+          </Card.Root>
+        </button>
+      </div>
+      <Note>
+        Only the fill answers the pointer. The ladder names the region rung for this, and in the
+        dark palette that is the card rung's own value — so the hover is mixed toward label instead,
+        the way a row's highlight is.
+      </Note>
+    </Row>
+  );
+}
+
+function CardDimensions() {
+  const dimensions = [
+    { name: 'card.radius', value: cardTokens.radius },
+    { name: 'card.padding', value: cardTokens.padding },
+    { name: 'card.gap', value: cardTokens.gap },
+    { name: 'card.headerGap', value: cardTokens.headerGap },
+    { name: 'card.footerGap', value: cardTokens.footerGap },
+    { name: 'card.titleSize', value: cardTokens.titleSize },
+    { name: 'card.titleLeading', value: cardTokens.titleLeading },
+    { name: 'card.descriptionSize', value: cardTokens.descriptionSize },
+    { name: 'card.descriptionLeading', value: cardTokens.descriptionLeading },
+  ];
+  return (
+    <Row>
+      <LegendKey>dimensions</LegendKey>
+      <div {...stylex.props(styles.replicaCaption)}>
+        <dl {...stylex.props(styles.constList)}>
+          {dimensions.map((entry) => (
+            <WidthProbeRow key={entry.name} {...entry} />
+          ))}
+        </dl>
+      </div>
+    </Row>
+  );
+}
+
+/** The four things a badge can state, and what a caller's glyph does to one. */
+function BadgeToneRow() {
+  return (
+    <Row>
+      <LegendKey>tones</LegendKey>
+      <Cluster>
+        {BADGE_TONES.map((tone) => (
+          <Badge key={tone} tone={tone}>
+            {tone}
+          </Badge>
+        ))}
+        <Badge icon={<TickGlyph />}>Verified</Badge>
+        <Badge>v1.42.0</Badge>
+        <Badge className={stylex.props(styles.badgeClamp).className}>
+          A plan name nobody shortened
+        </Badge>
+      </Cluster>
+    </Row>
+  );
+}
+
+/** A line between rows, and the same line down a row of controls. */
+function SeparatorRow() {
+  return (
+    <Row>
+      <LegendKey>separator</LegendKey>
+      <div {...stylex.props(styles.disclosureBlock)}>
+        <div {...stylex.props(styles.separatorRow)}>
+          <span {...stylex.props(styles.separatorText)}>lody-mac-studio</span>
+          <Separator />
+          <span {...stylex.props(styles.separatorText)}>lody-thinkpad</span>
+          <Separator />
+          <span {...stylex.props(styles.separatorText)}>lody-ci-runner</span>
+        </div>
+      </div>
+      <div {...stylex.props(styles.separatorToolbar)}>
+        <Button variant="ghost" size="small">
+          Previous
+        </Button>
+        <Separator orientation="vertical" />
+        <Button variant="ghost" size="small">
+          Next
+        </Button>
+      </div>
+    </Row>
+  );
+}
+
+function BadgeDimensions() {
+  const dimensions = [
+    { name: 'badge.height', value: badgeTokens.height },
+    { name: 'badge.radius', value: badgeTokens.radius },
+    { name: 'badge.paddingX', value: badgeTokens.paddingX },
+    { name: 'badge.gap', value: badgeTokens.gap },
+    { name: 'badge.glyphSize', value: badgeTokens.glyphSize },
+    { name: 'badge.labelSize', value: badgeTokens.labelSize },
+    { name: 'badge.labelLeading', value: badgeTokens.labelLeading },
+  ];
+  return (
+    <Row>
+      <LegendKey>dimensions</LegendKey>
+      <div {...stylex.props(styles.replicaCaption)}>
+        <dl {...stylex.props(styles.constList)}>
+          {dimensions.map((entry) => (
+            <WidthProbeRow key={entry.name} {...entry} />
+          ))}
+        </dl>
+      </div>
+    </Row>
+  );
+}
+
+/**
+ * A caller's mark inside a fallback, drawn here rather than in
+ * `internal/glyphs` because it is exactly that: a caller's. The package draws
+ * the marks that belong to a part — an accordion's chevron, a message's tone —
+ * and a face-shaped stand-in belongs to the surface that knows it has no name
+ * to make letters out of.
+ */
+function PersonGlyph() {
+  return (
+    <svg {...stylex.props(styles.avatarGlyph)} viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <path
+        d="M8 8.5a2.75 2.75 0 1 0 0-5.5 2.75 2.75 0 0 0 0 5.5ZM2.75 14c0-2.6 2.35-4 5.25-4s5.25 1.4 5.25 4"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+/** The ladder, and the letters each rung picks for itself. */
+function AvatarSizeRow({ name, size, use }: { name: string; size: AvatarSize; use: string }) {
+  const { ref, value } = useMeasured<HTMLSpanElement>('width');
+  return (
+    <Row>
+      <LegendKey>{name}</LegendKey>
+      <Cluster>
+        <Avatar.Root ref={ref} size={size}>
+          <Avatar.Fallback>WW</Avatar.Fallback>
+        </Avatar.Root>
+        <Avatar.Root size={size}>
+          <Avatar.Image src={SAMPLE_FACE} alt="" />
+          <Avatar.Fallback>WW</Avatar.Fallback>
+        </Avatar.Root>
+        <Avatar.Root size={size} shape="tile">
+          <Avatar.Fallback>L</Avatar.Fallback>
+        </Avatar.Root>
+      </Cluster>
+      <span {...stylex.props(styles.readout)}>{value}</span>
+      <span {...stylex.props(styles.rungUse)}>{use}</span>
+    </Row>
+  );
+}
+
+/**
+ * The two shapes, side by side at one rung. A circle is a person and a tile is
+ * a thing, and the tile's corner comes from the radius-by-size table rather
+ * than from a token of its own.
+ */
+function AvatarShapeRow() {
+  return (
+    <Row>
+      <LegendKey>shape</LegendKey>
+      <Cluster>
+        <Avatar.Root size="large">
+          <Avatar.Fallback>ZX</Avatar.Fallback>
+        </Avatar.Root>
+        <Avatar.Root size="large" shape="tile">
+          <Avatar.Fallback>LY</Avatar.Fallback>
+        </Avatar.Root>
+      </Cluster>
+      <span {...stylex.props(styles.rungUse)}>
+        circle · a person, at radius.full on corner.round — a squircle there is a superellipse,
+        which turns a face into a rounded square. tile · a thing, whose mark was drawn square.
+      </span>
+    </Row>
+  );
+}
+
+/**
+ * What is standing in, and what it is standing in for. Base UI picks between
+ * the two from the image's own loading status, so a surface writes both and
+ * never writes the condition — a broken URL leaves the letters up rather than
+ * flashing a torn image over them.
+ */
+function AvatarFallbackRow() {
+  return (
+    <Row>
+      <LegendKey>fallback</LegendKey>
+      <Cluster>
+        <Avatar.Root size="large">
+          <Avatar.Image src={SAMPLE_FACE} alt="" />
+          <Avatar.Fallback>ZX</Avatar.Fallback>
+        </Avatar.Root>
+        <Avatar.Root size="large">
+          <Avatar.Image src="https://lody.invalid/gone.png" alt="" />
+          <Avatar.Fallback>ZX</Avatar.Fallback>
+        </Avatar.Root>
+        <Avatar.Root size="large">
+          <Avatar.Fallback>
+            <Avatar.Glyph>
+              <PersonGlyph />
+            </Avatar.Glyph>
+          </Avatar.Fallback>
+        </Avatar.Root>
+        <Avatar.Root size="large" shape="tile">
+          <Avatar.Fallback style={{ backgroundColor: 'hsl(268 62% 52%)', color: 'hsl(0 0% 100%)' }}>
+            L
+          </Avatar.Fallback>
+        </Avatar.Root>
+      </Cluster>
+      <span {...stylex.props(styles.rungUse)}>
+        a picture · letters, when the URL is gone · a mark, when there is no name to make letters
+        out of · an identity colour, which is the surface&apos;s: which hue belongs to which
+        workspace is a product fact and not a token.
+      </span>
+    </Row>
+  );
+}
+
+function AvatarDimensions() {
+  const dimensions = [
+    { name: 'avatar.sizeMini', value: avatarTokens.sizeMini },
+    { name: 'avatar.sizeSmall', value: avatarTokens.sizeSmall },
+    { name: 'avatar.sizeMedium', value: avatarTokens.sizeMedium },
+    { name: 'avatar.sizeLarge', value: avatarTokens.sizeLarge },
+    { name: 'avatar.sizeXlarge', value: avatarTokens.sizeXlarge },
+    { name: 'avatar.initialsMini', value: avatarTokens.initialsMini },
+    { name: 'avatar.initialsSmall', value: avatarTokens.initialsSmall },
+    { name: 'avatar.initialsMedium', value: avatarTokens.initialsMedium },
+    { name: 'avatar.initialsLarge', value: avatarTokens.initialsLarge },
+    { name: 'avatar.initialsXlarge', value: avatarTokens.initialsXlarge },
+    { name: 'avatar.glyphMini', value: avatarTokens.glyphMini },
+    { name: 'avatar.glyphSmall', value: avatarTokens.glyphSmall },
+    { name: 'avatar.glyphMedium', value: avatarTokens.glyphMedium },
+    { name: 'avatar.glyphLarge', value: avatarTokens.glyphLarge },
+    { name: 'avatar.glyphXlarge', value: avatarTokens.glyphXlarge },
+    { name: 'avatar.tileRadiusMini', value: avatarTokens.tileRadiusMini },
+    { name: 'avatar.tileRadiusSmall', value: avatarTokens.tileRadiusSmall },
+    { name: 'avatar.tileRadiusMedium', value: avatarTokens.tileRadiusMedium },
+    { name: 'avatar.tileRadiusLarge', value: avatarTokens.tileRadiusLarge },
+    { name: 'avatar.tileRadiusXlarge', value: avatarTokens.tileRadiusXlarge },
+  ];
+  return (
+    <Row>
+      <LegendKey>dimensions</LegendKey>
+      <div {...stylex.props(styles.replicaCaption)}>
+        <dl {...stylex.props(styles.constList)}>
+          {dimensions.map((entry) => (
+            <WidthProbeRow key={entry.name} {...entry} />
+          ))}
+        </dl>
+      </div>
+    </Row>
+  );
+}
+
+/** Single keys, and the chords they are pressed in. */
+function KbdRow() {
+  return (
+    <Row>
+      <LegendKey>keys</LegendKey>
+      <Cluster>
+        <Kbd>&#8593;</Kbd>
+        <Kbd>&#8595;</Kbd>
+        <Kbd>&#8629;</Kbd>
+        <Kbd>esc</Kbd>
+        <Kbd>Shift</Kbd>
+        <KbdGroup>
+          <Kbd>&#8984;</Kbd>
+          <Kbd>K</Kbd>
+        </KbdGroup>
+        <KbdGroup>
+          <Kbd>&#8984;</Kbd>
+          <Kbd>&#8679;</Kbd>
+          <Kbd>P</Kbd>
+        </KbdGroup>
+      </Cluster>
+      <span {...stylex.props(styles.rungUse)}>
+        one cap is at least as wide as it is tall, so a chord of `K` and `Shift` does not jump
+        between eight pixels and forty. A group is a kbd around kbds, which is what HTML gives this
+        shape.
+      </span>
+    </Row>
+  );
+}
+
+/**
+ * The same caps standing on the one surface that inverts.
+ *
+ * This is the row that would catch the regression: a cap carrying the page's
+ * own gray onto a tooltip is a light chip on a dark one with the letters gone.
+ * `Tooltip.Content` declares `kbdOnInvertedTheme` on its popup, and the board
+ * composes the very same two styles rather than describing them, so a chip this
+ * package no longer draws cannot be reported here.
+ */
+function KbdOnChipRow() {
+  return (
+    <Row>
+      <LegendKey>on a tooltip</LegendKey>
+      <Cluster>
+        <div
+          {...stylex.props(
+            chip.popup,
+            kbdOnInvertedTheme,
+            styles.tooltipReplica,
+            styles.tooltipReplicaRow
+          )}
+        >
+          <span>Open the command palette</span>
+          <KbdGroup>
+            <Kbd>&#8984;</Kbd>
+            <Kbd>K</Kbd>
+          </KbdGroup>
+        </div>
+      </Cluster>
+      <span {...stylex.props(styles.rungUse)}>
+        A component token group is how a surface tells what is inside it what it is standing on.
+        StyleX has no descendant selector, and unlike the one the deleted implementation used it
+        also reaches a cap a caller wrapped in something of their own.
+      </span>
+    </Row>
+  );
+}
+
+function KbdDimensions() {
+  const dimensions = [
+    { name: 'kbd.height', value: kbdTokens.height },
+    { name: 'kbd.minWidth', value: kbdTokens.minWidth },
+    { name: 'kbd.paddingX', value: kbdTokens.paddingX },
+    { name: 'kbd.gap', value: kbdTokens.gap },
+    { name: 'kbd.radius', value: kbdTokens.radius },
+    { name: 'kbd.labelSize', value: kbdTokens.labelSize },
+    { name: 'kbd.labelLeading', value: kbdTokens.labelLeading },
+  ];
+  return (
+    <Row>
+      <LegendKey>dimensions</LegendKey>
+      <div {...stylex.props(styles.replicaCaption)}>
+        <dl {...stylex.props(styles.constList)}>
+          {dimensions.map((entry) => (
+            <WidthProbeRow key={entry.name} {...entry} />
+          ))}
+        </dl>
+      </div>
+    </Row>
+  );
+}
+
+const TOGGLE_SIZES: { name: string; size: ToggleSize }[] = [
+  { name: 'mini · 24', size: 'mini' },
+  { name: 'small · 28', size: 'small' },
+  { name: 'medium · 32', size: 'medium' },
+  { name: 'large · 36', size: 'large' },
+];
+
+const TOGGLE_COLORS = [
+  {
+    name: 'toggle.label',
+    value: toggleTokens.label,
+    note: 'off: about the thing it acts on',
+  },
+  { name: 'toggle.hover', value: toggleTokens.hover, note: 'the pointer, on an off toggle' },
+  { name: 'toggle.activeLabel', value: toggleTokens.activeLabel, note: 'on: it is the thing' },
+  {
+    name: 'toggle.pressedBackground',
+    value: toggleTokens.pressedBackground,
+    note: 'on: the well, not ink',
+  },
+  { name: 'toggle.ring', value: toggleTokens.ring, note: 'where the keyboard is' },
+];
+
+/** A mark for the board's toggles, sized by the box the control gives it. */
+function BoldGlyph() {
+  return (
+    <svg
+      width="100%"
+      height="100%"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M5 3h4a2.5 2.5 0 0 1 0 5H5zM5 8h4.6a2.5 2.5 0 0 1 0 5H5z" />
+    </svg>
+  );
+}
+
+function WrapGlyph() {
+  return (
+    <svg
+      width="100%"
+      height="100%"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M2.5 4h11M2.5 12h4M2.5 8h8.5a2.25 2.25 0 0 1 0 4.5H9.5M11 11l-1.5 1.5L11 14" />
+    </svg>
+  );
+}
+
+/**
+ * The two states, side by side, and the edge the pressed one carries.
+ *
+ * This is the one row that has to be read rather than described: off is a ghost
+ * Button and on is the well rung, which is the decision the whole family rests
+ * on. Ink would have been the other answer — the rules give a stored state ink
+ * — and ink is what a control that already sits in a well becomes when it is
+ * on. A toggle rests on nothing, so the well is still free.
+ */
+function ToggleStateRow() {
+  const { ref, value } = useMeasured<HTMLButtonElement>('box-shadow');
+  return (
+    <Row>
+      <LegendKey>off and on</LegendKey>
+      <Cluster>
+        <Toggle size="small">Wrap lines</Toggle>
+        <Toggle ref={ref} size="small" defaultPressed>
+          Wrap lines
+        </Toggle>
+        <Toggle size="small" icon aria-label="Bold">
+          <BoldGlyph />
+        </Toggle>
+        <Toggle size="small" icon defaultPressed aria-label="Wrap lines">
+          <WrapGlyph />
+        </Toggle>
+      </Cluster>
+      <span {...stylex.props(styles.readout)}>toggle.pressedWell {value}</span>
+    </Row>
+  );
+}
+
+/** One rung of the ladder, pressed so the row reads as a row. */
+function ToggleSizeRow({ name, size }: { name: string; size: ToggleSize }) {
+  const { ref, value } = useMeasured<HTMLButtonElement>('height');
+  return (
+    <Row>
+      <LegendKey>{name}</LegendKey>
+      <Cluster>
+        <Toggle ref={ref} size={size} defaultPressed>
+          Running
+        </Toggle>
+        <Toggle size={size}>Archived</Toggle>
+        <Toggle size={size} icon aria-label="Bold">
+          <BoldGlyph />
+        </Toggle>
+      </Cluster>
+      <span {...stylex.props(styles.readout)}>{value}</span>
+    </Row>
+  );
+}
+
+/** The second shape: a filter a person scans a row of rather than a control. */
+function TogglePillRow() {
+  return (
+    <Row>
+      <LegendKey>pill</LegendKey>
+      <Cluster>
+        <Toggle size="small" shape="pill" defaultPressed>
+          Running
+        </Toggle>
+        <Toggle size="small" shape="pill">
+          Needs review
+        </Toggle>
+        <Toggle size="small" shape="pill">
+          Archived
+        </Toggle>
+      </Cluster>
+      <Note>
+        A pill takes `corner.round`, because a squircle at `radius.full` is a superellipse rather
+        than the stadium the shape is named for.
+      </Note>
+    </Row>
+  );
+}
+
+/** A toggle nobody can press, reporting the one opacity the family dims with. */
+function ToggleDisabledRow() {
+  const { ref, value } = useMeasured<HTMLButtonElement>('opacity');
+  return (
+    <Row>
+      <LegendKey>disabled</LegendKey>
+      <Cluster>
+        <Toggle size="small" disabled>
+          Wrap lines
+        </Toggle>
+        <Toggle ref={ref} size="small" defaultPressed disabled>
+          Wrap lines
+        </Toggle>
+      </Cluster>
+      <span {...stylex.props(styles.readout)}>toggle.disabledOpacity {value}</span>
+    </Row>
+  );
+}
+
+/**
+ * The same three choices as a strip and as a set, which is the comparison this
+ * section exists to make.
+ *
+ * A `Tabs` strip picks what a person *sees*: one control, so a tray with one
+ * thing standing on it and a pill that slides. A `ToggleGroup`
+ * stores what is *on*: no track, and each member sinking on its own — because
+ * two of them can be pressed at once, and a sliding pill cannot say that.
+ */
+function ToggleSetRow() {
+  return (
+    <Row>
+      <LegendKey>set, and a strip</LegendKey>
+      <Cluster>
+        <ToggleGroup size="small" defaultValue={['board']}>
+          <Toggle value="board">Board</Toggle>
+          <Toggle value="list">List</Toggle>
+          <Toggle value="timeline">Timeline</Toggle>
+        </ToggleGroup>
+        <Tabs.Root defaultValue="board">
+          <Tabs.List size="small">
+            <Tabs.Tab value="board">Board</Tabs.Tab>
+            <Tabs.Tab value="list">List</Tabs.Tab>
+            <Tabs.Tab value="timeline">Timeline</Tabs.Tab>
+          </Tabs.List>
+        </Tabs.Root>
+      </Cluster>
+      <Note>
+        The set on the left and the strip on the right hold the same three words and are not the
+        same part. Only the strip is one control, so only the strip has a track.
+      </Note>
+    </Row>
+  );
+}
+
+/** Several at once, wrapping — the state no strip can describe. */
+function ToggleMultipleRow() {
+  return (
+    <Row>
+      <LegendKey>several at once</LegendKey>
+      <div {...stylex.props(styles.disclosureBlock)}>
+        <ToggleGroup multiple wrap size="mini" defaultValue={['status', 'assignee']}>
+          <Toggle value="status">Status</Toggle>
+          <Toggle value="assignee">Assignee</Toggle>
+          <Toggle value="labels">Labels</Toggle>
+          <Toggle value="due">Due date</Toggle>
+          <Toggle value="project">Project</Toggle>
+        </ToggleGroup>
+      </div>
+    </Row>
+  );
+}
+
+/**
+ * The bar, with two clusters and the one line between them.
+ *
+ * It draws nothing: what is under it here is the board's own panel. The gap
+ * between the clusters is wider than the gap inside one, which is the only
+ * thing the bar says about what belongs with what — beyond the line, and beyond
+ * making the whole row a single tab stop.
+ */
+function ToolbarRow() {
+  return (
+    <Row>
+      <LegendKey>bar</LegendKey>
+      <Cluster>
+        <Toolbar.Root aria-label="Format selection">
+          <Toolbar.Group aria-label="Marks">
+            <Toolbar.Button render={<Toggle size="small" icon aria-label="Bold" />}>
+              <BoldGlyph />
+            </Toolbar.Button>
+            <Toolbar.Button
+              render={<Toggle size="small" icon defaultPressed aria-label="Wrap lines" />}
+            >
+              <WrapGlyph />
+            </Toolbar.Button>
+          </Toolbar.Group>
+          <Toolbar.Separator />
+          <Toolbar.Group aria-label="Actions">
+            <Toolbar.Button
+              render={<Button variant="ghost" size="small" icon aria-label="Add a link" />}
+            >
+              <PlusGlyph />
+            </Toolbar.Button>
+            <Toolbar.Button render={<Button variant="ghost" size="small" />}>Quote</Toolbar.Button>
+          </Toolbar.Group>
+        </Toolbar.Root>
+      </Cluster>
+      <Note>
+        A bar is one tab stop and the arrow keys walk it, which is why it is a part rather than a
+        row with a gap: eight icon buttons are otherwise eight stops on the way past them.
+      </Note>
+    </Row>
+  );
+}
+
+function ToggleDimensions() {
+  const dimensions = [
+    { name: 'toggle.heightMini', value: toggleTokens.heightMini },
+    { name: 'toggle.heightSmall', value: toggleTokens.heightSmall },
+    { name: 'toggle.heightMedium', value: toggleTokens.heightMedium },
+    { name: 'toggle.heightLarge', value: toggleTokens.heightLarge },
+    { name: 'toggle.paddingXMini', value: toggleTokens.paddingXMini },
+    { name: 'toggle.paddingXSmall', value: toggleTokens.paddingXSmall },
+    { name: 'toggle.paddingXMedium', value: toggleTokens.paddingXMedium },
+    { name: 'toggle.paddingXLarge', value: toggleTokens.paddingXLarge },
+    { name: 'toggle.radiusMini', value: toggleTokens.radiusMini },
+    { name: 'toggle.radiusSmall', value: toggleTokens.radiusSmall },
+    { name: 'toggle.radiusMedium', value: toggleTokens.radiusMedium },
+    { name: 'toggle.textMini', value: toggleTokens.textMini },
+    { name: 'toggle.text', value: toggleTokens.text },
+    { name: 'toggle.gap', value: toggleTokens.gap },
+    { name: 'toggle.iconSize', value: toggleTokens.iconSize },
+    { name: 'toggle.groupGap', value: toggleTokens.groupGap },
+    { name: 'toggle.barGap', value: toggleTokens.barGap },
+    { name: 'toggle.ringWidth', value: toggleTokens.ringWidth },
+  ];
+  return (
+    <Row>
+      <LegendKey>dimensions</LegendKey>
+      <div {...stylex.props(styles.replicaCaption)}>
+        <dl {...stylex.props(styles.constList)}>
+          {dimensions.map((entry) => (
+            <WidthProbeRow key={entry.name} {...entry} />
+          ))}
+        </dl>
+      </div>
+    </Row>
+  );
+}
+
+function ButtonFocusRow() {
+  const { ref, value } = useMeasured<HTMLDivElement>('box-shadow');
+  return (
+    <Row>
+      <LegendKey>focus</LegendKey>
+      <Cluster>
+        <div ref={ref} {...stylex.props(styles.buttonFocusReplica)}>
+          Keyboard focus
+        </div>
+      </Cluster>
+      <span {...stylex.props(styles.readout)}>{value}</span>
+    </Row>
+  );
+}
+
+function FocusRingRow() {
+  const { ref, value } = useMeasured<HTMLDivElement>('box-shadow');
+  return (
+    <FieldRow legend="focus" readout={value}>
+      <div ref={ref} {...stylex.props(styles.focusReplica)}>
+        Describe the task
+      </div>
+    </FieldRow>
+  );
+}
+
+/**
+ * The `@lody/ui` token board: every semantic token and every Button state,
+ * rendered from the tokens themselves so the board cannot drift from them.
+ */
+export function UiGallery({ palettes = 'both' }: UiGalleryProps) {
+  return (
+    <Board>
+      <BoardHeader
+        title="Lody UI"
+        lead="Token board and primitive gallery for @lody/ui. Every colour, elevation rung, shadow, radius, control size, type step and Button state, rendered from the tokens in both palettes. Values under each sample are read back from the rendered node, so this board reports what the tokens produce rather than a copy of them."
+      />
+
+      <Section
+        title="Surfaces"
+        rule="Depth without lines. No border token exists: surfaces separate by luminance step and shadow."
+      >
+        <PaletteSplit palettes={palettes}>
+          <Grid>
+            {SURFACES.map((token) => (
+              <Swatch key={token.name} {...token} />
+            ))}
+          </Grid>
+        </PaletteSplit>
+      </Section>
+
+      <Section
+        title="Elevation ladder"
+        rule="One rung per component. The rung fixes background and shadow together."
+      >
+        <PaletteSplit palettes={palettes}>
+          <div {...stylex.props(styles.stage)}>
+            {RUNGS.map((rung) => (
+              <div key={rung.name} {...stylex.props(styles.rung, rung.style)}>
+                <span {...stylex.props(styles.rungName)}>{rung.name}</span>
+                <span {...stylex.props(styles.rungUse)}>{rung.use}</span>
+              </div>
+            ))}
+          </div>
+        </PaletteSplit>
+      </Section>
+
+      <Section
+        title="Content"
+        rule="label is the thing, secondaryLabel is about the thing, tertiaryLabel is a hint."
+      >
+        <PaletteSplit palettes={palettes}>
+          <div {...stylex.props(styles.textSample)}>
+            <span {...stylex.props(dyn.text(colors.label))}>label — Session started</span>
+            <span {...stylex.props(dyn.text(colors.secondaryLabel))}>
+              secondaryLabel — 4 files changed
+            </span>
+            <span {...stylex.props(dyn.text(colors.tertiaryLabel))}>
+              tertiaryLabel — Describe the task
+            </span>
+          </div>
+          <Grid>
+            {CONTENT_COLORS.map((token) => (
+              <Swatch key={token.name} {...token} />
+            ))}
+          </Grid>
+        </PaletteSplit>
+      </Section>
+
+      <Section
+        title="Fills and edges"
+        rule="separator divides list and table rows only, never around a surface. The ring is 2px, tight to the control, no glow."
+      >
+        <PaletteSplit palettes={palettes}>
+          <Rows>
+            <div {...stylex.props(styles.hoverRow, styles.hoverFill)}>hoverFill</div>
+            <div {...stylex.props(styles.hoverRow, styles.selectedFill)}>selectedFill</div>
+            <div {...stylex.props(styles.separatorRow)}>
+              <span {...stylex.props(styles.separatorText)}>separator — first row</span>
+              <Separator />
+              <span {...stylex.props(styles.separatorText)}>separator — next row</span>
+            </div>
+            <div {...stylex.props(styles.overlaySample)}>overlay</div>
+            <Cluster>
+              <div {...stylex.props(styles.ring, styles.ringAccent)}>focus ring · accent</div>
+              <div {...stylex.props(styles.ring, styles.ringDestructive)}>
+                invalid · destructive
+              </div>
+            </Cluster>
+          </Rows>
+          <Grid>
+            {FILLS.map((token) => (
+              <Swatch key={token.name} {...token} />
+            ))}
+          </Grid>
+        </PaletteSplit>
+      </Section>
+
+      <Section
+        title="Roles"
+        rule="accent marks live state only — focus, link, running — and is never a button fill. Ink carries stored state instead."
+      >
+        <PaletteSplit palettes={palettes}>
+          <Grid>
+            {ROLE_COLORS.map((token) => (
+              <Swatch key={token.name} {...token} />
+            ))}
+          </Grid>
+        </PaletteSplit>
+      </Section>
+
+      <Section
+        title="Gray ramp"
+        rule="Semantic first, gray second. These are for things with no role: scrollbar, track, kbd, skeleton."
+      >
+        <PaletteSplit palettes={palettes}>
+          <Grid>
+            {GRAYS.map((token) => (
+              <Swatch key={token.name} {...token} note="no role" />
+            ))}
+          </Grid>
+        </PaletteSplit>
+      </Section>
+
+      <Section
+        title="Shadows"
+        rule="Strength by rung, light from above. Every lifted edge is a hairline, a tight contact shadow and a short, negatively spread lift rather than one soft cloud: the cloud is what reads as grime. Dark palettes add an inset top highlight and draw the hairline in light. A sheen is the light's fall-off over a raised fill, a few percent at most, and a press drops it."
+      >
+        <PaletteSplit palettes={palettes}>
+          <Grid>
+            {SHADOWS.map((token) => (
+              <ShadowChip key={token.name} {...token} />
+            ))}
+            {SHEENS.map((token) => (
+              <ShadowChip key={token.name} {...token} />
+            ))}
+          </Grid>
+        </PaletteSplit>
+      </Section>
+
+      <Section
+        title="Corners"
+        rule="corner.shape (squircle) rides along with every radius except radius.full, which is a pill or a circle and takes corner.round: a squircle at that radius is a superellipse, not a stadium, so it would turn a switch track into a rounded rectangle and a radio into a squircle. Round corners outside Chromium are the accepted fallback. Nested radius is outer minus inset."
+      >
+        <PaletteSplit palettes={palettes}>
+          <Grid>
+            {RADII.map((token) => (
+              <RadiusChip key={token.name} {...token} />
+            ))}
+          </Grid>
+        </PaletteSplit>
+      </Section>
+
+      <Section
+        title="Control sizes"
+        rule="28 / 32 / 36. Default 32; 36 only for empty states and onboarding. Icon-only buttons are square at the size's height."
+      >
+        <PaletteSplit palettes={palettes}>
+          <Rows>
+            {CONTROL_SIZES.map((token) => (
+              <ControlRow key={token.name} {...token} />
+            ))}
+          </Rows>
+        </PaletteSplit>
+      </Section>
+
+      <Section
+        title="Type"
+        rule="Controls at 13 with weight 500 and controlTracking. Prose at 14. Field labels and help at 12."
+      >
+        <PaletteSplit palettes={palettes}>
+          <Rows>
+            {TYPE_SCALE.map((token) => (
+              <TypeRow key={token.name} {...token} />
+            ))}
+          </Rows>
+        </PaletteSplit>
+      </Section>
+
+      <Section title="Space" rule="The spacing step used for gaps, padding and stack rhythm.">
+        <PaletteSplit palettes={palettes}>
+          <Rows>
+            {SPACES.map((token) => (
+              <SpaceRow key={token.name} {...token} />
+            ))}
+          </Rows>
+        </PaletteSplit>
+      </Section>
+
+      <Section
+        title="Motion"
+        rule="The distance a thing travels picks its step. Press translates 1px and drops the ink edge at duration.fast. A popup rises 4px at duration.regular. A drawer crosses the window at duration.slow, because 180ms over 600px reads as a snap rather than a slide. One easing throughout. Hover a chip to see its duration."
+      >
+        <PaletteSplit palettes={palettes}>
+          <Cluster>
+            <div {...stylex.props(styles.motionChip, dyn.transition(duration.fast))}>
+              duration.fast · press, cross-fade
+            </div>
+            <div {...stylex.props(styles.motionChip, dyn.transition(duration.regular))}>
+              duration.regular · rise
+            </div>
+            <div {...stylex.props(styles.motionChip, dyn.transition(duration.slow))}>
+              duration.slow · a drawer crossing the window
+            </div>
+          </Cluster>
+        </PaletteSplit>
+      </Section>
+
+      <Section title="Constants" rule="Compile-time values; they are the same in both palettes.">
+        <PaletteSplit palettes={palettes}>
+          <dl {...stylex.props(styles.constList)}>
+            {CONSTS.map((entry) => (
+              <div key={entry.name} {...stylex.props(styles.constRow)}>
+                <dt {...stylex.props(styles.constName)}>{entry.name}</dt>
+                <dd {...stylex.props(styles.constValue)}>{entry.value}</dd>
+              </div>
+            ))}
+          </dl>
+        </PaletteSplit>
+      </Section>
+
+      <Section
+        title="Button · variants and sizes"
+        rule="Variant carries the role, size carries the density. Visual choices are props; callers never restyle a button."
+      >
+        <PaletteSplit palettes={palettes}>
+          <div {...stylex.props(styles.matrix)}>
+            {BUTTON_VARIANTS.map((variant) => (
+              <Fragment key={variant}>
+                <LegendKey>{variant}</LegendKey>
+                <Cluster>
+                  {BUTTON_SIZES.map((size) => (
+                    <Button key={size} variant={variant} size={size}>
+                      {size}
+                    </Button>
+                  ))}
+                </Cluster>
+              </Fragment>
+            ))}
+          </div>
+        </PaletteSplit>
+      </Section>
+
+      <Section
+        title="Button · states, tone, shape, icons"
+        rule="Disabled is 45% opacity on the whole control, not a colour. Destructive tone tints a quiet variant; the destructive variant fills. The focus ring is a box-shadow composed with the variant's own edge, never an outline."
+      >
+        <PaletteSplit palettes={palettes}>
+          <Rows>
+            <Row>
+              <LegendKey>disabled</LegendKey>
+              <Cluster>
+                <Button disabled>Primary</Button>
+                <Button variant="secondary" disabled>
+                  Secondary
+                </Button>
+                <Button variant="ghost" disabled>
+                  Ghost
+                </Button>
+                <Button variant="destructive" disabled>
+                  Delete
+                </Button>
+              </Cluster>
+            </Row>
+            <Row>
+              <LegendKey>tone=&quot;destructive&quot;</LegendKey>
+              <Cluster>
+                <Button variant="secondary" tone="destructive">
+                  Remove
+                </Button>
+                <Button variant="ghost" tone="destructive">
+                  Remove
+                </Button>
+                <Button variant="link" tone="destructive">
+                  Remove
+                </Button>
+                <Button variant="destructive">Delete session</Button>
+              </Cluster>
+            </Row>
+            <Row>
+              <LegendKey>shape=&quot;pill&quot;</LegendKey>
+              <Cluster>
+                <Button shape="pill">Send</Button>
+                <Button variant="secondary" shape="pill">
+                  Draft
+                </Button>
+                <Button shape="pill" icon aria-label="Add attachment">
+                  <PlusGlyph />
+                </Button>
+              </Cluster>
+            </Row>
+            <Row>
+              <LegendKey>icon</LegendKey>
+              <Cluster>
+                {BUTTON_SIZES.map((size) => (
+                  <Button
+                    key={size}
+                    size={size}
+                    variant="secondary"
+                    icon
+                    aria-label={`Add ${size}`}
+                  >
+                    <PlusGlyph />
+                  </Button>
+                ))}
+                <Button>
+                  <PlusGlyph />
+                  With label
+                </Button>
+              </Cluster>
+            </Row>
+            <ButtonFocusRow />
+            <Row>
+              <LegendKey>render</LegendKey>
+              <Cluster>
+                <Button variant="link" render={<a href="#gallery" />}>
+                  Anchor as a button
+                </Button>
+              </Cluster>
+            </Row>
+          </Rows>
+        </PaletteSplit>
+      </Section>
+
+      <Section
+        title="Field · label, control, help, error"
+        rule="One token group serves the whole family, so a state has one colour in one place. Field.Root owns name, disabled and validity; the label, control, help and error read that state instead of taking their own copies. Field.Root renders its validity as aria-invalid, and the ring follows that attribute, so a surface holding its own validation reaches the same state on a bare control."
+      >
+        <PaletteSplit palettes={palettes}>
+          <Rows>
+            <FieldRow legend="anatomy">
+              <Field.Root name="title">
+                <Field.Label>Session title</Field.Label>
+                <Input placeholder="Describe the task" />
+                <Field.Description>Shown in the sidebar and on the session card.</Field.Description>
+              </Field.Root>
+            </FieldRow>
+            <FieldRow legend="filled">
+              <Field.Root name="title">
+                <Field.Label>Session title</Field.Label>
+                <Input defaultValue="Rebuild the composer" />
+              </Field.Root>
+            </FieldRow>
+            <InvalidFieldRow />
+            <FieldRow legend={'invalid \u00b7 aria-invalid'}>
+              <Field.Label htmlFor="gallery-aria-invalid">Session title</Field.Label>
+              <Input id="gallery-aria-invalid" aria-invalid placeholder="Describe the task" />
+            </FieldRow>
+            <FieldRow legend="disabled">
+              <Field.Root name="title" disabled>
+                <Field.Label>Session title</Field.Label>
+                <Input defaultValue="Rebuild the composer" />
+                <Field.Description>Locked while the session runs.</Field.Description>
+              </Field.Root>
+            </FieldRow>
+            <FocusRingRow />
+          </Rows>
+          <Grid>
+            {FIELD_COLORS.map((token) => (
+              <Swatch key={token.name} {...token} />
+            ))}
+            <ShadowChip
+              name="field.well"
+              box={field.well}
+              fill={field.background}
+              ink={false}
+              note="the control is sunken, not outlined"
+            />
+          </Grid>
+        </PaletteSplit>
+      </Section>
+
+      <Section
+        title="Field · sizes and Textarea"
+        rule="28 / 32 / 36, the same ladder as Button, with radius small at 28 and medium at 32 and 36. Textarea is the same well at the medium radius and grows downward. What a value belongs with — an emoji before a name, the / before a command — goes in the leading slot inside the same well, a square the well’s height less its inset, rather than beside it as a second control with a second edge."
+      >
+        <PaletteSplit palettes={palettes}>
+          <Rows>
+            {FIELD_SIZES.map((entry) => (
+              <FieldSizeRow key={entry.size} {...entry} />
+            ))}
+            <FieldRow legend="input · leading">
+              <Field.Root name="role">
+                <Field.Label>Role</Field.Label>
+                <Input size="large" leading={<LeadingEmoji />} defaultValue="Code Reviewer" />
+              </Field.Root>
+            </FieldRow>
+            <FieldRow legend="input · leading text">
+              <Field.Root name="command">
+                <Field.Label>Slash command</Field.Label>
+                <Input size="large" leading="/" placeholder="review-pr" />
+              </Field.Root>
+            </FieldRow>
+            <FieldRow legend="textarea">
+              <Field.Root name="summary">
+                <Field.Label>What should the agent do?</Field.Label>
+                <Textarea placeholder="Describe the task" rows={3} />
+                <Field.Description>Enter sends; Shift+Enter adds a line.</Field.Description>
+              </Field.Root>
+            </FieldRow>
+            <FieldRow legend="textarea · invalid">
+              <Field.Root name="summary" invalid>
+                <Field.Label>What should the agent do?</Field.Label>
+                <Textarea defaultValue="" placeholder="Describe the task" rows={3} />
+                <Field.Error match>Describe the task before starting.</Field.Error>
+              </Field.Root>
+            </FieldRow>
+            <FieldRow legend="textarea · disabled">
+              <Field.Root name="summary" disabled>
+                <Field.Label>What should the agent do?</Field.Label>
+                <Textarea defaultValue="Rebuild the composer" resize="none" rows={3} />
+              </Field.Root>
+            </FieldRow>
+          </Rows>
+        </PaletteSplit>
+      </Section>
+
+      <Section
+        title="Field · Checkbox, Radio, Switch"
+        rule="The same well, ring and disabled treatment as the text controls, drawn as a 16px box and a 28px track. Stored state is ink: the label fill with the background mark and the primary button's own top highlight, because accent stays on live state and is never a fill. A mixed box announces mixed and draws the dash rather than falling back to a tick it does not hold."
+      >
+        <PaletteSplit palettes={palettes}>
+          <Rows>
+            <ChoiceRow legend="checkbox">
+              <Field.Label>
+                <Checkbox />
+                Include diffs
+              </Field.Label>
+              <Field.Label>
+                <Checkbox indeterminate />
+                Some files
+              </Field.Label>
+            </ChoiceRow>
+            <CheckedInkRow />
+            <ChoiceRow legend={'checkbox \u00b7 invalid'}>
+              <Field.Root invalid>
+                <Field.Label>
+                  <Checkbox />
+                  Accept the terms
+                </Field.Label>
+                <Field.Error match>Tick this to continue.</Field.Error>
+              </Field.Root>
+            </ChoiceRow>
+            <ChoiceRow legend={'checkbox \u00b7 disabled'}>
+              <Field.Root disabled>
+                <Field.Label>
+                  <Checkbox defaultChecked />
+                  Include diffs
+                </Field.Label>
+              </Field.Root>
+            </ChoiceRow>
+            <ChoiceRow legend="radio">
+              <RadioGroup name="gallery-review" defaultValue="ask">
+                <Field.Label>
+                  <Radio value="ask" />
+                  Ask before reviewing
+                </Field.Label>
+                <Field.Label>
+                  <Radio value="auto" />
+                  Review every push
+                </Field.Label>
+              </RadioGroup>
+            </ChoiceRow>
+            <SwitchTrackRow />
+            <ChoiceRow legend={'switch \u00b7 disabled'}>
+              <Field.Root disabled>
+                <Field.Label>
+                  <Switch defaultChecked />
+                  Auto review
+                </Field.Label>
+              </Field.Root>
+            </ChoiceRow>
+          </Rows>
+          <Grid>
+            {CHOICE_COLORS.map((token) => (
+              <Swatch key={token.name} {...token} />
+            ))}
+            <ShadowChip
+              name="field.checkedEdge"
+              box={field.checkedEdge}
+              fill={field.checkedFill}
+              ink
+              sheen={field.checkedSheen}
+              note="the ink highlight a checked control carries"
+            />
+            <ShadowChip
+              name="field.thumbShadow"
+              box={field.thumbShadow}
+              fill={field.thumb}
+              ink={false}
+              sheen={field.thumbSheen}
+              note="the thumb is raised on both tracks"
+            />
+            <ShadowChip
+              name="field.checkedSheen"
+              box={field.checkedEdge}
+              fill={field.checkedFill}
+              ink
+              sheen={field.checkedSheen}
+              note="the light falling off a checked fill"
+            />
+            <ShadowChip
+              name="field.thumbSheen"
+              box={field.thumbShadow}
+              fill={field.thumb}
+              ink={false}
+              sheen={field.thumbSheen}
+              note="the light falling off the thumb"
+            />
+          </Grid>
+        </PaletteSplit>
+      </Section>
+      <Section
+        title="NumberField and PasswordInput · a number, and a secret"
+        rule="Both are the field family’s well with something beside the value, the way a Combobox holds a chevron: one control with one ring, not a control and a button next to it. A NumberField is the range rather than a text control that happens to hold digits — it owns min, max and step, clamps what a stepper and the arrow keys do, and hands a surface a number or null instead of a string to parse. The steppers are for a value somebody nudges; a value typed once takes the bare input and is the whole well. Base UI names the steppers Increase and Decrease in English and marks an invalid number field data-invalid without ever saying aria-invalid, so this package states both itself. A PasswordInput is the one control here with no Base UI primitive under it: the input builds its own shell, which is how a Field.Root’s disabled reaches the eye and not only the value. Whether the secret is showing is the control’s own state — the eye on this board is live, and the revealed row is one press away."
+      >
+        <PaletteSplit palettes={palettes}>
+          <Rows>
+            <NumberStepperRow name="stepped" size="medium" />
+            <NumberBareRow />
+            {NUMBER_SIZES.map((entry) => (
+              <NumberStepperRow key={entry.size} {...entry} />
+            ))}
+            <NumberInvalidRow />
+            <FieldRow legend="disabled">
+              <Field.Root disabled>
+                <Field.Label>Conversation font size</Field.Label>
+                <NumberField.Root defaultValue={14} min={8} max={32}>
+                  <NumberField.Group>
+                    <NumberField.Input />
+                    <NumberField.Decrement />
+                    <NumberField.Increment />
+                  </NumberField.Group>
+                </NumberField.Root>
+              </Field.Root>
+            </FieldRow>
+            <PasswordRow legend="password">
+              <Field.Label>Password</Field.Label>
+              <PasswordInput defaultValue="hunter2" />
+              <Field.Description>At least 8 characters.</Field.Description>
+            </PasswordRow>
+            {PASSWORD_SIZES.map((entry) => (
+              <PasswordSizeRow key={entry.size} {...entry} />
+            ))}
+            <FieldRow legend={'password \u00b7 invalid'}>
+              <Field.Root invalid>
+                <Field.Label>Password</Field.Label>
+                <PasswordInput defaultValue="short" />
+                <Field.Error match>Use at least 8 characters.</Field.Error>
+              </Field.Root>
+            </FieldRow>
+            <FieldRow legend={'password \u00b7 disabled'}>
+              <Field.Root disabled>
+                <Field.Label>Password</Field.Label>
+                <PasswordInput defaultValue="hunter2" />
+              </Field.Root>
+            </FieldRow>
+          </Rows>
+        </PaletteSplit>
+      </Section>
+
+      <Section
+        title="Select · trigger and list"
+        rule="A trigger is a field like the input above it — one flat material for every control that holds a value — so it takes the field family's size ladder, ring, invalid ring and disabled opacity; the list it opens is on the floating rung and reads the popup group instead. A row states two facts: selected is the row that holds the value, highlighted is where the keyboard or the pointer is, and the highlight wins the fill because it is the one that moves. The open list below is a stand-in built from the same rules the popup applies, because a board cannot show a popup without covering what is under it."
+      >
+        <PaletteSplit palettes={palettes}>
+          <Rows>
+            {SELECT_SIZES.map((entry) => (
+              <SelectSizeRow key={entry.size} {...entry} />
+            ))}
+            <FieldRow legend="filled">
+              <Field.Root>
+                <Field.Label>Fruit</Field.Label>
+                <FruitSelect defaultValue="fuji" />
+              </Field.Root>
+            </FieldRow>
+            <FieldRow legend="invalid">
+              <Field.Root invalid>
+                <Field.Label>Fruit</Field.Label>
+                <FruitSelect />
+                <Field.Error match>Pick a fruit before continuing.</Field.Error>
+              </Field.Root>
+            </FieldRow>
+            <FieldRow legend="disabled">
+              <Field.Root disabled>
+                <Field.Label>Fruit</Field.Label>
+                <FruitSelect defaultValue="gala" />
+              </Field.Root>
+            </FieldRow>
+            <PopupReplica />
+          </Rows>
+          <Grid>
+            {POPUP_COLORS.map((token) => (
+              <Swatch key={token.name} {...token} />
+            ))}
+            <ShadowChip
+              name="popup.shadow"
+              box={popup.shadow}
+              fill={popup.background}
+              ink={false}
+              note="the floating rung, above the page"
+            />
+          </Grid>
+        </PaletteSplit>
+      </Section>
+
+      <Section
+        title="Combobox · filter and list"
+        rule="The same well and the same list, with a query in front of them. On its own the input is the whole control; inside an input group the group is the well and the input is bare, so a chevron beside it lands inside one control rather than beside a second one. The ring follows focus inside the group, and disabled dims it from state because :disabled cannot reach a div."
+      >
+        <PaletteSplit palettes={palettes}>
+          <Rows>
+            <FieldRow legend="input">
+              <Field.Root>
+                <Field.Label>Language</Field.Label>
+                <LanguageCombobox>
+                  <Combobox.Input placeholder="Search a language" />
+                </LanguageCombobox>
+              </Field.Root>
+            </FieldRow>
+            <FieldRow legend="input group">
+              <Field.Root>
+                <Field.Label>Language</Field.Label>
+                <LanguageCombobox>
+                  <Combobox.InputGroup>
+                    <Combobox.Input placeholder="Search a language" />
+                    <Combobox.Trigger aria-label="Open the language list" />
+                  </Combobox.InputGroup>
+                </LanguageCombobox>
+              </Field.Root>
+            </FieldRow>
+            <FieldRow legend="button · search inside">
+              <Field.Root>
+                <Field.Label>Language</Field.Label>
+                <LanguageCombobox
+                  defaultValue="Rust"
+                  search={<Combobox.Search placeholder="Search a language" />}
+                >
+                  <Combobox.Button />
+                </LanguageCombobox>
+              </Field.Root>
+            </FieldRow>
+            <FieldRow legend="filled">
+              <Field.Root>
+                <Field.Label>Language</Field.Label>
+                <LanguageCombobox defaultValue="Rust">
+                  <Combobox.InputGroup>
+                    <Combobox.Input />
+                    <Combobox.Trigger aria-label="Open the language list" />
+                  </Combobox.InputGroup>
+                </LanguageCombobox>
+              </Field.Root>
+            </FieldRow>
+            <FieldRow legend="invalid">
+              <Field.Root invalid>
+                <Field.Label>Language</Field.Label>
+                <LanguageCombobox>
+                  <Combobox.InputGroup>
+                    <Combobox.Input placeholder="Search a language" />
+                    <Combobox.Trigger aria-label="Open the language list" />
+                  </Combobox.InputGroup>
+                </LanguageCombobox>
+                <Field.Error match>Pick a language before continuing.</Field.Error>
+              </Field.Root>
+            </FieldRow>
+            <FieldRow legend="disabled">
+              <Field.Root disabled>
+                <Field.Label>Language</Field.Label>
+                <LanguageCombobox defaultValue="Rust">
+                  <Combobox.InputGroup>
+                    <Combobox.Input />
+                    <Combobox.Trigger aria-label="Open the language list" />
+                  </Combobox.InputGroup>
+                </LanguageCombobox>
+              </Field.Root>
+            </FieldRow>
+          </Rows>
+        </PaletteSplit>
+      </Section>
+      <Section
+        title="Menu · dropdown, context menu and menubar"
+        rule="A menu is the same floating surface a Select opens, so it reads the popup group and its rows are the rows of a list. One declaration differs: a list takes the width of the control it belongs to, and a menu — opened by whatever the surface already had there — states its own. A command that destroys something is the one row that is not the label colour, and its highlight is mixed toward destructive so the fill cannot say 'an ordinary command'. ContextMenu and Menubar re-use these rows rather than restating them: only the way in differs."
+      >
+        <PaletteSplit palettes={palettes}>
+          <Rows>
+            <Row>
+              <LegendKey>dropdown</LegendKey>
+              <Cluster>
+                <SessionMenu />
+              </Cluster>
+            </Row>
+            <Row>
+              <LegendKey>context menu</LegendKey>
+              <Cluster>
+                <ContextMenu.Root>
+                  <ContextMenu.Trigger>
+                    <div {...stylex.props(styles.contextArea)}>Right-click this area</div>
+                  </ContextMenu.Trigger>
+                  <ContextMenu.Content>
+                    <ContextMenu.Item inset>Rename</ContextMenu.Item>
+                    <ContextMenu.Item inset>Duplicate</ContextMenu.Item>
+                    <ContextMenu.Separator />
+                    <ContextMenu.Item inset tone="destructive">
+                      Delete
+                    </ContextMenu.Item>
+                  </ContextMenu.Content>
+                </ContextMenu.Root>
+              </Cluster>
+            </Row>
+            <Row>
+              <LegendKey>menubar</LegendKey>
+              <Cluster>
+                <Menubar.Root>
+                  <Menubar.Menu>
+                    <Menubar.Trigger>File</Menubar.Trigger>
+                    <Menubar.Content>
+                      <Menubar.Item shortcut={'\u2318N'}>New task</Menubar.Item>
+                      <Menubar.Item shortcut={'\u2318S'}>Save</Menubar.Item>
+                    </Menubar.Content>
+                  </Menubar.Menu>
+                  <Menubar.Menu>
+                    <Menubar.Trigger>Edit</Menubar.Trigger>
+                    <Menubar.Content>
+                      <Menubar.Item shortcut={'\u2318Z'}>Undo</Menubar.Item>
+                      <Menubar.Item tone="destructive">Delete</Menubar.Item>
+                    </Menubar.Content>
+                  </Menubar.Menu>
+                </Menubar.Root>
+              </Cluster>
+            </Row>
+            <MenuReplica />
+          </Rows>
+        </PaletteSplit>
+      </Section>
+
+      <Section
+        title="Popover · a surface with content on it"
+        rule="A popover is the floating rung a Select list and a Menu already open, holding content instead of rows. It replaces five of a list's declarations: the width a list takes from the control that shows its value, the 4px inset that lets a row bleed to the surface's edge, and the three that make the type a control's — size, weight and tracking — because what is in a popover is sentences at 14 and weight 400. A control placed in one brings its own step. It is opened by whatever the surface already had there, through render, the way a menu is."
+      >
+        <PaletteSplit palettes={palettes}>
+          <Rows>
+            <Row>
+              <LegendKey>popover</LegendKey>
+              <Cluster>
+                <FilterPopover />
+              </Cluster>
+            </Row>
+            <PopoverReplica />
+          </Rows>
+        </PaletteSplit>
+      </Section>
+
+      <Section
+        title="Dialog · AlertDialog and Drawer"
+        rule="The modal rung is the one that states three things at once: the elevated background, the large shadow, and an overlay over the page — a panel that covers what a person was doing while still showing it. The three are one family reading one token group. A Dialog is dismissable and says so with a cross; an AlertDialog is answered rather than dismissed, so it has no cross and a press beside it is not an answer — Escape still is, because it is the platform's cancel; a Drawer is that panel arriving from an edge, and unlike the other two it can be dragged back out of it — which is why this system has no Sheet. Each one names its own panel as the container every Select, Combobox and Menu inside it mounts into, so a list opened in a modal is inside the focus scope holding it."
+      >
+        <PaletteSplit palettes={palettes}>
+          <Rows>
+            <ModalTriggers />
+            <DialogReplica />
+            <ModalDimensions />
+            <Row>
+              <LegendKey>dialog.overlay</LegendKey>
+              <Cluster>
+                <div {...stylex.props(styles.overlaySwatch)}>
+                  <div {...stylex.props(styles.overlayFill)} />
+                </div>
+              </Cluster>
+              <span {...stylex.props(styles.rungUse)}>
+                The page, receding under the panel. It is the rung's third declaration rather than a
+                colour a surface picks.
+              </span>
+            </Row>
+          </Rows>
+          <Grid>
+            {DIALOG_COLORS.map((token) => (
+              <Swatch key={token.name} {...token} />
+            ))}
+            <ShadowChip
+              name="dialog.shadow"
+              box={dialogTokens.shadow}
+              fill={dialogTokens.background}
+              ink={false}
+              note="the modal rung, over everything"
+            />
+          </Grid>
+        </PaletteSplit>
+      </Section>
+
+      <Section
+        title="Tooltip · the name of the thing under the pointer"
+        rule="The one floating part that does not read the popup group. The ladder puts a menu, a popover and a list on the raised background under the popover shadow, and then names the tooltip apart: label with shadow.medium. That is a deliberate inversion — a popup is a place to act, a tooltip only names one — so a tooltip carries the page's text colour as its fill and the page's background as its ink, the same pair a primary button and a checked box take. It never takes the pointer, and one that names a control inside a popup still sits above it."
+      >
+        <PaletteSplit palettes={palettes}>
+          <Rows>
+            <TooltipRow />
+            <TooltipReplica />
+          </Rows>
+          <Grid>
+            {TOOLTIP_COLORS.map((token) => (
+              <Swatch key={token.name} {...token} />
+            ))}
+            <ShadowChip
+              name="tooltip.shadow"
+              box={tooltipTokens.shadow}
+              fill={tooltipTokens.background}
+              ink={false}
+              note="tight, because it sits on what it names"
+            />
+          </Grid>
+        </PaletteSplit>
+      </Section>
+      <Section
+        title="Tabs · the choices side by side"
+        rule="A tab strip is a flat tray with one key standing on it. The tray is not a field's well: a tab picks what is shown rather than what is stored, so the strip has no rim and no inner shadow — only a tint a step off whatever it sits on — and the pill is the one thing raised, lighter than the tray in both palettes. The pill is one element that slides rather than a fill on each tab, because the strip is one control. A tab carries no fill in any state; what changes when you take one is its colour, and the pill arriving under it. The size is stated once on the strip: the tabs take the track less a 2px inset, so a 32px strip holds a 28px pill, and their corner is the track's less the same inset. Arrow keys move without taking, because a tab swaps a panel that may be expensive to build."
+      >
+        <PaletteSplit palettes={palettes}>
+          <Rows>
+            {STRIP_SIZES.map((entry) => (
+              <StripRow key={entry.name} {...entry} />
+            ))}
+            <StripDisabledRow />
+            <StripStretchRow />
+            <StripPanelRow />
+            <StripDimensions />
+          </Rows>
+          <Grid>
+            {STRIP_COLORS.map((token) => (
+              <Swatch key={token.name} {...token} />
+            ))}
+            <ShadowChip
+              name="disclosure.indicatorShadow"
+              box={disclosureTokens.indicatorShadow}
+              fill={disclosureTokens.indicator}
+              ink={false}
+              sheen={disclosureTokens.indicatorSheen}
+              note="the selected tab, raised"
+            />
+            <ShadowChip
+              name="disclosure.indicatorSheen"
+              box={disclosureTokens.indicatorShadow}
+              fill={disclosureTokens.indicator}
+              ink={false}
+              sheen={disclosureTokens.indicatorSheen}
+              note="the light falling off the pill"
+            />
+          </Grid>
+        </PaletteSplit>
+      </Section>
+
+      <Section
+        title="Accordion and Collapsible · the choices stacked"
+        rule="The same family laid out down the page instead of across it: a row, and what opens under it in place. A row has no fill in any state — it is a line of a list rather than a control on a surface — so the line to the next row is the separator the rules give a list, and what moves when it opens is the chevron the part draws. One row is open at a time unless the stack says otherwise, because an accordion's point is that a long page stays short. A Collapsible is one of those rows with no list around it, so it takes no line and no row: its trigger is whatever the surface already had there, and the panel is all the primitive owns. What a panel holds is prose, and its padding rides on a child of it — the panel's own height is what the reveal animates, and Base UI measures that height with scrollHeight, which counts padding."
+      >
+        <PaletteSplit palettes={palettes}>
+          <Rows>
+            <StackRow />
+            <CollapsibleRow />
+            <StackDimensions />
+          </Rows>
+          <Grid>
+            {STACK_COLORS.map((token) => (
+              <Swatch key={token.name} {...token} />
+            ))}
+          </Grid>
+        </PaletteSplit>
+      </Section>
+      <Section
+        title="Alert and Toast · what the system says back"
+        rule="One message on two rungs. An Alert stays on the page it is about, so it takes the card rung; a Toast arrives over that page, so it takes the floating one — not the modal rung, because a toast does not have to be answered and nothing behind it recedes. Both are the same block: the tone's mark, what happened, the sentence under it, and whatever answers it. A tone is a tint and a mark, never a fill: the tint is 8% of the tone mixed into the rung's own background, which is the mix a destructive menu row already uses, and the mark is drawn by the part rather than passed to it — a caller free to choose a glyph can put a tick on a failure. Neutral is the one tone with no colour of its own: accent is the obvious candidate and the rules reserve it for live state. How urgently a message is announced follows from its tone as well, because a surface that had to choose would choose alert every time."
+      >
+        <PaletteSplit palettes={palettes}>
+          <Rows>
+            {FEEDBACK_TONES.map((tone) => (
+              <AlertRow key={tone} tone={tone} />
+            ))}
+            <AlertActionsRow />
+            <ToastReplica tone="neutral" />
+            <ToastReplica tone="danger" />
+            <ToastTriggerRow />
+            <MessageDimensions />
+          </Rows>
+          <Grid>
+            {MESSAGE_COLORS.map((token) => (
+              <Swatch key={token.name} {...token} />
+            ))}
+            <ShadowChip
+              name="feedback.noticeShadow"
+              box={feedbackTokens.noticeShadow}
+              fill={feedbackTokens.noticeBackground}
+              ink={false}
+              note="an Alert, on the card rung"
+            />
+            <ShadowChip
+              name="feedback.toastShadow"
+              box={feedbackTokens.toastShadow}
+              fill={feedbackTokens.toastBackground}
+              ink={false}
+              note="a Toast, over the page"
+            />
+          </Grid>
+        </PaletteSplit>
+      </Section>
+
+      <Section
+        title="Progress, Skeleton and Spinner · still working"
+        rule="The other half of the same sentence: not what happened, but that it has not finished. A bar is a well-rung track with the accent running in it, because the rules give accent to live state and name the running indicator by name — ink there would say the value is stored. A bar with no value is not a bar at zero: it is the same track with a band crossing it, since 'I do not know how far' and 'nothing has happened' are different reports. A skeleton takes a gray, which is what the rules reserve them for — a thing with no role yet — and it breathes rather than sweeping, stopping where a person has asked for less movement. A spinner is drawn in currentColor so it belongs to whatever holds it, and it keeps turning under reduced motion: it is the only thing saying the work has not stopped."
+      >
+        <PaletteSplit palettes={palettes}>
+          <Rows>
+            <Row>
+              <LegendKey>labelled</LegendKey>
+              <div {...stylex.props(styles.disclosureBlock)}>
+                <Progress value={62} label="Uploading the worktree" showValue />
+              </div>
+            </Row>
+            <ProgressRow name="0" value={0} />
+            <ProgressRow name="62" value={62} />
+            <ProgressRow name="100" value={100} />
+            <ProgressRow name="indeterminate" value={null} />
+            <SkeletonRow />
+            <SpinnerRow />
+            <WaitDimensions />
+          </Rows>
+          <Grid>
+            {WAIT_COLORS.map((token) => (
+              <Swatch key={token.name} {...token} />
+            ))}
+            <ShadowChip
+              name="feedback.trackWell"
+              box={feedbackTokens.trackWell}
+              fill={feedbackTokens.trackBackground}
+              ink={false}
+              note="the track, sunken"
+            />
+          </Grid>
+        </PaletteSplit>
+      </Section>
+      <Section
+        title="Table · rows on the page"
+        rule="The one part of this package with no surface of its own: no background, no shadow, no radius. A table is rows on whatever the surface around it already was, so the card holding one keeps owning its edges — and what it draws is the single edge the rules give a list, separator, between one row and the next. The head takes that line too: it is the row before the first record, and the rule against a line under a header is about a heading over a surface. The last record draws none, because there is no next row there. The two fills are the palette's own hoverFill and selectedFill rather than a mix of the surface — the rules name those two for a row on the page and card rungs, and this is that row; a popup derives its own only because on the floating rung they collapse into it. The pointer is answered only where pressing a row does something: a table of facts is read, not operated. A row is on the control ladder, and the size is stated once on the table, because a row's height and a cell's padding are one decision."
+      >
+        <PaletteSplit palettes={palettes} wide>
+          <Rows>
+            {TABLE_SIZES.map((entry) => (
+              <TableSizeRow key={entry.name} {...entry} />
+            ))}
+            <TableSortRow />
+            <TableSelectRow />
+            <TablePressRow />
+            <TableStickyRow />
+            <TableStackRow />
+            <TableWrapRow />
+            <TableEmptyRow />
+            <TablePartsRow />
+            <TableDimensions />
+          </Rows>
+          <Grid>
+            {TABLE_COLORS.map((token) => (
+              <Swatch key={token.name} {...token} />
+            ))}
+          </Grid>
+        </PaletteSplit>
+      </Section>
+
+      <Section
+        title="Pagination · the way to the rows that did not fit"
+        rule="A pager belongs to the table for the reason a Drawer belongs to the Dialog: it exists because a table did not fit, it sits on the same rung, and it states the same size — though nothing here needs a table above it, and the first caller in this repository is a file too large to open at once. It is one control rather than a kit of parts, because the part a caller would otherwise assemble is the one that is easy to get wrong: which pages to list out of nine thousand, and where to admit the rest are missing. The window is one width from the first page to the last, so the buttons do not move out from under the pointer, and a gap is only drawn where it hides more than one page — a gap hiding a single page is wider than the page it hides. The page you are on says so twice, as a fill and as aria-current, because the fill reaches only the people who can see it. The steps are disabled at the ends rather than removed. Where the pages are too many to list, the pager says where you are instead — and lets a person type it."
+      >
+        <PaletteSplit palettes={palettes}>
+          <Rows>
+            <PagerRow
+              name="all of them"
+              pages={5}
+              start={2}
+              note="Seven pages or fewer are listed in full: a gap that saves no room costs a press."
+            />
+            <PagerRow name="at the start" pages={40} start={1} />
+            <PagerRow name="in the middle" pages={40} start={20} />
+            <PagerRow name="at the end" pages={40} start={40} />
+            <PagerSizeRow />
+            <CompactPagerRow />
+            <CompactPagerRow jump />
+            <PagerDimensions />
+          </Rows>
+          <Grid>
+            {PAGER_COLORS.map((token) => (
+              <Swatch key={token.name} {...token} />
+            ))}
+          </Grid>
+        </PaletteSplit>
+      </Section>
+      <Section
+        title="Card · a block of a page"
+        rule="The elevation ladder's card step, made a component: the elevated background under the card shadow at the large radius, and no border, because a card's edge is its shadow. The parts are a Dialog's — a heading, the body a caller writes, and the answers — because what differs between a panel that owns the window and a block that owns a region of a page is the rung and the heading step, not what either is made of. It takes the same headline a dialog does: the rules reserve title for a page that is a page. A card does not nest — two of them one inside the other are the same fill twice in the light palette, where the card rung and the page are one white — and it renders no control of its own: interactive marks the card, and the button stays the caller's, because what a press does is a product decision."
+      >
+        <PaletteSplit palettes={palettes}>
+          <Rows>
+            <CardRow />
+            <InteractiveCardRow />
+            <CardDimensions />
+          </Rows>
+          <Grid>
+            {CARD_COLORS.map((token) => (
+              <Swatch key={token.name} {...token} />
+            ))}
+            <ShadowChip
+              name="card.shadow"
+              box={cardTokens.shadow}
+              fill={cardTokens.background}
+              ink={false}
+              note="the card rung, above the page"
+            />
+          </Grid>
+        </PaletteSplit>
+      </Section>
+
+      <Section
+        title="Badge and Separator · a fact, and a line"
+        rule="A badge is the one part of this system on no rung: it sits on a page, a card, a menu row or a modal panel, so it cannot take a background from the ladder — its fill is a film of the tone over whatever is underneath, which is the form a destructive ghost button's hover already takes. The words stay ink in every tone, and that is measured rather than preferred: warning is 2.8:1 on a near-white surface, a colour tuned for a 16px mark where 3:1 is the bar, and a badge is never wordless, so the tint carries the tone and the word carries the fact. It answers no pointer and takes no focus — a chip that did would be a Button. A Separator is the other half of the sentence and the only line this system allows: between the rows of a list or a table, never around a surface and never under a header, and it says so to a screen reader rather than hiding behind a decorative flag."
+      >
+        <PaletteSplit palettes={palettes}>
+          <Rows>
+            <BadgeToneRow />
+            {BADGE_RUNGS.map((rung) => (
+              <Row key={rung.name}>
+                <LegendKey>{rung.name}</LegendKey>
+                <div {...stylex.props(styles.badgeRung, rung.style)}>
+                  {BADGE_TONES.map((tone) => (
+                    <Badge key={tone} tone={tone}>
+                      {tone}
+                    </Badge>
+                  ))}
+                </div>
+                <span {...stylex.props(styles.rungUse)}>{rung.use}</span>
+              </Row>
+            ))}
+            <SeparatorRow />
+            <BadgeDimensions />
+          </Rows>
+          <Grid>
+            {BADGE_COLORS.map((token) => (
+              <Swatch key={token.name} {...token} />
+            ))}
+          </Grid>
+        </PaletteSplit>
+      </Section>
+
+      <Section
+        title="Avatar · who this is"
+        rule="The second part of this system on no rung, and the one that is not a film: what an avatar stands in for is opaque — a photograph — and a translucent stand-in would show a row's hover through a face. So the fallback takes a gray, which is what the rules reserve the gray ramp for: a thing with no role, the same reading that gave Skeleton its own. The ladder is the point. The deleted implementation had one size, and of its twenty-seven call sites twenty-one named a box and fifteen also named a type step for the letters — h-5 w-5 text-[9px], h-7 w-7 text-[11px], h-16 w-16 text-xl — which is two facts a surface had to keep in step and eight different answers about what two letters in a circle means. Here the box picks the letters. A person is a circle at radius.full on corner.round; a thing is a tile, because a circle around a logo is a crop and the mark inside it was drawn square."
+      >
+        <PaletteSplit palettes={palettes}>
+          <Rows>
+            {AVATAR_SIZES.map((entry) => (
+              <AvatarSizeRow key={entry.name} {...entry} />
+            ))}
+            <AvatarShapeRow />
+            <AvatarFallbackRow />
+            <AvatarDimensions />
+          </Rows>
+          <Grid>
+            {AVATAR_COLORS.map((token) => (
+              <Swatch key={token.name} {...token} />
+            ))}
+          </Grid>
+        </PaletteSplit>
+      </Section>
+
+      <Section
+        title="Kbd · a key on the keyboard"
+        rule="A gray, because the rules name a kbd among the things with no role: a cap stands for a piece of hardware rather than for anything on this screen, so accent would claim it is live, ink would claim it is stored and a tone would claim it reported something. It is never a control — no hover, no focus ring, no pressed state — and it is not a menu row's shortcut either: the rules give that slot plain trailing metadata, because a column of chips down a menu's right edge turns a quiet list into a keyboard diagram. A cap is for the surfaces where the keys are the subject. The word inside it is the caller's, since which key a person presses depends on their platform and this package carries no dictionary."
+      >
+        <PaletteSplit palettes={palettes}>
+          <Rows>
+            <KbdRow />
+            <KbdOnChipRow />
+            <KbdDimensions />
+          </Rows>
+          <Grid>
+            {KBD_COLORS.map((token) => (
+              <Swatch key={token.name} {...token} />
+            ))}
+          </Grid>
+        </PaletteSplit>
+      </Section>
+
+      <Section
+        title="Toggle, ToggleGroup and Toolbar · a control that stays pressed"
+        rule="A Toggle is not a Switch, and the difference is what each is for. A Switch stores a value in a form: it takes a name, answers to a Field.Root, can be invalid, and is read as a setting. A Toggle says an option is on right now — bold, wrapped lines, this filter — so it has no name, no validity and no message under it. Off it is a ghost Button, because that is what it is; on it sinks into the well. The rules give a stored state ink, and this is where that rule is read carefully rather than literally: ink is what a control that already sits in a well becomes when it is on — a Switch's off state occupies the well, so on has to leave it — and a toggle rests on nothing at all, so the well is still free and sinking is the plainest thing this system can say about a button that went down and stayed. It also keeps a bar of eight from reading as eight primary buttons. A set of them is not a Tabs strip: a strip picks what you see, so it can be one control with one pill sliding across it, while a set stores what is on and two of its members can be pressed at once. And a bar draws nothing at all — no fill, no shadow, no radius, not even the line a table draws — because what it is for is the keyboard: it makes a row of eight controls one tab stop and gives the arrow keys the walking."
+      >
+        <PaletteSplit palettes={palettes}>
+          <Rows>
+            <ToggleStateRow />
+            {TOGGLE_SIZES.map((entry) => (
+              <ToggleSizeRow key={entry.name} {...entry} />
+            ))}
+            <TogglePillRow />
+            <ToggleDisabledRow />
+            <ToggleSetRow />
+            <ToggleMultipleRow />
+            <ToolbarRow />
+            <ToggleDimensions />
+          </Rows>
+          <Grid>
+            {TOGGLE_COLORS.map((token) => (
+              <Swatch key={token.name} {...token} />
+            ))}
+          </Grid>
+        </PaletteSplit>
+      </Section>
+    </Board>
+  );
+}

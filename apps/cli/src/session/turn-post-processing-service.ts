@@ -17,7 +17,6 @@ import {
   type GitWorkingTreeDiffBaseline,
 } from '@/lib/git/git-diff-stats';
 import { countWorkingTreeTextFileLines } from '@/lib/git/working-tree-line-count';
-import { resolveGitBranch } from '@/lib/git/resolve-git-branch-name';
 import type { LoroDocumentManager, SessionDocument } from '@/lib/loro/doc';
 import { detectPullRequestForBranch, type DetectedPullRequest } from '@/lib/pr-detector';
 import { formatErrorMessage } from '@/utils/format-error';
@@ -86,44 +85,6 @@ export class TurnPostProcessingService {
       ownerRoomId: getSessionRoomId(ownerSessionId),
       pullRequests: this.resolvePullRequests(ownerMeta, activeMeta),
     };
-  }
-
-  async syncSessionBranchName(sessionId: SessionId, session: ISession): Promise<string | null> {
-    const workdir = session.getWorkdir();
-    const resolution = await resolveGitBranch(session.exec.bind(session), workdir);
-    if (resolution.kind !== 'branch') {
-      if (resolution.kind === 'unresolved') {
-        // The recorded branch stays whatever it was. That matters after a
-        // rename: PR discovery polls the stale name and never finds the PR.
-        this.deps.logger.warn(
-          `[${sessionId}] Could not resolve the current branch; SessionMeta.branchName may be stale`
-        );
-      } else {
-        // Detached HEAD keeps the last real branch on purpose. It is normally
-        // transient (inspecting a commit, bisect), and that branch is still the
-        // session's own — dropping the fact would stop PR discovery for a
-        // session whose PR is sitting on it. The previous code wrote the literal
-        // 'HEAD' here, which polluted meta and broke discovery outright.
-        this.deps.logger.debug(
-          `[${sessionId}] Detached HEAD; keeping the last known SessionMeta.branchName`
-        );
-      }
-      return null;
-    }
-    const branchName = resolution.branch;
-    try {
-      const sessionDoc = await this.deps.workspaceDocument.getOrCreateSessionDoc(sessionId);
-      const workspace = await this.resolveWorkspaceSessionContext(sessionId, sessionDoc);
-      if (workspace.ownerMeta?.branchName === branchName) {
-        return branchName;
-      }
-      await workspace.ownerDoc.setBranchName(branchName);
-    } catch (error) {
-      this.deps.logger.debug(
-        `[${sessionId}] Failed to sync branch name: ${formatErrorMessage(error)}`
-      );
-    }
-    return branchName;
   }
 
   /**

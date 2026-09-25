@@ -2,7 +2,7 @@ import { useCallback, useRef } from 'react';
 import { createFileRoute, Navigate, useNavigate } from '@tanstack/react-router';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { useTranslation } from 'react-i18next';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import { desktopOnboardingDraftAtom, desktopOnboardingPhaseAtom } from '@/atoms/onboarding';
 import { currentWorkspaceSlugAtom } from '@/atoms/workspace-context';
 import { OnboardingOverlay, type DesktopOnboardingCompletion } from '@/components/onboarding';

@@ -1,9 +1,9 @@
 import { useCallback, useLayoutEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Spinner } from '@/ui/spinner';
+import { Spinner } from '@lody/ui/spinner';
 
-import { Button } from '@/ui/button';
-import { Textarea } from '@/ui/textarea';
+import { Button } from '@lody/ui/button';
+import { Textarea } from '@lody/ui/textarea';
 import { cn } from '@/lib/utils';
 import type { ConversationFontSize } from '@/atoms/settings';
 import { conversationTextFontSizeStyle } from './conversation-font-size-classes';
@@ -101,24 +101,20 @@ export function UserMessageEditor({
         <Button
           type="button"
           variant="ghost"
-          size="sm"
+          size="small"
+          shape="pill"
           disabled={isSaving}
           onClick={onCancel}
-          className="h-7 rounded-full px-3 text-xs font-normal text-muted-foreground hover:text-foreground"
         >
           {t('common.cancel', 'Cancel')}
         </Button>
         <Button
           type="button"
-          variant="ghost"
-          size="sm"
+          variant="primary"
+          size="small"
+          shape="pill"
           disabled={!canSave}
           onClick={onSave}
-          className={cn(
-            'h-7 rounded-full px-3.5 text-xs font-medium shadow-xs transition-all',
-            'bg-foreground text-background hover:bg-foreground/90 hover:text-background',
-            'active:translate-y-[1px]'
-          )}
         >
           {isSaving ? <Spinner className="h-3.5 w-3.5" /> : null}
           {t('sessions.send', 'Send')}

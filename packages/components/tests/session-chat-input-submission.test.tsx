@@ -102,7 +102,7 @@ import {
 } from '../src/components/sessions/session-chat-input-area';
 import { initI18n } from '../src/i18n';
 import { MAX_PASTED_TEXT_BYTE_SIZE } from '../src/lib/pasted-text-draft';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }

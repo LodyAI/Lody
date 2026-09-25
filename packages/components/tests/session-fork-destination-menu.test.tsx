@@ -10,7 +10,7 @@ import { initI18n } from '../src/i18n';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
-  SessionForkDestinationPopover,
+  SessionForkDestinationMenu,
   getSessionForkDestinationOptions,
 } from '../src/components/sessions/session-fork-destination-menu';
 
@@ -48,7 +48,7 @@ describe('getSessionForkDestinationOptions', () => {
   });
 });
 
-describe('SessionForkDestinationPopover', () => {
+describe('SessionForkDestinationMenu', () => {
   let root: Root;
   let container: HTMLDivElement;
 
@@ -72,13 +72,13 @@ describe('SessionForkDestinationPopover', () => {
     vi.unstubAllGlobals();
   });
 
-  const renderPopover = async (
-    props: Partial<ComponentProps<typeof SessionForkDestinationPopover>> = {}
+  const renderMenu = async (
+    props: Partial<ComponentProps<typeof SessionForkDestinationMenu>> = {}
   ): Promise<void> => {
     await act(async () => {
       root.render(
         createElement(
-          SessionForkDestinationPopover,
+          SessionForkDestinationMenu,
           {
             open: true,
             worktreeAvailability: 'available',
@@ -88,12 +88,14 @@ describe('SessionForkDestinationPopover', () => {
           createElement('button', { type: 'button' }, 'Fork')
         )
       );
+      // Base UI defers the portal mount to a frame; jsdom's rAF is a real timer.
+      await new Promise((resolve) => setTimeout(resolve, 40));
     });
   };
 
   it('lists both destinations by name and explains each only on hover', async () => {
-    await renderPopover();
-    const items = Array.from(document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'));
+    await renderMenu();
+    const items = Array.from(document.querySelectorAll<HTMLElement>('[role="menuitem"]'));
     expect(items.map((item) => item.textContent)).toEqual([
       'Fork to new tab',
       'Fork to new worktree',
@@ -105,24 +107,24 @@ describe('SessionForkDestinationPopover', () => {
   });
 
   it('keeps the Git status check inline on the disabled worktree row', async () => {
-    await renderPopover({ worktreeAvailability: 'checking' });
+    await renderMenu({ worktreeAvailability: 'checking' });
     const worktree = Array.from(
-      document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')
+      document.querySelectorAll<HTMLElement>('[role="menuitem"]')
     ).find((item) => item.textContent?.startsWith('Fork to new worktree'));
-    expect(worktree?.disabled).toBe(true);
+    expect(worktree?.getAttribute('aria-disabled')).toBe('true');
     expect(worktree?.textContent).toContain('Checking Git status…');
   });
 
   it('offers copying when native fork is unavailable', async () => {
     let copied = false;
-    await renderPopover({
+    await renderMenu({
       nativeForkAvailable: false,
       worktreeAvailability: 'hidden',
       onCopyContext: () => {
         copied = true;
       },
     });
-    const items = Array.from(document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'));
+    const items = Array.from(document.querySelectorAll<HTMLElement>('[role="menuitem"]'));
     expect(items).toHaveLength(1);
     expect(items[0]?.textContent).toContain('Copy context as Markdown');
     await act(async () => items[0]?.click());
@@ -130,15 +132,15 @@ describe('SessionForkDestinationPopover', () => {
   });
 
   it('does not leave the first destination focused after opening', async () => {
-    await renderPopover();
+    await renderMenu();
     const firstItem = document.querySelector('[role="menuitem"]');
-    expect(firstItem).toBeInstanceOf(HTMLButtonElement);
+    expect(firstItem).toBeInstanceOf(HTMLElement);
     expect(document.activeElement).not.toBe(firstItem);
   });
 
   it('forks to a new tab from a menu, not a modal dialog', async () => {
     const onSelect = vi.fn();
-    await renderPopover({ onSelect });
+    await renderMenu({ onSelect });
     expect(document.querySelector('[role="dialog"]')).toBeNull();
     expect(document.querySelector('[role="menu"]')).not.toBeNull();
 
@@ -186,7 +188,7 @@ describe('SessionForkDestinationPopover', () => {
       )
     );
 
-    const fork = container.querySelector<HTMLButtonElement>('[aria-label="Fork session"]');
+    const fork = container.querySelector<HTMLElement>('[aria-label="Fork session"]');
     if (finished) {
       expect(fork).toBeTruthy();
       await act(async () => fork!.click());
@@ -201,7 +203,7 @@ describe('SessionForkDestinationPopover', () => {
       ? [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find((item) =>
           item.textContent?.includes('Copy context as Markdown')
         )
-      : container.querySelector<HTMLButtonElement>('[aria-label="Copy context as Markdown"]');
+      : container.querySelector<HTMLElement>('[aria-label="Copy context as Markdown"]');
     expect(copy).toBeTruthy();
     await act(async () => copy!.click());
     expect(copied).toBe('partial');

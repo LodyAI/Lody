@@ -1,13 +1,15 @@
 import { type ReactNode, useCallback, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Trash2 } from 'lucide-react';
+import * as stylex from '@stylexjs/stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { corner, radius, space } from '@lody/ui/tokens/scales.stylex';
 import {
   globalShortcutBindingHasModifier,
   type GlobalShortcutId,
   type GlobalShortcutSetError,
 } from '@lody/shared';
-import { Button } from '@/ui/button';
-import { cn } from '@/lib/utils';
+import { Button } from '@lody/ui/button';
 import {
   canonicalizeBinding,
   commands,
@@ -23,6 +25,7 @@ import type { GlobalShortcutBinding } from '@lody/shared';
 import { useGlobalShortcuts } from '@/hooks/use-global-shortcuts';
 import { Kbd } from '@/components/commands/kbd';
 import { CompactRow, CompactSection } from './compact-layout';
+import { settingsSurface as surface } from './surface';
 import { settingContainerClass } from '.';
 
 const CATEGORY_ORDER: CommandCategory[] = [
@@ -35,11 +38,45 @@ const CATEGORY_ORDER: CommandCategory[] = [
   'Other',
 ];
 
-// Fixed widths so the shortcut and trash columns line up across rows. The shortcut slot
-// holds up to ~4 chips comfortably; the trash slot stays present even when the row has
-// nothing to delete so the column doesn't shift when neighbors do.
-const SHORTCUT_SLOT_CLASS = 'flex w-36 justify-end';
-const TRASH_SLOT_CLASS = 'flex w-9 justify-center';
+const pulse = stylex.keyframes({
+  '0%': { opacity: 1 },
+  '50%': { opacity: 0.4 },
+  '100%': { opacity: 1 },
+});
+
+const styles = stylex.create({
+  intro: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: space[4],
+    paddingInline: space[4],
+  },
+  introText: { margin: 0, fontSize: '0.8em', color: colors.secondaryLabel },
+  error: { color: colors.destructive },
+  controls: { display: 'flex', alignItems: 'center' },
+  // Fixed widths so the shortcut and trash columns line up across rows. The shortcut
+  // slot holds up to ~4 chips comfortably; the trash slot stays present even when the
+  // row has nothing to delete so the column doesn't shift when neighbors do.
+  shortcutSlot: { display: 'flex', justifyContent: 'flex-end', width: '144px' },
+  trashSlot: { display: 'flex', justifyContent: 'center', width: '36px' },
+  glyph: { width: '100%', height: '100%' },
+  unbound: { fontSize: '0.8em', fontStyle: 'italic', fontWeight: 400, color: colors.tertiaryLabel },
+  recordingLabel: { fontWeight: 400 },
+  /** The capture is live, so its mark is the accent, and it breathes while it listens. */
+  recordingDot: {
+    width: '6px',
+    height: '6px',
+    flexShrink: 0,
+    borderRadius: radius.full,
+    cornerShape: corner.round,
+    backgroundColor: colors.accent,
+    animationName: pulse,
+    animationDuration: '2s',
+    animationTimingFunction: 'cubic-bezier(0.4, 0, 0.6, 1)',
+    animationIterationCount: 'infinite',
+  },
+});
 
 export function KeyboardShortcutsSetting() {
   const { t } = useTranslation();
@@ -89,25 +126,17 @@ export function KeyboardShortcutsSetting() {
 
   return (
     <div className={settingContainerClass}>
-      <div className="flex items-center justify-between gap-4">
-        <p className="text-xs text-muted-foreground">
-          {t('settings.keyboardShortcuts.description')}
-        </p>
-        <Button
-          variant="outline"
-          size="sm"
-          disabled={!anyOverridden}
-          onClick={handleResetAll}
-          className="h-7"
-        >
+      <div {...stylex.props(styles.intro)}>
+        <p {...stylex.props(styles.introText)}>{t('settings.keyboardShortcuts.description')}</p>
+        <Button variant="secondary" size="small" disabled={!anyOverridden} onClick={handleResetAll}>
           {t('settings.keyboardShortcuts.resetAll')}
         </Button>
       </div>
 
       {grouped.length === 0 && (
-        <div className="rounded-md border border-dashed border-border/70 p-6 text-center text-xs text-muted-foreground">
-          {t('settings.keyboardShortcuts.empty')}
-        </div>
+        <CompactSection>
+          <p {...stylex.props(surface.cardNote)}>{t('settings.keyboardShortcuts.empty')}</p>
+        </CompactSection>
       )}
 
       {grouped.map(([category, items]) => (
@@ -190,11 +219,11 @@ function GlobalShortcutRow({
   let helper: ReactNode = t('settings.keyboardShortcuts.globalHint');
   if (error === 'conflict') {
     helper = (
-      <span className="text-destructive">{t('settings.keyboardShortcuts.globalConflict')}</span>
+      <span {...stylex.props(styles.error)}>{t('settings.keyboardShortcuts.globalConflict')}</span>
     );
   } else if (error === 'invalid') {
     helper = (
-      <span className="text-destructive">
+      <span {...stylex.props(styles.error)}>
         {t('settings.keyboardShortcuts.globalNeedsModifier')}
       </span>
     );
@@ -209,8 +238,8 @@ function GlobalShortcutRow({
 
   return (
     <CompactRow label={label} helper={helper} alignTop>
-      <div className="flex items-center">
-        <div className={SHORTCUT_SLOT_CLASS}>
+      <div {...stylex.props(styles.controls)}>
+        <div {...stylex.props(styles.shortcutSlot)}>
           {recording ? (
             <RecordingButton preview={preview} onCancel={cancel} />
           ) : (
@@ -223,19 +252,20 @@ function GlobalShortcutRow({
             />
           )}
         </div>
-        <div className={TRASH_SLOT_CLASS}>
+        <div {...stylex.props(styles.trashSlot)}>
           {!recording && binding && (
             <Button
               variant="ghost"
-              size="icon"
-              className="h-7 w-7 text-muted-foreground hover:text-destructive [&_svg]:size-3.5"
+              size="small"
+              icon
+              tone="destructive"
               onClick={() => {
                 setError(null);
                 void onSet(id, null);
               }}
               title={t('settings.keyboardShortcuts.unbindTooltip')}
             >
-              <Trash2 />
+              <Trash2 {...stylex.props(styles.glyph)} />
             </Button>
           )}
         </div>
@@ -318,7 +348,7 @@ function ShortcutRow({
   let helper: ReactNode = undefined;
   if (rejected) {
     helper = (
-      <span className="text-destructive">
+      <span {...stylex.props(styles.error)}>
         {t('settings.keyboardShortcuts.alreadyUsed', {
           binding: formatKeyBinding(rejected.binding),
           command: rejected.otherTitle,
@@ -327,7 +357,7 @@ function ShortcutRow({
     );
   } else if (conflictTargetTitle) {
     helper = (
-      <span className="text-destructive">
+      <span {...stylex.props(styles.error)}>
         {t('settings.keyboardShortcuts.conflict', { command: conflictTargetTitle })}
       </span>
     );
@@ -343,24 +373,25 @@ function ShortcutRow({
       helper={helper}
       alignTop={Boolean(helper)}
     >
-      <div className="flex items-center">
-        <div className={SHORTCUT_SLOT_CLASS}>
+      <div {...stylex.props(styles.controls)}>
+        <div {...stylex.props(styles.shortcutSlot)}>
           {recording ? (
             <RecordingButton preview={preview} onCancel={cancel} />
           ) : (
             <ShortcutButton primary={primary} onClick={handleClickPrimary} />
           )}
         </div>
-        <div className={TRASH_SLOT_CLASS}>
+        <div {...stylex.props(styles.trashSlot)}>
           {!recording && primary && (
             <Button
               variant="ghost"
-              size="icon"
-              className="h-7 w-7 text-muted-foreground hover:text-destructive [&_svg]:size-3.5"
+              size="small"
+              icon
+              tone="destructive"
               onClick={handleUnbind}
               title={t('settings.keyboardShortcuts.unbindTooltip')}
             >
-              <Trash2 />
+              <Trash2 {...stylex.props(styles.glyph)} />
             </Button>
           )}
         </div>
@@ -372,48 +403,40 @@ function ShortcutRow({
 function ShortcutButton({ primary, onClick }: { primary: string | null; onClick: () => void }) {
   const { t } = useTranslation();
   return (
-    <button
+    <Button
       type="button"
+      variant="ghost"
+      size="small"
       onClick={onClick}
-      className={cn(
-        'inline-flex h-7 items-center rounded-md border border-transparent px-1.5 transition-colors',
-        'hover:border-input-border hover:bg-hover',
-        'focus-visible:border-input-border focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/60'
-      )}
       title={t('settings.keyboardShortcuts.editTooltip')}
     >
       {primary ? (
         <Kbd binding={primary} />
       ) : (
-        <span className="text-xs italic text-muted-foreground">
-          {t('settings.keyboardShortcuts.unbound')}
-        </span>
+        <span {...stylex.props(styles.unbound)}>{t('settings.keyboardShortcuts.unbound')}</span>
       )}
-    </button>
+    </Button>
   );
 }
 
 function RecordingButton({ preview, onCancel }: { preview: string | null; onCancel: () => void }) {
   const { t } = useTranslation();
   return (
-    <button
+    <Button
       type="button"
+      variant="secondary"
+      size="small"
       onClick={onCancel}
-      // Inner kbd chips get a primary tint so they read as "live capture" rather than
-      // the resting muted style.
-      className={cn(
-        'inline-flex h-7 items-center gap-2 rounded-md border border-primary/40 bg-primary/5 px-2.5 text-xs font-normal text-primary',
-        'transition-colors hover:bg-primary/10',
-        '[&_[data-slot=kbd]]:bg-primary/15 [&_[data-slot=kbd]]:text-primary'
-      )}
       title={t('settings.keyboardShortcuts.recordingCancelTooltip')}
     >
-      <span className="size-1.5 rounded-full bg-primary animate-pulse" />
+      <span {...stylex.props(styles.recordingDot)} />
       {preview ? (
         <Kbd binding={preview} />
       ) : (
-        <span>{t('settings.keyboardShortcuts.recording')}</span>
+        <span {...stylex.props(styles.recordingLabel)}>
+          {t('settings.keyboardShortcuts.recording')}
+        </span>
       )}
-    </button>
+    </Button>
   );
 }

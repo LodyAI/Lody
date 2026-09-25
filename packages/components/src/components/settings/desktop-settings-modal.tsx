@@ -1,5 +1,9 @@
-import { useCallback, useId } from 'react';
+import { useCallback, useId, type CSSProperties } from 'react';
 import { Bug, X } from 'lucide-react';
+import * as stylex from '@stylexjs/stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { space } from '@lody/ui/tokens/scales.stylex';
+import { Button } from '@lody/ui/button';
 import { useTranslation } from 'react-i18next';
 import { useAtom, useSetAtom } from 'jotai';
 import {
@@ -9,15 +13,8 @@ import {
   settingsSelectedMachineIdAtom,
   settingsSelectedProjectKeyAtom,
 } from '@/atoms';
-import { cn } from '@/lib/utils';
 import { ScrollArea } from '@/ui';
-import {
-  Dialog,
-  DialogClose,
-  DialogContentWithoutClose,
-  DialogDescription,
-  DialogTitle,
-} from '@/ui/dialog';
+import { Dialog } from '@/ui/dialog';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { isNativeAppShell } from '@/lib/native-platform';
 import { useAppCapability } from '@/lib/app-platform';
@@ -45,7 +42,122 @@ import { PromptShortcutsSetting } from './prompt-shortcuts-setting';
 import { McpSetting } from './mcp-setting';
 import { ShareManagementSetting } from './share-management-setting';
 import { FocusScope, useListKeyboardNavigation } from '@/ui/focus-scope';
+import { settingsSurface as surface } from './surface';
 
+/**
+ * The overlay's own size. The dialog panel sets its width, padding and gap
+ * itself, so a class could not reliably win over them; `style` is the panel's
+ * documented way to take a surface's layout.
+ */
+const PANEL_STYLE: CSSProperties = {
+  width: '84vw',
+  maxWidth: '1100px',
+  height: 'min(90vh, 950px)',
+  padding: 0,
+  gap: 0,
+  overflow: 'hidden',
+};
+
+/** The close button's inset, equal from the top and the end of the right pane. */
+const CLOSE_INSET = space[2];
+
+const styles = stylex.create({
+  srOnly: {
+    position: 'absolute',
+    width: '1px',
+    height: '1px',
+    padding: 0,
+    margin: '-1px',
+    overflow: 'hidden',
+    clipPath: 'inset(50%)',
+    whiteSpace: 'nowrap',
+    borderWidth: 0,
+  },
+  body: {
+    display: 'flex',
+    flexGrow: 1,
+    minHeight: 0,
+    overflow: 'hidden',
+  },
+  /**
+   * The nav is a sidebar on the panel: no fill of its own, and the one
+   * structural line of the overlay between it and the content.
+   */
+  nav: {
+    display: 'flex',
+    flexDirection: 'column',
+    flexShrink: 0,
+    width: '208px',
+    borderInlineEndWidth: '1px',
+    borderInlineEndStyle: 'solid',
+    borderInlineEndColor: colors.separator,
+  },
+  navScroll: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: space[4],
+    flexGrow: 1,
+    minHeight: 0,
+    overflowY: 'auto',
+    padding: space[3],
+  },
+  navGroupHeading: {
+    margin: 0,
+    paddingInline: space[2],
+    paddingBottom: space[1],
+    fontSize: '0.75em',
+    fontWeight: 400,
+    lineHeight: 1.25,
+    color: colors.tertiaryLabel,
+  },
+  navGroupRows: { display: 'flex', flexDirection: 'column', gap: '2px' },
+  navFooter: { marginTop: 'auto', padding: space[3] },
+  content: {
+    position: 'relative',
+    display: 'flex',
+    flexDirection: 'column',
+    flexGrow: 1,
+    minHeight: 0,
+    minWidth: 0,
+  },
+  close: {
+    position: 'absolute',
+    insetBlockStart: CLOSE_INSET,
+    insetInlineEnd: CLOSE_INSET,
+    zIndex: 10,
+  },
+  closeGlyph: { width: '100%', height: '100%' },
+  surface: {
+    display: 'flex',
+    flexDirection: 'column',
+    flexGrow: 1,
+    minHeight: 0,
+    minWidth: 0,
+    paddingTop: '20px',
+  },
+  header: {
+    display: 'flex',
+    alignItems: 'center',
+    flexShrink: 0,
+    height: '40px',
+    paddingInlineStart: space[8],
+    paddingInlineEnd: '40px',
+  },
+  paneBody: { flexGrow: 1, minHeight: 0 },
+  fill: { height: '100%' },
+  /**
+   * `padding-inline-end` keeps every right-pane control off the close button's
+   * column (inset + button). It sits inside the scroll area so the scrollbar
+   * stays flush with the pane edge.
+   */
+  paneInset: {
+    paddingInlineStart: space[6],
+    paddingInlineEnd: '40px',
+    paddingBottom: space[6],
+  },
+  paneInsetTop: { paddingTop: space[6] },
+  paneColumn: { marginInline: 'auto', maxWidth: '1024px' },
+});
 /**
  * Desktop-only settings overlay. Mounted once at the app level (like the bug-report
  * dialog) and shown whenever `settingsDialogOpenAtom` is set on a non-mobile viewport.
@@ -62,19 +174,16 @@ export function DesktopSettingsModal() {
   }
 
   return (
-    <Dialog
+    <Dialog.Root
       open={open}
       onOpenChange={(next) => {
         if (!next) setOpen(false);
       }}
     >
-      <DialogContentWithoutClose
-        noAnimation
-        className="flex h-[min(90vh,950px)] w-[84vw] max-w-[1100px] flex-col gap-0 overflow-hidden p-0 sm:p-0"
-      >
+      <Dialog.Content noAnimation closeButton={false} style={PANEL_STYLE}>
         <SettingsModalBody />
-      </DialogContentWithoutClose>
-    </Dialog>
+      </Dialog.Content>
+    </Dialog.Root>
   );
 }
 
@@ -141,123 +250,122 @@ function SettingsModalBody() {
 
   return (
     <SettingsDataCacheProvider>
-      <DialogDescription className="sr-only">{t('settings.title')}</DialogDescription>
-      <div className="flex min-h-0 flex-1 overflow-hidden [&_button]:font-normal">
+      <Dialog.Description {...stylex.props(styles.srOnly)}>
+        {t('settings.title')}
+      </Dialog.Description>
+      <div {...stylex.props(styles.body)}>
         <FocusScope
           id={navigationScopeId}
           role="navigation"
           aria-label={t('settings.title')}
-          className="flex w-52 flex-col border-e bg-background"
+          {...stylex.props(styles.nav)}
         >
-          <nav className="min-h-0 flex-1 overflow-y-auto p-3">
-            <div className="space-y-4">
-              {groupedSections.map((section) => {
-                const tabs = navigationTabs.filter((tab) => tab.section === section.id);
-                const showsAccountEntry = section.id === 'personal' && accountTab;
-                if (tabs.length === 0 && !showsAccountEntry) return null;
-                return (
-                  <section key={section.id} aria-label={section.label}>
-                    <h2 className="px-2.5 pb-1 text-[0.75em] font-normal text-foreground/50 dark:text-muted-foreground/70">
-                      {section.label}
-                    </h2>
-                    <div className="space-y-0.5">
-                      {showsAccountEntry ? (
-                        <div
-                          data-id="settings:account"
+          <nav {...stylex.props(styles.navScroll)}>
+            {groupedSections.map((section) => {
+              const tabs = navigationTabs.filter((tab) => tab.section === section.id);
+              const showsAccountEntry = section.id === 'personal' && accountTab;
+              if (tabs.length === 0 && !showsAccountEntry) return null;
+              return (
+                <section key={section.id} aria-label={section.label}>
+                  <h2 {...stylex.props(styles.navGroupHeading)}>{section.label}</h2>
+                  <div {...stylex.props(styles.navGroupRows)}>
+                    {showsAccountEntry ? (
+                      <div
+                        data-id="settings:account"
+                        data-scope-item="row"
+                        data-settings-tab-id="account"
+                      >
+                        <SettingsAccountEntry
+                          user={session?.user}
+                          active={resolvedActiveTab === 'account'}
+                          onSelect={() => selectTab('account')}
+                        />
+                      </div>
+                    ) : null}
+                    {tabs.map((tab) => {
+                      const Icon = tab.icon;
+                      const active = resolvedActiveTab === tab.id;
+                      return (
+                        <button
+                          key={tab.id}
+                          type="button"
+                          aria-current={active ? 'page' : undefined}
+                          data-id={`settings:${tab.id}`}
                           data-scope-item="row"
-                          data-settings-tab-id="account"
+                          data-settings-tab-id={tab.id}
+                          {...stylex.props(surface.listRow, active && surface.listRowSelected)}
+                          onClick={() => selectTab(tab.id)}
                         >
-                          <SettingsAccountEntry
-                            user={session?.user}
-                            active={resolvedActiveTab === 'account'}
-                            onSelect={() => selectTab('account')}
-                          />
-                        </div>
-                      ) : null}
-                      {tabs.map((tab) => {
-                        const Icon = tab.icon;
-                        return (
-                          <button
-                            key={tab.id}
-                            type="button"
-                            aria-current={resolvedActiveTab === tab.id ? 'page' : undefined}
-                            data-id={`settings:${tab.id}`}
-                            data-scope-item="row"
-                            data-settings-tab-id={tab.id}
-                            className={cn(
-                              'flex w-full items-center gap-2.5 rounded-md px-2.5 py-1 text-start text-[1em] font-normal transition-colors',
-                              resolvedActiveTab === tab.id
-                                ? 'bg-foreground/[0.06] text-foreground'
-                                : 'text-foreground/80 hover:bg-foreground/[0.04] hover:text-foreground dark:text-muted-foreground'
+                          <Icon
+                            {...stylex.props(
+                              surface.listRowIcon,
+                              active && surface.listRowIconSelected
                             )}
-                            onClick={() => selectTab(tab.id)}
-                          >
-                            <Icon
-                              className="h-4 w-4 shrink-0 opacity-80"
-                              strokeWidth={1.75}
-                              aria-hidden="true"
-                            />
-                            <span className="min-w-0 truncate">{t(tab.labelKey)}</span>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </section>
-                );
-              })}
-            </div>
+                            strokeWidth={1.75}
+                            aria-hidden="true"
+                          />
+                          <span {...stylex.props(surface.listRowLabel)}>{t(tab.labelKey)}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </section>
+              );
+            })}
           </nav>
           {canReportBug && (
-            <div className="mt-auto p-3">
+            <div {...stylex.props(styles.navFooter)}>
               <button
                 type="button"
                 data-id="settings:report-bug"
                 data-scope-item="row"
-                className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-1 text-start text-[1em] font-normal text-foreground/80 transition-colors hover:bg-foreground/[0.04] hover:text-foreground dark:text-muted-foreground"
+                {...stylex.props(surface.listRow)}
                 onClick={handleReportBug}
               >
-                <Bug className="h-4 w-4 shrink-0 opacity-80" strokeWidth={1.75} />
-                {t('bugReport.title', 'Report a bug')}
+                <Bug {...stylex.props(surface.listRowIcon)} strokeWidth={1.75} />
+                <span {...stylex.props(surface.listRowLabel)}>
+                  {t('bugReport.title', 'Report a bug')}
+                </span>
               </button>
             </div>
           )}
         </FocusScope>
 
-        <FocusScope
-          id={contentScopeId}
-          role="main"
-          className="relative flex min-h-0 min-w-0 flex-1 flex-col"
-        >
-          <DialogClose
-            className="absolute top-2.5 right-2.5 z-10 flex h-5 w-5 items-center justify-center rounded-full bg-foreground/[0.06] text-muted-foreground transition-colors hover:bg-foreground/[0.12] hover:text-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
-            aria-label={t('common.close', 'Close')}
+        <FocusScope id={contentScopeId} role="main" {...stylex.props(styles.content)}>
+          <Dialog.Close
+            render={
+              <Button
+                variant="ghost"
+                size="mini"
+                icon
+                aria-label={t('common.close', 'Close')}
+                {...stylex.props(styles.close)}
+              />
+            }
           >
-            <X className="h-3 w-3" strokeWidth={2} aria-hidden="true" />
-          </DialogClose>
-          {/* `pr-10` keeps every right-pane control off the close button's
-              vertical column (10px inset + 20px control). It sits inside the
-              scroll area so the scrollbar stays flush with the pane edge. */}
-          <div className="flex min-h-0 min-w-0 flex-1 flex-col pt-5" data-settings-surface="">
+            <X {...stylex.props(styles.closeGlyph)} aria-hidden="true" />
+          </Dialog.Close>
+          <div {...stylex.props(styles.surface)} data-settings-surface="">
             {selfTitledTab ? (
-              <DialogTitle className="sr-only">{t(activeTabConfig.labelKey)}</DialogTitle>
+              <Dialog.Title {...stylex.props(styles.srOnly)}>
+                {t(activeTabConfig.labelKey)}
+              </Dialog.Title>
             ) : (
-              <header className="flex h-10 shrink-0 items-center pr-10 pl-8">
-                <DialogTitle className="text-xl font-normal leading-none">
-                  {t(activeTabConfig.labelKey)}
-                </DialogTitle>
+              <header {...stylex.props(styles.header)}>
+                <Dialog.Title>{t(activeTabConfig.labelKey)}</Dialog.Title>
               </header>
             )}
-            <div className="min-h-0 flex-1">
+            <div {...stylex.props(styles.paneBody)}>
               {usesInternalScrolling ? (
-                <div className="h-full pt-6 pr-10 pb-6 pl-6">
-                  <div className="mx-auto h-full max-w-5xl">
+                <div {...stylex.props(styles.fill, styles.paneInset, styles.paneInsetTop)}>
+                  <div {...stylex.props(styles.fill, styles.paneColumn)}>
                     <SettingsTabContent tabId={resolvedActiveTab} />
                   </div>
                 </div>
               ) : (
-                <ScrollArea className="h-full">
-                  <div className={cn('pr-10 pb-6 pl-6', selfTitledTab ? 'pt-6' : 'pt-0')}>
-                    <div className="mx-auto max-w-5xl">
+                <ScrollArea {...stylex.props(styles.fill)}>
+                  <div {...stylex.props(styles.paneInset, selfTitledTab && styles.paneInsetTop)}>
+                    <div {...stylex.props(styles.paneColumn)}>
                       <SettingsTabContent tabId={resolvedActiveTab} />
                     </div>
                   </div>

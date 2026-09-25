@@ -86,57 +86,58 @@ describe('AgentClient goal prompt transport', () => {
 });
 
 describe('AgentClient session title updates', () => {
-  it('forwards Claude session_info_update titles', async () => {
-    const { client, onUpdateMessage, onSessionTitleUpdate } = createTestClient('claude');
-
-    await client.sessionUpdate(sessionInfoNotification({ title: '  Fix login bug  ' }));
-
-    expect(onSessionTitleUpdate).toHaveBeenCalledWith('Fix login bug');
-    // The notification itself still flows through the normal history pipeline.
-    expect(onUpdateMessage).toHaveBeenCalledTimes(1);
-  });
-
-  it('forwards explicitly named Codex threads', async () => {
-    const { client, onSessionTitleUpdate } = createTestClient('codex');
-
-    await client.sessionUpdate(
-      sessionInfoNotification({
-        title: '  Diagnose title generation  ',
-        _meta: { codex: { titleSource: 'explicit' } },
-      })
-    );
-
-    expect(onSessionTitleUpdate).toHaveBeenCalledWith('Diagnose title generation');
-  });
-
-  it('ignores source-tagged Codex prompt fallback titles', async () => {
-    const { client, onSessionTitleUpdate } = createTestClient('codex');
-
-    await client.sessionUpdate(
-      sessionInfoNotification({
-        title: 'first prompt fallback',
-        _meta: { codex: { titleSource: 'fallback' } },
-      })
-    );
-
-    expect(onSessionTitleUpdate).not.toHaveBeenCalled();
-  });
-
-  it('ignores untyped Codex titles from older adapters', async () => {
-    const { client, onSessionTitleUpdate } = createTestClient('codex');
-
-    await client.sessionUpdate(sessionInfoNotification({ title: 'unknown source' }));
-
-    expect(onSessionTitleUpdate).not.toHaveBeenCalled();
-  });
-
-  it('ignores session_info_update titles from agents without native title support', async () => {
-    const { client, onSessionTitleUpdate } = createTestClient('kimi');
-
-    await client.sessionUpdate(sessionInfoNotification({ title: 'first prompt fallback' }));
-
-    expect(onSessionTitleUpdate).not.toHaveBeenCalled();
-  });
+  it.each([
+    ['claude', false, undefined, 'Accepted'],
+    ['grok', false, undefined, 'Accepted'],
+    ['codex', false, { codex: { titleSource: 'explicit' } }, 'Accepted'],
+    ['codex', false, { codex: { titleSource: 'fallback' } }, undefined],
+    ['codex', false, undefined, undefined],
+    ['kimi', false, undefined, undefined],
+    ['custom', true, { lody: { titleSource: 'generated' } }, 'Accepted'],
+    ['custom', true, { lody: { titleSource: 'explicit' } }, 'Accepted'],
+    ['custom', true, { lody: { titleSource: 'fallback' } }, undefined],
+    ['custom', true, { lody: { titleSource: 'unset' } }, undefined],
+    ['custom', true, undefined, undefined],
+    ['custom', false, { lody: { titleSource: 'generated' } }, undefined],
+    ['claude', true, { lody: { titleSource: 'fallback' } }, undefined],
+    ['claude', true, undefined, undefined],
+    [
+      'codex',
+      true,
+      { lody: { titleSource: 'fallback' }, codex: { titleSource: 'explicit' } },
+      undefined,
+    ],
+    ['claude', false, { lody: { titleSource: 'unknown' } }, undefined],
+  ] as const)(
+    'routes %s title with capability=%s and metadata=%j',
+    async (provider, advertised, meta, expected) => {
+      const titles: string[] = [];
+      const { client } = createTestClient(provider);
+      Object.assign(client, {
+        lodyExtensionCapabilities: advertised ? { sessionTitle: { version: 1 } } : {},
+      });
+      // Observe the title consumer's resulting state, not callback counts.
+      Object.assign(client, {
+        options: {
+          // @ts-expect-error private options are only read for this boundary fixture
+          ...client.options,
+          agentConfig: {
+            cliType: provider === 'custom' ? 'custom' : 'builtin',
+            agentType: provider,
+          },
+          onSessionTitleUpdate: (title: string) => titles.push(title),
+        },
+      });
+      await client.sessionUpdate(sessionInfoNotification({ title: '  Accepted  ', _meta: meta }));
+      expect(titles).toEqual(expected ? [expected] : []);
+      await client.sessionUpdate(sessionInfoNotification({ title: '   ', _meta: meta }));
+      await client.sessionUpdate({
+        ...sessionInfoNotification({ title: 'Other session', _meta: meta }),
+        sessionId: 'different-session',
+      });
+      expect(titles).toEqual(expected ? [expected] : []);
+    }
+  );
 });
 
 describe('AgentClient agent warning updates', () => {

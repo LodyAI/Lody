@@ -5,12 +5,12 @@ import { flushSync } from 'react-dom';
  * Deferred mounting for interaction-only overlays inside long lists.
  *
  * A conversation row carries a handful of tooltips, popovers and context menus
- * that only matter on hover, focus or click, yet each one mounts 6-7 Radix
- * components with the row. Inside an unarmed boundary the shared `Tooltip`,
- * `Popover` and `ContextMenu` primitives render only their trigger element
- * (props merged exactly as `asChild` would) and no content. The boundary arms
- * on the first pointer entry or focus, which always precedes an interaction
- * with anything inside it, and the real primitives mount then.
+ * that only matter on hover, focus or click, yet each closed one still mounts
+ * its Base UI root and parts with the row. Inside an unarmed boundary the
+ * `Tooltip`, `Popover` and `ContextMenu` from `armed-overlays.tsx` render only
+ * their trigger element (props merged as `render` would) and no content. The
+ * boundary arms on the first pointer entry or focus, which always precedes an
+ * interaction with anything inside it, and the real parts mount then.
  *
  * Outside a boundary the context is armed, so every other surface is unchanged.
  */
@@ -35,7 +35,7 @@ const FOCUSABLE =
 /**
  * Arms on the first pointer entry or keyboard focus into the element the
  * returned handlers are spread on. Arming remounts the triggers inside (they
- * gain their Radix wrappers), so it must never land inside a press: Chromium
+ * gain their Base UI parts), so it must never land inside a press: Chromium
  * drops the click when the pressed node is replaced before pointerup.
  *
  * - Pointer entry commits synchronously. React schedules a `pointerenter`

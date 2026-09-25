@@ -8,7 +8,7 @@ import {
   type WorkspaceId,
 } from '@lody/shared';
 import { useAtom, useAtomValue } from 'jotai';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import { useTranslation } from 'react-i18next';
 import { chatLandingPendingFilesAtomFamily, type PendingFile } from '@/atoms/chat-landing-draft';
 import { localMachineIdAtom } from '@/atoms/local-probe';

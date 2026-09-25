@@ -306,6 +306,7 @@ import {
   type AuthContext,
 } from '@/lib/command-runtime';
 import { makeSessionAccessPolicy } from '@/session/session-access-policy';
+import { WorkspaceBranchService } from '@/session/workspace-branch-service';
 import { TurnPostProcessingService } from '@/session/turn-post-processing-service';
 import {
   applyAcpSessionRunConfig,
@@ -2869,7 +2870,14 @@ export class MessageHandler {
     this.usageTrackingService = this.cloudPort.usage;
     this.localProjectControlService = new LocalProjectControlService(this.logger);
     this.codeCollabV2DiffStore = new CodeCollabV2DiffStore(this.workspaceId);
+    const workspaceBranchService = new WorkspaceBranchService({
+      logger: this.logger,
+      workspaceDocument: this.workspaceDocument,
+    });
     this.codeCollabV2Service = new CodeCollabV2Service({
+      observeWorkspaceBranch: async ({ ownerSessionId, workspaceRoot }) => {
+        await workspaceBranchService.syncLocalWorkspace(ownerSessionId, workspaceRoot);
+      },
       resolveWorkspace: this.resolveCodeCollabV2Workspace,
       diffStore: this.codeCollabV2DiffStore,
       workspaceId: this.workspaceId,
@@ -3000,14 +3008,14 @@ export class MessageHandler {
           modelInfo,
           userTurnId
         ),
+      syncSessionBranchName: (sessionId, session) =>
+        workspaceBranchService.syncSession(sessionId, session),
       turnFinalization: {
         finalizeACPState: async (sessionId, turnId) =>
           await this.finalizeACPState(sessionId, turnId),
         persistCodeCollabTurnDiffs: async (sessionId, turnId) =>
           await this.persistCodeCollabTurnDiffs(sessionId, turnId),
         flushSessionUsage: async (sessionId) => await this.flushSessionUsage(sessionId),
-        syncSessionBranchName: async (sessionId, session) =>
-          await this.turnPostProcessingService.syncSessionBranchName(sessionId, session),
         updateSessionDiffStats: async (sessionId, session, options) =>
           await this.turnPostProcessingService.updateSessionDiffStats(sessionId, session, options),
         refreshCodeCollabSharedState: async (sessionId) =>

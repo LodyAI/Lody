@@ -17,7 +17,7 @@ import {
 } from '@lody/shared';
 import { useAtomValue } from 'jotai';
 import { usePostHog } from '@posthog/react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import { currentWorkspaceIdAtom, userAtom } from '@/atoms';
 import { getDurationSinceMs, getPerformanceNowMs } from '@/lib/posthog-analytics';
 import {
@@ -28,7 +28,7 @@ import {
 } from './diff-pr-analytics';
 import { DiffViewer } from '@/ui/diff-viewer/diff-viewer';
 import { ScrollArea } from '@/ui/scroll-area';
-import { Skeleton } from '@/ui/skeleton';
+import { Skeleton } from '@lody/ui/skeleton';
 import { cn } from '@/lib/utils';
 import { observeDiffPerfLongTasks } from '@/lib/diff-perf';
 import { FileIcon } from '@/components/icons/file-icons';
@@ -72,11 +72,11 @@ function FileDiffSkeleton({
         </div>
       </div>
       <div className="space-y-1.5 px-4 py-3">
-        <Skeleton className="h-3 w-full" />
-        <Skeleton className="h-3 w-11/12" />
-        <Skeleton className="h-3 w-4/5" />
-        <Skeleton className="h-3 w-full" />
-        <Skeleton className="h-3 w-3/4" />
+        <Skeleton width="100%" height={12} />
+        <Skeleton width="91%" height={12} />
+        <Skeleton width="80%" height={12} />
+        <Skeleton width="100%" height={12} />
+        <Skeleton width="75%" height={12} />
       </div>
     </div>
   );

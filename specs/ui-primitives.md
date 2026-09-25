@@ -1,0 +1,443 @@
+# Shared UI primitives
+
+Status: draft
+Translation: pending
+
+## Scenario
+
+A person should encounter the same control language across Lody's desktop and
+web surfaces. Buttons with the same role should share appearance, state feedback,
+and theme behavior even when they are composed by different product features.
+
+## Responsibilities
+
+`@lody/ui` owns reusable visual primitives and semantic design tokens. A primitive
+exposes named product choices instead of asking each caller to assemble its
+colors, dimensions, radius, shadow, and interaction states.
+
+The Button supports primary, secondary, ghost, destructive, and link variants;
+mini, small, medium, and large sizes; icon-only controls; destructive tone; and
+default or pill shapes. These choices define the redesigned interface. Migrated
+callers must not reproduce the appearance of the deleted Button implementation.
+
+A field is a composition rather than a single control. A field root owns the
+control's name, whether it is disabled, and whether it is valid; the label, the
+control, the help text, and the error message read that state from the root
+instead of receiving their own copies of it. A caller therefore states a field is
+invalid in one place, and cannot leave a control and its message disagreeing.
+The composition provides a text input in small, medium, and large sizes, a
+multi-line control, a checkbox, a group of radio options, and a switch, and
+associates the label with the control without the caller naming an identifier.
+
+The composition also provides a control that picks one value from a list the
+person opens, and one that filters that list as they type. These are two parts:
+the control a person sees at rest sits with the rest of the family and answers to
+the field root the same way, and the list it opens is a floating surface with its
+own appearance. A person reaches the list with the keyboard, walks it with the
+arrow keys, and takes a row with Enter; the row that holds the value is marked so
+they can see which one it is, and the row they are on is marked separately,
+because those are two different facts. A list that is open reports what it is to
+a screen reader, and a control tells one which list it opens.
+
+The composition also provides a control for a number and a control for a
+password. A number is a range rather than a text control that happens to hold
+digits: the control owns the smallest and largest values it will take and the
+step it moves in, keeps what a person enters inside that range, and reports the
+number itself rather than the text of it, so a surface neither parses what was
+typed nor writes its own limit. A person moves the value with the keyboard, and
+where it is worth nudging, with a control at each end of the field; those two
+controls are outside the keyboard's path, because the arrow keys already do
+what they do, and each is named in the language the surface is running in. A
+number that is outside its range says so to a screen reader and not only
+through its appearance.
+
+A password is masked until the person asks to see it, and the control that
+reveals it shares one field with the value rather than standing beside it as a
+second control: focus belongs to the field, not to one half of it. Whether the
+password is showing belongs to the control and lasts as long as the person is
+looking at it; no surface can set it, store it, or restore it. The reveal is
+named in both of its states — what it will do next, not what the field is doing
+— and a field that is disabled disables the reveal with the value, so nothing
+in it looks usable when it is not.
+
+A surface that owns a modal states where the popups inside it belong. A modal
+holds the keyboard and the scroll inside its panel, so a list that opens outside
+that panel is unreachable in it; the surface names the panel once and the lists
+under it follow. Product surfaces do not otherwise place these lists.
+
+The same floating surface also carries commands. A person reaches a menu three
+ways — a control that opens one, a right click or long press over a region, and
+a bar of names along the top of a window — and meets the same commands whichever
+way they came: one row, one height, one mark for where the keyboard is. A menu
+holds commands, commands that toggle a setting, commands that pick one of a set,
+headings over groups of them, and commands that open a further menu; a command
+may carry a glyph, a keyboard shortcut, and the fact that it destroys something,
+which it states in its own colour rather than only in its words. A command that
+toggles a setting leaves the menu open so a second can be toggled; a command that
+acts closes it. A person walks a menu with the arrow keys, opens a further menu
+from the row that owns it, and leaves with Escape; the row the pointer is on and
+the row the keyboard is on are one row, and a row that cannot be used is neither
+reached nor run.
+
+The list a control opens is as wide as that control, because the control shows
+the value the list holds. A menu is opened by whatever the surface already had
+there, so it states a width of its own. Where keyboard focus goes after a menu
+closes is a product decision — a surface may want the composer rather than the
+control that opened the menu — so the surface states it and the primitive does
+not choose for it.
+
+That same floating surface also carries content rather than rows or commands: a
+small panel a control opens, with a heading, a sentence about it, and whatever
+the surface puts under them. It is one surface with three things on it rather
+than three surfaces, so a panel and the menu beside it cannot open at two radii
+over two shadows. What it holds is prose, so its text follows the prose rule
+rather than the rule a row's label follows.
+
+A surface that must be answered before a person carries on is a panel over the
+whole window, with the page receding behind it. There are three, and they are
+one thing arriving three ways: one a person may dismiss, and which shows that it
+can be; one that must be answered, where a press beside it is not an answer,
+although the key that cancels still is; and one that arrives from an edge of the
+window rather than its middle. All three share one appearance, so a padding or a
+heading has one place to change. Each states its own panel as the place the
+lists and menus inside it belong, so a surface that opens one never has to.
+Which answer in such a panel is the affirmative one, and what it is about, is
+the surface's decision rather than the panel's.
+
+The one that arrives from an edge can also be sent back to it. A panel sliding in
+from an edge promises that gesture, and a person using a touch screen will make
+it, so that panel is a different thing from the one in the middle rather than the
+same thing repositioned: it is laid out against the edge it belongs to instead of
+placing itself, which is what leaves it free to follow a finger. It names that
+edge in reading order rather than as left or right, and the direction that sends
+it away follows from the edge, so a panel on the leading side departs the way
+"away" means in the reader's language. It either meets the window — reaching the
+physical edge, squaring the corners that touch it, and keeping its own contents
+clear of whatever the device intrudes — or floats clear of every edge as an
+object resting over the page. As it is dragged away the page behind it returns in
+proportion, so a gesture half-made reads as one that can be abandoned. A shell
+that wants the page itself to recede while such a panel is open says so around
+its own interface; the panel does not reach out and do it.
+
+A person may also be told what a control is without acting on it. That label is
+not a surface a person visits: it is a mark over the thing it names, so it reads
+inverted rather than raised, it never takes the pointer, and it sits above every
+other floating thing because what it names may itself be on one. It is offered
+to sighted people using a pointer or a keyboard and reaches neither touch nor a
+screen reader, so it never carries a control's name — every control it describes
+states its own name, and a surface that groups several of them lets the second
+appear without the wait the first had.
+
+A surface may also show one thing out of several, and there are three ways it
+does so: the choices side by side with the thing under them, the choices stacked
+with the thing opening in place beneath the one chosen, and a single such thing
+on its own. These are one family rather than three components, because each is a
+control that says what is shown and a region that shows it; only the arrangement
+differs. None of them holds a value — what they pick is what a person sees, not
+what is stored — so none takes a name, a validity or a field around it.
+
+The strip of choices is a sunken track with the chosen one raised out of it, and
+that mark is one thing that moves between the choices rather than a light that
+turns on under each, because the strip is a single control. It is provided by
+the strip itself rather than assembled by a surface. The choices are stated
+once at a size, and a strip told to take the width it is offered divides that
+width between them. Moving along the strip with the keyboard does not take a
+choice, because what a choice reveals may be expensive to produce; a surface
+whose regions are cheap may ask for the opposite.
+
+A stacked choice is a row with no fill of its own, separated from the next by
+the line the system gives a list, and it says what it hides with a mark that
+turns over as it opens. One is open at a time unless the surface says otherwise.
+A lone one has no list around it, so it has neither that line nor that row: it
+is opened by whatever the surface already had there. What opens is animated from
+its own measured height, so what it holds keeps its spacing on something inside
+it rather than on the part being measured.
+
+A person may also leave a control pressed. That is not the control that stores a
+value in a form — the one with a name, a place in a field and the ability to be
+wrong — but a statement that an option is on at this moment: the words in front
+of them are bold, the long lines are wrapped, this filter is being applied. It
+is a button in every other way, so the keyboard reaches it and a person who
+cannot see it is told both what kind of control it is and whether it is on.
+
+What it looks like when it is on follows from where it rests. The system fills a
+control with the accent colour when what it holds is stored, and that is right
+for the ones whose resting appearance already occupies the sunken place this
+system gives to anything you may put something into: on has to be somewhere
+else, so it is the accent fill.
+A control that rests on nothing has that place free, so it goes down into it and
+stays there — which is also what keeps a row of eight of them from reading as
+eight of the most important thing on the screen. It goes down and stays rather
+than dipping and coming back, which is what this system's raised controls do
+when they are pressed.
+
+Several of them may answer to one value, and that is a different thing from the
+strip of choices above, not an arrangement of it. The strip picks what a person
+sees, so it can be a single control with one mark moving across it; a set of
+these stores what is on, and two of its members can be on at once, which no
+single moving mark can say. So the set has no track under it and each member
+goes down on its own — including when the surface asks for one choice out of
+several, because the same set with several allowed has to look like itself. How
+tall the members are and what shape they take is stated once, on the set.
+
+A row of controls is itself something the system names, and what it is for is
+the keyboard rather than the eye: it draws nothing at all — not even the line a
+table is allowed — because it is a row of controls on whatever the surface
+already was. A row of eight things a person can press is eight stops on the way
+past it unless something says otherwise, so the row is one stop and the arrow
+keys walk it, stepping over what cannot be used rather than stopping there. Two
+distances say what belongs with what: one between the controls of a cluster, a
+wider one between clusters and either side of the line that divides them. That
+line is the one line this system allows, turned across the row, and the row
+states that rather than the surface — a row laid out one way cannot then be
+divided the other.
+
+The system also speaks back. What it says is either what happened or that it is
+still working, and those are one family rather than five components. A message
+is the same block wherever it appears — a mark that names what kind of message
+it is, what happened, a sentence about it, and whatever answers it — and it
+appears in two places: kept on the page it is about, or arriving over that page
+and leaving on its own. Neither takes the whole window, because a message does
+not have to be answered before a person carries on.
+
+A message reports one of four things: something worth knowing, something that
+worked, something that may still go wrong, and something that failed. The
+palette names three of them; the fourth is deliberately unnamed, because the
+colour that would suggest itself is reserved for live state. What it reports
+colours its mark and tints the surface under it, and never fills it. The mark
+belongs to what is being reported rather than to the surface that reports it, so
+a failure cannot be shown with a tick. How urgently a person using a screen
+reader is told follows from the same fact: a failure interrupts, a confirmation
+waits its turn.
+
+The other half is the wait. A bar shows how far something has got, in the one
+colour this system gives to live state; a bar with no value to show is not a bar
+at zero but the same bar saying it does not know, which is a different report. A
+bar that measures something rather than progressing through it gives that colour
+back. A stand-in for content that has not arrived says nothing to a screen
+reader, because its shape already says it, and it stops moving where a person
+has asked for less movement — while the mark that says work is under way keeps
+turning there, since it is the only thing saying the work has not stopped.
+
+Not everything on a surface reports or acts. Three things say what a page is
+made of while nothing is happening: a block that groups what belongs together, a
+word that states a fact about the thing beside it, and a line between the rows
+of a list. Each answers the question this system asks of every part — what its
+edge is — differently. The block's edge is the shadow that lifts it off the page.
+The word has no edge and no place on the ladder at all: it appears on a page, on
+a block, on a row of a list a person has opened and on a panel over the window,
+so what it is filled with is a film of its own colour over whatever it happens
+to sit on. The line is the edge, and it is the only one the system allows: it
+divides rows, never encloses a surface and never underlines a heading, and it
+says what it is to a screen reader rather than pretending to be decoration.
+
+A block is a panel one step nearer the page than the one that must be answered,
+and it is made of the same parts: a heading, a sentence about it, what a person
+came for, and the answers. It does not contain another of itself, and it is not a
+control — a surface may say that pressing the block does something, and then the
+surface provides what is pressed, because what a press does is the product's
+decision and not the block's.
+
+A word that states a fact says what kind of fact twice: by the tint behind it,
+and by the colour of the word itself. The colours this system gives to outcomes
+are tuned for a mark the size of a glyph rather than for text this small, so a
+word does not take one of them as it is — it takes that colour carried half the
+way to the colour text is normally written in, which keeps what kind it is while
+staying as legible as any other word on the surface. The tint alone is not
+enough: a chip this small is a wash a few percent away from whatever it sits on,
+and there is a palette in which two of the five outcomes are near enough in
+colour that no strength of wash tells them apart, while their words do. A fact
+with no kind to state takes the ordinary text colour. It reports the same four
+outcomes a message does, and one more — that something is happening now —
+because that is live state and the system has a colour for it. It is never a
+control: nothing about it answers a pointer or takes focus, and a surface that
+needs those needs a button.
+
+Every control in this family shares one set of state appearances: a sunken
+resting surface with no border, a placeholder in the hint colour, an accent ring
+on focus, a destructive ring while invalid that persists when the control is
+focused, and reduced opacity on the whole control when disabled. The states are
+defined once for the family, so a control added later inherits them rather than
+choosing its own.
+
+A control that stores a value — a ticked checkbox, the selected radio option, a
+switch that is on — shows that as the accent fill, the one hue this system
+reserves for state the eye should find, live or stored. A checkbox can also
+stand for a partial
+selection, which it announces as mixed rather than as ticked. Each of these
+controls is a button to the platform: the keyboard reaches it, a screen reader
+is told which kind of control it is and whether it holds a value, and a form
+receives that value under the name the field root gave it.
+
+A surface may also show records rather than one thing at a time. That is rows
+and columns, and it is the one part of this system with no surface of its own:
+no fill, no shadow, no rounded edge, because it is rows on whatever the surface
+around it already was, and a panel holding one keeps its own edges. The one edge
+it draws is the line a list is allowed, between one row and the next; the row of
+column names takes it too, because the row after it is the first record, and the
+last record draws none.
+
+A column is stated once. What a column is — its name, what it holds for one
+record, how much room it takes, whether its values are figures, whether the
+records can be ordered by it, what a total under it would say — is one
+description, and the row of names and the cells beneath it are two readings of
+it rather than two things a surface keeps in step. That is what lets the
+composition answer for the rest of a table: it can give a column a width the
+surface never writes a cell for, admit across every column at once that there is
+nothing to show, and say which column the records are ordered by in one place,
+so two columns claiming that at once is not a state that can be described. It
+does not reorder the records themselves — a surface that had already ordered
+them, on a server or across pages, would be overruled — so what it owns is the
+control, the mark of which way round it is, and the one place that fact is
+stated for a person who cannot see the mark.
+
+The rows answer the pointer only where pressing one does something, so a table
+of facts is read rather than operated; a row that can be pressed is reachable
+and usable from the keyboard as well, and says where the keyboard is. Records a
+surface would act on together are picked with a control inside the row, which is
+both what a person presses and what tells a screen reader what happened, with
+the row marked so they can be found again; the control over that column reports
+none, some, or all of them without being told which, and picking them all keeps
+the records a person took on pages that are not on screen.
+
+A table may be told how tall it is allowed to be, and then the row of column
+names stays while the records move under it. That row is no longer a row but a
+band over them, so it takes the surface a band over the page takes: without one,
+the records are drawn through the names. And a table narrower than its columns
+need is not a table with a bar to drag: it is a list of records, each one a
+stack of names and values, with each value carrying the name from the row that
+is no longer above it. Narrow means the table's own width rather than the
+window's, because the same table is narrow in a side panel on a wide screen.
+
+What a list that did not fit offers next belongs with it: a way to the records
+that are not on screen. It is one control rather than parts a surface
+assembles, because the decision that is easy to get wrong is which pages to
+offer out of thousands and where to admit the rest are missing — and it is made
+once here. What is offered stays one width from the first page to the last, so
+the choices do not move as a person walks through them, and the missing pages
+are admitted only where more than one is missing. The page a person is on is
+marked twice, once for the people who can see it and once for the people who
+cannot. Where there are too many pages to offer at all, it says where they are
+instead, and lets them type where they want to be — taking that when they have
+finished saying it rather than while they are still typing, since every
+half-typed number would otherwise be somewhere the surface had to go. Every
+word it says is the surface's, because this package carries no dictionary.
+
+The composition also names two things that are not part of this interface at
+all: a person, and a key on their keyboard. A face is shown at one of a fixed
+set of sizes, and how large it is decides how large the letters standing in for
+it are, so a surface states one fact rather than two that can disagree; a face
+is round and a thing that is not a person is not, because a round frame around a
+mark that was drawn square is a crop. Whether the picture or the stand-in is on
+screen follows from whether the picture arrived, so a surface says what both are
+and never says which. A surface that gives the thing a colour of its own — a
+colour derived from its name, so the same thing is the same colour wherever it
+appears — supplies that colour, because which colour belongs to which name is
+the product's decision and not this package's. A face states how much room it
+takes and keeps exactly that much, neither growing to fit what is inside it nor
+giving room back to a row that ran out.
+
+A key is drawn as the key it is, and the keys of one chord are drawn together
+and announced as one gesture. What the key is called is the surface's word,
+because which key a person presses depends on their platform and their layout.
+It is never a control: nothing about it answers a pointer, takes focus or can be
+selected. Where such a key is drawn on a surface whose colours are reversed, it
+reverses with it, and the surface tells it so rather than the key guessing.
+Neither of these two carries a role in the interface, so neither takes a colour
+that names one.
+
+Product surfaces own workflows, placement, responsive layout, and accessibility
+requirements. They may add layout or interaction classes when a local constraint
+cannot be expressed by the primitive, such as a 44 px touch target in the Mermaid
+viewer. Those classes must leave the primitive's visual identity under its props.
+
+## Theme behavior
+
+Semantic StyleX tokens provide light and dark values. A theme applies to a subtree
+so a primitive responds without product code selecting raw palette values. Token
+names describe meaning and interaction role; component tokens derive from those
+semantic values or documented fixed dimensions.
+
+The material is flat with one light above it, in both palettes. A control a
+person can press is at least as light as what it rests on and is told apart by a
+crisp edge and a short lift, never by a gray fill under a soft cloud of shadow; a
+place to put something is recessed; and a raised face may carry a sheen of a few
+percent that a press takes away. No surface carries grain, noise, gloss, a
+reflection or a deep groove.
+
+A forced theme applies to the subtree it is placed on, including the primitives
+inside it. A component token that derives from a semantic colour resolves against
+the palette in force on that subtree, not the palette of the document root, so two
+palettes can be shown at once on one page.
+
+## Gallery
+
+`@lody/ui` carries a gallery of its own tokens and primitives. It presents each
+semantic token, each elevation rung, and each state a primitive exposes through
+its props, rendered in both palettes from the tokens themselves rather than from
+copied values. The gallery is the reference a person reads when choosing a token
+or a prop, and the place a new token or primitive state becomes visible; a token
+that no sample presents is a gap the package reports.
+
+## Migration
+
+Primitives move from `@lody/components` one at a time. A legacy primitive is
+removed once all in-repository callers use the new package and type checks show no
+remaining dependency. The migration does not expose an adapter for old Button
+variants or sizes. A primitive arrives with the state appearances its family
+already defines; it does not introduce a second colour or state vocabulary for a
+state the family has decided.
+
+## Evidence
+
+Intended behavior: Issue [#304](https://github.com/LodyAI/Lody/issues/304) and PR
+[#305](https://github.com/LodyAI/Lody/pull/305).
+
+Inspected implementation: `packages/ui/src`, package compiler configuration, and
+migrated Button consumers in `packages/components`, Electron, and site docs.
+
+Executed validation is recorded in the linked PR and its
+[Agent Note](../.agents/notes/implemented/architecture/2026-09-08-ui-button-migration-takeover.md).
+
+The gallery and the subtree palette behavior are recorded in the
+[UI token gallery note](../.agents/notes/implemented/feature/2026-09-09-ui-token-gallery.md).
+The field composition, the state mapping it settles, and the outstanding focus
+ring suppression in the desktop shell are recorded in the
+[UI field primitives note](../.agents/notes/implemented/feature/2026-09-09-ui-field-primitives.md).
+The checkbox, radio and switch that join that family are recorded in the
+[UI choice controls note](../.agents/notes/implemented/feature/2026-09-10-ui-choice-controls.md),
+and the stored-value fill moving from ink to the accent colour is recorded in
+the
+[stored-state fill note](../.agents/notes/implemented/feature/2026-09-22-stored-state-accent-fill.md).
+The select and the combobox, the separate token group their lists take, and the
+container a modal names for them are recorded in the
+[UI select and combobox note](../.agents/notes/implemented/feature/2026-09-10-ui-select-combobox.md).
+The menu family that shares that surface, the one declaration it replaces, and
+the migration of the Radix menus still owed to it are recorded in the
+[UI menu primitives note](../.agents/notes/implemented/feature/2026-09-11-ui-menu-primitives.md).
+The popover on that same surface, the modal rung the dialog family shares, the
+inverted tooltip, and the migration still owed to them are recorded in the
+[UI overlay primitives note](../.agents/notes/implemented/feature/2026-09-12-ui-overlay-primitives.md).
+The three disclosures and the five parts that report are recorded in the
+[UI disclosure primitives note](../.agents/notes/implemented/feature/2026-09-12-ui-disclosure-primitives.md)
+and the
+[UI feedback primitives note](../.agents/notes/implemented/feature/2026-09-12-ui-feedback-primitives.md).
+The table with no surface of its own, the pager that shares its token group, and
+the two Radix files they replace are recorded in the
+[UI table and pagination note](../.agents/notes/implemented/feature/2026-09-12-ui-table-pagination.md).
+The card rung as a component, the badge that is on no rung, the one line the
+rules allow, and the Card callers still owed a flush surface are recorded in the
+[UI card, badge and separator note](../.agents/notes/implemented/feature/2026-09-12-ui-card-badge-separator.md).
+The avatar whose rung picks its own letters, the key cap, and the component
+token group that carries a surface's inversion into what is standing on it are
+recorded in the
+[UI avatar and kbd note](../.agents/notes/implemented/feature/2026-09-13-ui-avatar-kbd.md).
+The sunken place a pressed control goes into rather than filling with the
+accent, the
+set of them that is not the strip of choices, and the row that draws nothing and
+exists for the keyboard are recorded in the
+[UI toggle and toolbar note](../.agents/notes/implemented/feature/2026-09-15-ui-toggle-toolbar.md).
+The range that keeps its own limits, the field a password builds around its own
+value, and the two things the library underneath leaves unsaid are recorded in
+the
+[UI number and password fields note](../.agents/notes/implemented/feature/2026-09-20-ui-number-password-fields.md).

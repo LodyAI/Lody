@@ -16,9 +16,15 @@ mobile surfaces. Background for the rules below:
 - All user-visible copy must go through i18n.
 - Compact number units (K/M/B vs 万/亿) follow the product language via
   `toIntlLocaleOrEn` / `formatCompactNumber`, never the host OS locale.
-- Prefer shared primitives from `src/components/ui` over private replacements. Editable
-  controls fill with `bg-input-field`, never `bg-input`; gray means disabled
-  (`disabled:bg-muted`). Primitive rules: [src/ui/AGENTS.md](src/ui/AGENTS.md).
+- Use `@lody/ui` primitives for every control; never restyle one through `className`
+  (a StyleX or Tailwind visual class there loses to, or fights, its own). Legacy
+  primitive rules: [src/ui/AGENTS.md](src/ui/AGENTS.md).
+- New or rewritten product styling is StyleX, not Tailwind. Colour, shadow, radius and
+  space come from `@lody/ui/tokens/colors.stylex` / `scales.stylex`; styles live in the
+  component's `stylex.create`, and what an area shares lives in its `surface.ts`
+  (e.g. `components/settings/surface.ts`). Copy that follows `--ui-font-size` keeps `em`.
+  Materials are `@lody/ui`'s: cards lift, controls stand up, every value holder is
+  the one recessed well, and a list of records is one card with ruled rows.
 - `PlatformContext` intentionally has no default. Cloud-shaped component tests use
   `tests/test-platform.tsx`'s `TestCloudPlatformProvider`; plain-module tests install
   and remove the exact platform port they need.
@@ -63,6 +69,11 @@ mobile surfaces. Background for the rules below:
   sets keyed by content): each new value makes React walk the whole subtree. An
   `AnimatePresence` around such a subtree sets `presenceAffectsLayout={false}` unless it
   drives `layout` animations; otherwise its context changes on every parent render.
+- Components rendered inside conversation rows take `Tooltip`, `Popover` and `ContextMenu`
+  from `ui/armed-overlays.tsx`, not `@lody/ui`: inside an unarmed `useInteractionArm`
+  boundary they render only the trigger element until the first hover or focus. An
+  owner-opened overlay still mounts, focus that arms a row is handed back to the same
+  trigger, and arming never commits inside a press (Chromium drops the click).
 - Markdown code blocks tokenize in `lib/markdown-highlight.worker.ts`; the main thread
   keeps only cache hits and the no-worker fallback. Builds without an `es` worker format
   alias `@/lib/markdown-highlight-worker` to a null shim (see site-docs).
