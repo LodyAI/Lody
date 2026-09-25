@@ -34,15 +34,24 @@ const SIZES = {
  * arc is that same ink kept back — one declaration rather than a token per
  * context. It keeps turning under reduced motion: it is the only thing saying
  * the work has not stopped, and a still spinner says it has.
+ *
+ * The caller's `className` lands on the turning wrapper, not the glyph inside
+ * it. The wrapper's box is the glyph's box — the svg fills it — so a margin
+ * there spaces the mark while a margin on the glyph would grow the animated
+ * box asymmetrically and turn the spin into an orbit.
  */
 export const Spinner = forwardRef<SVGSVGElement, SpinnerProps>(function Spinner(
   { size = 'medium', label = 'Loading', className, ...rest },
   ref
 ) {
-  const spin = stylex.props(surface.spinnerSpin);
-  const sx = stylex.props(surface.spinner, SIZES[size]);
+  const box = stylex.props(surface.spinnerSpin, SIZES[size]);
+  const sx = stylex.props(surface.spinner);
   return (
-    <span data-slot="spinner" className={spin.className} style={spin.style}>
+    <span
+      data-slot="spinner"
+      className={appendClassName(box.className, className)}
+      style={box.style}
+    >
       <svg
         ref={ref}
         viewBox="0 0 16 16"
@@ -51,7 +60,7 @@ export const Spinner = forwardRef<SVGSVGElement, SpinnerProps>(function Spinner(
         aria-label={label ?? undefined}
         aria-hidden={label == null ? 'true' : undefined}
         {...rest}
-        className={appendClassName(sx.className, className)}
+        className={sx.className}
         style={sx.style}
       >
         <circle cx="8" cy="8" r="6.5" stroke="currentColor" strokeOpacity="0.25" />

@@ -57,9 +57,9 @@ context/acp-agent-edit-evidence.md; adapter repos: [apps/cli/AGENTS.md](../../AG
   Presets change only before the first prompt. Per-Agent ACP stdio/HTTP MCP
   belongs in the adapter, not host composition. JSONL encoding detection
   is READ-ONLY: fail mixed roots naming both paths; never modify artifacts.
-- `managed-agent-runtime.ts`: Codex pins come only from `codex-runtime-manifest.json`, Claude
-  pins only from `claude-runtime-manifest.json`; reject a dependency/manifest version mismatch
-  and never duplicate those pins or checksums beside the manager. Do not loosen the metadata
+- `managed-agent-runtime.ts`: Codex/Claude/Grok pins come only from their
+  `<name>-runtime-manifest.json`; reject dependency/manifest version mismatches and never
+  duplicate pins beside the manager. Do not loosen the metadata
   schema or accept unknown legacy fields. Definition drift is a miss; cleanup and update scans are best effort. The Grok submodule is never the source for production
   runtime binaries, and the desktop must not depend on the Kimi submodule workspace. Custom
   methods stay capability-gated. Inject the artifact base URL from

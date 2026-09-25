@@ -68,13 +68,21 @@ this page is the full text of the rules summarised there.
   panel-open action. It opens the reported candidate even when another page is already visible.
   That click IS the approval for that exact target: a remote route creates (or replaces) its tunnel
   immediately, with no confirmation dialog, because the CLI only accepts LOOPBACK targets from an
-  agent report. A typed loopback address and Share still go through the confirmation flow. The
-  approver is the session initiator, the same person the CLI already requires.
+  agent report. Enter on a typed loopback address and Share likewise authorize the exact target,
+  without a second confirmation. No candidate is required for a user-started server.
+  The approver is the session initiator, the same person the CLI already requires.
   Consume the request after handling it so a later panel remount cannot replay stale user intent —
   but NOT while the candidate is still in flight. Session meta carries only the candidate status;
   its target lives in the session doc `preview` state, and the two planes sync independently, so a
   click landing between those writes must wait for the doc (bounded by the doc reaching `synced`)
   instead of consuming the request and leaving an empty panel.
+  Remote connections are queried through Machine RPC rather than restored from persisted `active`
+  flags. A visible remote Browser renews only its current endpoint every minute; hidden panels,
+  background documents, local viewers, and observational queries do not renew remote access.
+  Creation/revoke fences stale status responses. The toolbar and expiry placeholder share
+  `PreviewConnectionStatus`; restore retains the logical address/path/query and explicitly
+  requests a new endpoint, then offers the replacement share link. Local content stays mounted
+  when remote sharing expires. The endpoint owner, not the panel, enforces the one-hour deadline.
   An empty Browser must always say WHY it is empty — a bare globe reads as a broken panel. With no
   reported candidate the empty state names that (the agent never called `lody_report_preview_candidate`,
   which is the common case, not a bug); with one, it points at the address bar.

@@ -4,6 +4,7 @@ import { api } from '@lody/cloud-api';
 import { ShareDeliveryEnvelopeSchema } from '@lody/shared/session-share-delivery';
 import {
   buildLoroStreamsTokenEndpoint,
+  PreviewControlVerificationSchema,
   createLoroStreamsTokenProvider,
   deriveConvexSiteUrl,
   normalizeBaseUrl,
@@ -42,7 +43,6 @@ export interface CloudCliPortOptions {
   authBaseUrl: string;
   authSiteUrl?: string;
   serverBaseUrl: string;
-  previewGatewayUrl?: string;
   /** Optional operator mirror; the public artifact channel is the default. */
   runtimeArtifactsBaseUrl?: string;
   logger: Logger;
@@ -267,7 +267,22 @@ export function createCloudCliPort(options: CloudCliPortOptions): CloudPort {
     },
     attachmentUpload: { serverBaseUrl },
     remotePreview: {
-      gatewayBaseUrl: normalizeBaseUrl(options.previewGatewayUrl?.trim() || serverBaseUrl),
+      verifyControl: async (input) => {
+        const response = await getCliHttpFetch({ logger: options.logger })(
+          new URL('/api/session-preview/verify', authSiteUrl),
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${options.token}`,
+            },
+            body: JSON.stringify(input),
+            signal: AbortSignal.timeout(10_000),
+          }
+        );
+        if (!response.ok) throw new Error(`Preview authorization failed (${response.status}).`);
+        return PreviewControlVerificationSchema.parse(await response.json());
+      },
     },
     runtimeArtifacts: {
       baseUrl: resolveRuntimeArtifactsBaseUrl(options.runtimeArtifactsBaseUrl),

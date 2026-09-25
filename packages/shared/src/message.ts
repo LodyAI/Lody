@@ -26,6 +26,8 @@ import type {
   SessionPreviewCreateResponse,
   SessionPreviewRevokeRequest,
   SessionPreviewRevokeResponse,
+  SessionPreviewStatusRequest,
+  SessionPreviewStatusResponse,
 } from './preview';
 import type { ProjectSkillsResult } from './acp/skills';
 import type { RpcSecretPublicKey } from './rpc-secret';
@@ -44,6 +46,8 @@ export type {
   SessionPreviewEndpointReleaseResponse,
   SessionPreviewRevokeRequest,
   SessionPreviewRevokeResponse,
+  SessionPreviewStatusRequest,
+  SessionPreviewStatusResponse,
 } from './preview';
 
 // ============================================
@@ -248,6 +252,14 @@ export interface MachineStatusResponse {
   success: boolean;
   resources?: MachineResourceInfo;
   lifecycle?: MachineLifecycleCapability;
+  error?: string;
+}
+
+export interface MachinePreviewControlResponse {
+  type: 'machine/preview-control_response';
+  machineId: MachineId;
+  success: boolean;
+  runtimeNonce?: string;
   error?: string;
 }
 
@@ -759,7 +771,8 @@ export type LocalSessionControlRequest =
   | SessionFileSendLocalRequest
   | PreviewCandidateReportRequest
   | SessionPreviewCreateRequest
-  | SessionPreviewRevokeRequest;
+  | SessionPreviewRevokeRequest
+  | SessionPreviewStatusRequest;
 
 export type LocalSessionControlResponse =
   | SessionCreateAck
@@ -785,7 +798,8 @@ export type LocalSessionControlResponse =
   | SessionFileSendLocalResponse
   | PreviewCandidateReportResponse
   | SessionPreviewCreateResponse
-  | SessionPreviewRevokeResponse;
+  | SessionPreviewRevokeResponse
+  | SessionPreviewStatusResponse;
 
 export type LocalProjectFileListResult = {
   paths: string[];

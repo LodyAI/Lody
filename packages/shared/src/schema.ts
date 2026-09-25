@@ -772,13 +772,6 @@ export type SessionPreviewCandidateMeta = Pick<PreviewCandidate, 'status' | 'upd
 
 export type SessionPreviewConnectionMeta = Pick<PreviewConnection, 'status' | 'updatedAt'>;
 
-export type SessionPreviewLegacyMetaFields = {
-  /** Deprecated legacy detail. Full preview candidate state lives in session doc `preview`. */
-  previewCandidate?: PreviewCandidate;
-  /** Deprecated legacy detail. Full preview connection state lives in session doc `preview`. */
-  previewConnection?: PreviewConnection;
-};
-
 export type SessionExternalHistoryCursorDocState = {
   importedTurnHashes?: string[];
   /**
@@ -1057,18 +1050,6 @@ export type SessionLegacyMetaFields = {
   /** Deprecated launch state; new writes store this in project worktree config. */
   worktreeCleanup?: WorktreeCleanupScriptConfig;
 };
-
-export type SessionMetaWithLegacyPreview = Omit<
-  SessionMeta,
-  'previewCandidate' | 'previewConnection'
-> &
-  Partial<SessionPreviewLegacyMetaFields>;
-
-export function getSessionPreviewLegacyFields(
-  session: Pick<SessionMeta, 'previewCandidate' | 'previewConnection'> | null | undefined
-): Partial<SessionPreviewLegacyMetaFields> {
-  return (session ?? {}) as Partial<SessionPreviewLegacyMetaFields>;
-}
 
 export type NeedToDeleteSessionQueueItem =
   | boolean

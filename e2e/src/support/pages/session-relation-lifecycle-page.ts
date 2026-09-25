@@ -112,7 +112,7 @@ export class SessionRelationLifecyclePage {
       await this.openSessionRouteById(sessionId);
       const relation = this.page.locator('[data-session-relation-card="opened-by"]');
       await expect(relation).toContainText('Deleted session', { timeout: 30_000 });
-      const back = relation.getByRole('button', { name: /^(Back to session|返回会话)$/u });
+      const back = relation.getByRole('button', { name: /^(Back to session|返回创建对话): /u });
       await expect(back).toBeDisabled();
       await expect(this.page).toHaveURL(this.sessionRoutePatternFor(sessionId));
     }

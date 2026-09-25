@@ -1,4 +1,4 @@
-name: Notify desktop Nightly
+name: Propose desktop Nightly
 
 on:
   push:
@@ -32,7 +32,7 @@ jobs:
           owner: ${{ vars.NIGHTLY_DISPATCH_OWNER }}
           repositories: ${{ vars.NIGHTLY_DISPATCH_REPOSITORY }}
           permission-actions: write
-      - name: Notify accepted source revision
+      - name: Request or update the Nightly release PR
         shell: bash
         env:
           GH_TOKEN: ${{ steps.token.outputs.token }}
@@ -40,5 +40,5 @@ jobs:
           DISPATCH_REPOSITORY: ${{ vars.NIGHTLY_DISPATCH_REPOSITORY }}
         run: |
           set -euo pipefail
-          gh api --method POST "repos/${DISPATCH_OWNER}/${DISPATCH_REPOSITORY}/actions/workflows/nightly-electron.yml/dispatches" \
+          gh api --method POST "repos/${DISPATCH_OWNER}/${DISPATCH_REPOSITORY}/actions/workflows/nightly-release-pr.yml/dispatches" \
             -f ref=main -f "inputs[source_repository]=${GITHUB_REPOSITORY}" -f "inputs[oss_sha]=${GITHUB_SHA}"

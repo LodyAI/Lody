@@ -64,6 +64,10 @@ export type SessionInfoBarProps = {
   contextActions?: readonly ContextChipAction[];
   /** Open the complete working-tree diff from the context diffstat. */
   onOpenAllChanges?: () => void;
+  /** Related-Sessions chip (opener + Sessions/Tabs created here). A plain
+   *  cluster action with its own popover; never staged. Pass it only when a
+   *  relation exists, so an otherwise empty bar still hides. */
+  relations?: ReactNode;
   /** Open the session Browser panel. Renders a
    *  plain action chip in the cluster zone (no stage form). */
   onOpenBrowser?: () => void;
@@ -137,6 +141,7 @@ export function SessionInfoBar({
   onOpenPr,
   contextActions,
   onOpenAllChanges,
+  relations,
   onOpenBrowser,
   privateAccessStatus,
   diffStat,
@@ -221,7 +226,7 @@ export function SessionInfoBar({
   // spacer): 8px under the pill, none under a queue sheet (it sits on the
   // composer), and the plain 4px when there is nothing to show.
   const ambientSync = syncStatus !== undefined ? syncStatus : syncing ? 'syncing' : null;
-  if (!defaultKey && !onOpenBrowser && !ambientSync && !privateAccessStatus) {
+  if (!defaultKey && !relations && !onOpenBrowser && !ambientSync && !privateAccessStatus) {
     return queue ? (
       <div className="w-full shrink-0 bg-background">
         <ConversationColumn>
@@ -288,7 +293,7 @@ export function SessionInfoBar({
   const clusterKeys = (['status', 'goal', 'schedule', 'context'] as const).filter(
     (key) => present[key] && key !== stagedKey
   );
-  const clusterNonEmpty = clusterKeys.length > 0 || !!onOpenBrowser;
+  const clusterNonEmpty = clusterKeys.length > 0 || !!relations || !!onOpenBrowser;
 
   return (
     // Light: same fill and lift as the session composer. Dark: recessed input.
@@ -307,6 +312,7 @@ export function SessionInfoBar({
       <ConversationColumn>
         {queue ? <div className={QUEUE_SHEET_INSET_CLASS}>{queue}</div> : null}
         <div
+          data-info-bar-surface=""
           className={cn(
             '@container flex h-8 w-full min-w-0 select-none items-center gap-1.5 rounded-lg border-[0.5px] border-foreground/[0.10] bg-[hsl(var(--composer))] px-2.5 text-xs dark:border-input-border/45 dark:bg-input/70',
             INFO_BAR_ELEVATION_CLASS,
@@ -327,11 +333,13 @@ export function SessionInfoBar({
               <span className="truncate font-medium">{privateAccessStatus.label}</span>
             </button>
           ) : null}
-          {privateAccessStatus && (clusterKeys.length > 0 || onOpenBrowser || stagedKey) ? (
+          {privateAccessStatus &&
+          (clusterKeys.length > 0 || relations || onOpenBrowser || stagedKey) ? (
             <span aria-hidden="true" className="h-3.5 w-px shrink-0 bg-muted-foreground/25" />
           ) : null}
           {clusterKeys.map((key) => renderItem(key, 'cluster'))}
-          {/* Browser is a plain action and has no stage form. */}
+          {/* Relations and Browser are plain actions with no stage form. */}
+          {relations}
           {onOpenBrowser ? (
             <ActionChip
               icon={MonitorPlay}
