@@ -1739,6 +1739,10 @@ export function MachineAgentSettings({
         label={t('settings.agent.machineTabs.machine', 'Machine')}
         current={resolvedSelectedMachine.id as string}
         onChange={(id) => onSelectedMachineChange(id as MachineId)}
+        overflow={{
+          label: (count) => t('settings.agent.machineTabs.more', '{{count}} more', { count }),
+          searchPlaceholder: t('settings.agent.machineTabs.search', 'Search machines'),
+        }}
         tabs={machinePills.map((pill) => ({
           id: pill.id,
           label: pill.label,

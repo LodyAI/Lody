@@ -61,8 +61,10 @@ import { settingsType as type } from './type.stylex';
 const MONO = 'var(--font-mono, ui-monospace, monospace)';
 
 const styles = stylex.create({
+  availableSection: { display: 'flex', flexDirection: 'column', gap: space[3] },
   /** The providers still to add: two columns of quiet, pressable entries. */
   available: {
+    marginInline: `calc(-1 * ${space[4]})`,
     display: 'grid',
     gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
     columnGap: space[2],
@@ -325,26 +327,28 @@ export function MachineProvidersSection({
   ];
 
   if (bare) {
+    if (configs.length === 0 && setups.length === 0) {
+      // An empty machine's page is what it could run, each one click from the
+      // dialog opened on it.
+      return onAddProvider ? (
+        <AvailableProviders configs={configs} onAdd={onAddProvider} />
+      ) : (
+        <div {...stylex.props(catalog.empty)}>
+          <Bot {...stylex.props(catalog.emptyIcon)} aria-hidden="true" />
+          <p {...stylex.props(catalog.emptyText)}>
+            {t('settings.agent.provider.empty', 'No providers on this machine yet.')}
+          </p>
+        </div>
+      );
+    }
     return (
-      <>
-        {configs.length === 0 && setups.length === 0 ? (
-          <div {...stylex.props(catalog.empty)}>
-            <Bot {...stylex.props(catalog.emptyIcon)} aria-hidden="true" />
-            <p {...stylex.props(catalog.emptyText)}>
-              {t('settings.agent.provider.empty', 'No providers on this machine yet.')}
-            </p>
+      <div {...stylex.props(settingsRecordsCard)}>
+        {providerLines.map((line, index) => (
+          <div key={line.key} {...stylex.props(surface.line, index > 0 && surface.lineRuled)}>
+            {line}
           </div>
-        ) : (
-          <div {...stylex.props(settingsRecordsCard)}>
-            {providerLines.map((line, index) => (
-              <div key={line.key} {...stylex.props(surface.line, index > 0 && surface.lineRuled)}>
-                {line}
-              </div>
-            ))}
-          </div>
-        )}
-        {onAddProvider ? <AvailableProviders configs={configs} onAdd={onAddProvider} /> : null}
-      </>
+        ))}
+      </div>
     );
   }
 
@@ -1135,9 +1139,8 @@ function useProviderUsage(machineId: string, enabled: boolean): Map<string, Prov
 }
 
 /**
- * The providers this machine does not have yet, one click from the dialog
- * opened on them. It is what a short list leaves room for, and it shrinks as
- * the list grows.
+ * What an empty machine could run, one click from the dialog opened on each:
+ * the empty state's own content rather than a sentence pointing at a button.
  */
 function AvailableProviders({
   configs,
@@ -1162,9 +1165,16 @@ function AvailableProviders({
       ),
     [configs, t]
   );
-  if (available.length === 0) return null;
   return (
-    <CompactSection title={t('settings.agent.provider.available', 'Available to add')}>
+    <section {...stylex.props(styles.availableSection)}>
+      <header>
+        <p {...stylex.props(surface.sectionTitle)}>
+          {t('settings.agent.provider.emptyTitle', 'No providers on this machine yet')}
+        </p>
+        <p {...stylex.props(surface.sectionDescription)}>
+          {t('settings.agent.provider.emptyPick', 'Pick one to start.')}
+        </p>
+      </header>
       <div {...stylex.props(styles.available)}>
         {available.map((provider) => (
           <button
@@ -1191,6 +1201,6 @@ function AvailableProviders({
           </button>
         ))}
       </div>
-    </CompactSection>
+    </section>
   );
 }

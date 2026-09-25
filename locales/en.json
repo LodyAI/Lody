@@ -4234,9 +4234,13 @@
   "settings.about.downloadStable": "Stable",
   "settings.about.downloadNightlyShort": "Nightly",
   "settings.agent.machineTabs.machine": "Machine",
-  "settings.agent.provider.available": "Available to add",
   "settings.agent.provider.conversationCount_one": "{{count}} conversation",
   "settings.agent.provider.conversationCount_other": "{{count}} conversations",
   "settings.agent.provider.lastUsed": "Used {{ago}} ago",
-  "settings.agent.dialog.option.grok.description": "xAI Grok coding agent runtime"
+  "settings.agent.dialog.option.grok.description": "xAI Grok coding agent runtime",
+  "settings.agent.machineTabs.more_one": "{{count}} more",
+  "settings.agent.machineTabs.more_other": "{{count}} more",
+  "settings.agent.machineTabs.search": "Search machines",
+  "settings.agent.provider.emptyTitle": "No providers on this machine yet",
+  "settings.agent.provider.emptyPick": "Pick one to start."
 }

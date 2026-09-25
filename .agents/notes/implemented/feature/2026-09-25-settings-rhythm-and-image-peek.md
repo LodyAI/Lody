@@ -260,13 +260,19 @@ The space is now filled with facts the renderer already holds, not decoration.
 A provider's second line names its default model (from the cached capabilities
 the composer reads; a model the runtime calls "default" is left out), how many
 open conversations on this machine use it and when one last moved (from the
-session index in memory), and its environment variable count. Under the list,
-"Available to add" shows the builtin runtimes and presets this machine does not
-have yet, two columns of name and one-line description, each opening the add
+session index in memory), and its environment variable count. A list of what the machine could still add
+was tried under every list and rejected: the owner wants it only when the
+machine has nothing. So an empty machine's page is "No providers on this machine
+yet", then the builtin runtimes and presets in two columns, each opening the add
 dialog already on that provider (`listAddableProviders` in
 `agent-config-dialog.tsx`; experimental runtimes, registry agents and custom
-commands stay behind the dialog's rail). It is long when the list is short and
-disappears when everything is configured. No request is made for any of it.
+commands stay behind the dialog's rail). None of this makes a request.
+
+With many machines the tabs keep to one row: those that fit are tabs, the rest
+sit behind a last "N more" tab whose menu gains a search field past eight, and
+the current machine always holds a place in the row. Every tab is laid out once
+out of sight to know how many fit, and the travelling line re-measures when a
+tab's width changes after its font loads.
 
 **A rule halfway between sections.** On About the space above a section rule was
 the page gap plus the row's padding (32px) and below it 24px, so the two rules
