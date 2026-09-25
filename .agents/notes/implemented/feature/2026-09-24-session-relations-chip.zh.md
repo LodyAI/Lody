@@ -12,7 +12,7 @@ Translation: current
 ## 决策
 
 - 数据来源是 `SessionMeta.openedBySessionId`。纯函数 `lib/session-relation-tree.ts` 从当前行向上走到最顶层的未归档创建者，再包含其所有后代，因此从树中任何成员打开看到的都是同一棵树。树的边连接“行”（根对话）：创建者若是 Tab，会通过侧边栏的 `resolveSidebarOpenerRowId` 归到其根对话，但不受侧边栏一层深度的限制。
-- 一行由一个根对话及其顶部 Tab 组成，Tab 以等宽胶囊并排，与用户在该对话中看到的标签栏一致。已关闭的 Tab 默认隐藏，除非是当前对话或参与了 opened-by 关系；侧边对话和已归档对话被排除，因此已归档的创建者会终止向上查找。遇到环时在第一个重复行停止。
+- 一行由一个根对话及其顶部 Tab 组成，Tab 以等宽胶囊并排，与用户在该对话中看到的标签栏一致。已关闭的 Tab 与标签栏一样隐藏，除非是当前对话（从已关闭 Tab 打开的对话仍挂在该行下）；侧边对话和已归档对话被排除，因此已归档的创建者会终止向上查找。遇到环时在第一个重复行停止。
 - 末尾的类型标签（父对话 / 对话 / Tab）改为实时状态：复用侧边栏的 `SessionRowStatusIndicator`（等待 > 运行中 > 未读），状态在各处读起来一致；树的形状本身已表明哪些是 Tab。
 - Tab 胶囊以 `{ sessionId: root, tabSessionId }` 导航，其他工作区里的 Tab 也能精确恢复。
 - 该图标和 Preview 一样是 cluster 区的普通操作，不会进入 stage：stage 只容纳一个摘要项，树没有摘要形态。`info-chip.tsx` 中的 `PopoverActionChip` 通过解析外层 `[data-info-bar-surface]` 的 Radix `virtualRef` 锚定到整条信息栏，面板看起来是信息栏向上展开。曾尝试用 React context 传递信息栏的 ref，后已移除：它为唯一的使用者在整条信息栏外包了一层 Provider。
@@ -22,4 +22,4 @@ Translation: current
 
 ## 验证与局限
 
-`tests/session-relation-tree.test.ts` 覆盖：从每个成员得到同一棵树、Tab 作为创建者、归档/侧边对话排除、已关闭 Tab 规则以及环。`tests/session-relation-card.test.tsx` 在真实信息栏中打开该图标，检查各行、当前标记以及 Tab 的精确导航目标。`Sessions/SessionRelationsChip` stories 用伪造的实时状态渲染这棵树。尚未在打包应用中用真实的 MCP 扇出验证。Tab 顺序按创建时间，而非用户在本地调整过的标签顺序。
+`tests/session-relation-tree.test.ts` 覆盖：从每个成员得到同一棵树、Tab 作为创建者、归档/侧边对话排除、已关闭 Tab 规则、环（含自引用）以及乱序输入下按创建时间排序。`tests/session-relation-card.test.tsx` 在真实信息栏中打开该图标，检查各行、当前标记以及 Tab 的精确导航目标。`Sessions/SessionRelationsChip` stories 用伪造的实时状态渲染这棵树。尚未在打包应用中用真实的 MCP 扇出验证。Tab 顺序按创建时间，而非用户在本地调整过的标签顺序。

@@ -29,7 +29,8 @@ packaged desktop app.
   `resolveSidebarOpenerRowId`, but without the sidebar's one-level depth cap.
 - A row is a root Session plus its top Tabs rendered as equal pills, matching
   the tab strip the user sees in that Session. Closed Tabs are hidden unless
-  current or part of an opened-by relation; side chats and archived Sessions
+  current, as in the tab strip (rows opened from a closed Tab still attach to
+  its row); side chats and archived Sessions
   are excluded, so an archived opener ends the upward walk. Cycles stop at the
   first repeated row.
 - The trailing kind badge (Parent / Session / Tab) was replaced by live status:
@@ -59,7 +60,8 @@ packaged desktop app.
 ## Verification and limits
 
 `tests/session-relation-tree.test.ts` covers the same tree from every member,
-Tab openers, archived/side-chat exclusion, the closed-Tab rule, and cycles.
+Tab openers, archived/side-chat exclusion, the closed-Tab rule, cycles
+including a self-opener, and creation-time order from shuffled input.
 `tests/session-relation-card.test.tsx` opens the chip inside the real info bar
 and checks rows, the current marker, and the exact Tab navigation target.
 `Sessions/SessionRelationsChip` stories render the tree with faked live status.

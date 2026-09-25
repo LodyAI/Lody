@@ -43,8 +43,10 @@ describe('buildSessionRelationTree', () => {
 
   it('roots the complete tree at the topmost ancestor from anywhere inside it', () => {
     const expected = ['top', '  mid[tab]', '    leaf', '  sibling'];
+    // Metadata-cache order is arbitrary; creation time decides row and Tab order.
+    const shuffled = [...sessions].reverse();
     for (const current of ['top', 'mid', 'tab', 'leaf', 'sibling']) {
-      expect(outline(buildSessionRelationTree(sessions, sid(current)))).toEqual(expected);
+      expect(outline(buildSessionRelationTree(shuffled, sid(current)))).toEqual(expected);
     }
   });
 
@@ -82,25 +84,30 @@ describe('buildSessionRelationTree', () => {
     expect(outline(tree)).toEqual(['a', '  b']);
   });
 
-  it('hides closed plain Tabs but keeps closed Tabs that are current or related', () => {
+  it('hides closed Tabs unless current, while rows opened from them still attach', () => {
     const tree = buildSessionRelationTree(
       [
         meta('root'),
-        meta('closed-plain', { parentSessionId: sid('root'), isTabClosed: true }),
+        meta('closed', { parentSessionId: sid('root'), isTabClosed: true }),
         meta('closed-current', { parentSessionId: sid('root'), isTabClosed: true }),
-        meta('closed-opener', { parentSessionId: sid('root'), isTabClosed: true }),
-        meta('opened', { openedBySessionId: sid('closed-opener') }),
+        meta('opened', { openedBySessionId: sid('closed') }),
       ],
       sid('closed-current')
     );
-    expect(outline(tree)).toEqual(['root[closed-current,closed-opener]', '  opened']);
+    expect(outline(tree)).toEqual(['root[closed-current]', '  opened']);
   });
 
-  it('terminates on an opened-by cycle', () => {
+  it('terminates on an opened-by cycle and a self-opener', () => {
     const tree = buildSessionRelationTree(
       [meta('x', { openedBySessionId: sid('y') }), meta('y', { openedBySessionId: sid('x') })],
       sid('x')
     );
     expect(outline(tree)).toEqual(['y', '  x']);
+    const self = buildSessionRelationTree(
+      [meta('self', { openedBySessionId: sid('self') })],
+      sid('self')
+    );
+    expect(outline(self)).toEqual(['self']);
+    expect(hasSessionRelations(self)).toBe(false);
   });
 });

@@ -32,8 +32,8 @@ const byCreatedAt = (left: SessionMeta, right: SessionMeta): number =>
  * to its root, exactly like the sidebar tree, but without its depth cap.
  *
  * Archived Sessions and side chats are left out, so an archived opener ends
- * the upward walk. A closed Tab stays hidden unless it is current or takes part
- * in an opened-by relation. Cycles stop at the first repeated row.
+ * the upward walk. Cycles, including a self-opener, stop at the first repeated
+ * row.
  */
 export function buildSessionRelationTree(
   sessions: readonly SessionMeta[],
@@ -46,22 +46,19 @@ export function buildSessionRelationTree(
   const currentRowId = resolveSidebarOpenerRowId(currentSessionId, byId);
   if (!currentRowId || !byId.has(currentRowId)) return null;
 
-  const openerIds = new Set(live.map((session) => session.openedBySessionId).filter(Boolean));
   const parentRowOf = (root: SessionMeta): string | null => {
     const rowId = resolveSidebarOpenerRowId(root.openedBySessionId, byId);
-    return rowId && rowId !== root.id && byId.has(rowId) ? rowId : null;
+    return rowId && byId.has(rowId) ? rowId : null;
   };
 
   const tabsByRow = new Map<string, SessionMeta[]>();
   const childrenByRow = new Map<string, SessionMeta[]>();
   for (const session of [...live].sort(byCreatedAt)) {
     if (session.parentSessionId) {
-      const visible =
-        !session.isTabClosed ||
-        session.id === currentSessionId ||
-        !!session.openedBySessionId ||
-        openerIds.has(session.id);
-      if (visible) append(tabsByRow, session.parentSessionId, session);
+      // A closed Tab stays out, as in the tab strip, unless it is the current one.
+      if (!session.isTabClosed || session.id === currentSessionId) {
+        append(tabsByRow, session.parentSessionId, session);
+      }
       continue;
     }
     const parentRowId = parentRowOf(session);

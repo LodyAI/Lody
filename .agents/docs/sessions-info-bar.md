@@ -175,8 +175,8 @@ which anchors to the pill (Radix `virtualRef` resolving the enclosing
 The popover shows the complete tree: every ancestor from the topmost live
 opener down, and every descendant. Edges connect rows (root Sessions); a Tab
 opener resolves to its root like the sidebar tree, without the sidebar's depth
-cap. A row is its root Session plus its top Tabs as equal pills; closed plain
-Tabs are hidden. Each pill is agent icon, live title, and the sidebar's
+cap. A row is its root Session plus its top Tabs as equal pills; closed Tabs
+are hidden unless current. Each pill is agent icon, live title, and the sidebar's
 `SessionRowStatusIndicator` (waiting > working > unread); the current Session is
 highlighted. Tab pills navigate with root + exact tab ids. The page reads only
 a boolean (`useHasSessionRelations`); the chip builds the tree in the leaf.
