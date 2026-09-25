@@ -9,9 +9,9 @@ import {
   Pause,
   Play,
   Plus,
+  RotateCcw,
   Search,
   Trash2,
-  Zap,
 } from 'lucide-react';
 import { getServerNow, type ScheduleRegistryRow, type ScheduleRuntimeRow } from '@lody/shared';
 import { Button } from '@lody/ui/button';
@@ -120,9 +120,14 @@ function ScheduleListRow({
   onRun,
   onDelete,
   onOpenSession,
+  compact,
+  selected,
 }: {
   row: ScheduleRegistryRow;
   runtime?: ScheduleRuntimeRow;
+  /** Beside an open schedule: the name and a status pill, nothing else. */
+  compact?: boolean;
+  selected?: boolean;
   context?: ScheduleRowContext;
   now: number;
   onOpen: () => void;
@@ -148,7 +153,21 @@ function ScheduleListRow({
   const canDelete = !!onDelete && context?.canDelete !== false;
   const lastSessionId = runtime?.lastDispatch?.sessionId;
   const toggleLabel = row.enabled ? t('schedules.pause', 'Pause') : t('schedules.resume', 'Resume');
-  const rowElement = (
+  const rowElement = compact ? (
+    <button
+      type="button"
+      onClick={onOpen}
+      aria-current={selected ? 'true' : undefined}
+      className={cn(
+        'flex w-full min-w-0 items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[0.9em] leading-5 transition-colors focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring',
+        selected ? 'bg-foreground/[0.07] text-foreground dark:bg-white/[0.09]' : 'hover:bg-hover',
+        !row.enabled && !selected && 'text-muted-foreground'
+      )}
+    >
+      <span className="min-w-0 flex-1 truncate">{row.title}</span>
+      <StatusPill status={status} />
+    </button>
+  ) : (
     <div
       className={cn(
         listGridClass,
@@ -282,8 +301,7 @@ function ScheduleListRow({
                   onClick={onRun}
                   aria-label={t('schedules.runNow', 'Run now')}
                 >
-                  {/* Zap, not Play: Play already means Resume on a paused row. */}
-                  <Zap className="size-full" />
+                  <Play className="size-full" />
                 </Button>
               }
             />
@@ -298,7 +316,7 @@ function ScheduleListRow({
             onClick={onToggle}
             aria-label={toggleLabel}
           >
-            {row.enabled ? <Pause className="size-full" /> : <Play className="size-full" />}
+            {row.enabled ? <Pause className="size-full" /> : <RotateCcw className="size-full" />}
           </Button>
         ) : null}
         <ChevronRight className="size-3.5 shrink-0 text-muted-foreground/50" aria-hidden="true" />
@@ -313,12 +331,12 @@ function ScheduleListRow({
           {t('schedules.open', 'Open')}
         </ContextMenu.Item>
         {canRun ? (
-          <ContextMenu.Item icon={<Zap />} onClick={onRun}>
+          <ContextMenu.Item icon={<Play />} onClick={onRun}>
             {t('schedules.runNow', 'Run now')}
           </ContextMenu.Item>
         ) : null}
         {canToggle ? (
-          <ContextMenu.Item icon={row.enabled ? <Pause /> : <Play />} onClick={onToggle}>
+          <ContextMenu.Item icon={row.enabled ? <Pause /> : <RotateCcw />} onClick={onToggle}>
             {toggleLabel}
           </ContextMenu.Item>
         ) : null}
@@ -354,6 +372,8 @@ export function ScheduleListView({
   onOpenSession,
   columnWidths: controlledWidths,
   onColumnWidthsChange,
+  compact = false,
+  selectedId,
   now = getServerNow(),
 }: {
   rows: ScheduleRegistryRow[];
@@ -370,6 +390,10 @@ export function ScheduleListView({
   columnWidths?: ScheduleColumnWidths;
   onColumnWidthsChange?: (next: ScheduleColumnWidths) => void;
   onOpenSession?: (id: string) => void;
+  /** A schedule is open beside the list: show names only. */
+  compact?: boolean;
+  /** The open schedule, highlighted in the compact list. */
+  selectedId?: string;
   /** Injected so stories and tests render a fixed "next run" column. */
   now?: number;
 }) {
@@ -395,29 +419,34 @@ export function ScheduleListView({
           <h1 className="mr-auto text-[1em] font-normal text-foreground">
             {t('schedules.title', 'Schedules')}
           </h1>
-          <Input
-            size="small"
-            leading={<Search className="size-3.5 text-muted-foreground" aria-hidden="true" />}
-            aria-label={t('schedules.search', 'Search schedules')}
-            placeholder={t('schedules.search', 'Search schedules')}
-            className="w-40 sm:w-56"
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-          />
+          {compact ? null : (
+            <Input
+              size="small"
+              leading={<Search className="size-3.5 text-muted-foreground" aria-hidden="true" />}
+              aria-label={t('schedules.search', 'Search schedules')}
+              placeholder={t('schedules.search', 'Search schedules')}
+              className="w-40 sm:w-56"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+            />
+          )}
           <Button
-            variant="primary"
+            variant={compact ? 'ghost' : 'primary'}
             size="small"
+            icon={compact}
             className="shrink-0"
             onClick={onNew}
             // The label is the only text and it is hidden on narrow screens.
             aria-label={t('schedules.new', 'New schedule')}
           >
-            <Plus className="size-3.5" />
-            <span className="hidden sm:inline">{t('schedules.new', 'New schedule')}</span>
+            <Plus className={compact ? 'size-full' : 'size-3.5'} />
+            {compact ? null : (
+              <span className="hidden sm:inline">{t('schedules.new', 'New schedule')}</span>
+            )}
           </Button>
         </header>
 
-        {ready && !error && filtered.length > 0 ? (
+        {!compact && ready && !error && filtered.length > 0 ? (
           <div
             className={cn(
               listGridClass,
@@ -447,7 +476,7 @@ export function ScheduleListView({
           </div>
         ) : null}
 
-        <div className="min-h-0 flex-1 overflow-auto">
+        <div className={cn('min-h-0 flex-1 overflow-auto', compact && 'px-2 pb-2')}>
           {!ready ? (
             <div className="space-y-px" aria-busy="true">
               <span className="sr-only">{t('schedules.loading', 'Loading schedules…')}</span>
@@ -502,6 +531,8 @@ export function ScheduleListView({
                 onRun={onRun ? () => onRun(row) : undefined}
                 onDelete={onDelete ? () => onDelete(row) : undefined}
                 onOpenSession={onOpenSession}
+                compact={compact}
+                selected={row.scheduleId === selectedId}
               />
             ))
           )}

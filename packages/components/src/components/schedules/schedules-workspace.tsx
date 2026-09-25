@@ -8,7 +8,7 @@ import { toast } from 'sonner';
 import { useNavigate } from '@tanstack/react-router';
 import { useTranslation } from 'react-i18next';
 import { v4 as uuid } from 'uuid';
-import { AlertTriangle, ArrowLeft, Pause, Play, Trash2, Zap } from 'lucide-react';
+import { AlertTriangle } from 'lucide-react';
 import { useCloudQuery } from '@lody/platform/react';
 import {
   DEFAULT_SCHEDULE_DESTINATION,
@@ -51,7 +51,6 @@ import { useOpenSettings } from '@/hooks/use-open-settings';
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import { DesktopMachineMenu } from '@/components/sessions/desktop-run-config-menu';
 import { ProjectRefSelector } from '@/components/shared/project-ref-selector';
-import { Button } from '@lody/ui/button';
 import { WorktreeCheckboxPill } from '@/components/shared/workdir-mode-selector';
 import {
   ScheduleForm,
@@ -61,7 +60,11 @@ import {
   type ScheduleFormValue,
 } from './schedule-view';
 import { scheduleCardProps } from './schedule-property-row';
-import { ScheduleDialog } from './schedule-dialog';
+import {
+  ScheduleDetailToolbar,
+  ScheduleHistoryDrawer,
+  ScheduleSplitView,
+} from './schedule-split-view';
 import { collectScheduleSaveIssues, type ScheduleIssueField } from './schedule-save-blockers';
 import { ScheduleDestinationRows, type PickableSession } from './schedule-destination-rows';
 import { ScheduleAgentControls } from './schedule-agent-controls';
@@ -208,9 +211,10 @@ function SchedulesContent({ scheduleId }: { scheduleId?: string }) {
       if (row) toggle(row);
     },
   });
+  const [historyOpen, setHistoryOpen] = useState(false);
   // Saving or closing always lands on the list: the list is the page, and a
-  // schedule is edited over it (a Dialog on desktop, a pushed page on mobile).
-  const body = !scheduleId ? null : scheduleId === 'new' ? (
+  // schedule opens beside it (a sliding panel on desktop, a pushed page on mobile).
+  const content = !scheduleId ? null : scheduleId === 'new' ? (
     <ScheduleEditor
       key={`${runtime?.workspaceId}:new`}
       onSaved={() => open()}
@@ -222,57 +226,6 @@ function SchedulesContent({ scheduleId }: { scheduleId?: string }) {
     <p className="p-5">{t('schedules.notFound', 'This schedule is unavailable or deleted.')}</p>
   ) : (
     <>
-      <div className="sticky top-0 z-10 flex flex-wrap items-center gap-1.5 border-b-[0.5px] border-border bg-background/95 px-4 py-2 backdrop-blur sm:pr-12">
-        {row.enabled ? (
-          <span className="mr-auto text-[0.9em] text-muted-foreground">
-            {t(
-              'schedules.pauseHelp',
-              'Pausing stops future runs. Cancel already submitted Sessions separately.'
-            )}
-          </span>
-        ) : (
-          <span className="mr-auto rounded-full border-[0.5px] px-2 py-px text-[0.75em] font-normal text-muted-foreground">
-            {t('schedules.paused', 'Paused')}
-          </span>
-        )}
-        <Button
-          variant="ghost"
-          size="small"
-          disabled={row.enabled ? !isOwner : !canManage}
-          onClick={() => toggle(row)}
-        >
-          {row.enabled ? <Pause className="size-3.5" /> : <Play className="size-3.5" />}
-          {row.enabled ? t('schedules.pause', 'Pause') : t('schedules.resume', 'Resume')}
-        </Button>
-        <Button
-          variant="ghost"
-          size="small"
-          disabled={!canManage}
-          onClick={() =>
-            setConfirmation({
-              title: t('schedules.runNow', 'Run now'),
-              description: t(
-                'schedules.runNowHelp',
-                'Run with the last saved prompt, Agent, Project and permission mode. Unsaved edits are excluded. This may run alongside existing work.'
-              ),
-              accept: requestRun(scheduleId),
-            })
-          }
-        >
-          <Zap className="size-3.5" />
-          {t('schedules.runNow', 'Run now')}
-        </Button>
-        <Button
-          variant="ghost"
-          size="small"
-          tone="destructive"
-          disabled={!isOwner}
-          onClick={() => row && confirmDelete(row)}
-        >
-          <Trash2 className="size-3.5" />
-          <span className="sr-only sm:not-sr-only">{t('schedules.delete', 'Delete')}</span>
-        </Button>
-      </div>
       {!canManage ? (
         <p className="mx-auto max-w-2xl px-4 pt-4 text-[0.9em] text-muted-foreground sm:px-6">
           {t(
@@ -310,13 +263,83 @@ function SchedulesContent({ scheduleId }: { scheduleId?: string }) {
         onSaved={() => open()}
         onOpenSession={openSession}
       />
-      <ScheduleSessionHistory scheduleId={scheduleId} />
+      <ScheduleHistoryDrawer open={historyOpen} onOpenChange={setHistoryOpen}>
+        <ScheduleSessionHistory scheduleId={scheduleId} />
+      </ScheduleHistoryDrawer>
     </>
   );
-  const dialogTitle =
-    scheduleId === 'new'
-      ? t('schedules.new', 'New schedule')
-      : (row?.title ?? t('schedules.title', 'Schedules'));
+  const detailPane = (
+    <>
+      <ScheduleDetailToolbar
+        onClose={() => open()}
+        paused={row ? !row.enabled : false}
+        actions={
+          row && scheduleId !== 'new'
+            ? {
+                enabled: row.enabled,
+                canToggle: row.enabled ? isOwner : canManage,
+                canRun: canManage,
+                canDelete: isOwner,
+                onToggle: () => toggle(row),
+                onRun: () =>
+                  setConfirmation({
+                    title: t('schedules.runNow', 'Run now'),
+                    description: t(
+                      'schedules.runNowHelp',
+                      'Run with the last saved prompt, Agent, Project and permission mode. Unsaved edits are excluded. This may run alongside existing work.'
+                    ),
+                    accept: requestRun(row.scheduleId),
+                  }),
+                onDelete: () => confirmDelete(row),
+                onHistory: () => setHistoryOpen(true),
+              }
+            : undefined
+        }
+      />
+      <div data-settings-surface="" className="min-h-0 flex-1 overflow-auto">
+        {content}
+      </div>
+    </>
+  );
+  const list = (compact: boolean) => (
+    <ScheduleListView
+      {...registry}
+      compact={compact}
+      selectedId={scheduleId}
+      onOpen={open}
+      onNew={() => open('new')}
+      onToggle={toggle}
+      onRun={runFromList}
+      onDelete={confirmDelete}
+      columnWidths={columnWidths ?? undefined}
+      onColumnWidthsChange={setColumnWidths}
+      onOpenSession={openSession}
+      contextForRow={(item) => ({
+        machine: machines.get(item.machineId as never)?.name ?? item.machineId,
+        agent: agents.find((a) => a.id === item.agentConfigId)?.name ?? item.agentConfigId,
+        project: !item.projectKey
+          ? null
+          : item.projectKind === 'local'
+            ? ([...localProjects.projects.values()].find(
+                (entry) =>
+                  entry.machineId === item.machineId && entry.project.id === item.projectKey
+              )?.project.name ?? item.projectKey)
+            : item.projectKey,
+        presence: onlineMachines.has(item.machineId as never)
+          ? 'online'
+          : presenceSync === 'synced'
+            ? 'offline'
+            : 'unknown',
+        canRun:
+          item.ownerId === user?.id &&
+          machineSupportsSchedulesProtocol(machines.get(item.machineId as never)),
+        canDelete: item.ownerId === user?.id,
+        canToggle:
+          item.ownerId === user?.id &&
+          (item.enabled || machineSupportsSchedulesProtocol(machines.get(item.machineId as never))),
+      })}
+    />
+  );
   return (
     <div className="flex h-full min-h-0 flex-col bg-background" data-settings-surface="">
       <AlertDialog.Root
@@ -349,57 +372,17 @@ function SchedulesContent({ scheduleId }: { scheduleId?: string }) {
           {error}
         </p>
       ) : null}
-      {mobile && scheduleId ? (
-        <>
-          <Button className="m-2 self-start" variant="ghost" size="small" onClick={() => open()}>
-            <ArrowLeft className="size-4" />
-            {t('schedules.all', 'All schedules')}
-          </Button>
-          <div className="min-h-0 flex-1 overflow-auto">{body}</div>
-        </>
-      ) : (
-        <ScheduleListView
-          {...registry}
-          onOpen={open}
-          onNew={() => open('new')}
-          onToggle={toggle}
-          onRun={runFromList}
-          onDelete={confirmDelete}
-          columnWidths={columnWidths ?? undefined}
-          onColumnWidthsChange={setColumnWidths}
-          onOpenSession={openSession}
-          contextForRow={(item) => ({
-            machine: machines.get(item.machineId as never)?.name ?? item.machineId,
-            agent: agents.find((a) => a.id === item.agentConfigId)?.name ?? item.agentConfigId,
-            project: !item.projectKey
-              ? null
-              : item.projectKind === 'local'
-                ? ([...localProjects.projects.values()].find(
-                    (entry) =>
-                      entry.machineId === item.machineId && entry.project.id === item.projectKey
-                  )?.project.name ?? item.projectKey)
-                : item.projectKey,
-            presence: onlineMachines.has(item.machineId as never)
-              ? 'online'
-              : presenceSync === 'synced'
-                ? 'offline'
-                : 'unknown',
-            canRun:
-              item.ownerId === user?.id &&
-              machineSupportsSchedulesProtocol(machines.get(item.machineId as never)),
-            canDelete: item.ownerId === user?.id,
-            canToggle:
-              item.ownerId === user?.id &&
-              (item.enabled ||
-                machineSupportsSchedulesProtocol(machines.get(item.machineId as never))),
-          })}
-        />
-      )}
-      {!mobile ? (
-        <ScheduleDialog title={dialogTitle} open={!!scheduleId} onClose={() => open()}>
-          {body}
-        </ScheduleDialog>
-      ) : null}
+      <div className="min-h-0 flex-1">
+        {mobile ? (
+          scheduleId ? (
+            <div className="flex h-full min-h-0 flex-col">{detailPane}</div>
+          ) : (
+            list(false)
+          )
+        ) : (
+          <ScheduleSplitView open={!!scheduleId} list={list} detail={detailPane} />
+        )}
+      </div>
     </div>
   );
 }
@@ -759,33 +742,26 @@ function ScheduleSessionHistory({ scheduleId }: { scheduleId: string }) {
   const linked = [...sessions, ...archived]
     .filter((s) => s.scheduleId === scheduleId)
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-  return (
-    <section className="mx-auto w-full max-w-2xl px-4 pb-8 sm:px-6">
-      <h2 className="mb-1.5 px-1 text-[0.75em] font-normal text-muted-foreground">
-        {t('schedules.history', 'Run history')}
-      </h2>
-      {linked.length === 0 ? (
-        <p {...scheduleCardProps('px-3 py-3 text-[0.9em] text-muted-foreground')}>
-          {t('schedules.noRuns', 'No Sessions have been created yet.')}
-        </p>
-      ) : (
-        <div {...scheduleCardProps()}>
-          {linked.slice(0, 100).map((s) => (
-            <ScheduleHistoryRow
-              key={s.id}
-              session={s}
-              onOpen={() => {
-                if (slug)
-                  void navigate({
-                    to: '/$workspaceName/sessions/$sessionId',
-                    params: { workspaceName: slug, sessionId: s.id },
-                  });
-              }}
-            />
-          ))}
-        </div>
-      )}
-    </section>
+  return linked.length === 0 ? (
+    <p {...scheduleCardProps('px-3 py-3 text-[0.9em] text-muted-foreground')}>
+      {t('schedules.noRuns', 'No Sessions have been created yet.')}
+    </p>
+  ) : (
+    <div {...scheduleCardProps()}>
+      {linked.slice(0, 100).map((s) => (
+        <ScheduleHistoryRow
+          key={s.id}
+          session={s}
+          onOpen={() => {
+            if (slug)
+              void navigate({
+                to: '/$workspaceName/sessions/$sessionId',
+                params: { workspaceName: slug, sessionId: s.id },
+              });
+          }}
+        />
+      ))}
+    </div>
   );
 }
 

@@ -13,10 +13,11 @@ import {
   type ScheduleTrigger,
 } from '@lody/shared';
 import { Button } from '@lody/ui/button';
+import { Tabs } from '@lody/ui/tabs';
 import { Tooltip } from '@lody/ui/tooltip';
 import { cn } from '@/lib/utils';
 import { formatUpcoming, triggerTimeZone } from './schedule-format';
-import { ScheduleSection, scheduleCardProps } from './schedule-property-row';
+import { PropertyRow, scheduleCardProps } from './schedule-property-row';
 import { FieldIssueMark } from './schedule-field-issue-mark';
 import type { ScheduleSaveIssue } from './schedule-save-blockers';
 import { ScheduleRecurrenceEditor } from './schedule-recurrence-editor';
@@ -49,7 +50,7 @@ export type ScheduleRunBarState = {
  *
  * Laid out like the composer, because it is one: a box holding the name, the
  * prompt and, along its bottom edge, the run bar — where it runs, with which
- * Agent, in which project. The time rule follows in its own card. Title and
+ * Agent, in which project. Where runs go and when share one card below. Title and
  * prompt carry their guidance in the placeholder, and the accessible name
  * stays on the field.
  *
@@ -88,7 +89,7 @@ export function ScheduleForm({
   contextBar?: (state: ScheduleRunBarState) => ReactNode;
   /** One muted line under those pills: what the current choice means. */
   contextNote?: ReactNode;
-  /** Where each run's prompt goes: its own card, above the trigger. */
+  /** Where each run's prompt goes: the first rows of the run card. */
   destination?: (state: ScheduleRunBarState) => ReactNode;
   issues?: readonly ScheduleSaveIssue[];
   saving: boolean;
@@ -182,7 +183,7 @@ export function ScheduleForm({
                 aria-label={t('schedules.name', 'Name')}
                 aria-invalid={attempted && titleMissing ? true : undefined}
                 placeholder={t('schedules.namePlaceholder', 'Name this scheduled task')}
-                className="min-w-0 flex-1 bg-transparent text-[1.05em] font-normal text-foreground outline-hidden placeholder:text-muted-foreground/60 focus-visible:shadow-none"
+                className="min-w-0 flex-1 bg-transparent text-[1.2em] font-semibold text-foreground outline-hidden placeholder:text-muted-foreground/60 focus-visible:shadow-none"
                 value={value.title}
                 onChange={(event) => setValue({ ...value, title: event.target.value })}
               />
@@ -204,10 +205,10 @@ export function ScheduleForm({
                   'schedules.promptPlaceholder',
                   'What should the agent do on every run? For example: review yesterday’s commits and summarise anything that looks risky.'
                 )}
-                // Grows with its text from 4 to 8 lines, then scrolls; no
+                // Grows with its text from 4 to 6 lines, then scrolls; no
                 // resize handle. `field-sizing` is CSS-only (Chromium).
                 className={cn(
-                  'block min-h-[calc(4lh)] max-h-[calc(8lh)] w-full resize-none overflow-y-auto bg-transparent p-0 text-[0.95em] leading-relaxed text-foreground outline-hidden [field-sizing:content] placeholder:text-muted-foreground/60 focus-visible:shadow-none',
+                  'block min-h-[calc(4lh)] max-h-[calc(6lh)] w-full resize-none overflow-y-auto bg-transparent p-0 text-[0.95em] leading-relaxed text-foreground outline-hidden [field-sizing:content] placeholder:text-muted-foreground/60 focus-visible:shadow-none',
                   attempted && promptMissing && 'pr-6'
                 )}
                 value={value.prompt}
@@ -239,39 +240,23 @@ export function ScheduleForm({
           ) : null}
         </div>
 
-        {destination ? (
-          <div {...scheduleCardProps()}>{destination({ revealMissing: attempted })}</div>
-        ) : null}
-        <ScheduleSection
-          title={t('schedules.trigger.label', 'Trigger')}
-          action={
-            <div
-              role="radiogroup"
-              aria-label={t('schedules.trigger.label', 'Trigger')}
-              className="flex rounded-md bg-foreground/[0.05] p-0.5 dark:bg-white/[0.06]"
+        {/* One card for how it runs: where each run goes, then when. Timed or
+            manual is just another row in it, not a section of its own. */}
+        <div {...scheduleCardProps()}>
+          {destination?.({ revealMissing: attempted })}
+          <PropertyRow label={t('schedules.trigger.label', 'Trigger')}>
+            <Tabs.Root
+              value={mode}
+              onValueChange={(next) => {
+                if (next === 'timed' || next === 'manual') setMode(next);
+              }}
             >
-              {(['timed', 'manual'] as const).map((option) => (
-                <button
-                  key={option}
-                  type="button"
-                  role="radio"
-                  aria-checked={mode === option}
-                  onClick={() => setMode(option)}
-                  className={cn(
-                    'rounded-[5px] px-2 py-0.5 text-[0.8em] font-normal transition-colors',
-                    mode === option
-                      ? 'bg-background text-foreground shadow-[0_0_0_0.5px_hsl(var(--border)),0_1px_1px_rgba(0,0,0,0.04)] dark:bg-white/[0.12] dark:shadow-none'
-                      : 'text-muted-foreground hover:text-foreground'
-                  )}
-                >
-                  {option === 'timed'
-                    ? t('schedules.trigger.timed', 'On a schedule')
-                    : t('schedules.trigger.manual', 'Manual')}
-                </button>
-              ))}
-            </div>
-          }
-        >
+              <Tabs.List size="small">
+                <Tabs.Tab value="timed">{t('schedules.trigger.timed', 'On a schedule')}</Tabs.Tab>
+                <Tabs.Tab value="manual">{t('schedules.trigger.manual', 'Manual')}</Tabs.Tab>
+              </Tabs.List>
+            </Tabs.Root>
+          </PropertyRow>
           {mode === 'manual' ? (
             <p className="flex min-h-11 items-center px-3 py-2 text-[0.9em] text-muted-foreground">
               {t(
@@ -318,7 +303,7 @@ export function ScheduleForm({
               </div>
             </>
           )}
-        </ScheduleSection>
+        </div>
 
         <div className="flex flex-col gap-2 border-t-[0.5px] border-border pt-4 sm:flex-row sm:items-center sm:justify-between">
           <div id={noteId} aria-live="polite" className="min-w-0 flex-1 px-3">

@@ -5,7 +5,11 @@ import {
   type ScheduleRowContext,
 } from '../components/schedules/schedule-view';
 import { ScheduleAgentControls } from '../components/schedules/schedule-agent-controls';
-import { ScheduleDialog } from '../components/schedules/schedule-dialog';
+import {
+  ScheduleDetailToolbar,
+  ScheduleHistoryDrawer,
+  ScheduleSplitView,
+} from '../components/schedules/schedule-split-view';
 import { ScheduleDestinationRows } from '../components/schedules/schedule-destination-rows';
 import { FieldIssueMark } from '../components/schedules/schedule-field-issue-mark';
 import type { ScheduleSaveIssue } from '../components/schedules/schedule-save-blockers';
@@ -241,7 +245,7 @@ function EditorStory({
   ...props
 }: Partial<React.ComponentProps<typeof ScheduleForm>> & {
   fixture?: EditorFixture;
-  /** Render without the page scroller, e.g. inside `ScheduleDialog`. */
+  /** Render without the page scroller, e.g. inside the detail pane. */
   bare?: boolean;
 }) {
   const [destination, setDestination] = useState<ScheduleDestination>(
@@ -507,16 +511,54 @@ export const EditorSaving: Story = editor({ saving: true });
 export const EditorError: Story = editor({ error: 'The schedule could not be saved.' });
 
 /**
- * Desktop: the list stays the page and a schedule opens over it in a Dialog —
- * no tabs. Saving or closing returns to the list.
+ * Desktop: list and schedule on one level. Opening one narrows the list to its
+ * names and slides the schedule in from the right; closing reverses it.
  */
-export const EditorInDialog: Story = {
-  render: (args) => (
-    <WithPlatform>
-      <ScheduleListView {...args} />
-      <ScheduleDialog title="New schedule" open onClose={() => {}}>
-        <EditorStory bare autoFocus fixture={{ chatOnly: true }} />
-      </ScheduleDialog>
-    </WithPlatform>
-  ),
+export const EditorBesideList: Story = {
+  render: function Render(args) {
+    const [open, setOpen] = useState(true);
+    const [history, setHistory] = useState(false);
+    return (
+      <WithPlatform>
+        <div className="h-dvh">
+          <ScheduleSplitView
+            open={open}
+            list={(compact) => (
+              <ScheduleListView
+                {...args}
+                compact={compact}
+                selectedId={open ? 'daily-review' : undefined}
+                onOpen={() => setOpen(true)}
+              />
+            )}
+            detail={
+              <>
+                <ScheduleDetailToolbar
+                  onClose={() => setOpen(false)}
+                  actions={{
+                    enabled: true,
+                    canToggle: true,
+                    canRun: true,
+                    canDelete: true,
+                    onToggle: () => {},
+                    onRun: () => {},
+                    onDelete: () => {},
+                    onHistory: () => setHistory(true),
+                  }}
+                />
+                <ScheduleHistoryDrawer open={history} onOpenChange={setHistory}>
+                  <p className="px-3 py-3 text-[0.9em] text-muted-foreground">
+                    No Sessions have been created yet.
+                  </p>
+                </ScheduleHistoryDrawer>
+                <div data-settings-surface="" className="min-h-0 flex-1 overflow-auto">
+                  <EditorStory bare fixture={{ chatOnly: true }} />
+                </div>
+              </>
+            }
+          />
+        </div>
+      </WithPlatform>
+    );
+  },
 };

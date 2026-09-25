@@ -303,13 +303,13 @@ describe('Time rules a person opens', () => {
 
   it('switches between manual and timed without losing the time rule', () => {
     open({ kind: 'cron', expression: '30 7 * * 1-5', timeZone: 'Asia/Shanghai' });
-    const radio = (name: string) =>
-      [...container.querySelectorAll<HTMLButtonElement>('[role="radio"]')].find(
+    const tab = (name: string) =>
+      [...container.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find(
         (button) => button.textContent === name
       )!;
-    act(() => radio(en['schedules.trigger.manual']).click());
+    act(() => tab(en['schedules.trigger.manual']).click());
     expect(container.textContent).toContain(en['schedules.trigger.manualHelp']);
-    act(() => radio(en['schedules.trigger.timed']).click());
+    act(() => tab(en['schedules.trigger.timed']).click());
     expect(repeatValue()).toBe(en['schedules.repeat.weekdays']);
     submit();
     // Untouched, so the stored spelling comes back exactly.

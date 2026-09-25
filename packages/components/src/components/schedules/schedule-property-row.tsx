@@ -34,26 +34,6 @@ export function scheduleCardProps(className?: string) {
 export const ghostValueClass =
   'flex h-8 last:-mr-2 last:max-w-[calc(100%+0.5rem)] min-w-0 max-w-full items-center justify-end gap-1.5 rounded-md bg-transparent px-2 text-[0.9em] font-normal text-foreground transition-colors hover:bg-foreground/[0.05] dark:hover:bg-white/[0.08] focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 data-[state=open]:bg-foreground/[0.05] dark:data-[state=open]:bg-white/[0.08]';
 
-export function ScheduleSection({
-  title,
-  action,
-  children,
-}: {
-  title: string;
-  action?: ReactNode;
-  children: ReactNode;
-}) {
-  return (
-    <section className="flex flex-col gap-1.5">
-      <div className="flex min-h-7 items-center gap-2 px-3">
-        <h2 className="text-[0.8em] font-normal text-muted-foreground">{title}</h2>
-        {action ? <div className="ml-auto">{action}</div> : null}
-      </div>
-      <div {...scheduleCardProps()}>{children}</div>
-    </section>
-  );
-}
-
 /**
  * Label left, control right.
  *

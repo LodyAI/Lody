@@ -18,16 +18,19 @@
   machine; never a project (none = plain chat, end to end). No consent checkbox,
   directory-scope checkbox, full-access warning or resume dialog — do not add one
   back in any shape; ownership, capability and permission still gate save/run.
-- The list is the page. There are no schedule tabs: on desktop `/schedules/new`
-  and `/schedules/$id` open over the list in `ScheduleDialog`; on mobile they
-  are a pushed page with a back button. Saving and closing both return to the
-  list. Keep the routes: links from a Session's info bar open the dialog.
+- The list is the page; no tabs, no dialog. On desktop `/schedules/new` and
+  `/schedules/$id` open beside it (`ScheduleSplitView`): the list narrows to
+  names and the schedule slides in from the trailing edge; on mobile it is a
+  pushed page. Its header (`ScheduleDetailToolbar`) is close plus compact icon
+  actions, run history last; history opens in a trailing `Drawer`. Saving and
+  closing both return to the full list. Keep the routes.
 - The editor reuses the composer's parts: one box holds name, a hairline, the
   prompt and, along its bottom, the composer's own Agent controls
   (`ScheduleAgentControls` = `DesktopRunConfigMenu` + `DesktopPermissionModeButton`).
   Under the box are the chat landing's context pills — `DesktopMachineMenu`, the
-  project chip, the worktree checkbox. The destination is its own card above the
-  trigger card. Name autofocuses on a new schedule. Do not fork look-alikes of
+  project chip, the worktree checkbox. Destination and trigger share one card;
+  timed/manual is a row (`Tabs`) in it. The name is larger and semibold and
+  autofocuses on a new schedule. Do not fork look-alikes of
   these controls; pass props to the shared ones.
 - The machine is its own choice (owned machines with agents). A new schedule
   opens as the chat landing left things: `pickScheduleAgent` over
@@ -46,7 +49,7 @@
 - Time and date are typed only: the native picker button is hidden
   (`[&::-webkit-calendar-picker-indicator]:hidden`), which in Chromium also
   removes the popup. The prompt has no resize handle: it grows with its text
-  from 4 to 8 lines (`[field-sizing:content]` + `lh` bounds), then scrolls.
+  from 4 to 6 lines (`[field-sizing:content]` + `lh` bounds), then scrolls.
   Field marks float (`absolute`) so they never narrow the text.
 - No time zone control. Wall-clock rules and one-off times are read on the owning
   machine's clock (`MachineMeta.timeZone`, device zone for older CLIs) via
@@ -78,7 +81,7 @@
   double-click resets), persisted per device in `scheduleListColumnWidthsAtom`,
   as `minmax(72px, width)` so a narrow panel still fits. The header cell must
   not clip — the handle hangs into the gap. A manual row's button is Run
-  (`Zap`); a timed row's is Pause/Resume (`Play` means Resume only). Every row
+  (`Play`); a timed row's is Pause/Resume (Resume is `RotateCcw`, never `Play`). Every row
   has a context menu (open, run, pause/resume, last run, delete). Run from the
   list starts at once with a toast; delete always confirms. Cells align to their
   first line; the target column names the machine; row actions are visible by
@@ -87,7 +90,7 @@
   Combobox, Tooltip, ContextMenu, Skeleton, `@/ui/dialog`); `className` carries
   layout only. Cards are `scheduleCardProps()` (the settings `settingsCard`
   StyleX) inside `data-settings-surface`. Copy is `em` of `--ui-font-size`, two
-  inks (`foreground`, `muted-foreground`), `font-normal`.
+  inks (`foreground`, `muted-foreground`), `font-normal` except the name.
 - Alignment is measured, not eyeballed: property rows are 44px, labels share
   one left line, every row's last visible mark ends on one right inset (selects
   are solid `Select.Trigger`s; only the native time input bleeds `-mr-2`); a row with a hint
