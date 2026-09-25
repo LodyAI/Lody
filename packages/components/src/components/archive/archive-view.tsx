@@ -33,6 +33,7 @@ import { Checkbox } from '@lody/ui/checkbox';
 import { Dialog } from '@/ui/dialog';
 import { Menu } from '@/ui/menu';
 import { Input } from '@lody/ui/input';
+import { archiveSearchFieldTheme } from './archive-search.stylex';
 import { Tooltip } from '@lody/ui/tooltip';
 import { currentWorkspaceSlugAtom, setMobileDrawerOpenAtom, userAtom } from '@/atoms';
 import { getAgentMetaByIdAtomFamily } from '@/atoms/agents';
@@ -2185,7 +2186,7 @@ export function ArchiveView() {
           placeholder={t('archive.searchPlaceholder', 'Search archived sessions…')}
           aria-label={t('archive.search', 'Search archive')}
           leading={<Search {...stylex.props(styles.searchGlyph)} aria-hidden="true" />}
-          className={stylex.props(styles.search).className}
+          className={stylex.props(styles.search, archiveSearchFieldTheme).className}
         />
         {isMobile ? (
           <Menu.Root>

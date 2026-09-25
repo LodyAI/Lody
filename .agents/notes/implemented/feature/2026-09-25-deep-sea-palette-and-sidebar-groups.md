@@ -41,6 +41,10 @@ itself is in [reading contrast](2026-09-24-reading-contrast.md).
   `theme-provider.tsx`. Menus, popovers and settings rows then take the raised popover, the
   reading ceiling and the cyan accent; `hoverFill` / `selectedFill` are the ink at 6% / 10%.
   Wells, trays, the overlay and the gray ramp keep the package's values.
+- The archive search is a flat field (`archive/archive-search.stylex.ts`, a `createTheme` over
+  the `field` tokens): `--input-field` fill and a 1px `--input-border` edge. The package's well,
+  28% black under a 2px inner shadow with a lit lower lip, read as a heavy trench on this canvas.
+  Other fields keep the well.
 - Links are cyan with the underline on hover only. `.markdown-renderer a` sets the color:
   the renderer's `[&_a]:text-markdown-link` never applied (Tailwind v4 generates no
   variants for a hand-written class), so links used to inherit the prose color and were

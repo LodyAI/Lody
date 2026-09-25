@@ -21,6 +21,7 @@
     "./dialog": "./src/dialog/dialog.tsx",
     "./drawer": "./src/drawer/drawer.tsx",
     "./field": "./src/field/field.tsx",
+    "./field/field.tokens.stylex": "./src/field/field.tokens.stylex.ts",
     "./focus-modality": "./src/focus/focus-modality.ts",
     "./gallery": "./src/gallery/gallery.tsx",
     "./input": "./src/field/input.tsx",

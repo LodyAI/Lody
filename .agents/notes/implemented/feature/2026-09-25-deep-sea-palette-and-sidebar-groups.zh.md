@@ -27,6 +27,8 @@ Translation: current
   `lib/vscode-theme/lody-ui-palette.stylex.ts` 用 `createTheme` 覆盖它的 `colors` token，改为读取主题变量（`--popover`、
   `--foreground`、`--primary` 等），由 `theme-provider.tsx` 按应用自己的明暗模式挂在根元素上。菜单、弹出层和设置行因此使用
   抬高的弹出层表面、阅读亮度上限和青色强调色；`hoverFill` / `selectedFill` 是文字色的 6% / 10%。凹槽、托盘、遮罩和灰阶保留组件库的值。
+- Archive 的搜索框改为平面输入框（`archive/archive-search.stylex.ts`，对 `field` token 的 `createTheme`）：`--input-field` 底色加
+  1px `--input-border` 边线。组件库的凹槽样式（28% 黑底、2px 内阴影和底部亮边）在这块画布上像一道很重的沟。其它输入框仍用凹槽。
 - 链接为青色，只在悬停时显示下划线。颜色由 `.markdown-renderer a` 设置：渲染器里的 `[&_a]:text-markdown-link` 从未生效
   （Tailwind v4 不为手写类生成变体），链接一直继承正文颜色，只靠下划线区分。GitHub 引用小标签使用同一色相。
 - 列表项间距 4px（之前 8px）。输入框占位文字为其 token 的 85%（约 4.9:1；之前 40%，约 2.1:1）。
