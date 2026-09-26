@@ -233,6 +233,81 @@ describe('live agent status', () => {
     expect(document.body.textContent).toContain('Claude Opus 5');
   });
 
+  it('labels command steps with the Run verb in the expanded group', async () => {
+    await render(
+      liveTurn([
+        {
+          type: 'tool_call',
+          toolCallId: 'sed-1',
+          title: "sed -n '1,240p' apps/view.tsx",
+          kind: 'execute',
+          status: 'completed',
+        },
+        {
+          type: 'tool_call',
+          toolCallId: 'bash-1',
+          title: 'pnpm --dir apps/electron test',
+          kind: 'bash',
+          status: 'in_progress',
+        },
+        {
+          type: 'tool_call',
+          toolCallId: 'mystery-1',
+          title: 'mycmd --flag',
+          status: 'completed',
+          content: [{ type: 'terminal_command', command: 'mycmd', args: ['--flag'] }],
+        },
+        {
+          type: 'tool_call',
+          toolCallId: 'shell-1',
+          title: 'Shell: cat hello.txt',
+          kind: 'execute',
+          status: 'completed',
+        },
+        {
+          type: 'tool_call',
+          toolCallId: 'shell-2',
+          title: 'Shell: npm start',
+          kind: 'execute',
+          status: 'in_progress',
+        },
+        {
+          type: 'tool_call',
+          toolCallId: 'search-1',
+          title: "Search for 'createServer'",
+          kind: 'search',
+          status: 'completed',
+        },
+      ]),
+      { label: 'Working' }
+    );
+
+    const header = [...container.querySelectorAll('button')].find((button) =>
+      button.textContent?.includes('commands')
+    );
+    expect(header).toBeDefined();
+    await act(async () => header!.click());
+
+    // Bare command titles get the verb, in the step's tense.
+    expect(container.textContent).toContain("Ran sed -n '1,240p' apps/view.tsx");
+    expect(container.textContent).toContain('Running pnpm --dir apps/electron test');
+    // A kindless call carrying terminal I/O is a command too.
+    expect(container.textContent).toContain('Ran mycmd --flag');
+    // Agent-authored labels keep their own wording — no doubled verb.
+    expect(container.textContent).toContain('Shell: cat hello.txt');
+    expect(container.textContent).not.toContain('Ran Shell');
+    expect(container.textContent).toContain("Searched for 'createServer'");
+
+    // The shimmering verb is the running signal: a tense-verb row drops the
+    // trailing spinner, while a running authored label keeps it.
+    const step = (text: string) =>
+      [...container.querySelectorAll('button')].find((button) =>
+        button.textContent?.includes(text)
+      )!;
+    expect(step('Running pnpm').querySelector('.animate-spin')).toBeNull();
+    expect(step('Shell: npm start').querySelector('.animate-spin')).not.toBeNull();
+  });
+
   it('shows the turn token usage in compact units with exact values on hover', async () => {
     await render(
       liveTurn([{ type: 'text', text: 'Done.' }], {

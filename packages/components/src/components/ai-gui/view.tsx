@@ -160,6 +160,7 @@ import {
 } from './assistant-message-render-items';
 import {
   buildAssistantTurnRenderLayout,
+  isCommandToolCall,
   type AssistantActivityRenderItem,
   type AssistantActivitySummary,
   type AssistantToolCallRenderItem,
@@ -6158,6 +6159,8 @@ const TOOL_VERB_FORMS: Record<string, { running: string; done: string }> = {
   Bash: { running: 'Running', done: 'Ran' },
 };
 
+const TOOL_TITLE_LEADING_WORD = /^([A-Z][a-z]+)(?=[\s:(])/;
+
 type ToolVerbStatus = 'running' | 'done';
 
 const toolVerbStatus = (status: ToolCallMessage['status']): ToolVerbStatus =>
@@ -6170,23 +6173,38 @@ const ToolVerb = ({ word, status }: { word: string; status: ToolVerbStatus }) =>
   </span>
 );
 
-/** A tool title whose opening verb, when it has one, follows the step's tense. */
+/**
+ * A tool title whose opening verb, when it has one, follows the step's tense.
+ * `verb` supplies one when the agent's title is a bare target — raw commands
+ * open lowercase or with punctuation, so a command step reads "Ran `sed -n …`"
+ * the way a file step reads "Read session-list.tsx". A title already opening
+ * with a capitalized word ("Shell: cat x") is an authored label and keeps it.
+ */
 const ToolTitleWithHighlight = ({
   title,
   status,
   className,
+  verb,
 }: {
   title: string;
   status: ToolVerbStatus;
   className?: string;
+  verb?: string;
 }) => {
-  const match = /^([A-Z][a-z]+)(?=[\s:(])/.exec(title);
+  const match = TOOL_TITLE_LEADING_WORD.exec(title);
   if (match && TOOL_VERB_FORMS[match[1]!]) {
     const word = match[1]!;
     return (
       <span className={className} title={title}>
         <ToolVerb word={word} status={status} />
         {title.slice(word.length)}
+      </span>
+    );
+  }
+  if (verb && TOOL_VERB_FORMS[verb] && !match) {
+    return (
+      <span className={className} title={title}>
+        <ToolVerb word={verb} status={status} /> {title}
       </span>
     );
   }
@@ -6887,7 +6905,18 @@ const ToolCallCard = memo(function ToolCallCard({
 
   const terminalTitleDefault = terminalTitleFromContent ?? title;
   const displayTitle = isTerminalExecuteToolCall ? terminalTitleDefault : title;
-  const runningIndicator = isRunning ? <Spinner className="h-4 w-4 text-muted-foreground" /> : null;
+  const commandVerb = isCommandToolCall(toolCall) ? 'Run' : undefined;
+  /* The tense verb is the running signal: a shimmering "Running …" needs no
+     spinner. Keep it only where the step's own wording carries no tense
+     (authored labels like "Shell: …"). */
+  const stepVerb =
+    isFileAction && fileName
+      ? kindMeta?.label
+      : (TOOL_TITLE_LEADING_WORD.exec(displayTitle)?.[1] ?? commandVerb);
+  const runningIndicator =
+    isRunning && !(stepVerb && TOOL_VERB_FORMS[stepVerb]) ? (
+      <Spinner className="h-4 w-4 text-muted-foreground" />
+    ) : null;
 
   const renderContentBlocks = () => {
     if (!contentBlocks?.length) return null;
@@ -7124,6 +7153,7 @@ const ToolCallCard = memo(function ToolCallCard({
             <ToolTitleWithHighlight
               title={displayTitle}
               status={toolVerbStatus(toolCall.status)}
+              verb={commandVerb}
               className={cn(
                 'truncate',
                 isActivityRow
