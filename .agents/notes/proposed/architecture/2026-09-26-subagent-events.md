@@ -71,6 +71,7 @@ the requirement to inspect execution details.
 
 Companion PRs: [Core contract](https://github.com/LodyAI/acp-extension-core/pull/15)
 and [Codex adapter](https://github.com/LodyAI/acp-extension-codex/pull/56).
+Host/UI PR: [Lody #996](https://github.com/LodyAI/Lody/pull/996).
 Standalone Codex release requires publishing Core and updating its dependency first.
 
 The user requested Codex validation before other provider work. Core owns the

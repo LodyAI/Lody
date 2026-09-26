@@ -58,6 +58,7 @@ transcript。Codex 首轮已在本地实现并进行合成测试；其他 provid
 
 配套 PR：[Core 契约](https://github.com/LodyAI/acp-extension-core/pull/15)与
 [Codex 扩展](https://github.com/LodyAI/acp-extension-codex/pull/56)。
+宿主/UI PR：[Lody #996](https://github.com/LodyAI/Lody/pull/996)。
 独立发布 Codex 扩展前，需要先发布 Core 并更新对应依赖版本。
 
 用户要求先验证 Codex，再接入其他 provider。Core 所有 `_lody/subagents/event`
