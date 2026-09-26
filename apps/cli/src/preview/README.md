@@ -28,6 +28,12 @@ production never falls back to TypeScript execution. POSIX process tests cover
 normal stop, CLI SIGKILL during creation/active use, native crash, missing binaries
 and cleanup failure. Native verification on other operating systems is separate.
 
+Native dependencies can emit plain-text diagnostics even with `--output json`.
+The log reader ignores bounded non-JSON lines; structured messages still require
+schema validation, and allocated origins still require the Quick Tunnel allowlist.
+Fatal parser and size-limit errors survive shutdown so a later DNS cancellation
+cannot replace the original failure.
+
 ## First public request
 
 `preview-tunnel-dns.ts` queries the configured DNS servers with a private Node

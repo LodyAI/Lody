@@ -453,3 +453,30 @@ events and fake time, not test timeouts as evidence.
 
 Final second-pass verification: full OSS `pnpm check`, CLI production build,
 formatting and documentation checks passed. Independent review found no P0/P1.
+
+## Native diagnostic parsing correction
+
+The pinned Linux binary emits quic-go's receive-buffer warning as plain text even
+with `--output json`. Treating that warning as a fatal JSON error sent SIGTERM
+after origin allocation. Shutdown then cancelled DNS initialization and exited
+with code zero; the exit handler reported that secondary DNS error instead of
+the parser failure. A same-host diagnostic reproduced this sequence, while
+tolerating the warning allowed QUIC registration. Registration alone does not
+prove a public HTTP round trip.
+
+Ignore bounded non-JSON diagnostic lines without retaining their contents. Keep
+structured schema validation, the origin allowlist and the output size bound.
+Preserve the first fatal parser/size error in the terminal result even after
+origin allocation. This avoids changing kernel buffers or disabling QUIC to
+work around a log-reader defect. Synthetic behavior cases cover split text,
+successful registration, invalid structured output/origins and oversized output
+followed by cancellation diagnostics. Product intent is unchanged.
+
+Correction validation: all 101 preview tests pass with an isolated CommonJS
+temporary root (the host's `/tmp/package.json` otherwise misclassifies the IPC
+suite's extensionless native fixture). The updated native owner also registered
+the pinned Linux binary over QUIC and completed cleanup with a null closed error.
+This live diagnostic did not exercise a public application HTTP round trip.
+Workspace typechecking, lint, formatting, documentation and boundary checks pass.
+Root `pnpm check` stops in unchanged virtua tests with `act is not a function`;
+the full repository test suite therefore has not passed for this correction.

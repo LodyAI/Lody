@@ -24,6 +24,8 @@ Managed preview tunnels and the local proxy. [apps/cli/AGENTS.md](../../AGENTS.m
   `ELECTRON_RUN_AS_NODE`, but never pass Lody credentials or supervisor tokens.
   All CLI builds emit a sibling `cloudflared-worker.js`; no source-loader fallback.
   Native logs use the pinned release's `--output json`.
+  Ignore bounded non-JSON dependency diagnostics; validate structured lifecycle
+  logs and origins, and preserve fatal parser errors through native shutdown.
   Allocating an origin is not readiness. Before a Quick Tunnel's first public
   HTTP probe, await edge registration and query DNS records through an isolated
   Resolver, not OS hostname lookup: early NXDOMAIN can poison proxy/TUN caches.
