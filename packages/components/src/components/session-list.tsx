@@ -90,7 +90,6 @@ import {
   SIDEBAR_ROW_LIST_CLASS,
   SIDEBAR_GROUP_LABEL_CLASS,
   SIDEBAR_GROUP_LABEL_COLOR_CLASS,
-  SIDEBAR_STICKY_GROUP_HEADER_CLASS,
 } from '@/components/sidebar-row-shared';
 import { SessionInfoHoverCard } from '@/components/session-info-hover-card';
 import type { SessionSharingState } from '@/lib/session-sharing';
@@ -1171,7 +1170,7 @@ const SessionGroupSection = memo(function SessionGroupSection({
   // regular in the sidebar row color with a 16px avatar and a hover fill.
   // "Chats" is a top-level group label like a machine or GitHub Worktrees:
   // the shared group label type (small, bold, faint, no icon), no hover fill,
-  // and it sticks while its conversations scroll.
+  // and it scrolls with its conversations.
   const isGroupLabel = group.kind !== 'repo';
   const headerBaseColorClass = isGroupLabel
     ? SIDEBAR_GROUP_LABEL_COLOR_CLASS
@@ -1187,12 +1186,7 @@ const SessionGroupSection = memo(function SessionGroupSection({
         isGroupLabel && 'mt-1 first:mt-0'
       )}
     >
-      <div
-        className={cn(
-          'group flex items-center',
-          isGroupLabel ? cn(SIDEBAR_STICKY_GROUP_HEADER_CLASS, 'h-[26px]') : 'h-7'
-        )}
-      >
+      <div className={cn('group flex items-center', isGroupLabel ? 'h-[26px]' : 'h-7')}>
         <div
           role={canNavigate || canToggle ? 'button' : undefined}
           tabIndex={canNavigate || canToggle ? 0 : -1}

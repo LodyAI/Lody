@@ -75,7 +75,8 @@ mobile surfaces. Background for the rules below:
   active tab go above it. Unselected sidebar text uses `text-sidebar-row-foreground`. Never hard-code
   white text on theme surfaces. Hover changes a row's fill, never its text color.
 - Sidebar top-level groups (machines, GitHub Worktrees, Chats) all use
-  `SIDEBAR_GROUP_LABEL_CLASS`, with no leading icon; project, repo and conversation rows
+  `SIDEBAR_GROUP_LABEL_CLASS`, with no leading icon or sticky positioning; labels scroll
+  with their rows. Project, repo and conversation rows
   are 1em. A machine is identified by its Offline pill and hover card
   (`sidebar-machine-card.tsx`); never show "offline" while its status is unknown.
 - `@lody/ui` colours come from the VS Code theme: `theme-provider.tsx` puts

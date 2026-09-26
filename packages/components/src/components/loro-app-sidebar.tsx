@@ -195,7 +195,6 @@ import {
   buildSessionRowOpenedByTreeSlot,
   type SessionRowOpenedByTreeSlot,
   SIDEBAR_ROW_LIST_CLASS,
-  SIDEBAR_STICKY_GROUP_HEADER_CLASS,
 } from '@/components/sidebar-row-shared';
 import {
   buildOpenedBySessionTree,
@@ -2747,10 +2746,7 @@ export function LoroAppSidebar({
               key={section.sectionKey}
               className={cn('space-y-0.5', SIDEBAR_TOP_GROUP_SPACING(sectionCollapsed))}
             >
-              {/* The header sticks while its projects scroll under it, and the
-                  next group's header pushes it off: the machine a project
-                  belongs to stays in view. */}
-              <div className={SIDEBAR_STICKY_GROUP_HEADER_CLASS}>
+              <div>
                 {/* No icon: a machine group reads like GitHub Worktrees and
                     Chats. "Offline" marks the exception, and hovering the
                     header tells what the group is (owner, status, OS). */}

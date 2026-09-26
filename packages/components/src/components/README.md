@@ -9,6 +9,9 @@ The sidebar spans `loro-sidebar.tsx`, `loro-app-sidebar.tsx`, `session-list.tsx`
 `sidebar-*.tsx`. `sessions/session-list-rows.ts` resolves row relationships, while
 `lib/session-opened-by-tree.ts` builds the presentation tree.
 
+Section labels scroll with their rows, per the
+[sidebar section scrolling Spec](../../../../specs/sidebar-section-scrolling.md).
+
 GitHub repository groups and local project folders both expose a desktop drag handle.
 Their orders are persisted per workspace; local project keys also include the owning
 machine so projects from different devices cannot collide. See the
