@@ -22,6 +22,14 @@ and file responsibilities: [../README.md](../README.md).
   (per-workspace `broker-<workspaceId>.json`) for the same reason. Diagnostics must probe the
   same broker the failing command used, or they report a misroute as the caller's workspace
   lacking the repo link. Regression test: `worktree-manager-broker-auth.test.ts`.
+- INVARIANT: never spawn a bare `node` for the credential helper. `credential.helper` is
+  built from `process.execPath` with both words quoted (Windows separators normalized to
+  `/` for git's MinGW bash), and the diagnostic probe spawns the same runtime. A desktop
+  launched from the Dock or a shortcut inherits the GUI PATH, which usually has no `node`,
+  so a `!node` helper never starts and git fails with `terminal prompts disabled` even
+  though the broker is healthy. Git children and the ACP session env also carry
+  `ELECTRON_RUN_AS_NODE=1` when the CLI is the Electron binary
+  ([note](../../../../../.agents/notes/implemented/bug-fix/2026-09-12-git-helper-cli-runtime.md)).
 
 ## Worktrees, branches, and setup
 

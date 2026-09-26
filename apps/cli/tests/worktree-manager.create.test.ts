@@ -75,11 +75,14 @@ describe('WorktreeManager', () => {
 
   describe('git credential config', () => {
     it('clears inherited helpers before installing the Lody helper', () => {
-      expect(buildGitHubCredentialConfigArgs('!node "/tmp/lody-helper.cjs"')).toEqual([
+      // The helper value names the CLI runtime explicitly and quotes both words,
+      // because installation paths contain spaces and the GUI PATH has no `node`.
+      const helperValue = '!"/Applications/Lody Helper.app/node" "/tmp/lody-helper.cjs"';
+      expect(buildGitHubCredentialConfigArgs(helperValue)).toEqual([
         '-c',
         'credential.helper=',
         '-c',
-        'credential.helper=!node "/tmp/lody-helper.cjs"',
+        `credential.helper=${helperValue}`,
         '-c',
         'credential.useHttpPath=true',
       ]);
