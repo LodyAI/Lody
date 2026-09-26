@@ -23,6 +23,7 @@
     "@playwright/test": "^1.58.2",
     "@types/node": "catalog:",
     "tsx": "^4.23.5",
-    "typescript": "catalog:"
+    "typescript": "catalog:",
+    "ws": "8.21.3"
   }
 }

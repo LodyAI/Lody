@@ -466,18 +466,30 @@ export class LocalProjectHistorySyncService {
 
   /** Same rule as continuing the session: its bound Provider, else the default launch. */
   private async sessionAgentConfig(meta: SessionMeta): Promise<AgentConfigMeta | null> {
-    return meta.agentConfigId
-      ? await this.manager.getAgentConfigById(meta.agentConfigId, this.context.machineId)
-      : null;
+    if (!meta.agentConfigId) return null;
+    const config = await this.manager.getAgentConfigById(
+      meta.agentConfigId,
+      this.context.machineId
+    );
+    if (!config)
+      throw new Error(
+        'The session’s bound provider is unavailable; history replay cannot use another account'
+      );
+    return config;
   }
 
-  private launchProvider(config: AgentConfigMeta | null | undefined): HistoryProviderLaunch {
+  private async launchProvider(
+    config: AgentConfigMeta | null | undefined
+  ): Promise<HistoryProviderLaunch> {
     return config
       ? {
           ...this.provider,
           customAcp: config.customAcp,
           runtimeOverrides: config.runtimeOverrides,
           env: config.env,
+          codexProfile: config.codexAuth
+            ? await getCodexProfileStore().resolve(this.context.workspaceId, config)
+            : undefined,
         }
       : this.provider;
   }
@@ -488,7 +500,7 @@ export class LocalProjectHistorySyncService {
     config: AgentConfigMeta | null | undefined
   ): Promise<MaterializedReplay> {
     const { notifications, runtimeConfig } = await loadHistorySessionReplay({
-      provider: this.launchProvider(config),
+      provider: await this.launchProvider(config),
       rootPath,
       acpSessionId,
       logger: this.logger,
@@ -837,7 +849,7 @@ export class LocalProjectHistorySyncService {
   }): Promise<HistoryCatalogSnapshot> {
     const agentConfig = await this.soleAgentConfig();
     const catalog = await listHistorySessionsForLocalProject({
-      provider: this.launchProvider(agentConfig),
+      provider: await this.launchProvider(agentConfig),
       rootPath: args.rootPath,
       logger: this.logger,
       requiredSessionIds: args.requiredSessionIds,
@@ -1142,3 +1154,4 @@ export class LocalProjectHistorySyncService {
     } satisfies Partial<SessionMeta>);
   }
 }
+import { getCodexProfileStore } from '@/agent/codex-profile-store';

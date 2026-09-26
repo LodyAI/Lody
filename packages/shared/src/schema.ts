@@ -116,6 +116,7 @@ export type TitleGenerationConfig = {
 };
 
 export type AgentConfigMeta = {
+  codexAuth?: import('./codex-auth-profile').CodexAuthProfile;
   id: AgentConfigId;
   /**
    * Parent machine this config belongs to. Configs are scoped per-machine because
@@ -799,6 +800,7 @@ export type SessionExternalHistoryCursorDocState = {
  * resolve customAcp/env from AgentConfigMeta and worktree scripts from project config.
  */
 export type SessionLaunchConfig = {
+  codexAuth?: import('./codex-auth-profile').CodexAuthProfile;
   customAcp?: CustomAcpLaunchSpec;
   runtimeOverrides?: BuiltinRuntimeOverrides;
   env?: Record<string, string>;

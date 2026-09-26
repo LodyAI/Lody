@@ -17,6 +17,8 @@ import type { SessionActivePresencePhase } from '@/lib/loro/session-active-prese
  * 会话配置
  */
 export interface SessionConfig {
+  codexAuth?: import('@lody/shared').CodexAuthProfile;
+  codexProfile?: import('../agent/codex-profile-store').ResolvedCodexProfile;
   workspaceId: WorkspaceId;
   requesterUserId: string;
   machineId: string;

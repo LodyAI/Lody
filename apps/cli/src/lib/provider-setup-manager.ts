@@ -1,5 +1,6 @@
 import {
   applyProviderSetupCancellationToFlock,
+  encodeCodexProfileConfig,
   deleteMachineFlockRowFromFlock,
   getMachineFlockAgentConfigs,
   getMachineFlockDocId,
@@ -26,6 +27,7 @@ import type { LoroRepo } from 'loro-repo';
 import type { SessionExecutionService } from '@/session/session-execution-service';
 import { formatErrorMessage } from '@/utils/format-error';
 import type { Logger } from '@/utils/logger';
+import { getCodexProfileStore } from '@/agent/codex-profile-store';
 
 type ProviderSetupExecution = Pick<
   SessionExecutionService,
@@ -79,6 +81,7 @@ export class ProviderSetupManager {
   private drainPromise: Promise<void> | null = null;
   private drainRequested = false;
   private stopped = false;
+  private cleanupRetry: ReturnType<typeof setTimeout> | undefined;
 
   constructor(options: ProviderSetupManagerOptions) {
     this.repo = options.repo;
@@ -110,6 +113,8 @@ export class ProviderSetupManager {
   stop(): void {
     this.stopped = true;
     this.drainRequested = false;
+    clearTimeout(this.cleanupRetry);
+    this.cleanupRetry = undefined;
   }
 
   async resumeAfterAuthentication(setupId: AgentConfigId): Promise<void> {
@@ -136,6 +141,7 @@ export class ProviderSetupManager {
     while (!this.stopped) {
       this.drainRequested = false;
       await this.reconcileCancellations();
+      await this.reconcileCodexProfiles();
       const setups = (await this.readSetups())
         .filter((setup) => RESUMABLE_STATUSES.has(setup.status))
         .sort((left, right) => left.createdAt - right.createdAt);
@@ -274,6 +280,45 @@ export class ProviderSetupManager {
     this.sync.markMachineFlockDocDirty(this.machineId, { reason: 'provider-setup-cancel' });
   }
 
+  private async reconcileCodexProfiles(): Promise<void> {
+    const store = getCodexProfileStore();
+    const profiles = await store.list(this.workspaceId);
+    if (!profiles.length) return;
+    const handle = await this.repo.openFlockDoc(
+      getMachineFlockDocId(this.workspaceId, this.machineId)
+    );
+    const rows = readMachineFlockRowsFromFlock(handle.flock, {
+      families: ['agentConfig', 'providerSetup'],
+    });
+    const configs = getMachineFlockAgentConfigs(rows);
+    const setups = getMachineFlockProviderSetups(rows);
+    for (const profile of profiles) {
+      if (profile.machineId !== this.machineId) continue;
+      const config =
+        configs[profile.configId as AgentConfigId] ??
+        setups[profile.configId as AgentConfigId]?.config;
+      try {
+        if (config?.codexAuth?.profileId === profile.profile.profileId)
+          await store.reconcileGenerations(profile);
+        else if (!(await store.remove(profile))) this.scheduleCleanupRetry();
+      } catch {
+        this.scheduleCleanupRetry();
+        this.logger.debug(
+          '[provider-setup] Codex credential cleanup is pending; it will retry on the next scan'
+        );
+      }
+    }
+  }
+
+  private scheduleCleanupRetry(): void {
+    if (this.stopped || this.cleanupRetry) return;
+    this.cleanupRetry = setTimeout(() => {
+      this.cleanupRetry = undefined;
+      void this.kick();
+    }, 30_000);
+    this.cleanupRetry.unref?.();
+  }
+
   private async readSetup(setupId: AgentConfigId): Promise<ProviderSetupTask | undefined> {
     const handle = await this.repo.openFlockDoc(
       getMachineFlockDocId(this.workspaceId, this.machineId)
@@ -397,10 +442,12 @@ export class ProviderSetupManager {
       await this.deleteSetup(setupId);
       return;
     }
+    if (setup.config.codexAuth)
+      await getCodexProfileStore().resolve(this.workspaceId, setup.config);
 
     const now = getServerNow();
     const flock = handle.flock as unknown as MachineFlockWritableFlock;
-    flock.set(machineFlockKeys.agentConfig(setupId), setup.config, now);
+    flock.set(machineFlockKeys.agentConfig(setupId), encodeCodexProfileConfig(setup.config), now);
     // Publishing is the user adding the provider explicitly, so the earlier same-type
     // removal intent has to be retracted too, or the list holds it while startup still
     // treats it as removed.

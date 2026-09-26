@@ -1,4 +1,5 @@
 import type { RateLimit } from 'acp-extension-core';
+import { CodexAuthProfileSchema, assertManagedCodexProfileConfig } from './codex-auth-profile';
 import {
   getAcpCapabilityCacheKey,
   hasBuiltinRuntimeOverrideValues,
@@ -910,6 +911,7 @@ export function buildSessionLaunchConfig(
     return undefined;
   }
   const config: SessionLaunchConfig = {};
+  if (input.codexAuth) config.codexAuth = CodexAuthProfileSchema.parse(input.codexAuth);
   if (input.customAcp) {
     config.customAcp = input.customAcp;
   }
@@ -933,6 +935,7 @@ export function mergeSessionLaunchConfig(
   fallback: SessionLaunchConfig | undefined
 ): SessionLaunchConfig | undefined {
   return buildSessionLaunchConfig({
+    codexAuth: primary?.codexAuth ?? fallback?.codexAuth,
     customAcp: primary?.customAcp ?? fallback?.customAcp,
     runtimeOverrides: primary?.runtimeOverrides ?? fallback?.runtimeOverrides,
     env: primary?.env ?? fallback?.env,
@@ -962,7 +965,16 @@ export function writeMachineFlockRowToFlock(
   if (machineFlockRowsEqual(previous, normalized)) {
     return false;
   }
-  flock.set(normalized.key, normalized.value, nowMs);
+  const persisted =
+    normalized.key[0] === 'agentConfig'
+      ? encodeCodexProfileConfig(normalized.value as AgentConfigMeta)
+      : normalized.key[0] === 'providerSetup'
+        ? {
+            ...(normalized.value as ProviderSetupTask),
+            config: encodeCodexProfileConfig((normalized.value as ProviderSetupTask).config),
+          }
+        : normalized.value;
+  flock.set(normalized.key, persisted, nowMs);
   flock.commit();
   return true;
 }
@@ -1161,6 +1173,11 @@ const normalizeSessionLaunchConfig = (value: unknown): SessionLaunchConfig | und
     return undefined;
   }
   const config: SessionLaunchConfig = {};
+  if (!isMissing(value.codexAuth)) {
+    const profile = CodexAuthProfileSchema.safeParse(value.codexAuth);
+    if (!profile.success) return undefined;
+    config.codexAuth = profile.data;
+  }
   if (!isMissing(value.customAcp)) {
     if (!isCustomAcpLaunchSpec(value.customAcp)) {
       return undefined;
@@ -1430,6 +1447,22 @@ const normalizeAgentConfigMeta = (value: unknown): AgentConfigMeta | undefined =
     config.brandId = value.brandId as AgentConfigMeta['brandId'];
   }
 
+  if (!isMissing(value.codexAuth)) {
+    const profile = CodexAuthProfileSchema.safeParse(value.codexAuth);
+    if (!profile.success) return undefined;
+    config.codexAuth = profile.data;
+    try {
+      if (
+        config.runtimeOverrides?.codexPath === CODEX_PROFILE_LEGACY_LAUNCH_GUARD &&
+        Object.keys(config.runtimeOverrides).length === 1
+      )
+        delete config.runtimeOverrides;
+      assertManagedCodexProfileConfig(config);
+    } catch {
+      return undefined;
+    }
+  }
+
   return config;
 };
 
@@ -1560,3 +1593,4 @@ const isAcpCapabilityCacheEntry = (value: unknown): value is AcpCapabilityCacheE
   Array.isArray(value.modes) &&
   Array.isArray(value.models) &&
   typeof value.fetchedAt === 'number';
+import { encodeCodexProfileConfig, CODEX_PROFILE_LEGACY_LAUNCH_GUARD } from './codex-auth-profile';

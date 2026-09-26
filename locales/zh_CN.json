@@ -1,4 +1,12 @@
 {
+  "settings.agent.codex.authentication": "认证方式",
+  "settings.agent.codex.storage": "凭据仅保存在所选机器上。每个提供商配置使用独立账户。",
+  "settings.agent.codex.customApi": "自定义 API",
+  "settings.agent.codex.baseUrl": "Base URL",
+  "settings.agent.codex.keyNext": "在登录步骤中安全输入 API Key。若需更改目标地址，请添加新的提供商。",
+  "settings.agent.codex.enterKey": "输入 API Key",
+  "settings.agent.codex.updateKey": "更新 API Key",
+  "settings.agent.codex.verifyingKey": "正在验证 API Key",
   "settings.beta.semanticShortcuts": "跟随操作区域关闭标签",
   "settings.beta.semanticShortcutsHelper": "在桌面端，关闭最近用鼠标指向或用键盘操作的会话区或右侧面板中的当前标签。",
   "sessions.cancelSend": "取消发送",
