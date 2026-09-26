@@ -96,6 +96,16 @@ window per workspace runs notifications, badges, and background status checks,
 handing off on exit. Cache clearing and logout are application-wide and close
 other windows to release connections.
 
+The Dock badge is an absolute snapshot of owned, non-archived sidebar rows that
+have unread output or a live permission request, including contained conversations.
+Each row contributes at most one; waiting takes precedence over unread. Closed
+conversations suppress unread as defined in [tab closure](session-tab-closure.md).
+The elected renderer publishes changes immediately and reasserts the full snapshot,
+including zero, every 30 seconds and on focus/visibility restoration. Background
+timer throttling or system sleep can delay the interval. Main replaces each window's
+contribution and discards it on renderer crash, document navigation, or window close;
+routine reconciliation must not repeat a permission bounce.
+
 Workspace windows use the existing platform directory; the public desktop still
 has one local workspace. Shared UI multi-workspace entries must not change other
 windows' targets through global account selection.

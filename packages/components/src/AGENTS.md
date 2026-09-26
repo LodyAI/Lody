@@ -83,6 +83,11 @@ Performance comparisons must use the current full-Mirror baseline.
 
 ## Workspace transitions
 
+- Dock counts derive from complete active metadata and the sidebar's child activity
+  summary. Publish absolute snapshots, including zero, on change and every 30 seconds;
+  focus/visibility restoration reconciles too. Keep the timer independent of count
+  changes and mount it only in the ready workspace's elected window.
+
 - Authenticated workspace switches keep `MainLayout` mounted: the sidebar and
   workspace identity are stable chrome, while the content pane shows a scoped
   placeholder until route, runtime, and doc-meta ownership agree. Pending scope

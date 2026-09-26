@@ -111,6 +111,17 @@ changing keyboard, terminal, or window-resize follow behavior, which is why it i
 consumed for exactly one height resize and is not merged into programmatic-jump
 suppression.
 
+## `useWorkspaceBadge`
+
+`workspaceBadgeAtom` derives an absolute count from complete active-session metadata
+and fresh presence, sharing the sidebar's parent/child activity summary. The elected
+workspace window publishes changes immediately, reasserts the snapshot every 30 seconds,
+and reconciles on focus or visibility restoration. The interval reads the current atom
+and never restarts because the count changed; failed IPC gets another opportunity even
+when the authoritative count stays zero. Main replaces contributions, and removes stale
+ones on renderer crash/reload or window close. See the
+[desktop window contract](../../../../specs/desktop-windows.md).
+
 ## `useStableSession`
 
 A single HTTP 401 can be a stale response, so it is verified once against the
