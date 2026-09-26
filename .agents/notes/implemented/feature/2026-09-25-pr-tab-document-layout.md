@@ -89,9 +89,8 @@ come from Lody.
     step, so it never gets a button of its own.
   - The checks card became the merge card. It has a verdict heading (ready,
     conflicts, blocked, checking, draft, merged, closed), a checks summary, and
-    the expandable runs. It replaces the separate notices. A PR that can merge
-    past failing checks that are not required gets a warning mark, not a green
-    tick.
+    the expandable runs. It replaces the separate notices. Each state gives
+    one verdict; see [design review round 2](#design-review-round-2).
 - **`@lody/ui` gained `ButtonGroup`.** There was none; every split action in
   the product was two Buttons with a 2px gap. That is exactly why the old
   header read as two black blocks. Segments keep their outer corners and
@@ -106,6 +105,47 @@ come from Lody.
 
 The landing embed (`embedded`) keeps its slim bar with `PullRequestBadge` and
 the same header action; the title block, merge card and activity change there.
+
+## Design review round 2
+
+- **One column.** The header, the scrolled body and the composer dock each put
+  the page gutter outside one 48rem column, so at 1280px breadcrumb, title,
+  state line, meta, description, both cards and the composer all run 256–1024
+  (before: 256, 272 and 276 on the left; the composer was wider than the cards).
+  Comment and description markdown drops chat's 4px prose inset
+  (`SessionCommentMarkdown`), so a body starts on its author's name (296) and
+  the description on the title. A card row's mark sits in one 16px slot, so the
+  verdict and every check run start their text at one inset.
+- **One verdict per state.** The headline names the most important fact and its
+  mark takes that fact's tone; the line under it is neutral grey context. Failing
+  checks on a mergeable PR read "2 checks failed" / "Can still merge · 4 checks"
+  instead of "Ready to merge" beside a red line; running checks read "2 checks
+  running". Conflict, blocked, checking, draft, merged and closed keep their
+  headline and show the checks as neutral context, so a conflict no longer sits
+  beside a green "All checks passed". The header's merge glyph reads the same
+  tone function as the card's mark.
+- **Resolve conflicts.** The round-1 screenshot showed it disabled because the
+  story passed no `onResolveConflicts`; in the app it is offered only while the
+  owning session offers the agent action (info bar, idle agent, doc ready). It is
+  now an ordinary enabled secondary command when offered. When not offered, the
+  header shows the normal disabled merge and the card carries the conflict.
+- **The bottom of the tab.** The scroll area fades over its last 16px above the
+  composer, and the Comment button sits inside the `Textarea` well at its
+  bottom-right, 4px in, as the chat composer holds its send button. The well is
+  the standard `Textarea`; only its bottom padding makes room.
+- **Canvas.** In light, `background` and `elevatedBackground` are both white,
+  so the tab painted its page in the card fill. The tab now paints settings'
+  canvas step (`background` mixed 3.5% toward black) and the cards sit one rung
+  above it in both palettes. No token changed.
+- **One glyph per fact.** A draft shows its glyph only in the state pill: the
+  merge card and Ready for review have none. Review verdict words (approved,
+  requested changes) lost their leading glyph; the coloured word is unambiguous
+  in both palettes.
+- `tests/pr-tab-view.test.ts` now also checks the failed-checks verdict and its
+  neutral context, Resolve conflicts enabled when offered, the disabled merge
+  when not, and the single draft glyph. Edges were measured with
+  `getBoundingClientRect` in Chromium on the Storybook stories at 1280px; the
+  new `MergeConflictResolvable` story shows the offered command.
 
 ## Verification
 

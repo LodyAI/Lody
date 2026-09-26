@@ -2012,7 +2012,6 @@
   "sessions.pr.statusOpen": "已开启",
   "sessions.prTab.base": "目标",
   "sessions.prTab.checking": "检查中…",
-  "sessions.prTab.checks": "检查",
   "sessions.prTab.checksCount": "{{count}} 项检查",
   "sessions.prTab.checksCountOne": "1 项检查",
   "sessions.prTab.checksFailed": "部分检查失败",
@@ -4258,5 +4257,11 @@
   "sessions.prTab.verdictBlocked": "合并被阻止",
   "sessions.prTab.verdictConflict": "与目标分支存在冲突",
   "sessions.prTab.verdictDraft": "草稿，尚未提交审阅",
-  "sessions.prTab.verdictReady": "可以合并"
+  "sessions.prTab.verdictReady": "可以合并",
+  "sessions.prTab.verdictCanStillMerge": "仍可合并",
+  "sessions.prTab.verdictCheckFailedOne": "1 项检查失败",
+  "sessions.prTab.verdictChecksFailed": "{{count}} 项检查失败",
+  "sessions.prTab.verdictCheckRunningOne": "1 项检查运行中",
+  "sessions.prTab.verdictChecksRunning": "{{count}} 项检查运行中",
+  "sessions.prTab.checksFailedOf": "{{total}} 项检查中 {{failed}} 项失败"
 }

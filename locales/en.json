@@ -2012,7 +2012,6 @@
   "sessions.pr.statusOpen": "Open",
   "sessions.prTab.base": "Base",
   "sessions.prTab.checking": "Checking…",
-  "sessions.prTab.checks": "Checks",
   "sessions.prTab.checksCount": "{{count}} checks",
   "sessions.prTab.checksCountOne": "1 check",
   "sessions.prTab.checksFailed": "Some checks failed",
@@ -4258,5 +4257,11 @@
   "sessions.prTab.verdictBlocked": "Merging is blocked",
   "sessions.prTab.verdictConflict": "Conflicts with the base branch",
   "sessions.prTab.verdictDraft": "Draft — not ready for review",
-  "sessions.prTab.verdictReady": "Ready to merge"
+  "sessions.prTab.verdictReady": "Ready to merge",
+  "sessions.prTab.verdictCanStillMerge": "Can still merge",
+  "sessions.prTab.verdictCheckFailedOne": "1 check failed",
+  "sessions.prTab.verdictChecksFailed": "{{count}} checks failed",
+  "sessions.prTab.verdictCheckRunningOne": "1 check running",
+  "sessions.prTab.verdictChecksRunning": "{{count}} checks running",
+  "sessions.prTab.checksFailedOf": "{{failed}} of {{total}} checks failed"
 }

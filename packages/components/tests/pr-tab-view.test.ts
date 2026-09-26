@@ -406,13 +406,74 @@ describe('PrTabView merge card', () => {
     expect(merged.card?.getAttribute('data-pr-merge-card')).toBe('merged');
   });
 
-  it('names a conflict in the card and offers Resolve conflicts in the header', () => {
+  it('names failed checks as the verdict and keeps merging as neutral context', () => {
+    const run = (id: number, name: string, conclusion: 'success' | 'failure') => ({
+      id,
+      name,
+      status: 'completed' as const,
+      conclusion,
+      htmlUrl: null,
+      startedAt: null,
+      completedAt: null,
+      appName: null,
+    });
+    const failing: GitHubCheckRunsSummary = {
+      status: 'completed',
+      conclusion: 'failure',
+      total: 4,
+      runs: [
+        run(1, 'build', 'success'),
+        run(2, 'lint', 'failure'),
+        run(3, 'typecheck', 'failure'),
+        run(4, 'test', 'success'),
+      ],
+    };
+    const { card, header } = render(pullRequest, { data: { ...data, checkRuns: failing } });
+    expect(card?.getAttribute('data-pr-merge-card')).toBe('ready');
+    expect(card?.textContent).toContain('2 checks failed');
+    expect(card?.textContent).toContain('Can still merge · 4 checks');
+    expect(card?.textContent).not.toContain('Ready to merge');
+    const merge = header?.querySelector<HTMLButtonElement>('[data-pr-merge-action] button');
+    expect(merge?.disabled).toBe(false);
+  });
+
+  it('offers Resolve conflicts as an enabled command while the session can run it', () => {
+    const onResolveConflicts = vi.fn();
     const { card, header } = render(
       { ...pullRequest, mergeable: false, mergeableState: 'dirty' },
-      { onResolveConflicts: vi.fn() }
+      { onResolveConflicts }
     );
     expect(card?.getAttribute('data-pr-merge-card')).toBe('conflict');
     expect(card?.textContent).toContain('Conflicts with the base branch');
-    expect(header?.textContent).toContain('Resolve conflicts');
+    const resolve = [...(header?.querySelectorAll('button') ?? [])].find(
+      (button) => button.textContent === 'Resolve conflicts'
+    );
+    expect(resolve?.disabled).toBe(false);
+    flushSync(() => resolve?.click());
+    expect(onResolveConflicts).toHaveBeenCalled();
+  });
+
+  it('shows the disabled merge for a conflict nobody here can resolve', () => {
+    const { card, header } = render({ ...pullRequest, mergeable: false, mergeableState: 'dirty' });
+    expect(card?.textContent).toContain('Conflicts with the base branch');
+    expect(header?.textContent).not.toContain('Resolve conflicts');
+    const merge = [...(header?.querySelectorAll('button') ?? [])].find(
+      (button) => button.textContent === 'Merge'
+    );
+    expect(merge?.disabled).toBe(true);
+  });
+
+  it('draws the draft glyph once, in the state pill', () => {
+    const { card, header } = render(
+      { ...pullRequest, draft: true, mergeableState: 'draft' },
+      { onMarkReadyForReview: vi.fn() }
+    );
+    expect(card?.getAttribute('data-pr-merge-card')).toBe('draft');
+    expect(card?.querySelector('svg')).toBeNull();
+    const ready = [...(header?.querySelectorAll('button') ?? [])].find(
+      (button) => button.textContent === 'Ready for review'
+    );
+    expect(ready?.querySelector('svg')).toBeNull();
+    expect(container?.querySelector('[data-pr-state="draft"] svg')).not.toBeNull();
   });
 });

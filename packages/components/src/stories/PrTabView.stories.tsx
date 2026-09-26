@@ -472,6 +472,25 @@ export const MergeConflict: Story = {
   },
 };
 
+/** The owning session offers the agent's "Resolve conflicts": an ordinary enabled command. */
+export const MergeConflictResolvable: Story = {
+  args: {
+    repoFullName: 'loro-dev/lody',
+    prNumber: 42,
+    state: 'ready',
+    data: {
+      ...baseData,
+      pullRequest: { ...basePr, mergeable: false, mergeableState: 'dirty' },
+      checkRuns: failingChecks,
+    },
+    onResolveConflicts: () => {
+      // eslint-disable-next-line no-console
+      console.log('[story] resolve conflicts');
+    },
+    ...storyCallbacks,
+  },
+};
+
 export const MergeChecking: Story = {
   args: {
     repoFullName: 'loro-dev/lody',

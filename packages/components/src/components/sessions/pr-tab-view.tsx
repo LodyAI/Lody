@@ -7,11 +7,9 @@ import {
   CheckCircle2,
   ChevronDown,
   CircleDashed,
-  CircleDot,
   GitMerge,
   GitPullRequestArrow,
   GitPullRequestClosed,
-  GitPullRequestDraft,
   Github,
   MinusCircle,
   RefreshCcw,
@@ -66,6 +64,22 @@ const ENTRY_GUTTER = 'calc(12px + 20px + 8px)';
 /** Descriptions taller than this fold behind "Show more". */
 const DESCRIPTION_FOLD = '22rem';
 const FOCUS_RING = `0 0 0 ${focus.ringWidth} ${colors.accent}`;
+/**
+ * The ground the tab's cards stand on: a step below the panel, as settings'
+ * canvas is. In light the panel and a card are both white, so a card on the
+ * bare panel read only by its hairline; mixed toward black from the panel's own
+ * fill, the step holds in both palettes and the cards sit one rung above it.
+ */
+const CANVAS = `color-mix(in oklab, ${colors.background}, black 3.5%)`;
+/** How far a scrolled block fades as it passes under the comment composer. */
+const SCROLL_FADE = '16px';
+/**
+ * The comment's submit sits inside the well's bottom-right corner, 4px in — the
+ * inset `Input` gives whatever it holds — and the text keeps clear of it.
+ */
+const COMPOSER_ACTION_INSET = '4px';
+/** Room under the text for the submit: a mini Button (24px) and its inset twice. */
+const COMPOSER_ACTION_ROOM = `calc(${COMPOSER_ACTION_INSET} * 2 + 24px)`;
 
 const styles = stylex.create({
   root: {
@@ -75,10 +89,17 @@ const styles = stylex.create({
     flexDirection: 'column',
     height: '100%',
     minHeight: 0,
-    backgroundColor: colors.background,
+    backgroundColor: CANVAS,
     color: colors.label,
   },
-  column: { width: '100%', maxWidth: COLUMN, marginInline: 'auto' },
+  /**
+   * Every block — breadcrumb, title, description, cards, composer — sits in this
+   * one column, so the tab has one left edge and one right edge. The gutter
+   * outside it is the band's own padding, never the column's.
+   */
+  column: { boxSizing: 'border-box', width: '100%', maxWidth: COLUMN, marginInline: 'auto' },
+  gutter: { paddingInline: space[4] },
+  gutterEmbedded: { paddingInline: '20px' },
 
   // The header and the branch row are the page, not a band: no rule under either.
   header: {
@@ -87,7 +108,6 @@ const styles = stylex.create({
     flexShrink: 0,
     alignItems: 'center',
     height: 'calc(3.75rem + var(--safe-area-top))',
-    paddingInline: space[4],
     paddingTop: 'var(--safe-area-top)',
   },
   headerRow: { display: 'flex', minWidth: 0, alignItems: 'center', gap: space[2] },
@@ -219,17 +239,19 @@ const styles = stylex.create({
   branchChipBase: { color: colors.secondaryLabel },
 
   scroll: { flexGrow: 1, flexBasis: 0, minHeight: 0 },
+  /** Content passes under the composer through a short fade, not a hard cut. */
+  scrollUnderComposer: {
+    maskImage: `linear-gradient(to bottom, black calc(100% - ${SCROLL_FADE}), transparent)`,
+  },
   body: {
-    boxSizing: 'border-box',
     display: 'flex',
     flexDirection: 'column',
     gap: '20px',
-    paddingInline: space[4],
     // The header bar's own lower half is already the space above the title.
     paddingTop: space[1],
     paddingBottom: 'calc(1.25rem + var(--safe-area-bottom))',
   },
-  bodyEmbedded: { gap: '14px', paddingInline: '20px', paddingTop: '20px', paddingBottom: '20px' },
+  bodyEmbedded: { gap: '14px', paddingTop: '20px', paddingBottom: '20px' },
   skeleton: { display: 'flex', flexDirection: 'column', gap: space[3] },
 
   // A document, not a band of chips: the title leads, one line says what state
@@ -262,7 +284,6 @@ const styles = stylex.create({
   description: {
     position: 'relative',
     marginTop: space[1],
-    paddingInlineEnd: space[1],
     fontSize: '1em',
     lineHeight: 1.625,
     color: colors.label,
@@ -277,7 +298,7 @@ const styles = stylex.create({
     maskImage: 'linear-gradient(to bottom, black calc(100% - 4.5rem), transparent)',
   },
   descriptionToggle: { display: 'flex', marginTop: `calc(-1 * ${space[1]})` },
-  descriptionEmbedded: { paddingInlineEnd: 0, fontSize: '0.9em' },
+  descriptionEmbedded: { fontSize: '0.9em' },
   noDescription: {
     margin: 0,
     fontSize: '0.8em',
@@ -341,7 +362,7 @@ const styles = stylex.create({
     flexGrow: 1,
     minWidth: 0,
     alignItems: 'center',
-    gap: '10px',
+    gap: space[2],
     margin: 0,
     borderWidth: 0,
     paddingInline: space[3],
@@ -383,6 +404,18 @@ const styles = stylex.create({
     fontVariantNumeric: 'tabular-nums',
   },
   merged: { color: 'hsl(var(--github-merged))' },
+  /**
+   * The box a card row's leading mark sits in. The verdict's 16px mark and a
+   * run's 14px one share it, so every row's text starts at one inset.
+   */
+  markSlot: {
+    display: 'inline-flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '16px',
+    height: '16px',
+  },
   chevron: {
     transitionProperty: 'transform',
     transitionDuration: duration.fast,
@@ -473,14 +506,18 @@ const styles = stylex.create({
   sectionStack: { display: 'flex', flexDirection: 'column', gap: space[3] },
   sectionStackEmbedded: { gap: space[2] },
 
-  composer: { display: 'flex', flexDirection: 'column', gap: space[2] },
-  composerActions: { display: 'flex', justifyContent: 'flex-end' },
+  /** The comment well, holding its submit at the bottom right like the chat composer. */
+  composer: { position: 'relative' },
+  composerActions: {
+    position: 'absolute',
+    insetInlineEnd: COMPOSER_ACTION_INSET,
+    insetBlockEnd: COMPOSER_ACTION_INSET,
+    display: 'flex',
+  },
   composerDock: {
     flexShrink: 0,
-    paddingInline: space[4],
     paddingTop: space[4],
     paddingBottom: 'calc(1rem + var(--safe-area-bottom))',
-    backgroundColor: colors.background,
   },
 
   /** The labelled and the icon-only form of one action; the tab's width picks. */
@@ -527,7 +564,8 @@ export interface PrTabViewProps {
   /**
    * Dispatch the agent "resolve conflicts" prompt (same one the info-bar
    * "Resolve Conflicts" button sends). Provided only while the action is
-   * offerable; when absent the conflict button stays a disabled indicator.
+   * offerable; when absent a conflicted PR shows the disabled merge, and the
+   * merge card says why.
    */
   onResolveConflicts?: () => void;
   /** The resolve-conflicts dispatch is in flight — show loading, block clicks. */
@@ -766,7 +804,9 @@ const CheckRunRow = memo(function CheckRunRow({ run }: { run: GitHubCheckRun }) 
   const { t } = useTranslation();
   return (
     <li {...stylex.props(styles.runRow, styles.ruled)}>
-      <CheckRunIcon run={run} />
+      <span {...stylex.props(styles.markSlot)}>
+        <CheckRunIcon run={run} />
+      </span>
       <span {...stylex.props(styles.truncate, styles.grow)} title={run.name}>
         {run.name}
       </span>
@@ -869,13 +909,15 @@ const IssueCommentItem = memo(function IssueCommentItem({
   );
 });
 
-/** What a review did, as the verb of its row. Only a verdict takes a colour. */
+/**
+ * What a review did, as the verb of its row. Only a verdict takes a colour, and
+ * the word is the verdict: a glyph in front of "approved" said it twice.
+ */
 function ReviewVerb({ state }: { state: GitHubReview['state'] }) {
   const { t } = useTranslation();
   if (state === 'approved') {
     return (
       <span {...stylex.props(styles.entryVerb, styles.success)}>
-        <CheckCircle2 {...stylex.props(styles.glyph12)} aria-hidden />
         {t('sessions.prTab.reviewApproved', 'approved')}
       </span>
     );
@@ -883,7 +925,6 @@ function ReviewVerb({ state }: { state: GitHubReview['state'] }) {
   if (state === 'changes_requested') {
     return (
       <span {...stylex.props(styles.entryVerb, styles.danger)}>
-        <CircleDot {...stylex.props(styles.glyph12)} aria-hidden />
         {t('sessions.prTab.reviewChangesRequested', 'requested changes')}
       </span>
     );
@@ -1056,13 +1097,51 @@ function isPrBusy(
   return Boolean(p.isMerging || p.isUpdatingState || p.isMarkingReady || p.isDeletingBranch);
 }
 
-/** The checks' say on a merge, as the colour of the merge glyph. */
-function mergeGlyphTone(checks: GitHubCheckRunsSummary | null) {
-  if (!checks || checks.total === 0) return styles.muted;
-  if (checks.status === 'in_progress' || checks.status === 'queued') return styles.warning;
-  if (checks.conclusion === 'failure') return styles.danger;
-  if (checks.conclusion === 'success') return styles.success;
-  return styles.muted;
+type Tone = 'success' | 'warning' | 'danger' | 'muted' | 'merged';
+
+const TONE_STYLES = {
+  success: styles.success,
+  warning: styles.warning,
+  danger: styles.danger,
+  muted: styles.muted,
+  merged: styles.merged,
+} as const;
+
+interface ChecksTally {
+  state: 'none' | 'running' | 'failed' | 'passed' | 'other';
+  total: number;
+  running: number;
+  failed: number;
+}
+
+function tallyChecks(checks: GitHubCheckRunsSummary | null): ChecksTally {
+  const total = checks?.total ?? 0;
+  if (!checks || total === 0) return { state: 'none', total: 0, running: 0, failed: 0 };
+  const running = checks.runs.filter((run) => run.status !== 'completed').length;
+  const failed = checks.runs.filter(
+    (run) =>
+      run.status === 'completed' && (run.conclusion === 'failure' || run.conclusion === 'timed_out')
+  ).length;
+  const state =
+    checks.status === 'in_progress' || checks.status === 'queued'
+      ? 'running'
+      : checks.conclusion === 'failure'
+        ? 'failed'
+        : checks.conclusion === 'success'
+          ? 'passed'
+          : 'other';
+  return { state, total, running, failed };
+}
+
+/**
+ * The checks' say on a PR GitHub would merge. The card's verdict mark and the
+ * header's merge glyph both read it, so the two can never disagree.
+ */
+function readyTone(tally: ChecksTally): Tone {
+  if (tally.state === 'running') return 'warning';
+  if (tally.state === 'failed') return 'danger';
+  if (tally.state === 'other') return 'muted';
+  return 'success';
 }
 
 /**
@@ -1151,7 +1230,9 @@ function PrPrimaryAction({
         {isMerging ? (
           <Spinner {...stylex.props(styles.glyph14)} />
         ) : (
-          <GitMerge {...stylex.props(styles.glyph14, mergeGlyphTone(checks))} />
+          <GitMerge
+            {...stylex.props(styles.glyph14, TONE_STYLES[readyTone(tallyChecks(checks))])}
+          />
         )}
         {mergeMethodShortLabel(mergeMethod, t)}
       </Button>,
@@ -1180,38 +1261,29 @@ function PrPrimaryAction({
     );
   }
 
-  // Conflict — the agent-driven "Resolve conflicts" action. Clickable when the
-  // owning session offers it (shared 1:1 with the info-bar button, same prompt +
-  // pending); a disabled indicator otherwise.
-  if (kind === 'conflict') {
+  // Conflict, while the owning session offers the agent's "Resolve conflicts"
+  // (shared 1:1 with the info-bar button, same prompt and pending): the next
+  // step, so it reads as an ordinary enabled command. The card carries the red.
+  if (kind === 'conflict' && (onResolveConflicts || isResolvingConflicts)) {
     const resolving = Boolean(isResolvingConflicts);
-    const canResolve = Boolean(onResolveConflicts) && !resolving;
     return split(
       <Button
         type="button"
         size="small"
         variant="secondary"
-        onClick={canResolve ? onResolveConflicts : undefined}
-        disabled={!canResolve}
-        title={t(
-          'sessions.prTab.mergeConflictBody',
-          'This branch has conflicts that must be resolved on GitHub or your local repo before merging.'
-        )}
+        onClick={onResolveConflicts}
+        disabled={resolving || busy || !onResolveConflicts}
       >
-        {resolving ? (
-          <Spinner {...stylex.props(styles.glyph14)} />
-        ) : (
-          <AlertCircle {...stylex.props(styles.glyph14, styles.danger)} />
-        )}
+        {resolving && <Spinner {...stylex.props(styles.glyph14)} />}
         {t('sessions.prTab.resolveConflicts', 'Resolve conflicts')}
       </Button>,
       closeItem
     );
   }
 
-  // Blocked / still checking — merge stays in place, disabled, so the header
-  // keeps its shape while GitHub decides; the card below says why.
-  if ((kind === 'blocked' || kind === 'checking') && onMerge) {
+  // Blocked, still checking, or a conflict nobody here can resolve: merge stays
+  // in place, disabled, so the header keeps its shape; the card below says why.
+  if ((kind === 'blocked' || kind === 'checking' || kind === 'conflict') && onMerge) {
     return split(
       <Button
         type="button"
@@ -1224,7 +1296,12 @@ function PrPrimaryAction({
                 'sessions.prTab.mergeBlocked',
                 'Merging is blocked — required reviews, failing checks, or the branch is behind.'
               )
-            : t('sessions.prTab.mergeChecking', 'Checking if the branch can be merged…')
+            : kind === 'conflict'
+              ? t(
+                  'sessions.prTab.mergeConflictBody',
+                  'This branch has conflicts that must be resolved on GitHub or your local repo before merging.'
+                )
+              : t('sessions.prTab.mergeChecking', 'Checking if the branch can be merged…')
         }
       >
         <GitMerge {...stylex.props(styles.glyph14)} />
@@ -1243,11 +1320,8 @@ function PrPrimaryAction({
         onClick={() => void onMarkReadyForReview()}
         disabled={busy}
       >
-        {isMarkingReady ? (
-          <Spinner {...stylex.props(styles.glyph14)} />
-        ) : (
-          <GitPullRequestArrow {...stylex.props(styles.glyph14)} />
-        )}
+        {/* The state pill already says draft; the command needs no second glyph. */}
+        {isMarkingReady && <Spinner {...stylex.props(styles.glyph14)} />}
         {t('sessions.prTab.readyForReview', 'Ready for review')}
       </Button>,
       closeItem
@@ -1346,51 +1420,134 @@ function PrPrimaryAction({
   return null;
 }
 
-type Verdict = { mark: React.ReactNode; title: string };
+/**
+ * One verdict per state: a headline naming the fact that matters most, a mark
+ * in that headline's tone (none where the state pill already says it), and a
+ * neutral line of context under it. The context never carries a colour of its
+ * own, so a card cannot say "ready" and "failed" at once.
+ */
+type Verdict = { mark: React.ReactNode; title: string; detail: string | null };
 
-function mergeVerdict(kind: MergeKind, t: RelativeTimeT): Verdict {
+function countChecks(total: number, t: RelativeTimeT): string {
+  return total === 1
+    ? t('sessions.prTab.checksCountOne', '1 check')
+    : t('sessions.prTab.checksCount', '{{count}} checks', { count: total });
+}
+
+/** The checks as neutral context under a verdict about something else. */
+function checksContext(tally: ChecksTally, t: RelativeTimeT): string | null {
+  const count = countChecks(tally.total, t);
+  switch (tally.state) {
+    case 'none':
+      return null;
+    case 'running':
+      return `${t('sessions.prTab.checksRunning', 'Checks running')} · ${count}`;
+    case 'passed':
+      return `${t('sessions.prTab.checksPassed', 'All checks passed')} · ${count}`;
+    case 'failed':
+      return tally.failed > 0
+        ? t('sessions.prTab.checksFailedOf', '{{failed}} of {{total}} checks failed', {
+            failed: tally.failed,
+            total: tally.total,
+          })
+        : `${t('sessions.prTab.checksFailed', 'Some checks failed')} · ${count}`;
+    case 'other':
+      return count;
+  }
+  return assertNever(tally.state);
+}
+
+function markOf(Icon: typeof CheckCircle2, tone: Tone): React.ReactNode {
+  return <Icon {...stylex.props(styles.glyph16, TONE_STYLES[tone])} />;
+}
+
+/** A PR GitHub would merge: the checks decide what the headline says. */
+function readyVerdict(tally: ChecksTally, t: RelativeTimeT): Verdict {
+  const tone = readyTone(tally);
+  const stillMerges = `${t('sessions.prTab.verdictCanStillMerge', 'Can still merge')} · ${countChecks(tally.total, t)}`;
+  if (tally.state === 'failed') {
+    return {
+      mark: markOf(XCircle, tone),
+      title:
+        tally.failed === 0
+          ? t('sessions.prTab.checksFailed', 'Some checks failed')
+          : tally.failed === 1
+            ? t('sessions.prTab.verdictCheckFailedOne', '1 check failed')
+            : t('sessions.prTab.verdictChecksFailed', '{{count}} checks failed', {
+                count: tally.failed,
+              }),
+      detail: stillMerges,
+    };
+  }
+  if (tally.state === 'running') {
+    return {
+      mark: <Spinner {...stylex.props(styles.glyph16, TONE_STYLES[tone])} />,
+      title:
+        tally.running === 0
+          ? t('sessions.prTab.checksRunning', 'Checks running')
+          : tally.running === 1
+            ? t('sessions.prTab.verdictCheckRunningOne', '1 check running')
+            : t('sessions.prTab.verdictChecksRunning', '{{count}} checks running', {
+                count: tally.running,
+              }),
+      detail: stillMerges,
+    };
+  }
+  return {
+    mark: markOf(tally.state === 'other' ? CircleDashed : CheckCircle2, tone),
+    title: t('sessions.prTab.verdictReady', 'Ready to merge'),
+    detail: checksContext(tally, t),
+  };
+}
+
+function mergeVerdict(kind: MergeKind, tally: ChecksTally, t: RelativeTimeT): Verdict {
+  const detail = checksContext(tally, t);
   switch (kind) {
     case 'ready':
-      return {
-        mark: <CheckCircle2 {...stylex.props(styles.glyph16, styles.success)} />,
-        title: t('sessions.prTab.verdictReady', 'Ready to merge'),
-      };
+      return readyVerdict(tally, t);
     case 'conflict':
       return {
-        mark: <AlertCircle {...stylex.props(styles.glyph16, styles.danger)} />,
+        mark: markOf(AlertCircle, 'danger'),
         title: t('sessions.prTab.verdictConflict', 'Conflicts with the base branch'),
+        detail,
       };
     case 'blocked':
       return {
-        mark: <ShieldAlert {...stylex.props(styles.glyph16, styles.warning)} />,
+        mark: markOf(ShieldAlert, 'warning'),
         title: t('sessions.prTab.verdictBlocked', 'Merging is blocked'),
+        detail,
       };
     case 'checking':
       return {
         mark: <Spinner {...stylex.props(styles.glyph16, styles.muted)} />,
         title: t('sessions.prTab.mergeChecking', 'Checking if the branch can be merged…'),
+        detail,
       };
     case 'draft':
+      // The state pill is the one draft glyph; the headline says it in words.
       return {
-        mark: <GitPullRequestDraft {...stylex.props(styles.glyph16, styles.muted)} />,
+        mark: null,
         title: t('sessions.prTab.verdictDraft', 'Draft — not ready for review'),
+        detail,
       };
     case 'merged':
       return {
-        mark: <GitMerge {...stylex.props(styles.glyph16, styles.merged)} />,
+        mark: markOf(GitMerge, 'merged'),
         title: t('sessions.prTab.mergedAlready', 'Pull request merged'),
+        detail,
       };
     case 'closed':
       return {
-        mark: <GitPullRequestClosed {...stylex.props(styles.glyph16, styles.danger)} />,
+        mark: markOf(GitPullRequestClosed, 'danger'),
         title: t('sessions.prTab.closed', 'Closed without merging'),
+        detail,
       };
   }
   return assertNever(kind);
 }
 
 function assertNever(value: never): never {
-  throw new Error(`Unhandled merge kind: ${value}`);
+  throw new Error(`Unhandled merge state: ${String(value)}`);
 }
 
 /**
@@ -1408,59 +1565,21 @@ function MergeCard({
 }) {
   const { t } = useTranslation();
   const kind = resolveMergeKind(pr);
-  const total = checks?.total ?? 0;
-  const running = checks?.status === 'in_progress' || checks?.status === 'queued';
-  const failed = !running && checks?.conclusion === 'failure';
-  const passed = !running && checks?.conclusion === 'success';
-  const base = mergeVerdict(kind, t);
-  // GitHub lets a PR merge past checks that are not required; the verdict still
-  // says it can merge, but its mark must not be a green tick beside a red line.
-  const verdict: Verdict =
-    kind === 'ready' && failed
-      ? { ...base, mark: <AlertCircle {...stylex.props(styles.glyph16, styles.warning)} /> }
-      : kind === 'ready' && running
-        ? { ...base, mark: <CircleDashed {...stylex.props(styles.glyph16, styles.muted)} /> }
-        : base;
+  const tally = tallyChecks(checks);
+  const total = tally.total;
+  const verdict = mergeVerdict(kind, tally, t);
   // Collapse the run list once everything is green — the detail line already
   // says so; expand by default when something needs attention.
-  const [open, setOpen] = useState(!passed);
-
-  const countLabel =
-    total === 1
-      ? t('sessions.prTab.checksCountOne', '1 check')
-      : t('sessions.prTab.checksCount', '{{count}} checks', { count: total });
-  const detail =
-    total === 0
-      ? null
-      : `${
-          running
-            ? t('sessions.prTab.checksRunning', 'Checks running')
-            : passed
-              ? t('sessions.prTab.checksPassed', 'All checks passed')
-              : failed
-                ? t('sessions.prTab.checksFailed', 'Some checks failed')
-                : t('sessions.prTab.checks', 'Checks')
-        } · ${countLabel}`;
-  const detailMark =
-    total === 0 ? null : running ? (
-      <Spinner {...stylex.props(styles.glyph12, styles.warning)} />
-    ) : passed ? (
-      <CheckCircle2 {...stylex.props(styles.glyph12, styles.success)} />
-    ) : failed ? (
-      <XCircle {...stylex.props(styles.glyph12, styles.danger)} />
-    ) : (
-      <CircleDashed {...stylex.props(styles.glyph12, styles.muted)} />
-    );
+  const [open, setOpen] = useState(tally.state !== 'passed');
 
   const summary = (
     <>
-      {verdict.mark}
+      {verdict.mark && <span {...stylex.props(styles.markSlot)}>{verdict.mark}</span>}
       <span {...stylex.props(styles.verdict)}>
         <span {...stylex.props(styles.verdictTitle)}>{verdict.title}</span>
-        {detail && (
-          <span {...stylex.props(styles.verdictDetail, failed && styles.danger)}>
-            {detailMark}
-            <span {...stylex.props(styles.truncate)}>{detail}</span>
+        {verdict.detail && (
+          <span {...stylex.props(styles.verdictDetail)}>
+            <span {...stylex.props(styles.truncate)}>{verdict.detail}</span>
           </span>
         )}
       </span>
@@ -1582,15 +1701,17 @@ function Composer({
         value={value}
         onChange={(e) => setValue(e.target.value)}
         placeholder={t('sessions.prTab.composerPlaceholder', 'Leave a comment')}
-        rows={3}
+        rows={2}
         resize="none"
         disabled={isPending}
+        // Layout only: the text keeps clear of the submit sitting in the well.
+        style={{ paddingBottom: COMPOSER_ACTION_ROOM }}
       />
       <div {...stylex.props(styles.composerActions)}>
         {/* The header's merge is the view's one primary; a comment is secondary. */}
         <Button
           type="button"
-          size="small"
+          size="mini"
           variant="secondary"
           onClick={() => void submit()}
           disabled={!canSubmit}
@@ -1679,93 +1800,99 @@ export const PrTabView = memo(function PrTabView({
     ) : null;
 
   const body = (
-    <div {...stylex.props(styles.column, styles.body, embedded && styles.bodyEmbedded)}>
-      {state === 'loading' && !pr && <PrBodySkeleton />}
+    <div {...stylex.props(styles.gutter, embedded && styles.gutterEmbedded)}>
+      <div {...stylex.props(styles.column, styles.body, embedded && styles.bodyEmbedded)}>
+        {state === 'loading' && !pr && <PrBodySkeleton />}
 
-      {state === 'error' && !pr && (
-        <div {...stylex.props(styles.notice, styles.noticeDanger)}>
-          <AlertCircle {...stylex.props(styles.mark, styles.danger)} />
-          <div {...stylex.props(styles.noticeBody)}>
-            <p {...stylex.props(styles.noticeTitle, styles.noticeTitleDanger)}>
-              {t('sessions.prTab.loadError', 'Failed to load pull request')}
-            </p>
-            {error && <p {...stylex.props(styles.noticeDetail)}>{error}</p>}
-          </div>
-          <div {...stylex.props(styles.noticeActions)}>
-            {onRefresh && (
-              <Button type="button" size="mini" variant="secondary" onClick={onRefresh}>
-                {t('sessions.prTab.retry', 'Retry')}
-              </Button>
-            )}
-          </div>
-        </div>
-      )}
-
-      {pr && (
-        <>
-          <section {...stylex.props(styles.titleSection, embedded && styles.titleSectionEmbedded)}>
-            <h2 {...stylex.props(styles.title, embedded && styles.titleEmbedded)}>{pr.title}</h2>
-            <PrStateLine pr={pr} />
-            <PrMetaLine pr={pr} />
-            {pr.body ? (
-              embedded ? (
-                <div {...stylex.props(styles.description, styles.descriptionEmbedded)}>
-                  <SessionCommentMarkdown body={pr.body} allowHtml />
-                </div>
-              ) : (
-                <PrDescription body={pr.body} />
-              )
-            ) : (
-              <p {...stylex.props(styles.noDescription)}>
-                {t('sessions.prTab.noDescription', 'No description provided.')}
+        {state === 'error' && !pr && (
+          <div {...stylex.props(styles.notice, styles.noticeDanger)}>
+            <AlertCircle {...stylex.props(styles.mark, styles.danger)} />
+            <div {...stylex.props(styles.noticeBody)}>
+              <p {...stylex.props(styles.noticeTitle, styles.noticeTitleDanger)}>
+                {t('sessions.prTab.loadError', 'Failed to load pull request')}
               </p>
+              {error && <p {...stylex.props(styles.noticeDetail)}>{error}</p>}
+            </div>
+            <div {...stylex.props(styles.noticeActions)}>
+              {onRefresh && (
+                <Button type="button" size="mini" variant="secondary" onClick={onRefresh}>
+                  {t('sessions.prTab.retry', 'Retry')}
+                </Button>
+              )}
+            </div>
+          </div>
+        )}
+
+        {pr && (
+          <>
+            <section
+              {...stylex.props(styles.titleSection, embedded && styles.titleSectionEmbedded)}
+            >
+              <h2 {...stylex.props(styles.title, embedded && styles.titleEmbedded)}>{pr.title}</h2>
+              <PrStateLine pr={pr} />
+              <PrMetaLine pr={pr} />
+              {pr.body ? (
+                embedded ? (
+                  <div {...stylex.props(styles.description, styles.descriptionEmbedded)}>
+                    <SessionCommentMarkdown body={pr.body} allowHtml />
+                  </div>
+                ) : (
+                  <PrDescription body={pr.body} />
+                )
+              ) : (
+                <p {...stylex.props(styles.noDescription)}>
+                  {t('sessions.prTab.noDescription', 'No description provided.')}
+                </p>
+              )}
+            </section>
+
+            {checksPermissionError && (
+              <ChecksPermissionNotice onGrantChecksPermission={onGrantChecksPermission} />
             )}
-          </section>
 
-          {checksPermissionError && (
-            <ChecksPermissionNotice onGrantChecksPermission={onGrantChecksPermission} />
-          )}
+            <MergeCard pr={pr} checks={checksPermissionError ? null : (data?.checkRuns ?? null)} />
 
-          <MergeCard pr={pr} checks={checksPermissionError ? null : (data?.checkRuns ?? null)} />
-
-          <section {...stylex.props(styles.sectionStack, embedded && styles.sectionStackEmbedded)}>
-            {conversation.length > 0 && (
-              <ul {...stylex.props(styles.list, styles.card)}>
-                {conversation.map((item, index) => {
-                  const row = stylex.props(index > 0 && styles.ruled);
-                  if (item.kind === 'issue') {
+            <section
+              {...stylex.props(styles.sectionStack, embedded && styles.sectionStackEmbedded)}
+            >
+              {conversation.length > 0 && (
+                <ul {...stylex.props(styles.list, styles.card)}>
+                  {conversation.map((item, index) => {
+                    const row = stylex.props(index > 0 && styles.ruled);
+                    if (item.kind === 'issue') {
+                      return (
+                        <li key={`issue-${item.comment.id}`} {...row}>
+                          <IssueCommentItem comment={item.comment} />
+                        </li>
+                      );
+                    }
+                    if (item.kind === 'review-thread') {
+                      return (
+                        <li key={`thread-${item.thread.id}`} {...row}>
+                          <div {...stylex.props(styles.orphanThread)}>
+                            <GitHubCommentThread thread={item.thread} surface="inset" showAnchor />
+                          </div>
+                        </li>
+                      );
+                    }
                     return (
-                      <li key={`issue-${item.comment.id}`} {...row}>
-                        <IssueCommentItem comment={item.comment} />
+                      <li key={`review-${item.review.id}`} {...row}>
+                        <ReviewSubmissionItem review={item.review} threads={item.threads} />
                       </li>
                     );
-                  }
-                  if (item.kind === 'review-thread') {
-                    return (
-                      <li key={`thread-${item.thread.id}`} {...row}>
-                        <div {...stylex.props(styles.orphanThread)}>
-                          <GitHubCommentThread thread={item.thread} surface="inset" showAnchor />
-                        </div>
-                      </li>
-                    );
-                  }
-                  return (
-                    <li key={`review-${item.review.id}`} {...row}>
-                      <ReviewSubmissionItem review={item.review} threads={item.threads} />
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-            {embedded && onPostComment && (
-              <Composer
-                isPending={Boolean(isPostingComment)}
-                onSubmit={(commentBody) => onPostComment(commentBody)}
-              />
-            )}
-          </section>
-        </>
-      )}
+                  })}
+                </ul>
+              )}
+              {embedded && onPostComment && (
+                <Composer
+                  isPending={Boolean(isPostingComment)}
+                  onSubmit={(commentBody) => onPostComment(commentBody)}
+                />
+              )}
+            </section>
+          </>
+        )}
+      </div>
     </div>
   );
 
@@ -1781,7 +1908,7 @@ export const PrTabView = memo(function PrTabView({
           <div {...stylex.props(styles.shrink)}>{primaryAction}</div>
         </div>
       ) : (
-        <header {...stylex.props(styles.header)}>
+        <header {...stylex.props(styles.header, styles.gutter)}>
           <div {...stylex.props(styles.column, styles.headerRow)}>
             {leadingSlot}
             <span {...stylex.props(styles.crumbs)}>
@@ -1833,12 +1960,15 @@ export const PrTabView = memo(function PrTabView({
         </header>
       )}
 
-      <ScrollArea data-pr-content-scroll-area="" {...stylex.props(styles.scroll)}>
+      <ScrollArea
+        data-pr-content-scroll-area=""
+        {...stylex.props(styles.scroll, !embedded && onPostComment && styles.scrollUnderComposer)}
+      >
         {body}
       </ScrollArea>
 
       {!embedded && onPostComment && (
-        <div data-pr-comment-composer="" {...stylex.props(styles.composerDock)}>
+        <div data-pr-comment-composer="" {...stylex.props(styles.composerDock, styles.gutter)}>
           <div {...stylex.props(styles.column)}>
             <Composer
               isPending={Boolean(isPostingComment)}
