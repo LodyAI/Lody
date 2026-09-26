@@ -4,6 +4,7 @@ Status: implemented
 Translation: current
 
 [中文](2026-09-26-single-focus-edge-for-nested-editors.zh.md)
+[PR #1030](https://github.com/LodyAI/Lody/pull/1030)
 
 ## Abstract
 
