@@ -208,3 +208,58 @@ export const HoverInteraction: Story = {
     </div>
   ),
 };
+
+const listRows: Array<Partial<SessionInfoCardProps> & { title: string }> = [
+  { ...githubArgs, title: 'Fix data persistence race', prCiRuns: ciPassing },
+  {
+    ...githubArgs,
+    title: 'Ship presence heartbeat',
+    prStatus: 'merged',
+    prNumber: 99,
+    prCiRuns: ciRunning,
+  },
+  {
+    ...githubArgs,
+    title: 'Spike: fabric shader LOD',
+    prStatus: 'closed',
+    prNumber: 74,
+    prCiRuns: ciFailing,
+  },
+  {
+    kind: 'local',
+    title: 'Refactor persistence layer',
+    isWorktree: true,
+    folderName: 'lody',
+    machineName: 'Studio Mac',
+    branchName: 'feat/persistence-refactor',
+  },
+];
+
+/**
+ * Run the pointer down the rows: the first card fades in after the warm-up,
+ * then each next row's card replaces it in place, with no fade between them.
+ */
+export const HoverAcrossRows: Story = {
+  render: (args) => (
+    <div className="flex w-64 flex-col rounded-lg border border-border p-2">
+      {listRows.map((row) => (
+        <SessionInfoHoverCard
+          key={row.title}
+          {...args}
+          {...row}
+          latestMessageAt={hoursAgo(2)}
+          standalone={false}
+        >
+          <div
+            role="button"
+            tabIndex={0}
+            data-row={row.title}
+            className="flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-sidebar-hover"
+          >
+            <span className="min-w-0 flex-1 truncate">{row.title}</span>
+          </div>
+        </SessionInfoHoverCard>
+      ))}
+    </div>
+  ),
+};

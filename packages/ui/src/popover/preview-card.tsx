@@ -22,6 +22,12 @@ export interface PreviewCardContentProps extends Omit<
   /** The popup's own pointer handlers, for a caller that owns the hover intent. */
   onPointerEnter?: PopupBaseProps['onPointerEnter'];
   onPointerLeave?: PopupBaseProps['onPointerLeave'];
+  /**
+   * Skip the rise and fade, in and out. A surface that swaps one card for the
+   * next as a pointer runs down a list states it for those swaps: two cards
+   * crossing in opposite fades read as flicker, not as one card moving.
+   */
+  noAnimation?: boolean;
   className?: string;
 }
 
@@ -43,6 +49,7 @@ export const PreviewCardContent = forwardRef<HTMLDivElement, PreviewCardContentP
       container,
       onPointerEnter,
       onPointerLeave,
+      noAnimation = false,
       sideOffset = POPUP_GAP,
       ...rest
     },
@@ -69,12 +76,14 @@ export const PreviewCardContent = forwardRef<HTMLDivElement, PreviewCardContentP
             onPointerLeave={onPointerLeave}
             className={(state) => {
               const hidden =
-                state.transitionStatus === 'starting' || state.transitionStatus === 'ending';
+                !noAnimation &&
+                (state.transitionStatus === 'starting' || state.transitionStatus === 'ending');
               return appendClassName(
                 stylex.props(
                   surface.popup,
                   surface.popupPanel,
-                  hidden && hiddenSurfaceForSide(state.side)
+                  hidden && hiddenSurfaceForSide(state.side),
+                  noAnimation && surface.popupNoTransition
                 ).className,
                 className
               );

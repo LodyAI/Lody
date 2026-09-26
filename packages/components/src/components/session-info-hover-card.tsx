@@ -737,6 +737,9 @@ export function SidebarHoverCard({
   content: ReactNode;
 }) {
   const [open, setOpen] = useState(false);
+  // True while this card is one step of a run down the list: it appears and
+  // leaves in place instead of fading, so the pointer reads one card moving.
+  const [inRun, setInRun] = useState(false);
   const anchorRef = useRef<HTMLDivElement>(null);
   const openRef = useRef(false);
   const closeTimer = useRef<number | null>(null);
@@ -759,6 +762,7 @@ export function SidebarHoverCard({
   const closeSelf = useCallback(() => {
     clearClose();
     clearOpen();
+    setInRun(false);
     // Only a card that was actually shown counts as an interaction (keeps the warm
     // window alive); an aborted warmup must not.
     if (openRef.current) lastCardInteractionAt = performance.now();
@@ -766,17 +770,28 @@ export function SidebarHoverCard({
     setOpen(false);
   }, [clearClose, clearOpen]);
 
+  // Another card opening takes over: this one leaves at once, with no fade.
+  const handOff = useCallback(() => {
+    closeSelf();
+    setInRun(true);
+  }, [closeSelf]);
+
   // Open now, closing whatever else is open first so only one card ever shows at a
-  // time (the outgoing card disappears instantly, no grace).
-  const openNow = useCallback(() => {
-    clearClose();
-    clearOpen();
-    if (activeClose && activeClose !== closeSelf) activeClose();
-    activeClose = closeSelf;
-    lastCardInteractionAt = performance.now();
-    openRef.current = true;
-    setOpen(true);
-  }, [clearClose, clearOpen, closeSelf]);
+  // time (the outgoing card disappears instantly, no grace). A warm open is part
+  // of a run down the list and appears in place; only the first one fades in.
+  const openNow = useCallback(
+    (warm: boolean) => {
+      clearClose();
+      clearOpen();
+      if (activeClose && activeClose !== handOff) activeClose();
+      activeClose = handOff;
+      lastCardInteractionAt = performance.now();
+      openRef.current = true;
+      setInRun(warm);
+      setOpen(true);
+    },
+    [clearClose, clearOpen, handOff]
+  );
 
   // Hover intent: instant while warm, otherwise wait out the warmup delay.
   const requestOpen = useCallback(() => {
@@ -784,11 +799,11 @@ export function SidebarHoverCard({
     if (openRef.current || pressSuppression) return;
     const warm = performance.now() - lastCardInteractionAt < WARM_WINDOW_MS;
     if (warm) {
-      openNow();
+      openNow(true);
       return;
     }
     clearOpen();
-    openTimer.current = window.setTimeout(openNow, WARMUP_DELAY_MS);
+    openTimer.current = window.setTimeout(() => openNow(false), WARMUP_DELAY_MS);
   }, [clearClose, clearOpen, openNow]);
 
   // Leaving cancels a pending warmup (so the card never appears after the cursor
@@ -810,16 +825,16 @@ export function SidebarHoverCard({
 
   // Release the shared slot whenever this card is closed (incl. Escape / outside).
   useEffect(() => {
-    if (!open && activeClose === closeSelf) activeClose = null;
-  }, [open, closeSelf]);
+    if (!open && activeClose === handOff) activeClose = null;
+  }, [open, handOff]);
 
   useEffect(
     () => () => {
       clearClose();
       clearOpen();
-      if (activeClose === closeSelf) activeClose = null;
+      if (activeClose === handOff) activeClose = null;
     },
-    [clearClose, clearOpen, closeSelf]
+    [clearClose, clearOpen, handOff]
   );
 
   if (disabled) return <>{children}</>;
@@ -847,6 +862,7 @@ export function SidebarHoverCard({
         collisionPadding={12}
         onPointerEnter={clearClose}
         onPointerLeave={scheduleClose}
+        noAnimation={inRun}
         className={stylex.props(styles.size).className}
       >
         {content}

@@ -120,6 +120,13 @@ export const surface = stylex.create({
     fontWeight: 400,
     color: popup.description,
   },
+  /**
+   * A popup that appears and leaves in place: no hidden end is applied and no
+   * property transitions, so Base UI mounts and unmounts it at once. It is
+   * `transition-property`, not a zero duration: only dropping the property
+   * cancels a rise already under way, which a card replaced mid-fade has.
+   */
+  popupNoTransition: { transitionProperty: 'none' },
   /** Where the rise starts and ends: 4px below the resting position. */
   popupHidden: { opacity: 0, transform: `translateY(${popup.rise})` },
   /**

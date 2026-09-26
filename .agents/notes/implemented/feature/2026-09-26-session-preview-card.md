@@ -53,6 +53,19 @@ headers, so one card is open across both. Both cards now sit on the preview
 card's surface: the machine card dropped its own sidebar-grey frame and lays
 out its rows only. Its contents are not restyled here.
 
+**A run down the list swaps cards in place.** Every row owns its card, so
+moving from row to row closed one card and opened the next. On the popover's
+surface both faded, and the owner found that running the pointer over several
+rows made the card fade in and out without end, so it could not be read.
+`PreviewCard.Content` gained `noAnimation` (as Dialog has): no hidden end and
+`transition-property: none`. A zero duration was not enough, because a card
+replaced during its own fade-in kept that fade running and stayed on screen
+beside the next one. `SidebarHoverCard` sets it for a warm open and for the
+card handed off to another. Only the first card after the warm-up fades in,
+and only the last one, left for empty space, fades out. The Storybook story
+`HoverAcrossRows`, sampled in Chromium, shows one card at full opacity 30ms
+after each row change.
+
 **The card's contents: one kind of fact per row, in reading order.** Each row
 has a 14px mark in one column and its value in ink at the footnote step:
 
