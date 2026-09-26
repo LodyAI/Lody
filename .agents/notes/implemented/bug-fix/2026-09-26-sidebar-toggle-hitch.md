@@ -60,3 +60,5 @@ This changes the ordinary-toggle behavior described in the earlier
 [scroll-restoration decision](../feature/2026-09-25-compact-desktop-layout.md)
 and follows the [working-mark benchmark](../feature/2026-09-24-sidebar-working-grid.md).
 Current intent: [desktop-window Spec](../../../../specs/desktop-windows.md).
+The later [content-width animation decision](2026-09-26-sidebar-content-width-animation.md)
+supersedes the once-only flex-footprint change described above.

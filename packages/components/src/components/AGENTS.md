@@ -12,9 +12,10 @@ Child directories (`sessions/`, `mobile/`, `chat/`, `settings/`, …) own their 
   `startSessionMentionDrag` / `armSessionMentionDrag` must light
   `ConversationDropOverlay` before `dragenter`. Navigation overlays use
   `draggable={false}`; rows own `draggable`.
-- Full-width desktop hiding retains the sidebar DOM and scroll, makes it inert,
-  and stops eager-sync/keyboard-nav sources. Compact/settings may remount it; restore
-  scroll by workspace. [Decision](../../../../.agents/notes/implemented/bug-fix/2026-09-26-sidebar-toggle-hitch.md).
+- Keep desktop sidebar mounted/inert with scroll; animate content width on Cmd+B
+  (zero for reduced motion); pause eager-sync/keyboard-nav. Compact/settings
+  remounts restore scroll.
+  [Decision](../../../../.agents/notes/implemented/bug-fix/2026-09-26-sidebar-content-width-animation.md).
 - Every list uses `lib/session-opened-by-tree.ts`: `session-list.tsx` groups, local-project
   sections, Updated/Pinned in `sidebar-updated-session-list.tsx`, and
   `sidebar-navigation-model.ts` for matching keyboard navigation.

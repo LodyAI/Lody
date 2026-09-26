@@ -89,9 +89,9 @@ export function WebWorkspaceLayout({ children }: { children: ReactNode }) {
     );
   }
 
-  // Reserve/release the sidebar's flex space once, then slide the retained DOM
-  // with a transform. Animating a margin made the content pane relayout on every
-  // frame; remounting the sidebar rebuilt every session row on each Cmd+B.
+  // Keep the sidebar mounted while its transform and flex footprint transition
+  // together. The margin transition lets the content pane resize smoothly;
+  // retaining the sidebar avoids rebuilding every session row on each Cmd+B.
   // LoroSidebar clamps its persisted default. The hidden wrapper must release
   // that same actual width, or an old out-of-range preference leaves a gap.
   const sidebarSlideWidth = Math.min(
@@ -148,19 +148,21 @@ export function WebWorkspaceLayout({ children }: { children: ReactNode }) {
           ]}
         </AnimatePresence>
       ) : (
-        <motion.div
+        <div
           ref={sidebarRef}
-          key="app-sidebar"
           className="relative z-10 h-full shrink-0"
-          initial={false}
-          animate={{ x: sidebarVisible ? 0 : -sidebarSlideWidth }}
-          transition={slideTransition}
-          style={{ marginRight: sidebarVisible ? 0 : -sidebarSlideWidth }}
+          style={{
+            transform: `translateX(${sidebarVisible ? 0 : -sidebarSlideWidth}px)`,
+            marginRight: sidebarVisible ? 0 : -sidebarSlideWidth,
+            transitionProperty: 'transform, margin-right',
+            transitionDuration: shouldReduceMotion ? '0ms' : '220ms',
+            transitionTimingFunction: 'cubic-bezier(0.32, 0.72, 0, 1)',
+          }}
           aria-hidden={!sidebarVisible}
           inert={!sidebarVisible}
         >
           <DesktopSidebarContent pathname={pathname} />
-        </motion.div>
+        </div>
       )}
       <FocusScope
         ref={contentRef}

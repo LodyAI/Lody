@@ -89,7 +89,9 @@ restored.
 
 In the full-width desktop layout, hiding the sidebar keeps its view and scroll
 position mounted but pauses sidebar-driven Session prefetch; reopening it does
-not remount the list. Compact presentation and settings navigation may unmount
+not remount the list. The sidebar and adjacent content pane animate together
+between their open and closed widths, except when reduced motion is requested.
+Compact presentation and settings navigation may unmount
 the sidebar, restoring its scroll position for that workspace on return. Data
 required by the current conversation and Tasks page continues syncing. Only one
 window per workspace runs notifications, badges, and background status checks,

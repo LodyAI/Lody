@@ -69,6 +69,9 @@ describe('desktop sidebar toggle', () => {
     expect(wrapper.getAttribute('aria-hidden')).toBe('true');
     expect(wrapper.hasAttribute('inert')).toBe(true);
     expect(wrapper.style.marginRight).toBe('-280px');
+    expect(wrapper.style.transform).toBe('translateX(-280px)');
+    expect(wrapper.style.transitionProperty).toBe('transform, margin-right');
+    expect(wrapper.style.transitionDuration).toBe('220ms');
     expect(document.activeElement).toBe(
       container!.querySelector(`[data-focus-scope="${WORKSPACE_FOCUS_SCOPES.content}"]`)
     );
@@ -78,6 +81,7 @@ describe('desktop sidebar toggle', () => {
     expect(wrapper.getAttribute('aria-hidden')).toBe('false');
     expect(wrapper.hasAttribute('inert')).toBe(false);
     expect(wrapper.style.marginRight).toBe('0px');
+    expect(wrapper.style.transform).toBe('translateX(0px)');
     expect(viewport.scrollTop).toBe(173);
     expect(input.value).toBe('unsaved filter');
   });
@@ -98,8 +102,10 @@ describe('desktop sidebar toggle', () => {
     expect(sidebar).not.toBeNull();
     const wrapper = sidebar!.parentElement!;
     expect(wrapper.style.marginRight).toBe('-420px');
+    expect(wrapper.style.transform).toBe('translateX(-420px)');
     flushSync(() => store.set(sidebarLastWidthAtom, 100));
     expect(wrapper.style.marginRight).toBe('-240px');
+    expect(wrapper.style.transform).toBe('translateX(-240px)');
     flushSync(() => store.set(sidebarCollapsedAtom, false));
     expect(container!.querySelector('[data-sidebar-identity]')).toBe(sidebar);
   });

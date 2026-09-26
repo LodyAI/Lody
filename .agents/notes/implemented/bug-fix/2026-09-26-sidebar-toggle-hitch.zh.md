@@ -46,3 +46,4 @@ Translation: current
 本决策改变了先前[滚动恢复决策](../feature/2026-09-25-compact-desktop-layout.zh.md)中
 普通切换的行为，延续[工作标记基准](../feature/2026-09-24-sidebar-working-grid.zh.md)。
 当前意图见[桌面窗口 Spec](../../../../specs/desktop-windows.zh.md)。
+[后续主内容区宽度动画决策](2026-09-26-sidebar-content-width-animation.zh.md)取代了上文一次性切换布局宽度的做法。
