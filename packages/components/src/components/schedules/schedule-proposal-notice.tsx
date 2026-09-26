@@ -6,8 +6,13 @@ import { toast } from '@/lib/toast';
 import { CalendarClock } from 'lucide-react';
 import { v4 as uuid } from 'uuid';
 import {
+  applyScheduleRecurrence,
+  defaultScheduleRecurrence,
   getServerNow,
   resolveSessionConversationConfig,
+  withScheduleRecurrenceTimeZone,
+  type ScheduleRecurrence,
+  type ScheduleTrigger,
   ScheduleRepository,
   getDeviceTimeZone,
   scheduleProposalRuleToRecurrence,
@@ -26,6 +31,9 @@ import { useVisibleLocalProjects } from '@/hooks/use-visible-local-projects';
 import { useVisibleMachineMetas } from '@/hooks/use-visible-machine-metas';
 import { useWorkspaceAgentRoles } from '@/hooks/use-workspace-agent-roles';
 import { Button } from '@lody/ui/button';
+import { Input } from '@lody/ui/input';
+import { Tabs } from '@lody/ui/tabs';
+import { Textarea } from '@lody/ui/textarea';
 import { MarkdownRenderer } from '@/components/ai-gui/markdown-renderer';
 import { describeDestination, describeRecurrence } from './schedule-format';
 import {
@@ -33,7 +41,8 @@ import {
   type ProposalConversation,
   type ProposalTargetProblem,
 } from './schedule-proposal-target';
-import { scheduleCardProps } from './schedule-property-row';
+import { PropertyRow, scheduleCardProps } from './schedule-property-row';
+import { ScheduleRecurrenceEditor } from './schedule-recurrence-editor';
 import { collectScheduleSaveBlockers } from './schedule-save-blockers';
 
 export type ScheduleProposalNoticeProps = {
@@ -52,6 +61,11 @@ export type ScheduleProposalNoticeProps = {
  * go, and the Agent, mode and project it resolved (this conversation's unless
  * the person named others), and it refuses with the same reasons the editor
  * would rather than creating something that could not run.
+ *
+ * Before creating, Edit turns the card itself into a small form for the name,
+ * the prompt and the time rule. The edits live in the card only — the notice
+ * keeps the Agent's proposal, so a retried proposal still matches it — and
+ * once created the card is a receipt with nothing left to edit.
  */
 export function ScheduleProposalNotice({
   meta,
@@ -73,6 +87,14 @@ export function ScheduleProposalNotice({
   const { machines } = useVisibleMachineMetas({ includeMachineFlock: true });
   const local = useVisibleLocalProjects({ includeMachineFlock: true });
   const [busy, setBusy] = useState(false);
+  const [editing, setEditing] = useState(false);
+  // The person's edits, once they pressed Edit; the proposal itself otherwise.
+  const [edit, setEdit] = useState<{
+    title: string;
+    prompt: string;
+    manual: boolean;
+    recurrence: ScheduleRecurrence;
+  } | null>(null);
   // The conversation's effective run config (mode, model, options) lives in
   // its history, not its meta. It has to be read for DISPLAY too: the card
   // decides whether Create is allowed from it, and the same Agent with no mode
@@ -111,10 +133,52 @@ export function ScheduleProposalNotice({
   const machine = target ? machines.get(target.agentConfig.machineId) : undefined;
   // A rule the agent proposed without a zone runs on the target machine's clock.
   const machineTimeZone = machine?.timeZone ?? getDeviceTimeZone();
-  const recurrence = useMemo(
+  const proposedRecurrence = useMemo(
     () => scheduleProposalRuleToRecurrence(meta.rule, machineTimeZone),
     [machineTimeZone, meta.rule]
   );
+  const title = edit?.title ?? meta.title;
+  const prompt = edit?.prompt ?? meta.prompt;
+  // The rule that will be created, on the target machine's clock (null = manual).
+  const recurrence = edit
+    ? edit.manual
+      ? null
+      : withScheduleRecurrenceTimeZone(edit.recurrence, machineTimeZone)
+    : proposedRecurrence;
+  const startEditing = () => {
+    setEdit(
+      (current) =>
+        current ?? {
+          title: meta.title,
+          prompt: meta.prompt,
+          manual: proposedRecurrence === null,
+          recurrence: proposedRecurrence ?? defaultScheduleRecurrence(machineTimeZone),
+        }
+    );
+    setEditing(true);
+  };
+  // What an edited rule cannot become, said the way the editor says it.
+  const editProblems = (() => {
+    if (!edit) return [];
+    const problems: string[] = [];
+    if (!edit.title.trim()) problems.push(t('schedules.requireName', 'Enter a schedule name.'));
+    if (!edit.prompt.trim())
+      problems.push(t('schedules.requirePrompt', 'Describe what the Agent should do.'));
+    if (recurrence) {
+      try {
+        applyScheduleRecurrence(recurrence, getServerNow());
+      } catch {
+        problems.push(
+          recurrence.kind === 'weekly' && recurrence.weekdays.length === 0
+            ? t('schedules.requireWeekday', 'Choose at least one day of the week.')
+            : recurrence.kind === 'monthly' && recurrence.days.length === 0
+              ? t('schedules.requireMonthDay', 'Choose at least one day of the month.')
+              : t('schedules.invalidTime', 'Check the time rule and time zone.')
+        );
+      }
+    }
+    return problems;
+  })();
   const machineLocalProjectIds = useMemo(
     () =>
       new Set(
@@ -201,6 +265,12 @@ export function ScheduleProposalNotice({
         if (!final.ok) return;
         const latestMachine = machines.get(final.target.agentConfig.machineId);
         const now = getServerNow();
+        const clock = latestMachine?.timeZone ?? getDeviceTimeZone();
+        const trigger: ScheduleTrigger = edit
+          ? edit.manual
+            ? { kind: 'manual' }
+            : applyScheduleRecurrence(withScheduleRecurrenceTimeZone(edit.recurrence, clock), now)
+          : scheduleProposalRuleToTrigger(meta.rule, now, clock);
         // The proposal id is the schedule id, so a double click or a retried
         // write cannot create two schedules.
         const scheduleId = meta.proposalId;
@@ -215,13 +285,9 @@ export function ScheduleProposalNotice({
               now,
               create: true,
               draft: {
-                title: meta.title,
-                prompt: meta.prompt,
-                trigger: scheduleProposalRuleToTrigger(
-                  meta.rule,
-                  now,
-                  latestMachine?.timeZone ?? getDeviceTimeZone()
-                ),
+                title: title.trim(),
+                prompt,
+                trigger,
                 machineId: final.target.agentConfig.machineId,
                 agent: final.target.agent,
                 ...(final.target.project ? { project: final.target.project } : {}),
@@ -240,7 +306,21 @@ export function ScheduleProposalNotice({
         setBusy(false);
       }
     })();
-  }, [agents, machines, meta, roles, runtime, session, sessionId, target, user, writeOutcome]);
+  }, [
+    agents,
+    edit,
+    machines,
+    meta,
+    prompt,
+    roles,
+    runtime,
+    session,
+    sessionId,
+    target,
+    title,
+    user,
+    writeOutcome,
+  ]);
 
   const dismiss = useCallback(() => {
     void (async () => {
@@ -291,14 +371,19 @@ export function ScheduleProposalNotice({
     ),
     no_agent: t('schedules.proposal.noAgent', 'This conversation has no Agent to run with.'),
   };
-  const reasons = problem ? [problemText[problem]] : blockers;
+  const reasons = problem ? [problemText[problem]] : [...editProblems, ...blockers];
   const rows: [string, string][] = [
-    [
-      t('schedules.trigger.label', 'Trigger'),
-      recurrence
-        ? describeRecurrence(recurrence, t, i18n.language)
-        : t('schedules.trigger.manual', 'Manual'),
-    ],
+    // While editing, the rule has its own controls above.
+    ...(editing
+      ? []
+      : [
+          [
+            t('schedules.trigger.label', 'Trigger'),
+            recurrence
+              ? describeRecurrence(recurrence, t, i18n.language)
+              : t('schedules.trigger.manual', 'Manual'),
+          ] as [string, string],
+        ]),
     [
       t('schedules.sendTo', 'Send to'),
       describeDestination(target?.destination ?? { kind: 'new_session' }, t),
@@ -342,10 +427,53 @@ export function ScheduleProposalNotice({
           </span>
         ) : null}
       </div>
-      <p className="text-[1em] font-normal">{meta.title}</p>
-      <div className="max-h-40 overflow-y-auto rounded-md bg-foreground/[0.03] px-2.5 py-2 dark:bg-white/[0.04]">
-        <MarkdownRenderer text={meta.prompt} size="sm" />
-      </div>
+      {editing && edit ? (
+        <>
+          <Input
+            size="small"
+            aria-label={t('schedules.name', 'Name')}
+            placeholder={t('schedules.namePlaceholder', 'Name this scheduled task')}
+            maxLength={200}
+            value={edit.title}
+            onChange={(event) => setEdit({ ...edit, title: event.target.value })}
+          />
+          <Textarea
+            rows={4}
+            resize="vertical"
+            aria-label={t('schedules.prompt', 'What should the Agent do?')}
+            value={edit.prompt}
+            onChange={(event) => setEdit({ ...edit, prompt: event.target.value })}
+          />
+          <div {...scheduleCardProps()}>
+            <PropertyRow label={t('schedules.trigger.label', 'Trigger')}>
+              <Tabs.Root
+                value={edit.manual ? 'manual' : 'timed'}
+                onValueChange={(next) => setEdit({ ...edit, manual: next === 'manual' })}
+              >
+                <Tabs.List size="small">
+                  <Tabs.Tab value="timed">{t('schedules.trigger.timed', 'On a schedule')}</Tabs.Tab>
+                  <Tabs.Tab value="manual">{t('schedules.trigger.manual', 'Manual')}</Tabs.Tab>
+                </Tabs.List>
+              </Tabs.Root>
+            </PropertyRow>
+            {edit.manual ? null : (
+              <ScheduleRecurrenceEditor
+                value={withScheduleRecurrenceTimeZone(edit.recurrence, machineTimeZone)}
+                onChange={(next) => setEdit({ ...edit, recurrence: next })}
+                now={getServerNow()}
+                timeZone={machineTimeZone}
+              />
+            )}
+          </div>
+        </>
+      ) : (
+        <>
+          <p className="text-[1em] font-normal">{title}</p>
+          <div className="max-h-40 overflow-y-auto rounded-md bg-foreground/[0.03] px-2.5 py-2 dark:bg-white/[0.04]">
+            <MarkdownRenderer text={prompt} size="sm" />
+          </div>
+        </>
+      )}
       <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-[0.9em]">
         {rows.map(([label, value]) => (
           <div key={label} className="contents">
@@ -365,6 +493,20 @@ export function ScheduleProposalNotice({
         <Button size="small" variant="ghost" disabled={busy} onClick={dismiss}>
           {t('schedules.proposal.dismiss', 'Ignore')}
         </Button>
+        {editing ? (
+          <Button
+            size="small"
+            variant="secondary"
+            disabled={busy}
+            onClick={() => setEditing(false)}
+          >
+            {t('schedules.proposal.doneEditing', 'Done')}
+          </Button>
+        ) : (
+          <Button size="small" variant="secondary" disabled={busy} onClick={startEditing}>
+            {t('schedules.proposal.edit', 'Edit')}
+          </Button>
+        )}
         <Button
           size="small"
           variant="primary"

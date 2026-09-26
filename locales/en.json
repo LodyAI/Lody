@@ -4189,6 +4189,8 @@
   "schedules.proposal.by": "Proposed by {{name}}",
   "schedules.proposal.create": "Create",
   "schedules.proposal.dismiss": "Ignore",
+  "schedules.proposal.edit": "Edit",
+  "schedules.proposal.doneEditing": "Done",
   "schedules.proposal.created": "Scheduled task created",
   "schedules.proposal.dismissed": "Proposal ignored",
   "schedules.proposal.open": "Open",

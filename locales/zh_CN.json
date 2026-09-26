@@ -4189,6 +4189,8 @@
   "schedules.proposal.by": "由 {{name}} 提议",
   "schedules.proposal.create": "创建",
   "schedules.proposal.dismiss": "忽略",
+  "schedules.proposal.edit": "编辑",
+  "schedules.proposal.doneEditing": "完成",
   "schedules.proposal.created": "已创建定时任务",
   "schedules.proposal.dismissed": "已忽略提议",
   "schedules.proposal.open": "打开",

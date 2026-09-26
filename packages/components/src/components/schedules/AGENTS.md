@@ -77,7 +77,9 @@
   mismatches are `invalid` issues on the Agent controls / chat row.
 - An agent can only PROPOSE (`schedule_proposal` notice →
   `ScheduleProposalNotice`); Create on the card is the creation, with
-  `proposalId` as schedule id. `resolveScheduleProposalTarget` defaults to the
+  `proposalId` as schedule id. Edit reshapes name, prompt and rule in the card
+  only (never written back to the notice, so a retried proposal still matches);
+  a created card has no edit. `resolveScheduleProposalTarget` defaults to the
   proposing conversation; a named Role/Agent/machine/project overrides only that
   part; a named Agent without a Role gets the builtin default mode. Same save
   rule, same gate, trigger on the target machine's clock.
