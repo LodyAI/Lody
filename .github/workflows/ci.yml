@@ -106,10 +106,22 @@ jobs:
         if: steps.override.outputs.force_full == 'true' || steps.scope.outputs.run_check_quick != 'false'
         run: pnpm check:quick
 
-  tests:
-    name: Tests
+  # The components and cli suites are CPU-bound on a 4-vCPU runner, so they run
+  # on their own runners (components in three Vitest shards). See
+  # .agents/notes/implemented/testing/2026-09-26-ci-test-groups-and-pnpm-store-cache.md.
+  test-groups:
+    name: Tests (${{ matrix.label }})
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { group: components, shard: 1/3, label: components 1/3 }
+          - { group: components, shard: 2/3, label: components 2/3 }
+          - { group: components, shard: 3/3, label: components 3/3 }
+          - { group: cli, shard: '', label: cli }
+          - { group: rest, shard: '', label: rest }
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -161,31 +173,59 @@ jobs:
           fi
           echo "force_full=${force}" >> "$GITHUB_OUTPUT"
 
-      - name: Skip tests for docs-only / empty affected set
-        if: steps.override.outputs.force_full != 'true' && steps.scope.outputs.run_tests == 'false'
+      - name: Plan test group
+        id: plan
+        # Fail open: a missing `run` output runs the group.
+        continue-on-error: true
+        env:
+          GROUP: ${{ matrix.group }}
+          SHARD: ${{ matrix.shard }}
+          FORCE_FULL: ${{ steps.override.outputs.force_full }}
         run: |
-          echo "Skipping Tests install and suite: ${{ steps.scope.outputs.reason }}"
+          full=()
+          [ "$FORCE_FULL" = "false" ] || full=(--full)
+          node .github/scripts/run-ci-tests.mjs --scope "$RUNNER_TEMP/ci-scope.json" \
+            --group "$GROUP" --shard "$SHARD" "${full[@]}" --plan >> "$GITHUB_OUTPUT"
+
+      - name: Skip group for docs-only / unaffected scope
+        if: steps.plan.outputs.run == 'false'
+        run: |
+          echo "Skipping ${{ matrix.label }}: ${{ steps.scope.outputs.reason }}"
 
       - name: Install dependencies
-        if: steps.override.outputs.force_full == 'true' || steps.scope.outputs.run_tests != 'false'
+        if: steps.plan.outputs.run != 'false'
         run: pnpm install --frozen-lockfile
 
       - name: Prepare ACP adapters
-        if: steps.override.outputs.force_full == 'true' || steps.scope.outputs.run_tests != 'false'
+        if: steps.plan.outputs.run != 'false'
         run: pnpm --filter lody prepare:acp-adapters
 
-      - name: Run tests (forced full)
-        if: steps.override.outputs.force_full == 'true'
-        env:
-          GIT_CONFIG_COUNT: 1
-          GIT_CONFIG_KEY_0: commit.gpgSign
-          GIT_CONFIG_VALUE_0: 'false'
-        run: pnpm test:ci
-
       - name: Run tests
-        if: steps.override.outputs.force_full != 'true' && steps.scope.outputs.run_tests != 'false'
+        if: steps.plan.outputs.run != 'false'
         env:
+          GROUP: ${{ matrix.group }}
+          SHARD: ${{ matrix.shard }}
+          FORCE_FULL: ${{ steps.override.outputs.force_full }}
           GIT_CONFIG_COUNT: 1
           GIT_CONFIG_KEY_0: commit.gpgSign
           GIT_CONFIG_VALUE_0: 'false'
-        run: node .github/scripts/run-ci-tests.mjs --scope "$RUNNER_TEMP/ci-scope.json"
+        run: |
+          full=()
+          [ "$FORCE_FULL" = "false" ] || full=(--full)
+          node .github/scripts/run-ci-tests.mjs --scope "$RUNNER_TEMP/ci-scope.json" \
+            --group "$GROUP" --shard "$SHARD" "${full[@]}"
+
+  # Stable required check: green only when every group succeeded.
+  tests:
+    name: Tests
+    needs: test-groups
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require every test group
+        env:
+          RESULT: ${{ needs.test-groups.result }}
+        run: |
+          echo "Test groups: $RESULT"
+          [ "$RESULT" = "success" ]
