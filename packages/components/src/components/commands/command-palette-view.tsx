@@ -223,15 +223,18 @@ export function CommandPaletteView({
         noAnimation
         style={PANEL_STYLE}
         backdropClassName="z-[var(--z-command-palette,85)] bg-black/30"
-        onKeyDown={(event) => {
-          if (event.key === 'Escape') onOpenChange(false);
-        }}
       >
         <Cmdk
           shouldFilter={false}
           loop
           value={active}
           onValueChange={setActive}
+          onKeyDown={(event) => {
+            if (event.key !== 'Escape') return;
+            event.preventDefault();
+            event.stopPropagation();
+            onOpenChange(false);
+          }}
           {...stylex.props(styles.root)}
         >
           <div {...stylex.props(styles.field)}>

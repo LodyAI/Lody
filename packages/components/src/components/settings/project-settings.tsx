@@ -231,12 +231,6 @@ export type ProjectSettingsViewProps = {
   localProjectRemovalStateByKey?: ReadonlyMap<string, LocalProjectRemovalState>;
 };
 
-/* Desktop settings is itself a dialog: a nested overlay restacks at its z-index
-   with a lighter veil. It is handed to the backdrop, which owns both of those
-   properties itself, so it stays the class string the other settings dialogs
-   (MCP, Agent Roles) pass there. */
-const NESTED_SETTINGS_DIALOG_OVERLAY = 'z-[var(--z-dialog)] bg-black/20';
-
 /** The global thin scrollbar; a `::-webkit-scrollbar` rule StyleX cannot state. */
 const SCROLLBAR_CLASS = 'scrollbar-pro';
 
@@ -1111,7 +1105,6 @@ export function ProjectSettingsComponent({
         open={addLocalProjectDialogOpen}
         onOpenChange={setAddLocalProjectDialogOpen}
         initialMachineId={addLocalProjectMachineId}
-        backdropClassName={NESTED_SETTINGS_DIALOG_OVERLAY}
       />
       <RemoveLocalProjectDialog
         open={pendingRemoval != null}
@@ -1127,7 +1120,6 @@ export function ProjectSettingsComponent({
           machineSupportsLocalProjectRemovalProtocol(machineMetaMap.get(pendingRemoval.machineId))
         }
         isRemoving={isRemovingLocalProject}
-        backdropClassName={NESTED_SETTINGS_DIALOG_OVERLAY}
         onOpenChange={(open) => {
           if (!open && !isRemovingLocalProject) setPendingRemoval(null);
         }}
@@ -1419,10 +1411,7 @@ function ProjectSettingsDesktop({
           if (!open) setEditingProjectKey(null);
         }}
       >
-        <Dialog.Content
-          backdropClassName={NESTED_SETTINGS_DIALOG_OVERLAY}
-          style={EDITOR_PANEL_STYLE}
-        >
+        <Dialog.Content style={EDITOR_PANEL_STYLE}>
           <Dialog.Title className={stylex.props(styles.srOnly).className}>
             {editingProject?.kind === 'local'
               ? editingProject.row.project.name

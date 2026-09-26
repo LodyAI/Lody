@@ -6,7 +6,7 @@ import * as stylex from '@stylexjs/stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { space, text } from '@lody/ui/tokens/scales.stylex';
 import { withClassName } from '@/lib/stylex';
-import { navigationSidebarHiddenAtom, showNavigationSidebarAtom } from '@/atoms/layout-state';
+import { navigationSidebarVisibleAtom, showNavigationSidebarAtom } from '@/atoms/layout-state';
 import { isMacOSElectronRenderer, useElectronFullscreen } from '@/lib/electron';
 import {
   useMacTrafficLightRowPadClass,
@@ -118,7 +118,7 @@ export function WebArchiveScreen({
   children,
 }: WebArchiveScreenProps) {
   const { t } = useTranslation();
-  const isLeftSidebarHidden = useAtomValue(navigationSidebarHiddenAtom);
+  const isLeftSidebarHidden = !useAtomValue(navigationSidebarVisibleAtom);
   const showNavigationSidebar = useSetAtom(showNavigationSidebarAtom);
   const isElectronFullscreen = useElectronFullscreen();
   const windowDragClass = useWindowDragRegionClass();

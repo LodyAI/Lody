@@ -71,8 +71,8 @@ with this package's `stylex-options.ts`.
   animates a `scrollHeight`, which counts it.
 - Alert, Toast, Progress, Skeleton and Spinner are one `feedback` family. A tone
   is a tint and a mark, never a fill — mark in `tone.ts`, tint in `surface.ts`;
-  `disabled` is Base UI state. A Spinner's turn rides an HTML wrapper, not
-  svg: svg animations can't composite at DPR≠1 (crbug 1186312).
+  `disabled` is Base UI state. A Spinner's turn rides an HTML wrapper — svg
+  can't composite at DPR≠1 (crbug 1186312) — and `className` lands on that box.
 - `Table` and `Pagination` are one `table` family. **A column is stated once**:
   `Table` takes `columns` and owns width, ordering, selection (a `Checkbox`,
   never `aria-selected`), the empty row's span, the sticky head and the narrow

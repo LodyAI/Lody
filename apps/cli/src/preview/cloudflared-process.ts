@@ -51,6 +51,7 @@ export async function startCloudflaredProcess(options: {
   /** Explicit entry for source-based integration fixtures; production uses only its bundle. */
   workerPath?: string;
   env?: NodeJS.ProcessEnv;
+  onDiagnostic?: (message: string) => void;
 }): Promise<CloudflaredProcess> {
   options.signal.throwIfAborted();
   const worker = spawn(
@@ -134,8 +135,10 @@ export async function startCloudflaredProcess(options: {
     }
     const message = result.data;
     if (message.type === 'origin') resolveOrigin(message.origin);
-    else if (message.type === 'diagnostic') diagnostic = message.message;
-    else {
+    else if (message.type === 'diagnostic') {
+      diagnostic = message.message;
+      options.onDiagnostic?.(diagnostic);
+    } else {
       failure = new CloudflaredError(message.stage, message.message);
       rejectOrigin(failure);
     }

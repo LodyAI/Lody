@@ -2,6 +2,7 @@ import { app } from 'electron'
 import { join } from 'node:path'
 import { mkdirSync } from 'node:fs'
 import { desktopInstallationProfile } from './platform'
+import { installDesktopLog } from './desktop-log'
 import { enableRendererHangStacks } from './renderer-hang-diagnostics'
 import { registerLocalFileResourceScheme } from './services/local-file-resource-protocol'
 import { initialDevbarControl } from './services/devbar/control'
@@ -15,6 +16,10 @@ if (desktopInstallationProfile.desktopUserDataName) {
   app.setPath('userData', userData)
   app.setPath('sessionData', userData)
 }
+
+// After userData is final and before anything else can fail, so startup
+// failures and the rest of this process's life reach the daily log.
+installDesktopLog()
 
 // On Linux, Electron/Chromium auto-detects the keyring backend for GNOME and KDE
 // desktops, but falls back to basic-text (unencrypted) on other desktops like

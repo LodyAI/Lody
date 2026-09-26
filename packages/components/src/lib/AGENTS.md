@@ -22,6 +22,8 @@ Rationale: [components](../../../../.agents/docs/components-package.md) and
 - `ErrorBoundary`'s `error-boundary-fallback.tsx` displays the real error and one-click
   full-report copy on every build. Details default visible (`showErrorDetails` opts out);
   `lib/error-boundary-report.ts` is the pure copy builder.
+- Error/not-found screens use `components/status-page.tsx`; pre-React `boot-failure.ts`
+  draws that column in plain DOM with copied V2 token values, never React/StyleX/Tailwind.
 - Crash screens never reload/restart/reset themselves. `resetKeys` must not clear a captured
   error; the copyable fallback stays visible until the user presses a recovery button.
 - A cloud query throws into render and keeps throwing. An optional surface inside a larger

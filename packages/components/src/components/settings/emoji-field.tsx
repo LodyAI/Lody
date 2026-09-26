@@ -108,6 +108,9 @@ export function EmojiField({
         // The list is long and the search field wants the caret; taking focus to
         // the popover root would fight the picker's own keyboard handling.
         initialFocus={false}
+        // Temporary override: the panel's 12px padding and 10px gap read loose
+        // around a dense picker grid; pull both down to the menu inset.
+        className="gap-1 p-1"
       >
         <Suspense
           fallback={

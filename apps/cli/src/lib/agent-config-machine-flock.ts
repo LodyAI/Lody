@@ -111,6 +111,21 @@ export async function listMergedAgentConfigs(
   return mergeAgentConfigs(loroRepoMetaConfigs, machineFlockConfigs);
 }
 
+/** The machine's only provider of this type; none when absent or ambiguous. */
+export async function findSoleMachineAgentConfig(
+  repo: LoroRepo,
+  workspaceId: WorkspaceId,
+  machineId: MachineId,
+  cliType: AgentConfigCliType,
+  agentType: string
+): Promise<AgentConfigMeta | undefined> {
+  const matches = (await listMergedAgentConfigs(repo, workspaceId, [machineId])).filter(
+    (config) =>
+      config.cliType === cliType && config.agentType === agentType && config.machineId === machineId
+  );
+  return matches.length === 1 ? matches[0] : undefined;
+}
+
 export async function upsertMachineAgentConfig(
   repo: LoroRepo,
   workspaceId: WorkspaceId,

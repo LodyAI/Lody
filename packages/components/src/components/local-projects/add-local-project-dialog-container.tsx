@@ -197,7 +197,6 @@ export interface AddLocalProjectDialogContainerProps {
   initialMachineId?: MachineId | null;
   onAdded?: AddLocalProjectDialogProps['onAdded'];
   onLocated?: (info: { machineId: MachineId; localProjectId: LocalProjectId }) => void;
-  backdropClassName?: string;
 }
 
 export function AddLocalProjectDialogContainer({
@@ -206,7 +205,6 @@ export function AddLocalProjectDialogContainer({
   initialMachineId,
   onAdded,
   onLocated,
-  backdropClassName,
 }: AddLocalProjectDialogContainerProps) {
   const isMobile = useIsMobile();
   const controller = useAddLocalProjectController(onAdded, onLocated);
@@ -222,7 +220,6 @@ export function AddLocalProjectDialogContainer({
       ops={controller.ops}
       onAdded={controller.onAdded}
       onLocateRegistered={controller.onLocateRegistered}
-      backdropClassName={backdropClassName}
     />
   );
 }

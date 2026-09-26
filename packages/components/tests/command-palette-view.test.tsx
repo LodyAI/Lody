@@ -41,7 +41,7 @@ describe('CommandPaletteView', () => {
       root.render(
         createElement(CommandPaletteView, {
           open: true,
-          onOpenChange: (open) => openChanges.push(open),
+          onOpenChange: (open: boolean) => openChanges.push(open),
           query: '',
           onQueryChange: () => undefined,
           results,
@@ -108,7 +108,7 @@ describe('CommandPaletteView', () => {
     expect(document.body.textContent).toContain('Nothing here');
   });
 
-  it('closes the palette when Escape is pressed in its search field', async () => {
+  it('closes when Escape is pressed', async () => {
     await render([result('back', 'Navigation')]);
     await press('Escape');
     expect(openChanges).toContain(false);

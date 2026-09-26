@@ -8,7 +8,6 @@ import { userAtom } from '@/atoms';
 import { getAllAgentConfigAtom } from '@/atoms/agents';
 import { onlineMachineIdsAtom } from '@/atoms/presence';
 import { useAcpSelectorOptions } from '@/hooks/use-acp-selector-options';
-import { useIsMobile } from '@/hooks/use-mobile';
 import { useVisibleMachineMetas } from '@/hooks/use-visible-machine-metas';
 import { useWorkspaceAgentRoleActions } from '@/hooks/use-workspace-agent-roles';
 import {
@@ -83,7 +82,6 @@ export function AgentRoleEditorDialog({
 }) {
   const { t } = useTranslation();
   const postHog = usePostHog();
-  const isMobile = useIsMobile();
   const currentUserId = useAtomValue(userAtom)?.id ?? null;
   const onlineMachineIds = useAtomValue(onlineMachineIdsAtom);
   const agentConfigs = useAtomValue(getAllAgentConfigAtom);
@@ -210,14 +208,7 @@ export function AgentRoleEditorDialog({
         if (!open) close();
       }}
     >
-      <Dialog.Content
-        backdropClassName={
-          // Desktop settings is itself a dialog; match its z-index so this
-          // later overlay covers it without stacking a second /80 veil.
-          isMobile ? undefined : 'z-[var(--z-dialog)] bg-black/20'
-        }
-        className={SETTINGS_EDITOR_DIALOG_LAYOUT}
-      >
+      <Dialog.Content className={SETTINGS_EDITOR_DIALOG_LAYOUT}>
         <Dialog.Header>
           <Dialog.Title>
             {editor?.mode === 'edit'

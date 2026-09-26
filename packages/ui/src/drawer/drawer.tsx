@@ -2,7 +2,13 @@ import { Drawer as BaseDrawer } from '@base-ui/react/drawer';
 import * as stylex from '@stylexjs/stylex';
 import { forwardRef, useSyncExternalStore, type ComponentProps, type ReactNode } from 'react';
 import { Button } from '../button/button';
-import { DialogFooter, DialogHeader, usePanelContainer } from '../dialog/parts';
+import {
+  DialogFooter,
+  DialogHeader,
+  ModalDepthProvider,
+  useModalDepth,
+  usePanelContainer,
+} from '../dialog/parts';
 import {
   drawerFlushStyle,
   drawerHiddenStyle,
@@ -121,16 +127,21 @@ export const DrawerContent = forwardRef<HTMLDivElement, DrawerContentProps>(func
 ) {
   const { ref: panelRef, container: panel } = usePanelContainer<HTMLDivElement>(ref);
   const palette = useForcedThemeClassNames();
+  // Same suppression as the dialog backdrop: a drawer nested inside a modal
+  // still needs its veil over the panel it was opened from.
+  const nested = useModalDepth() > 0;
   return (
     <BaseDrawer.Portal
       container={container}
       className={[stylex.props(styles.portal).className, ...palette].filter(Boolean).join(' ')}
     >
       <BaseDrawer.Backdrop
+        forceRender
         className={(state) =>
           appendClassName(
             stylex.props(
               modal.backdrop,
+              nested && modal.backdropNested,
               modal.backdropSwipe,
               isHidden(state.transitionStatus) && modal.backdropHidden
             ).className,
@@ -166,7 +177,9 @@ export const DrawerContent = forwardRef<HTMLDivElement, DrawerContentProps>(func
           }
         >
           <BaseDrawer.Content>
-            <PopupContainerProvider container={panel}>{children}</PopupContainerProvider>
+            <PopupContainerProvider container={panel}>
+              <ModalDepthProvider>{children}</ModalDepthProvider>
+            </PopupContainerProvider>
           </BaseDrawer.Content>
           {closeButton ? (
             <BaseDrawer.Close
