@@ -27,9 +27,10 @@ void test('27. electron last-run argv omits maxWorkers on the electron command',
     execFileSync,
   });
   assert.equal(calls.length, 2);
-  assert.deepEqual(calls[0].args.slice(0, 4), [
+  assert.deepEqual(calls[0].args.slice(0, 5), [
     '-r',
     '--workspace-concurrency=2',
+    '--no-sort',
     '--filter',
     '!@lody/electron',
   ]);

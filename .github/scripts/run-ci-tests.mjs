@@ -39,9 +39,12 @@ export function runCiTests({
   const testPackages = Array.isArray(scope.testPackages) ? scope.testPackages : [];
   const nonElectron = testPackages.filter((name) => name !== '@lody/electron');
   if (nonElectron.length > 0) {
+    // Test runs need no build order. Topological sorting would queue apps/cli
+    // (via code-review-helper) behind the much longer components suite.
     runPnpm(execFileSync, cwd, [
       '-r',
       '--workspace-concurrency=2',
+      '--no-sort',
       ...EXCLUDED_FILTERS.flatMap((filter) => ['--filter', filter]),
       ...nonElectron.flatMap((name) => ['--filter', name]),
       'run',
