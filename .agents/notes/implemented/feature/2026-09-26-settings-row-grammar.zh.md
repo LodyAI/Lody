@@ -54,9 +54,15 @@ Translation: current
 `elevatedBackground: hsl(var(--card))`。CSS 自定义属性在声明它的节点上求值，子节点继承的是算好的值，
 所以面板上的替换传不到这个 token。在 `Settings/DesktopSettingsModal` story 里实测，页面是
 `rgb(239,239,241)`（根节点的 card），导航栏约 94.7%：导航栏那一档消失，整个 Dialog 发灰。
-`productSettingsSurfacePalette`（`lody-ui-palette.stylex.ts`）在面板上重新声明 `elevatedBackground`
-和 `secondaryBackground`，让它们按面板自己的 `--card` 求值。页面重新量得 `rgb(255,255,255)`，导航栏
-保留深一档，深色模式不变（替换只在浅色下生效）。
+现在面板按应用当前的明暗模式重新声明整套产品调色板（`productDarkPalette` 或 `productLightPalette`），
+让 token 按面板自己的 `--card` 求值。页面重新量得 `rgb(255,255,255)`，导航栏保留深一档。
+
+这个修复的第一版只重新声明了 `elevatedBackground` 和 `secondaryBackground`
+（`productSettingsSurfacePalette`），结果弄坏了深色模式。StyleX 0.19 应用 `createTheme` 时会同时挂上
+变量组自己的 class，它的规则（`:root, .<group>{…}`）声明了每个 token 的包内默认值，所以只写两个 token
+的主题会把面板里其余颜色全部重置成 `@lody/ui` 固定的中性调色板，并按系统外观而不是应用设置选明暗。
+深色的“机器”页里，页面还是深海 `#191A1D`，记录卡片却变成包里中性的 `#232323`，在线圆点是它的
+`hsl(151 60% 52%)`，名称是超过阅读亮度上限的纯白。在根节点以下声明的主题必须写全整个变量组。
 
 ## 局限与后续
 

@@ -67,11 +67,21 @@ hsl(var(--card))` on the root. A custom property is computed where it is
 declared and inherited as that value, so the pane's remap never reached the
 token. Measured in the `Settings/DesktopSettingsModal` story, the page was
 `rgb(239,239,241)` (the root card) next to a nav at about 94.7%: the nav's step
-had vanished and the whole dialog read gray. `productSettingsSurfacePalette`
-(`lody-ui-palette.stylex.ts`) re-declares `elevatedBackground` and
-`secondaryBackground` on the pane, so they resolve against the pane's own
-`--card`. The page measures `rgb(255,255,255)` again, the nav keeps its step, and
-dark mode is unchanged because the remap applies only in light mode.
+had vanished and the whole dialog read gray. The pane now declares the whole
+product palette of the app's resolved mode again (`productDarkPalette` or
+`productLightPalette`), so its tokens resolve against the pane's own `--card`.
+The page measures `rgb(255,255,255)` again and the nav keeps its step.
+
+The first version of this fix declared only `elevatedBackground` and
+`secondaryBackground` (`productSettingsSurfacePalette`), and broke dark mode.
+StyleX 0.19 applies a `createTheme` together with its variable group's class,
+whose rule (`:root, .<group>{…}`) declares every token's package default, so the
+two-token theme reset every other colour in the pane to `@lody/ui`'s fixed
+neutral palette, light or dark by the OS appearance. In the dark Machines tab the
+page stayed the deep-sea `#191A1D` while the records cards drew the package's
+neutral `#232323`, the online dot its `hsl(151 60% 52%)` and names pure white
+above the reading ceiling. A theme declared below the root must restate the whole
+group.
 
 ## Limits and next steps
 

@@ -14,6 +14,13 @@ import { colors } from '@lody/ui/tokens/colors.stylex';
  *
  * Only what the theme has no counterpart for keeps the package's value per
  * mode: wells, trays, the modal overlay and the gray ramp.
+ *
+ * An element that needs the tokens resolved against its own variables (the
+ * settings pane remaps `--card`) declares the whole palette of the app's mode
+ * again, never a theme of a few tokens: StyleX applies a theme together with its
+ * variable group's class, which declares every token's package default on that
+ * element, so a partial theme resets the rest of the subtree to `@lody/ui`'s
+ * fixed neutral palette, in the OS appearance rather than the app's.
  */
 export const productDarkPalette = stylex.createTheme(colors, {
   background: 'hsl(var(--background))',
@@ -73,19 +80,4 @@ export const productLightPalette = stylex.createTheme(colors, {
   gray4: 'hsl(222 13% 85%)',
   gray5: 'hsl(223 16% 91.6%)',
   gray6: 'hsl(220 23% 97.5%)',
-});
-
-/**
- * The settings pane's surfaces, re-declared on the pane itself. The pane remaps
- * `--card` to the popover fill in light mode (`[data-settings-surface]` in
- * `tailwind/index.css`), but the palettes above are declared on the root, where
- * `hsl(var(--card))` has already resolved to the root's card: a custom property
- * is computed where it is declared and inherited as that value. Declared again on
- * the pane, the tokens resolve against the pane's own `--card`, so the page is the
- * white the remap intends and the nav keeps its step below it. In dark the remap
- * does not apply and the values equal the root's.
- */
-export const productSettingsSurfacePalette = stylex.createTheme(colors, {
-  elevatedBackground: 'hsl(var(--card))',
-  secondaryBackground: 'hsl(var(--card))',
 });

@@ -4,7 +4,8 @@ import * as stylex from '@stylexjs/stylex';
 import type { ComponentProps } from 'react';
 import type { AgentConfigMeta, MachineId } from '@lody/shared';
 import { settingsFlat } from '@/components/settings/material.stylex';
-import { productSettingsSurfacePalette } from '@/lib/vscode-theme/lody-ui-palette.stylex';
+import { productDarkPalette, productLightPalette } from '@/lib/vscode-theme/lody-ui-palette.stylex';
+import { useResolvedTheme } from '@/theme-provider';
 import { settingsSurface } from '@/components/settings/surface';
 import {
   AccountMachinesOverviewView,
@@ -304,11 +305,12 @@ const paneMachines: AccountMachineOverviewItem[] = [
 
 /** A settings page as the desktop pane draws it: its scope, material and canvas. */
 function DesktopPane(args: ComponentProps<typeof AccountSettingsPure>) {
+  const palette = useResolvedTheme() === 'dark' ? productDarkPalette : productLightPalette;
   return (
     <div
       data-settings-surface=""
       data-testid="settings-pane"
-      {...stylex.props(productSettingsSurfacePalette, settingsFlat, settingsSurface.canvas)}
+      {...stylex.props(palette, settingsFlat, settingsSurface.canvas)}
       style={{ width: 860, minHeight: '100vh', paddingInline: 32, paddingBlock: 24 }}
     >
       <AccountSettingsPure {...args} />

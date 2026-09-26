@@ -42,7 +42,8 @@ import { PromptShortcutsSetting } from './prompt-shortcuts-setting';
 import { McpSetting } from './mcp-setting';
 import { ShareManagementSetting } from './share-management-setting';
 import { FocusScope, useListKeyboardNavigation } from '@/ui/focus-scope';
-import { productSettingsSurfacePalette } from '@/lib/vscode-theme/lody-ui-palette.stylex';
+import { productDarkPalette, productLightPalette } from '@/lib/vscode-theme/lody-ui-palette.stylex';
+import { useResolvedTheme } from '@/theme-provider';
 import { settingsFlat } from './material.stylex';
 import { SettingsPaneHeaderProvider } from './settings-page-header';
 import { settingsSurface as surface } from './surface';
@@ -217,6 +218,7 @@ function SettingsModalBody() {
   const canReportBug = useAppCapability('bugReport');
   const { activeOrganization } = useOrganization();
   const { data: session } = useStableSession();
+  const resolvedTheme = useResolvedTheme();
   const platformTabs = useVisibleSettingsTabs();
   const visibleTabs = isNativeAppShell()
     ? platformTabs.filter((tab) => tab.id !== 'billing')
@@ -367,7 +369,9 @@ function SettingsModalBody() {
           </Dialog.Close>
           <div
             {...stylex.props(
-              productSettingsSurfacePalette,
+              // Declared again here so the tokens resolve against the pane's own
+              // `--card` (white in light mode); see `lody-ui-palette.stylex.ts`.
+              resolvedTheme === 'dark' ? productDarkPalette : productLightPalette,
               settingsFlat,
               styles.surface,
               surface.canvas
