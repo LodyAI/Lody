@@ -1,5 +1,7 @@
 import { useState } from 'react';
 import * as stylex from '@stylexjs/stylex';
+import { SettingsPageActions, SettingsPageLead } from './settings-page-header';
+import { settingsRecordsCard } from './compact-layout';
 import { useAtomValue } from 'jotai';
 import { usePostHog } from '@posthog/react';
 import { Plug, Plus, Trash2 } from 'lucide-react';
@@ -12,7 +14,6 @@ import {
   type WorkspaceMcpServerMeta,
 } from '@lody/shared';
 import { userAtom } from '@/atoms';
-import { useIsMobile } from '@/hooks/use-mobile';
 import {
   useWorkspaceMcpCatalog,
   useWorkspaceMcpCatalogActions,
@@ -24,7 +25,6 @@ import { Badge } from '@lody/ui/badge';
 import { Button } from '@lody/ui/button';
 import { Dialog } from '@/ui/dialog';
 import { Switch } from '@lody/ui/switch';
-import { Tooltip } from '@lody/ui/tooltip';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { space } from '@lody/ui/tokens/scales.stylex';
 import { McpConnectionForm, type McpConnectionFormValue } from './mcp-connection-form';
@@ -54,7 +54,6 @@ type EditorState = { mode: 'add' } | { mode: 'edit'; entry: WorkspaceMcpServerMe
 export function McpSetting() {
   const { t } = useTranslation();
   const postHog = usePostHog();
-  const isMobile = useIsMobile();
   const user = useAtomValue(userAtom);
   const { servers, synced } = useWorkspaceMcpCatalog();
   const { upsert, remove } = useWorkspaceMcpCatalogActions();
@@ -140,66 +139,40 @@ export function McpSetting() {
 
   return (
     <div {...stylex.props(surface.container)}>
-      <p {...stylex.props(catalog.intro)}>{t('settings.mcp.description')}</p>
+      <SettingsPageLead>{t('settings.mcp.description')}</SettingsPageLead>
 
-      <section {...stylex.props(surface.section)}>
-        <header {...stylex.props(surface.sectionHeader)}>
-          <div {...stylex.props(catalog.heading)}>
-            <h3 {...stylex.props(surface.sectionTitle)}>{t('settings.mcp.catalogTitle')}</h3>
-            {servers.length > 0 ? (
-              <span {...stylex.props(catalog.count)}>{servers.length}</span>
-            ) : null}
-            {!synced ? (
-              <span {...stylex.props(catalog.syncing)}>
-                <Spinner size="small" aria-hidden="true" />
-                {t('settings.mcp.syncing')}
-              </span>
-            ) : null}
-          </div>
-          <div {...stylex.props(surface.sectionActions)}>
-            <Tooltip.Root>
-              <Tooltip.Trigger
-                render={
-                  <Button
-                    variant="ghost"
-                    aria-label={addLabel}
-                    size="small"
-                    icon
-                    onClick={() => openEditor({ mode: 'add' })}
-                  >
-                    <Plus {...stylex.props(catalog.icon)} />
-                  </Button>
-                }
+      <SettingsPageActions>
+        {!synced ? (
+          <span {...stylex.props(catalog.syncing)}>
+            <Spinner size="small" aria-hidden="true" />
+            {t('settings.mcp.syncing')}
+          </span>
+        ) : null}
+        <Button size="small" variant="secondary" onClick={() => openEditor({ mode: 'add' })}>
+          <Plus {...stylex.props(catalog.icon)} />
+          {addLabel}
+        </Button>
+      </SettingsPageActions>
+
+      {servers.length === 0 ? (
+        <div {...stylex.props(catalog.empty)}>
+          <Plug {...stylex.props(catalog.emptyIcon)} aria-hidden="true" />
+          <p {...stylex.props(catalog.emptyText)}>{t('settings.mcp.empty')}</p>
+        </div>
+      ) : (
+        <div {...stylex.props(settingsRecordsCard)}>
+          {servers.map((server, index) => (
+            <div key={server.id} {...stylex.props(surface.line, index > 0 && surface.lineRuled)}>
+              <McpServerRow
+                server={server}
+                onEdit={() => openEditor({ mode: 'edit', entry: server })}
+                onToggleDefault={(enabled) => void toggleDefault(server, enabled)}
+                onRemove={() => setPendingRemoval(server)}
               />
-              <Tooltip.Content>{addLabel}</Tooltip.Content>
-            </Tooltip.Root>
-          </div>
-        </header>
-
-        {servers.length === 0 ? (
-          <div {...stylex.props(catalog.empty)}>
-            <Plug {...stylex.props(catalog.emptyIcon)} aria-hidden="true" />
-            <p {...stylex.props(catalog.emptyText)}>{t('settings.mcp.empty')}</p>
-            <Button size="small" variant="secondary" onClick={() => openEditor({ mode: 'add' })}>
-              <Plus {...stylex.props(catalog.icon)} />
-              {addLabel}
-            </Button>
-          </div>
-        ) : (
-          <div {...stylex.props(surface.card)}>
-            {servers.map((server, index) => (
-              <div key={server.id} {...stylex.props(surface.line, index > 0 && surface.lineRuled)}>
-                <McpServerRow
-                  server={server}
-                  onEdit={() => openEditor({ mode: 'edit', entry: server })}
-                  onToggleDefault={(enabled) => void toggleDefault(server, enabled)}
-                  onRemove={() => setPendingRemoval(server)}
-                />
-              </div>
-            ))}
-          </div>
-        )}
-      </section>
+            </div>
+          ))}
+        </div>
+      )}
 
       <Dialog.Root
         open={editor !== null}
@@ -209,14 +182,7 @@ export function McpSetting() {
           setEditor(null);
         }}
       >
-        <Dialog.Content
-          backdropClassName={
-            // Desktop settings is itself a dialog; match its z-index so this
-            // later overlay covers it without stacking a second /80 veil.
-            isMobile ? undefined : 'z-[var(--z-dialog)] bg-black/20'
-          }
-          className={SETTINGS_EDITOR_DIALOG_LAYOUT}
-        >
+        <Dialog.Content className={SETTINGS_EDITOR_DIALOG_LAYOUT}>
           <Dialog.Header>
             <Dialog.Title>
               {editor?.mode === 'edit' ? t('settings.mcp.editTitle') : t('settings.mcp.addTitle')}

@@ -355,7 +355,9 @@ describe('AppearanceSettingsView', () => {
     expect(container?.textContent).toContain('Font ligatures');
     expect(container?.textContent).toContain('conversation, code, and tool output');
     const content = container?.textContent ?? '';
-    expect(content.indexOf('Font ligatures')).toBeGreaterThan(content.indexOf('Terminal'));
+    // Ligatures belong with the other text settings, before the terminal's own.
+    expect(content.indexOf('Font ligatures')).toBeGreaterThan(content.indexOf('Interface font'));
+    expect(content.indexOf('Font ligatures')).toBeLessThan(content.indexOf('Terminal'));
 
     const ligaturesSwitch = container?.querySelector<HTMLButtonElement>(
       'button[aria-label="Font ligatures"]'

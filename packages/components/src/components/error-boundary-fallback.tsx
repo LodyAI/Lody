@@ -3,18 +3,25 @@ import { useTranslation } from 'react-i18next';
 import {
   AlertTriangle,
   Check,
-  ChevronRight,
+  CircleAlert,
   Copy,
   RefreshCw,
   RotateCcw,
   Trash2,
 } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
-import { colors, shadow } from '@lody/ui/tokens/colors.stylex';
-import { corner, duration, ease, radius, space, text } from '@lody/ui/tokens/scales.stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { corner, radius, space, text } from '@lody/ui/tokens/scales.stylex';
 
 import { Button } from '@lody/ui/button';
 import { AlertDialog } from '@/ui/dialog';
+import {
+  StatusPage,
+  StatusPageActions,
+  StatusPageCode,
+  StatusPageDetails,
+  StatusPageFootnote,
+} from '@/components/status-page';
 import { writeTextToClipboard } from '@/lib/clipboard';
 import { openExternalUrl } from '@/lib/native-browser';
 import { LODY_DISCORD_URL } from '@/lib/lody-urls';
@@ -41,17 +48,12 @@ export type ErrorBoundaryFallbackViewProps = {
 
 const COPIED_RESET_MS = 2000;
 
-const WIDE = '@media (min-width: 640px)';
-const MONO = 'var(--font-mono, ui-monospace, monospace)';
-/** A block inside a surface is the region rung: a fill with no edge. */
-const REGION = `color-mix(in oklab, transparent, ${colors.label} 3%)`;
-
 const styles = stylex.create({
   icon14: { flexShrink: 0, width: '14px', height: '14px' },
   success: { color: colors.success },
   destructive: { color: colors.destructive },
 
-  /** Inline: a message, a tint and a mark. */
+  /** Inline: a message, a tint and a mark — the danger tone's circle, as on the page. */
   inline: {
     boxSizing: 'border-box',
     display: 'inline-flex',
@@ -64,7 +66,7 @@ const styles = stylex.create({
     paddingBlock: space[1],
     borderRadius: radius.medium,
     cornerShape: corner.shape,
-    backgroundColor: `color-mix(in oklab, transparent, ${colors.destructive} 10%)`,
+    backgroundColor: `color-mix(in oklab, transparent, ${colors.destructive} 8%)`,
   },
   inlineText: {
     minWidth: 0,
@@ -75,82 +77,7 @@ const styles = stylex.create({
     color: colors.label,
   },
 
-  root: { boxSizing: 'border-box', width: '100%' },
-  /** The page: the report is a card centred on it. */
-  page: {
-    display: 'flex',
-    alignItems: { default: 'flex-start', [WIDE]: 'center' },
-    justifyContent: 'center',
-    minHeight: '60vh',
-    overflow: 'auto',
-    padding: { default: space[4], [WIDE]: space[6] },
-  },
-  /** A section: the report is a region of whatever surface holds it. */
-  section: {
-    padding: space[4],
-    borderRadius: radius.medium,
-    cornerShape: corner.shape,
-    backgroundColor: REGION,
-  },
-  body: {
-    boxSizing: 'border-box',
-    display: 'flex',
-    flexDirection: 'column',
-    gap: space[3],
-    width: '100%',
-    minWidth: 0,
-    textAlign: 'start',
-  },
-  card: {
-    maxWidth: '672px',
-    padding: '20px',
-    backgroundColor: colors.elevatedBackground,
-    boxShadow: shadow.card,
-    borderRadius: radius.large,
-    cornerShape: corner.shape,
-  },
-  header: { display: 'flex', alignItems: 'flex-start', gap: '10px' },
-  headerMark: { flexShrink: 0, width: '16px', height: '16px', marginTop: '1px' },
-  headerMarkPage: { width: '20px', height: '20px', marginTop: '2px' },
-  headerText: { minWidth: 0 },
-  title: {
-    margin: 0,
-    fontSize: text.bodySize,
-    lineHeight: text.bodyLeading,
-    fontWeight: 600,
-    color: colors.label,
-  },
-  titlePage: { fontSize: text.headlineSize, lineHeight: text.headlineLeading },
-  description: {
-    margin: 0,
-    marginTop: space[1],
-    fontSize: { default: text.footnoteSize, [WIDE]: text.bodySize },
-    lineHeight: { default: text.footnoteLeading, [WIDE]: text.bodyLeading },
-    color: colors.secondaryLabel,
-  },
-  code: {
-    boxSizing: 'border-box',
-    minWidth: 0,
-    margin: 0,
-    padding: space[3],
-    overflow: 'auto',
-    borderRadius: radius.medium,
-    cornerShape: corner.shape,
-    backgroundColor: REGION,
-    fontFamily: MONO,
-    lineHeight: '20px',
-    whiteSpace: 'pre-wrap',
-    overflowWrap: 'anywhere',
-    userSelect: 'text',
-  },
-  headline: { maxHeight: '128px', fontSize: text.footnoteSize, color: colors.label },
-  details: {
-    maxHeight: '40vh',
-    marginTop: space[2],
-    fontSize: text.captionSize,
-    color: colors.secondaryLabel,
-  },
-  actions: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: space[2] },
+  /** A blocked copy: the one outcome here that is a message rather than a step. */
   message: {
     display: 'flex',
     alignItems: 'flex-start',
@@ -160,78 +87,37 @@ const styles = stylex.create({
     paddingBlock: space[2],
     borderRadius: radius.medium,
     cornerShape: corner.shape,
-    backgroundColor: `color-mix(in oklab, transparent, ${colors.destructive} 10%)`,
+    backgroundColor: `color-mix(in oklab, transparent, ${colors.destructive} 8%)`,
     fontSize: text.footnoteSize,
     lineHeight: text.footnoteLeading,
-    color: colors.destructive,
-  },
-  messageMark: { marginTop: '1px' },
-  steps: {
-    padding: space[3],
-    borderRadius: radius.medium,
-    cornerShape: corner.shape,
-    backgroundColor: REGION,
-  },
-  stepsTitle: {
-    margin: 0,
-    fontSize: text.footnoteSize,
-    fontWeight: 500,
     color: colors.label,
   },
-  stepsList: {
-    margin: 0,
-    marginTop: space[1.5],
-    paddingInlineStart: space[4],
-    listStyleType: 'decimal',
-    fontSize: text.footnoteSize,
-    lineHeight: '20px',
-    color: colors.secondaryLabel,
-  },
-  step: { marginTop: { default: space[1], ':first-child': 0 } },
+  messageMark: { marginTop: '1px', color: colors.destructive },
   /** A link inside a sentence: accent, underlined under the pointer. */
   textLink: {
     margin: 0,
     padding: 0,
     borderWidth: 0,
     backgroundColor: 'transparent',
+    boxShadow: 'none',
     color: colors.accent,
     fontFamily: 'inherit',
     fontSize: 'inherit',
     lineHeight: 'inherit',
     fontWeight: 500,
     textDecorationLine: { default: 'none', ':hover': 'underline' },
-    textUnderlineOffset: '4px',
+    textUnderlineOffset: '3px',
     cursor: 'pointer',
   },
-  disclosure: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: space[1],
-    margin: 0,
-    padding: 0,
-    borderWidth: 0,
-    backgroundColor: 'transparent',
+  /**
+   * The wipe is a way out, not an answer: a quiet link rather than a red
+   * button, since its confirmation dialog is where the cost is spelled out.
+   */
+  quietLink: {
     color: { default: colors.secondaryLabel, ':hover': colors.label },
-    fontFamily: 'inherit',
-    fontSize: text.footnoteSize,
-    cursor: 'pointer',
+    textDecorationLine: 'underline',
+    textDecorationColor: `color-mix(in oklab, transparent, ${colors.secondaryLabel} 50%)`,
   },
-  chevron: {
-    transform: 'rotate(0deg)',
-    transitionProperty: 'transform',
-    transitionDuration: duration.fast,
-    transitionTimingFunction: ease.standard,
-  },
-  chevronOpen: { transform: 'rotate(90deg)' },
-  detailsBlock: { minWidth: 0 },
-  lastResort: {
-    display: 'flex',
-    flexWrap: 'wrap',
-    alignItems: 'center',
-    columnGap: space[3],
-    rowGap: space[1],
-  },
-  lastResortHint: { fontSize: text.captionSize, color: colors.secondaryLabel },
 });
 
 /**
@@ -308,7 +194,7 @@ export function ErrorBoundaryFallback({
   if (variant === 'inline') {
     return (
       <div role="alert" {...stylex.props(styles.inline)}>
-        <AlertTriangle {...stylex.props(styles.icon14, styles.destructive)} aria-hidden="true" />
+        <CircleAlert {...stylex.props(styles.icon14, styles.destructive)} aria-hidden="true" />
         <span {...stylex.props(styles.inlineText)} title={headline}>
           {showErrorDetails ? headline : t('errorBoundary.inlineTitle', 'This part failed')}
         </span>
@@ -333,149 +219,96 @@ export function ErrorBoundaryFallback({
     );
   }
 
-  const isPage = variant === 'page';
+  const isRegion = variant === 'section';
 
   return (
-    <div role="alert" {...stylex.props(styles.root, isPage ? styles.page : styles.section)}>
-      <div {...stylex.props(styles.body, isPage && styles.card)}>
-        <div {...stylex.props(styles.header)}>
-          <AlertTriangle
-            {...stylex.props(
-              styles.headerMark,
-              isPage && styles.headerMarkPage,
-              styles.destructive
-            )}
-            aria-hidden="true"
-          />
-          <div {...stylex.props(styles.headerText)}>
-            <h2 {...stylex.props(styles.title, isPage && styles.titlePage)}>
-              {t('errorBoundary.title', 'Lody hit an unexpected error')}
-            </h2>
-            <p {...stylex.props(styles.description)}>
-              {t(
-                'errorBoundary.description',
-                'The rest of the app is still running. Nothing reloads on its own — pick a step below.'
-              )}
-            </p>
-          </div>
-        </div>
+    <StatusPage
+      layout={isRegion ? 'region' : 'window'}
+      tone="danger"
+      role="alert"
+      illustration="broken"
+      title={t('errorBoundary.title', 'Lody hit a snag')}
+      description={t(
+        'errorBoundary.description',
+        'Your work is safe. Try again — if it keeps happening, reload Lody.'
+      )}
+    >
+      <StatusPageActions>
+        <Button type="button" size="small" onClick={resetErrorBoundary}>
+          <RotateCcw {...stylex.props(styles.icon14)} aria-hidden="true" />
+          {t('errorBoundary.tryAgain', 'Try again')}
+        </Button>
+        <Button
+          type="button"
+          variant="secondary"
+          size="small"
+          onClick={() => {
+            reloadApp();
+          }}
+        >
+          <RefreshCw {...stylex.props(styles.icon14)} aria-hidden="true" />
+          {t('errorBoundary.reload', 'Reload Lody')}
+        </Button>
+        <Button type="button" variant="secondary" size="small" onClick={handleCopy}>
+          {copied ? (
+            <Check {...stylex.props(styles.icon14, styles.success)} aria-hidden="true" />
+          ) : (
+            <Copy {...stylex.props(styles.icon14)} aria-hidden="true" />
+          )}
+          {copied
+            ? t('errorBoundary.copied', 'Copied')
+            : t('errorBoundary.copyDetails', 'Copy error details')}
+        </Button>
+      </StatusPageActions>
 
-        {showErrorDetails ? (
-          <pre {...stylex.props(styles.code, styles.headline)}>{headline}</pre>
-        ) : null}
+      {showErrorDetails ? <StatusPageCode>{headline}</StatusPageCode> : null}
 
-        <div {...stylex.props(styles.actions)}>
-          <Button type="button" size="small" onClick={resetErrorBoundary}>
-            <RotateCcw {...stylex.props(styles.icon14)} aria-hidden="true" />
-            {t('errorBoundary.tryAgain', 'Try again')}
-          </Button>
-          <Button
-            type="button"
-            variant="secondary"
-            size="small"
-            onClick={() => {
-              reloadApp();
-            }}
-          >
-            <RefreshCw {...stylex.props(styles.icon14)} aria-hidden="true" />
-            {t('errorBoundary.reload', 'Reload Lody')}
-          </Button>
-          <Button type="button" variant="secondary" size="small" onClick={handleCopy}>
-            {copied ? (
-              <Check {...stylex.props(styles.icon14, styles.success)} aria-hidden="true" />
-            ) : (
-              <Copy {...stylex.props(styles.icon14)} aria-hidden="true" />
-            )}
-            {copied
-              ? t('errorBoundary.copied', 'Copied')
-              : t('errorBoundary.copyDetails', 'Copy error details')}
-          </Button>
-        </div>
+      {copyFailed ? (
+        <p role="status" {...stylex.props(styles.message)}>
+          <AlertTriangle {...stylex.props(styles.icon14, styles.messageMark)} aria-hidden="true" />
+          {t(
+            'errorBoundary.copyFailed',
+            'Copying was blocked. Open the technical details below and select the text manually.'
+          )}
+        </p>
+      ) : null}
 
-        {copyFailed ? (
-          <p {...stylex.props(styles.message)}>
-            <AlertTriangle
-              {...stylex.props(styles.icon14, styles.messageMark)}
-              aria-hidden="true"
-            />
-            {t(
-              'errorBoundary.copyFailed',
-              'Copying was blocked. Open the technical details below and select the text manually.'
-            )}
-          </p>
-        ) : null}
+      {showErrorDetails && report.details ? (
+        <StatusPageDetails
+          label={t('errorBoundary.technicalDetails', 'Technical details')}
+          open={detailsOpen}
+          onOpenChange={setDetailsOpen}
+        >
+          <StatusPageCode size="details">{report.details}</StatusPageCode>
+        </StatusPageDetails>
+      ) : null}
 
-        <div {...stylex.props(styles.steps)}>
-          <p {...stylex.props(styles.stepsTitle)}>
-            {t('errorBoundary.nextStepsTitle', 'If it keeps happening')}
-          </p>
-          <ol {...stylex.props(styles.stepsList)}>
-            <li {...stylex.props(styles.step)}>
-              {t('errorBoundary.stepRetry', 'Try again — one-off glitches recover here.')}
-            </li>
-            <li {...stylex.props(styles.step)}>
-              {t('errorBoundary.stepReload', 'Reload Lody. Your synced work is not affected.')}
-            </li>
-            <li {...stylex.props(styles.step)}>
-              {t(
-                'errorBoundary.stepReport',
-                'Still broken? Copy the error details and send them to us on Discord — they tell us exactly what failed.'
-              )}{' '}
-              <button
-                type="button"
-                {...stylex.props(styles.textLink)}
-                onClick={() => {
-                  void openExternalUrl(LODY_DISCORD_URL);
-                }}
-              >
-                {t('errorBoundary.openDiscord', 'Open Discord')}
-              </button>
-            </li>
-            <li {...stylex.props(styles.step)}>
-              {t(
-                'errorBoundary.stepHardReset',
-                'Stuck on this screen after every reload? Clear all local data and sign in again.'
-              )}
-            </li>
-          </ol>
-        </div>
+      <StatusPageFootnote>
+        {t(
+          'errorBoundary.stepReport',
+          'Still broken? Copy the error details and send them to us on Discord — they tell us exactly what failed.'
+        )}{' '}
+        <button
+          type="button"
+          {...stylex.props(styles.textLink)}
+          onClick={() => {
+            void openExternalUrl(LODY_DISCORD_URL);
+          }}
+        >
+          {t('errorBoundary.openDiscord', 'Open Discord')}
+        </button>
+      </StatusPageFootnote>
 
-        {showErrorDetails && report.details ? (
-          <div {...stylex.props(styles.detailsBlock)}>
-            <button
-              type="button"
-              {...stylex.props(styles.disclosure)}
-              onClick={() => setDetailsOpen((open) => !open)}
-              aria-expanded={detailsOpen}
-            >
-              <ChevronRight
-                {...stylex.props(styles.icon14, styles.chevron, detailsOpen && styles.chevronOpen)}
-                aria-hidden="true"
-              />
-              {t('errorBoundary.technicalDetails', 'Technical details')}
-            </button>
-            {detailsOpen ? (
-              <pre {...stylex.props(styles.code, styles.details)}>{report.details}</pre>
-            ) : null}
-          </div>
-        ) : null}
-
-        <div {...stylex.props(styles.lastResort)}>
-          <Button
-            type="button"
-            variant="ghost"
-            size="small"
-            tone="destructive"
-            onClick={() => setHardResetOpen(true)}
-          >
-            <Trash2 {...stylex.props(styles.icon14)} aria-hidden="true" />
-            {t('errorBoundary.hardReset', 'Clear all local data and sign out')}
-          </Button>
-          <span {...stylex.props(styles.lastResortHint)}>
-            {t('errorBoundary.hardResetHint', 'Last resort. Synced work stays on the server.')}
-          </span>
-        </div>
-      </div>
+      <StatusPageFootnote>
+        {t('errorBoundary.hardResetLead', 'Stuck on this screen after every reload?')}{' '}
+        <button
+          type="button"
+          {...stylex.props(styles.textLink, styles.quietLink)}
+          onClick={() => setHardResetOpen(true)}
+        >
+          {t('errorBoundary.hardReset', 'Clear all local data and sign out')}
+        </button>
+      </StatusPageFootnote>
 
       <HardResetConfirmDialog
         open={hardResetOpen}
@@ -483,7 +316,7 @@ export function ErrorBoundaryFallback({
         isResetting={hardResetting}
         onConfirm={handleHardReset}
       />
-    </div>
+    </StatusPage>
   );
 }
 

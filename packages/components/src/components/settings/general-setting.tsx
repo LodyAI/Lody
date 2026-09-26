@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect, useCallback } from 'react';
+import { useMemo, useState, useEffect, useCallback, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import type {
   GetNotificationPermissionStatusResult,
@@ -23,7 +23,7 @@ import { useAtom, useAtomValue } from 'jotai';
 import { CompactRow, CompactSection } from './compact-layout';
 import { settingContainerClass } from '.';
 import { AutoArchiveSection } from './auto-archive-setting';
-import { ExperimentalFeaturesSection } from './experimental-features-setting';
+import { ExperimentalFeatureRows } from './experimental-features-setting';
 import {
   getOneSignalPermissionState,
   getOneSignalPushSubscriptionOptedIn,
@@ -404,39 +404,52 @@ export function GeneralSettingsComponent() {
   useElectronEnabledSetting(isElectron, 'getPreventSleepEnabled', setPreventSleepEnabled);
   useElectronEnabledSetting(isElectron, 'getCliAutoStartEnabled', setCliAutoStartEnabled);
 
-  const permissionLabel = useMemo(() => {
-    if (isElectron && !notificationsEnabled) {
-      return t('settings.notifications.disabledDesktop');
-    }
-    switch (permissionStatus) {
-      case 'granted':
-        return t('settings.notifications.permissionGranted');
-      case 'denied':
-        return t(
-          isElectron
-            ? 'settings.notifications.permissionDeniedStatusDesktop'
-            : isNative
-              ? 'settings.notifications.permissionDeniedStatusNative'
-              : 'settings.notifications.permissionDeniedStatus'
-        );
-      default:
-        return t('settings.notifications.permissionDefault');
-    }
-  }, [isElectron, isNative, notificationsEnabled, permissionStatus, t]);
-
-  const disableReason = useMemo(() => {
-    if (!notificationSupported) {
-      return t('settings.notifications.reason.notSupported');
-    }
-    if (!isElectron && !oneSignalReady) {
-      return t('settings.notifications.reason.notReady');
-    }
-    return undefined;
-  }, [isElectron, notificationSupported, oneSignalReady, t]);
-
   const desktopHint = useMemo(() => {
     return t(getDesktopNotificationHintKey(electronPlatform));
   }, [electronPlatform, t]);
+
+  // The switch already says whether notifications are on. The helper speaks
+  // only when something stops them from working, and says what to do about it.
+  const notificationProblem = useMemo((): ReactNode => {
+    if (!notificationSupported) {
+      return (
+        <span {...stylex.props(styles.error)}>
+          {isElectron
+            ? t('settings.notifications.unsupportedDesktop')
+            : t('settings.notifications.unsupported')}
+        </span>
+      );
+    }
+    if (permissionStatus === 'denied') {
+      const status = t(
+        isElectron
+          ? 'settings.notifications.permissionDeniedStatusDesktop'
+          : isNative
+            ? 'settings.notifications.permissionDeniedStatusNative'
+            : 'settings.notifications.permissionDeniedStatus'
+      );
+      if (!isElectron) return status;
+      return (
+        <span {...stylex.props(styles.helperLines)}>
+          <span>{status}</span>
+          <span>{desktopHint}</span>
+        </span>
+      );
+    }
+    if (!isElectron && !oneSignalReady && !isProcessing) {
+      return t('settings.notifications.reason.notReady');
+    }
+    return undefined;
+  }, [
+    desktopHint,
+    isElectron,
+    isNative,
+    isProcessing,
+    notificationSupported,
+    oneSignalReady,
+    permissionStatus,
+    t,
+  ]);
 
   const openSystemNotificationSettings =
     useCallback(async (): Promise<OpenSystemNotificationSettingsResult> => {
@@ -672,7 +685,9 @@ export function GeneralSettingsComponent() {
           </CompactSection>
         ) : null}
 
-        <CompactSection>
+        {/* Settings are grouped by what they are about, so no group is one row
+          and no row needs a sentence to say where it applies. */}
+        <CompactSection title={t('settings.general.sections.conversations', 'Conversations')}>
           <CompactRow
             label={t(
               'settings.general.sessions.queuedMessageBehavior.label',
@@ -680,7 +695,7 @@ export function GeneralSettingsComponent() {
             )}
             helper={t(
               'settings.general.sessions.queuedMessageBehavior.helper',
-              'Choose whether messages sent while the agent is working wait in the queue or steer the active response.'
+              'For messages you send while the agent is working.'
             )}
           >
             <QueuedMessageBehaviorControl
@@ -688,6 +703,11 @@ export function GeneralSettingsComponent() {
               onChange={setQueuedMessageBehavior}
             />
           </CompactRow>
+          {isElectron ? (
+            <div id="path-launchers" {...stylex.props(styles.anchor)}>
+              <PathLaunchersSettings isElectron={isElectron} platform={electronPlatform} inline />
+            </div>
+          ) : null}
           <CompactRow
             label={t(
               'settings.general.sessions.codeOnlyLineChanges.label',
@@ -695,7 +715,7 @@ export function GeneralSettingsComponent() {
             )}
             helper={t(
               'settings.general.sessions.codeOnlyLineChanges.helper',
-              'When enabled, session sidebar line counts exclude docs, tests, and dev files.'
+              'Sidebar line counts skip docs, tests, and dev config.'
             )}
           >
             <Switch
@@ -704,28 +724,14 @@ export function GeneralSettingsComponent() {
               onCheckedChange={setSessionSidebarCodeChangesOnly}
             />
           </CompactRow>
-
           <CompactRow
             label={
               isElectron
                 ? t('settings.notifications.enableToggleDesktop')
                 : t('settings.notifications.enableToggle')
             }
-            helper={
-              <span {...stylex.props(styles.helperLines)}>
-                <span>{permissionLabel}</span>
-                {disableReason && !isProcessing ? <span>{disableReason}</span> : null}
-                {isElectron && permissionStatus !== 'granted' ? <span>{desktopHint}</span> : null}
-                {!notificationSupported ? (
-                  <span {...stylex.props(styles.error)}>
-                    {isElectron
-                      ? t('settings.notifications.unsupportedDesktop')
-                      : t('settings.notifications.unsupported')}
-                  </span>
-                ) : null}
-              </span>
-            }
-            alignTop
+            helper={notificationProblem}
+            alignTop={notificationProblem != null}
           >
             {isProcessing ? (
               <span {...stylex.props(styles.switchSlot)}>
@@ -744,15 +750,32 @@ export function GeneralSettingsComponent() {
           </CompactRow>
         </CompactSection>
         {isElectron && (
-          <CompactSection title={t('settings.general.autoLaunch.title', 'Startup')}>
+          <CompactSection title={t('settings.general.sections.thisComputer', 'This computer')}>
+            <div id="cli-auto-start" {...stylex.props(styles.anchor)}>
+              <CompactRow
+                label={t('settings.general.cliAutoStart.label', 'Run local agent')}
+                helper={t(
+                  'settings.general.cliAutoStart.helper',
+                  'Turn off to use Lody only to control agents on other machines.'
+                )}
+              >
+                {cliAutoStartLoading ? (
+                  <span {...stylex.props(styles.switchSlot)}>
+                    <Spinner size="small" label={t('common.loading', 'Loading...')} />
+                  </span>
+                ) : (
+                  <Switch
+                    id="cli-auto-start-toggle"
+                    checked={cliAutoStartEnabled}
+                    onCheckedChange={(checked) => {
+                      void handleToggleCliAutoStart(checked);
+                    }}
+                  />
+                )}
+              </CompactRow>
+            </div>
             <CliDaemonSetting />
-            <CompactRow
-              label={t('settings.general.autoLaunch.label', 'Launch at startup')}
-              helper={t(
-                'settings.general.autoLaunch.helper',
-                'Automatically run Lody when you sign in'
-              )}
-            >
+            <CompactRow label={t('settings.general.autoLaunch.label', 'Launch at startup')}>
               {autoLaunch.enabledLoading ? (
                 <span {...stylex.props(styles.switchSlot)}>
                   <Spinner size="small" label={t('common.loading', 'Loading...')} />
@@ -770,10 +793,6 @@ export function GeneralSettingsComponent() {
             </CompactRow>
             <CompactRow
               label={t('settings.general.autoLaunch.hideWindowLabel', 'Hide window on auto-launch')}
-              helper={t(
-                'settings.general.autoLaunch.hideWindowHelper',
-                'Keep the main window hidden when Lody starts automatically after sign-in'
-              )}
             >
               {autoLaunch.hideWindowLoading ? (
                 <span {...stylex.props(styles.switchSlot)}>
@@ -790,32 +809,14 @@ export function GeneralSettingsComponent() {
                 />
               )}
             </CompactRow>
-            <div id="cli-auto-start" {...stylex.props(styles.anchor)}>
-              <CompactRow
-                label={t('settings.general.cliAutoStart.label', 'Run local agent')}
-                helper={t(
-                  'settings.general.cliAutoStart.helper',
-                  'Lody runs an agent on this computer to work on your local projects. Turn this off to use Lody only as a control panel for agents running on other machines.'
-                )}
-                alignTop
-              >
-                {cliAutoStartLoading ? (
-                  <span {...stylex.props(styles.switchSlot)}>
-                    <Spinner size="small" label={t('common.loading', 'Loading...')} />
-                  </span>
-                ) : (
-                  <Switch
-                    id="cli-auto-start-toggle"
-                    checked={cliAutoStartEnabled}
-                    onCheckedChange={(checked) => {
-                      void handleToggleCliAutoStart(checked);
-                    }}
-                  />
-                )}
-              </CompactRow>
-            </div>
             <div id="prevent-sleep" {...stylex.props(styles.anchor)}>
-              <CompactRow label={t('settings.general.preventSleep.label', 'Prevent sleep')}>
+              <CompactRow
+                label={t('settings.general.preventSleep.label', 'Prevent sleep')}
+                helper={t(
+                  'settings.general.preventSleep.helper',
+                  'Keep this computer awake while Lody runs, so agents are not cut off.'
+                )}
+              >
                 <Switch
                   id="prevent-sleep-toggle"
                   checked={preventSleepEnabled}
@@ -836,16 +837,9 @@ export function GeneralSettingsComponent() {
 
         {githubIntegrationAvailable ? <AutoArchiveSection /> : null}
 
-        <ExperimentalFeaturesSection />
-
-        {isElectron && (
-          <div id="path-launchers" {...stylex.props(styles.anchor)}>
-            <PathLaunchersSettings isElectron={isElectron} platform={electronPlatform} />
-          </div>
-        )}
-
         {/* Clear local cache stays last in General settings. */}
-        <CompactSection>
+        <CompactSection title={t('settings.general.sections.advanced', 'Advanced')}>
+          <ExperimentalFeatureRows />
           <CompactRow
             label={t('settings.cache.clearCache.label')}
             helper={t('settings.cache.clearCache.description')}

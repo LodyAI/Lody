@@ -1,19 +1,24 @@
-/**
- * 404 页面组件
- * 当用户访问不存在的页面时显示
- */
-import { useNavigate } from '@tanstack/react-router';
+import { useLocation, useNavigate } from '@tanstack/react-router';
 import { Button } from '@lody/ui/button';
-import { Home, ArrowLeft } from 'lucide-react';
+import * as stylex from '@stylexjs/stylex';
+import { ArrowLeft } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import { StatusPage, StatusPageActions, StatusPageCode } from '@/components/status-page';
 
+const styles = stylex.create({
+  icon14: { flexShrink: 0, width: '14px', height: '14px' },
+});
+
+/**
+ * The route nothing matched. It names the address it was asked for, because
+ * that is the one thing a person can check — a typo, a stale link — and the
+ * one thing a bare "404" does not tell them.
+ */
 export function NotFound() {
   const navigate = useNavigate();
   const { t } = useTranslation();
+  const href = useLocation({ select: (location) => location.href });
 
-  /**
-   * 返回上一页
-   */
   const handleGoBack = () => {
     if (window.history.length > 1) {
       window.history.back();
@@ -22,43 +27,26 @@ export function NotFound() {
     }
   };
 
-  /**
-   * 返回首页
-   */
-  const handleGoHome = () => {
-    void navigate({ to: '/' });
-  };
-
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background">
-      <div className="max-w-md px-4 text-center">
-        <div className="mb-8">
-          <h1 className="text-9xl font-bold text-muted-foreground">404</h1>
-        </div>
-
-        <h2 className="mb-4 text-2xl font-semibold text-foreground">
-          {t('notFound.title', 'Page Not Found')}
-        </h2>
-
-        <p className="mb-8 text-muted-foreground">
-          {t(
-            'notFound.description',
-            'Sorry, the page you are looking for does not exist or has been moved.'
-          )}
-        </p>
-
-        <div className="flex justify-center gap-4">
-          <Button variant="secondary" onClick={handleGoBack} className="flex">
-            <ArrowLeft className="h-4 w-4" />
-            {t('notFound.goBack', 'Go Back')}
-          </Button>
-
-          <Button onClick={handleGoHome} className="flex">
-            <Home className="h-4 w-4" />
-            {t('notFound.goHome', 'Go Home')}
-          </Button>
-        </div>
-      </div>
-    </div>
+    <StatusPage
+      layout="window"
+      illustration="missing"
+      title={t('notFound.title', 'This page wandered off')}
+      description={t(
+        'notFound.description',
+        'Nothing in Lody lives at this address. It may have moved, or the link is out of date.'
+      )}
+    >
+      <StatusPageCode size="fit">{href}</StatusPageCode>
+      <StatusPageActions>
+        <Button size="small" onClick={() => void navigate({ to: '/' })}>
+          {t('notFound.goHome', 'Go home')}
+        </Button>
+        <Button variant="secondary" size="small" onClick={handleGoBack}>
+          <ArrowLeft {...stylex.props(styles.icon14)} aria-hidden="true" />
+          {t('notFound.goBack', 'Go back')}
+        </Button>
+      </StatusPageActions>
+    </StatusPage>
   );
 }

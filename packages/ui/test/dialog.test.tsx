@@ -136,6 +136,28 @@ describe('Dialog', () => {
     expect(list.closest('[role="dialog"]')).toBe(panel());
   });
 
+  test('a dialog opened inside a dialog still renders its own overlay', async () => {
+    // Base UI mounts no backdrop for a nested root, which would leave the
+    // stacked dialog dimming nothing. Every panel dims what it was opened
+    // from, so each open dialog paints one `role="presentation"` overlay.
+    mounted = await mount(
+      <Dialog.Root defaultOpen>
+        <Dialog.Content>
+          <Dialog.Title>Outer</Dialog.Title>
+          <Dialog.Root defaultOpen>
+            <Dialog.Content>
+              <Dialog.Title>Inner</Dialog.Title>
+            </Dialog.Content>
+          </Dialog.Root>
+        </Dialog.Content>
+      </Dialog.Root>
+    );
+    expect(panels()).toHaveLength(2);
+    // The portal also mounts an internal backdrop for outside-press detection;
+    // the veil is the presentation div carrying the open state.
+    expect(all('[role="presentation"][data-open]')).toHaveLength(2);
+  });
+
   test('carries a forced palette across the portal, onto the backdrop too', async () => {
     mounted = await mount(
       <ThemeRoot mode="dark">

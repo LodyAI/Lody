@@ -1,7 +1,13 @@
 import * as React from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
+import * as stylex from '@stylexjs/stylex';
 import { Mention, MentionInput } from '@/ui/mention';
-import { MentionTwoLevelMenuBody } from '@/components/mentions/mention-two-level-menu';
+import { mentionSurface } from '@/ui/mention/mention-surface';
+import type { Mention as MentionRange } from '@/ui/mention/mention-root';
+import {
+  MentionTwoLevelMenu,
+  MentionTwoLevelMenuBody,
+} from '@/components/mentions/mention-two-level-menu';
 import {
   getMentionViewCandidates,
   selectMentionMenuView,
@@ -201,6 +207,30 @@ const COMMANDS: MentionCandidate[] = [
   toCommandCandidate({ name: 'compact', description: 'Compact the conversation context' }),
 ];
 
+/** Session times are shown against the page's clock, so the fixture is relative to it. */
+const STORY_NOW = Date.now();
+
+const SESSION_CANDIDATES: MentionCandidate[] = [
+  {
+    value: 'session-current',
+    label: 'current-parser-work',
+    insertText: '@current-parser-work',
+    kind: 'session',
+    icon: 'session',
+    title: 'Current parser work',
+    activityAt: STORY_NOW - 12 * 60_000,
+  },
+  {
+    value: 'session-other',
+    label: 'other-project-work',
+    insertText: '@other-project-work',
+    kind: 'session',
+    icon: 'session',
+    title: 'Other project work',
+    activityAt: STORY_NOW - 3 * 24 * 60 * 60_000,
+  },
+];
+
 function category(
   id: MentionCategory['id'],
   namespace: string,
@@ -227,10 +257,26 @@ const CATEGORIES: MentionCategory[] = [
   category('file', 'file', 'Files', 'file', FILES),
   category('issue', 'issue', 'Issues', 'issue', ISSUES),
   category('pr', 'pr', 'Pull Requests', 'pr', []),
-  category('skill', 'skill', 'Skills', 'skill', SKILLS),
+  category('skill', 'skill', 'Skills', 'skill', SKILLS, { directTrigger: '$' }),
   category('agent_role', 'role', 'Agent Roles', 'agent_role', AGENT_ROLES),
-  category('command', 'cmd', 'Commands', 'command', COMMANDS),
+  category('session', 'session', 'Sessions', 'session', SESSION_CANDIDATES),
+  category('command', 'cmd', 'Commands', 'command', COMMANDS, { directTrigger: '/' }),
 ];
+
+/* The real menu surface, laid out where floating-ui would put it. */
+const harness = stylex.create({
+  menu: { width: 'max-content', maxWidth: '100%', marginTop: '8px' },
+  menuWithDetail: { width: 'min(640px, 100%)' },
+  floatingFrame: {
+    display: 'flex',
+    flexDirection: 'column',
+    justifyContent: 'flex-end',
+    height: '460px',
+    width: '760px',
+    padding: '24px',
+    boxSizing: 'border-box',
+  },
+});
 
 type HarnessProps = {
   /** Text after `@`, exactly what the composer would hold. */
@@ -269,32 +315,19 @@ function Harness({ search, categories = CATEGORIES, withDetail = true, narrow }:
           className="w-full rounded-md border border-input-border bg-input p-2"
           aria-label="composer"
         />
-        <div className="mt-2 w-max max-w-full overflow-hidden rounded-md border border-border bg-popover text-popover-foreground shadow-md">
+        <div
+          {...stylex.props(
+            mentionSurface.surface,
+            harness.menu,
+            detail != null && harness.menuWithDetail
+          )}
+        >
           <MentionTwoLevelMenuBody view={view} onBack={() => {}} showBack detail={detail} />
         </div>
       </Mention>
     </div>
   );
 }
-
-const SESSION_CANDIDATES: MentionCandidate[] = [
-  {
-    value: 'session-current',
-    label: 'current-parser-work',
-    insertText: '@current-parser-work',
-    kind: 'session',
-    icon: 'session',
-    title: 'Current parser work',
-  },
-  {
-    value: 'session-other',
-    label: 'other-project-work',
-    insertText: '@other-project-work',
-    kind: 'session',
-    icon: 'session',
-    title: 'Other project work',
-  },
-];
 
 function SessionScopeHarness({
   initialScope,
@@ -345,6 +378,40 @@ function SessionScopeHarness({
 
   return (
     <Harness search="session:" categories={[sessionCategory]} withDetail={false} narrow={narrow} />
+  );
+}
+
+/**
+ * The real floating menu over a live textarea: type `@`, `$` or `/` to open it
+ * at the caret, exactly as the composer does. The textarea sits low in the frame
+ * so the menu flips above it, the way it does at the bottom of a conversation.
+ */
+function FloatingHarness() {
+  const [value, setValue] = React.useState('');
+  const [mentions, setMentions] = React.useState<MentionRange[]>([]);
+  const [selected, setSelected] = React.useState<string[]>([]);
+  return (
+    <div {...stylex.props(harness.floatingFrame)}>
+      <Mention
+        triggers={['@', '$', '/']}
+        inputValue={value}
+        onInputValueChange={setValue}
+        mentions={mentions}
+        onMentionsChange={setMentions}
+        value={selected}
+        onValueChange={setSelected}
+        onFilter={(options) => options}
+      >
+        <MentionInput
+          value={value}
+          onChange={() => {}}
+          className="w-full rounded-md border border-input-border bg-input p-2"
+          aria-label="composer"
+          rows={3}
+        />
+        <MentionTwoLevelMenu categories={CATEGORIES} surface="unknown" />
+      </Mention>
+    </div>
   );
 }
 
@@ -476,4 +543,10 @@ export const AgentRoleAvailability: Story = {
 
 export const AgentRoleAvailabilityNarrow: Story = {
   args: { ...AgentRoleAvailability.args, narrow: true },
+};
+
+/** The real popup, placed at the caret: type `@`, `$` or `/` in the textarea. */
+export const FloatingAtCaret: Story = {
+  args: { search: '' },
+  render: () => <FloatingHarness />,
 };

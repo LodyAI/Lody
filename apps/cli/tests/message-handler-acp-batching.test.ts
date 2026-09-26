@@ -11,6 +11,7 @@ import type {
   WorkspaceId,
 } from '@lody/shared';
 
+import type { SessionUsageUpdate } from 'acp-extension-core';
 import { MessageHandler } from '../src/lib/message-handler';
 import { SessionDocument } from '../src/lib/loro/doc';
 import type { LoroDocumentManager } from '../src/lib/loro/doc';
@@ -359,6 +360,74 @@ describe('MessageHandler ACP batching', () => {
 
       const historyAfterTimerDrain = await doc.sessionData.history.readAll();
       expect(readItems(historyAfterTimerDrain[0])).toEqual([{ type: 'text', text: 'pending' }]);
+    } finally {
+      await destroyRepoOnRealTimers(repo);
+    }
+  });
+
+  it('records each turn its own token usage deltas, including late reports', async () => {
+    vi.useRealTimers();
+    const sessionId = 'turn-token-usage' as SessionId;
+    const { repo, docs, handler } = await createHandlerHarness([sessionId]);
+    const doc = docs.get(sessionId);
+    if (!doc) throw new Error(`Missing session doc for ${sessionId}`);
+    const host = handler as unknown as {
+      beginConversationTurn(sessionId: SessionId): string;
+      createAssistantEntryForTurn(
+        sessionId: SessionId,
+        sessionDoc: SessionDocument,
+        turnId: string
+      ): Promise<void>;
+      finalizeACPState(sessionId: SessionId, turnId?: string): Promise<void>;
+      recordTurnTokenUsage(
+        sessionId: SessionId,
+        update: SessionUsageUpdate
+      ): Promise<void> | undefined;
+    };
+    const row = (inputTokens: number, cacheReadInputTokens: number) => ({
+      inputTokens,
+      outputTokens: 20,
+      cacheReadInputTokens,
+      cacheCreationInputTokens: 5,
+      reasoningOutputTokens: 7,
+    });
+    // Cumulative modelUsage is deliberately large: only `delta` is attributed.
+    const report = (delta?: ReturnType<typeof row>): SessionUsageUpdate => ({
+      sessionId,
+      usage: row(1, 1),
+      modelUsage: { model: row(900_000, 900_000) },
+      ...(delta ? { delta: { usage: delta, modelUsage: { model: delta } } } : {}),
+    });
+
+    try {
+      const first = host.beginConversationTurn(sessionId);
+      await host.createAssistantEntryForTurn(sessionId, doc, first);
+      await host.recordTurnTokenUsage(sessionId, report(row(100, 1000)));
+      await host.recordTurnTokenUsage(sessionId, report(row(50, 2000)));
+      await host.recordTurnTokenUsage(sessionId, report());
+      await host.finalizeACPState(sessionId, first);
+      // Background work reporting after the turn ended belongs to that turn.
+      await host.recordTurnTokenUsage(sessionId, report(row(10, 0)));
+
+      const second = host.beginConversationTurn(sessionId);
+      await host.createAssistantEntryForTurn(sessionId, doc, second);
+      await host.recordTurnTokenUsage(sessionId, report(row(3, 4)));
+      await host.finalizeACPState(sessionId, second);
+
+      const reopened = new SessionDocument(repo, sessionId, async () => {});
+      await reopened.initOffline({ history: [] });
+      const history = await reopened.sessionData.history.readAll();
+      expect(history.find((entry) => entry.id === first)?.tokenUsage).toEqual({
+        inputTokens: 160,
+        outputTokens: 60,
+        cacheReadInputTokens: 3000,
+        cacheCreationInputTokens: 15,
+        reasoningOutputTokens: 21,
+      });
+      expect(history.find((entry) => entry.id === second)?.tokenUsage).toMatchObject({
+        inputTokens: 3,
+        cacheReadInputTokens: 4,
+      });
     } finally {
       await destroyRepoOnRealTimers(repo);
     }
