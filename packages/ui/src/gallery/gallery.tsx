@@ -64,6 +64,7 @@ import { toggle as toggleTokens } from '../toggle/toggle.tokens.stylex';
 import { Toolbar } from '../toggle/toolbar';
 import { Pagination } from '../table/pagination';
 import { Popover } from '../popover/popover';
+import { PreviewCard } from '../popover/preview-card';
 import { popup } from '../popup/popup.tokens.stylex';
 import { surface } from '../popup/surface';
 import { Table, type TableColumn, type TableSize, type TableSorting } from '../table/table';
@@ -1900,6 +1901,26 @@ function PopoverReplica() {
         </dl>
       </div>
     </Row>
+  );
+}
+
+/**
+ * A preview card a reader can hover: the popover's surface, opened by resting
+ * the pointer rather than by a press, and holding facts rather than a form.
+ */
+function BranchPreviewCard() {
+  return (
+    <PreviewCard.Root>
+      <PreviewCard.Trigger href="#preview-card">feat/session-preview</PreviewCard.Trigger>
+      <PreviewCard.Content side="bottom" align="start">
+        <div {...stylex.props(surface.panelHeader)}>
+          <h3 {...stylex.props(surface.panelTitle)}>feat/session-preview</h3>
+          <p {...stylex.props(surface.panelDescription)}>
+            A worktree on Studio Mac, 3 commits ahead of main.
+          </p>
+        </div>
+      </PreviewCard.Content>
+    </PreviewCard.Root>
   );
 }
 
@@ -4446,7 +4467,7 @@ export function UiGallery({ palettes = 'both' }: UiGalleryProps) {
 
       <Section
         title="Popover · a surface with content on it"
-        rule="A popover is the floating rung a Select list and a Menu already open, holding content instead of rows. It replaces five of a list's declarations: the width a list takes from the control that shows its value, the 4px inset that lets a row bleed to the surface's edge, and the three that make the type a control's — size, weight and tracking — because what is in a popover is sentences at 14 and weight 400. A control placed in one brings its own step. It is opened by whatever the surface already had there, through render, the way a menu is."
+        rule="A popover is the floating rung a Select list and a Menu already open, holding content instead of rows. It replaces five of a list's declarations: the width a list takes from the control that shows its value, the 4px inset that lets a row bleed to the surface's edge, and the three that make the type a control's — size, weight and tracking — because what is in a popover is sentences at 14 and weight 400. A control placed in one brings its own step. It is opened by whatever the surface already had there, through render, the way a menu is. A preview card is the same surface opened by a resting pointer: it takes no focus and is not a dialog."
       >
         <PaletteSplit palettes={palettes}>
           <Rows>
@@ -4454,6 +4475,12 @@ export function UiGallery({ palettes = 'both' }: UiGalleryProps) {
               <LegendKey>popover</LegendKey>
               <Cluster>
                 <FilterPopover />
+              </Cluster>
+            </Row>
+            <Row>
+              <LegendKey>preview card</LegendKey>
+              <Cluster>
+                <BranchPreviewCard />
               </Cluster>
             </Row>
             <PopoverReplica />

@@ -5,11 +5,7 @@ import type { MachineId } from '@lody/shared';
 import { useMachineOnlineStatus } from '@/hooks/use-machine-online-status';
 import { cn } from '@/lib/utils';
 import { UserAvatar } from '@/components/user-avatar';
-import {
-  SIDEBAR_CARD_FRAME_CLASS,
-  SidebarHoverCard,
-  cardSurfaceStyle,
-} from '@/components/session-info-hover-card';
+import { SidebarHoverCard } from '@/components/session-info-hover-card';
 
 /** A machine's `os` (Node's `process.platform`) as people name it. */
 const OS_LABELS: Readonly<Record<string, string>> = {
@@ -124,7 +120,7 @@ function SidebarMachineCard({ machine }: { machine: SidebarMachineInfo }) {
   });
 
   return (
-    <div style={cardSurfaceStyle} className={SIDEBAR_CARD_FRAME_CLASS}>
+    <div className="flex min-w-0 flex-col text-xs text-foreground">
       <div className="mb-2 flex items-baseline gap-2">
         <span className="min-w-0 flex-1 truncate text-sm text-foreground" title={machine.name}>
           {machine.name}

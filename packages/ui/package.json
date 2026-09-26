@@ -32,6 +32,7 @@
     "./password-input": "./src/field/password-input.tsx",
     "./popover": "./src/popover/popover.tsx",
     "./popup-container": "./src/popup/portal-container.tsx",
+    "./preview-card": "./src/popover/preview-card.tsx",
     "./progress": "./src/feedback/progress.tsx",
     "./radio": "./src/field/radio.tsx",
     "./select": "./src/field/select.tsx",

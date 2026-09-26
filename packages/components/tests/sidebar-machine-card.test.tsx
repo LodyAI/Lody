@@ -98,7 +98,8 @@ describe('sidebar machine group', () => {
       vi.advanceTimersByTime(1000);
     });
 
-    const card = document.body.querySelector('[data-radix-popper-content-wrapper]');
+    // The card portals out of the trigger's container, straight under the body.
+    const card = [...document.body.children].find((node) => node !== container);
     expect(card?.textContent).toContain('Lampese.local');
     expect(card?.textContent).toContain('Offline');
     expect(card?.textContent).toContain('Lampese');

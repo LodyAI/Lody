@@ -143,6 +143,8 @@ export type {
   PopoverTriggerProps,
 } from './popover/popover';
 export { PopupContainerProvider, usePopupContainer } from './popup/portal-container';
+export { PreviewCard } from './popover/preview-card';
+export type { PreviewCardContentProps } from './popover/preview-card';
 export type { PopupContainer } from './popup/portal-container';
 export { Radio, RadioGroup } from './field/radio';
 export type { RadioGroupProps, RadioProps } from './field/radio';

@@ -52,8 +52,9 @@ with this package's `stylex-options.ts`.
 - Every trigger here is Base UI's, unstyled: a surface opens a menu, popover or
   modal with what it had there, `render={<Button …/>}`. Post-close focus is the
   product's, as `finalFocus`.
-- `Popover` reads `popup` too and replaces five of a list's declarations;
-  `test/popover.test.tsx` names them and pins them.
+- `Popover` reads `popup` and replaces five of a list's declarations
+  (`test/popover.test.tsx` pins them); `PreviewCard` is it hovered open, with
+  no focus and no dialog role.
 - Dialog, AlertDialog and Drawer are one family on the modal rung sharing
   `dialog/surface.ts`; only their way in and dismissal differ. An outside press
   does not answer an alert dialog; Escape does. `Content` names its panel to
@@ -63,8 +64,8 @@ with this package's `stylex-options.ts`.
   viewport lays it out so the panel's `transform` carries the drag. `side` is
   the writing direction's edge, `inset` the second axis.
 - `Tooltip` is on the floating rung (popup's colours, its own geometry) and
-  **never inverts**: light in light, dark in dark. It is visual-only — no
-  role, no `aria-describedby` — so every trigger states its `aria-label`.
+  **never inverts**. It is visual-only — no role, no `aria-describedby` — so
+  every trigger states its `aria-label`.
 - Tabs, Accordion and Collapsible are one `disclosure` family sharing
   `disclosure/surface.ts`. `Tabs.List` draws its own indicator and states the
   size once for every tab; a revealed panel's padding rides on a child: Base UI

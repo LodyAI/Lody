@@ -97,6 +97,14 @@ than three surfaces, so a panel and the menu beside it cannot open at two radii
 over two shadows. What it holds is prose, so its text follows the prose rule
 rather than the rule a row's label follows.
 
+The same panel can also be offered to a resting pointer: facts about the thing
+under it — where a conversation runs, its branch, its pull request — shown
+without a press. It is that panel rather than a fourth floating material, so it
+lifts on the same shadow and draws no line around itself. It takes no focus and
+is not announced as a dialog, since a pointer sweeping down a list passes over
+it on the way somewhere else; a surface that shows one card per row decides for
+itself how long a pointer must rest and how many cards may be open at once.
+
 A surface that must be answered before a person carries on is a panel over the
 whole window, with the page receding behind it. There are three, and they are
 one thing arriving three ways: one a person may dismiss, and which shows that it
@@ -430,6 +438,9 @@ the migration of the Radix menus still owed to it are recorded in the
 The popover on that same surface, the modal rung the dialog family shares, the
 tooltip, and the migration still owed to them are recorded in the
 [UI overlay primitives note](../.agents/notes/implemented/feature/2026-09-12-ui-overlay-primitives.md).
+The preview card on the popover's surface, and the session info card that moved
+onto it, are recorded in the
+[session preview card note](../.agents/notes/implemented/feature/2026-09-26-session-preview-card.md).
 The three disclosures and the five parts that report are recorded in the
 [UI disclosure primitives note](../.agents/notes/implemented/feature/2026-09-12-ui-disclosure-primitives.md)
 and the

@@ -13,7 +13,7 @@ behavior.
 | `src/field`         | Base UI Field composition: label, Input, Textarea, NumberField, PasswordInput, Checkbox, Radio, Switch, Select, Combobox, help, and error |
 | `src/popup`         | The floating surface a list, a menu or a popover opens on, and its tokens                                                                 |
 | `src/menu`          | Menu, ContextMenu and Menubar: commands on that surface                                                                                   |
-| `src/popover`       | The same surface holding content rather than rows                                                                                         |
+| `src/popover`       | The same surface holding content rather than rows: `Popover` pressed open, `PreviewCard` hovered open                                     |
 | `src/dialog`        | Dialog and AlertDialog: the modal rung, and its tokens                                                                                    |
 | `src/drawer`        | The same rung, arriving from an edge and draggable back out                                                                               |
 | `src/tooltip`       | The small floating chip that names what is under the pointer                                                                              |
@@ -227,6 +227,21 @@ than prose.
     <Popover.Close render={<Button size="small" />}>Apply</Popover.Close>
   </Popover.Content>
 </Popover.Root>
+```
+
+A `PreviewCard` is the popover's surface opened by a resting pointer rather than
+a press. It holds facts about what is under the pointer, takes no focus and is
+not a dialog, so a list swept by a pointer is not announced as a run of dialogs.
+Its `Trigger` is Base UI's link with its own delays; a surface that owns the hover
+intent — the session list shares one warm window across every row — controls
+`Root open` and names the row with `Content anchor={ref}` instead.
+
+```tsx
+<PreviewCard.Root open={open} onOpenChange={setOpen}>
+  <PreviewCard.Content anchor={rowRef} side="right" align="start">
+    …
+  </PreviewCard.Content>
+</PreviewCard.Root>
 ```
 
 `Dialog`, `AlertDialog` and `Drawer` are one family on the modal rung — the

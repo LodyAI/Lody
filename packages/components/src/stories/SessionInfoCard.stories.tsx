@@ -41,6 +41,7 @@ const meta = {
     latestMessageAt: hoursAgo(2),
     now,
     onOpenPullRequest: fn(),
+    standalone: true,
   },
 } satisfies Meta<typeof SessionInfoCard>;
 
@@ -74,6 +75,14 @@ export const TeamWithAuthor: Story = {
     ...githubArgs,
     author: { name: 'Alex Rivera', image: null },
     prCiRuns: ciPassing,
+    sharing: {
+      visibility: 'team',
+      canManage: true,
+      machineId: 'machine-story' as MachineId,
+      localProjectId: null,
+      machineName: 'Studio Mac',
+      projectName: null,
+    },
   },
 };
 
@@ -185,7 +194,7 @@ export const LongBranchName: Story = {
 export const HoverInteraction: Story = {
   render: (args) => (
     <div className="w-64 rounded-lg border border-border p-2">
-      <SessionInfoHoverCard {...args} {...githubArgs} prCiRuns={ciPassing}>
+      <SessionInfoHoverCard {...args} {...githubArgs} prCiRuns={ciPassing} standalone={false}>
         <div
           role="button"
           tabIndex={0}
