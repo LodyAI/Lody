@@ -3,12 +3,13 @@
 Binding rules live in [AGENTS.md](AGENTS.md); this index explains ownership.
 Child directories such as `sessions/`, `mobile/`, `chat/`, and `archive/` own their scoped rules.
 
-| Area                | Entry points                                                                                                     | Responsibility                                        |
-| ------------------- | ---------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------- |
-| Sidebar             | [`loro-sidebar.tsx`](loro-sidebar.tsx), [`session-list.tsx`](session-list.tsx)                                   | Organizes workspace and session navigation.           |
-| Desktop layout      | [`web-workspace-layout.tsx`](web-workspace-layout.tsx), [`sidebar-update-banner.tsx`](sidebar-update-banner.tsx) | Owns the shell's safe areas and update notice.        |
-| Provider readiness  | [`shared/agent-readiness-mark.tsx`](shared/agent-readiness-mark.tsx)                                             | Draws setup state across settings and onboarding.     |
-| Conversation access | [`session-sharing.tsx`](session-sharing.tsx), [`sharing/`](sharing/)                                             | Presents team visibility and static sharing controls. |
+| Area                | Entry points                                                                                                     | Responsibility                                            |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------- |
+| Sidebar             | [`loro-sidebar.tsx`](loro-sidebar.tsx), [`session-list.tsx`](session-list.tsx)                                   | Organizes workspace and session navigation.               |
+| Desktop layout      | [`web-workspace-layout.tsx`](web-workspace-layout.tsx), [`sidebar-update-banner.tsx`](sidebar-update-banner.tsx) | Owns the shell's safe areas and update notice.            |
+| Provider readiness  | [`shared/agent-readiness-mark.tsx`](shared/agent-readiness-mark.tsx)                                             | Draws setup state across settings and onboarding.         |
+| Shared cues         | [`shared/`](shared/)                                                                                             | Draws cross-surface drop, run-config, and transport cues. |
+| Conversation access | [`session-sharing.tsx`](session-sharing.tsx), [`sharing/`](sharing/)                                             | Presents team visibility and static sharing controls.     |
 
 ## Sidebar and session rows
 
@@ -87,6 +88,18 @@ compositable on Retina displays. The migration keeps the previous rendered
 geometry and palette; its verification and the one product-theme colour bridge
 are recorded in the
 [StyleX migration note](../../../../.agents/notes/implemented/simplification/2026-09-26-agent-readiness-stylex.md).
+
+## Shared cues
+
+The [conversation drop overlay](shared/conversation-drop-overlay.tsx) paints a
+non-interactive mask over the active drop zone; the parent owns hit testing and
+drag state. The [DeepSeek delegation warning](shared/deepseek-delegation-warning.tsx)
+supplies the same linked warning contents to desktop and mobile run configuration.
+The [MCP transport icon](shared/mcp-transport.tsx) supplies the transport glyph to
+settings controls. Their visual rules are component-local StyleX, with the
+overlay's light/dark alpha tied to the app's explicit theme. See the
+[migration decision](../../../../.agents/notes/implemented/simplification/2026-09-26-shared-cues-stylex.md)
+for the visual-equivalence boundary.
 
 ## Conversation access
 
