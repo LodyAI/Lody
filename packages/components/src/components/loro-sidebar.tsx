@@ -34,7 +34,7 @@ import { ScrollArea } from '@/ui/scroll-area';
 import {
   AppWindow,
   Archive,
-  LayoutGrid,
+  CircleHelp,
   BookOpen,
   Bug,
   ClipboardList,
@@ -1459,15 +1459,36 @@ export const LoroSidebar = memo(function LoroSidebar({
         <div className={getLoroSidebarFooterClassName(isMobile)}>
           {!isMobile ? renderWorkspaceControl('top') : null}
           <div className={cn('flex items-center gap-1', !isMobile && 'ml-auto shrink-0 gap-2')}>
-            <IconButton label="Settings" onClick={onSettingsClicked}>
-              <Settings strokeWidth={1.5} />
-            </IconButton>
+            <Menu.Root>
+              <Menu.Trigger
+                render={
+                  <IconButton label={t('menu.help', 'Help')}>
+                    <CircleHelp strokeWidth={1.5} />
+                  </IconButton>
+                }
+              />
+              <Menu.Content side="top" align="end" className="min-w-[160px]">
+                <Menu.Item onClick={() => onDocsClicked?.()}>
+                  <BookOpen className="h-4 w-4" />
+                  {mergedLabels.docs}
+                </Menu.Item>
+                <Menu.Item onClick={() => onJoinCommunityClicked?.()}>
+                  <Users className="h-4 w-4" />
+                  {mergedLabels.joinCommunity}
+                </Menu.Item>
+                <Menu.Item onClick={() => onFeedbackClicked?.()}>
+                  <MessageSquareMore className="h-4 w-4" />
+                  {mergedLabels.feedback}
+                </Menu.Item>
+                <Menu.Item onClick={() => onBugReportClicked?.()}>
+                  <Bug className="h-4 w-4" />
+                  {mergedLabels.bugReport}
+                </Menu.Item>
+              </Menu.Content>
+            </Menu.Root>
 
-            {/* Low-frequency places (Archive, Help) share one "More" menu so
-                the footer does not keep an always-visible archive icon. While
-                Archive is open, the same slot becomes its exit: the archive
-                icon, turning into a back arrow on hover, returns to where the
-                user came from (Home when there is no history). */}
+            {/* While Archive is open, its button returns to the previous page
+                (Home when there is no history). */}
             {activeNav === 'archive' ? (
               <IconButton
                 label={t('archive.leave', 'Leave Archive')}
@@ -1493,39 +1514,14 @@ export const LoroSidebar = memo(function LoroSidebar({
                 />
               </IconButton>
             ) : (
-              <Menu.Root>
-                <Menu.Trigger
-                  render={
-                    <IconButton label={t('common.more', 'More')}>
-                      <LayoutGrid strokeWidth={1.5} />
-                    </IconButton>
-                  }
-                />
-                <Menu.Content side="top" align="end" className="min-w-[160px]">
-                  <Menu.Item onClick={() => onArchiveClicked?.()}>
-                    <Archive className="h-4 w-4" />
-                    {t('archive.title', 'Archive')}
-                  </Menu.Item>
-                  <Menu.Separator />
-                  <Menu.Item onClick={() => onDocsClicked?.()}>
-                    <BookOpen className="h-4 w-4" />
-                    {mergedLabels.docs}
-                  </Menu.Item>
-                  <Menu.Item onClick={() => onJoinCommunityClicked?.()}>
-                    <Users className="h-4 w-4" />
-                    {mergedLabels.joinCommunity}
-                  </Menu.Item>
-                  <Menu.Item onClick={() => onFeedbackClicked?.()}>
-                    <MessageSquareMore className="h-4 w-4" />
-                    {mergedLabels.feedback}
-                  </Menu.Item>
-                  <Menu.Item onClick={() => onBugReportClicked?.()}>
-                    <Bug className="h-4 w-4" />
-                    {mergedLabels.bugReport}
-                  </Menu.Item>
-                </Menu.Content>
-              </Menu.Root>
+              <IconButton label={t('archive.title', 'Archive')} onClick={onArchiveClicked}>
+                <Archive strokeWidth={1.5} />
+              </IconButton>
             )}
+
+            <IconButton label={t('settings.title', 'Settings')} onClick={onSettingsClicked}>
+              <Settings strokeWidth={1.5} />
+            </IconButton>
           </div>
 
           {isMobile ? (

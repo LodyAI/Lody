@@ -171,38 +171,60 @@ describe('LoroSidebar pinned section', () => {
     }
   );
 
-  it('keeps Archive and Help behind one More menu in the footer', async () => {
-    const onArchiveClicked = vi.fn();
-    const onDocsClicked = vi.fn();
-    renderSidebar({ onArchiveClicked, onDocsClicked });
+  it('orders Help, Archive, and Settings and keeps their destinations reachable', async () => {
+    let destination = 'home';
+    renderSidebar({
+      onArchiveClicked: () => {
+        destination = 'archive';
+      },
+      onDocsClicked: () => {
+        destination = 'docs';
+      },
+      onSettingsClicked: () => {
+        destination = 'settings';
+      },
+    });
 
-    // No standalone Archive or Help buttons: only Settings and More.
     const footerButton = (name: string) =>
       Array.from(container?.querySelectorAll('button') ?? []).find(
         (button) => button.textContent?.trim() === name
       );
-    expect(footerButton('Archive')).toBeUndefined();
-    expect(footerButton('Help')).toBeUndefined();
-    const more = footerButton('More');
-    expect(more).toBeDefined();
+    const help = footerButton('Help');
+    expect(help).toBeDefined();
+    expect(
+      Array.from(help!.parentElement!.children).map((button) => button.textContent?.trim())
+    ).toEqual(['Help', 'Archive', 'Settings']);
+    await act(async () => footerButton('Archive')?.click());
+    expect(destination).toBe('archive');
+    await act(async () => footerButton('Settings')?.click());
+    expect(destination).toBe('settings');
 
-    await act(async () => more?.click());
+    await act(async () => help?.click());
     const items = Array.from(document.querySelectorAll<HTMLElement>('[role="menuitem"]'));
-    expect(items[0]?.textContent).toBe('Archive');
-    expect(items.some((item) => item.textContent?.includes('Docs'))).toBe(true);
+    expect(items.some((item) => item.textContent?.includes('Archive'))).toBe(false);
+    const docs = items.find((item) => item.textContent?.includes('Docs'));
+    expect(docs).toBeDefined();
 
-    await act(async () => items[0]?.click());
-    expect(onArchiveClicked).toHaveBeenCalledTimes(1);
+    await act(async () => docs?.click());
+    expect(destination).toBe('docs');
   });
 
-  it('turns the More slot into the Archive exit while Archive is open', () => {
-    const onHomeClicked = vi.fn();
-    renderSidebar({ activeNav: 'archive', onHomeClicked });
+  it('keeps Help and Settings around the Archive exit while Archive is open', () => {
+    let destination = 'archive';
+    renderSidebar({
+      activeNav: 'archive',
+      onHomeClicked: () => {
+        destination = 'home';
+      },
+    });
 
     const buttons = Array.from(container?.querySelectorAll('button') ?? []);
     expect(buttons.some((button) => button.textContent?.trim() === 'More')).toBe(false);
     const exit = buttons.find((button) => button.textContent?.trim() === 'Leave Archive');
     expect(exit).toBeDefined();
+    expect(
+      Array.from(exit!.parentElement!.children).map((button) => button.textContent?.trim())
+    ).toEqual(['Help', 'Leave Archive', 'Settings']);
     expect(exit?.querySelector('svg.lucide-archive')).not.toBeNull();
     expect(exit?.querySelector('svg.lucide-arrow-left')).not.toBeNull();
 
@@ -210,7 +232,7 @@ describe('LoroSidebar pinned section', () => {
     flushSync(() => {
       exit?.click();
     });
-    expect(onHomeClicked).toHaveBeenCalledTimes(1);
+    expect(destination).toBe('home');
   });
 
   it('renders back and forward next to the collapse toggle', () => {
