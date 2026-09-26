@@ -323,7 +323,13 @@ const summarizePreviewConnectionForMeta = (
 
 export class PreviewService {
   private readonly activeTunnels = new Map<SessionId, QuickTunnelSession>();
+  private readonly candidateReports = new Map<SessionId, object>();
+  private readonly reportedStarts = new Map<
+    SessionId,
+    { target: PreviewTarget; cancellation: AbortController; done: Promise<unknown> }
+  >();
   private readonly operations = new Map<SessionId, Promise<unknown>>();
+  private readonly previewWrites = new Map<SessionId, Promise<unknown>>();
   private readonly cancelled = new Map<SessionId, AbortController>();
   private readonly slotIds = new Map<SessionId, string>();
   private readonly previewCreateAttempts: number[] = [];
@@ -342,7 +348,8 @@ export class PreviewService {
   }
 
   async reportCandidate(
-    request: PreviewCandidateReportRequest
+    request: PreviewCandidateReportRequest,
+    invokingUserId?: string
   ): Promise<PreviewCandidateReportResponse> {
     const scopeFailure = this.validateRequestScope(request.machineId, request.workspaceId);
     if (scopeFailure) {
@@ -355,59 +362,149 @@ export class PreviewService {
       };
     }
 
-    const session = await this.getSessionMeta(request.sessionId);
-    const normalized = normalizeTarget(request.target);
-    const now = this.now();
-    const baseCandidate: PreviewCandidate = {
-      status: 'invalid',
-      candidateId: randomUUID(),
-      target: isValidationFailure(normalized) ? request.target : normalized,
-      source: request.source,
-      reportedAt: now,
-      updatedAt: now,
-    };
+    const report = {};
+    this.candidateReports.set(request.sessionId, report);
+    const publishCandidate = (candidate: PreviewCandidate) =>
+      this.patchSessionPreview(
+        request.sessionId,
+        { previewCandidate: candidate },
+        () => this.candidateReports.get(request.sessionId) === report
+      );
+    try {
+      const session = await this.getSessionMeta(request.sessionId);
+      const normalized = normalizeTarget(request.target);
+      const now = this.now();
+      const baseCandidate: PreviewCandidate = {
+        status: 'invalid',
+        candidateId: randomUUID(),
+        target: isValidationFailure(normalized) ? request.target : normalized,
+        source: request.source,
+        reportedAt: now,
+        updatedAt: now,
+      };
 
-    if (!session.ok) {
-      const candidate = this.withCandidateFailure(baseCandidate, 'report', session.failure);
-      await this.patchSessionPreview(request.sessionId, { previewCandidate: candidate });
-      return this.candidateResponse(request.sessionId, false, candidate, session.failure);
+      if (!session.ok) {
+        const candidate = this.withCandidateFailure(baseCandidate, 'report', session.failure);
+        await publishCandidate(candidate);
+        return this.candidateResponse(request.sessionId, false, candidate, session.failure);
+      }
+
+      if (isValidationFailure(normalized)) {
+        const candidate = this.withCandidateFailure(baseCandidate, 'report', normalized);
+        await publishCandidate(candidate);
+        return this.candidateResponse(request.sessionId, false, candidate, normalized);
+      }
+
+      const tcpFailure = await probeTcp(normalized);
+      if (tcpFailure) {
+        const candidate = this.withCandidateFailure(baseCandidate, 'report', tcpFailure);
+        await publishCandidate(candidate);
+        return this.candidateResponse(request.sessionId, false, candidate, tcpFailure);
+      }
+
+      const candidate: PreviewCandidate = {
+        ...baseCandidate,
+        status: 'available',
+        target: normalized,
+        validation: {
+          lastCheckedAt: now,
+          stage: 'report',
+          ok: true,
+        },
+      };
+      await publishCandidate(candidate);
+      // The caller supplies identity from the local active execution, never from
+      // the report payload, session owner, or daemon account as a fallback.
+      if (
+        this.candidateReports.get(request.sessionId) === report &&
+        invokingUserId === session.meta.userId &&
+        this.deps.remotePreview &&
+        this.deps.runtimeBaseUrl
+      ) {
+        this.startReportedPreview(request, normalized, invokingUserId);
+      }
+      return {
+        type: 'session/preview-candidate-report_response',
+        sessionId: request.sessionId,
+        success: true,
+        candidate,
+      };
+    } finally {
+      if (this.candidateReports.get(request.sessionId) === report)
+        this.candidateReports.delete(request.sessionId);
     }
+  }
 
-    if (isValidationFailure(normalized)) {
-      const candidate = this.withCandidateFailure(baseCandidate, 'report', normalized);
-      await this.patchSessionPreview(request.sessionId, { previewCandidate: candidate });
-      return this.candidateResponse(request.sessionId, false, candidate, normalized);
+  private startReportedPreview(
+    request: PreviewCandidateReportRequest,
+    target: PreviewTarget,
+    invokingUserId: string
+  ): void {
+    const previous = this.reportedStarts.get(request.sessionId);
+    if (
+      previous &&
+      !previous.cancellation.signal.aborted &&
+      sameTargetOrigin(previous.target, target)
+    )
+      return;
+    if (previous) {
+      previous.cancellation.abort(new Error('Preview candidate replaced'));
+      this.activeTunnels.get(request.sessionId)?.cancel('replaced');
     }
-
-    const tcpFailure = await probeTcp(normalized);
-    if (tcpFailure) {
-      const candidate = this.withCandidateFailure(baseCandidate, 'report', tcpFailure);
-      await this.patchSessionPreview(request.sessionId, { previewCandidate: candidate });
-      return this.candidateResponse(request.sessionId, false, candidate, tcpFailure);
-    }
-
-    const candidate: PreviewCandidate = {
-      ...baseCandidate,
-      status: 'available',
-      target: normalized,
-      validation: {
-        lastCheckedAt: now,
-        stage: 'report',
-        ok: true,
-      },
-    };
-    await this.patchSessionPreview(request.sessionId, {
-      previewCandidate: candidate,
+    const cancellation = new AbortController();
+    const done = this.serialize(request.sessionId, async () => {
+      cancellation.signal.throwIfAborted();
+      const session = await this.getSessionMeta(request.sessionId);
+      cancellation.signal.throwIfAborted();
+      // Reports may race while their target probes and document writes await.
+      // Only the currently reported origin may start in the lifecycle queue.
+      if (
+        !session.ok ||
+        session.meta.previewCandidate?.status !== 'available' ||
+        !sameTargetOrigin(session.meta.previewCandidate.target, target)
+      )
+        return;
+      await this.createPreviewExclusive(
+        {
+          type: 'session/preview-create',
+          machineId: request.machineId,
+          workspaceId: request.workspaceId,
+          sessionId: request.sessionId,
+          requestedByUserId: invokingUserId,
+          target,
+        },
+        cancellation.signal,
+        'agent-report'
+      );
     });
-    return {
-      type: 'session/preview-candidate-report_response',
-      sessionId: request.sessionId,
-      success: true,
-      candidate,
-    };
+    const entry = { target, cancellation, done };
+    this.reportedStarts.set(request.sessionId, entry);
+    void done
+      .catch((error: unknown) => {
+        if (!cancellation.signal.aborted)
+          this.deps.logger.error('Failed to prepare reported preview', error);
+      })
+      .finally(() => {
+        if (this.reportedStarts.get(request.sessionId) === entry)
+          this.reportedStarts.delete(request.sessionId);
+      });
   }
 
   async createPreview(request: SessionPreviewCreateRequest): Promise<SessionPreviewCreateResponse> {
+    // A Browser click joins agent-started acquisition, then goes through the
+    // normal caller/target approval checks and reuses the resulting endpoint.
+    const reported = this.reportedStarts.get(request.sessionId);
+    if (reported) {
+      await reported.done.catch(() => {});
+      if (reported.cancellation.signal.aborted)
+        return {
+          type: 'session/preview-create_response',
+          sessionId: request.sessionId,
+          success: false,
+          error: 'preview_already_active',
+          message: 'Preview preparation was cancelled or replaced. Open the current preview again.',
+        };
+    }
     if (this.operations.has(request.sessionId))
       return {
         type: 'session/preview-create_response',
@@ -426,8 +523,11 @@ export class PreviewService {
   }
 
   private async createPreviewExclusive(
-    request: SessionPreviewCreateRequest,
-    signal: AbortSignal
+    request: Omit<SessionPreviewCreateRequest, 'approval'> & {
+      approval?: SessionPreviewCreateRequest['approval'];
+    },
+    signal: AbortSignal,
+    source: 'user' | 'agent-report' = 'user'
   ): Promise<SessionPreviewCreateResponse> {
     const scopeFailure = this.validateRequestScope(request.machineId, request.workspaceId);
     if (scopeFailure) {
@@ -456,10 +556,11 @@ export class PreviewService {
     }
 
     if (
-      !request.approval ||
-      request.approval.confirmedByUserId !== request.requestedByUserId ||
-      request.approval.confirmedAt < now - PREVIEW_APPROVAL_MAX_AGE_MS ||
-      request.approval.confirmedAt > now + PREVIEW_APPROVAL_FUTURE_SKEW_MS
+      source === 'user' &&
+      (!request.approval ||
+        request.approval.confirmedByUserId !== request.requestedByUserId ||
+        request.approval.confirmedAt < now - PREVIEW_APPROVAL_MAX_AGE_MS ||
+        request.approval.confirmedAt > now + PREVIEW_APPROVAL_FUTURE_SKEW_MS)
     ) {
       const failure: ValidationFailure = {
         code: 'user_confirmation_required',
@@ -474,20 +575,22 @@ export class PreviewService {
       return this.failCreate(request.sessionId, requestedTarget, now, request.target);
     }
 
-    const approvedTarget = normalizeTarget(request.approval.target);
-    const actualTargetClass = classifyBrowserHostname(requestedTarget.host);
-    const approvedTargetClass = request.approval.targetClass.replace('_', '-');
-    if (
-      isValidationFailure(approvedTarget) ||
-      actualTargetClass !== approvedTargetClass ||
-      !sameTargetOrigin(approvedTarget, requestedTarget)
-    ) {
-      const failure: ValidationFailure = {
-        code: 'target_changed',
-        message: 'The approved preview target origin does not match the requested target.',
-        retryable: false,
-      };
-      return this.failCreate(request.sessionId, failure, now, requestedTarget);
+    if (source === 'user' && request.approval) {
+      const approvedTarget = normalizeTarget(request.approval.target);
+      const actualTargetClass = classifyBrowserHostname(requestedTarget.host);
+      const approvedTargetClass = request.approval.targetClass.replace('_', '-');
+      if (
+        isValidationFailure(approvedTarget) ||
+        actualTargetClass !== approvedTargetClass ||
+        !sameTargetOrigin(approvedTarget, requestedTarget)
+      ) {
+        const failure: ValidationFailure = {
+          code: 'target_changed',
+          message: 'The approved preview target origin does not match the requested target.',
+          retryable: false,
+        };
+        return this.failCreate(request.sessionId, failure, now, requestedTarget);
+      }
     }
 
     signal.throwIfAborted();
@@ -621,19 +724,7 @@ export class PreviewService {
         message: `Preview tunnel creation failed: ${formatErrorMessage(failureError)}`,
         retryable: true,
       };
-      const failed: PreviewConnection = {
-        ...creating,
-        status: 'failed',
-        updatedAt: this.now(),
-        error: {
-          stage: 'connect',
-          errorCode: failure.code,
-          message: failure.message,
-          retryable: failure.retryable,
-        },
-      };
-      await this.patchSessionPreview(request.sessionId, { previewConnection: failed });
-      return this.connectionResponse(request.sessionId, false, failed, failure);
+      return this.failCreatingConnection(request.sessionId, creating, failure);
     }
   }
 
@@ -735,6 +826,8 @@ export class PreviewService {
   }
 
   async closeSessionPreviewForCleanup(sessionId: SessionId, reason: string): Promise<void> {
+    this.candidateReports.delete(sessionId);
+    this.reportedStarts.get(sessionId)?.cancellation.abort(new Error(reason));
     this.cancelled.get(sessionId)?.abort(new Error(reason));
     this.activeTunnels.get(sessionId)?.cancel('session_ended');
     return this.serialize(sessionId, async () => {
@@ -769,7 +862,13 @@ export class PreviewService {
   }
 
   async closeAllActiveTunnelsForCleanup(reason: string): Promise<void> {
-    const sessionIds = new Set([...this.activeTunnels.keys(), ...this.operations.keys()]);
+    // Invalidate reports still probing before they can enqueue preparation.
+    this.candidateReports.clear();
+    const sessionIds = new Set([
+      ...this.activeTunnels.keys(),
+      ...this.operations.keys(),
+      ...this.reportedStarts.keys(),
+    ]);
     const results = await Promise.allSettled(
       [...sessionIds].map((sessionId) => this.closeSessionPreviewForCleanup(sessionId, reason))
     );
@@ -807,6 +906,8 @@ export class PreviewService {
         error: 'grant_denied',
         message: 'Only the session initiator can close this preview.',
       };
+    this.candidateReports.delete(request.sessionId);
+    this.reportedStarts.get(request.sessionId)?.cancellation.abort(new Error('Preview revoked'));
     this.cancelled.get(request.sessionId)?.abort(new Error('Preview revoked'));
     this.activeTunnels.get(request.sessionId)?.cancel('revoked');
     return this.serialize(request.sessionId, async () => {
@@ -1116,31 +1217,42 @@ export class PreviewService {
 
   private async patchSessionPreview(
     sessionId: SessionId,
-    patch: SessionPreviewStatePatch
+    patch: SessionPreviewStatePatch,
+    isCurrent: () => boolean = () => true
   ): Promise<void> {
-    try {
-      const sessionDoc = await this.deps.workspaceDocument.getOrCreateSessionDoc(sessionId);
-      const current = (await sessionDoc.getPreviewState()) ?? {};
-      const next: SessionPreviewDocState = {
-        ...current,
-      };
-      if (hasPreviewPatchKey(patch, 'previewCandidate')) {
-        next.candidate = patch.previewCandidate;
-      }
-      if (hasPreviewPatchKey(patch, 'previewConnection')) {
-        next.connection = patch.previewConnection;
-      }
-      await sessionDoc.setPreviewState(next);
-      await this.deps.workspaceDocument.repo.upsertDocMeta(getSessionRoomId(sessionId), {
-        previewCandidate: summarizePreviewCandidateForMeta(next.candidate),
-        previewConnection: summarizePreviewConnectionForMeta(next.connection),
-      } satisfies Partial<Pick<SessionMeta, 'previewCandidate' | 'previewConnection'>>);
-    } catch (error) {
-      this.deps.logger.debug(
-        `[${sessionId}] Failed to update preview session meta: ${formatErrorMessage(error)}`
-      );
-      throw error;
-    }
+    // Reports and lifecycle updates share a document. Serialize the complete
+    // read/modify/write so a report cannot restore an obsolete connection.
+    return this.serialize(
+      sessionId,
+      async () => {
+        if (!isCurrent()) return;
+        try {
+          const sessionDoc = await this.deps.workspaceDocument.getOrCreateSessionDoc(sessionId);
+          const current = (await sessionDoc.getPreviewState()) ?? {};
+          const next: SessionPreviewDocState = {
+            ...current,
+          };
+          if (hasPreviewPatchKey(patch, 'previewCandidate')) {
+            next.candidate = patch.previewCandidate;
+          }
+          if (hasPreviewPatchKey(patch, 'previewConnection')) {
+            next.connection = patch.previewConnection;
+          }
+          if (!isCurrent()) return;
+          await sessionDoc.setPreviewState(next);
+          await this.deps.workspaceDocument.repo.upsertDocMeta(getSessionRoomId(sessionId), {
+            previewCandidate: summarizePreviewCandidateForMeta(next.candidate),
+            previewConnection: summarizePreviewConnectionForMeta(next.connection),
+          } satisfies Partial<Pick<SessionMeta, 'previewCandidate' | 'previewConnection'>>);
+        } catch (error) {
+          this.deps.logger.debug(
+            `[${sessionId}] Failed to update preview session meta: ${formatErrorMessage(error)}`
+          );
+          throw error;
+        }
+      },
+      this.previewWrites
+    );
   }
 
   private withCandidateFailure(
@@ -1265,12 +1377,16 @@ export class PreviewService {
     return Math.round(this.deps.now?.() ?? getServerNow());
   }
 
-  private serialize<T>(sessionId: SessionId, action: () => Promise<T>): Promise<T> {
-    const previous = this.operations.get(sessionId) ?? Promise.resolve();
+  private serialize<T>(
+    sessionId: SessionId,
+    action: () => Promise<T>,
+    queue = this.operations
+  ): Promise<T> {
+    const previous = queue.get(sessionId) ?? Promise.resolve();
     const operation = previous.then(action, action);
-    this.operations.set(sessionId, operation);
+    queue.set(sessionId, operation);
     const clear = () => {
-      if (this.operations.get(sessionId) === operation) this.operations.delete(sessionId);
+      if (queue.get(sessionId) === operation) queue.delete(sessionId);
     };
     void operation.then(clear, clear);
     return operation;

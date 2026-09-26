@@ -65,6 +65,7 @@ describe('cloudflared process ownership', () => {
     child.stderr.write(
       `${JSON.stringify({ message: 'Registered tunnel connection', protocol: 'quic' })}\n`
     );
+    await expect(handle.registered).resolves.toBeUndefined();
     expect(handle.diagnostic()).toContain('connection=registered (quic)');
     child.log(
       'Unable to reach edge https://example.test/?token=secret',
@@ -76,6 +77,21 @@ describe('cloudflared process ownership', () => {
     expect(failure?.message).toContain('Unable to reach edge [url]');
     expect(failure?.message).toContain('dial timeout [url]');
     expect(failure?.message).not.toContain('secret');
+  });
+
+  it('rejects registration if the allocated connector exits before registering', async () => {
+    const run = launch();
+    const child = await run.spawned;
+    child.log('| https://fixture-quick.trycloudflare.com |');
+    const handle = await run.result;
+    let registrationFailure: unknown;
+    void handle.registered.catch((error: unknown) => {
+      registrationFailure = error;
+    });
+    child.emit('close', 1, null);
+    const failure = await handle.closed;
+    expect(failure?.message).toContain('cloudflared exited');
+    expect(registrationFailure).toBe(failure);
   });
 
   it('fails an invalid origin and releases the process', async () => {

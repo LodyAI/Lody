@@ -10,9 +10,11 @@ import {
   selectMentionMenuViewForTrigger,
   toFileCandidate,
   toIssuePrCandidate,
+  toSessionCandidate,
   type MentionCandidate,
   type MentionCategory,
 } from '../src/components/mentions/mention-registry';
+import type { SessionMentionItem } from '../src/components/mentions/mention-session-source';
 
 function makeCandidate(value: string): MentionCandidate {
   return {
@@ -174,6 +176,25 @@ describe('candidate insertion semantics', () => {
     expect(candidate.navigateText).toBe('@src/components/');
     expect(candidate.insertText).toBe('@src/components');
     expect(candidate.kind).toBe('dir');
+    // The row reads the folder's own name, then where it sits.
+    expect(candidate.title).toBe('components/');
+    expect(candidate.hint).toBe('src');
+  });
+
+  it('shows a path as its name then its folder, while committing the whole path', () => {
+    const nested = toFileCandidate({
+      kind: 'file',
+      path: 'src/ui/mention/mention-root.tsx',
+      token: 'src/ui/mention/mention-root.tsx',
+    });
+    expect(nested.title).toBe('mention-root.tsx');
+    expect(nested.hint).toBe('src/ui/mention');
+    expect(nested.insertText).toBe('@src/ui/mention/mention-root.tsx');
+
+    // A file at the root has no folder to name.
+    const top = toFileCandidate({ kind: 'file', path: 'README.md', token: 'README.md' });
+    expect(top.title).toBe('README.md');
+    expect(top.hint).toBeUndefined();
   });
 
   it('commits a file with no navigation step', () => {
@@ -197,10 +218,41 @@ describe('candidate insertion semantics', () => {
     expect(candidate.title).toBe('Broken menu');
   });
 
+  it("carries a session's last activity for the row to state", () => {
+    const candidate = toSessionCandidate(
+      {
+        slug: 'parser-work',
+        sessionId: 'session-1' as SessionMentionItem['sessionId'],
+        title: 'Parser work',
+        activityAt: 1_700_000_000_000,
+        projectKey: 'chat',
+      },
+      { untitled: 'Untitled session' }
+    );
+    expect(candidate.activityAt).toBe(1_700_000_000_000);
+
+    const unknown = toSessionCandidate(
+      {
+        slug: 'x',
+        sessionId: 'session-2' as SessionMentionItem['sessionId'],
+        title: '',
+        activityAt: 0,
+        projectKey: 'chat',
+      },
+      { untitled: 'Untitled session' }
+    );
+    // No timestamp is no time at all, not "56y".
+    expect(unknown.activityAt).toBeUndefined();
+    expect(unknown.title).toBe('Untitled session');
+  });
+
   it('keeps the slash form for commands', () => {
     const [candidate] = buildCommandCandidates([{ name: 'review', description: 'Review' }], '');
 
     expect(candidate?.insertText).toBe('/review');
+    // The description rides on the name's line rather than a second one.
+    expect(candidate?.hint).toBe('Review');
+    expect(candidate?.subtitle).toBeUndefined();
   });
 });
 

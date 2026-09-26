@@ -85,24 +85,24 @@ describe('usage delivery', () => {
   });
   afterEach(() => vi.restoreAllMocks());
 
-  it('persists turn snapshots independently across model switches, retries and adapter restarts', async () => {
-    const report = (turnId: string, model: string, tokens: number) => {
+  it('persists scoped snapshots independently across model switches, retries and adapter restarts', async () => {
+    const report = (scopeId: string, model: string, tokens: number) => {
       const usage = { inputTokens: tokens, outputTokens: 0, cacheReadInputTokens: 0 };
       const event = parseLodyExtensionMessage({
         method: LODY_EXTENSION_METHODS.sessionUsageUpdate,
         sessionId: 'native',
-        provider: 'codex',
+        provider: 'claude',
         params: {
           sessionId: 'native',
           usage,
           modelUsage: { [model]: usage },
-          _meta: { codex: { usageTurnId: turnId } },
+          _meta: { lody: { usageScopeId: scopeId } },
         },
       });
       if (event?.type !== 'usage' || !event.accountingId)
         throw new Error('Missing accounting scope');
       service.recordSessionUsageUpdate({
-        ...input(0, 'codex'),
+        ...input(0, 'claude'),
         acpSessionId: event.accountingId,
         update: event.update,
       });
@@ -118,6 +118,8 @@ describe('usage delivery', () => {
       cliToken: 'synthetic',
       logger,
     });
+    // The restarted adapter's counters start from zero under a new scope and
+    // must count in full, not be hidden below the earlier, larger scopes.
     report('c', 'model-b', 500);
     await service.flushSessionUsage('s');
     const stored = new Map<string, number>();
@@ -128,9 +130,9 @@ describe('usage delivery', () => {
       }
     }
     expect([...stored.entries()]).toEqual([
-      ['native:turn:a:model-a', 10000],
-      ['native:turn:b:model-b', 2000],
-      ['native:turn:c:model-b', 500],
+      ['native:scope:a:model-a', 10000],
+      ['native:scope:b:model-b', 2000],
+      ['native:scope:c:model-b', 500],
     ]);
     expect([...stored.values()].reduce((a, b) => a + b, 0)).toBe(12500);
   });

@@ -232,4 +232,34 @@ describe('live agent status', () => {
     await act(async () => info!.click());
     expect(document.body.textContent).toContain('Claude Opus 5');
   });
+
+  it('shows the turn token usage in compact units with exact values on hover', async () => {
+    await render(
+      liveTurn([{ type: 'text', text: 'Done.' }], {
+        finished: true,
+        tokenUsage: {
+          inputTokens: 1234,
+          outputTokens: 300,
+          cacheReadInputTokens: 1_500_000,
+          cacheCreationInputTokens: 2000,
+          reasoningOutputTokens: 200,
+        },
+      }),
+      { label: 'Working' }
+    );
+    // Token usage alone is enough to offer the turn details.
+    const info = container.querySelector<HTMLButtonElement>('[aria-label="Turn configuration"]');
+    await act(async () => info!.click());
+    const value = (label: string) =>
+      [...document.body.querySelectorAll('dt')].find((dt) => dt.textContent === label)
+        ?.nextElementSibling;
+    expect(document.body.textContent).toContain('Tokens');
+    expect(value('Input')?.textContent).toBe('1.2K');
+    // Output includes reasoning; cache sums reads and writes.
+    expect(value('Output')?.textContent).toBe('500');
+    expect(value('Output')?.getAttribute('title')).toBe('500 · Reasoning 200');
+    expect(value('Cache')?.textContent).toBe('1.5M');
+    expect(value('Cache')?.getAttribute('title')).toBe('1,502,000 · Read 1,500,000 · Write 2,000');
+    expect(document.body.textContent).not.toContain('No configuration recorded');
+  });
 });

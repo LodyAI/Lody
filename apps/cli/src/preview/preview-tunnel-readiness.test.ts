@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { Resolver } from 'node:dns/promises';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PreviewTarget } from '@lody/shared';
 import {
   verifyPreviewTunnelRoundTrip,
@@ -13,10 +14,241 @@ const target: PreviewTarget = {
 };
 
 describe('verifyPreviewTunnelRoundTrip', () => {
+  beforeEach(() => {
+    vi.spyOn(Resolver.prototype, 'resolve4').mockResolvedValue(['203.0.113.1']);
+  });
   afterEach(() => {
     vi.useRealTimers();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
+  });
+
+  it('avoids poisoning hostname caches before DNS publication and edge registration', async () => {
+    vi.useFakeTimers();
+    let published = false;
+    let connected = false;
+    let poisoned = false;
+    let settled = false;
+    const registration = Promise.withResolvers<void>();
+    vi.mocked(Resolver.prototype.resolve4).mockImplementation(async () => {
+      if (!published) throw Object.assign(new Error('not published'), { code: 'ENOTFOUND' });
+      return ['203.0.113.1'];
+    });
+    const ready = verifyPreviewTunnelRoundTrip({
+      publicUrl: 'https://test.trycloudflare.com/?__lody_preview_token=secret',
+      target,
+      registered: registration.promise,
+      fetch: async () => {
+        if (!published || !connected) poisoned = true;
+        if (poisoned) throw Object.assign(new Error('negative cache'), { code: 'ECONNRESET' });
+        return new Response(null, {
+          headers: { [PREVIEW_PROXY_RESPONSE_HEADER]: PREVIEW_PROXY_RESPONSE_VERSION },
+        });
+      },
+    }).then(() => {
+      settled = true;
+    });
+    await vi.advanceTimersByTimeAsync(2_000);
+    published = true;
+    await vi.advanceTimersByTimeAsync(500);
+    expect(settled).toBe(false);
+    connected = true;
+    registration.resolve();
+    await ready;
+    expect(poisoned).toBe(false);
+    expect(settled).toBe(true);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it.each(['cancel', 'deadline', 'exit'])(
+    'releases a pending registration and DNS query on %s',
+    async (reason) => {
+      vi.useFakeTimers();
+      const controller = new AbortController();
+      const registration = Promise.withResolvers<void>();
+      const dns = Promise.withResolvers<string[]>();
+      let cancelled = false;
+      vi.mocked(Resolver.prototype.resolve4).mockReturnValue(dns.promise);
+      vi.spyOn(Resolver.prototype, 'cancel').mockImplementation(() => {
+        cancelled = true;
+        dns.reject(Object.assign(new Error('DNS cancelled'), { code: 'ECANCELLED' }));
+      });
+      const ready = verifyPreviewTunnelRoundTrip({
+        publicUrl: 'https://test.trycloudflare.com',
+        target,
+        registered: registration.promise,
+        signal: controller.signal,
+        fetch: async () => {
+          throw new Error('HTTP must not start');
+        },
+      });
+      const failure = expect(ready).rejects.toThrow(
+        reason === 'deadline' ? '90000 ms limit' : reason
+      );
+      if (reason === 'deadline') await vi.advanceTimersByTimeAsync(90_000);
+      else if (reason === 'exit') registration.reject(new Error('exit'));
+      else controller.abort(new Error('cancel'));
+      await failure;
+      expect(cancelled).toBe(true);
+      expect(vi.getTimerCount()).toBe(0);
+    }
+  );
+
+  it.each(['cancel', 'deadline'])(
+    'settles on %s after DNS completes while registration is still pending',
+    async (reason) => {
+      vi.useFakeTimers();
+      const controller = new AbortController();
+      const registration = Promise.withResolvers<void>();
+      let failure: unknown;
+      const ready = verifyPreviewTunnelRoundTrip({
+        publicUrl: 'https://test.trycloudflare.com',
+        target,
+        registered: registration.promise,
+        signal: controller.signal,
+        fetch: async () => {
+          throw new Error('HTTP must not start');
+        },
+      }).catch((error: unknown) => {
+        failure = error;
+      });
+      try {
+        // Complete DNS before cancellation: DNS can no longer reject Promise.all.
+        await vi.advanceTimersByTimeAsync(0);
+        if (reason === 'deadline') await vi.advanceTimersByTimeAsync(90_000);
+        else {
+          controller.abort(new Error('cancel'));
+          await vi.advanceTimersByTimeAsync(0);
+        }
+        expect(failure).toBeInstanceOf(Error);
+        expect((failure as Error).message).toContain(
+          reason === 'deadline' ? '90000 ms limit' : 'cancel'
+        );
+        expect(vi.getTimerCount()).toBe(0);
+      } finally {
+        registration.resolve();
+        await ready;
+      }
+    }
+  );
+
+  it('retains HTTP proxy support when configured DNS servers cannot be reached', async () => {
+    vi.mocked(Resolver.prototype.resolve4).mockRejectedValue(
+      Object.assign(new Error('blocked DNS'), { code: 'ETIMEOUT' })
+    );
+    await expect(
+      verifyPreviewTunnelRoundTrip({
+        publicUrl: 'https://test.trycloudflare.com',
+        target,
+        fetch: async () =>
+          new Response(null, {
+            headers: { [PREVIEW_PROXY_RESPONSE_HEADER]: PREVIEW_PROXY_RESPONSE_VERSION },
+          }),
+      })
+    ).resolves.toBeUndefined();
+  });
+
+  it.each(['ENOTFOUND', 'ENODATA', 'empty'])(
+    'falls back to the authenticated public route after bounded local DNS negatives: %s',
+    async (code) => {
+      vi.useFakeTimers();
+      vi.mocked(Resolver.prototype.resolve4).mockImplementation(async () => {
+        if (code === 'empty') return [];
+        throw Object.assign(new Error('local filtering DNS'), { code });
+      });
+      const controller = new AbortController();
+      let ready = false;
+      const result = verifyPreviewTunnelRoundTrip({
+        publicUrl: 'https://test.trycloudflare.com',
+        target,
+        signal: controller.signal,
+        registered: Promise.resolve(),
+        fetch: async () =>
+          new Response(null, {
+            headers: { [PREVIEW_PROXY_RESPONSE_HEADER]: PREVIEW_PROXY_RESPONSE_VERSION },
+          }),
+      }).then(() => {
+        ready = true;
+      });
+      void result.catch(() => {});
+      try {
+        await vi.advanceTimersByTimeAsync(9_999);
+        expect(ready).toBe(false);
+        await vi.advanceTimersByTimeAsync(1);
+        expect(ready).toBe(true);
+        await result;
+        expect(vi.getTimerCount()).toBe(0);
+      } finally {
+        controller.abort(new Error('test cleanup'));
+        await result.catch(() => {});
+      }
+    }
+  );
+
+  it('still requires the authenticated marker after the DNS publication budget expires', async () => {
+    vi.useFakeTimers();
+    vi.mocked(Resolver.prototype.resolve4).mockRejectedValue(
+      Object.assign(new Error('local filtering DNS'), { code: 'ENOTFOUND' })
+    );
+    const result = verifyPreviewTunnelRoundTrip({
+      publicUrl: 'https://test.trycloudflare.com',
+      target,
+      registered: Promise.resolve(),
+      fetch: async () => new Response('denied', { status: 403 }),
+    });
+    const rejected = expect(result).rejects.toThrow('HTTP 403');
+    await vi.advanceTimersByTimeAsync(10_000);
+    await rejected;
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('cancels an in-flight DNS query at its budget but still waits for edge registration', async () => {
+    vi.useFakeTimers();
+    const dns = Promise.withResolvers<string[]>();
+    const registered = Promise.withResolvers<void>();
+    let cancelled = false;
+    let ready = false;
+    vi.mocked(Resolver.prototype.resolve4).mockReturnValue(dns.promise);
+    vi.spyOn(Resolver.prototype, 'cancel').mockImplementation(() => {
+      cancelled = true;
+      dns.reject(Object.assign(new Error('cancelled'), { code: 'ECANCELLED' }));
+    });
+    const result = verifyPreviewTunnelRoundTrip({
+      publicUrl: 'https://test.trycloudflare.com',
+      target,
+      registered: registered.promise,
+      fetch: async () =>
+        new Response(null, {
+          headers: { [PREVIEW_PROXY_RESPONSE_HEADER]: PREVIEW_PROXY_RESPONSE_VERSION },
+        }),
+    }).then(() => {
+      ready = true;
+    });
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(cancelled).toBe(true);
+    expect(ready).toBe(false);
+    registered.resolve();
+    await result;
+    expect(ready).toBe(true);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('never waits for DNS publication or registration during active health checks', async () => {
+    vi.useFakeTimers();
+    vi.mocked(Resolver.prototype.resolve4).mockReturnValue(new Promise(() => {}));
+    await expect(
+      verifyPreviewTunnelRoundTrip({
+        publicUrl: 'https://test.trycloudflare.com',
+        target,
+        mode: 'health',
+        registered: new Promise(() => {}),
+        fetch: async () =>
+          new Response(null, {
+            headers: { [PREVIEW_PROXY_RESPONSE_HEADER]: PREVIEW_PROXY_RESPONSE_VERSION },
+          }),
+      })
+    ).resolves.toBeUndefined();
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it('keeps capability parameters while following preview-origin redirects', async () => {

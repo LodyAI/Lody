@@ -28,6 +28,24 @@ production never falls back to TypeScript execution. POSIX process tests cover
 normal stop, CLI SIGKILL during creation/active use, native crash, missing binaries
 and cleanup failure. Native verification on other operating systems is separate.
 
+## First public request
+
+`preview-tunnel-dns.ts` queries the configured DNS servers with a private Node
+Resolver, bypassing OS hostname lookup caches. A newly allocated Quick Tunnel
+hostname can initially return NXDOMAIN. Sending it to an HTTP proxy or TUN at
+that point can cache failure long after the tunnel is usable. The startup
+verifier waits for the bounded DNS publication check and the native connector's
+first registration, reported through typed IPC, before its first public request. All stages
+share the existing 90-second readiness deadline and cancellation signal.
+
+Negative DNS answers retry for at most ten seconds before falling back to the
+existing proxy HTTP verification: filtered/split local DNS may stay negative even
+when the proxy can resolve the hostname. Unavailable DNS transport falls back
+immediately. The DNS budget cancels in-flight queries without resetting the
+shared startup deadline; parent cancellation still aborts readiness. No IP
+is pinned, no external resolver is selected, and DNS never grants access or proves
+readiness. Five-second active health checks and local viewing skip this startup gate.
+
 ## Distribution
 
 `cloudflared-manifest.json` pins upstream release artifacts. The downloader uses
@@ -104,3 +122,13 @@ has been independently verified.
 Behavioral tests check deterministic collection, platform conflicts, source
 license mismatch, installed text, cache reuse and explicit rejection of missing
 or modified cached notices.
+
+## Agent-reported startup
+
+The local message handler derives the active execution user and passes it separately
+from the candidate payload. An available loopback candidate from the Session owner
+starts background preparation when the platform supports remote preview. Reports
+return promptly; Browser clicks join preparation and then retain the usual control
+authorization checks. Same-origin reports coalesce; newer origins, revoke and
+Session cleanup cancel obsolete queued work. Resource limits and the one-hour idle
+policy still apply, including to a prepared preview that nobody opens.

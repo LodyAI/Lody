@@ -150,6 +150,7 @@ export class QuickTunnelSession {
       const endpoint = this.proxy.bindViewerOrigin(this.options.sessionId, child.origin);
       await (this.options.verify ?? verifyPreviewTunnelRoundTrip)({
         publicUrl: endpoint.viewerUrl,
+        registered: child.registered,
         target: this.options.target,
         signal,
         fetch: getCliHttpFetch({ logger: this.options.logger }),

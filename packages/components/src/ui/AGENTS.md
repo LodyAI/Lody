@@ -9,24 +9,24 @@ feature directory.
 `ui/emoji-picker.tsx` is the shadcn `frimousse` registry component, with its two copy
 strings on i18n rather than the registry's inline English.
 
+- No surface fill: `bg-popover` lands darker than the `@lody/ui` popup it sits in;
+  only the sticky header fills (`colors.raisedBackground`).
 - Its dataset SHIPS WITH THE APP. `frimousse` otherwise fetches
   `${emojibaseUrl}/${locale}/{data,messages}.json` from a public CDN, which leaves the
   picker spinning forever in an offline desktop or mobile app. Every host build must
   register `vite-emojibase-assets.ts` (see `apps/electron/electron.vite.config.ts`) and
   the picker must read `getBundledEmojibaseUrl()`.
-- This is a URL contract, not an import: the library builds those paths at runtime, so
-  a hashed `?url` asset cannot satisfy it and a host that forgets the plugin gets an
-  empty picker. Keep the locale list in the plugin and `lib/emojibase-assets.ts` in
-  step; each locale is ~750 KB.
+- A URL contract, not an import — a hashed `?url` asset cannot satisfy the
+  runtime-built paths; a host missing the plugin gets an empty picker. Keep the
+  locale list in step with `lib/emojibase-assets.ts` (~750 KB each).
 - `data.json` folds every bundled locale's `label` and `tags` into `tags`
   (build-time merge keyed on `hexcode`), because frimousse searches only the
   loaded locale — one query then matches in either product language. `label` and
   `messages.json` stay per-locale so display names and category headers keep the
   UI language.
-- Anchor the URL on the Vite BASE, never on `document.baseURI` alone. The router uses
-  browser history over http, so the document URL is a deep route and resolving against
-  it asks for `…/settings/emojibase`, which the dev server answers with the SPA
-  fallback — the picker then parses HTML as JSON.
+- Anchor the URL on the Vite BASE, never `document.baseURI`: router paths are deep
+  routes, so document-relative resolution asks for `…/settings/emojibase` and gets
+  SPA-fallback HTML parsed as JSON.
 - Keep `focus-visible:shadow-none` on its search input: `tailwind/index.css`'s
   zero-specificity "Pro focus style" rings every focused input unless a
   `focus-visible:` utility overrides it, and this bare registry input had none.
@@ -44,7 +44,7 @@ strings on i18n rather than the registry's inline English.
 ## Menus and viewers
 
 - Dialog overlays and content share one z rung: portal DOM order puts each new
-  overlay above earlier dialogs and below its own content.
+  overlay (lighter when nested) above earlier panels and below its own.
 - Dialog-contained `OptionSelector` menus must portal into the nearest
   `[data-lody-dialog-content]`; a body portal is outside the modal's scroll and
   focus guards. `src/ui/dialog.tsx` emits that attribute on every panel.
@@ -67,7 +67,7 @@ strings on i18n rather than the registry's inline English.
   Trigger/Content`, `render` instead of `asChild`, `delay` on the trigger or
   provider. The chip is visual-only — no `role="tooltip"`, no
   `aria-describedby` — so an icon-only trigger names itself with `aria-label`.
-- Overlay list hover (menus, command palette, mention, select) is
+- Overlay list hover (menus, command palette, select) is
   `bg-foreground/[0.05]` in light and `bg-white/[0.10]` in dark. Do not use
   `--hover` on popovers — it is sized for the page/sidebar and vanishes on the
   near-black dark menu fill. Kbd chips use the same 6% ink fill and muted text

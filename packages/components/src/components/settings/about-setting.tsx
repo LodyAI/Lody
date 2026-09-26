@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { Fragment, useCallback, useEffect, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAtom } from 'jotai';
 import { CheckCircle2, AlertCircle, Download, ExternalLink } from 'lucide-react';
@@ -39,6 +39,14 @@ const MONO = 'var(--font-mono, ui-monospace, monospace)';
 const styles = stylex.create({
   /** A fact the build states: read, not set, so it is quiet and fixed-width. */
   value: { fontSize: type.caption, fontFamily: MONO, color: colors.secondaryLabel },
+  /** The build's facts on one line, set apart by middle dots. */
+  facts: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'baseline',
+    columnGap: space[1.5],
+    rowGap: '2px',
+  },
   status: {
     display: 'inline-flex',
     alignItems: 'center',
@@ -292,57 +300,107 @@ export function AboutSettingsComponent() {
 
   if (isMobile) return <MobileAboutSettings />;
 
+  const buildFacts: ReactNode[] = [
+    ...(RELEASE_CHANNEL !== null ? [t(`settings.about.channel.${RELEASE_CHANNEL}`)] : []),
+    t('settings.about.builtAt', 'Built {{date}}', { date: formatBuildDate(BUILD_DATE) }),
+    <span key="commit" {...stylex.props(styles.value)} title={GIT_COMMIT}>
+      {GIT_COMMIT.slice(0, 8)}
+    </span>,
+    ...(OSS_GIT_COMMIT !== null
+      ? [
+          <span key="oss" title={OSS_GIT_COMMIT}>
+            {t('settings.about.ossCommitShort', 'Open source')}{' '}
+            <span {...stylex.props(styles.value)}>{OSS_GIT_COMMIT.slice(0, 8)}</span>
+          </span>,
+        ]
+      : []),
+  ];
+
   return (
     <div className={settingContainerClass}>
+      {/* What is running is one fact: the version, and the build it came
+        from as its detail; the update check acts on exactly that. */}
       <CompactSection>
-        {displayVersion && (
-          <CompactRow label={t('settings.about.version')}>
-            <span {...stylex.props(styles.value)}>{displayVersion}</span>
-          </CompactRow>
-        )}
-        <CompactRow label={t('settings.about.buildDate')}>
-          <span {...stylex.props(styles.value)}>{formatBuildDate(BUILD_DATE)}</span>
-        </CompactRow>
-        {RELEASE_CHANNEL !== null && (
-          <CompactRow label={t('settings.about.releaseChannel')}>
-            <span {...stylex.props(styles.value)}>
-              {t(`settings.about.channel.${RELEASE_CHANNEL}`)}
-            </span>
-          </CompactRow>
-        )}
         <CompactRow
-          label={t(
-            OSS_GIT_COMMIT !== null ? 'settings.about.cloudCommit' : 'settings.about.commitHash'
-          )}
-        >
-          <span {...stylex.props(styles.value)} title={GIT_COMMIT}>
-            {GIT_COMMIT.slice(0, 8)}
-          </span>
-        </CompactRow>
-        {OSS_GIT_COMMIT !== null && (
-          <CompactRow label={t('settings.about.ossCommit')}>
-            <span {...stylex.props(styles.value)} title={OSS_GIT_COMMIT}>
-              {OSS_GIT_COMMIT.slice(0, 8)}
+          label={
+            displayVersion
+              ? t('settings.about.versionLine', 'Lody {{version}}', { version: displayVersion })
+              : 'Lody'
+          }
+          helper={
+            <span {...stylex.props(styles.facts)}>
+              {buildFacts.map((fact, index) => (
+                <Fragment key={index}>
+                  {index > 0 ? <span aria-hidden="true">·</span> : null}
+                  {fact}
+                </Fragment>
+              ))}
             </span>
-          </CompactRow>
-        )}
+          }
+        >
+          {updaterState && phase !== 'disabled' ? (
+            <>
+              {showStatus && (
+                <UpdateStatusText phase={phase} percent={updaterState.percent} t={t} />
+              )}
+              {isDownloaded && updaterState.error && (
+                <span
+                  {...stylex.props(styles.status, styles.statusError)}
+                  title={updaterState.error}
+                >
+                  <AlertCircle {...stylex.props(styles.statusIcon)} />
+                  {t('settings.about.updateError')}
+                </span>
+              )}
+              {isDownloaded ? (
+                <Button
+                  size="small"
+                  onClick={() => {
+                    void handleQuitAndInstall();
+                  }}
+                  disabled={isInstalling}
+                >
+                  {isInstalling ? (
+                    <Spinner size="small" />
+                  ) : (
+                    <Download {...stylex.props(styles.icon)} />
+                  )}
+                  {t('settings.about.updateAndRestart')}
+                </Button>
+              ) : (
+                <Button
+                  variant="secondary"
+                  size="small"
+                  onClick={() => {
+                    void handleCheckForUpdates();
+                  }}
+                  disabled={isChecking || phase === 'downloading'}
+                >
+                  {isChecking && <Spinner size="small" />}
+                  {t('settings.about.checkForUpdates')}
+                </Button>
+              )}
+            </>
+          ) : null}
+        </CompactRow>
+      </CompactSection>
+
+      <CompactSection>
         <CompactRow label={t('settings.about.community', 'Community')}>
           <JoinCommunityButton />
         </CompactRow>
         <CompactRow label={t('settings.about.downloadApps', 'Download apps')}>
           <Button variant="secondary" size="small" onClick={handleOpenDownloadPage}>
             <ExternalLink {...stylex.props(styles.icon)} />
-            {t('settings.about.openDownloadPage', 'Open download page')}
+            {t('settings.about.downloadStable', 'Stable')}
           </Button>
-        </CompactRow>
-        <CompactRow label={t('settings.about.downloadNightly')}>
           <Button
             variant="secondary"
             size="small"
             onClick={() => void openExternalUrl(getNightlyDownloadPageUrl(i18n.resolvedLanguage))}
           >
             <ExternalLink {...stylex.props(styles.icon)} />
-            {t('settings.about.openDownloadPage', 'Open download page')}
+            {t('settings.about.downloadNightlyShort', 'Nightly')}
           </Button>
         </CompactRow>
         <CompactRow label={t('settings.about.website', 'Website')}>
@@ -379,45 +437,6 @@ export function AboutSettingsComponent() {
           </CompactRow>
         )}
         {developerModeEnabled && <DevbarSettingsControls />}
-        {updaterState && phase !== 'disabled' && (
-          <CompactRow label={t('settings.about.checkForUpdates')}>
-            {showStatus && <UpdateStatusText phase={phase} percent={updaterState.percent} t={t} />}
-            {isDownloaded && updaterState.error && (
-              <span {...stylex.props(styles.status, styles.statusError)} title={updaterState.error}>
-                <AlertCircle {...stylex.props(styles.statusIcon)} />
-                {t('settings.about.updateError')}
-              </span>
-            )}
-            {isDownloaded ? (
-              <Button
-                size="small"
-                onClick={() => {
-                  void handleQuitAndInstall();
-                }}
-                disabled={isInstalling}
-              >
-                {isInstalling ? (
-                  <Spinner size="small" />
-                ) : (
-                  <Download {...stylex.props(styles.icon)} />
-                )}
-                {t('settings.about.updateAndRestart')}
-              </Button>
-            ) : (
-              <Button
-                variant="secondary"
-                size="small"
-                onClick={() => {
-                  void handleCheckForUpdates();
-                }}
-                disabled={isChecking || phase === 'downloading'}
-              >
-                {isChecking && <Spinner size="small" />}
-                {t('settings.about.checkForUpdates')}
-              </Button>
-            )}
-          </CompactRow>
-        )}
       </CompactSection>
       <BetaFeaturesSection />
     </div>

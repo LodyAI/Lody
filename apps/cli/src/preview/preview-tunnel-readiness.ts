@@ -4,6 +4,7 @@ import {
   type PreviewTarget,
 } from '@lody/shared';
 import { formatErrorMessage } from '@/utils/format-error';
+import { waitForPreviewDns, waitForPreviewRetry } from './preview-tunnel-dns';
 
 // Fresh Quick Tunnel routes can take over a minute to accept TLS after allocation.
 const TUNNEL_ROUND_TRIP_TIMEOUT_MS = 90_000;
@@ -55,21 +56,6 @@ function isTransientNetworkError(error: unknown): boolean {
   return error.cause !== undefined && error.cause !== error && isTransientNetworkError(error.cause);
 }
 
-function waitForReadiness(signal: AbortSignal): Promise<void> {
-  signal.throwIfAborted();
-  return new Promise((resolve, reject) => {
-    const abort = () => {
-      clearTimeout(timer);
-      reject(signal.reason);
-    };
-    const timer = setTimeout(() => {
-      signal.removeEventListener('abort', abort);
-      resolve();
-    }, 500);
-    signal.addEventListener('abort', abort, { once: true });
-  });
-}
-
 async function fetchReadyRoute(
   url: URL,
   signal: AbortSignal,
@@ -104,7 +90,7 @@ async function fetchReadyRoute(
       observe(networkErrorCodes(error), true);
       if (!waitForPropagation || !isTransientNetworkError(error)) throw error;
     }
-    await waitForReadiness(signal);
+    await waitForPreviewRetry(signal);
   }
 }
 
@@ -117,6 +103,7 @@ export async function verifyPreviewTunnelRoundTrip(args: {
   signal?: AbortSignal;
   fetch?: typeof fetch;
   mode?: 'readiness' | 'health';
+  registered?: Promise<void>;
   onDiagnostic?: (message: string) => void;
 }): Promise<void> {
   const gateway = new URL(args.publicUrl);
@@ -147,6 +134,26 @@ export async function verifyPreviewTunnelRoundTrip(args: {
 
   let viewerUrl = initialViewerUrl;
   try {
+    if (waitForPropagation && gateway.hostname.endsWith('.trycloudflare.com')) {
+      signal.throwIfAborted();
+      let abort = () => {};
+      const aborted = new Promise<never>((_resolve, reject) => {
+        abort = () => reject(signal.reason);
+      });
+      signal.addEventListener('abort', abort, { once: true });
+      try {
+        await Promise.race([
+          Promise.all([
+            args.registered,
+            waitForPreviewDns(gateway.hostname, signal, args.onDiagnostic),
+          ]),
+          aborted,
+        ]);
+      } finally {
+        signal.removeEventListener('abort', abort);
+      }
+      signal.throwIfAborted();
+    }
     for (
       let redirectCount = 0;
       redirectCount <= TUNNEL_ROUND_TRIP_MAX_REDIRECTS;
@@ -206,5 +213,7 @@ export async function verifyPreviewTunnelRoundTrip(args: {
     }
   } finally {
     clearTimeout(timeout);
+    // A failed registration also cancels any DNS query still running in parallel.
+    controller.abort();
   }
 }
