@@ -56,6 +56,8 @@ slot on mobile — is pinned by `tests/assistant-turn-action-inset.test.ts`,
 the mobile live and finished states. `tests/agent-activity-row.test.tsx` covers
 live status placement above the subagent task summary, both with and without
 footer actions, and task-summary expansion.
+The [compact duration Spec](../../../../../specs/compact-duration-spacing.md)
+defines locale-specific spacing for these labels.
 
 ## Why the rules read the way they do
 
