@@ -2815,11 +2815,7 @@ export class MessageHandler {
       this.workspaceDocument,
       item.target.sessionId,
       prompt,
-      {
-        ...resolveTurnDispatchConfig({}),
-        scheduleToolsEnabled:
-          operation.frozenContinuationConfig.inputConfig.scheduleToolsEnabled === true,
-      },
+      resolveTurnDispatchConfig({}),
       undefined,
       delegatedRequester ? undefined : operation.requesterUserId,
       {

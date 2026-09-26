@@ -178,7 +178,6 @@ export async function createScheduleWorkspace(args: {
         {
           ...resolveTurnDispatchConfig({}),
           ...agent,
-          scheduleToolsEnabled: true,
           inheritSessionDefaults: false,
         },
         target

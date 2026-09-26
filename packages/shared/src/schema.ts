@@ -526,8 +526,6 @@ const acpSessionConfigSchema = schema
       configOptionValues: schema.Any({ required: false }),
       /** Workspace MCP catalog ids selected for this session (string[]). */
       mcpServerIds: schema.Any({ required: false }),
-      /** Whether the built-in Lody Schedule MCP tools are mounted for this Turn. */
-      scheduleToolsEnabled: schema.Boolean({ required: false }),
       /** Agent Role selected for this Turn; null is explicit None. */
       agentRoleId: agentRoleIdSchema,
       agentRoleRevision: schema.Number({ required: false }),

@@ -61,7 +61,6 @@ export type SessionConversationConfig = {
   modelId?: string;
   configOptionValues?: Record<string, AcpConfigOptionValue>;
   mcpServerIds?: McpServerId[];
-  scheduleToolsEnabled?: boolean;
   /** Null is an explicit None; undefined means the selected Turn predates this field. */
   agentRoleId?: AgentRoleId | null;
   agentRoleRevision?: number;
@@ -174,9 +173,6 @@ export const resolveSessionConversationConfig = (
       ...(typeof inputConfig.agentRoleId === 'string' && inputConfig.agentRoleRevision !== undefined
         ? { agentRoleRevision: inputConfig.agentRoleRevision }
         : {}),
-      ...(typeof inputConfig.scheduleToolsEnabled === 'boolean'
-        ? { scheduleToolsEnabled: inputConfig.scheduleToolsEnabled }
-        : {}),
     };
   };
 
@@ -267,11 +263,6 @@ export const resolveSessionMcpSelection = (
   history: readonly { id: string; role: unknown; inputConfig?: unknown }[],
   messageQueue: readonly { $cid?: unknown; acpSessionConfig?: unknown }[] = []
 ): McpServerId[] => resolveSessionConversationConfig(history, messageQueue).mcpServerIds ?? [];
-
-export const resolveSessionScheduleToolsEnabled = (
-  history: readonly { id: string; role: unknown; inputConfig?: unknown }[],
-  messageQueue: readonly { $cid?: unknown; acpSessionConfig?: unknown }[] = []
-): boolean => resolveSessionConversationConfig(history, messageQueue).scheduleToolsEnabled === true;
 
 const normalizeTextInputBlock = (
   block: Extract<SessionInputBlock, { type: 'text' }>
@@ -633,7 +624,6 @@ export const buildSessionTurnInputConfig = (args: {
   modelId?: string | null;
   configOptionValues?: Record<string, AcpConfigOptionValue> | null;
   mcpServerIds?: readonly McpServerId[] | null;
-  scheduleToolsEnabled?: boolean;
   agentRoleId?: AgentRoleId | null;
   agentRoleRevision?: number;
   issuePRMentions?: IssuePRMention[];
@@ -657,9 +647,6 @@ export const buildSessionTurnInputConfig = (args: {
     ...(args.agentRoleId !== undefined ? { agentRoleId: args.agentRoleId } : {}),
     ...(typeof args.agentRoleId === 'string' && args.agentRoleRevision !== undefined
       ? { agentRoleRevision: args.agentRoleRevision }
-      : {}),
-    ...(args.scheduleToolsEnabled !== undefined
-      ? { scheduleToolsEnabled: args.scheduleToolsEnabled === true }
       : {}),
     issuePRMentions: args.issuePRMentions,
     resume: args.resume,

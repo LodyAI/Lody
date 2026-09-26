@@ -1,4 +1,3 @@
-import { schedulesFeatureEnabledAtom } from '@/atoms/settings';
 import { openSessionOnModifiedClick } from '@/lib/desktop-window';
 import { usePostHog } from '@posthog/react';
 import { capturePostHogEvent } from '@/lib/posthog-analytics';
@@ -2892,8 +2891,6 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
     });
   }, [activeNav, closeMobileDrawer, router, workspaceSlug]);
 
-  const schedulesEnabled = useAtomValue(schedulesFeatureEnabledAtom);
-
   const handleDocsClicked = useCallback(() => {
     closeMobileDrawer();
     if (typeof window === 'undefined') return;
@@ -3443,7 +3440,6 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
         onCreateWorkspaceClicked={handleCreateWorkspaceClicked}
         onHomeClicked={handleHomeClicked}
         onArchiveClicked={handleArchiveClicked}
-        showSchedules={schedulesEnabled}
         onSchedulesClicked={() => {
           if (workspaceSlug) {
             closeMobileDrawer();

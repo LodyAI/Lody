@@ -4,7 +4,6 @@ import { currentWorkspaceSlugAtom } from '@/atoms/workspace-context';
 import { useWorkspaceWindowOwner, WorkspaceWindowOwnerContext } from '@/lib/desktop-window';
 import { type ReactNode } from 'react';
 import { useAtomValue } from 'jotai';
-import { schedulesFeatureEnabledAtom } from '@/atoms/settings';
 import { useScheduleRegistrySync } from '@/hooks/use-schedules';
 import { useIsMobile } from '../hooks/use-mobile';
 import { MobileWorkspaceLayout } from './mobile/mobile-workspace-layout';
@@ -64,14 +63,13 @@ export function MainLayout({
 }) {
   const workspace = useAtomValue(currentWorkspaceSlugAtom);
   const owner = useWorkspaceWindowOwner(workspaceReady ? workspace : null);
-  const schedulesEnabled = useAtomValue(schedulesFeatureEnabledAtom);
 
   return (
     <WorkspaceWindowOwnerContext value={owner}>
       <PromptShortcutProvider enabled={workspaceReady}>
         <WorkspaceRuntimeShell workspaceReady={workspaceReady}>
           {children}
-          {schedulesEnabled && workspaceReady ? <ScheduleRegistrySync /> : null}
+          {workspaceReady ? <ScheduleRegistrySync /> : null}
           {owner && workspaceReady ? <WorkspaceBadge /> : null}
           {owner && workspaceReady ? <AgentRoleSchemaReconciliation /> : null}
           {workspaceReady ? <BugReportDialogContainer /> : null}

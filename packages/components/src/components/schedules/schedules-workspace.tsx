@@ -36,7 +36,6 @@ import {
   userAtom,
 } from '@/atoms';
 import { getAllAgentConfigAtom } from '@/atoms/agents';
-import { schedulesFeatureEnabledAtom } from '@/atoms/settings';
 import { scheduleListColumnWidthsAtom, scheduleSplitListWidthAtom } from '@/atoms/schedules';
 import { useResolvedWorkspaceScope } from '@/hooks/use-resolved-workspace-scope';
 import {
@@ -69,11 +68,6 @@ import { pickScheduleAgent, seedScheduleAgentRunRef } from './schedule-agent-def
 import { readChatLandingDefaults } from '@/lib/chat-landing-defaults';
 
 export function SchedulesWorkspace({ scheduleId }: { scheduleId?: string }) {
-  const enabled = useAtomValue(schedulesFeatureEnabledAtom);
-  return enabled ? <SchedulesContent scheduleId={scheduleId} /> : null;
-}
-
-function SchedulesContent({ scheduleId }: { scheduleId?: string }) {
   const { t } = useTranslation();
   const activeRuntime = useAtomValue(activeWorkspaceRuntimeAtom);
   const scope = useResolvedWorkspaceScope();

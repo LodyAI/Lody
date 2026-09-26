@@ -115,7 +115,6 @@ describe('Schedule to ordinary Session handoff', () => {
             timestamp: new Date(now).toISOString(),
             items: [{ type: 'text', text: run.prompt }],
             fileDiff: [],
-            inputConfig: { scheduleToolsEnabled: true },
           },
         })
       );

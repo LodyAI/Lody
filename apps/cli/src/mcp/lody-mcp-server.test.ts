@@ -130,8 +130,8 @@ describe('shared Operation store path', () => {
   });
 });
 
-const listPublishedToolNames = async (scheduleToolsEnabled = false): Promise<string[]> => {
-  const server = buildLodyMcpServer({ scheduleToolsEnabled });
+const listPublishedToolNames = async (): Promise<string[]> => {
+  const server = buildLodyMcpServer();
   const client = new Client({ name: 'mcp-catalog-test-client', version: '1.0.0' });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
@@ -150,6 +150,16 @@ describe('Lody MCP tool catalog', () => {
       expect.arrayContaining(['lody_session_rename', 'lody_session_rename_many'])
     );
     expect(names.filter((name) => name.startsWith('lody_task_'))).toEqual([]);
+  });
+
+  it('always advertises only the bounded Schedule family', async () => {
+    const names = await listPublishedToolNames();
+    expect(names.filter((name) => name.startsWith('lody_schedule_')).sort()).toEqual([
+      'lody_schedule_get',
+      'lody_schedule_list',
+      'lody_schedule_pause',
+      'lody_schedule_propose',
+    ]);
   });
 });
 
@@ -599,7 +609,6 @@ describe('session MCP input schemas', () => {
       modeId: 'default',
       modelId: 'opus',
       configOptionValues: { reasoning_effort: 'medium' },
-      scheduleToolsEnabled: false,
       inheritSessionDefaults: false,
     });
     expect(buildResolvedMcpCreateCanonicalCommand(resolved)).toMatchObject({
@@ -1160,21 +1169,5 @@ describe('session MCP input schemas', () => {
       Buffer.byteLength(original, 'utf8') -
         Buffer.byteLength(result.text.replace('\n…\n', ''), 'utf8')
     );
-  });
-});
-
-describe('Schedule MCP tool gate', () => {
-  it('advertises only the bounded Schedule family when the turn enables it', async () => {
-    expect(
-      (await listPublishedToolNames(false)).filter((name) => name.startsWith('lody_schedule_'))
-    ).toEqual([]);
-    const names = await listPublishedToolNames(true);
-    expect(names.filter((name) => name.startsWith('lody_schedule_')).sort()).toEqual([
-      'lody_schedule_get',
-      'lody_schedule_list',
-      'lody_schedule_pause',
-      'lody_schedule_propose',
-    ]);
-    expect(names.filter((name) => name.startsWith('lody_task_'))).toEqual([]);
   });
 });

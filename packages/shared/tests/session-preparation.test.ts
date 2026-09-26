@@ -46,15 +46,6 @@ describe('session preparation run config', () => {
     ]);
   });
 
-  it('separates Schedule-enabled preparation from plain Agent instances', () => {
-    const enabled = buildSessionPreparationRunConfig({ scheduleToolsEnabled: true });
-    expect(enabled).toEqual({ scheduleToolsEnabled: true });
-    expect(normalizeSessionPreparationRunConfigForDedup(enabled)).not.toEqual(
-      normalizeSessionPreparationRunConfigForDedup({})
-    );
-    expect(buildSessionPreparationRunConfig({ scheduleToolsEnabled: false })).toBeUndefined();
-  });
-
   it('omits an empty selection', () => {
     expect(
       buildSessionPreparationRunConfig({

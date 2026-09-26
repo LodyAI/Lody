@@ -28,9 +28,10 @@
   its fixed dispatch age. Only unprepared pending automatic runs may be superseded.
 - The command service is transport-neutral. Local CLI/MCP uses the authenticated
   user's private daemon socket; cloud one-shot commands use their workspace repo.
-  Official MCP has list/show/propose/pause only, with the invoking owner and
-  driving turn's `scheduleToolsEnabled` checked again by the service. Human
-  commands are not a security boundary against an Agent with shell access.
+  Official MCP has list/show/propose/pause only and is registered for every
+  Agent session; the service re-checks that the caller owns the invoking
+  Session on this machine. A proposal takes effect only after the person
+  confirms its card. Human commands are not a security boundary against an Agent with shell access.
   `propose` takes a NAMED rule (`ScheduleProposalRuleSchema`), never cron, and
   validates it as a trigger before writing; it publishes one idempotent
   `schedule_proposal` system notice per `requestId` through

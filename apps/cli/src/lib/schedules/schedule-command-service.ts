@@ -68,16 +68,10 @@ export async function executeScheduleCommand(
       meta.machineId !== auth.machineId
     )
       throw new Error('Schedule tools require the invoking Session owner');
+    // Proposal and pause notices are idempotent by entry id; read them from a
+    // synced Session so a repeated call sees the notice it already published.
     const session = await manager.getOrCreateSessionDoc(requesterSessionId);
     await sync(session.roomId);
-    const history = readSessionHistory(session.sessionData.history);
-    const assistant = [...history].reverse().find((entry) => entry.role === 'assistant');
-    const turn = history.find(
-      (entry) =>
-        entry.id === (meta.processingUserMsgId ?? assistant?.userTurnId ?? meta.latestUserMsgId)
-    );
-    if (turn?.inputConfig?.scheduleToolsEnabled !== true)
-      throw new Error('Schedule tools are disabled for the driving Turn');
   }
   const registry = await manager.repo.openFlockDoc(getScheduleRegistryFlockDocId(workspaceId));
   if (!localOnly) await registry.syncOnce();

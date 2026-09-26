@@ -18,7 +18,9 @@ twice. People create schedules in an editor shaped like the composer or accept a
 Agent's proposal card with one click; an Agent can never create one itself. The
 rules people can pick are deliberately few (days, weekdays, weekly, monthly,
 every N hours or minutes, once, manual) and are always read on the owning
-machine's clock. Not yet verified: a packaged desktop end-to-end run.
+machine's clock. It shipped without a developer or beta gate (2026-09-26): the
+Agent's Schedule tools are always offered, since they can only propose. Not yet
+verified: a packaged desktop end-to-end run.
 
 ## Decision
 

@@ -1,4 +1,3 @@
-import { schedulesFeatureEnabledAtom } from '@/atoms/settings';
 import { sessionHasUnreadMessages } from '@/lib/session-read-receipt';
 import {
   useCallback,
@@ -581,7 +580,6 @@ function WorkspaceChatLanding({
   const multiWorkspaceAvailable = useAppCapability('multiWorkspace');
   const currentUser = useAtomValue(userAtom);
   const userId = currentUser?.id;
-  const schedulesEnabled = useAtomValue(schedulesFeatureEnabledAtom);
   const { activeOrganization, organizations, switchOrganization } = useOrganization({
     targetSlug: workspaceSlug,
   });
@@ -3109,7 +3107,6 @@ function WorkspaceChatLanding({
         configOptionValues: dispatchConfigOptionValues,
         issuePRMentions,
         mcpServerIds: mcpSelection.selectedIds,
-        scheduleToolsEnabled: schedulesEnabled,
         agentRoleId: activeAgentRole?.id ?? null,
         agentRoleRevision: activeAgentRole?.revision,
       });
@@ -4302,7 +4299,6 @@ function WorkspaceChatLanding({
         modelId: modelOptions.length > 0 ? selectedModelId : null,
         configOptionValues: dispatchConfigOptionValues,
         mcpServerIds: mcpSelection.selectedIds,
-        scheduleToolsEnabled: schedulesEnabled,
       }),
     [
       dispatchConfigOptionValues,
@@ -4311,7 +4307,6 @@ function WorkspaceChatLanding({
       modelOptions.length,
       selectedModeId,
       selectedModelId,
-      schedulesEnabled,
     ]
   );
   const { handoffToSession: handoffSessionPreparation } = useSessionPreparation({
@@ -5189,16 +5184,13 @@ function WorkspaceChatLanding({
     if (isMobile) return 'chat';
     return contextType === 'chat' ? 'chat' : 'projects';
   });
-  /* Developer-only beta gates drive the extra dock tabs on mobile home.
-     When a gate is off, a stale selection must render as Chat — as if
-     the tab were never built. Inbox also retains its team-workspace gate. */
+  /* A developer-only beta gate (plus the team-workspace gate) drives the
+     Inbox dock tab on mobile home. When it is off, a stale selection must
+     render as Chat — as if the tab were never built. */
   const inboxFeatureEnabled = useAtomValue(inboxFeatureEnabledAtom);
   const showMobileInbox = showProjectSharing && inboxFeatureEnabled;
   const effectiveMobileHomeTab: MobileHomeTab =
-    (selectedMobileHomeTab === 'schedules' && !schedulesEnabled) ||
-    (selectedMobileHomeTab === 'inbox' && !showMobileInbox)
-      ? 'chat'
-      : selectedMobileHomeTab;
+    selectedMobileHomeTab === 'inbox' && !showMobileInbox ? 'chat' : selectedMobileHomeTab;
   useEffect(() => {
     if (!showMobileInbox && selectedMobileHomeTab === 'inbox') {
       setSelectedMobileHomeTab('chat');
@@ -6365,7 +6357,6 @@ function WorkspaceChatLanding({
           onPullToRefresh={handleMobileHomePullToRefresh}
           selectedTab={effectiveMobileHomeTab}
           showInboxTab={showMobileInbox}
-          showSchedulesTab={schedulesEnabled}
           selectedProjectsSubTab={selectedProjectsSubTab}
           onProjectsSubTabSelect={handleMobileHomeProjectsSubTabSelect}
           onAddLocalProject={() => openAddProjectDialog()}

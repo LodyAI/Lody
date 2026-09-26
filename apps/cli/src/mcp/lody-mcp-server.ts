@@ -877,7 +877,6 @@ export interface McpSessionContext {
   sessionId: SessionId;
   localControlSocketPath: string | undefined;
   workdir: string;
-  scheduleToolsEnabled?: boolean;
 }
 
 // The stdio entrypoint is a dedicated per-session process, so its context can
@@ -898,7 +897,6 @@ const getSessionContext = (): McpSessionContext =>
     ),
     localControlSocketPath: readOptionalEnv('LODY_MCP_SOCKET_PATH', 'LODY_PREVIEW_MCP_SOCKET_PATH'),
     workdir: readOptionalEnv('LODY_MCP_WORKDIR', 'LODY_PREVIEW_MCP_WORKDIR') ?? process.cwd(),
-    scheduleToolsEnabled: readOptionalEnv('LODY_MCP_SCHEDULE_TOOLS_ENABLED') === '1',
   };
 
 // One connection per machine-level store for the whole MCP server process,
@@ -1263,10 +1261,7 @@ const resolveMcpSessionCreate = (
     return {
       input,
       prompt: input.prompt,
-      dispatchConfig: {
-        ...buildMcpTurnDispatchConfig(input),
-        scheduleToolsEnabled: invoking?.frozenInputConfig.scheduleToolsEnabled === true,
-      },
+      dispatchConfig: buildMcpTurnDispatchConfig(input),
     };
   }
 
@@ -1320,7 +1315,6 @@ const resolveMcpSessionCreate = (
     prompt: composeAgentRolePrompt(role.promptPrefix, input.prompt),
     dispatchConfig: {
       ...role.runConfig,
-      scheduleToolsEnabled: invoking?.frozenInputConfig.scheduleToolsEnabled === true,
       inheritSessionDefaults: false,
     },
     role,
@@ -1791,7 +1785,7 @@ const buildSessionList = async (input: SessionListToolInput): Promise<unknown> =
       execution: SessionExecutionSnapshot;
     }> = [];
     const readChunkSize = MAX_MCP_STATUS_BATCH_SIZE;
-    for (let offset = 0; offset < candidates.length && matches.length <= limit; ) {
+    for (let offset = 0; offset < candidates.length && matches.length <= limit;) {
       const chunk = candidates.slice(offset, offset + readChunkSize);
       offset += chunk.length;
       const liveStatuses = await readSessionLiveStatusesMany({
@@ -2797,10 +2791,7 @@ const startSessionChatOperation = async (args: SessionChatToolInput): Promise<un
         manager,
         pendingItem.target.sessionId,
         args.prompt,
-        {
-          ...resolveTurnDispatchConfig({}),
-          scheduleToolsEnabled: invoking.frozenInputConfig.scheduleToolsEnabled === true,
-        },
+        resolveTurnDispatchConfig({}),
         undefined,
         undefined,
         {
@@ -3409,10 +3400,7 @@ const startSessionChatManyOperation = async (args: SessionChatManyToolInput): Pr
             manager,
             storedItem.target.sessionId,
             expandedItem.prompt,
-            {
-              ...resolveTurnDispatchConfig({}),
-              scheduleToolsEnabled: invoking.frozenInputConfig.scheduleToolsEnabled === true,
-            },
+            resolveTurnDispatchConfig({}),
             undefined,
             undefined,
             {
@@ -3549,7 +3537,7 @@ export const __lodyMcpServerInternals = {
   resolveMcpSessionId,
 };
 
-export function buildLodyMcpServer(config: { scheduleToolsEnabled?: boolean } = {}): McpServer {
+export function buildLodyMcpServer(): McpServer {
   // The HTTP host is long-lived and the stdio server normally lives for the
   // Agent session. Initialization is idempotent and local-platform telemetry
   // remains hard-disabled inside the analytics layer.
@@ -3568,7 +3556,6 @@ export function buildLodyMcpServer(config: { scheduleToolsEnabled?: boolean } = 
     }
   );
   registerScheduleTools(server, {
-    enabled: config.scheduleToolsEnabled === true,
     execute: async (command) => {
       const ctx = getSessionContext();
       const { sendScheduleCommand } = await import('@/lib/schedules/schedule-command-client');
@@ -4394,7 +4381,5 @@ export function buildLodyMcpServer(config: { scheduleToolsEnabled?: boolean } = 
 }
 
 export async function runLodyMcpServer(): Promise<void> {
-  await buildLodyMcpServer({
-    scheduleToolsEnabled: getSessionContext().scheduleToolsEnabled,
-  }).connect(new StdioServerTransport());
+  await buildLodyMcpServer().connect(new StdioServerTransport());
 }

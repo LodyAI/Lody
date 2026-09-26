@@ -2,7 +2,6 @@ import { useRouter } from '@tanstack/react-router';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { useTranslation } from 'react-i18next';
 import { currentWorkspaceSlugAtom, settingsDialogOpenAtom, toggleZenLayoutModeAtom } from '@/atoms';
-import { schedulesFeatureEnabledAtom } from '@/atoms/settings';
 import { getCommandKeybindings, useCommand } from '@/lib/commands';
 import { getAppCurrentPathWithSearch } from '@/lib/app-location';
 import { isSettingsPath, resolveSettingsCloseTo } from '@/lib/settings-navigation';
@@ -64,41 +63,34 @@ export function AppCommands() {
     run: () => toggleZenLayoutMode(),
   });
 
-  const schedulesEnabled = useAtomValue(schedulesFeatureEnabledAtom);
-  useCommand(
-    {
-      id: 'schedules.open',
-      title: t('commands.schedules.open', 'Open Schedules'),
-      category: 'Workspace',
-      keybindings: [],
-      when: () => !!workspaceSlug,
-      run: () => {
-        if (workspaceSlug)
-          void router.navigate({
-            to: '/$workspaceName/schedules',
-            params: { workspaceName: workspaceSlug },
-          });
-      },
+  useCommand({
+    id: 'schedules.open',
+    title: t('commands.schedules.open', 'Open Schedules'),
+    category: 'Workspace',
+    keybindings: [],
+    when: () => !!workspaceSlug,
+    run: () => {
+      if (workspaceSlug)
+        void router.navigate({
+          to: '/$workspaceName/schedules',
+          params: { workspaceName: workspaceSlug },
+        });
     },
-    schedulesEnabled
-  );
-  useCommand(
-    {
-      id: 'schedules.new',
-      title: t('commands.schedules.new', 'New Schedule'),
-      category: 'Workspace',
-      keybindings: [],
-      when: () => !!workspaceSlug,
-      run: () => {
-        if (workspaceSlug)
-          void router.navigate({
-            to: '/$workspaceName/schedules/$scheduleId',
-            params: { workspaceName: workspaceSlug, scheduleId: 'new' },
-          });
-      },
+  });
+  useCommand({
+    id: 'schedules.new',
+    title: t('commands.schedules.new', 'New Schedule'),
+    category: 'Workspace',
+    keybindings: [],
+    when: () => !!workspaceSlug,
+    run: () => {
+      if (workspaceSlug)
+        void router.navigate({
+          to: '/$workspaceName/schedules/$scheduleId',
+          params: { workspaceName: workspaceSlug, scheduleId: 'new' },
+        });
     },
-    schedulesEnabled
-  );
+  });
 
   // ⌘, toggles settings: open from anywhere (remembering where we came from so the
   // close can return there), or — when already on a settings page — close back to it.

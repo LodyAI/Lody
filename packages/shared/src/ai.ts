@@ -1773,8 +1773,6 @@ export type ACPTurnConfig = {
   configOptionValues?: Record<string, AcpConfigOptionValue>;
   /** Workspace MCP catalog ids selected for this session. */
   mcpServerIds?: McpServerId[];
-  /** Whether the built-in Lody Schedule MCP tools are available to this Turn's Agent session. */
-  scheduleToolsEnabled?: boolean;
   /**
    * Agent Role identity selected in the composer for this Turn. Null is an
    * explicit None selection; absence is legacy/unknown. This is provenance for

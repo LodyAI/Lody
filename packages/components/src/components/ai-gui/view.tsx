@@ -227,7 +227,6 @@ import { toast } from '@/lib/toast';
 import { SessionPlanBar } from '@/components/sessions/session-plan-bar';
 import { ContainerQueryProvider } from './container-query-provider';
 import { ScheduleProposalNotice } from '@/components/schedules/schedule-proposal-notice';
-import { schedulesFeatureEnabledAtom } from '@/atoms/settings';
 import { shouldRenderSystemRowItem } from './message-content-guards';
 import { getChatFailedDiagnosticCopy } from './chat-failed-diagnostic-copy';
 import { extractReadableChatFailedMessage } from './chat-failed-error-report';
@@ -2286,9 +2285,8 @@ const SystemMessageRowView = ({
   onNavigateSession?: (target: SessionNavigationTarget) => void;
   capacityRetry?: CapacityRetryControl;
 }) => {
-  const schedulesEnabled = useAtomValue(schedulesFeatureEnabledAtom);
   const systemItems = message.items.flatMap((item, itemIndex) =>
-    shouldRenderSystemRowItem(item, schedulesEnabled) ? [{ item, itemIndex }] : []
+    shouldRenderSystemRowItem(item) ? [{ item, itemIndex }] : []
   );
 
   if (systemItems.length === 0) {

@@ -6,11 +6,7 @@ import type { ElectronUpdaterPhase } from '@lody/shared';
 import { useAtom } from 'jotai';
 import { Button } from '@lody/ui/button';
 import { Switch } from '@lody/ui/switch';
-import {
-  developerModeEnabledAtom,
-  inboxBetaEnabledAtom,
-  schedulesBetaEnabledAtom,
-} from '@/atoms/settings';
+import { developerModeEnabledAtom, inboxBetaEnabledAtom } from '@/atoms/settings';
 import { useElectronUpdaterState } from '@/hooks/use-electron-updater-state';
 import { OpenSourceAttributionsDialog } from '@/components/settings/open-source-attributions-dialog';
 import { JoinCommunityButton } from '@/components/settings/join-community-dialog';
@@ -110,7 +106,6 @@ const DEVELOPER_MODE_REVEAL_TAPS = 7;
 export function MobileAboutSettings() {
   const { t, i18n } = useTranslation();
   const [developerModeEnabled, setDeveloperModeEnabled] = useAtom(developerModeEnabledAtom);
-  const [schedulesEnabled, setSchedulesEnabled] = useAtom(schedulesBetaEnabledAtom);
   const [inboxBetaEnabled, setInboxBetaEnabled] = useAtom(inboxBetaEnabledAtom);
   const [revealTaps, setRevealTaps] = useState(0);
   const updaterState = useElectronUpdaterState();
@@ -289,16 +284,6 @@ export function MobileAboutSettings() {
       {developerModeEnabled ? (
         <MobileSettingsSection title={t('settings.beta.title', 'Beta features')}>
           <MobileSettingsRowGroup>
-            <MobileSettingsRow
-              label={t('schedules.title', 'Schedules')}
-              helper={t('schedules.betaHelp', 'Run prompts on a schedule using your own machine.')}
-            >
-              <Switch
-                checked={schedulesEnabled}
-                onCheckedChange={setSchedulesEnabled}
-                aria-label={t('schedules.title', 'Schedules')}
-              />
-            </MobileSettingsRow>
             <MobileSettingsRow
               label={t('settings.beta.inbox', 'Inbox')}
               helper={t(

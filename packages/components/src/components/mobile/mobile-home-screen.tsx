@@ -412,9 +412,6 @@ export type MobileHomeScreenProps = {
   selectedTab: MobileHomeTab;
   /** Inbox only appears in workspaces with more than one member. */
   showInboxTab?: boolean;
-  /** Shows the Schedules tab in the bottom dock (developer-mode Schedules
-     beta gate). When false a `selectedTab` of `'schedules'` falls back to Chat. */
-  showSchedulesTab?: boolean;
   /** Active sub-tab inside the Projects tab. Required when `selectedTab`
      is 'projects'; ignored on the Chat tab. */
   selectedProjectsSubTab?: MobileProjectsSubTab;
@@ -1004,8 +1001,7 @@ function RecentItemsRow<TItem extends { id: string }>({
    `<MobileWorkspaceTabBar>` via plain props, not closures. */
 function workspaceTabSpecs(
   labels: MobileHomeScreenLabels,
-  showInboxTab = false,
-  showSchedulesTab = false
+  showInboxTab = false
 ): ReadonlyArray<MobileBottomTabBarTabSpec<MobileHomeTab>> {
   /* Icons at 24px (h-6) — the dock pill is h-14, so h-5/20px read as
      under-drawn next to the label. Material icons go through MobileReactIcon
@@ -1027,16 +1023,12 @@ function workspaceTabSpecs(
       material: <MobileReactIcon icon={MdChat} className="h-6 w-6" />,
       label: labels.chatTab ?? 'Chat',
     },
-    ...(showSchedulesTab
-      ? [
-          {
-            key: 'schedules' as const,
-            ios: <Clock3 className="h-6 w-6" />,
-            material: <Clock3 className="h-6 w-6" />,
-            label: labels.schedulesTab ?? 'Schedules',
-          },
-        ]
-      : []),
+    {
+      key: 'schedules',
+      ios: <Clock3 className="h-6 w-6" />,
+      material: <Clock3 className="h-6 w-6" />,
+      label: labels.schedulesTab ?? 'Schedules',
+    },
     {
       key: 'projects',
       ios: <Folders className="h-6 w-6" strokeWidth={1.75} />,
@@ -1266,7 +1258,6 @@ export function MobileHomeScreen({
   onPullToRefresh,
   selectedTab,
   showInboxTab = false,
-  showSchedulesTab = false,
   selectedProjectsSubTab = 'local',
   onProjectsSubTabSelect,
   onAddLocalProject,
@@ -1372,11 +1363,7 @@ export function MobileHomeScreen({
     return map;
   }, [machines]);
 
-  /* The Schedules tab only exists while the beta gate is on; a stale
-     selection falls back to Chat as if the tab were never built. */
-  const scheduleTabActive = showSchedulesTab && selectedTab === 'schedules';
-  const effectiveSelectedTab: MobileHomeTab =
-    selectedTab === 'schedules' && !showSchedulesTab ? 'chat' : selectedTab;
+  const scheduleTabActive = selectedTab === 'schedules';
 
   const resolvedTheme: 'ios' | 'material' =
     theme ?? (isIOSRuntimeEnvironment() ? 'ios' : 'material');
@@ -1722,8 +1709,8 @@ export function MobileHomeScreen({
             bottom tabs. Tabs are built locally so the translations stay
             co-located with the other screen copy. */}
         <MobileWorkspaceTabBar<MobileHomeTab>
-          tabs={workspaceTabSpecs(labels, showInboxTab, showSchedulesTab)}
-          selectedTab={effectiveSelectedTab}
+          tabs={workspaceTabSpecs(labels, showInboxTab)}
+          selectedTab={selectedTab}
           onTabSelect={(tab) => onTabSelect?.(tab)}
           onNewChat={onNewChat}
           newChatAriaLabel={labels.newChatAriaLabel}

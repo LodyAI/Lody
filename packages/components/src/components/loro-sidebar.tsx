@@ -253,7 +253,7 @@ export interface LoroSidebarProps {
   onLinkRepoClicked?: () => void;
   onHomeClicked?: () => void;
   onArchiveClicked?: () => void;
-  showSchedules?: boolean;
+  /** Shows the Schedules entry; absent where there is nowhere to go. */
   onSchedulesClicked?: () => void;
   onSettingsClicked?: () => void;
   onDocsClicked?: () => void;
@@ -750,7 +750,6 @@ export const LoroSidebar = memo(function LoroSidebar({
   onLinkRepoClicked,
   onHomeClicked,
   onArchiveClicked,
-  showSchedules = false,
   onSchedulesClicked,
   onSettingsClicked,
   onDocsClicked,
@@ -1270,7 +1269,7 @@ export const LoroSidebar = memo(function LoroSidebar({
             icon={<SquarePen className="h-4 w-4" />}
             onClick={onHomeClicked}
           />
-          {showSchedules ? (
+          {onSchedulesClicked ? (
             <NavButton
               active={activeNav === 'schedules'}
               label={mergedLabels.schedules}

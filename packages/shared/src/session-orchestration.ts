@@ -222,11 +222,6 @@ export type FrozenOperationContinuationConfig = {
     modeId?: string;
     modelId?: string;
     configOptionValues?: Record<string, string | boolean>;
-    /**
-     * Frozen capability gate for the built-in Lody Schedule MCP tools, carried
-     * from the driving Turn so recovery keeps the same tool surface.
-     */
-    scheduleToolsEnabled?: boolean;
     inheritSessionDefaults?: false;
   } | null>;
 };

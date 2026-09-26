@@ -11,7 +11,6 @@ export type SessionPreparationRunConfig = {
   modelId?: string;
   configOptionValues?: Record<string, AcpConfigOptionValue>;
   mcpServerIds?: McpServerId[];
-  scheduleToolsEnabled?: boolean;
 };
 
 export type SessionPreparationClaimIdentity = {
@@ -45,7 +44,6 @@ export function buildSessionPreparationRunConfig(input: {
   modelId?: string | null;
   configOptionValues?: Record<string, AcpConfigOptionValue> | null;
   mcpServerIds?: readonly McpServerId[] | null;
-  scheduleToolsEnabled?: boolean;
 }): SessionPreparationRunConfig | undefined {
   const modeId = trimOptionalId(input.modeId);
   const modelId = trimOptionalId(input.modelId);
@@ -61,9 +59,8 @@ export function buildSessionPreparationRunConfig(input: {
       ? configOptionValues
       : undefined;
   const mcpServerIds = input.mcpServerIds ? [...input.mcpServerIds] : undefined;
-  const scheduleToolsEnabled = input.scheduleToolsEnabled === true ? true : undefined;
 
-  if (!modeId && !modelId && !nonEmptyConfigOptionValues && !mcpServerIds && !scheduleToolsEnabled) {
+  if (!modeId && !modelId && !nonEmptyConfigOptionValues && !mcpServerIds) {
     return undefined;
   }
   return {
@@ -71,7 +68,6 @@ export function buildSessionPreparationRunConfig(input: {
     ...(modelId ? { modelId } : {}),
     ...(nonEmptyConfigOptionValues ? { configOptionValues: nonEmptyConfigOptionValues } : {}),
     ...(mcpServerIds ? { mcpServerIds } : {}),
-    ...(scheduleToolsEnabled ? { scheduleToolsEnabled } : {}),
   };
 }
 
@@ -90,7 +86,6 @@ export function normalizeSessionPreparationRunConfigForDedup(
     ...(config.mcpServerIds === undefined
       ? []
       : [normalizeMcpServerIdsForDedup(config.mcpServerIds)]),
-    ...(config.scheduleToolsEnabled === true ? [{ schedules: true }] : []),
   ];
 }
 

@@ -57,7 +57,6 @@ const prepare = (project?: ProjectRef) =>
     }),
     {
       ...resolveTurnDispatchConfig({}),
-      scheduleToolsEnabled: true,
       inheritSessionDefaults: false,
     },
     buildScheduleRunTarget({ targetMachine, agentConfig, project })

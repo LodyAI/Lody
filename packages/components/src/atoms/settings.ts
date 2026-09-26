@@ -216,16 +216,6 @@ export const developerModeEnabledAtom = atomWithStorage<boolean>(
   { getOnInit: true }
 );
 
-export const schedulesBetaEnabledAtom = atomWithStorage<boolean>(
-  'lody-schedules-beta-enabled',
-  false,
-  undefined,
-  { getOnInit: true }
-);
-export const schedulesFeatureEnabledAtom = atom(
-  (get) => get(developerModeEnabledAtom) && get(schedulesBetaEnabledAtom)
-);
-
 // Opt-in for the unfinished mobile Inbox. Reachable only from the beta section
 // while Developer mode is on.
 export const inboxBetaEnabledAtom = atomWithStorage<boolean>(

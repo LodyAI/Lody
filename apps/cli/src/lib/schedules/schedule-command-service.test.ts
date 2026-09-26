@@ -60,7 +60,6 @@ async function fixture() {
   });
   let history: any[] = [];
   let owner = 'owner';
-  let tools = true;
   const context = {
     manager: {
       repo: {
@@ -81,10 +80,7 @@ async function fixture() {
         withHistoryPort({
           roomId: 'session-session',
           waitUntilSynced: notificationSync,
-          getHistory: () => [
-            { id: 'turn', role: 'user', inputConfig: { scheduleToolsEnabled: tools } },
-            ...history,
-          ],
+          getHistory: () => [{ id: 'turn', role: 'user' }, ...history],
           updateHistory: async (update: (entries: any[]) => any[]) => {
             history = update(history);
           },
@@ -104,9 +100,6 @@ async function fixture() {
     history: () => history,
     owner: (value: string) => {
       owner = value;
-    },
-    tools: (value: boolean) => {
-      tools = value;
     },
   };
 }
@@ -131,7 +124,7 @@ describe('Schedule command authorization', () => {
     await executeScheduleCommand(h.context, { action: 'delete', scheduleId: 'schedule' });
     expect(h.context.manager.syncDocOrThrow).not.toHaveBeenCalled();
   });
-  it('enforces the MCP action whitelist and driving turn owner/feature at the domain boundary', async () => {
+  it('enforces the MCP action whitelist and invoking Session owner at the domain boundary', async () => {
     const h = await fixture();
     h.context.requesterSessionId = 'session' as never;
     for (const action of ['resume', 'run', 'delete'])
@@ -147,11 +140,6 @@ describe('Schedule command authorization', () => {
       'owner'
     );
     h.owner('owner');
-    h.tools(false);
-    await expect(executeScheduleCommand(h.context, { action: 'list', limit: 30 })).rejects.toThrow(
-      'driving Turn'
-    );
-    h.tools(true);
     await expect(
       executeScheduleCommand(h.context, { action: 'list', limit: 1 })
     ).resolves.toMatchObject({ matched: 1 });

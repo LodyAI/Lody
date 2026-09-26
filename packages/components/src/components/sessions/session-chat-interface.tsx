@@ -1,5 +1,4 @@
 import { useSchedules } from '@/hooks/use-schedules';
-import { schedulesFeatureEnabledAtom } from '@/atoms/settings';
 import { windowPreparationAtom } from '@/lib/window-preparation';
 import { conversationCopyRange } from '@/lib/conversation-copy-range';
 import { describeCopiedConversation } from '@/lib/describe-copied-conversation';
@@ -2027,7 +2026,6 @@ export const SessionChatInterface = memo(
     const [publicShareSessionId, setPublicShareSessionId] = useState<string | null>(null);
     const publicShareStatus = useSessionShareStatus(publicShareWorkspaceId ?? null, session.id);
     const currentUser = useAtomValue(userAtom);
-    const schedulesEnabled = useAtomValue(schedulesFeatureEnabledAtom);
     const { openSettings } = useOpenSettings();
     const billingEntitlement = useCloudQuery(
       cloudOperations.billing.getWorkspaceBillingEntitlement,
@@ -3740,7 +3738,6 @@ export const SessionChatInterface = memo(
             configOptionValues: turnConfigOptionValues,
             issuePRMentions,
             mcpServerIds: mcpSelection.selectedIds,
-            scheduleToolsEnabled: schedulesEnabled,
             agentRoleId:
               options?.agentRole?.agentRoleId ?? (options?.agentRole === null ? null : undefined),
             agentRoleRevision: options?.agentRole?.agentRoleRevision,
@@ -3850,7 +3847,6 @@ export const SessionChatInterface = memo(
         touchSessionActivity,
         updateHistoryEntry,
         t,
-        schedulesEnabled,
       ]
     );
 
@@ -3882,7 +3878,6 @@ export const SessionChatInterface = memo(
             configOptionValues: turnConfigOptionValues,
             issuePRMentions,
             mcpServerIds: mcpSelection.selectedIds,
-            scheduleToolsEnabled: schedulesEnabled,
             agentRoleId:
               options?.agentRole?.agentRoleId ?? (options?.agentRole === null ? null : undefined),
             agentRoleRevision: options?.agentRole?.agentRoleRevision,
@@ -3898,7 +3893,6 @@ export const SessionChatInterface = memo(
             configOptionValues: inputConfig.configOptionValues ?? undefined,
             issuePRMentions: inputConfig.issuePRMentions ?? undefined,
             mcpServerIds: [...mcpSelection.selectedIds],
-            scheduleToolsEnabled: inputConfig.scheduleToolsEnabled,
             agentRoleId: inputConfig.agentRoleId,
             agentRoleRevision: inputConfig.agentRoleRevision,
             resume: inputConfig.resume ?? undefined,
@@ -3947,7 +3941,6 @@ export const SessionChatInterface = memo(
         session.userId,
         sessionProject,
         t,
-        schedulesEnabled,
       ]
     );
 
@@ -6188,7 +6181,7 @@ export const SessionChatInterface = memo(
                     onGoalCommand={handleGoalCardCommand}
                     onGoalDismiss={handleDismissGoalBanner}
                     scheduleSource={
-                      schedulesEnabled && session.scheduleId
+                      session.scheduleId
                         ? {
                             title:
                               scheduleRegistry.rows.find(

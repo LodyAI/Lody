@@ -4022,7 +4022,6 @@
   "schedules.deleteTitle": "删除“{{title}}”？",
   "schedules.deleteHelp": "之后不会再运行，任务将被删除。已经创建的对话会保留。",
   "schedules.title": "定时任务",
-  "schedules.betaHelp": "按计划或手动触发，让所选 Agent 自动开始对话。",
   "schedules.new": "新建定时任务",
   "schedules.search": "搜索定时任务",
   "schedules.loading": "正在加载定时任务…",

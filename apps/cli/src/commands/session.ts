@@ -1324,7 +1324,6 @@ function buildCliHistoryInputConfig(args: {
   modeId?: string;
   modelId?: string;
   configOptionValues?: Record<string, string | boolean>;
-  scheduleToolsEnabled?: boolean;
   resume?: ACPSessionConfig['resume'];
   chainDepth?: number;
 }): NonNullable<SessionHistoryInput['inputConfig']> {
@@ -1338,7 +1337,6 @@ function buildCliHistoryInputConfig(args: {
       args.configOptionValues && Object.keys(args.configOptionValues).length > 0
         ? args.configOptionValues
         : undefined,
-    scheduleToolsEnabled: args.scheduleToolsEnabled === true,
     resume: args.resume,
     chainDepth: args.chainDepth,
   };
@@ -1348,8 +1346,6 @@ export type ResolvedTurnDispatchConfig = {
   modeId?: string;
   modelId?: string;
   configOptionValues?: Record<string, string | boolean>;
-  /** Frozen capability gate for the built-in Lody Task MCP tools. */
-  scheduleToolsEnabled?: boolean;
   /** Prevent create replay from re-reading mutable defaults from the requester history. */
   inheritSessionDefaults?: false;
   /**
@@ -1397,9 +1393,6 @@ export function applyAgentRunConfigSelection(
   };
   return {
     config: {
-      ...(rest.scheduleToolsEnabled !== undefined
-        ? { scheduleToolsEnabled: rest.scheduleToolsEnabled }
-        : {}),
       ...((resolved.modeId ?? rest.modeId) ? { modeId: resolved.modeId ?? rest.modeId } : {}),
       ...((resolved.modelId ?? rest.modelId) ? { modelId: resolved.modelId ?? rest.modelId } : {}),
       ...(Object.keys(configOptionValues).length > 0 ? { configOptionValues } : {}),
@@ -1502,8 +1495,6 @@ function mergeTurnDispatchConfig(
     modeId: explicitConfig.modeId ?? fallbackConfig?.modeId,
     modelId: explicitConfig.modelId ?? fallbackConfig?.modelId,
     configOptionValues: explicitConfig.configOptionValues ?? fallbackConfig?.configOptionValues,
-    scheduleToolsEnabled:
-      explicitConfig.scheduleToolsEnabled ?? fallbackConfig?.scheduleToolsEnabled,
   };
 }
 
@@ -1680,9 +1671,6 @@ export function filterCompatibleInheritedTurnConfig(
     ...(config.modeId && supportedModes.has(config.modeId) ? { modeId: config.modeId } : {}),
     ...(config.modelId && supportedModels.has(config.modelId) ? { modelId: config.modelId } : {}),
     ...(configOptionValues ? { configOptionValues } : {}),
-    ...(config.scheduleToolsEnabled !== undefined
-      ? { scheduleToolsEnabled: config.scheduleToolsEnabled }
-      : {}),
   };
 }
 
@@ -1727,9 +1715,6 @@ export function resolveTurnDispatchConfigFromInputConfig(
     ...(inputConfig.modelId ? { modelId: inputConfig.modelId } : {}),
     ...(inputConfig.configOptionValues
       ? { configOptionValues: inputConfig.configOptionValues }
-      : {}),
-    ...(inputConfig.scheduleToolsEnabled !== undefined
-      ? { scheduleToolsEnabled: inputConfig.scheduleToolsEnabled }
       : {}),
   };
 }
@@ -3122,7 +3107,6 @@ export async function prepareSessionInput(
       modeId: effectiveDispatchConfig.modeId ?? undefined,
       modelId: effectiveDispatchConfig.modelId ?? undefined,
       configOptionValues: effectiveDispatchConfig.configOptionValues,
-      scheduleToolsEnabled: effectiveDispatchConfig.scheduleToolsEnabled,
       chainDepth: options.chainDepth,
     }),
     fileDiff: [],
@@ -3385,7 +3369,6 @@ export async function sendSessionChatResult(
       modeId: effectiveDispatchConfig.modeId,
       modelId: effectiveDispatchConfig.modelId,
       configOptionValues: effectiveDispatchConfig.configOptionValues,
-      scheduleToolsEnabled: effectiveDispatchConfig.scheduleToolsEnabled,
       resume: session.acpSessionId ?? undefined,
       chainDepth: orchestration?.chainDepth,
     }),

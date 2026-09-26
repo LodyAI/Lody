@@ -2004,7 +2004,6 @@ export class SessionDispatchWatcher {
         mcpServerIds: entry.inputConfig?.mcpServerIds ?? [],
         agentRoleId: entry.inputConfig?.agentRoleId,
         agentRoleRevision: entry.inputConfig?.agentRoleRevision,
-        scheduleToolsEnabled: entry.inputConfig?.scheduleToolsEnabled === true,
         issuePRMentions: entry.inputConfig?.issuePRMentions,
         resume: entry.inputConfig?.resume ?? resolveDispatchAcpSessionId(meta),
       },
@@ -2048,7 +2047,6 @@ export class SessionDispatchWatcher {
         mcpServerIds: entry.inputConfig?.mcpServerIds ?? [],
         agentRoleId: entry.inputConfig?.agentRoleId,
         agentRoleRevision: entry.inputConfig?.agentRoleRevision,
-        scheduleToolsEnabled: entry.inputConfig?.scheduleToolsEnabled === true,
         issuePRMentions: entry.inputConfig?.issuePRMentions,
         resume: entry.inputConfig?.resume,
       },
@@ -2180,7 +2178,6 @@ export class SessionDispatchWatcher {
           normalizeMcpServerIdSelection(queuedItem.acpSessionConfig?.mcpServerIds) ?? [],
         agentRoleId: queuedItem.acpSessionConfig?.agentRoleId,
         agentRoleRevision: queuedItem.acpSessionConfig?.agentRoleRevision,
-        scheduleToolsEnabled: queuedItem.acpSessionConfig?.scheduleToolsEnabled === true,
         issuePRMentions: queuedItem.acpSessionConfig?.issuePRMentions,
         resume: resolveResumableAcpSessionId(meta),
       });

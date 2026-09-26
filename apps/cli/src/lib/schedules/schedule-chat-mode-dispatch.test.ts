@@ -172,7 +172,6 @@ describe('Chat-only schedule handoff', () => {
             timestamp: new Date(60_000).toISOString(),
             items: [{ type: 'text', text: scheduled.prompt }],
             fileDiff: [],
-            inputConfig: { scheduleToolsEnabled: true },
           },
         } satisfies PreparedSessionInput;
       },
@@ -325,7 +324,6 @@ describe('Owned-chat schedule handoff', () => {
             timestamp: new Date(60_000).toISOString(),
             items: [{ type: 'text', text: scheduled.prompt }],
             fileDiff: [],
-            inputConfig: { scheduleToolsEnabled: true },
           },
         } satisfies PreparedSessionInput;
       },

@@ -4,7 +4,6 @@ import { Switch } from '@lody/ui/switch';
 import {
   developerModeEnabledAtom,
   inboxBetaEnabledAtom,
-  schedulesBetaEnabledAtom,
   promptShortcutsBetaEnabledAtom,
   semanticShortcutsBetaEnabledAtom,
 } from '@/atoms/settings';
@@ -23,7 +22,6 @@ import { CompactRow, CompactSection } from './compact-layout';
 export function BetaFeaturesSection() {
   const { t } = useTranslation();
   const developerModeEnabled = useAtomValue(developerModeEnabledAtom);
-  const [schedulesEnabled, setSchedulesEnabled] = useAtom(schedulesBetaEnabledAtom);
   const [inboxBetaEnabled, setInboxBetaEnabled] = useAtom(inboxBetaEnabledAtom);
 
   const [promptShortcutsBetaEnabled, setPromptShortcutsBetaEnabled] = useAtom(
@@ -38,16 +36,6 @@ export function BetaFeaturesSection() {
 
   return (
     <CompactSection title={t('settings.beta.title', 'Beta features')}>
-      <CompactRow
-        label={t('schedules.title', 'Schedules')}
-        helper={t('schedules.betaHelp', 'Run prompts on a schedule using your own machine.')}
-      >
-        <Switch
-          checked={schedulesEnabled}
-          onCheckedChange={setSchedulesEnabled}
-          aria-label={t('schedules.title', 'Schedules')}
-        />
-      </CompactRow>
       <CompactRow
         label={t('settings.beta.inbox', 'Inbox')}
         helper={t(

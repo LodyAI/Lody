@@ -5,8 +5,9 @@
 
 - One workspace-shell Registry subscription supplies list and provenance links;
   details acquire/release one Schedule store through WorkspaceRuntime. All writes use
-  `withScheduleStore`. Never load every definition for listing. The developer + beta
-  gate hides navigation, commands and background subscriptions together.
+  `withScheduleStore`. Never load every definition for listing. Schedules are
+  generally available: no developer/beta gate on navigation, commands, the
+  Registry subscription, proposal cards or the Agent's Schedule tools.
 - `schedule-view.tsx` is presentational with Storybook fixtures;
   `schedules-workspace.tsx` owns domain writes, selectors and composition.
   `schedule-save-blockers.ts` is the one save rule, `schedule-format.ts` the one

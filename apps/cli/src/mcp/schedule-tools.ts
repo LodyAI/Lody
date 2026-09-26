@@ -7,14 +7,13 @@ import {
   type ScheduleCommand,
 } from '@lody/shared';
 
-type Dependencies = { enabled: boolean; execute: (command: ScheduleCommand) => Promise<unknown> };
+type Dependencies = { execute: (command: ScheduleCommand) => Promise<unknown> };
 const id = z
   .string()
   .min(1)
   .max(50)
   .regex(/^[a-zA-Z0-9_-]+$/);
 export function registerScheduleTools(server: McpServer, deps: Dependencies): void {
-  if (!deps.enabled) return;
   const call = async (command: ScheduleCommand) => {
     try {
       return {
