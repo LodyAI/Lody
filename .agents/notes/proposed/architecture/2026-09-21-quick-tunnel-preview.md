@@ -357,3 +357,39 @@ Verification: all 83 CLI preview tests pass, including deterministic negative-ca
 registration, cancellation/deadline, proxy-only DNS failure, and process/IPC cleanup
 coverage. CLI type checking and repository documentation checks pass. The running
 desktop application was not replaced by these source-level validations.
+
+## Prepare on Agent report and preserve Browser content (2026-09-26)
+
+The requested interaction now starts the remote endpoint when an active Agent
+reports its loopback server, rather than making the first Browser click pay the
+entire startup cost. This changes the earlier explicit-click-only policy. The
+local dispatch boundary supplies the active execution user separately from the
+report; only the Session initiator qualifies. Remote reports and missing invocation
+identity cannot trigger preparation, and local-only platforms keep candidate-only
+behavior. No wire fields or persisted metadata are added.
+
+Background preparation uses the existing per-Session lifecycle queue, target
+validation, endpoint capabilities, machine slots, rate limits and idle expiry.
+Same-origin reports join/reuse; replacing the origin, revoke and cleanup cancel
+obsolete preparation. Browser clicks join pending preparation before their normal
+authorization/reuse path. The trade-off is opening a capability-protected endpoint
+and occupying a machine slot even if the user never opens Browser; idle expiry
+remains the bound. This avoids making renderer mounting the owner of preparation.
+
+Inspection also found that the navigation-progress branch temporarily unmounted
+existing content, and a failed status RPC cleared the viewer URL. Keep the current
+page in both cases, while authoritative closed/failed states still invalidate it.
+The existing frame cache remains browser-dependent across a full panel unmount;
+this does not promise persistence across app reload or idle expiry.
+
+PR preparation adds independent authorization, race, scope and simplification
+reviews. They found two lifecycle gaps: late candidate writes could overwrite a
+newer report, and global cleanup missed reports still probing. Candidate writes
+now use generation guards inside a shared serialized preview-state write queue;
+global cleanup invalidates those reports before cancelling queued preparation.
+Cross-review and a fresh adversarial review found no remaining blocking issue.
+
+Verification for this follow-up covers CLI/UI type checks, CLI production build,
+formatting, documentation and static/boundary checks. No new tests or live
+UI/network runs were performed for this policy change; behavioral verification
+remains a review limitation. The PR remains a draft.

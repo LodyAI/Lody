@@ -6527,7 +6527,11 @@ export class MessageHandler {
     dispatchContext: MessageDispatchContext
   ): Promise<void> {
     this.touchSession(message.sessionId);
-    const response = await this.previewService.reportCandidate(message);
+    const invokingUserId =
+      dispatchContext.source === 'local'
+        ? this.executionService.getActiveInvocationContext(message.sessionId)?.requesterUserId
+        : undefined;
+    const response = await this.previewService.reportCandidate(message, invokingUserId);
     dispatchContext.send(response);
   }
 

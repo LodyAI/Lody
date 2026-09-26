@@ -8,8 +8,12 @@ Translation: current
 A user can start a development server themselves and submit `localhost:5173`
 in the Session Browser. The address always names the Session's machine. Enter
 authorizes that exact loopback origin; it does not start the development server
-and does not open another confirmation dialog. Agent suggestions, typing, and
-mounting a panel cannot authorize public exposure.
+and does not open another confirmation dialog. On remote-preview-enabled machines,
+a validated report from the Session owner's active local Agent starts the remote
+endpoint in the background, before Browser is opened. The report returns without
+waiting for readiness; a Browser click joins that work. Identity comes from the
+active execution, never report fields or an inferred machine owner. Other reports
+remain candidates only. Typing and mounting a panel do not create endpoints.
 
 ## Ownership and access
 
@@ -80,7 +84,13 @@ and query. Restore is new explicit authorization and loads a new endpoint
 without replaying application operations. Browser explains that the share link
 changed and offers copying it. Offline/ended Sessions show why restoration is
 unavailable. Closing remote sharing never stops local viewing or the user's
-development server. Panel unmount does not close the endpoint.
+development server. Panel unmount does not close the endpoint. Repeated reports for the same origin
+join preparation or reuse its live endpoint. A newly reported origin replaces
+pending preparation; revoke and Session cleanup also cancel queued preparation.
+Returning to a mounted Browser preserves its page while status refreshes. A
+control-plane request failure alone does not invalidate the current viewer URL;
+authoritative closed/failed endpoint state does. Resolving the current address must not unmount its page; navigation to a
+different origin still replaces the old content.
 
 ## Boundaries and verification
 
