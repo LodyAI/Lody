@@ -54,7 +54,7 @@ export const mentionSurface = stylex.create({
     animationDuration: duration.regular,
     animationTimingFunction: ease.standard,
   },
-  /** A row: a 28px control that happens to live in a list. */
+  /** A row: a 28px minimum control that keeps wrapped content in its box. */
   item: {
     boxSizing: 'border-box',
     position: 'relative',
@@ -63,6 +63,9 @@ export const mentionSurface = stylex.create({
     gap: space[2],
     width: '100%',
     minHeight: control.small,
+    // The list is a capped vertical flexbox. Keep a wrapped subtitle from
+    // shrinking the row back to the minimum and painting over its neighbour.
+    flexShrink: 0,
     paddingInline: space[2],
     borderRadius: radius.medium,
     cornerShape: corner.shape,
