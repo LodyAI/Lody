@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import { useAtomValue } from 'jotai';
 import { useTranslation } from 'react-i18next';
-import { Bot, ChevronDown, CircleHelp, Folder, LockKeyhole, MonitorCog, Users } from 'lucide-react';
+import { ChevronDown, CircleHelp, Folder, MonitorCog } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
 import { Spinner } from '@lody/ui/spinner';
 import { colors } from '@lody/ui/tokens/colors.stylex';
@@ -10,14 +10,12 @@ import type { AgentConfigMeta, MachineId } from '@lody/shared';
 import { getAllAgentConfigAtom } from '@/atoms/agents';
 import { localMachineIdAtom } from '@/atoms/local-probe';
 import { userAtom } from '@/atoms';
-import { AgentIcon } from '@/components/icons/agent-icon';
 import { useMachineFlockAgentConfigsForMachineIds } from '@/hooks/use-machine-flock-agent-configs';
 import { useOnlineMachineIds } from '@/hooks/use-machine-online-status';
 import { useOpenSettings } from '@/hooks/use-open-settings';
 import { useVisibleLocalProjectsFromMachineIndex } from '@/hooks/use-visible-local-projects';
 import { useVisibleMachineMetas } from '@/hooks/use-visible-machine-metas';
 import { isElectronRenderer } from '@/lib/electron';
-import { Badge } from '@lody/ui/badge';
 import { Button, type ButtonSize, type ButtonVariant } from '@lody/ui/button';
 import { Menu } from '@lody/ui/menu';
 import { Tooltip } from '@lody/ui/tooltip';
@@ -125,18 +123,35 @@ export function AccountMachinesOverview() {
   );
 }
 
+/** Wide enough for the machine's name and its three trailing columns on one line. */
+const ROOMY = '@container (min-width: 30rem)';
+
 const styles = stylex.create({
+  /** The container the rows measure; the list is its only child. */
+  frame: { minWidth: 0, containerType: 'inline-size' },
   /**
-   * One machine: who it is on the left, what can be done with it on the right.
-   * The two halves wrap onto two lines in a narrow panel rather than being
-   * laid out from a viewport breakpoint the settings panel does not follow.
+   * Every machine shares one set of columns — the name takes the rest, each
+   * trailing column is as wide as its widest cell — so a count or a button sits
+   * at the same x on every row however long the row's own text is.
+   */
+  list: {
+    display: { default: 'flex', [ROOMY]: 'grid' },
+    flexDirection: 'column',
+    gridTemplateColumns: { default: null, [ROOMY]: 'minmax(0, 1fr) auto auto auto' },
+    minWidth: 0,
+  },
+  /**
+   * One machine: who it is, then how many Agents and directories it has, then
+   * its settings. In a narrow panel the trailing half wraps under the name.
    */
   row: {
-    display: 'flex',
+    display: { default: 'flex', [ROOMY]: 'grid' },
     flexWrap: 'wrap',
+    gridColumn: { default: null, [ROOMY]: '1 / -1' },
+    gridTemplateColumns: { default: null, [ROOMY]: 'subgrid' },
     alignItems: 'center',
-    columnGap: space[3],
-    rowGap: space[2],
+    columnGap: space[1],
+    rowGap: space[1],
     paddingInline: space[4],
     paddingBlock: '8px',
   },
@@ -144,10 +159,10 @@ const styles = stylex.create({
     display: 'flex',
     alignItems: 'center',
     gap: space[3],
-    flexGrow: 1,
-    flexShrink: 1,
-    flexBasis: '14em',
+    // Narrow, the name owns its line and the three trailing cells wrap together.
+    flexBasis: { default: '100%', [ROOMY]: 'auto' },
     minWidth: 0,
+    paddingInlineEnd: space[3],
   },
   identityText: { minWidth: 0 },
   dot: {
@@ -162,7 +177,7 @@ const styles = stylex.create({
     backgroundColor: colors.success,
     boxShadow: `0 0 0 3px color-mix(in oklab, ${colors.success} 20%, transparent)`,
   },
-  nameLine: { display: 'flex', alignItems: 'center', gap: space[1.5], minWidth: 0 },
+  nameLine: { display: 'flex', alignItems: 'baseline', gap: space[2], minWidth: 0 },
   /** The machine's name opens its settings: a link in the row's own words. */
   nameButton: {
     minWidth: 0,
@@ -186,6 +201,10 @@ const styles = stylex.create({
     textDecoration: { default: 'none', ':hover': 'underline' },
     boxShadow: { default: 'none', ':focus-visible': `0 0 0 ${focus.ringWidth} ${colors.accent}` },
   },
+  /** An offline machine reads a step quieter: it can be managed, not used. */
+  nameOffline: { color: colors.secondaryLabel },
+  /** "This machine": a note beside the name, in the name's own line. */
+  here: { flexShrink: 0, fontSize: type.caption, color: colors.secondaryLabel },
   status: {
     margin: 0,
     fontSize: type.caption,
@@ -195,19 +214,16 @@ const styles = stylex.create({
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
   },
-  controls: {
-    display: 'flex',
-    flexWrap: 'wrap',
-    alignItems: 'center',
-    justifyContent: 'flex-end',
-    gap: space[1],
-    minWidth: 0,
-    marginInlineStart: 'auto',
-  },
+  /** A trailing column's cell: its content meets the column's end edge. */
+  cell: { justifySelf: 'end' },
+  /** The first trailing cell pushes the wrapped cells to the row's end edge. */
+  cellLead: { marginInlineStart: { default: 'auto', [ROOMY]: 0 } },
+  count: { fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' },
+  countOffline: { color: colors.secondaryLabel },
   note: { display: 'flex', alignItems: 'center', justifyContent: 'center', gap: space[2] },
   icon: { flexShrink: 0, width: '14px', height: '14px' },
   iconHint: { color: colors.tertiaryLabel },
-  /** A glyph inside a box that sizes it — an icon Button's, a Badge's, a menu row's. */
+  /** A glyph inside a box that sizes it — an icon Button's, a menu row's. */
   glyph: { width: '100%', height: '100%' },
   truncate: {
     minWidth: 0,
@@ -215,34 +231,6 @@ const styles = stylex.create({
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
   },
-  /** The Agents a machine runs, overlapped like a stack of faces. */
-  stack: { display: 'flex', flexShrink: 0, alignItems: 'center' },
-  chip: {
-    boxSizing: 'border-box',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexShrink: 0,
-    width: '20px',
-    minWidth: '20px',
-    height: '20px',
-    borderRadius: radius.full,
-    cornerShape: corner.round,
-    backgroundColor: colors.background,
-    color: colors.label,
-    boxShadow: `0 0 0 2px ${colors.elevatedBackground}`,
-  },
-  chipStacked: { marginInlineStart: '-6px' },
-  /** No Agent, or the ones past the third: a stand-in, so the gray ramp. */
-  chipStandIn: {
-    width: 'auto',
-    paddingInline: '4px',
-    backgroundColor: colors.gray5,
-    color: colors.secondaryLabel,
-    fontSize: '9px',
-    fontVariantNumeric: 'tabular-nums',
-  },
-  chipGlyph: { width: '12px', height: '12px' },
   tooltipHint: { margin: 0, marginTop: '2px', opacity: 0.7 },
   tooltipTitle: { margin: 0 },
   /** A directory in the menu: its name, and where it is on disk under it. */
@@ -299,68 +287,89 @@ export function AccountMachinesOverviewView({
             {t('workspace.machines.empty', 'No machines connected')}
           </p>
         ) : (
-          items.map((item) => (
-            <div key={item.id} {...stylex.props(styles.row)}>
-              <div {...stylex.props(styles.identity)}>
-                <span
-                  {...stylex.props(styles.dot, item.isOnline && styles.dotOnline)}
-                  aria-hidden="true"
-                />
-                <div {...stylex.props(styles.identityText)}>
-                  <div {...stylex.props(styles.nameLine)}>
-                    <button
-                      type="button"
-                      onClick={() => onManageMachine(item.id)}
-                      {...stylex.props(styles.nameButton)}
-                    >
-                      {item.name}
-                    </button>
-                    {item.id === currentMachineId ? (
-                      <Badge>{t('settings.account.machines.localMachine', 'This machine')}</Badge>
-                    ) : null}
+          <div {...stylex.props(styles.frame)}>
+            <div {...stylex.props(styles.list)}>
+              {items.map((item, index) => (
+                <div key={item.id} {...stylex.props(styles.row, index > 0 && surface.lineRuled)}>
+                  <div {...stylex.props(styles.identity)}>
+                    <span
+                      {...stylex.props(styles.dot, item.isOnline && styles.dotOnline)}
+                      aria-hidden="true"
+                    />
+                    <div {...stylex.props(styles.identityText)}>
+                      <div {...stylex.props(styles.nameLine)}>
+                        <button
+                          type="button"
+                          onClick={() => onManageMachine(item.id)}
+                          {...stylex.props(styles.nameButton, !item.isOnline && styles.nameOffline)}
+                        >
+                          {item.name}
+                        </button>
+                        {item.id === currentMachineId ? (
+                          <span {...stylex.props(styles.here)}>
+                            {t('settings.account.machines.localMachine', 'This machine')}
+                          </span>
+                        ) : null}
+                      </div>
+                      <p {...stylex.props(styles.status)}>
+                        {[
+                          item.isOnline
+                            ? t('workspace.machines.online', 'Online')
+                            : t('workspace.machines.offline', 'Offline'),
+                          item.os,
+                          item.sharedWithTeam
+                            ? t('workspace.machines.shared', 'Shared')
+                            : t('workspace.machines.private', 'Private'),
+                        ]
+                          .filter(Boolean)
+                          .join(' · ')}
+                      </p>
+                    </div>
                   </div>
-                  <p {...stylex.props(styles.status)}>
-                    {item.isOnline
-                      ? t('workspace.machines.online', 'Online')
-                      : t('workspace.machines.offline', 'Offline')}
-                    {item.os ? ` · ${item.os}` : ''}
-                  </p>
-                </div>
-              </div>
 
-              <div {...stylex.props(styles.controls)}>
-                <AccessStatus sharedWithTeam={item.sharedWithTeam} />
-                <AgentStackButton agents={item.agents} onClick={() => onConfigureAgents(item.id)} />
-                <DirectoriesMenu
-                  directories={item.directories}
-                  onOpenDirectory={(projectKey) => onOpenDirectory(item.id, projectKey)}
-                  onOpenDirectories={() => onOpenDirectories(item.id)}
-                />
-                <Tooltip.Root>
-                  <Tooltip.Trigger
-                    render={
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="small"
-                        icon
-                        onClick={() => onManageMachine(item.id)}
-                        aria-label={t('settings.account.machines.manageMachine', {
-                          name: item.name,
-                          defaultValue: 'Manage {{name}}',
-                        })}
-                      >
-                        <MonitorCog strokeWidth={1.75} {...stylex.props(styles.glyph)} />
-                      </Button>
-                    }
-                  />
-                  <Tooltip.Content>
-                    {t('settings.account.machines.manageMachineShort', 'Machine settings')}
-                  </Tooltip.Content>
-                </Tooltip.Root>
-              </div>
+                  <div {...stylex.props(styles.cell, styles.cellLead)}>
+                    <AgentsButton
+                      agents={item.agents}
+                      quiet={!item.isOnline}
+                      onClick={() => onConfigureAgents(item.id)}
+                    />
+                  </div>
+                  <div {...stylex.props(styles.cell)}>
+                    <DirectoriesMenu
+                      directories={item.directories}
+                      quiet={!item.isOnline}
+                      onOpenDirectory={(projectKey) => onOpenDirectory(item.id, projectKey)}
+                      onOpenDirectories={() => onOpenDirectories(item.id)}
+                    />
+                  </div>
+                  <div {...stylex.props(styles.cell)}>
+                    <Tooltip.Root>
+                      <Tooltip.Trigger
+                        render={
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="small"
+                            icon
+                            onClick={() => onManageMachine(item.id)}
+                            aria-label={t('settings.account.machines.manageMachine', {
+                              name: item.name,
+                              defaultValue: 'Manage {{name}}',
+                            })}
+                          >
+                            <MonitorCog strokeWidth={1.75} {...stylex.props(styles.glyph)} />
+                          </Button>
+                        }
+                      />
+                      <Tooltip.Content>
+                        {t('settings.account.machines.manageMachineShort', 'Machine settings')}
+                      </Tooltip.Content>
+                    </Tooltip.Root>
+                  </div>
+                </div>
+              ))}
             </div>
-          ))
+          </div>
         )}
       </CompactSection>
     </Tooltip.Provider>
@@ -408,10 +417,12 @@ function PrivacyHelp({
 /** The directories a machine shares: a menu that lists them and opens one. */
 function DirectoriesMenu({
   directories,
+  quiet,
   onOpenDirectory,
   onOpenDirectories,
 }: {
   directories: AccountMachineDirectory[];
+  quiet: boolean;
   onOpenDirectory: (projectKey: string) => void;
   onOpenDirectories: () => void;
 }) {
@@ -421,8 +432,7 @@ function DirectoriesMenu({
       <Menu.Trigger
         render={
           <Button type="button" variant="ghost" size="small">
-            <Folder strokeWidth={1.75} {...stylex.props(styles.icon)} />
-            <span {...stylex.props(styles.truncate)}>
+            <span {...stylex.props(styles.count, quiet && styles.countOffline)}>
               {t('settings.account.machines.directoryCount', {
                 count: directories.length,
                 defaultValue: '{{count}} directories',
@@ -468,10 +478,17 @@ function DirectoriesMenu({
   );
 }
 
-function AgentStackButton({ agents, onClick }: { agents: AgentConfigMeta[]; onClick: () => void }) {
+/** How many Agents a machine runs, naming them on hover; it opens their configuration. */
+function AgentsButton({
+  agents,
+  quiet,
+  onClick,
+}: {
+  agents: AgentConfigMeta[];
+  quiet: boolean;
+  onClick: () => void;
+}) {
   const { t } = useTranslation();
-  const visibleAgents = agents.slice(0, 3);
-  const hiddenCount = Math.max(0, agents.length - visibleAgents.length);
   const names = agents.map((agent) => agent.name).join(', ');
 
   return (
@@ -485,34 +502,12 @@ function AgentStackButton({ agents, onClick }: { agents: AgentConfigMeta[]; onCl
             onClick={onClick}
             aria-label={t('settings.account.machines.configureAgents', 'Configure Agents')}
           >
-            <span {...stylex.props(styles.stack)} aria-hidden="true">
-              {visibleAgents.length === 0 ? (
-                <span {...stylex.props(styles.chip, styles.chipStandIn)}>
-                  <Bot strokeWidth={1.75} {...stylex.props(styles.chipGlyph)} />
-                </span>
-              ) : (
-                visibleAgents.map((agent, index) => (
-                  <span
-                    key={agent.id}
-                    {...stylex.props(styles.chip, index > 0 && styles.chipStacked)}
-                  >
-                    <AgentIcon
-                      cliType={agent.cliType}
-                      agentType={agent.agentType}
-                      brandId={agent.brandId}
-                      env={agent.env}
-                      className={stylex.props(styles.chipGlyph).className}
-                    />
-                  </span>
-                ))
-              )}
-              {hiddenCount > 0 ? (
-                <span {...stylex.props(styles.chip, styles.chipStacked, styles.chipStandIn)}>
-                  +{hiddenCount}
-                </span>
-              ) : null}
+            <span {...stylex.props(styles.count, quiet && styles.countOffline)}>
+              {t('settings.account.machines.agentCount', {
+                count: agents.length,
+                defaultValue: '{{count}} Agents',
+              })}
             </span>
-            {t('settings.account.machines.configureAgentsShort', 'Configure')}
           </Button>
         }
       />
@@ -529,40 +524,6 @@ function AgentStackButton({ agents, onClick }: { agents: AgentConfigMeta[]; onCl
               )}
         </p>
       </Tooltip.Content>
-    </Tooltip.Root>
-  );
-}
-
-/** Whether workspace members can reach a machine: a standing fact, so a badge. */
-function AccessStatus({ sharedWithTeam }: { sharedWithTeam: boolean }) {
-  const { t } = useTranslation();
-  const Icon = sharedWithTeam ? Users : LockKeyhole;
-  const label = sharedWithTeam
-    ? t('workspace.machines.shared', 'Shared')
-    : t('workspace.machines.private', 'Private');
-  const description = sharedWithTeam
-    ? t(
-        'workspace.machines.sharedTooltip',
-        'Workspace members can access this machine. Only the machine owner can change sharing.'
-      )
-    : t(
-        'settings.account.machines.privateMachineTooltip',
-        'Only you can access this machine. Its conversations are not visible to other workspace members.'
-      );
-
-  return (
-    <Tooltip.Root>
-      <Tooltip.Trigger
-        render={
-          <Badge
-            icon={<Icon strokeWidth={1.75} {...stylex.props(styles.glyph)} />}
-            aria-label={`${label}. ${description}`}
-          >
-            {label}
-          </Badge>
-        }
-      />
-      <Tooltip.Content>{description}</Tooltip.Content>
     </Tooltip.Root>
   );
 }

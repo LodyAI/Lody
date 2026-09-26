@@ -16,8 +16,9 @@ rolls back — is in the root [AGENTS.md](../../../../../AGENTS.md).
   header names every page; a page hands it actions and a one-line lead through
   `settings-page-header.tsx`, never its own title. Inside `settingsFlat` (pane, project
   window) preferences are flat under a section rule and managed records keep a card
-  (`boxed`); elsewhere groups are cards. Group by meaning, no one-row groups; a
-  helper says what the label cannot. Split master/detail by fill; type: `type.stylex.ts`.
+  (`boxed`; Account boxes every group, sign-out last); elsewhere groups are cards.
+  Group by meaning, no one-row groups; a helper says what the label cannot. Split
+  master/detail by fill; type: `type.stylex.ts`.
 - `share-management-setting.tsx` lists published static copies via the scoped cloud
   query. Ordinary members see their publications; admins see the workspace inventory.
   Draft uploads are not published shares. Reuse `useSessionShareLinkActions` for

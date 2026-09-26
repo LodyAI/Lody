@@ -3,13 +3,14 @@ import { useTranslation } from 'react-i18next';
 import { Spinner } from '@lody/ui/spinner';
 import { toast } from '@/lib/toast';
 import type { IconType } from 'react-icons';
-import { SiApple, SiDiscord, SiGithub } from 'react-icons/si';
-import { FcGoogle } from 'react-icons/fc';
+import { SiApple, SiDiscord, SiGithub, SiGoogle } from 'react-icons/si';
+import { ChevronDown } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
-import { corner, duration, ease, focus, radius, space } from '@lody/ui/tokens/scales.stylex';
+import { space } from '@lody/ui/tokens/scales.stylex';
 import { withClassName } from '@/lib/stylex';
 import { Button } from '@lody/ui/button';
+import { Menu } from '@lody/ui/menu';
 import { Dialog } from '@/ui/dialog';
 import { settingsType as type } from './type.stylex';
 
@@ -26,13 +27,21 @@ interface LinkedAccountsListProps {
   className?: string;
   /**
    * Connect an unbound provider. Typically redirects to the provider's OAuth
-   * flow. When provided, unbound logos become clickable (with a confirm first).
+   * flow. When provided, the unbound providers are offered in a menu (with a
+   * confirm first).
    */
   onConnect?: (providerId: string) => Promise<void> | void;
 }
 
 const styles = stylex.create({
-  list: { display: 'flex', alignItems: 'center', gap: space[3] },
+  list: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    columnGap: space[3],
+    rowGap: space[1],
+  },
   loading: {
     display: 'flex',
     alignItems: 'center',
@@ -40,77 +49,31 @@ const styles = stylex.create({
     fontSize: type.caption,
     color: colors.secondaryLabel,
   },
-  /**
-   * The box a mark sits in; the mark takes its colour from it, so a connectable
-   * mark previews its connected colour under the pointer by the box's own hover.
-   */
-  mark: {
+  /** A connected account: its mark, then its name, in the row's value ink. */
+  account: {
     display: 'inline-flex',
-    flexShrink: 0,
-    padding: 0,
-    margin: 0,
-    borderWidth: 0,
-    backgroundColor: 'transparent',
-    borderRadius: radius.mini,
-    cornerShape: corner.shape,
-    transitionProperty: 'color, opacity, filter',
-    transitionDuration: duration.fast,
-    transitionTimingFunction: ease.standard,
+    alignItems: 'center',
+    gap: space[1.5],
+    color: colors.label,
+    whiteSpace: 'nowrap',
   },
-  pressable: {
-    cursor: 'pointer',
-    outlineStyle: 'none',
-    boxShadow: { default: 'none', ':focus-visible': `0 0 0 ${focus.ringWidth} ${colors.accent}` },
-  },
-  icon: { width: '20px', height: '20px', flexShrink: 0 },
-  /** An unbound monochrome mark is a hint. */
-  unbound: { color: colors.tertiaryLabel },
-  /** A flat multi-colour mark has its colours baked in, so it is grayed instead. */
-  flatUnbound: { opacity: 0.4, filter: 'grayscale(1)' },
-  flatUnboundConnectable: {
-    opacity: { default: 0.4, ':hover': 1 },
-    filter: { default: 'grayscale(1)', ':hover': 'none' },
-  },
-  ink: { color: colors.label },
-  inkConnectable: { color: { default: colors.tertiaryLabel, ':hover': colors.label } },
-  discord: { color: '#5865F2' },
-  discordConnectable: { color: { default: colors.tertiaryLabel, ':hover': '#5865F2' } },
+  none: { color: colors.secondaryLabel },
+  mark: { width: '14px', height: '14px', flexShrink: 0, color: colors.secondaryLabel },
+  icon: { width: '14px', height: '14px', flexShrink: 0 },
+  hint: { color: colors.tertiaryLabel },
+  /** A glyph inside a menu row's icon box, which sizes it. */
+  glyph: { width: '100%', height: '100%' },
 });
 
-type BrandTone = 'ink' | 'discord';
-
-/* Brand marks are sized on a shared grid so they read at the same optical size.
-   Monochrome simple-icons draw in `currentColor` (the label ink for GitHub/Apple
-   so they stay visible in dark mode); the flat-colour Google mark (`FcGoogle`)
-   has baked colours, so it's grayed with a filter when unbound. */
-const PROVIDERS: {
-  id: string;
-  Icon: IconType;
-  /** Flat multi-color mark (colors baked in) → gray via filter when unbound. */
-  flat?: boolean;
-  /** The brand colour a bound (or hovered, connectable) monochrome mark takes. */
-  tone?: BrandTone;
-}[] = [
-  { id: 'github', Icon: SiGithub, tone: 'ink' },
-  { id: 'google', Icon: FcGoogle, flat: true },
-  { id: 'apple', Icon: SiApple, tone: 'ink' },
-  { id: 'discord', Icon: SiDiscord, tone: 'discord' },
+/* Every mark is the monochrome simple-icons glyph in one ink: a connected
+   account reads as a word with a sign, not as a row of brand stickers, and
+   what is not connected yet is an offer in a menu rather than a grayed logo. */
+const PROVIDERS: { id: string; Icon: IconType }[] = [
+  { id: 'github', Icon: SiGithub },
+  { id: 'google', Icon: SiGoogle },
+  { id: 'apple', Icon: SiApple },
+  { id: 'discord', Icon: SiDiscord },
 ];
-
-const BOUND_TONES = { ink: styles.ink, discord: styles.discord } as const;
-const CONNECTABLE_TONES = {
-  ink: styles.inkConnectable,
-  discord: styles.discordConnectable,
-} as const;
-
-function markStyle(bound: boolean, connectable: boolean, flat?: boolean, tone?: BrandTone) {
-  if (flat) {
-    if (bound) return null;
-    return connectable ? styles.flatUnboundConnectable : styles.flatUnbound;
-  }
-  if (bound) return tone ? BOUND_TONES[tone] : null;
-  return connectable && tone ? CONNECTABLE_TONES[tone] : styles.unbound;
-}
 
 export function LinkedAccountsList({
   accounts,
@@ -155,51 +118,45 @@ export function LinkedAccountsList({
   }
 
   const pendingLabel = pendingProviderId ? providerLabel(pendingProviderId) : '';
+  const bound = PROVIDERS.filter(({ id }) => boundProviders.has(id));
+  const unbound = PROVIDERS.filter(({ id }) => !boundProviders.has(id));
 
   return (
     <>
       <div {...withClassName(stylex.props(styles.list), className)}>
-        {PROVIDERS.map(({ id, Icon, flat, tone }) => {
-          const bound = boundProviders.has(id);
-          const label = providerLabel(id);
-          const connectable = !bound && Boolean(onConnect);
-          const mark = markStyle(bound, connectable, flat, tone);
-          const icon = <Icon aria-hidden {...stylex.props(styles.icon)} />;
-
-          if (connectable) {
-            return (
-              <button
-                key={id}
-                type="button"
-                title={t('settings.profile.bindings.connectAction', { provider: label })}
-                aria-label={t('settings.profile.bindings.connectAction', { provider: label })}
-                onClick={() => setPendingProviderId(id)}
-                {...stylex.props(styles.mark, styles.pressable, mark)}
-              >
-                {icon}
-              </button>
-            );
-          }
-
-          return (
-            <span
-              key={id}
-              {...stylex.props(styles.mark, mark)}
-              title={
-                bound
-                  ? t('settings.profile.bindings.connected', { provider: label })
-                  : t('settings.profile.bindings.notConnected', { provider: label })
-              }
-              aria-label={
-                bound
-                  ? t('settings.profile.bindings.connected', { provider: label })
-                  : t('settings.profile.bindings.notConnected', { provider: label })
-              }
-            >
-              {icon}
+        {bound.length === 0 ? (
+          <span {...stylex.props(styles.none)}>{t('settings.profile.bindings.none')}</span>
+        ) : (
+          bound.map(({ id, Icon }) => (
+            <span key={id} {...stylex.props(styles.account)}>
+              <Icon aria-hidden {...stylex.props(styles.mark)} />
+              {providerLabel(id)}
             </span>
-          );
-        })}
+          ))
+        )}
+        {onConnect && unbound.length > 0 ? (
+          <Menu.Root>
+            <Menu.Trigger
+              render={
+                <Button type="button" variant="ghost" size="small">
+                  {t('settings.profile.bindings.connectMenu')}
+                  <ChevronDown {...stylex.props(styles.icon, styles.hint)} />
+                </Button>
+              }
+            />
+            <Menu.Content align="end">
+              {unbound.map(({ id, Icon }) => (
+                <Menu.Item
+                  key={id}
+                  icon={<Icon aria-hidden {...stylex.props(styles.glyph)} />}
+                  onClick={() => setPendingProviderId(id)}
+                >
+                  {t('settings.profile.bindings.connectAction', { provider: providerLabel(id) })}
+                </Menu.Item>
+              ))}
+            </Menu.Content>
+          </Menu.Root>
+        ) : null}
       </div>
 
       <Dialog.Root

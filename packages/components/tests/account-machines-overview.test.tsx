@@ -67,9 +67,17 @@ describe('AccountMachinesOverviewView', () => {
     const onConfigureAgents = vi.fn();
     await render({ onConfigureAgents });
 
-    await act(async () => getButton('Configure').click());
+    await act(async () => getButton('0 Agents').click());
 
     expect(onConfigureAgents).toHaveBeenCalledWith(machineId);
+  });
+
+  it('states reachability, platform and access in the machine status line', async () => {
+    await render({
+      items: [{ ...items[0]!, isOnline: false, sharedWithTeam: false }],
+    });
+
+    expect(container?.textContent).toContain('Offline · macOS · Private');
   });
 
   it('labels the current Electron machine next to its name', async () => {

@@ -284,6 +284,39 @@ by 16px before a headless section's first row and by 24px before a heading, and 
 records card stands 8px further off. Text sits about 24px from the rule on both
 sides.
 
+## Fifth review: the Account page
+
+The owner still found Account "messy, with a weight I can't name". Counted on the
+screenshot, the page had three layouts (flat rows, a record card with six controls
+per row, a header action over an empty card), seven kinds of clickable thing, and
+at least three right edges. Its first heading, Profile, held the email as a header
+aside, so it read like one more row. Its heaviest ink was the brand logos and the
+Agent icon stacks. Sign Out sat between the profile and the machines.
+
+- **One layout.** Every group on Account is a card with a heading: Profile (email,
+  name, avatar, connected accounts), My machines, CLI Token, and Sign-in
+  (password, then Sign Out, last on the page). Profile is identity rather than a
+  preference, so it is boxed even inside `settingsFlat`. Email is now its own row.
+- **Machine rows share columns.** The rows form one grid, and each row is a
+  `subgrid` of it: the name takes the rest, and each trailing column is as wide as
+  its widest cell. Before, each row's controls were packed from the right edge, so
+  a machine with one fewer Agent icon shifted its whole cluster about 30px. Each
+  cell is plain text now ("6 Agents", "10 directories ▾", then the settings
+  button). The Agent names moved to the tooltip, and Private/Shared moved from a
+  gray badge into the status line ("Offline · darwin · Private"). An offline
+  machine's name and counts step down to secondary ink. Below 30rem of container
+  width, the three cells wrap together under the name.
+- **Connected accounts are words.** Each bound provider shows a monochrome mark
+  and its name. Unbound providers are no longer grayed logos; they sit in a
+  "Connect" menu that opens the same confirm dialog. The same component serves
+  mobile.
+
+Not changed: the ghost header action ("Create token"), and the username's ghost
+value button, whose padding still sets it about 10px inside the other values.
+`@lody/ui` does not export the button's padding token for a matching bleed.
+Whether My machines belongs on Account at all is an open information-architecture
+question for the owner.
+
 ## Verification
 
 - Storybook screenshots before and after, in Chinese, for the preferences
@@ -306,5 +339,11 @@ sides.
   their data stories inside the pane frame. The title and first content now sit
   at the same place on every page (measured). The material study, outside
   `settingsFlat`, still draws cards.
+- Fifth review: `Settings/AccountSettings/DesktopPane` (the page inside the pane
+  scope and `settingsFlat`, with machines and CLI tokens), captured before and
+  after in Chinese, in both palettes, at 860px and 480px.
+  `tests/account-machines-overview.test.tsx` covers the status line, and
+  `tests/linked-accounts-list.test.tsx` covers the connected list and the connect
+  menu through to `onConnect`.
 - Not verified in the packaged Electron app. Storybook renders the same
   components, but outside the app shell.

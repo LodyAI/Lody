@@ -1,5 +1,13 @@
 import { WorkspaceOwnershipTransfer } from '@/components/settings/workspace-ownership-transfer';
 import type { Meta, StoryObj } from '@storybook/react';
+import * as stylex from '@stylexjs/stylex';
+import type { AgentConfigMeta, MachineId } from '@lody/shared';
+import { settingsFlat } from '@/components/settings/material.stylex';
+import { settingsSurface } from '@/components/settings/surface';
+import {
+  AccountMachinesOverviewView,
+  type AccountMachineOverviewItem,
+} from '@/components/settings/account-machines-overview';
 import { AccountSettingsPure } from '@/components/settings';
 import type { AccountSettingsPureProps } from '@/components/settings';
 import type { Invitation } from 'better-auth/plugins';
@@ -247,4 +255,84 @@ export const AfterOwnershipTransfer: Story = {
       role: member.userId === 'user-2' ? 'owner' : 'member',
     })),
   },
+};
+
+const studioId = 'machine-studio' as MachineId;
+const airId = 'machine-air' as MachineId;
+
+function paneAgent(
+  id: string,
+  machineId: MachineId,
+  agentType: 'claude' | 'codex'
+): AgentConfigMeta {
+  return {
+    id,
+    machineId,
+    name: id,
+    description: undefined,
+    cliType: 'builtin',
+    agentType,
+    env: {},
+  } as AgentConfigMeta;
+}
+
+const paneMachines: AccountMachineOverviewItem[] = [
+  {
+    id: studioId,
+    name: 'alice-mac-studio.local',
+    os: 'darwin',
+    isOnline: true,
+    sharedWithTeam: false,
+    agents: ['a', 'b', 'c', 'd', 'e', 'f'].map((key, index) =>
+      paneAgent(`agent-${key}`, studioId, index % 2 ? 'codex' : 'claude')
+    ),
+    directories: Array.from({ length: 10 }, (_, index) => ({
+      key: `${studioId}:dir-${index}`,
+      name: `project-${index}`,
+      rootPath: `/Users/alice/Code/project-${index}`,
+      sharedWithTeam: index % 3 === 0,
+    })),
+  },
+  {
+    id: airId,
+    name: 'alice-macbook-air.local',
+    os: 'darwin',
+    isOnline: false,
+    sharedWithTeam: false,
+    agents: ['a', 'b', 'c'].map((key, index) =>
+      paneAgent(`agent-air-${key}`, airId, index % 2 ? 'codex' : 'claude')
+    ),
+    directories: [],
+  },
+];
+
+/* The Account page as the desktop settings pane draws it: inside the
+   `data-settings-surface` scope and the pane's flat material, with the machines
+   overview and CLI tokens it shows a signed-in owner. */
+export const DesktopPane: Story = {
+  args: {
+    canGenerateCliApiKey: true,
+    cliApiKeys: [],
+    onGenerateCliApiKey: noop,
+    accountMachinesSlot: (
+      <AccountMachinesOverviewView
+        items={paneMachines}
+        currentMachineId={studioId}
+        onConfigureAgents={noop}
+        onManageMachine={noop}
+        onOpenDirectory={noop}
+        onOpenDirectories={noop}
+      />
+    ),
+  },
+  render: (args) => (
+    <div
+      data-settings-surface=""
+      data-testid="account-pane"
+      {...stylex.props(settingsFlat, settingsSurface.canvas)}
+      style={{ width: 860, minHeight: '100vh', paddingInline: 32, paddingBlock: 24 }}
+    >
+      <AccountSettingsPure {...args} />
+    </div>
+  ),
 };

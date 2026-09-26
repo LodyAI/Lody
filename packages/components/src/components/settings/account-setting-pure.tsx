@@ -11,7 +11,6 @@ import {
   Trash2,
   ChevronDown,
   Check,
-  LogOut,
   KeyRound,
   Pencil,
   X,
@@ -71,6 +70,8 @@ const styles = stylex.create({
     whiteSpace: 'nowrap',
     color: colors.label,
   },
+  /** A fact the row states but cannot change: a step quieter than an editable value. */
+  valueQuiet: { color: colors.secondaryLabel },
   valueIcon: { width: '12px', height: '12px', flexShrink: 0, color: colors.tertiaryLabel },
   icon: { width: '14px', height: '14px', flexShrink: 0 },
   /** An icon-only button draws the glyph's box; the glyph fills it. */
@@ -627,12 +628,16 @@ export function AccountSettingsPure({
 
   return (
     <div {...stylex.props(settingsSurface.container)}>
-      {/* Profile: user avatar, display name, connected accounts, password. */}
+      {/* Profile: who the person is — email, display name, avatar, connected accounts. */}
       {surface === 'account' ? (
-        <CompactSection
-          title={t('settings.profile.title')}
-          headerRight={currentUser?.email || undefined}
-        >
+        <CompactSection title={t('settings.profile.title')} boxed>
+          {currentUser?.email ? (
+            <CompactRow label={t('settings.profile.email')}>
+              <span {...stylex.props(styles.valueText, styles.valueQuiet)}>
+                {currentUser.email}
+              </span>
+            </CompactRow>
+          ) : null}
           <CompactRow label={t('settings.profile.name')}>
             {canEditUserName ? (
               isEditingUserName ? (
@@ -692,35 +697,6 @@ export function AccountSettingsPure({
               />
             </CompactRow>
           ) : null}
-          {onChangePassword && onSetupPassword ? (
-            <CompactRow
-              label={t('settings.profile.password.label')}
-              helper={
-                hasPasswordCredential
-                  ? t('settings.profile.password.helper')
-                  : t('settings.profile.password.setupHelper')
-              }
-            >
-              <ChangePasswordButton
-                hasPassword={hasPasswordCredential}
-                onChangePassword={onChangePassword}
-                onVerifyCurrentPassword={onVerifyCurrentPassword}
-                onSetupPassword={onSetupPassword}
-              />
-            </CompactRow>
-          ) : null}
-          <CompactRow label={t('settings.account.signOut')}>
-            <Button
-              variant="secondary"
-              size="small"
-              onClick={() => {
-                void onSignOut();
-              }}
-            >
-              <LogOut {...stylex.props(styles.icon)} />
-              {t('settings.account.signOut')}
-            </Button>
-          </CompactRow>
         </CompactSection>
       ) : null}
 
@@ -1166,6 +1142,40 @@ export function AccountSettingsPure({
               );
             })
           )}
+        </CompactSection>
+      ) : null}
+
+      {/* Sign-in: how this account signs in, and leaving it — the page's last word. */}
+      {surface === 'account' ? (
+        <CompactSection title={t('settings.account.signIn.title')} boxed>
+          {onChangePassword && onSetupPassword ? (
+            <CompactRow
+              label={t('settings.profile.password.label')}
+              helper={
+                hasPasswordCredential
+                  ? t('settings.profile.password.helper')
+                  : t('settings.profile.password.setupHelper')
+              }
+            >
+              <ChangePasswordButton
+                hasPassword={hasPasswordCredential}
+                onChangePassword={onChangePassword}
+                onVerifyCurrentPassword={onVerifyCurrentPassword}
+                onSetupPassword={onSetupPassword}
+              />
+            </CompactRow>
+          ) : null}
+          <CompactRow label={t('settings.account.signOut')}>
+            <Button
+              variant="secondary"
+              size="small"
+              onClick={() => {
+                void onSignOut();
+              }}
+            >
+              {t('settings.account.signOut')}
+            </Button>
+          </CompactRow>
         </CompactSection>
       ) : null}
 
