@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ACPSessionId, SessionId } from '@lody/shared';
+import type { ACPSessionId, AcpSessionNotification, SessionId } from '@lody/shared';
 import type { AuthMethod, InitializeResponse, NewSessionResponse } from '@agentclientprotocol/sdk';
 
 const connectionMocks = vi.hoisted(() => ({
@@ -8,6 +8,7 @@ const connectionMocks = vi.hoisted(() => ({
   loadSession: vi.fn(),
   resumeSession: vi.fn(),
   request: vi.fn(),
+  abort: new AbortController(),
 }));
 
 vi.mock('@agentclientprotocol/sdk', async (importOriginal) => {
@@ -15,6 +16,7 @@ vi.mock('@agentclientprotocol/sdk', async (importOriginal) => {
   return {
     ...actual,
     ClientSideConnection: class MockClientSideConnection {
+      signal = connectionMocks.abort.signal;
       initialize = connectionMocks.initialize;
       newSession = connectionMocks.newSession;
       loadSession = connectionMocks.loadSession;
@@ -73,6 +75,7 @@ function initializeResponse(): InitializeResponse {
 describe('AgentClient Kimi authentication and resume', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    connectionMocks.abort = new AbortController();
     connectionMocks.initialize.mockResolvedValue(initializeResponse());
     connectionMocks.newSession.mockResolvedValue({
       sessionId: 'new-session',
@@ -80,6 +83,82 @@ describe('AgentClient Kimi authentication and resume', () => {
     connectionMocks.loadSession.mockResolvedValue({});
     connectionMocks.resumeSession.mockResolvedValue({});
     connectionMocks.request.mockResolvedValue({});
+  });
+
+  it('marks live child observations unknown on transport loss and refuses orphan permissions', async () => {
+    const notifications: AcpSessionNotification[] = [];
+    const client = new AgentClient({
+      sessionId: 'test' as SessionId,
+      logger: createSilentLogger(),
+      terminalManager: {} as never,
+      onUpdateMessage: (event) => notifications.push(event),
+      onRequestPermission: async () => ({ outcome: { outcome: 'selected', optionId: 'allow' } }),
+    });
+    connectionMocks.initialize.mockResolvedValue({
+      ...initializeResponse(),
+      agentCapabilities: { _meta: { lody: { subagentEvents: { version: 1 } } } },
+    });
+    await client.startSession({} as never, '/tmp');
+    const request = {
+      sessionId: 'new-session',
+      _meta: { lody: { subagentRunId: 'child' } },
+      toolCall: { toolCallId: 'child-tool' },
+      options: [{ optionId: 'allow', name: 'Allow', kind: 'allow_once' as const }],
+    };
+    expect(await client.requestPermission(request)).toEqual({ outcome: { outcome: 'cancelled' } });
+    const snapshot = {
+      name: 'Research',
+      parentRunId: null,
+      support: { stream: ['text'], progress: false, outputRead: 'none', cancel: false },
+    };
+    for (const state of ['completed', 'running']) {
+      await client.extNotification?.('_lody/subagents/event', {
+        version: 1,
+        sessionId: 'new-session',
+        runId: 'finished-child',
+        type: 'snapshot',
+        snapshot: { ...snapshot, state },
+      });
+    }
+    expect(
+      await client.requestPermission({
+        ...request,
+        _meta: { lody: { subagentRunId: 'finished-child' } },
+      })
+    ).toEqual({ outcome: { outcome: 'cancelled' } });
+    await client.extNotification?.('_lody/subagents/event', {
+      version: 1,
+      sessionId: 'new-session',
+      runId: 'child',
+      type: 'snapshot',
+      snapshot: {
+        state: 'running',
+        name: 'Research',
+        parentRunId: null,
+        support: { stream: ['text'], progress: false, outputRead: 'none', cancel: false },
+      },
+    });
+    expect(await client.requestPermission(request)).toEqual({
+      outcome: { outcome: 'selected', optionId: 'allow' },
+    });
+    connectionMocks.abort.abort();
+    const last = notifications.at(-1);
+    expect(last).toMatchObject({
+      update: {
+        sessionUpdate: 'subagent_event',
+        event: {
+          runId: 'child',
+          type: 'snapshot',
+          snapshot: {
+            state: 'unknown',
+            name: 'Research',
+            outputIncomplete: true,
+            reason: { code: 'disconnected' },
+          },
+        },
+      },
+    });
+    expect(await client.requestPermission(request)).toEqual({ outcome: { outcome: 'cancelled' } });
   });
 
   it('retains terminal auth methods and surfaces -32000 as a structured error', async () => {
@@ -137,7 +216,10 @@ describe('AgentClient Kimi authentication and resume', () => {
         clientCapabilities: expect.objectContaining({
           _meta: {
             'cognition.ai/subagentSupport': true,
-            lody: { elicitation: { version: 1, answerNotes: true } },
+            lody: {
+              elicitation: { version: 1, answerNotes: true },
+              subagentEvents: { version: 1 },
+            },
           },
         }),
       })

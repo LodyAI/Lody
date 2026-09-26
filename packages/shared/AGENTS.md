@@ -59,6 +59,7 @@ Exact deletion bypasses discovery. See [relations](../../specs/session-relations
   a supplied turn id restricts lookup to that turn. Preserve legacy JSON metadata on lookup.
 - Mirror's text-event optimization ships upstream in pinned `loro-mirror`; no local patch
   exists and no storage schema or write validation depends on it.
+- Subagent events must preserve run identity and root ownership.
 
 ## Machine protocol negotiation
 

@@ -12,6 +12,7 @@ import {
   type LodyExtensionCapabilities,
   type LodyElicitationMeta,
   type LodyGoalCapability,
+  type LodySubagentSnapshot,
   type RateLimit,
   type RateLimitsGetRequest,
   type RateLimitsSnapshot,
@@ -627,6 +628,7 @@ export class AgentClient implements acp.Client {
   private supportsFork = false;
   private supportsForkAtTurn = false;
   private lodyExtensionCapabilities: LodyExtensionCapabilities = {};
+  private readonly subagentSnapshots = new Map<string, LodySubagentSnapshot>();
   private readonly devinSubagentTaskIds = new Set<string>();
   private worktreeProject?: LodyWorktreeProject;
   private authMethods: acp.AuthMethod[] = [];
@@ -778,6 +780,9 @@ export class AgentClient implements acp.Client {
     params: acp.RequestPermissionRequest
   ): Promise<acp.RequestPermissionResponse> {
     this.ensureSessionMatch(params.sessionId as ACPSessionId);
+    if (!this.isKnownSubagentInteraction(params._meta)) {
+      return { outcome: { outcome: 'cancelled' } };
+    }
     const requestId = randomUUID();
     this.logger.debug(
       `[${this.options.sessionId}] Requesting permission for tool call ${params.toolCall.toolCallId}`
@@ -797,6 +802,7 @@ export class AgentClient implements acp.Client {
   async unstable_createElicitation(
     params: acp.CreateElicitationRequest
   ): Promise<acp.CreateElicitationResponse> {
+    if (!this.isKnownSubagentInteraction(params._meta)) return { action: 'decline' };
     const elicitation = parseAskUserQuestionElicitationRequest(params);
     if (!elicitation) {
       this.logger.debug(
@@ -1475,6 +1481,39 @@ export class AgentClient implements acp.Client {
     }
   }
 
+  private markSubagentsDisconnected(): void {
+    if (!this.acpSessionId) return;
+    for (const [runId, previous] of this.subagentSnapshots) {
+      if (previous.state !== 'pending' && previous.state !== 'running') continue;
+      const snapshot: LodySubagentSnapshot = {
+        ...previous,
+        state: 'unknown',
+        outputIncomplete: true,
+        reason: { code: 'disconnected' },
+      };
+      this.subagentSnapshots.set(runId, snapshot);
+      this.options.onUpdateMessage({
+        sessionId: this.acpSessionId,
+        update: {
+          sessionUpdate: 'subagent_event',
+          event: { version: 1, sessionId: this.acpSessionId, runId, type: 'snapshot', snapshot },
+        },
+      });
+    }
+  }
+
+  private isKnownSubagentInteraction(meta: Record<string, unknown> | null | undefined): boolean {
+    const lody = meta?.lody;
+    if (!lody || typeof lody !== 'object' || !('subagentRunId' in lody)) return true;
+    if (typeof lody.subagentRunId !== 'string') return false;
+    const snapshot = this.subagentSnapshots.get(lody.subagentRunId);
+    return (
+      this.lodyExtensionCapabilities.subagentEvents?.version === 1 &&
+      snapshot !== undefined &&
+      (snapshot.state === 'pending' || snapshot.state === 'running')
+    );
+  }
+
   private async handleExtensionMessage(
     method: string,
     params: Record<string, unknown>
@@ -1495,6 +1534,36 @@ export class AgentClient implements acp.Client {
       return;
     }
     switch (event.type) {
+      case 'subagent': {
+        if (this.lodyExtensionCapabilities.subagentEvents?.version !== 1 || !this.acpSessionId) {
+          return;
+        }
+        const barrier = this.steerApplicationBarrier;
+        if (barrier) await barrier;
+        const childEvent = event.event;
+        if (childEvent.sessionId !== this.acpSessionId) return;
+        if (childEvent.type === 'snapshot') {
+          const previous = this.subagentSnapshots.get(childEvent.runId);
+          // Terminal executions cannot regain consent authority under the same ID.
+          // A reactivated native thread must be assigned a fresh run by the adapter.
+          if (
+            previous &&
+            ['completed', 'failed', 'cancelled'].includes(previous.state) &&
+            childEvent.snapshot.state !== previous.state
+          )
+            return;
+          this.subagentSnapshots.set(childEvent.runId, childEvent.snapshot);
+        } else {
+          const snapshot = this.subagentSnapshots.get(childEvent.runId);
+          if (!snapshot || ['completed', 'failed', 'cancelled'].includes(snapshot.state)) return;
+        }
+        this.lastSessionUpdateAtMs = Date.now();
+        this.options.onUpdateMessage({
+          sessionId: childEvent.sessionId,
+          update: { sessionUpdate: 'subagent_event', event: childEvent },
+        });
+        return;
+      }
       case 'usage': {
         // Never invent a model from the UI selection. Legacy adapters without
         // modelUsage stay unattributed/skipped instead of being misattributed.
@@ -1788,8 +1857,17 @@ export class AgentClient implements acp.Client {
     forkSessionId?: ACPSessionId,
     forkSessionTurnId?: string
   ): Promise<acp.NewSessionResponse> {
+    this.markSubagentsDisconnected();
+    this.subagentSnapshots.clear();
     const connection = new acp.ClientSideConnection(() => this, stream);
     this.connection = connection;
+    connection.signal.addEventListener(
+      'abort',
+      () => {
+        if (this.connection === connection) this.markSubagentsDisconnected();
+      },
+      { once: true }
+    );
     const grokClientIdentifier = this.getGrokClientIdentifier();
     const devinClientCapabilitiesMeta = this.getDevinClientCapabilitiesMeta();
     this.worktreeProject = undefined;
@@ -1872,6 +1950,7 @@ export class AgentClient implements acp.Client {
                 ...devinClientCapabilitiesMeta,
                 lody: {
                   elicitation: { version: 1, answerNotes: true },
+                  subagentEvents: { version: 1 },
                 } satisfies LodyClientExtensionCapabilities,
               },
             },

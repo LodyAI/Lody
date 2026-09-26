@@ -90,6 +90,27 @@ footer actions, and task-summary expansion.
   unmodified wheel is never taken either way:
   [mermaid-diagram-rendering.md](mermaid-diagram-rendering.md).
 
+## Subagent tasks
+
+`subagent-task-panel.tsx` renders a turn's `subagent_task` items as one card of
+ruled rows. A row's first line is the task and its time; a running task adds a
+second line with its latest step, taken from the last `run.items` entry, then
+`run.progress`, then the legacy `summary`/`lastToolName`, so older tasks keep
+working. A row opens the panel's ONE dialog by task id (not a snapshot), so a
+streaming run keeps updating inside it and the view follows the end only while
+the reader is there. The dialog renders `run.items` through `view.tsx`'s turn
+renderers (`SubagentRunHistory`) and never passes a `searchBlockId`: search
+indexes the conversation, not a dialog.
+
+State comes from `run.snapshot.state` when present; the legacy `status` cannot
+say cancelled or unknown. `unknown` means Lody lost sight of the run, so the
+group never waits on it. A run whose provider streams nothing says so rather
+than looking stalled, and `outputIncomplete` is stated under what arrived. Stored
+run history renders whatever the machine's state; only Stop waits on
+`machineSupportsSubagentEvents` and the run's `support.cancel`. Behaviour is
+pinned by `tests/subagent-task-panel.test.tsx` and shown by
+`SubagentTaskPanel.stories.tsx`.
+
 ## Creation progress
 
 `created-session-operation-card.tsx` owns each navigable child card and its title

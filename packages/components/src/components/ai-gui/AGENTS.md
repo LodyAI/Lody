@@ -47,8 +47,7 @@ Edit `AGENTS.md`, not its `CLAUDE.md` symlink. Ownership: [README.md](README.md)
   reopens upstream must clear `finished` and `endedAt` (see
   `apps/cli/src/session/AGENTS.md`).
 - Thought and tool rows share one compact transparent timeline and 13px
-  hierarchy, with no glyphs: the verb says the kind of step. A background or
-  subagent task opens a popover peek from its row, never a dialog. Execute calls are not cards. Desktop disclosure headers use
+  hierarchy, with no glyphs: the verb says the kind of step. Execute calls are not cards. Desktop disclosure headers use
   body type, a hover-only trailing chevron, no fill, and no thought rows.
   Turns are avatar-free and full-width; run config lives in the footer.
 - Duration has one owner: desktop uses `WorkedGroupHeader` for folded turns and
@@ -77,6 +76,8 @@ Edit `AGENTS.md`, not its `CLAUDE.md` symlink. Ownership: [README.md](README.md)
 
 - Native child cancel requires subagentCancellation v1 and an exact parent turn;
   never use durable whole-turn Stop or invent a terminal state in the panel.
+  A `run` task also needs subagentEvents v1 and `support.cancel`. Task rows and
+  their ONE dialog: [README.md](README.md#subagent-tasks).
 
 - `--ui-font-size` is the 1em baseline; compact chrome is 0.9em. Conversation
   body/headings/mono/terminal still scale through

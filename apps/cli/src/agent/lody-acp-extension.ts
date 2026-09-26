@@ -10,6 +10,9 @@ import type {
 } from '@agentclientprotocol/sdk';
 import {
   LODY_EXTENSION_METHODS,
+  LODY_SUBAGENT_EVENT_METHOD,
+  isLodySubagentEvent,
+  type LodySubagentEvent,
   MAX_USAGE_SCOPE_ID_LENGTH,
   normalizeLodyExtensionMethod,
   type LodyExtensionCapabilities,
@@ -48,6 +51,7 @@ const GoalActionSchema = z.enum(['set', 'pause', 'resume', 'clear']);
 const LodyCapabilitiesSchema = z
   .object({
     sessionTitle: VersionOneSchema.optional().catch(undefined),
+    subagentEvents: VersionOneSchema.optional().catch(undefined),
     usage: VersionOneSchema.optional(),
     rateLimits: VersionOneSchema.extend({ query: z.literal(true).optional() }).optional(),
     forkAtTurn: VersionOneSchema.optional(),
@@ -157,6 +161,7 @@ const LEGACY_METHODS = {
 } as const;
 
 export type LodyExtensionEvent =
+  | { readonly type: 'subagent'; readonly event: LodySubagentEvent }
   | { readonly type: 'usage'; readonly update: SessionUsageUpdate; readonly accountingId?: string }
   | { readonly type: 'rateLimits'; readonly snapshot: RateLimitsSnapshot }
   | {
@@ -237,6 +242,11 @@ export function parseLodyExtensionMessage(args: {
   provider: string;
 }): LodyExtensionEvent | null {
   const method = normalizeLodyExtensionMethod(args.method);
+  if (method === LODY_SUBAGENT_EVENT_METHOD) {
+    return isLodySubagentEvent(args.params) && args.params.sessionId === args.sessionId
+      ? { type: 'subagent', event: args.params }
+      : null;
+  }
   if (method === LODY_EXTENSION_METHODS.sessionUsageUpdate) {
     const update = SessionUsageUpdateSchema.parse(args.params);
     const scopeId = parseUsageScopeId(args.params, args.provider);
