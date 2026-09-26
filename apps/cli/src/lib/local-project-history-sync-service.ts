@@ -54,7 +54,11 @@ import {
 } from '@lody/shared';
 
 import type { LoroDocumentManager, SessionDocument } from '@/lib/loro/doc';
-import { readMachineLocalProjects, upsertMachineLocalProject } from '@/lib/local-project-meta';
+import {
+  readMachineLocalProjects,
+  upsertMachineLocalProject,
+  withMachineCatalogWriteLock,
+} from '@/lib/local-project-meta';
 import {
   type HistoryProviderLaunch,
   listHistorySessionsForLocalProject,
@@ -65,39 +69,6 @@ import { formatErrorMessage } from '@/utils/format-error';
 import type { Logger } from '@/utils/logger';
 
 const syncLeases = new Set<string>();
-
-// In-process serializer for machineRoomId-scoped catalog writes. History rows
-// are stored in machine Flock localProject entries, but each provider still does
-// a read-modify-write for its nested catalog. Two concurrent providers operating
-// on the same machine could otherwise clobber each other's history fields.
-//
-// Per-process only; cross-process races on the same machineRoomId remain
-// possible but require simultaneous CLI processes for the same machine, which
-// is not the normal mode of operation.
-const machineCatalogWriteChains = new Map<string, Promise<unknown>>();
-
-async function withMachineCatalogWriteLock<T>(
-  machineRoomId: string,
-  fn: () => Promise<T>
-): Promise<T> {
-  const prev = machineCatalogWriteChains.get(machineRoomId);
-  const current = (async () => {
-    if (prev) {
-      await prev.catch(() => {
-        // swallow prior errors — they belong to other callers, not us
-      });
-    }
-    return fn();
-  })();
-  machineCatalogWriteChains.set(machineRoomId, current);
-  try {
-    return await current;
-  } finally {
-    if (machineCatalogWriteChains.get(machineRoomId) === current) {
-      machineCatalogWriteChains.delete(machineRoomId);
-    }
-  }
-}
 
 type ExistingHistorySession = {
   sessionId: SessionId;

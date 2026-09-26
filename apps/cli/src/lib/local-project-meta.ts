@@ -16,12 +16,46 @@ import {
 } from '@lody/shared';
 import type { MachineLegacyMetaFields } from '@lody/shared';
 import type { LoroRepo } from 'loro-repo';
+import { realpathSync, statSync } from 'node:fs';
+import { normalizeLocalProjectRootPath } from '@lody/shared/node/local-project';
 
 import { readTimeoutEnv, withTimeout } from './loro/timeout-utils';
 
 export type MachineFlockSyncScheduler = {
   markMachineFlockDocDirty: (machineId: MachineId, options?: { reason?: string }) => void;
 };
+
+// Path reconciliation and history providers rewrite the same Flock project row.
+// Serialize their read-modify-write cycles so one cannot drop the other's fields.
+const machineCatalogWriteChains = new Map<string, Promise<unknown>>();
+
+export async function withMachineCatalogWriteLock<T>(
+  machineRoomId: string,
+  fn: () => Promise<T>
+): Promise<T> {
+  const previous = machineCatalogWriteChains.get(machineRoomId);
+  const current = (async () => {
+    if (previous) await previous.catch(() => undefined);
+    return fn();
+  })();
+  machineCatalogWriteChains.set(machineRoomId, current);
+  try {
+    return await current;
+  } finally {
+    if (machineCatalogWriteChains.get(machineRoomId) === current) {
+      machineCatalogWriteChains.delete(machineRoomId);
+    }
+  }
+}
+
+function canonicalLocalProjectRootPath(rootPath: string): string {
+  try {
+    const resolved = realpathSync.native(rootPath);
+    return statSync(resolved).isDirectory() ? normalizeLocalProjectRootPath(resolved) : rootPath;
+  } catch {
+    return rootPath;
+  }
+}
 
 export function shouldApplyMachineDeleteLocalProjectCommand(
   project: Pick<LocalProjectMeta, 'createdAtMs'>,
@@ -82,11 +116,15 @@ export async function upsertMachineLocalProject(
   options: { sync?: MachineFlockSyncScheduler; reason?: string } = {}
 ): Promise<void> {
   const handle = await repo.openFlockDoc(getMachineFlockDocId(workspaceId, machineId));
+  const canonicalProject = {
+    ...project,
+    rootPath: canonicalLocalProjectRootPath(project.rootPath),
+  };
   const changed = writeMachineFlockRowToFlock(
     handle.flock,
     {
       key: machineFlockKeys.localProject(project.id),
-      value: project,
+      value: canonicalProject,
     },
     nowMs
   );
@@ -101,6 +139,33 @@ export async function upsertMachineLocalProject(
   } else {
     await handle.syncOnce().catch(() => undefined);
   }
+}
+
+/** Repairs older project rows whose path was stored through a symlink. */
+export async function reconcileMachineLocalProjectRootPaths(
+  repo: LoroRepo,
+  workspaceId: WorkspaceId,
+  machineId: MachineId,
+  sync: MachineFlockSyncScheduler
+): Promise<void> {
+  await withMachineCatalogWriteLock(getMachineRoomId(machineId), async () => {
+    const projects = await readMachineLocalProjects(repo, workspaceId, machineId);
+    for (const project of Object.values(projects)) {
+      const canonicalRootPath = canonicalLocalProjectRootPath(project.rootPath);
+      if (canonicalRootPath === project.rootPath) continue;
+      await upsertMachineLocalProject(
+        repo,
+        workspaceId,
+        machineId,
+        {
+          ...project,
+          rootPath: canonicalRootPath,
+        },
+        undefined,
+        { sync, reason: 'local-project-path-reconcile' }
+      );
+    }
+  });
 }
 
 export async function removeMachineLocalProject(
