@@ -53,6 +53,11 @@ markup in `index.html` would not show before it.
   with the width in a CSS variable. React's copies read the same attributes, so the
   decision is made once. The script only reads storage. On any failure it falls
   back to the light canvas with the mark alone.
+- **Safe area like the layout root.** The shell pads its top and sides by
+  `env(safe-area-inset-*)`, as `LAYOUT_SAFE_AREA_INSET_CLASS` does for the desktop
+  layout root, so in the iPad native shell the sidebar column starts below the
+  status bar. Below the mobile breakpoint it does not pad, because the mobile layout
+  insets its own surfaces.
 - **Continuity over motion.** The mark fades in after 120 ms and starts a slow
   breathing pulse at 1.2 s, so a fast start never sees motion. Delays are measured
   from navigation start (`--lody-boot-elapsed`), so React's copy continues the static
@@ -110,6 +115,11 @@ markup in `index.html` would not show before it.
   - that the colours match the bundled themes.
 - `apps/electron/src/renderer/renderer-csp.test.mjs` checks both renderer entries
   for the markers and the current hash.
+- The iPad case was emulated on the desktop build at 1180×820 with CDP
+  `Emulation.setSafeAreaInsetsOverride` (top 24/bottom 20, and an exaggerated
+  left/right 44). Before the fix, the shell's sidebar column started 24px higher
+  than the real one; after it, the shell and the layout line up on every edge.
+  A real device or simulator run of the native shell was not possible here.
 - A desktop reload was recorded under Xvfb with every script, stylesheet and wasm
   request delayed by 1.5 s through a main-process `file:` handler, before and after.
 

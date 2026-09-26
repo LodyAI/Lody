@@ -43,6 +43,12 @@ export const BOOT_SHELL_COLORS = {
 export const BOOT_SHELL_MARK_SIZE = 48;
 
 /**
+ * The shell insets itself from the safe area on the top and sides, as the
+ * desktop layout root does (`LAYOUT_SAFE_AREA_INSET_CLASS`), so in the iPad
+ * native shell the sidebar column starts below the status bar like the real
+ * one. Below the mobile breakpoint the mobile layout insets its own surfaces,
+ * so the shell does not.
+ *
  * Animation delays are measured from navigation start, not from when an
  * element was created: `--lody-boot-elapsed` carries each copy's creation time,
  * so when React replaces the static frame with its own copy the mark keeps its
@@ -54,7 +60,7 @@ const light = BOOT_SHELL_COLORS.light;
 const dark = BOOT_SHELL_COLORS.dark;
 
 export const BOOT_SHELL_CSS = `
-.lody-boot-shell{position:fixed;inset:0;display:flex;overflow:hidden;background:${hsl(light.canvas)};color:${hsl(light.status)};font:12px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}
+.lody-boot-shell{position:fixed;inset:0;box-sizing:border-box;padding:env(safe-area-inset-top,0px) env(safe-area-inset-right,0px) 0 env(safe-area-inset-left,0px);display:flex;overflow:hidden;background:${hsl(light.canvas)};color:${hsl(light.status)};font:12px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}
 .dark .lody-boot-shell{background:${hsl(dark.canvas)};color:${hsl(dark.status)}}
 .lody-boot-shell__sidebar{display:none;flex:none;box-sizing:border-box;width:var(--lody-boot-sidebar-width,${BOOT_SHELL_SIDEBAR_WIDTH.default}px);height:100%;background:${hsl(light.sidebar)};border-right:1px solid ${hsl(light.sidebarBorder)}}
 .dark .lody-boot-shell__sidebar{background:${hsl(dark.sidebar)};border-right-color:${hsl(dark.sidebarBorder)}}
@@ -66,7 +72,7 @@ export const BOOT_SHELL_CSS = `
 .lody-boot-shell__status-title{font-size:13px;font-weight:500}
 @keyframes lody-boot-shell-in{from{opacity:0}}
 @keyframes lody-boot-shell-breathe{50%{opacity:.5}}
-@media (max-width:767px){.lody-boot-shell.lody-boot-shell .lody-boot-shell__sidebar{display:none}}
+@media (max-width:767px){.lody-boot-shell{padding:0}.lody-boot-shell.lody-boot-shell .lody-boot-shell__sidebar{display:none}}
 @media (prefers-reduced-motion:reduce){.lody-boot-shell__mark,.lody-boot-shell__status{animation:none}}
 `.trim();
 

@@ -42,6 +42,9 @@ React 绘制的一切在首次 commit 之前都不存在：`LoadingPlaceholder`�
   非工作区路由、设置页、侧栏折叠时都不显示；会话窗口默认折叠，辅助窗口读取自己的存储。
   结果以 `data-lody-boot-sidebar` 记录在 `<html>` 上，宽度写入一个 CSS 变量。
   React 的副本读取同样的属性，所以只判断一次。脚本只读不写；任何失败都退回为浅色画布加居中标志。
+- **安全区与布局根节点一致。** 外壳按 `env(safe-area-inset-*)` 给上、左、右加内边距，
+  与桌面布局根节点的 `LAYOUT_SAFE_AREA_INSET_CLASS` 相同，所以在 iPad 原生壳里侧栏列
+  从状态栏下方开始。低于移动端断点时不加，因为移动端布局会自己处理各个界面的安全区。
 - **连续优先于动效。** 标志在 120 ms 后淡入，1.2 s 起缓慢呼吸，所以启动快时看不到任何动效。
   延迟从导航开始计算（`--lody-boot-elapsed`），因此 React 副本会接续静态副本的相位，
   而不是重新开始。闸口文字在 0.9 s 时淡入到标志下方。开启“减少动态效果”时两者都关闭。
@@ -86,6 +89,9 @@ React 绘制的一切在首次 commit 之前都不存在：`LoadingPlaceholder`�
   - React 与静态标记一致；
   - 颜色与内置主题一致。
 - `apps/electron/src/renderer/renderer-csp.test.mjs` 检查两个渲染入口都带有标记和当前 hash。
+- iPad 场景在桌面构建上模拟：窗口 1180×820，用 CDP `Emulation.setSafeAreaInsetsOverride`
+  设置上 24 / 下 20 的安全区，另测了夸大的左右各 44。修复前外壳的侧栏列比真实侧栏高 24px；
+  修复后外壳与布局在各条边上都对齐。这里无法在真机或模拟器上运行原生壳。
 - 在 Xvfb 下录制了改动前后的桌面端重载：通过主进程的 `file:` handler，
   把每个脚本、样式表和 wasm 请求都延迟 1.5 秒。
 
