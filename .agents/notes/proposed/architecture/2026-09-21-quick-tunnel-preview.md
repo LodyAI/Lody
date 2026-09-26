@@ -456,6 +456,8 @@ formatting and documentation checks passed. Independent review found no P0/P1.
 
 ## Native diagnostic parsing correction
 
+Follow-up PR: [#994](https://github.com/LodyAI/Lody/pull/994).
+
 The pinned Linux binary emits quic-go's receive-buffer warning as plain text even
 with `--output json`. Treating that warning as a fatal JSON error sent SIGTERM
 after origin allocation. Shutdown then cancelled DNS initialization and exited

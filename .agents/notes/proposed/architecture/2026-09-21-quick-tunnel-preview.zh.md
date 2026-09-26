@@ -351,6 +351,8 @@ PR 准备阶段进行了授权、并发、范围和简化维度的独立复核�
 
 ## 原生日志解析修正
 
+后续 PR：[#994](https://github.com/LodyAI/Lody/pull/994)。
+
 固定版本的 Linux 二进制即使启用 `--output json`，仍会以纯文本输出 quic-go
 接收缓冲区警告。将它当作致命 JSON 错误，会在地址分配后发送 SIGTERM。
 随后的退出取消 DNS 初始化并返回退出码零，退出处理器因此报告次生的 DNS
