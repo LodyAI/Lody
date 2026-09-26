@@ -5,6 +5,8 @@ Translation: current
 
 [English](2026-09-26-sidebar-footer.md)
 
+PR: [#1001](https://github.com/LodyAI/Lody/pull/1001)
+
 ## 摘要
 
 原先底部在设置之后用「更多」菜单收纳归档和帮助，无法直接访问要求的三个入口。

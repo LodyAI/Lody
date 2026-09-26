@@ -5,6 +5,8 @@ Translation: current
 
 [中文](2026-09-26-sidebar-footer.zh.md)
 
+PR: [#1001](https://github.com/LodyAI/Lody/pull/1001)
+
 ## Abstract
 
 The footer grouped Archive and Help under More after Settings, preventing direct
