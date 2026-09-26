@@ -50,6 +50,33 @@ mobile surfaces. Background for the rules below:
 - System theme state, persistence, and browser preference tracking are owned by
   `next-themes`. Keep Lody's wrapper focused on preview state, fixed VS Code theme
   application, and the Electron native-theme bridge.
+- Never `@source`-scan a third-party component library in `src/tailwind/index.css`:
+  it emits that library's utilities globally. Konsta's `last-child-hairline-b-none`
+  (unanchored `:last-child … ::after`) made every portal open/close restyle the whole
+  app. Keep `#root` off `<body>`'s tail (`lib/body-tail-sentinel.ts`, mounted by
+  `routes/__root.tsx`). Rationale:
+  [portal restyle note](../../.agents/notes/implemented/bug-fix/2026-09-23-portal-full-restyle.md).
+- Sidebar session-row lists use `SIDEBAR_ROW_LIST_CLASS` (`content-visibility: auto`,
+  which also applies paint containment): a row must draw inside its own box (inset
+  focus rings; connectors inside the leading slot). Recursive GitHub trees go through
+  `lib/repo-file-paths-cache.ts`, never a direct `githubFetchFilePaths` per search.
+- Layout-level components never subscribe to high-frequency atoms (presence and its
+  clock, all sessions): host such hooks in a leaf that renders nothing
+  (`LodyLiveActivityHost`) and read sidebar navigation state at key time. Sidebar rows
+  are memoized: keep item and live-status identity while unchanged and pass
+  selection-independent handlers, or every row re-renders on each switch or tick.
+- A context over the conversation or the sidebar keeps a stable value (stable callbacks,
+  sets keyed by content): each new value makes React walk the whole subtree. An
+  `AnimatePresence` around such a subtree sets `presenceAffectsLayout={false}` unless it
+  drives `layout` animations; otherwise its context changes on every parent render.
+- Components rendered inside conversation rows take `Tooltip`, `Popover` and `ContextMenu`
+  from `ui/armed-overlays.tsx`, not `@lody/ui`: inside an unarmed `useInteractionArm`
+  boundary they render only the trigger element until the first hover or focus. An
+  owner-opened overlay still mounts, focus that arms a row is handed back to the same
+  trigger, and arming never commits inside a press (Chromium drops the click).
+- Markdown code blocks tokenize in `lib/markdown-highlight.worker.ts`; the main thread
+  keeps only cache hits and the no-worker fallback. Builds without an `es` worker format
+  alias `@/lib/markdown-highlight-worker` to a null shim (see site-docs).
 
 ## Rules shared by callers
 

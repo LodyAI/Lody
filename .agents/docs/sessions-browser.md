@@ -66,9 +66,11 @@ this page is the full text of the rules summarised there.
   Only the address bar may reach one.
   The composer info-bar Browser action is an explicit candidate-navigation request, not merely a
   panel-open action. It opens the reported candidate even when another page is already visible.
-  That click IS the approval for that exact target: a remote route creates (or replaces) its tunnel
-  immediately, with no confirmation dialog, because the CLI only accepts LOOPBACK targets from an
-  agent report. Enter on a typed loopback address and Share likewise authorize the exact target,
+  An eligible local Agent report already starts background remote preparation using
+  the active Session owner's execution identity. The click joins that work or reuses
+  the resulting endpoint. It remains exact-target authorization when a new endpoint
+  is needed, without a confirmation dialog; the CLI accepts only LOOPBACK targets.
+  Enter on a typed loopback address and Share likewise authorize the exact target,
   without a second confirmation. No candidate is required for a user-started server.
   The approver is the session initiator, the same person the CLI already requires.
   Consume the request after handling it so a later panel remount cannot replay stale user intent —
@@ -79,7 +81,9 @@ this page is the full text of the rules summarised there.
   Remote connections are queried through Machine RPC rather than restored from persisted `active`
   flags. A visible remote Browser renews only its current endpoint every minute; hidden panels,
   background documents, local viewers, and observational queries do not renew remote access.
-  Creation/revoke fences stale status responses. The toolbar and expiry placeholder share
+  Creation/revoke fences stale status responses. Navigation progress keeps existing
+  content mounted, and a failed status RPC retains the current viewer URL; only
+  an authoritative endpoint state invalidates it. The toolbar and expiry placeholder share
   `PreviewConnectionStatus`; restore retains the logical address/path/query and explicitly
   requests a new endpoint, then offers the replacement share link. Local content stays mounted
   when remote sharing expires. The endpoint owner, not the panel, enforces the one-hour deadline.

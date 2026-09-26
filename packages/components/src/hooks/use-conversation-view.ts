@@ -58,13 +58,10 @@ export function useTurnRange(
     let range: ReturnType<ConversationView['acquireRange']> | undefined;
     let disposed = false;
     const acquire = () => {
-      let start = Math.max(0, from);
-      if (extend && start > 0) {
-        const scan = { turnCount: start, index: (i: number) => view.index(i) };
-        const user = findLastIndex(scan, (row) => row.role === 'user', { limit: 50 });
-        if (user >= 0) start = user;
-      }
-      const next = view.acquireRange(start, Math.min(view.turnCount, to));
+      const next = view.acquireRange(
+        resolveRangeStart(view, from, extend),
+        Math.min(view.turnCount, to)
+      );
       range?.release();
       range = next;
       const settle = () => {
@@ -94,13 +91,37 @@ export function useTurnRange(
       range?.release();
     };
   }, [view, from, to, extend]);
-  return (
-    !!settled &&
+  if (
+    settled &&
     settled.view === view &&
     settled.from === from &&
     settled.to === to &&
     settled.extend === extend
-  );
+  ) {
+    return true;
+  }
+  // Already hydrated (a cached conversation reopening): ready in this render,
+  // not one promise tick later, so its first frame is not a hidden one. The
+  // effect above still takes the lease that keeps these turns hydrated.
+  return !!view && to > from && isRangeHydrated(view, resolveRangeStart(view, from, extend), to);
+}
+
+function resolveRangeStart(view: ConversationView, from: number, extend: boolean): number {
+  let start = Math.max(0, from);
+  if (extend && start > 0) {
+    const scan = { turnCount: start, index: (i: number) => view.index(i) };
+    const user = findLastIndex(scan, (row) => row.role === 'user', { limit: 50 });
+    if (user >= 0) start = user;
+  }
+  return start;
+}
+
+function isRangeHydrated(view: ConversationView, from: number, to: number): boolean {
+  const end = Math.min(view.turnCount, to);
+  for (let i = from; i < end; i++) {
+    if (!view.isHydrated(i)) return false;
+  }
+  return true;
 }
 
 /** One turn by id, hydrated while mounted. */

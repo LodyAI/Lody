@@ -1,7 +1,6 @@
 import {
   useCallback,
   useEffect,
-  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -10,7 +9,7 @@ import {
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
-import { corner, duration, ease, focus, radius, space } from '@lody/ui/tokens/scales.stylex';
+import { corner, duration, ease, radius, space } from '@lody/ui/tokens/scales.stylex';
 import { useOpenSettings } from '@/hooks/use-open-settings';
 import type { TFunction } from 'i18next';
 import { formatDistanceToNow, type Locale } from 'date-fns';
@@ -34,7 +33,6 @@ import {
   Wrench,
 } from 'lucide-react';
 import { toast } from '@/lib/toast';
-import { observeResizeOnAnimationFrame } from '@/lib/resize-observer';
 import { Spinner } from '@lody/ui/spinner';
 import {
   getLocalProjectHistoryProviderKey,
@@ -91,6 +89,9 @@ import { toIntlLocale } from '@/lib/intl-locale';
 import { openExternalUrl } from '@/lib/native-browser';
 import { withClassName } from '@/lib/stylex';
 import { MobileProjectSettings } from '@/components/mobile/mobile-project-settings';
+import { settingsFlat, settingsMaterial as material } from './material.stylex';
+import { SettingsPageActions, useInSettingsPane } from './settings-page-header';
+import { SettingsLineTabs } from './settings-line-tabs';
 import { settingsSurface as surface } from './surface';
 import { AgentIcon, getAgentDisplayName } from '@/components/icons/agent-icon';
 import { useSettingsDataCache } from './settings-data-cache';
@@ -266,8 +267,8 @@ const styles = stylex.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: space[3],
-    // On the same edge as the section names and the rows' text below it.
-    paddingInline: space[4],
+    // On the edge the section names start from.
+    paddingInline: material.headingInset,
   },
   pageHeading: { minWidth: 0 },
   pageSubtitle: {
@@ -1216,6 +1217,7 @@ function ProjectSettingsDesktop({
   const editingProject =
     allSelections.find((selection) => selection.key === editingProjectKey) ?? null;
 
+  const inSettingsPane = useInSettingsPane();
   const addProjectActions =
     onAddLocalProject || onAddGitHubProject ? (
       <ProjectAddMenu
@@ -1260,18 +1262,25 @@ function ProjectSettingsDesktop({
   return (
     <>
       <div {...stylex.props(surface.container, styles.page)}>
-        <div {...stylex.props(styles.pageHeader)}>
-          <div {...stylex.props(styles.pageHeading)}>
-            <h2 {...stylex.props(surface.pageTitle)}>{t('settings.tabs.projects', 'Projects')}</h2>
-            <p {...stylex.props(styles.pageSubtitle)}>
-              {t(
-                'workspace.projects.settingsSubtitle',
-                'Local folders and GitHub repositories available in this workspace.'
-              )}
-            </p>
+        {inSettingsPane ? (
+          // The pane names the page; the sources below say what it holds.
+          <SettingsPageActions>{addProjectActions}</SettingsPageActions>
+        ) : (
+          <div {...stylex.props(styles.pageHeader)}>
+            <div {...stylex.props(styles.pageHeading)}>
+              <h2 {...stylex.props(surface.pageTitle)}>
+                {t('settings.tabs.projects', 'Projects')}
+              </h2>
+              <p {...stylex.props(styles.pageSubtitle)}>
+                {t(
+                  'workspace.projects.settingsSubtitle',
+                  'Local folders and GitHub repositories available in this workspace.'
+                )}
+              </p>
+            </div>
+            {addProjectActions}
           </div>
-          {addProjectActions}
-        </div>
+        )}
 
         {isAnyLoading && totalCount === 0 ? (
           <div {...stylex.props(styles.loading)}>
@@ -1315,7 +1324,9 @@ function ProjectSettingsDesktop({
                   }}
                 >
                   <CompactSection
-                    title={`${machine.machineName} · ${status}`}
+                    title={machine.machineName}
+                    description={status}
+                    boxed
                     headerRight={
                       canAdd ? (
                         <Button
@@ -1364,7 +1375,9 @@ function ProjectSettingsDesktop({
             {githubSections.map((section, index) => (
               <CompactSection
                 key={section.owner}
-                title={`${section.owner} · ${t('chat.contextSwitch.github', 'GitHub')}`}
+                title={section.owner}
+                description={t('chat.contextSwitch.github', 'GitHub')}
+                boxed
                 headerRight={
                   index === 0 && onOpenGitHubSettings ? (
                     <Button
@@ -1383,7 +1396,6 @@ function ProjectSettingsDesktop({
                   <ProjectLine
                     key={row.key}
                     title={row.name}
-                    caption={row.repoFullName}
                     privateRepo={row.private}
                     onOpen={() => setEditingProjectKey(row.key)}
                   />
@@ -1443,7 +1455,8 @@ function ProjectLine({
   onOpen,
 }: {
   readonly title: string;
-  readonly caption: string;
+  /** Where it lives, when its section does not already say. */
+  readonly caption?: string;
   readonly shared?: boolean;
   readonly privateRepo?: boolean;
   readonly conversationCount?: number;
@@ -1474,7 +1487,7 @@ function ProjectLine({
       <button type="button" onClick={onOpen} {...stylex.props(styles.lineButton)}>
         <span {...stylex.props(styles.lineText)}>
           <span {...stylex.props(styles.lineName)}>{title}</span>
-          <span {...stylex.props(styles.lineCaption)}>{caption}</span>
+          {caption ? <span {...stylex.props(styles.lineCaption)}>{caption}</span> : null}
         </span>
         {meta.length > 0 ? (
           <span {...stylex.props(styles.lineMeta)}>{meta.join(' · ')}</span>
@@ -1676,30 +1689,19 @@ function ProjectWindow({
       </p>
     ) : null;
 
+  // Only Conversations needs a lead: the other pages' tab names and their
+  // editors' own descriptions already say what each holds.
   const pageDescription =
-    page === 'general'
+    page === 'conversations'
       ? t(
-          'workspace.projects.window.generalDescription',
-          'Where this project lives and who can use it.'
+          'workspace.projects.window.conversationsDescription',
+          'Bring conversations you had with an agent outside Lody into this workspace.'
         )
-      : page === 'worktree'
-        ? t(
-            'workspace.projects.window.worktreeDescription',
-            'Scripts that run when a conversation gets its own worktree, and when it is archived.'
-          )
-        : page === 'skills'
-          ? t(
-              'workspace.projects.window.skillsDescription',
-              'Skills the agent finds in this project.'
-            )
-          : t(
-              'workspace.projects.window.conversationsDescription',
-              'Bring conversations you had with an agent outside Lody into this workspace.'
-            );
+      : null;
 
   return (
     <Tooltip.Provider delay={200}>
-      <div {...stylex.props(win.window, surface.canvas)}>
+      <div {...stylex.props(settingsFlat, win.window, surface.canvas)}>
         {/* Four views of one project are a strip, not a sidebar: the name and
             where it lives above, the views under it, the page at full width. */}
         <header {...stylex.props(win.head)}>
@@ -1740,11 +1742,13 @@ function ProjectWindow({
               </>
             )}
           </p>
-          <PageTabs pages={pages} current={page} onChange={setPage} />
+          <div {...stylex.props(win.pageTabsSlot)}>
+            <SettingsLineTabs tabs={pages} current={page} onChange={setPage} />
+          </div>
         </header>
 
         <section {...stylex.props(win.main)}>
-          <p {...stylex.props(win.pageDescription)}>{pageDescription}</p>
+          {pageDescription ? <p {...stylex.props(win.pageDescription)}>{pageDescription}</p> : null}
 
           {page === 'conversations' && localRow ? (
             <ConversationsPage
@@ -1783,39 +1787,30 @@ function ProjectWindow({
                         </Button>
                       ) : null}
                     </CompactRow>
-                    <CompactRow
-                      label={t('workspace.projects.window.machine', 'Machine')}
-                      helper={
-                        removalState === 'waiting_for_device'
-                          ? t(
-                              'sidebar.localProjects.remove.waitingForDevice',
-                              'Waiting for device…'
-                            )
-                          : removalState === 'removing'
-                            ? t('sidebar.localProjects.remove.removing', 'Removing…')
-                            : undefined
-                      }
-                    >
-                      <span {...stylex.props(win.value)}>
-                        {localRow.machineName} ·{' '}
-                        {machineReachable
-                          ? t('workspace.machines.online', 'Online')
-                          : t('workspace.machines.offline', 'Offline')}
-                      </span>
-                    </CompactRow>
                   </CompactSection>
                   <ProjectShareControl
                     row={localRow}
                     onSharedWithTeamChange={onSharedWithTeamChange}
                   />
                   {canRemoveLocalProject?.(localRow) && onRequestRemoveLocalProject ? (
+                    // The header already names the machine and whether it is
+                    // online; a pending removal is said where the removal is.
                     <CompactSection tone="danger">
                       <CompactRow
                         label={t('workspace.projects.delete', 'Delete project')}
-                        helper={t(
-                          'sidebar.localProjects.remove.originalDirectorySafe',
-                          'Lody never deletes the original project folder or its files.'
-                        )}
+                        helper={
+                          removalState === 'waiting_for_device'
+                            ? t(
+                                'sidebar.localProjects.remove.waitingForDevice',
+                                'Waiting for device…'
+                              )
+                            : removalState === 'removing'
+                              ? t('sidebar.localProjects.remove.removing', 'Removing…')
+                              : t(
+                                  'sidebar.localProjects.remove.originalDirectorySafe',
+                                  'Lody never deletes the original project folder or its files.'
+                                )
+                        }
                       >
                         <Button
                           type="button"
@@ -1851,13 +1846,6 @@ function ProjectWindow({
                         )}
                       </Button>
                     ) : null}
-                  </CompactRow>
-                  <CompactRow label={t('workspace.projects.window.visibility', 'Visibility')}>
-                    <span {...stylex.props(win.value)}>
-                      {githubRow.private
-                        ? t('workspace.projects.privateRepo', 'Private')
-                        : t('workspace.projects.window.public', 'Public')}
-                    </span>
                   </CompactRow>
                 </CompactSection>
               ) : null}
@@ -1966,80 +1954,6 @@ type ProjectWindowPage = 'general' | 'worktree' | 'skills' | 'conversations';
  * tray strips the pages use for their own choices (agent, state) — a strip over
  * a strip reads as one level.
  */
-function PageTabs({
-  pages,
-  current,
-  onChange,
-}: {
-  readonly pages: readonly {
-    id: ProjectWindowPage;
-    label: string;
-    count?: number;
-    warn?: boolean;
-  }[];
-  readonly current: ProjectWindowPage;
-  readonly onChange: (page: ProjectWindowPage) => void;
-}) {
-  const listRef = useRef<HTMLDivElement>(null);
-  const [line, setLine] = useState<{ left: number; width: number } | null>(null);
-
-  useLayoutEffect(() => {
-    const list = listRef.current;
-    if (!list) return undefined;
-    const measure = () => {
-      const tab = list.querySelector<HTMLElement>(`[data-page="${current}"]`);
-      if (tab) setLine({ left: tab.offsetLeft, width: tab.offsetWidth });
-    };
-    measure();
-    return observeResizeOnAnimationFrame(list, measure);
-  }, [current, pages]);
-
-  return (
-    <div ref={listRef} role="tablist" {...stylex.props(win.pageTabs)}>
-      {pages.map((entry) => {
-        const selected = entry.id === current;
-        return (
-          <button
-            key={entry.id}
-            type="button"
-            role="tab"
-            aria-selected={selected}
-            data-page={entry.id}
-            onClick={() => onChange(entry.id)}
-            onKeyDown={(event) => {
-              if (event.key !== 'ArrowRight' && event.key !== 'ArrowLeft') return;
-              event.preventDefault();
-              const index = pages.findIndex((page) => page.id === entry.id);
-              const next =
-                pages[
-                  (index + (event.key === 'ArrowRight' ? 1 : -1) + pages.length) % pages.length
-                ]!;
-              onChange(next.id);
-              listRef.current?.querySelector<HTMLElement>(`[data-page="${next.id}"]`)?.focus();
-            }}
-            tabIndex={selected ? 0 : -1}
-            {...stylex.props(win.pageTab, selected && win.pageTabCurrent)}
-          >
-            {entry.label}
-            {entry.count ? (
-              <span {...stylex.props(win.tabCount, entry.warn && win.tabCountWarn)}>
-                {entry.count}
-              </span>
-            ) : null}
-          </button>
-        );
-      })}
-      {line ? (
-        <span
-          aria-hidden="true"
-          {...stylex.props(win.pageTabLine)}
-          style={{ transform: `translateX(${line.left}px)`, width: `${line.width}px` }}
-        />
-      ) : null}
-    </div>
-  );
-}
-
 type HistoryStatus = 'available' | 'imported' | 'sync_conflict';
 type HistoryFilter = 'all' | HistoryStatus;
 
@@ -2481,54 +2395,7 @@ const win = stylex.create({
   headPathDim: { color: colors.tertiaryLabel },
   headSep: { flexShrink: 0, color: colors.tertiaryLabel },
   headMachine: { flexShrink: 0, whiteSpace: 'nowrap' },
-  pageTabs: {
-    position: 'relative',
-    display: 'flex',
-    alignItems: 'stretch',
-    gap: '20px',
-    marginTop: space[3],
-  },
-  pageTab: {
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: '6px',
-    height: '36px',
-    margin: 0,
-    padding: 0,
-    borderWidth: 0,
-    backgroundColor: 'transparent',
-    fontFamily: 'inherit',
-    fontSize: '13.5px',
-    fontWeight: 500,
-    color: { default: colors.secondaryLabel, ':hover': colors.label },
-    cursor: 'pointer',
-    outlineStyle: 'none',
-    boxShadow: { default: 'none', ':focus-visible': `0 0 0 ${focus.ringWidth} ${colors.accent}` },
-    borderRadius: '4px',
-    transitionProperty: 'color',
-    transitionDuration: '150ms',
-  },
-  pageTabCurrent: { color: { default: colors.label, ':hover': colors.label } },
-  /** The current view's line: it travels to the next rather than blinking. */
-  pageTabLine: {
-    position: 'absolute',
-    left: 0,
-    bottom: 0,
-    height: '2px',
-    borderRadius: '9999px',
-    backgroundColor: colors.label,
-    transitionProperty: 'transform, width',
-    transitionDuration: '240ms',
-    transitionTimingFunction: 'cubic-bezier(0.2, 0.8, 0.2, 1)',
-  },
-  tabCount: {
-    marginInlineStart: '2px',
-    fontSize: '11px',
-    fontWeight: 500,
-    color: colors.tertiaryLabel,
-    fontVariantNumeric: 'tabular-nums',
-  },
-  tabCountWarn: { color: `color-mix(in oklab, ${colors.warning} 80%, ${colors.label})` },
+  pageTabsSlot: { marginTop: space[3] },
   statusDot: {
     flexShrink: 0,
     width: '6px',

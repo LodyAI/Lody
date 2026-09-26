@@ -1,10 +1,14 @@
 import type { Meta, StoryObj } from '@storybook/react';
 import { useState, type ComponentProps } from 'react';
+import * as stylex from '@stylexjs/stylex';
+import { settingsFlat } from '@/components/settings/material.stylex';
+import { withClassName } from '@/lib/stylex';
 import { GitHubSettingsView } from '@/components/settings/github-settings-view';
 import type { SettingsWorkspaceRepoWithStatus } from '@/components/settings/settings-data-cache';
 
 /* Settings > GitHub, as the desktop overlay's right pane draws it: inside the
-   `data-settings-surface` scope that maps `--card` to the settings material. */
+   `data-settings-surface` scope and the pane's flat material (`settingsFlat`).
+   `boxed` drops the flat theme, to see the card the mobile screens keep. */
 
 const repo = (
   repoFullName: string,
@@ -39,13 +43,13 @@ const manyRepos = [
 
 type ViewProps = ComponentProps<typeof GitHubSettingsView>;
 
-function Harness(props: Partial<ViewProps>) {
+function Harness({ boxed = false, ...props }: Partial<ViewProps> & { boxed?: boolean }) {
   const [repos, setRepos] = useState(props.repos ?? fewRepos);
   const [identityEnabled, setIdentityEnabled] = useState(props.identity?.enabled ?? true);
   return (
     <div
       data-settings-surface=""
-      className="min-h-screen bg-background py-6"
+      {...withClassName(stylex.props(!boxed && settingsFlat), 'min-h-screen bg-background py-6')}
       style={{ width: 860, paddingInline: 24 }}
     >
       <GitHubSettingsView

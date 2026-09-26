@@ -258,6 +258,36 @@ describe('session switch coalescing', () => {
     expect(frames.pending).toBe(0);
   });
 
+  it('reads the sidebar list at key time without re-rendering the layout that hosts it', () => {
+    let renders = 0;
+    function CountingHost() {
+      renders += 1;
+      useKeyboardNavigation();
+      return null;
+    }
+    unmount();
+    for (const cmd of commands.list()) commands.unregister(cmd.id);
+    root = createRoot(container);
+    renderWith(createElement(CountingHost));
+    const rendersAfterMount = renders;
+
+    // The sidebar republishes its rows on every session change.
+    act(() => {
+      store.set(
+        sidebarNavItemsAtom,
+        ['s1', 's7', 's8'].map((sessionId) => ({
+          kind: 'session' as const,
+          sessionId,
+          groupKey: 'g',
+        }))
+      );
+    });
+    expect(renders).toBe(rendersAfterMount);
+
+    pressNext();
+    expect(navigations).toEqual(['s7']);
+  });
+
   it('stops at the last session instead of wrapping', () => {
     routeSessionId = 's10';
     pressNext();

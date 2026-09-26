@@ -1,7 +1,20 @@
 import * as MentionPrimitive from './mention/index';
 import * as React from 'react';
+import * as stylex from '@stylexjs/stylex';
 
 import { cn } from '@/lib/utils';
+import { withClassName } from '@/lib/stylex';
+import { useMentionContext } from './mention/mention-root';
+import { mentionSurface as surface } from './mention/mention-surface';
+
+const styles = stylex.create({
+  content: {
+    position: 'relative',
+    zIndex: 'var(--z-popover)',
+    minWidth: '8rem',
+    overflow: 'hidden',
+  },
+});
 
 function Mention({ className, ...props }: React.ComponentProps<typeof MentionPrimitive.Root>) {
   return (
@@ -48,6 +61,10 @@ const MentionInput = React.forwardRef<
 
 MentionInput.displayName = 'MentionInput';
 
+/**
+ * The floating rung the menu opens on. A caller's `className` lays it out (its
+ * width against `--mention-input-width`); the surface is this component's.
+ */
 function MentionContent({
   className,
   children,
@@ -57,11 +74,8 @@ function MentionContent({
     <MentionPrimitive.Portal>
       <MentionPrimitive.Content
         data-slot="mention-content"
-        className={cn(
-          'data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 relative z-[var(--z-popover)] min-w-32 overflow-hidden rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md data-[state=closed]:animate-out data-[state=open]:animate-in',
-          className
-        )}
         {...props}
+        {...withClassName(stylex.props(surface.surface, styles.content), className)}
       >
         {children}
       </MentionPrimitive.Content>
@@ -69,19 +83,27 @@ function MentionContent({
   );
 }
 
+/** A row: a 28px control that happens to live in a list. */
 function MentionItem({
   className,
   children,
   ...props
 }: React.ComponentProps<typeof MentionPrimitive.Item>) {
+  const context = useMentionContext('MentionItem');
+  const highlighted = context.highlightedItem?.value === props.value;
+  const disabled = props.disabled || context.disabled;
   return (
     <MentionPrimitive.Item
       data-slot="mention-item"
-      className={cn(
-        'relative flex w-full cursor-default select-none items-center gap-2 rounded-xs px-2 py-1.5 text-sm outline-hidden data-[disabled]:pointer-events-none data-[highlighted]:bg-foreground/[0.05] data-[highlighted]:text-foreground data-[disabled]:opacity-50 dark:data-[highlighted]:bg-white/[0.10] dark:data-[highlighted]:text-foreground',
+      {...props}
+      {...withClassName(
+        stylex.props(
+          surface.item,
+          highlighted && surface.itemHighlighted,
+          disabled && surface.itemDisabled
+        ),
         className
       )}
-      {...props}
     >
       {children}
     </MentionPrimitive.Item>

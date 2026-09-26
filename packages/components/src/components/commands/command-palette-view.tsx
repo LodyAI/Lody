@@ -6,6 +6,7 @@ import { colors } from '@lody/ui/tokens/colors.stylex';
 import { corner, duration, radius, space } from '@lody/ui/tokens/scales.stylex';
 import { Dialog } from '@/ui/dialog';
 import { formatKeyParts } from '@/lib/commands';
+import { isImeComposingNativeKeyboardEvent } from '@/lib/ime';
 
 export type PaletteIcon = ComponentType<{ className?: string; strokeWidth?: number }>;
 
@@ -223,21 +224,22 @@ export function CommandPaletteView({
         noAnimation
         style={PANEL_STYLE}
         backdropClassName="z-[var(--z-command-palette,85)] bg-black/30"
+        onKeyDownCapture={(event) => {
+          // Base UI can focus the popup itself, outside the cmdk subtree. Handle
+          // Escape at the dialog boundary so dismissal does not depend on focus.
+          if (event.key !== 'Escape' || isImeComposingNativeKeyboardEvent(event.nativeEvent)) {
+            return;
+          }
+          event.preventDefault();
+          event.stopPropagation();
+          onOpenChange(false);
+        }}
       >
         <Cmdk
           shouldFilter={false}
           loop
           value={active}
           onValueChange={setActive}
-          onKeyDownCapture={(event) => {
-            // The command input/list may own Escape before the outer dialog sees it.
-            // The palette's visible hint promises that Escape closes this surface.
-            if (event.key === 'Escape' && !event.nativeEvent.isComposing) {
-              event.preventDefault();
-              event.stopPropagation();
-              onOpenChange(false);
-            }
-          }}
           {...stylex.props(styles.root)}
         >
           <div {...stylex.props(styles.field)}>

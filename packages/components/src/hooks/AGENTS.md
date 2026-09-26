@@ -14,25 +14,24 @@ Parent AGENTS apply. Edit `AGENTS.md`, not its `CLAUDE.md` symlink. Background: 
   before deferred resize delivery. Observe spacer height and mounted row geometry
   (which may overflow it), never message subtrees/text or scroll pointer styles. Respect the live follow
   lock and explicit jump suppression.
-- Virtua owns rows, measurement and index navigation; `use-sticky-scroll.ts` adapts
-  `use-stick-to-bottom` to its viewport/content. No content-token effects or upward
-  distance thresholds: real upward wheel, touch, selection or scrollbar movement
-  releases streaming follow immediately.
+- Virtua owns rows and measurement; `use-sticky-scroll.ts` owns the follow mode
+  (`follow`/`anchored`/`free`, [note](../../../../.agents/notes/implemented/architecture/2026-09-23-conversation-follow-modes.md)).
+  Only reader input releases it: upward wheel not consumed by a nested scroller,
+  upward keys, upward scroll with pointer/touch held. Only a downward scroll to the
+  real bottom, an explicit jump or a send re-arms. Observers never change the mode.
 - Bind through the viewport's React callback ref on Virtua's public `Virtualizer`;
   detach on unmount, including empty-to-populated transitions. Never recover it from
   a `VList` handle, DOM query, item-count effect, observer retry or timer.
-- Follow-lock truth is `state.isAtBottom`: the returned `isAtBottom` includes tolerance;
-  `escapedFromLock` records escape history and survives explicit re-locking.
-- Handle viewport HEIGHT changes through ResizeObserver; ignore width-only records.
-  No resize-event pumps, guessed transition durations or stop timers. Before a composer
-  inline-height write, set a one-shot ref consumed only by the next viewport height
-  resize, without `scrollToRealBottom`; keep it separate from jump suppression.
-- Group toggles never scroll. Observer deliveries must never re-arm the follow
-  lock — only scroll events may — so the content ResizeObserver releases a
-  same-delivery re-lock while the commit-time snapshot says not-following. No
-  frame retries/settle timers.
-- Preserve per-session restoration, search/expansion suppression and viewport resizing
-  for keyboards and terminal docks.
+- Handle viewport HEIGHT changes (composer, keyboard, docks) through ResizeObserver,
+  keeping the mode's position; ignore width-only records. Mark own scrollTop
+  writes. No resize pumps, skip flags or guessed timers.
+- A direct send glides (rAF, retargeted per frame; input stops it) to its row and
+  reserves a reply-room `Virtualizer` sibling; outside `anchored` it only shrinks.
+  Queue/guide sends never scroll.
+- Group toggles never scroll; a non-following reader is never pulled to the end.
+  No frame retries/settle timers. Keep per-session restore, search/expand suppression.
+- A cached session renders in the frame after its click: no promise tick,
+  effect-only state or deferred setState before reveal.
 
 ## Session, auth, and app shell
 

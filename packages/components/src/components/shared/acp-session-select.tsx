@@ -3,7 +3,7 @@ import { Check, ChevronDown } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
 import { Button } from '@lody/ui/button';
-import { Tooltip } from '@lody/ui/tooltip';
+import { Tooltip } from '@/ui/armed-overlays';
 import { Menu } from '@/ui/menu';
 
 export type AcpSessionSelectOption = {

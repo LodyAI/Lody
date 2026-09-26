@@ -72,17 +72,19 @@ function MainLayoutComponent() {
 }
 
 function LocalPlatformLayoutContent({ workspaceName }: { workspaceName: string }) {
-  // Same dock-badge / live-activity wiring as the cloud layout.
-  useLodyLiveActivity({ workspaceName });
   const pathname = useLocation({ select: (location) => location.pathname });
   const isChatLandingRoute = pathname.endsWith('/chat');
 
   return (
-    <RouteSuspense fallback={isChatLandingRoute ? <CriticalWorkspaceShell /> : null}>
-      <PreloadedMainLayout>
-        <AuthenticatedWorkspaceContent />
-      </PreloadedMainLayout>
-    </RouteSuspense>
+    <>
+      {/* Same dock-badge / live-activity wiring as the cloud layout. */}
+      <LodyLiveActivityHost workspaceName={workspaceName} />
+      <RouteSuspense fallback={isChatLandingRoute ? <CriticalWorkspaceShell /> : null}>
+        <PreloadedMainLayout>
+          <AuthenticatedWorkspaceContent />
+        </PreloadedMainLayout>
+      </RouteSuspense>
+    </>
   );
 }
 
@@ -387,7 +389,32 @@ function CloudMainLayoutComponent({ workspaceName }: { workspaceName: string }) 
   return <AuthedLayoutContent hasLocalToken={false} workspaceName={workspaceName} />;
 }
 
+/**
+ * Owns the dock-badge / Live Activity subscriptions (every session, presence and
+ * its clock). A leaf that renders nothing, so their frequent updates re-render
+ * only this component instead of the whole workspace layout.
+ */
+function LodyLiveActivityHost({ workspaceName }: { workspaceName: string }) {
+  useLodyLiveActivity({ workspaceName });
+  return null;
+}
+
 function AuthedLayoutContent({
+  hasLocalToken,
+  workspaceName,
+}: {
+  hasLocalToken: boolean;
+  workspaceName: string;
+}) {
+  return (
+    <>
+      <LodyLiveActivityHost workspaceName={workspaceName} />
+      <AuthedLayoutRoutes hasLocalToken={hasLocalToken} workspaceName={workspaceName} />
+    </>
+  );
+}
+
+function AuthedLayoutRoutes({
   hasLocalToken,
   workspaceName,
 }: {
@@ -407,11 +434,6 @@ function AuthedLayoutContent({
   useBillingOverviewPreload(user ? currentWorkspaceId : null);
   const [orgSettled, setOrgSettled] = useState(!organizationsLoading);
   const [userSettled, setUserSettled] = useState(Boolean(user) && Boolean(currentWorkspaceId));
-
-  // Push this workspace's owned-by-me unread/waiting counts to the Electron
-  // dock badge. No-op on web. Mounted at the workspace layout so it lives
-  // for the entire authenticated session (one subscriber per window).
-  useLodyLiveActivity({ workspaceName });
 
   useEffect(() => {
     if (!organizationsLoading) {

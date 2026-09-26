@@ -225,6 +225,10 @@ export function useConversationTextSelection<T>({
     };
     const onScroll = (event: Event) => {
       if (event.target !== viewport) return;
+      // Nothing is held: any live range was already retained by selectionchange
+      // (or the mount-time sync), so a plain scroll must not read the Selection
+      // or force a synchronous React flush on every scroll event.
+      if (!activeRef.current && retained.current.size === 0) return;
       const range = selectionRange();
       if (range) {
         // Commit keepMounted before Virtua's bubble-phase scroll listener.

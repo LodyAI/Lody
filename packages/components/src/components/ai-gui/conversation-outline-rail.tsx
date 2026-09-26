@@ -14,7 +14,7 @@ import { createPortal } from 'react-dom';
 import { usePostHog } from '@posthog/react';
 import { useTranslation } from 'react-i18next';
 import { cn } from '@/lib/utils';
-import { Popover } from '@lody/ui/popover';
+import { Popover } from '@/ui/armed-overlays';
 import type { ConversationOutlineEntry } from '@/lib/conversation-outline';
 import { useLatestRef } from '@/hooks/use-latest-ref';
 import { capturePostHogSampled } from '@/lib/posthog-analytics';

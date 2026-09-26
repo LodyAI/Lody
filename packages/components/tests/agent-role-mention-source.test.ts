@@ -214,6 +214,8 @@ describe('agent role menu rows', () => {
     // Nothing restated in the detail: the pane heads itself with the same mark
     // and name.
     expect(candidate?.detail?.title).toBeUndefined();
+    // Who does the work and where, on the row's own line.
+    expect(candidate?.hint).toBe('Codex · Studio');
   });
 
   it('hands the Role to the shared pane instead of restating it as rows', () => {

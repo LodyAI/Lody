@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { act, createElement } from 'react';
+import { act, createElement, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
@@ -51,12 +51,30 @@ describe('CommandPaletteView', () => {
     });
   };
 
+  function StatefulPalette({ results }: { results: PaletteResult[] }) {
+    const [open, setOpen] = useState(true);
+    return createElement(CommandPaletteView, {
+      open,
+      onOpenChange: setOpen,
+      query: '',
+      onQueryChange: () => {},
+      results,
+      labels: LABELS,
+    });
+  }
+
   const selectedTitle = () =>
     document.body.querySelector('[cmdk-item][aria-selected="true"]')?.textContent;
   const press = async (key: string) => {
     const input = document.body.querySelector<HTMLInputElement>('[cmdk-input]')!;
     await act(async () => {
       input.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
+    });
+  };
+  const pressOnDialogSurface = async (key: string, isComposing = false) => {
+    const dialog = document.body.querySelector<HTMLElement>('[data-lody-dialog-content]')!;
+    await act(async () => {
+      dialog.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, isComposing }));
     });
   };
 
@@ -108,7 +126,22 @@ describe('CommandPaletteView', () => {
     expect(document.body.textContent).toContain('Nothing here');
   });
 
-  it('closes when Escape is pressed', async () => {
+  it('closes on Escape but lets an active IME composition handle Escape first', async () => {
+    await act(async () => {
+      root.render(createElement(StatefulPalette, { results: [result('back')] }));
+    });
+
+    const input = document.body.querySelector<HTMLInputElement>('[cmdk-input]')!;
+    input.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }));
+    await pressOnDialogSurface('Escape', true);
+    expect(document.body.querySelector('[cmdk-input]')).not.toBeNull();
+    input.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true }));
+
+    await pressOnDialogSurface('Escape');
+    expect(document.body.querySelector('[cmdk-input]')).toBeNull();
+  });
+
+  it('reports the controlled close request when Escape is pressed', async () => {
     await render([result('back', 'Navigation')]);
     await press('Escape');
     expect(openChanges).toContain(false);

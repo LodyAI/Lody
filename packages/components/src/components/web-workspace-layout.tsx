@@ -67,13 +67,16 @@ export function WebWorkspaceLayout({ children }: { children: ReactNode }) {
 
   return (
     <div className={cn(getWebWorkspaceLayoutRootClassName(), 'relative')}>
+      {/* presenceAffectsLayout gives the presence context a new value on every
+          render, which re-propagated it through the whole sidebar (~29k fibers)
+          on each session switch. Neither branch animates `layout`. */}
       {compact ? (
         // Compact desktop: the navigation sidebar floats over the content as
         // a dismissible sheet instead of taking a column it can no longer
         // afford. Scrim click records a real collapse (persisted), matching
         // every other close path; compact auto-hide uses the separate
         // suppressed flag so widening restores the sidebar instead.
-        <AnimatePresence initial={false}>
+        <AnimatePresence initial={false} presenceAffectsLayout={false}>
           {sidebarVisible && [
             <motion.div
               key="app-sidebar-scrim"
@@ -104,7 +107,7 @@ export function WebWorkspaceLayout({ children }: { children: ReactNode }) {
           ]}
         </AnimatePresence>
       ) : (
-        <AnimatePresence initial={false}>
+        <AnimatePresence initial={false} presenceAffectsLayout={false}>
           {sidebarVisible && (
             <motion.div
               key="app-sidebar"
