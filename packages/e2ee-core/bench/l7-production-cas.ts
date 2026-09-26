@@ -73,7 +73,6 @@ async function main() {
       kind: 'personal',
       signingPublicKey: extra.publicKey,
       encryptionPublicKey: extra.enc,
-      canManage: false,
       possessionSignature: await extra.sign(
         possessionSigningBytes({
           genesis: await hashRecord(genesis),
@@ -81,7 +80,6 @@ async function main() {
           signingPublicKey: extra.publicKey,
           encryptionPublicKey: extra.enc,
           kind: 'personal',
-          canManage: false,
         })
       ),
     },

@@ -58,11 +58,11 @@ describe('R backup material and two-process restore', () => {
     const result = JSON.parse(readFileSync(join(dir, 'restore.json'), 'utf8')) as {
       recoveredEpochs: number[];
       newLength: number;
-      canManage: boolean;
+      canEndorse: boolean;
     };
     expect(result.recoveredEpochs).toEqual([0, 1]);
     expect(result.newLength).toBe(4);
-    expect(result.canManage).toBe(true);
+    expect(result.canEndorse).toBe(true);
   });
 
   it('restores from snapshot materials without prefix records', async () => {
@@ -78,12 +78,12 @@ describe('R backup material and two-process restore', () => {
       origin: string;
       recoveredEpochs: number[];
       newLength: number;
-      canManage: boolean;
+      canEndorse: boolean;
     };
     expect(result.origin).toBe('snapshot');
     expect(result.recoveredEpochs).toEqual([0, 1]);
     expect(result.newLength).toBe(4);
-    expect(result.canManage).toBe(true);
+    expect(result.canEndorse).toBe(true);
   });
 
   it('fails restore when R is revoked, membership is removed, the current packet is missing, or the backup is damaged', async () => {

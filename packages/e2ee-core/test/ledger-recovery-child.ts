@@ -36,6 +36,16 @@ function hex(bytes: Uint8Array): string {
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
+/** The restored Owner personal device manages through its role: it may endorse. */
+function canEndorse(ledger: Awaited<ReturnType<typeof Ledger.verify>>, signer: Uint8Array) {
+  try {
+    ledger.prepareSnapshot(signer);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function write(name: string, bytes: Uint8Array) {
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, name), bytes);
@@ -126,7 +136,6 @@ async function setup() {
       kind: 'recovery',
       signingPublicKey: recovery.publicKey,
       encryptionPublicKey: recovery.enc,
-      canManage: false,
       possessionSignature: await recovery.sign(
         possessionSigningBytes({
           genesis: anchor,
@@ -136,7 +145,6 @@ async function setup() {
           signingPublicKey: recovery.publicKey,
           encryptionPublicKey: recovery.enc,
           kind: 'recovery',
-          canManage: false,
         })
       ),
     },
@@ -275,7 +283,6 @@ async function restore() {
       kind: 'personal',
       signingPublicKey: nextMaterial.publicKey,
       encryptionPublicKey: nextMaterial.enc,
-      canManage: true,
       possessionSignature: await nextHandle.sign(
         possessionSigningBytes({
           genesis: read('anchor.bin'),
@@ -284,7 +291,6 @@ async function restore() {
           signingPublicKey: nextMaterial.publicKey,
           encryptionPublicKey: nextMaterial.enc,
           kind: 'personal',
-          canManage: true,
         })
       ),
     },
@@ -298,7 +304,7 @@ async function restore() {
       JSON.stringify({
         recoveredEpochs: [...history.keys()].sort((a, b) => a - b),
         newLength: next.length,
-        canManage: next.state.devices.get(hex(nextMaterial.publicKey))?.canManage === true,
+        canEndorse: canEndorse(next, nextMaterial.publicKey),
       })
     )
   );
@@ -352,7 +358,6 @@ async function restoreSnapshot() {
       kind: 'personal',
       signingPublicKey: nextMaterial.publicKey,
       encryptionPublicKey: nextMaterial.enc,
-      canManage: true,
       possessionSignature: await nextHandle.sign(
         possessionSigningBytes({
           genesis: read('anchor.bin'),
@@ -361,7 +366,6 @@ async function restoreSnapshot() {
           signingPublicKey: nextMaterial.publicKey,
           encryptionPublicKey: nextMaterial.enc,
           kind: 'personal',
-          canManage: true,
         })
       ),
     },
@@ -376,7 +380,7 @@ async function restoreSnapshot() {
         origin: next.origin,
         recoveredEpochs: [...history.keys()].sort((a, b) => a - b),
         newLength: next.length,
-        canManage: next.state.devices.get(hex(nextMaterial.publicKey))?.canManage === true,
+        canEndorse: canEndorse(next, nextMaterial.publicKey),
       })
     )
   );

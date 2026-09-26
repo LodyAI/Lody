@@ -5,7 +5,6 @@ const fail = (code: LedgerErrorCode): Either.Either<never, ValidationError> =>
   Either.left(new ValidationError({ code }));
 import {
   asArray,
-  asBool,
   asExactBytes,
   asNullOrUint,
   asUint,
@@ -85,7 +84,6 @@ export type Operation =
       readonly kind: DeviceKind;
       readonly signingPublicKey: SigningPublicKey;
       readonly encryptionPublicKey: EncryptionPublicKey;
-      readonly canManage: boolean;
       readonly possessionSignature: Signature;
     }
   | {
@@ -181,7 +179,6 @@ export function possessionSigningBytes(input: {
   signingPublicKey: SigningPublicKey;
   encryptionPublicKey: EncryptionPublicKey;
   kind: DeviceKind;
-  canManage: boolean;
 }): Either.Either<Uint8Array, ValidationError> {
   return Either.gen(function* () {
     return yield* possessSigningBytes([
@@ -190,7 +187,6 @@ export function possessionSigningBytes(input: {
       copyBytes(input.signingPublicKey),
       copyBytes(input.encryptionPublicKey),
       encodeKind(input.kind),
-      input.canManage,
     ]);
   });
 }
@@ -204,9 +200,12 @@ function encodeJoinRequest(request: JoinRequest): CborValue {
     copyBytes(request.signature),
   ];
 }
+// Private decoder capability: callers cannot inject an unchecked public-key parser.
+type CheckSigningKey = (bytes: Uint8Array) => Either.Either<SigningPublicKey, ValidationError>;
+
 function decodeJoinRequest(
   value: CborValue,
-  facts = SigningFacts.empty
+  checkKey: CheckSigningKey
 ): Either.Either<JoinRequest, ValidationError> {
   return Either.gen(function* () {
     const parts = yield* asArray(value, 'invalid-operation');
@@ -218,9 +217,8 @@ function decodeJoinRequest(
       userId: yield* checkUserId(
         yield* asExactBytes(parts[1]!, USER_ID_BYTES, 'invalid-operation')
       ),
-      signingPublicKey: yield* checkSigningPublicKey(
-        yield* asExactBytes(parts[2]!, SIGNING_KEY_BYTES, 'invalid-key'),
-        facts
+      signingPublicKey: yield* checkKey(
+        yield* asExactBytes(parts[2]!, SIGNING_KEY_BYTES, 'invalid-key')
       ),
       encryptionPublicKey: yield* checkEncryptionPublicKey(
         yield* asExactBytes(parts[3]!, ENCRYPTION_KEY_BYTES, 'invalid-key')
@@ -251,7 +249,6 @@ function encodeOperation(operation: Operation): Either.Either<CborValue, Validat
           encodeKind(operation.kind),
           copyBytes(operation.signingPublicKey),
           copyBytes(operation.encryptionPublicKey),
-          operation.canManage,
           copyBytes(operation.possessionSignature),
         ];
       case 'revokeDevice':
@@ -271,7 +268,7 @@ function encodeOperation(operation: Operation): Either.Either<CborValue, Validat
 }
 function decodeOperation(
   value: CborValue,
-  facts = SigningFacts.empty
+  checkKey: CheckSigningKey
 ): Either.Either<Operation, ValidationError> {
   return Either.gen(function* () {
     const parts = yield* asArray(value, 'unknown-operation');
@@ -285,7 +282,7 @@ function decodeOperation(
           membershipId: yield* checkMembershipId(
             yield* asExactBytes(parts[1]!, MEMBERSHIP_ID_BYTES, 'invalid-operation')
           ),
-          request: yield* decodeJoinRequest(parts[2]!, facts),
+          request: yield* decodeJoinRequest(parts[2]!, checkKey),
         };
       }
       case OP_REMOVE_MEMBER: {
@@ -308,20 +305,18 @@ function decodeOperation(
         };
       }
       case OP_ADMIT_DEVICE: {
-        if (parts.length !== 6) return yield* fail('invalid-operation');
+        if (parts.length !== 5) return yield* fail('invalid-operation');
         return {
           type: 'admitDevice',
           kind: yield* decodeKind(parts[1]!),
-          signingPublicKey: yield* checkSigningPublicKey(
-            yield* asExactBytes(parts[2]!, SIGNING_KEY_BYTES, 'invalid-key'),
-            facts
+          signingPublicKey: yield* checkKey(
+            yield* asExactBytes(parts[2]!, SIGNING_KEY_BYTES, 'invalid-key')
           ),
           encryptionPublicKey: yield* checkEncryptionPublicKey(
             yield* asExactBytes(parts[3]!, ENCRYPTION_KEY_BYTES, 'invalid-key')
           ),
-          canManage: yield* asBool(parts[4]!, 'invalid-operation'),
           possessionSignature: yield* checkSignature(
-            yield* asExactBytes(parts[5]!, SIGNATURE_BYTES, 'bad-proof')
+            yield* asExactBytes(parts[4]!, SIGNATURE_BYTES, 'bad-proof')
           ),
         };
       }
@@ -329,10 +324,7 @@ function decodeOperation(
         if (parts.length !== 2) return yield* fail('invalid-operation');
         return {
           type: 'revokeDevice',
-          target: yield* checkSigningPublicKey(
-            yield* asExactBytes(parts[1]!, SIGNING_KEY_BYTES, 'invalid-key'),
-            facts
-          ),
+          target: yield* checkKey(yield* asExactBytes(parts[1]!, SIGNING_KEY_BYTES, 'invalid-key')),
         };
       }
       case OP_TRANSFER_OWNER: {
@@ -418,7 +410,7 @@ export function signingBytesForBody(
 }
 function decodeBody(
   value: CborValue,
-  facts = SigningFacts.empty
+  checkKey: CheckSigningKey
 ): Either.Either<Body, ValidationError> {
   return Either.gen(function* () {
     const parts = yield* asArray(value);
@@ -427,10 +419,7 @@ function decodeBody(
       return {
         type: 'genesis',
         fields: {
-          signer: yield* checkSigningPublicKey(
-            yield* asExactBytes(parts[1]!, SIGNING_KEY_BYTES, 'invalid-key'),
-            facts
-          ),
+          signer: yield* checkKey(yield* asExactBytes(parts[1]!, SIGNING_KEY_BYTES, 'invalid-key')),
           userId: yield* checkUserId(yield* asExactBytes(parts[2]!, USER_ID_BYTES, 'canonical')),
           membershipId: yield* checkMembershipId(
             yield* asExactBytes(parts[3]!, MEMBERSHIP_ID_BYTES, 'canonical')
@@ -449,11 +438,8 @@ function decodeBody(
         type: 'ordinary',
         fields: {
           previousHash: yield* checkHash(yield* asExactBytes(parts[0], HASH_BYTES)),
-          signer: yield* checkSigningPublicKey(
-            yield* asExactBytes(parts[1]!, SIGNING_KEY_BYTES, 'invalid-key'),
-            facts
-          ),
-          operation: yield* decodeOperation(parts[2]!, facts),
+          signer: yield* checkKey(yield* asExactBytes(parts[1]!, SIGNING_KEY_BYTES, 'invalid-key')),
+          operation: yield* decodeOperation(parts[2]!, checkKey),
         },
       };
     }
@@ -481,6 +467,13 @@ export function decodeRecord(
   recordBytes: Uint8Array,
   facts = SigningFacts.empty
 ): Either.Either<DecodedRecord, ValidationError> {
+  return Either.map(decodeRecordWithFacts(recordBytes, facts), ({ record }) => record);
+}
+
+function decodeRecordUsing(
+  recordBytes: Uint8Array,
+  checkKey: CheckSigningKey
+): Either.Either<DecodedRecord, ValidationError> {
   return Either.gen(function* () {
     const stable = copyBytes(recordBytes);
     const root = yield* asArray(yield* decodeCbor(stable));
@@ -490,7 +483,7 @@ export function decodeRecord(
       yield* asExactBytes(root[1]!, SIGNATURE_BYTES, 'canonical')
     );
     return {
-      body: yield* decodeBody(bodyValue, facts),
+      body: yield* decodeBody(bodyValue, checkKey),
       bodyBytes: yield* bodyBytesFromRecord(stable, bodyValue),
       signature,
       recordBytes: stable,
@@ -514,16 +507,16 @@ export function encodeRecord(
 /** Returns updated immutable point facts; neither success nor failure mutates input facts. */
 export function decodeRecordWithFacts(bytes: Uint8Array, facts = SigningFacts.empty) {
   return Either.gen(function* () {
-    const record = yield* decodeRecord(bytes, facts);
     let next = facts;
-    const keys = [record.body.fields.signer];
-    if (record.body.type === 'ordinary') {
-      const operation = record.body.fields.operation;
-      if (operation.type === 'admitMember') keys.push(operation.request.signingPublicKey);
-      if (operation.type === 'admitDevice') keys.push(operation.signingPublicKey);
-      if (operation.type === 'revokeDevice') keys.push(operation.target);
-    }
-    for (const key of keys) next = (yield* next.check(key)).facts;
+    const record = yield* decodeRecordUsing(bytes, (key) =>
+      Either.map(
+        Either.mapLeft(next.check(key), () => new ValidationError({ code: 'invalid-key' })),
+        (checked) => {
+          next = checked.facts;
+          return checked.key.toBytes();
+        }
+      )
+    );
     return { record, facts: next };
   });
 }

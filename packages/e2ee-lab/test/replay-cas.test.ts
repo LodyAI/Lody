@@ -68,8 +68,8 @@ async function casRace(): Promise<{ events: readonly LabEvent[]; statuses: strin
   const extra = await generateDevice();
   const other = await generateDevice();
   const results = await Promise.allSettled([
-    alice.admitDevice(extra, 'personal', false),
-    twin.admitDevice(other, 'personal', false),
+    alice.admitDevice(extra, 'personal'),
+    twin.admitDevice(other, 'personal'),
   ]);
   const statuses = results.map((row) =>
     row.status === 'fulfilled' ? row.value.status : 'rejected'

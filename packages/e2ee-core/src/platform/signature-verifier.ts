@@ -16,10 +16,16 @@ export function makeSignatureVerifier() {
           : Effect.fail(new ValidationError({ code: 'bad-signature' }))
       );
     },
-    verifyMany: (jobs) =>
-      Effect.suspend(() => {
-        for (const job of jobs) {
-          if (!verifySignature(job.publicKey, job.message, job.signature, cache))
+    verifyMany: (jobs, facts) => {
+      const owned = jobs.map((job) => ({
+        ...job,
+        publicKey: new Uint8Array(job.publicKey),
+        message: new Uint8Array(job.message),
+        signature: new Uint8Array(job.signature),
+      }));
+      return Effect.suspend(() => {
+        for (const job of owned) {
+          if (!verifySignature(job.publicKey, job.message, job.signature, cache, facts))
             return Effect.fail(
               new ValidationError({
                 code: job.code ?? 'bad-signature',
@@ -28,7 +34,8 @@ export function makeSignatureVerifier() {
             );
         }
         return Effect.void;
-      }),
+      });
+    },
   });
 }
 

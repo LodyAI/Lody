@@ -7,7 +7,7 @@ import type {
   SigningPublicKey,
   UserId,
 } from './bytes';
-import type { Operation } from './ledger-schema';
+import type { DeviceKind, Operation } from './ledger-schema';
 
 /** Initial key material must already be durably retained by the key lifecycle.
  * A commitment is public data, not proof of possession or storage durability. */
@@ -18,9 +18,9 @@ export interface CreateLedgerCommand {
   readonly epochCommitment: EpochCommitment;
 }
 
-export type DeviceGrant =
-  | { readonly kind: 'personal'; readonly canManage: boolean }
-  | { readonly kind: 'machine' | 'recovery'; readonly canManage: false };
+export interface DeviceGrant {
+  readonly kind: DeviceKind;
+}
 
 export type LedgerCommand =
   | {
@@ -74,7 +74,6 @@ export function commandOperation(command: LedgerCommand): Operation {
       return {
         type: 'admitDevice',
         kind: command.kind,
-        canManage: command.canManage,
         signingPublicKey: command.signingPublicKey.toBytes(),
         encryptionPublicKey: command.encryptionPublicKey.toBytes(),
         possessionSignature: command.possessionSignature.toBytes(),

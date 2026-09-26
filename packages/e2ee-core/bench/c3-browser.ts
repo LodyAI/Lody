@@ -75,13 +75,13 @@ async function main() {
   const admitted = await append(
     created.ledger,
     owner,
-    await admitDeviceOp(created.anchor, created.membershipId, phone, 'personal', true)
+    await admitDeviceOp(created.anchor, created.membershipId, phone, 'personal')
   );
   const extraDevice = await ed25519();
   const extra = await append(
     admitted.ledger,
     owner,
-    await admitDeviceOp(created.anchor, created.membershipId, extraDevice, 'personal', false)
+    await admitDeviceOp(created.anchor, created.membershipId, extraDevice, 'personal')
   );
   const check = await Ledger.verify({
     anchor: created.anchor,

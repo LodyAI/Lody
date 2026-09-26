@@ -411,7 +411,7 @@ export function collabScript(): readonly CollabStep[] {
           event.phase === 'request-queued',
         { kind: 'drop' }
       );
-      const first = await w.members.alice.admitDevice(w.devices['spare']!, 'personal', false);
+      const first = await w.members.alice.admitDevice(w.devices['spare']!, 'personal');
       if (first.status !== 'unknown') throw new Error(`lost-ack:${first.status}`);
       const resumed = await w.members.alice.resume();
       if (resumed.status !== 'committed') throw new Error(`resume-spare:${resumed.status}`);
@@ -498,7 +498,7 @@ export function collabScript(): readonly CollabStep[] {
       expectText(await readLoro(w.members.dave), 'epoch-one');
     }),
     step('alice-admit-crash', async (w) => {
-      const admitted = await w.members.alice.admitDevice(w.devices['crash']!, 'personal', false);
+      const admitted = await w.members.alice.admitDevice(w.devices['crash']!, 'personal');
       if (admitted.status !== 'committed') throw new Error(`admit-crash:${admitted.status}`);
     }),
     step('crash-write', async (w) => {

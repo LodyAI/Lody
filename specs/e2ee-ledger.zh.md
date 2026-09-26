@@ -22,7 +22,7 @@ Translation: pending
 | 设备               | device                         | 一台电脑、手机、远程机器或恢复设备。每台自己生成密钥，不复制旧设备私钥。                                                                                       |
 | 个人 / 机器 / 恢复 | personal / machine / recovery  | 设备种类。机器不能管理 Org；恢复设备平时不运行，只用来收密钥和批准本人的新个人设备。                                                                           |
 | 角色               | Owner / Admin / Member / Guest | 用户在本 Org 的权限档。Guest 只读。设备不另存一套角色。                                                                                                        |
-| 管理能力           | `canManage`                    | 这台个人设备能不能做邀请、发布新一代密钥等管理操作。必须和用户角色取交集：Admin 的普通手机若未授予管理能力，仍不能发布新一代密钥。机器和恢复设备必须为 false。 |
+| 管理设备           | managing device                | 角色为 Owner/Admin 的成员的当前有效 personal 设备。由角色与设备种类推出，账本不另存能力字段：升为 Admin 后该用户已登记的手机立即可管理，降级后立即失去。机器和恢复设备永不管理。 |
 | 恢复设备           | recovery device，文中常写 R    | 已登记、平时不上线的虚拟设备。私钥用 Passkey 或恢复文件包起来，需要时才解锁。                                                                                  |
 | Passkey            | Passkey / PRF                  | 系统级通行密钥；这里只用它派生一段密钥来包装 R 的私钥。Passkey 不是 R，也不能代替账本授权。真机 PRF 仍待验收。                                                 |
 | 用户根私钥         | user root key                  | 旧设想：每人一把凌驾于所有设备之上的私钥。本稿没有这种钥匙；恢复走登记过的 R。                                                                                 |
@@ -99,7 +99,7 @@ Translation: pending
 | D1 A                     | Owner 单方转让：当前 Owner 的管理个人设备单独签名，接任者须已是成员。              |
 | D2                       | 创世代承诺暂不编 genesis；持钥模块解开后按 §2 公式核对。                           |
 | D3                       | 账本没有 cancel 操作；用过的申请 ID 永久消费。                                     |
-| D4–D5                    | §8 的操作字段和权限交集（角色 ∩ `canManage` ∩ 设备种类）。                         |
+| D4–D5                    | §8 的操作字段和权限交集（角色 ∩ 设备种类）。                                       |
 
 ## 1. 目标与确认范围
 
@@ -224,7 +224,6 @@ type Device = {
   membershipId: MembershipId;
   kind: 'personal' | 'machine' | 'recovery';
   encryptionPublicKey: EncryptionPublicKey;
-  canManage: boolean;
 };
 type EpochState = {
   number: number;
@@ -238,7 +237,7 @@ type EpochState = {
 签名公钥用于验证作者，加密公钥用于接收信封，两者用途不同；以上均为公开信息。
 不再用含糊的 `identityKeys` 或 `encryptionKey` 字段名。恢复设备使用相同的独立
 签名/加密公钥与成员绑定，不在 Member 上另设恢复公钥或要求所有设备保管用户私钥。
-`machine` 与 `recovery` 的 `canManage` 必须为 false；恢复授权是单独允许的本人
+`machine` 与 `recovery` 按种类永不管理 Org；恢复授权是单独允许的本人
 设备操作，不是管理 Org。Guest 为只读成员，其有效签名仍能用于持钥和本人设备流程，
 不能用于内容写入或机器执行。其余角色的内容/执行权仍受具体目标范围与设备限制。
 
@@ -279,9 +278,9 @@ head。Owner 单方转让已确认（D1 A）：当前 Owner 管理个人设备�
 
 R 的用途限定为接收 Org 密钥、授权本人的新个人设备；不能直接写内容、执行命令、
 邀请他人、换代、改角色或移交 Owner。恢复不是 Guest 角色；即使用户是 Owner，
-R 也没有直接管理权限。已确认：用户当前为 Owner/Admin 时，R 可显式授予新个人
-设备管理能力；Member/Guest 不允许授予该能力。提交时同时检查 R、成员当前资格和
-明确的能力字段；解密成功本身不授予管理权。字段编码仍须随操作 API 确认。
+R 也没有直接管理权限。R 接纳的新个人设备与该用户其它个人设备一样，管理能力随用户
+当前角色：用户为 Owner/Admin 时即可管理，Member/Guest 不可。提交时检查 R 与成员
+当前资格；解密成功本身不授予管理权。
 恢复后由有效个人设备明确撤销丢失设备，不由 R
 执行任意治理或偷偷连带撤销。
 
@@ -515,7 +514,7 @@ epoch = 0:    commitment = SHA-256("lody-e2ee/epoch-key/v1\0" || K)
 | 1    | admitMember   | `[1, membershipId, joinRequest]`                                  |
 | 2    | removeMember  | `[2, membershipId]`                                               |
 | 3    | setRole       | `[3, membershipId, role]` role=1 admin / 2 member / 3 guest       |
-| 4    | admitDevice   | `[4, kind, newSign, newEnc, canManage, possessionSig]` kind=0/1/2 |
+| 4    | admitDevice   | `[4, kind, newSign, newEnc, possessionSig]` kind=0/1/2            |
 | 5    | revokeDevice  | `[5, targetSign]`                                                 |
 | 6    | transferOwner | `[6, successorMembershipId]`                                      |
 | 7    | publishEpoch  | `[7, epoch, commitment, previousEpochKey72]` epoch≥1              |
@@ -539,15 +538,15 @@ epoch = 0:    commitment = SHA-256("lody-e2ee/epoch-key/v1\0" || K)
 
 - 之前没有任何记录。
 - `protocolVersion = 1`；签名公钥为规范素阶点；加密公钥 32 字节非全零。
-- 效果：该 `userId` / `membershipId` 成为唯一 Owner；创始设备为 personal 且 `canManage=true`；epoch=0，承诺为 `epoch0Commitment`。信任锚仍须外带确认。
+- 效果：该 `userId` / `membershipId` 成为唯一 Owner；创始设备为 personal；epoch=0，承诺为 `epoch0Commitment`。信任锚仍须外带确认。
 
 **`admitMember`**
 
-- 提交者：有效 personal **且** `canManage` **且** 角色为 Owner 或 Admin（`requirePersonalManage`）。Guest 不能邀请。
+- 提交者：有效 personal **且** 角色为 Owner 或 Admin（`requirePersonalManage`）。Guest 不能邀请。
 - `membershipId` 从未在本 Org 用过；该 `userId` 当前没有有效成员资格。
 - `(firstSign, requestId)` 未消费；`firstSign` / `firstEnc` 从未在本 Org 出现过（含已撤设备）。
 - `joinRequest` 由 `firstSign` 签名，覆盖 genesis 与申请字段。核心不查 `expiresAt`。
-- 效果：恒为 Member（不能经此授予 Guest/Admin）；第一台设备为 personal、`canManage=false`。不发当前代密钥（宿主随后发信封）。
+- 效果：恒为 Member（不能经此授予 Guest/Admin）；第一台设备为 personal，管理能力随角色（此时为 Member，不能管理）。不发当前代密钥（宿主随后发信封）。
 
 **`removeMember`**
 
@@ -563,10 +562,9 @@ epoch = 0:    commitment = SHA-256("lody-e2ee/epoch-key/v1\0" || K)
 
 **`admitDevice`**
 
-- 提交者：本人当前有效的 personal，**或** 本人的 R（`requireOwnPersonalOrRecovery`）。不要求提交者 `canManage`。
+- 提交者：本人当前有效的 personal，**或** 本人的 R（`requireOwnPersonalOrRecovery`）。不要求提交者为管理设备。
 - R 只能接纳 `kind=personal`。Guest 不能接纳 machine。
-- `machine` / `recovery` 的 `canManage` 必须 false。`canManage=true` 仅当新设备是 personal **且** 该成员当前为 Owner/Admin。
-- `newSign` / `newEnc` 从未在本 Org 出现。持钥证明由 **新设备** `newSign` 签署，绑定 genesis、前置状态推导出的目标 `membershipId`、新公钥、kind、`canManage`。
+- `newSign` / `newEnc` 从未在本 Org 出现。持钥证明由 **新设备** `newSign` 签署，绑定 genesis、前置状态推导出的目标 `membershipId`、新公钥、kind。
 - 效果：设备挂到提交者的当前 `membershipId`。不沿批准关系形成授权树。
 
 **`revokeDevice`**
@@ -594,13 +592,15 @@ epoch = 0:    commitment = SHA-256("lody-e2ee/epoch-key/v1\0" || K)
 无用户根私钥。重放不用“现在”否定历史。
 `(firstSign, requestId)` 永久消费。账本无 cancel 操作（D3）。
 
-持钥证明覆盖 `"lody-e2ee/possess/v2\0" || encode([genesis, targetMembershipId, newSign, newEnc, kind, canManage])`，由新设备签名。
+持钥证明覆盖 `"lody-e2ee/possess/v2\0" || encode([genesis, targetMembershipId, newSign, newEnc, kind])`，由新设备签名。
 `targetMembershipId` 为 16 字节的目标成员实例。调用方必须先向新设备确认该目标；验证器从前置已验证状态中的记录签署设备取得成员实例，再重建上述签名字节。
-操作 `[4, kind, newSign, newEnc, canManage, possessionSig]` 不重复存成员实例，也不绑定某台批准设备；同一成员的其它合法个人设备或 R 仍可按权限规则批准。
+操作 `[4, kind, newSign, newEnc, possessionSig]` 不重复存成员实例，也不绑定某台批准设备；同一成员的其它合法个人设备或 R 仍可按权限规则批准。
 首次成员加入仍使用 `joinRequest`，不要求申请者提供尚未分配的成员实例。
 
 这是不兼容的实验协议修订：记录数组形状与创世版本保持不变，但持钥证明域改为 v2。
 旧 v1 持钥证明（包括磁盘 pending、历史中的 admitDevice）不能在新版重放中通过，不双读、不自动重签、不改写历史或删除旧文件。
+2026-09-24 起又原地移除了 `canManage`：`admitDevice` 由 6 元素变为 5 元素，持钥证明数组去掉末项，
+权限快照的设备条目去掉末项；含旧字段的记录、pending 与快照按非法编码拒绝，同样不双读、不迁移。
 需要完整重放的旧实验 Org 应用旧版本审计，或显式创建新的实验 Org；旧权限快照仍是外带背书状态，不因此成为历史证明。
 `revokeDevice` 的 `targetSign` 是被撤设备的签名公钥。
 
@@ -609,9 +609,9 @@ epoch = 0:    commitment = SHA-256("lody-e2ee/epoch-key/v1\0" || K)
 
 ### 8.3 权限交集（摘要）
 
-管理类操作（接纳/移除成员、改角色、换代、转让）要求：有效 personal **且** `canManage` **且** 当前角色允许。
-本人设备接纳/撤销不要求提交者 `canManage`。R 只能接纳本人 personal。
-`canManage=true` 仅当目标是 personal **且** 当前角色为 Owner/Admin（含 R 恢复管理设备）。
+管理类操作（接纳/移除成员、改角色、换代、转让）要求：有效 personal **且** 当前角色允许。
+设备不另存管理能力，角色升降对该成员全部个人设备立即生效；机器与恢复设备按种类排除。
+本人设备接纳/撤销不要求提交者为管理设备。R 只能接纳本人 personal。
 Guest 可接纳/撤销本人 personal 与登记 R，不可登记 machine、不可换代/邀请/改角色。
 Admin 可接纳 Member 并换代，不可改角色、移除成员或转让。机器无管理权。
 分发当前代密钥信封不属于管理操作：任何当前有效的非恢复设备都可以转发，见 §8.5。
@@ -648,7 +648,7 @@ AAD 为规范 DAG-CBOR `encode([genesis32, epoch, senderSign32, recipientSign32]
 HPKE info 为 `"lody-e2ee/hpke-epoch/v1\0"`，明文是 32 字节当前代密钥。
 接收方核对发送者资格、接收设备资格、epoch、精确长度和 AAD，验证签名后才解密；本地加密公钥必须匹配账本接收设备，解密结果必须匹配当前承诺。
 发送者资格（`canSendEpoch`，2026-09-22 确认）：发送者是本 Org 当前有效设备且不是恢复设备。个人、机器、Guest 的设备都可以把当前代密钥转发给任何当前有效设备；R 只收不发。
-分钥不是管理操作，不要求角色或 `canManage`：钥匙真伪由承诺核对保证，收件人资格由账本保证，发送者角色不提供额外证据。宿主网关对密钥流写入复用同一判定。
+分钥不是管理操作，不要求角色或管理设备：钥匙真伪由承诺核对保证，收件人资格由账本保证，发送者角色不提供额外证据。宿主网关对密钥流写入复用同一判定。
 
 历史包为 `nonce24 || ciphertext32 || tag16`，直接以 K*n 作 XChaCha20-Poly1305 密钥；
 AAD 为 `"lody-e2ee/epoch-history/v1\0" || genesis32 || uint32be(n)`，明文固定 K*(n−1)。
@@ -656,9 +656,9 @@ AAD 为 `"lody-e2ee/epoch-history/v1\0" || genesis32 || uint32be(n)`，明文固
 
 ### 8.6 快照不变量与记录身份
 
-快照中的 machine/recovery 必须 `canManage=false`，与从创世重放一致。
+快照设备条目不含管理能力字段；管理权始终由当前角色与设备种类推出，与从创世重放一致。
 不要把操作准入条件误作永久状态不变量：成员降级为 Guest 后可以保留已登记的 machine，
-降级后的个人设备也可以保留 `canManage=true` 标志；实际权限仍取当前角色、设备种类和标志的交集。
+但其个人设备随即失去管理权。
 结构校验不能证明背书者没有撒谎，独立核对与按需历史审计仍不可替代。
 
 严格 Ed25519 检查不保证持有私钥者对同一 body 只能生成一个有效签名。
@@ -711,7 +711,7 @@ next.hashAt(0);
 失败显示同步失败并重试同一密文。换代记录已含 72 字节历史包，不再另发历史流。
 
 恢复（宿主）：`openRecoveryDevice` 解 R 私钥 → `Ledger.verify` → 打开已投递给 R 的当前代信封并核对 commitment →
-沿历史包解旧钥 → R 签署 `admitDevice` personal（Owner/Admin 可显式 `canManage`）→ CAS 后清理 R 秘密。
+沿历史包解旧钥 → R 签署 `admitDevice` personal（用户为 Owner/Admin 时新设备即可管理）→ CAS 后清理 R 秘密。
 
 错误码：`canonical|truncated|trailing|oversize|nesting|unknown-version|unknown-operation|bad-signature|bad-proof|invalid-key|unauthorized|replay|wrong-parent|wrong-anchor|genesis-mismatch|owner-transfer-unconfirmed|invalid-operation`，可带失败位置。
 

@@ -3,7 +3,13 @@ import { runPromiseThrow } from '../effect-run';
 import { copyBytes, bytesEqual } from './cbor';
 import { hashRecord, type Hash, type SigningPointCache } from './crypto';
 import { fail, LedgerError } from './error';
-import { genesisHash, type SigningPublicKey } from '../pure/bytes';
+import {
+  genesisHash,
+  recordHash,
+  signature,
+  signingPublicKey,
+  type SigningPublicKey,
+} from '../pure/bytes';
 import { viewState, type LedgerView } from '../pure/records';
 import { makeSignatureVerifier } from '../platform/signature-verifier';
 import type { ClientError } from '../pure/errors';
@@ -117,12 +123,6 @@ export class LedgerClient {
   }): Promise<LedgerClient> {
     const snapshot = copyBytes(input.snapshot);
     const trust = copyTrust(input.trust);
-    const incoming = await Ledger.verifySnapshot({
-      trust,
-      snapshot,
-      suffix: [],
-      pointCache: input.pointCache,
-    });
     const client = new LedgerClient(
       null,
       trust.genesis,
@@ -130,51 +130,19 @@ export class LedgerClient {
       input.stream,
       input.pointCache
     );
-    await input.store.exclusive(async (tx) => {
-      const loaded = await tx.load();
-      if (loaded) {
-        if (!bytesEqual(loaded.genesis, trust.genesis)) fail('wrong-anchor');
-        const existing =
-          loaded.snapshot && loaded.snapshotTrust
-            ? await Ledger.verifySnapshot({
-                trust: loaded.snapshotTrust,
-                snapshot: loaded.snapshot,
-                suffix: loaded.records,
-                pointCache: input.pointCache,
-              })
-            : loaded.records.length === 0
-              ? fail('genesis-mismatch')
-              : await Ledger.verify({
-                  anchor: loaded.genesis,
-                  records: loaded.records,
-                  pointCache: input.pointCache,
-                });
-        if (incoming.length < existing.length) fail('replay');
-        if (incoming.length === existing.length) {
-          if (!bytesEqual(incoming.head, existing.head)) fail('replay');
-          const incomingDigest = incoming.comparisonNote(
-            trust.endorser,
-            input.pointCache
-          ).stateDigest;
-          const existingDigest = existing.comparisonNote(
-            trust.endorser,
-            input.pointCache
-          ).stateDigest;
-          if (!bytesEqual(incomingDigest, existingDigest)) fail('replay');
-          if (loaded.snapshot && !bytesEqual(loaded.snapshot, snapshot)) fail('replay');
-          return;
-        }
-        fail('replay');
-      }
-      await tx.save({
-        genesis: copyBytes(trust.genesis),
-        records: [],
-        pending: null,
-        offset: input.stream.initialOffset,
-        snapshot,
-        snapshotTrust: trust,
-      });
-    });
+    client.engine = await runPromiseThrow(
+      client.provide(
+        Effect.gen(function* () {
+          return yield* LedgerEngine.legacyFromSnapshot({
+            genesis: yield* genesisHash(trust.genesis),
+            endorser: yield* signingPublicKey(trust.endorser),
+            head: yield* recordHash(trust.head),
+            headSignature: yield* signature(trust.headSignature),
+            snapshot,
+          });
+        }).pipe(Effect.mapError(legacyError))
+      )
+    );
     return client;
   }
 

@@ -199,7 +199,6 @@ function encodeAuthState(state: InternalState): Either.Either<CborValue, Validat
         copyBytes(device.membershipId),
         encodeKind(device.kind),
         copyBytes(device.encryptionPublicKey),
-        device.canManage,
       ]),
       state.epoch.number,
       copyBytes(state.epoch.keyCommitment),
@@ -263,8 +262,7 @@ export function assertEndorserEligible(
 ): Either.Either<void, ValidationError> {
   return Either.gen(function* () {
     const device = state.devices.get(keyId(signer));
-    if (!device || device.kind !== 'personal' || !device.canManage)
-      return yield* fail('unauthorized');
+    if (!device || device.kind !== 'personal') return yield* fail('unauthorized');
     const member = state.members.get(keyId(device.membershipId));
     if (!member || (member.role !== 'owner' && member.role !== 'admin'))
       return yield* fail('unauthorized');
@@ -323,7 +321,7 @@ function importAuthState(
     let lastDevice: Uint8Array | undefined;
     for (const row of yield* asArray(fields[2]!)) {
       const tuple = yield* asArray(row);
-      if (tuple.length !== 5) return yield* fail('canonical');
+      if (tuple.length !== 4) return yield* fail('canonical');
       const signPub = yield* checkSigningPublicKey(
         yield* asExactBytes(tuple[0]!, SIGNING_KEY_BYTES),
         facts
@@ -335,14 +333,11 @@ function importAuthState(
       const enc = yield* checkEncryptionPublicKey(
         yield* asExactBytes(tuple[3]!, ENCRYPTION_KEY_BYTES)
       );
-      const canManage = yield* asBool(tuple[4]!);
       if (!members.has(keyId(membershipId))) return yield* fail('canonical');
-      if (kind !== 'personal' && canManage) return yield* fail('canonical');
       devices.set(keyId(signPub), {
         membershipId: copyBytes(membershipId),
         kind,
         encryptionPublicKey: enc,
-        canManage,
       });
     }
     const epochNumber = yield* asUint(fields[3]!);

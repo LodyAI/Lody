@@ -1,11 +1,13 @@
 /**
- * Finite authorization oracle matching proofs/e2ee/E2EE.lean `step`.
+ * Finite authorization oracle for the ledger `step`, mirroring proofs/e2ee/E2EE.lean.
+ * Management is role-derived: an active personal device of a current Owner/Admin
+ * manages; machine and recovery devices never do. There is no per-device flag.
  * Not a reimplementation of Ledger; correspondence tests drive the public API.
  * Owner transfer matches proofs/e2ee/E2EE.lean (D1 A). setRoleGuest matches D5.
  */
 export type Kind = 'personal' | 'machine' | 'recovery';
 export type LeanRole = 'owner' | 'admin' | 'member' | 'guest';
-export type LeanDevice = { memberId: number; kind: Kind; canManage: boolean };
+export type LeanDevice = { memberId: number; kind: Kind };
 export type LeanState = {
   owner: number;
   members: Array<[number, LeanRole]>;
@@ -20,7 +22,7 @@ export type LeanOp =
   | { type: 'setRoleAdmin'; actor: number; target: number }
   | { type: 'setRoleMember'; actor: number; target: number }
   | { type: 'setRoleGuest'; actor: number; target: number }
-  | { type: 'admitDevice'; actor: number; newId: number; kind: Kind; canManage: boolean }
+  | { type: 'admitDevice'; actor: number; newId: number; kind: Kind }
   | { type: 'revokeDevice'; actor: number; target: number }
   | { type: 'publishEpoch'; actor: number }
   | { type: 'transferOwner'; actor: number; successor: number };
@@ -33,13 +35,13 @@ export function deviceOf(s: LeanState, id: number): LeanDevice | undefined {
 }
 export function isPersonalManage(s: LeanState, actor: number): boolean {
   const d = deviceOf(s, actor);
-  if (!d || d.kind !== 'personal' || !d.canManage) return false;
+  if (!d || d.kind !== 'personal') return false;
   const role = roleOf(s, d.memberId);
   return role === 'owner' || role === 'admin';
 }
 export function isOwnerManage(s: LeanState, actor: number): boolean {
   const d = deviceOf(s, actor);
-  if (!d || d.kind !== 'personal' || !d.canManage) return false;
+  if (!d || d.kind !== 'personal') return false;
   return roleOf(s, d.memberId) === 'owner';
 }
 
@@ -54,10 +56,7 @@ export function leanStep(s: LeanState, op: LeanOp): LeanState | null {
       return {
         ...s,
         members: [...s.members, [op.newMember, 'member']],
-        devices: [
-          ...s.devices,
-          [op.firstDevice, { memberId: op.newMember, kind: 'personal', canManage: false }],
-        ],
+        devices: [...s.devices, [op.firstDevice, { memberId: op.newMember, kind: 'personal' }]],
         usedMembers: [...s.usedMembers, op.newMember],
       };
     }
@@ -93,19 +92,12 @@ export function leanStep(s: LeanState, op: LeanOp): LeanState | null {
         (d.kind === 'personal' || d.kind === 'recovery') &&
         (d.kind !== 'recovery' || op.kind === 'personal') &&
         (roleOf(s, d.memberId) !== 'guest' || op.kind !== 'machine') &&
-        ((op.kind !== 'machine' && op.kind !== 'recovery') || !op.canManage) &&
-        (!op.canManage ||
-          (op.kind === 'personal' &&
-            (roleOf(s, d.memberId) === 'owner' || roleOf(s, d.memberId) === 'admin'))) &&
         deviceOf(s, op.newId) === undefined &&
         !s.retired.includes(op.newId);
       if (!ok) return null;
       return {
         ...s,
-        devices: [
-          ...s.devices,
-          [op.newId, { memberId: d.memberId, kind: op.kind, canManage: op.canManage }],
-        ],
+        devices: [...s.devices, [op.newId, { memberId: d.memberId, kind: op.kind }]],
       };
     }
     case 'revokeDevice': {
@@ -141,7 +133,7 @@ export function leanStep(s: LeanState, op: LeanOp): LeanState | null {
 export const genesis: LeanState = {
   owner: 0,
   members: [[0, 'owner']],
-  devices: [[0, { memberId: 0, kind: 'personal', canManage: true }]],
+  devices: [[0, { memberId: 0, kind: 'personal' }]],
   epoch: 0,
   retired: [],
   usedMembers: [0],
@@ -170,9 +162,6 @@ export function assertAuthInvariants(s: LeanState): void {
   if (roleOf(s, s.owner) !== 'owner') throw new Error('owner-missing');
   for (const [id, device] of s.devices) {
     if (s.retired.includes(id)) throw new Error('retired-still-active');
-    if ((device.kind === 'machine' || device.kind === 'recovery') && device.canManage) {
-      throw new Error('non-personal-manage');
-    }
     if (roleOf(s, device.memberId) === undefined) throw new Error('orphan-device');
   }
 }
@@ -201,8 +190,7 @@ export function candidateOps(maxMember: number, maxDevice: number, maxEpoch: num
     }
     for (const newId of devices) {
       for (const kind of kinds) {
-        ops.push({ type: 'admitDevice', actor, newId, kind, canManage: false });
-        ops.push({ type: 'admitDevice', actor, newId, kind, canManage: true });
+        ops.push({ type: 'admitDevice', actor, newId, kind });
       }
     }
   }

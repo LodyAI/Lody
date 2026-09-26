@@ -59,8 +59,8 @@ async function casOnce(input?: {
     ? await (await import('../src/platform/device')).importDevice(input.extras.other)
     : await generateDevice();
   runtime.pause('twin');
-  const aliceSubmit = alice.admitDevice(extra, 'personal', false);
-  const twinSubmit = twin.admitDevice(other, 'personal', false);
+  const aliceSubmit = alice.admitDevice(extra, 'personal');
+  const twinSubmit = twin.admitDevice(other, 'personal');
   const casRequest =
     (actor: string) => (event: { actor: string; operation: string; phase: string }) =>
       event.actor === actor && event.operation === 'submit' && event.phase === 'request-queued';
@@ -119,7 +119,7 @@ async function lostAckOnce(input?: {
   host.setFailpoint('drop-control-ack');
   let status = 'unknown';
   try {
-    status = (await alice.admitDevice(extra, 'personal', false)).status;
+    status = (await alice.admitDevice(extra, 'personal')).status;
   } catch {
     host.setFailpoint('none');
     status = (await alice.resume()).status;

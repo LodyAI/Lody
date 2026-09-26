@@ -15,6 +15,10 @@ export class SigningFacts {
   get size(): number {
     return HashMap.size(this.#keys);
   }
+  /** Exact-byte evidence only; no caller-supplied boolean or mutable key escapes. */
+  has(bytes: Uint8Array): boolean {
+    return HashMap.has(this.#keys, keyId(bytes));
+  }
   check(bytes: Uint8Array): Either.Either<
     {
       readonly key: SigningPublicKey;

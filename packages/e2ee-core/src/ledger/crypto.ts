@@ -77,9 +77,11 @@ function concat(parts: readonly Uint8Array[]): Uint8Array<ArrayBuffer> {
 }
 function validSigningPoint(
   bytes: Uint8Array,
-  cache: SigningPointCache = liveSigningPointCache
+  cache: SigningPointCache = liveSigningPointCache,
+  facts = SigningFacts.empty
 ): boolean {
   if (bytes.byteLength !== SIGNING_KEY_BYTES) return false;
+  if (facts.has(bytes)) return true;
   if (cache.get(bytes)) return true;
   try {
     const point = Point.fromBytes(bytes, false);
@@ -159,10 +161,11 @@ export function verifySignature(
   publicKey: SigningPublicKey,
   message: Uint8Array,
   signature: Signature,
-  cache: SigningPointCache = liveSigningPointCache
+  cache: SigningPointCache = liveSigningPointCache,
+  facts = SigningFacts.empty
 ): boolean {
   if (signature.byteLength !== SIGNATURE_BYTES) return false;
-  if (!validSigningPoint(publicKey, cache)) return false;
+  if (!validSigningPoint(publicKey, cache, facts)) return false;
   try {
     if (!Point.fromBytes(signature.subarray(0, 32), false).isTorsionFree()) return false;
   } catch {

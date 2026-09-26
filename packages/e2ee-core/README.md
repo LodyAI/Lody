@@ -67,6 +67,11 @@ the old schema entry only unwraps its result. `SigningFacts` is immutable eviden
 of public-key point validity, not permission or a verified signature. Parsing takes
 these facts explicitly and returns updated facts without mutating the input; no
 global cache lives in the pure layer. The legacy cache adapter remains temporary.
+The decoder collects facts during its first pass; batched signature verification
+may reuse them for the exact public-key bytes only. Signature R subgroup checks,
+signature equations and permission replay always run. Snapshot prefix scanning
+shares point facts across pages, not authorization. Snapshot clients retain the
+verified view only while the persisted snapshot/trust/prefix bytes still match.
 
 `pure/operation-proofs.ts` constructs owned signature jobs for joining and device
 possession. Both replay paths share it. Device proofs still require the actor's
@@ -328,6 +333,15 @@ policy from zero; it caches parsed prime-subgroup public keys and uses
 `@noble/hashes` SHA-512/SHA-256 so the hot path is synchronous. Measured 10k from-zero (16,250 signatures) on Node with parallel Ed25519
 workers was ~2.9s hot vs ~11.5s single-thread under the historical benchmark.
 These measurements did not meet 100ms; that gate is now withdrawn.
+For a paired native Effect measurement, run
+`pnpm --filter @lody/e2ee-core exec tsx bench/effect-compare.ts /absolute/baseline/packages/e2ee-core`.
+The baseline must accept the same wire format. It uses one shared 1000-record
+fixture, 3 warmups and 10 alternating samples: full replay, full intent submit
+(including SQLite/CAS/readback), snapshot creation plus first synchronization,
+and SQLite client restore plus refresh. Each client/run gets a fresh verifier;
+process/JIT warmup is not cold process startup. A fifth metric measures the
+Promise snapshot facade. Raw samples and synthetic SQLite artifacts are retained
+in the reported temporary directory; no phone/browser claim is implied.
 `Ledger.verify` is sequential by default. Pass
 `createNodeSignatureVerifyExecutor()` from `@lody/e2ee-core/ledger-node` to opt
 into Node worker parallelism; environment variables are not consulted.

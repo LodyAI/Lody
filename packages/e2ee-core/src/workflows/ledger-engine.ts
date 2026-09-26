@@ -23,10 +23,12 @@ import {
   type Signature,
   type SigningPublicKey,
 } from '../pure/bytes';
-import type { LedgerView } from '../pure/records';
+import { viewState, type LedgerView } from '../pure/records';
+import { stateDigestOf } from '../pure/ledger-snapshot';
 import { bytesEqual, copyBytes } from '../pure/cbor';
 import { hashRecordBytes } from '../pure/wire-crypto';
-import { decodeRecord, type Operation } from '../pure/ledger-schema';
+import { decodeRecord, decodeRecordWithFacts, type Operation } from '../pure/ledger-schema';
+import { SigningFacts } from '../pure/signing-facts';
 import {
   MAX_LEDGER_RECORDS,
   MAX_LEDGER_READ_PAGES,
@@ -137,6 +139,20 @@ export class LedgerEngine {
   static createFromSnapshot(
     input: SnapshotBootstrap
   ): Effect.Effect<LedgerEngine, ClientError, Dependencies> {
+    return LedgerEngine.openSnapshot(input, false);
+  }
+
+  /** Compatibility open may reuse an identical existing journal, never replace it. */
+  static legacyFromSnapshot(
+    input: SnapshotBootstrap
+  ): Effect.Effect<LedgerEngine, ClientError, Dependencies> {
+    return LedgerEngine.openSnapshot(input, true);
+  }
+
+  private static openSnapshot(
+    input: SnapshotBootstrap,
+    allowExisting: boolean
+  ): Effect.Effect<LedgerEngine, ClientError, Dependencies> {
     const snapshot = copyBytes(input.snapshot);
     const anchor = input.genesis;
     const trust = {
@@ -158,7 +174,25 @@ export class LedgerEngine {
       );
       yield* client.store.exclusive((tx) =>
         Effect.gen(function* () {
-          if ((yield* tx.load) !== null) yield* Effect.fail(new StorageError({ reason: 'exists' }));
+          const loaded = yield* tx.load;
+          if (loaded !== null) {
+            if (!allowExisting) return yield* Effect.fail(new StorageError({ reason: 'exists' }));
+            if (!bytesEqual(loaded.genesis, anchor.toBytes()))
+              return yield* invalid('wrong-anchor');
+            const existing = yield* client.load(tx);
+            if (
+              ledger.length !== existing.ledger.length ||
+              !bytesEqual(ledger.head.toBytes(), existing.ledger.head.toBytes()) ||
+              !bytesEqual(
+                yield* stateDigestOf(viewState(ledger)),
+                yield* stateDigestOf(viewState(existing.ledger))
+              ) ||
+              (loaded.snapshot !== undefined && !bytesEqual(loaded.snapshot, snapshot))
+            )
+              return yield* invalid('replay');
+            // load retained the verified existing view, pending bytes and cursor.
+            return undefined;
+          }
           const journal: LedgerJournal = {
             genesis: trust.genesis,
             snapshot,
@@ -169,6 +203,7 @@ export class LedgerEngine {
           };
           yield* Effect.uninterruptible(tx.save(copyJournal(journal)));
           yield* Ref.set(client.cached, { journal, ledger });
+          return undefined;
         })
       );
       return client;
@@ -325,6 +360,9 @@ export class LedgerEngine {
         session.journal.snapshotBound === true;
       let cursor = session.journal.offset;
       let skippedUnknown = false;
+      // Point validity only, not signatures or authority. Carry across pages of
+      // a snapshot prefix without making a global cache or trusting that prefix.
+      let prefixFacts = SigningFacts.empty;
       for (let pageIndex = 0; pageIndex < MAX_LEDGER_READ_PAGES; pageIndex++) {
         const page = yield* this.stream.readAfter(cursor);
         yield* offset(page.nextOffset);
@@ -354,7 +392,9 @@ export class LedgerEngine {
             continue;
           }
           if (snapshotMode) {
-            const decoded = yield* decodeRecord(record);
+            const parsed = yield* decodeRecordWithFacts(record, prefixFacts);
+            prefixFacts = parsed.facts;
+            const decoded = parsed.record;
             if (decoded.body.type === 'genesis') {
               if (wasBound) return yield* invalid('wrong-parent');
               skippedUnknown = true;

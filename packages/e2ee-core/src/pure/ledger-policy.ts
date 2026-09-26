@@ -31,7 +31,6 @@ export function genesisState(
       membershipId,
       kind: 'personal',
       encryptionPublicKey: copyBytes(fields.encryptionPublicKey),
-      canManage: true,
     };
     return {
       genesis: copyBytes(recordHash),
@@ -94,7 +93,7 @@ function memberOf(state: InternalState, device: Device): Result<Member> {
 function requirePersonalManage(state: InternalState, signer: Uint8Array) {
   return Either.gen(function* () {
     const device = yield* activeDevice(state, signer);
-    if (device.kind !== 'personal' || !device.canManage) return yield* fail('unauthorized');
+    if (device.kind !== 'personal') return yield* fail('unauthorized');
     const member = yield* memberOf(state, device);
     if (member.role !== 'owner' && member.role !== 'admin') return yield* fail('unauthorized');
     return { device, member };
@@ -182,7 +181,6 @@ export function operationChanges(
             membershipId,
             kind: 'personal',
             encryptionPublicKey: copyBytes(operation.request.encryptionPublicKey),
-            canManage: false,
           },
         ]);
         return changes;
@@ -225,14 +223,6 @@ export function operationChanges(
           return yield* fail('unauthorized');
         if (member.role === 'guest' && operation.kind === 'machine')
           return yield* fail('unauthorized');
-        if (operation.kind === 'machine' || operation.kind === 'recovery') {
-          if (operation.canManage) return yield* fail('unauthorized');
-        }
-        if (operation.canManage) {
-          if (operation.kind !== 'personal') return yield* fail('unauthorized');
-          if (member.role !== 'owner' && member.role !== 'admin')
-            return yield* fail('unauthorized');
-        }
         const signHex = yield* claimSigning(state, operation.signingPublicKey, facts);
         const encHex = yield* claimEnc(state, operation.encryptionPublicKey);
         (changes.usedSigningKeys ??= []).push(signHex);
@@ -243,7 +233,6 @@ export function operationChanges(
             membershipId: copyBytes(actor.membershipId),
             kind: operation.kind,
             encryptionPublicKey: copyBytes(operation.encryptionPublicKey),
-            canManage: operation.canManage,
           },
         ]);
         return changes;

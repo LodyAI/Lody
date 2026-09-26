@@ -52,8 +52,8 @@ describe('P2 permit runtime', () => {
     const extra = await generateDevice();
     const other = await generateDevice();
     runtime.pause('twin');
-    const aliceSubmit = alice.admitDevice(extra, 'personal', false);
-    const twinSubmit = twin.admitDevice(other, 'personal', false);
+    const aliceSubmit = alice.admitDevice(extra, 'personal');
+    const twinSubmit = twin.admitDevice(other, 'personal');
     await runtime.whenRequested(2);
     const casRequest =
       (actor: string) => (event: { actor: string; operation: string; phase: string }) =>

@@ -814,3 +814,54 @@ scenarios or protocol acceptance requirements.
 - Tests: re-run after caller wipe, concurrent `Effect.all`, retry after a failed
   `deriveBits`. Content suite 16/16. P0–P4 is not accepted: four-class
   performance still lacks old-version baselines for increment/snapshot/recovery.
+
+### 2026-09-26 — Remove duplicate point validation and snapshot bootstrap work
+
+- Preserved the other in-flight change removing `canManage`. The comparison
+  baseline is a frozen copy of that working tree on HEAD `7a52a45d`, not the
+  incompatible `d7d3b7c6` wire format. Baseline `src/**/*.ts` fingerprint:
+  `91fac57be47ab0cb8790695fdb8316a409d2cf7eb0709025f2be1bf97c5eb030`.
+- Decode collects immutable point facts on the first pass. The private decoder
+  callback cannot be supplied through the public API. SignatureVerifier may
+  reuse exact-byte facts, but still checks every signature R subgroup and
+  signature equation. Permission replay is unchanged; point facts grant no
+  authority. Batched verification also owns its deferred input bytes.
+- Snapshot prefix scanning retains point facts across pages. The Promise
+  snapshot factory now delegates to the same engine as the native factory,
+  retaining the verified view after durable save. Existing-journal acceptance
+  still checks length, head, authenticated state digest and snapshot bytes;
+  pending bytes/cursor are retained. A later same-head replacement fails closed,
+  including before the first refresh.
+- Added real-crypto regressions for changed messages/signatures/keys despite
+  known point facts, repeated deferred batch execution, immutable nested-key
+  collection and late snapshot replacement. No protocol/permission change in
+  this performance fix. No new global cache or unchecked evidence constructor.
+- `bench/effect-compare.ts` measures native full replay, full intent submit,
+  snapshot plus first synchronization and SQLite restore plus refresh, plus
+  the Promise snapshot facade. Same 1000 signed records, 3 warmups, 10
+  alternating samples, fresh verifier per run/client. Baseline path:
+  `/private/tmp/e2ee-point-perf-xDBtJ9/before`. This is warmed-process/cold-client
+  measurement, not browser/phone or process-startup evidence. The initial bench
+  stopped because its empty SQLite baseline was lazily uncreated; the harness
+  now materializes empty storage before timing, without changing runtime code.
+- Paired medians (Node 22.23.1, ms; before → after): replay 1902.83 →
+  1461.36 (-23.2%); full submit 83.88 → 79.19 (-5.6%); native snapshot
+  779.33 → 421.79 (-45.9%); restore 1925.37 → 1508.92 (-21.6%);
+  Promise snapshot 970.25 → 444.68 (-54.2%). Raw samples:
+  `/var/folders/x9/v95xfgsd7q77l65gphtc4vdw0000gn/T/e2ee-native-compare-NRvxjv/results.json`.
+  Fixed source fingerprint:
+  `c56f3f65c28c50c7a63a518545672c7ae43b60d97497af90ae6a6e75f7a54be8`.
+  Fingerprints hash sorted source-relative `.ts` paths, NUL, contents, NUL using
+  SHA-256. This verifies the repair against the current-format pre-fix tree,
+  not the original migration baseline or all P0–P4 acceptance gates.
+- Verification: core `vitest run --maxWorkers=2`: 496 passed / 1 skipped;
+  the unchanged 180-second 10k persistence/restart test passed in 125.08 seconds.
+  Lab full suite: 142 passed. Core/Lab typecheck, Electron `typecheck:node`,
+  complete Effect boundary check, scoped type-aware lint (0 errors, 30 warnings),
+  changed-source formatting and `docs check` passed. The Lean executable
+  correspondence case remains skipped by the existing model-availability/current-
+  policy gate; this repair is not a Lean proof. Root `pnpm check` was not rerun.
+- Final lint-only explicit `undefined` returns do not change benchmark behavior;
+  final source fingerprint is
+  `1eefee403fabf0b9aeb117de27376220cf3c5c6a08b6ad7b8b6b825e2bfbf7a7`.
+  No commit/push, other in-flight edits preserved, product E2EE remains off.

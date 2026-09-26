@@ -42,7 +42,7 @@ in-package tests only; do not re-export it.
   Inject entropy/clocks/timers/executors; production uses live secure randomness
   and real time through platform adapters.
 - Snapshot join (§6.1, DEC-001): out-of-band genesis, endorser, attested head
-  and endorser signature; only Owner/Admin personal+canManage may endorse.
+  and endorser signature; only a current Owner/Admin personal device may endorse.
   Bind complete state, replay facts, genesis, position and head, not head alone.
   Verify increments; full replay is optional audit. Independent comparison detects
   divergence, not global freshness or honest history. Preserve rollback, CAS,
@@ -64,15 +64,15 @@ in-package tests only; do not re-export it.
 - Device possession uses `possess/v2` and binds the target membership inferred
   from the actor's preceding verified state. Check during replay even with a
   worker verifier. v1 proofs are rejected, not silently migrated or re-signed.
-  Snapshots reject machine/recovery canManage; demotion may retain machines
-  and personal management flags (effective rights still intersect the role).
+  Devices carry no management flag: management = active personal device ∩
+  current Owner/Admin role, so role changes apply to all personal devices at
+  once. Old 6-element admitDevice and 5-element snapshot device rows fail.
 - Roles owner/admin/member/guest; guest read-only; machines have no Org
   management. Device revoke is this-Org and the named device only. Owner
   transfer is unilateral `[6, successorMembershipId]`; predecessor becomes
   Admin; successor must already be a member.
 - Recovery device R receives epoch keys and may admit that user's personal
-  devices. R may set `canManage` only when the user is currently Owner/Admin;
-  submit re-checks. Passkey/file wrap the same R independently; leaking R
+  devices; those follow the user's current role like any personal device. Passkey/file wrap the same R independently; leaking R
   requires replace-R, update entries, and per-Org revoke-old-R plus rotation.
 - Signing keys must be canonical nonzero prime-subgroup Ed25519 points.
   Verification uses pinned noble-ed25519 with `zip215: false` and explicit

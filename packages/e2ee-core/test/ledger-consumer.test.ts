@@ -108,15 +108,13 @@ async function admitDevice(
   genesis: Uint8Array,
   targetMembershipId: Uint8Array,
   target: Device,
-  kind: 'personal' | 'machine' | 'recovery',
-  canManage: boolean
+  kind: 'personal' | 'machine' | 'recovery'
 ): Promise<Extract<Operation, { type: 'admitDevice' }>> {
   return {
     type: 'admitDevice',
     kind,
     signingPublicKey: target.publicKey,
     encryptionPublicKey: target.enc,
-    canManage,
     possessionSignature: await target.sign(
       possessionSigningBytes({
         genesis,
@@ -124,7 +122,6 @@ async function admitDevice(
         signingPublicKey: target.publicKey,
         encryptionPublicKey: target.enc,
         kind,
-        canManage,
       })
     ),
   };
@@ -227,17 +224,9 @@ describe('C2 public-package black-box consumer', () => {
     const stale = afterJoin;
 
     const recovery = await device();
-    await commit(
-      leader,
-      owner,
-      await admitDevice(anchor, ownerMembership, recovery, 'recovery', false)
-    );
+    await commit(leader, owner, await admitDevice(anchor, ownerMembership, recovery, 'recovery'));
     const phone = await device();
-    await commit(
-      leader,
-      owner,
-      await admitDevice(anchor, ownerMembership, phone, 'personal', true)
-    );
+    await commit(leader, owner, await admitDevice(anchor, ownerMembership, phone, 'personal'));
     await commit(leader, owner, { type: 'revokeDevice', target: phone.publicKey });
     const afterRevoke = await leader.read();
     expect(afterRevoke.state.devices.has(hex(phone.publicKey))).toBe(false);
@@ -258,14 +247,16 @@ describe('C2 public-package black-box consumer', () => {
     });
 
     const laptop = await device();
-    await commit(
-      leader,
-      recovery,
-      await admitDevice(anchor, ownerMembership, laptop, 'personal', true)
-    );
+    await commit(leader, recovery, await admitDevice(anchor, ownerMembership, laptop, 'personal'));
     const recoveredView = await leader.read();
     expect(recoveredView.state.devices.get(hex(laptop.publicKey))?.kind).toBe('personal');
-    expect(recoveredView.state.devices.get(hex(laptop.publicKey))?.canManage).toBe(true);
+    // The R-approved Owner laptop manages through the Owner role.
+    const laptopInvite = {
+      type: 'admitMember' as const,
+      membershipId: random(16),
+      request: await joinRequest(anchor, await device()),
+    };
+    expect(() => recoveredView.prepareChecked(laptopInvite, laptop.publicKey)).not.toThrow();
 
     const genesisDecoded = decodeRecord(genesis);
     if (genesisDecoded.body.type !== 'genesis') throw new Error('not-genesis');
@@ -317,7 +308,7 @@ describe('C2 public-package black-box consumer', () => {
     }
 
     const stranger = await device();
-    const competing = await admitDevice(anchor, ownerMembership, stranger, 'personal', false);
+    const competing = await admitDevice(anchor, ownerMembership, stranger, 'personal');
     const proposal = stale.prepare(competing, owner.publicKey);
     const fork = await stale.finalize(proposal, await owner.sign(proposal.signingBytes));
     const conflict = await follower.submit(fork);
@@ -356,7 +347,7 @@ describe('C2 public-package black-box consumer', () => {
       await commit(
         leader,
         member,
-        await admitDevice(anchor, ownerMembership, await device(), 'personal', false)
+        await admitDevice(anchor, ownerMembership, await device(), 'personal')
       );
       throw new Error('removed-member-admitted');
     } catch (error) {

@@ -36,7 +36,6 @@ function org(role: 'owner' | 'admin' | 'member' | 'guest' = 'member'): OrgState 
           membershipId: fromHex(ownerMem),
           kind: 'personal' as const,
           encryptionPublicKey: fromHex('01'.repeat(32)),
-          canManage: true,
         },
       ],
       [
@@ -45,7 +44,6 @@ function org(role: 'owner' | 'admin' | 'member' | 'guest' = 'member'): OrgState 
           membershipId: fromHex(memberMem),
           kind: 'personal' as const,
           encryptionPublicKey: fromHex('02'.repeat(32)),
-          canManage: false,
         },
       ],
       [
@@ -54,7 +52,6 @@ function org(role: 'owner' | 'admin' | 'member' | 'guest' = 'member'): OrgState 
           membershipId: fromHex(guestMem),
           kind: 'personal' as const,
           encryptionPublicKey: fromHex('03'.repeat(32)),
-          canManage: false,
         },
       ],
     ]),
@@ -155,7 +152,6 @@ describe('thin host gateway ACL', () => {
             membershipId: fromHex(memberMem),
             kind: 'recovery' as const,
             encryptionPublicKey: fromHex('04'.repeat(32)),
-            canManage: false,
           },
         ],
       ]),

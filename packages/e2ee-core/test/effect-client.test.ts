@@ -68,7 +68,7 @@ async function setup() {
       genesis: anchor,
       membershipId: value(Bytes.membershipId(created.membershipId)),
       encryptionPublicKey: value(Bytes.encryptionPublicKey(phone.enc)),
-      grant: { kind: 'personal', canManage: false },
+      grant: { kind: 'personal' },
     }).pipe(
       Effect.provide(deviceSignerLayer(value(Bytes.signingPublicKey(phone.publicKey)), phone.sign)),
       Effect.provide(signatureVerifierLayer)
@@ -381,7 +381,7 @@ describe('Effect client owns submissions', () => {
     const client = await Effect.runPromise(create);
     const mutable = { ...s.command };
     const execute = client.execute(mutable);
-    mutable.canManage = true;
+    mutable.kind = 'machine';
     const result = await Effect.runPromise(execute);
     expect(result._tag).toBe('Committed');
     expect(result.ledger.genesis.equals(s.anchor)).toBe(true);
@@ -465,7 +465,6 @@ describe('Effect client owns submissions', () => {
       ...s.command,
       _tag: 'AdmitDevice',
       kind: 'personal',
-      canManage: false,
       signingPublicKey: value(Bytes.signingPublicKey(s.owner.publicKey)),
       encryptionPublicKey: value(Bytes.encryptionPublicKey(s.owner.enc)),
       possessionSignature: value(Bytes.signature(new Uint8Array(64))),

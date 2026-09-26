@@ -122,9 +122,7 @@ describe('P4 AttackLab isolation', () => {
     const host = await launchLab();
     const alice = await labClient({ host, account: 'alice', runtime });
     await alice.createSpace();
-    expect((await alice.admitDevice(await generateDevice(), 'personal', false)).status).toBe(
-      'committed'
-    );
+    expect((await alice.admitDevice(await generateDevice(), 'personal')).status).toBe('committed');
     const lab = createAttackLab({
       host,
       runtime,
@@ -366,7 +364,7 @@ describe('P4 AttackLab intercept and advanceUntil', () => {
       expectedPlaintext: 'none',
       genesisHex: alice.genesisHex,
     });
-    const admit = alice.admitDevice(await generateDevice(), 'personal', false);
+    const admit = alice.admitDevice(await generateDevice(), 'personal');
     const queued = await permitUntil(runtime, casRequest('alice'));
     await lab.intercept({ eventId: queued.eventId, kind: 'drop' });
     runtime.permit(queued.eventId);
@@ -388,7 +386,7 @@ describe('P4 AttackLab intercept and advanceUntil', () => {
       expectedPlaintext: 'none',
       genesisHex: alice.genesisHex,
     });
-    const admit = alice.admitDevice(await generateDevice(), 'personal', false);
+    const admit = alice.admitDevice(await generateDevice(), 'personal');
     const queued = await permitUntil(runtime, casRequest('alice'));
     await lab.intercept({ eventId: queued.eventId, kind: 'delay' });
     runtime.permit(queued.eventId);
@@ -421,7 +419,7 @@ describe('P4 AttackLab intercept and advanceUntil', () => {
       expectedPlaintext: 'none',
       genesisHex: alice.genesisHex,
     });
-    const admit = alice.admitDevice(await generateDevice(), 'personal', false);
+    const admit = alice.admitDevice(await generateDevice(), 'personal');
     const queued = await permitUntil(runtime, casRequest('alice'));
     await lab.intercept({ eventId: queued.eventId, kind: 'duplicate' });
     runtime.permit(queued.eventId);
@@ -443,7 +441,7 @@ describe('P4 AttackLab intercept and advanceUntil', () => {
       expectedPlaintext: 'none',
       genesisHex: alice.genesisHex,
     });
-    const admit = alice.admitDevice(await generateDevice(), 'personal', false);
+    const admit = alice.admitDevice(await generateDevice(), 'personal');
     const queued = await permitUntil(runtime, casRequest('alice'));
     await lab.intercept({
       eventId: queued.eventId,
@@ -475,7 +473,7 @@ describe('P4 AttackLab intercept and advanceUntil', () => {
       genesisHex: alice.genesisHex,
     });
     const extra = await generateDevice();
-    const admit = alice.admitDevice(extra, 'personal', false);
+    const admit = alice.admitDevice(extra, 'personal');
     const queued = await permitUntil(runtime, casRequest('alice'));
     await lab.intercept({ eventId: queued.eventId, kind: 'truncate' });
     runtime.permit(queued.eventId);

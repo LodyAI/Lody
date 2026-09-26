@@ -72,7 +72,7 @@ export async function buildChain(count: number) {
       next = await append(
         ledger,
         owner,
-        await admitDeviceOp(created.anchor, created.membershipId, device, kind, false)
+        await admitDeviceOp(created.anchor, created.membershipId, device, kind)
       );
     }
     records.push(next.record);

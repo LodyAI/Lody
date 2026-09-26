@@ -16,7 +16,6 @@ export interface RefDevice {
   readonly user: string;
   readonly kind: RefKind;
   readonly role: RefRole;
-  readonly canManage: boolean;
 }
 
 export interface RefState {
@@ -40,7 +39,6 @@ export function refStateFromOrg(org: string, state: OrgState): RefState {
       user: member ? toHex(member.userId) : '',
       kind: device.kind,
       role,
-      canManage: device.canManage,
     });
   }
   return {
@@ -59,7 +57,7 @@ function deviceOf(state: RefState, deviceId: string): RefDevice | undefined {
 
 function isPersonalManager(state: RefState, deviceId: string): boolean {
   const device = deviceOf(state, deviceId);
-  if (!device || device.kind !== 'personal' || !device.canManage) return false;
+  if (!device || device.kind !== 'personal') return false;
   return device.role === 'owner' || device.role === 'admin';
 }
 

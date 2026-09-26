@@ -120,7 +120,6 @@ const proposal = first.prepare(
     kind: 'personal',
     signingPublicKey: extra.publicKey,
     encryptionPublicKey: extra.enc,
-    canManage: false,
     possessionSignature: await extra.sign(
       possessionSigningBytes({
         genesis: anchor,
@@ -128,7 +127,6 @@ const proposal = first.prepare(
         signingPublicKey: extra.publicKey,
         encryptionPublicKey: extra.enc,
         kind: 'personal',
-        canManage: false,
       })
     ),
   },

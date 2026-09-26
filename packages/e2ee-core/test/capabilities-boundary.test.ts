@@ -63,7 +63,7 @@ describe('E1 pure ledger boundary', () => {
     const next = await append(
       created.ledger,
       owner,
-      await admitDeviceOp(created.anchor, created.membershipId, phone, 'personal', false)
+      await admitDeviceOp(created.anchor, created.membershipId, phone, 'personal')
     );
     expect(created.ledger.length).toBe(1);
     expect(created.ledger.state.devices.size).toBe(1);
@@ -118,13 +118,7 @@ describe('E1 pure ledger boundary', () => {
     });
 
     const phone = await ed25519();
-    const operation = await admitDeviceOp(
-      created.anchor,
-      created.membershipId,
-      phone,
-      'personal',
-      false
-    );
+    const operation = await admitDeviceOp(created.anchor, created.membershipId, phone, 'personal');
     const proposal = verified.prepare(operation, owner.publicKey, isolated);
     const record = encodeSignedRecord(proposal.bodyBytes, await owner.sign(proposal.signingBytes));
 
@@ -162,7 +156,7 @@ describe('E2 explicit verify executor', () => {
       const next = await append(
         ledger,
         owner,
-        await admitDeviceOp(created.anchor, created.membershipId, device, 'personal', false)
+        await admitDeviceOp(created.anchor, created.membershipId, device, 'personal')
       );
       records.push(next.record);
       ledger = next.ledger;
@@ -172,8 +166,7 @@ describe('E2 explicit verify executor', () => {
       created.anchor,
       created.membershipId,
       attacker,
-      'personal',
-      false
+      'personal'
     );
     forgedOp.possessionSignature[0] = (forgedOp.possessionSignature[0] ?? 0) ^ 0xff;
     const proposal = ledger.prepare(forgedOp, owner.publicKey);

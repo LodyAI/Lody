@@ -118,7 +118,7 @@ describe('lab host lifecycle', () => {
     await alice.readLedger();
     await writeLoro(alice, 'epoch-zero');
     const tablet = await generateDevice();
-    expect((await alice.admitDevice(tablet, 'personal', false)).status).toBe('committed');
+    expect((await alice.admitDevice(tablet, 'personal')).status).toBe('committed');
     await alice.deliverEpochKey(tablet, 0);
     const writer = await labClient({
       host,
@@ -285,7 +285,7 @@ describe('lab host lifecycle', () => {
       }
       return orig(input, init);
     };
-    const pendingDevice = await alice.admitDevice(tablet, 'personal', false);
+    const pendingDevice = await alice.admitDevice(tablet, 'personal');
     expect(pendingDevice.status).not.toBe('committed');
     alice.fetch = orig;
     await expect(alice.publishEpoch()).rejects.toMatchObject({ _tag: 'PendingOperationExists' });
@@ -417,7 +417,7 @@ describe('lab host lifecycle', () => {
     const path = join(alice.clientDir, 'epoch-candidate.json');
     expect(existsSync(path)).toBe(false);
     const tablet = await generateDevice();
-    expect((await alice.admitDevice(tablet, 'personal', false)).status).toBe('committed');
+    expect((await alice.admitDevice(tablet, 'personal')).status).toBe('committed');
     expect((await alice.publishEpoch()).status).toBe('committed');
     expect((await alice.readLedger()).state.epoch.number).toBe(2);
     expect(alice.ledgerEpoch).toBe(2);
@@ -429,7 +429,7 @@ describe('lab host lifecycle', () => {
     await alice.createSpace();
     await writeLoro(alice, 'epoch-zero-text');
     const tablet = await generateDevice();
-    expect((await alice.admitDevice(tablet, 'personal', false)).status).toBe('committed');
+    expect((await alice.admitDevice(tablet, 'personal')).status).toBe('committed');
     await alice.deliverEpochKey(tablet, 0);
     const writer = await labClient({
       host,
@@ -583,7 +583,7 @@ describe('lab host lifecycle', () => {
     await alice.createSpace();
     await alice.readLedger();
     const tablet = await generateDevice();
-    expect((await alice.admitDevice(tablet, 'personal', false)).status).toBe('committed');
+    expect((await alice.admitDevice(tablet, 'personal')).status).toBe('committed');
     await alice.deliverEpochKey(tablet, 0);
     const writer = await labClient({
       host,
@@ -610,7 +610,7 @@ describe('lab host lifecycle', () => {
     await alice.createSpace();
     await alice.readLedger();
     const tablet = await generateDevice();
-    expect((await alice.admitDevice(tablet, 'personal', false)).status).toBe('committed');
+    expect((await alice.admitDevice(tablet, 'personal')).status).toBe('committed');
     await alice.deliverEpochKey(tablet, 0);
     const writer = await labClient({
       host,
@@ -632,7 +632,7 @@ describe('lab host lifecycle', () => {
     const alice = await labClient({ host, account: 'alice', clientDir });
     await alice.createSpace();
     const tablet = await generateDevice();
-    expect((await alice.admitDevice(tablet, 'personal', false)).status).toBe('committed');
+    expect((await alice.admitDevice(tablet, 'personal')).status).toBe('committed');
     const first = await alice.deliverEpochKey(tablet, 0);
     const deviceJson = await exportDevice(alice.device);
     const genesisHex = alice.genesisHex!;
@@ -654,7 +654,7 @@ describe('lab host lifecycle', () => {
     const alice = await labClient({ host, account: 'alice' });
     await alice.createSpace();
     const tablet = await generateDevice();
-    expect((await alice.admitDevice(tablet, 'personal', false)).status).toBe('committed');
+    expect((await alice.admitDevice(tablet, 'personal')).status).toBe('committed');
     await alice.deliverEpochKey(tablet, 0);
     const live = makeLiveFs();
     let allowWrite = true;
@@ -701,7 +701,7 @@ describe('lab host lifecycle', () => {
     });
     await alice.createSpace();
     const tablet = await generateDevice();
-    expect((await alice.admitDevice(tablet, 'personal', false)).status).toBe('committed');
+    expect((await alice.admitDevice(tablet, 'personal')).status).toBe('committed');
     await expect(alice.deliverEpochKey(tablet, 0)).rejects.toThrow('pending-key-delivery');
     expect(existsSync(join(alice.clientDir, 'key-outbox.sqlite'))).toBe(true);
     blockPut = false;
@@ -870,7 +870,7 @@ describe('lab host lifecycle', () => {
       },
       body: JSON.stringify({ name: 'kill-after-commit' }),
     });
-    await alice.admitDevice(await generateDevice(), 'personal', false).catch(() => undefined);
+    await alice.admitDevice(await generateDevice(), 'personal').catch(() => undefined);
     await new Promise<void>((resolve) => {
       if (first.child.exitCode !== null) resolve();
       else first.child.on('exit', () => resolve());

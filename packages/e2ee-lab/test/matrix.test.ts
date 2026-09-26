@@ -58,7 +58,6 @@ describe('P3 Spec §7 matrix', () => {
         kind: 'personal',
         signingPublicKey: extra.publicKey,
         encryptionPublicKey: extra.enc,
-        canManage: false,
         possessionSignature: await extra.sign(
           possessionSigningBytes({
             genesis: fromHex(alice.genesisHex!),
@@ -66,7 +65,6 @@ describe('P3 Spec §7 matrix', () => {
             signingPublicKey: extra.publicKey,
             encryptionPublicKey: extra.enc,
             kind: 'personal',
-            canManage: false,
           })
         ),
       },
@@ -101,7 +99,7 @@ describe('P3 Spec §7 matrix', () => {
     await outsider.adoptGenesis(alice.genesisHex!);
     let unauthorized = false;
     try {
-      await outsider.admitDevice(await generateDevice(), 'personal', false);
+      await outsider.admitDevice(await generateDevice(), 'personal');
       unauthorized = true;
     } catch {
       unauthorized = false;
@@ -121,7 +119,7 @@ describe('P3 Spec §7 matrix', () => {
     const phone = await generateDevice();
     let lostStatus = 'unknown';
     try {
-      lostStatus = (await alice.admitDevice(phone, 'personal', false)).status;
+      lostStatus = (await alice.admitDevice(phone, 'personal')).status;
     } catch {
       host.setFailpoint('none');
       lostStatus = (await alice.resume()).status;

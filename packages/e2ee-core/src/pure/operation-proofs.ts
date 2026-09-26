@@ -34,7 +34,6 @@ export function operationProofJobs(
             signingPublicKey: operation.signingPublicKey,
             encryptionPublicKey: operation.encryptionPublicKey,
             kind: operation.kind,
-            canManage: operation.canManage,
           }),
           sig: copyBytes(operation.possessionSignature),
         },

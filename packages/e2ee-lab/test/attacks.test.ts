@@ -63,7 +63,6 @@ describe('P3 judge and real control tamper', () => {
         kind: 'personal',
         signingPublicKey: extra.publicKey,
         encryptionPublicKey: extra.enc,
-        canManage: false,
         possessionSignature: await extra.sign(
           possessionSigningBytes({
             genesis: fromHex(alice.genesisHex!),
@@ -71,7 +70,6 @@ describe('P3 judge and real control tamper', () => {
             signingPublicKey: extra.publicKey,
             encryptionPublicKey: extra.enc,
             kind: 'personal',
-            canManage: false,
           })
         ),
       },

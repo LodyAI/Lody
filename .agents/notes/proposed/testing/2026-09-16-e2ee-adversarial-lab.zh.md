@@ -530,7 +530,10 @@ v1 `possessionSigningBytes` 为 `[genesis, signPub, encPub, kind, canManage]`。
 
 建议新证明编码（不要悄悄加长 v1）：为已有成员加设备时绑定 `targetMembershipId`。首次 `admitMember` 仍用加入申请（当时还没有 membershipId）。保留 R 给该用户准入个人设备。`usedSigningKeys`/`usedEncKeys` 仍在 Org 内消费密钥；请求 id 还能阻止未使用证明被重放。旧 pending 仍是 v1。确认前不实现。
 
-### 待决策 — 授予 canManage 是否要求 actor.canManage
+### 已取代 — 授予 canManage 是否要求 actor.canManage
+
+2026-09-24 取代：账本已删除 `canManage`，见控制账本笔记修订。D8 现断言加入设备的管理权随成员角色。
+
 
 当前 spec §8.3 与 `policy.ts` 允许 Owner/Admin 的 `canManage=false` 个人设备给新个人设备设 `canManage=true`。这不是传递性上限。已保留表征测试。若收紧：设置 canManage 需要 actor.canManage，R 恢复管理个人设备作为显式例外。确认前不实现。
 

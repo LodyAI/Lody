@@ -257,7 +257,7 @@ describe('K1 durable epoch-key delivery', () => {
     const admitted = await append(
       created.ledger,
       owner,
-      await admitDeviceOp(created.anchor, created.membershipId, phone, 'personal', true)
+      await admitDeviceOp(created.anchor, created.membershipId, phone, 'personal')
     );
     const frame = await sealEpochEnvelope({
       state: admitted.ledger.state,
@@ -273,7 +273,8 @@ describe('K1 durable epoch-key delivery', () => {
     let state = admitted.ledger.state;
     const authorize = async (bytes: Uint8Array) => {
       const sender = state.devices.get(hex(owner.publicKey));
-      if (!sender || sender.kind !== 'personal' || !sender.canManage) {
+      const role = sender && state.members.get(hex(sender.membershipId))?.role;
+      if (!sender || sender.kind !== 'personal' || (role !== 'owner' && role !== 'admin')) {
         throw new LedgerError('unauthorized');
       }
       await openEpochEnvelope({
@@ -365,7 +366,7 @@ describe('K1 durable epoch-key delivery', () => {
     const admitted = await append(
       created.ledger,
       owner,
-      await admitDeviceOp(created.anchor, created.membershipId, phone, 'personal', true)
+      await admitDeviceOp(created.anchor, created.membershipId, phone, 'personal')
     );
     const frame = await sealEpochEnvelope({
       state: admitted.ledger.state,
@@ -457,7 +458,7 @@ describe('K1 durable epoch-key delivery', () => {
     const admitted = await append(
       created.ledger,
       owner,
-      await admitDeviceOp(created.anchor, created.membershipId, phone, 'personal', true)
+      await admitDeviceOp(created.anchor, created.membershipId, phone, 'personal')
     );
     const frame = await sealEpochEnvelope({
       state: admitted.ledger.state,
@@ -503,7 +504,7 @@ describe('K1 durable epoch-key delivery', () => {
     const admitted = await append(
       created.ledger,
       owner,
-      await admitDeviceOp(created.anchor, created.membershipId, phone, 'personal', true)
+      await admitDeviceOp(created.anchor, created.membershipId, phone, 'personal')
     );
     const frame = await sealEpochEnvelope({
       state: admitted.ledger.state,
@@ -557,7 +558,7 @@ describe('K1 durable epoch-key delivery', () => {
     const admitted = await append(
       created.ledger,
       owner,
-      await admitDeviceOp(created.anchor, created.membershipId, phone, 'personal', true)
+      await admitDeviceOp(created.anchor, created.membershipId, phone, 'personal')
     );
     const frame = await sealEpochEnvelope({
       state: admitted.ledger.state,
@@ -582,7 +583,8 @@ describe('K1 durable epoch-key delivery', () => {
       entered();
       await blocked;
       const sender = state.devices.get(hex(owner.publicKey));
-      if (!sender || sender.kind !== 'personal' || !sender.canManage) {
+      const role = sender && state.members.get(hex(sender.membershipId))?.role;
+      if (!sender || sender.kind !== 'personal' || (role !== 'owner' && role !== 'admin')) {
         throw new LedgerError('unauthorized');
       }
       await openEpochEnvelope({
@@ -632,7 +634,7 @@ describe('K1 durable epoch-key delivery', () => {
     const admitted = await append(
       created.ledger,
       owner,
-      await admitDeviceOp(created.anchor, created.membershipId, phone, 'personal', true)
+      await admitDeviceOp(created.anchor, created.membershipId, phone, 'personal')
     );
     const frame = await sealEpochEnvelope({
       state: admitted.ledger.state,

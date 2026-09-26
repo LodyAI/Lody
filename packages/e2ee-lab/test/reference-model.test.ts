@@ -18,7 +18,6 @@ function device(input: Partial<RefDevice> & Pick<RefDevice, 'id'>): RefDevice {
     user: 'alice',
     kind: 'personal',
     role: 'owner',
-    canManage: true,
     ...input,
   };
 }
@@ -61,10 +60,20 @@ describe('independent reference model', () => {
   it('rejects unauthorized admit, write, and epoch send', () => {
     const world = state([
       device({ id: 'owner' }),
-      device({ id: 'guest', role: 'guest', canManage: false, user: 'bob' }),
-      device({ id: 'machine', kind: 'machine', role: 'member', canManage: false, user: 'alice' }),
+      device({ id: 'guest', role: 'guest', user: 'bob' }),
+      device({ id: 'machine', kind: 'machine', role: 'member', user: 'alice' }),
     ]);
     expect(refMayAdmit(world, 'guest', 'org-a')).toBe(false);
+    const roleBound = state([
+      device({ id: 'admin-phone', role: 'admin', user: 'bob' }),
+      device({ id: 'member-phone', role: 'member', user: 'carol' }),
+      device({ id: 'owner-machine', kind: 'machine' }),
+      device({ id: 'owner-r', kind: 'recovery' }),
+    ]);
+    expect(refMayAdmit(roleBound, 'admin-phone', 'org-a')).toBe(true);
+    expect(refMayAdmit(roleBound, 'member-phone', 'org-a')).toBe(false);
+    expect(refMayAdmit(roleBound, 'owner-machine', 'org-a')).toBe(false);
+    expect(refMayAdmit(roleBound, 'owner-r', 'org-a')).toBe(false);
     expect(refMayWriteDocument(world, 'guest', 'org-a', 1)).toBe(false);
     expect(refMayWriteDocument(world, 'owner', 'org-b', 1)).toBe(false);
     expect(refMayWriteDocument(world, 'owner', 'org-a', 0)).toBe(false);
@@ -73,20 +82,17 @@ describe('independent reference model', () => {
     expect(refMaySendEpoch(world, 'owner', 'org-a')).toBe(true);
     expect(refMaySendEpoch(world, 'owner', 'org-b')).toBe(false);
     expect(refMaySendEpoch(world, 'stranger', 'org-a')).toBe(false);
-    const recovery = device({ id: 'r', kind: 'recovery', role: 'member', canManage: false });
+    const recovery = device({ id: 'r', kind: 'recovery', role: 'member' });
     expect(refMaySendEpoch(state([device({ id: 'owner' }), recovery]), 'r', 'org-a')).toBe(false);
     const revokedMachine = state(
-      [
-        device({ id: 'owner' }),
-        device({ id: 'machine', kind: 'machine', role: 'member', canManage: false }),
-      ],
+      [device({ id: 'owner' }), device({ id: 'machine', kind: 'machine', role: 'member' })],
       { revoked: new Set(['machine']) }
     );
     expect(refMaySendEpoch(revokedMachine, 'machine', 'org-a')).toBe(false);
   });
 
   it('keeps recovery and revoke inside current membership', () => {
-    const recovery = device({ id: 'r', kind: 'recovery', role: 'member', canManage: false });
+    const recovery = device({ id: 'r', kind: 'recovery', role: 'member' });
     const world = state([device({ id: 'owner' }), recovery], { revoked: new Set(['r']) });
     expect(refMayRecover(world, 'r', 'alice', 'org-a')).toBe(false);
     expect(refMayRecover(state([device({ id: 'owner' }), recovery]), 'r', 'alice', 'org-a')).toBe(

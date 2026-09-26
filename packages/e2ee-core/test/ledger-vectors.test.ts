@@ -99,7 +99,7 @@ describe('L1 full-operation DAG-CBOR golden vectors', () => {
     const personal = await appendSigned(
       ledger,
       owner,
-      await possess(genesisHash, phone, 'personal', true)
+      await possess(genesisHash, phone, 'personal')
     );
     records.push(personal.record);
     ledger = personal.ledger;
@@ -107,7 +107,7 @@ describe('L1 full-operation DAG-CBOR golden vectors', () => {
     const machineRec = await appendSigned(
       ledger,
       owner,
-      await possess(genesisHash, machine, 'machine', false)
+      await possess(genesisHash, machine, 'machine')
     );
     records.push(machineRec.record);
     ledger = machineRec.ledger;
@@ -115,7 +115,7 @@ describe('L1 full-operation DAG-CBOR golden vectors', () => {
     const recoveryRec = await appendSigned(
       ledger,
       owner,
-      await possess(genesisHash, recovery, 'recovery', false)
+      await possess(genesisHash, recovery, 'recovery')
     );
     records.push(recoveryRec.record);
     ledger = recoveryRec.ledger;
@@ -181,12 +181,12 @@ describe('L1 full-operation DAG-CBOR golden vectors', () => {
       'c4c4beea624a4e8dfc5ab3f9a47d935ca9632b62bfcd7defd8e81b20f559aaad',
       '70af9f3171ac870499319cc23ddcbf74da3c7214bb34e6cd0f8541e5590bab59',
       '19c1d73823746fc5170ffc4144eb06390c551dadb53a340c1313738277ada798',
-      '56016c3bfaa21ba5d3b636863b5446c7790414f2de01b4f82ce38b7ab807521a',
-      '59678924dfa8990b6c0db05d4bb48788fa83dba45980818c0d0ebd266b0b8ea1',
-      '5ca399a6b1dc9b30305424ec7b11cbad19846267f22f6b5c35a89a253e7c05ed',
-      '6c290462a102f0dc6e677de554dba36999150b78fd05ea2cacbfe23051f00ce8',
-      'b4c6435f2e2bf80de0e583bf758492af7a215a75f0a5c7a3d5def11b9ecd48da',
-      'ca00d2feafc19de9a5f0453915842520dbf3eb943a11979d54d52e0fcc05164d',
+      'af984374b0d445441c9414d41233474cd02be40b36fe0b84aad6da47ad92f610',
+      '52dc45ff7697e31d0e9af3e132643150f0605ce453037b76adb529a2de08a53f',
+      '8da4d0f8052fdec185efa6a027c38ff693d483ef3b675043bfe322642b119c52',
+      '8499882aa9960aac50f54eb233c2304392ac17723056f99a71304ec829baecb4',
+      '7bad54b2974bfc6b2a8dfcda7d4d1aad5a6697e66ada8b7306e2fb005f02c380',
+      '52a7222ff503f4bfeadebb959b08f902c49ac9060df45796f35e993f5d644b94',
     ]);
 
     const full = await Ledger.verify({ anchor: genesisHash, records });
@@ -220,15 +220,13 @@ describe('L1 full-operation DAG-CBOR golden vectors', () => {
 async function possess(
   genesis: Uint8Array,
   deviceKeys: Awaited<ReturnType<typeof device>>,
-  kind: 'personal' | 'machine' | 'recovery',
-  canManage: boolean
+  kind: 'personal' | 'machine' | 'recovery'
 ) {
   return {
     type: 'admitDevice' as const,
     kind,
     signingPublicKey: deviceKeys.publicKey,
     encryptionPublicKey: deviceKeys.enc,
-    canManage,
     possessionSignature: await deviceKeys.sign(
       possessionSigningBytes({
         genesis,
@@ -236,7 +234,6 @@ async function possess(
         signingPublicKey: deviceKeys.publicKey,
         encryptionPublicKey: deviceKeys.enc,
         kind,
-        canManage,
       })
     ),
   };

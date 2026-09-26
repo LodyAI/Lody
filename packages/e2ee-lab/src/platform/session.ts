@@ -136,21 +136,9 @@ function ledgerCommand(operation: Operation): Effect.Effect<LedgerCommand, Valid
         const signingPublicKey = yield* Bytes.signingPublicKey(operation.signingPublicKey);
         const encryptionPublicKey = yield* Bytes.encryptionPublicKey(operation.encryptionPublicKey);
         const possessionSignature = yield* Bytes.signature(operation.possessionSignature);
-        if (operation.kind === 'personal')
-          return {
-            _tag: 'AdmitDevice' as const,
-            kind: 'personal' as const,
-            canManage: operation.canManage,
-            signingPublicKey,
-            encryptionPublicKey,
-            possessionSignature,
-          };
-        if (operation.canManage)
-          return yield* Effect.fail(new ValidationError({ code: 'unauthorized' }));
         return {
           _tag: 'AdmitDevice' as const,
           kind: operation.kind,
-          canManage: false as const,
           signingPublicKey,
           encryptionPublicKey,
           possessionSignature,
@@ -531,7 +519,6 @@ export class DemoSession {
     admitted: boolean;
     roleConfigured: boolean;
     requestedRole: 'admin' | 'member' | 'guest';
-    deviceCanManage: false;
     roleStatus?: string;
   }> {
     const request: JoinRequest = {
@@ -555,7 +542,6 @@ export class DemoSession {
       admitted,
       roleConfigured,
       requestedRole: role,
-      deviceCanManage: false as const,
       ...(roleStatus === undefined ? {} : { roleStatus }),
     });
     const findMember = (ledger: Ledger) => {
@@ -648,7 +634,6 @@ export class DemoSession {
     admitted: boolean;
     roleConfigured: boolean;
     requestedRole: 'admin' | 'member' | 'guest';
-    deviceCanManage: false;
     roleStatus?: string;
   }> {
     try {
@@ -660,7 +645,6 @@ export class DemoSession {
         roleConfigured: roleResult.status === 'committed',
         requestedRole: role,
         roleStatus: roleResult.status,
-        deviceCanManage: false,
       };
     } catch (error) {
       const status = joinHelperStatus(error);
@@ -671,25 +655,19 @@ export class DemoSession {
         roleConfigured: false,
         requestedRole: role,
         roleStatus: status,
-        deviceCanManage: false,
       };
     }
   }
 
   async admitDevice(
     target: DemoDevice,
-    kind: 'personal' | 'machine' | 'recovery',
-    canManage: boolean
+    kind: 'personal' | 'machine' | 'recovery'
   ): Promise<{ status: string }> {
     if (!this.genesis || !this.genesisHex || !this.device) throw new Error('no-space');
     const ledger = await this.readLedger();
     const actor = ledger.state.devices.get(deviceHex(this.device));
     if (!actor) throw new Error('unauthorized');
-    if (kind !== 'personal' && canManage) throw new LedgerError('unauthorized');
-    const grant =
-      kind === 'personal'
-        ? { kind: 'personal' as const, canManage }
-        : { kind, canManage: false as const };
+    const grant = { kind };
     const genesisHex = this.genesisHex;
     const membership = actor.membershipId;
     const encryptionKey = target.enc;

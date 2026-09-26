@@ -11,7 +11,16 @@ import {
   possessionSigningBytes,
   signingBytesForBody,
 } from '../src/ledger/schema';
-import { append, ed25519, fromHex, hex, random, signGenesis, signJoin } from './ledger-fixtures';
+import {
+  admitDeviceOp,
+  append,
+  ed25519,
+  fromHex,
+  hex,
+  random,
+  signGenesis,
+  signJoin,
+} from './ledger-fixtures';
 
 function expectCode(error: unknown, code: string): void {
   expect(error).toBeInstanceOf(LedgerError);
@@ -206,7 +215,6 @@ describe('L1 canonical vectors and rejects', () => {
         signingPublicKey: applicant.publicKey,
         encryptionPublicKey: applicant.enc,
         kind: 'personal',
-        canManage: false,
       })
     );
     const request = {
@@ -227,5 +235,75 @@ describe('L1 canonical vectors and rejects', () => {
     } catch (error) {
       expectCode(error, 'bad-proof');
     }
+  });
+
+  it('round-trips the 5-element admitDevice and rejects the legacy canManage wire and proof', async () => {
+    const owner = await ed25519();
+    const created = await signGenesis(owner);
+    const phone = await ed25519();
+    const op = await admitDeviceOp(created.anchor, created.membershipId, phone, 'personal');
+    const proposal = created.ledger.prepare(op, owner.publicKey);
+    const body = decodeCbor(proposal.bodyBytes) as unknown[];
+    const wire = body[2] as unknown[];
+    expect(wire).toHaveLength(5);
+    expect(wire[0]).toBe(4);
+    expect(hex(wire[2] as Uint8Array)).toBe(hex(phone.publicKey));
+    expect(hex(wire[3] as Uint8Array)).toBe(hex(phone.enc));
+    expect(hex(wire[4] as Uint8Array)).toBe(hex(op.possessionSignature));
+    const record = encodeSignedRecord(proposal.bodyBytes, await owner.sign(proposal.signingBytes));
+    const decoded = decodeRecord(record);
+    if (decoded.body.type !== 'ordinary') throw new Error('not-ordinary');
+    expect(decoded.body.fields.operation).toEqual(op);
+    const admitted = await created.ledger.extend([record]);
+    expect(admitted.state.devices.get(hex(phone.publicKey))).toEqual({
+      membershipId: created.membershipId,
+      kind: 'personal',
+      encryptionPublicKey: phone.enc,
+    });
+
+    // Legacy 6-element form [4, kind, sign, enc, canManage, proof] is not decoded.
+    for (const canManage of [false, true]) {
+      const legacyBody = encodeCbor([
+        body[0] as Uint8Array,
+        body[1] as Uint8Array,
+        [
+          4,
+          wire[1] as number,
+          wire[2] as Uint8Array,
+          wire[3] as Uint8Array,
+          canManage,
+          wire[4] as Uint8Array,
+        ],
+      ]);
+      const legacy = encodeSignedRecord(
+        legacyBody,
+        await owner.sign(signingBytesForBody(legacyBody))
+      );
+      expect(() => decodeRecord(legacy)).toThrowError(LedgerError);
+      await expect(created.ledger.extend([legacy])).rejects.toMatchObject({
+        code: 'invalid-operation',
+      });
+    }
+
+    // A possess/v2 proof over the legacy payload that still carried canManage fails.
+    const current = possessionSigningBytes({
+      genesis: created.anchor,
+      targetMembershipId: created.membershipId,
+      signingPublicKey: phone.publicKey,
+      encryptionPublicKey: phone.enc,
+      kind: 'personal',
+    });
+    const domain = new TextEncoder().encode('lody-e2ee/possess/v2\0');
+    expect(hex(current.subarray(0, domain.length))).toBe(hex(domain));
+    const payload = decodeCbor(current.subarray(domain.length)) as unknown[];
+    expect(payload).toHaveLength(5);
+    const legacyPayload = encodeCbor([...(payload as Uint8Array[]), false as never]);
+    const legacyProof = new Uint8Array(domain.length + legacyPayload.length);
+    legacyProof.set(domain);
+    legacyProof.set(legacyPayload, domain.length);
+    const withLegacyProof = { ...op, possessionSignature: await phone.sign(legacyProof) };
+    await expect(append(created.ledger, owner, withLegacyProof)).rejects.toMatchObject({
+      code: 'bad-proof',
+    });
   });
 });

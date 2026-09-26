@@ -49,7 +49,6 @@ async function admit(anchor: Uint8Array, membershipId: Uint8Array) {
     kind: 'personal' as const,
     signingPublicKey: extra.publicKey,
     encryptionPublicKey: extra.enc,
-    canManage: false,
     possessionSignature: await extra.sign(
       possessionSigningBytes({
         genesis: anchor,
@@ -57,7 +56,6 @@ async function admit(anchor: Uint8Array, membershipId: Uint8Array) {
         signingPublicKey: extra.publicKey,
         encryptionPublicKey: extra.enc,
         kind: 'personal',
-        canManage: false,
       })
     ),
   };

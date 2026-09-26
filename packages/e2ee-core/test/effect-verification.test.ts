@@ -61,7 +61,7 @@ it('enrollment refuses signatures from a different real device before returning 
           genesis,
           membershipId,
           encryptionPublicKey,
-          grant: { kind: 'personal', canManage: false },
+          grant: { kind: 'personal' },
         }).pipe(Effect.provide(signer))
       );
       const join = yield* Effect.either(
@@ -105,7 +105,7 @@ it('binds application evidence to the exact verified view, not merely its head',
   const next = await append(
     created.ledger,
     owner,
-    await admitDeviceOp(created.anchor, created.membershipId, phone, 'personal', false)
+    await admitDeviceOp(created.anchor, created.membershipId, phone, 'personal')
   );
   const result = await Effect.runPromise(
     Effect.gen(function* () {
@@ -161,13 +161,7 @@ it('computes policy changes without input mutation and never partially consumes 
   if (decoded.body.type !== 'genesis') throw new Error('expected genesis fixture');
   const state = applyGenesis(decoded.body.fields, created.anchor);
   const before = structuredClone(state);
-  const operation = await admitDeviceOp(
-    created.anchor,
-    created.membershipId,
-    phone,
-    'personal',
-    false
-  );
+  const operation = await admitDeviceOp(created.anchor, created.membershipId, phone, 'personal');
   // Signing key is valid, but the encryption-key check fails later.
   const invalid = { ...operation, encryptionPublicKey: new Uint8Array(32) };
   expect(operationChanges(state, owner.publicKey, invalid)).toMatchObject({
@@ -248,17 +242,110 @@ it('pure decoding preserves wire bytes and returns errors without mutating point
   expect(facts.size).toBe(1);
 });
 
+it('point evidence does not authorize signatures and batched verification owns its inputs', async () => {
+  const owner = await ed25519();
+  const created = await signGenesis(owner);
+  const parsed = Either.getOrThrow(Schema.decodeRecordWithFacts(created.record));
+  const facts = parsed.facts;
+  const good = {
+    publicKey: new Uint8Array(owner.publicKey),
+    message: recordSigningBytes(parsed.record.bodyBytes),
+    signature: new Uint8Array(parsed.record.signature),
+  };
+  await Effect.runPromise(
+    Effect.gen(function* () {
+      const verifier = yield* SignatureVerifier;
+      const pending = verifier.verifyMany([good], facts);
+      good.publicKey.fill(0);
+      good.message.fill(0);
+      good.signature.fill(0);
+      yield* pending;
+      yield* pending;
+      const original = {
+        publicKey: owner.publicKey,
+        message: recordSigningBytes(parsed.record.bodyBytes),
+        signature: parsed.record.signature,
+      };
+      for (const bad of [
+        { ...original, message: new Uint8Array(original.message.length) },
+        { ...original, publicKey: new Uint8Array(32) },
+        { ...original, signature: new Uint8Array(64) },
+      ]) {
+        expect(yield* Effect.either(verifier.verifyMany([bad], facts))).toMatchObject({
+          _tag: 'Left',
+          left: { code: 'bad-signature' },
+        });
+      }
+      expect(
+        yield* Effect.either(
+          verifier.verifyMany(
+            [
+              {
+                ...original,
+                message: new Uint8Array(original.message.length),
+                code: 'bad-proof',
+                position: 9,
+              },
+            ],
+            facts
+          )
+        )
+      ).toMatchObject({ _tag: 'Left', left: { code: 'bad-proof', position: 9 } });
+    }).pipe(Effect.provide(signatureVerifierLayer))
+  );
+  expect(facts.has(owner.publicKey)).toBe(true);
+  expect(facts.has(new Uint8Array(32))).toBe(false);
+});
+
+it('nested decoding accumulates point evidence without leaking partial facts on failure', async () => {
+  const owner = await ed25519();
+  const phone = await ed25519();
+  const created = await signGenesis(owner);
+  const base = Either.getOrThrow(Schema.decodeRecordWithFacts(created.record));
+  const admission = await append(
+    created.ledger,
+    owner,
+    await admitDeviceOp(created.anchor, created.membershipId, phone, 'personal')
+  );
+  const parsed = Either.getOrThrow(Schema.decodeRecordWithFacts(admission.record, base.facts));
+  expect(parsed.facts.size).toBe(2);
+  expect(parsed.facts.has(phone.publicKey)).toBe(true);
+  expect(base.facts.has(phone.publicKey)).toBe(false);
+  const body = parsed.record.body;
+  if (body.type !== 'ordinary' || body.fields.operation.type !== 'admitDevice')
+    throw new Error('expected admission');
+  const invalid = Either.getOrThrow(
+    Schema.encodeRecord(
+      {
+        ...body,
+        fields: {
+          ...body.fields,
+          operation: {
+            ...body.fields.operation,
+            encryptionPublicKey: new Uint8Array(32),
+          },
+        },
+      },
+      parsed.record.signature,
+      base.facts
+    )
+  );
+  expect(Schema.decodeRecordWithFacts(invalid, base.facts)).toMatchObject({
+    _tag: 'Left',
+    left: { code: 'invalid-key' },
+  });
+  expect(base.facts.size).toBe(1);
+  parsed.record.body.fields.signer.fill(0);
+  body.fields.operation.signingPublicKey.fill(0);
+  expect(parsed.facts.has(phone.publicKey)).toBe(true);
+  expect(parsed.facts.has(new Uint8Array(32))).toBe(false);
+});
+
 it('pure proof jobs bind the target membership and own all signature material', async () => {
   const owner = await ed25519();
   const phone = await ed25519();
   const created = await signGenesis(owner);
-  const operation = await admitDeviceOp(
-    created.anchor,
-    created.membershipId,
-    phone,
-    'personal',
-    false
-  );
+  const operation = await admitDeviceOp(created.anchor, created.membershipId, phone, 'personal');
   expect(operationProofJobs(created.anchor, operation)).toMatchObject({
     _tag: 'Left',
     left: { code: 'unauthorized' },

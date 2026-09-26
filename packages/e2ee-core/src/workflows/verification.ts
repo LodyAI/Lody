@@ -107,7 +107,7 @@ export function verifyLedger(input: {
         position,
       });
     }
-    yield* verifier.verifyMany(outer);
+    yield* verifier.verifyMany(outer, facts);
     const genesis = hashes[0]!;
     for (let position = 1; position < decoded.length; position++) {
       const record = decoded[position]!;
@@ -127,7 +127,7 @@ export function verifyLedger(input: {
           position,
         });
     }
-    if (memberProofs.length > 0) yield* verifier.verifyMany(memberProofs);
+    if (memberProofs.length > 0) yield* verifier.verifyMany(memberProofs, facts);
     let state: InternalState | undefined;
     for (let position = 0; position < decoded.length; position++) {
       const record = decoded[position]!;
@@ -144,7 +144,8 @@ export function verifyLedger(input: {
             signature: job.sig,
             code: 'bad-proof' as const,
             position,
-          }))
+          })),
+          facts
         );
       }
       state = yield* applyDecodedRecord(
@@ -217,8 +218,8 @@ export function extendLedger(
           });
       }
     }
-    yield* verifier.verifyMany(outer);
-    if (memberProofs.length > 0) yield* verifier.verifyMany(memberProofs);
+    yield* verifier.verifyMany(outer, facts);
+    if (memberProofs.length > 0) yield* verifier.verifyMany(memberProofs, facts);
     for (let offset = 0; offset < decoded.length; offset++) {
       const position = start + offset;
       const record = decoded[offset]!;
@@ -235,7 +236,8 @@ export function extendLedger(
             signature: job.sig,
             code: 'bad-proof' as const,
             position,
-          }))
+          })),
+          facts
         );
       }
       yield* applyDecodedRecord(

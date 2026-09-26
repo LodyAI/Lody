@@ -219,7 +219,7 @@ describe('P3 key delivery and history unwrap', () => {
     const admitted = await append(
       created.ledger,
       owner,
-      await admitDeviceOp(created.anchor, created.membershipId, phone, 'personal', false)
+      await admitDeviceOp(created.anchor, created.membershipId, phone, 'personal')
     );
     const stream = new MemoryLedgerStream();
     stream.records = [created.record, admitted.record];
@@ -883,7 +883,7 @@ describe('P3 key delivery and history unwrap', () => {
     const admitted = await append(
       created.ledger,
       owner,
-      await admitDeviceOp(created.anchor, created.membershipId, phone, 'personal', true)
+      await admitDeviceOp(created.anchor, created.membershipId, phone, 'personal')
     );
     const frame = await sealEpochEnvelope({
       state: admitted.ledger.state,
@@ -1014,7 +1014,7 @@ describe('P3 key delivery and history unwrap', () => {
     const admitted = await append(
       created.ledger,
       owner,
-      await admitDeviceOp(created.anchor, created.membershipId, phone, 'personal', false)
+      await admitDeviceOp(created.anchor, created.membershipId, phone, 'personal')
     );
     const attacker = await device();
     const fakeKey = random(32);
@@ -1066,7 +1066,7 @@ describe('P3 key delivery and history unwrap', () => {
     const withR = await append(
       created.ledger,
       owner,
-      await admitDeviceOp(created.anchor, created.membershipId, recovery, 'recovery', false)
+      await admitDeviceOp(created.anchor, created.membershipId, recovery, 'recovery')
     );
     const k0 = created.secret;
     const frame = await sealEpochEnvelope({
@@ -1121,12 +1121,12 @@ describe('P3 key delivery and history unwrap', () => {
     const admittedPhone = await append(
       created.ledger,
       owner,
-      await admitDeviceOp(created.anchor, created.membershipId, phone, 'personal', false)
+      await admitDeviceOp(created.anchor, created.membershipId, phone, 'personal')
     );
     const admitted = await append(
       admittedPhone.ledger,
       owner,
-      await admitDeviceOp(created.anchor, created.membershipId, laptop, 'personal', false)
+      await admitDeviceOp(created.anchor, created.membershipId, laptop, 'personal')
     );
     await expect(
       sealEpochEnvelope({
@@ -1269,19 +1269,19 @@ describe('P3 key delivery and history unwrap', () => {
     const withLaptop = await append(
       joined.ledger,
       owner,
-      await admitDeviceOp(created.anchor, created.membershipId, laptop, 'personal', false)
+      await admitDeviceOp(created.anchor, created.membershipId, laptop, 'personal')
     );
     const machine = await device();
     const withMachine = await append(
       withLaptop.ledger,
       member,
-      await admitDeviceOp(created.anchor, memberMembership, machine, 'machine', false)
+      await admitDeviceOp(created.anchor, memberMembership, machine, 'machine')
     );
     const recovery = await device();
     const admitted = await append(
       withMachine.ledger,
       member,
-      await admitDeviceOp(created.anchor, memberMembership, recovery, 'recovery', false)
+      await admitDeviceOp(created.anchor, memberMembership, recovery, 'recovery')
     );
     const state = admitted.ledger.state;
     expect(canSendEpoch(state, owner.publicKey)).toBe(true);

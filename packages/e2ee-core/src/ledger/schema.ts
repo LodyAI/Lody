@@ -37,7 +37,6 @@ export function possessionSigningBytes(input: {
   signingPublicKey: SigningPublicKey;
   encryptionPublicKey: EncryptionPublicKey;
   kind: DeviceKind;
-  canManage: boolean;
 }): Uint8Array {
   return unwrap(pure.possessionSigningBytes(input));
 }

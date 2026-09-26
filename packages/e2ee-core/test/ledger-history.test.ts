@@ -51,7 +51,7 @@ describe('L2 immutable extend', () => {
     const good = await append(
       created.ledger,
       owner,
-      await admitDeviceOp(created.anchor, created.membershipId, phone, 'personal', true)
+      await admitDeviceOp(created.anchor, created.membershipId, phone, 'personal')
     );
     const flipped = new Uint8Array(good.record);
     const last = flipped.byteLength - 1;
@@ -103,12 +103,12 @@ describe('L4 independent clients and malicious history', () => {
     const a = await append(
       created.ledger,
       owner,
-      await admitDeviceOp(created.anchor, created.membershipId, phone, 'personal', true)
+      await admitDeviceOp(created.anchor, created.membershipId, phone, 'personal')
     );
     const b = await append(
       created.ledger,
       owner,
-      await admitDeviceOp(created.anchor, created.membershipId, laptop, 'personal', false)
+      await admitDeviceOp(created.anchor, created.membershipId, laptop, 'personal')
     );
     try {
       await a.ledger.extend([b.record]);
@@ -187,7 +187,7 @@ describe('L4 independent clients and malicious history', () => {
     const fake = await append(
       created.ledger,
       owner,
-      await admitDeviceOp(created.anchor, created.membershipId, attacker, 'personal', true)
+      await admitDeviceOp(created.anchor, created.membershipId, attacker, 'personal')
     );
     const claim = fake.ledger.summary();
     expect(created.ledger.summary().head).not.toEqual(claim.head);

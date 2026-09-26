@@ -8,6 +8,7 @@ import type {
   ValidationError,
 } from '../pure/errors';
 import type { LedgerJournal, LedgerReadPage } from '../pure/journal';
+import type { SigningFacts } from '../pure/signing-facts';
 
 export interface JournalTransaction {
   readonly load: Effect.Effect<LedgerJournal | null, StorageError | ValidationError>;
@@ -67,7 +68,9 @@ export class SignatureVerifier extends Context.Tag('@lody/e2ee-core/SignatureVer
     }) => Effect.Effect<void, ValidationError>;
     /** One Effect for a batch. Do not construct an Effect per signature in replay. */
     readonly verifyMany: (
-      jobs: readonly SignatureJobInput[]
+      jobs: readonly SignatureJobInput[],
+      /** Optional point-validity evidence. Every signature still needs verification. */
+      facts?: SigningFacts
     ) => Effect.Effect<void, ValidationError>;
   }
 >() {}

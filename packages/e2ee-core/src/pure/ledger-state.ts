@@ -11,7 +11,6 @@ export interface Device {
   readonly membershipId: Uint8Array;
   readonly kind: DeviceKind;
   readonly encryptionPublicKey: Uint8Array;
-  readonly canManage: boolean;
 }
 
 export interface EpochState {
@@ -93,7 +92,6 @@ function freezeDevice(device: Device): Device {
     membershipId: copyBytes(device.membershipId),
     kind: device.kind,
     encryptionPublicKey: copyBytes(device.encryptionPublicKey),
-    canManage: device.canManage,
   });
 }
 

@@ -1,7 +1,6 @@
 import { writeFileSync } from 'node:fs';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
-  canSendEpoch,
   encodeSignedRecord,
   joinRequestSigningBytes,
   openEpochEnvelope,
@@ -91,7 +90,7 @@ describe('design probes: binding, host cache, guest content', () => {
     await alice.createSpace();
     await alice.readLedger();
     const tablet = await generateDevice();
-    expect((await alice.admitDevice(tablet, 'personal', false)).status).toBe('committed');
+    expect((await alice.admitDevice(tablet, 'personal')).status).toBe('committed');
     await alice.deliverEpochKey(tablet, 0);
     const writer = await labClient({
       host,
@@ -253,7 +252,7 @@ describe('design probes: binding, host cache, guest content', () => {
     const key = bob.epochKeys.get(0);
     if (!key) throw new Error('missing-bob-epoch');
 
-    // Bob is a plain member with canManage=false. A forwarded key that is not
+    // Bob is a plain member and cannot manage. A forwarded key that is not
     // the committed key fails the commitment check and leaves Carol without a key.
     const ledger = await bob.readLedger();
     const wrongKey = await sealEpochEnvelope({
@@ -439,28 +438,31 @@ describe('design probes: ordinary plane vs harness', () => {
     expect((await alice.readLedger()).state.devices.has(toHex(bob.device.publicKey))).toBe(false);
   });
 
-  it('reports role=admin without implying the join device can manage', async () => {
+  it('lets a join device follow its member role for management', async () => {
     const host = await launchLab();
     const alice = await labClient({ host, account: 'alice' });
     const bob = await labClient({ host, account: 'bob' });
+    const carol = await labClient({ host, account: 'carol' });
+    const dave = await labClient({ host, account: 'dave' });
     await alice.createSpace();
     const join = await bob.requestJoin(alice.genesisHex!);
     const approved = await alice.approveJoin(join, 'admin');
     expect(approved.status).toBe('committed');
     expect(approved.roleConfigured).toBe(true);
-    expect(approved.deviceCanManage).toBe(false);
-    const ledger = await bob.readLedger();
-    const member = [...ledger.state.members.values()].find((row) => row.role === 'admin');
-    expect(member?.role).toBe('admin');
-    // The join device may forward keys once it holds one; here it has none yet.
-    expect(canSendEpoch(ledger.state, bob.device.publicKey)).toBe(true);
-    await expect(bob.deliverEpochKey(alice.device, 0)).rejects.toThrow('missing-epoch-key');
-    const manager = await generateDevice();
-    expect((await bob.admitDevice(manager, 'personal', true)).status).toBe('committed');
-    const after = await bob.readLedger();
-    expect(canSendEpoch(after.state, manager.publicKey)).toBe(true);
+    // The device registered at join inherits the admin role; no second device is needed.
+    const carolJoin = await carol.requestJoin(alice.genesisHex!);
+    expect((await bob.approveJoin(carolJoin)).status).toBe('committed');
     const machine = await generateDevice();
-    await expect(bob.admitDevice(machine, 'machine', true)).rejects.toThrow();
+    expect((await bob.admitDevice(machine, 'machine')).status).toBe('committed');
+    expect(
+      (await alice.submit({ type: 'setRole', membershipId: approved.membershipId, role: 'member' }))
+        .status
+    ).toBe('committed');
+    // Demotion removes management from every device of that member at once.
+    const daveJoin = await dave.requestJoin(alice.genesisHex!);
+    const refused = await bob.approveJoin(daveJoin);
+    expect(refused.admitted).toBe(false);
+    expect(refused.status).not.toBe('committed');
   });
 
   it('does not flag historical member content after setRole→guest', async () => {
@@ -777,7 +779,7 @@ describe('design probes: ordinary plane vs harness', () => {
     await alice.createSpace();
     await alice.readLedger();
     const tablet = await generateDevice();
-    expect((await alice.admitDevice(tablet, 'personal', false)).status).toBe('committed');
+    expect((await alice.admitDevice(tablet, 'personal')).status).toBe('committed');
     await alice.deliverEpochKey(tablet, 0);
     const writer = await labClient({
       host,

@@ -82,8 +82,7 @@ export async function admitDeviceOp(
   genesis: Uint8Array,
   targetMembershipId: Uint8Array,
   device: DeviceKeys,
-  kind: 'personal' | 'machine' | 'recovery',
-  canManage: boolean
+  kind: 'personal' | 'machine' | 'recovery'
 ): Promise<Extract<Operation, { type: 'admitDevice' }>> {
   const possessionSignature = await device.sign(
     possessionSigningBytes({
@@ -92,7 +91,6 @@ export async function admitDeviceOp(
       signingPublicKey: device.publicKey,
       encryptionPublicKey: device.enc,
       kind,
-      canManage,
     })
   );
   return {
@@ -100,7 +98,6 @@ export async function admitDeviceOp(
     kind,
     signingPublicKey: device.publicKey,
     encryptionPublicKey: device.enc,
-    canManage,
     possessionSignature,
   };
 }
@@ -156,8 +153,7 @@ export async function buildMixedChain(count: number) {
           created.anchor,
           ledger.state.devices.get(hex(members[members.length - 1]!.publicKey))!.membershipId,
           device,
-          'personal',
-          false
+          'personal'
         )
       );
       records.push(next.record);
@@ -167,7 +163,7 @@ export async function buildMixedChain(count: number) {
       const next = await append(
         ledger,
         owner,
-        await admitDeviceOp(created.anchor, created.membershipId, machine, 'machine', false)
+        await admitDeviceOp(created.anchor, created.membershipId, machine, 'machine')
       );
       records.push(next.record);
       ledger = next.ledger;
@@ -195,7 +191,7 @@ export async function buildMixedChain(count: number) {
       const next = await append(
         ledger,
         owner,
-        await admitDeviceOp(created.anchor, created.membershipId, recovery, 'recovery', false)
+        await admitDeviceOp(created.anchor, created.membershipId, recovery, 'recovery')
       );
       records.push(next.record);
       ledger = next.ledger;

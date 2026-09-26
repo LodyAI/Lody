@@ -118,11 +118,11 @@ function stageContracts(decoded: DecodedRecord, signed: SignatureCheckedRecord) 
   const wrongSignature: SignatureCheckedRecord = decoded;
   // @ts-expect-error Signature verification is not authorization at a ledger view.
   const wrongAuthority: ApplicableRecord = signed;
-  // @ts-expect-error Machines cannot be given an Org-management flag.
-  const machine: DeviceGrant = { kind: 'machine', canManage: true };
-  // @ts-expect-error Recovery devices cannot be given an Org-management flag.
-  const recovery: DeviceGrant = { kind: 'recovery', canManage: true };
-  return { wrongSignature, wrongAuthority, machine, recovery };
+  // @ts-expect-error Management is role-derived; no device grant carries a management flag.
+  const personal: DeviceGrant = { kind: 'personal', canManage: true };
+  // @ts-expect-error Device kinds are closed; there is no managing device kind.
+  const manager: DeviceGrant = { kind: 'manager' };
+  return { wrongSignature, wrongAuthority, personal, manager };
 }
 void stageContracts;
 

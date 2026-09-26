@@ -540,7 +540,10 @@ v1 `possessionSigningBytes` is `[genesis, signPub, encPub, kind, canManage]`. `a
 
 Recommend a new proof encoding (do not silently lengthen v1): bind `targetMembershipId` when adding a device to an existing member. First `admitMember` still uses the join request (no membershipId yet). Keep recovery-device R admitting that user’s personal devices. `usedSigningKeys`/`usedEncKeys` still consume keys Org-wide; a request id would additionally stop replay of an unused proof. Old pending proofs remain v1. Do not implement until confirmed.
 
-### Pending decision — require actor canManage to grant canManage
+### Superseded decision — require actor canManage to grant canManage
+
+Superseded 2026-09-24: the ledger no longer has `canManage`; see the control-log note revision. D8 now asserts that a join device follows its member role.
+
 
 Current spec §8.3 and `policy.ts` allow an Owner/Admin personal device with `canManage=false` to admit a new personal device with `canManage=true`. That is not a transitive cap. Characterization test kept. Tightening would be: actor.canManage required to set canManage, with an explicit exception for recovery device R restoring a managing personal device. Do not implement until confirmed.
 

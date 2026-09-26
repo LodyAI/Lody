@@ -111,15 +111,13 @@ async function admitDevice(
   genesisHash: Uint8Array,
   targetMembershipId: Uint8Array,
   target: Device,
-  kind: 'personal' | 'machine' | 'recovery',
-  canManage: boolean
+  kind: 'personal' | 'machine' | 'recovery'
 ): Promise<Extract<Operation, { type: 'admitDevice' }>> {
   return {
     type: 'admitDevice',
     kind,
     signingPublicKey: target.publicKey,
     encryptionPublicKey: target.enc,
-    canManage,
     possessionSignature: await target.sign(
       possessionSigningBytes({
         genesis: genesisHash,
@@ -127,7 +125,6 @@ async function admitDevice(
         signingPublicKey: target.publicKey,
         encryptionPublicKey: target.enc,
         kind,
-        canManage,
       })
     ),
   };
@@ -183,7 +180,7 @@ describe('P3 public-export K/R/C loop', () => {
     const admittedA = await append(
       ledger,
       owner,
-      await admitDevice(created.anchor, created.ledger.state.owner, phoneA, 'personal', true)
+      await admitDevice(created.anchor, created.ledger.state.owner, phoneA, 'personal')
     );
     records.push(admittedA.record);
     ledger = admittedA.ledger;
@@ -191,7 +188,7 @@ describe('P3 public-export K/R/C loop', () => {
     const admittedC = await append(
       ledger,
       phoneA,
-      await admitDevice(created.anchor, created.ledger.state.owner, laptopC, 'personal', false)
+      await admitDevice(created.anchor, created.ledger.state.owner, laptopC, 'personal')
     );
     records.push(admittedC.record);
     ledger = admittedC.ledger;
@@ -199,7 +196,7 @@ describe('P3 public-export K/R/C loop', () => {
     const admittedR = await append(
       ledger,
       owner,
-      await admitDevice(created.anchor, created.ledger.state.owner, recovery, 'recovery', false)
+      await admitDevice(created.anchor, created.ledger.state.owner, recovery, 'recovery')
     );
     records.push(admittedR.record);
     ledger = admittedR.ledger;
@@ -380,49 +377,37 @@ describe('P3 public-export K/R/C loop', () => {
         created.anchor,
         ledger.state.devices.get(hex(member.publicKey))!.membershipId,
         memberR,
-        'recovery',
-        false
+        'recovery'
       )
     );
     ledger = withMemberR.ledger;
     records.push(withMemberR.record);
-    await expect(
-      append(
-        ledger,
-        memberR,
-        await admitDevice(
-          created.anchor,
-          ledger.state.devices.get(hex(memberR.publicKey))!.membershipId,
-          await device(),
-          'personal',
-          true
-        )
-      )
-    ).rejects.toMatchObject({ code: 'unauthorized' });
+    const memberLaptop = await device();
     const memberC = await append(
       ledger,
       memberR,
       await admitDevice(
         created.anchor,
         ledger.state.devices.get(hex(memberR.publicKey))!.membershipId,
-        await device(),
-        'personal',
-        false
+        memberLaptop,
+        'personal'
       )
     );
     ledger = memberC.ledger;
     records.push(memberC.record);
+    // A Member's personal device, even one approved by R, has no Org management.
+    await expect(
+      append(ledger, memberLaptop, {
+        type: 'admitMember',
+        membershipId: random(16),
+        request: await joinRequest(created.anchor, await device()),
+      })
+    ).rejects.toMatchObject({ code: 'unauthorized' });
 
     const restored = await append(
       ledger,
       recovery,
-      await admitDevice(
-        created.anchor,
-        created.ledger.state.owner,
-        await device(),
-        'personal',
-        true
-      )
+      await admitDevice(created.anchor, created.ledger.state.owner, await device(), 'personal')
     );
     ledger = restored.ledger;
     records.push(restored.record);
@@ -433,7 +418,7 @@ describe('P3 public-export K/R/C loop', () => {
       await append(
         orgY.ledger,
         recovery,
-        await admitDevice(orgY.anchor, orgY.ledger.state.owner, await device(), 'personal', false)
+        await admitDevice(orgY.anchor, orgY.ledger.state.owner, await device(), 'personal')
       );
       throw new Error('cross-org-recovery');
     } catch (error) {
@@ -551,7 +536,7 @@ describe('P3 public-export K/R/C loop', () => {
     const withR = await append(
       created.ledger,
       owner,
-      await admitDevice(created.anchor, created.ledger.state.owner, recovery, 'recovery', false)
+      await admitDevice(created.anchor, created.ledger.state.owner, recovery, 'recovery')
     );
     let ledger = withR.ledger;
     const records = [created.record, withR.record];
@@ -624,9 +609,16 @@ describe('P3 public-export K/R/C loop', () => {
     const restored = await append(
       ledger,
       recovery,
-      await admitDevice(created.anchor, created.ledger.state.owner, replacement, 'personal', true)
+      await admitDevice(created.anchor, created.ledger.state.owner, replacement, 'personal')
     );
-    expect(restored.ledger.state.devices.get(hex(replacement.publicKey))?.canManage).toBe(true);
+    expect(restored.ledger.state.devices.get(hex(replacement.publicKey))?.kind).toBe('personal');
+    // Management follows the Owner role, so the recovered personal device can admit.
+    const fromReplacement = await append(
+      restored.ledger,
+      replacement,
+      await admitDevice(created.anchor, created.ledger.state.owner, await device(), 'personal')
+    );
+    expect(fromReplacement.ledger.state.devices.size).toBe(restored.ledger.state.devices.size + 1);
   });
 
   it('keeps approved C after R revoke, drops all device kinds on removeMember, and isolates Org Y', async () => {
@@ -637,17 +629,17 @@ describe('P3 public-export K/R/C loop', () => {
     const withR = await append(
       ledger,
       owner,
-      await admitDevice(created.anchor, created.ledger.state.owner, recovery, 'recovery', false)
+      await admitDevice(created.anchor, created.ledger.state.owner, recovery, 'recovery')
     );
     ledger = withR.ledger;
     const laptopC = await device();
     const withC = await append(
       ledger,
       recovery,
-      await admitDevice(created.anchor, created.ledger.state.owner, laptopC, 'personal', true)
+      await admitDevice(created.anchor, created.ledger.state.owner, laptopC, 'personal')
     );
     ledger = withC.ledger;
-    expect(ledger.state.devices.get(hex(laptopC.publicKey))?.canManage).toBe(true);
+    expect(ledger.state.devices.get(hex(laptopC.publicKey))?.kind).toBe('personal');
 
     const revokedR = await append(ledger, owner, {
       type: 'revokeDevice',
@@ -656,18 +648,18 @@ describe('P3 public-export K/R/C loop', () => {
     ledger = revokedR.ledger;
     expect(ledger.state.devices.has(hex(recovery.publicKey))).toBe(false);
     expect(ledger.state.devices.has(hex(laptopC.publicKey))).toBe(true);
-    expect(ledger.state.devices.get(hex(laptopC.publicKey))?.canManage).toBe(true);
+    // C approved by the now-revoked R keeps Owner management through its role.
+    const fromC = await append(
+      ledger,
+      laptopC,
+      await admitDevice(created.anchor, created.ledger.state.owner, await device(), 'personal')
+    );
+    expect(fromC.ledger.state.devices.size).toBe(ledger.state.devices.size + 1);
     await expect(
       append(
         ledger,
         recovery,
-        await admitDevice(
-          created.anchor,
-          created.ledger.state.owner,
-          await device(),
-          'personal',
-          false
-        )
+        await admitDevice(created.anchor, created.ledger.state.owner, await device(), 'personal')
       )
     ).rejects.toMatchObject({ code: 'unauthorized' });
 
@@ -688,8 +680,7 @@ describe('P3 public-export K/R/C loop', () => {
         created.anchor,
         ledger.state.devices.get(hex(member.publicKey))!.membershipId,
         memberMachine,
-        'machine',
-        false
+        'machine'
       )
     );
     ledger = withMachine.ledger;
@@ -701,8 +692,7 @@ describe('P3 public-export K/R/C loop', () => {
         created.anchor,
         ledger.state.devices.get(hex(member.publicKey))!.membershipId,
         memberR,
-        'recovery',
-        false
+        'recovery'
       )
     );
     ledger = withMemberR.ledger;
@@ -722,13 +712,7 @@ describe('P3 public-export K/R/C loop', () => {
       append(
         ledger,
         member,
-        await admitDevice(
-          created.anchor,
-          created.ledger.state.owner,
-          await device(),
-          'personal',
-          false
-        )
+        await admitDevice(created.anchor, created.ledger.state.owner, await device(), 'personal')
       )
     ).rejects.toMatchObject({ code: 'unauthorized' });
 
@@ -737,14 +721,14 @@ describe('P3 public-export K/R/C loop', () => {
     const yR = await append(
       orgY.ledger,
       otherOwner,
-      await admitDevice(orgY.anchor, orgY.ledger.state.owner, recovery, 'recovery', false)
+      await admitDevice(orgY.anchor, orgY.ledger.state.owner, recovery, 'recovery')
     );
     expect(yR.ledger.state.devices.has(hex(recovery.publicKey))).toBe(true);
     expect(ledger.state.devices.has(hex(recovery.publicKey))).toBe(false);
     const yC = await append(
       yR.ledger,
       recovery,
-      await admitDevice(orgY.anchor, orgY.ledger.state.owner, await device(), 'personal', false)
+      await admitDevice(orgY.anchor, orgY.ledger.state.owner, await device(), 'personal')
     );
     expect(yC.ledger.state.devices.size).toBe(3);
   });
@@ -756,7 +740,7 @@ describe('P3 public-export K/R/C loop', () => {
     const withR = await append(
       created.ledger,
       owner,
-      await admitDevice(created.anchor, created.ledger.state.owner, recovery, 'recovery', false)
+      await admitDevice(created.anchor, created.ledger.state.owner, recovery, 'recovery')
     );
     const identity = hex(created.anchor);
     const material = random(32);
