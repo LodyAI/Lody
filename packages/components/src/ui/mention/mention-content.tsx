@@ -29,6 +29,8 @@ type InputBoundaryRect = {
 };
 type MentionContentStyle = React.CSSProperties & {
   '--mention-input-width'?: string;
+  /** Where the entrance starts: one step further from the caret, on the side the menu landed. */
+  '--mention-rise'?: string;
 };
 
 interface MentionContentContextValue {
@@ -269,14 +271,23 @@ const MentionContent = React.forwardRef<ContentElement, MentionContentProps>(
       setFloatingRef.current(node);
     }, []);
     const composedRef = useComposedRefs(forwardedRef, handleFloatingRef);
-    const composedStyle = React.useMemo<React.CSSProperties>(() => {
+    const resolvedSide = positionerContext.side;
+    const composedStyle = React.useMemo<MentionContentStyle>(() => {
       return {
         ...inputWidthStyle,
+        '--mention-rise': resolvedSide === 'top' ? '-4px' : '4px',
         ...style,
         ...positionerContext.floatingStyles,
         ...(!context.open && forceMount ? { visibility: 'hidden' } : {}),
       };
-    }, [inputWidthStyle, style, positionerContext.floatingStyles, forceMount, context.open]);
+    }, [
+      inputWidthStyle,
+      resolvedSide,
+      style,
+      positionerContext.floatingStyles,
+      forceMount,
+      context.open,
+    ]);
 
     useDismiss({
       /* Disabled on mobile: the docked panel manages its own lifetime

@@ -89,7 +89,6 @@ const styles = stylex.create({
     cornerShape: corner.shape,
   },
   line: { minWidth: 0 },
-  lineRuled: { boxShadow: `inset 0 1px 0 ${colors.separator}` },
   groupError: {
     display: 'flex',
     alignItems: 'flex-start',
@@ -157,6 +156,7 @@ const styles = stylex.create({
 });
 import { capturePickerSearchSelected } from '@/lib/picker-search-analytics';
 import { settingsType as type } from './type.stylex';
+import { settingsSurface as surface } from './surface';
 
 /**
  * Desktop "Skills" sub-tab for a project detail pane (local + GitHub).
@@ -401,14 +401,14 @@ function SkillGroupCard({
         {group.skills.map((skill, index) => (
           <div
             key={skill.id}
-            {...stylex.props(styles.line, (index > 0 || Boolean(group.error)) && styles.lineRuled)}
+            {...stylex.props(styles.line, (index > 0 || Boolean(group.error)) && surface.lineRuled)}
           >
             <SkillRow skill={skill} scope={group.scope} onOpen={() => onSkillOpen?.(skill.id)} />
           </div>
         ))}
 
         {group.skippedExternalSymlinks ? (
-          <div {...stylex.props(styles.groupFootnote, styles.lineRuled)}>
+          <div {...stylex.props(styles.groupFootnote, surface.lineRuled)}>
             {t('workspace.projects.skills.skippedSymlinks', {
               defaultValue: '{{count}} external symlinks skipped',
               count: group.skippedExternalSymlinks,
