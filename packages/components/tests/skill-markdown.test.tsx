@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { renderInlineMarkdown, SkillMarkdownFallback } from '../src/components/settings/skill-markdown';
+import {
+  renderInlineMarkdown,
+  SkillMarkdownFallback,
+} from '../src/components/settings/skill-markdown';
 
 function inlineHtml(text: string): string {
   return renderToStaticMarkup(<>{renderInlineMarkdown(text, 'k')}</>);
@@ -38,7 +41,7 @@ describe('SkillMarkdownFallback', () => {
     expect(html).toContain('<h1');
     expect(html).toContain('>Title</h1>');
     expect(html).toContain('<ul');
-    expect(html).toContain('<li>one</li>');
+    expect(html).toContain('>one</li>');
     expect(html).toContain('<pre');
     expect(html).toContain('code()');
     // The literal markdown markers should not survive as text.

@@ -12,7 +12,7 @@
 | Issue linking | `scripts/pr-issue-link.mjs` | Parse and normalize only `## Related issue`. |
 | Event orchestration | `workflows/pr-policy.yml`, `workflows/pr-policy-reconcile.yml` | Route every PR event and audit through one concurrency group and one reconciler. |
 | Scope labels | `labeler.yml`, `workflows/pr-scope.yml` | Derive configured `scope:*` labels from changed paths. |
-| Code checks | `workflows/ci.yml`, `scripts/select-ci-scope.mjs` | Keep `Static checks`/`Tests`. Selector skip/affected fail open; no workflow `paths`. |
+| Code checks | `workflows/ci.yml`, `scripts/select-ci-scope.mjs` | Keep `Static checks`/`Tests`. Selector skip/affected fail open; no workflow `paths`. Only main writes the pnpm store cache. |
 | Codex review | root `AGENTS.md` `## Code Review Rules`, `codex-review.md` | Report only P0/P1, security first; 👍 when the linked Issue is solved. |
 
 Do not duplicate a rule across these layers. Changes to required PR template
@@ -110,6 +110,15 @@ expiry are required reconciliation writes; scheduled and manual audits surface
 their failures and perform expiry.
 
 ## Other automation
+
+- `notify-desktop-nightly.yml` sends accepted main SHA notifications to the
+  designated release-PR maintenance workflow only. OSS pushes must not directly
+  authorize a desktop release: the receiving repository requires a merged release PR. It checks
+  out no source and receives no installer signing or storage credentials. Destination
+  configuration is operator-owned; its GitHub App token is scoped to one configured
+  repository with Actions write, and is revoked after the job. That permission can
+  control other Actions in the destination, so the App installation itself must be
+  limited to the intended repository. This does not publish the local-only desktop.
 
 - Issue Forms cover only components present in the public repository. Keep Bug
   and Feature title prefixes, issue types, and existing labels aligned; route

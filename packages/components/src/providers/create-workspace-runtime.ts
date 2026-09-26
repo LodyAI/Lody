@@ -1,3 +1,10 @@
+import { waitForScheduleWriteSync, withScheduleWrite } from './schedule-write-sync';
+import {
+  getScheduleRoomId,
+  scheduleDocSchema,
+  scheduleDocumentFromMirrorState,
+} from '@lody/shared';
+import type { ScheduleDocStore } from '@/atoms/runtime';
 import {
   createLocalWindowBootstrap,
   createSessionSnapshotLoader,
@@ -33,7 +40,6 @@ import {
   getSessionRoomId,
   getMachineFlockAgentConfigs,
   getMachineFlockDocId,
-  isMachineDocRoomId,
   isSessionDocRoomId,
   isLoroRepoDocDeleted,
   readSessionOperationTargets,
@@ -116,7 +122,7 @@ import { TargetRoutedMachineMonitor } from './target-routed-machine-monitor';
 import { createResilientRemoteCursorStore } from './resilient-remote-cursor-store';
 import { scheduleAfterStartupNavigationCooldown } from './startup-network-idle';
 import { logCodeCollabDebug } from '@/lib/code-collab-debug';
-import { listDocMetaEntries } from '@/lib/doc-meta-batch';
+import { readSessionAndMachineMetas, type ReadDocMetaCache } from '@/lib/doc-meta-batch';
 import {
   createEagerSyncHighWaterStore,
   type EagerSyncHighWaterCache,
@@ -205,6 +211,12 @@ type RuntimeDeps = {
    */
   getAuthorizedMachineIds?: () => ReadonlySet<MachineId> | null;
   eagerSyncSurface?: EagerSyncSurface;
+  /**
+   * The ready doc-meta projection for this runtime's repo. Startup readers use
+   * it instead of rescanning the whole meta namespace; absent or not ready, they
+   * scan.
+   */
+  readDocMetaCache?: ReadDocMetaCache;
 };
 
 type LoroStreamsTokenProvider = ReturnType<typeof createLoroStreamsTokenProvider>;
@@ -1718,11 +1730,13 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     requestSessionPreviewEndpointAcquire,
     requestSessionPreviewEndpointRelease,
     requestSessionPreviewRevoke,
+    requestSessionPreviewStatus,
     requestLocalProjectGitState,
     requestLocalProjectControl,
     requestMachineBugReport,
     requestMachinePiExtensions,
   } = createWorkspaceMachineRpcFacade({
+    getSessionToken: () => authToken,
     getMachineProtocolCapabilities: async (machineId) => {
       const entry = await repo.getDocMeta(getMachineRoomId(machineId));
       return (entry?.meta as Partial<MachineMeta> | undefined)?.protocolCapabilities;
@@ -2485,10 +2499,9 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
         listMachineIds: async () => {
           const authorizedMachineIds = deps.getAuthorizedMachineIds?.() ?? null;
           if (!authorizedMachineIds) return [];
-          const entries = await listDocMetaEntries(repo);
-          return entries
-            .filter((entry) => isMachineDocRoomId(entry.docId) && !isLoroRepoDocDeleted(entry))
-            .map((entry) => entry.docId.slice(MACHINE_DOC_PREFIX.length).trim() as MachineId)
+          const { machines } = await readSessionAndMachineMetas(repo, deps.readDocMetaCache);
+          return Object.keys(machines)
+            .map((roomId) => roomId.slice(MACHINE_DOC_PREFIX.length).trim() as MachineId)
             .filter((machineId) => machineId.length > 0 && authorizedMachineIds.has(machineId));
         },
         isMachineOnline: (machineId) =>
@@ -4051,6 +4064,57 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     unload: (sessionId) => repo.unloadDoc(getPreviewCommentRoomId(sessionId)),
   });
 
+  const scheduleStoreCache = createManagedStoreCache<string, ScheduleDocStore>({
+    releaseDelayMs: STORE_RELEASE_DELAY_MS,
+    unload: (id) => repo.unloadDoc(getScheduleRoomId(id)),
+    create: async (id) => {
+      const roomId = getScheduleRoomId(id);
+      const handle = await repo.openPersistedDoc(roomId);
+      const mirror = new Mirror({
+        doc: handle.doc as LoroDoc,
+        schema: scheduleDocSchema,
+        ignoreUnknownProperties: true,
+      });
+      let room: RepoRoomSubscription | null = null;
+      let disposed = false;
+      const syncAbort = new AbortController();
+      const firstSynced = transportReady.promise.then(async () => {
+        const joined = await waitForRoomToSync(() => handle.joinRoom(), {
+          roomId,
+          initialDelayMs: 0,
+          isCancelled: () => disposed,
+          firstSynced: (sub) => readinessBindingForDocRoom(sub, roomId).firstSyncedWithRemote,
+          onSubscription: (sub) => {
+            room = sub;
+          },
+        });
+        if (disposed) joined?.unsubscribe();
+        else room = joined ?? null;
+      });
+      void firstSynced.catch(() => {});
+      return {
+        roomId,
+        firstSynced,
+        getState: () => scheduleDocumentFromMirrorState(mirror.getState(), id),
+        subscribe: (listener) => mirror.subscribe(listener),
+        waitUntilSynced: async () => {
+          await firstSynced.catch(() => {});
+          if (room && !disposed)
+            await waitForScheduleWriteSync(
+              readinessBindingForDocRoom(room, roomId),
+              syncAbort.signal
+            );
+        },
+        dispose: () => {
+          disposed = true;
+          syncAbort.abort();
+          mirror.dispose();
+          room?.unsubscribe();
+        },
+      };
+    },
+  });
+
   // Dual-author: every client direct-authors its own durable writes and uploads
   // them over its own cloud connection; local targets additionally converge with
   // the CLI over the local plane (specs/local-first-two-plane.md 作者规则).
@@ -4069,6 +4133,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     await Promise.all([
       sessionStoreCache.releaseIdle(),
       previewVisualCommentStoreCache.releaseIdle(),
+      scheduleStoreCache.releaseIdle(),
     ]);
   };
 
@@ -4172,16 +4237,10 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     eagerSyncVisibleSessionIds?.has(sessionId) ?? false;
 
   const seedBackgroundSyncSnapshots = async (): Promise<void> => {
-    const entries = await listDocMetaEntries(repo);
-    for (const entry of entries) {
-      if (!isSessionDocRoomId(entry.docId) || isLoroRepoDocDeleted(entry)) {
-        continue;
-      }
-      const sessionId = sessionIdFromRoomId(entry.docId);
-      backgroundSyncSnapshots.set(
-        sessionId,
-        toSessionActivitySnapshot(sessionId, entry.meta as Record<string, unknown>)
-      );
+    const { sessions } = await readSessionAndMachineMetas(repo, deps.readDocMetaCache);
+    for (const [roomId, meta] of Object.entries(sessions)) {
+      const sessionId = sessionIdFromRoomId(roomId);
+      backgroundSyncSnapshots.set(sessionId, toSessionActivitySnapshot(sessionId, meta));
     }
   };
 
@@ -4412,6 +4471,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
 
       await sessionStoreCache.disposeAll();
       await previewVisualCommentStoreCache.disposeAll();
+      await scheduleStoreCache.disposeAll();
       let codeCollabFileIndexCacheDisposeError: unknown = null;
       try {
         await codeCollabFileIndexCache.dispose();
@@ -4563,6 +4623,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     },
     releaseSessionStore: sessionStoreCache.release,
     acquireSessionStore: sessionStoreCache.acquire,
+    peekSessionStore: sessionStoreCache.peek,
     releaseSessionStoreRef: sessionStoreCache.releaseRef,
     withPreviewVisualCommentStore: async <T>(
       sessionId: SessionId,
@@ -4578,6 +4639,13 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     releasePreviewVisualCommentStore: previewVisualCommentStoreCache.release,
     acquirePreviewVisualCommentStore: previewVisualCommentStoreCache.acquire,
     releasePreviewVisualCommentStoreRef: previewVisualCommentStoreCache.releaseRef,
+    withScheduleStore: <T>(
+      id: string,
+      fn: (store: ScheduleDocStore) => Promise<T> | T,
+      options?: { create?: boolean }
+    ): Promise<T> => withScheduleWrite(scheduleStoreCache, id, fn, options),
+    acquireScheduleStore: scheduleStoreCache.acquire,
+    releaseScheduleStoreRef: scheduleStoreCache.releaseRef,
     sendControl,
     waitForSessionCreateResponse,
     waitForSessionCancelResponse,
@@ -4617,6 +4685,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     requestSessionPreviewEndpointAcquire,
     requestSessionPreviewEndpointRelease,
     requestSessionPreviewRevoke,
+    requestSessionPreviewStatus,
     requestLocalProjectGitState,
     requestLocalProjectControl,
     requestMachineBugReport,

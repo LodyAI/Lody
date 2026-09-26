@@ -235,7 +235,9 @@ export interface CloudAttachmentUploadPort {
 }
 
 export interface CloudRemotePreviewPort {
-  gatewayBaseUrl: string;
+  verifyControl(
+    input: import('@lody/shared').VerifyPreviewControlInput
+  ): Promise<{ requesterUserId: string; expiresAt: number }>;
 }
 
 export interface RuntimeArtifactsPort {

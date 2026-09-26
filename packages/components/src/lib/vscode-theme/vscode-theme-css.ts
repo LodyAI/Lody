@@ -706,6 +706,8 @@ export const createLodyThemeCssVariables = (
     variables['--input-field'] = hexColorToHslChannel(inputFieldColor);
   }
 
+  applyReadingBrightness(theme, colorByCssVariable, variables);
+
   for (const alias of SYNTAX_ALIAS_SCOPES) {
     const color = findTokenForeground(theme, alias.scopes);
     if (color) {
@@ -741,6 +743,215 @@ const resolveInputFieldColor = (
   return hexColorLightness(inputColor) >= hexColorLightness(backgroundColor)
     ? inputColor
     : backgroundColor;
+};
+
+/**
+ * Text foregrounds that take the dark-theme brightness ceiling. Foregrounds on
+ * colored fills (`--primary-foreground`, `--destructive-foreground`,
+ * `--sidebar-primary-foreground`, `--highlight-foreground`,
+ * `--sidebar-highlight-foreground`) keep the theme's value: they need their
+ * contrast against a saturated button or badge, not against the canvas.
+ */
+const CEILED_FOREGROUND_VARIABLES = [
+  '--foreground',
+  '--card-foreground',
+  '--code-foreground',
+  '--input-foreground',
+  '--secondary-foreground',
+  '--button-secondary-foreground',
+  '--hover-foreground',
+  '--selection-foreground',
+  '--selection-inactive-foreground',
+  '--bottom-bar-foreground',
+  '--tab-hover-foreground',
+  '--tab-inactive-foreground',
+  '--sidebar-foreground',
+  '--sidebar-hover-foreground',
+  // Colored text (diff counts, modified files) keeps its hue under the ceiling.
+  '--code-added',
+  '--code-removed',
+  '--modified-file',
+] as const;
+
+/**
+ * Reading brightness. A theme whose foreground is (near) pure white on a
+ * near-black canvas halates in long reading and makes every surface equally
+ * loud. In dark themes every text foreground is held under one brightness
+ * ceiling — the luminance of text at `READING_CONTRAST_CAP.dark.reading`
+ * against the canvas — so menus, settings, buttons and panels share one level.
+ * Conversation prose (`--reading-foreground`) sits one step above it, and
+ * `--foreground-strong` (headings, bold) above that, still below pure white. Popover and accent foregrounds are set from
+ * the ceiled foreground: the stylesheet defaults for them are not themed.
+ * Light themes only cap long-form reading text; high-contrast themes are left
+ * as they are.
+ */
+const applyReadingBrightness = (
+  theme: LodyResolvedVSCodeTheme,
+  colorByCssVariable: Record<string, string>,
+  variables: Record<string, string>
+): void => {
+  const themeType = theme.type;
+  if (themeType !== 'dark' && themeType !== 'light') return;
+  const cap = READING_CONTRAST_CAP[themeType];
+  const foreground = colorByCssVariable['--foreground'];
+  const background = colorByCssVariable['--background'];
+  const set = (name: string, color: string | undefined) => {
+    if (color) variables[name] = hexColorToHslChannel(color);
+  };
+
+  set(
+    '--foreground-strong',
+    resolveContrastCappedColor(foreground, background, cap.strong) ?? foreground
+  );
+  // Conversation prose sits one step above the interface-text ceiling.
+  set('--reading-foreground', resolveContrastCappedColor(foreground, background, cap.prose));
+  set(
+    '--sidebar-row-foreground',
+    resolveContrastCappedColor(
+      colorByCssVariable['--sidebar-foreground'],
+      colorByCssVariable['--sidebar-background'],
+      cap.sidebarRow
+    )
+  );
+
+  if (themeType !== 'dark' || !background) return;
+  const ceiling = luminanceAtContrast(background, cap.reading);
+  for (const name of CEILED_FOREGROUND_VARIABLES) {
+    const color = colorByCssVariable[name];
+    if (!color) continue;
+    const ceiled = resolveLuminanceCappedColor(color, background, ceiling);
+    if (ceiled) {
+      colorByCssVariable[name] = ceiled;
+      set(name, ceiled);
+    }
+  }
+  set('--popover-foreground', colorByCssVariable['--foreground']);
+  set('--accent-foreground', colorByCssVariable['--foreground']);
+  // Menus and popovers are raised panels, the same surface as the composer
+  // and the info bar at the bottom (`dark:bg-input/90` over the canvas), not
+  // the canvas itself: themes such as Vesper set their widget background to
+  // the editor color, which left every dropdown sunk into the page.
+  const inputSurface = colorByCssVariable['--input'];
+  if (inputSurface) set('--popover', mixHexColors(inputSurface, background, 0.1));
+
+  // The selected conversation and the active tab read at the prose level:
+  // above the other sidebar text, never above the conversation itself. Their
+  // selection fill, not extra brightness, marks them.
+  const proseCeiling = luminanceAtContrast(background, cap.prose);
+  for (const name of SELECTED_FOREGROUND_VARIABLES) {
+    const color = colorByCssVariable[name];
+    const ceiled = color && resolveLuminanceCappedColor(color, background, proseCeiling);
+    if (ceiled) set(name, ceiled);
+  }
+
+  for (const [name, color] of Object.entries(READING_THEME_OVERRIDES[theme.id] ?? {})) {
+    set(name, color);
+  }
+};
+
+/** Foregrounds of the selected / active element, capped at the prose step. */
+const SELECTED_FOREGROUND_VARIABLES = [
+  '--sidebar-selection-foreground',
+  '--tab-active-foreground',
+] as const;
+
+/**
+ * Chosen reading colors for bundled themes whose look is tuned by hand rather
+ * than derived: Vesper's sidebar titles and selected/active text, picked on
+ * its deep-sea palette (vesper-deep-sea-palette.ts).
+ */
+const READING_THEME_OVERRIDES: Record<string, Partial<Record<string, string>>> = {
+  vesper: {
+    // Prose at HSL lightness 90%, near-neutral (14.6:1 on the graphite
+    // canvas); the selected conversation and the active tab use the same
+    // color. Sidebar titles at lightness 75% (9.9:1). The selected row sits on
+    // a 12% jellyfish-cyan tint, one of the few places the brand blue shows.
+    '--reading-foreground': '#E4E5E7',
+    '--sidebar-row-foreground': '#BCBEC2',
+    '--sidebar-selection-foreground': '#E4E5E7',
+    '--tab-active-foreground': '#E4E5E7',
+    '--sidebar-selection': '#252E35',
+  },
+};
+
+/** The luminance of a lighter color that has `contrast` against `background`. */
+const luminanceAtContrast = (background: string, contrast: number): number =>
+  contrast * (relativeLuminance(background) + 0.05) - 0.05;
+
+/** `color` moved toward `background` until its luminance is at most `ceiling`. */
+const resolveLuminanceCappedColor = (
+  color: string,
+  background: string,
+  ceiling: number
+): string | undefined => {
+  if (relativeLuminance(color) <= ceiling) return undefined;
+  let low = 0;
+  let high = 1;
+  for (let step = 0; step < 16; step += 1) {
+    const middle = (low + high) / 2;
+    if (relativeLuminance(mixHexColors(color, background, middle)) > ceiling) {
+      low = middle;
+    } else {
+      high = middle;
+    }
+  }
+  return mixHexColors(color, background, high);
+};
+
+/**
+ * Contrast ceilings for reading surfaces. Body text far above WCAG AAA (7:1)
+ * gains no legibility, but a pure-white glyph on a near-black canvas halates:
+ * strokes bloom and dense text (CJK especially) blurs, most for readers with
+ * astigmatism. Vesper's #FFFFFF on #101010 is 19:1. In dark themes interface
+ * text is capped at 13:1 (about HSL lightness 84% on the warm Vesper canvas),
+ * conversation prose, the selected row and the active tab at 15.9:1 (#EFEDEB,
+ * lightness 93%), headings at 17.3:1, and unselected sidebar text at 10.6:1 so
+ * the sidebar always sits below the reading column. Light themes are capped
+ * higher, where glare is milder.
+ */
+const READING_CONTRAST_CAP = {
+  dark: { strong: 16.3, prose: 14.6, reading: 13, sidebarRow: 9.9 },
+  light: { strong: 21, prose: 16, reading: 16, sidebarRow: 10 },
+} as const;
+
+/**
+ * The foreground moved toward the background until its contrast is at most
+ * `cap`, or undefined when it already is (the theme's color is used as is).
+ */
+const resolveContrastCappedColor = (
+  foreground: string | undefined,
+  background: string | undefined,
+  cap: number
+): string | undefined => {
+  if (!foreground || !background) return undefined;
+  if (contrastRatio(foreground, background) <= cap) return undefined;
+  // Contrast falls monotonically as the foreground moves toward the background.
+  let low = 0;
+  let high = 1;
+  for (let step = 0; step < 16; step += 1) {
+    const middle = (low + high) / 2;
+    if (contrastRatio(mixHexColors(foreground, background, middle), background) > cap) {
+      low = middle;
+    } else {
+      high = middle;
+    }
+  }
+  return mixHexColors(foreground, background, high);
+};
+
+const relativeLuminance = (color: string): number => {
+  const { r, g, b } = hexColorToRgb(color);
+  const linear = (channel: number) => {
+    const value = channel / 255;
+    return value <= 0.03928 ? value / 12.92 : Math.pow((value + 0.055) / 1.055, 2.4);
+  };
+  return 0.2126 * linear(r) + 0.7152 * linear(g) + 0.0722 * linear(b);
+};
+
+const contrastRatio = (first: string, second: string): number => {
+  const a = relativeLuminance(first);
+  const b = relativeLuminance(second);
+  return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
 };
 
 const hexColorLightness = (color: string): number => {

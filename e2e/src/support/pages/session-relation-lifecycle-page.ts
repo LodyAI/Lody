@@ -10,6 +10,7 @@ import {
 } from '../fixtures/session-relation-lifecycle-fixture.js';
 import { isProcessAlive } from '../fixtures/session-fork-fixture.js';
 import type { AdditionalWorktreeFork, SessionForkResources } from './session-fork-page.js';
+import { openSidebarArchive } from './sidebar-footer.js';
 
 export type SessionRelationLifecycleResources = {
   rootSessionId: string;
@@ -112,7 +113,7 @@ export class SessionRelationLifecyclePage {
       await this.openSessionRouteById(sessionId);
       const relation = this.page.locator('[data-session-relation-card="opened-by"]');
       await expect(relation).toContainText('Deleted session', { timeout: 30_000 });
-      const back = relation.getByRole('button', { name: /^(Back to session|返回会话)$/u });
+      const back = relation.getByRole('button', { name: /^(Back to session|返回创建对话): /u });
       await expect(back).toBeDisabled();
       await expect(this.page).toHaveURL(this.sessionRoutePatternFor(sessionId));
     }
@@ -238,7 +239,7 @@ export class SessionRelationLifecyclePage {
   }
 
   private async openArchive(): Promise<void> {
-    await this.page.getByRole('button', { name: /^(Archive|归档)$/u, exact: true }).click();
+    await openSidebarArchive(this.page);
     await expect(this.page).toHaveURL(/#\/local\/archive(?:\?.*)?$/u);
   }
 

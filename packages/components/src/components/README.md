@@ -35,6 +35,11 @@ and [display preference](../../../../.agents/notes/implemented/feature/2026-09-2
 
 ## Entry points and layout
 
+- Sidebar footer: Help (`?`), Archive, Settings, in that order. Help retains the
+  documentation, GitHub repository, community, GitHub Issues feedback, and bug-report menu; Archive is a direct
+  button and becomes the return action while open. See the
+  [footer Spec](../../../../specs/sidebar-footer.md).
+
 - [Zen layout](../../../../specs/zen-layout.md): `AppCommands` dispatches the shared
   layout action; the mounted desktop Session publishes its right-panel controls.
 
@@ -58,6 +63,12 @@ and [display preference](../../../../.agents/notes/implemented/feature/2026-09-2
   layout (`detectAppDeviceClass()` is `tablet`, viewport >= 768) with
   `viewport-fit=cover`, which is why desktop top/side padding also matters there.
   The composer owns its bottom edge; a global bottom inset would double-pad it.
+- Sidebar toggle: `WebWorkspaceLayout` retains the full-width sidebar, moves it
+  with a transform, and changes content width once rather than on every animation
+  frame. `SidebarVisibilityGate` pauses sidebar-only sources while hidden. Compact
+  presentation and settings navigation can still remount it: `LoroSidebar` saves
+  its viewport offset by workspace in `atoms/sidebar-state.ts` and restores it
+  before paint. [Decision](../../../../.agents/notes/implemented/bug-fix/2026-09-26-sidebar-toggle-hitch.md).
 
 ## Conversation access
 

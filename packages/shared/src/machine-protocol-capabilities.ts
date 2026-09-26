@@ -13,8 +13,11 @@ export const MACHINE_PROTOCOL_CAPABILITIES = {
   acpAuthenticationInteractions: 'acpAuthenticationInteractions',
   localProjectRemoval: 'localProjectRemoval',
   providerSetup: 'providerSetup',
+  schedules: 'schedules',
+  preparedSessionInput: 'preparedSessionInput',
   localFileResources: 'localFileResources',
   acpProtocolAuthentication: 'acpProtocolAuthentication',
+  previewControl: 'previewControl',
   piExtensions: 'piExtensions',
 } as const;
 
@@ -22,8 +25,11 @@ export const ACP_AUTHENTICATION_INTERACTIONS_PROTOCOL_VERSION = 2;
 export const SUBAGENT_CANCELLATION_PROTOCOL_VERSION = 1;
 export const LOCAL_PROJECT_REMOVAL_PROTOCOL_VERSION = 1;
 export const PROVIDER_SETUP_PROTOCOL_VERSION = 1;
+export const SCHEDULES_PROTOCOL_VERSION = 1;
+export const PREPARED_SESSION_INPUT_PROTOCOL_VERSION = 1;
 export const LOCAL_FILE_RESOURCES_PROTOCOL_VERSION = 1;
 export const ACP_PROTOCOL_AUTHENTICATION_VERSION = 2;
+export const PREVIEW_CONTROL_PROTOCOL_VERSION = 1;
 export const PI_EXTENSIONS_PROTOCOL_VERSION = 1;
 
 type MachineProtocolCapabilityCarrier = {
@@ -69,9 +75,23 @@ export const CURRENT_MACHINE_PROTOCOL_CAPABILITIES: MachineProtocolCapabilities 
     ACP_AUTHENTICATION_INTERACTIONS_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.localProjectRemoval]: LOCAL_PROJECT_REMOVAL_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.providerSetup]: PROVIDER_SETUP_PROTOCOL_VERSION,
+  [MACHINE_PROTOCOL_CAPABILITIES.schedules]: SCHEDULES_PROTOCOL_VERSION,
+  [MACHINE_PROTOCOL_CAPABILITIES.preparedSessionInput]: PREPARED_SESSION_INPUT_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.localFileResources]: LOCAL_FILE_RESOURCES_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.acpProtocolAuthentication]: ACP_PROTOCOL_AUTHENTICATION_VERSION,
+  [MACHINE_PROTOCOL_CAPABILITIES.previewControl]: PREVIEW_CONTROL_PROTOCOL_VERSION,
 };
+
+/** Whether the daemon supports the dedicated Quick Tunnel control handshake. */
+export function machineSupportsPreviewControlProtocol(
+  machine: MachineProtocolCapabilityCarrier | null | undefined
+): boolean {
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.previewControl,
+    PREVIEW_CONTROL_PROTOCOL_VERSION
+  );
+}
 
 /** Whether the target daemon supports interactive Custom/Registry ACP authentication. */
 export function machineSupportsAcpAuthenticationInteractionsProtocol(
@@ -139,5 +159,27 @@ export function machineSupportsPiExtensions(
     machine,
     MACHINE_PROTOCOL_CAPABILITIES.piExtensions,
     PI_EXTENSIONS_PROTOCOL_VERSION
+  );
+}
+
+/** Whether the target daemon owns and runs machine-scheduled automation. */
+export function machineSupportsSchedulesProtocol(
+  machine: MachineProtocolCapabilityCarrier | null | undefined
+): boolean {
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.schedules,
+    SCHEDULES_PROTOCOL_VERSION
+  );
+}
+
+/** Whether the target daemon accepts inert `prepared` user turns. */
+export function machineSupportsPreparedSessionInputProtocol(
+  machine: MachineProtocolCapabilityCarrier | null | undefined
+): boolean {
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.preparedSessionInput,
+    PREPARED_SESSION_INPUT_PROTOCOL_VERSION
   );
 }

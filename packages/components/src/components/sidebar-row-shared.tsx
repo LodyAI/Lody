@@ -16,12 +16,15 @@ import {
   X,
   type LucideIcon,
 } from 'lucide-react';
-import { Spinner } from '@/ui/spinner';
+import { useWorkingHandOver, WorkingStatusMark } from '@/ui/working-status-mark';
 import type { PrStatus, SessionPullRequestCiState } from '@lody/shared';
 import { cn } from '@/lib/utils';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
-import { ContextMenuItem } from '@/ui/context-menu';
-import { Skeleton } from '@/ui/skeleton';
+import { Tooltip } from '@lody/ui/tooltip';
+import * as stylex from '@stylexjs/stylex';
+import { Badge } from '@lody/ui/badge';
+import { mergeableBadgeTheme } from './sidebar-mergeable-badge.stylex';
+import { ContextMenu } from '@lody/ui/context-menu';
+import { Skeleton } from '@lody/ui/skeleton';
 import { PR_STATUS_META } from '@/components/sessions/pull-request-badge';
 import { SidebarConfirmArchiveButton } from '@/components/sidebar-confirm-archive-button';
 import { CachedAvatarImg } from '@/components/cached-avatar-img';
@@ -134,7 +137,7 @@ function MaskedPrCiIcon({
  * its ├/└ connectors and the nesting silently disappeared exactly on the rows a
  * user watches most.
  */
-function SessionRowStatusIndicator({
+export function SessionRowStatusIndicator({
   isWaitingPermission,
   isWorking,
   hasUnreadMessages,
@@ -145,12 +148,18 @@ function SessionRowStatusIndicator({
 }) {
   let icon: ReactNode = null;
 
-  if (isWaitingPermission) {
+  if (isWaitingPermission === true) {
     icon = <Hand className="h-3 w-3 text-status-warning" />;
-  } else if (isWorking) {
-    icon = <Spinner data-session-working-spinner="" className="h-3 w-3 shrink-0 text-primary" />;
-  } else if (hasUnreadMessages) {
-    icon = <span className="h-2 w-2 rounded-full bg-primary" />;
+  } else if (isWorking === true || hasUnreadMessages === true) {
+    // Working grid, the working → unread "done" transition, and the unread dot
+    // are one component so it stays mounted across that change and can see it.
+    icon = (
+      <WorkingStatusMark
+        working={isWorking === true}
+        unread={hasUnreadMessages === true}
+        className="text-primary"
+      />
+    );
   }
 
   if (!icon) return null;
@@ -180,20 +189,30 @@ function hasSessionRowStatus({
 
 /**
  * ③ The PR status icon shown in the final slot (colored, non-interactive —
- * opening the PR is handled by the row context menu + info card). Sized to match
- * the Archive button that replaces it on hover.
+ * opening the PR is handled by the row context menu + info card). Sidebar rows
+ * pass `compact` so the mark stays below the title's weight; the info bar and
+ * mobile row keep the full 14px size.
  *
  * The mobile conversation row (`mobile/mobile-project-screen.tsx`) renders this
  * same component at the end of its own metric cluster, so PR status tone and the
  * CI verdict badge read identically on both platforms.
  */
+/** A filter, not opacity: the mark keeps its full lightness, only its hue is muted. */
+const SIDEBAR_PR_ICON_COMPACT_CLASS = 'saturate-[0.55]';
+
 export function SessionPrIcon({
   prStatus,
   prCiState,
+  compact = false,
   className,
 }: {
   prStatus: PrStatus;
   prCiState?: SessionPullRequestCiState | null;
+  /**
+   * Sidebar rows: a 12px mark (14px with a CI verdict) at reduced saturation, so
+   * the GitHub status hues stay readable without outshining the titles.
+   */
+  compact?: boolean;
   className?: string;
 }) {
   const meta = PR_STATUS_META[prStatus] ?? PR_STATUS_META.open;
@@ -224,32 +243,50 @@ export function SessionPrIcon({
         VerdictIcon={VerdictIcon}
         baseToneClassName={meta.iconColorClassName}
         verdict={verdict}
-        className={cn(prStatus === 'merged' && 'translate-x-px', className)}
+        className={cn(
+          compact && SIDEBAR_PR_ICON_COMPACT_CLASS,
+          compact && 'h-3.5 w-3.5',
+          prStatus === 'merged' && 'translate-x-px',
+          className
+        )}
       />
     );
   }
   return (
     <BaseIcon
-      className={cn('h-3.5 w-3.5 shrink-0', meta.iconColorClassName, className)}
+      className={cn(
+        compact ? ['h-3 w-3', SIDEBAR_PR_ICON_COMPACT_CLASS] : 'h-3.5 w-3.5',
+        'shrink-0',
+        meta.iconColorClassName,
+        className
+      )}
       strokeWidth={2.25}
       aria-hidden="true"
     />
   );
 }
 
+const styles = stylex.create({
+  contents: { display: 'contents' },
+});
+
 /**
  * Passive readiness marker for an inactive session row. It intentionally owns
  * the former diff-stat slot: once a PR is ready, the next useful sidebar fact
- * is that it can be merged, not how many lines it changes.
+ * is that it can be merged, not how many lines it changes. It is the one
+ * status in the row meant to be noticed: a success Badge whose word is the
+ * success colour itself (`sidebar-mergeable-badge.stylex.ts`), while the PR
+ * icons beside it stay desaturated.
  */
 export function SessionMergeablePill() {
   const { t } = useTranslation();
   return (
-    <span
-      data-session-mergeable-pill=""
-      className="inline-flex h-5 shrink-0 items-center rounded-full border border-status-success/45 bg-status-success/[0.06] px-1.5 text-[10px] font-medium leading-none tracking-[0.01em] text-status-success"
-    >
-      {t('sessions.pr.mergeable', 'Mergeable')}
+    // The theme sits on a layout-less wrapper: a Badge reads its tokens from
+    // whatever holds it.
+    <span {...stylex.props(styles.contents, mergeableBadgeTheme)}>
+      <Badge tone="success" data-session-mergeable-pill="">
+        {t('sessions.pr.mergeable', 'Mergeable')}
+      </Badge>
     </span>
   );
 }
@@ -267,13 +304,7 @@ export function SessionRowAuthorAvatar({
   author?: { name?: string | null; image?: string | null } | null;
 }) {
   if (!author) return null;
-  return (
-    <UserAvatar
-      user={author}
-      className="h-[18px] w-[18px] shrink-0"
-      fallbackClassName="text-[9px] font-medium"
-    />
-  );
+  return <UserAvatar user={author} size="small" className="shrink-0" />;
 }
 
 /**
@@ -296,14 +327,16 @@ export function SessionRowWorktreeIndicator({ isWorktree }: { isWorktree?: boole
   if (!isWorktree) return null;
   const label = t('sessions.infoCard.worktree', 'Worktree');
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <span className="inline-flex shrink-0 items-center text-sidebar-foreground-muted/45">
-          <WorktreeIcon className="h-3.5 w-3.5" aria-label={label} />
-        </span>
-      </TooltipTrigger>
-      <TooltipContent>{label}</TooltipContent>
-    </Tooltip>
+    <Tooltip.Root>
+      <Tooltip.Trigger
+        render={
+          <span className="inline-flex shrink-0 items-center text-sidebar-foreground-muted/45">
+            <WorktreeIcon className="h-3 w-3" aria-label={label} />
+          </span>
+        }
+      />
+      <Tooltip.Content>{label}</Tooltip.Content>
+    </Tooltip.Root>
   );
 }
 
@@ -329,22 +362,36 @@ export function SessionRowOpenedByMenuItems({
   return (
     <>
       {goToOpener ? (
-        <ContextMenuItem onSelect={goToOpener}>
-          <CornerLeftUp />
+        <ContextMenu.Item icon={<CornerLeftUp />} onClick={goToOpener}>
           {goToOpenerLabel}
-        </ContextMenuItem>
+        </ContextMenu.Item>
       ) : null}
       {opener ? (
-        <ContextMenuItem onSelect={opener.onToggle}>
-          <ChevronDown
-            className={cn('transition-transform', opener.expanded ? 'rotate-0' : '-rotate-90')}
-          />
+        <ContextMenu.Item
+          icon={
+            <ChevronDown
+              className={cn('transition-transform', opener.expanded ? 'rotate-0' : '-rotate-90')}
+            />
+          }
+          onClick={opener.onToggle}
+        >
           {opener.label}
-        </ContextMenuItem>
+        </ContextMenu.Item>
       ) : null}
     </>
   );
 }
+
+/**
+ * The container of a sidebar session-row list. A workspace sidebar can mount
+ * hundreds of rows (244 in one "Chats" group, 94% of the page's DOM) while a
+ * dozen are visible. `content-visibility: auto` lets the browser skip style,
+ * layout and paint for rows scrolled out of the sidebar: a full-app restyle
+ * measured 25ms before and 8.6ms after. Rows must keep drawing inside their own
+ * box (focus rings are `ring-inset`), because the property also applies paint
+ * containment. The rule lives in `tailwind/index.css` (`sidebar-row-list`).
+ */
+export const SIDEBAR_ROW_LIST_CLASS = 'flex flex-col gap-px sidebar-row-list';
 
 /**
  * Marks one flat-list row with opened-by tree depth. `gutter={false}` leaves
@@ -393,20 +440,23 @@ export function SidebarRowArchiveButton({
   revealClassName?: string;
 }) {
   return (
-    <Tooltip delayDuration={500}>
-      <TooltipTrigger asChild>
-        <SidebarConfirmArchiveButton
-          label={label}
-          confirmLabel={confirmLabel}
-          className={cn(
-            'absolute right-0 top-0 z-20 opacity-0 pointer-events-none',
-            revealClassName
-          )}
-          onConfirm={onConfirm}
-        />
-      </TooltipTrigger>
-      <TooltipContent side="top">{label}</TooltipContent>
-    </Tooltip>
+    <Tooltip.Root>
+      <Tooltip.Trigger
+        delay={500}
+        render={
+          <SidebarConfirmArchiveButton
+            label={label}
+            confirmLabel={confirmLabel}
+            className={cn(
+              'absolute right-0 top-0 z-20 opacity-0 pointer-events-none',
+              revealClassName
+            )}
+            onConfirm={onConfirm}
+          />
+        }
+      />
+      <Tooltip.Content side="top">{label}</Tooltip.Content>
+    </Tooltip.Root>
   );
 }
 
@@ -440,14 +490,16 @@ export function SidebarRowEndSlot({
   archive?: ReactNode;
   fadeClassName?: string;
 }) {
+  // The end slot outlives the status mark, so the hand-over hold lives here.
+  const drawWorking = useWorkingHandOver(isWorking === true, hasUnreadMessages === true);
   const restContent = hasSessionRowStatus({
     isWaitingPermission,
-    isWorking,
+    isWorking: drawWorking,
     hasUnreadMessages,
   }) ? (
     <SessionRowStatusIndicator
       isWaitingPermission={isWaitingPermission}
-      isWorking={isWorking}
+      isWorking={drawWorking}
       hasUnreadMessages={hasUnreadMessages}
     />
   ) : (
@@ -521,13 +573,37 @@ export function GitHubOwnerIcon({
 
 // Shared section-header metrics. Every sidebar organize mode (Workspace local
 // project / GitHub Worktrees sections and the flat Updated list) uses these so
-// section labels read identically (0.9em medium, muted — full muted token, not a
-// further /55 fade: that made "Pinned"/"Chats" and the filter icon nearly
-// illegible on light sidebars).
+// section labels read identically (0.9em medium, in the sidebar row color — not
+// brighter than the session titles under them, and not a further /55 fade: that
+// made "Pinned"/"Chats" and the filter icon nearly illegible on light sidebars).
+/**
+ * Top-level group label (a machine, GitHub Worktrees, Chats). Projects and
+ * repos sit flush below it, so the header is told apart by type alone: about
+ * 11.5px bold, faint, a 26px row with no hover fill, above 14px regular rows
+ * with a hover fill. Every group label uses exactly this class — one size
+ * (from the interface font size, not the parent's `em`), one color — so the
+ * groups read as one consistent layer.
+ */
+export const SIDEBAR_GROUP_LABEL_COLOR_CLASS = 'text-sidebar-foreground-muted/70';
+export const SIDEBAR_GROUP_LABEL_CLASS = cn(
+  'text-[length:calc(var(--ui-font-size,14px)*0.82)] font-bold tracking-[0.01em]',
+  SIDEBAR_GROUP_LABEL_COLOR_CLASS
+);
+
+/**
+ * Sticky wrapper for a top-level group header (a machine, GitHub Worktrees,
+ * Chats): rows scroll beneath it, so it must paint the sidebar surface.
+ * `bg-sidebar` resolves to `--sidebar-background`; the look-alike
+ * `bg-sidebar-background` is not a generated utility and leaves the header
+ * transparent, letting a selected row's frame bleed through the group label.
+ */
+export const SIDEBAR_STICKY_GROUP_HEADER_CLASS = 'sticky top-0 z-10 bg-sidebar';
+
 const SECTION_HEADER_BUTTON_CLASS = cn(
-  'relative flex h-7 min-w-0 flex-1 select-none items-center gap-1.5 rounded-md px-2 text-left',
+  'relative flex h-[26px] min-w-0 flex-1 select-none items-center gap-1.5 rounded-md px-2 text-left',
   'border border-transparent bg-transparent',
-  'text-[0.9em] font-medium text-sidebar-foreground-muted transition-colors',
+  SIDEBAR_GROUP_LABEL_CLASS,
+  'transition-colors',
   // The outer row paints the focus ring; suppress the global :focus-visible
   // box-shadow here so the ring wraps the whole row (label + action).
   'focus-visible:shadow-none'
@@ -569,7 +645,7 @@ export function SidebarSectionHeader({
     if (canToggle) onToggleCollapsed?.();
   };
   return (
-    <div className="group flex h-7 items-center gap-1 rounded-md has-[[role=button]:focus-visible]:shadow-[inset_0_0_0_1px_hsl(var(--primary)/0.5)]">
+    <div className="group flex h-[26px] items-center gap-1 rounded-md has-[[role=button]:focus-visible]:shadow-[inset_0_0_0_1px_hsl(var(--primary)/0.5)]">
       <div
         role={canToggle ? 'button' : undefined}
         tabIndex={canToggle ? 0 : -1}

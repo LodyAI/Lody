@@ -80,6 +80,7 @@ describes the shared parsing and persistence boundary.
 | `session-file-quick-open.tsx`                                                                                                             | Quick open over the file index                           |
 | `components/`                                                                                                                             | File tree ([scope AGENTS.md](components/AGENTS.md))      |
 | `session-browser-panel.tsx`, `session-browser-toolbar.tsx`, `session-browser-resume-state.ts`                                             | Session Browser panel, address bar, and resume state     |
+| `session-browser-panel-view.tsx`, `preview-connection-status.tsx` | Shared Browser presentation and connection/recovery UI; used by production and Storybook |
 | `public-browser-surface.tsx`                                                                                                              | Public engine host (Electron `WebContentsView`)          |
 | `managed-preview-surface.tsx`, `managed-preview-frame-cache.ts`                                                                           | Managed Preview host and its LRU frame cache             |
 | `static-html-preview-document.ts`, `session-html-attachment-action.ts`                                                                    | Static `srcdoc` document policy for complete HTML text   |

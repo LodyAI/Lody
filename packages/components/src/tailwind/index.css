@@ -1,3 +1,4 @@
+@layer theme, base, stylex, components, utilities;
 @import './fonts.css';
 @import 'katex/dist/katex.min.css';
 @import 'tw-animate-css';
@@ -6,9 +7,23 @@
 
 @config "../../tailwind.config.js";
 @source "../**/*.{ts,tsx}";
-@source "../../node_modules/konsta/react";
-@source "../../node_modules/konsta/shared";
-@source "../../node_modules/konsta/styles";
+/* Konsta is imported for its theme, safe-area utilities and the `safe-areas`
+   hook only; no Konsta component is rendered. Do NOT scan Konsta's sources:
+   that generates utilities such as `last-child-hairline-b-none`, whose
+   unanchored `:last-child … ::after` selectors make every portal open/close
+   restyle the whole app (~25ms per popover on a large workspace). */
+
+/* Sidebar session-row lists: skip style, layout and paint for rows scrolled out
+   of view. `auto` remembers each row's last rendered height; 50px is only the
+   estimate for rows never on screen (two-line repo rows are 54px, child and
+   chat rows 30-36px), kept close so the scrollbar barely moves as rows render.
+   See SIDEBAR_ROW_LIST_CLASS. */
+@utility sidebar-row-list {
+  & > * {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 50px;
+  }
+}
 
 @custom-variant dark (&:where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *)));
 
@@ -98,11 +113,34 @@ pre,
 }
 
 @layer utilities {
-  .text-markdown-link {
-    color: hsl(212 62% 40%);
+  /* Links are jellyfish cyan (the brand accent, #7CC4E8 in dark themes).
+     Markdown anchors take it from the `.markdown-renderer a` rule: a
+     hand-written class has no `[&_a]:` variant in Tailwind v4, so the
+     renderer's `[&_a]:text-markdown-link` never applied and links inherited
+     the prose color. */
+  .text-markdown-link,
+  .markdown-renderer a {
+    color: hsl(200 72% 34%);
   }
-  .dark .text-markdown-link {
-    color: hsl(211 56% 72%);
+  .dark .text-markdown-link,
+  .dark .markdown-renderer a {
+    color: hsl(200 69% 70%);
+  }
+  /* A link rendered as a reference label (GitHub PR / issue): a link-blue
+     tinted chip (no border) instead of the prose underline, so it reads as
+     clickable at a glance. The hue is the prose link's (`.text-markdown-link`). Outranks the
+     renderer's `[&_a]:` link variants in this same layer. */
+  .markdown-renderer a.markdown-reference-chip {
+    --reference-chip-hue: 200 72% 34%;
+    color: hsl(var(--reference-chip-hue));
+    background-color: hsl(var(--reference-chip-hue) / 0.12);
+    text-decoration: none;
+  }
+  .markdown-renderer a.markdown-reference-chip:hover {
+    background-color: hsl(var(--reference-chip-hue) / 0.18);
+  }
+  .dark .markdown-renderer a.markdown-reference-chip {
+    --reference-chip-hue: 200 69% 70%;
   }
   .text-pr-merged {
     color: hsl(var(--github-merged));
@@ -143,12 +181,6 @@ pre,
 }
 
 @layer components {
-  .markdown-renderer > div {
-    /* Streamdown only exposes block/circle carets. Keep chat output cursor-free
-       even if upstream changes the default or a caller accidentally enables it. */
-    --streamdown-caret: '' !important;
-  }
-
   /* Agent prose sits 4px inside the rail so it does not read as proud of
      bordered cards (tables, fenced code). Nested copy in those surfaces stay flush. */
   .markdown-renderer :is(p, h1, h2, h3, h4, h5, h6) {
@@ -197,9 +229,6 @@ pre,
     margin-block: 0.875rem !important;
     overflow: hidden;
     gap: 0 !important;
-    /* Streamdown ships `bg-sidebar border-border rounded-xl p-2` utilities on
-       this element. Tailwind's utilities layer beats our components layer, so
-       these must be `!important` to pin the block to our --code-* tokens. */
     border: none !important;
     border-radius: 0.5rem !important;
     background: var(--markdown-code-block-bg) !important;
@@ -270,8 +299,6 @@ pre,
   }
 
   .markdown-renderer [data-streamdown='code-block-actions'] button {
-    /* Streamdown's button is `display:block` with an inline <svg>, which sits
-       off-center. Make it a centered flex box. */
     display: inline-flex;
     width: 1.5rem;
     height: 1.5rem;
@@ -304,9 +331,6 @@ pre,
 
   .markdown-renderer [data-streamdown='code-block-body'] {
     overflow-x: auto;
-    /* Streamdown ships `bg-background border border-border rounded-md p-4` on
-       the body — a second surface inside our container. Flatten it with
-       `!important` so the container is the only visible surface. */
     border: 0 !important;
     border-radius: 0 !important;
     background: transparent !important;
@@ -336,7 +360,7 @@ pre,
   }
 
   /* A `diff` fence is often an explanatory, headerless snippet rather than a
-     parseable patch. Its custom Streamdown renderer marks rows directly so the
+     parseable patch. Its renderer marks rows directly so the
      semantic add/remove treatment works for both forms and while streaming. */
   .markdown-renderer [data-markdown-diff-block='true'] {
     --markdown-diff-addition-bg: color-mix(
@@ -409,24 +433,6 @@ pre,
     color: var(--markdown-code-block-foreground);
   }
 
-  /* Nested Streamdown highlighter: chrome lives on the outer block. */
-  .markdown-renderer .lody-code-highlight [data-streamdown='code-block'] {
-    margin: 0 !important;
-    overflow: visible;
-    border: 0 !important;
-    border-radius: 0 !important;
-    background: transparent !important;
-  }
-
-  .markdown-renderer .lody-code-highlight [data-streamdown='code-block-header'],
-  .markdown-renderer .lody-code-highlight [data-streamdown='code-block-actions'],
-  .markdown-renderer
-    .lody-code-highlight
-    [data-streamdown='code-block']
-    > div:not([data-streamdown]):has(> [data-streamdown='code-block-actions']) {
-    display: none !important;
-  }
-
   .markdown-renderer [data-streamdown='mermaid-block'] {
     --markdown-mermaid-bg: hsl(var(--muted) / 0.32);
     --markdown-mermaid-border: hsl(var(--border));
@@ -448,27 +454,16 @@ pre,
     color: var(--markdown-mermaid-foreground);
   }
 
-  .markdown-renderer [data-streamdown='mermaid-block'] > div:first-child:not([data-streamdown]) {
-    display: none;
-  }
-
-  .markdown-renderer
-    [data-streamdown='mermaid-block']
-    > div:not([data-streamdown]):has(> [data-streamdown='mermaid-block-actions']) {
-    position: absolute !important;
+  .markdown-renderer [data-streamdown='mermaid-block-actions'] {
+    position: absolute;
     inset-block-start: 0.375rem;
     inset-inline-end: 0.375rem;
     z-index: 2;
-    height: auto !important;
-    min-height: 0 !important;
-    margin: 0 !important;
-    padding: 0 !important;
-    pointer-events: none;
-  }
-
-  .markdown-renderer [data-streamdown='mermaid-block-actions'] {
+    display: flex;
+    align-items: center;
     gap: 0.125rem;
-    border-color: var(--markdown-mermaid-control-border);
+    padding: 0.125rem;
+    border: 1px solid var(--markdown-mermaid-control-border);
     border-radius: 0.3125rem;
     background: var(--markdown-mermaid-control-bg);
     color: var(--markdown-mermaid-muted);
@@ -499,22 +494,17 @@ pre,
   }
 
   .markdown-renderer [data-streamdown='mermaid-block-actions'] button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     border-radius: 0.25rem;
     padding: 0.25rem;
+    cursor: pointer;
   }
 
   .markdown-renderer [data-streamdown='mermaid-block-actions'] button:hover {
     background: hsl(var(--muted) / 0.72);
     color: var(--markdown-mermaid-foreground);
-  }
-
-  .markdown-renderer
-    [data-streamdown='mermaid-block']
-    > div:not([data-streamdown]):has(> [data-streamdown='mermaid']) {
-    overflow: visible;
-    border: 0 !important;
-    border-radius: 0 !important;
-    background: transparent !important;
   }
 
   .markdown-renderer [data-streamdown='mermaid'] {
@@ -532,9 +522,8 @@ pre,
     overflow-y: visible !important;
     overscroll-behavior-x: contain;
     padding: 1rem;
-    /* Overrides Streamdown's own grab cursor: an inactive preview does not pan,
-       it activates on click (`use-mermaid-diagram-canvas.tsx` tags it
-       `role="button"` once the diagram renders). */
+    /* An inactive preview does not pan, it activates on click
+       (`use-mermaid-diagram-canvas.tsx` tags it `role="button"`). */
     cursor: zoom-in !important;
     scrollbar-gutter: stable;
     scrollbar-width: thin;
@@ -579,20 +568,12 @@ pre,
     background-color: hsl(var(--scrollbar-thumb-hover) / 0.65);
   }
 
-  .markdown-renderer [data-streamdown='mermaid'] > div > div:last-child {
+  .markdown-renderer [data-streamdown='mermaid-svg'] {
     min-width: 100%;
-    align-items: flex-start;
-    justify-content: flex-start !important;
     padding-block: 0.125rem;
   }
 
-  .markdown-renderer [data-streamdown='mermaid'] [aria-label='Mermaid chart'] {
-    display: block !important;
-    width: 100%;
-    min-width: 100%;
-  }
-
-  .markdown-renderer [data-streamdown='mermaid'] [aria-label='Mermaid chart'] svg {
+  .markdown-renderer [data-streamdown='mermaid-svg'] svg {
     display: block;
     margin-inline: auto;
     width: auto !important;
@@ -950,6 +931,12 @@ pre,
        is delimited by `--input-border`. Themed builds compute the same rule in
        `vscode-theme-css.ts`. */
     --input-field: 0 0% 100%;
+    /* Long-form conversation text, unselected sidebar rows and the one step
+       above the dark brightness ceiling (headings, bold). Themed builds derive
+       them in `vscode-theme-css.ts`; unthemed they are the plain foregrounds. */
+    --reading-foreground: var(--foreground);
+    --foreground-strong: var(--foreground);
+    --sidebar-row-foreground: var(--sidebar-foreground);
     --switch-track: 220 9% 64%;
     --ring: 220 82% 65%;
     --chart-1: 220 82% 65%;
@@ -1045,10 +1032,12 @@ pre,
     --terminal-ansi-bright-magenta: var(--vscode-terminal-ansiBrightMagenta, #bc05bc);
     --terminal-ansi-bright-cyan: var(--vscode-terminal-ansiBrightCyan, #0598bc);
     --terminal-ansi-bright-white: var(--vscode-terminal-ansiBrightWhite, #a5a5a5);
+    /* PingFang SC (macOS / iOS) first, for CJK and Latin alike; it is Apple's
+       system font and cannot be bundled. Windows falls back to Microsoft YaHei.
+       Inter stays self-hosted for the interface-font setting and diagrams. */
     --font-sans-default:
-      'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Helvetica Neue',
-      Arial, 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', 'Apple Color Emoji',
-      'Segoe UI Emoji', sans-serif;
+      'PingFang SC', -apple-system, BlinkMacSystemFont, 'Hiragino Sans GB', 'Microsoft YaHei',
+      'Helvetica Neue', Arial, 'Apple Color Emoji', 'Segoe UI Emoji', sans-serif;
     --font-sans: var(--lody-interface-font-family, var(--font-sans-default));
     --font-serif: serif;
     --font-wordmark:
@@ -1294,6 +1283,14 @@ pre,
   :where(a, button, input, textarea, select, [tabindex]):focus-visible {
     outline: none;
     box-shadow: inset 0 0 0 1px hsl(var(--primary) / 0.5);
+  }
+
+  /* …but only while the person navigates by keyboard: focus handed back after
+     Escape is `:focus-visible` too. Text entry keeps it (see the modality rule
+     at the end of this file). */
+  :where(html[data-focus-modality='pointer'])
+    :where(a, button, select, [tabindex]):not(input, textarea):focus-visible {
+    box-shadow: none;
   }
 
   /* Radix menu items already paint their own focus highlight (focus:bg-hover /
@@ -2082,12 +2079,7 @@ pre,
   width: 60%;
   content: '';
   pointer-events: none;
-  background: linear-gradient(
-    90deg,
-    transparent,
-    hsl(var(--background) / 0.78),
-    transparent
-  );
+  background: linear-gradient(90deg, transparent, hsl(var(--background) / 0.78), transparent);
   transform: translateX(-100%);
   animation: agent-shimmer-sweep 2.2s linear infinite;
   will-change: transform;
@@ -2131,17 +2123,6 @@ pre,
     animation: none;
     transform: scale(0.8);
   }
-}
-
-/* Mobile mention picker: collapse the menu's inner `scrollbar-pro
-   max-h-[260px] overflow-auto` list into a single scroller owned by the
-   docked panel. Two nested scroll containers (panel + inner cap) made
-   touch scrolling flaky and pinned the list to 260px regardless of the
-   panel's own max-height. Inside the mobile panel the inner list should
-   just flow; the panel scrolls. */
-.mention-mobile-panel .scrollbar-pro {
-  max-height: none !important;
-  overflow: visible !important;
 }
 
 /* Usage heatmap: each day pops in with a short scale+fade. The stagger is
@@ -2188,4 +2169,15 @@ pre,
     animation: none;
     transform: translateX(50%);
   }
+}
+
+/* Focus rings are for keyboard navigation. `installFocusModality` (@lody/ui)
+   marks the document `pointer` until Tab or an arrow key moves focus, and zeroes
+   `focus.ringWidth` for every StyleX ring; this does the same for the legacy
+   Tailwind `focus-visible:ring-*` utilities. Unlayered, so it outranks them.
+   Text entry keeps its ring: whoever is typing needs to see where. */
+html[data-focus-modality='pointer']
+  :focus-visible:not(input, textarea, select, [contenteditable='true'], [contenteditable='']) {
+  --tw-ring-shadow: 0 0 #0000;
+  --tw-ring-offset-shadow: 0 0 #0000;
 }

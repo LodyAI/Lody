@@ -1,6 +1,5 @@
 import type { RenderOptions } from 'beautiful-mermaid';
 import type { MermaidConfig } from 'mermaid';
-import type { DiagramPlugin } from 'streamdown';
 
 import type { ResolvedTheme } from '../../theme-provider';
 
@@ -50,6 +49,9 @@ const MERMAID_LIGHT_THEME_VARIABLES = {
   sequenceNumberColor: '#475569',
 };
 
+// Dark diagram text stays under the app's dark brightness ceiling (text no
+// lighter than ~13:1 against the canvas, see `vscode-theme-css.ts`); Mermaid
+// takes literal colors, so these cannot read the theme variables.
 const MERMAID_DARK_THEME_VARIABLES = {
   background: '#0b1120',
   mainBkg: '#111827',
@@ -57,12 +59,12 @@ const MERMAID_DARK_THEME_VARIABLES = {
   tertiaryColor: '#1e293b',
   primaryColor: '#172033',
   primaryBorderColor: '#60a5fa',
-  primaryTextColor: '#f8fafc',
-  secondaryTextColor: '#f8fafc',
-  tertiaryTextColor: '#f8fafc',
+  primaryTextColor: '#d0d5dc',
+  secondaryTextColor: '#d0d5dc',
+  tertiaryTextColor: '#d0d5dc',
   lineColor: '#cbd5e1',
-  textColor: '#e2e8f0',
-  titleColor: '#f8fafc',
+  textColor: '#cbd5e1',
+  titleColor: '#d0d5dc',
   defaultLinkColor: '#cbd5e1',
   edgeLabelBackground: '#0b1120',
   nodeBorder: '#60a5fa',
@@ -70,15 +72,15 @@ const MERMAID_DARK_THEME_VARIABLES = {
   clusterBorder: '#475569',
   actorBkg: '#111827',
   actorBorder: '#60a5fa',
-  actorTextColor: '#f8fafc',
+  actorTextColor: '#d0d5dc',
   signalColor: '#cbd5e1',
-  signalTextColor: '#f8fafc',
+  signalTextColor: '#d0d5dc',
   labelBoxBkgColor: '#111827',
   labelBoxBorderColor: '#475569',
-  labelTextColor: '#f8fafc',
-  loopTextColor: '#f8fafc',
+  labelTextColor: '#d0d5dc',
+  loopTextColor: '#d0d5dc',
   noteBkgColor: '#422006',
-  noteTextColor: '#fffbeb',
+  noteTextColor: '#dfd3b5',
   noteBorderColor: '#f59e0b',
   activationBkgColor: '#1e3a5f',
   activationBorderColor: '#60a5fa',
@@ -126,8 +128,8 @@ const FALLBACK_CHAR_WIDTH = FALLBACK_FONT_SIZE * 0.6;
 // When the runtime cannot load (old browser) or the source uses a diagram type
 // beautiful-mermaid does not support, show the mermaid source as a plain code
 // block instead of an error panel: the source is the most useful thing left to
-// display, and staying SVG keeps Streamdown's copy/download controls working.
-const renderMermaidLoadFallback = (source: string, options: RenderOptions): { svg: string } => {
+// display, and staying SVG keeps the block's copy/download controls working.
+const renderMermaidLoadFallback = (source: string, options: RenderOptions): string => {
   const allLines = source.split('\n');
   const lines = allLines
     .slice(0, FALLBACK_MAX_LINES)
@@ -146,63 +148,45 @@ const renderMermaidLoadFallback = (source: string, options: RenderOptions): { sv
         }</tspan>`
     )
     .join('');
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
 <rect width="100%" height="100%" fill="${options.surface ?? options.bg ?? '#f8fafc'}" rx="6" />
 <text x="${FALLBACK_PADDING}" y="${FALLBACK_PADDING + FALLBACK_FONT_SIZE}" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="${FALLBACK_FONT_SIZE}" fill="${options.fg ?? '#0f172a'}">${tspans}${
     truncated ? `<tspan x="${FALLBACK_PADDING}" dy="${FALLBACK_LINE_HEIGHT}">…</tspan>` : ''
   }</text>
 </svg>`;
-  return { svg };
 };
 
 type BeautifulMermaidRuntime = typeof import('beautiful-mermaid');
 
-export const createMarkdownMermaidPlugin = (): DiagramPlugin => {
-  let runtimePromise: Promise<BeautifulMermaidRuntime> | null = null;
-  let runtimeUnavailable = false;
-  let currentConfig: MermaidConfig = createMarkdownMermaidConfig('light');
+let runtimePromise: Promise<BeautifulMermaidRuntime> | null = null;
+let runtimeUnavailable = false;
 
-  const loadRuntime = async (): Promise<BeautifulMermaidRuntime | null> => {
-    if (runtimeUnavailable) return null;
-    runtimePromise ??= import('beautiful-mermaid');
-    try {
-      return await runtimePromise;
-    } catch (error) {
-      runtimeUnavailable = true;
-      runtimePromise = null;
-      console.warn('[Lody] Mermaid runtime failed to load; falling back to static text.', error);
-      return null;
-    }
-  };
+const loadRuntime = async (): Promise<BeautifulMermaidRuntime | null> => {
+  if (runtimeUnavailable) return null;
+  runtimePromise ??= import('beautiful-mermaid');
+  try {
+    return await runtimePromise;
+  } catch (error) {
+    runtimeUnavailable = true;
+    runtimePromise = null;
+    console.warn('[Lody] Mermaid runtime failed to load; falling back to static text.', error);
+    return null;
+  }
+};
 
-  return {
-    name: 'mermaid',
-    type: 'diagram',
-    language: 'mermaid',
-    getMermaid: (config?: MermaidConfig) => {
-      if (config) {
-        currentConfig = { ...MERMAID_BASE_CONFIG, ...config };
-      }
-      return {
-        initialize: (nextConfig: MermaidConfig) => {
-          currentConfig = { ...MERMAID_BASE_CONFIG, ...nextConfig };
-        },
-        render: async (_id: string, source: string) => {
-          const fallbackOptions = mermaidConfigToRenderOptions(currentConfig);
-          const runtime = await loadRuntime();
-          if (!runtime) {
-            return renderMermaidLoadFallback(source, fallbackOptions);
-          }
-          try {
-            return {
-              svg: await runtime.renderMermaidSVGAsync(source, fallbackOptions),
-            };
-          } catch (error) {
-            console.warn('[Lody] Mermaid render failed; using fallback.', error);
-            return renderMermaidLoadFallback(source, fallbackOptions);
-          }
-        },
-      };
-    },
-  };
+export const renderMarkdownMermaidSvg = async (
+  source: string,
+  theme: ResolvedTheme
+): Promise<string> => {
+  const options = mermaidConfigToRenderOptions(createMarkdownMermaidConfig(theme));
+  const runtime = await loadRuntime();
+  if (!runtime) {
+    return renderMermaidLoadFallback(source, options);
+  }
+  try {
+    return await runtime.renderMermaidSVGAsync(source, options);
+  } catch (error) {
+    console.warn('[Lody] Mermaid render failed; using fallback.', error);
+    return renderMermaidLoadFallback(source, options);
+  }
 };

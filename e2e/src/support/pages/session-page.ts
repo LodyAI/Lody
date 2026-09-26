@@ -1,5 +1,6 @@
 import { expect, type Page } from '@playwright/test';
 import { type ScriptedAcpEvent, WorkSessionFixture } from '../fixtures/work-session-fixture.js';
+import { openSidebarArchive } from './sidebar-footer.js';
 
 const PROVIDER_NAME = 'Deterministic E2E Agent';
 const HELD_RESPONSE = 'Synthetic response started.';
@@ -100,7 +101,7 @@ export class SessionPage {
     if (!match?.[1]) throw new Error(`Expected a Session route, received ${this.page.url()}`);
     const sessionId = decodeURIComponent(match[1]);
     await this.archiveSessionAndWaitForRuntimeExit(waiting);
-    await this.page.getByRole('button', { name: /^(Archive|归档)$/u, exact: true }).click();
+    await openSidebarArchive(this.page);
     await expect(this.page).toHaveURL(/#\/local\/archive(?:\?.*)?$/u);
     const archivedRow = this.page.locator(`[data-id="archive-session:${sessionId}"]`);
     await expect(archivedRow).toBeVisible({ timeout: 30_000 });

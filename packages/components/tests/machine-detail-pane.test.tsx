@@ -6,7 +6,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import type { MachineId, MachineViewMeta } from '@lody/shared';
 import { MachineDetailPane } from '../src/components/settings/machine-detail-pane';
 import { initI18n } from '../src/i18n';
-import { TooltipProvider } from '../src/ui/tooltip';
+import { Tooltip } from '@lody/ui/tooltip';
 
 vi.mock('../src/hooks/use-authenticated-convex', () => ({
   useAuthenticatedConvex: () => ({ requestAuthRecovery: vi.fn() }),
@@ -64,7 +64,7 @@ describe('MachineDetailPane revoke machine access', () => {
   ) => {
     await act(async () => {
       root?.render(
-        <TooltipProvider>
+        <Tooltip.Provider>
           <MachineDetailPane
             machine={machine}
             readOnly={options?.readOnly}
@@ -82,7 +82,7 @@ describe('MachineDetailPane revoke machine access', () => {
             canRevokeCredentials
             onRevokeCredentials={onRevokeCredentials}
           />
-        </TooltipProvider>
+        </Tooltip.Provider>
       );
     });
   };

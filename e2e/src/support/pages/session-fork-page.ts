@@ -1,6 +1,7 @@
 import { existsSync } from 'node:fs';
 import { expect, type Page } from '@playwright/test';
 import { isProcessAlive, SessionForkFixture } from '../fixtures/session-fork-fixture.js';
+import { openSidebarArchive } from './sidebar-footer.js';
 
 const AGENT_NAME = 'Deterministic Session Fork Agent';
 const SOURCE_PROMPT = 'Create a completed source for deterministic Session fork coverage.';
@@ -180,7 +181,7 @@ export class SessionForkPage {
       .click();
     await this.page.getByRole('menuitem', { name: /^(Archive session|归档会话)$/u }).click();
     await expect(this.page).toHaveURL(/#\/local\/chat(?:\?.*)?$/u, { timeout: 30_000 });
-    await this.page.getByRole('button', { name: /^(Archive|归档)$/u, exact: true }).click();
+    await openSidebarArchive(this.page);
     await expect(this.page).toHaveURL(/#\/local\/archive(?:\?.*)?$/u);
     const archivedRow = this.archivedRow(sessionId);
     await expect(archivedRow).toBeVisible({ timeout: 30_000 });

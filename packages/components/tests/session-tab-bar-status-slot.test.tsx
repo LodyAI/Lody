@@ -15,7 +15,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { lodyPresenceStatesAtom } from '../src/atoms/presence';
 import { SessionTabBar } from '../src/components/sessions/session-tab-bar';
-import { TooltipProvider } from '../src/ui/tooltip';
+import { Tooltip } from '@lody/ui/tooltip';
 import { FocusScope } from '../src/ui/focus-scope';
 import { WORKSPACE_FOCUS_SCOPES } from '../src/atoms/focus-layer';
 
@@ -111,7 +111,7 @@ async function renderTabBar(
   await act(async () => {
     root.render(
       <Provider store={store}>
-        <TooltipProvider>
+        <Tooltip.Provider>
           <FocusScope id={WORKSPACE_FOCUS_SCOPES.sessionConversation}>
             <SessionTabBar
               variant="session"
@@ -124,7 +124,7 @@ async function renderTabBar(
               onNewTab={vi.fn()}
             />
           </FocusScope>
-        </TooltipProvider>
+        </Tooltip.Provider>
       </Provider>
     );
   });
@@ -176,7 +176,11 @@ describe('SessionTabBar status slot', () => {
     });
 
     expect(unreadDot('session-child')).toBeNull();
-    expect(container.querySelector('#session-tab-session-child .animate-spin')).not.toBeNull();
+    expect(
+      container.querySelector(
+        '#session-tab-session-child .animate-spin, #session-tab-session-child [data-slot="spinner"]'
+      )
+    ).not.toBeNull();
   });
 
   it('shows the waiting-permission marker instead of the busy spinner', async () => {
@@ -184,7 +188,11 @@ describe('SessionTabBar status slot', () => {
       presence: { 'session-child': 'requestPermission' },
     });
 
-    expect(container.querySelector('#session-tab-session-child .animate-spin')).toBeNull();
+    expect(
+      container.querySelector(
+        '#session-tab-session-child .animate-spin, #session-tab-session-child [data-slot="spinner"]'
+      )
+    ).toBeNull();
     expect(unreadDot('session-child')).toBeNull();
     expect(
       container.querySelector('#session-tab-session-child .text-status-warning')

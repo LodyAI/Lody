@@ -96,6 +96,7 @@ export type ExportManifest = {
   outputDir: string;
   sessionCount: number;
   taskCount: number;
+  scheduleCount?: number;
   usageExported: boolean;
 };
 

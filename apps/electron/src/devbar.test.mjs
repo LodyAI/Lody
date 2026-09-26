@@ -21,44 +21,18 @@ import { isDevbarDeepLink } from './renderer/src/devbar/deep-link.ts'
 import { devbarSampleRoute } from './renderer/src/devbar/route.ts'
 
 void test('environment activation remains an explicit automation override', () => {
-  assert.deepEqual(initialDevbarControl('true'), {
-    enabled: true,
-    agentAccess: true,
-    warmupEnabled: false
-  })
+  assert.deepEqual(initialDevbarControl('true'), { enabled: true })
   for (const value of [undefined, '', 'false', '0', '1', 'dev', 'staging', 'prod']) {
-    assert.deepEqual(initialDevbarControl(value), {
-      enabled: false,
-      agentAccess: false,
-      warmupEnabled: false
-    })
+    assert.deepEqual(initialDevbarControl(value), { enabled: false })
   }
 })
 
-void test('runtime control validates the secondary agent capability gate', () => {
-  assert.deepEqual(
-    parseDevbarControlInput({ enabled: true, agentAccess: false, warmupEnabled: false }),
-    {
-      enabled: true,
-      agentAccess: false,
-      warmupEnabled: false
-    }
-  )
-  assert.deepEqual(
-    parseDevbarControlInput({ enabled: true, agentAccess: true, warmupEnabled: true }),
-    {
-      enabled: true,
-      agentAccess: true,
-      warmupEnabled: true
-    }
-  )
-  assert.throws(() =>
-    parseDevbarControlInput({ enabled: false, agentAccess: true, warmupEnabled: false })
-  )
-  assert.throws(() =>
-    parseDevbarControlInput({ enabled: 'true', agentAccess: false, warmupEnabled: false })
-  )
-  assert.throws(() => parseDevbarControlInput({ enabled: true, agentAccess: false }))
+void test('runtime control validates the devbar control flags', () => {
+  assert.deepEqual(parseDevbarControlInput({ enabled: true }), { enabled: true })
+  assert.deepEqual(parseDevbarControlInput({ enabled: false }), { enabled: false })
+  assert.throws(() => parseDevbarControlInput({ enabled: 'true' }))
+  assert.throws(() => parseDevbarControlInput({}))
+  assert.throws(() => parseDevbarControlInput(null))
 })
 
 void test('runtime activation selects the Devbar entry only for the primary product window', () => {

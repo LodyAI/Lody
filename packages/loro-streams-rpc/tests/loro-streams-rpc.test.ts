@@ -1882,7 +1882,12 @@ describe('LoroStreamsMachineRpcClient', () => {
     client.stop();
   });
 
-  it('sends session preview create requests and resolves preview responses', async () => {
+  it('keeps preview creation pending beyond public route propagation and resolves its response', async () => {
+    const proof = {
+      runtimeNonce: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      requestId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+      requestToken: 'synthetic-preview-proof',
+    };
     const fake = createFakeStreamClient();
     const client = new LoroStreamsMachineRpcClient({
       workspaceId: 'workspace-1',
@@ -1890,76 +1895,85 @@ describe('LoroStreamsMachineRpcClient', () => {
       streamClient: fake.streamClient,
     });
 
-    const responsePromise = client.requestSessionPreviewCreate({
-      sessionId: 'session-1',
-      requestedByUserId: 'user-1',
-      target: { protocol: 'http', host: '127.0.0.1', port: 5173 },
-      approval: {
-        source: 'browser_address',
-        targetClass: 'loopback',
-        target: { protocol: 'http', host: '127.0.0.1', port: 5173 },
-        confirmedByUserId: 'user-1',
-        confirmedAt: 1000,
-      },
-      timeoutMs: 5000,
-    });
-
-    await vi.waitFor(() => {
-      expect(fake.appended).toHaveLength(1);
-    });
-
-    const request = fake.appended[0]?.value as {
-      id: string;
-      method: string;
-      params?: { sessionId?: string; requestedByUserId?: string };
-    };
-    expect(request.method).toBe('session/preview-create');
-    expect(request.params).toEqual({
-      sessionId: 'session-1',
-      requestedByUserId: 'user-1',
-      target: { protocol: 'http', host: '127.0.0.1', port: 5173 },
-      approval: {
-        source: 'browser_address',
-        targetClass: 'loopback',
-        target: { protocol: 'http', host: '127.0.0.1', port: 5173 },
-        confirmedByUserId: 'user-1',
-        confirmedAt: 1000,
-      },
-      replaceExisting: undefined,
-    });
-
-    fake.pushBatch({
-      messages: [
-        {
-          jsonrpc: '2.0',
-          id: request.id,
-          method: 'session/preview-create',
-          rpcVersion: '1',
-          machineId: 'machine-1',
-          result: {
-            type: 'session/preview-create_response',
-            sessionId: 'session-1',
-            success: false,
-            error: 'tunnel_not_configured',
-            message: 'Preview gateway is not configured.',
-          },
-        },
-      ],
-      nextOffset: '3',
-      cursor: 'cursor-3',
-      upToDate: true,
-    });
-
-    await expect(responsePromise).resolves.toEqual(
-      expect.objectContaining({
-        type: 'session/preview-create_response',
+    vi.useFakeTimers();
+    try {
+      const responsePromise = client.requestSessionPreviewCreate({
+        proof,
         sessionId: 'session-1',
-        success: false,
-        error: 'tunnel_not_configured',
-      })
-    );
+        requestedByUserId: 'user-1',
+        target: { protocol: 'http', host: '127.0.0.1', port: 5173 },
+        approval: {
+          source: 'browser_address',
+          targetClass: 'loopback',
+          target: { protocol: 'http', host: '127.0.0.1', port: 5173 },
+          confirmedByUserId: 'user-1',
+          confirmedAt: 1000,
+        },
+      });
 
-    client.stop();
+      await fake.waitForAppendedCount(1);
+      let settled = false;
+      void responsePromise.then(() => {
+        settled = true;
+      });
+      await vi.advanceTimersByTimeAsync(65_000);
+      expect(settled).toBe(false);
+
+      const request = fake.appended[0]?.value as {
+        id: string;
+        method: string;
+        params?: { sessionId?: string; requestedByUserId?: string };
+      };
+      expect(request.method).toBe('session/preview-create');
+      expect(request.params).toEqual({
+        proof,
+        sessionId: 'session-1',
+        requestedByUserId: 'user-1',
+        target: { protocol: 'http', host: '127.0.0.1', port: 5173 },
+        approval: {
+          source: 'browser_address',
+          targetClass: 'loopback',
+          target: { protocol: 'http', host: '127.0.0.1', port: 5173 },
+          confirmedByUserId: 'user-1',
+          confirmedAt: 1000,
+        },
+        restart: undefined,
+      });
+
+      fake.pushBatch({
+        messages: [
+          {
+            jsonrpc: '2.0',
+            id: request.id,
+            method: 'session/preview-create',
+            rpcVersion: '1',
+            machineId: 'machine-1',
+            result: {
+              type: 'session/preview-create_response',
+              sessionId: 'session-1',
+              success: false,
+              error: 'tunnel_not_configured',
+              message: 'Remote preview is not configured.',
+            },
+          },
+        ],
+        nextOffset: '3',
+        cursor: 'cursor-3',
+        upToDate: true,
+      });
+
+      await expect(responsePromise).resolves.toEqual(
+        expect.objectContaining({
+          type: 'session/preview-create_response',
+          sessionId: 'session-1',
+          success: false,
+          error: 'tunnel_not_configured',
+        })
+      );
+    } finally {
+      client.stop();
+      vi.useRealTimers();
+    }
   });
 
   it('sends local project git state requests and resolves git state responses', async () => {

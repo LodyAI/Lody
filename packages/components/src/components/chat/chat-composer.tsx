@@ -9,7 +9,6 @@ import {
   type ClipboardEvent,
   type DragEvent,
   type KeyboardEvent,
-  type MutableRefObject,
   type ReactNode,
   type Ref,
 } from 'react';
@@ -18,6 +17,7 @@ import { useTranslation } from 'react-i18next';
 
 import type { AcpCommandSummary } from '@lody/shared';
 import { AttachmentAddMenu, type AttachmentAddMenuMcp } from './attachment-add-menu';
+import { ComposerImagePeek } from './composer-image-peek';
 import { CommentReferenceChip, type CommentReferenceChipItem } from './comment-reference-chip';
 import {
   VisualAnnotationReferenceChip,
@@ -48,17 +48,10 @@ import type { Mention as MentionRange } from '@/ui/mention/index';
 import type { PersistedMentionRange } from '@/components/mentions/mention-persistence';
 import { toIntlLocale } from '@/lib/intl-locale';
 import { useIsMobile } from '@/hooks/use-mobile';
-import { Button, type ButtonProps } from '@/ui/button';
-import {
-  Dialog,
-  DialogClose,
-  DialogContent,
-  DialogContentWithoutClose,
-  DialogDescription,
-  DialogTitle,
-} from '@/ui/dialog';
-import { Sheet, SheetContent, SheetDescription, SheetTitle } from '@/ui/sheet';
-import { Textarea, type TextareaProps } from '@/ui/textarea';
+import { Button, type ButtonProps } from '@lody/ui/button';
+import { Dialog } from '@/ui/dialog';
+import { Drawer } from '@lody/ui/drawer';
+import { Textarea, type TextareaProps } from '@lody/ui/textarea';
 import { hasFileTransfer, readDroppedTransfer } from '@/lib/file-drop';
 import {
   COMPOSER_COMPACT_PLACEHOLDER_MAX_PX,
@@ -191,11 +184,6 @@ export interface ChatComposerProps {
   autoResize?: boolean;
   /** Maximum number of rows when autoResize is enabled (default: 12) */
   maxRows?: number;
-  /**
-   * Marks the next viewport resize as caused by this composer's height change,
-   * so a parent conversation can preserve the reader's scroll position.
-   */
-  skipNextViewportResizeAutoScrollRef?: MutableRefObject<boolean>;
   /** Focus the textarea when clicking the container background. */
   focusOnContainerClick?: boolean;
 }
@@ -220,7 +208,7 @@ export function getChatComposerTextareaClassName({
           isMobile ? 'min-h-[24px]' : 'min-h-[48px]'
         ),
     'focus-visible:outline-hidden focus-visible:ring-0 focus-visible:ring-offset-0',
-    'text-input-foreground placeholder:text-input-placeholder/40'
+    'text-input-foreground placeholder:text-input-placeholder/85'
   );
 }
 
@@ -293,7 +281,6 @@ export function ChatComposer({
   className,
   autoResize = false,
   maxRows = 12,
-  skipNextViewportResizeAutoScrollRef,
   focusOnContainerClick = false,
 }: ChatComposerProps) {
   const { t, i18n } = useTranslation();
@@ -319,7 +306,6 @@ export function ChatComposer({
       !!window.matchMedia?.('(pointer: fine)').matches,
     [isMobile]
   );
-  const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
   const [previewPastedTextDraftId, setPreviewPastedTextDraftId] = useState<string | null>(null);
   const [previewPastedTextEditorValue, setPreviewPastedTextEditorValue] = useState('');
   const imageDragDepthRef = useRef(0);
@@ -340,8 +326,13 @@ export function ChatComposer({
     const update = (width: number) => {
       setUseCompactPlaceholder(width <= COMPOSER_COMPACT_PLACEHOLDER_MAX_PX);
     };
-    update(box.getBoundingClientRect().width);
-    if (typeof ResizeObserver === 'undefined') return undefined;
+    // No synchronous measurement here: a layout-effect read forces style and
+    // layout of the whole just-committed tree (a full conversation on a session
+    // switch). ResizeObserver delivers the first size before that frame paints.
+    if (typeof ResizeObserver === 'undefined') {
+      update(box.getBoundingClientRect().width);
+      return undefined;
+    }
     const observer = new ResizeObserver((entries) => {
       const width = entries[0]?.contentRect.width ?? 0;
       update(width);
@@ -587,33 +578,28 @@ export function ChatComposer({
     const minHeight = lineHeight * effectivePromptRows + paddingTop + paddingBottom;
     const maxHeight = lineHeight * maxRows + paddingTop + paddingBottom;
 
-    const previousHeight = textarea.style.height;
-
-    // Reset height to auto to get accurate scrollHeight
-    textarea.style.height = 'auto';
-
-    // Calculate new height, clamped between min and max.
-    // When empty, ignore scrollHeight: Chromium includes the wrapped placeholder
-    // text in an empty textarea's scrollHeight, so a long placeholder would grow
-    // the box past minHeight and then visibly shrink on the first keystroke.
+    // When empty, the height is simply minHeight — and must be: Chromium includes
+    // the wrapped placeholder text in an empty textarea's scrollHeight, so a long
+    // placeholder would grow the box past minHeight and then visibly shrink on
+    // the first keystroke. Skipping the measurement also matters for speed: an
+    // `auto` reset followed by a scrollHeight read forces a synchronous layout
+    // of the whole page, and a session switch mounts an empty composer into a
+    // freshly committed conversation (~5ms per switch).
     const hasValue = (promptValue ?? '').length > 0;
-    const scrollHeight = textarea.scrollHeight;
-    const newHeight = hasValue ? Math.max(minHeight, Math.min(scrollHeight, maxHeight)) : minHeight;
-
-    const nextHeight = `${newHeight}px`;
-    if (previousHeight && previousHeight !== nextHeight && skipNextViewportResizeAutoScrollRef) {
-      skipNextViewportResizeAutoScrollRef.current = true;
+    if (!hasValue) {
+      textarea.style.height = `${minHeight}px`;
+      textarea.style.overflowY = 'hidden';
+      return;
     }
-    textarea.style.height = nextHeight;
+
+    // Reset height to auto to get an accurate scrollHeight, then clamp.
+    textarea.style.height = 'auto';
+    const scrollHeight = textarea.scrollHeight;
+    const newHeight = Math.max(minHeight, Math.min(scrollHeight, maxHeight));
+
+    textarea.style.height = `${newHeight}px`;
     textarea.style.overflowY = scrollHeight > maxHeight ? 'auto' : 'hidden';
-  }, [
-    autoResize,
-    promptValue,
-    promptRef,
-    effectivePromptRows,
-    maxRows,
-    skipNextViewportResizeAutoScrollRef,
-  ]);
+  }, [autoResize, promptValue, promptRef, effectivePromptRows, maxRows]);
 
   const boxTextareaClassName = getChatComposerTextareaClassName({ tone, variant, isMobile });
 
@@ -643,7 +629,7 @@ export function ChatComposer({
   const dialogTextareaClassName = cn(
     'input-scrollbar min-h-[120px] resize-none px-4 py-3 text-sm leading-6 transition-shadow sm:min-h-[120px]',
     'w-full rounded-2xl border-transparent bg-transparent focus-visible:ring-0 focus-visible:ring-offset-0',
-    'text-input-foreground placeholder:text-input-placeholder/40'
+    'text-input-foreground placeholder:text-input-placeholder/85'
   );
 
   const actionBaseClassName = cn(
@@ -718,7 +704,9 @@ export function ChatComposer({
         ) : null}
 
         {!isDialog ? (
-          <div className={cn('flex flex-col', isLanding ? 'gap-2' : 'gap-1')}>
+          // The `@` menu opens against this frame, above the chip row, so it lines
+          // up with the composer and never cuts a chip in half.
+          <div data-mention-frame="" className={cn('flex flex-col', isLanding ? 'gap-2' : 'gap-1')}>
             {/* Top selector (repo, branch) - shown outside and above the input box */}
             {topSelector ? (
               <div className="flex w-full min-w-0 select-none items-center gap-1">
@@ -797,38 +785,41 @@ export function ChatComposer({
                         image.status === 'failed' && 'border-destructive/50'
                       )}
                     >
-                      <button
-                        type="button"
-                        className="h-full w-full"
-                        onClick={() => setPreviewImageUrl(image.previewUrl)}
-                        aria-label={image.name}
-                      >
-                        <img
-                          src={image.previewUrl}
-                          alt={image.name}
-                          className={cn(
-                            'h-full w-full object-cover',
-                            image.status !== 'uploaded' && 'grayscale'
-                          )}
-                        />
-                        {image.status === 'uploading' ? (
-                          <div
-                            className="absolute inset-0 bg-black/45 transition-[clip-path]"
-                            style={{
-                              clipPath: `inset(${Math.max(0, Math.min(100, image.progress))}% 0 0 0)`,
-                            }}
-                          />
-                        ) : null}
-                        {image.status === 'failed' ? (
-                          <div className="absolute inset-0 bg-black/45" />
-                        ) : null}
-                      </button>
+                      <ComposerImagePeek
+                        src={image.previewUrl}
+                        name={image.name}
+                        alt={imagePreviewLabel}
+                        trigger={
+                          <button type="button" className="h-full w-full" aria-label={image.name}>
+                            <img
+                              src={image.previewUrl}
+                              alt={image.name}
+                              className={cn(
+                                'h-full w-full object-cover',
+                                image.status !== 'uploaded' && 'grayscale'
+                              )}
+                            />
+                            {image.status === 'uploading' ? (
+                              <div
+                                className="absolute inset-0 bg-black/45 transition-[clip-path]"
+                                style={{
+                                  clipPath: `inset(${Math.max(0, Math.min(100, image.progress))}% 0 0 0)`,
+                                }}
+                              />
+                            ) : null}
+                            {image.status === 'failed' ? (
+                              <div className="absolute inset-0 bg-black/45" />
+                            ) : null}
+                          </button>
+                        }
+                      />
                       <div className="absolute right-1 top-1">
                         <Button
                           type="button"
                           variant="secondary"
-                          size="icon"
-                          className={cn('rounded-full', isMobile ? 'h-6 w-6' : 'h-5 w-5')}
+                          size="mini"
+                          icon
+                          className={cn(isMobile ? '' : '')}
                           onClick={() => onImageRemove?.(image.id)}
                           aria-label={removeImageLabel}
                         >
@@ -923,8 +914,9 @@ export function ChatComposer({
                         <Button
                           type="button"
                           variant="secondary"
-                          size="icon"
-                          className={cn('rounded-full', isMobile ? 'h-6 w-6' : 'h-5 w-5')}
+                          size="mini"
+                          icon
+                          className={cn(isMobile ? '' : '')}
                           onClick={() => onFileRemove?.(file.id)}
                           aria-label={removeAttachmentLabel}
                         >
@@ -1107,24 +1099,6 @@ export function ChatComposer({
           </>
         )}
       </div>
-      <Dialog
-        open={previewImageUrl !== null}
-        onOpenChange={(open) => {
-          if (!open) {
-            setPreviewImageUrl(null);
-          }
-        }}
-      >
-        <DialogContent className="max-w-3xl border-none bg-transparent p-2 shadow-none">
-          {previewImageUrl ? (
-            <img
-              src={previewImageUrl}
-              alt={imagePreviewLabel}
-              className="max-h-[80vh] w-full rounded-lg object-contain"
-            />
-          ) : null}
-        </DialogContent>
-      </Dialog>
       {(() => {
         const handlePastedTextOpenChange = (open: boolean) => {
           if (!open) {
@@ -1145,8 +1119,12 @@ export function ChatComposer({
 
         if (isMobile) {
           return (
-            <Sheet open={previewPastedTextDraft !== null} onOpenChange={handlePastedTextOpenChange}>
-              <SheetContent
+            <Drawer.Root
+              side="bottom"
+              open={previewPastedTextDraft !== null}
+              onOpenChange={handlePastedTextOpenChange}
+            >
+              <Drawer.Content
                 side="bottom"
                 className="flex h-[85vh] flex-col gap-0 rounded-t-2xl p-0"
               >
@@ -1156,13 +1134,13 @@ export function ChatComposer({
                       <div className="h-1 w-9 rounded-full bg-muted-foreground/30" />
                     </div>
                     <div className="flex shrink-0 items-center justify-between gap-3 border-b border-border/60 px-4 py-2.5">
-                      <SheetTitle className="flex items-center gap-2 text-sm font-medium">
+                      <Drawer.Title className="flex items-center gap-2 text-sm font-medium">
                         <ClipboardPaste className="h-3.5 w-3.5 text-muted-foreground" />
                         {pastedTextDialogTitle}
-                      </SheetTitle>
-                      <SheetDescription className="text-xs text-muted-foreground tabular-nums">
+                      </Drawer.Title>
+                      <Drawer.Description className="text-xs text-muted-foreground tabular-nums">
                         {summaryText}
-                      </SheetDescription>
+                      </Drawer.Description>
                     </div>
                     <Textarea
                       aria-label={pastedTextEditorLabel}
@@ -1175,31 +1153,38 @@ export function ChatComposer({
                     />
                   </>
                 ) : null}
-              </SheetContent>
-            </Sheet>
+              </Drawer.Content>
+            </Drawer.Root>
           );
         }
 
         return (
-          <Dialog open={previewPastedTextDraft !== null} onOpenChange={handlePastedTextOpenChange}>
-            <DialogContentWithoutClose className="flex h-[85vh] max-h-[85vh] max-w-3xl flex-col gap-0 overflow-hidden p-0">
+          <Dialog.Root
+            open={previewPastedTextDraft !== null}
+            onOpenChange={handlePastedTextOpenChange}
+          >
+            <Dialog.Content
+              closeButton={false}
+              width="48rem"
+              className="flex h-[85vh] max-h-[85vh] flex-col gap-0 overflow-hidden p-0"
+            >
               {previewPastedTextDraft ? (
                 <>
                   <div className="flex items-center justify-between gap-3 border-b border-border/60 px-5 py-3">
-                    <DialogTitle className="flex items-center gap-2 text-sm font-medium">
+                    <Dialog.Title className="flex items-center gap-2 text-sm font-medium">
                       <ClipboardPaste className="h-3.5 w-3.5 text-muted-foreground" />
                       {pastedTextDialogTitle}
-                    </DialogTitle>
+                    </Dialog.Title>
                     <div className="flex items-center gap-3">
-                      <DialogDescription className="text-xs text-muted-foreground tabular-nums">
+                      <Dialog.Description className="text-xs text-muted-foreground tabular-nums">
                         {summaryText}
-                      </DialogDescription>
-                      <DialogClose
+                      </Dialog.Description>
+                      <Dialog.Close
                         className="rounded-xs opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-hidden focus:ring-2 focus:ring-ring focus:ring-offset-2"
                         aria-label={t('common.close', 'Close')}
                       >
                         <X className="h-4 w-4" />
-                      </DialogClose>
+                      </Dialog.Close>
                     </div>
                   </div>
                   <div className="flex min-h-0 flex-1 px-5 py-4">
@@ -1214,8 +1199,8 @@ export function ChatComposer({
                   </div>
                 </>
               ) : null}
-            </DialogContentWithoutClose>
-          </Dialog>
+            </Dialog.Content>
+          </Dialog.Root>
         );
       })()}
     </>

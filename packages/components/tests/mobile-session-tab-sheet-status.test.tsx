@@ -81,7 +81,8 @@ function renderRows(conversations: ConversationTabEntry[]): HTMLElement[] {
 }
 
 const hand = (row: HTMLElement) => row.querySelector(`[aria-label="${WAITING_LABEL}"]`);
-const spinner = (row: HTMLElement) => row.querySelector('.animate-spin');
+const spinner = (row: HTMLElement) =>
+  row.querySelector('.animate-spin, [data-slot="spinner"]');
 const unreadDot = (row: HTMLElement) => row.querySelector('[aria-label="Unread messages"]');
 
 describe('mobile session tab sheet status slot', () => {
@@ -107,5 +108,56 @@ describe('mobile session tab sheet status slot', () => {
     ]);
     expect(hand(both!)).not.toBeNull();
     expect(unreadDot(both!)).toBeNull();
+  });
+});
+
+describe('archive and closed conversations', () => {
+  function renderSheet(onNewConversation: (() => void) | undefined) {
+    flushSync(() => {
+      root.render(
+        createElement(MobileSessionTabSheet, {
+          open: true,
+          onOpenChange: vi.fn(),
+          conversations: [entry({ id: 'main', main: true, active: true })],
+          archivedConversations: [
+            { id: 'closed', title: 'Closed child', lastActivityAt: null },
+            {
+              id: 'archived',
+              title: 'Archived child',
+              lastActivityAt: null,
+              restoresArchive: true,
+            },
+          ],
+          viewers: [],
+          onSelectConversation: vi.fn(),
+          onNewConversation,
+          onSelectViewer: vi.fn(),
+          onRestoreConversation: vi.fn(),
+        })
+      );
+    });
+    flushSync(() => {
+      Array.from(container.querySelectorAll<HTMLButtonElement>('button[aria-expanded]'))
+        .find((button) => button.textContent?.startsWith('Closed'))!
+        .click();
+    });
+  }
+
+  it('labels an archived child of a live workspace Restore and a closed tab Reopen', () => {
+    renderSheet(vi.fn());
+    expect(container.textContent).toContain('New Chat');
+    const labels = Array.from(
+      container.querySelectorAll<HTMLButtonElement>('button[aria-label]'),
+      (button) => [button.textContent?.trim(), button.getAttribute('aria-label')]
+    ).filter(([text]) => text === 'Closed child' || text === 'Archived child');
+    expect(labels).toEqual([
+      ['Closed child', 'Reopen conversation'],
+      ['Archived child', 'Restore session'],
+    ]);
+  });
+
+  it('offers no New Chat in a review-only archived workspace', () => {
+    renderSheet(undefined);
+    expect(container.textContent).not.toContain('New Chat');
   });
 });

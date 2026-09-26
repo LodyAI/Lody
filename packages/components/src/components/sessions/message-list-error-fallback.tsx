@@ -1,15 +1,40 @@
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Check, Copy } from 'lucide-react';
+import * as stylex from '@stylexjs/stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { text } from '@lody/ui/tokens/scales.stylex';
 import type { ErrorBoundaryFallbackProps } from '@/components/error-boundary';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
+import {
+  StatusPage,
+  StatusPageActions,
+  StatusPageCode,
+  StatusPageDetails,
+} from '@/components/status-page';
 import { writeTextToClipboard } from '@/lib/clipboard';
 import {
   buildErrorBoundaryReport,
   collectErrorBoundaryEnvironment,
+  isRawConvexServerError,
 } from '@/lib/error-boundary-report';
 import { getSessionRenderTraceText } from '@/lib/session-render-trace';
 
+const styles = stylex.create({
+  icon14: { flexShrink: 0, width: '14px', height: '14px' },
+  success: { color: colors.success },
+  copyFailed: {
+    margin: 0,
+    fontSize: text.footnoteSize,
+    lineHeight: text.footnoteLeading,
+    color: colors.destructive,
+  },
+});
+
+/**
+ * The message list crashed but the composer under it did not: the pane says
+ * so, keeps the draft, and offers a retry that remounts only the list.
+ */
 export function MessageListErrorFallback({
   error,
   componentStack,
@@ -17,6 +42,7 @@ export function MessageListErrorFallback({
 }: ErrorBoundaryFallbackProps) {
   const { t } = useTranslation();
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle');
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const report = useMemo(
     () =>
       buildErrorBoundaryReport({
@@ -28,65 +54,74 @@ export function MessageListErrorFallback({
       }),
     [error, componentStack]
   );
+  // As on the crash screen: a backend payload quotes server internals, so it
+  // stays in the copy and the details rather than on the page.
+  const headline = isRawConvexServerError(error)
+    ? t('errorBoundary.serverErrorSummary', 'The Lody backend returned a server error.')
+    : report.summary;
+  const copyLabel =
+    copyState === 'copied'
+      ? t('errorBoundary.copied', 'Copied')
+      : t('errorBoundary.copyDetails', 'Copy error details');
 
   return (
-    <div
+    <StatusPage
+      layout="pane"
+      illustration="broken"
       role="alert"
-      className="flex h-full w-full items-center justify-center overflow-auto p-4 text-center"
+      title={t('sessions.messageListCrashedTitle', "Messages couldn't be displayed")}
+      description={t(
+        'sessions.messageListCrashed',
+        'The message list failed to render. Your draft below is safe.'
+      )}
     >
-      <div className="w-full min-w-0 max-w-lg">
-        <div className="text-sm font-semibold text-foreground">
-          {t('common.somethingWentWrong', 'Something went wrong')}
-        </div>
-        <div className="mt-1 text-xs text-muted-foreground">
-          {t(
-            'sessions.messageListCrashed',
-            'The message list failed to render. Your draft message below is safe.'
-          )}
-        </div>
-        <div className="mt-3 flex flex-wrap justify-center gap-2">
-          <Button type="button" onClick={resetErrorBoundary}>
-            {t('common.tryAgain', 'Try again')}
-          </Button>
+      <StatusPageActions>
+        <Button type="button" size="small" onClick={resetErrorBoundary}>
+          {t('errorBoundary.tryAgain', 'Try again')}
+        </Button>
+      </StatusPageActions>
+      <StatusPageCode
+        action={
+          // As on the crash screen, copying acts on the error, so it sits on it.
           <Button
             type="button"
-            variant="outline"
+            variant="ghost"
+            size="mini"
+            icon
+            aria-label={copyLabel}
+            title={copyLabel}
             onClick={() => {
-              void writeTextToClipboard(report.text).then((ok) =>
-                setCopyState(ok ? 'copied' : 'failed')
-              );
+              void writeTextToClipboard(report.text).then((ok) => {
+                setCopyState(ok ? 'copied' : 'failed');
+                if (!ok) setDetailsOpen(true);
+              });
             }}
           >
             {copyState === 'copied' ? (
-              <Check className="size-4" aria-hidden="true" />
+              <Check {...stylex.props(styles.icon14, styles.success)} aria-hidden="true" />
             ) : (
-              <Copy className="size-4" aria-hidden="true" />
+              <Copy {...stylex.props(styles.icon14)} aria-hidden="true" />
             )}
-            {copyState === 'copied'
-              ? t('errorBoundary.copied', 'Copied')
-              : t('errorBoundary.copyDetails', 'Copy error details')}
           </Button>
-        </div>
-        {copyState === 'failed' ? (
-          <p role="status" className="mt-2 text-xs text-destructive">
-            {t(
-              'errorBoundary.copyFailed',
-              'Copying was blocked. Open the technical details below and select the text manually.'
-            )}
-          </p>
-        ) : null}
-        <details
-          className="mt-3 text-left text-xs text-muted-foreground"
-          open={copyState === 'failed' || undefined}
-        >
-          <summary className="cursor-pointer text-center">
-            {t('errorBoundary.technicalDetails', 'Technical details')}
-          </summary>
-          <pre className="mt-2 max-h-64 select-text overflow-auto rounded-md border border-border p-3 whitespace-pre-wrap [overflow-wrap:anywhere]">
-            {report.text}
-          </pre>
-        </details>
-      </div>
-    </div>
+        }
+      >
+        {headline}
+      </StatusPageCode>
+      {copyState === 'failed' ? (
+        <p role="status" {...stylex.props(styles.copyFailed)}>
+          {t(
+            'errorBoundary.copyFailed',
+            'Copying was blocked. Open the technical details below and select the text manually.'
+          )}
+        </p>
+      ) : null}
+      <StatusPageDetails
+        label={t('errorBoundary.technicalDetails', 'Technical details')}
+        open={detailsOpen}
+        onOpenChange={setDetailsOpen}
+      >
+        <StatusPageCode size="details">{report.text}</StatusPageCode>
+      </StatusPageDetails>
+    </StatusPage>
   );
 }

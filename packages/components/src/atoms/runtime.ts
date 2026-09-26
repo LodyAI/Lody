@@ -144,11 +144,27 @@ export type PreviewVisualCommentDocStore = {
   waitUntilSynced: () => Promise<void>;
 };
 
+export type ScheduleDocStore = {
+  readonly roomId: string;
+  readonly firstSynced: Promise<void>;
+  getState: () => import('@lody/shared').ScheduleDocument | null;
+  subscribe: (listener: () => void) => () => void;
+  dispose: () => void;
+  waitUntilSynced: () => Promise<void>;
+};
+
 export type WorkspaceRuntime = {
   /**
    * The workspace slug used for caching the (slug, id) mapping.
    */
   readonly workspaceSlug: string;
+  withScheduleStore: <T>(
+    scheduleId: string,
+    fn: (store: ScheduleDocStore) => Promise<T> | T,
+    options?: { create?: boolean }
+  ) => Promise<T>;
+  acquireScheduleStore: (scheduleId: string) => Promise<ScheduleDocStore>;
+  releaseScheduleStoreRef: (scheduleId: string) => void;
   /**
    * The workspace id used for IndexedDB/WebSocket connections.
    */
@@ -203,6 +219,13 @@ export type WorkspaceRuntime = {
   ) => Promise<T>;
   releaseSessionStore: (sessionId: SessionId) => Promise<void>;
   acquireSessionStore: (sessionId: SessionId) => Promise<SessionDocStore>;
+  /**
+   * The session's store if it is already open, synchronously, without taking a
+   * reference. Lets a newly mounted conversation render a cached session in
+   * its first commit; the consumer still acquires it to keep it alive.
+   * Optional: runtimes without a synchronous cache always open asynchronously.
+   */
+  peekSessionStore?: (sessionId: SessionId) => SessionDocStore | undefined;
   releaseSessionStoreRef: (sessionId: SessionId) => void;
   withPreviewVisualCommentStore: <T>(
     sessionId: SessionId,
@@ -350,7 +373,7 @@ export type WorkspaceRuntime = {
     requestedByUserId: string,
     target: PreviewTarget,
     approval: PreviewTargetApproval,
-    options?: { replaceExisting?: boolean; timeoutMs?: number }
+    options?: { restart?: boolean; timeoutMs?: number }
   ) => Promise<SessionPreviewCreateResponse | null>;
   resolveMachineTargetPlane: (
     machineId: MachineId,
@@ -442,6 +465,12 @@ export type WorkspaceRuntime = {
     },
     options?: { timeoutMs?: number; ownerSessionId?: SessionId | string }
   ) => Promise<CodeCollabV2LspUnsupported | CodeCollabV2Error | null>;
+  requestSessionPreviewStatus: (
+    machineId: MachineId,
+    sessionId: SessionId,
+    requestedByUserId: string,
+    options?: { renewEndpointId?: string; timeoutMs?: number }
+  ) => Promise<import('@lody/shared').SessionPreviewStatusResponse | null>;
   requestSessionPreviewRevoke: (
     machineId: MachineId,
     sessionId: SessionId,

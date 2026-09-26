@@ -25,19 +25,13 @@ import {
   PinOff,
   Users,
 } from 'lucide-react';
-import { Spinner } from '@/ui/spinner';
+import { Spinner } from '@lody/ui/spinner';
 import { useTranslation } from 'react-i18next';
 
 import { cn } from '@/lib/utils';
 import { formatCompactRelativeTime } from '@/lib/format-relative-time';
-import { TooltipProvider } from '@/ui/tooltip';
-import {
-  ContextMenu,
-  ContextMenuContent,
-  ContextMenuItem,
-  ContextMenuSeparator,
-  ContextMenuTrigger,
-} from '@/ui/context-menu';
+import { Tooltip } from '@lody/ui/tooltip';
+import { ContextMenu } from '@lody/ui/context-menu';
 import { SwipeActionRow } from '@/components/shared/swipe-action-row';
 import {
   GitHubOwnerIcon,
@@ -55,6 +49,7 @@ import {
   buildSessionRowOpenedByTreeSlot,
   type SidebarRowKind,
   type SessionRowOpenedByTreeSlot,
+  SIDEBAR_ROW_LIST_CLASS,
 } from '@/components/sidebar-row-shared';
 import {
   sidebarCollapsedOpenedBySessionsAtom,
@@ -534,7 +529,7 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
   }
 
   return (
-    <TooltipProvider>
+    <Tooltip.Provider>
       <div className={cn('flex flex-col', className)}>
         {buckets.map((bucket, bucketIndex) => {
           const bucketHeaderAction = bucketIndex === 0 ? headerAction : null;
@@ -574,7 +569,7 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
                 onToggleCollapsed={canToggleBucket ? handleToggle : undefined}
               />
               {!collapsed ? (
-                <div className="flex flex-col gap-px">
+                <div className={SIDEBAR_ROW_LIST_CLASS}>
                   {visibleNodes.map((node, nodeIndex) => {
                     const openedByTree = buildSessionRowOpenedByTreeSlot(node, t, () =>
                       handleToggleOpenedBySessions(node.item.id)
@@ -651,7 +646,7 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
           onRename={(sessionId, nextTitle) => onRenameItem?.(sessionId, nextTitle)}
         />
       </div>
-    </TooltipProvider>
+    </Tooltip.Provider>
   );
 });
 
@@ -852,9 +847,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
     <span
       className={cn(
         'min-w-0 flex-1 truncate font-normal',
-        showSelectedState
-          ? 'text-sidebar-selection-foreground'
-          : 'text-sidebar-foreground group-hover/row:text-sidebar-hover-foreground'
+        showSelectedState ? 'text-sidebar-selection-foreground' : 'text-sidebar-row-foreground'
       )}
     >
       {item.title}
@@ -892,9 +885,12 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
         !showSelectedState &&
           onSelect &&
           !isMobile &&
-          'hover:bg-sidebar-hover hover:text-sidebar-hover-foreground data-[menu-open]:bg-sidebar-hover data-[menu-open]:text-sidebar-hover-foreground',
+          // Hover marks the row with its fill only; the title keeps its color.
+          'hover:bg-sidebar-hover data-[menu-open]:bg-sidebar-hover',
         showSelectedState &&
           'bg-sidebar-selection text-sidebar-selection-foreground hover:bg-sidebar-selection',
+        // Unselected titles sit below the reading column's brightness.
+        !showSelectedState && 'text-sidebar-row-foreground',
         // Keyboard-only focus ring — see SessionList: plain :focus-within also
         // matches after mouse clicks via the overlay <a> and left a permanent
         // inset ring on the selected row.
@@ -998,7 +994,9 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
                   <SessionRowWorktreeIndicator
                     isWorktree={item.kind === 'local' && item.isWorktree}
                   />
-                  {showPr ? <SessionPrIcon prStatus={prStatus} prCiState={item.prCiState} /> : null}
+                  {showPr ? (
+                    <SessionPrIcon compact prStatus={prStatus} prCiState={item.prCiState} />
+                  ) : null}
                 </span>
               ) : undefined
             }
@@ -1048,81 +1046,83 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
   }
 
   const menuRow = hasMenuActions ? (
-    <ContextMenu onOpenChange={setRowMenuOpen}>
-      <ContextMenuTrigger asChild>{row}</ContextMenuTrigger>
-      <ContextMenuContent className="min-w-[180px]">
+    <ContextMenu.Root onOpenChange={setRowMenuOpen}>
+      <ContextMenu.Trigger>{row}</ContextMenu.Trigger>
+      <ContextMenu.Content className="min-w-[180px]">
         <SessionRowOpenedByMenuItems
           opener={openedByOpener}
           goToOpenerLabel={contextMenuLabels.goToOpenerSession}
         />
         {canTogglePin ? (
-          <ContextMenuItem
-            onSelect={() => {
+          <ContextMenu.Item
+            icon={item.isPinned ? <PinOff /> : <Pin />}
+            onClick={() => {
               onTogglePin?.(item.id, !item.isPinned);
             }}
           >
-            {item.isPinned ? <PinOff /> : <Pin />}
             {item.isPinned ? contextMenuLabels.unpin : contextMenuLabels.pin}
-          </ContextMenuItem>
+          </ContextMenu.Item>
         ) : null}
         {canMarkUnread ? (
-          <ContextMenuItem
-            onSelect={() => {
+          <ContextMenu.Item
+            icon={<Mail />}
+            onClick={() => {
               onMarkUnread?.(item.id);
             }}
           >
-            <Mail />
             {contextMenuLabels.markUnread}
-          </ContextMenuItem>
+          </ContextMenu.Item>
         ) : null}
         {canRename ? (
-          <ContextMenuItem
-            onSelect={() => {
+          <ContextMenu.Item
+            icon={<Pencil />}
+            onClick={() => {
               onBeginRename(item.id, item.title);
             }}
           >
-            <Pencil />
             {contextMenuLabels.rename}
-          </ContextMenuItem>
+          </ContextMenu.Item>
         ) : null}
         {(openedByOpener || canTogglePin || canMarkUnread || canRename) &&
         (canCopyUrl || branchName || shareMenuState) ? (
-          <ContextMenuSeparator />
+          <ContextMenu.Separator />
         ) : null}
         {canCopyUrl ? (
-          <ContextMenuItem
-            onSelect={() => {
+          <ContextMenu.Item
+            icon={<Link2 />}
+            onClick={() => {
               onCopyUrl?.(item.id);
             }}
           >
-            <Link2 />
             {contextMenuLabels.copyUrl}
-          </ContextMenuItem>
+          </ContextMenu.Item>
         ) : null}
         {branchName ? (
-          <ContextMenuItem
-            onSelect={() => {
+          <ContextMenu.Item
+            icon={<GitBranch />}
+            onClick={() => {
               void navigator.clipboard.writeText(branchName).catch(() => {});
             }}
           >
-            <GitBranch />
             {contextMenuLabels.copyBranch}
-          </ContextMenuItem>
+          </ContextMenu.Item>
         ) : null}
         {shareMenuState ? (
-          <ContextMenuItem
+          <ContextMenu.Item
             disabled={shareMenuState !== 'share'}
-            onSelect={() => {
+            icon={
+              shareMenuState === 'share' ? (
+                <Users />
+              ) : shareMenuState === 'loading' ? (
+                <Spinner />
+              ) : (
+                <LockKeyhole />
+              )
+            }
+            onClick={() => {
               onShareWithTeam?.(item.id);
             }}
           >
-            {shareMenuState === 'share' ? (
-              <Users />
-            ) : shareMenuState === 'loading' ? (
-              <Spinner />
-            ) : (
-              <LockKeyhole />
-            )}
             {shareMenuState === 'share'
               ? contextMenuLabels.shareWithTeam
               : shareMenuState === 'unregistered'
@@ -1130,7 +1130,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
                 : shareMenuState === 'owner-only'
                   ? contextMenuLabels.onlyOwnerCanShare
                   : contextMenuLabels.loadingSharing}
-          </ContextMenuItem>
+          </ContextMenu.Item>
         ) : null}
         {(openedByOpener ||
           canTogglePin ||
@@ -1140,17 +1140,17 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
           branchName ||
           shareMenuState) &&
         (handlePrOpen || (canGoToOpener && openerSessionId) || isElectronRenderer()) ? (
-          <ContextMenuSeparator />
+          <ContextMenu.Separator />
         ) : null}
         {handlePrOpen ? (
-          <ContextMenuItem
-            onSelect={() => {
+          <ContextMenu.Item
+            icon={<GitPullRequest />}
+            onClick={() => {
               handlePrOpen();
             }}
           >
-            <GitPullRequest />
             {contextMenuLabels.openPr}
-          </ContextMenuItem>
+          </ContextMenu.Item>
         ) : null}
         <SessionRowOpenedByMenuItems
           goToOpener={
@@ -1172,20 +1172,20 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
           (canGoToOpener && openerSessionId) ||
           isElectronRenderer()) &&
         canArchive ? (
-          <ContextMenuSeparator />
+          <ContextMenu.Separator />
         ) : null}
         {canArchive ? (
-          <ContextMenuItem
-            onSelect={() => {
+          <ContextMenu.Item
+            icon={<Archive />}
+            onClick={() => {
               onArchive?.(item.id);
             }}
           >
-            <Archive />
             {contextMenuLabels.archive}
-          </ContextMenuItem>
+          </ContextMenu.Item>
         ) : null}
-      </ContextMenuContent>
-    </ContextMenu>
+      </ContextMenu.Content>
+    </ContextMenu.Root>
   ) : (
     row
   );

@@ -1,0 +1,61 @@
+# 深海配色、抬高的弹出层和侧栏分组标签
+
+Status: implemented
+Translation: current
+
+[English](2026-09-25-deep-sea-palette-and-sidebar-groups.md)
+
+## 摘要
+
+暖色版 Vesper 看起来发棕：暖色压暗就是咖啡色，而且铺满了所有表面。现在 Lody 的 Vesper 是安静的石墨灰，只带一丝冷意；
+品牌的水母青（#7CC4E8）是唯一「发光」的强调色，用于链接、选中、焦点和主要操作。下拉菜单和弹出层放在输入框那一层的表面上，
+不再和画布同色。侧栏里，设备、GitHub Worktrees、Chats 三类分组使用同一种标签样式（小号、粗体、淡色、无图标），下面是 14px
+的项目、仓库和会话行。设备不靠图标识别，而是靠离线 pill 和悬停卡片。亮度上限本身见[阅读对比度](2026-09-24-reading-contrast.zh.md)。
+
+## 决策
+
+- 配色（`bundled/vesper-deep-sea-palette.ts`）：在内置主题解析时应用一次，因此应用 token、终端、代码高亮和 `--vscode-*` 一致。
+  - 表面为手动调定的石墨灰：画布 #131416、侧栏 #191A1D、卡片和输入框 #1E2023、选中和悬停 #25272B、边框 #2B2D31（饱和度约 7%）。
+  - 其余中性灰保持亮度，带几个通道单位的冷色偏移，越接近白色越弱，因此文字基本是中性色。
+  - 橙色强调色（#FFC799、#FFCFA8）换成水母青（#7CC4E8、#9AD3EF）；表示警告或已修改的橙色（`editorWarning.foreground`、
+    `editorGutter.modifiedBackground`）保持琥珀色。
+- 阅读颜色（`READING_THEME_OVERRIDES`）：正文、选中行和激活标签页 #E4E5E7（HSL 亮度 90%，14.6:1），侧栏标题 #BCBEC2（9.9:1），
+  选中行的底色是 12% 的青色（#252E35）。深色上限：界面 13:1、正文 14.6:1、标题 16.3:1、侧栏行 9.9:1。Electron 窗口和标题栏使用画布色。
+- 弹出层：深色主题下 `--popover` 使用输入框的表面（`--input` 以 90% 叠在画布上）。Vesper 的弹窗背景等于编辑器颜色，
+  导致所有下拉菜单都像凹进页面里。
+- `@lody/ui`（#913）自带固定的浅色和深色调色板：纯白文字、Vesper 的橙色强调色、中性灰，并跟随系统外观。
+  `lib/vscode-theme/lody-ui-palette.stylex.ts` 用 `createTheme` 覆盖它的 `colors` token，改为读取主题变量（`--popover`、
+  `--foreground`、`--primary` 等），由 `theme-provider.tsx` 按应用自己的明暗模式挂在根元素上。菜单、弹出层和设置行因此使用
+  抬高的弹出层表面、阅读亮度上限和青色强调色；`hoverFill` / `selectedFill` 是文字色的 6% / 10%。凹槽、托盘、遮罩和灰阶保留组件库的值。
+- Archive 的搜索框改为平面输入框（`archive/archive-search.stylex.ts`，对 `field` token 的 `createTheme`）：`--input-field` 底色加
+  1px `--input-border` 边线。组件库的凹槽样式（28% 黑底、2px 内阴影和底部亮边）在这块画布上像一道很重的沟。其它输入框仍用凹槽。
+- 链接为青色，只在悬停时显示下划线。颜色由 `.markdown-renderer a` 设置：渲染器里的 `[&_a]:text-markdown-link` 从未生效
+  （Tailwind v4 不为手写类生成变体），链接一直继承正文颜色，只靠下划线区分。GitHub 引用小标签使用同一色相。
+- 列表项间距 4px（之前 8px）。输入框占位文字为其 token 的 85%（约 4.9:1；之前 40%，约 2.1:1）。
+- 侧栏分组（`sidebar-row-shared.tsx` 中的 `SIDEBAR_GROUP_LABEL_CLASS`）：
+  - 标签：`0.82 × --ui-font-size`（11.5px）、粗体、侧栏次要色的 70%、行高 26px、无图标、悬停无底色。所有分组标签都用这一个类，
+    设备、GitHub Worktrees、Chats 之间的字号和颜色不会再出现偏差。
+  - 行：项目、仓库、会话都是 14px（1em）常规字重；项目文件夹和仓库头像 16px。分组和它的行左对齐，只有会话缩进一级。
+    展开的分组之间 16px，标签到第一行 2px。
+  - 设备和 Chats 的标签在滚动时吸顶。
+  - 设备：本机排第一，然后是用户自己的其他设备，最后是队友的设备，队友设备默认折叠（手动切换会被记住）。标签去掉 `.local`。
+    离线设备名后显示「离线」pill；在线和状态未知时不显示，所以连接过程中设备不会闪现离线。悬停标签打开卡片
+    （`sidebar-machine-card.tsx`）：全名、在线状态、主人、系统和项目数。它和会话信息卡共用 `SidebarHoverCard`，同一时间只开一张。
+
+## 备选方案
+
+- 暖白点：在深色表面上显得红棕。
+- 蓝墨色表面（#12151A，饱和度约 18%）：太蓝，变化也太大。
+- 分组标签带图标：显示器或 GitHub 图标和项目文件夹、仓库头像在同一列，标签和行看起来像同一层。
+- 设备名前加状态点：让设备看起来和 GitHub Worktrees、Chats 是不同种类的分组。
+- 项目在设备下缩进：会话就需要第三级缩进，太占宽度。
+- 全大写标签：主机名变得难读。
+- 「团队设备」父分组：多一层层级，还会牵动键盘导航。
+- 卡片里显示「上次在线时间」：侧栏只有在线状态，没有上次在线时间（遗留的 `lastSeen` 字段不能用）。
+
+## 验证与限制
+
+- `tests/vscode-theme-css.test.ts` 和 `tests/vscode-theme.test.ts` 检查解析后的配色、青色强调色、琥珀色警告和抬高的弹出层。
+  `tests/sidebar-machine-card.test.tsx` 检查只有确认离线的设备才显示 pill，以及悬停卡片的内容。组件测试全部通过。
+- 在本地 web 构建上检查过：分组标签实测 11.48px / 700、同一颜色；行 14px。
+- 未完成：折叠分组的活动点、列表里的主人头像、GitHub Worktrees 标签吸顶（它的仓库渲染在它的容器之外）。浅色主题不变。

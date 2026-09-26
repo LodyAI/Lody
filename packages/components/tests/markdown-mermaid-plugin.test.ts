@@ -13,17 +13,22 @@ vi.mock('mermaid', () => {
   throw new Error('mermaid.js must not load after the renderer unifies on beautiful-mermaid');
 });
 
-const { createMarkdownMermaidConfig, createMarkdownMermaidPlugin } =
+const { createMarkdownMermaidConfig, renderMarkdownMermaidSvg } =
   await import('../src/components/ai-gui/markdown-mermaid');
 
-describe('markdown mermaid plugin', () => {
-  it('renders a flowchart through beautiful-mermaid', async () => {
-    const plugin = createMarkdownMermaidPlugin();
-    const result = await plugin
-      .getMermaid(createMarkdownMermaidConfig('dark'))
-      .render('diagram-1', ['graph TD', '  A-->B'].join('\n'));
+const relativeLuminance = (hex: string): number => {
+  const channel = (offset: number) => {
+    const value = Number.parseInt(hex.slice(offset, offset + 2), 16) / 255;
+    return value <= 0.03928 ? value / 12.92 : Math.pow((value + 0.055) / 1.055, 2.4);
+  };
+  return 0.2126 * channel(1) + 0.7152 * channel(3) + 0.0722 * channel(5);
+};
 
-    expect(result.svg).toContain('data-diagram="flowchart"');
+describe('markdown mermaid rendering', () => {
+  it('renders a flowchart through beautiful-mermaid', async () => {
+    const svg = await renderMarkdownMermaidSvg(['graph TD', '  A-->B'].join('\n'), 'dark');
+
+    expect(svg).toContain('data-diagram="flowchart"');
   });
 
   it('keeps dark-mode mermaid colors readable', () => {
@@ -33,36 +38,46 @@ describe('markdown mermaid plugin', () => {
     expect(lightConfig.theme).toBe('base');
     expect(darkConfig.theme).toBe('base');
     expect(darkConfig.darkMode).toBe(true);
-    expect(darkConfig.themeVariables).toMatchObject({
-      primaryTextColor: '#f8fafc',
-      lineColor: '#cbd5e1',
-      textColor: '#e2e8f0',
-    });
+    // Dark diagram text is readable but no brighter than the app's dark text
+    // ceiling (#D5D5D5-level luminance), never near-white.
+    const variables = darkConfig.themeVariables as Record<string, string>;
+    for (const name of [
+      'primaryTextColor',
+      'textColor',
+      'titleColor',
+      'actorTextColor',
+      'signalTextColor',
+      'noteTextColor',
+    ]) {
+      const luminance = relativeLuminance(variables[name]!);
+      expect({ name, readable: luminance > 0.5, capped: luminance <= 0.666 }).toEqual({
+        name,
+        readable: true,
+        capped: true,
+      });
+    }
     expect(darkConfig.themeVariables).not.toBe(lightConfig.themeVariables);
   });
 
   it('falls back to a themed multi-line code block for unsupported diagram types', async () => {
-    const plugin = createMarkdownMermaidPlugin();
-    const result = await plugin
-      .getMermaid(createMarkdownMermaidConfig('dark'))
-      .render('diagram-2', ['pie title Pets', '  "Dogs" : 40', '  "Cats" : 60'].join('\n'));
+    const svg = await renderMarkdownMermaidSvg(
+      ['pie title Pets', '  "Dogs" : 40', '  "Cats" : 60'].join('\n'),
+      'dark'
+    );
 
-    expect(result.svg).not.toContain('Diagram unavailable');
+    expect(svg).not.toContain('Diagram unavailable');
     // One tspan per source line, so the fallback actually renders multi-line.
-    expect(result.svg.match(/<tspan/g)).toHaveLength(3);
-    expect(result.svg).toContain('pie title Pets');
+    expect(svg.match(/<tspan/g)).toHaveLength(3);
+    expect(svg).toContain('pie title Pets');
     // Dark theme surface/text colors, not the old light amber panel.
-    expect(result.svg).toContain('fill="#111827"');
-    expect(result.svg).toContain('fill="#e2e8f0"');
+    expect(svg).toContain('fill="#111827"');
+    expect(svg).toContain('fill="#cbd5e1"');
   });
 
   it('escapes markup in the fallback source listing', async () => {
-    const plugin = createMarkdownMermaidPlugin();
-    const result = await plugin
-      .getMermaid(createMarkdownMermaidConfig('light'))
-      .render('diagram-3', 'pie title <script>alert(1)</script>');
+    const svg = await renderMarkdownMermaidSvg('pie title <script>alert(1)</script>', 'light');
 
-    expect(result.svg).not.toContain('<script>');
-    expect(result.svg).toContain('&lt;script&gt;');
+    expect(svg).not.toContain('<script>');
+    expect(svg).toContain('&lt;script&gt;');
   });
 });

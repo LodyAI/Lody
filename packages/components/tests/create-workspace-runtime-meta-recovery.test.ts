@@ -760,6 +760,35 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
     await runtime.dispose();
   });
 
+  it('takes startup capability candidates from the ready doc-meta projection', async () => {
+    mocks.joinMetaRoom.mockResolvedValueOnce(createMetaSub(Promise.resolve()));
+    mocks.listDoc.mockResolvedValue([{ docId: 'machine-scanned', meta: {}, exists: true }]);
+    let candidates: MachineId[] = [];
+    mocks.startupAcpCapabilitiesRefresh.mockImplementationOnce(async (ports) => {
+      candidates = await ports.listMachineIds();
+    });
+
+    const runtime = await createWorkspaceRuntime({
+      workspaceSlug: 'workspace',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      apiBaseUrl: 'https://api.example.test',
+      token: 'auth-token',
+      getAuthorizedMachineIds: () => new Set(['cached', 'scanned'] as MachineId[]),
+      readDocMetaCache: (repo) =>
+        repo === runtime.repo
+          ? { sessions: {}, machines: { 'machine-cached': { name: 'cached' } } }
+          : null,
+    });
+
+    await flushPromises();
+    publishPresenceSyncState('synced');
+    mocks.startupCapabilityCooldowns.at(-1)?.run();
+    await flushPromises();
+
+    expect(candidates).toEqual(['cached']);
+    await runtime.dispose();
+  });
+
   it('uses the Electron local data plane without attaching Loro Streams', async () => {
     mocks.joinMetaRoom.mockResolvedValueOnce(createMetaSub(Promise.resolve()));
     enableElectronLocalDataPlane();

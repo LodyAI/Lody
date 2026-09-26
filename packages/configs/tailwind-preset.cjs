@@ -89,6 +89,10 @@ module.exports = {
           foreground: 'hsl(var(--destructive-foreground) / <alpha-value>)',
         },
         border: 'hsl(var(--border) / <alpha-value>)',
+        // Long-form conversation text: the foreground with its contrast capped.
+        reading: 'hsl(var(--reading-foreground) / <alpha-value>)',
+        // The one step above the dark-theme brightness ceiling: headings, bold.
+        'foreground-strong': 'hsl(var(--foreground-strong) / <alpha-value>)',
         input: {
           DEFAULT: 'hsl(var(--input) / <alpha-value>)',
           // Fill of an editable control. Separate from `input.DEFAULT`, which
@@ -111,6 +115,8 @@ module.exports = {
           DEFAULT: 'hsl(var(--sidebar-background) / <alpha-value>)',
           foreground: 'hsl(var(--sidebar-foreground) / <alpha-value>)',
           'foreground-muted': 'hsl(var(--sidebar-foreground-muted) / <alpha-value>)',
+          // Unselected session titles: dimmer than the reading column.
+          'row-foreground': 'hsl(var(--sidebar-row-foreground) / <alpha-value>)',
           primary: 'hsl(var(--sidebar-primary) / <alpha-value>)',
           'primary-foreground': 'hsl(var(--sidebar-primary-foreground) / <alpha-value>)',
           highlight: 'hsl(var(--sidebar-highlight) / <alpha-value>)',
@@ -199,18 +205,17 @@ module.exports = {
         'accordion-up': 'accordion-up 0.2s ease-out',
       },
       fontFamily: {
+        // Same default stack as `--font-sans-default` in components' index.css.
         sans: [
-          'Inter',
+          'PingFang SC',
           '-apple-system',
           'BlinkMacSystemFont',
-          'Segoe UI',
-          'Roboto',
+          'Hiragino Sans GB',
+          'Microsoft YaHei',
           'Helvetica Neue',
           'Arial',
-          'system-ui',
-          'Noto Sans SC',
-          'PingFang SC',
-          'Microsoft YaHei',
+          'Apple Color Emoji',
+          'Segoe UI Emoji',
           'sans-serif',
         ],
         mono: [

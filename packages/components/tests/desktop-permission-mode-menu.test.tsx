@@ -6,7 +6,8 @@ import { createRoot, type Root } from 'react-dom/client';
 
 import { DesktopPermissionModeButton } from '../src/components/sessions/desktop-run-config-menu';
 import { initI18n } from '../src/i18n';
-import { TooltipProvider } from '../src/ui/tooltip';
+import { menuGroupLabelClassName } from '../src/ui/menu-styles';
+import { Tooltip } from '@lody/ui/tooltip';
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -57,7 +58,7 @@ describe('DesktopPermissionModeButton menu', () => {
     await act(async () => {
       root?.render(
         createElement(
-          TooltipProvider,
+          Tooltip.Provider,
           null,
           createElement(DesktopPermissionModeButton, {
             modeOptions,
@@ -69,19 +70,32 @@ describe('DesktopPermissionModeButton menu', () => {
     });
     await act(async () => {
       container
-        ?.querySelector('button[aria-label="Permission"]')
-        ?.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button: 0 }));
+        ?.querySelector('button[aria-label^="Permission"]')
+        ?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }));
+      await new Promise((resolve) => setTimeout(resolve, 40));
     });
     return document.querySelector('[role="menu"]') as HTMLElement;
   };
 
-  it('keeps the group label in sentence case and hides descriptions on the row', async () => {
+  it('shows the mode as an icon, naming the selected mode in its label and tooltip', async () => {
+    await openMenu();
+    const trigger = container?.querySelector('button[aria-label^="Permission"]');
+    expect(trigger?.getAttribute('aria-label')).toBe('Permission: Agent');
+    expect(trigger?.getAttribute('title')).toBe('Permission: Agent');
+    // No visible text: the icon carries the mode.
+    expect(trigger?.textContent?.trim()).toBe('');
+  });
+
+  it('lists options without a group label and hides descriptions on the row', async () => {
     const menu = await openMenu();
-    const label = [...menu.querySelectorAll('*')].find(
-      (node) => node.childNodes.length === 1 && node.textContent === 'Permission'
+    // The trigger already carries the "Permission" label, so the menu must not
+    // repeat it as a heading.
+    const labelClasses = menuGroupLabelClassName.split(/\s+/).filter(Boolean);
+    expect(labelClasses.length).toBeGreaterThan(0);
+    const label = [...menu.querySelectorAll('*')].find((node) =>
+      labelClasses.every((cls) => node.classList.contains(cls))
     );
-    expect(label).toBeDefined();
-    expect(label?.className).toContain('normal-case');
+    expect(label).toBeUndefined();
     expect(menu.textContent).not.toContain('Requires approval');
     expect(menu.textContent).not.toContain('Exercise caution');
     const agent = [...menu.querySelectorAll('[role="menuitem"]')].find((node) =>

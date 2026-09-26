@@ -48,22 +48,34 @@ describe('AccountMachinesOverviewView', () => {
   afterEach(async () => {
     await act(async () => root?.unmount());
     container?.remove();
+    document.body.innerHTML = '';
   });
 
-  it('opens the selected machine Agent configuration', async () => {
-    const onConfigureAgents = vi.fn();
-    await render({ onConfigureAgents });
+  it('states each machine in one line under its name', async () => {
+    await render({
+      items: [
+        items[0]!,
+        {
+          ...items[0]!,
+          id: 'machine-two' as MachineId,
+          name: 'Build box',
+          os: 'Linux',
+          isOnline: false,
+          sharedWithTeam: false,
+        },
+      ],
+    });
 
-    await act(async () => getButton('Configure').click());
-
-    expect(onConfigureAgents).toHaveBeenCalledWith(machineId);
+    expect(helpers()).toEqual([
+      'Online · macOS · Shared · 0 Agents · 1 directory',
+      'Offline · Linux · Private · 0 Agents · 1 directory',
+    ]);
   });
 
-  it('labels the current Electron machine next to its name', async () => {
+  it('labels the current Electron machine in its status line', async () => {
     await render({ currentMachineId: machineId });
 
-    const machineName = getButton('MacBook Pro');
-    expect(machineName.parentElement?.textContent).toBe('MacBook ProThis machine');
+    expect(helpers()[0]).toBe('This machine · Online · macOS · Shared · 0 Agents · 1 directory');
   });
 
   it('does not label a machine without an Electron current-machine id', async () => {
@@ -72,16 +84,17 @@ describe('AccountMachinesOverviewView', () => {
     expect(container?.textContent).not.toContain('This machine');
   });
 
-  it('reveals connected directories and opens the selected project', async () => {
-    const onOpenDirectory = vi.fn();
-    await render({ onOpenDirectory });
+  it('opens the machine settings from its one Manage button', async () => {
+    const onManageMachine = vi.fn();
+    await render({ onManageMachine });
 
-    expect(container?.textContent).not.toContain('/Users/zixuan/Code/lody');
-    await act(async () => getButton('1 directory').click());
-    expect(container?.textContent).toContain('/Users/zixuan/Code/lody');
+    const buttons = Array.from(container?.querySelectorAll('section button') ?? []).filter(
+      (button) => button.textContent === 'Manage'
+    );
+    expect(buttons).toHaveLength(1);
+    await act(async () => (buttons[0] as HTMLButtonElement).click());
 
-    await act(async () => getButton('lody').click());
-    expect(onOpenDirectory).toHaveBeenCalledWith(machineId, 'machine-one:project-one');
+    expect(onManageMachine).toHaveBeenCalledWith(machineId);
   });
 
   async function render(
@@ -91,23 +104,17 @@ describe('AccountMachinesOverviewView', () => {
       root?.render(
         <AccountMachinesOverviewView
           items={items}
-          onConfigureAgents={() => undefined}
           onManageMachine={() => undefined}
-          onOpenDirectory={() => undefined}
-          onOpenDirectories={() => undefined}
           {...overrides}
         />
       );
     });
   }
 
-  function getButton(name: string): HTMLButtonElement {
-    const button = Array.from(container?.querySelectorAll('button') ?? []).find((element) =>
-      element.textContent?.includes(name)
-    );
-    if (!(button instanceof HTMLButtonElement)) {
-      throw new Error(`Could not find button: ${name}`);
-    }
-    return button;
+  /** Each machine row's one-line status, in row order. */
+  function helpers(): string[] {
+    return Array.from(container?.querySelectorAll('section p') ?? [])
+      .map((element) => element.textContent ?? '')
+      .filter((text) => text.includes(' · '));
   }
 });

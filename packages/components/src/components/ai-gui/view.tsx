@@ -8,7 +8,6 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   memo,
   type MouseEvent as ReactMouseEvent,
-  type MutableRefObject,
   type ReactNode,
   useCallback,
   useContext,
@@ -19,6 +18,7 @@ import {
   useRef,
   useState,
 } from 'react';
+import { InteractionArmedProvider, useInteractionArm } from '@/ui/interaction-arm';
 import {
   MessageSelectionContext,
   MessageSelectionOverlay,
@@ -49,7 +49,7 @@ import { usePostHog } from '@posthog/react';
 import { capturePostHogEvent, getAnalyticsFileKind } from '@/lib/posthog-analytics';
 import { getRpcDeliveredTurnKey, rpcDeliveredTurnsAtom } from '@/atoms/session-dispatch-delivery';
 import { selectAtom } from 'jotai/utils';
-import { Virtualizer, type VirtualizerHandle, type CustomItemComponentProps } from 'virtua';
+import { Virtualizer, type VirtualizerHandle, type CustomItemComponentProps } from '@lody/virtua';
 import {
   type AgentConfigCliType,
   type ChatFailedCode,
@@ -81,7 +81,6 @@ import {
   SESSION_FILE_MAX_COUNT,
 } from '@lody/shared';
 import { AskUserQuestionCard } from '@/components/sessions/ask-user-question-card';
-import { PermissionRequestCard } from '@/components/sessions/floating-permission-request';
 import { CommentReferenceCard } from './comment-reference-card';
 import { VisualAnnotationReferenceCard } from './visual-annotation-reference-card';
 import { currentWorkspaceIdAtom } from '@/atoms';
@@ -89,6 +88,10 @@ import { getAgentMetaByIdAtomFamily } from '@/atoms/agents';
 import { sessionMetaAtomFamily } from '@/atoms/doc-meta';
 import { authTokenAtom, runtimeAtom } from '@/atoms/runtime';
 import { machineSupportsSubagentCancellation } from '@lody/shared';
+import { scrollDebug } from '@/hooks/scroll-debug-log';
+import { readSessionTurnTokenUsage, type SessionTurnTokenUsage } from '@lody/shared/session-data';
+import { formatCompactNumber } from '@/lib/format-compact-number';
+import { toIntlLocaleOrEn } from '@/lib/intl-locale';
 import { useStickyScroll } from '@/hooks/use-sticky-scroll';
 import { buildResendInputBlocks, isUndeliveredUserTurnEntry } from '@/lib/undelivered-user-turn';
 import { ConversationOutlineRail } from './conversation-outline-rail';
@@ -113,7 +116,6 @@ import {
   Brain,
   BrushCleaning,
   Check,
-  X,
   CheckCircle2,
   ChevronRight,
   Circle,
@@ -123,7 +125,6 @@ import {
   Globe,
   Info,
   ListChecks,
-  Loader2,
   MoveRight,
   PencilLine,
   Search,
@@ -149,7 +150,7 @@ import { OpenAIIcon } from '@/components/icons/openai-icon';
 import { AgentIcon } from '@/components/icons/agent-icon';
 import { AssistantEditedFiles, type AssistantEditedFileEntry } from './assistant-edited-files';
 import {
-  SessionForkDestinationPopover,
+  SessionForkDestinationMenu,
   type SessionForkDestination,
   type SessionForkWorktreeAvailability,
 } from '@/components/sessions/session-fork-destination-menu';
@@ -159,6 +160,7 @@ import {
 } from './assistant-message-render-items';
 import {
   buildAssistantTurnRenderLayout,
+  isCommandToolCall,
   type AssistantActivityRenderItem,
   type AssistantActivitySummary,
   type AssistantToolCallRenderItem,
@@ -182,7 +184,7 @@ import {
 } from './conversation-panel';
 import { TerminalComponent } from './terminal-component';
 import { prepareTerminalOutputBlocksPreview } from './terminal-preview';
-import { type DurationUnitLabels, formatDurationCompact } from '@/lib/format-duration';
+import { formatDurationCompact, getDurationUnitLabels } from '@/lib/format-duration';
 import {
   resolveLiveSessionHistoryDurationMs,
   resolveSessionHistoryDurationMs,
@@ -199,21 +201,12 @@ import { formatConversationTimestamp } from '@/lib/format-conversation-timestamp
 import { toIntlLocale } from '@/lib/intl-locale';
 import { useStableCallback } from '@/hooks/use-stable-callback';
 import { normalizeWorktreePath, normalizeWorktreeTitle } from '@/lib/worktree-path';
-import { Badge } from '@/ui/badge';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/ui/alert-dialog';
-import { Button } from '@/ui/button';
+import { Badge, type BadgeTone } from '@lody/ui/badge';
+import { AlertDialog } from '@/ui/dialog';
+import { Button } from '@lody/ui/button';
 import { stripRecommended } from '@/components/shared/acp-selector-options';
 import { DiffViewer } from '@/ui/diff-viewer/diff-viewer';
-import { Skeleton } from '@/ui/skeleton';
+import { Skeleton } from '@lody/ui/skeleton';
 import { getSessionImageBlobUrl, getSessionImageDataUrl } from '@/lib/session-image-cache';
 import { SessionFileCard, SessionFileCardList } from './session-file-card';
 import {
@@ -223,17 +216,21 @@ import {
 import { downloadSessionFile, fetchSessionFilePreview } from '@/lib/session-file-download';
 import { getMachineMetaByIdAtomFamily } from '@/atoms/machines';
 import { isHtmlSessionFile } from '@/lib/session-file-presentation';
-import type { MachineId, MessageTextSpan, SessionFilePayload } from '@lody/shared';
+import type {
+  MachineId,
+  MessageTextSpan,
+  SessionFilePayload,
+  ScheduleProposalMeta,
+} from '@lody/shared';
 import { MessageTextWithChips } from '@/components/mentions/message-text-chips';
 import { isNativeIOSAppShell } from '@/lib/native-platform';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/ui/tooltip';
-import { Popover, PopoverContent, PopoverTrigger } from '@/ui/popover';
+import { Popover, Tooltip } from '@/ui/armed-overlays';
 import { UserAvatar } from '../user-avatar';
 import { useTranslation } from 'react-i18next';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import { SessionPlanBar } from '@/components/sessions/session-plan-bar';
 import { ContainerQueryProvider } from './container-query-provider';
-import { usePermissionResponse } from '@/hooks/use-permission-response';
+import { ScheduleProposalNotice } from '@/components/schedules/schedule-proposal-notice';
 import { shouldRenderSystemRowItem } from './message-content-guards';
 import { getChatFailedDiagnosticCopy } from './chat-failed-diagnostic-copy';
 import { extractReadableChatFailedMessage } from './chat-failed-error-report';
@@ -423,6 +420,11 @@ type ChatVirtualRow = AssistantChatVirtualRow | StandardChatVirtualRow | Placeho
 export interface SessionChatStreamHandle {
   scrollToBottom: () => void;
   scrollToIndex: (index: number, smooth?: boolean) => void;
+  /**
+   * Hold the user message `messageId` at the top of the viewport, with room
+   * reserved below it for the reply, as soon as its row is rendered.
+   */
+  anchorMessage: (messageId: string) => void;
 }
 
 export type SessionChatUser =
@@ -472,17 +474,27 @@ const NativeSelectionRowsContext = createContext<{
   leading: number;
   held: ReadonlySet<string>;
 }>({ rows: [], leading: 0, held: new Set() });
+// Keys of the two Virtua rows that are not conversation rows (`keyed` needs one per row).
+const LEADING_ROW_KEY = '\u0000leading';
+const AGENT_ACTIVITY_ROW_KEY = '\u0000agent-activity';
+
 function ConversationVirtualRow({ index, ...props }: CustomItemComponentProps) {
   const { rows, leading, held } = useContext(NativeSelectionRowsContext);
   const row = rows[index - leading];
+  // Row tooltips, popovers and context menus mount on the first hover or focus
+  // (see `ui/interaction-arm.tsx`): they were over a third of a switch's mounts.
+  const { armed, armHandlers } = useInteractionArm();
   return (
     <NativeTextSelectionHoldContext.Provider value={!!row && held.has(row.turnId)}>
-      <div
-        {...props}
-        data-virtual-index={index}
-        data-conversation-row-key={row?.key}
-        data-conversation-turn-id={row?.turnId}
-      />
+      <InteractionArmedProvider value={armed}>
+        <div
+          {...props}
+          {...armHandlers}
+          data-virtual-index={index}
+          data-conversation-row-key={row?.key}
+          data-conversation-turn-id={row?.turnId}
+        />
+      </InteractionArmedProvider>
     </NativeTextSelectionHoldContext.Provider>
   );
 }
@@ -529,8 +541,6 @@ export interface SessionChatStreamViewProps {
   /** The status is live work (not waiting on the user): shimmer it. */
   agentActivityShimmer?: boolean;
   conversationFontSize?: ConversationFontSize;
-  /** Skips one auto-follow caused by the session composer changing height. */
-  skipNextViewportResizeAutoScrollRef?: MutableRefObject<boolean>;
   /** Full-page overlay that keeps the conversation outline independent of composer height. */
   outlineOverlayRoot?: HTMLElement | null;
   /**
@@ -894,6 +904,7 @@ const assistantGroupHasActiveSearch = (
 };
 
 const hasAssistantTurnConfigInfo = (message: SessionHistoryParsed): boolean =>
+  readSessionTurnTokenUsage(message.tokenUsage) !== undefined ||
   Boolean(message.modelInfo?.name) ||
   Boolean(message.inputConfig?.modeId) ||
   Boolean(message.inputConfig?.configOptionValues) ||
@@ -1328,11 +1339,11 @@ export const buildChatVirtualRows = ({
 };
 
 /**
- * Chat virtual scroll using Virtua library.
+ * Chat virtual scroll using the keyed Virtua fork (`@lody/virtua`).
  *
- * IMPORTANT: Do NOT dynamically toggle Virtua's `shift` prop — it causes
- * element overlap bugs (Virtua bug #284). We use shift={false} since chat
- * messages are appended to the end.
+ * Rows are keyed (`keyed`), not `shift`ed: sizes follow row keys, and rows
+ * inserted anywhere above the viewport (placeholder turns hydrating) keep the
+ * row at the viewport start in place.
  *
  * Sticky-to-bottom behavior (ResizeObserver, hysteresis, scroll position
  * caching) is encapsulated in the `useStickyScroll` hook.
@@ -1372,7 +1383,6 @@ export const SessionChatStreamView = forwardRef<
       // Waiting on the user (warning tone) is not work in progress.
       agentActivityShimmer = agentActivityTone !== 'warning',
       conversationFontSize = DEFAULT_CONVERSATION_FONT_SIZE,
-      skipNextViewportResizeAutoScrollRef,
       suppressStickyAutoScrollRef,
       outlineOverlayRoot,
       onVisibleTurnRangeChange,
@@ -1573,12 +1583,28 @@ export const SessionChatStreamView = forwardRef<
     // before `Virtualizer` mounts, yet every hook above that return has already
     // run — including the one that reads the stored row measurements.
     const hasVirtualizedRows = virtualRows.length > 0;
+    const placeholderRowCount = useMemo(
+      () => virtualRows.reduce((count, row) => count + (row.type === 'placeholder' ? 1 : 0), 0),
+      [virtualRows]
+    );
+    // Placeholder turns turning into several body rows is the prime suspect for
+    // repeated open flicker; the scroll debug timeline records each change.
+    useEffect(() => {
+      scrollDebug('rows', {
+        total: virtualRows.length,
+        placeholders: placeholderRowCount,
+        leading: leadingContent != null,
+      });
+    }, [leadingContent, placeholderRowCount, virtualRows.length]);
 
     const {
       scrollRef: scrollContainerRef,
+      spacerRef: bottomSpacerRef,
       scrollElement: scrollViewportElement,
       isSticky,
-      scrollToBottom,
+      scrollToBottom: scrollStreamToBottom,
+      anchorToRow,
+      retargetAnchor,
       initialScrollRestored,
       initialVirtualizerCache,
       persistVirtualizerCache,
@@ -1592,9 +1618,59 @@ export const SessionChatStreamView = forwardRef<
       // scroll otherwise targets an index short of the true bottom.
       itemCount: virtualRows.length + leadingRowCount + (shouldShowAgentActivityRow ? 1 : 0),
       onAtBottomChange,
-      skipNextViewportResizeAutoScrollRef,
       suppressAutoScrollRef: autoScrollSuppressedRef,
     });
+
+    /**
+     * A sent message waiting for its row. The send path learns the turn id
+     * before the conversation view renders it, so the anchor is resolved in
+     * the layout effect of the commit that first contains the row.
+     */
+    const pendingAnchorMessageIdRef = useRef<string | null>(null);
+    /**
+     * The message currently held. The hook holds a Virtua index, so rows
+     * inserted or removed above it (the provenance row, a work group folding,
+     * a placeholder splitting) re-resolve the index from this id.
+     */
+    const anchoredMessageIdRef = useRef<string | null>(null);
+    const findMessageRowIndex = useCallback(
+      (messageId: string) => {
+        const rowIndex = virtualRows.findIndex(
+          (row) =>
+            row.type === 'standard' &&
+            row.item.type === 'message' &&
+            row.item.message.id === messageId
+        );
+        return rowIndex === -1 ? -1 : rowIndex + leadingRowCount;
+      },
+      [leadingRowCount, virtualRows]
+    );
+    const resolvePendingAnchor = useCallback(() => {
+      const messageId = pendingAnchorMessageIdRef.current;
+      if (messageId === null) {
+        const anchored = anchoredMessageIdRef.current;
+        if (anchored !== null) retargetAnchor(findMessageRowIndex(anchored));
+        return;
+      }
+      const index = findMessageRowIndex(messageId);
+      if (index === -1) return;
+      pendingAnchorMessageIdRef.current = null;
+      anchoredMessageIdRef.current = messageId;
+      anchorToRow(index);
+    }, [anchorToRow, findMessageRowIndex, retargetAnchor]);
+    useLayoutEffect(resolvePendingAnchor, [resolvePendingAnchor]);
+    const anchorMessage = useCallback(
+      (messageId: string) => {
+        pendingAnchorMessageIdRef.current = messageId;
+        resolvePendingAnchor();
+      },
+      [resolvePendingAnchor]
+    );
+    const scrollToBottom = useCallback(() => {
+      pendingAnchorMessageIdRef.current = null;
+      anchoredMessageIdRef.current = null;
+      scrollStreamToBottom();
+    }, [scrollStreamToBottom]);
     const selectableRows = useMemo(
       () =>
         virtualRows.map((row) => ({
@@ -1648,13 +1724,17 @@ export const SessionChatStreamView = forwardRef<
           )
         ),
     });
+    // Every row reads this context. `holds` is a fresh Map per render, so key the
+    // held set by its ids: a new set per render re-rendered every row, ~10 times
+    // per session switch.
+    const heldTurnIdsKey = [...nativeTextSelection.holds.keys()].join('\0');
+    const heldTurnIds = useMemo(
+      () => new Set(heldTurnIdsKey === '' ? [] : heldTurnIdsKey.split('\0')),
+      [heldTurnIdsKey]
+    );
     const nativeSelectionRows = useMemo(
-      () => ({
-        rows: selectableRows,
-        leading: leadingRowCount,
-        held: new Set(nativeTextSelection.holds.keys()),
-      }),
-      [selectableRows, leadingRowCount, nativeTextSelection.holds]
+      () => ({ rows: selectableRows, leading: leadingRowCount, held: heldTurnIds }),
+      [selectableRows, leadingRowCount, heldTurnIds]
     );
 
     // ---- Outline rail ------------------------------------------------------
@@ -1868,15 +1948,45 @@ export const SessionChatStreamView = forwardRef<
       reportVisibleTurnRange();
     }, [initialScrollRestored, reportVisibleTurnRange, virtualRows.length]);
 
+    // The top fade's bottom counterpart, above the info bar: shown while
+    // conversation content continues past the bottom edge. The reply room under
+    // an anchored message is blank space, not content, so it does not count.
+    const [hasContentBelow, setHasContentBelow] = useState(false);
+    const syncHasContentBelow = useCallback(() => {
+      const viewport = scrollViewportElement;
+      if (!viewport) return;
+      const replyRoom = viewport.querySelector<HTMLElement>(
+        ':scope > [data-conversation-reply-room]'
+      );
+      const below =
+        viewport.scrollHeight -
+        viewport.scrollTop -
+        viewport.clientHeight -
+        (replyRoom?.offsetHeight ?? 0);
+      setHasContentBelow(below > 1);
+    }, [scrollViewportElement]);
+
     const handleStreamScroll = useCallback(
       (offset: number) => {
         handleScroll(offset);
         setIsScrolledFromTop(offset > 0);
+        syncHasContentBelow();
         syncActiveOutlineIndex();
         reportVisibleTurnRange();
       },
-      [handleScroll, reportVisibleTurnRange, syncActiveOutlineIndex]
+      [handleScroll, reportVisibleTurnRange, syncActiveOutlineIndex, syncHasContentBelow]
     );
+
+    // Content also grows or shrinks without a scroll (a streaming reply under
+    // an anchored message, a resized window); re-measure on those too.
+    useEffect(() => {
+      if (isMobile || !scrollViewportElement) return undefined;
+      const observer = new ResizeObserver(syncHasContentBelow);
+      observer.observe(scrollViewportElement);
+      const content = scrollViewportElement.firstElementChild;
+      if (content) observer.observe(content);
+      return () => observer.disconnect();
+    }, [isMobile, scrollViewportElement, syncHasContentBelow]);
 
     const handleOutlinePreview = useCallback(
       (outlineIndex: number) => {
@@ -1919,9 +2029,10 @@ export const SessionChatStreamView = forwardRef<
       [activeSearchBlockId, items, scrollRowToTop, virtualRows]
     );
 
-    useImperativeHandle(ref, () => ({ scrollToBottom, scrollToIndex }), [
+    useImperativeHandle(ref, () => ({ scrollToBottom, scrollToIndex, anchorMessage }), [
       scrollToBottom,
       scrollToIndex,
+      anchorMessage,
     ]);
 
     const noMessagesLabel = t('sessions.noMessages');
@@ -2055,7 +2166,10 @@ export const SessionChatStreamView = forwardRef<
                   // the first layout is the real one instead of an estimate that
                   // has to be corrected before the conversation can be shown.
                   cache={initialVirtualizerCache}
-                  shift={false}
+                  // Rows are identified by key: sizes follow their rows, and a
+                  // placeholder turn becoming several rows above the reader
+                  // leaves what they are reading in place.
+                  keyed
                   onScroll={handleStreamScroll}
                   onScrollEnd={handleStreamScrollEnd}
                   // Pre-render extra items outside the viewport to reduce blank areas
@@ -2068,7 +2182,9 @@ export const SessionChatStreamView = forwardRef<
                   keepMounted={nativeTextSelection.keepMounted}
                 >
                   {leadingContent == null ? null : (
-                    <div data-conversation-leading-content="">{leadingContent}</div>
+                    <div key={LEADING_ROW_KEY} data-conversation-leading-content="">
+                      {leadingContent}
+                    </div>
                   )}
                   {virtualRows.map((row, rowIndex) => {
                     if (row.type === 'placeholder') {
@@ -2140,7 +2256,11 @@ export const SessionChatStreamView = forwardRef<
                     );
                   })}
                   {shouldShowAgentActivityRow && agentActivityLabel && (
-                    <div className="shrink-0 pt-1" data-agent-activity-row-spacer="">
+                    <div
+                      key={AGENT_ACTIVITY_ROW_KEY}
+                      className="shrink-0 pt-1"
+                      data-agent-activity-row-spacer=""
+                    >
                       <AgentActivityRow
                         label={agentActivityLabel}
                         tone={agentActivityTone}
@@ -2152,12 +2272,24 @@ export const SessionChatStreamView = forwardRef<
                   )}
                 </Virtualizer>
               </NativeSelectionRowsContext.Provider>
+              {/* Reply room below an anchored sent message; useStickyScroll
+                  owns its height. It must follow the Virtualizer: sticky scroll
+                  reads the virtualized content as the viewport's first child. */}
+              <div ref={bottomSpacerRef} aria-hidden data-conversation-reply-room="" />
               <MessageSelectionOverlay />
             </div>
             {/* Top fade into the bg-background canvas above (desktop only),
                 hinting that the conversation continues past the top edge. */}
             {!isMobile && isScrolledFromTop ? (
               <div className="pointer-events-none absolute inset-x-0 top-0 h-12 bg-gradient-to-b from-background to-transparent" />
+            ) : null}
+            {/* Bottom fade into the same canvas over the last 40px above the
+                info bar (desktop only): more conversation below. */}
+            {!isMobile && hasContentBelow ? (
+              <div
+                data-conversation-bottom-fade=""
+                className="pointer-events-none absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-background to-transparent"
+              />
             ) : null}
             {/* Round outline. Its visual layer portals to the full-page overlay
                 when supplied, so composer growth cannot move its centre. It is
@@ -2182,7 +2314,7 @@ export const SessionChatStreamView = forwardRef<
                 <ConversationColumn className="flex justify-end">
                   <Button
                     variant="secondary"
-                    size="icon"
+                    icon
                     className="pointer-events-auto rounded-full border-[0.5px] border-border bg-white text-foreground shadow-[0_0.5px_1px_1px_rgba(0,0,0,0.04)] hover:bg-white dark:bg-secondary dark:text-secondary-foreground dark:shadow-none"
                     onClick={scrollToBottom}
                     aria-label={t('sessions.scrollToLatest')}
@@ -2303,7 +2435,15 @@ const SystemMessageRowView = ({
   return (
     <div className="flex flex-col gap-2">
       {systemItems.map(({ item, itemIndex }) =>
-        item.type === 'system_notice' ? (
+        item.type === 'system_notice' && item.name === 'schedule_proposal' && item.meta ? (
+          <ScheduleProposalNotice
+            key={`schedule-proposal-${itemIndex}`}
+            meta={item.meta as ScheduleProposalMeta}
+            sessionId={sessionId}
+            entryId={message.id}
+            itemIndex={itemIndex}
+          />
+        ) : item.type === 'system_notice' ? (
           <SystemNoticeView
             key={`${item.name}-${itemIndex}`}
             notice={item}
@@ -2701,12 +2841,13 @@ const SystemNoticeView = ({
 
       {/* Center content */}
       <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-muted/50 border border-border/60">
-        <TooltipProvider>
-          <Tooltip delayDuration={500}>
-            <TooltipTrigger asChild>
-              <Info className="h-4 w-4 text-muted-foreground cursor-help" />
-            </TooltipTrigger>
-            <TooltipContent side="top" className="max-w-xs text-center">
+        <Tooltip.Provider>
+          <Tooltip.Root>
+            <Tooltip.Trigger
+              delay={500}
+              render={<Info className="h-4 w-4 text-muted-foreground cursor-help" />}
+            />
+            <Tooltip.Content side="top" className="max-w-xs text-center">
               <p>{tooltipContent}</p>
               {meta?.terminalOmitted && (
                 <p className="mt-1 text-xs opacity-80">
@@ -2724,9 +2865,9 @@ const SystemNoticeView = ({
                   )}
                 </p>
               )}
-            </TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
+            </Tooltip.Content>
+          </Tooltip.Root>
+        </Tooltip.Provider>
         <span className="text-xs text-muted-foreground">{mainMessage}</span>
       </div>
 
@@ -3411,89 +3552,102 @@ const UserMessageRowView = ({
               />
             )}
             {onEdit ? (
-              <TooltipProvider>
-                <Tooltip delayDuration={500}>
-                  <TooltipTrigger asChild>
+              <Tooltip.Provider>
+                <Tooltip.Root>
+                  <Tooltip.Trigger
+                    delay={500}
+                    render={
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        icon
+                        className={cn(
+                          'h-7 w-7 text-muted-foreground hover:bg-hover hover:text-foreground transition-opacity',
+                          !isMobile &&
+                            'opacity-0 group-hover/usermsg:opacity-100 focus-visible:opacity-100'
+                        )}
+                        onClick={() => {
+                          setEditText(getTextContentFromMessageItems(message.items));
+                          setIsEditing(true);
+                        }}
+                        aria-label={t('sessions.editMessage', 'Edit message')}
+                      >
+                        <PencilLine className="h-3.5 w-3.5" />
+                      </Button>
+                    }
+                  />
+                  <Tooltip.Content>{t('sessions.editMessage', 'Edit message')}</Tooltip.Content>
+                </Tooltip.Root>
+              </Tooltip.Provider>
+            ) : null}
+            {pinCtx ? (
+              <Tooltip.Provider>
+                <Tooltip.Root>
+                  <Tooltip.Trigger
+                    delay={500}
+                    render={
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        icon
+                        className={cn(
+                          'h-7 w-7 text-muted-foreground hover:bg-hover hover:text-foreground transition-opacity',
+                          !isMobile &&
+                            'opacity-0 group-hover/usermsg:opacity-100 focus-visible:opacity-100'
+                        )}
+                        onClick={handlePin}
+                        aria-label={
+                          isPinned
+                            ? t('sessions.pin.unpin', 'Unpin message')
+                            : t('sessions.pin.pin', 'Pin this message')
+                        }
+                      >
+                        {isPinned ? (
+                          <PinOff className="h-3.5 w-3.5" />
+                        ) : (
+                          <Pin className="h-3.5 w-3.5" />
+                        )}
+                      </Button>
+                    }
+                  />
+                  <Tooltip.Content>
+                    {isPinned
+                      ? t('sessions.pin.unpin', 'Unpin message')
+                      : t('sessions.pin.pin', 'Pin this message')}
+                  </Tooltip.Content>
+                </Tooltip.Root>
+              </Tooltip.Provider>
+            ) : null}
+            <Tooltip.Provider>
+              <Tooltip.Root>
+                <Tooltip.Trigger
+                  delay={500}
+                  render={
                     <Button
                       type="button"
                       variant="ghost"
-                      size="icon"
+                      icon
                       className={cn(
                         'h-7 w-7 text-muted-foreground hover:bg-hover hover:text-foreground transition-opacity',
                         !isMobile &&
                           'opacity-0 group-hover/usermsg:opacity-100 focus-visible:opacity-100'
                       )}
                       onClick={() => {
-                        setEditText(getTextContentFromMessageItems(message.items));
-                        setIsEditing(true);
+                        void handleCopy();
                       }}
-                      aria-label={t('sessions.editMessage', 'Edit message')}
+                      aria-label="Copy message"
                     >
-                      <PencilLine className="h-3.5 w-3.5" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>{t('sessions.editMessage', 'Edit message')}</TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
-            ) : null}
-            {pinCtx ? (
-              <TooltipProvider>
-                <Tooltip delayDuration={500}>
-                  <TooltipTrigger asChild>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      className={cn(
-                        'h-7 w-7 text-muted-foreground hover:bg-hover hover:text-foreground transition-opacity',
-                        !isMobile &&
-                          'opacity-0 group-hover/usermsg:opacity-100 focus-visible:opacity-100'
-                      )}
-                      onClick={handlePin}
-                      aria-label={
-                        isPinned
-                          ? t('sessions.pin.unpin', 'Unpin message')
-                          : t('sessions.pin.pin', 'Pin this message')
-                      }
-                    >
-                      {isPinned ? (
-                        <PinOff className="h-3.5 w-3.5" />
+                      {didCopy ? (
+                        <Check className="h-3.5 w-3.5" />
                       ) : (
-                        <Pin className="h-3.5 w-3.5" />
+                        <Copy className="h-3.5 w-3.5" />
                       )}
                     </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>
-                    {isPinned
-                      ? t('sessions.pin.unpin', 'Unpin message')
-                      : t('sessions.pin.pin', 'Pin this message')}
-                  </TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
-            ) : null}
-            <TooltipProvider>
-              <Tooltip delayDuration={500}>
-                <TooltipTrigger asChild>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    className={cn(
-                      'h-7 w-7 text-muted-foreground hover:bg-hover hover:text-foreground transition-opacity',
-                      !isMobile &&
-                        'opacity-0 group-hover/usermsg:opacity-100 focus-visible:opacity-100'
-                    )}
-                    onClick={() => {
-                      void handleCopy();
-                    }}
-                    aria-label="Copy message"
-                  >
-                    {didCopy ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>{didCopy ? 'Copied' : 'Copy message'}</TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
+                  }
+                />
+                <Tooltip.Content>{didCopy ? 'Copied' : 'Copy message'}</Tooltip.Content>
+              </Tooltip.Root>
+            </Tooltip.Provider>
           </div>
         ) : null}
       </div>
@@ -3523,28 +3677,30 @@ function UserMessageAuthorAvatar({
 }) {
   const { t } = useTranslation();
   const displayName = user?.name?.trim() || user?.email?.trim();
-  const avatar = (
-    <UserAvatar user={user} className={cn(isMobile ? 'h-7 w-7' : 'h-8 w-8')} showIcon />
-  );
+  // One rung on both shells: the 28/32 split was a size that had drifted rather
+  // than a decision, and `@lody/ui`'s ladder has nothing between them.
+  const avatar = <UserAvatar user={user} size="large" showIcon />;
 
   if (isMobile || !showProfile || !displayName) {
     return avatar;
   }
 
   return (
-    <Popover>
-      <PopoverTrigger asChild>
-        <button
-          type="button"
-          className="block rounded-full outline-hidden ring-offset-background transition-opacity hover:opacity-85 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-          aria-label={t('sessions.openSenderProfile', 'View profile for {{name}}', {
-            name: displayName,
-          })}
-        >
-          {avatar}
-        </button>
-      </PopoverTrigger>
-      <PopoverContent
+    <Popover.Root>
+      <Popover.Trigger
+        render={
+          <button
+            type="button"
+            className="block rounded-full outline-hidden ring-offset-background transition-opacity hover:opacity-85 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+            aria-label={t('sessions.openSenderProfile', 'View profile for {{name}}', {
+              name: displayName,
+            })}
+          >
+            {avatar}
+          </button>
+        }
+      />
+      <Popover.Content
         side="left"
         align="start"
         sideOffset={10}
@@ -3552,11 +3708,7 @@ function UserMessageAuthorAvatar({
         aria-label={t('sessions.senderProfile', 'Sender profile')}
       >
         <div className="flex items-center gap-3.5 p-4">
-          <UserAvatar
-            user={user}
-            className="h-16 w-16 shrink-0 text-xl"
-            fallbackClassName="bg-primary/10 text-primary"
-          />
+          <UserAvatar user={user} size="xlarge" className="shrink-0" />
           <div className="min-w-0">
             <div className="truncate text-sm font-semibold text-foreground">
               {user?.name?.trim() || displayName}
@@ -3568,8 +3720,8 @@ function UserMessageAuthorAvatar({
             ) : null}
           </div>
         </div>
-      </PopoverContent>
-    </Popover>
+      </Popover.Content>
+    </Popover.Root>
   );
 }
 
@@ -3593,15 +3745,15 @@ const ResendUndeliveredDialog = ({
 }) => {
   const { t } = useTranslation();
   return (
-    <AlertDialog open={open} onOpenChange={onOpenChange}>
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle>
+    <AlertDialog.Root open={open} onOpenChange={onOpenChange}>
+      <AlertDialog.Content>
+        <AlertDialog.Header>
+          <AlertDialog.Title>
             {deliveryUnknown
               ? t('sessions.messageStatus.deliveryUnknown', 'Application unknown')
               : t('sessions.resendUndelivered.title', 'Message not delivered')}
-          </AlertDialogTitle>
-          <AlertDialogDescription>
+          </AlertDialog.Title>
+          <AlertDialog.Description>
             {deliveryUnknown
               ? t(
                   'sessions.resendUndelivered.unknownDescription',
@@ -3611,19 +3763,75 @@ const ResendUndeliveredDialog = ({
                   'sessions.resendUndelivered.description',
                   'This message never reached the agent, so it did not run. Resend the same content as a new message?'
                 )}
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel disabled={isResending}>
+          </AlertDialog.Description>
+        </AlertDialog.Header>
+        <AlertDialog.Footer>
+          <AlertDialog.Cancel disabled={isResending}>
             {t('common.cancel', 'Cancel')}
-          </AlertDialogCancel>
-          <AlertDialogAction disabled={isResending} onClick={onConfirm}>
+          </AlertDialog.Cancel>
+          <AlertDialog.Action disabled={isResending} onClick={onConfirm}>
             {isResending ? <Spinner className="h-3.5 w-3.5" strokeWidth={2} /> : null}
             {t('sessions.resendUndelivered.action', 'Resend message')}
-          </AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
+          </AlertDialog.Action>
+        </AlertDialog.Footer>
+      </AlertDialog.Content>
+    </AlertDialog.Root>
+  );
+};
+
+/** Tokens this turn consumed, in compact product-language units (1.2K / 1.2万). */
+const AssistantTurnTokenUsageRows = ({ usage }: { usage: SessionTurnTokenUsage }) => {
+  const { t, i18n } = useTranslation();
+  const locale = toIntlLocaleOrEn(i18n.resolvedLanguage ?? i18n.language);
+  const exact = new Intl.NumberFormat(locale);
+  const rows = [
+    {
+      key: 'input',
+      label: t('sessions.turnConfig.inputTokens', 'Input'),
+      value: usage.inputTokens,
+      detail: undefined,
+    },
+    {
+      key: 'output',
+      label: t('sessions.turnConfig.outputTokens', 'Output'),
+      // Stored output excludes reasoning; the turn's output is both.
+      value: usage.outputTokens + usage.reasoningOutputTokens,
+      detail:
+        usage.reasoningOutputTokens > 0
+          ? t('sessions.turnConfig.outputDetail', 'Reasoning {{reasoning}}', {
+              reasoning: exact.format(usage.reasoningOutputTokens),
+            })
+          : undefined,
+    },
+    {
+      key: 'cache',
+      label: t('sessions.turnConfig.cacheTokens', 'Cache'),
+      value: usage.cacheReadInputTokens + usage.cacheCreationInputTokens,
+      detail: t('sessions.turnConfig.cacheDetail', 'Read {{read}} · Write {{write}}', {
+        read: exact.format(usage.cacheReadInputTokens),
+        write: exact.format(usage.cacheCreationInputTokens),
+      }),
+    },
+  ];
+  return (
+    <div className="border-t border-border/60 px-3 py-2.5">
+      <div className="mb-1.5 text-[11px] font-medium text-foreground">
+        {t('sessions.turnConfig.tokens', 'Tokens')}
+      </div>
+      <dl className="space-y-1.5">
+        {rows.map((row) => (
+          <div key={row.key} className="flex items-start justify-between gap-3 text-[11px]">
+            <dt className="shrink-0 text-muted-foreground">{row.label}</dt>
+            <dd
+              className="text-right font-medium tabular-nums text-foreground"
+              title={[exact.format(row.value), row.detail].filter(Boolean).join(' · ')}
+            >
+              {formatCompactNumber(row.value, locale)}
+            </dd>
+          </div>
+        ))}
+      </dl>
+    </div>
   );
 };
 
@@ -3659,7 +3867,11 @@ const AssistantTurnConfigInfoButton = ({
     [message.modelInfo, message.inputConfig]
   );
   const modelBaseName = message.modelInfo ? formatAssistantModelBaseName(message.modelInfo) : '';
-  if (configRows.length === 0 && !modelBaseName) {
+  const tokenUsage = useMemo(
+    () => readSessionTurnTokenUsage(message.tokenUsage),
+    [message.tokenUsage]
+  );
+  if (configRows.length === 0 && !modelBaseName && !tokenUsage) {
     return null;
   }
   const tooltipPreview = (() => {
@@ -3677,37 +3889,41 @@ const AssistantTurnConfigInfoButton = ({
   })();
 
   return (
-    <Popover open={configOpen} onOpenChange={setConfigOpen}>
-      <TooltipProvider delayDuration={300}>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <PopoverTrigger asChild>
-              <button
-                type="button"
-                className={cn(
-                  'inline-flex shrink-0 items-center justify-center rounded-sm',
-                  /* Rest tone matches every other icon in the turn; hover is
+    <Popover.Root open={configOpen} onOpenChange={setConfigOpen}>
+      <Tooltip.Provider>
+        <Tooltip.Root>
+          <Tooltip.Trigger
+            render={
+              <Popover.Trigger
+                render={
+                  <button
+                    type="button"
+                    className={cn(
+                      'inline-flex shrink-0 items-center justify-center rounded-sm',
+                      /* Rest tone matches every other icon in the turn; hover is
                      what brightens. */
-                  'text-muted-foreground transition-colors',
-                  'hover:bg-hover/50 hover:text-foreground',
-                  'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
-                  className
-                )}
-                aria-label={t('sessions.turnConfig.open', 'Turn configuration')}
-                aria-expanded={configOpen}
-              >
-                <Info className={cn('h-3.5 w-3.5', iconClassName)} strokeWidth={2} />
-              </button>
-            </PopoverTrigger>
-          </TooltipTrigger>
+                      'text-muted-foreground transition-colors',
+                      'hover:bg-hover/50 hover:text-foreground',
+                      'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
+                      className
+                    )}
+                    aria-label={t('sessions.turnConfig.open', 'Turn configuration')}
+                    aria-expanded={configOpen}
+                  >
+                    <Info className={cn('h-3.5 w-3.5', iconClassName)} strokeWidth={2} />
+                  </button>
+                }
+              />
+            }
+          />
           {!configOpen ? (
-            <TooltipContent side="top" className="max-w-xs">
+            <Tooltip.Content side="top" className="max-w-xs">
               {tooltipPreview}
-            </TooltipContent>
+            </Tooltip.Content>
           ) : null}
-        </Tooltip>
-      </TooltipProvider>
-      <PopoverContent align="start" side="bottom" sideOffset={6} className="w-64 gap-0 p-0">
+        </Tooltip.Root>
+      </Tooltip.Provider>
+      <Popover.Content align="start" side="bottom" sideOffset={6} className="w-64 gap-0 p-0">
         <div className="border-b border-border/60 px-3 py-2">
           <div className="text-[11px] font-medium text-foreground">
             {t('sessions.turnConfig.title', 'Turn configuration')}
@@ -3731,32 +3947,38 @@ const AssistantTurnConfigInfoButton = ({
               </dd>
             </div>
           ))}
-          {configRows.length === 0 ? (
+          {configRows.length === 0 && !tokenUsage ? (
             <p className="text-[11px] text-muted-foreground">
               {t('sessions.turnConfig.empty', 'No configuration recorded for this turn.')}
             </p>
           ) : null}
         </dl>
-      </PopoverContent>
-    </Popover>
+        {tokenUsage ? <AssistantTurnTokenUsageRows usage={tokenUsage} /> : null}
+      </Popover.Content>
+    </Popover.Root>
   );
 };
 
-/* Shared type/icon for the activity group header AND every tool/thought
-   step under it — one size, one color so the stack reads as one list. */
-const ACTIVITY_PROCESS_TEXT_CLASS = 'text-[12.5px] font-medium leading-snug text-muted-foreground';
-const ACTIVITY_PROCESS_ICON_CLASS = 'h-3.5 w-3.5 shrink-0 text-muted-foreground';
-/* One tone for every icon in a turn — see `ACTIVITY_PROCESS_ICON_CLASS`. Only
-   the optical nudge is local; no per-icon opacity. */
-const ACTIVITY_STEP_ICON_CLASS = cn(ACTIVITY_PROCESS_ICON_CLASS, 'mt-0.5');
+/* The turn reads on three steps: the reply is the text; a group summary
+   ("Worked for 12s", "Read 2 files") is a notch smaller and secondary; a step
+   under it is smaller again, at regular weight — a medium-weight gray reads as
+   a second, muddier kind of text. Steps carry no glyphs: the verb already says
+   what kind of step it is, and a column of icons was a second list beside it. */
+const ACTIVITY_PROCESS_TEXT_CLASS = 'text-[12.5px] font-normal leading-snug text-muted-foreground';
+const ACTIVITY_PROCESS_ICON_CLASS = 'h-3.5 w-3.5 shrink-0 text-muted-foreground/70';
 /* Match the prose's fixed 4px inset, independent of the root font size. */
 const ACTIVITY_STEP_BUTTON_CLASS = cn(
-  'min-h-7 items-start rounded-md px-[4px] py-1 hover:bg-hover/40',
+  /* As wide as its words: a step is a line of text, not a bar across the
+     column. Hover brightens the words (see the title class), not a fill. */
+  'w-fit max-w-full min-h-6 select-none items-start rounded-md px-[4px] py-0.5',
   ACTIVITY_PROCESS_TEXT_CLASS
 );
-const ACTIVITY_STEP_TITLE_CLASS = cn('min-w-0 flex-1', ACTIVITY_PROCESS_TEXT_CLASS);
+const ACTIVITY_STEP_TITLE_CLASS = cn(
+  'min-w-0 flex-1 transition-colors group-hover:text-foreground',
+  ACTIVITY_PROCESS_TEXT_CLASS
+);
 const ACTIVITY_STEP_BODY_CLASS =
-  'text-[12.5px] font-medium leading-[1.5] text-muted-foreground ' +
+  'text-[12.5px] font-normal leading-[1.5] text-muted-foreground ' +
   '[&_:is(h1,h2,h3,h4,h5,h6)]:!my-1 [&_:is(h1,h2,h3,h4,h5,h6)]:!text-[12.5px] ' +
   '[&_:is(h1,h2,h3,h4,h5,h6)]:!font-medium [&_:is(h1,h2,h3,h4,h5,h6)]:!text-muted-foreground ' +
   '[&_:is(h1,h2,h3,h4,h5,h6):first-child]:!mt-0 ' +
@@ -3764,12 +3986,23 @@ const ACTIVITY_STEP_BODY_CLASS =
 
 /* The collapsed activity group's label type; the live status row reuses it so
    "Working" reads as the next group label, not a separate widget. */
+/** A one-line process status ("Context compacted"): the group header's box and type. */
+const PROCESS_STATUS_LINE_CLASS = (isMobile: boolean) =>
+  cn(
+    'flex w-full items-center py-0.5 text-muted-foreground',
+    isMobile
+      ? cn('gap-1.5 pr-1', ACTIVITY_PROCESS_TEXT_CLASS)
+      : 'gap-1.5 px-[4px] text-[length:var(--markdown-body-font-size,1em)] leading-[1.75]'
+  );
+
 const ACTIVITY_GROUP_LABEL_CLASS = (isMobile: boolean) =>
   cn(
     'min-w-0',
     isMobile
       ? cn('flex-1', ACTIVITY_PROCESS_TEXT_CLASS)
-      : 'text-[length:var(--markdown-body-font-size,1em)] font-normal leading-[1.75]'
+      : /* A notch under the reply, and set close: summaries and their steps
+           are one compact list between paragraphs, not paragraphs themselves. */
+        'text-[length:calc(var(--markdown-body-font-size,1em)*0.9)] font-normal leading-[1.5]'
   );
 
 /** Last intended rotate after a click. Survives Virtua remounting the row. */
@@ -3928,11 +4161,7 @@ const WorkedGroupHeader = ({
 }) => {
   const { t } = useTranslation();
   const isMobile = useIsMobile();
-  const durationUnitLabels: DurationUnitLabels = {
-    hour: t('time.unitShort.hour', 'h'),
-    minute: t('time.unitShort.minute', 'm'),
-    second: t('time.unitShort.second', 's'),
-  };
+  const durationUnitLabels = getDurationUnitLabels(t);
   /* Mobile moves the turn duration to the footer action bar, where it also
      keeps the copy button clear of the session drawer's left-edge back-swipe
      strip. Both rows read the same `resolveSessionHistoryDurationMs(message)`,
@@ -3966,7 +4195,7 @@ function ActivityProcessStep({
   children,
   className,
 }: {
-  icon: ReactNode;
+  icon?: ReactNode;
   children: ReactNode;
   className?: string;
 }) {
@@ -3974,12 +4203,12 @@ function ActivityProcessStep({
     <div
       className={cn(
         /* Keep the leading icon on the same inset as tool steps and prose. */
-        'flex w-full min-h-7 items-start gap-1.5 px-[4px] py-1',
+        'flex w-full min-h-6 items-start gap-1.5 px-[4px] py-0.5',
         ACTIVITY_PROCESS_TEXT_CLASS,
         className
       )}
     >
-      <span className="inline-flex shrink-0">{icon}</span>
+      {icon ? <span className="inline-flex shrink-0">{icon}</span> : null}
       <div className="min-w-0 flex-1">{children}</div>
     </div>
   );
@@ -3987,13 +4216,11 @@ function ActivityProcessStep({
 
 const AssistantToolCallVirtualRow = memo(
   function AssistantToolCallVirtualRow({
-    sessionId,
     messageId,
     entry,
     onFilePathClick,
     fontSize,
   }: {
-    sessionId: SessionId;
     messageId: string;
     entry: AssistantToolCallRenderItem;
     onFilePathClick?: (filePath: string) => void;
@@ -4018,7 +4245,6 @@ const AssistantToolCallVirtualRow = memo(
 
     return (
       <ToolCallCard
-        sessionId={sessionId}
         toolCall={entry.content}
         expanded={expanded}
         onExpandedChange={setExpanded}
@@ -4034,7 +4260,6 @@ const AssistantToolCallVirtualRow = memo(
   // unchanged sub-trees. Comparing it keeps completed tool calls (and their
   // terminal-preview scans) out of the per-token render path.
   (prev, next) =>
-    prev.sessionId === next.sessionId &&
     prev.messageId === next.messageId &&
     prev.entry.content === next.entry.content &&
     prev.entry.itemIndex === next.entry.itemIndex &&
@@ -4087,8 +4312,17 @@ const CARD_CONTENT_TYPES = new Set<MessageContent['type']>([
   'file',
 ]);
 
+/** Tool calls that render as a one-line process status (no card surface). */
+const isProcessStatusToolCall = (content: MessageContent): boolean =>
+  content.type === 'tool_call' &&
+  (content.activityKind === 'context_compaction' || content.activityKind === 'codex_retry');
+
 const isCardContentBlock = (block: AssistantTurnRenderBlock): boolean =>
-  block.kind === 'content' && CARD_CONTENT_TYPES.has(block.entry.content.type);
+  block.kind === 'content' &&
+  CARD_CONTENT_TYPES.has(block.entry.content.type) &&
+  // "Context compacted" / "Retrying…" sit in the process rhythm, spaced like
+  // the "Ran N commands" headers around them.
+  !isProcessStatusToolCall(block.entry.content);
 
 const isAssistantToolCallActivityEntry = (
   entry: AssistantActivityRenderItem
@@ -4130,21 +4364,16 @@ const AssistantThoughtVirtualRow = memo(function AssistantThoughtVirtualRow({
   fontSize: ConversationFontSize;
 }) {
   const { t } = useTranslation();
-  /* Match tool-step layout: leading icon + body. Group header already
-     says "Thought", so we don't stack a second "思考过程" label. */
+  /* The thought is prose on the rail, with no glyph: it is the agent's own
+     words, and an icon beside every paragraph of it read as a list of
+     objects. The group header already says "Thought". */
   return (
-    <ActivityProcessStep
-      icon={
-        <Sparkles
-          className={ACTIVITY_STEP_ICON_CLASS}
-          aria-label={
-            isThinking
-              ? t('sessions.toolActivity.thinking', 'Thinking…')
-              : t('sessions.toolActivity.thought', 'Thought')
-          }
-        />
-      }
-    >
+    <ActivityProcessStep>
+      <span className="sr-only">
+        {isThinking
+          ? t('sessions.toolActivity.thinking', 'Thinking…')
+          : t('sessions.toolActivity.thought', 'Thought')}
+      </span>
       <MarkdownRenderer
         text={text}
         size={fontSize}
@@ -4212,11 +4441,7 @@ const LiveTurnDurationLabel = ({
   const now = useStableNow(LIVE_TURN_DURATION_SAMPLE_MS);
   const durationMs = resolveLiveSessionHistoryDurationMs(message, now.getTime());
   if (durationMs === null) return null;
-  const duration = formatDurationCompact(durationMs, {
-    hour: t('time.unitShort.hour', 'h'),
-    minute: t('time.unitShort.minute', 'm'),
-    second: t('time.unitShort.second', 's'),
-  });
+  const duration = formatDurationCompact(durationMs, getDurationUnitLabels(t));
   if (!duration) return null;
   return <>{t('sessions.workedFor', { duration, defaultValue: 'Worked for {{duration}}' })}</>;
 };
@@ -4232,13 +4457,7 @@ const LiveActivityLabel = ({ label, message }: { label: string; message: LiveAct
   const now = useStableNow(LIVE_TURN_DURATION_SAMPLE_MS);
   const durationMs = resolveLiveSessionHistoryDurationMs(message, now.getTime());
   const duration =
-    durationMs === null
-      ? ''
-      : formatDurationCompact(durationMs, {
-          hour: t('time.unitShort.hour', 'h'),
-          minute: t('time.unitShort.minute', 'm'),
-          second: t('time.unitShort.second', 's'),
-        });
+    durationMs === null ? '' : formatDurationCompact(durationMs, getDurationUnitLabels(t));
   if (!duration) return <>{label}</>;
   return (
     <>
@@ -4273,7 +4492,7 @@ const AssistantForkButton = ({
     <Button
       type="button"
       variant="ghost"
-      size="icon"
+      icon
       className={cn(
         'h-7 w-7 text-muted-foreground hover:bg-hover hover:text-foreground',
         className
@@ -4285,7 +4504,7 @@ const AssistantForkButton = ({
   );
 
   return (
-    <SessionForkDestinationPopover
+    <SessionForkDestinationMenu
       open={menuOpen}
       onOpenChange={(open) => {
         setMenuOpen(open);
@@ -4297,7 +4516,7 @@ const AssistantForkButton = ({
       onSelect={(destination) => onFork?.(turnId, destination)}
     >
       {button}
-    </SessionForkDestinationPopover>
+    </SessionForkDestinationMenu>
   );
 };
 
@@ -4341,11 +4560,7 @@ export const AssistantTurnFooter = ({
   }, [message.finished, message.items]);
   const hasCopyableText = textContent.trim().length > 0;
   const fileDiffs = fileDiffOverride ?? message.fileDiff ?? EMPTY_EDITED_FILE_ENTRIES;
-  const durationUnitLabels: DurationUnitLabels = {
-    hour: t('time.unitShort.hour', 'h'),
-    minute: t('time.unitShort.minute', 'm'),
-    second: t('time.unitShort.second', 's'),
-  };
+  const durationUnitLabels = getDurationUnitLabels(t);
   const durationMs = resolveSessionHistoryDurationMs(message);
   const durationLabel =
     durationMs === null ? '' : formatDurationCompact(durationMs, durationUnitLabels);
@@ -4445,53 +4660,59 @@ export const AssistantTurnFooter = ({
           {hasCopyableText || hasTurnConfigInfo || onFork || copyContext ? (
             <div className="flex items-center gap-0.5 -mr-[7px]">
               {showStreamingContextCopy ? (
-                <TooltipProvider>
-                  <Tooltip delayDuration={500}>
-                    <TooltipTrigger asChild>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        className="h-7 w-7 text-muted-foreground hover:bg-hover hover:text-foreground"
-                        onClick={() => copyContext?.(message.id)}
-                        aria-label={t('sessions.copyContextMarkdown', 'Copy context as Markdown')}
-                      >
-                        <Copy className="h-3.5 w-3.5" />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      {t('sessions.copyContextMarkdown', 'Copy context as Markdown')}
-                    </TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
-              ) : showFinishedMetadata && hasCopyableText ? (
-                <TooltipProvider>
-                  <Tooltip delayDuration={500}>
-                    <TooltipTrigger asChild>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        className="h-7 w-7 text-muted-foreground hover:bg-hover hover:text-foreground"
-                        onClick={() => {
-                          void handleCopy();
-                        }}
-                        aria-label={t('sessions.copyResponse', 'Copy response')}
-                      >
-                        {didCopy ? (
-                          <Check className="h-3.5 w-3.5" />
-                        ) : (
+                <Tooltip.Provider>
+                  <Tooltip.Root>
+                    <Tooltip.Trigger
+                      delay={500}
+                      render={
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          icon
+                          className="h-7 w-7 text-muted-foreground hover:bg-hover hover:text-foreground"
+                          onClick={() => copyContext?.(message.id)}
+                          aria-label={t('sessions.copyContextMarkdown', 'Copy context as Markdown')}
+                        >
                           <Copy className="h-3.5 w-3.5" />
-                        )}
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>
+                        </Button>
+                      }
+                    />
+                    <Tooltip.Content>
+                      {t('sessions.copyContextMarkdown', 'Copy context as Markdown')}
+                    </Tooltip.Content>
+                  </Tooltip.Root>
+                </Tooltip.Provider>
+              ) : showFinishedMetadata && hasCopyableText ? (
+                <Tooltip.Provider>
+                  <Tooltip.Root>
+                    <Tooltip.Trigger
+                      delay={500}
+                      render={
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          icon
+                          className="h-7 w-7 text-muted-foreground hover:bg-hover hover:text-foreground"
+                          onClick={() => {
+                            void handleCopy();
+                          }}
+                          aria-label={t('sessions.copyResponse', 'Copy response')}
+                        >
+                          {didCopy ? (
+                            <Check className="h-3.5 w-3.5" />
+                          ) : (
+                            <Copy className="h-3.5 w-3.5" />
+                          )}
+                        </Button>
+                      }
+                    />
+                    <Tooltip.Content>
                       {didCopy
                         ? t('common.copied', 'Copied')
                         : t('sessions.copyResponse', 'Copy response')}
-                    </TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
+                    </Tooltip.Content>
+                  </Tooltip.Root>
+                </Tooltip.Provider>
               ) : null}
               {/* The turn config lives below the output on every layout, and is
                   known from the moment the turn opens: no need to wait for it to end. */}
@@ -4534,8 +4755,8 @@ export const AssistantTurnFooter = ({
               <Button
                 key={action.id}
                 type="button"
-                variant={isAccent ? 'default' : 'outline'}
-                size="sm"
+                variant={isAccent ? 'primary' : 'secondary'}
+                size="small"
                 className={cn(
                   'h-8 gap-1.5 rounded-md px-3 text-xs font-medium transition-colors',
                   isAccent
@@ -4773,7 +4994,6 @@ const AssistantChatItem = memo(function AssistantChatItem({
            hierarchy — see `cardSiblingGap` above and `ai-gui/AGENTS.md`. */
         return isAssistantToolCallActivityEntry(entry) ? (
           <AssistantToolCallVirtualRow
-            sessionId={row.item.sessionId}
             messageId={message.id}
             entry={entry}
             onFilePathClick={onFilePathClick}
@@ -4857,6 +5077,7 @@ const AssistantChatItem = memo(function AssistantChatItem({
         return cardSiblingGap;
       case 'worked_group_header':
       case 'activity_group_header':
+        return processSiblingGap;
       case 'subagent_tasks':
         return turnSiblingGap;
       case 'footer':
@@ -5203,7 +5424,6 @@ const renderAssistantContent = (
         />
       ) : (
         <ToolCallCard
-          sessionId={sessionId}
           toolCall={content}
           onFilePathClick={options?.onFilePathClick}
           fontSize={conversationFontSize}
@@ -5484,6 +5704,7 @@ const WorkspaceUserImageBlock = ({
     >
       {isThumbnailLoading && (
         <Skeleton
+          shape="block"
           className={cn(isThumbnail ? thumbnailFrameClass : `h-36 ${fullFrameWidthClass}`)}
         />
       )}
@@ -5897,13 +6118,7 @@ const renderUserContent = (
     case 'goal':
       return <GoalBlock goal={content} />;
     case 'tool_call':
-      return (
-        <ToolCallCard
-          sessionId={sessionId}
-          toolCall={content}
-          fontSize={options.conversationFontSize}
-        />
-      );
+      return <ToolCallCard toolCall={content} fontSize={options.conversationFontSize} />;
     case 'comment_reference':
       return (
         <div className="flex w-full justify-end px-2 pt-1">
@@ -5935,24 +6150,77 @@ const extractFilePathFromTitle = (title: string, label: string) => {
   return path.trim() || null;
 };
 
-/** Action words that should be highlighted in tool titles */
-const TOOL_ACTION_WORDS = ['Find', 'Search', 'Grep', 'Glob'];
+/**
+ * The action a tool title opens with, as a verb with tense: in progress while
+ * the tool runs ("Searching"), done once it has ("Searched"). The verb is the
+ * one word that changes as the step happens, so it is the brightened word, and
+ * it shimmers while it is still going.
+ */
+const TOOL_VERB_FORMS: Record<string, { running: string; done: string }> = {
+  Read: { running: 'Reading', done: 'Read' },
+  Edit: { running: 'Editing', done: 'Edited' },
+  Write: { running: 'Writing', done: 'Wrote' },
+  Delete: { running: 'Deleting', done: 'Deleted' },
+  Move: { running: 'Moving', done: 'Moved' },
+  Search: { running: 'Searching', done: 'Searched' },
+  Grep: { running: 'Searching', done: 'Searched' },
+  Find: { running: 'Finding', done: 'Found' },
+  Glob: { running: 'Finding', done: 'Found' },
+  List: { running: 'Listing', done: 'Listed' },
+  Fetch: { running: 'Fetching', done: 'Fetched' },
+  Run: { running: 'Running', done: 'Ran' },
+  Execute: { running: 'Running', done: 'Ran' },
+  Bash: { running: 'Running', done: 'Ran' },
+};
+
+const TOOL_TITLE_LEADING_WORD = /^([A-Z][a-z]+)(?=[\s:(])/;
+
+type ToolVerbStatus = 'running' | 'done';
+
+const toolVerbStatus = (status: ToolCallMessage['status']): ToolVerbStatus =>
+  status === 'pending' || status === 'in_progress' ? 'running' : 'done';
+
+/** The verb, brightened, shimmering while the step runs. */
+const ToolVerb = ({ word, status }: { word: string; status: ToolVerbStatus }) => (
+  <span className={cn('text-foreground/90', status === 'running' && 'agent-shimmer')}>
+    {TOOL_VERB_FORMS[word]?.[status] ?? word}
+  </span>
+);
 
 /**
- * Renders a tool title with the action word (e.g., "Find", "Search") slightly brighter.
- * If no action word is found at the start, renders the title as-is.
+ * A tool title whose opening verb, when it has one, follows the step's tense.
+ * `verb` supplies one when the agent's title is a bare target — raw commands
+ * open lowercase or with punctuation, so a command step reads "Ran `sed -n …`"
+ * the way a file step reads "Read session-list.tsx". A title already opening
+ * with a capitalized word ("Shell: cat x") is an authored label and keeps it.
  */
-const ToolTitleWithHighlight = ({ title, className }: { title: string; className?: string }) => {
-  for (const action of TOOL_ACTION_WORDS) {
-    if (title.startsWith(action + ' ')) {
-      const rest = title.slice(action.length);
-      return (
-        <span className={className} title={title}>
-          <span className="text-foreground/90">{action}</span>
-          {rest}
-        </span>
-      );
-    }
+const ToolTitleWithHighlight = ({
+  title,
+  status,
+  className,
+  verb,
+}: {
+  title: string;
+  status: ToolVerbStatus;
+  className?: string;
+  verb?: string;
+}) => {
+  const match = TOOL_TITLE_LEADING_WORD.exec(title);
+  if (match && TOOL_VERB_FORMS[match[1]!]) {
+    const word = match[1]!;
+    return (
+      <span className={className} title={title}>
+        <ToolVerb word={word} status={status} />
+        {title.slice(word.length)}
+      </span>
+    );
+  }
+  if (verb && TOOL_VERB_FORMS[verb] && !match) {
+    return (
+      <span className={className} title={title}>
+        <ToolVerb word={verb} status={status} /> {title}
+      </span>
+    );
   }
   return (
     <span className={className} title={title}>
@@ -6032,7 +6300,7 @@ const UserPlainTextBlock = ({
             // unbreakable token (e.g. a pasted log URL). `break-words`/`overflow-wrap:break-word`
             // wraps visually but does NOT shrink min-content, so it must not be set here —
             // it would win by source order and let the bubble overflow its column on every engine.
-            'min-w-0 max-w-full whitespace-pre-wrap text-foreground [overflow-wrap:anywhere]',
+            'min-w-0 max-w-full whitespace-pre-wrap text-reading [overflow-wrap:anywhere]',
             isLong && !isFullTextVisible ? 'overflow-hidden' : ''
           )}
           style={{
@@ -6061,7 +6329,7 @@ const UserPlainTextBlock = ({
             <Button
               type="button"
               variant="ghost"
-              size="sm"
+              size="small"
               className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
               onClick={() => setIsExpanded((prev) => !prev)}
             >
@@ -6087,6 +6355,7 @@ const CollapsibleCard = ({
   containerProps,
   buttonClassName,
   bodyClassName,
+  onActivate,
 }: {
   left: ReactNode;
   right?: ReactNode;
@@ -6100,6 +6369,8 @@ const CollapsibleCard = ({
   containerProps?: SearchContainerProps;
   buttonClassName?: string;
   bodyClassName?: string;
+  /** What pressing the header does when there is no body to open. */
+  onActivate?: () => void;
 }) => {
   const [uncontrolledExpanded, setUncontrolledExpanded] = useState(defaultExpanded);
   const hasBody = children !== null && children !== undefined;
@@ -6124,10 +6395,10 @@ const CollapsibleCard = ({
         type="button"
         className={cn(
           'group flex w-full items-center gap-1.5 rounded-md px-1 py-1 text-left text-muted-foreground transition-colors hover:text-foreground',
-          canToggle ? 'cursor-pointer' : 'cursor-default',
+          canToggle || onActivate ? 'cursor-pointer' : 'cursor-default',
           buttonClassName
         )}
-        onClick={canToggle ? () => setExpanded(!isExpanded) : undefined}
+        onClick={canToggle ? () => setExpanded(!isExpanded) : onActivate}
         aria-expanded={canToggle ? isExpanded : undefined}
       >
         <div className="flex min-w-0 flex-1 items-center gap-1.5">
@@ -6354,25 +6625,28 @@ const PlanPanel = ({
           )}
           <span className={CONVERSATION_PANEL_TITLE_CLASS}>Proposed Plan</span>
         </button>
-        <TooltipProvider>
-          <Tooltip delayDuration={500}>
-            <TooltipTrigger asChild>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className="-mr-1 h-6 w-6 shrink-0 text-muted-foreground hover:bg-hover hover:text-foreground"
-                onClick={() => {
-                  void handleCopy();
-                }}
-                aria-label="Copy plan"
-              >
-                {didCopy ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>{didCopy ? 'Copied' : 'Copy plan'}</TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
+        <Tooltip.Provider>
+          <Tooltip.Root>
+            <Tooltip.Trigger
+              delay={500}
+              render={
+                <Button
+                  type="button"
+                  variant="ghost"
+                  icon
+                  className="-mr-1 h-6 w-6 shrink-0 text-muted-foreground hover:bg-hover hover:text-foreground"
+                  onClick={() => {
+                    void handleCopy();
+                  }}
+                  aria-label="Copy plan"
+                >
+                  {didCopy ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+                </Button>
+              }
+            />
+            <Tooltip.Content>{didCopy ? 'Copied' : 'Copy plan'}</Tooltip.Content>
+          </Tooltip.Root>
+        </Tooltip.Provider>
       </div>
       <div className="relative">
         <div
@@ -6473,19 +6747,14 @@ const PLAN_STATUS_META: Record<
   },
 };
 
-const PRIORITY_META: Record<PlanEntryItem['priority'], { label: string; className: string }> = {
-  high: {
-    label: 'High',
-    className: 'border-status-danger/20 bg-status-danger/[0.15] text-status-danger',
-  },
-  medium: {
-    label: 'Medium',
-    className: 'border-status-warning/20 bg-status-warning/[0.15] text-status-warning',
-  },
-  low: {
-    label: 'Low',
-    className: 'border-status-success/20 bg-status-success/[0.15] text-status-success',
-  },
+/**
+ * How urgent a plan entry is, as one of the tones the Badge already has: the
+ * three colours this table used to name by hand are those three outcomes.
+ */
+const PRIORITY_META: Record<PlanEntryItem['priority'], { label: string; tone: BadgeTone }> = {
+  high: { label: 'High', tone: 'danger' },
+  medium: { label: 'Medium', tone: 'warning' },
+  low: { label: 'Low', tone: 'success' },
 };
 
 const PlanEntryRow = ({
@@ -6512,12 +6781,7 @@ const PlanEntryRow = ({
           <StatusIcon className={cn('h-4 w-4 flex-none shrink-0', statusMeta.className)} />
           <span className="break-words">{entry.content}</span>
         </div>
-        <Badge
-          variant="outline"
-          className={cn('text-[10px] font-semibold uppercase', priorityMeta.className)}
-        >
-          {priorityMeta.label}
-        </Badge>
+        <Badge tone={priorityMeta.tone}>{priorityMeta.label}</Badge>
       </div>
     </div>
   );
@@ -6529,7 +6793,6 @@ const PlanEntryRow = ({
 // items, so a shallow compare skips completed tool calls entirely.
 const ToolCallCard = memo(function ToolCallCard({
   toolCall,
-  sessionId,
   fontSize,
   expanded,
   onExpandedChange,
@@ -6537,7 +6800,6 @@ const ToolCallCard = memo(function ToolCallCard({
   inlineOutput = false,
 }: {
   toolCall: ToolCallMessage;
-  sessionId: SessionId;
   fontSize: ConversationFontSize;
   expanded?: boolean;
   onExpandedChange?: (expanded: boolean) => void;
@@ -6545,21 +6807,21 @@ const ToolCallCard = memo(function ToolCallCard({
   inlineOutput?: boolean;
 }) {
   const { t } = useTranslation();
+  const isMobile = useIsMobile();
   if (toolCall.activityKind === 'codex_retry') {
     if (toolCall.status !== 'pending' && toolCall.status !== 'in_progress') return null;
     return (
-      <div className="flex min-h-7 items-center gap-2 py-1 text-sm text-muted-foreground">
-        <Spinner className="h-4 w-4 shrink-0" aria-hidden="true" />
+      <div className={PROCESS_STATUS_LINE_CLASS(isMobile)}>
+        <Spinner className="h-[1em] w-[1em] shrink-0" aria-hidden="true" />
         <span>{t('sessions.activity.retrying', 'Retrying…')}</span>
       </div>
     );
   }
   if (toolCall.activityKind === 'context_compaction') {
     const isCompacting = toolCall.status === 'pending' || toolCall.status === 'in_progress';
-    const StatusIcon = isCompacting ? Loader2 : toolCall.status === 'failed' ? AlertCircle : Check;
     return (
-      <div className="flex min-h-7 items-center gap-2 py-1 text-sm text-muted-foreground">
-        <Spinner icon={StatusIcon} spinning={isCompacting} className="h-4 w-4" aria-hidden="true" />
+      <div className={PROCESS_STATUS_LINE_CLASS(isMobile)}>
+        {isCompacting ? <Spinner className="h-[1em] w-[1em] shrink-0" aria-hidden="true" /> : null}
         <span>
           {isCompacting
             ? t('sessions.activity.compactingContext', 'Compacting context')
@@ -6571,11 +6833,7 @@ const ToolCallCard = memo(function ToolCallCard({
     );
   }
   const kindMeta = toolCall.kind ? TOOL_KIND_META[toolCall.kind] : undefined;
-  const KindIcon = kindMeta?.icon ?? Wrench;
   const isActivityRow = inlineOutput;
-  const kindIconClass = isActivityRow
-    ? ACTIVITY_STEP_ICON_CLASS
-    : 'h-3.5 w-3.5 flex-none shrink-0 text-current';
 
   const hasDiffContent = Boolean(toolCall.content?.some((block) => block.type === 'diff'));
   const hasTerminalContent = Boolean(
@@ -6661,7 +6919,18 @@ const ToolCallCard = memo(function ToolCallCard({
 
   const terminalTitleDefault = terminalTitleFromContent ?? title;
   const displayTitle = isTerminalExecuteToolCall ? terminalTitleDefault : title;
-  const runningIndicator = isRunning ? <Spinner className="h-4 w-4 text-muted-foreground" /> : null;
+  const commandVerb = isCommandToolCall(toolCall) ? 'Run' : undefined;
+  /* The tense verb is the running signal: a shimmering "Running …" needs no
+     spinner. Keep it only where the step's own wording carries no tense
+     (authored labels like "Shell: …"). */
+  const stepVerb =
+    isFileAction && fileName
+      ? kindMeta?.label
+      : (TOOL_TITLE_LEADING_WORD.exec(displayTitle)?.[1] ?? commandVerb);
+  const runningIndicator =
+    isRunning && !(stepVerb && TOOL_VERB_FORMS[stepVerb]) ? (
+      <Spinner className="h-4 w-4 text-muted-foreground" />
+    ) : null;
 
   const renderContentBlocks = () => {
     if (!contentBlocks?.length) return null;
@@ -6809,6 +7078,10 @@ const ToolCallCard = memo(function ToolCallCard({
             : 'space-y-2.5 px-0 pb-1 pt-1.5'
       )}
       right={runningIndicator}
+      /* A file step with nothing to open (a read) is the file: pressing the
+         row opens it. A step that unfolds keeps the row for that, and its
+         file name is the link. */
+      onActivate={isFilePathClickable ? triggerFilePathClick : undefined}
       left={
         <div
           className={cn(
@@ -6817,9 +7090,9 @@ const ToolCallCard = memo(function ToolCallCard({
             isTerminalExecuteToolCall ? null : titleColorClass
           )}
         >
-          <KindIcon className={kindIconClass} />
           {isFileAction && fileName ? (
-            <div className="flex min-w-0 items-center gap-1.5">
+            /* One word space between the verb and its file, not a 6px gap. */
+            <div className="flex min-w-0 items-center gap-[0.3em]">
               <span
                 className={cn(
                   isActivityRow
@@ -6827,51 +7100,74 @@ const ToolCallCard = memo(function ToolCallCard({
                     : 'text-[13px] font-semibold leading-tight'
                 )}
               >
-                {kindMeta?.label ?? title}
+                {kindMeta?.label && TOOL_VERB_FORMS[kindMeta.label] ? (
+                  <ToolVerb word={kindMeta.label} status={toolVerbStatus(toolCall.status)} />
+                ) : (
+                  (kindMeta?.label ?? title)
+                )}
               </span>
-              <TooltipProvider>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <span
-                      role={isFilePathClickable ? 'button' : undefined}
-                      tabIndex={isFilePathClickable ? 0 : undefined}
-                      onClick={isFilePathClickable ? handleFilePathClick : undefined}
-                      onKeyDown={isFilePathClickable ? handleFilePathKeyDown : undefined}
-                      className={cn(
-                        isActivityRow
-                          ? cn(
-                              'inline-flex min-w-0 max-w-[min(100%,20rem)] shrink items-center truncate font-mono',
-                              ACTIVITY_PROCESS_TEXT_CLASS
-                            )
-                          : 'inline-flex min-w-0 max-w-[240px] shrink items-center gap-1 rounded-md border border-border/60 px-2 py-0.5 text-[11px]',
-                        isFilePathClickable ? 'cursor-pointer hover:bg-hover/60' : ''
-                      )}
-                    >
-                      {normalizedFilePath && !isActivityRow ? (
-                        <FileIcon
-                          filePath={normalizedFilePath}
-                          className="h-3.5 w-3.5 shrink-0 grayscale"
-                        />
-                      ) : null}
+              <Tooltip.Provider>
+                <Tooltip.Root>
+                  <Tooltip.Trigger
+                    render={
                       <span
+                        role={isFilePathClickable ? 'button' : undefined}
+                        tabIndex={isFilePathClickable ? 0 : undefined}
+                        onClick={isFilePathClickable ? handleFilePathClick : undefined}
+                        onKeyDown={isFilePathClickable ? handleFilePathKeyDown : undefined}
                         className={cn(
-                          'min-w-0 truncate whitespace-nowrap font-mono',
-                          isActivityRow ? ACTIVITY_PROCESS_TEXT_CLASS : 'text-xs'
+                          isActivityRow
+                            ? cn(
+                                'inline-flex min-w-0 max-w-[min(100%,20rem)] shrink items-center truncate',
+                                ACTIVITY_PROCESS_TEXT_CLASS
+                              )
+                            : 'inline-flex min-w-0 max-w-[240px] shrink items-center gap-1 rounded-md border border-border/60 px-2 py-0.5 text-[11px]',
+                          isFilePathClickable
+                            ? isActivityRow
+                              ? /* The file name is a link inside the step: the pointer
+                                   says so, and only it brightens under the pointer. */
+                                'cursor-pointer'
+                              : 'cursor-pointer hover:bg-hover/60'
+                            : ''
                         )}
                       >
-                        {fileName}
+                        {normalizedFilePath && !isActivityRow ? (
+                          <FileIcon
+                            filePath={normalizedFilePath}
+                            className="h-3.5 w-3.5 shrink-0 grayscale"
+                          />
+                        ) : null}
+                        <span
+                          className={cn(
+                            'min-w-0 truncate whitespace-nowrap',
+                            /* A step is a sentence ("Read session-list.tsx"),
+                               so its file name stays in the sentence's type. */
+                            isActivityRow
+                              ? cn(
+                                  ACTIVITY_PROCESS_TEXT_CLASS,
+                                  'transition-colors',
+                                  isFilePathClickable &&
+                                    'underline-offset-2 group-hover:text-foreground hover:underline'
+                                )
+                              : 'font-mono text-xs'
+                          )}
+                        >
+                          {fileName}
+                        </span>
                       </span>
-                    </span>
-                  </TooltipTrigger>
+                    }
+                  />
                   {normalizedFilePath ? (
-                    <TooltipContent>{normalizedFilePath}</TooltipContent>
+                    <Tooltip.Content>{normalizedFilePath}</Tooltip.Content>
                   ) : null}
-                </Tooltip>
-              </TooltipProvider>
+                </Tooltip.Root>
+              </Tooltip.Provider>
             </div>
           ) : (
             <ToolTitleWithHighlight
               title={displayTitle}
+              status={toolVerbStatus(toolCall.status)}
+              verb={commandVerb}
               className={cn(
                 'truncate',
                 isActivityRow
@@ -6919,7 +7215,7 @@ const ToolCallCard = memo(function ToolCallCard({
 
           {hasContent ? <div className="space-y-2">{renderContentBlocks()}</div> : null}
 
-          {hasPermission && <PermissionRequestBlock sessionId={sessionId} toolCall={toolCall} />}
+          {hasPermission && <PermissionRequestBlock toolCall={toolCall} />}
         </Fragment>
       ) : null}
     </CollapsibleCard>
@@ -7186,16 +7482,17 @@ const StandardToolContentBlock = ({
  */
 const PlanExitBlock = ({
   toolCall,
-  sessionId,
   fontSize,
   onFilePathClick,
   messageId,
   itemIndex,
+  sessionId,
   awaitingDecision = false,
   planRenderedSeparately = false,
 }: {
   toolCall: ToolCallMessage;
-  sessionId: SessionId;
+  /** Analytics only: resolves whether the plan belongs to a child (sub-agent) session. */
+  sessionId?: SessionId;
   fontSize: ConversationFontSize;
   onFilePathClick?: (filePath: string) => void;
   messageId: string;
@@ -7222,26 +7519,21 @@ const PlanExitBlock = ({
           awaitingDecision={awaitingDecision}
         />
       ) : null}
-      <PermissionRequestBlock sessionId={sessionId} toolCall={toolCall} collapseByDefault />
+      <PermissionRequestBlock toolCall={toolCall} />
     </div>
   );
 };
 
-const PermissionRequestBlock = ({
-  toolCall,
-  sessionId,
-  collapseByDefault = false,
-}: {
-  toolCall: ToolCallMessage;
-  sessionId: SessionId;
-  /** Keep a duplicated in-conversation request compact when the composer owns the active action. */
-  collapseByDefault?: boolean;
-}) => {
+/**
+ * A permission request's place in the turn. While it is pending the answer is
+ * given in the prompt that stands in for the composer — the one live surface —
+ * so this line only says the turn is waiting there. Once answered it is the
+ * record: what was chosen, on one line.
+ */
+const PermissionRequestBlock = ({ toolCall }: { toolCall: ToolCallMessage }) => {
   const readonly = useContext(SessionReadonlyContext);
   const permission = toolCall.permissionRequest;
   const { t } = useTranslation();
-  const { respondToPermission, isReady } = usePermissionResponse();
-  const [pendingOptionId, setPendingOptionId] = useState<string | null>(null);
 
   const askQuestionMeta = useMemo(
     () => (permission ? parseAskUserQuestionPermissionMeta(permission._meta) : null),
@@ -7259,14 +7551,6 @@ const PermissionRequestBlock = ({
     return null;
   }
 
-  if (readonly && !permission.outcome) {
-    return (
-      <div className="text-sm text-muted-foreground">
-        {t('sharing.permissionPending', 'Waiting for the author')}
-      </div>
-    );
-  }
-
   if (askQuestionMeta && readonlyAnswers) {
     return (
       <AskUserQuestionCard
@@ -7276,10 +7560,6 @@ const PermissionRequestBlock = ({
     );
   }
 
-  const selectedOptionId =
-    permission.outcome?.outcome === 'selected' ? permission.outcome.optionId : undefined;
-  const isResolved = Boolean(permission.outcome);
-  const isCancelled = permission.outcome?.outcome === 'cancelled';
   const record = resolvePermissionRecord(permission);
 
   // `ToolCallCard` also drops the body for a withdrawn request, so this is the
@@ -7288,62 +7568,35 @@ const PermissionRequestBlock = ({
     return null;
   }
 
-  if (record.kind === 'settled') {
-    const label =
-      record.optionName ??
-      (record.allowed
-        ? t('sessions.permissionApproved', 'Permission Approved')
-        : t('sessions.permissionDenied', 'Permission Denied'));
-    const OutcomeIcon = record.allowed ? Check : X;
+  if (record.kind === 'pending') {
     return (
       <div
         className={cn('flex min-h-7 w-full items-start gap-1.5 py-1', ACTIVITY_PROCESS_TEXT_CLASS)}
       >
-        {/* Check vs cross already carries approved-vs-denied, so the icon keeps
-            the turn's one icon tone instead of introducing a hue no other icon
-            in the row has. */}
-        <OutcomeIcon className={ACTIVITY_STEP_ICON_CLASS} aria-hidden="true" />
-        {/* Truncated like every other process row: an `allow_always` name runs
-            to a full sentence, and the record must stay one line. */}
-        <span className="min-w-0 flex-1 truncate" title={label}>
-          {label}
+        <span className="min-w-0 flex-1 truncate">
+          {readonly
+            ? t('sharing.permissionPending', 'Waiting for the author')
+            : t('sessions.permission.waitingInline', 'Waiting for your answer')}
         </span>
       </div>
     );
   }
 
-  const handleSelect = async (optionId: string) => {
-    if (isResolved || isCancelled || !isReady) {
-      return;
-    }
-    setPendingOptionId(optionId);
-    try {
-      await respondToPermission(sessionId, permission.requestId, {
-        outcome: 'selected',
-        optionId,
-      });
-    } catch (error) {
-      console.error('Failed to respond to permission request:', error);
-      setPendingOptionId(null);
-    }
-  };
-
+  const label =
+    record.optionName ??
+    (record.allowed
+      ? t('sessions.permissionApproved', 'Permission Approved')
+      : t('sessions.permissionDenied', 'Permission Denied'));
   return (
-    <PermissionRequestCard
-      options={permission.options}
-      defaultCollapsed={collapseByDefault}
-      isResolved={isResolved}
-      isCancelled={isCancelled}
-      isReady={isReady}
-      pendingOptionId={pendingOptionId}
-      selectedOptionId={selectedOptionId}
-      /* On the rail with the rest of its tool call's body. A private `ml-4`
-         used to put it 16px right of its own siblings. */
-      className="w-full max-w-[43rem]"
-      onSelect={(optionId) => {
-        void handleSelect(optionId);
-      }}
-    />
+    <div
+      className={cn('flex min-h-7 w-full items-start gap-1.5 py-1', ACTIVITY_PROCESS_TEXT_CLASS)}
+    >
+      {/* Truncated like every other process row: an `allow_always` name runs
+          to a full sentence, and the record must stay one line. */}
+      <span className="min-w-0 flex-1 truncate" title={label}>
+        {label}
+      </span>
+    </div>
   );
 };
 

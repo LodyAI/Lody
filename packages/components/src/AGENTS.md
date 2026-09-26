@@ -30,6 +30,9 @@ Performance comparisons must use the current full-Mirror baseline.
 
 ## Lightweight hosted entries
 
+- `lib/client-build-info.ts` owns build provenance for About and reports. Bug report
+  metadata contains only build constants, distinct from remote machine logs.
+
 - Public/auth entry points that bypass the full product router import route-agnostic
   surfaces. Keep host navigation behind callback props so those surfaces do not import
   the route tree, `RuntimeProvider`, or workspace Flock document implementation. When
@@ -45,6 +48,15 @@ Performance comparisons must use the current full-Mirror baseline.
   Preserve the separate iOS native keyboard offset and bottom-sheet handling.
   `repositionInputs={false}` explicitly opts out of both Vaul repositioning and
   this inset; callers using it own their keyboard layout.
+
+## Working session status
+
+- Session marks use `ui/working-status-mark.tsx`, mounted across the status change
+  and fed via `useWorkingHandOver` because unread arrives after presence.
+  `WorkingGrid` shares one viewport observer: only visible marks animate; returning
+  marks sample the shared clock. Animate only `transform`/`opacity` from
+  `startTime = 0`, never per-frame script or React state.
+  [Decision](../../../.agents/notes/implemented/feature/2026-09-24-sidebar-working-grid.md).
 
 ## Keyboard navigation
 
@@ -90,10 +102,10 @@ Performance comparisons must use the current full-Mirror baseline.
 ## ACP selectors
 
 - Built-in Codex reasoning selectors normalize cached options against exact model support
-  in `components/shared/acp-selector-options.ts`: Astra, Sol, and Terra expose Max/Ultra;
-  Luna exposes Max only. Keep this aligned with the ACP model catalog; a model version
-  threshold cannot represent per-model differences, and cached efforts may belong to
-  a different selected model.
+  in `components/shared/acp-selector-options.ts`: GPT-6 Astra/Sol and GPT-5.6 Sol/Terra
+  expose Max/Ultra; GPT-6 Luna and GPT-5.6 Luna expose Max only. Keep this aligned with
+  the ACP model catalog; a model version threshold cannot represent per-model differences,
+  and cached efforts may belong to a different selected model.
 
 ## ACP authentication
 

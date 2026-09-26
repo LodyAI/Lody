@@ -46,6 +46,7 @@ tuning shortcut are in [`README.md`](README.md).
 - Marketing pages (landing/pricing/changelog/download) must stay on `--landing-*` /
   `--mkt-*` and reference no `fd-` token — check that before moving a component between
   marketing and reading (blog/docs) surfaces.
+- Nightly uses standalone `/download/nightly` pages and recolors the shared atmosphere.
 
 ## Content pipeline and build
 
@@ -106,7 +107,7 @@ tuning shortcut are in [`README.md`](README.md).
 
 - The landing's product demo is a site-owned, display-only replica in
   `components/landing-replica/`: components take demo data as props and never
-  import the app (`@/*`, `@lody/components`, `@lody/shared`), jotai, i18next,
+  import the app (`@/*`, `@lody/components`, `@lody/shared`, `@lody/ui`), jotai, i18next,
   Convex, platform ports, or workers. `scripts/app-boundary.mjs` (in `test`)
   enforces it. To follow an app change, copy its markup into the replica; app
   refactors no longer reach the landing on their own. Rationale:

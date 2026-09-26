@@ -34,7 +34,7 @@ vi.mock('react-i18next', () => ({
   }),
 }));
 
-vi.mock('sonner', () => ({
+vi.mock('@/lib/toast', () => ({
   toast: {
     error: mocks.toastError,
   },

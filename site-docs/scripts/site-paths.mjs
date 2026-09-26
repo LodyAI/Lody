@@ -18,6 +18,8 @@ const STATIC_PATHS = [
   '/zh/changelog',
   '/download',
   '/zh/download',
+  '/download/nightly',
+  '/zh/download/nightly',
   '/privacy',
   '/zh/privacy',
   '/terms',

@@ -9,6 +9,7 @@ import {
   TEXT_ATTACHMENT_PATH,
   type TextAttachmentFixture,
 } from '../fixtures/text-attachment-fixture.js';
+import { openSidebarArchive } from './sidebar-footer.js';
 
 const AGENT_NAME = 'Deterministic Text Attachment Agent';
 const HISTORY_ATTACHMENT_NAME = /(?:\d+-)?synthetic-text-attachment\.txt$/u;
@@ -253,7 +254,7 @@ export class TextAttachmentPage {
 
   private async openArchive(): Promise<void> {
     if (!/#\/local\/archive(?:\?.*)?$/u.test(this.page.url())) {
-      await this.page.getByRole('button', { name: /^(Archive|归档)$/u, exact: true }).click();
+      await openSidebarArchive(this.page);
     }
     await expect(this.page).toHaveURL(/#\/local\/archive(?:\?.*)?$/u);
   }

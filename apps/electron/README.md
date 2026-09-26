@@ -91,15 +91,15 @@ and shared state. The Devbar renderer and embedded dock authenticate to the Hub'
 RPC transport with a per-process token delivered over IPC; Hub pages on the
 loopback origin and non-browser callers without an Origin header stay inside the
 boundary, while opaque origins such as `null` cannot call RPC methods without it.
-Developer Mode shows a separate `Agent and terminal access`
-switch while Devbar runs. Enabling it restarts the Hub with the aggregate HTTP MCP
-endpoint and Terminals panel. Coding agents can then read the performance snapshot
-and Inspector resources, and Terminals can start local subprocesses. Arbitrary
+The running Hub always includes the aggregate HTTP MCP
+endpoint and Terminals panel: enabling Devbar is the single consent step. Coding
+agents can then read the performance snapshot and Inspector resources, and
+Terminals can start local subprocesses. Arbitrary
 command requests are disabled, but the interactive shell remains a privileged
 process-control capability. Stopping Devbar removes both capabilities. See the
 [current behavior and security boundary](../../specs/desktop-devbar.md#devframe-hub).
 
-After enabling Agent and terminal access, configure a coding-agent host once with
+While Devbar runs, configure a coding-agent host once with
 the stdio command `apps/electron/node_modules/.bin/devframe connect`. The connector
 discovers the runtime-selected port and connects as a local non-browser caller,
 which the Hub trusts without an Origin header. In Lody, review and

@@ -1,8 +1,11 @@
 import { useState } from 'react';
+import * as stylex from '@stylexjs/stylex';
+import { SettingsPageActions, SettingsPageLead, useSettingsPane } from './settings-page-header';
+import { SettingsEmptyList, settingsRecordsCard } from './compact-layout';
 import { useAtomValue } from 'jotai';
 import { usePostHog } from '@posthog/react';
-import { Plug, Plus, Trash2 } from 'lucide-react';
-import { Spinner } from '@/ui/spinner';
+import { Plus, Trash2 } from 'lucide-react';
+import { Spinner } from '@lody/ui/spinner';
 import { useTranslation } from 'react-i18next';
 import {
   describeMcpConnection,
@@ -11,43 +14,54 @@ import {
   type WorkspaceMcpServerMeta,
 } from '@lody/shared';
 import { userAtom } from '@/atoms';
-import { useIsMobile } from '@/hooks/use-mobile';
+import { useDialogExitSnapshot } from '@/hooks/use-dialog-exit-snapshot';
 import {
   useWorkspaceMcpCatalog,
   useWorkspaceMcpCatalogActions,
 } from '@/hooks/use-workspace-mcp-catalog';
-import { cn } from '@/lib/utils';
-import { SETTINGS_ROW_CARD_CLASS } from './compact-layout';
 import { capturePostHogEvent } from '@/lib/posthog-analytics';
 import { MCP_TRANSPORT_LABELS, McpTransportIcon } from '@/components/shared/mcp-transport';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/ui/alert-dialog';
-import { Badge } from '@/ui/badge';
-import { Button } from '@/ui/button';
-import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/ui/dialog';
-import { Switch } from '@/ui/switch';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
-import { settingContainerClass } from '.';
+import { AlertDialog } from '@/ui/dialog';
+import { Badge } from '@lody/ui/badge';
+import { Button } from '@lody/ui/button';
+import { Dialog } from '@/ui/dialog';
+import { Switch } from '@lody/ui/switch';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { space } from '@lody/ui/tokens/scales.stylex';
 import { McpConnectionForm, type McpConnectionFormValue } from './mcp-connection-form';
+import {
+  SETTINGS_EDITOR_DIALOG_LAYOUT,
+  SETTINGS_EDITOR_DIALOG_WIDTH,
+  settingsCatalog as catalog,
+  settingsSurface as surface,
+} from './surface';
+import { settingsType as type } from './type.stylex';
+
+const styles = stylex.create({
+  actions: { gap: space[2] },
+  default: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: space[1.5],
+    fontSize: type.caption,
+    color: colors.secondaryLabel,
+    cursor: 'pointer',
+  },
+  /** The word beside the switch is dropped on a narrow panel; the switch keeps its label. */
+  defaultText: { display: { default: 'none', '@media (min-width: 640px)': 'inline' } },
+});
 
 type EditorState = { mode: 'add' } | { mode: 'edit'; entry: WorkspaceMcpServerMeta };
 
 export function McpSetting() {
   const { t } = useTranslation();
   const postHog = usePostHog();
-  const isMobile = useIsMobile();
   const user = useAtomValue(userAtom);
   const { servers, synced } = useWorkspaceMcpCatalog();
   const { upsert, remove } = useWorkspaceMcpCatalogActions();
   const [editor, setEditor] = useState<EditorState | null>(null);
+  const { shown: shownEditor, onOpenChangeComplete } = useDialogExitSnapshot(editor);
+  const settingsPane = useSettingsPane();
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string>();
   const [pendingRemoval, setPendingRemoval] = useState<WorkspaceMcpServerMeta | null>(null);
@@ -128,99 +142,65 @@ export function McpSetting() {
   const addLabel = t('settings.mcp.add');
 
   return (
-    <div className={settingContainerClass}>
-      <p className="text-xs leading-snug text-muted-foreground">{t('settings.mcp.description')}</p>
+    <div {...stylex.props(surface.container)}>
+      <SettingsPageLead>{t('settings.mcp.description')}</SettingsPageLead>
 
-      <section className="flex flex-col">
-        <div className="flex items-center justify-between gap-2 pb-1 pt-0.5">
-          <div className="flex min-w-0 items-center gap-2">
-            <h3 className="text-xs font-normal text-muted-foreground">
-              {t('settings.mcp.catalogTitle')}
-            </h3>
-            {servers.length > 0 ? (
-              <span className="text-xs tabular-nums text-muted-foreground/70">
-                {servers.length}
-              </span>
-            ) : null}
-            {!synced ? (
-              <span className="flex items-center gap-1 text-[11px] text-muted-foreground/70">
-                <Spinner className="h-3 w-3" aria-hidden="true" />
-                {t('settings.mcp.syncing')}
-              </span>
-            ) : null}
-          </div>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-7 w-7 text-muted-foreground hover:bg-muted/60 hover:text-foreground"
-                aria-label={addLabel}
-                onClick={() => openEditor({ mode: 'add' })}
-              >
-                <Plus className="h-3.5 w-3.5" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>{addLabel}</TooltipContent>
-          </Tooltip>
-        </div>
+      <SettingsPageActions>
+        {!synced ? (
+          <span {...stylex.props(catalog.syncing)}>
+            <Spinner size="small" aria-hidden="true" />
+            {t('settings.mcp.syncing')}
+          </span>
+        ) : null}
+        <Button size="small" variant="secondary" onClick={() => openEditor({ mode: 'add' })}>
+          <Plus {...stylex.props(catalog.icon)} />
+          {addLabel}
+        </Button>
+      </SettingsPageActions>
 
-        {servers.length === 0 ? (
-          <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-border/60 bg-card/30 px-6 py-8 text-center text-sm">
-            <Plug className="h-6 w-6 text-muted-foreground/70" aria-hidden="true" />
-            <p className="mt-2 text-muted-foreground">{t('settings.mcp.empty')}</p>
-            <Button size="sm" className="mt-3" onClick={() => openEditor({ mode: 'add' })}>
-              <Plus className="mr-1.5 h-3.5 w-3.5" />
-              {addLabel}
-            </Button>
-          </div>
-        ) : (
-          <div className="space-y-2">
-            {servers.map((server) => (
+      {servers.length === 0 ? (
+        <SettingsEmptyList>{t('settings.mcp.empty')}</SettingsEmptyList>
+      ) : (
+        <div {...stylex.props(settingsRecordsCard)}>
+          {servers.map((server, index) => (
+            <div key={server.id} {...stylex.props(surface.line, index > 0 && surface.lineRuled)}>
               <McpServerRow
-                key={server.id}
                 server={server}
                 onEdit={() => openEditor({ mode: 'edit', entry: server })}
                 onToggleDefault={(enabled) => void toggleDefault(server, enabled)}
                 onRemove={() => setPendingRemoval(server)}
               />
-            ))}
-          </div>
-        )}
-      </section>
+            </div>
+          ))}
+        </div>
+      )}
 
-      <Dialog
+      <Dialog.Root
         open={editor !== null}
         onOpenChange={(open) => {
           if (open) return;
           setError(undefined);
           setEditor(null);
         }}
+        onOpenChangeComplete={onOpenChangeComplete}
       >
-        <DialogContent
-          overlayClassName={
-            // Desktop settings is itself a dialog; match its z-index so this
-            // later overlay covers it without stacking a second /80 veil.
-            isMobile ? undefined : 'z-[var(--z-dialog)] bg-black/20'
-          }
-          className={cn(
-            'flex max-h-[min(680px,88dvh)] w-[min(620px,96dvw)] max-w-none flex-col gap-0 overflow-hidden p-0 sm:max-w-none sm:p-0',
-            !isMobile && 'shadow-popover'
-          )}
+        <Dialog.Content
+          width={SETTINGS_EDITOR_DIALOG_WIDTH}
+          centerOn={settingsPane}
+          className={SETTINGS_EDITOR_DIALOG_LAYOUT}
         >
-          <header className="shrink-0 border-b border-border/60 px-5 py-3 pr-12">
-            <DialogTitle className="text-sm font-normal">
-              {editor?.mode === 'edit' ? t('settings.mcp.editTitle') : t('settings.mcp.addTitle')}
-            </DialogTitle>
-            <DialogDescription className="mt-0.5 text-xs leading-snug text-muted-foreground">
-              {t('settings.mcp.dialogDescription')}
-            </DialogDescription>
-          </header>
-          {editor ? (
+          <Dialog.Header>
+            <Dialog.Title>
+              {shownEditor?.mode === 'edit'
+                ? t('settings.mcp.editTitle')
+                : t('settings.mcp.addTitle')}
+            </Dialog.Title>
+            <Dialog.Description>{t('settings.mcp.dialogDescription')}</Dialog.Description>
+          </Dialog.Header>
+          {shownEditor ? (
             <McpConnectionForm
-              key={editor.mode === 'edit' ? editor.entry.id : 'new'}
-              className="min-h-0 flex-1"
-              initialEntry={editor.mode === 'edit' ? editor.entry : undefined}
+              key={shownEditor.mode === 'edit' ? shownEditor.entry.id : 'new'}
+              initialEntry={shownEditor.mode === 'edit' ? shownEditor.entry : undefined}
               submitting={submitting}
               error={error}
               onSubmit={save}
@@ -230,44 +210,44 @@ export function McpSetting() {
               }}
             />
           ) : null}
-        </DialogContent>
-      </Dialog>
+        </Dialog.Content>
+      </Dialog.Root>
 
-      <AlertDialog
+      <AlertDialog.Root
         open={pendingRemoval !== null}
         onOpenChange={(open) => {
           if (!open && !removing) setPendingRemoval(null);
         }}
       >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t('settings.mcp.removeTitle')}</AlertDialogTitle>
-            <AlertDialogDescription>
+        <AlertDialog.Content>
+          <AlertDialog.Header>
+            <AlertDialog.Title>{t('settings.mcp.removeTitle')}</AlertDialog.Title>
+            <AlertDialog.Description>
               {t('settings.mcp.confirmRemove', { name: pendingRemoval?.name ?? '' })}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={removing}>{t('common.cancel')}</AlertDialogCancel>
-            <AlertDialogAction
+            </AlertDialog.Description>
+          </AlertDialog.Header>
+          <AlertDialog.Footer>
+            <AlertDialog.Cancel disabled={removing}>{t('common.cancel')}</AlertDialog.Cancel>
+            <Button
               disabled={removing}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              onClick={(event) => {
-                event.preventDefault();
+              variant="destructive"
+              onClick={() => {
                 void confirmRemoval();
               }}
             >
-              {removing ? <Spinner className="mr-2 h-4 w-4" /> : null}
+              {removing ? <Spinner size="small" /> : null}
               {t('common.remove')}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+            </Button>
+          </AlertDialog.Footer>
+        </AlertDialog.Content>
+      </AlertDialog.Root>
     </div>
   );
 }
 
-/** One catalog entry. The row body opens the editor (same affordance as an
- *  agent provider row); the trailing cluster keeps the two quick actions. */
+/** One catalog entry, as a line of the catalog's card. The row body opens the
+ *  editor (same affordance as an agent provider row); the trailing cluster keeps
+ *  the two quick actions. */
 export function McpServerRow({
   server,
   onEdit,
@@ -282,61 +262,55 @@ export function McpServerRow({
   const { t } = useTranslation();
   const defaultLabel = t('settings.mcp.defaultToggle', { name: server.name });
   return (
-    <div className={cn('overflow-hidden', SETTINGS_ROW_CARD_CLASS)}>
-      <div className="flex w-full min-w-0 items-center transition-colors hover:bg-hover/40">
-        <button
-          type="button"
-          onClick={onEdit}
-          aria-label={t('common.edit')}
-          className="flex min-w-0 flex-1 items-center gap-2.5 rounded-lg px-3 py-2 text-left focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
-        >
-          <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-foreground/[0.05] text-muted-foreground">
-            <McpTransportIcon transport={server.transport} />
+    <div {...stylex.props(catalog.row, surface.pressableLine)}>
+      <button
+        type="button"
+        onClick={onEdit}
+        aria-label={t('common.edit')}
+        {...stylex.props(catalog.rowMain)}
+      >
+        <span {...stylex.props(catalog.glyph)}>
+          <McpTransportIcon transport={server.transport} />
+        </span>
+        <span {...stylex.props(catalog.body)}>
+          <span {...stylex.props(catalog.titleLine)}>
+            <span {...stylex.props(catalog.name)}>{server.name}</span>
+            <Badge>{MCP_TRANSPORT_LABELS[server.transport]}</Badge>
           </span>
-          <span className="min-w-0 flex-1">
-            <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
-              <span className="min-w-0 truncate text-sm font-normal leading-tight">
-                {server.name}
-              </span>
-              <Badge variant="secondary" className="shrink-0 px-1.5 py-0 text-[10px]">
-                {MCP_TRANSPORT_LABELS[server.transport]}
-              </Badge>
-            </span>
-            <span className="mt-0.5 block truncate font-mono text-[11px] leading-tight text-muted-foreground">
+          <span {...stylex.props(catalog.meta)}>
+            <span {...stylex.props(catalog.truncate, catalog.mono)}>
               {describeMcpConnection(server.connection) ?? '—'}
             </span>
-            {server.description ? (
-              <span className="mt-0.5 block truncate text-[11px] leading-tight text-muted-foreground/80">
-                {server.description}
-              </span>
-            ) : null}
           </span>
-        </button>
-        <div className="flex shrink-0 items-center gap-2 py-2 pl-2 pr-2">
-          {/* The switch keeps its own Radix `data-state`, so the label sits
-              beside it rather than wrapping it in a tooltip trigger. */}
-          <label
-            className="flex cursor-pointer items-center gap-1.5 text-[11px] text-muted-foreground"
-            title={t('settings.mcp.form.defaultEnabledHint')}
-          >
-            <span className="hidden sm:inline">{t('settings.mcp.default')}</span>
-            <Switch
-              checked={server.enabledByDefault === true}
-              aria-label={defaultLabel}
-              onCheckedChange={onToggleDefault}
-            />
-          </label>
-          <Button
-            type="button"
-            size="icon"
-            variant="ghost"
-            className="h-7 w-7 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-            aria-label={t('common.remove')}
-            onClick={onRemove}
-          >
-            <Trash2 className="h-3.5 w-3.5" />
-          </Button>
-        </div>
+          {server.description ? (
+            <span {...stylex.props(catalog.meta, catalog.metaHint)}>
+              <span {...stylex.props(catalog.truncate)}>{server.description}</span>
+            </span>
+          ) : null}
+        </span>
+      </button>
+      <div {...stylex.props(catalog.actions, styles.actions)}>
+        {/* The switch carries its own state attributes, so the label sits
+            beside it rather than wrapping it in a tooltip trigger. */}
+        <label {...stylex.props(styles.default)} title={t('settings.mcp.form.defaultEnabledHint')}>
+          <span {...stylex.props(styles.defaultText)}>{t('settings.mcp.default')}</span>
+          <Switch
+            checked={server.enabledByDefault === true}
+            aria-label={defaultLabel}
+            onCheckedChange={onToggleDefault}
+          />
+        </label>
+        <Button
+          type="button"
+          variant="ghost"
+          aria-label={t('common.remove')}
+          size="small"
+          icon
+          tone="destructive"
+          onClick={onRemove}
+        >
+          <Trash2 {...stylex.props(catalog.icon)} />
+        </Button>
       </div>
     </div>
   );

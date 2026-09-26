@@ -151,6 +151,16 @@ describe('Lody MCP tool catalog', () => {
     );
     expect(names.filter((name) => name.startsWith('lody_task_'))).toEqual([]);
   });
+
+  it('always advertises only the bounded Schedule family', async () => {
+    const names = await listPublishedToolNames();
+    expect(names.filter((name) => name.startsWith('lody_schedule_')).sort()).toEqual([
+      'lody_schedule_get',
+      'lody_schedule_list',
+      'lody_schedule_pause',
+      'lody_schedule_propose',
+    ]);
+  });
 });
 
 describe('lody_feedback input schema', () => {

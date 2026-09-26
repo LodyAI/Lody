@@ -17,6 +17,7 @@ import {
   SECOND_RESPONSE,
   type ContextCopyFixture,
 } from '../fixtures/context-copy-fixture.js';
+import { openSidebarArchive } from './sidebar-footer.js';
 
 const AGENT_NAME = 'Deterministic Context Copy Agent';
 
@@ -207,9 +208,7 @@ export class ContextCopyPage {
   }
 
   private async copyFromForkMenu(): Promise<void> {
-    const forkMenu = this.page.locator(
-      '[role="menu"][aria-label="Fork conversation"][data-state="open"]'
-    );
+    const forkMenu = this.page.locator('[role="menu"][data-open]');
     await expect(forkMenu).toBeVisible();
     await expect(
       forkMenu.getByRole('menuitem', { name: /^(Fork to new tab|分叉到新标签页)$/u })
@@ -256,7 +255,7 @@ export class ContextCopyPage {
       .click();
     await this.page.getByRole('menuitem', { name: /^(Archive session|归档会话)$/u }).click();
     await expect(this.page).toHaveURL(/#\/local\/chat(?:\?.*)?$/u, { timeout: 30_000 });
-    await this.page.getByRole('button', { name: /^(Archive|归档)$/u, exact: true }).click();
+    await openSidebarArchive(this.page);
     await expect(this.page).toHaveURL(/#\/local\/archive(?:\?.*)?$/u);
     const archived = this.archivedRow(sessionId);
     await expect(archived).toBeVisible({ timeout: 30_000 });

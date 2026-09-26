@@ -8,12 +8,12 @@ import {
   memo,
   forwardRef,
   useImperativeHandle,
-  type MutableRefObject,
 } from 'react';
+import * as stylex from '@stylexjs/stylex';
 import { useAtomValue } from 'jotai';
 import { ArrowUp } from 'lucide-react';
-import { Spinner } from '@/ui/spinner';
-import { Button } from '@/ui/button';
+import { Spinner } from '@lody/ui/spinner';
+import { Button } from '@lody/ui/button';
 import type { AcpSessionSelectOption } from '@/components/shared/acp-session-select';
 import { useSessionAgentRole, type SessionAgentRoleControl } from '@/hooks/use-session-agent-role';
 import { buildAgentRoleFormValueFromRunConfig } from '@/lib/agent-role-form';
@@ -34,6 +34,7 @@ import {
   DesktopPermissionModeButton,
   DesktopRunConfigMenu,
 } from '@/components/sessions/desktop-run-config-menu';
+import { composerSurface } from '@/components/shared/composer-surface';
 import {
   ChatComposer,
   type ChatComposerFileItem,
@@ -109,7 +110,7 @@ import {
 import { resolveEffectiveCodeCollabWorkspaceId } from '@/lib/code-collab-workspace-id';
 import { getDroppedFileLocalPath, toPathMentionInsertion } from '@/lib/dropped-local-path';
 import { isImeComposingKeyboardEvent } from '@/lib/ime';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import { uploadSessionImage, validateSessionImageFile } from '@/lib/session-image-upload';
 import {
   computeSha256Hex,
@@ -449,8 +450,6 @@ export interface SessionChatInputAreaProps {
    * which may stack the queue directly on the composer), so skip the spacer.
    */
   hideTopSpacer?: boolean;
-  /** One-shot guard for a viewport resize caused by the composer auto-growing. */
-  skipNextViewportResizeAutoScrollRef?: MutableRefObject<boolean>;
   onModeChange: (value: string) => void;
   onModelChange: (value: string) => void;
   onConfigOptionChange?: (configId: string, value: AcpConfigOptionValue) => void;
@@ -551,7 +550,6 @@ export const SessionChatInputArea = memo(
       hideTopSpacer = false,
       freeTurnLimitNotice,
       mcp,
-      skipNextViewportResizeAutoScrollRef,
       onModeChange,
       onModelChange,
       onConfigOptionChange,
@@ -2564,9 +2562,11 @@ export const SessionChatInputArea = memo(
               disabled
               aria-label={t('chat.runConfig.buttonAriaLabel', 'Run configuration')}
               title={t('sessions.sendConfigLocked', 'Configuration is locked while sending')}
-              className="h-7 truncate px-2 text-sm text-muted-foreground opacity-70"
+              {...stylex.props(composerSurface.trigger)}
             >
-              {selectedModelLabel ?? t('chat.runConfig.buttonAriaLabel', 'Run configuration')}
+              <span {...stylex.props(composerSurface.truncate)}>
+                {selectedModelLabel ?? t('chat.runConfig.buttonAriaLabel', 'Run configuration')}
+              </span>
             </button>
           ) : (
             (mobileFooterSelectorNode ?? desktopFooterSelectorNode)
@@ -2620,7 +2620,7 @@ export const SessionChatInputArea = memo(
           void onStop();
         }}
         variant="ghost"
-        size="icon"
+        icon
         aria-label={t('sessions.stop')}
         className={cn(
           primaryActionSizeClassName,
@@ -2636,7 +2636,7 @@ export const SessionChatInputArea = memo(
     ) : (
       <Button
         type="button"
-        size="icon"
+        icon
         variant="ghost"
         onClick={() => {
           if (waitingForUploads) {
@@ -2739,7 +2739,6 @@ export const SessionChatInputArea = memo(
         primaryAction={primaryActionNode}
         autoResize
         maxRows={11}
-        skipNextViewportResizeAutoScrollRef={skipNextViewportResizeAutoScrollRef}
         focusOnContainerClick
       />
     );

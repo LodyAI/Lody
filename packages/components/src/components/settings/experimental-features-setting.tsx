@@ -1,6 +1,6 @@
 import { useAtom, useAtomValue } from 'jotai';
 import { useTranslation } from 'react-i18next';
-import { Switch } from '@/ui/switch';
+import { Switch } from '@lody/ui/switch';
 import {
   experimentalFeaturesEnabledAtom,
   reviewAgentExperimentEnabledAtom,
@@ -17,18 +17,22 @@ import { CompactRow, CompactSection } from './compact-layout';
  */
 export function ExperimentalFeaturesSection() {
   const { t } = useTranslation();
+  return (
+    <CompactSection title={t('settings.experimental.title', 'Experimental features')}>
+      <ExperimentalFeatureRows />
+    </CompactSection>
+  );
+}
+
+/** The master switch and, while it is on, each feature's own switch. */
+export function ExperimentalFeatureRows() {
+  const { t } = useTranslation();
   const [experimentalEnabled, setExperimentalEnabled] = useAtom(experimentalFeaturesEnabledAtom);
   const [reviewAgentEnabled, setReviewAgentEnabled] = useAtom(reviewAgentExperimentEnabledAtom);
 
   return (
-    <CompactSection title={t('settings.experimental.title', 'Experimental features')}>
-      <CompactRow
-        label={t('settings.experimental.enable', 'Enable experimental features')}
-        helper={t(
-          'settings.experimental.enableHelper',
-          'Show features that are still being built. They can change or break.'
-        )}
-      >
+    <>
+      <CompactRow label={t('settings.experimental.enable', 'Enable experimental features')}>
         <Switch
           checked={experimentalEnabled}
           onCheckedChange={setExperimentalEnabled}
@@ -51,7 +55,7 @@ export function ExperimentalFeaturesSection() {
           />
         </CompactRow>
       ) : null}
-    </CompactSection>
+    </>
   );
 }
 

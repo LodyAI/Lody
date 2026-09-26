@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { useAtomValue } from 'jotai';
 import { usePostHog } from '@posthog/react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import { useTranslation } from 'react-i18next';
 import type { GitHubMergeMethod, PrStatus } from '@lody/shared';
 
@@ -292,7 +292,11 @@ export function PrTabContainer({
       onMarkReadyForReview={handleMarkReadyForReview}
       onDeleteBranch={handleDeleteBranch}
       onResolveConflicts={canResolveConflicts ? resolveConflictsAction?.run : undefined}
-      isResolvingConflicts={resolveConflictsAction?.pending ?? false}
+      // Pending only counts for an offerable action: while the session hydrates
+      // or cannot offer it, the header shows the disabled merge instead.
+      isResolvingConflicts={Boolean(
+        resolveConflictsAction?.available && resolveConflictsAction.pending
+      )}
       onRefresh={handleRefresh}
       onPostComment={handlePostComment}
       onGrantChecksPermission={handleGrantChecksPermission}

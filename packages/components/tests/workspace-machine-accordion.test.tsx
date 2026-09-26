@@ -80,6 +80,7 @@ describe('WorkspaceMachineExpandedSection', () => {
     const childLayout = [...collapsedRow!.children].map(
       (child) => `${child.tagName}:${child.className}`
     );
+    const collapsedChevronClasses = [...(collapsedRow!.lastElementChild?.classList ?? [])];
 
     flushSync(() => collapsedRow!.click());
 
@@ -91,9 +92,11 @@ describe('WorkspaceMachineExpandedSection', () => {
     );
     expect(expandedChildLayout.slice(0, -1)).toEqual(childLayout.slice(0, -1));
     expect(expandedRow!.lastElementChild?.tagName).toBe(collapsedRow!.lastElementChild?.tagName);
-    expect(expandedRow!.lastElementChild?.classList.contains('h-4')).toBe(true);
-    expect(expandedRow!.lastElementChild?.classList.contains('w-4')).toBe(true);
-    expect(expandedRow!.lastElementChild?.classList.contains('shrink-0')).toBe(true);
+    // The chevron keeps its box and only turns: every class it had is still on it.
+    expect(collapsedChevronClasses.length).toBeGreaterThan(0);
+    for (const name of collapsedChevronClasses) {
+      expect(expandedRow!.lastElementChild?.classList.contains(name)).toBe(true);
+    }
     expect(container.querySelector('[data-machine-details]')).toBeNull();
     expect(frameCallbacks.size).toBe(1);
 

@@ -1,6 +1,6 @@
 import type { CSSProperties, ReactNode } from 'react';
 import { Menu } from 'lucide-react';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { useIsMobile } from '../../hooks/use-mobile';
 import { useSetAtom } from 'jotai';
 import { toggleMobileDrawerAtom } from '../../atoms';
@@ -50,7 +50,7 @@ export function BaseHeader({
       {isMobile && !hideMenuButton && (
         <Button
           variant="ghost"
-          size="icon"
+          icon
           className="mr-2 md:hidden"
           onClick={(e) => {
             // Remove focus to avoid aria-hidden warnings in some browsers.

@@ -79,6 +79,8 @@ minimumReleaseAge: 10080
 
 # Grandfather versions already locked on main; later releases remain quarantined.
 minimumReleaseAgeExclude:
+  # Adds the `remend` option the streaming Markdown renderer passes (lobehub/streamdown#5).
+  - '@lobehub/streamdown@1.4.0'
   # Built-in runtime refresh, verified together with the pinned adapters.
   - '@anthropic-ai/claude-agent-sdk@0.3.280'
   - '@anthropic-ai/claude-agent-sdk-darwin-arm64@0.3.280'

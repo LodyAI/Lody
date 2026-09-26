@@ -1,12 +1,16 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { CheckCircle2, AlertCircle, Download, ExternalLink } from 'lucide-react';
-import { Spinner } from '@/ui/spinner';
+import { Spinner } from '@lody/ui/spinner';
 import type { ElectronUpdaterPhase } from '@lody/shared';
 import { useAtom } from 'jotai';
-import { Button } from '@/ui/button';
-import { Switch } from '@/ui/switch';
-import { developerModeEnabledAtom, inboxBetaEnabledAtom } from '@/atoms/settings';
+import { Button } from '@lody/ui/button';
+import { Switch } from '@lody/ui/switch';
+import {
+  developerModeEnabledAtom,
+  inboxBetaEnabledAtom,
+  promptShortcutsBetaEnabledAtom,
+} from '@/atoms/settings';
 import { useElectronUpdaterState } from '@/hooks/use-electron-updater-state';
 import { OpenSourceAttributionsDialog } from '@/components/settings/open-source-attributions-dialog';
 import { JoinCommunityButton } from '@/components/settings/join-community-dialog';
@@ -107,6 +111,9 @@ export function MobileAboutSettings() {
   const { t, i18n } = useTranslation();
   const [developerModeEnabled, setDeveloperModeEnabled] = useAtom(developerModeEnabledAtom);
   const [inboxBetaEnabled, setInboxBetaEnabled] = useAtom(inboxBetaEnabledAtom);
+  const [promptShortcutsBetaEnabled, setPromptShortcutsBetaEnabled] = useAtom(
+    promptShortcutsBetaEnabledAtom
+  );
   const [revealTaps, setRevealTaps] = useState(0);
   const updaterState = useElectronUpdaterState();
   const [isInstalling, setIsInstalling] = useState(false);
@@ -226,8 +233,7 @@ export function MobileAboutSettings() {
           >
             {isDownloaded ? (
               <Button
-                size="sm"
-                className="h-8 px-3"
+                size="small"
                 onClick={() => {
                   void handleQuitAndInstall();
                 }}
@@ -242,9 +248,8 @@ export function MobileAboutSettings() {
               </Button>
             ) : (
               <Button
-                variant="outline"
-                size="sm"
-                className="h-8 px-3"
+                variant="secondary"
+                size="small"
                 onClick={() => {
                   void handleCheckForUpdates();
                 }}
@@ -297,6 +302,19 @@ export function MobileAboutSettings() {
                 checked={inboxBetaEnabled}
                 onCheckedChange={setInboxBetaEnabled}
                 aria-label={t('settings.beta.inbox', 'Inbox')}
+              />
+            </MobileSettingsRow>
+            <MobileSettingsRow
+              label={t('settings.tabs.promptShortcuts', 'Prompt Shortcuts')}
+              helper={t(
+                'settings.beta.promptShortcutsHelper',
+                'Create reusable prompts and insert them with /. In development — expect rough edges.'
+              )}
+            >
+              <Switch
+                checked={promptShortcutsBetaEnabled}
+                onCheckedChange={setPromptShortcutsBetaEnabled}
+                aria-label={t('settings.tabs.promptShortcuts', 'Prompt Shortcuts')}
               />
             </MobileSettingsRow>
           </MobileSettingsRowGroup>

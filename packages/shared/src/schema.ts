@@ -479,6 +479,7 @@ export const sessionPlanEntrySchema = schema.LoroMap({
 
 export type SessionHistorySendStatus = 'timeout';
 export type SessionHistoryStatus =
+  | 'prepared'
   | 'pending'
   | 'pending_apply'
   | 'delivery_unknown'
@@ -584,7 +585,12 @@ export const isSessionHistoryDelivered = (
 ): boolean => {
   const status = resolveSessionHistoryStatus(entry);
   if (status) {
-    return status !== 'pending' && status !== 'pending_apply' && status !== 'delivery_unknown';
+    return (
+      status !== 'prepared' &&
+      status !== 'pending' &&
+      status !== 'pending_apply' &&
+      status !== 'delivery_unknown'
+    );
   }
   return entry?.read === true;
 };
@@ -621,6 +627,9 @@ export const sessionHistorySchema = schema.LoroMap({
   read: schema.Boolean({ required: false }),
   userId: schema.String({ required: false }),
   modelInfo: schema.Any({ required: false }),
+  // Assistant turns: tokens this turn consumed, summed from adapter usage deltas.
+  // A primitive JSON value (`SessionTurnTokenUsage`), replaced whole on each write.
+  tokenUsage: schema.Any({ required: false }),
   // FileDiff 此次对话有哪些文件变更，和具体变更行数
   fileDiff: schema.Any(),
   // Indicates whether the agent's response for this turn has finished
@@ -772,13 +781,6 @@ export type SessionPreviewCandidateMeta = Pick<PreviewCandidate, 'status' | 'upd
 
 export type SessionPreviewConnectionMeta = Pick<PreviewConnection, 'status' | 'updatedAt'>;
 
-export type SessionPreviewLegacyMetaFields = {
-  /** Deprecated legacy detail. Full preview candidate state lives in session doc `preview`. */
-  previewCandidate?: PreviewCandidate;
-  /** Deprecated legacy detail. Full preview connection state lives in session doc `preview`. */
-  previewConnection?: PreviewConnection;
-};
-
 export type SessionExternalHistoryCursorDocState = {
   importedTurnHashes?: string[];
   /**
@@ -886,6 +888,8 @@ export type SessionMeta = {
    */
   agentRoleId?: AgentRoleId;
   agentRoleRevision?: number;
+  /** Schedule provenance only, a UUID of at most 50 UTF-8 bytes. */
+  scheduleId?: string;
   acpSessionId?: ACPSessionId;
   /** Exact Session or child Tab that created/opened this session, when known. */
   openedBySessionId?: SessionId;
@@ -1058,18 +1062,6 @@ export type SessionLegacyMetaFields = {
   worktreeCleanup?: WorktreeCleanupScriptConfig;
 };
 
-export type SessionMetaWithLegacyPreview = Omit<
-  SessionMeta,
-  'previewCandidate' | 'previewConnection'
-> &
-  Partial<SessionPreviewLegacyMetaFields>;
-
-export function getSessionPreviewLegacyFields(
-  session: Pick<SessionMeta, 'previewCandidate' | 'previewConnection'> | null | undefined
-): Partial<SessionPreviewLegacyMetaFields> {
-  return (session ?? {}) as Partial<SessionPreviewLegacyMetaFields>;
-}
-
 export type NeedToDeleteSessionQueueItem =
   | boolean
   | {
@@ -1225,6 +1217,12 @@ export type MachineMeta = {
   supportsLocalProjectHistoryRpc?: boolean;
   /** Versioned daemon protocols available to remote and local clients. */
   protocolCapabilities?: MachineProtocolCapabilities;
+  /**
+   * IANA zone of the machine's clock, e.g. `Asia/Shanghai` (under 50 bytes,
+   * rewritten only at registration). Schedules owned by this machine are
+   * authored on this clock; absent on older CLIs.
+   */
+  timeZone?: string;
 };
 
 /**

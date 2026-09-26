@@ -40,6 +40,44 @@ export function formatCompactRelativeTime(
   return `${years}y`;
 }
 
+type TranslateCount = (key: string, fallback: string, options: { count: number }) => string;
+
+/**
+ * "2m ago" / "2 分钟前": how long ago, in the product language's own units.
+ *
+ * `formatCompactRelativeTime` is Latin shorthand for a narrow column of
+ * timestamps; inside a sentence of Chinese copy its "2m" reads as English, so
+ * prose that says when something happened takes this one. English keeps the
+ * compact units ("2m ago"); Chinese spells them ("2 分钟前"). The steps are
+ * the compact formatter's, so a row never disagrees with the list beside it.
+ */
+export function formatLocalizedRelativeTime(
+  value: RelativeTimeValue,
+  t: TranslateCount,
+  now: Date = new Date()
+): string {
+  const date = toDate(value);
+  if (!date) return '--';
+
+  const minutes = Math.floor(Math.max(0, now.getTime() - date.getTime()) / 60_000);
+  if (minutes < 1) return t('time.ago.justNow', 'just now', { count: 0 });
+  if (minutes < 60) return t('time.ago.minutes', '{{count}}m ago', { count: minutes });
+
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return t('time.ago.hours', '{{count}}h ago', { count: hours });
+
+  const days = Math.floor(hours / 24);
+  if (days < 7) return t('time.ago.days', '{{count}}d ago', { count: days });
+
+  const weeks = Math.floor(days / 7);
+  if (weeks < 4) return t('time.ago.weeks', '{{count}}w ago', { count: weeks });
+
+  const months = Math.floor(days / 30);
+  if (months < 12) return t('time.ago.months', '{{count}}mo ago', { count: months });
+
+  return t('time.ago.years', '{{count}}y ago', { count: Math.floor(days / 365) });
+}
+
 /**
  * Compact absolute month + year ("Aug 2025"), for dates where *when it was
  * created* matters more than how long ago that was.

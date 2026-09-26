@@ -2,14 +2,9 @@ import type { ReactNode } from 'react';
 import { Check, ChevronDown } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
-import { Button } from '@/ui/button';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/ui/dropdown-menu';
+import { Button } from '@lody/ui/button';
+import { Tooltip } from '@/ui/armed-overlays';
+import { Menu } from '@/ui/menu';
 
 export type AcpSessionSelectOption = {
   value: string;
@@ -68,12 +63,17 @@ export function AcpSessionSelect({
   const label = selectedOption?.label ?? placeholder ?? '';
   const isMenuEnabled = !disabled && options.length > 1;
   const isDark = tone === 'dark';
+  // Icon-only triggers hide the selected label, so the tooltip and the
+  // accessible name carry it instead ("Permission mode: Plan").
+  const withSelectedLabel = (name: string | undefined) =>
+    iconOnly && label ? (name ? `${name}: ${label}` : label) : name;
 
   const trigger = (
     <Button
       type="button"
       variant="ghost"
-      size={iconOnly ? 'icon' : 'sm'}
+      size="mini"
+      icon={iconOnly}
       className={cn(
         'min-w-0 select-none gap-1 text-foreground/70 hover:text-foreground focus-visible:ring-0 focus-visible:ring-offset-0',
         variant === 'compact' && compactClassName(isDark, iconOnly),
@@ -83,9 +83,9 @@ export function AcpSessionSelect({
         variant === 'text' && !iconOnly && 'rounded-md bg-transparent px-1 hover:bg-transparent',
         className
       )}
-      aria-label={ariaLabel}
+      aria-label={withSelectedLabel(ariaLabel)}
       disabled={disabled}
-      title={triggerTitle ?? label}
+      title={withSelectedLabel(triggerTitle) ?? label}
     >
       {icon ? <span className="flex shrink-0 items-center">{icon}</span> : null}
       {!iconOnly ? <span className="font-medium">{label}</span> : null}
@@ -100,34 +100,34 @@ export function AcpSessionSelect({
   }
 
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>{trigger}</DropdownMenuTrigger>
-      <DropdownMenuContent align={align} className={cn('min-w-[120px]', contentClassName)}>
+    <Menu.Root>
+      <Menu.Trigger render={trigger}>{trigger}</Menu.Trigger>
+      <Menu.Content align={align} className={cn('min-w-[120px]', contentClassName)}>
         {options.map((option) => {
           const isSelected = option.value === value;
           const menuItem = (
-            <DropdownMenuItem
+            <Menu.Item
               key={option.value}
               disabled={option.disabled}
-              onSelect={() => onChange(option.value)}
+              onClick={() => onChange(option.value)}
               className="justify-between"
             >
               <span>{option.label}</span>
               {isSelected ? <Check className="h-3 w-3 opacity-70" /> : null}
-            </DropdownMenuItem>
+            </Menu.Item>
           );
 
           if (showDescription && option.description) {
             return (
-              <Tooltip key={option.value} delayDuration={500}>
-                <TooltipTrigger asChild>{menuItem}</TooltipTrigger>
-                <TooltipContent side="right">{option.description}</TooltipContent>
-              </Tooltip>
+              <Tooltip.Root key={option.value}>
+                <Tooltip.Trigger delay={500} render={menuItem}/>
+                <Tooltip.Content side="right">{option.description}</Tooltip.Content>
+              </Tooltip.Root>
             );
           }
           return menuItem;
         })}
-      </DropdownMenuContent>
-    </DropdownMenu>
+      </Menu.Content>
+    </Menu.Root>
   );
 }

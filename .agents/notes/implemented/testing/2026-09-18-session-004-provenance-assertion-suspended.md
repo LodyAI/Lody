@@ -62,3 +62,7 @@ the scenario itself was not re-run (needs a built desktop). The suspended
 step also covered the survivors' independent deletion, so the journey no
 longer proves archived Sessions are deletable from their own route — that
 flow is equally blocked by the unresolved archived-view UX.
+
+The archived-view decision was made on 2026-09-24 (view history, archive independent of
+tab closure); the assertion is re-enabled by
+[orthogonal archive and closure](../bug-fix/2026-09-24-archive-independent-of-tab-close.md).

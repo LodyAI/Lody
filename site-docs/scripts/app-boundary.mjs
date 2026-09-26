@@ -9,7 +9,7 @@ import path from 'node:path';
 const SOURCE_DIRS = ['components', 'app', 'src', 'lib'];
 const ROOT_FILES = ['vite.config.ts', 'source.config.ts'];
 const SOURCE_EXTENSIONS = new Set(['.ts', '.tsx', '.mts', '.mjs', '.js', '.css']);
-const FORBIDDEN_PACKAGES = ['@lody/components', '@lody/shared'];
+const FORBIDDEN_PACKAGES = ['@lody/components', '@lody/shared', '@lody/ui'];
 
 const RULES = [
   {
@@ -19,13 +19,14 @@ const RULES = [
   },
   {
     pattern:
-      /(?:\bfrom\s*|\bimport\s*\(\s*|\bimport\s+)['"]@lody\/(?:components|shared)(?:\/[^'"]*)?['"]/gu,
+      /(?:\bfrom\s*|\bimport\s*\(\s*|\bimport\s+)['"]@lody\/(?:components|shared|ui)(?:\/[^'"]*)?['"]/gu,
     message: 'imports an app workspace package',
   },
   {
     // Only build inputs: demo copy legitimately names app file paths.
-    pattern: /packages\/components\/src/gu,
-    message: 'points at `packages/components/src` (alias, Tailwind @source, or path)',
+    pattern: /packages\/(?:components\/src|ui\/)/gu,
+    message:
+      'points at `packages/components/src` or `packages/ui` (alias, Tailwind @source, or path)',
     appliesTo: (file) => file.endsWith('.css') || ROOT_FILES.includes(path.basename(file)),
   },
 ];

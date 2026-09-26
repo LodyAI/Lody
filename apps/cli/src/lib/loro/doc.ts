@@ -109,6 +109,7 @@ import { createCliSqliteRepoStore } from './sqlite-repo-store';
 import { streamsRoomBinding, type StreamsRoomBinding } from './streams-room-binding';
 import { formatErrorMessage } from '@/utils/format-error';
 import {
+  findSoleMachineAgentConfig,
   listMergedAgentConfigs,
   readMachineBuiltinAgentOptOuts,
   readMergedAgentConfigById,
@@ -1375,6 +1376,20 @@ export class LoroDocumentManager {
     return false;
   }
 
+  async findSoleAgentConfig(
+    cliType: AgentConfigCliType,
+    agentType: string,
+    machineId: MachineId
+  ): Promise<AgentConfigMeta | undefined> {
+    return await findSoleMachineAgentConfig(
+      this.repo,
+      this.workspaceId,
+      machineId,
+      cliType,
+      agentType
+    );
+  }
+
   /** Managed builtin provider types the user removed on this machine, so they must not be auto-registered at startup. */
   async getBuiltinAgentOptOuts(machineId: MachineId): Promise<Set<ManagedBuiltinAgentType>> {
     return await readMachineBuiltinAgentOptOuts(this.repo, this.workspaceId, machineId);
@@ -1525,7 +1540,7 @@ export class LoroDocumentManager {
     modelReasoningEfforts?: Record<string, string[]>,
     acknowledgedSteer = false,
     goalActions?: SessionGoalAction[],
-    options: { signal?: AbortSignal } = {}
+    options: { signal?: AbortSignal; sessionTitle?: boolean } = {}
   ): Promise<AcpCapabilityCacheEntry> {
     options.signal?.throwIfAborted();
     if (!this.machine) {
@@ -2949,6 +2964,7 @@ const serializeAcpCapabilityWithoutFetchTime = (entry: AcpCapabilityCacheEntry):
     availableCommands: entry.availableCommands,
     sessionFork: entry.sessionFork,
     acknowledgedSteer: entry.acknowledgedSteer,
+    sessionTitle: entry.sessionTitle,
     sessionForkWorktree: entry.sessionForkWorktree,
   });
 
@@ -3035,7 +3051,7 @@ export class MachineDocument implements LoroDocument<{}, MachineMeta> {
     modelReasoningEfforts?: Record<string, string[]>,
     acknowledgedSteer = false,
     goalActions?: SessionGoalAction[],
-    options: { signal?: AbortSignal } = {}
+    options: { signal?: AbortSignal; sessionTitle?: boolean } = {}
   ): Promise<AcpCapabilityCacheEntry> {
     options.signal?.throwIfAborted();
     const normalizedModes = modes.map((mode) => ({
@@ -3061,6 +3077,7 @@ export class MachineDocument implements LoroDocument<{}, MachineMeta> {
       sessionFork,
       acknowledgedSteer,
       goalActions: goalActions?.length ? goalActions : undefined,
+      sessionTitle: options.sessionTitle,
       sessionForkWorktree: sessionFork,
       modelReasoningEfforts:
         modelReasoningEfforts && Object.keys(modelReasoningEfforts).length > 0

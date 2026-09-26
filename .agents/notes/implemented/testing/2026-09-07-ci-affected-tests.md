@@ -6,6 +6,8 @@ PR: https://github.com/LodyAI/Lody/pull/499
 
 English | [中文](2026-09-07-ci-affected-tests.zh.md)
 
+Later: [CI test groups and pnpm store cache](2026-09-26-ci-test-groups-and-pnpm-store-cache.md) splits `Tests` into runner-level groups behind the same required check.
+
 ## Abstract
 
 `CI` (`.github/workflows/ci.yml`) always runs the full workspace typecheck, `check:quick`, and `pnpm test:ci` on every `pull_request`, `push` to `main`, and `workflow_dispatch`. `test:ci` is a full recursive Vitest/`node --test` sweep excluding only `@lody/electron` from the parallel pass (then running it last) and excluding `acp-extension-claude` / `acp-extension-codex`. That is correct for `main` and for hub-package changes, and it is wasted work for docs-only PRs and for leaf-package PRs. A components-only PR currently still runs ~264 CLI tests; an `apps/cli`-only PR currently still runs ~451 components tests.

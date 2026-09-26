@@ -17,10 +17,10 @@ import {
 /**
  * Diagram interaction for `markdown-renderer.tsx`.
  *
- * Streamdown owns the diagram markup, so everything here is applied to nodes it
- * rendered: the click target and its `role`/`tabindex` by observer, the canvas
- * transform on the `<svg>`, and the full-screen button by portal into the
- * block's own action bar.
+ * `MarkdownMermaidBlock` renders the diagram asynchronously, so everything here
+ * is applied to nodes it rendered: the click target and its `role`/`tabindex`
+ * by observer, the canvas transform on the `<svg>`, and the full-screen button
+ * by portal into the block's own action bar.
  *
  * A diagram in a message is a still preview. Clicking one with a pointer that
  * can pinch ACTIVATES it: that one diagram becomes a canvas until Escape, a
@@ -30,7 +30,7 @@ import {
  * control bar's buttons zoom.
  */
 
-/** Streamdown's wrapper around one rendered diagram, inside a `mermaid-block`. */
+/** The frame around one rendered diagram, inside a `mermaid-block`. */
 export const MERMAID_DIAGRAM_SELECTOR = '[data-streamdown="mermaid"]';
 const MERMAID_BLOCK_SELECTOR = '[data-streamdown="mermaid-block"]';
 const MERMAID_BLOCK_ACTIONS_SELECTOR = '[data-streamdown="mermaid-block-actions"]';
@@ -192,9 +192,9 @@ export function useMermaidDiagramCanvas({
 
   const closeDiagram = useCallback(() => setSelection(null), []);
 
-  // Streamdown renders a diagram only after its lazily imported runtime
-  // resolves — long after this component commits — so the click target, the
-  // block ids, and the action-bar hosts are all applied by observer.
+  // A diagram renders only after its lazily imported runtime resolves — long
+  // after this component commits — so the click target, the block ids, and the
+  // action-bar hosts are all applied by observer.
   useEffect(() => {
     const root = containerRef.current;
     if (!root) {
@@ -300,20 +300,8 @@ export function useMermaidDiagramCanvas({
     };
   }, [canvasLabel, containerRef, deactivate, enabled]);
 
-  // Streamdown's pan/zoom canvas listens for `wheel` non-passively and calls
-  // `preventDefault()` on every one of them, so a page scroll that merely passes
-  // under a diagram is swallowed and becomes a zoom instead. Turning
-  // `controls.mermaid.panZoom` off only hides that canvas's buttons — the
-  // listener stays, and it sits on Streamdown's own element, so the gesture has
-  // to be taken from it in the capture phase above.
-  //
-  // Only a pinch over the ACTIVE diagram is consumed here. Everything else is
-  // handed back: the interceptor never calls `preventDefault()`, because the
-  // browser's own scrolling is the behaviour being restored. `stopPropagation()`
-  // alone would also hide the gesture from the conversation's wheel listeners
-  // further up (releasing stick-to-bottom, abandoning an outline jump), so an
-  // uncancelable copy is re-dispatched from the markdown root, whose path
-  // excludes the canvas.
+  // Only a pinch over the ACTIVE diagram is consumed. Every other wheel is left
+  // to the page, so a scroll that merely passes under a diagram still scrolls.
   useEffect(() => {
     const root = containerRef.current;
     if (!root || !enabled) {
@@ -321,52 +309,27 @@ export function useMermaidDiagramCanvas({
     }
 
     const handleWheel = (event: WheelEvent) => {
-      const target = event.target;
-      if (!(target instanceof Element)) {
+      if (!(event.ctrlKey || event.metaKey)) {
         return;
       }
-      const diagram = target.closest(MERMAID_DIAGRAM_SELECTOR);
-      if (!diagram) {
+      const diagram = canvasRef.current?.diagram;
+      if (!diagram || !(event.target instanceof Node) || !diagram.contains(event.target)) {
         return;
       }
-      event.stopPropagation();
-
-      if (canvasRef.current?.diagram === diagram && (event.ctrlKey || event.metaKey)) {
-        // A trackpad pinch, which Chromium would otherwise spend on zooming the
-        // whole window.
-        event.preventDefault();
-        zoomAt(event.clientX, event.clientY, computeCanvasPinchFactor(event.deltaY));
-        return;
-      }
-
-      root.dispatchEvent(
-        new WheelEvent('wheel', {
-          bubbles: true,
-          cancelable: false,
-          composed: true,
-          deltaX: event.deltaX,
-          deltaY: event.deltaY,
-          deltaZ: event.deltaZ,
-          deltaMode: event.deltaMode,
-          clientX: event.clientX,
-          clientY: event.clientY,
-          altKey: event.altKey,
-          ctrlKey: event.ctrlKey,
-          metaKey: event.metaKey,
-          shiftKey: event.shiftKey,
-        })
-      );
+      // A trackpad pinch, which Chromium would otherwise spend on zooming the
+      // whole window.
+      event.preventDefault();
+      zoomAt(event.clientX, event.clientY, computeCanvasPinchFactor(event.deltaY));
     };
 
-    root.addEventListener('wheel', handleWheel, { capture: true, passive: false });
+    root.addEventListener('wheel', handleWheel, { passive: false });
     return () => {
-      root.removeEventListener('wheel', handleWheel, { capture: true });
+      root.removeEventListener('wheel', handleWheel);
     };
   }, [containerRef, enabled, zoomAt]);
 
   // Which device is asking decides what a click means, so the pointer is
-  // recorded before the click arrives. Capture phase: Streamdown's canvas calls
-  // `setPointerCapture` on its own element for a drag it can no longer perform.
+  // recorded before the click arrives.
   useEffect(() => {
     const root = containerRef.current;
     if (!root || !enabled) {
@@ -584,11 +547,7 @@ export function useMermaidDiagramCanvas({
   };
 }
 
-/**
- * Sits in Streamdown's own action bar beside copy and download, which is
- * always visible rather than revealed on hover. It replaces the bundled
- * full-screen control, whose overlay a touch user cannot leave.
- */
+/** Sits in the diagram block's action bar beside copy and download. */
 export function MermaidFullscreenButton({
   label,
   onOpen,

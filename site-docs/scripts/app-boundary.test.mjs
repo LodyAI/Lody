@@ -28,17 +28,23 @@ await test('app imports, scans and dependencies are reported', () => {
       "import { ChatComposer } from '@/components/chat/chat-composer';",
       "import type { SessionMeta } from '@lody/shared';",
       "const lazyView = () => import('@/components/ai-gui/view');",
+      "import { Button } from '@lody/ui/button';",
     ].join('\n'),
     'app/global.css': "@source '../../packages/components/src/**/*.{ts,tsx}';",
-    'vite.config.ts': "const src = path.resolve(dirname, '../packages/components/src');",
+    'vite.config.ts': [
+      "const src = path.resolve(dirname, '../packages/components/src');",
+      "import { stylexOptions } from '../packages/ui/stylex-options';",
+    ].join('\n'),
   });
   try {
     assert.deepEqual(findAppBoundaryViolations(root), [
       'components/preview.tsx:1 imports the app through the `@/*` alias',
       'components/preview.tsx:2 imports an app workspace package',
       'components/preview.tsx:3 imports the app through the `@/*` alias',
-      'app/global.css:1 points at `packages/components/src` (alias, Tailwind @source, or path)',
-      'vite.config.ts:1 points at `packages/components/src` (alias, Tailwind @source, or path)',
+      'components/preview.tsx:4 imports an app workspace package',
+      'app/global.css:1 points at `packages/components/src` or `packages/ui` (alias, Tailwind @source, or path)',
+      'vite.config.ts:1 points at `packages/components/src` or `packages/ui` (alias, Tailwind @source, or path)',
+      'vite.config.ts:2 points at `packages/components/src` or `packages/ui` (alias, Tailwind @source, or path)',
       'package.json dependencies depends on @lody/shared',
     ]);
   } finally {

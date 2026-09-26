@@ -22,7 +22,33 @@ import {
   type LodyResolvedVSCodeTheme,
 } from '@/lib/vscode-theme';
 
+import * as stylex from '@stylexjs/stylex';
+import {
+  darkShadowTheme,
+  darkSheenTheme,
+  lightShadowTheme,
+  lightSheenTheme,
+} from '@lody/ui/tokens/colors.stylex';
+import { productDarkPalette, productLightPalette } from '@/lib/vscode-theme/lody-ui-palette.stylex';
+
 export type Theme = 'dark' | 'light' | 'system';
+
+/**
+ * `@lody/ui`'s palette on the root, in the app's resolved mode: its colours
+ * read the VS Code theme's variables (`lody-ui-palette.stylex.ts`), and its
+ * shadows and sheens follow the app's light/dark rather than the OS's.
+ */
+const uiPaletteClassNames = (mode: 'light' | 'dark'): string[] =>
+  (
+    (mode === 'dark'
+      ? stylex.props(productDarkPalette, darkShadowTheme, darkSheenTheme)
+      : stylex.props(productLightPalette, lightShadowTheme, lightSheenTheme)
+    ).className ?? ''
+  )
+    .split(' ')
+    .filter(Boolean);
+
+const UI_PALETTE_CLASSES = [...uiPaletteClassNames('light'), ...uiPaletteClassNames('dark')];
 export type ResolvedTheme = 'light' | 'dark';
 
 export const THEME_CYCLE_ORDER: readonly Theme[] = ['light', 'dark', 'system'];
@@ -144,8 +170,8 @@ function LodyThemeProvider({
   useIsomorphicLayoutEffect(() => {
     const root = window.document.documentElement;
 
-    root.classList.remove('light', 'dark');
-    root.classList.add(resolvedTheme);
+    root.classList.remove('light', 'dark', ...UI_PALETTE_CLASSES);
+    root.classList.add(resolvedTheme, ...uiPaletteClassNames(resolvedTheme));
     root.style.colorScheme = theme === 'system' ? 'light dark' : resolvedTheme;
   }, [resolvedTheme, theme]);
 

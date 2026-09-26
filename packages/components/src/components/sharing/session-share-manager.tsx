@@ -1,22 +1,121 @@
 import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Check, Copy, Globe } from 'lucide-react';
+import { AlertCircle, Check, Copy, Globe } from 'lucide-react';
+import * as stylex from '@stylexjs/stylex';
 import { SHARE_LIMITS } from '@lody/shared/session-sharing';
 import type { useSessionShareManagement } from '@/hooks/use-session-share-management';
-import { cn } from '@/lib/utils';
-import { Button } from '@/ui/button';
-import { Checkbox } from '@/ui/checkbox';
-import { Progress } from '@/ui/progress';
-import {
-  AlertDialog,
-  AlertDialogContent,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogCancel,
-  AlertDialogAction,
-} from '@/ui/alert-dialog';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { corner, duration, ease, radius, space, text } from '@lody/ui/tokens/scales.stylex';
+import { Button } from '@lody/ui/button';
+import { Checkbox } from '@lody/ui/checkbox';
+import { Input } from '@lody/ui/input';
+import { Progress } from '@lody/ui/progress';
+import { Skeleton } from '@lody/ui/skeleton';
+import { AlertDialog } from '@/ui/dialog';
+import { shareSurface } from './surface';
+
+const REDUCED_MOTION = '@media (prefers-reduced-motion: reduce)';
+
+/** A step arrives from a hair to the right, the way the next screen of a flow does. */
+const stepIn = stylex.keyframes({
+  from: { opacity: 0, transform: 'translateX(4px)' },
+  to: { opacity: 1, transform: 'none' },
+});
+
+const styles = stylex.create({
+  frame: { display: 'flex', flexDirection: 'column', minHeight: '100%' },
+  transition: {
+    position: 'relative',
+    overflow: 'hidden',
+    transitionProperty: { default: 'height', [REDUCED_MOTION]: 'none' },
+    transitionDuration: '300ms',
+    transitionTimingFunction: 'ease-out',
+  },
+  step: {
+    animationName: { default: stepIn, [REDUCED_MOTION]: 'none' },
+    animationDuration: duration.regular,
+    animationTimingFunction: ease.standard,
+  },
+  /** One screen: its lines stacked, set apart by space. */
+  body: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: space[3],
+    paddingBottom: space[4],
+  },
+  loading: { display: 'flex', flexDirection: 'column', gap: space[3], paddingBottom: space[4] },
+  status: { margin: 0, fontSize: text.bodySize, lineHeight: text.bodyLeading, color: colors.label },
+  prose: {
+    margin: 0,
+    fontSize: text.bodySize,
+    lineHeight: text.bodyLeading,
+    color: colors.secondaryLabel,
+  },
+  lead: { display: 'flex', alignItems: 'center', gap: space[2] },
+  leadIcon: { flexShrink: 0, width: '16px', height: '16px', color: colors.secondaryLabel },
+  successIcon: { flexShrink: 0, width: '16px', height: '16px', color: colors.success },
+  published: {
+    margin: 0,
+    fontSize: text.bodySize,
+    lineHeight: text.bodyLeading,
+    fontWeight: 500,
+    color: colors.label,
+  },
+  note: {
+    margin: 0,
+    fontSize: text.footnoteSize,
+    lineHeight: text.footnoteLeading,
+    color: colors.secondaryLabel,
+  },
+  linkRow: { display: 'flex', alignItems: 'center', gap: space[1] },
+  secretMissing: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'flex-start',
+    gap: space[2],
+  },
+  /** The checkbox and its sentence are one pressable line. */
+  option: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: space[2],
+    marginInline: `calc(-1 * ${space[2]})`,
+    paddingInline: space[2],
+    paddingBlock: space[1.5],
+    borderRadius: radius.small,
+    cornerShape: corner.shape,
+    fontSize: text.bodySize,
+    lineHeight: text.bodyLeading,
+    color: colors.label,
+    cursor: 'pointer',
+    backgroundColor: { default: 'transparent', ':hover': colors.hoverFill },
+    transitionProperty: 'background-color',
+    transitionDuration: duration.fast,
+    transitionTimingFunction: ease.standard,
+  },
+  optionDisabled: {
+    cursor: 'not-allowed',
+    backgroundColor: { default: 'transparent', ':hover': 'transparent' },
+  },
+  optionLabelDisabled: { opacity: 0.45 },
+  /**
+   * The answers stick to the bottom of the dialog's scroll body. The panel is
+   * what separates them from the content scrolling under, so the row takes the
+   * panel's own fill and no rule above it.
+   */
+  footer: {
+    position: 'sticky',
+    insetBlockEnd: 0,
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: space[2],
+    marginTop: 'auto',
+    paddingTop: space[3],
+    backgroundColor: colors.elevatedBackground,
+  },
+  spacer: { flexGrow: 1 },
+});
 
 export type ShareCandidate = { sessionId: string; title: string };
 export type SessionShareManagerProps = ReturnType<typeof useSessionShareManagement> & {
@@ -47,15 +146,9 @@ function StepTransition({ step, children }: { step: ShareStep; children: ReactNo
     return () => observer.disconnect();
   }, []);
   return (
-    <div
-      className="relative overflow-hidden transition-[height] duration-300 ease-out motion-reduce:transition-none"
-      style={{ height }}
-    >
+    <div {...stylex.props(styles.transition)} style={{ height }}>
       <div ref={inner}>
-        <div
-          key={step}
-          className="duration-200 animate-in fade-in-0 slide-in-from-right-1 motion-reduce:animate-none"
-        >
+        <div key={step} {...stylex.props(styles.step)}>
           {children}
         </div>
       </div>
@@ -67,41 +160,42 @@ function StepTransition({ step, children }: { step: ShareStep; children: ReactNo
 function ShareLinkField({ url, onCopy, busy }: { url: string; onCopy: () => void; busy: boolean }) {
   const { t } = useTranslation();
   return (
-    <div className="flex items-center gap-1 rounded-md border border-input-border bg-input-field py-1 pl-2.5 pr-1">
-      <input
+    <div {...stylex.props(styles.linkRow)}>
+      <Input
         readOnly
+        size="small"
         value={url}
         aria-label={t('sharing.static.linkLabel', 'Share link')}
         onFocus={(event) => event.currentTarget.select()}
-        className="min-w-0 flex-1 truncate bg-transparent font-mono text-xs text-muted-foreground outline-hidden"
       />
       <Button
         type="button"
         variant="ghost"
-        size="sm"
+        size="small"
+        icon
         disabled={busy}
         onClick={onCopy}
         aria-label={t('settings.shares.copy', 'Copy link')}
-        className="h-6 w-6 shrink-0 p-0"
       >
-        <Copy className="size-3.5" />
+        <Copy {...stylex.props(shareSurface.glyph)} />
       </Button>
     </div>
   );
 }
 
+/** A hint is secondary copy; a failure is a tint and a mark, never a bordered box. */
 function Note({ tone = 'muted', children }: { tone?: 'muted' | 'alert'; children: ReactNode }) {
-  return (
-    <p
-      role={tone === 'alert' ? 'alert' : undefined}
-      className={cn(
-        'text-xs leading-5',
-        tone === 'alert' ? 'text-destructive' : 'text-muted-foreground'
-      )}
-    >
-      {children}
-    </p>
-  );
+  if (tone === 'alert')
+    return (
+      <div role="alert" {...stylex.props(shareSurface.message, shareSurface.messageDestructive)}>
+        <AlertCircle
+          aria-hidden
+          {...stylex.props(shareSurface.mark, shareSurface.markDestructive)}
+        />
+        <p {...stylex.props(styles.note, shareSurface.messageBody)}>{children}</p>
+      </div>
+    );
+  return <p {...stylex.props(styles.note)}>{children}</p>;
 }
 
 /** Pure controls: only a human's action uploads and publishes the frozen package. */
@@ -148,11 +242,13 @@ export function SessionShareManager(props: SessionShareManagerProps) {
   const body = (() => {
     if (step === 'loading')
       return (
-        <div className="space-y-3 px-5 pb-5" aria-busy="true">
-          <div className="h-4 w-3/4 animate-pulse rounded bg-muted" />
-          <div className="h-3 w-full animate-pulse rounded bg-muted" />
-          <div className="h-3 w-2/3 animate-pulse rounded bg-muted" />
-          <span className="sr-only">{t('common.loading', 'Loading…')}</span>
+        <div {...stylex.props(styles.loading)} aria-busy="true">
+          <Skeleton width="75%" height={16} />
+          <Skeleton width="100%" height={12} />
+          <Skeleton width="66%" height={12} />
+          <span {...stylex.props(shareSurface.visuallyHidden)}>
+            {t('common.loading', 'Loading…')}
+          </span>
         </div>
       );
     if (step === 'publishing') {
@@ -165,25 +261,21 @@ export function SessionShareManager(props: SessionShareManagerProps) {
             ? t('sharing.static.phasePublishing', 'Publishing…')
             : t('sharing.static.phaseCapturing', 'Freezing this conversation…');
       return (
-        <div className="space-y-3 px-5 pb-6 pt-1">
-          <p role="status" className="text-sm text-foreground">
+        <div {...stylex.props(styles.body)}>
+          <p role="status" {...stylex.props(styles.status)}>
             {label}
           </p>
-          <Progress
-            className="h-1 bg-muted"
-            indeterminate={phase !== 'uploading'}
-            value={props.progress}
-          />
+          <Progress value={phase === 'uploading' ? props.progress : null} />
           <Note>{t('sharing.static.phaseHint', 'Keep this dialog open until it finishes.')}</Note>
         </div>
       );
     }
     if (step === 'published')
       return (
-        <div className="space-y-3 px-5 pb-5 pt-1">
-          <div className="flex items-center gap-2">
-            <Check className="size-4 text-emerald-500" aria-hidden />
-            <p className="text-sm font-medium text-foreground">
+        <div {...stylex.props(styles.body)}>
+          <div {...stylex.props(styles.lead)}>
+            <Check {...stylex.props(styles.successIcon)} aria-hidden />
+            <p {...stylex.props(styles.published)}>
               {result?.copied
                 ? t('sharing.static.publishedCopied', 'Shared. Link copied to your clipboard.')
                 : t('sharing.static.published', 'Shared.')}
@@ -213,16 +305,16 @@ export function SessionShareManager(props: SessionShareManagerProps) {
         </div>
       );
     return (
-      <div className="space-y-3 px-5 pb-5 pt-1">
+      <div {...stylex.props(styles.body)}>
         {active ? (
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Globe className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+          <div {...stylex.props(styles.lead, styles.prose)}>
+            <Globe {...stylex.props(styles.leadIcon)} aria-hidden />
             <span>
               {t('sharing.static.publicNotice', 'Anyone with the link can view this conversation.')}
             </span>
           </div>
         ) : (
-          <p className="text-sm leading-6 text-muted-foreground">
+          <p {...stylex.props(styles.prose)}>
             {t('sharing.static.publicNotice', 'Anyone with the link can view this conversation.')}
           </p>
         )}
@@ -254,13 +346,14 @@ export function SessionShareManager(props: SessionShareManagerProps) {
           </Note>
         )}
         {children.length > 0 && canPublish && !selectionLocked && (
-          <label className="-mx-2 flex cursor-pointer items-center gap-2.5 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-hover has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-60">
+          <label {...stylex.props(styles.option, busy && styles.optionDisabled)}>
             <Checkbox
-              checked={includeChildren}
+              checked={includeChildren === true}
+              indeterminate={includeChildren === 'indeterminate'}
               disabled={busy}
               onCheckedChange={(checked) => toggleChildren(checked !== false)}
             />
-            <span>
+            <span {...stylex.props(busy && styles.optionLabelDisabled)}>
               {includeChildren === 'indeterminate'
                 ? t(
                     'sharing.static.includeChildrenPartial',
@@ -295,7 +388,7 @@ export function SessionShareManager(props: SessionShareManagerProps) {
           </Note>
         )}
         {active && entry?.canManage && !props.hasSecret && (
-          <div className="space-y-2">
+          <div {...stylex.props(styles.secretMissing)}>
             <Note>
               {t(
                 'settings.shares.secretMissing',
@@ -304,8 +397,8 @@ export function SessionShareManager(props: SessionShareManagerProps) {
             </Note>
             <Button
               type="button"
-              variant="outline"
-              size="sm"
+              variant="secondary"
+              size="small"
               disabled={busy}
               onClick={() => setConfirming({ kind: 'reset', revision: entry.revision })}
             >
@@ -323,7 +416,7 @@ export function SessionShareManager(props: SessionShareManagerProps) {
         )}
         {props.error && <Note tone="alert">{props.error}</Note>}
         {props.notice && (
-          <p role="status" className="text-xs text-muted-foreground">
+          <p role="status" {...stylex.props(styles.note)}>
             {props.notice}
           </p>
         )}
@@ -339,16 +432,16 @@ export function SessionShareManager(props: SessionShareManagerProps) {
           {entry?.canRevoke && (
             <Button
               variant="ghost"
-              size="sm"
+              tone="destructive"
+              size="small"
               disabled={busy}
-              className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
               onClick={() => setConfirming({ kind: 'revoke', revision: entry.revision })}
             >
               {t('sharing.static.revoke', 'Revoke share')}
             </Button>
           )}
-          <div className="flex-1" />
-          <Button size="sm" disabled={busy || !result?.url} onClick={() => void props.onCopy()}>
+          <div {...stylex.props(styles.spacer)} />
+          <Button size="small" disabled={busy || !result?.url} onClick={() => void props.onCopy()}>
             {t('settings.shares.copy', 'Copy link')}
           </Button>
         </>
@@ -358,33 +451,38 @@ export function SessionShareManager(props: SessionShareManagerProps) {
         {entry?.canRevoke && (
           <Button
             variant="ghost"
-            size="sm"
+            tone="destructive"
+            size="small"
             disabled={busy}
-            className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
             onClick={() => setConfirming({ kind: 'revoke', revision: entry.revision })}
           >
             {t('sharing.static.revoke', 'Revoke share')}
           </Button>
         )}
-        <div className="flex-1" />
+        <div {...stylex.props(styles.spacer)} />
         {active && props.shareLink && (
-          <Button variant="outline" size="sm" disabled={busy} onClick={() => void props.onCopy()}>
+          <Button
+            variant="secondary"
+            size="small"
+            disabled={busy}
+            onClick={() => void props.onCopy()}
+          >
             {t('settings.shares.copy', 'Copy link')}
           </Button>
         )}
         {!canPublish ? (
-          <Button variant="outline" size="sm" onClick={props.onClose}>
+          <Button variant="secondary" size="small" onClick={props.onClose}>
             {t('common.close', 'Close')}
           </Button>
         ) : (
           <>
             {!active && (
-              <Button variant="ghost" size="sm" disabled={busy} onClick={props.onClose}>
+              <Button variant="ghost" size="small" disabled={busy} onClick={props.onClose}>
                 {t('common.cancel', 'Cancel')}
               </Button>
             )}
             <Button
-              size="sm"
+              size="small"
               disabled={busy || (!props.canCapture && !conflict)}
               onClick={() => (conflict ? props.onDiscard() : void props.onPublish())}
             >
@@ -401,36 +499,33 @@ export function SessionShareManager(props: SessionShareManagerProps) {
   })();
 
   return (
-    <div className="flex min-h-full flex-col">
+    <div {...stylex.props(styles.frame)}>
       <StepTransition step={step}>{body}</StepTransition>
-      {footer && (
-        <div className="sticky bottom-0 mt-auto flex flex-wrap items-center gap-2 border-t border-border/60 bg-background px-5 py-3">
-          {footer}
-        </div>
-      )}
-      <AlertDialog
+      {footer && <div {...stylex.props(styles.footer)}>{footer}</div>}
+      <AlertDialog.Root
         open={confirming !== null}
         onOpenChange={(open) => {
           if (!open) setConfirming(null);
         }}
       >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
+        <AlertDialog.Content>
+          <AlertDialog.Header>
+            <AlertDialog.Title>
               {confirming?.kind === 'reset'
                 ? t('sharing.static.reset', 'Reset link')
                 : t('sharing.static.revoke', 'Revoke share')}
-            </AlertDialogTitle>
-            <AlertDialogDescription>
+            </AlertDialog.Title>
+            <AlertDialog.Description>
               {t(
                 'sharing.static.invalidateNotice',
                 'The previous link will stop working. Downloaded copies cannot be recalled.'
               )}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>{t('common.cancel', 'Cancel')}</AlertDialogCancel>
-            <AlertDialogAction
+            </AlertDialog.Description>
+          </AlertDialog.Header>
+          <AlertDialog.Footer>
+            <AlertDialog.Cancel>{t('common.cancel', 'Cancel')}</AlertDialog.Cancel>
+            <AlertDialog.Action
+              variant="destructive"
               disabled={busy || confirming?.revision !== entry?.revision}
               onClick={() => {
                 if (!confirming || confirming.revision !== entry?.revision) return;
@@ -440,10 +535,10 @@ export function SessionShareManager(props: SessionShareManagerProps) {
               }}
             >
               {t('common.confirm', 'Confirm')}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+            </AlertDialog.Action>
+          </AlertDialog.Footer>
+        </AlertDialog.Content>
+      </AlertDialog.Root>
     </div>
   );
 }

@@ -4,14 +4,9 @@
  * A diagram is a still preview until the reader clicks it. Activation turns
  * that one diagram into a canvas: a trackpad pinch zooms around the pointer and
  * a drag pans, both by transforming the rendered `<svg>` inside the frame
- * Streamdown already clips. An unmodified wheel is never taken, so the page
+ * `MarkdownMermaidBlock` clips. An unmodified wheel is never taken, so the page
  * scrolls whether or not a diagram happens to be active — the reader cannot get
  * stuck in a canvas they forgot they opened.
- *
- * The transform goes on the `<svg>`, not on Streamdown's own pan/zoom canvas:
- * that canvas stays pinned at `transform: none` (see `markdown-renderer.tsx`),
- * so its handlers cannot fight ours, and Streamdown never writes to the `<svg>`
- * it injected as raw markup.
  */
 
 export type MermaidCanvasTransform = {
@@ -31,7 +26,7 @@ export type MermaidCanvasRect = {
  * What the reader can see right now, in viewport coordinates: the frame that
  * clips the diagram, and the diagram as it is currently drawn — transform
  * included. Everything below works from these two rectangles rather than from
- * Streamdown's layout, which centres the diagram in a frame far wider than it
+ * the block's layout, which centres the diagram in a frame far wider than it
  * and cannot be reconstructed from a transform.
  */
 export type MermaidCanvasView = {

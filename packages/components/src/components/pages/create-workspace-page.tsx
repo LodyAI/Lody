@@ -1,11 +1,11 @@
 import { useTranslation } from 'react-i18next';
 import { ArrowLeft, ArrowRight, Building2, CreditCard } from 'lucide-react';
-import { Spinner } from '@/ui/spinner';
+import { Spinner } from '@lody/ui/spinner';
 
-import { Button } from '@/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/ui/card';
-import { Input } from '@/ui/input';
-import { Label } from '@/ui/label';
+import { Button } from '@lody/ui/button';
+import { Card } from '@/ui/card';
+import { Input } from '@lody/ui/input';
+import { Field as UiField } from '@lody/ui/field';
 import { PricingPageLink } from '../shared/pricing-page-link';
 import { SubscribeConsentNotice } from '../shared/subscribe-consent-notice';
 import { formatUsd } from '../settings/billing-setting-pure';
@@ -67,27 +67,27 @@ export function CreateWorkspacePage({
           <Button
             type="button"
             variant="ghost"
-            size="sm"
+            size="small"
             onClick={onBackToWorkspace}
             disabled={creating}
-            className="mb-3 -ml-2 gap-2 text-muted-foreground hover:text-foreground"
+            className="mb-3 -ml-2"
           >
             <ArrowLeft className="h-4 w-4" />
             {t('organization.backToPreviousWorkspace', 'Back to previous workspace')}
           </Button>
         ) : null}
 
-        <Card>
-          <CardHeader className="text-center">
+        <Card.Root>
+          <Card.Header className="text-center">
             <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-primary/10">
               <Building2 className="h-6 w-6 text-primary" />
             </div>
-            <CardTitle className="text-2xl">
+            <Card.Title className="text-2xl">
               {paidRequired
                 ? t('organization.createPlusWorkspaceTitle', 'Create a Plus workspace')
                 : t('organization.welcomeTitle', 'Welcome to Lody Agent')}
-            </CardTitle>
-            <CardDescription className="mt-2 whitespace-pre-line">
+            </Card.Title>
+            <Card.Description className="mt-2 whitespace-pre-line">
               {paidRequired
                 ? t(
                     'organization.createPlusWorkspaceDescription',
@@ -97,12 +97,14 @@ export function CreateWorkspacePage({
                     'organization.welcomeDescription',
                     "Let's create your first workspace to get started"
                   )}
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
+            </Card.Description>
+          </Card.Header>
+          <Card.Content>
             <div className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="workspace-name">{t('organization.workspaceName')}</Label>
+                <UiField.Label htmlFor="workspace-name">
+                  {t('organization.workspaceName')}
+                </UiField.Label>
                 <Input
                   id="workspace-name"
                   type="text"
@@ -128,7 +130,9 @@ export function CreateWorkspacePage({
 
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
-                  <Label htmlFor="workspace-slug">{t('organization.workspaceSlug')}</Label>
+                  <UiField.Label htmlFor="workspace-slug">
+                    {t('organization.workspaceSlug')}
+                  </UiField.Label>
                   <div className="flex items-center gap-2">
                     {canResetSlug ? (
                       <button
@@ -226,6 +230,7 @@ export function CreateWorkspacePage({
               ) : null}
 
               <Button
+                size="large"
                 onClick={onSubmit}
                 disabled={
                   creating ||
@@ -235,7 +240,6 @@ export function CreateWorkspacePage({
                   !slugAvailable
                 }
                 className="w-full"
-                size="lg"
               >
                 {creating ? (
                   <span className="flex items-center">
@@ -258,8 +262,8 @@ export function CreateWorkspacePage({
 
               {paidRequired ? <SubscribeConsentNotice className="text-center" /> : null}
             </div>
-          </CardContent>
-        </Card>
+          </Card.Content>
+        </Card.Root>
       </div>
     </div>
   );

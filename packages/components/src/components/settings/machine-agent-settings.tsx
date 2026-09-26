@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import * as stylex from '@stylexjs/stylex';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { useNavigate } from '@tanstack/react-router';
 import { useCloudMutation } from '@lody/platform/react';
@@ -14,9 +15,9 @@ import {
   type SessionId,
   type WorkspaceId,
 } from '@lody/shared';
-import { Check, ChevronDown, ChevronRight } from 'lucide-react';
-import { Spinner } from '@/ui/spinner';
-import { toast } from 'sonner';
+import { Check, ChevronDown, ChevronRight, Plus } from 'lucide-react';
+import { Spinner } from '@lody/ui/spinner';
+import { toast } from '@/lib/toast';
 import { activeWorkspaceRuntimeAtom, authTokenAtom, type WorkspaceRuntime } from '@/atoms/runtime';
 import { developerModeEnabledAtom, reviewAgentFeatureEnabledAtom } from '@/atoms/settings';
 import { settingsDialogOpenAtom } from '@/atoms/settings';
@@ -60,8 +61,9 @@ import { formatSessionTabSearch } from '@/lib/session-tab-url';
 import { useMachineMonitor } from '@/hooks/use-machine-monitor';
 import { useMachineLifecycleCapability } from '@/hooks/use-machine-lifecycle-capability';
 import { useOpenSettings } from '@/hooks/use-open-settings';
-import { cn } from '@/lib/utils';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { corner, duration, ease, radius, space } from '@lody/ui/tokens/scales.stylex';
 import { Drawer, DrawerContent, DrawerDescription, DrawerTitle } from '@/ui/drawer';
 import { MobileSettingsRow, MobileSettingsSection } from '@/components/mobile/mobile-settings-row';
 import {
@@ -85,6 +87,7 @@ import { ReviewPolicySection } from './review-policy-setting';
 import {
   AgentConfigDialog,
   type AgentConfigDialogMode,
+  type AgentConfigFormData,
   type AgentConfigSubmitPayload,
 } from './agent-config-dialog';
 import {
@@ -92,6 +95,238 @@ import {
   WorkspaceMachineExpandedSection,
   type WorkspaceMachineAccordionMeta,
 } from './workspace-machine-accordion';
+import { SettingsPageActions, useInSettingsPane } from './settings-page-header';
+import { SettingsLineTabs } from './settings-line-tabs';
+import { settingsSurface as surface } from './surface';
+import { settingsType as type } from './type.stylex';
+
+const TRUNCATE = {
+  minWidth: 0,
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+  whiteSpace: 'nowrap',
+} as const;
+
+/** The bottom sheet keeps the home indicator's room below its last row. */
+const SHEET_BOTTOM = 'calc(12px + max(0px, var(--safe-area-bottom, 0px)))';
+
+const styles = stylex.create({
+  icon14: { width: '14px', height: '14px', flexShrink: 0 },
+  icon16: { width: '16px', height: '16px', flexShrink: 0 },
+  hint: { color: colors.tertiaryLabel },
+  truncate: TRUNCATE,
+  /** A note in the page: the region rung, a fill with no edge. */
+  banner: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: space[2],
+    fontSize: type.caption,
+    color: colors.secondaryLabel,
+  },
+  bannerSlot: { paddingInline: space[3], paddingTop: space[3] },
+  centered: {
+    display: 'flex',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: space[2],
+    height: '100%',
+    padding: space[4],
+    fontSize: type.caption,
+    color: colors.secondaryLabel,
+  },
+  column: { display: 'flex', flexDirection: 'column', width: '100%', minWidth: 0 },
+  fill: { height: '100%', minHeight: 0 },
+  scroll: { overflowY: 'auto' },
+  clip: { flexGrow: 1, minHeight: 0, overflow: 'hidden' },
+  mobileBody: { display: 'flex', flexDirection: 'column', paddingBottom: space[4] },
+  mobileList: { gap: space[3], padding: space[3] },
+  mobileListBody: {
+    display: 'flex',
+    flexGrow: 1,
+    flexDirection: 'column',
+    gap: space[3],
+    minHeight: 0,
+    overflow: 'hidden',
+    padding: space[2],
+  },
+  grow: { flexGrow: 1, minHeight: 0 },
+  machineLabel: { display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 },
+  machineName: { ...TRUNCATE, fontSize: '0.95em', lineHeight: type.leading, fontWeight: 400 },
+  dot: {
+    flexShrink: 0,
+    width: '8px',
+    height: '8px',
+    borderRadius: radius.full,
+    cornerShape: corner.round,
+    backgroundColor: colors.tertiaryLabel,
+  },
+  dotOnline: { backgroundColor: colors.success },
+  sheetTitle: {
+    paddingInline: space[4],
+    paddingTop: space[3],
+    paddingBottom: space[1],
+    textAlign: 'center',
+    fontSize: '0.95em',
+  },
+  srOnly: {
+    position: 'absolute',
+    width: '1px',
+    height: '1px',
+    padding: 0,
+    margin: '-1px',
+    overflow: 'hidden',
+    clip: 'rect(0 0 0 0)',
+    whiteSpace: 'nowrap',
+    borderWidth: 0,
+  },
+  sheetBody: {
+    minHeight: 0,
+    overflowY: 'auto',
+    paddingInline: space[3],
+    paddingTop: space[2],
+    paddingBottom: SHEET_BOTTOM,
+  },
+  sheetPolicy: { flexGrow: 1, minHeight: 0, overflowY: 'auto', paddingBottom: SHEET_BOTTOM },
+  /** A row of the machine picker: the whole line is the choice. */
+  pickerRow: {
+    boxSizing: 'border-box',
+    display: 'flex',
+    alignItems: 'center',
+    gap: space[3],
+    width: '100%',
+    margin: 0,
+    paddingInline: space[4],
+    paddingBlock: space[3],
+    borderWidth: 0,
+    backgroundColor: { default: 'transparent', ':active': colors.hoverFill },
+    color: colors.label,
+    fontFamily: 'inherit',
+    fontSize: '1em',
+    textAlign: 'start',
+    cursor: 'pointer',
+    transitionProperty: 'background-color',
+    transitionDuration: duration.fast,
+    transitionTimingFunction: ease.standard,
+  },
+  pickerText: { flexGrow: 1, minWidth: 0 },
+  pickerName: { ...TRUNCATE, display: 'block', fontSize: '0.95em' },
+  pickerMeta: {
+    ...TRUNCATE,
+    display: 'block',
+    marginTop: '2px',
+    fontSize: type.caption,
+    color: colors.secondaryLabel,
+  },
+  pickerCheck: {
+    display: 'flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '20px',
+    height: '20px',
+    color: colors.accent,
+  },
+  page: { display: 'flex', flexDirection: 'column', gap: space[4], width: '100%', minWidth: 0 },
+  heading: { minWidth: 0 },
+  machineDot: {
+    flexShrink: 0,
+    width: '6px',
+    height: '6px',
+    borderRadius: radius.full,
+    backgroundColor: colors.tertiaryLabel,
+  },
+  machineDotOnline: { backgroundColor: colors.success },
+  addGlyph: { width: '14px', height: '14px' },
+  headingLine: { display: 'flex', alignItems: 'center', gap: space[1.5] },
+  headingSubtitle: {
+    margin: 0,
+    marginTop: '2px',
+    fontSize: type.caption,
+    color: colors.secondaryLabel,
+  },
+  stack: { display: 'flex', flexDirection: 'column', gap: space[3] },
+  emptyNote: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    gap: space[2],
+    paddingInline: space[4],
+    paddingBlock: space[8],
+    textAlign: 'center',
+    fontSize: type.caption,
+    color: colors.secondaryLabel,
+  },
+  privateSection: { display: 'flex', flexDirection: 'column', gap: space[3], paddingTop: space[3] },
+  privateHeading: { paddingInline: space[1] },
+  privateTitleLine: { display: 'flex', alignItems: 'center', gap: space[2] },
+  privateTitle: { margin: 0, fontSize: type.caption, fontWeight: 400, color: colors.label },
+  count: {
+    fontSize: type.caption,
+    fontVariantNumeric: 'tabular-nums',
+    color: colors.secondaryLabel,
+  },
+  privateHint: {
+    margin: 0,
+    marginTop: '2px',
+    fontSize: type.caption,
+    color: colors.secondaryLabel,
+  },
+  selectPrompt: {
+    paddingInline: space[1],
+    paddingBlock: space[8],
+    textAlign: 'center',
+    fontSize: type.caption,
+    color: colors.secondaryLabel,
+  },
+  /** The disclosure is the card's first line; the pointer fills the whole of it. */
+  disclosure: {
+    boxSizing: 'border-box',
+    display: 'flex',
+    alignItems: 'center',
+    gap: space[2],
+    width: '100%',
+    margin: 0,
+    paddingInline: space[4],
+    paddingTop: '10px',
+    paddingBottom: space[1],
+    borderWidth: 0,
+    color: colors.label,
+    fontFamily: 'inherit',
+    fontSize: type.caption,
+    fontWeight: 400,
+    textAlign: 'start',
+    cursor: 'pointer',
+  },
+  disclosureLabel: { flexGrow: 1, minWidth: 0 },
+  privateCardHint: {
+    margin: 0,
+    paddingInline: space[4],
+    paddingBottom: '10px',
+    fontSize: type.caption,
+    lineHeight: 1.375,
+    color: colors.secondaryLabel,
+  },
+  /** A private machine: a line of the card that opens it. */
+  privateRow: {
+    boxSizing: 'border-box',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: space[2],
+    width: '100%',
+    margin: 0,
+    paddingInline: space[4],
+    paddingBlock: '8px',
+    borderWidth: 0,
+    color: colors.label,
+    fontFamily: 'inherit',
+    fontSize: type.caption,
+    textAlign: 'start',
+    cursor: 'pointer',
+  },
+  manage: { flexShrink: 0, fontSize: type.caption, color: colors.secondaryLabel },
+});
 
 export type MachineAgentSettingsProps = {
   selectedMachineId: MachineId | null;
@@ -173,6 +408,7 @@ export function MachineAgentSettings({
   mode = 'agents',
 }: MachineAgentSettingsProps) {
   const { t } = useTranslation();
+  const inSettingsPane = useInSettingsPane();
   const { openSettings } = useOpenSettings();
   const navigate = useNavigate();
   const isMobile = useIsMobile();
@@ -590,7 +826,15 @@ export function MachineAgentSettings({
   // decoupled from any single "selected machine" now that desktop lists them all.
   const [dialogMachineId, setDialogMachineId] = useState<MachineId | null>(null);
   const dialogMachine = dialogMachineId ? machines.get(dialogMachineId) : undefined;
-  const dialogOpen = dialogMode !== null;
+  // The dialog's open bit lives apart from its mode/machine: the root must be
+  // mounted while closed for Base UI to report `starting`/`ending`, or neither
+  // transition ever plays — a dialog mounted already-open renders in its final
+  // state on the first frame, and one unmounted on close vanishes mid-fade.
+  const [dialogOpen, setDialogOpen] = useState(false);
+  // Opening happens one commit after the root mounts, for the same reason.
+  useLayoutEffect(() => {
+    if (dialogMode && dialogMachine) setDialogOpen(true);
+  }, [dialogMode, dialogMachine]);
   const [latestCliVersion, setLatestCliVersion] = useState<string | null>(null);
 
   const sharedWithTeam = resolvedSelectedMachine
@@ -880,10 +1124,13 @@ export function MachineAgentSettings({
 
   const { checkBinaryStatus, installBinary } = useMachineAcpBinaryActions(runtime, workspaceId);
 
-  const openCreateDialog = useCallback((machine: MachineViewMeta) => {
-    setDialogMachineId(machine.id);
-    setDialogMode({ kind: 'create' });
-  }, []);
+  const openCreateDialog = useCallback(
+    (machine: MachineViewMeta, initialForm?: Partial<AgentConfigFormData>) => {
+      setDialogMachineId(machine.id);
+      setDialogMode(initialForm ? { kind: 'create', initialForm } : { kind: 'create' });
+    },
+    []
+  );
 
   const openEditDialog = useCallback((machine: MachineViewMeta, config: AgentConfigMeta) => {
     setDialogMachineId(machine.id);
@@ -984,8 +1231,8 @@ export function MachineAgentSettings({
   const hasMachines = machines.size > 0;
 
   const banner = showBanner ? (
-    <div className="flex items-center gap-2 rounded-md border border-border/60 bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
-      <Spinner className="h-3.5 w-3.5" />
+    <div {...stylex.props(surface.formBlock, styles.banner)}>
+      <Spinner size="small" />
       {t('settings.agent.migration.banner', 'Upgrading agent configs to be per-machine…')}
     </div>
   ) : null;
@@ -995,9 +1242,16 @@ export function MachineAgentSettings({
       <AgentConfigDialog
         open={dialogOpen}
         onOpenChange={(open) => {
-          if (!open) setDialogMode(null);
+          if (!open) setDialogOpen(false);
         }}
-        nestedInDialog={!isMobile}
+        onOpenChangeComplete={(open) => {
+          // Mode and machine outlive `open` so the panel's real content is
+          // still there while it fades out; they clear once it has left.
+          if (!open) {
+            setDialogMode(null);
+            setDialogMachineId(null);
+          }
+        }}
         mode={dialogMode}
         machine={dialogMachine}
         onSubmit={handleDialogSubmit}
@@ -1015,8 +1269,8 @@ export function MachineAgentSettings({
 
   if (isLoading && !hasMachines) {
     return (
-      <div className="flex h-full items-center justify-center gap-2 p-4 text-sm text-muted-foreground">
-        <Spinner className="h-4 w-4" />
+      <div {...stylex.props(inSettingsPane && surface.container, styles.centered)}>
+        <Spinner size="small" />
         {t('workspace.machines.loadingVisibility', 'Loading machines')}
       </div>
     );
@@ -1024,7 +1278,7 @@ export function MachineAgentSettings({
 
   if (!hasMachines) {
     return (
-      <div className="flex h-full items-center justify-center p-4 text-sm text-muted-foreground">
+      <div {...stylex.props(inSettingsPane && surface.container, styles.centered)}>
         {t('workspace.machines.empty', 'No machines connected')}
       </div>
     );
@@ -1035,22 +1289,19 @@ export function MachineAgentSettings({
   if (isMobile) {
     if (mode === 'agents') {
       return (
-        <div className="flex h-full min-h-0 w-full min-w-0 flex-col overflow-y-auto">
-          {banner ? <div className="px-3 pt-3">{banner}</div> : null}
-          <div className="flex flex-col pb-4">
+        <div {...stylex.props(styles.column, styles.fill, styles.scroll)}>
+          {banner ? <div {...stylex.props(styles.bannerSlot)}>{banner}</div> : null}
+          <div {...stylex.props(styles.mobileBody)}>
             {remoteMachinesAvailable && resolvedSelectedMachine ? (
               <MobileSettingsSection title={t('settings.tabs.machines', 'Machines')}>
                 <MobileSettingsRow
                   label={
-                    <div className="flex min-w-0 items-center gap-2.5">
+                    <div {...stylex.props(styles.machineLabel)}>
                       <span
                         aria-hidden
-                        className={cn(
-                          'h-2 w-2 shrink-0 rounded-full',
-                          selectedIsOnline ? 'bg-status-success' : 'bg-muted-foreground/35'
-                        )}
+                        {...stylex.props(styles.dot, selectedIsOnline && styles.dotOnline)}
                       />
-                      <span className="truncate text-[0.95rem] font-normal leading-tight">
+                      <span {...stylex.props(styles.machineName)}>
                         {resolvedSelectedMachine.name || resolvedSelectedMachine.id}
                       </span>
                     </div>
@@ -1064,7 +1315,7 @@ export function MachineAgentSettings({
                     </span>
                   }
                   onClick={() => setMobileMachinePickerOpen(true)}
-                  trailing={<ChevronRight className="h-4 w-4" />}
+                  trailing={<ChevronRight {...stylex.props(styles.icon16)} />}
                 />
               </MobileSettingsSection>
             ) : null}
@@ -1092,22 +1343,22 @@ export function MachineAgentSettings({
                     'Choose the reviewer used by sessions on each machine.'
                   )}
                   onClick={() => setMobileReviewPolicyOpen(true)}
-                  trailing={<ChevronRight className="h-4 w-4" />}
+                  trailing={<ChevronRight {...stylex.props(styles.icon16)} />}
                 />
               </MobileSettingsSection>
             ) : null}
           </div>
           {remoteMachinesAvailable ? (
             <Drawer open={mobileMachinePickerOpen} onOpenChange={setMobileMachinePickerOpen}>
-              <DrawerContent className="max-h-[80dvh]! rounded-t-2xl border-border/60">
-                <DrawerTitle className="px-4 pb-1 pt-3 text-center text-[0.95rem]">
+              <DrawerContent className="max-h-[80dvh]!">
+                <DrawerTitle {...stylex.props(styles.sheetTitle)}>
                   {t('settings.tabs.machines', 'Machines')}
                 </DrawerTitle>
-                <DrawerDescription className="sr-only">
+                <DrawerDescription {...stylex.props(styles.srOnly)}>
                   {t('settings.agent.machineTabs.selectPromptAgent', 'Select a machine.')}
                 </DrawerDescription>
-                <div className="min-h-0 overflow-y-auto px-3 pb-[calc(12px+max(0px,var(--safe-area-bottom,0px)))] pt-2">
-                  <div className="overflow-hidden rounded-2xl border border-border/60 bg-card">
+                <div {...stylex.props(styles.sheetBody)}>
+                  <div {...stylex.props(surface.card)}>
                     {allItems.map((item, index) => {
                       const selected = item.machine.id === resolvedSelectedMachine?.id;
                       const itemIsLocal = item.machine.id === localMachineId;
@@ -1115,10 +1366,7 @@ export function MachineAgentSettings({
                         <button
                           key={item.machine.id}
                           type="button"
-                          className={cn(
-                            'flex w-full items-center gap-3 px-4 py-3 text-left transition-colors active:bg-muted/40',
-                            index > 0 && 'border-t border-border'
-                          )}
+                          {...stylex.props(styles.pickerRow, index > 0 && surface.lineRuled)}
                           onClick={() => {
                             onSelectedMachineChange(item.machine.id);
                             setMobileMachinePickerOpen(false);
@@ -1126,16 +1374,13 @@ export function MachineAgentSettings({
                         >
                           <span
                             aria-hidden
-                            className={cn(
-                              'h-2 w-2 shrink-0 rounded-full',
-                              item.isOnline ? 'bg-status-success' : 'bg-muted-foreground/35'
-                            )}
+                            {...stylex.props(styles.dot, item.isOnline && styles.dotOnline)}
                           />
-                          <span className="min-w-0 flex-1">
-                            <span className="block truncate text-[0.95rem] font-normal">
+                          <span {...stylex.props(styles.pickerText)}>
+                            <span {...stylex.props(styles.pickerName)}>
                               {item.machine.name || item.machine.id}
                             </span>
-                            <span className="mt-0.5 block truncate text-[0.78rem] text-muted-foreground">
+                            <span {...stylex.props(styles.pickerMeta)}>
                               {item.isOnline
                                 ? t('workspace.machines.online', 'Online')
                                 : t('workspace.machines.offline', 'Offline')}
@@ -1147,8 +1392,8 @@ export function MachineAgentSettings({
                                 : ''}
                             </span>
                           </span>
-                          <span className="flex h-5 w-5 shrink-0 items-center justify-center text-primary">
-                            {selected ? <Check className="h-4 w-4" /> : null}
+                          <span {...stylex.props(styles.pickerCheck)}>
+                            {selected ? <Check {...stylex.props(styles.icon16)} /> : null}
                           </span>
                         </button>
                       );
@@ -1160,17 +1405,17 @@ export function MachineAgentSettings({
           ) : null}
           {reviewAgentEnabled ? (
             <Drawer open={mobileReviewPolicyOpen} onOpenChange={setMobileReviewPolicyOpen}>
-              <DrawerContent className="h-[88dvh]! max-h-[88dvh]! rounded-t-2xl border-border/60">
-                <DrawerTitle className="px-4 pb-1 pt-3 text-center text-[0.95rem]">
+              <DrawerContent className="h-[88dvh]! max-h-[88dvh]!">
+                <DrawerTitle {...stylex.props(styles.sheetTitle)}>
                   {t('settings.review.title', 'Review agent')}
                 </DrawerTitle>
-                <DrawerDescription className="sr-only">
+                <DrawerDescription {...stylex.props(styles.srOnly)}>
                   {t(
                     'settings.review.machineConfigHelper',
                     'Choose the reviewer used by sessions on each machine.'
                   )}
                 </DrawerDescription>
-                <div className="min-h-0 flex-1 overflow-y-auto pb-[calc(12px+max(0px,var(--safe-area-bottom,0px)))]">
+                <div {...stylex.props(styles.sheetPolicy)}>
                   {mobileReviewPolicyOpen ? <ReviewPolicySection /> : null}
                 </div>
               </DrawerContent>
@@ -1183,9 +1428,9 @@ export function MachineAgentSettings({
 
     if (resolvedSelectedMachine) {
       return (
-        <div className="flex h-full min-h-0 w-full min-w-0 flex-col">
-          {banner ? <div className="px-3 pt-3">{banner}</div> : null}
-          <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+        <div {...stylex.props(styles.column, styles.fill)}>
+          {banner ? <div {...stylex.props(styles.bannerSlot)}>{banner}</div> : null}
+          <div {...stylex.props(styles.column, styles.clip)}>
             <MachineDetailPane
               key={resolvedSelectedMachine.id}
               mode="devices"
@@ -1242,10 +1487,10 @@ export function MachineAgentSettings({
       );
     }
     return (
-      <div className="flex h-full min-h-0 w-full min-w-0 flex-col gap-3 p-3">
+      <div {...stylex.props(styles.column, styles.fill, styles.mobileList)}>
         {banner}
-        <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden p-2">
-          <div className="min-h-0 flex-1">
+        <div {...stylex.props(styles.mobileListBody)}>
+          <div {...stylex.props(styles.grow)}>
             <MachineTabList
               variant="detailed"
               items={filteredModeItems}
@@ -1288,15 +1533,20 @@ export function MachineAgentSettings({
           'AI agent configurations available in this workspace.'
         );
 
-  const header = (
-    <div className="min-w-0">
-      <div className="flex items-center gap-1.5">
-        <h2 className="text-base font-normal text-foreground">{title}</h2>
-        {mode === 'machines' && remoteMachinesAvailable ? (
-          <MachineListFilterButton filter={effectiveFilter} onFilterChange={setFilter} />
-        ) : null}
+  const filterButton =
+    mode === 'machines' && remoteMachinesAvailable ? (
+      <MachineListFilterButton filter={effectiveFilter} onFilterChange={setFilter} />
+    ) : null;
+  // In the pane the header names the page; only the filter is this page's to add.
+  const header = inSettingsPane ? (
+    <SettingsPageActions>{filterButton}</SettingsPageActions>
+  ) : (
+    <div {...stylex.props(styles.heading)}>
+      <div {...stylex.props(styles.headingLine)}>
+        <h2 {...stylex.props(surface.pageTitle)}>{title}</h2>
+        {filterButton}
       </div>
-      <p className="mt-0.5 text-xs text-muted-foreground">{subtitle}</p>
+      <p {...stylex.props(styles.headingSubtitle)}>{subtitle}</p>
     </div>
   );
 
@@ -1382,7 +1632,7 @@ export function MachineAgentSettings({
   if (mode !== 'agents') {
     if (!remoteMachinesAvailable) {
       return (
-        <div className="flex w-full min-w-0 flex-col gap-4">
+        <div {...stylex.props(inSettingsPane && surface.container, styles.page)}>
           {banner}
           {header}
           {resolvedSelectedMachine ? (
@@ -1440,15 +1690,15 @@ export function MachineAgentSettings({
     }
 
     return (
-      <div className="flex w-full min-w-0 flex-col gap-4">
+      <div {...stylex.props(inSettingsPane && surface.container, styles.page)}>
         {banner}
         {header}
 
-        <div className="space-y-3">
+        <div {...stylex.props(styles.stack)}>
           {sharedAccordionItems.length > 0 ? (
             sharedAccordionItems.map(renderDesktopMachineSection)
           ) : (
-            <div className="rounded-xl border border-border/50 bg-muted/10 px-4 py-8 text-center text-sm text-muted-foreground">
+            <div {...stylex.props(surface.card, styles.emptyNote)}>
               {modeTotalBeforeFilter === 0
                 ? t('workspace.machines.empty', 'No machines connected')
                 : t(
@@ -1456,40 +1706,37 @@ export function MachineAgentSettings({
                     'No machines match these filters.'
                   )}
               {modeTotalBeforeFilter > 0 ? (
-                <div className="mt-2">
-                  <Button
-                    variant="link"
-                    size="sm"
-                    className="h-auto px-0 text-xs"
-                    onClick={() => setFilter({ onlineOnly: false, mineOnly: false })}
-                  >
-                    {t('settings.agent.machineTabs.filter.reset', 'Clear filter')}
-                  </Button>
-                </div>
+                <Button
+                  variant="link"
+                  size="small"
+                  onClick={() => setFilter({ onlineOnly: false, mineOnly: false })}
+                >
+                  {t('settings.agent.machineTabs.filter.reset', 'Clear filter')}
+                </Button>
               ) : null}
             </div>
           )}
         </div>
 
         {ownPrivateItems.length > 0 ? (
-          <section className="space-y-3 pt-3">
-            <div className="px-1">
-              <div className="flex items-center gap-2">
-                <h3 className="text-sm font-normal text-foreground">
+          <section {...stylex.props(styles.privateSection)}>
+            <div {...stylex.props(styles.privateHeading)}>
+              <div {...stylex.props(styles.privateTitleLine)}>
+                <h3 {...stylex.props(styles.privateTitle)}>
                   {t('settings.machines.yourPrivateMachines', 'Your private machines')}
                 </h3>
-                <span className="text-xs tabular-nums text-muted-foreground">
-                  {ownPrivateItems.length}
-                </span>
+                <span {...stylex.props(styles.count)}>{ownPrivateItems.length}</span>
               </div>
-              <p className="mt-0.5 text-xs text-muted-foreground">
+              <p {...stylex.props(styles.privateHint)}>
                 {t(
                   'settings.machines.privateMachinesHint',
                   'These machines are not available to other workspace members. Select one here to manage sharing.'
                 )}
               </p>
             </div>
-            <div className="space-y-3">{ownPrivateItems.map(renderDesktopMachineSection)}</div>
+            <div {...stylex.props(styles.stack)}>
+              {ownPrivateItems.map(renderDesktopMachineSection)}
+            </div>
           </section>
         ) : null}
         {dialog}
@@ -1497,20 +1744,69 @@ export function MachineAgentSettings({
     );
   }
 
+  // In the pane the header carries adding a provider; the machines are tabs
+  // under the title, shown only when there is more than one to choose, so the
+  // list under them is the chosen machine's providers and nothing else.
+  const machineTabs =
+    machinePills.length > 1 && resolvedSelectedMachine ? (
+      <SettingsLineTabs
+        ruled
+        label={t('settings.agent.machineTabs.machine', 'Machine')}
+        current={resolvedSelectedMachine.id as string}
+        onChange={(id) => onSelectedMachineChange(id as MachineId)}
+        overflow={{
+          label: (count) => t('settings.agent.machineTabs.more', '{{count}} more', { count }),
+          searchPlaceholder: t('settings.agent.machineTabs.search', 'Search machines'),
+        }}
+        tabs={machinePills.map((pill) => ({
+          id: pill.id,
+          label: pill.label,
+          leading: (
+            <span
+              aria-hidden="true"
+              {...stylex.props(styles.machineDot, pill.online && styles.machineDotOnline)}
+            />
+          ),
+        }))}
+      />
+    ) : null;
+
   return (
-    <div className="flex w-full min-w-0 flex-col gap-4">
+    <div {...stylex.props(inSettingsPane && surface.container, styles.page)}>
       {banner}
       {header}
 
-      <MachinePills
-        pills={machinePills}
-        selectedId={resolvedSelectedMachine?.id ?? null}
-        onSelect={(id) => onSelectedMachineChange(id as MachineId)}
-      />
+      {inSettingsPane ? (
+        <SettingsPageActions>
+          {resolvedSelectedMachine ? (
+            <Button
+              variant="secondary"
+              size="small"
+              onClick={() => openCreateDialog(resolvedSelectedMachine)}
+            >
+              <Plus {...stylex.props(styles.addGlyph)} />
+              {t('settings.agent.provider.addProvider', 'Add provider')}
+            </Button>
+          ) : null}
+        </SettingsPageActions>
+      ) : (
+        <MachinePills
+          pills={machinePills}
+          selectedId={resolvedSelectedMachine?.id ?? null}
+          onSelect={(id) => onSelectedMachineChange(id as MachineId)}
+        />
+      )}
+      {inSettingsPane ? machineTabs : null}
 
       {resolvedSelectedMachine ? (
         <MachineProvidersSection
           key={resolvedSelectedMachine.id}
+          bare={inSettingsPane}
+          onAddProvider={
+            inSettingsPane
+              ? (initialForm) => openCreateDialog(resolvedSelectedMachine, initialForm)
+              : undefined
+          }
           flush
           machine={resolvedSelectedMachine}
           configs={configsForMachine}
@@ -1523,7 +1819,7 @@ export function MachineAgentSettings({
           onDeleteSetup={handleDeleteSetup}
         />
       ) : (
-        <div className="px-1 py-8 text-center text-sm text-muted-foreground">
+        <div {...stylex.props(styles.selectPrompt)}>
           {t('settings.agent.machineTabs.selectPromptAgent', 'Select a machine.')}
         </div>
       )}
@@ -1548,47 +1844,44 @@ function OwnPrivateMachines({
   if (items.length === 0) return null;
 
   return (
-    <div className="rounded-lg border border-dashed border-border/70 bg-muted/20 p-2">
+    <div {...stylex.props(surface.card)}>
       <button
         type="button"
-        className="flex w-full items-center gap-2 rounded-md px-1 py-1 text-left"
+        {...stylex.props(styles.disclosure, surface.pressableLine)}
         aria-expanded={expanded}
         onClick={() => onExpandedChange(!expanded)}
       >
         {expanded ? (
-          <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+          <ChevronDown {...stylex.props(styles.icon14, styles.hint)} />
         ) : (
-          <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+          <ChevronRight {...stylex.props(styles.icon14, styles.hint)} />
         )}
-        <span className="min-w-0 flex-1 text-xs font-normal">
+        <span {...stylex.props(styles.disclosureLabel)}>
           {t('settings.machines.yourPrivateMachines', 'Your private machines')}
         </span>
-        <span className="text-[11px] text-muted-foreground">{items.length}</span>
+        <span {...stylex.props(styles.count)}>{items.length}</span>
       </button>
-      <p className="px-1 pb-1 text-[11px] leading-4 text-muted-foreground">
+      <p {...stylex.props(styles.privateCardHint)}>
         {t(
           'settings.machines.privateMachinesHint',
           'These machines are not available to other workspace members. Select one here to manage sharing.'
         )}
       </p>
-      {expanded ? (
-        <div className="mt-1 space-y-1">
-          {items.map((item) => (
-            <Button
+      {expanded
+        ? items.map((item) => (
+            <button
               key={item.machine.id}
-              variant="ghost"
-              size="sm"
-              className="h-8 w-full justify-between px-2 text-xs font-normal"
+              type="button"
+              {...stylex.props(styles.privateRow, surface.pressableLine, surface.lineRuled)}
               onClick={() => onOpen(item.machine.id)}
             >
-              <span className="truncate">{item.machine.name || item.machine.id}</span>
-              <span className="shrink-0 text-[10px] text-muted-foreground">
+              <span {...stylex.props(styles.truncate)}>{item.machine.name || item.machine.id}</span>
+              <span {...stylex.props(styles.manage)}>
                 {t('settings.machines.manage', 'Manage')}
               </span>
-            </Button>
-          ))}
-        </div>
-      ) : null}
+            </button>
+          ))
+        : null}
     </div>
   );
 }

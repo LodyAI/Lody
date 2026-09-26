@@ -10,7 +10,7 @@ import { SessionTabBar } from '../src/components/sessions/session-tab-bar';
 import { allocateAdaptiveTabStripLayout } from '../src/components/sessions/adaptive-tab-strip';
 import { useEmptySessionDraft } from '../src/hooks/use-empty-session-draft';
 import { createDraftSessionTab, type DraftSessionTab } from '../src/lib/session-draft-tabs';
-import { TooltipProvider } from '../src/ui/tooltip';
+import { Tooltip } from '@lody/ui/tooltip';
 import { FocusScope } from '../src/ui/focus-scope';
 import { WORKSPACE_FOCUS_SCOPES } from '../src/atoms/focus-layer';
 
@@ -71,26 +71,28 @@ describe('SessionTabBar drag sources', () => {
   async function renderTabBar(
     childSessions: SessionMeta[],
     parent = parentSession,
-    onTabClose = vi.fn()
+    onTabClose = vi.fn(),
+    closedSessions: SessionMeta[] = []
   ) {
     await act(async () => {
       root.render(
         <Provider store={createStore()}>
-          <TooltipProvider>
+          <Tooltip.Provider>
             <FocusScope id={WORKSPACE_FOCUS_SCOPES.sessionConversation}>
               <SessionTabBar
                 variant="session"
                 parentSession={parent}
                 childSessions={childSessions}
                 draftTabs={[]}
-                archivedChildSessions={[]}
+                archivedChildSessions={closedSessions}
                 activeTabSessionId={parentSession.id}
                 onTabSelect={vi.fn()}
                 onNewTab={vi.fn()}
                 onTabClose={onTabClose}
+                onTabRestore={vi.fn()}
               />
             </FocusScope>
-          </TooltipProvider>
+          </Tooltip.Provider>
         </Provider>
       );
     });
@@ -150,11 +152,11 @@ describe('SessionTabBar drag sources', () => {
     await act(async () =>
       root.render(
         <Provider store={createStore()}>
-          <TooltipProvider>
+          <Tooltip.Provider>
             <StrictMode>
               <Harness />
             </StrictMode>
-          </TooltipProvider>
+          </Tooltip.Provider>
         </Provider>
       )
     );
@@ -189,6 +191,52 @@ describe('SessionTabBar drag sources', () => {
     });
     expect(container.querySelectorAll('[role="tab"]')).toHaveLength(0);
     expect(container.querySelector('[aria-label="New tab"]')).not.toBeNull();
+  });
+
+  it('keeps the open tabs of an archived workspace visible for review', async () => {
+    const closedChild = {
+      ...childSession,
+      id: 'session-closed-child' as SessionId,
+      isArchived: true,
+      isTabClosed: true,
+    };
+    await renderTabBar(
+      [{ ...childSession, isArchived: true }, closedChild],
+      { ...parentSession, isArchived: true },
+      vi.fn(),
+      [closedChild]
+    );
+    expect(
+      Array.from(container.querySelectorAll('[role="tab"]'), (tab) => tab.textContent)
+    ).toEqual(['Main session', 'Child session']);
+    // Review-only: no new conversation can start until the workspace is restored.
+    expect(container.querySelector('[aria-label="New tab"]')).toBeNull();
+    await act(async () =>
+      container.querySelector<HTMLButtonElement>('[aria-label="Closed conversations"]')!.click()
+    );
+    // Reopening a closed tab of an archived workspace does not restore it.
+    expect(
+      document.querySelector('[aria-label="Reopen conversation: Child session"]')
+    ).not.toBeNull();
+    expect(document.querySelector('[aria-label^="Restore session"]')).toBeNull();
+  });
+
+  it('offers Restore only for an archived child of a live workspace', async () => {
+    const archivedChild = { ...childSession, isArchived: true };
+    const closedChild = {
+      ...childSession,
+      id: 'session-closed-child' as SessionId,
+      title: 'Closed child',
+      isTabClosed: true,
+    };
+    await renderTabBar([], parentSession, vi.fn(), [archivedChild, closedChild]);
+    await act(async () =>
+      container.querySelector<HTMLButtonElement>('[aria-label="Closed conversations"]')!.click()
+    );
+    expect(document.querySelector('[aria-label="Restore session: Child session"]')).not.toBeNull();
+    expect(
+      document.querySelector('[aria-label="Reopen conversation: Closed child"]')
+    ).not.toBeNull();
   });
 
   it('waits for hydration and reuses an existing draft without replacing its input', async () => {
@@ -560,13 +608,13 @@ describe('SessionTabBar rapid-close tab widths', () => {
     await act(async () =>
       root.render(
         <Provider store={createStore()}>
-          <TooltipProvider>
+          <Tooltip.Provider>
             <FocusScope id={WORKSPACE_FOCUS_SCOPES.sessionConversation}>
               <Profiler id="rapid-close" onRender={() => commits++}>
                 <Harness />
               </Profiler>
             </FocusScope>
-          </TooltipProvider>
+          </Tooltip.Provider>
         </Provider>
       )
     );

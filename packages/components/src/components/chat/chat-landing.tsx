@@ -59,8 +59,9 @@ import {
   RefreshCw,
   X,
 } from 'lucide-react';
-import { Spinner } from '@/ui/spinner';
-import { Button } from '@/ui/button';
+import * as stylex from '@stylexjs/stylex';
+import { Spinner } from '@lody/ui/spinner';
+import { Button } from '@lody/ui/button';
 import { PiProviderMigrationCard } from './pi-provider-migration-card';
 
 import {
@@ -79,7 +80,7 @@ import {
   mobileKeyboardActionAtom,
   runtimeInitializingAtom,
   setMobileDrawerOpenAtom,
-  navigationSidebarHiddenAtom,
+  navigationSidebarVisibleAtom,
   showNavigationSidebarAtom,
   userAtom,
   workspaceReposCacheAtomFamily,
@@ -93,7 +94,7 @@ import { isImeComposingKeyboardEvent } from '@/lib/ime';
 import { useNavigate } from '@tanstack/react-router';
 import { activeWorkspaceRuntimeAtom, authTokenAtom, runtimeAtom } from '@/atoms/runtime';
 
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useOpenSettings } from '@/hooks/use-open-settings';
 import {
@@ -206,8 +207,8 @@ import { wrapPastedTextChipLabel } from '@/components/mentions/mention-chips';
 import { ErrorBoundary } from '@/components/error-boundary';
 import { ChatLandingView, type ChatLandingHintType } from './chat-landing-view';
 import { getSessionCreationNavigation } from './submission/use-composer-navigation-focus';
-import { BranchSelector, getSelectorTagClassName } from './chat-landing-selectors';
-import { CONTEXT_PILL_SURFACE_CLASS } from './context-pill-class';
+import { BranchSelector } from './chat-landing-selectors';
+import { composerSurface } from '@/components/shared/composer-surface';
 import {
   extractIssuePRMentionsFromText,
   useKnownIssuePrItems,
@@ -284,7 +285,7 @@ import {
   NO_PROJECT_BUCKET_ID,
   PINNED_BUCKET_ID,
 } from '@/components/mobile/mobile-chat-list';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
+import { Tooltip } from '@lody/ui/tooltip';
 import {
   MobileHomeScreen,
   type MobileChatGroupBy,
@@ -326,7 +327,7 @@ import {
 } from '@/lib/local-project-rpc-file-provider';
 import { GitHubRepoFileProvider } from '@/lib/github-repo-file-provider';
 import type { FileWorkspaceProvider } from '@/lib/file-workspace-provider';
-import { Tabs, TabsList, TabsTrigger } from '@/ui/tabs';
+import { Tabs } from '@lody/ui/tabs';
 import { Folder as FolderIcon, GitBranch as GitBranchIcon } from 'lucide-react';
 import { AddLocalProjectDialogContainer } from '@/components/local-projects/add-local-project-dialog-container';
 import {
@@ -499,16 +500,8 @@ const warnWorkspaceRuntimeUnavailable = (message: string, context: string): void
 };
 
 const resolveLocalProjectGithubRepoFullName = (
-  gitState: LocalProjectGitState | null | undefined,
-  workspaceRepositories: { fullName: string }[] | null | undefined
-): string | null => {
-  if (!gitState?.git) return null;
-  const repoFullName = gitState.githubRepoFullName?.trim();
-  if (!repoFullName) return null;
-  return workspaceRepositories?.some((repo) => repo.fullName === repoFullName)
-    ? repoFullName
-    : null;
-};
+  gitState: LocalProjectGitState | null | undefined
+): string | null => (gitState?.git ? gitState.githubRepoFullName?.trim() || null : null);
 
 type LocalProjectGitStateEntry = {
   machineId: MachineId;
@@ -937,7 +930,7 @@ function WorkspaceChatLanding({
   } = useSessionActions();
   const openMobileDrawer = useSetAtom(setMobileDrawerOpenAtom);
   const setBugReportDialogOpen = useSetAtom(bugReportDialogOpenAtom);
-  const isLeftSidebarHidden = useAtomValue(navigationSidebarHiddenAtom);
+  const isLeftSidebarHidden = !useAtomValue(navigationSidebarVisibleAtom);
   const showNavigationSidebar = useSetAtom(showNavigationSidebarAtom);
   const visibleLocalMachineId = useMemo(() => {
     const machineId = localProbeResult?.machineId as MachineId | undefined;
@@ -1590,8 +1583,6 @@ function WorkspaceChatLanding({
   ]);
 
   // ── Agent/Mode/Model config ──
-  const selectorTagClassName = getSelectorTagClassName(tone);
-
   const selectedConfig = useMemo<AgentConfigMeta | undefined>(
     () =>
       selectedAgent ? executorConfigs.find((cfg) => cfg.id === selectedAgent.agentId) : undefined,
@@ -2749,9 +2740,9 @@ function WorkspaceChatLanding({
     (gitStateOverride?: LocalProjectGitState | null): string | null => {
       const effectiveLocalGitState = gitStateOverride ?? activeLocalGitState;
       if (!selectedLocalProject) return null;
-      return resolveLocalProjectGithubRepoFullName(effectiveLocalGitState, repositories);
+      return resolveLocalProjectGithubRepoFullName(effectiveLocalGitState);
     },
-    [activeLocalGitState, repositories, selectedLocalProject]
+    [activeLocalGitState, selectedLocalProject]
   );
 
   // ── Branch options (context-dependent) ──
@@ -3455,7 +3446,7 @@ function WorkspaceChatLanding({
         emptyText={t('chat.branchEmpty', { defaultValue: 'No branches found' })}
         loading={contextType === 'local' ? loadingLocalGitState || runtimeInitializing : undefined}
         loadingText={t('chat.branchLoading', { defaultValue: 'Loading branches...' })}
-        className="h-6 min-w-0 max-w-full gap-1.5 rounded-none border-none bg-transparent px-2 text-[0.9em] font-normal text-foreground/80 hover:bg-foreground/[0.06] hover:text-foreground disabled:opacity-100 [&_span]:text-[0.9em] [&_span]:leading-tight [&_svg]:text-current [&_svg]:opacity-100"
+        className="min-w-0 max-w-full"
         disabled={isBranchDisabled}
       />
     </span>
@@ -3465,23 +3456,27 @@ function WorkspaceChatLanding({
     selectedLocalProject &&
     localGitStateError &&
     !loadingLocalGitState ? (
-      <Tooltip delayDuration={300}>
-        <TooltipTrigger asChild>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className="h-6 w-6 rounded-md px-0 text-status-error hover:text-status-error [&_svg]:size-3.5"
-            onClick={handleLocalGitStateRetry}
-            aria-label={t('chat.localGitStateRetry', 'Retry loading branches')}
-          >
-            <RefreshCw aria-hidden="true" />
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent side="bottom">
+      <Tooltip.Root>
+        <Tooltip.Trigger
+          delay={300}
+          render={
+            <Button
+              type="button"
+              variant="ghost"
+              size="mini"
+              tone="destructive"
+              icon
+              onClick={handleLocalGitStateRetry}
+              aria-label={t('chat.localGitStateRetry', 'Retry loading branches')}
+            >
+              <RefreshCw {...stylex.props(composerSurface.glyph14)} aria-hidden="true" />
+            </Button>
+          }
+        />
+        <Tooltip.Content side="bottom">
           {t('chat.localGitStateRetry', 'Retry loading branches')}
-        </TooltipContent>
-      </Tooltip>
+        </Tooltip.Content>
+      </Tooltip.Root>
     ) : null;
 
   const worktreeUnavailableReason = loadingLocalGitState
@@ -3513,15 +3508,10 @@ function WorkspaceChatLanding({
 
   const branchWorktreePill =
     branchSelectorNode || topWorktreeNode ? (
-      <div
-        className={cn(
-          'flex h-6 min-w-0 max-w-full items-center overflow-hidden rounded-md',
-          CONTEXT_PILL_SURFACE_CLASS
-        )}
-      >
+      <div {...stylex.props(composerSurface.contextPill)}>
         {branchSelectorNode}
         {branchSelectorNode && topWorktreeNode ? (
-          <span aria-hidden="true" className="h-4 w-px shrink-0 bg-border" />
+          <span aria-hidden="true" {...stylex.props(composerSurface.contextPillDivider)} />
         ) : null}
         {topWorktreeNode}
       </div>
@@ -3794,12 +3784,11 @@ function WorkspaceChatLanding({
         <Button
           type="button"
           variant="ghost"
-          size="sm"
-          className={cn(selectorTagClassName, 'text-[0.9em] leading-tight')}
+          size="mini"
           onClick={resetErrorBoundary}
           aria-label={t('chat.retryTargetSelector', 'Retry target selector')}
         >
-          <RefreshCw aria-hidden="true" className="size-3" />
+          <RefreshCw {...stylex.props(composerSurface.glyph12)} aria-hidden="true" />
           {t('common.retry', 'Retry')}
         </Button>
       )}
@@ -4104,38 +4093,30 @@ function WorkspaceChatLanding({
      small to read at a glance on a phone and doesn't surface both
      options without an extra tap. */
   /* Workdir mode pills: icon+label as a tight group, centered in each
-     equal-width segment (same affinity pattern as the Type ContextSwitch). */
-  const mobileSheetWorkdirModePillTriggerClassName = cn(
-    'flex-1 justify-center gap-1 rounded-md px-2 py-1 text-sm font-medium transition-all',
-    'data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-xs',
-    'text-muted-foreground'
-  );
+     equal-width segment (same affinity pattern as the Type ContextSwitch).
+     The track, the pill and the dimming of an unavailable choice are the
+     primitive's; a stretched strip is what splits the width between them. */
   const mobileSheetWorkdirModeNode =
     contextType === 'local' && selectedLocalProject ? (
-      <Tabs
+      <Tabs.Root
         value={effectiveWorkdirMode}
         onValueChange={(value) => handleWorkdirModeChange(value as WorkdirMode)}
-        className="w-full"
       >
-        <TabsList className="flex h-10 w-full rounded-md bg-muted p-1">
-          <TabsTrigger value="local" className={mobileSheetWorkdirModePillTriggerClassName}>
+        <Tabs.List size="large" stretch>
+          <Tabs.Tab value="local">
             <FolderIcon className="h-3.5 w-3.5" aria-hidden="true" />
             <span>{t('chat.mobileNewChat.workdirLocalLabel', '本地文件')}</span>
-          </TabsTrigger>
-          <TabsTrigger
+          </Tabs.Tab>
+          <Tabs.Tab
             value="worktree"
             disabled={!worktreeAvailable}
             title={worktreeUnavailableReason}
-            className={cn(
-              mobileSheetWorkdirModePillTriggerClassName,
-              !worktreeAvailable && 'cursor-not-allowed opacity-50'
-            )}
           >
             <GitBranchIcon className="h-3.5 w-3.5" aria-hidden="true" />
             <span>{t('chat.mobileNewChat.workdirWorktreeLabel', '新工作树')}</span>
-          </TabsTrigger>
-        </TabsList>
-      </Tabs>
+          </Tabs.Tab>
+        </Tabs.List>
+      </Tabs.Root>
     ) : null;
 
   /* ── Composer footer: same MobileSessionRunConfig as the in-session
@@ -4257,8 +4238,8 @@ function WorkspaceChatLanding({
   }, [freshRepositories, selectedRepo]);
   const selectedLocalProjectGithubRepoFullName = useMemo(() => {
     if (contextType !== 'local') return undefined;
-    return resolveLocalProjectGithubRepoFullName(activeLocalGitState, repositories) ?? undefined;
-  }, [activeLocalGitState, contextType, repositories]);
+    return resolveLocalProjectGithubRepoFullName(activeLocalGitState) ?? undefined;
+  }, [activeLocalGitState, contextType]);
 
   const preparationMachineId = useMemo(() => {
     if (!selectedAgent) return null;
@@ -5203,9 +5184,9 @@ function WorkspaceChatLanding({
     if (isMobile) return 'chat';
     return contextType === 'chat' ? 'chat' : 'projects';
   });
-  /* Developer-only beta gates drive the extra dock tabs on mobile home.
-     When a gate is off, a stale selection must render as Chat — as if
-     the tab were never built. Inbox also retains its team-workspace gate. */
+  /* A developer-only beta gate (plus the team-workspace gate) drives the
+     Inbox dock tab on mobile home. When it is off, a stale selection must
+     render as Chat — as if the tab were never built. */
   const inboxFeatureEnabled = useAtomValue(inboxFeatureEnabledAtom);
   const showMobileInbox = showProjectSharing && inboxFeatureEnabled;
   const effectiveMobileHomeTab: MobileHomeTab =
@@ -6211,7 +6192,7 @@ function WorkspaceChatLanding({
             primaryAction={
               <Button
                 type="button"
-                size="icon"
+                icon
                 variant="ghost"
                 onClick={() => {
                   void handleSubmit();
@@ -6433,6 +6414,7 @@ function WorkspaceChatLanding({
               'Connect a GitHub repository'
             ),
             chatTab: t('chat.contextSwitch.chat', 'Chat'),
+            schedulesTab: t('schedules.title', 'Schedules'),
             recentProjectsHeading: t('chat.mobileHome.recentProjectsHeading', '最近常用'),
             settingsTab: t('settings.title', 'Settings'),
             projectRemoving: t('sidebar.localProjects.remove.removing', 'Removing…'),
@@ -6712,7 +6694,7 @@ function WorkspaceChatLanding({
             <Button
               type="button"
               variant="ghost"
-              size="icon"
+              icon
               onClick={() => showNavigationSidebar()}
               aria-label={t('chat.leftSidebar.show', 'Show navigation sidebar')}
               className="h-7 w-7 shrink-0 text-muted-foreground"
