@@ -109,6 +109,7 @@ import { createCliSqliteRepoStore } from './sqlite-repo-store';
 import { streamsRoomBinding, type StreamsRoomBinding } from './streams-room-binding';
 import { formatErrorMessage } from '@/utils/format-error';
 import {
+  findSoleMachineAgentConfig,
   listMergedAgentConfigs,
   readMachineBuiltinAgentOptOuts,
   readMergedAgentConfigById,
@@ -1373,6 +1374,20 @@ export class LoroDocumentManager {
       }
     }
     return false;
+  }
+
+  async findSoleAgentConfig(
+    cliType: AgentConfigCliType,
+    agentType: string,
+    machineId: MachineId
+  ): Promise<AgentConfigMeta | undefined> {
+    return await findSoleMachineAgentConfig(
+      this.repo,
+      this.workspaceId,
+      machineId,
+      cliType,
+      agentType
+    );
   }
 
   /** Managed builtin provider types the user removed on this machine, so they must not be auto-registered at startup. */

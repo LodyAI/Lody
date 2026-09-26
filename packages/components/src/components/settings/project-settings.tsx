@@ -10,7 +10,7 @@ import {
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
-import { corner, duration, ease, radius, space } from '@lody/ui/tokens/scales.stylex';
+import { corner, duration, ease, focus, radius, space } from '@lody/ui/tokens/scales.stylex';
 import { useOpenSettings } from '@/hooks/use-open-settings';
 import type { TFunction } from 'i18next';
 import { formatDistanceToNow, type Locale } from 'date-fns';
@@ -103,6 +103,7 @@ import { ProjectSkillsTab } from './project-skills-tab';
 import type { ProjectSkillsSource } from '@/hooks/use-project-skills';
 import { useAppCapability } from '@/lib/app-platform';
 import { getVisibleLocalProjectHistoryFailures } from '@/lib/local-project-history-catalog';
+import { settingsType as type } from './type.stylex';
 
 export type ProjectSettingsRow = {
   key: string;
@@ -229,12 +230,6 @@ export type ProjectSettingsViewProps = {
   localProjectRemovalStateByKey?: ReadonlyMap<string, LocalProjectRemovalState>;
 };
 
-/* Desktop settings is itself a dialog: a nested overlay restacks at its z-index
-   with a lighter veil. It is handed to the backdrop, which owns both of those
-   properties itself, so it stays the class string the other settings dialogs
-   (MCP, Agent Roles) pass there. */
-const NESTED_SETTINGS_DIALOG_OVERLAY = 'z-[var(--z-dialog)] bg-black/20';
-
 /** The global thin scrollbar; a `::-webkit-scrollbar` rule StyleX cannot state. */
 const SCROLLBAR_CLASS = 'scrollbar-pro';
 
@@ -260,11 +255,10 @@ const SCRIPT_TEXTAREA_STYLE: CSSProperties = {
 };
 
 const styles = stylex.create({
-  /* The page column, widened for the two panes and filling the panel height. */
+  /* The page column, filling the panel height. */
   page: {
     height: '100%',
     minHeight: 0,
-    maxWidth: { default: null, '@media (min-width: 768px)': '1152px' },
   },
   pageHeader: {
     display: 'flex',
@@ -276,17 +270,10 @@ const styles = stylex.create({
     paddingInline: space[4],
   },
   pageHeading: { minWidth: 0 },
-  pageTitle: {
-    margin: 0,
-    fontSize: '1.125em',
-    fontWeight: 400,
-    lineHeight: 1.25,
-    color: colors.label,
-  },
   pageSubtitle: {
     margin: 0,
     marginTop: '2px',
-    fontSize: '0.8em',
+    fontSize: type.caption,
     lineHeight: 1.375,
     color: colors.secondaryLabel,
   },
@@ -297,7 +284,7 @@ const styles = stylex.create({
     gap: space[2],
     paddingInline: space[3],
     paddingBlock: '40px',
-    fontSize: '0.875em',
+    fontSize: type.caption,
     color: colors.secondaryLabel,
   },
   empty: {
@@ -311,7 +298,7 @@ const styles = stylex.create({
     textAlign: 'center',
   },
   emptyIcon: { width: '20px', height: '20px', color: colors.tertiaryLabel },
-  emptyText: { margin: 0, fontSize: '0.875em', color: colors.secondaryLabel },
+  emptyText: { margin: 0, fontSize: type.caption, color: colors.secondaryLabel },
 
   /* The two-pane catalog: sources on the left, the selected source's folders
      on the right, both one sidebar list language; one structural line between. */
@@ -341,7 +328,7 @@ const styles = stylex.create({
     margin: 0,
     paddingInlineStart: space[4],
     paddingInlineEnd: space[2],
-    paddingBlock: '10px',
+    paddingBlock: '8px',
     borderWidth: 0,
     backgroundColor: 'transparent',
     color: 'inherit',
@@ -356,7 +343,7 @@ const styles = stylex.create({
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
-    lineHeight: 1.25,
+    lineHeight: type.leading,
     color: colors.label,
   },
   lineCaption: {
@@ -364,13 +351,13 @@ const styles = stylex.create({
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
     fontFamily: MONO,
-    fontSize: '0.75em',
-    lineHeight: 1.3,
+    fontSize: type.caption,
+    lineHeight: type.leading,
     color: colors.secondaryLabel,
   },
   lineMeta: {
     flexShrink: 0,
-    fontSize: '0.8em',
+    fontSize: type.caption,
     color: colors.tertiaryLabel,
     fontVariantNumeric: 'tabular-nums',
     whiteSpace: 'nowrap',
@@ -409,9 +396,9 @@ const styles = stylex.create({
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
     margin: 0,
-    fontSize: '0.875em',
+    fontSize: type.caption,
     fontWeight: 400,
-    lineHeight: 1.25,
+    lineHeight: type.leading,
     color: colors.label,
   },
   folderList: {
@@ -430,7 +417,7 @@ const styles = stylex.create({
     paddingInline: space[2],
     paddingTop: space[1],
     paddingBottom: '2px',
-    fontSize: '0.75em',
+    fontSize: type.caption,
     fontWeight: 400,
     color: colors.secondaryLabel,
   },
@@ -442,7 +429,7 @@ const styles = stylex.create({
     paddingInline: space[2],
     paddingBlock: space[4],
   },
-  note: { margin: 0, fontSize: '0.8em', lineHeight: 1.375, color: colors.secondaryLabel },
+  note: { margin: 0, fontSize: type.caption, lineHeight: 1.375, color: colors.secondaryLabel },
 
   /* What a list row holds beyond `surface.listRow*`: a caption under the name. */
   rowText: {
@@ -457,8 +444,8 @@ const styles = stylex.create({
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
-    fontSize: '0.85em',
-    lineHeight: 1.25,
+    fontSize: type.caption,
+    lineHeight: type.leading,
     color: colors.secondaryLabel,
   },
   rowCaptionMono: { fontFamily: MONO },
@@ -529,7 +516,7 @@ const styles = stylex.create({
 
   /* Menu rows that say what they add under their name. */
   menuText: { display: 'flex', flexDirection: 'column', minWidth: 0, paddingBlock: space[1] },
-  menuHint: { fontSize: '0.85em', color: colors.secondaryLabel },
+  menuHint: { fontSize: type.caption, color: colors.secondaryLabel },
   buttonIcon: { width: '14px', height: '14px', flexShrink: 0 },
 
   /* The project editor: a scroll body of stacked settings sections. */
@@ -554,7 +541,7 @@ const styles = stylex.create({
     margin: 0,
     fontSize: '1em',
     fontWeight: 400,
-    lineHeight: 1.25,
+    lineHeight: type.leading,
     color: colors.label,
   },
   pathRow: {
@@ -571,13 +558,13 @@ const styles = stylex.create({
     whiteSpace: 'nowrap',
     margin: 0,
     fontFamily: MONO,
-    fontSize: '0.75em',
+    fontSize: type.caption,
     color: colors.secondaryLabel,
   },
   detailNote: {
     margin: 0,
     marginTop: space[1],
-    fontSize: '0.75em',
+    fontSize: type.caption,
     lineHeight: 1.375,
     color: colors.secondaryLabel,
   },
@@ -592,7 +579,7 @@ const styles = stylex.create({
     display: 'flex',
     alignItems: 'center',
     gap: space[1.5],
-    fontSize: '0.875em',
+    fontSize: type.caption,
     fontWeight: 400,
     color: colors.label,
   },
@@ -600,7 +587,7 @@ const styles = stylex.create({
   editorDescription: {
     margin: 0,
     marginTop: space[1],
-    fontSize: '0.8em',
+    fontSize: type.caption,
     lineHeight: 1.375,
     color: colors.secondaryLabel,
   },
@@ -629,7 +616,7 @@ const styles = stylex.create({
     alignItems: 'center',
     gap: space[2],
     paddingBlock: space[6],
-    fontSize: '0.8em',
+    fontSize: type.caption,
     color: colors.secondaryLabel,
   },
   stack: { display: 'flex', flexDirection: 'column', gap: space[2] },
@@ -639,7 +626,7 @@ const styles = stylex.create({
     display: 'flex',
     alignItems: 'flex-start',
     gap: space[1.5],
-    fontSize: '0.75em',
+    fontSize: type.caption,
     lineHeight: 1.375,
     color: colors.secondaryLabel,
   },
@@ -649,14 +636,14 @@ const styles = stylex.create({
     alignItems: 'center',
     justifyContent: 'flex-end',
     gap: space[1],
-    fontSize: '0.75em',
+    fontSize: type.caption,
     color: colors.secondaryLabel,
   },
   error: {
     display: 'flex',
     alignItems: 'flex-start',
     gap: space[2],
-    fontSize: '0.8em',
+    fontSize: type.caption,
     lineHeight: 1.375,
     color: colors.destructive,
   },
@@ -677,7 +664,7 @@ const styles = stylex.create({
     backgroundColor: { default: 'transparent', ':hover': colors.hoverFill },
     color: { default: colors.secondaryLabel, ':hover': colors.label },
     fontFamily: 'inherit',
-    fontSize: '0.875em',
+    fontSize: type.caption,
     fontWeight: 400,
     textAlign: 'start',
     cursor: 'pointer',
@@ -702,7 +689,7 @@ const styles = stylex.create({
     flexDirection: 'column',
     flexGrow: 1,
     minHeight: 0,
-    fontSize: '0.8em',
+    fontSize: type.caption,
   },
   panelBar: {
     display: 'flex',
@@ -804,7 +791,7 @@ const styles = stylex.create({
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
-    fontSize: '0.85em',
+    fontSize: type.caption,
     color: colors.secondaryLabel,
   },
   conflict: { display: 'flex', flexShrink: 0, alignItems: 'center', gap: space[1] },
@@ -1117,7 +1104,6 @@ export function ProjectSettingsComponent({
         open={addLocalProjectDialogOpen}
         onOpenChange={setAddLocalProjectDialogOpen}
         initialMachineId={addLocalProjectMachineId}
-        backdropClassName={NESTED_SETTINGS_DIALOG_OVERLAY}
       />
       <RemoveLocalProjectDialog
         open={pendingRemoval != null}
@@ -1133,7 +1119,6 @@ export function ProjectSettingsComponent({
           machineSupportsLocalProjectRemovalProtocol(machineMetaMap.get(pendingRemoval.machineId))
         }
         isRemoving={isRemovingLocalProject}
-        backdropClassName={NESTED_SETTINGS_DIALOG_OVERLAY}
         onOpenChange={(open) => {
           if (!open && !isRemovingLocalProject) setPendingRemoval(null);
         }}
@@ -1277,7 +1262,7 @@ function ProjectSettingsDesktop({
       <div {...stylex.props(surface.container, styles.page)}>
         <div {...stylex.props(styles.pageHeader)}>
           <div {...stylex.props(styles.pageHeading)}>
-            <h2 {...stylex.props(styles.pageTitle)}>{t('settings.tabs.projects', 'Projects')}</h2>
+            <h2 {...stylex.props(surface.pageTitle)}>{t('settings.tabs.projects', 'Projects')}</h2>
             <p {...stylex.props(styles.pageSubtitle)}>
               {t(
                 'workspace.projects.settingsSubtitle',
@@ -1414,10 +1399,7 @@ function ProjectSettingsDesktop({
           if (!open) setEditingProjectKey(null);
         }}
       >
-        <Dialog.Content
-          backdropClassName={NESTED_SETTINGS_DIALOG_OVERLAY}
-          style={EDITOR_PANEL_STYLE}
-        >
+        <Dialog.Content style={EDITOR_PANEL_STYLE}>
           <Dialog.Title className={stylex.props(styles.srOnly).className}>
             {editingProject?.kind === 'local'
               ? editingProject.row.project.name
@@ -1717,7 +1699,7 @@ function ProjectWindow({
 
   return (
     <Tooltip.Provider delay={200}>
-      <div {...stylex.props(win.window)}>
+      <div {...stylex.props(win.window, surface.canvas)}>
         {/* Four views of one project are a strip, not a sidebar: the name and
             where it lives above, the views under it, the page at full width. */}
         <header {...stylex.props(win.head)}>
@@ -2471,9 +2453,9 @@ const win = stylex.create({
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
-    fontSize: '17px',
-    fontWeight: 600,
-    lineHeight: 1.3,
+    fontSize: type.title,
+    fontWeight: type.titleWeight,
+    lineHeight: type.leading,
     letterSpacing: '-0.01em',
     color: colors.label,
   },
@@ -2521,7 +2503,7 @@ const win = stylex.create({
     color: { default: colors.secondaryLabel, ':hover': colors.label },
     cursor: 'pointer',
     outlineStyle: 'none',
-    boxShadow: { default: 'none', ':focus-visible': `0 0 0 2px ${colors.accent}` },
+    boxShadow: { default: 'none', ':focus-visible': `0 0 0 ${focus.ringWidth} ${colors.accent}` },
     borderRadius: '4px',
     transitionProperty: 'color',
     transitionDuration: '150ms',
@@ -2560,12 +2542,17 @@ const win = stylex.create({
     flexShrink: 0,
     margin: 0,
     paddingTop: space[4],
-    paddingBottom: space[3],
+    paddingBottom: space[2],
     paddingInline: space[6],
     fontSize: '12px',
     lineHeight: 1.45,
     color: colors.secondaryLabel,
   },
+  /**
+   * The page scrolls, and a scroller clips what paints outside its padding box.
+   * A card's edge is a 0.5px ring in its shadow, so a card flush with the top
+   * of the scroller loses its top edge: the top padding is the ring's room.
+   */
   pageBody: {
     display: 'flex',
     flexDirection: 'column',
@@ -2574,6 +2561,7 @@ const win = stylex.create({
     minHeight: 0,
     overflowY: 'auto',
     paddingInline: space[6],
+    paddingTop: space[1],
     paddingBottom: space[6],
   },
   note: { margin: 0, fontSize: '12px', lineHeight: 1.45, color: colors.secondaryLabel },
@@ -2622,7 +2610,7 @@ const win = stylex.create({
     display: 'inline-flex',
     alignItems: 'center',
     gap: space[2],
-    fontSize: '0.85em',
+    fontSize: type.caption,
     color: colors.secondaryLabel,
     cursor: 'pointer',
   },
@@ -2632,7 +2620,7 @@ const win = stylex.create({
     alignItems: 'center',
     gap: space[3],
     paddingInline: space[4],
-    paddingBlock: '10px',
+    paddingBlock: '8px',
     cursor: 'default',
     outlineStyle: 'none',
   },
@@ -2641,10 +2629,10 @@ const win = stylex.create({
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
-    lineHeight: 1.3,
+    lineHeight: type.leading,
     color: colors.label,
   },
-  sessionTime: { fontSize: '0.8em', color: colors.tertiaryLabel },
+  sessionTime: { fontSize: type.caption, color: colors.tertiaryLabel },
   conflict: { display: 'inline-flex', alignItems: 'center', gap: space[1], flexShrink: 0 },
   empty: {
     display: 'flex',

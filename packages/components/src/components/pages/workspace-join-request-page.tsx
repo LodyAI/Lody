@@ -52,7 +52,7 @@ export function WorkspaceJoinRequestPage({
     <div className="flex min-h-screen w-full items-center justify-center bg-background p-4">
       <div className="w-full max-w-md overflow-hidden rounded-2xl border border-border/60 bg-card shadow-[0_8px_30px_-12px_rgba(0,0,0,0.12)]">
         <div className="flex flex-col items-center px-7 pb-7 pt-8 text-center">
-          {busy ? <Spinner className="mb-4 size-6 text-muted-foreground" /> : null}
+          {busy ? <Spinner size="large" className="mb-4 text-muted-foreground" /> : null}
           {!busy ? (
             <img
               src={workspaceAvatarPlaceholder}

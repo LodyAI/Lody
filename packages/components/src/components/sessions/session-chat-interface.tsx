@@ -209,6 +209,7 @@ import { RenameSessionDialog, type RenameSessionDialogTarget } from './rename-se
 import { useResolvedTheme } from '../../theme-provider';
 import { PullRequestBadge } from './pull-request-badge';
 import { SessionInfoBar } from './session-info-bar';
+import { CurrentSessionRelationsChip, useHasSessionRelations } from './session-relations-chip';
 import type { ContextChipAction, PrCiRun } from './session-info-chips';
 import {
   resolveSessionInfoBarGitHubActionIds,
@@ -1228,11 +1229,11 @@ export function SessionHeaderMenu({
                   <span className="sr-only">{t('sessions.machineLabel', 'Machine')}: </span>
                   <span className="min-w-0 flex-1 truncate">{machineName}</span>
                   {project?.kind === 'local' ? (
-                    <span className="ml-auto shrink-0 rounded border border-border/70 px-1 py-px text-[0.62rem] font-medium leading-none text-muted-foreground">
+                    <Badge className="ml-auto">
                       {session.isWorktree
                         ? t('chat.workdir.worktree', 'Worktree')
                         : t('chat.workdir.local', 'Local')}
-                    </span>
+                    </Badge>
                   ) : null}
                 </div>
               ) : null}
@@ -4719,6 +4720,7 @@ export const SessionChatInterface = memo(
       openerSessionMeta?.title,
       t,
     ]);
+    const hasSessionRelations = useHasSessionRelations(session.id);
     const openedByConversationStart = useMemo(() => {
       const openedBy = openedByRelations?.openedBy;
       if (!openedBy) return undefined;
@@ -6195,6 +6197,16 @@ export const SessionChatInterface = memo(
                     onOpenPr={prLinkHandler}
                     contextActions={infoBarContextActions}
                     onOpenAllChanges={onOpenAllChanges}
+                    // Opener + every Session/Tab created here: the in-stream
+                    // creation cards scroll away with the conversation.
+                    relations={
+                      hasSessionRelations ? (
+                        <CurrentSessionRelationsChip
+                          sessionId={session.id}
+                          onOpenSession={handleOpenRelatedSession}
+                        />
+                      ) : undefined
+                    }
                     onOpenBrowser={browserActionAvailable ? handleOpenBrowser : undefined}
                     privateAccessStatus={
                       isMobile && sharing?.visibility === 'private'

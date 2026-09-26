@@ -5,7 +5,7 @@ import { Bot, ChevronDown, CircleHelp, Folder, LockKeyhole, MonitorCog, Users } 
 import * as stylex from '@stylexjs/stylex';
 import { Spinner } from '@lody/ui/spinner';
 import { colors } from '@lody/ui/tokens/colors.stylex';
-import { corner, radius, space } from '@lody/ui/tokens/scales.stylex';
+import { corner, focus, radius, space } from '@lody/ui/tokens/scales.stylex';
 import type { AgentConfigMeta, MachineId } from '@lody/shared';
 import { getAllAgentConfigAtom } from '@/atoms/agents';
 import { localMachineIdAtom } from '@/atoms/local-probe';
@@ -23,6 +23,7 @@ import { Menu } from '@lody/ui/menu';
 import { Tooltip } from '@lody/ui/tooltip';
 import { CompactSection } from './compact-layout';
 import { settingsSurface as surface } from './surface';
+import { settingsType as type } from './type.stylex';
 
 export type AccountMachineDirectory = {
   key: string;
@@ -137,7 +138,7 @@ const styles = stylex.create({
     columnGap: space[3],
     rowGap: space[2],
     paddingInline: space[4],
-    paddingBlock: '10px',
+    paddingBlock: '8px',
   },
   identity: {
     display: 'flex',
@@ -175,7 +176,7 @@ const styles = stylex.create({
     fontFamily: 'inherit',
     fontSize: '1em',
     fontWeight: 400,
-    lineHeight: 1.25,
+    lineHeight: type.leading,
     textAlign: 'start',
     overflow: 'hidden',
     textOverflow: 'ellipsis',
@@ -183,12 +184,12 @@ const styles = stylex.create({
     cursor: 'pointer',
     outlineStyle: 'none',
     textDecoration: { default: 'none', ':hover': 'underline' },
-    boxShadow: { default: 'none', ':focus-visible': `0 0 0 2px ${colors.accent}` },
+    boxShadow: { default: 'none', ':focus-visible': `0 0 0 ${focus.ringWidth} ${colors.accent}` },
   },
   status: {
     margin: 0,
-    fontSize: '0.8em',
-    lineHeight: 1.25,
+    fontSize: type.caption,
+    lineHeight: type.leading,
     color: colors.secondaryLabel,
     overflow: 'hidden',
     textOverflow: 'ellipsis',

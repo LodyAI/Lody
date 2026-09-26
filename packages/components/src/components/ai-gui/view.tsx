@@ -182,7 +182,7 @@ import {
 } from './conversation-panel';
 import { TerminalComponent } from './terminal-component';
 import { prepareTerminalOutputBlocksPreview } from './terminal-preview';
-import { type DurationUnitLabels, formatDurationCompact } from '@/lib/format-duration';
+import { formatDurationCompact, getDurationUnitLabels } from '@/lib/format-duration';
 import {
   resolveLiveSessionHistoryDurationMs,
   resolveSessionHistoryDurationMs,
@@ -4003,11 +4003,7 @@ const WorkedGroupHeader = ({
 }) => {
   const { t } = useTranslation();
   const isMobile = useIsMobile();
-  const durationUnitLabels: DurationUnitLabels = {
-    hour: t('time.unitShort.hour', 'h'),
-    minute: t('time.unitShort.minute', 'm'),
-    second: t('time.unitShort.second', 's'),
-  };
+  const durationUnitLabels = getDurationUnitLabels(t);
   /* Mobile moves the turn duration to the footer action bar, where it also
      keeps the copy button clear of the session drawer's left-edge back-swipe
      strip. Both rows read the same `resolveSessionHistoryDurationMs(message)`,
@@ -4278,11 +4274,7 @@ const LiveTurnDurationLabel = ({
   const now = useStableNow(LIVE_TURN_DURATION_SAMPLE_MS);
   const durationMs = resolveLiveSessionHistoryDurationMs(message, now.getTime());
   if (durationMs === null) return null;
-  const duration = formatDurationCompact(durationMs, {
-    hour: t('time.unitShort.hour', 'h'),
-    minute: t('time.unitShort.minute', 'm'),
-    second: t('time.unitShort.second', 's'),
-  });
+  const duration = formatDurationCompact(durationMs, getDurationUnitLabels(t));
   if (!duration) return null;
   return <>{t('sessions.workedFor', { duration, defaultValue: 'Worked for {{duration}}' })}</>;
 };
@@ -4298,13 +4290,7 @@ const LiveActivityLabel = ({ label, message }: { label: string; message: LiveAct
   const now = useStableNow(LIVE_TURN_DURATION_SAMPLE_MS);
   const durationMs = resolveLiveSessionHistoryDurationMs(message, now.getTime());
   const duration =
-    durationMs === null
-      ? ''
-      : formatDurationCompact(durationMs, {
-          hour: t('time.unitShort.hour', 'h'),
-          minute: t('time.unitShort.minute', 'm'),
-          second: t('time.unitShort.second', 's'),
-        });
+    durationMs === null ? '' : formatDurationCompact(durationMs, getDurationUnitLabels(t));
   if (!duration) return <>{label}</>;
   return (
     <>
@@ -4407,11 +4393,7 @@ export const AssistantTurnFooter = ({
   }, [message.finished, message.items]);
   const hasCopyableText = textContent.trim().length > 0;
   const fileDiffs = fileDiffOverride ?? message.fileDiff ?? EMPTY_EDITED_FILE_ENTRIES;
-  const durationUnitLabels: DurationUnitLabels = {
-    hour: t('time.unitShort.hour', 'h'),
-    minute: t('time.unitShort.minute', 'm'),
-    second: t('time.unitShort.second', 's'),
-  };
+  const durationUnitLabels = getDurationUnitLabels(t);
   const durationMs = resolveSessionHistoryDurationMs(message);
   const durationLabel =
     durationMs === null ? '' : formatDurationCompact(durationMs, durationUnitLabels);
@@ -6615,9 +6597,7 @@ const PlanEntryRow = ({
           <StatusIcon className={cn('h-4 w-4 flex-none shrink-0', statusMeta.className)} />
           <span className="break-words">{entry.content}</span>
         </div>
-        <Badge tone={priorityMeta.tone} className="uppercase">
-          {priorityMeta.label}
-        </Badge>
+        <Badge tone={priorityMeta.tone}>{priorityMeta.label}</Badge>
       </div>
     </div>
   );

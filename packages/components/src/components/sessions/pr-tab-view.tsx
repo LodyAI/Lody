@@ -40,7 +40,7 @@ import {
   isPullRequestMergeabilityPending,
 } from '@/lib/github-pr-details-state';
 import { colors, shadow } from '@lody/ui/tokens/colors.stylex';
-import { corner, duration, ease, radius, space } from '@lody/ui/tokens/scales.stylex';
+import { corner, duration, ease, focus, radius, space } from '@lody/ui/tokens/scales.stylex';
 import { Avatar, type AvatarSize } from '@lody/ui/avatar';
 import { Badge } from '@lody/ui/badge';
 import { Button } from '@lody/ui/button';
@@ -58,7 +58,7 @@ const TINY = '@container pr-tab (width < 280px)';
 const MONO = 'var(--font-mono)';
 /** One column, centred, however wide the panel is dragged. */
 const COLUMN = '48rem';
-const FOCUS_RING = `0 0 0 2px ${colors.accent}`;
+const FOCUS_RING = `0 0 0 ${focus.ringWidth} ${colors.accent}`;
 
 const styles = stylex.create({
   root: {

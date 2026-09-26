@@ -23,15 +23,16 @@ import { Popover } from '@lody/ui/popover';
 import { Skeleton } from '@lody/ui/skeleton';
 import { Switch } from '@lody/ui/switch';
 import { colors } from '@lody/ui/tokens/colors.stylex';
-import { radius, space } from '@lody/ui/tokens/scales.stylex';
+import { focus, radius, space } from '@lody/ui/tokens/scales.stylex';
 import { settingsCatalog as catalog, settingsSurface as surface } from './surface';
+import { settingsType as type } from './type.stylex';
 
 const styles = stylex.create({
-  lead: { margin: 0, fontSize: '0.875em', color: colors.secondaryLabel },
-  notice: { margin: 0, fontSize: '0.875em', color: colors.label },
-  error: { margin: 0, fontSize: '0.875em', color: colors.destructive },
+  lead: { margin: 0, fontSize: type.caption, color: colors.secondaryLabel },
+  notice: { margin: 0, fontSize: type.caption, color: colors.label },
+  error: { margin: 0, fontSize: type.caption, color: colors.destructive },
   toolbar: { display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: space[2] },
-  toggleLabel: { fontSize: '0.75em', color: colors.secondaryLabel },
+  toggleLabel: { fontSize: type.caption, color: colors.secondaryLabel },
   /**
    * One share: the publisher's face, the title and when it was published. The
    * row is the hit area of its title button, through the button's `::after`.
@@ -42,7 +43,7 @@ const styles = stylex.create({
     alignItems: 'flex-start',
     gap: space[3],
     paddingInline: space[4],
-    paddingBlock: '10px',
+    paddingBlock: '8px',
   },
   body: { flexGrow: 1, minWidth: 0 },
   /** The title button: one focusable control per row, its hit area the whole row. */
@@ -60,7 +61,7 @@ const styles = stylex.create({
     cursor: 'pointer',
     outline: 'none',
     borderRadius: radius.mini,
-    boxShadow: { default: 'none', ':focus-visible': `0 0 0 2px ${colors.accent}` },
+    boxShadow: { default: 'none', ':focus-visible': `0 0 0 ${focus.ringWidth} ${colors.accent}` },
     '::after': { content: '""', position: 'absolute', inset: 0 },
   },
   title: {
@@ -68,7 +69,7 @@ const styles = stylex.create({
     WebkitBoxOrient: 'vertical',
     WebkitLineClamp: 2,
     overflow: 'hidden',
-    fontSize: '0.875em',
+    fontSize: type.caption,
     color: colors.label,
   },
   titleRevoked: { color: colors.secondaryLabel },
@@ -78,7 +79,7 @@ const styles = stylex.create({
     gap: space[1.5],
     margin: 0,
     marginTop: '2px',
-    fontSize: '0.75em',
+    fontSize: type.caption,
     color: colors.secondaryLabel,
   },
   /** Above the row's hit area, so the face opens its own popover. */
@@ -95,7 +96,7 @@ const styles = stylex.create({
     cursor: 'pointer',
     outline: 'none',
     opacity: { default: 1, ':hover': 0.85 },
-    boxShadow: { default: 'none', ':focus-visible': `0 0 0 2px ${colors.accent}` },
+    boxShadow: { default: 'none', ':focus-visible': `0 0 0 ${focus.ringWidth} ${colors.accent}` },
   },
   avatarStatic: { flexShrink: 0 },
   profile: { display: 'flex', alignItems: 'center', gap: space[3], width: '232px' },
@@ -105,7 +106,7 @@ const styles = stylex.create({
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
     fontSize: '14px',
-    fontWeight: 600,
+    fontWeight: type.headingWeight,
     color: colors.label,
   },
   profileEmail: {

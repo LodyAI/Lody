@@ -17,11 +17,21 @@ describe('shared tab closure', () => {
     expect(getSessionTabFallback('parent', ['parent', 'child'], ['child'], true)).toBe('child');
     expect(getSessionTabFallback('parent', ['parent'], [], true)).toBe('empty');
   });
-  it('combines legacy archives with independent close flags', () => {
-    expect(isSessionTabClosed({})).toBe(false);
-    expect(isSessionTabClosed({ isTabClosed: true })).toBe(true);
-    expect(isSessionTabClosed({ isArchived: true, isTabClosed: false })).toBe(true);
-    expect(isSessionTabClosed({ isArchived: false, isTabClosed: false })).toBe(false);
+  it('keeps tab closure independent of archive', () => {
+    const liveWorkspace = false;
+    const archivedWorkspace = true;
+    expect(isSessionTabClosed({}, liveWorkspace)).toBe(false);
+    expect(isSessionTabClosed({ isTabClosed: true }, liveWorkspace)).toBe(true);
+    // Reviewing an archived workspace shows every tab it had open.
+    expect(isSessionTabClosed({ isArchived: true }, archivedWorkspace)).toBe(false);
+    expect(isSessionTabClosed({ isArchived: true, isTabClosed: true }, archivedWorkspace)).toBe(
+      true
+    );
+    // A live workspace keeps archived children out of its strip.
+    expect(isSessionTabClosed({ isArchived: true, isTabClosed: false }, liveWorkspace)).toBe(true);
+    expect(isSessionTabClosed({ isArchived: false, isTabClosed: false }, liveWorkspace)).toBe(
+      false
+    );
   });
   it('chooses the right open neighbour, then the left, then empty', () => {
     const order = ['parent', 'a', 'b', 'c'];

@@ -18,6 +18,7 @@ import { useTranslation } from 'react-i18next';
 
 import type { AcpCommandSummary } from '@lody/shared';
 import { AttachmentAddMenu, type AttachmentAddMenuMcp } from './attachment-add-menu';
+import { ComposerImagePeek } from './composer-image-peek';
 import { CommentReferenceChip, type CommentReferenceChipItem } from './comment-reference-chip';
 import {
   VisualAnnotationReferenceChip,
@@ -312,7 +313,6 @@ export function ChatComposer({
       !!window.matchMedia?.('(pointer: fine)').matches,
     [isMobile]
   );
-  const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
   const [previewPastedTextDraftId, setPreviewPastedTextDraftId] = useState<string | null>(null);
   const [previewPastedTextEditorValue, setPreviewPastedTextEditorValue] = useState('');
   const imageDragDepthRef = useRef(0);
@@ -790,32 +790,34 @@ export function ChatComposer({
                         image.status === 'failed' && 'border-destructive/50'
                       )}
                     >
-                      <button
-                        type="button"
-                        className="h-full w-full"
-                        onClick={() => setPreviewImageUrl(image.previewUrl)}
-                        aria-label={image.name}
-                      >
-                        <img
-                          src={image.previewUrl}
-                          alt={image.name}
-                          className={cn(
-                            'h-full w-full object-cover',
-                            image.status !== 'uploaded' && 'grayscale'
-                          )}
-                        />
-                        {image.status === 'uploading' ? (
-                          <div
-                            className="absolute inset-0 bg-black/45 transition-[clip-path]"
-                            style={{
-                              clipPath: `inset(${Math.max(0, Math.min(100, image.progress))}% 0 0 0)`,
-                            }}
-                          />
-                        ) : null}
-                        {image.status === 'failed' ? (
-                          <div className="absolute inset-0 bg-black/45" />
-                        ) : null}
-                      </button>
+                      <ComposerImagePeek
+                        src={image.previewUrl}
+                        name={image.name}
+                        alt={imagePreviewLabel}
+                        trigger={
+                          <button type="button" className="h-full w-full" aria-label={image.name}>
+                            <img
+                              src={image.previewUrl}
+                              alt={image.name}
+                              className={cn(
+                                'h-full w-full object-cover',
+                                image.status !== 'uploaded' && 'grayscale'
+                              )}
+                            />
+                            {image.status === 'uploading' ? (
+                              <div
+                                className="absolute inset-0 bg-black/45 transition-[clip-path]"
+                                style={{
+                                  clipPath: `inset(${Math.max(0, Math.min(100, image.progress))}% 0 0 0)`,
+                                }}
+                              />
+                            ) : null}
+                            {image.status === 'failed' ? (
+                              <div className="absolute inset-0 bg-black/45" />
+                            ) : null}
+                          </button>
+                        }
+                      />
                       <div className="absolute right-1 top-1">
                         <Button
                           type="button"
@@ -1102,24 +1104,6 @@ export function ChatComposer({
           </>
         )}
       </div>
-      <Dialog.Root
-        open={previewImageUrl !== null}
-        onOpenChange={(open) => {
-          if (!open) {
-            setPreviewImageUrl(null);
-          }
-        }}
-      >
-        <Dialog.Content className="max-w-3xl border-none bg-transparent p-2 shadow-none">
-          {previewImageUrl ? (
-            <img
-              src={previewImageUrl}
-              alt={imagePreviewLabel}
-              className="max-h-[80vh] w-full rounded-lg object-contain"
-            />
-          ) : null}
-        </Dialog.Content>
-      </Dialog.Root>
       {(() => {
         const handlePastedTextOpenChange = (open: boolean) => {
           if (!open) {
@@ -1180,7 +1164,10 @@ export function ChatComposer({
         }
 
         return (
-          <Dialog.Root open={previewPastedTextDraft !== null} onOpenChange={handlePastedTextOpenChange}>
+          <Dialog.Root
+            open={previewPastedTextDraft !== null}
+            onOpenChange={handlePastedTextOpenChange}
+          >
             <Dialog.Content
               closeButton={false}
               className="flex h-[85vh] max-h-[85vh] max-w-3xl flex-col gap-0 overflow-hidden p-0"

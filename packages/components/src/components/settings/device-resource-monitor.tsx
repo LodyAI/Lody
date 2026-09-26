@@ -22,12 +22,13 @@ import { Spinner } from '@lody/ui/spinner';
 import { Button } from '@lody/ui/button';
 import { Tooltip } from '@lody/ui/tooltip';
 import { colors } from '@lody/ui/tokens/colors.stylex';
-import { corner, radius, space } from '@lody/ui/tokens/scales.stylex';
+import { corner, focus, radius, space } from '@lody/ui/tokens/scales.stylex';
 import { AlertDialog } from '@/ui/dialog';
 import { toast } from '@/lib/toast';
 import type { MachineMonitorViewState } from '@/hooks/use-machine-monitor';
 import { AgentIcon, getAgentDisplayName } from '@/components/icons/agent-icon';
 import { settingsSurface as surface } from './surface';
+import { settingsType as type } from './type.stylex';
 
 type SessionPresentationMeta = SessionMeta;
 
@@ -51,7 +52,7 @@ const styles = stylex.create({
     gap: space[2],
     paddingBlock: space[8],
     textAlign: 'center',
-    fontSize: '0.875em',
+    fontSize: type.caption,
     color: colors.secondaryLabel,
   },
   noticeMeta: {
@@ -68,7 +69,7 @@ const styles = stylex.create({
     justifyContent: 'center',
     gap: space[2],
     paddingBlock: '40px',
-    fontSize: '0.875em',
+    fontSize: type.caption,
     color: colors.secondaryLabel,
   },
   mono: { fontFamily: 'var(--font-mono, ui-monospace, monospace)' },
@@ -182,7 +183,7 @@ const styles = stylex.create({
     textAlign: 'start',
     cursor: { default: 'pointer', ':disabled': 'default' },
     outlineStyle: 'none',
-    boxShadow: { default: 'none', ':focus-visible': `0 0 0 2px ${colors.accent}` },
+    boxShadow: { default: 'none', ':focus-visible': `0 0 0 ${focus.ringWidth} ${colors.accent}` },
   },
   /** The agent's mark: it stands for something outside the interface, so a gray. */
   agentTile: {
@@ -248,7 +249,7 @@ const styles = stylex.create({
     borderRadius: radius.mini,
     cornerShape: corner.round,
     outlineStyle: 'none',
-    boxShadow: { default: 'none', ':focus-visible': `0 0 0 2px ${colors.accent}` },
+    boxShadow: { default: 'none', ':focus-visible': `0 0 0 ${focus.ringWidth} ${colors.accent}` },
   },
   statusLabelled: {
     display: 'flex',

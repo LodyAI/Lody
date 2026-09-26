@@ -3,10 +3,9 @@ import { useTranslation } from 'react-i18next';
 import { TimerReset } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
-import { corner, duration, ease, radius, space, text } from '@lody/ui/tokens/scales.stylex';
+import { corner, duration, ease, focus, radius, space, text } from '@lody/ui/tokens/scales.stylex';
 import { Button } from '@lody/ui/button';
 
-import { useIsMobile } from '@/hooks/use-mobile';
 import { useCodexResetForecast } from '@/hooks/use-codex-reset-forecast';
 import { formatCodexResetExpiry } from '@/lib/codex-reset-forecast';
 import { CodexResetForecastDialog } from './codex-reset-forecast-dialog';
@@ -34,7 +33,7 @@ const styles = stylex.create({
       default: 'transparent',
       ':hover': `color-mix(in oklab, transparent, ${colors.label} 6%)`,
     },
-    boxShadow: { default: 'none', ':focus-visible': `0 0 0 2px ${colors.accent}` },
+    boxShadow: { default: 'none', ':focus-visible': `0 0 0 ${focus.ringWidth} ${colors.accent}` },
     outlineStyle: 'none',
     color: colors.label,
     fontFamily: 'inherit',
@@ -99,7 +98,6 @@ export type CodexResetForecastChipProps = {
  */
 export function CodexResetForecastChip({ enabled }: CodexResetForecastChipProps) {
   const { t } = useTranslation();
-  const isMobile = useIsMobile();
   const [open, setOpen] = useState(false);
   const forecast = useCodexResetForecast(enabled);
 
@@ -133,9 +131,6 @@ export function CodexResetForecastChip({ enabled }: CodexResetForecastChipProps)
       <CodexResetForecastDialog
         open={open}
         onOpenChange={setOpen}
-        // Desktop settings already owns the full-page /80 veil. Lift this
-        // later overlay above that dialog and dim it only lightly.
-        nestedInDialog={!isMobile}
         state={forecast.state}
         watch={forecast.watch}
         isExpired={forecast.isExpired}

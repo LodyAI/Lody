@@ -304,5 +304,25 @@ is closed and unmounted — nothing inside a `Dialog.Content`, `Popover.Content`
 all three. A defect in what a person actually sees can still survive a green
 suite; the board has to be opened in Chromium under both palettes.
 
+## Follow-up, 2026-09-25: the tooltip no longer inverts
+
+The owner reversed the inversion recorded under Decision. In use, a dark chip
+over a light surface — and a light one over a dark surface — read as a foreign
+patch laid on the interface rather than as a name for what was under the
+pointer; the owner's rule is that a tooltip is light in the light palette and
+dark in the dark one, never the reverse. The tooltip therefore moved onto the
+floating rung: `tooltip.background` is `raisedBackground`, `tooltip.label` is
+`label` and `tooltip.shadow` is `shadow.popover`, the values `popup` reads, and
+`tooltipPaletteTheme` re-declares the same three so a forced palette still
+reaches a portalled chip.
+
+The `tooltip` group stays. Its colours now agree with `popup`, but its corner,
+padding, type step, maximum width and rise are a chip's rather than a popup
+surface's, and a tooltip reaching for `popup.radius` would name the wrong thing.
+`kbdOnInvertedTheme`, which existed only because the chip inverted (see the
+[UI avatar and kbd note](2026-09-13-ui-avatar-kbd.md)), was deleted: a cap on a
+tooltip is now a cap on a raised surface like any other. `shadow.medium` is no
+longer read by any rung in `@lody/ui`; the token is left in place.
+
 The Popover, Dialog, AlertDialog and Tooltip call sites this note left on Radix
 landed in [2026-09-22-ui-radix-callsite-migration](2026-09-22-ui-radix-callsite-migration.md).
