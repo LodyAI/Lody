@@ -10,6 +10,14 @@ import topLevelAwait from '../vite-top-level-await-fixed.cjs';
 import { emojibaseAssetsPlugin } from '../vite-emojibase-assets';
 import { loroCrdtWasmUrlWorkaround } from '../vite-wasm-workarounds.ts';
 
+// The shell can export NODE_ENV=production even while running Storybook's dev
+// server. Vite's React plugin then disables its refresh runtime while the
+// serve transform still emits refresh signatures. Keep only `storybook dev`
+// aligned with its actual mode; `storybook build` remains production.
+if (process.argv.includes('dev') && process.env.NODE_ENV === 'production') {
+  process.env.NODE_ENV = 'development';
+}
+
 const require = createRequire(import.meta.url);
 
 const config: StorybookConfig = {
