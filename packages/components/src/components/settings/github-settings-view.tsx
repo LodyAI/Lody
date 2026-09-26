@@ -14,6 +14,7 @@ import { openExternalUrl } from '@/lib/native-browser';
 import { CompactRow, CompactSection } from './compact-layout';
 import type { GitHubPersonalIdentitySettingsCardProps } from './integrations-setting';
 import type { SettingsWorkspaceRepoWithStatus } from './settings-data-cache';
+import { settingsMaterial as material } from './material.stylex';
 import { settingsCatalog as catalog, settingsSurface as surface } from './surface';
 import { settingsType as type } from './type.stylex';
 
@@ -53,7 +54,7 @@ const styles = stylex.create({
     alignItems: 'center',
     columnGap: space[1],
     margin: 0,
-    paddingInline: space[4],
+    paddingInline: material.headingInset,
     fontSize: type.caption,
     lineHeight: 1.4,
     color: colors.secondaryLabel,
@@ -178,6 +179,7 @@ export function GitHubSettingsView({
             owners.map((owner) => (
               <CompactSection
                 key={owner.name}
+                boxed
                 title={owner.name}
                 headerRight={
                   <span {...stylex.props(styles.count)}>

@@ -130,29 +130,27 @@ describe('Drawer', () => {
     }
   });
 
-  test("the viewport carries the rung's stacking, so the backdrop stays under it", () => {
+  test("the viewport carries the rung's stacking; the backdrop shares it, the panel does not", () => {
     // A `position: fixed` element creates a stacking context, so a `z-index` on
     // the panel inside the viewport orders it only against its own siblings —
     // against the page it counts as whatever the viewport counts as. With the
     // viewport at `auto` the backdrop painted over the drawer and the panel
     // rendered greyed under its own overlay. The stacking therefore belongs to
     // the viewport, and the panel states none.
+    // The backdrop shares the rung rather than sitting one below it: portals
+    // append in order, so a later modal's overlay lands between the earlier
+    // panel and its own.
     const rung = classesFor(stylex.create({ probe: { zIndex: z.dialog } }).probe);
-    const under = classesFor(stylex.create({ probe: { zIndex: z.dialogBackdrop } }).probe);
     expect(rung.length).toBeGreaterThan(0);
-    expect(rung).not.toEqual(under);
 
     for (const className of rung) {
       expect(classesFor(modal.drawerViewport)).toContain(className);
+      expect(classesFor(modal.backdrop)).toContain(className);
       // The dialog panel is the other member of the rung and stacks the same,
       // which is what makes this the rung's z-index rather than the drawer's.
       expect(classesFor(modal.popup)).toContain(className);
       // The panel inside the viewport claims nothing it could not honour.
       expect(classesFor(modal.drawerPopup)).not.toContain(className);
-    }
-    for (const className of under) {
-      expect(classesFor(modal.backdrop)).toContain(className);
-      expect(classesFor(modal.drawerViewport)).not.toContain(className);
     }
   });
 

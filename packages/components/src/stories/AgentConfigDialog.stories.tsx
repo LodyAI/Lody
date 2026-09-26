@@ -99,7 +99,7 @@ function CreateWrapper() {
 
 function NestedCreateWrapper() {
   const [settingsOpen, setSettingsOpen] = useState(true);
-  const [providerOpen, setProviderOpen] = useState(true);
+  const [providerOpen, setProviderOpen] = useState(false);
 
   return (
     <Dialog.Root open={settingsOpen} onOpenChange={setSettingsOpen}>
@@ -116,12 +116,18 @@ function NestedCreateWrapper() {
           <main className="flex-1 bg-background p-8">
             <h2 className="text-xl font-semibold">Agent Provider</h2>
             <div className="mt-4 h-24 rounded-lg border border-border bg-card" />
+            <button
+              type="button"
+              className="mt-6 rounded-md bg-primary px-3 py-1.5 text-sm text-primary-foreground"
+              onClick={() => setProviderOpen(true)}
+            >
+              New provider
+            </button>
           </main>
         </div>
         <AgentConfigDialog
           open={providerOpen}
           onOpenChange={setProviderOpen}
-          nestedInDialog
           mode={{ kind: 'create' }}
           machine={makeMachineWithClaudeCaps()}
           onSubmit={async () => {}}

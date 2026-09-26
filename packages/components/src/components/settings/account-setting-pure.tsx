@@ -902,6 +902,7 @@ export function AccountSettingsPure({
       {isWorkspaceSurface ? (
         <CompactSection
           title={t('workspace.members.title')}
+          boxed
           actions={
             hasAdminPermission && (
               <Button
@@ -996,7 +997,7 @@ export function AccountSettingsPure({
 
       {/* Pending Invitations */}
       {isWorkspaceSurface && pendingInvitations.length > 0 ? (
-        <CompactSection title={t('workspace.invitations.title')}>
+        <CompactSection title={t('workspace.invitations.title')} boxed>
           {pendingInvitations.map((invitation) => (
             <div key={invitation.id} {...stylex.props(styles.record)}>
               {/* The invitee has no face yet: the member's circle, holding a mark. */}
@@ -1079,6 +1080,7 @@ export function AccountSettingsPure({
       {surface === 'account' && canGenerateCliApiKey ? (
         <CompactSection
           title={t('settings.account.cliAuth.title')}
+          boxed
           description={t('settings.account.cliAuth.description')}
           actions={
             // A header action sits beside the group's name, so it is a ghost; this

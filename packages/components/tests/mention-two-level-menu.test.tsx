@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Mention, MentionInput, useMentionContext } from '../src/ui/mention';
 import type { Mention as MentionRange } from '../src/ui/mention/mention-root';
 import {
+  matchedRuns,
   MentionTwoLevelMenuBody,
   useMentionCategoryActivation,
 } from '../src/components/mentions/mention-two-level-menu';
@@ -67,7 +68,6 @@ function makeCategories(): MentionCategory[] {
             kind: 'dir' as const,
             icon: 'dir' as const,
             title: 'src/',
-            mono: true,
           },
         ].filter((entry) => entry.value.includes(term)),
     },
@@ -386,11 +386,48 @@ describe('MentionTwoLevelMenuBody', () => {
     expect(text).toContain('.claude/skills/x/SKILL.md');
     // The rows are still there beside it.
     expect(rowTitles()).toEqual(['Broken menu#3312', 'Slow switch#3298']);
-    const detailTitle = Array.from(container?.querySelectorAll('p') ?? []).find(
-      (entry) => entry.textContent === 'code-collab-debug'
-    );
-    expect(detailTitle?.parentElement?.classList).toContain('[scrollbar-gutter:stable]');
-    expect(detailTitle?.parentElement?.classList).toContain('h-[320px]');
+    // The pane is beside the rows, not one of them: it cannot be highlighted or picked.
+    const pane = container?.querySelector('[data-mention-detail]');
+    expect(pane?.textContent).toContain('Diagnose Code Collab diffs.');
+    expect(pane?.closest('[data-slot="mention-item"]')).toBeNull();
+  });
+
+  it('states when a session was last active', () => {
+    const categories = makeCategories();
+    categories.push({
+      id: 'session',
+      namespace: 'session',
+      label: 'Sessions',
+      icon: 'session',
+      status: 'ready',
+      getCandidates: () => [
+        {
+          value: 'session-1',
+          label: 'parser-work',
+          insertText: '@parser-work',
+          kind: 'session',
+          icon: 'session',
+          title: 'Parser work',
+          // Half an hour clear of the boundary, so the label cannot tick over.
+          activityAt: Date.now() - 150 * 60_000,
+        },
+      ],
+    });
+
+    render('@session:', categories);
+    expect(rowTitles()).toEqual(['Parser work2h']);
+  });
+
+  it('marks a folder as a row that opens', () => {
+    render('@file:');
+    const folder = container?.querySelector('[data-slot="mention-item"]');
+    expect(folder?.querySelector('.lucide-chevron-right')).not.toBeNull();
+  });
+
+  it('gives a row that inserts no opening mark', () => {
+    render('@issue:');
+    const issue = container?.querySelector('[data-slot="mention-item"]');
+    expect(issue?.querySelector('.lucide-chevron-right')).toBeNull();
   });
 
   it('omits the detail panel when the candidate has none', () => {
@@ -507,5 +544,29 @@ describe('skill candidate detail', () => {
 
     expect(candidate.detail?.badges).toEqual(['Global']);
     expect(candidate.detail?.rows).toEqual([{ label: 'Path', value: 'a/SKILL.md', mono: true }]);
+  });
+});
+
+describe('matchedRuns', () => {
+  it('lights the letters the term matched, in order', () => {
+    expect(matchedRuns('mention-root.tsx', 'mroot')).toEqual([
+      { text: 'm', matched: true },
+      { text: 'ention-', matched: false },
+      { text: 'root', matched: true },
+      { text: '.tsx', matched: false },
+    ]);
+  });
+
+  it('matches a path term by its last segment, since a file row shows the name', () => {
+    expect(matchedRuns('registry.ts', 'mentions/reg')?.[0]).toEqual({
+      text: 'reg',
+      matched: true,
+    });
+  });
+
+  it('claims nothing when the title is not where the term matched', () => {
+    // An issue found by its number keeps its title whole.
+    expect(matchedRuns('Broken menu', '3312')).toBeNull();
+    expect(matchedRuns('Broken menu', '')).toBeNull();
   });
 });

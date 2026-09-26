@@ -8,7 +8,7 @@ import { Popover } from '@/ui/armed-overlays';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { corner, focus, radius, space } from '@lody/ui/tokens/scales.stylex';
 import type { MessageContent } from '@lody/shared';
-import { formatDurationCompact } from '@/lib/format-duration';
+import { formatDurationCompact, getDurationUnitLabels } from '@/lib/format-duration';
 import { writeTextToClipboard } from '@/lib/clipboard';
 import { useStableNow } from '@/hooks/use-stable-now';
 
@@ -251,18 +251,12 @@ const styles = stylex.create({
   actions: { display: 'flex', justifyContent: 'flex-end', gap: space[2] },
 });
 
-const durationLabels = (t: (key: string, fallback: string) => string) => ({
-  hour: t('time.unitShort.hour', 'h'),
-  minute: t('time.unitShort.minute', 'm'),
-  second: t('time.unitShort.second', 's'),
-});
-
 /** How long a running task has been at it, ticking once a second. */
 function LiveElapsed({ startedAtEpochSeconds }: { startedAtEpochSeconds: number }) {
   const { t } = useTranslation();
   const now = useStableNow(1000);
   const elapsed = Math.max(0, now.getTime() - startedAtEpochSeconds * 1000);
-  return <>{formatDurationCompact(elapsed, durationLabels(t))}</>;
+  return <>{formatDurationCompact(elapsed, getDurationUnitLabels(t))}</>;
 }
 
 const useActor = (task: SubagentTask): string => {
@@ -312,7 +306,7 @@ function SubagentTaskRow({
   ) : task.status === 'failed' ? (
     t('sessions.subagentTasks.statusFailed', 'Failed')
   ) : duration !== null ? (
-    formatDurationCompact(duration, durationLabels(t))
+    formatDurationCompact(duration, getDurationUnitLabels(t))
   ) : null;
 
   return (
@@ -400,7 +394,7 @@ function TaskPeek({
               <LiveElapsed startedAtEpochSeconds={task.startedAtEpochSeconds} />
             </>
           ) : duration !== null ? (
-            ` · ${formatDurationCompact(duration, durationLabels(t))}`
+            ` · ${formatDurationCompact(duration, getDurationUnitLabels(t))}`
           ) : null}
           {running && task.lastToolName
             ? ` · ${t('sessions.subagentTasks.runningTool', 'Running {{tool}}', {
