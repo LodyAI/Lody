@@ -1,4 +1,4 @@
-# Space compact Chinese durations consistently
+# Join Chinese duration with its label
 
 Status: implemented
 Translation: current
@@ -7,28 +7,26 @@ Translation: current
 
 ## Abstract
 
-The previous duration change joined Chinese unit groups as `7分25秒`, but the
-requested UI wording is `工作了 7 分 25 秒`. Compact durations now have separate
-localized gaps between numbers and units and between unit groups. English keeps
-`7m 25s`; countdown chips retain their separate short-label format.
+The shared formatter already rendered Chinese compact durations as `7分25秒`,
+but the surrounding labels still produced `工作了 7分25秒`. The chosen wording
+is `工作了7分25秒`, without spaces anywhere in that duration phrase. The Chinese
+labels now join directly to the formatted value; English remains `7m 25s`.
 
 ## Decision
 
-The shared formatter reads `time.numberUnitSeparator` and the existing
-`time.unitSeparator`. Both are spaces in Chinese; English keeps an empty
-number-unit separator and a space between groups. The surrounding
-`sessions.workedFor` and `sessions.activityWithDuration` templates already
-provide the single space before the duration.
+The Chinese `sessions.workedFor` and `sessions.activityWithDuration` templates
+omit the space before `{{duration}}`. The shared formatter retains an empty
+Chinese `time.unitSeparator`, so its one-, two-, and three-unit outputs have
+no internal spaces. English templates and formatting remain unchanged.
 
-This replaces the Chinese spacing choice recorded in the
-[earlier separator decision](2026-09-25-duration-unit-separator.md); that note
-remains historical evidence for why one shared formatter owns these surfaces.
-The current behavior is specified in the
+The [earlier separator decision](2026-09-25-duration-unit-separator.md)
+continues to explain the shared formatter's unit-group spacing. This decision
+changes the surrounding label. Current behavior is specified in the
 [compact duration Spec](../../../../specs/compact-duration-spacing.md).
 
 ## Verification and limits
 
 The duration test covers Chinese one-, two-, and three-unit values using the
-shipped locale, the full `工作了` phrase, and unchanged English formatting.
-Countdown chips format one short unit through a different function and are
-outside this change.
+shipped locale, both complete status templates, and unchanged English
+formatting. Countdown chips format one short unit through a different function
+and are outside this change.

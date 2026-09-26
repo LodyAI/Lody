@@ -5,11 +5,10 @@ Translation: current
 
 [中文](compact-duration-spacing.zh.md)
 
-When a user reads a compact elapsed time in the interface, each number and its
-unit, and each adjacent unit group, are separated according to the product
-language. Chinese shows `7 分 25 秒`; English shows `7m 25s`. The surrounding
-sentence owns its own spacing, so the Chinese live status reads
-`工作中（工作了 7 分 25 秒）`.
+Compact elapsed time follows the product language. Chinese joins numbers,
+units, and adjacent unit groups without spaces (`7分25秒`); English keeps its
+existing format (`7m 25s`). The Chinese surrounding label also joins directly
+to the duration, so the live status reads `工作中（工作了7分25秒）`.
 
 The same duration format applies to live and finished turns, goal metrics,
 CI run times, and subagent task durations. Countdown chips use their own

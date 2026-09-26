@@ -47,18 +47,18 @@ describe('localized compact durations', () => {
   const labels = (locale: Record<string, string>) =>
     getDurationUnitLabels((key, fallback) => locale[key] ?? fallback);
 
-  it('separates every Chinese number, unit, and duration group', () => {
+  it('joins Chinese duration units and the surrounding wording without spaces', () => {
     const units = labels(zh);
-    expect(formatDurationCompact(445_000, units)).toBe('7 分 25 秒');
-    expect(formatDurationCompact(3_625_000, units)).toBe('1 时 00 分 25 秒');
-    expect(formatDurationCompact(25_000, units)).toBe('25 秒');
+    expect(formatDurationCompact(445_000, units)).toBe('7分25秒');
+    expect(formatDurationCompact(3_625_000, units)).toBe('1时00分25秒');
+    expect(formatDurationCompact(25_000, units)).toBe('25秒');
     const duration = formatDurationCompact(445_000, units);
-    expect(zh['sessions.workedFor'].replace('{{duration}}', duration)).toBe('工作了 7 分 25 秒');
+    expect(zh['sessions.workedFor'].replace('{{duration}}', duration)).toBe('工作了7分25秒');
     expect(
       zh['sessions.activityWithDuration']
         .replace('{{label}}', '工作中')
         .replace('{{duration}}', duration)
-    ).toBe('工作中（工作了 7 分 25 秒）');
+    ).toBe('工作中（工作了7分25秒）');
   });
 
   it('keeps English compact units attached to their numbers', () => {
