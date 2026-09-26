@@ -352,6 +352,118 @@ describe('verifyPreviewTunnelRoundTrip', () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
+  it.each(['ENETUNREACH', 'EHOSTUNREACH', 'aggregate'])(
+    'recovers from %s after the DNS budget without replacing the tunnel',
+    async (kind) => {
+      vi.useFakeTimers();
+      vi.mocked(Resolver.prototype.resolve4).mockRejectedValue(
+        Object.assign(new Error('not yet published'), { code: 'ENOTFOUND' })
+      );
+      const unreachable = Object.assign(new Error('secret URL'), {
+        code: kind === 'aggregate' ? 'ENETUNREACH' : kind,
+        address: '2001:db8::1',
+      });
+      const cause =
+        kind === 'aggregate'
+          ? new AggregateError(
+              [
+                unreachable,
+                Object.assign(new Error('secret'), {
+                  code: 'ETIMEDOUT',
+                  address: '192.0.2.1',
+                }),
+              ],
+              'secret aggregate'
+            )
+          : unreachable;
+      let reachable = false;
+      let ready = false;
+      const diagnostics: string[] = [];
+      const result = verifyPreviewTunnelRoundTrip({
+        publicUrl: 'https://test.trycloudflare.com/?__lody_preview_token=secret',
+        target,
+        registered: Promise.resolve(),
+        onDiagnostic: (message) => diagnostics.push(message),
+        fetch: async () => {
+          if (!reachable) throw new TypeError('secret fetch', { cause });
+          return new Response(null, {
+            headers: {
+              [PREVIEW_PROXY_RESPONSE_HEADER]: PREVIEW_PROXY_RESPONSE_VERSION,
+            },
+          });
+        },
+      }).then(() => {
+        ready = true;
+      });
+      await vi.advanceTimersByTimeAsync(15_000);
+      expect(ready).toBe(false);
+      reachable = true;
+      await vi.advanceTimersByTimeAsync(500);
+      await result;
+      expect(ready).toBe(true);
+      expect(diagnostics.join('\n')).toContain('IPv6 2001:db8::1');
+      if (kind === 'aggregate') expect(diagnostics.join('\n')).toContain('IPv4 192.0.2.1');
+      expect(diagnostics.join('\n')).not.toContain('secret');
+      expect(vi.getTimerCount()).toBe(0);
+    }
+  );
+
+  it('does not retry an aggregate containing a permanent TLS failure', async () => {
+    vi.useFakeTimers();
+    const result = verifyPreviewTunnelRoundTrip({
+      publicUrl: 'https://test.trycloudflare.com',
+      target,
+      fetch: async () => {
+        throw new TypeError('fetch failed', {
+          cause: new AggregateError([
+            Object.assign(new Error('secret unreachable'), {
+              code: 'ENETUNREACH',
+              address: 'fe80::1%secret',
+            }),
+            Object.assign(new Error('secret certificate'), {
+              code: 'CERT_HAS_EXPIRED',
+              address: 'https://secret.test/?token=secret',
+            }),
+          ]),
+        });
+      },
+    });
+    await expect(result).rejects.toThrow('CERT_HAS_EXPIRED');
+    await expect(result).rejects.not.toThrow('secret');
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it.each(['cancel', 'deadline', 'health'])(
+    'bounds persistent network unreachability on %s',
+    async (mode) => {
+      vi.useFakeTimers();
+      const controller = new AbortController();
+      const result = verifyPreviewTunnelRoundTrip({
+        publicUrl: 'https://test.trycloudflare.com',
+        target,
+        signal: controller.signal,
+        mode: mode === 'health' ? 'health' : 'readiness',
+        fetch: async () => {
+          throw Object.assign(new Error('unreachable'), { code: 'ENETUNREACH' });
+        },
+      });
+      const rejected = expect(result).rejects.toThrow(
+        mode === 'cancel'
+          ? 'user cancelled'
+          : mode === 'deadline'
+            ? '90000 ms limit'
+            : 'ENETUNREACH'
+      );
+      if (mode === 'deadline') await vi.advanceTimersByTimeAsync(90_000);
+      if (mode === 'cancel') {
+        await vi.advanceTimersByTimeAsync(1_000);
+        controller.abort(new Error('user cancelled'));
+      }
+      await rejected;
+      expect(vi.getTimerCount()).toBe(0);
+    }
+  );
+
   it('cancels propagation immediately without waiting for the extended deadline', async () => {
     vi.useFakeTimers();
     const controller = new AbortController();

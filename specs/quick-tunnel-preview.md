@@ -113,3 +113,9 @@ DNS publication is an optimization with a ten-second budget, not a requirement
 that local DNS agree with proxy DNS. Persistent local negative answers fall back
 to the authenticated public probe within the original startup deadline.
 Default create RPC callers allow eight minutes for acquisition and startup.
+
+During startup, temporary network/host unreachability retries within that same
+deadline without replacing the registered tunnel. Public HTTP connections try
+available address families while preserving configured proxy routing and TLS
+verification. Permanent certificate/authorization failures remain immediate;
+active health checks retain their existing five-second, no-retry behavior.

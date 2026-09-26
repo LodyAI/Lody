@@ -482,3 +482,35 @@ This live diagnostic did not exercise a public application HTTP round trip.
 Workspace typechecking, lint, formatting, documentation and boundary checks pass.
 Root `pnpm check` stops in unchanged virtua tests with `act is not a function`;
 the full repository test suite therefore has not passed for this correction.
+
+## Public-route network recovery
+
+After native registration worked, a fresh route still failed at its first public
+probe with ENETUNREACH after the ten-second A-record publication budget. The host
+had no public IPv6 route; a forced IPv6 request reproduced the error while IPv4
+reached Cloudflare. The original probe did not record its address, so its exact
+family cannot be established retrospectively.
+
+Startup now retries ENETUNREACH/EHOSTUNREACH within the existing 90-second deadline.
+Bounded traversal includes aggregate connection failures and causes, retaining
+safe codes and validated IP/family details. Mixed permanent failures do not retry.
+The shared proxy-aware HTTP transport explicitly enables Node address-family
+selection for both direct sockets and proxy sockets, benefiting its other callers
+as well. It never bypasses the proxy or pins a Cloudflare address. Explicit
+Node-default transport mode remains controlled by Node. Health checks stay bounded
+to five seconds without startup retries. No tunnel restart or machine DNS change
+is introduced.
+
+Deterministic cases cover DNS-budget fallback followed by network recovery,
+aggregate errors, certificate failures, cancellation and the deadline. Real local
+HTTP and CONNECT boundaries cover an unavailable first IPv6 address followed by a
+working IPv4 address, with the runtime default selection disabled. These tests
+prove address fallback and proxy routing without external network dependencies.
+
+Validation: 114 preview/HTTP transport tests pass. The separate opt-in real Quick
+Tunnel test also passes on Linux: public HTTP forwarding, anonymous rejection,
+binary WebSocket echo, active health and revocation all succeed, and the synthetic
+local server remains reachable after tunnel closure. This validates one real run,
+not external-service availability guarantees.
+Workspace typechecking, lint, formatting, docs and boundary checks pass; full
+`pnpm check` still stops at the pre-existing virtua `act is not a function` failures.

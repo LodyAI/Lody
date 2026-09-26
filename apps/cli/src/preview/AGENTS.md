@@ -34,6 +34,8 @@ Managed preview tunnels and the local proxy. [apps/cli/AGENTS.md](../../AGENTS.m
   then fall back to the existing HTTP proxy path, as do transport failures. Never
   hardcode public IPs or treat DNS/registration as readiness. Health/local viewing skip this gate.
   Public probes do not renew idle time.
+  Startup retries network-unreachable errors within that deadline; inspect all
+  aggregate error branches so permanent TLS failures still fail immediately.
   Readiness diagnostics retain attempt counts, pending state, last HTTP status or
   nested network error codes, and connector registration progress. Never log
   capability-bearing request URLs, arbitrary fetch error messages or response bodies.

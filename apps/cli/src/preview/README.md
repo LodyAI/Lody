@@ -52,6 +52,15 @@ shared startup deadline; parent cancellation still aborts readiness. No IP
 is pinned, no external resolver is selected, and DNS never grants access or proves
 readiness. Five-second active health checks and local viewing skip this startup gate.
 
+Startup also retries network/host-unreachable errors within the same deadline.
+Dual-stack connection errors are inspected across bounded aggregate branches;
+permanent errors such as certificate failures still fail immediately. Diagnostics
+retain validated IP addresses and address families, never arbitrary error messages.
+The shared CLI HTTP dispatcher explicitly enables Node address-family selection
+for direct destinations and proxy connections. Proxy routing remains authoritative;
+an unavailable proxy does not authorize a direct connection. This also benefits
+other callers of that dispatcher; explicit Node-default transport mode is unchanged.
+
 ## Distribution
 
 `cloudflared-manifest.json` pins upstream release artifacts. The downloader uses
