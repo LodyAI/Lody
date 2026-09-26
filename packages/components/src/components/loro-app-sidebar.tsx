@@ -119,6 +119,7 @@ import { useOpenSettings } from '@/hooks/use-open-settings';
 import { useOrganization } from '@/hooks/useOrganization';
 import { useVisibleSessionMetas } from '@/hooks/use-visible-session-metas';
 import { useReportVisibleSessionsForEagerSync } from '@/hooks/use-report-visible-sessions-for-eager-sync';
+import { SidebarVisibilityGate } from './sidebar-visibility-gate';
 import {
   LoroSidebar,
   type LoroSidebarLabels,
@@ -194,7 +195,6 @@ import {
   buildSessionRowOpenedByTreeSlot,
   type SessionRowOpenedByTreeSlot,
   SIDEBAR_ROW_LIST_CLASS,
-  SIDEBAR_STICKY_GROUP_HEADER_CLASS,
 } from '@/components/sidebar-row-shared';
 import {
   buildOpenedBySessionTree,
@@ -230,6 +230,8 @@ const SIDEBAR_TOP_GROUP_SPACING = (collapsed: boolean) => (collapsed ? 'mb-1' : 
 
 export type LoroAppSidebarProps = {
   className?: string;
+  /** Desktop retained sidebar pauses sidebar-only sources while hidden. */
+  pauseSidebarSourcesWhenHidden?: boolean;
   /**
    * Overlay presentation for the compact desktop layout: the sidebar is a
    * floating sheet whose width the caller's wrapper owns, so it drops its
@@ -1534,7 +1536,27 @@ export const hasWorkspaceSidebarTopContent = (
   showGithubWorktrees: boolean
 ): boolean => localProjectSectionCount > 0 || showGithubWorktrees;
 
-export function LoroAppSidebar({ className, overlay = false }: LoroAppSidebarProps) {
+function VisibleSidebarEagerSync({
+  sessions,
+  allActiveSessions,
+}: {
+  sessions: readonly SessionMeta[];
+  allActiveSessions: readonly SessionMeta[];
+}) {
+  useReportVisibleSessionsForEagerSync('loro-app-sidebar', sessions, allActiveSessions);
+  return null;
+}
+
+function SidebarKeyboardNavReporter(opts: Parameters<typeof useSidebarKeyboardNav>[0]) {
+  useSidebarKeyboardNav(opts);
+  return null;
+}
+
+export function LoroAppSidebar({
+  className,
+  overlay = false,
+  pauseSidebarSourcesWhenHidden = false,
+}: LoroAppSidebarProps) {
   const { t, i18n } = useTranslation();
   const router = useRouter();
   // Narrow subscription: the sidebar only derives state from pathname + search,
@@ -1625,7 +1647,6 @@ export function LoroAppSidebar({ className, overlay = false }: LoroAppSidebarPro
     workspaceId: scopedWorkspaceId,
     enabled: workspaceDataReady,
   });
-  useReportVisibleSessionsForEagerSync('loro-app-sidebar', sessions, allActiveSessions);
   const sessionsListLoading = Boolean(workspaceSlug) && !workspaceDataReady;
   const {
     machines: machineMetaMap,
@@ -2646,6 +2667,7 @@ export function LoroAppSidebar({ className, overlay = false }: LoroAppSidebarPro
   // candidate slot, so remounting the one instance at a new slot does not
   // close an open popover.
   const [sidebarFilterOpen, setSidebarFilterOpen] = useState(false);
+  const closeFilterOnHide = useCallback(() => setSidebarFilterOpen(false), []);
   const sidebarFilterPopover = !isMobile ? (
     <SidebarFilterPopover
       organize={organizeMode}
@@ -2724,10 +2746,7 @@ export function LoroAppSidebar({ className, overlay = false }: LoroAppSidebarPro
               key={section.sectionKey}
               className={cn('space-y-0.5', SIDEBAR_TOP_GROUP_SPACING(sectionCollapsed))}
             >
-              {/* The header sticks while its projects scroll under it, and the
-                  next group's header pushes it off: the machine a project
-                  belongs to stays in view. */}
-              <div className={SIDEBAR_STICKY_GROUP_HEADER_CLASS}>
+              <div>
                 {/* No icon: a machine group reads like GitHub Worktrees and
                     Chats. "Offline" marks the exception, and hovering the
                     header tells what the group is (owner, status, OS). */}
@@ -3464,10 +3483,6 @@ export function LoroAppSidebar({ className, overlay = false }: LoroAppSidebarPro
     ]
   );
 
-  useSidebarKeyboardNav({
-    items: sidebarNavigationItems,
-    callbacks: keyboardNavCallbacks,
-  });
   const handleSidebarItemFocus = useCallback(
     (item: HTMLElement) => {
       const sessionId = item.dataset.sidebarSessionId?.trim();
@@ -3499,6 +3514,16 @@ export function LoroAppSidebar({ className, overlay = false }: LoroAppSidebarPro
         className
       )}
     >
+      <SidebarVisibilityGate
+        disableWhenHidden={pauseSidebarSourcesWhenHidden}
+        onHidden={closeFilterOnHide}
+      >
+        <VisibleSidebarEagerSync sessions={sessions} allActiveSessions={allActiveSessions} />
+        <SidebarKeyboardNavReporter
+          items={sidebarNavigationItems}
+          callbacks={keyboardNavCallbacks}
+        />
+      </SidebarVisibilityGate>
       {!isMobile ? <WindowDragStrip /> : null}
       <LoroSidebar
         className={cn(
@@ -3511,6 +3536,7 @@ export function LoroAppSidebar({ className, overlay = false }: LoroAppSidebarPro
         userEmail={user?.email ?? ''}
         workspaces={workspaces}
         currentWorkspaceId={resolvedWorkspaceId}
+        scrollStateKey={workspaceSlug}
         workspaceSwitcherEnabled={multiWorkspaceAvailable}
         connectionUiState={connectionUiState}
         workspaceSyncing={sessionsListLoading}

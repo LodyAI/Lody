@@ -72,6 +72,7 @@ export const surface = stylex.create({
     overflowY: 'auto',
     overflowX: 'hidden',
   },
+  popupMenuCompact: { minWidth: '180px' },
   /**
    * A popover surface: the same rung with content on it instead of rows.
    *

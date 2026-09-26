@@ -10,12 +10,15 @@ import {
   memo,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
   useSyncExternalStore,
 } from 'react';
+import { useStore } from 'jotai';
 import { cn } from '@/lib/utils';
+import { sidebarScrollTopByWorkspaceAtom } from '@/atoms/sidebar-state';
 import {
   WINDOW_DRAG_EXEMPT_CLASS,
   WINDOW_DRAG_HEADER_CLASS,
@@ -146,6 +149,8 @@ export interface LoroSidebarProps {
   userEmail: string;
   workspaces: LoroSidebarWorkspace[];
   currentWorkspaceId: string;
+  /** Stable workspace key for restoring the scroll viewport after a desktop remount. */
+  scrollStateKey?: string | null;
   /**
    * Whether the workspace identity opens the switch/create menu. Platforms
    * without the `multiWorkspace` capability render the identity as a static
@@ -697,20 +702,25 @@ export function getLoroSidebarFooterIconButtonClassName(isMobile: boolean, activ
   );
 }
 
+export const DEFAULT_DESKTOP_SIDEBAR_WIDTH = 280;
+export const MIN_DESKTOP_SIDEBAR_WIDTH = 240;
+export const MAX_DESKTOP_SIDEBAR_WIDTH = 420;
+
 export const LoroSidebar = memo(function LoroSidebar({
   className,
   workspaceName,
   userEmail,
   workspaces,
   currentWorkspaceId,
+  scrollStateKey,
   workspaceSwitcherEnabled = true,
   connectionUiState,
   workspaceSyncing = false,
   isElectron = false,
   isElectronMacOS: _isElectronMacOS = false,
-  defaultWidth = 280,
-  minWidth = 240,
-  maxWidth = 420,
+  defaultWidth = DEFAULT_DESKTOP_SIDEBAR_WIDTH,
+  minWidth = MIN_DESKTOP_SIDEBAR_WIDTH,
+  maxWidth = MAX_DESKTOP_SIDEBAR_WIDTH,
   activeNav = null,
   topContent,
   desktopFilterAction,
@@ -768,6 +778,20 @@ export const LoroSidebar = memo(function LoroSidebar({
   const macTrafficLightRowPadClass = useMacTrafficLightRowPadClass();
   const windowsCaptionRowPadClass = useWindowsCaptionRowPadClass();
   const { t } = useTranslation();
+  const store = useStore();
+  const scrollViewportRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const viewport = scrollViewportRef.current;
+    if (!viewport || !scrollStateKey) return undefined;
+    viewport.scrollTop = store.get(sidebarScrollTopByWorkspaceAtom)[scrollStateKey] ?? 0;
+    return () => {
+      const previous = store.get(sidebarScrollTopByWorkspaceAtom);
+      store.set(sidebarScrollTopByWorkspaceAtom, {
+        ...previous,
+        [scrollStateKey]: viewport.scrollTop,
+      });
+    };
+  }, [collapsed, scrollStateKey, store]);
   const collapseShortcut = useCommandShortcutLabel('sidebar.toggle');
   const backShortcut = useCommandShortcutLabel('nav.back');
   const forwardShortcut = useCommandShortcutLabel('nav.forward');
@@ -991,17 +1015,7 @@ export const LoroSidebar = memo(function LoroSidebar({
                 {workspaceIdentity}
               </button>
             }
-          >
-            <button
-              type="button"
-              className={cn(workspaceIdentityClassName, windowDrag && WINDOW_DRAG_EXEMPT_CLASS)}
-              data-workspace-switcher-trigger
-              data-workspace-syncing={workspaceSyncing ? 'true' : 'false'}
-              aria-busy={workspaceSyncing || undefined}
-            >
-              {workspaceIdentity}
-            </button>
-          </Menu.Trigger>
+          />
         </div>
         <Menu.Content align="start" side={menuSide} className="w-64">
           <Menu.GroupLabel className="normal-case text-xs font-normal tracking-normal">
@@ -1022,6 +1036,7 @@ export const LoroSidebar = memo(function LoroSidebar({
                 <Tooltip.Provider delay={400}>
                   {workspaces.map((ws) => {
                     const workspaceSlug = ws.slug;
+                    const supportsNewWindow = isElectronRenderer() && !!workspaceSlug;
                     // The avatar carries identity, so the check moves to the
                     // row's trailing edge. ps-2/pe-8 replace the ps-8 selection
                     // indent: the 20px avatar and the action rows' 20px icon
@@ -1033,6 +1048,27 @@ export const LoroSidebar = memo(function LoroSidebar({
                         value={ws.id}
                         indicator="check"
                         indicatorSide="end"
+                        // Resolve the radio item in the dropdown's context before
+                        // introducing the separate right-click menu in its render.
+                        render={
+                          supportsNewWindow
+                            ? (props) => (
+                                <ContextMenu.Root>
+                                  <ContextMenu.Trigger render={<div {...props} />} />
+                                  <ContextMenu.Content>
+                                    <ContextMenu.Item
+                                      icon={<AppWindow />}
+                                      onClick={() => {
+                                        openDesktopWindow(undefined, workspaceSlug, 'context_menu');
+                                      }}
+                                    >
+                                      {t('workspace.openInNewWindow')}
+                                    </ContextMenu.Item>
+                                  </ContextMenu.Content>
+                                </ContextMenu.Root>
+                              )
+                            : undefined
+                        }
                         icon={
                           <WorkspaceAvatar
                             workspace={{ name: ws.name, logo: ws.logo }}
@@ -1075,35 +1111,15 @@ export const LoroSidebar = memo(function LoroSidebar({
                       </Menu.RadioItem>
                     );
 
-                    if (!isElectronRenderer() || !workspaceSlug) return row;
+                    if (!supportsNewWindow || ws.id === currentWorkspaceId) return row;
 
-                    const contextTrigger = <ContextMenu.Trigger>{row}</ContextMenu.Trigger>;
                     return (
-                      <ContextMenu.Root key={ws.id}>
-                        {ws.id === currentWorkspaceId ? (
-                          contextTrigger
-                        ) : (
-                          // Other workspaces explain the modifier-click on hover,
-                          // beside the row. Tooltip and ContextMenu roots render no
-                          // DOM, so both triggers' props land on the row element.
-                          <Tooltip.Root>
-                            <Tooltip.Trigger render={contextTrigger} />
-                            <Tooltip.Content side="right" sideOffset={8}>
-                              {newWindowHint}
-                            </Tooltip.Content>
-                          </Tooltip.Root>
-                        )}
-                        <ContextMenu.Content>
-                          <ContextMenu.Item
-                            icon={<AppWindow />}
-                            onClick={() => {
-                              openDesktopWindow(undefined, workspaceSlug, 'context_menu');
-                            }}
-                          >
-                            {t('workspace.openInNewWindow')}
-                          </ContextMenu.Item>
-                        </ContextMenu.Content>
-                      </ContextMenu.Root>
+                      <Tooltip.Root key={ws.id}>
+                        <Tooltip.Trigger render={row} />
+                        <Tooltip.Content side="right" sideOffset={8}>
+                          {newWindowHint}
+                        </Tooltip.Content>
+                      </Tooltip.Root>
                     );
                   })}
                 </Tooltip.Provider>
@@ -1285,6 +1301,7 @@ export const LoroSidebar = memo(function LoroSidebar({
         </div>
 
         <ScrollArea
+          viewportRef={scrollViewportRef}
           className={cn(
             'min-h-0 flex-1',
             isMobile ? 'mt-4 pb-[calc(12px+env(safe-area-inset-bottom,0px))]' : 'mt-2'

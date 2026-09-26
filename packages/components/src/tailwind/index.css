@@ -181,12 +181,6 @@ pre,
 }
 
 @layer components {
-  .markdown-renderer > div {
-    /* Streamdown only exposes block/circle carets. Keep chat output cursor-free
-       even if upstream changes the default or a caller accidentally enables it. */
-    --streamdown-caret: '' !important;
-  }
-
   /* Agent prose sits 4px inside the rail so it does not read as proud of
      bordered cards (tables, fenced code). Nested copy in those surfaces stay flush. */
   .markdown-renderer :is(p, h1, h2, h3, h4, h5, h6) {
@@ -235,9 +229,6 @@ pre,
     margin-block: 0.875rem !important;
     overflow: hidden;
     gap: 0 !important;
-    /* Streamdown ships `bg-sidebar border-border rounded-xl p-2` utilities on
-       this element. Tailwind's utilities layer beats our components layer, so
-       these must be `!important` to pin the block to our --code-* tokens. */
     border: none !important;
     border-radius: 0.5rem !important;
     background: var(--markdown-code-block-bg) !important;
@@ -308,8 +299,6 @@ pre,
   }
 
   .markdown-renderer [data-streamdown='code-block-actions'] button {
-    /* Streamdown's button is `display:block` with an inline <svg>, which sits
-       off-center. Make it a centered flex box. */
     display: inline-flex;
     width: 1.5rem;
     height: 1.5rem;
@@ -342,9 +331,6 @@ pre,
 
   .markdown-renderer [data-streamdown='code-block-body'] {
     overflow-x: auto;
-    /* Streamdown ships `bg-background border border-border rounded-md p-4` on
-       the body — a second surface inside our container. Flatten it with
-       `!important` so the container is the only visible surface. */
     border: 0 !important;
     border-radius: 0 !important;
     background: transparent !important;
@@ -374,7 +360,7 @@ pre,
   }
 
   /* A `diff` fence is often an explanatory, headerless snippet rather than a
-     parseable patch. Its custom Streamdown renderer marks rows directly so the
+     parseable patch. Its renderer marks rows directly so the
      semantic add/remove treatment works for both forms and while streaming. */
   .markdown-renderer [data-markdown-diff-block='true'] {
     --markdown-diff-addition-bg: color-mix(
@@ -447,24 +433,6 @@ pre,
     color: var(--markdown-code-block-foreground);
   }
 
-  /* Nested Streamdown highlighter: chrome lives on the outer block. */
-  .markdown-renderer .lody-code-highlight [data-streamdown='code-block'] {
-    margin: 0 !important;
-    overflow: visible;
-    border: 0 !important;
-    border-radius: 0 !important;
-    background: transparent !important;
-  }
-
-  .markdown-renderer .lody-code-highlight [data-streamdown='code-block-header'],
-  .markdown-renderer .lody-code-highlight [data-streamdown='code-block-actions'],
-  .markdown-renderer
-    .lody-code-highlight
-    [data-streamdown='code-block']
-    > div:not([data-streamdown]):has(> [data-streamdown='code-block-actions']) {
-    display: none !important;
-  }
-
   .markdown-renderer [data-streamdown='mermaid-block'] {
     --markdown-mermaid-bg: hsl(var(--muted) / 0.32);
     --markdown-mermaid-border: hsl(var(--border));
@@ -486,29 +454,16 @@ pre,
     color: var(--markdown-mermaid-foreground);
   }
 
-  /* Streamdown's "mermaid" language header. `!important`: it carries a `flex`
-     utility, which outranks this components-layer rule. */
-  .markdown-renderer [data-streamdown='mermaid-block'] > div:first-child:not([data-streamdown]) {
-    display: none !important;
-  }
-
-  .markdown-renderer
-    [data-streamdown='mermaid-block']
-    > div:not([data-streamdown]):has(> [data-streamdown='mermaid-block-actions']) {
-    position: absolute !important;
+  .markdown-renderer [data-streamdown='mermaid-block-actions'] {
+    position: absolute;
     inset-block-start: 0.375rem;
     inset-inline-end: 0.375rem;
     z-index: 2;
-    height: auto !important;
-    min-height: 0 !important;
-    margin: 0 !important;
-    padding: 0 !important;
-    pointer-events: none;
-  }
-
-  .markdown-renderer [data-streamdown='mermaid-block-actions'] {
+    display: flex;
+    align-items: center;
     gap: 0.125rem;
-    border-color: var(--markdown-mermaid-control-border);
+    padding: 0.125rem;
+    border: 1px solid var(--markdown-mermaid-control-border);
     border-radius: 0.3125rem;
     background: var(--markdown-mermaid-control-bg);
     color: var(--markdown-mermaid-muted);
@@ -539,22 +494,17 @@ pre,
   }
 
   .markdown-renderer [data-streamdown='mermaid-block-actions'] button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     border-radius: 0.25rem;
     padding: 0.25rem;
+    cursor: pointer;
   }
 
   .markdown-renderer [data-streamdown='mermaid-block-actions'] button:hover {
     background: hsl(var(--muted) / 0.72);
     color: var(--markdown-mermaid-foreground);
-  }
-
-  .markdown-renderer
-    [data-streamdown='mermaid-block']
-    > div:not([data-streamdown]):has(> [data-streamdown='mermaid']) {
-    overflow: visible;
-    border: 0 !important;
-    border-radius: 0 !important;
-    background: transparent !important;
   }
 
   .markdown-renderer [data-streamdown='mermaid'] {
@@ -572,9 +522,8 @@ pre,
     overflow-y: visible !important;
     overscroll-behavior-x: contain;
     padding: 1rem;
-    /* Overrides Streamdown's own grab cursor: an inactive preview does not pan,
-       it activates on click (`use-mermaid-diagram-canvas.tsx` tags it
-       `role="button"` once the diagram renders). */
+    /* An inactive preview does not pan, it activates on click
+       (`use-mermaid-diagram-canvas.tsx` tags it `role="button"`). */
     cursor: zoom-in !important;
     scrollbar-gutter: stable;
     scrollbar-width: thin;
@@ -619,20 +568,12 @@ pre,
     background-color: hsl(var(--scrollbar-thumb-hover) / 0.65);
   }
 
-  .markdown-renderer [data-streamdown='mermaid'] > div > div:last-child {
+  .markdown-renderer [data-streamdown='mermaid-svg'] {
     min-width: 100%;
-    align-items: flex-start;
-    justify-content: flex-start !important;
     padding-block: 0.125rem;
   }
 
-  .markdown-renderer [data-streamdown='mermaid'] [aria-label='Mermaid chart'] {
-    display: block !important;
-    width: 100%;
-    min-width: 100%;
-  }
-
-  .markdown-renderer [data-streamdown='mermaid'] [aria-label='Mermaid chart'] svg {
+  .markdown-renderer [data-streamdown='mermaid-svg'] svg {
     display: block;
     margin-inline: auto;
     width: auto !important;
@@ -2090,29 +2031,6 @@ pre,
 @media (prefers-reduced-motion: reduce) {
   .mobile-drill-in,
   .mobile-drill-out {
-    animation: none;
-  }
-}
-
-/* An agent runtime whose wait has no denominator (the ACP handshake) gets the
-   same ring as a download, on an orbit instead of a fill. Transform-only and
-   CSS-driven, so React stays idle while it spins. The class sits on an HTML
-   wrapper around the arc's own `<svg>`, not on an SVG `<g>`: Chromium cannot
-   composite SVG transform animations at DPR≠1 (see the spinner rule above). */
-@keyframes agent-readiness-orbit {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-.agent-readiness-orbit {
-  animation: agent-readiness-orbit 1.4s linear infinite;
-  transform-origin: 50% 50%;
-  will-change: transform;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .agent-readiness-orbit {
     animation: none;
   }
 }

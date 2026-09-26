@@ -1,6 +1,10 @@
 import { memo, useMemo, useState } from 'react';
-import { CodeBlockContainer, type CustomRendererProps } from 'streamdown';
-import { MarkdownCodeToolbar, parseMarkdownCodeBlockLabel } from './markdown-code-block';
+import {
+  CodeBlockContainer,
+  MarkdownCodeToolbar,
+  parseMarkdownCodeBlockLabel,
+  type MarkdownCodeBlockProps,
+} from './markdown-code-block';
 
 type MarkdownDiffLineKind = 'addition' | 'context' | 'deletion' | 'hunk' | 'metadata';
 
@@ -30,7 +34,7 @@ export const MarkdownDiffBlock = memo(function MarkdownDiffBlock({
   isIncomplete,
   language,
   meta,
-}: CustomRendererProps) {
+}: MarkdownCodeBlockProps) {
   const [wrapped, setWrapped] = useState(false);
   const lines = useMemo(() => getVisibleDiffLines(code), [code]);
   const label = useMemo(() => parseMarkdownCodeBlockLabel(language, meta), [language, meta]);

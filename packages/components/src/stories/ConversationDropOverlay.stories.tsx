@@ -44,3 +44,20 @@ export const LandingFiles: Story = {
   globals: { theme: 'dark' },
   render: () => <LandingDropDemo dropKind="files" />,
 };
+
+function IsolatedDropDemo({ dropKind }: { dropKind: 'session-mention' | 'files' }) {
+  return (
+    <div className="relative mx-auto h-[320px] w-[560px] bg-background text-foreground">
+      <p className="p-8">Conversation</p>
+      <ConversationDropOverlay active kind={dropKind} />
+    </div>
+  );
+}
+
+export const IsolatedSessionMention: Story = {
+  render: () => <IsolatedDropDemo dropKind="session-mention" />,
+};
+
+export const IsolatedFiles: Story = {
+  render: () => <IsolatedDropDemo dropKind="files" />,
+};

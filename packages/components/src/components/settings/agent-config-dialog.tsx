@@ -99,7 +99,15 @@ import { Badge } from '@lody/ui/badge';
 import { Radio, RadioGroup } from '@lody/ui/radio';
 import * as stylex from '@stylexjs/stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
-import { control, corner, duration, ease, radius, space } from '@lody/ui/tokens/scales.stylex';
+import {
+  control,
+  corner,
+  duration,
+  ease,
+  focus,
+  radius,
+  space,
+} from '@lody/ui/tokens/scales.stylex';
 import { AcpAuthenticationPanel } from './acp-authentication-panel';
 import { Field } from './form-primitives';
 import { settingsCatalog as catalog, settingsSurface as surface } from './surface';
@@ -408,6 +416,36 @@ const styles = stylex.create({
   },
   warningBody: { minWidth: 0 },
   answer: { alignSelf: 'flex-start' },
+  /**
+   * The injected-variables disclosure reads as a caption that opens, not a
+   * control: a text trigger on the column's edge, colour on hover, a ring only
+   * for keyboard focus. A padded ghost box here either sits its label off the
+   * column or bleeds its fill past it.
+   */
+  injectedTrigger: {
+    display: 'inline-flex',
+    alignSelf: 'flex-start',
+    alignItems: 'center',
+    gap: space[1.5],
+    margin: 0,
+    paddingInline: 0,
+    paddingBlock: 0,
+    borderWidth: 0,
+    borderStyle: 'none',
+    borderRadius: radius.mini,
+    backgroundColor: 'transparent',
+    fontFamily: 'inherit',
+    fontSize: '11px',
+    fontWeight: 400,
+    lineHeight: 1.375,
+    color: { default: colors.secondaryLabel, ':hover': colors.label },
+    cursor: 'pointer',
+    outlineStyle: 'none',
+    boxShadow: { default: 'none', ':focus-visible': `0 0 0 ${focus.ringWidth} ${colors.accent}` },
+    transitionProperty: 'color',
+    transitionDuration: duration.fast,
+    transitionTimingFunction: ease.standard,
+  },
   footerNarrow: { paddingInline: space[4], paddingBottom: space[3] },
   footerNote: {
     display: 'inline-flex',
@@ -3847,15 +3885,15 @@ function PresetPanel({
       ) : null}
 
       <Collapsible.Root open={injectedOpen} onOpenChange={setInjectedOpen}>
-        <div {...stylex.props(styles.answer)}>
-          <Collapsible.Trigger render={<Button type="button" variant="ghost" size="small" />}>
-            <ChevronDown
-              {...stylex.props(styles.disclosureIcon, injectedOpen && styles.disclosureIconOpen)}
-            />
-            {t('settings.agent.dialog.preset.showInjected', 'Show injected variables')}
-            <Lock aria-hidden="true" {...stylex.props(styles.lockIcon)} />
-          </Collapsible.Trigger>
-        </div>
+        <Collapsible.Trigger
+          render={<button type="button" {...stylex.props(styles.injectedTrigger)} />}
+        >
+          <ChevronDown
+            {...stylex.props(styles.disclosureIcon, injectedOpen && styles.disclosureIconOpen)}
+          />
+          {t('settings.agent.dialog.preset.showInjected', 'Show injected variables')}
+          <Lock aria-hidden="true" {...stylex.props(styles.lockIcon)} />
+        </Collapsible.Trigger>
         <Collapsible.Panel>
           <div {...stylex.props(styles.revealed)}>
             <dl {...stylex.props(styles.envList)}>

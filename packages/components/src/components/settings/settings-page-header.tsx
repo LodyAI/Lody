@@ -27,6 +27,8 @@ const styles = stylex.create({
 interface SettingsPaneHeaderSlots {
   actions: HTMLElement | null;
   lead: HTMLElement | null;
+  /** The page pane itself, beside the nav. */
+  pane: HTMLElement | null;
 }
 
 const SettingsPaneHeaderContext = createContext<SettingsPaneHeaderSlots | null>(null);
@@ -36,6 +38,17 @@ export const SettingsPaneHeaderProvider = SettingsPaneHeaderContext.Provider;
 /** Whether this page is drawn inside the desktop settings pane, under its header. */
 export function useInSettingsPane(): boolean {
   return useContext(SettingsPaneHeaderContext) !== null;
+}
+
+/**
+ * The page pane, for a settings editor dialog to centre on (`Dialog.Content`'s
+ * `centerOn`): opened from a page, it belongs over that page rather than over
+ * the seam between the nav and the page. Outside the pane — the mobile
+ * settings routes, the composer's Role picker — there is none, and the dialog
+ * is centred on the window.
+ */
+export function useSettingsPane(): HTMLElement | null {
+  return useContext(SettingsPaneHeaderContext)?.pane ?? null;
 }
 
 /** A page's actions, beside its name in the pane header. */

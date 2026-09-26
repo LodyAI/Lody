@@ -20,7 +20,7 @@
     "test": "corepack pnpm -r --workspace-concurrency=1 run test",
     "test:scripts": "node --test scripts/*.test.mjs scripts/docs/*.test.mjs",
     "docs": "node scripts/docs/main.mjs",
-    "test:ci": "corepack pnpm test:scripts && corepack pnpm -r --workspace-concurrency=2 --filter \"!@lody/electron\" --filter \"!acp-extension-codex\" --filter \"!acp-extension-claude\" run test --maxWorkers=2 && corepack pnpm --filter @lody/electron run test",
+    "test:ci": "corepack pnpm test:scripts && corepack pnpm -r --workspace-concurrency=2 --no-sort --filter \"!@lody/electron\" --filter \"!acp-extension-codex\" --filter \"!acp-extension-claude\" run test --maxWorkers=2 && corepack pnpm --filter @lody/electron run test",
     "test:watch": "corepack pnpm -r run test:watch",
     "test:coverage": "corepack pnpm -r run test:coverage",
     "e2e:build": "corepack pnpm --dir apps/electron build",
@@ -84,14 +84,5 @@
     "undici": "catalog:",
     "zstd-stream": "^1.1.0"
   },
-  "packageManager": "pnpm@10.20.0+sha512.cf9998222162dd85864d0a8102e7892e7ba4ceadebbf5a31f9c2fce48dfce317a9c53b9f6464d1ef9042cba2e02ae02a9f7c143a2b438cd93c91840f0192b9dd",
-  "pnpm": {
-    "packageExtensions": {
-      "streamdown": {
-        "dependencies": {
-          "shiki": "3.22.0"
-        }
-      }
-    }
-  }
+  "packageManager": "pnpm@10.20.0+sha512.cf9998222162dd85864d0a8102e7892e7ba4ceadebbf5a31f9c2fce48dfce317a9c53b9f6464d1ef9042cba2e02ae02a9f7c143a2b438cd93c91840f0192b9dd"
 }

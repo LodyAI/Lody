@@ -151,6 +151,7 @@ afterEach(() => {
   container.remove();
   Element.prototype.animate = originalAnimate;
   window.matchMedia = originalMatchMedia;
+  vi.unstubAllGlobals();
 });
 
 function render(node: React.ReactElement) {
@@ -164,6 +165,67 @@ const TRANSFORM_OR_OPACITY = (frame: Keyframe) =>
 const scaleOf = (frame: Keyframe) => Number(/scale\(([\d.]+)\)/.exec(String(frame.transform))![1]);
 
 describe('WorkingGrid', () => {
+  it('allocates tile animations only while a mark is visible', () => {
+    const observed = new Set<Element>();
+    let notify: IntersectionObserverCallback | undefined;
+    let observerCount = 0;
+    vi.stubGlobal(
+      'IntersectionObserver',
+      class {
+        constructor(callback: IntersectionObserverCallback) {
+          notify = callback;
+          observerCount += 1;
+        }
+        observe(element: Element) {
+          observed.add(element);
+        }
+        unobserve(element: Element) {
+          observed.delete(element);
+        }
+        disconnect() {
+          observed.clear();
+        }
+      }
+    );
+    render(
+      <>
+        <WorkingGrid />
+        <WorkingGrid />
+      </>
+    );
+    expect(observerCount).toBe(1);
+    expect(observed.size).toBe(2);
+    expect(recorded).toHaveLength(0);
+
+    const first = [...observed][0]!;
+    act(() => {
+      notify?.(
+        [{ target: first, isIntersecting: true } as IntersectionObserverEntry],
+        {} as IntersectionObserver
+      );
+    });
+    expect(recorded).toHaveLength(18);
+    expect(recorded.every((animation) => !animation.cancelled)).toBe(true);
+
+    act(() => {
+      notify?.(
+        [{ target: first, isIntersecting: false } as IntersectionObserverEntry],
+        {} as IntersectionObserver
+      );
+    });
+    expect(recorded.every((animation) => animation.cancelled)).toBe(true);
+    act(() => {
+      notify?.(
+        [{ target: first, isIntersecting: true } as IntersectionObserverEntry],
+        {} as IntersectionObserver
+      );
+    });
+    expect(recorded).toHaveLength(36);
+    expect(recorded.slice(18).every((animation) => animation.startTime === 0)).toBe(true);
+    render(<div />);
+    expect(observed.size).toBe(0);
+  });
+
   it('plays one main wave with a small interfering ripple by default', () => {
     render(<WorkingGrid minScale={0.3} maxScale={0.9} lightCompensation={false} />);
 

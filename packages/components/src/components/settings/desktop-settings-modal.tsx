@@ -265,9 +265,10 @@ function SettingsModalBody() {
   // Every page's actions and lead are drawn in this one header.
   const [actionsSlot, setActionsSlot] = useState<HTMLElement | null>(null);
   const [leadSlot, setLeadSlot] = useState<HTMLElement | null>(null);
+  const [pane, setPane] = useState<HTMLElement | null>(null);
   const headerSlots = useMemo(
-    () => ({ actions: actionsSlot, lead: leadSlot }),
-    [actionsSlot, leadSlot]
+    () => ({ actions: actionsSlot, lead: leadSlot, pane }),
+    [actionsSlot, leadSlot, pane]
   );
 
   return (
@@ -368,6 +369,7 @@ function SettingsModalBody() {
             <X {...stylex.props(styles.closeGlyph)} aria-hidden="true" />
           </Dialog.Close>
           <div
+            ref={setPane}
             {...stylex.props(
               // Declared again here so the tokens resolve against the pane's own
               // `--card` (white in light mode); see `lody-ui-palette.stylex.ts`.

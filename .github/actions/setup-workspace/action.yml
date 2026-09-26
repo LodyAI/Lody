@@ -1,0 +1,49 @@
+name: Set up workspace toolchain
+description: >-
+  Install pnpm and Node, then restore the pnpm store. Restore never writes:
+  only `.github/workflows/pnpm-store-cache.yml` on main saves the store, so PR
+  runs share one default-branch entry instead of each writing an ~800 MB copy.
+
+inputs:
+  node-version:
+    description: Node.js version passed to actions/setup-node.
+    required: true
+
+outputs:
+  cache-hit:
+    description: '`true` only when the store was restored from the exact lockfile key.'
+    value: ${{ steps.restore.outputs.cache-hit }}
+  cache-key:
+    description: Exact store key for the current lockfile.
+    value: ${{ steps.key.outputs.key }}
+  store-path:
+    description: Absolute pnpm store path.
+    value: ${{ steps.key.outputs.store-path }}
+
+runs:
+  using: composite
+  steps:
+    - name: Setup pnpm
+      uses: pnpm/action-setup@v4
+
+    - name: Setup Node
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ inputs.node-version }}
+
+    - name: Resolve pnpm store
+      id: key
+      shell: bash
+      run: |
+        echo "store-path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+        echo "key=pnpm-store-v1-${RUNNER_OS}-${RUNNER_ARCH}-${{ hashFiles('pnpm-lock.yaml') }}" >> "$GITHUB_OUTPUT"
+
+    # The prefix fallback keeps a lockfile change from turning into a cold
+    # download of the whole store: pnpm fetches only the missing packages.
+    - name: Restore pnpm store
+      id: restore
+      uses: actions/cache/restore@v4
+      with:
+        path: ${{ steps.key.outputs.store-path }}
+        key: ${{ steps.key.outputs.key }}
+        restore-keys: pnpm-store-v1-${{ runner.os }}-${{ runner.arch }}-

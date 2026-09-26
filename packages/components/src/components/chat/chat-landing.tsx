@@ -3490,7 +3490,7 @@ function WorkspaceChatLanding({
       <WorktreeCheckboxPill
         checked
         disabled
-        className="h-6 rounded-none bg-transparent px-2 text-foreground/80 hover:bg-foreground/[0.06]"
+        surface="context"
         disabledReason={t(
           'chat.workdir.githubRequired',
           'GitHub projects always run in an isolated worktree.'
@@ -3502,7 +3502,7 @@ function WorkspaceChatLanding({
         onCheckedChange={(checked) => handleWorkdirModeChange(checked ? 'worktree' : 'local')}
         disabled={!worktreeAvailable}
         disabledReason={!worktreeAvailable ? worktreeUnavailableReason : undefined}
-        className="h-6 rounded-none bg-transparent px-2 text-foreground/80 hover:bg-foreground/[0.06]"
+        surface="context"
       />
     ) : null;
 

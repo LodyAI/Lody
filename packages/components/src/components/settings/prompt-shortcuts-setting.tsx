@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import * as stylex from '@stylexjs/stylex';
-import { SettingsPageActions, SettingsPageLead } from './settings-page-header';
+import { SettingsPageActions, SettingsPageLead, useSettingsPane } from './settings-page-header';
 import { SettingsEmptyList, settingsRecordsCard } from './compact-layout';
 import { useAtomValue } from 'jotai';
 import { useTranslation } from 'react-i18next';
@@ -24,6 +24,7 @@ import { capturePostHogEvent } from '@/lib/posthog-analytics';
 import { getPromptShortcutAnalyticsProperties } from '@/lib/prompt-shortcut-analytics';
 import { usePromptShortcuts } from '../../providers/prompt-shortcut-provider';
 import { useVisibleMachineMetas } from '@/hooks/use-visible-machine-metas';
+import { useDialogExitSnapshot } from '@/hooks/use-dialog-exit-snapshot';
 import { useVisibleLocalProjectsFromMachineIndex } from '@/hooks/use-visible-local-projects';
 import { useMachineFlockAgentConfigsForMachineIds } from '@/hooks/use-machine-flock-agent-configs';
 import { CombinedMentionTextarea } from '@/components/mentions/combined-mention-textarea';
@@ -191,6 +192,8 @@ function PromptShortcutsSettingContent({
     value: PromptShortcut;
     base: PromptShortcutIndexEntry | null;
   } | null>(null);
+  const { shown: shownEditor, onOpenChangeComplete } = useDialogExitSnapshot(editor);
+  const settingsPane = useSettingsPane();
   const [removal, setRemoval] = useState<PromptShortcutIndexEntry | null>(null);
   const [busy, setBusy] = useState(false);
   const edit = async (entry: PromptShortcutIndexEntry) => {
@@ -226,7 +229,7 @@ function PromptShortcutsSettingContent({
       },
     });
   };
-  const owned = editor ? editor.value.ownerUserId === runtime?.userId : false;
+  const owned = shownEditor ? shownEditor.value.ownerUserId === runtime?.userId : false;
   return (
     <div {...stylex.props(surface.container)}>
       <SettingsPageLead>
@@ -253,14 +256,16 @@ function PromptShortcutsSettingContent({
         onOpenChange={(open) => {
           if (!open && !busy) setEditor(null);
         }}
+        onOpenChangeComplete={onOpenChangeComplete}
       >
         <Dialog.Content
           width={SETTINGS_EDITOR_DIALOG_WIDTH}
+          centerOn={settingsPane}
           className={SETTINGS_EDITOR_DIALOG_LAYOUT}
         >
           <Dialog.Header>
             <Dialog.Title>
-              {!editor?.base
+              {!shownEditor?.base
                 ? t('settings.promptShortcuts.new', 'New Prompt Shortcut')
                 : owned
                   ? t('settings.promptShortcuts.edit', 'Edit Prompt Shortcut')
@@ -278,12 +283,12 @@ function PromptShortcutsSettingContent({
                   )}
             </Dialog.Description>
           </Dialog.Header>
-          {editor && runtime ? (
+          {shownEditor && runtime ? (
             owned ? (
               <ShortcutEditor
-                key={editor.value.id}
-                initial={editor.value}
-                isNew={!editor.base}
+                key={shownEditor.value.id}
+                initial={shownEditor.value}
+                isNew={!shownEditor.base}
                 canShare={runtime.canShare}
                 saving={busy}
                 scope={scope}
@@ -293,19 +298,19 @@ function PromptShortcutsSettingContent({
                   try {
                     await runtime.save({
                       value: { ...value, revision: crypto.randomUUID(), updatedAt: getServerNow() },
-                      base: editor.base,
+                      base: shownEditor.base,
                       bodyDocId:
-                        !editor.base || editor.base.visibility !== value.visibility
+                        !shownEditor.base || shownEditor.base.visibility !== value.visibility
                           ? crypto.randomUUID()
-                          : editor.base.bodyDocId,
+                          : shownEditor.base.bodyDocId,
                     });
                     capturePostHogEvent(
                       postHog,
-                      editor.base ? 'prompt_shortcut/updated' : 'prompt_shortcut/created',
+                      shownEditor.base ? 'prompt_shortcut/updated' : 'prompt_shortcut/created',
                       {
                         ...getPromptShortcutAnalyticsProperties(value, value.mentions.length),
-                        ...(editor.base
-                          ? { visibility_changed: editor.base.visibility !== value.visibility }
+                        ...(shownEditor.base
+                          ? { visibility_changed: shownEditor.base.visibility !== value.visibility }
                           : {}),
                       }
                     );
@@ -317,7 +322,7 @@ function PromptShortcutsSettingContent({
               />
             ) : (
               <PromptShortcutReadOnlyView
-                shortcut={editor.value}
+                shortcut={shownEditor.value}
                 options={scope.options}
                 onClose={() => setEditor(null)}
               />

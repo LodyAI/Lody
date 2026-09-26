@@ -3,6 +3,9 @@ import { isSessionWindow, windowStorage } from '@/lib/desktop-window';
 import { atomWithStorage, createJSONStorage } from 'jotai/utils';
 import { currentWorkspaceIdAtom } from './workspace-context';
 
+/** In-memory viewport positions survive sidebar unmounts, scoped to each workspace. */
+export const sidebarScrollTopByWorkspaceAtom = atom<Record<string, number>>({});
+
 /**
  * Sidebar state atoms with localStorage persistence
  *

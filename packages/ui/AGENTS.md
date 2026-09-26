@@ -2,8 +2,7 @@
 
 `CLAUDE.md` is a symlink to this file. Edit `AGENTS.md` only.
 
-Base UI + StyleX library that `packages/components/src/ui` migrates into one
-component at a time. Consumers compile its source through `@stylexjs/unplugin`
+Base UI + StyleX primitives. Consumers compile through `@stylexjs/unplugin`
 with this package's `stylex-options.ts`.
 
 - Package styles use StyleX: no Tailwind, `cn`, `cva`, `tailwind-merge` or
@@ -49,9 +48,9 @@ with this package's `stylex-options.ts`.
   100% and StyleX has no descendant selector: a menu row's, a badge's, an
   avatar's, an icon-only `Button`'s. A caller's icon states 100% too; a
   checkbox row's box holds its mark only.
-- Every trigger here is Base UI's, unstyled: a surface opens a menu, popover or
-  modal with what it had there, `render={<Button …/>}`. Post-close focus is the
-  product's, as `finalFocus`.
+- Triggers use Base UI `render` for an existing element. Only default context-menu
+  wrappers use `display: contents`; rendered triggers keep their box. A nested
+  menu root goes inside the outer item's `render`. Product owns `finalFocus`.
 - `Popover` reads `popup` and replaces five of a list's declarations
   (`test/popover.test.tsx` pins them); `PreviewCard` is it hovered open, with
   no focus and no dialog role.

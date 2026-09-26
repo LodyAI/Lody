@@ -193,12 +193,23 @@ had there, through Base UI's `render`:
 </Menu.Root>
 ```
 
+`Menu.Content` grows beyond its width floor for longer rows. Use
+`width="compact"` for a short two-choice menu; the regular width remains the
+default. Width is a primitive variant, not a caller class override.
+
 `ContextMenu` and `Menubar` restate only the way in — a right click or a long
 press, and a bar of names — and re-export `Menu`'s rows rather than rebuilding
 them, so a command looks and behaves the same wherever a person meets it. A row
 answers `onClick`; a row that should leave the menu up says `closeOnClick={false}`
 rather than cancelling the event. Where focus goes after a menu closes is the
 product's policy, passed as `finalFocus`.
+
+When a menu row also opens a context menu, put `ContextMenu.Root` inside the
+row's `render` callback, passing the callback's props to the actual row element
+through `ContextMenu.Trigger render={<div {...props} />}`. This keeps the row's
+highlight and selection in the outer menu's context. A rendered context trigger
+preserves that element's layout; only the default wrapper uses `display: contents`.
+A tooltip can then render the menu row as its trigger and measure the same box.
 
 A row's leading box holds a caller's icon, a tick or a dot, and sizes what is in
 it: a glyph placed there states its own dimensions as 100% rather than arriving

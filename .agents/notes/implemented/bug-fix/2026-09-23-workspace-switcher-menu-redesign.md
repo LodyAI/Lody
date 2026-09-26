@@ -72,3 +72,41 @@ opened-by tree tests pass (the revert restores the original code path).
 Not verified: radio select / context-menu / modifier-click interactions
 run through unchanged handlers; multi-account (email label) and
 free-plan variants were reasoned, not rendered.
+
+## Follow-up, 2026-09-26: preserve menu ownership and the tooltip anchor
+
+The Base UI migration in `18f10b6514` left each desktop workspace radio item
+under its own `ContextMenu.Root`. Both menu families share a root context, so
+the radio item read the closed context menu's highlight state instead of the
+dropdown's. The tooltip also rendered the context trigger's `display: contents`
+wrapper, which has no measurable box and positioned the hint near the viewport
+origin. The earlier comment claiming both triggers reached the row was stale.
+
+The radio item now resolves in the dropdown and introduces the context menu
+inside its `render` callback. Its props, handlers and ref reach one real row
+element, which is also the tooltip trigger. `ContextMenu.Trigger` applies
+`display: contents` only to its default wrapper; an explicit `render` preserves
+the supplied element's layout. The switcher trigger also drops the duplicated
+child button left by the migration. Adding a CSS hover or a tooltip offset
+would leave the incorrect menu ownership and anchor intact.
+
+The composition is `Tooltip.Trigger → Menu.RadioItem → render(ContextMenu.Root
+→ ContextMenu.Trigger → div)`: the outer menu owns selection/highlight, while
+the inner menu owns the right-click action. The existing menu appearance and
+workspace navigation intent are unchanged.
+
+Regression coverage extends the workspace identity and shared menu suites to
+check highlight movement, the hint's row trigger, dropdown selection/closure,
+and a rendered context trigger's ref/layout and right-click behavior.
+
+Verification: the two sidebar suites pass (24 tests), as does the updated menu
+suite (30 tests). The UI package's existing 299 tests and its typecheck passed;
+changed-file lint and formatting pass. A Chromium fixture using the real styled
+primitives measured the row at y=315 and its hint at y=322, with a flex row,
+active highlight and working right-click menu. This verifies the composition,
+not a packaged Electron build. Existing dependency caches were reused; the full
+components typecheck still reports unrelated dependency/type errors (including
+Effect type identities). `docs check` is blocked by links into the uninitialized
+Codex/Grok submodules; none of its errors concern the changed documents.
+
+PR: [#1022](https://github.com/LodyAI/Lody/pull/1022).

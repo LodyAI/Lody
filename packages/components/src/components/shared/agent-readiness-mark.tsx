@@ -1,7 +1,10 @@
 import type { AgentBrandId, AgentConfigCliType } from '@lody/shared';
+import * as stylex from '@stylexjs/stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { radius } from '@lody/ui/tokens/scales.stylex';
 
 import { AgentIcon } from '@/components/icons/agent-icon';
-import { cn } from '@/lib/utils';
+import { withClassName } from '@/lib/stylex';
 
 /**
  * How far along an agent is toward being usable, expressed on the agent's own
@@ -18,11 +21,71 @@ const RING_RADIUS = 45;
 const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
 /** Visible sweep of the indeterminate arc, as a fraction of the ring. */
 const ORBIT_ARC_FRACTION = 0.22;
+const REDUCED_MOTION = '@media (prefers-reduced-motion: reduce)';
+
+const orbit = stylex.keyframes({ to: { transform: 'rotate(360deg)' } });
+
+const styles = stylex.create({
+  mark: {
+    position: 'relative',
+    display: 'inline-flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: radius.small,
+    // The product's --muted surface has no @lody/ui token yet. Keep its 40%
+    // wash until that palette gains one, so this migration changes no pixels.
+    backgroundColor: 'color-mix(in oklab, hsl(var(--muted)) 40%, transparent)',
+  },
+  avatar: {
+    borderRadius: radius.full,
+    backgroundColor: 'color-mix(in oklab, hsl(var(--muted)) 50%, transparent)',
+  },
+  small: { width: '28px', height: '28px' },
+  medium: { width: '40px', height: '40px' },
+  large: { width: '56px', height: '56px' },
+  ring: {
+    position: 'absolute',
+    inset: 0,
+    width: '100%',
+    height: '100%',
+    transform: 'rotate(-90deg)',
+  },
+  ringTrack: { stroke: `color-mix(in oklab, ${colors.separator} 70%, transparent)` },
+  ringAccent: { stroke: colors.accent },
+  ringFill: {
+    transitionProperty: 'stroke-dashoffset',
+    transitionDuration: '400ms',
+    transitionTimingFunction: 'ease-out',
+  },
+  orbit: {
+    position: 'absolute',
+    inset: 0,
+    animationName: { default: orbit, [REDUCED_MOTION]: 'none' },
+    animationDuration: '1400ms',
+    animationTimingFunction: 'linear',
+    animationIterationCount: 'infinite',
+    transformOrigin: '50% 50%',
+    willChange: 'transform',
+  },
+  orbitRing: { width: '100%', height: '100%' },
+  icon: {
+    position: 'relative',
+    transitionProperty: 'opacity',
+    transitionDuration: '500ms',
+  },
+  iconSmall: { width: '12px', height: '12px' },
+  iconMedium: { width: '18px', height: '18px' },
+  iconLarge: { width: '24px', height: '24px' },
+  ready: { color: colors.label, opacity: 1 },
+  arriving: { color: colors.secondaryLabel, opacity: 0.7, filter: 'saturate(0)' },
+  cold: { color: colors.secondaryLabel, opacity: 0.4, filter: 'saturate(0)' },
+});
 
 const SIZES = {
-  sm: { box: 'h-7 w-7', icon: 'h-3 w-3', stroke: 8 },
-  md: { box: 'h-10 w-10', icon: 'h-4.5 w-4.5', stroke: 7 },
-  lg: { box: 'h-14 w-14', icon: 'h-6 w-6', stroke: 6 },
+  sm: { box: styles.small, icon: styles.iconSmall, stroke: 8 },
+  md: { box: styles.medium, icon: styles.iconMedium, stroke: 7 },
+  lg: { box: styles.large, icon: styles.iconLarge, stroke: 6 },
 } as const;
 
 export type AgentReadinessMarkProps = {
@@ -39,6 +102,8 @@ export type AgentReadinessMarkProps = {
    */
   percent?: number | null;
   size?: keyof typeof SIZES;
+  /** The onboarding avatar is round and has a stronger muted wash. */
+  surface?: 'tile' | 'avatar';
   className?: string;
   /** Describes the mark for assistive tech; the visual carries no text. */
   ariaLabel?: string;
@@ -52,6 +117,7 @@ export function AgentReadinessMark({
   readiness,
   percent = null,
   size = 'md',
+  surface = 'tile',
   className,
   ariaLabel,
 }: AgentReadinessMarkProps) {
@@ -63,9 +129,8 @@ export function AgentReadinessMark({
 
   return (
     <span
-      className={cn(
-        'relative inline-flex shrink-0 items-center justify-center rounded-lg bg-muted/40',
-        box,
+      {...withClassName(
+        stylex.props(styles.mark, surface === 'avatar' && styles.avatar, box),
         className
       )}
       {...(ariaLabel ? { role: 'img', 'aria-label': ariaLabel } : {})}
@@ -73,18 +138,14 @@ export function AgentReadinessMark({
       {readiness === 'arriving' ? (
         <>
           {/* -rotate-90 puts 0% at twelve o'clock for the determinate fill. */}
-          <svg
-            viewBox="0 0 100 100"
-            className="absolute inset-0 h-full w-full -rotate-90"
-            aria-hidden="true"
-          >
+          <svg viewBox="0 0 100 100" {...stylex.props(styles.ring)} aria-hidden="true">
             <circle
               cx="50"
               cy="50"
               r={RING_RADIUS}
               fill="none"
               strokeWidth={stroke}
-              className="stroke-border/70"
+              {...stylex.props(styles.ringTrack)}
             />
             {determinatePercent !== null ? (
               <circle
@@ -96,8 +157,7 @@ export function AgentReadinessMark({
                 strokeLinecap="round"
                 strokeDasharray={RING_CIRCUMFERENCE}
                 strokeDashoffset={RING_CIRCUMFERENCE * (1 - determinatePercent / 100)}
-                className="stroke-primary"
-                style={{ transition: 'stroke-dashoffset 400ms ease-out' }}
+                {...stylex.props(styles.ringAccent, styles.ringFill)}
               />
             ) : null}
           </svg>
@@ -109,8 +169,8 @@ export function AgentReadinessMark({
             // so a `<g>` orbit re-runs style, pre-paint and layerize on the
             // main thread every vsync. A block-level span composites. Same
             // rule as `ui/spinner.tsx`.
-            <span className="agent-readiness-orbit absolute inset-0" aria-hidden="true">
-              <svg viewBox="0 0 100 100" className="h-full w-full">
+            <span {...stylex.props(styles.orbit)} aria-hidden="true">
+              <svg viewBox="0 0 100 100" {...stylex.props(styles.orbitRing)}>
                 <circle
                   cx="50"
                   cy="50"
@@ -119,7 +179,7 @@ export function AgentReadinessMark({
                   strokeWidth={stroke}
                   strokeLinecap="round"
                   strokeDasharray={`${RING_CIRCUMFERENCE * ORBIT_ARC_FRACTION} ${RING_CIRCUMFERENCE}`}
-                  className="stroke-primary"
+                  {...stylex.props(styles.ringAccent)}
                 />
               </svg>
             </span>
@@ -131,17 +191,19 @@ export function AgentReadinessMark({
         agentType={agentType}
         brandId={brandId}
         env={env}
-        className={cn(
-          'relative transition-opacity duration-500',
-          // Saturation is the state. `saturate-0` catches the brand-coloured
-          // glyphs; the registry marks already inherit `currentColor`.
-          readiness === 'ready'
-            ? 'text-foreground opacity-100'
-            : readiness === 'arriving'
-              ? 'text-muted-foreground opacity-70 saturate-0'
-              : 'text-muted-foreground opacity-40 saturate-0',
-          icon
-        )}
+        className={
+          stylex.props(
+            styles.icon,
+            // Saturation catches brand-coloured glyphs; registry marks already
+            // inherit currentColor.
+            readiness === 'ready'
+              ? styles.ready
+              : readiness === 'arriving'
+                ? styles.arriving
+                : styles.cold,
+            icon
+          ).className
+        }
       />
     </span>
   );

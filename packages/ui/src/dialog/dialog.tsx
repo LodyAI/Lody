@@ -9,7 +9,8 @@ import { useForcedThemeClassNames } from '../theme/theme';
 import {
   DialogFooter,
   DialogHeader,
-  mergePanelWidth,
+  mergePanelLayout,
+  useInlineCentre,
   ModalDepthProvider,
   useModalDepth,
   usePanelContainer,
@@ -54,6 +55,14 @@ export interface ModalContentProps extends Omit<PopupBaseProps, 'className' | 'r
    * viewport cap still applies on top.
    */
   width?: CSSProperties['width'];
+  /**
+   * An element to centre the panel on across the window's width, in place of
+   * the window's own centre: a dialog opened from one pane of a larger surface
+   * — the settings page beside its nav — belongs over that pane. The panel
+   * stays inside the window, and with no element it is centred on the window.
+   * The block axis stays the window's.
+   */
+  centerOn?: Element | null;
   className?: string;
 }
 
@@ -147,12 +156,14 @@ export const DialogContent = forwardRef<HTMLDivElement, DialogContentProps>(func
     closeButton = true,
     closeLabel = 'Close',
     width,
+    centerOn,
     style,
     ...rest
   },
   ref
 ) {
   const { ref: panelRef, container: panel } = usePanelContainer<HTMLDivElement>(ref);
+  const centre = useInlineCentre(centerOn);
   // A portalled panel leaves the subtree whose palette it should be using, so
   // the classes that declare that palette travel with it and land on the
   // portal, where they cascade into the backdrop and the panel alike.
@@ -169,7 +180,7 @@ export const DialogContent = forwardRef<HTMLDivElement, DialogContentProps>(func
       <BaseDialog.Popup
         ref={panelRef}
         {...rest}
-        style={mergePanelWidth(style, width)}
+        style={mergePanelLayout(style, { width, centre })}
         className={(state) =>
           appendClassName(
             stylex.props(

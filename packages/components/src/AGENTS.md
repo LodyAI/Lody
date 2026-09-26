@@ -49,6 +49,15 @@ Performance comparisons must use the current full-Mirror baseline.
   `repositionInputs={false}` explicitly opts out of both Vaul repositioning and
   this inset; callers using it own their keyboard layout.
 
+## Working session status
+
+- Session marks use `ui/working-status-mark.tsx`, mounted across the status change
+  and fed via `useWorkingHandOver` because unread arrives after presence.
+  `WorkingGrid` shares one viewport observer: only visible marks animate; returning
+  marks sample the shared clock. Animate only `transform`/`opacity` from
+  `startTime = 0`, never per-frame script or React state.
+  [Decision](../../../.agents/notes/implemented/feature/2026-09-24-sidebar-working-grid.md).
+
 ## Keyboard navigation
 
 - Each independently navigable list owns one `FocusScope` and one
@@ -73,6 +82,11 @@ Performance comparisons must use the current full-Mirror baseline.
   ordinarily collapsed right panel.
 
 ## Workspace transitions
+
+- Dock counts derive from complete active metadata and the sidebar's child activity
+  summary. Publish absolute snapshots, including zero, on change and every 30 seconds;
+  focus/visibility restoration reconciles too. Keep the timer independent of count
+  changes and mount it only in the ready workspace's elected window.
 
 - Authenticated workspace switches keep `MainLayout` mounted: the sidebar and
   workspace identity are stable chrome, while the content pane shows a scoped

@@ -3,8 +3,8 @@
 /**
  * LandingPreviewPanel — the session Browser panel for the DESIGN-MODE feature demo.
  *
- * Uses the REAL `SessionBrowserToolbar` (back / forward / reload / address bar /
- * annotate / share) over a mock page surface, mirroring `SessionBrowserPanel`
+ * Uses a replica of the app's `SessionBrowserToolbar` (back / forward / reload /
+ * address bar / annotate / share) over a mock page surface, mirroring `SessionBrowserPanel`
  * (packages/components/src/components/sessions/session-browser-panel.tsx), which
  * replaced the old `SessionPreviewPanel` — there is no Preview header, device
  * toolbar or dotted canvas any more; the page fills the panel like a browser tab.
@@ -16,10 +16,9 @@
 
 import { type ReactNode } from 'react';
 import { Check, Send, SendHorizontal, X } from 'lucide-react';
-import { Button } from '@lody/ui/button';
-import { Textarea } from '@lody/ui/textarea';
-import { SessionBrowserToolbar } from '@/components/sessions/session-browser-toolbar';
-import { cn } from '@/lib/utils';
+import { ReplicaBrowserToolbar } from './landing-replica/browser-toolbar';
+import { Button } from './landing-replica/button';
+import { cn } from './landing-replica/utils';
 
 export type LandingPreviewDemoState = {
   loading: boolean;
@@ -66,29 +65,11 @@ const BROWSER_ADDRESS = 'http://127.0.0.1:3002/';
 export function LandingPreviewPanel({ state }: { state: LandingPreviewDemoState }) {
   return (
     <div className="flex h-full min-h-0 flex-col bg-background">
-      {/* The REAL toolbar; every control is inert here except annotation mode,
-          which the scripted demo drives. */}
-      <SessionBrowserToolbar
+      {/* Toolbar replica; only annotation mode changes, driven by the demo. */}
+      <ReplicaBrowserToolbar
         address={BROWSER_ADDRESS}
-        canGoBack={false}
-        canGoForward={false}
         loading={state.loading}
-        annotationEnabled={state.annotating}
-        annotationAvailable
-        sharing={false}
-        shareAvailable
-        hasShareUrl={false}
-        busy={false}
-        onAddressChange={() => undefined}
-        onRestoreAddress={() => undefined}
-        onNavigate={() => undefined}
-        onBack={() => undefined}
-        onForward={() => undefined}
-        onReload={() => undefined}
-        onStop={() => undefined}
-        onToggleAnnotation={() => undefined}
-        onShare={() => undefined}
-        onStopSharing={() => undefined}
+        annotating={state.annotating}
       />
 
       {/* The page fills the panel — the browser has no device canvas. */}
@@ -220,17 +201,18 @@ function DraftCommentCard({ text }: { text: string }) {
           <X className="h-3.5 w-3.5" />
         </button>
       </div>
-      <Textarea
+      {/* The app's `ui/textarea` classes merged with the card's overrides. */}
+      <textarea
         value={text}
-        onChange={() => undefined}
+        readOnly
         placeholder="Describe what should change here..."
-        className="min-h-20 resize-none bg-background text-xs"
+        className="flex min-h-20 w-full resize-none rounded-md border border-input-border bg-background px-3 py-2 text-xs text-input-foreground ring-offset-background placeholder:text-input-placeholder focus-visible:outline-hidden focus-visible:ring-0 focus-visible:ring-offset-0 disabled:cursor-not-allowed disabled:bg-muted disabled:opacity-60"
       />
       <div className="mt-2 flex justify-end gap-1.5">
-        <Button type="button" variant="ghost" size="small">
+        <Button type="button" size="sm" variant="ghost">
           Cancel
         </Button>
-        <Button type="button" data-demo="pv-draft-send" size="small" disabled={text.length === 0}>
+        <Button type="button" size="sm" data-demo="pv-draft-send" disabled={text.length === 0}>
           <Send className="h-3.5 w-3.5" />
           Add comment
         </Button>

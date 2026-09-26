@@ -8,6 +8,7 @@ import { userAtom } from '@/atoms';
 import { getAllAgentConfigAtom } from '@/atoms/agents';
 import { onlineMachineIdsAtom } from '@/atoms/presence';
 import { useAcpSelectorOptions } from '@/hooks/use-acp-selector-options';
+import { useDialogExitSnapshot } from '@/hooks/use-dialog-exit-snapshot';
 import { useVisibleMachineMetas } from '@/hooks/use-visible-machine-metas';
 import { useWorkspaceAgentRoleActions } from '@/hooks/use-workspace-agent-roles';
 import {
@@ -22,6 +23,7 @@ import {
 import { capturePostHogEvent } from '@/lib/posthog-analytics';
 import { Dialog } from '@/ui/dialog';
 import { AgentRoleForm } from './agent-role-form';
+import { useSettingsPane } from './settings-page-header';
 import { SETTINGS_EDITOR_DIALOG_LAYOUT, SETTINGS_EDITOR_DIALOG_WIDTH } from './surface';
 
 /**
@@ -58,7 +60,7 @@ export const openAgentRoleEditorForEdit = (role: AgentRole): AgentRoleEditorStat
  * twice.
  */
 export function AgentRoleEditorDialog({
-  editor,
+  editor: openEditor,
   accessibleRoles,
   onChange,
   onClose,
@@ -87,6 +89,10 @@ export function AgentRoleEditorDialog({
   const agentConfigs = useAtomValue(getAllAgentConfigAtom);
   const { machines } = useVisibleMachineMetas();
   const { upsert } = useWorkspaceAgentRoleActions();
+  const settingsPane = useSettingsPane();
+  // Everything below renders the editor the dialog was open with, so a closing
+  // panel fades out with its form rather than emptying first.
+  const { shown: editor, onOpenChangeComplete } = useDialogExitSnapshot(openEditor);
 
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string>();
@@ -169,7 +175,7 @@ export function AgentRoleEditorDialog({
   };
 
   const save = async () => {
-    if (!editor || !editorValue || formErrors.length > 0 || !currentUserId) return;
+    if (!openEditor || !editor || !editorValue || formErrors.length > 0 || !currentUserId) return;
     const role = buildAgentRoleFromForm(editorValue, {
       existing: editor.mode === 'edit' ? editor.role : undefined,
       ownerUserId: currentUserId,
@@ -203,13 +209,15 @@ export function AgentRoleEditorDialog({
 
   return (
     <Dialog.Root
-      open={editor !== null}
+      open={openEditor !== null}
       onOpenChange={(open) => {
         if (!open) close();
       }}
+      onOpenChangeComplete={onOpenChangeComplete}
     >
       <Dialog.Content
         width={SETTINGS_EDITOR_DIALOG_WIDTH}
+        centerOn={settingsPane}
         className={SETTINGS_EDITOR_DIALOG_LAYOUT}
       >
         <Dialog.Header>
@@ -223,7 +231,10 @@ export function AgentRoleEditorDialog({
         {editor && editorValue ? (
           <AgentRoleForm
             value={editorValue}
-            onChange={(value) => onChange({ ...editor, value })}
+            // A panel fading out is not edited: a change there would reopen it.
+            onChange={(value) => {
+              if (openEditor) onChange({ ...openEditor, value });
+            }}
             machines={machineOptions}
             agentConfigs={machineAgentConfigs.map((config) => ({
               agentConfigId: config.id,

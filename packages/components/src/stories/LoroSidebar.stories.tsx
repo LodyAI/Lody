@@ -10,10 +10,7 @@ import type {
 import { LoroSidebar } from '@/components/loro-sidebar';
 import { SidebarFilterPopover } from '@/components/sidebar-filter-popover';
 import { LocalProjectItem } from '@/components/loro-app-sidebar';
-import {
-  SidebarSectionHeader,
-  SIDEBAR_STICKY_GROUP_HEADER_CLASS,
-} from '@/components/sidebar-row-shared';
+import { SidebarSectionHeader } from '@/components/sidebar-row-shared';
 import { buildSidebarOpenerRowResolver } from '@/components/sessions/session-list-rows';
 import { SessionList } from '@/components/session-list';
 import type { SessionListProps } from '@/components/session-list';
@@ -1523,11 +1520,10 @@ export const SessionsFinishing: Story = {
 };
 
 /**
- * Regression fixture for a machine group's sticky header. Mirrors
- * `LoroAppSidebar`'s local-project section DOM: a sticky section header over
- * many collapsed project rows inside the sidebar's scroll container. Scroll
- * the box — a selected row must slide under the opaque header, never bleed
- * through the machine name.
+ * Regression fixture for a machine group's scrolling header. Mirrors
+ * `LoroAppSidebar`'s local-project section DOM with many collapsed project
+ * rows. Scroll the box: the machine label must leave the viewport with its
+ * rows, without sticking over a project.
  */
 function MachineGroupScrollFixture() {
   const isMobile = useIsMobile();
@@ -1550,7 +1546,7 @@ function MachineGroupScrollFixture() {
       >
         {/* Production section wrapper: loro-app-sidebar.tsx localProjectsTopContent. */}
         <div className="space-y-0.5">
-          <div className={SIDEBAR_STICKY_GROUP_HEADER_CLASS}>
+          <div>
             <SidebarSectionHeader
               label="LAPTOP-PP66IJ89"
               collapsed={false}
@@ -1604,8 +1600,8 @@ function MachineGroupScrollFixture() {
   );
 }
 
-export const MachineGroupStickyHeader: Story = {
-  name: 'Machine group sticky header (scroll)',
+export const MachineGroupScrollingHeader: Story = {
+  name: 'Machine group scrolling header',
   render: () => <MachineGroupScrollFixture />,
   args: { ...Default.args! },
 };

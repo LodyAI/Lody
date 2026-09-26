@@ -3,7 +3,6 @@ import {
   isMarkdownCodeFence,
   parseMarkdownCodeBlockLabel,
   parseMarkdownCodeBlockPath,
-  parseMarkdownCodeHighlightLanguage,
 } from '../src/components/ai-gui/markdown-code-block';
 
 describe('parseMarkdownCodeBlockPath', () => {
@@ -29,16 +28,6 @@ describe('parseMarkdownCodeBlockLabel', () => {
   it('prefers a path over the language id', () => {
     expect(parseMarkdownCodeBlockLabel('ts', 'src/app.ts')).toBe('src/app.ts');
     expect(parseMarkdownCodeBlockLabel('python', undefined)).toBe('python');
-  });
-});
-
-describe('parseMarkdownCodeHighlightLanguage', () => {
-  it('uses highlight= when the fence was remapped to text', () => {
-    expect(parseMarkdownCodeHighlightLanguage('text', 'highlight=sql')).toBe('sql');
-  });
-
-  it('falls back to the fence language', () => {
-    expect(parseMarkdownCodeHighlightLanguage('tsx', undefined)).toBe('tsx');
   });
 });
 

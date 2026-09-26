@@ -109,6 +109,7 @@ const SESSION_LIST_VISIBLE_KEYS: readonly (keyof SessionMeta)[] = [
   'userId',
   'machineId',
   'isArchived',
+  'isTabClosed',
   'isPinned',
   'diffStats',
   'pullRequests',

@@ -8,7 +8,8 @@ import { DialogBackdrop, type ModalContentProps } from './dialog';
 import {
   DialogFooter,
   DialogHeader,
-  mergePanelWidth,
+  mergePanelLayout,
+  useInlineCentre,
   ModalDepthProvider,
   usePanelContainer,
 } from './parts';
@@ -51,12 +52,14 @@ export const AlertDialogContent = forwardRef<HTMLDivElement, AlertDialogContentP
       backdropClassName,
       noAnimation,
       width,
+      centerOn,
       style,
       ...rest
     },
     ref
   ) {
     const { ref: panelRef, container: panel } = usePanelContainer<HTMLDivElement>(ref);
+    const centre = useInlineCentre(centerOn);
     const palette = useForcedThemeClassNames();
     const noTransition = noAnimation ? stylex.props(modal.noTransition).className : undefined;
     return (
@@ -72,7 +75,7 @@ export const AlertDialogContent = forwardRef<HTMLDivElement, AlertDialogContentP
         <BaseAlertDialog.Popup
           ref={panelRef}
           {...rest}
-          style={mergePanelWidth(style, width)}
+          style={mergePanelLayout(style, { width, centre })}
           className={(state) =>
             appendClassName(
               stylex.props(

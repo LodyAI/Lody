@@ -1,0 +1,127 @@
+diff --git a/es/Streamdown.d.mts b/es/Streamdown.d.mts
+index f1ff4903333dad86d1af74cb1973d4e944bea5ab..a27f97423bd694042f67445464d7e405026cf910 100644
+--- a/es/Streamdown.d.mts
++++ b/es/Streamdown.d.mts
+@@ -3,6 +3,8 @@ import { Options } from "react-markdown";
+ import { RemendOptions } from "remend";
+ //#region src/Streamdown.d.ts
+ interface StreamdownProps extends Omit<Options, 'children'> {
++	/** Show existing content immediately when this stream mounts. Later additions still animate. */
++	animateOnMount?: boolean;
+   content: string;
+   granularity?: StreamAnimationGranularity;
+   /**
+diff --git a/es/Streamdown.mjs b/es/Streamdown.mjs
+index a049ef29b0a9f451cf44f4adb30670674a907bc4..b4c657d64b6536017e85baee04d2b71de0693df1 100644
+--- a/es/Streamdown.mjs
++++ b/es/Streamdown.mjs
+@@ -43,7 +43,7 @@ const StreamdownBlock = memo(({ children, ...rest }) => {
+ StreamdownBlock.displayName = "StreamdownBlock";
+ const MIN_STREAM_CHAR_PACE_MS = 2;
+ const MAX_REVEAL_GAP_MS = 160;
+-const updateBlockAnimation = ({ blocks, charDelay, getBlockState, pluginsCache, renderNow, revealClock, runtimes }) => {
++const updateBlockAnimation = ({ animateInitial, blocks, charDelay, getBlockState, pluginsCache, renderNow, revealClock, runtimes }) => {
+ 	const blockAnimationMeta = /* @__PURE__ */ new Map();
+ 	const alive = /* @__PURE__ */ new Set();
+ 	let revealedNewChars = false;
+@@ -58,7 +58,8 @@ const updateBlockAnimation = ({ blocks, charDelay, getBlockState, pluginsCache,
+ 				blockBirth: state === "revealed" ? renderNow : void 0,
+ 				charCount: 0,
+ 				rawLength: -1,
+-				settled: false,
++				settled: !animateInitial && state === "revealed",
++				suppressInitialAnimation: !animateInitial && state === "streaming",
+ 				skipped: []
+ 			};
+ 			runtimes.set(block.startOffset, runtime);
+@@ -112,7 +113,7 @@ const updateBlockAnimation = ({ blocks, charDelay, getBlockState, pluginsCache,
+ 	}
+ 	return blockAnimationMeta;
+ };
+-const StreamdownBlocks = memo(({ content: smoothedContent, granularity, markdownOptions, remendOptions, tailUnitsRef }) => {
++const StreamdownBlocks = memo(({ animateOnMount, content: smoothedContent, granularity, markdownOptions, remendOptions, tailUnitsRef }) => {
+ 	const profiler = useStreamdownProfiler();
+ 	const { components: baseComponents, ...rest } = markdownOptions;
+ 	const baseRehypePlugins = useStablePlugins(markdownOptions.rehypePlugins ?? EMPTY_PLUGINS);
+@@ -141,9 +142,11 @@ const StreamdownBlocks = memo(({ content: smoothedContent, granularity, markdown
+ 	const blockRuntimesRef = useRef(/* @__PURE__ */ new Map());
+ 	const blockPluginsRef = useRef(/* @__PURE__ */ new Map());
+ 	const revealClockRef = useRef({ lastTs: 0 });
++	const initialRenderRef = useRef(true);
+ 	const renderNow = getNow();
+ 	const animationStart = profiler ? getNow() : 0;
+ 	const blockAnimationMeta = updateBlockAnimation({
++		animateInitial: animateOnMount || !initialRenderRef.current,
+ 		blocks,
+ 		charDelay,
+ 		getBlockState,
+@@ -152,6 +155,7 @@ const StreamdownBlocks = memo(({ content: smoothedContent, granularity, markdown
+ 		revealClock: revealClockRef.current,
+ 		runtimes: blockRuntimesRef.current
+ 	});
++	initialRenderRef.current = false;
+ 	const blockAnimationDurationMs = profiler ? getNow() - animationStart : 0;
+ 	useEffect(() => {
+ 		if (!profiler) return;
+@@ -278,7 +282,7 @@ const useLatexGuard = (content, enabled) => {
+ 	}
+ 	return validRef.current || content;
+ };
+-const Streamdown = memo(({ content, granularity = "char", latexGuard = false, preprocess, remend, smoothing, ...rest }) => {
++const Streamdown = memo(({ animateOnMount = true, content, granularity = "char", latexGuard = false, preprocess, remend, smoothing, ...rest }) => {
+ 	const preprocessed = useMemo(() => preprocess ? preprocess(content) : content, [content, preprocess]);
+ 	const guardedContent = useLatexGuard(preprocessed, latexGuard);
+ 	const tailUnitsRef = useRef(0);
+@@ -290,6 +294,7 @@ const Streamdown = memo(({ content, granularity = "char", latexGuard = false, pr
+ 	});
+ 	const markdownOptions = useStableValue(rest);
+ 	return /* @__PURE__ */ jsx(StreamdownBlocks, {
++		animateOnMount,
+ 		content: smoothedContent,
+ 		granularity,
+ 		markdownOptions,
+diff --git a/es/rehypeStreamAnimated.d.mts b/es/rehypeStreamAnimated.d.mts
+index 4ef2242700ad9d37649bfa7668f1d8553d5a291a..358cb7d288e8e3d1b6c9f3ca2bd70b779ac246ae 100644
+--- a/es/rehypeStreamAnimated.d.mts
++++ b/es/rehypeStreamAnimated.d.mts
+@@ -5,6 +5,8 @@ interface StreamBirthPacing {
+   pace: number;
+ }
+ interface StreamAnimatedRuntime {
++	/** Seed the first parsed tail as already visible; later characters still receive births. */
++	suppressInitialAnimation?: boolean;
+   /**
+    * Birth timestamp per rendered char, assigned on first render from
+    * `pacing` (or supplied up front by legacy callers).
+diff --git a/es/rehypeStreamAnimated.mjs b/es/rehypeStreamAnimated.mjs
+index 6b6c4a7815a06776c0667a54d8dbbaa8b3595f5b..ec477d06e2b9ed34c22b9836a3749cb7bbece37c 100644
+--- a/es/rehypeStreamAnimated.mjs
++++ b/es/rehypeStreamAnimated.mjs
+@@ -52,6 +52,7 @@ const rehypeStreamAnimated = (options = {}) => {
+ 		}
+ 		let globalCharIndex = 0;
+ 		const now = nowOverride ?? (resolvedRuntime ? getNow() : 0);
++		const suppressInitialAnimation = resolvedRuntime?.suppressInitialAnimation === true;
+ 		const shouldSkip = (node) => {
+ 			return SKIP_TAGS.has(node.tagName) || hasClass(node, "katex");
+ 		};
+@@ -70,6 +71,11 @@ const rehypeStreamAnimated = (options = {}) => {
+ 			const births = resolvedRuntime.births;
+ 			for (let i = from; i < from + count; i++) {
+ 				if (births[i] !== void 0) continue;
++				if (suppressInitialAnimation) {
++					births[i] = now - fadeDuration;
++					resolvedRuntime.skipped[i] = true;
++					continue;
++				}
+ 				const chained = i > 0 ? births[i - 1] + pacing.pace : now;
+ 				births[i] = Math.min(now + pacing.capMs, Math.max(chained, now));
+ 			}
+@@ -137,6 +143,7 @@ const rehypeStreamAnimated = (options = {}) => {
+ 				return "skip";
+ 			}
+ 		}));
++		if (resolvedRuntime) resolvedRuntime.suppressInitialAnimation = false;
+ 	};
+ };
+ //#endregion

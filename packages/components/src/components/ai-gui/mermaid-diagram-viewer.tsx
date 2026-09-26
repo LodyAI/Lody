@@ -16,12 +16,11 @@ import { cn } from '@/lib/utils';
 /**
  * The full-screen viewer for a rendered Mermaid diagram.
  *
- * Streamdown ships its own Mermaid full-screen overlay; `markdown-renderer.tsx`
- * turns it off (`controls.mermaid.fullscreen: false`) and mounts this instead.
- * The bundled one positions its only exit at a raw `top-4 right-4`, which on a
- * phone lands inside the status-bar inset, and its content layer covers the
- * whole backdrop while swallowing clicks — so on touch there is no reachable
- * way out at all. Three rules keep that from recurring here:
+ * It replaced an earlier bundled overlay whose only exit sat at a raw
+ * `top-4 right-4`, which on a phone lands inside the status-bar inset, and
+ * whose content layer covered the whole backdrop while swallowing clicks — so
+ * on touch there was no reachable way out at all. Three rules keep that from
+ * recurring here:
  *
  * 1. Controls sit in a bar padded by the `--safe-area-*` variables (the same
  *    ones `tailwind/index.css` maps to `env(safe-area-inset-*)`), never at a

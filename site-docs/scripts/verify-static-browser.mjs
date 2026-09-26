@@ -226,6 +226,18 @@ async function faults() {
           'Healthy hydration must not replace mismatched server HTML'
         );
       });
+      if (urlPath === '/' || urlPath === '/zh') {
+        // The app preview renders real workspace components inside an
+        // OptionalEnhancement boundary, so an app-only hook it newly reaches
+        // blanks the stage without failing anything else on the page.
+        await run(`landing app preview mounts ${urlPath}`, async () => {
+          await page.locator('section.underwater-reveal').scrollIntoViewIfNeeded();
+          await page
+            .locator('.underwater-reveal__frame textarea')
+            .first()
+            .waitFor({ state: 'visible' });
+        });
+      }
     } finally {
       await context.close();
     }

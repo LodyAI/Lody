@@ -16,23 +16,6 @@ vi.mock('react-i18next', () => ({
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
 ).IS_REACT_ACT_ENVIRONMENT = true;
 
-class TestIntersectionObserver {
-  readonly root = null;
-  readonly rootMargin = '';
-  readonly thresholds = [];
-
-  disconnect() {}
-  observe() {}
-  takeRecords() {
-    return [];
-  }
-  unobserve() {}
-}
-
-(
-  globalThis as typeof globalThis & { IntersectionObserver: typeof IntersectionObserver }
-).IntersectionObserver = TestIntersectionObserver as typeof IntersectionObserver;
-
 const STREAM_CHUNK_COUNT = 48;
 const MALFORMED_BOLD_AUTOLINK_MARKDOWN =
   '**https://github.com/LodyAI/Lody/pull/262**(`fix/some-branch` -> `main`)';
@@ -137,8 +120,11 @@ describe('MarkdownRenderer streaming rendering', () => {
     throw new Error(`Expected element matching ${selector}`);
   };
 
-  it('preserves the rest of a math document after a less-than comparison', async () => {
-    await renderMarkdown(String.raw`# Synthetic calculation
+  it.each([false, true])(
+    'preserves the rest of a math document after a less-than comparison while streaming=%s',
+    async (isStreaming) => {
+      await renderMarkdown(
+        String.raw`# Synthetic calculation
 
 Inline notation \(p<q\) stays in the document.
 
@@ -159,11 +145,15 @@ The entire document remains readable.
 
 ## References
 
-End of synthetic document.`);
+End of synthetic document.`,
+        { isStreaming }
+      );
+      if (isStreaming) await waitForElement('.streamdown-animated');
 
-    expect(container?.textContent).toContain('End of synthetic document.');
-    expect(container?.querySelectorAll('.katex-display')).toHaveLength(2);
-  });
+      expect(container?.textContent).toContain('End of synthetic document.');
+      expect(container?.querySelectorAll('.katex-display')).toHaveLength(2);
+    }
+  );
 
   it('uses the GFM autolink path for email literals', async () => {
     await renderMarkdown('Contact agent-000@example.com before checking https://example.com.');
@@ -178,11 +168,11 @@ End of synthetic document.`);
 
       const url = 'https://github.com/LodyAI/Lody/pull/262';
       // The link ends exactly at the URL; a bare PR URL renders as its reference label.
-      const link = container?.querySelector(`[data-streamdown="strong"] a[href="${url}"]`);
-      expect(link?.querySelector('[data-github-reference="pull"]')?.textContent).toBe('PR LodyAI/Lody#262');
-      expect(container?.querySelector('[data-streamdown="strong"]')?.textContent).toBe(
+      const link = container?.querySelector(`strong a[href="${url}"]`);
+      expect(link?.querySelector('[data-github-reference="pull"]')?.textContent).toBe(
         'PR LodyAI/Lody#262'
       );
+      expect(container?.querySelector('strong')?.textContent).toBe('PR LodyAI/Lody#262');
       expect(container?.querySelector('code')?.textContent).toBe('fix/some-branch');
       expect(container?.textContent).toContain('fix/some-branch -> main');
       expect(container?.textContent).not.toContain('**');
@@ -192,9 +182,7 @@ End of synthetic document.`);
   it('preserves an absolute destination when repairing a bold www autolink', async () => {
     await renderMarkdown(MALFORMED_BOLD_WWW_AUTOLINK_MARKDOWN);
 
-    const link = container?.querySelector(
-      '[data-streamdown="strong"] a[href="http://www.example.com"]'
-    );
+    const link = container?.querySelector('strong a[href="http://www.example.com"]');
     expect(link?.textContent).toBe('www.example.com');
     expect(container?.textContent).toContain('fix/some-branch -> main');
   });
@@ -202,7 +190,7 @@ End of synthetic document.`);
   it('adds an absolute scheme for mixed-case www autolinks', async () => {
     await renderMarkdown(MALFORMED_BOLD_MIXED_CASE_WWW_AUTOLINK_MARKDOWN);
 
-    const link = container?.querySelector('[data-streamdown="strong"] a');
+    const link = container?.querySelector('strong a');
     expect(link?.getAttribute('href')).toBe('http://WWW.example.com');
     expect(link?.textContent).toBe('WWW.example.com');
   });
@@ -212,7 +200,7 @@ End of synthetic document.`);
 
     const link = container?.querySelector('a[href="https://example.com/path**segment"]');
     expect(link?.textContent).toBe('https://example.com/path**segment');
-    expect(container?.querySelector('[data-streamdown="strong"]')).toBeNull();
+    expect(container?.querySelector('strong')).toBeNull();
   });
 
   it('does not split a URL when ordinary URL text precedes an inline code suffix', async () => {
@@ -221,14 +209,14 @@ End of synthetic document.`);
     const link = container?.querySelector('a');
     expect(link?.getAttribute('href')).toBe('https://example.com/path**segment(%60code%60)');
     expect(link?.textContent).toBe('https://example.com/path**segment(`code`)');
-    expect(container?.querySelector('[data-streamdown="strong"]')).toBeNull();
+    expect(container?.querySelector('strong')).toBeNull();
     expect(container?.querySelector('code')).toBeNull();
   });
 
   it('searches past an invalid asterisk pair for a later valid closer', async () => {
     await renderMarkdown(URL_WITH_LATER_VALID_CLOSER_MARKDOWN);
 
-    const link = container?.querySelector('[data-streamdown="strong"] a');
+    const link = container?.querySelector('strong a');
     expect(link?.getAttribute('href')).toBe('https://example.com/a**b/c');
     expect(link?.textContent).toBe('https://example.com/a**b/c');
     expect(container?.querySelector('code')?.textContent).toBe('code');
@@ -237,7 +225,7 @@ End of synthetic document.`);
   it('handles many non-closing asterisk pairs before a valid closer', async () => {
     await renderMarkdown(LONG_URL_WITH_REPEATED_NON_CLOSERS_MARKDOWN);
 
-    const link = container?.querySelector('[data-streamdown="strong"] a');
+    const link = container?.querySelector('strong a');
     expect(link?.getAttribute('href')).toBe(LONG_URL_WITH_REPEATED_NON_CLOSERS);
     expect(link?.textContent).toBe(LONG_URL_WITH_REPEATED_NON_CLOSERS);
     expect(container?.querySelector('code')?.textContent).toBe('code');
@@ -286,9 +274,15 @@ End of synthetic document.`);
 
     const reference = (href: string) =>
       container?.querySelector(`a[href="${href}"] [data-github-reference]`) ?? null;
-    expect(reference('https://github.com/LodyAI/Lody/pull/954')?.textContent).toBe('PR LodyAI/Lody#954');
-    expect(reference('https://github.com/acme/app/issues/12')?.textContent).toBe('Issue acme/app#12');
-    expect(reference('https://github.com/LodyAI/Lody/pull/7/files')?.textContent).toBe('PR LodyAI/Lody#7');
+    expect(reference('https://github.com/LodyAI/Lody/pull/954')?.textContent).toBe(
+      'PR LodyAI/Lody#954'
+    );
+    expect(reference('https://github.com/acme/app/issues/12')?.textContent).toBe(
+      'Issue acme/app#12'
+    );
+    expect(reference('https://github.com/LodyAI/Lody/pull/7/files')?.textContent).toBe(
+      'PR LodyAI/Lody#7'
+    );
     // Descriptive text, or a number that does not match the URL, keeps the plain link.
     expect(reference('https://github.com/LodyAI/Lody/pull/955')).toBeNull();
     expect(
@@ -301,7 +295,7 @@ End of synthetic document.`);
     await renderMarkdown(BOLD_AUTOLINK_BEFORE_CJK_MARKDOWN);
 
     const url = 'https://github.com/LodyAI/Lody/pull/317';
-    const link = container?.querySelector(`[data-streamdown="strong"] a[href="${url}"]`);
+    const link = container?.querySelector(`strong a[href="${url}"]`);
     expect(link?.textContent).toBe('PR LodyAI/Lody#317');
     expect(container?.querySelector('code')?.textContent).toBe('fix/mobile-staged-background-sync');
     expect(container?.textContent).toContain('，分支');
@@ -327,7 +321,7 @@ End of synthetic document.`);
   it('does not treat a non-ASCII symbol as Markdown punctuation after the marker', async () => {
     await renderMarkdown(URL_WITH_NON_ASCII_SYMBOL_AFTER_MARKER_MARKDOWN);
 
-    expect(container?.querySelector('[data-streamdown="strong"]')).toBeNull();
+    expect(container?.querySelector('strong')).toBeNull();
     expect(container?.querySelector('code')).toBeNull();
     expect(container?.textContent).toContain('https://example.com/**€(`code`)');
   });
@@ -335,7 +329,7 @@ End of synthetic document.`);
   it('recognizes astral Unicode punctuation after a strong closer', async () => {
     await renderMarkdown(URL_WITH_ASTRAL_PUNCTUATION_AFTER_MARKER_MARKDOWN);
 
-    const link = container?.querySelector('[data-streamdown="strong"] a');
+    const link = container?.querySelector('strong a');
     expect(link?.getAttribute('href')).toBe('https://example.com');
     expect(link?.textContent).toBe('https://example.com');
     expect(container?.querySelector('code')?.textContent).toBe('code');
@@ -344,14 +338,14 @@ End of synthetic document.`);
   it('does not reduce triple-star emphasis to a strong link', async () => {
     await renderMarkdown(TRIPLE_STAR_BOLD_ITALIC_AUTOLINK_MARKDOWN);
 
-    expect(container?.querySelector('[data-streamdown="strong"]')).toBeNull();
+    expect(container?.querySelector('strong')).toBeNull();
     expect(container?.textContent).toContain('https://example.com');
   });
 
   it('searches past an escaped URL marker for a later valid closer', async () => {
     await renderMarkdown(ESCAPED_INTERNAL_DOUBLE_ASTERISK_MARKDOWN);
 
-    const link = container?.querySelector('[data-streamdown="strong"] a');
+    const link = container?.querySelector('strong a');
     expect(link?.getAttribute('href')).toBe('https://example.com/%5C*%5C*path');
     expect(link?.textContent).toBe('https://example.com/\\*\\*path');
     expect(container?.querySelector('code')?.textContent).toBe('code');
@@ -360,7 +354,7 @@ End of synthetic document.`);
   it('repairs bold autolinks when the URL contains an HTML entity', async () => {
     await renderMarkdown(HTML_ENTITY_BOLD_AUTOLINK_MARKDOWN);
 
-    const link = container?.querySelector('[data-streamdown="strong"] a');
+    const link = container?.querySelector('strong a');
     expect(link?.getAttribute('href')).toBe('https://example.com/?a=1&amp;b=2');
     expect(link?.textContent).toBe('https://example.com/?a=1&amp;b=2');
     expect(container?.querySelector('code')?.textContent).toBe('fix/some-branch');
@@ -374,14 +368,14 @@ End of synthetic document.`);
   ])('does not turn escaped bold markers into formatting: %s', async (markdown) => {
     await renderMarkdown(markdown);
 
-    expect(container?.querySelector('[data-streamdown="strong"]')).toBeNull();
+    expect(container?.querySelector('strong')).toBeNull();
     expect(container?.textContent).toContain('**');
   });
 
   it('keeps raw HTML escaped by default', async () => {
     await renderMarkdown('Hello <strong>raw</strong>.');
 
-    expect(container?.querySelector('[data-streamdown="strong"]')).toBeNull();
+    expect(container?.querySelector('strong')).toBeNull();
     expect(container?.textContent).toContain('<strong>raw</strong>');
   });
 
@@ -434,7 +428,7 @@ End of synthetic document.`);
   it('renders sanitized raw HTML when allowHtml is enabled', async () => {
     await renderMarkdown('Hello <strong>raw</strong>.', { allowHtml: true });
 
-    expect(container?.querySelector('[data-streamdown="strong"]')?.textContent).toBe('raw');
+    expect(container?.querySelector('strong')?.textContent).toBe('raw');
   });
 
   it('keeps inline LaTeX literal while rendering Mermaid blocks', async () => {
@@ -548,24 +542,56 @@ End of synthetic document.`);
     expect(fileLinkButton).not.toBeNull();
   });
 
-  it('keeps incomplete streaming Markdown rendered without per-word animation spans', async () => {
-    await renderMarkdown(
-      ['Streaming words are still arriving.', '', '```ts', 'const answer = 42;'].join('\n'),
-      { isStreaming: true }
-    );
+  it('fades a streaming turn in, then hands the finished text to the static renderer', async () => {
+    await renderMarkdown('Streaming words are still arriving.', { isStreaming: true });
+    await waitForElement('.streamdown-animated');
 
-    expect(container?.textContent).toContain('Streaming words are still arriving.');
-    expect(await waitForElement('[data-streamdown="code-block"]')).not.toBeNull();
-    expect(container?.querySelector('[data-sd-animate]')).toBeNull();
+    vi.useFakeTimers();
+    try {
+      await renderMarkdown('Streaming words are still arriving. Done.', { isStreaming: false });
+      expect(container?.querySelector('.streamdown-animated')).not.toBeNull();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1000);
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expect(container?.querySelector('.streamdown-animated')).toBeNull();
+    expect(container?.querySelector('.stream-char')).toBeNull();
+    expect(container?.textContent).toBe('Streaming words are still arriving. Done.');
   });
 
-  it('does not render Streamdown caret placeholders while streaming', async () => {
-    await renderMarkdown('Streaming text should not reserve a cursor placeholder.', {
-      isStreaming: true,
-    });
+  it('shows a mounted stream immediately while still animating later additions', async () => {
+    const existingText = 'Earlier paragraph.\n\nAlready visible before reopening.';
+    vi.useFakeTimers();
+    try {
+      await renderMarkdown(existingText, { isStreaming: true });
+      expect(container?.textContent).toContain('Already visible before reopening.');
+      expect(container?.querySelector('.stream-char:not(.stream-char-revealed)')).toBeNull();
+      expect(container?.querySelector('.stream-block')).toBeNull();
 
-    expect(container?.innerHTML).not.toContain('--streamdown-caret');
-    expect(container?.innerHTML).not.toContain('content-[var(--streamdown-caret)]');
+      await act(async () => {
+        root?.render(null);
+      });
+      await renderMarkdown(existingText, { isStreaming: true });
+      expect(container?.textContent).toContain('Already visible before reopening.');
+      expect(container?.querySelector('.stream-char:not(.stream-char-revealed)')).toBeNull();
+      expect(container?.querySelector('.stream-block')).toBeNull();
+
+      await renderMarkdown(`${existingText} New output arrives.`, {
+        isStreaming: true,
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(250);
+      });
+
+      expect(container?.textContent).toContain('New');
+      expect(container?.querySelector('.stream-char:not(.stream-char-revealed)')).not.toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('keeps GFM autolinks available across streaming renders', async () => {
@@ -610,7 +636,7 @@ End of synthetic document.`);
 
     console.info(
       [
-        'markdown streamdown streaming render',
+        'markdown streaming render',
         `finalChars=${finalText.length}`,
         `cumulativeRenderedInputChars=${cumulativeRenderedInputChars}`,
         `amplification=${amplification.toFixed(1)}x`,
