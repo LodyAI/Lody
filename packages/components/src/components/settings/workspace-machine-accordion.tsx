@@ -9,7 +9,7 @@ import { colors } from '@lody/ui/tokens/colors.stylex';
 import { corner, duration, ease, focus, radius, space } from '@lody/ui/tokens/scales.stylex';
 import { UserAvatar } from '@/components/user-avatar';
 import { withClassName } from '@/lib/stylex';
-import { settingsSurface as surface } from './surface';
+import { settingsRecordsCard } from './compact-layout';
 import type { MachineTabOwner } from './machine-tab-list';
 import { settingsType as type } from './type.stylex';
 
@@ -226,7 +226,7 @@ export function WorkspaceMachineCollapsedRow({
   onExpand: () => void;
 }) {
   return (
-    <section {...stylex.props(surface.card, styles.card)}>
+    <section {...stylex.props(settingsRecordsCard, styles.card)}>
       <WorkspaceMachineAccordionRow meta={meta} expanded={false} onToggle={onExpand} />
     </section>
   );
@@ -313,7 +313,7 @@ export function WorkspaceMachineExpandedSection({
   }, []);
 
   return (
-    <section {...stylex.props(surface.card, styles.card, styles.expandedCard)}>
+    <section {...stylex.props(settingsRecordsCard, styles.card, styles.expandedCard)}>
       <WorkspaceMachineAccordionRow meta={meta} expanded onToggle={onCollapse} />
       <div
         {...stylex.props(!detailReady && styles.detailPending)}

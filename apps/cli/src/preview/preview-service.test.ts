@@ -54,6 +54,19 @@ function fixture(workspace = workspaceId) {
     agentType: 'codex',
   };
   const changes: SessionPreviewDocState[] = [];
+  const sessionDoc = {
+    getPreviewState: vi.fn(async () => preview),
+    setPreviewState: vi.fn(async (next: SessionPreviewDocState) => {
+      preview = next;
+      changes.push(next);
+    }),
+  };
+  const repo = {
+    getDocMeta: vi.fn(async () => ({ meta })),
+    upsertDocMeta: async (_room: string, patch: Partial<SessionMeta>) => {
+      meta = { ...meta, ...patch };
+    },
+  };
   const service = new PreviewService({
     logger,
     machineId,
@@ -68,22 +81,11 @@ function fixture(workspace = workspaceId) {
       }),
     },
     workspaceDocument: {
-      getOrCreateSessionDoc: async () => ({
-        getPreviewState: async () => preview,
-        setPreviewState: async (next) => {
-          preview = next;
-          changes.push(next);
-        },
-      }),
-      repo: {
-        getDocMeta: async () => ({ meta }),
-        upsertDocMeta: async (_room, patch) => {
-          meta = { ...meta, ...patch };
-        },
-      },
+      getOrCreateSessionDoc: async () => sessionDoc,
+      repo,
     },
   });
-  return { service, changes, state: () => preview, meta: () => meta };
+  return { service, changes, sessionDoc, repo, state: () => preview, meta: () => meta };
 }
 
 describe('PreviewService Quick Tunnel lifecycle', () => {
@@ -121,6 +123,7 @@ describe('PreviewService Quick Tunnel lifecycle', () => {
       const exited = Promise.withResolvers<CloudflaredError | null>();
       return {
         origin: 'https://synthetic-preview.trycloudflare.com',
+        registered: Promise.resolve(),
         closed: exited.promise,
         diagnostic: () => undefined,
         stop: async () => {
@@ -162,6 +165,202 @@ describe('PreviewService Quick Tunnel lifecycle', () => {
     return result;
   }
 
+  it('starts reported preparation in the background and joins same-origin reports and Browser clicks', async () => {
+    const downloading = Promise.withResolvers<void>();
+    const downloaded = Promise.withResolvers<string>();
+    vi.mocked(ensureCloudflaredBinary).mockImplementationOnce(async () => {
+      downloading.resolve();
+      return downloaded.promise;
+    });
+    const { service, state, changes } = setup();
+    const request = createRequest();
+    const report = { ...request, type: 'session/preview-candidate-report' as const };
+    // The report must resolve while the download is still deliberately blocked.
+    expect((await service.reportCandidate(report, userId)).success).toBe(true);
+    await downloading.promise;
+    const preparing = state().connection;
+    expect(preparing?.status).toBe('creating');
+    expect((await service.reportCandidate(report, userId)).success).toBe(true);
+    const opened = service.createPreview(request);
+    downloaded.resolve('/synthetic/cloudflared');
+    const result = await opened;
+    expect(result.success).toBe(true);
+    expect(result.connection?.status).toBe('active');
+    expect(result.connection?.endpointId).toBe(preparing?.endpointId);
+    expect(
+      changes
+        .filter((change) => change.connection?.status === 'creating')
+        .every((change) => change.connection?.endpointId === preparing?.endpointId)
+    ).toBe(true);
+    expect(
+      await (await fetch(proxyOrigin + new URL(result.connection?.publicUrl ?? '').search)).text()
+    ).toBe('development server');
+  });
+
+  it.each(['download', 'readiness'] as const)(
+    'revokes eager preparation during %s without publishing a late active endpoint',
+    async (phase) => {
+      const entered = Promise.withResolvers<AbortSignal>();
+      const blockUntilAborted = async (signal: AbortSignal | undefined) => {
+        if (!signal) throw new Error('Expected preparation cancellation signal');
+        entered.resolve(signal);
+        await new Promise<never>((_resolve, reject) => {
+          if (signal.aborted) reject(signal.reason);
+          else signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+        });
+      };
+      if (phase === 'download') {
+        vi.mocked(ensureCloudflaredBinary).mockImplementationOnce(async ({ signal }) => {
+          await blockUntilAborted(signal);
+          return '/synthetic/cloudflared';
+        });
+      } else {
+        vi.mocked(verifyPreviewTunnelRoundTrip).mockImplementationOnce(({ signal }) =>
+          blockUntilAborted(signal)
+        );
+      }
+      const { service, state, changes } = setup();
+      const request = createRequest();
+      await service.reportCandidate(
+        { ...request, type: 'session/preview-candidate-report' },
+        userId
+      );
+      const signal = await entered.promise;
+      const opening = service.createPreview(request);
+      const revoked = await service.revokePreview({ ...request, type: 'session/preview-revoke' });
+      expect(revoked.success).toBe(true);
+      expect(signal.aborted).toBe(true);
+      expect((await opening).success).toBe(false);
+      expect(state().connection?.closedReason).toBe('revoked');
+      expect(changes.some((change) => change.connection?.status === 'active')).toBe(false);
+      if (phase === 'readiness') await expect(fetch(proxyOrigin)).rejects.toThrow();
+    }
+  );
+
+  it('cancels queued reported preparation during cleanup before it acquires a tunnel', async () => {
+    const entered = Promise.withResolvers<void>();
+    vi.mocked(ensureCloudflaredBinary).mockImplementationOnce(async ({ signal }) => {
+      entered.resolve();
+      return new Promise<string>((_resolve, reject) =>
+        signal?.addEventListener('abort', () => reject(signal.reason), { once: true })
+      );
+    });
+    const { service, state, changes } = setup();
+    const request = createRequest();
+    const manual = service.createPreview(request);
+    await entered.promise;
+    // This eager start is queued behind the manual owner; it has no active
+    // cancellation entry yet, so cancelling only the current owner is insufficient.
+    await service.reportCandidate({ ...request, type: 'session/preview-candidate-report' }, userId);
+    await service.closeAllActiveTunnelsForCleanup('queued preparation cleanup');
+    expect((await manual).success).toBe(false);
+    expect(state().connection?.closedReason).toBe('session_ended');
+    expect(changes.some((change) => change.connection?.status === 'active')).toBe(false);
+    expect(
+      new Set(changes.map((change) => change.connection?.endpointId).filter(Boolean)).size
+    ).toBe(1);
+  });
+
+  it('invalidates a report still reading session metadata during full cleanup', async () => {
+    const entered = Promise.withResolvers<void>();
+    const resume = Promise.withResolvers<void>();
+    const owner = setup();
+    owner.repo.getDocMeta.mockImplementationOnce(async () => {
+      entered.resolve();
+      await resume.promise;
+      return { meta: owner.meta() };
+    });
+    const report = owner.service.reportCandidate(
+      { ...createRequest(), type: 'session/preview-candidate-report' },
+      userId
+    );
+    await entered.promise;
+    await owner.service.closeAllActiveTunnelsForCleanup('cleanup during report validation');
+    resume.resolve();
+    await report;
+    expect(owner.state()).toEqual({});
+    expect(owner.changes).toEqual([]);
+  });
+
+  it('rejects a stale report publication after a newer candidate has started preparation', async () => {
+    const entered = Promise.withResolvers<void>();
+    const resume = Promise.withResolvers<void>();
+    const downloading = Promise.withResolvers<void>();
+    const downloaded = Promise.withResolvers<string>();
+    vi.mocked(ensureCloudflaredBinary).mockImplementationOnce(async () => {
+      downloading.resolve();
+      return downloaded.promise;
+    });
+    const owner = setup();
+    owner.repo.getDocMeta.mockImplementationOnce(async () => {
+      entered.resolve();
+      await resume.promise;
+      return { meta: owner.meta() };
+    });
+    const request = createRequest();
+    const old = owner.service.reportCandidate(
+      {
+        ...request,
+        target: { ...request.target, path: '/old' },
+        type: 'session/preview-candidate-report',
+      },
+      userId
+    );
+    await entered.promise;
+    const current = await owner.service.reportCandidate(
+      {
+        ...request,
+        target: { ...request.target, path: '/current' },
+        type: 'session/preview-candidate-report',
+      },
+      userId
+    );
+    await downloading.promise;
+    const creating = owner.state().connection;
+    resume.resolve();
+    await old;
+    const afterStaleReport = owner.state();
+    const opened = owner.service.createPreview(request);
+    downloaded.resolve('/synthetic/cloudflared');
+    const active = await opened;
+    expect(afterStaleReport.candidate).toEqual(current.candidate);
+    expect(afterStaleReport.connection).toEqual(creating);
+    expect(active.connection?.endpointId).toBe(creating?.endpointId);
+    expect(owner.state().candidate).toEqual(current.candidate);
+  });
+
+  it('rechecks report generation after an awaited document read before publishing', async () => {
+    const entered = Promise.withResolvers<void>();
+    const resume = Promise.withResolvers<void>();
+    const owner = setup();
+    owner.sessionDoc.getPreviewState
+      .mockImplementationOnce(async () => owner.state())
+      .mockImplementationOnce(async () => {
+        const snapshot = owner.state();
+        entered.resolve();
+        await resume.promise;
+        return snapshot;
+      });
+    const request = createRequest();
+    const older = owner.service.reportCandidate({
+      ...request,
+      target: { ...request.target, path: '/old' },
+      type: 'session/preview-candidate-report',
+    });
+    await entered.promise;
+    // Starting B synchronously invalidates A even though A already passed the
+    // initial write-queue guard and is now awaiting its document snapshot.
+    const newer = owner.service.reportCandidate({
+      ...request,
+      target: { ...request.target, path: '/current' },
+      type: 'session/preview-candidate-report',
+    });
+    resume.resolve();
+    const [, current] = await Promise.all([older, newer]);
+    expect(owner.changes).toEqual([{ candidate: current.candidate }]);
+    expect(owner.state().candidate).toEqual(current.candidate);
+  });
+
   it('shares the machine limit across workspaces and releases slots after revoke and failed creation', async () => {
     const owners = [];
     for (let index = 0; index < DEFAULT_PREVIEW_MAX_ACTIVE_TUNNELS_PER_MACHINE; index++) {
@@ -183,7 +382,24 @@ describe('PreviewService Quick Tunnel lifecycle', () => {
       Array(DEFAULT_PREVIEW_MAX_ACTIVE_TUNNELS_PER_MACHINE - 1).fill('active')
     );
     vi.mocked(ensureCloudflaredBinary).mockRejectedValueOnce(new Error('Download unavailable'));
-    expect((await extra.service.createPreview(request)).error).toBe('tunnel_creation_failed');
+    const failed = await extra.service.createPreview(request);
+    const creating = extra.changes
+      .filter((change) => change.connection?.status === 'creating')
+      .at(-1)?.connection;
+    expect(creating?.endpointId).toEqual(expect.any(String));
+    expect(failed.error).toBe('tunnel_creation_failed');
+    expect(failed.connection).toEqual({
+      ...creating,
+      status: 'failed',
+      updatedAt: expect.any(Number),
+      error: {
+        stage: 'connect',
+        errorCode: 'tunnel_creation_failed',
+        message: expect.stringContaining('Download unavailable'),
+        retryable: true,
+      },
+    });
+    expect(extra.state().connection).toEqual(failed.connection);
     expect((await extra.service.createPreview(request)).success).toBe(true);
     expect(extra.state().connection?.status).toBe('active');
     expect(await (await fetch(`http://127.0.0.1:${port}`)).text()).toBe('development server');

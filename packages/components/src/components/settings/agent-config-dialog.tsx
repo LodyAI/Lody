@@ -958,6 +958,7 @@ const BUILTIN_OPTIONS: AgentTypeOption[] = [
     kind: 'builtin',
     value: 'builtin:grok',
     label: 'Grok',
+    descriptionKey: 'settings.agent.dialog.option.grok.description',
     descriptionDefault: 'xAI Grok coding agent runtime',
     cliType: 'builtin',
     agentType: 'grok',
@@ -1143,8 +1144,8 @@ export type BinaryActionArgs = {
 export type AgentConfigDialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  /** Render above an already-open dialog, such as the desktop settings modal. */
-  nestedInDialog?: boolean;
+  /** Fires when the open/close transition finishes — the caller's cleanup hook. */
+  onOpenChangeComplete?: (open: boolean) => void;
   mode: AgentConfigDialogMode;
   machine: MachineViewMeta;
   onSubmit: (payload: AgentConfigSubmitPayload) => Promise<void>;
@@ -1216,6 +1217,49 @@ export function buildPresetCreateForm(presetId: string): Partial<AgentConfigForm
     presetCredentialModeId: credentialMode?.id,
     presetBaseUrlOptionId: getDefaultBaseUrlOptionId(credentialMode),
   };
+}
+
+/** A provider a person can add from outside the dialog, opened pre-selected. */
+export type AddableProvider = {
+  key: string;
+  label: string;
+  description: string | undefined;
+  cliType: AgentConfigCliType;
+  agentType: string;
+  /** Set for a preset, whose config carries the brand rather than its own runtime. */
+  brandId: AgentBrandId | undefined;
+  initialForm: Partial<AgentConfigFormData>;
+};
+
+/**
+ * The builtin runtimes and the presets, in the dialog's order, each with the
+ * form that opens the dialog straight on it. Experimental runtimes, registry
+ * agents and custom commands stay behind the dialog's own rail.
+ */
+export function listAddableProviders(t: Translate): AddableProvider[] {
+  const builtins = BUILTIN_OPTIONS.filter((option) => !option.experimental).map((option) => ({
+    key: option.value,
+    label: getOptionLabel(t, option),
+    description: getOptionDescription(t, option) ?? option.descriptionDefault,
+    cliType: option.cliType,
+    agentType: option.agentType,
+    brandId: undefined,
+    initialForm: {
+      cliType: option.cliType,
+      agentType: option.agentType,
+      name: getOptionLabel(t, option),
+    },
+  }));
+  const presets = PRESETS.map((preset) => ({
+    key: `preset:${preset.id}`,
+    label: t(preset.labelKey, preset.label),
+    description: t(preset.descriptionKey, preset.descriptionDefault),
+    cliType: preset.cliType,
+    agentType: preset.agentType,
+    brandId: preset.brandId,
+    initialForm: buildPresetCreateForm(preset.id),
+  }));
+  return [...builtins, ...presets];
 }
 
 function resolveCredentialModeBaseUrl(
@@ -1421,7 +1465,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
   const {
     open,
     onOpenChange,
-    nestedInDialog = false,
+    onOpenChangeComplete,
     mode,
     machine,
     onSubmit,
@@ -3151,15 +3195,12 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
   );
 
   return (
-    <Dialog.Root open={open} onOpenChange={onOpenChange}>
+    <Dialog.Root
+      open={open}
+      onOpenChange={onOpenChange}
+      onOpenChangeComplete={onOpenChangeComplete}
+    >
       <Dialog.Content
-        backdropClassName={
-          nestedInDialog
-            ? // Radix portals are siblings under body. Matching the parent content's
-              // z-index lets this later overlay cover it without stacking another /80 veil.
-              'z-[var(--z-dialog)] bg-black/20'
-            : undefined
-        }
         // On the narrow layout the picker and form headers carry their own
         // left-aligned back button, which doubles as a close on the root step, so
         // a corner cross would be redundant and easy to hit by accident.

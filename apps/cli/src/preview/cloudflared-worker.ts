@@ -51,6 +51,12 @@ try {
   try {
     controller.signal.throwIfAborted();
     await send({ type: 'origin', origin: child.origin });
+    void child.registered.then(
+      () => send({ type: 'registered' }).catch(stop),
+      () => {
+        /* Native failure is reported by child.closed below. */
+      }
+    );
     const aborted = new Promise<null>((resolve) => {
       if (controller.signal.aborted) resolve(null);
       else controller.signal.addEventListener('abort', () => resolve(null), { once: true });

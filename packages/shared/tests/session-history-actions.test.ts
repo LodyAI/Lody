@@ -105,6 +105,70 @@ for (const backend of ['loro'] as const)
       expect(history[1]).toMatchObject({ finished: true, endedAt: 42 });
       expect(history[2]?.finished).toBeUndefined();
     });
+    it('sums token usage on the selected assistant, across finish and reopen', async () => {
+      const data = create();
+      await seed(data);
+      const usage = (inputTokens: number, cacheReadInputTokens = 0) => ({
+        inputTokens,
+        outputTokens: 5,
+        cacheReadInputTokens,
+        cacheCreationInputTokens: 1,
+        reasoningOutputTokens: 2,
+      });
+      await data.commands.applyHistoryAction({
+        kind: 'assistant-token-usage',
+        turnId: 'a',
+        add: usage(10, 1000),
+      });
+      await data.commands.applyHistoryAction({
+        kind: 'finish-assistant',
+        turnId: 'a',
+        endedAt: 42,
+      });
+      // A late report after finalization adds instead of replacing.
+      await data.commands.applyHistoryAction({
+        kind: 'assistant-token-usage',
+        turnId: 'a',
+        add: usage(3),
+      });
+      const history = await data.history.readAll();
+      expect(history[1]?.tokenUsage).toEqual({
+        inputTokens: 13,
+        outputTokens: 10,
+        cacheReadInputTokens: 1000,
+        cacheCreationInputTokens: 2,
+        reasoningOutputTokens: 4,
+      });
+      expect(history[2]?.tokenUsage).toBeUndefined();
+      expect(
+        (
+          await data.commands.applyHistoryAction({
+            kind: 'assistant-token-usage',
+            turnId: 'u',
+            add: usage(1),
+          })
+        ).matched
+      ).toBe(false);
+    });
+    it('rejects malformed token usage without changing history', async () => {
+      const data = create();
+      await seed(data);
+      const before = await data.history.readAll();
+      await expect(
+        data.commands.applyHistoryAction({
+          kind: 'assistant-token-usage',
+          turnId: 'a',
+          add: {
+            inputTokens: -1,
+            outputTokens: 0,
+            cacheReadInputTokens: 0,
+            cacheCreationInputTokens: 0,
+            reasoningOutputTokens: 0,
+          },
+        })
+      ).rejects.toThrow();
+      expect(await data.history.readAll()).toEqual(before);
+    });
     it('rejects malformed content without changing history', async () => {
       const data = create();
       await seed(data);

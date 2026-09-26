@@ -2184,17 +2184,6 @@ pre,
   }
 }
 
-/* Mobile mention picker: collapse the menu's inner `scrollbar-pro
-   max-h-[260px] overflow-auto` list into a single scroller owned by the
-   docked panel. Two nested scroll containers (panel + inner cap) made
-   touch scrolling flaky and pinned the list to 260px regardless of the
-   panel's own max-height. Inside the mobile panel the inner list should
-   just flow; the panel scrolls. */
-.mention-mobile-panel .scrollbar-pro {
-  max-height: none !important;
-  overflow: visible !important;
-}
-
 /* Usage heatmap: each day pops in with a short scale+fade. The stagger is
    driven by an inline `animation-delay` per column, so the reveal sweeps
    left to right across the year instead of flashing all 371 cells at once.

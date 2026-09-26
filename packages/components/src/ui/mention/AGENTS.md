@@ -90,6 +90,12 @@ Shared mention primitive used by composer autocomplete surfaces.
   classes; viewport-only caps let wide menus escape the composer.
 - Mobile mention content bypasses floating-ui and docks through
   `MentionMobilePanel`; desktop positioning classes do not control mobile layout.
+  The docked strip is the only scroller: menus pass `docked` and drop their own.
+- Desktop content, the mobile strip and rows share `mention-surface.ts`: the
+  `@lody/ui` popup surface restated in semantic tokens (no border, no Tailwind).
+  StyleX cannot read `data-highlighted`, so `ui/mention.tsx` derives the row
+  highlight from `highlightedItem.value`; row values must stay unique per menu.
+  The entrance rises from the side the menu landed on (`--mention-rise`).
 
 ## Files
 

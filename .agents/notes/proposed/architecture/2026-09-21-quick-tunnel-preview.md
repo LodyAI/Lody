@@ -324,3 +324,132 @@ response coverage. CLI production build passed. The outer full build hit the
 mobile Vite build's Node heap limit; this is not a successful full-product build.
 Running application processes were not replaced. These observations do not complete
 the broader Quick Tunnel acceptance gates above.
+
+## DNS publication gate (2026-09-26)
+
+Correction to the earlier propagation interpretation: on one macOS proxy/TUN
+network, concurrent requests to the same newly allocated tunnel reached the
+synthetic page at 15.2 seconds when proxy CONNECT addressed a DNS-observed edge
+IP with the original SNI and certificate validation. Ordinary hostname proxy
+requests only succeeded at 71.4 seconds. DNS initially returned NXDOMAIN and
+then positive records at 12.8 seconds. This strongly implicates negative caching
+in the hostname network path; the exact cache owner was not inspected. Skipping
+HTTP proxy configuration still traversed the system TUN, so that was not a clean
+network bypass. Fixed IPs were a diagnostic control, not a product solution.
+
+The implementation now waits for native registration and DNS publication before
+the first public GET. A per-startup Node Resolver queries configured DNS servers
+without populating OS hostname caches. It retries negative answers and cancels
+outstanding queries with the shared 90-second readiness deadline. If direct DNS
+transport is unavailable, it logs a bounded diagnostic and retains normal proxy
+HTTP verification. This preserves proxy-only networks without adding a DoH
+provider or hardcoded destination. Only the authenticated public proxy response
+activates an endpoint; local viewing and active health checks bypass the gate.
+
+Two real-network runs through the modified QuickTunnelSession, IPC worker,
+managed cached binary and authenticated local proxy reached ready in 12.1 and
+9.6 seconds. Both succeeded on their first public HTTP request. Earlier ordinary
+hostname runs took 67.3 and 71.4 seconds. These are local samples, not a
+cross-network latency guarantee. The temporary connectors and fixture servers
+were released. Existing browser iframe/WS acceptance limits remain.
+
+Verification: all 83 CLI preview tests pass, including deterministic negative-cache,
+registration, cancellation/deadline, proxy-only DNS failure, and process/IPC cleanup
+coverage. CLI type checking and repository documentation checks pass. The running
+desktop application was not replaced by these source-level validations.
+
+## Prepare on Agent report and preserve Browser content (2026-09-26)
+
+The requested interaction now starts the remote endpoint when an active Agent
+reports its loopback server, rather than making the first Browser click pay the
+entire startup cost. This changes the earlier explicit-click-only policy. The
+local dispatch boundary supplies the active execution user separately from the
+report; only the Session initiator qualifies. Remote reports and missing invocation
+identity cannot trigger preparation, and local-only platforms keep candidate-only
+behavior. No wire fields or persisted metadata are added.
+
+Background preparation uses the existing per-Session lifecycle queue, target
+validation, endpoint capabilities, machine slots, rate limits and idle expiry.
+Same-origin reports join/reuse; replacing the origin, revoke and cleanup cancel
+obsolete preparation. Browser clicks join pending preparation before their normal
+authorization/reuse path. The trade-off is opening a capability-protected endpoint
+and occupying a machine slot even if the user never opens Browser; idle expiry
+remains the bound. This avoids making renderer mounting the owner of preparation.
+
+Inspection also found that the navigation-progress branch temporarily unmounted
+existing content, and a failed status RPC cleared the viewer URL. Keep the current
+page in both cases, while authoritative closed/failed states still invalidate it.
+The existing frame cache remains browser-dependent across a full panel unmount;
+this does not promise persistence across app reload or idle expiry.
+
+PR preparation adds independent authorization, race, scope and simplification
+reviews. They found two lifecycle gaps: late candidate writes could overwrite a
+newer report, and global cleanup missed reports still probing. Candidate writes
+now use generation guards inside a shared serialized preview-state write queue;
+global cleanup invalidates those reports before cancelling queued preparation.
+Cross-review and a fresh adversarial review found no remaining blocking issue.
+
+Initial verification covered CLI/UI type checks, CLI production build,
+formatting, documentation and static/boundary checks. The subsequent behavioral
+verification and review corrections are recorded below; live UI/network
+validation of the eager-start policy remains outstanding.
+
+## Review correction and cancellation ablation (2026-09-26)
+
+[PR #990 review](https://github.com/LodyAI/Lody/pull/990#discussion_r4109592954)
+identified a valid proxy-only-network regression: local split/filtering DNS may
+return persistent ENOTFOUND/ENODATA although the HTTP proxy can resolve the host.
+Three fake-clock reproductions (both errors and an empty answer) failed before
+the correction. DNS now has a ten-second publication budget, including in-flight
+query cancellation, then falls back to the existing authenticated HTTP route.
+Parent cancellation, edge registration, marker validation and the shared 90-second
+deadline remain mandatory. This bound is a compatibility trade-off: unusually slow
+publication may still encounter the original hostname-cache delay after fallback.
+
+Ablations used the same deterministic lifecycle suite, changing one production
+mechanism at a time and restoring rejected variants immediately:
+
+| Variant | Observation | Decision |
+| --- | --- | --- |
+| Remove eager task registration in the manual `cancelled` map | Lifecycle suite passed before and after; revoke during download/readiness and queued cleanup still cancel through `reportedStarts` | Keep deletion: one cancellation owner for eager work |
+| Remove the final report-generation check after an awaited document read | Controlled stale-write regression fails immediately | Restore/retain guard |
+| Remove full-cleanup report invalidation | Controlled report-resume-after-cleanup regression fails immediately | Restore/retain invalidation |
+
+The extra `reportedStarts` keys in full cleanup are retained: the operation queue
+can remove a completed operation before the reported entry's later microtask
+cleanup, while a Browser caller still needs its cancellation state. The first
+write guard is also retained to avoid reading documents for already obsolete
+reports. No simplification is justified solely by a line appearing redundant.
+
+Coverage adds explicit-signal cases for background startup, same-origin coalescing,
+early Browser joining, pending and queued cancellation, cleanup during validation,
+and stale candidate publication. DNS coverage includes proxy fallback, marker
+rejection and in-flight query cancellation without bypassing edge registration.
+No live network performance claim is made for this correction.
+
+Final verification passed: all 95 preview tests; full OSS `pnpm check` (including
+2,976 CLI, 4,107 components and 194 Electron tests); CLI production build;
+formatting and documentation checks. Fresh adversarial review found no remaining
+P0/P1. Live UI/network validation of the eager-start policy remains outstanding.
+
+The second ablation pass removes duplicate failed-connection construction and
+publication in `createPreviewExclusive`, delegating to the existing
+`failCreatingConnection` method. The strengthened failure/slot regression checks
+endpoint provenance, the error shape, persisted state and successful slot reuse.
+The baseline and simplified variants pass; the complete preview suite passes all
+97 cases. Removing failed-state publication as a negative control fails the state
+assertion, so that write remains inside the shared method.
+
+Replacing native/IPC resolver placeholders with `Promise.withResolvers` passed
+behavior tests but failed production typechecking: CLI exposes only ES2022 APIs.
+That variant was restored rather than expanding compilation scope for this cleanup.
+Negative controls also removed native registration rejection, IPC registration
+rejection, and the independent readiness abort wait. They failed one, one, and
+two controlled assertions respectively, so all three mechanisms remain. Crash
+checks observe registration failure at the process-closure barrier; fake-clock
+cases check cancellation/deadline after DNS has already completed. Settled DNS
+can no longer reject the combined registration wait. The experiments use explicit
+events and fake time, not test timeouts as evidence.
+
+Final second-pass verification: full OSS `pnpm check`, CLI production build,
+formatting and documentation checks passed. Independent review found no P0/P1.

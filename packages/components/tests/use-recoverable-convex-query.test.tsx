@@ -237,7 +237,7 @@ describe('useRecoverableConvexQuery', () => {
     // The crash screen shows the error text it was given, except for raw
     // backend payloads: those stay behind the collapsed details + Copy, so the
     // user is not shown server internals they cannot act on.
-    expect(container.textContent).toContain('Lody hit an unexpected error');
+    expect(container.textContent).toContain('Lody hit a snag');
     expect(container.textContent).not.toContain('CONVEX');
     expect(container.textContent).not.toContain('Server Error');
   });

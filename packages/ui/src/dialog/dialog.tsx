@@ -6,7 +6,13 @@ import { appendClassName } from '../internal/class-name';
 import { CrossGlyph } from '../internal/glyphs';
 import { PopupContainerProvider, type PopupContainer } from '../popup/portal-container';
 import { useForcedThemeClassNames } from '../theme/theme';
-import { DialogFooter, DialogHeader, usePanelContainer } from './parts';
+import {
+  DialogFooter,
+  DialogHeader,
+  ModalDepthProvider,
+  useModalDepth,
+  usePanelContainer,
+} from './parts';
 import { isHidden, modal } from './surface';
 
 type PopupBaseProps = ComponentProps<typeof BaseDialog.Popup>;
@@ -71,17 +77,33 @@ const styles = stylex.create({
   portal: { display: 'contents' },
 });
 
-/** The overlay under the panel, and whatever the host put on it. */
+/**
+ * The overlay under the panel, and whatever the host put on it.
+ *
+ * `forceRender` is unconditional on purpose: Base UI mounts no backdrop for a
+ * dialog nested inside another (`useRenderDialogRoot` marks such a root
+ * `nested`), which would leave a stacked dialog dimming nothing — the one
+ * surface a nested overlay exists to cover is the panel it was opened from.
+ * The overlay rides the same z rung as the panels (`modal.backdrop`), so
+ * portal DOM order alone puts it above the earlier panel and below its own,
+ * and `modal.backdropNested` keeps the veil light over an already-dimmed
+ * stack.
+ */
 export const DialogBackdrop = forwardRef<HTMLDivElement, DialogBackdropProps>(
   function DialogBackdrop({ className, children, ...rest }, ref) {
+    const nested = useModalDepth() > 0;
     return (
       <BaseDialog.Backdrop
         ref={ref}
+        forceRender
         {...rest}
         className={(state) =>
           appendClassName(
-            stylex.props(modal.backdrop, isHidden(state.transitionStatus) && modal.backdropHidden)
-              .className,
+            stylex.props(
+              modal.backdrop,
+              nested && modal.backdropNested,
+              isHidden(state.transitionStatus) && modal.backdropHidden
+            ).className,
             className
           )
         }
@@ -145,7 +167,9 @@ export const DialogContent = forwardRef<HTMLDivElement, DialogContentProps>(func
           )
         }
       >
-        <PopupContainerProvider container={panel}>{children}</PopupContainerProvider>
+        <PopupContainerProvider container={panel}>
+          <ModalDepthProvider>{children}</ModalDepthProvider>
+        </PopupContainerProvider>
         {closeButton ? (
           <BaseDialog.Close
             render={
