@@ -2094,29 +2094,6 @@ pre,
   }
 }
 
-/* An agent runtime whose wait has no denominator (the ACP handshake) gets the
-   same ring as a download, on an orbit instead of a fill. Transform-only and
-   CSS-driven, so React stays idle while it spins. The class sits on an HTML
-   wrapper around the arc's own `<svg>`, not on an SVG `<g>`: Chromium cannot
-   composite SVG transform animations at DPR≠1 (see the spinner rule above). */
-@keyframes agent-readiness-orbit {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-.agent-readiness-orbit {
-  animation: agent-readiness-orbit 1.4s linear infinite;
-  transform-origin: 50% 50%;
-  will-change: transform;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .agent-readiness-orbit {
-    animation: none;
-  }
-}
-
 /* Live agent status shimmer (the look of shadcn's text shimmer, driven by the
    compositor). A soft band in the page background color slides across the
    label: over glyphs it fades them toward the background, over the empty

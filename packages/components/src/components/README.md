@@ -3,6 +3,13 @@
 Binding rules live in [AGENTS.md](AGENTS.md); this index explains ownership.
 Child directories such as `sessions/`, `mobile/`, `chat/`, and `archive/` own their scoped rules.
 
+| Area                | Entry points                                                                                                     | Responsibility                                        |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------- |
+| Sidebar             | [`loro-sidebar.tsx`](loro-sidebar.tsx), [`session-list.tsx`](session-list.tsx)                                   | Organizes workspace and session navigation.           |
+| Desktop layout      | [`web-workspace-layout.tsx`](web-workspace-layout.tsx), [`sidebar-update-banner.tsx`](sidebar-update-banner.tsx) | Owns the shell's safe areas and update notice.        |
+| Provider readiness  | [`shared/agent-readiness-mark.tsx`](shared/agent-readiness-mark.tsx)                                             | Draws setup state across settings and onboarding.     |
+| Conversation access | [`session-sharing.tsx`](session-sharing.tsx), [`sharing/`](sharing/)                                             | Presents team visibility and static sharing controls. |
+
 ## Sidebar and session rows
 
 The sidebar spans `loro-sidebar.tsx`, `loro-app-sidebar.tsx`, `session-list.tsx`, and
@@ -63,6 +70,17 @@ and [display preference](../../../../.agents/notes/implemented/feature/2026-09-2
   layout (`detectAppDeviceClass()` is `tablet`, viewport >= 768) with
   `viewport-fit=cover`, which is why desktop top/side padding also matters there.
   The composer owns its bottom edge; a global bottom inset would double-pad it.
+
+## Provider readiness
+
+[`shared/agent-readiness-mark.tsx`](shared/agent-readiness-mark.tsx) draws the
+provider's cold, arriving, and ready states in setup and onboarding. It owns its
+StyleX sizes, tones, `surface="avatar"` onboarding variant, and progress orbit;
+the indeterminate arc animates an HTML wrapper around the SVG to remain
+compositable on Retina displays. The migration keeps the previous rendered
+geometry and palette; its verification and the one product-theme colour bridge
+are recorded in the
+[StyleX migration note](../../../../.agents/notes/implemented/simplification/2026-09-26-agent-readiness-stylex.md).
 
 ## Conversation access
 
