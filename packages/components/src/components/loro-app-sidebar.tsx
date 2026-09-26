@@ -212,6 +212,13 @@ import {
 
 export type LoroAppSidebarProps = {
   className?: string;
+  /**
+   * Overlay presentation for the compact desktop layout: the sidebar is a
+   * floating sheet whose width the caller's wrapper owns, so it drops its
+   * resizable inline width and the resize sash. Desktop chrome (header,
+   * shortcuts, context menus) is unchanged — this is NOT the mobile drawer.
+   */
+  overlay?: boolean;
 };
 
 export type PendingLocalProjectRemoval = {
@@ -241,8 +248,6 @@ export type RemoveLocalProjectDialogProps = {
   onOpenChange: (open: boolean) => void;
   onPreflightCleanup: () => Promise<LocalProjectWorktreeCleanupPreflightResult>;
   onConfirm: (options: { cleanupWorktrees: boolean }) => void;
-  /** Nested inside another dialog (desktop settings). Matches MCP's overlay. */
-  backdropClassName?: string;
 };
 
 type PendingSessionShare = {
@@ -266,7 +271,6 @@ export function RemoveLocalProjectDialog({
   onOpenChange,
   onPreflightCleanup,
   onConfirm,
-  backdropClassName,
 }: RemoveLocalProjectDialogProps) {
   const { t } = useTranslation();
   const [cleanupWorktrees, setCleanupWorktrees] = useState(false);
@@ -314,7 +318,7 @@ export function RemoveLocalProjectDialog({
 
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
-      <Dialog.Content className="sm:max-w-lg" backdropClassName={backdropClassName}>
+      <Dialog.Content className="sm:max-w-lg">
         <Dialog.Header>
           <Dialog.Title>
             {t('sidebar.localProjects.remove.title', 'Remove “{{name}}” from Lody?', {
@@ -1509,7 +1513,7 @@ export const hasWorkspaceSidebarTopContent = (
   showGithubWorktrees: boolean
 ): boolean => localProjectSectionCount > 0 || showGithubWorktrees;
 
-export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
+export function LoroAppSidebar({ className, overlay = false }: LoroAppSidebarProps) {
   const { t, i18n } = useTranslation();
   const router = useRouter();
   // Narrow subscription: the sidebar only derives state from pathname + search,
@@ -3444,6 +3448,7 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
         onSettingsClicked={handleSettingsClicked}
         onInviteClicked={handleInviteClicked}
         onLinkRepoClicked={handleLinkRepoClicked}
+        overlay={overlay}
       />
 
       <SessionShareDialog

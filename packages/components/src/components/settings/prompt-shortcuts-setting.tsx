@@ -21,7 +21,6 @@ import { withClassName } from '@/lib/stylex';
 import { capturePostHogEvent } from '@/lib/posthog-analytics';
 import { getPromptShortcutAnalyticsProperties } from '@/lib/prompt-shortcut-analytics';
 import { usePromptShortcuts } from '../../providers/prompt-shortcut-provider';
-import { useIsMobile } from '@/hooks/use-mobile';
 import { useVisibleMachineMetas } from '@/hooks/use-visible-machine-metas';
 import { useVisibleLocalProjectsFromMachineIndex } from '@/hooks/use-visible-local-projects';
 import { useMachineFlockAgentConfigsForMachineIds } from '@/hooks/use-machine-flock-agent-configs';
@@ -49,6 +48,7 @@ import {
   settingsCatalog as catalog,
   settingsSurface as surface,
 } from './surface';
+import { settingsType as type } from './type.stylex';
 
 /** The well's ink without its alpha, for the chip cover below. */
 const WELL_INK = `rgb(from ${colors.wellBackground} r g b)`;
@@ -62,7 +62,7 @@ const styles = stylex.create({
   slug: {
     flexShrink: 0,
     fontFamily: 'var(--font-mono, ui-monospace, monospace)',
-    fontSize: '0.7em',
+    fontSize: type.caption,
     color: colors.secondaryLabel,
   },
   scope: { flexShrink: 0, marginInlineStart: 'auto' },
@@ -77,8 +77,8 @@ const styles = stylex.create({
   warning: {
     flexShrink: 0,
     marginInlineStart: 'auto',
-    fontSize: '0.7em',
-    lineHeight: 1.25,
+    fontSize: type.caption,
+    lineHeight: type.leading,
     color: colors.warning,
   },
   /** The read-only view's identity line: the glyph, the name, the command. */
@@ -183,7 +183,6 @@ function PromptShortcutsSettingContent({
 }) {
   const { t } = useTranslation();
   const postHog = usePostHog();
-  const isMobile = useIsMobile();
   const { runtime, entries, loading } = state;
   const scope = useShortcutScopeOptions(runtime?.workspaceId);
   const [editor, setEditor] = useState<{
@@ -253,14 +252,7 @@ function PromptShortcutsSettingContent({
           if (!open && !busy) setEditor(null);
         }}
       >
-        <Dialog.Content
-          backdropClassName={
-            // Desktop settings is itself a dialog; match its z-index so this
-            // later overlay covers it without stacking a second /80 veil.
-            isMobile ? undefined : 'z-[var(--z-dialog)] bg-black/20'
-          }
-          className={SETTINGS_EDITOR_DIALOG_LAYOUT}
-        >
+        <Dialog.Content className={SETTINGS_EDITOR_DIALOG_LAYOUT}>
           <Dialog.Header>
             <Dialog.Title>
               {!editor?.base

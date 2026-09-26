@@ -55,10 +55,13 @@ import {
   formatCommandForDisplay,
   isV8OutOfMemoryExit,
   type LaunchHandle,
-  type PreparedLaunch
+  type PreparedLaunch,
+  type SupervisorExitDecision,
+  type SupervisorState
 } from '@lody/cli-supervisor'
 import type { BootstrapSession } from './auth-service'
 import { desktopInstallationProfile, isLocalPlatform, mainPlatformKind } from '../platform'
+import { getDesktopLog } from '../desktop-log'
 import type { DesktopExecutionHost } from './desktop-execution-host'
 import { getUserShellEnvCached, shouldUseWindowsShell } from './shell-env'
 import { applyProxyEnvFallback, resolveSystemProxyEnv } from './system-proxy-env'
@@ -96,6 +99,108 @@ const LOCAL_CLI_HOST_ENDPOINT = getLocalCliHostEndpoint(mainPlatformKind)
 const CLI_CREDENTIALS_PATH = join(LODY_DATA_DIR, 'credentials.json')
 const ELECTRON_SETTINGS_PATH = join(LODY_DATA_DIR, 'electron-settings.json')
 const BUNDLED_CLI_ENTRY_FILE = 'index.js'
+
+function decideEmbeddedCliExit(result: CliRunResult): SupervisorExitDecision {
+  if (result.code === CLI_EXIT_CODE_AUTH_FAILURE) {
+    return {
+      action: 'fatal' as const,
+      message: 'CLI authentication failed; sign in again to restart the local agent'
+    }
+  }
+  if (result.code === CLI_EXIT_CODE_SUPERVISOR_CONTRACT_MISMATCH) {
+    return {
+      action: 'fatal' as const,
+      message: 'Embedded CLI rejected the supervisor contract; update the desktop app'
+    }
+  }
+  if (isV8OutOfMemoryExit(result)) {
+    return {
+      action: 'retry' as const,
+      countFailure: true,
+      failureClass: 'v8_oom' as const,
+      message: 'Electron-managed CLI exhausted its V8 heap'
+    }
+  }
+  return {
+    action: 'retry' as const,
+    countFailure: result.code !== CLI_EXIT_CODE_RETRYABLE_STARTUP,
+    message:
+      result.code === 0
+        ? 'Electron-managed CLI exited unexpectedly'
+        : `Electron-managed CLI exited with code ${result.code ?? 'signal'}`
+  }
+}
+
+function traceEmbeddedCliExitDecision(
+  result: CliRunResult,
+  decision: SupervisorExitDecision
+): SupervisorExitDecision {
+  const counted = 'countFailure' in decision ? ` countFailure=${decision.countFailure}` : ''
+  const failureClass =
+    'failureClass' in decision && decision.failureClass
+      ? ` failureClass=${decision.failureClass}`
+      : ''
+  getDesktopLog().warn(
+    'cli-supervisor',
+    `exit decision action=${decision.action}${counted}${failureClass} code=${
+      result.code ?? 'null'
+    } signal=${result.signal ?? 'none'} terminationKind=${
+      result.terminationKind ?? 'unknown'
+    } message=${decision.message ?? ''}`
+  )
+  return decision
+}
+
+const CLI_STDERR_TRACE_MAX_CHARS = 8_000
+
+/**
+ * Daily-log trace of one embedded CLI process: spawn, every stderr line (a V8
+ * out-of-memory abort or native crash writes only there; the CLI's own logger
+ * never sees it), and how it ended.
+ */
+function traceEmbeddedCliProcess(
+  handle: LaunchHandle,
+  meta: { subcommand: string; argCount: number; maxOldSpaceMiB?: number }
+): LaunchHandle {
+  const log = getDesktopLog()
+  const { child } = handle
+  const pid = child.pid ?? '?'
+  const spawnedAtMs = Date.now()
+  log.info(
+    'cli',
+    `spawned embedded CLI pid=${pid} subcommand=${meta.subcommand} argCount=${meta.argCount}${
+      meta.maxOldSpaceMiB ? ` maxOldSpaceMiB=${meta.maxOldSpaceMiB}` : ''
+    }`
+  )
+  child.stderr?.on('data', (chunk: Buffer | string) => {
+    const text = String(chunk).slice(0, CLI_STDERR_TRACE_MAX_CHARS)
+    for (const line of text.split('\n')) {
+      if (line.trim()) log.debug('cli', `pid=${pid} stderr: ${line}`)
+    }
+  })
+  void handle.result.then(
+    (result) => {
+      const abnormal = result.terminationKind !== 'exit' || result.code !== 0
+      log[abnormal ? 'warn' : 'info'](
+        'cli',
+        `embedded CLI pid=${pid} subcommand=${meta.subcommand} ended code=${
+          result.code ?? 'null'
+        } signal=${result.signal ?? 'none'} terminationKind=${
+          result.terminationKind ?? 'unknown'
+        } uptimeMs=${Date.now() - spawnedAtMs}`
+      )
+    },
+    (error: unknown) => {
+      log.error(
+        'cli',
+        `embedded CLI pid=${pid} subcommand=${meta.subcommand} failed after ${
+          Date.now() - spawnedAtMs
+        }ms: ${formatUnknownError(error)}`
+      )
+    }
+  )
+  return handle
+}
 
 type CliRunOptions = {
   envOverrides?: NodeJS.ProcessEnv
@@ -273,9 +378,6 @@ function buildCliRuntimeEnvOverrides(): NodeJS.ProcessEnv {
   assignEnvIfPresent(env, 'LODY_AUTH_URL', import.meta.env.VITE_CONVEX_DEPLOY_URL)
   assignEnvIfPresent(env, 'LODY_AUTH_SITE_URL', import.meta.env.VITE_CONVEX_SITE_URL)
   assignEnvIfPresent(env, 'LODY_SERVER_URL', import.meta.env.VITE_SERVER_URL)
-  // Always shadow any inherited value: an unset bundled gateway must fall back to
-  // LODY_SERVER_URL in the CLI, never to a user-provided control origin.
-  env.LODY_PREVIEW_GATEWAY_URL = import.meta.env.VITE_PREVIEW_GATEWAY_URL?.trim() ?? ''
   assignEnvIfPresent(env, 'SITE_URL', import.meta.env.VITE_SITE_URL)
 
   return env
@@ -381,6 +483,7 @@ export class CliService {
   private readonly executionHost: DesktopExecutionHost | undefined
   private readonly supervisorToken = `${randomUUID()}${randomUUID()}`
   private hostLease: LocalCliHostLease | null = null
+  private lastTracedSupervisorState = ''
 
   constructor(options: CliServiceOptions = {}) {
     this.resolveBootstrapSession = options.resolveBootstrapSession
@@ -410,36 +513,7 @@ export class CliService {
           return null
         }
       },
-      decideExit: (result) => {
-        if (result.code === CLI_EXIT_CODE_AUTH_FAILURE) {
-          return {
-            action: 'fatal' as const,
-            message: 'CLI authentication failed; sign in again to restart the local agent'
-          }
-        }
-        if (result.code === CLI_EXIT_CODE_SUPERVISOR_CONTRACT_MISMATCH) {
-          return {
-            action: 'fatal' as const,
-            message: 'Embedded CLI rejected the supervisor contract; update the desktop app'
-          }
-        }
-        if (isV8OutOfMemoryExit(result)) {
-          return {
-            action: 'retry' as const,
-            countFailure: true,
-            failureClass: 'v8_oom' as const,
-            message: 'Electron-managed CLI exhausted its V8 heap'
-          }
-        }
-        return {
-          action: 'retry' as const,
-          countFailure: result.code !== CLI_EXIT_CODE_RETRYABLE_STARTUP,
-          message:
-            result.code === 0
-              ? 'Electron-managed CLI exited unexpectedly'
-              : `Electron-managed CLI exited with code ${result.code ?? 'signal'}`
-        }
-      },
+      decideExit: (result) => traceEmbeddedCliExitDecision(result, decideEmbeddedCliExit(result)),
       existingRuntimePolicy:
         desktopInstallationProfile.releaseChannel === 'nightly' ? 'reject' : 'attach',
       ownership: this.executionHost?.ownership ?? {
@@ -470,6 +544,7 @@ export class CliService {
         }
       },
       onStateChange: (state) => {
+        this.traceSupervisorState(state)
         const runtime = state.runtime
         if (runtime?.machineId) {
           this.cachedMachineId = runtime.machineId
@@ -480,6 +555,26 @@ export class CliService {
     })
 
     return this.supervisor
+  }
+
+  /**
+   * Records Supervisor transitions in the daily log. `reconnecting` while a CLI
+   * child is alive means its state probe went unanswered — the embedded CLI's
+   * event loop is blocked — which the UI shows as a disconnect.
+   */
+  private traceSupervisorState(state: SupervisorState): void {
+    const runtime = state.runtime
+    const summary = `phase=${state.phase} desired=${state.desiredState}${
+      runtime ? ` runtimePid=${runtime.pid} ownership=${state.runtimeOwnership ?? 'unknown'}` : ''
+    }${state.retryAttempt !== undefined ? ` retryAttempt=${state.retryAttempt}` : ''}${
+      state.retryInMs !== undefined ? ` retryInMs=${state.retryInMs}` : ''
+    }${state.lastExitCode !== undefined ? ` lastExitCode=${state.lastExitCode}` : ''} message=${
+      state.message ?? ''
+    }`
+    if (summary === this.lastTracedSupervisorState) return
+    this.lastTracedSupervisorState = summary
+    const level = state.phase === 'fatal' || state.phase === 'offline' ? 'warn' : 'info'
+    getDesktopLog()[level]('cli-supervisor', `state ${summary}`)
   }
 
   private async buildLaunchPreparation(signal: AbortSignal): Promise<PreparedLaunch> {
@@ -1038,20 +1133,30 @@ export class CliService {
 
     return {
       spawn: () =>
-        this.spawnCli(
-          resolveBundledCliRuntime(),
-          [
-            ...(options?.maxOldSpaceMiB ? [`--max-old-space-size=${options.maxOldSpaceMiB}`] : []),
-            entry,
-            ...args
-          ],
+        traceEmbeddedCliProcess(
+          this.spawnCli(
+            resolveBundledCliRuntime(),
+            [
+              ...(options?.maxOldSpaceMiB
+                ? [`--max-old-space-size=${options.maxOldSpaceMiB}`]
+                : []),
+              entry,
+              ...args
+            ],
+            {
+              env,
+              windowsHide: true,
+              ...(options?.supervisorControl ? { stdio: ['ignore', 'pipe', 'pipe', 'ipc'] } : {})
+            },
+            sender,
+            options
+          ),
+          // Only the subcommand: renderer-supplied arguments may carry credentials.
           {
-            env,
-            windowsHide: true,
-            ...(options?.supervisorControl ? { stdio: ['ignore', 'pipe', 'pipe', 'ipc'] } : {})
-          },
-          sender,
-          options
+            subcommand: args[0] ?? '(none)',
+            argCount: args.length,
+            maxOldSpaceMiB: options?.maxOldSpaceMiB
+          }
         )
     }
   }

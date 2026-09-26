@@ -11,6 +11,21 @@ this page is the full text of the rules summarised there.
   attachment-rich list case is `SessionChatStream` → `HumanAndAgentAttachments`;
   shared full-page session conversation coverage is `SessionConversationPage.stories.tsx`
   using `session-conversation-page.tsx`.
+- Browser Preview has `States` (`SessionBrowserPreview.stories.tsx`) for deterministic
+  presentation and `Controller` (`SessionBrowserPanel.stories.tsx`) for real Enter and
+  restore handlers with synthetic RPC data. Both use production presentation:
+  `SessionBrowserPanel` → `SessionBrowserPanelView` → toolbar/status/surface.
+  The status stories render the real address-bar icon and its details popover, including
+  open-popover, narrow, dark and Chinese variants. State stories use the real Managed
+  Preview surface with an inert `documentHtml` fixture; they do not validate tunnel
+  transport or annotation messaging. Native `WebContentsView` content cannot be rendered
+  in web Storybook; its unsupported browser state is covered instead. Theme/locale
+  controls apply to state stories; controller play assertions run in English.
+  Run `pnpm --filter @lody/components exec playwright test
+  tests/e2e/browser-preview-stories.spec.ts --workers=1` for every registered Browser
+  story, recovery-button assertions, browser errors, open-popover assertions, and
+  per-story screenshots in Playwright's ignored output directory. Screenshots are review
+  artifacts, not git files.
 - **Storybook-fidelity invariant (stories mirror production, they don't own UI).**
   A `*.stories.tsx` may only mock data/providers and render the REAL component.
   NEVER put appearance (color/spacing/border/sizing that changes how a component

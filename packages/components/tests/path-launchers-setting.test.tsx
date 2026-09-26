@@ -36,6 +36,7 @@ describe('PathLaunchersSettings', () => {
     await initI18n('en');
     localStorage.clear();
     Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1024 });
+    Reflect.deleteProperty(window.navigator, 'userAgent');
     Object.defineProperty(window, 'matchMedia', {
       configurable: true,
       value: vi.fn().mockImplementation((query: string) => ({
@@ -127,6 +128,13 @@ describe('PathLaunchersSettings', () => {
   });
 
   it('uses a bottom sheet for the custom launcher form on mobile', async () => {
+    // Mobile comes from the device identity, not width alone: a narrow
+    // desktop-class window keeps the desktop dialog.
+    Object.defineProperty(window.navigator, 'userAgent', {
+      configurable: true,
+      value:
+        'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148',
+    });
     Object.defineProperty(window, 'innerWidth', { configurable: true, value: 390 });
     seedCustomLauncher();
     await renderSettings();

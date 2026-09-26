@@ -1297,6 +1297,14 @@ pre,
     box-shadow: inset 0 0 0 1px hsl(var(--primary) / 0.5);
   }
 
+  /* …but only while the person navigates by keyboard: focus handed back after
+     Escape is `:focus-visible` too. Text entry keeps it (see the modality rule
+     at the end of this file). */
+  :where(html[data-focus-modality='pointer'])
+    :where(a, button, select, [tabindex]):not(input, textarea):focus-visible {
+    box-shadow: none;
+  }
+
   /* Radix menu items already paint their own focus highlight (focus:bg-hover /
      data-[state=open]:bg-hover). Menus move DOM focus onto items as you hover
      and while a submenu is open, so the global inset accent ring above would
@@ -2083,12 +2091,7 @@ pre,
   width: 60%;
   content: '';
   pointer-events: none;
-  background: linear-gradient(
-    90deg,
-    transparent,
-    hsl(var(--background) / 0.78),
-    transparent
-  );
+  background: linear-gradient(90deg, transparent, hsl(var(--background) / 0.78), transparent);
   transform: translateX(-100%);
   animation: agent-shimmer-sweep 2.2s linear infinite;
   will-change: transform;
@@ -2189,4 +2192,15 @@ pre,
     animation: none;
     transform: translateX(50%);
   }
+}
+
+/* Focus rings are for keyboard navigation. `installFocusModality` (@lody/ui)
+   marks the document `pointer` until Tab or an arrow key moves focus, and zeroes
+   `focus.ringWidth` for every StyleX ring; this does the same for the legacy
+   Tailwind `focus-visible:ring-*` utilities. Unlayered, so it outranks them.
+   Text entry keeps its ring: whoever is typing needs to see where. */
+html[data-focus-modality='pointer']
+  :focus-visible:not(input, textarea, select, [contenteditable='true'], [contenteditable='']) {
+  --tw-ring-shadow: 0 0 #0000;
+  --tw-ring-offset-shadow: 0 0 #0000;
 }

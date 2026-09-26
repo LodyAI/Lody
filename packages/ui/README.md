@@ -16,7 +16,8 @@ behavior.
 | `src/popover`       | The same surface holding content rather than rows                                                                                         |
 | `src/dialog`        | Dialog and AlertDialog: the modal rung, and its tokens                                                                                    |
 | `src/drawer`        | The same rung, arriving from an edge and draggable back out                                                                               |
-| `src/tooltip`       | The inverted chip that names what is under the pointer                                                                                    |
+| `src/tooltip`       | The small floating chip that names what is under the pointer                                                                              |
+| `src/focus`         | Focus modality: rings for keyboard navigation, none for focus a pointer user never moved                                                  |
 | `src/disclosure`    | Tabs, Accordion and Collapsible: a trigger, and the thing it shows                                                                        |
 | `src/toggle`        | Toggle, ToggleGroup and Toolbar: a control that stays pressed, and the bar holding it                                                     |
 | `src/feedback`      | Alert, Toast, Progress, Skeleton and Spinner: what the system says back                                                                   |
@@ -298,10 +299,12 @@ mounts inside the panel instead of being treated as outside it. `Dialog.Content`
 `AlertDialog.Content` and `Sheet.Content` do this for their own panel, so a
 product surface never has to.
 
-A `Tooltip` is the one floating part that does not read the popup group. The
-elevation ladder puts a menu, a popover and a list on the raised background under
-the popover shadow, and names the tooltip apart: `label` with `shadow.medium`, an
-inversion, because a tooltip is not a place to act but a label over one.
+A `Tooltip` stands on the floating rung with a menu, a popover and a list: the
+raised background under the popover shadow, with the page's own ink, so it is
+light in a light palette and dark in a dark one and never inverts. It reads a
+`tooltip` group rather than `popup` because its geometry is a chip's — a smaller
+corner, tighter padding, the footnote step — and a tooltip is not a place to act
+but a label over one.
 
 ```tsx
 <Tooltip.Provider>
@@ -319,6 +322,22 @@ A tooltip is visual only. Base UI gives the chip no role and wires no
 reader, so **the trigger states its own `aria-label`** — a control whose only name
 was its tooltip has no name at all. `Tooltip.Provider` groups them, so once one
 has opened the next opens without its delay.
+
+A focus ring marks where keyboard navigation is. `:focus-visible` alone is the
+browser's guess from the last input of any kind, so a dialog opened with the
+mouse and closed with Escape hands focus back to a control that then lights up.
+Install the modality tracker once at the app root:
+
+```ts
+import { installFocusModality } from '@lody/ui/focus-modality';
+
+useEffect(() => installFocusModality(), []);
+```
+
+Tab and the arrow keys outside a text field make the modality `keyboard`; a
+pointer press makes it `pointer`, which zeroes `focus.ringWidth` — the width every
+family's ring reads — and publishes `data-focus-modality` on `<html>` for styles
+this package does not own. Text fields keep their own 2px ring.
 
 `Tabs`, `Accordion` and `Collapsible` are one family too, and what they share is
 the question rather than the shape: a trigger, and the thing it shows. A tab
@@ -659,7 +678,7 @@ the caller's, because what a press does is a product decision.
 A `Badge` is a standing fact about the thing beside it, and the one part of this
 system on **no rung**: it sits on a page, a card, a menu row or a modal panel,
 so it takes no background from the ladder. Its tone is a _film_ of that tone
-over whatever is underneath — 12% of `label` for neutral, 22% of its own colour
+over whatever is underneath — 8% of `label` for neutral, 14% of its own colour
 for the rest — **and its word carries that tone as well**, as the tone pulled
 halfway to `label`.
 
@@ -668,7 +687,7 @@ colour for a 16px mark rather than for 11px text. Half the distance to the ink
 keeps the hue and gains the contrast — 5.2:1 at the worst, on every rung in both
 palettes — and the word is the mark a person actually looks at on a 20px chip.
 The four words land 0.097 apart in oklab at the closest in the light palette and
-0.048 in the dark, against 0.030 and 0.035 for the films under them. In the dark
+0.048 in the dark, against 0.019 and 0.026 for the films under them. In the dark
 palette that is the whole difference: `accent` is a pale peach there and
 `warning` an amber, so their films are two brown washes and their words are a
 peach and a gold.
@@ -756,11 +775,9 @@ right edge turns a quiet list into a keyboard diagram. A cap is for the surfaces
 where the keys are the subject: a command palette, a shortcuts sheet, a tooltip
 that teaches one.
 
-A cap standing on a `Tooltip` inverts with it. `Tooltip.Content` declares
-`kbdOnInvertedTheme` on its popup, and every cap under it inherits — a component
-token group is how a surface tells what is inside it what it is standing on, and
-unlike the descendant selector the deleted implementation used it also reaches a
-cap a caller wrapped in something of their own.
+A cap standing on a `Tooltip` is the same cap: the tooltip is on the floating
+rung, so the cap stands on a raised surface as it does in a command palette, and
+nothing re-declares what it is made of.
 
 The state mapping every control in this family shares — rest, placeholder,
 focus, invalid, disabled, checked, selected — is in

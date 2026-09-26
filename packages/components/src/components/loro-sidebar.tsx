@@ -269,6 +269,12 @@ export interface LoroSidebarProps {
    * hover-reveal button on the workspace row, or keyboard shortcut at parent).
    */
   onRequestCollapse?: () => void;
+  /**
+   * Overlay presentation for the compact desktop layout: fluid width owned by
+   * the caller's wrapper, no resize sash. Desktop chrome stays desktop —
+   * unlike `isMobile`, which swaps in touch chrome and safe-area insets.
+   */
+  overlay?: boolean;
 }
 
 /**
@@ -444,23 +450,14 @@ function ConnectionPill({
           ? labels.connectionLoading
           : labels.connectionOffline;
   return (
-    <span
-      className={cn(
-        'inline-flex shrink-0 items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-medium',
-        isLoading
-          ? 'bg-sidebar-hover text-sidebar-foreground-muted'
-          : 'bg-status-danger/[0.12] text-status-danger ring-1 ring-status-danger/20'
-      )}
+    <Badge
+      tone={isLoading ? 'running' : 'danger'}
+      icon={isLoading ? <Spinner className="h-3 w-3" label={null} /> : undefined}
       aria-label={label}
       data-workspace-status={state}
     >
-      {isLoading ? (
-        <Spinner className="h-3 w-3 shrink-0" aria-hidden />
-      ) : (
-        <span className="h-1.5 w-1.5 rounded-full bg-status-danger" aria-hidden />
-      )}
-      <span>{label}</span>
-    </span>
+      {label}
+    </Badge>
   );
 }
 
@@ -753,6 +750,7 @@ export const LoroSidebar = memo(function LoroSidebar({
   onWidthChange,
   collapsed = false,
   onRequestCollapse,
+  overlay = false,
 }: LoroSidebarProps) {
   const isMobile = useIsMobile();
   const isElectronFullscreen = useElectronFullscreen();
@@ -1054,7 +1052,7 @@ export const LoroSidebar = memo(function LoroSidebar({
                                   })}
                             </span>
                           ) : ws.planTier ? (
-                            <Badge className="shrink-0 border-transparent bg-foreground/[0.06] px-1.5 py-0 text-[10px] font-normal text-muted-foreground">
+                            <Badge>
                               {ws.planTier === 'enterprise'
                                 ? mergedLabels.planEnterprise
                                 : mergedLabels.planPlus}
@@ -1142,33 +1140,34 @@ export const LoroSidebar = memo(function LoroSidebar({
       // so its hit area straddles the edge; the inner content div clips instead.
       className={cn('relative h-full select-none bg-sidebar text-sidebar-foreground', className)}
       style={
-        isMobile
+        isMobile || overlay
           ? undefined
           : { width: sidebarWidth, minWidth: resolvedMinWidth, maxWidth: resolvedMaxWidth }
       }
     >
-      {!isMobile && (
-        // VSCode-style sash: a 12px pointer hit area straddling the border
-        // (6px inside + 6px outside, so hovering ON or just past the edge
-        // still triggers); the visible affordance is a thin 2px line covering
-        // the border itself. Slight hover delay so it doesn't flash when the
-        // cursor merely passes over the edge.
-        <div
-          className={cn(
-            'absolute -right-1.5 top-0 z-20 h-full w-3 cursor-col-resize bg-transparent',
-            // 2px line covers the panel's `border-r` for the full height.
-            'after:absolute after:right-[5px] after:top-0 after:bottom-0 after:w-[2px]',
-            'after:bg-transparent after:transition-colors after:duration-150',
-            isResizing
-              ? 'after:bg-sidebar-ring/70'
-              : 'hover:after:bg-sidebar-ring/50 hover:after:delay-150'
-          )}
-          onPointerDown={handleResizeStart}
-          onPointerMove={handleResizeMove}
-          onPointerUp={handleResizeEnd}
-          onPointerCancel={handleResizeEnd}
-        />
-      )}
+      {!isMobile &&
+        !overlay && (
+          // VSCode-style sash: a 12px pointer hit area straddling the border
+          // (6px inside + 6px outside, so hovering ON or just past the edge
+          // still triggers); the visible affordance is a thin 2px line covering
+          // the border itself. Slight hover delay so it doesn't flash when the
+          // cursor merely passes over the edge.
+          <div
+            className={cn(
+              'absolute -right-1.5 top-0 z-20 h-full w-3 cursor-col-resize bg-transparent',
+              // 2px line covers the panel's `border-r` for the full height.
+              'after:absolute after:right-[5px] after:top-0 after:bottom-0 after:w-[2px]',
+              'after:bg-transparent after:transition-colors after:duration-150',
+              isResizing
+                ? 'after:bg-sidebar-ring/70'
+                : 'hover:after:bg-sidebar-ring/50 hover:after:delay-150'
+            )}
+            onPointerDown={handleResizeStart}
+            onPointerMove={handleResizeMove}
+            onPointerUp={handleResizeEnd}
+            onPointerCancel={handleResizeEnd}
+          />
+        )}
 
       <div className="relative flex h-full flex-col overflow-hidden">
         <div

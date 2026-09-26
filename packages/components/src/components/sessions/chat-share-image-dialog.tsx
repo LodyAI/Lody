@@ -11,6 +11,7 @@ import {
   corner,
   duration,
   ease,
+  focus,
   radius,
   space,
   text,
@@ -38,7 +39,9 @@ import {
 } from '@/components/share-card/chat-share-card';
 import { AgentIcon, getAgentDisplayName } from '@/components/icons/agent-icon';
 
-const RING = `0 0 0 2px ${colors.accent}`;
+const RING = `0 0 0 ${focus.ringWidth} ${colors.accent}`;
+// The chosen option's ring is a state, not focus, so it keeps its width.
+const SELECTED_RING = `0 0 0 2px ${colors.accent}`;
 const HOVER_RING = `0 0 0 2px color-mix(in oklab, transparent, ${colors.accent} 40%)`;
 const REGION = `color-mix(in oklab, transparent, ${colors.label} 3%)`;
 /** A segment's corner: the track's, less the inset it keeps from it. */
@@ -157,9 +160,9 @@ const styles = stylex.create({
   },
   swatchSelected: {
     boxShadow: {
-      default: `${RING}, ${shadow.raised}`,
-      ':hover': `${RING}, ${shadow.raised}`,
-      ':focus-visible': `${RING}, ${shadow.raised}`,
+      default: `${SELECTED_RING}, ${shadow.raised}`,
+      ':hover': `${SELECTED_RING}, ${shadow.raised}`,
+      ':focus-visible': `${SELECTED_RING}, ${shadow.raised}`,
     },
   },
   swatchNone: {

@@ -10,6 +10,7 @@ import {
   corner,
   duration,
   ease,
+  focus,
   radius,
   space,
   text as textStep,
@@ -204,7 +205,7 @@ const styles = stylex.create({
     color: { default: colors.secondaryLabel, ':hover': colors.label },
     textDecorationLine: { default: 'none', ':hover': 'underline' },
     textUnderlineOffset: '2px',
-    boxShadow: { default: 'none', ':focus-visible': `0 0 0 2px ${colors.accent}` },
+    boxShadow: { default: 'none', ':focus-visible': `0 0 0 ${focus.ringWidth} ${colors.accent}` },
     outlineStyle: 'none',
     transitionProperty: 'color',
     transitionDuration: duration.fast,
@@ -222,8 +223,7 @@ const styles = stylex.create({
 export type CodexResetForecastDialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  /** Render above an already-open dialog, such as the desktop settings modal. */
-  nestedInDialog?: boolean;
+
   state: CodexResetForecastState;
   /** The still-valid forecast, already selected against `nowMs` by the caller. */
   watch: CodexResetWatch | null;
@@ -244,7 +244,6 @@ export type CodexResetForecastDialogProps = {
 export function CodexResetForecastDialog({
   open,
   onOpenChange,
-  nestedInDialog = false,
   state,
   watch,
   isExpired,
@@ -271,10 +270,7 @@ export function CodexResetForecastDialog({
 
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
-      <Dialog.Content
-        // Restacks the backdrop over the settings dialog (codex-reset/AGENTS.md).
-        backdropClassName={nestedInDialog ? 'z-[var(--z-dialog)] bg-black/20' : undefined}
-      >
+      <Dialog.Content>
         <Dialog.Header>
           <Dialog.Title>
             <span {...stylex.props(styles.title)}>

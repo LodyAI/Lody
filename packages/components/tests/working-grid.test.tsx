@@ -13,14 +13,14 @@
  */
 
 import React, { act } from 'react';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync } from 'react-dom';
 import { createRoot, type Root } from 'react-dom/client';
 
 import { SidebarRowEndSlot } from '../src/components/sidebar-row-shared';
 import { WorkingGrid } from '../src/ui/working-grid';
 import { WorkingGridCollapse } from '../src/ui/working-grid-collapse';
-import { WorkingStatusMark } from '../src/ui/working-status-mark';
+import { WORKING_HAND_OVER_MS, WorkingStatusMark } from '../src/ui/working-status-mark';
 import {
   crestDelayMs,
   tileSeaPoint,
@@ -384,6 +384,51 @@ describe('WorkingGridCollapse', () => {
     expect(container.querySelector('[data-session-unread-dot]')).not.toBeNull();
   });
 
+  describe('hand-over hold', () => {
+    beforeEach(() => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    });
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('still plays when presence clears before the unread write lands', () => {
+      // Presence is applied at once; the doc-meta unread bump a task later.
+      const rest = <span data-rest-icon="" />;
+      render(<SidebarRowEndSlot isWorking restIcon={rest} />);
+      render(<SidebarRowEndSlot isWorking={false} restIcon={rest} />);
+      // The grid holds instead of dropping to the resting icon...
+      expect(container.querySelector('[data-session-working-indicator]')).not.toBeNull();
+      expect(container.querySelector('[data-rest-icon]')).toBeNull();
+      act(() => {
+        vi.advanceTimersByTime(WORKING_HAND_OVER_MS - 1);
+      });
+      // ...so the late unread write still gets the transition.
+      render(<SidebarRowEndSlot isWorking={false} hasUnreadMessages restIcon={rest} />);
+      expect(container.querySelector('[data-session-done-transition]')).not.toBeNull();
+      // Reading the session afterwards clears the mark for good.
+      render(<SidebarRowEndSlot isWorking={false} restIcon={rest} />);
+      act(() => {
+        vi.advanceTimersByTime(WORKING_HAND_OVER_MS);
+      });
+      expect(container.querySelector('[data-session-row-indicator]')).toBeNull();
+      expect(container.querySelector('[data-rest-icon]')).not.toBeNull();
+    });
+
+    it('lets the held grid go when no unread write arrives', () => {
+      render(<SidebarRowEndSlot isWorking />);
+      render(<SidebarRowEndSlot isWorking={false} />);
+      act(() => {
+        vi.advanceTimersByTime(WORKING_HAND_OVER_MS - 1);
+      });
+      expect(container.querySelector('[data-session-working-indicator]')).not.toBeNull();
+      act(() => {
+        vi.advanceTimersByTime(1);
+      });
+      expect(container.querySelector('[data-session-row-indicator]')).toBeNull();
+    });
+  });
+
   it('does not play for a session that was never working', () => {
     render(<SidebarRowEndSlot hasUnreadMessages />);
     expect(container.querySelector('[data-session-done-transition]')).toBeNull();
@@ -395,8 +440,7 @@ describe('WorkingStatusMark', () => {
   const grid = () => container.querySelector('[data-session-working-indicator]');
   const dot = () => container.querySelector('[data-session-unread-dot]');
 
-  it('collapses into the dot when unread lands before work stops (how a turn ends)', () => {
-    // The CLI writes the unread bump, then releases presence.
+  it('collapses into the dot when unread lands before work stops', () => {
     render(<WorkingStatusMark working unread={false} />);
     render(<WorkingStatusMark working unread />);
     expect(grid()).not.toBeNull();
@@ -405,7 +449,8 @@ describe('WorkingStatusMark', () => {
     expect(grid()).toBeNull();
   });
 
-  it('shows the dot without the transition if work stops before unread lands', () => {
+  it('shows the dot without the transition if work stopped before unread landed', () => {
+    // Callers bridge that gap with useWorkingHandOver (see SidebarRowEndSlot).
     render(<WorkingStatusMark working unread={false} />);
     render(<WorkingStatusMark working={false} unread={false} />);
     expect(container.childElementCount).toBe(0);

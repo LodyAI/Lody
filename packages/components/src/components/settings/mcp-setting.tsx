@@ -12,7 +12,6 @@ import {
   type WorkspaceMcpServerMeta,
 } from '@lody/shared';
 import { userAtom } from '@/atoms';
-import { useIsMobile } from '@/hooks/use-mobile';
 import {
   useWorkspaceMcpCatalog,
   useWorkspaceMcpCatalogActions,
@@ -33,6 +32,7 @@ import {
   settingsCatalog as catalog,
   settingsSurface as surface,
 } from './surface';
+import { settingsType as type } from './type.stylex';
 
 const styles = stylex.create({
   actions: { gap: space[2] },
@@ -40,7 +40,7 @@ const styles = stylex.create({
     display: 'flex',
     alignItems: 'center',
     gap: space[1.5],
-    fontSize: '0.7em',
+    fontSize: type.caption,
     color: colors.secondaryLabel,
     cursor: 'pointer',
   },
@@ -53,7 +53,6 @@ type EditorState = { mode: 'add' } | { mode: 'edit'; entry: WorkspaceMcpServerMe
 export function McpSetting() {
   const { t } = useTranslation();
   const postHog = usePostHog();
-  const isMobile = useIsMobile();
   const user = useAtomValue(userAtom);
   const { servers, synced } = useWorkspaceMcpCatalog();
   const { upsert, remove } = useWorkspaceMcpCatalogActions();
@@ -208,14 +207,7 @@ export function McpSetting() {
           setEditor(null);
         }}
       >
-        <Dialog.Content
-          backdropClassName={
-            // Desktop settings is itself a dialog; match its z-index so this
-            // later overlay covers it without stacking a second /80 veil.
-            isMobile ? undefined : 'z-[var(--z-dialog)] bg-black/20'
-          }
-          className={SETTINGS_EDITOR_DIALOG_LAYOUT}
-        >
+        <Dialog.Content className={SETTINGS_EDITOR_DIALOG_LAYOUT}>
           <Dialog.Header>
             <Dialog.Title>
               {editor?.mode === 'edit' ? t('settings.mcp.editTitle') : t('settings.mcp.addTitle')}

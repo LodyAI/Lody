@@ -7,7 +7,7 @@ import { Check, ExternalLink, FolderPlus, Github } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
 import { Spinner } from '@lody/ui/spinner';
 import { colors } from '@lody/ui/tokens/colors.stylex';
-import { duration, ease, space, text } from '@lody/ui/tokens/scales.stylex';
+import { duration, ease, focus, space, text } from '@lody/ui/tokens/scales.stylex';
 import type { LocalProjectId, MachineId } from '@lody/shared';
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import { toast } from '@/lib/toast';
@@ -32,7 +32,7 @@ import { OnboardingShell, OnboardingBackButton, OnboardingNextButton } from '../
 import { useOnboardingAnalytics } from '../onboarding-analytics';
 import { onboardingSurface as surface } from './surface';
 
-const RING = `inset 0 0 0 2px ${colors.accent}`;
+const RING = `inset 0 0 0 ${focus.ringWidth} ${colors.accent}`;
 const LINE = `inset 0 1px 0 ${colors.separator}`;
 
 const styles = stylex.create({
