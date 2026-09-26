@@ -948,8 +948,6 @@ export interface AddLocalProjectDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   isMobile?: boolean;
-  /** Nested inside another dialog (desktop settings). Matches MCP's overlay. */
-  backdropClassName?: string;
   machines: RemoteDirectoryPickerMachine[];
   machinesLoading?: boolean;
   initialMachineId?: RemoteDirectoryPickerArgs['initialMachineId'];
@@ -972,7 +970,6 @@ export function AddLocalProjectDialog({
   ops,
   onAdded,
   onLocateRegistered,
-  backdropClassName,
 }: AddLocalProjectDialogProps) {
   const { t } = useTranslation();
   const close = useCallback(() => onOpenChange(false), [onOpenChange]);
@@ -1011,7 +1008,7 @@ export function AddLocalProjectDialog({
 
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
-      <Dialog.Content backdropClassName={backdropClassName}>
+      <Dialog.Content>
         <Dialog.Title {...stylex.props(styles.srOnly)}>{a11yTitle}</Dialog.Title>
         <Dialog.Description {...stylex.props(styles.srOnly)}>{a11yDescription}</Dialog.Description>
         <RemoteDirectoryPicker

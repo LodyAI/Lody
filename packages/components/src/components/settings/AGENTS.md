@@ -59,8 +59,8 @@ rolls back — is in the root [AGENTS.md](../../../../../AGENTS.md).
   names stay on the default interface font. Font size is five named tiers writing
   `--ui-font-size`. Font ligatures is a boolean after the Terminal section, writing
   `--lody-font-ligatures` for conversation, code, and tool output.
-- The Codex reset forecast chip in the provider row must not fetch on mount and must
-  pass `nestedInDialog` for its dialog: [../codex-reset/AGENTS.md](../codex-reset/AGENTS.md).
+- The Codex reset forecast chip in the provider row must not fetch on mount:
+  [../codex-reset/AGENTS.md](../codex-reset/AGENTS.md).
 - The usage share card is a fixed-format report, not a second `ChatShareCard`:
   exact pixel aspects, period = the page range, headline = that range's total.
   Derive every number through `usage-share-stats.ts` (stamp the metric on the

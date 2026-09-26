@@ -19,6 +19,11 @@ export const dialog = stylex.defineVars({
   background: colors.elevatedBackground,
   shadow: shadow.large,
   overlay: colors.overlay,
+  // The veil a dialog inside another dialog draws over the panel beneath it.
+  // The page overlay already sits under the parent panel, so a second full
+  // veil would compound into near-black; a lighter one still separates the two
+  // surfaces without burying the first.
+  nestedOverlay: 'hsl(0 0% 0% / 0.2)',
   // A surface takes the large radius; nested radius is outer minus inset, which
   // is why nothing inside a panel reaches for this one.
   radius: radius.large,

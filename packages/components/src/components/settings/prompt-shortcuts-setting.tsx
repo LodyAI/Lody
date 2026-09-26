@@ -21,7 +21,6 @@ import { withClassName } from '@/lib/stylex';
 import { capturePostHogEvent } from '@/lib/posthog-analytics';
 import { getPromptShortcutAnalyticsProperties } from '@/lib/prompt-shortcut-analytics';
 import { usePromptShortcuts } from '../../providers/prompt-shortcut-provider';
-import { useIsMobile } from '@/hooks/use-mobile';
 import { useVisibleMachineMetas } from '@/hooks/use-visible-machine-metas';
 import { useVisibleLocalProjectsFromMachineIndex } from '@/hooks/use-visible-local-projects';
 import { useMachineFlockAgentConfigsForMachineIds } from '@/hooks/use-machine-flock-agent-configs';
@@ -184,7 +183,6 @@ function PromptShortcutsSettingContent({
 }) {
   const { t } = useTranslation();
   const postHog = usePostHog();
-  const isMobile = useIsMobile();
   const { runtime, entries, loading } = state;
   const scope = useShortcutScopeOptions(runtime?.workspaceId);
   const [editor, setEditor] = useState<{
@@ -254,14 +252,7 @@ function PromptShortcutsSettingContent({
           if (!open && !busy) setEditor(null);
         }}
       >
-        <Dialog.Content
-          backdropClassName={
-            // Desktop settings is itself a dialog; match its z-index so this
-            // later overlay covers it without stacking a second /80 veil.
-            isMobile ? undefined : 'z-[var(--z-dialog)] bg-black/20'
-          }
-          className={SETTINGS_EDITOR_DIALOG_LAYOUT}
-        >
+        <Dialog.Content className={SETTINGS_EDITOR_DIALOG_LAYOUT}>
           <Dialog.Header>
             <Dialog.Title>
               {!editor?.base
