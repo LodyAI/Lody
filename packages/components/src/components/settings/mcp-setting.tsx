@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import * as stylex from '@stylexjs/stylex';
-import { SettingsPageActions, SettingsPageLead } from './settings-page-header';
+import { SettingsPageActions, SettingsPageLead, useSettingsPane } from './settings-page-header';
 import { SettingsEmptyList, settingsRecordsCard } from './compact-layout';
 import { useAtomValue } from 'jotai';
 import { usePostHog } from '@posthog/react';
@@ -14,6 +14,7 @@ import {
   type WorkspaceMcpServerMeta,
 } from '@lody/shared';
 import { userAtom } from '@/atoms';
+import { useDialogExitSnapshot } from '@/hooks/use-dialog-exit-snapshot';
 import {
   useWorkspaceMcpCatalog,
   useWorkspaceMcpCatalogActions,
@@ -59,6 +60,8 @@ export function McpSetting() {
   const { servers, synced } = useWorkspaceMcpCatalog();
   const { upsert, remove } = useWorkspaceMcpCatalogActions();
   const [editor, setEditor] = useState<EditorState | null>(null);
+  const { shown: shownEditor, onOpenChangeComplete } = useDialogExitSnapshot(editor);
+  const settingsPane = useSettingsPane();
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string>();
   const [pendingRemoval, setPendingRemoval] = useState<WorkspaceMcpServerMeta | null>(null);
@@ -179,21 +182,25 @@ export function McpSetting() {
           setError(undefined);
           setEditor(null);
         }}
+        onOpenChangeComplete={onOpenChangeComplete}
       >
         <Dialog.Content
           width={SETTINGS_EDITOR_DIALOG_WIDTH}
+          centerOn={settingsPane}
           className={SETTINGS_EDITOR_DIALOG_LAYOUT}
         >
           <Dialog.Header>
             <Dialog.Title>
-              {editor?.mode === 'edit' ? t('settings.mcp.editTitle') : t('settings.mcp.addTitle')}
+              {shownEditor?.mode === 'edit'
+                ? t('settings.mcp.editTitle')
+                : t('settings.mcp.addTitle')}
             </Dialog.Title>
             <Dialog.Description>{t('settings.mcp.dialogDescription')}</Dialog.Description>
           </Dialog.Header>
-          {editor ? (
+          {shownEditor ? (
             <McpConnectionForm
-              key={editor.mode === 'edit' ? editor.entry.id : 'new'}
-              initialEntry={editor.mode === 'edit' ? editor.entry : undefined}
+              key={shownEditor.mode === 'edit' ? shownEditor.entry.id : 'new'}
+              initialEntry={shownEditor.mode === 'edit' ? shownEditor.entry : undefined}
               submitting={submitting}
               error={error}
               onSubmit={save}

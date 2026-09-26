@@ -4,7 +4,7 @@ import { AlertDialog } from '../src/dialog/alert-dialog';
 import { Dialog } from '../src/dialog/dialog';
 import { Select } from '../src/field/select';
 import { ThemeRoot, forcedThemeClassNames } from '../src/theme/theme';
-import { all, classesOf, click, mount, one, press, type Mounted } from './dom';
+import { all, classesOf, click, mount, one, press, step, type Mounted } from './dom';
 
 let mounted: Mounted | undefined;
 afterEach(async () => {
@@ -104,6 +104,46 @@ describe('Dialog', () => {
     );
     expect(panel().style.width).toBe('640px');
     expect(panel().style.overscrollBehavior).toBe('contain');
+  });
+
+  test('a panel centred on an element follows that element, inside the window', async () => {
+    // jsdom lays nothing out, so the pane's box is stated; what is pinned is
+    // the centre the panel is given and the window clamp around it.
+    const pane = document.createElement('div');
+    let box = { left: 334, width: 752 };
+    pane.getBoundingClientRect = () => new DOMRect(box.left, 0, box.width, 700);
+    document.body.append(pane);
+    mounted = await mount(
+      <Dialog.Root defaultOpen>
+        <Dialog.Content width="620px" centerOn={pane}>
+          <Dialog.Title>Rename session</Dialog.Title>
+        </Dialog.Content>
+      </Dialog.Root>
+    );
+    const declared = () => panel().getAttribute('style') ?? '';
+    expect(declared()).toContain(', 710px, ');
+    expect(declared()).toContain('min(620px, 100vw - ');
+    expect(panel().style.width).toBe('620px');
+
+    // The pane moves when the window does, without resizing itself.
+    box = { left: 200, width: 752 };
+    await step(() => {
+      window.dispatchEvent(new Event('resize'));
+    });
+    expect(declared()).toContain(', 576px, ');
+    pane.remove();
+  });
+
+  test('a panel with no element to centre on keeps the window centre', async () => {
+    mounted = await mount(
+      <Dialog.Root defaultOpen>
+        <Dialog.Content width="620px" centerOn={null}>
+          <Dialog.Title>Rename session</Dialog.Title>
+        </Dialog.Content>
+      </Dialog.Root>
+    );
+    expect(panel().style.width).toBe('620px');
+    expect(panel().getAttribute('style') ?? '').not.toContain('inset-inline-start');
   });
 
   test('a footer answer runs its handler and takes the panel down with it', async () => {
