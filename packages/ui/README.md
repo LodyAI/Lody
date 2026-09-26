@@ -235,6 +235,9 @@ not a dialog, so a list swept by a pointer is not announced as a run of dialogs.
 Its `Trigger` is Base UI's link with its own delays; a surface that owns the hover
 intent — the session list shares one warm window across every row — controls
 `Root open` and names the row with `Content anchor={ref}` instead.
+While a pointer runs down such a list, each card replaces the last; `noAnimation`
+on those swaps makes them appear and leave in place, since two cards crossing in
+opposite fades read as flicker rather than one card moving.
 
 ```tsx
 <PreviewCard.Root open={open} onOpenChange={setOpen}>
