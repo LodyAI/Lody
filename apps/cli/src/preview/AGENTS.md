@@ -27,9 +27,10 @@ Managed preview tunnels and the local proxy. [apps/cli/AGENTS.md](../../AGENTS.m
   Allocating an origin is not readiness. Before a Quick Tunnel's first public
   HTTP probe, await edge registration and query DNS records through an isolated
   Resolver, not OS hostname lookup: early NXDOMAIN can poison proxy/TUN caches.
-  Registration, DNS and HTTP share the startup deadline. Direct-DNS transport
-  failures retain the existing HTTP proxy path; never hardcode public IPs or
-  treat DNS/registration as readiness. Health/local viewing skip this gate.
+  Registration, DNS and HTTP share the startup deadline. DNS publication has a
+  10-second budget: persistent negative answers (including filtered/split DNS)
+  then fall back to the existing HTTP proxy path, as do transport failures. Never
+  hardcode public IPs or treat DNS/registration as readiness. Health/local viewing skip this gate.
   Public probes do not renew idle time.
   Readiness diagnostics retain attempt counts, pending state, last HTTP status or
   nested network error codes, and connector registration progress. Never log
@@ -91,6 +92,9 @@ Managed preview tunnels and the local proxy. [apps/cli/AGENTS.md](../../AGENTS.m
   which must match the Session initiator; never infer it from session/daemon ownership.
   Keep this trusted entry separate from remote report payloads. Coalesce same-origin
   preparation and cancel queued work on replacement, revoke and Session cleanup.
+  `reportedStarts` owns eager cancellation; `cancelled` is only for manual creation.
+  Keep generation guards inside serialized preview-state writes and invalidate
+  reports still validating during full cleanup.
   Validate path-relative targets here.
 - The local preview proxy must never forward an OBSERVED WebSocket close code into a Close frame.
   RFC 6455 reserves 1005/1006 for local observation, so `ws` throws from a TCP callback and kills

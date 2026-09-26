@@ -464,24 +464,18 @@ export class PreviewService {
         !sameTargetOrigin(session.meta.previewCandidate.target, target)
       )
         return;
-      this.cancelled.set(request.sessionId, cancellation);
-      try {
-        await this.createPreviewExclusive(
-          {
-            type: 'session/preview-create',
-            machineId: request.machineId,
-            workspaceId: request.workspaceId,
-            sessionId: request.sessionId,
-            requestedByUserId: invokingUserId,
-            target,
-          },
-          cancellation.signal,
-          'agent-report'
-        );
-      } finally {
-        if (this.cancelled.get(request.sessionId) === cancellation)
-          this.cancelled.delete(request.sessionId);
-      }
+      await this.createPreviewExclusive(
+        {
+          type: 'session/preview-create',
+          machineId: request.machineId,
+          workspaceId: request.workspaceId,
+          sessionId: request.sessionId,
+          requestedByUserId: invokingUserId,
+          target,
+        },
+        cancellation.signal,
+        'agent-report'
+      );
     });
     const entry = { target, cancellation, done };
     this.reportedStarts.set(request.sessionId, entry);

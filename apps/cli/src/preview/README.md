@@ -34,12 +34,15 @@ and cleanup failure. Native verification on other operating systems is separate.
 Resolver, bypassing OS hostname lookup caches. A newly allocated Quick Tunnel
 hostname can initially return NXDOMAIN. Sending it to an HTTP proxy or TUN at
 that point can cache failure long after the tunnel is usable. The startup
-verifier waits for both a DNS record and the native connector's first registration,
-reported through typed IPC, before making its first public request. All stages
+verifier waits for the bounded DNS publication check and the native connector's
+first registration, reported through typed IPC, before its first public request. All stages
 share the existing 90-second readiness deadline and cancellation signal.
 
-Negative DNS answers retry; unavailable DNS transport emits a bounded diagnostic
-and retains the existing proxy HTTP verification for proxy-only networks. No IP
+Negative DNS answers retry for at most ten seconds before falling back to the
+existing proxy HTTP verification: filtered/split local DNS may stay negative even
+when the proxy can resolve the hostname. Unavailable DNS transport falls back
+immediately. The DNS budget cancels in-flight queries without resetting the
+shared startup deadline; parent cancellation still aborts readiness. No IP
 is pinned, no external resolver is selected, and DNS never grants access or proves
 readiness. Five-second active health checks and local viewing skip this startup gate.
 

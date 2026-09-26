@@ -109,4 +109,7 @@ Evidence: [CLI preview](../apps/cli/src/preview/AGENTS.md),
 
 Startup public-route verification allows up to 90 seconds for a newly allocated
 route to propagate; active-route health checks remain bounded to five seconds.
+DNS publication is an optimization with a ten-second budget, not a requirement
+that local DNS agree with proxy DNS. Persistent local negative answers fall back
+to the authenticated public probe within the original startup deadline.
 Default create RPC callers allow eight minutes for acquisition and startup.

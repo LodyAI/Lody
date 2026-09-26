@@ -389,7 +389,45 @@ now use generation guards inside a shared serialized preview-state write queue;
 global cleanup invalidates those reports before cancelling queued preparation.
 Cross-review and a fresh adversarial review found no remaining blocking issue.
 
-Verification for this follow-up covers CLI/UI type checks, CLI production build,
-formatting, documentation and static/boundary checks. No new tests or live
-UI/network runs were performed for this policy change; behavioral verification
-remains a review limitation. The PR remains a draft.
+Initial verification covered CLI/UI type checks, CLI production build,
+formatting, documentation and static/boundary checks. The subsequent behavioral
+verification and review corrections are recorded below; live UI/network
+validation of the eager-start policy remains outstanding.
+
+## Review correction and cancellation ablation (2026-09-26)
+
+[PR #990 review](https://github.com/LodyAI/Lody/pull/990#discussion_r4109592954)
+identified a valid proxy-only-network regression: local split/filtering DNS may
+return persistent ENOTFOUND/ENODATA although the HTTP proxy can resolve the host.
+Three fake-clock reproductions (both errors and an empty answer) failed before
+the correction. DNS now has a ten-second publication budget, including in-flight
+query cancellation, then falls back to the existing authenticated HTTP route.
+Parent cancellation, edge registration, marker validation and the shared 90-second
+deadline remain mandatory. This bound is a compatibility trade-off: unusually slow
+publication may still encounter the original hostname-cache delay after fallback.
+
+Ablations used the same deterministic lifecycle suite, changing one production
+mechanism at a time and restoring rejected variants immediately:
+
+| Variant | Observation | Decision |
+| --- | --- | --- |
+| Remove eager task registration in the manual `cancelled` map | Lifecycle suite passed before and after; revoke during download/readiness and queued cleanup still cancel through `reportedStarts` | Keep deletion: one cancellation owner for eager work |
+| Remove the final report-generation check after an awaited document read | Controlled stale-write regression fails immediately | Restore/retain guard |
+| Remove full-cleanup report invalidation | Controlled report-resume-after-cleanup regression fails immediately | Restore/retain invalidation |
+
+The extra `reportedStarts` keys in full cleanup are retained: the operation queue
+can remove a completed operation before the reported entry's later microtask
+cleanup, while a Browser caller still needs its cancellation state. The first
+write guard is also retained to avoid reading documents for already obsolete
+reports. No simplification is justified solely by a line appearing redundant.
+
+Coverage adds explicit-signal cases for background startup, same-origin coalescing,
+early Browser joining, pending and queued cancellation, cleanup during validation,
+and stale candidate publication. DNS coverage includes proxy fallback, marker
+rejection and in-flight query cancellation without bypassing edge registration.
+No live network performance claim is made for this correction.
+
+Final verification passed: all 95 preview tests; full OSS `pnpm check` (including
+2,976 CLI, 4,107 components and 194 Electron tests); CLI production build;
+formatting and documentation checks. Fresh adversarial review found no remaining
+P0/P1. Live UI/network validation of the eager-start policy remains outstanding.
