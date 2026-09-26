@@ -20,6 +20,7 @@ const DEFAULT_SLOW_THRESHOLD_MS = 120_000;
 
 export type SessionActivePresencePhase =
   | 'thinking'
+  | 'finalizing'
   | 'initializing'
   | 'git-clone'
   | 'managed-runtime'
@@ -51,6 +52,9 @@ const phaseToStatus = (
   switch (phase ?? 'thinking') {
     case 'thinking':
       return SessionStatusFactory.running();
+    case 'finalizing':
+      // One lifecycle value. No detail: a changing detail republishes every call.
+      return { type: 'running', phase: 'finalizing' };
     case 'initializing':
       return SessionStatusFactory.initializing(undefined, detail);
     case 'git-clone':

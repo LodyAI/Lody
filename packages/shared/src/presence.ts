@@ -85,6 +85,9 @@ const ActiveSessionStatusSchema = z.preprocess(
     z.object({
       type: z.literal('running'),
       activity: z.enum(['image_generation']).optional(),
+      // Optional so an older running parser strips it and keeps `{ type: 'running' }`.
+      // Do not encode this as `activity`: an unknown activity enum drops the entry.
+      phase: z.literal('finalizing').optional(),
     }),
     z.object({
       type: z.literal('requestPermission'),

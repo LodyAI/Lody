@@ -904,6 +904,9 @@ export class SessionExecutionService {
     triggerReason: string
   ): Promise<void> {
     try {
+      // Prompt exit is one phase change, shared by both completion paths.
+      // Do not pass detail and do not call this per token or chunk.
+      this.deps.setSessionActivePresencePhase(sessionId, 'finalizing');
       await sessionDoc.setStatus(SessionStatusFactory.idle());
       this.captureStatusChanged(sessionId, 'idle', undefined, triggerReason);
     } catch (error) {

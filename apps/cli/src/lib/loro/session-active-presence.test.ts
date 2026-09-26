@@ -83,6 +83,31 @@ describe('SessionActivePresenceController', () => {
     );
   });
 
+  it('publishes finalizing once and keeps ownership until clear', () => {
+    const workspaceDocument = createWorkspaceDocument();
+    const controller = new SessionActivePresenceController(
+      workspaceDocument as LoroDocumentManager,
+      machineId,
+      createLogger(),
+      { intervalMs: 1_000 }
+    );
+    controller.start(sessionId, 'thinking');
+    controller.setPhase(sessionId, 'finalizing');
+    controller.setPhase(sessionId, 'finalizing');
+    expect(controller.getStatus(sessionId)).toEqual({ type: 'running', phase: 'finalizing' });
+    expect(workspaceDocument.publishSessionPresence).toHaveBeenCalledTimes(2);
+    expect(workspaceDocument.publishSessionPresence).toHaveBeenLastCalledWith(
+      sessionId,
+      machineId,
+      { type: 'running', phase: 'finalizing' }
+    );
+    expect(controller.has(sessionId)).toBe(true);
+    controller.setPhase(sessionId, 'thinking');
+    expect(controller.getStatus(sessionId)).toEqual({ type: 'running' });
+    controller.clear(sessionId);
+    expect(controller.getStatus(sessionId)).toBeNull();
+  });
+
   it('publishes managed runtime progress as initializing presence detail', () => {
     const workspaceDocument = createWorkspaceDocument();
     const controller = new SessionActivePresenceController(

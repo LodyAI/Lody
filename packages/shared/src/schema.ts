@@ -93,11 +93,12 @@ export const parseRateLimitEntryKey = (
  */
 export type InitializingStage = 'git-clone' | 'managed-runtime' | 'acp' | 'resuming';
 export type SessionRunningActivity = 'image_generation';
+export type SessionRunningPhase = 'finalizing';
 export type PermissionRequestKind = 'permission' | 'ask_user_question';
 
 export type SessionStatus =
   | { type: 'idle' }
-  | { type: 'running'; activity?: SessionRunningActivity }
+  | { type: 'running'; activity?: SessionRunningActivity; phase?: SessionRunningPhase }
   | { type: 'requestPermission' }
   | {
       type: 'initializing';

@@ -257,7 +257,7 @@ import {
   type SessionActivePresencePhase,
 } from './loro/session-active-presence';
 import {
-  resolveImageGenerationStatusWrite,
+  resolveImageGenerationPresencePhase,
   shouldRestoreRunningAfterPermission,
 } from './session-activity-status';
 import type { RepoWatchHandle } from 'loro-repo';
@@ -1203,28 +1203,18 @@ export class MessageHandler {
     const state = this.store.get(sessionId);
     const task = state.imageGenerationActivityStatusChain
       .catch(() => undefined)
-      .then(async () => {
+      .then(() => {
         const currentState = this.store.get(sessionId);
-        const hasActiveImageGeneration = currentState.imageGenerationActiveCallIds.size > 0;
-        const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
-        const status = (await sessionDoc.getMetaState())?.status;
-
-        // This chain rides on ACP events and can drain after the visible active
-        // scope ended; a working-status write is only sustainable while this
-        // session still has active presence.
-        const nextStatus = resolveImageGenerationStatusWrite({
-          hasActiveImageGeneration,
-          hasActivePresence: this.hasSessionActivePresence(sessionId),
-          status,
+        // Presence-only. Reading durable status awaits the doc and can land
+        // after prompt-end already published finalizing and idle. setPhase
+        // dedupes an unchanged phase, so a burst of the same begin does not
+        // republish; do not call this per token or chunk.
+        const nextPhase = resolveImageGenerationPresencePhase({
+          hasActiveImageGeneration: currentState.imageGenerationActiveCallIds.size > 0,
+          current: this.sessionActivePresence.getStatus(sessionId),
         });
-        if (nextStatus) {
-          await sessionDoc.setStatus(nextStatus);
-          this.setSessionActivePresencePhase(
-            sessionId,
-            nextStatus.type === 'running' && nextStatus.activity === 'image_generation'
-              ? 'image_generation'
-              : 'thinking'
-          );
+        if (nextPhase) {
+          this.setSessionActivePresencePhase(sessionId, nextPhase);
         }
       });
 
