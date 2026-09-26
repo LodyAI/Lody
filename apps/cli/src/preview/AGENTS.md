@@ -86,8 +86,12 @@ Managed preview tunnels and the local proxy. [apps/cli/AGENTS.md](../../AGENTS.m
   and WS the same fixed lookup; ambient DNS and global HTTP proxies cannot retarget it.
   Closing an endpoint also destroys its dispatcher. IPv4/IPv6-only localhost services
   must both work without changing the user's listener configuration.
-- Still require a fresh approval from the session initiator, and validate path-relative targets
-  here.
+- User-triggered remote controls still require fresh target approval. A valid local
+  Agent report may start preparation using ONLY the active execution's user identity,
+  which must match the Session initiator; never infer it from session/daemon ownership.
+  Keep this trusted entry separate from remote report payloads. Coalesce same-origin
+  preparation and cancel queued work on replacement, revoke and Session cleanup.
+  Validate path-relative targets here.
 - The local preview proxy must never forward an OBSERVED WebSocket close code into a Close frame.
   RFC 6455 reserves 1005/1006 for local observation, so `ws` throws from a TCP callback and kills
   the CLI with the active Agent session. Mirror the shape instead (`mirrorWebSocketClose` in

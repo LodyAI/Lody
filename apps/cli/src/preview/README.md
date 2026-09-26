@@ -119,3 +119,13 @@ has been independently verified.
 Behavioral tests check deterministic collection, platform conflicts, source
 license mismatch, installed text, cache reuse and explicit rejection of missing
 or modified cached notices.
+
+## Agent-reported startup
+
+The local message handler derives the active execution user and passes it separately
+from the candidate payload. An available loopback candidate from the Session owner
+starts background preparation when the platform supports remote preview. Reports
+return promptly; Browser clicks join preparation and then retain the usual control
+authorization checks. Same-origin reports coalesce; newer origins, revoke and
+Session cleanup cancel obsolete queued work. Resource limits and the one-hour idle
+policy still apply, including to a prepared preview that nobody opens.
