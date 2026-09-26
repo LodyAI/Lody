@@ -382,7 +382,24 @@ describe('PreviewService Quick Tunnel lifecycle', () => {
       Array(DEFAULT_PREVIEW_MAX_ACTIVE_TUNNELS_PER_MACHINE - 1).fill('active')
     );
     vi.mocked(ensureCloudflaredBinary).mockRejectedValueOnce(new Error('Download unavailable'));
-    expect((await extra.service.createPreview(request)).error).toBe('tunnel_creation_failed');
+    const failed = await extra.service.createPreview(request);
+    const creating = extra.changes
+      .filter((change) => change.connection?.status === 'creating')
+      .at(-1)?.connection;
+    expect(creating?.endpointId).toEqual(expect.any(String));
+    expect(failed.error).toBe('tunnel_creation_failed');
+    expect(failed.connection).toEqual({
+      ...creating,
+      status: 'failed',
+      updatedAt: expect.any(Number),
+      error: {
+        stage: 'connect',
+        errorCode: 'tunnel_creation_failed',
+        message: expect.stringContaining('Download unavailable'),
+        retryable: true,
+      },
+    });
+    expect(extra.state().connection).toEqual(failed.connection);
     expect((await extra.service.createPreview(request)).success).toBe(true);
     expect(extra.state().connection?.status).toBe('active');
     expect(await (await fetch(`http://127.0.0.1:${port}`)).text()).toBe('development server');

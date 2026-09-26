@@ -431,3 +431,25 @@ Final verification passed: all 95 preview tests; full OSS `pnpm check` (includin
 2,976 CLI, 4,107 components and 194 Electron tests); CLI production build;
 formatting and documentation checks. Fresh adversarial review found no remaining
 P0/P1. Live UI/network validation of the eager-start policy remains outstanding.
+
+The second ablation pass removes duplicate failed-connection construction and
+publication in `createPreviewExclusive`, delegating to the existing
+`failCreatingConnection` method. The strengthened failure/slot regression checks
+endpoint provenance, the error shape, persisted state and successful slot reuse.
+The baseline and simplified variants pass; the complete preview suite passes all
+97 cases. Removing failed-state publication as a negative control fails the state
+assertion, so that write remains inside the shared method.
+
+Replacing native/IPC resolver placeholders with `Promise.withResolvers` passed
+behavior tests but failed production typechecking: CLI exposes only ES2022 APIs.
+That variant was restored rather than expanding compilation scope for this cleanup.
+Negative controls also removed native registration rejection, IPC registration
+rejection, and the independent readiness abort wait. They failed one, one, and
+two controlled assertions respectively, so all three mechanisms remain. Crash
+checks observe registration failure at the process-closure barrier; fake-clock
+cases check cancellation/deadline after DNS has already completed. Settled DNS
+can no longer reject the combined registration wait. The experiments use explicit
+events and fake time, not test timeouts as evidence.
+
+Final second-pass verification: full OSS `pnpm check`, CLI production build,
+formatting and documentation checks passed. Independent review found no P0/P1.

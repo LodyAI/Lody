@@ -84,10 +84,14 @@ describe('cloudflared process ownership', () => {
     const child = await run.spawned;
     child.log('| https://fixture-quick.trycloudflare.com |');
     const handle = await run.result;
-    const rejected = expect(handle.registered).rejects.toThrow('cloudflared exited');
+    let registrationFailure: unknown;
+    void handle.registered.catch((error: unknown) => {
+      registrationFailure = error;
+    });
     child.emit('close', 1, null);
-    await rejected;
-    expect(await handle.closed).toBeInstanceOf(Error);
+    const failure = await handle.closed;
+    expect(failure?.message).toContain('cloudflared exited');
+    expect(registrationFailure).toBe(failure);
   });
 
   it('fails an invalid origin and releases the process', async () => {

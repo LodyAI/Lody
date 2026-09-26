@@ -94,6 +94,44 @@ describe('verifyPreviewTunnelRoundTrip', () => {
     }
   );
 
+  it.each(['cancel', 'deadline'])(
+    'settles on %s after DNS completes while registration is still pending',
+    async (reason) => {
+      vi.useFakeTimers();
+      const controller = new AbortController();
+      const registration = Promise.withResolvers<void>();
+      let failure: unknown;
+      const ready = verifyPreviewTunnelRoundTrip({
+        publicUrl: 'https://test.trycloudflare.com',
+        target,
+        registered: registration.promise,
+        signal: controller.signal,
+        fetch: async () => {
+          throw new Error('HTTP must not start');
+        },
+      }).catch((error: unknown) => {
+        failure = error;
+      });
+      try {
+        // Complete DNS before cancellation: DNS can no longer reject Promise.all.
+        await vi.advanceTimersByTimeAsync(0);
+        if (reason === 'deadline') await vi.advanceTimersByTimeAsync(90_000);
+        else {
+          controller.abort(new Error('cancel'));
+          await vi.advanceTimersByTimeAsync(0);
+        }
+        expect(failure).toBeInstanceOf(Error);
+        expect((failure as Error).message).toContain(
+          reason === 'deadline' ? '90000 ms limit' : 'cancel'
+        );
+        expect(vi.getTimerCount()).toBe(0);
+      } finally {
+        registration.resolve();
+        await ready;
+      }
+    }
+  );
+
   it('retains HTTP proxy support when configured DNS servers cannot be reached', async () => {
     vi.mocked(Resolver.prototype.resolve4).mockRejectedValue(
       Object.assign(new Error('blocked DNS'), { code: 'ETIMEOUT' })

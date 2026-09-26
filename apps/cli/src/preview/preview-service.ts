@@ -724,19 +724,7 @@ export class PreviewService {
         message: `Preview tunnel creation failed: ${formatErrorMessage(failureError)}`,
         retryable: true,
       };
-      const failed: PreviewConnection = {
-        ...creating,
-        status: 'failed',
-        updatedAt: this.now(),
-        error: {
-          stage: 'connect',
-          errorCode: failure.code,
-          message: failure.message,
-          retryable: failure.retryable,
-        },
-      };
-      await this.patchSessionPreview(request.sessionId, { previewConnection: failed });
-      return this.connectionResponse(request.sessionId, false, failed, failure);
+      return this.failCreatingConnection(request.sessionId, creating, failure);
     }
   }
 

@@ -221,10 +221,14 @@ describe.skipIf(process.platform === 'win32')('cloudflared lifecycle IPC', () =>
       const { socket, info } = await local.connected;
       socket.write('origin\n');
       const child = await pending;
-      const registration = expect(child.registered).rejects.toThrow();
+      let registrationFailure: unknown;
+      void child.registered.catch((error: unknown) => {
+        registrationFailure = error;
+      });
       socket.write('crash\n');
-      await registration;
       expect((await child.closed)?.message).toContain('cloudflared exited (7)');
+      expect(registrationFailure).toBeInstanceOf(Error);
+      expect((registrationFailure as Error).message).toContain('cloudflared exited (7)');
       expect(exists(info.ownerPid)).toBe(false);
       await expect(access(info.config)).rejects.toThrow();
     } finally {
