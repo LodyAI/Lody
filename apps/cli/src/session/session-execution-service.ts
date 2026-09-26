@@ -752,6 +752,8 @@ export class SessionExecutionService {
   private readonly canceledTurnBySession = new Map<SessionId, string>();
   private readonly currentTurnBySession = new Map<SessionId, string>();
   private readonly turnRuntimeBySession = new Map<SessionId, TurnRuntimeState>();
+  /** Fail-closed process-local barrier while the replicated Stop marker is unavailable. */
+  private readonly operationDeliveryPauseFallbackBySession = new Map<SessionId, string>();
   private readonly rewriteBarrierSessions = new Set<SessionId>();
   private readonly rewriteConflictLeaseSessions = new Set<SessionId>();
   private readonly turnReleaseWaiters = new Map<SessionId, Map<string, Set<() => void>>>();
@@ -1132,6 +1134,11 @@ export class SessionExecutionService {
       hasReusableSession: Boolean(this.deps.sessionManager.getSession(sessionId)),
       hasRewriteBarrier: this.rewriteBarrierSessions.has(sessionId),
     };
+  }
+
+  /** Whether Stop has paused automatic Operation completion delivery in this process. */
+  isOperationDeliveryPaused(sessionId: SessionId): boolean {
+    return this.operationDeliveryPauseFallbackBySession.has(sessionId);
   }
 
   tryAcquireSessionRewriteBarrier(sessionId: SessionId): (() => void) | null {
@@ -2370,6 +2377,13 @@ export class SessionExecutionService {
       // where a cancelled turn can be durably folded as succeeded.
       yield* self.ignoreWithWarning(
         options.sessionId,
+        'Failed to pause Operation delivery after Stop',
+        self.tryPromise(() =>
+          self.pauseOperationDeliveryAfterStop(options.sessionId, options.turnId)
+        )
+      );
+      yield* self.ignoreWithWarning(
+        options.sessionId,
         'Failed to mark dispatch cancelled',
         self.tryPromise(() =>
           self.markDispatchCancelled(options.sessionId, options.sessionDoc, options.userTurnId)
@@ -2410,12 +2424,6 @@ export class SessionExecutionService {
         'Failed to set cancelled turn status to idle',
         self.tryPromise(() => options.sessionDoc.setStatus(SessionStatusFactory.idle()))
       );
-      yield* self.ignoreWithWarning(
-        options.sessionId,
-        'Failed to clear cancel request',
-        self.tryPromise(() => self.clearCancelRequest(options.sessionId))
-      );
-
       const sessionToDrain = options.session;
       if (sessionToDrain && !options.terminateSession) {
         // Keep the execution owner until ACP has actually finished. Otherwise
@@ -3571,6 +3579,23 @@ export class SessionExecutionService {
     await upsertDocMeta(getSessionRoomId(sessionId), patch);
   }
 
+  private async pauseOperationDeliveryAfterStop(
+    sessionId: SessionId,
+    turnId: string
+  ): Promise<void> {
+    // Arm the local barrier before the replicated write. If that write fails,
+    // the coordinator in this process must still fail closed instead of
+    // starting a completion turn immediately after Stop released ownership.
+    this.operationDeliveryPauseFallbackBySession.set(sessionId, turnId);
+    await this.upsertSessionMeta(sessionId, {
+      operationDeliveryPausedAtTurnId: turnId,
+      // The UI's durable Stop request is the restart-safe fallback while this
+      // write is unavailable. Clear it only in the same successful patch that
+      // establishes the canonical pause marker.
+      lastCanceledTurn: undefined,
+    });
+  }
+
   /**
    * Map the user turn's history entry to `status`. Returns whether a matching
    * entry existed locally — with RPC fast-path dispatch the turn can complete
@@ -3703,6 +3728,14 @@ export class SessionExecutionService {
       // newer activation published by another peer.
       processingUserMsgId: userTurnId,
     });
+    // A real user turn is the explicit resume boundary for Operation
+    // completions retained by Stop. Delivery/goal turns have no userTurnId
+    // here and therefore cannot clear the durable pause themselves.
+    await this.upsertSessionMeta(sessionId, {
+      operationDeliveryPausedAtTurnId: undefined,
+      lastCanceledTurn: undefined,
+    });
+    this.operationDeliveryPauseFallbackBySession.delete(sessionId);
     await this.acknowledgeSteerTurn(sessionId, userTurnId);
   }
 
@@ -5534,6 +5567,18 @@ export class SessionExecutionService {
               this.turnRuntimeBySession.get(sessionId)?.turnId;
             if (liveTurnId == null) {
               const history = readSessionHistory(sessionDoc.sessionData.history);
+              const requestedAssistant = history.find(
+                (entry) => entry.id === turnId && entry.role === 'assistant'
+              );
+              const stoppedUserTurnId = requestedAssistant?.userTurnId;
+              const hasCancelledRequestedTurn =
+                typeof stoppedUserTurnId === 'string' &&
+                history.some(
+                  (entry) =>
+                    entry.id === stoppedUserTurnId &&
+                    entry.role === 'user' &&
+                    entry.status === 'canceled'
+                );
               const hasUnfinishedRequestedTurn = history.some(
                 (entry) =>
                   entry.id === turnId &&
@@ -5565,6 +5610,23 @@ export class SessionExecutionService {
                   turnId,
                   reportTurnError: false,
                 });
+                return { success: true };
+              }
+              if (hasCancelledRequestedTurn) {
+                // A prior daemon cancelled this turn but could not replicate
+                // the canonical pause marker. Preserve fail-closed startup
+                // behavior through lastCanceledTurn, then atomically heal the
+                // marker and consume that Stop request.
+                await this.pauseOperationDeliveryAfterStop(sessionId, turnId);
+                return { success: true };
+              }
+              const persistedMeta = await this.getSessionMeta(sessionId);
+              if (persistedMeta?.lastCanceledTurn === turnId) {
+                // The Stop request itself is the durable recovery receipt. The
+                // cancelled history entry may not have replicated (or its
+                // write may have failed independently), so never consume the
+                // final fail-closed barrier merely because history is absent.
+                await this.pauseOperationDeliveryAfterStop(sessionId, turnId);
                 return { success: true };
               }
             }

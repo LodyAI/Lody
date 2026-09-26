@@ -1550,7 +1550,12 @@ describe('SessionExecutionService', () => {
     expect(upsertDocMeta).toHaveBeenCalledWith(expect.any(String), {
       processingUserMsgId: 'user-2',
     });
+    expect(upsertDocMeta).toHaveBeenCalledWith(expect.any(String), {
+      operationDeliveryPausedAtTurnId: undefined,
+      lastCanceledTurn: undefined,
+    });
     expect(meta).toMatchObject({ latestUserMsgId: 'user-3', processingUserMsgId: 'user-2' });
+    expect(getDocMeta).toHaveBeenCalled();
   });
 
   it('cannot overwrite a newer activation while an earlier turn becomes terminal', async () => {
@@ -7473,11 +7478,12 @@ describe('SessionExecutionService', () => {
     expect(session.agentClient.cancel).toHaveBeenCalledWith('acp-3');
     expect(sessionDoc.setStatus).toHaveBeenCalledWith(SessionStatusFactory.idle());
     expect(upsertDocMeta).toHaveBeenCalledWith('session-session-3', {
-      lastHandledUserMsgId: 'turn-cancel-1',
-      processingUserMsgId: undefined,
+      operationDeliveryPausedAtTurnId: 'assistant-turn-1',
+      lastCanceledTurn: undefined,
     });
     expect(upsertDocMeta).toHaveBeenCalledWith('session-session-3', {
-      lastCanceledTurn: undefined,
+      lastHandledUserMsgId: 'turn-cancel-1',
+      processingUserMsgId: undefined,
     });
   });
 
@@ -7534,6 +7540,171 @@ describe('SessionExecutionService', () => {
     expect(result).toEqual({ success: true });
     expect(session.agentClient.cancel).toHaveBeenCalledWith('acp-cancel-finalizer-fail');
     expect(deps.turnFinalization.finalizeACPState).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps Operation delivery paused locally when the replicated Stop marker write fails', async () => {
+    const sessionDoc = {
+      getHistory: vi.fn(async () => []),
+      setStatus: vi.fn(async () => {}),
+      updateHistory: vi.fn(async () => {}),
+    };
+    const session = {
+      acpSessionId: 'acp-cancel-pause-write-fail' as ACPSessionId,
+      agentClient: {
+        isCreated: vi.fn(() => true),
+        cancel: vi.fn(async () => {}),
+      },
+    };
+    const sessionManager = {
+      getSession: vi.fn(() => session),
+      getPendingSession: vi.fn(() => null),
+      createSession: vi.fn(),
+      setSessionError: vi.fn(),
+      terminateSession: vi.fn(),
+      refreshGhTokenForSession: vi.fn(async () => {}),
+    } as unknown as SessionManager;
+    const upsertDocMeta = vi.fn(async (_roomId: string, patch: Partial<SessionMeta>) => {
+      if (patch.operationDeliveryPausedAtTurnId) {
+        throw new Error('replicated marker write failed');
+      }
+    });
+    const deps = createBaseDeps({
+      sessionManager,
+      getActiveTurnId: vi.fn(() => 'assistant-turn-pause-write-fail'),
+      workspaceDocument: {
+        repo: {
+          upsertDocMeta,
+          getDocMeta: vi.fn(async () => ({
+            meta: {
+              latestUserMsgId: 'turn-pause-write-fail',
+              processingUserMsgId: 'turn-pause-write-fail',
+            },
+          })),
+        },
+        getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
+        updateAcpCapabilities: vi.fn(async () => {}),
+      } as unknown as LoroDocumentManager,
+    });
+
+    const service = new SessionExecutionService(deps);
+    const result = await service.cancelSession({
+      type: 'session/cancel',
+      sessionId: 'session-cancel-pause-write-fail' as SessionId,
+      machineId: 'machine-1',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      turnId: 'assistant-turn-pause-write-fail',
+    });
+
+    expect(result).toEqual({ success: true });
+    expect(service.isOperationDeliveryPaused('session-cancel-pause-write-fail' as SessionId)).toBe(
+      true
+    );
+  });
+
+  it('heals a missing pause marker from a durable cancelled turn after restart', async () => {
+    const upsertDocMeta = vi.fn(async () => {});
+    const history = [
+      {
+        id: 'turn-stopped-before-restart',
+        role: 'user',
+        status: 'canceled',
+      },
+      {
+        id: 'assistant-stopped-before-restart',
+        role: 'assistant',
+        userTurnId: 'turn-stopped-before-restart',
+        finished: true,
+      },
+    ];
+    const sessionDoc = withHistoryPort({
+      getHistory: vi.fn(() => history),
+      setStatus: vi.fn(async () => {}),
+      updateHistory: vi.fn(async () => {}),
+    });
+    const deps = createBaseDeps({
+      sessionManager: {
+        getSession: vi.fn(() => null),
+        getPendingSession: vi.fn(() => null),
+        createSession: vi.fn(),
+        setSessionError: vi.fn(),
+        terminateSession: vi.fn(),
+        refreshGhTokenForSession: vi.fn(async () => {}),
+      } as unknown as SessionManager,
+      getActiveTurnId: vi.fn(() => undefined),
+      workspaceDocument: {
+        repo: {
+          upsertDocMeta,
+          getDocMeta: vi.fn(async () => ({
+            meta: { lastCanceledTurn: 'assistant-stopped-before-restart' },
+          })),
+        },
+        getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
+        updateAcpCapabilities: vi.fn(async () => {}),
+      } as unknown as LoroDocumentManager,
+    });
+
+    const service = new SessionExecutionService(deps);
+    const result = await service.cancelSession({
+      type: 'session/cancel',
+      sessionId: 'session-stopped-before-restart' as SessionId,
+      machineId: 'machine-1',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      turnId: 'assistant-stopped-before-restart',
+    });
+
+    expect(result).toEqual({ success: true });
+    expect(upsertDocMeta).toHaveBeenCalledWith('session-session-stopped-before-restart', {
+      operationDeliveryPausedAtTurnId: 'assistant-stopped-before-restart',
+      lastCanceledTurn: undefined,
+    });
+  });
+
+  it('heals a durable Stop request after restart even when cancelled history is unavailable', async () => {
+    const upsertDocMeta = vi.fn(async () => {});
+    const sessionDoc = withHistoryPort({
+      getHistory: vi.fn(() => []),
+      setStatus: vi.fn(async () => {}),
+      updateHistory: vi.fn(async () => {}),
+    });
+    const deps = createBaseDeps({
+      sessionManager: {
+        getSession: vi.fn(() => null),
+        getPendingSession: vi.fn(() => null),
+        createSession: vi.fn(),
+        setSessionError: vi.fn(),
+        terminateSession: vi.fn(),
+        refreshGhTokenForSession: vi.fn(async () => {}),
+      } as unknown as SessionManager,
+      getActiveTurnId: vi.fn(() => undefined),
+      workspaceDocument: {
+        repo: {
+          upsertDocMeta,
+          getDocMeta: vi.fn(async () => ({
+            meta: { lastCanceledTurn: 'assistant-stop-without-history' },
+          })),
+        },
+        getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
+        updateAcpCapabilities: vi.fn(async () => {}),
+      } as unknown as LoroDocumentManager,
+    });
+
+    const restartedService = new SessionExecutionService(deps);
+    const result = await restartedService.cancelSession({
+      type: 'session/cancel',
+      sessionId: 'session-stop-without-history' as SessionId,
+      machineId: 'machine-1',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      turnId: 'assistant-stop-without-history',
+    });
+
+    expect(result).toEqual({ success: true });
+    expect(upsertDocMeta).toHaveBeenCalledWith('session-session-stop-without-history', {
+      operationDeliveryPausedAtTurnId: 'assistant-stop-without-history',
+      lastCanceledTurn: undefined,
+    });
+    expect(
+      restartedService.isOperationDeliveryPaused('session-stop-without-history' as SessionId)
+    ).toBe(true);
   });
 
   it('ignores a cancel request for a stale turn id', async () => {
@@ -7653,6 +7824,7 @@ describe('SessionExecutionService', () => {
     expect(sessionDoc.updateHistory).toHaveBeenCalled();
     expect(sessionDoc.setStatus).toHaveBeenCalledWith(SessionStatusFactory.idle());
     expect(upsertDocMeta).toHaveBeenCalledWith('session-session-stale-compaction', {
+      operationDeliveryPausedAtTurnId: 'assistant-stale-compaction',
       lastCanceledTurn: undefined,
     });
   });
@@ -7713,6 +7885,7 @@ describe('SessionExecutionService', () => {
       processingUserMsgId: undefined,
     });
     expect(upsertDocMeta).toHaveBeenCalledWith('session-session-queued-cancel', {
+      operationDeliveryPausedAtTurnId: 'assistant-turn-1',
       lastCanceledTurn: undefined,
     });
   });

@@ -1100,6 +1100,15 @@ export class LodyOperationCoordinator {
     if (!metaRecord?.meta || isLoroRepoDocDeleted(metaRecord)) return;
     const meta = metaRecord.meta as SessionMeta;
     if (meta.isArchived || meta.machineId !== this.options.machineId) return;
+    // Stop is a session pause, not merely cancellation of one ACP request.
+    // Keep durable completions pending until a user-authored turn explicitly
+    // resumes the session and clears this marker while taking ownership.
+    if (
+      meta.operationDeliveryPausedAtTurnId ||
+      meta.lastCanceledTurn ||
+      this.options.executionService.isOperationDeliveryPaused(delivery.requesterSessionId)
+    )
+      return;
     const sessionDoc = await this.options.workspaceDocument.getOrCreateSessionDoc(
       delivery.requesterSessionId
     );
