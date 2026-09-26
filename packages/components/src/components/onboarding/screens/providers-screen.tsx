@@ -652,7 +652,7 @@ function ShowcaseChipMark({
         readiness={warmed.readiness}
         percent={warmed.percent}
         size="sm"
-        className="rounded-full bg-muted/50"
+        surface="avatar"
       />
     );
   }
