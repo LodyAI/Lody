@@ -782,7 +782,12 @@ export function ShortcutPromptField({
       rows={4}
       // A value holder, so the well every other field in the form is.
       containerClassName={stylex.props(styles.promptWell).className}
-      className={withClassName(stylex.props(styles.promptInput), 'input-scrollbar').className}
+      // The wrapper owns this field's focus ring; suppress the shell's global
+      // inset focus shadow on the textarea inside it.
+      className={
+        withClassName(stylex.props(styles.promptInput), 'input-scrollbar focus-visible:shadow-none')
+          .className
+      }
       skillAgent={skillAgent}
       onMentionRangesChange={(ranges) => editor.onRangesChange(toPersistedMentionRanges(ranges))}
     />

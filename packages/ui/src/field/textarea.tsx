@@ -14,6 +14,7 @@ import { isInvalid } from './invalid';
 import { well } from './well';
 
 export type TextareaResize = 'vertical' | 'none';
+export type TextareaAppearance = 'well' | 'bare';
 
 type BaseProps = ComponentProps<typeof BaseInput>;
 
@@ -23,6 +24,8 @@ export interface TextareaProps extends Omit<
 > {
   /** Whether the person can drag the control taller. */
   resize?: TextareaResize;
+  /** Bare content inside a parent that owns the field surface and focus edge. */
+  appearance?: TextareaAppearance;
   render?: ReactElement;
   className?: string;
   /** Layout a caller owns, such as a surface's own font size. Not visual identity. */
@@ -39,12 +42,13 @@ const styles = stylex.create({
     lineHeight: text.subheadlineLeading,
     minHeight: field.textareaMinHeight,
   },
+  bare: { display: 'block', width: '100%' },
   resizeVertical: { resize: 'vertical' },
   resizeNone: { resize: 'none' },
 });
 
 export const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(function Textarea(
-  { resize = 'vertical', className, render, ...rest },
+  { resize = 'vertical', appearance = 'well', className, render, ...rest },
   ref
 ) {
   // Base UI has no textarea part; `Input` is `Field.Control`, which renders
@@ -60,10 +64,10 @@ export const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(function 
       className={(state) =>
         appendClassName(
           stylex.props(
-            well.base,
-            styles.textarea,
+            appearance === 'bare' ? well.bare : well.base,
+            appearance === 'bare' ? styles.bare : styles.textarea,
             resize === 'none' ? styles.resizeNone : styles.resizeVertical,
-            isInvalid(state.valid, ariaInvalid) && well.invalid
+            appearance === 'well' && isInvalid(state.valid, ariaInvalid) && well.invalid
           ).className,
           className
         )

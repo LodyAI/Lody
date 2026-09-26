@@ -192,7 +192,7 @@ export type {
   TabsTabProps,
 } from './disclosure/tabs';
 export { Textarea } from './field/textarea';
-export type { TextareaProps, TextareaResize } from './field/textarea';
+export type { TextareaAppearance, TextareaProps, TextareaResize } from './field/textarea';
 export { Toast } from './feedback/toast';
 export type { ToastProviderProps, ToastViewportProps } from './feedback/toast';
 export type { FeedbackTone } from './feedback/tone';

@@ -58,6 +58,7 @@ import { Select } from '../field/select';
 import { Separator } from '../separator/separator';
 import { Switch } from '../field/switch';
 import { Textarea } from '../field/textarea';
+import { well } from '../field/well';
 import { Toggle, type ToggleSize } from '../toggle/toggle';
 import { ToggleGroup } from '../toggle/toggle-group';
 import { toggle as toggleTokens } from '../toggle/toggle.tokens.stylex';
@@ -144,6 +145,7 @@ const styles = stylex.create({
     color: colors.secondaryLabel,
   },
   well: { backgroundColor: colors.wellBackground, boxShadow: shadow.inset },
+  bareTextareaShell: { padding: space[2], borderRadius: radius.medium },
   page: { backgroundColor: colors.background },
   region: { backgroundColor: colors.secondaryBackground },
   card: { backgroundColor: colors.elevatedBackground, boxShadow: shadow.card },
@@ -4144,6 +4146,14 @@ export function UiGallery({ palettes = 'both' }: UiGalleryProps) {
                 <Field.Label>What should the agent do?</Field.Label>
                 <Textarea placeholder="Describe the task" rows={3} />
                 <Field.Description>Enter sends; Shift+Enter adds a line.</Field.Description>
+              </Field.Root>
+            </FieldRow>
+            <FieldRow legend="textarea · bare in shell">
+              <Field.Root name="embedded-summary">
+                <Field.Label>Embedded editor</Field.Label>
+                <div {...stylex.props(well.shell, styles.bareTextareaShell)}>
+                  <Textarea appearance="bare" placeholder="Continue editing" rows={3} />
+                </div>
               </Field.Root>
             </FieldRow>
             <FieldRow legend="textarea · invalid">

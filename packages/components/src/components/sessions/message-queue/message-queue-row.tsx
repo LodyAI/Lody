@@ -207,11 +207,9 @@ function RowBody(props: MessageQueueRowProps & EditCommitProps) {
             className={cn(
               'block w-full resize-none border-transparent bg-transparent',
               'px-2 pt-1 text-xs leading-snug text-foreground',
-              // The base layer paints `box-shadow: inset 0 0 0 1px` on any focused
-              // textarea. That used to land exactly on this field's own border; now
-              // that the shell owns the border, it would draw a second rectangle
-              // inside the box. The composer suppresses it the same way.
-              'outline-none focus-visible:outline-hidden focus-visible:ring-0 focus-visible:ring-offset-0'
+              // The shell owns the focus ring; the base layer's inset shadow
+              // would draw another rectangle on the textarea.
+              'outline-none focus-visible:outline-hidden focus-visible:shadow-none'
             )}
             disabled={isPending}
             aria-label={t('sessions.messageQueue.editMessage', 'Edit queued message')}
