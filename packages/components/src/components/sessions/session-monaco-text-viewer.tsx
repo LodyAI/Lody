@@ -1,4 +1,5 @@
 import 'monaco-editor/min/vs/editor/editor.main.css';
+import './session-monaco-text-viewer.css';
 
 import { useEffect, useMemo, useRef } from 'react';
 import { useAtomValue } from 'jotai';
@@ -241,7 +242,12 @@ export function SessionMonacoTextViewer({
   }, [findRequestSeq]);
 
   return (
-    <div className={cn('h-full min-h-[240px] w-full overflow-hidden', className)}>
+    <div
+      className={cn(
+        'lody-session-monaco h-full min-h-[240px] w-full overflow-hidden',
+        className
+      )}
+    >
       <div ref={containerRef} className="h-full w-full" />
     </div>
   );
