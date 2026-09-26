@@ -108,3 +108,5 @@ not a packaged Electron build. Existing dependency caches were reused; the full
 components typecheck still reports unrelated dependency/type errors (including
 Effect type identities). `docs check` is blocked by links into the uninitialized
 Codex/Grok submodules; none of its errors concern the changed documents.
+
+PR: [#1022](https://github.com/LodyAI/Lody/pull/1022).

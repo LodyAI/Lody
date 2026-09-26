@@ -83,3 +83,5 @@ dropdown 选择与关闭，以及显式渲染右键触发器的 ref、布局和�
 依赖缓存；完整 components 类型检查仍报告改动范围外的依赖/类型错误（包括
 Effect 类型标识冲突）。`docs check` 被未初始化的 Codex/Grok 子模块链接阻塞，
 其错误不涉及本次修改的文档。
+
+PR：[#1022](https://github.com/LodyAI/Lody/pull/1022)。
