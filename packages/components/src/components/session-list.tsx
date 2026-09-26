@@ -1031,7 +1031,7 @@ const SessionGroupSection = memo(function SessionGroupSection({
             const showInfoCard = !isMobile;
             const menuRow = hasMenuActions ? (
               <ContextMenu.Root key={session.sessionId}>
-                <ContextMenu.Trigger >{row}</ContextMenu.Trigger>
+                <ContextMenu.Trigger>{row}</ContextMenu.Trigger>
                 <ContextMenu.Content className="min-w-[180px]">
                   <SessionRowOpenedByMenuItems
                     opener={openedByOpener}
@@ -1039,31 +1039,31 @@ const SessionGroupSection = memo(function SessionGroupSection({
                   />
                   {onTogglePinSession ? (
                     <ContextMenu.Item
+                      icon={session.isPinned ? <PinOff /> : <Pin />}
                       onClick={() => {
                         onTogglePinSession(session.sessionId, !session.isPinned);
                       }}
                     >
-                      {session.isPinned ? <PinOff /> : <Pin />}
                       {session.isPinned ? contextMenuLabels.unpin : contextMenuLabels.pin}
                     </ContextMenu.Item>
                   ) : null}
                   {canMarkUnread ? (
                     <ContextMenu.Item
+                      icon={<Mail />}
                       onClick={() => {
                         onMarkSessionUnread?.(session.sessionId);
                       }}
                     >
-                      <Mail />
                       {contextMenuLabels.markUnread}
                     </ContextMenu.Item>
                   ) : null}
                   {onRenameSession ? (
                     <ContextMenu.Item
+                      icon={<Pencil />}
                       onClick={() => {
                         beginRename(session.sessionId, session.title);
                       }}
                     >
-                      <Pencil />
                       {contextMenuLabels.rename}
                     </ContextMenu.Item>
                   ) : null}
@@ -1073,38 +1073,40 @@ const SessionGroupSection = memo(function SessionGroupSection({
                   ) : null}
                   {onCopySessionUrl ? (
                     <ContextMenu.Item
+                      icon={<Link2 />}
                       onClick={() => {
                         onCopySessionUrl(session.sessionId);
                       }}
                     >
-                      <Link2 />
                       {contextMenuLabels.copyUrl}
                     </ContextMenu.Item>
                   ) : null}
                   {session.branchName ? (
                     <ContextMenu.Item
+                      icon={<GitBranch />}
                       onClick={() => {
                         void navigator.clipboard.writeText(session.branchName).catch(() => {});
                       }}
                     >
-                      <GitBranch />
                       {contextMenuLabels.copyBranch}
                     </ContextMenu.Item>
                   ) : null}
                   {shareMenuState ? (
                     <ContextMenu.Item
                       disabled={shareMenuState !== 'share'}
+                      icon={
+                        shareMenuState === 'share' ? (
+                          <Users />
+                        ) : shareMenuState === 'loading' ? (
+                          <Spinner />
+                        ) : (
+                          <LockKeyhole />
+                        )
+                      }
                       onClick={() => {
                         onShareSessionWithTeam?.(session.sessionId);
                       }}
                     >
-                      {shareMenuState === 'share' ? (
-                        <Users />
-                      ) : shareMenuState === 'loading' ? (
-                        <Spinner />
-                      ) : (
-                        <LockKeyhole />
-                      )}
                       {shareMenuState === 'share'
                         ? contextMenuLabels.shareWithTeam
                         : shareMenuState === 'unregistered'
@@ -1128,6 +1130,7 @@ const SessionGroupSection = memo(function SessionGroupSection({
                   ) : null}
                   {onOpenPullRequest && prUrl ? (
                     <ContextMenu.Item
+                      icon={<GitPullRequest />}
                       onClick={() => {
                         onOpenPullRequest({
                           sessionId: session.sessionId,
@@ -1137,7 +1140,6 @@ const SessionGroupSection = memo(function SessionGroupSection({
                         });
                       }}
                     >
-                      <GitPullRequest />
                       {contextMenuLabels.openPr}
                     </ContextMenu.Item>
                   ) : null}
@@ -1171,11 +1173,11 @@ const SessionGroupSection = memo(function SessionGroupSection({
                   ) : null}
                   {onArchiveSession ? (
                     <ContextMenu.Item
+                      icon={<Archive />}
                       onClick={() => {
                         onArchiveSession(session.sessionId);
                       }}
                     >
-                      <Archive />
                       {contextMenuLabels.archive}
                     </ContextMenu.Item>
                   ) : null}

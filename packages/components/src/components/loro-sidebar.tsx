@@ -1084,11 +1084,11 @@ export const LoroSidebar = memo(function LoroSidebar({
                         )}
                         <ContextMenu.Content>
                           <ContextMenu.Item
+                            icon={<AppWindow />}
                             onClick={() => {
                               openDesktopWindow(undefined, workspaceSlug, 'context_menu');
                             }}
                           >
-                            <AppWindow />
                             {t('workspace.openInNewWindow')}
                           </ContextMenu.Item>
                         </ContextMenu.Content>

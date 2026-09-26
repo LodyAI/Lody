@@ -1051,31 +1051,31 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
         />
         {canTogglePin ? (
           <ContextMenu.Item
+            icon={item.isPinned ? <PinOff /> : <Pin />}
             onClick={() => {
               onTogglePin?.(item.id, !item.isPinned);
             }}
           >
-            {item.isPinned ? <PinOff /> : <Pin />}
             {item.isPinned ? contextMenuLabels.unpin : contextMenuLabels.pin}
           </ContextMenu.Item>
         ) : null}
         {canMarkUnread ? (
           <ContextMenu.Item
+            icon={<Mail />}
             onClick={() => {
               onMarkUnread?.(item.id);
             }}
           >
-            <Mail />
             {contextMenuLabels.markUnread}
           </ContextMenu.Item>
         ) : null}
         {canRename ? (
           <ContextMenu.Item
+            icon={<Pencil />}
             onClick={() => {
               onBeginRename(item.id, item.title);
             }}
           >
-            <Pencil />
             {contextMenuLabels.rename}
           </ContextMenu.Item>
         ) : null}
@@ -1085,38 +1085,40 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
         ) : null}
         {canCopyUrl ? (
           <ContextMenu.Item
+            icon={<Link2 />}
             onClick={() => {
               onCopyUrl?.(item.id);
             }}
           >
-            <Link2 />
             {contextMenuLabels.copyUrl}
           </ContextMenu.Item>
         ) : null}
         {branchName ? (
           <ContextMenu.Item
+            icon={<GitBranch />}
             onClick={() => {
               void navigator.clipboard.writeText(branchName).catch(() => {});
             }}
           >
-            <GitBranch />
             {contextMenuLabels.copyBranch}
           </ContextMenu.Item>
         ) : null}
         {shareMenuState ? (
           <ContextMenu.Item
             disabled={shareMenuState !== 'share'}
+            icon={
+              shareMenuState === 'share' ? (
+                <Users />
+              ) : shareMenuState === 'loading' ? (
+                <Spinner />
+              ) : (
+                <LockKeyhole />
+              )
+            }
             onClick={() => {
               onShareWithTeam?.(item.id);
             }}
           >
-            {shareMenuState === 'share' ? (
-              <Users />
-            ) : shareMenuState === 'loading' ? (
-              <Spinner />
-            ) : (
-              <LockKeyhole />
-            )}
             {shareMenuState === 'share'
               ? contextMenuLabels.shareWithTeam
               : shareMenuState === 'unregistered'
@@ -1138,11 +1140,11 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
         ) : null}
         {handlePrOpen ? (
           <ContextMenu.Item
+            icon={<GitPullRequest />}
             onClick={() => {
               handlePrOpen();
             }}
           >
-            <GitPullRequest />
             {contextMenuLabels.openPr}
           </ContextMenu.Item>
         ) : null}
@@ -1170,11 +1172,11 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
         ) : null}
         {canArchive ? (
           <ContextMenu.Item
+            icon={<Archive />}
             onClick={() => {
               onArchive?.(item.id);
             }}
           >
-            <Archive />
             {contextMenuLabels.archive}
           </ContextMenu.Item>
         ) : null}

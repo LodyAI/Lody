@@ -329,16 +329,19 @@ export function SessionRowOpenedByMenuItems({
   return (
     <>
       {goToOpener ? (
-        <ContextMenu.Item onClick={goToOpener}>
-          <CornerLeftUp />
+        <ContextMenu.Item icon={<CornerLeftUp />} onClick={goToOpener}>
           {goToOpenerLabel}
         </ContextMenu.Item>
       ) : null}
       {opener ? (
-        <ContextMenu.Item onClick={opener.onToggle}>
-          <ChevronDown
-            className={cn('transition-transform', opener.expanded ? 'rotate-0' : '-rotate-90')}
-          />
+        <ContextMenu.Item
+          icon={
+            <ChevronDown
+              className={cn('transition-transform', opener.expanded ? 'rotate-0' : '-rotate-90')}
+            />
+          }
+          onClick={opener.onToggle}
+        >
           {opener.label}
         </ContextMenu.Item>
       ) : null}
