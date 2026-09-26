@@ -39,6 +39,7 @@ import {
   type ManagedRuntimeProgressCallback,
 } from '@/agent/managed-agent-runtime';
 import { getManagedRuntimeUpdateCoordinator } from '@/agent/managed-runtime-update-coordinator';
+import { getGhShimHostBinDir } from '@/lib/gh-shim-script';
 import {
   DEEPSEEK_HARNESS_CAPABILITY_SOURCE_VERSION,
   resolveDeepSeekHarnessProcessLaunch,
@@ -670,6 +671,22 @@ function normalizePathEntry(entry: string): string {
   return normalized.length > 1 ? normalized.replace(/[\\/]+$/, '') : normalized;
 }
 
+/**
+ * Moves the `gh` shim dir to the front when present. The shim is the only `gh` that
+ * fetches a fresh managed token per call; a `gh` found earlier in PATH reads the
+ * session's launch-time `GH_TOKEN`, which expires about an hour later. Agent shells
+ * (Claude Code's shell snapshot) inherit this order verbatim, so `BASH_ENV` alone
+ * cannot restore it.
+ */
+function pinGhShimBinDirFirst(parts: string[]): string[] {
+  const shimDir = normalizePathEntry(getGhShimHostBinDir());
+  const index = parts.findIndex((entry) => normalizePathEntry(entry) === shimDir);
+  if (index <= 0) {
+    return parts;
+  }
+  return [parts[index], ...parts.slice(0, index), ...parts.slice(index + 1)];
+}
+
 export function getDefaultAcpPathEntries(homeDir = homedir(), agentType?: string): string[] {
   if (!homeDir) {
     return [];
@@ -696,7 +713,9 @@ export function withDefaultAcpPathEntries(
   const currentWithoutDefaults = currentParts.filter(
     (entry) => !defaultEntrySet.has(normalizePathEntry(entry))
   );
-  const nextPath = [...defaultEntries, ...currentWithoutDefaults].join(delimiter);
+  const nextPath = pinGhShimBinDirFirst([...defaultEntries, ...currentWithoutDefaults]).join(
+    delimiter
+  );
 
   if (env[pathKey] === nextPath) {
     return env;
@@ -719,7 +738,8 @@ export function withDefaultAcpPathEntries(
  *   resolve from wherever the user actually put them (homebrew/cargo/volta/asdf/
  *   `~/.local/bin`/...). A GUI/daemon launch inherits a minimal PATH, so without
  *   this `opencode acp` & friends fail with ENOENT. Base-only entries (e.g.
- *   runtime-injected `node_modules/.bin`) are appended so nothing is lost.
+ *   runtime-injected `node_modules/.bin`) are appended so nothing is lost. The
+ *   one exception is the `gh` shim dir, which stays first (`pinGhShimBinDirFirst`).
  *
  * Hardcoding a few dirs (see `withDefaultAcpPathEntries`) was rejected: it cannot
  * cover the open-ended set of locations different users install tools into.
@@ -751,7 +771,7 @@ export function mergeLoginShellEnv(
   }
 
   if (ordered.length > 0) {
-    merged[pathKey] = ordered.join(delimiter);
+    merged[pathKey] = pinGhShimBinDirFirst(ordered).join(delimiter);
   }
 
   return merged;

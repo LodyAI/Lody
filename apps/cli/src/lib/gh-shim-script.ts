@@ -323,14 +323,18 @@ const readRepoFullName = async () => {
   return parseRepoFromUrl(fromEnv) || parseRepoFromUrl(await readGitRemoteOrigin());
 };
 
+// LODY_GIT_CRED_BROKER_STATE_FILE names THIS session's workspace broker and must win,
+// exactly as in the git credential helper: the shared broker.json is last-writer-wins
+// across a fleet's workspaces, and a restarted broker only updates the state files.
 const BROKER_STATE_PATHS = [
+  process.env.LODY_GIT_CRED_BROKER_STATE_FILE,
   '/home/node/.lody/broker.json',
   path.join(
     process.env.LODY_DATA_DIR ||
       path.join(os.homedir(), process.env.LODY_PLATFORM === 'local' ? '.lody-oss' : '.lody'),
     'broker.json'
   ),
-];
+].filter(Boolean);
 
 const getBrokerConfigFromFile = () => {
   for (const statePath of BROKER_STATE_PATHS) {
@@ -449,10 +453,24 @@ const callBrokerWithFallback = async (action) => {
   if (first.error && source === 'env' && isConnectionError(first.error)) {
     const fileConfig = getBrokerConfigFromFile();
     if (fileConfig && fileConfig.url !== url) {
-      return await action(fileConfig.url, fileConfig.token);
+      const second = await action(fileConfig.url, fileConfig.token);
+      if (second.error) reportBrokerUnreachable([url, fileConfig.url], second.error);
+      return second;
     }
   }
+  if (first.error) reportBrokerUnreachable([url], first.error);
   return first;
+};
+
+// Without this line a dead broker is indistinguishable from "not logged in": gh runs
+// without a managed token and 'gh auth status' reports no account.
+const reportBrokerUnreachable = (urls, error) => {
+  const code = (error && (error.code || (error.cause && error.cause.code))) || '';
+  const reason = code || String((error && error.message) || error);
+  process.stderr.write(
+    'lody gh: credential broker unreachable at ' + urls.join(', then ') + ' (' + reason +
+      '); running gh without a Lody-managed token.\\n'
+  );
 };
 
 const fetchTokenFromBroker = async (repoFullName) => {
