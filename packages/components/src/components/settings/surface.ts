@@ -1,6 +1,14 @@
 import * as stylex from '@stylexjs/stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
-import { corner, duration, ease, focus, radius, space } from '@lody/ui/tokens/scales.stylex';
+import {
+  control,
+  corner,
+  duration,
+  ease,
+  focus,
+  radius,
+  space,
+} from '@lody/ui/tokens/scales.stylex';
 import { settingsMaterial as material } from './material.stylex';
 import { settingsType as type } from './type.stylex';
 
@@ -255,6 +263,34 @@ export const settingsSurface = stylex.create({
     fontVariantNumeric: 'tabular-nums',
   },
 
+  /**
+   * A row a person presses to go somewhere (a page, a dialog), drawn as a
+   * settings row: the whole line is the target and a quiet mark at its end
+   * says where it leads. Spread with `row` and `pressableLine`; it resets what
+   * a button brings.
+   */
+  linkRow: {
+    boxSizing: 'border-box',
+    width: '100%',
+    margin: 0,
+    borderWidth: 0,
+    borderStyle: 'none',
+    color: 'inherit',
+    fontFamily: 'inherit',
+    fontSize: 'inherit',
+    textAlign: 'start',
+    cursor: 'pointer',
+    outline: 'none',
+    boxShadow: {
+      default: 'none',
+      ':focus-visible': `inset 0 0 0 ${focus.ringWidth} ${colors.accent}`,
+    },
+  },
+  /** A link row's end holds a control's height, so it is as tall as a row with a button. */
+  linkEnd: { minHeight: control.small },
+  /** A link row's end mark: a hint, in the ink of a glyph at rest. */
+  linkMark: { flexShrink: 0, width: '14px', height: '14px', color: colors.tertiaryLabel },
+
   /** Copy standing in for a card's rows: an empty list, a loading line. */
   cardNote: {
     margin: 0,
@@ -264,6 +300,16 @@ export const settingsSurface = stylex.create({
     lineHeight: 1.375,
     color: colors.secondaryLabel,
   },
+  /** An empty list's one line when it carries the way to fill it. */
+  cardNoteWithAction: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: space[4],
+    paddingBlock: space[2],
+  },
+  /** A row whose control cannot be used here: its name steps back with it. */
+  rowLabelDisabled: { color: colors.tertiaryLabel },
   /**
    * The column a settings page lays out in: sections stacked and set apart by
    * space, centred at a reading width once the panel is wide.
@@ -450,23 +496,6 @@ export const settingsCatalog = stylex.create({
     gap: space[1],
     paddingInlineEnd: space[3],
   },
-  /** An empty catalog: a quiet region, no edge and no dashed box. */
-  empty: {
-    boxSizing: 'border-box',
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: space[3],
-    paddingInline: space[6],
-    paddingBlock: space[8],
-    borderRadius: radius.large,
-    cornerShape: corner.shape,
-    backgroundColor: material.emptyFill,
-    textAlign: 'center',
-  },
-  emptyIcon: { width: '24px', height: '24px', color: colors.tertiaryLabel },
-  emptyText: { margin: 0, fontSize: type.caption, color: colors.secondaryLabel },
   icon: { flexShrink: 0, width: '14px', height: '14px' },
   iconSmall: { flexShrink: 0, width: '12px', height: '12px' },
 

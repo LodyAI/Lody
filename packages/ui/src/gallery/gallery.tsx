@@ -3308,6 +3308,14 @@ function KbdRow() {
           <Kbd>P</Kbd>
         </KbdGroup>
       </Cluster>
+      <LegendKey>medium</LegendKey>
+      <Cluster>
+        <KbdGroup>
+          <Kbd size="medium">Ctrl</Kbd>
+          <Kbd size="medium">Shift</Kbd>
+          <Kbd size="medium">[</Kbd>
+        </KbdGroup>
+      </Cluster>
       <span {...stylex.props(styles.rungUse)}>
         one cap is at least as wide as it is tall, so a chord of `K` and `Shift` does not jump
         between eight pixels and forty. A group is a kbd around kbds, which is what HTML gives this

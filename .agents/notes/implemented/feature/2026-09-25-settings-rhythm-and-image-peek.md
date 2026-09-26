@@ -284,6 +284,41 @@ by 16px before a headless section's first row and by 24px before a heading, and 
 records card stands 8px further off. Text sits about 24px from the rule on both
 sides.
 
+## Design review round 2
+
+A second critique of the real desktop app, with material and spacing held fixed:
+
+- **Keyboard Shortcuts.** Fifteen red trash cans read as fifteen alarms. Unbinding
+  now appears only when the pointer or keyboard reaches a row, in neutral ink, and
+  turns destructive only while the icon itself is hovered or focused. Key caps
+  read at 12px: `@lody/ui` `Kbd` gained `size="medium"` (the footnote step in the
+  same cap); the palette and tooltips keep the 11px caption cap.
+- **One add, named.** Every catalog header's add is icon + text. On Projects the
+  header's icon-only "+" and each machine's "Add folder" opened the same folder
+  dialog, whose machine picker makes the per-machine entry a duplicate, so the
+  header's "Add project" is the only one (a direct button, or a menu when a GitHub
+  repository can also be added).
+- **About.** Every row said its name twice (Website / Visit website) and "Join
+  community" was the window's one primary button. Community, Website and Open
+  Source Licenses are now rows that are themselves the link, with a quiet ↗ (out of
+  Lody) or › (a dialog) at the end (`CompactLinkRow`); Downloads names its two
+  channels as quiet links. Rows keep a control's height, so the rhythm is unchanged.
+- **Agents.** The English "Custom" pill became the meta line's first fact,
+  localized ("自定义 · 1 个对话 · 2 分钟前用过"). "2m 前用过" mixed an English unit
+  into Chinese: `formatLocalizedRelativeTime` spells units per language
+  (`time.ago.*`; English keeps "2m ago"). The sidebar's compact formatter is unchanged.
+- **Empty catalogs.** MCP, Agent Roles, Prompt Shortcuts, Shares, GitHub, Projects
+  and a machine with no providers now share `SettingsEmptyList`: the list's own
+  records card with one quiet line, no centred icon.
+- **Unavailable switches.** Launch at startup is supported only on macOS and Windows
+  (the main process's `process.platform` check). An unavailable row dims its name
+  (`CompactRow disabled`) and says why; "Hide window on auto-launch" says it applies
+  once Launch at startup is on.
+- **Top inset kept.** Removing the surface's 20px top inset put the page title on
+  the nav's first heading and the close button (≈65px), but the re-review read
+  the title jammed against the sheet's top edge with no header band. The approved
+  20px inset stays; the title sits one line below the nav heading by design.
+
 ## Verification
 
 - Storybook screenshots before and after, in Chinese, for the preferences

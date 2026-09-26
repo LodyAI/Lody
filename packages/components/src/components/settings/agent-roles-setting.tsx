@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { useAtomValue } from 'jotai';
-import { Plus, Trash2, UserRoundCog } from 'lucide-react';
+import { Plus, Trash2 } from 'lucide-react';
 import { Spinner } from '@lody/ui/spinner';
 import { useTranslation } from 'react-i18next';
 import {
@@ -28,7 +28,7 @@ import { AlertDialog } from '@/ui/dialog';
 import { Badge } from '@lody/ui/badge';
 import { Button } from '@lody/ui/button';
 import { SettingsPageActions, SettingsPageLead } from './settings-page-header';
-import { settingsRecordsCard } from './compact-layout';
+import { SettingsEmptyList, settingsRecordsCard } from './compact-layout';
 import { settingsCatalog as catalog, settingsSurface as surface } from './surface';
 import {
   AgentRoleEditorDialog,
@@ -113,10 +113,7 @@ export function AgentRolesSetting() {
       </SettingsPageActions>
 
       {roles.length === 0 ? (
-        <div {...stylex.props(catalog.empty)}>
-          <UserRoundCog {...stylex.props(catalog.emptyIcon)} aria-hidden="true" />
-          <p {...stylex.props(catalog.emptyText)}>{t('settings.agentRoles.empty')}</p>
-        </div>
+        <SettingsEmptyList>{t('settings.agentRoles.empty')}</SettingsEmptyList>
       ) : (
         <div {...stylex.props(catalog.groups)}>
           {roleGroups.map((group) => (

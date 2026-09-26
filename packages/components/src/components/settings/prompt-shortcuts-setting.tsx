@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { SettingsPageActions, SettingsPageLead } from './settings-page-header';
-import { settingsRecordsCard } from './compact-layout';
+import { SettingsEmptyList, settingsRecordsCard } from './compact-layout';
 import { useAtomValue } from 'jotai';
 import { useTranslation } from 'react-i18next';
 import { usePostHog } from '@posthog/react';
@@ -14,7 +14,7 @@ import {
   type PromptShortcut,
   type PromptShortcutIndexEntry,
 } from '@lody/shared/prompt-shortcuts';
-import { Plus, SquareSlash, Trash2 } from 'lucide-react';
+import { Plus, Trash2 } from 'lucide-react';
 import { Spinner } from '@lody/ui/spinner';
 import { promptShortcutsFeatureEnabledAtom } from '@/atoms/settings';
 import { getAllAgentConfigAtom } from '@/atoms/agents';
@@ -425,15 +425,12 @@ export function PromptShortcutsList({
 
       {entries.length === 0 ? (
         loading ? null : (
-          <div {...stylex.props(catalog.empty)}>
-            <SquareSlash {...stylex.props(catalog.emptyIcon)} aria-hidden="true" />
-            <p {...stylex.props(catalog.emptyText)}>
-              {t(
-                'settings.promptShortcuts.empty',
-                'No Prompt Shortcuts yet. Save a Prompt you retype often and call it with /.'
-              )}
-            </p>
-          </div>
+          <SettingsEmptyList>
+            {t(
+              'settings.promptShortcuts.empty',
+              'No Prompt Shortcuts yet. Save a Prompt you retype often and call it with /.'
+            )}
+          </SettingsEmptyList>
         )
       ) : (
         <div {...stylex.props(settingsRecordsCard)}>

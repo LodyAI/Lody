@@ -4,7 +4,7 @@ import { Trash2 } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
 import { SettingsPageActions, SettingsPageLead } from './settings-page-header';
 import { colors } from '@lody/ui/tokens/colors.stylex';
-import { corner, radius } from '@lody/ui/tokens/scales.stylex';
+import { corner, duration, ease, radius } from '@lody/ui/tokens/scales.stylex';
 import {
   globalShortcutBindingHasModifier,
   type GlobalShortcutId,
@@ -54,6 +54,26 @@ const styles = stylex.create({
   // row has nothing to delete so the column doesn't shift when neighbors do.
   shortcutSlot: { display: 'flex', justifyContent: 'flex-end', width: '144px' },
   trashSlot: { display: 'flex', justifyContent: 'center', width: '36px' },
+  /**
+   * Unbinding is the row's second action, so it waits for the pointer or the
+   * keyboard to reach the row: fifteen trash cans at rest read as fifteen
+   * alarms. It keeps its place in the flow, so the key caps never shift.
+   */
+  reveal: {
+    opacity: {
+      default: 0,
+      [stylex.when.ancestor(':hover')]: 1,
+      [stylex.when.ancestor(':focus-within')]: 1,
+    },
+    pointerEvents: {
+      default: 'none',
+      [stylex.when.ancestor(':hover')]: 'auto',
+      [stylex.when.ancestor(':focus-within')]: 'auto',
+    },
+    transitionProperty: 'opacity',
+    transitionDuration: duration.fast,
+    transitionTimingFunction: ease.standard,
+  },
   glyph: { width: '100%', height: '100%' },
   unbound: {
     fontSize: type.caption,
@@ -76,6 +96,9 @@ const styles = stylex.create({
     animationIterationCount: 'infinite',
   },
 });
+
+/** The row the unbind action waits on: its hover and focus reveal it. */
+const ROW_MARKER = stylex.props(stylex.defaultMarker()).className;
 
 export function KeyboardShortcutsSetting() {
   const { t } = useTranslation();
@@ -236,7 +259,7 @@ function GlobalShortcutRow({
   }
 
   return (
-    <CompactRow label={label} helper={helper} alignTop>
+    <CompactRow label={label} helper={helper} alignTop className={ROW_MARKER}>
       <div {...stylex.props(styles.controls)}>
         <div {...stylex.props(styles.shortcutSlot)}>
           {recording ? (
@@ -251,21 +274,14 @@ function GlobalShortcutRow({
             />
           )}
         </div>
-        <div {...stylex.props(styles.trashSlot)}>
+        <div {...stylex.props(styles.trashSlot, styles.reveal)}>
           {!recording && binding && (
-            <Button
-              variant="ghost"
-              size="small"
-              icon
-              tone="destructive"
-              onClick={() => {
+            <UnbindButton
+              onUnbind={() => {
                 setError(null);
                 void onSet(id, null);
               }}
-              title={t('settings.keyboardShortcuts.unbindTooltip')}
-            >
-              <Trash2 {...stylex.props(styles.glyph)} />
-            </Button>
+            />
           )}
         </div>
       </div>
@@ -371,6 +387,7 @@ function ShortcutRow({
       label={resolveTitle(command, command.title)}
       helper={helper}
       alignTop={Boolean(helper)}
+      className={ROW_MARKER}
     >
       <div {...stylex.props(styles.controls)}>
         <div {...stylex.props(styles.shortcutSlot)}>
@@ -380,22 +397,39 @@ function ShortcutRow({
             <ShortcutButton primary={primary} onClick={handleClickPrimary} />
           )}
         </div>
-        <div {...stylex.props(styles.trashSlot)}>
-          {!recording && primary && (
-            <Button
-              variant="ghost"
-              size="small"
-              icon
-              tone="destructive"
-              onClick={handleUnbind}
-              title={t('settings.keyboardShortcuts.unbindTooltip')}
-            >
-              <Trash2 {...stylex.props(styles.glyph)} />
-            </Button>
-          )}
+        <div {...stylex.props(styles.trashSlot, styles.reveal)}>
+          {!recording && primary && <UnbindButton onUnbind={handleUnbind} />}
         </div>
       </div>
     </CompactRow>
+  );
+}
+
+/**
+ * Removes a row's binding. It is ink until the pointer or focus is on it, and
+ * only then says it destroys something: the destructive tone answers the
+ * glyph itself, not the row it sits in.
+ */
+function UnbindButton({ onUnbind }: { onUnbind: () => void }) {
+  const { t } = useTranslation();
+  const [armed, setArmed] = useState(false);
+  const label = t('settings.keyboardShortcuts.unbindTooltip');
+  return (
+    <Button
+      variant="ghost"
+      size="small"
+      icon
+      tone={armed ? 'destructive' : 'neutral'}
+      onPointerEnter={() => setArmed(true)}
+      onPointerLeave={() => setArmed(false)}
+      onFocus={() => setArmed(true)}
+      onBlur={() => setArmed(false)}
+      onClick={onUnbind}
+      aria-label={label}
+      title={label}
+    >
+      <Trash2 {...stylex.props(styles.glyph)} />
+    </Button>
   );
 }
 
@@ -410,7 +444,7 @@ function ShortcutButton({ primary, onClick }: { primary: string | null; onClick:
       title={t('settings.keyboardShortcuts.editTooltip')}
     >
       {primary ? (
-        <Kbd binding={primary} />
+        <Kbd binding={primary} size="medium" />
       ) : (
         <span {...stylex.props(styles.unbound)}>{t('settings.keyboardShortcuts.unbound')}</span>
       )}
@@ -430,7 +464,7 @@ function RecordingButton({ preview, onCancel }: { preview: string | null; onCanc
     >
       <span {...stylex.props(styles.recordingDot)} />
       {preview ? (
-        <Kbd binding={preview} />
+        <Kbd binding={preview} size="medium" />
       ) : (
         <span {...stylex.props(styles.recordingLabel)}>
           {t('settings.keyboardShortcuts.recording')}

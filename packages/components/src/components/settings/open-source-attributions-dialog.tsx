@@ -1,4 +1,11 @@
-import { useEffect, useRef, useState } from 'react';
+import {
+  cloneElement,
+  useEffect,
+  useRef,
+  useState,
+  type MouseEvent,
+  type ReactElement,
+} from 'react';
 import { Boxes, ExternalLink, FileCode2, FolderTree, Palette, ScrollText } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
@@ -195,9 +202,21 @@ function groupBy<T>(items: T[], getKey: (item: T) => string): Record<string, T[]
   return groups;
 }
 
+type TriggerHandlers = {
+  onClick?: (event: MouseEvent) => void;
+  onDoubleClick?: (event: MouseEvent) => void;
+};
+
 export function OpenSourceAttributionsDialog({
+  trigger,
   onTriggerDoubleClick,
 }: {
+  /**
+   * What opens the dialog, when not the default "View notices" button — the
+   * desktop About page makes the row itself the link. It must render a
+   * `<button>` and forward its ref and handlers.
+   */
+  trigger?: ReactElement<TriggerHandlers>;
   onTriggerDoubleClick?: () => void;
 }) {
   const { t } = useTranslation();
@@ -225,11 +244,10 @@ export function OpenSourceAttributionsDialog({
       }}
     >
       <Dialog.Trigger
-        render={
-          <Button
-            variant="secondary"
-            size="small"
-            onClick={(event) => {
+        render={cloneElement<TriggerHandlers>(
+          trigger ?? <Button variant="secondary" size="small" />,
+          {
+            onClick: (event: MouseEvent) => {
               event.preventDefault();
               // Base UI's trigger still opens on click after this handler —
               // `preventDefault` does not reach it, only its own opt-out does.
@@ -241,17 +259,21 @@ export function OpenSourceAttributionsDialog({
                 openTimerRef.current = null;
                 setOpen(true);
               }, 400);
-            }}
-            onDoubleClick={(event) => {
+            },
+            onDoubleClick: (event: MouseEvent) => {
               event.preventDefault();
               clearOpenTimer();
               onTriggerDoubleClick?.();
-            }}
-          />
-        }
+            },
+          }
+        )}
       >
-        <ScrollText {...stylex.props(styles.smallIcon)} />
-        {t('settings.about.viewAttributions', 'View notices')}
+        {trigger ? undefined : (
+          <>
+            <ScrollText {...stylex.props(styles.smallIcon)} />
+            {t('settings.about.viewAttributions', 'View notices')}
+          </>
+        )}
       </Dialog.Trigger>
       <Dialog.Content style={PANEL_STYLE}>
         <Dialog.Header>

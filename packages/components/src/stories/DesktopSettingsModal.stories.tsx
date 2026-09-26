@@ -54,6 +54,16 @@ export const AboutTab: Story = {
   render: () => <SettingsModalStory tab="about" />,
 };
 
+/** Unbinding waits for the row: hover or focus a row to see it. Caps read at 12px. */
+export const KeyboardShortcutsTab: Story = {
+  render: () => <SettingsModalStory tab="keyboard-shortcuts" />,
+};
+
+/** An empty catalog: the list's own card with one quiet line. */
+export const McpEmptyTab: Story = {
+  render: () => <SettingsModalStory tab="mcp" />,
+};
+
 export const DarkModePreferencesTab: Story = {
   render: () => (
     <div className="dark">
