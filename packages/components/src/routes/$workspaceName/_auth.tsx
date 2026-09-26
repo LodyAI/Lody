@@ -31,6 +31,7 @@ import { PreloadedMainLayout } from '@/components/preloaded-main-layout';
 import { RouteSuspense } from '@/components/route-suspense';
 import { RouteMessage } from '@/components/route-message';
 import { LoadingPlaceholder } from '@/components/loading-placeholder';
+import { BootShell } from '@/components/boot-shell';
 import { useVisibleMachineMetas } from '@/hooks/use-visible-machine-metas';
 import { useFireOncePerKey } from '@/hooks/use-fire-once';
 import { writeLastAppRoutePath } from '@/lib/last-app-route';
@@ -72,92 +73,19 @@ function MainLayoutComponent() {
 }
 
 function LocalPlatformLayoutContent({ workspaceName }: { workspaceName: string }) {
-  const pathname = useLocation({ select: (location) => location.pathname });
-  const isChatLandingRoute = pathname.endsWith('/chat');
-
   return (
     <>
       {/* Same dock-badge / live-activity wiring as the cloud layout. */}
       <LodyLiveActivityHost workspaceName={workspaceName} />
-      <RouteSuspense fallback={isChatLandingRoute ? <CriticalWorkspaceShell /> : null}>
+      {/* The boot shell holds the window's first frame until the layout chunk
+          arrives, on every route: an empty fallback would blank the window
+          between the static frame and the layout. */}
+      <RouteSuspense fallback={<BootShell />}>
         <PreloadedMainLayout>
           <AuthenticatedWorkspaceContent />
         </PreloadedMainLayout>
       </RouteSuspense>
     </>
-  );
-}
-
-/**
- * Keep the first local workspace frame useful while the full layout chunk is
- * loading. This is intentionally dependency-free: the real sidebar, dialogs,
- * editor, and providers arrive through MainLayout after this frame commits.
- */
-function CriticalWorkspaceShell() {
-  const { t } = useTranslation();
-  const newChatLabel = t('sidebar.newSession', 'New chat');
-  const searchLabel = t('common.search', 'Search');
-  const heading = t('chat.heading2', 'What should we work on?');
-  const messageLabel = t('sessions.typeMessage', 'Type a message...');
-
-  return (
-    <div
-      aria-busy="true"
-      data-critical-workspace-shell="true"
-      style={{
-        display: 'flex',
-        width: '100%',
-        height: '100%',
-        overflow: 'hidden',
-        backgroundColor: 'hsl(var(--background))',
-        color: 'hsl(var(--foreground))',
-        fontFamily: 'var(--font-sans)',
-      }}
-    >
-      <aside
-        aria-label="Workspace navigation"
-        style={{
-          display: 'flex',
-          width: 220,
-          flexDirection: 'column',
-          gap: 12,
-          borderRight: '1px solid hsl(var(--border) / 0.6)',
-          padding: 16,
-          fontSize: 13,
-        }}
-      >
-        <strong style={{ fontSize: 15 }}>Lody</strong>
-        <span style={{ opacity: 0.78 }}>{newChatLabel}</span>
-        <span style={{ opacity: 0.62 }}>{searchLabel}</span>
-        <span style={{ opacity: 0.62 }}>{t('settings.title', 'Settings')}</span>
-      </aside>
-      <main
-        style={{
-          display: 'flex',
-          minWidth: 0,
-          flex: 1,
-          flexDirection: 'column',
-          alignItems: 'center',
-          justifyContent: 'center',
-          gap: 28,
-          padding: 32,
-        }}
-      >
-        <h1 style={{ margin: 0, fontSize: 26, fontWeight: 600 }}>{heading}</h1>
-        <div
-          aria-label={messageLabel}
-          style={{
-            width: 'min(680px, 100%)',
-            border: '1px solid hsl(var(--border) / 0.8)',
-            borderRadius: 12,
-            padding: '14px 16px',
-            color: 'hsl(var(--muted-foreground))',
-          }}
-        >
-          {messageLabel}
-        </div>
-      </main>
-    </div>
   );
 }
 
@@ -357,6 +285,7 @@ function CloudMainLayoutComponent({ workspaceName }: { workspaceName: string }) 
   if (!sessionSettled) {
     return (
       <LoadingPlaceholder
+        variant="boot"
         title={t('workspace.route.signingInTitle')}
         description={t('workspace.route.signingInDescription')}
       />
@@ -366,6 +295,7 @@ function CloudMainLayoutComponent({ workspaceName }: { workspaceName: string }) 
   if (isPending || isRetrying) {
     return (
       <LoadingPlaceholder
+        variant="boot"
         title={t('workspace.route.signingInTitle')}
         description={t('workspace.route.signingInDescription')}
       />
@@ -478,6 +408,7 @@ function AuthedLayoutRoutes({
   if (!orgSettled || !userSettled) {
     return (
       <LoadingPlaceholder
+        variant="boot"
         title={t('workspace.route.loadingTitle')}
         description={t('workspace.route.setupLoadingDescription')}
       />
@@ -500,6 +431,7 @@ function AuthedLayoutRoutes({
   if (organizationsLoading) {
     return (
       <LoadingPlaceholder
+        variant="boot"
         title={t('workspace.route.loadingWorkspacesTitle')}
         description={t('workspace.route.loadingWorkspacesDescription')}
       />
@@ -526,6 +458,7 @@ function AuthedLayoutRoutes({
   if (!user || !currentWorkspaceId) {
     return (
       <LoadingPlaceholder
+        variant="boot"
         title={t('workspace.route.loadingTitle')}
         description={t('workspace.route.setupLoadingDescription')}
       />
