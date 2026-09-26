@@ -170,6 +170,9 @@ patchedDependencies:
   '@better-auth/electron@1.5.5':
     hash: c0bab8bf6f42816473109d61f757f961d4f3bcc1b1cd07c4fe7c2f012fd291ac
     path: patches/@better-auth__electron@1.5.5.patch
+  '@lobehub/streamdown@1.4.0':
+    hash: 8612b888268c5005fef076aaaf07e990520f59477a48a755d63a93eb4a58cda1
+    path: patches/@lobehub__streamdown@1.4.0.patch
   '@pierre/diffs@1.0.10':
     hash: 0afca3b16a96287f9f3c9a7ae70d10d86090cc8a1adaa35886b799bd5087b3d8
     path: patches/@pierre__diffs@1.0.10.patch
@@ -1004,7 +1007,7 @@ importers:
         version: 5.2.2(react-hook-form@7.71.1(react@19.2.0))
       '@lobehub/streamdown':
         specifier: ^1.4.0
-        version: 1.4.0(@types/react@19.2.17)(react-dom@19.2.0(react@19.2.0))(react@19.2.0)
+        version: 1.4.0(patch_hash=8612b888268c5005fef076aaaf07e990520f59477a48a755d63a93eb4a58cda1)(@types/react@19.2.17)(react-dom@19.2.0(react@19.2.0))(react@19.2.0)
       '@lody/cloud-api':
         specifier: workspace:*
         version: link:../cloud-api
@@ -15648,7 +15651,7 @@ snapshots:
 
   '@lit-labs/ssr-dom-shim@1.6.0': {}
 
-  '@lobehub/streamdown@1.4.0(@types/react@19.2.17)(react-dom@19.2.0(react@19.2.0))(react@19.2.0)':
+  '@lobehub/streamdown@1.4.0(patch_hash=8612b888268c5005fef076aaaf07e990520f59477a48a755d63a93eb4a58cda1)(@types/react@19.2.17)(react-dom@19.2.0(react@19.2.0))(react@19.2.0)':
     dependencies:
       '@types/hast': 3.0.5
       hast-util-to-jsx-runtime: 2.3.6

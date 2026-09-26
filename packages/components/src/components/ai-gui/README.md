@@ -20,7 +20,10 @@ the reasoning behind those rules.
   work) and a hover preview; `conversation-outline-arrival-intent.ts` decides when
   a pointer heading for a tick counts as arrival.
 - `markdown-renderer.tsx` renders finished text with react-markdown and a
-  streaming turn with `@lobehub/streamdown`; `markdown-code-block.tsx` owns fenced
+  streaming turn with `@lobehub/streamdown`. Its dependency patch reveals text
+  already present at mount so switching back to a live Session does not replay
+  the stream fade ([note](../../../../../.agents/notes/implemented/bug-fix/2026-09-26-streamdown-remount-animation.md)).
+  `markdown-code-block.tsx` owns fenced
   blocks, wrap, and Markdown-fence preview (`markdown-code-highlight.ts` the Shiki
   tokens); `markdown-diff-block.tsx` is the inline diff; `markdown-mermaid-block.tsx`
   renders a closed Mermaid fence. Diagrams are split three ways: `use-mermaid-diagram-canvas.tsx`
@@ -91,6 +94,9 @@ defines locale-specific spacing for these labels.
   in-flight tail, but it still parses per block and ships lookbehind regex
   literals that Safari < 16.4 cannot parse; finished text never needs either
   ([note](../../../../../.agents/notes/implemented/feature/2026-09-26-lobehub-streamdown.md)).
+- **No replay on a live row remount.** A session switch or virtualized row
+  remount can mount a stream with existing text. The patched engine seeds that
+  text as revealed and continues to animate later additions.
 - **The gutter rule.** Virtua rows are absolutely positioned and ignore scroller
   padding, so the rail has to come from `ConversationColumn`.
 - **The Mermaid viewer replacement, and click-to-activate in a message.**

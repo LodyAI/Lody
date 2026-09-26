@@ -1335,6 +1335,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
         {streamingRendererActive ? (
           <Suspense fallback={staticMarkdown}>
             <StreamingMarkdown
+              animateOnMount={false}
               content={normalizedText}
               remend={STREAMING_REMEND_OPTIONS}
               components={components}

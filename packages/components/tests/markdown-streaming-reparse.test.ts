@@ -563,6 +563,37 @@ End of synthetic document.`,
     expect(container?.textContent).toBe('Streaming words are still arriving. Done.');
   });
 
+  it('shows a mounted stream immediately while still animating later additions', async () => {
+    const existingText = 'Earlier paragraph.\n\nAlready visible before reopening.';
+    vi.useFakeTimers();
+    try {
+      await renderMarkdown(existingText, { isStreaming: true });
+      expect(container?.textContent).toContain('Already visible before reopening.');
+      expect(container?.querySelector('.stream-char:not(.stream-char-revealed)')).toBeNull();
+      expect(container?.querySelector('.stream-block')).toBeNull();
+
+      await act(async () => {
+        root?.render(null);
+      });
+      await renderMarkdown(existingText, { isStreaming: true });
+      expect(container?.textContent).toContain('Already visible before reopening.');
+      expect(container?.querySelector('.stream-char:not(.stream-char-revealed)')).toBeNull();
+      expect(container?.querySelector('.stream-block')).toBeNull();
+
+      await renderMarkdown(`${existingText} New output arrives.`, {
+        isStreaming: true,
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(250);
+      });
+
+      expect(container?.textContent).toContain('New');
+      expect(container?.querySelector('.stream-char:not(.stream-char-revealed)')).not.toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('keeps GFM autolinks available across streaming renders', async () => {
     const chunks = buildStreamingMarkdownChunks(STREAM_CHUNK_COUNT);
     const finalText = chunks.join('');

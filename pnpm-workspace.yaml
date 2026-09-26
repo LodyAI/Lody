@@ -179,6 +179,7 @@ patchedDependencies:
   app-builder-lib@26.15.3: patches/app-builder-lib@26.15.3.patch
   '@better-auth/api-key@1.5.5': patches/@better-auth__api-key@1.5.5.patch
   '@better-auth/electron@1.5.5': patches/@better-auth__electron@1.5.5.patch
+  '@lobehub/streamdown@1.4.0': patches/@lobehub__streamdown@1.4.0.patch
   '@pierre/diffs@1.0.10': patches/@pierre__diffs@1.0.10.patch
   '@tanstack/router-generator@1.159.4': patches/@tanstack__router-generator@1.159.4.patch
   loro-repo@0.20.0: patches/loro-repo.patch
