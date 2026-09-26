@@ -66,7 +66,8 @@ interface MentionContentProps
    * left-aligned to it and as wide at most. It picks its side once per open —
    * above unless there is truly no room there — and keeps it: a level change or
    * a keystroke resizes the menu in place and never moves its anchor. Its height
-   * is capped to the room on that side instead of flipping.
+   * is capped to the room on that side instead of flipping. An explicit `side`
+   * pins the side instead of choosing it from the room.
    */
   positionAnchor?: 'caret' | 'composer';
 
@@ -88,7 +89,7 @@ interface MentionContentProps
 const MentionContent = React.forwardRef<ContentElement, MentionContentProps>(
   (props, forwardedRef) => {
     const {
-      side = 'bottom',
+      side: requestedSide,
       sideOffset = 4,
       align = 'start',
       alignOffset = 0,
@@ -115,9 +116,10 @@ const MentionContent = React.forwardRef<ContentElement, MentionContentProps>(
     const [frameRect, setFrameRect] = React.useState<InputBoundaryRect | null>(null);
     /** Room above and below the frame inside the visible layer, for `composer`. */
     const [frameRoom, setFrameRoom] = React.useState<{ above: number; below: number } | null>(null);
-    /** The side a `composer` menu chose when it opened. Held until it closes. */
-    const [lockedSide, setLockedSide] = React.useState<'top' | 'bottom' | null>(null);
+    /** The side a `composer` menu chose or was pinned to when it opened. Held until it closes. */
+    const [lockedSide, setLockedSide] = React.useState<Side | null>(null);
     const composerAnchor = positionAnchor === 'composer';
+    const side = requestedSide ?? 'bottom';
 
     const rtlAwareAlign = React.useMemo(() => {
       if (context.dir !== 'rtl') return align;
@@ -249,7 +251,7 @@ const MentionContent = React.forwardRef<ContentElement, MentionContentProps>(
         setLockedSide(null);
         return;
       }
-      if (!frameRoom) return;
+      if (requestedSide || !frameRoom) return;
       setLockedSide(
         (previous) =>
           previous ??
@@ -257,7 +259,7 @@ const MentionContent = React.forwardRef<ContentElement, MentionContentProps>(
             ? 'top'
             : 'bottom')
       );
-    }, [composerAnchor, context.open, frameRoom]);
+    }, [composerAnchor, context.open, frameRoom, requestedSide]);
 
     const inputWidthStyle = React.useMemo<MentionContentStyle>(() => {
       return {
@@ -300,7 +302,7 @@ const MentionContent = React.forwardRef<ContentElement, MentionContentProps>(
     const anchorRef = composerAnchor
       ? (frameAnchor ?? context.virtualAnchor)
       : context.virtualAnchor;
-    const placedSide: Side = composerAnchor ? (lockedSide ?? 'top') : side;
+    const placedSide: Side = composerAnchor ? (requestedSide ?? lockedSide ?? 'top') : side;
 
     const positionerContext = useAnchorPositioner({
       open: context.open,

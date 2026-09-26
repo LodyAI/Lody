@@ -107,7 +107,9 @@ This section supersedes the placement and detail-pane sizing described above.
   (chip row and box, marked in `ChatComposer`), left-aligned, 8px away. The side
   is chosen once per open (above unless there is no room) and never flips; the
   height is capped to that side's room instead, so a level change resizes the
-  menu where it stands.
+  menu where it stands. A later fix pins the `@` menu's `side="top"` outright
+  ([note](../bug-fix/2026-09-26-mention-menu-pinned-above-input.md)); the room
+  pick remains for unpinned composer menus.
 - **Proportions.** The list takes the narrow column (about 220px) and the detail
   the wide one (300px) in a 536px menu. The pane fills the height the list sets,
   down to a 168px floor, and scrolls inside it; the description is clamped to

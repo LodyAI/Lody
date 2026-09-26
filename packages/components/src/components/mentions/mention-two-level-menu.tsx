@@ -1133,10 +1133,12 @@ export function MentionTwoLevelMenu({
 
   return (
     // The docked mobile panel places itself; this width is the desktop popup's.
-    // Placed against the composer, not the caret: one side per open, one gap,
-    // left edges lined up, and a level change resizes it where it stands.
+    // Placed against the composer, not the caret, and pinned above it: the room
+    // pick could otherwise land it below a composer pressed to the layer's top,
+    // over the very rows being completed.
     <MentionContent
       positionAnchor="composer"
+      side="top"
       sideOffset={8}
       className={stylex.props(width.menu, detail && width.menuWithDetail).className}
     >

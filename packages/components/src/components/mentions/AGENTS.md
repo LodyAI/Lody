@@ -15,7 +15,7 @@ Pipeline background: [ui-mentions.md](../../../../../.agents/docs/ui-mentions.md
   rule (sessions: having any) belongs there too. Placeholder hints advertise `$`
   only under the conditions that enable Skill mentions.
 - Desktop menus render through `MentionContent`, capped at
-  `var(--mention-input-width)`.
+  `var(--mention-input-width)`; `@` pins `side="top"`.
 - `insertText` must keep its type's prompt form (`@path`, `#123`, `$token`,
   `/cmd`): reaching a type through `@` must not change what the agent receives.
   Directory candidates carry BOTH `navigateText` (`@dir/`, descend) and

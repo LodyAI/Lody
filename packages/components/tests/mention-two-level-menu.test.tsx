@@ -649,7 +649,15 @@ describe('composer placement', () => {
     restoreRect?.();
   });
 
-  function Composer({ open, rows }: { open: boolean; rows: number }) {
+  function Composer({
+    open,
+    rows,
+    side,
+  }: {
+    open: boolean;
+    rows: number;
+    side?: 'top' | 'bottom';
+  }) {
     return (
       <div data-mention-frame="">
         <Mention
@@ -664,7 +672,7 @@ describe('composer placement', () => {
           autoCloseOnEmpty={false}
         >
           <MentionInput value="@" onChange={() => {}} />
-          <MentionContent positionAnchor="composer" sideOffset={8}>
+          <MentionContent positionAnchor="composer" side={side} sideOffset={8}>
             {Array.from({ length: rows }, (_, index) => (
               <div key={index}>row {index}</div>
             ))}
@@ -674,8 +682,8 @@ describe('composer placement', () => {
     );
   }
 
-  function show(open: boolean, rows = 2) {
-    act(() => root?.render(<Composer open={open} rows={rows} />));
+  function show(open: boolean, rows = 2, side?: 'top' | 'bottom') {
+    act(() => root?.render(<Composer open={open} rows={rows} side={side} />));
   }
 
   /** The popup's height cap: the room on the side it chose, less the gap. */
@@ -712,5 +720,13 @@ describe('composer placement', () => {
     show(true);
     // 768 - 140 below the frame, less the window margin and the gap.
     expect(cap()).toBe('604px');
+  });
+
+  it('keeps an explicit side even when the room below is larger', () => {
+    // 24px above the frame, 612px below: the room pick would open it below.
+    frameTop = 40;
+    show(true, 2, 'top');
+    // Pinned above, capped to the 24px room there less the gap.
+    expect(cap()).toBe('16px');
   });
 });
