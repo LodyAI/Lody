@@ -1,3 +1,5 @@
+// ESM stand-in for the CJS `use-sync-external-store/shim/with-selector` (see the
+// sibling shim); aliased in vite.config.ts.
 import { useMemo, useSyncExternalStore } from 'react';
 
 type Subscribe = (onStoreChange: () => void) => () => void;

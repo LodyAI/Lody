@@ -32,3 +32,6 @@ Translation: current
 32 个用例通过。dev server 上仍会出现一次 three.js `compileAsync` 的 `isReady` 页面错误
 （`underwater-background.tsx` 未改动，符合 StrictMode 双挂载的表现）；生产环境的 hydration
 检查没有记录页面错误，不在本次范围内。
+
+后续：落地页已完全不再渲染应用组件，本 shim 随之删除；见
+[独立复刻笔记](../architecture/2026-09-24-landing-standalone-product-replica.zh.md)。

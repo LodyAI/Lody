@@ -1645,15 +1645,6 @@ importers:
 
   site-docs:
     dependencies:
-      '@lody/components':
-        specifier: workspace:*
-        version: link:../packages/components
-      '@lody/shared':
-        specifier: workspace:*
-        version: link:../packages/shared
-      '@lody/ui':
-        specifier: workspace:*
-        version: link:../packages/ui
       '@number-flow/react':
         specifier: ^0.6.2
         version: 0.6.2(react-dom@19.2.0(react@19.2.0))(react@19.2.0)
@@ -1672,6 +1663,9 @@ importers:
       '@types/mdx':
         specifier: ^2.0.13
         version: 2.0.14
+      clsx:
+        specifier: ^2.1.1
+        version: 2.1.1
       fumadocs-core:
         specifier: 16.8.12
         version: 16.8.12(@mdx-js/mdx@3.1.1)(@tanstack/react-router@1.170.18(react-dom@19.2.0(react@19.2.0))(react@19.2.0))(@types/estree-jsx@1.0.5)(@types/hast@3.0.5)(@types/mdast@4.0.4)(@types/react@19.2.17)(lucide-react@0.523.0(react@19.2.0))(react-dom@19.2.0(react@19.2.0))(react-router@7.13.0(react-dom@19.2.0(react@19.2.0))(react@19.2.0))(react@19.2.0)(zod@4.3.6)
@@ -1681,12 +1675,6 @@ importers:
       fumadocs-ui:
         specifier: npm:@fumadocs/base-ui@16.8.12
         version: '@fumadocs/base-ui@16.8.12(@date-fns/tz@1.4.1)(@emotion/is-prop-valid@1.4.0)(@tailwindcss/oxide@4.3.3)(@types/mdx@2.0.14)(@types/react@19.2.17)(date-fns@4.1.0)(fumadocs-core@16.8.12(@mdx-js/mdx@3.1.1)(@tanstack/react-router@1.170.18(react-dom@19.2.0(react@19.2.0))(react@19.2.0))(@types/estree-jsx@1.0.5)(@types/hast@3.0.5)(@types/mdast@4.0.4)(@types/react@19.2.17)(lucide-react@0.523.0(react@19.2.0))(react-dom@19.2.0(react@19.2.0))(react-router@7.13.0(react-dom@19.2.0(react@19.2.0))(react@19.2.0))(react@19.2.0)(zod@4.3.6))(react-dom@19.2.0(react@19.2.0))(react@19.2.0)(tailwindcss@4.3.3)'
-      i18next:
-        specifier: ^25.3.1
-        version: 25.8.4(typescript@5.9.3)
-      jotai:
-        specifier: 'catalog:'
-        version: 2.17.1(@babel/core@7.29.0)(@babel/template@7.28.6)(@types/react@19.2.17)(react@19.2.0)
       lucide-react:
         specifier: 'catalog:'
         version: 0.523.0(react@19.2.0)
@@ -1699,12 +1687,12 @@ importers:
       react-dom:
         specifier: 'catalog:'
         version: 19.2.0(react@19.2.0)
-      react-i18next:
-        specifier: ^15.6.0
-        version: 15.7.4(i18next@25.8.4(typescript@5.9.3))(react-dom@19.2.0(react@19.2.0))(react@19.2.0)(typescript@5.9.3)
       srvx:
         specifier: ^0.11.9
         version: 0.11.22
+      tailwind-merge:
+        specifier: ^3.6.0
+        version: 3.6.0
       three:
         specifier: ^0.185.0
         version: 0.185.1
@@ -1712,9 +1700,6 @@ importers:
         specifier: 4.3.6
         version: 4.3.6
     devDependencies:
-      '@stylexjs/unplugin':
-        specifier: 0.19.0
-        version: 0.19.0(unplugin@3.3.0(esbuild@0.28.2)(rolldown@1.2.7)(rollup@4.57.1)(vite@8.1.5(@types/node@24.10.12)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.13)(yaml@2.8.2)))
       '@tailwindcss/vite':
         specifier: ^4.3.2
         version: 4.3.3(vite@8.1.5(@types/node@24.10.12)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.13)(yaml@2.8.2))
@@ -17824,19 +17809,6 @@ snapshots:
       browserslist: 4.28.1
       lightningcss: 1.33.0
       unplugin: 3.3.0(esbuild@0.28.2)(rolldown@1.2.7)(rollup@4.57.1)(vite@7.3.1(@types/node@24.10.12)(jiti@2.7.0)(lightningcss@1.33.0)(terser@5.46.0)(tsx@4.23.13)(yaml@2.8.2))
-    transitivePeerDependencies:
-      - supports-color
-
-  '@stylexjs/unplugin@0.19.0(unplugin@3.3.0(esbuild@0.28.2)(rolldown@1.2.7)(rollup@4.57.1)(vite@8.1.5(@types/node@24.10.12)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.13)(yaml@2.8.2)))':
-    dependencies:
-      '@babel/core': 7.29.0
-      '@babel/plugin-syntax-flow': 7.29.7(@babel/core@7.29.0)
-      '@babel/plugin-syntax-jsx': 7.29.7(@babel/core@7.29.0)
-      '@babel/plugin-syntax-typescript': 7.29.7(@babel/core@7.29.0)
-      '@stylexjs/babel-plugin': 0.19.0
-      browserslist: 4.28.1
-      lightningcss: 1.33.0
-      unplugin: 3.3.0(esbuild@0.28.2)(rolldown@1.2.7)(rollup@4.57.1)(vite@8.1.5(@types/node@24.10.12)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.13)(yaml@2.8.2))
     transitivePeerDependencies:
       - supports-color
 

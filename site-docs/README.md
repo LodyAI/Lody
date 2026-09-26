@@ -7,17 +7,16 @@ builds to `site-docs/out/client`. Binding rules live in
 
 ## Directory map
 
-| Directory | Owns | Rules |
-| --- | --- | --- |
-| `app/` | CSS only: reading theme, landing, pricing | [`app/AGENTS.md`](app/AGENTS.md) |
-| `components/` | Landing, marketing, and product-replica React components | [`components/AGENTS.md`](components/AGENTS.md) |
-| `content/` | MDX SSOT for docs, blog, changelog, legal | [`content/AGENTS.md`](content/AGENTS.md) |
-| `context/` | Landing demo sequencing and screenshot notes | — |
-| `lib/` | Server-only content lookups, metadata, browser-safe helpers | [`lib/AGENTS.md`](lib/AGENTS.md) |
-| `public/` | Static assets, `.well-known/`, generated SEO files | [`public/AGENTS.md`](public/AGENTS.md) |
-| `scripts/` | Path enumeration and SEO/content generators | [`scripts/AGENTS.md`](scripts/AGENTS.md) |
-| `src/` | Router, file routes, page adapters | [`src/AGENTS.md`](src/AGENTS.md) |
-| `types/` | Hand-written declarations for `@/*` app components | — |
+| Directory     | Owns                                                        | Rules                                          |
+| ------------- | ----------------------------------------------------------- | ---------------------------------------------- |
+| `app/`        | CSS only: reading theme, landing, pricing                   | [`app/AGENTS.md`](app/AGENTS.md)               |
+| `components/` | Landing, marketing, and product-replica React components    | [`components/AGENTS.md`](components/AGENTS.md) |
+| `content/`    | MDX SSOT for docs, blog, changelog, legal                   | [`content/AGENTS.md`](content/AGENTS.md)       |
+| `context/`    | Landing demo sequencing and screenshot notes                | —                                              |
+| `lib/`        | Server-only content lookups, metadata, browser-safe helpers | [`lib/AGENTS.md`](lib/AGENTS.md)               |
+| `public/`     | Static assets, `.well-known/`, generated SEO files          | [`public/AGENTS.md`](public/AGENTS.md)         |
+| `scripts/`    | Path enumeration and SEO/content generators                 | [`scripts/AGENTS.md`](scripts/AGENTS.md)       |
+| `src/`        | Router, file routes, page adapters                          | [`src/AGENTS.md`](src/AGENTS.md)               |
 
 ## Component responsibilities
 
@@ -28,21 +27,21 @@ builds to `site-docs/out/client`. Binding rules live in
   desktop cursor interaction.
 - `components/landing-feature-tabs.tsx` — the onboarding indicator above the app
   (`.underwater-tabs`) with auto-advancing progress bars.
-- `components/landing-app-preview.tsx` — the live product replica on the stage.
+- `components/landing-app-preview.tsx` — the product stage: scripted ghost-cursor
+  demos and their state, rendered with the replica below.
+- `components/landing-replica/` — display-only replicas of the app's shell,
+  conversation, composer, diff, browser, mobile, and usage/PR views. They take demo
+  data as props and import nothing from the app; `scripts/app-boundary.mjs` checks
+  that in `test`.
+- `components/landing-preview-data.ts` — demo copy, session rows, the scripted
+  conversations, and the mock diff.
 - `components/marketing-atmosphere.tsx` — the shared marketing ambient field,
   hosted once by `components/site-root-provider.tsx`.
 - `components/pricing-page.tsx` — pricing table, plans, and FAQ.
-- `components/app-preview-shims/` — build shims for modules that cannot run in the
-  public-site bundle. `use-online-machines-shim.ts` is the machine source for
-  `DesktopRunConfigMenu` (the real hook needs an installed platform); the preview
-  seeds its `landingPreviewMachinesAtom` alongside `agentConfigMetaCacheAtom` in
-  `previewStore`. `mention-expansion-shim.ts` makes the composer's before-send
-  mention expansion the identity, because the real one resolves Agent Roles
-  through Convex-backed machine visibility.
 
 Demo sequencing and screenshot notes live in
 [context/landing-demos.md](context/landing-demos.md). Measurements, history, and
-the replicated session shell's current shape are in
+the product replica's recorded shape are in
 [landing and marketing internals](../.agents/docs/site-landing-and-marketing.md).
 
 ## Changing landing visuals

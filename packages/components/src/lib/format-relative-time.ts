@@ -31,10 +31,10 @@ export function formatCompactRelativeTime(
   if (days < 7) return `${days}d`;
 
   const weeks = Math.floor(days / 7);
-  if (weeks < 4) return `${weeks}w`;
+  if (days < 30) return `${weeks}w`;
 
   const months = Math.floor(days / 30);
-  if (months < 12) return `${months}mo`;
+  if (days < 365) return `${months}mo`;
 
   const years = Math.floor(days / 365);
   return `${years}y`;
@@ -70,10 +70,10 @@ export function formatLocalizedRelativeTime(
   if (days < 7) return t('time.ago.days', '{{count}}d ago', { count: days });
 
   const weeks = Math.floor(days / 7);
-  if (weeks < 4) return t('time.ago.weeks', '{{count}}w ago', { count: weeks });
+  if (days < 30) return t('time.ago.weeks', '{{count}}w ago', { count: weeks });
 
   const months = Math.floor(days / 30);
-  if (months < 12) return t('time.ago.months', '{{count}}mo ago', { count: months });
+  if (days < 365) return t('time.ago.months', '{{count}}mo ago', { count: months });
 
   return t('time.ago.years', '{{count}}y ago', { count: Math.floor(days / 365) });
 }
