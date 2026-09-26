@@ -172,6 +172,10 @@ it takes `popup.menuWidth` and grows past it for its longest row. A menu scrolls
 in its own box rather than between scroll arrows, because its rows are the
 popup's own children.
 
+A short two-choice menu may use the compact 180px width floor instead of the
+regular `popup.menuWidth` floor. Both grow for a longer row; neither changes
+the floating surface or its rows.
+
 | part            | what it is                                                                  |
 | --------------- | --------------------------------------------------------------------------- |
 | leading box     | `popup.indicatorSize`, at `popup.hint`: a caller's icon, a tick, or a dot   |

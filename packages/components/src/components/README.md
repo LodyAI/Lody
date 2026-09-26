@@ -9,6 +9,7 @@ Child directories such as `sessions/`, `mobile/`, `chat/`, and `archive/` own th
 | Desktop layout      | [`web-workspace-layout.tsx`](web-workspace-layout.tsx), [`sidebar-update-banner.tsx`](sidebar-update-banner.tsx) | Owns the shell's safe areas and update notice.            |
 | Provider readiness  | [`shared/agent-readiness-mark.tsx`](shared/agent-readiness-mark.tsx)                                             | Draws setup state across settings and onboarding.         |
 | Shared cues         | [`shared/`](shared/)                                                                                             | Draws cross-surface drop, run-config, and transport cues. |
+| Session controls    | [`shared/workdir-mode-selector.tsx`](shared/workdir-mode-selector.tsx), [`shared/session-relation-card.tsx`](shared/session-relation-card.tsx) | Selects workdir mode and navigates session provenance. |
 | Conversation access | [`session-sharing.tsx`](session-sharing.tsx), [`sharing/`](sharing/)                                             | Presents team visibility and static sharing controls.     |
 
 ## Sidebar and session rows
@@ -100,6 +101,20 @@ settings controls. Their visual rules are component-local StyleX, with the
 overlay's light/dark alpha tied to the app's explicit theme. See the
 [migration decision](../../../../.agents/notes/implemented/simplification/2026-09-26-shared-cues-stylex.md)
 for the visual-equivalence boundary.
+
+## Session controls
+
+The [workdir mode selector](shared/workdir-mode-selector.tsx) offers local and
+worktree modes in a compact menu. The companion worktree checkbox pill uses its
+flat `surface="context"` presentation in the chat landing composer. An
+unavailable worktree remains visible with
+its reason; after session creation the current mode is an inert, tooltip-named
+value rather than a disabled action. The
+[session relation card](shared/session-relation-card.tsx) presents opened/opened-by
+provenance in the conversation and operation stream, with navigation enabled
+only while its exact target is available. Both components own their visual
+rules in StyleX; the [session-control decision](../../../../.agents/notes/implemented/simplification/2026-09-26-session-controls-stylex.md)
+records the preservation boundary.
 
 ## Conversation access
 

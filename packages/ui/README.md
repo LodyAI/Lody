@@ -193,6 +193,10 @@ had there, through Base UI's `render`:
 </Menu.Root>
 ```
 
+`Menu.Content` grows beyond its width floor for longer rows. Use
+`width="compact"` for a short two-choice menu; the regular width remains the
+default. Width is a primitive variant, not a caller class override.
+
 `ContextMenu` and `Menubar` restate only the way in — a right click or a long
 press, and a bar of names — and re-export `Menu`'s rows rather than rebuilding
 them, so a command looks and behaves the same wherever a person meets it. A row

@@ -1837,6 +1837,18 @@ function SessionMenu() {
   );
 }
 
+function CompactMenu() {
+  return (
+    <Menu.Root>
+      <Menu.Trigger render={<Button variant="secondary" />}>Two choices</Menu.Trigger>
+      <Menu.Content width="compact">
+        <Menu.Item>Local</Menu.Item>
+        <Menu.Item>Worktree</Menu.Item>
+      </Menu.Content>
+    </Menu.Root>
+  );
+}
+
 /**
  * The popover surface, drawn from `popup/surface.ts` on a stand-in. The real
  * popover above it opens over whatever is under it, which a board cannot hold
@@ -4423,6 +4435,7 @@ export function UiGallery({ palettes = 'both' }: UiGalleryProps) {
               <LegendKey>dropdown</LegendKey>
               <Cluster>
                 <SessionMenu />
+                <CompactMenu />
               </Cluster>
             </Row>
             <Row>
