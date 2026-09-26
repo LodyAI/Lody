@@ -20,7 +20,10 @@ This partially replaces the footer decision in the
 [reading-contrast note](2026-09-24-reading-contrast.md); its other decisions remain.
 The [Spec](../../../../specs/sidebar-footer.md) describes the new order.
 `LoroSidebar` owns rendering and existing callbacks; the E2E archive helper now
-uses the standalone button. The existing sidebar suite checks order, destinations,
+uses the standalone button. Help places GitHub directly after Docs. The app sidebar
+opens the repository and feedback Issues URLs through `openExternalUrl`, sharing
+the desktop/browser link handling already used by Docs.
+The existing sidebar suite checks order, destinations,
 the Help menu, and the Archive exit; all 15 tests pass. Formatting, scoped static
 analysis, translation-key validation, and documentation checks pass. Full-check
 results are recorded in the PR; no interactive desktop inspection has been performed.

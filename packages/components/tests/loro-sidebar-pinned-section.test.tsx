@@ -180,6 +180,12 @@ describe('LoroSidebar pinned section', () => {
       onDocsClicked: () => {
         destination = 'docs';
       },
+      onGithubClicked: () => {
+        destination = 'github';
+      },
+      onFeedbackClicked: () => {
+        destination = 'feedback';
+      },
       onSettingsClicked: () => {
         destination = 'settings';
       },
@@ -204,9 +210,28 @@ describe('LoroSidebar pinned section', () => {
     expect(items.some((item) => item.textContent?.includes('Archive'))).toBe(false);
     const docs = items.find((item) => item.textContent?.includes('Docs'));
     expect(docs).toBeDefined();
+    expect(items.map((item) => item.textContent?.trim())).toEqual([
+      'Docs',
+      'GitHub',
+      'Join community',
+      'Feedback',
+      'Report bug',
+    ]);
 
     await act(async () => docs?.click());
     expect(destination).toBe('docs');
+    await act(async () => help?.click());
+    const github = Array.from(document.querySelectorAll<HTMLElement>('[role="menuitem"]')).find(
+      (item) => item.textContent?.trim() === 'GitHub'
+    );
+    await act(async () => github?.click());
+    expect(destination).toBe('github');
+    await act(async () => help?.click());
+    const feedback = Array.from(document.querySelectorAll<HTMLElement>('[role="menuitem"]')).find(
+      (item) => item.textContent?.trim() === 'Feedback'
+    );
+    await act(async () => feedback?.click());
+    expect(destination).toBe('feedback');
   });
 
   it('keeps Help and Settings around the Archive exit while Archive is open', () => {

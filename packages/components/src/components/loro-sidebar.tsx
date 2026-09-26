@@ -253,6 +253,7 @@ export interface LoroSidebarProps {
   onArchiveClicked?: () => void;
   onSettingsClicked?: () => void;
   onDocsClicked?: () => void;
+  onGithubClicked?: () => void;
   onJoinCommunityClicked?: () => void;
   onFeedbackClicked?: () => void;
   onBugReportClicked?: () => void;
@@ -747,6 +748,7 @@ export const LoroSidebar = memo(function LoroSidebar({
   onArchiveClicked,
   onSettingsClicked,
   onDocsClicked,
+  onGithubClicked,
   onJoinCommunityClicked,
   onFeedbackClicked,
   onBugReportClicked,
@@ -1471,6 +1473,10 @@ export const LoroSidebar = memo(function LoroSidebar({
                 <Menu.Item onClick={() => onDocsClicked?.()}>
                   <BookOpen className="h-4 w-4" />
                   {mergedLabels.docs}
+                </Menu.Item>
+                <Menu.Item onClick={() => onGithubClicked?.()}>
+                  <Github className="h-4 w-4" />
+                  {t('sidebar.github', 'GitHub')}
                 </Menu.Item>
                 <Menu.Item onClick={() => onJoinCommunityClicked?.()}>
                   <Users className="h-4 w-4" />

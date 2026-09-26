@@ -6,7 +6,10 @@ Translation: current
 [English](sidebar-footer.md)
 
 侧边栏底部从左到右显示三个入口：帮助（`?`）、归档、设置。
-帮助菜单包含文档、社区、反馈和问题报告。归档通过独立按钮直接打开。
+帮助菜单依次包含文档、GitHub、社区、反馈和问题报告。
+GitHub 在外部浏览器打开 `https://github.com/LodyAI/Lody`；
+反馈在外部浏览器打开 `https://github.com/LodyAI/Lody/issues`。
+归档通过独立按钮直接打开。
 在归档页中，归档按钮返回上一页；没有历史记录时返回首页。
 帮助和设置始终可用。共享的桌面和移动侧边栏使用相同顺序。
 

@@ -36,7 +36,7 @@ and [display preference](../../../../.agents/notes/implemented/feature/2026-09-2
 ## Entry points and layout
 
 - Sidebar footer: Help (`?`), Archive, Settings, in that order. Help retains the
-  documentation, community, feedback, and bug-report menu; Archive is a direct
+  documentation, GitHub repository, community, GitHub Issues feedback, and bug-report menu; Archive is a direct
   button and becomes the return action while open. See the
   [footer Spec](../../../../specs/sidebar-footer.md).
 

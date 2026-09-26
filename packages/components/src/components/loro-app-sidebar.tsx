@@ -3015,6 +3015,11 @@ export function LoroAppSidebar({ className, overlay = false }: LoroAppSidebarPro
     void openExternalUrl(targetUrl);
   }, [closeMobileDrawer, language]);
 
+  const handleGithubClicked = useCallback(() => {
+    closeMobileDrawer();
+    void openExternalUrl('https://github.com/LodyAI/Lody');
+  }, [closeMobileDrawer]);
+
   const setJoinCommunityDialogOpen = useSetAtom(joinCommunityDialogOpenAtom);
   const handleJoinCommunityClicked = useCallback(() => {
     closeMobileDrawer();
@@ -3023,7 +3028,7 @@ export function LoroAppSidebar({ className, overlay = false }: LoroAppSidebarPro
 
   const handleFeedbackClicked = useCallback(() => {
     closeMobileDrawer();
-    window.open('https://feedback.lody.ai', '_blank', 'noopener,noreferrer');
+    void openExternalUrl('https://github.com/LodyAI/Lody/issues');
   }, [closeMobileDrawer]);
 
   const setBugReportDialogOpen = useSetAtom(bugReportDialogOpenAtom);
@@ -3549,6 +3554,7 @@ export function LoroAppSidebar({ className, overlay = false }: LoroAppSidebarPro
         onHomeClicked={handleHomeClicked}
         onArchiveClicked={handleArchiveClicked}
         onDocsClicked={handleDocsClicked}
+        onGithubClicked={handleGithubClicked}
         onJoinCommunityClicked={handleJoinCommunityClicked}
         onFeedbackClicked={handleFeedbackClicked}
         onBugReportClicked={handleBugReportClicked}
