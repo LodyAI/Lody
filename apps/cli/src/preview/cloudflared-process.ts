@@ -6,6 +6,7 @@ import { CloudflaredError, type CloudflaredProcess } from './cloudflared-native'
 export { CloudflaredError, type CloudflaredProcess } from './cloudflared-native';
 
 const WorkerMessage = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('registered') }),
   z.object({
     type: z.literal('origin'),
     origin: z.string().regex(/^https:\/\/[a-z0-9]+(?:-[a-z0-9]+)*\.trycloudflare\.com$/),
@@ -72,9 +73,19 @@ export async function startCloudflaredProcess(options: {
   let stopping = false;
   let resolveOrigin: (origin: string) => void = () => {};
   let rejectOrigin: (error: unknown) => void = () => {};
+  let resolveRegistration: () => void = () => {};
+  let rejectRegistration: (error: unknown) => void = () => {};
+  const registered = new Promise<void>((resolve, reject) => {
+    resolveRegistration = resolve;
+    rejectRegistration = reject;
+  });
+  void registered.catch(() => {});
   const origin = new Promise<string>((resolve, reject) => {
     resolveOrigin = resolve;
-    rejectOrigin = reject;
+    rejectOrigin = (error) => {
+      reject(error);
+      rejectRegistration(error);
+    };
   });
   const release = () => {
     if (stopping) return;
@@ -135,6 +146,7 @@ export async function startCloudflaredProcess(options: {
     }
     const message = result.data;
     if (message.type === 'origin') resolveOrigin(message.origin);
+    else if (message.type === 'registered') resolveRegistration();
     else if (message.type === 'diagnostic') {
       diagnostic = message.message;
       options.onDiagnostic?.(diagnostic);
@@ -154,7 +166,13 @@ export async function startCloudflaredProcess(options: {
     const allocated = await origin;
     options.signal.throwIfAborted();
     if (failure) throw failure;
-    return { origin: allocated, closed, stop, diagnostic: () => diagnostic };
+    return {
+      origin: allocated,
+      registered,
+      closed,
+      stop,
+      diagnostic: () => diagnostic,
+    };
   } catch (error) {
     await stop();
     throw error;

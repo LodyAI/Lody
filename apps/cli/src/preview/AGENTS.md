@@ -24,7 +24,14 @@ Managed preview tunnels and the local proxy. [apps/cli/AGENTS.md](../../AGENTS.m
   `ELECTRON_RUN_AS_NODE`, but never pass Lody credentials or supervisor tokens.
   All CLI builds emit a sibling `cloudflared-worker.js`; no source-loader fallback.
   Native logs use the pinned release's `--output json`.
-  Allocating an origin is not readiness. Public probes do not renew idle time.
+  Allocating an origin is not readiness. Before a Quick Tunnel's first public
+  HTTP probe, await edge registration and query DNS records through an isolated
+  Resolver, not OS hostname lookup: early NXDOMAIN can poison proxy/TUN caches.
+  Registration, DNS and HTTP share the startup deadline. DNS publication has a
+  10-second budget: persistent negative answers (including filtered/split DNS)
+  then fall back to the existing HTTP proxy path, as do transport failures. Never
+  hardcode public IPs or treat DNS/registration as readiness. Health/local viewing skip this gate.
+  Public probes do not renew idle time.
   Readiness diagnostics retain attempt counts, pending state, last HTTP status or
   nested network error codes, and connector registration progress. Never log
   capability-bearing request URLs, arbitrary fetch error messages or response bodies.
@@ -80,8 +87,15 @@ Managed preview tunnels and the local proxy. [apps/cli/AGENTS.md](../../AGENTS.m
   and WS the same fixed lookup; ambient DNS and global HTTP proxies cannot retarget it.
   Closing an endpoint also destroys its dispatcher. IPv4/IPv6-only localhost services
   must both work without changing the user's listener configuration.
-- Still require a fresh approval from the session initiator, and validate path-relative targets
-  here.
+- User-triggered remote controls still require fresh target approval. A valid local
+  Agent report may start preparation using ONLY the active execution's user identity,
+  which must match the Session initiator; never infer it from session/daemon ownership.
+  Keep this trusted entry separate from remote report payloads. Coalesce same-origin
+  preparation and cancel queued work on replacement, revoke and Session cleanup.
+  `reportedStarts` owns eager cancellation; `cancelled` is only for manual creation.
+  Keep generation guards inside serialized preview-state writes and invalidate
+  reports still validating during full cleanup.
+  Validate path-relative targets here.
 - The local preview proxy must never forward an OBSERVED WebSocket close code into a Close frame.
   RFC 6455 reserves 1005/1006 for local observation, so `ws` throws from a TCP callback and kills
   the CLI with the active Agent session. Mirror the shape instead (`mirrorWebSocketClose` in
