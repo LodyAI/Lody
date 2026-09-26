@@ -4762,6 +4762,7 @@ export class MessageHandler {
       if (notifications.length === 0) {
         return;
       }
+      const lateEvidenceOwners = new Set<string>();
       try {
         await appendACPNotificationsToAssistantEntry(
           args.sessionDoc,
@@ -4769,15 +4770,19 @@ export class MessageHandler {
           args.assistantEntryId,
           {
             logger: this.logger,
-            editCallback: async (edits) => {
+            editCallback: async (edits, assistantEntryId) => {
               // Edit tool calls (Codex apply_patch et al) bypass `fs/write_text_file` and
               // standard ACP diff blocks. Collect them so the turn-end persist can gap-fill
               // them into the diff store (old text chained from the prior recorded state),
               // keeping the turn-diff badge and its clickable content from the same source.
-              this.collectCodeCollabEditEvidence(args.sessionId, args.turnId, edits);
+              const ownerTurnId = assistantEntryId ?? args.turnId;
+              this.collectCodeCollabEditEvidence(args.sessionId, ownerTurnId, edits);
+              if (ownerTurnId !== args.turnId) lateEvidenceOwners.add(ownerTurnId);
             },
-            standardDiffCallback: async (diffs) => {
-              await this.collectCodeCollabStandardDiffs(args.sessionId, args.turnId, diffs);
+            standardDiffCallback: async (diffs, assistantEntryId) => {
+              const ownerTurnId = assistantEntryId ?? args.turnId;
+              await this.collectCodeCollabStandardDiffs(args.sessionId, ownerTurnId, diffs);
+              if (ownerTurnId !== args.turnId) lateEvidenceOwners.add(ownerTurnId);
             },
           },
           args.modelInfo
@@ -4802,6 +4807,9 @@ export class MessageHandler {
       await this.markACPNotificationsUnread(args.sessionId, args.sessionDoc, notifications);
       if (args.targetSource === 'finalized_turn') {
         await this.persistLateCodeCollabTurnDiffs(args.sessionId, args.turnId);
+      }
+      for (const ownerTurnId of lateEvidenceOwners) {
+        await this.persistLateCodeCollabTurnDiffs(args.sessionId, ownerTurnId);
       }
     };
 

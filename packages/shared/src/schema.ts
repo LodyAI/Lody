@@ -243,6 +243,27 @@ const historyMessageItemSchema = schema
     {
       type: schema.String<MessageContent['type']>(),
       text: schema.LoroText({ required: false }),
+      run: schema.Any({
+        storageSchema: schema
+          .LoroMap(
+            {
+              items: schema.LoroList(
+                schema
+                  .LoroMap({
+                    text: schema.LoroText({ required: false }),
+                    content: schema.Any({
+                      storageSchema: schema.LoroList(historyToolContentSchema, undefined, {
+                        required: false,
+                      }),
+                    }),
+                  })
+                  .catchall(historyNestedPayloadSchema)
+              ),
+            },
+            { required: false }
+          )
+          .catchall(historyNestedPayloadSchema),
+      }),
       // Streaming fields: a hint, not a validation constraint on old/future payloads.
       markdown: schema.Any({ storageSchema: schema.LoroText({ required: false }) }),
       content: schema.Any({

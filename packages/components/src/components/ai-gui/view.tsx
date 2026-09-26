@@ -87,7 +87,7 @@ import { currentWorkspaceIdAtom } from '@/atoms';
 import { getAgentMetaByIdAtomFamily } from '@/atoms/agents';
 import { sessionMetaAtomFamily } from '@/atoms/doc-meta';
 import { authTokenAtom, runtimeAtom } from '@/atoms/runtime';
-import { machineSupportsSubagentCancellation } from '@lody/shared';
+import { machineSupportsSubagentCancellation, machineSupportsSubagentEvents } from '@lody/shared';
 import { scrollDebug } from '@/hooks/scroll-debug-log';
 import { readSessionTurnTokenUsage, type SessionTurnTokenUsage } from '@lody/shared/session-data';
 import { formatCompactNumber } from '@/lib/format-compact-number';
@@ -166,7 +166,7 @@ import {
   type AssistantToolCallRenderItem,
   type AssistantTurnRenderBlock,
 } from './assistant-turn-render-blocks';
-import { SubagentTaskPanel, collectSubagentTasks } from './subagent-task-panel';
+import { SubagentTaskPanel, collectSubagentTasks, type SubagentTask } from './subagent-task-panel';
 import { SessionReadonlyContext } from './session-readonly-context';
 import { UserMessageEditor } from './user-message-editor';
 import { resolvePermissionRecord } from './permission-record';
@@ -4267,14 +4267,87 @@ const AssistantToolCallVirtualRow = memo(
     prev.fontSize === next.fontSize
 );
 
+/**
+ * A subagent run's own steps, in its task dialog. They go through the turn
+ * timeline's renderers, so a child's tool call reads exactly like the parent's.
+ * Nothing here takes a `searchBlockId`: conversation search indexes the
+ * conversation, and a dialog's content is not in it.
+ */
+const SubagentRunHistory = ({
+  task,
+  fontSize,
+}: {
+  task: SubagentTask;
+  fontSize: ConversationFontSize;
+}) => {
+  const { t } = useTranslation();
+  const run = task.run;
+  if (!run) return null;
+  const live = run.snapshot.state === 'running' || run.snapshot.state === 'pending';
+  const lastIndex = run.items.length - 1;
+  return (
+    <>
+      {run.items.map((item, index) => {
+        const streaming = live && index === lastIndex;
+        switch (item.type) {
+          case 'text':
+            return (
+              <MarkdownBlock
+                key={`text:${index}`}
+                text={item.text}
+                size={fontSize}
+                isStreaming={streaming}
+              />
+            );
+          case 'thought':
+            return (
+              <ActivityProcessStep key={`thought:${index}`}>
+                <span className="sr-only">
+                  {streaming
+                    ? t('sessions.toolActivity.thinking', 'Thinking…')
+                    : t('sessions.toolActivity.thought', 'Thought')}
+                </span>
+                <MarkdownRenderer
+                  text={item.text}
+                  size={fontSize}
+                  className={ACTIVITY_STEP_BODY_CLASS}
+                  isStreaming={streaming}
+                />
+              </ActivityProcessStep>
+            );
+          case 'tool_call':
+            return (
+              <ToolCallCard
+                key={`tool:${item.toolCallId}`}
+                toolCall={item}
+                fontSize={fontSize}
+                inlineOutput
+              />
+            );
+          case 'plan':
+            return <PlanBlock key={`plan:${index}`} entries={item.entries} fontSize={fontSize} />;
+          default:
+            return null;
+        }
+      })}
+    </>
+  );
+};
+
 const AssistantSubagentTasksRow = ({
   message,
   sessionId,
+  fontSize,
 }: {
   message: SessionHistoryParsed;
   sessionId: SessionId;
+  fontSize: ConversationFontSize;
 }) => {
   const tasks = useMemo(() => collectSubagentTasks(message.items), [message.items]);
+  const renderHistory = useCallback(
+    (task: SubagentTask) => <SubagentRunHistory task={task} fontSize={fontSize} />,
+    [fontSize]
+  );
   const runtime = useAtomValue(runtimeAtom);
   const session = useAtomValue(sessionMetaAtomFamily(getSessionRoomId(sessionId)));
   const machine = useAtomValue(getMachineMetaByIdAtomFamily(session?.machineId));
@@ -4295,7 +4368,14 @@ const AssistantSubagentTasksRow = ({
             throw new Error(response?.error || t('sessions.subagentTasks.cancelFailed'));
         }
       : undefined;
-  return <SubagentTaskPanel tasks={tasks} onCancel={onCancel} />;
+  return (
+    <SubagentTaskPanel
+      tasks={tasks}
+      onCancel={onCancel}
+      runCancellation={machineSupportsSubagentEvents(machine)}
+      renderHistory={renderHistory}
+    />
+  );
 };
 
 /**
@@ -5019,7 +5099,11 @@ const AssistantChatItem = memo(function AssistantChatItem({
                 <AgentActivityStatus {...liveStatus} message={message} />
               </div>
             ) : null}
-            <AssistantSubagentTasksRow message={message} sessionId={row.item.sessionId} />
+            <AssistantSubagentTasksRow
+              message={message}
+              sessionId={row.item.sessionId}
+              fontSize={conversationFontSize}
+            />
           </>
         );
       case 'footer':

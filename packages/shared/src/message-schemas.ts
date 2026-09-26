@@ -1,6 +1,12 @@
 import { z } from 'zod';
 import { SubagentTaskPayloadSchema } from './acp/claude-subagent-task';
 import {
+  isLodySubagentSnapshot,
+  isLodySubagentProgress,
+  type LodySubagentSnapshot,
+  type LodySubagentProgress,
+} from 'acp-extension-core';
+import {
   PI_EXTENSION_PATH_MAX_LENGTH,
   PI_EXTENSIONS_MAX_SELECTIONS,
   SESSION_FILE_MAX_COUNT,
@@ -3278,13 +3284,47 @@ export const ToolCallMessageSchema = z.object({
 });
 
 // Non-system notice MessageContent discriminated union
+const SubagentItemIdentityShape = {
+  nativeTurnId: z.string().optional(),
+  messageId: z.string().optional(),
+};
 export const NonSystemNoticeMessageContentSchema = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('text'),
     text: z.string(),
     spans: z.array(MessageTextSpanSchema).optional(),
   }),
-  SubagentTaskPayloadSchema.extend({ type: z.literal('subagent_task') }),
+  SubagentTaskPayloadSchema.extend({
+    type: z.literal('subagent_task'),
+    run: z
+      .object({
+        sessionId: z.string().min(1),
+        snapshot: z.custom<LodySubagentSnapshot>(isLodySubagentSnapshot),
+        progress: z.custom<LodySubagentProgress>(isLodySubagentProgress).optional(),
+        items: z.array(
+          z.discriminatedUnion('type', [
+            z.object({
+              ...SubagentItemIdentityShape,
+              type: z.literal('text'),
+              text: z.string(),
+              spans: z.array(MessageTextSpanSchema).optional(),
+            }),
+            z.object({
+              ...SubagentItemIdentityShape,
+              type: z.literal('thought'),
+              text: z.string(),
+            }),
+            z.object({
+              ...SubagentItemIdentityShape,
+              type: z.literal('plan'),
+              entries: z.array(PlanEntrySchema),
+            }),
+            ToolCallMessageSchema.extend(SubagentItemIdentityShape),
+          ])
+        ),
+      })
+      .optional(),
+  }),
   SessionCommentReferenceInputBlockSchema,
   SessionVisualAnnotationReferenceInputBlockSchema,
   SessionImageInputBlockSchema,

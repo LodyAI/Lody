@@ -7,6 +7,10 @@ import { createSessionMirror } from '../src/session-mirror';
 import { sessionDocSchema, type SessionHistory } from '../src/schema';
 import type { SessionId } from '../src/ids';
 import { createHistoryWriter, type StoredHistorySnapshot } from '../src/history-writer';
+import { applyNotificationOnHistory } from '../src/acp/history-apply';
+import { parseSessionNotification } from '../src/acp/schema';
+import type { LodySubagentEvent, LodySubagentSnapshot } from 'acp-extension-core';
+import type { MessageContent } from '../src/ai';
 
 const id = 'synthetic-session' as SessionId;
 const entry = (turnId = 'turn'): SessionHistory => ({
@@ -20,6 +24,278 @@ const open = (doc: Loro) =>
   createSessionMirror({ doc, initialState: { session: { id }, history: [] } });
 
 describe('single history writer', () => {
+  it('retains child message identities and scalar tool output without altering root identity', () => {
+    const writer = open(new Loro()).historyWriter;
+    writer.append({ ...entry('first'), role: 'assistant', acpTurnId: 'parent', items: [] });
+    const emit = (payload: Record<string, unknown>) =>
+      writer.updateEntry('first', (turn) => {
+        const notification = parseSessionNotification({
+          sessionId: 'root',
+          update: {
+            sessionUpdate: 'subagent_event',
+            event: { version: 1, sessionId: 'root', runId: 'run', ...payload },
+          },
+        });
+        return applyNotificationOnHistory([turn], [notification], undefined, {
+          targetAssistantEntryId: 'first',
+        })[0]!;
+      });
+    emit({
+      type: 'snapshot',
+      snapshot: {
+        state: 'running',
+        support: { stream: ['text', 'tool'], progress: false, cancel: false, outputRead: 'none' },
+      },
+    });
+    const text = (nativeTurnId: string, messageId: string, delta: string) =>
+      emit({
+        type: 'output',
+        nativeTurnId,
+        messageId,
+        update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: delta } },
+      });
+    text('turn-a', 'message-a', 'one');
+    text('turn-a', 'message-a', 'two');
+    text('turn-a', 'message-b', 'three');
+    text('turn-b', 'message-b', 'four');
+    emit({
+      type: 'output',
+      nativeTurnId: 'turn-b',
+      update: {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'tool',
+        title: 'Read',
+        rawInput: ['file'],
+        rawOutput: 'file contents',
+      },
+    });
+    const turn = writer.read('first')!;
+    const task = turn.items[0] as Extract<MessageContent, { type: 'subagent_task' }>;
+    expect(turn.acpTurnId).toBe('parent');
+    expect(task.run?.snapshot.outputIncomplete).toBeUndefined();
+    expect(task.run?.items).toMatchObject([
+      { type: 'text', nativeTurnId: 'turn-a', messageId: 'message-a', text: 'onetwo' },
+      { type: 'text', nativeTurnId: 'turn-a', messageId: 'message-b', text: 'three' },
+      { type: 'text', nativeTurnId: 'turn-b', messageId: 'message-b', text: 'four' },
+      {
+        type: 'tool_call',
+        nativeTurnId: 'turn-b',
+        content: [{ type: 'content', content: { type: 'text', text: 'file contents' } }],
+        _meta: { lody: { subagentRaw: { rawInput: ['file'], rawOutput: 'file contents' } } },
+      },
+    ]);
+  });
+  it('persists isolated child transcripts on their original turn across parent completion and reopening', () => {
+    const doc = new Loro();
+    const mirror = open(doc);
+    const writer = mirror.historyWriter;
+    writer.append({ ...entry('first'), role: 'assistant', acpTurnId: 'parent-turn', items: [] });
+    const snapshot: LodySubagentSnapshot = {
+      state: 'running',
+      parentRunId: null,
+      name: 'Worker',
+      support: {
+        stream: ['text', 'thought', 'tool', 'plan'],
+        progress: true,
+        outputRead: 'none',
+        cancel: false,
+      },
+    };
+    const emit = (
+      runId: string,
+      payload: Omit<LodySubagentEvent, 'version' | 'sessionId' | 'runId'> | Record<string, unknown>,
+      target = 'first',
+      sessionId = 'root'
+    ) => {
+      const notification = parseSessionNotification({
+        sessionId,
+        update: {
+          sessionUpdate: 'subagent_event',
+          event: { version: 1, sessionId, runId, ...payload },
+        },
+      });
+      writer.update((history) =>
+        applyNotificationOnHistory(history, [notification], undefined, {
+          targetAssistantEntryId: target,
+        })
+      );
+    };
+    emit('a', { type: 'snapshot', snapshot });
+    emit('b', { type: 'snapshot', snapshot });
+    const chunk = (text: string) => ({
+      type: 'output',
+      nativeTurnId: 'child-turn',
+      update: {
+        sessionUpdate: 'agent_message_chunk',
+        content: { type: 'text', text },
+        _meta: { lody: { turnId: 'child-turn' } },
+      },
+    });
+    emit('a', chunk('hello'));
+    emit('a', chunk('hello'));
+    emit('b', chunk('independent'));
+    for (const runId of ['a', 'b'])
+      emit(runId, {
+        type: 'output',
+        update: {
+          sessionUpdate: 'tool_call',
+          toolCallId: 'same-tool',
+          title: runId,
+          status: 'in_progress',
+        },
+      });
+    writer.updateEntry('first', (turn) => ({ ...turn, finished: true, endedAt: 1 }));
+    writer.append({ ...entry('second'), role: 'assistant', items: [] });
+    emit(
+      'a',
+      {
+        type: 'output',
+        update: {
+          sessionUpdate: 'tool_call_update',
+          toolCallId: 'same-tool',
+          status: 'completed',
+          content: [{ type: 'diff', path: 'file', oldText: '', newText: 'full diff retained' }],
+        },
+      },
+      'second'
+    );
+    emit(
+      'a',
+      { type: 'progress', progress: { summary: 'working', totalTokens: 10, lastToolName: 'Read' } },
+      'second'
+    );
+    emit('a', { type: 'progress', progress: { summary: null } }, 'second');
+    emit(
+      'a',
+      {
+        type: 'output',
+        update: {
+          sessionUpdate: 'plan',
+          entries: [{ content: 'child plan', status: 'completed', priority: 'high' }],
+        },
+      },
+      'second'
+    );
+    emit(
+      'a',
+      { type: 'snapshot', snapshot: { ...snapshot, state: 'unknown', outputIncomplete: true } },
+      'second'
+    );
+    emit('a', { type: 'snapshot', snapshot: { ...snapshot, state: 'completed' } }, 'second');
+    emit('a', chunk('late output'), 'second');
+    emit('missing', chunk('orphan'), 'second');
+    emit('a', chunk('cross root'), 'second', 'another-root');
+    const first = writer.read('first')!;
+    const tasks = first.items as Extract<MessageContent, { type: 'subagent_task' }>[];
+    expect(first.acpTurnId).toBe('parent-turn');
+    expect(first.plan).toBeUndefined();
+    expect(writer.read('second')!.items).toEqual([]);
+    expect(tasks).toHaveLength(2);
+    expect(tasks[0]?.run).toMatchObject({
+      snapshot: { state: 'completed', outputIncomplete: true },
+      progress: { summary: null, totalTokens: 10, lastToolName: 'Read' },
+      items: [
+        { type: 'text', text: 'hellohello' },
+        {
+          type: 'tool_call',
+          toolCallId: 'same-tool',
+          status: 'completed',
+          content: [{ type: 'diff', newText: 'full diff retained' }],
+        },
+        { type: 'plan' },
+      ],
+    });
+    expect(tasks[1]?.run?.items).toMatchObject([
+      { type: 'text', text: 'independent' },
+      { type: 'tool_call', status: 'in_progress' },
+    ]);
+    const row = doc.getList('history').get(0) as LoroMap;
+    const task = (row.get('items') as LoroList).get(0) as LoroMap;
+    const run = task.get('run') as LoroMap;
+    const childText = (run.get('items') as LoroList).get(0) as LoroMap;
+    expect(childText.get('text')).toBeInstanceOf(LoroText);
+    expect(run.get('sessionId')).toBe('root');
+    expect((run.get('snapshot') as LoroMap).get('state')).toBe('completed');
+    const copy = new Loro();
+    copy.import(doc.export({ mode: 'snapshot' }));
+    expect(open(copy).historyWriter.read('first')).toEqual(first);
+  });
+
+  it('rejects malformed child history atomically and refuses unresolved or cyclic ownership', () => {
+    const doc = new Loro();
+    const writer = open(doc).historyWriter;
+    writer.append({ ...entry('first'), role: 'assistant', items: [] });
+    const snapshot: LodySubagentSnapshot = {
+      state: 'running',
+      parentRunId: null,
+      support: { stream: ['text'], progress: false, outputRead: 'none', cancel: false },
+    };
+    const notification = (runId: string, parentRunId: string | null) =>
+      parseSessionNotification({
+        sessionId: 'root',
+        update: {
+          sessionUpdate: 'subagent_event',
+          event: {
+            version: 1,
+            sessionId: 'root',
+            runId,
+            type: 'snapshot',
+            snapshot: { ...snapshot, parentRunId },
+          },
+        },
+      });
+    writer.update((history) => applyNotificationOnHistory(history, [notification('a', null)]));
+    expect(writer.read('first')!.items).toEqual([]);
+    writer.update((history) =>
+      applyNotificationOnHistory(
+        history,
+        [
+          notification('a', null),
+          notification('b', 'a'),
+          notification('a', 'b'),
+          notification('c', 'missing'),
+        ],
+        undefined,
+        { targetAssistantEntryId: 'first' }
+      )
+    );
+    const before = writer.read('first');
+    expect(before!.items).toHaveLength(2);
+    expect(before!.items[0]).toMatchObject({ run: { snapshot: { parentRunId: null } } });
+    expect(() =>
+      writer.updateEntry('first', (turn) => ({
+        ...turn,
+        items: [
+          {
+            type: 'subagent_task',
+            taskId: 'bad',
+            status: 'in_progress',
+            run: {
+              sessionId: 'root',
+              snapshot,
+              items: [{ type: 'tool_call', toolCallId: 'secret', status: 'invalid' }],
+            },
+          },
+        ] as never,
+      }))
+    ).toThrow('Invalid history write');
+    expect(writer.read('first')).toEqual(before);
+    expect(() =>
+      parseSessionNotification({
+        sessionId: 'root',
+        update: {
+          sessionUpdate: 'subagent_event',
+          event: {
+            version: 1,
+            sessionId: 'root',
+            runId: 'bad',
+            type: 'output',
+            update: { sessionUpdate: 'current_mode_update', currentModeId: 'bypass' },
+          },
+        },
+      })
+    ).toThrow();
+  });
   it.each(['containers', 'legacy JSON'] as const)(
     'responds to permissions without reading unrelated bodies: %s',
     (representation) => {
