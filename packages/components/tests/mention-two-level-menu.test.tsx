@@ -275,35 +275,6 @@ describe('MentionTwoLevelMenuBody', () => {
     }
   );
 
-  it('keeps a wrapped disabled reason inside its row', () => {
-    const candidate: MentionCandidate = {
-      value: 'remote-role',
-      label: 'Remote Reviewer',
-      insertText: '@Remote-Reviewer',
-      kind: 'agent_role',
-      icon: 'agent_role',
-      title: 'Remote Reviewer',
-      disabled: true,
-      subtitle: 'Unavailable: this workspace requires a role on the same machine',
-    };
-    const categories: MentionCategory[] = [
-      {
-        id: 'agent_role',
-        namespace: 'role',
-        label: 'Agent Roles',
-        icon: 'agent_role',
-        status: 'ready',
-        getCandidates: () => [candidate],
-      },
-    ];
-
-    render('@Remote', categories);
-
-    const row = container?.querySelector<HTMLElement>('[data-disabled]');
-    expect(row).not.toBeNull();
-    expect(getComputedStyle(row!).flexShrink).toBe('0');
-  });
-
   it('lists one row per category at the first level', () => {
     render('@');
 

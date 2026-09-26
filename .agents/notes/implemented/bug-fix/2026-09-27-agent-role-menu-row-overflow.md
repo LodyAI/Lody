@@ -35,8 +35,10 @@ same failure for other wrapped content, so both alternatives were rejected.
   popup and docked mobile menu.
 - The existing `AgentRoleAvailabilityNarrow` Storybook story exercises wrapped
   disabled reasons and remains the visual regression fixture.
-- `mention-two-level-menu.test.tsx` renders a long disabled reason and asserts
-  the real row's computed `flex-shrink` is zero.
+- The first CI run showed that this Vitest JSDOM setup does not load generated
+  StyleX CSS: `getComputedStyle(row).flexShrink` was empty. That assertion was
+  removed because it measured the test setup, not row layout; the existing
+  Storybook story remains the visual regression fixture.
 - `node scripts/docs/main.mjs status` was run before the edit. Full package tests
   were not run because dependencies were not installed in this checkout.
 - Pull request: [#1032](https://github.com/LodyAI/Lody/pull/1032).

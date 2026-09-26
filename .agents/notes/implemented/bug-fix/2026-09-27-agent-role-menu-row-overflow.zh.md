@@ -28,8 +28,9 @@ Agent Role mention 菜单使用纵向 flex 容器时，禁用原因换行会把�
 - 报告截图中的每条 Role 都有两行“不可用”原因，后续名称进入前一条原因的第二行。
 - 受影响的布局是桌面弹出菜单和停靠式移动菜单共用的 `MentionItem` surface。
 - 已有的 `AgentRoleAvailabilityNarrow` Storybook story 覆盖带换行禁用原因的场景，继续作为视觉回归夹具。
-- `mention-two-level-menu.test.tsx` 会渲染一条长禁用原因，并断言真实行计算出的
-  `flex-shrink` 为零。
+- 首次 CI 显示 Vitest 的 JSDOM 环境没有加载生成的 StyleX CSS，
+  `getComputedStyle(row).flexShrink` 返回空字符串。该断言测到的是测试环境而非行布局，
+  因此已移除；现有 Storybook 场景继续作为视觉回归夹具。
 - 编辑前已运行 `node scripts/docs/main.mjs status`。当前检出没有安装依赖，因此未运行
   完整的包测试。
 - Pull request: [#1032](https://github.com/LodyAI/Lody/pull/1032)。
