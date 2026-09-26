@@ -1015,17 +1015,7 @@ export const LoroSidebar = memo(function LoroSidebar({
                 {workspaceIdentity}
               </button>
             }
-          >
-            <button
-              type="button"
-              className={cn(workspaceIdentityClassName, windowDrag && WINDOW_DRAG_EXEMPT_CLASS)}
-              data-workspace-switcher-trigger
-              data-workspace-syncing={workspaceSyncing ? 'true' : 'false'}
-              aria-busy={workspaceSyncing || undefined}
-            >
-              {workspaceIdentity}
-            </button>
-          </Menu.Trigger>
+          />
         </div>
         <Menu.Content align="start" side={menuSide} className="w-64">
           <Menu.GroupLabel className="normal-case text-xs font-normal tracking-normal">
@@ -1046,6 +1036,7 @@ export const LoroSidebar = memo(function LoroSidebar({
                 <Tooltip.Provider delay={400}>
                   {workspaces.map((ws) => {
                     const workspaceSlug = ws.slug;
+                    const supportsNewWindow = isElectronRenderer() && !!workspaceSlug;
                     // The avatar carries identity, so the check moves to the
                     // row's trailing edge. ps-2/pe-8 replace the ps-8 selection
                     // indent: the 20px avatar and the action rows' 20px icon
@@ -1057,6 +1048,27 @@ export const LoroSidebar = memo(function LoroSidebar({
                         value={ws.id}
                         indicator="check"
                         indicatorSide="end"
+                        // Resolve the radio item in the dropdown's context before
+                        // introducing the separate right-click menu in its render.
+                        render={
+                          supportsNewWindow
+                            ? (props) => (
+                                <ContextMenu.Root>
+                                  <ContextMenu.Trigger render={<div {...props} />} />
+                                  <ContextMenu.Content>
+                                    <ContextMenu.Item
+                                      icon={<AppWindow />}
+                                      onClick={() => {
+                                        openDesktopWindow(undefined, workspaceSlug, 'context_menu');
+                                      }}
+                                    >
+                                      {t('workspace.openInNewWindow')}
+                                    </ContextMenu.Item>
+                                  </ContextMenu.Content>
+                                </ContextMenu.Root>
+                              )
+                            : undefined
+                        }
                         icon={
                           <WorkspaceAvatar
                             workspace={{ name: ws.name, logo: ws.logo }}
@@ -1099,35 +1111,15 @@ export const LoroSidebar = memo(function LoroSidebar({
                       </Menu.RadioItem>
                     );
 
-                    if (!isElectronRenderer() || !workspaceSlug) return row;
+                    if (!supportsNewWindow || ws.id === currentWorkspaceId) return row;
 
-                    const contextTrigger = <ContextMenu.Trigger>{row}</ContextMenu.Trigger>;
                     return (
-                      <ContextMenu.Root key={ws.id}>
-                        {ws.id === currentWorkspaceId ? (
-                          contextTrigger
-                        ) : (
-                          // Other workspaces explain the modifier-click on hover,
-                          // beside the row. Tooltip and ContextMenu roots render no
-                          // DOM, so both triggers' props land on the row element.
-                          <Tooltip.Root>
-                            <Tooltip.Trigger render={contextTrigger} />
-                            <Tooltip.Content side="right" sideOffset={8}>
-                              {newWindowHint}
-                            </Tooltip.Content>
-                          </Tooltip.Root>
-                        )}
-                        <ContextMenu.Content>
-                          <ContextMenu.Item
-                            icon={<AppWindow />}
-                            onClick={() => {
-                              openDesktopWindow(undefined, workspaceSlug, 'context_menu');
-                            }}
-                          >
-                            {t('workspace.openInNewWindow')}
-                          </ContextMenu.Item>
-                        </ContextMenu.Content>
-                      </ContextMenu.Root>
+                      <Tooltip.Root key={ws.id}>
+                        <Tooltip.Trigger render={row} />
+                        <Tooltip.Content side="right" sideOffset={8}>
+                          {newWindowHint}
+                        </Tooltip.Content>
+                      </Tooltip.Root>
                     );
                   })}
                 </Tooltip.Provider>
