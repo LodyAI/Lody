@@ -43,6 +43,7 @@ import { CliRuntimeStateReporter } from '@/lib/cli-runtime-state';
 import { makeTerminalPtyService, type TerminalPtyServiceApi } from '@/lib/terminal-pty-service';
 import {
   readMachineLocalProjects,
+  reconcileMachineLocalProjectRootPaths,
   removeMachineLocalProject,
   resolveWorkspaceLocalProject,
   resolveWorkspaceLocalProjectRootPath,
@@ -796,6 +797,17 @@ export class LodyFleet {
         }
 
         await lody.start();
+
+        await reconcileMachineLocalProjectRootPaths(
+          lody.documentManager.repo,
+          workspace.id as WorkspaceId,
+          this.machineId,
+          lody.documentManager
+        ).catch((error: unknown) => {
+          workspaceLogger.warn(
+            `Failed to reconcile local project paths: ${formatErrorMessage(error)}`
+          );
+        });
 
         if (!this.desiredWorkspaces.has(workspace.id) || this.stopped) {
           await lody.cleanup();
