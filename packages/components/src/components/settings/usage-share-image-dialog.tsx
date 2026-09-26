@@ -212,7 +212,10 @@ export function UsageShareImageDialog({
         if (!exportingRef.current) onOpenChange(next);
       }}
     >
-      <Dialog.Content className="flex max-h-[85vh] max-w-4xl flex-col gap-0 overflow-hidden p-0 sm:p-0">
+      <Dialog.Content
+        width="56rem"
+        className="flex max-h-[85vh] flex-col gap-0 overflow-hidden p-0 sm:p-0"
+      >
         <Dialog.Header className="border-b border-border/70 px-4 py-3.5 pr-12 text-left sm:px-5 sm:pr-12">
           <Dialog.Title className="text-base">
             {t('workspace.usage.shareImage.dialogTitle')}

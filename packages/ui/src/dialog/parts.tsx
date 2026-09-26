@@ -1,5 +1,13 @@
 import * as stylex from '@stylexjs/stylex';
-import { createContext, useCallback, useContext, useState, type ReactNode, type Ref } from 'react';
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+  type Ref,
+} from 'react';
 import { appendClassName } from '../internal/class-name';
 import { modal } from './surface';
 
@@ -35,6 +43,24 @@ export function DialogFooter({ children, className }: DialogSectionProps) {
       {children}
     </div>
   );
+}
+
+/**
+ * Composes a panel `width` into the popup's `style`, in whichever form the
+ * caller used — Base UI lets `style` be an object or a callback of the popup's
+ * state. The width travels as inline style rather than as a class, because a
+ * second `width` declaration on the panel would race the rung's own in the
+ * sheet rather than reliably follow it.
+ */
+export function mergePanelWidth<S>(
+  style: CSSProperties | ((state: S) => CSSProperties | undefined) | undefined,
+  width: CSSProperties['width']
+): typeof style {
+  if (width === undefined) return style;
+  if (typeof style === 'function') {
+    return (state: S) => ({ ...style(state), width });
+  }
+  return { ...style, width };
 }
 
 /**

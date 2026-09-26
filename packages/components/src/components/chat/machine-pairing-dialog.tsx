@@ -106,7 +106,7 @@ export function MachinePairingDialog({
 
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
-      <Dialog.Content className="max-w-xl">
+      <Dialog.Content width="36rem">
         {connected ? (
           <>
             <Dialog.Header>

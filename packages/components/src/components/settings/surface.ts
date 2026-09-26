@@ -526,8 +526,10 @@ export const settingsCatalog = stylex.create({
 
 /**
  * The size of a settings editor dialog (MCP server, Agent Role, Prompt
- * Shortcut). Layout only, and a Tailwind class on purpose: the panel states its
- * own width in StyleX, and a second StyleX width on the same element is ordered
- * by the stylesheet, while utilities sit in a later layer and win.
+ * Shortcut). The width rides `Dialog.Content`'s `width` prop — the panel's own
+ * width is a StyleX declaration, and a second one on the same element is
+ * ordered by the stylesheet rather than the caller. This class keeps only the
+ * height cap.
  */
-export const SETTINGS_EDITOR_DIALOG_LAYOUT = 'w-[620px] max-h-[min(680px,88dvh)]';
+export const SETTINGS_EDITOR_DIALOG_WIDTH = '620px';
+export const SETTINGS_EDITOR_DIALOG_LAYOUT = 'max-h-[min(680px,88dvh)]';

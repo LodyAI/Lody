@@ -30,6 +30,7 @@ import { space } from '@lody/ui/tokens/scales.stylex';
 import { McpConnectionForm, type McpConnectionFormValue } from './mcp-connection-form';
 import {
   SETTINGS_EDITOR_DIALOG_LAYOUT,
+  SETTINGS_EDITOR_DIALOG_WIDTH,
   settingsCatalog as catalog,
   settingsSurface as surface,
 } from './surface';
@@ -182,7 +183,10 @@ export function McpSetting() {
           setEditor(null);
         }}
       >
-        <Dialog.Content className={SETTINGS_EDITOR_DIALOG_LAYOUT}>
+        <Dialog.Content
+          width={SETTINGS_EDITOR_DIALOG_WIDTH}
+          className={SETTINGS_EDITOR_DIALOG_LAYOUT}
+        >
           <Dialog.Header>
             <Dialog.Title>
               {editor?.mode === 'edit' ? t('settings.mcp.editTitle') : t('settings.mcp.addTitle')}

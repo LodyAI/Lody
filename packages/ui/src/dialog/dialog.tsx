@@ -1,6 +1,6 @@
 import { Dialog as BaseDialog } from '@base-ui/react/dialog';
 import * as stylex from '@stylexjs/stylex';
-import { forwardRef, type ComponentProps, type ReactNode } from 'react';
+import { forwardRef, type ComponentProps, type CSSProperties, type ReactNode } from 'react';
 import { Button } from '../button/button';
 import { appendClassName } from '../internal/class-name';
 import { CrossGlyph } from '../internal/glyphs';
@@ -9,6 +9,7 @@ import { useForcedThemeClassNames } from '../theme/theme';
 import {
   DialogFooter,
   DialogHeader,
+  mergePanelWidth,
   ModalDepthProvider,
   useModalDepth,
   usePanelContainer,
@@ -43,6 +44,16 @@ export interface ModalContentProps extends Omit<PopupBaseProps, 'className' | 'r
   backdropClassName?: string;
   /** Skip the enter/exit fade so the surface appears instantly. */
   noAnimation?: boolean;
+  /**
+   * Panel width when the rung's default is wrong for this surface.
+   *
+   * It lands on inline `style`: the panel already states `width` itself, and a
+   * second declaration — a StyleX class here or a caller's utility class —
+   * wins only if the sheet happens to order it after. A lone `max-width` can
+   * only narrow the fixed default, never widen it. The rung's own `max-width`
+   * viewport cap still applies on top.
+   */
+  width?: CSSProperties['width'];
   className?: string;
 }
 
@@ -135,6 +146,8 @@ export const DialogContent = forwardRef<HTMLDivElement, DialogContentProps>(func
     noAnimation,
     closeButton = true,
     closeLabel = 'Close',
+    width,
+    style,
     ...rest
   },
   ref
@@ -156,6 +169,7 @@ export const DialogContent = forwardRef<HTMLDivElement, DialogContentProps>(func
       <BaseDialog.Popup
         ref={panelRef}
         {...rest}
+        style={mergePanelWidth(style, width)}
         className={(state) =>
           appendClassName(
             stylex.props(

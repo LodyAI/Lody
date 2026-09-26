@@ -46,6 +46,7 @@ import {
 import { ScopePills } from './prompt-shortcut-scope';
 import {
   SETTINGS_EDITOR_DIALOG_LAYOUT,
+  SETTINGS_EDITOR_DIALOG_WIDTH,
   settingsCatalog as catalog,
   settingsSurface as surface,
 } from './surface';
@@ -253,7 +254,10 @@ function PromptShortcutsSettingContent({
           if (!open && !busy) setEditor(null);
         }}
       >
-        <Dialog.Content className={SETTINGS_EDITOR_DIALOG_LAYOUT}>
+        <Dialog.Content
+          width={SETTINGS_EDITOR_DIALOG_WIDTH}
+          className={SETTINGS_EDITOR_DIALOG_LAYOUT}
+        >
           <Dialog.Header>
             <Dialog.Title>
               {!editor?.base

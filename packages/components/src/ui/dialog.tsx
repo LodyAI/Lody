@@ -14,6 +14,10 @@ import { WindowDragStrip } from '@/ui/window-drag-region';
  * - `WindowDragStrip` on the backdrop, so an Electron window stays draggable
  *   beside the dialog the same way it is beside the page.
  *
+ * A non-default panel width goes on `Content`'s `width` prop (`@lody/ui`'s
+ * `ModalContentProps`), never a `max-w-*` class — a cap alone can only narrow
+ * the rung's fixed `dialog.width`, never widen it.
+ *
  * `AlertDialog.Action`/`AlertDialog.Cancel` are `Close` rendered as styled
  * buttons: an answer runs its `onClick` and then closes. An answer that must
  * hold the dialog open while work is in flight is not a `Close` at all — it is

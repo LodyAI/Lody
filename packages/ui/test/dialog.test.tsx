@@ -90,6 +90,22 @@ describe('Dialog', () => {
     expect(panels()).toHaveLength(0);
   });
 
+  test('a panel width lands as inline style, alongside a caller style', async () => {
+    // The panel states its own `width` in StyleX, so a second `width` class
+    // would only win by sheet order. `width` rides the inline `style` instead —
+    // the one channel that always follows the panel — and composes with the
+    // `style` a caller already passes.
+    mounted = await mount(
+      <Dialog.Root defaultOpen>
+        <Dialog.Content width="640px" style={{ overscrollBehavior: 'contain' }}>
+          <Dialog.Title>Rename session</Dialog.Title>
+        </Dialog.Content>
+      </Dialog.Root>
+    );
+    expect(panel().style.width).toBe('640px');
+    expect(panel().style.overscrollBehavior).toBe('contain');
+  });
+
   test('a footer answer runs its handler and takes the panel down with it', async () => {
     const save = vi.fn();
     mounted = await mount(
