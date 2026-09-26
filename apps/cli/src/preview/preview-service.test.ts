@@ -121,6 +121,7 @@ describe('PreviewService Quick Tunnel lifecycle', () => {
       const exited = Promise.withResolvers<CloudflaredError | null>();
       return {
         origin: 'https://synthetic-preview.trycloudflare.com',
+        registered: Promise.resolve(),
         closed: exited.promise,
         diagnostic: () => undefined,
         stop: async () => {

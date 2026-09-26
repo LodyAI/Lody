@@ -24,7 +24,13 @@ Managed preview tunnels and the local proxy. [apps/cli/AGENTS.md](../../AGENTS.m
   `ELECTRON_RUN_AS_NODE`, but never pass Lody credentials or supervisor tokens.
   All CLI builds emit a sibling `cloudflared-worker.js`; no source-loader fallback.
   Native logs use the pinned release's `--output json`.
-  Allocating an origin is not readiness. Public probes do not renew idle time.
+  Allocating an origin is not readiness. Before a Quick Tunnel's first public
+  HTTP probe, await edge registration and query DNS records through an isolated
+  Resolver, not OS hostname lookup: early NXDOMAIN can poison proxy/TUN caches.
+  Registration, DNS and HTTP share the startup deadline. Direct-DNS transport
+  failures retain the existing HTTP proxy path; never hardcode public IPs or
+  treat DNS/registration as readiness. Health/local viewing skip this gate.
+  Public probes do not renew idle time.
   Readiness diagnostics retain attempt counts, pending state, last HTTP status or
   nested network error codes, and connector registration progress. Never log
   capability-bearing request URLs, arbitrary fetch error messages or response bodies.

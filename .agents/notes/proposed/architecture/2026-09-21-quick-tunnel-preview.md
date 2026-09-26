@@ -324,3 +324,36 @@ response coverage. CLI production build passed. The outer full build hit the
 mobile Vite build's Node heap limit; this is not a successful full-product build.
 Running application processes were not replaced. These observations do not complete
 the broader Quick Tunnel acceptance gates above.
+
+## DNS publication gate (2026-09-26)
+
+Correction to the earlier propagation interpretation: on one macOS proxy/TUN
+network, concurrent requests to the same newly allocated tunnel reached the
+synthetic page at 15.2 seconds when proxy CONNECT addressed a DNS-observed edge
+IP with the original SNI and certificate validation. Ordinary hostname proxy
+requests only succeeded at 71.4 seconds. DNS initially returned NXDOMAIN and
+then positive records at 12.8 seconds. This strongly implicates negative caching
+in the hostname network path; the exact cache owner was not inspected. Skipping
+HTTP proxy configuration still traversed the system TUN, so that was not a clean
+network bypass. Fixed IPs were a diagnostic control, not a product solution.
+
+The implementation now waits for native registration and DNS publication before
+the first public GET. A per-startup Node Resolver queries configured DNS servers
+without populating OS hostname caches. It retries negative answers and cancels
+outstanding queries with the shared 90-second readiness deadline. If direct DNS
+transport is unavailable, it logs a bounded diagnostic and retains normal proxy
+HTTP verification. This preserves proxy-only networks without adding a DoH
+provider or hardcoded destination. Only the authenticated public proxy response
+activates an endpoint; local viewing and active health checks bypass the gate.
+
+Two real-network runs through the modified QuickTunnelSession, IPC worker,
+managed cached binary and authenticated local proxy reached ready in 12.1 and
+9.6 seconds. Both succeeded on their first public HTTP request. Earlier ordinary
+hostname runs took 67.3 and 71.4 seconds. These are local samples, not a
+cross-network latency guarantee. The temporary connectors and fixture servers
+were released. Existing browser iframe/WS acceptance limits remain.
+
+Verification: all 83 CLI preview tests pass, including deterministic negative-cache,
+registration, cancellation/deadline, proxy-only DNS failure, and process/IPC cleanup
+coverage. CLI type checking and repository documentation checks pass. The running
+desktop application was not replaced by these source-level validations.

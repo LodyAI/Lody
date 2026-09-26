@@ -28,6 +28,21 @@ production never falls back to TypeScript execution. POSIX process tests cover
 normal stop, CLI SIGKILL during creation/active use, native crash, missing binaries
 and cleanup failure. Native verification on other operating systems is separate.
 
+## First public request
+
+`preview-tunnel-dns.ts` queries the configured DNS servers with a private Node
+Resolver, bypassing OS hostname lookup caches. A newly allocated Quick Tunnel
+hostname can initially return NXDOMAIN. Sending it to an HTTP proxy or TUN at
+that point can cache failure long after the tunnel is usable. The startup
+verifier waits for both a DNS record and the native connector's first registration,
+reported through typed IPC, before making its first public request. All stages
+share the existing 90-second readiness deadline and cancellation signal.
+
+Negative DNS answers retry; unavailable DNS transport emits a bounded diagnostic
+and retains the existing proxy HTTP verification for proxy-only networks. No IP
+is pinned, no external resolver is selected, and DNS never grants access or proves
+readiness. Five-second active health checks and local viewing skip this startup gate.
+
 ## Distribution
 
 `cloudflared-manifest.json` pins upstream release artifacts. The downloader uses

@@ -73,6 +73,7 @@ describe.skipIf(process.platform === 'win32')('cloudflared lifecycle IPC', () =>
           console.error(JSON.stringify({ level: 'error', message: 'edge https://secret.test/?token=secret unavailable' }));
           console.error(JSON.stringify({ message: '| https://fixture-quick.trycloudflare.com |' }));
         }
+        if (command.trim() === 'register') console.error(JSON.stringify({ message: 'Registered tunnel connection', protocol: 'quic' }));
         if (command.trim() === 'crash') process.exit(7);
       });
       process.on('SIGTERM', () => process.exit(0));
@@ -143,6 +144,8 @@ describe.skipIf(process.platform === 'win32')('cloudflared lifecycle IPC', () =>
       expect(child.origin).toBe('https://fixture-quick.trycloudflare.com');
       expect(child.diagnostic()).toContain('connection=not registered');
       expect(child.diagnostic()).toContain('lastError=edge [url] unavailable');
+      socket.write('register\n');
+      await expect(child.registered).resolves.toBeUndefined();
       await child.stop();
       await child.stop();
       expect(await child.closed).toBeNull();
@@ -218,7 +221,9 @@ describe.skipIf(process.platform === 'win32')('cloudflared lifecycle IPC', () =>
       const { socket, info } = await local.connected;
       socket.write('origin\n');
       const child = await pending;
+      const registration = expect(child.registered).rejects.toThrow();
       socket.write('crash\n');
+      await registration;
       expect((await child.closed)?.message).toContain('cloudflared exited (7)');
       expect(exists(info.ownerPid)).toBe(false);
       await expect(access(info.config)).rejects.toThrow();
