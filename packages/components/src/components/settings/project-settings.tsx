@@ -1,7 +1,6 @@
 import {
   useCallback,
   useEffect,
-  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -34,7 +33,6 @@ import {
   Wrench,
 } from 'lucide-react';
 import { toast } from '@/lib/toast';
-import { observeResizeOnAnimationFrame } from '@/lib/resize-observer';
 import { Spinner } from '@lody/ui/spinner';
 import {
   getLocalProjectHistoryProviderKey,
@@ -91,6 +89,9 @@ import { toIntlLocale } from '@/lib/intl-locale';
 import { openExternalUrl } from '@/lib/native-browser';
 import { withClassName } from '@/lib/stylex';
 import { MobileProjectSettings } from '@/components/mobile/mobile-project-settings';
+import { settingsFlat, settingsMaterial as material } from './material.stylex';
+import { SettingsPageActions, useInSettingsPane } from './settings-page-header';
+import { SettingsLineTabs } from './settings-line-tabs';
 import { settingsSurface as surface } from './surface';
 import { AgentIcon, getAgentDisplayName } from '@/components/icons/agent-icon';
 import { useSettingsDataCache } from './settings-data-cache';
@@ -103,6 +104,7 @@ import { ProjectSkillsTab } from './project-skills-tab';
 import type { ProjectSkillsSource } from '@/hooks/use-project-skills';
 import { useAppCapability } from '@/lib/app-platform';
 import { getVisibleLocalProjectHistoryFailures } from '@/lib/local-project-history-catalog';
+import { settingsType as type } from './type.stylex';
 
 export type ProjectSettingsRow = {
   key: string;
@@ -229,12 +231,6 @@ export type ProjectSettingsViewProps = {
   localProjectRemovalStateByKey?: ReadonlyMap<string, LocalProjectRemovalState>;
 };
 
-/* Desktop settings is itself a dialog: a nested overlay restacks at its z-index
-   with a lighter veil. It is handed to the backdrop, which owns both of those
-   properties itself, so it stays the class string the other settings dialogs
-   (MCP, Agent Roles) pass there. */
-const NESTED_SETTINGS_DIALOG_OVERLAY = 'z-[var(--z-dialog)] bg-black/20';
-
 /** The global thin scrollbar; a `::-webkit-scrollbar` rule StyleX cannot state. */
 const SCROLLBAR_CLASS = 'scrollbar-pro';
 
@@ -260,11 +256,10 @@ const SCRIPT_TEXTAREA_STYLE: CSSProperties = {
 };
 
 const styles = stylex.create({
-  /* The page column, widened for the two panes and filling the panel height. */
+  /* The page column, filling the panel height. */
   page: {
     height: '100%',
     minHeight: 0,
-    maxWidth: { default: null, '@media (min-width: 768px)': '1152px' },
   },
   pageHeader: {
     display: 'flex',
@@ -272,21 +267,14 @@ const styles = stylex.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: space[3],
-    // On the same edge as the section names and the rows' text below it.
-    paddingInline: space[4],
+    // On the edge the section names start from.
+    paddingInline: material.headingInset,
   },
   pageHeading: { minWidth: 0 },
-  pageTitle: {
-    margin: 0,
-    fontSize: '1.125em',
-    fontWeight: 400,
-    lineHeight: 1.25,
-    color: colors.label,
-  },
   pageSubtitle: {
     margin: 0,
     marginTop: '2px',
-    fontSize: '0.8em',
+    fontSize: type.caption,
     lineHeight: 1.375,
     color: colors.secondaryLabel,
   },
@@ -297,7 +285,7 @@ const styles = stylex.create({
     gap: space[2],
     paddingInline: space[3],
     paddingBlock: '40px',
-    fontSize: '0.875em',
+    fontSize: type.caption,
     color: colors.secondaryLabel,
   },
   empty: {
@@ -311,7 +299,7 @@ const styles = stylex.create({
     textAlign: 'center',
   },
   emptyIcon: { width: '20px', height: '20px', color: colors.tertiaryLabel },
-  emptyText: { margin: 0, fontSize: '0.875em', color: colors.secondaryLabel },
+  emptyText: { margin: 0, fontSize: type.caption, color: colors.secondaryLabel },
 
   /* The two-pane catalog: sources on the left, the selected source's folders
      on the right, both one sidebar list language; one structural line between. */
@@ -341,7 +329,7 @@ const styles = stylex.create({
     margin: 0,
     paddingInlineStart: space[4],
     paddingInlineEnd: space[2],
-    paddingBlock: '10px',
+    paddingBlock: '8px',
     borderWidth: 0,
     backgroundColor: 'transparent',
     color: 'inherit',
@@ -356,7 +344,7 @@ const styles = stylex.create({
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
-    lineHeight: 1.25,
+    lineHeight: type.leading,
     color: colors.label,
   },
   lineCaption: {
@@ -364,13 +352,13 @@ const styles = stylex.create({
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
     fontFamily: MONO,
-    fontSize: '0.75em',
-    lineHeight: 1.3,
+    fontSize: type.caption,
+    lineHeight: type.leading,
     color: colors.secondaryLabel,
   },
   lineMeta: {
     flexShrink: 0,
-    fontSize: '0.8em',
+    fontSize: type.caption,
     color: colors.tertiaryLabel,
     fontVariantNumeric: 'tabular-nums',
     whiteSpace: 'nowrap',
@@ -409,9 +397,9 @@ const styles = stylex.create({
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
     margin: 0,
-    fontSize: '0.875em',
+    fontSize: type.caption,
     fontWeight: 400,
-    lineHeight: 1.25,
+    lineHeight: type.leading,
     color: colors.label,
   },
   folderList: {
@@ -430,7 +418,7 @@ const styles = stylex.create({
     paddingInline: space[2],
     paddingTop: space[1],
     paddingBottom: '2px',
-    fontSize: '0.75em',
+    fontSize: type.caption,
     fontWeight: 400,
     color: colors.secondaryLabel,
   },
@@ -442,7 +430,7 @@ const styles = stylex.create({
     paddingInline: space[2],
     paddingBlock: space[4],
   },
-  note: { margin: 0, fontSize: '0.8em', lineHeight: 1.375, color: colors.secondaryLabel },
+  note: { margin: 0, fontSize: type.caption, lineHeight: 1.375, color: colors.secondaryLabel },
 
   /* What a list row holds beyond `surface.listRow*`: a caption under the name. */
   rowText: {
@@ -457,8 +445,8 @@ const styles = stylex.create({
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
-    fontSize: '0.85em',
-    lineHeight: 1.25,
+    fontSize: type.caption,
+    lineHeight: type.leading,
     color: colors.secondaryLabel,
   },
   rowCaptionMono: { fontFamily: MONO },
@@ -529,7 +517,7 @@ const styles = stylex.create({
 
   /* Menu rows that say what they add under their name. */
   menuText: { display: 'flex', flexDirection: 'column', minWidth: 0, paddingBlock: space[1] },
-  menuHint: { fontSize: '0.85em', color: colors.secondaryLabel },
+  menuHint: { fontSize: type.caption, color: colors.secondaryLabel },
   buttonIcon: { width: '14px', height: '14px', flexShrink: 0 },
 
   /* The project editor: a scroll body of stacked settings sections. */
@@ -554,7 +542,7 @@ const styles = stylex.create({
     margin: 0,
     fontSize: '1em',
     fontWeight: 400,
-    lineHeight: 1.25,
+    lineHeight: type.leading,
     color: colors.label,
   },
   pathRow: {
@@ -571,13 +559,13 @@ const styles = stylex.create({
     whiteSpace: 'nowrap',
     margin: 0,
     fontFamily: MONO,
-    fontSize: '0.75em',
+    fontSize: type.caption,
     color: colors.secondaryLabel,
   },
   detailNote: {
     margin: 0,
     marginTop: space[1],
-    fontSize: '0.75em',
+    fontSize: type.caption,
     lineHeight: 1.375,
     color: colors.secondaryLabel,
   },
@@ -592,7 +580,7 @@ const styles = stylex.create({
     display: 'flex',
     alignItems: 'center',
     gap: space[1.5],
-    fontSize: '0.875em',
+    fontSize: type.caption,
     fontWeight: 400,
     color: colors.label,
   },
@@ -600,7 +588,7 @@ const styles = stylex.create({
   editorDescription: {
     margin: 0,
     marginTop: space[1],
-    fontSize: '0.8em',
+    fontSize: type.caption,
     lineHeight: 1.375,
     color: colors.secondaryLabel,
   },
@@ -629,7 +617,7 @@ const styles = stylex.create({
     alignItems: 'center',
     gap: space[2],
     paddingBlock: space[6],
-    fontSize: '0.8em',
+    fontSize: type.caption,
     color: colors.secondaryLabel,
   },
   stack: { display: 'flex', flexDirection: 'column', gap: space[2] },
@@ -639,7 +627,7 @@ const styles = stylex.create({
     display: 'flex',
     alignItems: 'flex-start',
     gap: space[1.5],
-    fontSize: '0.75em',
+    fontSize: type.caption,
     lineHeight: 1.375,
     color: colors.secondaryLabel,
   },
@@ -649,14 +637,14 @@ const styles = stylex.create({
     alignItems: 'center',
     justifyContent: 'flex-end',
     gap: space[1],
-    fontSize: '0.75em',
+    fontSize: type.caption,
     color: colors.secondaryLabel,
   },
   error: {
     display: 'flex',
     alignItems: 'flex-start',
     gap: space[2],
-    fontSize: '0.8em',
+    fontSize: type.caption,
     lineHeight: 1.375,
     color: colors.destructive,
   },
@@ -677,7 +665,7 @@ const styles = stylex.create({
     backgroundColor: { default: 'transparent', ':hover': colors.hoverFill },
     color: { default: colors.secondaryLabel, ':hover': colors.label },
     fontFamily: 'inherit',
-    fontSize: '0.875em',
+    fontSize: type.caption,
     fontWeight: 400,
     textAlign: 'start',
     cursor: 'pointer',
@@ -702,7 +690,7 @@ const styles = stylex.create({
     flexDirection: 'column',
     flexGrow: 1,
     minHeight: 0,
-    fontSize: '0.8em',
+    fontSize: type.caption,
   },
   panelBar: {
     display: 'flex',
@@ -804,7 +792,7 @@ const styles = stylex.create({
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
-    fontSize: '0.85em',
+    fontSize: type.caption,
     color: colors.secondaryLabel,
   },
   conflict: { display: 'flex', flexShrink: 0, alignItems: 'center', gap: space[1] },
@@ -1117,7 +1105,6 @@ export function ProjectSettingsComponent({
         open={addLocalProjectDialogOpen}
         onOpenChange={setAddLocalProjectDialogOpen}
         initialMachineId={addLocalProjectMachineId}
-        backdropClassName={NESTED_SETTINGS_DIALOG_OVERLAY}
       />
       <RemoveLocalProjectDialog
         open={pendingRemoval != null}
@@ -1133,7 +1120,6 @@ export function ProjectSettingsComponent({
           machineSupportsLocalProjectRemovalProtocol(machineMetaMap.get(pendingRemoval.machineId))
         }
         isRemoving={isRemovingLocalProject}
-        backdropClassName={NESTED_SETTINGS_DIALOG_OVERLAY}
         onOpenChange={(open) => {
           if (!open && !isRemovingLocalProject) setPendingRemoval(null);
         }}
@@ -1231,6 +1217,7 @@ function ProjectSettingsDesktop({
   const editingProject =
     allSelections.find((selection) => selection.key === editingProjectKey) ?? null;
 
+  const inSettingsPane = useInSettingsPane();
   const addProjectActions =
     onAddLocalProject || onAddGitHubProject ? (
       <ProjectAddMenu
@@ -1275,18 +1262,25 @@ function ProjectSettingsDesktop({
   return (
     <>
       <div {...stylex.props(surface.container, styles.page)}>
-        <div {...stylex.props(styles.pageHeader)}>
-          <div {...stylex.props(styles.pageHeading)}>
-            <h2 {...stylex.props(styles.pageTitle)}>{t('settings.tabs.projects', 'Projects')}</h2>
-            <p {...stylex.props(styles.pageSubtitle)}>
-              {t(
-                'workspace.projects.settingsSubtitle',
-                'Local folders and GitHub repositories available in this workspace.'
-              )}
-            </p>
+        {inSettingsPane ? (
+          // The pane names the page; the sources below say what it holds.
+          <SettingsPageActions>{addProjectActions}</SettingsPageActions>
+        ) : (
+          <div {...stylex.props(styles.pageHeader)}>
+            <div {...stylex.props(styles.pageHeading)}>
+              <h2 {...stylex.props(surface.pageTitle)}>
+                {t('settings.tabs.projects', 'Projects')}
+              </h2>
+              <p {...stylex.props(styles.pageSubtitle)}>
+                {t(
+                  'workspace.projects.settingsSubtitle',
+                  'Local folders and GitHub repositories available in this workspace.'
+                )}
+              </p>
+            </div>
+            {addProjectActions}
           </div>
-          {addProjectActions}
-        </div>
+        )}
 
         {isAnyLoading && totalCount === 0 ? (
           <div {...stylex.props(styles.loading)}>
@@ -1330,7 +1324,9 @@ function ProjectSettingsDesktop({
                   }}
                 >
                   <CompactSection
-                    title={`${machine.machineName} · ${status}`}
+                    title={machine.machineName}
+                    description={status}
+                    boxed
                     headerRight={
                       canAdd ? (
                         <Button
@@ -1379,7 +1375,9 @@ function ProjectSettingsDesktop({
             {githubSections.map((section, index) => (
               <CompactSection
                 key={section.owner}
-                title={`${section.owner} · ${t('chat.contextSwitch.github', 'GitHub')}`}
+                title={section.owner}
+                description={t('chat.contextSwitch.github', 'GitHub')}
+                boxed
                 headerRight={
                   index === 0 && onOpenGitHubSettings ? (
                     <Button
@@ -1398,7 +1396,6 @@ function ProjectSettingsDesktop({
                   <ProjectLine
                     key={row.key}
                     title={row.name}
-                    caption={row.repoFullName}
                     privateRepo={row.private}
                     onOpen={() => setEditingProjectKey(row.key)}
                   />
@@ -1414,10 +1411,7 @@ function ProjectSettingsDesktop({
           if (!open) setEditingProjectKey(null);
         }}
       >
-        <Dialog.Content
-          backdropClassName={NESTED_SETTINGS_DIALOG_OVERLAY}
-          style={EDITOR_PANEL_STYLE}
-        >
+        <Dialog.Content style={EDITOR_PANEL_STYLE}>
           <Dialog.Title className={stylex.props(styles.srOnly).className}>
             {editingProject?.kind === 'local'
               ? editingProject.row.project.name
@@ -1461,7 +1455,8 @@ function ProjectLine({
   onOpen,
 }: {
   readonly title: string;
-  readonly caption: string;
+  /** Where it lives, when its section does not already say. */
+  readonly caption?: string;
   readonly shared?: boolean;
   readonly privateRepo?: boolean;
   readonly conversationCount?: number;
@@ -1492,7 +1487,7 @@ function ProjectLine({
       <button type="button" onClick={onOpen} {...stylex.props(styles.lineButton)}>
         <span {...stylex.props(styles.lineText)}>
           <span {...stylex.props(styles.lineName)}>{title}</span>
-          <span {...stylex.props(styles.lineCaption)}>{caption}</span>
+          {caption ? <span {...stylex.props(styles.lineCaption)}>{caption}</span> : null}
         </span>
         {meta.length > 0 ? (
           <span {...stylex.props(styles.lineMeta)}>{meta.join(' · ')}</span>
@@ -1694,30 +1689,19 @@ function ProjectWindow({
       </p>
     ) : null;
 
+  // Only Conversations needs a lead: the other pages' tab names and their
+  // editors' own descriptions already say what each holds.
   const pageDescription =
-    page === 'general'
+    page === 'conversations'
       ? t(
-          'workspace.projects.window.generalDescription',
-          'Where this project lives and who can use it.'
+          'workspace.projects.window.conversationsDescription',
+          'Bring conversations you had with an agent outside Lody into this workspace.'
         )
-      : page === 'worktree'
-        ? t(
-            'workspace.projects.window.worktreeDescription',
-            'Scripts that run when a conversation gets its own worktree, and when it is archived.'
-          )
-        : page === 'skills'
-          ? t(
-              'workspace.projects.window.skillsDescription',
-              'Skills the agent finds in this project.'
-            )
-          : t(
-              'workspace.projects.window.conversationsDescription',
-              'Bring conversations you had with an agent outside Lody into this workspace.'
-            );
+      : null;
 
   return (
     <Tooltip.Provider delay={200}>
-      <div {...stylex.props(win.window)}>
+      <div {...stylex.props(settingsFlat, win.window, surface.canvas)}>
         {/* Four views of one project are a strip, not a sidebar: the name and
             where it lives above, the views under it, the page at full width. */}
         <header {...stylex.props(win.head)}>
@@ -1758,11 +1742,13 @@ function ProjectWindow({
               </>
             )}
           </p>
-          <PageTabs pages={pages} current={page} onChange={setPage} />
+          <div {...stylex.props(win.pageTabsSlot)}>
+            <SettingsLineTabs tabs={pages} current={page} onChange={setPage} />
+          </div>
         </header>
 
         <section {...stylex.props(win.main)}>
-          <p {...stylex.props(win.pageDescription)}>{pageDescription}</p>
+          {pageDescription ? <p {...stylex.props(win.pageDescription)}>{pageDescription}</p> : null}
 
           {page === 'conversations' && localRow ? (
             <ConversationsPage
@@ -1801,39 +1787,30 @@ function ProjectWindow({
                         </Button>
                       ) : null}
                     </CompactRow>
-                    <CompactRow
-                      label={t('workspace.projects.window.machine', 'Machine')}
-                      helper={
-                        removalState === 'waiting_for_device'
-                          ? t(
-                              'sidebar.localProjects.remove.waitingForDevice',
-                              'Waiting for device…'
-                            )
-                          : removalState === 'removing'
-                            ? t('sidebar.localProjects.remove.removing', 'Removing…')
-                            : undefined
-                      }
-                    >
-                      <span {...stylex.props(win.value)}>
-                        {localRow.machineName} ·{' '}
-                        {machineReachable
-                          ? t('workspace.machines.online', 'Online')
-                          : t('workspace.machines.offline', 'Offline')}
-                      </span>
-                    </CompactRow>
                   </CompactSection>
                   <ProjectShareControl
                     row={localRow}
                     onSharedWithTeamChange={onSharedWithTeamChange}
                   />
                   {canRemoveLocalProject?.(localRow) && onRequestRemoveLocalProject ? (
+                    // The header already names the machine and whether it is
+                    // online; a pending removal is said where the removal is.
                     <CompactSection tone="danger">
                       <CompactRow
                         label={t('workspace.projects.delete', 'Delete project')}
-                        helper={t(
-                          'sidebar.localProjects.remove.originalDirectorySafe',
-                          'Lody never deletes the original project folder or its files.'
-                        )}
+                        helper={
+                          removalState === 'waiting_for_device'
+                            ? t(
+                                'sidebar.localProjects.remove.waitingForDevice',
+                                'Waiting for device…'
+                              )
+                            : removalState === 'removing'
+                              ? t('sidebar.localProjects.remove.removing', 'Removing…')
+                              : t(
+                                  'sidebar.localProjects.remove.originalDirectorySafe',
+                                  'Lody never deletes the original project folder or its files.'
+                                )
+                        }
                       >
                         <Button
                           type="button"
@@ -1869,13 +1846,6 @@ function ProjectWindow({
                         )}
                       </Button>
                     ) : null}
-                  </CompactRow>
-                  <CompactRow label={t('workspace.projects.window.visibility', 'Visibility')}>
-                    <span {...stylex.props(win.value)}>
-                      {githubRow.private
-                        ? t('workspace.projects.privateRepo', 'Private')
-                        : t('workspace.projects.window.public', 'Public')}
-                    </span>
                   </CompactRow>
                 </CompactSection>
               ) : null}
@@ -1984,80 +1954,6 @@ type ProjectWindowPage = 'general' | 'worktree' | 'skills' | 'conversations';
  * tray strips the pages use for their own choices (agent, state) — a strip over
  * a strip reads as one level.
  */
-function PageTabs({
-  pages,
-  current,
-  onChange,
-}: {
-  readonly pages: readonly {
-    id: ProjectWindowPage;
-    label: string;
-    count?: number;
-    warn?: boolean;
-  }[];
-  readonly current: ProjectWindowPage;
-  readonly onChange: (page: ProjectWindowPage) => void;
-}) {
-  const listRef = useRef<HTMLDivElement>(null);
-  const [line, setLine] = useState<{ left: number; width: number } | null>(null);
-
-  useLayoutEffect(() => {
-    const list = listRef.current;
-    if (!list) return undefined;
-    const measure = () => {
-      const tab = list.querySelector<HTMLElement>(`[data-page="${current}"]`);
-      if (tab) setLine({ left: tab.offsetLeft, width: tab.offsetWidth });
-    };
-    measure();
-    return observeResizeOnAnimationFrame(list, measure);
-  }, [current, pages]);
-
-  return (
-    <div ref={listRef} role="tablist" {...stylex.props(win.pageTabs)}>
-      {pages.map((entry) => {
-        const selected = entry.id === current;
-        return (
-          <button
-            key={entry.id}
-            type="button"
-            role="tab"
-            aria-selected={selected}
-            data-page={entry.id}
-            onClick={() => onChange(entry.id)}
-            onKeyDown={(event) => {
-              if (event.key !== 'ArrowRight' && event.key !== 'ArrowLeft') return;
-              event.preventDefault();
-              const index = pages.findIndex((page) => page.id === entry.id);
-              const next =
-                pages[
-                  (index + (event.key === 'ArrowRight' ? 1 : -1) + pages.length) % pages.length
-                ]!;
-              onChange(next.id);
-              listRef.current?.querySelector<HTMLElement>(`[data-page="${next.id}"]`)?.focus();
-            }}
-            tabIndex={selected ? 0 : -1}
-            {...stylex.props(win.pageTab, selected && win.pageTabCurrent)}
-          >
-            {entry.label}
-            {entry.count ? (
-              <span {...stylex.props(win.tabCount, entry.warn && win.tabCountWarn)}>
-                {entry.count}
-              </span>
-            ) : null}
-          </button>
-        );
-      })}
-      {line ? (
-        <span
-          aria-hidden="true"
-          {...stylex.props(win.pageTabLine)}
-          style={{ transform: `translateX(${line.left}px)`, width: `${line.width}px` }}
-        />
-      ) : null}
-    </div>
-  );
-}
-
 type HistoryStatus = 'available' | 'imported' | 'sync_conflict';
 type HistoryFilter = 'all' | HistoryStatus;
 
@@ -2471,9 +2367,9 @@ const win = stylex.create({
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
-    fontSize: '17px',
-    fontWeight: 600,
-    lineHeight: 1.3,
+    fontSize: type.title,
+    fontWeight: type.titleWeight,
+    lineHeight: type.leading,
     letterSpacing: '-0.01em',
     color: colors.label,
   },
@@ -2499,54 +2395,7 @@ const win = stylex.create({
   headPathDim: { color: colors.tertiaryLabel },
   headSep: { flexShrink: 0, color: colors.tertiaryLabel },
   headMachine: { flexShrink: 0, whiteSpace: 'nowrap' },
-  pageTabs: {
-    position: 'relative',
-    display: 'flex',
-    alignItems: 'stretch',
-    gap: '20px',
-    marginTop: space[3],
-  },
-  pageTab: {
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: '6px',
-    height: '36px',
-    margin: 0,
-    padding: 0,
-    borderWidth: 0,
-    backgroundColor: 'transparent',
-    fontFamily: 'inherit',
-    fontSize: '13.5px',
-    fontWeight: 500,
-    color: { default: colors.secondaryLabel, ':hover': colors.label },
-    cursor: 'pointer',
-    outlineStyle: 'none',
-    boxShadow: { default: 'none', ':focus-visible': `0 0 0 2px ${colors.accent}` },
-    borderRadius: '4px',
-    transitionProperty: 'color',
-    transitionDuration: '150ms',
-  },
-  pageTabCurrent: { color: { default: colors.label, ':hover': colors.label } },
-  /** The current view's line: it travels to the next rather than blinking. */
-  pageTabLine: {
-    position: 'absolute',
-    left: 0,
-    bottom: 0,
-    height: '2px',
-    borderRadius: '9999px',
-    backgroundColor: colors.label,
-    transitionProperty: 'transform, width',
-    transitionDuration: '240ms',
-    transitionTimingFunction: 'cubic-bezier(0.2, 0.8, 0.2, 1)',
-  },
-  tabCount: {
-    marginInlineStart: '2px',
-    fontSize: '11px',
-    fontWeight: 500,
-    color: colors.tertiaryLabel,
-    fontVariantNumeric: 'tabular-nums',
-  },
-  tabCountWarn: { color: `color-mix(in oklab, ${colors.warning} 80%, ${colors.label})` },
+  pageTabsSlot: { marginTop: space[3] },
   statusDot: {
     flexShrink: 0,
     width: '6px',
@@ -2560,12 +2409,17 @@ const win = stylex.create({
     flexShrink: 0,
     margin: 0,
     paddingTop: space[4],
-    paddingBottom: space[3],
+    paddingBottom: space[2],
     paddingInline: space[6],
     fontSize: '12px',
     lineHeight: 1.45,
     color: colors.secondaryLabel,
   },
+  /**
+   * The page scrolls, and a scroller clips what paints outside its padding box.
+   * A card's edge is a 0.5px ring in its shadow, so a card flush with the top
+   * of the scroller loses its top edge: the top padding is the ring's room.
+   */
   pageBody: {
     display: 'flex',
     flexDirection: 'column',
@@ -2574,6 +2428,7 @@ const win = stylex.create({
     minHeight: 0,
     overflowY: 'auto',
     paddingInline: space[6],
+    paddingTop: space[1],
     paddingBottom: space[6],
   },
   note: { margin: 0, fontSize: '12px', lineHeight: 1.45, color: colors.secondaryLabel },
@@ -2622,7 +2477,7 @@ const win = stylex.create({
     display: 'inline-flex',
     alignItems: 'center',
     gap: space[2],
-    fontSize: '0.85em',
+    fontSize: type.caption,
     color: colors.secondaryLabel,
     cursor: 'pointer',
   },
@@ -2632,7 +2487,7 @@ const win = stylex.create({
     alignItems: 'center',
     gap: space[3],
     paddingInline: space[4],
-    paddingBlock: '10px',
+    paddingBlock: '8px',
     cursor: 'default',
     outlineStyle: 'none',
   },
@@ -2641,10 +2496,10 @@ const win = stylex.create({
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
-    lineHeight: 1.3,
+    lineHeight: type.leading,
     color: colors.label,
   },
-  sessionTime: { fontSize: '0.8em', color: colors.tertiaryLabel },
+  sessionTime: { fontSize: type.caption, color: colors.tertiaryLabel },
   conflict: { display: 'inline-flex', alignItems: 'center', gap: space[1], flexShrink: 0 },
   empty: {
     display: 'flex',

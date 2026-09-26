@@ -16,10 +16,11 @@ import {
   X,
   type LucideIcon,
 } from 'lucide-react';
-import { WorkingStatusMark } from '@/ui/working-status-mark';
+import { useWorkingHandOver, WorkingStatusMark } from '@/ui/working-status-mark';
 import type { PrStatus, SessionPullRequestCiState } from '@lody/shared';
 import { cn } from '@/lib/utils';
 import { Tooltip } from '@lody/ui/tooltip';
+import { Badge } from '@lody/ui/badge';
 import { ContextMenu } from '@lody/ui/context-menu';
 import { Skeleton } from '@lody/ui/skeleton';
 import { PR_STATUS_META } from '@/components/sessions/pull-request-badge';
@@ -134,7 +135,7 @@ function MaskedPrCiIcon({
  * its ├/└ connectors and the nesting silently disappeared exactly on the rows a
  * user watches most.
  */
-function SessionRowStatusIndicator({
+export function SessionRowStatusIndicator({
   isWaitingPermission,
   isWorking,
   hasUnreadMessages,
@@ -251,12 +252,9 @@ export function SessionPrIcon({
 export function SessionMergeablePill() {
   const { t } = useTranslation();
   return (
-    <span
-      data-session-mergeable-pill=""
-      className="inline-flex h-5 shrink-0 items-center rounded-full border border-status-success/45 bg-status-success/[0.06] px-1.5 text-[10px] font-medium leading-none tracking-[0.01em] text-status-success"
-    >
+    <Badge tone="success" data-session-mergeable-pill="">
       {t('sessions.pr.mergeable', 'Mergeable')}
-    </span>
+    </Badge>
   );
 }
 
@@ -347,6 +345,17 @@ export function SessionRowOpenedByMenuItems({
     </>
   );
 }
+
+/**
+ * The container of a sidebar session-row list. A workspace sidebar can mount
+ * hundreds of rows (244 in one "Chats" group, 94% of the page's DOM) while a
+ * dozen are visible. `content-visibility: auto` lets the browser skip style,
+ * layout and paint for rows scrolled out of the sidebar: a full-app restyle
+ * measured 25ms before and 8.6ms after. Rows must keep drawing inside their own
+ * box (focus rings are `ring-inset`), because the property also applies paint
+ * containment. The rule lives in `tailwind/index.css` (`sidebar-row-list`).
+ */
+export const SIDEBAR_ROW_LIST_CLASS = 'flex flex-col gap-px sidebar-row-list';
 
 /**
  * Marks one flat-list row with opened-by tree depth. `gutter={false}` leaves
@@ -445,14 +454,16 @@ export function SidebarRowEndSlot({
   archive?: ReactNode;
   fadeClassName?: string;
 }) {
+  // The end slot outlives the status mark, so the hand-over hold lives here.
+  const drawWorking = useWorkingHandOver(isWorking === true, hasUnreadMessages === true);
   const restContent = hasSessionRowStatus({
     isWaitingPermission,
-    isWorking,
+    isWorking: drawWorking,
     hasUnreadMessages,
   }) ? (
     <SessionRowStatusIndicator
       isWaitingPermission={isWaitingPermission}
-      isWorking={isWorking}
+      isWorking={drawWorking}
       hasUnreadMessages={hasUnreadMessages}
     />
   ) : (

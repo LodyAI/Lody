@@ -1,5 +1,5 @@
 import * as stylex from '@stylexjs/stylex';
-import { useCallback, useState, type ReactNode, type Ref } from 'react';
+import { createContext, useCallback, useContext, useState, type ReactNode, type Ref } from 'react';
 import { appendClassName } from '../internal/class-name';
 import { modal } from './surface';
 
@@ -55,6 +55,28 @@ export function DialogFooter({ children, className }: DialogSectionProps) {
  * the subtree once the panel exists, so the provider hands down an element
  * rather than a box that may not have been filled yet.
  */
+/**
+ * How many modals are open above a point in the tree.
+ *
+ * A portal mounts into `document.body`, so DOM position cannot say whether a
+ * dialog opened inside another dialog — React context can, since it follows
+ * the component tree across the portal. `Content` hands its children the next
+ * depth here, and the family's backdrops read it to draw a lighter veil over
+ * the panel they were opened from.
+ */
+const ModalDepthContext = createContext(0);
+
+/** The number of ancestor modals this subtree sits inside. */
+export function useModalDepth(): number {
+  return useContext(ModalDepthContext);
+}
+
+/** Everything inside this modal counts as one level deeper. */
+export function ModalDepthProvider({ children }: { children: ReactNode }) {
+  const depth = useContext(ModalDepthContext);
+  return <ModalDepthContext.Provider value={depth + 1}>{children}</ModalDepthContext.Provider>;
+}
+
 export function usePanelContainer<T extends HTMLElement>(forwarded: Ref<T>) {
   const [container, setContainer] = useState<T | null>(null);
   const ref = useCallback(

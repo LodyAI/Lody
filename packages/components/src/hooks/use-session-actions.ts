@@ -311,7 +311,6 @@ export type SessionActions = {
   deleteSessions: (sessionIds: SessionId[]) => Promise<void>;
   archiveSession: (sessionId: SessionId) => Promise<void>;
   setSessionTabClosed: (sessionId: SessionId, closed: boolean) => Promise<void>;
-  reopenSessionTab: (sessionId: SessionId) => Promise<void>;
   restoreSession: (sessionId: SessionId) => Promise<void>;
   deleteArchivedSession: (sessionId: SessionId) => Promise<void>;
   setSessionPinned: (sessionId: SessionId, isPinned: boolean) => Promise<void>;
@@ -1204,10 +1203,10 @@ export function useSessionActions(): SessionActions {
       if (store.get(activeWorkspaceRuntimeAtom) !== runtime) {
         throw new Error('Workspace changed before restoring');
       }
+      // Restore is a lifecycle change only; every tab keeps its close flag.
       for (const session of restoreTargets) {
         await runtime.writer.upsertDocMeta(getSessionRoomId(session.id), {
           isArchived: false,
-          ...(session.id === sessionId ? { isTabClosed: false } : {}),
         } as Partial<SessionMeta>);
       }
       log('[session-restore] restored', {
@@ -1229,23 +1228,6 @@ export function useSessionActions(): SessionActions {
       await runtime.writer.upsertDocMeta(roomId, { isTabClosed: closed });
     },
     [runtime, store]
-  );
-
-  const reopenSessionTab = useCallback(
-    async (sessionId: SessionId) => {
-      if (!runtime) throw new Error('Runtime not ready');
-      const entry = await runtime.repo.getDocMeta(getSessionRoomId(sessionId));
-      if (!entry?.meta || isLoroRepoDocDeleted(entry)) {
-        throw new Error('Session metadata unavailable');
-      }
-      if ((entry.meta as SessionMeta).isArchived) {
-        // Legacy tab closes archived the session. Retain restoration checks and
-        // containment semantics rather than clearing the lifecycle bit directly.
-        await restoreSession(sessionId);
-      }
-      await setSessionTabClosed(sessionId, false);
-    },
-    [runtime, restoreSession, setSessionTabClosed]
   );
 
   const deleteArchivedSessionMeta = useCallback(
@@ -1305,7 +1287,6 @@ export function useSessionActions(): SessionActions {
     updateSessionStatus,
     updateSessionTitle,
     setSessionTabClosed,
-    reopenSessionTab,
     transferSessionOwner,
     markSessionRead,
     markSessionUnread,

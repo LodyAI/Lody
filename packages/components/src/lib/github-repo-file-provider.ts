@@ -3,13 +3,13 @@ import {
   githubFetchDefaultBranch,
   githubFetchFileAtCommit,
   githubFetchFileBytesAtCommit,
-  githubFetchFilePaths,
   githubFetchTreeLevel,
   isBinaryImagePath,
   SESSION_IMAGE_MAX_SIZE_BYTES,
   type GitHubTreeLevelEntry,
 } from '@lody/shared';
 import { withGitHubTokenRetry } from './github-token';
+import { loadRepoFilePaths } from './repo-file-paths-cache';
 import {
   LazyDirectoryFileProvider,
   joinProjectPath,
@@ -40,10 +40,12 @@ export class GitHubRepoFileProvider extends LazyDirectoryFileProvider {
 
   async searchFiles(query: string): Promise<readonly FileWorkspaceProviderEntry[]> {
     const branch = await this.getBranch();
-    const result = await withGitHubTokenRetry(
+    // Cached per repository and branch: search runs per keystroke, and the
+    // recursive tree is megabytes of JSON parsed on the main thread.
+    const result = await loadRepoFilePaths(
       this.options.workspaceId,
       this.options.repoFullName,
-      (token) => githubFetchFilePaths(token, this.options.repoFullName, branch)
+      branch
     );
     const normalized = query.trim().toLowerCase();
     const paths = normalized

@@ -54,6 +54,8 @@ class MockResizeObserver {
 type ScrollFixture = {
   scrollElement: HTMLDivElement;
   contentElement: HTMLDivElement;
+  /** Reply room element; its inline height adds to the scroll height. */
+  spacerElement: HTMLDivElement;
   lastRow: HTMLDivElement;
   setScrollTop: (value: number) => void;
   getScrollTop: () => number;
@@ -66,6 +68,8 @@ type ScrollFixture = {
 type MockVirtualizerHandle = VirtualizerHandle & {
   scrollToIndex: ReturnType<typeof vi.fn>;
   scrollTo: ReturnType<typeof vi.fn>;
+  getItemOffset: ReturnType<typeof vi.fn>;
+  getItemSize: ReturnType<typeof vi.fn>;
 };
 
 /** Stand-in for Virtua's opaque row-measurement snapshot; identity is the assertion. */
@@ -79,7 +83,7 @@ type HarnessProps = {
   hasVirtualizedRows?: boolean;
   initialContentReady?: boolean;
   onAtBottomChange?: (atBottom: boolean) => void;
-  skipNextViewportResizeAutoScrollRef?: React.MutableRefObject<boolean>;
+  spacerElement?: HTMLDivElement | null;
   suppressAutoScrollRef?: React.RefObject<boolean>;
 };
 
@@ -93,7 +97,8 @@ async function advanceAnimationFrames(): Promise<void> {
     rafQueue = [];
     vi.advanceTimersByTime(17);
     for (const callback of callbacks) {
-      callback(performance.now());
+      // The fake clock: 17ms per frame, like the timers advanced above.
+      callback(Date.now());
     }
     await Promise.resolve();
   }
@@ -107,6 +112,8 @@ function createScrollFixture(): ScrollFixture {
   scrollElement.style.paddingBottom = '24px';
   scrollElement.style.overflow = 'auto';
   scrollElement.appendChild(contentElement);
+  const spacerElement = document.createElement('div');
+  scrollElement.appendChild(spacerElement);
   rootElement.appendChild(scrollElement);
   document.body.appendChild(rootElement);
 
@@ -125,7 +132,7 @@ function createScrollFixture(): ScrollFixture {
   });
   Object.defineProperty(scrollElement, 'scrollHeight', {
     configurable: true,
-    get: () => scrollHeight,
+    get: () => scrollHeight + (parseFloat(spacerElement.style.height) || 0),
   });
   Object.defineProperty(scrollElement, 'clientHeight', {
     configurable: true,
@@ -144,17 +151,7 @@ function createScrollFixture(): ScrollFixture {
       toJSON: () => ({}),
     }) as DOMRect;
   contentElement.getBoundingClientRect = () =>
-    ({
-      width: clientWidth,
-      height: contentHeight,
-      top: 0,
-      left: 0,
-      right: clientWidth,
-      bottom: contentHeight,
-      x: 0,
-      y: 0,
-      toJSON: () => ({}),
-    }) as DOMRect;
+    new DOMRect(0, -scrollTop, clientWidth, contentHeight);
 
   const lastRow = document.createElement('div');
   lastRow.dataset.virtualIndex = '3';
@@ -165,6 +162,7 @@ function createScrollFixture(): ScrollFixture {
   return {
     scrollElement,
     contentElement,
+    spacerElement,
     lastRow,
     setScrollTop: (value) => {
       scrollTop = value;
@@ -194,6 +192,8 @@ function createMockVirtualizerHandle(
     viewportSize: 400,
     findItemIndex: () => 3,
     cache,
+    getItemOffset: vi.fn(() => 0),
+    getItemSize: vi.fn(() => 100),
     scrollToIndex: vi.fn(),
     scrollTo: vi.fn((offset: number) => {
       scrollElement.scrollTop = offset;
@@ -242,7 +242,7 @@ function HookHarness({
   hasVirtualizedRows,
   initialContentReady,
   onAtBottomChange,
-  skipNextViewportResizeAutoScrollRef,
+  spacerElement = null,
   suppressAutoScrollRef,
 }: HarnessProps) {
   const vlistRef = useRef<VirtualizerHandle | null>(vlist);
@@ -255,15 +255,19 @@ function HookHarness({
     hasVirtualizedRows,
     initialContentReady,
     onAtBottomChange,
-    skipNextViewportResizeAutoScrollRef,
     suppressAutoScrollRef,
   });
-  const { scrollRef } = result;
+  const { scrollRef, spacerRef } = result;
 
   useLayoutEffect(() => {
     scrollRef(scrollElement);
     return () => scrollRef(null);
   }, [scrollElement, scrollRef]);
+
+  useLayoutEffect(() => {
+    spacerRef(spacerElement);
+    return () => spacerRef(null);
+  }, [spacerElement, spacerRef]);
 
   useEffect(() => {
     latestResult = result;
@@ -792,34 +796,292 @@ describe('useStickyScroll Virtua adapter', () => {
     expect(latestResult?.isSticky).toBe(true);
   });
 
-  it('skips one viewport resize caused by the composer changing height', async () => {
-    const sessionId = 'session-composer-viewport-resize' as SessionId;
+  it('keeps a followed conversation on the bottom while the composer grows', async () => {
+    const sessionId = 'session-composer-grows' as SessionId;
     const fixture = createScrollFixture();
     const vlist = createMockVirtualizerHandle(fixture.scrollElement);
-    const skipNextViewportResizeAutoScrollRef = { current: true };
 
-    await renderHarness({
-      sessionId,
-      vlist,
-      scrollElement: fixture.scrollElement,
-      itemCount: 4,
-      skipNextViewportResizeAutoScrollRef,
-    });
+    await renderHarness({ sessionId, vlist, scrollElement: fixture.scrollElement, itemCount: 4 });
     await act(async () => {
       await advanceAnimationFrames();
     });
+    expect(fixture.getScrollTop()).toBe(240);
 
-    vlist.scrollToIndex.mockClear();
-    fixture.setClientHeight(320);
+    // Typing a second line takes 24px from the conversation viewport.
+    fixture.setClientHeight(376);
     await act(async () => {
       emitResize(fixture.scrollElement);
       await advanceAnimationFrames();
     });
 
-    expect(vlist.scrollToIndex).not.toHaveBeenCalled();
-    expect(fixture.getScrollTop()).toBe(240);
-    expect(skipNextViewportResizeAutoScrollRef.current).toBe(false);
+    expect(fixture.getScrollTop()).toBe(264);
     expect(latestResult?.isSticky).toBe(true);
+  });
+
+  it('keeps following when the composer shrinks and the browser clamps scrollTop', async () => {
+    const sessionId = 'session-composer-shrinks' as SessionId;
+    const fixture = createScrollFixture();
+    const vlist = createMockVirtualizerHandle(fixture.scrollElement);
+
+    await renderHarness({ sessionId, vlist, scrollElement: fixture.scrollElement, itemCount: 4 });
+    await act(async () => {
+      await advanceAnimationFrames();
+    });
+    expect(fixture.getScrollTop()).toBe(240);
+
+    // Sending clears the composer: the viewport grows and the browser clamps
+    // scrollTop upward before any observer runs. No pointer is held.
+    fixture.setClientHeight(440);
+    await act(async () => {
+      fixture.setScrollTop(200);
+      fixture.scrollElement.dispatchEvent(new Event('scroll'));
+      emitResize(fixture.scrollElement);
+      await advanceAnimationFrames();
+    });
+    expect(latestResult?.isSticky).toBe(true);
+
+    fixture.setContentHeight(696);
+    fixture.setScrollHeight(720);
+    await act(async () => {
+      emitResize(fixture.contentElement);
+      await advanceAnimationFrames();
+    });
+    expect(fixture.getScrollTop()).toBe(280);
+    expect(latestResult?.isSticky).toBe(true);
+  });
+
+  it('keeps following when the wheel scrolls a nested code block upward', async () => {
+    const sessionId = 'session-nested-wheel' as SessionId;
+    const fixture = createScrollFixture();
+    const vlist = createMockVirtualizerHandle(fixture.scrollElement);
+    const codeBlock = document.createElement('pre');
+    codeBlock.style.overflowY = 'auto';
+    fixture.lastRow.appendChild(codeBlock);
+
+    await renderHarness({ sessionId, vlist, scrollElement: fixture.scrollElement, itemCount: 4 });
+    await act(async () => {
+      await advanceAnimationFrames();
+    });
+
+    codeBlock.scrollTop = 30;
+    await act(async () => {
+      codeBlock.dispatchEvent(new WheelEvent('wheel', { deltaY: -40, bubbles: true }));
+    });
+    expect(latestResult?.isSticky).toBe(true);
+
+    // The same wheel once the block reached its own top scrolls the conversation.
+    codeBlock.scrollTop = 0;
+    await act(async () => {
+      codeBlock.dispatchEvent(new WheelEvent('wheel', { deltaY: -40, bubbles: true }));
+    });
+    expect(latestResult?.isSticky).toBe(false);
+  });
+
+  it('releases follow for a scrollbar drag upward but not for an unheld upward scroll', async () => {
+    const sessionId = 'session-scrollbar-drag' as SessionId;
+    const fixture = createScrollFixture();
+    const vlist = createMockVirtualizerHandle(fixture.scrollElement);
+
+    await renderHarness({ sessionId, vlist, scrollElement: fixture.scrollElement, itemCount: 4 });
+    await act(async () => {
+      await advanceAnimationFrames();
+    });
+
+    await act(async () => {
+      fixture.setScrollTop(200);
+      fixture.scrollElement.dispatchEvent(new Event('scroll'));
+    });
+    expect(latestResult?.isSticky).toBe(true);
+
+    await act(async () => {
+      fixture.scrollElement.dispatchEvent(new MouseEvent('pointerdown', { button: 0 }));
+      fixture.setScrollTop(120);
+      fixture.scrollElement.dispatchEvent(new Event('scroll'));
+      document.dispatchEvent(new MouseEvent('pointerup'));
+    });
+    expect(latestResult?.isSticky).toBe(false);
+
+    // Dragging back down to the real bottom re-arms follow.
+    await act(async () => {
+      fixture.setScrollTop(240);
+      fixture.scrollElement.dispatchEvent(new Event('scroll'));
+    });
+    expect(latestResult?.isSticky).toBe(true);
+  });
+
+  describe('anchoring a sent message', () => {
+    /** Row 3 starts at 516 and is 100px tall; the viewport shows 376px of content. */
+    async function renderAnchoredFixture(sessionId: SessionId, rowSize = 100) {
+      const fixture = createScrollFixture();
+      fixture.lastRow.getBoundingClientRect = () =>
+        new DOMRect(0, 516 - fixture.getScrollTop(), 320, rowSize);
+      const vlist = createMockVirtualizerHandle(fixture.scrollElement);
+      vlist.getItemOffset.mockImplementation(() => 516);
+      vlist.getItemSize.mockImplementation(() => rowSize);
+      await renderHarness({
+        sessionId,
+        vlist,
+        scrollElement: fixture.scrollElement,
+        itemCount: 4,
+        spacerElement: fixture.spacerElement,
+      });
+      await act(async () => {
+        await advanceAnimationFrames();
+      });
+      await act(async () => {
+        latestResult?.anchorToRow(3);
+      });
+      await act(async () => {
+        await advanceAnimationFrames();
+      });
+      return fixture;
+    }
+
+    it('holds the message at the top with room reserved for the reply', async () => {
+      const fixture = await renderAnchoredFixture('session-anchor' as SessionId);
+
+      expect(fixture.getScrollTop()).toBe(516);
+      // 516 + 400 viewport - 24 padding - 616 content end.
+      expect(fixture.spacerElement.style.height).toBe('276px');
+      expect(latestResult?.isSticky).toBe(true);
+
+      // The reply streams in: the room shrinks and nothing moves.
+      fixture.setContentHeight(716);
+      fixture.setScrollHeight(740);
+      await act(async () => {
+        emitResize(fixture.contentElement);
+        await advanceAnimationFrames();
+      });
+      expect(fixture.getScrollTop()).toBe(516);
+      expect(fixture.spacerElement.style.height).toBe('176px');
+
+      // The reply fills the room: the conversation follows the bottom again.
+      fixture.setContentHeight(916);
+      fixture.setScrollHeight(940);
+      await act(async () => {
+        emitResize(fixture.contentElement);
+        await advanceAnimationFrames();
+      });
+      expect(fixture.spacerElement.style.height).toBe('0px');
+      expect(fixture.getScrollTop()).toBe(540);
+
+      fixture.setContentHeight(1016);
+      fixture.setScrollHeight(1040);
+      await act(async () => {
+        emitResize(fixture.contentElement);
+        await advanceAnimationFrames();
+      });
+      expect(fixture.getScrollTop()).toBe(640);
+      expect(latestResult?.isSticky).toBe(true);
+    });
+
+    it('gives the reserved room up as the reader scrolls up, and never restores it', async () => {
+      const fixture = await renderAnchoredFixture('session-anchor-scroll-up' as SessionId);
+      expect(fixture.spacerElement.style.height).toBe('276px');
+
+      await act(async () => {
+        fixture.scrollElement.dispatchEvent(new WheelEvent('wheel', { deltaY: -100 }));
+        fixture.setScrollTop(416);
+        fixture.scrollElement.dispatchEvent(new Event('scroll'));
+      });
+      expect(latestResult?.isSticky).toBe(false);
+      expect(fixture.spacerElement.style.height).toBe('176px');
+      expect(fixture.getScrollTop()).toBe(416);
+
+      // The reply keeps growing below a reader who left: nothing pulls them.
+      fixture.setContentHeight(716);
+      fixture.setScrollHeight(740);
+      await act(async () => {
+        emitResize(fixture.contentElement);
+        await advanceAnimationFrames();
+      });
+      expect(fixture.getScrollTop()).toBe(416);
+      expect(fixture.spacerElement.style.height).toBe('76px');
+
+      await act(async () => {
+        fixture.scrollElement.dispatchEvent(new WheelEvent('wheel', { deltaY: -200 }));
+        fixture.setScrollTop(216);
+        fixture.scrollElement.dispatchEvent(new Event('scroll'));
+      });
+      expect(fixture.spacerElement.style.height).toBe('0px');
+
+      // Scrolling back down reaches the real end and follows again.
+      await act(async () => {
+        fixture.setScrollTop(340);
+        fixture.scrollElement.dispatchEvent(new Event('scroll'));
+      });
+      expect(fixture.spacerElement.style.height).toBe('0px');
+      expect(latestResult?.isSticky).toBe(true);
+    });
+
+    it('glides to the message instead of jumping, and stops when the reader scrolls', async () => {
+      const fixture = createScrollFixture();
+      fixture.lastRow.getBoundingClientRect = () =>
+        new DOMRect(0, 516 - fixture.getScrollTop(), 320, 100);
+      const vlist = createMockVirtualizerHandle(fixture.scrollElement);
+      vlist.getItemOffset.mockImplementation(() => 516);
+      await renderHarness({
+        sessionId: 'session-anchor-glide' as SessionId,
+        vlist,
+        scrollElement: fixture.scrollElement,
+        itemCount: 4,
+        spacerElement: fixture.spacerElement,
+      });
+      await act(async () => {
+        await advanceAnimationFrames();
+      });
+      expect(fixture.getScrollTop()).toBe(240);
+
+      await act(async () => {
+        latestResult?.anchorToRow(3);
+      });
+      // The room is reserved at once; the viewport has not moved yet.
+      expect(fixture.spacerElement.style.height).toBe('276px');
+      expect(fixture.getScrollTop()).toBe(240);
+
+      const positions: number[] = [];
+      for (let frame = 0; frame < 4; frame += 1) {
+        const callbacks = [...rafQueue];
+        rafQueue = [];
+        vi.advanceTimersByTime(17);
+        await act(async () => {
+          for (const callback of callbacks) callback(Date.now());
+        });
+        positions.push(fixture.getScrollTop());
+      }
+      expect(positions[1]).toBeGreaterThan(240);
+      expect(positions[3]).toBeGreaterThan(positions[1]!);
+      expect(positions[3]).toBeLessThan(516);
+
+      // The reader wheels up mid-glide: the glide stops where it is.
+      const stoppedAt = fixture.getScrollTop();
+      await act(async () => {
+        fixture.scrollElement.dispatchEvent(new WheelEvent('wheel', { deltaY: -40 }));
+        await advanceAnimationFrames();
+      });
+      expect(fixture.getScrollTop()).toBe(stoppedAt);
+      expect(latestResult?.isSticky).toBe(false);
+    });
+
+    it('follows the bottom when the message is taller than the viewport', async () => {
+      const fixture = await renderAnchoredFixture('session-anchor-tall' as SessionId, 500);
+
+      expect(fixture.spacerElement.style.height).toBe('0px');
+      expect(fixture.getScrollTop()).toBe(240);
+      expect(latestResult?.isSticky).toBe(true);
+    });
+
+    it('keeps the anchor when the composer shrinks after sending', async () => {
+      const fixture = await renderAnchoredFixture('session-anchor-composer' as SessionId);
+
+      fixture.setClientHeight(440);
+      await act(async () => {
+        emitResize(fixture.scrollElement);
+        await advanceAnimationFrames();
+      });
+      expect(fixture.getScrollTop()).toBe(516);
+      expect(fixture.spacerElement.style.height).toBe('316px');
+    });
   });
 
   it('attaches when the scroll viewport mounts after the empty state', async () => {

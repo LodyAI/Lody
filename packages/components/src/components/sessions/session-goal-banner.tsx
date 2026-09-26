@@ -15,7 +15,7 @@ import { cn } from '@/lib/utils';
 import { Button } from '@lody/ui/button';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { getGoalStatusPresentation } from '@/lib/session-goal-status';
-import { formatDurationCompact, type DurationUnitLabels } from '@/lib/format-duration';
+import { formatDurationCompact, getDurationUnitLabels } from '@/lib/format-duration';
 import { observeResizeOnAnimationFrame } from '@/lib/resize-observer';
 import {
   isSessionGoalCleared,
@@ -180,11 +180,7 @@ export const SessionGoalBanner = memo(function SessionGoalBanner({
     onGoalCommand?.(command, goal);
   };
 
-  const durationUnitLabels: DurationUnitLabels = {
-    hour: t('time.unitShort.hour', 'h'),
-    minute: t('time.unitShort.minute', 'm'),
-    second: t('time.unitShort.second', 's'),
-  };
+  const durationUnitLabels = getDurationUnitLabels(t);
   const tokensUsed = Math.max(0, Math.floor(goal.tokensUsed ?? 0));
   const tokenBudget =
     typeof goal.tokenBudget === 'number' && goal.tokenBudget > 0

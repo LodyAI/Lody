@@ -27,7 +27,8 @@ import { AGENT_ROLE_UNAVAILABLE_REASON_KEYS } from '@/lib/composer-agent-roles';
 import { AlertDialog } from '@/ui/dialog';
 import { Badge } from '@lody/ui/badge';
 import { Button } from '@lody/ui/button';
-import { Tooltip } from '@lody/ui/tooltip';
+import { SettingsPageActions, SettingsPageLead } from './settings-page-header';
+import { settingsRecordsCard } from './compact-layout';
 import { settingsCatalog as catalog, settingsSurface as surface } from './surface';
 import {
   AgentRoleEditorDialog,
@@ -96,76 +97,58 @@ export function AgentRolesSetting() {
 
   return (
     <div {...stylex.props(surface.container)}>
-      <p {...stylex.props(catalog.intro)}>{t('settings.agentRoles.description')}</p>
+      <SettingsPageLead>{t('settings.agentRoles.description')}</SettingsPageLead>
 
-      <section {...stylex.props(surface.section)}>
-        <header {...stylex.props(surface.sectionHeader)}>
-          <div {...stylex.props(catalog.heading)}>
-            <h3 {...stylex.props(surface.sectionTitle)}>{t('settings.agentRoles.catalogTitle')}</h3>
-            {roles.length > 0 ? <span {...stylex.props(catalog.count)}>{roles.length}</span> : null}
-            {!synced ? (
-              <span {...stylex.props(catalog.syncing)}>
-                <Spinner size="small" aria-hidden="true" />
-                {t('settings.agentRoles.syncing')}
-              </span>
-            ) : null}
-          </div>
-          <div {...stylex.props(surface.sectionActions)}>
-            <Tooltip.Root>
-              <Tooltip.Trigger
-                render={
-                  <Button variant="ghost" aria-label={addLabel} size="small" icon onClick={openAdd}>
-                    <Plus {...stylex.props(catalog.icon)} />
-                  </Button>
-                }
+      <SettingsPageActions>
+        {!synced ? (
+          <span {...stylex.props(catalog.syncing)}>
+            <Spinner size="small" aria-hidden="true" />
+            {t('settings.agentRoles.syncing')}
+          </span>
+        ) : null}
+        <Button size="small" variant="secondary" onClick={openAdd}>
+          <Plus {...stylex.props(catalog.icon)} />
+          {addLabel}
+        </Button>
+      </SettingsPageActions>
+
+      {roles.length === 0 ? (
+        <div {...stylex.props(catalog.empty)}>
+          <UserRoundCog {...stylex.props(catalog.emptyIcon)} aria-hidden="true" />
+          <p {...stylex.props(catalog.emptyText)}>{t('settings.agentRoles.empty')}</p>
+        </div>
+      ) : (
+        <div {...stylex.props(catalog.groups)}>
+          {roleGroups.map((group) => (
+            <div key={group.machineId} {...stylex.props(catalog.group)}>
+              {/* The machine leads its group instead of repeating on every row:
+                  a Role binds one machine exactly, so it is what the list is
+                  grouped BY, not a fact about each entry. */}
+              <MachineGroupHeading
+                label={group.machineLabel}
+                online={onlineMachineIds.has(group.machineId)}
               />
-              <Tooltip.Content>{addLabel}</Tooltip.Content>
-            </Tooltip.Root>
-          </div>
-        </header>
-
-        {roles.length === 0 ? (
-          <div {...stylex.props(catalog.empty)}>
-            <UserRoundCog {...stylex.props(catalog.emptyIcon)} aria-hidden="true" />
-            <p {...stylex.props(catalog.emptyText)}>{t('settings.agentRoles.empty')}</p>
-            <Button size="small" variant="secondary" onClick={openAdd}>
-              <Plus {...stylex.props(catalog.icon)} />
-              {addLabel}
-            </Button>
-          </div>
-        ) : (
-          <div {...stylex.props(catalog.groups)}>
-            {roleGroups.map((group) => (
-              <div key={group.machineId} {...stylex.props(catalog.group)}>
-                {/* The machine leads its group instead of repeating on every row:
-                    a Role binds one machine exactly, so it is what the list is
-                    grouped BY, not a fact about each entry. */}
-                <MachineGroupHeading
-                  label={group.machineLabel}
-                  online={onlineMachineIds.has(group.machineId)}
-                />
-                <div {...stylex.props(surface.card)}>
-                  {group.roles.map((role, index) => (
-                    <div
-                      key={role.id}
-                      {...stylex.props(surface.line, index > 0 && surface.lineRuled)}
-                    >
-                      <AgentRoleRow
-                        role={role}
-                        availability={resolve(role)}
-                        agentConfig={agentConfigs.find((entry) => entry.id === role.agentConfigId)}
-                        canManage={canManageAgentRole(role, currentUserId)}
-                        onEdit={() => openEdit(role)}
-                        onRemove={() => setPendingRemoval(role)}
-                      />
-                    </div>
-                  ))}
-                </div>
+              <div {...stylex.props(settingsRecordsCard)}>
+                {group.roles.map((role, index) => (
+                  <div
+                    key={role.id}
+                    {...stylex.props(surface.line, index > 0 && surface.lineRuled)}
+                  >
+                    <AgentRoleRow
+                      role={role}
+                      availability={resolve(role)}
+                      agentConfig={agentConfigs.find((entry) => entry.id === role.agentConfigId)}
+                      canManage={canManageAgentRole(role, currentUserId)}
+                      onEdit={() => openEdit(role)}
+                      onRemove={() => setPendingRemoval(role)}
+                    />
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
-        )}
-      </section>
+            </div>
+          ))}
+        </div>
+      )}
 
       <AgentRoleEditorDialog
         editor={editor}
@@ -251,11 +234,11 @@ export function AgentRoleRow({
             {/* No `@token` here: it is derived from this very name, so printing
                 both says one thing twice. */}
             <span {...stylex.props(catalog.name)}>{role.name}</span>
-            <Badge>
-              {role.visibility === 'workspace'
-                ? t('settings.agentRoles.visibility.workspace')
-                : t('settings.agentRoles.visibility.private')}
-            </Badge>
+            {/* Private is the default and says nothing on every row; only a Role
+                the whole workspace can use is marked. */}
+            {role.visibility === 'workspace' ? (
+              <Badge>{t('settings.agentRoles.visibility.workspace')}</Badge>
+            ) : null}
             {role.promptPrefix ? <Badge>{t('settings.agentRoles.hasPrompt')}</Badge> : null}
           </span>
           <span {...stylex.props(catalog.meta)}>

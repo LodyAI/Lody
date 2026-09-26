@@ -3,25 +3,25 @@ import { colors, shadow } from '../tokens/colors.stylex';
 import { radius, space, text } from '../tokens/scales.stylex';
 
 /**
- * The one floating thing that is not the popup surface.
+ * The floating rung's material, cut down to a label.
  *
  * The elevation ladder puts a menu, a popover and a list on the floating rung —
- * the raised background under the popover shadow — and then names the tooltip
- * separately: `label` with `shadow.medium`. That is a deliberate inversion. A
- * popup is a place you act; a tooltip only names what is already under the
- * pointer, and it has to read at a glance over whatever it covers without
- * becoming another surface competing for attention. Inverting it says "this is
- * not part of the page" in one step, in both palettes, which is why it reads
- * `tooltip` rather than `popup`: a tooltip reaching for `popup.background`
- * would be naming the wrong thing to get the wrong colour.
+ * the raised background under the popover shadow — and a tooltip is on that rung
+ * too: the same fill, the same ink and the same shadow, so it is light in a
+ * light palette and dark in a dark one like every other floating surface. What
+ * sets it apart is size rather than material: a popup is a place you act, a
+ * tooltip only names what is already under the pointer, so it keeps its own
+ * smaller corner, padding, type step and width. That is why it still reads
+ * `tooltip` rather than `popup`: the colours agree today, but the chip's
+ * geometry is its own, and a tooltip reaching for `popup.radius` would be
+ * naming the wrong thing to get the wrong corner.
  */
 export const tooltip = stylex.defineVars({
-  background: colors.label,
-  // The ink on that fill: the page background, the same pair a primary button
-  // and a checked box take. A stored-state fill and an inverted chip are the
-  // same two colours in the same order.
-  label: colors.background,
-  shadow: shadow.medium,
+  background: colors.raisedBackground,
+  // The ink on that fill: the popup surface's own `label`, so a tooltip over a
+  // menu and the rows inside that menu are written in the same colour.
+  label: colors.label,
+  shadow: shadow.popover,
   // The corner rule gives 8 to 28px controls and to tooltips by name.
   radius: radius.small,
   paddingX: space[2],
@@ -42,7 +42,7 @@ export const tooltip = stylex.defineVars({
  * document root keeps the root palette inside a themed subtree.
  */
 export const tooltipPaletteTheme = stylex.createTheme(tooltip, {
-  background: colors.label,
-  label: colors.background,
-  shadow: shadow.medium,
+  background: colors.raisedBackground,
+  label: colors.label,
+  shadow: shadow.popover,
 });

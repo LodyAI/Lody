@@ -1,6 +1,6 @@
 import * as stylex from '@stylexjs/stylex';
 import { colors, shadow, sheen } from '../tokens/colors.stylex';
-import { control, radius, text } from '../tokens/scales.stylex';
+import { control, focus, radius, text } from '../tokens/scales.stylex';
 
 export const button = stylex.defineVars({
   heightMini: '24px',
@@ -36,7 +36,7 @@ export const button = stylex.defineVars({
   ghostLabel: colors.secondaryLabel,
   ghostHover: colors.hoverFill,
   ring: colors.accent,
-  ringWidth: '2px',
+  ringWidth: focus.ringWidth,
 });
 
 /**

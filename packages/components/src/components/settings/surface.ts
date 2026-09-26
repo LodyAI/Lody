@@ -1,6 +1,8 @@
 import * as stylex from '@stylexjs/stylex';
-import { colors, shadow } from '@lody/ui/tokens/colors.stylex';
-import { corner, duration, ease, radius, space } from '@lody/ui/tokens/scales.stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { corner, duration, ease, focus, radius, space } from '@lody/ui/tokens/scales.stylex';
+import { settingsMaterial as material } from './material.stylex';
+import { settingsType as type } from './type.stylex';
 
 /**
  * The materials every settings surface shares, in `@lody/ui`'s own tokens: a
@@ -18,29 +20,56 @@ import { corner, duration, ease, radius, space } from '@lody/ui/tokens/scales.st
 const WIDE = '@media (min-width: 640px)';
 
 export const settingsSurface = stylex.create({
-  /** A titled group: the heading above, the card of rows below. */
+  /**
+   * A titled group: the heading, then its rows. How the group is drawn — a
+   * card, or rows on the page under a rule — is `settingsMaterial`'s.
+   */
   section: {
     display: 'flex',
     flexDirection: 'column',
-    gap: space[1.5],
+    gap: space[2],
     minWidth: 0,
+    // The page's title opens the page; only a section after another is ruled.
+    // The page gap above the rule is paid back below it, so a rule sits
+    // halfway between the last row above and the first line below.
+    paddingTop: { default: material.sectionRuleGap, ':first-child': 0 },
+    boxShadow: { default: material.sectionRule, ':first-child': 'none' },
     fontSize: '1em',
   },
+  /** A section led by its heading: the heading has no padding of its own to lend. */
+  sectionTitled: { paddingTop: { default: material.sectionTitledGap, ':first-child': 0 } },
+  /** A boxed collection is set apart by its box; a rule above it would be a second edge. */
+  sectionBoxed: {
+    paddingTop: { default: material.sectionBoxedGap, ':first-child': 0 },
+    boxShadow: 'none',
+  },
   /**
-   * The heading names the group from outside it, so the card holds rows only:
-   * a band with a rule under it is a second edge inside the first.
+   * A group's name, above its rows: on a flat page it starts where the title
+   * and the rows' copy do; over a card it is inset to the rows' copy.
    */
   sectionHeader: {
     display: 'flex',
     alignItems: 'flex-end',
     justifyContent: 'space-between',
     gap: space[2],
-    minHeight: space[6],
-    paddingInline: space[4],
+    paddingInline: material.headingInset,
   },
-  sectionHeading: { flexGrow: 1, minWidth: 0, lineHeight: 1.25 },
-  sectionTitle: { margin: 0, fontSize: '0.75em', fontWeight: 400, color: colors.secondaryLabel },
-  sectionDescription: { margin: 0, fontSize: '0.8em', color: colors.secondaryLabel },
+  sectionHeading: { flexGrow: 1, minWidth: 0, lineHeight: type.leading },
+  sectionTitle: {
+    margin: 0,
+    fontSize: '1em',
+    fontWeight: type.headingWeight,
+    lineHeight: type.leading,
+    color: colors.label,
+  },
+  /** A group that destroys something — leave, transfer, delete — says so in its name. */
+  sectionTitleDanger: { color: colors.destructive },
+  sectionDescription: {
+    margin: 0,
+    fontSize: type.caption,
+    lineHeight: type.leading,
+    color: colors.secondaryLabel,
+  },
   sectionAside: {
     minWidth: 0,
     flexShrink: 1,
@@ -48,31 +77,42 @@ export const settingsSurface = stylex.create({
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
     textAlign: 'end',
-    fontSize: '0.8em',
+    fontSize: type.caption,
     color: colors.secondaryLabel,
   },
   sectionActions: { display: 'flex', flexShrink: 0, alignItems: 'center', gap: space[1.5] },
 
   /**
-   * The card rung, made a settings card: `@lody/ui`'s Card material without its
-   * padding, because its children are rows that run edge to edge.
+   * The page a settings group stands on: the panel's own fill. The page is one
+   * plane and its groups are flat on it (`settingsFlat`), so it needs no step
+   * of its own.
+   */
+  canvas: { backgroundColor: colors.elevatedBackground },
+  /**
+   * The master side of a master/detail split — the settings nav: a step below
+   * the page in either palette. The step in fill is the split; a line down the
+   * panel would be a second edge doing the same job.
+   */
+  nav: { backgroundColor: `color-mix(in oklab, ${colors.background}, black 3.5%)` },
+  /**
+   * A group's rows. On a flat page they bleed past the column by their own
+   * inset, so their copy meets the headings and the pointer's fill has room.
    */
   card: {
     boxSizing: 'border-box',
     minWidth: 0,
     overflow: 'hidden',
-    backgroundColor: colors.elevatedBackground,
-    boxShadow: shadow.card,
-    borderRadius: radius.large,
+    marginInline: `calc(-1 * ${material.groupBleed})`,
+    backgroundColor: material.groupFill,
+    boxShadow: material.groupShadow,
+    borderRadius: material.groupRadius,
     cornerShape: corner.shape,
   },
-  /** A group that destroys something marks its card with a destructive hairline. */
-  cardDanger: {
-    boxShadow: `0 0 0 0.5px color-mix(in oklab, ${colors.destructive} 45%, transparent), ${shadow.card}`,
-  },
-  /** One line of a card. Every line but the first is ruled from the one above. */
+  /** A group that destroys something marks its card, when it has one. */
+  cardDanger: { boxShadow: material.dangerShadow },
+  /** One line of a group. Every line but the first is ruled from the one above, on a card. */
   line: { minWidth: 0 },
-  lineRuled: { boxShadow: `inset 0 1px 0 ${colors.separator}` },
+  lineRuled: { boxShadow: material.rowRule },
 
   /**
    * A setting: its name and what it does, and the control that sets it. The
@@ -87,14 +127,19 @@ export const settingsSurface = stylex.create({
     alignItems: { default: 'stretch', [WIDE]: 'center' },
     gap: { default: space[2], [WIDE]: space[4] },
     paddingInline: space[4],
-    paddingBlock: '10px',
+    paddingBlock: space[2],
   },
   rowTop: { alignItems: { default: 'stretch', [WIDE]: 'start' } },
   /** Helper copy is capped so it stays readable on a wide panel. */
   rowText: { minWidth: 0 },
   rowTextCapped: { maxWidth: { default: null, [WIDE]: '520px' } },
-  rowLabel: { margin: 0, lineHeight: 1.25, color: colors.label },
-  rowHelper: { margin: 0, fontSize: '0.8em', lineHeight: 1.25, color: colors.secondaryLabel },
+  rowLabel: { margin: 0, lineHeight: type.leading, color: colors.label },
+  rowHelper: {
+    margin: 0,
+    fontSize: type.caption,
+    lineHeight: type.leading,
+    color: colors.secondaryLabel,
+  },
   rowControl: {
     display: 'flex',
     flexWrap: 'wrap',
@@ -109,6 +154,8 @@ export const settingsSurface = stylex.create({
 
   /** A row a person can open: the whole line answers the pointer. */
   pressableLine: {
+    borderRadius: material.rowRadius,
+    cornerShape: corner.shape,
     backgroundColor: {
       default: 'transparent',
       ':hover': `color-mix(in oklab, ${colors.elevatedBackground}, ${colors.label} 4%)`,
@@ -144,7 +191,7 @@ export const settingsSurface = stylex.create({
   /**
    * A row of a list a person moves through — the settings nav, the Projects
    * sources and folders: a sidebar row. No edge; the pointer's fill and the
-   * current row's fill are the palette's own `hoverFill` and `selectedFill`.
+   * current row's fill are washes of ink over whatever the row stands on.
    * Spread on a `<button>` or a link; it resets what a button brings.
    */
   listRow: {
@@ -161,12 +208,17 @@ export const settingsSurface = stylex.create({
     borderWidth: 0,
     borderRadius: radius.small,
     cornerShape: corner.shape,
-    backgroundColor: { default: 'transparent', ':hover': colors.hoverFill },
+    // Ink washes rather than the palette's hover/selected fills: those are tuned
+    // for the page rung and all but vanish on the nav's darker fill.
+    backgroundColor: {
+      default: 'transparent',
+      ':hover': `color-mix(in oklab, transparent, ${colors.label} 5%)`,
+    },
     color: colors.label,
     fontFamily: 'inherit',
     fontSize: '1em',
     fontWeight: 400,
-    lineHeight: 1.25,
+    lineHeight: type.leading,
     textAlign: 'start',
     textDecoration: 'none',
     cursor: 'pointer',
@@ -175,7 +227,10 @@ export const settingsSurface = stylex.create({
     transitionTimingFunction: ease.standard,
   },
   listRowSelected: {
-    backgroundColor: { default: colors.selectedFill, ':hover': colors.selectedFill },
+    backgroundColor: {
+      default: `color-mix(in oklab, transparent, ${colors.label} 8%)`,
+      ':hover': `color-mix(in oklab, transparent, ${colors.label} 8%)`,
+    },
   },
   /** A list row's glyph: icons at rest are a hint. */
   listRowIcon: {
@@ -195,7 +250,7 @@ export const settingsSurface = stylex.create({
   },
   listRowMeta: {
     flexShrink: 0,
-    fontSize: '0.85em',
+    fontSize: type.caption,
     color: colors.tertiaryLabel,
     fontVariantNumeric: 'tabular-nums',
   },
@@ -205,7 +260,7 @@ export const settingsSurface = stylex.create({
     margin: 0,
     paddingInline: space[4],
     paddingBlock: '10px',
-    fontSize: '0.8em',
+    fontSize: type.caption,
     lineHeight: 1.375,
     color: colors.secondaryLabel,
   },
@@ -218,24 +273,37 @@ export const settingsSurface = stylex.create({
     boxSizing: 'border-box',
     display: 'flex',
     flexDirection: 'column',
-    gap: space[3],
+    gap: material.pageGap,
     minWidth: 0,
     overflowX: 'hidden',
-    paddingInline: { default: space[4], '@media (min-width: 768px)': space[2] },
+    paddingInline: space[4],
     paddingBlock: space[2],
     marginInline: { default: null, '@media (min-width: 768px)': 'auto' },
-    maxWidth: { default: null, '@media (min-width: 768px)': '896px' },
+    maxWidth: { default: null, '@media (min-width: 768px)': '760px' },
+  },
+  /**
+   * A page's own name, above its sections: one step up from a row and set in
+   * weight, so the page reads as a document with a title — the modal header and
+   * every page that names itself use this one style.
+   */
+  pageTitle: {
+    margin: 0,
+    fontSize: type.title,
+    fontWeight: type.titleWeight,
+    lineHeight: 1.3,
+    letterSpacing: '-0.01em',
+    color: colors.label,
   },
   /** A settings page: its sections stacked, set apart by space. */
   page: {
     display: 'flex',
     flexDirection: 'column',
-    gap: space[4],
+    gap: space[6],
     minWidth: 0,
   },
 });
 
-const RING = `inset 0 0 0 2px ${colors.accent}`;
+const RING = `inset 0 0 0 ${focus.ringWidth} ${colors.accent}`;
 
 /**
  * The catalogs (Agent Roles, MCP servers, providers, shares, prompt shortcuts)
@@ -246,32 +314,36 @@ const RING = `inset 0 0 0 2px ${colors.accent}`;
  */
 export const settingsCatalog = stylex.create({
   /** A catalog page's lead sentence, above its sections. */
-  intro: { margin: 0, fontSize: '0.75em', lineHeight: 1.375, color: colors.secondaryLabel },
+  intro: { margin: 0, fontSize: type.caption, lineHeight: 1.375, color: colors.secondaryLabel },
   /** The heading's name, its count and what is still syncing, on one line. */
   heading: { display: 'flex', flexGrow: 1, alignItems: 'center', gap: space[2], minWidth: 0 },
-  count: { fontSize: '0.75em', color: colors.tertiaryLabel, fontVariantNumeric: 'tabular-nums' },
+  count: {
+    fontSize: type.caption,
+    color: colors.tertiaryLabel,
+    fontVariantNumeric: 'tabular-nums',
+  },
   syncing: {
     display: 'inline-flex',
     alignItems: 'center',
     gap: space[1],
-    fontSize: '0.7em',
+    fontSize: type.caption,
     color: colors.tertiaryLabel,
   },
   /** Groups of one catalog, stacked and set apart by space. */
-  groups: { display: 'flex', flexDirection: 'column', gap: space[4], minWidth: 0 },
-  group: { display: 'flex', flexDirection: 'column', gap: space[1.5], minWidth: 0 },
-  /** A group's name, above its card: a label, never a bordered pill. */
+  groups: { display: 'flex', flexDirection: 'column', gap: space[6], minWidth: 0 },
+  group: { display: 'flex', flexDirection: 'column', gap: space[2], minWidth: 0 },
+  /** A group's name, above its rows: a label, never a bordered pill. */
   groupHeading: {
     display: 'flex',
     alignItems: 'center',
     gap: space[1.5],
     minWidth: 0,
     margin: 0,
-    paddingInline: space[4],
-    fontSize: '0.75em',
-    fontWeight: 400,
-    lineHeight: 1.25,
-    color: colors.secondaryLabel,
+    paddingInline: material.headingInset,
+    fontSize: '1em',
+    fontWeight: type.headingWeight,
+    lineHeight: type.leading,
+    color: colors.label,
   },
   groupHeadingLabel: {
     minWidth: 0,
@@ -354,8 +426,8 @@ export const settingsCatalog = stylex.create({
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
-    fontSize: '0.875em',
-    lineHeight: 1.25,
+    fontSize: type.caption,
+    lineHeight: type.leading,
     color: colors.label,
   },
   meta: {
@@ -363,8 +435,8 @@ export const settingsCatalog = stylex.create({
     alignItems: 'center',
     gap: space[1.5],
     minWidth: 0,
-    fontSize: '0.7em',
-    lineHeight: 1.25,
+    fontSize: type.caption,
+    lineHeight: type.leading,
     color: colors.secondaryLabel,
   },
   metaHint: { color: colors.tertiaryLabel },
@@ -390,11 +462,11 @@ export const settingsCatalog = stylex.create({
     paddingBlock: space[8],
     borderRadius: radius.large,
     cornerShape: corner.shape,
-    backgroundColor: `color-mix(in oklab, transparent, ${colors.label} 3%)`,
+    backgroundColor: material.emptyFill,
     textAlign: 'center',
   },
   emptyIcon: { width: '24px', height: '24px', color: colors.tertiaryLabel },
-  emptyText: { margin: 0, fontSize: '0.875em', color: colors.secondaryLabel },
+  emptyText: { margin: 0, fontSize: type.caption, color: colors.secondaryLabel },
   icon: { flexShrink: 0, width: '14px', height: '14px' },
   iconSmall: { flexShrink: 0, width: '12px', height: '12px' },
 

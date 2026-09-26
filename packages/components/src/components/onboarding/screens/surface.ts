@@ -1,6 +1,6 @@
 import * as stylex from '@stylexjs/stylex';
 import { colors, shadow } from '@lody/ui/tokens/colors.stylex';
-import { corner, duration, ease, radius, space, text } from '@lody/ui/tokens/scales.stylex';
+import { corner, duration, ease, focus, radius, space, text } from '@lody/ui/tokens/scales.stylex';
 
 /**
  * The materials every onboarding setup screen shares, in `@lody/ui`'s own
@@ -14,7 +14,7 @@ import { corner, duration, ease, radius, space, text } from '@lody/ui/tokens/sca
  */
 
 /** The accent ring a selected or keyboard-focused tile carries over its card shadow. */
-const TILE_RING = `0 0 0 2px ${colors.accent}, ${shadow.card}`;
+const TILE_RING = `0 0 0 ${focus.ringWidth} ${colors.accent}, ${shadow.card}`;
 const TILE_HOVER = `color-mix(in oklab, ${colors.elevatedBackground}, ${colors.label} 4%)`;
 /** A block inside a card, or a quiet note on the stage: the region rung, a fill with no edge. */
 const REGION_FILL = `color-mix(in oklab, transparent, ${colors.label} 3%)`;

@@ -1,3 +1,4 @@
+export * from './preview-control';
 import { CliType } from './ai';
 export * from './history-writer';
 export * from './history-write-schema';

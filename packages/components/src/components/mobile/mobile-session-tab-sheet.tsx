@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from 'react';
 import {
+  ArchiveRestore,
   ChevronDown,
   File as FileIcon,
   FileDiff,
@@ -12,6 +13,7 @@ import {
   X,
 } from 'lucide-react';
 import { Spinner } from '@lody/ui/spinner';
+import { Badge } from '@lody/ui/badge';
 import { useTranslation } from 'react-i18next';
 import { getServerNow } from '@lody/shared';
 
@@ -55,7 +57,7 @@ export type ConversationTabEntry = {
   lastActivityAt: number | null;
 };
 
-/** Archived child conversation, shown behind a collapsed disclosure row. */
+/** Closed conversation, shown behind a collapsed disclosure row. */
 export type ArchivedConversationEntry = {
   id: string;
   title: string;
@@ -63,6 +65,8 @@ export type ArchivedConversationEntry = {
   running?: boolean;
   waitingPermission?: boolean;
   unread?: boolean;
+  /** An archived child of a live workspace: tapping restores it instead of reopening. */
+  restoresArchive?: boolean;
 };
 
 export type ViewerTabEntry = {
@@ -80,9 +84,10 @@ export type MobileSessionTabSheetProps = {
   archivedConversations?: ArchivedConversationEntry[];
   viewers: ViewerTabEntry[];
   onSelectConversation: (id: string) => void;
-  onNewConversation: () => void;
+  /** Omitted for a review-only (archived) workspace: no New Chat row. */
+  onNewConversation?: () => void;
   onSelectViewer: (id: string) => void;
-  /** Tapping an archived row restores it (and switches to it). */
+  /** Tapping a closed row reopens (or, for `restoresArchive`, restores) it and switches to it. */
   onRestoreConversation?: (id: string) => void;
   onCloseConversation?: (id: string) => void;
 };
@@ -183,19 +188,21 @@ export function MobileSessionTabSheet({
                 )}
               </div>
             ))}
-            <button
-              type="button"
-              onClick={() => select(onNewConversation)}
-              className={cn(
-                rowClassName,
-                'font-medium text-muted-foreground transition-colors hover:text-foreground'
-              )}
-            >
-              <span className="flex h-4 w-4 shrink-0 items-center justify-center">
-                <Plus className="h-4 w-4" strokeWidth={1.8} aria-hidden="true" />
-              </span>
-              <span>{t('sessions.tabs.newChat', 'New Chat')}</span>
-            </button>
+            {onNewConversation ? (
+              <button
+                type="button"
+                onClick={() => select(onNewConversation)}
+                className={cn(
+                  rowClassName,
+                  'font-medium text-muted-foreground transition-colors hover:text-foreground'
+                )}
+              >
+                <span className="flex h-4 w-4 shrink-0 items-center justify-center">
+                  <Plus className="h-4 w-4" strokeWidth={1.8} aria-hidden="true" />
+                </span>
+                <span>{t('sessions.tabs.newChat', 'New Chat')}</span>
+              </button>
+            ) : null}
             {showArchived ? (
               <>
                 <button
@@ -226,7 +233,11 @@ export function MobileSessionTabSheet({
                         key={a.id}
                         type="button"
                         onClick={() => select(() => onRestoreConversation(a.id))}
-                        aria-label={t('sessions.tabs.reopenTab', 'Reopen conversation')}
+                        aria-label={
+                          a.restoresArchive
+                            ? t('archive.restore', 'Restore session')
+                            : t('sessions.tabs.reopenTab', 'Reopen conversation')
+                        }
                         className={cn(
                           rowClassName,
                           'transition-colors hover:bg-muted-foreground/5'
@@ -253,11 +264,19 @@ export function MobileSessionTabSheet({
                         <span className="shrink-0 text-xs tabular-nums text-muted-foreground/70">
                           {formatRelativeTime(a.lastActivityAt, t)}
                         </span>
-                        <Undo2
-                          className="h-3.5 w-3.5 shrink-0 text-muted-foreground/70"
-                          strokeWidth={1.8}
-                          aria-hidden="true"
-                        />
+                        {a.restoresArchive ? (
+                          <ArchiveRestore
+                            className="h-3.5 w-3.5 shrink-0 text-muted-foreground/70"
+                            strokeWidth={1.8}
+                            aria-hidden="true"
+                          />
+                        ) : (
+                          <Undo2
+                            className="h-3.5 w-3.5 shrink-0 text-muted-foreground/70"
+                            strokeWidth={1.8}
+                            aria-hidden="true"
+                          />
+                        )}
                       </button>
                     ))
                   : null}
@@ -367,11 +386,7 @@ function ConversationRow({
         >
           {label}
         </span>
-        {mainChip ? (
-          <span className="shrink-0 rounded border border-border/70 px-1 py-px text-[0.62rem] font-medium leading-none text-muted-foreground">
-            {mainChip}
-          </span>
-        ) : null}
+        {mainChip ? <Badge>{mainChip}</Badge> : null}
       </span>
       {elapsed ? (
         <span className="shrink-0 text-xs tabular-nums text-muted-foreground">{elapsed}</span>

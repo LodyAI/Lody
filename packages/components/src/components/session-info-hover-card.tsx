@@ -4,6 +4,7 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from 'react';
 import * as PopoverPrimitive from '@radix-ui/react-popover';
@@ -25,6 +26,7 @@ import {
   Users,
 } from 'lucide-react';
 import { Spinner } from '@/ui/spinner';
+import { Badge } from '@lody/ui/badge';
 import { useTranslation } from 'react-i18next';
 import type { PrStatus, SessionPullRequestCiState } from '@lody/shared';
 import { cn } from '@/lib/utils';
@@ -346,9 +348,7 @@ export function SessionInfoCard({
           {isWorktree ? (
             // The icon glyph alone is easy to miss; a small pill makes the
             // isolated-worktree mode unmistakable in the details surface.
-            <span className="shrink-0 rounded-sm bg-muted-foreground/10 px-1 py-px text-[10px] font-medium text-muted-foreground">
-              {t('sessions.infoCard.worktree', 'Worktree')}
-            </span>
+            <Badge>{t('sessions.infoCard.worktree', 'Worktree')}</Badge>
           ) : null}
         </span>
       ),
@@ -537,6 +537,39 @@ let activeClose: (() => void) | null = null;
  */
 let lastCardInteractionAt = Number.NEGATIVE_INFINITY;
 
+/** Pointer travel that ends a press suppression; a still pointer never does. */
+const PRESS_MOVE_TOLERANCE_PX = 4;
+
+/**
+ * Where the last press on a card trigger happened, while cards are suppressed.
+ * A press navigates, and navigation re-renders the rows under a pointer that has
+ * not moved, which re-fires `pointerenter`. While warm, that would open a card in
+ * the very commit that switches the conversation; the card's Radix `Presence`
+ * reads the computed animation name on mount, forcing the whole switch's pending
+ * style work synchronously (~30ms per open on a large workspace). Cards stay shut
+ * until the pointer really moves.
+ */
+let pressSuppression: { x: number; y: number } | null = null;
+
+function releasePressSuppressionOnMove(event: PointerEvent) {
+  if (
+    pressSuppression &&
+    Math.hypot(event.clientX - pressSuppression.x, event.clientY - pressSuppression.y) <
+      PRESS_MOVE_TOLERANCE_PX
+  ) {
+    return;
+  }
+  pressSuppression = null;
+  document.removeEventListener('pointermove', releasePressSuppressionOnMove, true);
+}
+
+function suppressCardsUntilPointerMoves(x: number, y: number) {
+  if (!pressSuppression) {
+    document.addEventListener('pointermove', releasePressSuppressionOnMove, true);
+  }
+  pressSuppression = { x, y };
+}
+
 /**
  * Wraps a trigger with hover-to-open behavior and renders {@link SessionInfoCard}
  * beside it. The first hover warms up (~650ms) before opening; while the pointer
@@ -593,7 +626,7 @@ export function SessionInfoHoverCard({
   // Hover intent: instant while warm, otherwise wait out the warmup delay.
   const requestOpen = useCallback(() => {
     clearClose();
-    if (openRef.current) return;
+    if (openRef.current || pressSuppression) return;
     const warm = performance.now() - lastCardInteractionAt < WARM_WINDOW_MS;
     if (warm) {
       openNow();
@@ -610,6 +643,15 @@ export function SessionInfoHoverCard({
     clearClose();
     closeTimer.current = window.setTimeout(closeSelf, CLOSE_DELAY_MS);
   }, [clearOpen, clearClose, closeSelf]);
+
+  const handlePointerDown = useCallback(
+    (event: ReactPointerEvent) => {
+      if (event.button !== 0) return;
+      suppressCardsUntilPointerMoves(event.clientX, event.clientY);
+      closeSelf();
+    },
+    [closeSelf]
+  );
 
   // Release the shared slot whenever this card is closed (incl. Escape / outside).
   useEffect(() => {
@@ -635,7 +677,11 @@ export function SessionInfoHoverCard({
       }}
     >
       <PopoverPrimitive.Anchor asChild>
-        <div onPointerEnter={requestOpen} onPointerLeave={scheduleClose}>
+        <div
+          onPointerEnter={requestOpen}
+          onPointerLeave={scheduleClose}
+          onPointerDown={handlePointerDown}
+        >
           {children}
         </div>
       </PopoverPrimitive.Anchor>

@@ -37,6 +37,12 @@ import {
   SessionPrepareCancelResponseSchema,
   SessionPrepareResponseSchema,
   SessionPreviewEndpointAcquireResponseSchema,
+  SessionPreviewCreateRequestSchema,
+  SessionPreviewCreateResponseSchema,
+  SessionPreviewRevokeRequestSchema,
+  SessionPreviewRevokeResponseSchema,
+  SessionPreviewStatusRequestSchema,
+  SessionPreviewStatusResponseSchema,
   SessionPreviewEndpointReleaseResponseSchema,
   PreviewTargetSchema,
   SessionSteerResponseSchema,
@@ -220,6 +226,18 @@ export const LocalMachineRpcRequestSchema = z.discriminatedUnion('method', [
       .strict(),
   }).strict(),
   BaseLocalMachineRpcRequestSchema.extend({
+    method: z.literal('session/preview-create'),
+    params: SessionPreviewCreateRequestSchema.omit({ type: true, machineId: true, workspaceId: true }),
+  }).strict(),
+  BaseLocalMachineRpcRequestSchema.extend({
+    method: z.literal('session/preview-revoke'),
+    params: SessionPreviewRevokeRequestSchema.omit({ type: true, machineId: true, workspaceId: true }),
+  }).strict(),
+  BaseLocalMachineRpcRequestSchema.extend({
+    method: z.literal('session/preview-status'),
+    params: SessionPreviewStatusRequestSchema.omit({ type: true, machineId: true, workspaceId: true }),
+  }).strict(),
+  BaseLocalMachineRpcRequestSchema.extend({
     method: z.literal('session/preview-endpoint-acquire'),
     params: z
       .object({
@@ -282,6 +300,9 @@ export const LocalMachineRpcResultSchema = z.union([
   SessionPreviewEndpointAcquireResponseSchema,
   SessionPreviewEndpointReleaseResponseSchema,
   SessionSteerResponseSchema,
+  SessionPreviewCreateResponseSchema,
+  SessionPreviewRevokeResponseSchema,
+  SessionPreviewStatusResponseSchema,
   SessionGoalResponseSchema,
   SessionTerminateResponseSchema,
   MachinePiExtensionsResponseSchema,

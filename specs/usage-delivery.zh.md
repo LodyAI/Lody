@@ -17,7 +17,10 @@ Local 组合仍完全禁用云用量服务。
 exactly-once 账本。缓存读/写、普通输入/输出、推理桶互不重叠。未知费用省略而非填零。
 
 对于 adapter 自有账本，Replay 不新增用量，模型切换与压缩不清零。新计量生命周期必须使用新的消费端
-计量身份或恢复基线；进程内状态不保证重启连续性。Grok 在两个完成通道之间
+计量身份或恢复基线；进程内状态不保证重启连续性。计数随进程重启归零的 adapter
+须为每条更新标注 Core 用量范围 `_meta.lody.usageScopeId`：此时 `modelUsage` 只在
+这个永不复用的范围内累计，消费端把各范围相加。跨重启复用同一身份是错误的，
+因为托管端按身份取最大值，会把重启后较小的计数隐藏到超过旧总量为止。Grok 在两个完成通道之间
 按 prompt 标识贡献，允许单调补全。DSH 按持久化请求事件标识贡献，使用请求
 实际路由而非 UI 当前模型。
 
@@ -26,19 +29,21 @@ exactly-once 账本。缓存读/写、普通输入/输出、推理桶互不重�
 CLI 合并待发累计快照，包括 Grok。失败 payload 保留原归属直至确认，
 并发 flush 共用发送过程。delta 不再加到总量，也不传给旧持久化端点。
 持久化仅投影 Token/费用字段及顶层 contextWindow；不转发搜索请求次数或模型级 contextWindow。
+任何 provider 的带范围更新都以 `nativeSessionId:scope:encodedScopeId` 作为现有
+用量接口的计量身份；无范围更新沿用 ACP session ID。真实 ACP session ID 和 session
+metadata 不变；同一范围重复投递保持幂等，无需修改托管持久化逻辑。
 Codex 将 native 根 thread 计数的增量归给实际提交参数中冻结的模型，
-每个 native turn 是一个计量生命周期。累计 turn 快照带有通知级
-`_meta.codex.usageTurnId`；CLI 将 `nativeSessionId:turn:encodedTurnId`
-用作现有用量接口的计量身份，真实 ACP session ID 和 session metadata 不变。
-因此 A 的历史用量不会记到 B 的新 turn，重试保持幂等，无需修改托管持久化逻辑。
+每个 native turn 是一个计量生命周期，也是它的范围；CLI 在一个版本内仍把旧的
+Codex 专用 `_meta.codex.usageTurnId` 读作该范围。因此 A 的历史用量不会记到 B 的新 turn。
+Claude 以每条 SDK result 的 uuid 为范围，只携带该 result 对 query 级读数的新增；
+重启或 clear-context 后的新 query() 在新范围下从零计数。
 
 内存中仅保留前一份原生快照和当前 turn。恢复快照仅作比较起点；缺失时保守跳过
 首条通知，不把历史计入新增。不使用 sidecar、持久化基线、历史模型账本或 raw-response
 计量，也不汇总子 agent。reset、reroute 和崩溃仍尽力而为，不保证精确计费。
 无标记旧 adapter 保留原累计范围；新版 adapter 需要配套 CLI。
 
-Claude query 和 Kimi activation 快照可提供
-delta，而不改变累计范围。Kimi 源码变更需新 managed artifact 才会影响实际运行版本。
+Kimi activation 快照可提供 delta，而不改变累计范围。Kimi 源码变更需新 managed artifact 才会影响实际运行版本。
 保留 provider 费用；缺失 cache-write 费率不能用 cache-read 价格替代。空聚合不代表已知
 零费用。
 
@@ -51,12 +56,21 @@ DSH 按请求完成事件时间，使用官方 UTC 工作日高峰/非高峰价�
 再累加费用。未知路由、自定义端点或缺失时间戳不虚构价格。价格表有日期，
 不是账单；跨价格边界的请求可能与账单不同。Runtime 未报告的活动无法计入。
 
+## 每轮显示
+
+assistant history 条目可带 `tokenUsage`（输入、输出、缓存读/写、推理，与 Core
+分桶一样互不重叠），即路由到该条目的 `delta.usage` 之和。CLI 在轮次结束时写入
+进行中轮次的合计，迟到的上报加到已结束的条目上；重新打开的轮次继续累加。它只
+用于显示，不是计量来源；不提供 `delta` 的 adapter 不显示。轮次详情弹层以产品
+语言的紧凑单位显示输入、输出（含推理）和缓存（读 + 写）。
+
 ## 证据与发布
 
 - [Core 契约](../packages/acp-extension-core/src/usage.ts)
 - [DSH 测试](../packages/acp-extension-dsh/src/usage.test.ts)
 - [Grok 测试](../packages/acp-extension-grok/test/proxy.test.js)
 - [投递测试](../apps/cli/src/lib/usage/usage-tracking-service.test.ts)
+- [范围决策](../.agents/notes/proposed/bug-fix/2026-09-25-usage-accounting-scopes.zh.md)
 - [调查更正](../.agents/notes/proposed/bug-fix/2026-09-12-grok-token-accounting.zh.md)
 
 先发布 Core 0.1.5，再构建/发布依赖累加器的 adapters，之后更新消费端 gitlink/

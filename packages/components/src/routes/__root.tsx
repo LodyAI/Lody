@@ -17,7 +17,8 @@ import { RuntimeProvider } from '../providers/runtime-provider';
 import { markStartupNavigationForEagerSync } from '../providers/startup-network-idle';
 import { trackDeferredPostHogPageView } from '../lib/deferred-posthog';
 import { scheduleIdleTask } from '../lib/idle-task';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { keepAppRootOffBodyTail } from '../lib/body-tail-sentinel';
 import { ErrorBoundary } from '@/components/error-boundary';
 import { isMissingEmail } from '@lody/shared';
 import { cloudOperations } from '@/lib/cloud-api-operations';
@@ -86,6 +87,7 @@ export const Route = createRootRouteWithContext<RouterContext>()({
 
 function RootComponent() {
   const { authClient } = useRouter().options.context;
+  useLayoutEffect(() => keepAppRootOffBodyTail(), []);
 
   // Local (open-source) platform: same inner app shell, but the auth/Convex
   // layers are replaced by static no-op contexts and the platform contract is

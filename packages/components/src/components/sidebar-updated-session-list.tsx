@@ -49,6 +49,7 @@ import {
   buildSessionRowOpenedByTreeSlot,
   type SidebarRowKind,
   type SessionRowOpenedByTreeSlot,
+  SIDEBAR_ROW_LIST_CLASS,
 } from '@/components/sidebar-row-shared';
 import {
   sidebarCollapsedOpenedBySessionsAtom,
@@ -568,7 +569,7 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
                 onToggleCollapsed={canToggleBucket ? handleToggle : undefined}
               />
               {!collapsed ? (
-                <div className="flex flex-col gap-px">
+                <div className={SIDEBAR_ROW_LIST_CLASS}>
                   {visibleNodes.map((node, nodeIndex) => {
                     const openedByTree = buildSessionRowOpenedByTreeSlot(node, t, () =>
                       handleToggleOpenedBySessions(node.item.id)

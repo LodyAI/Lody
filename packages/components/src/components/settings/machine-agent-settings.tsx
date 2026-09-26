@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
 import { useAtomValue, useSetAtom } from 'jotai';
@@ -15,7 +15,7 @@ import {
   type SessionId,
   type WorkspaceId,
 } from '@lody/shared';
-import { Check, ChevronDown, ChevronRight } from 'lucide-react';
+import { Check, ChevronDown, ChevronRight, Plus } from 'lucide-react';
 import { Spinner } from '@lody/ui/spinner';
 import { toast } from '@/lib/toast';
 import { activeWorkspaceRuntimeAtom, authTokenAtom, type WorkspaceRuntime } from '@/atoms/runtime';
@@ -87,6 +87,7 @@ import { ReviewPolicySection } from './review-policy-setting';
 import {
   AgentConfigDialog,
   type AgentConfigDialogMode,
+  type AgentConfigFormData,
   type AgentConfigSubmitPayload,
 } from './agent-config-dialog';
 import {
@@ -94,7 +95,10 @@ import {
   WorkspaceMachineExpandedSection,
   type WorkspaceMachineAccordionMeta,
 } from './workspace-machine-accordion';
+import { SettingsPageActions, useInSettingsPane } from './settings-page-header';
+import { SettingsLineTabs } from './settings-line-tabs';
 import { settingsSurface as surface } from './surface';
+import { settingsType as type } from './type.stylex';
 
 const TRUNCATE = {
   minWidth: 0,
@@ -116,18 +120,19 @@ const styles = stylex.create({
     display: 'flex',
     alignItems: 'center',
     gap: space[2],
-    fontSize: '0.75em',
+    fontSize: type.caption,
     color: colors.secondaryLabel,
   },
   bannerSlot: { paddingInline: space[3], paddingTop: space[3] },
   centered: {
     display: 'flex',
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: space[2],
     height: '100%',
     padding: space[4],
-    fontSize: '0.875em',
+    fontSize: type.caption,
     color: colors.secondaryLabel,
   },
   column: { display: 'flex', flexDirection: 'column', width: '100%', minWidth: 0 },
@@ -147,7 +152,7 @@ const styles = stylex.create({
   },
   grow: { flexGrow: 1, minHeight: 0 },
   machineLabel: { display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 },
-  machineName: { ...TRUNCATE, fontSize: '0.95em', lineHeight: 1.25, fontWeight: 400 },
+  machineName: { ...TRUNCATE, fontSize: '0.95em', lineHeight: type.leading, fontWeight: 400 },
   dot: {
     flexShrink: 0,
     width: '8px',
@@ -204,14 +209,13 @@ const styles = stylex.create({
     transitionDuration: duration.fast,
     transitionTimingFunction: ease.standard,
   },
-  ruled: { boxShadow: `inset 0 1px 0 ${colors.separator}` },
   pickerText: { flexGrow: 1, minWidth: 0 },
   pickerName: { ...TRUNCATE, display: 'block', fontSize: '0.95em' },
   pickerMeta: {
     ...TRUNCATE,
     display: 'block',
     marginTop: '2px',
-    fontSize: '0.78em',
+    fontSize: type.caption,
     color: colors.secondaryLabel,
   },
   pickerCheck: {
@@ -225,12 +229,20 @@ const styles = stylex.create({
   },
   page: { display: 'flex', flexDirection: 'column', gap: space[4], width: '100%', minWidth: 0 },
   heading: { minWidth: 0 },
+  machineDot: {
+    flexShrink: 0,
+    width: '6px',
+    height: '6px',
+    borderRadius: radius.full,
+    backgroundColor: colors.tertiaryLabel,
+  },
+  machineDotOnline: { backgroundColor: colors.success },
+  addGlyph: { width: '14px', height: '14px' },
   headingLine: { display: 'flex', alignItems: 'center', gap: space[1.5] },
-  headingTitle: { margin: 0, fontSize: '1em', fontWeight: 400, color: colors.label },
   headingSubtitle: {
     margin: 0,
     marginTop: '2px',
-    fontSize: '0.75em',
+    fontSize: type.caption,
     color: colors.secondaryLabel,
   },
   stack: { display: 'flex', flexDirection: 'column', gap: space[3] },
@@ -242,20 +254,29 @@ const styles = stylex.create({
     paddingInline: space[4],
     paddingBlock: space[8],
     textAlign: 'center',
-    fontSize: '0.875em',
+    fontSize: type.caption,
     color: colors.secondaryLabel,
   },
   privateSection: { display: 'flex', flexDirection: 'column', gap: space[3], paddingTop: space[3] },
   privateHeading: { paddingInline: space[1] },
   privateTitleLine: { display: 'flex', alignItems: 'center', gap: space[2] },
-  privateTitle: { margin: 0, fontSize: '0.875em', fontWeight: 400, color: colors.label },
-  count: { fontSize: '0.75em', fontVariantNumeric: 'tabular-nums', color: colors.secondaryLabel },
-  privateHint: { margin: 0, marginTop: '2px', fontSize: '0.75em', color: colors.secondaryLabel },
+  privateTitle: { margin: 0, fontSize: type.caption, fontWeight: 400, color: colors.label },
+  count: {
+    fontSize: type.caption,
+    fontVariantNumeric: 'tabular-nums',
+    color: colors.secondaryLabel,
+  },
+  privateHint: {
+    margin: 0,
+    marginTop: '2px',
+    fontSize: type.caption,
+    color: colors.secondaryLabel,
+  },
   selectPrompt: {
     paddingInline: space[1],
     paddingBlock: space[8],
     textAlign: 'center',
-    fontSize: '0.875em',
+    fontSize: type.caption,
     color: colors.secondaryLabel,
   },
   /** The disclosure is the card's first line; the pointer fills the whole of it. */
@@ -272,7 +293,7 @@ const styles = stylex.create({
     borderWidth: 0,
     color: colors.label,
     fontFamily: 'inherit',
-    fontSize: '0.875em',
+    fontSize: type.caption,
     fontWeight: 400,
     textAlign: 'start',
     cursor: 'pointer',
@@ -282,7 +303,7 @@ const styles = stylex.create({
     margin: 0,
     paddingInline: space[4],
     paddingBottom: '10px',
-    fontSize: '0.75em',
+    fontSize: type.caption,
     lineHeight: 1.375,
     color: colors.secondaryLabel,
   },
@@ -296,15 +317,15 @@ const styles = stylex.create({
     width: '100%',
     margin: 0,
     paddingInline: space[4],
-    paddingBlock: '10px',
+    paddingBlock: '8px',
     borderWidth: 0,
     color: colors.label,
     fontFamily: 'inherit',
-    fontSize: '0.875em',
+    fontSize: type.caption,
     textAlign: 'start',
     cursor: 'pointer',
   },
-  manage: { flexShrink: 0, fontSize: '0.75em', color: colors.secondaryLabel },
+  manage: { flexShrink: 0, fontSize: type.caption, color: colors.secondaryLabel },
 });
 
 export type MachineAgentSettingsProps = {
@@ -387,6 +408,7 @@ export function MachineAgentSettings({
   mode = 'agents',
 }: MachineAgentSettingsProps) {
   const { t } = useTranslation();
+  const inSettingsPane = useInSettingsPane();
   const { openSettings } = useOpenSettings();
   const navigate = useNavigate();
   const isMobile = useIsMobile();
@@ -804,7 +826,15 @@ export function MachineAgentSettings({
   // decoupled from any single "selected machine" now that desktop lists them all.
   const [dialogMachineId, setDialogMachineId] = useState<MachineId | null>(null);
   const dialogMachine = dialogMachineId ? machines.get(dialogMachineId) : undefined;
-  const dialogOpen = dialogMode !== null;
+  // The dialog's open bit lives apart from its mode/machine: the root must be
+  // mounted while closed for Base UI to report `starting`/`ending`, or neither
+  // transition ever plays — a dialog mounted already-open renders in its final
+  // state on the first frame, and one unmounted on close vanishes mid-fade.
+  const [dialogOpen, setDialogOpen] = useState(false);
+  // Opening happens one commit after the root mounts, for the same reason.
+  useLayoutEffect(() => {
+    if (dialogMode && dialogMachine) setDialogOpen(true);
+  }, [dialogMode, dialogMachine]);
   const [latestCliVersion, setLatestCliVersion] = useState<string | null>(null);
 
   const sharedWithTeam = resolvedSelectedMachine
@@ -1094,10 +1124,13 @@ export function MachineAgentSettings({
 
   const { checkBinaryStatus, installBinary } = useMachineAcpBinaryActions(runtime, workspaceId);
 
-  const openCreateDialog = useCallback((machine: MachineViewMeta) => {
-    setDialogMachineId(machine.id);
-    setDialogMode({ kind: 'create' });
-  }, []);
+  const openCreateDialog = useCallback(
+    (machine: MachineViewMeta, initialForm?: Partial<AgentConfigFormData>) => {
+      setDialogMachineId(machine.id);
+      setDialogMode(initialForm ? { kind: 'create', initialForm } : { kind: 'create' });
+    },
+    []
+  );
 
   const openEditDialog = useCallback((machine: MachineViewMeta, config: AgentConfigMeta) => {
     setDialogMachineId(machine.id);
@@ -1209,9 +1242,16 @@ export function MachineAgentSettings({
       <AgentConfigDialog
         open={dialogOpen}
         onOpenChange={(open) => {
-          if (!open) setDialogMode(null);
+          if (!open) setDialogOpen(false);
         }}
-        nestedInDialog={!isMobile}
+        onOpenChangeComplete={(open) => {
+          // Mode and machine outlive `open` so the panel's real content is
+          // still there while it fades out; they clear once it has left.
+          if (!open) {
+            setDialogMode(null);
+            setDialogMachineId(null);
+          }
+        }}
         mode={dialogMode}
         machine={dialogMachine}
         onSubmit={handleDialogSubmit}
@@ -1229,7 +1269,7 @@ export function MachineAgentSettings({
 
   if (isLoading && !hasMachines) {
     return (
-      <div {...stylex.props(styles.centered)}>
+      <div {...stylex.props(inSettingsPane && surface.container, styles.centered)}>
         <Spinner size="small" />
         {t('workspace.machines.loadingVisibility', 'Loading machines')}
       </div>
@@ -1238,7 +1278,7 @@ export function MachineAgentSettings({
 
   if (!hasMachines) {
     return (
-      <div {...stylex.props(styles.centered)}>
+      <div {...stylex.props(inSettingsPane && surface.container, styles.centered)}>
         {t('workspace.machines.empty', 'No machines connected')}
       </div>
     );
@@ -1326,7 +1366,7 @@ export function MachineAgentSettings({
                         <button
                           key={item.machine.id}
                           type="button"
-                          {...stylex.props(styles.pickerRow, index > 0 && styles.ruled)}
+                          {...stylex.props(styles.pickerRow, index > 0 && surface.lineRuled)}
                           onClick={() => {
                             onSelectedMachineChange(item.machine.id);
                             setMobileMachinePickerOpen(false);
@@ -1493,13 +1533,18 @@ export function MachineAgentSettings({
           'AI agent configurations available in this workspace.'
         );
 
-  const header = (
+  const filterButton =
+    mode === 'machines' && remoteMachinesAvailable ? (
+      <MachineListFilterButton filter={effectiveFilter} onFilterChange={setFilter} />
+    ) : null;
+  // In the pane the header names the page; only the filter is this page's to add.
+  const header = inSettingsPane ? (
+    <SettingsPageActions>{filterButton}</SettingsPageActions>
+  ) : (
     <div {...stylex.props(styles.heading)}>
       <div {...stylex.props(styles.headingLine)}>
-        <h2 {...stylex.props(styles.headingTitle)}>{title}</h2>
-        {mode === 'machines' && remoteMachinesAvailable ? (
-          <MachineListFilterButton filter={effectiveFilter} onFilterChange={setFilter} />
-        ) : null}
+        <h2 {...stylex.props(surface.pageTitle)}>{title}</h2>
+        {filterButton}
       </div>
       <p {...stylex.props(styles.headingSubtitle)}>{subtitle}</p>
     </div>
@@ -1587,7 +1632,7 @@ export function MachineAgentSettings({
   if (mode !== 'agents') {
     if (!remoteMachinesAvailable) {
       return (
-        <div {...stylex.props(styles.page)}>
+        <div {...stylex.props(inSettingsPane && surface.container, styles.page)}>
           {banner}
           {header}
           {resolvedSelectedMachine ? (
@@ -1645,7 +1690,7 @@ export function MachineAgentSettings({
     }
 
     return (
-      <div {...stylex.props(styles.page)}>
+      <div {...stylex.props(inSettingsPane && surface.container, styles.page)}>
         {banner}
         {header}
 
@@ -1699,20 +1744,69 @@ export function MachineAgentSettings({
     );
   }
 
+  // In the pane the header carries adding a provider; the machines are tabs
+  // under the title, shown only when there is more than one to choose, so the
+  // list under them is the chosen machine's providers and nothing else.
+  const machineTabs =
+    machinePills.length > 1 && resolvedSelectedMachine ? (
+      <SettingsLineTabs
+        ruled
+        label={t('settings.agent.machineTabs.machine', 'Machine')}
+        current={resolvedSelectedMachine.id as string}
+        onChange={(id) => onSelectedMachineChange(id as MachineId)}
+        overflow={{
+          label: (count) => t('settings.agent.machineTabs.more', '{{count}} more', { count }),
+          searchPlaceholder: t('settings.agent.machineTabs.search', 'Search machines'),
+        }}
+        tabs={machinePills.map((pill) => ({
+          id: pill.id,
+          label: pill.label,
+          leading: (
+            <span
+              aria-hidden="true"
+              {...stylex.props(styles.machineDot, pill.online && styles.machineDotOnline)}
+            />
+          ),
+        }))}
+      />
+    ) : null;
+
   return (
-    <div {...stylex.props(styles.page)}>
+    <div {...stylex.props(inSettingsPane && surface.container, styles.page)}>
       {banner}
       {header}
 
-      <MachinePills
-        pills={machinePills}
-        selectedId={resolvedSelectedMachine?.id ?? null}
-        onSelect={(id) => onSelectedMachineChange(id as MachineId)}
-      />
+      {inSettingsPane ? (
+        <SettingsPageActions>
+          {resolvedSelectedMachine ? (
+            <Button
+              variant="secondary"
+              size="small"
+              onClick={() => openCreateDialog(resolvedSelectedMachine)}
+            >
+              <Plus {...stylex.props(styles.addGlyph)} />
+              {t('settings.agent.provider.addProvider', 'Add provider')}
+            </Button>
+          ) : null}
+        </SettingsPageActions>
+      ) : (
+        <MachinePills
+          pills={machinePills}
+          selectedId={resolvedSelectedMachine?.id ?? null}
+          onSelect={(id) => onSelectedMachineChange(id as MachineId)}
+        />
+      )}
+      {inSettingsPane ? machineTabs : null}
 
       {resolvedSelectedMachine ? (
         <MachineProvidersSection
           key={resolvedSelectedMachine.id}
+          bare={inSettingsPane}
+          onAddProvider={
+            inSettingsPane
+              ? (initialForm) => openCreateDialog(resolvedSelectedMachine, initialForm)
+              : undefined
+          }
           flush
           machine={resolvedSelectedMachine}
           configs={configsForMachine}
@@ -1778,7 +1872,7 @@ function OwnPrivateMachines({
             <button
               key={item.machine.id}
               type="button"
-              {...stylex.props(styles.privateRow, surface.pressableLine, styles.ruled)}
+              {...stylex.props(styles.privateRow, surface.pressableLine, surface.lineRuled)}
               onClick={() => onOpen(item.machine.id)}
             >
               <span {...stylex.props(styles.truncate)}>{item.machine.name || item.machine.id}</span>

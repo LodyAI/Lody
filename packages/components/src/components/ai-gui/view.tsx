@@ -8,7 +8,6 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   memo,
   type MouseEvent as ReactMouseEvent,
-  type MutableRefObject,
   type ReactNode,
   useCallback,
   useContext,
@@ -88,6 +87,10 @@ import { getAgentMetaByIdAtomFamily } from '@/atoms/agents';
 import { sessionMetaAtomFamily } from '@/atoms/doc-meta';
 import { authTokenAtom, runtimeAtom } from '@/atoms/runtime';
 import { machineSupportsSubagentCancellation } from '@lody/shared';
+import { scrollDebug } from '@/hooks/scroll-debug-log';
+import { readSessionTurnTokenUsage, type SessionTurnTokenUsage } from '@lody/shared/session-data';
+import { formatCompactNumber } from '@/lib/format-compact-number';
+import { toIntlLocaleOrEn } from '@/lib/intl-locale';
 import { useStickyScroll } from '@/hooks/use-sticky-scroll';
 import { buildResendInputBlocks, isUndeliveredUserTurnEntry } from '@/lib/undelivered-user-turn';
 import { ConversationOutlineRail } from './conversation-outline-rail';
@@ -179,7 +182,7 @@ import {
 } from './conversation-panel';
 import { TerminalComponent } from './terminal-component';
 import { prepareTerminalOutputBlocksPreview } from './terminal-preview';
-import { type DurationUnitLabels, formatDurationCompact } from '@/lib/format-duration';
+import { formatDurationCompact, getDurationUnitLabels } from '@/lib/format-duration';
 import {
   resolveLiveSessionHistoryDurationMs,
   resolveSessionHistoryDurationMs,
@@ -416,6 +419,11 @@ type ChatVirtualRow = AssistantChatVirtualRow | StandardChatVirtualRow | Placeho
 export interface SessionChatStreamHandle {
   scrollToBottom: () => void;
   scrollToIndex: (index: number, smooth?: boolean) => void;
+  /**
+   * Hold the user message `messageId` at the top of the viewport, with room
+   * reserved below it for the reply, as soon as its row is rendered.
+   */
+  anchorMessage: (messageId: string) => void;
 }
 
 export type SessionChatUser =
@@ -522,8 +530,6 @@ export interface SessionChatStreamViewProps {
   /** The status is live work (not waiting on the user): shimmer it. */
   agentActivityShimmer?: boolean;
   conversationFontSize?: ConversationFontSize;
-  /** Skips one auto-follow caused by the session composer changing height. */
-  skipNextViewportResizeAutoScrollRef?: MutableRefObject<boolean>;
   /** Full-page overlay that keeps the conversation outline independent of composer height. */
   outlineOverlayRoot?: HTMLElement | null;
   /**
@@ -887,6 +893,7 @@ const assistantGroupHasActiveSearch = (
 };
 
 const hasAssistantTurnConfigInfo = (message: SessionHistoryParsed): boolean =>
+  readSessionTurnTokenUsage(message.tokenUsage) !== undefined ||
   Boolean(message.modelInfo?.name) ||
   Boolean(message.inputConfig?.modeId) ||
   Boolean(message.inputConfig?.configOptionValues) ||
@@ -1365,7 +1372,6 @@ export const SessionChatStreamView = forwardRef<
       // Waiting on the user (warning tone) is not work in progress.
       agentActivityShimmer = agentActivityTone !== 'warning',
       conversationFontSize = DEFAULT_CONVERSATION_FONT_SIZE,
-      skipNextViewportResizeAutoScrollRef,
       suppressStickyAutoScrollRef,
       outlineOverlayRoot,
       onVisibleTurnRangeChange,
@@ -1566,12 +1572,27 @@ export const SessionChatStreamView = forwardRef<
     // before `Virtualizer` mounts, yet every hook above that return has already
     // run — including the one that reads the stored row measurements.
     const hasVirtualizedRows = virtualRows.length > 0;
+    const placeholderRowCount = useMemo(
+      () => virtualRows.reduce((count, row) => count + (row.type === 'placeholder' ? 1 : 0), 0),
+      [virtualRows]
+    );
+    // Placeholder turns turning into several body rows is the prime suspect for
+    // repeated open flicker; the scroll debug timeline records each change.
+    useEffect(() => {
+      scrollDebug('rows', {
+        total: virtualRows.length,
+        placeholders: placeholderRowCount,
+        leading: leadingContent != null,
+      });
+    }, [leadingContent, placeholderRowCount, virtualRows.length]);
 
     const {
       scrollRef: scrollContainerRef,
+      spacerRef: bottomSpacerRef,
       scrollElement: scrollViewportElement,
       isSticky,
-      scrollToBottom,
+      scrollToBottom: scrollStreamToBottom,
+      anchorToRow,
       initialScrollRestored,
       initialVirtualizerCache,
       persistVirtualizerCache,
@@ -1585,9 +1606,40 @@ export const SessionChatStreamView = forwardRef<
       // scroll otherwise targets an index short of the true bottom.
       itemCount: virtualRows.length + leadingRowCount + (shouldShowAgentActivityRow ? 1 : 0),
       onAtBottomChange,
-      skipNextViewportResizeAutoScrollRef,
       suppressAutoScrollRef: autoScrollSuppressedRef,
     });
+
+    /**
+     * A sent message waiting for its row. The send path learns the turn id
+     * before the conversation view renders it, so the anchor is resolved in
+     * the layout effect of the commit that first contains the row.
+     */
+    const pendingAnchorMessageIdRef = useRef<string | null>(null);
+    const resolvePendingAnchor = useCallback(() => {
+      const messageId = pendingAnchorMessageIdRef.current;
+      if (messageId === null) return;
+      const rowIndex = virtualRows.findIndex(
+        (row) =>
+          row.type === 'standard' &&
+          row.item.type === 'message' &&
+          row.item.message.id === messageId
+      );
+      if (rowIndex === -1) return;
+      pendingAnchorMessageIdRef.current = null;
+      anchorToRow(rowIndex + leadingRowCount);
+    }, [anchorToRow, leadingRowCount, virtualRows]);
+    useLayoutEffect(resolvePendingAnchor, [resolvePendingAnchor]);
+    const anchorMessage = useCallback(
+      (messageId: string) => {
+        pendingAnchorMessageIdRef.current = messageId;
+        resolvePendingAnchor();
+      },
+      [resolvePendingAnchor]
+    );
+    const scrollToBottom = useCallback(() => {
+      pendingAnchorMessageIdRef.current = null;
+      scrollStreamToBottom();
+    }, [scrollStreamToBottom]);
     const selectableRows = useMemo(
       () =>
         virtualRows.map((row) => ({
@@ -1912,9 +1964,10 @@ export const SessionChatStreamView = forwardRef<
       [activeSearchBlockId, items, scrollRowToTop, virtualRows]
     );
 
-    useImperativeHandle(ref, () => ({ scrollToBottom, scrollToIndex }), [
+    useImperativeHandle(ref, () => ({ scrollToBottom, scrollToIndex, anchorMessage }), [
       scrollToBottom,
       scrollToIndex,
+      anchorMessage,
     ]);
 
     const noMessagesLabel = t('sessions.noMessages');
@@ -2145,6 +2198,10 @@ export const SessionChatStreamView = forwardRef<
                   )}
                 </Virtualizer>
               </NativeSelectionRowsContext.Provider>
+              {/* Reply room below an anchored sent message; useStickyScroll
+                  owns its height. It must follow the Virtualizer: sticky scroll
+                  reads the virtualized content as the viewport's first child. */}
+              <div ref={bottomSpacerRef} aria-hidden data-conversation-reply-room="" />
               <MessageSelectionOverlay />
             </div>
             {/* Top fade into the bg-background canvas above (desktop only),
@@ -3640,6 +3697,62 @@ const ResendUndeliveredDialog = ({
   );
 };
 
+/** Tokens this turn consumed, in compact product-language units (1.2K / 1.2万). */
+const AssistantTurnTokenUsageRows = ({ usage }: { usage: SessionTurnTokenUsage }) => {
+  const { t, i18n } = useTranslation();
+  const locale = toIntlLocaleOrEn(i18n.resolvedLanguage ?? i18n.language);
+  const exact = new Intl.NumberFormat(locale);
+  const rows = [
+    {
+      key: 'input',
+      label: t('sessions.turnConfig.inputTokens', 'Input'),
+      value: usage.inputTokens,
+      detail: undefined,
+    },
+    {
+      key: 'output',
+      label: t('sessions.turnConfig.outputTokens', 'Output'),
+      // Stored output excludes reasoning; the turn's output is both.
+      value: usage.outputTokens + usage.reasoningOutputTokens,
+      detail:
+        usage.reasoningOutputTokens > 0
+          ? t('sessions.turnConfig.outputDetail', 'Reasoning {{reasoning}}', {
+              reasoning: exact.format(usage.reasoningOutputTokens),
+            })
+          : undefined,
+    },
+    {
+      key: 'cache',
+      label: t('sessions.turnConfig.cacheTokens', 'Cache'),
+      value: usage.cacheReadInputTokens + usage.cacheCreationInputTokens,
+      detail: t('sessions.turnConfig.cacheDetail', 'Read {{read}} · Write {{write}}', {
+        read: exact.format(usage.cacheReadInputTokens),
+        write: exact.format(usage.cacheCreationInputTokens),
+      }),
+    },
+  ];
+  return (
+    <div className="border-t border-border/60 px-3 py-2.5">
+      <div className="mb-1.5 text-[11px] font-medium text-foreground">
+        {t('sessions.turnConfig.tokens', 'Tokens')}
+      </div>
+      <dl className="space-y-1.5">
+        {rows.map((row) => (
+          <div key={row.key} className="flex items-start justify-between gap-3 text-[11px]">
+            <dt className="shrink-0 text-muted-foreground">{row.label}</dt>
+            <dd
+              className="text-right font-medium tabular-nums text-foreground"
+              title={[exact.format(row.value), row.detail].filter(Boolean).join(' · ')}
+            >
+              {formatCompactNumber(row.value, locale)}
+            </dd>
+          </div>
+        ))}
+      </dl>
+    </div>
+  );
+};
+
 /** Hover tooltip + click popover for turn model / run-config. */
 const AssistantTurnConfigInfoButton = ({
   message,
@@ -3672,7 +3785,11 @@ const AssistantTurnConfigInfoButton = ({
     [message.modelInfo, message.inputConfig]
   );
   const modelBaseName = message.modelInfo ? formatAssistantModelBaseName(message.modelInfo) : '';
-  if (configRows.length === 0 && !modelBaseName) {
+  const tokenUsage = useMemo(
+    () => readSessionTurnTokenUsage(message.tokenUsage),
+    [message.tokenUsage]
+  );
+  if (configRows.length === 0 && !modelBaseName && !tokenUsage) {
     return null;
   }
   const tooltipPreview = (() => {
@@ -3748,12 +3865,13 @@ const AssistantTurnConfigInfoButton = ({
               </dd>
             </div>
           ))}
-          {configRows.length === 0 ? (
+          {configRows.length === 0 && !tokenUsage ? (
             <p className="text-[11px] text-muted-foreground">
               {t('sessions.turnConfig.empty', 'No configuration recorded for this turn.')}
             </p>
           ) : null}
         </dl>
+        {tokenUsage ? <AssistantTurnTokenUsageRows usage={tokenUsage} /> : null}
       </Popover.Content>
     </Popover.Root>
   );
@@ -3952,11 +4070,7 @@ const WorkedGroupHeader = ({
 }) => {
   const { t } = useTranslation();
   const isMobile = useIsMobile();
-  const durationUnitLabels: DurationUnitLabels = {
-    hour: t('time.unitShort.hour', 'h'),
-    minute: t('time.unitShort.minute', 'm'),
-    second: t('time.unitShort.second', 's'),
-  };
+  const durationUnitLabels = getDurationUnitLabels(t);
   /* Mobile moves the turn duration to the footer action bar, where it also
      keeps the copy button clear of the session drawer's left-edge back-swipe
      strip. Both rows read the same `resolveSessionHistoryDurationMs(message)`,
@@ -4227,11 +4341,7 @@ const LiveTurnDurationLabel = ({
   const now = useStableNow(LIVE_TURN_DURATION_SAMPLE_MS);
   const durationMs = resolveLiveSessionHistoryDurationMs(message, now.getTime());
   if (durationMs === null) return null;
-  const duration = formatDurationCompact(durationMs, {
-    hour: t('time.unitShort.hour', 'h'),
-    minute: t('time.unitShort.minute', 'm'),
-    second: t('time.unitShort.second', 's'),
-  });
+  const duration = formatDurationCompact(durationMs, getDurationUnitLabels(t));
   if (!duration) return null;
   return <>{t('sessions.workedFor', { duration, defaultValue: 'Worked for {{duration}}' })}</>;
 };
@@ -4247,13 +4357,7 @@ const LiveActivityLabel = ({ label, message }: { label: string; message: LiveAct
   const now = useStableNow(LIVE_TURN_DURATION_SAMPLE_MS);
   const durationMs = resolveLiveSessionHistoryDurationMs(message, now.getTime());
   const duration =
-    durationMs === null
-      ? ''
-      : formatDurationCompact(durationMs, {
-          hour: t('time.unitShort.hour', 'h'),
-          minute: t('time.unitShort.minute', 'm'),
-          second: t('time.unitShort.second', 's'),
-        });
+    durationMs === null ? '' : formatDurationCompact(durationMs, getDurationUnitLabels(t));
   if (!duration) return <>{label}</>;
   return (
     <>
@@ -4356,11 +4460,7 @@ export const AssistantTurnFooter = ({
   }, [message.finished, message.items]);
   const hasCopyableText = textContent.trim().length > 0;
   const fileDiffs = fileDiffOverride ?? message.fileDiff ?? EMPTY_EDITED_FILE_ENTRIES;
-  const durationUnitLabels: DurationUnitLabels = {
-    hour: t('time.unitShort.hour', 'h'),
-    minute: t('time.unitShort.minute', 'm'),
-    second: t('time.unitShort.second', 's'),
-  };
+  const durationUnitLabels = getDurationUnitLabels(t);
   const durationMs = resolveSessionHistoryDurationMs(message);
   const durationLabel =
     durationMs === null ? '' : formatDurationCompact(durationMs, durationUnitLabels);
@@ -6564,9 +6664,7 @@ const PlanEntryRow = ({
           <StatusIcon className={cn('h-4 w-4 flex-none shrink-0', statusMeta.className)} />
           <span className="break-words">{entry.content}</span>
         </div>
-        <Badge tone={priorityMeta.tone} className="uppercase">
-          {priorityMeta.label}
-        </Badge>
+        <Badge tone={priorityMeta.tone}>{priorityMeta.label}</Badge>
       </div>
     </div>
   );

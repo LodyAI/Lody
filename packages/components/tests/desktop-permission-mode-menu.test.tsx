@@ -77,14 +77,16 @@ describe('DesktopPermissionModeButton menu', () => {
     return document.querySelector('[role="menu"]') as HTMLElement;
   };
 
-  it('keeps the group label in sentence case and hides descriptions on the row', async () => {
+  it('lists options without a group label and hides descriptions on the row', async () => {
     const menu = await openMenu();
-    const label = [...menu.querySelectorAll('*')].find(
-      (node) => node.childNodes.length === 1 && node.textContent === 'Permission'
+    // The trigger already carries the "Permission" label, so the menu must not
+    // repeat it as a heading.
+    const labelClasses = menuGroupLabelClassName.split(/\s+/).filter(Boolean);
+    expect(labelClasses.length).toBeGreaterThan(0);
+    const label = [...menu.querySelectorAll('*')].find((node) =>
+      labelClasses.every((cls) => node.classList.contains(cls))
     );
-    expect(label).toBeDefined();
-    // The product's own sentence-case label, not the package's caps heading.
-    expect(label?.className).toContain(menuGroupLabelClassName);
+    expect(label).toBeUndefined();
     expect(menu.textContent).not.toContain('Requires approval');
     expect(menu.textContent).not.toContain('Exercise caution');
     const agent = [...menu.querySelectorAll('[role="menuitem"]')].find((node) =>

@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import { Trans, useTranslation } from 'react-i18next';
 import { Spinner } from '@lody/ui/spinner';
 
+import { Badge } from '@lody/ui/badge';
 import { Button } from '@lody/ui/button';
 import { cn } from '@/lib/utils';
 // Placeholder workspace avatar until per-workspace avatars are supported.
@@ -68,7 +69,7 @@ export function AcceptInvitationPage({
         <div className="flex flex-col items-center px-7 pb-7 pt-8 text-center">
           {state === 'loading' ? (
             <>
-              <Spinner className="mb-4 size-6 text-muted-foreground" aria-hidden="true" />
+              <Spinner size="large" className="mb-4 text-muted-foreground" aria-hidden="true" />
               <Title>{t('invite.processing.title', 'Processing invitation')}</Title>
               <Description>
                 {t('invite.processing.description', 'Hang tight, this only takes a moment.')}
@@ -240,8 +241,6 @@ function Description({ children }: { children: ReactNode }) {
 function InvitationRole({ role }: { role: string }) {
   const { t } = useTranslation();
   return (
-    <p className="mt-3 rounded-full border border-border/60 px-2.5 py-1 text-xs text-muted-foreground">
-      {t('invite.role.label', 'Role: {{role}}', { role })}
-    </p>
+    <Badge className="mt-3 max-w-full">{t('invite.role.label', 'Role: {{role}}', { role })}</Badge>
   );
 }

@@ -80,7 +80,7 @@ import {
   mobileKeyboardActionAtom,
   runtimeInitializingAtom,
   setMobileDrawerOpenAtom,
-  navigationSidebarHiddenAtom,
+  navigationSidebarVisibleAtom,
   showNavigationSidebarAtom,
   userAtom,
   workspaceReposCacheAtomFamily,
@@ -930,7 +930,7 @@ function WorkspaceChatLanding({
   } = useSessionActions();
   const openMobileDrawer = useSetAtom(setMobileDrawerOpenAtom);
   const setBugReportDialogOpen = useSetAtom(bugReportDialogOpenAtom);
-  const isLeftSidebarHidden = useAtomValue(navigationSidebarHiddenAtom);
+  const isLeftSidebarHidden = !useAtomValue(navigationSidebarVisibleAtom);
   const showNavigationSidebar = useSetAtom(showNavigationSidebarAtom);
   const visibleLocalMachineId = useMemo(() => {
     const machineId = localProbeResult?.machineId as MachineId | undefined;

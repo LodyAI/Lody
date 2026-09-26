@@ -50,6 +50,19 @@ mobile surfaces. Background for the rules below:
 - System theme state, persistence, and browser preference tracking are owned by
   `next-themes`. Keep Lody's wrapper focused on preview state, fixed VS Code theme
   application, and the Electron native-theme bridge.
+- Never `@source`-scan a third-party component library in `src/tailwind/index.css`:
+  it emits that library's utilities globally. Konsta's `last-child-hairline-b-none`
+  (unanchored `:last-child … ::after`) made every portal open/close restyle the whole
+  app. Keep `#root` off `<body>`'s tail (`lib/body-tail-sentinel.ts`, mounted by
+  `routes/__root.tsx`). Rationale:
+  [portal restyle note](../../.agents/notes/implemented/bug-fix/2026-09-23-portal-full-restyle.md).
+- Sidebar session-row lists use `SIDEBAR_ROW_LIST_CLASS` (`content-visibility: auto`,
+  which also applies paint containment): a row must draw inside its own box (inset
+  focus rings; connectors inside the leading slot). Recursive GitHub trees go through
+  `lib/repo-file-paths-cache.ts`, never a direct `githubFetchFilePaths` per search.
+- Markdown code blocks tokenize in `lib/markdown-highlight.worker.ts`; the main thread
+  keeps only cache hits and the no-worker fallback. Builds without an `es` worker format
+  alias `@/lib/markdown-highlight-worker` to a null shim (see site-docs).
 
 ## Rules shared by callers
 

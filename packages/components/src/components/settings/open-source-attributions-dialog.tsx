@@ -231,6 +231,11 @@ export function OpenSourceAttributionsDialog({
             size="small"
             onClick={(event) => {
               event.preventDefault();
+              // Base UI's trigger still opens on click after this handler —
+              // `preventDefault` does not reach it, only its own opt-out does.
+              // Suppress it so the deferred open survives long enough for a
+              // double-click to cancel it.
+              (event as { preventBaseUIHandler?: () => void }).preventBaseUIHandler?.();
               clearOpenTimer();
               openTimerRef.current = setTimeout(() => {
                 openTimerRef.current = null;

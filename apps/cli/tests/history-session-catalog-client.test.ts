@@ -129,7 +129,7 @@ describe('requestHistorySessionReplay', () => {
     const request = vi.fn(async () => ({}));
     const loadSession = vi.fn(async () => ({}));
 
-    await requestHistorySessionReplay({
+    const runtimeConfig = await requestHistorySessionReplay({
       provider: codexProvider,
       acpSessionId,
       cwd: '/repo/project',
@@ -152,6 +152,7 @@ describe('requestHistorySessionReplay', () => {
       sessionId: acpSessionId,
     });
     expect(loadSession).not.toHaveBeenCalled();
+    expect(runtimeConfig).toBeUndefined();
   });
 
   it('fails closed when builtin Codex does not advertise the read-only method', async () => {
@@ -173,11 +174,22 @@ describe('requestHistorySessionReplay', () => {
     expect(loadSession).not.toHaveBeenCalled();
   });
 
-  it('keeps loadSession for non-Codex providers', async () => {
+  it("keeps loadSession for non-Codex providers and returns the session's runtime selection", async () => {
     const request = vi.fn(async () => ({}));
-    const loadSession = vi.fn(async () => ({}));
+    const loadSession = vi.fn(async () => ({
+      configOptions: [
+        {
+          id: 'model',
+          name: 'Model',
+          category: 'model',
+          type: 'select',
+          currentValue: 'model-a',
+          options: [{ value: 'model-a', name: 'A' }],
+        },
+      ],
+    }));
 
-    await requestHistorySessionReplay({
+    const runtimeConfig = await requestHistorySessionReplay({
       provider: { cliType: 'registry', agentType: 'auggie' },
       acpSessionId,
       cwd: '/repo/project',
@@ -192,6 +204,11 @@ describe('requestHistorySessionReplay', () => {
       sessionId: acpSessionId,
       cwd: '/repo/project',
       mcpServers: [],
+    });
+    expect(runtimeConfig).toEqual({
+      acpSessionId,
+      modelId: 'model-a',
+      configOptionValues: { model: 'model-a' },
     });
   });
 });

@@ -108,7 +108,7 @@ export function selectPromptShortcutCandidates(
           // header already says these are Prompt Shortcuts.
           iconEmoji: getShortcutEmoji(entry),
           title: `/${entry.slug}`,
-          subtitle: entry.description,
+          hint: entry.description,
           trailing: visibility,
           disabled: availability.kind !== 'available',
           disabledReason: shortcutAvailabilityMessage(availability, t) || undefined,

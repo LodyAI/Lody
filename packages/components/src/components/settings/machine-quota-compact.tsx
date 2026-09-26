@@ -24,6 +24,7 @@ import {
   formatRateLimitWindowShortLabel,
   getAgentRateLimitWindows,
 } from '@/lib/session-usage';
+import { settingsType as type } from './type.stylex';
 
 type MachineUsageData = MachineViewMeta['raceLimits'][string];
 
@@ -220,7 +221,7 @@ const styles = stylex.create({
     display: 'inline-flex',
     alignItems: 'center',
     gap: space[1.5],
-    fontSize: '0.8em',
+    fontSize: type.caption,
     fontWeight: 400,
     color: colors.label,
   },

@@ -6,8 +6,7 @@
  *    page position and the document timeline, never on when a mark mounted;
  *  - a long rhythm wave pulses whole marks down a list;
  *  - the animation stays on the compositor: Web Animations on HTML elements,
- *    touching only `transform` and `opacity`, cancelled on unmount;
- *  - every mark holds still while the user reads outside the sidebar.
+ *    touching only `transform` and `opacity`, cancelled on unmount.
  *
  * jsdom has no Web Animations API, so the component tests install a recording
  * `Element.prototype.animate` and assert which elements animate which properties.
@@ -21,8 +20,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { SidebarRowEndSlot } from '../src/components/sidebar-row-shared';
 import { WorkingGrid } from '../src/ui/working-grid';
 import { WorkingGridCollapse } from '../src/ui/working-grid-collapse';
-import { WorkingStatusMark } from '../src/ui/working-status-mark';
-import { READING_IDLE_MS, setWorkingGridReadingPause } from '../src/ui/working-grid-reading';
+import { WORKING_HAND_OVER_MS, WorkingStatusMark } from '../src/ui/working-status-mark';
 import {
   crestDelayMs,
   tileSeaPoint,
@@ -98,7 +96,6 @@ interface RecordedAnimation {
   keyframes: Keyframe[];
   options: KeyframeAnimationOptions;
   startTime: number | null;
-  paused: boolean;
   cancelled: boolean;
   finish: () => void;
 }
@@ -123,7 +120,6 @@ beforeEach(() => {
       keyframes: keyframes as Keyframe[],
       options: options as KeyframeAnimationOptions,
       startTime: null,
-      paused: false,
       cancelled: false,
       finish: () => {},
     };
@@ -135,11 +131,6 @@ beforeEach(() => {
       finished,
       set startTime(value: number | null) {
         entry.startTime = value;
-        entry.paused = false;
-      },
-      set currentTime(_value: number | null) {},
-      pause() {
-        entry.paused = true;
       },
       cancel() {
         entry.cancelled = true;
@@ -347,48 +338,6 @@ describe('WorkingGrid', () => {
     expect(container.querySelectorAll('[data-working-grid-tile]')).toHaveLength(9);
   });
 
-  it('holds every mark still while the user reads outside the sidebar', () => {
-    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'performance'] });
-    try {
-      setWorkingGridReadingPause(true);
-      render(
-        <div>
-          <div data-working-grid-region="">
-            <WorkingGrid />
-            <button type="button">row</button>
-          </div>
-          <p>conversation</p>
-        </div>
-      );
-      const sidebar = container.querySelector('button')!;
-      const reading = container.querySelector('p')!;
-
-      // Clicking inside the sidebar is not reading.
-      sidebar.dispatchEvent(new Event('pointerdown', { bubbles: true }));
-      expect(recorded.some((animation) => animation.paused)).toBe(false);
-
-      // Scrolling the conversation freezes every loop on its current frame...
-      reading.dispatchEvent(new Event('wheel', { bubbles: true }));
-      expect(recorded.every((animation) => animation.paused)).toBe(true);
-
-      // ...until the reader has been quiet for a while.
-      vi.advanceTimersByTime(READING_IDLE_MS - 1);
-      expect(recorded.every((animation) => animation.paused)).toBe(true);
-      vi.advanceTimersByTime(1);
-      expect(recorded.some((animation) => animation.paused)).toBe(false);
-      // Resumed together, on one shared clock.
-      expect(new Set(recorded.map((animation) => animation.startTime)).size).toBe(1);
-
-      // Moving back into the sidebar resumes at once.
-      reading.dispatchEvent(new Event('keydown', { bubbles: true }));
-      expect(recorded.every((animation) => animation.paused)).toBe(true);
-      sidebar.dispatchEvent(new Event('pointerover', { bubbles: true }));
-      expect(recorded.some((animation) => animation.paused)).toBe(false);
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
   it('is the sidebar row working mark', () => {
     render(<SidebarRowEndSlot isWorking />);
     const mark = container.querySelector('[data-session-working-indicator]');
@@ -435,6 +384,51 @@ describe('WorkingGridCollapse', () => {
     expect(container.querySelector('[data-session-unread-dot]')).not.toBeNull();
   });
 
+  describe('hand-over hold', () => {
+    beforeEach(() => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    });
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('still plays when presence clears before the unread write lands', () => {
+      // Presence is applied at once; the doc-meta unread bump a task later.
+      const rest = <span data-rest-icon="" />;
+      render(<SidebarRowEndSlot isWorking restIcon={rest} />);
+      render(<SidebarRowEndSlot isWorking={false} restIcon={rest} />);
+      // The grid holds instead of dropping to the resting icon...
+      expect(container.querySelector('[data-session-working-indicator]')).not.toBeNull();
+      expect(container.querySelector('[data-rest-icon]')).toBeNull();
+      act(() => {
+        vi.advanceTimersByTime(WORKING_HAND_OVER_MS - 1);
+      });
+      // ...so the late unread write still gets the transition.
+      render(<SidebarRowEndSlot isWorking={false} hasUnreadMessages restIcon={rest} />);
+      expect(container.querySelector('[data-session-done-transition]')).not.toBeNull();
+      // Reading the session afterwards clears the mark for good.
+      render(<SidebarRowEndSlot isWorking={false} restIcon={rest} />);
+      act(() => {
+        vi.advanceTimersByTime(WORKING_HAND_OVER_MS);
+      });
+      expect(container.querySelector('[data-session-row-indicator]')).toBeNull();
+      expect(container.querySelector('[data-rest-icon]')).not.toBeNull();
+    });
+
+    it('lets the held grid go when no unread write arrives', () => {
+      render(<SidebarRowEndSlot isWorking />);
+      render(<SidebarRowEndSlot isWorking={false} />);
+      act(() => {
+        vi.advanceTimersByTime(WORKING_HAND_OVER_MS - 1);
+      });
+      expect(container.querySelector('[data-session-working-indicator]')).not.toBeNull();
+      act(() => {
+        vi.advanceTimersByTime(1);
+      });
+      expect(container.querySelector('[data-session-row-indicator]')).toBeNull();
+    });
+  });
+
   it('does not play for a session that was never working', () => {
     render(<SidebarRowEndSlot hasUnreadMessages />);
     expect(container.querySelector('[data-session-done-transition]')).toBeNull();
@@ -446,8 +440,7 @@ describe('WorkingStatusMark', () => {
   const grid = () => container.querySelector('[data-session-working-indicator]');
   const dot = () => container.querySelector('[data-session-unread-dot]');
 
-  it('collapses into the dot when unread lands before work stops (how a turn ends)', () => {
-    // The CLI writes the unread bump, then releases presence.
+  it('collapses into the dot when unread lands before work stops', () => {
     render(<WorkingStatusMark working unread={false} />);
     render(<WorkingStatusMark working unread />);
     expect(grid()).not.toBeNull();
@@ -456,7 +449,8 @@ describe('WorkingStatusMark', () => {
     expect(grid()).toBeNull();
   });
 
-  it('shows the dot without the transition if work stops before unread lands', () => {
+  it('shows the dot without the transition if work stopped before unread landed', () => {
+    // Callers bridge that gap with useWorkingHandOver (see SidebarRowEndSlot).
     render(<WorkingStatusMark working unread={false} />);
     render(<WorkingStatusMark working={false} unread={false} />);
     expect(container.childElementCount).toBe(0);

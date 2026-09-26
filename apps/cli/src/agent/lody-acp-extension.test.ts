@@ -9,30 +9,34 @@ import {
 } from './lody-acp-extension';
 
 describe('Core usage accounting boundary', () => {
-  it('scopes only marked Codex turn snapshots and keeps their native routing session unchanged', () => {
+  it('scopes Core-marked snapshots for any provider and keeps the native routing session', () => {
     const usage = { inputTokens: 2000, outputTokens: 0, cacheReadInputTokens: 0 };
-    const params = {
-      sessionId: 'native',
-      usage,
-      modelUsage: { 'model-b': usage },
-      _meta: { codex: { usageTurnId: 'turn-b' } },
-    };
-    const parse = (provider: string, value = params) =>
+    const update = { sessionId: 'native', usage, modelUsage: { 'model-b': usage } };
+    const parse = (provider: string, _meta: Record<string, unknown>) =>
       parseLodyExtensionMessage({
         method: LODY_EXTENSION_METHODS.sessionUsageUpdate,
-        params: value,
+        params: { ...update, _meta },
         sessionId: 'native',
         provider,
       });
-    expect(parse('codex')).toEqual({
+    for (const provider of ['claude', 'codex', 'kimi']) {
+      expect(parse(provider, { lody: { usageScopeId: 'result/1' } })).toEqual({
+        type: 'usage',
+        accountingId: 'native:scope:result%2F1',
+        update,
+      });
+    }
+    // Legacy Codex spelling maps to the same identity; other providers ignore it.
+    expect(parse('codex', { codex: { usageTurnId: 'turn-b' } })).toEqual({
       type: 'usage',
-      accountingId: 'native:turn:turn-b',
-      update: { sessionId: 'native', usage, modelUsage: { 'model-b': usage } },
+      accountingId: 'native:scope:turn-b',
+      update,
     });
-    expect(parse('claude')).toEqual({
+    expect(parse('claude', { codex: { usageTurnId: 'turn-b' } })).toEqual({
       type: 'usage',
-      update: { sessionId: 'native', usage, modelUsage: { 'model-b': usage } },
+      update,
     });
+    expect(parse('claude', { lody: { usageScopeId: '' } })).toEqual({ type: 'usage', update });
   });
   it.each(['codex', 'claude', 'kimi', 'grok', 'deepseek'] as const)(
     'preserves %s optional delta separately from cumulative totals and rejects invalid buckets',

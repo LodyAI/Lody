@@ -627,6 +627,9 @@ export const sessionHistorySchema = schema.LoroMap({
   read: schema.Boolean({ required: false }),
   userId: schema.String({ required: false }),
   modelInfo: schema.Any({ required: false }),
+  // Assistant turns: tokens this turn consumed, summed from adapter usage deltas.
+  // A primitive JSON value (`SessionTurnTokenUsage`), replaced whole on each write.
+  tokenUsage: schema.Any({ required: false }),
   // FileDiff 此次对话有哪些文件变更，和具体变更行数
   fileDiff: schema.Any(),
   // Indicates whether the agent's response for this turn has finished
@@ -777,13 +780,6 @@ export type SessionPreviewDocState = {
 export type SessionPreviewCandidateMeta = Pick<PreviewCandidate, 'status' | 'updatedAt'>;
 
 export type SessionPreviewConnectionMeta = Pick<PreviewConnection, 'status' | 'updatedAt'>;
-
-export type SessionPreviewLegacyMetaFields = {
-  /** Deprecated legacy detail. Full preview candidate state lives in session doc `preview`. */
-  previewCandidate?: PreviewCandidate;
-  /** Deprecated legacy detail. Full preview connection state lives in session doc `preview`. */
-  previewConnection?: PreviewConnection;
-};
 
 export type SessionExternalHistoryCursorDocState = {
   importedTurnHashes?: string[];
@@ -1065,18 +1061,6 @@ export type SessionLegacyMetaFields = {
   /** Deprecated launch state; new writes store this in project worktree config. */
   worktreeCleanup?: WorktreeCleanupScriptConfig;
 };
-
-export type SessionMetaWithLegacyPreview = Omit<
-  SessionMeta,
-  'previewCandidate' | 'previewConnection'
-> &
-  Partial<SessionPreviewLegacyMetaFields>;
-
-export function getSessionPreviewLegacyFields(
-  session: Pick<SessionMeta, 'previewCandidate' | 'previewConnection'> | null | undefined
-): Partial<SessionPreviewLegacyMetaFields> {
-  return (session ?? {}) as Partial<SessionPreviewLegacyMetaFields>;
-}
 
 export type NeedToDeleteSessionQueueItem =
   | boolean

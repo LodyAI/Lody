@@ -595,6 +595,28 @@ describe('AgentClient session preparation gate', () => {
     });
   });
 
+  it('resumes builtin Pi sessions without replaying them through loadSession', async () => {
+    connectionMocks.initialize.mockResolvedValue({
+      agentCapabilities: { loadSession: true, sessionCapabilities: { resume: {} } },
+    });
+    connectionMocks.resumeSession.mockResolvedValue({});
+    const client = new AgentClient({
+      logger: createLogger(),
+      sessionId: 'session-pi-resume' as SessionId,
+      terminalManager: {} as never,
+      agentConfig: { cliType: 'builtin', agentType: 'pi' },
+      onUpdateMessage: vi.fn(),
+      onRequestPermission: vi.fn(),
+    });
+
+    await client.startSession({} as never, '/workdir', '/pi/session.jsonl' as never);
+
+    expect(connectionMocks.resumeSession).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: '/pi/session.jsonl', cwd: '/workdir' })
+    );
+    expect(connectionMocks.loadSession).not.toHaveBeenCalled();
+  });
+
   it('injects Lody MCP into DeepSeek Harness sessions', async () => {
     const client = new AgentClient({
       logger: createLogger(),

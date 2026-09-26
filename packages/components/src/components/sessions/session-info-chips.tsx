@@ -35,7 +35,7 @@ import { cn } from '@/lib/utils';
 import { Button } from '@lody/ui/button';
 import { writeTextToClipboard } from '@/lib/clipboard';
 import { getGoalStatusPresentation } from '@/lib/session-goal-status';
-import { formatDurationCompact, type DurationUnitLabels } from '@/lib/format-duration';
+import { formatDurationCompact, getDurationUnitLabels } from '@/lib/format-duration';
 import { ClusterChip, StageChip } from './info-chip';
 import { WorktreeIcon } from '@/components/icons/worktree-icon';
 import { Tooltip } from '@lody/ui/tooltip';
@@ -161,11 +161,7 @@ export function GoalChip({
   const showClear = !isCleared && commands?.includes('clear') === true && onGoalCommand != null;
   const showDismiss = isCleared && onDismiss != null;
 
-  const durationUnitLabels: DurationUnitLabels = {
-    hour: t('time.unitShort.hour', 'h'),
-    minute: t('time.unitShort.minute', 'm'),
-    second: t('time.unitShort.second', 's'),
-  };
+  const durationUnitLabels = getDurationUnitLabels(t);
   const timeUsedMs = Math.max(0, Math.floor((goal.timeUsedSeconds ?? 0) * 1000));
   const timeLabel = timeUsedMs > 0 ? formatDurationCompact(timeUsedMs, durationUnitLabels) : '';
   const tokensUsed = Math.max(0, Math.floor(goal.tokensUsed ?? 0));
@@ -805,11 +801,7 @@ function PrCiPopoverBody({
   onOpenRun?: (run: PrCiRun) => void;
 }) {
   const { t } = useTranslation();
-  const durationUnitLabels: DurationUnitLabels = {
-    hour: t('time.unitShort.hour', 'h'),
-    minute: t('time.unitShort.minute', 'm'),
-    second: t('time.unitShort.second', 's'),
-  };
+  const durationUnitLabels = getDurationUnitLabels(t);
   const { settled, overallLabel, toneClassName } = usePrCiPresentation(runs);
   return (
     <div className="flex flex-col gap-1.5 p-3">

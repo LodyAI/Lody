@@ -8,7 +8,6 @@ import {
   memo,
   forwardRef,
   useImperativeHandle,
-  type MutableRefObject,
 } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { useAtomValue } from 'jotai';
@@ -451,8 +450,6 @@ export interface SessionChatInputAreaProps {
    * which may stack the queue directly on the composer), so skip the spacer.
    */
   hideTopSpacer?: boolean;
-  /** One-shot guard for a viewport resize caused by the composer auto-growing. */
-  skipNextViewportResizeAutoScrollRef?: MutableRefObject<boolean>;
   onModeChange: (value: string) => void;
   onModelChange: (value: string) => void;
   onConfigOptionChange?: (configId: string, value: AcpConfigOptionValue) => void;
@@ -553,7 +550,6 @@ export const SessionChatInputArea = memo(
       hideTopSpacer = false,
       freeTurnLimitNotice,
       mcp,
-      skipNextViewportResizeAutoScrollRef,
       onModeChange,
       onModelChange,
       onConfigOptionChange,
@@ -2743,7 +2739,6 @@ export const SessionChatInputArea = memo(
         primaryAction={primaryActionNode}
         autoResize
         maxRows={11}
-        skipNextViewportResizeAutoScrollRef={skipNextViewportResizeAutoScrollRef}
         focusOnContainerClick
       />
     );

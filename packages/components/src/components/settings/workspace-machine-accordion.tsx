@@ -6,11 +6,12 @@ import * as stylex from '@stylexjs/stylex';
 import { Badge } from '@lody/ui/badge';
 import { Tooltip } from '@lody/ui/tooltip';
 import { colors } from '@lody/ui/tokens/colors.stylex';
-import { corner, duration, ease, radius, space } from '@lody/ui/tokens/scales.stylex';
+import { corner, duration, ease, focus, radius, space } from '@lody/ui/tokens/scales.stylex';
 import { UserAvatar } from '@/components/user-avatar';
 import { withClassName } from '@/lib/stylex';
-import { settingsSurface as surface } from './surface';
+import { settingsRecordsCard } from './compact-layout';
 import type { MachineTabOwner } from './machine-tab-list';
+import { settingsType as type } from './type.stylex';
 
 export type WorkspaceMachineAccordionMeta = {
   machine: MachineViewMeta;
@@ -95,7 +96,10 @@ const styles = stylex.create({
     textAlign: 'start',
     cursor: 'pointer',
     outlineStyle: 'none',
-    boxShadow: { default: 'none', ':focus-visible': `inset 0 0 0 2px ${colors.accent}` },
+    boxShadow: {
+      default: 'none',
+      ':focus-visible': `inset 0 0 0 ${focus.ringWidth} ${colors.accent}`,
+    },
   },
   dot: {
     flexShrink: 0,
@@ -116,7 +120,7 @@ const styles = stylex.create({
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
-    fontSize: '0.875em',
+    fontSize: type.caption,
     fontWeight: 400,
     color: colors.label,
   },
@@ -222,7 +226,7 @@ export function WorkspaceMachineCollapsedRow({
   onExpand: () => void;
 }) {
   return (
-    <section {...stylex.props(surface.card, styles.card)}>
+    <section {...stylex.props(settingsRecordsCard, styles.card)}>
       <WorkspaceMachineAccordionRow meta={meta} expanded={false} onToggle={onExpand} />
     </section>
   );
@@ -309,7 +313,7 @@ export function WorkspaceMachineExpandedSection({
   }, []);
 
   return (
-    <section {...stylex.props(surface.card, styles.card, styles.expandedCard)}>
+    <section {...stylex.props(settingsRecordsCard, styles.card, styles.expandedCard)}>
       <WorkspaceMachineAccordionRow meta={meta} expanded onToggle={onCollapse} />
       <div
         {...stylex.props(!detailReady && styles.detailPending)}

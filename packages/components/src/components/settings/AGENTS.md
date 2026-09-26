@@ -10,13 +10,14 @@ rolls back — is in the root [AGENTS.md](../../../../../AGENTS.md).
 
 ## Layout and components
 
-- Desktop overlay close is `absolute` on the RIGHT pane only, equal `top`/`right`
-  inset, no close row. Right-pane `padding-right` keeps chrome off that column;
-  apply it inside the scroll area so the scrollbar stays flush with the pane edge.
-- Settings style in StyleX from `surface.ts` / `compact-layout.tsx`: a card has no
-  border, its title sits above it, rows split by a line; a list is ONE card of ruled
-  rows, never stacked cards; a form is one surface. No new gray fills.
-
+- Desktop overlay close is `absolute` on the RIGHT pane only (equal `top`/`right`
+  inset); the pane's in-scroll `padding-right` keeps chrome off that column.
+- Settings style in StyleX from `surface.ts`/`compact-layout.tsx`. The desktop pane
+  header names every page; a page hands it actions and a one-line lead through
+  `settings-page-header.tsx`, never its own title. Inside `settingsFlat` (pane, project
+  window) preferences are flat under a section rule and managed records keep a card
+  (`boxed`); elsewhere groups are cards. Group by meaning, no one-row groups; a
+  helper says what the label cannot. Split master/detail by fill; type: `type.stylex.ts`.
 - `share-management-setting.tsx` lists published static copies via the scoped cloud
   query. Ordinary members see their publications; admins see the workspace inventory.
   Draft uploads are not published shares. Reuse `useSessionShareLinkActions` for
@@ -37,11 +38,10 @@ rolls back — is in the root [AGENTS.md](../../../../../AGENTS.md).
   never surface `machine_rpc_unavailable` as an editor error. The GitHub source
   row must paint from `lody:githubReposCache` on first frame; do not wait on
   `listWorkspaceReposWithStatus` to decide whether GitHub exists.
-- A settings row (`compact-layout.tsx`) is one grid: the label column takes the
-  remaining space and the control column hugs its content. Never size either column
-  from a viewport breakpoint — settings render in a panel far narrower than the window,
-  and the panel clips its overflow, so a `md:`-width label column silently hides the
-  control. Copy is `font-normal` (size/muted, not weight).
+- A settings row (`compact-layout.tsx`) is one grid: the label column takes the rest,
+  the control column hugs its content. Never size a column from a viewport breakpoint:
+  the panel is narrower than the window and clips overflow, so a `md:` label column
+  hides the control.
 - Agent configuration lives in `agent-config-dialog.tsx` plus `env-vars-textarea.tsx`.
   DeepSeek Harness official vs custom endpoint is dialog form state only: persist
   `DEEPSEEK_API_KEY` / `DEEPSEEK_BASE_URL` (official always writes
@@ -50,17 +50,17 @@ rolls back — is in the root [AGENTS.md](../../../../../AGENTS.md).
   add a parallel manual catalog field. Additional env cannot override either connection
   key, and changing endpoint or credential invalidates the dialog's prior live
   verification.
-- Keep optional three.js/R3F usage behind the lazy usage-calendar module so lightweight
-  and SSR consumers do not evaluate its renderer graph.
+- Keep three.js/R3F behind the lazy usage-calendar module so lightweight and SSR
+  consumers never evaluate its renderer graph.
 - Usage day details persist bounded snapshots per auth session, workspace, and
   date. Reuse for one hour; refresh expired selections without blanking cached
   data. Preserve auth/capability gates; see [contract](../../../../../specs/usage-detail-cache.md).
 - Interface/terminal fonts exclude symbol families in `lib/local-fonts.ts`; option
   names stay on the default interface font. Font size is five named tiers writing
-  `--ui-font-size`. Font ligatures is a boolean after the Terminal section, writing
+  `--ui-font-size`. Font ligatures is a boolean in the Text group, writing
   `--lody-font-ligatures` for conversation, code, and tool output.
-- The Codex reset forecast chip in the provider row must not fetch on mount and must
-  pass `nestedInDialog` for its dialog: [../codex-reset/AGENTS.md](../codex-reset/AGENTS.md).
+- The Codex reset forecast chip in the provider row must not fetch on mount:
+  [../codex-reset/AGENTS.md](../codex-reset/AGENTS.md).
 - The usage share card is a fixed-format report, not a second `ChatShareCard`:
   exact pixel aspects, period = the page range, headline = that range's total.
   Derive every number through `usage-share-stats.ts` (stamp the metric on the
@@ -70,15 +70,14 @@ rolls back — is in the root [AGENTS.md](../../../../../AGENTS.md).
   Both share cards use `lib/share-image-export.ts` and
   `components/share-theme-scope.ts`; do not fork either.
   `StatsSettingsView` keeps the entry behind the opt-in `shareCard` prop with a lazy
-  dialog, because the public landing reuses that view. Typography and spacing come
-  from the card's own `TEXT`, `PAD_X`, and `RHYTHM` constants — never a fresh
-  `text-[…]` or an off-grid padding. `PAD_X` binds the footer too, so every band
+  dialog, because the public landing reuses that view. Type and spacing come
+  from the card's `TEXT`, `PAD_X`, and `RHYTHM` constants, never fresh `text-[…]`
+  or off-grid padding. `PAD_X` binds the footer too, so every band
   shares one left edge. `ASPECT_SIZE` includes the backdrop; size against the
   48px-shorter framed case. Keep every band but the headline `shrink-0`.
-  The graphic follows the range —
-  hour skyline, day-by-hour grid, or the 53-week calendar, matching the Usage
-  screen — and every kind must fit the one `GRAPHIC_H` box so card height never
-  depends on range. Leave the space beside the headline empty.
+  The graphic follows the range
+  (hour skyline, day-by-hour grid, or 53-week calendar, as on the Usage screen);
+  every kind fits the one `GRAPHIC_H` box so card height never depends on range. Leave the space beside the headline empty.
 
 ## Agent Roles
 
