@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: [#1031](https://github.com/LodyAI/Lody/pull/1031)
 
 [English](2026-09-27-project-context-pill-elevation.md)
 
