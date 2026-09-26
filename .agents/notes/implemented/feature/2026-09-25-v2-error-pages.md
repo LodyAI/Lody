@@ -26,8 +26,8 @@ that those copied values can drift from `@lody/ui`'s tokens, and no test catches
   page ground, its own scroll (the shell clips `#root`) and a desktop drag strip,
   because a full-window failure otherwise leaves a hidden-titlebar window
   immovable. `pane` fills a panel that already has a ground. `region` is the
-  existing section boundary: a region-rung block, start-aligned, with smaller
-  type and the danger tone's circle mark instead of a drawing.
+  existing section boundary: it stands in for that section on the section's own
+  ground (no fill, no mark), start-aligned, with smaller type and no drawing.
 - **Calm, not alarming.** The owner found the first V2 pass "让人心慌" (it made
   people anxious): a red mark, the raw error first and a red wipe button. Pages
   now open with a drawing instead of the mark. The copy leads with reassurance
@@ -46,8 +46,8 @@ that those copied values can drift from `@lody/ui`'s tokens, and no test catches
   card is a block on a page, not the page.
 - **The way out leads.** On the boot screen, Reload is the primary action and Copy
   is secondary. On the crash screen the four-step "If it keeps happening" list
-  repeated the buttons above it. It shrank to a footnote with the Discord link
-  and the last-resort wipe, which keeps its confirmation dialog.
+  repeated the buttons above it. It shrank to one footnote line holding both the
+  Discord link and the last-resort wipe, which keeps its confirmation dialog.
 - **Surfaces state what only they know.** 404 shows the address it was asked for.
   The boot screen names the likely fix when a chunk failed to load. It shows the
   build it is running, and a separate title when the renderer died
@@ -72,6 +72,32 @@ that those copied values can drift from `@lody/ui`'s tokens, and no test catches
 - **A test that parses `colors.stylex.ts` to pin the boot screen's copies.**
   Rejected: that is a source-string assertion. The drift risk is recorded
   in the file header and in `lib/AGENTS.md` instead.
+
+## Design review round 2
+
+A critique of the first pass found the alarm had come back on the smaller
+surfaces and the crash screen still offered seven ways out.
+
+- `section` and `inline` lost the red circle and the pink strip. Both open with a
+  human sentence ("This part couldn't be shown") and one reassurance in the page's
+  voice; inline keeps the raw error behind its copy button and a tooltip.
+- `region` drops its fill rather than becoming a card. The 3% ink tray sat below
+  its canvas in light and read as a hole, and a section fallback replaces the
+  section itself, as a failed page is the page. So it keeps the host's ground.
+- The crash screen is two buttons (Try again, Reload Lody), the error with an
+  icon-only copy button in its corner (`StatusPageCode action`), the details
+  disclosure and one footnote line: "Still stuck? Tell us on Discord or clear
+  local data." The wipe still opens its confirmation dialog. The message-list
+  fallback uses the same copy placement. The boot screen keeps its two buttons.
+- Action buttons lost their leading icons (retry, reload, back), on the boot
+  screen as well. The only icon left on an action is the icon-only copy button.
+- Titles use `text-wrap: balance` and descriptions and footnotes use `pretty`,
+  in `StatusPage` and in the boot stylesheet. The zh 404 line was shortened to
+  one line so it no longer leaves "过期。" alone.
+- Copy: the page title is "Lody couldn't show this page" (was "Lody hit a
+  snag"), the message-list line uses 你, and a chunk-load boot failure is titled
+  "Part of Lody didn't load" instead of claiming Lody did not start.
+- The illustrations are unchanged.
 
 ## Verification
 

@@ -42,7 +42,7 @@ export const PageWithManualRecovery: Story = {
   args: {},
 };
 
-/** One panel or region failed; the surrounding layout still works. */
+/** One panel or region failed; the surrounding layout still works. No tray: it keeps the section's ground. */
 export const Section: Story = {
   args: {
     variant: 'section',
@@ -56,7 +56,7 @@ export const Section: Story = {
   ],
 };
 
-/** Tight spots (headers, toolbars): one readable line, retry, and copy. */
+/** Tight spots (headers, toolbars): one calm sentence, retry, and copy. */
 export const Inline: Story = {
   args: {
     variant: 'inline',
@@ -64,6 +64,20 @@ export const Inline: Story = {
   decorators: [
     (Story) => (
       <div style={{ padding: 24 }}>
+        <Story />
+      </div>
+    ),
+  ],
+};
+
+/** A narrow slot: the sentence wraps to a second line at most. */
+export const InlineNarrow: Story = {
+  args: {
+    variant: 'inline',
+  },
+  decorators: [
+    (Story) => (
+      <div style={{ width: 280, padding: 24 }}>
         <Story />
       </div>
     ),
