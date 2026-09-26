@@ -690,7 +690,7 @@ describe('composer placement', () => {
     expect(cap()).toBe('576px');
   });
 
-  it('keeps its side through a level change and a moved composer', () => {
+  it('keeps its side through a level change and a moved composer', async () => {
     frameTop = 600;
     show(true, 2);
     show(true, 9);
@@ -699,7 +699,7 @@ describe('composer placement', () => {
     // The composer rises to the top; the open menu stays above it rather than
     // flipping, and only its cap follows the room left there.
     frameTop = 40;
-    act(() => window.dispatchEvent(new Event('resize')));
+    await act(() => window.dispatchEvent(new Event('resize')));
     expect(cap()).toBe('16px');
   });
 
