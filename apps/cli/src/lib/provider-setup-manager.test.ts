@@ -21,6 +21,11 @@ import type { LoroRepo } from 'loro-repo';
 
 import type { Logger } from '@/utils/logger';
 import { ProviderSetupManager, type ProviderSetupManagerOptions } from './provider-setup-manager';
+import { mkdtemp, writeFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import * as codexProfiles from '../agent/codex-profile-store';
+import { registerCodexProfileProcess } from '../agent/codex-profile-process-usage';
 
 class FakeMachineFlock implements MachineFlockWritableFlock {
   readonly rows = new Map<string, { key: MachineFlockKey; value: unknown }>();
@@ -136,6 +141,64 @@ function createHarnessForFlock<TFlock extends MachineFlockWritableFlock>(
 function createHarness(overrides: Partial<ProviderSetupManagerOptions['execution']> = {}) {
   return createHarnessForFlock(new FakeMachineFlock(), overrides);
 }
+
+it.each([false, true])(
+  'retries deferred credential cleanup with a bounded timer, stop=%s',
+  async (stopBeforeRetry) => {
+    vi.useFakeTimers();
+    const root = await mkdtemp(path.join(tmpdir(), 'lody-profile-cleanup-test-'));
+    const cleaned = Promise.withResolvers<void>();
+    let credentialPresent = true;
+    const store = new codexProfiles.CodexProfileStore(
+      root,
+      {
+        get: async () => undefined,
+        set: async () => {},
+        delete: async () => {},
+      },
+      async () => {
+        credentialPresent = false;
+        cleaned.resolve();
+      }
+    );
+    const getter = vi.spyOn(codexProfiles, 'getCodexProfileStore').mockReturnValue(store);
+    const { manager } = createHarness();
+    try {
+      const profile = await store.resolve(
+        workspaceId,
+        {
+          ...createSetup().config,
+          codexAuth: {
+            mode: 'chatgpt',
+            profileId: '60a84cb4-50fd-4590-9f69-6055ffef0c57',
+          },
+        },
+        true
+      );
+      if (!profile) throw new Error('Missing synthetic profile');
+      const lease = await registerCodexProfileProcess(profile, { directNative: true });
+      lease.recordNativePid(process.pid);
+      await manager.kick();
+      expect(credentialPresent).toBe(true);
+      expect(vi.getTimerCount()).toBe(1);
+      const proof = path.join(profile.home, '..', 'processes', `${lease.token}.native.json`);
+      await writeFile(proof, JSON.stringify({ nativeExited: true }));
+      if (stopBeforeRetry) manager.stop();
+      await vi.advanceTimersByTimeAsync(30_000);
+      if (!stopBeforeRetry) {
+        await cleaned.promise;
+        await manager.kick();
+      }
+      expect(credentialPresent).toBe(stopBeforeRetry);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      manager.stop();
+      getter.mockRestore();
+      vi.useRealTimers();
+      await rm(root, { recursive: true, force: true });
+    }
+  }
+);
 
 function seedSetup(flock: MachineFlockWritableFlock, setup = createSetup()): void {
   writeMachineFlockRowToFlock(flock, {

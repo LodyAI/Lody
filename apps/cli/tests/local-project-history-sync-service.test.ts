@@ -910,6 +910,7 @@ describe('history import persistence', () => {
       getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
       cleanSessionDoc,
       findSoleAgentConfig: vi.fn(async () => options.agentConfig),
+      getAgentConfigById: async () => options.agentConfig ?? null,
     };
     const logger = {
       debug: vi.fn(),
@@ -946,6 +947,12 @@ describe('history import persistence', () => {
     ).listCatalogSnapshot.bind(service);
 
     return {
+      sessionAgentConfig: (meta: SessionMeta) =>
+        (
+          service as unknown as {
+            sessionAgentConfig(meta: SessionMeta): Promise<AgentConfigMeta | null>;
+          }
+        ).sessionAgentConfig(meta),
       calls,
       cleanSessionDoc,
       deleteDoc,
@@ -968,6 +975,14 @@ describe('history import persistence', () => {
     acpSessionId: 'acp-1' as ACPSessionId,
     project: { kind: 'local' as const, localProjectId },
     materialized: materializedReplay(),
+  });
+
+  it('refuses default-account replay when a session’s bound provider was deleted', async () => {
+    const harness = createHarness();
+    await expect(
+      harness.sessionAgentConfig(sessionMeta({ agentConfigId: 'deleted-config' as AgentConfigId }))
+    ).rejects.toThrow('bound provider is unavailable');
+    await expect(harness.sessionAgentConfig(sessionMeta())).resolves.toBeNull();
   });
 
   it('persists complete history before publishing a synced session meta', async () => {
@@ -1175,14 +1190,11 @@ describe('compareCatalogItems', () => {
 
 describe('selectLatestCatalogItems', () => {
   it('keeps only the newest 100 sessions', () => {
-    const items = Array.from(
-      { length: 101 },
-      (_, index): LocalProjectHistoryCatalogItem => ({
-        acpSessionId: `acp-${index}`,
-        title: `Session ${index}`,
-        updatedAt: new Date(Date.UTC(2026, 0, 1, 0, 0, 0, index)).toISOString(),
-      })
-    );
+    const items = Array.from({ length: 101 }, (_, index): LocalProjectHistoryCatalogItem => ({
+      acpSessionId: `acp-${index}`,
+      title: `Session ${index}`,
+      updatedAt: new Date(Date.UTC(2026, 0, 1, 0, 0, 0, index)).toISOString(),
+    }));
 
     const selected = selectLatestCatalogItems(items);
 

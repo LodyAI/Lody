@@ -81,6 +81,7 @@ const createSessionDoc = (meta?: SessionMeta): FakeSessionDoc => ({
 
 const createWorkspaceDocument = (docs: Map<SessionId, FakeSessionDoc>) =>
   ({
+    getAgentConfigById: vi.fn(async () => null),
     getOrCreateSessionDoc: vi.fn(async (sessionId: SessionId) => {
       const existing = docs.get(sessionId);
       if (existing) {

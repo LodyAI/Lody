@@ -544,20 +544,44 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
       );
       captureAcpSpawnStarted(spawnAnalyticsProps);
       let agentProcessHandle: SessionProcessHandle;
+      let releaseProfile:
+        | import('../agent/codex-profile-process-usage').CodexProfileProcessUsage
+        | undefined;
+      let closeBroker: (() => Promise<void>) | undefined;
+      const releaseResources = async () => {
+        await closeBroker?.();
+        await releaseProfile?.();
+      };
       try {
         callbacks.abortSignal?.throwIfAborted();
+        const profile = this.config.codexProfile;
+        if (profile?.profile.mode === 'chatgpt')
+          releaseProfile = await registerCodexProfileProcess(profile);
+        const prepared = profile
+          ? await codexProfileSpawnEnvironment({ profile }, env)
+          : { env, close: undefined };
+        closeBroker = prepared.close;
+        if (releaseProfile) prepared.env.LODY_CODEX_PROCESS_TOKEN = releaseProfile.token;
         const executable = resolveDeepSeekHarnessSpawn({
           command: callbacks.command,
           args: callbacks.args ?? [],
-          env,
+          env: prepared.env,
           workdir: this.getWorkdir(),
         });
         agentProcessHandle = await this.sandbox.spawn(executable.command, executable.args, {
           cwd: this.getWorkdir(),
-          env,
+          env: prepared.env,
           stdio: ['pipe', 'pipe', 'pipe'],
         });
+        agentProcessHandle.onExit(() => {
+          void releaseResources().catch(() => {});
+        });
+        agentProcessHandle.onError(() => {
+          void releaseResources().catch(() => {});
+        });
       } catch (error) {
+        await releaseProfile?.abandonBeforeSpawn();
+        await releaseResources();
         captureAcpSpawnFailed({ ...spawnAnalyticsProps, reason: classifyCliSpawnReason(error) });
         throw error;
       }
@@ -911,3 +935,7 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
     this.emit('output', output);
   }
 }
+import {
+  registerCodexProfileProcess,
+  codexProfileSpawnEnvironment,
+} from '../agent/codex-profile-runtime';

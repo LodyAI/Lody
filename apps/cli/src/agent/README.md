@@ -10,11 +10,13 @@ context/acp-agent-edit-evidence.md. Adapter source repositories and builtin prov
 [apps/cli/AGENTS.md](../../AGENTS.md). Where updates go after they arrive:
 context/message-flow.md "Upstream".
 
-| Boundary           | Owner                                        | Responsibility                                                               |
-| ------------------ | -------------------------------------------- | ---------------------------------------------------------------------------- |
-| ACP connection     | [AgentClient](agent-client.ts)               | Negotiates capabilities, tracks raw requests, and classifies steer evidence. |
-| Process startup    | [Runner](acp-runner.ts)                      | Spawns agents under the shared startup gate.                                 |
-| Runtime resolution | [Managed runtimes](managed-agent-runtime.ts) | Resolves pinned distributions and verifies their artifacts.                  |
+| Boundary           | Owner                                                                    | Responsibility                                                                   |
+| ------------------ | ------------------------------------------------------------------------ | -------------------------------------------------------------------------------- |
+| ACP connection     | [AgentClient](agent-client.ts)                                           | Negotiates capabilities, tracks raw requests, and classifies steer evidence.     |
+| Process startup    | [Runner](acp-runner.ts)                                                  | Spawns agents under the shared startup gate.                                     |
+| Runtime resolution | [Managed runtimes](managed-agent-runtime.ts)                             | Resolves pinned distributions and verifies their artifacts.                      |
+| Codex credentials  | [Profiles](codex-profile-store.ts), [broker](codex-credential-broker.ts) | Host-bound homes and vault generations; redirect-denying user-side API requests. |
+| Codex process uses | [Usage records](codex-profile-process-usage.ts) | Independent process records for deletion cleanup; same-profile sessions remain concurrent. |
 
 ## Files
 
@@ -186,9 +188,10 @@ Which authentication path runs is decided by the provider, not the caller: a man
 runs its pinned login command, and everything else (registry and custom ACP) opens a
 temporary standard ACP connection in the same bounded lifecycle. Kimi runs `acp --login`;
 Grok runs the official `login --device-auth`; Claude Code runs the official
-`auth login --claudeai` subscription flow; Codex always runs the official
-`login --device-auth` ChatGPT flow so Web can complete authentication against a remote
-machine.
+`auth login --claudeai` subscription flow. Codex ChatGPT runs official
+`login --device-auth`; managed API profiles use the existing secret-input interaction
+and a tools-free Responses probe. [Account profiles](../../../../specs/codex-account-profiles.md)
+owns isolation, generation rotation, concurrency and compatibility guarantees.
 
 Remote Web transport stores only an ephemeral-ECDH/AES-GCM envelope in the 24-hour request
 stream; the target machine keeps the recipient private key in memory and decrypts

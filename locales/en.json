@@ -1,4 +1,12 @@
 {
+  "settings.agent.codex.authentication": "Authentication",
+  "settings.agent.codex.storage": "Credentials stay on the selected machine. Each provider has its own account.",
+  "settings.agent.codex.customApi": "Custom API",
+  "settings.agent.codex.baseUrl": "Base URL",
+  "settings.agent.codex.keyNext": "Enter the API Key securely during sign-in. To change the destination, add a new provider.",
+  "settings.agent.codex.enterKey": "Enter API Key",
+  "settings.agent.codex.updateKey": "Update API Key",
+  "settings.agent.codex.verifyingKey": "Verifying API Key",
   "settings.beta.semanticShortcuts": "Pointer-aware close shortcut",
   "settings.beta.semanticShortcutsHelper": "On desktop, close the active tab in the conversation or right panel you last pointed at or used with the keyboard.",
   "sessions.cancelSend": "Cancel send",

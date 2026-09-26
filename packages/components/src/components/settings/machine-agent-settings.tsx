@@ -831,10 +831,11 @@ export function MachineAgentSettings({
   // transition ever plays — a dialog mounted already-open renders in its final
   // state on the first frame, and one unmounted on close vanishes mid-fade.
   const [dialogOpen, setDialogOpen] = useState(false);
+  const dialogMachineAvailable = !!dialogMachine;
   // Opening happens one commit after the root mounts, for the same reason.
   useLayoutEffect(() => {
-    if (dialogMode && dialogMachine) setDialogOpen(true);
-  }, [dialogMode, dialogMachine]);
+    if (dialogMode && dialogMachineAvailable) setDialogOpen(true);
+  }, [dialogMode, dialogMachineAvailable]);
   const [latestCliVersion, setLatestCliVersion] = useState<string | null>(null);
 
   const sharedWithTeam = resolvedSelectedMachine
@@ -1144,6 +1145,7 @@ export function MachineAgentSettings({
         if (dialogMode.kind === 'create') {
           const config: AgentConfigMeta = {
             id: payload.id,
+            codexAuth: payload.codexAuth,
             name: payload.name,
             description: payload.description,
             cliType: payload.cliType,
@@ -1164,6 +1166,7 @@ export function MachineAgentSettings({
         } else {
           await updateConfig({
             id: dialogMode.config.id as AgentConfigId,
+            codexAuth: payload.codexAuth,
             machineId: dialogMode.config.machineId,
             name: payload.name,
             description: payload.description,

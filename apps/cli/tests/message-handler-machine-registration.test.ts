@@ -183,6 +183,7 @@ describe('MessageHandler machine registration', () => {
     // Exhaustive on purpose: registration is where a capability key and its
     // version reach every client, so adding one must be acknowledged here.
     expect(registeredMeta.protocolCapabilities).toEqual({
+      codexAuthProfiles: 1,
       ...(getHostMachineProtocolCapabilities().builtinPi ? { builtinPi: 1 } : {}),
       acpAuthenticationInteractions: 2,
       previewControl: 1,

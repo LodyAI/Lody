@@ -694,7 +694,10 @@ type AcpAuthenticationOptions = {
 };
 
 type ResolvedMachineAcpCapabilitiesRefreshRequest = MachineAcpCapabilitiesRefreshRequestValidated &
-  Pick<AgentConfigMeta, 'cliType' | 'agentType' | 'customAcp' | 'runtimeOverrides' | 'env'>;
+  Pick<
+    AgentConfigMeta,
+    'cliType' | 'agentType' | 'customAcp' | 'runtimeOverrides' | 'env' | 'codexAuth'
+  >;
 
 const summarizeAcpAuthMethod = (method: unknown): MachineAcpAuthMethodSummary => {
   const record =
@@ -4239,6 +4242,8 @@ export class SessionExecutionService {
         const restoreBranch = project?.branch?.trim() || undefined;
         const restoreConfig: SessionConfig = {
           sessionId,
+          agentConfigId: meta?.agentConfigId,
+          codexAuth: storedLaunchConfig.config?.codexAuth,
           workspaceId: message.workspaceId,
           agentCliType: acpSessionConfig.cliType,
           agentType: acpSessionConfig.agentType,
@@ -5861,6 +5866,8 @@ export class SessionExecutionService {
       };
     }
     const resolvedBase = { ...base, agentType: config.agentType };
+    const profileStore = getCodexProfileStore();
+    const codexProfile = await profileStore.resolve(this.deps.workspaceId, config, true);
 
     const onProgress = (event: AcpAuthenticationProgressEvent): void => {
       if (event.status === 'auth-methods') {
@@ -5891,6 +5898,52 @@ export class SessionExecutionService {
       runtimeOverrides: config.runtimeOverrides,
       env: config.env,
       onProgress,
+      codexProfile,
+      authenticateManagedProfile:
+        codexProfile?.profile.mode === 'api-key'
+          ? async ({ signal, requestInput }) => {
+              const frozenBinding = JSON.stringify(config.codexAuth);
+              const input = await requestInput(
+                {
+                  title: 'Codex API Key',
+                  description: `Confirm the destination: ${codexProfile.profile.mode === 'api-key' ? codexProfile.profile.baseUrl : ''}. The key is stored only on this machine.`,
+                  fields: [{ id: 'apiKey', type: 'secret', label: 'API Key', required: true }],
+                },
+                `Enter an API Key for ${codexProfile.profile.mode === 'api-key' ? codexProfile.profile.baseUrl : ''}`
+              );
+              const assertCurrent = async () => {
+                signal.throwIfAborted();
+                const current = await this.deps.workspaceDocument.getAgentConfigForMachineLaunch(
+                  config.id,
+                  this.deps.machineId
+                );
+                if (!current || JSON.stringify(current.codexAuth) !== frozenBinding)
+                  throw new Error('Provider changed during authentication; try again');
+                assertManagedCodexProfileConfig(current);
+              };
+              await assertCurrent();
+              await profileStore.withApiKeyCandidate(
+                codexProfile,
+                String(input.apiKey ?? ''),
+                async (candidateKey) => {
+                  await this.deps.fetchAcpCapabilities(
+                    config.cliType,
+                    config.agentType,
+                    config.env,
+                    config.customAcp,
+                    config.runtimeOverrides,
+                    {
+                      signal,
+                      codexProfile: { profile: codexProfile, candidateKey },
+                      verifyCodexCredential: true,
+                    }
+                  );
+                  await assertCurrent();
+                },
+                signal
+              );
+            }
+          : undefined,
     });
     if (result.success && result.disposition === 'authenticated') {
       const refreshController = new AbortController();
@@ -5916,6 +5969,7 @@ export class SessionExecutionService {
             customAcp: config.customAcp,
             runtimeOverrides: config.runtimeOverrides,
             env: config.env,
+            codexAuth: config.codexAuth,
           },
           { signal: refreshController.signal }
         );
@@ -5990,6 +6044,7 @@ export class SessionExecutionService {
         customAcp: config.customAcp,
         runtimeOverrides: config.runtimeOverrides,
         env: config.env,
+        codexAuth: config.codexAuth,
       },
       options
     );
@@ -6111,6 +6166,18 @@ export class SessionExecutionService {
   ): Promise<MachineAcpCapabilitiesRefreshResponse> {
     try {
       options.signal?.throwIfAborted();
+      let codexProfile: ResolvedCodexProfile | undefined;
+      if (message.codexAuth) {
+        const config = await this.deps.workspaceDocument.getAgentConfigForMachineLaunch(
+          message.configId,
+          this.deps.machineId
+        );
+        if (!config || JSON.stringify(config.codexAuth) !== JSON.stringify(message.codexAuth))
+          throw new Error('Provider changed during verification');
+        codexProfile = await getCodexProfileStore().resolve(this.deps.workspaceId, config, true);
+        if (!codexProfile || !(await getCodexProfileStore().isReady(codexProfile)))
+          throw new AcpAuthenticationRequiredError([]);
+      }
       await this.emitBuiltinRuntimeStatusForRefresh(message, options.onAcpBinaryProgress);
       options.signal?.throwIfAborted();
       const {
@@ -6132,6 +6199,7 @@ export class SessionExecutionService {
         message.runtimeOverrides,
         {
           signal: options.signal,
+          codexProfile: codexProfile ? { profile: codexProfile } : undefined,
           onManagedRuntimeProgress: (event) => {
             if (options.signal?.aborted) return;
             options.onAcpBinaryProgress?.(
@@ -6549,3 +6617,5 @@ const computeAcpRefreshDedupeKey = (
     : '';
   return `${configId}\x00${cliType}\x00${agentType}\x00${envSerialized}\x00${customSerialized}\x00${runtimeOverrideSerialized}`;
 };
+import { getCodexProfileStore, type ResolvedCodexProfile } from '../agent/codex-profile-store';
+import { assertManagedCodexProfileConfig } from '@lody/shared';

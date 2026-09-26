@@ -8,7 +8,8 @@ import {
   ACP_EXTENSION_DSH_QUERY_PATH_ENV,
   ACP_EXTENSION_DSH_SESSION_ROOT_ENV,
 } from 'acp-extension-dsh/profile';
-import { REGISTRY_ACP_AGENTS } from '@lody/shared';
+import { REGISTRY_ACP_AGENTS, CODEX_PROFILE_LEGACY_LAUNCH_GUARD } from '@lody/shared';
+import { spawn } from 'node:child_process';
 
 import {
   getAcpCapabilitySourceVersion,
@@ -44,6 +45,19 @@ function getRegistryAgent(agentType: string) {
 }
 
 describe('resolveBuiltinACPSetting', () => {
+  it('keeps the managed-profile legacy guard on both native login and ACP launch, so neither can use global auth', async () => {
+    const input = {
+      cliType: 'builtin' as const,
+      agentType: 'codex',
+      runtimeOverrides: { codexPath: CODEX_PROFILE_LEGACY_LAUNCH_GUARD },
+    };
+    const login = await resolveBuiltinAuthenticationProcessLaunch({ ...input, action: 'login' });
+    expect(login?.command).toContain(CODEX_PROFILE_LEGACY_LAUNCH_GUARD);
+    expect(() => spawn(login!.command, login!.args)).toThrow();
+    const acp = await resolveACPProcessLaunchAsync(input);
+    expect(acp.env?.CODEX_PATH).toContain(CODEX_PROFILE_LEGACY_LAUNCH_GUARD);
+    expect(() => spawn(acp.env!.CODEX_PATH!, ['app-server'])).toThrow();
+  });
   it('requires the current extension-aware Pi runtime and keys the selected catalog', async () => {
     const support = vi
       .spyOn(managedRuntime, 'PI_EXTENSIONS_SUPPORTED', 'get')

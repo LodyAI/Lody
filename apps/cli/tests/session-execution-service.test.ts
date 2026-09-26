@@ -41,6 +41,7 @@ import { SessionEditAndResendService } from '../src/session/session-edit-and-res
 import { AcpAuthenticationRequiredError, AgentClient } from '../src/agent/agent-client';
 import { AcpAuthenticationManager } from '../src/agent/acp-authentication';
 import * as piDiscovery from '../src/agent/pi-extensions';
+import * as codexProfiles from '../src/agent/codex-profile-store';
 import { GitExecutableNotFoundError } from '../src/session/worktree/git-process-error';
 import { LodyOperationStore } from '../src/orchestration/operation-store';
 import { markAssistantTurnFinished } from '../src/lib/assistant-turn-finalize';
@@ -3753,7 +3754,12 @@ describe('SessionExecutionService', () => {
   });
 
   it('restores a missing session for chat using stored ACP session id', async () => {
+    const codexAuth = {
+      mode: 'chatgpt' as const,
+      profileId: '60a84cb4-50fd-4590-9f69-6055ffef0c57',
+    };
     const meta = {
+      agentConfigId: capabilityConfigId,
       repoFullName: 'owner/repo',
       acpSessionId: 'acp-1' as ACPSessionId,
       branchName: 'feat/resume',
@@ -3801,6 +3807,8 @@ describe('SessionExecutionService', () => {
         expect(config.githubRepo).toBe('owner/repo');
         expect(config.restoreBranchName).toBe('feat/resume');
         expect(config.parentSessionId).toBe('parent-session-1');
+        expect(config.agentConfigId).toBe(capabilityConfigId);
+        expect(config.codexAuth).toEqual(codexAuth);
         expect(agentStart?.resumeSessionId).toBe('acp-1');
         return restoredSession as unknown;
       }),
@@ -3812,6 +3820,8 @@ describe('SessionExecutionService', () => {
     const deps = createBaseDeps({
       sessionManager,
       workspaceDocument: {
+        getAgentConfigById: async () =>
+          createLaunchConfig({ cliType: 'builtin', agentType: 'codex', env: {}, codexAuth }),
         repo: {
           upsertDocMeta: vi.fn(async () => {}),
           getDocMeta: vi.fn(async () => undefined),
@@ -7763,6 +7773,83 @@ describe('SessionExecutionService', () => {
       );
     } finally {
       authenticate.mockRestore();
+    }
+  });
+
+  it('rejects an endpoint rewrite between displaying the secret form and accepting its key', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'lody-auth-binding-'));
+    const secrets = new Map<string, string>();
+    const store = new codexProfiles.CodexProfileStore(root, {
+      get: async (id) => secrets.get(id),
+      set: async (id, value) => {
+        secrets.set(id, value);
+      },
+      delete: async (id) => {
+        secrets.delete(id);
+      },
+    });
+    let persistedConfig = createLaunchConfig({
+      cliType: 'builtin',
+      agentType: 'codex',
+      env: {},
+      codexAuth: {
+        mode: 'api-key',
+        profileId: '0b772cc2-dc33-4708-aabb-61b7c1cd15c0',
+        baseUrl: 'https://confirmed.example.invalid/v1',
+      },
+    });
+    const profileStore = vi.spyOn(codexProfiles, 'getCodexProfileStore').mockReturnValue(store);
+    const authenticate = vi
+      .spyOn(AcpAuthenticationManager.prototype, 'authenticate')
+      .mockImplementation(async (options) => {
+        try {
+          if (!options.authenticateManagedProfile) throw new Error('Missing managed flow');
+          await options.authenticateManagedProfile({
+            signal: new AbortController().signal,
+            requestInput: async (_form, message) => {
+              expect(message).toContain('https://confirmed.example.invalid/v1');
+              persistedConfig = {
+                ...persistedConfig,
+                codexAuth: {
+                  profileId: '0b772cc2-dc33-4708-aabb-61b7c1cd15c0',
+                  mode: 'api-key',
+                  baseUrl: 'https://changed.example.invalid/v1',
+                },
+              };
+              return { apiKey: 'synthetic-key-must-not-be-used' };
+            },
+          });
+          return { success: true, disposition: 'authenticated' };
+        } catch (error) {
+          return { success: false, disposition: 'error', error: String(error) };
+        }
+      });
+    const service = new SessionExecutionService(
+      createBaseDeps({
+        workspaceDocument: {
+          getAgentConfigForMachineLaunch: async () => persistedConfig,
+        } as unknown as LoroDocumentManager,
+      })
+    );
+    try {
+      const result = await service.authenticateMachineAcp({
+        type: 'machine/acp-authenticate',
+        machineId: 'machine-1' as MachineId,
+        workspaceId: 'workspace-1' as WorkspaceId,
+        requestId: 'frozen-api-binding',
+        action: 'start',
+        configId: capabilityConfigId,
+      });
+      expect(result).toMatchObject({
+        success: false,
+        error: expect.stringContaining('Provider changed during authentication'),
+      });
+      expect(secrets.size).toBe(0);
+      expect(await store.list('workspace-1')).toHaveLength(1);
+    } finally {
+      authenticate.mockRestore();
+      profileStore.mockRestore();
+      fs.rmSync(root, { recursive: true, force: true });
     }
   });
 

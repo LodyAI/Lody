@@ -305,6 +305,7 @@ export function ProviderSetupRow({
         ) : null}
         {setup.status === 'awaiting-auth' ? (
           <AcpAuthenticationPanel
+            codexAuthMode={config.codexAuth?.mode}
             machineId={setup.machineId}
             configId={config.id}
             cliType={config.cliType}
