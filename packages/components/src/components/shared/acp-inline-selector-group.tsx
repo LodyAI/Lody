@@ -342,6 +342,7 @@ export function AcpBottomBarModeSelector({
           showDescription
           variant="compact"
           icon={getModeIcon(selectedModeId ?? null)}
+          iconOnly
           ariaLabel="Permission mode"
           contentClassName={contentClassName}
           triggerTitle="Permission mode"
@@ -354,6 +355,7 @@ export function AcpBottomBarModeSelector({
               configOptionValues?.[permissionSelector.configId]
             ) as string) ?? null
           ),
+          iconOnly: true,
           placeholder: 'Mode',
           tone,
           contentClassName,

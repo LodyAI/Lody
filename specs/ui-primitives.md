@@ -19,6 +19,10 @@ The Button supports primary, secondary, ghost, destructive, and link variants;
 mini, small, medium, and large sizes; icon-only controls; destructive tone; and
 default or pill shapes. These choices define the redesigned interface. Migrated
 callers must not reproduce the appearance of the deleted Button implementation.
+Buttons that are one control — a command with its options, or a short run of
+peers — form a button group: its buttons become segments of one shape with a
+seam between them, so a split action never reads as two unrelated buttons
+placed side by side.
 
 A field is a composition rather than a single control. A field root owns the
 control's name, whether it is disabled, and whether it is valid; the label, the

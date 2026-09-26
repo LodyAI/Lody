@@ -126,11 +126,11 @@ describe('SidebarUpdatedSessionList session-type icon', () => {
     const rowWithoutPr = container.querySelector('[data-sidebar-updated-id="session-without-pr"]');
 
     expect(rowWithPr?.querySelector('.lucide-git-pull-request')).not.toBeNull();
-    expect(rowWithPr?.querySelector('.text-code-added')).toBeNull();
-    expect(rowWithPr?.querySelector('.text-code-removed')).toBeNull();
+    expect(rowWithPr?.querySelector('.text-github-addition')).toBeNull();
+    expect(rowWithPr?.querySelector('.text-github-deletion')).toBeNull();
     expect(rowWithoutPr?.querySelector('.lucide-git-pull-request')).toBeNull();
-    expect(rowWithoutPr?.querySelector('.text-code-added')).toBeNull();
-    expect(rowWithoutPr?.querySelector('.text-code-removed')).toBeNull();
+    expect(rowWithoutPr?.querySelector('.text-github-addition')).toBeNull();
+    expect(rowWithoutPr?.querySelector('.text-github-deletion')).toBeNull();
   });
 
   it('shows the PR icon for a local row linked to a GitHub PR', () => {

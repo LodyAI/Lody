@@ -134,6 +134,13 @@ const alias = [
     replacement: path.resolve(dirname, 'components/app-preview-shims/diff-render-worker-shim.ts'),
   },
   {
+    find: '@/lib/markdown-highlight-worker',
+    replacement: path.resolve(
+      dirname,
+      'components/app-preview-shims/markdown-highlight-worker-shim.ts'
+    ),
+  },
+  {
     find: '@/lib/diff-parse-worker',
     replacement: path.resolve(dirname, 'components/app-preview-shims/diff-parse-worker-shim.ts'),
   },

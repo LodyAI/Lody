@@ -14,7 +14,7 @@ import {
   getSessionForkDestinationOptions,
 } from '../src/components/sessions/session-fork-destination-menu';
 
-vi.mock('virtua', () => ({
+vi.mock('@lody/virtua', () => ({
   Virtualizer: ({ children }: { children: import('react').ReactNode }) => children,
 }));
 

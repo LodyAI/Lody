@@ -22,6 +22,8 @@ export class CloudflaredError extends Error {
 export type CloudflaredProcess = {
   /** Address allocation alone is not readiness; the manager probes the public route. */
   origin: string;
+  /** First edge registration; neither this nor address allocation proves readiness. */
+  registered: Promise<void>;
   closed: Promise<CloudflaredError | null>;
   diagnostic(): string | undefined;
   stop(): Promise<void>;
@@ -146,9 +148,20 @@ export async function startCloudflaredNative(options: {
   });
   let resolveOrigin: (origin: string) => void = () => {};
   let rejectOrigin: (error: unknown) => void = () => {};
+  let resolveRegistration: () => void = () => {};
+  let rejectRegistration: (error: unknown) => void = () => {};
+  const registered = new Promise<void>((resolve, reject) => {
+    resolveRegistration = resolve;
+    rejectRegistration = reject;
+  });
+  // Registration can fail before the caller has received the allocated origin.
+  void registered.catch(() => {});
   const originPromise = new Promise<string>((resolve, reject) => {
     resolveOrigin = resolve;
-    rejectOrigin = reject;
+    rejectOrigin = (error) => {
+      reject(error);
+      rejectRegistration(error);
+    };
   });
   let stopPromise: Promise<void> | undefined;
   const stop = (): Promise<void> => {
@@ -201,7 +214,8 @@ export async function startCloudflaredNative(options: {
     stream.on('data', (chunk: string) => {
       pending += chunk;
       if (Buffer.byteLength(pending) > MAX_LOG_LINE_BYTES) {
-        rejectOrigin(new CloudflaredError('start', 'cloudflared log line exceeded its size limit'));
+        exitError ??= new CloudflaredError('start', 'cloudflared log line exceeded its size limit');
+        rejectOrigin(exitError);
         child.kill('SIGTERM');
         pending = '';
         return;
@@ -210,14 +224,23 @@ export async function startCloudflaredNative(options: {
       pending = lines.pop() ?? '';
       for (const line of lines) {
         if (!line.trim()) continue;
+        let raw: unknown;
         try {
-          const log = LogLine.parse(JSON.parse(line));
+          raw = JSON.parse(line);
+        } catch {
+          // Native dependencies (notably quic-go) can write plain-text diagnostics
+          // even with --output json. They are not lifecycle messages.
+          continue;
+        }
+        try {
+          const log = LogLine.parse(raw);
           const origin = parseQuickTunnelOrigin(log.message);
           if (origin) {
             resolveOrigin(origin);
             options.onDiagnostic?.(diagnostic());
           }
           if (log.message === 'Registered tunnel connection') {
+            resolveRegistration();
             connectionState = `registered (${log.protocol ?? 'unknown'})`;
             options.onDiagnostic?.(diagnostic());
           }
@@ -231,7 +254,10 @@ export async function startCloudflaredNative(options: {
             options.onDiagnostic?.(diagnostic());
           }
         } catch (error) {
-          rejectOrigin(new CloudflaredError('start', 'Invalid cloudflared JSON output', error));
+          // Origin allocation may already have settled. Preserve the first failure
+          // for closed as well, before SIGTERM produces secondary shutdown errors.
+          exitError ??= new CloudflaredError('start', 'Invalid cloudflared JSON output', error);
+          rejectOrigin(exitError);
           child.kill('SIGTERM');
         }
       }
@@ -255,7 +281,7 @@ export async function startCloudflaredNative(options: {
     const origin = await originPromise;
     options.signal.throwIfAborted();
     if (exited) throw exitError ?? new CloudflaredError('start', 'cloudflared already exited');
-    return { origin, closed, stop, diagnostic };
+    return { origin, registered, closed, stop, diagnostic };
   } catch (error) {
     await stop();
     throw error;

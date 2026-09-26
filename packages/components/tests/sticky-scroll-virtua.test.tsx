@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import React, { act, createRef, useRef } from 'react';
 import { createRoot } from 'react-dom/client';
-import { Virtualizer, type VirtualizerHandle } from 'virtua';
+import { Virtualizer, type VirtualizerHandle } from '@lody/virtua';
 import { it, expect, vi } from 'vitest';
 import type { SessionId } from '@lody/shared';
 import { scrollViewportToRealBottom } from '../src/hooks/sticky-scroll-dom';

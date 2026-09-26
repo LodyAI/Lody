@@ -126,4 +126,32 @@ describe('ProjectSettingsView local-project remove', () => {
     expect(onRequestRemoveLocalProject).toHaveBeenCalledTimes(1);
     expect(onRequestRemoveLocalProject.mock.calls[0]?.[0]?.project.name).toBe('Lody');
   });
+
+  // One add for the page, named like every catalog's: the folder dialog asks
+  // which machine, so a source section carries no second "Add folder".
+  it('adds a project from the one labelled page action', async () => {
+    const onAddLocalProject = vi.fn();
+    await act(async () => {
+      root.render(
+        <SettingsStoryProviders>
+          <ProjectSettingsView
+            sections={[{ ...sections[0]!, rows: [] }]}
+            githubSections={[]}
+            isLoading={false}
+            githubProjectsLoading={false}
+            addableMachines={[{ machineId, machineName: 'MacBook Pro', online: true }]}
+            onAddLocalProject={onAddLocalProject}
+          />
+        </SettingsStoryProviders>
+      );
+    });
+
+    const buttons = Array.from(container.querySelectorAll('button'));
+    expect(buttons.some((button) => button.textContent?.includes('Add folder'))).toBe(false);
+    const add = buttons.filter((button) => button.textContent?.trim() === 'Add project');
+    expect(add).toHaveLength(1);
+    await act(async () => add[0]?.click());
+    expect(onAddLocalProject).toHaveBeenCalledWith();
+    expect(container.textContent).toContain('No folders added on this machine yet.');
+  });
 });

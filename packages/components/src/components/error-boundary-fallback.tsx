@@ -1,14 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useTranslation } from 'react-i18next';
-import {
-  AlertTriangle,
-  Check,
-  CircleAlert,
-  Copy,
-  RefreshCw,
-  RotateCcw,
-  Trash2,
-} from 'lucide-react';
+import { Trans, useTranslation } from 'react-i18next';
+import { AlertTriangle, Check, Copy, Trash2 } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { corner, radius, space, text } from '@lody/ui/tokens/scales.stylex';
@@ -51,9 +43,12 @@ const COPIED_RESET_MS = 2000;
 const styles = stylex.create({
   icon14: { flexShrink: 0, width: '14px', height: '14px' },
   success: { color: colors.success },
-  destructive: { color: colors.destructive },
 
-  /** Inline: a message, a tint and a mark — the danger tone's circle, as on the page. */
+  /**
+   * Inline: what happened and that the rest is fine, in the page's voice, on
+   * whatever ground the failed part stood on — no tint, no mark. The raw error
+   * is one copy away, and in the tooltip.
+   */
   inline: {
     boxSizing: 'border-box',
     display: 'inline-flex',
@@ -61,21 +56,21 @@ const styles = stylex.create({
     gap: space[2],
     width: 'fit-content',
     maxWidth: '100%',
-    paddingInlineStart: space[3],
-    paddingInlineEnd: space[1],
-    paddingBlock: space[1],
-    borderRadius: radius.medium,
-    cornerShape: corner.shape,
-    backgroundColor: `color-mix(in oklab, transparent, ${colors.destructive} 8%)`,
+    minWidth: 0,
   },
   inlineText: {
     minWidth: 0,
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
     fontSize: text.footnoteSize,
-    color: colors.label,
+    lineHeight: text.footnoteLeading,
+    color: colors.secondaryLabel,
+    // Two lines at most: the sentence may wrap once in a narrow slot.
+    display: '-webkit-box',
+    WebkitBoxOrient: 'vertical',
+    WebkitLineClamp: 2,
+    overflow: 'hidden',
   },
+  inlineTitle: { fontWeight: 500, color: colors.label },
+  inlineActions: { display: 'inline-flex', alignItems: 'center', gap: space[1], flexShrink: 0 },
 
   /** A blocked copy: the one outcome here that is a message rather than a step. */
   message: {
@@ -126,8 +121,9 @@ const styles = stylex.create({
  * Invariants, learned from users who got permanently wedged on the old version:
  * - The real error text is on screen, not only in DevTools, and copyable in one
  *   click — the copy payload is the full report from `error-boundary-report.ts`.
- * - Nothing here reloads or resets on its own. Every recovery step is a button
- *   the user presses, in escalating order (retry → reload → report → wipe).
+ * - Nothing here reloads or resets on its own. Every recovery step is something
+ *   the user presses, in escalating order (retry → reload → report → wipe):
+ *   the first two are buttons, the last two share one quiet footnote line.
  * - The last resort clears every local trace and signs the user out, so a
  *   poisoned local state (a bad sign-in above all) cannot trap them forever.
  */
@@ -191,30 +187,42 @@ export function ErrorBoundaryFallback({
     void startHardReset();
   }, []);
 
+  const copyLabel = copied
+    ? t('errorBoundary.copied', 'Copied')
+    : t('errorBoundary.copyDetails', 'Copy error details');
+  const copyButton = (
+    <Button
+      type="button"
+      variant="ghost"
+      size="mini"
+      icon
+      onClick={handleCopy}
+      aria-label={copyLabel}
+      title={copyLabel}
+    >
+      {copied ? (
+        <Check {...stylex.props(styles.icon14, styles.success)} aria-hidden="true" />
+      ) : (
+        <Copy {...stylex.props(styles.icon14)} aria-hidden="true" />
+      )}
+    </Button>
+  );
+
   if (variant === 'inline') {
     return (
       <div role="alert" {...stylex.props(styles.inline)}>
-        <CircleAlert {...stylex.props(styles.icon14, styles.destructive)} aria-hidden="true" />
-        <span {...stylex.props(styles.inlineText)} title={headline}>
-          {showErrorDetails ? headline : t('errorBoundary.inlineTitle', 'This part failed')}
+        <span {...stylex.props(styles.inlineText)} title={showErrorDetails ? headline : undefined}>
+          <span {...stylex.props(styles.inlineTitle)}>
+            {t('errorBoundary.inlineTitle', "This part couldn't be shown.")}
+          </span>{' '}
+          {t('errorBoundary.inlineDescription', 'Everything else still works.')}
         </span>
-        <Button type="button" variant="ghost" size="mini" onClick={resetErrorBoundary}>
-          {t('errorBoundary.tryAgain', 'Try again')}
-        </Button>
-        <Button
-          type="button"
-          variant="ghost"
-          size="mini"
-          icon
-          onClick={handleCopy}
-          aria-label={t('errorBoundary.copyDetails', 'Copy error details')}
-        >
-          {copied ? (
-            <Check {...stylex.props(styles.icon14, styles.success)} aria-hidden="true" />
-          ) : (
-            <Copy {...stylex.props(styles.icon14)} aria-hidden="true" />
-          )}
-        </Button>
+        <span {...stylex.props(styles.inlineActions)}>
+          <Button type="button" variant="ghost" size="mini" onClick={resetErrorBoundary}>
+            {t('errorBoundary.tryAgain', 'Try again')}
+          </Button>
+          {copyButton}
+        </span>
       </div>
     );
   }
@@ -224,18 +232,27 @@ export function ErrorBoundaryFallback({
   return (
     <StatusPage
       layout={isRegion ? 'region' : 'window'}
-      tone="danger"
       role="alert"
       illustration="broken"
-      title={t('errorBoundary.title', 'Lody hit a snag')}
-      description={t(
-        'errorBoundary.description',
-        'Your work is safe. Try again — if it keeps happening, reload Lody.'
-      )}
+      title={
+        isRegion
+          ? t('errorBoundary.sectionTitle', "This part couldn't be shown")
+          : t('errorBoundary.title', "Lody couldn't show this page")
+      }
+      description={
+        isRegion
+          ? t(
+              'errorBoundary.sectionDescription',
+              'The rest of Lody still works, and your work is safe.'
+            )
+          : t(
+              'errorBoundary.description',
+              'Your work is safe. Try again — if it keeps happening, reload Lody.'
+            )
+      }
     >
       <StatusPageActions>
         <Button type="button" size="small" onClick={resetErrorBoundary}>
-          <RotateCcw {...stylex.props(styles.icon14)} aria-hidden="true" />
           {t('errorBoundary.tryAgain', 'Try again')}
         </Button>
         <Button
@@ -246,22 +263,13 @@ export function ErrorBoundaryFallback({
             reloadApp();
           }}
         >
-          <RefreshCw {...stylex.props(styles.icon14)} aria-hidden="true" />
           {t('errorBoundary.reload', 'Reload Lody')}
         </Button>
-        <Button type="button" variant="secondary" size="small" onClick={handleCopy}>
-          {copied ? (
-            <Check {...stylex.props(styles.icon14, styles.success)} aria-hidden="true" />
-          ) : (
-            <Copy {...stylex.props(styles.icon14)} aria-hidden="true" />
-          )}
-          {copied
-            ? t('errorBoundary.copied', 'Copied')
-            : t('errorBoundary.copyDetails', 'Copy error details')}
-        </Button>
+        {/* With the error hidden there is no block to carry the copy. */}
+        {showErrorDetails ? null : copyButton}
       </StatusPageActions>
 
-      {showErrorDetails ? <StatusPageCode>{headline}</StatusPageCode> : null}
+      {showErrorDetails ? <StatusPageCode action={copyButton}>{headline}</StatusPageCode> : null}
 
       {copyFailed ? (
         <p role="status" {...stylex.props(styles.message)}>
@@ -283,31 +291,30 @@ export function ErrorBoundaryFallback({
         </StatusPageDetails>
       ) : null}
 
+      {/* One quiet line for both ways past this screen: tell us, or start clean. */}
       <StatusPageFootnote>
-        {t(
-          'errorBoundary.stepReport',
-          'Still broken? Copy the error details and send them to us on Discord — they tell us exactly what failed.'
-        )}{' '}
-        <button
-          type="button"
-          {...stylex.props(styles.textLink)}
-          onClick={() => {
-            void openExternalUrl(LODY_DISCORD_URL);
+        <Trans
+          i18nKey="errorBoundary.stillStuck"
+          defaults="Still stuck? <discord>Tell us on Discord</discord> or <reset>clear local data</reset>."
+          components={{
+            discord: (
+              <button
+                type="button"
+                {...stylex.props(styles.textLink)}
+                onClick={() => {
+                  void openExternalUrl(LODY_DISCORD_URL);
+                }}
+              />
+            ),
+            reset: (
+              <button
+                type="button"
+                {...stylex.props(styles.textLink, styles.quietLink)}
+                onClick={() => setHardResetOpen(true)}
+              />
+            ),
           }}
-        >
-          {t('errorBoundary.openDiscord', 'Open Discord')}
-        </button>
-      </StatusPageFootnote>
-
-      <StatusPageFootnote>
-        {t('errorBoundary.hardResetLead', 'Stuck on this screen after every reload?')}{' '}
-        <button
-          type="button"
-          {...stylex.props(styles.textLink, styles.quietLink)}
-          onClick={() => setHardResetOpen(true)}
-        >
-          {t('errorBoundary.hardReset', 'Clear all local data and sign out')}
-        </button>
+        />
       </StatusPageFootnote>
 
       <HardResetConfirmDialog

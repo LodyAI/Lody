@@ -767,7 +767,9 @@ between them: a `+` is how a chord is written in prose, and this is not prose.
 One cap is at least as wide as it is tall, so `K` and `Shift` do not read as
 noise side by side. The face is the UI font, because `<kbd>` defaults to
 monospace and `⌘` there is a different glyph from the identical character in the
-label beside it.
+label beside it. A cap is `small` (the caption step) beside a line of text and
+`medium` (the footnote step) on a page whose subject is the keys, such as a
+shortcuts sheet; the height, fill and corner are the same cap's.
 
 A menu row's shortcut is **not** this: the rules give that slot plain trailing
 metadata in `popup.hint`, because a column of chips down a menu's right edge

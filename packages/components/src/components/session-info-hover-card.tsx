@@ -4,6 +4,7 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from 'react';
 import * as PopoverPrimitive from '@radix-ui/react-popover';
@@ -80,7 +81,11 @@ const cardDarkEdgeColor =
 const cardSeparatorColor =
   'color-mix(in oklab, hsl(var(--sidebar-background)) 86%, hsl(var(--foreground)) 14%)';
 
-const cardSurfaceStyle: CSSProperties = {
+/** The frame of a sidebar hover card (pair with `cardSurfaceStyle`). */
+export const SIDEBAR_CARD_FRAME_CLASS =
+  'flex w-[16.5rem] flex-col rounded-lg border-[0.5px] border-[var(--session-info-card-edge)] p-2.5 text-xs text-foreground dark:border-[var(--session-info-card-dark-edge)]';
+
+export const cardSurfaceStyle: CSSProperties = {
   backgroundColor: 'hsl(var(--sidebar-background))',
   boxShadow: '0px 3px 6px -2px lch(0% 0 0 / 0.02), 0px 1px 1px lch(0% 0 0 / 0.04)',
   '--session-info-card-edge': cardEdgeColor,
@@ -361,8 +366,8 @@ export function SessionInfoCard({
       label: t('sessions.infoCard.changes', 'Changes'),
       value: (
         <span className="inline-flex items-center gap-1.5 tabular-nums">
-          <span className="text-code-added">+{addedLines}</span>
-          <span className="text-code-removed">-{deletedLines}</span>
+          <span className="text-github-addition">+{addedLines}</span>
+          <span className="text-github-deletion">-{deletedLines}</span>
         </span>
       ),
     });
@@ -427,7 +432,7 @@ export function SessionInfoCard({
     <div
       style={cardSurfaceStyle}
       className={cn(
-        'flex w-[16.5rem] flex-col rounded-lg border-[0.5px] border-[var(--session-info-card-edge)] p-2.5 text-xs text-foreground dark:border-[var(--session-info-card-dark-edge)]',
+        SIDEBAR_CARD_FRAME_CLASS,
         className
       )}
     >
@@ -536,11 +541,42 @@ let activeClose: (() => void) | null = null;
  */
 let lastCardInteractionAt = Number.NEGATIVE_INFINITY;
 
+/** Pointer travel that ends a press suppression; a still pointer never does. */
+const PRESS_MOVE_TOLERANCE_PX = 4;
+
+/**
+ * Where the last press on a card trigger happened, while cards are suppressed.
+ * A press navigates, and navigation re-renders the rows under a pointer that has
+ * not moved, which re-fires `pointerenter`. While warm, that would open a card in
+ * the very commit that switches the conversation; the card's Radix `Presence`
+ * reads the computed animation name on mount, forcing the whole switch's pending
+ * style work synchronously (~30ms per open on a large workspace). Cards stay shut
+ * until the pointer really moves.
+ */
+let pressSuppression: { x: number; y: number } | null = null;
+
+function releasePressSuppressionOnMove(event: PointerEvent) {
+  if (
+    pressSuppression &&
+    Math.hypot(event.clientX - pressSuppression.x, event.clientY - pressSuppression.y) <
+      PRESS_MOVE_TOLERANCE_PX
+  ) {
+    return;
+  }
+  pressSuppression = null;
+  document.removeEventListener('pointermove', releasePressSuppressionOnMove, true);
+}
+
+function suppressCardsUntilPointerMoves(x: number, y: number) {
+  if (!pressSuppression) {
+    document.addEventListener('pointermove', releasePressSuppressionOnMove, true);
+  }
+  pressSuppression = { x, y };
+}
+
 /**
  * Wraps a trigger with hover-to-open behavior and renders {@link SessionInfoCard}
- * beside it. The first hover warms up (~650ms) before opening; while the pointer
- * keeps hitting cards, later opens are instant. A short close grace lets the
- * cursor travel from the row into the card without it closing.
+ * beside it (see {@link SidebarHoverCard}).
  */
 export function SessionInfoHoverCard({
   children,
@@ -548,6 +584,34 @@ export function SessionInfoHoverCard({
   now,
   ...cardProps
 }: SessionInfoHoverCardProps) {
+  return (
+    <SidebarHoverCard
+      disabled={disabled}
+      content={<SessionInfoCardWithNow {...cardProps} now={now} />}
+    >
+      {children}
+    </SidebarHoverCard>
+  );
+}
+
+/**
+ * The sidebar's hover card shell, shared by conversation rows and machine group
+ * headers so only one card is ever open across both. The first hover warms up
+ * (~650ms) before opening; while the pointer keeps hitting cards, later opens
+ * are instant. A short close grace lets the cursor travel from the trigger into
+ * the card without it closing. `content` mounts only while the card is open.
+ */
+export function SidebarHoverCard({
+  children,
+  disabled,
+  content,
+}: {
+  /** The trigger. Hovering it opens the card. */
+  children: ReactNode;
+  /** Skip the hover card entirely (e.g. on touch devices with no hover). */
+  disabled?: boolean;
+  content: ReactNode;
+}) {
   const [open, setOpen] = useState(false);
   const openRef = useRef(false);
   const closeTimer = useRef<number | null>(null);
@@ -592,7 +656,7 @@ export function SessionInfoHoverCard({
   // Hover intent: instant while warm, otherwise wait out the warmup delay.
   const requestOpen = useCallback(() => {
     clearClose();
-    if (openRef.current) return;
+    if (openRef.current || pressSuppression) return;
     const warm = performance.now() - lastCardInteractionAt < WARM_WINDOW_MS;
     if (warm) {
       openNow();
@@ -609,6 +673,15 @@ export function SessionInfoHoverCard({
     clearClose();
     closeTimer.current = window.setTimeout(closeSelf, CLOSE_DELAY_MS);
   }, [clearOpen, clearClose, closeSelf]);
+
+  const handlePointerDown = useCallback(
+    (event: ReactPointerEvent) => {
+      if (event.button !== 0) return;
+      suppressCardsUntilPointerMoves(event.clientX, event.clientY);
+      closeSelf();
+    },
+    [closeSelf]
+  );
 
   // Release the shared slot whenever this card is closed (incl. Escape / outside).
   useEffect(() => {
@@ -634,7 +707,11 @@ export function SessionInfoHoverCard({
       }}
     >
       <PopoverPrimitive.Anchor asChild>
-        <div onPointerEnter={requestOpen} onPointerLeave={scheduleClose}>
+        <div
+          onPointerEnter={requestOpen}
+          onPointerLeave={scheduleClose}
+          onPointerDown={handlePointerDown}
+        >
           {children}
         </div>
       </PopoverPrimitive.Anchor>
@@ -650,7 +727,7 @@ export function SessionInfoHoverCard({
           onPointerLeave={scheduleClose}
           className="z-[var(--z-popover)] outline-hidden"
         >
-          <SessionInfoCardWithNow {...cardProps} now={now} />
+          {content}
         </PopoverPrimitive.Content>
       </PopoverPrimitive.Portal>
     </PopoverPrimitive.Root>

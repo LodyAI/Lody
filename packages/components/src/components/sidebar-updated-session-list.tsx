@@ -49,6 +49,7 @@ import {
   buildSessionRowOpenedByTreeSlot,
   type SidebarRowKind,
   type SessionRowOpenedByTreeSlot,
+  SIDEBAR_ROW_LIST_CLASS,
 } from '@/components/sidebar-row-shared';
 import {
   sidebarCollapsedOpenedBySessionsAtom,
@@ -568,7 +569,7 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
                 onToggleCollapsed={canToggleBucket ? handleToggle : undefined}
               />
               {!collapsed ? (
-                <div className="flex flex-col gap-px">
+                <div className={SIDEBAR_ROW_LIST_CLASS}>
                   {visibleNodes.map((node, nodeIndex) => {
                     const openedByTree = buildSessionRowOpenedByTreeSlot(node, t, () =>
                       handleToggleOpenedBySessions(node.item.id)
@@ -846,9 +847,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
     <span
       className={cn(
         'min-w-0 flex-1 truncate font-normal',
-        showSelectedState
-          ? 'text-sidebar-selection-foreground'
-          : 'text-sidebar-foreground group-hover/row:text-sidebar-hover-foreground'
+        showSelectedState ? 'text-sidebar-selection-foreground' : 'text-sidebar-row-foreground'
       )}
     >
       {item.title}
@@ -886,9 +885,12 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
         !showSelectedState &&
           onSelect &&
           !isMobile &&
-          'hover:bg-sidebar-hover hover:text-sidebar-hover-foreground data-[menu-open]:bg-sidebar-hover data-[menu-open]:text-sidebar-hover-foreground',
+          // Hover marks the row with its fill only; the title keeps its color.
+          'hover:bg-sidebar-hover data-[menu-open]:bg-sidebar-hover',
         showSelectedState &&
           'bg-sidebar-selection text-sidebar-selection-foreground hover:bg-sidebar-selection',
+        // Unselected titles sit below the reading column's brightness.
+        !showSelectedState && 'text-sidebar-row-foreground',
         // Keyboard-only focus ring — see SessionList: plain :focus-within also
         // matches after mouse clicks via the overlay <a> and left a permanent
         // inset ring on the selected row.
@@ -992,7 +994,9 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
                   <SessionRowWorktreeIndicator
                     isWorktree={item.kind === 'local' && item.isWorktree}
                   />
-                  {showPr ? <SessionPrIcon prStatus={prStatus} prCiState={item.prCiState} /> : null}
+                  {showPr ? (
+                    <SessionPrIcon compact prStatus={prStatus} prCiState={item.prCiState} />
+                  ) : null}
                 </span>
               ) : undefined
             }

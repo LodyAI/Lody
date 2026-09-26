@@ -1,13 +1,7 @@
 import { useLocation, useNavigate } from '@tanstack/react-router';
 import { Button } from '@lody/ui/button';
-import * as stylex from '@stylexjs/stylex';
-import { ArrowLeft } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { StatusPage, StatusPageActions, StatusPageCode } from '@/components/status-page';
-
-const styles = stylex.create({
-  icon14: { flexShrink: 0, width: '14px', height: '14px' },
-});
 
 /**
  * The route nothing matched. It names the address it was asked for, because
@@ -43,7 +37,6 @@ export function NotFound() {
           {t('notFound.goHome', 'Go home')}
         </Button>
         <Button variant="secondary" size="small" onClick={handleGoBack}>
-          <ArrowLeft {...stylex.props(styles.icon14)} aria-hidden="true" />
           {t('notFound.goBack', 'Go back')}
         </Button>
       </StatusPageActions>

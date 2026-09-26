@@ -4,7 +4,7 @@ import { Copy, Folder } from 'lucide-react';
 
 import { WorktreeIcon } from '@/components/icons/worktree-icon';
 import { Menu } from '@/ui/menu';
-import { Tooltip } from '@lody/ui/tooltip';
+import { Tooltip } from '@/ui/armed-overlays';
 
 export type SessionForkDestination = 'shared' | 'new-worktree';
 

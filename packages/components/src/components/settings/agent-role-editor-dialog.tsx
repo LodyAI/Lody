@@ -22,7 +22,7 @@ import {
 import { capturePostHogEvent } from '@/lib/posthog-analytics';
 import { Dialog } from '@/ui/dialog';
 import { AgentRoleForm } from './agent-role-form';
-import { SETTINGS_EDITOR_DIALOG_LAYOUT } from './surface';
+import { SETTINGS_EDITOR_DIALOG_LAYOUT, SETTINGS_EDITOR_DIALOG_WIDTH } from './surface';
 
 /**
  * A `create` carries its id from the moment the form opens.
@@ -208,7 +208,10 @@ export function AgentRoleEditorDialog({
         if (!open) close();
       }}
     >
-      <Dialog.Content className={SETTINGS_EDITOR_DIALOG_LAYOUT}>
+      <Dialog.Content
+        width={SETTINGS_EDITOR_DIALOG_WIDTH}
+        className={SETTINGS_EDITOR_DIALOG_LAYOUT}
+      >
         <Dialog.Header>
           <Dialog.Title>
             {editor?.mode === 'edit'

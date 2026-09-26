@@ -1,7 +1,7 @@
 import { Fragment, useCallback, useEffect, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAtom } from 'jotai';
-import { CheckCircle2, AlertCircle, Download, ExternalLink } from 'lucide-react';
+import { CheckCircle2, AlertCircle, ArrowUpRight, Download } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { space } from '@lody/ui/tokens/scales.stylex';
@@ -10,11 +10,11 @@ import type { ElectronUpdaterPhase } from '@lody/shared';
 import { Button } from '@lody/ui/button';
 import { Switch } from '@lody/ui/switch';
 import { BetaFeaturesSection } from './beta-features-setting';
-import { CompactRow, CompactSection } from './compact-layout';
+import { CompactLinkRow, CompactRow, CompactSection } from './compact-layout';
 import { settingContainerClass } from '.';
 import { useElectronUpdaterState } from '@/hooks/use-electron-updater-state';
 import { OpenSourceAttributionsDialog } from './open-source-attributions-dialog';
-import { JoinCommunityButton } from './join-community-dialog';
+import { JoinCommunityDialog } from './join-community-dialog';
 import { openExternalUrl } from '@/lib/native-browser';
 import { getIpcServices } from '@/lib/electron-ipc-client';
 import { getDownloadPageUrl, getNightlyDownloadPageUrl, getWebsiteUrl } from '@/lib/lody-urls';
@@ -58,6 +58,8 @@ const styles = stylex.create({
   statusIcon: { width: '14px', height: '14px', flexShrink: 0 },
   statusIconSuccess: { color: colors.success },
   icon: { width: '14px', height: '14px', flexShrink: 0 },
+  /** Where a channel's link leads, in the ink of a hint. */
+  linkMark: { width: '14px', height: '14px', flexShrink: 0, color: colors.tertiaryLabel },
   endpoints: {
     display: 'flex',
     flexDirection: 'column',
@@ -262,6 +264,7 @@ export function AboutSettingsComponent() {
   const [isInstalling, setIsInstalling] = useState(false);
   const [developerModeEnabled, setDeveloperModeEnabled] = useAtom(developerModeEnabledAtom);
   const [developerModeRevealed, setDeveloperModeRevealed] = useState(false);
+  const [communityOpen, setCommunityOpen] = useState(false);
   const isMobile = useIsMobile();
 
   const handleOpenDownloadPage = useCallback(() => {
@@ -385,35 +388,43 @@ export function AboutSettingsComponent() {
         </CompactRow>
       </CompactSection>
 
+      {/* Each row is its own link: the name, and a quiet mark for where it
+        leads (↗ out of Lody, › into a dialog). A button beside the name would
+        only say the name again. Downloads has two destinations, so its row
+        names the two channels, in the same quiet ink. */}
       <CompactSection>
-        <CompactRow label={t('settings.about.community', 'Community')}>
-          <JoinCommunityButton />
-        </CompactRow>
+        <CompactLinkRow
+          label={t('settings.about.community', 'Community')}
+          to="open"
+          onClick={() => setCommunityOpen(true)}
+        />
         <CompactRow label={t('settings.about.downloadApps', 'Download apps')}>
-          <Button variant="secondary" size="small" onClick={handleOpenDownloadPage}>
-            <ExternalLink {...stylex.props(styles.icon)} />
+          <Button variant="ghost" size="small" onClick={handleOpenDownloadPage}>
             {t('settings.about.downloadStable', 'Stable')}
+            <ArrowUpRight {...stylex.props(styles.linkMark)} aria-hidden="true" />
           </Button>
           <Button
-            variant="secondary"
+            variant="ghost"
             size="small"
             onClick={() => void openExternalUrl(getNightlyDownloadPageUrl(i18n.resolvedLanguage))}
           >
-            <ExternalLink {...stylex.props(styles.icon)} />
             {t('settings.about.downloadNightlyShort', 'Nightly')}
+            <ArrowUpRight {...stylex.props(styles.linkMark)} aria-hidden="true" />
           </Button>
         </CompactRow>
-        <CompactRow label={t('settings.about.website', 'Website')}>
-          <Button variant="secondary" size="small" onClick={handleOpenWebsite}>
-            <ExternalLink {...stylex.props(styles.icon)} />
-            {t('settings.about.visitWebsite', 'Visit website')}
-          </Button>
-        </CompactRow>
-        <CompactRow label={t('settings.about.openSourceAttributions', 'Open Source Licenses')}>
-          <OpenSourceAttributionsDialog
-            onTriggerDoubleClick={() => setDeveloperModeRevealed(true)}
-          />
-        </CompactRow>
+        <CompactLinkRow
+          label={t('settings.about.website', 'Website')}
+          onClick={handleOpenWebsite}
+        />
+        <OpenSourceAttributionsDialog
+          trigger={
+            <CompactLinkRow
+              label={t('settings.about.openSourceAttributions', 'Open Source Licenses')}
+              to="open"
+            />
+          }
+          onTriggerDoubleClick={() => setDeveloperModeRevealed(true)}
+        />
         {showDeveloperModeSwitch && (
           <CompactRow
             label={t('settings.about.developerMode', 'Developer mode')}
@@ -439,6 +450,7 @@ export function AboutSettingsComponent() {
         {developerModeEnabled && <DevbarSettingsControls />}
       </CompactSection>
       <BetaFeaturesSection />
+      <JoinCommunityDialog open={communityOpen} onOpenChange={setCommunityOpen} />
     </div>
   );
 }

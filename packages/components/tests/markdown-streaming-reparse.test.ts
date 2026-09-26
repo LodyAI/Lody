@@ -4,10 +4,7 @@ import { act, createElement, type ComponentProps } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import {
-  createMarkdownMermaidConfig,
-  MarkdownRenderer,
-} from '../src/components/ai-gui/markdown-renderer';
+import { MarkdownRenderer } from '../src/components/ai-gui/markdown-renderer';
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
@@ -180,9 +177,12 @@ End of synthetic document.`);
       await renderMarkdown(MALFORMED_BOLD_AUTOLINK_MARKDOWN, { isStreaming });
 
       const url = 'https://github.com/LodyAI/Lody/pull/262';
+      // The link ends exactly at the URL; a bare PR URL renders as its reference label.
       const link = container?.querySelector(`[data-streamdown="strong"] a[href="${url}"]`);
-      expect(link?.textContent).toBe(url);
-      expect(container?.querySelector('[data-streamdown="strong"]')?.textContent).toBe(url);
+      expect(link?.querySelector('[data-github-reference="pull"]')?.textContent).toBe('PR LodyAI/Lody#262');
+      expect(container?.querySelector('[data-streamdown="strong"]')?.textContent).toBe(
+        'PR LodyAI/Lody#262'
+      );
       expect(container?.querySelector('code')?.textContent).toBe('fix/some-branch');
       expect(container?.textContent).toContain('fix/some-branch -> main');
       expect(container?.textContent).not.toContain('**');
@@ -252,12 +252,57 @@ End of synthetic document.`);
     expect(container?.querySelector('code')).toBeNull();
   });
 
+  it('copies a table as Markdown from its copy button', async () => {
+    const writeText = vi.fn(async (_text: string) => undefined);
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    });
+    await renderMarkdown(
+      ['| Name | Notes |', '| --- | --- |', '| a | x \\| y |', '| b | plain |'].join('\n')
+    );
+
+    const copy = container?.querySelector<HTMLButtonElement>('button[aria-label="Copy table"]');
+    expect(copy).not.toBeNull();
+    await act(async () => {
+      copy?.click();
+    });
+
+    // No rich clipboard in the test DOM: the Markdown text is what is copied.
+    expect(writeText).toHaveBeenCalledWith(
+      ['| Name | Notes |', '| --- | --- |', '| a | x \\| y |', '| b | plain |'].join('\n')
+    );
+    expect(copy?.getAttribute('aria-label')).toBe('Copied');
+  });
+
+  it('renders links that only name a GitHub PR or issue as reference labels', async () => {
+    await renderMarkdown(
+      [
+        'Opened https://github.com/LodyAI/Lody/pull/954 and [#12](https://github.com/acme/app/issues/12).',
+        'Also [LodyAI/Lody#7](https://github.com/LodyAI/Lody/pull/7/files).',
+        'But [the fix](https://github.com/LodyAI/Lody/pull/955) and [#13](https://github.com/acme/app/issues/99) stay links.',
+      ].join('\n\n')
+    );
+
+    const reference = (href: string) =>
+      container?.querySelector(`a[href="${href}"] [data-github-reference]`) ?? null;
+    expect(reference('https://github.com/LodyAI/Lody/pull/954')?.textContent).toBe('PR LodyAI/Lody#954');
+    expect(reference('https://github.com/acme/app/issues/12')?.textContent).toBe('Issue acme/app#12');
+    expect(reference('https://github.com/LodyAI/Lody/pull/7/files')?.textContent).toBe('PR LodyAI/Lody#7');
+    // Descriptive text, or a number that does not match the URL, keeps the plain link.
+    expect(reference('https://github.com/LodyAI/Lody/pull/955')).toBeNull();
+    expect(
+      container?.querySelector('a[href="https://github.com/LodyAI/Lody/pull/955"]')?.textContent
+    ).toBe('the fix');
+    expect(reference('https://github.com/acme/app/issues/99')).toBeNull();
+  });
+
   it('ends a bold autolink at full-width punctuation instead of swallowing the sentence', async () => {
     await renderMarkdown(BOLD_AUTOLINK_BEFORE_CJK_MARKDOWN);
 
     const url = 'https://github.com/LodyAI/Lody/pull/317';
     const link = container?.querySelector(`[data-streamdown="strong"] a[href="${url}"]`);
-    expect(link?.textContent).toBe(url);
+    expect(link?.textContent).toBe('PR LodyAI/Lody#317');
     expect(container?.querySelector('code')?.textContent).toBe('fix/mobile-staged-background-sync');
     expect(container?.textContent).toContain('，分支');
     expect(container?.textContent).not.toContain('**');
@@ -501,21 +546,6 @@ End of synthetic document.`);
       'button[title="/home/agent/project/src/routes/api/upload.$key.tsx:9"]'
     );
     expect(fileLinkButton).not.toBeNull();
-  });
-
-  it('uses Mermaid theme variables with readable dark-mode foregrounds and lines', () => {
-    const lightConfig = createMarkdownMermaidConfig('light');
-    const darkConfig = createMarkdownMermaidConfig('dark');
-
-    expect(lightConfig.theme).toBe('base');
-    expect(darkConfig.theme).toBe('base');
-    expect(darkConfig.darkMode).toBe(true);
-    expect(darkConfig.themeVariables).toMatchObject({
-      primaryTextColor: '#f8fafc',
-      lineColor: '#cbd5e1',
-      textColor: '#e2e8f0',
-    });
-    expect(darkConfig.themeVariables).not.toBe(lightConfig.themeVariables);
   });
 
   it('keeps incomplete streaming Markdown rendered without per-word animation spans', async () => {

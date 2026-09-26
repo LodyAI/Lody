@@ -200,7 +200,7 @@ export function SessionFileQuickOpen({
 
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
-      <Dialog.Content className="overflow-hidden p-0 sm:max-w-2xl">
+      <Dialog.Content width="42rem" className="overflow-hidden p-0">
         <Dialog.Title className="sr-only">
           {t('sessions.fileQuickOpen.title', 'Quick open file')}
         </Dialog.Title>

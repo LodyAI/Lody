@@ -10,7 +10,7 @@ Edit `AGENTS.md`, not its `CLAUDE.md` symlink. Ownership: [README.md](README.md)
   output. Never wire `searchBlockId` to tool, terminal, or diff renderers.
 - Window stream readiness must use the same hydration/initial-scroll conditions as
   viewport visibility; hydrated history alone cannot reveal a native window.
-- `SessionChatStreamView` uses one Virtua list with stable keys and `shift={false}`.
+- `SessionChatStreamView` uses one `keyed` `@lody/virtua` list with stable row keys (no `shift`).
   Map history indexes to rows. Collapsed activity is one row; expanded details
   are siblings, never nested scrollers or fixed-height process panels.
 - Native text selection retains its complete row corridor and history leases;
@@ -110,3 +110,5 @@ Edit `AGENTS.md`, not its `CLAUDE.md` symlink. Ownership: [README.md](README.md)
   cards, mobile avatars do not.
 - Attachment and mobile image-preview invariants live in
   [session-files-rendering.md](session-files-rendering.md).
+- Markdown images remember each source's natural size or failure for the page's
+  life: a Virtua remount must render at its final height (failed sources show alt text).

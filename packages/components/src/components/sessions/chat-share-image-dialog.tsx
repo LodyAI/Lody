@@ -930,7 +930,7 @@ export function ChatShareImageDialog({
     <Dialog.Root open={open} onOpenChange={requestOpenChange}>
       {/* The preview is the card at a readable scale, so the panel is wider than a
           dialog's column of prose. */}
-      <Dialog.Content style={{ width: '720px' }}>
+      <Dialog.Content width="720px">
         <Dialog.Header>
           <Dialog.Title>{dialogTitle}</Dialog.Title>
           <Dialog.Description>

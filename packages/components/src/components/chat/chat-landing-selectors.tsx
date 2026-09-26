@@ -83,8 +83,11 @@ export function ModeSelector({
       disabled={disabled || options.length === 0}
       align="start"
       icon={getModeIcon(value)}
-      className="max-w-[12rem]"
+      // Icon only (every mode has one): the mode's name is the tooltip. A label
+      // such as "Bypass permissions" otherwise took most of the control row.
+      iconOnly
       ariaLabel="Permission mode"
+      triggerTitle="Permission mode"
     />
   );
 }

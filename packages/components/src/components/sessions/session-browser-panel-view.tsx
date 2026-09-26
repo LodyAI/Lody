@@ -71,7 +71,7 @@ export function SessionBrowserPanelView({
           </Button>
         </div>
       ) : null}
-      {navigationPhase ? (
+      {navigationPhase && !hasContent ? (
         <div
           role="status"
           aria-live="polite"

@@ -4,7 +4,7 @@ import * as stylex from '@stylexjs/stylex';
 import { Check, ChevronRight, CircleDashed, Copy, X } from 'lucide-react';
 import { Spinner } from '@lody/ui/spinner';
 import { Button } from '@lody/ui/button';
-import { Popover } from '@lody/ui/popover';
+import { Popover } from '@/ui/armed-overlays';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { corner, focus, radius, space } from '@lody/ui/tokens/scales.stylex';
 import type { MessageContent } from '@lody/shared';

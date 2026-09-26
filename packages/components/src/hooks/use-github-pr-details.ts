@@ -175,6 +175,40 @@ async function runPrSliceWithUnauthorizedRetry(
   });
 }
 
+/**
+ * One network request per identical GitHub read in flight, across every hook
+ * instance: the PR info bar and the PR tab mount their own hooks for the same
+ * pull request, and each used to send its own copy of every request.
+ */
+/**
+ * `join` reuses any read already in flight (polls, invalidations). `fresh`
+ * (an explicit refresh, usually right after a merge or close) joins only
+ * another fresh read: a poll begun before the write would report the
+ * pre-write state.
+ */
+type GitHubReadSharing = 'join' | 'fresh';
+
+const sharedGitHubReads = new Map<
+  string,
+  { request: Promise<unknown>; sharing: GitHubReadSharing }
+>();
+
+function shareGitHubRead<T>(
+  key: string,
+  read: () => Promise<T>,
+  sharing: GitHubReadSharing
+): Promise<T> {
+  const pending = sharedGitHubReads.get(key);
+  if (pending && (sharing === 'join' || pending.sharing === 'fresh')) {
+    return pending.request as Promise<T>;
+  }
+  const request: Promise<T> = read().finally(() => {
+    if (sharedGitHubReads.get(key)?.request === request) sharedGitHubReads.delete(key);
+  });
+  sharedGitHubReads.set(key, { request, sharing });
+  return request;
+}
+
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => {
     window.setTimeout(resolve, ms);
@@ -256,6 +290,10 @@ export function useGitHubPrDetails({
   const canFetch = enabledWithInputs && canRunAuthedWorkspaceQuery(workspaceId, isAuthenticated);
 
   const [payload, setPayload] = useState<PrCachePayload | null>(null);
+  // The PR `payload`/`state` describe. A switched view keeps the previous PR's
+  // values until its cache read lands; they must not render (or enable Merge)
+  // as the new PR's.
+  const [loadedCacheKey, setLoadedCacheKey] = useState<string | null>(null);
   const [state, setState] = useState<GitHubPrDetailsState>(enabledWithInputs ? 'loading' : 'idle');
   const [isRevalidating, setIsRevalidating] = useState(false);
   const [error, setError] = useState<Error | null>(null);
@@ -273,7 +311,9 @@ export function useGitHubPrDetails({
   // convex-driven revalidation) await the existing Promise instead of
   // short-circuiting to a no-op, so the button's loading state stays in sync
   // with whatever's actually in flight.
-  const inFlightPromisesRef = useRef<Map<Slice, Promise<void>>>(new Map());
+  const inFlightPromisesRef = useRef<
+    Map<Slice, { promise: Promise<void>; sharing: GitHubReadSharing }>
+  >(new Map());
   const cacheKeyRef = useRef<string | null>(null);
   // Survives effect re-runs so "resume from a pause" stays distinguishable from
   // "the effect restarted while still visible".
@@ -309,6 +349,7 @@ export function useGitHubPrDetails({
   useEffect(() => {
     if (!enabledWithInputs || !workspaceId || !normalizedRepoFullName || !prNumber) {
       setPayload(null);
+      setLoadedCacheKey(null);
       payloadRef.current = null;
       versionsRef.current = EMPTY_PR_CACHE_VERSIONS;
       cacheKeyRef.current = null;
@@ -343,6 +384,7 @@ export function useGitHubPrDetails({
     void (async () => {
       const entry = await readPrCacheEntry(workspaceId, normalizedRepoFullName, prNumber);
       if (cancelled || cacheKeyRef.current !== cacheKey) return;
+      setLoadedCacheKey(cacheKey);
       if (entry) {
         payloadRef.current = entry.payload;
         versionsRef.current = entry.versions;
@@ -385,6 +427,7 @@ export function useGitHubPrDetails({
         payloadRef.current = nextPayload;
         versionsRef.current = nextVersions;
         setPayload(nextPayload);
+        setLoadedCacheKey(targetCacheKey);
       }
       const entry: PrCacheEntry = {
         workspaceId: targetWorkspaceId,
@@ -454,13 +497,21 @@ export function useGitHubPrDetails({
   }, [runBranchProbe]);
 
   const fetchSlice = useCallback(
-    (slice: Slice, requestOptions?: GitHubReadRequestOptions): Promise<void> => {
+    function fetchSliceOnce(
+      slice: Slice,
+      requestOptions?: GitHubReadRequestOptions,
+      sharing: GitHubReadSharing = 'join'
+    ): Promise<void> {
       if (!workspaceId || !normalizedRepoFullName || !prNumber || !cacheKey) {
         return Promise.resolve();
       }
       const targetCacheKey = cacheKey;
       const existing = inFlightPromisesRef.current.get(slice);
-      if (existing) return existing;
+      if (existing) {
+        if (sharing === 'join' || existing.sharing === 'fresh') return existing.promise;
+        // A fresh read starts after this one, which may predate a write.
+        return existing.promise.then(() => fetchSliceOnce(slice, requestOptions, sharing));
+      }
       setIsRevalidating(true);
       let promise: Promise<void>;
       const run = async (): Promise<void> => {
@@ -469,11 +520,16 @@ export function useGitHubPrDetails({
             if (cacheKeyRef.current !== targetCacheKey) return;
             switch (slice) {
               case 'prDetails': {
-                const fetchedPullRequest = await githubFetchPullRequestDetails(
-                  token,
-                  normalizedRepoFullName,
-                  prNumber,
-                  requestOptions
+                const fetchedPullRequest = await shareGitHubRead(
+                  `prDetails:${workspaceId}:${normalizedRepoFullName}#${prNumber}:${requestOptions?.cache ?? ''}`,
+                  () =>
+                    githubFetchPullRequestDetails(
+                      token,
+                      normalizedRepoFullName,
+                      prNumber,
+                      requestOptions
+                    ),
+                  sharing
                 );
                 if (cacheKeyRef.current !== targetCacheKey) return;
                 const prev = payloadRef.current ?? createEmptyPayload();
@@ -490,11 +546,16 @@ export function useGitHubPrDetails({
                 break;
               }
               case 'reviewComments': {
-                const reviewThreads = await githubFetchPRReviewComments(
-                  token,
-                  normalizedRepoFullName,
-                  prNumber,
-                  requestOptions
+                const reviewThreads = await shareGitHubRead(
+                  `reviewComments:${workspaceId}:${normalizedRepoFullName}#${prNumber}:${requestOptions?.cache ?? ''}`,
+                  () =>
+                    githubFetchPRReviewComments(
+                      token,
+                      normalizedRepoFullName,
+                      prNumber,
+                      requestOptions
+                    ),
+                  sharing
                 );
                 if (cacheKeyRef.current !== targetCacheKey) return;
                 const prev = payloadRef.current ?? createEmptyPayload();
@@ -507,11 +568,16 @@ export function useGitHubPrDetails({
                 break;
               }
               case 'reviews': {
-                const reviews = await githubFetchPullRequestReviews(
-                  token,
-                  normalizedRepoFullName,
-                  prNumber,
-                  requestOptions
+                const reviews = await shareGitHubRead(
+                  `reviews:${workspaceId}:${normalizedRepoFullName}#${prNumber}:${requestOptions?.cache ?? ''}`,
+                  () =>
+                    githubFetchPullRequestReviews(
+                      token,
+                      normalizedRepoFullName,
+                      prNumber,
+                      requestOptions
+                    ),
+                  sharing
                 );
                 if (cacheKeyRef.current !== targetCacheKey) return;
                 const prev = payloadRef.current ?? createEmptyPayload();
@@ -524,11 +590,16 @@ export function useGitHubPrDetails({
                 break;
               }
               case 'issueComments': {
-                const issueComments = await githubFetchPRIssueComments(
-                  token,
-                  normalizedRepoFullName,
-                  prNumber,
-                  requestOptions
+                const issueComments = await shareGitHubRead(
+                  `issueComments:${workspaceId}:${normalizedRepoFullName}#${prNumber}:${requestOptions?.cache ?? ''}`,
+                  () =>
+                    githubFetchPRIssueComments(
+                      token,
+                      normalizedRepoFullName,
+                      prNumber,
+                      requestOptions
+                    ),
+                  sharing
                 );
                 if (cacheKeyRef.current !== targetCacheKey) return;
                 const prev = payloadRef.current ?? createEmptyPayload();
@@ -545,11 +616,10 @@ export function useGitHubPrDetails({
                 const ref = payloadRef.current?.pullRequest?.headSha || headCommitSha?.trim() || '';
                 if (!ref) return;
                 try {
-                  const checkRuns = await githubFetchCheckRuns(
-                    token,
-                    normalizedRepoFullName,
-                    ref,
-                    requestOptions
+                  const checkRuns = await shareGitHubRead(
+                    `checkRuns:${workspaceId}:${normalizedRepoFullName}@${ref}:${requestOptions?.cache ?? ''}`,
+                    () => githubFetchCheckRuns(token, normalizedRepoFullName, ref, requestOptions),
+                    sharing
                   );
                   if (cacheKeyRef.current !== targetCacheKey) return;
                   const prev = payloadRef.current ?? createEmptyPayload();
@@ -602,7 +672,7 @@ export function useGitHubPrDetails({
             setState('error');
           }
         } finally {
-          if (inFlightPromisesRef.current.get(slice) === promise) {
+          if (inFlightPromisesRef.current.get(slice)?.promise === promise) {
             inFlightPromisesRef.current.delete(slice);
             if (inFlightPromisesRef.current.size === 0 && cacheKeyRef.current === targetCacheKey) {
               setIsRevalidating(false);
@@ -611,7 +681,7 @@ export function useGitHubPrDetails({
         }
       };
       promise = run();
-      inFlightPromisesRef.current.set(slice, promise);
+      inFlightPromisesRef.current.set(slice, { promise, sharing });
       return promise;
     },
     [cacheKey, headCommitSha, normalizedRepoFullName, prNumber, workspaceId, writeCache]
@@ -729,12 +799,12 @@ export function useGitHubPrDetails({
   // --- Public refresh() ---------------------------------------------------
   const refresh = useCallback(async () => {
     const requestOptions: GitHubReadRequestOptions = { cache: 'reload' };
-    await fetchSlice('prDetails', requestOptions);
+    await fetchSlice('prDetails', requestOptions, 'fresh');
     await Promise.all([
-      fetchSlice('reviewComments', requestOptions),
-      fetchSlice('reviews', requestOptions),
-      fetchSlice('issueComments', requestOptions),
-      fetchSlice('checkRuns', requestOptions),
+      fetchSlice('reviewComments', requestOptions, 'fresh'),
+      fetchSlice('reviews', requestOptions, 'fresh'),
+      fetchSlice('issueComments', requestOptions, 'fresh'),
+      fetchSlice('checkRuns', requestOptions, 'fresh'),
     ]);
     return payloadToData(payloadRef.current);
   }, [fetchSlice]);
@@ -1047,12 +1117,18 @@ export function useGitHubPrDetails({
   // BetterAuth cookie is still valid. Keep that transition inside the loading
   // state: this hook owns token refresh + retry, while RootApp owns the only
   // confirmed-expiry redirect in the product.
-  const data = payloadToData(payload);
+  const payloadIsCurrent = loadedCacheKey === cacheKey;
+  const data = payloadToData(payloadIsCurrent ? payload : null);
   const settledUnauthenticated = enabledWithInputs && !isConvexAuthLoading && !isAuthenticated;
   const unauthedAndEmpty = settledUnauthenticated && !data;
   const hasUnauthorizedError = error !== null && isGitHubUnauthorizedTokenError(error);
   const recoverableAuthError = (unauthedAndEmpty || hasUnauthorizedError) && !data;
-  const effectiveState: GitHubPrDetailsState = recoverableAuthError ? 'loading' : state;
+  const currentState: GitHubPrDetailsState = payloadIsCurrent
+    ? state
+    : cacheKey !== null
+      ? 'loading'
+      : 'idle';
+  const effectiveState: GitHubPrDetailsState = recoverableAuthError ? 'loading' : currentState;
 
   // Silent recovery from an apparent session expiry. Each refresh goes through
   // runActionWithUnauthorizedRetry, which mints a fresh Convex JWT from the

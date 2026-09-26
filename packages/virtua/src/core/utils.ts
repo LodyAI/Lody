@@ -1,0 +1,53 @@
+/** @internal */
+export const NULL = null;
+
+/**
+ * @internal
+ */
+export const EMPTY: readonly never[] = [];
+
+/** @internal */
+export const { min, max, abs, floor } = Math;
+
+/**
+ * @internal
+ */
+export const clamp = (value: number, minValue: number, maxValue: number): number =>
+  min(maxValue, max(minValue, value));
+
+/**
+ * @internal
+ */
+export const sort = <T extends number>(arr: T[]): T[] => {
+  return arr.sort((a, b) => a - b);
+};
+
+/**
+ * @internal
+ */
+export const timeout = setTimeout;
+/**
+ * @internal
+ */
+export const cancelTimeout = clearTimeout;
+
+/**
+ * @internal
+ */
+export const microtask: (fn: () => void) => void =
+  typeof queueMicrotask === 'function'
+    ? queueMicrotask
+    : (fn) => {
+        Promise.resolve().then(fn);
+      };
+
+/**
+ * @internal
+ */
+export const createPromise = <T = void>(): [Promise<T>, (arg: T) => void] => {
+  let resolve: ((arg: T) => void) | undefined;
+  const promise = new Promise<T>((res) => {
+    resolve = res;
+  });
+  return [promise, resolve!];
+};

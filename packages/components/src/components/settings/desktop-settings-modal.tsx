@@ -42,6 +42,7 @@ import { PromptShortcutsSetting } from './prompt-shortcuts-setting';
 import { McpSetting } from './mcp-setting';
 import { ShareManagementSetting } from './share-management-setting';
 import { FocusScope, useListKeyboardNavigation } from '@/ui/focus-scope';
+import { productSettingsSurfacePalette } from '@/lib/vscode-theme/lody-ui-palette.stylex';
 import { settingsFlat } from './material.stylex';
 import { SettingsPaneHeaderProvider } from './settings-page-header';
 import { settingsSurface as surface } from './surface';
@@ -365,7 +366,12 @@ function SettingsModalBody() {
             <X {...stylex.props(styles.closeGlyph)} aria-hidden="true" />
           </Dialog.Close>
           <div
-            {...stylex.props(settingsFlat, styles.surface, surface.canvas)}
+            {...stylex.props(
+              productSettingsSurfacePalette,
+              settingsFlat,
+              styles.surface,
+              surface.canvas
+            )}
             data-settings-surface=""
           >
             <header {...stylex.props(styles.header, styles.paneInset, styles.headerFlush)}>

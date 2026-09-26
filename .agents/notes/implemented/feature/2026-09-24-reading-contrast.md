@@ -1,0 +1,132 @@
+# Reading contrast and a dark-theme brightness ceiling
+
+Status: implemented
+Translation: current
+
+[中文](2026-09-24-reading-contrast.zh.md)
+
+## Abstract
+
+Long sessions were tiring in dark themes whose foreground is pure white: in Vesper, prose,
+headings, menus, buttons, settings and every sidebar title were #FFFFFF on #101010 (19.7:1),
+so strokes halated, dense CJK text blurred and nothing marked the reading column. Dark themes
+now hold every text foreground under one brightness ceiling, the luminance of text at 13:1
+against the canvas (about HSL lightness 85% on Vesper, still above WCAG AAA). Conversation prose sits one
+step above it (14.6:1, #E4E5E7: HSL lightness 90%), shared by the selected sidebar row and
+the active tab; only headings and bold go above that. Unselected sidebar text sits below
+the prose. Vesper's palette itself (graphite surfaces, jellyfish-cyan accent) is recorded in
+[the deep-sea palette note](2026-09-25-deep-sea-palette-and-sidebar-groups.md). High-contrast themes are unchanged, and light themes cap only
+long-form text.
+
+## Decision
+
+- `vscode-theme-css.ts` (`applyReadingBrightness`), dark themes: every text foreground
+  token (`--foreground`, card, code, input, secondary and secondary-button, hover,
+  selection, bottom bar, tab, sidebar, plus `--code-added/-removed` and `--modified-file`)
+  is moved toward the canvas until its luminance is at most the ceiling. Hue is kept.
+  `--popover-foreground` and `--accent-foreground` are set from the ceiled foreground: the
+  stylesheet defaults for them were an unthemed near-white (`210 40% 96%`), which is why
+  dropdown menus stayed white.
+- Above the ceiling: `--foreground-strong` (16.3:1, headings and bold). The selected sidebar
+  row and the active tab are capped at the prose step, so they are brighter than the other
+  sidebar text but never brighter than the conversation; their fill marks the selection.
+- `--reading-foreground` for prose and user bubbles (14.6:1; Vesper pins #E4E5E7); `--sidebar-row-foreground` (9.9:1)
+  for unselected session titles, group and project labels, section headers and New chat /
+  Search, so the sidebar never outshines the prose. Hover changes a row's fill only.
+- Foregrounds on colored fills (`--primary-foreground`, `--destructive-foreground`,
+  highlight foregrounds) keep the theme value: they need contrast against the fill.
+- Vesper's own palette is Lody's deep-sea variant (`bundled/vesper-deep-sea-palette.ts`); see
+  [the deep-sea palette note](2026-09-25-deep-sea-palette-and-sidebar-groups.md). It replaced a warm variant that read as brown.
+- `READING_THEME_OVERRIDES` pins Vesper's prose, selected and active text (#E4E5E7), sidebar
+  titles (#BCBEC2) and the selected row's cyan tint (#252E35).
+- Literal colors outside the tokens: the dark Mermaid palette now stays under the ceiling,
+  and the green merge button uses `dark:text-background` like the PR tab's.
+- Inline code: 7% fill, reading color. List items 0.5rem apart. The outline rail rests at /32.
+
+## Column and font
+
+- The conversation column caps its CONTENT at 768px (was 700px inside a 736px column):
+  `CONVERSATION_CONTENT_WIDTH_CLASS` adds the per-breakpoint gutter to the max width, and
+  the outline rail's container threshold moves from 860px to 928px to keep its margin.
+- The default sans stack is `"PingFang SC", -apple-system, BlinkMacSystemFont,
+"Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", Arial` plus emoji fonts. PingFang
+  SC is Apple's proprietary system font: it cannot be bundled, so macOS and iOS use it and
+  Windows falls back to Microsoft YaHei. Inter stays self-hosted for the interface-font
+  setting and diagrams. Bundling an open font (Noto Sans SC / Source Han Sans, SIL OFL)
+  for uniform CJK on every platform was not done: it needs unicode-range subsets of a
+  multi-megabyte family.
+
+## Conversation details
+
+- GitHub references: a link whose text only names a pull request or issue (the URL
+  itself, `#123`, `repo#123`, `owner/repo#123`, `PR #123`) renders as a link-blue chip,
+  `[icon] owner/repo #123`: the pull-request or issue icon names the kind (also spoken to
+  screen readers), and the tinted fill (no border) marks it as clickable
+  (`github-reference-link.tsx`, `.markdown-reference-chip`). A link with its own wording,
+  or a number that does not match its URL, stays an ordinary link. The anchor keeps the
+  in-app PR interception.
+- Tables: lines are foreground tints (frame and header rule 14%, row and column rules 8%)
+  because the theme border melts into the canvas; no zebra stripes. No row or column is
+  assumed to be a label: every cell shares one color and weight, and only the header row,
+  which Markdown always has, gets a faint band. A copy button (top right, on hover or
+  focus, always on touch) copies the table as HTML plus a Markdown fallback
+  (`markdown-table.tsx`).
+- Sidebar footer: Settings plus one More menu (Archive, then Docs, community, feedback,
+  bug report). While Archive is open the More slot becomes its exit: the archive icon,
+  a back arrow on hover, returning to the previous page (Home without history). Active
+  footer icons use a 12% foreground fill (16% on hover); the row selection token was
+  nearly invisible behind a 24px icon.
+- Bottom fade (desktop): the last 40px of the conversation above the info bar fade into the
+  canvas while content continues below, the counterpart of the top fade. It is measured on the
+  scroll container, minus the reply room under an anchored message, and re-measured on resize
+  so a reply growing below the fold shows it without a scroll.
+- Process rows: "Context compacted" and "Retrying…" are process status lines, not cards,
+  so they share the "Ran N commands" header's box and gap (34px rhythm; was 39 / 32px).
+- Info bar: the PR number is secondary text beside the colored PR icon; CI is a verdict
+  icon (no tinted "CI" pill); line totals sit in a tinted chip on the right edge.
+- Line totals everywhere (+/−) use `github-addition` / `github-deletion`, the PR's green
+  and red. `--code-added` keeps the theme's diff color for diff highlighting.
+- Sidebar: PR marks are desaturated (`saturate(0.55)`, a filter, not opacity); the
+  `Mergeable` pill is the one status meant to be noticed, with a real fill and semibold
+  label.
+- Settings navigation: `@lody/ui` (#913, #969) rebuilt it on `settings/surface.ts`, where rows
+  are washes of the ink. They keep this change's strength, 6% on hover and 10% when current
+  (#969 chose 5% / 8%), and a keyboard-focused row shows the hover wash instead of the accent
+  ring, since the dialog focuses a row when it opens. The account row takes the package's
+  avatar rather than this change's 18px one.
+- `Mergeable` is a success `Badge` (#969). Its word is the success colour itself, not the
+  package's half-way mix toward the ink, through a `createTheme` over the badge tokens
+  (`sidebar-mergeable-badge.stylex.ts`), and its tint stays at this change's 16% where the
+  package's settled at 14% (#976). The border and semibold weight have no token and were not
+  kept.
+
+## Alternatives
+
+- A 15px default (tiers 13–18px, chrome 1px under the prose): implemented, then reverted
+  after review in the app, where 15px prose read as too large. The default stays 14px on
+  the 12–16px scale, with chrome and prose at the same size.
+- Letting wide tables and Mermaid diagrams extend past the 768px column, centered on it:
+  implemented, then reverted after review in the app, where blocks jutting out of the
+  reading column looked odd. Wide blocks stay in the column (tables scroll, diagrams open
+  full screen).
+- Styling each surface (menus, settings, buttons, panels) one by one: a static scan found
+  no hard-coded white there; the white came from the tokens, so the ceiling belongs in the
+  theme layer where every surface inherits it.
+- Editing the bundled theme files: they are vendored and other surfaces read their raw
+  values; the derived tokens change only text.
+- Dimming row icons and avatars with opacity, and brightening titles on hover: tried and
+  rejected; faded icons and avatars read as disabled, and a color change under the pointer
+  looks unstable.
+- A 40em CJK column: not done here.
+
+## Verification and limits
+
+- `tests/vscode-theme-css.test.ts`: a pure-white dark theme holds `--foreground`, popover
+  and sidebar foregrounds at or under 13:1, the strong step and active tab between 13
+  and 16.3:1, sidebar rows under the prose; Vesper resolves to its deep-sea palette with its
+  pinned colors; soft and high-contrast
+  themes are untouched. `tests/markdown-mermaid-plugin.test.ts` checks the dark diagram
+  text is under the ceiling. Components suite passes.
+- Local production build with Vesper: prose renders #E4E5E7 (HSL L 90%, 14.6:1).
+- Only Vesper was inspected in the browser. Share images, terminals and colored-fill badges
+  keep their own colors.

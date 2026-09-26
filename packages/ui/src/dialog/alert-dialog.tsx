@@ -5,7 +5,13 @@ import { appendClassName } from '../internal/class-name';
 import { PopupContainerProvider } from '../popup/portal-container';
 import { useForcedThemeClassNames } from '../theme/theme';
 import { DialogBackdrop, type ModalContentProps } from './dialog';
-import { DialogFooter, DialogHeader, ModalDepthProvider, usePanelContainer } from './parts';
+import {
+  DialogFooter,
+  DialogHeader,
+  mergePanelWidth,
+  ModalDepthProvider,
+  usePanelContainer,
+} from './parts';
 import { isHidden, modal } from './surface';
 
 type TitleBaseProps = ComponentProps<typeof BaseAlertDialog.Title>;
@@ -37,7 +43,17 @@ const styles = stylex.create({
  */
 export const AlertDialogContent = forwardRef<HTMLDivElement, AlertDialogContentProps>(
   function AlertDialogContent(
-    { className, children, container, backdropContent, backdropClassName, noAnimation, ...rest },
+    {
+      className,
+      children,
+      container,
+      backdropContent,
+      backdropClassName,
+      noAnimation,
+      width,
+      style,
+      ...rest
+    },
     ref
   ) {
     const { ref: panelRef, container: panel } = usePanelContainer<HTMLDivElement>(ref);
@@ -56,6 +72,7 @@ export const AlertDialogContent = forwardRef<HTMLDivElement, AlertDialogContentP
         <BaseAlertDialog.Popup
           ref={panelRef}
           {...rest}
+          style={mergePanelWidth(style, width)}
           className={(state) =>
             appendClassName(
               stylex.props(

@@ -28,7 +28,7 @@ import { Button } from '@lody/ui/button';
 import { Input } from '@lody/ui/input';
 import { Textarea } from '@lody/ui/textarea';
 import { Dialog } from '@/ui/dialog';
-import { Tooltip } from '@lody/ui/tooltip';
+import { Tooltip } from '@/ui/armed-overlays';
 import { colors, shadow, sheen } from '@lody/ui/tokens/colors.stylex';
 import { corner, duration, ease, focus, radius, space, text } from '@lody/ui/tokens/scales.stylex';
 import { withClassName } from '@/lib/stylex';

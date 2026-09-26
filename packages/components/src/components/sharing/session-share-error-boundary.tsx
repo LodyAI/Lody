@@ -9,7 +9,6 @@ export function SessionShareReadError() {
     <main>
       <StatusPage
         layout="window"
-        tone="danger"
         illustration="broken"
         role="alert"
         title={t('sharing.renderError', 'This conversation could not be displayed')}

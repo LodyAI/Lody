@@ -69,7 +69,7 @@ export function SessionFilePreviewPanel({
     // `min-w-0` is load-bearing: this panel is a grid child of Dialog.Content
     // (`display: grid`). Grid/flex items default to `min-width: auto`, so wide
     // content (long code lines, tables, unbreakable tokens) would stretch the
-    // panel past the dialog's `max-w-3xl` and bleed out of the modal. Capping
+    // panel past the dialog's `width` cap and bleed out of the modal. Capping
     // the min width forces content to wrap/scroll within the modal width.
     <div className="flex min-h-0 min-w-0 flex-col">
       <div className="flex items-center justify-between gap-3 border-b border-border/50 pb-3">
@@ -207,7 +207,7 @@ export function SessionFilePreviewDialog({
   const panelKey = useMemo(() => panelProps.file.fileId, [panelProps.file.fileId]);
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
-      <Dialog.Content closeButton={false} className="w-[calc(100vw-2rem)] max-w-3xl">
+      <Dialog.Content closeButton={false} width="48rem">
         <SessionFilePreviewPanel key={panelKey} {...panelProps} />
       </Dialog.Content>
     </Dialog.Root>

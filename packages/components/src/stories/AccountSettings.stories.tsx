@@ -1,5 +1,15 @@
 import { WorkspaceOwnershipTransfer } from '@/components/settings/workspace-ownership-transfer';
 import type { Meta, StoryObj } from '@storybook/react';
+import * as stylex from '@stylexjs/stylex';
+import type { ComponentProps } from 'react';
+import type { AgentConfigMeta, MachineId } from '@lody/shared';
+import { settingsFlat } from '@/components/settings/material.stylex';
+import { productSettingsSurfacePalette } from '@/lib/vscode-theme/lody-ui-palette.stylex';
+import { settingsSurface } from '@/components/settings/surface';
+import {
+  AccountMachinesOverviewView,
+  type AccountMachineOverviewItem,
+} from '@/components/settings/account-machines-overview';
 import { AccountSettingsPure } from '@/components/settings';
 import type { AccountSettingsPureProps } from '@/components/settings';
 import type { Invitation } from 'better-auth/plugins';
@@ -247,4 +257,102 @@ export const AfterOwnershipTransfer: Story = {
       role: member.userId === 'user-2' ? 'owner' : 'member',
     })),
   },
+};
+
+const studioId = 'machine-studio' as MachineId;
+const airId = 'machine-air' as MachineId;
+
+const paneAgents = (machineId: MachineId, count: number): AgentConfigMeta[] =>
+  Array.from(
+    { length: count },
+    (_, index) =>
+      ({
+        id: `${machineId}-agent-${index}`,
+        machineId,
+        name: index % 2 ? 'Codex' : 'Claude Code',
+        cliType: 'builtin',
+        agentType: index % 2 ? 'codex' : 'claude',
+        env: {},
+      }) as AgentConfigMeta
+  );
+
+const paneMachines: AccountMachineOverviewItem[] = [
+  {
+    id: studioId,
+    name: 'alice-mac-studio.local',
+    os: 'darwin',
+    isOnline: true,
+    sharedWithTeam: false,
+    agents: paneAgents(studioId, 6),
+    directories: Array.from({ length: 10 }, (_, index) => ({
+      key: `${studioId}:dir-${index}`,
+      name: `project-${index}`,
+      rootPath: `/Users/alice/Code/project-${index}`,
+      sharedWithTeam: false,
+    })),
+  },
+  {
+    id: airId,
+    name: 'alice-macbook-air.local',
+    os: 'darwin',
+    isOnline: false,
+    sharedWithTeam: false,
+    agents: paneAgents(airId, 3),
+    directories: [],
+  },
+];
+
+/** A settings page as the desktop pane draws it: its scope, material and canvas. */
+function DesktopPane(args: ComponentProps<typeof AccountSettingsPure>) {
+  return (
+    <div
+      data-settings-surface=""
+      data-testid="settings-pane"
+      {...stylex.props(productSettingsSurfacePalette, settingsFlat, settingsSurface.canvas)}
+      style={{ width: 860, minHeight: '100vh', paddingInline: 32, paddingBlock: 24 }}
+    >
+      <AccountSettingsPure {...args} />
+    </div>
+  );
+}
+
+/** Settings > Account in the desktop pane: profile, connected accounts, machines, tokens. */
+export const DesktopPaneAccount: Story = {
+  args: {
+    onConnectAccount: noop,
+    canGenerateCliApiKey: true,
+    cliApiKeys: [
+      {
+        id: 'key-1',
+        name: 'Lody CLI Token',
+        keyStart: 'lody_cli_',
+        keyPreview: 'lody_cli_abc******123456',
+        note: 'CI runner',
+        source: 'manual',
+        createdAt: Date.UTC(2026, 8, 20, 9, 30),
+        lastRequest: Date.UTC(2026, 8, 25, 18, 5),
+        expiresAt: null,
+        enabled: true,
+      },
+    ],
+    onGenerateCliApiKey: noop,
+    onRevokeCliApiKey: noop,
+    accountMachinesSlot: (
+      <AccountMachinesOverviewView
+        items={paneMachines}
+        currentMachineId={studioId}
+        onManageMachine={() => {}}
+      />
+    ),
+  },
+  render: (args) => <DesktopPane {...args} />,
+};
+
+/** Settings > General (the workspace) in the desktop pane, with a pending invitation. */
+export const DesktopPaneWorkspace: Story = {
+  args: {
+    surface: 'workspace',
+    pendingInvitations: mockPendingInvitations,
+  },
+  render: (args) => <DesktopPane {...args} />,
 };

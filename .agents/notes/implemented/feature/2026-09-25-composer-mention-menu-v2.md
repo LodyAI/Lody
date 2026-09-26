@@ -93,6 +93,51 @@ not start); a sliding highlight (the popup rows deliberately take no transition,
 so the fill never lags the keyboard); ghost text previewing the insertion in the
 composer (it would touch the mirror and caret contract for a small gain).
 
+## Design review round 2
+
+A critique in the real desktop app, not Storybook, found what the stories hid.
+This section supersedes the placement and detail-pane sizing described above.
+
+- **Placement.** The menu took `MentionContent`'s defaults: anchored to the
+  caret line, `side: 'bottom'`, and floating-ui's `flip` re-run on every resize.
+  The two-row first level fit below the caret inside the composer, over its
+  toolbar; the second level did not, so it flipped above the caret line, onto the
+  chip row, starting at the caret's x and leaving a chip fragment beside it.
+  `positionAnchor="composer"` anchors to the composer's `[data-mention-frame]`
+  (chip row and box, marked in `ChatComposer`), left-aligned, 8px away. The side
+  is chosen once per open (above unless there is no room) and never flips; the
+  height is capped to that side's room instead, so a level change resizes the
+  menu where it stands.
+- **Proportions.** The list takes the narrow column (about 220px) and the detail
+  the wide one (300px) in a 536px menu. The pane fills the height the list sets,
+  down to a 168px floor, and scrolls inside it; the description is clamped to
+  five lines at 12/18. The Role pane takes the same column.
+- **Pane content.** The heading was missing in the app because the pane was a
+  scrolling flex column and the heading, being `overflow: hidden`, shrank to
+  nothing under a long description. Parts no longer shrink, and a pane without a
+  title is headed by the row's. Scope and version are one quiet line, not
+  badges; a path stays on one line and gives way in its middle.
+- **Glyphs.** A row drops a glyph that only repeats its level's heading (the
+  skill glyph under "Skills"). A file's type, a folder and a Role's emoji stay;
+  rows without a mark keep an empty box only where a neighbour has one.
+- **Filtering.** `@skill:sy` kept all six system skills because a skill matched
+  its whole path, and `sy` is in `~/.codex/skills/.system`. A skill now matches
+  its path only below its skills directory. A term that matches nothing shows
+  "Nothing matches “sy”" at every level, never the unfiltered list.
+- **`/` on the home composer stays silent.** `/` is registered only when
+  commands or Prompt Shortcuts are available, as the
+  [command-trigger draft](../../../../specs/command-mention-triggers.md) states,
+  and the placeholder advertises `/` on the same rule. The E2E agent reports no
+  commands and Prompt Shortcuts are a developer beta, so nothing opened. Showing
+  an empty menu there would change that gate, which is the spec's call.
+- **Verification.** `tests/mention-registry.test.ts` reproduces `@skill:sy` and
+  `$sy` on the pure view; `tests/mention-two-level-menu.test.tsx` pins the
+  locked side, the height cap and re-choosing on reopen, the no-match line, the
+  dropped glyphs and the middle split. `FloatingInComposer`,
+  `FloatingComposerAtTop`, `SkillCategorySystem` and `SkillNoMatch` stories
+  cover the states; the E2E walk captured the home composer's `@`, second level,
+  typed and `$` states in the packaged renderer, light and dark.
+
 ## Alternatives considered
 
 - **Build the menu on `@lody/ui`'s `Combobox` or `Menu`.** Both own focus and

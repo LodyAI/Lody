@@ -14,7 +14,6 @@ import {
   UserRoundCog,
 } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
-import { Badge } from '@lody/ui/badge';
 import { Button } from '@lody/ui/button';
 import { Spinner } from '@lody/ui/spinner';
 import { Toggle } from '@lody/ui/toggle';
@@ -51,8 +50,11 @@ import {
 
 const MONO = 'var(--font-mono, ui-monospace, monospace)';
 
-/** Too narrow for the rows and the 248px detail side by side. */
+/** Too narrow for the rows and the 300px detail side by side. */
 const NARROW_MENU = '@container mention-menu (max-width: 480px)';
+
+/** The list's cap; the detail pane beside it follows the list's height. */
+const LIST_CAP = 'min(320px, 60vh)';
 
 /**
  * Starts each lazy source the open menu needs, at most once while it stays
@@ -141,18 +143,23 @@ export function matchedRuns(
  * line only to say why it cannot be picked.
  */
 const styles = stylex.create({
-  /** The scroller holding the rows; the docked mobile strip is its own. */
+  /**
+   * The scroller holding the rows; the docked mobile strip is its own. It also
+   * gives way when the composer caps the menu to the room on its side.
+   */
   list: {
     display: 'flex',
     flexDirection: 'column',
     minWidth: 0,
-    maxHeight: 'min(320px, 60vh)',
+    minHeight: 0,
+    flexShrink: 1,
+    maxHeight: LIST_CAP,
     overflowX: 'hidden',
     overflowY: 'auto',
     overscrollBehavior: 'contain',
   },
   listDocked: { maxHeight: 'none', overflowY: 'visible' },
-  level: { display: 'flex', flexDirection: 'column', minWidth: 0 },
+  level: { display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 0 },
   levelDeeper: {
     animationName: { default: enterDeeper, [REDUCED_MOTION]: 'none' },
     animationDuration: duration.regular,
@@ -172,10 +179,19 @@ const styles = stylex.create({
     display: 'flex',
     alignItems: 'stretch',
     minWidth: 0,
+    minHeight: 0,
     containerName: 'mention-menu',
     containerType: 'inline-size',
   },
-  withDetailList: { flexGrow: 1, flexShrink: 1, minWidth: 0 },
+  /** The names are short: the list takes the narrow column, the detail the wide one. */
+  withDetailList: {
+    display: 'flex',
+    flexDirection: 'column',
+    flexGrow: 1,
+    flexShrink: 1,
+    minWidth: 0,
+    minHeight: 0,
+  },
   /** The leading mark: a 16px box at rest in the hint colour. */
   glyph: {
     display: 'flex',
@@ -308,32 +324,56 @@ const styles = stylex.create({
     fontWeight: 400,
   },
   /**
-   * The highlighted row's detail, beside the rows on the same surface. It takes
-   * the height its content needs, up to the list's own cap, instead of holding
-   * a fixed box open under a short list.
+   * The highlighted row's detail, beside the rows on the same surface: the
+   * wider column, because it holds sentences. Its height is the list's — the
+   * pane fills the row the list sets and scrolls inside it, down to a floor that
+   * keeps the heading and the description readable beside a two-row list — so a
+   * long description can no longer set the popup's height.
    */
   detail: {
     boxSizing: 'border-box',
-    display: { default: 'flex', [NARROW_MENU]: 'none' },
-    flexDirection: 'column',
-    gap: space[2],
+    display: { default: 'block', [NARROW_MENU]: 'none' },
+    position: 'relative',
     flexShrink: 0,
-    width: '248px',
-    maxHeight: 'min(320px, 60vh)',
+    width: '300px',
+    minHeight: '168px',
     marginInlineStart: space[1],
-    paddingInline: space[3],
-    paddingBlock: space[2],
-    overflowY: 'auto',
-    scrollbarGutter: 'stable',
     borderInlineStartWidth: '1px',
     borderInlineStartStyle: 'solid',
     borderInlineStartColor: colors.separator,
     fontWeight: 400,
   },
-  /** The Role pane draws its own box; this only steps it aside when narrow. */
-  detailSlot: { display: { default: 'flex', [NARROW_MENU]: 'none' }, flexShrink: 0 },
+  /**
+   * The Role pane draws its own box and edge; the slot gives it the detail
+   * column's width and the list's height, and steps it aside when narrow.
+   */
+  detailSlot: {
+    display: { default: 'block', [NARROW_MENU]: 'none' },
+    position: 'relative',
+    flexShrink: 0,
+    width: '300px',
+    minHeight: '168px',
+  },
+  /** What the pane holds, filling it and scrolling there. */
+  detailScroll: {
+    boxSizing: 'border-box',
+    position: 'absolute',
+    inset: 0,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: space[1.5],
+    paddingInline: space[3],
+    paddingBlock: space[2],
+    overflowY: 'auto',
+    overscrollBehavior: 'contain',
+  },
+  /**
+   * A pane part keeps its height. The pane is a flex column that scrolls, and a
+   * line with `overflow: hidden` may otherwise shrink to nothing — which is how
+   * a long description pushed the heading out of the pane altogether.
+   */
+  detailPart: { flexShrink: 0, minWidth: 0, margin: 0 },
   detailTitle: {
-    margin: 0,
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
@@ -342,28 +382,54 @@ const styles = stylex.create({
     lineHeight: text.subheadlineLeading,
     fontWeight: 600,
   },
-  detailBadges: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: space[1] },
-  detailDescription: {
-    margin: 0,
-    whiteSpace: 'pre-wrap',
-    color: colors.secondaryLabel,
+  /** Scope, version: quiet facts under the heading, on its line. */
+  detailMeta: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    color: colors.tertiaryLabel,
     fontSize: text.footnoteSize,
     lineHeight: text.footnoteLeading,
   },
-  detailRows: { display: 'flex', flexDirection: 'column', gap: space[1.5], margin: 0 },
-  detailRow: { display: 'flex', flexDirection: 'column', gap: '2px', minWidth: 0 },
-  detailRowLabel: {
-    color: colors.tertiaryLabel,
-    fontSize: text.captionSize,
-    lineHeight: text.captionLeading,
+  /** Five lines at most: enough to say what the skill is for, not a wall. */
+  detailDescription: {
+    display: '-webkit-box',
+    WebkitBoxOrient: 'vertical',
+    WebkitLineClamp: 5,
+    overflow: 'hidden',
+    whiteSpace: 'pre-line',
+    color: colors.secondaryLabel,
+    fontSize: text.footnoteSize,
+    lineHeight: 1.5,
+    textWrap: 'pretty',
   },
+  /** A fact is one line: its label, then its value, which gives way. Values align. */
+  detailRows: {
+    display: 'grid',
+    gridTemplateColumns: 'auto minmax(0, 1fr)',
+    alignItems: 'baseline',
+    columnGap: space[2],
+    rowGap: '2px',
+    fontSize: text.footnoteSize,
+    lineHeight: 1.5,
+  },
+  detailRow: { display: 'contents' },
+  detailRowLabel: { color: colors.tertiaryLabel, whiteSpace: 'nowrap' },
   detailRowValue: {
+    display: 'flex',
+    flexGrow: 1,
     minWidth: 0,
     margin: 0,
-    overflowWrap: 'anywhere',
     color: colors.secondaryLabel,
-    fontSize: text.footnoteSize,
-    lineHeight: text.footnoteLeading,
+    whiteSpace: 'nowrap',
+  },
+  /** A path gives way in its middle: the start says where, the end says what. */
+  truncateHead: { flexShrink: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' },
+  truncateTail: {
+    flexShrink: 0,
+    maxWidth: '100%',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
   },
   mono: { fontFamily: MONO },
 });
@@ -412,8 +478,31 @@ function CandidateIcon({
   }
 }
 
+/**
+ * Whether a row's glyph says anything the heading above it has not. A Skills
+ * level printing the skill glyph on every row repeats its heading six times;
+ * a file's type, a folder, a Role's emoji or a row of another kind are the
+ * row's own.
+ */
+function carriesOwnMark(candidate: MentionCandidate, category: MentionCategory): boolean {
+  return (
+    Boolean(candidate.iconEmoji) || candidate.icon === 'file' || candidate.icon !== category.icon
+  );
+}
+
+/**
+ * How a list's rows lead. `mark` draws the row's glyph; `inset` keeps an empty
+ * box so a row without a mark of its own lines up with neighbours that have
+ * one; `none` drops the box when no row in the list has a mark to show.
+ */
+type RowLead = 'mark' | 'inset' | 'none';
+
+function leadFor(own: boolean, anyOwn: boolean): RowLead {
+  return own ? 'mark' : anyOwn ? 'inset' : 'none';
+}
+
 /** The leading box; it steps up from hint to secondary under the keyboard. */
-function RowGlyph({ value, children }: { value: string; children: React.ReactNode }) {
+function RowGlyph({ value, children }: { value: string; children?: React.ReactNode }) {
   const highlighted = useMentionContext('MentionRowGlyph').highlightedItem?.value === value;
   return (
     <span
@@ -485,11 +574,13 @@ function CandidateTitle({ runs }: { runs: Array<{ text: string; matched: boolean
 
 function CandidateRow({
   candidate,
+  lead,
   term,
   now,
   onSelect,
 }: {
   candidate: MentionCandidate;
+  lead: RowLead;
   /** What was typed after the trigger and namespace, to light what matched. */
   term: string;
   now: Date;
@@ -521,13 +612,17 @@ function CandidateRow({
       onMentionSelect={onSelect}
       onMentionPrepare={candidate.onPrepare}
     >
-      <RowGlyph value={candidate.value}>
-        <CandidateIcon
-          icon={candidate.icon}
-          emoji={candidate.iconEmoji}
-          path={candidate.iconPath}
-        />
-      </RowGlyph>
+      {lead === 'mark' ? (
+        <RowGlyph value={candidate.value}>
+          <CandidateIcon
+            icon={candidate.icon}
+            emoji={candidate.iconEmoji}
+            path={candidate.iconPath}
+          />
+        </RowGlyph>
+      ) : lead === 'inset' ? (
+        <RowGlyph value={candidate.value} />
+      ) : null}
       <span {...stylex.props(styles.text, stacked && styles.textStacked)}>
         <span {...stylex.props(styles.line)}>
           <span
@@ -562,6 +657,29 @@ function CandidateRow({
  * Desktop side panel for the highlighted candidate. Mobile docks a narrow
  * full-width strip with no hover, so it stays list-only.
  */
+/**
+ * Where a path gives way: the file it ends in (and its folder, when short)
+ * stays whole, the folders before take the ellipsis. Exported for tests.
+ */
+export function splitPathTail(path: string): { head: string; tail: string } {
+  const parts = path.split('/');
+  if (parts.length < 2) return { head: '', tail: path };
+  const lastTwo = parts.slice(-2).join('/');
+  const tail = parts.length > 2 && lastTwo.length <= 32 ? lastTwo : (parts.at(-1) ?? path);
+  return { head: path.slice(0, path.length - tail.length), tail };
+}
+
+/** A path on one line, truncated in its middle rather than wrapped mid-word. */
+function MiddleTruncated({ value }: { value: string }) {
+  const { head, tail } = splitPathTail(value);
+  return (
+    <>
+      {head ? <span {...stylex.props(styles.truncateHead)}>{head}</span> : null}
+      <span {...stylex.props(styles.truncateTail)}>{tail}</span>
+    </>
+  );
+}
+
 function CandidateDetailPane({ detail }: { detail: MentionCandidateDetail }) {
   // A Role is the composer's object, read with the composer's pane: same rows,
   // same wording for the ids, same instruction block — sized to this menu.
@@ -573,34 +691,43 @@ function CandidateDetailPane({ detail }: { detail: MentionCandidateDetail }) {
           agentConfig={detail.agentRole.agentConfig}
           machine={detail.agentRole.machine}
           machineLabel={detail.agentRole.machineLabel}
-          className="h-[320px] w-[248px]"
+          className="absolute inset-0 h-auto w-auto"
         />
       </div>
     );
   }
   return (
     <div data-mention-detail="" {...stylex.props(styles.detail)}>
-      {detail.title ? <p {...stylex.props(styles.detailTitle)}>{detail.title}</p> : null}
-      {detail.badges?.length ? (
-        <div {...stylex.props(styles.detailBadges)}>
-          {detail.badges.map((badge) => (
-            <Badge key={badge}>{badge}</Badge>
-          ))}
-        </div>
-      ) : null}
-      {detail.description ? (
-        <p {...stylex.props(styles.detailDescription)}>{detail.description}</p>
-      ) : null}
-      {detail.rows?.length ? (
-        <dl {...stylex.props(styles.detailRows)}>
-          {detail.rows.map((row) => (
-            <div key={row.label} {...stylex.props(styles.detailRow)}>
-              <dt {...stylex.props(styles.detailRowLabel)}>{row.label}</dt>
-              <dd {...stylex.props(styles.detailRowValue, row.mono && styles.mono)}>{row.value}</dd>
-            </div>
-          ))}
-        </dl>
-      ) : null}
+      <div {...stylex.props(styles.detailScroll)}>
+        {detail.title ? (
+          <p {...stylex.props(styles.detailPart, styles.detailTitle)}>{detail.title}</p>
+        ) : null}
+        {detail.meta?.length ? (
+          <p {...stylex.props(styles.detailPart, styles.detailMeta)}>{detail.meta.join(' · ')}</p>
+        ) : null}
+        {detail.description ? (
+          <p {...stylex.props(styles.detailPart, styles.detailDescription)}>{detail.description}</p>
+        ) : null}
+        {detail.rows?.length ? (
+          <dl {...stylex.props(styles.detailPart, styles.detailRows)}>
+            {detail.rows.map((row) => (
+              <div key={row.label} {...stylex.props(styles.detailRow)}>
+                <dt {...stylex.props(styles.detailRowLabel)}>{row.label}</dt>
+                <dd
+                  title={row.value}
+                  {...stylex.props(styles.detailRowValue, row.mono && styles.mono)}
+                >
+                  {row.mono ? (
+                    <MiddleTruncated value={row.value} />
+                  ) : (
+                    <span {...stylex.props(styles.truncateHead)}>{row.value}</span>
+                  )}
+                </dd>
+              </div>
+            ))}
+          </dl>
+        ) : null}
+      </div>
     </div>
   );
 }
@@ -762,6 +889,13 @@ export function MentionTwoLevelMenuBody({
     </div>
   );
 
+  function noMatch(query: string) {
+    return t('mention.menu.noMatch', {
+      term: query,
+      defaultValue: 'Nothing matches “{{term}}”',
+    });
+  }
+
   function renderLevel() {
     if (view.level === 'categories') {
       return (
@@ -775,8 +909,15 @@ export function MentionTwoLevelMenuBody({
 
     if (view.level === 'aggregate') {
       if (view.categories.length === 0 && view.groups.length === 0) {
-        return <Message>{t('mention.menu.noResults', 'No results')}</Message>;
+        return <Message>{noMatch(view.term)}</Message>;
       }
+      // Category rows each lead with their own glyph; a result leads with one
+      // only when its kind is not the group heading's.
+      const anyOwn =
+        view.categories.length > 0 ||
+        view.groups.some((group) =>
+          group.candidates.some((candidate) => carriesOwnMark(candidate, group.category))
+        );
       return (
         <div {...stylex.props(listStyle)}>
           {view.categories.map((category) => (
@@ -800,6 +941,7 @@ export function MentionTwoLevelMenuBody({
                 <CandidateRow
                   key={candidate.value}
                   candidate={candidate}
+                  lead={leadFor(carriesOwnMark(candidate, group.category), anyOwn)}
                   term={term}
                   now={now}
                   onSelect={() => onCandidateSelect?.(group.category, rank)}
@@ -812,6 +954,7 @@ export function MentionTwoLevelMenuBody({
     }
 
     const { category, candidates } = view;
+    const anyOwn = candidates.some((candidate) => carriesOwnMark(candidate, category));
     return (
       <>
         <CategoryHeader showBack={showBack} onBack={onBack} category={category} />
@@ -826,6 +969,7 @@ export function MentionTwoLevelMenuBody({
               <CandidateRow
                 key={candidate.value}
                 candidate={candidate}
+                lead={leadFor(carriesOwnMark(candidate, category), anyOwn)}
                 term={term}
                 now={now}
                 onSelect={() => onCandidateSelect?.(category, rank)}
@@ -835,12 +979,17 @@ export function MentionTwoLevelMenuBody({
         ) : category.status === 'loading' ? (
           <Message tone="loading">{t('mention.menu.loading', 'Loading…')}</Message>
         ) : category.emptyState ? (
+          // The category's own empty state knows more (a scope to widen) than
+          // a generic line does.
           <div {...stylex.props(styles.emptyState)}>
             <span>{category.emptyState.message}</span>
             {category.emptyState.action ? (
               <CategoryAction action={category.emptyState.action} />
             ) : null}
           </div>
+        ) : term ? (
+          // A term that names nothing says so; it never falls back to the list.
+          <Message>{noMatch(term)}</Message>
         ) : (
           <Message>{t('mention.menu.noResults', 'No results')}</Message>
         )}
@@ -855,7 +1004,8 @@ const width = stylex.create({
     width: 'max-content',
     maxWidth: 'min(var(--mention-input-width), calc(100vw - 2rem))',
   },
-  menuWithDetail: { width: 'min(640px, var(--mention-input-width), calc(100vw - 2rem))' },
+  /** About 220px of names beside the 300px detail; below 480px the detail steps aside. */
+  menuWithDetail: { width: 'min(536px, var(--mention-input-width), calc(100vw - 2rem))' },
 });
 
 /**
@@ -925,7 +1075,11 @@ export function MentionTwoLevelMenu({
     const match =
       visibleCandidates.find((candidate) => candidate.value === highlightedValue) ??
       visibleCandidates[0];
-    return match?.detail ?? null;
+    if (!match?.detail) return null;
+    // A pane is headed by what it describes; a Role's pane heads itself.
+    return match.detail.agentRole || match.detail.title
+      ? match.detail
+      : { ...match.detail, title: match.title };
   }, [highlightedValue, isMobile, visibleCandidates]);
 
   const postHog = usePostHog();
@@ -979,7 +1133,13 @@ export function MentionTwoLevelMenu({
 
   return (
     // The docked mobile panel places itself; this width is the desktop popup's.
-    <MentionContent className={stylex.props(width.menu, detail && width.menuWithDetail).className}>
+    // Placed against the composer, not the caret: one side per open, one gap,
+    // left edges lined up, and a level change resizes it where it stands.
+    <MentionContent
+      positionAnchor="composer"
+      sideOffset={8}
+      className={stylex.props(width.menu, detail && width.menuWithDetail).className}
+    >
       <MentionTwoLevelMenuBody
         view={view}
         onBack={handleBack}

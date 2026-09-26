@@ -9,6 +9,39 @@ import { useOpenSettings } from '@/hooks/use-open-settings';
 import { ConversationColumn } from '@/components/shared/conversation-column';
 import { COMPOSER_ELEVATION_CLASS } from '@/components/chat/composer-surface';
 
+// `Notification.permission` is a synchronous browser round trip (~3ms in Chrome),
+// and this prompt remounts with every conversation. Cache it only while a
+// permission-change listener keeps the cache honest (settings can grant or deny
+// while the page lives); without the Permissions API, read it each time.
+let cachedNotificationPermission: NotificationPermission | null = null;
+let notificationPermissionWatch: 'idle' | 'pending' | 'active' = 'idle';
+
+function readNotificationPermission(): NotificationPermission {
+  if (notificationPermissionWatch === 'active' && cachedNotificationPermission !== null) {
+    return cachedNotificationPermission;
+  }
+  const permission = Notification.permission;
+  if (
+    notificationPermissionWatch === 'idle' &&
+    typeof navigator.permissions?.query === 'function'
+  ) {
+    notificationPermissionWatch = 'pending';
+    navigator.permissions.query({ name: 'notifications' }).then(
+      (status) => {
+        status.addEventListener('change', () => {
+          cachedNotificationPermission = null;
+        });
+        notificationPermissionWatch = 'active';
+      },
+      () => {
+        // Unsupported descriptor: keep reading directly.
+      }
+    );
+  }
+  if (notificationPermissionWatch === 'active') cachedNotificationPermission = permission;
+  return permission;
+}
+
 export interface NotificationPermissionPromptProps {
   /** Whether the session has completed (used as trigger to show the prompt) */
   sessionCompleted: boolean;
@@ -49,12 +82,8 @@ export function NotificationPermissionPrompt({
     return 'Notification' in window && typeof Notification === 'function';
   }, []);
 
-  const permissionStatus = useMemo(() => {
-    if (!notificationSupported) return 'denied';
-    return Notification.permission;
-  }, [notificationSupported]);
-
-  // Determine if we should show the prompt
+  // Determine if we should show the prompt. The permission read goes last: it
+  // is the only check that costs a browser round trip.
   const shouldShow = useMemo(() => {
     // Don't show if user is not logged in
     if (!user) return false;
@@ -62,22 +91,13 @@ export function NotificationPermissionPrompt({
     if (dismissed) return false;
     // Don't show if notifications not supported
     if (!notificationSupported) return false;
-    // Don't show if permission already granted or denied
-    if (permissionStatus !== 'default') return false;
     // Only show after session completion
     if (!sessionCompleted) return false;
     // Don't show again if already shown for this session
     if (hasShownForThisSession) return false;
-
-    return true;
-  }, [
-    user,
-    dismissed,
-    notificationSupported,
-    permissionStatus,
-    sessionCompleted,
-    hasShownForThisSession,
-  ]);
+    // Don't show if permission already granted or denied
+    return readNotificationPermission() === 'default';
+  }, [user, dismissed, notificationSupported, sessionCompleted, hasShownForThisSession]);
 
   // Show the prompt with a slight delay after session completion
   useEffect(() => {

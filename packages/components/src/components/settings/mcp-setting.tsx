@@ -1,10 +1,10 @@
 import { useState } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { SettingsPageActions, SettingsPageLead } from './settings-page-header';
-import { settingsRecordsCard } from './compact-layout';
+import { SettingsEmptyList, settingsRecordsCard } from './compact-layout';
 import { useAtomValue } from 'jotai';
 import { usePostHog } from '@posthog/react';
-import { Plug, Plus, Trash2 } from 'lucide-react';
+import { Plus, Trash2 } from 'lucide-react';
 import { Spinner } from '@lody/ui/spinner';
 import { useTranslation } from 'react-i18next';
 import {
@@ -30,6 +30,7 @@ import { space } from '@lody/ui/tokens/scales.stylex';
 import { McpConnectionForm, type McpConnectionFormValue } from './mcp-connection-form';
 import {
   SETTINGS_EDITOR_DIALOG_LAYOUT,
+  SETTINGS_EDITOR_DIALOG_WIDTH,
   settingsCatalog as catalog,
   settingsSurface as surface,
 } from './surface';
@@ -155,10 +156,7 @@ export function McpSetting() {
       </SettingsPageActions>
 
       {servers.length === 0 ? (
-        <div {...stylex.props(catalog.empty)}>
-          <Plug {...stylex.props(catalog.emptyIcon)} aria-hidden="true" />
-          <p {...stylex.props(catalog.emptyText)}>{t('settings.mcp.empty')}</p>
-        </div>
+        <SettingsEmptyList>{t('settings.mcp.empty')}</SettingsEmptyList>
       ) : (
         <div {...stylex.props(settingsRecordsCard)}>
           {servers.map((server, index) => (
@@ -182,7 +180,10 @@ export function McpSetting() {
           setEditor(null);
         }}
       >
-        <Dialog.Content className={SETTINGS_EDITOR_DIALOG_LAYOUT}>
+        <Dialog.Content
+          width={SETTINGS_EDITOR_DIALOG_WIDTH}
+          className={SETTINGS_EDITOR_DIALOG_LAYOUT}
+        >
           <Dialog.Header>
             <Dialog.Title>
               {editor?.mode === 'edit' ? t('settings.mcp.editTitle') : t('settings.mcp.addTitle')}

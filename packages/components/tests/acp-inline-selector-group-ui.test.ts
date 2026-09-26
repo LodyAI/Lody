@@ -200,9 +200,10 @@ describe('AcpBottomBarModeSelector UI', () => {
     );
 
     const permissionButton = container?.querySelector<HTMLButtonElement>(
-      'button[aria-label="Permission Mode"]'
+      'button[aria-label^="Permission Mode"]'
     );
-    expect(permissionButton?.textContent).toContain('Ask Every Time');
+    // The selector is icon-only; the selected mode is named in its label.
+    expect(permissionButton?.getAttribute('aria-label')).toBe('Permission Mode: Ask Every Time');
     expect(container?.textContent).not.toContain('Agent');
   });
 });

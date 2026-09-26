@@ -1,6 +1,14 @@
 import * as stylex from '@stylexjs/stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
-import { corner, duration, ease, focus, radius, space } from '@lody/ui/tokens/scales.stylex';
+import {
+  control,
+  corner,
+  duration,
+  ease,
+  focus,
+  radius,
+  space,
+} from '@lody/ui/tokens/scales.stylex';
 import { settingsMaterial as material } from './material.stylex';
 import { settingsType as type } from './type.stylex';
 
@@ -192,6 +200,9 @@ export const settingsSurface = stylex.create({
    * A row of a list a person moves through — the settings nav, the Projects
    * sources and folders: a sidebar row. No edge; the pointer's fill and the
    * current row's fill are washes of ink over whatever the row stands on.
+   * Keyboard focus shows as the pointer's wash, not the shell's accent ring:
+   * the dialog focuses a row when it opens, and from the keyboard that focus
+   * is `:focus-visible`, which framed a row nobody chose.
    * Spread on a `<button>` or a link; it resets what a button brings.
    */
   listRow: {
@@ -209,11 +220,15 @@ export const settingsSurface = stylex.create({
     borderRadius: radius.small,
     cornerShape: corner.shape,
     // Ink washes rather than the palette's hover/selected fills: those are tuned
-    // for the page rung and all but vanish on the nav's darker fill.
+    // for the page rung and all but vanish on the nav's darker fill. 6% / 10%
+    // so the current row reads clearly against the nav.
     backgroundColor: {
       default: 'transparent',
-      ':hover': `color-mix(in oklab, transparent, ${colors.label} 5%)`,
+      ':hover': `color-mix(in oklab, transparent, ${colors.label} 6%)`,
+      ':focus-visible': `color-mix(in oklab, transparent, ${colors.label} 6%)`,
     },
+    boxShadow: { default: null, ':focus-visible': 'none' },
+    outline: { default: null, ':focus-visible': 'none' },
     color: colors.label,
     fontFamily: 'inherit',
     fontSize: '1em',
@@ -228,8 +243,9 @@ export const settingsSurface = stylex.create({
   },
   listRowSelected: {
     backgroundColor: {
-      default: `color-mix(in oklab, transparent, ${colors.label} 8%)`,
-      ':hover': `color-mix(in oklab, transparent, ${colors.label} 8%)`,
+      default: `color-mix(in oklab, transparent, ${colors.label} 10%)`,
+      ':hover': `color-mix(in oklab, transparent, ${colors.label} 10%)`,
+      ':focus-visible': `color-mix(in oklab, transparent, ${colors.label} 10%)`,
     },
   },
   /** A list row's glyph: icons at rest are a hint. */
@@ -255,6 +271,34 @@ export const settingsSurface = stylex.create({
     fontVariantNumeric: 'tabular-nums',
   },
 
+  /**
+   * A row a person presses to go somewhere (a page, a dialog), drawn as a
+   * settings row: the whole line is the target and a quiet mark at its end
+   * says where it leads. Spread with `row` and `pressableLine`; it resets what
+   * a button brings.
+   */
+  linkRow: {
+    boxSizing: 'border-box',
+    width: '100%',
+    margin: 0,
+    borderWidth: 0,
+    borderStyle: 'none',
+    color: 'inherit',
+    fontFamily: 'inherit',
+    fontSize: 'inherit',
+    textAlign: 'start',
+    cursor: 'pointer',
+    outline: 'none',
+    boxShadow: {
+      default: 'none',
+      ':focus-visible': `inset 0 0 0 ${focus.ringWidth} ${colors.accent}`,
+    },
+  },
+  /** A link row's end holds a control's height, so it is as tall as a row with a button. */
+  linkEnd: { minHeight: control.small },
+  /** A link row's end mark: a hint, in the ink of a glyph at rest. */
+  linkMark: { flexShrink: 0, width: '14px', height: '14px', color: colors.tertiaryLabel },
+
   /** Copy standing in for a card's rows: an empty list, a loading line. */
   cardNote: {
     margin: 0,
@@ -264,6 +308,16 @@ export const settingsSurface = stylex.create({
     lineHeight: 1.375,
     color: colors.secondaryLabel,
   },
+  /** An empty list's one line when it carries the way to fill it. */
+  cardNoteWithAction: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: space[4],
+    paddingBlock: space[2],
+  },
+  /** A row whose control cannot be used here: its name steps back with it. */
+  rowLabelDisabled: { color: colors.tertiaryLabel },
   /**
    * The column a settings page lays out in: sections stacked and set apart by
    * space, centred at a reading width once the panel is wide.
@@ -450,23 +504,6 @@ export const settingsCatalog = stylex.create({
     gap: space[1],
     paddingInlineEnd: space[3],
   },
-  /** An empty catalog: a quiet region, no edge and no dashed box. */
-  empty: {
-    boxSizing: 'border-box',
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: space[3],
-    paddingInline: space[6],
-    paddingBlock: space[8],
-    borderRadius: radius.large,
-    cornerShape: corner.shape,
-    backgroundColor: material.emptyFill,
-    textAlign: 'center',
-  },
-  emptyIcon: { width: '24px', height: '24px', color: colors.tertiaryLabel },
-  emptyText: { margin: 0, fontSize: type.caption, color: colors.secondaryLabel },
   icon: { flexShrink: 0, width: '14px', height: '14px' },
   iconSmall: { flexShrink: 0, width: '12px', height: '12px' },
 
@@ -526,8 +563,10 @@ export const settingsCatalog = stylex.create({
 
 /**
  * The size of a settings editor dialog (MCP server, Agent Role, Prompt
- * Shortcut). Layout only, and a Tailwind class on purpose: the panel states its
- * own width in StyleX, and a second StyleX width on the same element is ordered
- * by the stylesheet, while utilities sit in a later layer and win.
+ * Shortcut). The width rides `Dialog.Content`'s `width` prop — the panel's own
+ * width is a StyleX declaration, and a second one on the same element is
+ * ordered by the stylesheet rather than the caller. This class keeps only the
+ * height cap.
  */
-export const SETTINGS_EDITOR_DIALOG_LAYOUT = 'w-[620px] max-h-[min(680px,88dvh)]';
+export const SETTINGS_EDITOR_DIALOG_WIDTH = '620px';
+export const SETTINGS_EDITOR_DIALOG_LAYOUT = 'max-h-[min(680px,88dvh)]';

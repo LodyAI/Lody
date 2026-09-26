@@ -1,6 +1,6 @@
 import { Button as BaseButton } from '@base-ui/react/button';
 import * as stylex from '@stylexjs/stylex';
-import { forwardRef, type ComponentProps } from 'react';
+import { createContext, forwardRef, useContext, type ComponentProps } from 'react';
 import { colors } from '../tokens/colors.stylex';
 import { corner, duration, ease, radius, text } from '../tokens/scales.stylex';
 import { button } from './button.tokens.stylex';
@@ -163,6 +163,48 @@ const styles = stylex.create({
     textDecoration: { default: 'none', ':hover': 'underline' },
     textUnderlineOffset: '4px',
   },
+  /**
+   * A button inside a `ButtonGroup` is a segment of one shape: it keeps its
+   * outer corners and squares the ones it shares with a neighbour. Longhands,
+   * so they win over the size's `borderRadius` shorthand; the corner a segment
+   * keeps is restated because StyleX has no "unset on this condition".
+   */
+  segmentMini: {
+    borderStartStartRadius: { default: 0, ':first-child': button.radiusMini },
+    borderEndStartRadius: { default: 0, ':first-child': button.radiusMini },
+    borderStartEndRadius: { default: 0, ':last-child': button.radiusMini },
+    borderEndEndRadius: { default: 0, ':last-child': button.radiusMini },
+  },
+  segmentSmall: {
+    borderStartStartRadius: { default: 0, ':first-child': button.radiusSmall },
+    borderEndStartRadius: { default: 0, ':first-child': button.radiusSmall },
+    borderStartEndRadius: { default: 0, ':last-child': button.radiusSmall },
+    borderEndEndRadius: { default: 0, ':last-child': button.radiusSmall },
+  },
+  segmentMedium: {
+    borderStartStartRadius: { default: 0, ':first-child': button.radiusMedium },
+    borderEndStartRadius: { default: 0, ':first-child': button.radiusMedium },
+    borderStartEndRadius: { default: 0, ':last-child': button.radiusMedium },
+    borderEndEndRadius: { default: 0, ':last-child': button.radiusMedium },
+  },
+  segmentPill: {
+    borderStartStartRadius: { default: 0, ':first-child': radius.full },
+    borderEndStartRadius: { default: 0, ':first-child': radius.full },
+    borderStartEndRadius: { default: 0, ':last-child': radius.full },
+    borderEndEndRadius: { default: 0, ':last-child': radius.full },
+  },
+  /**
+   * The segments sit a hairline apart rather than touching: each keeps its own
+   * edge, so the seam is drawn by the two edges meeting, the way a split
+   * action's divider reads in every desktop toolkit — and no border token is
+   * needed for it.
+   */
+  group: {
+    display: 'inline-flex',
+    flexShrink: 0,
+    alignItems: 'stretch',
+    gap: '1px',
+  },
   destructiveTone: {
     color: { default: colors.destructive, ':hover': colors.destructive },
     backgroundColor: { ':hover': `color-mix(in oklab, ${colors.destructive} 10%, transparent)` },
@@ -175,6 +217,16 @@ const sizeStyles = {
   medium: styles.medium,
   large: styles.large,
 };
+
+const segmentStyles = {
+  mini: styles.segmentMini,
+  small: styles.segmentSmall,
+  medium: styles.segmentMedium,
+  large: styles.segmentMedium,
+};
+
+/** Whether the button is a segment of a `ButtonGroup`. */
+const ButtonGroupContext = createContext(false);
 
 const iconStyles = {
   mini: styles.iconMini,
@@ -196,11 +248,13 @@ export const Button = forwardRef<HTMLElement, ButtonProps>(function Button(
   },
   ref
 ) {
+  const segment = useContext(ButtonGroupContext);
   const sx = stylex.props(
     styles.base,
     sizeStyles[size],
     icon && iconStyles[size],
     shape === 'pill' && styles.pill,
+    segment && (shape === 'pill' ? styles.segmentPill : segmentStyles[size]),
     styles[variant],
     tone === 'destructive' &&
       variant !== 'primary' &&
@@ -225,5 +279,39 @@ export const Button = forwardRef<HTMLElement, ButtonProps>(function Button(
         children
       )}
     </BaseButton>
+  );
+});
+
+export interface ButtonGroupProps extends Omit<ComponentProps<'div'>, 'className'> {
+  className?: string;
+}
+
+/**
+ * Buttons that are one control: a command and its options (a split button),
+ * or a short run of peers. Its buttons are segments of one shape — outer
+ * corners kept, shared corners squared, a hairline seam between them — so a
+ * split action reads as one thing rather than two buttons that happen to be
+ * adjacent. Give every segment the same variant and size; the group draws
+ * nothing of its own.
+ *
+ * A segment must be a direct child, which a Base UI trigger rendered as a
+ * Button is (`<Menu.Trigger render={<Button … />} />`): the corners follow
+ * `:first-child` and `:last-child`.
+ */
+export const ButtonGroup = forwardRef<HTMLDivElement, ButtonGroupProps>(function ButtonGroup(
+  { className, children, ...rest },
+  ref
+) {
+  const sx = stylex.props(styles.group);
+  return (
+    <div
+      ref={ref}
+      role="group"
+      {...rest}
+      className={className ? `${sx.className} ${className}` : sx.className}
+      style={sx.style}
+    >
+      <ButtonGroupContext.Provider value>{children}</ButtonGroupContext.Provider>
+    </div>
   );
 });
