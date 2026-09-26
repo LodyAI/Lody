@@ -44,7 +44,7 @@ strings on i18n rather than the registry's inline English.
 ## Menus and viewers
 
 - Dialog overlays and content share one z rung: portal DOM order puts each new
-  overlay above earlier dialogs and below its own content.
+  overlay (lighter when nested) above earlier panels and below its own.
 - Dialog-contained `OptionSelector` menus must portal into the nearest
   `[data-lody-dialog-content]`; a body portal is outside the modal's scroll and
   focus guards. `src/ui/dialog.tsx` emits that attribute on every panel.

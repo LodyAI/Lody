@@ -234,6 +234,7 @@ export function CommandPaletteView({
             // The palette's visible hint promises that Escape closes this surface.
             if (event.key === 'Escape' && !event.nativeEvent.isComposing) {
               event.preventDefault();
+              event.stopPropagation();
               onOpenChange(false);
             }
           }}

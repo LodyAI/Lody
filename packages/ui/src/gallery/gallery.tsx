@@ -800,6 +800,11 @@ const DIALOG_COLORS = [
   { name: 'dialog.background', value: dialogTokens.background, note: 'the modal rung' },
   { name: 'dialog.title', value: dialogTokens.title, note: 'the heading, and the panel text' },
   { name: 'dialog.description', value: dialogTokens.description, note: 'the sentence under it' },
+  {
+    name: 'dialog.nestedOverlay',
+    value: dialogTokens.nestedOverlay,
+    note: 'the lighter veil a stacked dialog draws over its parent panel',
+  },
 ];
 
 const TOOLTIP_COLORS = [

@@ -81,6 +81,7 @@ it('opens selectable details when copying fails, without claiming success', asyn
   await click('Copy error details');
   expect(container.textContent).toContain('Copying was blocked');
   expect(button('Copy error details')).toBeDefined();
-  expect(container.querySelector('details')?.open).toBe(true);
-  expect(container.querySelector('pre')?.textContent).toContain('at measureRow');
+  expect(button('Technical details').getAttribute('aria-expanded')).toBe('true');
+  const details = [...container.querySelectorAll('pre')].map((pre) => pre.textContent).join('\n');
+  expect(details).toContain('at measureRow');
 });

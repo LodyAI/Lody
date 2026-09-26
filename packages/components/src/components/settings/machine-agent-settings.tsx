@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
 import { useAtomValue, useSetAtom } from 'jotai';
@@ -249,8 +249,17 @@ const styles = stylex.create({
   privateHeading: { paddingInline: space[1] },
   privateTitleLine: { display: 'flex', alignItems: 'center', gap: space[2] },
   privateTitle: { margin: 0, fontSize: type.caption, fontWeight: 400, color: colors.label },
-  count: { fontSize: type.caption, fontVariantNumeric: 'tabular-nums', color: colors.secondaryLabel },
-  privateHint: { margin: 0, marginTop: '2px', fontSize: type.caption, color: colors.secondaryLabel },
+  count: {
+    fontSize: type.caption,
+    fontVariantNumeric: 'tabular-nums',
+    color: colors.secondaryLabel,
+  },
+  privateHint: {
+    margin: 0,
+    marginTop: '2px',
+    fontSize: type.caption,
+    color: colors.secondaryLabel,
+  },
   selectPrompt: {
     paddingInline: space[1],
     paddingBlock: space[8],
@@ -804,7 +813,15 @@ export function MachineAgentSettings({
   // decoupled from any single "selected machine" now that desktop lists them all.
   const [dialogMachineId, setDialogMachineId] = useState<MachineId | null>(null);
   const dialogMachine = dialogMachineId ? machines.get(dialogMachineId) : undefined;
-  const dialogOpen = dialogMode !== null;
+  // The dialog's open bit lives apart from its mode/machine: the root must be
+  // mounted while closed for Base UI to report `starting`/`ending`, or neither
+  // transition ever plays — a dialog mounted already-open renders in its final
+  // state on the first frame, and one unmounted on close vanishes mid-fade.
+  const [dialogOpen, setDialogOpen] = useState(false);
+  // Opening happens one commit after the root mounts, for the same reason.
+  useLayoutEffect(() => {
+    if (dialogMode && dialogMachine) setDialogOpen(true);
+  }, [dialogMode, dialogMachine]);
   const [latestCliVersion, setLatestCliVersion] = useState<string | null>(null);
 
   const sharedWithTeam = resolvedSelectedMachine
@@ -1209,9 +1226,16 @@ export function MachineAgentSettings({
       <AgentConfigDialog
         open={dialogOpen}
         onOpenChange={(open) => {
-          if (!open) setDialogMode(null);
+          if (!open) setDialogOpen(false);
         }}
-        nestedInDialog={!isMobile}
+        onOpenChangeComplete={(open) => {
+          // Mode and machine outlive `open` so the panel's real content is
+          // still there while it fades out; they clear once it has left.
+          if (!open) {
+            setDialogMode(null);
+            setDialogMachineId(null);
+          }
+        }}
         mode={dialogMode}
         machine={dialogMachine}
         onSubmit={handleDialogSubmit}
