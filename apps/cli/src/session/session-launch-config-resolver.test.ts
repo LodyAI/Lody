@@ -39,7 +39,120 @@ const sessionMeta = (): SessionMeta =>
     agentConfigId,
   }) as SessionMeta;
 
+const importedCustomSessionMeta = (): SessionMeta =>
+  ({
+    id: sessionId,
+    machineId,
+    cliType: 'custom',
+    agentType: 'history-agent',
+    origin: 'external-acp',
+  }) as SessionMeta;
+
+function customAgentConfig(input: {
+  id: string;
+  agentType?: string;
+  command: string;
+}): Parameters<FakeMachineFlock['rows']['push']>[0] {
+  return {
+    key: machineFlockKeys.agentConfig(input.id as AgentConfigId),
+    value: {
+      id: input.id,
+      machineId,
+      name: input.id,
+      cliType: 'custom',
+      agentType: input.agentType ?? 'history-agent',
+      customAcp: { command: input.command },
+      env: { HISTORY_TOKEN: input.id },
+      prompt: '',
+    },
+  } as Parameters<FakeMachineFlock['rows']['push']>[0];
+}
+
 describe('resolveSessionLaunchConfig', () => {
+  it('uses the unique current custom config for an imported session without a config id', () => {
+    const flock = new FakeMachineFlock();
+    const config = customAgentConfig({ id: 'custom-1', command: 'history-agent-v1' });
+    flock.rows.push(config);
+
+    expect(
+      readMachineSessionLaunchSnapshotFromFlock({
+        flock,
+        sessionId,
+        sessionMeta: importedCustomSessionMeta(),
+      }).resolution
+    ).toEqual({
+      source: 'agent-config',
+      config: {
+        customAcp: { command: 'history-agent-v1' },
+        env: { HISTORY_TOKEN: 'custom-1' },
+      },
+    });
+
+    config.value = {
+      ...(config.value as object),
+      customAcp: { command: 'history-agent-v2' },
+    };
+    expect(
+      readMachineSessionLaunchSnapshotFromFlock({
+        flock,
+        sessionId,
+        sessionMeta: importedCustomSessionMeta(),
+      }).resolution.config?.customAcp
+    ).toEqual({ command: 'history-agent-v2' });
+  });
+
+  it('fails closed when an imported custom session has no matching config', () => {
+    const flock = new FakeMachineFlock();
+    flock.rows.push(
+      customAgentConfig({ id: 'other-agent', agentType: 'other', command: 'other-agent' })
+    );
+
+    expect(
+      readMachineSessionLaunchSnapshotFromFlock({
+        flock,
+        sessionId,
+        sessionMeta: importedCustomSessionMeta(),
+      }).resolution
+    ).toEqual({ source: 'none', config: undefined });
+  });
+
+  it('fails closed when multiple configs match an imported custom session', () => {
+    const flock = new FakeMachineFlock();
+    flock.rows.push(
+      customAgentConfig({ id: 'custom-1', command: 'history-agent-v1' }),
+      customAgentConfig({ id: 'custom-2', command: 'history-agent-v2' })
+    );
+
+    expect(
+      readMachineSessionLaunchSnapshotFromFlock({
+        flock,
+        sessionId,
+        sessionMeta: importedCustomSessionMeta(),
+      }).resolution
+    ).toEqual({ source: 'none', config: undefined });
+  });
+
+  it('preserves legacy launch fields for a non-imported custom session without a config id', () => {
+    const flock = new FakeMachineFlock();
+    flock.rows.push(customAgentConfig({ id: 'custom-1', command: 'current-command' }));
+    const meta = {
+      ...importedCustomSessionMeta(),
+      origin: 'lody',
+      customAcp: { command: 'legacy-command' },
+      env: { HISTORY_TOKEN: 'legacy' },
+    } as SessionMeta;
+
+    expect(
+      readMachineSessionLaunchSnapshotFromFlock({ flock, sessionId, sessionMeta: meta }).resolution
+    ).toEqual({
+      source: 'legacy-session',
+      config: {
+        customAcp: { command: 'legacy-command' },
+        env: { HISTORY_TOKEN: 'legacy' },
+      },
+    });
+  });
+
   it('reads the current launch config synchronously from an existing Flock handle', () => {
     const flock = new FakeMachineFlock();
     flock.rows.push({
