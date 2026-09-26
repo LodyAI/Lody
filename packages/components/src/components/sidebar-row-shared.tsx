@@ -590,6 +590,15 @@ export const SIDEBAR_GROUP_LABEL_CLASS = cn(
   SIDEBAR_GROUP_LABEL_COLOR_CLASS
 );
 
+/**
+ * Sticky wrapper for a top-level group header (a machine, GitHub Worktrees,
+ * Chats): rows scroll beneath it, so it must paint the sidebar surface.
+ * `bg-sidebar` resolves to `--sidebar-background`; the look-alike
+ * `bg-sidebar-background` is not a generated utility and leaves the header
+ * transparent, letting a selected row's frame bleed through the group label.
+ */
+export const SIDEBAR_STICKY_GROUP_HEADER_CLASS = 'sticky top-0 z-10 bg-sidebar';
+
 const SECTION_HEADER_BUTTON_CLASS = cn(
   'relative flex h-[26px] min-w-0 flex-1 select-none items-center gap-1.5 rounded-md px-2 text-left',
   'border border-transparent bg-transparent',

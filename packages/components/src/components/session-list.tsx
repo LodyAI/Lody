@@ -90,6 +90,7 @@ import {
   SIDEBAR_ROW_LIST_CLASS,
   SIDEBAR_GROUP_LABEL_CLASS,
   SIDEBAR_GROUP_LABEL_COLOR_CLASS,
+  SIDEBAR_STICKY_GROUP_HEADER_CLASS,
 } from '@/components/sidebar-row-shared';
 import { SessionInfoHoverCard } from '@/components/session-info-hover-card';
 import type { SessionSharingState } from '@/lib/session-sharing';
@@ -1189,7 +1190,7 @@ const SessionGroupSection = memo(function SessionGroupSection({
       <div
         className={cn(
           'group flex items-center',
-          isGroupLabel ? 'sticky top-0 z-10 h-[26px] bg-sidebar-background' : 'h-7'
+          isGroupLabel ? cn(SIDEBAR_STICKY_GROUP_HEADER_CLASS, 'h-[26px]') : 'h-7'
         )}
       >
         <div
