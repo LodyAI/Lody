@@ -25,6 +25,7 @@ import { Switch } from '@lody/ui/switch';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { focus, radius, space } from '@lody/ui/tokens/scales.stylex';
 import { settingsCatalog as catalog, settingsSurface as surface } from './surface';
+import { settingsRecordsCard } from './compact-layout';
 import { settingsType as type } from './type.stylex';
 
 const styles = stylex.create({
@@ -334,7 +335,7 @@ function ShareManagementList({
         </p>
       )}
       {result === undefined ? (
-        <div {...stylex.props(surface.card)}>
+        <div {...stylex.props(settingsRecordsCard)}>
           {[0, 1, 2, 3].map((index) => (
             <div key={index} {...stylex.props(surface.line, index > 0 && surface.lineRuled)}>
               <ShareRowSkeleton />
@@ -367,7 +368,7 @@ function ShareManagementList({
           {/* One card of ruled rows: a list of records is one surface, and a
               title keeps the card's whole width instead of a column of it. */}
           {visible.length > 0 && (
-            <ul {...stylex.props(surface.card, styles.list)}>
+            <ul {...stylex.props(settingsRecordsCard, styles.list)}>
               {visible.map((entry, index) => {
                 const isRevoked = entry.status !== 'active';
                 const publishedAt = new Date(entry.createdAt);

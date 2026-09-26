@@ -92,6 +92,9 @@ export function PromptShortcutProvider({
   const [instance, setInstance] = useState<{
     runtime: PromptShortcutRuntime;
     generation: number;
+    platform: typeof platform;
+    cloud: boolean;
+    isActive: () => boolean;
   } | null>(null);
   const [failure, setFailure] = useState<{
     workspaceId: string;
@@ -103,7 +106,10 @@ export function PromptShortcutProvider({
   const runtime =
     instance?.runtime.workspaceId === workspaceId &&
     instance.runtime.userId === userId &&
-    instance.generation === generation
+    instance.generation === generation &&
+    instance.platform === platform &&
+    instance.cloud === cloud &&
+    instance.isActive()
       ? instance.runtime
       : null;
   const initializationError =
@@ -223,7 +229,7 @@ export function PromptShortcutProvider({
           : undefined
       );
       check();
-      setInstance({ runtime: owned, generation });
+      setInstance({ runtime: owned, generation, platform, cloud, isActive: () => !disposed });
       void owned.flush();
     })().catch((error) => {
       if (!disposed) {
@@ -233,6 +239,9 @@ export function PromptShortcutProvider({
     });
     return () => {
       disposed = true;
+      // Identity can return before the replacement finishes opening. Retire this
+      // effect's instance immediately, even while its durable close is pending.
+      setInstance((value) => (value?.runtime === owned ? null : value));
       // Close a late initialization as well; no leaked IndexedDB/Streams leases.
       const closing = opening
         .then(async () => {
