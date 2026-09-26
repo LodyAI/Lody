@@ -36,7 +36,7 @@ describe('CommandPaletteView', () => {
     run: () => ran.push(key),
   });
 
-  const render = async (results: PaletteResult[], onOpenChange = () => undefined) => {
+  const render = async (results: PaletteResult[]) => {
     await act(async () => {
       root.render(
         createElement(CommandPaletteView, {
