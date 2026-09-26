@@ -14,8 +14,9 @@ tiles in the primary colour across which a slow light drifts, driven by two shor
 waves crossing the page plus one long rhythm wave that brightens whole marks in
 turn down the list; every tile samples them at its own page position. The
 animation runs on the compositor through Web Animations of `transform` and
-`opacity` on one shared clock, with no per-frame script. Unmeasured: the
-renderer cost of 19 small animated layers per mark in a packaged build, and the effect on real readers.
+`opacity` on one shared clock, with no per-frame script. Offscreen marks now defer
+their animation creation until visible. Unmeasured: the renderer cost of 19
+small animated layers per mark in a packaged build, and the effect on real readers.
 
 ## Problem
 
@@ -143,11 +144,11 @@ Verified by scrubbing the paused animations frame by frame in Storybook
 
 ## Implementation choice
 
-| Option | Result |
-|---|---|
-| rAF loop writing styles (the prototype) | Rejected: per-frame main-thread work and repaint, the cost the spinner fix removed. |
-| CSS keyframes with per-tile `animation-delay` | Rejected: CSS animations start when an element mounts, so marks mounted at different moments would sit on different seas. |
-| **Web Animations, `startTime = 0`, per-tile delay from the phase** | Chosen: compositor-driven, and every loop is aligned to the document timeline regardless of mount time. |
+| Option                                                             | Result                                                                                                                    |
+| ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------- |
+| rAF loop writing styles (the prototype)                            | Rejected: per-frame main-thread work and repaint, the cost the spinner fix removed.                                       |
+| CSS keyframes with per-tile `animation-delay`                      | Rejected: CSS animations start when an element mounts, so marks mounted at different moments would sit on different seas. |
+| **Web Animations, `startTime = 0`, per-tile delay from the phase** | Chosen: compositor-driven, and every loop is aligned to the document timeline regardless of mount time.                   |
 
 A sum of two sines cannot be one keyframe loop, so each tile nests two layers,
 one per wave, and their scales and opacities multiply. Each layer spans the
@@ -185,6 +186,36 @@ a `SidebarSimulation` story at production geometry: 28px rows, the trailing
 status slot that swaps to Archive on hover, waiting and unread marks beside
 working ones. `Components/LodySidebar` → All sessions working shows the real
 sidebar with every session running.
+
+## Follow-up: start only visible marks
+
+Cmd+B remounts the desktop sidebar on expansion. Each working mark previously
+created 18 Web Animations in its layout effect, even below the scroll viewport;
+many working rows could therefore allocate animations before the sidebar's first
+paint. `WorkingGrid` now shares one `IntersectionObserver` across marks and starts
+those animations only when a mark intersects the viewport. On leaving, it cancels
+them. The grid's static tiles remain visible, and returning marks use the existing
+document-timeline zero so they rejoin the same wave phase. Engines without the
+observer keep the prior immediate behavior. This structurally reduces offscreen
+animation allocations, not total sidebar mount cost or every Cmd+B hitch:
+visible marks and the sidebar's layout animation still have costs.
+
+The added component test covers shared observation, offscreen inactivity,
+cancellation on exit, and the shared phase when a mark returns. It passes in a
+standalone checkout (23 tests); no packaged-renderer trace has been run.
+
+The reproducible [sidebar benchmark](../../../../packages/components/benchmarks/sidebar-toggle.bench.tsx)
+mounts/unmounts a synthetic 180-session list with mixed status. In production-mode
+React + jsdom, 16 samples per case showed no clear mount win from the observer:
+45 rendered preview rows took 154.8 ms at the baseline commit versus 156.9 ms
+with this change; with all 180 rows shown, 437.7 ms versus 514.1 ms in one
+run, while another all-rows run varied to 672.0 ms versus 688.8 ms. The mock
+animation API omits Chromium's WAAPI and paint costs, so these numbers cannot
+establish whether the observer helps or hurts actual Cmd+B frame timing. They
+do establish that full sidebar remounting remains expensive, especially when
+users expand every group. Storybook/Chromium measurement was attempted but the
+dev server did not render the benchmark iframe within the timeout; a packaged
+Electron trace remains necessary before claiming the hitch is fixed.
 
 ## Verification
 

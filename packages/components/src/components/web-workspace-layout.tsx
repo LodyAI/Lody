@@ -1,8 +1,13 @@
-import { type ReactNode } from 'react';
+import { memo, useLayoutEffect, useRef, type ReactNode } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { useLocation } from '@tanstack/react-router';
 import { LoroAppSidebar } from './loro-app-sidebar';
+import {
+  DEFAULT_DESKTOP_SIDEBAR_WIDTH,
+  MAX_DESKTOP_SIDEBAR_WIDTH,
+  MIN_DESKTOP_SIDEBAR_WIDTH,
+} from './loro-sidebar';
 import { ErrorBoundary } from './error-boundary';
 import { useKeyboardNavigation } from '../hooks/use-keyboard-navigation';
 import { useIsCompactDesktop } from '../hooks/use-mobile';
@@ -17,13 +22,24 @@ import { FocusScope } from '@/ui/focus-scope';
 import { WindowDragStrip } from '@/ui/window-drag-region';
 import { cn } from '@/lib/utils';
 
-// LoroSidebar's default expanded width (see loro-sidebar.tsx `defaultWidth`);
-// `sidebarLastWidthAtom` stores 0 until the user resizes, so fall back to this.
-const DEFAULT_SIDEBAR_WIDTH = 280;
-
 // Compact overlay width: the standard 18rem drawer, capped so it never
 // covers the whole window on the narrowest desktops.
 const COMPACT_SIDEBAR_OVERLAY_WIDTH = 'min(18rem,85vw)';
+
+const DesktopSidebarContent = memo(function DesktopSidebarContent({
+  pathname,
+}: {
+  pathname: string;
+}) {
+  return (
+    <ErrorBoundary name="AppSidebar" variant="section" resetKeys={[pathname]}>
+      <LoroAppSidebar
+        pauseSidebarSourcesWhenHidden
+        className="h-full transition-shadow duration-150"
+      />
+    </ErrorBoundary>
+  );
+});
 
 export function WebWorkspaceLayout({ children }: { children: ReactNode }) {
   // Only the pathname drives this layout (settings branch + error boundary
@@ -37,7 +53,27 @@ export function WebWorkspaceLayout({ children }: { children: ReactNode }) {
   const setSidebarCollapsed = useSetAtom(sidebarCollapsedAtom);
   const sidebarLastWidth = useAtomValue(sidebarLastWidthAtom);
   const shouldReduceMotion = useReducedMotion();
+  const sidebarRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const wasSidebarVisibleRef = useRef(sidebarVisible);
 
+  useLayoutEffect(() => {
+    const wasVisible = wasSidebarVisibleRef.current;
+    wasSidebarVisibleRef.current = sidebarVisible;
+    if (!wasVisible || sidebarVisible || compact || isSettingsRoute(pathname)) return;
+    const active = document.activeElement;
+    // Setting inert can move focus to <body> before layout effects run. A
+    // sidebar popover can also have focus in a portal outside this subtree.
+    // Preserve focus in another panel or a modal, but dismiss sidebar popovers.
+    const inOtherScope =
+      active instanceof Element &&
+      active.closest('[data-focus-scope]') &&
+      !sidebarRef.current?.contains(active);
+    const inModal = active instanceof Element && active.closest('[aria-modal="true"]');
+    if (!inOtherScope && !inModal) {
+      contentRef.current?.focus({ preventScroll: true });
+    }
+  }, [compact, pathname, sidebarVisible]);
   useKeyboardNavigation();
 
   if (isSettingsRoute(pathname)) {
@@ -53,13 +89,18 @@ export function WebWorkspaceLayout({ children }: { children: ReactNode }) {
     );
   }
 
-  // Slide the sidebar in/out horizontally on collapse/expand. Animating
-  // `marginLeft` (not width/transform) both slides the panel off the left edge —
-  // clipped by this row's `overflow-hidden` — and reclaims the flex space so the
-  // content pane grows to fill. AnimatePresence keeps the sidebar mounted for
-  // the exit slide, then unmounts it. marginLeft stays 0 while expanded, so live
-  // resize never fights the animation.
-  const sidebarSlideWidth = sidebarLastWidth > 0 ? sidebarLastWidth : DEFAULT_SIDEBAR_WIDTH;
+  // Reserve/release the sidebar's flex space once, then slide the retained DOM
+  // with a transform. Animating a margin made the content pane relayout on every
+  // frame; remounting the sidebar rebuilt every session row on each Cmd+B.
+  // LoroSidebar clamps its persisted default. The hidden wrapper must release
+  // that same actual width, or an old out-of-range preference leaves a gap.
+  const sidebarSlideWidth = Math.min(
+    Math.max(
+      sidebarLastWidth > 0 ? sidebarLastWidth : DEFAULT_DESKTOP_SIDEBAR_WIDTH,
+      MIN_DESKTOP_SIDEBAR_WIDTH
+    ),
+    MAX_DESKTOP_SIDEBAR_WIDTH
+  );
   const slideTransition = {
     duration: shouldReduceMotion ? 0 : 0.22,
     ease: [0.32, 0.72, 0, 1] as const,
@@ -107,24 +148,22 @@ export function WebWorkspaceLayout({ children }: { children: ReactNode }) {
           ]}
         </AnimatePresence>
       ) : (
-        <AnimatePresence initial={false} presenceAffectsLayout={false}>
-          {sidebarVisible && (
-            <motion.div
-              key="app-sidebar"
-              className="h-full shrink-0"
-              initial={{ marginLeft: -sidebarSlideWidth }}
-              animate={{ marginLeft: 0 }}
-              exit={{ marginLeft: -sidebarSlideWidth }}
-              transition={slideTransition}
-            >
-              <ErrorBoundary name="AppSidebar" variant="section" resetKeys={[pathname]}>
-                <LoroAppSidebar className="h-full transition-shadow duration-150" />
-              </ErrorBoundary>
-            </motion.div>
-          )}
-        </AnimatePresence>
+        <motion.div
+          ref={sidebarRef}
+          key="app-sidebar"
+          className="relative z-10 h-full shrink-0"
+          initial={false}
+          animate={{ x: sidebarVisible ? 0 : -sidebarSlideWidth }}
+          transition={slideTransition}
+          style={{ marginRight: sidebarVisible ? 0 : -sidebarSlideWidth }}
+          aria-hidden={!sidebarVisible}
+          inert={!sidebarVisible}
+        >
+          <DesktopSidebarContent pathname={pathname} />
+        </motion.div>
       )}
       <FocusScope
+        ref={contentRef}
         id={WORKSPACE_FOCUS_SCOPES.content}
         className="relative flex min-w-0 flex-1 overflow-hidden"
       >

@@ -4,6 +4,7 @@ import React, { type ReactNode } from 'react';
 import { flushSync } from 'react-dom';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createStore, Provider } from 'jotai';
 
 import lodyLogo from '../src/assets/lody-icon.png';
 import { LoadingPlaceholder } from '../src/components/loading-placeholder';
@@ -90,6 +91,26 @@ describe('workspace identity capability boundary', () => {
 
     expect(container?.querySelector('[data-workspace-switcher-trigger]')?.tagName).toBe('BUTTON');
     expect(container?.querySelector('[data-workspace-identity]')).toBeNull();
+  });
+
+  it('restores the sidebar viewport after unmount and keeps workspace positions separate', () => {
+    const store = createStore();
+    const sidebar = (key: string) => <LoroSidebar {...sidebarProps} scrollStateKey={key} />;
+    render(<Provider store={store}>{sidebar('workspace-a')}</Provider>);
+
+    const viewport = () =>
+      container?.querySelector<HTMLDivElement>('[data-radix-scroll-area-viewport]');
+    expect(viewport()).not.toBeNull();
+    viewport()!.scrollTop = 180;
+    flushSync(() => root?.render(<Provider store={store}>{null}</Provider>));
+    flushSync(() => root?.render(<Provider store={store}>{sidebar('workspace-a')}</Provider>));
+    expect(viewport()?.scrollTop).toBe(180);
+
+    flushSync(() => root?.render(<Provider store={store}>{sidebar('workspace-b')}</Provider>));
+    expect(viewport()?.scrollTop).toBe(0);
+    viewport()!.scrollTop = 55;
+    flushSync(() => root?.render(<Provider store={store}>{sidebar('workspace-a')}</Provider>));
+    expect(viewport()?.scrollTop).toBe(180);
   });
 
   it('keeps scoped workspace synchronization visible after the connection is online', () => {

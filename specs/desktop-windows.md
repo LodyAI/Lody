@@ -87,11 +87,14 @@ windows; execution acts only in the window receiving the key. The original windo
 retains existing close/tray behavior; other workspace windows are not automatically
 restored.
 
-Hiding the sidebar unmounts its content and pauses Session prefetch; data required
-by the current conversation and Tasks page continues syncing. Only one window per
-workspace runs notifications, badges, and background status checks, handing off
-on exit. Cache clearing and logout are application-wide and close other windows
-to release connections.
+In the full-width desktop layout, hiding the sidebar keeps its view and scroll
+position mounted but pauses sidebar-driven Session prefetch; reopening it does
+not remount the list. Compact presentation and settings navigation may unmount
+the sidebar, restoring its scroll position for that workspace on return. Data
+required by the current conversation and Tasks page continues syncing. Only one
+window per workspace runs notifications, badges, and background status checks,
+handing off on exit. Cache clearing and logout are application-wide and close
+other windows to release connections.
 
 Workspace windows use the existing platform directory; the public desktop still
 has one local workspace. Shared UI multi-workspace entries must not change other

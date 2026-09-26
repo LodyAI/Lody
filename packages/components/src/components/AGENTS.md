@@ -5,25 +5,24 @@ Child directories (`sessions/`, `mobile/`, `chat/`, `settings/`, …) own their 
 
 ## Sidebar and session rows
 
-Ownership and explanations: [README.md](README.md).
-
 - Sidebar rows represent Sessions, never Tasks.
-- Every desktop row supports session-mention drag and Mark as unread in the shared ⋯
-  menu (Workspace, Local Project, Updated, and Pinned); hide Mark as unread on unread rows.
-  Use `lib/session-mention-drag.ts` for drops on the conversation page or landing.
-  Parent tabs in `session-tab-bar.tsx` use HTML5 drag; child tabs use the dnd-kit
-  in-flight store. `startSessionMentionDrag` / `armSessionMentionDrag` must light
+- Desktop Workspace, Local Project, Updated and Pinned rows support mention drag
+  and Mark as unread (hide on unread). Use `lib/session-mention-drag.ts` for
+  conversation/landing drops; parent tabs use HTML5 drag, child tabs dnd-kit.
+  `startSessionMentionDrag` / `armSessionMentionDrag` must light
   `ConversationDropOverlay` before `dragenter`. Navigation overlays use
-  `draggable={false}`; put `draggable` on the row.
+  `draggable={false}`; rows own `draggable`.
+- Full-width desktop hiding retains the sidebar DOM and scroll, makes it inert,
+  and stops eager-sync/keyboard-nav sources. Compact/settings may remount it; restore
+  scroll by workspace. [Decision](../../../../.agents/notes/implemented/bug-fix/2026-09-26-sidebar-toggle-hitch.md).
 - Every list uses `lib/session-opened-by-tree.ts`: `session-list.tsx` groups, local-project
   sections, Updated/Pinned in `sidebar-updated-session-list.tsx`, and
   `sidebar-navigation-model.ts` for matching keyboard navigation.
-- Keep the relations distinct: `openedBySessionId` is the precise opener;
-  `openedByRowSessionId` is its sidebar row. `buildSidebarOpenerRowResolver` in
-  `sessions/session-list-rows.ts` walks `parentSessionId` to the root row using the
-  sidebar's `allActiveSessions`, never a set re-derived from visible rows. Never rewrite
-  the precise opener to the root. Opened Sessions retain independent workspaces;
-  `parentSessionId` children remain excluded from `sessionListAtom` sidebar rows.
+- `openedBySessionId` is the precise opener; `openedByRowSessionId` is its row.
+  `buildSidebarOpenerRowResolver` in `sessions/session-list-rows.ts` walks
+  `parentSessionId` to root using sidebar `allActiveSessions`, not visible rows.
+  Preserve the precise opener and independent child workspace. `parentSessionId`
+  children stay out of `sessionListAtom` rows.
 - Opener and unrelated top-level rows retain flat-list alignment. In the leading slot,
   an opener shows disclosure and a child shows ├/└; hover swaps either for ⋯ at the same
   7px centre. Draw nesting regardless of working/unread/waiting status. Only children
