@@ -32,7 +32,7 @@ const buildInfo: Record<string, string> = {
 
 renderBootFailure(rootElement, reconstructed, {
   buildInfo,
-  hint: 'Lody could not load the main window. Click Reload to try again, or Copy error and share it with the team.',
+  surface: 'recovery',
   onReload: () => {
     if (getIpcServices()) {
       try {

@@ -22,6 +22,8 @@ export class CloudflaredError extends Error {
 export type CloudflaredProcess = {
   /** Address allocation alone is not readiness; the manager probes the public route. */
   origin: string;
+  /** First edge registration; neither this nor address allocation proves readiness. */
+  registered: Promise<void>;
   closed: Promise<CloudflaredError | null>;
   diagnostic(): string | undefined;
   stop(): Promise<void>;
@@ -146,9 +148,20 @@ export async function startCloudflaredNative(options: {
   });
   let resolveOrigin: (origin: string) => void = () => {};
   let rejectOrigin: (error: unknown) => void = () => {};
+  let resolveRegistration: () => void = () => {};
+  let rejectRegistration: (error: unknown) => void = () => {};
+  const registered = new Promise<void>((resolve, reject) => {
+    resolveRegistration = resolve;
+    rejectRegistration = reject;
+  });
+  // Registration can fail before the caller has received the allocated origin.
+  void registered.catch(() => {});
   const originPromise = new Promise<string>((resolve, reject) => {
     resolveOrigin = resolve;
-    rejectOrigin = reject;
+    rejectOrigin = (error) => {
+      reject(error);
+      rejectRegistration(error);
+    };
   });
   let stopPromise: Promise<void> | undefined;
   const stop = (): Promise<void> => {
@@ -218,6 +231,7 @@ export async function startCloudflaredNative(options: {
             options.onDiagnostic?.(diagnostic());
           }
           if (log.message === 'Registered tunnel connection') {
+            resolveRegistration();
             connectionState = `registered (${log.protocol ?? 'unknown'})`;
             options.onDiagnostic?.(diagnostic());
           }
@@ -255,7 +269,7 @@ export async function startCloudflaredNative(options: {
     const origin = await originPromise;
     options.signal.throwIfAborted();
     if (exited) throw exitError ?? new CloudflaredError('start', 'cloudflared already exited');
-    return { origin, closed, stop, diagnostic };
+    return { origin, registered, closed, stop, diagnostic };
   } catch (error) {
     await stop();
     throw error;

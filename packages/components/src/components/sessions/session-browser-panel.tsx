@@ -211,7 +211,9 @@ function SessionBrowserPanelController({
           epoch === previewObservationEpoch.current
         ) {
           setPreviewStatusError(errorMessage(statusError));
-          if (!localEndpointRef.current) setViewerUrl(null);
+          // A control-plane timeout does not revoke the viewer capability.
+          // Keep the current page; only an authoritative endpoint state above
+          // may invalidate it. Returning to the panel must not reload it.
         }
       } finally {
         if (!disposed && sequence === requestSequence) {

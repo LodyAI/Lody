@@ -21,6 +21,7 @@ function fixture(overrides: Partial<ConstructorParameters<typeof QuickTunnelSess
       proxyOrigin = options.proxyOrigin;
       return {
         origin: 'https://synthetic-preview.trycloudflare.com',
+        registered: Promise.resolve(),
         closed: exited.promise,
         diagnostic: () => undefined,
         stop: async () => {
@@ -101,6 +102,7 @@ describe('QuickTunnelSession ownership and idle expiry', () => {
     const { session } = fixture({
       start: async () => ({
         origin: 'https://synthetic-preview.trycloudflare.com',
+        registered: Promise.resolve(),
         closed: new Promise(() => undefined),
         diagnostic: () => undefined,
         stop: async () => {
@@ -151,6 +153,7 @@ describe('QuickTunnelSession ownership and idle expiry', () => {
         proxyOrigin = options.proxyOrigin;
         return {
           origin: 'https://synthetic-preview.trycloudflare.com',
+          registered: Promise.resolve(),
           closed: new Promise(() => undefined),
           diagnostic: () => 'Failed to dial edge: connection timeout',
           stop: async () => {

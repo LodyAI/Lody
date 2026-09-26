@@ -3676,7 +3676,7 @@ export function buildLodyMcpServer(): McpServer {
     {
       title: 'Report frontend dev server preview',
       description:
-        'Use this immediately after starting or discovering a frontend/web dev server for the current Lody session. Report the loopback host and port before telling the user the server is ready, so Lody can offer a preview. This only reports a candidate. After a successful report, tell the user to click the Browser button in the bar directly above the message input; Lody opens the reported address directly, creating the remote tunnel it needs.',
+        "Use this immediately after starting or discovering a frontend/web dev server for the current Lody session. Report the loopback host and port before telling the user the server is ready. On remote-preview-enabled machines, a validated report from the session owner's active agent starts preparing the authenticated remote tunnel in the background. Reporting does not wait for tunnel readiness. Tell the user to click the Browser button in the bar directly above the message input to open the preview.",
       // Pass the full ZodObject (not `.shape`) so `.strict()` carries through to SDK
       // validation; the MCP SDK runs `safeParseAsync` against this before invoking the
       // handler, so no second `.parse(args)` is needed below.
@@ -3728,7 +3728,7 @@ export function buildLodyMcpServer(): McpServer {
         }
 
         return textResult(
-          `Preview candidate reported for ${args.protocol}://${args.host}:${args.port}${args.path ?? '/'}. Tell the user to click the Browser button in the bar directly above the message input. Lody opens this address directly, creating the remote tunnel it needs.`
+          `Preview candidate reported for ${args.protocol}://${args.host}:${args.port}${args.path ?? '/'}. Eligible remote previews prepare in the background; this response does not mean the tunnel is ready. Tell the user to click the Browser button in the bar directly above the message input to open the preview.`
         );
       } catch (error) {
         return textResult(`Failed to report preview candidate: ${String(error)}`, true);

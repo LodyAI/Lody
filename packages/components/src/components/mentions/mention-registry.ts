@@ -102,10 +102,20 @@ export type MentionCandidate = {
   kind: MentionKind;
   icon: MentionIcon;
   title: string;
+  /**
+   * Quiet words on the title's own line, after it: a file's folder, a
+   * command's description. The row stays one line; they give way first.
+   */
+  hint?: string;
+  /** A second line under the title, such as why a Role cannot be picked. */
   subtitle?: string;
   trailing?: string;
-  /** Render the title in the monospace face (paths, tokens). */
-  mono?: boolean;
+  /**
+   * When the thing was last touched, for a row whose recency is what tells two
+   * of them apart (sessions). The menu renders it as a compact "2h" against a
+   * shared clock, so the registry stays free of `Date.now()`.
+   */
+  activityAt?: number;
   /** Path an extension-aware icon derives its glyph from. */
   iconPath?: string;
   /**
@@ -344,8 +354,20 @@ function applyLimit<T>(ranked: T[], limit: number | undefined): T[] {
   return limit === undefined || ranked.length <= limit ? ranked : ranked.slice(0, limit);
 }
 
+/**
+ * A path as a row reads it: the name, then the folder it sits in. The name is
+ * what a person scans for; the folder tells two same-named files apart.
+ */
+function splitPathForRow(token: string, isDirectory: boolean): { name: string; folder?: string } {
+  const trimmed = token.replace(/\/+$/, '');
+  const slash = trimmed.lastIndexOf('/');
+  const name = `${trimmed.slice(slash + 1)}${isDirectory ? '/' : ''}`;
+  return slash > 0 ? { name, folder: trimmed.slice(0, slash) } : { name };
+}
+
 export function toFileCandidate(item: PathSuggestion): MentionCandidate {
   const isDirectory = item.kind === 'dir';
+  const { name, folder } = splitPathForRow(item.token, isDirectory);
   return {
     value: item.token,
     label: item.token,
@@ -355,9 +377,9 @@ export function toFileCandidate(item: PathSuggestion): MentionCandidate {
     navigateText: isDirectory ? `${MENTION_TRIGGER}${item.token}` : undefined,
     kind: isDirectory ? 'dir' : 'file',
     icon: isDirectory ? 'dir' : 'file',
-    title: item.token,
+    title: name,
+    hint: folder,
     iconPath: item.path,
-    mono: true,
   };
 }
 
@@ -469,6 +491,7 @@ export function toSessionCandidate(
     kind: 'session',
     icon: 'session',
     title: item.title || labels.untitled,
+    activityAt: item.activityAt > 0 ? item.activityAt : undefined,
   };
 }
 
@@ -513,6 +536,9 @@ export function toAgentRoleCandidate(
     icon: 'agent_role',
     iconEmoji: emoji,
     title: role.name,
+    // Who does the work and where: two Roles named alike on two machines are
+    // told apart here without opening the pane.
+    hint: [item.agentConfig?.name, item.machine?.name].filter(Boolean).join(' · ') || undefined,
     disabled: item.availability.kind !== 'available',
     subtitle: availabilityText,
     detail: {
@@ -554,7 +580,7 @@ export function toCommandCandidate(command: AcpCommandSummary): MentionCandidate
     kind: 'command',
     icon: 'command',
     title: `/${command.name}`,
-    subtitle: command.description,
+    hint: command.description,
   };
 }
 

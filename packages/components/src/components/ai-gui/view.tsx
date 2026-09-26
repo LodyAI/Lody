@@ -89,6 +89,9 @@ import { sessionMetaAtomFamily } from '@/atoms/doc-meta';
 import { authTokenAtom, runtimeAtom } from '@/atoms/runtime';
 import { machineSupportsSubagentCancellation } from '@lody/shared';
 import { scrollDebug } from '@/hooks/scroll-debug-log';
+import { readSessionTurnTokenUsage, type SessionTurnTokenUsage } from '@lody/shared/session-data';
+import { formatCompactNumber } from '@/lib/format-compact-number';
+import { toIntlLocaleOrEn } from '@/lib/intl-locale';
 import { useStickyScroll } from '@/hooks/use-sticky-scroll';
 import { buildResendInputBlocks, isUndeliveredUserTurnEntry } from '@/lib/undelivered-user-turn';
 import { ConversationOutlineRail } from './conversation-outline-rail';
@@ -180,7 +183,7 @@ import {
 } from './conversation-panel';
 import { TerminalComponent } from './terminal-component';
 import { prepareTerminalOutputBlocksPreview } from './terminal-preview';
-import { type DurationUnitLabels, formatDurationCompact } from '@/lib/format-duration';
+import { formatDurationCompact, getDurationUnitLabels } from '@/lib/format-duration';
 import {
   resolveLiveSessionHistoryDurationMs,
   resolveSessionHistoryDurationMs,
@@ -894,6 +897,7 @@ const assistantGroupHasActiveSearch = (
 };
 
 const hasAssistantTurnConfigInfo = (message: SessionHistoryParsed): boolean =>
+  readSessionTurnTokenUsage(message.tokenUsage) !== undefined ||
   Boolean(message.modelInfo?.name) ||
   Boolean(message.inputConfig?.modeId) ||
   Boolean(message.inputConfig?.configOptionValues) ||
@@ -3760,6 +3764,62 @@ const ResendUndeliveredDialog = ({
   );
 };
 
+/** Tokens this turn consumed, in compact product-language units (1.2K / 1.2万). */
+const AssistantTurnTokenUsageRows = ({ usage }: { usage: SessionTurnTokenUsage }) => {
+  const { t, i18n } = useTranslation();
+  const locale = toIntlLocaleOrEn(i18n.resolvedLanguage ?? i18n.language);
+  const exact = new Intl.NumberFormat(locale);
+  const rows = [
+    {
+      key: 'input',
+      label: t('sessions.turnConfig.inputTokens', 'Input'),
+      value: usage.inputTokens,
+      detail: undefined,
+    },
+    {
+      key: 'output',
+      label: t('sessions.turnConfig.outputTokens', 'Output'),
+      // Stored output excludes reasoning; the turn's output is both.
+      value: usage.outputTokens + usage.reasoningOutputTokens,
+      detail:
+        usage.reasoningOutputTokens > 0
+          ? t('sessions.turnConfig.outputDetail', 'Reasoning {{reasoning}}', {
+              reasoning: exact.format(usage.reasoningOutputTokens),
+            })
+          : undefined,
+    },
+    {
+      key: 'cache',
+      label: t('sessions.turnConfig.cacheTokens', 'Cache'),
+      value: usage.cacheReadInputTokens + usage.cacheCreationInputTokens,
+      detail: t('sessions.turnConfig.cacheDetail', 'Read {{read}} · Write {{write}}', {
+        read: exact.format(usage.cacheReadInputTokens),
+        write: exact.format(usage.cacheCreationInputTokens),
+      }),
+    },
+  ];
+  return (
+    <div className="border-t border-border/60 px-3 py-2.5">
+      <div className="mb-1.5 text-[11px] font-medium text-foreground">
+        {t('sessions.turnConfig.tokens', 'Tokens')}
+      </div>
+      <dl className="space-y-1.5">
+        {rows.map((row) => (
+          <div key={row.key} className="flex items-start justify-between gap-3 text-[11px]">
+            <dt className="shrink-0 text-muted-foreground">{row.label}</dt>
+            <dd
+              className="text-right font-medium tabular-nums text-foreground"
+              title={[exact.format(row.value), row.detail].filter(Boolean).join(' · ')}
+            >
+              {formatCompactNumber(row.value, locale)}
+            </dd>
+          </div>
+        ))}
+      </dl>
+    </div>
+  );
+};
+
 /** Hover tooltip + click popover for turn model / run-config. */
 const AssistantTurnConfigInfoButton = ({
   message,
@@ -3792,7 +3852,11 @@ const AssistantTurnConfigInfoButton = ({
     [message.modelInfo, message.inputConfig]
   );
   const modelBaseName = message.modelInfo ? formatAssistantModelBaseName(message.modelInfo) : '';
-  if (configRows.length === 0 && !modelBaseName) {
+  const tokenUsage = useMemo(
+    () => readSessionTurnTokenUsage(message.tokenUsage),
+    [message.tokenUsage]
+  );
+  if (configRows.length === 0 && !modelBaseName && !tokenUsage) {
     return null;
   }
   const tooltipPreview = (() => {
@@ -3868,12 +3932,13 @@ const AssistantTurnConfigInfoButton = ({
               </dd>
             </div>
           ))}
-          {configRows.length === 0 ? (
+          {configRows.length === 0 && !tokenUsage ? (
             <p className="text-[11px] text-muted-foreground">
               {t('sessions.turnConfig.empty', 'No configuration recorded for this turn.')}
             </p>
           ) : null}
         </dl>
+        {tokenUsage ? <AssistantTurnTokenUsageRows usage={tokenUsage} /> : null}
       </Popover.Content>
     </Popover.Root>
   );
@@ -4081,11 +4146,7 @@ const WorkedGroupHeader = ({
 }) => {
   const { t } = useTranslation();
   const isMobile = useIsMobile();
-  const durationUnitLabels: DurationUnitLabels = {
-    hour: t('time.unitShort.hour', 'h'),
-    minute: t('time.unitShort.minute', 'm'),
-    second: t('time.unitShort.second', 's'),
-  };
+  const durationUnitLabels = getDurationUnitLabels(t);
   /* Mobile moves the turn duration to the footer action bar, where it also
      keeps the copy button clear of the session drawer's left-edge back-swipe
      strip. Both rows read the same `resolveSessionHistoryDurationMs(message)`,
@@ -4365,11 +4426,7 @@ const LiveTurnDurationLabel = ({
   const now = useStableNow(LIVE_TURN_DURATION_SAMPLE_MS);
   const durationMs = resolveLiveSessionHistoryDurationMs(message, now.getTime());
   if (durationMs === null) return null;
-  const duration = formatDurationCompact(durationMs, {
-    hour: t('time.unitShort.hour', 'h'),
-    minute: t('time.unitShort.minute', 'm'),
-    second: t('time.unitShort.second', 's'),
-  });
+  const duration = formatDurationCompact(durationMs, getDurationUnitLabels(t));
   if (!duration) return null;
   return <>{t('sessions.workedFor', { duration, defaultValue: 'Worked for {{duration}}' })}</>;
 };
@@ -4385,13 +4442,7 @@ const LiveActivityLabel = ({ label, message }: { label: string; message: LiveAct
   const now = useStableNow(LIVE_TURN_DURATION_SAMPLE_MS);
   const durationMs = resolveLiveSessionHistoryDurationMs(message, now.getTime());
   const duration =
-    durationMs === null
-      ? ''
-      : formatDurationCompact(durationMs, {
-          hour: t('time.unitShort.hour', 'h'),
-          minute: t('time.unitShort.minute', 'm'),
-          second: t('time.unitShort.second', 's'),
-        });
+    durationMs === null ? '' : formatDurationCompact(durationMs, getDurationUnitLabels(t));
   if (!duration) return <>{label}</>;
   return (
     <>
@@ -4494,11 +4545,7 @@ export const AssistantTurnFooter = ({
   }, [message.finished, message.items]);
   const hasCopyableText = textContent.trim().length > 0;
   const fileDiffs = fileDiffOverride ?? message.fileDiff ?? EMPTY_EDITED_FILE_ENTRIES;
-  const durationUnitLabels: DurationUnitLabels = {
-    hour: t('time.unitShort.hour', 'h'),
-    minute: t('time.unitShort.minute', 'm'),
-    second: t('time.unitShort.second', 's'),
-  };
+  const durationUnitLabels = getDurationUnitLabels(t);
   const durationMs = resolveSessionHistoryDurationMs(message);
   const durationLabel =
     durationMs === null ? '' : formatDurationCompact(durationMs, durationUnitLabels);
