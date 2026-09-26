@@ -5,7 +5,7 @@ import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
 import { currentWorkspaceIdAtom, currentWorkspaceSlugAtom } from '@/atoms';
 import { useWorkspaceSyncStuckReport } from '@/hooks/use-workspace-sync-stuck-report';
 import { resolveWorkspaceDataScope } from '@/lib/workspace-data-scope';
-import { useWorkspaceRouteTargetSlug } from '@/providers/workspace-route-target';
+import { useWorkspaceRouteTargetSlug } from '../providers/workspace-route-target';
 
 /**
  * Renders nothing. Mounted beside the workspace layout rather than inside the
