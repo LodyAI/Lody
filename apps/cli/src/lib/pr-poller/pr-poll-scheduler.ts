@@ -11,18 +11,17 @@ import type {
 import type { PrPollerConfig } from './pr-poller-config';
 import {
   applyProviderSafetyFloor,
+  evaluateScopeGate,
   fullScopeQuota,
-  isScopeFrozen,
   nextRepoCooldown,
   refillScopeQuota,
-  scopeQuotaAvailableAtMs,
   spendScopeQuota,
+  type PrPollScopeGate,
 } from './pr-poll-quota';
 import { emptyPrPollerState, type PrPollerState, type PrPollerStateStore } from './pr-poller-state';
 import { selectHighOwners } from './pr-poll-priority';
 import {
   computeNextWakeAtMs,
-  computeTargetDueAtMs,
   pickNextBatch,
   planDueBatches,
   prPollTargetKey,
@@ -31,6 +30,7 @@ import {
 } from './pr-poll-select';
 import {
   computeDiscoveryFingerprint,
+  computePrPollMetaSignature,
   enumeratePrPollTargets,
   resolveOwnerRepositoryContext,
   type AliveSessionMeta,
@@ -66,6 +66,14 @@ const NEW_VIEWER_DEBOUNCE_MS = 1_000;
 const META_UPDATE_DEBOUNCE_MS = 2_000;
 const CREDENTIAL_RETRY_MS = 60_000;
 const CREDENTIAL_LOG_THROTTLE_MS = 10 * 60_000;
+/**
+ * How long a `(workspace, repo) → credential scope` observation may be used as
+ * a fast negative before the credential must be resolved for real again. Scope
+ * gating skips whole scopes without resolving credentials; this bound is what
+ * stops a long freeze from locking out a NEWLY available credential that would
+ * resolve to a different, ungated scope.
+ */
+const SCOPE_MAPPING_TTL_MS = 10 * 60_000;
 /** Freeze when GitHub signals a limit without a usable resetAt. */
 const DEFAULT_RATE_LIMIT_FREEZE_MS = 10 * 60_000;
 /**
@@ -133,6 +141,16 @@ export class PrPollScheduler {
   private readonly lastAttemptAtMs = new Map<string, number>();
   /** Anti-starvation streak across wakes (see `pickNextBatch`). */
   private consecutiveHighDispatches = 0;
+  /**
+   * Last observed `(workspace, repo) → credential scope`, with the observation
+   * time. Credentials decide scopes, so this is the only way to know which
+   * scope a repo belongs to WITHOUT resolving its credential; it is used as a
+   * fast negative only (skip an already-gated scope) and expires after
+   * `SCOPE_MAPPING_TTL_MS` so a new credential always gets a real resolve.
+   */
+  private readonly knownRepoScopes = new Map<string, { scope: string; observedAtMs: number }>();
+  /** Per `scope|reason` suppression window for the scope-gate skip logs. */
+  private readonly scopeGateLogUntilMs = new Map<string, number>();
   private chain: Promise<void> = Promise.resolve();
   private wakeTimer: NodeJS.Timeout | null = null;
   private wakeAtMs: number | null = null;
@@ -308,6 +326,9 @@ export class PrPollScheduler {
   /**
    * Viewing/activity only shift dueness (computed fresh on every wake), so a
    * presence change just needs a debounced wake — no state invalidation.
+   * It goes through `scheduleWake`, never straight to `runWake`: presence
+   * heartbeats fire on their own cadence and must not be able to pull a wake
+   * in front of a gate (see `scheduleWake`).
    */
   private onPresenceChanged(runtime: WorkspaceRuntime): void {
     if (!this.started || !runtime.ready || runtime.presenceWakeTimer) {
@@ -315,7 +336,7 @@ export class PrPollScheduler {
     }
     runtime.presenceWakeTimer = setTimeout(() => {
       runtime.presenceWakeTimer = null;
-      this.enqueue(() => this.runWake());
+      this.scheduleWake();
     }, NEW_VIEWER_DEBOUNCE_MS);
     runtime.presenceWakeTimer.unref?.();
   }
@@ -342,7 +363,7 @@ export class PrPollScheduler {
         }
         const result = await this.applyPendingSessionMetadata(runtime);
         if (result.changed) {
-          await this.runWake();
+          this.scheduleWake();
         }
       });
     }, META_UPDATE_DEBOUNCE_MS);
@@ -404,8 +425,18 @@ export class PrPollScheduler {
         changed = runtime.sessionMetas.delete(sessionId) || changed;
         continue;
       }
+      // The replica always takes the fresh meta, but only a change the poll
+      // projection can actually see (targets, repository context, lane input)
+      // counts as `changed` — an unrelated write (title, status, usage) must
+      // not re-project or wake.
+      const previous = runtime.sessionMetas.get(sessionId);
       runtime.sessionMetas.set(sessionId, { sessionId, meta });
-      changed = true;
+      if (
+        !previous ||
+        computePrPollMetaSignature(previous.meta) !== computePrPollMetaSignature(meta)
+      ) {
+        changed = true;
+      }
     }
     if (changed) {
       this.projectRuntimeEntries(runtime);
@@ -539,17 +570,35 @@ export class PrPollScheduler {
     this.wakeAtMs = null;
   }
 
+  /**
+   * Recompute the wake time from current facts. Every externally triggered
+   * wake (start, workspace ready, presence, metadata) goes through here, and
+   * `scheduleWakeAt` only ever moves a wake EARLIER — so an external trigger
+   * can advance a wake but never jump a gate: a due batch whose scope is
+   * frozen / out of tokens / cooling down contributes its availability time,
+   * not `nowMs`. Without this, presence heartbeats and unrelated metadata
+   * writes each buy a full wake that can only skip.
+   */
   private scheduleWake(): void {
     if (!this.started) {
       return;
     }
     const nowMs = this.nowMs();
     const targets = this.buildTargets(nowMs);
+    const gateHints: number[] = [];
+    let dispatchableNow = false;
+    for (const batch of planDueBatches(targets, nowMs)) {
+      const known = this.knownScopeGate(batch, nowMs);
+      if (known?.gate.gated) {
+        gateHints.push(known.gate.availableAtMs);
+        continue;
+      }
+      dispatchableNow = true;
+    }
     // Already-due targets (fresh registration, restart catch-up) run now;
-    // otherwise wake at the earliest future dueness, capped.
-    const anyDue = targets.some((target) => computeTargetDueAtMs(target) <= nowMs);
+    // otherwise wake at the earliest future dueness or gate opening, capped.
     this.scheduleWakeAt(
-      anyDue ? nowMs : computeNextWakeAtMs(targets, [], nowMs, MAX_WAKE_INTERVAL_MS)
+      dispatchableNow ? nowMs : computeNextWakeAtMs(targets, gateHints, nowMs, MAX_WAKE_INTERVAL_MS)
     );
   }
 
@@ -582,8 +631,13 @@ export class PrPollScheduler {
     const nowMs = this.nowMs();
     const targets = this.buildTargets(nowMs);
     this.pruneState(targets);
-    const remaining: PrPollBatchPlan[] = planDueBatches(targets, nowMs);
     const deferredHints: number[] = [];
+    // Gate whole scopes BEFORE the batch loop: a frozen/empty/cooling scope
+    // blocks every repo it owns, so resolving each repo's credential only to
+    // skip it is pure waste (and one log line per repo per wake).
+    const remaining: PrPollBatchPlan[] = planDueBatches(targets, nowMs).filter(
+      (batch) => !this.deferGatedBatch(batch, nowMs, deferredHints)
+    );
     while (remaining.length > 0) {
       const batch = pickNextBatch(
         remaining,
@@ -608,6 +662,7 @@ export class PrPollScheduler {
 
   /** Bound the persisted state to currently-enumerated targets of ready workspaces. */
   private pruneState(targets: readonly SchedulableTarget[]): void {
+    this.pruneGateMemory(this.nowMs());
     const readyWorkspaceIds = new Set(
       Array.from(this.workspaces.values())
         .filter((runtime) => runtime.ready)
@@ -639,6 +694,25 @@ export class PrPollScheduler {
     }
   }
 
+  /**
+   * Both gate caches are keyed by repo/scope and are only ever valid for a
+   * bounded window, so expired entries are dead weight: drop them on every
+   * wake instead of letting a long-lived daemon accumulate one per repository
+   * it has ever polled.
+   */
+  private pruneGateMemory(nowMs: number): void {
+    for (const [key, known] of this.knownRepoScopes) {
+      if (nowMs - known.observedAtMs >= SCOPE_MAPPING_TTL_MS) {
+        this.knownRepoScopes.delete(key);
+      }
+    }
+    for (const [key, untilMs] of this.scopeGateLogUntilMs) {
+      if (nowMs >= untilMs) {
+        this.scopeGateLogUntilMs.delete(key);
+      }
+    }
+  }
+
   // -------------------------------------------------------------- one batch
 
   /** Returns true when a GitHub request was actually dispatched. */
@@ -661,6 +735,7 @@ export class PrPollScheduler {
       deferredHints.push(nowMs + CREDENTIAL_RETRY_MS);
       return false;
     }
+    this.rememberRepoScope(batch, credential.credentialScope, nowMs);
 
     const gate = this.preflightScope(credential, batch.repoFullName, deferredHints);
     if (!gate) {
@@ -705,6 +780,7 @@ export class PrPollScheduler {
       runtime.handle.invalidateCredential(batch.repoFullName, credential);
       const retried = await runtime.handle.resolveCredential(batch.repoFullName);
       if (retried) {
+        this.rememberRepoScope(batch, retried.credentialScope, this.nowMs());
         const retryGate = this.preflightScope(retried, batch.repoFullName, deferredHints);
         if (!retryGate) {
           this.counters.skips += 1;
@@ -756,37 +832,96 @@ export class PrPollScheduler {
     repoFullName: string,
     deferredHints: number[]
   ): { scope: string; cooldownKey: string } | null {
-    const { config, logger } = this.deps;
     const nowMs = this.nowMs();
     const scope = credential.credentialScope;
-    const cooldownKey = `${scope}:${repoFullName}`;
-    const cooldown = this.state.repoCooldowns[cooldownKey];
-    if (cooldown && cooldown.nextRetryAtMs > nowMs) {
-      deferredHints.push(cooldown.nextRetryAtMs);
+    const gate = this.scopeGate(scope, repoFullName, nowMs);
+    this.state.scopes[scope] = gate.quota;
+    if (gate.gated) {
+      this.logScopeGate(scope, repoFullName, gate, nowMs);
+      deferredHints.push(gate.availableAtMs);
       return null;
     }
+    return { scope, cooldownKey: `${scope}:${repoFullName}` };
+  }
 
-    const quota = refillScopeQuota(
-      this.state.scopes[scope] ?? fullScopeQuota(nowMs, config),
+  private scopeGate(scope: string, repoFullName: string, nowMs: number): PrPollScopeGate {
+    return evaluateScopeGate({
+      quota: this.state.scopes[scope],
+      repoCooldown: this.state.repoCooldowns[`${scope}:${repoFullName}`],
       nowMs,
-      config
+      config: this.deps.config,
+    });
+  }
+
+  private repoScopeKey(workspaceId: string, repoFullName: string): string {
+    return `${workspaceId}|${repoFullName}`;
+  }
+
+  /**
+   * Gate a batch by the scope its credential resolved to LAST time, without
+   * resolving anything. Returns null when that mapping is unknown or older
+   * than `SCOPE_MAPPING_TTL_MS` — then the batch must take the real path, so a
+   * newly available credential (possibly on a different, ungated scope) can
+   * never be locked out by a stale mapping.
+   */
+  private knownScopeGate(
+    batch: PrPollBatchPlan,
+    nowMs: number
+  ): { scope: string; gate: PrPollScopeGate } | null {
+    const known = this.knownRepoScopes.get(
+      this.repoScopeKey(batch.workspaceId, batch.repoFullName)
     );
-    this.state.scopes[scope] = quota;
-
-    if (isScopeFrozen(quota, nowMs)) {
-      logger.debug(`[pr-poller] Scope ${scope} is frozen; skipping ${repoFullName}`);
-      deferredHints.push(quota.frozenUntilMs ?? nowMs + DEFAULT_RATE_LIMIT_FREEZE_MS);
+    if (!known || nowMs - known.observedAtMs >= SCOPE_MAPPING_TTL_MS) {
       return null;
     }
-    if (quota.tokens < 1) {
-      logger.debug(
-        `[pr-poller] Bucket empty for scope ${scope}; skipping ${repoFullName} until refill`
-      );
-      deferredHints.push(scopeQuotaAvailableAtMs(quota, nowMs, config));
-      return null;
-    }
+    return { scope: known.scope, gate: this.scopeGate(known.scope, batch.repoFullName, nowMs) };
+  }
 
-    return { scope, cooldownKey };
+  private rememberRepoScope(batch: PrPollBatchPlan, scope: string, nowMs: number): void {
+    this.knownRepoScopes.set(this.repoScopeKey(batch.workspaceId, batch.repoFullName), {
+      scope,
+      observedAtMs: nowMs,
+    });
+  }
+
+  private deferGatedBatch(batch: PrPollBatchPlan, nowMs: number, deferredHints: number[]): boolean {
+    const known = this.knownScopeGate(batch, nowMs);
+    if (!known?.gate.gated) {
+      return false;
+    }
+    this.logScopeGate(known.scope, batch.repoFullName, known.gate, nowMs);
+    deferredHints.push(known.gate.availableAtMs);
+    this.counters.skips += 1;
+    return true;
+  }
+
+  /**
+   * One skip log per `(scope, reason)` per gate window. An exhausted bucket is
+   * the STEADY state for a handful of repos on one credential, so logging per
+   * repo per wake produced thousands of identical lines a day and hid
+   * everything else; the window ends exactly when the gate can next open.
+   */
+  private logScopeGate(
+    scope: string,
+    repoFullName: string,
+    gate: Extract<PrPollScopeGate, { gated: true }>,
+    nowMs: number
+  ): void {
+    if (gate.reason === 'repo-cooldown') {
+      // Already logged with its backoff when the cooldown was entered.
+      return;
+    }
+    const key = `${scope}|${gate.reason}`;
+    if (nowMs < (this.scopeGateLogUntilMs.get(key) ?? 0)) {
+      return;
+    }
+    this.scopeGateLogUntilMs.set(key, gate.availableAtMs);
+    const until = new Date(gate.availableAtMs).toISOString();
+    this.deps.logger.debug(
+      gate.reason === 'frozen'
+        ? `[pr-poller] Scope ${scope} is frozen; skipping ${repoFullName} and every other repo on this scope until ${until}`
+        : `[pr-poller] Bucket empty for scope ${scope}; skipping ${repoFullName} and every other repo on this scope until refill at ${until}`
+    );
   }
 
   private async handleOutcome(

@@ -105,6 +105,36 @@ export function getCurrentPullRequest(
 }
 
 /**
+ * Everything `enumeratePrPollTargets` + the lane rule read out of ONE session
+ * meta: ownership/liveness, the activity signal, the repository context, and
+ * the associated PR list (order included — the current PR is the LAST item).
+ *
+ * Session metadata changes for reasons the reconciler does not care about
+ * (title, status, token usage, cost, awaiting-user marker...). Those writes
+ * leave this signature untouched, cannot move a single target or lane, and
+ * must therefore not re-project or wake the poller — otherwise every unrelated
+ * write pays a full wake, and with an exhausted quota that is thousands of
+ * pointless credential resolutions a day.
+ */
+export function computePrPollMetaSignature(
+  meta: SessionMeta,
+  resolveGitHubRepo: ResolveSessionGitHubRepo = defaultResolveGitHubRepo
+): string {
+  const pullRequests = (meta.pullRequests ?? [])
+    .map((pr) => `${pr.url}\u0000${pr.status}`)
+    .join('\u0001');
+  return [
+    meta.machineId ?? '',
+    meta.parentSessionId ?? '',
+    meta.isArchived ? '1' : '0',
+    meta.lastMessageAt ?? '',
+    resolveDiscoveryBranch(meta) ?? '',
+    resolveGitHubRepo(meta) ?? '',
+    pullRequests,
+  ].join('\u0002');
+}
+
+/**
  * Enumerate per-owner targets from the workspace's alive session metas.
  *
  * Owner normalization follows `turn-post-processing-service.ts`:

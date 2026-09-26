@@ -94,6 +94,14 @@ Effect adapters: `pr-poller-workspace.ts` (Loro repo + presence + credentials
   `githubRepoFullName` and runtime `branchName` are present. Its branch is shared
   mutable state and may be briefly stale after Git operations outside Lody; the
   next runtime branch sync / metadata reprojection is the accepted repair path.
+- **Gated scopes short-circuit the wake.** An empty bucket is the STEADY state
+  for a few repos sharing one credential. `scheduleWake` is the only wake entry
+  point: it may move a wake earlier but never past a gate, so presence and
+  metadata triggers defer to the scope's `availableAtMs`. `runWake` drops gated
+  batches BEFORE resolving credentials, keyed by the last observed
+  `repo → scope` (which expires, so a new credential is never locked out);
+  scope-wide skips log once per gate window; and a metadata write counts as a
+  change only when `computePrPollMetaSignature` moves.
 - **No turn-end hook.** Post-turn freshness comes from the `lastMessageAt`
   activity rule (high lane for 10 min); do not re-add scheduler callbacks to
   turn finalization.
