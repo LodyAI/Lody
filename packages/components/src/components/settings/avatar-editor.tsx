@@ -9,8 +9,10 @@ import { toast } from '@/lib/toast';
 import type { AvatarKind } from '@lody/shared';
 import { withClassName } from '@/lib/stylex';
 import { AVATAR_ACCEPT, validateAvatarFile } from '@/lib/avatar-upload';
+import { cropAvatarFile, type AvatarCropArea } from '@/lib/avatar-crop';
 import { UserAvatar } from '../user-avatar';
 import { WorkspaceAvatar } from '../workspace-avatar';
+import { AvatarCropDialog } from './avatar-crop-dialog';
 
 const styles = stylex.create({
   root: { flexShrink: 0 },
@@ -87,26 +89,50 @@ export function AvatarEditor({
   const { t } = useTranslation();
   const inputRef = useRef<HTMLInputElement>(null);
   const [isUploading, setIsUploading] = useState(false);
+  const [cropFile, setCropFile] = useState<File | null>(null);
+  const [isCropDialogOpen, setIsCropDialogOpen] = useState(false);
 
-  const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     // Allow re-selecting the same file later by clearing the input value.
     event.target.value = '';
     if (!file) return;
 
     const validationError = validateAvatarFile(file);
-    if (validationError) {
+    if (validationError !== null) {
       toast.error(t('settings.profile.avatar.invalidFile'), { description: validationError });
       return;
     }
 
+    setCropFile(file);
+    setIsCropDialogOpen(true);
+  };
+
+  const handleCropDialogOpenChange = (open: boolean) => {
+    setIsCropDialogOpen(open);
+    if (!open) setCropFile(null);
+  };
+
+  const handleCropConfirm = async (file: File, crop: AvatarCropArea): Promise<boolean> => {
     setIsUploading(true);
     try {
-      await onUpload(file);
-    } catch (error) {
-      toast.error(t('settings.profile.avatar.uploadFailed'), {
-        description: error instanceof Error ? error.message : undefined,
-      });
+      let croppedFile: File;
+      try {
+        croppedFile = await cropAvatarFile(file, crop);
+      } catch {
+        toast.error(t('settings.avatar.crop.failed'));
+        return false;
+      }
+
+      try {
+        await onUpload(croppedFile);
+        return true;
+      } catch (error) {
+        toast.error(t('settings.profile.avatar.uploadFailed'), {
+          description: error instanceof Error ? error.message : undefined,
+        });
+        return false;
+      }
     } finally {
       setIsUploading(false);
     }
@@ -130,9 +156,7 @@ export function AvatarEditor({
         type="file"
         accept={AVATAR_ACCEPT}
         {...stylex.props(styles.fileInput)}
-        onChange={(event) => {
-          void handleFileChange(event);
-        }}
+        onChange={handleFileChange}
       />
       <button
         type="button"
@@ -146,6 +170,13 @@ export function AvatarEditor({
           {isUploading ? <Spinner size="small" /> : <Pencil {...stylex.props(styles.icon)} />}
         </span>
       </button>
+      <AvatarCropDialog
+        file={cropFile}
+        kind={kind}
+        open={isCropDialogOpen}
+        onOpenChange={handleCropDialogOpenChange}
+        onConfirm={handleCropConfirm}
+      />
     </div>
   );
 }

@@ -169,6 +169,7 @@
     "qrcode": "^1.5.4",
     "react": "catalog:",
     "react-dom": "catalog:",
+    "react-easy-crop": "6.2.3",
     "react-hook-form": "^7.60.0",
     "react-i18next": "^15.6.0",
     "react-icons": "^5.5.0",
