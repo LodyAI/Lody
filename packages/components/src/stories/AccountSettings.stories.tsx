@@ -311,6 +311,7 @@ const paneMachines: AccountMachineOverviewItem[] = [
    overview and CLI tokens it shows a signed-in owner. */
 export const DesktopPane: Story = {
   args: {
+    onConnectAccount: noop,
     canGenerateCliApiKey: true,
     cliApiKeys: [],
     onGenerateCliApiKey: noop,

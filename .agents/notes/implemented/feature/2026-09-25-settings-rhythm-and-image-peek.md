@@ -294,7 +294,7 @@ aside, so it read like one more row. Its heaviest ink was the brand logos and th
 Agent icon stacks. Sign Out sat between the profile and the machines.
 
 - **One layout.** Every group on Account is a card with a heading: Profile (email,
-  name, avatar, connected accounts), My machines, CLI Token, and Sign-in
+  name, avatar), Connected accounts, My machines, CLI Token, and Sign-in
   (password, then Sign Out, last on the page). Profile is identity rather than a
   preference, so it is boxed even inside `settingsFlat`. Email is now its own row.
 - **Machine rows share columns.** The rows form one grid, and each row is a
@@ -306,10 +306,12 @@ Agent icon stacks. Sign Out sat between the profile and the machines.
   gray badge into the status line ("Offline · darwin · Private"). An offline
   machine's name and counts step down to secondary ink. Below 30rem of container
   width, the three cells wrap together under the name.
-- **Connected accounts are words.** Each bound provider shows a monochrome mark
-  and its name. Unbound providers are no longer grayed logos; they sit in a
-  "Connect" menu that opens the same confirm dialog. The same component serves
-  mobile.
+- **Connected accounts are a records card.** A first pass turned them into monochrome
+  names with a "Connect" menu; the owner rejected it ("做的并不好… 就之前那种 boxed
+  card"). They are now their own boxed group, like My machines: one row per provider,
+  with its brand mark, name, and state ("Connected Jan 15, 2025" or "Not connected"),
+  and a Connect button on the rows that are not connected. That button opens the
+  existing confirm dialog. Mobile keeps the original row of logos.
 
 Not changed: the ghost header action ("Create token"), and the username's ghost
 value button, whose padding still sets it about 10px inside the other values.
@@ -343,7 +345,7 @@ question for the owner.
   scope and `settingsFlat`, with machines and CLI tokens), captured before and
   after in Chinese, in both palettes, at 860px and 480px.
   `tests/account-machines-overview.test.tsx` covers the status line, and
-  `tests/linked-accounts-list.test.tsx` covers the connected list and the connect
-  menu through to `onConnect`.
+  `tests/linked-accounts-list.test.tsx` covers every provider's row state and the
+  Connect button through the confirm to `onConnect`.
 - Not verified in the packaged Electron app. Storybook renders the same
   components, but outside the app shell.

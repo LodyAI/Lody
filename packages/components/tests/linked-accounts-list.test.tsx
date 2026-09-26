@@ -3,7 +3,7 @@
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { LinkedAccountsList } from '../src/components/settings/linked-accounts-list';
+import { LinkedAccountsSection } from '../src/components/settings/linked-accounts-list';
 import { initI18n } from '../src/i18n';
 
 (
@@ -20,7 +20,7 @@ class TestPointerEvent extends MouseEvent {
   }
 }
 
-describe('LinkedAccountsList', () => {
+describe('LinkedAccountsSection', () => {
   let root: Root | undefined;
   let container: HTMLDivElement | undefined;
 
@@ -39,29 +39,38 @@ describe('LinkedAccountsList', () => {
     vi.unstubAllGlobals();
   });
 
-  it('names connected accounts and offers only the rest for connecting', async () => {
+  it('lists every provider with its state and connects one after confirming', async () => {
     const onConnect = vi.fn();
     await act(async () => {
       root?.render(
-        <LinkedAccountsList accounts={[{ id: 'a', providerId: 'github' }]} onConnect={onConnect} />
+        <LinkedAccountsSection
+          accounts={[{ id: 'a', providerId: 'github', createdAt: '2025-01-15T12:00:00Z' }]}
+          onConnect={onConnect}
+        />
       );
     });
 
-    expect(container?.textContent).toContain('GitHub');
-    await press(getButton('Connect'));
-    const offered = await vi.waitFor(() => {
-      const labels = Array.from(document.body.querySelectorAll('[role="menuitem"]')).map(
-        (item) => item.textContent
-      );
-      expect(labels.length).toBeGreaterThan(0);
-      return labels;
-    });
-    expect(offered).toEqual(['Connect Google', 'Connect Apple', 'Connect Discord']);
+    const rows = Array.from(container?.querySelectorAll('section p') ?? []).map(
+      (element) => element.textContent
+    );
+    expect(rows).toEqual([
+      'Connected accounts',
+      'GitHub',
+      'Connected Jan 15, 2025',
+      'Google',
+      'Not connected',
+      'Apple',
+      'Not connected',
+      'Discord',
+      'Not connected',
+    ]);
+    // Only the providers that are not connected offer to connect.
+    expect(Array.from(container?.querySelectorAll('button') ?? []).length).toBe(3);
 
-    const google = Array.from(
-      document.body.querySelectorAll<HTMLElement>('[role="menuitem"]')
-    ).find((item) => item.textContent === 'Connect Google');
-    await act(async () => google?.click());
+    const googleRow = Array.from(container?.querySelectorAll('section div') ?? []).find(
+      (element) => element.textContent === 'GoogleNot connectedConnect'
+    );
+    await press(googleRow!.querySelector('button')!);
     const confirm = await vi.waitFor(() => {
       const button = Array.from(document.body.querySelectorAll('button')).find(
         (element) => element.textContent === 'Continue'
@@ -74,12 +83,12 @@ describe('LinkedAccountsList', () => {
     expect(onConnect).toHaveBeenCalledWith('google');
   });
 
-  it('says nothing is connected and offers no menu without a connect action', async () => {
+  it('offers no Connect button without a connect action', async () => {
     await act(async () => {
-      root?.render(<LinkedAccountsList accounts={[]} />);
+      root?.render(<LinkedAccountsSection accounts={[]} />);
     });
 
-    expect(container?.textContent).toBe('None yet');
+    expect(container?.textContent).toContain('Not connected');
     expect(container?.querySelector('button')).toBeNull();
   });
 
@@ -94,13 +103,5 @@ describe('LinkedAccountsList', () => {
       element.dispatchEvent(new MouseEvent('mouseup', init));
       element.click();
     });
-  }
-
-  function getButton(name: string): HTMLButtonElement {
-    const button = Array.from(container?.querySelectorAll('button') ?? []).find((element) =>
-      element.textContent?.includes(name)
-    );
-    if (!(button instanceof HTMLButtonElement)) throw new Error(`Could not find button: ${name}`);
-    return button;
   }
 });
