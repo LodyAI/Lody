@@ -2,7 +2,12 @@ import type { SessionId } from '@lody/shared';
 import { formatErrorMessage } from '@/utils/format-error';
 
 export type SessionPreparationState =
-  'preparing' | 'initialized' | 'session-ready' | 'claimed' | 'expired' | 'failed';
+  | 'preparing'
+  | 'initialized'
+  | 'session-ready'
+  | 'claimed'
+  | 'expired'
+  | 'failed';
 
 export interface SessionPreparationResource {
   initialized: Promise<void>;
@@ -33,7 +38,8 @@ type PreparationRecord<T extends SessionPreparationResource> = {
 };
 
 export type SessionPreparationClaimResult<T extends SessionPreparationResource> =
-  { status: 'claimed'; resource: T } | { status: 'miss'; cleanup: Promise<void> | null };
+  | { status: 'claimed'; resource: T }
+  | { status: 'miss'; cleanup: Promise<void> | null };
 
 export class SessionPreparationService<T extends SessionPreparationResource> {
   private readonly records = new Map<SessionId, PreparationRecord<T>>();

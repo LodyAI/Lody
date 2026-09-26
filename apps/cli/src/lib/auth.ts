@@ -40,7 +40,10 @@ export interface AuthInfo {
 }
 
 export type ValidateTokenFailureReason =
-  'invalid' | 'request_failed' | 'invalid_response' | 'network_error';
+  | 'invalid'
+  | 'request_failed'
+  | 'invalid_response'
+  | 'network_error';
 
 export type ValidateTokenResult =
   | {
@@ -58,7 +61,8 @@ export type ValidateTokenResult =
     };
 
 export type LoginResult =
-  ({ success: true } & AuthInfo) | { success: false; error: string; retryable?: boolean };
+  | ({ success: true } & AuthInfo)
+  | { success: false; error: string; retryable?: boolean };
 export type LogoutResult = { success: true; user?: UserInfo } | { success: false; error: string };
 
 const UserInfoSchema = z

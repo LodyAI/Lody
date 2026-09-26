@@ -171,7 +171,9 @@ describe('schedule list rows', () => {
       )
     );
     const click = (element: Element) =>
-      act(() => element.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+      act(() => {
+        element.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      });
     click(rowOf('Nightly review').querySelector('span')!);
     click(container.querySelector('input')!);
     click(container.querySelector('[data-testid="detail-text"]')!);

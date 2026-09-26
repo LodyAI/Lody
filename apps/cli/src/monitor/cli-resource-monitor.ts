@@ -193,7 +193,8 @@ export class CliResourceMonitor {
     cpuCount: number;
     processMemoryKind: 'rss-sum' | 'physical-footprint-sum' | 'working-set-sum';
     processTreeUsage:
-      { memoryBytes: number; cpuTimeMicros: number; processCount: number } | undefined;
+      | { memoryBytes: number; cpuTimeMicros: number; processCount: number }
+      | undefined;
   }): AcpSessionMonitorSnapshot {
     const { session } = args;
     let current: CumulativeResourceSample;

@@ -88,7 +88,9 @@ export class CatalogPermissionError extends Data.TaggedError('CatalogPermissionE
 }> {}
 
 export type LocalWorkspaceCatalogError =
-  CatalogMissingError | CatalogCorruptError | CatalogPermissionError;
+  | CatalogMissingError
+  | CatalogCorruptError
+  | CatalogPermissionError;
 
 export type CacheRemoteWorkspacesInput = {
   identity: LocalCatalogIdentity;

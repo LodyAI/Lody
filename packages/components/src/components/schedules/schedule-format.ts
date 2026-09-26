@@ -112,6 +112,10 @@ export function describeRecurrence(
                 })
               : recurrence.trigger.at,
       });
+    default: {
+      const unknown: never = recurrence;
+      return unknown;
+    }
   }
 }
 
@@ -130,6 +134,10 @@ export function describeDestination(destination: ScheduleDestination, t: TFuncti
       return t('schedules.destination.ownSession', 'One chat for this task');
     case 'existing_session':
       return t('schedules.destination.existingSession', 'An existing chat');
+    default: {
+      const unknown: never = destination;
+      return unknown;
+    }
   }
 }
 

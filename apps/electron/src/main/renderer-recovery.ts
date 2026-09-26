@@ -17,7 +17,8 @@ function resolveLogFilePath(): string {
 }
 
 export type ReloadTarget =
-  { type: 'url'; url: string } | { type: 'file'; filePath: string; hash?: string }
+  | { type: 'url'; url: string }
+  | { type: 'file'; filePath: string; hash?: string }
 
 type RendererWatchdogState = {
   reloadTarget: ReloadTarget | null

@@ -28,7 +28,7 @@ function useElementWidth<T extends HTMLElement>() {
   const [width, setWidth] = useState<number>();
   useLayoutEffect(() => {
     const element = ref.current;
-    if (!element) return;
+    if (!element) return undefined;
     setWidth(element.clientWidth);
     const observer = new ResizeObserver(([entry]) => setWidth(entry!.contentRect.width));
     observer.observe(element);

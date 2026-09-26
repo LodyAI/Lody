@@ -79,7 +79,7 @@ export function ScheduleProposalNotice({
   // would otherwise sit behind "choose a permission mode" forever.
   const [runConfig, setRunConfig] = useState<ProposalConversation['runConfig']>({});
   useEffect(() => {
-    if (!runtime) return;
+    if (!runtime) return undefined;
     let cancelled = false;
     void runtime
       .withSessionStore(sessionId, (store) => store.sessionData.history.readAll())

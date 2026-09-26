@@ -114,7 +114,11 @@ export type ManagedRuntimeLaunch = ManagedRuntimeInstallation & {
 };
 
 export type ManagedRuntimeProgressPhase =
-  'downloading' | 'verifying' | 'extracting' | 'publishing' | 'complete';
+  | 'downloading'
+  | 'verifying'
+  | 'extracting'
+  | 'publishing'
+  | 'complete';
 
 export type ManagedRuntimeProgressEvent = {
   runtimeName: ManagedRuntimeName;
