@@ -9,7 +9,7 @@ behavior.
 | ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
 | `src/tokens`        | Semantic color, type, spacing, motion, radius, and elevation tokens                                                                       |
 | `src/theme`         | Applies light or dark StyleX themes to a subtree                                                                                          |
-| `src/button`        | Base UI Button behavior and Lody variants, sizes, tones, and shapes                                                                       |
+| `src/button`        | Base UI Button behavior and Lody variants, sizes, tones, and shapes; `ButtonGroup` joins buttons into one segmented control               |
 | `src/field`         | Base UI Field composition: label, Input, Textarea, NumberField, PasswordInput, Checkbox, Radio, Switch, Select, Combobox, help, and error |
 | `src/popup`         | The floating surface a list, a menu or a popover opens on, and its tokens                                                                 |
 | `src/menu`          | Menu, ContextMenu and Menubar: commands on that surface                                                                                   |

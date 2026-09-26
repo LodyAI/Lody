@@ -13,7 +13,7 @@ import { Avatar, type AvatarSize } from '../avatar/avatar';
 import { avatar as avatarTokens } from '../avatar/avatar.tokens.stylex';
 import { Badge, type BadgeTone } from '../badge/badge';
 import { badge as badgeTokens } from '../badge/badge.tokens.stylex';
-import { Button } from '../button/button';
+import { Button, ButtonGroup } from '../button/button';
 import { button } from '../button/button.tokens.stylex';
 import { Card } from '../card/card';
 import { card as cardTokens } from '../card/card.tokens.stylex';
@@ -3966,6 +3966,30 @@ export function UiGallery({ palettes = 'both' }: UiGalleryProps) {
                 <Button shape="pill" icon aria-label="Add attachment">
                   <PlusGlyph />
                 </Button>
+              </Cluster>
+            </Row>
+            <Row>
+              <LegendKey>ButtonGroup</LegendKey>
+              <Cluster>
+                <ButtonGroup>
+                  <Button size="small">Merge</Button>
+                  <Button size="small" icon aria-label="Merge options">
+                    <PlusGlyph />
+                  </Button>
+                </ButtonGroup>
+                <ButtonGroup>
+                  <Button size="small" variant="secondary">
+                    Squash
+                  </Button>
+                  <Button size="small" variant="secondary" icon aria-label="Merge options">
+                    <PlusGlyph />
+                  </Button>
+                </ButtonGroup>
+                <ButtonGroup>
+                  <Button variant="secondary">Day</Button>
+                  <Button variant="secondary">Week</Button>
+                  <Button variant="secondary">Month</Button>
+                </ButtonGroup>
               </Cluster>
             </Row>
             <Row>

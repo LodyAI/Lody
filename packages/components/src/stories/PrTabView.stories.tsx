@@ -78,6 +78,24 @@ const reviewComment = (overrides: Partial<GitHubReviewComment>): GitHubReviewCom
   ...overrides,
 });
 
+const threadOneHunk = [
+  '@@ -120,6 +120,12 @@ export const PrTabView = memo(function PrTabView({',
+  '   const { t } = useTranslation();',
+  '   const pr = data?.pullRequest;',
+  '-  const conversation = buildConversation(data);',
+  '+  const conversation = data',
+  '+    ? buildConversation(data.issueComments, data.reviewThreads, data.reviews)',
+  '+    : [];',
+].join('\n');
+
+const threadTwoHunk = [
+  '@@ -706,4 +706,7 @@ export async function githubFetchReviewThreads(',
+  '   const commits = await fetchCommits(token, repo, pr);',
+  '+  const head = commits.at(-1);',
+  '+  if (!head) return [];',
+  '   return threads.filter((thread) => thread.commitId === head.sha);',
+].join('\n');
+
 const threadOne: GitHubReviewThread = {
   id: 101,
   anchor: {
@@ -102,7 +120,7 @@ const threadOne: GitHubReviewThread = {
     }),
   ],
   outdated: false,
-  diffHunk: '',
+  diffHunk: threadOneHunk,
   subjectType: 'line',
 };
 
@@ -126,7 +144,7 @@ const threadTwo: GitHubReviewThread = {
     }),
   ],
   outdated: true,
-  diffHunk: '',
+  diffHunk: threadTwoHunk,
   subjectType: 'line',
 };
 
@@ -342,6 +360,10 @@ export const Merged: Story = {
         closedAt: new Date(Date.now() - 1000 * 60 * 30).toISOString(),
       },
     },
+    branchExists: true,
+    onDeleteBranch: () => {
+      /* no-op in stories */
+    },
     ...storyCallbacks,
   },
 };
@@ -386,6 +408,18 @@ export const LongBody: Story = {
           "const result = await githubFetchPullRequestDetails(token, 'loro-dev/lody', 42);",
           '```',
           '> Reviewers can click a review thread to open the corresponding line in the diff viewer.',
+          '## Related issue',
+          'Closes #41.',
+          '## Problem / pressure',
+          'Reviewers bounce between the app and GitHub for every review round, and lose the',
+          'session context each time they do.',
+          '## Approach',
+          '- Fetch PR details, threads, reviews and checks in one hook',
+          '- Render them in a side-panel tab next to the conversation',
+          '- Keep merge, close and ready-for-review in the header',
+          '## Verification',
+          '- `pnpm check`',
+          '- Manual walk through open, draft, merged and closed PRs',
         ].join('\n'),
       },
     },
@@ -433,6 +467,25 @@ export const MergeConflict: Story = {
     data: {
       ...baseData,
       pullRequest: { ...basePr, mergeable: false, mergeableState: 'dirty' },
+    },
+    ...storyCallbacks,
+  },
+};
+
+/** The owning session offers the agent's "Resolve conflicts": an ordinary enabled command. */
+export const MergeConflictResolvable: Story = {
+  args: {
+    repoFullName: 'loro-dev/lody',
+    prNumber: 42,
+    state: 'ready',
+    data: {
+      ...baseData,
+      pullRequest: { ...basePr, mergeable: false, mergeableState: 'dirty' },
+      checkRuns: failingChecks,
+    },
+    onResolveConflicts: () => {
+      // eslint-disable-next-line no-console
+      console.log('[story] resolve conflicts');
     },
     ...storyCallbacks,
   },

@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, test } from 'vitest';
-import { Button } from '../src/button/button';
+import { Button, ButtonGroup } from '../src/button/button';
 import { forcedThemeClassNames } from '../src/theme/theme';
 
 describe('Button', () => {
@@ -36,6 +36,25 @@ describe('Button', () => {
     // A label flows on its own; wrapping it would put the words in a 16px box.
     const text = renderToStaticMarkup(<Button>Save</Button>);
     expect(text).toMatch(/<button[^>]*>Save<\/button>/);
+  });
+
+  test('a ButtonGroup makes its buttons segments of one shape', () => {
+    const alone = renderToStaticMarkup(<Button size="small">Merge</Button>);
+    const grouped = renderToStaticMarkup(
+      <ButtonGroup>
+        <Button size="small">Merge</Button>
+        <Button size="small" icon aria-label="Options">
+          <svg />
+        </Button>
+      </ButtonGroup>
+    );
+    expect(grouped).toMatch(/^<div[^>]*role="group"/);
+    const classes = (html: string) =>
+      new Set((/<button[^>]*class="([^"]*)"/.exec(html)?.[1] ?? '').split(' '));
+    const segment = classes(grouped);
+    // The segment squares its shared corners: classes a lone button never carries.
+    expect([...segment].some((c) => !classes(alone).has(c))).toBe(true);
+    expect([...classes(alone)].every((c) => segment.has(c))).toBe(true);
   });
 
   test('render swaps the element', () => {
