@@ -32,3 +32,4 @@ Agent Role mention 菜单使用纵向 flex 容器时，禁用原因换行会把�
   `flex-shrink` 为零。
 - 编辑前已运行 `node scripts/docs/main.mjs status`。当前检出没有安装依赖，因此未运行
   完整的包测试。
+- Pull request: [#1032](https://github.com/LodyAI/Lody/pull/1032)。

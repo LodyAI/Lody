@@ -39,3 +39,4 @@ same failure for other wrapped content, so both alternatives were rejected.
   the real row's computed `flex-shrink` is zero.
 - `node scripts/docs/main.mjs status` was run before the edit. Full package tests
   were not run because dependencies were not installed in this checkout.
+- Pull request: [#1032](https://github.com/LodyAI/Lody/pull/1032).
