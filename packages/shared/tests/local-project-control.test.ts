@@ -570,6 +570,8 @@ describe('node local project control guard', () => {
         localProjectId: 'project-1',
         relativePath: 'src',
         limit: 100,
+        sort: { by: 'mtime', order: 'desc', directoriesFirst: false },
+        include: ['stat'],
       })
     ).toBe(true);
 
@@ -579,7 +581,7 @@ describe('node local project control guard', () => {
         type: 'local-project/list-dir',
         result: {
           entries: [
-            { name: 'index.ts', type: 'file' },
+            { name: 'index.ts', type: 'file', mtimeMs: 1_000, size: 42 },
             { name: 'components', type: 'directory' },
           ],
           truncated: false,

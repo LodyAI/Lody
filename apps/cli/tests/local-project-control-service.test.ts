@@ -71,6 +71,22 @@ describe('LocalProjectControlService.listProjectDirectory', () => {
     expect(result.truncated).toBe(true);
   });
 
+  it('sorts before truncation and returns stat metadata only when requested', async () => {
+    await mkdir(path.join(rootPath, 'sorted'));
+    await writeFile(path.join(rootPath, 'sorted', 'file10.txt'), '1234567890');
+    await writeFile(path.join(rootPath, 'sorted', 'file2.txt'), '12');
+
+    const result = await service.listProjectDirectory(rootPath, 'sorted', {
+      limit: 1,
+      sort: { by: 'size', order: 'desc', directoriesFirst: false },
+      include: ['stat'],
+    });
+
+    expect(result.entries[0]).toMatchObject({ name: 'file10.txt', type: 'file', size: 10 });
+    expect(result.entries[0]?.mtimeMs).toEqual(expect.any(Number));
+    expect(result.truncated).toBe(true);
+  });
+
   it('browses machine directories without project-root filtering', async () => {
     await mkdir(path.join(rootPath, 'package-dir'));
     await mkdir(path.join(rootPath, 'package-dir', '.git'));

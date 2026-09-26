@@ -16,6 +16,7 @@ export const MACHINE_PROTOCOL_CAPABILITIES = {
   schedules: 'schedules',
   preparedSessionInput: 'preparedSessionInput',
   localFileResources: 'localFileResources',
+  localProjectDirectoryMetadata: 'localProjectDirectoryMetadata',
   acpProtocolAuthentication: 'acpProtocolAuthentication',
   previewControl: 'previewControl',
   piExtensions: 'piExtensions',
@@ -28,6 +29,7 @@ export const PROVIDER_SETUP_PROTOCOL_VERSION = 1;
 export const SCHEDULES_PROTOCOL_VERSION = 1;
 export const PREPARED_SESSION_INPUT_PROTOCOL_VERSION = 1;
 export const LOCAL_FILE_RESOURCES_PROTOCOL_VERSION = 1;
+export const LOCAL_PROJECT_DIRECTORY_METADATA_PROTOCOL_VERSION = 1;
 export const ACP_PROTOCOL_AUTHENTICATION_VERSION = 2;
 export const PREVIEW_CONTROL_PROTOCOL_VERSION = 1;
 export const PI_EXTENSIONS_PROTOCOL_VERSION = 1;
@@ -78,6 +80,8 @@ export const CURRENT_MACHINE_PROTOCOL_CAPABILITIES: MachineProtocolCapabilities 
   [MACHINE_PROTOCOL_CAPABILITIES.schedules]: SCHEDULES_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.preparedSessionInput]: PREPARED_SESSION_INPUT_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.localFileResources]: LOCAL_FILE_RESOURCES_PROTOCOL_VERSION,
+  [MACHINE_PROTOCOL_CAPABILITIES.localProjectDirectoryMetadata]:
+    LOCAL_PROJECT_DIRECTORY_METADATA_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.acpProtocolAuthentication]: ACP_PROTOCOL_AUTHENTICATION_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.previewControl]: PREVIEW_CONTROL_PROTOCOL_VERSION,
 };
