@@ -485,6 +485,8 @@ the full repository test suite therefore has not passed for this correction.
 
 ## Public-route network recovery
 
+Follow-up PR: [#995](https://github.com/LodyAI/Lody/pull/995).
+
 After native registration worked, a fresh route still failed at its first public
 probe with ENETUNREACH after the ten-second A-record publication budget. The host
 had no public IPv6 route; a forced IPv6 request reproduced the error while IPv4

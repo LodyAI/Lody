@@ -374,6 +374,8 @@ virtua 测试中因 `act is not a function` 中止，本次修正未取得全仓
 
 ## 公网回访的网络恢复
 
+后续 PR：[#995](https://github.com/LodyAI/Lody/pull/995)。
+
 原生连接成功注册后，新路由仍在十秒 A 记录发布等待结束后的首次公网回访中
 报 ENETUNREACH。宿主机没有公网 IPv6 路由；强制 IPv6 请求复现该错误，IPv4
 则能访问 Cloudflare。原始回访未记录目标地址，无法事后确定当次使用的地址族。
