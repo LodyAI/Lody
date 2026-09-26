@@ -41,6 +41,11 @@ end-to-end map. The WS/DO control-plane path is DEPRECATED; do not add to it.
   Local dispatch triggers off the renderer-authored `latestUserMsgId` doc-meta write
   plus the local Machine RPC fast path.
 
+- INVARIANT: the `gh` shim dir stays FIRST in every agent PATH, after login-shell and
+  default-dir merges (`pinGhShimBinDirFirst`), and the shim resolves its broker like the
+  git credential helper, `LODY_GIT_CRED_BROKER_STATE_FILE` first
+  ([note](../../../../.agents/notes/implemented/bug-fix/2026-09-26-gh-shim-broker-and-path.md)).
+
 ## Local Loro data plane
 
 Read [loro/AGENTS.md](loro/AGENTS.md) before enumerating rooms, publishing presence,

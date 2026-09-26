@@ -34,6 +34,7 @@ import {
   DEEPSEEK_HARNESS_HOME_ENV,
   DEEPSEEK_HARNESS_VERSION,
 } from '../src/agent/deepseek-harness-runtime';
+import { getGhShimHostBinDir, prependGhShimBinDirToPath } from '../src/lib/gh-shim-script';
 
 function getRegistryAgent(agentType: string) {
   const agent = REGISTRY_ACP_AGENTS.find((candidate) => candidate.id === agentType);
@@ -766,6 +767,29 @@ describe('mergeLoginShellEnv', () => {
     const shell = { PATH: '/usr/bin' };
 
     expect(splitPath(mergeLoginShellEnv(base, shell).PATH)).toEqual(['/usr/bin']);
+  });
+
+  it('keeps the gh shim dir ahead of login-shell and default ACP entries', () => {
+    // The session env prepends the shim, but the login shell and default ACP dirs are
+    // merged in front of it afterwards. /usr/bin/gh would then win and read the
+    // launch-time GH_TOKEN, which 401s once it expires.
+    const shimDir = getGhShimHostBinDir();
+    const base = { PATH: prependGhShimBinDirToPath('/proj/node_modules/.bin:/usr/bin') };
+    const shell = { PATH: '/home/u/.local/bin:/usr/local/bin:/usr/bin:/bin' };
+
+    const spawned = withDefaultAcpPathEntries(mergeLoginShellEnv(base, shell));
+
+    expect(splitPath(spawned.PATH)).toEqual([
+      shimDir,
+      join(homedir(), '.local/bin'),
+      join(homedir(), 'bin'),
+      join(homedir(), '.claude/local'),
+      '/home/u/.local/bin',
+      '/usr/local/bin',
+      '/usr/bin',
+      '/bin',
+      '/proj/node_modules/.bin',
+    ]);
   });
 
   it('lets base win for non-PATH vars but fills in vars only the shell has', () => {

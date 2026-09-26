@@ -229,7 +229,10 @@ Agent `gh` auth for GitHub repo sessions is set up in `session-manager.ts`: it c
 credential broker, prepends the `~/.lody/bin/gh` shim, and injects/refreshes a managed
 `GH_TOKEN` when no user token is present. The shim lives in `../lib/gh-shim-script.ts`; token
 fetching/caching is in `../lib/github-token-manager.ts`; git HTTPS auth uses
-`../lib/git-credential-helper-script.ts`. Session process trees are already correct —
+`../lib/git-credential-helper-script.ts`. The injected `GH_TOKEN` is a launch-time copy that an
+already-running agent never sees refreshed, so the shim must win PATH lookup (see
+[../lib/AGENTS.md](../lib/AGENTS.md)); it fetches per call and, when the session's broker URL is
+dead, recovers through `LODY_GIT_CRED_BROKER_STATE_FILE`. Session process trees are already correct —
 `prepareGitHubRepoSessionConfig` injects the env explicitly. The host-side rule is in
 [worktree/AGENTS.md](worktree/AGENTS.md).
 

@@ -192,6 +192,52 @@ describe('ensureGhShimScript', () => {
   );
 
   it(
+    "recovers through the session's broker state file after the broker restarts",
+    async () => {
+      // A restarted broker listens on a new port. The session env still names the old
+      // one; only the per-workspace state file carries the new address.
+      const broker = await startTokenBroker('restarted-broker-token');
+      const deadUrl = await reserveClosedLoopbackUrl();
+      const stateFile = path.join(tempHomeDir ?? '', 'broker-workspace-a.json');
+      writeFileSync(stateFile, JSON.stringify({ url: broker.url, token: broker.authToken }));
+      ensureGhShimScript();
+
+      const result = await runShim({
+        LODY_GIT_CRED_BROKER_URL: deadUrl,
+        LODY_GIT_CRED_BROKER_TOKEN: 'stale-broker-auth',
+        LODY_GIT_CRED_BROKER_STATE_FILE: stateFile,
+        LODY_GITHUB_REPO_FULL_NAME: 'loro-dev/lody',
+      });
+
+      expect(result.status).toBe(0);
+      expect(result.stdout).toContain('GH_TOKEN=restarted-broker-token');
+      expect(result.stderr).toBe('');
+      expect(brokerRequestCount).toBe(1);
+    },
+    SHIM_INTEGRATION_TIMEOUT_MS
+  );
+
+  it(
+    'names the unreachable broker on stderr instead of failing silently',
+    async () => {
+      const deadUrl = await reserveClosedLoopbackUrl();
+      ensureGhShimScript();
+
+      const result = await runShim({
+        LODY_GIT_CRED_BROKER_URL: deadUrl,
+        LODY_GIT_CRED_BROKER_TOKEN: 'stale-broker-auth',
+        LODY_GITHUB_REPO_FULL_NAME: 'loro-dev/lody',
+      });
+
+      expect(result.status).toBe(0);
+      expect(result.stdout).toContain('GH_TOKEN=\n');
+      expect(result.stderr).toContain(`credential broker unreachable at ${deadUrl}`);
+      expect(result.stderr).toContain('ECONNREFUSED');
+    },
+    SHIM_INTEGRATION_TIMEOUT_MS
+  );
+
+  it(
     'clears stale managed tokens when the broker rejects the requester context',
     async () => {
       const broker = await startTokenBroker('ignored-token', { status: 403 });
@@ -300,6 +346,21 @@ const runShim = async (
     child.on('close', (code) => finish(() => resolve(code)));
   });
   return { status, stdout, stderr };
+};
+
+// Binds and closes a loopback port so connecting to it is refused deterministically.
+const reserveClosedLoopbackUrl = async (): Promise<string> => {
+  const server = http.createServer();
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', () => resolve());
+  });
+  const address = server.address();
+  await new Promise<void>((resolve) => server.close(() => resolve()));
+  if (!address || typeof address === 'string') {
+    throw new Error('probe server did not bind to a TCP port');
+  }
+  return `http://127.0.0.1:${address.port}`;
 };
 
 const startTokenBroker = async (
