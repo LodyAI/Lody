@@ -39,6 +39,7 @@ import { type LodyLiveActivityBridge, useLodyLiveActivity } from '@/hooks/use-lo
 import { isNativeIOSAppShell } from '@/lib/native-platform';
 import { isLocalAppPlatform } from '@/lib/app-platform';
 import { useResolvedWorkspaceScope } from '../../hooks/use-resolved-workspace-scope';
+import { WorkspaceSyncStuckReporter } from '@/components/workspace-sync-stuck-reporter';
 import { useBillingOverviewPreload } from '../../hooks/use-billing-overview-preload';
 
 const AUTH_ROUTE_ONESIGNAL_LOGIN_IDLE_TIMEOUT_MS = 10_000;
@@ -77,6 +78,7 @@ function LocalPlatformLayoutContent({ workspaceName }: { workspaceName: string }
     <>
       {/* Same dock-badge / live-activity wiring as the cloud layout. */}
       <LodyLiveActivityHost workspaceName={workspaceName} />
+      <WorkspaceSyncStuckReporter />
       {/* The boot shell holds the window's first frame until the layout chunk
           arrives, on every route: an empty fallback would blank the window
           between the static frame and the layout. */}
@@ -339,6 +341,7 @@ function AuthedLayoutContent({
   return (
     <>
       <LodyLiveActivityHost workspaceName={workspaceName} />
+      <WorkspaceSyncStuckReporter />
       <AuthedLayoutRoutes hasLocalToken={hasLocalToken} workspaceName={workspaceName} />
     </>
   );
