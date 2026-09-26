@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: https://github.com/LodyAI/Lody/pull/1021
 
 [English](2026-09-26-streamdown-remount-animation.md)
 
