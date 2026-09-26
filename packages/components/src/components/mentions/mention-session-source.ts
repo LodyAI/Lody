@@ -265,8 +265,14 @@ function readSlugCache(): SlugCache {
   }
 }
 
+// Every composer surface of a conversation (input area, composer, mention
+// textarea) asks for the same items; they share one array, remembered once.
+const rememberedItemLists = new WeakSet<readonly SessionMentionItem[]>();
+
 export function rememberSessionMentionSlugs(items: readonly SessionMentionItem[]): void {
   if (typeof localStorage === 'undefined' || items.length === 0) return;
+  if (rememberedItemLists.has(items)) return;
+  rememberedItemLists.add(items);
   try {
     const raw = localStorage.getItem(SLUG_CACHE_KEY);
     const merged: SlugCache = { ...parseSlugCache(raw) };
@@ -297,10 +303,41 @@ export function rememberSessionMentionSlugs(items: readonly SessionMentionItem[]
  * review runs, task sessions — are exactly what gets referenced. `sessions` is
  * the sidebar-row projection, which deliberately hides child tabs.
  */
+// Every composer surface of a conversation asks for the same items, each with
+// its own (equal) filtered session array. Reuse the last result while the
+// sessions are the same objects, so they build and remember the items once.
+let lastMentionItems: {
+  sessions: readonly SessionMeta[];
+  currentSessionId: string | null;
+  items: SessionMentionItem[];
+} | null = null;
+
+function sameSessions(left: readonly SessionMeta[], right: readonly SessionMeta[]): boolean {
+  if (left === right) return true;
+  if (left.length !== right.length) return false;
+  for (let index = 0; index < left.length; index++) {
+    if (left[index] !== right[index]) return false;
+  }
+  return true;
+}
+
+function getSessionMentionItems(
+  sessions: readonly SessionMeta[],
+  currentSessionId: string | null
+): SessionMentionItem[] {
+  const last = lastMentionItems;
+  if (last && last.currentSessionId === currentSessionId && sameSessions(last.sessions, sessions)) {
+    return last.items;
+  }
+  const items = buildSessionMentionItems(sessions, currentSessionId);
+  lastMentionItems = { sessions, currentSessionId, items };
+  return items;
+}
+
 export function useSessionMentionItems(currentSessionId?: string | null): SessionMentionItem[] {
   const { allActiveSessions } = useVisibleSessionMetas();
   const items = React.useMemo(
-    () => buildSessionMentionItems(allActiveSessions, currentSessionId),
+    () => getSessionMentionItems(allActiveSessions, currentSessionId ?? null),
     [currentSessionId, allActiveSessions]
   );
   // Keep the slug -> id map durable so a draft reloaded tomorrow, or one whose
@@ -414,5 +451,10 @@ export function hydrateSessionMentionsFromText(
   slugToId: ReadonlyMap<string, string>,
   knownFileTokens?: ReadonlySet<string>
 ): HydratedMentions {
-  return hydrateSlugMentionsFromText({ text, slugToValue: slugToId, kind: 'session', knownFileTokens });
+  return hydrateSlugMentionsFromText({
+    text,
+    slugToValue: slugToId,
+    kind: 'session',
+    knownFileTokens,
+  });
 }

@@ -12,7 +12,7 @@ import { createPlanModeConfigOption } from 'acp-extension-core';
 import type { AgentConfigId, AgentRoleId, McpServerId, SessionId } from './ids';
 import type { MessageTextSpan } from './message-text-spans';
 import type { MinimalVisualAnnotationAnchor } from './visual-annotation-types';
-import type { WorktreeScriptPhase } from './project';
+import type { ProjectRef, WorktreeScriptPhase } from './project';
 import {
   DEEPSEEK_HARNESS_AGENT_PRESETS,
   DEEPSEEK_HARNESS_PERMISSION_MODES,
@@ -1207,6 +1207,7 @@ export type SystemNoticeName =
   | 'chat_failed'
   | 'agent_warning'
   | 'task_proposal'
+  | 'schedule_proposal'
   | 'session_fork_origin';
 
 /**
@@ -1322,6 +1323,55 @@ export type TaskProposalMeta = {
 };
 
 /**
+ * The time rule an agent may propose: exactly the named shapes the schedule
+ * editor offers, never cron. `timeZone` is optional because the person, not the
+ * agent, is where the wall clock lives; the client fills in its own zone.
+ */
+export type ScheduleProposalRule =
+  | { kind: 'manual' }
+  | { kind: 'minutes'; every: number }
+  | { kind: 'hours'; every: number }
+  | { kind: 'daily'; hour: number; minute: number; timeZone?: string }
+  | { kind: 'weekdays'; hour: number; minute: number; timeZone?: string }
+  | { kind: 'weekly'; weekdays: number[]; hour: number; minute: number; timeZone?: string }
+  | { kind: 'monthly'; days: number[]; hour: number; minute: number; timeZone?: string }
+  | { kind: 'once'; at: string };
+
+/**
+ * Where a proposed schedule runs, when the person named it in conversation.
+ * Anything absent is taken from the conversation the proposal was made in.
+ */
+export type ScheduleProposalTarget = {
+  agentConfigId?: string;
+  agentRoleId?: string;
+  machineId?: string;
+  project?: ProjectRef;
+};
+
+/**
+ * Metadata for the schedule_proposal system notice: an agent has gathered
+ * enough to schedule a task and is asking the person to create it. Confirming
+ * on the card IS the creation; there is no form afterwards. Like a task
+ * proposal, it stays in history unresolved until acted on.
+ */
+export type ScheduleProposalMeta = {
+  /** Stable id; a retried proposal replaces itself instead of stacking. */
+  proposalId: string;
+  title: string;
+  prompt: string;
+  rule: ScheduleProposalRule;
+  destination?:
+    | { kind: 'new_session' }
+    | { kind: 'own_session' }
+    | { kind: 'existing_session'; sessionId: string };
+  target?: ScheduleProposalTarget;
+  outcome?: 'created' | 'dismissed';
+  /** Set once the person confirmed and the schedule exists. */
+  scheduleId?: string;
+  proposedBy?: MessageItemActor;
+};
+
+/**
  * System notice metadata by notice name
  */
 export type SystemNoticeMeta = {
@@ -1329,6 +1379,7 @@ export type SystemNoticeMeta = {
   chat_failed: ChatFailedMeta;
   agent_warning: AgentWarningMeta;
   task_proposal: TaskProposalMeta;
+  schedule_proposal: ScheduleProposalMeta;
   session_fork_origin: SessionForkOriginMeta;
 };
 

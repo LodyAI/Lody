@@ -84,6 +84,7 @@ Repository map and entry points: [README.md](README.md#repository).
   contracts over hidden fallbacks; remove only unused code. Update the nearest
   public `AGENTS.md` when an invariant or boundary changes.
 
+
 ## Code Review Rules
 
 Report only P0/P1, security first. If the PR solves the linked Issue and no P0/P1

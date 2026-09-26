@@ -295,6 +295,114 @@ describe('useGitHubPrDetails target isolation', () => {
     vi.clearAllMocks();
   });
 
+  it('sends one request when two views of the same PR refresh together', async () => {
+    const results: Array<UseGitHubPrDetailsResult | null> = [null, null];
+    const input: UseGitHubPrDetailsInput = {
+      workspaceId: 'workspace-1',
+      repoFullName: 'loro-dev/lody',
+      prNumber: 1,
+    };
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => {
+      root?.render(
+        createElement(
+          TestCloudPlatformProvider,
+          null,
+          createElement(Probe, { input, onResult: (result) => (results[0] = result) }),
+          createElement(Probe, { input, onResult: (result) => (results[1] = result) })
+        )
+      );
+    });
+    for (let attempt = 0; attempt < 30 && !results.every((r) => r?.state === 'ready'); attempt++) {
+      await act(async () => {
+        await new Promise((resolve) => window.setTimeout(resolve, 0));
+      });
+    }
+    await act(async () => {
+      await new Promise((resolve) => window.setTimeout(resolve, 0));
+    });
+
+    githubMocks.githubFetchPullRequestDetails.mockClear();
+    const shared = createDeferred<GitHubPullRequestDetails>();
+    githubMocks.githubFetchPullRequestDetails.mockReturnValue(shared.promise);
+
+    let refreshes: Array<Promise<GitHubPrDetailsData | null> | undefined> = [];
+    await act(async () => {
+      refreshes = results.map((result) => result?.refresh());
+      await Promise.resolve();
+    });
+    expect(githubMocks.githubFetchPullRequestDetails).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      shared.resolve(createPullRequest(1, { title: 'Shared refresh' }));
+      await Promise.all(refreshes);
+    });
+    expect(results.map((result) => result?.data?.pullRequest.title)).toEqual([
+      'Shared refresh',
+      'Shared refresh',
+    ]);
+  });
+
+  it("does not let a refresh join another view's poll that started before it", async () => {
+    vi.useFakeTimers();
+    const results: Array<UseGitHubPrDetailsResult | null> = [null, null];
+    const base: UseGitHubPrDetailsInput = {
+      workspaceId: 'workspace-1',
+      repoFullName: 'loro-dev/lody',
+      prNumber: 1,
+    };
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => {
+      root?.render(
+        createElement(
+          TestCloudPlatformProvider,
+          null,
+          // The merging view is off screen, so only the other view polls.
+          createElement(Probe, {
+            input: { ...base, visible: false },
+            onResult: (result) => (results[0] = result),
+          }),
+          createElement(Probe, { input: base, onResult: (result) => (results[1] = result) })
+        )
+      );
+    });
+    for (let attempt = 0; attempt < 30 && !results.every((r) => r?.state === 'ready'); attempt++) {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+    }
+
+    githubMocks.githubFetchPullRequestDetails.mockClear();
+    const beforeMerge = createDeferred<GitHubPullRequestDetails>();
+    const afterMerge = createDeferred<GitHubPullRequestDetails>();
+    githubMocks.githubFetchPullRequestDetails
+      .mockReturnValueOnce(beforeMerge.promise)
+      .mockReturnValueOnce(afterMerge.promise);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(15_000);
+    });
+    expect(githubMocks.githubFetchPullRequestDetails).toHaveBeenCalledTimes(1);
+
+    // The first view merges, then refreshes: that read must be its own.
+    let refreshed: Promise<GitHubPrDetailsData | null> | undefined;
+    await act(async () => {
+      refreshed = results[0]?.refresh();
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(githubMocks.githubFetchPullRequestDetails).toHaveBeenCalledTimes(2);
+
+    await act(async () => {
+      afterMerge.resolve(createPullRequest(1, { title: 'After merge' }));
+      beforeMerge.resolve(createPullRequest(1, { title: 'Before merge' }));
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect((await refreshed)?.pullRequest.title).toBe('After merge');
+  });
+
   it('bypasses the browser cache when manually refreshing an idle PR tab', async () => {
     const refreshedPullRequest = createPullRequest(1, {
       title: 'Refreshed pull request',
@@ -519,6 +627,28 @@ describe('useGitHubPrDetails target isolation', () => {
     expect(currentResult?.isMarkingReady).toBe(false);
     expect(currentResult?.data?.pullRequest.draft).toBe(false);
     expect(currentResult?.data?.pullRequest.mergeableState).toBe('clean');
+  });
+
+  it("never presents the previous PR's details as the next one's while its cache read is pending", async () => {
+    await renderHook({ workspaceId: 'workspace-1', repoFullName: 'loro-dev/lody', prNumber: 1 });
+    await waitForResult((result) => result.data?.pullRequest.number === 1);
+    expect(currentResult?.state).toBe('ready');
+
+    const pendingRead = createDeferred<null>();
+    const pendingDetails = createDeferred<ReturnType<typeof createPullRequest>>();
+    cacheMocks.readPrCacheEntry.mockReturnValueOnce(pendingRead.promise);
+    githubMocks.githubFetchPullRequestDetails.mockReturnValueOnce(pendingDetails.promise);
+    await renderHook({ workspaceId: 'workspace-1', repoFullName: 'loro-dev/lody', prNumber: 2 });
+
+    // PR 1's checks and ready state must not render (or enable Merge) for PR 2.
+    expect(currentResult?.data).toBeNull();
+    expect(currentResult?.state).toBe('loading');
+
+    await act(async () => {
+      pendingRead.resolve(null);
+      pendingDetails.resolve(createPullRequest(2));
+    });
+    await waitForResult((result) => result.data?.pullRequest.number === 2);
   });
 
   it('does not apply a completed merge to the PR opened after navigation', async () => {

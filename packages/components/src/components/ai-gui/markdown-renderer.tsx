@@ -31,6 +31,14 @@ import {
   type UrlTransform,
 } from 'streamdown';
 import type { BundledLanguage } from 'shiki';
+import { getMarkdownHighlightWorker } from '@/lib/markdown-highlight-worker';
+import {
+  createMarkdownHighlighter,
+  MARKDOWN_CODE_LANGUAGES,
+  MARKDOWN_CODE_THEME_NAME,
+  tokenizeMarkdownCode,
+  type MarkdownHighlighter,
+} from '@/lib/markdown-highlighter';
 import { Check, Copy } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { DEFAULT_CONVERSATION_FONT_SIZE } from '@/atoms/settings';
@@ -55,11 +63,18 @@ import type { ConversationFontSize } from '@/atoms/settings';
 import { MarkdownFencedCodeBlock } from './markdown-code-block';
 import { MarkdownDiffBlock } from './markdown-diff-block';
 import { createMarkdownMermaidConfig, createMarkdownMermaidPlugin } from './markdown-mermaid';
+import {
+  GitHubReferenceChip,
+  isGitHubReferenceLabel,
+  markdownLinkText,
+  parseGitHubReferenceUrl,
+} from './github-reference-link';
+import { MarkdownTable } from './markdown-table';
 import { MermaidDiagramViewer } from './mermaid-diagram-viewer';
 import { MermaidFullscreenButton, useMermaidDiagramCanvas } from './use-mermaid-diagram-canvas';
 import { SessionReadonlyContext } from './session-readonly-context';
 import type { MarkdownAgentFileLinkMenuItem } from '@/hooks/use-session-file-actions';
-import { ContextMenu } from '@lody/ui/context-menu';
+import { ContextMenu } from '@/ui/armed-overlays';
 
 export { createMarkdownMermaidConfig } from './markdown-mermaid';
 
@@ -150,7 +165,10 @@ const transformMdastChildren = (tree: unknown, transform: MdastChildTransformer)
 // `[&_h1]:mt-5` arbitrary variants — zeroing margin-top AND margin-bottom on
 // every block. `!` flips on `!important` so per-element margins survive.
 const MARKDOWN_BASE_CLASSNAME =
-  'markdown-renderer max-w-none text-foreground leading-[1.75] ' +
+  // Body text uses the contrast-capped reading color; headings and bold take
+  // the one step above it, so hierarchy reads by brightness (`--foreground-strong`).
+  'markdown-renderer max-w-none text-reading leading-[1.75] ' +
+  '[&_h1]:text-foreground-strong [&_h2]:text-foreground-strong [&_h3]:text-foreground-strong [&_h4]:text-foreground-strong [&_strong]:text-foreground-strong ' +
   '[&_p]:!mt-0 [&_p]:!mb-3 [&_p:has(+ul)]:!mb-2 [&_p:last-child]:!mb-0 [&_p:first-child]:!mt-0 ' +
   '[&_ul]:!my-2 [&_ul]:pl-3 [&_ul]:list-disc ' +
   '[&_ul:not(.contains-task-list)]:pl-0 [&_ul:not(.contains-task-list)]:list-none ' +
@@ -170,7 +188,7 @@ const MARKDOWN_BASE_CLASSNAME =
   // single inline runs — so between-item spacing must come from the <li> box
   // itself, not the inner <p>. `mt-2` on non-first items keeps list edges
   // flush with the `ul`/`ol` margins.
-  '[&_li]:!my-0 [&_li]:!py-0 [&_li:not(:first-child)]:!mt-2 [&_ul>li:not(:first-child)]:!mt-1 [&_ol>li:not(:first-child)]:!mt-1 [&_li>ul]:!my-1 [&_li>ol]:!my-1 ' +
+  '[&_li]:!my-0 [&_li]:!py-0 [&_li:not(:first-child)]:!mt-1 [&_ul>li:not(:first-child)]:!mt-1 [&_ol>li:not(:first-child)]:!mt-1 [&_li>ul]:!my-1 [&_li>ol]:!my-1 ' +
   // Streamdown's default blockquote class adds `italic`; override it so quoted
   // body text stays upright (explicit `*emphasis*` inside still renders italic
   // via the descendant <em>'s own font-style). The `[&_blockquote]` descendant
@@ -184,10 +202,17 @@ const MARKDOWN_BASE_CLASSNAME =
   '[&_h5]:!mt-3 [&_h5]:!mb-1.5 [&_h5]:font-semibold [&_h5]:uppercase [&_h5]:tracking-wide ' +
   '[&_h6]:!mt-3 [&_h6]:!mb-1.5 [&_h6]:font-semibold [&_h6]:uppercase [&_h6]:tracking-wide [&_h6]:text-muted-foreground ' +
   '[&_:is(h1,h2,h3,h4,h5,h6):first-child]:!mt-0 ' +
-  '[&_a]:text-markdown-link ' +
-  '[&_a]:underline [&_a]:underline-offset-2 [&_a]:decoration-current/35 [&_a:hover]:decoration-current/70 ' +
+  // Color marks a link; the underline appears on hover only (a standing one
+  // made dense CJK prose read as crowded).
+  '[&_a]:no-underline [&_a]:underline-offset-2 [&_a]:decoration-current/60 [&_a:hover]:underline ' +
   '[&_.katex-display]:!my-5 [&_.katex-display]:overflow-x-auto [&_.katex-display]:overflow-y-hidden [&_.katex-display]:py-1 ' +
   '[&_[data-streamdown="mermaid-block"]]:!my-5 ' +
+  // Streamdown gives every code block an inline `content-visibility: auto`
+  // with a 200px placeholder. Conversation rows are already virtualized, and
+  // that placeholder turns into the block's real height the first time the
+  // block renders: a one-line block shrank by ~158px under a reader climbing
+  // the conversation, too late for Virtua to compensate. Render them normally.
+  '[&_[data-streamdown="code-block"]]:![content-visibility:visible] ' +
   // Streamdown wraps every diagram in a pan/zoom canvas that claims the gesture
   // through inline styles: `touch-action: none` stops a finger resting on a
   // diagram from scrolling the conversation, and its transform moves the preview
@@ -202,11 +227,13 @@ const MARKDOWN_BASE_CLASSNAME =
   '[&_[data-streamdown="mermaid"]]:overflow-hidden ' +
   '[&_[data-streamdown="code-block"]]:!my-4 ' +
   '[&_table]:!my-0 [&_table]:w-full [&_table]:border-collapse [&_table]:text-[0.92em] [&_table]:leading-[1.5] ' +
-  '[&_th]:border-b [&_th]:border-border/70 [&_th]:bg-muted/20 [&_th]:px-2.5 [&_th]:py-1.5 [&_th]:text-left [&_th]:font-semibold [&_th]:text-foreground/80 dark:[&_th]:bg-muted/40 ' +
-  '[&_td]:border-b [&_td]:border-border/45 [&_td]:px-2.5 [&_td]:py-1.5 [&_td]:align-top ' +
-  '[&_tbody_tr:nth-child(even)]:bg-muted/15 [&_tbody_tr:last-child_td]:border-b-0 ' +
-  '[&_:is(th,td):first-child]:w-px [&_:is(th,td):first-child]:whitespace-nowrap ' +
-  '[&_tbody_td:first-child]:font-medium [&_tbody_td:first-child]:text-foreground/75 ' +
+  // Lines are foreground tints (the theme border melts into the canvas). No
+  // column or row is assumed to be a label: cells share one color and weight;
+  // only the header row, which Markdown always has, gets a faint band.
+  '[&_th]:border-b [&_th]:border-foreground/[0.14] [&_th]:bg-foreground/[0.035] [&_th]:px-2.5 [&_th]:py-1.5 [&_th]:text-left [&_th]:font-normal [&_th]:align-top ' +
+  '[&_td]:border-b [&_td]:border-foreground/[0.08] [&_td]:px-2.5 [&_td]:py-1.5 [&_td]:align-top ' +
+  '[&_:is(th,td)+:is(th,td)]:border-l [&_:is(th,td)+:is(th,td)]:border-l-foreground/[0.08] ' +
+  '[&_tbody_tr:last-child_td]:border-b-0 ' +
   '[&_table_code]:!bg-foreground/[0.08] [&_table_code]:!ring-0 dark:[&_table_code]:!bg-foreground/[0.14]';
 
 const MARKDOWN_SIZE_CLASSNAME =
@@ -654,31 +681,12 @@ const remarkLinkifyFilePaths = () => {
 
 const MARKDOWN_MATH_PLUGIN = createMathPlugin();
 
-type ShikiHighlighter = Awaited<ReturnType<(typeof import('shiki/core'))['createHighlighterCore']>>;
 type MarkdownHighlightResult = NonNullable<ReturnType<CodeHighlighterPlugin['highlight']>>;
 
-const MARKDOWN_CODE_THEME_NAME = 'lody-css-variables';
 // Streamdown's type does not model registered custom theme names, but Shiki accepts
 // them after createHighlighterCore() registers the matching theme object.
 const MARKDOWN_CODE_THEME_INPUT = MARKDOWN_CODE_THEME_NAME as unknown as ThemeInput;
 const MARKDOWN_CODE_THEMES = [MARKDOWN_CODE_THEME_INPUT, MARKDOWN_CODE_THEME_INPUT] as const;
-
-const MARKDOWN_CODE_LANGUAGES = [
-  'typescript',
-  'tsx',
-  'javascript',
-  'jsx',
-  'json',
-  'bash',
-  'shellscript',
-  'markdown',
-  'python',
-  'rust',
-  'go',
-  'yaml',
-  'html',
-  'css',
-] as const satisfies readonly BundledLanguage[];
 
 const MARKDOWN_CODE_LANGUAGE_ALIASES: Partial<Record<string, BundledLanguage>> = {
   js: 'javascript',
@@ -803,7 +811,7 @@ const writeHighlightCache = (
 };
 
 const highlightCode = (
-  highlighter: ShikiHighlighter,
+  highlighter: MarkdownHighlighter,
   options: HighlightOptions
 ): MarkdownHighlightResult => {
   const language = normalizeCodeLanguage(options.language);
@@ -819,13 +827,7 @@ const highlightCode = (
   }
 
   try {
-    const result = highlighter.codeToTokens(options.code, {
-      lang: language,
-      themes: {
-        light: MARKDOWN_CODE_THEMES[0],
-        dark: MARKDOWN_CODE_THEMES[1],
-      },
-    });
+    const result = tokenizeMarkdownCode(highlighter, options.code, language);
     if (cacheable) {
       writeHighlightCache(cacheKey, options.code.length, result);
     }
@@ -835,45 +837,42 @@ const highlightCode = (
   }
 };
 
+/**
+ * Code blocks are tokenized in a worker: a large block took 60–80ms of main
+ * thread on first display (e.g. opening a session), blocking input and paint.
+ * Streamdown renders the raw text until the result arrives through `callback`.
+ * Cache hits stay synchronous. Without a worker (tests, server rendering, or
+ * after the worker failed) the same highlighter runs on the main thread.
+ */
 const createLazyShikiCodePlugin = (): CodeHighlighterPlugin => {
-  let highlighter: ShikiHighlighter | null = null;
-  let highlighterPromise: Promise<ShikiHighlighter> | null = null;
+  let highlighter: MarkdownHighlighter | null = null;
+  let highlighterPromise: Promise<MarkdownHighlighter> | null = null;
 
   const loadHighlighter = async () => {
-    // @pierre/diffs already imports shiki's bundledLanguages catalog. Reuse it
-    // instead of a second shiki/langs/*.mjs graph (duplicate grammar chunks).
-    highlighterPromise ??= Promise.all([
-      import('shiki/core'),
-      import('shiki/engine/javascript'),
-      import('shiki'),
-    ]).then(
-      ([
-        { createCssVariablesTheme, createHighlighterCore },
-        { createJavaScriptRegexEngine },
-        shiki,
-      ]) =>
-        createHighlighterCore({
-          engine: createJavaScriptRegexEngine(),
-          langs: MARKDOWN_CODE_LANGUAGES.map((id) => {
-            const language = shiki.bundledLanguages[id];
-            if (!language) {
-              throw new Error(`Missing bundled shiki language: ${id}`);
-            }
-            return language;
-          }),
-          themes: [
-            createCssVariablesTheme({
-              name: MARKDOWN_CODE_THEME_NAME,
-              variablePrefix: '--lody-shiki-',
-            }),
-          ],
-        }).then((loadedHighlighter) => {
-          highlighter = loadedHighlighter;
-          return loadedHighlighter;
-        })
-    );
-
+    highlighterPromise ??= createMarkdownHighlighter().then((loadedHighlighter) => {
+      highlighter = loadedHighlighter;
+      return loadedHighlighter;
+    });
     return highlighterPromise;
+  };
+
+  const highlightOnMainThread = (
+    options: HighlightOptions,
+    callback?: (result: MarkdownHighlightResult) => void
+  ): MarkdownHighlightResult | null => {
+    if (highlighter) {
+      return highlightCode(highlighter, options);
+    }
+
+    void loadHighlighter()
+      .then((loadedHighlighter) => {
+        callback?.(highlightCode(loadedHighlighter, options));
+      })
+      .catch(() => {
+        callback?.(createPlainHighlightResult(options.code));
+      });
+
+    return null;
   };
 
   return {
@@ -882,18 +881,31 @@ const createLazyShikiCodePlugin = (): CodeHighlighterPlugin => {
     getSupportedLanguages: () => [...MARKDOWN_CODE_LANGUAGES],
     getThemes: () => [...MARKDOWN_CODE_THEMES],
     highlight: (options, callback) => {
-      if (highlighter) {
-        return highlightCode(highlighter, options);
+      const language = normalizeCodeLanguage(options.language);
+      if (!language) {
+        return createPlainHighlightResult(options.code);
+      }
+      const cacheable = options.code.length <= HIGHLIGHT_CACHE_MAX_CODE_CHARS;
+      const cacheKey = `${language}\0${options.code}`;
+      if (cacheable) {
+        const cached = readHighlightCache(cacheKey);
+        if (cached !== undefined) return cached;
       }
 
-      void loadHighlighter()
-        .then((loadedHighlighter) => {
-          callback?.(highlightCode(loadedHighlighter, options));
-        })
-        .catch(() => {
-          callback?.(createPlainHighlightResult(options.code));
-        });
+      const worker = getMarkdownHighlightWorker();
+      if (!worker) return highlightOnMainThread(options, callback);
 
+      worker.highlight(options.code, language).then(
+        (tokens) => {
+          if (cacheable) writeHighlightCache(cacheKey, options.code.length, tokens);
+          callback?.(tokens);
+        },
+        () => {
+          // The worker died: finish this block (and later ones) on the main thread.
+          const result = highlightOnMainThread(options, callback);
+          if (result) callback?.(result);
+        }
+      );
       return null;
     },
     supportsLanguage: (language) => normalizeCodeLanguage(language) !== null,
@@ -1127,7 +1139,7 @@ const createMarkdownComponents = ({
       <code
         className={cn(
           className,
-          'rounded-sm bg-foreground/[0.08] px-1 py-px font-mono text-[0.85em] text-foreground ring-0 dark:bg-foreground/[0.14]'
+          'rounded-sm bg-foreground/[0.06] px-1 py-px font-mono text-[0.85em] text-reading ring-0 dark:bg-foreground/[0.07]'
         )}
         {...rest}
       >
@@ -1135,17 +1147,7 @@ const createMarkdownComponents = ({
       </code>
     );
   },
-  table: (props: MarkdownTableProps) => {
-    const { node: _node, ...rest } = props;
-    return (
-      <div
-        data-markdown-table
-        className="scrollbar-pro my-3 overflow-x-auto rounded-lg border border-border/70 bg-background"
-      >
-        <table {...rest} />
-      </div>
-    );
-  },
+  table: (props: MarkdownTableProps) => <MarkdownTable {...props} />,
   a: (props: MarkdownLinkProps) => {
     const { children, href, node: _node, rel, ...rest } = props;
     // Workspace resource links are display-only in a publication, not a second
@@ -1165,6 +1167,25 @@ const createMarkdownComponents = ({
         >
           {children}
         </AgentFileLink>
+      );
+    }
+
+    // A link that only names a GitHub pull request or issue renders as a small
+    // reference label; one with its own wording stays an ordinary link.
+    const githubReference = parseGitHubReferenceUrl(href);
+    if (githubReference && isGitHubReferenceLabel(markdownLinkText(children), githubReference)) {
+      return (
+        <MarkdownExternalLink
+          href={href}
+          rel={rel}
+          {...rest}
+          className={cn(
+            rest.className,
+            'markdown-reference-chip mx-[0.1em] inline-flex max-w-full items-center rounded-md px-[0.4em] align-[-0.12em] text-[0.92em] leading-[1.55] transition-colors'
+          )}
+        >
+          <GitHubReferenceChip reference={githubReference} />
+        </MarkdownExternalLink>
       );
     }
 
@@ -1205,13 +1226,70 @@ function ConversationMarkdownImage(props: MarkdownImageProps) {
       </span>
     );
   }
-  const { node: _node, src, alt, ...rest } = props;
+  return <SizedMarkdownImage {...props} />;
+}
+
+type ImageOutcome = { width: number; height: number } | 'failed';
+
+/**
+ * What each image source did the last time it mounted. Virtua unmounts rows
+ * outside the overscan, and an image without known dimensions renders at 0px
+ * until it loads, so every remount changed its row's height after mount and
+ * moved the conversation. Known sizes are reserved up front; a source that
+ * failed (an agent-local path the page cannot reach) renders its alt text.
+ */
+const imageOutcomes = new Map<string, ImageOutcome>();
+const IMAGE_OUTCOME_LIMIT = 500;
+
+function rememberImageOutcome(src: string, outcome: ImageOutcome): void {
+  imageOutcomes.delete(src);
+  imageOutcomes.set(src, outcome);
+  if (imageOutcomes.size > IMAGE_OUTCOME_LIMIT) {
+    const oldest = imageOutcomes.keys().next().value;
+    if (oldest !== undefined) imageOutcomes.delete(oldest);
+  }
+}
+
+function SizedMarkdownImage(props: MarkdownImageProps) {
+  const { node: _node, src, alt, onLoad, onError, ...rest } = props;
+  const key = typeof src === 'string' ? src : undefined;
+  const [outcome, setOutcome] = useState(() =>
+    key === undefined ? undefined : imageOutcomes.get(key)
+  );
+  if (outcome === 'failed') {
+    return (
+      <span
+        role="img"
+        aria-label={alt || 'Image'}
+        className="my-2 block text-sm text-muted-foreground"
+      >
+        {alt || 'Image'}
+      </span>
+    );
+  }
   return (
     <img
       {...rest}
       src={src}
       alt={alt ?? ''}
+      // With `height: auto`, these reserve the image's aspect ratio before it loads.
+      width={outcome?.width ?? rest.width}
+      height={outcome?.height ?? rest.height}
       className={cn('my-2 max-h-[32rem] max-w-full rounded-md object-contain', rest.className)}
+      onLoad={(event) => {
+        const image = event.currentTarget;
+        if (key !== undefined && image.naturalWidth > 0) {
+          rememberImageOutcome(key, { width: image.naturalWidth, height: image.naturalHeight });
+        }
+        onLoad?.(event);
+      }}
+      onError={(event) => {
+        if (key !== undefined) {
+          rememberImageOutcome(key, 'failed');
+          setOutcome('failed');
+        }
+        onError?.(event);
+      }}
     />
   );
 }

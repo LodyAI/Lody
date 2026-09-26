@@ -114,9 +114,12 @@ const ADD_CUSTOM_LAUNCHER_VALUE = '__add_custom_launcher__';
 export function PathLaunchersSettings({
   isElectron,
   platform,
+  inline = false,
 }: {
   isElectron: boolean;
   platform?: string | null;
+  /** A row of the caller's section rather than a section of its own. */
+  inline?: boolean;
 }) {
   const { t } = useTranslation();
   const postHog = usePostHog();
@@ -224,91 +227,93 @@ export function PathLaunchersSettings({
     }
   };
 
+  const row = (
+    <CompactRow
+      label={t('settings.pathLaunchers.title', 'Open with')}
+      helper={t(
+        'settings.pathLaunchers.description',
+        "The app a session header's Open button uses."
+      )}
+    >
+      <Select.Root
+        open={selectOpen}
+        onOpenChange={setSelectOpen}
+        value={selectedLauncherId}
+        onValueChange={(value) => {
+          if (value != null) handleSelectDefault(value);
+        }}
+      >
+        <div {...stylex.props(styles.select)}>
+          <Select.Trigger
+            aria-label={t('settings.pathLaunchers.default.label', 'Default launcher')}
+          >
+            <Select.Value>
+              <LauncherOptionContent launcher={selectedLauncher} />
+            </Select.Value>
+          </Select.Trigger>
+        </div>
+        <Select.Content>
+          {pathLauncherOptions.map((launcher) => {
+            const launcherId = getPathLauncherId(launcher);
+            const customLauncherId = launcher.kind === 'custom' ? launcher.id : null;
+            return (
+              <Select.Item
+                key={launcherId}
+                value={launcherId}
+                // A marker, not a look: it lets the edit action show while this
+                // row is under the pointer or the keyboard.
+                className={stylex.props(stylex.defaultMarker()).className}
+                endContent={
+                  customLauncherId ? (
+                    <span {...stylex.props(styles.rowReveal)}>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        tabIndex={-1}
+                        size="mini"
+                        icon
+                        aria-label={t('settings.pathLaunchers.editAction', 'Edit')}
+                        title={t('settings.pathLaunchers.editAction', 'Edit')}
+                        onPointerDown={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                        }}
+                        onPointerUp={(event) => event.stopPropagation()}
+                        onClick={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          handleEditCustomLauncher(customLauncherId);
+                        }}
+                      >
+                        <Pencil {...stylex.props(styles.glyph)} />
+                      </Button>
+                    </span>
+                  ) : null
+                }
+              >
+                <LauncherOptionContent launcher={launcher} />
+              </Select.Item>
+            );
+          })}
+          {isElectron ? (
+            <>
+              <Select.Separator />
+              <Select.Item value={ADD_CUSTOM_LAUNCHER_VALUE}>
+                <span {...stylex.props(styles.option, styles.addCustom)}>
+                  <Plus {...stylex.props(styles.optionIcon)} />
+                  <span>{t('settings.pathLaunchers.addCustom', 'Custom launcher')}</span>
+                </span>
+              </Select.Item>
+            </>
+          ) : null}
+        </Select.Content>
+      </Select.Root>
+    </CompactRow>
+  );
+
   return (
     <>
-      <CompactSection>
-        <CompactRow
-          label={t('settings.pathLaunchers.title', 'Path launchers')}
-          helper={t(
-            'settings.pathLaunchers.description',
-            'Pick the app the Open button uses in session headers.'
-          )}
-        >
-          <Select.Root
-            open={selectOpen}
-            onOpenChange={setSelectOpen}
-            value={selectedLauncherId}
-            onValueChange={(value) => {
-              if (value != null) handleSelectDefault(value);
-            }}
-          >
-            <div {...stylex.props(styles.select)}>
-              <Select.Trigger
-                aria-label={t('settings.pathLaunchers.default.label', 'Default launcher')}
-              >
-                <Select.Value>
-                  <LauncherOptionContent launcher={selectedLauncher} />
-                </Select.Value>
-              </Select.Trigger>
-            </div>
-            <Select.Content>
-              {pathLauncherOptions.map((launcher) => {
-                const launcherId = getPathLauncherId(launcher);
-                const customLauncherId = launcher.kind === 'custom' ? launcher.id : null;
-                return (
-                  <Select.Item
-                    key={launcherId}
-                    value={launcherId}
-                    // A marker, not a look: it lets the edit action show while this
-                    // row is under the pointer or the keyboard.
-                    className={stylex.props(stylex.defaultMarker()).className}
-                    endContent={
-                      customLauncherId ? (
-                        <span {...stylex.props(styles.rowReveal)}>
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            tabIndex={-1}
-                            size="mini"
-                            icon
-                            aria-label={t('settings.pathLaunchers.editAction', 'Edit')}
-                            title={t('settings.pathLaunchers.editAction', 'Edit')}
-                            onPointerDown={(event) => {
-                              event.preventDefault();
-                              event.stopPropagation();
-                            }}
-                            onPointerUp={(event) => event.stopPropagation()}
-                            onClick={(event) => {
-                              event.preventDefault();
-                              event.stopPropagation();
-                              handleEditCustomLauncher(customLauncherId);
-                            }}
-                          >
-                            <Pencil {...stylex.props(styles.glyph)} />
-                          </Button>
-                        </span>
-                      ) : null
-                    }
-                  >
-                    <LauncherOptionContent launcher={launcher} />
-                  </Select.Item>
-                );
-              })}
-              {isElectron ? (
-                <>
-                  <Select.Separator />
-                  <Select.Item value={ADD_CUSTOM_LAUNCHER_VALUE}>
-                    <span {...stylex.props(styles.option, styles.addCustom)}>
-                      <Plus {...stylex.props(styles.optionIcon)} />
-                      <span>{t('settings.pathLaunchers.addCustom', 'Custom launcher')}</span>
-                    </span>
-                  </Select.Item>
-                </>
-              ) : null}
-            </Select.Content>
-          </Select.Root>
-        </CompactRow>
-      </CompactSection>
+      {inline ? row : <CompactSection>{row}</CompactSection>}
 
       <LauncherFormDialog
         draft={draft}

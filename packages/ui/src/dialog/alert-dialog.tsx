@@ -4,8 +4,14 @@ import { forwardRef, type ComponentProps } from 'react';
 import { appendClassName } from '../internal/class-name';
 import { PopupContainerProvider } from '../popup/portal-container';
 import { useForcedThemeClassNames } from '../theme/theme';
-import type { ModalContentProps } from './dialog';
-import { DialogFooter, DialogHeader, usePanelContainer } from './parts';
+import { DialogBackdrop, type ModalContentProps } from './dialog';
+import {
+  DialogFooter,
+  DialogHeader,
+  mergePanelWidth,
+  ModalDepthProvider,
+  usePanelContainer,
+} from './parts';
 import { isHidden, modal } from './surface';
 
 type TitleBaseProps = ComponentProps<typeof BaseAlertDialog.Title>;
@@ -37,7 +43,17 @@ const styles = stylex.create({
  */
 export const AlertDialogContent = forwardRef<HTMLDivElement, AlertDialogContentProps>(
   function AlertDialogContent(
-    { className, children, container, backdropContent, backdropClassName, noAnimation, ...rest },
+    {
+      className,
+      children,
+      container,
+      backdropContent,
+      backdropClassName,
+      noAnimation,
+      width,
+      style,
+      ...rest
+    },
     ref
   ) {
     const { ref: panelRef, container: panel } = usePanelContainer<HTMLDivElement>(ref);
@@ -48,20 +64,15 @@ export const AlertDialogContent = forwardRef<HTMLDivElement, AlertDialogContentP
         container={container}
         className={[stylex.props(styles.portal).className, ...palette].filter(Boolean).join(' ')}
       >
-        <BaseAlertDialog.Backdrop
-          className={(state) =>
-            appendClassName(
-              stylex.props(modal.backdrop, isHidden(state.transitionStatus) && modal.backdropHidden)
-                .className,
-              appendClassName(backdropClassName, noTransition)
-            )
-          }
-        >
+        {/* `AlertDialog.Backdrop` is the dialog's backdrop upstream, so the
+            shared part carries forceRender and the nested veil here too. */}
+        <DialogBackdrop className={appendClassName(backdropClassName, noTransition)}>
           {backdropContent}
-        </BaseAlertDialog.Backdrop>
+        </DialogBackdrop>
         <BaseAlertDialog.Popup
           ref={panelRef}
           {...rest}
+          style={mergePanelWidth(style, width)}
           className={(state) =>
             appendClassName(
               stylex.props(
@@ -73,7 +84,9 @@ export const AlertDialogContent = forwardRef<HTMLDivElement, AlertDialogContentP
             )
           }
         >
-          <PopupContainerProvider container={panel}>{children}</PopupContainerProvider>
+          <PopupContainerProvider container={panel}>
+            <ModalDepthProvider>{children}</ModalDepthProvider>
+          </PopupContainerProvider>
         </BaseAlertDialog.Popup>
       </BaseAlertDialog.Portal>
     );

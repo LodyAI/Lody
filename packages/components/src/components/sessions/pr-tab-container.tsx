@@ -292,7 +292,11 @@ export function PrTabContainer({
       onMarkReadyForReview={handleMarkReadyForReview}
       onDeleteBranch={handleDeleteBranch}
       onResolveConflicts={canResolveConflicts ? resolveConflictsAction?.run : undefined}
-      isResolvingConflicts={resolveConflictsAction?.pending ?? false}
+      // Pending only counts for an offerable action: while the session hydrates
+      // or cannot offer it, the header shows the disabled merge instead.
+      isResolvingConflicts={Boolean(
+        resolveConflictsAction?.available && resolveConflictsAction.pending
+      )}
       onRefresh={handleRefresh}
       onPostComment={handlePostComment}
       onGrantChecksPermission={handleGrantChecksPermission}

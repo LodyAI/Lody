@@ -78,6 +78,31 @@ describe('chat landing keyboard navigation IME handling', () => {
     expect(document.activeElement).not.toBe(textarea);
   });
 
+  it('lets an open modal receive Escape while the composer still has focus', async () => {
+    const textarea = container.querySelector('textarea')!;
+    const dialog = document.createElement('div');
+    dialog.setAttribute('role', 'dialog');
+    dialog.setAttribute('data-open', '');
+    document.body.appendChild(dialog);
+    textarea.focus();
+    let reachedTarget = false;
+    textarea.addEventListener('keydown', () => {
+      reachedTarget = true;
+    });
+    const event = new KeyboardEvent('keydown', {
+      key: 'Escape',
+      bubbles: true,
+      cancelable: true,
+    });
+
+    await act(async () => textarea.dispatchEvent(event));
+
+    expect(reachedTarget).toBe(true);
+    expect(event.defaultPrevented).toBe(false);
+    expect(document.activeElement).toBe(textarea);
+    dialog.remove();
+  });
+
   it('yields an unhandled horizontal boundary to the scope switcher', async () => {
     await act(async () => root.render(<BoundaryHarness />));
     const button = container.querySelector('button')!;

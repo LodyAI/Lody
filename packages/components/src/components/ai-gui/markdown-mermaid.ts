@@ -50,6 +50,9 @@ const MERMAID_LIGHT_THEME_VARIABLES = {
   sequenceNumberColor: '#475569',
 };
 
+// Dark diagram text stays under the app's dark brightness ceiling (text no
+// lighter than ~13:1 against the canvas, see `vscode-theme-css.ts`); Mermaid
+// takes literal colors, so these cannot read the theme variables.
 const MERMAID_DARK_THEME_VARIABLES = {
   background: '#0b1120',
   mainBkg: '#111827',
@@ -57,12 +60,12 @@ const MERMAID_DARK_THEME_VARIABLES = {
   tertiaryColor: '#1e293b',
   primaryColor: '#172033',
   primaryBorderColor: '#60a5fa',
-  primaryTextColor: '#f8fafc',
-  secondaryTextColor: '#f8fafc',
-  tertiaryTextColor: '#f8fafc',
+  primaryTextColor: '#d0d5dc',
+  secondaryTextColor: '#d0d5dc',
+  tertiaryTextColor: '#d0d5dc',
   lineColor: '#cbd5e1',
-  textColor: '#e2e8f0',
-  titleColor: '#f8fafc',
+  textColor: '#cbd5e1',
+  titleColor: '#d0d5dc',
   defaultLinkColor: '#cbd5e1',
   edgeLabelBackground: '#0b1120',
   nodeBorder: '#60a5fa',
@@ -70,15 +73,15 @@ const MERMAID_DARK_THEME_VARIABLES = {
   clusterBorder: '#475569',
   actorBkg: '#111827',
   actorBorder: '#60a5fa',
-  actorTextColor: '#f8fafc',
+  actorTextColor: '#d0d5dc',
   signalColor: '#cbd5e1',
-  signalTextColor: '#f8fafc',
+  signalTextColor: '#d0d5dc',
   labelBoxBkgColor: '#111827',
   labelBoxBorderColor: '#475569',
-  labelTextColor: '#f8fafc',
-  loopTextColor: '#f8fafc',
+  labelTextColor: '#d0d5dc',
+  loopTextColor: '#d0d5dc',
   noteBkgColor: '#422006',
-  noteTextColor: '#fffbeb',
+  noteTextColor: '#dfd3b5',
   noteBorderColor: '#f59e0b',
   activationBkgColor: '#1e3a5f',
   activationBorderColor: '#60a5fa',

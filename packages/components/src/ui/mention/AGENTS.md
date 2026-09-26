@@ -81,15 +81,25 @@ Shared mention primitive used by composer autocomplete surfaces.
   match the search term against each item's `value` hides rows whose payload
   happens not to contain it, and a hidden row renders null, which strips its node
   from the collection and breaks arrow-key movement across groups.
-- Desktop `MentionContent` is caret-anchored vertically but horizontally constrained
+- Desktop `MentionContent` defaults to the caret line, horizontally constrained
   to the textarea range via its virtual collision boundary and
   `--mention-input-width`.
-- `MentionContent positionAnchor="input-top"` places top-side menus against the
-  input wrapper's top edge instead of the current caret line.
+- `positionAnchor="composer"` anchors to the input's nearest `[data-mention-frame]`
+  (else its wrapper), left-aligned and no wider. It picks its side once per open
+  — above unless there is no room — and never flips: a level change resizes it
+  in place, and its height is capped to that side's room. An explicit `side`
+  pins the side instead of the room pick. A composer marks the frame around
+  its chip row and box, so the menu never half-covers a chip.
 - Menu callers should include `var(--mention-input-width)` in desktop `max-w`
   classes; viewport-only caps let wide menus escape the composer.
 - Mobile mention content bypasses floating-ui and docks through
   `MentionMobilePanel`; desktop positioning classes do not control mobile layout.
+  The docked strip is the only scroller: menus pass `docked` and drop their own.
+- Desktop content, the mobile strip and rows share `mention-surface.ts`: the
+  `@lody/ui` popup surface restated in semantic tokens (no border, no Tailwind).
+  StyleX cannot read `data-highlighted`, so `ui/mention.tsx` derives the row
+  highlight from `highlightedItem.value`; row values must stay unique per menu.
+  The entrance rises from the side the menu landed on (`--mention-rise`).
 
 ## Files
 

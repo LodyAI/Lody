@@ -15,7 +15,9 @@ within a row; and every group was a white card on a white panel held apart only
 by a shadow halo. Settings now has one type scale (a 12px floor, 1.45 leading,
 two weights plus a semibold title) and a three-step material chosen from four
 rendered variants: a nav, a neutral gray canvas, and white cards on it, split
-by fill rather than lines. A card flush with the top of a scroller also lost its
+by fill rather than lines. A fourth review found the real cause was content, not
+material: one page frame, groups by meaning, fewer sentences, flat preferences
+and boxed records. A card flush with the top of a scroller also lost its
 top edge, which is fixed, and the composer's image lightbox became a popover
 card that springs out of the thumbnail. Tooltips stopped inverting in the same
 change; that reversal is recorded in the
@@ -180,6 +182,143 @@ no query the commands are grouped under their category; with one, the list stays
 ordered by relevance. A shortcut is quiet trailing text like a menu's, and the
 highlight is an ink wash driven by cmdk's controlled value so it can be StyleX.
 
+## Fourth review: one frame, content first, flat preferences, boxed records
+
+The owner found the page "all lines" and asked for the nav's mix toward black at
+3.5% and for Linear's settings. At 3.5% the nav matches the old canvas, so the
+content became the panel's own fill (`surface.canvas` is `elevatedBackground`);
+the nav stays a step below it in both palettes.
+
+**Material, three tries.** Linear's bordered trays with inset row rules were
+rejected as not good-looking. Two flat variants followed (a rule above each
+section only; and the same with inset rules between rows), and the owner picked
+the first. On the GitHub page the owner then saw that some groups need a box and
+some do not. The package rule already said so: "a list of records is one card
+with ruled rows". So preferences (each row a question) are flat and records a
+person manages (repositories, servers, roles, providers, projects, machines,
+members, tokens, shares) keep a card. `settings/material.stylex.ts` holds a
+group's drawing as variables whose defaults are the card; `settingsFlat` is the
+theme the desktop pane and the project window apply, `settingsBoxed` puts a
+records group back on its card (`CompactSection boxed`, `settingsRecordsCard`).
+Mobile settings and settings dialogs are unchanged. A flat group's rows bleed
+16px past the column so their copy meets the headings; the first section on a
+page takes no rule, since the title opens it.
+
+**Content was the real problem.** The owner asked whether the issue was density,
+arrangement and needless description rather than boxes. Measured and read, it
+was:
+
+- Three page frames. Most pages had the pane's title; Projects, Agents and
+  Machines drew their own (23px lower, a different inset, Agents 40px wider).
+  Now the pane header names every page and holds its actions and one-line lead
+  (`settings-page-header.tsx` portals `SettingsPageActions` / `SettingsPageLead`
+  into it); no page draws its own title in the pane.
+- Groups cut by component, not meaning: Preferences was 3 groups for 5 rows (7
+  in the desktop app, with two one-row groups), Appearance 3 for 4. Preferences
+  is now Conversations (queue behaviour, Open with, code-only line counts,
+  notifications), This computer (local agent, daemon, launch at startup, hide
+  window, prevent sleep), auto-archive, and Advanced (experimental, clear cache).
+  Appearance is theme and language, Text (interface font, size, ligatures),
+  Terminal, App icon.
+- Helpers that repeated their label (launch at startup, hide window,
+  experimental) are gone; long ones are one clause. Notifications speak only when
+  something blocks them, instead of restating the switch. Prevent sleep gained
+  the helper it lacked: it keeps the computer awake while Lody runs.
+- About: version, channel, build date and commits are one row with the update
+  check beside them; the two download rows are one row with two destinations.
+- Catalogs (MCP, Agent Roles, Prompt Shortcuts): the add action moved into the
+  page header, a section heading that repeated the page title went, the empty
+  state no longer repeats the add button, and a private record is no longer
+  badged on every row (only shared ones are).
+- Projects: a machine or GitHub owner section is titled by its name with its
+  state underneath; GitHub rows no longer repeat the owner. The project window
+  dropped the Machine and Visibility rows its header already states, and the
+  General, Worktree and Skills leads that restated their tabs; a pending removal
+  is said on the Delete row.
+
+Row padding, section gaps and the type scale are unchanged.
+
+**A detour: the material came back, then went again.** After the owner said the
+flat version had "killed the highlight material", cards on a 2% canvas were
+rendered with full-width and inset row rules. The owner chose to keep the flat
+preferences with boxed records after all.
+
+**Agents, redesigned.** The desktop Agents tab used the providers' roomy mobile
+density (`variant="list"`): 56px rows, a 32px icon tile, and the rate-limit
+meters hidden, since only the compact row shows them. The pane now draws the
+compact row (`MachineProvidersSection bare`): a 24px glyph, 8px block padding,
+and the meters beside the name. Refresh and delete appear only under the pointer
+or keyboard focus, laid over the row's end on its hover fill, so a list at rest
+shows what is true of each provider and reaches the edge (kept in the flow while
+hidden, they left an empty band the owner spotted). The machine pills became the page's tabs under its title
+(`SettingsLineTabs`, the project window's sliding-line tabs made shared), shown
+only when there is more than one machine; "Add provider" sits in the page header.
+A header Select was tried first and rejected.
+The "Agent Provider" heading that repeated the page is gone.
+
+Compacted, a machine with two or three providers left the page mostly empty.
+The space is now filled with facts the renderer already holds, not decoration.
+A provider's second line names its default model (from the cached capabilities
+the composer reads; a model the runtime calls "default" is left out), how many
+open conversations on this machine use it and when one last moved (from the
+session index in memory), and its environment variable count. A list of what the machine could still add
+was tried under every list and rejected: the owner wants it only when the
+machine has nothing. An empty machine's page is a quiet line, "No agents on {machine} yet",
+over the onboarding's wall of agent marks as pills, each opening the add dialog
+already on that agent (`listAddableProviders` in `agent-config-dialog.tsx`;
+experimental runtimes, registry agents and custom commands stay behind the
+dialog's rail). A bare heading read as hand-typed and an arc of raised discs as
+cheap; of three rendered alternatives (a line icon over a two-column list, the
+wall, the list alone) the owner chose the wall.
+
+With many machines the tabs keep to one row: those that fit are tabs, the rest
+sit behind a last "N more" tab whose menu gains a search field past eight, and
+the current machine always holds a place in the row. Every tab is laid out once
+out of sight to know how many fit, and the travelling line re-measures when a
+tab's width changes after its font loads.
+
+**A rule halfway between sections.** On About the space above a section rule was
+the page gap plus the row's padding (32px) and below it 24px, so the two rules
+sat off-centre. Inside `settingsFlat` the page gap is now 16px, a rule is followed
+by 16px before a headless section's first row and by 24px before a heading, and a
+records card stands 8px further off. Text sits about 24px from the rule on both
+sides.
+
+## Design review round 2
+
+A second critique of the real desktop app, with material and spacing held fixed:
+
+- **Keyboard Shortcuts.** Fifteen red trash cans read as fifteen alarms. Unbinding
+  now appears only when the pointer or keyboard reaches a row, in neutral ink, and
+  turns destructive only while the icon itself is hovered or focused. Key caps
+  read at 12px: `@lody/ui` `Kbd` gained `size="medium"` (the footnote step in the
+  same cap); the palette and tooltips keep the 11px caption cap.
+- **One add, named.** Every catalog header's add is icon + text. On Projects the
+  header's icon-only "+" and each machine's "Add folder" opened the same folder
+  dialog, whose machine picker makes the per-machine entry a duplicate, so the
+  header's "Add project" is the only one (a direct button, or a menu when a GitHub
+  repository can also be added).
+- **About.** Every row said its name twice (Website / Visit website) and "Join
+  community" was the window's one primary button. Community, Website and Open
+  Source Licenses are now rows that are themselves the link, with a quiet ↗ (out of
+  Lody) or › (a dialog) at the end (`CompactLinkRow`); Downloads names its two
+  channels as quiet links. Rows keep a control's height, so the rhythm is unchanged.
+- **Agents.** The English "Custom" pill became the meta line's first fact,
+  localized ("自定义 · 1 个对话 · 2 分钟前用过"). "2m 前用过" mixed an English unit
+  into Chinese: `formatLocalizedRelativeTime` spells units per language
+  (`time.ago.*`; English keeps "2m ago"). The sidebar's compact formatter is unchanged.
+- **Empty catalogs.** MCP, Agent Roles, Prompt Shortcuts, Shares, GitHub, Projects
+  and a machine with no providers now share `SettingsEmptyList`: the list's own
+  records card with one quiet line, no centred icon.
+- **Unavailable switches.** Launch at startup is supported only on macOS and Windows
+  (the main process's `process.platform` check). An unavailable row dims its name
+  (`CompactRow disabled`) and says why; "Hide window on auto-launch" says it applies
+  once Launch at startup is on.
+- **Top inset kept.** Removing the surface's 20px top inset put the page title on
+  the nav's first heading and the close button (≈65px), but the re-review read
+  the title jammed against the sheet's top edge with no header band. The approved
+  20px inset stays; the title sits one line below the nav heading by design.
+
 ## Verification
 
 - Storybook screenshots before and after, in Chinese, for the preferences
@@ -196,5 +335,11 @@ highlight is an ink wash driven by cmdk's controlled value so it can be StyleX.
 - `packages/ui/test/focus-modality.test.tsx` covers the modality switches, and
   `tests/command-palette-view.test.tsx` covers group headings, arrow-key
   highlight, Enter, and the empty state.
+- Fourth review: the settings overlay in both palettes, in Chinese, with the
+  desktop-app sections forced on (Preferences, Appearance, MCP, Agent Roles,
+  Keyboard Shortcuts, About), and Projects, Agents providers and Account rows from
+  their data stories inside the pane frame. The title and first content now sit
+  at the same place on every page (measured). The material study, outside
+  `settingsFlat`, still draws cards.
 - Not verified in the packaged Electron app. Storybook renders the same
   components, but outside the app shell.

@@ -41,4 +41,7 @@ this page is the full text of the rules summarised there.
   is distinct from machine-offline (informational only: sends are written
   durably and run on reconnect — do not block them; neutral tone, not warning).
   The header `SessionSyncingIndicator` only covers active catch-up
-  (`isSyncingRoomSyncState`) behind a ~400ms `useDelayedFlag`.
+  (`isSyncingRoomSyncState`) behind a ~400ms `useDelayedFlag`. The conversation's own
+  loading states (`lib/session-content-sync-state.ts`: skeleton while nothing is
+  cached, "Updating" in the info bar while a saved copy first catches up) follow
+  the same rule and never cover a degraded connection.

@@ -1,10 +1,13 @@
 import { Command } from 'commander';
 import {
   getMachineFlockDocId,
+  getScheduleRoomId,
+  getScheduleRegistryFlockDocId,
   isMachineDocRoomId,
   type MachineMeta,
   type WorkspaceId,
 } from '@lody/shared';
+import { listWorkspaceScheduleIds } from '@/lib/schedules/schedule-documents';
 import {
   getAuthContextOrThrow,
   listAliveDocMetas,
@@ -224,28 +227,36 @@ export async function syncItems(input: {
 }
 
 /**
- * Flock documents `lody sync` pulls: one per machine, plus the workspace task
- * index.
- *
- * Both halves of a task are pulled explicitly: the index here, and the task rooms
- * in the doc sweep. Neither comes for free — task rooms are absent from workspace
- * meta, so the meta-driven room scan never lists them, and the index is a Flock
- * doc that the room sweep does not cover. Code Collab file-index Flocks stay
- * excluded by design.
+ * Flock documents `lody sync` pulls: one per machine, plus the workspace
+ * Schedule Registry. The Registry is a Flock doc the room sweep does not cover,
+ * so it is pulled explicitly. Code Collab file-index Flocks stay excluded by
+ * design.
  */
 async function listSyncableFlockDocIds(
   manager: LoroDocumentManager,
   workspaceId: WorkspaceId
 ): Promise<string[]> {
   const machines = await listAliveDocMetas<MachineMeta>(manager, isMachineDocRoomId);
-  return machines
-    .map((entry) => getMachineFlockDocId(workspaceId, entry.meta.id))
-    .sort((left, right) => left.localeCompare(right));
+  return [
+    ...machines.map((entry) => getMachineFlockDocId(workspaceId, entry.meta.id)),
+    getScheduleRegistryFlockDocId(workspaceId),
+  ].sort((left, right) => left.localeCompare(right));
 }
 
-/** Documents `lody sync` pulls. */
-export function buildSyncDocIds(aliveRoomIds: readonly string[]): string[] {
-  return [...aliveRoomIds].sort((left, right) => left.localeCompare(right));
+/**
+ * Documents `lody sync` pulls.
+ *
+ * Schedule rooms normally come from loro-repo's `e/<docId>` existence index;
+ * the Schedule Registry is merged in as a repair source without syncing a room
+ * twice.
+ */
+export function buildSyncDocIds(
+  aliveRoomIds: readonly string[],
+  scheduleIds: readonly string[] = []
+): string[] {
+  return [...new Set([...aliveRoomIds, ...scheduleIds.map(getScheduleRoomId)])].sort(
+    (left, right) => left.localeCompare(right)
+  );
 }
 
 async function syncWorkspace(input: {
@@ -280,7 +291,11 @@ async function syncWorkspace(input: {
       return;
     }
 
-    const docIds = buildSyncDocIds(await listAliveRoomIds(manager, () => true));
+    await manager.syncFlockDocOrThrow(getScheduleRegistryFlockDocId(workspaceId), {
+      reason: 'sync:schedules:registry',
+    });
+    const scheduleIds = await listWorkspaceScheduleIds(manager, workspaceId);
+    const docIds = buildSyncDocIds(await listAliveRoomIds(manager, () => true), scheduleIds);
     const flockDocIds = await listSyncableFlockDocIds(manager, workspaceId);
 
     await syncItems({

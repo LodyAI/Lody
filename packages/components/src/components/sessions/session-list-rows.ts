@@ -231,7 +231,21 @@ type LatestPullRequestInfo = {
   readiness: SessionPullRequestReadiness | null;
 };
 
+// Every sidebar list rebuilds all rows whenever any session changes (a running
+// agent updates its meta constantly). Session metas keep their identity while
+// unchanged, and this is a pure function of one, so memoize per object.
+const latestPullRequestInfoBySession = new WeakMap<SessionMeta, LatestPullRequestInfo>();
+
 export function getLatestPullRequestInfo(session: SessionMeta): LatestPullRequestInfo {
+  let info = latestPullRequestInfoBySession.get(session);
+  if (!info) {
+    info = computeLatestPullRequestInfo(session);
+    latestPullRequestInfoBySession.set(session, info);
+  }
+  return info;
+}
+
+function computeLatestPullRequestInfo(session: SessionMeta): LatestPullRequestInfo {
   const pullRequests = session.pullRequests ?? [];
   if (!pullRequests.length) {
     return { url: null, number: null, status: null, ciState: null, readiness: null };

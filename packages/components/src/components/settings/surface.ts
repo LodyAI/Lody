@@ -1,6 +1,15 @@
 import * as stylex from '@stylexjs/stylex';
-import { colors, shadow } from '@lody/ui/tokens/colors.stylex';
-import { corner, duration, ease, focus, radius, space } from '@lody/ui/tokens/scales.stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import {
+  control,
+  corner,
+  duration,
+  ease,
+  focus,
+  radius,
+  space,
+} from '@lody/ui/tokens/scales.stylex';
+import { settingsMaterial as material } from './material.stylex';
 import { settingsType as type } from './type.stylex';
 
 /**
@@ -19,21 +28,39 @@ import { settingsType as type } from './type.stylex';
 const WIDE = '@media (min-width: 640px)';
 
 export const settingsSurface = stylex.create({
-  /** A titled group: the heading, then its rows. */
+  /**
+   * A titled group: the heading, then its rows. How the group is drawn — a
+   * card, or rows on the page under a rule — is `settingsMaterial`'s.
+   */
   section: {
     display: 'flex',
     flexDirection: 'column',
     gap: space[2],
     minWidth: 0,
+    // The page's title opens the page; only a section after another is ruled.
+    // The page gap above the rule is paid back below it, so a rule sits
+    // halfway between the last row above and the first line below.
+    paddingTop: { default: material.sectionRuleGap, ':first-child': 0 },
+    boxShadow: { default: material.sectionRule, ':first-child': 'none' },
     fontSize: '1em',
   },
-  /** A settings page reads as a document: a group is named by a heading, not boxed. */
+  /** A section led by its heading: the heading has no padding of its own to lend. */
+  sectionTitled: { paddingTop: { default: material.sectionTitledGap, ':first-child': 0 } },
+  /** A boxed collection is set apart by its box; a rule above it would be a second edge. */
+  sectionBoxed: {
+    paddingTop: { default: material.sectionBoxedGap, ':first-child': 0 },
+    boxShadow: 'none',
+  },
+  /**
+   * A group's name, above its rows: on a flat page it starts where the title
+   * and the rows' copy do; over a card it is inset to the rows' copy.
+   */
   sectionHeader: {
     display: 'flex',
     alignItems: 'flex-end',
     justifyContent: 'space-between',
     gap: space[2],
-    paddingInline: space[4],
+    paddingInline: material.headingInset,
   },
   sectionHeading: { flexGrow: 1, minWidth: 0, lineHeight: type.leading },
   sectionTitle: {
@@ -43,6 +70,8 @@ export const settingsSurface = stylex.create({
     lineHeight: type.leading,
     color: colors.label,
   },
+  /** A group that destroys something — leave, transfer, delete — says so in its name. */
+  sectionTitleDanger: { color: colors.destructive },
   sectionDescription: {
     margin: 0,
     fontSize: type.caption,
@@ -62,40 +91,36 @@ export const settingsSurface = stylex.create({
   sectionActions: { display: 'flex', flexShrink: 0, alignItems: 'center', gap: space[1.5] },
 
   /**
-   * The ground a settings page stands on: a step below the panel, so its groups
-   * can be white cards read by the difference in fill rather than by a shadow
-   * strong enough to halo. Mixed toward black from the panel's own fill, so the
-   * step holds in both palettes and in a forced one: a neutral gray in light, a
-   * shade under the panel in dark.
+   * The page a settings group stands on: the panel's own fill. The page is one
+   * plane and its groups are flat on it (`settingsFlat`), so it needs no step
+   * of its own.
    */
-  canvas: { backgroundColor: `color-mix(in oklab, ${colors.elevatedBackground}, black 3.5%)` },
+  canvas: { backgroundColor: colors.elevatedBackground },
   /**
-   * The master side of a master/detail split — the settings nav: the darkest of
-   * the three steps (nav, canvas, card) in either palette. The step in fill is
-   * the split; a line down the panel would be a second edge doing the same job.
+   * The master side of a master/detail split — the settings nav: a step below
+   * the page in either palette. The step in fill is the split; a line down the
+   * panel would be a second edge doing the same job.
    */
-  nav: { backgroundColor: `color-mix(in oklab, ${colors.background}, black 6.5%)` },
+  nav: { backgroundColor: `color-mix(in oklab, ${colors.background}, black 3.5%)` },
   /**
-   * A group's rows on a card: the raised fill with the card rung's hairline and
-   * contact shadow, no lift. On the canvas the card is found by its fill, so the
-   * shadow only has to draw its edge.
+   * A group's rows. On a flat page they bleed past the column by their own
+   * inset, so their copy meets the headings and the pointer's fill has room.
    */
   card: {
     boxSizing: 'border-box',
     minWidth: 0,
     overflow: 'hidden',
-    backgroundColor: colors.raisedBackground,
-    boxShadow: shadow.card,
-    borderRadius: radius.large,
+    marginInline: `calc(-1 * ${material.groupBleed})`,
+    backgroundColor: material.groupFill,
+    boxShadow: material.groupShadow,
+    borderRadius: material.groupRadius,
     cornerShape: corner.shape,
   },
-  /** A group that destroys something marks its card with a destructive hairline. */
-  cardDanger: {
-    boxShadow: `0 0 0 0.5px color-mix(in oklab, ${colors.destructive} 45%, transparent), ${shadow.card}`,
-  },
-  /** One line of a card. Every line but the first is ruled from the one above. */
+  /** A group that destroys something marks its card, when it has one. */
+  cardDanger: { boxShadow: material.dangerShadow },
+  /** One line of a group. Every line but the first is ruled from the one above, on a card. */
   line: { minWidth: 0 },
-  lineRuled: { boxShadow: `inset 0 1px 0 color-mix(in oklab, transparent, ${colors.label} 8%)` },
+  lineRuled: { boxShadow: material.rowRule },
 
   /**
    * A setting: its name and what it does, and the control that sets it. The
@@ -137,6 +162,8 @@ export const settingsSurface = stylex.create({
 
   /** A row a person can open: the whole line answers the pointer. */
   pressableLine: {
+    borderRadius: material.rowRadius,
+    cornerShape: corner.shape,
     backgroundColor: {
       default: 'transparent',
       ':hover': `color-mix(in oklab, ${colors.elevatedBackground}, ${colors.label} 4%)`,
@@ -173,6 +200,9 @@ export const settingsSurface = stylex.create({
    * A row of a list a person moves through — the settings nav, the Projects
    * sources and folders: a sidebar row. No edge; the pointer's fill and the
    * current row's fill are washes of ink over whatever the row stands on.
+   * Keyboard focus shows as the pointer's wash, not the shell's accent ring:
+   * the dialog focuses a row when it opens, and from the keyboard that focus
+   * is `:focus-visible`, which framed a row nobody chose.
    * Spread on a `<button>` or a link; it resets what a button brings.
    */
   listRow: {
@@ -190,11 +220,15 @@ export const settingsSurface = stylex.create({
     borderRadius: radius.small,
     cornerShape: corner.shape,
     // Ink washes rather than the palette's hover/selected fills: those are tuned
-    // for the page rung and all but vanish on the nav's darker fill.
+    // for the page rung and all but vanish on the nav's darker fill. 6% / 10%
+    // so the current row reads clearly against the nav.
     backgroundColor: {
       default: 'transparent',
-      ':hover': `color-mix(in oklab, transparent, ${colors.label} 5%)`,
+      ':hover': `color-mix(in oklab, transparent, ${colors.label} 6%)`,
+      ':focus-visible': `color-mix(in oklab, transparent, ${colors.label} 6%)`,
     },
+    boxShadow: { default: null, ':focus-visible': 'none' },
+    outline: { default: null, ':focus-visible': 'none' },
     color: colors.label,
     fontFamily: 'inherit',
     fontSize: '1em',
@@ -209,8 +243,9 @@ export const settingsSurface = stylex.create({
   },
   listRowSelected: {
     backgroundColor: {
-      default: `color-mix(in oklab, transparent, ${colors.label} 8%)`,
-      ':hover': `color-mix(in oklab, transparent, ${colors.label} 8%)`,
+      default: `color-mix(in oklab, transparent, ${colors.label} 10%)`,
+      ':hover': `color-mix(in oklab, transparent, ${colors.label} 10%)`,
+      ':focus-visible': `color-mix(in oklab, transparent, ${colors.label} 10%)`,
     },
   },
   /** A list row's glyph: icons at rest are a hint. */
@@ -236,6 +271,34 @@ export const settingsSurface = stylex.create({
     fontVariantNumeric: 'tabular-nums',
   },
 
+  /**
+   * A row a person presses to go somewhere (a page, a dialog), drawn as a
+   * settings row: the whole line is the target and a quiet mark at its end
+   * says where it leads. Spread with `row` and `pressableLine`; it resets what
+   * a button brings.
+   */
+  linkRow: {
+    boxSizing: 'border-box',
+    width: '100%',
+    margin: 0,
+    borderWidth: 0,
+    borderStyle: 'none',
+    color: 'inherit',
+    fontFamily: 'inherit',
+    fontSize: 'inherit',
+    textAlign: 'start',
+    cursor: 'pointer',
+    outline: 'none',
+    boxShadow: {
+      default: 'none',
+      ':focus-visible': `inset 0 0 0 ${focus.ringWidth} ${colors.accent}`,
+    },
+  },
+  /** A link row's end holds a control's height, so it is as tall as a row with a button. */
+  linkEnd: { minHeight: control.small },
+  /** A link row's end mark: a hint, in the ink of a glyph at rest. */
+  linkMark: { flexShrink: 0, width: '14px', height: '14px', color: colors.tertiaryLabel },
+
   /** Copy standing in for a card's rows: an empty list, a loading line. */
   cardNote: {
     margin: 0,
@@ -245,6 +308,16 @@ export const settingsSurface = stylex.create({
     lineHeight: 1.375,
     color: colors.secondaryLabel,
   },
+  /** An empty list's one line when it carries the way to fill it. */
+  cardNoteWithAction: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: space[4],
+    paddingBlock: space[2],
+  },
+  /** A row whose control cannot be used here: its name steps back with it. */
+  rowLabelDisabled: { color: colors.tertiaryLabel },
   /**
    * The column a settings page lays out in: sections stacked and set apart by
    * space, centred at a reading width once the panel is wide.
@@ -254,10 +327,10 @@ export const settingsSurface = stylex.create({
     boxSizing: 'border-box',
     display: 'flex',
     flexDirection: 'column',
-    gap: space[6],
+    gap: material.pageGap,
     minWidth: 0,
     overflowX: 'hidden',
-    paddingInline: { default: space[4], '@media (min-width: 768px)': space[2] },
+    paddingInline: space[4],
     paddingBlock: space[2],
     marginInline: { default: null, '@media (min-width: 768px)': 'auto' },
     maxWidth: { default: null, '@media (min-width: 768px)': '760px' },
@@ -313,14 +386,14 @@ export const settingsCatalog = stylex.create({
   /** Groups of one catalog, stacked and set apart by space. */
   groups: { display: 'flex', flexDirection: 'column', gap: space[6], minWidth: 0 },
   group: { display: 'flex', flexDirection: 'column', gap: space[2], minWidth: 0 },
-  /** A group's name, above its card: a label, never a bordered pill. */
+  /** A group's name, above its rows: a label, never a bordered pill. */
   groupHeading: {
     display: 'flex',
     alignItems: 'center',
     gap: space[1.5],
     minWidth: 0,
     margin: 0,
-    paddingInline: space[4],
+    paddingInline: material.headingInset,
     fontSize: '1em',
     fontWeight: type.headingWeight,
     lineHeight: type.leading,
@@ -431,23 +504,6 @@ export const settingsCatalog = stylex.create({
     gap: space[1],
     paddingInlineEnd: space[3],
   },
-  /** An empty catalog: a quiet region, no edge and no dashed box. */
-  empty: {
-    boxSizing: 'border-box',
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: space[3],
-    paddingInline: space[6],
-    paddingBlock: space[8],
-    borderRadius: radius.large,
-    cornerShape: corner.shape,
-    backgroundColor: `color-mix(in oklab, transparent, ${colors.label} 3%)`,
-    textAlign: 'center',
-  },
-  emptyIcon: { width: '24px', height: '24px', color: colors.tertiaryLabel },
-  emptyText: { margin: 0, fontSize: type.caption, color: colors.secondaryLabel },
   icon: { flexShrink: 0, width: '14px', height: '14px' },
   iconSmall: { flexShrink: 0, width: '12px', height: '12px' },
 
@@ -507,8 +563,10 @@ export const settingsCatalog = stylex.create({
 
 /**
  * The size of a settings editor dialog (MCP server, Agent Role, Prompt
- * Shortcut). Layout only, and a Tailwind class on purpose: the panel states its
- * own width in StyleX, and a second StyleX width on the same element is ordered
- * by the stylesheet, while utilities sit in a later layer and win.
+ * Shortcut). The width rides `Dialog.Content`'s `width` prop — the panel's own
+ * width is a StyleX declaration, and a second one on the same element is
+ * ordered by the stylesheet rather than the caller. This class keeps only the
+ * height cap.
  */
-export const SETTINGS_EDITOR_DIALOG_LAYOUT = 'w-[620px] max-h-[min(680px,88dvh)]';
+export const SETTINGS_EDITOR_DIALOG_WIDTH = '620px';
+export const SETTINGS_EDITOR_DIALOG_LAYOUT = 'max-h-[min(680px,88dvh)]';

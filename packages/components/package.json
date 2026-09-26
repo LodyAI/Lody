@@ -96,6 +96,7 @@
     "@lody/loro-streams-rpc": "workspace:*",
     "@lody/platform": "workspace:*",
     "@lody/shared": "workspace:*",
+    "@lody/virtua": "workspace:*",
     "@loro-dev/flock-wasm": "catalog:",
     "@loro-dev/streams-crdt": "catalog:",
     "@meowdown/core": "0.59.0",
@@ -110,7 +111,6 @@
     "@radix-ui/react-context-menu": "^2.2.15",
     "@radix-ui/react-dialog": "^1.1.14",
     "@radix-ui/react-dropdown-menu": "^2.0.6",
-    "@radix-ui/react-popover": "^1.0.7",
     "@radix-ui/react-scroll-area": "^1.2.9",
     "@radix-ui/react-slot": "^1.2.4",
     "@radix-ui/react-tabs": "^1.0.4",
@@ -187,10 +187,8 @@
     "three": "^0.185.1",
     "tw-animate-css": "^1.3.5",
     "uuid": "^11.0.5",
-    "use-stick-to-bottom": "^1.1.6",
     "validator": "^13.15.35",
     "vaul": "^1.1.2",
-    "virtua": "^0.49.1",
     "zod": "catalog:"
   },
   "devDependencies": {

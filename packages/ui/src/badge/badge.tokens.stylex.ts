@@ -128,3 +128,9 @@ export const badgePaletteTheme = stylex.createTheme(badge, {
   warningFill: `color-mix(in oklab, ${colors.warning} 14%, transparent)`,
   dangerFill: `color-mix(in oklab, ${colors.destructive} 14%, transparent)`,
 });
+
+/** A stronger success signal for a standing fact that needs to be noticed. */
+export const badgeProminentSuccessTheme = stylex.createTheme(badge, {
+  successLabel: colors.success,
+  successFill: `color-mix(in oklab, ${colors.success} 16%, transparent)`,
+});

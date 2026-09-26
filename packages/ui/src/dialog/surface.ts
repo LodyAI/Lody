@@ -31,10 +31,23 @@ export const modal = stylex.create({
     transitionProperty: 'opacity',
     transitionDuration: duration.regular,
     transitionTimingFunction: ease.standard,
-    zIndex: z.dialogBackdrop,
+    // The overlay shares the panel's rung rather than sitting one step below
+    // it. Every portal appends to the same parent, so DOM order is what stacks
+    // a later dialog: its overlay lands above the earlier panel and below its
+    // own — a nested dialog dims the dialog it was opened from, not just the
+    // page. A lower rung would leave a nested overlay painted under the first
+    // panel, invisible.
+    zIndex: z.dialog,
   },
   /** Both ends of the backdrop's fade. */
   backdropHidden: { opacity: 0 },
+  /**
+   * The veil over the panel a nested dialog was opened from. It stays lighter
+   * than the page overlay (`dialog.nestedOverlay`): that overlay is already
+   * dimming the page under the parent panel, so restating it here would
+   * double-darken the stack.
+   */
+  backdropNested: { backgroundColor: dialog.nestedOverlay },
   /**
    * A surface that has to appear instantly — the command palette pops in with
    * no fade — states it here rather than overriding the transition with a
@@ -132,9 +145,9 @@ export const modal = stylex.create({
     // creates a stacking context, so a `z-index` on the panel inside it only
     // orders the panel against its own siblings — against the page it counts as
     // whatever the viewport counts as, which with no `z-index` is `auto`. The
-    // backdrop, at `z.dialogBackdrop`, then paints over the drawer: the panel
-    // renders greyed under its own overlay. The viewport is the element that
-    // stacks against the product shell, so it is the one that says so.
+    // backdrop, at `z.dialog`, then paints over the drawer: the panel renders
+    // greyed under its own overlay. The viewport is the element that stacks
+    // against the product shell, so it is the one that says so.
     zIndex: z.dialog,
   },
   /**

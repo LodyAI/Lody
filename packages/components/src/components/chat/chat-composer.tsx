@@ -9,7 +9,6 @@ import {
   type ClipboardEvent,
   type DragEvent,
   type KeyboardEvent,
-  type MutableRefObject,
   type ReactNode,
   type Ref,
 } from 'react';
@@ -185,11 +184,6 @@ export interface ChatComposerProps {
   autoResize?: boolean;
   /** Maximum number of rows when autoResize is enabled (default: 12) */
   maxRows?: number;
-  /**
-   * Marks the next viewport resize as caused by this composer's height change,
-   * so a parent conversation can preserve the reader's scroll position.
-   */
-  skipNextViewportResizeAutoScrollRef?: MutableRefObject<boolean>;
   /** Focus the textarea when clicking the container background. */
   focusOnContainerClick?: boolean;
 }
@@ -214,7 +208,7 @@ export function getChatComposerTextareaClassName({
           isMobile ? 'min-h-[24px]' : 'min-h-[48px]'
         ),
     'focus-visible:outline-hidden focus-visible:ring-0 focus-visible:ring-offset-0',
-    'text-input-foreground placeholder:text-input-placeholder/40'
+    'text-input-foreground placeholder:text-input-placeholder/85'
   );
 }
 
@@ -287,7 +281,6 @@ export function ChatComposer({
   className,
   autoResize = false,
   maxRows = 12,
-  skipNextViewportResizeAutoScrollRef,
   focusOnContainerClick = false,
 }: ChatComposerProps) {
   const { t, i18n } = useTranslation();
@@ -333,8 +326,13 @@ export function ChatComposer({
     const update = (width: number) => {
       setUseCompactPlaceholder(width <= COMPOSER_COMPACT_PLACEHOLDER_MAX_PX);
     };
-    update(box.getBoundingClientRect().width);
-    if (typeof ResizeObserver === 'undefined') return undefined;
+    // No synchronous measurement here: a layout-effect read forces style and
+    // layout of the whole just-committed tree (a full conversation on a session
+    // switch). ResizeObserver delivers the first size before that frame paints.
+    if (typeof ResizeObserver === 'undefined') {
+      update(box.getBoundingClientRect().width);
+      return undefined;
+    }
     const observer = new ResizeObserver((entries) => {
       const width = entries[0]?.contentRect.width ?? 0;
       update(width);
@@ -580,33 +578,28 @@ export function ChatComposer({
     const minHeight = lineHeight * effectivePromptRows + paddingTop + paddingBottom;
     const maxHeight = lineHeight * maxRows + paddingTop + paddingBottom;
 
-    const previousHeight = textarea.style.height;
-
-    // Reset height to auto to get accurate scrollHeight
-    textarea.style.height = 'auto';
-
-    // Calculate new height, clamped between min and max.
-    // When empty, ignore scrollHeight: Chromium includes the wrapped placeholder
-    // text in an empty textarea's scrollHeight, so a long placeholder would grow
-    // the box past minHeight and then visibly shrink on the first keystroke.
+    // When empty, the height is simply minHeight — and must be: Chromium includes
+    // the wrapped placeholder text in an empty textarea's scrollHeight, so a long
+    // placeholder would grow the box past minHeight and then visibly shrink on
+    // the first keystroke. Skipping the measurement also matters for speed: an
+    // `auto` reset followed by a scrollHeight read forces a synchronous layout
+    // of the whole page, and a session switch mounts an empty composer into a
+    // freshly committed conversation (~5ms per switch).
     const hasValue = (promptValue ?? '').length > 0;
-    const scrollHeight = textarea.scrollHeight;
-    const newHeight = hasValue ? Math.max(minHeight, Math.min(scrollHeight, maxHeight)) : minHeight;
-
-    const nextHeight = `${newHeight}px`;
-    if (previousHeight && previousHeight !== nextHeight && skipNextViewportResizeAutoScrollRef) {
-      skipNextViewportResizeAutoScrollRef.current = true;
+    if (!hasValue) {
+      textarea.style.height = `${minHeight}px`;
+      textarea.style.overflowY = 'hidden';
+      return;
     }
-    textarea.style.height = nextHeight;
+
+    // Reset height to auto to get an accurate scrollHeight, then clamp.
+    textarea.style.height = 'auto';
+    const scrollHeight = textarea.scrollHeight;
+    const newHeight = Math.max(minHeight, Math.min(scrollHeight, maxHeight));
+
+    textarea.style.height = `${newHeight}px`;
     textarea.style.overflowY = scrollHeight > maxHeight ? 'auto' : 'hidden';
-  }, [
-    autoResize,
-    promptValue,
-    promptRef,
-    effectivePromptRows,
-    maxRows,
-    skipNextViewportResizeAutoScrollRef,
-  ]);
+  }, [autoResize, promptValue, promptRef, effectivePromptRows, maxRows]);
 
   const boxTextareaClassName = getChatComposerTextareaClassName({ tone, variant, isMobile });
 
@@ -636,7 +629,7 @@ export function ChatComposer({
   const dialogTextareaClassName = cn(
     'input-scrollbar min-h-[120px] resize-none px-4 py-3 text-sm leading-6 transition-shadow sm:min-h-[120px]',
     'w-full rounded-2xl border-transparent bg-transparent focus-visible:ring-0 focus-visible:ring-offset-0',
-    'text-input-foreground placeholder:text-input-placeholder/40'
+    'text-input-foreground placeholder:text-input-placeholder/85'
   );
 
   const actionBaseClassName = cn(
@@ -711,7 +704,9 @@ export function ChatComposer({
         ) : null}
 
         {!isDialog ? (
-          <div className={cn('flex flex-col', isLanding ? 'gap-2' : 'gap-1')}>
+          // The `@` menu opens against this frame, above the chip row, so it lines
+          // up with the composer and never cuts a chip in half.
+          <div data-mention-frame="" className={cn('flex flex-col', isLanding ? 'gap-2' : 'gap-1')}>
             {/* Top selector (repo, branch) - shown outside and above the input box */}
             {topSelector ? (
               <div className="flex w-full min-w-0 select-none items-center gap-1">
@@ -1170,7 +1165,8 @@ export function ChatComposer({
           >
             <Dialog.Content
               closeButton={false}
-              className="flex h-[85vh] max-h-[85vh] max-w-3xl flex-col gap-0 overflow-hidden p-0"
+              width="48rem"
+              className="flex h-[85vh] max-h-[85vh] flex-col gap-0 overflow-hidden p-0"
             >
               {previewPastedTextDraft ? (
                 <>

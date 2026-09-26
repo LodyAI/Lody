@@ -128,6 +128,24 @@ function TaskListDemo({
           onToggleChatsCollapsed={() => setChatsCollapsed((prev) => !prev)}
           onArchiveSession={archiveTask}
           onRenameSession={renameTask}
+          onTogglePinSession={(sessionId, pinned) =>
+            setTaskState((prev) =>
+              prev.map((task) =>
+                task.sessionId === sessionId ? { ...task, isPinned: pinned } : task
+              )
+            )
+          }
+          onMarkSessionUnread={(sessionId) =>
+            setTaskState((prev) =>
+              prev.map((task) =>
+                task.sessionId === sessionId ? { ...task, hasUnreadMessages: true } : task
+              )
+            )
+          }
+          onCopySessionUrl={(sessionId) =>
+            void navigator.clipboard.writeText(`/demo/sessions/${sessionId}`).catch(() => {})
+          }
+          onOpenPullRequest={() => {}}
           onNew={createTask}
           onMoveRepo={(move) => setRepoState(move.nextRepos)}
           getSessionHref={(sessionId) => `/demo/sessions/${sessionId}`}
@@ -251,6 +269,21 @@ const DEFAULT_ARGS: SessionListProps = {
 
 export const Default: Story = {
   args: DEFAULT_ARGS,
+  render: (args) => <TaskListDemo {...args} />,
+};
+
+/**
+ * The desktop row context menu carrying every action: right-click a row (or its
+ * hover ⋯) on a repo session like "Browser notifications" — pin, mark unread,
+ * rename, copy link/branch, open PR and archive all render. zh_CN matches the
+ * shipping sidebar.
+ */
+export const RowContextMenu: Story = {
+  name: 'Row Context Menu',
+  args: DEFAULT_ARGS,
+  parameters: {
+    globals: { theme: 'light', locale: 'zh_CN' },
+  },
   render: (args) => <TaskListDemo {...args} />,
 };
 

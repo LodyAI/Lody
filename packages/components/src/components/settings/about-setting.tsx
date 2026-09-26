@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useState } from 'react';
+import { Fragment, useCallback, useEffect, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAtom } from 'jotai';
-import { CheckCircle2, AlertCircle, Download, ExternalLink } from 'lucide-react';
+import { CheckCircle2, AlertCircle, ArrowUpRight, Download } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { space } from '@lody/ui/tokens/scales.stylex';
@@ -10,11 +10,11 @@ import type { ElectronUpdaterPhase } from '@lody/shared';
 import { Button } from '@lody/ui/button';
 import { Switch } from '@lody/ui/switch';
 import { BetaFeaturesSection } from './beta-features-setting';
-import { CompactRow, CompactSection } from './compact-layout';
+import { CompactLinkRow, CompactRow, CompactSection } from './compact-layout';
 import { settingContainerClass } from '.';
 import { useElectronUpdaterState } from '@/hooks/use-electron-updater-state';
 import { OpenSourceAttributionsDialog } from './open-source-attributions-dialog';
-import { JoinCommunityButton } from './join-community-dialog';
+import { JoinCommunityDialog } from './join-community-dialog';
 import { openExternalUrl } from '@/lib/native-browser';
 import { getIpcServices } from '@/lib/electron-ipc-client';
 import { getDownloadPageUrl, getNightlyDownloadPageUrl, getWebsiteUrl } from '@/lib/lody-urls';
@@ -39,6 +39,14 @@ const MONO = 'var(--font-mono, ui-monospace, monospace)';
 const styles = stylex.create({
   /** A fact the build states: read, not set, so it is quiet and fixed-width. */
   value: { fontSize: type.caption, fontFamily: MONO, color: colors.secondaryLabel },
+  /** The build's facts on one line, set apart by middle dots. */
+  facts: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'baseline',
+    columnGap: space[1.5],
+    rowGap: '2px',
+  },
   status: {
     display: 'inline-flex',
     alignItems: 'center',
@@ -50,6 +58,8 @@ const styles = stylex.create({
   statusIcon: { width: '14px', height: '14px', flexShrink: 0 },
   statusIconSuccess: { color: colors.success },
   icon: { width: '14px', height: '14px', flexShrink: 0 },
+  /** Where a channel's link leads, in the ink of a hint. */
+  linkMark: { width: '14px', height: '14px', flexShrink: 0, color: colors.tertiaryLabel },
   endpoints: {
     display: 'flex',
     flexDirection: 'column',
@@ -254,6 +264,7 @@ export function AboutSettingsComponent() {
   const [isInstalling, setIsInstalling] = useState(false);
   const [developerModeEnabled, setDeveloperModeEnabled] = useAtom(developerModeEnabledAtom);
   const [developerModeRevealed, setDeveloperModeRevealed] = useState(false);
+  const [communityOpen, setCommunityOpen] = useState(false);
   const isMobile = useIsMobile();
 
   const handleOpenDownloadPage = useCallback(() => {
@@ -292,70 +303,128 @@ export function AboutSettingsComponent() {
 
   if (isMobile) return <MobileAboutSettings />;
 
+  const buildFacts: ReactNode[] = [
+    ...(RELEASE_CHANNEL !== null ? [t(`settings.about.channel.${RELEASE_CHANNEL}`)] : []),
+    t('settings.about.builtAt', 'Built {{date}}', { date: formatBuildDate(BUILD_DATE) }),
+    <span key="commit" {...stylex.props(styles.value)} title={GIT_COMMIT}>
+      {GIT_COMMIT.slice(0, 8)}
+    </span>,
+    ...(OSS_GIT_COMMIT !== null
+      ? [
+          <span key="oss" title={OSS_GIT_COMMIT}>
+            {t('settings.about.ossCommitShort', 'Open source')}{' '}
+            <span {...stylex.props(styles.value)}>{OSS_GIT_COMMIT.slice(0, 8)}</span>
+          </span>,
+        ]
+      : []),
+  ];
+
   return (
     <div className={settingContainerClass}>
+      {/* What is running is one fact: the version, and the build it came
+        from as its detail; the update check acts on exactly that. */}
       <CompactSection>
-        {displayVersion && (
-          <CompactRow label={t('settings.about.version')}>
-            <span {...stylex.props(styles.value)}>{displayVersion}</span>
-          </CompactRow>
-        )}
-        <CompactRow label={t('settings.about.buildDate')}>
-          <span {...stylex.props(styles.value)}>{formatBuildDate(BUILD_DATE)}</span>
-        </CompactRow>
-        {RELEASE_CHANNEL !== null && (
-          <CompactRow label={t('settings.about.releaseChannel')}>
-            <span {...stylex.props(styles.value)}>
-              {t(`settings.about.channel.${RELEASE_CHANNEL}`)}
-            </span>
-          </CompactRow>
-        )}
         <CompactRow
-          label={t(
-            OSS_GIT_COMMIT !== null ? 'settings.about.cloudCommit' : 'settings.about.commitHash'
-          )}
-        >
-          <span {...stylex.props(styles.value)} title={GIT_COMMIT}>
-            {GIT_COMMIT.slice(0, 8)}
-          </span>
-        </CompactRow>
-        {OSS_GIT_COMMIT !== null && (
-          <CompactRow label={t('settings.about.ossCommit')}>
-            <span {...stylex.props(styles.value)} title={OSS_GIT_COMMIT}>
-              {OSS_GIT_COMMIT.slice(0, 8)}
+          label={
+            displayVersion
+              ? t('settings.about.versionLine', 'Lody {{version}}', { version: displayVersion })
+              : 'Lody'
+          }
+          helper={
+            <span {...stylex.props(styles.facts)}>
+              {buildFacts.map((fact, index) => (
+                <Fragment key={index}>
+                  {index > 0 ? <span aria-hidden="true">·</span> : null}
+                  {fact}
+                </Fragment>
+              ))}
             </span>
-          </CompactRow>
-        )}
-        <CompactRow label={t('settings.about.community', 'Community')}>
-          <JoinCommunityButton />
+          }
+        >
+          {updaterState && phase !== 'disabled' ? (
+            <>
+              {showStatus && (
+                <UpdateStatusText phase={phase} percent={updaterState.percent} t={t} />
+              )}
+              {isDownloaded && updaterState.error && (
+                <span
+                  {...stylex.props(styles.status, styles.statusError)}
+                  title={updaterState.error}
+                >
+                  <AlertCircle {...stylex.props(styles.statusIcon)} />
+                  {t('settings.about.updateError')}
+                </span>
+              )}
+              {isDownloaded ? (
+                <Button
+                  size="small"
+                  onClick={() => {
+                    void handleQuitAndInstall();
+                  }}
+                  disabled={isInstalling}
+                >
+                  {isInstalling ? (
+                    <Spinner size="small" />
+                  ) : (
+                    <Download {...stylex.props(styles.icon)} />
+                  )}
+                  {t('settings.about.updateAndRestart')}
+                </Button>
+              ) : (
+                <Button
+                  variant="secondary"
+                  size="small"
+                  onClick={() => {
+                    void handleCheckForUpdates();
+                  }}
+                  disabled={isChecking || phase === 'downloading'}
+                >
+                  {isChecking && <Spinner size="small" />}
+                  {t('settings.about.checkForUpdates')}
+                </Button>
+              )}
+            </>
+          ) : null}
         </CompactRow>
+      </CompactSection>
+
+      {/* Each row is its own link: the name, and a quiet mark for where it
+        leads (↗ out of Lody, › into a dialog). A button beside the name would
+        only say the name again. Downloads has two destinations, so its row
+        names the two channels, in the same quiet ink. */}
+      <CompactSection>
+        <CompactLinkRow
+          label={t('settings.about.community', 'Community')}
+          to="open"
+          onClick={() => setCommunityOpen(true)}
+        />
         <CompactRow label={t('settings.about.downloadApps', 'Download apps')}>
-          <Button variant="secondary" size="small" onClick={handleOpenDownloadPage}>
-            <ExternalLink {...stylex.props(styles.icon)} />
-            {t('settings.about.openDownloadPage', 'Open download page')}
+          <Button variant="ghost" size="small" onClick={handleOpenDownloadPage}>
+            {t('settings.about.downloadStable', 'Stable')}
+            <ArrowUpRight {...stylex.props(styles.linkMark)} aria-hidden="true" />
           </Button>
-        </CompactRow>
-        <CompactRow label={t('settings.about.downloadNightly')}>
           <Button
-            variant="secondary"
+            variant="ghost"
             size="small"
             onClick={() => void openExternalUrl(getNightlyDownloadPageUrl(i18n.resolvedLanguage))}
           >
-            <ExternalLink {...stylex.props(styles.icon)} />
-            {t('settings.about.openDownloadPage', 'Open download page')}
+            {t('settings.about.downloadNightlyShort', 'Nightly')}
+            <ArrowUpRight {...stylex.props(styles.linkMark)} aria-hidden="true" />
           </Button>
         </CompactRow>
-        <CompactRow label={t('settings.about.website', 'Website')}>
-          <Button variant="secondary" size="small" onClick={handleOpenWebsite}>
-            <ExternalLink {...stylex.props(styles.icon)} />
-            {t('settings.about.visitWebsite', 'Visit website')}
-          </Button>
-        </CompactRow>
-        <CompactRow label={t('settings.about.openSourceAttributions', 'Open Source Licenses')}>
-          <OpenSourceAttributionsDialog
-            onTriggerDoubleClick={() => setDeveloperModeRevealed(true)}
-          />
-        </CompactRow>
+        <CompactLinkRow
+          label={t('settings.about.website', 'Website')}
+          onClick={handleOpenWebsite}
+        />
+        <OpenSourceAttributionsDialog
+          trigger={
+            <CompactLinkRow
+              label={t('settings.about.openSourceAttributions', 'Open Source Licenses')}
+              to="open"
+            />
+          }
+          onTriggerDoubleClick={() => setDeveloperModeRevealed(true)}
+        />
         {showDeveloperModeSwitch && (
           <CompactRow
             label={t('settings.about.developerMode', 'Developer mode')}
@@ -379,47 +448,9 @@ export function AboutSettingsComponent() {
           </CompactRow>
         )}
         {developerModeEnabled && <DevbarSettingsControls />}
-        {updaterState && phase !== 'disabled' && (
-          <CompactRow label={t('settings.about.checkForUpdates')}>
-            {showStatus && <UpdateStatusText phase={phase} percent={updaterState.percent} t={t} />}
-            {isDownloaded && updaterState.error && (
-              <span {...stylex.props(styles.status, styles.statusError)} title={updaterState.error}>
-                <AlertCircle {...stylex.props(styles.statusIcon)} />
-                {t('settings.about.updateError')}
-              </span>
-            )}
-            {isDownloaded ? (
-              <Button
-                size="small"
-                onClick={() => {
-                  void handleQuitAndInstall();
-                }}
-                disabled={isInstalling}
-              >
-                {isInstalling ? (
-                  <Spinner size="small" />
-                ) : (
-                  <Download {...stylex.props(styles.icon)} />
-                )}
-                {t('settings.about.updateAndRestart')}
-              </Button>
-            ) : (
-              <Button
-                variant="secondary"
-                size="small"
-                onClick={() => {
-                  void handleCheckForUpdates();
-                }}
-                disabled={isChecking || phase === 'downloading'}
-              >
-                {isChecking && <Spinner size="small" />}
-                {t('settings.about.checkForUpdates')}
-              </Button>
-            )}
-          </CompactRow>
-        )}
       </CompactSection>
       <BetaFeaturesSection />
+      <JoinCommunityDialog open={communityOpen} onOpenChange={setCommunityOpen} />
     </div>
   );
 }

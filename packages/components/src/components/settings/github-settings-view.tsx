@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
-import { ArrowUpRight, Github, Lock, Search } from 'lucide-react';
+import { ArrowUpRight, Lock, Search } from 'lucide-react';
 import { Avatar } from '@lody/ui/avatar';
 import { Button } from '@lody/ui/button';
 import { Input } from '@lody/ui/input';
@@ -11,9 +11,10 @@ import { colors } from '@lody/ui/tokens/colors.stylex';
 import { space } from '@lody/ui/tokens/scales.stylex';
 import { isElectronRenderer } from '@/lib/electron';
 import { openExternalUrl } from '@/lib/native-browser';
-import { CompactRow, CompactSection } from './compact-layout';
+import { CompactRow, CompactSection, SettingsEmptyList } from './compact-layout';
 import type { GitHubPersonalIdentitySettingsCardProps } from './integrations-setting';
 import type { SettingsWorkspaceRepoWithStatus } from './settings-data-cache';
+import { settingsMaterial as material } from './material.stylex';
 import { settingsCatalog as catalog, settingsSurface as surface } from './surface';
 import { settingsType as type } from './type.stylex';
 
@@ -53,7 +54,7 @@ const styles = stylex.create({
     alignItems: 'center',
     columnGap: space[1],
     margin: 0,
-    paddingInline: space[4],
+    paddingInline: material.headingInset,
     fontSize: type.caption,
     lineHeight: 1.4,
     color: colors.secondaryLabel,
@@ -142,21 +143,26 @@ export function GitHubSettingsView({
           </p>
         </CompactSection>
       ) : repos.length === 0 ? (
-        <div {...stylex.props(catalog.empty)}>
-          <Github {...stylex.props(catalog.emptyIcon)} aria-hidden="true" />
-          <p {...stylex.props(catalog.emptyText)}>
-            {t(
-              'settings.integrations.github.noAuthorizedRepos',
-              'No repositories authorized yet. Install the GitHub App to get started.'
-            )}
-          </p>
-          {canManage ? (
-            <Button onClick={onConnect} disabled={connecting || !workspaceReady}>
-              {connecting ? <Spinner size="small" /> : null}
-              {t('settings.integrations.github.install', 'Install GitHub App')}
-            </Button>
-          ) : null}
-        </div>
+        <SettingsEmptyList
+          action={
+            canManage ? (
+              <Button
+                variant="secondary"
+                size="small"
+                onClick={onConnect}
+                disabled={connecting || !workspaceReady}
+              >
+                {connecting ? <Spinner size="small" /> : null}
+                {t('settings.integrations.github.install', 'Install GitHub App')}
+              </Button>
+            ) : null
+          }
+        >
+          {t(
+            'settings.integrations.github.noAuthorizedRepos',
+            'No repositories authorized yet. Install the GitHub App to get started.'
+          )}
+        </SettingsEmptyList>
       ) : (
         <>
           {repos.length > SEARCH_THRESHOLD ? (
@@ -178,6 +184,7 @@ export function GitHubSettingsView({
             owners.map((owner) => (
               <CompactSection
                 key={owner.name}
+                boxed
                 title={owner.name}
                 headerRight={
                   <span {...stylex.props(styles.count)}>

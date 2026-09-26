@@ -3,6 +3,7 @@ import type { LocalProjectId, MachineId } from '@lody/shared';
 import {
   ArrowUpRight,
   Check,
+  ChevronDown,
   CircleSlash2,
   FolderOpen,
   FolderPlus,
@@ -531,8 +532,8 @@ export function UnifiedProjectSelectorView({
                 ? [
                     'flex h-8 w-full min-w-0 max-w-none items-center gap-2 rounded-md px-2',
                     'text-[1em] font-normal transition-colors',
-                    'bg-transparent text-foreground hover:bg-hover',
-                    'data-[state=open]:bg-hover',
+                    'bg-transparent text-foreground hover:bg-foreground/[0.05] dark:hover:bg-white/[0.08]',
+                    'data-[state=open]:bg-foreground/[0.05] dark:data-[state=open]:bg-white/[0.08]',
                     '[&_svg]:text-current [&_svg]:opacity-70',
                     value.kind === 'none' && 'text-muted-foreground',
                   ]
@@ -557,6 +558,9 @@ export function UnifiedProjectSelectorView({
               {triggerIcon}
             </span>
             <span className="min-w-0 flex-1 truncate text-left">{triggerLabel}</span>
+            {isPropertyRow ? (
+              <ChevronDown className="size-3.5 shrink-0 !opacity-50" aria-hidden="true" />
+            ) : null}
           </button>
         </Menu.Trigger>
         <Menu.Content

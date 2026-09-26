@@ -122,7 +122,7 @@ export function OperationReplyCard(props: OperationReplyCardProps) {
 
       {reply ? (
         <Dialog.Root open={open} onOpenChange={setOpen}>
-          <Dialog.Content className="flex max-h-[80vh] max-w-2xl flex-col gap-0 p-0 sm:p-0">
+          <Dialog.Content width="42rem" className="flex max-h-[80vh] flex-col gap-0 p-0 sm:p-0">
             <div className="flex min-w-0 items-center gap-3 border-b border-border/60 py-3 pl-5 pr-12">
               <div className="min-w-0 flex-1">
                 <Dialog.Description className="text-xs">

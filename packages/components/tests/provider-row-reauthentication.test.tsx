@@ -88,3 +88,57 @@ describe('ProviderRow reauthentication', () => {
     expect(onEdit).toHaveBeenCalledWith(config);
   });
 });
+
+describe('ProviderRow meta line', () => {
+  let container: HTMLDivElement;
+  let root: Root;
+  const now = new Date('2026-09-26T08:00:00.000Z');
+
+  beforeEach(() => {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(now);
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+  });
+
+  afterEach(async () => {
+    act(() => root.unmount());
+    container.remove();
+    vi.useRealTimers();
+    await initI18n('en');
+  });
+
+  const renderCustom = async () => {
+    const config = { ...makeConfig({ cliType: 'custom', agentType: 'e2e' }), name: 'E2E Agent' };
+    await act(async () => {
+      root.render(
+        <ProviderRow
+          config={config}
+          machine={machine}
+          onEdit={vi.fn()}
+          usage={{ conversations: 1, lastUsedAt: now.getTime() - 2 * 60_000 }}
+        />
+      );
+    });
+  };
+
+  // The kind is a fact of the meta line, in the reader's language, not an
+  // English pill beside the name; the time reads as a sentence of that language.
+  it('names a custom provider and when it was used in Chinese', async () => {
+    await initI18n('zh_CN');
+    await renderCustom();
+
+    expect(container.textContent).toContain('自定义 · 1 个对话 · 2 分钟前用过');
+    expect(container.textContent).not.toContain('Custom');
+    expect(container.textContent).not.toContain('2m');
+  });
+
+  it('keeps the compact units in English', async () => {
+    await initI18n('en');
+    await renderCustom();
+
+    expect(container.textContent).toContain('Custom · 1 conversation · Used 2m ago');
+  });
+});

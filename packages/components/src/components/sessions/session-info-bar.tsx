@@ -18,6 +18,7 @@ import {
   GoalChip,
   ScheduleChip,
   StatusChip,
+  ScheduleSourceChip,
   useScheduledTaskSignature,
   type GoalChipCommandHandler,
   type ContextChipAction,
@@ -25,12 +26,17 @@ import {
   type WorkspaceLocationKind,
 } from './session-info-chips';
 import type { SessionStatusStripState } from './session-status-strip';
-import { SessionSyncingIndicator } from './session-syncing-indicator';
+import {
+  SessionSyncingIndicator,
+  type SessionSyncIndicatorVariant,
+} from './session-syncing-indicator';
 
-export type InfoBarItemKey = 'status' | 'goal' | 'schedule' | 'context';
+export type InfoBarItemKey = 'status' | 'goal' | 'schedule' | 'scheduleSource' | 'context';
 
 export type SessionInfoBarProps = {
   status: SessionStatusStripState | null;
+  /** The schedule that started this session; the chip is the way back to it. */
+  scheduleSource?: { title: string; onOpen: () => void } | null;
   /**
    * The queued-turn sheet. Not a bar item: it sits on the bar's top edge, or,
    * when the bar has nothing to show, directly on the composer below.
@@ -75,6 +81,8 @@ export type SessionInfoBarProps = {
    *  bar's right edge. Not a cluster/stage item — it must never steal focus
    *  or relayout the canonical order. */
   syncing?: boolean;
+  /** Overrides `syncing` with a specific conversation content-sync state. */
+  syncStatus?: SessionSyncIndicatorVariant | null;
   /** Mobile native shell only: lift the bar above the session drawer's
    *  transparent z-30 left-edge swipe-back strip, which otherwise covers the
    *  leftmost ~48px of the row and swallows taps on the first chip. Same
@@ -125,6 +133,7 @@ export function SessionInfoBar({
   goalPendingCommand,
   onGoalCommand,
   onGoalDismiss,
+  scheduleSource,
   scheduledTasks,
   prCiRuns,
   onOpenPrCiRun,
@@ -141,6 +150,7 @@ export function SessionInfoBar({
   privateAccessStatus,
   diffStat,
   syncing = false,
+  syncStatus,
   protectFromEdgeBackZone = false,
   initialStage,
   queue,
@@ -158,10 +168,13 @@ export function SessionInfoBar({
     status: hasStatus,
     goal: hasGoal,
     schedule: hasSchedule,
+    scheduleSource: !!scheduleSource,
     context: hasContext,
   };
   const defaultKey =
-    (['context', 'status', 'goal', 'schedule'] as const).find((key) => present[key]) ?? null;
+    (['context', 'status', 'goal', 'schedule', 'scheduleSource'] as const).find(
+      (key) => present[key]
+    ) ?? null;
 
   const [stage, setStage] = useState<InfoBarItemKey | null>(initialStage ?? defaultKey);
 
@@ -219,7 +232,8 @@ export function SessionInfoBar({
   // The bar owns the gap above the composer (the session composer skips its own
   // spacer): 8px under the pill, none under a queue sheet (it sits on the
   // composer), and the plain 4px when there is nothing to show.
-  if (!defaultKey && !relations && !onOpenBrowser && !syncing && !privateAccessStatus) {
+  const ambientSync = syncStatus !== undefined ? syncStatus : syncing ? 'syncing' : null;
+  if (!defaultKey && !relations && !onOpenBrowser && !ambientSync && !privateAccessStatus) {
     return queue ? (
       <div className="w-full shrink-0 bg-background">
         <ConversationColumn>
@@ -260,6 +274,15 @@ export function SessionInfoBar({
         return hasSchedule && scheduledTasks ? (
           <ScheduleChip key={key} tasks={scheduledTasks} {...itemMode} />
         ) : null;
+      case 'scheduleSource':
+        return scheduleSource ? (
+          <ScheduleSourceChip
+            key={key}
+            title={scheduleSource.title}
+            onOpen={scheduleSource.onOpen}
+            {...itemMode}
+          />
+        ) : null;
       case 'context':
         return hasContext ? (
           <ContextChip
@@ -283,7 +306,7 @@ export function SessionInfoBar({
     }
   };
 
-  const clusterKeys = (['status', 'goal', 'schedule', 'context'] as const).filter(
+  const clusterKeys = (['status', 'goal', 'schedule', 'scheduleSource', 'context'] as const).filter(
     (key) => present[key] && key !== stagedKey
   );
   const clusterNonEmpty = clusterKeys.length > 0 || !!relations || !!onOpenBrowser;
@@ -360,9 +383,12 @@ export function SessionInfoBar({
               sync-only mode nothing else consumes the row's free space, so
               ml-auto keeps the spinner pinned right; with a stage present
               its flex-1 has already eaten the space (no-op). */}
-          {syncing ? (
+          {ambientSync ? (
             <span className="ml-auto inline-flex shrink-0 items-center">
-              <SessionSyncingIndicator labelClassName="hidden @[560px]:inline" />
+              <SessionSyncingIndicator
+                variant={ambientSync}
+                labelClassName="hidden @[560px]:inline"
+              />
             </span>
           ) : null}
         </div>

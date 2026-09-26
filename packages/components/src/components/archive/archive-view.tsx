@@ -33,6 +33,7 @@ import { Checkbox } from '@lody/ui/checkbox';
 import { Dialog } from '@/ui/dialog';
 import { Menu } from '@/ui/menu';
 import { Input } from '@lody/ui/input';
+import { archiveSearchFieldTheme } from './archive-search.stylex';
 import { Tooltip } from '@lody/ui/tooltip';
 import { currentWorkspaceSlugAtom, setMobileDrawerOpenAtom, userAtom } from '@/atoms';
 import { getAgentMetaByIdAtomFamily } from '@/atoms/agents';
@@ -243,8 +244,8 @@ const styles = stylex.create({
     lineHeight: text.footnoteLeading,
     fontVariantNumeric: 'tabular-nums',
   },
-  added: { color: 'hsl(var(--code-added))' },
-  removed: { color: 'hsl(var(--code-removed))' },
+  added: { color: 'hsl(var(--github-addition))' },
+  removed: { color: 'hsl(var(--github-deletion))' },
   avatarAnchor: { display: 'inline-flex', flexShrink: 0 },
   /* A row's actions answer the pointer on that row, or a keyboard inside them. */
   actions: {
@@ -2185,7 +2186,7 @@ export function ArchiveView() {
           placeholder={t('archive.searchPlaceholder', 'Search archived sessions…')}
           aria-label={t('archive.search', 'Search archive')}
           leading={<Search {...stylex.props(styles.searchGlyph)} aria-hidden="true" />}
-          className={stylex.props(styles.search).className}
+          className={stylex.props(styles.search, archiveSearchFieldTheme).className}
         />
         {isMobile ? (
           <Menu.Root>

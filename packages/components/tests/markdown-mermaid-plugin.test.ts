@@ -16,6 +16,14 @@ vi.mock('mermaid', () => {
 const { createMarkdownMermaidConfig, createMarkdownMermaidPlugin } =
   await import('../src/components/ai-gui/markdown-mermaid');
 
+const relativeLuminance = (hex: string): number => {
+  const channel = (offset: number) => {
+    const value = Number.parseInt(hex.slice(offset, offset + 2), 16) / 255;
+    return value <= 0.03928 ? value / 12.92 : Math.pow((value + 0.055) / 1.055, 2.4);
+  };
+  return 0.2126 * channel(1) + 0.7152 * channel(3) + 0.0722 * channel(5);
+};
+
 describe('markdown mermaid plugin', () => {
   it('renders a flowchart through beautiful-mermaid', async () => {
     const plugin = createMarkdownMermaidPlugin();
@@ -33,11 +41,24 @@ describe('markdown mermaid plugin', () => {
     expect(lightConfig.theme).toBe('base');
     expect(darkConfig.theme).toBe('base');
     expect(darkConfig.darkMode).toBe(true);
-    expect(darkConfig.themeVariables).toMatchObject({
-      primaryTextColor: '#f8fafc',
-      lineColor: '#cbd5e1',
-      textColor: '#e2e8f0',
-    });
+    // Dark diagram text is readable but no brighter than the app's dark text
+    // ceiling (#D5D5D5-level luminance), never near-white.
+    const variables = darkConfig.themeVariables as Record<string, string>;
+    for (const name of [
+      'primaryTextColor',
+      'textColor',
+      'titleColor',
+      'actorTextColor',
+      'signalTextColor',
+      'noteTextColor',
+    ]) {
+      const luminance = relativeLuminance(variables[name]!);
+      expect({ name, readable: luminance > 0.5, capped: luminance <= 0.666 }).toEqual({
+        name,
+        readable: true,
+        capped: true,
+      });
+    }
     expect(darkConfig.themeVariables).not.toBe(lightConfig.themeVariables);
   });
 
@@ -53,7 +74,7 @@ describe('markdown mermaid plugin', () => {
     expect(result.svg).toContain('pie title Pets');
     // Dark theme surface/text colors, not the old light amber panel.
     expect(result.svg).toContain('fill="#111827"');
-    expect(result.svg).toContain('fill="#e2e8f0"');
+    expect(result.svg).toContain('fill="#cbd5e1"');
   });
 
   it('escapes markup in the fallback source listing', async () => {

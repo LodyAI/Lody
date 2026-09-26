@@ -7,6 +7,7 @@ export * from './session-control-plane';
 import type { AgentConfigId, MachineId, SessionId, TaskId, WorkspaceId } from './ids';
 import { PREVIEW_COMMENT_DOC_PREFIX, getLoroPreviewCommentStreamId } from './preview-comment-types';
 import { TASK_DOC_PREFIX, getLoroTaskStreamId } from './task-types';
+import { SCHEDULE_DOC_PREFIX, getLoroScheduleStreamId } from './schedule-registry';
 import type { StreamsCrdtShardUrlsOptions } from '@loro-dev/streams-crdt';
 
 export type {
@@ -44,6 +45,12 @@ export * from './agent-brand';
 export * from './agent-authentication';
 export * from './acp-authentication-limits';
 export * from './schema';
+export * from './schedule-types';
+export * from './schedule-time';
+export * from './schedule-recurrence';
+export * from './schedule-registry';
+export * from './schedule-schema';
+export * from './schedule-repository';
 export * from './cron-next-fire';
 export * from './scheduled-tasks-from-history';
 export * from './project';
@@ -406,6 +413,9 @@ export const isCodeCollabFileIndexSignalFlockDocId = (value: string): boolean =>
   return parts.length === 3 && parts[1] === LORO_CODE_COLLAB_FILE_INDEX_SIGNAL_STREAM_SEGMENT;
 };
 export const getLoroStreamIdForDocId = (workspaceId: WorkspaceId, docId: string): string => {
+  if (docId.startsWith(SCHEDULE_DOC_PREFIX)) {
+    return getLoroScheduleStreamId(workspaceId, docId.slice(SCHEDULE_DOC_PREFIX.length));
+  }
   if (docId.startsWith(PREVIEW_COMMENT_DOC_PREFIX)) {
     return getLoroPreviewCommentStreamId(
       workspaceId,
@@ -476,3 +486,5 @@ export interface Attachment {
   uploadedAt: Date;
   uploadedBy: User;
 }
+
+export * from './schedule-control';

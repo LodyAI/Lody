@@ -5,7 +5,7 @@ import { usePostHog } from '@posthog/react';
 import { Monitor, Moon, SquareTerminal, Sun } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
-import { space } from '@lody/ui/tokens/scales.stylex';
+import { corner, radius, space } from '@lody/ui/tokens/scales.stylex';
 
 import {
   conversationFontSizeAtom,
@@ -93,14 +93,18 @@ const styles = stylex.create({
   stepper: { width: '112px' },
   option: { display: 'flex', alignItems: 'center', gap: space[2] },
   optionIcon: { width: '16px', height: '16px', flexShrink: 0 },
-  helperLines: { display: 'flex', flexDirection: 'column', gap: '2px' },
   error: { color: colors.destructive },
   /**
    * A picture of the terminal in the terminal's own palette: it is the line of
    * the card that shows what the two rows above it set.
    */
+  /** A sample of the terminal, set in the rows' own column. */
   terminal: {
     overflow: 'hidden',
+    marginInline: space[4],
+    marginBlock: space[2],
+    borderRadius: radius.medium,
+    cornerShape: corner.shape,
     backgroundColor: 'var(--terminal-background)',
     color: 'var(--terminal-foreground)',
   },
@@ -322,21 +326,11 @@ export function AppearanceSettingsView({
         </CompactRow>
       </CompactSection>
 
-      <CompactSection>
+      <CompactSection title={t('settings.appearance.sections.text', 'Text')}>
         {isElectron ? (
           <CompactRow
             label={t('settings.interfaceFontFamily.label', 'Interface font')}
-            helper={
-              <span {...stylex.props(styles.helperLines)}>
-                <span>
-                  {t(
-                    'settings.interfaceFontFamily.helper',
-                    'Choose an installed font for the interface and conversation content.'
-                  )}
-                </span>
-                {fontLoadStatus}
-              </span>
-            }
+            helper={fontLoadStatus}
           >
             <SystemFontCombobox
               value={interfaceFontFamily}
@@ -361,6 +355,19 @@ export function AppearanceSettingsView({
               onCommit={(value) => onConversationFontSizeChange(Number(value))}
             />
           </div>
+        </CompactRow>
+        <CompactRow
+          label={t('settings.fontLigatures.label', 'Font ligatures')}
+          helper={t(
+            'settings.fontLigatures.helper',
+            'Applies to conversation, code, and tool output.'
+          )}
+        >
+          <Switch
+            checked={fontLigaturesEnabled}
+            onCheckedChange={onFontLigaturesEnabledChange}
+            aria-label={t('settings.fontLigatures.label', 'Font ligatures')}
+          />
         </CompactRow>
       </CompactSection>
 
@@ -435,21 +442,6 @@ export function AppearanceSettingsView({
           </div>
         </CompactSection>
       ) : null}
-      <CompactSection>
-        <CompactRow
-          label={t('settings.fontLigatures.label', 'Font ligatures')}
-          helper={t(
-            'settings.fontLigatures.helper',
-            'Applies to conversation, code, and tool output.'
-          )}
-        >
-          <Switch
-            checked={fontLigaturesEnabled}
-            onCheckedChange={onFontLigaturesEnabledChange}
-            aria-label={t('settings.fontLigatures.label', 'Font ligatures')}
-          />
-        </CompactRow>
-      </CompactSection>
       <MobileAppIconSettings layout={isElectron ? 'desktop' : 'mobile'} />
     </div>
   );

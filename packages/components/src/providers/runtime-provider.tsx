@@ -1,9 +1,13 @@
 import { useEffect, useRef, type ReactNode } from 'react';
-import { useAtomValue, useSetAtom } from 'jotai';
+import { useAtomValue, useSetAtom, useStore } from 'jotai';
 import { LODY_PRESENCE_HEARTBEAT_MS, type MachineId, type WorkspaceId } from '@lody/shared';
 import { authTokenAtom, runtimeAtom } from '@/atoms/runtime';
 import { currentWorkspaceIdAtom, currentWorkspaceSlugAtom } from '@/atoms';
-import { clearDocMetaCacheAtom, docMetaSubscriptionAtom } from '@/atoms/doc-meta';
+import {
+  clearDocMetaCacheAtom,
+  docMetaSubscriptionAtom,
+  readReadyDocMetaCache,
+} from '@/atoms/doc-meta';
 import {
   clearLodyPresenceStatesAtom,
   setLodyPresenceNowMsAtom,
@@ -74,6 +78,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
   const token = useAtomValue(authTokenAtom);
   const runtime = useAtomValue(runtimeAtom);
   const setRuntime = useSetAtom(runtimeAtom);
+  const store = useStore();
   const setControlConnectionState = useSetAtom(lodyControlConnectionStateAtom);
   const setRuntimeInitializing = useSetAtom(runtimeInitializingAtom);
   const setBrowserOnline = useSetAtom(browserOnlineAtom);
@@ -272,6 +277,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
             const snapshot = authorizedMachineIdsRef.current;
             return snapshot?.workspaceId === effectiveWorkspaceId ? snapshot.machineIds : null;
           },
+          readDocMetaCache: (repo) => readReadyDocMetaCache(store, repo),
           ...(telemetryEnabled
             ? {
                 onAnalyticsEvent: (event: {
@@ -373,6 +379,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     setRuntime,
     setPresenceStates,
     setPresenceSyncState,
+    store,
     telemetryEnabled,
     workspaceSlug,
     effectiveWorkspaceId,

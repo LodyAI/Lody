@@ -1,5 +1,6 @@
 import { readSessionHistory } from '@lody/shared/session-data';
 import { readLatestTurn } from '@lody/shared/session-data';
+import { TurnTokenUsageLedger, turnTokenUsageFromUpdate } from './usage/turn-token-usage';
 import os from 'os';
 import fs from 'fs';
 import path from 'path';
@@ -169,6 +170,7 @@ import {
   type LodyOperationItemResult,
   type StoredLodyOperation,
   hasPendingUserTurnActivation,
+  getDeviceTimeZone,
 } from '@lody/shared';
 import { getHostMachineProtocolCapabilities } from '../agent/managed-agent-runtime';
 import { ISession, SessionManager } from '../session/session-manager';
@@ -771,6 +773,7 @@ export class MessageHandler {
   private readonly cloudPort: CloudPort;
   private notificationService: CloudNotificationsPort | null;
   private usageTrackingService: CloudUsagePort | null;
+  private readonly turnTokenUsage = new TurnTokenUsageLedger();
   // Backstop bound on how long turn finalization waits for a cloud side
   // effect once it has been allowed to run (see runTurnCloudSideEffect —
   // known-offline skips entirely; this bound covers half-open networks the
@@ -1060,6 +1063,41 @@ export class MessageHandler {
     await this.runTurnCloudSideEffect(sessionId, 'session usage flush', async () => {
       await usageTrackingService.flushSessionUsage(sessionId);
     });
+  }
+
+  /**
+   * Attribute a usage delta to the assistant entry that owns ACP output now. A
+   * live turn's usage is written once at finalization; a late report (background
+   * work after the turn ended) is added to the finished entry immediately.
+   */
+  private recordTurnTokenUsage(
+    sessionId: SessionId,
+    update: SessionUsageUpdate
+  ): Promise<void> | undefined {
+    const usage = turnTokenUsageFromUpdate(update);
+    const target = usage && this.store.getCurrentACPUpdateTarget(sessionId);
+    if (!usage || !target) return undefined;
+    this.turnTokenUsage.add(sessionId, target.assistantEntryId, usage);
+    return target.source === 'finalized_turn'
+      ? this.flushTurnTokenUsage(sessionId, target.assistantEntryId)
+      : undefined;
+  }
+
+  private async flushTurnTokenUsage(sessionId: SessionId, assistantEntryId: string) {
+    const usage = this.turnTokenUsage.take(sessionId, assistantEntryId);
+    if (!usage) return;
+    try {
+      const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
+      await sessionDoc.sessionData.commands.applyHistoryAction({
+        kind: 'assistant-token-usage',
+        turnId: assistantEntryId,
+        add: usage,
+      });
+    } catch (error) {
+      this.logger.debug(
+        `[${sessionId}] Failed to record turn token usage: ${formatErrorMessage(error)}`
+      );
+    }
   }
 
   private async handleUsageUpdate(
@@ -3534,6 +3572,7 @@ export class MessageHandler {
         rpcVersion: supportsStreamsRpc ? LORO_STREAMS_RPC_VERSION : undefined,
         supportsLocalProjectHistoryRpc: supportsStreamsRpc,
         protocolCapabilities: getHostMachineProtocolCapabilities(),
+        timeZone: getDeviceTimeZone(),
         supportRegistryAgentTypes: this.supportRegistryAgentTypes,
         sessions: [],
       });
@@ -3611,6 +3650,7 @@ export class MessageHandler {
     });
 
     this.sessionManager.on('onUsageUpdate', ({ sessionId, acpSessionId, usage, accountingId }) => {
+      void this.recordTurnTokenUsage(sessionId, usage);
       const promise = this.handleUsageUpdate(sessionId, accountingId ?? acpSessionId, usage);
       const usageState = this.store.get(sessionId);
       usageState.pendingUsageHandlers.add(promise);
@@ -5488,12 +5528,18 @@ export class MessageHandler {
         endedAt,
         permissionWaitMs,
       });
+      if (finalizedTarget) {
+        await this.flushTurnTokenUsage(sessionId, finalizedTarget.assistantEntryId);
+      }
       await sessionDoc.waitUntilSynced();
     } catch (error) {
       this.logger.error(`[${sessionId}] Failed to flush ACP updates during finalization:`, error);
     } finally {
       if (finalizedTarget) {
         this.store.rememberFinalizedTurnForLateACPUpdates(sessionId, finalizedTarget);
+        // Usage that arrived after the flush above but before this late-target
+        // switch is still pending for the entry; later reports flush on arrival.
+        void this.flushTurnTokenUsage(sessionId, finalizedTarget.assistantEntryId);
       }
       if (turnId) {
         this.clearConversationTurnIfMatches(sessionId, turnId);
@@ -5761,6 +5807,7 @@ export class MessageHandler {
         rpcVersion: supportsStreamsRpc ? LORO_STREAMS_RPC_VERSION : machineMeta?.rpcVersion,
         supportsLocalProjectHistoryRpc: supportsStreamsRpc,
         protocolCapabilities: getHostMachineProtocolCapabilities(),
+        timeZone: getDeviceTimeZone(),
         supportRegistryAgentTypes: this.supportRegistryAgentTypes,
         sessions: machineMeta?.sessions ?? [],
       });
@@ -6527,7 +6574,11 @@ export class MessageHandler {
     dispatchContext: MessageDispatchContext
   ): Promise<void> {
     this.touchSession(message.sessionId);
-    const response = await this.previewService.reportCandidate(message);
+    const invokingUserId =
+      dispatchContext.source === 'local'
+        ? this.executionService.getActiveInvocationContext(message.sessionId)?.requesterUserId
+        : undefined;
+    const response = await this.previewService.reportCandidate(message, invokingUserId);
     dispatchContext.send(response);
   }
 
@@ -9613,6 +9664,19 @@ export class MessageHandler {
    */
   getTrackedSessionIds(): SessionId[] {
     return this.store.sessionIds();
+  }
+
+  /** Host-local admission snapshot; durable pending input is checked by its caller. */
+  hasAutomationSessionWork(sessionId: SessionId): boolean {
+    const execution = this.executionService.getExecutionSnapshot(sessionId);
+    return (
+      execution.hasActiveTurn ||
+      execution.hasBlockingPendingCreate ||
+      execution.hasRewriteBarrier ||
+      this.operationCoordinator.hasPendingWorkForRequester(sessionId) ||
+      this.hasSessionActivePresence(sessionId) ||
+      this.sessionDispatchWatcher.hasPendingDispatch(sessionId)
+    );
   }
 
   /**

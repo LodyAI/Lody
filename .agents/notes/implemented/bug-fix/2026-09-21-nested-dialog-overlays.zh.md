@@ -14,6 +14,12 @@ Translation: current
 
 ## 决策与证据
 
+更正 2026-09-25：下文描述的机制属于 Radix 时代的 `DialogOverlay` 适配层。
+在 Base UI 下，嵌套 root 根本不挂载 backdrop，按调用方的 overlay class 因此
+静默失效；归口已移至 primitive —— 见
+[2026-09-25-modal-nested-backdrop](2026-09-25-modal-nested-backdrop.zh.md)。
+本记录建立的共享 z 层级不变量仍然成立。
+
 [DialogOverlay](../../../../packages/components/src/ui/dialog.tsx) 为两种内容组件
 统一修复。共用 `--z-dialog` 避免引入独立的嵌套计数器，并保留调用方覆盖、动画及
 Radix 焦点和关闭处理。现有 popover portal 也采用同层级加 DOM 顺序的方式。

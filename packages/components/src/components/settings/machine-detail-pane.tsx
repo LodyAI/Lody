@@ -1,4 +1,5 @@
-import { useRef, useState, type ReactNode } from 'react';
+import { useMemo, useRef, useState, type ReactNode } from 'react';
+import { useAtomValue } from 'jotai';
 import * as stylex from '@stylexjs/stylex';
 import { useTranslation } from 'react-i18next';
 import {
@@ -9,7 +10,11 @@ import {
   type MachineViewMeta,
   type ProviderSetupTask,
   type SessionMeta,
+  resolveAgentBrandId,
 } from '@lody/shared';
+import { AgentIcon } from '@/components/icons/agent-icon';
+import { sessionMetaCacheAtom } from '@/atoms/doc-meta';
+import { listAddableProviders, type AgentConfigFormData } from './agent-config-dialog';
 import {
   Activity,
   Bot,
@@ -43,7 +48,7 @@ import { MobileSettingsSection } from '@/components/mobile/mobile-settings-row';
 import { ProviderRow } from './provider-row';
 import { ProviderSetupRow } from './provider-setup-row';
 import { DeviceResourceMonitor } from './device-resource-monitor';
-import { CompactSection } from './compact-layout';
+import { CompactSection, SettingsEmptyList, settingsRecordsCard } from './compact-layout';
 import { settingsSurface as surface } from './surface';
 import type { MachineMonitorViewState } from '@/hooks/use-machine-monitor';
 import {
@@ -56,6 +61,40 @@ import { settingsType as type } from './type.stylex';
 const MONO = 'var(--font-mono, ui-monospace, monospace)';
 
 const styles = stylex.create({
+  quietLine: {
+    margin: 0,
+    fontSize: type.caption,
+    lineHeight: type.leading,
+    color: colors.secondaryLabel,
+    textAlign: 'center',
+  },
+  wallSection: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    gap: space[3],
+    paddingTop: space[8],
+  },
+  wall: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    gap: space[1],
+    maxWidth: '560px',
+  },
+  wallMark: {
+    display: 'flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '24px',
+    height: '24px',
+    borderRadius: radius.full,
+    cornerShape: corner.round,
+    backgroundColor: `color-mix(in oklab, transparent, ${colors.label} 4%)`,
+    color: colors.secondaryLabel,
+  },
+  wallGlyph: { width: '14px', height: '14px' },
   icon12: { width: '12px', height: '12px', flexShrink: 0 },
   icon14: { width: '14px', height: '14px', flexShrink: 0 },
   /** A glyph in a box that sizes it — a menu row's leading box, a badge's. */
@@ -65,7 +104,6 @@ const styles = stylex.create({
   inset: { paddingInline: space[4] },
   /** One line of a list: every line but the first is ruled from the one above. */
   line: { minWidth: 0 },
-  lineRuled: { boxShadow: `inset 0 1px 0 ${colors.separator}` },
   empty: {
     display: 'flex',
     flexDirection: 'column',
@@ -199,6 +237,13 @@ export type MachineProvidersSectionProps = {
   /** Desktop pills content is flush with the title — no extra horizontal inset. */
   flush?: boolean;
   variant?: 'default' | 'mobile-list';
+  /**
+   * The providers alone, as one card of compact rows: the page that holds them
+   * names them and carries the add action in its own header.
+   */
+  bare?: boolean;
+  /** Opens the add dialog straight on one provider, from the "available" list. */
+  onAddProvider?: (initialForm: Partial<AgentConfigFormData>) => void;
 };
 
 /** "Agent Provider" list + add button — shared by the mobile detail pane and the
@@ -215,8 +260,11 @@ export function MachineProvidersSection({
   onDeleteSetup,
   flush = false,
   variant = 'default',
+  bare = false,
+  onAddProvider,
 }: MachineProvidersSectionProps) {
   const { t } = useTranslation();
+  const usageByConfig = useProviderUsage(machine.id, bare);
   const addButton = (
     <Tooltip.Root>
       <Tooltip.Trigger
@@ -254,10 +302,38 @@ export function MachineProvidersSection({
         onEdit={onEditConfig}
         onDelete={onDeleteConfig}
         onRefresh={onRefreshConfig}
-        variant="list"
+        variant={bare ? 'card' : 'list'}
+        usage={bare ? (usageByConfig.get(config.id) ?? EMPTY_USAGE) : undefined}
       />
     )),
   ];
+
+  if (bare) {
+    if (configs.length === 0 && setups.length === 0) {
+      // An empty machine's page is what it could run, each one click from the
+      // dialog opened on it.
+      return onAddProvider ? (
+        <AvailableProviders
+          machineName={machine.name || machine.id}
+          configs={configs}
+          onAdd={onAddProvider}
+        />
+      ) : (
+        <SettingsEmptyList>
+          {t('settings.agent.provider.empty', 'No providers on this machine yet.')}
+        </SettingsEmptyList>
+      );
+    }
+    return (
+      <div {...stylex.props(settingsRecordsCard)}>
+        {providerLines.map((line, index) => (
+          <div key={line.key} {...stylex.props(surface.line, index > 0 && surface.lineRuled)}>
+            {line}
+          </div>
+        ))}
+      </div>
+    );
+  }
 
   if (variant === 'mobile-list') {
     return (
@@ -269,7 +345,7 @@ export function MachineProvidersSection({
           <EmptyProviders onAdd={onAddConfig} />
         ) : (
           providerLines.map((line, index) => (
-            <div key={line.key} {...stylex.props(styles.line, index > 0 && styles.lineRuled)}>
+            <div key={line.key} {...stylex.props(styles.line, index > 0 && surface.lineRuled)}>
               {line}
             </div>
           ))
@@ -278,13 +354,14 @@ export function MachineProvidersSection({
     );
   }
 
-  // The providers are one list, so one card of ruled rows: the section rules
-  // the lines between them, and a provider is a row of it, not a card.
+  // The providers are one list of records, so one card of ruled rows, even on
+  // the flat pane: a provider is a row of it, not a card.
   return (
     <div {...stylex.props(!flush && styles.inset)}>
       <CompactSection
         title={t('settings.agent.provider.title', 'Agent Provider')}
         actions={addButton}
+        boxed
       >
         {configs.length === 0 && setups.length === 0 ? (
           <EmptyProviders onAdd={onAddConfig} />
@@ -1014,5 +1091,96 @@ function EmptyProviders({ onAdd }: { onAdd: () => void }) {
         {t('settings.agent.provider.addProvider', 'Add provider')}
       </Button>
     </div>
+  );
+}
+
+type ProviderUsage = { conversations: number; lastUsedAt: number | null };
+const EMPTY_USAGE: ProviderUsage = { conversations: 0, lastUsedAt: null };
+
+/**
+ * How much each provider on a machine is used, from the session index already
+ * in memory: its open conversations, and when any of them last moved. No
+ * request is made; an empty index reads as unused.
+ */
+function useProviderUsage(machineId: string, enabled: boolean): Map<string, ProviderUsage> {
+  const sessions = useAtomValue(sessionMetaCacheAtom);
+  return useMemo(() => {
+    const usage = new Map<string, ProviderUsage>();
+    if (!enabled) return usage;
+    for (const session of Object.values(sessions)) {
+      if (session.machineId !== machineId || !session.agentConfigId) continue;
+      const entry = usage.get(session.agentConfigId) ?? { conversations: 0, lastUsedAt: null };
+      if (!session.isArchived) entry.conversations += 1;
+      const at = session.lastMessageAt ?? Date.parse(session.createdAt);
+      if (Number.isFinite(at) && (entry.lastUsedAt == null || at > entry.lastUsedAt)) {
+        entry.lastUsedAt = at;
+      }
+      usage.set(session.agentConfigId, entry);
+    }
+    return usage;
+  }, [enabled, machineId, sessions]);
+}
+
+/**
+ * What an empty machine could run, one click from the dialog opened on each:
+ * the empty state's own content rather than a sentence pointing at a button.
+ */
+function AvailableProviders({
+  machineName,
+  configs,
+  onAdd,
+}: {
+  machineName: string;
+  configs: AgentConfigMeta[];
+  onAdd: (initialForm: Partial<AgentConfigFormData>) => void;
+}) {
+  const { t } = useTranslation();
+  const available = useMemo(
+    () =>
+      listAddableProviders(t).filter(
+        (provider) =>
+          !configs.some((config) => {
+            const brandId = resolveAgentBrandId(config);
+            return provider.brandId
+              ? brandId === provider.brandId
+              : !brandId &&
+                  config.cliType === provider.cliType &&
+                  config.agentType === provider.agentType;
+          })
+      ),
+    [configs, t]
+  );
+  // An empty machine is shown what it could run: the onboarding wall of marks,
+  // each opening the add dialog already on that agent.
+  return (
+    <section {...stylex.props(styles.wallSection)}>
+      <p {...stylex.props(styles.quietLine)}>
+        {t('settings.agent.provider.emptyOnMachine', 'No agents on {{machine}} yet', {
+          machine: machineName,
+        })}
+      </p>
+      <div {...stylex.props(styles.wall)}>
+        {available.map((provider) => (
+          <Button
+            key={provider.key}
+            type="button"
+            variant="ghost"
+            shape="pill"
+            title={provider.description}
+            onClick={() => onAdd(provider.initialForm)}
+          >
+            <span {...stylex.props(styles.wallMark)}>
+              <AgentIcon
+                cliType={provider.cliType}
+                agentType={provider.agentType}
+                brandId={provider.brandId}
+                className={stylex.props(styles.wallGlyph).className}
+              />
+            </span>
+            {provider.label}
+          </Button>
+        ))}
+      </div>
+    </section>
   );
 }

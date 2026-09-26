@@ -1,3 +1,10 @@
+import { machineSupportsPreparedSessionInputProtocol } from '@lody/shared';
+import {
+  materializePreparedSessionInput,
+  commitPreparedSessionDispatch,
+  isPreparedSessionDispatched,
+  type PreparedSessionInput,
+} from '@/lib/prepared-session-input';
 import { readSessionHistory } from '@lody/shared/session-data';
 import { Command } from 'commander';
 import { promises as fs } from 'node:fs';
@@ -1667,21 +1674,23 @@ export function filterCompatibleInheritedTurnConfig(
   };
 }
 
-async function readAgentAcpCapability(args: {
+export async function readAgentAcpCapability(args: {
   manager: LoroDocumentManager;
   workspaceId: WorkspaceId;
   machineId: MachineId;
   agentConfigId?: AgentConfigMeta['id'];
+  localOnly?: boolean;
 }): Promise<AcpCapabilityCacheEntry | undefined> {
   if (!args.agentConfigId) {
     return undefined;
   }
-  await syncMachineFlockDocsForRead(
-    args.manager,
-    args.workspaceId,
-    [args.machineId],
-    'session.acp-capabilities'
-  );
+  if (!args.localOnly)
+    await syncMachineFlockDocsForRead(
+      args.manager,
+      args.workspaceId,
+      [args.machineId],
+      'session.acp-capabilities'
+    );
   const handle = await args.manager.repo.openFlockDoc(
     getMachineFlockDocId(args.workspaceId, args.machineId)
   );
@@ -2912,6 +2921,7 @@ async function resolveEffectiveSessionCreateDispatchConfig(args: {
   agentConfig: AgentConfigMeta;
   openedBySessionId?: SessionId;
   dispatchConfig: ResolvedTurnDispatchConfig;
+  localOnly?: boolean;
 }): Promise<ResolvedTurnDispatchConfig> {
   const { frozenInheritedInputConfig, ...dispatchConfig } = args.dispatchConfig;
   const inheritedDispatchConfig =
@@ -2947,6 +2957,7 @@ async function resolveEffectiveSessionCreateDispatchConfig(args: {
         workspaceId: args.workspaceId,
         machineId: args.agentConfig.machineId,
         agentConfigId: args.agentConfig.id,
+        localOnly: args.localOnly,
       })
     : undefined;
   const requested = applyAgentRunConfigSelection(dispatchConfig, capability);
@@ -2982,30 +2993,16 @@ export function buildSessionRestoreMetaPatch(): Partial<SessionMeta> {
   };
 }
 
-export async function createSessionResult(
+/** Resolve once, then persist this JSON before retryable Session materialization. */
+export async function prepareSessionInput(
   auth: AuthContext,
   workspace: WorkspaceSummary,
   manager: LoroDocumentManager,
   prompt: string,
   options: CreateOptions,
   dispatchConfig: ResolvedTurnDispatchConfig,
-  structuredOutput?: {
-    outputMode: StructuredSessionOutputMode;
-    timeoutMs: number;
-    onEvent?: (event: SessionTurnOutputEvent) => void;
-  }
-): Promise<{
-  sessionId: SessionId;
-  machineId: MachineId;
-  workspaceId: WorkspaceId;
-  userTurnId: string;
-  agentConfigId: string;
-  project?: ProjectRef;
-  parentSessionId?: SessionId;
-  openedBySessionId?: SessionId;
-  openedByRootSessionId?: SessionId;
-  completionPromise?: Promise<Awaited<ReturnType<typeof waitForTurnCompletion>>>;
-}> {
+  ownerTarget?: Pick<ResolvedCreateContext, 'targetMachine' | 'agentConfig' | 'project'>
+): Promise<PreparedSessionInput> {
   const envOverrides = parseEnvAssignments(options.env);
   if (Object.keys(envOverrides).length > 0) {
     throw new Error(
@@ -3034,7 +3031,16 @@ export async function createSessionResult(
     requesterUserId,
     options.sessionOwnerUserId
   );
-  const resolved = await resolveCreateContext({ auth, workspace, manager, options, requester });
+  if (
+    ownerTarget &&
+    (ownerTarget.targetMachine.id !== auth.machineId ||
+      ownerTarget.targetMachine.ownerUserId !== auth.userId ||
+      ownerTarget.agentConfig.machineId !== auth.machineId)
+  ) {
+    throw new Error('Host-owned Session target does not belong to the authenticated local owner');
+  }
+  const resolved: ResolvedCreateContext =
+    ownerTarget ?? (await resolveCreateContext({ auth, workspace, manager, options, requester }));
   const {
     targetMachine,
     agentConfig,
@@ -3049,15 +3055,14 @@ export async function createSessionResult(
     agentConfig,
     ...(openedBySessionId ? { openedBySessionId } : {}),
     dispatchConfig,
+    localOnly: ownerTarget !== undefined,
   });
 
   const sessionId = options.sessionId ?? (uuidV4() as SessionId);
-  const sessionRoomId = getSessionRoomId(sessionId);
-  const sessionDoc = await manager.getOrCreateSessionDoc(sessionId);
   const repoFullName = resolveProjectGitHubRepo(project);
   const baseBranch = project?.kind === 'local' ? undefined : project?.branch?.trim();
   const title = normalizeCliValue(options.title);
-  await manager.repo.upsertDocMeta(sessionRoomId, {
+  const meta = {
     id: sessionId,
     machineId: targetMachine.id,
     createdAt: new Date(getServerNow()).toISOString(),
@@ -3080,7 +3085,76 @@ export async function createSessionResult(
       : {}),
     // `agentRoleId`/`agentRoleRevision` are declared on `SessionMeta` now, so
     // the provenance fields no longer need a local intersection here.
-  } satisfies SessionMeta);
+  } satisfies SessionMeta;
+
+  const userTurn: SessionHistoryInput = {
+    id: options.userTurnId ?? uuidV4(),
+    role: 'user',
+    timestamp: meta.createdAt,
+    // Legacy daemons only understand pending input. Host-owned automation
+    // always uses the inert prepared protocol; remote creates negotiate it.
+    status:
+      ownerTarget || machineSupportsPreparedSessionInputProtocol(targetMachine)
+        ? 'prepared'
+        : 'pending',
+    read: !!ownerTarget || machineSupportsPreparedSessionInputProtocol(targetMachine),
+    userId: requesterUserId,
+    items: [{ type: 'text', text: prompt }],
+    inputConfig: buildCliHistoryInputConfig({
+      prompt: buildAgentPrompt(prompt, agentConfig.prompt ?? ''),
+      cliType: agentConfig.cliType,
+      agentType: agentConfig.agentType,
+      modeId: effectiveDispatchConfig.modeId ?? undefined,
+      modelId: effectiveDispatchConfig.modelId ?? undefined,
+      configOptionValues: effectiveDispatchConfig.configOptionValues,
+      chainDepth: options.chainDepth,
+    }),
+    fileDiff: [],
+    finished: true,
+  };
+  return { sessionId, meta, userTurn };
+}
+
+export async function createSessionResult(
+  auth: AuthContext,
+  workspace: WorkspaceSummary,
+  manager: LoroDocumentManager,
+  prompt: string,
+  options: CreateOptions,
+  dispatchConfig: ResolvedTurnDispatchConfig,
+  structuredOutput?: {
+    outputMode: StructuredSessionOutputMode;
+    timeoutMs: number;
+    onEvent?: (event: SessionTurnOutputEvent) => void;
+  }
+): Promise<{
+  sessionId: SessionId;
+  machineId: MachineId;
+  workspaceId: WorkspaceId;
+  userTurnId: string;
+  agentConfigId: string;
+  project?: ProjectRef;
+  parentSessionId?: SessionId;
+  openedBySessionId?: SessionId;
+  openedByRootSessionId?: SessionId;
+  completionPromise?: Promise<Awaited<ReturnType<typeof waitForTurnCompletion>>>;
+}> {
+  const prepared = await prepareSessionInput(
+    auth,
+    workspace,
+    manager,
+    prompt,
+    options,
+    dispatchConfig
+  );
+  const { sessionId, meta } = prepared;
+  const sessionRoomId = getSessionRoomId(sessionId);
+  const { project, parentSessionId, openedBySessionId, openedByRootSessionId } = meta;
+  const requesterUserId = prepared.userTurn.userId!;
+  const targetMachine = { id: meta.machineId };
+  const agentConfig = { id: meta.agentConfigId! };
+  await materializePreparedSessionInput(manager, prepared);
+  const sessionDoc = await manager.getOrCreateSessionDoc(sessionId);
 
   let completionAbortController: AbortController | undefined;
   let completionPromise: Promise<Awaited<ReturnType<typeof waitForTurnCompletion>>> | undefined;
@@ -3088,24 +3162,7 @@ export async function createSessionResult(
   // running the turn, so a later failure must not roll the session back.
   let dispatched = false;
   try {
-    const modeId = effectiveDispatchConfig.modeId;
-    const modelId = effectiveDispatchConfig.modelId;
-    const sessionCreatePrompt = buildAgentPrompt(prompt, agentConfig.prompt ?? '');
-    const userTurn = await appendUserPromptHistory({
-      sessionDoc,
-      prompt,
-      userId: requesterUserId,
-      inputConfig: buildCliHistoryInputConfig({
-        prompt: sessionCreatePrompt,
-        cliType: agentConfig.cliType,
-        agentType: agentConfig.agentType,
-        modeId: modeId ?? undefined,
-        modelId: modelId ?? undefined,
-        configOptionValues: effectiveDispatchConfig.configOptionValues,
-        chainDepth: options.chainDepth,
-      }),
-      preallocatedId: options.userTurnId,
-    });
+    const userTurn = prepared.userTurn;
     const userTurnId = userTurn.id;
     completionAbortController = structuredOutput ? new AbortController() : undefined;
     completionPromise = structuredOutput
@@ -3119,11 +3176,13 @@ export async function createSessionResult(
         })
       : undefined;
 
-    await updateSessionActivityTimestampsBestEffort(manager, sessionId);
-    await manager.repo.upsertDocMeta(sessionRoomId, {
-      status: SessionStatusFactory.idle(),
-    } satisfies Partial<SessionMeta>);
-    await writeDispatchPointer({ manager, sessionId, userTurnId });
+    if (!(await isPreparedSessionDispatched(manager, prepared))) {
+      await updateSessionActivityTimestampsBestEffort(manager, sessionId);
+      await manager.repo.upsertDocMeta(sessionRoomId, {
+        status: SessionStatusFactory.idle(),
+      } satisfies Partial<SessionMeta>);
+    }
+    await commitPreparedSessionDispatch(manager, prepared);
     dispatched = true;
     await confirmDispatchSyncedBestEffort({
       manager,
@@ -3159,7 +3218,7 @@ export async function createSessionResult(
     // was committed. After dispatch, deleting the session would destroy an
     // already-running turn (and its title) — the durable pointer plus Operation
     // store own eventual delivery instead.
-    if (!dispatched) {
+    if (!dispatched && !options.sessionId) {
       await rollbackPendingSessionCreate(manager, sessionId);
     }
     throw error;

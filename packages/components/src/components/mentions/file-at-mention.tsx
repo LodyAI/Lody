@@ -3,8 +3,6 @@ import * as React from 'react';
 import { forEachAtTokenSpan, type HydratedMentions } from '@/components/mentions/mention-hydration';
 import { useAtomValue } from 'jotai';
 import { usePostHog } from '@posthog/react';
-import { z } from 'zod';
-import { githubFetchFilePaths } from '@lody/shared';
 
 import { currentWorkspaceIdAtom } from '@/atoms';
 import {
@@ -14,7 +12,13 @@ import {
 } from '@/components/mentions/mention-analytics';
 import { buildPathSuggestions } from './file-search/engine';
 export * from './file-search/engine';
-import { withGitHubTokenRetry } from '@/lib/github-token';
+import {
+  fetchRepoFilePaths,
+  getRepoFilePathsCacheKey,
+  isRepoFilePathsStale,
+  readCachedRepoFilePaths,
+  type RepoFilePathsCacheEntry,
+} from '@/lib/repo-file-paths-cache';
 import { cn } from '@/lib/utils';
 import { FileIcon, FolderIcon } from '@/components/icons/file-icons';
 import {
@@ -27,89 +31,7 @@ import {
 } from '@/ui/mention';
 import type { TextareaProps } from '@lody/ui/textarea';
 
-export type RepoFilePathsResult = {
-  repoFullName: string;
-  defaultBranch: string;
-  headSha: string;
-  paths: string[];
-  truncated: boolean;
-};
-
-const RepoFilePathsResultSchema = z.object({
-  repoFullName: z.string(),
-  defaultBranch: z.string(),
-  headSha: z.string(),
-  paths: z.array(z.string()),
-  truncated: z.boolean(),
-});
-
-type RepoFilePathsCacheEntry = RepoFilePathsResult & {
-  fetchedAt: number;
-};
-
-const CACHE_TTL_MS = 1000 * 60 * 60 * 6; // 6h
-
-const memoryCache = new Map<string, RepoFilePathsCacheEntry>();
-
-const DB_NAME = 'lody:repo-file-paths';
-const DB_VERSION = 1;
-const STORE_NAME = 'pathsByRepo';
-
-function getCacheKey(workspaceId: string, repoFullName: string) {
-  return `${workspaceId}:${repoFullName}`;
-}
-
-function openCacheDb(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
-    if (typeof indexedDB === 'undefined') {
-      reject(new Error('IndexedDB not available'));
-      return;
-    }
-    const request = indexedDB.open(DB_NAME, DB_VERSION);
-    request.onerror = () => reject(request.error);
-    request.onupgradeneeded = () => {
-      const db = request.result;
-      if (!db.objectStoreNames.contains(STORE_NAME)) {
-        db.createObjectStore(STORE_NAME);
-      }
-    };
-    request.onsuccess = () => resolve(request.result);
-  });
-}
-
-async function idbGet(key: string): Promise<RepoFilePathsCacheEntry | null> {
-  try {
-    const db = await openCacheDb();
-    return await new Promise((resolve, reject) => {
-      const tx = db.transaction(STORE_NAME, 'readonly');
-      const store = tx.objectStore(STORE_NAME);
-      const req = store.get(key);
-      req.onerror = () => reject(req.error);
-      req.onsuccess = () => resolve((req.result as RepoFilePathsCacheEntry | undefined) ?? null);
-    });
-  } catch {
-    return null;
-  }
-}
-
-async function idbSet(key: string, value: RepoFilePathsCacheEntry): Promise<void> {
-  try {
-    const db = await openCacheDb();
-    await new Promise<void>((resolve, reject) => {
-      const tx = db.transaction(STORE_NAME, 'readwrite');
-      const store = tx.objectStore(STORE_NAME);
-      const req = store.put(value, key);
-      req.onerror = () => reject(req.error);
-      req.onsuccess = () => resolve();
-    });
-  } catch {
-    // ignore
-  }
-}
-
-function isStale(entry: RepoFilePathsCacheEntry, now: number) {
-  return now - entry.fetchedAt > CACHE_TTL_MS;
-}
+export type { RepoFilePathsResult } from '@/lib/repo-file-paths-cache';
 
 export function hydrateFileMentionsFromText(text: string, knownPaths: Set<string>) {
   const mentions: HydratedMentions['mentions'] = [];
@@ -163,38 +85,24 @@ export function useRepoFilePaths(repoFullName?: string) {
     let cancelled = false;
     const now = Date.now();
     const fetchStartedAt = Date.now();
-    const key = getCacheKey(workspaceIdValue, repoFullNameValue);
+    const key = getRepoFilePathsCacheKey(workspaceIdValue, repoFullNameValue);
 
     async function run() {
-      const mem = memoryCache.get(key);
-      if (mem) {
-        setData({ entry: mem, status: isStale(mem, now) ? 'refreshing' : 'ready' });
+      const cached = await readCachedRepoFilePaths(key);
+      if (cancelled) return;
+      if (cached) {
+        setData({
+          entry: cached,
+          status: isRepoFilePathsStale(cached, now) ? 'refreshing' : 'ready',
+        });
+        if (!isRepoFilePathsStale(cached, Date.now())) return;
       } else {
         setData((prev) => ({ ...prev, status: 'loading' }));
-        const persisted = await idbGet(key);
-        if (cancelled) return;
-        if (persisted) {
-          memoryCache.set(key, persisted);
-          setData({ entry: persisted, status: isStale(persisted, now) ? 'refreshing' : 'ready' });
-        }
       }
 
-      const current = memoryCache.get(key) ?? (await idbGet(key));
-      if (cancelled) return;
-      if (current && !isStale(current, Date.now())) return;
-
       try {
-        const result = await withGitHubTokenRetry(workspaceIdValue, repoFullNameValue, (token) =>
-          githubFetchFilePaths(token, repoFullNameValue)
-        );
+        const entry = await fetchRepoFilePaths(workspaceIdValue, repoFullNameValue);
         if (cancelled) return;
-        const parsed = RepoFilePathsResultSchema.parse({
-          repoFullName: repoFullNameValue,
-          ...result,
-        });
-        const entry: RepoFilePathsCacheEntry = { ...parsed, fetchedAt: Date.now() };
-        memoryCache.set(key, entry);
-        void idbSet(key, entry);
         setData({ entry, status: 'ready' });
       } catch (err) {
         if (cancelled) return;

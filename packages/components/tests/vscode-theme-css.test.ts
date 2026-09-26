@@ -23,6 +23,13 @@ const contrastRatio = (a: string, b: string): number => {
   return (light + 0.05) / (dark + 0.05);
 };
 
+// Dark themes hold every text foreground under the reading ceiling (13:1
+// against the canvas): on the fixture's #101010, pure white becomes #D5D5D5.
+const CEILED_ON_FIXTURE = '0 0% 83.5%';
+const PROSE_ON_FIXTURE = '0 0% 88.2%';
+// The #FFC799 accent used as selection text is already under the ceiling: unchanged.
+const CEILED_ACCENT_ON_FIXTURE = '27.1 100% 80%';
+
 const themeFixture: LodyResolvedVSCodeTheme = {
   schemaVersion: 1,
   id: 'vesper-like',
@@ -79,16 +86,20 @@ describe('createLodyThemeCssVariables', () => {
 
     expect(variables['--background']).toBe('0 0% 6.3%');
     expect(variables['--hover']).toBe('0 0% 10.2%');
-    expect(variables['--hover-foreground']).toBe('0 0% 100%');
+    expect(variables['--hover-foreground']).toBe(CEILED_ON_FIXTURE);
     expect(variables['--highlight']).toBe(warmAccent);
     expect(variables['--highlight-foreground']).toBe(buttonForeground);
     expect(variables['--selection']).toBe('0 0% 13.7%');
-    expect(variables['--selection-foreground']).toBe(warmAccent);
+    expect(variables['--selection-foreground']).toBe(CEILED_ACCENT_ON_FIXTURE);
     expect(variables['--selection-inactive']).toBe('0 0% 13.7%');
-    expect(variables['--selection-inactive-foreground']).toBe(warmAccent);
+    expect(variables['--selection-inactive-foreground']).toBe(CEILED_ACCENT_ON_FIXTURE);
     expect(variables['--secondary']).toBe('0 0% 13.7%');
     expect(variables['--button-secondary']).toBe(hexColorToHslChannel('#282A36'));
-    expect(variables['--button-secondary-foreground']).toBe(hexColorToHslChannel('#F8F8F2'));
+    // #F8F8F2 is above the ceiling too.
+    expect(variables['--button-secondary-foreground']).not.toBe(hexColorToHslChannel('#F8F8F2'));
+    expect(
+      contrastRatio(variables['--button-secondary-foreground']!, variables['--background']!)
+    ).toBeLessThanOrEqual(13);
     expect(variables['--button-secondary-hover']).toBe(hexColorToHslChannel('#343746'));
     expect(variables['--button-hover']).toBe(hexColorToHslChannel('#FFCFA8'));
     expect(variables['--input']).toBe(hexColorToHslChannel('#1C1C1C'));
@@ -97,11 +108,12 @@ describe('createLodyThemeCssVariables', () => {
     expect(variables['--input-field']).toBe(hexColorToHslChannel('#1C1C1C'));
     expect(variables['--tab-bar']).toBe('0 0% 6.3%');
     expect(variables['--tab-active']).toBe('0 0% 8.6%');
-    expect(variables['--tab-active-foreground']).toBe('0 0% 100%');
+    // The active tab takes the strong step (16:1), not the reading ceiling.
+    expect(variables['--tab-active-foreground']).toBe(PROSE_ON_FIXTURE);
     expect(variables['--tab-inactive']).toBe('0 0% 6.3%');
     expect(variables['--tab-inactive-foreground']).toBe('0 0% 49.4%');
     expect(variables['--tab-hover']).toBe('0 0% 15.7%');
-    expect(variables['--tab-hover-foreground']).toBe('0 0% 100%');
+    expect(variables['--tab-hover-foreground']).toBe(CEILED_ON_FIXTURE);
     expect(variables['--tab-border']).toBe('0 0% 6.3%');
     expect(variables['--tab-active-accent']).toBe(warmAccent);
     expect(variables['--destructive']).toBe('0 100% 50%');
@@ -112,7 +124,7 @@ describe('createLodyThemeCssVariables', () => {
     expect(variables['--status-danger']).toBe('0 100% 50%');
     expect(variables['--status-merged']).toBe('300 100% 50%');
     expect(variables['--sidebar-background']).toBe('0 0% 6.3%');
-    expect(variables['--sidebar-foreground']).toBe('0 0% 100%');
+    expect(variables['--sidebar-foreground']).toBe(CEILED_ON_FIXTURE);
     expect(variables['--sidebar-foreground-muted']).toBe('0 0% 62.7%');
     expect(variables['--sidebar-hover']).toBe('0 0% 15.7%');
     expect(variables['--sidebar-hover-foreground']).toBe(sidebarForeground);
@@ -122,7 +134,11 @@ describe('createLodyThemeCssVariables', () => {
     expect(variables['--sidebar-selection']).toBe('0 0% 13.7%');
     expect(variables['--sidebar-selection-foreground']).toBe(warmAccent);
     expect(variables['--sidebar-ring']).toBe(warmAccent);
-    expect(variables['--code-added']).toBe('120 100% 50%');
+    // #00FF00 is brighter than the dark text ceiling: same hue, dimmed.
+    expect(variables['--code-added']!.split(' ')[0]).toBe('120');
+    expect(
+      contrastRatio(variables['--code-added']!, variables['--background']!)
+    ).toBeLessThanOrEqual(13);
     expect(variables['--code-removed']).toBe('0 100% 50%');
     expect(variables['--modified-file']).toBe('300 100% 50%');
     expect(variables['--scrollbar-thumb']).toBe(
@@ -158,10 +174,11 @@ describe('createLodyThemeCssVariables', () => {
     });
 
     expect(variables['--button-secondary']).toBe('0 0% 11%');
-    expect(variables['--button-secondary-foreground']).toBe('0 0% 100%');
+    expect(variables['--button-secondary-foreground']).toBe(CEILED_ON_FIXTURE);
     expect(variables['--button-secondary-hover']).toBe('0 0% 15.7%');
     expect(variables['--tab-active']).toBe('0 0% 6.3%');
-    expect(variables['--tab-active-foreground']).toBe('0 0% 100%');
+    // The active tab takes the strong step (16:1), not the reading ceiling.
+    expect(variables['--tab-active-foreground']).toBe(PROSE_ON_FIXTURE);
     expect(variables['--tab-inactive']).toBe('0 0% 6.3%');
     expect(variables['--tab-inactive-foreground']).toBe('0 0% 62.7%');
     expect(variables['--tab-hover']).toBe('0 0% 15.7%');
@@ -177,11 +194,11 @@ describe('createLodyThemeCssVariables', () => {
       ...themeFixture,
       colors: {
         ...themeFixture.colors,
-        'list.foreground': '#DDDDDD',
+        'list.foreground': '#C0C0C0',
       },
     });
 
-    expect(variables['--sidebar-foreground']).toBe(hexColorToHslChannel('#DDDDDD'));
+    expect(variables['--sidebar-foreground']).toBe(hexColorToHslChannel('#C0C0C0'));
     expect(variables['--sidebar-foreground-muted']).toBe(hexColorToHslChannel('#A0A0A0'));
   });
 
@@ -242,5 +259,74 @@ describe('createLodyThemeCssVariables', () => {
       });
     }
     expect(contrastRatio(variables['--syntax-comment']!, background!)).toBeGreaterThanOrEqual(3.5);
+  });
+
+  it('holds dark-theme text under the reading ceiling, with one stronger step', () => {
+    // A pure-white theme that is not tuned by hand, so everything is derived.
+    const variables = createLodyThemeCssVariables(themeFixture);
+    const background = variables['--background']!;
+    for (const name of ['--foreground', '--popover-foreground', '--sidebar-foreground']) {
+      expect({ name, ok: contrastRatio(variables[name]!, background) <= 13 }).toEqual({
+        name,
+        ok: true,
+      });
+    }
+    // Prose is one step above the interface text; headings one above prose,
+    // still below pure white.
+    const reading = contrastRatio(variables['--reading-foreground']!, background);
+    expect(reading).toBeGreaterThan(13);
+    expect(reading).toBeLessThanOrEqual(14.6);
+    const strong = contrastRatio(variables['--foreground-strong']!, background);
+    expect(strong).toBeGreaterThan(reading);
+    expect(strong).toBeLessThanOrEqual(16.3);
+    // The active tab reads at the prose level, never above it.
+    expect(variables['--tab-active-foreground']).toBe(variables['--reading-foreground']);
+    const sidebarRow = contrastRatio(
+      variables['--sidebar-row-foreground']!,
+      variables['--sidebar-background']!
+    );
+    expect(sidebarRow).toBeLessThanOrEqual(9.9);
+    // The sidebar never outshines the reading column.
+    expect(sidebarRow).toBeLessThan(reading);
+  });
+
+  it('renders Vesper in its deep-sea palette, with the hand-tuned reading colors', () => {
+    const variables = createLodyThemeCssVariables(getBundledVSCodeThemeByIdSync('vesper')!);
+    expect(variables['--background']).toBe(hexColorToHslChannel('#131416'));
+    expect(variables['--reading-foreground']).toBe(hexColorToHslChannel('#E4E5E7'));
+    expect(variables['--sidebar-row-foreground']).toBe(hexColorToHslChannel('#BCBEC2'));
+    expect(variables['--sidebar-selection-foreground']).toBe(hexColorToHslChannel('#E4E5E7'));
+    expect(variables['--tab-active-foreground']).toBe(hexColorToHslChannel('#E4E5E7'));
+    // The selected row sits on a jellyfish-cyan tint.
+    expect(variables['--sidebar-selection']).toBe(hexColorToHslChannel('#252E35'));
+    // Text follows the ceiling; the grays stay near-neutral (a faint cool cast).
+    expect(
+      contrastRatio(variables['--foreground']!, variables['--background']!)
+    ).toBeLessThanOrEqual(13);
+    for (const name of ['--background', '--foreground', '--muted-foreground', '--border']) {
+      const saturation = Number.parseFloat(variables[name]!.split(' ')[1]!);
+      expect({ name, quiet: saturation <= 10 }).toEqual({ name, quiet: true });
+    }
+    // Jellyfish cyan is the accent; warnings stay amber.
+    expect(variables['--primary']).toBe(hexColorToHslChannel('#7CC4E8'));
+    expect(variables['--status-warning']).toBe(hexColorToHslChannel('#FFC799'));
+    // Menus and popovers are raised to the composer's surface, not the canvas.
+    expect(variables['--popover']).not.toBe(variables['--background']);
+  });
+
+  it('leaves a theme whose text is already below the cap, and high-contrast themes, alone', () => {
+    const soft = createLodyThemeCssVariables({
+      ...themeFixture,
+      type: 'dark',
+      colors: { ...themeFixture.colors, 'editor.background': '#1E1E1E', foreground: '#C8C8C8' },
+    });
+    expect(soft['--reading-foreground']).toBeUndefined();
+
+    const highContrast = createLodyThemeCssVariables({
+      ...themeFixture,
+      type: 'hcDark',
+      colors: { ...themeFixture.colors, 'editor.background': '#000000', foreground: '#FFFFFF' },
+    });
+    expect(highContrast['--reading-foreground']).toBeUndefined();
   });
 });

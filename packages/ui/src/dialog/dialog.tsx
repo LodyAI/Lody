@@ -1,12 +1,19 @@
 import { Dialog as BaseDialog } from '@base-ui/react/dialog';
 import * as stylex from '@stylexjs/stylex';
-import { forwardRef, type ComponentProps, type ReactNode } from 'react';
+import { forwardRef, type ComponentProps, type CSSProperties, type ReactNode } from 'react';
 import { Button } from '../button/button';
 import { appendClassName } from '../internal/class-name';
 import { CrossGlyph } from '../internal/glyphs';
 import { PopupContainerProvider, type PopupContainer } from '../popup/portal-container';
 import { useForcedThemeClassNames } from '../theme/theme';
-import { DialogFooter, DialogHeader, usePanelContainer } from './parts';
+import {
+  DialogFooter,
+  DialogHeader,
+  mergePanelWidth,
+  ModalDepthProvider,
+  useModalDepth,
+  usePanelContainer,
+} from './parts';
 import { isHidden, modal } from './surface';
 
 type PopupBaseProps = ComponentProps<typeof BaseDialog.Popup>;
@@ -37,6 +44,16 @@ export interface ModalContentProps extends Omit<PopupBaseProps, 'className' | 'r
   backdropClassName?: string;
   /** Skip the enter/exit fade so the surface appears instantly. */
   noAnimation?: boolean;
+  /**
+   * Panel width when the rung's default is wrong for this surface.
+   *
+   * It lands on inline `style`: the panel already states `width` itself, and a
+   * second declaration — a StyleX class here or a caller's utility class —
+   * wins only if the sheet happens to order it after. A lone `max-width` can
+   * only narrow the fixed default, never widen it. The rung's own `max-width`
+   * viewport cap still applies on top.
+   */
+  width?: CSSProperties['width'];
   className?: string;
 }
 
@@ -71,17 +88,33 @@ const styles = stylex.create({
   portal: { display: 'contents' },
 });
 
-/** The overlay under the panel, and whatever the host put on it. */
+/**
+ * The overlay under the panel, and whatever the host put on it.
+ *
+ * `forceRender` is unconditional on purpose: Base UI mounts no backdrop for a
+ * dialog nested inside another (`useRenderDialogRoot` marks such a root
+ * `nested`), which would leave a stacked dialog dimming nothing — the one
+ * surface a nested overlay exists to cover is the panel it was opened from.
+ * The overlay rides the same z rung as the panels (`modal.backdrop`), so
+ * portal DOM order alone puts it above the earlier panel and below its own,
+ * and `modal.backdropNested` keeps the veil light over an already-dimmed
+ * stack.
+ */
 export const DialogBackdrop = forwardRef<HTMLDivElement, DialogBackdropProps>(
   function DialogBackdrop({ className, children, ...rest }, ref) {
+    const nested = useModalDepth() > 0;
     return (
       <BaseDialog.Backdrop
         ref={ref}
+        forceRender
         {...rest}
         className={(state) =>
           appendClassName(
-            stylex.props(modal.backdrop, isHidden(state.transitionStatus) && modal.backdropHidden)
-              .className,
+            stylex.props(
+              modal.backdrop,
+              nested && modal.backdropNested,
+              isHidden(state.transitionStatus) && modal.backdropHidden
+            ).className,
             className
           )
         }
@@ -113,6 +146,8 @@ export const DialogContent = forwardRef<HTMLDivElement, DialogContentProps>(func
     noAnimation,
     closeButton = true,
     closeLabel = 'Close',
+    width,
+    style,
     ...rest
   },
   ref
@@ -134,6 +169,7 @@ export const DialogContent = forwardRef<HTMLDivElement, DialogContentProps>(func
       <BaseDialog.Popup
         ref={panelRef}
         {...rest}
+        style={mergePanelWidth(style, width)}
         className={(state) =>
           appendClassName(
             stylex.props(
@@ -145,7 +181,9 @@ export const DialogContent = forwardRef<HTMLDivElement, DialogContentProps>(func
           )
         }
       >
-        <PopupContainerProvider container={panel}>{children}</PopupContainerProvider>
+        <PopupContainerProvider container={panel}>
+          <ModalDepthProvider>{children}</ModalDepthProvider>
+        </PopupContainerProvider>
         {closeButton ? (
           <BaseDialog.Close
             render={

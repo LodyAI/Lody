@@ -10,7 +10,10 @@ import type {
 import { LoroSidebar } from '@/components/loro-sidebar';
 import { SidebarFilterPopover } from '@/components/sidebar-filter-popover';
 import { LocalProjectItem } from '@/components/loro-app-sidebar';
-import { SidebarSectionHeader } from '@/components/sidebar-row-shared';
+import {
+  SidebarSectionHeader,
+  SIDEBAR_STICKY_GROUP_HEADER_CLASS,
+} from '@/components/sidebar-row-shared';
 import { buildSidebarOpenerRowResolver } from '@/components/sessions/session-list-rows';
 import { SessionList } from '@/components/session-list';
 import type { SessionListProps } from '@/components/session-list';
@@ -1516,5 +1519,93 @@ function SessionsFinishingLayout(args: Parameters<typeof LoroSidebar>[0]) {
 export const SessionsFinishing: Story = {
   name: 'Sessions finishing',
   render: (args) => <SessionsFinishingLayout {...args} />,
+  args: { ...Default.args! },
+};
+
+/**
+ * Regression fixture for a machine group's sticky header. Mirrors
+ * `LoroAppSidebar`'s local-project section DOM: a sticky section header over
+ * many collapsed project rows inside the sidebar's scroll container. Scroll
+ * the box — a selected row must slide under the opaque header, never bleed
+ * through the machine name.
+ */
+function MachineGroupScrollFixture() {
+  const isMobile = useIsMobile();
+  const [collapsedProjects, setCollapsedProjects] = useState<Record<string, boolean>>({});
+  const projects = useMemo<LocalProjectMeta[]>(
+    () =>
+      Array.from({ length: 24 }, (_, index) => ({
+        id: `scroll-proj-${index + 1}` as LocalProjectId,
+        name: `project-${String(index + 1).padStart(2, '0')}`,
+        rootPath: `C:\\Users\\dev\\Code\\project-${String(index + 1).padStart(2, '0')}`,
+        createdAtMs: NOW - index * 24 * 60 * 60 * 1000,
+      })),
+    []
+  );
+  return (
+    <div className="flex min-h-screen w-full items-start justify-center bg-background p-10">
+      <div
+        data-testid="machine-group-scrollbox"
+        className="h-[360px] w-[280px] overflow-y-auto rounded-xl border border-sidebar-border/60 bg-sidebar p-2"
+      >
+        {/* Production section wrapper: loro-app-sidebar.tsx localProjectsTopContent. */}
+        <div className="space-y-0.5">
+          <div className={SIDEBAR_STICKY_GROUP_HEADER_CLASS}>
+            <SidebarSectionHeader
+              label="LAPTOP-PP66IJ89"
+              collapsed={false}
+              isMobile={isMobile}
+              toggleLabel="Toggle section"
+              onToggleCollapsed={() => {}}
+            />
+          </div>
+          <div className="space-y-0.5">
+            {projects.map((project, index) => {
+              const key = `${demoMachineId}:${project.id}`;
+              return (
+                <LocalProjectItem
+                  key={project.id}
+                  machineId={demoMachineId}
+                  machineName="LAPTOP-PP66IJ89"
+                  project={project}
+                  canRemoveProject
+                  collapsed={collapsedProjects[key] ?? true}
+                  whetherShowFullList={false}
+                  isSelected={index === 0}
+                  sessionsForProject={[]}
+                  childSessionsByParent={new Map()}
+                  liveSessionStatuses={EMPTY_LIVE_SESSION_STATUSES}
+                  formattedPath={project.rootPath}
+                  defaultSessionTitle="Untitled"
+                  selectedSessionId={null}
+                  removeProjectLabel="Remove folder"
+                  archiveTooltipLabel="Archive"
+                  archiveActionLabel="Archive"
+                  archiveConfirmLabel="Confirm"
+                  isMobile={isMobile}
+                  toggleLabel="Toggle"
+                  onNavigateProject={() => {}}
+                  onNavigateSession={() => {}}
+                  onArchive={() => {}}
+                  collapsedOpenedBySessionIds={{}}
+                  onToggleOpenedBySessions={() => {}}
+                  onToggleCollapsed={() =>
+                    setCollapsedProjects((prev) => ({ ...prev, [key]: !(prev[key] ?? true) }))
+                  }
+                  onToggleFullList={() => {}}
+                  onRequestRemoval={() => {}}
+                />
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export const MachineGroupStickyHeader: Story = {
+  name: 'Machine group sticky header (scroll)',
+  render: () => <MachineGroupScrollFixture />,
   args: { ...Default.args! },
 };

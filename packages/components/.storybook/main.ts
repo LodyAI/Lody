@@ -7,7 +7,16 @@ import tailwindcss from '@tailwindcss/vite';
 import wasm from 'vite-plugin-wasm';
 import { stylexOptions } from '../../ui/stylex-options';
 import topLevelAwait from '../vite-top-level-await-fixed.cjs';
+import { emojibaseAssetsPlugin } from '../vite-emojibase-assets';
 import { loroCrdtWasmUrlWorkaround } from '../vite-wasm-workarounds.ts';
+
+// The shell can export NODE_ENV=production even while running Storybook's dev
+// server. Vite's React plugin then disables its refresh runtime while the
+// serve transform still emits refresh signatures. Keep only `storybook dev`
+// aligned with its actual mode; `storybook build` remains production.
+if (process.argv.includes('dev') && process.env.NODE_ENV === 'production') {
+  process.env.NODE_ENV = 'development';
+}
 
 const require = createRequire(import.meta.url);
 
@@ -40,6 +49,9 @@ const config: StorybookConfig = {
     });
     viteConfig.plugins.push(tailwindcss());
     viteConfig.plugins.push(stylex.vite(stylexOptions));
+    // Serves `/emojibase/<locale>/{data,messages}.json` in dev so the picker's
+    // bundled-dataset URL contract holds here too, not only in app builds.
+    viteConfig.plugins.push(emojibaseAssetsPlugin());
 
     viteConfig.worker = {
       ...(viteConfig.worker ?? {}),

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import React from 'react';
+import React, { act } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync } from 'react-dom';
 import { createRoot, type Root } from 'react-dom/client';
@@ -159,24 +159,105 @@ describe('LoroSidebar pinned section', () => {
     expect(selected).toBe('second');
   });
 
-  it('keeps the desktop collapse toggle hover-revealed in browsers', () => {
-    renderSidebar({ onRequestCollapse: vi.fn() });
+  it.each([false, true])(
+    'keeps the desktop collapse toggle visible, not hover-revealed (Electron=%s)',
+    (isElectron) => {
+      renderSidebar({ isElectron, onRequestCollapse: vi.fn() });
 
-    const button = container?.querySelector('button[aria-label="Toggle Sidebar"]');
-    expect(button).not.toBeNull();
-    expect(button?.className).toContain('opacity-0');
-    expect(button?.className).toContain('pointer-events-none');
-    expect(button?.className).toContain('group-hover/sidebar-header:opacity-100');
+      const button = container?.querySelector('button[aria-label="Toggle Sidebar"]');
+      expect(button).not.toBeNull();
+      expect(button?.className).not.toContain('opacity-0');
+      expect(button?.className).not.toContain('pointer-events-none');
+    }
+  );
+
+  it('orders Help, Archive, and Settings and keeps their destinations reachable', async () => {
+    let destination = 'home';
+    renderSidebar({
+      onArchiveClicked: () => {
+        destination = 'archive';
+      },
+      onDocsClicked: () => {
+        destination = 'docs';
+      },
+      onGithubClicked: () => {
+        destination = 'github';
+      },
+      onFeedbackClicked: () => {
+        destination = 'feedback';
+      },
+      onSettingsClicked: () => {
+        destination = 'settings';
+      },
+    });
+
+    const footerButton = (name: string) =>
+      Array.from(container?.querySelectorAll('button') ?? []).find(
+        (button) => button.textContent?.trim() === name
+      );
+    const help = footerButton('Help');
+    expect(help).toBeDefined();
+    expect(
+      Array.from(help!.parentElement!.children).map((button) => button.textContent?.trim())
+    ).toEqual(['Help', 'Archive', 'Settings']);
+    await act(async () => footerButton('Archive')?.click());
+    expect(destination).toBe('archive');
+    await act(async () => footerButton('Settings')?.click());
+    expect(destination).toBe('settings');
+
+    await act(async () => help?.click());
+    const items = Array.from(document.querySelectorAll<HTMLElement>('[role="menuitem"]'));
+    expect(items.some((item) => item.textContent?.includes('Archive'))).toBe(false);
+    const docs = items.find((item) => item.textContent?.includes('Docs'));
+    expect(docs).toBeDefined();
+    expect(items.map((item) => item.textContent?.trim())).toEqual([
+      'Docs',
+      'GitHub',
+      'Join community',
+      'Feedback',
+      'Report bug',
+    ]);
+
+    await act(async () => docs?.click());
+    expect(destination).toBe('docs');
+    await act(async () => help?.click());
+    const github = Array.from(document.querySelectorAll<HTMLElement>('[role="menuitem"]')).find(
+      (item) => item.textContent?.trim() === 'GitHub'
+    );
+    await act(async () => github?.click());
+    expect(destination).toBe('github');
+    await act(async () => help?.click());
+    const feedback = Array.from(document.querySelectorAll<HTMLElement>('[role="menuitem"]')).find(
+      (item) => item.textContent?.trim() === 'Feedback'
+    );
+    await act(async () => feedback?.click());
+    expect(destination).toBe('feedback');
   });
 
-  it('shows the desktop collapse toggle by default in Electron', () => {
-    renderSidebar({ isElectron: true, onRequestCollapse: vi.fn() });
+  it('keeps Help and Settings around the Archive exit while Archive is open', () => {
+    let destination = 'archive';
+    renderSidebar({
+      activeNav: 'archive',
+      onHomeClicked: () => {
+        destination = 'home';
+      },
+    });
 
-    const button = container?.querySelector('button[aria-label="Toggle Sidebar"]');
-    expect(button).not.toBeNull();
-    expect(button?.className).not.toContain('opacity-0');
-    expect(button?.className).not.toContain('pointer-events-none');
-    expect(button?.className).toContain('focus-visible:outline-hidden');
+    const buttons = Array.from(container?.querySelectorAll('button') ?? []);
+    expect(buttons.some((button) => button.textContent?.trim() === 'More')).toBe(false);
+    const exit = buttons.find((button) => button.textContent?.trim() === 'Leave Archive');
+    expect(exit).toBeDefined();
+    expect(
+      Array.from(exit!.parentElement!.children).map((button) => button.textContent?.trim())
+    ).toEqual(['Help', 'Leave Archive', 'Settings']);
+    expect(exit?.querySelector('svg.lucide-archive')).not.toBeNull();
+    expect(exit?.querySelector('svg.lucide-arrow-left')).not.toBeNull();
+
+    // No history to return to in the test window: leaving goes Home.
+    flushSync(() => {
+      exit?.click();
+    });
+    expect(destination).toBe('home');
   });
 
   it('renders back and forward next to the collapse toggle', () => {
@@ -193,8 +274,9 @@ describe('LoroSidebar pinned section', () => {
     expect(parent?.children[0]).toBe(collapse);
     expect(parent?.children[1]).toBe(back);
     expect(parent?.children[2]).toBe(forward);
-    expect(back?.className).toContain('h-5');
-    expect(forward?.className).toContain('h-5');
+    // Arrows with a shaft, not chevrons.
+    expect(back?.querySelector('svg.lucide-arrow-left')).not.toBeNull();
+    expect(forward?.querySelector('svg.lucide-arrow-right')).not.toBeNull();
   });
 
   it('renders pinned conversations before Workspace groups', () => {

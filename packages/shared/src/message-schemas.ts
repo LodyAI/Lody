@@ -14,6 +14,7 @@ import {
 } from './ai';
 import { SESSION_GOAL_ACTIONS } from './goal';
 import type { AgentRoleId, SessionId } from './ids';
+import type { ProjectRef } from './project';
 import { MAX_MESSAGE_TEXT_SPAN_MARK_LENGTH, MESSAGE_TEXT_SPAN_KINDS } from './message-text-spans';
 import { RpcSecretPublicKeySchema } from './rpc-secret';
 import { LodyOperationIdSchema, LodyOperationCompletionSchema } from './session-orchestration';
@@ -3162,6 +3163,61 @@ export const TaskProposalMetaSchema = z.object({
   proposedBy: MessageItemActorSchema.optional(),
 });
 
+const proposalTimeOfDay = {
+  hour: z.number().int().min(0).max(23),
+  minute: z.number().int().min(0).max(59),
+  timeZone: z.string().min(1).max(100).optional(),
+};
+export const ScheduleProposalRuleSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('manual') }).strict(),
+  z.object({ kind: z.literal('minutes'), every: z.number().int().min(1).max(59) }).strict(),
+  z.object({ kind: z.literal('hours'), every: z.number().int().min(1).max(23) }).strict(),
+  z.object({ kind: z.literal('daily'), ...proposalTimeOfDay }).strict(),
+  z.object({ kind: z.literal('weekdays'), ...proposalTimeOfDay }).strict(),
+  z
+    .object({
+      kind: z.literal('weekly'),
+      weekdays: z.array(z.number().int().min(0).max(6)).min(1).max(7),
+      ...proposalTimeOfDay,
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('monthly'),
+      days: z.array(z.number().int().min(1).max(31)).min(1).max(31),
+      ...proposalTimeOfDay,
+    })
+    .strict(),
+  z.object({ kind: z.literal('once'), at: z.string().datetime({ offset: true }) }).strict(),
+]);
+
+export const ScheduleProposalDestinationSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('new_session') }).strict(),
+  z.object({ kind: z.literal('own_session') }).strict(),
+  z.object({ kind: z.literal('existing_session'), sessionId: z.string().min(1) }).strict(),
+]);
+
+export const ScheduleProposalTargetSchema = z
+  .object({
+    agentConfigId: z.string().min(1).optional(),
+    agentRoleId: z.string().min(1).optional(),
+    machineId: z.string().min(1).optional(),
+    project: ProjectRefSchema.transform((value) => value as ProjectRef).optional(),
+  })
+  .strict();
+
+export const ScheduleProposalMetaSchema = z.object({
+  proposalId: z.string().trim().min(1),
+  title: z.string().trim().min(1).max(200),
+  prompt: z.string().min(1).max(32768),
+  rule: ScheduleProposalRuleSchema,
+  destination: ScheduleProposalDestinationSchema.optional(),
+  target: ScheduleProposalTargetSchema.optional(),
+  outcome: z.enum(['created', 'dismissed']).optional(),
+  scheduleId: z.string().optional(),
+  proposedBy: MessageItemActorSchema.optional(),
+});
+
 // Reason codes for chat_failed system notice
 export const ChatFailedReasonSchema = z.enum([
   'session_archived',
@@ -3351,6 +3407,11 @@ export const SystemNoticeSchema = z.discriminatedUnion('name', [
     type: z.literal('system_notice'),
     name: z.literal('task_proposal'),
     meta: TaskProposalMetaSchema.optional(),
+  }),
+  z.object({
+    type: z.literal('system_notice'),
+    name: z.literal('schedule_proposal'),
+    meta: ScheduleProposalMetaSchema.optional(),
   }),
   z.object({
     type: z.literal('system_notice'),

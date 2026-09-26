@@ -13,7 +13,6 @@ import {
   parseRateLimitEntryKey,
 } from '@lody/shared';
 import { toast } from '@/lib/toast';
-import { Badge } from '@lody/ui/badge';
 import { Button } from '@lody/ui/button';
 import { AlertDialog } from '@/ui/dialog';
 import { withClassName } from '@/lib/stylex';
@@ -23,6 +22,8 @@ import { settingsCatalog as catalog, settingsSurface as surface } from './surfac
 import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
 import { useMachineAcpBinaryProgress } from '@/hooks/use-machine-acp-binary-progress';
 import { AgentIcon } from '@/components/icons/agent-icon';
+import { useAcpSelectorOptions } from '@/hooks/use-acp-selector-options';
+import { formatLocalizedRelativeTime } from '@/lib/format-relative-time';
 import { CodexResetForecastChip } from '@/components/codex-reset/codex-reset-forecast-entry';
 import { canShowCodexResetForecast } from '@/lib/codex-reset-forecast';
 import {
@@ -34,14 +35,17 @@ import {
 } from '@/lib/session-usage';
 import { settingsType as type } from './type.stylex';
 
+/** The fill a pressable settings row takes under the pointer (`surface.pressableLine`). */
+const ROW_HOVER = `color-mix(in oklab, ${colors.elevatedBackground}, ${colors.label} 4%)`;
+
 /** Wide enough in its own container to set the meters beside the name. */
 const ROOMY = '@container (min-width: 24rem)';
 
 const styles = stylex.create({
   /** A line of the machine's provider card; the list draws the card and the rules. */
   root: { minWidth: 0, containerType: 'inline-size' },
-  row: { display: 'flex', alignItems: 'center', width: '100%', minWidth: 0 },
-  main: { gap: space[2], paddingInline: space[3], paddingBlock: space[1.5] },
+  row: { position: 'relative', display: 'flex', alignItems: 'center', width: '100%', minWidth: 0 },
+  main: { gap: '10px', paddingInline: space[4], paddingBlock: space[2] },
   mainList: { gap: space[3], paddingInline: space[4], paddingBlock: space[3] },
   icon: {
     display: 'flex',
@@ -56,7 +60,6 @@ const styles = stylex.create({
   glyph: { width: '16px', height: '16px' },
   glyphList: { width: '20px', height: '20px' },
   body: { flexGrow: 1, minWidth: 0 },
-  badge: { textTransform: 'capitalize' },
   trailing: {
     display: 'flex',
     flexShrink: 0,
@@ -68,6 +71,35 @@ const styles = stylex.create({
     color: colors.secondaryLabel,
   },
   trailingList: { paddingBlock: space[3] },
+  /** The compact row's facts end on the rows' own inset. */
+  trailingCompact: { paddingInlineEnd: space[4] },
+  /**
+   * The row's own actions, shown to the pointer or keyboard that reaches the
+   * row: at rest the row says only what is true of the provider.
+   */
+  actions: { display: 'flex', alignItems: 'center', gap: space[2] },
+  reveal: {
+    // Laid over the row's end rather than kept in its flow, so at rest the
+    // row's own facts reach the edge instead of stopping short of two
+    // invisible buttons. The fill is the row's hover fill, faded at its start.
+    position: 'absolute',
+    insetInlineEnd: space[3],
+    top: '50%',
+    transform: 'translateY(-50%)',
+    paddingInlineStart: space[2],
+    backgroundColor: ROW_HOVER,
+    boxShadow: `-16px 0 12px -4px ${ROW_HOVER}`,
+    opacity: {
+      default: 0,
+      [stylex.when.ancestor(':hover')]: 1,
+      [stylex.when.ancestor(':focus-within')]: 1,
+    },
+    pointerEvents: {
+      default: 'none',
+      [stylex.when.ancestor(':hover')]: 'auto',
+      [stylex.when.ancestor(':focus-within')]: 'auto',
+    },
+  },
   /** The meters sit beside the name when the row has room, and under it when not. */
   metersInline: {
     display: { default: 'none', [ROOMY]: 'flex' },
@@ -133,6 +165,12 @@ export type ProviderRowProps = {
    * for all its providers and the rule between them.
    */
   variant?: 'card' | 'list';
+  /**
+   * How much the provider is used on its machine. A compact row states it on
+   * its second line, with the default model, so a short list still says what
+   * each provider is for and whether anyone reaches for it.
+   */
+  usage?: { conversations: number; lastUsedAt: number | null };
   /** Layout only. */
   className?: string;
 };
@@ -147,11 +185,26 @@ export function ProviderRow({
   onDelete,
   onRefresh,
   variant = 'card',
+  usage,
   className,
 }: ProviderRowProps) {
   const { t } = useTranslation();
   const { cliType, agentType } = config;
   const envCount = Object.keys(config.env || {}).length;
+  // The cached capabilities the composer also reads; nothing is fetched here.
+  const selector = useAcpSelectorOptions({
+    configId: config.id,
+    cliType,
+    agentType,
+    runtimeOverrides: config.runtimeOverrides,
+    machine,
+  });
+  // A model the runtime calls "default" names nothing, so the row leaves it out.
+  const defaultModel =
+    selector.defaultModelId && selector.defaultModelId.toLowerCase() !== 'default'
+      ? (selector.modelOptions.find((option) => option.value === selector.defaultModelId)?.label ??
+        null)
+      : null;
   const showRateLimits =
     canShowSubscriptionRateLimits({ cliType, agentType, config }) &&
     !!machine?.raceLimits &&
@@ -172,7 +225,14 @@ export function ProviderRow({
   // Codex-only: the third-party reset forecast for OpenAI's own usage limits.
   const showResetForecast = canShowCodexResetForecast({ cliType, agentType, config });
 
-  const typeBadge = cliType === 'builtin' ? null : cliType === 'custom' ? 'Custom' : 'Registry';
+  // What kind of provider this is, when it is not one Lody ships: a fact of the
+  // meta line, in words, not a pill on every row.
+  const kind =
+    cliType === 'builtin'
+      ? null
+      : cliType === 'custom'
+        ? t('settings.agent.dialog.group.custom', 'Custom')
+        : t('settings.agent.dialog.group.registry', 'ACP Provider');
 
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -221,9 +281,26 @@ export function ProviderRow({
   };
 
   const compact = variant === 'card';
+  const facts = compact
+    ? [
+        kind,
+        defaultModel,
+        usage && usage.conversations > 0
+          ? t('settings.agent.provider.conversationCount', '{{count}} conversations', {
+              count: usage.conversations,
+            })
+          : null,
+        usage?.lastUsedAt != null
+          ? t('settings.agent.provider.lastUsed', 'Used {{ago}}', {
+              ago: formatLocalizedRelativeTime(usage.lastUsedAt, t),
+            })
+          : null,
+        envCount > 0 ? t('settings.agent.provider.envCount', { count: envCount }) : null,
+      ].filter((fact): fact is string => fact != null)
+    : [kind].filter((fact): fact is string => fact != null);
   return (
     <div {...withClassName(stylex.props(styles.root), className)}>
-      <div {...stylex.props(styles.row, surface.pressableLine)}>
+      <div {...stylex.props(stylex.defaultMarker(), styles.row, surface.pressableLine)}>
         <button
           type="button"
           onClick={() => onEdit(config)}
@@ -242,15 +319,17 @@ export function ProviderRow({
           <div {...stylex.props(styles.body)}>
             <div {...stylex.props(catalog.titleLine)}>
               <span {...stylex.props(catalog.name)}>{config.name}</span>
-              {typeBadge ? (
-                <Badge>
-                  <span {...stylex.props(styles.badge)}>{typeBadge}</span>
-                </Badge>
-              ) : null}
             </div>
+            {facts.length > 0 ? (
+              <span {...stylex.props(catalog.meta)}>
+                <span {...stylex.props(catalog.truncate)}>{facts.join(' · ')}</span>
+              </span>
+            ) : null}
           </div>
         </button>
-        <div {...stylex.props(styles.trailing, !compact && styles.trailingList)}>
+        <div
+          {...stylex.props(styles.trailing, compact ? styles.trailingCompact : styles.trailingList)}
+        >
           {/* Not mounted at all when ineligible, so a non-Codex row costs no
               store subscription and no clock tick. */}
           {showResetForecast ? <CodexResetForecastChip enabled /> : null}
@@ -269,49 +348,51 @@ export function ProviderRow({
               ))}
             </div>
           )}
-          {envCount > 0 && (
+          {envCount > 0 && !compact && (
             <span>{t('settings.agent.provider.envCount', { count: envCount })}</span>
           )}
           {refreshing && binaryProgressText ? (
             <span {...stylex.props(styles.progress)}>{binaryProgressText}</span>
           ) : null}
-          {onRefresh && (
-            <Button
-              variant="ghost"
-              size="small"
-              icon
-              disabled={refreshing}
-              aria-label={t(
-                'agents.acpCapabilities.refreshModelsAndModes',
-                'Refresh models and modes'
-              )}
-              onClick={(event) => {
-                event.stopPropagation();
-                void handleRefresh();
-              }}
-            >
-              {refreshing ? (
-                <Spinner size="small" />
-              ) : (
-                <RefreshCw {...stylex.props(catalog.icon)} />
-              )}
-            </Button>
-          )}
-          {onDelete && (
-            <Button
-              variant="ghost"
-              aria-label={t('common.delete', 'Delete')}
-              size="small"
-              icon
-              tone="destructive"
-              onClick={(event) => {
-                event.stopPropagation();
-                setDeleteOpen(true);
-              }}
-            >
-              <Trash2 {...stylex.props(catalog.icon)} />
-            </Button>
-          )}
+          <span {...stylex.props(styles.actions, compact && !refreshing && styles.reveal)}>
+            {onRefresh && (
+              <Button
+                variant="ghost"
+                size="small"
+                icon
+                disabled={refreshing}
+                aria-label={t(
+                  'agents.acpCapabilities.refreshModelsAndModes',
+                  'Refresh models and modes'
+                )}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  void handleRefresh();
+                }}
+              >
+                {refreshing ? (
+                  <Spinner size="small" />
+                ) : (
+                  <RefreshCw {...stylex.props(catalog.icon)} />
+                )}
+              </Button>
+            )}
+            {onDelete && (
+              <Button
+                variant="ghost"
+                aria-label={t('common.delete', 'Delete')}
+                size="small"
+                icon
+                tone="destructive"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setDeleteOpen(true);
+                }}
+              >
+                <Trash2 {...stylex.props(catalog.icon)} />
+              </Button>
+            )}
+          </span>
         </div>
       </div>
       {rateLimitWindows.length > 0 && compact && (

@@ -205,7 +205,7 @@ describe('conversation view React readers', () => {
     await act(async () => releaseReady());
   });
 
-  it('holds the initial tail window until ready and never hides later window loads', async () => {
+  it('is ready once the initial tail is hydrated, without a promise tick, and never hides later window loads', async () => {
     const { view } = await openView(150);
     const acquire = view.acquireRange.bind(view);
     let releaseReady!: () => void;
@@ -221,20 +221,25 @@ describe('conversation view React readers', () => {
       stream = useConversationStreamItems(view, FIXTURE_SESSION_ID);
       return <span>{String(stream.initialWindowReady)}</span>;
     }
+    // 300 turns: the 40-turn tail beyond the always-hydrated keep is not hydrated yet.
+    expect(view.isHydrated(260)).toBe(false);
     await act(async () => root.render(<Probe />));
     expect(container.textContent).toBe('false');
+    // The lease hydrates it; its promise is still pending, and ready does not wait for it.
+    await act(async () => {
+      await flush();
+    });
+    expect(view.isHydrated(260)).toBe(true);
+    expect(container.textContent).toBe('true');
+
+    // A later window loading (still gated) never hides the revealed tail.
     await act(async () => {
       stream.onVisibleTurnRangeChange({ from: 0, to: 8 });
     });
     await flush();
-    expect(view.isHydrated(0)).toBe(false);
-    expect(container.textContent).toBe('false');
-    await act(async () => {
-      releaseReady();
-    });
     expect(container.textContent).toBe('true');
     await act(async () => {
-      stream.onVisibleTurnRangeChange({ from: 0, to: 8 });
+      releaseReady();
     });
     await flush();
     expect(view.isHydrated(0)).toBe(true);

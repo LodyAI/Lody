@@ -196,11 +196,11 @@ describe('SessionList PR badge', () => {
     expect(passedVerdict?.getAttribute('height')).toBe('10');
     expect(passedVerdict?.classList.contains('text-status-success')).toBe(true);
     expect(passedPrIcon?.querySelector('.bg-sidebar')).toBeNull();
-    expect(rowWithPr?.querySelector('.text-code-added')).toBeNull();
-    expect(rowWithPr?.querySelector('.text-code-removed')).toBeNull();
+    expect(rowWithPr?.querySelector('.text-github-addition')).toBeNull();
+    expect(rowWithPr?.querySelector('.text-github-deletion')).toBeNull();
     expect(rowWithoutPr?.querySelector('[data-pr-ci-verdict]')).toBeNull();
-    expect(rowWithoutPr?.querySelector('.text-code-added')).toBeNull();
-    expect(rowWithoutPr?.querySelector('.text-code-removed')).toBeNull();
+    expect(rowWithoutPr?.querySelector('.text-github-addition')).toBeNull();
+    expect(rowWithoutPr?.querySelector('.text-github-deletion')).toBeNull();
   });
 
   it('replaces diff stats with a Mergeable pill only while the ready session is inactive', () => {
@@ -237,8 +237,8 @@ describe('SessionList PR badge', () => {
 
     const row = container.querySelector('[data-sidebar-session-id="ready-session"]');
     expect(row?.querySelector('[data-session-mergeable-pill]')?.textContent).toBe('Mergeable');
-    expect(row?.querySelector('.text-code-added')).toBeNull();
-    expect(row?.querySelector('.text-code-removed')).toBeNull();
+    expect(row?.querySelector('.text-github-addition')).toBeNull();
+    expect(row?.querySelector('.text-github-deletion')).toBeNull();
     expect(row?.querySelector('.lucide-git-pull-request')).not.toBeNull();
 
     flushSync(() => {
@@ -253,8 +253,8 @@ describe('SessionList PR badge', () => {
 
     const selectedRow = container.querySelector('[data-sidebar-session-id="ready-session"]');
     expect(selectedRow?.querySelector('[data-session-mergeable-pill]')).toBeNull();
-    expect(selectedRow?.querySelector('.text-code-added')).toBeNull();
-    expect(selectedRow?.querySelector('.text-code-removed')).toBeNull();
+    expect(selectedRow?.querySelector('.text-github-addition')).toBeNull();
+    expect(selectedRow?.querySelector('.text-github-deletion')).toBeNull();
     expect(selectedRow?.querySelector('.lucide-git-pull-request')).not.toBeNull();
   });
 

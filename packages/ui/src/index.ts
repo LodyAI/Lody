@@ -92,7 +92,7 @@ export type {
 export { Input } from './field/input';
 export type { InputProps, InputSize } from './field/input';
 export { Kbd, KbdGroup } from './kbd/kbd';
-export type { KbdGroupProps, KbdProps } from './kbd/kbd';
+export type { KbdGroupProps, KbdProps, KbdSize } from './kbd/kbd';
 export { Menu } from './menu/menu';
 export type {
   MenuCheckboxItemProps,
@@ -143,6 +143,8 @@ export type {
   PopoverTriggerProps,
 } from './popover/popover';
 export { PopupContainerProvider, usePopupContainer } from './popup/portal-container';
+export { PreviewCard } from './popover/preview-card';
+export type { PreviewCardContentProps } from './popover/preview-card';
 export type { PopupContainer } from './popup/portal-container';
 export { Radio, RadioGroup } from './field/radio';
 export type { RadioGroupProps, RadioProps } from './field/radio';
