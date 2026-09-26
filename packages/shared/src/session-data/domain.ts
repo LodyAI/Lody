@@ -1,5 +1,6 @@
 import type { MessageContent, ModelInfo, SessionTurnInputConfig } from '../ai';
 import type { PlanEntry } from '@agentclientprotocol/sdk';
+import type { SessionTurnTokenUsage } from './token-usage';
 
 // # Session domain DTOs
 //
@@ -40,6 +41,7 @@ export type SessionTurn = {
   readonly read?: boolean;
   readonly userId?: string;
   readonly modelInfo?: ModelInfo;
+  readonly tokenUsage?: SessionTurnTokenUsage;
   readonly fileDiff?: readonly unknown[];
   readonly status?: SessionTurnStatus;
   readonly inputConfig?: unknown;
@@ -63,6 +65,7 @@ export interface SessionTurnWritableValues {
   read: boolean | undefined;
   userId: string | undefined;
   modelInfo: ModelInfo | undefined;
+  tokenUsage: SessionTurnTokenUsage | undefined;
   fileDiff: readonly unknown[] | undefined;
   status: SessionTurnStatus | undefined;
   inputConfig: unknown;

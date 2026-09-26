@@ -1,5 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import * as stylex from '@stylexjs/stylex';
+import { SettingsPageActions, SettingsPageLead } from './settings-page-header';
+import { settingsRecordsCard } from './compact-layout';
 import { useAtomValue } from 'jotai';
 import { useTranslation } from 'react-i18next';
 import { usePostHog } from '@posthog/react';
@@ -21,7 +23,6 @@ import { withClassName } from '@/lib/stylex';
 import { capturePostHogEvent } from '@/lib/posthog-analytics';
 import { getPromptShortcutAnalyticsProperties } from '@/lib/prompt-shortcut-analytics';
 import { usePromptShortcuts } from '../../providers/prompt-shortcut-provider';
-import { useIsMobile } from '@/hooks/use-mobile';
 import { useVisibleMachineMetas } from '@/hooks/use-visible-machine-metas';
 import { useVisibleLocalProjectsFromMachineIndex } from '@/hooks/use-visible-local-projects';
 import { useMachineFlockAgentConfigsForMachineIds } from '@/hooks/use-machine-flock-agent-configs';
@@ -33,7 +34,6 @@ import { Badge } from '@lody/ui/badge';
 import { Button } from '@lody/ui/button';
 import { Dialog } from '@/ui/dialog';
 import { Dialog as UiDialog } from '@lody/ui/dialog';
-import { Tooltip } from '@lody/ui/tooltip';
 import { AlertDialog } from '@/ui/dialog';
 import { colors, shadow } from '@lody/ui/tokens/colors.stylex';
 import { corner, radius, space } from '@lody/ui/tokens/scales.stylex';
@@ -184,7 +184,6 @@ function PromptShortcutsSettingContent({
 }) {
   const { t } = useTranslation();
   const postHog = usePostHog();
-  const isMobile = useIsMobile();
   const { runtime, entries, loading } = state;
   const scope = useShortcutScopeOptions(runtime?.workspaceId);
   const [editor, setEditor] = useState<{
@@ -229,12 +228,12 @@ function PromptShortcutsSettingContent({
   const owned = editor ? editor.value.ownerUserId === runtime?.userId : false;
   return (
     <div {...stylex.props(surface.container)}>
-      <p {...stylex.props(catalog.intro)}>
+      <SettingsPageLead>
         {t(
           'settings.promptShortcuts.intro',
           'Saved Prompts you can call with a slash command. Each one says where it applies; a Shortcut with nothing set works anywhere in this workspace. Private until you share it.'
         )}
-      </p>
+      </SettingsPageLead>
 
       <PromptShortcutsList
         entries={entries}
@@ -254,14 +253,7 @@ function PromptShortcutsSettingContent({
           if (!open && !busy) setEditor(null);
         }}
       >
-        <Dialog.Content
-          backdropClassName={
-            // Desktop settings is itself a dialog; match its z-index so this
-            // later overlay covers it without stacking a second /80 veil.
-            isMobile ? undefined : 'z-[var(--z-dialog)] bg-black/20'
-          }
-          className={SETTINGS_EDITOR_DIALOG_LAYOUT}
-        >
+        <Dialog.Content className={SETTINGS_EDITOR_DIALOG_LAYOUT}>
           <Dialog.Header>
             <Dialog.Title>
               {!editor?.base
@@ -416,42 +408,20 @@ export function PromptShortcutsList({
   const { t } = useTranslation();
   const addLabel = t('settings.promptShortcuts.new', 'New Prompt Shortcut');
   return (
-    <section {...stylex.props(surface.section)}>
-      <header {...stylex.props(surface.sectionHeader)}>
-        <div {...stylex.props(catalog.heading)}>
-          <h3 {...stylex.props(surface.sectionTitle)}>
-            {t('settings.tabs.promptShortcuts', 'Prompt Shortcuts')}
-          </h3>
-          {entries.length > 0 ? (
-            <span {...stylex.props(catalog.count)}>{entries.length}</span>
-          ) : null}
-          {loading ? (
-            <span role="status" {...stylex.props(catalog.syncing)}>
-              <Spinner size="small" aria-hidden="true" />
-              {t('common.loading', 'Loading…')}
-            </span>
-          ) : null}
-        </div>
-        <div {...stylex.props(surface.sectionActions)}>
-          <Tooltip.Root>
-            <Tooltip.Trigger
-              render={
-                <Button
-                  variant="ghost"
-                  size="small"
-                  icon
-                  aria-label={addLabel}
-                  disabled={!canCreate || busy}
-                  onClick={onCreate}
-                >
-                  <Plus {...stylex.props(catalog.icon)} />
-                </Button>
-              }
-            />
-            <Tooltip.Content>{addLabel}</Tooltip.Content>
-          </Tooltip.Root>
-        </div>
-      </header>
+    <>
+      {/* The page is named for this list, so the list takes no heading of its own. */}
+      <SettingsPageActions>
+        {loading ? (
+          <span role="status" {...stylex.props(catalog.syncing)}>
+            <Spinner size="small" aria-hidden="true" />
+            {t('common.loading', 'Loading…')}
+          </span>
+        ) : null}
+        <Button size="small" variant="secondary" disabled={!canCreate || busy} onClick={onCreate}>
+          <Plus {...stylex.props(catalog.icon)} />
+          {addLabel}
+        </Button>
+      </SettingsPageActions>
 
       {entries.length === 0 ? (
         loading ? null : (
@@ -463,19 +433,10 @@ export function PromptShortcutsList({
                 'No Prompt Shortcuts yet. Save a Prompt you retype often and call it with /.'
               )}
             </p>
-            <Button
-              size="small"
-              variant="secondary"
-              disabled={!canCreate || busy}
-              onClick={onCreate}
-            >
-              <Plus {...stylex.props(catalog.icon)} />
-              {addLabel}
-            </Button>
           </div>
         )
       ) : (
-        <div {...stylex.props(surface.card)}>
+        <div {...stylex.props(settingsRecordsCard)}>
           {entries.map((entry, index) => (
             <div key={entry.id} {...stylex.props(surface.line, index > 0 && surface.lineRuled)}>
               <PromptShortcutRow
@@ -490,7 +451,7 @@ export function PromptShortcutsList({
           ))}
         </div>
       )}
-    </section>
+    </>
   );
 }
 
@@ -545,12 +506,11 @@ export function PromptShortcutRow({
             <span {...stylex.props(catalog.name)}>{entry.name}</span>
             <span {...stylex.props(styles.slug)}>/{entry.slug}</span>
             {/* Visibility, not scope: the pills say where it can be called,
-                this says who can read it. */}
-            <Badge>
-              {entry.visibility === 'workspace'
-                ? t('settings.promptShortcuts.shared', 'Shared')
-                : t('settings.promptShortcuts.private', 'Private')}
-            </Badge>
+                this says who can read it. Private is the default, so only a
+                shared one is marked. */}
+            {entry.visibility === 'workspace' ? (
+              <Badge>{t('settings.promptShortcuts.shared', 'Shared')}</Badge>
+            ) : null}
             {/* Owned by someone else: the missing delete button is the only
                 other sign, and an absence is not a signal. */}
             {canManage ? null : (

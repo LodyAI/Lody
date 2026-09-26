@@ -26,6 +26,10 @@ Replacement contract: [shared rules](../../../shared/AGENTS.md#session-history).
 
 ## Workspace switching
 
+- Prompt Shortcuts instances belong to one initialization effect lifetime. Cleanup
+  must retire the published instance immediately, before asynchronous durable close.
+  Returning to the same account/workspace must never reuse a retired instance;
+  render-time fencing also covers platform, cloud capability, and retry generation.
 - The `$workspaceName` route owns the render-time target slug. Workspace-scoped UI must
   require that target, the active runtime, and the runtime-owned doc-meta snapshot to agree
   before reading singleton caches. Shared visibility and sharing hooks enforce this gate by

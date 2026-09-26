@@ -282,6 +282,7 @@ export function AccountMachinesOverviewView({
     <Tooltip.Provider delay={250}>
       <CompactSection
         title={t('settings.account.machines.title', 'My machines')}
+        boxed
         description={t(
           'settings.account.machines.description',
           'Machines connected by you, with their Agents and shared directories.'

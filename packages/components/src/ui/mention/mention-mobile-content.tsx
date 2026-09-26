@@ -1,7 +1,10 @@
 import * as React from 'react';
 import { createPortal } from 'react-dom';
+import * as stylex from '@stylexjs/stylex';
+import { space } from '@lody/ui/tokens/scales.stylex';
 import { observeResizeOnAnimationFrame } from '@/lib/resize-observer';
-import { cn } from '@/lib/utils';
+import { withClassName } from '@/lib/stylex';
+import { mentionSurface } from './mention-surface';
 
 /* Viewport breakpoint that flips the mention menu from the desktop
    floating popover to the mobile docked panel. 640px = Tailwind `sm`;
@@ -33,6 +36,20 @@ const PANEL_TOP_INSET = 56;
 /* Absolute cap so the panel stays a compact strip even when there's
    lots of room above the composer (the list scrolls past this). */
 const PANEL_MAX_HEIGHT = 220;
+
+const styles = stylex.create({
+  /**
+   * The docked strip is the only scroller: the menu's own list scroller is off
+   * on mobile, because nested scrollers made touch scrolling flaky. It rises
+   * from below, toward the composer it sits on — the rise's default direction.
+   */
+  panel: {
+    insetInline: space[2],
+    zIndex: 60,
+    overflowY: 'auto',
+    overscrollBehavior: 'contain',
+  },
+});
 
 /**
  * Mobile presentation for the mention menu. Instead of a floating
@@ -149,19 +166,10 @@ export function MentionMobilePanel({
   const isInModal = container !== document.body;
 
   return createPortal(
-    /* Single scroll container (see the `.mention-mobile-panel
-       .scrollbar-pro` reset in index.css that flattens the menu's inner
-       260px scroller into this one — nested scrollers made touch scroll
-       flaky). */
     <div
       role="listbox"
       aria-orientation="vertical"
-      className={cn(
-        'mention-mobile-panel inset-x-2 z-[60] overflow-y-auto overscroll-contain rounded-2xl',
-        'border border-border/60 bg-popover text-popover-foreground shadow-xl',
-        // Plain fade — never fights vaul's transforms.
-        'animate-in fade-in-0 slide-in-from-bottom-2 duration-150'
-      )}
+      {...withClassName(stylex.props(mentionSurface.surface, styles.panel))}
       style={{
         position: isInModal ? 'absolute' : 'fixed',
         pointerEvents: 'auto',
