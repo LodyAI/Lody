@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import type { AgentConfigMeta, AgentRole, ScheduleProposalMeta, SessionMeta } from '@lody/shared';
+import {
+  ScheduleAgentSchema,
+  type AgentConfigMeta,
+  type AgentRole,
+  type ScheduleProposalMeta,
+  type SessionMeta,
+} from '@lody/shared';
 import { resolveScheduleProposalTarget } from '../src/components/schedules/schedule-proposal-target';
 
 const reviewer = {
@@ -60,6 +66,27 @@ describe('where a proposed schedule runs', () => {
         source: { agent: 'conversation', project: 'conversation' },
       },
     });
+  });
+
+  it('carries the conversation’s options in the shape a schedule can store', () => {
+    // Conversation options are ACP values (booleans too) and may include a
+    // credential; a schedule stores strings and never credentials. Handing them
+    // over as-is made Create throw.
+    const result = resolveScheduleProposalTarget({
+      meta: meta(),
+      conversation: {
+        session,
+        runConfig: {
+          modeId: 'acceptEdits',
+          configOptionValues: { fast: true, effort: 'high', api_key: 'secret' },
+        },
+      },
+      agents,
+      roles: [],
+    });
+    if (!result.ok) throw new Error(result.problem);
+    expect(result.target.agent.configOptionValues).toEqual({ fast: 'true', effort: 'high' });
+    expect(ScheduleAgentSchema.safeParse(result.target.agent).success).toBe(true);
   });
 
   it('lets a named Role replace the Agent, machine and run config together', () => {

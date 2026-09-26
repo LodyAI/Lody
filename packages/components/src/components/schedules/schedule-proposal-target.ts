@@ -1,6 +1,8 @@
 import type { AgentRunRef } from '@/components/shared/agent-run-ref';
 import {
   getBuiltinDefaultModeId,
+  isSensitiveAcpConfigOptionId,
+  type AcpConfigOptionValue,
   type AgentConfigId,
   type AgentConfigMeta,
   type AgentRole,
@@ -14,8 +16,29 @@ import {
 export type ProposalConversation = {
   session: SessionMeta;
   /** Effective run config of the conversation's latest user turn. */
-  runConfig: { modeId?: string; modelId?: string; configOptionValues?: Record<string, string> };
+  runConfig: {
+    modeId?: string;
+    modelId?: string;
+    configOptionValues?: Record<string, AcpConfigOptionValue>;
+  };
 };
+
+/**
+ * ACP option values as a schedule stores them: strings, never credentials.
+ * A conversation's options arrive as ACP values (booleans included), and the
+ * schedule definition rejects anything else, so Create would throw.
+ */
+function scheduleOptionValues(
+  values: Record<string, AcpConfigOptionValue> | undefined
+): Record<string, string> | undefined {
+  if (!values) return undefined;
+  const entries = Object.entries(values)
+    .filter(
+      ([id, value]) => value !== undefined && value !== null && !isSensitiveAcpConfigOptionId(id)
+    )
+    .map(([id, value]) => [id, String(value)] as const);
+  return entries.length ? Object.fromEntries(entries) : undefined;
+}
 
 export type ResolvedProposalTarget = {
   agent: AgentRunRef;
@@ -77,26 +100,18 @@ export function resolveScheduleProposalTarget(args: {
     ? {
         modeId: role.runConfig.modeId,
         modelId: role.runConfig.modelId,
-        configOptionValues: role.runConfig.configOptionValues
-          ? Object.fromEntries(
-              Object.entries(role.runConfig.configOptionValues).map(([key, value]) => [
-                key,
-                String(value),
-              ])
-            )
-          : undefined,
+        configOptionValues: role.runConfig.configOptionValues,
       }
     : sameAgentAsConversation
       ? (conversation?.runConfig ?? {})
       : { modeId: getBuiltinDefaultModeId(agentConfig.cliType, agentConfig.agentType) };
 
+  const configOptionValues = scheduleOptionValues(runConfig.configOptionValues);
   const agent: AgentRunRef = {
     agentConfigId: agentConfig.id as AgentConfigId,
     ...(runConfig.modeId ? { modeId: runConfig.modeId } : {}),
     ...(runConfig.modelId ? { modelId: runConfig.modelId } : {}),
-    ...(runConfig.configOptionValues && Object.keys(runConfig.configOptionValues).length
-      ? { configOptionValues: runConfig.configOptionValues }
-      : {}),
+    ...(configOptionValues ? { configOptionValues } : {}),
   };
 
   const destination: ScheduleDestination =

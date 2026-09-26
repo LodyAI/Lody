@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAtomValue } from 'jotai';
 import { useNavigate } from '@tanstack/react-router';
 import { useTranslation } from 'react-i18next';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import { CalendarClock } from 'lucide-react';
 import { v4 as uuid } from 'uuid';
 import {
@@ -89,7 +89,7 @@ export function ScheduleProposalNotice({
         setRunConfig({
           modeId: config.modeId,
           modelId: config.modelId,
-          configOptionValues: config.configOptionValues as Record<string, string> | undefined,
+          configOptionValues: config.configOptionValues,
         });
       })
       .catch(() => {});
@@ -147,11 +147,13 @@ export function ScheduleProposalNotice({
       const read = await runtime.withSessionStore(sessionId, (store) =>
         store.sessionData.history.readTurn(entryId)
       );
-      if (read.state !== 'ready') return;
+      // Never return quietly: the schedule may already exist, and a card that
+      // does not change reads as a Create button that does nothing.
+      if (read.state !== 'ready') throw new Error('The proposal could not be read.');
       const entry = read.turn;
       const items = Array.isArray(entry.items) ? [...(entry.items as unknown[])] : [];
       const item = items[itemIndex];
-      if (!item || typeof item !== 'object') return;
+      if (!item || typeof item !== 'object') throw new Error('The proposal could not be read.');
       items[itemIndex] = { ...(item as Record<string, unknown>), meta: next };
       const nextEntry = { ...entry, items } as unknown as Parameters<
         typeof runtime.writer.updateSessionHistory
@@ -190,7 +192,7 @@ export function ScheduleProposalNotice({
             runConfig: {
               modeId: latest.modeId,
               modelId: latest.modelId,
-              configOptionValues: latest.configOptionValues as Record<string, string> | undefined,
+              configOptionValues: latest.configOptionValues,
             },
           },
           agents,
@@ -245,6 +247,8 @@ export function ScheduleProposalNotice({
       setBusy(true);
       try {
         await writeOutcome({ ...meta, outcome: 'dismissed' });
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : String(error));
       } finally {
         setBusy(false);
       }

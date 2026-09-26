@@ -4,7 +4,7 @@ import { useIsMobile } from '@/hooks/use-mobile';
 import { useCommand } from '@/lib/commands';
 import { useEffect, useMemo, useState } from 'react';
 import { useAtom, useAtomValue } from 'jotai';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import { useNavigate } from '@tanstack/react-router';
 import { useTranslation } from 'react-i18next';
 import { v4 as uuid } from 'uuid';
