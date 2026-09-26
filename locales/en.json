@@ -3938,6 +3938,7 @@
   "mention.category.command.label": "Agent Commands",
   "mention.menu.backFrom": "{{category}}, back to all categories",
   "mention.menu.noResults": "No results",
+  "mention.menu.noMatch": "Nothing matches “{{term}}”",
   "mention.menu.loading": "Loading…",
   "mention.file.loadError": "Failed to load files.",
   "mention.file.truncatedGithub": "Repo is very large; GitHub returned a truncated file list.",

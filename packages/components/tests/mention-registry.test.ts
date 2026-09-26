@@ -5,6 +5,7 @@ import {
   buildFileCandidates,
   buildIssuePrCandidates,
   buildMentionFileIndex,
+  buildSkillCandidates,
   getCategoryNavigateText,
   selectMentionMenuView,
   selectMentionMenuViewForTrigger,
@@ -15,6 +16,7 @@ import {
   type MentionCategory,
 } from '../src/components/mentions/mention-registry';
 import type { SessionMentionItem } from '../src/components/mentions/mention-session-source';
+import { buildSkillMentionItems } from '../src/components/mentions/mention-skill-source';
 
 function makeCandidate(value: string): MentionCandidate {
   return {
@@ -162,6 +164,65 @@ describe('selectMentionMenuView', () => {
     if (view?.level !== 'category') throw new Error('expected category');
     expect(view.category.id).toBe('skill');
     expect(view.candidates.map((entry) => entry.value)).toEqual(['review']);
+  });
+});
+
+describe('skill category filtering', () => {
+  // A machine's system skills: every path runs through `~/.codex/skills/.system`.
+  const items = buildSkillMentionItems([
+    {
+      scope: 'system',
+      dir: '~/.codex/skills/.system',
+      skills: [
+        'imagegen',
+        'openai-docs',
+        'plugin-creator',
+        'review-agent',
+        'skill-creator',
+        'skill-installer',
+      ].map((name) => ({
+        id: name,
+        name,
+        relativePath: `~/.codex/skills/.system/${name}/SKILL.md`,
+        isSymlink: false,
+      })),
+    },
+  ]);
+  const labels = {
+    author: 'Author',
+    path: 'Path',
+    linksTo: 'Links to',
+    symlink: 'symlink',
+    scope: { project: 'Project', global: 'Global', system: 'System' },
+  };
+  const skills: MentionCategory = {
+    id: 'skill',
+    namespace: 'skill',
+    directTrigger: '$',
+    label: 'Skills',
+    icon: 'skill',
+    status: 'ready',
+    getCandidates: (term, limit) => buildSkillCandidates(items, term, null, labels, limit),
+  };
+
+  it('answers a term that names no skill with no rows, not the whole list', () => {
+    // `sy` is in `.system`, which every one of these paths shares.
+    for (const view of [
+      selectMentionMenuView([skills], 'skill:sy'),
+      selectMentionMenuViewForTrigger([skills], '$', 'sy'),
+    ]) {
+      if (view?.level !== 'category') throw new Error('expected the skill level');
+      expect(view.candidates).toEqual([]);
+    }
+  });
+
+  it('matches the skill, not the skills directory around it', () => {
+    const view = selectMentionMenuView([skills], 'skill:skill');
+    if (view.level !== 'category') throw new Error('expected the skill level');
+    expect(view.candidates.map((candidate) => candidate.title)).toEqual([
+      'skill-creator',
+      'skill-installer',
+    ]);
   });
 });
 
