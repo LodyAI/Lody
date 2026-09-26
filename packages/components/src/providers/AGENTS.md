@@ -37,6 +37,8 @@ Replacement contract: [shared rules](../../../shared/AGENTS.md#session-history).
   projection and disables queries, Machine Flock, sharing, and eager-sync inputs. Provider-
   external consumers such as `RuntimeProvider` retain their existing default behavior. Explicit
   `workspaceId` / `enabled` options remain fenced by the route scope and cannot reopen stale work.
+- Each `resolveWorkspaceDataScope` wait names its `blocker`; keep scan failures on the scope.
+  [Stuck report](../../../../.agents/notes/implemented/feature/2026-09-26-workspace-sync-stuck-telemetry.md).
 
 ## Workspace runtime
 
