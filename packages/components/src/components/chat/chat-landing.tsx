@@ -6153,6 +6153,13 @@ function WorkspaceChatLanding({
         resetKeys={[workspaceId, workspaceSlug, contextType, mobileNewChatOpen]}
       >
         <MobileInlinePickerRowSlot>
+          <input
+            ref={attachmentInputRef}
+            type="file"
+            multiple
+            className="hidden"
+            onChange={handleAttachmentInputChange}
+          />
           {composerNoticeNode}
           <ChatComposer
             tone={tone}
@@ -6229,13 +6236,6 @@ function WorkspaceChatLanding({
   if (isMobile && mobileProjectContext) {
     return (
       <>
-        <input
-          ref={attachmentInputRef}
-          type="file"
-          multiple
-          className="hidden"
-          onChange={handleAttachmentInputChange}
-        />
         {mobileNewChatSheetNode}
         <MobileProjectScreen
           project={mobileProjectContext}
@@ -6337,13 +6337,6 @@ function WorkspaceChatLanding({
   if (isMobile) {
     return (
       <>
-        <input
-          ref={attachmentInputRef}
-          type="file"
-          multiple
-          className="hidden"
-          onChange={handleAttachmentInputChange}
-        />
         <MobileHomeScreen
           workspace={mobileHomeWorkspace}
           workspaceOptions={mobileHomeWorkspaceOptions}
