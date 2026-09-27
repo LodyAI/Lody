@@ -1,4 +1,11 @@
-import { useLayoutEffect, useRef, type ComponentPropsWithoutRef, type CSSProperties } from 'react';
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ComponentPropsWithoutRef,
+  type CSSProperties,
+} from 'react';
 
 import { cn } from '@/lib/utils';
 import { useResolvedTheme } from '@/theme-provider';
@@ -94,6 +101,27 @@ const LIGHT_SIZE_BOOST = 1.08;
 // easeInOutSine: a half period of a sine between two keyframes.
 const SINE = 'cubic-bezier(0.37, 0, 0.63, 1)';
 const clamp01 = (value: number) => Math.min(Math.max(value, 0), 1);
+
+// The sidebar can contain many running sessions. Observe them with one viewport
+// observer so only marks that can be seen allocate their tile animations.
+const visibleMarks = new Map<Element, (visible: boolean) => void>();
+let visibilityObserver: IntersectionObserver | null = null;
+
+function observeWorkingGrid(element: Element, onVisibleChange: (visible: boolean) => void) {
+  visibilityObserver ??= new IntersectionObserver((entries) => {
+    for (const entry of entries) visibleMarks.get(entry.target)?.(entry.isIntersecting);
+  });
+  visibleMarks.set(element, onVisibleChange);
+  visibilityObserver.observe(element);
+  return () => {
+    visibilityObserver?.unobserve(element);
+    visibleMarks.delete(element);
+    if (visibleMarks.size === 0) {
+      visibilityObserver?.disconnect();
+      visibilityObserver = null;
+    }
+  };
+}
 
 /**
  * Crest → trough → crest loop: scale from 1 to `scaleLow`, opacity from
@@ -204,6 +232,13 @@ export function WorkingGrid({
       : minScaleProp;
   const maxScale = compensate ? Math.min(1, maxScaleProp * LIGHT_SIZE_BOOST) : maxScaleProp;
   const rootRef = useRef<HTMLSpanElement>(null);
+  // Fall back to the existing behavior in engines without IntersectionObserver.
+  const [visible, setVisible] = useState(() => typeof IntersectionObserver !== 'function');
+  useEffect(() => {
+    const root = rootRef.current;
+    if (!root || typeof IntersectionObserver !== 'function') return undefined;
+    return observeWorkingGrid(root, setVisible);
+  }, []);
   const cell = size / (3 + 2 * gap);
   const pitch = cell * (1 + gap);
   // Tiles are drawn at maxScale inside their cell, centred (or bottom-aligned when
@@ -218,7 +253,7 @@ export function WorkingGrid({
 
   useLayoutEffect(() => {
     const root = rootRef.current;
-    if (!root || typeof root.animate !== 'function') return undefined;
+    if (!visible || !root || typeof root.animate !== 'function') return undefined;
     if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return undefined;
 
     const rect = root.getBoundingClientRect();
@@ -335,6 +370,7 @@ export function WorkingGrid({
       animations.forEach((animation) => animation.cancel());
     };
   }, [
+    visible,
     size,
     scale,
     minScale,

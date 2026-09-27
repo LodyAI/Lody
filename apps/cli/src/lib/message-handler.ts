@@ -170,6 +170,7 @@ import {
   type LodyOperationItemResult,
   type StoredLodyOperation,
   hasPendingUserTurnActivation,
+  getDeviceTimeZone,
 } from '@lody/shared';
 import { getHostMachineProtocolCapabilities } from '../agent/managed-agent-runtime';
 import { ISession, SessionManager } from '../session/session-manager';
@@ -277,6 +278,7 @@ import {
   type BufferedACPUpdate,
 } from '@/lib/session-transient-store';
 import { fetchAcpCapabilities, type FetchAcpCapabilitiesOptions } from '@/agent/acp-capabilities';
+import { resolveExpectedAcpCapabilitySourceVersion } from '@/agent/setting';
 import type { WorkspaceWatchCoordinatorApi } from './code-collab/workspace-watch-coordinator';
 import { appendIssuePrMentionsToPrompt } from '@/session/session-execution-helpers';
 import {
@@ -2884,7 +2886,13 @@ export class MessageHandler {
     this.sessionActivePresence = new SessionActivePresenceController(
       this.workspaceDocument,
       this.machineId,
-      this.logger
+      this.logger,
+      {
+        // Late-bound: the execution service is constructed further down this
+        // constructor, and the watchdog can only fire once a turn is running.
+        onInitializationStalled: (sessionId, stall) =>
+          this.executionService.notifyInitializationStalled(sessionId, stall),
+      }
     );
     this.supportRegistryAgentTypes = config.supportRegistryAgentTypes ?? [];
     this.closeSessionTerminals = config.closeSessionTerminals;
@@ -3099,6 +3107,8 @@ export class MessageHandler {
           runtimeOverrides,
           options
         ),
+      resolveAcpCapabilitySourceVersion: async (input) =>
+        await resolveExpectedAcpCapabilitySourceVersion(input),
       evictForMemoryPressure: async (excludeSessionId) =>
         await this.evictForMemoryPressureFn(excludeSessionId),
     });
@@ -3214,13 +3224,14 @@ export class MessageHandler {
             this.triggerPendingProcessLifecycleAction(response.requestId);
           }
         },
-        refreshMachineAcpCapabilities: async ({ configId, onAcpBinaryProgress, signal }) =>
+        refreshMachineAcpCapabilities: async ({ configId, force, onAcpBinaryProgress, signal }) =>
           await this.executionService.refreshMachineAcpCapabilities(
             {
               type: 'machine/acp-capabilities-refresh',
               machineId: this.machineId,
               workspaceId: this.workspaceId,
               configId,
+              force,
             },
             { onAcpBinaryProgress, signal }
           ),
@@ -3571,6 +3582,7 @@ export class MessageHandler {
         rpcVersion: supportsStreamsRpc ? LORO_STREAMS_RPC_VERSION : undefined,
         supportsLocalProjectHistoryRpc: supportsStreamsRpc,
         protocolCapabilities: getHostMachineProtocolCapabilities(),
+        timeZone: getDeviceTimeZone(),
         supportRegistryAgentTypes: this.supportRegistryAgentTypes,
         sessions: [],
       });
@@ -5813,6 +5825,7 @@ export class MessageHandler {
         rpcVersion: supportsStreamsRpc ? LORO_STREAMS_RPC_VERSION : machineMeta?.rpcVersion,
         supportsLocalProjectHistoryRpc: supportsStreamsRpc,
         protocolCapabilities: getHostMachineProtocolCapabilities(),
+        timeZone: getDeviceTimeZone(),
         supportRegistryAgentTypes: this.supportRegistryAgentTypes,
         sessions: machineMeta?.sessions ?? [],
       });
@@ -9669,6 +9682,19 @@ export class MessageHandler {
    */
   getTrackedSessionIds(): SessionId[] {
     return this.store.sessionIds();
+  }
+
+  /** Host-local admission snapshot; durable pending input is checked by its caller. */
+  hasAutomationSessionWork(sessionId: SessionId): boolean {
+    const execution = this.executionService.getExecutionSnapshot(sessionId);
+    return (
+      execution.hasActiveTurn ||
+      execution.hasBlockingPendingCreate ||
+      execution.hasRewriteBarrier ||
+      this.operationCoordinator.hasPendingWorkForRequester(sessionId) ||
+      this.hasSessionActivePresence(sessionId) ||
+      this.sessionDispatchWatcher.hasPendingDispatch(sessionId)
+    );
   }
 
   /**

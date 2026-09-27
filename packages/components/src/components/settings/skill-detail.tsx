@@ -53,7 +53,7 @@ const styles = stylex.create({
 });
 
 /** The panel reads a SKILL.md, so it keeps a reading width rather than a form's. */
-const SKILL_DIALOG_STYLE = { width: 'calc(100vw - 2rem)', maxWidth: '768px' } as const;
+const SKILL_DIALOG_WIDTH = '768px';
 
 /**
  * Shared skill detail body: badges + metadata + the rendered SKILL.md markdown
@@ -135,7 +135,7 @@ export function SkillDetailDialog({
 }) {
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
-      <Dialog.Content style={SKILL_DIALOG_STYLE}>
+      <Dialog.Content width={SKILL_DIALOG_WIDTH}>
         <Dialog.Header>
           <Dialog.Title {...stylex.props(styles.title)}>{skill?.name}</Dialog.Title>
         </Dialog.Header>

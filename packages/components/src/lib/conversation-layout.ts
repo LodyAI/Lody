@@ -26,6 +26,7 @@
 /** Horizontal inset shared by stream rows, context strip, composer. */
 export const CONVERSATION_GUTTER_X_CLASS = 'px-[14px] sm:px-[18px]';
 
-// 46rem (736px): the common chat-column measure — max-w-3xl (48rem) minus 1rem
-// side padding. Wide enough for code blocks, narrow enough to stay readable.
-export const CONVERSATION_CONTENT_WIDTH_CLASS = `mx-auto w-full max-w-[46rem] ${CONVERSATION_GUTTER_X_CLASS}`;
+// 768px of content (48rem), plus the gutter on each side: the column caps the
+// CONTENT box, so the max width adds the per-breakpoint gutter (14px / 18px).
+// Wide enough for code blocks, narrow enough to stay readable.
+export const CONVERSATION_CONTENT_WIDTH_CLASS = `mx-auto w-full max-w-[calc(48rem+28px)] sm:max-w-[calc(48rem+36px)] ${CONVERSATION_GUTTER_X_CLASS}`;

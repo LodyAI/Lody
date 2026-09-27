@@ -174,10 +174,10 @@ describe('ThemeProvider', () => {
     expect(document.documentElement.classList.contains('dark')).toBe(true);
     expect(document.documentElement.dataset.lodyVscodeTheme).toBe(FIXED_DARK_THEME_ID);
     expect(document.documentElement.style.getPropertyValue('--vscode-editor-background')).toBe(
-      '#101010'
+      '#131416'
     );
     expect(document.documentElement.style.getPropertyValue('--vscode-button-background')).toBe(
-      '#FFC799'
+      '#7CC4E8'
     );
   });
 
@@ -191,7 +191,7 @@ describe('ThemeProvider', () => {
     }
 
     const firstApplication = applyVSCodeThemeCssVariables(documentRoot, darkTheme);
-    expect(documentRoot.style.getPropertyValue('--vscode-button-background')).toBe('#FFC799');
+    expect(documentRoot.style.getPropertyValue('--vscode-button-background')).toBe('#7CC4E8');
 
     const secondApplication = applyVSCodeThemeCssVariables(documentRoot, lightTheme);
     const lightButtonBackground = createThemeCssVariables(lightTheme)['--vscode-button-background'];

@@ -21,6 +21,7 @@ export const HistoryEntryWriteSchema = z.object({
   permissionWaitMs: z.number().optional(),
   status: z
     .enum([
+      'prepared',
       'pending',
       'pending_apply',
       'delivery_unknown',

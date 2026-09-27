@@ -9,11 +9,11 @@ behavior.
 | ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
 | `src/tokens`        | Semantic color, type, spacing, motion, radius, and elevation tokens                                                                       |
 | `src/theme`         | Applies light or dark StyleX themes to a subtree                                                                                          |
-| `src/button`        | Base UI Button behavior and Lody variants, sizes, tones, and shapes                                                                       |
+| `src/button`        | Base UI Button behavior and Lody variants, sizes, tones, and shapes; `ButtonGroup` joins buttons into one segmented control               |
 | `src/field`         | Base UI Field composition: label, Input, Textarea, NumberField, PasswordInput, Checkbox, Radio, Switch, Select, Combobox, help, and error |
 | `src/popup`         | The floating surface a list, a menu or a popover opens on, and its tokens                                                                 |
 | `src/menu`          | Menu, ContextMenu and Menubar: commands on that surface                                                                                   |
-| `src/popover`       | The same surface holding content rather than rows                                                                                         |
+| `src/popover`       | The same surface holding content rather than rows: `Popover` pressed open, `PreviewCard` hovered open                                     |
 | `src/dialog`        | Dialog and AlertDialog: the modal rung, and its tokens                                                                                    |
 | `src/drawer`        | The same rung, arriving from an edge and draggable back out                                                                               |
 | `src/tooltip`       | The small floating chip that names what is under the pointer                                                                              |
@@ -193,12 +193,23 @@ had there, through Base UI's `render`:
 </Menu.Root>
 ```
 
+`Menu.Content` grows beyond its width floor for longer rows. Use
+`width="compact"` for a short two-choice menu; the regular width remains the
+default. Width is a primitive variant, not a caller class override.
+
 `ContextMenu` and `Menubar` restate only the way in — a right click or a long
 press, and a bar of names — and re-export `Menu`'s rows rather than rebuilding
 them, so a command looks and behaves the same wherever a person meets it. A row
 answers `onClick`; a row that should leave the menu up says `closeOnClick={false}`
 rather than cancelling the event. Where focus goes after a menu closes is the
 product's policy, passed as `finalFocus`.
+
+When a menu row also opens a context menu, put `ContextMenu.Root` inside the
+row's `render` callback, passing the callback's props to the actual row element
+through `ContextMenu.Trigger render={<div {...props} />}`. This keeps the row's
+highlight and selection in the outer menu's context. A rendered context trigger
+preserves that element's layout; only the default wrapper uses `display: contents`.
+A tooltip can then render the menu row as its trigger and measure the same box.
 
 A row's leading box holds a caller's icon, a tick or a dot, and sizes what is in
 it: a glyph placed there states its own dimensions as 100% rather than arriving
@@ -227,6 +238,24 @@ than prose.
     <Popover.Close render={<Button size="small" />}>Apply</Popover.Close>
   </Popover.Content>
 </Popover.Root>
+```
+
+A `PreviewCard` is the popover's surface opened by a resting pointer rather than
+a press. It holds facts about what is under the pointer, takes no focus and is
+not a dialog, so a list swept by a pointer is not announced as a run of dialogs.
+Its `Trigger` is Base UI's link with its own delays; a surface that owns the hover
+intent — the session list shares one warm window across every row — controls
+`Root open` and names the row with `Content anchor={ref}` instead.
+While a pointer runs down such a list, each card replaces the last; `noAnimation`
+on those swaps makes them appear and leave in place, since two cards crossing in
+opposite fades read as flicker rather than one card moving.
+
+```tsx
+<PreviewCard.Root open={open} onOpenChange={setOpen}>
+  <PreviewCard.Content anchor={rowRef} side="right" align="start">
+    …
+  </PreviewCard.Content>
+</PreviewCard.Root>
 ```
 
 `Dialog`, `AlertDialog` and `Drawer` are one family on the modal rung — the

@@ -43,6 +43,7 @@ import { CliRuntimeStateReporter } from '@/lib/cli-runtime-state';
 import { makeTerminalPtyService, type TerminalPtyServiceApi } from '@/lib/terminal-pty-service';
 import {
   readMachineLocalProjects,
+  reconcileMachineLocalProjectRootPaths,
   removeMachineLocalProject,
   resolveWorkspaceLocalProject,
   resolveWorkspaceLocalProjectRootPath,
@@ -87,6 +88,11 @@ import {
 import { WorkspaceWatchCoordinator } from '@/lib/code-collab/workspace-watch-coordinator';
 import { findWorkspacesBySelector, formatWorkspaceCandidate } from '@/lib/workspace-selector';
 import { listAliveSessionMetas } from '@/lib/command-runtime';
+import { AgentExecutionSlots } from './agent-execution-slots';
+import {
+  createScheduleWorkspace,
+  type ScheduleWorkspaceHandle,
+} from './schedules/schedule-workspace';
 import { preflightLocalProjectWorktreeRemoval } from '@/lib/local-project-removal';
 
 const FLEET_RUNTIME_STATE_INTERVAL_MS = 2_000;
@@ -122,6 +128,7 @@ type WorkspaceRuntimeState = {
   lody: Lody;
   unsubscribeTerminalCleanup: () => void;
   prPollerWorkspace: PrPollerWorkspaceHandle;
+  schedules: ScheduleWorkspaceHandle;
   reviewAutomation: ReviewAutomationWorkspaceHandle | null;
 };
 
@@ -270,6 +277,35 @@ export class LodyFleet {
       dispatchSession: async (message, options) =>
         await this.dispatchLocalSessionControl(message, options),
       dispatchProject: async (message) => await this.dispatchLocalProjectControl(message),
+      dispatchSchedule: async (message) => {
+        const runtime = await this.resolveWorkspaceRuntime(message.workspaceId as WorkspaceId);
+        const { executeScheduleCommand } = await import('./schedules/schedule-command-service');
+        try {
+          const result = await executeScheduleCommand(
+            {
+              manager: runtime.lody.documentManager,
+              workspace: runtime.workspace,
+              auth: {
+                token: this.cliToken,
+                userId: this.userId,
+                userName: '',
+                userEmail: '',
+                machineId: this.machineId,
+                machineName: this.machineName,
+              },
+              localOnly: this.localPlatform,
+              requesterSessionId: message.requesterSessionId as SessionId | undefined,
+            },
+            message.command
+          );
+          return { ok: true, result };
+        } catch (error) {
+          return {
+            ok: false,
+            error: error instanceof Error ? error.message : 'Schedule command failed',
+          };
+        }
+      },
       dispatchMachineRpc: async (message) => await this.dispatchLocalMachineRpc(message),
     };
     await traceAsync(this.logger, 'startup.local_ipc', undefined, async () => {
@@ -550,6 +586,7 @@ export class LodyFleet {
     this.runtimes.clear();
     for (const runtime of runtimes) {
       try {
+        await runtime.schedules.dispose();
         await runtime.lody.cleanup();
         runtime.unsubscribeTerminalCleanup();
         await runtime.prPollerWorkspace.dispose();
@@ -729,6 +766,7 @@ export class LodyFleet {
       });
 
       let lody: Lody | null = null;
+      let stopSchedules: (() => Promise<void>) | undefined;
       const workspaceStartAt = Date.now();
       try {
         lody = await Lody.create({
@@ -760,6 +798,17 @@ export class LodyFleet {
 
         await lody.start();
 
+        await reconcileMachineLocalProjectRootPaths(
+          lody.documentManager.repo,
+          workspace.id as WorkspaceId,
+          this.machineId,
+          lody.documentManager
+        ).catch((error: unknown) => {
+          workspaceLogger.warn(
+            `Failed to reconcile local project paths: ${formatErrorMessage(error)}`
+          );
+        });
+
         if (!this.desiredWorkspaces.has(workspace.id) || this.stopped) {
           await lody.cleanup();
           return;
@@ -778,6 +827,26 @@ export class LodyFleet {
           prAssociation: this.cloudPort.prAssociation,
           logger: workspaceLogger,
         });
+        // Scheduled automation: this machine runs the schedules it owns, so
+        // entrusted work continues while nobody is looking.
+        const executionSlots = new AgentExecutionSlots();
+        const schedules = await createScheduleWorkspace({
+          manager: startedLody.documentManager,
+          workspace,
+          auth: {
+            token: this.cliToken,
+            userId: this.userId,
+            userName: '',
+            userEmail: '',
+            machineId: this.machineId,
+            machineName: this.machineName,
+          },
+          localOnly: this.localPlatform,
+          slots: executionSlots,
+          logger: workspaceLogger,
+          hasSessionWork: (sessionId) => startedLody.hasAutomationSessionWork(sessionId),
+        });
+        stopSchedules = schedules.dispose;
         // Auto review and merge. It runs here rather than through MCP because
         // the orchestration chain-depth guard caps a chain at five hops from the
         // last human input, and because CI and GitHub state are explicitly
@@ -855,6 +924,7 @@ export class LodyFleet {
           lody: startedLody,
           unsubscribeTerminalCleanup,
           prPollerWorkspace,
+          schedules,
           reviewAutomation,
         });
         this.prStatusPoller.registerWorkspace(prPollerWorkspace);
@@ -868,6 +938,7 @@ export class LodyFleet {
         this.runtimeStateReporter.clearIssue(`workspace_start_failed:${workspace.id}`);
         this.refreshRuntimeState();
       } catch (error) {
+        await stopSchedules?.();
         if (lody) {
           await lody.cleanup().catch((cleanupError: unknown) => {
             this.logger.debug(
@@ -938,6 +1009,8 @@ export class LodyFleet {
     this.prStatusPoller.unregisterWorkspace(workspaceId);
 
     try {
+      await state.schedules.dispose();
+      await state.reviewAutomation?.dispose();
       await state.lody.cleanup();
       state.unsubscribeTerminalCleanup();
       await state.prPollerWorkspace.dispose();
@@ -1007,7 +1080,7 @@ export class LodyFleet {
   /**
    * Auth context for engine-authored turns.
    *
-   * Same shape delegated task automation uses: the daemon's own CLI credential
+   * Same shape scheduled automation uses: the daemon's own CLI credential
    * is the authorization principal, and the session's owner is inherited from
    * the session being driven.
    */

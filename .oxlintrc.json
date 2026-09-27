@@ -15,6 +15,7 @@
     "packages/acp-extension-core/test/**/*",
     "packages/acp-extension-kimi/**/*",
     "packages/acp-extension-pi/**/*",
+    "packages/virtua/src/**/*",
     "site/**/*",
     "functions/**/*",
     ".codex/**/*",

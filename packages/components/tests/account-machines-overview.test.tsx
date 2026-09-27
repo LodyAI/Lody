@@ -14,16 +14,6 @@ import { initI18n } from '../src/i18n';
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
 ).IS_REACT_ACT_ENVIRONMENT = true;
 
-/** jsdom has no PointerEvent; Base UI reads `pointerType` to tell a mouse press apart. */
-class TestPointerEvent extends MouseEvent {
-  readonly pointerType: string;
-
-  constructor(type: string, init: MouseEventInit & { pointerType?: string } = {}) {
-    super(type, init);
-    this.pointerType = init.pointerType ?? '';
-  }
-}
-
 const machineId = 'machine-one' as MachineId;
 const items: AccountMachineOverviewItem[] = [
   {
@@ -50,7 +40,6 @@ describe('AccountMachinesOverviewView', () => {
 
   beforeEach(async () => {
     await initI18n('en');
-    vi.stubGlobal('PointerEvent', TestPointerEvent);
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -60,23 +49,33 @@ describe('AccountMachinesOverviewView', () => {
     await act(async () => root?.unmount());
     container?.remove();
     document.body.innerHTML = '';
-    vi.unstubAllGlobals();
   });
 
-  it('opens the selected machine Agent configuration', async () => {
-    const onConfigureAgents = vi.fn();
-    await render({ onConfigureAgents });
+  it('states each machine in one line under its name', async () => {
+    await render({
+      items: [
+        items[0]!,
+        {
+          ...items[0]!,
+          id: 'machine-two' as MachineId,
+          name: 'Build box',
+          os: 'Linux',
+          isOnline: false,
+          sharedWithTeam: false,
+        },
+      ],
+    });
 
-    await act(async () => getButton('Configure').click());
-
-    expect(onConfigureAgents).toHaveBeenCalledWith(machineId);
+    expect(helpers()).toEqual([
+      'Online · macOS · Shared · 0 Agents · 1 directory',
+      'Offline · Linux · Private · 0 Agents · 1 directory',
+    ]);
   });
 
-  it('labels the current Electron machine next to its name', async () => {
+  it('labels the current Electron machine in its status line', async () => {
     await render({ currentMachineId: machineId });
 
-    const machineName = getButton('MacBook Pro');
-    expect(machineName.parentElement?.textContent).toBe('MacBook ProThis machine');
+    expect(helpers()[0]).toBe('This machine · Online · macOS · Shared · 0 Agents · 1 directory');
   });
 
   it('does not label a machine without an Electron current-machine id', async () => {
@@ -85,18 +84,17 @@ describe('AccountMachinesOverviewView', () => {
     expect(container?.textContent).not.toContain('This machine');
   });
 
-  it('lists connected directories in a menu and opens the selected project', async () => {
-    const onOpenDirectory = vi.fn();
-    await render({ onOpenDirectory });
+  it('opens the machine settings from its one Manage button', async () => {
+    const onManageMachine = vi.fn();
+    await render({ onManageMachine });
 
-    expect(document.body.textContent).not.toContain('/Users/zixuan/Code/lody');
-    await press(getButton('1 directory'));
-    await vi.waitFor(() =>
-      expect(getMenuItem('lody').textContent).toContain('/Users/zixuan/Code/lody')
+    const buttons = Array.from(container?.querySelectorAll('section button') ?? []).filter(
+      (button) => button.textContent === 'Manage'
     );
+    expect(buttons).toHaveLength(1);
+    await act(async () => (buttons[0] as HTMLButtonElement).click());
 
-    await act(async () => getMenuItem('lody').click());
-    expect(onOpenDirectory).toHaveBeenCalledWith(machineId, 'machine-one:project-one');
+    expect(onManageMachine).toHaveBeenCalledWith(machineId);
   });
 
   async function render(
@@ -106,44 +104,17 @@ describe('AccountMachinesOverviewView', () => {
       root?.render(
         <AccountMachinesOverviewView
           items={items}
-          onConfigureAgents={() => undefined}
           onManageMachine={() => undefined}
-          onOpenDirectory={() => undefined}
-          onOpenDirectories={() => undefined}
           {...overrides}
         />
       );
     });
   }
 
-  /** The pointer pressing a control, in the order a browser delivers it. */
-  async function press(element: HTMLElement) {
-    await act(async () => {
-      const init = { bubbles: true, cancelable: true, button: 0, pointerType: 'mouse' };
-      element.dispatchEvent(new TestPointerEvent('pointerdown', init));
-      element.dispatchEvent(new MouseEvent('mousedown', init));
-      element.focus();
-      element.dispatchEvent(new TestPointerEvent('pointerup', init));
-      element.dispatchEvent(new MouseEvent('mouseup', init));
-      element.click();
-    });
-  }
-
-  function getMenuItem(name: string): HTMLElement {
-    const item = Array.from(
-      document.body.querySelectorAll<HTMLElement>('[role="menu"] [role="menuitem"]')
-    ).find((element) => element.textContent?.includes(name));
-    if (!item) throw new Error(`Could not find menu item: ${name}`);
-    return item;
-  }
-
-  function getButton(name: string): HTMLButtonElement {
-    const button = Array.from(container?.querySelectorAll('button') ?? []).find((element) =>
-      element.textContent?.includes(name)
-    );
-    if (!(button instanceof HTMLButtonElement)) {
-      throw new Error(`Could not find button: ${name}`);
-    }
-    return button;
+  /** Each machine row's one-line status, in row order. */
+  function helpers(): string[] {
+    return Array.from(container?.querySelectorAll('section p') ?? [])
+      .map((element) => element.textContent ?? '')
+      .filter((text) => text.includes(' · '));
   }
 });

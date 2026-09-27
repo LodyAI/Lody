@@ -14,10 +14,13 @@ export const MACHINE_PROTOCOL_CAPABILITIES = {
   acpAuthenticationInteractions: 'acpAuthenticationInteractions',
   localProjectRemoval: 'localProjectRemoval',
   providerSetup: 'providerSetup',
+  schedules: 'schedules',
+  preparedSessionInput: 'preparedSessionInput',
   localFileResources: 'localFileResources',
   acpProtocolAuthentication: 'acpProtocolAuthentication',
   previewControl: 'previewControl',
   piExtensions: 'piExtensions',
+  acpCapabilityRefreshCache: 'acpCapabilityRefreshCache',
 } as const;
 
 export const ACP_AUTHENTICATION_INTERACTIONS_PROTOCOL_VERSION = 2;
@@ -25,10 +28,13 @@ export const SUBAGENT_CANCELLATION_PROTOCOL_VERSION = 1;
 export const SUBAGENT_EVENTS_PROTOCOL_VERSION = 1;
 export const LOCAL_PROJECT_REMOVAL_PROTOCOL_VERSION = 1;
 export const PROVIDER_SETUP_PROTOCOL_VERSION = 1;
+export const SCHEDULES_PROTOCOL_VERSION = 1;
+export const PREPARED_SESSION_INPUT_PROTOCOL_VERSION = 1;
 export const LOCAL_FILE_RESOURCES_PROTOCOL_VERSION = 1;
 export const ACP_PROTOCOL_AUTHENTICATION_VERSION = 2;
 export const PREVIEW_CONTROL_PROTOCOL_VERSION = 1;
 export const PI_EXTENSIONS_PROTOCOL_VERSION = 1;
+export const ACP_CAPABILITY_REFRESH_CACHE_PROTOCOL_VERSION = 1;
 
 type MachineProtocolCapabilityCarrier = {
   protocolCapabilities?: MachineProtocolCapabilities;
@@ -74,9 +80,13 @@ export const CURRENT_MACHINE_PROTOCOL_CAPABILITIES: MachineProtocolCapabilities 
     ACP_AUTHENTICATION_INTERACTIONS_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.localProjectRemoval]: LOCAL_PROJECT_REMOVAL_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.providerSetup]: PROVIDER_SETUP_PROTOCOL_VERSION,
+  [MACHINE_PROTOCOL_CAPABILITIES.schedules]: SCHEDULES_PROTOCOL_VERSION,
+  [MACHINE_PROTOCOL_CAPABILITIES.preparedSessionInput]: PREPARED_SESSION_INPUT_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.localFileResources]: LOCAL_FILE_RESOURCES_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.acpProtocolAuthentication]: ACP_PROTOCOL_AUTHENTICATION_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.previewControl]: PREVIEW_CONTROL_PROTOCOL_VERSION,
+  [MACHINE_PROTOCOL_CAPABILITIES.acpCapabilityRefreshCache]:
+    ACP_CAPABILITY_REFRESH_CACHE_PROTOCOL_VERSION,
 };
 
 export function machineSupportsSubagentEvents(
@@ -167,4 +177,62 @@ export function machineSupportsPiExtensions(
     MACHINE_PROTOCOL_CAPABILITIES.piExtensions,
     PI_EXTENSIONS_PROTOCOL_VERSION
   );
+}
+
+/** Whether the target daemon owns and runs machine-scheduled automation. */
+export function machineSupportsSchedulesProtocol(
+  machine: MachineProtocolCapabilityCarrier | null | undefined
+): boolean {
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.schedules,
+    SCHEDULES_PROTOCOL_VERSION
+  );
+}
+
+/** Whether the target daemon accepts inert `prepared` user turns. */
+export function machineSupportsPreparedSessionInputProtocol(
+  machine: MachineProtocolCapabilityCarrier | null | undefined
+): boolean {
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.preparedSessionInput,
+    PREPARED_SESSION_INPUT_PROTOCOL_VERSION
+  );
+}
+
+/**
+ * Whether the target daemon may answer `machine/acp-capabilities-refresh` from
+ * its persisted entry, and therefore understands the `force` field that opts out.
+ *
+ * Both facts arrive together in one build, so they share one capability: a daemon
+ * that never caches is exactly a daemon that rejects `force`.
+ */
+export function machineSupportsAcpCapabilityRefreshCacheProtocol(
+  machine: MachineProtocolCapabilityCarrier | null | undefined
+): boolean {
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.acpCapabilityRefreshCache,
+    ACP_CAPABILITY_REFRESH_CACHE_PROTOCOL_VERSION
+  );
+}
+
+/**
+ * The `force` field to put in a `machine/acp-capabilities-refresh` request,
+ * spread into the request so an unsupported target gets no key at all.
+ *
+ * Omission is required, not cosmetic: a daemon without this capability parses the
+ * request with a strict schema, so a `force` key — even one whose value is
+ * `undefined` but present — makes it drop the RPC request without a reply or
+ * reject the local-control request outright. Omission is also the behavior a
+ * forced caller wants, because such a daemon has no cache and always probes.
+ */
+export function negotiatedAcpCapabilitiesRefreshForce(
+  machine: MachineProtocolCapabilityCarrier | null | undefined,
+  force: boolean | undefined
+): { force?: true } {
+  return force === true && machineSupportsAcpCapabilityRefreshCacheProtocol(machine)
+    ? { force: true }
+    : {};
 }

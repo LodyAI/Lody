@@ -553,15 +553,17 @@ export const ManyProjects: Story = {
   },
 };
 
+/** Nothing anywhere: the page's one quiet line, in a records card. */
 export const Empty: Story = {
   args: {
     sections: [],
+    githubSections: [],
     addableMachines: [],
   },
 };
 
-/** A machine the user can add to but that has no project yet still gets a pill
-    and an in-place add action. */
+/** A machine the user can add to but that has no project yet is still listed,
+    its card holding one quiet line; the page header's "Add project" is the way in. */
 export const MachineWithoutProjects: Story = {
   args: {
     sections: [],

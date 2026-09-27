@@ -255,6 +255,10 @@ export class LodyOperationCoordinator {
     void this.wake('startup');
   }
 
+  hasPendingWorkForRequester(sessionId: SessionId): boolean {
+    return this.store?.hasPendingWorkForRequester(this.options.workspaceId, sessionId) ?? true;
+  }
+
   stop(): void {
     this.started = false;
     this.metaWatch?.unsubscribe();

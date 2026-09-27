@@ -660,6 +660,95 @@ export const DesktopPlanWithdrawn: Story = outcomeStory(
   planExitOutcomeTurn('alignment-plan-cancelled', { outcome: 'cancelled' })
 );
 
+/**
+ * COMMAND STEPS — the expanded activity group's verb contract.
+ *
+ * Command tool calls title themselves with the raw command, so the step gets
+ * its verb from the renderer: "Running" while the call is in flight (the verb
+ * shimmers, like every other step's), "Ran" once it lands. Searches and reads
+ * keep the verbs their own titles already carry. Click the group header to
+ * expand the list the screenshot below describes.
+ */
+const commandStepsTurn: SessionHistoryParsed = {
+  id: 'alignment-command-steps',
+  role: 'assistant',
+  timestamp: new Date(Date.now() - 47_000).toISOString(),
+  read: true,
+  finished: false,
+  items: [
+    {
+      type: 'text',
+      text: 'dev 服务器起不来,先看启动脚本,再确认依赖解析和 vite 配置。',
+    },
+    {
+      type: 'tool_call',
+      toolCallId: 'command-steps-sed',
+      title: "sed -n '1,240p' apps/electron/scripts/dev-local.mjs",
+      kind: 'execute',
+      status: 'completed',
+      content: [
+        {
+          type: 'terminal_command',
+          command: '/bin/bash',
+          args: ['-lc', "sed -n '1,240p' apps/electron/scripts/dev-local.mjs"],
+          cwd: '/repo',
+        },
+      ],
+    },
+    {
+      type: 'tool_call',
+      toolCallId: 'command-steps-git',
+      title: 'git status --short',
+      kind: 'execute',
+      status: 'completed',
+    },
+    {
+      type: 'tool_call',
+      toolCallId: 'command-steps-search',
+      title: "Search for 'buildWith|transformAsync|unplugin'",
+      kind: 'search',
+      status: 'completed',
+    },
+    {
+      type: 'tool_call',
+      toolCallId: 'command-steps-read',
+      title: 'Read packages/components/src/components/ai-gui/view.tsx',
+      kind: 'read',
+      status: 'completed',
+      locations: [{ path: 'packages/components/src/components/ai-gui/view.tsx' }],
+    },
+    {
+      type: 'tool_call',
+      toolCallId: 'command-steps-pnpm',
+      title: 'pnpm --dir apps/electron exec electron-vite dev --mode oss',
+      kind: 'execute',
+      status: 'in_progress',
+    },
+  ],
+};
+
+export const DesktopCommandSteps: Story = {
+  args: {
+    sessionId,
+    items: [{ type: 'message', sessionId, message: commandStepsTurn, turnIndex: 0 } as const],
+    renderMessageRow,
+  },
+  globals: { theme: 'dark' },
+  render: () => (
+    <WithRuntime>
+      <div className="relative h-[380px] w-full bg-background">
+        <SessionChatStreamView
+          items={[{ type: 'message', sessionId, message: commandStepsTurn, turnIndex: 0 } as const]}
+          sessionId={sessionId}
+          renderMessageRow={renderMessageRow}
+          lastAssistantMessageId={commandStepsTurn.id}
+          agentActivityLabel="Working"
+        />
+      </div>
+    </WithRuntime>
+  ),
+};
+
 export const DesktopPlanModeTurn: Story = {
   args: { sessionId, items: planModeItems, renderMessageRow },
   globals: { theme: 'dark' },

@@ -1,0 +1,9 @@
+{
+  "extends": "../configs/tsconfig.extend.json",
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "noUncheckedIndexedAccess": true,
+    "types": []
+  },
+  "include": ["src", "tests"]
+}

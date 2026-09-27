@@ -1,11 +1,4 @@
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type CSSProperties,
-} from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
@@ -23,7 +16,6 @@ import {
   Ellipsis,
   ExternalLink,
   FolderPlus,
-  FolderOpen,
   Github,
   Info,
   Plus,
@@ -71,7 +63,7 @@ import {
   type PendingLocalProjectRemoval,
 } from '@/components/loro-app-sidebar';
 import { getIpcServices } from '@/lib/electron-ipc-client';
-import { CompactRow, CompactSection } from './compact-layout';
+import { CompactRow, CompactSection, SettingsEmptyList } from './compact-layout';
 import { Button, type ButtonProps } from '@lody/ui/button';
 import { Dialog } from '@/ui/dialog';
 import { Checkbox } from '@lody/ui/checkbox';
@@ -81,7 +73,7 @@ import { Tabs } from '@lody/ui/tabs';
 import { Badge } from '@lody/ui/badge';
 import { Textarea } from '@lody/ui/textarea';
 import { Input } from '@lody/ui/input';
-import { VList } from 'virtua';
+import { VList } from '@lody/virtua';
 
 import { AlertDialog } from '@/ui/dialog';
 import { Tooltip } from '@lody/ui/tooltip';
@@ -288,18 +280,6 @@ const styles = stylex.create({
     fontSize: type.caption,
     color: colors.secondaryLabel,
   },
-  empty: {
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: space[2],
-    paddingInline: space[3],
-    paddingBlock: '48px',
-    textAlign: 'center',
-  },
-  emptyIcon: { width: '20px', height: '20px', color: colors.tertiaryLabel },
-  emptyText: { margin: 0, fontSize: type.caption, color: colors.secondaryLabel },
 
   /* The two-pane catalog: sources on the left, the selected source's folders
      on the right, both one sidebar list language; one structural line between. */
@@ -1227,12 +1207,6 @@ function ProjectSettingsDesktop({
       />
     ) : null;
 
-  const addableMachineIds = useMemo(
-    () => new Set((addableMachines ?? []).map((machine) => machine.machineId)),
-    [addableMachines]
-  );
-  const addFolderLabel = t('workspace.projects.addFolder', 'Add folder');
-
   /* Arriving for one machine (from its "Add folder" elsewhere) scrolls its
      section into view rather than hiding every other source. */
   const sectionRefs = useRef(new Map<string, HTMLElement>());
@@ -1288,12 +1262,7 @@ function ProjectSettingsDesktop({
             {t('workspace.projects.loading', 'Loading projects')}
           </div>
         ) : totalCount === 0 && machineEntries.length === 0 ? (
-          <div {...stylex.props(styles.empty)}>
-            <FolderOpen {...stylex.props(styles.emptyIcon)} aria-hidden="true" />
-            <p {...stylex.props(styles.emptyText)}>
-              {t('workspace.projects.empty', 'No projects yet')}
-            </p>
-          </div>
+          <SettingsEmptyList>{t('workspace.projects.empty', 'No projects yet')}</SettingsEmptyList>
         ) : (
           /* Every source at once, each a section: its name above, its projects
              as the ruled rows of one card. Nothing is hidden behind a picked
@@ -1304,7 +1273,6 @@ function ProjectSettingsDesktop({
                 sections.find((section) => section.machineId === machine.machineId)?.rows ?? [];
               const isThisMachine = Boolean(localMachineId && machine.machineId === localMachineId);
               const online = machine.online || isThisMachine;
-              const canAdd = Boolean(onAddLocalProject && addableMachineIds.has(machine.machineId));
               const status = [
                 isThisMachine
                   ? t('workspace.projects.thisMachine', 'This machine')
@@ -1323,29 +1291,7 @@ function ProjectSettingsDesktop({
                     else sectionRefs.current.delete(machine.machineId);
                   }}
                 >
-                  <CompactSection
-                    title={machine.machineName}
-                    description={status}
-                    boxed
-                    headerRight={
-                      canAdd ? (
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="small"
-                          title={t(
-                            'workspace.projects.addFolderOnMachine',
-                            'Add a folder on {{machine}}',
-                            { machine: machine.machineName }
-                          )}
-                          onClick={() => onAddLocalProject?.(machine.machineId)}
-                        >
-                          <FolderPlus {...stylex.props(styles.buttonIcon)} />
-                          {addFolderLabel}
-                        </Button>
-                      ) : null
-                    }
-                  >
+                  <CompactSection title={machine.machineName} description={status} boxed>
                     {rows.length === 0 ? (
                       <p {...stylex.props(surface.cardNote)}>
                         {t(
@@ -1533,21 +1479,30 @@ function ProjectAddMenu({
   readonly variant?: ButtonProps['variant'];
 }) {
   const { t } = useTranslation();
+  const label = t('workspace.projects.addProjectMenu', 'Add project');
+  // Like every catalog's add action, it names what it adds. With one way in it
+  // is that way; a menu of one item would be a second click for nothing. The
+  // folder dialog asks which machine, so a source needs no add of its own.
+  if (onAddLocalProject && !onAddGitHubProject) {
+    return (
+      <Button
+        type="button"
+        variant={variant ?? 'ghost'}
+        size={size ?? 'small'}
+        onClick={() => onAddLocalProject()}
+      >
+        <Plus {...stylex.props(styles.buttonIcon)} />
+        {label}
+      </Button>
+    );
+  }
   return (
     <Menu.Root>
       <Menu.Trigger
-        render={
-          <Button
-            type="button"
-            variant={variant ?? 'ghost'}
-            size={size ?? 'small'}
-            icon
-            aria-label={t('workspace.projects.addProjectMenu', 'Add project')}
-            title={t('workspace.projects.addProjectMenu', 'Add project')}
-          />
-        }
+        render={<Button type="button" variant={variant ?? 'ghost'} size={size ?? 'small'} />}
       >
-        <Plus {...stylex.props(styles.glyph)} />
+        <Plus {...stylex.props(styles.buttonIcon)} />
+        {label}
       </Menu.Trigger>
       <Menu.Content align="end">
         {onAddLocalProject ? (

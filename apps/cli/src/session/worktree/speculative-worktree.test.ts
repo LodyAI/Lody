@@ -92,8 +92,13 @@ describe('speculative worktree ownership', () => {
     const prepared = await materializeSpeculativeWorktree(materializeArgs(manager, sessionId));
 
     expect(prepared.info).toEqual(info);
-    expect(manager.ensureRepo).toHaveBeenCalledTimes(1);
-    expect(manager.createWorktree).toHaveBeenCalledWith(sessionId, 'main', undefined);
+    expect(manager.createWorktree).toHaveBeenCalledWith(
+      sessionId,
+      'main',
+      undefined,
+      undefined,
+      undefined
+    );
 
     await prepared.dispose();
     expect(manager.removeWorktree).toHaveBeenCalledWith(sessionId, true, undefined, {

@@ -18,6 +18,7 @@ import {
   GoalChip,
   ScheduleChip,
   StatusChip,
+  ScheduleSourceChip,
   useScheduledTaskSignature,
   type GoalChipCommandHandler,
   type ContextChipAction,
@@ -30,10 +31,12 @@ import {
   type SessionSyncIndicatorVariant,
 } from './session-syncing-indicator';
 
-export type InfoBarItemKey = 'status' | 'goal' | 'schedule' | 'context';
+export type InfoBarItemKey = 'status' | 'goal' | 'schedule' | 'scheduleSource' | 'context';
 
 export type SessionInfoBarProps = {
   status: SessionStatusStripState | null;
+  /** The schedule that started this session; the chip is the way back to it. */
+  scheduleSource?: { title: string; onOpen: () => void } | null;
   /**
    * The queued-turn sheet. Not a bar item: it sits on the bar's top edge, or,
    * when the bar has nothing to show, directly on the composer below.
@@ -130,6 +133,7 @@ export function SessionInfoBar({
   goalPendingCommand,
   onGoalCommand,
   onGoalDismiss,
+  scheduleSource,
   scheduledTasks,
   prCiRuns,
   onOpenPrCiRun,
@@ -164,10 +168,13 @@ export function SessionInfoBar({
     status: hasStatus,
     goal: hasGoal,
     schedule: hasSchedule,
+    scheduleSource: !!scheduleSource,
     context: hasContext,
   };
   const defaultKey =
-    (['context', 'status', 'goal', 'schedule'] as const).find((key) => present[key]) ?? null;
+    (['context', 'status', 'goal', 'schedule', 'scheduleSource'] as const).find(
+      (key) => present[key]
+    ) ?? null;
 
   const [stage, setStage] = useState<InfoBarItemKey | null>(initialStage ?? defaultKey);
 
@@ -267,6 +274,15 @@ export function SessionInfoBar({
         return hasSchedule && scheduledTasks ? (
           <ScheduleChip key={key} tasks={scheduledTasks} {...itemMode} />
         ) : null;
+      case 'scheduleSource':
+        return scheduleSource ? (
+          <ScheduleSourceChip
+            key={key}
+            title={scheduleSource.title}
+            onOpen={scheduleSource.onOpen}
+            {...itemMode}
+          />
+        ) : null;
       case 'context':
         return hasContext ? (
           <ContextChip
@@ -290,7 +306,7 @@ export function SessionInfoBar({
     }
   };
 
-  const clusterKeys = (['status', 'goal', 'schedule', 'context'] as const).filter(
+  const clusterKeys = (['status', 'goal', 'schedule', 'scheduleSource', 'context'] as const).filter(
     (key) => present[key] && key !== stagedKey
   );
   const clusterNonEmpty = clusterKeys.length > 0 || !!relations || !!onOpenBrowser;

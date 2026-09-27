@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import * as stylex from '@stylexjs/stylex';
-import { SettingsPageActions, SettingsPageLead } from './settings-page-header';
-import { settingsRecordsCard } from './compact-layout';
+import { SettingsPageActions, SettingsPageLead, useSettingsPane } from './settings-page-header';
+import { SettingsEmptyList, settingsRecordsCard } from './compact-layout';
 import { useAtomValue } from 'jotai';
 import { useTranslation } from 'react-i18next';
 import { usePostHog } from '@posthog/react';
@@ -14,7 +14,7 @@ import {
   type PromptShortcut,
   type PromptShortcutIndexEntry,
 } from '@lody/shared/prompt-shortcuts';
-import { Plus, SquareSlash, Trash2 } from 'lucide-react';
+import { Plus, Trash2 } from 'lucide-react';
 import { Spinner } from '@lody/ui/spinner';
 import { promptShortcutsFeatureEnabledAtom } from '@/atoms/settings';
 import { getAllAgentConfigAtom } from '@/atoms/agents';
@@ -24,6 +24,7 @@ import { capturePostHogEvent } from '@/lib/posthog-analytics';
 import { getPromptShortcutAnalyticsProperties } from '@/lib/prompt-shortcut-analytics';
 import { usePromptShortcuts } from '../../providers/prompt-shortcut-provider';
 import { useVisibleMachineMetas } from '@/hooks/use-visible-machine-metas';
+import { useDialogExitSnapshot } from '@/hooks/use-dialog-exit-snapshot';
 import { useVisibleLocalProjectsFromMachineIndex } from '@/hooks/use-visible-local-projects';
 import { useMachineFlockAgentConfigsForMachineIds } from '@/hooks/use-machine-flock-agent-configs';
 import { CombinedMentionTextarea } from '@/components/mentions/combined-mention-textarea';
@@ -46,6 +47,7 @@ import {
 import { ScopePills } from './prompt-shortcut-scope';
 import {
   SETTINGS_EDITOR_DIALOG_LAYOUT,
+  SETTINGS_EDITOR_DIALOG_WIDTH,
   settingsCatalog as catalog,
   settingsSurface as surface,
 } from './surface';
@@ -190,6 +192,8 @@ function PromptShortcutsSettingContent({
     value: PromptShortcut;
     base: PromptShortcutIndexEntry | null;
   } | null>(null);
+  const { shown: shownEditor, onOpenChangeComplete } = useDialogExitSnapshot(editor);
+  const settingsPane = useSettingsPane();
   const [removal, setRemoval] = useState<PromptShortcutIndexEntry | null>(null);
   const [busy, setBusy] = useState(false);
   const edit = async (entry: PromptShortcutIndexEntry) => {
@@ -225,7 +229,7 @@ function PromptShortcutsSettingContent({
       },
     });
   };
-  const owned = editor ? editor.value.ownerUserId === runtime?.userId : false;
+  const owned = shownEditor ? shownEditor.value.ownerUserId === runtime?.userId : false;
   return (
     <div {...stylex.props(surface.container)}>
       <SettingsPageLead>
@@ -252,11 +256,16 @@ function PromptShortcutsSettingContent({
         onOpenChange={(open) => {
           if (!open && !busy) setEditor(null);
         }}
+        onOpenChangeComplete={onOpenChangeComplete}
       >
-        <Dialog.Content className={SETTINGS_EDITOR_DIALOG_LAYOUT}>
+        <Dialog.Content
+          width={SETTINGS_EDITOR_DIALOG_WIDTH}
+          centerOn={settingsPane}
+          className={SETTINGS_EDITOR_DIALOG_LAYOUT}
+        >
           <Dialog.Header>
             <Dialog.Title>
-              {!editor?.base
+              {!shownEditor?.base
                 ? t('settings.promptShortcuts.new', 'New Prompt Shortcut')
                 : owned
                   ? t('settings.promptShortcuts.edit', 'Edit Prompt Shortcut')
@@ -274,12 +283,12 @@ function PromptShortcutsSettingContent({
                   )}
             </Dialog.Description>
           </Dialog.Header>
-          {editor && runtime ? (
+          {shownEditor && runtime ? (
             owned ? (
               <ShortcutEditor
-                key={editor.value.id}
-                initial={editor.value}
-                isNew={!editor.base}
+                key={shownEditor.value.id}
+                initial={shownEditor.value}
+                isNew={!shownEditor.base}
                 canShare={runtime.canShare}
                 saving={busy}
                 scope={scope}
@@ -289,19 +298,19 @@ function PromptShortcutsSettingContent({
                   try {
                     await runtime.save({
                       value: { ...value, revision: crypto.randomUUID(), updatedAt: getServerNow() },
-                      base: editor.base,
+                      base: shownEditor.base,
                       bodyDocId:
-                        !editor.base || editor.base.visibility !== value.visibility
+                        !shownEditor.base || shownEditor.base.visibility !== value.visibility
                           ? crypto.randomUUID()
-                          : editor.base.bodyDocId,
+                          : shownEditor.base.bodyDocId,
                     });
                     capturePostHogEvent(
                       postHog,
-                      editor.base ? 'prompt_shortcut/updated' : 'prompt_shortcut/created',
+                      shownEditor.base ? 'prompt_shortcut/updated' : 'prompt_shortcut/created',
                       {
                         ...getPromptShortcutAnalyticsProperties(value, value.mentions.length),
-                        ...(editor.base
-                          ? { visibility_changed: editor.base.visibility !== value.visibility }
+                        ...(shownEditor.base
+                          ? { visibility_changed: shownEditor.base.visibility !== value.visibility }
                           : {}),
                       }
                     );
@@ -313,7 +322,7 @@ function PromptShortcutsSettingContent({
               />
             ) : (
               <PromptShortcutReadOnlyView
-                shortcut={editor.value}
+                shortcut={shownEditor.value}
                 options={scope.options}
                 onClose={() => setEditor(null)}
               />
@@ -425,15 +434,12 @@ export function PromptShortcutsList({
 
       {entries.length === 0 ? (
         loading ? null : (
-          <div {...stylex.props(catalog.empty)}>
-            <SquareSlash {...stylex.props(catalog.emptyIcon)} aria-hidden="true" />
-            <p {...stylex.props(catalog.emptyText)}>
-              {t(
-                'settings.promptShortcuts.empty',
-                'No Prompt Shortcuts yet. Save a Prompt you retype often and call it with /.'
-              )}
-            </p>
-          </div>
+          <SettingsEmptyList>
+            {t(
+              'settings.promptShortcuts.empty',
+              'No Prompt Shortcuts yet. Save a Prompt you retype often and call it with /.'
+            )}
+          </SettingsEmptyList>
         )
       ) : (
         <div {...stylex.props(settingsRecordsCard)}>
@@ -776,7 +782,12 @@ export function ShortcutPromptField({
       rows={4}
       // A value holder, so the well every other field in the form is.
       containerClassName={stylex.props(styles.promptWell).className}
-      className={withClassName(stylex.props(styles.promptInput), 'input-scrollbar').className}
+      // The wrapper owns this field's focus ring; suppress the shell's global
+      // inset focus shadow on the textarea inside it.
+      className={
+        withClassName(stylex.props(styles.promptInput), 'input-scrollbar focus-visible:shadow-none')
+          .className
+      }
       skillAgent={skillAgent}
       onMentionRangesChange={(ranges) => editor.onRangesChange(toPersistedMentionRanges(ranges))}
     />

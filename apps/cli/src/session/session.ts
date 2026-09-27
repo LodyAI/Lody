@@ -1,4 +1,7 @@
 import EventEmitter from 'eventemitter3';
+import { clearGitHubTokenEnv } from '@/lib/gh-token-env';
+import { applyNonOwnerShellEnv } from '@/lib/non-owner-shell-env';
+import { prependGhShimBinDirToPath } from '@/lib/gh-shim-script';
 import { ACPSessionId, getServerNow, MachineId, SessionId } from '@lody/shared';
 import type { CreateAgentConfig, ISession, SessionMonitorRuntimeInfo } from './session-manager';
 import {
@@ -124,7 +127,6 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
   private acpCapabilities: AcpCapabilitiesResult | null = null;
   private acpCapabilitySourceVersion: string | null = null;
   public terminalManager: TerminalManager;
-  public ghTokenInjected: boolean = false;
 
   constructor(
     config: SessionConfig,
@@ -383,6 +385,9 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
     options: { preferMachineIdentity: boolean }
   ): void {
     const configEnv = this.config.env ?? {};
+    if (this.config.githubCredentialPolicy) {
+      this.config.githubCredentialPolicy.allowLocalAuth = options.preferMachineIdentity;
+    }
     // Set git identity using Git's recognized environment variables directly
     const { name, email } = resolveSessionGitIdentity(
       { name: userName, email: userEmail },
@@ -488,7 +493,28 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
     // gateway); a proxy inherited from the host process or the login shell
     // must never intercept those. Runs last so a proxy contributed by the
     // login shell is covered too.
-    return withLoopbackNoProxy(withDefaultAcpPathEntries(agentEnv, this.config.agentType));
+    const finalEnv = withLoopbackNoProxy(
+      withDefaultAcpPathEntries(agentEnv, this.config.agentType)
+    );
+    const policy = this.config.githubCredentialPolicy;
+    if (policy) {
+      if (!policy.allowLocalAuth) {
+        clearGitHubTokenEnv(finalEnv);
+        applyNonOwnerShellEnv(finalEnv, policy.stateFilePath);
+      } else if (policy.stateFilePath) {
+        finalEnv.PATH = prependGhShimBinDirToPath(finalEnv.PATH, policy.stateFilePath);
+      }
+      // Shell/agent overrides cannot select a different session's authority.
+      for (const key of Object.keys(configEnv)) {
+        if (
+          key.startsWith('LODY_GIT_CRED_') ||
+          key.startsWith('GIT_CONFIG_') ||
+          key === 'LODY_GIT_LOCAL_CONFIG'
+        )
+          finalEnv[key] = configEnv[key];
+      }
+    }
+    return finalEnv;
   }
 
   async createAgent(callbacks: CreateAgentConfig): Promise<string> {

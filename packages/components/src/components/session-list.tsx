@@ -88,6 +88,10 @@ import {
   SidebarListSkeleton,
   buildSessionRowOpenedByTreeSlot,
   SIDEBAR_ROW_LIST_CLASS,
+  SIDEBAR_GROUP_LABEL_CLASS,
+  SIDEBAR_GROUP_LABEL_COLOR_CLASS,
+  SidebarGroupActivityMark,
+  summarizeSidebarGroupActivity,
 } from '@/components/sidebar-row-shared';
 import { SessionInfoHoverCard } from '@/components/session-info-hover-card';
 import type { SessionSharingState } from '@/lib/session-sharing';
@@ -722,7 +726,8 @@ const SessionGroupRow = memo(function SessionGroupRow({
         !showSelectedState &&
           isSelectable &&
           !isMobile &&
-          'hover:bg-sidebar-hover hover:text-sidebar-hover-foreground',
+          // Hover marks the row with its fill only; the title keeps its color.
+          'hover:bg-sidebar-hover',
         showSelectedState &&
           'bg-sidebar-selection text-sidebar-selection-foreground hover:bg-sidebar-selection',
         // Keyboard-only focus ring. Plain :focus-within also matches
@@ -778,8 +783,9 @@ const SessionGroupRow = memo(function SessionGroupRow({
         />
         <div
           className={cn(
-            'min-w-0 flex-1 flex items-center gap-1 truncate text-[0.9em]',
-            showSelectedState ? 'text-sidebar-selection-foreground' : 'text-sidebar-foreground'
+            // 1em: conversation titles match the prose size in every organize mode.
+            'min-w-0 flex-1 flex items-center gap-1 truncate text-[1em]',
+            showSelectedState ? 'text-sidebar-selection-foreground' : 'text-sidebar-row-foreground'
           )}
           // Double-click to rename is scoped to the title only, so it can't
           // be triggered by double-clicking the Archive confirm button.
@@ -823,7 +829,9 @@ const SessionGroupRow = memo(function SessionGroupRow({
                   />
                 ) : null}
                 {showMergeablePill ? <SessionMergeablePill /> : null}
-                {hasPr ? <SessionPrIcon prStatus={prStatus} prCiState={session.prCiState} /> : null}
+                {hasPr ? (
+                  <SessionPrIcon compact prStatus={prStatus} prCiState={session.prCiState} />
+                ) : null}
               </span>
             ) : undefined
           }
@@ -852,31 +860,31 @@ const SessionGroupRow = memo(function SessionGroupRow({
         />
         {onTogglePinSession ? (
           <ContextMenu.Item
+            icon={session.isPinned ? <PinOff /> : <Pin />}
             onClick={() => {
               onTogglePinSession(session.sessionId, !session.isPinned);
             }}
           >
-            {session.isPinned ? <PinOff /> : <Pin />}
             {session.isPinned ? contextMenuLabels.unpin : contextMenuLabels.pin}
           </ContextMenu.Item>
         ) : null}
         {canMarkUnread ? (
           <ContextMenu.Item
+            icon={<Mail />}
             onClick={() => {
               onMarkSessionUnread?.(session.sessionId);
             }}
           >
-            <Mail />
             {contextMenuLabels.markUnread}
           </ContextMenu.Item>
         ) : null}
         {onRenameSession ? (
           <ContextMenu.Item
+            icon={<Pencil />}
             onClick={() => {
               beginRename(session.sessionId, session.title);
             }}
           >
-            <Pencil />
             {contextMenuLabels.rename}
           </ContextMenu.Item>
         ) : null}
@@ -886,38 +894,40 @@ const SessionGroupRow = memo(function SessionGroupRow({
         ) : null}
         {onCopySessionUrl ? (
           <ContextMenu.Item
+            icon={<Link2 />}
             onClick={() => {
               onCopySessionUrl(session.sessionId);
             }}
           >
-            <Link2 />
             {contextMenuLabels.copyUrl}
           </ContextMenu.Item>
         ) : null}
         {session.branchName ? (
           <ContextMenu.Item
+            icon={<GitBranch />}
             onClick={() => {
               void navigator.clipboard.writeText(session.branchName).catch(() => {});
             }}
           >
-            <GitBranch />
             {contextMenuLabels.copyBranch}
           </ContextMenu.Item>
         ) : null}
         {shareMenuState ? (
           <ContextMenu.Item
             disabled={shareMenuState !== 'share'}
+            icon={
+              shareMenuState === 'share' ? (
+                <Users />
+              ) : shareMenuState === 'loading' ? (
+                <Spinner />
+              ) : (
+                <LockKeyhole />
+              )
+            }
             onClick={() => {
               onShareSessionWithTeam?.(session.sessionId);
             }}
           >
-            {shareMenuState === 'share' ? (
-              <Users />
-            ) : shareMenuState === 'loading' ? (
-              <Spinner />
-            ) : (
-              <LockKeyhole />
-            )}
             {shareMenuState === 'share'
               ? contextMenuLabels.shareWithTeam
               : shareMenuState === 'unregistered'
@@ -941,6 +951,7 @@ const SessionGroupRow = memo(function SessionGroupRow({
         ) : null}
         {onOpenPullRequest && prUrl ? (
           <ContextMenu.Item
+            icon={<GitPullRequest />}
             onClick={() => {
               onOpenPullRequest({
                 sessionId: session.sessionId,
@@ -950,7 +961,6 @@ const SessionGroupRow = memo(function SessionGroupRow({
               });
             }}
           >
-            <GitPullRequest />
             {contextMenuLabels.openPr}
           </ContextMenu.Item>
         ) : null}
@@ -984,11 +994,11 @@ const SessionGroupRow = memo(function SessionGroupRow({
         ) : null}
         {onArchiveSession ? (
           <ContextMenu.Item
+            icon={<Archive />}
             onClick={() => {
               onArchiveSession(session.sessionId);
             }}
           >
-            <Archive />
             {contextMenuLabels.archive}
           </ContextMenu.Item>
         ) : null}
@@ -1154,29 +1164,36 @@ const SessionGroupSection = memo(function SessionGroupSection({
       showTreeGutter: hasOpenedByTreeNesting(nodes),
     };
   }, [collapsedOpenedBySessionIds, group, whetherShowFullList]);
+  // A folded group still says whether anything inside it needs the user.
+  const collapsedActivity = useMemo(
+    () => (group.collapsed ? summarizeSidebarGroupActivity(group.sessions) : null),
+    [group.collapsed, group.sessions]
+  );
   const toggleListLabel = whetherShowFullList
     ? t('sessions.showLess', 'Show less')
     : t('sessions.showAll', 'Show all ({{count}})', { count: group.sessions.length });
   const resolvedTrailingContent = trailingContent ?? (group.collapsed ? null : dragHandle);
-  // Repo group labels (e.g. "loro-dev/loro") name concrete content, but dark-mode
-  // resting chrome should still recede behind the conversation. Hover and active
-  // states restore full contrast. "Chats" uses the full muted token (same as
-  // SidebarSectionHeader) — not an extra /55 fade on top of muted.
-  const headerBaseColorClass =
-    group.kind === 'repo'
-      ? 'text-sidebar-foreground dark:text-sidebar-foreground/75'
-      : 'text-sidebar-foreground-muted';
-  // Typography splits with color: repo headers read as content (regular weight,
-  // full foreground; the leading repo icon marks them as a group), the "Chats"
-  // header reads as section chrome (medium, muted) so section labels recede.
-  const headerTypographyClass =
-    group.kind === 'repo' ? 'text-[0.9em] font-normal' : 'text-[0.9em] font-medium';
-  const headerToggleHoverClass =
-    group.kind === 'repo' ? 'hover:text-sidebar-hover-foreground' : 'hover:text-sidebar-foreground';
+  // A repo ("loro-dev/loro") is a second-level row like a project: 14px
+  // regular in the sidebar row color with a 16px avatar and a hover fill.
+  // "Chats" is a top-level group label like a machine or GitHub Worktrees:
+  // the shared group label type (small, bold, faint, no icon), no hover fill,
+  // and it scrolls with its conversations.
+  const isGroupLabel = group.kind !== 'repo';
+  const headerBaseColorClass = isGroupLabel
+    ? SIDEBAR_GROUP_LABEL_COLOR_CLASS
+    : 'text-sidebar-row-foreground';
+  const headerTypographyClass = isGroupLabel ? SIDEBAR_GROUP_LABEL_CLASS : 'text-[1em] font-normal';
 
   return (
-    <div className={cn('flex flex-col gap-0.5', getSidebarGroupSpacingClass(group.collapsed))}>
-      <div className="group flex h-7 items-center">
+    <div
+      className={cn(
+        'flex flex-col gap-0.5',
+        getSidebarGroupSpacingClass(group.collapsed),
+        // 16px above a top-level group (the repo groups before it end in 12px).
+        isGroupLabel && 'mt-1 first:mt-0'
+      )}
+    >
+      <div className={cn('group flex items-center', isGroupLabel ? 'h-[26px]' : 'h-7')}>
         <div
           role={canNavigate || canToggle ? 'button' : undefined}
           tabIndex={canNavigate || canToggle ? 0 : -1}
@@ -1184,7 +1201,8 @@ const SessionGroupSection = memo(function SessionGroupSection({
           data-scope-item="row"
           data-sidebar-group-key={group.key}
           className={cn(
-            'relative flex h-7 w-full select-none items-center gap-1 rounded-md px-2 text-left',
+            'relative flex w-full select-none items-center rounded-md px-2 text-left',
+            isGroupLabel ? 'h-[26px] gap-1.5' : 'h-7 gap-1',
             'border border-transparent',
             'min-w-0 flex-1 transition-colors',
             headerTypographyClass,
@@ -1194,14 +1212,11 @@ const SessionGroupSection = memo(function SessionGroupSection({
                 ? cn(
                     'cursor-pointer bg-transparent',
                     headerBaseColorClass,
-                    !isMobile && 'hover:bg-sidebar-hover hover:text-sidebar-hover-foreground'
+                    !isMobile &&
+                      (isGroupLabel ? 'hover:text-sidebar-foreground' : 'hover:bg-sidebar-hover')
                   )
                 : canToggle
-                  ? cn(
-                      'cursor-pointer bg-transparent',
-                      headerBaseColorClass,
-                      !isMobile && headerToggleHoverClass
-                    )
+                  ? cn('cursor-pointer bg-transparent', headerBaseColorClass)
                   : cn('cursor-default bg-transparent', headerBaseColorClass)
           )}
           onClick={canNavigate ? handleNavigate : handleToggleGroup}
@@ -1242,12 +1257,10 @@ const SessionGroupSection = memo(function SessionGroupSection({
                 className={cn(
                   // Left-anchored (not centered in the 20px button) so its left edge
                   // lines up with the session rows' leading status slot below.
-                  'absolute left-0 top-1/2 -translate-y-1/2 h-3.5 w-3.5 transition-opacity duration-100',
+                  'absolute left-0 top-1/2 -translate-y-1/2 h-4 w-4 transition-opacity duration-100',
                   // Mobile: chevron is always shown so the owner avatar must hide
                   // permanently to avoid the two icons overlapping.
-                  canToggle && isMobile
-                    ? 'opacity-0'
-                    : cn('opacity-80', canToggle && 'group-hover:opacity-0')
+                  canToggle && isMobile ? 'opacity-0' : cn(canToggle && 'group-hover:opacity-0')
                 )}
               />
               {canToggle && (
@@ -1277,6 +1290,7 @@ const SessionGroupSection = memo(function SessionGroupSection({
             />
           ) : null}
           <span className="flex-1" aria-hidden="true" />
+          {collapsedActivity ? <SidebarGroupActivityMark activity={collapsedActivity} /> : null}
         </div>
 
         {resolvedTrailingContent}

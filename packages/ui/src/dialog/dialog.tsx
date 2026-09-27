@@ -1,6 +1,6 @@
 import { Dialog as BaseDialog } from '@base-ui/react/dialog';
 import * as stylex from '@stylexjs/stylex';
-import { forwardRef, type ComponentProps, type ReactNode } from 'react';
+import { forwardRef, type ComponentProps, type CSSProperties, type ReactNode } from 'react';
 import { Button } from '../button/button';
 import { appendClassName } from '../internal/class-name';
 import { CrossGlyph } from '../internal/glyphs';
@@ -9,6 +9,8 @@ import { useForcedThemeClassNames } from '../theme/theme';
 import {
   DialogFooter,
   DialogHeader,
+  mergePanelLayout,
+  useInlineCentre,
   ModalDepthProvider,
   useModalDepth,
   usePanelContainer,
@@ -43,6 +45,24 @@ export interface ModalContentProps extends Omit<PopupBaseProps, 'className' | 'r
   backdropClassName?: string;
   /** Skip the enter/exit fade so the surface appears instantly. */
   noAnimation?: boolean;
+  /**
+   * Panel width when the rung's default is wrong for this surface.
+   *
+   * It lands on inline `style`: the panel already states `width` itself, and a
+   * second declaration — a StyleX class here or a caller's utility class —
+   * wins only if the sheet happens to order it after. A lone `max-width` can
+   * only narrow the fixed default, never widen it. The rung's own `max-width`
+   * viewport cap still applies on top.
+   */
+  width?: CSSProperties['width'];
+  /**
+   * An element to centre the panel on across the window's width, in place of
+   * the window's own centre: a dialog opened from one pane of a larger surface
+   * — the settings page beside its nav — belongs over that pane. The panel
+   * stays inside the window, and with no element it is centred on the window.
+   * The block axis stays the window's.
+   */
+  centerOn?: Element | null;
   className?: string;
 }
 
@@ -135,11 +155,15 @@ export const DialogContent = forwardRef<HTMLDivElement, DialogContentProps>(func
     noAnimation,
     closeButton = true,
     closeLabel = 'Close',
+    width,
+    centerOn,
+    style,
     ...rest
   },
   ref
 ) {
   const { ref: panelRef, container: panel } = usePanelContainer<HTMLDivElement>(ref);
+  const centre = useInlineCentre(centerOn);
   // A portalled panel leaves the subtree whose palette it should be using, so
   // the classes that declare that palette travel with it and land on the
   // portal, where they cascade into the backdrop and the panel alike.
@@ -156,6 +180,7 @@ export const DialogContent = forwardRef<HTMLDivElement, DialogContentProps>(func
       <BaseDialog.Popup
         ref={panelRef}
         {...rest}
+        style={mergePanelLayout(style, { width, centre })}
         className={(state) =>
           appendClassName(
             stylex.props(

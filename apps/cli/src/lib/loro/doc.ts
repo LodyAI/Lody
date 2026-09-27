@@ -42,6 +42,7 @@ import {
   getAcpCapabilityCacheKey,
   normalizeSessionPullRequestMeta,
   getServerNow,
+  shouldRenewAcpCapabilityFetchTime,
   isLoroRepoDocDeleted,
   getMachineFlockAcpCapabilities,
   getMachineFlockProviderSetupCancellations,
@@ -3094,7 +3095,11 @@ export class MachineDocument implements LoroDocument<{}, MachineMeta> {
     if (
       existing &&
       serializeAcpCapabilityWithoutFetchTime(existing) ===
-        serializeAcpCapabilityWithoutFetchTime(entry)
+        serializeAcpCapabilityWithoutFetchTime(entry) &&
+      // Unchanged content is still rewritten once it is old enough: the refresh
+      // cache trusts `fetchedAt`, and an entry never renewed would expire once
+      // and then miss on every later request, re-probing forever.
+      !shouldRenewAcpCapabilityFetchTime(existing, entry.fetchedAt)
     ) {
       return existing;
     }

@@ -2023,12 +2023,6 @@ html:not(.uw-motion-ready) .uw-agents__banner-track {
   display: none;
 }
 
-/* PrTabView owns a nested Radix viewport. It is moved by the same page-scroll
-   coordinator and its scrollbar stays hidden so the frame reads as a scene. */
-.uw-power__demo [data-pr-content-scroll-area] [data-orientation='vertical'] {
-  opacity: 0;
-}
-
 /* Children fill the frame; PR uses flex+ScrollArea, Usage scrolls the inner. */
 .uw-power__demo-inner > .flex.h-full,
 .uw-power__demo-inner > .flex.min-h-0 {

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  ACP_CAPABILITY_FETCH_TIME_RENEW_AFTER_MS,
   type AgentConfigId,
   type MachineFlockKey,
   type MachineFlockWritableFlock,
@@ -79,6 +80,55 @@ describe('MachineDocument ACP capabilities', () => {
     expect(syncOnce).not.toHaveBeenCalled();
     expect(second.fetchedAt).toBe(first.fetchedAt);
     expect([...flock.rows.values()][0]?.value).toMatchObject({ acknowledgedSteer: true });
+  });
+
+  it('rewrites an unchanged entry only once it is old enough to need renewing', async () => {
+    vi.useFakeTimers();
+    const start = new Date('2026-07-15T00:00:00.000Z').getTime();
+    vi.setSystemTime(start);
+    const flock = new FakeMachineFlock();
+    const markDirty = vi.fn();
+    const repo = {
+      openFlockDoc: vi.fn(async () => ({ flock, syncOnce: vi.fn(async () => undefined) })),
+      flush: vi.fn(async () => undefined),
+    } as unknown as LoroRepo;
+    const document = new MachineDocument(
+      repo,
+      'workspace-1' as WorkspaceId,
+      'machine-1' as MachineId,
+      markDirty
+    );
+    const write = () =>
+      document.updateAcpCapabilities(
+        'config-1' as AgentConfigId,
+        'registry',
+        'opencode',
+        [],
+        [{ modelId: 'model-a', name: 'Model A' }],
+        undefined,
+        undefined,
+        false,
+        'opencode@1.0.0'
+      );
+    const storedFetchedAt = () =>
+      ([...flock.rows.values()][0]?.value as { fetchedAt: number } | undefined)?.fetchedAt;
+
+    await write();
+    vi.setSystemTime(start + ACP_CAPABILITY_FETCH_TIME_RENEW_AFTER_MS - 1);
+    await write();
+
+    // Still young: identical content costs no Flock write, flush or sync.
+    expect(flock.commits).toBe(1);
+    expect(markDirty).toHaveBeenCalledTimes(1);
+    expect(storedFetchedAt()).toBe(start);
+
+    vi.setSystemTime(start + ACP_CAPABILITY_FETCH_TIME_RENEW_AFTER_MS);
+    const renewed = await write();
+
+    expect(flock.commits).toBe(2);
+    expect(markDirty).toHaveBeenCalledTimes(2);
+    expect(renewed.fetchedAt).toBe(start + ACP_CAPABILITY_FETCH_TIME_RENEW_AFTER_MS);
+    expect(storedFetchedAt()).toBe(start + ACP_CAPABILITY_FETCH_TIME_RENEW_AFTER_MS);
   });
 
   it('persists a capability change that only updates per-model reasoning efforts', async () => {

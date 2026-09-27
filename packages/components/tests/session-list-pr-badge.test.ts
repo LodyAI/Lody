@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import React from 'react';
+import React, { act } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync } from 'react-dom';
 import { createRoot, type Root } from 'react-dom/client';
@@ -8,6 +8,7 @@ import { Provider } from 'jotai';
 import { SessionList } from '../src/components/session-list';
 import { SessionPrIcon, SidebarRowEndSlot } from '../src/components/sidebar-row-shared';
 import { initI18n } from '../src/i18n';
+import { WORKING_HAND_OVER_MS } from '../src/ui/working-status-mark';
 
 const PR_STATUS_CASES = [
   ['open', '.lucide-git-pull-request', 'text-github-open'],
@@ -196,11 +197,11 @@ describe('SessionList PR badge', () => {
     expect(passedVerdict?.getAttribute('height')).toBe('10');
     expect(passedVerdict?.classList.contains('text-status-success')).toBe(true);
     expect(passedPrIcon?.querySelector('.bg-sidebar')).toBeNull();
-    expect(rowWithPr?.querySelector('.text-code-added')).toBeNull();
-    expect(rowWithPr?.querySelector('.text-code-removed')).toBeNull();
+    expect(rowWithPr?.querySelector('.text-github-addition')).toBeNull();
+    expect(rowWithPr?.querySelector('.text-github-deletion')).toBeNull();
     expect(rowWithoutPr?.querySelector('[data-pr-ci-verdict]')).toBeNull();
-    expect(rowWithoutPr?.querySelector('.text-code-added')).toBeNull();
-    expect(rowWithoutPr?.querySelector('.text-code-removed')).toBeNull();
+    expect(rowWithoutPr?.querySelector('.text-github-addition')).toBeNull();
+    expect(rowWithoutPr?.querySelector('.text-github-deletion')).toBeNull();
   });
 
   it('replaces diff stats with a Mergeable pill only while the ready session is inactive', () => {
@@ -237,8 +238,8 @@ describe('SessionList PR badge', () => {
 
     const row = container.querySelector('[data-sidebar-session-id="ready-session"]');
     expect(row?.querySelector('[data-session-mergeable-pill]')?.textContent).toBe('Mergeable');
-    expect(row?.querySelector('.text-code-added')).toBeNull();
-    expect(row?.querySelector('.text-code-removed')).toBeNull();
+    expect(row?.querySelector('.text-github-addition')).toBeNull();
+    expect(row?.querySelector('.text-github-deletion')).toBeNull();
     expect(row?.querySelector('.lucide-git-pull-request')).not.toBeNull();
 
     flushSync(() => {
@@ -253,8 +254,8 @@ describe('SessionList PR badge', () => {
 
     const selectedRow = container.querySelector('[data-sidebar-session-id="ready-session"]');
     expect(selectedRow?.querySelector('[data-session-mergeable-pill]')).toBeNull();
-    expect(selectedRow?.querySelector('.text-code-added')).toBeNull();
-    expect(selectedRow?.querySelector('.text-code-removed')).toBeNull();
+    expect(selectedRow?.querySelector('.text-github-addition')).toBeNull();
+    expect(selectedRow?.querySelector('.text-github-deletion')).toBeNull();
     expect(selectedRow?.querySelector('.lucide-git-pull-request')).not.toBeNull();
   });
 
@@ -373,5 +374,66 @@ describe('SessionList PR badge', () => {
 
     expect(container.querySelector('[data-session-working-indicator]')).toBeNull();
     expect(container.querySelector('[data-working-grid]')).toBeNull();
+  });
+
+  it('keeps a folded repo group telling what its hidden sessions are doing', () => {
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    const row = (sessionId: string, status: Partial<Record<string, boolean>>) => ({
+      sessionId,
+      title: sessionId,
+      repoFullName: 'loro-dev/lody',
+      branchName: sessionId,
+      latestMessageAt: '2026-04-22T00:00:00.000Z',
+      addedLines: 0,
+      deletedLines: 0,
+      isWorking: false,
+      hasUnreadMessages: false,
+      isOffline: false,
+      isWaitingPermission: false,
+      ...status,
+    });
+    const renderList = (collapsed: boolean, sessions: ReturnType<typeof row>[]) => {
+      flushSync(() => {
+        root?.render(
+          React.createElement(
+            Provider,
+            null,
+            React.createElement(SessionList, {
+              sessions,
+              repos: [{ repoFullName: 'loro-dev/lody', collapsed }],
+              onToggleRepoCollapsed: () => undefined,
+            })
+          )
+        );
+      });
+      return container?.querySelector('[data-sidebar-group-key="loro-dev/lody"]');
+    };
+
+    const sessions = [
+      row('running', { isWorking: true }),
+      row('finished', { hasUnreadMessages: true }),
+      row('read'),
+    ];
+    let header = renderList(false, sessions);
+    expect(header?.querySelector('[data-sidebar-group-activity]')).toBeNull();
+
+    header = renderList(true, sessions);
+    expect(container.querySelectorAll('[data-sidebar-session-id]')).toHaveLength(0);
+    const mark = header?.querySelector('[data-sidebar-group-activity]');
+    expect(mark?.querySelector('[data-working-grid]')).not.toBeNull();
+    expect(mark?.getAttribute('aria-label')).toBe('1 working · 1 unread');
+
+    // Work stops with nothing new to read: like a row, the group holds its grid
+    // briefly in case the unread write is still on its way, then goes quiet.
+    vi.useFakeTimers();
+    header = renderList(true, [row('read')]);
+    expect(header?.querySelector('[data-working-grid]')).not.toBeNull();
+    act(() => {
+      vi.advanceTimersByTime(WORKING_HAND_OVER_MS);
+    });
+    expect(header?.querySelector('[data-session-row-indicator]')).toBeNull();
+    vi.useRealTimers();
   });
 });

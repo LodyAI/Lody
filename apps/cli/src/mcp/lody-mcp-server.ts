@@ -119,6 +119,7 @@ import {
   LodyOperationStoreError,
   runWithOperationStoreBusyRetry,
 } from '@/orchestration/operation-store';
+import { registerScheduleTools } from './schedule-tools';
 import { truncateSessionHistoryText as truncateUtf8HeadTail } from '@/mcp/session-history-page';
 import { buildSessionHistoryForReader } from '@/mcp/session-history-handler';
 import { version as cliVersion } from '@/pkg';
@@ -3554,6 +3555,16 @@ export function buildLodyMcpServer(): McpServer {
       ].join(' '),
     }
   );
+  registerScheduleTools(server, {
+    execute: async (command) => {
+      const ctx = getSessionContext();
+      const { sendScheduleCommand } = await import('@/lib/schedules/schedule-command-client');
+      return sendScheduleCommand(command, {
+        workspace: getMcpWorkspaceId(ctx),
+        requesterSessionId: ctx.sessionId,
+      });
+    },
+  });
 
   server.registerTool(
     FEEDBACK_TOOL_NAME,

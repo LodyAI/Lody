@@ -8,6 +8,7 @@ import {
   sessionMetaCacheAtom,
   sideSessionsAtomFamily,
 } from '../src/atoms/doc-meta';
+import { sessionHasUnreadMessages } from '../src/lib/session-read-receipt';
 
 const sessionId = 'session-with-ci' as SessionId;
 const roomId = getSessionRoomId(sessionId);
@@ -24,6 +25,17 @@ const session: SessionMeta = {
 };
 
 describe('sessionListAtom', () => {
+  it('updates unread presentation when only the tab closure changes', () => {
+    const store = createStore();
+    const unread = { ...session, lastMessageAt: 200, lastReadAt: 100 };
+    store.set(sessionMetaCacheAtom, { [roomId]: unread });
+    expect(sessionHasUnreadMessages(store.get(sessionListAtom)[0]!)).toBe(true);
+    store.set(sessionMetaCacheAtom, { [roomId]: { ...unread, isTabClosed: true } });
+    expect(sessionHasUnreadMessages(store.get(sessionListAtom)[0]!)).toBe(false);
+    store.set(sessionMetaCacheAtom, { [roomId]: { ...unread, isTabClosed: false } });
+    expect(sessionHasUnreadMessages(store.get(sessionListAtom)[0]!)).toBe(true);
+  });
+
   it('publishes a new list when only pullRequestState changes', () => {
     const store = createStore();
     store.set(sessionMetaCacheAtom, { [roomId]: session });

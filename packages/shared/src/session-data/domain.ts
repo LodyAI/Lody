@@ -16,6 +16,8 @@ import type { SessionTurnTokenUsage } from './token-usage';
 export type SessionTurnRole = 'user' | 'assistant' | 'system';
 
 export type SessionTurnStatus =
+  /** Materialized by a schedule but inert until `latestUserMsgId` commits it. */
+  | 'prepared'
   | 'pending'
   | 'pending_apply'
   | 'delivery_unknown'

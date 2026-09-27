@@ -208,7 +208,7 @@ export function getChatComposerTextareaClassName({
           isMobile ? 'min-h-[24px]' : 'min-h-[48px]'
         ),
     'focus-visible:outline-hidden focus-visible:ring-0 focus-visible:ring-offset-0',
-    'text-input-foreground placeholder:text-input-placeholder/40'
+    'text-input-foreground placeholder:text-input-placeholder/85'
   );
 }
 
@@ -629,7 +629,7 @@ export function ChatComposer({
   const dialogTextareaClassName = cn(
     'input-scrollbar min-h-[120px] resize-none px-4 py-3 text-sm leading-6 transition-shadow sm:min-h-[120px]',
     'w-full rounded-2xl border-transparent bg-transparent focus-visible:ring-0 focus-visible:ring-offset-0',
-    'text-input-foreground placeholder:text-input-placeholder/40'
+    'text-input-foreground placeholder:text-input-placeholder/85'
   );
 
   const actionBaseClassName = cn(
@@ -704,7 +704,9 @@ export function ChatComposer({
         ) : null}
 
         {!isDialog ? (
-          <div className={cn('flex flex-col', isLanding ? 'gap-2' : 'gap-1')}>
+          // The `@` menu opens against this frame, above the chip row, so it lines
+          // up with the composer and never cuts a chip in half.
+          <div data-mention-frame="" className={cn('flex flex-col', isLanding ? 'gap-2' : 'gap-1')}>
             {/* Top selector (repo, branch) - shown outside and above the input box */}
             {topSelector ? (
               <div className="flex w-full min-w-0 select-none items-center gap-1">
@@ -1163,7 +1165,8 @@ export function ChatComposer({
           >
             <Dialog.Content
               closeButton={false}
-              className="flex h-[85vh] max-h-[85vh] max-w-3xl flex-col gap-0 overflow-hidden p-0"
+              width="48rem"
+              className="flex h-[85vh] max-h-[85vh] flex-col gap-0 overflow-hidden p-0"
             >
               {previewPastedTextDraft ? (
                 <>

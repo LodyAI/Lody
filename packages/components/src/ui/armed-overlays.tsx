@@ -1,11 +1,12 @@
 import * as React from 'react';
 import { ContextMenu as UiContextMenu } from '@lody/ui/context-menu';
+import { Menu as UiMenu } from '@lody/ui/menu';
 import { Popover as UiPopover } from '@lody/ui/popover';
 import { Tooltip as UiTooltip } from '@lody/ui/tooltip';
 import { InteractionArmedProvider, useInteractionArmed } from './interaction-arm';
 
 /**
- * `@lody/ui`'s `Tooltip`, `Popover` and `ContextMenu` for surfaces inside an
+ * `@lody/ui`'s `Tooltip`, `Popover`, `Menu` and `ContextMenu` for surfaces inside an
  * `useInteractionArm` boundary (conversation rows). Armed, each part is the
  * package's own. Unarmed, a root renders only its children, a trigger renders
  * the element Base UI would have rendered (its `render` element or default tag,
@@ -170,4 +171,11 @@ export const ContextMenu = {
     style: { display: 'contents' },
   }),
   Content: armedContent(UiContextMenu.Content, 'ContextMenuContent'),
+};
+
+export const Menu = {
+  ...UiMenu,
+  Root: armedRoot(UiMenu.Root, 'MenuRoot'),
+  Trigger: armedTrigger(UiMenu.Trigger, 'MenuTrigger', 'button'),
+  Content: armedContent(UiMenu.Content, 'MenuContent'),
 };

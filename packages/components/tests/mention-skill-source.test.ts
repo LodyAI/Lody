@@ -240,6 +240,24 @@ describe('selectSkillMentionCandidates', () => {
     const result = selectSkillMentionCandidates(items, 'co', null);
     expect(result[0]?.token).toBe('code-review');
   });
+
+  it('finds a skill by its own folder, but never by the directory it sits in', () => {
+    const nested = buildSkillMentionItems([
+      {
+        scope: 'project',
+        dir: '.claude/skills',
+        truncated: false,
+        skills: [
+          skill({ name: 'pdf', relativePath: '.claude/skills/documents/pdf/SKILL.md' }),
+          skill({ name: 'lint', relativePath: '.claude/skills/lint/SKILL.md' }),
+        ],
+      },
+    ]);
+    expect(selectSkillMentionCandidates(nested, 'documents', null).map((i) => i.token)).toEqual([
+      'pdf',
+    ]);
+    expect(selectSkillMentionCandidates(nested, 'claude', null)).toEqual([]);
+  });
 });
 
 describe('hydrateSkillMentionsFromText', () => {
@@ -264,11 +282,7 @@ describe('buildSkillMentionRewrites', () => {
   });
 
   it('expands global skill tokens to absolute skill paths when present', () => {
-    const result = expandInText(
-      'run $global-only',
-      items,
-      new Set(['~/.claude/skills'])
-    );
+    const result = expandInText('run $global-only', items, new Set(['~/.claude/skills']));
 
     expect(result).toBe(
       'run use /global-only [Skill Path](/home/user/.claude/skills/global-only/SKILL.md)'
@@ -276,11 +290,7 @@ describe('buildSkillMentionRewrites', () => {
   });
 
   it('uses the selected provider directories before resolving duplicate tokens', () => {
-    const result = expandInText(
-      'run $code-review',
-      items,
-      new Set(['.claude/skills'])
-    );
+    const result = expandInText('run $code-review', items, new Set(['.claude/skills']));
 
     expect(result).toBe('run use /code-review [Skill Path](.claude/skills/code-review/SKILL.md)');
   });

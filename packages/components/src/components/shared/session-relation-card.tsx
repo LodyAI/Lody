@@ -1,7 +1,69 @@
 import type { ElementType, ReactNode } from 'react';
 import { ArrowUpRight, GitBranchPlus } from 'lucide-react';
+import * as stylex from '@stylexjs/stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { space } from '@lody/ui/tokens/scales.stylex';
 
-import { cn } from '@/lib/utils';
+import { withClassName } from '@/lib/stylex';
+
+const styles = stylex.create({
+  root: { minWidth: 0 },
+  action: {
+    display: 'flex',
+    alignItems: 'center',
+    width: '100%',
+    minWidth: 0,
+    height: '32px',
+    gap: space[2],
+    paddingInline: '10px',
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: `color-mix(in oklab, ${colors.separator} 60%, transparent)`,
+    borderRadius: '6px',
+    backgroundColor: {
+      default: 'color-mix(in oklab, hsl(var(--muted)) 20%, transparent)',
+      ':hover': 'color-mix(in oklab, hsl(var(--muted)) 50%, transparent)',
+      ':disabled:hover': 'color-mix(in oklab, hsl(var(--muted)) 20%, transparent)',
+    },
+    textAlign: 'left',
+    fontSize: '12px',
+    lineHeight: '16px',
+    color: colors.secondaryLabel,
+    transitionProperty: 'color, background-color, border-color, text-decoration-color, fill, stroke',
+    transitionDuration: '150ms',
+    transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
+    cursor: { default: 'pointer', ':disabled': 'default' },
+  },
+  icon: { width: '14px', height: '14px', flexShrink: 0 },
+  label: { flexShrink: 0 },
+  title: {
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontWeight: 500,
+    color: colors.label,
+  },
+  detail: {
+    minWidth: 0,
+    flexGrow: 1,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  end: { display: 'flex', alignItems: 'center', flexShrink: 0, gap: space[2], marginLeft: 'auto' },
+  actionIcon: {
+    width: '14px',
+    height: '14px',
+    opacity: {
+      default: 0.6,
+      ':is([data-session-relation-action]:hover *)': 1,
+    },
+    transitionProperty: 'opacity',
+    transitionDuration: '150ms',
+    transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
+  },
+});
 
 export function SessionRelationCard({
   label,
@@ -30,26 +92,24 @@ export function SessionRelationCard({
   // One line: the info bar's related-Sessions chip is the persistent index,
   // so the in-stream record only needs what happened, to whom, and a way there.
   return (
-    <div data-session-relation-card={relation} className={cn('min-w-0', className)}>
+    <div data-session-relation-card={relation} {...withClassName(stylex.props(styles.root), className)}>
       <button
         type="button"
+        data-session-relation-action
         disabled={!onAction}
         onClick={onAction}
         title={sessionTitle}
         aria-label={`${actionLabel}: ${sessionTitle}`}
-        className="group flex h-8 w-full min-w-0 items-center gap-2 rounded-md border border-border/60 bg-muted/20 px-2.5 text-left text-xs text-muted-foreground transition-colors hover:bg-muted/50 disabled:cursor-default disabled:hover:bg-muted/20"
+        {...stylex.props(styles.action)}
       >
-        <Icon className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-        <span className="shrink-0">{label}</span>
-        <span className="min-w-0 truncate font-medium text-foreground">{sessionTitle}</span>
-        {detail ? <span className="min-w-0 flex-1 truncate">· {detail}</span> : null}
-        <span className="ml-auto flex shrink-0 items-center gap-2">
+        <Icon {...stylex.props(styles.icon)} aria-hidden="true" />
+        <span {...stylex.props(styles.label)}>{label}</span>
+        <span {...stylex.props(styles.title)}>{sessionTitle}</span>
+        {detail ? <span {...stylex.props(styles.detail)}>· {detail}</span> : null}
+        <span {...stylex.props(styles.end)}>
           {status}
           {onAction ? (
-            <ActionIcon
-              className="h-3.5 w-3.5 opacity-60 transition-opacity group-hover:opacity-100"
-              aria-hidden="true"
-            />
+            <ActionIcon {...stylex.props(styles.actionIcon)} aria-hidden="true" />
           ) : null}
         </span>
       </button>

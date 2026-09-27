@@ -1,5 +1,6 @@
 import { existsSync } from 'node:fs';
 import { expect, type Page } from '@playwright/test';
+import { openSidebarArchive } from './sidebar-footer.js';
 
 type TerminalSnapshot = {
   terminalId: string;
@@ -149,7 +150,7 @@ export class WorkSessionPage {
       })
       .toEqual([]);
 
-    await this.page.getByRole('button', { name: /^(Archive|归档)$/u, exact: true }).click();
+    await openSidebarArchive(this.page);
     await expect(this.page).toHaveURL(/#\/local\/archive(?:\?.*)?$/u);
     const archivedRow = this.page.locator(`[data-id="archive-session:${resources.sessionId}"]`);
     await expect(archivedRow).toBeVisible({ timeout: 30_000 });

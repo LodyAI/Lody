@@ -1,11 +1,94 @@
 import { Check, ChevronDown, Folder, GitBranch } from 'lucide-react';
+import * as stylex from '@stylexjs/stylex';
 import { useTranslation } from 'react-i18next';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { space } from '@lody/ui/tokens/scales.stylex';
 
-import { cn } from '@/lib/utils';
+import { withClassName } from '@/lib/stylex';
 import { Button } from '@lody/ui/button';
 import { Menu } from '@/ui/menu';
 import { Tooltip } from '@lody/ui/tooltip';
 import { Checkbox } from '@lody/ui/checkbox';
+
+const styles = stylex.create({
+  checkboxPill: {
+    display: 'flex',
+    alignItems: 'center',
+    height: '24px',
+    flexShrink: 0,
+    gap: space[1.5],
+    paddingInline: space[2],
+    borderRadius: '6px',
+    backgroundColor: {
+      default: 'hsl(var(--hover))',
+      ':hover': 'color-mix(in oklab, hsl(var(--hover)) 80%, transparent)',
+    },
+    fontSize: '12px',
+    lineHeight: '16px',
+    fontWeight: 400,
+    color: { default: colors.secondaryLabel, ':hover': colors.label },
+    userSelect: 'none',
+    cursor: 'pointer',
+    transitionProperty: 'color, background-color, border-color, text-decoration-color, fill, stroke',
+    transitionDuration: '150ms',
+    transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
+  },
+  checkboxPillDisabled: {
+    cursor: 'not-allowed',
+    backgroundColor: { default: 'hsl(var(--hover))', ':hover': 'hsl(var(--hover))' },
+    color: { default: colors.secondaryLabel, ':hover': colors.secondaryLabel },
+  },
+  checkboxPillContext: {
+    borderRadius: 0,
+    backgroundColor: {
+      default: 'transparent',
+      ':hover': `color-mix(in oklab, ${colors.label} 6%, transparent)`,
+    },
+    color: {
+      default: `color-mix(in oklab, ${colors.label} 80%, transparent)`,
+      ':hover': colors.label,
+    },
+  },
+  checkboxPillContextDisabled: {
+    color: {
+      default: `color-mix(in oklab, ${colors.label} 80%, transparent)`,
+      ':hover': `color-mix(in oklab, ${colors.label} 80%, transparent)`,
+    },
+  },
+  tooltipTrigger: { display: 'inline-flex' },
+  tooltipCopy: { maxWidth: '288px' },
+  readOnlyTrigger: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: '28px',
+    gap: space[1.5],
+    paddingInline: '10px',
+    borderRadius: '8px',
+    fontSize: '13px',
+    lineHeight: 1,
+    fontWeight: 500,
+    letterSpacing: '-0.01em',
+    color: colors.secondaryLabel,
+    opacity: 0.8,
+    whiteSpace: 'nowrap',
+    userSelect: 'none',
+  },
+  selectedIcon: { width: '14px', height: '14px', flexShrink: 0 },
+  selectedLabel: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: '12px',
+    lineHeight: 1.25,
+    fontWeight: 500,
+  },
+  chevron: { width: '14px', height: '14px', flexShrink: 0, opacity: 0.7 },
+  optionRow: { display: 'flex', minWidth: 0, alignItems: 'center', gap: space[2] },
+  optionIcon: { width: '14px', height: '14px', flexShrink: 0, opacity: 0.8 },
+  optionLabel: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  checkIcon: { width: '12px', height: '12px', opacity: 0.7 },
+});
 
 export type WorkdirMode = 'local' | 'worktree';
 
@@ -27,6 +110,8 @@ export interface WorktreeCheckboxPillProps {
   onCheckedChange?: (checked: boolean) => void;
   disabled?: boolean;
   disabledReason?: string;
+  /** Flat composer-context presentation; the default is the standalone pill. */
+  surface?: 'default' | 'context';
   className?: string;
 }
 
@@ -35,15 +120,19 @@ export function WorktreeCheckboxPill({
   onCheckedChange,
   disabled = false,
   disabledReason,
+  surface = 'default',
   className,
 }: WorktreeCheckboxPillProps) {
   const { t } = useTranslation();
   const control = (
     <label
-      className={cn(
-        'flex h-6 shrink-0 select-none items-center gap-1.5 rounded-md bg-hover px-2 text-xs font-normal',
-        'text-muted-foreground transition-colors',
-        disabled ? 'cursor-not-allowed' : 'cursor-pointer hover:bg-hover/80 hover:text-foreground',
+      {...withClassName(
+        stylex.props(
+          styles.checkboxPill,
+          disabled && styles.checkboxPillDisabled,
+          surface === 'context' && styles.checkboxPillContext,
+          surface === 'context' && disabled && styles.checkboxPillContextDisabled
+        ),
         className
       )}
     >
@@ -61,9 +150,9 @@ export function WorktreeCheckboxPill({
 
   return (
     <Tooltip.Root>
-      <Tooltip.Trigger delay={400} render={<span className="inline-flex">{control}</span>}/>
-      <Tooltip.Content side="top" className="max-w-72">
-        {disabledReason}
+      <Tooltip.Trigger delay={400} render={<span {...stylex.props(styles.tooltipTrigger)}>{control}</span>} />
+      <Tooltip.Content side="top">
+        <span {...stylex.props(styles.tooltipCopy)}>{disabledReason}</span>
       </Tooltip.Content>
     </Tooltip.Root>
   );
@@ -107,29 +196,30 @@ export function WorkdirModeSelector({
   ];
   const selectedOption = options.find((option) => option.value === selectedMode) ?? options[0]!;
 
-  const trigger = (
-    <Button
-      type="button"
-      variant="ghost"
-      size="small"
-      disabled={readOnly}
-      aria-label={t('chat.workdir.selectorLabel', 'Working directory mode')}
-      className={cn(
-        'min-w-0 shrink select-none',
-        'focus-visible:ring-0 focus-visible:ring-offset-0',
-        readOnly && 'cursor-default opacity-80'
-      )}
-    >
-      <SelectedIcon className="h-3.5 w-3.5 shrink-0" />
-      <span className="truncate text-xs font-medium leading-tight">{selectedOption.label}</span>
-      {!readOnly ? <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-70" /> : null}
-    </Button>
+  const triggerContent = (
+    <>
+      <SelectedIcon {...stylex.props(styles.selectedIcon)} />
+      <span {...stylex.props(styles.selectedLabel)}>{selectedOption.label}</span>
+      {!readOnly ? <ChevronDown {...stylex.props(styles.chevron)} /> : null}
+    </>
   );
 
   if (readOnly) {
     return (
       <Tooltip.Root>
-        <Tooltip.Trigger delay={500} render={<span className="inline-flex">{trigger}</span>}/>
+        <Tooltip.Trigger
+          delay={500}
+          render={
+            <span {...stylex.props(styles.tooltipTrigger)}>
+              <span
+                {...stylex.props(styles.readOnlyTrigger)}
+                aria-label={t('chat.workdir.selectorLabel', 'Working directory mode')}
+              >
+                {triggerContent}
+              </span>
+            </span>
+          }
+        />
         <Tooltip.Content side="top">
           {t('chat.workdir.readOnly', 'Working directory mode cannot be changed after creation.')}
         </Tooltip.Content>
@@ -137,10 +227,21 @@ export function WorkdirModeSelector({
     );
   }
 
+  const trigger = (
+    <Button
+      type="button"
+      variant="ghost"
+      size="small"
+      aria-label={t('chat.workdir.selectorLabel', 'Working directory mode')}
+    >
+      {triggerContent}
+    </Button>
+  );
+
   return (
     <Menu.Root modal={modal}>
       <Menu.Trigger render={trigger}>{trigger}</Menu.Trigger>
-      <Menu.Content align="end" className="min-w-[180px]">
+      <Menu.Content align="end" width="compact">
         {options.map((option) => {
           const Icon = modeIcon[option.value];
           const item = (
@@ -148,13 +249,12 @@ export function WorkdirModeSelector({
               key={option.value}
               disabled={option.disabled}
               onClick={() => onModeChange(option.value)}
-              className="justify-between"
             >
-              <span className="flex min-w-0 items-center gap-2">
-                <Icon className="h-3.5 w-3.5 shrink-0 opacity-80" />
-                <span className="truncate">{option.label}</span>
+              <span {...stylex.props(styles.optionRow)}>
+                <Icon {...stylex.props(styles.optionIcon)} />
+                <span {...stylex.props(styles.optionLabel)}>{option.label}</span>
               </span>
-              {option.value === selectedMode ? <Check className="h-3 w-3 opacity-70" /> : null}
+              {option.value === selectedMode ? <Check {...stylex.props(styles.checkIcon)} /> : null}
             </Menu.Item>
           );
 

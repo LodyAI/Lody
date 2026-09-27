@@ -24,8 +24,8 @@ import { Skeleton } from '@lody/ui/skeleton';
 import { Switch } from '@lody/ui/switch';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { focus, radius, space } from '@lody/ui/tokens/scales.stylex';
-import { settingsCatalog as catalog, settingsSurface as surface } from './surface';
-import { settingsRecordsCard } from './compact-layout';
+import { settingsSurface as surface } from './surface';
+import { SettingsEmptyList, settingsRecordsCard } from './compact-layout';
 import { settingsType as type } from './type.stylex';
 
 const styles = stylex.create({
@@ -359,11 +359,9 @@ function ShareManagementList({
             </div>
           )}
           {visible.length === 0 && (
-            <div {...stylex.props(catalog.empty)}>
-              <p {...stylex.props(catalog.emptyText)}>
-                {t('settings.shares.empty', 'No published shares.')}
-              </p>
-            </div>
+            <SettingsEmptyList>
+              {t('settings.shares.empty', 'No published shares.')}
+            </SettingsEmptyList>
           )}
           {/* One card of ruled rows: a list of records is one surface, and a
               title keeps the card's whole width instead of a column of it. */}

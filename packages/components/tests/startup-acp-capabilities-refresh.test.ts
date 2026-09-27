@@ -34,7 +34,7 @@ describe('runStartupAcpCapabilitiesRefresh', () => {
         }
       },
       onError,
-    });
+    }, { refreshedConfigKeys: new Set() });
 
     expect(refreshed).toEqual(expect.arrayContaining(['first', 'second', 'third']));
     expect(refreshed.indexOf('second')).toBeGreaterThan(refreshed.indexOf('first'));
@@ -58,7 +58,7 @@ describe('runStartupAcpCapabilitiesRefresh', () => {
         refreshed.push({ machineId, configId: agentConfig.id });
       },
       onError: (_error, context) => errors.push(context),
-    });
+    }, { refreshedConfigKeys: new Set() });
 
     expect(refreshed).toEqual([]);
     expect(errors).toEqual([{ machineId: sourceMachineId, configId: 'foreign-config' }]);
@@ -82,7 +82,7 @@ describe('runStartupAcpCapabilitiesRefresh', () => {
           activeMachines -= 1;
         },
       },
-      { machineConcurrency: 2 }
+      { refreshedConfigKeys: new Set(), machineConcurrency: 2 }
     );
 
     await vi.waitFor(() => expect(releases).toHaveLength(2));
@@ -110,7 +110,7 @@ describe('runStartupAcpCapabilitiesRefresh', () => {
       refreshAgentConfig: async (_machineId, agentConfig) => {
         refreshed.push(agentConfig.id);
       },
-    });
+    }, { refreshedConfigKeys: new Set() });
 
     expect(listed).toEqual([onlineMachine]);
     expect(refreshed).toEqual(['machine-online-agent']);
@@ -129,7 +129,7 @@ describe('runStartupAcpCapabilitiesRefresh', () => {
         refreshed.push(agentConfig.id);
         online = false;
       },
-    });
+    }, { refreshedConfigKeys: new Set() });
 
     expect(refreshed).toEqual(['first']);
   });
@@ -163,7 +163,7 @@ describe('runStartupAcpCapabilitiesRefresh', () => {
         },
         onError,
       },
-      { signal: abortController.signal }
+      { refreshedConfigKeys: new Set(), signal: abortController.signal }
     );
 
     await firstStarted;
@@ -172,5 +172,48 @@ describe('runStartupAcpCapabilitiesRefresh', () => {
 
     expect(refreshed).toEqual(['first']);
     expect(onError).not.toHaveBeenCalled();
+  });
+  it('does not re-probe configs an aborted pass already refreshed, and retries the ones that failed', async () => {
+    const machineId = 'machine-reconnecting' as MachineId;
+    const refreshedConfigKeys = new Set<string>();
+    const configs = [
+      config('answered', machineId),
+      config('failed', machineId),
+      config('never-reached', machineId),
+    ];
+    const attempts: string[] = [];
+    const abortController = new AbortController();
+    let markSecondFailed!: () => void;
+    const secondFailed = new Promise<void>((resolve) => {
+      markSecondFailed = resolve;
+    });
+
+    const ports = {
+      listMachineIds: async () => [machineId],
+      isMachineOnline: () => true,
+      listAgentConfigs: async () => configs,
+      refreshAgentConfig: async (_machineId: MachineId, agentConfig: AgentConfigMeta) => {
+        attempts.push(agentConfig.id);
+        if (agentConfig.id === 'failed') {
+          markSecondFailed();
+          throw new Error('probe failed');
+        }
+      },
+      onError: () => {},
+    };
+
+    const firstPass = runStartupAcpCapabilitiesRefresh(ports, {
+      refreshedConfigKeys,
+      signal: abortController.signal,
+    });
+    await secondFailed;
+    abortController.abort();
+    await firstPass;
+
+    expect(attempts).toEqual(['answered', 'failed']);
+
+    await runStartupAcpCapabilitiesRefresh(ports, { refreshedConfigKeys });
+
+    expect(attempts).toEqual(['answered', 'failed', 'failed', 'never-reached']);
   });
 });

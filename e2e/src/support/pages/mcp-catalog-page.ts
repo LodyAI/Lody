@@ -1,5 +1,6 @@
 import { expect, type Locator, type Page } from '@playwright/test';
 import { type McpCatalogAcpEvent, McpCatalogFixture } from '../fixtures/mcp-catalog-fixture.js';
+import { openSidebarArchive } from './sidebar-footer.js';
 
 const RESPONSE_TEXT = 'Synthetic MCP selection received.';
 
@@ -162,7 +163,7 @@ export class McpCatalogPage {
       this.fixture.expectAgentExited(event.pid),
       this.fixture.expectMcpExited(mcpProcess.pid),
     ]);
-    await this.page.getByRole('button', { name: /^(Archive|归档)$/u, exact: true }).click();
+    await openSidebarArchive(this.page);
     await expect(this.page).toHaveURL(/#\/local\/archive(?:\?.*)?$/u);
     const archivedRow = this.page.locator(`[data-id="archive-session:${sessionId}"]`);
     await expect(archivedRow).toBeVisible({ timeout: 30_000 });

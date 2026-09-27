@@ -1169,8 +1169,8 @@ function DiffViewerImpl({
           )}
           {(additions > 0 || deletions > 0) && (
             <div className="flex shrink-0 items-center gap-1.5 text-xs">
-              {additions > 0 && <span className="text-code-added">+{additions}</span>}
-              {deletions > 0 && <span className="text-code-removed">-{deletions}</span>}
+              {additions > 0 && <span className="text-github-addition">+{additions}</span>}
+              {deletions > 0 && <span className="text-github-deletion">-{deletions}</span>}
             </div>
           )}
         </CollapsibleCardHeader>

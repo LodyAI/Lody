@@ -13,7 +13,6 @@ import {
   parseRateLimitEntryKey,
 } from '@lody/shared';
 import { toast } from '@/lib/toast';
-import { Badge } from '@lody/ui/badge';
 import { Button } from '@lody/ui/button';
 import { AlertDialog } from '@/ui/dialog';
 import { withClassName } from '@/lib/stylex';
@@ -24,7 +23,7 @@ import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
 import { useMachineAcpBinaryProgress } from '@/hooks/use-machine-acp-binary-progress';
 import { AgentIcon } from '@/components/icons/agent-icon';
 import { useAcpSelectorOptions } from '@/hooks/use-acp-selector-options';
-import { formatCompactRelativeTime } from '@/lib/format-relative-time';
+import { formatLocalizedRelativeTime } from '@/lib/format-relative-time';
 import { CodexResetForecastChip } from '@/components/codex-reset/codex-reset-forecast-entry';
 import { canShowCodexResetForecast } from '@/lib/codex-reset-forecast';
 import {
@@ -61,7 +60,6 @@ const styles = stylex.create({
   glyph: { width: '16px', height: '16px' },
   glyphList: { width: '20px', height: '20px' },
   body: { flexGrow: 1, minWidth: 0 },
-  badge: { textTransform: 'capitalize' },
   trailing: {
     display: 'flex',
     flexShrink: 0,
@@ -227,7 +225,14 @@ export function ProviderRow({
   // Codex-only: the third-party reset forecast for OpenAI's own usage limits.
   const showResetForecast = canShowCodexResetForecast({ cliType, agentType, config });
 
-  const typeBadge = cliType === 'builtin' ? null : cliType === 'custom' ? 'Custom' : 'Registry';
+  // What kind of provider this is, when it is not one Lody ships: a fact of the
+  // meta line, in words, not a pill on every row.
+  const kind =
+    cliType === 'builtin'
+      ? null
+      : cliType === 'custom'
+        ? t('settings.agent.dialog.group.custom', 'Custom')
+        : t('settings.agent.dialog.group.registry', 'ACP Provider');
 
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -278,6 +283,7 @@ export function ProviderRow({
   const compact = variant === 'card';
   const facts = compact
     ? [
+        kind,
         defaultModel,
         usage && usage.conversations > 0
           ? t('settings.agent.provider.conversationCount', '{{count}} conversations', {
@@ -285,13 +291,13 @@ export function ProviderRow({
             })
           : null,
         usage?.lastUsedAt != null
-          ? t('settings.agent.provider.lastUsed', 'Used {{ago}} ago', {
-              ago: formatCompactRelativeTime(usage.lastUsedAt),
+          ? t('settings.agent.provider.lastUsed', 'Used {{ago}}', {
+              ago: formatLocalizedRelativeTime(usage.lastUsedAt, t),
             })
           : null,
         envCount > 0 ? t('settings.agent.provider.envCount', { count: envCount }) : null,
       ].filter((fact): fact is string => fact != null)
-    : [];
+    : [kind].filter((fact): fact is string => fact != null);
   return (
     <div {...withClassName(stylex.props(styles.root), className)}>
       <div {...stylex.props(stylex.defaultMarker(), styles.row, surface.pressableLine)}>
@@ -313,11 +319,6 @@ export function ProviderRow({
           <div {...stylex.props(styles.body)}>
             <div {...stylex.props(catalog.titleLine)}>
               <span {...stylex.props(catalog.name)}>{config.name}</span>
-              {typeBadge ? (
-                <Badge>
-                  <span {...stylex.props(styles.badge)}>{typeBadge}</span>
-                </Badge>
-              ) : null}
             </div>
             {facts.length > 0 ? (
               <span {...stylex.props(catalog.meta)}>

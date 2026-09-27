@@ -474,8 +474,11 @@ const VirtualFileTreeRow = memo(function VirtualFileTreeRow({
         {visibleMenuItems.map((menuItem) => {
           const ItemIcon = menuItem.icon;
           return (
-            <ContextMenu.Item key={menuItem.id} onClick={() => menuItem.run(item.id)}>
-              <ItemIcon className="h-3.5 w-3.5" aria-hidden="true" />
+            <ContextMenu.Item
+              key={menuItem.id}
+              icon={<ItemIcon aria-hidden="true" />}
+              onClick={() => menuItem.run(item.id)}
+            >
               {menuItem.label}
             </ContextMenu.Item>
           );

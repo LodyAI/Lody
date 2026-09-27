@@ -1,17 +1,29 @@
-import { lazy, memo, Suspense, useMemo, useState } from 'react';
-import { Eye, EyeOff, WrapText } from 'lucide-react';
+import {
+  type ComponentProps,
+  type CSSProperties,
+  lazy,
+  memo,
+  Suspense,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
+import { Check, Copy, Eye, EyeOff, WrapText } from 'lucide-react';
 import { useAtomValue } from 'jotai';
 import { useTranslation } from 'react-i18next';
-import {
-  CodeBlock,
-  CodeBlockContainer,
-  CodeBlockCopyButton,
-  type CustomRendererProps,
-} from 'streamdown';
 import { conversationFontSizeAtom } from '@/atoms/settings';
+import { writeTextToClipboard } from '@/lib/clipboard';
+import { useMarkdownCodeTokens, type MarkdownCodeToken } from './markdown-code-highlight';
+
+export type MarkdownCodeBlockProps = {
+  code: string;
+  isIncomplete: boolean;
+  language: string;
+  meta: string | undefined;
+};
 
 const NAMED_PATH_PATTERN = /(?:title|filename|path|file)\s*=\s*(?:"([^"]+)"|'([^']+)'|(\S+))/iu;
-const HIGHLIGHT_LANG_PATTERN = /\bhighlight=(\S+)/iu;
 const MARKDOWN_FENCE_LANGUAGES = new Set(['md', 'markdown', 'mdx', 'gfm', 'mdown', 'mkd']);
 
 const MarkdownPreview = lazy(() =>
@@ -42,21 +54,101 @@ export function parseMarkdownCodeBlockLabel(language: string, meta: string | und
   return parseMarkdownCodeBlockPath(meta) ?? language.trim();
 }
 
-export function parseMarkdownCodeHighlightLanguage(
-  language: string,
-  meta: string | undefined
-): string {
-  const highlight = meta?.match(HIGHLIGHT_LANG_PATTERN)?.[1];
-  if (highlight) return highlight;
-  return language.trim() || 'text';
-}
-
 export function isMarkdownCodeFence(language: string, meta: string | undefined): boolean {
   const lang = language.trim().toLowerCase();
   if (MARKDOWN_FENCE_LANGUAGES.has(lang)) return true;
   const path = parseMarkdownCodeBlockPath(meta);
   return path != null && /\.(?:md|markdown|mdx|mdown|mkd)$/iu.test(path);
 }
+
+const COPY_FEEDBACK_MS = 2000;
+
+export function CodeBlockContainer({
+  language,
+  isIncomplete,
+  ...props
+}: ComponentProps<'div'> & { language: string; isIncomplete: boolean }) {
+  return (
+    <div
+      data-incomplete={isIncomplete || undefined}
+      data-language={language}
+      data-streamdown="code-block"
+      {...props}
+    />
+  );
+}
+
+export function CodeBlockCopyButton({ code }: { code: string }) {
+  const { t } = useTranslation();
+  const [copied, setCopied] = useState(false);
+  const timeoutRef = useRef(0);
+  const label = t('common.copyCode', 'Copy code');
+
+  useEffect(() => () => window.clearTimeout(timeoutRef.current), []);
+
+  return (
+    <button
+      type="button"
+      data-streamdown="code-block-copy-button"
+      aria-label={label}
+      title={copied ? t('common.copied', 'Copied') : label}
+      onClick={() => {
+        void writeTextToClipboard(code).then((ok) => {
+          if (!ok) return;
+          setCopied(true);
+          window.clearTimeout(timeoutRef.current);
+          timeoutRef.current = window.setTimeout(() => setCopied(false), COPY_FEEDBACK_MS);
+        });
+      }}
+    >
+      {copied ? <Check size={14} /> : <Copy size={14} />}
+    </button>
+  );
+}
+
+const tokenStyle = ({ color, htmlStyle }: MarkdownCodeToken): CSSProperties | undefined => {
+  if (!htmlStyle) return color ? { color } : undefined;
+  return {
+    color: htmlStyle.color ?? color,
+    fontStyle: htmlStyle['font-style'],
+    fontWeight: htmlStyle['font-weight'],
+    textDecoration: htmlStyle['text-decoration'],
+  };
+};
+
+const MarkdownCodeBody = memo(function MarkdownCodeBody({
+  code,
+  language,
+  isIncomplete,
+}: {
+  code: string;
+  language: string;
+  isIncomplete: boolean;
+}) {
+  const trimmed = useMemo(() => code.replace(/\n+$/u, ''), [code]);
+  const lines = useMarkdownCodeTokens(trimmed, language, isIncomplete);
+
+  return (
+    <div data-streamdown="code-block-body" data-language={language}>
+      <pre>
+        <code>
+          {lines.map((line, lineIndex) => (
+            // Lines only append while a fence streams, so position is stable.
+            <span key={lineIndex}>
+              {line.length === 0 || (line.length === 1 && line[0]?.content === '')
+                ? '\n'
+                : line.map((token, tokenIndex) => (
+                    <span key={tokenIndex} style={tokenStyle(token)}>
+                      {token.content}
+                    </span>
+                  ))}
+            </span>
+          ))}
+        </code>
+      </pre>
+    </div>
+  );
+});
 
 export const MarkdownCodeToolbar = memo(function MarkdownCodeToolbar({
   code,
@@ -120,16 +212,12 @@ export const MarkdownFencedCodeBlock = memo(function MarkdownFencedCodeBlock({
   isIncomplete,
   language,
   meta,
-}: CustomRendererProps) {
+}: MarkdownCodeBlockProps) {
   const [wrapped, setWrapped] = useState(false);
   const [previewing, setPreviewing] = useState(false);
   const conversationFontSize = useAtomValue(conversationFontSizeAtom);
   const markdownPreview = useMemo(() => isMarkdownCodeFence(language, meta), [language, meta]);
   const label = useMemo(() => parseMarkdownCodeBlockLabel(language, meta), [language, meta]);
-  const highlightLanguage = useMemo(
-    () => parseMarkdownCodeHighlightLanguage(language, meta),
-    [language, meta]
-  );
   const showPreview = markdownPreview && previewing;
 
   return (
@@ -155,14 +243,7 @@ export const MarkdownFencedCodeBlock = memo(function MarkdownFencedCodeBlock({
           </Suspense>
         </div>
       ) : (
-        <div className="lody-code-highlight">
-          <CodeBlock
-            code={code}
-            isIncomplete={isIncomplete}
-            language={highlightLanguage}
-            lineNumbers={false}
-          />
-        </div>
+        <MarkdownCodeBody code={code} language={language} isIncomplete={isIncomplete} />
       )}
     </CodeBlockContainer>
   );

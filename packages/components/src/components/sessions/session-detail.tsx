@@ -1730,7 +1730,12 @@ const SessionDetail = ({
     return 'idle';
   }, [activeSession, activeSessionLiveStatus]);
   useTabStatus(tabStatus);
-  const { latestPr, repoFullName, canShowGitHubActions } = useMemo(
+  const {
+    sourceSessionId: prSessionId,
+    latestPr,
+    repoFullName,
+    canShowGitHubActions,
+  } = useMemo(
     () => getSessionGitHubState(activeTabSession, workspaceOwnerSession),
     [activeTabSession, workspaceOwnerSession]
   );
@@ -5925,6 +5930,7 @@ const SessionDetail = ({
             <VaulDrawerBody topInset={MOBILE_DRAWER_HEADER_INSET}>
               {latestPr && repoFullName && urlPrNumber === latestPrNumber && latestPrNumber && (
                 <PrTabContainer
+                  sessionId={prSessionId}
                   repoFullName={latestPrRepoFullName}
                   prNumber={latestPrNumber}
                   headCommitSha={getSessionPullRequestLegacyFields(latestPr).headCommitSha}
@@ -6070,6 +6076,7 @@ const SessionDetail = ({
       />
     ) : activeSidebarTab === 'pr' && latestPr && repoFullName && latestPrNumber ? (
       <PrTabContainer
+        sessionId={prSessionId}
         repoFullName={latestPrRepoFullName}
         prNumber={latestPrNumber}
         headCommitSha={getSessionPullRequestLegacyFields(latestPr).headCommitSha}

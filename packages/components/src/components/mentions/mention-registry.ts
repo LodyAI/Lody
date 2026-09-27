@@ -68,9 +68,13 @@ export type MentionCategoryStatus = 'ready' | 'loading' | 'error' | 'disabled';
  * plain fields rather than shipping its own component.
  */
 export type MentionCandidateDetail = {
-  /** Absent on a candidate whose pane carries its own heading — a Role's does. */
+  /**
+   * The pane's heading. The menu falls back to the row's title, so a pane is
+   * never headed by its metadata; a Role's pane carries its own heading.
+   */
   title?: string;
-  badges?: string[];
+  /** Scope, version and the like: quiet facts the pane sets on one line. */
+  meta?: string[];
   description?: string;
   rows?: Array<{ label: string; value: string; mono?: boolean }>;
   /**
@@ -450,7 +454,7 @@ export function toSkillCandidate(
     title: item.token,
     detail: {
       title: skill.name,
-      badges: [
+      meta: [
         labels.scope[item.scope],
         ...(skill.version ? [`v${skill.version}`] : []),
         ...(skill.isSymlink ? [labels.symlink] : []),
@@ -542,7 +546,7 @@ export function toAgentRoleCandidate(
     disabled: item.availability.kind !== 'available',
     subtitle: availabilityText,
     detail: {
-      // No `title` and no badges: the pane heads itself with the Role's own
+      // No `title` and no meta: the pane heads itself with the Role's own
       // mark and name, and visibility is deliberately absent — every Role the menu
       // lists is one this user may read, so private-vs-workspace changes
       // nothing about accepting it. It is a Settings concern.

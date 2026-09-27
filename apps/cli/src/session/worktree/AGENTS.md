@@ -8,8 +8,13 @@ and file responsibilities: [../README.md](../README.md).
 
 ## Git credential broker
 
+- Host clone/fetch must receive the prepared session's managed Git PATH/config in
+  `brokerAuth.transportEnv`, not just a helper: HTTP headers authenticate before
+  helpers. Pin the per-call context token; do not read a mutable session file.
+
 - INVARIANT: host-side git must receive its credential broker as an explicit argument
-  (`WorktreeManager.ensureRepo({ brokerAuth })`), never from ambient `process.env`. Every
+  (`WorktreeManager.ensureRepo({ brokerAuth })` or the per-call `createWorktree` argument),
+  never from ambient `process.env`. Every
   workspace's `GitCredentialBroker` writes the same process-global `LODY_GIT_CRED_BROKER_*`
   pair and the shared `~/.lody/broker.json`, and `ensureStarted()` early-returns, so the
   ambient value belongs to whichever workspace started or recovered its broker LAST and the
@@ -22,6 +27,12 @@ and file responsibilities: [../README.md](../README.md).
   (per-workspace `broker-<workspaceId>.json`) for the same reason. Diagnostics must probe the
   same broker the failing command used, or they report a misroute as the caller's workspace
   lacking the repo link. Regression test: `worktree-manager-broker-auth.test.ts`.
+- `createWorktree` owns clone/fetch under its repo lock: callers must not pre-fetch
+  separately. Clone a missing cache before validating a persisted restore branch.
+  The same frozen auth must reach checkout and retries too (smudge/LFS can fetch).
+  With no broker, use native Git credentials; never install a context-dependent
+  helper or borrow the ambient workspace broker. Test actual worktree creation
+  with the generated helper, not just the preliminary `ensureRepo` spawn.
 
 ## Worktrees, branches, and setup
 

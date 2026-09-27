@@ -46,9 +46,11 @@ function render(props: Partial<Parameters<typeof ErrorBoundaryFallback>[0]> = {}
   });
 }
 
+/** A button by its visible text or, for an icon-only one, its accessible name. */
 function button(text: string): HTMLButtonElement {
-  const found = Array.from(document.body.querySelectorAll('button')).find((element) =>
-    element.textContent?.includes(text)
+  const found = Array.from(document.body.querySelectorAll('button')).find(
+    (element) =>
+      element.textContent?.includes(text) || element.getAttribute('aria-label')?.includes(text)
   );
   if (!found) {
     throw new Error(
@@ -105,7 +107,7 @@ describe('ErrorBoundaryFallback', () => {
     expect(copied).toContain('Stack:');
     expect(copied).toContain('Component stack:');
     expect(copied).toContain('at RootOutlet');
-    expect(container.textContent).toContain('Copied');
+    expect(button('Copied')).toBeDefined();
   });
 
   it('surfaces a blocked copy and reveals the details so the text stays selectable', async () => {
@@ -145,7 +147,7 @@ describe('ErrorBoundaryFallback', () => {
   it('requires a confirmation before clearing local data and signing out', () => {
     render();
 
-    click(button('Clear all local data and sign out'));
+    click(button('clear local data'));
     expect(mocks.startHardReset).not.toHaveBeenCalled();
     expect(document.body.textContent).toContain('Clear all local data and sign out?');
 
@@ -158,7 +160,7 @@ describe('ErrorBoundaryFallback', () => {
   it('lets the user cancel the wipe from the confirmation', () => {
     render();
 
-    click(button('Clear all local data and sign out'));
+    click(button('clear local data'));
     click(button('Cancel'));
 
     expect(mocks.startHardReset).not.toHaveBeenCalled();
@@ -179,11 +181,41 @@ describe('ErrorBoundaryFallback', () => {
     expect(writeText.mock.calls[0]?.[0]).toContain('[CONVEX Q(localProjects:list)]');
   });
 
-  it('keeps the inline variant to one readable line with retry and copy', () => {
+  it('offers exactly two ways out as buttons, with copy on the error itself', () => {
+    render();
+
+    const actions = Array.from(container.querySelectorAll('button')).filter((element) =>
+      element.textContent?.trim()
+    );
+    expect(actions.slice(0, 2).map((element) => element.textContent)).toEqual([
+      'Try again',
+      'Reload Lody',
+    ]);
+    const copy = button('Copy error details');
+    expect(copy.textContent).toBe('');
+    expect(copy.closest('div')?.parentElement?.querySelector('pre')?.textContent).toBe(
+      'TypeError: session.title is not a function'
+    );
+  });
+
+  it('says what happened in words in a section, and still shows the error', () => {
+    render({ variant: 'section' });
+
+    expect(container.querySelector('h2')?.textContent).toBe("This part couldn't be shown");
+    expect(container.textContent).toContain('TypeError: session.title is not a function');
+    expect(button('clear local data')).toBeDefined();
+  });
+
+  it('keeps the inline variant to a sentence with retry, the raw error behind copy', async () => {
     render({ variant: 'inline' });
 
-    expect(container.textContent).toContain('TypeError: session.title is not a function');
+    expect(container.textContent).toContain("This part couldn't be shown.");
+    expect(container.textContent).not.toContain('TypeError');
     expect(container.querySelectorAll('button')).toHaveLength(2);
-    expect(container.textContent).not.toContain('Clear all local data');
+    expect(container.textContent).not.toContain('clear local data');
+
+    click(button('Copy error details'));
+    await act(async () => {});
+    expect(writeText.mock.calls[0]?.[0]).toContain('TypeError: session.title is not a function');
   });
 });

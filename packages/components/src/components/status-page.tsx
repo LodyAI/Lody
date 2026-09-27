@@ -1,5 +1,5 @@
 import { createContext, useContext, useId, type ReactNode } from 'react';
-import { ChevronRight, CircleAlert } from 'lucide-react';
+import { ChevronRight } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { corner, duration, ease, radius, space, text } from '@lody/ui/tokens/scales.stylex';
@@ -15,16 +15,11 @@ import {
  * - `window`: it is the whole window — the page ground, a drag strip on the
  *   desktop, and its own scroll, since the shell clips `#root`.
  * - `pane`: it fills a panel that already has a ground (a session pane).
- * - `region`: a block inside a surface that is otherwise still working, so it
- *   takes the region rung and the smaller type.
+ * - `region`: it stands in for one section of a surface that is otherwise
+ *   still working. It is that section, not a block inside it, so it keeps the
+ *   ground the section had — no fill of its own — and takes the smaller type.
  */
 export type StatusPageLayout = 'window' | 'pane' | 'region';
-
-/**
- * `danger` is a failure; `neutral` is a place that is not there. On a page the
- * illustration says which; only a `region`, too small for one, wears the mark.
- */
-export type StatusPageTone = 'neutral' | 'danger';
 
 export type { StatusIllustration };
 
@@ -61,13 +56,12 @@ const styles = stylex.create({
     padding: space[6],
     color: colors.label,
   },
+  // No fill: a tray under the content read as a hole sunk below the section's
+  // ground. The section that failed is the section, as a failed page is the page.
   region: {
     boxSizing: 'border-box',
     width: '100%',
     padding: space[4],
-    borderRadius: radius.medium,
-    cornerShape: corner.shape,
-    backgroundColor: REGION,
     color: colors.label,
   },
   /**
@@ -119,13 +113,6 @@ const styles = stylex.create({
     '--si-on-accent': colors.onAccent,
     '--si-ink': colors.gray2,
   },
-  mark: {
-    flexShrink: 0,
-    width: '16px',
-    height: '16px',
-    marginBottom: space[1],
-    color: colors.destructive,
-  },
   title: {
     margin: 0,
     fontSize: text.titleSize,
@@ -134,6 +121,8 @@ const styles = stylex.create({
     letterSpacing: '-0.01em',
     color: colors.label,
     overflowWrap: 'anywhere',
+    // Short centred lines: even them out rather than leave one word below.
+    textWrap: 'balance',
   },
   titleRegion: {
     fontSize: text.bodySize,
@@ -146,6 +135,8 @@ const styles = stylex.create({
     lineHeight: text.bodyLeading,
     color: colors.secondaryLabel,
     overflowWrap: 'anywhere',
+    // No one-character widow ("期。") on the last line of CJK copy.
+    textWrap: 'pretty',
   },
   descriptionRegion: { fontSize: text.footnoteSize, lineHeight: text.footnoteLeading },
 
@@ -158,6 +149,12 @@ const styles = stylex.create({
   },
   actionsRegion: { justifyContent: 'flex-start' },
 
+  /** Holds the verbatim block and the one action that belongs to it. */
+  codeFrame: {
+    position: 'relative',
+    alignSelf: 'stretch',
+    minWidth: 0,
+  },
   code: {
     boxSizing: 'border-box',
     alignSelf: 'stretch',
@@ -187,8 +184,13 @@ const styles = stylex.create({
     lineHeight: text.captionLeading,
     color: colors.secondaryLabel,
   },
-  // Inside a region the block would be the same fill twice; one step darker.
-  codeInRegion: { backgroundColor: `color-mix(in oklab, transparent, ${colors.label} 5%)` },
+  // Room at the end of the first line for the action in the corner.
+  codeWithAction: { paddingInlineEnd: '36px' },
+  codeAction: {
+    position: 'absolute',
+    top: space[1.5],
+    insetInlineEnd: space[1.5],
+  },
 
   disclosure: {
     display: 'inline-flex',
@@ -234,12 +236,12 @@ const styles = stylex.create({
     lineHeight: text.footnoteLeading,
     color: colors.tertiaryLabel,
     overflowWrap: 'anywhere',
+    textWrap: 'pretty',
   },
 });
 
 export type StatusPageProps = {
   layout: StatusPageLayout;
-  tone?: StatusPageTone;
   /** The drawing a page opens with. A `region` never draws one. */
   illustration?: StatusIllustration;
   title: ReactNode;
@@ -257,13 +259,13 @@ const RegionContext = createContext(false);
  * that has failed is the page, not a panel floating over one. A page opens
  * with a drawing of what happened, says it in words, reassures, and offers the
  * way out; the verbatim error and the details come after, quieter, for whoever
- * needs them. A region is the same statements, compact and without the drawing.
+ * needs them. A region is the same statements, compact, without the drawing and
+ * without a mark: a red sign on one section is the alarm the page left out.
  *
  * `boot-failure.ts` draws the same column without React; keep them alike.
  */
 export function StatusPage({
   layout,
-  tone = 'neutral',
   illustration,
   title,
   description,
@@ -288,9 +290,6 @@ export function StatusPage({
               />
             </>
           ) : null}
-          {isRegion && tone === 'danger' ? (
-            <CircleAlert {...stylex.props(styles.mark)} aria-hidden="true" />
-          ) : null}
           <Heading {...stylex.props(styles.title, isRegion && styles.titleRegion)}>{title}</Heading>
           {description ? (
             <p {...stylex.props(styles.description, isRegion && styles.descriptionRegion)}>
@@ -312,27 +311,38 @@ export function StatusPageActions({ children }: { children: ReactNode }) {
 
 /**
  * Verbatim text a person may need to read, select or send: the error itself
- * (`headline`), or the diagnostics under it (`details`).
+ * (`headline`), or the diagnostics under it (`details`). `action` is the one
+ * thing done to that text — copying it — and sits in the block's corner, on
+ * the text it acts on rather than in the row of ways out.
  */
 export function StatusPageCode({
   children,
   size = 'headline',
+  action,
 }: {
   children: ReactNode;
   size?: 'headline' | 'details' | 'fit';
+  action?: ReactNode;
 }) {
   const isRegion = useContext(RegionContext);
-  return (
+  const pre = (
     <pre
       {...stylex.props(
         styles.code,
         size === 'details' ? styles.codeDetails : styles.codeHeadline,
         size === 'fit' && !isRegion && styles.codeFit,
-        isRegion && styles.codeInRegion
+        action != null && styles.codeWithAction
       )}
     >
       {children}
     </pre>
+  );
+  if (action == null) return pre;
+  return (
+    <div {...stylex.props(styles.codeFrame)}>
+      {pre}
+      <div {...stylex.props(styles.codeAction)}>{action}</div>
+    </div>
   );
 }
 

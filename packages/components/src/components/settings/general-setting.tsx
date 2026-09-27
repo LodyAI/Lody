@@ -775,40 +775,7 @@ export function GeneralSettingsComponent() {
               </CompactRow>
             </div>
             <CliDaemonSetting />
-            <CompactRow label={t('settings.general.autoLaunch.label', 'Launch at startup')}>
-              {autoLaunch.enabledLoading ? (
-                <span {...stylex.props(styles.switchSlot)}>
-                  <Spinner size="small" label={t('common.loading', 'Loading...')} />
-                </span>
-              ) : (
-                <Switch
-                  id="auto-launch-toggle"
-                  checked={autoLaunch.enabled}
-                  disabled={!autoLaunch.supported || autoLaunch.loading}
-                  onCheckedChange={(checked) => {
-                    void autoLaunch.updateEnabled(checked);
-                  }}
-                />
-              )}
-            </CompactRow>
-            <CompactRow
-              label={t('settings.general.autoLaunch.hideWindowLabel', 'Hide window on auto-launch')}
-            >
-              {autoLaunch.hideWindowLoading ? (
-                <span {...stylex.props(styles.switchSlot)}>
-                  <Spinner size="small" label={t('common.loading', 'Loading...')} />
-                </span>
-              ) : (
-                <Switch
-                  id="auto-launch-hide-window-toggle"
-                  checked={autoLaunch.hideWindowOnAutoLaunch}
-                  disabled={!autoLaunch.enabled || autoLaunch.loading}
-                  onCheckedChange={(checked) => {
-                    void autoLaunch.updateHideWindow(checked);
-                  }}
-                />
-              )}
-            </CompactRow>
+            <AutoLaunchSettingRows autoLaunch={autoLaunch} />
             <div id="prevent-sleep" {...stylex.props(styles.anchor)}>
               <CompactRow
                 label={t('settings.general.preventSleep.label', 'Prevent sleep')}
@@ -857,6 +824,90 @@ export function GeneralSettingsComponent() {
         isClearing={clearCache.isClearing}
         onConfirm={() => void clearCache.confirmClear()}
       />
+    </>
+  );
+}
+
+type AutoLaunchState = Pick<
+  ReturnType<typeof useElectronAutoLaunch>,
+  | 'supported'
+  | 'enabled'
+  | 'hideWindowOnAutoLaunch'
+  | 'loading'
+  | 'enabledLoading'
+  | 'hideWindowLoading'
+  | 'updateEnabled'
+  | 'updateHideWindow'
+>;
+
+/**
+ * Launch at startup, and the one setting that only means something once it
+ * is on. A switch that cannot be used here says why under its name, and the
+ * name steps back with it, so an off switch and an unavailable one never look
+ * alike. The operating system decides whether Lody can register as a login
+ * item (the main process supports macOS and Windows), and hiding the window
+ * only applies to a launch at startup.
+ */
+export function AutoLaunchSettingRows({ autoLaunch }: { autoLaunch: AutoLaunchState }) {
+  const { t } = useTranslation();
+  // Still reading the state is not "unavailable": say nothing until it is known.
+  const unsupported = !autoLaunch.supported && !autoLaunch.enabledLoading;
+  const needsLaunch = autoLaunch.supported && !autoLaunch.enabled;
+  const unsupportedReason = t(
+    'settings.general.autoLaunch.unsupported',
+    'Available on macOS and Windows only.'
+  );
+  return (
+    <>
+      <CompactRow
+        label={t('settings.general.autoLaunch.label', 'Launch at startup')}
+        helper={unsupported ? unsupportedReason : undefined}
+        disabled={unsupported}
+      >
+        {autoLaunch.enabledLoading ? (
+          <span {...stylex.props(styles.switchSlot)}>
+            <Spinner size="small" label={t('common.loading', 'Loading...')} />
+          </span>
+        ) : (
+          <Switch
+            id="auto-launch-toggle"
+            checked={autoLaunch.enabled}
+            disabled={!autoLaunch.supported || autoLaunch.loading}
+            onCheckedChange={(checked) => {
+              void autoLaunch.updateEnabled(checked);
+            }}
+          />
+        )}
+      </CompactRow>
+      <CompactRow
+        label={t('settings.general.autoLaunch.hideWindowLabel', 'Hide window on auto-launch')}
+        helper={
+          unsupported
+            ? unsupportedReason
+            : needsLaunch
+              ? t(
+                  'settings.general.autoLaunch.hideWindowNeedsLaunch',
+                  'Applies once Launch at startup is on.'
+                )
+              : undefined
+        }
+        disabled={unsupported || needsLaunch}
+      >
+        {autoLaunch.hideWindowLoading ? (
+          <span {...stylex.props(styles.switchSlot)}>
+            <Spinner size="small" label={t('common.loading', 'Loading...')} />
+          </span>
+        ) : (
+          <Switch
+            id="auto-launch-hide-window-toggle"
+            checked={autoLaunch.hideWindowOnAutoLaunch}
+            disabled={!autoLaunch.enabled || autoLaunch.loading}
+            onCheckedChange={(checked) => {
+              void autoLaunch.updateHideWindow(checked);
+            }}
+          />
+        )}
+      </CompactRow>
     </>
   );
 }

@@ -1,3 +1,4 @@
+import { useSchedules } from '@/hooks/use-schedules';
 import { windowPreparationAtom } from '@/lib/window-preparation';
 import { conversationCopyRange } from '@/lib/conversation-copy-range';
 import { describeCopiedConversation } from '@/lib/describe-copied-conversation';
@@ -53,6 +54,7 @@ import {
   Users,
   X,
 } from 'lucide-react';
+import { useRouter } from '@tanstack/react-router';
 import { Spinner } from '@lody/ui/spinner';
 import { Button } from '@lody/ui/button';
 import { isMacOSElectronRenderer, useElectronFullscreen } from '@/lib/electron';
@@ -133,6 +135,7 @@ import { useSessionShareStatus } from '@/hooks/use-session-share-management';
 import {
   conversationFontSizeAtom,
   currentWorkspaceIdAtom,
+  currentWorkspaceSlugAtom,
   getAllAgentConfigAtom,
   queuedMessageBehaviorAtom,
   userAtom,
@@ -2337,6 +2340,7 @@ export const SessionChatInterface = memo(
     }, [session, localeObj]);
 
     const {
+      sourceSessionId: prSessionId,
       repoFullName,
       latestPr,
       latestPrState,
@@ -2370,6 +2374,7 @@ export const SessionChatInterface = memo(
     const prLinkHandler = latestPr ? openLatestPr : undefined;
     const preferredMergeMethod = usePreferredPrMergeMethod();
     const activePrDetails = useGitHubPrDetails({
+      sessionId: prSessionId,
       workspaceId,
       repoFullName: latestPrRepoFullName,
       prNumber: latestPrNumber,
@@ -4717,6 +4722,10 @@ export const SessionChatInterface = memo(
       if (run.url) window.open(run.url, '_blank', 'noopener,noreferrer');
     }, []);
 
+    const router = useRouter();
+    const workspaceSlug = useAtomValue(currentWorkspaceSlugAtom);
+    const scheduleRegistry = useSchedules();
+
     // Presentation-only "opened by" provenance (MCP `lody_session_create`).
     // Read from the already-loaded session meta cache, so it costs no extra
     // document. `parentSessionId` children are excluded by the atom — they are
@@ -6227,6 +6236,26 @@ export const SessionChatInterface = memo(
                     }
                     onGoalCommand={handleGoalCardCommand}
                     onGoalDismiss={handleDismissGoalBanner}
+                    scheduleSource={
+                      session.scheduleId
+                        ? {
+                            title:
+                              scheduleRegistry.rows.find(
+                                (row) => row.scheduleId === session.scheduleId
+                              )?.title ?? t('schedules.source', 'Scheduled task'),
+                            onOpen: () => {
+                              if (workspaceSlug && session.scheduleId)
+                                void router.navigate({
+                                  to: '/$workspaceName/schedules/$scheduleId',
+                                  params: {
+                                    workspaceName: workspaceSlug,
+                                    scheduleId: session.scheduleId,
+                                  },
+                                });
+                            },
+                          }
+                        : null
+                    }
                     scheduledTasks={pendingScheduledTasks}
                     prCiRuns={infoBarPrCiRuns}
                     onOpenPrCiRun={handleOpenPrCiRun}

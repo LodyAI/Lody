@@ -10,7 +10,7 @@ Edit `AGENTS.md`, not its `CLAUDE.md` symlink. Ownership: [README.md](README.md)
   output. Never wire `searchBlockId` to tool, terminal, or diff renderers.
 - Window stream readiness must use the same hydration/initial-scroll conditions as
   viewport visibility; hydrated history alone cannot reveal a native window.
-- `SessionChatStreamView` uses one Virtua list with stable keys and `shift={false}`.
+- `SessionChatStreamView` uses one `keyed` `@lody/virtua` list with stable row keys (no `shift`).
   Map history indexes to rows. Collapsed activity is one row; expanded details
   are siblings, never nested scrollers or fixed-height process panels.
 - Native text selection retains its complete row corridor and history leases;
@@ -81,8 +81,9 @@ Edit `AGENTS.md`, not its `CLAUDE.md` symlink. Ownership: [README.md](README.md)
 
 - `--ui-font-size` is the 1em baseline; compact chrome is 0.9em. Conversation
   body/headings/mono/terminal still scale through
-  `conversation-font-size-classes.ts`. Streamdown stays streaming; never
-  word-level `animated`.
+  `conversation-font-size-classes.ts`. Only streaming turns load the stream
+  engine; else static. A remounted streaming row shows its existing text
+  immediately; only later additions animate.
 - A Mermaid diagram in a message is a still preview until a pointer click
   activates it, and an unmodified wheel is NEVER taken — activated or not.
   Deactivation preserves pan/zoom and activation adds no outline; see the
@@ -111,3 +112,8 @@ Edit `AGENTS.md`, not its `CLAUDE.md` symlink. Ownership: [README.md](README.md)
   cards, mobile avatars do not.
 - Attachment and mobile image-preview invariants live in
   [session-files-rendering.md](session-files-rendering.md).
+- Markdown images remember each source's natural size or failure for the page's
+  life: a Virtua remount must render at its final height (failed sources show alt text).
+- Live file Markdown images use the owning file provider: same-machine reads are
+  automatic; remote reads require a per-image click. Never grant this resolver to
+  anonymous shares. Release owned Blob URLs on cleanup and ignore late reads.

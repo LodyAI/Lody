@@ -10,12 +10,15 @@ import {
   memo,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
   useSyncExternalStore,
 } from 'react';
+import { useStore } from 'jotai';
 import { cn } from '@/lib/utils';
+import { sidebarScrollTopByWorkspaceAtom } from '@/atoms/sidebar-state';
 import {
   WINDOW_DRAG_EXEMPT_CLASS,
   WINDOW_DRAG_HEADER_CLASS,
@@ -34,17 +37,18 @@ import { ScrollArea } from '@/ui/scroll-area';
 import {
   AppWindow,
   Archive,
+  CircleHelp,
   BookOpen,
   Bug,
-  CircleHelp,
   ClipboardList,
+  ListTodo,
   Github,
   SquarePen,
   Link2,
   ListFilter,
   MessageSquareMore,
-  ChevronLeft,
-  ChevronRight,
+  ArrowLeft,
+  ArrowRight,
   PanelLeft,
   Plus,
   Search,
@@ -70,7 +74,7 @@ import type { SidebarOrganizeMode } from '@/atoms/sidebar-state';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useStableNow } from '@/hooks/use-stable-now';
 
-export type LoroSidebarNavKey = 'home' | 'archive';
+export type LoroSidebarNavKey = 'home' | 'archive' | 'schedules';
 
 export type LoroSidebarChatScope = 'my' | 'team';
 export type LoroSidebarOrganizeMode = SidebarOrganizeMode;
@@ -114,6 +118,7 @@ export type LoroSidebarChatItem = {
 
 export type LoroSidebarLabels = {
   home: string;
+  schedules: string;
   docs: string;
   joinCommunity: string;
   feedback: string;
@@ -144,6 +149,8 @@ export interface LoroSidebarProps {
   userEmail: string;
   workspaces: LoroSidebarWorkspace[];
   currentWorkspaceId: string;
+  /** Stable workspace key for restoring the scroll viewport after a desktop remount. */
+  scrollStateKey?: string | null;
   /**
    * Whether the workspace identity opens the switch/create menu. Platforms
    * without the `multiWorkspace` capability render the identity as a static
@@ -251,8 +258,11 @@ export interface LoroSidebarProps {
   onLinkRepoClicked?: () => void;
   onHomeClicked?: () => void;
   onArchiveClicked?: () => void;
+  /** Shows the Schedules entry; absent where there is nowhere to go. */
+  onSchedulesClicked?: () => void;
   onSettingsClicked?: () => void;
   onDocsClicked?: () => void;
+  onGithubClicked?: () => void;
   onJoinCommunityClicked?: () => void;
   onFeedbackClicked?: () => void;
   onBugReportClicked?: () => void;
@@ -285,6 +295,7 @@ const COLLAPSE_DRAG_THRESHOLD = 160;
 
 const defaultLabels: LoroSidebarLabels = {
   home: 'Home',
+  schedules: 'Schedules',
   docs: 'Docs',
   joinCommunity: 'Join community',
   feedback: 'Feedback',
@@ -573,7 +584,6 @@ function SidebarHeaderIconButton({
   onClick,
   className,
   disabled = false,
-  compact = false,
   children,
 }: {
   label: string;
@@ -581,7 +591,6 @@ function SidebarHeaderIconButton({
   onClick?: () => void;
   className?: string;
   disabled?: boolean;
-  compact?: boolean;
   children: ReactNode;
 }) {
   const button = (
@@ -592,7 +601,7 @@ function SidebarHeaderIconButton({
       onClick={onClick}
       className={cn(
         'flex shrink-0 items-center justify-center rounded-md outline-hidden',
-        compact ? 'h-5 w-5' : 'h-7 w-7',
+        'h-7 w-7',
         disabled
           ? 'cursor-default text-sidebar-foreground-muted/40'
           : 'text-sidebar-foreground-muted hover:bg-sidebar-hover hover:text-sidebar-hover-foreground focus-visible:ring-1 focus-visible:ring-sidebar-ring/40',
@@ -641,11 +650,14 @@ function NavButton({
         type="button"
         onClick={onClick}
         className={cn(
-          'group flex w-full select-none items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[0.9em] outline-hidden transition',
+          // Same size as the session titles below: a smaller label reads as
+          // undersized next to its 16px icon.
+          'group flex w-full select-none items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm outline-hidden transition',
           'focus-visible:ring-1 focus-visible:ring-sidebar-ring/30',
           active
             ? 'bg-sidebar-selection text-sidebar-selection-foreground'
-            : 'text-sidebar-foreground dark:text-sidebar-foreground/75 hover:bg-sidebar-hover hover:text-sidebar-hover-foreground',
+            : // Same brightness as unselected session titles; hover changes the fill only.
+              'text-sidebar-row-foreground hover:bg-sidebar-hover',
           // Keep the label clear of the trailing control instead of letting it
           // truncate under it.
           action && 'pr-8'
@@ -682,11 +694,17 @@ export function getLoroSidebarFooterIconButtonClassName(isMobile: boolean, activ
       ? 'h-12 w-12 rounded-xl [&_svg]:h-5 [&_svg]:w-5'
       : 'h-6 w-6 rounded-md [&_svg]:h-3.5 [&_svg]:w-3.5',
     'transition-colors focus-visible:ring-1 focus-visible:ring-sidebar-ring/40',
+    // A 12% foreground fill: the row selection token is tuned for full-width
+    // rows and nearly vanishes behind a 24px icon.
     active
-      ? 'bg-sidebar-selection text-sidebar-selection-foreground'
+      ? 'bg-foreground/[0.12] text-sidebar-selection-foreground hover:bg-foreground/[0.16]'
       : 'text-sidebar-foreground dark:text-sidebar-foreground-muted hover:bg-sidebar-hover hover:text-sidebar-hover-foreground'
   );
 }
+
+export const DEFAULT_DESKTOP_SIDEBAR_WIDTH = 280;
+export const MIN_DESKTOP_SIDEBAR_WIDTH = 240;
+export const MAX_DESKTOP_SIDEBAR_WIDTH = 420;
 
 export const LoroSidebar = memo(function LoroSidebar({
   className,
@@ -694,14 +712,15 @@ export const LoroSidebar = memo(function LoroSidebar({
   userEmail,
   workspaces,
   currentWorkspaceId,
+  scrollStateKey,
   workspaceSwitcherEnabled = true,
   connectionUiState,
   workspaceSyncing = false,
   isElectron = false,
   isElectronMacOS: _isElectronMacOS = false,
-  defaultWidth = 280,
-  minWidth = 240,
-  maxWidth = 420,
+  defaultWidth = DEFAULT_DESKTOP_SIDEBAR_WIDTH,
+  minWidth = MIN_DESKTOP_SIDEBAR_WIDTH,
+  maxWidth = MAX_DESKTOP_SIDEBAR_WIDTH,
   activeNav = null,
   topContent,
   desktopFilterAction,
@@ -742,8 +761,10 @@ export const LoroSidebar = memo(function LoroSidebar({
   onLinkRepoClicked,
   onHomeClicked,
   onArchiveClicked,
+  onSchedulesClicked,
   onSettingsClicked,
   onDocsClicked,
+  onGithubClicked,
   onJoinCommunityClicked,
   onFeedbackClicked,
   onBugReportClicked,
@@ -757,6 +778,20 @@ export const LoroSidebar = memo(function LoroSidebar({
   const macTrafficLightRowPadClass = useMacTrafficLightRowPadClass();
   const windowsCaptionRowPadClass = useWindowsCaptionRowPadClass();
   const { t } = useTranslation();
+  const store = useStore();
+  const scrollViewportRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const viewport = scrollViewportRef.current;
+    if (!viewport || !scrollStateKey) return undefined;
+    viewport.scrollTop = store.get(sidebarScrollTopByWorkspaceAtom)[scrollStateKey] ?? 0;
+    return () => {
+      const previous = store.get(sidebarScrollTopByWorkspaceAtom);
+      store.set(sidebarScrollTopByWorkspaceAtom, {
+        ...previous,
+        [scrollStateKey]: viewport.scrollTop,
+      });
+    };
+  }, [collapsed, scrollStateKey, store]);
   const collapseShortcut = useCommandShortcutLabel('sidebar.toggle');
   const backShortcut = useCommandShortcutLabel('nav.back');
   const forwardShortcut = useCommandShortcutLabel('nav.forward');
@@ -980,17 +1015,7 @@ export const LoroSidebar = memo(function LoroSidebar({
                 {workspaceIdentity}
               </button>
             }
-          >
-            <button
-              type="button"
-              className={cn(workspaceIdentityClassName, windowDrag && WINDOW_DRAG_EXEMPT_CLASS)}
-              data-workspace-switcher-trigger
-              data-workspace-syncing={workspaceSyncing ? 'true' : 'false'}
-              aria-busy={workspaceSyncing || undefined}
-            >
-              {workspaceIdentity}
-            </button>
-          </Menu.Trigger>
+          />
         </div>
         <Menu.Content align="start" side={menuSide} className="w-64">
           <Menu.GroupLabel className="normal-case text-xs font-normal tracking-normal">
@@ -1011,6 +1036,7 @@ export const LoroSidebar = memo(function LoroSidebar({
                 <Tooltip.Provider delay={400}>
                   {workspaces.map((ws) => {
                     const workspaceSlug = ws.slug;
+                    const supportsNewWindow = isElectronRenderer() && !!workspaceSlug;
                     // The avatar carries identity, so the check moves to the
                     // row's trailing edge. ps-2/pe-8 replace the ps-8 selection
                     // indent: the 20px avatar and the action rows' 20px icon
@@ -1022,6 +1048,27 @@ export const LoroSidebar = memo(function LoroSidebar({
                         value={ws.id}
                         indicator="check"
                         indicatorSide="end"
+                        // Resolve the radio item in the dropdown's context before
+                        // introducing the separate right-click menu in its render.
+                        render={
+                          supportsNewWindow
+                            ? (props) => (
+                                <ContextMenu.Root>
+                                  <ContextMenu.Trigger render={<div {...props} />} />
+                                  <ContextMenu.Content>
+                                    <ContextMenu.Item
+                                      icon={<AppWindow />}
+                                      onClick={() => {
+                                        openDesktopWindow(undefined, workspaceSlug, 'context_menu');
+                                      }}
+                                    >
+                                      {t('workspace.openInNewWindow')}
+                                    </ContextMenu.Item>
+                                  </ContextMenu.Content>
+                                </ContextMenu.Root>
+                              )
+                            : undefined
+                        }
                         icon={
                           <WorkspaceAvatar
                             workspace={{ name: ws.name, logo: ws.logo }}
@@ -1064,35 +1111,15 @@ export const LoroSidebar = memo(function LoroSidebar({
                       </Menu.RadioItem>
                     );
 
-                    if (!isElectronRenderer() || !workspaceSlug) return row;
+                    if (!supportsNewWindow || ws.id === currentWorkspaceId) return row;
 
-                    const contextTrigger = <ContextMenu.Trigger>{row}</ContextMenu.Trigger>;
                     return (
-                      <ContextMenu.Root key={ws.id}>
-                        {ws.id === currentWorkspaceId ? (
-                          contextTrigger
-                        ) : (
-                          // Other workspaces explain the modifier-click on hover,
-                          // beside the row. Tooltip and ContextMenu roots render no
-                          // DOM, so both triggers' props land on the row element.
-                          <Tooltip.Root>
-                            <Tooltip.Trigger render={contextTrigger} />
-                            <Tooltip.Content side="right" sideOffset={8}>
-                              {newWindowHint}
-                            </Tooltip.Content>
-                          </Tooltip.Root>
-                        )}
-                        <ContextMenu.Content>
-                          <ContextMenu.Item
-                            onClick={() => {
-                              openDesktopWindow(undefined, workspaceSlug, 'context_menu');
-                            }}
-                          >
-                            <AppWindow />
-                            {t('workspace.openInNewWindow')}
-                          </ContextMenu.Item>
-                        </ContextMenu.Content>
-                      </ContextMenu.Root>
+                      <Tooltip.Root key={ws.id}>
+                        <Tooltip.Trigger render={row} />
+                        <Tooltip.Content side="right" sideOffset={8}>
+                          {newWindowHint}
+                        </Tooltip.Content>
+                      </Tooltip.Root>
                     );
                   })}
                 </Tooltip.Provider>
@@ -1172,7 +1199,7 @@ export const LoroSidebar = memo(function LoroSidebar({
       <div className="relative flex h-full flex-col overflow-hidden">
         <div
           className={cn(
-            'group/sidebar-header relative flex items-center justify-between gap-2',
+            'relative flex items-center justify-between gap-2',
             isMobile
               ? 'pl-[calc(12px+var(--safe-area-left))] pr-[calc(12px+var(--safe-area-right))] pt-[calc(12px+var(--safe-area-top))]'
               : cn('h-11 px-1.5', macTrafficLightRowPadClass, windowsCaptionRowPadClass),
@@ -1186,7 +1213,7 @@ export const LoroSidebar = memo(function LoroSidebar({
           ) : (
             <span
               aria-label="Lody"
-              className="select-none px-2 text-[18px] font-semibold leading-none tracking-[-0.03em] text-sidebar-foreground"
+              className="select-none px-2 text-[18px] font-semibold leading-none tracking-[-0.03em] text-reading"
               style={{ fontFamily: 'var(--font-wordmark)' }}
             >
               Lody
@@ -1196,7 +1223,9 @@ export const LoroSidebar = memo(function LoroSidebar({
             <Tooltip.Provider delay={400}>
               <div
                 className={cn(
-                  'ml-auto flex shrink-0 items-center',
+                  // `gap-0.5` between full-size buttons keeps Back and Forward
+                  // apart as two targets instead of one fused control.
+                  'ml-auto flex shrink-0 items-center gap-0.5',
                   windowDrag && WINDOW_DRAG_EXEMPT_CLASS
                 )}
               >
@@ -1205,17 +1234,14 @@ export const LoroSidebar = memo(function LoroSidebar({
                     label={t('commands.sidebar.toggle', 'Toggle Sidebar')}
                     shortcut={collapseShortcut}
                     onClick={() => onRequestCollapse()}
-                    className={
-                      isElectron
-                        ? 'focus-visible:outline-hidden'
-                        : 'opacity-0 pointer-events-none group-hover/sidebar-header:opacity-100 group-hover/sidebar-header:pointer-events-auto focus-visible:opacity-100 focus-visible:pointer-events-auto transition-opacity duration-100'
-                    }
+                    // Always visible: the collapse control is found where it
+                    // was last seen, not revealed by hovering the header.
+                    className="focus-visible:outline-hidden"
                   >
                     <PanelLeft className="h-4 w-4" />
                   </SidebarHeaderIconButton>
                 ) : null}
                 <SidebarHeaderIconButton
-                  compact
                   disabled={!canGoBack}
                   label={t('commands.nav.back', 'Back')}
                   shortcut={backShortcut}
@@ -1224,10 +1250,9 @@ export const LoroSidebar = memo(function LoroSidebar({
                     if (!commands.execute('nav.back')) window.history.back();
                   }}
                 >
-                  <ChevronLeft className="h-3.5 w-3.5" />
+                  <ArrowLeft className="h-4 w-4" strokeWidth={1.75} />
                 </SidebarHeaderIconButton>
                 <SidebarHeaderIconButton
-                  compact
                   disabled={!canGoForward}
                   label={t('commands.nav.forward', 'Forward')}
                   shortcut={forwardShortcut}
@@ -1236,7 +1261,7 @@ export const LoroSidebar = memo(function LoroSidebar({
                     if (!commands.execute('nav.forward')) window.history.forward();
                   }}
                 >
-                  <ChevronRight className="h-3.5 w-3.5" />
+                  <ArrowRight className="h-4 w-4" strokeWidth={1.75} />
                 </SidebarHeaderIconButton>
               </div>
             </Tooltip.Provider>
@@ -1256,18 +1281,27 @@ export const LoroSidebar = memo(function LoroSidebar({
           <NavButton
             active={activeNav === 'home'}
             label={mergedLabels.home}
-            icon={<SquarePen className="h-4 w-4" />}
+            icon={<SquarePen className="h-4 w-4" strokeWidth={1.75} />}
             onClick={onHomeClicked}
           />
+          {onSchedulesClicked ? (
+            <NavButton
+              active={activeNav === 'schedules'}
+              label={mergedLabels.schedules}
+              icon={<ListTodo className="h-4 w-4" />}
+              onClick={onSchedulesClicked}
+            />
+          ) : null}
           <NavButton
             active={false}
             label={t('common.search', 'Search')}
-            icon={<Search className="h-4 w-4" />}
+            icon={<Search className="h-4 w-4" strokeWidth={1.75} />}
             onClick={() => setCommandPaletteOpen(true)}
           />
         </div>
 
         <ScrollArea
+          viewportRef={scrollViewportRef}
           className={cn(
             'min-h-0 flex-1',
             isMobile ? 'mt-4 pb-[calc(12px+env(safe-area-inset-bottom,0px))]' : 'mt-2'
@@ -1402,30 +1436,33 @@ export const LoroSidebar = memo(function LoroSidebar({
                       ) : null}
                     </div>
 
-                    <GlassSurface className="p-1">
-                      <ul className="space-y-1">
-                        {section.items.map((item) => (
-                          <li key={item.id}>
-                            <div
-                              className={cn(
-                                'flex items-center gap-2 rounded-lg px-2 py-2 text-[0.9em]',
-                                item.isSelected
-                                  ? 'bg-sidebar-selection text-sidebar-selection-foreground'
-                                  : 'text-sidebar-foreground-muted hover:bg-sidebar-hover hover:text-sidebar-hover-foreground'
-                              )}
-                            >
-                              <span className="h-2 w-2 rounded-full bg-sidebar-border" />
-                              <span className="min-w-0 flex-1 truncate">{item.title}</span>
-                              {item.ageLabel ? (
-                                <span className="shrink-0 text-[0.75em] text-sidebar-foreground-muted">
-                                  {item.ageLabel}
-                                </span>
-                              ) : null}
-                            </div>
-                          </li>
-                        ))}
-                      </ul>
-                    </GlassSurface>
+                    {/* A project with no sessions yet is its header alone, not an empty tray. */}
+                    {section.items.length > 0 ? (
+                      <GlassSurface className="p-1">
+                        <ul className="space-y-1">
+                          {section.items.map((item) => (
+                            <li key={item.id}>
+                              <div
+                                className={cn(
+                                  'flex items-center gap-2 rounded-lg px-2 py-2 text-[1em]',
+                                  item.isSelected
+                                    ? 'bg-sidebar-selection text-sidebar-selection-foreground'
+                                    : 'text-sidebar-foreground-muted hover:bg-sidebar-hover hover:text-sidebar-hover-foreground'
+                                )}
+                              >
+                                <span className="h-2 w-2 rounded-full bg-sidebar-border" />
+                                <span className="min-w-0 flex-1 truncate">{item.title}</span>
+                                {item.ageLabel ? (
+                                  <span className="shrink-0 text-[0.75em] text-sidebar-foreground-muted">
+                                    {item.ageLabel}
+                                  </span>
+                                ) : null}
+                              </div>
+                            </li>
+                          ))}
+                        </ul>
+                      </GlassSurface>
+                    ) : null}
                   </div>
                 ))}
 
@@ -1458,26 +1495,22 @@ export const LoroSidebar = memo(function LoroSidebar({
         <div className={getLoroSidebarFooterClassName(isMobile)}>
           {!isMobile ? renderWorkspaceControl('top') : null}
           <div className={cn('flex items-center gap-1', !isMobile && 'ml-auto shrink-0 gap-2')}>
-            <IconButton label="Settings" onClick={onSettingsClicked}>
-              <Settings strokeWidth={1.5} />
-            </IconButton>
-
             <Menu.Root>
               <Menu.Trigger
                 render={
-                  <IconButton label="Help">
+                  <IconButton label={t('menu.help', 'Help')}>
                     <CircleHelp strokeWidth={1.5} />
                   </IconButton>
                 }
-              >
-                <IconButton label="Help">
-                  <CircleHelp strokeWidth={1.5} />
-                </IconButton>
-              </Menu.Trigger>
-              <Menu.Content side="top" align="start" className="min-w-[140px]">
+              />
+              <Menu.Content side="top" align="end" className="min-w-[160px]">
                 <Menu.Item onClick={() => onDocsClicked?.()}>
                   <BookOpen className="h-4 w-4" />
                   {mergedLabels.docs}
+                </Menu.Item>
+                <Menu.Item onClick={() => onGithubClicked?.()}>
+                  <Github className="h-4 w-4" />
+                  {t('sidebar.github', 'GitHub')}
                 </Menu.Item>
                 <Menu.Item onClick={() => onJoinCommunityClicked?.()}>
                   <Users className="h-4 w-4" />
@@ -1494,8 +1527,40 @@ export const LoroSidebar = memo(function LoroSidebar({
               </Menu.Content>
             </Menu.Root>
 
-            <IconButton label="Archive" active={activeNav === 'archive'} onClick={onArchiveClicked}>
-              <Archive strokeWidth={1.5} />
+            {/* While Archive is open, its button returns to the previous page
+                (Home when there is no history). */}
+            {activeNav === 'archive' ? (
+              <IconButton
+                label={t('archive.leave', 'Leave Archive')}
+                title={t('archive.leave', 'Leave Archive')}
+                active
+                className="group"
+                onClick={() => {
+                  if (canGoBack && commands.execute('nav.back')) return;
+                  if (canGoBack) {
+                    window.history.back();
+                    return;
+                  }
+                  onHomeClicked?.();
+                }}
+              >
+                <Archive
+                  strokeWidth={1.5}
+                  className="group-hover:hidden group-focus-visible:hidden"
+                />
+                <ArrowLeft
+                  strokeWidth={1.5}
+                  className="hidden group-hover:block group-focus-visible:block"
+                />
+              </IconButton>
+            ) : (
+              <IconButton label={t('archive.title', 'Archive')} onClick={onArchiveClicked}>
+                <Archive strokeWidth={1.5} />
+              </IconButton>
+            )}
+
+            <IconButton label={t('settings.title', 'Settings')} onClick={onSettingsClicked}>
+              <Settings strokeWidth={1.5} />
             </IconButton>
           </div>
 

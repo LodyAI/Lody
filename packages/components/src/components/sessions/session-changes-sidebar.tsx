@@ -314,8 +314,8 @@ function AggregateStats({
 
   return (
     <>
-      <span className={cn(STAT_COL_CLASS, 'text-code-added')}>+{add}</span>
-      <span className={cn(STAT_COL_CLASS, 'text-code-removed')}>−{del}</span>
+      <span className={cn(STAT_COL_CLASS, 'text-github-addition')}>+{add}</span>
+      <span className={cn(STAT_COL_CLASS, 'text-github-deletion')}>−{del}</span>
     </>
   );
 }
@@ -337,8 +337,8 @@ function RowTrailing({
         </span>
       ) : (
         <>
-          <span className={cn(STAT_COL_CLASS, 'text-code-added')}>+{add}</span>
-          <span className={cn(STAT_COL_CLASS, 'text-code-removed')}>−{del}</span>
+          <span className={cn(STAT_COL_CLASS, 'text-github-addition')}>+{add}</span>
+          <span className={cn(STAT_COL_CLASS, 'text-github-deletion')}>−{del}</span>
         </>
       )}
     </span>

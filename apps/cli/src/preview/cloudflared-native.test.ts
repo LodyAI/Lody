@@ -53,6 +53,45 @@ function launch() {
 }
 
 describe('cloudflared process ownership', () => {
+  it('tolerates split plain-text diagnostics before allocation and before registration', async () => {
+    const run = launch();
+    const child = await run.spawned;
+    child.stderr.write('native startup diagnostic\n');
+    child.log('| https://fixture-quick.trycloudflare.com |');
+    const handle = await run.result;
+    child.stderr.write('failed to sufficiently increase receive buffer');
+    child.stderr.write(
+      ` size (was: 208 kiB, wanted: 7168 kiB, got: 416 kiB)\n${JSON.stringify({ message: 'Registered tunnel connection', protocol: 'quic' })}\n`
+    );
+    await expect(handle.registered).resolves.toBeUndefined();
+    expect(handle.diagnostic()).toContain('connection=registered (quic)');
+    await handle.stop();
+    await expect(handle.closed).resolves.toBeNull();
+  });
+
+  it.each([
+    ['invalid structured log', JSON.stringify({ message: 42 })],
+    ['invalid origin', JSON.stringify({ message: '| https://attacker.test |' })],
+    ['oversized diagnostic', 'x'.repeat(64 * 1024 + 1)],
+  ])('preserves %s after allocation through shutdown', async (_label, line) => {
+    const run = launch();
+    const child = await run.spawned;
+    child.log('| https://fixture-quick.trycloudflare.com |');
+    const handle = await run.result;
+    child.exitOnSignal = false;
+    const registrationFailure = handle.registered.catch((error: unknown) => error);
+    child.stderr.write(`${line}\n`);
+    child.log('Failed to initialize DNS local resolver', 'error', 'operation was canceled');
+    child.emit('close', 0, null);
+    const failure = await handle.closed;
+    expect(failure?.message).toBe(
+      _label === 'oversized diagnostic'
+        ? 'cloudflared log line exceeded its size limit'
+        : 'Invalid cloudflared JSON output'
+    );
+    expect(await registrationFailure).toBe(failure);
+  });
+
   it('parses split JSON lines and redacts both diagnostic fields on native failure', async () => {
     const run = launch();
     const child = await run.spawned;

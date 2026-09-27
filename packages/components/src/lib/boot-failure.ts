@@ -11,7 +11,7 @@
 // - Inline styles only (no inline scripts) keep us compatible with the
 //   renderer CSP, which allows `style-src 'self' 'unsafe-inline'` but
 //   blocks `script-src 'unsafe-inline'`.
-// - Two affordances by design: "Reload" first (so users can recover
+// - Two affordances by design, words only: "Reload" first (so users can recover
 //   in-page instead of force-quitting) and "Copy error" (so they can share
 //   the raw error with us).
 
@@ -321,7 +321,6 @@ const LIGHT_VARS = `
   --bf-tertiary-label: hsl(220 8% 62%);
   --bf-accent: hsl(220 82% 65%);
   --bf-destructive: hsl(356 72% 47%);
-  --bf-success: hsl(151 55% 36%);
   --bf-region: color-mix(in oklab, transparent, hsl(225 7% 11%) 3%);
   --bf-hover: hsl(225 15% 94.9%);
   --bf-shadow-raised: 0 0 0 0.5px hsl(225 10% 11% / 0.16), 0 1px 1px hsl(225 10% 11% / 0.06), 0 2px 4px -1px hsl(225 10% 11% / 0.07);
@@ -347,7 +346,6 @@ const DARK_VARS = `
   --bf-tertiary-label: hsl(0 0% 45%);
   --bf-accent: hsl(27 100% 80%);
   --bf-destructive: hsl(0 100% 75%);
-  --bf-success: hsl(151 60% 52%);
   --bf-region: color-mix(in oklab, transparent, hsl(0 0% 100%) 3%);
   --bf-hover: hsl(0 0% 15.7%);
   --bf-shadow-raised: inset 0 1px 0 hsl(0 0% 100% / 0.08), 0 0 0 0.5px hsl(0 0% 0% / 0.7), 0 1px 2px hsl(0 0% 0% / 0.5);
@@ -393,11 +391,11 @@ ${R} .bf-header { display: flex; flex-direction: column; align-items: center; ga
 ${R} .bf-art { display: block; margin-bottom: 8px; line-height: 0; }
 ${R} h1 {
   margin: 0; font-size: 18px; line-height: 24px; font-weight: 600; letter-spacing: -0.01em;
-  color: var(--bf-label);
+  color: var(--bf-label); text-wrap: balance;
 }
 ${R} .bf-description {
   margin: 0; font-size: 14px; line-height: 20px; color: var(--bf-secondary-label);
-  overflow-wrap: anywhere;
+  overflow-wrap: anywhere; text-wrap: pretty;
 }
 ${R} pre {
   align-self: stretch; text-align: start;
@@ -420,7 +418,6 @@ ${R} .bf-button {
 ${R} .bf-button:active { transform: translateY(1px); background-image: none; }
 ${R} .bf-button:disabled { opacity: 0.45; cursor: default; }
 ${R} .bf-button:focus-visible { box-shadow: 0 0 0 2px var(--bf-accent); }
-${R} .bf-button svg { width: 14px; height: 14px; flex-shrink: 0; }
 ${R} .bf-primary {
   background-color: var(--bf-label); background-image: var(--bf-sheen-ink);
   color: var(--bf-background); box-shadow: var(--bf-shadow-ink);
@@ -434,8 +431,7 @@ ${R} .bf-secondary {
 ${R} .bf-secondary:hover { background-color: color-mix(in oklab, var(--bf-raised), var(--bf-label) 4%); }
 ${R} .bf-primary:focus-visible { box-shadow: var(--bf-shadow-ink), 0 0 0 2px var(--bf-accent); }
 ${R} .bf-secondary:focus-visible { box-shadow: var(--bf-shadow-raised), 0 0 0 2px var(--bf-accent); }
-${R} .bf-copied svg { color: var(--bf-success); }
-${R} .bf-status { margin: 0; font-size: 12px; line-height: 16px; color: var(--bf-secondary-label); }
+${R} .bf-status { margin: 0; font-size: 12px; line-height: 16px; color: var(--bf-secondary-label); text-wrap: pretty; }
 ${R} .bf-status:empty { display: none; }
 ${R} .bf-status[data-tone="danger"] { color: var(--bf-destructive); }
 ${R} .bf-disclosure {
@@ -448,23 +444,22 @@ ${R} .bf-disclosure:hover { color: var(--bf-label); }
 ${R} .bf-disclosure:focus-visible { color: var(--bf-label); text-decoration: underline; }
 ${R} .bf-disclosure svg { width: 14px; height: 14px; transition: transform 120ms ${EASE}; }
 ${R} .bf-disclosure[aria-expanded="true"] svg { transform: rotate(90deg); }
-${R} .bf-footnote { margin: 0; font-size: 12px; line-height: 16px; color: var(--bf-tertiary-label); }
+${R} .bf-footnote { margin: 0; font-size: 12px; line-height: 16px; color: var(--bf-tertiary-label); text-wrap: pretty; }
 @media (prefers-reduced-motion: reduce) { ${R} * { transition: none !important; } }
 ${STATUS_ILLUSTRATION_CSS}
 `;
 
-// Lucide's chevron-right, rotate-cw and copy/check, inline: the
-// icon package is part of the bundle that may not have run.
+// Lucide's chevron-right, inline: the icon package is part of the bundle that
+// may not have run. The buttons carry words only; an icon beside "Reload" was
+// decoration on a page meant to be calm.
 const SVG_ATTRS =
   'xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
   'stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"';
 const ICON_CHEVRON = `<svg ${SVG_ATTRS}><path d="m9 18 6-6-6-6"/></svg>`;
-const ICON_RELOAD = `<svg ${SVG_ATTRS}><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg>`;
-const ICON_COPY = `<svg ${SVG_ATTRS}><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>`;
-const ICON_CHECK = `<svg ${SVG_ATTRS}><path d="M20 6 9 17l-5-5"/></svg>`;
 
 type BootFailureCopy = {
   title: string;
+  loadFailedTitle: string;
   recoveryTitle: string;
   loadFailed: string;
   unknown: string;
@@ -482,9 +477,9 @@ type BootFailureCopy = {
 const COPY: Record<'en' | 'zh_CN', BootFailureCopy> = {
   en: {
     title: "Lody didn't start this time",
+    loadFailedTitle: "Part of Lody didn't load",
     recoveryTitle: 'The Lody window stopped',
-    loadFailed:
-      "Part of Lody didn't load. Your sessions and files are untouched — reloading usually fixes this.",
+    loadFailed: 'Your sessions and files are untouched — reloading usually fixes this.',
     unknown:
       "Your sessions and files are untouched. Reloading usually gets things going; if it doesn't, copy the error and send it to us.",
     recovery:
@@ -499,8 +494,9 @@ const COPY: Record<'en' | 'zh_CN', BootFailureCopy> = {
   },
   zh_CN: {
     title: 'Lody 这次没能启动',
+    loadFailedTitle: 'Lody 有一部分没加载出来',
     recoveryTitle: 'Lody 窗口停下来了',
-    loadFailed: 'Lody 有一部分没加载出来。你的会话和文件都没有受影响，通常重新加载就能恢复。',
+    loadFailed: '你的会话和文件都没有受影响，通常重新加载就能恢复。',
     unknown: '你的会话和文件都没有受影响。通常重新加载就能恢复；如果不行，请复制错误发给我们。',
     recovery:
       '你的会话和文件都没有受影响。重新加载即可重新打开；如果反复出现，请复制错误发给我们。',
@@ -550,10 +546,12 @@ function describeFailure(
 ): { title: string; description: string } {
   if (surface === 'recovery') return { title: copy.recoveryTitle, description: copy.recovery };
   // A chunk that did not load or a stale asset is the one case where the
-  // likely fix is known, so the page says it instead of the generic line.
-  const description =
-    kind === 'module_load' || kind === 'stale_asset' ? copy.loadFailed : copy.unknown;
-  return { title: copy.title, description };
+  // cause and the likely fix are known, so the title names the cause — Lody
+  // did start; part of it did not load — and the line under it names the fix.
+  if (kind === 'module_load' || kind === 'stale_asset') {
+    return { title: copy.loadFailedTitle, description: copy.loadFailed };
+  }
+  return { title: copy.title, description: copy.unknown };
 }
 
 function buildFootnote(
@@ -609,8 +607,8 @@ export function renderBootFailure(
     (diag.hint ? `<p class="bf-description">${escapeHtml(diag.hint)}</p>` : '') +
     `</div>` +
     `<div class="bf-actions">` +
-    `<button type="button" class="bf-button bf-primary" data-action="reload">${ICON_RELOAD}<span>${escapeHtml(copy.reload)}</span></button>` +
-    `<button type="button" class="bf-button bf-secondary" data-action="copy">${ICON_COPY}<span>${escapeHtml(copy.copy)}</span></button>` +
+    `<button type="button" class="bf-button bf-primary" data-action="reload">${escapeHtml(copy.reload)}</button>` +
+    `<button type="button" class="bf-button bf-secondary" data-action="copy">${escapeHtml(copy.copy)}</button>` +
     `</div>` +
     `<pre class="bf-message">${escapeHtml(diag.message)}</pre>` +
     `<p class="bf-status" data-role="status" aria-live="polite"></p>` +
@@ -650,10 +648,7 @@ export function renderBootFailure(
   if (copyButton) {
     let copiedTimer: number | undefined;
     const showCopyLabel = (copied: boolean) => {
-      copyButton.classList.toggle('bf-copied', copied);
-      copyButton.innerHTML = `${copied ? ICON_CHECK : ICON_COPY}<span>${escapeHtml(
-        copied ? copy.copied : copy.copy
-      )}</span>`;
+      copyButton.textContent = copied ? copy.copied : copy.copy;
     };
     copyButton.addEventListener('click', () => {
       postBootBeaconEvent('app/boot_failure_copy_clicked', { platform: beaconPlatform });

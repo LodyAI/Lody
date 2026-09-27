@@ -1,14 +1,14 @@
 {
   "name": "kimi-code",
-  "version": "2.0.2-lody.d4caf044fe0c",
+  "version": "2.0.2-lody.4befe38ffe0a",
   "sourceVersion": "2.0.2",
-  "sourceCommit": "d4caf044fe0c3c12aa8496f9fa442643d521e479",
+  "sourceCommit": "4befe38ffe0a1d8b0313162c40e7359ed95e5244",
   "kind": "node-package",
   "minNodeVersion": "22.19.0",
   "artifact": {
-    "fileName": "lody-kimi-code-2.0.2-lody.d4caf044fe0c-9815b2b309f842e7.tar.zst",
-    "sha256": "9815b2b309f842e7880385555c46bc80f77a802190c9e733398d3143272f686a",
-    "size": 3251372,
+    "fileName": "lody-kimi-code-2.0.2-lody.4befe38ffe0a-bb3af82c95b5d416.tar.zst",
+    "sha256": "bb3af82c95b5d4166f89099fb4ecd705fda8ae93841e9a32442a64b239565774",
+    "size": 3250572,
     "compression": "zstd",
     "cmd": "package/dist/main.mjs"
   }

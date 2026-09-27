@@ -65,7 +65,7 @@ export function UpdateChangelogDialog({
 
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
-      <Dialog.Content style={{ width: PANEL_WIDTH }}>
+      <Dialog.Content width={PANEL_WIDTH}>
         <Dialog.Header>
           <Dialog.Title>
             {t('updates.changelog.title', "What's new in {{version}}", { version })}

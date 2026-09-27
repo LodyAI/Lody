@@ -28,8 +28,8 @@ clicks/drags entirely and hides the disc; state fallbacks may still idle.
 Typing uses controlled state (`setPrompt` / `setReply`) via `scheduleTypedText`.
 
 Each demo is a scripted "ghost user" (`.lody-demo-cursor`, portaled to `<body>`)
-that drives real `landing-app-preview.tsx` components via pointer events, with
-direct state fallbacks so a loop never stalls. The indicator is an iPad-style
+that drives the display-only replica (`components/landing-replica/`) via pointer
+events on its DOM hooks, with direct state fallbacks so a loop never stalls. The indicator is an iPad-style
 touch disc (CSS), not a desktop arrow cursor.
 
 ## Tab 1 — worktree (`demo="worktree"`)
@@ -38,12 +38,12 @@ touch disc (CSS), not a desktop arrow cursor.
   (state only) → send → session streams reply. Panel stays closed. On compact
   viewports (`max-width: 1200px` or `max-height: 960px` — phone, tablet, and
   ~1000px laptops) the desktop shell is contain-scaled into the reveal frame
-  (`ForceDesktopLayoutProvider` + `.landing-desktop-demo-shell`) — it does NOT
-  switch to the real mobile session chrome. Roomy desktops keep a fluid shell
+  (`.landing-desktop-demo-shell`) — it does NOT switch to the mobile session
+  chrome. Roomy desktops keep a fluid shell
   at the fixed 1120×760 stage.
-- **No phone focus camera:** `focusDemo` is a no-op — Ken-Burns pan/zoom fought
-  the ghost cursor on mobile. Shell stays at rest contain-scale; `moveCursorToEl`
-  uses live element rects only.
+- **No phone focus camera:** Ken-Burns pan/zoom fought the ghost cursor on
+  mobile and was removed. The shell stays at rest contain-scale; the cursor uses
+  live element rects only.
 - **Mobile tab only** owns the iPhone UI (see tab 4).
 
 Budget `WORKTREE_DEMO_DURATION_MS`.
@@ -61,9 +61,9 @@ comment → hot-reload. Budget `DESIGN_DEMO_DURATION_MS`.
 
 ## Tab 4 — mobile (`demo="mobile"`)
 
-iPhone frame at the same stage height as desktop demos (760, not taller) — real
-mobile UI via `ForceMobileLayoutProvider`, no full-width card chrome flash → new
-chat → type jellyfish prompt → stream image. Budget `MOBILE_DEMO_DURATION_MS`.
+iPhone frame at the same stage height as desktop demos (760, not taller) — the
+replica's mobile home, new-chat sheet, and session, no full-width card chrome
+flash → new chat → type jellyfish prompt → stream image. Budget `MOBILE_DEMO_DURATION_MS`.
 
 ## Post-demo scroll sections
 
@@ -84,6 +84,7 @@ subscriptions only.
   public site has no dependency on private rollout plans.
 - Dynamic Island: real iPhone still at `/landing/dynamic-island.png` — **not**
   simulated inside the feature-tab play stage. Optional short loop still open.
-- Power grid: live demos via `StatsSettingsView` + `PrTabView` with deterministic
-  mock data (`landing-power-demos.tsx`) — no static screenshots (theme mismatch).
+- Power grid: live usage and PR replicas (`landing-replica/power-usage.tsx`,
+  `power-pr.tsx`) with deterministic mock data (`landing-power-demos.tsx`) — no
+  static screenshots (theme mismatch).
   Diff / line-comment review is only in the feature-tab play stage.

@@ -20,7 +20,9 @@ function BrokenMessages() {
 }
 function button(text: string) {
   const found = [...container.querySelectorAll('button')].find((element) =>
-    element.textContent?.toLowerCase().includes(text.toLowerCase())
+    `${element.textContent ?? ''} ${element.getAttribute('aria-label') ?? ''}`
+      .toLowerCase()
+      .includes(text.toLowerCase())
   );
   if (!found) throw new Error(`Missing button: ${text}`);
   return found;
@@ -69,7 +71,7 @@ it('copies the original exception and caught React stack without resetting the d
   expect(report).toContain('Boundary: SessionChatStream');
   expect(report).toContain('Component stack:');
   expect(report).toContain('BrokenMessages');
-  expect(container.textContent).toContain('Copied');
+  expect(button('Copied')).toBeDefined();
   expect(container.querySelector('textarea')?.value).toBe('unsent draft');
   crash = false;
   await click('Try again');

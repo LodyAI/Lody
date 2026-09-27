@@ -10,6 +10,7 @@ import {
 } from '../fixtures/session-relation-lifecycle-fixture.js';
 import { isProcessAlive } from '../fixtures/session-fork-fixture.js';
 import type { AdditionalWorktreeFork, SessionForkResources } from './session-fork-page.js';
+import { openSidebarArchive } from './sidebar-footer.js';
 
 export type SessionRelationLifecycleResources = {
   rootSessionId: string;
@@ -238,7 +239,7 @@ export class SessionRelationLifecyclePage {
   }
 
   private async openArchive(): Promise<void> {
-    await this.page.getByRole('button', { name: /^(Archive|归档)$/u, exact: true }).click();
+    await openSidebarArchive(this.page);
     await expect(this.page).toHaveURL(/#\/local\/archive(?:\?.*)?$/u);
   }
 

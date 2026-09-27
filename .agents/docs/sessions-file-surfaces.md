@@ -47,7 +47,10 @@ this page is the full text of the rules summarised there.
   clicks while pending; browser downloads remain independent. Each export uses an isolated
   cache filename. No remote host path is passed to the device OS.
   The path is resolved on the OWNING machine (its Flock `dotlodyPath` /
-  local-project root) and is built ONLY from that workspace root plus a
+  local-project root). The owning daemon publishes a real, normalized project
+  root even for older registrations through a symbolic link, so the renderer's
+  worktree ID matches the directory the daemon created. The file path is built
+  ONLY from that workspace root plus a
   genuinely workspace-relative viewer path — `lib/session-local-file-path.ts`
   rejects absolute and `..` paths, so a remote session can never hand this
   machine's shell a path of its choosing. The Files tree and the side-panel ⋯

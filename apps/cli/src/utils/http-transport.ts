@@ -109,6 +109,7 @@ export function createCliHttpTransport(
           },
           proxyTls: {
             timeout: config.connectTimeoutMs,
+            autoSelectFamily: true,
           },
         });
       }
@@ -123,6 +124,8 @@ export function createCliHttpTransport(
         maxConcurrentStreams: config.maxConcurrentStreams,
         connect: {
           timeout: config.connectTimeoutMs,
+          // Try both address families even if the embedding runtime disables it.
+          autoSelectFamily: true,
         },
       });
     },

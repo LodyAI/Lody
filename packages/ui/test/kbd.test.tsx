@@ -6,6 +6,7 @@ import { Kbd, KbdGroup } from '../src/kbd/kbd';
 import { kbd, kbdPaletteTheme } from '../src/kbd/kbd.tokens.stylex';
 import { forcedThemeClassNames } from '../src/theme/theme';
 import { Tooltip } from '../src/tooltip/tooltip';
+import { text } from '../src/tokens/scales.stylex';
 import { all, classesOf, mount, one, type Mounted } from './dom';
 
 /** See `menu.test.tsx`: the same loosened call the primitives make. */
@@ -70,6 +71,32 @@ describe('Kbd', () => {
     const inherit = stylex.create({ probe: { fontFamily: 'inherit' } });
     for (const className of classesFor(inherit.probe)) {
       expect(capClasses()).toContain(className);
+    }
+  });
+
+  test('a medium cap reads at the footnote step inside the same cap', () => {
+    // A shortcuts sheet is read, not glanced at, so its caps step up to 12px;
+    // the fill, height and corner stay the cap's own.
+    const html = renderToStaticMarkup(<Kbd size="medium">K</Kbd>);
+    const medium = (/class="([^"]*)"/.exec(html)?.[1] ?? '').split(' ').filter(Boolean);
+    const footnote = stylex.create({
+      probe: { fontSize: text.footnoteSize, lineHeight: text.footnoteLeading },
+    });
+    const caption = stylex.create({
+      probe: { fontSize: kbd.labelSize, lineHeight: kbd.labelLeading },
+    });
+    for (const className of classesFor(footnote.probe)) {
+      expect(medium).toContain(className);
+    }
+    for (const className of classesFor(caption.probe)) {
+      expect(medium).not.toContain(className);
+      expect(capClasses()).toContain(className);
+    }
+    const material = stylex.create({
+      probe: { height: kbd.height, backgroundColor: kbd.background },
+    });
+    for (const className of classesFor(material.probe)) {
+      expect(medium).toContain(className);
     }
   });
 

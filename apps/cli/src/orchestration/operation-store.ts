@@ -518,6 +518,15 @@ export class LodyOperationStore {
     return rows.map((row) => this.decodeOperation(row));
   }
 
+  hasPendingWorkForRequester(workspaceId: WorkspaceId, requesterSessionId: SessionId): boolean {
+    return !!this.db
+      .prepare(
+        `SELECT 1 FROM operations WHERE workspace_id=? AND requester_session_id=? AND state='active'
+      UNION ALL SELECT 1 FROM deliveries WHERE workspace_id=? AND requester_session_id=? AND state='pending' LIMIT 1`
+      )
+      .get(workspaceId, requesterSessionId, workspaceId, requesterSessionId);
+  }
+
   // Absence of a settlement is the durable obligation, including for Operations
   // created before this table existed. Delivery consumption does not discharge it.
   listPendingProgress(workspaceId: WorkspaceId, ownerMachineId: MachineId): StoredLodyOperation[] {

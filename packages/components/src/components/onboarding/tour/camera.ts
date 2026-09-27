@@ -94,6 +94,36 @@ export function resolveAnchor(stage: HTMLElement, anchor: string): HTMLElement |
     const bar = stage.querySelector<HTMLElement>('[data-tour-anchor="tab-bar"]');
     return bar?.querySelectorAll<HTMLElement>('[role="tab"]')[tab] ?? null;
   }
+  // The run-config trigger belongs to the composer footer; the product marks it
+  // for its own reasons (the onboarding blueprint and camera both aim at it).
+  if (anchor === 'composer.run-config') {
+    return stage.querySelector<HTMLElement>(
+      '[data-tour-anchor="composer"] [data-run-config-trigger]'
+    );
+  }
+  if (anchor === 'composer.input') {
+    return stage.querySelector<HTMLElement>(
+      '[data-tour-anchor="composer"] [data-lody-composer-input]'
+    );
+  }
+  if (anchor === 'composer.card' || anchor === 'composer.send') {
+    const input = stage.querySelector<HTMLElement>(
+      '[data-tour-anchor="composer"] [data-lody-composer-input]'
+    );
+    // The card is the input's nearest ancestor that paints its own ground.
+    let card: HTMLElement | null = input?.parentElement ?? null;
+    while (card && getComputedStyle(card).backgroundColor === 'rgba(0, 0, 0, 0)') {
+      card = card.parentElement;
+    }
+    if (anchor === 'composer.card') return card;
+    const buttons = card?.querySelectorAll<HTMLElement>('button');
+    return buttons && buttons.length > 0 ? buttons[buttons.length - 1]! : null;
+  }
+  if (anchor === 'sidebar.workspace') {
+    return stage.querySelector<HTMLElement>(
+      '[data-tour-anchor="sidebar"] [data-workspace-switcher-trigger]'
+    );
+  }
   if (anchor === 'pr.merge') {
     const buttons = stage.querySelectorAll<HTMLElement>(
       '[data-tour-anchor="side-panel"] [data-pr-merge-control] > button:first-child'

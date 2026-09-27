@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Check, Copy, RotateCcw } from 'lucide-react';
+import { Check, Copy } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { text } from '@lody/ui/tokens/scales.stylex';
@@ -59,46 +59,54 @@ export function MessageListErrorFallback({
   const headline = isRawConvexServerError(error)
     ? t('errorBoundary.serverErrorSummary', 'The Lody backend returned a server error.')
     : report.summary;
+  const copyLabel =
+    copyState === 'copied'
+      ? t('errorBoundary.copied', 'Copied')
+      : t('errorBoundary.copyDetails', 'Copy error details');
 
   return (
     <StatusPage
       layout="pane"
-      tone="danger"
       illustration="broken"
       role="alert"
       title={t('sessions.messageListCrashedTitle', "Messages couldn't be displayed")}
       description={t(
         'sessions.messageListCrashed',
-        'The message list failed to render. Your draft message below is safe.'
+        'The message list failed to render. Your draft below is safe.'
       )}
     >
       <StatusPageActions>
         <Button type="button" size="small" onClick={resetErrorBoundary}>
-          <RotateCcw {...stylex.props(styles.icon14)} aria-hidden="true" />
           {t('errorBoundary.tryAgain', 'Try again')}
         </Button>
-        <Button
-          type="button"
-          variant="secondary"
-          size="small"
-          onClick={() => {
-            void writeTextToClipboard(report.text).then((ok) => {
-              setCopyState(ok ? 'copied' : 'failed');
-              if (!ok) setDetailsOpen(true);
-            });
-          }}
-        >
-          {copyState === 'copied' ? (
-            <Check {...stylex.props(styles.icon14, styles.success)} aria-hidden="true" />
-          ) : (
-            <Copy {...stylex.props(styles.icon14)} aria-hidden="true" />
-          )}
-          {copyState === 'copied'
-            ? t('errorBoundary.copied', 'Copied')
-            : t('errorBoundary.copyDetails', 'Copy error details')}
-        </Button>
       </StatusPageActions>
-      <StatusPageCode>{headline}</StatusPageCode>
+      <StatusPageCode
+        action={
+          // As on the crash screen, copying acts on the error, so it sits on it.
+          <Button
+            type="button"
+            variant="ghost"
+            size="mini"
+            icon
+            aria-label={copyLabel}
+            title={copyLabel}
+            onClick={() => {
+              void writeTextToClipboard(report.text).then((ok) => {
+                setCopyState(ok ? 'copied' : 'failed');
+                if (!ok) setDetailsOpen(true);
+              });
+            }}
+          >
+            {copyState === 'copied' ? (
+              <Check {...stylex.props(styles.icon14, styles.success)} aria-hidden="true" />
+            ) : (
+              <Copy {...stylex.props(styles.icon14)} aria-hidden="true" />
+            )}
+          </Button>
+        }
+      >
+        {headline}
+      </StatusPageCode>
       {copyState === 'failed' ? (
         <p role="status" {...stylex.props(styles.copyFailed)}>
           {t(

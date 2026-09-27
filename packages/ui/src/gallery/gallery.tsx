@@ -12,8 +12,8 @@ import {
 import { Avatar, type AvatarSize } from '../avatar/avatar';
 import { avatar as avatarTokens } from '../avatar/avatar.tokens.stylex';
 import { Badge, type BadgeTone } from '../badge/badge';
-import { badge as badgeTokens } from '../badge/badge.tokens.stylex';
-import { Button } from '../button/button';
+import { badge as badgeTokens, badgeProminentSuccessTheme } from '../badge/badge.tokens.stylex';
+import { Button, ButtonGroup } from '../button/button';
 import { button } from '../button/button.tokens.stylex';
 import { Card } from '../card/card';
 import { card as cardTokens } from '../card/card.tokens.stylex';
@@ -58,12 +58,14 @@ import { Select } from '../field/select';
 import { Separator } from '../separator/separator';
 import { Switch } from '../field/switch';
 import { Textarea } from '../field/textarea';
+import { well } from '../field/well';
 import { Toggle, type ToggleSize } from '../toggle/toggle';
 import { ToggleGroup } from '../toggle/toggle-group';
 import { toggle as toggleTokens } from '../toggle/toggle.tokens.stylex';
 import { Toolbar } from '../toggle/toolbar';
 import { Pagination } from '../table/pagination';
 import { Popover } from '../popover/popover';
+import { PreviewCard } from '../popover/preview-card';
 import { popup } from '../popup/popup.tokens.stylex';
 import { surface } from '../popup/surface';
 import { Table, type TableColumn, type TableSize, type TableSorting } from '../table/table';
@@ -143,6 +145,7 @@ const styles = stylex.create({
     color: colors.secondaryLabel,
   },
   well: { backgroundColor: colors.wellBackground, boxShadow: shadow.inset },
+  bareTextareaShell: { padding: space[2], borderRadius: radius.medium },
   page: { backgroundColor: colors.background },
   region: { backgroundColor: colors.secondaryBackground },
   card: { backgroundColor: colors.elevatedBackground, boxShadow: shadow.card },
@@ -491,6 +494,7 @@ const styles = stylex.create({
    * surface that has to cap one caps the badge.
    */
   badgeClamp: { maxWidth: '96px' },
+  badgeThemeWrapper: { display: 'contents' },
   /** A row of controls with a line down it: the separator's other orientation. */
   separatorToolbar: { display: 'flex', alignItems: 'center', gap: space[2] },
   skeletonLines: { display: 'flex', flexDirection: 'column', gap: space[2], flexGrow: 1 },
@@ -1835,6 +1839,18 @@ function SessionMenu() {
   );
 }
 
+function CompactMenu() {
+  return (
+    <Menu.Root>
+      <Menu.Trigger render={<Button variant="secondary" />}>Two choices</Menu.Trigger>
+      <Menu.Content width="compact">
+        <Menu.Item>Local</Menu.Item>
+        <Menu.Item>Worktree</Menu.Item>
+      </Menu.Content>
+    </Menu.Root>
+  );
+}
+
 /**
  * The popover surface, drawn from `popup/surface.ts` on a stand-in. The real
  * popover above it opens over whatever is under it, which a board cannot hold
@@ -1900,6 +1916,26 @@ function PopoverReplica() {
         </dl>
       </div>
     </Row>
+  );
+}
+
+/**
+ * A preview card a reader can hover: the popover's surface, opened by resting
+ * the pointer rather than by a press, and holding facts rather than a form.
+ */
+function BranchPreviewCard() {
+  return (
+    <PreviewCard.Root>
+      <PreviewCard.Trigger href="#preview-card">feat/session-preview</PreviewCard.Trigger>
+      <PreviewCard.Content side="bottom" align="start">
+        <div {...stylex.props(surface.panelHeader)}>
+          <h3 {...stylex.props(surface.panelTitle)}>feat/session-preview</h3>
+          <p {...stylex.props(surface.panelDescription)}>
+            A worktree on Studio Mac, 3 commits ahead of main.
+          </p>
+        </div>
+      </PreviewCard.Content>
+    </PreviewCard.Root>
   );
 }
 
@@ -3078,6 +3114,9 @@ function BadgeToneRow() {
             {tone}
           </Badge>
         ))}
+        <span {...stylex.props(styles.badgeThemeWrapper, badgeProminentSuccessTheme)}>
+          <Badge tone="success">prominent success</Badge>
+        </span>
         <Badge icon={<TickGlyph />}>Verified</Badge>
         <Badge>v1.42.0</Badge>
         <Badge className={stylex.props(styles.badgeClamp).className}>
@@ -3306,6 +3345,14 @@ function KbdRow() {
           <Kbd>&#8984;</Kbd>
           <Kbd>&#8679;</Kbd>
           <Kbd>P</Kbd>
+        </KbdGroup>
+      </Cluster>
+      <LegendKey>medium</LegendKey>
+      <Cluster>
+        <KbdGroup>
+          <Kbd size="medium">Ctrl</Kbd>
+          <Kbd size="medium">Shift</Kbd>
+          <Kbd size="medium">[</Kbd>
         </KbdGroup>
       </Cluster>
       <span {...stylex.props(styles.rungUse)}>
@@ -3969,6 +4016,30 @@ export function UiGallery({ palettes = 'both' }: UiGalleryProps) {
               </Cluster>
             </Row>
             <Row>
+              <LegendKey>ButtonGroup</LegendKey>
+              <Cluster>
+                <ButtonGroup>
+                  <Button size="small">Merge</Button>
+                  <Button size="small" icon aria-label="Merge options">
+                    <PlusGlyph />
+                  </Button>
+                </ButtonGroup>
+                <ButtonGroup>
+                  <Button size="small" variant="secondary">
+                    Squash
+                  </Button>
+                  <Button size="small" variant="secondary" icon aria-label="Merge options">
+                    <PlusGlyph />
+                  </Button>
+                </ButtonGroup>
+                <ButtonGroup>
+                  <Button variant="secondary">Day</Button>
+                  <Button variant="secondary">Week</Button>
+                  <Button variant="secondary">Month</Button>
+                </ButtonGroup>
+              </Cluster>
+            </Row>
+            <Row>
               <LegendKey>icon</LegendKey>
               <Cluster>
                 {BUTTON_SIZES.map((size) => (
@@ -4075,6 +4146,14 @@ export function UiGallery({ palettes = 'both' }: UiGalleryProps) {
                 <Field.Label>What should the agent do?</Field.Label>
                 <Textarea placeholder="Describe the task" rows={3} />
                 <Field.Description>Enter sends; Shift+Enter adds a line.</Field.Description>
+              </Field.Root>
+            </FieldRow>
+            <FieldRow legend="textarea · bare in shell">
+              <Field.Root name="embedded-summary">
+                <Field.Label>Embedded editor</Field.Label>
+                <div {...stylex.props(well.shell, styles.bareTextareaShell)}>
+                  <Textarea appearance="bare" placeholder="Continue editing" rows={3} />
+                </div>
               </Field.Root>
             </FieldRow>
             <FieldRow legend="textarea · invalid">
@@ -4366,6 +4445,7 @@ export function UiGallery({ palettes = 'both' }: UiGalleryProps) {
               <LegendKey>dropdown</LegendKey>
               <Cluster>
                 <SessionMenu />
+                <CompactMenu />
               </Cluster>
             </Row>
             <Row>
@@ -4414,7 +4494,7 @@ export function UiGallery({ palettes = 'both' }: UiGalleryProps) {
 
       <Section
         title="Popover · a surface with content on it"
-        rule="A popover is the floating rung a Select list and a Menu already open, holding content instead of rows. It replaces five of a list's declarations: the width a list takes from the control that shows its value, the 4px inset that lets a row bleed to the surface's edge, and the three that make the type a control's — size, weight and tracking — because what is in a popover is sentences at 14 and weight 400. A control placed in one brings its own step. It is opened by whatever the surface already had there, through render, the way a menu is."
+        rule="A popover is the floating rung a Select list and a Menu already open, holding content instead of rows. It replaces five of a list's declarations: the width a list takes from the control that shows its value, the 4px inset that lets a row bleed to the surface's edge, and the three that make the type a control's — size, weight and tracking — because what is in a popover is sentences at 14 and weight 400. A control placed in one brings its own step. It is opened by whatever the surface already had there, through render, the way a menu is. A preview card is the same surface opened by a resting pointer: it takes no focus and is not a dialog."
       >
         <PaletteSplit palettes={palettes}>
           <Rows>
@@ -4422,6 +4502,12 @@ export function UiGallery({ palettes = 'both' }: UiGalleryProps) {
               <LegendKey>popover</LegendKey>
               <Cluster>
                 <FilterPopover />
+              </Cluster>
+            </Row>
+            <Row>
+              <LegendKey>preview card</LegendKey>
+              <Cluster>
+                <BranchPreviewCard />
               </Cluster>
             </Row>
             <PopoverReplica />

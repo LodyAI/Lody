@@ -873,7 +873,11 @@ const TaskGroupSection = memo(function TaskGroupSection({
                             ) : null}
                             {showMergeablePill ? <SessionMergeablePill /> : null}
                             {hasPr ? (
-                              <SessionPrIcon prStatus={prStatus} prCiState={task.prCiState} />
+                              <SessionPrIcon
+                                compact
+                                prStatus={prStatus}
+                                prCiState={task.prCiState}
+                              />
                             ) : null}
                             {task.sharing ? <SessionSharingIndicator state={task.sharing} /> : null}
                           </span>
@@ -896,11 +900,12 @@ const TaskGroupSection = memo(function TaskGroupSection({
               const showInfoCard = !isMobile;
               const menuRow = hasMenuActions ? (
                 <ContextMenu.Root key={task.taskId}>
-                  <ContextMenu.Trigger >{row}</ContextMenu.Trigger>
+                  <ContextMenu.Trigger>{row}</ContextMenu.Trigger>
                   <ContextMenu.Content className="min-w-[180px]">
                     {onOpenPullRequest && prUrl ? (
                       <>
                         <ContextMenu.Item
+                          icon={<GitPullRequest />}
                           onClick={() => {
                             onOpenPullRequest({
                               taskId: task.taskId,
@@ -910,7 +915,6 @@ const TaskGroupSection = memo(function TaskGroupSection({
                             });
                           }}
                         >
-                          <GitPullRequest />
                           {contextMenuLabels.openPr}
                         </ContextMenu.Item>
                         {onRenameTask ||
@@ -924,31 +928,31 @@ const TaskGroupSection = memo(function TaskGroupSection({
                     ) : null}
                     {onRenameTask ? (
                       <ContextMenu.Item
+                        icon={<Pencil />}
                         onClick={() => {
                           beginRename(task.taskId, task.title);
                         }}
                       >
-                        <Pencil />
                         {contextMenuLabels.rename}
                       </ContextMenu.Item>
                     ) : null}
                     {onTogglePinTask ? (
                       <ContextMenu.Item
+                        icon={task.isPinned ? <PinOff /> : <Pin />}
                         onClick={() => {
                           onTogglePinTask(task.taskId, !task.isPinned);
                         }}
                       >
-                        {task.isPinned ? <PinOff /> : <Pin />}
                         {task.isPinned ? contextMenuLabels.unpin : contextMenuLabels.pin}
                       </ContextMenu.Item>
                     ) : null}
                     {onArchiveTask ? (
                       <ContextMenu.Item
+                        icon={<Archive />}
                         onClick={() => {
                           onArchiveTask(task.taskId);
                         }}
                       >
-                        <Archive />
                         {contextMenuLabels.archive}
                       </ContextMenu.Item>
                     ) : null}
@@ -958,28 +962,30 @@ const TaskGroupSection = memo(function TaskGroupSection({
                     ) : null}
                     {onCopySessionUrl ? (
                       <ContextMenu.Item
+                        icon={<Link2 />}
                         onClick={() => {
                           onCopySessionUrl(task.taskId);
                         }}
                       >
-                        <Link2 />
                         {contextMenuLabels.copyUrl}
                       </ContextMenu.Item>
                     ) : null}
                     {shareMenuState ? (
                       <ContextMenu.Item
                         disabled={shareMenuState !== 'share'}
+                        icon={
+                          shareMenuState === 'share' ? (
+                            <Users />
+                          ) : shareMenuState === 'loading' ? (
+                            <Spinner />
+                          ) : (
+                            <LockKeyhole />
+                          )
+                        }
                         onClick={() => {
                           onShareSessionWithTeam?.(task.taskId);
                         }}
                       >
-                        {shareMenuState === 'share' ? (
-                          <Users />
-                        ) : shareMenuState === 'loading' ? (
-                          <Spinner />
-                        ) : (
-                          <LockKeyhole />
-                        )}
                         {shareMenuState === 'share'
                           ? contextMenuLabels.shareWithTeam
                           : shareMenuState === 'unregistered'
@@ -991,11 +997,11 @@ const TaskGroupSection = memo(function TaskGroupSection({
                     ) : null}
                     {task.branchName ? (
                       <ContextMenu.Item
+                        icon={<GitBranch />}
                         onClick={() => {
                           void navigator.clipboard.writeText(task.branchName).catch(() => {});
                         }}
                       >
-                        <GitBranch />
                         {contextMenuLabels.copyBranch}
                       </ContextMenu.Item>
                     ) : null}

@@ -4,8 +4,7 @@ import PierreDiffsRenderWorker from '@pierre/diffs/worker/worker.js?worker';
 
 // Isolated so the render worker (a Vite `?worker` import) is the ONLY thing a
 // non-Vite bundle needs to stub out. When this factory returns `undefined`,
-// `<FileDiff>` renders on the main thread via the shared highlighter — see the
-// marketing preview shim in `site-docs/components/app-preview-shims`.
+// `<FileDiff>` renders on the main thread via the shared highlighter.
 const DIFF_RENDER_WORKER_POOL_OPTIONS: WorkerPoolOptions = {
   workerFactory: () => new PierreDiffsRenderWorker(),
   poolSize: 1,

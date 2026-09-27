@@ -69,9 +69,9 @@ export function ChatFailedDetailDialog({
 
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
-      {/* `w-[calc(100vw-2rem)]` keeps the raw error readable on phones, where the
-          shared dialog default reserves 2rem of margin on each side. */}
-      <Dialog.Content className="w-[calc(100vw-2rem)] max-w-2xl gap-3">
+      {/* A wider panel than the modal default keeps the raw error readable; the
+          rung's own viewport cap still bounds it on phones. */}
+      <Dialog.Content width="42rem" className="gap-3">
         <Dialog.Header className="pr-6 text-left sm:text-left">
           <Dialog.Title className="flex items-start gap-2 text-base">
             <AlertCircle className="mt-0.5 size-4 shrink-0 text-destructive" aria-hidden="true" />

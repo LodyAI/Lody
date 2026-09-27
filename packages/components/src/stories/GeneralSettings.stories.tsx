@@ -1,5 +1,10 @@
 import type { Meta, StoryObj } from '@storybook/react';
 import { GeneralSettingsComponent } from '@/components/settings';
+import { AutoLaunchSettingRows } from '@/components/settings/general-setting';
+import { CompactSection } from '@/components/settings/compact-layout';
+import { settingsFlat } from '@/components/settings/material.stylex';
+import * as stylex from '@stylexjs/stylex';
+import { useTranslation } from 'react-i18next';
 import { RoutedStory, SettingsStoryProviders } from './settings-story-shell';
 
 /**
@@ -158,4 +163,44 @@ export const InSettingsLayout: Story = {
   parameters: {
     layout: 'fullscreen',
   },
+};
+
+const autoLaunchState = {
+  supported: true,
+  enabled: false,
+  hideWindowOnAutoLaunch: false,
+  loading: false,
+  enabledLoading: false,
+  hideWindowLoading: false,
+  updateEnabled: async () => {},
+  updateHideWindow: async () => {},
+};
+
+/** The launch rows as the desktop pane draws them, flat inside its surface. */
+function AutoLaunchStory({ state }: { state: Partial<typeof autoLaunchState> }) {
+  const { t } = useTranslation();
+  return (
+    <div
+      data-settings-surface=""
+      className={`${stylex.props(settingsFlat).className ?? ''} w-[640px] bg-background p-8`}
+    >
+      <CompactSection title={t('settings.general.sections.thisComputer', 'This computer')}>
+        <AutoLaunchSettingRows autoLaunch={{ ...autoLaunchState, ...state }} />
+      </CompactSection>
+    </div>
+  );
+}
+
+/** Where the OS has no login item (Linux): both rows step back and say why. */
+export const AutoLaunchUnsupported: Story = {
+  render: () => <AutoLaunchStory state={{ supported: false }} />,
+};
+
+/** Launch at startup is off: hiding the window reads as depending on it. */
+export const AutoLaunchOff: Story = {
+  render: () => <AutoLaunchStory state={{}} />,
+};
+
+export const AutoLaunchOn: Story = {
+  render: () => <AutoLaunchStory state={{ enabled: true, hideWindowOnAutoLaunch: true }} />,
 };

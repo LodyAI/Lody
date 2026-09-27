@@ -33,6 +33,7 @@ import { Checkbox } from '@lody/ui/checkbox';
 import { Dialog } from '@/ui/dialog';
 import { Menu } from '@/ui/menu';
 import { Input } from '@lody/ui/input';
+import { archiveSearchFieldTheme } from './archive-search.stylex';
 import { Tooltip } from '@lody/ui/tooltip';
 import { currentWorkspaceSlugAtom, setMobileDrawerOpenAtom, userAtom } from '@/atoms';
 import { getAgentMetaByIdAtomFamily } from '@/atoms/agents';
@@ -91,7 +92,6 @@ type PrStatusMeta = {
 
 const WIDE = '@media (min-width: 640px)';
 const ROW_HOVER = `color-mix(in oklab, ${colors.elevatedBackground}, ${colors.label} 4%)`;
-const ROW_FOCUS_RING = `inset 0 0 0 ${focus.ringWidth} ${colors.accent}`;
 const ROW_RULE = `inset 0 1px 0 ${colors.separator}`;
 
 const styles = stylex.create({
@@ -110,7 +110,7 @@ const styles = stylex.create({
     paddingInlineStart: '28px',
     paddingInlineEnd: space[2],
     backgroundColor: { default: 'transparent', ':hover': ROW_HOVER },
-    boxShadow: { default: 'none', ':focus-within': ROW_FOCUS_RING },
+    boxShadow: 'none',
     cornerShape: corner.shape,
     cursor: 'pointer',
     transitionProperty: 'background-color',
@@ -119,7 +119,7 @@ const styles = stylex.create({
   },
   rowNested: { paddingInlineStart: '44px' },
   rowRuled: {
-    boxShadow: { default: ROW_RULE, ':focus-within': ROW_FOCUS_RING },
+    boxShadow: ROW_RULE,
   },
   rowFirst: {
     borderTopLeftRadius: radius.large,
@@ -147,7 +147,7 @@ const styles = stylex.create({
     paddingInlineEnd: space[2],
     borderRadius: radius.medium,
     cornerShape: corner.shape,
-    boxShadow: { default: 'none', ':focus-within': ROW_FOCUS_RING },
+    boxShadow: 'none',
     cursor: 'pointer',
   },
   mobileRowNested: { paddingInlineStart: '40px' },
@@ -243,8 +243,8 @@ const styles = stylex.create({
     lineHeight: text.footnoteLeading,
     fontVariantNumeric: 'tabular-nums',
   },
-  added: { color: 'hsl(var(--code-added))' },
-  removed: { color: 'hsl(var(--code-removed))' },
+  added: { color: 'hsl(var(--github-addition))' },
+  removed: { color: 'hsl(var(--github-deletion))' },
   avatarAnchor: { display: 'inline-flex', flexShrink: 0 },
   /* A row's actions answer the pointer on that row, or a keyboard inside them. */
   actions: {
@@ -2185,7 +2185,7 @@ export function ArchiveView() {
           placeholder={t('archive.searchPlaceholder', 'Search archived sessions…')}
           aria-label={t('archive.search', 'Search archive')}
           leading={<Search {...stylex.props(styles.searchGlyph)} aria-hidden="true" />}
-          className={stylex.props(styles.search).className}
+          className={stylex.props(styles.search, archiveSearchFieldTheme).className}
         />
         {isMobile ? (
           <Menu.Root>

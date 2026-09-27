@@ -18,6 +18,7 @@ import {
 } from '../../packages/components/vite-renderer-bundle-aliases'
 import { stylexOptions } from '../../packages/ui/stylex-options'
 import { emojibaseAssetsPlugin } from '../../packages/components/vite-emojibase-assets'
+import { bootShellPlugin } from '../../packages/components/vite-boot-shell'
 
 function getGitCommitHash(): string {
   try {
@@ -190,7 +191,9 @@ export default defineConfig(({ mode }) => {
         // dataset ships in the bundle instead of being fetched from a CDN.
         emojibaseAssetsPlugin(),
         rendererBundleAliasPlugin(),
-        mermaidLazyBoundaryGuardPlugin()
+        mermaidLazyBoundaryGuardPlugin(),
+        // Paints the window's first frame before the renderer bundle has run.
+        bootShellPlugin()
       ]
     }
   }

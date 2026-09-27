@@ -30,6 +30,7 @@ export interface PrCachePayload {
 }
 
 export interface PrCacheEntry {
+  repositoryId?: number;
   workspaceId: string;
   repoFullName: string;
   prNumber: number;
@@ -45,8 +46,13 @@ const STORE_NAME = 'prDataByKey';
 
 const memoryCache = new Map<string, PrCacheEntry>();
 
-export function getPrCacheKey(workspaceId: string, repoFullName: string, prNumber: number): string {
-  return `${workspaceId}:${repoFullName.toLowerCase()}:#${prNumber}`;
+export function getPrCacheKey(
+  workspaceId: string,
+  repoFullName: string,
+  prNumber: number,
+  repositoryId?: number
+): string {
+  return `${workspaceId}:${repositoryId === undefined ? repoFullName.toLowerCase() : `repository-id:${repositoryId}`}:#${prNumber}`;
 }
 
 function openDb(): Promise<IDBDatabase> {
@@ -70,9 +76,10 @@ function openDb(): Promise<IDBDatabase> {
 export async function readPrCacheEntry(
   workspaceId: string,
   repoFullName: string,
-  prNumber: number
+  prNumber: number,
+  repositoryId?: number
 ): Promise<PrCacheEntry | null> {
-  const key = getPrCacheKey(workspaceId, repoFullName, prNumber);
+  const key = getPrCacheKey(workspaceId, repoFullName, prNumber, repositoryId);
   const cached = memoryCache.get(key);
   if (cached) return cached;
   try {
@@ -94,7 +101,12 @@ export async function readPrCacheEntry(
 }
 
 export async function writePrCacheEntry(entry: PrCacheEntry): Promise<void> {
-  const key = getPrCacheKey(entry.workspaceId, entry.repoFullName, entry.prNumber);
+  const key = getPrCacheKey(
+    entry.workspaceId,
+    entry.repoFullName,
+    entry.prNumber,
+    entry.repositoryId
+  );
   memoryCache.set(key, entry);
   try {
     const db = await openDb();

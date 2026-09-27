@@ -1,5 +1,5 @@
 import * as stylex from '@stylexjs/stylex';
-import { useRef, useState, type ComponentProps, type ReactNode } from 'react';
+import { act, useRef, useState, type ComponentProps, type ReactNode } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import { ContextMenu } from '../src/menu/context-menu';
@@ -523,6 +523,9 @@ describe('Menu surface', () => {
   });
 });
 
+/** Written out so a test asserts the declaration rather than the primitive's own constant. */
+const reference = stylex.create({ contents: { display: 'contents' } });
+
 describe('ContextMenu', () => {
   test('opens on a right click over the area it was given', async () => {
     mounted = await mount(
@@ -601,10 +604,43 @@ describe('ContextMenu', () => {
     // written here compiles to is the class the wrapper must be carrying.
     expect(classesOf(wrapper)).toEqual(expect.arrayContaining(classesFor(reference.contents)));
   });
-});
 
-/** Written out so a test asserts the declaration rather than the primitive's own constant. */
-const reference = stylex.create({ contents: { display: 'contents' } });
+  test('a rendered trigger preserves its box and forwards the anchor ref', async () => {
+    vi.useFakeTimers();
+    try {
+      let anchor: HTMLDivElement | null = null;
+      mounted = await mount(
+        <ContextMenu.Root>
+          <ContextMenu.Trigger
+            ref={(element) => {
+              anchor = element;
+            }}
+            render={<div data-anchor />}
+          >
+            Workspace
+          </ContextMenu.Trigger>
+          <ContextMenu.Content>
+            <ContextMenu.Item>Open in new window</ContextMenu.Item>
+          </ContextMenu.Content>
+        </ContextMenu.Root>
+      );
+      const row = one('[data-anchor]');
+      expect(anchor).toBe(row);
+      expect(classesOf(row)).not.toEqual(expect.arrayContaining(classesFor(reference.contents)));
+      await act(async () => {
+        row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(500);
+      });
+      expect(rowNamed('Open in new window')).toBeDefined();
+    } finally {
+      await mounted?.unmount();
+      mounted = undefined;
+      vi.useRealTimers();
+    }
+  });
+});
 
 describe('Menubar', () => {
   function Bar() {

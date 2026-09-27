@@ -1,0 +1,87 @@
+---
+title: Scheduled tasks
+description: Have your machine start a chat with a chosen Agent on a schedule or on demand — or let an Agent propose one from the conversation.
+---
+
+# Scheduled tasks
+
+A **scheduled task** sends a prompt at the times you choose, with the Agent, model, permission mode and project you picked. Every run is an ordinary chat: open it, keep talking, or stop it whenever you like.
+
+Typical uses: summarize yesterday's merged commits every morning, check dependency advisories every weekday, draft the weekly report on Friday — or keep a manual task you run with one click when you need it.
+
+## Where it runs
+
+Scheduled tasks do not run in the cloud. **One of your own machines** owns each one:
+
+- That machine runs the [Lody CLI](/docs/cli) (the desktop app starts it for you), on a version with schedule support.
+- Times are read on **that machine's local time zone**; there is no zone picker. "Every day at 9:00" means 9:00 on that machine.
+- If the machine is off, asleep, or the CLI is not running, nothing runs at that time. See [missed runs](#missed-runs) for what happens afterwards.
+
+You can view and manage scheduled tasks on the web, desktop and phone, but only the owning machine executes them.
+
+## Create a scheduled task
+
+Open **Schedules** in the sidebar and choose **New schedule** (or search "New Schedule" in the command palette). The editor is shaped like the composer:
+
+1. **Name and prompt** — what the Agent should do on each run.
+2. **Agent, model and permission** — the same controls as the bottom of the composer. A new task starts with the machine and Agent you last used on the chat landing, and that Agent's remembered settings.
+3. **Machine, project, worktree** — the project is optional; without one, each run is a plain chat with the Agent and no repository is checked out.
+4. **Send to** and **Trigger** — see below.
+
+Anything missing is marked with an exclamation mark next to the control that fixes it. Saving returns you to the list.
+
+## Triggers
+
+- **On a schedule** — pick a rule under **Repeat**, then the time:
+  - every day, every weekday, every week (choose days), every month (choose dates)
+  - every few hours, every few minutes
+  - once (a date and time)
+- **Manual** — never runs by itself; it runs only when you press **Run now**. Handy for a prompt you reuse.
+
+The editor lists the **Next runs** so you can check the rule. Times and dates are typed in.
+
+## Where runs go
+
+- **New chat each run** (default) — every run starts its own chat.
+- **One chat for this task** — every run is appended to the same chat, for tasks that build on earlier context. The chat is created on the first run; **Start a new chat** moves later runs to a fresh one.
+- **An existing chat** — runs are appended to a chat you pick. That chat's Agent is used, and no separate project is chosen.
+
+## Manage scheduled tasks
+
+Each row in the list shows the name, frequency, next run and what it runs with:
+
+- Timed rows have **Pause** / **Resume** right on the row; manual rows have **Run now**.
+- Right-click a row to open it, run it now, pause or resume, open the **Last run**, or delete it (deleting asks first).
+- Clicking a row slides its details in from the right: pause, run now and delete at the top, **Run history** at the bottom. Drag the divider to resize; click empty space in the list to close.
+
+Only the creator can edit, pause or delete a scheduled task. Pausing stops future runs; chats already started must be cancelled on their own.
+
+## Let an Agent set it up
+
+Tell the Agent something like "check for dependency updates every weekday at 9am" and it drafts the name, prompt and rule, then shows a **Schedule this task?** card in the chat.
+
+- The card uses the current conversation's Agent, permission mode, machine and project, and lists exactly what will be created.
+- **Edit** lets you change the name, prompt and time rule right on the card.
+- **Create** creates it; **Ignore** drops it. Once created the card can no longer be edited — change the task from the Schedules page.
+
+An Agent can only propose a scheduled task; it can never create or change one itself.
+
+## Missed runs
+
+If the machine was offline at the scheduled time, it runs **once** when it comes back, for the most recent missed time — not once per missed slot.
+
+If the previous run is still going when the next one is due, the new run waits and starts once the previous one finishes; at most one run waits.
+
+## FAQ
+
+### A task says "Waiting for the schedule configuration to finish syncing"?
+
+The owning machine has not received the latest configuration yet; for a few seconds after saving this is normal. If it stays, check that the machine is online and its CLI is up to date.
+
+### Why can't I pick a machine?
+
+Scheduled tasks run only on your own machines with a CLI that supports them. Update the Lody CLI on that machine.
+
+### Will my computer wake up to run a task?
+
+No. The CLI checks and runs tasks while the machine is awake; it does not wake a sleeping computer. After waking it catches up once, as described in [missed runs](#missed-runs).

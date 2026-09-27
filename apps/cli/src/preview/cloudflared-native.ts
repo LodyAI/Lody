@@ -214,7 +214,8 @@ export async function startCloudflaredNative(options: {
     stream.on('data', (chunk: string) => {
       pending += chunk;
       if (Buffer.byteLength(pending) > MAX_LOG_LINE_BYTES) {
-        rejectOrigin(new CloudflaredError('start', 'cloudflared log line exceeded its size limit'));
+        exitError ??= new CloudflaredError('start', 'cloudflared log line exceeded its size limit');
+        rejectOrigin(exitError);
         child.kill('SIGTERM');
         pending = '';
         return;
@@ -223,8 +224,16 @@ export async function startCloudflaredNative(options: {
       pending = lines.pop() ?? '';
       for (const line of lines) {
         if (!line.trim()) continue;
+        let raw: unknown;
         try {
-          const log = LogLine.parse(JSON.parse(line));
+          raw = JSON.parse(line);
+        } catch {
+          // Native dependencies (notably quic-go) can write plain-text diagnostics
+          // even with --output json. They are not lifecycle messages.
+          continue;
+        }
+        try {
+          const log = LogLine.parse(raw);
           const origin = parseQuickTunnelOrigin(log.message);
           if (origin) {
             resolveOrigin(origin);
@@ -245,7 +254,10 @@ export async function startCloudflaredNative(options: {
             options.onDiagnostic?.(diagnostic());
           }
         } catch (error) {
-          rejectOrigin(new CloudflaredError('start', 'Invalid cloudflared JSON output', error));
+          // Origin allocation may already have settled. Preserve the first failure
+          // for closed as well, before SIGTERM produces secondary shutdown errors.
+          exitError ??= new CloudflaredError('start', 'Invalid cloudflared JSON output', error);
+          rejectOrigin(exitError);
           child.kill('SIGTERM');
         }
       }

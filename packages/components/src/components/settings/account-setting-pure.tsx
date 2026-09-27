@@ -3,30 +3,15 @@ import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
 import type { Invitation } from 'better-auth/plugins';
 import type { AvatarKind, CliApiKeyRecord } from '@lody/shared';
-import {
-  UserPlus,
-  Mail,
-  Clock,
-  Copy,
-  Trash2,
-  ChevronDown,
-  Check,
-  LogOut,
-  KeyRound,
-  Pencil,
-  X,
-} from 'lucide-react';
+import { Copy, Trash2, ChevronDown, Check, Pencil, X } from 'lucide-react';
 import { Spinner } from '@lody/ui/spinner';
 import { Button } from '@lody/ui/button';
 import { Input } from '@lody/ui/input';
 import { Field as UiField } from '@lody/ui/field';
-import { Badge } from '@lody/ui/badge';
-import { Avatar } from '@lody/ui/avatar';
 import { Alert } from '@lody/ui/alert';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { space } from '@lody/ui/tokens/scales.stylex';
 import { Menu } from '@/ui/menu';
-import { UserAvatar } from '../user-avatar';
 import type { OrganizationMemberRef, OrganizationMemberRole } from '@/lib/organization-member-role';
 import { Dialog } from '@/ui/dialog';
 import { AlertDialog } from '@/ui/dialog';
@@ -41,10 +26,8 @@ import { ChangePasswordButton } from './change-password-button';
 import { LinkedAccountsList, type LinkedAccountInfo } from './linked-accounts-list';
 import { MobileAccountSettings } from '@/components/mobile/mobile-account-settings';
 import { useIsMobile } from '@/hooks/use-mobile';
+import { toIntlLocaleOrEn } from '@/lib/intl-locale';
 import { settingsSurface } from './surface';
-import { settingsType as type } from './type.stylex';
-
-const WIDE = '@media (min-width: 640px)';
 
 const styles = stylex.create({
   loading: {
@@ -71,91 +54,14 @@ const styles = stylex.create({
     whiteSpace: 'nowrap',
     color: colors.label,
   },
+  /** A fact the row states but cannot change: a step quieter than an editable value. */
+  valueQuiet: { color: colors.secondaryLabel },
   valueIcon: { width: '12px', height: '12px', flexShrink: 0, color: colors.tertiaryLabel },
   icon: { width: '14px', height: '14px', flexShrink: 0 },
   /** An icon-only button draws the glyph's box; the glyph fills it. */
   glyph: { width: '100%', height: '100%' },
 
-  /** A record in a list card: its face, what it is, and what can be done to it. */
-  record: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: space[3],
-    paddingInline: space[4],
-    paddingBlock: '8px',
-  },
-  recordText: { flexGrow: 1, minWidth: 0 },
-  recordTitle: {
-    minWidth: 0,
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-    margin: 0,
-    lineHeight: type.leading,
-    color: colors.label,
-  },
-  recordMeta: {
-    minWidth: 0,
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-    margin: 0,
-    marginTop: '2px',
-    fontSize: type.caption,
-    lineHeight: type.leading,
-    color: colors.secondaryLabel,
-  },
-  you: { marginInlineStart: space[1.5], fontSize: type.caption, color: colors.secondaryLabel },
-  recordActions: { display: 'flex', flexShrink: 0, alignItems: 'center', gap: space[1] },
-  inviteMeta: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: space[2],
-    marginTop: '2px',
-    fontSize: type.caption,
-    color: colors.secondaryLabel,
-  },
-  inviteStatus: { display: 'inline-flex', alignItems: 'center', gap: '2px' },
-  clock: { width: '10px', height: '10px', flexShrink: 0 },
-
   noteLoading: { display: 'flex', alignItems: 'center', gap: space[2] },
-  apiKey: {
-    display: 'flex',
-    flexDirection: { default: 'column', [WIDE]: 'row' },
-    alignItems: { default: 'stretch', [WIDE]: 'center' },
-    justifyContent: 'space-between',
-    gap: space[3],
-    paddingInline: space[4],
-    paddingBlock: '8px',
-  },
-  apiKeyText: { display: 'flex', flexDirection: 'column', gap: space[1], minWidth: 0 },
-  apiKeyHead: {
-    display: 'flex',
-    flexWrap: 'wrap',
-    alignItems: 'baseline',
-    columnGap: space[2],
-    rowGap: space[1],
-    minWidth: 0,
-  },
-  apiKeyNote: {
-    minWidth: 0,
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-    margin: 0,
-    color: colors.label,
-  },
-  apiKeyTime: { flexShrink: 0, fontSize: type.caption, color: colors.secondaryLabel },
-  apiKeyMeta: {
-    display: 'flex',
-    flexWrap: 'wrap',
-    columnGap: space[3],
-    rowGap: space[1],
-    fontSize: type.caption,
-    color: colors.secondaryLabel,
-  },
-  mono: { fontFamily: 'var(--font-mono, ui-monospace, monospace)' },
-  alignStart: { alignSelf: { default: 'flex-start', [WIDE]: 'center' } },
 
   /** A dialog's body between its header and its answers. */
   dialogBody: { display: 'flex', flexDirection: 'column', gap: space[3] },
@@ -165,9 +71,7 @@ const styles = stylex.create({
   alignSelfStart: { alignSelf: 'flex-start' },
 });
 
-function formatCliApiKeyTimestamp(
-  value: number | null
-): { label: string; dateTime: string } | null {
+function formatCliApiKeyTimestamp(value: number | null, language: string): string | null {
   if (value === null) {
     return null;
   }
@@ -177,16 +81,13 @@ function formatCliApiKeyTimestamp(
     return null;
   }
 
-  return {
-    label: new Intl.DateTimeFormat(undefined, {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    }).format(date),
-    dateTime: date.toISOString(),
-  };
+  return new Intl.DateTimeFormat(toIntlLocaleOrEn(language), {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(date);
 }
 
 export interface AccountMember {
@@ -334,7 +235,7 @@ export function AccountSettingsPure({
   onClearGeneratedCliApiKey,
   onRevokeCliApiKey,
 }: AccountSettingsPureProps) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const isMobile = useIsMobile();
   const isWorkspaceSurface = surface === 'workspace';
   const [inviteDialogOpen, setInviteDialogOpen] = useState(false);
@@ -564,6 +465,22 @@ export function AccountSettingsPure({
     await onGenerateCliApiKey?.(cliApiKeyNote);
   };
 
+  const cancelInvitation = async (invitationId: string) => {
+    setCancellingInvitationIds((prev) => new Set(prev).add(invitationId));
+    try {
+      await onCancelInvitation(invitationId);
+      setPendingInvitations((prev) => prev.filter((inv) => inv.id !== invitationId));
+    } catch {
+      // Error already handled by onCancelInvitation (toast shown)
+    } finally {
+      setCancellingInvitationIds((prev) => {
+        const next = new Set(prev);
+        next.delete(invitationId);
+        return next;
+      });
+    }
+  };
+
   if (loading) {
     return (
       <div {...stylex.props(styles.loading)}>
@@ -627,12 +544,16 @@ export function AccountSettingsPure({
 
   return (
     <div {...stylex.props(settingsSurface.container)}>
-      {/* Profile: user avatar, display name, connected accounts, password. */}
+      {/* Profile: who the person is — email, display name, avatar, connected accounts. */}
       {surface === 'account' ? (
-        <CompactSection
-          title={t('settings.profile.title')}
-          headerRight={currentUser?.email || undefined}
-        >
+        <CompactSection title={t('settings.profile.title')}>
+          {currentUser?.email ? (
+            <CompactRow label={t('settings.profile.email')}>
+              <span {...stylex.props(styles.valueText, styles.valueQuiet)}>
+                {currentUser.email}
+              </span>
+            </CompactRow>
+          ) : null}
           <CompactRow label={t('settings.profile.name')}>
             {canEditUserName ? (
               isEditingUserName ? (
@@ -692,35 +613,6 @@ export function AccountSettingsPure({
               />
             </CompactRow>
           ) : null}
-          {onChangePassword && onSetupPassword ? (
-            <CompactRow
-              label={t('settings.profile.password.label')}
-              helper={
-                hasPasswordCredential
-                  ? t('settings.profile.password.helper')
-                  : t('settings.profile.password.setupHelper')
-              }
-            >
-              <ChangePasswordButton
-                hasPassword={hasPasswordCredential}
-                onChangePassword={onChangePassword}
-                onVerifyCurrentPassword={onVerifyCurrentPassword}
-                onSetupPassword={onSetupPassword}
-              />
-            </CompactRow>
-          ) : null}
-          <CompactRow label={t('settings.account.signOut')}>
-            <Button
-              variant="secondary"
-              size="small"
-              onClick={() => {
-                void onSignOut();
-              }}
-            >
-              <LogOut {...stylex.props(styles.icon)} />
-              {t('settings.account.signOut')}
-            </Button>
-          </CompactRow>
         </CompactSection>
       ) : null}
 
@@ -898,20 +790,14 @@ export function AccountSettingsPure({
         </AlertDialog.Root>
       ) : null}
 
-      {/* Members */}
+      {/* Members: each a row answered by their role; the role menu also removes them. */}
       {isWorkspaceSurface ? (
         <CompactSection
           title={t('workspace.members.title')}
-          boxed
           actions={
             hasAdminPermission && (
-              <Button
-                icon
-                variant="ghost"
-                aria-label={t('workspace.members.invite')}
-                onClick={() => setInviteDialogOpen(true)}
-              >
-                <UserPlus {...stylex.props(styles.glyph)} />
+              <Button variant="ghost" icon={false} onClick={() => setInviteDialogOpen(true)}>
+                {t('workspace.members.invite')}
               </Button>
             )
           }
@@ -919,182 +805,132 @@ export function AccountSettingsPure({
           {members.map((member) => {
             const isEditable =
               hasAdminPermission && member.role !== 'owner' && member.userId !== currentUser?.id;
+            const name = member.user?.name || member.user?.email || '—';
+            const label =
+              member.userId === currentUser?.id
+                ? `${name} (${t('workspace.members.you', 'you')})`
+                : name;
 
             return (
-              <div key={member.id} {...stylex.props(styles.record)}>
-                <UserAvatar user={member.user} size="large" />
-                <div {...stylex.props(styles.recordText)}>
-                  <p {...stylex.props(styles.recordTitle)}>
-                    {member.user?.name || '—'}
-                    {member.userId === currentUser?.id && (
-                      <span {...stylex.props(styles.you)}>
-                        ({t('workspace.members.you', 'you')})
-                      </span>
-                    )}
-                  </p>
-                  <p {...stylex.props(styles.recordMeta)}>{member.user?.email}</p>
-                </div>
-                <div {...stylex.props(styles.recordActions)}>
-                  {isEditable ? (
-                    <Menu.Root>
-                      <Menu.Trigger render={<Button variant="ghost" size="mini" />}>
-                        {t(`organization.role.${member.role}`)}
-                        <ChevronDown {...stylex.props(styles.valueIcon)} />
-                      </Menu.Trigger>
-                      <Menu.Content align="end">
+              <CompactRow
+                key={member.id}
+                label={label}
+                helper={member.user?.name ? member.user?.email : undefined}
+              >
+                {isEditable ? (
+                  <Menu.Root>
+                    <Menu.Trigger render={<Button variant="secondary" size="small" />}>
+                      {t(`organization.role.${member.role}`)}
+                      <ChevronDown {...stylex.props(styles.valueIcon)} />
+                    </Menu.Trigger>
+                    <Menu.Content align="end">
+                      {(['member', 'admin'] as const).map((nextRole) => (
                         <Menu.Item
+                          key={nextRole}
                           inset
                           icon={
-                            member.role === 'member' ? (
+                            member.role === nextRole ? (
                               <Check {...stylex.props(styles.glyph)} />
                             ) : undefined
                           }
                           onClick={() => {
-                            void onUpdateRole(member, 'member');
+                            void onUpdateRole(member, nextRole);
                           }}
                         >
-                          {t('organization.role.member')}
+                          {t(`organization.role.${nextRole}`)}
                         </Menu.Item>
-                        <Menu.Item
-                          inset
-                          icon={
-                            member.role === 'admin' ? (
-                              <Check {...stylex.props(styles.glyph)} />
-                            ) : undefined
-                          }
-                          onClick={() => {
-                            void onUpdateRole(member, 'admin');
-                          }}
-                        >
-                          {t('organization.role.admin')}
-                        </Menu.Item>
-                      </Menu.Content>
-                    </Menu.Root>
-                  ) : (
-                    // A role nobody here can change is a standing fact about the member.
-                    <Badge>{t(`organization.role.${member.role}`)}</Badge>
-                  )}
-                  {isEditable && (
-                    <Button
-                      variant="ghost"
-                      size="small"
-                      icon
-                      tone="destructive"
-                      onClick={() => {
-                        setUserToDelete(member.id);
-                        setDeleteUserDialogOpen(true);
-                      }}
-                    >
-                      <Trash2 {...stylex.props(styles.glyph)} />
-                    </Button>
-                  )}
-                </div>
-              </div>
+                      ))}
+                      <Menu.Separator />
+                      <Menu.Item
+                        inset
+                        tone="destructive"
+                        onClick={() => {
+                          setUserToDelete(member.id);
+                          setDeleteUserDialogOpen(true);
+                        }}
+                      >
+                        {t('workspace.members.removeFromWorkspace')}
+                      </Menu.Item>
+                    </Menu.Content>
+                  </Menu.Root>
+                ) : (
+                  <span {...stylex.props(styles.valueText, styles.valueQuiet)}>
+                    {t(`organization.role.${member.role}`)}
+                  </span>
+                )}
+              </CompactRow>
             );
           })}
         </CompactSection>
       ) : null}
 
-      {/* Pending Invitations */}
+      {/* Pending invitations: each answered by its status; the menu copies or withdraws it. */}
       {isWorkspaceSurface && pendingInvitations.length > 0 ? (
-        <CompactSection title={t('workspace.invitations.title')} boxed>
-          {pendingInvitations.map((invitation) => (
-            <div key={invitation.id} {...stylex.props(styles.record)}>
-              {/* The invitee has no face yet: the member's circle, holding a mark. */}
-              <Avatar.Root size="large">
-                <Avatar.Fallback>
-                  <Avatar.Glyph>
-                    <Mail {...stylex.props(styles.glyph)} />
-                  </Avatar.Glyph>
-                </Avatar.Fallback>
-              </Avatar.Root>
-              <div {...stylex.props(styles.recordText)}>
-                <p {...stylex.props(styles.recordTitle)}>{invitation.email}</p>
-                <div {...stylex.props(styles.inviteMeta)}>
-                  <span>{t(`organization.role.${invitation.role}`)}</span>
-                  <span {...stylex.props(styles.inviteStatus)}>
-                    <Clock {...stylex.props(styles.clock)} />
-                    {t(`workspace.invitations.${invitation.status.toLowerCase()}`)}
-                  </span>
-                </div>
-              </div>
-              {invitation.status === 'pending' && (
-                <div {...stylex.props(styles.recordActions)}>
-                  <Button
-                    variant="ghost"
-                    size="small"
-                    onClick={() => {
-                      void onCopyInviteLink(getInviteLink(invitation));
-                    }}
-                  >
-                    <Copy {...stylex.props(styles.icon)} />
-                    {t('workspace.invitations.copyLink')}
-                  </Button>
-                  {hasAdminPermission && (
-                    <Button
-                      variant="ghost"
-                      size="small"
-                      icon
-                      tone="destructive"
-                      disabled={cancellingInvitationIds.has(invitation.id)}
-                      onClick={() => {
-                        void (async () => {
-                          setCancellingInvitationIds((prev) => {
-                            const next = new Set(prev);
-                            next.add(invitation.id);
-                            return next;
-                          });
-                          try {
-                            await onCancelInvitation(invitation.id);
-                            setPendingInvitations((prev) =>
-                              prev.filter((inv) => inv.id !== invitation.id)
-                            );
-                          } catch {
-                            // Error already handled by onCancelInvitation (toast shown)
-                          } finally {
-                            setCancellingInvitationIds((prev) => {
-                              const next = new Set(prev);
-                              next.delete(invitation.id);
-                              return next;
-                            });
-                          }
-                        })();
-                      }}
+        <CompactSection title={t('workspace.invitations.title')}>
+          {pendingInvitations.map((invitation) => {
+            const status = t(`workspace.invitations.${invitation.status.toLowerCase()}`);
+            const cancelling = cancellingInvitationIds.has(invitation.id);
+            return (
+              <CompactRow
+                key={invitation.id}
+                label={invitation.email}
+                helper={t(`organization.role.${invitation.role}`)}
+              >
+                {invitation.status === 'pending' ? (
+                  <Menu.Root>
+                    <Menu.Trigger
+                      render={<Button variant="secondary" size="small" disabled={cancelling} />}
                     >
-                      {cancellingInvitationIds.has(invitation.id) ? (
-                        <Spinner size="small" />
-                      ) : (
-                        <X {...stylex.props(styles.glyph)} />
-                      )}
-                    </Button>
-                  )}
-                </div>
-              )}
-            </div>
-          ))}
+                      {cancelling ? <Spinner size="small" /> : null}
+                      {status}
+                      <ChevronDown {...stylex.props(styles.valueIcon)} />
+                    </Menu.Trigger>
+                    <Menu.Content align="end">
+                      <Menu.Item
+                        icon={<Copy {...stylex.props(styles.glyph)} />}
+                        onClick={() => {
+                          void onCopyInviteLink(getInviteLink(invitation));
+                        }}
+                      >
+                        {t('workspace.invitations.copyLink')}
+                      </Menu.Item>
+                      {hasAdminPermission ? (
+                        <Menu.Item
+                          tone="destructive"
+                          icon={<X {...stylex.props(styles.glyph)} />}
+                          onClick={() => {
+                            void cancelInvitation(invitation.id);
+                          }}
+                        >
+                          {t('workspace.invitations.cancel')}
+                        </Menu.Item>
+                      ) : null}
+                    </Menu.Content>
+                  </Menu.Root>
+                ) : (
+                  <span {...stylex.props(styles.valueText, styles.valueQuiet)}>{status}</span>
+                )}
+              </CompactRow>
+            );
+          })}
         </CompactSection>
       ) : null}
 
       {isWorkspaceSurface ? workspaceJoinRequestsSlot : null}
 
+      {/* CLI tokens: each a row saying what it is and when it was used, answered by Revoke. */}
       {surface === 'account' && canGenerateCliApiKey ? (
         <CompactSection
           title={t('settings.account.cliAuth.title')}
-          boxed
-          description={t('settings.account.cliAuth.description')}
           actions={
-            // A header action sits beside the group's name, so it is a ghost; this
-            // one keeps its word, because a key glyph alone does not say "generate".
             <Button
               variant="ghost"
-              size="small"
               icon={false}
               onClick={() => {
                 setCliApiKeyDialogOpen(true);
               }}
               disabled={!onGenerateCliApiKey}
             >
-              <KeyRound {...stylex.props(styles.icon)} />
               {t('settings.account.cliAuth.generateButton')}
             </Button>
           }
@@ -1110,9 +946,8 @@ export function AccountSettingsPure({
             </p>
           ) : (
             cliApiKeys.map((apiKey) => {
-              const createdAt = formatCliApiKeyTimestamp(apiKey.createdAt);
-              const lastRequest = formatCliApiKeyTimestamp(apiKey.lastRequest);
-              const secondaryLine = apiKey.keyPreview || lastRequest;
+              const createdAt = formatCliApiKeyTimestamp(apiKey.createdAt, i18n.language);
+              const lastRequest = formatCliApiKeyTimestamp(apiKey.lastRequest, i18n.language);
               const sourceLabel =
                 apiKey.source === 'auto'
                   ? t('settings.account.cliAuth.sourceAuto')
@@ -1121,51 +956,67 @@ export function AccountSettingsPure({
                     : null;
 
               return (
-                <div key={apiKey.id} {...stylex.props(styles.apiKey)}>
-                  <div {...stylex.props(styles.apiKeyText)}>
-                    <div {...stylex.props(styles.apiKeyHead)}>
-                      <p {...stylex.props(styles.apiKeyNote)}>
-                        {apiKey.note || t('settings.account.cliAuth.recordNoteFallback')}
-                      </p>
-                      {sourceLabel && <Badge>{sourceLabel}</Badge>}
-                      {createdAt && (
-                        <time dateTime={createdAt.dateTime} {...stylex.props(styles.apiKeyTime)}>
-                          {createdAt.label}
-                        </time>
-                      )}
-                    </div>
-                    {secondaryLine && (
-                      <div {...stylex.props(styles.apiKeyMeta)}>
-                        {apiKey.keyPreview && (
-                          <span {...stylex.props(styles.mono)}>{apiKey.keyPreview}</span>
-                        )}
-                        {lastRequest && (
-                          <span>
-                            {t('settings.account.cliAuth.lastUsed', { at: lastRequest.label })}
-                          </span>
-                        )}
-                      </div>
-                    )}
-                  </div>
+                <CompactRow
+                  key={apiKey.id}
+                  label={apiKey.note || t('settings.account.cliAuth.recordNoteFallback')}
+                  helper={[
+                    apiKey.keyPreview,
+                    sourceLabel,
+                    createdAt,
+                    lastRequest
+                      ? t('settings.account.cliAuth.lastUsed', { at: lastRequest })
+                      : null,
+                  ]
+                    .filter(Boolean)
+                    .join(' · ')}
+                >
                   <Button
-                    variant="ghost"
+                    variant="secondary"
                     size="small"
-                    tone="destructive"
-                    className={stylex.props(styles.alignStart).className}
                     onClick={() => setCliApiKeyToRevoke(apiKey)}
                     disabled={revokingCliApiKeyId === apiKey.id}
                   >
-                    {revokingCliApiKeyId === apiKey.id ? (
-                      <Spinner size="small" />
-                    ) : (
-                      <Trash2 {...stylex.props(styles.icon)} />
-                    )}
+                    {revokingCliApiKeyId === apiKey.id ? <Spinner size="small" /> : null}
                     {t('settings.account.cliAuth.revokeButton')}
                   </Button>
-                </div>
+                </CompactRow>
               );
             })
           )}
+        </CompactSection>
+      ) : null}
+
+      {/* Sign-in: how this account signs in, and leaving it — the page's last group. */}
+      {surface === 'account' ? (
+        <CompactSection title={t('settings.account.signIn.title')}>
+          {onChangePassword && onSetupPassword ? (
+            <CompactRow
+              label={t('settings.profile.password.label')}
+              helper={
+                hasPasswordCredential
+                  ? t('settings.profile.password.helper')
+                  : t('settings.profile.password.setupHelper')
+              }
+            >
+              <ChangePasswordButton
+                hasPassword={hasPasswordCredential}
+                onChangePassword={onChangePassword}
+                onVerifyCurrentPassword={onVerifyCurrentPassword}
+                onSetupPassword={onSetupPassword}
+              />
+            </CompactRow>
+          ) : null}
+          <CompactRow label={t('settings.account.signOut')}>
+            <Button
+              variant="secondary"
+              size="small"
+              onClick={() => {
+                void onSignOut();
+              }}
+            >
+              {t('settings.account.signOutShort')}
+            </Button>
+          </CompactRow>
         </CompactSection>
       ) : null}
 

@@ -1,6 +1,11 @@
 import { Globe, SquareTerminal } from 'lucide-react';
+import * as stylex from '@stylexjs/stylex';
 import type { McpTransport } from '@lody/shared';
-import { cn } from '@/lib/utils';
+import { withClassName } from '@/lib/stylex';
+
+const styles = stylex.create({
+  icon: { width: '14px', height: '14px' },
+});
 
 /** Selection order for every transport picker. */
 export const MCP_TRANSPORTS: readonly McpTransport[] = ['stdio', 'http'];
@@ -26,5 +31,5 @@ export function McpTransportIcon({
   className?: string;
 }) {
   const Icon = transport === 'http' ? Globe : SquareTerminal;
-  return <Icon className={cn('h-3.5 w-3.5', className)} aria-hidden="true" />;
+  return <Icon {...withClassName(stylex.props(styles.icon), className)} aria-hidden="true" />;
 }

@@ -1,3 +1,9 @@
+import {
+  LOCAL_SCHEDULE_CONTROL_PATH,
+  ScheduleControlResponseSchema,
+  type ScheduleControlRequest,
+  type ScheduleControlResponse,
+} from '../schedule-control';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import http from 'node:http';
@@ -166,6 +172,10 @@ export type LocalProbeClientService = {
 };
 
 export type LocalControlClientService = {
+  scheduleControl: (
+    message: ScheduleControlRequest,
+    options?: LocalIpcRequestOptions
+  ) => Effect.Effect<ScheduleControlResponse, IpcError>;
   sessionControl: (
     message: LocalSessionControlRequest,
     options?: LocalSessionControlRequestOptions
@@ -933,6 +943,19 @@ function makeControlClient(
             ),
             ({ response, payload }) => parseSessionControlEnvelope(response, payload)
           ),
+    scheduleControl: (message, requestOptions) =>
+      Effect.flatMap(
+        post(
+          LOCAL_SCHEDULE_CONTROL_PATH,
+          message,
+          requestOptions?.timeoutMs ?? DEFAULT_LOCAL_CONTROL_TIMEOUT_MS
+        ),
+        ({ response, payload }) =>
+          parseJsonBody<ScheduleControlResponse>(
+            ScheduleControlResponseSchema,
+            (status) => `Invalid Schedule response (HTTP ${status})`
+          )(response, payload)
+      ),
     projectControl: (message, requestOptions) =>
       Effect.flatMap(
         post(

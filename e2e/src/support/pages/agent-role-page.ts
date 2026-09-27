@@ -1,5 +1,6 @@
 import { expect, type Locator, type Page } from '@playwright/test';
 import { AgentRoleFixture } from '../fixtures/agent-role-fixture.js';
+import { openSidebarArchive } from './sidebar-footer.js';
 
 type SessionMetaEvidence = {
   id?: string;
@@ -213,7 +214,7 @@ export class AgentRolePage {
     await this.page.getByRole('menuitem', { name: /^(Archive session|归档会话)$/u }).click();
     await expect(this.page).toHaveURL(/#\/local\/chat(?:\?.*)?$/u, { timeout: 30_000 });
     await this.fixture.expectAgentExited(resources.agentPid);
-    await this.page.getByRole('button', { name: /^(Archive|归档)$/u, exact: true }).click();
+    await openSidebarArchive(this.page);
     await expect(this.page).toHaveURL(/#\/local\/archive(?:\?.*)?$/u);
     const archivedRow = this.page.locator(`[data-id="archive-session:${resources.sessionId}"]`);
     await expect(archivedRow).toBeVisible({ timeout: 30_000 });

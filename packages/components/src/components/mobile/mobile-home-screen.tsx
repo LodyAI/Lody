@@ -1,3 +1,4 @@
+import { SchedulesWorkspace } from '../schedules/schedules-workspace';
 import {
   forwardRef,
   Fragment,
@@ -95,7 +96,7 @@ export type { MobileChatGroupBy };
    multi-member workspaces and occupies the natural "home" position.
    The 项目 tab merges Local + GitHub via an inner sub-tab; the 设置
    surface lives in the header's gear button. */
-export type MobileHomeTab = 'inbox' | 'chat' | 'projects';
+export type MobileHomeTab = 'inbox' | 'chat' | 'projects' | 'schedules';
 
 /* Sub-tab inside the "项目" tab. Drives both the heading + full list
    below the segmented selector. Persisted via `mobileHomeProjectsSubTabAtom`
@@ -309,6 +310,7 @@ export type MobileHomeScreenLabels = {
   addGitHubRepository?: string;
   addGitHubRepositoryHint?: string;
   chatTab?: string;
+  schedulesTab?: string;
   settingsTab?: string;
   /** aria-label for the archive-toggle chip in the header. Toggles the
      Chat tab between active and archived conversations. */
@@ -1022,6 +1024,12 @@ function workspaceTabSpecs(
       label: labels.chatTab ?? 'Chat',
     },
     {
+      key: 'schedules',
+      ios: <Clock3 className="h-6 w-6" />,
+      material: <Clock3 className="h-6 w-6" />,
+      label: labels.schedulesTab ?? 'Schedules',
+    },
+    {
       key: 'projects',
       ios: <Folders className="h-6 w-6" strokeWidth={1.75} />,
       material: <MobileReactIcon icon={MdFolderCopy} className="h-6 w-6" />,
@@ -1355,7 +1363,7 @@ export function MobileHomeScreen({
     return map;
   }, [machines]);
 
-  const effectiveSelectedTab: MobileHomeTab = selectedTab;
+  const scheduleTabActive = selectedTab === 'schedules';
 
   const resolvedTheme: 'ios' | 'material' =
     theme ?? (isIOSRuntimeEnvironment() ? 'ios' : 'material');
@@ -1386,11 +1394,14 @@ export function MobileHomeScreen({
     connectionUiState === 'offline';
   /* Keep search mounted for the exit transition; opacity/transform are
      driven by `searchOpaque`. Pill only mounts once `statusRevealed`. */
-  const [searchOpaque, setSearchOpaque] = useState(() => !wantStatusSlot);
-  const [statusRevealed, setStatusRevealed] = useState(() => wantStatusSlot);
+  const [searchOpaque, setSearchOpaque] = useState(() => !scheduleTabActive && !wantStatusSlot);
+  const [statusRevealed, setStatusRevealed] = useState(() => scheduleTabActive || wantStatusSlot);
   useEffect(() => {
     let reveal: number | undefined;
-    if (wantStatusSlot) {
+    if (scheduleTabActive) {
+      setSearchOpaque(false);
+      setStatusRevealed(true);
+    } else if (wantStatusSlot) {
       /* Exit search first; reveal pill only after the fade finishes so
          the two never share the chrome band. */
       setSearchOpaque(false);
@@ -1408,7 +1419,7 @@ export function MobileHomeScreen({
     return () => {
       if (reveal !== undefined) window.clearTimeout(reveal);
     };
-  }, [wantStatusSlot]);
+  }, [scheduleTabActive, wantStatusSlot]);
 
   /* Tab swipe was removed — conflicted with the row-level
      left-swipe-to-reveal-actions gesture on conversation rows. The
@@ -1473,19 +1484,21 @@ export function MobileHomeScreen({
                    Duration matches HEADER_SEARCH_EXIT_MS (tailwind
                    duration-150 ≈ 150ms; keep the timeout in sync). */
                 'transition-[opacity,transform] duration-150 ease-out',
-                searchOpaque
+                searchOpaque && !scheduleTabActive
                   ? 'opacity-100 translate-y-0'
                   : 'pointer-events-none translate-y-1.5 opacity-0'
               )}
-              aria-hidden={!searchOpaque}
+              aria-hidden={!searchOpaque || scheduleTabActive}
             >
-              <HeaderSearchInput
-                value={searchQuery}
-                onChange={setSearchQuery}
-                placeholder={searchPlaceholder}
-                ariaLabel={searchAriaLabel}
-                clearAriaLabel={clearSearchAriaLabel}
-              />
+              {!scheduleTabActive ? (
+                <HeaderSearchInput
+                  value={searchQuery}
+                  onChange={setSearchQuery}
+                  placeholder={searchPlaceholder}
+                  ariaLabel={searchAriaLabel}
+                  clearAriaLabel={clearSearchAriaLabel}
+                />
+              ) : null}
             </div>
 
             {/* Trailing header actions — same canvas liquid-glass discs as
@@ -1568,7 +1581,7 @@ export function MobileHomeScreen({
            then the centered status pill mounts. */}
         <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
           <div
-            className="flex min-h-0 flex-1 flex-col"
+            className={cn('flex min-h-0 flex-1 flex-col', scheduleTabActive && 'hidden')}
             style={
               pullDistance > 0
                 ? {
@@ -1680,6 +1693,14 @@ export function MobileHomeScreen({
               ) : null}
             </div>
           </div>
+
+          {/* Schedules tab fills the content region under the home header,
+             dock still visible. The home search row stays hidden. */}
+          {scheduleTabActive ? (
+            <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+              <SchedulesWorkspace />
+            </div>
+          ) : null}
         </div>
 
         {/* Shared workspace tabbar (chat / projects) + the optional
@@ -1689,7 +1710,7 @@ export function MobileHomeScreen({
             co-located with the other screen copy. */}
         <MobileWorkspaceTabBar<MobileHomeTab>
           tabs={workspaceTabSpecs(labels, showInboxTab)}
-          selectedTab={effectiveSelectedTab}
+          selectedTab={selectedTab}
           onTabSelect={(tab) => onTabSelect?.(tab)}
           onNewChat={onNewChat}
           newChatAriaLabel={labels.newChatAriaLabel}

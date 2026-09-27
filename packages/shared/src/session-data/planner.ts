@@ -57,9 +57,11 @@ export function createAssistantTurn(input: OpenAssistantTurnInput): Draft {
  * acknowledgement, not an execution outcome: a turn that already started or
  * finished must not be pulled back to `seen` by a read that observed `pending`
  * before the writer advanced it. `pending_apply` is a pre-submission state that
- * still carries pending work, so it is not treated as unread either.
+ * still carries pending work, so it is not treated as unread either; neither is
+ * `prepared`, a scheduled turn that stays inert until its dispatch pointer commits.
  */
 const SEEN_REGRESSION_BLOCKED = new Set<string>([
+  'prepared',
   'processing',
   'handled',
   'failed',

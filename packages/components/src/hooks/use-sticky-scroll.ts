@@ -7,7 +7,7 @@ import {
   useRef,
   useState,
 } from 'react';
-import type { CacheSnapshot, VirtualizerHandle } from 'virtua';
+import type { CacheSnapshot, VirtualizerHandle } from '@lody/virtua';
 import type { SessionId } from '@lody/shared';
 import { describeViewport, isScrollDebugEnabled, scrollDebug } from './scroll-debug-log';
 import {
@@ -102,6 +102,12 @@ export interface UseStickyScrollResult {
    * reserve the room below it, until the content below fills that room.
    */
   anchorToRow: (index: number) => void;
+  /**
+   * Move a held anchor to the anchored message's current index after rows
+   * above it were inserted or removed. No-op unless anchored; a negative
+   * index (the message is gone) falls back to following the bottom.
+   */
+  retargetAnchor: (index: number) => void;
   /** Whether the initial cached/end position has been applied to the virtualizer. */
   initialScrollRestored: boolean;
   /**
@@ -167,10 +173,9 @@ export function useStickyScroll({
    * across the correction — the blank flash on open.
    *
    * Taken on the first render that actually mounts the virtualizer, because
-   * `Virtualizer` reads `cache` only at mount and the snapshot is keyed by row
-   * count. Reading it during the empty state a session renders while its
-   * document is acquired would answer for a one-row list and then never ask
-   * again for the real conversation.
+   * `Virtualizer` reads `cache` only at mount. Reading it during the empty
+   * state a session renders while its document is acquired would hand an
+   * unkeyed caller a one-row answer and then never ask again.
    */
   const initialVirtualizerCacheRef = useRef<{ taken: boolean; value?: CacheSnapshot }>({
     taken: false,
@@ -808,6 +813,22 @@ export function useStickyScroll({
     [applyAnchor, cancelGlide, resolveDestination, sessionId, writeScrollTop]
   );
 
+  const retargetAnchor = useCallback(
+    (index: number) => {
+      if (modeRef.current !== 'anchored' || anchorIndexRef.current === index) return;
+      if (index < 0 || index >= itemCountRef.current) {
+        cancelGlide();
+        enterFollow('anchor-row-gone');
+        return;
+      }
+      scrollDebug('anchor-retarget', { from: anchorIndexRef.current, to: index });
+      anchorIndexRef.current = index;
+      // A glide re-reads its destination every frame; otherwise re-pin now.
+      if (!glideRef.current) applyAnchor();
+    },
+    [applyAnchor, cancelGlide, enterFollow]
+  );
+
   useEffect(() => cancelGlide, [cancelGlide]);
 
   const handleScroll = useCallback(
@@ -846,6 +867,7 @@ export function useStickyScroll({
     isSticky,
     scrollToBottom,
     anchorToRow,
+    retargetAnchor,
     initialScrollRestored,
     initialVirtualizerCache: initialVirtualizerCacheRef.current.value,
     persistVirtualizerCache,

@@ -26,7 +26,6 @@
     "lib/**/*.ts",
     "src/**/*.ts",
     "src/**/*.tsx",
-    "types/**/*.d.ts",
     ".source/**/*.ts",
     "source.config.ts",
     "vite.config.ts"

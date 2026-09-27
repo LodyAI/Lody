@@ -500,6 +500,7 @@ export const sessionPlanEntrySchema = schema.LoroMap({
 
 export type SessionHistorySendStatus = 'timeout';
 export type SessionHistoryStatus =
+  | 'prepared'
   | 'pending'
   | 'pending_apply'
   | 'delivery_unknown'
@@ -605,7 +606,12 @@ export const isSessionHistoryDelivered = (
 ): boolean => {
   const status = resolveSessionHistoryStatus(entry);
   if (status) {
-    return status !== 'pending' && status !== 'pending_apply' && status !== 'delivery_unknown';
+    return (
+      status !== 'prepared' &&
+      status !== 'pending' &&
+      status !== 'pending_apply' &&
+      status !== 'delivery_unknown'
+    );
   }
   return entry?.read === true;
 };
@@ -903,6 +909,8 @@ export type SessionMeta = {
    */
   agentRoleId?: AgentRoleId;
   agentRoleRevision?: number;
+  /** Schedule provenance only, a UUID of at most 50 UTF-8 bytes. */
+  scheduleId?: string;
   acpSessionId?: ACPSessionId;
   /** Exact Session or child Tab that created/opened this session, when known. */
   openedBySessionId?: SessionId;
@@ -1230,6 +1238,12 @@ export type MachineMeta = {
   supportsLocalProjectHistoryRpc?: boolean;
   /** Versioned daemon protocols available to remote and local clients. */
   protocolCapabilities?: MachineProtocolCapabilities;
+  /**
+   * IANA zone of the machine's clock, e.g. `Asia/Shanghai` (under 50 bytes,
+   * rewritten only at registration). Schedules owned by this machine are
+   * authored on this clock; absent on older CLIs.
+   */
+  timeZone?: string;
 };
 
 /**

@@ -8,7 +8,7 @@ This list covers shipped production dependencies plus vendored third-party asset
 
 ## Summary
 
-- Bundled assets: 13
+- Bundled assets: 14
 - Production dependencies: 963
 - Unique license expressions: 22
 
@@ -77,6 +77,13 @@ This list covers shipped production dependencies plus vendored third-party asset
 - Assets: Vesper
 - Notice file: `packages/components/src/lib/vscode-theme/bundled/themes/vesper/LICENSE.md`
 - Notes: Bundled VSCode color theme.
+### Virtua
+- License: MIT
+- Author: inokawa
+- Source: https://github.com/inokawa/virtua/tree/0.52.7
+- Assets: Virtua core and React bindings
+- Notice file: `packages/virtua/LICENSE`
+- Notes: Forked list virtualizer (packages/virtua, @lody/virtua) with keyed item sizes and anchoring.
 ### Visual Studio Code fuzzy scorer
 - License: MIT
 - Author: Microsoft Corporation

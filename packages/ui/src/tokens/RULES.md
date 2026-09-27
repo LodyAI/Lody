@@ -71,6 +71,8 @@ Never a border. One component token group, `field`, serves the whole family — 
 textarea, checkbox, radio, switch and the Select and Combobox triggers — so a
 state has one colour in one place instead of one per component. The lists those
 triggers open are on the floating rung and read `popup` instead; see below.
+When a parent owns that well and its focus ring, its inner text control uses the
+bare appearance so the two parts do not draw separate edges.
 
 | state       | what it is                                                                        |
 | ----------- | --------------------------------------------------------------------------------- |
@@ -171,6 +173,10 @@ opened by whatever the surface already had there — often a 28px icon button �
 it takes `popup.menuWidth` and grows past it for its longest row. A menu scrolls
 in its own box rather than between scroll arrows, because its rows are the
 popup's own children.
+
+A short two-choice menu may use the compact 180px width floor instead of the
+regular `popup.menuWidth` floor. Both grow for a longer row; neither changes
+the floating surface or its rows.
 
 | part            | what it is                                                                  |
 | --------------- | --------------------------------------------------------------------------- |
@@ -767,7 +773,9 @@ between them: a `+` is how a chord is written in prose, and this is not prose.
 One cap is at least as wide as it is tall, so `K` and `Shift` do not read as
 noise side by side. The face is the UI font, because `<kbd>` defaults to
 monospace and `⌘` there is a different glyph from the identical character in the
-label beside it.
+label beside it. A cap is `small` (the caption step) beside a line of text and
+`medium` (the footnote step) on a page whose subject is the keys, such as a
+shortcuts sheet; the height, fill and corner are the same cap's.
 
 A menu row's shortcut is **not** this: the rules give that slot plain trailing
 metadata in `popup.hint`, because a column of chips down a menu's right edge

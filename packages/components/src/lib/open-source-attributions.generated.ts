@@ -149,6 +149,20 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "noticePath": "packages/components/src/lib/vscode-theme/bundled/themes/vesper/LICENSE.md"
     },
     {
+      "id": "vendored-virtua",
+      "kind": "vendored",
+      "scope": "vendored-source",
+      "name": "Virtua",
+      "license": "MIT",
+      "homepage": "https://github.com/inokawa/virtua/tree/0.52.7",
+      "author": "inokawa",
+      "description": "Forked list virtualizer (packages/virtua, @lody/virtua) with keyed item sizes and anchoring.",
+      "assets": [
+        "Virtua core and React bindings"
+      ],
+      "noticePath": "packages/virtua/LICENSE"
+    },
+    {
       "id": "vendored-vscode-fuzzy-scorer",
       "kind": "vendored",
       "scope": "vendored-source",

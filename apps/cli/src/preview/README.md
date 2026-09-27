@@ -28,6 +28,12 @@ production never falls back to TypeScript execution. POSIX process tests cover
 normal stop, CLI SIGKILL during creation/active use, native crash, missing binaries
 and cleanup failure. Native verification on other operating systems is separate.
 
+Native dependencies can emit plain-text diagnostics even with `--output json`.
+The log reader ignores bounded non-JSON lines; structured messages still require
+schema validation, and allocated origins still require the Quick Tunnel allowlist.
+Fatal parser and size-limit errors survive shutdown so a later DNS cancellation
+cannot replace the original failure.
+
 ## First public request
 
 `preview-tunnel-dns.ts` queries the configured DNS servers with a private Node
@@ -45,6 +51,15 @@ immediately. The DNS budget cancels in-flight queries without resetting the
 shared startup deadline; parent cancellation still aborts readiness. No IP
 is pinned, no external resolver is selected, and DNS never grants access or proves
 readiness. Five-second active health checks and local viewing skip this startup gate.
+
+Startup also retries network/host-unreachable errors within the same deadline.
+Dual-stack connection errors are inspected across bounded aggregate branches;
+permanent errors such as certificate failures still fail immediately. Diagnostics
+retain validated IP addresses and address families, never arbitrary error messages.
+The shared CLI HTTP dispatcher explicitly enables Node address-family selection
+for direct destinations and proxy connections. Proxy routing remains authoritative;
+an unavailable proxy does not authorize a direct connection. This also benefits
+other callers of that dispatcher; explicit Node-default transport mode is unchanged.
 
 ## Distribution
 

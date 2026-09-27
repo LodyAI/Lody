@@ -4,6 +4,7 @@ import { currentWorkspaceSlugAtom } from '@/atoms/workspace-context';
 import { useWorkspaceWindowOwner, WorkspaceWindowOwnerContext } from '@/lib/desktop-window';
 import { type ReactNode, useLayoutEffect } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
+import { useScheduleRegistrySync } from '@/hooks/use-schedules';
 import { useIsCompactDesktop, useIsMobile } from '../hooks/use-mobile';
 import { syncCompactDesktopLayoutAtom } from '@/atoms/layout-state';
 import { MobileWorkspaceLayout } from './mobile/mobile-workspace-layout';
@@ -45,6 +46,11 @@ function AgentRoleSchemaReconciliation() {
   return null;
 }
 
+function ScheduleRegistrySync() {
+  useScheduleRegistrySync();
+  return null;
+}
+
 /**
  * Bridges the viewport's compact-desktop flag into atom state so commands and
  * derived visibility (which cannot call hooks) see the same presentation.
@@ -80,6 +86,7 @@ export function MainLayout({
         <CompactDesktopLayoutSync />
         <WorkspaceRuntimeShell workspaceReady={workspaceReady}>
           {children}
+          {workspaceReady ? <ScheduleRegistrySync /> : null}
           {owner && workspaceReady ? <WorkspaceBadge /> : null}
           {owner && workspaceReady ? <AgentRoleSchemaReconciliation /> : null}
           {workspaceReady ? <BugReportDialogContainer /> : null}

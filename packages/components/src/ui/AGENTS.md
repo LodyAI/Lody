@@ -96,13 +96,6 @@ strings on i18n rather than the registry's inline English.
   primitive's default and spins at rest ("No machines available" shipped that way).
   Evidence: [spinner note](../../../../.agents/notes/implemented/bug-fix/2026-09-13-spinner-off-svg-retina-composite.md).
 
-## Working grid
-
-- Session marks use `working-status-mark.tsx`, mounted across the change, fed via
-  `useWorkingHandOver` (unread lands after presence); animate only
-  `transform`/`opacity` from `startTime = 0`, never rAF, timers or React state.
-  [Note](../../../../.agents/notes/implemented/feature/2026-09-24-sidebar-working-grid.md).
-
 ## Scroll area
 
 - Keep the `@radix-ui/react-scroll-area` patch until an upstream version cancels

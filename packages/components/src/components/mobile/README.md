@@ -37,6 +37,10 @@ directory index. Stories: `src/stories/Mobile*.stories.tsx`.
 
 ## Sheets and session surfaces
 
+- `mobile-new-chat-sheet.tsx` provides a no-drag popup container inside its
+  modal, outside its scrolling content. The landing's mobile file input mounts
+  with the composer inside that sheet; the attachment menu stays within Vaul's
+  interaction boundary.
 - Bottom sheets: `mobile-new-chat-sheet.tsx`,
   `mobile-workspace-switcher-sheet.tsx`, `mobile-create-workspace-sheet.tsx`,
   `mobile-delete-workspace-sheet.tsx`, `mobile-worktree-config-sheet.tsx`,

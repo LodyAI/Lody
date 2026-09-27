@@ -49,6 +49,7 @@ describe('getSessionGitHubState', () => {
 
     const state = getSessionGitHubState(childSession, parentSession);
 
+    expect(state.sourceSessionId).toBe(parentSession.id);
     expect(state.repoFullName).toBe('loro-dev/lody');
     expect(state.workspaceDirty).toBe(true);
     expect(state.hasChanges).toBe(true);
@@ -66,6 +67,7 @@ describe('getSessionGitHubState', () => {
 
     const state = getSessionGitHubState(session);
 
+    expect(state.sourceSessionId).toBe(session.id);
     // Clean working tree (agent already committed) but real committed changes:
     // Create PR must stay available, so hasChanges is true while dirty is false.
     expect(state.workspaceDirty).toBe(false);

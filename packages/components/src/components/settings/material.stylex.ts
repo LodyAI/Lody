@@ -41,8 +41,6 @@ export const settingsMaterial = stylex.defineVars({
   sectionBoxedGap: '0px',
   /** A group that destroys something, drawn on its edge. */
   dangerShadow: `0 0 0 0.5px color-mix(in oklab, ${colors.destructive} 45%, transparent), ${shadow.card}`,
-  /** An empty catalog's region. */
-  emptyFill: `color-mix(in oklab, transparent, ${colors.label} 3%)`,
 });
 
 /**
@@ -66,7 +64,6 @@ export const settingsBoxed = stylex.createTheme(settingsMaterial, {
   sectionTitledGap: '0px',
   sectionBoxedGap: '0px',
   dangerShadow: `0 0 0 0.5px color-mix(in oklab, ${colors.destructive} 45%, transparent), ${shadow.card}`,
-  emptyFill: `color-mix(in oklab, transparent, ${colors.label} 3%)`,
 });
 
 export const settingsFlat = stylex.createTheme(settingsMaterial, {
@@ -83,5 +80,4 @@ export const settingsFlat = stylex.createTheme(settingsMaterial, {
   sectionTitledGap: space[6],
   sectionBoxedGap: space[2],
   dangerShadow: 'none',
-  emptyFill: 'transparent',
 });

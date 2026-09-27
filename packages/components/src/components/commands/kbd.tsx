@@ -1,9 +1,11 @@
-import { Kbd as KbdPrimitive, KbdGroup } from '@lody/ui/kbd';
+import { Kbd as KbdPrimitive, KbdGroup, type KbdSize } from '@lody/ui/kbd';
 import { formatKeyParts } from '@/lib/commands';
 
 type KbdProps = {
   /** Binding string in registry syntax, e.g. `Mod+b`, `Shift+Enter`. */
   binding: string;
+  /** `medium` where the keys are what the page is about (the shortcuts sheet). */
+  size?: KbdSize;
   className?: string;
 };
 
@@ -14,13 +16,15 @@ type KbdProps = {
  * of; this component owns only the split from a binding string into keys, which
  * is a fact about Lody's registry syntax rather than about keyboards.
  */
-export function Kbd({ binding, className }: KbdProps) {
+export function Kbd({ binding, size, className }: KbdProps) {
   const parts = formatKeyParts(binding);
   if (parts.length === 0) return null;
   return (
     <KbdGroup className={className}>
       {parts.map((label, i) => (
-        <KbdPrimitive key={`${label}-${i}`}>{label}</KbdPrimitive>
+        <KbdPrimitive key={`${label}-${i}`} size={size}>
+          {label}
+        </KbdPrimitive>
       ))}
     </KbdGroup>
   );

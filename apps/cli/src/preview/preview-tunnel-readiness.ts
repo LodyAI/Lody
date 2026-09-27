@@ -1,3 +1,4 @@
+import { isIP } from 'node:net';
 import {
   buildManagedPreviewViewerUrl,
   setPreviewQueryParamInUrl,
@@ -17,43 +18,69 @@ export const PREVIEW_PROXY_RESPONSE_HEADER = 'x-lody-preview-proxy';
 export const PREVIEW_PROXY_RESPONSE_VERSION = '1';
 export const PREVIEW_PROBE_HEADER = 'x-lody-preview-probe';
 
-// Error messages can contain the capability-bearing request URL. Only retain
-// bounded errno codes from the cause chain, never arbitrary messages or headers.
-function networkErrorCodes(error: unknown): string {
-  const codes: string[] = [];
+// Fetch messages can contain credentials. Inspect bounded causes/aggregate
+// branches, retaining only errno codes and validated connection addresses.
+function networkFailures(error: unknown) {
+  const failures: Array<{ code: string; address?: string }> = [];
   const seen = new Set<unknown>();
-  let current = error;
-  while (current instanceof Error && !seen.has(current) && seen.size < 8) {
+  const pending: unknown[] = [error];
+  let complete = true;
+  while (pending.length && seen.size < 32) {
+    const current = pending.shift();
+    if (!(current instanceof Error) || seen.has(current)) continue;
     seen.add(current);
     if (
       'code' in current &&
       typeof current.code === 'string' &&
       /^[A-Z0-9_]{1,80}$/.test(current.code)
     ) {
-      codes.push(current.code);
+      const address =
+        'address' in current &&
+        typeof current.address === 'string' &&
+        !current.address.includes('%') &&
+        isIP(current.address)
+          ? current.address
+          : undefined;
+      failures.push({ code: current.code, address });
     }
-    current = current.cause;
+    if (current.cause !== undefined) pending.push(current.cause);
+    if (current instanceof AggregateError) {
+      if (current.errors.length > 32) complete = false;
+      pending.push(...current.errors.slice(0, 32));
+    }
   }
-  return codes.join(' -> ') || 'network error (no code)';
+  return { failures, complete: complete && pending.length === 0 };
+}
+
+function networkErrorCodes(error: unknown): string {
+  return (
+    networkFailures(error)
+      .failures.map(({ code, address }) =>
+        address ? `${code} (IPv${isIP(address)} ${address})` : code
+      )
+      .join(' -> ') || 'network error (no code)'
+  );
 }
 
 function isTransientNetworkError(error: unknown): boolean {
-  if (!(error instanceof Error)) return false;
-  if (
-    'code' in error &&
-    typeof error.code === 'string' &&
-    [
-      'ENOTFOUND',
-      'EAI_AGAIN',
-      'ECONNRESET',
-      'ECONNREFUSED',
-      'ETIMEDOUT',
-      'UND_ERR_CONNECT_TIMEOUT',
-      'UND_ERR_SOCKET',
-    ].includes(error.code)
-  )
-    return true;
-  return error.cause !== undefined && error.cause !== error && isTransientNetworkError(error.cause);
+  const { failures, complete } = networkFailures(error);
+  return (
+    complete &&
+    failures.length > 0 &&
+    failures.every(({ code }) =>
+      [
+        'ENOTFOUND',
+        'EAI_AGAIN',
+        'ENETUNREACH',
+        'EHOSTUNREACH',
+        'ECONNRESET',
+        'ECONNREFUSED',
+        'ETIMEDOUT',
+        'UND_ERR_CONNECT_TIMEOUT',
+        'UND_ERR_SOCKET',
+      ].includes(code)
+    )
+  );
 }
 
 async function fetchReadyRoute(

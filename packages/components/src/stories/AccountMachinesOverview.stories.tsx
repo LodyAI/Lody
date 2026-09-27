@@ -74,10 +74,7 @@ const meta = {
   args: {
     items,
     currentMachineId: macId,
-    onConfigureAgents: noOp,
     onManageMachine: noOp,
-    onOpenDirectory: noOp,
-    onOpenDirectories: noOp,
   },
   decorators: [
     (Story) => (

@@ -49,6 +49,7 @@ function LocalHomeRoute() {
   if (!workspace) {
     return (
       <LoadingPlaceholder
+        variant="boot"
         title={t('workspace.route.localStartingTitle')}
         description={t('workspace.route.localStartingDescription')}
       />
@@ -93,6 +94,7 @@ function CloudHomeRoute() {
   if (isPending || isRetrying) {
     return (
       <LoadingPlaceholder
+        variant="boot"
         title={t('workspace.route.signingInTitle')}
         description={t('workspace.route.signingInDescription')}
       />
@@ -129,6 +131,7 @@ function AuthedHomeRoute() {
   if (!orgSettled) {
     return (
       <LoadingPlaceholder
+        variant="boot"
         title={t('workspace.route.loadingWorkspacesTitle')}
         description={t('workspace.route.loadingWorkspacesDescription')}
       />
@@ -151,6 +154,7 @@ function AuthedHomeRoute() {
   if (organizationsLoading || organizations === undefined) {
     return (
       <LoadingPlaceholder
+        variant="boot"
         title={t('workspace.route.loadingWorkspacesTitle')}
         description={t('workspace.route.loadingWorkspacesDescription')}
       />

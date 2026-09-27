@@ -3490,7 +3490,7 @@ function WorkspaceChatLanding({
       <WorktreeCheckboxPill
         checked
         disabled
-        className="h-6 rounded-none bg-transparent px-2 text-foreground/80 hover:bg-foreground/[0.06]"
+        surface="context"
         disabledReason={t(
           'chat.workdir.githubRequired',
           'GitHub projects always run in an isolated worktree.'
@@ -3502,7 +3502,7 @@ function WorkspaceChatLanding({
         onCheckedChange={(checked) => handleWorkdirModeChange(checked ? 'worktree' : 'local')}
         disabled={!worktreeAvailable}
         disabledReason={!worktreeAvailable ? worktreeUnavailableReason : undefined}
-        className="h-6 rounded-none bg-transparent px-2 text-foreground/80 hover:bg-foreground/[0.06]"
+        surface="context"
       />
     ) : null;
 
@@ -5184,9 +5184,9 @@ function WorkspaceChatLanding({
     if (isMobile) return 'chat';
     return contextType === 'chat' ? 'chat' : 'projects';
   });
-  /* Developer-only beta gates drive the extra dock tabs on mobile home.
-     When a gate is off, a stale selection must render as Chat — as if
-     the tab were never built. Inbox also retains its team-workspace gate. */
+  /* A developer-only beta gate (plus the team-workspace gate) drives the
+     Inbox dock tab on mobile home. When it is off, a stale selection must
+     render as Chat — as if the tab were never built. */
   const inboxFeatureEnabled = useAtomValue(inboxFeatureEnabledAtom);
   const showMobileInbox = showProjectSharing && inboxFeatureEnabled;
   const effectiveMobileHomeTab: MobileHomeTab =
@@ -6153,6 +6153,13 @@ function WorkspaceChatLanding({
         resetKeys={[workspaceId, workspaceSlug, contextType, mobileNewChatOpen]}
       >
         <MobileInlinePickerRowSlot>
+          <input
+            ref={attachmentInputRef}
+            type="file"
+            multiple
+            className="hidden"
+            onChange={handleAttachmentInputChange}
+          />
           {composerNoticeNode}
           <ChatComposer
             tone={tone}
@@ -6229,13 +6236,6 @@ function WorkspaceChatLanding({
   if (isMobile && mobileProjectContext) {
     return (
       <>
-        <input
-          ref={attachmentInputRef}
-          type="file"
-          multiple
-          className="hidden"
-          onChange={handleAttachmentInputChange}
-        />
         {mobileNewChatSheetNode}
         <MobileProjectScreen
           project={mobileProjectContext}
@@ -6337,13 +6337,6 @@ function WorkspaceChatLanding({
   if (isMobile) {
     return (
       <>
-        <input
-          ref={attachmentInputRef}
-          type="file"
-          multiple
-          className="hidden"
-          onChange={handleAttachmentInputChange}
-        />
         <MobileHomeScreen
           workspace={mobileHomeWorkspace}
           workspaceOptions={mobileHomeWorkspaceOptions}
@@ -6414,6 +6407,7 @@ function WorkspaceChatLanding({
               'Connect a GitHub repository'
             ),
             chatTab: t('chat.contextSwitch.chat', 'Chat'),
+            schedulesTab: t('schedules.title', 'Schedules'),
             recentProjectsHeading: t('chat.mobileHome.recentProjectsHeading', '最近常用'),
             settingsTab: t('settings.title', 'Settings'),
             projectRemoving: t('sidebar.localProjects.remove.removing', 'Removing…'),

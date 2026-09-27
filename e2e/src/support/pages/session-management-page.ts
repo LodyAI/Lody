@@ -6,6 +6,7 @@ import {
   SESSION_MANAGEMENT_PROMPT,
   type SessionManagementFixture,
 } from '../fixtures/session-management-fixture.js';
+import { openSidebarArchive } from './sidebar-footer.js';
 
 const AGENT_NAME = 'Deterministic Session Management Agent';
 
@@ -153,7 +154,7 @@ export class SessionManagementPage {
 
   private async openArchive(): Promise<void> {
     if (!/#\/local\/archive(?:\?.*)?$/u.test(this.page.url())) {
-      await this.page.getByRole('button', { name: /^(Archive|归档)$/u, exact: true }).click();
+      await openSidebarArchive(this.page);
     }
     await expect(this.page).toHaveURL(/#\/local\/archive(?:\?.*)?$/u);
   }

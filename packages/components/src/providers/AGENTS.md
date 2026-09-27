@@ -23,6 +23,12 @@ Replacement contract: [shared rules](../../../shared/AGENTS.md#session-history).
   live Streams connections.
 - Release any one-shot document handle or subscription that is not already owned by the
   workspace runtime.
+- Startup capability discovery is once per agent config per runtime, recorded in the
+  runtime-owned `refreshedConfigKeys` set. A pass aborted by presence leaving `synced` is
+  re-armed, so a pass-level flag is not the gate: reconnecting must never re-probe a config that
+  already answered, because each probe starts and kills a real agent process. Refresh requests
+  default to the machine's cache; only a user action or a setup/authentication workflow sets
+  `force`. Intent: [capability refresh cache](../../../../specs/acp-capability-refresh-cache.md).
 
 ## Workspace switching
 
@@ -37,6 +43,8 @@ Replacement contract: [shared rules](../../../shared/AGENTS.md#session-history).
   projection and disables queries, Machine Flock, sharing, and eager-sync inputs. Provider-
   external consumers such as `RuntimeProvider` retain their existing default behavior. Explicit
   `workspaceId` / `enabled` options remain fenced by the route scope and cannot reopen stale work.
+- Each `resolveWorkspaceDataScope` wait names its `blocker`; keep scan failures on the scope.
+  [Stuck report](../../../../.agents/notes/implemented/feature/2026-09-26-workspace-sync-stuck-telemetry.md).
 
 ## Workspace runtime
 

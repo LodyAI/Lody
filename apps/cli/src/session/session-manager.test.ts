@@ -1,5 +1,6 @@
 import os from 'node:os';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -12,6 +13,7 @@ import {
   type AgentConfigId,
   type LocalProjectId,
   type MachineId,
+  type RepoId,
   type SessionId,
   type SessionLaunchConfig,
   type SessionMeta,
@@ -27,7 +29,12 @@ import type { SessionConfig } from './types';
 import type { LoroDocumentManager } from '../lib/loro/doc';
 import type { Logger } from '../utils/logger';
 import { runWorktreeSetup } from './worktree/worktree-setup-runner';
-import { getWorktreeManager, type WorktreeInfo } from './worktree/worktree-manager';
+import {
+  getWorktreeManager,
+  type GitCredentialBrokerAuth,
+  type WorktreeInfo,
+  type WorktreeManagerSource,
+} from './worktree/worktree-manager';
 import { materializeSpeculativeWorktree } from './worktree/speculative-worktree';
 import {
   SessionPreparationService,
@@ -273,6 +280,91 @@ describe('SessionManager child session workdir resolution', () => {
     vi.unstubAllEnvs();
     rmSync(tempHome, { recursive: true, force: true });
   });
+
+  it.each(['cold', 'parent'] as const)(
+    'keeps requester auth through %s GitHub worktree creation',
+    async (mode) => {
+      vi.stubEnv('LODY_DATA_DIR', tempHome);
+      const sourceDir = createLocalRepo(tempHome);
+      const repoId = `github---fixture---${mode}` as RepoId;
+      const repoUrl = pathToFileURL(sourceDir).href;
+      const sessionId = `github-${mode}-startup` as SessionId;
+      const parentId = 'github-parent-owner' as SessionId;
+      runGit(sourceDir, ['branch', 'session/parent-restore']);
+      const parentDoc = createSessionDoc({
+        id: parentId,
+        machineId: 'machine-1' as MachineId,
+        userId: 'user-1',
+        createdAt: '2026-06-20T00:00:00.000Z',
+        cliType: 'builtin',
+        agentType: 'codex',
+        project: { kind: 'github', repoFullName: 'fixture/repo', branch: 'main' },
+        isWorktree: true,
+        baseBranch: 'main',
+        branchName: 'session/parent-restore',
+      });
+      const manager = new SessionManager(
+        createLogger(),
+        'token',
+        'machine-1' as MachineId,
+        'workspace-1' as WorkspaceId,
+        createWorkspaceDocument(new Map([[parentId, parentDoc]])),
+        {
+          sessionSandboxFactory: async () => createNoopSessionSandbox(),
+          cloudPort: createTestCloudPort(),
+        }
+      );
+      const auth: GitCredentialBrokerAuth = {
+        workspaceId: 'workspace-1',
+        url: 'http://fixture.invalid',
+        token: 'fixture',
+        contextToken: 'frozen-requester',
+        transportEnv: {},
+      };
+      const internals = manager as unknown as {
+        resolveHostGitBrokerAuth(
+          source: WorktreeManagerSource,
+          config: SessionConfig
+        ): Promise<GitCredentialBrokerAuth>;
+      };
+      const authSpy = vi.spyOn(internals, 'resolveHostGitBrokerAuth').mockResolvedValue(auth);
+      const worktrees = getWorktreeManager({ repoId, repoUrl, logger: createLogger() });
+      const realCreate = worktrees.createWorktree.bind(worktrees);
+      const createSpy = vi
+        .spyOn(worktrees, 'createWorktree')
+        .mockImplementation(async (...args) => {
+          if (args[4] !== auth) throw new Error('requester auth was lost at the creation boundary');
+          return realCreate(...args);
+        });
+      try {
+        const session = await createSessionInner(
+          manager,
+          createSessionConfig({
+            sessionId,
+            repoId,
+            githubRepo: 'fixture/repo',
+            githubRepoUrl: repoUrl,
+            parentSessionId: mode === 'parent' ? parentId : undefined,
+            project: { kind: 'github', repoFullName: 'fixture/repo', branch: 'main' },
+            worktreeSetup: { scripts: { bash: 'echo fixture' } },
+          })
+        );
+        const workdir = session.getWorkdir();
+        if (!workdir) throw new Error('missing materialized worktree');
+        expect(runGit(workdir, ['rev-parse', 'HEAD'])).toBe(
+          runGit(sourceDir, ['rev-parse', 'HEAD'])
+        );
+        expect(workdir).toBe(
+          worktrees.getWorktreeHostPath(mode === 'parent' ? parentId : sessionId)
+        );
+        if (mode === 'parent')
+          expect(runGit(workdir, ['branch', '--show-current'])).toBe('session/parent-restore');
+      } finally {
+        createSpy.mockRestore();
+        authSpy.mockRestore();
+      }
+    }
+  );
 
   it('reuses the parent default chat workdir for chat-only child sessions', async () => {
     const parentSessionId = 'parent-session' as SessionId;
@@ -911,6 +1003,172 @@ describe('SessionManager durable create ownership', () => {
     created.resolve(session);
     await expect(result).resolves.toBe(session);
     expect(manager.getPendingSession(sessionId)).toBeNull();
+  });
+
+  const buildOwnershipManager = () =>
+    new SessionManager(
+      createLogger(),
+      'token',
+      'machine-1' as MachineId,
+      'workspace-1' as WorkspaceId,
+      createWorkspaceDocument(new Map()),
+      {
+        sessionSandboxFactory: async () => createNoopSessionSandbox(),
+        cloudPort: createTestCloudPort(),
+      }
+    );
+
+  it('hands a retry a fresh create after a wedged one is abandoned', async () => {
+    const manager = buildOwnershipManager();
+    const sessionId = 'wedged-create-session' as SessionId;
+    const attempts: Array<ReturnType<typeof deferred<ISession>>> = [];
+    // A create wedged inside a managed-runtime install or ACP startup: the
+    // first attempt's promise is never resolved by this test.
+    const createFromPreparationOrCold = vi.fn(async () => {
+      const pending = deferred<ISession>();
+      attempts.push(pending);
+      return await pending.promise;
+    });
+    (
+      manager as unknown as {
+        createSessionFromPreparationOrCold: typeof createFromPreparationOrCold;
+      }
+    ).createSessionFromPreparationOrCold = createFromPreparationOrCold;
+    const config = createSessionConfig({ sessionId });
+
+    void manager.createSession(config).catch(() => undefined);
+    await Promise.resolve();
+    const wedged = manager.getPendingSession(sessionId);
+    expect(wedged).not.toBeNull();
+
+    // Deduplication hands a naive retry the very same wedged promise, so it
+    // would stall exactly like the first attempt.
+    void manager.createSession(config).catch(() => undefined);
+    await Promise.resolve();
+    expect(manager.getPendingSession(sessionId)).toBe(wedged);
+
+    expect(manager.abandonPendingSessionCreate(sessionId, 'initialization-stalled')).toBe(true);
+    expect(manager.getPendingSession(sessionId)).toBeNull();
+
+    // The retry now reaches a genuinely new create and completes, which is the
+    // self-healing the stall watchdog promises.
+    const retry = manager.createSession(config);
+    await Promise.resolve();
+    expect(manager.getPendingSession(sessionId)).not.toBe(wedged);
+    const retrySession = {
+      sessionId,
+      terminate: vi.fn(async () => undefined),
+    } as unknown as ISession;
+    attempts[1]?.resolve(retrySession);
+    await expect(retry).resolves.toBe(retrySession);
+  });
+
+  it('terminates a session that materializes from an abandoned create', async () => {
+    const manager = buildOwnershipManager();
+    const sessionId = 'late-create-session' as SessionId;
+    const created = deferred<ISession>();
+    const createFromPreparationOrCold = vi.fn(async () => await created.promise);
+    (
+      manager as unknown as {
+        createSessionFromPreparationOrCold: typeof createFromPreparationOrCold;
+      }
+    ).createSessionFromPreparationOrCold = createFromPreparationOrCold;
+
+    void manager.createSession(createSessionConfig({ sessionId })).catch(() => undefined);
+    await Promise.resolve();
+    expect(manager.abandonPendingSessionCreate(sessionId, 'initialization-stalled')).toBe(true);
+
+    // The abandoned create wins the race after nobody is waiting for it. Its
+    // Session was never handed to a caller, so it must not survive as an orphan.
+    const terminate = vi.fn(async () => undefined);
+    created.resolve({ sessionId, terminate } as unknown as ISession);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(terminate).toHaveBeenCalledWith(true);
+  });
+
+  it('reaps a late orphan without unregistering or finalizing the retry that replaced it', async () => {
+    const manager = buildOwnershipManager();
+    const sessionId = 'orphan-after-replacement-session' as SessionId;
+    const config = createSessionConfig({ sessionId });
+    const managerTerminated: SessionId[] = [];
+    manager.on('terminated', (event: { sessionId: SessionId }) => {
+      managerTerminated.push(event.sessionId);
+    });
+
+    const orphanCreate = deferred<ISession>();
+    const replacementCreate = deferred<ISession>();
+    let attempt = 0;
+    (
+      manager as unknown as {
+        createSessionFromPreparationOrCold: () => Promise<ISession>;
+      }
+    ).createSessionFromPreparationOrCold = async () =>
+      await (++attempt === 1 ? orphanCreate.promise : replacementCreate.promise);
+
+    // Attempt 1 registers its Session (manager listeners attached) and then
+    // wedges in managed-runtime resolution or ACP startup — both of which run
+    // AFTER `createSessionInner` has published it.
+    void manager.createSession(config).catch(() => undefined);
+    await Promise.resolve();
+    const orphan = (await createSessionInner(manager, config)) as Session;
+    expect(manager.abandonPendingSessionCreate(sessionId, 'initialization-stalled')).toBe(true);
+
+    // The retry publishes a healthy replacement under the same id and completes.
+    const retry = manager.createSession(config);
+    await Promise.resolve();
+    const replacement = await createSessionInner(manager, config);
+    replacementCreate.resolve(replacement);
+    await expect(retry).resolves.toBe(replacement);
+    expect(manager.getSession(sessionId)).toBe(replacement);
+
+    // Only now does the orphan's wedged startup return.
+    const orphanTerminated = new Promise<void>((resolve) => {
+      orphan.once('terminated', () => resolve());
+    });
+    orphanCreate.resolve(orphan);
+    await orphanTerminated;
+    await Promise.resolve();
+
+    // The orphan is gone, but its death is invisible to the manager: the
+    // replacement stays registered, and MessageHandler never hears a
+    // `terminated` for this id that would finalize the replacement's live turn.
+    expect(manager.getSession(sessionId)).toBe(replacement);
+    expect(managerTerminated).toEqual([]);
+  });
+
+  it('reports no entry to abandon when the create already settled', async () => {
+    const manager = buildOwnershipManager();
+    const sessionId = 'settled-create-session' as SessionId;
+    expect(manager.abandonPendingSessionCreate(sessionId, 'initialization-stalled')).toBe(false);
+  });
+
+  it('stops waiting on a wedged create instead of hanging teardown', async () => {
+    vi.useFakeTimers();
+    try {
+      const manager = buildOwnershipManager();
+      const sessionId = 'wedged-terminate-session' as SessionId;
+      (
+        manager as unknown as {
+          pendingSessionCreates: Map<SessionId, Promise<ISession>>;
+        }
+      ).pendingSessionCreates.set(sessionId, new Promise<ISession>(() => {}));
+
+      const result = manager.requestSessionTerminate(sessionId);
+      let settled = false;
+      void result.then(() => {
+        settled = true;
+      });
+      await Promise.resolve();
+      expect(settled).toBe(false);
+
+      // Teardown gives the create its deadline and then detaches, rather than
+      // waiting on a promise that will never settle.
+      await vi.advanceTimersByTimeAsync(300_000);
+      await expect(result).resolves.toBe('terminated');
+      expect(manager.getPendingSession(sessionId)).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

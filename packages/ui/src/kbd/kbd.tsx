@@ -4,11 +4,21 @@ import { appendClassName } from '../internal/class-name';
 import { corner, text } from '../tokens/scales.stylex';
 import { kbd } from './kbd.tokens.stylex';
 
-export interface KbdProps extends Omit<ComponentProps<'kbd'>, 'className'> {
+export interface KbdGroupProps extends Omit<ComponentProps<'kbd'>, 'className'> {
   className?: string;
 }
 
-export type KbdGroupProps = KbdProps;
+/**
+ * `small` is the caption step, for a cap beside a line of text: a palette row,
+ * a tooltip. `medium` is the footnote step, for a page whose subject is the
+ * keys themselves (a shortcuts sheet), where the cap is read rather than
+ * glanced at and 11px closes up. The height, fill and corner do not change.
+ */
+export type KbdSize = 'small' | 'medium';
+
+export interface KbdProps extends KbdGroupProps {
+  size?: KbdSize;
+}
 
 const styles = stylex.create({
   /**
@@ -45,6 +55,8 @@ const styles = stylex.create({
     pointerEvents: 'none',
     userSelect: 'none',
   },
+  /** The footnote step, inside the same cap. */
+  capMedium: { fontSize: text.footnoteSize, lineHeight: text.footnoteLeading },
   /**
    * A chord: the keys that are pressed together. It is a `<kbd>` around
    * `<kbd>`s, which is what HTML gives this exact shape, so a screen reader is
@@ -75,8 +87,11 @@ const styles = stylex.create({
  * quiet list into a keyboard diagram. A cap is for the surfaces where the keys
  * themselves are the subject.
  */
-export const Kbd = forwardRef<HTMLElement, KbdProps>(function Kbd({ className, ...rest }, ref) {
-  const sx = stylex.props(styles.cap);
+export const Kbd = forwardRef<HTMLElement, KbdProps>(function Kbd(
+  { className, size = 'small', ...rest },
+  ref
+) {
+  const sx = stylex.props(styles.cap, size === 'medium' && styles.capMedium);
   return (
     <kbd
       ref={ref}

@@ -1,9 +1,8 @@
 /**
  * Feature-tab demo durations and the demo id union.
  *
- * These live apart from `landing-app-preview.tsx` on purpose. The preview is the
- * landing's heaviest module (it mounts real product UI, and behind it the chat
- * composer / markdown renderer / katex), and it sits BELOW the 100dvh hero, so it
+ * These live apart from `landing-app-preview.tsx` on purpose. The preview (the
+ * product replica and its diff highlighter) sits BELOW the 100dvh hero, so it
  * is loaded lazily from `underwater-experience.tsx`. That module still needs the
  * tab durations at module scope to build `TAB_DURATIONS` — importing them from
  * the preview would pull the whole preview graph back into the landing's

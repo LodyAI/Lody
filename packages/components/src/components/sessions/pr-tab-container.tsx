@@ -93,6 +93,7 @@ export function PrTabContainer({
     branchExists,
     isRevalidating,
   } = useGitHubPrDetails({
+    sessionId: sessionId ?? undefined,
     workspaceId: currentWorkspaceId ?? null,
     repoFullName,
     prNumber,
@@ -103,9 +104,7 @@ export function PrTabContainer({
   // The owning session (this PR tab's session) publishes the live resolve-
   // conflicts action; consuming it here keeps the PR-tab button in lockstep with
   // the info-bar "Resolve Conflicts" button (same dispatch, shared pending).
-  const resolveConflictsAction = useAtomValue(
-    resolveConflictsActionAtomFamily(sessionId ?? '')
-  );
+  const resolveConflictsAction = useAtomValue(resolveConflictsActionAtomFamily(sessionId ?? ''));
   const canResolveConflicts = Boolean(
     resolveConflictsAction?.available && !resolveConflictsAction.pending
   );
@@ -292,7 +291,11 @@ export function PrTabContainer({
       onMarkReadyForReview={handleMarkReadyForReview}
       onDeleteBranch={handleDeleteBranch}
       onResolveConflicts={canResolveConflicts ? resolveConflictsAction?.run : undefined}
-      isResolvingConflicts={resolveConflictsAction?.pending ?? false}
+      // Pending only counts for an offerable action: while the session hydrates
+      // or cannot offer it, the header shows the disabled merge instead.
+      isResolvingConflicts={Boolean(
+        resolveConflictsAction?.available && resolveConflictsAction.pending
+      )}
       onRefresh={handleRefresh}
       onPostComment={handlePostComment}
       onGrantChecksPermission={handleGrantChecksPermission}

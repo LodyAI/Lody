@@ -83,7 +83,7 @@ type Story = StoryObj<typeof meta>;
 // so the story exercises the panel exactly as users see it.
 const wrap = (content: React.ReactNode) => (
   <Dialog.Root open>
-    <Dialog.Content closeButton={false} className="w-[calc(100vw-2rem)] max-w-3xl">
+    <Dialog.Content closeButton={false} width="48rem">
       {content}
     </Dialog.Content>
   </Dialog.Root>

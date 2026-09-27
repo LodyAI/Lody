@@ -8,7 +8,7 @@ import {
   type RefObject,
 } from 'react';
 import { flushSync } from 'react-dom';
-import type { VirtualizerHandle } from 'virtua';
+import type { VirtualizerHandle } from '@lody/virtua';
 import type { ConversationRange, ConversationView } from '@/lib/conversation-view';
 import { useLatestRef } from './use-latest-ref';
 

@@ -9,7 +9,7 @@ import {
   type GitHubTreeLevelEntry,
 } from '@lody/shared';
 import { withGitHubTokenRetry } from './github-token';
-import { loadRepoFilePaths } from './repo-file-paths-cache';
+import { fetchRepoFilePaths, type RepoFilePathsCacheEntry } from './repo-file-paths-cache';
 import {
   LazyDirectoryFileProvider,
   joinProjectPath,
@@ -33,25 +33,36 @@ export type GitHubRepoFileProviderOptions = {
 export class GitHubRepoFileProvider extends LazyDirectoryFileProvider {
   private readonly directoryTreeShaByPath = new Map<string, string>();
   private resolvedBranch: string | undefined;
+  private searchPaths: Promise<RepoFilePathsCacheEntry> | null = null;
 
   constructor(private readonly options: GitHubRepoFileProviderOptions) {
     super();
   }
 
   async searchFiles(query: string): Promise<readonly FileWorkspaceProviderEntry[]> {
-    const branch = await this.getBranch();
-    // Cached per repository and branch: search runs per keystroke, and the
-    // recursive tree is megabytes of JSON parsed on the main thread.
-    const result = await loadRepoFilePaths(
-      this.options.workspaceId,
-      this.options.repoFullName,
-      branch
-    );
+    const result = await this.loadSearchPaths();
     const normalized = query.trim().toLowerCase();
     const paths = normalized
       ? result.paths.filter((path) => path.toLowerCase().includes(normalized))
       : result.paths;
     return paths.slice(0, DEFAULT_SEARCH_MAX_FILES).map((path) => toFileEntry(path));
+  }
+
+  /**
+   * Fetched fresh once per provider, like the directory listing it sits next
+   * to, then reused: search runs per keystroke and the recursive tree is
+   * megabytes of JSON. The shared cache's TTL would hide files pushed since.
+   */
+  private loadSearchPaths(): Promise<RepoFilePathsCacheEntry> {
+    this.searchPaths ??= this.getBranch()
+      .then((branch) =>
+        fetchRepoFilePaths(this.options.workspaceId, this.options.repoFullName, branch)
+      )
+      .catch((error: unknown) => {
+        this.searchPaths = null;
+        throw error;
+      });
+    return this.searchPaths;
   }
 
   async openFile(pathOrFileId: string): Promise<FileWorkspaceOpenResult> {

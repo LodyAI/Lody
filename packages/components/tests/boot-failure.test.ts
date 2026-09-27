@@ -125,12 +125,15 @@ describe('renderBootFailure', () => {
     expect(root.textContent).toContain('Build ff272419 · 2026-09-25');
   });
 
-  it('says reloading is the likely fix only when a chunk failed to load', () => {
+  it('names the cause and the likely fix only when a chunk failed to load', () => {
     renderBootFailure(root, new TypeError('Failed to fetch dynamically imported module: /a.js'));
+    // Lody did start; the title says what actually failed.
+    expect(root.querySelector('h1')?.textContent).toBe("Part of Lody didn't load");
     expect(root.textContent).toContain('reloading usually fixes this.');
 
     root.innerHTML = '';
     renderBootFailure(root, new Error('boom'));
+    expect(root.querySelector('h1')?.textContent).toBe("Lody didn't start this time");
     expect(root.textContent).not.toContain('reloading usually fixes this.');
   });
 

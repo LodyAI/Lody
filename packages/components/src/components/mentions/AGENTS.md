@@ -15,7 +15,7 @@ Pipeline background: [ui-mentions.md](../../../../../.agents/docs/ui-mentions.md
   rule (sessions: having any) belongs there too. Placeholder hints advertise `$`
   only under the conditions that enable Skill mentions.
 - Desktop menus render through `MentionContent`, capped at
-  `var(--mention-input-width)`.
+  `var(--mention-input-width)`; `@` pins `side="top"`.
 - `insertText` must keep its type's prompt form (`@path`, `#123`, `$token`,
   `/cmd`): reaching a type through `@` must not change what the agent receives.
   Directory candidates carry BOTH `navigateText` (`@dir/`, descend) and
@@ -31,8 +31,8 @@ Pipeline background: [ui-mentions.md](../../../../../.agents/docs/ui-mentions.md
 - A candidate describes its side panel through the neutral
   `MentionCandidateDetail` fields, which render verbatim — put i18n'd text
   there, never a raw enum. The one exception is `detail.agentRole`, rendering
-  `sessions/agent-role-detail-pane.tsx`: desktop only, fixed height, stable
-  scrollbar gutter.
+  `sessions/agent-role-detail-pane.tsx`: desktop only. The list sets either
+  pane's height.
 - Lazy work is `MentionCategory.activation`; category navigation starts its
   destination synchronously through `MentionItem.onMentionNavigate`, while
   `selectMentionViewActivations` covers typed/pasted prefixes, direct triggers,

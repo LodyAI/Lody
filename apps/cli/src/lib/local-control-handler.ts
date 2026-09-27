@@ -1,4 +1,10 @@
 import {
+  LOCAL_SCHEDULE_CONTROL_PATH,
+  ScheduleControlRequestSchema,
+  type ScheduleControlRequest,
+  type ScheduleControlResponse,
+} from '@lody/shared';
+import {
   LOCAL_MACHINE_RPC_PATH,
   LocalMachineRpcResponseSchema,
   LocalProjectControlRequestSchema,
@@ -28,6 +34,7 @@ const PROJECT_CONTROL_TYPES: ReadonlyArray<LocalProjectControlRequestValidated['
   LocalProjectControlRequestSchema.options.map((option) => option.shape.type.value);
 
 export interface LocalSessionControlConfig {
+  dispatchSchedule?: (message: ScheduleControlRequest) => Promise<ScheduleControlResponse>;
   machineId: MachineId;
   logger: Logger;
   dispatchSession: (
@@ -287,6 +294,27 @@ export class LocalControlHandler {
     requestId: number;
     onSessionResponse?: (response: LocalSessionControlResponse) => void;
   }): Promise<LocalControlHandlerResponse> {
+    if (request.path === LOCAL_SCHEDULE_CONTROL_PATH) {
+      return (async () => {
+        let raw: unknown;
+        try {
+          raw = JSON.parse(request.rawBody);
+        } catch {
+          return handlerResponse(400, { ok: false, error: 'invalid_request' });
+        }
+        const parsed = ScheduleControlRequestSchema.safeParse(raw);
+        if (!parsed.success) return handlerResponse(400, { ok: false, error: 'invalid_request' });
+        if (parsed.data.machineId !== this.config.machineId)
+          return handlerResponse(403, { ok: false, error: 'machine_mismatch' });
+        if (!this.config.dispatchSchedule)
+          return handlerResponse(501, { ok: false, error: 'schedules_unsupported' });
+        try {
+          return handlerResponse(200, await this.config.dispatchSchedule(parsed.data));
+        } catch {
+          return handlerResponse(500, { ok: false, error: 'schedule_control_failed' });
+        }
+      })();
+    }
     if (request.path === LOCAL_SESSION_CONTROL_PATH) {
       return handleSessionControlRequest(this.config, request.rawBody, request.requestId, {
         onResponse: request.onSessionResponse,

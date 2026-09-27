@@ -55,6 +55,8 @@ export interface MenuContentProps extends Omit<
   container?: PopupContainer;
   /** Where focus goes when the menu closes; Base UI's `Menu.Popup` prop. */
   finalFocus?: PopupBaseProps['finalFocus'];
+  /** Use the 180px width floor for short, two-choice menus. */
+  width?: 'regular' | 'compact';
   className?: string;
 }
 
@@ -206,7 +208,7 @@ function rowClassName(
  * context menu is anchored to the pointer rather than to a control.
  */
 export const MenuContent = forwardRef<HTMLDivElement, MenuContentProps>(function MenuContent(
-  { className, children, container, finalFocus, sideOffset = POPUP_GAP, ...rest },
+  { className, children, container, finalFocus, width = 'regular', sideOffset = POPUP_GAP, ...rest },
   ref
 ) {
   const inheritedContainer = usePopupContainer();
@@ -245,6 +247,7 @@ export const MenuContent = forwardRef<HTMLDivElement, MenuContentProps>(function
               stylex.props(
                 surface.popup,
                 surface.popupMenu,
+                width === 'compact' && surface.popupMenuCompact,
                 hidden && hiddenSurfaceForSide(state.side)
               ).className,
               className

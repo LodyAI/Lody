@@ -19,8 +19,8 @@ In compact presentation the navigation sidebar and the Session side panel
 stop taking columns and become overlays, synced into
 `compactDesktopLayoutAtom` so non-hook consumers see the same state. The one
 trade-off: crossing the compact boundary remounts the sidebar and an open
-side panel once, so their transient in-component state (e.g. scroll position)
-resets — persisted atoms survive.
+side panel once. The sidebar viewport now restores its per-workspace scroll
+position; other transient in-component state may reset. Persisted atoms survive.
 
 ## Root cause
 
@@ -107,5 +107,24 @@ from a viewport breakpoint.
   past the breakpoint). That was the original reason for the identity pin;
   the remount is accepted because a wide viewport genuinely changes which UI
   is usable.
+
+## Follow-up: preserve sidebar viewport position
+
+The desktop sidebar also remounts after its normal collapse/expand transition.
+That discarded the scroll viewport's `scrollTop`, so opening a long list again
+jumped to its start; crossing the compact boundary did the same. `LoroSidebar`
+now saves its viewport offset in a window-local Jotai atom when that viewport
+unmounts or changes workspace, and restores it in a layout effect before paint.
+The key comes from the target workspace slug, so switching workspaces does not
+reuse another workspace's position. This preserves the current hidden-sidebar
+prefetch shutdown. If the list has since shrunk, the browser clamps the offset
+to the available range; a fresh app reload starts at the top.
+
+The component regression test for remount and workspace switching passes in a
+standalone checkout (7 tests in the owning suite). A synthetic sidebar
+mount/unmount benchmark is recorded in the
+[working-grid note](2026-09-24-sidebar-working-grid.md); it does not establish
+real Electron Cmd+B frame timing, and the hitch should not be considered fixed
+on that evidence alone.
 
 Spec: [desktop multi-window](../../../../specs/desktop-windows.md).

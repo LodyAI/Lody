@@ -41,6 +41,7 @@ const meta = {
     latestMessageAt: hoursAgo(2),
     now,
     onOpenPullRequest: fn(),
+    standalone: true,
   },
 } satisfies Meta<typeof SessionInfoCard>;
 
@@ -74,6 +75,14 @@ export const TeamWithAuthor: Story = {
     ...githubArgs,
     author: { name: 'Alex Rivera', image: null },
     prCiRuns: ciPassing,
+    sharing: {
+      visibility: 'team',
+      canManage: true,
+      machineId: 'machine-story' as MachineId,
+      localProjectId: null,
+      machineName: 'Studio Mac',
+      projectName: null,
+    },
   },
 };
 
@@ -185,7 +194,7 @@ export const LongBranchName: Story = {
 export const HoverInteraction: Story = {
   render: (args) => (
     <div className="w-64 rounded-lg border border-border p-2">
-      <SessionInfoHoverCard {...args} {...githubArgs} prCiRuns={ciPassing}>
+      <SessionInfoHoverCard {...args} {...githubArgs} prCiRuns={ciPassing} standalone={false}>
         <div
           role="button"
           tabIndex={0}
@@ -196,6 +205,61 @@ export const HoverInteraction: Story = {
           <span className="shrink-0 text-[11px] tabular-nums text-code-added">+312</span>
         </div>
       </SessionInfoHoverCard>
+    </div>
+  ),
+};
+
+const listRows: Array<Partial<SessionInfoCardProps> & { title: string }> = [
+  { ...githubArgs, title: 'Fix data persistence race', prCiRuns: ciPassing },
+  {
+    ...githubArgs,
+    title: 'Ship presence heartbeat',
+    prStatus: 'merged',
+    prNumber: 99,
+    prCiRuns: ciRunning,
+  },
+  {
+    ...githubArgs,
+    title: 'Spike: fabric shader LOD',
+    prStatus: 'closed',
+    prNumber: 74,
+    prCiRuns: ciFailing,
+  },
+  {
+    kind: 'local',
+    title: 'Refactor persistence layer',
+    isWorktree: true,
+    folderName: 'lody',
+    machineName: 'Studio Mac',
+    branchName: 'feat/persistence-refactor',
+  },
+];
+
+/**
+ * Run the pointer down the rows: the first card fades in after the warm-up,
+ * then each next row's card replaces it in place, with no fade between them.
+ */
+export const HoverAcrossRows: Story = {
+  render: (args) => (
+    <div className="flex w-64 flex-col rounded-lg border border-border p-2">
+      {listRows.map((row) => (
+        <SessionInfoHoverCard
+          key={row.title}
+          {...args}
+          {...row}
+          latestMessageAt={hoursAgo(2)}
+          standalone={false}
+        >
+          <div
+            role="button"
+            tabIndex={0}
+            data-row={row.title}
+            className="flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-sidebar-hover"
+          >
+            <span className="min-w-0 flex-1 truncate">{row.title}</span>
+          </div>
+        </SessionInfoHoverCard>
+      ))}
     </div>
   ),
 };

@@ -99,3 +99,34 @@ export const Sizes: Story = {
     </div>
   ),
 };
+
+/** The compact onboarding avatar uses the same readiness vocabulary. */
+export const AvatarSurface: Story = {
+  args: { cliType: 'builtin', agentType: 'codex', readiness: 'ready' },
+  render: () => (
+    <div className="flex items-center gap-4">
+      <AgentReadinessMark
+        cliType="builtin"
+        agentType="codex"
+        readiness="cold"
+        size="sm"
+        surface="avatar"
+      />
+      <AgentReadinessMark
+        cliType="builtin"
+        agentType="codex"
+        readiness="arriving"
+        percent={47}
+        size="sm"
+        surface="avatar"
+      />
+      <AgentReadinessMark
+        cliType="builtin"
+        agentType="codex"
+        readiness="ready"
+        size="sm"
+        surface="avatar"
+      />
+    </div>
+  ),
+};

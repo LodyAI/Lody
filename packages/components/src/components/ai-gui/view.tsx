@@ -1,3 +1,6 @@
+import * as stylex from '@stylexjs/stylex';
+import { space } from '@lody/ui/tokens/scales.stylex';
+import { writeTextToClipboard } from '@/lib/clipboard';
 import {
   type ComponentPropsWithoutRef,
   type ComponentType,
@@ -49,7 +52,7 @@ import { usePostHog } from '@posthog/react';
 import { capturePostHogEvent, getAnalyticsFileKind } from '@/lib/posthog-analytics';
 import { getRpcDeliveredTurnKey, rpcDeliveredTurnsAtom } from '@/atoms/session-dispatch-delivery';
 import { selectAtom } from 'jotai/utils';
-import { Virtualizer, type VirtualizerHandle, type CustomItemComponentProps } from 'virtua';
+import { Virtualizer, type VirtualizerHandle, type CustomItemComponentProps } from '@lody/virtua';
 import {
   type AgentConfigCliType,
   type ChatFailedCode,
@@ -160,6 +163,7 @@ import {
 } from './assistant-message-render-items';
 import {
   buildAssistantTurnRenderLayout,
+  isCommandToolCall,
   type AssistantActivityRenderItem,
   type AssistantActivitySummary,
   type AssistantToolCallRenderItem,
@@ -215,7 +219,12 @@ import {
 import { downloadSessionFile, fetchSessionFilePreview } from '@/lib/session-file-download';
 import { getMachineMetaByIdAtomFamily } from '@/atoms/machines';
 import { isHtmlSessionFile } from '@/lib/session-file-presentation';
-import type { MachineId, MessageTextSpan, SessionFilePayload } from '@lody/shared';
+import type {
+  MachineId,
+  MessageTextSpan,
+  SessionFilePayload,
+  ScheduleProposalMeta,
+} from '@lody/shared';
 import { MessageTextWithChips } from '@/components/mentions/message-text-chips';
 import { isNativeIOSAppShell } from '@/lib/native-platform';
 import { Popover, Tooltip } from '@/ui/armed-overlays';
@@ -224,9 +233,13 @@ import { useTranslation } from 'react-i18next';
 import { toast } from '@/lib/toast';
 import { SessionPlanBar } from '@/components/sessions/session-plan-bar';
 import { ContainerQueryProvider } from './container-query-provider';
+import { ScheduleProposalNotice } from '@/components/schedules/schedule-proposal-notice';
 import { shouldRenderSystemRowItem } from './message-content-guards';
 import { getChatFailedDiagnosticCopy } from './chat-failed-diagnostic-copy';
-import { extractReadableChatFailedMessage } from './chat-failed-error-report';
+import {
+  buildChatFailedErrorReport,
+  extractReadableChatFailedMessage,
+} from './chat-failed-error-report';
 import { DEFAULT_CONVERSATION_FONT_SIZE, type ConversationFontSize } from '@/atoms/settings';
 import {
   conversationMonoFontSizeStyle,
@@ -467,6 +480,10 @@ const NativeSelectionRowsContext = createContext<{
   leading: number;
   held: ReadonlySet<string>;
 }>({ rows: [], leading: 0, held: new Set() });
+// Keys of the two Virtua rows that are not conversation rows (`keyed` needs one per row).
+const LEADING_ROW_KEY = '\u0000leading';
+const AGENT_ACTIVITY_ROW_KEY = '\u0000agent-activity';
+
 function ConversationVirtualRow({ index, ...props }: CustomItemComponentProps) {
   const { rows, leading, held } = useContext(NativeSelectionRowsContext);
   const row = rows[index - leading];
@@ -1328,11 +1345,11 @@ export const buildChatVirtualRows = ({
 };
 
 /**
- * Chat virtual scroll using Virtua library.
+ * Chat virtual scroll using the keyed Virtua fork (`@lody/virtua`).
  *
- * IMPORTANT: Do NOT dynamically toggle Virtua's `shift` prop — it causes
- * element overlap bugs (Virtua bug #284). We use shift={false} since chat
- * messages are appended to the end.
+ * Rows are keyed (`keyed`), not `shift`ed: sizes follow row keys, and rows
+ * inserted anywhere above the viewport (placeholder turns hydrating) keep the
+ * row at the viewport start in place.
  *
  * Sticky-to-bottom behavior (ResizeObserver, hysteresis, scroll position
  * caching) is encapsulated in the `useStickyScroll` hook.
@@ -1593,6 +1610,7 @@ export const SessionChatStreamView = forwardRef<
       isSticky,
       scrollToBottom: scrollStreamToBottom,
       anchorToRow,
+      retargetAnchor,
       initialScrollRestored,
       initialVirtualizerCache,
       persistVirtualizerCache,
@@ -1615,19 +1633,37 @@ export const SessionChatStreamView = forwardRef<
      * the layout effect of the commit that first contains the row.
      */
     const pendingAnchorMessageIdRef = useRef<string | null>(null);
+    /**
+     * The message currently held. The hook holds a Virtua index, so rows
+     * inserted or removed above it (the provenance row, a work group folding,
+     * a placeholder splitting) re-resolve the index from this id.
+     */
+    const anchoredMessageIdRef = useRef<string | null>(null);
+    const findMessageRowIndex = useCallback(
+      (messageId: string) => {
+        const rowIndex = virtualRows.findIndex(
+          (row) =>
+            row.type === 'standard' &&
+            row.item.type === 'message' &&
+            row.item.message.id === messageId
+        );
+        return rowIndex === -1 ? -1 : rowIndex + leadingRowCount;
+      },
+      [leadingRowCount, virtualRows]
+    );
     const resolvePendingAnchor = useCallback(() => {
       const messageId = pendingAnchorMessageIdRef.current;
-      if (messageId === null) return;
-      const rowIndex = virtualRows.findIndex(
-        (row) =>
-          row.type === 'standard' &&
-          row.item.type === 'message' &&
-          row.item.message.id === messageId
-      );
-      if (rowIndex === -1) return;
+      if (messageId === null) {
+        const anchored = anchoredMessageIdRef.current;
+        if (anchored !== null) retargetAnchor(findMessageRowIndex(anchored));
+        return;
+      }
+      const index = findMessageRowIndex(messageId);
+      if (index === -1) return;
       pendingAnchorMessageIdRef.current = null;
-      anchorToRow(rowIndex + leadingRowCount);
-    }, [anchorToRow, leadingRowCount, virtualRows]);
+      anchoredMessageIdRef.current = messageId;
+      anchorToRow(index);
+    }, [anchorToRow, findMessageRowIndex, retargetAnchor]);
     useLayoutEffect(resolvePendingAnchor, [resolvePendingAnchor]);
     const anchorMessage = useCallback(
       (messageId: string) => {
@@ -1638,6 +1674,7 @@ export const SessionChatStreamView = forwardRef<
     );
     const scrollToBottom = useCallback(() => {
       pendingAnchorMessageIdRef.current = null;
+      anchoredMessageIdRef.current = null;
       scrollStreamToBottom();
     }, [scrollStreamToBottom]);
     const selectableRows = useMemo(
@@ -1917,15 +1954,45 @@ export const SessionChatStreamView = forwardRef<
       reportVisibleTurnRange();
     }, [initialScrollRestored, reportVisibleTurnRange, virtualRows.length]);
 
+    // The top fade's bottom counterpart, above the info bar: shown while
+    // conversation content continues past the bottom edge. The reply room under
+    // an anchored message is blank space, not content, so it does not count.
+    const [hasContentBelow, setHasContentBelow] = useState(false);
+    const syncHasContentBelow = useCallback(() => {
+      const viewport = scrollViewportElement;
+      if (!viewport) return;
+      const replyRoom = viewport.querySelector<HTMLElement>(
+        ':scope > [data-conversation-reply-room]'
+      );
+      const below =
+        viewport.scrollHeight -
+        viewport.scrollTop -
+        viewport.clientHeight -
+        (replyRoom?.offsetHeight ?? 0);
+      setHasContentBelow(below > 1);
+    }, [scrollViewportElement]);
+
     const handleStreamScroll = useCallback(
       (offset: number) => {
         handleScroll(offset);
         setIsScrolledFromTop(offset > 0);
+        syncHasContentBelow();
         syncActiveOutlineIndex();
         reportVisibleTurnRange();
       },
-      [handleScroll, reportVisibleTurnRange, syncActiveOutlineIndex]
+      [handleScroll, reportVisibleTurnRange, syncActiveOutlineIndex, syncHasContentBelow]
     );
+
+    // Content also grows or shrinks without a scroll (a streaming reply under
+    // an anchored message, a resized window); re-measure on those too.
+    useEffect(() => {
+      if (isMobile || !scrollViewportElement) return undefined;
+      const observer = new ResizeObserver(syncHasContentBelow);
+      observer.observe(scrollViewportElement);
+      const content = scrollViewportElement.firstElementChild;
+      if (content) observer.observe(content);
+      return () => observer.disconnect();
+    }, [isMobile, scrollViewportElement, syncHasContentBelow]);
 
     const handleOutlinePreview = useCallback(
       (outlineIndex: number) => {
@@ -2105,7 +2172,10 @@ export const SessionChatStreamView = forwardRef<
                   // the first layout is the real one instead of an estimate that
                   // has to be corrected before the conversation can be shown.
                   cache={initialVirtualizerCache}
-                  shift={false}
+                  // Rows are identified by key: sizes follow their rows, and a
+                  // placeholder turn becoming several rows above the reader
+                  // leaves what they are reading in place.
+                  keyed
                   onScroll={handleStreamScroll}
                   onScrollEnd={handleStreamScrollEnd}
                   // Pre-render extra items outside the viewport to reduce blank areas
@@ -2118,7 +2188,9 @@ export const SessionChatStreamView = forwardRef<
                   keepMounted={nativeTextSelection.keepMounted}
                 >
                   {leadingContent == null ? null : (
-                    <div data-conversation-leading-content="">{leadingContent}</div>
+                    <div key={LEADING_ROW_KEY} data-conversation-leading-content="">
+                      {leadingContent}
+                    </div>
                   )}
                   {virtualRows.map((row, rowIndex) => {
                     if (row.type === 'placeholder') {
@@ -2190,7 +2262,11 @@ export const SessionChatStreamView = forwardRef<
                     );
                   })}
                   {shouldShowAgentActivityRow && agentActivityLabel && (
-                    <div className="shrink-0 pt-1" data-agent-activity-row-spacer="">
+                    <div
+                      key={AGENT_ACTIVITY_ROW_KEY}
+                      className="shrink-0 pt-1"
+                      data-agent-activity-row-spacer=""
+                    >
                       <AgentActivityRow
                         label={agentActivityLabel}
                         tone={agentActivityTone}
@@ -2212,6 +2288,14 @@ export const SessionChatStreamView = forwardRef<
                 hinting that the conversation continues past the top edge. */}
             {!isMobile && isScrolledFromTop ? (
               <div className="pointer-events-none absolute inset-x-0 top-0 h-12 bg-gradient-to-b from-background to-transparent" />
+            ) : null}
+            {/* Bottom fade into the same canvas over the last 40px above the
+                info bar (desktop only): more conversation below. */}
+            {!isMobile && hasContentBelow ? (
+              <div
+                data-conversation-bottom-fade=""
+                className="pointer-events-none absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-background to-transparent"
+              />
             ) : null}
             {/* Round outline. Its visual layer portals to the full-page overlay
                 when supplied, so composer growth cannot move its centre. It is
@@ -2357,7 +2441,15 @@ const SystemMessageRowView = ({
   return (
     <div className="flex flex-col gap-2">
       {systemItems.map(({ item, itemIndex }) =>
-        item.type === 'system_notice' ? (
+        item.type === 'system_notice' && item.name === 'schedule_proposal' && item.meta ? (
+          <ScheduleProposalNotice
+            key={`schedule-proposal-${itemIndex}`}
+            meta={item.meta as ScheduleProposalMeta}
+            sessionId={sessionId}
+            entryId={message.id}
+            itemIndex={itemIndex}
+          />
+        ) : item.type === 'system_notice' ? (
           <SystemNoticeView
             key={`${item.name}-${itemIndex}`}
             notice={item}
@@ -2567,6 +2659,10 @@ const DashedNoticeRule = () => (
   />
 );
 
+const noticeStyles = stylex.create({
+  footer: { paddingInline: space[2], paddingBottom: space[2] },
+});
+
 /**
  * Renders a single system notice as a divider with tooltip
  */
@@ -2590,11 +2686,13 @@ const AgentNoticeBanner = ({
   label,
   detail,
   action,
+  footer,
 }: {
   tone: 'error' | 'warning' | 'muted';
   label: string;
   detail?: string;
   action?: ReactNode;
+  footer?: ReactNode;
 }) => {
   // Error is a cross, warning a triangle, muted an info circle — an octagon
   // with an exclamation inside still read as "notice" at 14px.
@@ -2648,6 +2746,7 @@ const AgentNoticeBanner = ({
           </span>
         </div>
       ) : null}
+      {footer ? <div {...stylex.props(noticeStyles.footer)}>{footer}</div> : null}
     </div>
   );
 };
@@ -3003,9 +3102,25 @@ const ChatFailedNoticeView = ({
       </button>
     ) : null;
 
-  // Same banner as the agent warning; only the tone and the "more" path differ.
-  // A raw provider payload is a document, so it opens the report dialog instead
-  // of unfolding, and the clipboard gets the untouched text.
+  const handleCopyError = async () => {
+    const report = buildChatFailedErrorReport({
+      title: reasonMessage,
+      action: actionMessage,
+      reason: meta?.reason,
+      code: meta?.code,
+      message: rawMessage,
+      sessionId,
+      agentType: sessionMeta?.agentType,
+      machineId: sessionMeta?.machineId,
+    });
+    if (await writeTextToClipboard(report)) {
+      toast.success(t('common.copied', 'Copied'));
+    } else {
+      toast.error(t('sessions.systemNotices.chatFailed.copyFailed', 'Failed to copy error'));
+    }
+  };
+
+  // Keep copy visible on touch screens, separately from the capacity retry action.
   const noticeRow = (
     <AgentNoticeBanner
       tone={isProviderOverloaded ? 'muted' : 'error'}
@@ -3017,6 +3132,12 @@ const ChatFailedNoticeView = ({
           .join('\n\n') || undefined
       }
       action={retryAction}
+      footer={
+        <Button variant="ghost" size="medium" onClick={() => void handleCopyError()}>
+          <Copy size={14} aria-hidden="true" />
+          {t('sessions.systemNotices.chatFailed.copyError', 'Copy error')}
+        </Button>
+      }
     />
   );
 
@@ -3900,6 +4021,15 @@ const ACTIVITY_STEP_BODY_CLASS =
 
 /* The collapsed activity group's label type; the live status row reuses it so
    "Working" reads as the next group label, not a separate widget. */
+/** A one-line process status ("Context compacted"): the group header's box and type. */
+const PROCESS_STATUS_LINE_CLASS = (isMobile: boolean) =>
+  cn(
+    'flex w-full items-center py-0.5 text-muted-foreground',
+    isMobile
+      ? cn('gap-1.5 pr-1', ACTIVITY_PROCESS_TEXT_CLASS)
+      : 'gap-1.5 px-[4px] text-[length:var(--markdown-body-font-size,1em)] leading-[1.75]'
+  );
+
 const ACTIVITY_GROUP_LABEL_CLASS = (isMobile: boolean) =>
   cn(
     'min-w-0',
@@ -4297,8 +4427,17 @@ const CARD_CONTENT_TYPES = new Set<MessageContent['type']>([
   'file',
 ]);
 
+/** Tool calls that render as a one-line process status (no card surface). */
+const isProcessStatusToolCall = (content: MessageContent): boolean =>
+  content.type === 'tool_call' &&
+  (content.activityKind === 'context_compaction' || content.activityKind === 'codex_retry');
+
 const isCardContentBlock = (block: AssistantTurnRenderBlock): boolean =>
-  block.kind === 'content' && CARD_CONTENT_TYPES.has(block.entry.content.type);
+  block.kind === 'content' &&
+  CARD_CONTENT_TYPES.has(block.entry.content.type) &&
+  // "Context compacted" / "Retrying…" sit in the process rhythm, spaced like
+  // the "Ran N commands" headers around them.
+  !isProcessStatusToolCall(block.entry.content);
 
 const isAssistantToolCallActivityEntry = (
   entry: AssistantActivityRenderItem
@@ -5268,34 +5407,6 @@ type GoalMessage = Extract<MessageContent, { type: 'goal' }>;
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
-const writeTextToClipboard = async (text: string): Promise<boolean> => {
-  if (!text.trim()) return false;
-
-  try {
-    await navigator.clipboard.writeText(text);
-    return true;
-  } catch {
-    try {
-      const el = document.createElement('textarea');
-      el.value = text;
-      el.style.position = 'fixed';
-      el.style.top = '0';
-      el.style.left = '0';
-      el.style.width = '1px';
-      el.style.height = '1px';
-      el.style.opacity = '0';
-      document.body.appendChild(el);
-      el.focus();
-      el.select();
-      const ok = document.execCommand('copy');
-      document.body.removeChild(el);
-      return ok;
-    } catch {
-      return false;
-    }
-  }
-};
-
 const formatJsonValue = (value: unknown) => {
   try {
     return JSON.stringify(value, null, 2);
@@ -6153,6 +6264,8 @@ const TOOL_VERB_FORMS: Record<string, { running: string; done: string }> = {
   Bash: { running: 'Running', done: 'Ran' },
 };
 
+const TOOL_TITLE_LEADING_WORD = /^([A-Z][a-z]+)(?=[\s:(])/;
+
 type ToolVerbStatus = 'running' | 'done';
 
 const toolVerbStatus = (status: ToolCallMessage['status']): ToolVerbStatus =>
@@ -6165,23 +6278,38 @@ const ToolVerb = ({ word, status }: { word: string; status: ToolVerbStatus }) =>
   </span>
 );
 
-/** A tool title whose opening verb, when it has one, follows the step's tense. */
+/**
+ * A tool title whose opening verb, when it has one, follows the step's tense.
+ * `verb` supplies one when the agent's title is a bare target — raw commands
+ * open lowercase or with punctuation, so a command step reads "Ran `sed -n …`"
+ * the way a file step reads "Read session-list.tsx". A title already opening
+ * with a capitalized word ("Shell: cat x") is an authored label and keeps it.
+ */
 const ToolTitleWithHighlight = ({
   title,
   status,
   className,
+  verb,
 }: {
   title: string;
   status: ToolVerbStatus;
   className?: string;
+  verb?: string;
 }) => {
-  const match = /^([A-Z][a-z]+)(?=[\s:(])/.exec(title);
+  const match = TOOL_TITLE_LEADING_WORD.exec(title);
   if (match && TOOL_VERB_FORMS[match[1]!]) {
     const word = match[1]!;
     return (
       <span className={className} title={title}>
         <ToolVerb word={word} status={status} />
         {title.slice(word.length)}
+      </span>
+    );
+  }
+  if (verb && TOOL_VERB_FORMS[verb] && !match) {
+    return (
+      <span className={className} title={title}>
+        <ToolVerb word={verb} status={status} /> {title}
       </span>
     );
   }
@@ -6263,7 +6391,7 @@ const UserPlainTextBlock = ({
             // unbreakable token (e.g. a pasted log URL). `break-words`/`overflow-wrap:break-word`
             // wraps visually but does NOT shrink min-content, so it must not be set here —
             // it would win by source order and let the bubble overflow its column on every engine.
-            'min-w-0 max-w-full whitespace-pre-wrap text-foreground [overflow-wrap:anywhere]',
+            'min-w-0 max-w-full whitespace-pre-wrap text-reading [overflow-wrap:anywhere]',
             isLong && !isFullTextVisible ? 'overflow-hidden' : ''
           )}
           style={{
@@ -6770,11 +6898,12 @@ const ToolCallCard = memo(function ToolCallCard({
   inlineOutput?: boolean;
 }) {
   const { t } = useTranslation();
+  const isMobile = useIsMobile();
   if (toolCall.activityKind === 'codex_retry') {
     if (toolCall.status !== 'pending' && toolCall.status !== 'in_progress') return null;
     return (
-      <div className="flex min-h-7 items-center gap-2 py-1 text-sm text-muted-foreground">
-        <Spinner className="h-4 w-4 shrink-0" aria-hidden="true" />
+      <div className={PROCESS_STATUS_LINE_CLASS(isMobile)}>
+        <Spinner className="h-[1em] w-[1em] shrink-0" aria-hidden="true" />
         <span>{t('sessions.activity.retrying', 'Retrying…')}</span>
       </div>
     );
@@ -6782,8 +6911,8 @@ const ToolCallCard = memo(function ToolCallCard({
   if (toolCall.activityKind === 'context_compaction') {
     const isCompacting = toolCall.status === 'pending' || toolCall.status === 'in_progress';
     return (
-      <div className="flex min-h-7 items-center gap-2 py-1 text-sm text-muted-foreground">
-        {isCompacting ? <Spinner className="h-4 w-4" aria-hidden="true" /> : null}
+      <div className={PROCESS_STATUS_LINE_CLASS(isMobile)}>
+        {isCompacting ? <Spinner className="h-[1em] w-[1em] shrink-0" aria-hidden="true" /> : null}
         <span>
           {isCompacting
             ? t('sessions.activity.compactingContext', 'Compacting context')
@@ -6881,7 +7010,18 @@ const ToolCallCard = memo(function ToolCallCard({
 
   const terminalTitleDefault = terminalTitleFromContent ?? title;
   const displayTitle = isTerminalExecuteToolCall ? terminalTitleDefault : title;
-  const runningIndicator = isRunning ? <Spinner className="h-4 w-4 text-muted-foreground" /> : null;
+  const commandVerb = isCommandToolCall(toolCall) ? 'Run' : undefined;
+  /* The tense verb is the running signal: a shimmering "Running …" needs no
+     spinner. Keep it only where the step's own wording carries no tense
+     (authored labels like "Shell: …"). */
+  const stepVerb =
+    isFileAction && fileName
+      ? kindMeta?.label
+      : (TOOL_TITLE_LEADING_WORD.exec(displayTitle)?.[1] ?? commandVerb);
+  const runningIndicator =
+    isRunning && !(stepVerb && TOOL_VERB_FORMS[stepVerb]) ? (
+      <Spinner className="h-4 w-4 text-muted-foreground" />
+    ) : null;
 
   const renderContentBlocks = () => {
     if (!contentBlocks?.length) return null;
@@ -7118,6 +7258,7 @@ const ToolCallCard = memo(function ToolCallCard({
             <ToolTitleWithHighlight
               title={displayTitle}
               status={toolVerbStatus(toolCall.status)}
+              verb={commandVerb}
               className={cn(
                 'truncate',
                 isActivityRow

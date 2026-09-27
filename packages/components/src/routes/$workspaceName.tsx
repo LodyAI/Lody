@@ -129,6 +129,7 @@ function LocalWorkspaceGuardRoute() {
   if (!workspace) {
     return (
       <LoadingPlaceholder
+        variant="boot"
         title={t('workspace.route.localStartingTitle')}
         description={t('workspace.route.localStartingDescription')}
       />
@@ -210,6 +211,7 @@ function CloudWorkspaceGuardRoute() {
 
     return (
       <LoadingPlaceholder
+        variant="boot"
         title={t('workspace.route.loadingWorkspacesTitle')}
         description={t('workspace.route.loadingWorkspacesDescription')}
       />
@@ -284,6 +286,7 @@ function CloudWorkspaceGuardRoute() {
   if (!sessionSettled) {
     return (
       <LoadingPlaceholder
+        variant="boot"
         title={t('workspace.route.signingInTitle')}
         description={t('workspace.route.signingInDescription')}
       />
@@ -298,6 +301,7 @@ function CloudWorkspaceGuardRoute() {
   if (isPending || isRetrying || access === undefined) {
     return (
       <LoadingPlaceholder
+        variant="boot"
         title={t('workspace.route.accessLoadingTitle')}
         description={t('workspace.route.accessLoadingDescription')}
       />
@@ -311,6 +315,7 @@ function CloudWorkspaceGuardRoute() {
   if (access.status === 'unauthenticated') {
     return (
       <LoadingPlaceholder
+        variant="boot"
         title={t('workspace.route.signingInTitle')}
         description={t('workspace.route.signingInDescription')}
       />
@@ -399,6 +404,7 @@ function WorkspaceAuthedRoute({
     if (optimisticGuard === 'wait-for-switch') {
       return (
         <LoadingPlaceholder
+          variant="boot"
           title={t('workspace.route.switchingTitle')}
           description={t('workspace.route.switchingDescription')}
         />
@@ -413,6 +419,7 @@ function WorkspaceAuthedRoute({
   if (!orgSettled) {
     return (
       <LoadingPlaceholder
+        variant="boot"
         title={t('workspace.route.loadingWorkspacesTitle')}
         description={t('workspace.route.loadingWorkspacesDescription')}
       />
@@ -423,6 +430,7 @@ function WorkspaceAuthedRoute({
   if (organizationsLoading || !hasOrganizations) {
     return (
       <LoadingPlaceholder
+        variant="boot"
         title={t('workspace.route.loadingWorkspacesTitle')}
         description={t('workspace.route.loadingWorkspacesDescription')}
       />
@@ -468,6 +476,7 @@ function WorkspaceAuthedRoute({
   if (workspaceGuard === 'wait-for-switch') {
     return (
       <LoadingPlaceholder
+        variant="boot"
         title={t('workspace.route.switchingTitle')}
         description={t('workspace.route.switchingDescription')}
       />

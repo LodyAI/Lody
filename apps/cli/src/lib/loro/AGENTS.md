@@ -75,6 +75,10 @@ its 90s freshness window while the room still reports `joined`, so the machine r
 offline with no error raised anywhere. The `(phase, detail)` dedupe is NOT a rate
 limit: a detail that changes per emit (percentage, counter, label) defeats it.
 
+INVARIANT: `initializing` is bounded per stage from the last phase/detail change; on
+expiry the heartbeat stops and `notifyInitializationStalled` fails the turn. Spec:
+`specs/session-initialization-deadline.md`.
+
 Never reintroduce periodic doc-meta writes (`lastSeen`/`lastRunningSeen`) — they stall
 Loro flush; meta timestamps are written only at status transitions. Durable
 `MachineMeta.lastSeen` is retired (not written even at registration); machine online

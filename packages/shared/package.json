@@ -172,7 +172,8 @@
     "loro-mirror": "catalog:",
     "@agentclientprotocol/sdk": "catalog:",
     "acp-extension-core": "workspace:*",
-    "zod": "catalog:"
+    "zod": "catalog:",
+    "croner": "10.0.1"
   },
   "peerDependencies": {
     "loro-crdt": "catalog:",

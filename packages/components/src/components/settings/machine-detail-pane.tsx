@@ -48,8 +48,8 @@ import { MobileSettingsSection } from '@/components/mobile/mobile-settings-row';
 import { ProviderRow } from './provider-row';
 import { ProviderSetupRow } from './provider-setup-row';
 import { DeviceResourceMonitor } from './device-resource-monitor';
-import { CompactSection, settingsRecordsCard } from './compact-layout';
-import { settingsCatalog as catalog, settingsSurface as surface } from './surface';
+import { CompactSection, SettingsEmptyList, settingsRecordsCard } from './compact-layout';
+import { settingsSurface as surface } from './surface';
 import type { MachineMonitorViewState } from '@/hooks/use-machine-monitor';
 import {
   WorkspaceMachineAccordionSummary,
@@ -319,12 +319,9 @@ export function MachineProvidersSection({
           onAdd={onAddProvider}
         />
       ) : (
-        <div {...stylex.props(catalog.empty)}>
-          <Bot {...stylex.props(catalog.emptyIcon)} aria-hidden="true" />
-          <p {...stylex.props(catalog.emptyText)}>
-            {t('settings.agent.provider.empty', 'No providers on this machine yet.')}
-          </p>
-        </div>
+        <SettingsEmptyList>
+          {t('settings.agent.provider.empty', 'No providers on this machine yet.')}
+        </SettingsEmptyList>
       );
     }
     return (

@@ -40,6 +40,28 @@ export const AutomaticallyCreatedBy: Story = {
   },
 };
 
+export const ReadOnly: Story = {
+  args: {
+    relation: 'opened',
+    label: 'Related session',
+    sessionTitle: 'Audit the sidebar navigation state',
+    actionLabel: 'View session',
+    className: 'w-[640px] max-w-[calc(100vw-2rem)]',
+  },
+};
+
+export const WithDetail: Story = {
+  args: {
+    relation: 'opened',
+    label: 'Message sent to',
+    sessionTitle: 'Audit the sidebar navigation state',
+    actionLabel: 'View session',
+    detail: 'The target machine is online and ready.',
+    onAction: () => {},
+    className: 'w-[640px] max-w-[calc(100vw-2rem)]',
+  },
+};
+
 const operationSessionId = 'storybook-created-session' as SessionId;
 const operationCompletion: SessionHistoryParsed = {
   id: 'storybook-create-completion',

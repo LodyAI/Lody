@@ -46,17 +46,20 @@ const styles = stylex.create({
 /**
  * The region a right click or a long press opens the menu over.
  *
- * It renders no box of its own — `display: contents` — because a context menu
- * is attached to something the surface already laid out, and a wrapper with a
- * layout of its own would change that layout just by being asked for a menu.
+ * Its default wrapper uses `display: contents`. With `render`, the supplied
+ * element owns its layout and remains a measurable anchor for other overlays.
  */
 export const ContextMenuTrigger = forwardRef<HTMLDivElement, ContextMenuTriggerProps>(
-  function ContextMenuTrigger({ className, ...rest }, ref) {
+  function ContextMenuTrigger({ className, render, ...rest }, ref) {
     return (
       <BaseContextMenu.Trigger
         ref={ref}
         {...rest}
-        className={appendClassName(stylex.props(styles.trigger).className, className)}
+        render={render}
+        className={appendClassName(
+          render == null ? stylex.props(styles.trigger).className : undefined,
+          className
+        )}
       />
     );
   }

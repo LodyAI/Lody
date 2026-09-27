@@ -1,6 +1,35 @@
 import { ExternalLink, ShieldAlert } from 'lucide-react';
+import * as stylex from '@stylexjs/stylex';
 import { useTranslation } from 'react-i18next';
 import type { AgentConfigCliType, AgentType } from '@lody/shared';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { space } from '@lody/ui/tokens/scales.stylex';
+
+const styles = stylex.create({
+  warningIcon: {
+    marginTop: '2px',
+    width: '16px',
+    height: '16px',
+    flexShrink: 0,
+    color: colors.warning,
+  },
+  copy: {
+    minWidth: 0,
+    fontSize: '12px',
+    lineHeight: 1.375,
+    color: `color-mix(in oklab, ${colors.label} 90%, transparent)`,
+  },
+  link: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: space[1],
+    fontWeight: 500,
+    color: colors.warning,
+    textDecorationLine: 'underline',
+    textUnderlineOffset: '2px',
+  },
+  linkIcon: { width: '12px', height: '12px', flexShrink: 0 },
+});
 
 export const DEEPSEEK_DELEGATION_DISCUSSION_URL =
   'https://github.com/deepseek-ai/deepseek-harness/discussions/4065';
@@ -28,15 +57,15 @@ export function DeepSeekDelegationWarningContent() {
 
   return (
     <>
-      <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-status-warning" aria-hidden="true" />
-      <span className="min-w-0 text-xs leading-snug text-foreground/90">
+      <ShieldAlert {...stylex.props(styles.warningIcon)} aria-hidden="true" />
+      <span {...stylex.props(styles.copy)}>
         {t(
           'chat.runConfig.deepseek.delegationWarning',
           "Due to a current DSH limitation, delegated subagents may use the session's creation-time model (DeepSeek-V41-Flash) instead of this model, which can cost more."
         )}{' '}
-        <span className="inline-flex items-center gap-1 font-medium text-status-warning underline underline-offset-2">
+        <span {...stylex.props(styles.link)}>
           {t('chat.runConfig.deepseek.delegationDiscussion', 'Upstream discussion')}
-          <ExternalLink className="h-3 w-3 shrink-0" aria-hidden="true" />
+          <ExternalLink {...stylex.props(styles.linkIcon)} aria-hidden="true" />
         </span>
       </span>
     </>

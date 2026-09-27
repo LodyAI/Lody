@@ -32,31 +32,6 @@ vi.mock('beautiful-mermaid', () => ({
     `<svg xmlns="http://www.w3.org/2000/svg" width="${DIAGRAM_WIDTH}" height="${DIAGRAM_HEIGHT}" data-diagram="sequence"><text>Launch game</text></svg>`,
 }));
 
-// Streamdown renders a diagram only once it scrolls into view; jsdom has no
-// IntersectionObserver, so report every observed block as visible.
-class VisibleIntersectionObserver implements IntersectionObserver {
-  readonly root = null;
-  readonly rootMargin = '';
-  readonly thresholds: readonly number[] = [];
-
-  constructor(private readonly callback: IntersectionObserverCallback) {}
-
-  observe(target: Element): void {
-    this.callback(
-      [{ isIntersecting: true, intersectionRatio: 1, target } as IntersectionObserverEntry],
-      this
-    );
-  }
-
-  unobserve(): void {}
-  disconnect(): void {}
-  takeRecords(): IntersectionObserverEntry[] {
-    return [];
-  }
-}
-
-vi.stubGlobal('IntersectionObserver', VisibleIntersectionObserver);
-
 const { MarkdownRenderer } = await import('../src/components/ai-gui/markdown-renderer');
 
 (
@@ -82,11 +57,9 @@ const viewerClose = () =>
   document.body.querySelector<HTMLElement>('[data-testid="mermaid-diagram-viewer-close"]');
 
 /**
- * Streamdown defers a diagram until its block is on screen (a 300ms debounce
- * plus an idle callback) and both the block and the render runtime arrive
- * through dynamic imports. Fake timers drive that schedule so the wait is a
- * number of steps rather than a race against the wall clock;
- * `advanceTimersByTimeAsync` flushes the pending imports between them.
+ * The diagram renders after its runtime arrives through a dynamic import. Fake
+ * timers make the wait a number of steps rather than a race against the wall
+ * clock; `advanceTimersByTimeAsync` flushes the pending import between them.
  */
 async function flushUntil(condition: () => boolean, attempts = 20): Promise<void> {
   for (let attempt = 0; attempt < attempts; attempt += 1) {
@@ -194,7 +167,7 @@ describe('diagram pinch arithmetic', () => {
 describe('inline canvas geometry', () => {
   /**
    * A 400x300 frame, drawn at the viewport origin, holding a 200x150 diagram
-   * that Streamdown has centred inside it.
+   * centred inside it.
    */
   const resting: MermaidCanvasView = {
     frame: { left: 0, top: 0, width: 400, height: 300 },
@@ -364,8 +337,7 @@ describe('mermaid full-screen viewer', () => {
   it('replaces the bundled full-screen control with a diagram that opens the viewer', async () => {
     const diagram = await renderMarkdown();
 
-    // Streamdown's own overlay is the one this fix removes; the block keeps its
-    // other controls.
+    // No bundled overlay; the block keeps its other controls.
     expect(container?.querySelector('button[title="View fullscreen"]')).toBeNull();
     expect(container?.querySelector('button[title="Copy code"]')).toBeTruthy();
 
@@ -744,7 +716,6 @@ describe('mermaid full-screen viewer', () => {
     });
     container?.removeEventListener('wheel', listener);
 
-    // Streamdown's pan/zoom canvas would have taken this one and zoomed instead.
     expect(wheel.defaultPrevented).toBe(false);
     expect(abovePage).toEqual([120]);
   });

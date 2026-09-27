@@ -54,7 +54,7 @@ import { Badge } from '@lody/ui/badge';
 import { Button } from '@lody/ui/button';
 import { Switch } from '@lody/ui/switch';
 import { colors } from '@lody/ui/tokens/colors.stylex';
-import { space } from '@lody/ui/tokens/scales.stylex';
+import { control, space } from '@lody/ui/tokens/scales.stylex';
 import { Tooltip } from '@lody/ui/tooltip';
 import { Menu } from '@/ui/menu';
 
@@ -90,7 +90,14 @@ const styles = stylex.create({
   machineName: { maxWidth: '8rem' },
   roleName: { maxWidth: '11rem' },
   agentName: { maxWidth: '9rem' },
-  permissionName: { maxWidth: '9rem' },
+  /** The permission trigger is always the compact face: its icon alone. */
+  iconOnly: {
+    flexShrink: 0,
+    width: control.small,
+    gap: 0,
+    paddingInline: 0,
+    justifyContent: 'center',
+  },
   /** The model keeps its tail when it truncates: `provider/model` loses the prefix. */
   modelName: { maxWidth: '10rem', direction: 'rtl' },
   /** The "create a Role" mark at the end of the empty Role row. */
@@ -214,6 +221,14 @@ function ToggleItem({
 const triggerClassName = (state: { open: boolean }) =>
   stylex.props(surface.trigger, surface.triggerCompact, state.open && surface.triggerOpen)
     .className ?? '';
+
+const iconOnlyTriggerClassName = (state: { open: boolean }) =>
+  stylex.props(
+    surface.trigger,
+    surface.triggerCompact,
+    styles.iconOnly,
+    state.open && surface.triggerOpen
+  ).className ?? '';
 
 export type DesktopMachineMenuOption = {
   value: MachineId;
@@ -673,6 +688,7 @@ export function DesktopRunConfigMenu({
                 type="button"
                 aria-label={runConfigButtonAriaLabel}
                 aria-disabled
+                data-run-config-trigger=""
                 {...stylex.props(surface.trigger, surface.triggerCompact, surface.triggerInert)}
               >
                 {triggerFace}
@@ -684,6 +700,7 @@ export function DesktopRunConfigMenu({
       ) : (
         <Menu.Trigger
           aria-label={runConfigButtonAriaLabel}
+          data-run-config-trigger=""
           className={triggerClassName}
           render={<button type="button" />}
         >
@@ -1099,15 +1116,16 @@ export function DesktopPermissionModeButton({
 
   return (
     <Menu.Root>
+      {/* Icon only: every mode has an icon (warning modes the amber shield),
+          and a label such as "Bypass permissions" took most of the control
+          row. The mode's name is the tooltip and the accessible name. */}
       <Menu.Trigger
-        aria-label={permissionLabel}
-        className={triggerClassName}
+        aria-label={label ? `${permissionLabel}: ${label}` : permissionLabel}
+        title={label ? `${permissionLabel}: ${label}` : permissionLabel}
+        className={iconOnlyTriggerClassName}
         render={<button type="button" />}
       >
         <span {...stylex.props(surface.glyph)}>{permissionModeIcon(value ?? null)}</span>
-        <span {...stylex.props(surface.faceText, styles.permissionName)}>
-          {label ?? permissionLabel}
-        </span>
       </Menu.Trigger>
       <Menu.Content align="start" className="w-max min-w-44 max-w-64">
         {options.map((opt) => (

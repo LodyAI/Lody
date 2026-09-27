@@ -12,6 +12,7 @@
     "session-orchestration",
     "agent-collaboration",
     "agent-roles",
+    "scheduled-tasks",
     "cli-runtimes",
     "device-resource-monitoring",
     "lody-review",

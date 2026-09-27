@@ -153,7 +153,7 @@ export function SessionBrowserToolbar({
               autoCorrect="off"
               spellCheck={false}
               disabled={busy}
-              className="h-full min-w-0 flex-1 bg-transparent px-2.5 text-xs text-foreground outline-none placeholder:text-muted-foreground"
+              className="h-full min-w-0 flex-1 bg-transparent px-2.5 text-xs text-foreground outline-none placeholder:text-muted-foreground focus-visible:shadow-none"
             />
             {previewStatus ? (
               <div className="mr-0.5 flex shrink-0 items-center">

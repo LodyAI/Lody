@@ -1,0 +1,64 @@
+name: pnpm store cache
+
+# Sole writer of the pnpm store cache used by every workflow through
+# `.github/actions/setup-workspace`. Runs on main so the entry is visible to
+# all PRs; PR-scoped entries are never read by other PRs and used to evict the
+# main entries from the 10 GB repository cache.
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - pnpm-lock.yaml
+      - .github/actions/setup-workspace/action.yml
+      - .github/workflows/pnpm-store-cache.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pnpm-store-cache-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: 22
+  COREPACK_ENABLE_DOWNLOAD_PROMPT: 0
+
+jobs:
+  warm:
+    name: Warm pnpm store (${{ matrix.os }})
+    if: github.ref == 'refs/heads/main'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-15, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Set up workspace toolchain
+        id: setup
+        uses: ./.github/actions/setup-workspace
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Populate pnpm store
+        if: steps.setup.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          pnpm install --frozen-lockfile --ignore-scripts
+          # The fallback restore may carry packages from older lockfiles.
+          pnpm store prune
+
+      - name: Save pnpm store
+        if: steps.setup.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ steps.setup.outputs.store-path }}
+          key: ${{ steps.setup.outputs.cache-key }}

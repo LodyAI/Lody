@@ -20,6 +20,7 @@ import { FileIcon, FolderIcon } from '@/components/icons/file-icons';
 import { MobileEdgeBackSwipeZone } from '@/components/mobile/mobile-edge-back-swipe';
 import { SessionFileImagePreview } from '@/components/sessions/session-file-image-preview';
 import { MarkdownRenderer } from '@/components/ai-gui/markdown-renderer';
+import { MarkdownFileResources } from '@/components/ai-gui/markdown-file-image';
 import { SessionMonacoTextViewer } from '@/components/sessions/session-monaco-text-viewer';
 import { useFileWorkspaceTree } from '@/hooks/use-code-session';
 import { isNativeAppShell } from '@/lib/native-platform';
@@ -641,7 +642,7 @@ function MobileFilePreview({
           });
           return;
         }
-        setContent({ status: 'ready', path, snapshot: result.snapshot });
+        setContent({ status: 'ready', path: result.entry.path, snapshot: result.snapshot });
       })
       .catch((error: unknown) => {
         if (cancelled) return;
@@ -724,13 +725,20 @@ function MobileFilePreview({
     );
   }
 
-  return (
+  const textPreview = (
     <MobileTextPreview
-      path={path}
+      path={content.path}
       text={snapshot.text}
       onScrollActivity={onScrollActivity}
       bottomClearanceClassName={bottomClearanceClassName}
     />
+  );
+  return provider ? (
+    <MarkdownFileResources provider={provider} documentPath={content.path} automatic={false} active>
+      {textPreview}
+    </MarkdownFileResources>
+  ) : (
+    textPreview
   );
 }
 
