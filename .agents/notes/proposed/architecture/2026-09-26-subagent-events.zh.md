@@ -11,13 +11,13 @@ Builtin provider 对子 agent 暴露的能力不同：独立子 transcript、任
 的输出尾部。Lody 此前既没有消费原生子会话生命周期，也没有保存其他子 sessionId
 的输出。建议在 Core 中统一为三种事件，明确每次执行的能力，并复用 ACP 内容。
 代价是增加扩展适配工作，收益是明确显示输出缺失，而非假装所有任务都有完整实时
-transcript。Codex 首轮已在本地实现并进行合成测试；其他 provider 仍是提案，
-尚未证明真实发布运行包与源码行为一致。
+transcript。用户已实测确认 Codex 首轮可用；其余 builtin 扩展已有源码接入和合成
+测试覆盖，托管 runtime 发布及各 provider 的真实运行验证仍待完成。
 
 ## 事件清单
 
 目标 schema 和语义见 [draft Spec](../../../../specs/subagent-events.zh.md)。
-下表箭头表示目标映射，本次仅实现 Codex。
+下表保留接入前的原始能力调查；当前源码能力见下文“其余 builtin 扩展”。
 
 | Provider | 原生输入及现有扩展输出                                                                                                                                                                  | 建议映射与限制                                                                                                                                                              |
 | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -85,7 +85,7 @@ Codex 子事件 → Core envelope → AgentClient → HistoryWriter
 其原生 runtime pin。
 
 行为验证覆盖协商、授权归属、断连、嵌套/复用执行、迟到输出、跨轮次持久化和工具
-隔离。其他适配前仍需真实 Codex 测试。全部 provider 上线及持久化重连映射仍是
+隔离。用户现已确认真实 Codex 可用。全部 provider 上线及持久化重连映射仍是
 提案，因此 Note 保留 `proposed`，Spec 保留 draft。
 
 验证：Core 7 项、Codex 协商/协作 33 项、宿主定向 109 项、面板交互 12 项、对话
@@ -95,6 +95,30 @@ Codex 子事件 → Core envelope → AgentClient → HistoryWriter
 不声称全仓检查全绿。
 UI Designer 检查了亮色/暗色 Storybook 截图，但历史使用替身渲染器；真实工具/思考
 渲染仍需桌面端及真实执行验证。
+
+### 其余 builtin 扩展
+
+所有新路径都要求双方协商 v1，旧客户端行为不变。已有宿主、持久化及 UI 无需
+provider 分支。Core 提供可选的 activation 级发射器，处理新 run 身份、终态保护
+和部分 snapshot；原生顺序、订阅和父子归属仍由各扩展负责。
+
+| 扩展   | 源码接入                                                      | 限制                                                                  |
+| ------ | ------------------------------------------------------------- | --------------------------------------------------------------------- |
+| Claude | 原生路由 → snapshot、文本/思考/工具/计划；SDK 进度 → progress | 只纳入真实子 agent；拒绝归属未知的授权；不把子历史重放到根 transcript |
+| Grok   | 原生生命周期/进度、子 ACP、累积参数片段；识别复用 attempt     | context token 不计费；1.0.40 runtime 待实测                           |
+| DSH    | scoped start/end 确立归属；本地子任务复用富工具投影           | 进程外子任务仅生命周期和最终摘要；不开放子 questionnaire              |
+| Kimi   | registry 发现子 agent；Klient 订阅嵌套任务及文本/思考/工具    | 订阅可能遗漏开头，标记不完整；不改引擎                                |
+| Pi     | 子 JSONL 文本/思考/工具事件及进程生命周期/进度                | 不开放子提问或嵌套启动；进程所有权不变                                |
+
+run 取消/补拉仍关闭，既有 taskId 接口不变。交互通过根 ACP 连接并携带 run 归属
+和命名空间工具 ID；子历史工具保持原生 ID。Kimi、Pi 仍不加入根 workspace。
+测试在忽略的 node_modules 中临时链接本地 Core 构建；已发布的 Core 0.1.8 不含
+新导出。独立发布前必须发布 Core 并升级依赖；Kimi/Pi 还需新托管产物和校验和。
+本轮不改 runtime pin、计费或 UI。
+
+测试覆盖规范载荷、旧路径、嵌套归属、执行复用、终态后输出和实时历史。本轮未
+执行付费/真实 provider。Kimi ACP 全套在既有 skill discovery 测试中出现四项失败；
+定向事件/交互测试单独记录，不声称全套通过。
 
 ### 源码清单
 
@@ -110,9 +134,8 @@ UI Designer 检查了亮色/暗色 Storybook 截图，但历史使用替身渲�
   删除了未使用的宿主 list/output wrapper。本提案增加实际 UI 消费者，不声称那些
   wrapper 仍存在。[唯一写入者决策](../../implemented/architecture/2026-09-07-single-history-writer.zh.md)
   继续约束持久化所有权。
-- 没有真实 provider 执行。后续 provider 工作需要按需发布运行包、确认原生身份
-  与恢复证据，并测试各扩展的事件顺序和有界输出尾部行为；Codex 测试不能证明
-  其他 provider 具有同样能力。
+- 用户已确认真实 Codex 可用。其他扩展仍需各自实测，并在需要时发布 runtime；
+  Codex 成功不代表其他 provider 输出能力相同或发布产物已与源码一致。
 
 源码入口：[Claude 路由](../../../../packages/acp-extension-claude/src/native-subagents.ts)、
 [Codex 路由](../../../../packages/acp-extension-codex/src/subagents/CodexSubagentEventRouter.ts)、

@@ -7,7 +7,7 @@ Translation: current
 
 Agent 委派任务后，用户应能看到子 agent 的状态，以及 provider 实际提供的执行细节。
 没有文本通道的运行中任务，不应显示得像流式输出故障。本草案描述目标契约；
-首轮实现仅接入 Codex，等待用户实测，不承诺所有 provider 都有相同输出能力。
+Codex 已经用户实测确认，正在接入其余 builtin 扩展，不承诺所有 provider 都有相同输出能力。
 
 ## 职责与传输
 
@@ -157,8 +157,10 @@ unknown，不把新执行并入旧执行。映射持久化是后续实现工作�
 
 首轮包含 Core、宿主路由、唯一写入者持久化、UI 和随应用构建的 Codex 扩展。
 宿主与扩展双方协商后才使用新载体。Daemon 声明 `subagentEvents` v1 控制新实时
-UI 消费者，离线仍可阅读已存 transcript。旧历史不重写；其他扩展及所需的托管包
-发布等待 Codex 实测通过后再进行。
+UI 消费者，离线仍可阅读已存 transcript。旧历史不重写。Claude、Grok、DSH、
+Kimi、Pi 在 Codex 验证后复用该载体；每个 run 按原生可观察能力声明支持程度。
+Kimi、Pi 仍是隔离的托管 runtime，源码接入不等于发布并更新带校验和的产物。
+规范 run 的取消和补拉控制仍不启用。
 
 重点审阅：是否接受 Core envelope，而非宿主直接消费原生子会话；是否接受一个 Lody
 会话内的多 run transcript；是否接受按真实能力降级，而不承诺所有 provider 输出一致。
@@ -167,7 +169,8 @@ UI 消费者，离线仍可阅读已存 transcript。旧历史不重写；其他
 
 Provider 事件清单与理由见
 [提案 Note](../.agents/notes/proposed/architecture/2026-09-26-subagent-events.zh.md)。
-Codex 合成测试覆盖路由、授权、嵌套/复用执行、终态竞态和跨轮次持久化，真实
-provider 验证仍待完成。首版存储保留文本、思考、工具和计划；非文本消息块会将
+Codex 合成测试覆盖路由、授权、嵌套/复用执行、终态竞态和跨轮次持久化，用户已
+确认 Codex 可用；其他 provider 仍需在源码及 runtime 上线后各自实测。
+首版存储保留文本、思考、工具和计划；非文本消息块会将
 执行标为不完整，不假装已经保存。工具内容保留。UI 显示最新行动，并在弹窗中
 展示全部已保存历史。本草案尚无链接的正式批准。

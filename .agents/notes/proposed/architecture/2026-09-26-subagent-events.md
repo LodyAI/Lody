@@ -13,13 +13,15 @@ child-session lifecycles nor retained foreign child-session output. We propose
 three normalized event kinds in Core, with explicit per-run capabilities and
 ACP content reuse. This adds adapter work but makes missing provider output
 visible rather than pretending every task has a complete live transcript.
-The Codex-first phase is implemented locally with synthetic tests; other providers
-remain proposed, and live deployment parity is not established.
+The user has confirmed the Codex-first implementation works. Remaining builtin
+adapters now have source integrations and synthetic coverage; managed-runtime
+publication and their live deployment verification remain outstanding.
 
 ## Event inventory
 
 The target schema and semantics live in the [draft Spec](../../../../specs/subagent-events.md).
-The arrows below are target mappings; only Codex is implemented in this change.
+This table records the original pre-integration inventory. Current source support
+is recorded under “Remaining builtin adapters” below.
 
 | Provider | Native input and existing adapter surface                                                                                                                                                                        | Proposed mapping and limits                                                                                                                                                                                                                                |
 | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -104,7 +106,7 @@ adapter is bundled, so this phase does not change its native runtime pin.
 
 Behavioral validation covers negotiation, permission ownership, connection loss,
 nested/reused runs, late output, cross-turn persistence and tool isolation. Live
-Codex testing is still required before enabling other adapters. Full-provider
+Codex testing has now been confirmed by the user. Full-provider
 rollout and durable reconnect mappings remain proposed; this note therefore stays
 in `proposed`, and the linked Spec remains a draft.
 
@@ -116,6 +118,34 @@ tests. Broader host/UI runs encountered unchanged GitHub-shim failures and provi
 dialog timeouts and were stopped; full-repository green is not claimed.
 The UI Designer inspected light/dark Storybook screenshots using a stand-in history
 renderer; the real tool/thought renderer still needs desktop/live-run verification.
+
+### Remaining builtin adapters
+
+All new paths require bilateral v1 negotiation and preserve legacy clients. The
+existing host, persistence and UI need no provider-specific branches. Core's optional
+per-activation emitter handles fresh run IDs, terminal protection and partial snapshots;
+adapters own native ordering, subscriptions and ancestry.
+
+| Adapter | Source integration                                                                       | Limits                                                                                     |
+| ------- | ---------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| Claude  | Native routing → snapshot and text/thought/tool/plan; SDK progress → progress            | Actual subagents only; unknown consent ownership denied; no child replay into root history |
+| Grok    | Native lifecycle/progress, child ACP, cumulative argument fragments, attempt-aware reuse | Context tokens are not billing; runtime 1.0.40 needs live validation                       |
+| DSH     | Scoped start/end establishes ancestry; local descendants reuse rich tool projection      | Non-local children expose lifecycle/final summary only; no delegated questionnaires        |
+| Kimi    | Task registry discovers children; Klient streams nested tasks and text/thought/tools     | Subscription may miss initial output, so mark incomplete; engine unchanged                 |
+| Pi      | Child JSONL text/thinking/tool events and process lifecycle/progress                     | No child questions or nested spawning; native process ownership unchanged                  |
+
+Run-addressed cancellation/output reads remain disabled. Existing task-ID APIs
+are unchanged. Consent uses root ACP requests with run ownership and namespaced
+tool IDs; canonical child tools retain their native IDs. Kimi and Pi remain outside
+the root workspace graph. Their tests temporarily link the local Core build inside
+ignored node_modules; published Core 0.1.8 lacks these exports. Standalone publication
+requires a Core release and dependency update; Kimi/Pi also need new managed artifacts
+and checksums. This phase changes no runtime pins, billing surface or UI code.
+
+Tests cover normalized payloads, legacy paths, nested ownership, execution reuse,
+late output and streaming history. No paid/live provider was executed in this phase.
+The full Kimi ACP suite encountered four existing skill-discovery test failures;
+targeted event/interaction checks are reported separately, not as full-suite green.
 
 ### Source inventory
 
@@ -135,10 +165,9 @@ renderer; the real tool/thought renderer still needs desktop/live-run verificati
   it does not claim those wrappers already exist. Existing
   [single-writer decision](../../implemented/architecture/2026-09-07-single-history-writer.md)
   remains authoritative for persistence ownership.
-- No live provider executions. Remaining provider work needs runtime publication
-  where applicable, native identity/recovery evidence, and tests for each adapter's
-  event ordering and bounded output-tail behavior; Codex tests are not evidence
-  that other providers have equivalent capabilities.
+- The user confirmed live Codex behavior. Remaining adapters still need their own
+  live checks and runtime publication where applicable; Codex success does not
+  establish equivalent output or deployment parity for other providers.
 
 Source entry points: [Claude routing](../../../../packages/acp-extension-claude/src/native-subagents.ts),
 [Codex routing](../../../../packages/acp-extension-codex/src/subagents/CodexSubagentEventRouter.ts),

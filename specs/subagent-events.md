@@ -8,7 +8,7 @@ Translation: current
 When an agent delegates work, users should see the child's state and whatever
 execution details its provider actually exposes. A running task with no text
 feed must not look like a broken stream. This draft describes the target contract;
-the first implementation covers Codex only, pending live user testing. It does not
+Codex has passed user testing and the remaining builtin adapters are being integrated. It does not
 claim that every provider offers equivalent output.
 
 ## Responsibilities and transport
@@ -188,7 +188,10 @@ The first rollout includes Core, host routing, single-writer persistence, UI and
 the bundled Codex adapter. Host and adapter must both negotiate before using the
 carrier. The daemon advertises `subagentEvents` v1 for new live UI consumers;
 persisted transcripts remain readable offline. Old histories are not rewritten.
-Other adapters and any required managed-artifact publication wait for Codex testing.
+Claude, Grok, DSH, Kimi and Pi reuse this carrier after Codex validation. Per-run
+support reflects the observed native surface, not provider-wide parity. Kimi and Pi
+remain isolated managed runtimes; source integration is separate from publishing
+and pinning their checksummed artifacts. Existing run controls remain disabled.
 
 Review focus: accept the Core envelope versus native child-session transport;
 accept per-run transcripts inside one Lody session; accept truthful capability
@@ -199,7 +202,8 @@ degradation rather than promising identical output from all providers.
 Provider event inventory and rationale are in the
 [proposal note](../.agents/notes/proposed/architecture/2026-09-26-subagent-events.md).
 Codex synthetic tests cover routing, permissions, nested/reused runs, terminal
-races and persistence across turns. Live provider verification remains outstanding.
+races and persistence across turns, and the user has confirmed Codex works. Other
+providers require their own live verification after the source and runtime rollout.
 The first storage projection retains text, thought, tools and plan; non-text
 message chunks mark the run incomplete rather than being silently claimed as
 retained. Tool content is preserved. The UI shows the latest action and a dialog
