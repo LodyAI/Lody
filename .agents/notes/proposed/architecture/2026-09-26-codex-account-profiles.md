@@ -68,10 +68,10 @@ Cross-process refresh serialization belongs in the native credential owner,
 not a launch-time lease or a second host OAuth implementation.
 The adapter mitigation is tracked separately in
 [acp-extension-codex PR #58](https://github.com/LodyAI/acp-extension-codex/pull/58).
-The adapter's squash-merged `main` commit also requires `acp-extension-core`
-0.1.9 for an additive subagent-event contract. The host pins both merged
-commits, not the deleted adapter PR branch. Lody does not advertise that new
-client capability, so this dependency alignment does not enable subagent events.
+The merged adapter and matching Core pin are owned by the separate
+[dependency-upgrade note](2026-09-27-codex-adapter-core-pins.md) and
+[Lody #1067](https://github.com/LodyAI/Lody/pull/1067). This host change consumes
+that pair; it does not own the version transition.
 
 A restored Session may carry a legacy `codexAuth` value. That value verifies the
 historical identity but cannot authorize a new native process: launch now requires

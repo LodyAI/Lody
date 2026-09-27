@@ -50,9 +50,10 @@ Provider，再启动一次新进程；第二次失败即终止。该有界恢复
 启动时租约或宿主另写一套 OAuth 刷新完成。
 adapter 的缓解措施另见
 [acp-extension-codex PR #58](https://github.com/LodyAI/acp-extension-codex/pull/58)。
-adapter 合并到 `main` 的 squash 提交还依赖 `acp-extension-core` 0.1.9 的增量子代理
-事件契约。宿主同时固定两个已合并提交，而不是已删除的 adapter PR 分支。Lody
-未声明这项新的客户端能力，因此配套升级不会启用子代理事件。
+已合并 adapter 与匹配 Core 的指针由独立的
+[依赖升级记录](2026-09-27-codex-adapter-core-pins.zh.md)及
+[Lody #1067](https://github.com/LodyAI/Lody/pull/1067)负责。本宿主改动消费这组版本，
+不负责版本迁移。
 
 恢复的会话可能携带旧格式的 `codexAuth`。这个值只能验证历史身份，不能授权启动新的
 原生进程；启动现在要求实时 Provider 保留相同的托管账户绑定。本地删除协调是异步的，
