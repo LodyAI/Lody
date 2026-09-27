@@ -68,6 +68,10 @@ Cross-process refresh serialization belongs in the native credential owner,
 not a launch-time lease or a second host OAuth implementation.
 The adapter mitigation is tracked separately in
 [acp-extension-codex PR #58](https://github.com/LodyAI/acp-extension-codex/pull/58).
+The adapter's squash-merged `main` commit also requires `acp-extension-core`
+0.1.9 for an additive subagent-event contract. The host pins both merged
+commits, not the deleted adapter PR branch. Lody does not advertise that new
+client capability, so this dependency alignment does not enable subagent events.
 
 A restored Session may carry a legacy `codexAuth` value. That value verifies the
 historical identity but cannot authorize a new native process: launch now requires
@@ -120,9 +124,9 @@ video and checks no profile writes `auth.json`; its external-wire fixture uses n
 
 The profile implementation passed `pnpm check`, formatting, public boundary,
 docs check, and E2E suite checks before the bounded retry. For the retry, 32
-targeted CLI tests, 819 adapter tests including stable-load refresh and legacy
-behavior, typechecks, formatting, docs check, and boundary checks pass. A full
-local `pnpm check` has not passed on this revision:
+targeted CLI tests, 825 adapter tests including stable-load refresh and legacy
+behavior, 8 Core contract tests, typechecks, formatting, docs check, and boundary
+checks pass. A full local `pnpm check` has not passed on this revision:
 the checkout initially lacked the Electron binary, then an unrelated Git test
 failed only in the concurrent run; the isolated tests passed after repairing the
 binary. A standalone full CLI run timed out in unrelated worktree-broker tests.

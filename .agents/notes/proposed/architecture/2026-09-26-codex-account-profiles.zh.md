@@ -50,6 +50,9 @@ Provider，再启动一次新进程；第二次失败即终止。该有界恢复
 启动时租约或宿主另写一套 OAuth 刷新完成。
 adapter 的缓解措施另见
 [acp-extension-codex PR #58](https://github.com/LodyAI/acp-extension-codex/pull/58)。
+adapter 合并到 `main` 的 squash 提交还依赖 `acp-extension-core` 0.1.9 的增量子代理
+事件契约。宿主同时固定两个已合并提交，而不是已删除的 adapter PR 分支。Lody
+未声明这项新的客户端能力，因此配套升级不会启用子代理事件。
 
 恢复的会话可能携带旧格式的 `codexAuth`。这个值只能验证历史身份，不能授权启动新的
 原生进程；启动现在要求实时 Provider 保留相同的托管账户绑定。本地删除协调是异步的，
@@ -89,9 +92,9 @@ userData。未查看真实账户或既有凭据。
 没有写入 `auth.json`；外部协议模拟不使用真实账户。
 
 有界重试加入前，账户实现通过 `pnpm check`、格式化、公开边界、文档及 E2E 套件检查。
-本次重试通过 32 项定向 CLI 测试、819 项 adapter 测试（含稳定版加载刷新及旧模式
-行为）、类型检查、格式化、文档及边界检查。当前修订的本地完整 `pnpm check`
-尚未通过：工作树起初缺少 Electron 二进制；
+本次重试通过 32 项定向 CLI 测试、825 项 adapter 测试（含稳定版加载刷新及旧模式
+行为）、8 项 Core 契约测试、类型检查、格式化、文档及边界检查。当前修订的本地完整
+`pnpm check` 尚未通过：工作树起初缺少 Electron 二进制；
 补齐后，一个无关 Git 测试仅在并发执行时失败，隔离运行则通过。单独执行的完整 CLI
 套件另有无关 worktree 凭据转发测试超时。完整套件仍以托管 CI 为准。现有加密 RPC
 测试通过，但尚未执行远程桌面全链路。Windows/Linux 凭据后端与真实账户密钥库刷新
