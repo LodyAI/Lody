@@ -31,3 +31,5 @@ Mermaid 全屏表面仅在该表面设置 `touch-action: none` 并使用 Pointer
 的 9 项测试全部通过，包含图片点击不得关闭查看器的回归测试；定向 Oxlint 也没有发现问题。当前
 工作树没有已安装的包管理器或本地依赖，测试通过临时依赖链接运行。完整 `tsgo` 检查仍被无关的
 Electron/ACP 工作区缺失包阻塞，仓库文档检查仍保留这些文件之外原有的断链。
+
+- Pull request: [#1035](https://github.com/LodyAI/Lody/pull/1035)。

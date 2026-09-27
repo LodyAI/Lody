@@ -42,3 +42,5 @@ manager or local dependencies; using a temporary dependency link allowed the
 focused tests to run. A full `tsgo` check remains blocked by unrelated missing
 Electron/ACP workspace packages, and the repository docs check retains its
 pre-existing broken links outside these files.
+
+- Pull request: [#1035](https://github.com/LodyAI/Lody/pull/1035).
