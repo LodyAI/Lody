@@ -1650,11 +1650,17 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     if (!brokerEnv) {
       return undefined;
     }
+    const contextToken = config.env?.[LODY_GIT_CRED_CONTEXT_TOKEN_ENV];
+    if (!contextToken) {
+      throw new Error(
+        'GitHub worktree preparation is missing its requester credential context; no GitHub operation was attempted.'
+      );
+    }
     return {
       workspaceId: this.workspaceId,
       url: brokerEnv.url,
       token: brokerEnv.token,
-      contextToken: config.env?.[LODY_GIT_CRED_CONTEXT_TOKEN_ENV],
+      contextToken,
       stateFilePath: this.gitCredentialBroker?.getStateFilePath(),
       transportEnv: Object.fromEntries(
         Object.entries(config.env ?? {}).filter(
@@ -1768,19 +1774,15 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       this.logger.debug(
         `[${config.sessionId}] Shared parent worktree missing for ${config.parentSessionId}; creating it now`
       );
-      await worktreeManager.ensureRepo({
-        brokerAuth: await this.resolveHostGitBrokerAuth(
-          {
-            kind: 'github',
-            repoUrl: config.githubRepoUrl,
-          },
-          config
-        ),
-      });
       const sharedWorktree = await worktreeManager.createWorktree(
         config.parentSessionId,
         parentMeta?.baseBranch?.trim() || config.branch,
-        parentMeta?.branchName?.trim() || undefined
+        parentMeta?.branchName?.trim() || undefined,
+        undefined,
+        await this.resolveHostGitBrokerAuth(
+          { kind: 'github', repoUrl: config.githubRepoUrl },
+          config
+        )
       );
       await parentSessionDoc.setBranchName(sharedWorktree.branch);
       await parentSessionDoc.setIsWorktree(true);
@@ -1937,17 +1939,13 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       }
       const worktreeInfo =
         preparedWorktreeUsable ??
-        (await (async () => {
-          await worktreeManager.ensureRepo({
-            brokerAuth: await this.resolveHostGitBrokerAuth(worktreeTarget.target.source, config),
-          });
-          return await worktreeManager.createWorktree(
-            config.sessionId!,
-            config.branch,
-            config.restoreBranchName,
-            config.worktreeStartPoint
-          );
-        })());
+        (await worktreeManager.createWorktree(
+          config.sessionId!,
+          config.branch,
+          config.restoreBranchName,
+          config.worktreeStartPoint,
+          await this.resolveHostGitBrokerAuth(worktreeTarget.target.source, config)
+        ));
       if (!config.deferWorktreeMetaPersistence) {
         await sessionDoc.setBranchName(worktreeInfo.branch);
         await sessionDoc.setIsWorktree(true);

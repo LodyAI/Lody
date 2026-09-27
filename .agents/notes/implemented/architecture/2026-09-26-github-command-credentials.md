@@ -27,6 +27,22 @@ discover rotated context from a per-session file instead of requiring a restart.
 
 ## Evidence and limits
 
+Startup correction: the earlier auth tests stopped at `ensureRepo`, missing the
+second fetch inside `createWorktree`. That fetch lost requester context and blocked
+new conversations. Creation now owns preparation under its lock and receives the
+frozen auth through checkout/retries as well. Missing bare caches are cloned before
+restore-branch validation; native broker-less execution no longer installs the
+managed helper. Native Git fixtures now run the generated helper through clone,
+fetch, speculative creation, cache-loss restore and credential-using smudge filters;
+they also cover native auth, caller isolation and rejected context. Remote Git and
+broker responses are synthetic, not a live GitHub or platform-keychain smoke test.
+The HTTPS transport also stopped prefixing an empty `GIT_CONFIG_PARAMETERS` with
+whitespace, which native Git rejects before contacting the remote. Native parser
+tests cover absent, empty and inherited configuration with App/personal identities.
+The generated Git wrapper classifies checkout as a remote read and preserves that
+classification in credential subprocesses; nested pushes still require write access.
+The smudge fixture runs this wrapper with a read-only personal token and no App fallback.
+
 Review correction: `gh` originally skipped write-capability preflight. Known
 commands now check push/admin before selection; comments/reviews and fork-head
 updates must not inherit that requirement. Policy outages are distinguished from

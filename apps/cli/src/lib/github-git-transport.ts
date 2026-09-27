@@ -95,11 +95,12 @@ const main = async () => {
   } else {
     // Append last-precedence config without exposing the token in argv. Reset
     // inherited headers and helpers; neither may leak or persist other identity.
-    env.GIT_CONFIG_PARAMETERS = (env.GIT_CONFIG_PARAMETERS || '') + ' ' + [
+    // Git rejects leading whitespace when there are no inherited parameters.
+    env.GIT_CONFIG_PARAMETERS = [env.GIT_CONFIG_PARAMETERS, ...[
       'http.' + url + '.extraHeader=',
       'http.' + url + '.extraHeader=' + (selection.token ? 'Authorization: Basic ' + Buffer.from('x-access-token:' + selection.token).toString('base64') : 'Authorization:'),
       'credential.' + url + '.helper=',
-    ].map(quote).join(' ');
+    ].map(quote)].filter(Boolean).join(' ');
     args = ['remote-https', process.argv[2], url];
   }
   const child = spawn(REAL_GIT, args, { env, stdio: 'inherit', windowsHide: true });
@@ -139,7 +140,14 @@ if (['fetch', 'clone', 'pull', 'push', 'ls-remote', 'submodule'].includes(comman
     process.exit(1);
   }
 }
-const env = { ...process.env, LODY_GIT_OPERATION: ['fetch', 'clone', 'pull', 'ls-remote', 'submodule'].includes(command) ? 'read' : 'write' };
+// Local operations can download objects or run LFS/smudge filters, but do not
+// write remote refs. Credential subprocesses inherit the enclosing operation.
+// A nested push always overrides read; aliases/unknown commands stay conservative.
+const readCommands = ['fetch', 'clone', 'pull', 'ls-remote', 'submodule', 'status', 'diff', 'log', 'show', 'rev-parse', 'config', 'add', 'commit', 'branch', 'checkout', 'switch', 'restore', 'reset', 'merge', 'rebase', 'tag', 'worktree', 'remote', 'init'];
+const operation = command === 'credential'
+  ? (process.env.LODY_GIT_OPERATION === 'read' ? 'read' : 'write')
+  : (readCommands.includes(command) ? 'read' : 'write');
+const env = { ...process.env, LODY_GIT_OPERATION: operation };
 const child = spawn(${JSON.stringify(realGit)}, args, { env, stdio: 'inherit', windowsHide: true });
 child.on('error', () => process.exit(1));
 child.on('exit', code => process.exit(code ?? 1));

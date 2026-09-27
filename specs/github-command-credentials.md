@@ -54,6 +54,13 @@ one context and cannot mix two requesters while resolving a credential. Backgrou
 commands launched after a switch use the then-current requester, not the identity
 of the turn that originally scheduled them.
 
+Host-side worktree preparation follows the same requester policy before an agent
+exists. Carry one explicit credential context through clone/fetch, checkout and
+checkout retries, including credential-using smudge filters. Worktree creation owns
+remote preparation; a preliminary fetch cannot authorize later operations. Native
+broker-less execution does not install managed credential helpers. Missing caller
+context is a Lody setup error, not a request for the user to reauthorize GitHub.
+
 ## Evidence and validation
 
 Implementation: CLI `github-credential-runtime.ts`, `gh-shim-script.ts`,

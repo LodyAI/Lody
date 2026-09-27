@@ -41,6 +41,12 @@ GitHub HTTPS 和标准 GitHub SSH 地址统一按实际 remote 选择凭据，�
 无需重启 Agent。单个 helper 固定使用一次上下文，不能混合两个请求者的权限。
 切换后才启动的后台命令使用当时的请求者，而不是最初安排该命令的 turn 身份。
 
+Agent 尚未启动时，宿主机 worktree 准备也遵循相同的请求者策略。克隆、拉取、checkout
+及其重试必须显式传递同一份凭据上下文，包括需要认证的 smudge filter。
+Worktree 创建自身负责远端准备，前置 fetch 不能替后续操作完成授权。
+没有 broker 的原生执行不安装托管 helper。调用方漏传上下文属于 Lody 初始化错误，
+不应要求用户重新授权 GitHub。
+
 ## 依据与验证
 
 实现位于 CLI 的 `github-credential-runtime.ts`、`gh-shim-script.ts`、

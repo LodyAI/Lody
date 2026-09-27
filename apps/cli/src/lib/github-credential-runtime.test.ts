@@ -52,6 +52,15 @@ function harness(
 }
 
 describe('per-command GitHub credential policy', () => {
+  it('identifies a missing caller context before accessing any credential service', async () => {
+    const readPolicy = vm.runInNewContext(githubCredentialRuntime + '\nreadCredentialPolicy', {
+      getContextToken: () => null,
+      requestBroker: () => {
+        throw new Error('must not contact a broker without requester context');
+      },
+    }) as () => Promise<unknown>;
+    await expect(readPolicy()).rejects.toThrow('Lody did not supply a GitHub credential context');
+  });
   it.each([null, { ok: false, status: 503, json: async () => ({ error: 'policy_unavailable' }) }])(
     'does not tell users to restart for policy service failures',
     async (response) => {

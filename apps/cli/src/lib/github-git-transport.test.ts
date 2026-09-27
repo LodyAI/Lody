@@ -108,6 +108,77 @@ function harness(
 }
 
 describe('GitHub per-remote transport', () => {
+  it('preserves credential reads but forces a nested push to use write authorization', () => {
+    const execPath = execFileSync('git', ['--exec-path'], { encoding: 'utf8' }).trim();
+    const coreGit = path.join(execPath, process.platform === 'win32' ? 'git.exe' : 'git');
+    const realGit = fs.existsSync(coreGit) ? coreGit : 'git';
+    const env = Object.fromEntries(
+      Object.entries(process.env).filter(
+        ([key]) => !/^(GIT_CONFIG_|LODY_GIT_|GIT_DIR$|GIT_WORK_TREE$)/.test(key)
+      )
+    );
+    Object.assign(env, {
+      GIT_CONFIG_NOSYSTEM: '1',
+      GIT_CONFIG_GLOBAL: path.join(directory, 'empty-config'),
+    });
+    ensureGitHubGitTransport(directory, '/unused', realGit);
+    const wrapper = path.join(directory, 'git');
+    for (const inherited of ['read', 'write', 'invalid', undefined]) {
+      const result = spawnSync(
+        process.execPath,
+        [
+          wrapper,
+          '-c',
+          'credential.helper=',
+          '-c',
+          'credential.helper=!f() { printf "username=fixture\\npassword=%s\\n" "$LODY_GIT_OPERATION"; }; f',
+          'credential',
+          'fill',
+        ],
+        {
+          cwd: directory,
+          env: { ...env, LODY_GIT_OPERATION: inherited },
+          input: 'protocol=https\nhost=fixture.test\n\n',
+          encoding: 'utf8',
+        }
+      );
+      expect(result.status, result.stderr).toBe(0);
+      expect(result.stdout).toContain(`password=${inherited === 'read' ? 'read' : 'write'}`);
+    }
+    const repo = path.join(directory, 'project');
+    const remote = path.join(directory, 'remote.git');
+    const git = (args: string[]) => execFileSync(realGit, args, { env, stdio: 'ignore' });
+    git(['init', '-b', 'fixture-base', repo]);
+    git(['init', '--bare', remote]);
+    git([
+      '-C',
+      repo,
+      '-c',
+      'user.name=Fixture',
+      '-c',
+      'user.email=fixture@example.test',
+      '-c',
+      'commit.gpgsign=false',
+      'commit',
+      '--allow-empty',
+      '-m',
+      'fixture',
+    ]);
+    fs.writeFileSync(
+      path.join(repo, '.git', 'hooks', 'pre-push'),
+      '#!/bin/sh\nprintf "operation=%s\\n" "$LODY_GIT_OPERATION" >&2\nexit 1\n',
+      { mode: 0o755 }
+    );
+    const push = spawnSync(process.execPath, [wrapper, '-C', repo, 'push', remote, 'HEAD'], {
+      env: { ...env, LODY_GIT_OPERATION: 'read' },
+      encoding: 'utf8',
+    });
+    expect(push.status).toBe(1);
+    expect(push.stderr).toContain('operation=write');
+    expect(
+      execFileSync(realGit, ['--git-dir', remote, 'for-each-ref'], { env, encoding: 'utf8' })
+    ).toBe('');
+  });
   it.skipIf(process.platform === 'win32')(
     'routes a native recursive submodule clone through the same transport',
     async () => {
@@ -306,47 +377,61 @@ process.exit(child.status ?? 1);
     ]);
   });
   it.each([
-    { owner: false, personal: false, source: 'app' },
-    { owner: true, personal: true, source: 'personal' },
-  ])('does not borrow local headers for $source', async ({ owner, personal, source }) => {
-    const h = harness({
-      owner,
-      personal,
-      target: 'https/org/repo',
-      header: 'Authorization: Bearer owner-secret',
-      env: {
-        GIT_CONFIG_PARAMETERS:
-          "'http.https://github.com/.extraHeader=Authorization: Bearer owner-secret'",
-      },
-    });
-    h.rotate();
-    await h.run();
-    expect(
-      h.sync.mock.calls.some(
-        ([, args]) =>
-          args.includes('http.extraHeader') || args[0] === 'credential' || args[0] === 'ls-remote'
-      )
-    ).toBe(false);
-    expect(
-      h.requests
-        .filter((request) => request.url.startsWith('http://broker'))
-        .every((request) => request.body.contextToken === 'original')
-    ).toBe(true);
-    const invocation = h.spawn.mock.calls[0] as unknown as [
-      string,
-      string[],
-      { env: Record<string, string> },
-    ];
-    const headers = execFileSync(
-      'git',
-      ['config', '--get-urlmatch', 'http.extraHeader', 'https://github.com/org/repo.git'],
-      { cwd: directory, env: { ...process.env, ...invocation[2].env }, encoding: 'utf8' }
-    );
-    expect(headers.trim()).toBe(
-      'Authorization: Basic ' +
-        Buffer.from('x-access-token:' + source + '-token').toString('base64')
-    );
-  });
+    { owner: false, personal: false, source: 'app', inherited: undefined },
+    { owner: true, personal: true, source: 'personal', inherited: undefined },
+    { owner: false, personal: false, source: 'app', inherited: '' },
+    { owner: true, personal: true, source: 'personal', inherited: '' },
+    {
+      owner: false,
+      personal: false,
+      source: 'app',
+      inherited: "'http.https://github.com/.extraHeader=Authorization: Bearer owner-secret'",
+    },
+    {
+      owner: true,
+      personal: true,
+      source: 'personal',
+      inherited: "'http.https://github.com/.extraHeader=Authorization: Bearer owner-secret'",
+    },
+  ])(
+    'does not borrow local headers for $source (inherited: $inherited)',
+    async ({ owner, personal, source, inherited }) => {
+      const h = harness({
+        owner,
+        personal,
+        target: 'https/org/repo',
+        header: 'Authorization: Bearer owner-secret',
+        env: inherited === undefined ? {} : { GIT_CONFIG_PARAMETERS: inherited },
+      });
+      h.rotate();
+      await h.run();
+      expect(
+        h.sync.mock.calls.some(
+          ([, args]) =>
+            args.includes('http.extraHeader') || args[0] === 'credential' || args[0] === 'ls-remote'
+        )
+      ).toBe(false);
+      expect(
+        h.requests
+          .filter((request) => request.url.startsWith('http://broker'))
+          .every((request) => request.body.contextToken === 'original')
+      ).toBe(true);
+      const invocation = h.spawn.mock.calls[0] as unknown as [
+        string,
+        string[],
+        { env: Record<string, string> },
+      ];
+      const headers = execFileSync(
+        'git',
+        ['config', '--get-urlmatch', 'http.extraHeader', 'https://github.com/org/repo.git'],
+        { cwd: directory, env: { ...process.env, ...invocation[2].env }, encoding: 'utf8' }
+      );
+      expect(headers.trim()).toBe(
+        'Authorization: Basic ' +
+          Buffer.from('x-access-token:' + source + '-token').toString('base64')
+      );
+    }
+  );
   it('native receive-pack advertisement does not change repository refs', () => {
     const bare = path.join(directory, 'remote.git');
     execFileSync('git', ['init', '--bare', bare], { stdio: 'ignore' });

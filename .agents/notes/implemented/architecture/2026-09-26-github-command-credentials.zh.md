@@ -23,6 +23,18 @@ credential helper。长期运行的原生 Agent 通过会话文件发现轮换�
 
 ## 依据与限制
 
+启动路径修正：之前的认证测试只到 `ensureRepo`，漏掉 `createWorktree` 内部第二次 fetch，
+该操作丢失请求者上下文，导致新会话无法启动。现由 worktree 创建在仓库锁内统一准备，
+并把固定的凭据上下文传到 checkout 及重试。缓存缺失时先克隆再验证恢复分支；
+没有 broker 的原生执行不再安装托管 helper。原生 Git 测试现通过生成的 helper 验证
+克隆、拉取、预创建、缓存丢失后的恢复、需要认证的 smudge filter，以及本地认证、
+请求者隔离和拒绝无效上下文。远端 Git 和 broker 响应是测试替身，不代表真实 GitHub
+或系统 keychain 冒烟验证。
+HTTPS transport 同时修正空 `GIT_CONFIG_PARAMETERS` 前多加空格的问题，原生 Git
+会在连接远端前拒绝该格式。原生解析器测试覆盖配置缺失、空值和继承配置下的 App/个人身份。
+生成的 Git 包装器把 checkout 视为远端读取，并让 credential 子进程继承该分类；
+嵌套 push 仍要求写权限。smudge 测试实际经过包装器，使用只读个人 token 且无 App 回退。
+
 审查修正：`gh` 原先跳过写权限预检。现对明确的命令检查 push/admin 后再选择身份；
 评论、评审和 fork 分支更新不能套用该要求。策略故障与会话上下文失效分开提示，
 不缓存可能过期的身份偏好。无法确定目标时解释托管身份限制，不静默使用本地权限。

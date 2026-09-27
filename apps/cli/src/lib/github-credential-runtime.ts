@@ -2,7 +2,7 @@
 export const githubCredentialRuntime = String.raw`
 const readCredentialPolicy = async () => {
   const contextToken = getContextToken();
-  if (!contextToken) throw new Error('GitHub credential context is missing. Restart this session.');
+  if (!contextToken) throw new Error('Lody did not supply a GitHub credential context for this operation. No GitHub credential was selected. Update Lody; if this persists, report this startup/context error.');
   let response;
   let policy;
   try {
