@@ -121,6 +121,41 @@ describe('WorktreeManager host git credential broker routing', () => {
     expect(env.LODY_GIT_CRED_BROKER_TOKEN).toBe('session-workspace-token');
   });
 
+  it.each(['clone', 'fetch'])(
+    'routes host %s through the prepared requester transport, not ambient authentication',
+    async (verb) => {
+      if (verb === 'clone')
+        rmSync(path.join(dataDir, 'repos', REPO_ID, 'bare.git'), { recursive: true });
+      const manager = await newManager();
+      const transportEnv = {
+        PATH: '/workspace/scoped-shims:/native/bin',
+        GIT_CONFIG_COUNT: '1',
+        GIT_CONFIG_KEY_0: 'url.lody-github::https/.insteadOf',
+        GIT_CONFIG_VALUE_0: 'https://github.com/',
+        LODY_GIT_LOCAL_CONFIG: '{}',
+      };
+      await manager.ensureRepo({
+        brokerAuth: {
+          workspaceId: 'workspace',
+          url: 'http://broker',
+          token: 'bearer',
+          contextToken: 'frozen-requester',
+          stateFilePath: '/workspace/broker.json',
+          transportEnv,
+        },
+      });
+      expect(envOfGitCall(verb)).toMatchObject({
+        ...transportEnv,
+        LODY_GIT_CRED_CONTEXT_TOKEN: 'frozen-requester',
+        LODY_GIT_CRED_CONTEXT_FILE: undefined,
+      });
+      const args = spawnMock.mock.calls.find(([, invocationArgs]) =>
+        (invocationArgs as string[]).includes(verb)
+      )?.[1] as string[];
+      expect(args.some((arg) => arg.includes('credential.https://github.com.helper'))).toBe(false);
+    }
+  );
+
   it('leaves the ambient pointer in place when no broker auth is supplied', async () => {
     // Local platform has no token manager and therefore no broker; host git must
     // keep working off whatever the environment already provides.

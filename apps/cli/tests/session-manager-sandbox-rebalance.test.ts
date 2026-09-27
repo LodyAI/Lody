@@ -11,7 +11,6 @@ import type { SessionSandbox, SessionSandboxLimits } from '../src/session/sessio
 import type { GitHubTokenManager } from '../src/lib/github-token-manager';
 import type { GitCredentialBroker } from '../src/lib/git-credential-broker';
 import { LODY_GIT_CRED_CONTEXT_TOKEN_ENV } from '../src/lib/git-credential-broker';
-import { LODY_MANAGED_GH_TOKEN_SHA256_ENV } from '../src/lib/gh-token-injector';
 import { createTestCloudPort } from './test-cloud-port';
 
 const GIB = 1024 * 1024 * 1024;
@@ -136,7 +135,7 @@ describe('SessionManager sandbox rebalance', () => {
     expect(manager.getSession('session-2' as SessionId)).toBe(sessionTwo);
   });
 
-  it('clears stale managed GH_TOKEN when requester token refresh fails', async () => {
+  it('rotates command context without minting or injecting session-wide tokens', async () => {
     const manager = new SessionManager(
       createSilentLogger(),
       'token',
@@ -162,24 +161,20 @@ describe('SessionManager sandbox rebalance', () => {
     const updateEnv = vi.fn();
     const session = {
       sessionId: 'session-1' as SessionId,
-      ghTokenInjected: true,
       updateEnv,
     } as unknown as ISession;
 
     await manager.refreshGhTokenForSession(session, 'owner/repo', 'user-2');
 
-    expect(tokenManager.invalidate).toHaveBeenCalledWith('owner/repo', {
-      requesterUserId: 'user-2',
-    });
-    expect(tokenManager.getWriteTokenForRepo).toHaveBeenCalledWith('owner/repo', {
+    expect(tokenManager.invalidate).not.toHaveBeenCalled();
+    expect(tokenManager.getWriteTokenForRepo).not.toHaveBeenCalled();
+    expect(broker.activateSessionContext).toHaveBeenCalledWith({
+      sessionId: 'session-1',
       requesterUserId: 'user-2',
       machineId: 'machine-1',
     });
     expect(updateEnv).toHaveBeenLastCalledWith({
       [LODY_GIT_CRED_CONTEXT_TOKEN_ENV]: 'context-token-2',
-      GH_TOKEN: undefined,
-      GITHUB_TOKEN: undefined,
-      [LODY_MANAGED_GH_TOKEN_SHA256_ENV]: undefined,
     });
   });
 });

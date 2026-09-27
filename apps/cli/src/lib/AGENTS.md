@@ -11,6 +11,12 @@ end-to-end map. The WS/DO control-plane path is DEPRECATED; do not add to it.
 
 ## Composition and transports
 
+- GitHub command auth lives in `github-credential-runtime.ts`: explicit personal
+  preference first, owner-only local credentials next, repo-scoped App last.
+  `github-git-transport.ts` also intercepts HTTPS headers and SSH remotes. Never
+  inject a startup-repo token globally, persist managed tokens through helpers,
+  or replay an uncertain write. Each helper captures one session context token.
+
 - `cloud-cli-port.ts` is the sole official-build composition root for cloud clients and
   endpoint-derived adapters. Daemon runtime modules must not construct cloud SDK
   clients or read `LODY_AUTH_URL` / `LODY_AUTH_SITE_URL` / `LODY_SERVER_URL`. The local

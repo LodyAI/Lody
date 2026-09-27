@@ -8457,6 +8457,7 @@ describe('SessionExecutionService goal control', () => {
       sessionManager: {
         getSession: () => session,
         getPendingSession: () => null,
+        refreshGhTokenForSession: vi.fn(async () => {}),
       } as unknown as SessionManager,
       workspaceDocument: {
         repo: { upsertDocMeta: async () => {}, getDocMeta: async () => undefined },

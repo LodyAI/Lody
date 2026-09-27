@@ -67,6 +67,7 @@ export type WorkspaceRepository = {
 };
 
 export type GitHubTokenErrorCode =
+  | 'personal_unavailable'
   | 'unauthorized'
   | 'not_a_member'
   | 'repo_not_linked'
@@ -522,8 +523,11 @@ export type CloudApi = {
     >;
     getPersonalOperationSettings: Query<{ workspaceId: string }, PersonalOperationSettings>;
     getPrCacheVersions: Query<
-      { workspaceId: string; repoFullName: string; prNumber: number },
+      { workspaceId: string; repoFullName: string; prNumber: number; sessionId?: string },
       {
+        repoFullName?: string;
+        repositoryId?: number;
+        identityPending?: boolean;
         prDetailsUpdatedAt: number | null;
         reviewCommentsUpdatedAt: number | null;
         reviewsUpdatedAt: number | null;
@@ -581,8 +585,13 @@ export type CloudApi = {
       { workspaceId: string; repoFullName: string; cliToken: string },
       BasicGitHubTokenResult
     >;
+    getCredentialPolicyForCli: Action<
+      { cliToken: string; workspaceId: string; requesterUserId: string; machineId: string },
+      { personalEnabled: boolean }
+    >;
     getOperationAccessTokenByRepoNameForCli: Action<
       {
+        credentialSource?: 'personal' | 'app';
         machineId?: string;
         requesterUserId?: string;
         forceAppFallback?: boolean;

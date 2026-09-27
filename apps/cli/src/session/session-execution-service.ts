@@ -1697,6 +1697,14 @@ export class SessionExecutionService {
           requesterUserId: options.userId,
           inputConfig: options.inputConfig,
         };
+        const githubSession =
+          runtime.session ?? this.deps.sessionManager.getSession(options.sessionId);
+        if (githubSession)
+          await this.deps.sessionManager.refreshGhTokenForSession(
+            githubSession,
+            undefined,
+            options.userId
+          );
         // Provider acceptance hands the original dispatch forward. A later
         // user-owned steer turn must not cancel or reopen that responsibility.
         await this.settleVisibleTurn(runtime, 'handled', { force: true });
@@ -4571,9 +4579,6 @@ export class SessionExecutionService {
               project = self.resolveProjectFromMeta(meta, message.project?.branch);
             }
             const githubRepo = resolveProjectGitHubRepo(project);
-            if (!githubRepo) {
-              return undefined;
-            }
             yield* self.tryPromise(() =>
               traceAsync(
                 self.deps.logger,

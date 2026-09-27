@@ -112,13 +112,22 @@ export type GitCredentialBrokerAuth = {
   workspaceId: string;
   url: string;
   token: string;
+  contextToken?: string;
+  stateFilePath?: string;
+  /** Prepared per-call routing, never shared on the cached WorktreeManager. */
+  transportEnv?: Record<string, string>;
 };
 
 const buildBrokerAuthEnv = (auth: GitCredentialBrokerAuth | undefined): NodeJS.ProcessEnv =>
   auth
     ? {
+        ...auth.transportEnv,
         LODY_GIT_CRED_BROKER_URL: auth.url,
         LODY_GIT_CRED_BROKER_TOKEN: auth.token,
+        LODY_GIT_CRED_CONTEXT_TOKEN: auth.contextToken,
+        LODY_GIT_CRED_CONTEXT_FILE: undefined,
+        LODY_GIT_CRED_BROKER_STATE_FILE: auth.stateFilePath,
+        LODY_GIT_OPERATION: 'read',
       }
     : {};
 
@@ -210,11 +219,11 @@ const isTerminalPromptsDisabledErrorMessage = (message: string): boolean => {
 // may block indefinitely in non-interactive clone/fetch paths.
 export const buildGitHubCredentialConfigArgs = (helperValue: string): string[] => [
   '-c',
-  'credential.helper=',
+  'credential.https://github.com.helper=',
   '-c',
-  `credential.helper=${helperValue}`,
+  `credential.https://github.com.helper=${helperValue}`,
   '-c',
-  'credential.useHttpPath=true',
+  'credential.https://github.com.useHttpPath=true',
 ];
 
 type HelperDebugEntry = {
@@ -525,7 +534,10 @@ export class WorktreeManager {
             'Content-Type': 'application/json',
             Authorization: `Bearer ${brokerToken}`,
           },
-          body: JSON.stringify({ repoFullName: remote.repoFullName }),
+          body: JSON.stringify({
+            repoFullName: remote.repoFullName,
+            contextToken: options.brokerAuth?.contextToken,
+          }),
           signal: controller.signal,
         });
 
@@ -779,7 +791,13 @@ export class WorktreeManager {
       const cloneUrl = this.repoUrl;
       try {
         await this.runGit(
-          [...this.buildGitAuthArgs(), 'clone', '--bare', cloneUrl, this.bareGitDir],
+          [
+            ...(brokerAuth?.transportEnv ? [] : this.buildGitAuthArgs()),
+            'clone',
+            '--bare',
+            cloneUrl,
+            this.bareGitDir,
+          ],
           this.baseDir,
           buildBrokerAuthEnv(brokerAuth)
         );
@@ -815,7 +833,12 @@ export class WorktreeManager {
     this.logger.debug(`[${this.repoId}] Fetching latest changes from origin (mode=${fetchMode})`);
     try {
       await this.runGit(
-        [...this.buildGitAuthArgs(), 'fetch', 'origin', '--prune'],
+        [
+          ...(brokerAuth?.transportEnv ? [] : this.buildGitAuthArgs()),
+          'fetch',
+          'origin',
+          '--prune',
+        ],
         this.bareGitDir,
         buildBrokerAuthEnv(brokerAuth)
       );

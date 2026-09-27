@@ -1,6 +1,5 @@
 import { EventEmitter } from 'eventemitter3';
 import os from 'os';
-import path from 'path';
 import { existsSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
@@ -69,19 +68,14 @@ import {
   GitCredentialBroker,
   LODY_GIT_CRED_BROKER_STATE_FILE_ENV,
   LODY_GIT_CRED_CONTEXT_TOKEN_ENV,
+  LODY_GIT_CRED_CONTEXT_FILE_ENV,
 } from '@/lib/git-credential-broker';
 import type { CloudGithubTokenManager, CloudPort } from '@lody/platform';
-import { isDevEnv } from '@/utils/runtime-env';
 import {
   buildCredentialHelperValueForHost,
   ensureCredentialHelperScript,
 } from '@/lib/git-credential-helper-script';
-import {
-  getGhTokenFingerprint,
-  hasManagedGhToken,
-  LODY_MANAGED_GH_TOKEN_SHA256_ENV,
-  resolveGhTokenForSession,
-} from '@/lib/gh-token-injector';
+import { clearManagedGhTokenEnv } from '@/lib/gh-token-env';
 import { ensureGhShimScript, prependGhShimBinDirToPath } from '@/lib/gh-shim-script';
 import { ensureLodyBashEnvForGhShim, shouldInjectBashEnvForGhShim } from '@/lib/lody-bashenv';
 import { ensureLodyZdotdirForGhShim, shouldInjectZdotdirForGhShim } from '@/lib/lody-zdotdir';
@@ -339,11 +333,6 @@ export interface ISession {
    * Takes effect on all subsequent exec() calls (each exec spawns a new process).
    */
   updateEnv(env: Record<string, string | undefined>): void;
-  /**
-   * Whether we injected a managed GitHub token as GH_TOKEN at session startup.
-   * When false, the user has their own auth and we should not overwrite it.
-   */
-  ghTokenInjected: boolean;
 }
 
 export type SessionMonitorRuntimeInfo = {
@@ -940,7 +929,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       config.mcpServerIds,
       config.configOptionValues
     );
-    const ghTokenInjected = await this.prepareGitHubRepoSessionConfig(config);
+    await this.prepareGitHubRepoSessionConfig(config);
     signal.throwIfAborted();
     const launch = await resolveACPProcessLaunchAsync({
       cliType: config.agentCliType,
@@ -1041,7 +1030,6 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       }
       session = new Session(config, this.logger, provisionalWorkdir, sandbox);
       sandbox = null;
-      session.ghTokenInjected = ghTokenInjected;
       this.preparationSessions.set(sessionId, session);
       await this.rebalanceSessionSandboxes();
       signal.throwIfAborted();
@@ -1070,7 +1058,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
                 baseBranch: config.branch,
                 restoreBranchName: config.restoreBranchName,
                 resolveBrokerAuth: () =>
-                  this.resolveHostGitBrokerAuth(worktreeTarget.target.source),
+                  this.resolveHostGitBrokerAuth(worktreeTarget.target.source, config),
                 logger: this.logger,
               })
             : Promise.resolve(null);
@@ -1202,7 +1190,6 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
         'session.createSessionInner.prepared',
         sessionId
       );
-      session.ghTokenInjected = prepared.session.ghTokenInjected;
       session.updateGitIdentity(config.userName, config.userEmail, config.requesterUserId, {
         preferMachineIdentity: config.requesterUserId === this.cloudPort.identity.userId,
       });
@@ -1330,7 +1317,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     config: SessionConfig,
     agentStart?: AgentStartConfig
   ): Promise<ISession> {
-    const ghTokenInjected = await this.prepareGitHubRepoSessionConfig(config);
+    await this.prepareGitHubRepoSessionConfig(config);
     const requestedResumeSessionId = agentStart?.resumeSessionId;
     const requestedForkSessionId = agentStart?.forkSessionId;
     const requestedForkSessionTurnId = agentStart?.forkSessionTurnId;
@@ -1354,7 +1341,6 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       'session.createSessionInner',
       config.sessionId!
     );
-    session.ghTokenInjected = ghTokenInjected;
     const sessionId = config.sessionId!;
     this.logger.debug(`[${sessionId}] Session workdir resolved: ${session.getWorkdir()}`);
     session.updateGitIdentity(config.userName, config.userEmail, config.requesterUserId, {
@@ -1498,129 +1484,93 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     return session;
   }
 
-  private async prepareGitHubRepoSessionConfig(config: SessionConfig): Promise<boolean> {
+  private async prepareGitHubRepoSessionConfig(config: SessionConfig): Promise<void> {
     const githubRepo = config.githubRepo ?? tryDeriveGitHubRepoFromUrl(config.githubRepoUrl);
-    if (!config.githubRepo && githubRepo) {
+    if (githubRepo) {
       config.githubRepo = githubRepo;
+      if (config.project?.kind === 'github' || !config.project) {
+        config.repoId ??= deriveRepoIdFromGitHubRepo(githubRepo);
+        config.githubRepoUrl = buildGitHubCloneUrl(githubRepo);
+      }
+      this.getGitHubTokenManager()?.retainRepoOwner(githubRepo);
     }
-    if (!githubRepo) {
-      return false;
+    const brokerEnv = await this.ensureGitCredentialBrokerEnv();
+    if (!brokerEnv) return;
+    const allowLocalAuth = config.requesterUserId === this.cloudPort.identity.userId;
+    config.githubCredentialPolicy = { allowLocalAuth };
+    if (!config.sessionId) throw new Error('SessionId is required for GitHub credentials');
+    const contextToken = this.gitCredentialBroker!.activateSessionContext({
+      sessionId: config.sessionId,
+      requesterUserId: config.requesterUserId,
+      machineId: this.machineId,
+    });
+    const brokerStateFilePath = this.gitCredentialBroker!.getStateFilePath();
+    if (!brokerStateFilePath) throw new Error('Workspace-scoped GitHub broker is required');
+    config.githubCredentialPolicy.stateFilePath = brokerStateFilePath;
+    const sessionEnv: Record<string, string> = { ...config.env };
+    clearManagedGhTokenEnv(sessionEnv);
+    if (contextToken) sessionEnv[LODY_GIT_CRED_CONTEXT_TOKEN_ENV] = contextToken;
+    const contextFile = this.gitCredentialBroker!.getSessionContextFilePath(config.sessionId);
+    if (contextFile) sessionEnv[LODY_GIT_CRED_CONTEXT_FILE_ENV] = contextFile;
+    this.ensureGhShimSessionEnv(sessionEnv);
+    // Install even without an initial repository: commands may cd into another
+    // checkout or address an authorized repository using -R.
+    const helperRepoId = config.repoId ?? ('github-credentials' as RepoId);
+    ensureCredentialHelperScript(helperRepoId);
+    // Preserve the caller's config for the composite helper's local delegation.
+    // The outer helper list is intentionally replaced: Git sends "store" to
+    // every configured helper and must never persist an injected App/user token.
+    sessionEnv.LODY_GIT_LOCAL_CONFIG ??= JSON.stringify(
+      Object.fromEntries(
+        Object.entries({ ...process.env, ...sessionEnv }).filter(([key]) =>
+          /^GIT_CONFIG_(COUNT|KEY_\d+|VALUE_\d+)$/.test(key)
+        )
+      )
+    );
+    const localConfig = JSON.parse(sessionEnv.LODY_GIT_LOCAL_CONFIG) as Record<string, string>;
+    for (const key of Object.keys(sessionEnv)) {
+      if (/^GIT_CONFIG_(COUNT|KEY_\d+|VALUE_\d+)$/.test(key)) delete sessionEnv[key];
     }
-
-    const repoId = deriveRepoIdFromGitHubRepo(githubRepo);
-    const githubRepoUrl = buildGitHubCloneUrl(githubRepo);
-    if (config.project?.kind === 'github' || !config.project) {
-      config.repoId = repoId;
-      config.githubRepoUrl = githubRepoUrl;
-    }
-    const tokenManager = this.getGitHubTokenManager();
-    tokenManager?.retainRepoOwner(githubRepo);
-    if (tokenManager) {
-      // Prefetch token BEFORE git operations to avoid race conditions.
-      // Previously this was fire-and-forget (void), which caused the first git clone
-      // to fail because the token wasn't ready when credential helper was invoked.
-      try {
-        await tokenManager.getAppTokenForRepo(githubRepo);
-        this.logger.debug(
-          `[${config.sessionId}] [github-token] Prefetch succeeded for ${githubRepo}`
-        );
-      } catch (error) {
-        // Log but don't fail - git operations will retry with fresh token if needed
-        this.logger.debug(
-          `[${config.sessionId}] [github-token] Prefetch failed for ${githubRepo}: ${formatErrorMessage(
-            error
-          )}`
-        );
+    Object.assign(sessionEnv, localConfig);
+    let configCount = Number(localConfig.GIT_CONFIG_COUNT ?? 0);
+    for (const host of ['github.com', 'www.github.com']) {
+      for (const [key, value] of [
+        [`credential.https://${host}.helper`, ''],
+        [`credential.https://${host}.helper`, buildCredentialHelperValueForHost(helperRepoId)],
+        [`credential.https://${host}.useHttpPath`, 'true'],
+      ] as const) {
+        sessionEnv[`GIT_CONFIG_KEY_${configCount}`] = key;
+        sessionEnv[`GIT_CONFIG_VALUE_${configCount++}`] = value;
       }
     }
-
-    const brokerEnv = await this.ensureGitCredentialBrokerEnv();
-    if (!brokerEnv) {
-      return false;
+    sessionEnv.GIT_CONFIG_COUNT = String(configCount);
+    for (const [key, value] of [
+      ['url.lody-github::.insteadOf', 'git@github.com:'],
+      ['url.lody-github::.insteadOf', 'ssh://git@github.com/'],
+      ['url.lody-github::.insteadOf', 'ssh://git@github.com:22/'],
+      ['url.lody-github::ssh443/.insteadOf', 'ssh://git@ssh.github.com:443/'],
+      ['url.lody-github::https/.insteadOf', 'https://github.com/'],
+      ['url.lody-github::https/.insteadOf', 'https://www.github.com/'],
+      ['url.lody-github::https/.insteadOf', 'https://github.com:443/'],
+      ['protocol.lody-github.allow', 'always'],
+    ] as const) {
+      sessionEnv[`GIT_CONFIG_KEY_${configCount}`] = key;
+      sessionEnv[`GIT_CONFIG_VALUE_${configCount++}`] = value;
     }
-    const sessionId = config.sessionId;
-    if (!sessionId) {
-      throw new Error('SessionId is required to prepare GitHub session credentials');
-    }
-    const contextToken = this.gitCredentialBroker?.activateSessionContext({
-      sessionId,
-      requesterUserId: config.requesterUserId,
-      machineId: this.machineId,
-    });
-
-    ensureCredentialHelperScript(repoId);
-
-    const isDev = isDevEnv();
-    const debugEnv: Record<string, string> = {};
-    const env = config.env;
-    if (isDev && env?.LODY_GIT_CRED_HELPER_DEBUG && !env?.LODY_GIT_CRED_HELPER_DEBUG_FILE) {
-      debugEnv.LODY_GIT_CRED_HELPER_DEBUG_FILE = path.join(
-        os.tmpdir(),
-        'lody-git-credential-helper-debug.log'
-      );
-    }
-
-    const sessionEnv: Record<string, string> = {
-      ...env,
-      ...debugEnv,
-    };
-    if (contextToken) {
-      sessionEnv[LODY_GIT_CRED_CONTEXT_TOKEN_ENV] = contextToken;
-    }
-
-    this.ensureGhShimSessionEnv(sessionEnv);
-
-    // Inject GH_TOKEN if the user isn't already authenticated with gh CLI
-    const ghToken = await resolveGhTokenForSession({
-      env: sessionEnv,
-      githubRepo,
-      tokenManager,
-      requesterUserId: config.requesterUserId,
-      machineId: this.machineId,
-      logger: this.logger,
-    });
-    if (ghToken) {
-      sessionEnv.GH_TOKEN = ghToken;
-      sessionEnv[LODY_MANAGED_GH_TOKEN_SHA256_ENV] = getGhTokenFingerprint(ghToken);
-    }
-
-    const credentialHelperValue = buildCredentialHelperValueForHost(repoId);
-    const brokerUrl = brokerEnv.url;
-
-    const brokerStateFilePath = this.gitCredentialBroker?.getStateFilePath();
-
+    sessionEnv.GIT_CONFIG_COUNT = String(configCount);
     config.env = {
       ...sessionEnv,
-      LODY_GIT_CRED_BROKER_URL: brokerUrl,
+      LODY_GIT_CRED_BROKER_URL: brokerEnv.url,
       LODY_GIT_CRED_BROKER_TOKEN: brokerEnv.token,
-      // Keeps the helper's connection-refused fallback inside this workspace instead
-      // of landing on the shared, last-writer-wins broker.json.
-      ...(brokerStateFilePath
-        ? { [LODY_GIT_CRED_BROKER_STATE_FILE_ENV]: brokerStateFilePath }
-        : {}),
-      LODY_GITHUB_REPO_FULL_NAME: githubRepo,
+      [LODY_GIT_CRED_BROKER_STATE_FILE_ENV]: brokerStateFilePath,
+      ...(githubRepo ? { LODY_GITHUB_REPO_FULL_NAME: githubRepo } : {}),
       GIT_TERMINAL_PROMPT: '0',
-      // Use credential helper for all git invocations inside the ACP process tree.
-      // The helper talks to the local broker to fetch fresh managed tokens on-demand.
-      GIT_CONFIG_COUNT: '3',
-      // Clear any existing helpers so only the CLI helper is used.
-      GIT_CONFIG_KEY_0: 'credential.helper',
-      GIT_CONFIG_VALUE_0: '',
-      GIT_CONFIG_KEY_1: 'credential.helper',
-      GIT_CONFIG_VALUE_1: credentialHelperValue,
-      GIT_CONFIG_KEY_2: 'credential.useHttpPath',
-      GIT_CONFIG_VALUE_2: 'true',
     };
-    return !!ghToken || hasManagedGhToken(sessionEnv);
   }
 
-  /**
-   * Refresh GH_TOKEN for a session using the managed write-operation token.
-   * This ensures gh CLI commands use a fresh token before each turn.
-   */
   async refreshGhTokenForSession(
     session: ISession,
-    githubRepo: string,
+    _githubRepo: string | undefined,
     requesterUserId: string
   ): Promise<void> {
     const contextToken = this.gitCredentialBroker?.activateSessionContext({
@@ -1628,61 +1578,21 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       requesterUserId,
       machineId: this.machineId,
     });
-    if (contextToken) {
-      session.updateEnv({ [LODY_GIT_CRED_CONTEXT_TOKEN_ENV]: contextToken });
-    }
-    // Only refresh if we originally injected the token at session startup.
-    // If the user has their own auth (GH_TOKEN, GITHUB_TOKEN, or gh CLI login),
-    // we must not overwrite it with a managed token.
-    if (!session.ghTokenInjected) {
-      return;
-    }
-    const tokenManager = this.getGitHubTokenManager();
-    if (!tokenManager) {
-      this.clearManagedGhTokenForSession(session, contextToken);
-      return;
-    }
-    try {
-      // Re-resolve before every turn so enabling personal identity immediately
-      // replaces any cached app write token for git/gh operations.
-      tokenManager.invalidate(githubRepo, { requesterUserId });
-      const token = await tokenManager.getWriteTokenForRepo(githubRepo, {
-        requesterUserId,
-        machineId: this.machineId,
-      });
-      session.updateEnv({
-        ...(contextToken ? { [LODY_GIT_CRED_CONTEXT_TOKEN_ENV]: contextToken } : {}),
-        GH_TOKEN: token,
-        [LODY_MANAGED_GH_TOKEN_SHA256_ENV]: getGhTokenFingerprint(token),
-      });
-    } catch (error) {
-      this.clearManagedGhTokenForSession(session, contextToken);
-      this.logger.debug(
-        `[${session.sessionId}] Failed to refresh GH_TOKEN: ${formatErrorMessage(error)}`
-      );
-    }
-  }
-
-  private clearManagedGhTokenForSession(session: ISession, contextToken: string | undefined): void {
-    session.updateEnv({
-      ...(contextToken ? { [LODY_GIT_CRED_CONTEXT_TOKEN_ENV]: contextToken } : {}),
-      GH_TOKEN: undefined,
-      GITHUB_TOKEN: undefined,
-      [LODY_MANAGED_GH_TOKEN_SHA256_ENV]: undefined,
-    });
+    if (contextToken) session.updateEnv({ [LODY_GIT_CRED_CONTEXT_TOKEN_ENV]: contextToken });
   }
 
   private ensureGhShimSessionEnv(sessionEnv: Record<string, string>): void {
-    ensureGhShimScript();
+    const statePath = this.gitCredentialBroker?.getStateFilePath();
+    ensureGhShimScript(statePath);
 
-    sessionEnv.PATH = prependGhShimBinDirToPath(sessionEnv.PATH ?? process.env.PATH);
+    sessionEnv.PATH = prependGhShimBinDirToPath(sessionEnv.PATH ?? process.env.PATH, statePath);
 
     if (shouldInjectBashEnvForGhShim()) {
-      sessionEnv.BASH_ENV = ensureLodyBashEnvForGhShim(sessionEnv.BASH_ENV);
+      sessionEnv.BASH_ENV = ensureLodyBashEnvForGhShim(sessionEnv.BASH_ENV, statePath);
     }
 
     if (shouldInjectZdotdirForGhShim()) {
-      sessionEnv.ZDOTDIR = ensureLodyZdotdirForGhShim(sessionEnv.ZDOTDIR);
+      sessionEnv.ZDOTDIR = ensureLodyZdotdirForGhShim(sessionEnv.ZDOTDIR, statePath);
     }
   }
 
@@ -1712,6 +1622,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
         tokenManager,
         workspaceId: this.workspaceId,
         logger: this.logger,
+        ownerUserId: this.cloudPort.identity.userId ?? undefined,
       });
     }
     return await this.gitCredentialBroker.ensureStarted();
@@ -1729,7 +1640,8 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
    * remote, and asking for it would start a broker they do not use.
    */
   private async resolveHostGitBrokerAuth(
-    source: WorktreeManagerSource | undefined
+    source: WorktreeManagerSource | undefined,
+    config: SessionConfig
   ): Promise<GitCredentialBrokerAuth | undefined> {
     if (source && source.kind !== 'github') {
       return undefined;
@@ -1742,6 +1654,16 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       workspaceId: this.workspaceId,
       url: brokerEnv.url,
       token: brokerEnv.token,
+      contextToken: config.env?.[LODY_GIT_CRED_CONTEXT_TOKEN_ENV],
+      stateFilePath: this.gitCredentialBroker?.getStateFilePath(),
+      transportEnv: Object.fromEntries(
+        Object.entries(config.env ?? {}).filter(
+          ([key]) =>
+            key === 'PATH' ||
+            key === 'LODY_GIT_LOCAL_CONFIG' ||
+            /^GIT_CONFIG_(COUNT|KEY_\d+|VALUE_\d+)$/.test(key)
+        )
+      ),
     };
   }
 
@@ -1847,10 +1769,13 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
         `[${config.sessionId}] Shared parent worktree missing for ${config.parentSessionId}; creating it now`
       );
       await worktreeManager.ensureRepo({
-        brokerAuth: await this.resolveHostGitBrokerAuth({
-          kind: 'github',
-          repoUrl: config.githubRepoUrl,
-        }),
+        brokerAuth: await this.resolveHostGitBrokerAuth(
+          {
+            kind: 'github',
+            repoUrl: config.githubRepoUrl,
+          },
+          config
+        ),
       });
       const sharedWorktree = await worktreeManager.createWorktree(
         config.parentSessionId,
@@ -2014,7 +1939,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
         preparedWorktreeUsable ??
         (await (async () => {
           await worktreeManager.ensureRepo({
-            brokerAuth: await this.resolveHostGitBrokerAuth(worktreeTarget.target.source),
+            brokerAuth: await this.resolveHostGitBrokerAuth(worktreeTarget.target.source, config),
           });
           return await worktreeManager.createWorktree(
             config.sessionId!,

@@ -9,14 +9,18 @@ import {
 } from 'fs';
 import { writeIfChanged } from './shell-file-utils';
 import path from 'path';
+import { createHash } from 'crypto';
 
-import { LODY_MANAGED_GH_TOKEN_SHA256_ENV } from '@/lib/gh-token-injector';
+import { GITHUB_CREDENTIAL_ENV_KEYS, LODY_MANAGED_GH_TOKEN_SHA256_ENV } from '@/lib/gh-token-env';
 import { getLodyDataDir } from '@lody/shared/node/installation-profile';
+import { githubCredentialRuntime } from './github-credential-runtime';
+import { ensureGitHubGitTransport } from './github-git-transport';
 
 const GH_SHIM_POSIX_BASENAME = 'gh';
 const GH_SHIM_WINDOWS_BASENAME = 'gh.cmd';
 const REAL_GH_PATH_PLACEHOLDER = '__LODY_REAL_GH_PATH__';
 const NODE_EXEC_PATH_PLACEHOLDER = '__LODY_NODE_EXEC_PATH__';
+const BROKER_STATE_PATH_PLACEHOLDER = '__LODY_BROKER_STATE_PATH__';
 const MANAGED_TOKEN_MARKER_ENV = LODY_MANAGED_GH_TOKEN_SHA256_ENV;
 
 const getWindowsExecutableCandidateNames = (name: string): string[] =>
@@ -58,6 +62,7 @@ const resolveExecutableFromPath = (name: string, excludedPath: string): string |
 
   const excludedComparablePath = toComparablePath(excludedPath);
   const excludedComparableDir = toComparablePath(path.dirname(excludedPath));
+  const managedRoot = toComparablePath(path.join(getLodyDataDir(), 'gh-session-bin'));
   const candidateNames =
     process.platform === 'win32' ? getWindowsExecutableCandidateNames(name) : [name];
 
@@ -67,7 +72,11 @@ const resolveExecutableFromPath = (name: string, excludedPath: string): string |
     }
 
     const comparableDir = toComparablePath(dir);
-    if (comparableDir === excludedComparableDir) {
+    if (
+      comparableDir === excludedComparableDir ||
+      path.dirname(comparableDir) === managedRoot ||
+      comparableDir === toComparablePath(path.join(getLodyDataDir(), 'bin'))
+    ) {
       continue;
     }
 
@@ -93,12 +102,14 @@ const { spawn } = require('child_process');
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
-const os = require('os');
 
 const REAL_GH_PATH = '${REAL_GH_PATH_PLACEHOLDER}';
 const SHIM_PATH = __filename;
 const SHIM_DIR = path.dirname(SHIM_PATH);
 const MANAGED_TOKEN_MARKER_ENV = '${MANAGED_TOKEN_MARKER_ENV}';
+const GITHUB_CREDENTIAL_ENV_KEYS = ${JSON.stringify(GITHUB_CREDENTIAL_ENV_KEYS)};
+const LEGACY_BIN_DIR = ${JSON.stringify(path.join(getLodyDataDir(), 'bin'))};
+${githubCredentialRuntime}
 const WINDOWS_EXECUTABLE_CANDIDATE_NAMES = ['gh.exe', 'gh.cmd', 'gh.bat', 'gh.com', 'gh'];
 
 const normalizeComparablePath = (value) => {
@@ -133,12 +144,13 @@ const resolveGhFromPath = () => {
 
   const shimComparablePath = toComparablePath(SHIM_PATH);
   const shimComparableDir = toComparablePath(SHIM_DIR);
+  const shimRoot = path.dirname(shimComparableDir);
   const candidateNames =
     process.platform === 'win32' ? WINDOWS_EXECUTABLE_CANDIDATE_NAMES : ['gh'];
 
   for (const dir of pathEnv.split(path.delimiter)) {
     if (!dir) continue;
-    if (toComparablePath(dir) === shimComparableDir) continue;
+    if (path.dirname(toComparablePath(dir)) === shimRoot || toComparablePath(dir) === toComparablePath(LEGACY_BIN_DIR)) continue;
 
     for (const candidateName of candidateNames) {
       const candidate = path.join(dir, candidateName);
@@ -188,6 +200,10 @@ const runGhCommand = (command, args, options) => new Promise((resolve) => {
     timeout: undefined,
   });
   let stdout = '';
+  let stderr = '';
+  if (child.stderr) {
+    child.stderr.on('data', (chunk) => { stderr += String(chunk || '').slice(0, 20000 - stderr.length); });
+  }
   if (child.stdout) {
     child.stdout.on('data', (chunk) => {
       stdout += String(chunk || '');
@@ -199,7 +215,7 @@ const runGhCommand = (command, args, options) => new Promise((resolve) => {
     if (settled) return;
     settled = true;
     if (timeoutId) clearTimeout(timeoutId);
-    resolve({ stdout, ...result });
+    resolve({ stdout, stderr, ...result });
   };
   if (timeoutMs > 0) {
     timeoutId = setTimeout(() => {
@@ -222,26 +238,15 @@ const isManagedTokenValue = (token, marker) => {
   return fingerprintToken(String(token)) === String(marker);
 };
 
-const hasUserProvidedEnvToken = (env) => {
-  const marker = env[MANAGED_TOKEN_MARKER_ENV];
-  const tokens = [env.GH_TOKEN, env.GITHUB_TOKEN].filter(Boolean);
-  return tokens.some((token) => !isManagedTokenValue(String(token), marker));
-};
-
-const hasManagedEnvToken = (env) => {
-  const marker = env[MANAGED_TOKEN_MARKER_ENV];
-  return (
-    isManagedTokenValue(env.GH_TOKEN, marker) ||
-    isManagedTokenValue(env.GITHUB_TOKEN, marker)
-  );
-};
-
 const clearManagedTokenEnv = (env) => {
-  if (!hasManagedEnvToken(env)) return;
   const marker = env[MANAGED_TOKEN_MARKER_ENV];
-  if (isManagedTokenValue(env.GH_TOKEN, marker)) delete env.GH_TOKEN;
-  if (isManagedTokenValue(env.GITHUB_TOKEN, marker)) delete env.GITHUB_TOKEN;
-  delete env[MANAGED_TOKEN_MARKER_ENV];
+  if (!marker) return;
+  for (const key of ['GH_TOKEN', 'GITHUB_TOKEN']) {
+    if (isManagedTokenValue(env[key], marker)) {
+      delete env[key];
+      delete env[MANAGED_TOKEN_MARKER_ENV];
+    }
+  }
 };
 
 const injectGhToken = (env, token) => {
@@ -251,223 +256,434 @@ const injectGhToken = (env, token) => {
   env[MANAGED_TOKEN_MARKER_ENV] = fingerprintToken(token);
 };
 
-const buildGhAuthEnv = (env) => {
-  const nextEnv = { ...env };
-  delete nextEnv.GH_TOKEN;
-  delete nextEnv.GITHUB_TOKEN;
-  delete nextEnv[MANAGED_TOKEN_MARKER_ENV];
-  return nextEnv;
-};
-
-const isGhCliAuthed = async (ghPath) => {
-  if (!ghPath) return false;
-  try {
-    const result = await runGhCommand(ghPath, ['auth', 'status'], {
-      env: buildGhAuthEnv(process.env),
-      stdio: ['ignore', 'ignore', 'ignore'],
-      timeout: 5000,
-    });
-    return result.status === 0;
-  } catch {
-    return false;
-  }
-};
-
-const parseRepoFromUrl = (raw) => {
-  const value = String(raw || '').trim().replace(/^["']|["']$/g, '');
-  if (!value) return null;
-
-  const https = value.match(/^https?:\\/\\/github\\.com\\/(.+)$/i);
-  if (https && https[1]) {
-    const withoutQuery = https[1].split('?')[0].split('#')[0];
-    const withoutGit = withoutQuery.replace(/\\.git$/i, '');
-    const parts = withoutGit.split('/').filter(Boolean);
-    if (parts.length >= 2) return parts[0] + '/' + parts[1];
-  }
-
-  const ssh = value.match(/^git@github\\.com:(.+)$/i);
-  if (ssh && ssh[1]) {
-    const withoutGit = ssh[1].replace(/\\.git$/i, '');
-    const parts = withoutGit.split('/').filter(Boolean);
-    if (parts.length >= 2) return parts[0] + '/' + parts[1];
-  }
-
-  const direct = value.replace(/\\.git$/i, '');
-  const parts = direct.split('/').filter(Boolean);
-  if (parts.length === 2 && !parts[0].includes(':')) {
-    return parts[0] + '/' + parts[1];
-  }
-
-  return null;
+// Keep authentication checks on the real executable and this invocation's env.
+// auth token checks local availability without a network request. /user then
+// distinguishes revoked credentials (401) from transient/permission errors.
+const hasUsableGhAuth = async (ghPath, env, host) => {
+  const available = await runGhCommand(ghPath, ['auth', 'token', '--hostname', host], {
+    env, stdio: ['ignore', 'ignore', 'ignore'], timeout: 5000,
+  });
+  if (available.error) throw new Error('Unable to inspect local GitHub credentials.');
+  if (available.status !== 0) return false;
+  const check = await runGhCommand(ghPath, ['api', '--hostname', host, 'user', '--silent'], {
+    env, stdio: ['ignore', 'ignore', 'pipe'], timeout: 5000,
+  });
+  if (check.status === 0) return true;
+  if (!check.error && /\\bHTTP 401\\b/i.test(check.stderr)) return false;
+  // A token may authenticate APIs that /user does not permit (e.g. installation
+  // tokens). Preserve this identity on 403, rate limits and network failures;
+  // the real command reports its own error and is never replayed.
+  return true;
 };
 
 const readGitRemoteOrigin = async () => {
   try {
     const result = await runGhCommand('git', ['remote', 'get-url', 'origin'], {
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-      timeout: 5000,
+      stdio: ['ignore', 'pipe', 'ignore'], timeout: 5000,
     });
-    if (!result || result.status !== 0) return null;
-    return String(result.stdout || '').trim() || null;
+    return result.status === 0 ? result.stdout.trim() : null;
   } catch {
     return null;
   }
 };
 
-const readRepoFullName = async () => {
-  const fromEnv =
-    process.env.LODY_GITHUB_REPO_FULL_NAME ||
-    process.env.GITHUB_REPOSITORY ||
-    process.env.GH_REPO;
-  return parseRepoFromUrl(fromEnv) || parseRepoFromUrl(await readGitRemoteOrigin());
+const parseRepo = (raw, defaultHost) => {
+  const value = String(raw || '').trim();
+  if (!value) return null;
+  let host = defaultHost;
+  let repo = value;
+  if (/^https?:\\/\\//i.test(value) || value.startsWith('ssh://')) {
+    try { const url = new URL(value); host = url.hostname; repo = url.pathname.slice(1); }
+    catch { return null; }
+  } else if (value.startsWith('git@')) {
+    const match = value.match(/^git@([^:]+):(.+)$/);
+    if (!match) return null;
+    host = match[1]; repo = match[2];
+  } else if (value.split('/').length === 3) {
+    const parts = value.split('/'); host = parts.shift(); repo = parts.join('/');
+  }
+  repo = repo.replace(/\\.git$/, '').replace(/\\/$/, '');
+  return /^[\\w.-]+\\/[\\w.-]+$/.test(repo) ? { host: host.toLowerCase(), repo } : null;
 };
 
-const BROKER_STATE_PATHS = [
-  '/home/node/.lody/broker.json',
-  path.join(
-    process.env.LODY_DATA_DIR ||
-      path.join(os.homedir(), process.env.LODY_PLATFORM === 'local' ? '.lody-oss' : '.lody'),
-    'broker.json'
-  ),
-];
+// Command-scoped option arity audited against cli/cli v2.96.0. Each descriptor is
+// long-name[:short-name]; a short name is not necessarily boolean elsewhere.
+const viewFlags = ['comments:c web:w', 'json jq:q template:t'];
+const commentFlags = ['edit-last create-if-none delete-last editor:e web:w yes', 'body:b body-file:F attach'];
+const editValues = 'add-assignee add-label add-project body:b body-file:F milestone:m remove-assignee remove-label remove-project title:t';
+const createValues = 'assignee:a attach body:b body-file:F label:l milestone:m project:p recover template:T title:t';
+const listValues = 'app assignee:a author:A json jq:q label:l limit:L search:S state:s template:t';
+const repoCommandFlags = {
+  run: {
+    cancel: ['force', ''],
+    delete: ['', ''],
+    download: ['', 'dir:D name:n pattern:p'],
+    list: ['all:a', 'limit:L workflow:w branch:b user:u event:e created commit:c status:s json jq:q template:t'],
+    rerun: ['failed debug:d', 'job:j'],
+    view: ['verbose:v exit-status log log-failed web:w', 'job:j attempt:a json jq:q template:t'],
+    watch: ['exit-status compact', 'interval:i'],
+  },
+  workflow: {
+    disable: ['', ''],
+    enable: ['', ''],
+    list: ['all:a', 'limit:L json jq:q template:t'],
+    run: ['json', 'ref:r field:F raw-field:f'],
+    view: ['web:w yaml:y', 'ref:r'],
+  },
+  cache: {
+    delete: ['all:a succeed-on-no-caches', 'ref:r'],
+    list: ['', 'limit:L order:O sort:S key:k ref:r json jq:q template:t'],
+  },
+  release: {
+    create: ['draft:d prerelease:p generate-notes latest verify-tag notes-from-tag fail-on-no-commits', 'target title:t notes:n notes-file:F discussion-category notes-start-tag'],
+    delete: ['yes:y cleanup-tag', ''],
+    'delete-asset': ['yes:y', ''],
+    download: ['clobber skip-existing', 'output:O dir:D pattern:p archive:A'],
+    edit: ['draft prerelease latest verify-tag', 'notes:n title:t discussion-category target tag notes-file:F'],
+    list: ['exclude-drafts exclude-pre-releases', 'limit:L order:O json jq:q template:t'],
+    upload: ['clobber', ''],
+    verify: ['', 'format jq:q template:t custom-trusted-root'],
+    'verify-asset': ['', 'format jq:q template:t custom-trusted-root'],
+    view: ['web:w', 'json jq:q template:t'],
+  },
+  repo: {
+    clone: ['recurse-submodules', ''],
+    fork: ['clone remote default-branch-only', 'fork-name org remote-name'],
+    sync: ['force', 'branch:b'],
+    view: ['web:w', 'branch:b json jq:q template:t'],
+    archive: ['confirm yes:y', ''],
+    delete: ['confirm yes', ''],
+    edit: ['template enable-issues enable-projects enable-wiki enable-discussions enable-merge-commit enable-squash-merge enable-rebase-merge enable-auto-merge enable-advanced-security enable-secret-scanning enable-secret-scanning-push-protection delete-branch-on-merge allow-forking allow-update-branch accept-visibility-change-consequences', 'description:d homepage:h default-branch visibility squash-merge-commit-message add-topic remove-topic'],
+    rename: ['confirm yes:y', ''],
+    // sync: ['force', 'source:s branch:b'], // OMIT: secondary repository --source
+  },
+  label: {
+    create: ['force:f', 'description:d color:c'],
+    delete: ['confirm yes', ''],
+    edit: ['', 'description:d color:c name:n'],
+    list: ['web:w', 'limit:L search:S order sort json jq:q template:t'],
+    // clone OMIT: positional source repository, --repo destination repository
+  },
+  pr: {
+    checkout: ['detach force:f recurse-submodules', 'branch:b worktree'],
+    checks: ['fail-fast required watch web:w', 'interval:i json jq:q template:t'],
+    close: ['delete-branch:d', 'comment:c'],
+    comment: commentFlags,
+    create: ['draft:d dry-run editor:e fill:f fill-first fill-verbose no-maintainer-edit web:w', createValues + ' base:B head:H reviewer:r'],
+    diff: ['name-only patch web:w', 'color exclude:e'],
+    edit: ['remove-milestone', editValues + ' add-reviewer base:B remove-reviewer'],
+    list: ['draft:d web:w', listValues + ' base:B head:H'],
+    lock: ['', 'reason:r'],
+    merge: ['admin auto delete-branch:d disable-auto merge:m rebase:r squash:s', 'author-email:A body:b body-file:F match-head-commit subject:t'],
+    ready: ['undo', ''],
+    reopen: ['', 'comment:c'],
+    revert: ['draft:d', 'body:b body-file:F title:t'],
+    review: ['approve:a comment:c request-changes:r', 'body:b body-file:F'],
+    status: ['conflict-status:c', 'json jq:q template:t'],
+    unlock: ['', ''],
+    'update-branch': ['rebase', ''],
+    view: viewFlags,
+  },
+  issue: {
+    close: ['', 'comment:c reason:r duplicate-of'],
+    comment: commentFlags,
+    create: ['editor:e web:w', createValues + ' blocked-by blocking parent type'],
+    delete: ['yes confirm', ''],
+    develop: ['checkout:c list:l', 'base:b branch-repo name:n issue-repo:i'],
+    edit: ['remove-milestone remove-type remove-parent', editValues + ' type parent add-sub-issue remove-sub-issue add-blocked-by remove-blocked-by add-blocking remove-blocking'],
+    list: ['web:w', listValues + ' mention milestone:m type'],
+    lock: ['', 'reason:r'],
+    pin: ['', ''],
+    reopen: ['', 'comment:c'],
+    status: ['', 'json jq:q template:t'],
+    transfer: ['', ''],
+    unlock: ['', ''],
+    unpin: ['', ''],
+    view: viewFlags,
+  },
+};
 
-const getBrokerConfigFromFile = () => {
-  for (const statePath of BROKER_STATE_PATHS) {
-    try {
-      if (!fs.existsSync(statePath)) continue;
-      const state = JSON.parse(fs.readFileSync(statePath, 'utf8'));
-      if (state && typeof state.url === 'string' && typeof state.token === 'string') {
-        return { url: state.url, token: state.token, source: 'file' };
+// null means ambiguous: local gh may handle it, but managed auth must not guess.
+const readRepoCommandArgs = (args) => {
+  const isUrl = (value) => /^https?:/i.test(value || '');
+  const arity = new Map([['--repo', true], ['-R', true], ['--help', false], ['-h', false]]);
+  const positionals = [];
+  let command;
+  let help = false;
+  let repo;
+  let issueRepo;
+  let branchRepo;
+  let duplicate;
+  let options = true;
+  for (let i = 1; i < args.length; i++) {
+    const arg = args[i];
+    if (options && arg === '--') { options = false; continue; }
+    if (!options || !arg.startsWith('-') || arg === '-') {
+      if (command) { positionals.push(arg); continue; }
+      if (!options) return null;
+      command = { new: 'create', ls: 'list', co: 'checkout' }[arg] || arg;
+      const flags = repoCommandFlags[args[0]]?.[command];
+      if (!Array.isArray(flags)) return null;
+      for (const [takesValue, descriptors] of [[false, flags[0]], [true, flags[1]]]) {
+        for (const descriptor of descriptors.split(' ').filter(Boolean)) {
+          const [long, short] = descriptor.split(':');
+          arity.set('--' + long, takesValue);
+          if (short) arity.set('-' + short, takesValue);
+        }
       }
-    } catch {
-      // Try the next state path.
+      continue;
+    }
+    const long = arg.startsWith('--');
+    const names = long ? [arg.split('=')[0]] : [...arg.slice(1)].map((letter) => '-' + letter);
+    for (let j = 0; j < names.length; j++) {
+      const name = names[j];
+      if (!arity.has(name)) return null;
+      const attached = long ? arg.indexOf('=') : j + 2 < arg.length ? j + 1 : -1;
+      if (arity.get(name)) {
+        let value = attached >= 0 ? arg.slice(attached + 1) : args[++i];
+        if (!long && attached >= 0 && value.startsWith('=')) value = value.slice(1);
+        // Consume known values once; never rescan them as flags or subjects.
+        if (value === undefined) return null;
+        if (name === '--repo' || name === '-R') repo = value;
+        if (args[0] === 'issue' && command === 'develop') {
+          if (name === '--issue-repo' || name === '-i') issueRepo = value;
+          if (name === '--branch-repo') branchRepo = value;
+        }
+        if (args[0] === 'issue' && command === 'close' && name === '--duplicate-of') duplicate = value;
+        break;
+      }
+      const value = long && attached >= 0 ? arg.slice(attached + 1) :
+        !long && arg[j + 2] === '=' ? arg.slice(j + 3) : 'true';
+      if (!/^(true|false|1|0|t|f)$/i.test(value)) return null;
+      if (name === '--help' || name === '-h') help = /^(true|1|t)$/i.test(value);
+      if (!long && arg[j + 2] === '=') break;
     }
   }
+  if (help) return { help, command };
+  if (!command) return null;
+  const subjectCommand = args[0] === 'pr' || args[0] === 'issue';
+  if (subjectCommand && ['create', 'list', 'status'].includes(command) && positionals.length) return null;
+  let subject = positionals[0];
+  if (args[0] === 'issue' && command === 'edit') {
+    const urls = positionals.filter(isUrl);
+    let issueTarget;
+    for (const value of urls) {
+      try {
+        const url = new URL(value);
+        const repo = parseRepo(url.pathname.split('/').slice(1, 3).join('/'), url.hostname);
+        if (!repo || repo.host !== 'github.com') return null;
+        const target = repo.repo.toLowerCase();
+        if (issueTarget && issueTarget !== target) return null;
+        issueTarget = target;
+      } catch { return null; }
+    }
+    // Native gh applies the first URL's repository to every number in the batch.
+    subject = urls[0] || subject;
+  } else if (subjectCommand && positionals.slice(1).some(isUrl)) return null;
+  if (!subjectCommand) {
+    // These repo commands take a repository operand; other groups take IDs, tags or files.
+    if (args[0] === 'repo' && ['view', 'archive', 'delete', 'edit', 'clone', 'fork', 'sync'].includes(command)) {
+      repo = subject || repo;
+    }
+    subject = undefined;
+  }
+  // These commands also send authenticated requests to a secondary repository.
+  // Native owner auth can handle other hosts; managed credentials must not reach them.
+  if (issueRepo !== undefined && repo !== undefined) branchRepo = repo;
+  if (branchRepo && parseRepo(branchRepo, process.env.GH_HOST || 'github.com')?.host !== 'github.com') return null;
+  if (isUrl(duplicate)) {
+    try { if (new URL(duplicate).hostname !== 'github.com') return null; }
+    catch { return null; }
+  }
+  // develop's deprecated selector overrides --repo regardless of flag order.
+  return { subject, repo: issueRepo !== undefined ? issueRepo : repo };
+};
+
+// API accepts exactly one endpoint. Values can themselves look like URLs or
+// hostname flags, so only consumed positional/hostname arguments select auth.
+const readApiArgs = (args) => {
+  const arity = new Map();
+  for (const [takesValue, descriptors] of [
+    [false, 'include:i slurp paginate silent verbose help:h'],
+    [true, 'hostname method:X field:F raw-field:f header:H preview:p input template:t jq:q cache'],
+  ]) {
+    for (const descriptor of descriptors.split(' ')) {
+      const [long, short] = descriptor.split(':');
+      arity.set('--' + long, takesValue);
+      if (short) arity.set('-' + short, takesValue);
+    }
+  }
+  const positionals = [];
+  let hostname;
+  let help = false;
+  let options = true;
+  for (let i = 1; i < args.length; i++) {
+    const arg = args[i];
+    if (options && arg === '--') { options = false; continue; }
+    if (!options || !arg.startsWith('-') || arg === '-') { positionals.push(arg); continue; }
+    const long = arg.startsWith('--');
+    const names = long ? [arg.split('=')[0]] : [...arg.slice(1)].map((letter) => '-' + letter);
+    for (let j = 0; j < names.length; j++) {
+      const name = names[j];
+      if (!arity.has(name)) return null;
+      const attached = long ? arg.indexOf('=') : j + 2 < arg.length ? j + 1 : -1;
+      if (arity.get(name)) {
+        let value = attached >= 0 ? arg.slice(attached + 1) : args[++i];
+        if (!long && attached >= 0 && value.startsWith('=')) value = value.slice(1);
+        if (value === undefined) return null;
+        if (name === '--hostname') hostname = value;
+        break;
+      }
+      const value = long && attached >= 0 ? arg.slice(attached + 1) :
+        !long && arg[j + 2] === '=' ? arg.slice(j + 3) : 'true';
+      if (!/^(true|false|1|0|t|f)$/i.test(value)) return null;
+      if (name === '--help' || name === '-h') help = /^(true|1|t)$/i.test(value);
+      if (!long && arg[j + 2] === '=') break;
+    }
+  }
+  return help || positionals.length === 1 ? { endpoint: positionals[0], hostname, help } : null;
+};
+
+const normalizeRepoArgs = (args) => {
+  // gh also accepts inherited repo flags before repository command groups.
+  let groupIndex = 0;
+  while (groupIndex < args.length) {
+    const arg = args[groupIndex];
+    if (arg === '--repo' || arg === '-R') { groupIndex += 2; continue; }
+    if (arg.startsWith('--repo=') || (arg.startsWith('-R') && arg.length > 2)) { groupIndex++; continue; }
+    break;
+  }
+  if (groupIndex && Object.hasOwn(repoCommandFlags, args[groupIndex])) {
+    args = [args[groupIndex], ...args.slice(0, groupIndex), ...args.slice(groupIndex + 1)];
+  }
+  return args;
+};
+
+const readGitHubTarget = async (args) => {
+  const repoCommand = Object.hasOwn(repoCommandFlags, args[0]);
+  const apiArgs = args[0] === 'api' ? readApiArgs(args) : undefined;
+  if (apiArgs === null || (!repoCommand && !apiArgs)) return { host: null, repo: null };
+  const host = String(apiArgs?.hostname || process.env.GH_HOST || 'github.com').toLowerCase();
+  if (apiArgs) {
+    const endpoint = apiArgs.endpoint;
+    let url = null;
+    try { if (endpoint.includes('://')) url = new URL(endpoint); }
+    catch { return { host: null, repo: null }; }
+    if (url && url.protocol !== 'https:') return { host: null, repo: null };
+    const apiHost = url ? (url.hostname === 'api.github.com' ? 'github.com' : url.hostname) : host;
+    const match = (url ? url.pathname : endpoint).match(/^\\/?repos\\/([^/]+\\/[^/?#]+)/);
+    let repo = match ? match[1] : null;
+    if (repo && repo.includes('{')) {
+      const context = parseRepo(process.env.GH_REPO || await readGitRemoteOrigin() || process.env.LODY_GITHUB_REPO_FULL_NAME, host);
+      if (context) {
+        const [owner, name] = context.repo.split('/');
+        repo = repo.replace('{owner}', owner).replace('{repo}', name);
+      }
+    }
+    // Repository-less API endpoints use the workspace's credential context.
+    return { host: apiHost, repo: repo && !repo.includes('{') ? repo :
+      (!match && !url ? process.env.LODY_GITHUB_REPO_FULL_NAME || null : null) };
+  }
+  // PR/Issue subjects override ambient repositories; option values do not.
+  const parsed = repoCommand ? readRepoCommandArgs(args) : undefined;
+  if (parsed === null) return { host: null, repo: null };
+  const subject = parsed.subject;
+  if (subject && /^https?:\\/\\//i.test(subject)) {
+    try {
+      const url = new URL(subject);
+      const repoPath = url.pathname.split('/').slice(1, 3).join('/');
+      return parseRepo(repoPath, url.hostname) || { host: url.hostname, repo: null };
+    } catch { return { host, repo: null }; }
+  }
+  // Never rescan option values (e.g. a template containing '-Rowner/repo').
+  const explicitRepo = parsed.repo || process.env.GH_REPO;
+  if (explicitRepo) return parseRepo(explicitRepo, host) || { host, repo: null };
+  return parseRepo(await readGitRemoteOrigin(), host) ||
+    parseRepo(process.env.LODY_GITHUB_REPO_FULL_NAME || process.env.GITHUB_REPOSITORY, host) ||
+    { host, repo: null };
+};
+
+const helpGroups = new Set([...Object.keys(repoCommandFlags), ...
+  'agent-task alias attestation auth codespace config discussion extension gist gpg-key org preview project ruleset search secret skill ssh-key variable'.split(' ')]);
+
+const readCredentialFreeArgs = (args) => {
+  if (!args.length || (args.length === 1 && args[0] === '-h')) return ['help', '--'];
+  if (args.length === 1 && /^(version|--version(?:=(true|1|t))?)$/i.test(args[0])) return ['--version'];
+  const parsed = args[0] === 'api' ? readApiArgs(args) :
+    Object.hasOwn(repoCommandFlags, args[0]) ? readRepoCommandArgs(args) : null;
+  if (parsed?.help) return ['help', '--', args[0], ...(parsed.command ? [parsed.command] : [])];
+  // A successfully consumed value (e.g. repo edit -h=true) is never rescanned as help.
+  if (parsed) return null;
+  let parts;
+  if (args[0] === 'help') return ['help', '--', ...args.slice(1)];
+  else if (helpGroups.has(args[0]) && (args.length === 1 || (args.length === 2 && args[1] === '-h'))) parts = [args[0]];
+  else {
+    let help = false;
+    let options = true;
+    parts = [];
+    for (const arg of args) {
+      if (arg === '--') { options = false; continue; }
+      const match = options && /^--help(?:=(true|false|1|0|t|f))?$/i.exec(arg);
+      if (match) help = !match[1] || /^(true|1|t)$/i.test(match[1]);
+      else parts.push(arg);
+    }
+    if (!help) return null;
+  }
+  // Outside the arity table, accept plain help paths only, never unknown option values.
+  return parts.every((part) => !part.startsWith('-')) ? ['help', '--', ...parts] : null;
+};
+
+// The daemon chooses this workspace binding when generating the wrapper.
+// Child environment overrides must never select the authorization authority.
+const BROKER_STATE_PATH = '${BROKER_STATE_PATH_PLACEHOLDER}';
+const getBrokerConfig = () => {
+  try {
+    const state = JSON.parse(fs.readFileSync(BROKER_STATE_PATH, 'utf8'));
+    if (state && typeof state.url === 'string' && typeof state.token === 'string') {
+      return { url: state.url, token: state.token };
+    }
+  } catch { /* Missing or unreadable trusted state fails closed. */ }
   return null;
 };
 
-const getBrokerConfig = () => {
-  const envUrl = process.env.LODY_GIT_CRED_BROKER_URL;
-  const envToken = process.env.LODY_GIT_CRED_BROKER_TOKEN;
-  if (envUrl && envToken) {
-    return { url: envUrl, token: envToken, source: 'env' };
+const capturedContextToken = (() => {
+  if (process.env.LODY_GIT_CRED_CONTEXT_FILE) {
+    try { return JSON.parse(fs.readFileSync(process.env.LODY_GIT_CRED_CONTEXT_FILE, 'utf8')).contextToken || null; } catch { return null; }
   }
-  return getBrokerConfigFromFile();
-};
-
-const getContextToken = () => {
   const value = process.env.LODY_GIT_CRED_CONTEXT_TOKEN;
   return typeof value === 'string' && value.trim() ? value.trim() : null;
-};
+})();
+const getContextToken = () => capturedContextToken;
 
-const isConnectionError = (error) => {
-  if (!error) return false;
-  const code = error.code || (error.cause && error.cause.code);
-  if (code === 'ECONNREFUSED' || code === 'ENOTFOUND' || code === 'ETIMEDOUT' || code === 'ECONNRESET') {
-    return true;
-  }
-  const message = String(error.message || '').toLowerCase();
-  return message.includes('econnrefused') || message.includes('enotfound') || message.includes('fetch failed');
-};
-
-const doBrokerRequest = async (baseUrl, brokerToken, endpoint, body, timeoutMs) => {
-  const fetchImpl = globalThis.fetch;
-  if (typeof fetchImpl !== 'function') return { unavailable: true };
-
+const requestBroker = async (endpoint, body, timeoutMs) => {
+  const config = getBrokerConfig();
+  if (!config || typeof globalThis.fetch !== 'function') return null;
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const res = await fetchImpl(baseUrl + endpoint, {
+    return await fetch(config.url + endpoint, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: 'Bearer ' + brokerToken,
+        Authorization: 'Bearer ' + config.token,
       },
       body: JSON.stringify(body),
       signal: controller.signal,
     });
-    return { res };
-  } catch (error) {
-    return { error };
+  } catch {
+    return null;
   } finally {
     clearTimeout(timeoutId);
   }
 };
 
-const doFetchFromBroker = async (baseUrl, brokerToken, repoFullName, contextToken) => {
-  const reply = await doBrokerRequest(
-    baseUrl,
-    brokerToken,
-    '/github-token',
-    { repoFullName, ...(contextToken ? { contextToken } : {}) },
-    10000
-  );
-  if (reply.unavailable) return { result: null };
-  if (reply.error) return { error: reply.error };
-  if (!reply.res.ok) return { result: null };
-  const json = await reply.res.json().catch(() => null);
-  if (!json || typeof json.token !== 'string' || !json.token) {
-    return { result: null };
-  }
-  return { result: { token: json.token } };
-};
-
-const doRejectToBroker = async (
-  baseUrl,
-  brokerToken,
-  repoFullName,
-  invalidatedToken,
-  contextToken
-) => {
-  // Short timeout: the gh shim awaits this before exiting, so a slow broker would stall
-  // the user. The next gh invocation will re-trigger reject if delivery here fails.
-  const reply = await doBrokerRequest(
-    baseUrl,
-    brokerToken,
-    '/github-token/reject',
-    {
-      repoFullName,
-      ...(contextToken ? { contextToken } : {}),
-      ...(invalidatedToken ? { invalidatedToken } : {}),
-    },
-    2000
-  );
-  if (reply.unavailable) return { result: false };
-  if (reply.error) return { error: reply.error };
-  return { result: reply.res.ok };
-};
-
-const callBrokerWithFallback = async (action) => {
-  const brokerConfig = getBrokerConfig();
-  if (!brokerConfig) return null;
-
-  const { url, token, source } = brokerConfig;
-  const first = await action(url, token);
-  if (first.result !== undefined) return first;
-
-  if (first.error && source === 'env' && isConnectionError(first.error)) {
-    const fileConfig = getBrokerConfigFromFile();
-    if (fileConfig && fileConfig.url !== url) {
-      return await action(fileConfig.url, fileConfig.token);
-    }
-  }
-  return first;
-};
-
-const fetchTokenFromBroker = async (repoFullName) => {
-  const contextToken = getContextToken();
-  const reply = await callBrokerWithFallback((url, token) =>
-    doFetchFromBroker(url, token, repoFullName, contextToken)
-  );
-  return reply && reply.result ? reply.result : null;
-};
 
 const rejectTokenToBroker = async (repoFullName, invalidatedToken) => {
-  const contextToken = getContextToken();
-  await callBrokerWithFallback((url, token) =>
-    doRejectToBroker(url, token, repoFullName, invalidatedToken, contextToken)
-  );
+  // Short timeout: the gh shim awaits this before exiting, so a slow broker would stall
+  // the user. The next gh invocation will re-trigger reject if delivery here fails.
+  await requestBroker('/github-token/reject', {
+    repoFullName, contextToken: getContextToken(), invalidatedToken,
+  }, 2000);
 };
 
 const GH_AUTH_FAILURE_PHRASES = [
@@ -483,29 +699,82 @@ const isGhAuthFailureOutput = (stderrText) => {
   return GH_AUTH_FAILURE_PHRASES.some((phrase) => value.includes(phrase));
 };
 
-const buildGhEnv = async (ghCommand) => {
+const buildGhEnv = async (ghCommand, args) => {
   const env = { ...process.env };
-  if (hasUserProvidedEnvToken(env)) {
-    clearManagedTokenEnv(env);
-    return { env };
-  }
-
-  const repoFullName = await readRepoFullName();
-  const hasBroker = !!getBrokerConfig();
-  if (repoFullName && hasBroker) {
-    const result = await fetchTokenFromBroker(repoFullName);
-    if (result && result.token) {
-      injectGhToken(env, result.token);
-      return { env, managed: { token: result.token, repoFullName } };
+  clearManagedTokenEnv(env);
+  const normalizedArgs = normalizeRepoArgs(args);
+  const helpArgs = readCredentialFreeArgs(normalizedArgs);
+  // Neither a missing environment marker nor an inherited token proves ownership.
+  const policy = helpArgs ? { allowLocalAuth: false, personalEnabled: false } : await readCredentialPolicy();
+  const { allowLocalAuth } = policy;
+  if (!allowLocalAuth) {
+    for (const key of Object.keys(env)) {
+      if (GITHUB_CREDENTIAL_ENV_KEYS.includes(key.toUpperCase())) delete env[key];
     }
-    clearManagedTokenEnv(env);
-    return { env };
   }
+  // Help needs no authority. Canonical arguments prevent any user operation.
+  if (helpArgs) {
+    // Help must not load owner aliases/extensions or start background authentication.
+    const directory = fs.mkdtempSync(path.join(require('os').tmpdir(), 'lody-gh-help-'));
+    process.on('exit', () => { try { fs.rmSync(directory, { recursive: true, force: true }); } catch {} });
+    env.GH_CONFIG_DIR = directory;
+    env.XDG_DATA_HOME = directory;
+    env.XDG_STATE_HOME = directory;
+    env.XDG_CACHE_HOME = directory;
+    env.GH_PAGER = '';
+    env.GH_NO_UPDATE_NOTIFIER = '1';
+    env.GH_NO_EXTENSION_UPDATE_NOTIFIER = '1';
+    // The separator keeps gh's extension-help rewrite from executing a command.
+    return { env, args: helpArgs };
+  }
+  // Authentication management must reach the owner's real gh unchanged, even
+  // when no login exists yet; injecting an App token prevents gh auth login.
+  if (args[0] === 'auth') {
+    if (allowLocalAuth) return { env };
+    throw new Error('GitHub authentication management is unavailable for this session.');
+  }
+  const target = await readGitHubTarget(normalizedArgs);
+  if (!target.host) {
+    // The owner's native gh can resolve ambiguous arguments itself. A shared
+    // session must stop rather than risk selecting another host's credentials.
+    if (allowLocalAuth && !policy.personalEnabled) return { env };
+    throw new Error('Cannot determine the GitHub target safely for this session.');
+  }
+  const tokenKeys = target.host === 'github.com' || target.host.endsWith('.ghe.com')
+    ? ['GH_TOKEN', 'GITHUB_TOKEN'] : ['GH_ENTERPRISE_TOKEN', 'GITHUB_ENTERPRISE_TOKEN'];
+  if (target.host === 'github.com' && target.repo) {
+    // Unknown operations are conservatively treated as writes. Only the
+    // preflight is retried, never the user's command.
+    // Contents push permission says nothing about issue/comment/review access.
+    // Those commands keep the selected identity if the actual operation fails.
+    const requireWrite = false;
+    const selected = await selectGitHubCredential(target.repo, policy, async () => {
+      for (const key of tokenKeys) {
+        const token = env[key];
+        if (token && await checkRepositoryCredential(token, target.repo, requireWrite) === 'usable') return { token };
+        delete env[key];
+      }
+      const result = await runGhCommand(ghCommand, ['auth', 'token', '--hostname', target.host], {
+        env, stdio: ['ignore', 'pipe', 'ignore'], timeout: 5000,
+      });
+      if (result.error) throw new Error('Unable to inspect local GitHub credentials.');
+      const token = result.status === 0 ? result.stdout.trim() : '';
+      return token && await checkRepositoryCredential(token, target.repo, requireWrite) === 'usable' ? { token } : null;
+    }, requireWrite);
+    env.GH_HOST = 'github.com';
+    injectGhToken(env, selected.token);
+    return { env, ...(selected.source !== 'local' ? { managed: { token: selected.token, repoFullName: target.repo } } : {}) };
+  }
+  // Try explicit credentials in gh's precedence order. Only a definitive 401
+  // allows the next credential; never retry the user's actual command.
+  for (const key of tokenKeys) {
+    if (!env[key]) continue;
+    if (await hasUsableGhAuth(ghCommand, env, target.host)) return { env };
+    delete env[key];
+  }
+  if (allowLocalAuth && await hasUsableGhAuth(ghCommand, env, target.host)) return { env };
 
-  if (await isGhCliAuthed(ghCommand)) {
-    clearManagedTokenEnv(env);
-    return { env };
-  }
+  if (!allowLocalAuth) throw new Error('No managed GitHub credential is available for this session.');
   return { env };
 };
 
@@ -516,8 +785,8 @@ const main = async () => {
     process.exit(127);
   }
 
-  const ghEnv = await buildGhEnv(ghCommand);
-  const child = spawnGh(ghCommand, process.argv.slice(2), {
+  const ghEnv = await buildGhEnv(ghCommand, process.argv.slice(2));
+  const child = spawnGh(ghCommand, ghEnv.args || process.argv.slice(2), {
     stdio: ['inherit', 'inherit', 'pipe'],
     env: ghEnv.env,
   });
@@ -545,32 +814,51 @@ const main = async () => {
   });
 };
 
-main().catch(() => process.exit(1));
+main().catch((error) => { console.error(error.message); process.exit(1); });
 `;
 
 const windowsLauncherSourceTemplate = `@echo off
 "${NODE_EXEC_PATH_PLACEHOLDER}" "%~dp0gh" %*
 `;
 
-export const getGhShimHostBinDir = (): string => path.join(getLodyDataDir(), 'bin');
+// Only managed session PATHs include this directory. Ordinary local shells use
+// native gh, so missing session context never needs an authorization exception.
+const resolveBrokerStatePath = (statePath?: string): string =>
+  path.resolve(statePath ?? path.join(getLodyDataDir(), 'broker.json'));
 
-const getGhShimHostNodeScriptPath = (): string =>
-  path.join(getGhShimHostBinDir(), GH_SHIM_POSIX_BASENAME);
+export const getGhShimHostBinDir = (brokerStateFilePath?: string): string =>
+  path.join(
+    getLodyDataDir(),
+    'gh-session-bin',
+    createHash('sha256')
+      .update(resolveBrokerStatePath(brokerStateFilePath))
+      .digest('hex')
+      .slice(0, 16)
+  );
 
-const getGhShimHostWindowsLauncherPath = (): string =>
-  path.join(getGhShimHostBinDir(), GH_SHIM_WINDOWS_BASENAME);
+const getGhShimHostNodeScriptPath = (brokerStateFilePath?: string): string =>
+  path.join(getGhShimHostBinDir(brokerStateFilePath), GH_SHIM_POSIX_BASENAME);
 
-export const getGhShimHostPath = (): string =>
-  process.platform === 'win32' ? getGhShimHostWindowsLauncherPath() : getGhShimHostNodeScriptPath();
+const getGhShimHostWindowsLauncherPath = (brokerStateFilePath?: string): string =>
+  path.join(getGhShimHostBinDir(brokerStateFilePath), GH_SHIM_WINDOWS_BASENAME);
+
+export const getGhShimHostPath = (brokerStateFilePath?: string): string =>
+  process.platform === 'win32'
+    ? getGhShimHostWindowsLauncherPath(brokerStateFilePath)
+    : getGhShimHostNodeScriptPath(brokerStateFilePath);
 
 const escapeForSingleQuotedString = (value: string): string =>
   value.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
 
 const escapeForDoubleQuotedCmdString = (value: string): string => value.replace(/"/g, '""');
 
-const buildGhShimSource = (realGhPath: string | null): string => {
+const buildGhShimSource = (realGhPath: string | null, brokerStateFilePath?: string): string => {
   const escapedRealPath = realGhPath ? escapeForSingleQuotedString(realGhPath) : '';
-  return wrapperSourceTemplate.split(REAL_GH_PATH_PLACEHOLDER).join(escapedRealPath);
+  return wrapperSourceTemplate
+    .split(REAL_GH_PATH_PLACEHOLDER)
+    .join(escapedRealPath)
+    .split(BROKER_STATE_PATH_PLACEHOLDER)
+    .join(escapeForSingleQuotedString(resolveBrokerStatePath(brokerStateFilePath)));
 };
 
 const buildWindowsLauncherSource = (): string =>
@@ -578,7 +866,8 @@ const buildWindowsLauncherSource = (): string =>
     .split(NODE_EXEC_PATH_PLACEHOLDER)
     .join(escapeForDoubleQuotedCmdString(process.execPath));
 
-const resolveRealGhPath = (): string | null => resolveExecutableFromPath('gh', getGhShimHostPath());
+const resolveRealGhPath = (brokerStateFilePath?: string): string | null =>
+  resolveExecutableFromPath('gh', getGhShimHostPath(brokerStateFilePath));
 
 const ensureParentDirForFile = (filePath: string): void => {
   const dir = path.dirname(filePath);
@@ -622,15 +911,18 @@ const ensureWritableShimTarget = (filePath: string): void => {
   }
 };
 
-export const ensureGhShimScript = (): void => {
-  const source = buildGhShimSource(resolveRealGhPath());
+export const ensureGhShimScript = (brokerStateFilePath?: string): void => {
+  const source = buildGhShimSource(resolveRealGhPath(brokerStateFilePath), brokerStateFilePath);
   const shimTargets =
     process.platform === 'win32'
       ? [
-          { filePath: getGhShimHostNodeScriptPath(), content: source },
-          { filePath: getGhShimHostWindowsLauncherPath(), content: buildWindowsLauncherSource() },
+          { filePath: getGhShimHostNodeScriptPath(brokerStateFilePath), content: source },
+          {
+            filePath: getGhShimHostWindowsLauncherPath(brokerStateFilePath),
+            content: buildWindowsLauncherSource(),
+          },
         ]
-      : [{ filePath: getGhShimHostNodeScriptPath(), content: source }];
+      : [{ filePath: getGhShimHostNodeScriptPath(brokerStateFilePath), content: source }];
 
   for (const { filePath, content } of shimTargets) {
     ensureParentDirForFile(filePath);
@@ -648,10 +940,23 @@ export const ensureGhShimScript = (): void => {
       writeIfChanged(filePath, content, 0o755);
     }
   }
+  const realGit = resolveExecutableFromPath(
+    'git',
+    path.join(getGhShimHostBinDir(brokerStateFilePath), 'git')
+  );
+  if (realGit)
+    ensureGitHubGitTransport(
+      getGhShimHostBinDir(brokerStateFilePath),
+      resolveBrokerStatePath(brokerStateFilePath),
+      realGit
+    );
 };
 
-export const prependGhShimBinDirToPath = (pathEnv: string | undefined): string => {
-  const shimBinDir = getGhShimHostBinDir();
+export const prependGhShimBinDirToPath = (
+  pathEnv: string | undefined,
+  brokerStateFilePath?: string
+): string => {
+  const shimBinDir = getGhShimHostBinDir(brokerStateFilePath);
   const entries = (pathEnv ?? '').split(path.delimiter).filter(Boolean);
   const shimComparableDir = toComparablePath(shimBinDir);
   const filtered = entries.filter((entry) => toComparablePath(entry) !== shimComparableDir);

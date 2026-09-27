@@ -434,6 +434,7 @@ function SessionConversationDiffPanelImpl({
   );
   const latestPrNumber = getPullRequestNumber(latestPr);
   const githubReviewComments = useGitHubReviewComments({
+    sessionId,
     workspaceId: currentWorkspaceId,
     repoFullName,
     prNumber: latestPrNumber,

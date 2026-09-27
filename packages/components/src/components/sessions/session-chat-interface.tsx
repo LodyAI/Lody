@@ -2373,6 +2373,7 @@ export const SessionChatInterface = memo(
     const prLinkHandler = latestPr ? openLatestPr : undefined;
     const preferredMergeMethod = usePreferredPrMergeMethod();
     const activePrDetails = useGitHubPrDetails({
+      sessionId: session.id,
       workspaceId,
       repoFullName: latestPrRepoFullName,
       prNumber: latestPrNumber,
