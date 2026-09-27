@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
+import { execFileSync } from 'child_process';
 import { SessionId } from '@lody/shared';
 import {
   buildGitHubCredentialConfigArgs,
@@ -74,15 +75,44 @@ describe('WorktreeManager', () => {
   });
 
   describe('git credential config', () => {
-    it('clears inherited helpers before installing the Lody helper', () => {
-      expect(buildGitHubCredentialConfigArgs('!node "/tmp/lody-helper.cjs"')).toEqual([
-        '-c',
-        'credential.helper=',
-        '-c',
-        'credential.helper=!node "/tmp/lody-helper.cjs"',
-        '-c',
-        'credential.useHttpPath=true',
-      ]);
+    it.each([
+      ['github.com', 'managed', 'owner/repo.git'],
+      ['git.example.com', 'native', undefined],
+    ])('isolates the GitHub helper from native credentials for %s', (host, username, repoPath) => {
+      const helper = (identity: string) =>
+        `!f() { printf 'username=${identity}\\npassword=synthetic-test-token\\n'; }; f`;
+      const output = execFileSync(
+        'git',
+        [
+          '-c',
+          'credential.helper=',
+          '-c',
+          `credential.helper=${helper('native')}`,
+          ...buildGitHubCredentialConfigArgs(helper('managed')),
+          'credential',
+          'fill',
+        ],
+        {
+          cwd: testDir,
+          encoding: 'utf8',
+          input: `protocol=https\nhost=${host}\npath=owner/repo.git\n\n`,
+          env: {
+            ...process.env,
+            GIT_CONFIG_NOSYSTEM: '1',
+            GIT_CONFIG_GLOBAL: path.join(testDir, 'unused-gitconfig'),
+            GIT_CONFIG_COUNT: '0',
+            GIT_TERMINAL_PROMPT: '0',
+          },
+        }
+      );
+      const credential = Object.fromEntries(
+        output
+          .trim()
+          .split('\n')
+          .map((line) => line.split('='))
+      );
+      expect(credential).toMatchObject({ protocol: 'https', host, username });
+      expect(credential.path).toBe(repoPath);
     });
   });
 

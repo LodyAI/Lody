@@ -27,4 +27,8 @@ credential helper。长期运行的原生 Agent 通过会话文件发现轮换�
 实现和确定性的策略、生成命令及原生 Git advertisement 测试已存在；修正后对标准 URL 支持范围的对抗式复审未发现剩余阻断项。
 未部署线上服务、未修改真实用户凭据。准备 ACP adapters 和 review assets 后，CLI bundle 构建也已通过。
 
+CI 发现一条过时的全局 helper 断言；现以原生 Git credential-fill 测试验证仅接管 GitHub，
+并保留其他 host 的 helper 链。桌面 PR E2E 改为检出 merge ref，使本地 action 与合并后的
+工作流配套，避免新工作流搭配旧 head 源码。
+
 PR：[#1034](https://github.com/LodyAI/Lody/pull/1034)。

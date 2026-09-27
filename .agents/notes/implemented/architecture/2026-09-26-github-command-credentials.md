@@ -34,4 +34,9 @@ remaining blocker after corrections. No live service
 deployment or real-user credential mutation has been performed. The CLI bundle
 also builds after preparing its ACP adapters and review assets.
 
+CI exposed an outdated global-helper assertion; native Git credential-fill tests
+now verify GitHub-only routing and preservation of other hosts' helper chains.
+Desktop PR E2E checks out the merge ref, keeping local actions aligned with the
+merged workflow instead of combining a new workflow with an older head tree.
+
 PR: [#1034](https://github.com/LodyAI/Lody/pull/1034).
