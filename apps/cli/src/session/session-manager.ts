@@ -1497,6 +1497,9 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
         config.agentConfigId,
         this.machineId
       );
+      if (config.codexAuth && !provider?.codexAuth) {
+        throw new Error('This Codex provider account is no longer available');
+      }
       if (provider?.codexAuth) {
         if (
           config.codexAuth &&

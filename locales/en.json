@@ -7,6 +7,7 @@
   "settings.agent.codex.enterKey": "Enter API Key",
   "settings.agent.codex.updateKey": "Update API Key",
   "settings.agent.codex.verifyingKey": "Verifying API Key",
+  "settings.agent.codex.boundChatgptAccount": "This provider is bound to its ChatGPT account. Add a new provider to use another account.",
   "sessions.markdownImage.load": "Load image",
   "sessions.markdownImage.loading": "Loading image…",
   "sessions.markdownImage.failed": "Image could not be loaded",

@@ -7,6 +7,7 @@
   "settings.agent.codex.enterKey": "输入 API Key",
   "settings.agent.codex.updateKey": "更新 API Key",
   "settings.agent.codex.verifyingKey": "正在验证 API Key",
+  "settings.agent.codex.boundChatgptAccount": "此提供商已绑定当前 ChatGPT 账户。若要使用其他账户，请添加新的提供商。",
   "sessions.markdownImage.load": "加载图片",
   "sessions.markdownImage.loading": "正在加载图片…",
   "sessions.markdownImage.failed": "图片加载失败",

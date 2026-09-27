@@ -46,6 +46,17 @@ the tombstone, then waits for all records to prove exit. Unknown processes delay
 credential cleanup only. Late exit proofs address their own host-generated token,
 never another process's record. Existing login-operation serialization is unchanged.
 
+A restored Session may carry a legacy `codexAuth` value. That value verifies the
+historical identity but cannot authorize a new native process: launch now requires
+the current Provider to retain the same managed binding. The local removal
+reconciler is asynchronous and cannot substitute for this check. New Sessions do
+not write per-Session launch configuration; the missing-Provider fallback already
+rejected their normal restore path, but it left legacy-bound restores exposed.
+The generic edit-dialog sign-in action also conflicted with immutable ChatGPT
+bindings: a ready profile is deliberately rejected by the daemon. Editing such a
+Provider now explains that another account needs a new Provider; initial login
+during creation and API key replacement retain their respective actions.
+
 Older daemons ignore unknown profile fields. A persisted NUL-containing
 `runtimeOverrides.codexPath` therefore makes old launch/login resolution fail before
 native auth can run; supported Flock readers remove only the exact marker while

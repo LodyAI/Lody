@@ -270,6 +270,57 @@ describe('AgentConfigDialog', () => {
     expect(saved).toEqual([]);
   });
 
+  it('shows the immutable account binding without a sign-in action for managed ChatGPT', async () => {
+    await renderDialog(
+      {
+        kind: 'edit',
+        config: {
+          id: 'managed-chatgpt' as AgentConfigId,
+          machineId,
+          name: 'Work Codex',
+          cliType: 'builtin',
+          agentType: 'codex',
+          env: {},
+          codexAuth: { mode: 'chatgpt', profileId: '937c8a40-0e27-4d44-9716-0eb60b26a195' },
+        },
+      },
+      createMachine('Workstation', { codexAuthProfiles: 1 })
+    );
+
+    expect(document.body.textContent).toContain(
+      'This provider is bound to its ChatGPT account. Add a new provider to use another account.'
+    );
+    expect(document.body.textContent).not.toContain('Sign in again');
+  });
+
+  it('keeps API key replacement available when editing a managed Codex endpoint', async () => {
+    await renderDialog(
+      {
+        kind: 'edit',
+        config: {
+          id: 'managed-api-key' as AgentConfigId,
+          machineId,
+          name: 'Relay Codex',
+          cliType: 'builtin',
+          agentType: 'codex',
+          env: {},
+          codexAuth: {
+            mode: 'api-key',
+            profileId: '3e332bd5-96ab-4d35-b9fc-9a965a1be42c',
+            baseUrl: 'https://relay.example.invalid/v1',
+          },
+        },
+      },
+      createMachine('Workstation', { codexAuthProfiles: 1 })
+    );
+
+    expect(
+      Array.from(document.body.querySelectorAll('button')).some(
+        (button) => button.textContent?.trim() === 'Update API Key'
+      )
+    ).toBe(true);
+  });
+
   it('shows managed Codex endpoint choices only for capable machines and never saves a key in the form', async () => {
     const saved: AgentConfigSubmitPayload[] = [];
     await renderDialog(

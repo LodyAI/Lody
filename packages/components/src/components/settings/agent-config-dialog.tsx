@@ -1713,15 +1713,18 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
   const usesProtocolAuthentication =
     usesAcpProtocolAuthentication(formData.cliType) &&
     machineSupportsAcpProtocolAuthentication(machine);
+  const boundChatgptCodex =
+    mode.kind === 'edit' && managedCodexForm && codexAuth?.mode === 'chatgpt';
   const showAuthenticationPanel =
     mode.kind === 'edit'
-      ? supportsBuiltinAuthentication({
+      ? !boundChatgptCodex &&
+        (supportsBuiltinAuthentication({
           cliType: formData.cliType,
           agentType: formData.agentType,
           brandId: resolvedBrandId,
           env: formData.env,
         }) ||
-        (authRequired && usesProtocolAuthentication)
+          (authRequired && usesProtocolAuthentication))
       : authRequired &&
         ((isManagedBuiltin && formData.agentType !== 'pi') || usesProtocolAuthentication);
   const builtinRuntimeOverrideKey =
@@ -3005,6 +3008,19 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
           )}
           {probeError && isBubBuiltin && <BubInstallGuide />}
 
+          {boundChatgptCodex ? (
+            <Field
+              label={t('settings.agent.dialog.section.account', 'Account')}
+              icon={<KeyRound aria-hidden="true" {...stylex.props(catalog.icon)} />}
+            >
+              <p {...stylex.props(styles.statusText)}>
+                {t(
+                  'settings.agent.codex.boundChatgptAccount',
+                  'This provider is bound to its ChatGPT account. Add a new provider to use another account.'
+                )}
+              </p>
+            </Field>
+          ) : null}
           {showAuthenticationPanel ? (
             <Field
               label={t('settings.agent.dialog.section.account', 'Account')}
