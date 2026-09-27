@@ -10,6 +10,8 @@ subdirectory; this file is the navigation index. Cross-module explanations live 
   shared Session title/Machine/Agent/Role filters.
 - `resource-discovery.ts` — readable directory projections, Role availability,
   sensitive-field exclusion and list/get behavior shared by MCP and CLI.
+  List inputs are validated here against resource-specific allowlists derived from
+  the shared query schema; the CLI only translates flags and resolves selectors.
 - `resource-discovery-runtime.ts` — synchronized workspace readers and caller-specific
   authorization; it supplies the existing workspace command runtime to the query service.
   Intent and limits: [resource discovery](../../../../specs/resource-discovery.md).

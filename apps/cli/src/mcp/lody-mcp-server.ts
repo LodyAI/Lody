@@ -38,7 +38,6 @@ import {
   shouldBypassSessionQuota,
   type LodySessionPresenceState,
   type LocalSessionControlRequest,
-  type AgentConfigMeta,
   type AgentRole,
   type LocalProjectMeta,
   type MachineId,
@@ -133,7 +132,7 @@ import { captureCli, initCliAnalytics } from '@/lib/analytics/posthog';
 import { registerDiscoveryTools } from './discovery-tools';
 import { createResourceDiscovery } from '@/lib/resource-discovery-runtime';
 import { getCliPlatformKind } from '@/lib/cli-platform';
-import { summarizeDiscoveryAgent } from '@/lib/resource-discovery';
+import { summarizeDiscoveryAgent as summarizeAgentConfig } from '@/lib/resource-discovery';
 import { SessionDiscoveryFilterShape, matchesSessionDiscovery } from '@/lib/discovery-query';
 
 const PREVIEW_TOOL_NAME = 'lody_report_preview_candidate';
@@ -2247,10 +2246,6 @@ const assertDifferentMcpSession = (
   if (source.id === target.id) {
     throw new Error('An MCP agent cannot send a chat prompt to its own active session.');
   }
-};
-
-const summarizeAgentConfig = (config: AgentConfigMeta, capability?: AcpCapabilityCacheEntry) => {
-  return summarizeDiscoveryAgent(config, capability);
 };
 
 /**

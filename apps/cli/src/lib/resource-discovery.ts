@@ -154,20 +154,19 @@ export class ResourceDiscovery {
       }));
     if (resource === 'project') {
       const rows: DiscoveryRow[] = [];
-      if (query.kind !== 'github')
-        for (const machine of authorized) {
-          for (const project of await source.projects(machine.id)) {
-            if (await source.canAccess(machine.id, project.id))
-              rows.push({
-                id: project.id,
-                name: project.name,
-                kind: 'local',
-                machineId: machine.id,
-                rootPath: project.rootPath,
-                availability: availability(machine.id),
-              });
-          }
+      for (const machine of authorized) {
+        for (const project of await source.projects(machine.id)) {
+          if (await source.canAccess(machine.id, project.id))
+            rows.push({
+              id: project.id,
+              name: project.name,
+              kind: 'local',
+              machineId: machine.id,
+              rootPath: project.rootPath,
+              availability: availability(machine.id),
+            });
         }
+      }
       if (query.kind !== 'local' && !query.machineId)
         for (const repo of await source.repositories()) {
           rows.push({
@@ -196,11 +195,14 @@ export class ResourceDiscovery {
         : undefined;
     };
     if (resource === 'agent_config')
-      return [...configs.values()].map((config) => ({
-        ...summarizeDiscoveryAgent(config, capabilityOf(config)),
-        availability: availability(config.machineId),
-        capabilityStatus: capabilityOf(config) ? 'reported' : 'unknown',
-      }));
+      return [...configs.values()].map((config) => {
+        const capability = capabilityOf(config);
+        return {
+          ...summarizeDiscoveryAgent(config, capability),
+          availability: availability(config.machineId),
+          capabilityStatus: capability ? 'reported' : 'unknown',
+        };
+      });
     return roles.map((role) => {
       const config = configs.get(role.agentConfigId);
       let state: DiscoveryAvailability;
@@ -267,9 +269,7 @@ export class ResourceDiscovery {
           row.description,
           typeof row.rootPath === 'string' ? row.rootPath : undefined
         ) &&
-        (!query.machineId ||
-          row.machineId === query.machineId ||
-          (resource === 'machine' && row.id === query.machineId)) &&
+        (!query.machineId || row.machineId === query.machineId) &&
         (!query.onlineStatus || row.onlineStatus === query.onlineStatus)
     );
     return {

@@ -16,27 +16,14 @@ export const DiscoveryQuerySchema = z
   })
   .strict();
 export type DiscoveryQuery = z.input<typeof DiscoveryQuerySchema>;
+const pageKeys = { query: true, limit: true, cursor: true } as const;
+const machineScopedListSchema = DiscoveryQuerySchema.pick({ ...pageKeys, machineId: true });
 export const ResourceListSchemas = {
-  machine: z
-    .object({
-      ...DiscoveryPageShape,
-      onlineStatus: z.enum(['online', 'offline', 'unknown']).optional(),
-    })
-    .strict(),
-  project: z
-    .object({
-      ...DiscoveryPageShape,
-      machineId: z.string().trim().min(1).optional(),
-      kind: z.enum(['local', 'github']).optional(),
-    })
-    .strict(),
-  agent_config: z
-    .object({ ...DiscoveryPageShape, machineId: z.string().trim().min(1).optional() })
-    .strict(),
-  agent_role: z
-    .object({ ...DiscoveryPageShape, machineId: z.string().trim().min(1).optional() })
-    .strict(),
-  mcp: z.object(DiscoveryPageShape).strict(),
+  machine: DiscoveryQuerySchema.pick({ ...pageKeys, onlineStatus: true }),
+  project: DiscoveryQuerySchema.pick({ ...pageKeys, machineId: true, kind: true }),
+  agent_config: machineScopedListSchema,
+  agent_role: machineScopedListSchema,
+  mcp: DiscoveryQuerySchema.pick(pageKeys),
 };
 export type DiscoveryPage<T> = { items: T[]; hasMore: boolean; nextCursor?: string };
 

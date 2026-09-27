@@ -2,7 +2,7 @@ import { Command } from 'commander';
 import type { WorkspaceId } from '@lody/shared';
 import { createResourceDiscovery } from '@/lib/resource-discovery-runtime';
 import type { DiscoveryResource, DiscoveryRow } from '@/lib/resource-discovery';
-import { DiscoveryQuerySchema, type DiscoveryQuery } from '@/lib/discovery-query';
+import type { DiscoveryQuery } from '@/lib/discovery-query';
 import {
   getAuthContextOrThrow,
   resolveWorkspaceOrThrow,
@@ -57,14 +57,14 @@ export async function runDiscoveryList(
       const machineId = options.machine
         ? await discovery.resolveMachine(options.machine)
         : undefined;
-      const query: DiscoveryQuery = DiscoveryQuerySchema.parse({
+      const query: DiscoveryQuery = {
         query: options.query,
         limit: options.limit,
         cursor: options.cursor,
         ...(machineId ? { machineId } : {}),
         ...(options.kind ? { kind: options.kind } : {}),
         ...(options.onlineStatus ? { onlineStatus: options.onlineStatus } : {}),
-      });
+      };
       let page = await discovery.list(resource, query);
       const items: DiscoveryRow[] = [...page.items];
       while (options.allPages && page.nextCursor) {
@@ -102,7 +102,7 @@ export async function runDiscoveryList(
   });
 }
 
-export function discoveryListCommand(resource: DiscoveryResource): Command {
+export function discoveryListCommand(resource: 'agent_config' | 'agent_role' | 'mcp'): Command {
   const command = addDiscoveryOptions(
     new Command('list')
       .description(`List readable ${resource} resources`)
@@ -111,11 +111,7 @@ export function discoveryListCommand(resource: DiscoveryResource): Command {
       .option('--json', 'Print JSON')
       .option('--debug', 'Enable debug output')
   );
-  if (['project', 'agent_config', 'agent_role'].includes(resource))
-    command.option('--machine <selector>', 'Machine id or name');
-  if (resource === 'project') command.option('--kind <kind>', 'local or github');
-  if (resource === 'machine')
-    command.option('--online-status <state>', 'online, offline or unknown');
+  if (resource !== 'mcp') command.option('--machine <selector>', 'Machine id or name');
   return command.action((options: DiscoveryCommandOptions) => runDiscoveryList(resource, options));
 }
 

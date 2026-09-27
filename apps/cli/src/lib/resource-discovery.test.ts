@@ -169,6 +169,72 @@ describe('resource discovery across MCP and CLI', () => {
     });
   });
 
+  it('filters Roles by their binding while retaining unavailable matches', async () => {
+    const discovery = new ResourceDiscovery(
+      source({ roles: async () => [role('one'), role('two', { machineId: 'two' as MachineId })] })
+    );
+    const page = await discovery.list('agent_role', { machineId: 'two' });
+    expect(page.items.map((row) => row.id)).toEqual(['two']);
+    expect(page.items[0]?.availability?.state).toBe('unavailable');
+  });
+
+  it('reads GitHub-only projects independently of the local machine catalog', async () => {
+    const discovery = new ResourceDiscovery(
+      source({
+        machines: async () => {
+          throw new Error('machine catalog unavailable');
+        },
+      })
+    );
+    expect((await discovery.list('project', { kind: 'github' })).items).toEqual([
+      {
+        id: 'synthetic/repo',
+        name: 'synthetic/repo',
+        kind: 'github',
+        repoFullName: 'synthetic/repo',
+      },
+    ]);
+  });
+
+  it('preserves mixed, local-only and machine-scoped project results', async () => {
+    const discovery = new ResourceDiscovery(source());
+    expect((await discovery.list('project')).items.map((row) => [row.kind, row.machineId])).toEqual(
+      [
+        ['github', undefined],
+        ['local', 'one'],
+        ['local', 'two'],
+      ]
+    );
+    expect(
+      (await discovery.list('project', { machineId: 'two' })).items.map((row) => [
+        row.kind,
+        row.machineId,
+      ])
+    ).toEqual([['local', 'two']]);
+  });
+
+  it('reports cached and missing agent capabilities and omits launch secrets', async () => {
+    const deps = source({
+      configs: async (id) =>
+        id === 'one'
+          ? [
+              { ...config('agent'), env: { TOKEN: 'synthetic-secret' } },
+              { ...config('unreported'), agentType: 'claude' },
+            ]
+          : [],
+    });
+    const page = await new ResourceDiscovery(deps).list('agent_config');
+    expect(page.items).toMatchObject([
+      {
+        id: 'agent',
+        capabilityStatus: 'reported',
+        runConfig: { models: [{ id: 'model', name: 'Model' }] },
+      },
+      { id: 'unreported', capabilityStatus: 'unknown', runConfig: { models: [] } },
+    ]);
+    expect(JSON.stringify(page)).not.toContain('synthetic-secret');
+  });
+
   it('omits MCP connection values and distinguishes unknown selection from an explicit empty selection', async () => {
     const servers = [
       {
@@ -217,11 +283,17 @@ describe('resource discovery across MCP and CLI', () => {
       const result = await client.callTool({ name: 'lody_machine_list', arguments: { limit: 1 } });
       const expected = await discovery.list('machine', { limit: 1 });
       expect(result.content).toEqual([{ type: 'text', text: JSON.stringify(expected) }]);
-      const invalid = await client.callTool({
-        name: 'lody_mcp_list',
-        arguments: { machineId: 'one' },
-      });
-      expect(invalid.isError).toBe(true);
+      for (const [resource, args] of [
+        ['machine', { machineId: 'one' }],
+        ['project', { onlineStatus: 'online' }],
+        ['agent_config', { kind: 'local' }],
+        ['agent_role', { onlineStatus: 'online' }],
+        ['mcp', { machineId: 'one' }],
+      ] as const) {
+        const invalid = await client.callTool({ name: `lody_${resource}_list`, arguments: args });
+        expect(invalid.isError, resource).toBe(true);
+        await expect(discovery.list(resource, args)).rejects.toThrow();
+      }
     } finally {
       await client.close();
       await server.close();
