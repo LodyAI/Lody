@@ -3,6 +3,8 @@
 Status: implemented
 Translation: current
 
+PR: [#1038](https://github.com/LodyAI/Lody/pull/1038)
+
 [中文](2026-09-27-mobile-new-chat-attachment-menu.zh.md)
 
 ## Abstract
