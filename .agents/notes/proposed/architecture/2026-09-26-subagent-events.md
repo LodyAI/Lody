@@ -121,6 +121,12 @@ renderer; the real tool/thought renderer still needs desktop/live-run verificati
 
 ### Remaining builtin adapters
 
+Companion draft PRs: [Claude #36](https://github.com/LodyAI/acp-extension-claude/pull/36),
+[Grok #23](https://github.com/LodyAI/acp-extension-grok/pull/23),
+[DSH #25](https://github.com/LodyAI/acp-extension-dsh/pull/25),
+[Kimi #18](https://github.com/LodyAI/acp-extension-kimi/pull/18), and
+[Pi #7](https://github.com/LodyAI/acp-extension-pi/pull/7).
+
 All new paths require bilateral v1 negotiation and preserve legacy clients. The
 existing host, persistence and UI need no provider-specific branches. Core's optional
 per-activation emitter handles fresh run IDs, terminal protection and partial snapshots;
@@ -144,8 +150,24 @@ and checksums. This phase changes no runtime pins, billing surface or UI code.
 
 Tests cover normalized payloads, legacy paths, nested ownership, execution reuse,
 late output and streaming history. No paid/live provider was executed in this phase.
-The full Kimi ACP suite encountered four existing skill-discovery test failures;
+The full Kimi ACP suite encountered four skill-discovery test failures (baseline cause unconfirmed);
 targeted event/interaction checks are reported separately, not as full-suite green.
+
+### Ablation of apparent redundancy
+
+Controlled deletions used the existing Core and Grok behavior suites, not source-text
+assertions. Removing Core's preliminary `get` in `start` preserves all 8 tests:
+`live` already performs that lookup and rejects missing or terminal runs. Grok's
+terminal status classification is now computed once for state and incompleteness;
+all 83 tests pass with explicit completed/failed/cancelled/unknown coverage.
+
+Two deletion candidates were rejected and restored. Removing Core's output liveness
+guard fails the retained-transcript assertion by admitting a late terminal output.
+Removing Grok's `turns`/`tool_calls` mappings fails the final-counter assertion;
+native progress and completion genuinely use different field names. The original
+Grok test omitted final counters, so it was extended before evaluating that deletion.
+The final Core build/typecheck and Grok syntax check pass. These are bounded
+equivalence checks, not proof of live-provider parity or a repository-wide audit.
 
 ### Source inventory
 

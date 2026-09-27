@@ -98,6 +98,12 @@ UI Designer 检查了亮色/暗色 Storybook 截图，但历史使用替身渲�
 
 ### 其余 builtin 扩展
 
+配套草稿 PR：[Claude #36](https://github.com/LodyAI/acp-extension-claude/pull/36)、
+[Grok #23](https://github.com/LodyAI/acp-extension-grok/pull/23)、
+[DSH #25](https://github.com/LodyAI/acp-extension-dsh/pull/25)、
+[Kimi #18](https://github.com/LodyAI/acp-extension-kimi/pull/18)、
+[Pi #7](https://github.com/LodyAI/acp-extension-pi/pull/7)。
+
 所有新路径都要求双方协商 v1，旧客户端行为不变。已有宿主、持久化及 UI 无需
 provider 分支。Core 提供可选的 activation 级发射器，处理新 run 身份、终态保护
 和部分 snapshot；原生顺序、订阅和父子归属仍由各扩展负责。
@@ -117,8 +123,21 @@ run 取消/补拉仍关闭，既有 taskId 接口不变。交互通过根 ACP �
 本轮不改 runtime pin、计费或 UI。
 
 测试覆盖规范载荷、旧路径、嵌套归属、执行复用、终态后输出和实时历史。本轮未
-执行付费/真实 provider。Kimi ACP 全套在既有 skill discovery 测试中出现四项失败；
+执行付费/真实 provider。Kimi ACP 全套在 skill discovery 测试中出现四项失败，尚未确认基线原因；
 定向事件/交互测试单独记录，不声称全套通过。
+
+### 疑似冗余的消融验证
+
+逐项删除后运行现有 Core 和 Grok 行为测试，不使用源码字符串断言。
+删除 Core `start` 中预先执行的 `get` 后，8 个测试全部通过：`live` 已经完成
+相同查询，并排除不存在或已终止的执行。Grok 的终态分类改为只计算一次，
+同时用于状态和不完整标记；补充完成、失败、取消、未知状态断言后，83 个测试通过。
+
+另外两项删除被否决并恢复。去掉 Core 输出的存活检查，会让迟到的终态输出进入
+历史，导致事件序列断言失败；去掉 Grok 的 `turns`/`tool_calls` 映射，会丢失最终
+计数。原生进度与结束事件确实使用不同字段名。原 Grok 测试未包含最终计数，
+因此先补充断言再评估删除。最终 Core 构建/类型检查和 Grok 语法检查通过。
+这些结论仅针对覆盖到的行为，不代表实机等价性或全仓库审计。
 
 ### 源码清单
 
