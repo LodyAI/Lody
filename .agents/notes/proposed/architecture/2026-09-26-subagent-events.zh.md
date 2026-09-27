@@ -59,7 +59,7 @@ transcript。用户已实测确认 Codex 首轮可用；其余 builtin 扩展已
 配套 PR：[Core 契约](https://github.com/LodyAI/acp-extension-core/pull/15)与
 [Codex 扩展](https://github.com/LodyAI/acp-extension-codex/pull/56)。
 宿主/UI PR：[Lody #996](https://github.com/LodyAI/Lody/pull/996)。
-独立发布 Codex 扩展前，需要先发布 Core 并更新对应依赖版本。
+独立扩展现已固定到已发布的 Core 0.1.9。
 
 用户要求先验证 Codex，再接入其他 provider。Core 所有 `_lody/subagents/event`
 校验及双向 v1 能力协商。Codex 复用现有原生路由，将重新使用的执行映射为新的
@@ -118,8 +118,11 @@ provider 分支。Core 提供可选的 activation 级发射器，处理新 run �
 
 run 取消/补拉仍关闭，既有 taskId 接口不变。交互通过根 ACP 连接并携带 run 归属
 和命名空间工具 ID；子历史工具保持原生 ID。Kimi、Pi 仍不加入根 workspace。
-测试在忽略的 node_modules 中临时链接本地 Core 构建；已发布的 Core 0.1.8 不含
-新导出。独立发布前必须发布 Core 并升级依赖；Kimi/Pi 还需新托管产物和校验和。
+初期测试因 Core 0.1.8 缺少导出而临时链接本地构建。六个扩展现已固定 Core 0.1.9，
+npm/pnpm 锁文件包含发布包完整性校验和及 ACP SDK 依赖。Kimi/Pi 的隔离安装已改用
+发布包。根工作区保留显式 Core workspace override；另外四个扩展也先使用独立安装
+的 0.1.9 验证，再恢复工作区链接。发布年龄例外仅允许 `acp-extension-core@0.1.9`。
+Pi 显式声明单包工作区，使锁文件独立于父工作区。Kimi/Pi 仍需新托管产物和校验和。
 本轮不改 runtime pin、计费或 UI。
 
 测试覆盖规范载荷、旧路径、嵌套归属、执行复用、终态后输出和实时历史。本轮未

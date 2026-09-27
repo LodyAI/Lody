@@ -74,7 +74,7 @@ the requirement to inspect execution details.
 Companion PRs: [Core contract](https://github.com/LodyAI/acp-extension-core/pull/15)
 and [Codex adapter](https://github.com/LodyAI/acp-extension-codex/pull/56).
 Host/UI PR: [Lody #996](https://github.com/LodyAI/Lody/pull/996).
-Standalone Codex release requires publishing Core and updating its dependency first.
+Standalone adapters now pin the published Core 0.1.9 dependency.
 
 The user requested Codex validation before other provider work. Core owns the
 `_lody/subagents/event` validator and bilateral v1 capability. Codex adapts its
@@ -143,10 +143,16 @@ adapters own native ordering, subscriptions and ancestry.
 Run-addressed cancellation/output reads remain disabled. Existing task-ID APIs
 are unchanged. Consent uses root ACP requests with run ownership and namespaced
 tool IDs; canonical child tools retain their native IDs. Kimi and Pi remain outside
-the root workspace graph. Their tests temporarily link the local Core build inside
-ignored node_modules; published Core 0.1.8 lacks these exports. Standalone publication
-requires a Core release and dependency update; Kimi/Pi also need new managed artifacts
-and checksums. This phase changes no runtime pins, billing surface or UI code.
+the root workspace graph. Initial tests used temporary local Core links because
+0.1.8 lacked the exports. All six adapters now pin published Core 0.1.9; npm/pnpm
+lockfiles include its registry integrity and ACP SDK dependency. Published-package
+validation replaces those links in the isolated Kimi/Pi installs. Root workspace
+consumers retain the explicit Core workspace override; the other four adapters were
+also checked against a separately installed 0.1.9 package before restoring that override.
+Release-age exceptions are restricted to `acp-extension-core@0.1.9`. Pi's explicit
+single-package workspace keeps its lockfile independent of the parent workspace.
+Kimi/Pi still need new managed artifacts and checksums. No runtime pins, billing
+surface or UI code change in this dependency update.
 
 Tests cover normalized payloads, legacy paths, nested ownership, execution reuse,
 late output and streaming history. No paid/live provider was executed in this phase.
