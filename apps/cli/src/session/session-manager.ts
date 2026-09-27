@@ -73,6 +73,7 @@ import {
 import type { CloudGithubTokenManager, CloudPort } from '@lody/platform';
 import { isDevEnv } from '@/utils/runtime-env';
 import {
+  buildCredentialHelperRuntimeEnv,
   buildCredentialHelperValueForHost,
   ensureCredentialHelperScript,
 } from '@/lib/git-credential-helper-script';
@@ -1591,6 +1592,9 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
 
     config.env = {
       ...sessionEnv,
+      // The helper command is `process.execPath`, so ACP git children need this flag
+      // to run the packaged desktop binary as Node.
+      ...buildCredentialHelperRuntimeEnv(),
       LODY_GIT_CRED_BROKER_URL: brokerUrl,
       LODY_GIT_CRED_BROKER_TOKEN: brokerEnv.token,
       // Keeps the helper's connection-refused fallback inside this workspace instead
