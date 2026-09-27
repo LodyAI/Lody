@@ -36,6 +36,8 @@ import {
   resolveBaseBranchPreference,
   resolveProjectGitHubRepo,
   getSessionRoomId,
+  type AcpCapabilityCacheEntry,
+  decideAcpCapabilityRefreshCache,
   getServerNow,
   SessionCreateRequestValidated,
   SessionHistoryInput,
@@ -62,7 +64,7 @@ import {
   serializeCustomAcpLaunchSpec,
 } from '@lody/shared';
 import type { ContentBlock } from '@agentclientprotocol/sdk';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import type { ModelInfo } from '@lody/shared';
 import { Cause, Data, Effect, Exit, Fiber, type Scope } from 'effect';
 import {
@@ -618,6 +620,18 @@ export type SessionExecutionServiceDeps = {
     modelReasoningEfforts?: Record<string, string[]>;
     capabilitySourceVersion?: string;
   }>;
+  /**
+   * The `capabilitySourceVersion` a probe would stamp right now, resolved without
+   * starting an agent. `undefined` when it cannot be known without that work, in
+   * which case the persisted entry is never reused.
+   */
+  resolveAcpCapabilitySourceVersion: (input: {
+    cliType: AgentConfigCliType;
+    agentType: string;
+    customAcp?: CustomAcpLaunchSpec;
+    runtimeOverrides?: BuiltinRuntimeOverrides;
+    env?: Record<string, string>;
+  }) => Promise<string | undefined>;
   /** Evict idle sessions if system memory is under pressure */
   evictForMemoryPressure: (excludeSessionId?: SessionId) => Promise<MemoryPressureEvictionResult>;
 };
@@ -779,6 +793,14 @@ export class SessionExecutionService {
   // a fresh CLI subprocess and wait a few seconds; running it twice in parallel
   // doubles process cost and races the final `updateAcpCapabilities` write.
   private readonly inFlightAcpRefresh = new Map<string, InFlightAcpRefreshEntry>();
+  /**
+   * Fingerprint of the launch inputs — env included — behind each capability
+   * entry this process wrote. Memory only, on purpose: the entry itself lives in
+   * the Machine Flock document, which syncs to the cloud, and even a hash of a
+   * token is a credential derivative a low-entropy token can be recovered from.
+   * An empty map after restart just means each config probes once.
+   */
+  private readonly acpCapabilityLaunchInputFingerprints = new Map<AgentConfigId, string>();
 
   // Coalesce concurrent install requests for the same agent so the user clicking
   // "download" twice (or a refresh racing an install) triggers a single download.
@@ -1700,6 +1722,14 @@ export class SessionExecutionService {
           requesterUserId: options.userId,
           inputConfig: options.inputConfig,
         };
+        const githubSession =
+          runtime.session ?? this.deps.sessionManager.getSession(options.sessionId);
+        if (githubSession)
+          await this.deps.sessionManager.refreshGhTokenForSession(
+            githubSession,
+            undefined,
+            options.userId
+          );
         // Provider acceptance hands the original dispatch forward. A later
         // user-owned steer turn must not cancel or reopen that responsibility.
         await this.settleVisibleTurn(runtime, 'handled', { force: true });
@@ -4576,9 +4606,6 @@ export class SessionExecutionService {
               project = self.resolveProjectFromMeta(meta, message.project?.branch);
             }
             const githubRepo = resolveProjectGitHubRepo(project);
-            if (!githubRepo) {
-              return undefined;
-            }
             yield* self.tryPromise(() =>
               traceAsync(
                 self.deps.logger,
@@ -5795,6 +5822,17 @@ export class SessionExecutionService {
         capabilities.goalActions,
         { sessionTitle: capabilities.sessionTitle }
       );
+      this.acpCapabilityLaunchInputFingerprints.set(
+        agentConfigId,
+        fingerprintAcpLaunchInputs({
+          configId: agentConfigId,
+          cliType: config.agentCliType,
+          agentType: config.agentType,
+          env: config.env,
+          customAcp: config.customAcp,
+          runtimeOverrides: config.runtimeOverrides,
+        })
+      );
     })().catch((error: unknown) => {
       this.deps.logger.debug(
         `[${session.sessionId}] Failed to update ACP capabilities from created session: ${formatErrorMessage(
@@ -5970,6 +6008,11 @@ export class SessionExecutionService {
             runtimeOverrides: config.runtimeOverrides,
             env: config.env,
             codexAuth: config.codexAuth,
+            // Authentication changes what the agent will advertise (models and
+            // config options gated on the account), and the persisted entry was
+            // stamped with the same launch inputs, so only a real probe can tell
+            // the caller whether the new credentials actually work.
+            force: true,
           },
           { signal: refreshController.signal }
         );
@@ -6089,10 +6132,26 @@ export class SessionExecutionService {
     );
 
     this.deps.logger.debug(
-      `[acp-capabilities] Refresh requested (cliType=${message.cliType} agentType=${message.agentType})`
+      `[acp-capabilities] Refresh requested (cliType=${message.cliType} agentType=${message.agentType} force=${message.force === true})`
     );
     if (options.signal?.aborted) {
       throw createAcpRefreshAbortError();
+    }
+
+    if (message.force !== true) {
+      let cached: AcpCapabilityCacheEntry | undefined;
+      try {
+        cached = await this.readFreshAcpCapabilityCacheEntry(message);
+      } catch (error) {
+        // Reading the entry opens the same Machine Flock document the probe would
+        // write back to, so a failure here is a failed refresh, reported the same
+        // way. Probing anyway would hide a broken document behind a process spawn.
+        return this.buildFailedAcpRefreshResponse(message, error);
+      }
+      if (cached) {
+        options.signal?.throwIfAborted();
+        return buildAcpCapabilitiesRefreshResponseFromCache(this.deps.machineId, message, cached);
+      }
     }
 
     let entry = this.inFlightAcpRefresh.get(dedupeKey);
@@ -6158,6 +6217,54 @@ export class SessionExecutionService {
         (error: unknown) => finish(() => reject(error))
       );
     });
+  }
+
+  /**
+   * The persisted entry when it still describes what a probe would return.
+   *
+   * A hit requires the exact `capabilitySourceVersion` the current launch inputs
+   * would produce, and that this process wrote the entry from the same launch
+   * inputs — env included, which the source version mostly does not cover — so
+   * editing a runtime override, a custom command, or any env value misses.
+   * Lookup failures propagate to the
+   * caller, which reports them as a failed refresh rather than probing: a broken
+   * Machine Flock document would fail the probe's write-back too.
+   */
+  private async readFreshAcpCapabilityCacheEntry(
+    message: ResolvedMachineAcpCapabilitiesRefreshRequest
+  ): Promise<AcpCapabilityCacheEntry | undefined> {
+    const expectedSourceVersion = await this.deps.resolveAcpCapabilitySourceVersion({
+      cliType: message.cliType,
+      agentType: message.agentType,
+      customAcp: message.customAcp,
+      runtimeOverrides: message.runtimeOverrides,
+      env: message.env,
+    });
+    const recordedFingerprint = this.acpCapabilityLaunchInputFingerprints.get(message.configId);
+    const decision = decideAcpCapabilityRefreshCache({
+      entry: await this.deps.workspaceDocument.getAcpCapabilities(
+        this.deps.machineId,
+        message.configId
+      ),
+      expectedSourceVersion,
+      launchInputs:
+        recordedFingerprint === undefined
+          ? 'unknown'
+          : recordedFingerprint === fingerprintAcpLaunchInputs(message)
+            ? 'matching'
+            : 'changed',
+      nowMs: getServerNow(),
+    });
+    if (!decision.hit) {
+      this.deps.logger.debug(
+        `[acp-capabilities] Cache miss (cliType=${message.cliType} agentType=${message.agentType} reason=${decision.reason})`
+      );
+      return undefined;
+    }
+    this.deps.logger.debug(
+      `[acp-capabilities] Served from cache without starting the agent (cliType=${message.cliType} agentType=${message.agentType} sourceVersion=${expectedSourceVersion})`
+    );
+    return decision.entry;
   }
 
   private async executeAcpRefresh(
@@ -6233,6 +6340,10 @@ export class SessionExecutionService {
         goalActions,
         { signal: options.signal, sessionTitle }
       );
+      this.acpCapabilityLaunchInputFingerprints.set(
+        message.configId,
+        fingerprintAcpLaunchInputs(message)
+      );
 
       return {
         type: 'machine/acp-capabilities-refresh_response',
@@ -6253,26 +6364,33 @@ export class SessionExecutionService {
         availableCommands,
       };
     } catch (error) {
-      const errorMessage = formatErrorMessage(error);
-      this.deps.logger.debug(
-        `[acp-capabilities] Refresh failed (cliType=${message.cliType} agentType=${message.agentType}): ${errorMessage}`
-      );
-      return {
-        type: 'machine/acp-capabilities-refresh_response',
-        machineId: this.deps.machineId,
-        configId: message.configId,
-        cliType: message.cliType,
-        agentType: message.agentType,
-        success: false,
-        ...(error instanceof AcpAuthenticationRequiredError
-          ? {
-              authRequired: true,
-              authMethods: error.authMethods.map(summarizeAcpAuthMethod),
-            }
-          : {}),
-        error: errorMessage,
-      };
+      return this.buildFailedAcpRefreshResponse(message, error);
     }
+  }
+
+  private buildFailedAcpRefreshResponse(
+    message: ResolvedMachineAcpCapabilitiesRefreshRequest,
+    error: unknown
+  ): MachineAcpCapabilitiesRefreshResponse {
+    const errorMessage = formatErrorMessage(error);
+    this.deps.logger.debug(
+      `[acp-capabilities] Refresh failed (cliType=${message.cliType} agentType=${message.agentType}): ${errorMessage}`
+    );
+    return {
+      type: 'machine/acp-capabilities-refresh_response',
+      machineId: this.deps.machineId,
+      configId: message.configId,
+      cliType: message.cliType,
+      agentType: message.agentType,
+      success: false,
+      ...(error instanceof AcpAuthenticationRequiredError
+        ? {
+            authRequired: true,
+            authMethods: error.authMethods.map(summarizeAcpAuthMethod),
+          }
+        : {}),
+      error: errorMessage,
+    };
   }
 
   private async emitBuiltinRuntimeStatusForRefresh(
@@ -6587,12 +6705,76 @@ export class SessionExecutionService {
   }
 }
 
+/**
+ * The refresh response a cache hit returns.
+ *
+ * It repeats the persisted entry rather than re-deriving anything, so a caller
+ * cannot tell a hit from a probe except by how fast it answered: the renderer
+ * writes `capability` straight into its Machine Flock rows either way.
+ */
+const buildAcpCapabilitiesRefreshResponseFromCache = (
+  machineId: MachineId,
+  message: ResolvedMachineAcpCapabilitiesRefreshRequest,
+  capability: AcpCapabilityCacheEntry
+): MachineAcpCapabilitiesRefreshResponse => ({
+  type: 'machine/acp-capabilities-refresh_response',
+  machineId,
+  configId: message.configId,
+  cliType: message.cliType,
+  agentType: message.agentType,
+  success: true,
+  modes: capability.modes.map((mode) => ({
+    id: mode.id,
+    name: mode.name,
+    description: mode.description ?? undefined,
+  })),
+  models: capability.models.map((model) => ({
+    modelId: model.modelId,
+    name: model.name ?? undefined,
+    description: model.description ?? undefined,
+  })),
+  configOptions: capability.configOptions?.map((option) => ({
+    id: option.id,
+    name: option.name,
+    category: option.category,
+    optionCount: option.options.length,
+  })),
+  capability,
+  availableCommands: capability.availableCommands,
+});
+
 const findRegistryAcpAgent = (agentType: string): RegistryAcpAgent | undefined =>
   REGISTRY_ACP_AGENTS.find((agent) => agent.id === agentType);
 
 // NUL separates field segments and \x01 separates env pairs so equivalent
 // env maps produce identical keys and ambiguous separators in values can't
 // collide. Env vars on POSIX cannot contain either control character.
+/**
+ * In-memory identity of everything a capability probe is launched with. Hashed
+ * only so the long-lived map does not retain another plaintext copy of the env;
+ * it is never persisted, synced, or logged.
+ */
+const fingerprintAcpLaunchInputs = (inputs: {
+  configId: AgentConfigId;
+  cliType: AgentConfigCliType;
+  agentType: string;
+  env?: Record<string, string>;
+  customAcp?: CustomAcpLaunchSpec;
+  runtimeOverrides?: BuiltinRuntimeOverrides;
+}): string =>
+  createHash('sha256')
+    .update(
+      computeAcpRefreshDedupeKey(
+        inputs.configId,
+        inputs.cliType,
+        inputs.agentType,
+        inputs.env,
+        inputs.customAcp,
+        inputs.runtimeOverrides
+      )
+    )
+    .digest('hex');
+
 const computeAcpRefreshDedupeKey = (
   configId: AgentConfigId,
   cliType: AgentConfigCliType,

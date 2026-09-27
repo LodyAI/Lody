@@ -1357,6 +1357,7 @@ export const MachineAcpCapabilitiesRefreshRequestSchema = z
     machineId: MachineIdSchema,
     workspaceId: WorkspaceIdSchema,
     configId: AgentConfigIdSchema,
+    force: z.boolean().optional(),
   })
   .strict();
 

@@ -66,6 +66,8 @@ import { MermaidFullscreenButton, useMermaidDiagramCanvas } from './use-mermaid-
 import { SessionReadonlyContext } from './session-readonly-context';
 import type { MarkdownAgentFileLinkMenuItem } from '@/hooks/use-session-file-actions';
 import { ContextMenu } from '@/ui/armed-overlays';
+import { MarkdownFileImage, MarkdownFileResourcesContext } from './markdown-file-image';
+import { resolveMarkdownImagePath } from '@/lib/session-file-open-target';
 
 export { createMarkdownMermaidConfig } from './markdown-mermaid';
 
@@ -975,6 +977,7 @@ const createMarkdownComponents = ({
 
 function ConversationMarkdownImage(props: MarkdownImageProps) {
   const readonly = useContext(SessionReadonlyContext);
+  const resources = useContext(MarkdownFileResourcesContext);
   // No workspace URI fetch is mounted for an anonymous publication.
   // Typed share images are handled separately through the manifest attachment reader.
   if (readonly) {
@@ -996,6 +999,13 @@ function ConversationMarkdownImage(props: MarkdownImageProps) {
         {props.alt || 'Image'}
       </span>
     );
+  }
+  if (
+    resources &&
+    typeof props.src === 'string' &&
+    resolveMarkdownImagePath(resources.documentPath, props.src) !== null
+  ) {
+    return <MarkdownFileImage src={props.src} alt={props.alt} />;
   }
   return <SizedMarkdownImage {...props} />;
 }

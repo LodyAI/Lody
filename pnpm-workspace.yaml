@@ -28,8 +28,8 @@ catalog:
   '@loro-dev/flock-wasm': ^0.4.3
   '@loro-dev/loro-cli': 0.6.0
   '@loro-dev/sqlite-riverrun': 0.2.0
-  '@loro-dev/streams-client': 0.7.0
-  '@loro-dev/streams-crdt': 0.15.1
+  '@loro-dev/streams-client': 0.8.0
+  '@loro-dev/streams-crdt': 0.16.0
   '@tanstack/react-router': ^1.127.9
   '@tanstack/react-router-devtools': ^1.127.9
   '@tanstack/router-plugin': ^1.127.9
@@ -79,6 +79,9 @@ minimumReleaseAge: 10080
 
 # Grandfather versions already locked on main; later releases remain quarantined.
 minimumReleaseAgeExclude:
+  # Explicit Streams upgrade; keep the exception limited to the reviewed release.
+  - '@loro-dev/streams-crdt@0.16.0'
+  - '@loro-dev/streams-client@0.8.0'
   # Adds the `remend` option the streaming Markdown renderer passes (lobehub/streamdown#5).
   - '@lobehub/streamdown@1.4.0'
   # Built-in runtime refresh, verified together with the pinned adapters.
@@ -171,6 +174,12 @@ packageExtensions:
   konsta@4.0.1:
     peerDependencies:
       react: '*'
+
+# loro-repo 0.20.0 declares ^0.15.0; its adapter APIs are compatible with
+# this reviewed release. Do not relax other packages or future Streams versions.
+peerDependencyRules:
+  allowedVersions:
+    'loro-repo@0.20.0>@loro-dev/streams-crdt': '0.16.0'
 
 packageManagerStrictVersion: true
 

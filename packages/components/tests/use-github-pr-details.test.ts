@@ -35,9 +35,27 @@ const convexAuthMock = vi.hoisted(() => ({
   },
 }));
 
+const identityMocks = vi.hoisted(() => ({
+  versions: null as null | {
+    identityPending?: boolean;
+    repositoryId?: number;
+    repoFullName?: string;
+  },
+  repair: vi.fn(async () => ({ resolved: false })),
+}));
+
+vi.mock('convex/react', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('convex/react')>()),
+  useMutation: () => identityMocks.repair,
+}));
+
+vi.mock('react-i18next', () => ({
+  useTranslation: () => ({ t: (_key: string, fallback: string) => fallback }),
+}));
+
 vi.mock('../src/hooks/use-recoverable-convex-query', () => ({
   usePublicConvexQuery: () => undefined,
-  useRecoverableConvexQuery: () => null,
+  useRecoverableConvexQuery: () => identityMocks.versions,
 }));
 
 vi.mock('../src/hooks/use-authenticated-convex', () => ({
@@ -238,6 +256,8 @@ describe('useGitHubPrDetails target isolation', () => {
   };
 
   beforeEach(() => {
+    identityMocks.versions = null;
+    identityMocks.repair.mockClear();
     currentResult = null;
     convexAuthMock.state = { isAuthenticated: true, isLoading: false };
     cacheMocks.readPrCacheEntry.mockImplementation(
@@ -293,6 +313,41 @@ describe('useGitHubPrDetails target isolation', () => {
     container = undefined;
     vi.useRealTimers();
     vi.clearAllMocks();
+  });
+
+  it('shows a blocked identity error and retries safe repair instead of loading forever', async () => {
+    identityMocks.versions = { identityPending: true };
+    const input = {
+      workspaceId: 'identity-ws',
+      sessionId: 'old-session',
+      repoFullName: 'org/repo',
+      prNumber: 7,
+    };
+    await renderHook(input);
+    expect(currentResult?.state).toBe('error');
+    expect(currentResult?.data).toBeNull();
+    expect(currentResult?.error?.message).toContain('repository identity');
+    expect(githubMocks.githubFetchPullRequestDetails).not.toHaveBeenCalled();
+    await act(async () => {
+      await currentResult?.refresh();
+    });
+    expect(identityMocks.repair).toHaveBeenCalledWith(input);
+    identityMocks.versions = { identityPending: false, repositoryId: 99, repoFullName: 'org/repo' };
+    await renderHook(input);
+    await waitForResult((result) => result.state === 'ready');
+    expect(currentResult?.error).toBeNull();
+  });
+
+  it('does not fall back to a session name when its identity query returns null', async () => {
+    await renderHook({
+      workspaceId: 'ws-null',
+      sessionId: 'missing',
+      repoFullName: 'org/reused',
+      prNumber: 7,
+    });
+    expect(currentResult?.state).toBe('error');
+    expect(currentResult?.data).toBeNull();
+    expect(githubMocks.githubFetchPullRequestDetails).not.toHaveBeenCalled();
   });
 
   it('sends one request when two views of the same PR refresh together', async () => {

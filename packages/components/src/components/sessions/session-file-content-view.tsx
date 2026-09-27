@@ -62,6 +62,7 @@ import { normalizePinnedProviderOpenResult } from '@/lib/session-file-provider-o
 import { SessionFileBinaryPreview } from './session-file-binary-preview';
 import { SessionFileImagePreview } from './session-file-image-preview';
 import { MarkdownRenderer } from '../ai-gui/markdown-renderer';
+import { MarkdownFileResources } from '../ai-gui/markdown-file-image';
 import { isSvgPath } from '@/lib/image-file-preview';
 import { logCodeCollabDebug } from '@/lib/code-collab-debug';
 import {
@@ -1139,7 +1140,19 @@ function SessionFileContentViewImpl({
       className="mx-auto w-full max-w-3xl px-3 py-3 select-text sm:px-4 sm:py-4"
       data-native-selection-allow
     >
-      <MarkdownRenderer text={markdownPreviewText} size={conversationFontSize} />
+      {fileProvider ? (
+        <MarkdownFileResources
+          key={`${session.machineId}:${sessionId}`}
+          provider={fileProvider}
+          documentPath={providerEntry?.path ?? normalizedPath}
+          automatic={Boolean(sessionFileActions.localHost)}
+          active={isActiveSurface && showMarkdownRendered}
+        >
+          <MarkdownRenderer text={markdownPreviewText} size={conversationFontSize} />
+        </MarkdownFileResources>
+      ) : (
+        <MarkdownRenderer text={markdownPreviewText} size={conversationFontSize} />
+      )}
     </div>
   ) : isSvgTextFile && data.status === 'ready' && data.snapshot.kind === 'text' ? (
     <SessionFileImagePreview path={normalizedPath} svgText={data.snapshot.text} />

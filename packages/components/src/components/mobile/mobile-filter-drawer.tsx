@@ -394,7 +394,7 @@ function DimensionPage({ pill, onBack }: { pill: MultiSelectPill; onBack: () => 
               spellCheck={false}
               className={cn(
                 'min-w-0 flex-1 border-none bg-transparent text-sm outline-none',
-                'focus:outline-none focus:ring-0 placeholder:text-muted-foreground'
+                'focus:outline-none focus:ring-0 focus-visible:shadow-none placeholder:text-muted-foreground'
               )}
             />
           </div>

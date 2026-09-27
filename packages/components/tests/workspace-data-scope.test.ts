@@ -26,7 +26,11 @@ describe('resolveWorkspaceDataScope', () => {
         organizationsReady: false,
         expectedWorkspaceId: null,
       })
-    ).toEqual({ status: 'switching', targetSlug: 'workspace-b' });
+    ).toEqual({
+      status: 'switching',
+      targetSlug: 'workspace-b',
+      blocker: 'runtime_other_workspace',
+    });
   });
 
   it('rejects metadata owned by an earlier runtime with the same target slug', () => {
@@ -41,7 +45,7 @@ describe('resolveWorkspaceDataScope', () => {
         organizationsReady: true,
         expectedWorkspaceId: 'workspace-b-id',
       })
-    ).toEqual({ status: 'switching', targetSlug: 'workspace-b' });
+    ).toEqual({ status: 'switching', targetSlug: 'workspace-b', blocker: 'doc_meta_scan_pending' });
   });
 
   it('rejects a matching snapshot until its bootstrap is ready', () => {
@@ -55,7 +59,7 @@ describe('resolveWorkspaceDataScope', () => {
         organizationsReady: true,
         expectedWorkspaceId: 'workspace-b-id',
       })
-    ).toEqual({ status: 'switching', targetSlug: 'workspace-b' });
+    ).toEqual({ status: 'switching', targetSlug: 'workspace-b', blocker: 'doc_meta_scan_pending' });
   });
 
   it('allows an offline cached runtime without waiting for organizations', () => {
@@ -88,6 +92,33 @@ describe('resolveWorkspaceDataScope', () => {
         organizationsReady: true,
         expectedWorkspaceId: 'server-workspace-b-id',
       })
-    ).toEqual({ status: 'switching', targetSlug: 'workspace-b' });
+    ).toEqual({ status: 'switching', targetSlug: 'workspace-b', blocker: 'workspace_id_mismatch' });
+  });
+
+  it('names each remaining reason the scope is held back', () => {
+    const runtime = createRuntime('workspace-b', 'workspace-b-id');
+    const resolve = (overrides: Partial<Parameters<typeof resolveWorkspaceDataScope>[0]>) =>
+      resolveWorkspaceDataScope({
+        targetSlug: 'workspace-b',
+        runtime,
+        docMetaScope: createDocMetaScope(runtime),
+        organizationsReady: true,
+        expectedWorkspaceId: 'workspace-b-id',
+        ...overrides,
+      });
+
+    expect(resolve({ runtime: null })).toMatchObject({ blocker: 'runtime_missing' });
+    expect(resolve({ docMetaScope: null })).toMatchObject({ blocker: 'doc_meta_scan_pending' });
+    expect(
+      resolve({
+        docMetaScope: {
+          ...createDocMetaScope(runtime, false),
+          scanFailure: { errorType: 'TypeError' },
+        },
+      })
+    ).toMatchObject({ blocker: 'doc_meta_scan_failed' });
+    expect(resolve({ expectedWorkspaceId: null })).toMatchObject({
+      blocker: 'workspace_not_in_organizations',
+    });
   });
 });

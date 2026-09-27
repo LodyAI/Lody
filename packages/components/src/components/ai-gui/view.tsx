@@ -1,3 +1,6 @@
+import * as stylex from '@stylexjs/stylex';
+import { space } from '@lody/ui/tokens/scales.stylex';
+import { writeTextToClipboard } from '@/lib/clipboard';
 import {
   type ComponentPropsWithoutRef,
   type ComponentType,
@@ -233,7 +236,10 @@ import { ContainerQueryProvider } from './container-query-provider';
 import { ScheduleProposalNotice } from '@/components/schedules/schedule-proposal-notice';
 import { shouldRenderSystemRowItem } from './message-content-guards';
 import { getChatFailedDiagnosticCopy } from './chat-failed-diagnostic-copy';
-import { extractReadableChatFailedMessage } from './chat-failed-error-report';
+import {
+  buildChatFailedErrorReport,
+  extractReadableChatFailedMessage,
+} from './chat-failed-error-report';
 import { DEFAULT_CONVERSATION_FONT_SIZE, type ConversationFontSize } from '@/atoms/settings';
 import {
   conversationMonoFontSizeStyle,
@@ -2653,6 +2659,10 @@ const DashedNoticeRule = () => (
   />
 );
 
+const noticeStyles = stylex.create({
+  footer: { paddingInline: space[2], paddingBottom: space[2] },
+});
+
 /**
  * Renders a single system notice as a divider with tooltip
  */
@@ -2676,11 +2686,13 @@ const AgentNoticeBanner = ({
   label,
   detail,
   action,
+  footer,
 }: {
   tone: 'error' | 'warning' | 'muted';
   label: string;
   detail?: string;
   action?: ReactNode;
+  footer?: ReactNode;
 }) => {
   // Error is a cross, warning a triangle, muted an info circle — an octagon
   // with an exclamation inside still read as "notice" at 14px.
@@ -2734,6 +2746,7 @@ const AgentNoticeBanner = ({
           </span>
         </div>
       ) : null}
+      {footer ? <div {...stylex.props(noticeStyles.footer)}>{footer}</div> : null}
     </div>
   );
 };
@@ -3089,9 +3102,25 @@ const ChatFailedNoticeView = ({
       </button>
     ) : null;
 
-  // Same banner as the agent warning; only the tone and the "more" path differ.
-  // A raw provider payload is a document, so it opens the report dialog instead
-  // of unfolding, and the clipboard gets the untouched text.
+  const handleCopyError = async () => {
+    const report = buildChatFailedErrorReport({
+      title: reasonMessage,
+      action: actionMessage,
+      reason: meta?.reason,
+      code: meta?.code,
+      message: rawMessage,
+      sessionId,
+      agentType: sessionMeta?.agentType,
+      machineId: sessionMeta?.machineId,
+    });
+    if (await writeTextToClipboard(report)) {
+      toast.success(t('common.copied', 'Copied'));
+    } else {
+      toast.error(t('sessions.systemNotices.chatFailed.copyFailed', 'Failed to copy error'));
+    }
+  };
+
+  // Keep copy visible on touch screens, separately from the capacity retry action.
   const noticeRow = (
     <AgentNoticeBanner
       tone={isProviderOverloaded ? 'muted' : 'error'}
@@ -3103,6 +3132,12 @@ const ChatFailedNoticeView = ({
           .join('\n\n') || undefined
       }
       action={retryAction}
+      footer={
+        <Button variant="ghost" size="medium" onClick={() => void handleCopyError()}>
+          <Copy size={14} aria-hidden="true" />
+          {t('sessions.systemNotices.chatFailed.copyError', 'Copy error')}
+        </Button>
+      }
     />
   );
 
@@ -5287,34 +5322,6 @@ type GoalMessage = Extract<MessageContent, { type: 'goal' }>;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
-
-const writeTextToClipboard = async (text: string): Promise<boolean> => {
-  if (!text.trim()) return false;
-
-  try {
-    await navigator.clipboard.writeText(text);
-    return true;
-  } catch {
-    try {
-      const el = document.createElement('textarea');
-      el.value = text;
-      el.style.position = 'fixed';
-      el.style.top = '0';
-      el.style.left = '0';
-      el.style.width = '1px';
-      el.style.height = '1px';
-      el.style.opacity = '0';
-      document.body.appendChild(el);
-      el.focus();
-      el.select();
-      const ok = document.execCommand('copy');
-      document.body.removeChild(el);
-      return ok;
-    } catch {
-      return false;
-    }
-  }
-};
 
 const formatJsonValue = (value: unknown) => {
   try {

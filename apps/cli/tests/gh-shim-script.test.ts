@@ -1,343 +1,243 @@
-import { spawn } from 'child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
-import http from 'http';
-import os from 'os';
-import path from 'path';
+import { EventEmitter } from 'node:events';
+import * as fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import crypto from 'node:crypto';
+import vm from 'node:vm';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-
 import {
   ensureGhShimScript,
   getGhShimHostBinDir,
   getGhShimHostPath,
 } from '../src/lib/gh-shim-script';
-import {
-  getGhTokenFingerprint,
-  LODY_MANAGED_GH_TOKEN_SHA256_ENV,
-} from '../src/lib/gh-token-injector';
 
-let tempHomeDir: string | null = null;
-let fakeBinDir: string | null = null;
-let tokenBroker: http.Server | null = null;
-let brokerRequestCount = 0;
-
-const originalPath = process.env.PATH ?? '';
-// Full workspace test runs can heavily delay Node child startup/close on CI.
-const SHIM_INTEGRATION_TIMEOUT_MS = 150_000;
-const SHIM_CHILD_TIMEOUT_MS = 120_000;
-
+let directory: string;
+let statePath: string;
 beforeEach(() => {
-  tempHomeDir = mkdtempSync(path.join(os.tmpdir(), 'lody-gh-shim-home-'));
-  fakeBinDir = mkdtempSync(path.join(os.tmpdir(), 'lody-gh-shim-bin-'));
-  vi.spyOn(os, 'homedir').mockReturnValue(tempHomeDir);
-  vi.stubEnv('PATH', `${fakeBinDir}${path.delimiter}${originalPath}`);
-  brokerRequestCount = 0;
-
-  writeFakeGh(
-    `#!/bin/sh
-if [ "$1" = "auth" ] && [ "$2" = "status" ]; then
-  if [ "$FAKE_GH_AUTHED" = "1" ]; then
-    exit 0
-  fi
-  exit 1
-fi
-if [ "$1" = "print-token" ]; then
-  printf 'GH_TOKEN=%s\\n' "\${GH_TOKEN:-}"
-  printf 'GITHUB_TOKEN=%s\\n' "\${GITHUB_TOKEN:-}"
-  printf 'MARKER=%s\\n' "\${${LODY_MANAGED_GH_TOKEN_SHA256_ENV}:-}"
-  exit 0
-fi
-printf '%s\\n' "$*"
-`
-  );
+  directory = fs.mkdtempSync(path.join(os.tmpdir(), 'lody-gh-policy-'));
+  vi.spyOn(os, 'homedir').mockReturnValue(directory);
+  vi.stubEnv('LODY_DATA_DIR', directory);
+  statePath = path.join(directory, 'workspace-broker.json');
+  ensureGhShimScript(statePath);
 });
-
-afterEach(async () => {
-  vi.unstubAllEnvs();
+afterEach(() => {
   vi.restoreAllMocks();
-  if (tokenBroker) {
-    await new Promise<void>((resolve) => tokenBroker?.close(() => resolve()));
-    tokenBroker = null;
-  }
-  if (tempHomeDir) {
-    rmSync(tempHomeDir, { recursive: true, force: true });
-    tempHomeDir = null;
-  }
-  if (fakeBinDir) {
-    rmSync(fakeBinDir, { recursive: true, force: true });
-    fakeBinDir = null;
-  }
+  vi.unstubAllEnvs();
+  fs.rmSync(directory, { recursive: true, force: true });
 });
 
-describe('ensureGhShimScript', () => {
-  it('generates a gh wrapper without PR association behavior', () => {
-    ensureGhShimScript();
-
-    const source = readFileSync(getGhShimHostPath(), 'utf8');
-
-    expect(source).toContain('/github-token');
-    expect(source).not.toContain('associatePullRequestForCli');
-    expect(source).not.toContain('pr create');
+function harness(
+  options: {
+    owner?: boolean;
+    personal?: boolean;
+    env?: Record<string, string>;
+    localToken?: string;
+    remote?: string;
+    status?: number;
+    permissions?: { push?: boolean; admin?: boolean };
+  } = {}
+) {
+  const calls: Array<{ path: string; body: Record<string, unknown> }> = [];
+  const actual: Array<string[]> = [];
+  const spawn = vi.fn((_command: string, args: string[]) => {
+    const child = Object.assign(new EventEmitter(), {
+      stdout: new EventEmitter(),
+      stderr: new EventEmitter(),
+      kill: vi.fn(),
+    });
+    queueMicrotask(() => {
+      let status = 0;
+      if (args[0] === 'remote')
+        child.stdout.emit('data', options.remote ?? 'git@github.com:cwd/project.git');
+      else if (args[0] === 'auth' && args[1] === 'token') {
+        if (options.localToken) child.stdout.emit('data', options.localToken);
+        else status = 1;
+      } else actual.push(args);
+      child.emit('close', status);
+    });
+    return child;
   });
-
-  it('generates a Windows gh.cmd launcher that points at the Node shim', () => {
-    const restorePlatform = setPlatformForTest('win32');
-    try {
-      writeFakeGhNamed('gh.cmd', '@echo off\r\n');
-      ensureGhShimScript();
-
-      const launcherPath = getGhShimHostPath();
-      const launcherSource = readFileSync(launcherPath, 'utf8');
-      const nodeShimPath = path.join(getGhShimHostBinDir(), 'gh');
-      const nodeShimSource = readFileSync(nodeShimPath, 'utf8');
-
-      expect(launcherPath).toMatch(/gh\.cmd$/i);
-      expect(launcherSource).toContain(process.execPath);
-      expect(launcherSource).toContain('%~dp0gh');
-      expect(nodeShimSource).toContain('/github-token');
-      expect(nodeShimSource).toContain(path.join(fakeBinDir!, 'gh.cmd'));
-    } finally {
-      restorePlatform();
-    }
-  });
-
-  it(
-    'fetches a fresh installation token when the session has no gh auth',
-    async () => {
-      const broker = await startTokenBroker('installation-token');
-      ensureGhShimScript();
-
-      const result = await runShim({
-        LODY_GIT_CRED_BROKER_URL: broker.url,
-        LODY_GIT_CRED_BROKER_TOKEN: broker.authToken,
-        LODY_GITHUB_REPO_FULL_NAME: 'loro-dev/lody',
-      });
-
-      expect(result.status).toBe(0);
-      expect(result.stdout).toContain('GH_TOKEN=installation-token');
-      expect(result.stdout).toContain('GITHUB_TOKEN=installation-token');
-      expect(brokerRequestCount).toBe(1);
-    },
-    SHIM_INTEGRATION_TIMEOUT_MS
-  );
-
-  it(
-    'preserves a user-provided GH_TOKEN and does not call the broker',
-    async () => {
-      const broker = await startTokenBroker('installation-token');
-      ensureGhShimScript();
-
-      const result = await runShim({
-        GH_TOKEN: 'user-token',
-        LODY_GIT_CRED_BROKER_URL: broker.url,
-        LODY_GIT_CRED_BROKER_TOKEN: broker.authToken,
-        LODY_GITHUB_REPO_FULL_NAME: 'loro-dev/lody',
-      });
-
-      expect(result.status).toBe(0);
-      expect(result.stdout).toContain('GH_TOKEN=user-token');
-      expect(result.stdout).toContain('GITHUB_TOKEN=');
-      expect(brokerRequestCount).toBe(0);
-    },
-    SHIM_INTEGRATION_TIMEOUT_MS
-  );
-
-  it(
-    'clears a managed GH_TOKEN while preserving a user-provided GITHUB_TOKEN',
-    async () => {
-      const broker = await startTokenBroker('installation-token');
-      const managedToken = 'old-lody-token';
-      ensureGhShimScript();
-
-      const result = await runShim({
-        GH_TOKEN: managedToken,
-        GITHUB_TOKEN: 'user-github-token',
-        [LODY_MANAGED_GH_TOKEN_SHA256_ENV]: getGhTokenFingerprint(managedToken),
-        LODY_GIT_CRED_BROKER_URL: broker.url,
-        LODY_GIT_CRED_BROKER_TOKEN: broker.authToken,
-        LODY_GITHUB_REPO_FULL_NAME: 'loro-dev/lody',
-      });
-
-      expect(result.status).toBe(0);
-      expect(result.stdout).toContain('GH_TOKEN=');
-      expect(result.stdout).toContain('GITHUB_TOKEN=user-github-token');
-      expect(result.stdout).not.toContain(managedToken);
-      expect(brokerRequestCount).toBe(0);
-    },
-    SHIM_INTEGRATION_TIMEOUT_MS
-  );
-
-  it(
-    'uses the broker token before ambient gh auth for managed repo sessions',
-    async () => {
-      const broker = await startTokenBroker('installation-token');
-      const managedToken = 'old-lody-token';
-      ensureGhShimScript();
-
-      const result = await runShim({
-        FAKE_GH_AUTHED: '1',
-        GH_TOKEN: managedToken,
-        [LODY_MANAGED_GH_TOKEN_SHA256_ENV]: getGhTokenFingerprint(managedToken),
-        LODY_GIT_CRED_BROKER_URL: broker.url,
-        LODY_GIT_CRED_BROKER_TOKEN: broker.authToken,
-        LODY_GITHUB_REPO_FULL_NAME: 'loro-dev/lody',
-      });
-
-      expect(result.status).toBe(0);
-      expect(result.stdout).toContain('GH_TOKEN=installation-token');
-      expect(result.stdout).toContain('GITHUB_TOKEN=installation-token');
-      expect(result.stdout).not.toContain(managedToken);
-      expect(brokerRequestCount).toBe(1);
-    },
-    SHIM_INTEGRATION_TIMEOUT_MS
-  );
-
-  it(
-    'clears stale managed tokens when the broker rejects the requester context',
-    async () => {
-      const broker = await startTokenBroker('ignored-token', { status: 403 });
-      const managedToken = 'old-lody-token';
-      ensureGhShimScript();
-
-      const result = await runShim({
-        GH_TOKEN: managedToken,
-        [LODY_MANAGED_GH_TOKEN_SHA256_ENV]: getGhTokenFingerprint(managedToken),
-        LODY_GIT_CRED_BROKER_URL: broker.url,
-        LODY_GIT_CRED_BROKER_TOKEN: broker.authToken,
-        LODY_GIT_CRED_CONTEXT_TOKEN: 'stale-context',
-        LODY_GITHUB_REPO_FULL_NAME: 'loro-dev/lody',
-      });
-
-      expect(result.status).toBe(0);
-      expect(result.stdout).toContain('GH_TOKEN=');
-      expect(result.stdout).toContain('GITHUB_TOKEN=');
-      expect(result.stdout).not.toContain(managedToken);
-      expect(brokerRequestCount).toBe(1);
-    },
-    SHIM_INTEGRATION_TIMEOUT_MS
-  );
-});
-
-const writeFakeGh = (source: string): void => {
-  writeFakeGhNamed('gh', source);
-};
-
-const writeFakeGhNamed = (name: string, source: string): void => {
-  if (!fakeBinDir) {
-    throw new Error('fakeBinDir is not initialized');
-  }
-  writeFileSync(path.join(fakeBinDir, name), source, { encoding: 'utf8', mode: 0o755 });
-};
-
-const setPlatformForTest = (platform: NodeJS.Platform): (() => void) => {
-  const originalPlatform = process.platform;
-  Object.defineProperty(process, 'platform', { value: platform });
-  return () => {
-    Object.defineProperty(process, 'platform', { value: originalPlatform });
-  };
-};
-
-const runShim = async (
-  env: Record<string, string>
-): Promise<{ status: number | null; stdout: string; stderr: string }> => {
-  const shimPath = getGhShimHostPath();
-  const shimBinDir = getGhShimHostBinDir();
-  if (!fakeBinDir) {
-    throw new Error('fakeBinDir is not initialized');
-  }
-  if (!tempHomeDir) {
-    throw new Error('tempHomeDir is not initialized');
-  }
-
-  const childEnv: NodeJS.ProcessEnv = {
-    HOME: tempHomeDir,
-    PATH: [shimBinDir, fakeBinDir, path.dirname(process.execPath)].join(path.delimiter),
-  };
-  if (process.platform === 'win32') {
-    childEnv.USERPROFILE = tempHomeDir;
-    childEnv.SystemRoot = process.env.SystemRoot;
-    childEnv.ComSpec = process.env.ComSpec;
-    childEnv.PATHEXT = process.env.PATHEXT;
-  }
-  Object.assign(childEnv, env);
-
-  const child = spawn(process.execPath, [shimPath, 'print-token'], {
-    env: childEnv,
-  });
-
-  let stdout = '';
-  let stderr = '';
-  child.stdout.setEncoding('utf8');
-  child.stderr.setEncoding('utf8');
-  child.stdout.on('data', (chunk: string) => {
-    stdout += chunk;
-  });
-  child.stderr.on('data', (chunk: string) => {
-    stderr += chunk;
-  });
-
-  const status = await new Promise<number | null>((resolve, reject) => {
-    let settled = false;
-    const finish = (callback: () => void): void => {
-      if (settled) {
-        return;
-      }
-      settled = true;
-      clearTimeout(timeout);
-      callback();
+  const fetch = vi.fn(async (url: string, init: { body?: string }) => {
+    if (url.startsWith('https://api.github.com/'))
+      return {
+        ok: (options.status ?? 200) === 200,
+        status: options.status ?? 200,
+        json: async () => ({ permissions: options.permissions ?? { push: false } }),
+      };
+    const endpoint = new URL(url).pathname;
+    const body = JSON.parse(init.body ?? '{}');
+    calls.push({ path: endpoint, body });
+    if (endpoint === '/github-auth-context')
+      return {
+        ok: true,
+        json: async () => ({
+          allowLocalAuth: options.owner ?? true,
+          personalEnabled: options.personal ?? false,
+        }),
+      };
+    return {
+      ok: true,
+      json: async () => ({
+        token: body.source + ':' + body.repoFullName,
+        tokenSource: body.source,
+        available: true,
+      }),
     };
-    const timeout = setTimeout(() => {
-      child.kill('SIGTERM');
-      finish(() =>
-        reject(
-          new Error(
-            `gh shim did not exit within ${SHIM_CHILD_TIMEOUT_MS}ms\nstdout:\n${stdout}\nstderr:\n${stderr}`
-          )
-        )
-      );
-    }, SHIM_CHILD_TIMEOUT_MS);
-
-    child.on('error', (error) => finish(() => reject(error)));
-    child.on('close', (code) => finish(() => resolve(code)));
   });
-  return { status, stdout, stderr };
-};
-
-const startTokenBroker = async (
-  token: string,
-  options?: { status?: number }
-): Promise<{ url: string; authToken: string }> => {
-  const authToken = 'broker-auth-token';
-  tokenBroker = http.createServer((req, res) => {
-    req.resume();
-    res.setHeader('Connection', 'close');
-    if (req.method !== 'POST' || req.url !== '/github-token') {
-      res.writeHead(404);
-      res.end();
-      return;
-    }
-    if (req.headers.authorization !== `Bearer ${authToken}`) {
-      res.writeHead(401);
-      res.end();
-      return;
-    }
-    brokerRequestCount += 1;
-    if (options?.status && options.status !== 200) {
-      res.writeHead(options.status, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: 'invalid_context' }));
-      return;
-    }
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ token }));
+  const source = fs
+    .readFileSync(getGhShimHostPath(statePath), 'utf8')
+    .replace(/main\(\)\.catch\([\s\S]*$/, 'globalThis.build = buildGhEnv;');
+  const context = vm.createContext({
+    require: (name: string) => {
+      if (name === 'child_process') return { spawn };
+      if (name === 'fs')
+        return {
+          ...fs,
+          accessSync: () => {},
+          statSync: () => ({ isFile: () => true }),
+          realpathSync: { native: (p: string) => p },
+          readFileSync: (p: string) => {
+            if (p !== statePath) throw new Error('Wrong workspace broker');
+            return JSON.stringify({ url: 'http://broker.test', token: 'bearer' });
+          },
+        };
+      return { path, crypto, os }[name as 'path' | 'crypto' | 'os'];
+    },
+    __filename: getGhShimHostPath(statePath),
+    process: {
+      env: {
+        PATH: '/native/bin',
+        LODY_GIT_CRED_CONTEXT_TOKEN: 'requester',
+        LODY_GITHUB_REPO_FULL_NAME: 'startup/repo',
+        ...options.env,
+      },
+      platform: 'linux',
+      on: vi.fn(),
+    },
+    console: { error: vi.fn() },
+    fetch,
+    URL,
+    AbortSignal,
+    AbortController,
+    setTimeout,
+    clearTimeout,
   });
+  vm.runInContext(source, context);
+  return {
+    calls,
+    actual,
+    spawn,
+    build: (args: string[]) =>
+      (
+        context.build as (
+          command: string,
+          args: string[]
+        ) => Promise<{ env: Record<string, string> }>
+      )('/native/bin/gh', args),
+  };
+}
 
-  await new Promise<void>((resolve, reject) => {
-    tokenBroker?.once('error', reject);
-    tokenBroker?.listen(0, '127.0.0.1', () => resolve());
+describe('generated gh command boundary', () => {
+  it('generates syntactically valid standalone gh and Git transports', () => {
+    for (const command of ['gh', 'git', 'git-remote-lody-github'])
+      expect(
+        () =>
+          new vm.Script(fs.readFileSync(path.join(getGhShimHostBinDir(statePath), command), 'utf8'))
+      ).not.toThrow();
   });
-
-  const address = tokenBroker.address();
-  if (!address || typeof address === 'string') {
-    throw new Error('broker did not bind to a TCP port');
-  }
-  return { url: `http://127.0.0.1:${address.port}`, authToken };
-};
+  it.each([
+    { args: ['pr', 'view', '1', '-R', 'other/repo'], repo: 'other/repo' },
+    { args: ['pr', 'view', 'https://github.com/url/repo/pull/1'], repo: 'url/repo' },
+    { args: ['pr', 'view', '1'], repo: 'cwd/project' },
+    { args: ['api', 'repos/api/repo/pulls'], repo: 'api/repo' },
+    { args: ['repo', 'clone', 'clone/repo'], repo: 'clone/repo' },
+  ])('uses actual target $repo rather than startup repo', async ({ args, repo }) => {
+    const h = harness({ owner: false });
+    expect((await h.build(args)).env.GH_TOKEN).toBe('app:' + repo);
+    expect(
+      h.calls.filter((c) => c.path === '/github-token').map((c) => c.body.repoFullName)
+    ).toEqual([repo]);
+  });
+  it('honors GH_REPO ahead of current directory', async () => {
+    const h = harness({ owner: false, env: { GH_REPO: 'env/repo' } });
+    expect((await h.build(['pr', 'list'])).env.GH_TOKEN).toBe('app:env/repo');
+  });
+  it('owner uses local before App', async () => {
+    const h = harness({ localToken: 'local' });
+    expect((await h.build(['pr', 'list'])).env.GH_TOKEN).toBe('local');
+    expect(h.calls.map((c) => c.path)).toEqual(['/github-auth-context']);
+  });
+  it.each([
+    ['pr', 'merge', '1'],
+    ['release', 'create', 'v1'],
+    ['workflow', 'run', 'build.yml'],
+    ['run', 'rerun', '123'],
+  ])('preflights required push permission for %s %s without executing a write', async (...args) => {
+    const h = harness({ localToken: 'read-only' });
+    expect((await h.build(args)).env.GH_TOKEN).toBe('app:cwd/project');
+    expect(h.actual).toEqual([]);
+  });
+  it('keeps owner credentials when a write preflight confirms push access', async () => {
+    const h = harness({ localToken: 'writer', permissions: { push: true } });
+    expect((await h.build(['-R', 'other/repo', 'pr', 'merge', '1'])).env.GH_TOKEN).toBe('writer');
+  });
+  it('uses admin rather than push capability for repository administration', async () => {
+    const h = harness({ localToken: 'writer', permissions: { push: true, admin: false } });
+    expect((await h.build(['repo', 'archive', 'other/repo'])).env.GH_TOKEN).toBe('app:other/repo');
+  });
+  it.each([
+    { flags: ['--disable-auto'], token: 'local' },
+    { flags: ['--disable-auto=true'], token: 'local' },
+    { flags: ['--disable-auto=false'], token: 'app:cwd/project' },
+    { flags: ['--disable-auto', '--disable-auto=false'], token: 'app:cwd/project' },
+    { flags: ['--body', '--disable-auto'], token: 'app:cwd/project' },
+  ])('uses parsed disable-auto semantics: $flags', async ({ flags, token }) => {
+    const h = harness({ localToken: 'local' });
+    expect((await h.build(['pr', 'merge', '1', ...flags])).env.GH_TOKEN).toBe(token);
+  });
+  it.each([
+    ['pr', 'update-branch', '1'],
+    ['repo', 'edit', '--description', 'test'],
+  ])('does not demand base push or admin for %s %s', async (...args) => {
+    const h = harness({ localToken: 'local', permissions: { push: false, admin: false } });
+    expect((await h.build(args)).env.GH_TOKEN).toBe('local');
+  });
+  it('does not reinterpret a comment body as a write command', async () => {
+    const h = harness({ localToken: 'reader' });
+    expect(
+      (await h.build(['pr', '--repo', 'other/repo', 'comment', '1', '--body', 'merge'])).env
+        .GH_TOKEN
+    ).toBe('reader');
+  });
+  it('personal overrides ambient tokens and local login even without push permission', async () => {
+    const h = harness({ personal: true, localToken: 'local', env: { GH_TOKEN: 'ambient' } });
+    expect((await h.build(['pr', 'comment', '1'])).env.GH_TOKEN).toBe('personal:cwd/project');
+    expect(h.spawn.mock.calls.some((call) => call[1][0] === 'auth')).toBe(false);
+  });
+  it('nonowner never reads local credentials', async () => {
+    const h = harness({ owner: false, localToken: 'local', env: { GH_TOKEN: 'owner-secret' } });
+    expect((await h.build(['pr', 'list'])).env.GH_TOKEN).toBe('app:cwd/project');
+    expect(h.spawn.mock.calls.some((call) => call[1][0] === 'auth')).toBe(false);
+  });
+  it('does not switch identity or execute the operation on a 403', async () => {
+    const h = harness({ personal: true, status: 403 });
+    await expect(h.build(['pr', 'comment', '1'])).rejects.toThrow('identity was not changed');
+    expect(h.calls.filter((c) => c.path === '/github-token').map((c) => c.body.source)).toEqual([
+      'personal',
+    ]);
+    expect(h.actual).toEqual([]);
+  });
+  it('does not send App credentials to an enterprise host', async () => {
+    const h = harness({ owner: false });
+    await expect(
+      h.build(['pr', 'view', 'https://github.example.com/o/r/pull/1'])
+    ).rejects.toThrow();
+    expect(h.calls.filter((c) => c.path === '/github-token')).toEqual([]);
+  });
+  it('unknown targets cannot bypass personal priority', async () => {
+    const h = harness({ personal: true, localToken: 'local' });
+    await expect(h.build(['some-extension', 'write'])).rejects.toThrow(
+      'separately authenticated terminal'
+    );
+  });
+});

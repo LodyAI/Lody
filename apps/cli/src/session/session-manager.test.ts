@@ -1,5 +1,6 @@
 import os from 'node:os';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -12,6 +13,7 @@ import {
   type AgentConfigId,
   type LocalProjectId,
   type MachineId,
+  type RepoId,
   type SessionId,
   type SessionLaunchConfig,
   type SessionMeta,
@@ -27,7 +29,12 @@ import type { SessionConfig } from './types';
 import type { LoroDocumentManager } from '../lib/loro/doc';
 import type { Logger } from '../utils/logger';
 import { runWorktreeSetup } from './worktree/worktree-setup-runner';
-import { getWorktreeManager, type WorktreeInfo } from './worktree/worktree-manager';
+import {
+  getWorktreeManager,
+  type GitCredentialBrokerAuth,
+  type WorktreeInfo,
+  type WorktreeManagerSource,
+} from './worktree/worktree-manager';
 import { materializeSpeculativeWorktree } from './worktree/speculative-worktree';
 import {
   SessionPreparationService,
@@ -274,6 +281,91 @@ describe('SessionManager child session workdir resolution', () => {
     vi.unstubAllEnvs();
     rmSync(tempHome, { recursive: true, force: true });
   });
+
+  it.each(['cold', 'parent'] as const)(
+    'keeps requester auth through %s GitHub worktree creation',
+    async (mode) => {
+      vi.stubEnv('LODY_DATA_DIR', tempHome);
+      const sourceDir = createLocalRepo(tempHome);
+      const repoId = `github---fixture---${mode}` as RepoId;
+      const repoUrl = pathToFileURL(sourceDir).href;
+      const sessionId = `github-${mode}-startup` as SessionId;
+      const parentId = 'github-parent-owner' as SessionId;
+      runGit(sourceDir, ['branch', 'session/parent-restore']);
+      const parentDoc = createSessionDoc({
+        id: parentId,
+        machineId: 'machine-1' as MachineId,
+        userId: 'user-1',
+        createdAt: '2026-06-20T00:00:00.000Z',
+        cliType: 'builtin',
+        agentType: 'codex',
+        project: { kind: 'github', repoFullName: 'fixture/repo', branch: 'main' },
+        isWorktree: true,
+        baseBranch: 'main',
+        branchName: 'session/parent-restore',
+      });
+      const manager = new SessionManager(
+        createLogger(),
+        'token',
+        'machine-1' as MachineId,
+        'workspace-1' as WorkspaceId,
+        createWorkspaceDocument(new Map([[parentId, parentDoc]])),
+        {
+          sessionSandboxFactory: async () => createNoopSessionSandbox(),
+          cloudPort: createTestCloudPort(),
+        }
+      );
+      const auth: GitCredentialBrokerAuth = {
+        workspaceId: 'workspace-1',
+        url: 'http://fixture.invalid',
+        token: 'fixture',
+        contextToken: 'frozen-requester',
+        transportEnv: {},
+      };
+      const internals = manager as unknown as {
+        resolveHostGitBrokerAuth(
+          source: WorktreeManagerSource,
+          config: SessionConfig
+        ): Promise<GitCredentialBrokerAuth>;
+      };
+      const authSpy = vi.spyOn(internals, 'resolveHostGitBrokerAuth').mockResolvedValue(auth);
+      const worktrees = getWorktreeManager({ repoId, repoUrl, logger: createLogger() });
+      const realCreate = worktrees.createWorktree.bind(worktrees);
+      const createSpy = vi
+        .spyOn(worktrees, 'createWorktree')
+        .mockImplementation(async (...args) => {
+          if (args[4] !== auth) throw new Error('requester auth was lost at the creation boundary');
+          return realCreate(...args);
+        });
+      try {
+        const session = await createSessionInner(
+          manager,
+          createSessionConfig({
+            sessionId,
+            repoId,
+            githubRepo: 'fixture/repo',
+            githubRepoUrl: repoUrl,
+            parentSessionId: mode === 'parent' ? parentId : undefined,
+            project: { kind: 'github', repoFullName: 'fixture/repo', branch: 'main' },
+            worktreeSetup: { scripts: { bash: 'echo fixture' } },
+          })
+        );
+        const workdir = session.getWorkdir();
+        if (!workdir) throw new Error('missing materialized worktree');
+        expect(runGit(workdir, ['rev-parse', 'HEAD'])).toBe(
+          runGit(sourceDir, ['rev-parse', 'HEAD'])
+        );
+        expect(workdir).toBe(
+          worktrees.getWorktreeHostPath(mode === 'parent' ? parentId : sessionId)
+        );
+        if (mode === 'parent')
+          expect(runGit(workdir, ['branch', '--show-current'])).toBe('session/parent-restore');
+      } finally {
+        createSpy.mockRestore();
+        authSpy.mockRestore();
+      }
+    }
+  );
 
   it('reuses the parent default chat workdir for chat-only child sessions', async () => {
     const parentSessionId = 'parent-session' as SessionId;

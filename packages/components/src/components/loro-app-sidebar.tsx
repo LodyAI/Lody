@@ -148,6 +148,7 @@ import {
   getEffectiveSessionActivitySummary,
   getEffectiveLatestMessageAt,
   getLatestPullRequestInfo,
+  type EffectiveSessionActivitySummary,
   type SessionListScope,
 } from './sessions/session-list-rows';
 import { getSelectedLocalProjectKey } from './chat/chat-landing-derived';
@@ -191,9 +192,13 @@ import {
   SidebarRowArchiveButton,
   SidebarRowEndSlot,
   SidebarSectionHeader,
+  SidebarGroupActivityMark,
   SessionRowOpenedByMenuItems,
   buildSessionRowOpenedByTreeSlot,
+  summarizeSidebarGroupActivity,
+  useSidebarGroupActivityDescription,
   type SessionRowOpenedByTreeSlot,
+  type SidebarGroupActivity,
   SIDEBAR_ROW_LIST_CLASS,
 } from '@/components/sidebar-row-shared';
 import {
@@ -1045,6 +1050,24 @@ const hoverActionClassName = cn(
 const menuTriggerOpenClassName =
   'group-data-[menu-open]:bg-muted/30 group-data-[menu-open]:text-foreground';
 
+/**
+ * Folded-group status for local-project Sessions: each one counted by the mark
+ * its row would draw, child Tabs rolled up exactly as the row rolls them up.
+ */
+function summarizeLocalSessionsActivity(
+  sessions: Iterable<SessionMeta>,
+  childSessionsByParent: Map<string, SessionMeta[]>,
+  liveSessionStatuses: ReadonlyMap<string, SessionStatus>
+): SidebarGroupActivity {
+  const rows: EffectiveSessionActivitySummary[] = [];
+  for (const session of sessions) {
+    rows.push(
+      getEffectiveSessionActivitySummary(session, childSessionsByParent, liveSessionStatuses)
+    );
+  }
+  return summarizeSidebarGroupActivity(rows);
+}
+
 const LOCAL_PROJECT_SELECTION_PROP_KEYS: ReadonlySet<string> = new Set(['selectedSessionId']);
 
 /**
@@ -1157,7 +1180,24 @@ export const LocalProjectItem = memo(function LocalProjectItem({
       : removalState === 'removing'
         ? t('sidebar.localProjects.remove.removing', 'Removing…')
         : null;
-  const ariaLabel = removalStateLabel ? `${baseAriaLabel} · ${removalStateLabel}` : baseAriaLabel;
+  // A folded project still says whether anything inside it needs the user: the
+  // mark each hidden row would draw, rolled up. Pinned Sessions are not here —
+  // they stay visible in Pinned, so folding the project does not hide them.
+  const collapsedActivity = useMemo(
+    () =>
+      collapsed && !removalState
+        ? summarizeLocalSessionsActivity(
+            sessionsForProject,
+            childSessionsByParent,
+            liveSessionStatuses
+          )
+        : null,
+    [childSessionsByParent, collapsed, liveSessionStatuses, removalState, sessionsForProject]
+  );
+  const collapsedActivityDescription = useSidebarGroupActivityDescription(collapsedActivity);
+  const ariaLabel = [baseAriaLabel, removalStateLabel, collapsedActivityDescription]
+    .filter(Boolean)
+    .join(' · ');
   const showSelectedState = isSelected && !isMobile;
   const handleNavigate = useCallback(() => {
     if (removalState) return;
@@ -1318,6 +1358,11 @@ export const LocalProjectItem = memo(function LocalProjectItem({
           {dragHandle}
         </div>
       ) : null}
+      {collapsedActivity ? (
+        // The row's path tooltip carries the description; a second hover
+        // surface on the mark would open alongside it.
+        <SidebarGroupActivityMark activity={collapsedActivity} describe={false} />
+      ) : null}
     </div>
   );
 
@@ -1330,7 +1375,7 @@ export const LocalProjectItem = memo(function LocalProjectItem({
               delay={500}
               render={showProjectMenu ? <ContextMenu.Trigger render={projectRow} /> : projectRow}
             />
-            {formattedPath || trimmedMachineName ? (
+            {formattedPath || trimmedMachineName || collapsedActivityDescription ? (
               <Tooltip.Content side="right" align="start" className="max-w-[420px] break-all">
                 <div className="flex flex-col gap-0.5 text-xs">
                   {trimmedMachineName ? (
@@ -1338,6 +1383,11 @@ export const LocalProjectItem = memo(function LocalProjectItem({
                   ) : null}
                   {formattedPath ? (
                     <span className="font-mono text-[11px] leading-snug">{formattedPath}</span>
+                  ) : null}
+                  {collapsedActivityDescription ? (
+                    <span data-sidebar-group-activity-description="">
+                      {collapsedActivityDescription}
+                    </span>
                   ) : null}
                 </div>
               </Tooltip.Content>
@@ -2715,6 +2765,21 @@ export function LoroAppSidebar({
                   projectCount: section.projects.length,
                 }
               : null;
+          // A folded machine says whether anything in its projects needs the
+          // user; the mark sits where a row's would, the machine card says how many.
+          const sectionActivity =
+            sectionCollapsed && section.machineId
+              ? summarizeLocalSessionsActivity(
+                  section.projects.flatMap(
+                    (project) =>
+                      workspaceLocalProjectSessionsByKey.get(
+                        `${section.machineId}:${project.id}`
+                      ) ?? []
+                  ),
+                  childSessionsByParent,
+                  liveSessionStatuses
+                )
+              : null;
           const dividerRight =
             section.canImport && isElectron ? (
               <button
@@ -2753,13 +2818,15 @@ export function LoroAppSidebar({
                 <SidebarMachineHoverCard
                   disabled={isMobile || !sectionMachine}
                   machine={
-                    sectionMachine ?? {
-                      machineId: '' as MachineId,
-                      name: section.sectionLabel,
-                      isOwn: true,
-                      isCurrent: true,
-                      projectCount: section.projects.length,
-                    }
+                    sectionMachine
+                      ? { ...sectionMachine, activity: sectionActivity }
+                      : {
+                          machineId: '' as MachineId,
+                          name: section.sectionLabel,
+                          isOwn: true,
+                          isCurrent: true,
+                          projectCount: section.projects.length,
+                        }
                   }
                 >
                   <SidebarSectionHeader
@@ -2772,6 +2839,9 @@ export function LoroAppSidebar({
                       </span>
                     }
                     collapsed={sectionCollapsed}
+                    activity={sectionActivity}
+                    // The machine card owns this header's hover and lists the counts.
+                    describeActivity={isMobile || !sectionMachine}
                     action={headerAction}
                     isMobile={isMobile}
                     toggleLabel={toggleLabel}
@@ -3172,6 +3242,11 @@ export function LoroAppSidebar({
   ]);
 
   const githubWorktreesLabel = useMemo(() => t('sidebar.githubWorktrees', 'GitHub Worktrees'), [t]);
+  const githubWorktreesCollapsedActivity = useMemo(
+    () =>
+      githubWorktreesSectionCollapsed ? summarizeSidebarGroupActivity(workspaceRepoSessions) : null,
+    [githubWorktreesSectionCollapsed, workspaceRepoSessions]
+  );
   const sidebarTopContent = hasWorkspaceSidebarTopContent(
     localProjectSections.length,
     showGithubWorktrees
@@ -3187,7 +3262,7 @@ export function LoroAppSidebar({
         <SidebarSectionHeader
           label={githubWorktreesLabel}
           collapsed={githubWorktreesSectionCollapsed}
-          count={workspaceRepoSessions.length}
+          activity={githubWorktreesCollapsedActivity}
           isMobile={isMobile}
           toggleLabel={toggleLabel}
           onToggleCollapsed={handleToggleGithubWorktreesSection}

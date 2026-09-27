@@ -67,14 +67,19 @@ export PATH=${toSingleQuotedShellString(ghShimBinDir)}:"$PATH"
 export const shouldInjectZdotdirForGhShim = (): boolean =>
   process.platform === 'darwin' && (existsSync('/bin/zsh') || existsSync('/usr/bin/zsh'));
 
-export const ensureLodyZdotdirForGhShim = (inheritZdotdir?: string): string => {
-  const zdotdirPath = LODY_ZDOTDIR_PATH;
+export const ensureLodyZdotdirForGhShim = (
+  inheritZdotdir?: string,
+  brokerStateFilePath?: string
+): string => {
+  const zdotdirPath = brokerStateFilePath
+    ? path.join(getGhShimHostBinDir(brokerStateFilePath), 'zdotdir')
+    : LODY_ZDOTDIR_PATH;
   mkdirSync(zdotdirPath, { recursive: true });
 
   writeIfChanged(path.join(zdotdirPath, '.zshenv'), buildZshenvSource(inheritZdotdir, zdotdirPath));
   writeIfChanged(
     path.join(zdotdirPath, '.zprofile'),
-    buildZprofileSource(getGhShimHostBinDir(), inheritZdotdir, zdotdirPath)
+    buildZprofileSource(getGhShimHostBinDir(brokerStateFilePath), inheritZdotdir, zdotdirPath)
   );
   writeIfChanged(
     path.join(zdotdirPath, '.zshrc'),

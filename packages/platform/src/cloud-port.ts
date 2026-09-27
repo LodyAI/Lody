@@ -265,6 +265,13 @@ export interface CloudGithubWriteTokenContext {
 }
 
 export interface CloudGithubTokenManager {
+  getCredentialPolicy(context: CloudGithubWriteTokenContext): Promise<{ personalEnabled: boolean }>;
+  getCredentialCandidate(
+    repoFullName: string,
+    context: CloudGithubWriteTokenContext,
+    source: 'personal' | 'app',
+    invalidatedPersonalToken?: string
+  ): Promise<{ token: string; tokenSource: 'personal' | 'app' } | null>;
   startAutoRefresh(): void;
   getAppTokenForRepo(repoFullName: string): Promise<string>;
   getWriteTokenForRepo(

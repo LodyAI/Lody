@@ -23,11 +23,8 @@ export type UserMessageEditorProps = {
 /**
  * In-place editor that takes the last user bubble's spot when resending.
  *
- * One surface only: the card carries the border, and the field inside is
- * transparent and chrome-free — the shared `Textarea` is what suppresses the
- * global `:focus-visible` inset ring (`@layer base` in tailwind/index.css) that
- * would otherwise draw a second rectangle around the text. Send matches the
- * composer's black pill so the two writing surfaces read as the same control.
+ * The card owns the editor's focus edge. Its bare Textarea keeps the native
+ * editing behavior without drawing a second focus ring inside the card.
  */
 export function UserMessageEditor({
   value,
@@ -73,6 +70,8 @@ export function UserMessageEditor({
       aria-busy={isSaving || undefined}
     >
       <Textarea
+        appearance="bare"
+        resize="none"
         ref={focusAtEnd}
         value={value}
         rows={1}
@@ -89,11 +88,7 @@ export function UserMessageEditor({
             if (canSave) onSave();
           }
         }}
-        className={cn(
-          'input-scrollbar resize-none rounded-none border-transparent bg-transparent p-0',
-          'leading-relaxed text-foreground',
-          isSaving && 'text-muted-foreground'
-        )}
+        className={cn('input-scrollbar leading-relaxed', isSaving && 'text-muted-foreground')}
         style={conversationTextFontSizeStyle(conversationFontSize)}
         aria-label={t('sessions.editMessage', 'Edit message')}
       />

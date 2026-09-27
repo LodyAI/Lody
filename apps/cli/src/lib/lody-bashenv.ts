@@ -34,12 +34,17 @@ ${sourceInherited}export PATH=${toSingleQuotedShellString(ghShimBinDir)}:"$PATH"
 
 export const shouldInjectBashEnvForGhShim = (): boolean => process.platform !== 'win32';
 
-export const ensureLodyBashEnvForGhShim = (inheritBashEnv?: string): string => {
-  const bashEnvPath = LODY_BASH_ENV_PATH;
+export const ensureLodyBashEnvForGhShim = (
+  inheritBashEnv?: string,
+  brokerStateFilePath?: string
+): string => {
+  const bashEnvPath = brokerStateFilePath
+    ? path.join(getGhShimHostBinDir(brokerStateFilePath), 'bashenv')
+    : LODY_BASH_ENV_PATH;
   mkdirSync(path.dirname(bashEnvPath), { recursive: true });
   writeIfChanged(
     bashEnvPath,
-    buildBashEnvSource(getGhShimHostBinDir(), inheritBashEnv, bashEnvPath)
+    buildBashEnvSource(getGhShimHostBinDir(brokerStateFilePath), inheritBashEnv, bashEnvPath)
   );
   return bashEnvPath;
 };

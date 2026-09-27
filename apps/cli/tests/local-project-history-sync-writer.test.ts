@@ -38,7 +38,8 @@ vi.mock('../src/lib/history-session-catalog-client', () => ({
   MAX_LOCAL_PROJECT_HISTORY_CATALOG_SESSIONS: 100,
 }));
 
-vi.mock('../src/lib/local-project-meta', () => ({
+vi.mock('../src/lib/local-project-meta', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../src/lib/local-project-meta')>()),
   readMachineLocalProjects: async () => ({}),
   upsertMachineLocalProject: async () => {},
 }));

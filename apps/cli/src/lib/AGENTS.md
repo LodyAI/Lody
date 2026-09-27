@@ -11,6 +11,12 @@ end-to-end map. The WS/DO control-plane path is DEPRECATED; do not add to it.
 
 ## Composition and transports
 
+- GitHub command auth lives in `github-credential-runtime.ts`: explicit personal
+  preference first, owner-only local credentials next, repo-scoped App last.
+  `github-git-transport.ts` also intercepts HTTPS headers and SSH remotes. Never
+  inject a startup-repo token globally, persist managed tokens through helpers,
+  or replay an uncertain write. Each helper captures one session context token.
+
 - `cloud-cli-port.ts` is the sole official-build composition root for cloud clients and
   endpoint-derived adapters. Daemon runtime modules must not construct cloud SDK
   clients or read `LODY_AUTH_URL` / `LODY_AUTH_SITE_URL` / `LODY_SERVER_URL`. The local
@@ -40,6 +46,9 @@ end-to-end map. The WS/DO control-plane path is DEPRECATED; do not add to it.
   reintroduce a proxy-authoring path (invariants in `specs/local-first-two-plane.md`).
   Local dispatch triggers off the renderer-authored `latestUserMsgId` doc-meta write
   plus the local Machine RPC fast path.
+
+- INVARIANT: agent PATH merges keep the session's `gh` shim dir first
+  ([note](../../../../.agents/notes/implemented/bug-fix/2026-09-26-gh-shim-broker-and-path.md)).
 
 ## Local Loro data plane
 

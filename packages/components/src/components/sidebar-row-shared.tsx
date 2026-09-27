@@ -531,6 +531,135 @@ export function SidebarRowEndSlot({
   );
 }
 
+type SessionRowStatusFlags = {
+  isWaitingPermission?: boolean;
+  isWorking?: boolean;
+  hasUnreadMessages?: boolean;
+};
+
+/**
+ * What a folded group hides, counted by the mark each hidden row would draw:
+ * a row counts once, under its own priority (`waiting > working > unread`), so
+ * the numbers add up to the rows that are asking for attention.
+ */
+export type SidebarGroupActivity = {
+  waiting: number;
+  working: number;
+  unread: number;
+};
+
+export const EMPTY_SIDEBAR_GROUP_ACTIVITY: SidebarGroupActivity = Object.freeze({
+  waiting: 0,
+  working: 0,
+  unread: 0,
+});
+
+export function summarizeSidebarGroupActivity(
+  rows: Iterable<SessionRowStatusFlags>
+): SidebarGroupActivity {
+  let waiting = 0;
+  let working = 0;
+  let unread = 0;
+  for (const row of rows) {
+    if (row.isWaitingPermission) waiting += 1;
+    else if (row.isWorking) working += 1;
+    else if (row.hasUnreadMessages) unread += 1;
+  }
+  if (waiting === 0 && working === 0 && unread === 0) return EMPTY_SIDEBAR_GROUP_ACTIVITY;
+  return { waiting, working, unread };
+}
+
+export function hasSidebarGroupActivity(activity: SidebarGroupActivity | null | undefined) {
+  return Boolean(activity && (activity.waiting || activity.working || activity.unread));
+}
+
+/** "1 waiting for approval · 2 working · 3 unread", omitting zero counts. */
+export function useSidebarGroupActivityDescription(
+  activity: SidebarGroupActivity | null | undefined
+): string | null {
+  const { t } = useTranslation();
+  if (!activity || !hasSidebarGroupActivity(activity)) return null;
+  const parts: string[] = [];
+  if (activity.waiting) {
+    parts.push(
+      t('sidebar.groupActivity.waiting', '{{count}} waiting for approval', {
+        count: activity.waiting,
+      })
+    );
+  }
+  if (activity.working) {
+    parts.push(
+      t('sidebar.groupActivity.working', '{{count}} working', { count: activity.working })
+    );
+  }
+  if (activity.unread) {
+    parts.push(t('sidebar.groupActivity.unread', '{{count}} unread', { count: activity.unread }));
+  }
+  return parts.join(' · ');
+}
+
+/**
+ * The status a FOLDED group (project, repo, machine, section) draws for the
+ * Sessions it hides: the one 14px mark a row would draw, in the same trailing
+ * column as the rows, chosen by the rows' own priority. Folding therefore never
+ * hides that something is waiting on the user, running, or finished unread —
+ * and an expanded group draws nothing, because its rows already say it.
+ *
+ * One mark, never a count or a stack: the glance answers "does anything in
+ * here need me?", the hover (`description`) answers "how much?", and expanding
+ * answers "which?". The mark stays mounted across status changes and runs the
+ * same working → unread hand-over as a row, so the group plays the done
+ * transition when its last running Session finishes.
+ *
+ * Pass `describe={false}` when the header already owns a hover surface (the
+ * project path tooltip, the machine card) and put the description there: two
+ * hover surfaces on one header open together.
+ */
+export function SidebarGroupActivityMark({
+  activity,
+  describe = true,
+}: {
+  activity: SidebarGroupActivity | null | undefined;
+  describe?: boolean;
+}) {
+  const description = useSidebarGroupActivityDescription(activity);
+  const isWaitingPermission = (activity?.waiting ?? 0) > 0;
+  const hasUnreadMessages = (activity?.unread ?? 0) > 0;
+  const drawWorking = useWorkingHandOver((activity?.working ?? 0) > 0, hasUnreadMessages);
+  const hasStatus = hasSessionRowStatus({
+    isWaitingPermission,
+    isWorking: drawWorking,
+    hasUnreadMessages,
+  });
+  // Keep the slot mounted while empty so the hand-over state survives.
+  const mark = (
+    <span
+      data-sidebar-group-activity=""
+      role={hasStatus && description ? 'img' : undefined}
+      aria-label={hasStatus && description ? description : undefined}
+      className={cn(
+        'relative flex h-5 shrink-0 items-center justify-center',
+        hasStatus ? 'w-5' : 'w-0'
+      )}
+    >
+      {hasStatus ? (
+        <SessionRowStatusIndicator
+          isWaitingPermission={isWaitingPermission}
+          isWorking={drawWorking}
+          hasUnreadMessages={hasUnreadMessages}
+        />
+      ) : null}
+    </span>
+  );
+  if (!describe || !hasStatus || !description) return mark;
+  return (
+    <Tooltip.Root>
+      <Tooltip.Trigger delay={300} render={mark} />
+      <Tooltip.Content side="right">{description}</Tooltip.Content>
+    </Tooltip.Root>
+  );
+}
+
 /**
  * A GitHub owner (user/org) avatar resolved from just `owner/repo`: the owner's
  * avatar, falling back to the GitHub glyph while it loads, when the handle can't be
@@ -617,6 +746,8 @@ export function SidebarSectionHeader({
   label,
   collapsed,
   action,
+  activity,
+  describeActivity = true,
   onToggleCollapsed,
   isMobile,
   toggleLabel,
@@ -627,6 +758,13 @@ export function SidebarSectionHeader({
   /** @deprecated The collapsed count badge has been removed; this prop is ignored. */
   count?: number;
   action?: ReactNode;
+  /**
+   * Status of the Sessions this section hides. Drawn only while collapsed, as
+   * {@link SidebarGroupActivityMark}; an expanded section's rows speak for it.
+   */
+  activity?: SidebarGroupActivity | null;
+  /** False when a wrapper already owns the header's hover surface (machine card). */
+  describeActivity?: boolean;
   onToggleCollapsed?: () => void;
   isMobile?: boolean;
   toggleLabel?: string;
@@ -675,6 +813,9 @@ export function SidebarSectionHeader({
           />
         ) : null}
         <span className="flex-1" aria-hidden="true" />
+        {collapsed && activity ? (
+          <SidebarGroupActivityMark activity={activity} describe={describeActivity} />
+        ) : null}
       </div>
       {action ? <div className="mr-2 shrink-0">{action}</div> : null}
     </div>

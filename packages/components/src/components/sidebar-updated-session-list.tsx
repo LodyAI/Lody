@@ -45,6 +45,7 @@ import {
   SidebarRowEndSlot,
   SidebarListSkeleton,
   SidebarSectionHeader,
+  summarizeSidebarGroupActivity,
   SessionRowOpenedByMenuItems,
   buildSessionRowOpenedByTreeSlot,
   type SidebarRowKind,
@@ -483,9 +484,12 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
           return {
             overflows: updatedBucketOverflowsPreview(bucket.items),
             nodes: EMPTY_TREE_NODES,
+            // A folded bucket still says whether anything inside needs the user.
+            collapsedActivity: summarizeSidebarGroupActivity(bucket.items),
           };
         }
         return {
+          collapsedActivity: null,
           overflows: updatedBucketOverflowsPreview(bucket.items),
           nodes: getVisibleUpdatedItemTree(
             bucket.items,
@@ -539,9 +543,14 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
             onToggleBucket?.(bucket.key);
           };
           const showFull = Boolean(showFullBuckets?.[bucket.key]);
-          const { overflows, nodes: visibleNodes } = bucketTrees[bucketIndex] ?? {
+          const {
+            overflows,
+            nodes: visibleNodes,
+            collapsedActivity,
+          } = bucketTrees[bucketIndex] ?? {
             overflows: false,
             nodes: EMPTY_TREE_NODES,
+            collapsedActivity: null,
           };
           // Only a bucket that actually contains an opened Session enables the
           // tree wrapper. Unrelated top-level rows keep their flat geometry.
@@ -563,6 +572,7 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
               <SidebarSectionHeader
                 label={bucket.label}
                 collapsed={collapsed}
+                activity={collapsedActivity}
                 action={bucketHeaderAction}
                 isMobile={isMobile}
                 toggleLabel={toggleBucketLabel}

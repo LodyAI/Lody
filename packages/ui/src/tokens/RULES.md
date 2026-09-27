@@ -71,6 +71,8 @@ Never a border. One component token group, `field`, serves the whole family — 
 textarea, checkbox, radio, switch and the Select and Combobox triggers — so a
 state has one colour in one place instead of one per component. The lists those
 triggers open are on the floating rung and read `popup` instead; see below.
+When a parent owns that well and its focus ring, its inner text control uses the
+bare appearance so the two parts do not draw separate edges.
 
 | state       | what it is                                                                        |
 | ----------- | --------------------------------------------------------------------------------- |

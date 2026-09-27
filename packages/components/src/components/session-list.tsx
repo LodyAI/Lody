@@ -90,6 +90,8 @@ import {
   SIDEBAR_ROW_LIST_CLASS,
   SIDEBAR_GROUP_LABEL_CLASS,
   SIDEBAR_GROUP_LABEL_COLOR_CLASS,
+  SidebarGroupActivityMark,
+  summarizeSidebarGroupActivity,
 } from '@/components/sidebar-row-shared';
 import { SessionInfoHoverCard } from '@/components/session-info-hover-card';
 import type { SessionSharingState } from '@/lib/session-sharing';
@@ -1162,6 +1164,11 @@ const SessionGroupSection = memo(function SessionGroupSection({
       showTreeGutter: hasOpenedByTreeNesting(nodes),
     };
   }, [collapsedOpenedBySessionIds, group, whetherShowFullList]);
+  // A folded group still says whether anything inside it needs the user.
+  const collapsedActivity = useMemo(
+    () => (group.collapsed ? summarizeSidebarGroupActivity(group.sessions) : null),
+    [group.collapsed, group.sessions]
+  );
   const toggleListLabel = whetherShowFullList
     ? t('sessions.showLess', 'Show less')
     : t('sessions.showAll', 'Show all ({{count}})', { count: group.sessions.length });
@@ -1283,6 +1290,7 @@ const SessionGroupSection = memo(function SessionGroupSection({
             />
           ) : null}
           <span className="flex-1" aria-hidden="true" />
+          {collapsedActivity ? <SidebarGroupActivityMark activity={collapsedActivity} /> : null}
         </div>
 
         {resolvedTrailingContent}

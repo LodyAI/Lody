@@ -1,4 +1,12 @@
-import { Fragment, useRef, type ComponentType, type CSSProperties, type ReactNode } from 'react';
+import {
+  Fragment,
+  useRef,
+  useState,
+  type ComponentType,
+  type CSSProperties,
+  type ReactNode,
+} from 'react';
+import { PopupContainerProvider } from '@lody/ui/popup-container';
 import { AnimatePresence, motion } from 'framer-motion';
 import { X } from 'lucide-react';
 
@@ -85,6 +93,7 @@ export function MobileNewChatSheet({
   onOpenChange,
   ...contentProps
 }: MobileNewChatSheetProps) {
+  const [popupContainer, setPopupContainer] = useState<HTMLDivElement | null>(null);
   const title = contentProps.labels?.title ?? '新建对话';
   const description = contentProps.labels?.description;
 
@@ -120,11 +129,16 @@ export function MobileNewChatSheet({
       >
         <DrawerTitle className="sr-only">{title}</DrawerTitle>
         <DrawerDescription className="sr-only">{description ?? title}</DrawerDescription>
-        <MobileNewChatSheetContent
-          {...contentProps}
-          onClose={() => onOpenChange(false)}
-          className={cn('max-h-full', contentProps.className)}
-        />
+        <PopupContainerProvider container={popupContainer}>
+          <MobileNewChatSheetContent
+            {...contentProps}
+            onClose={() => onOpenChange(false)}
+            className={cn('max-h-full', contentProps.className)}
+          />
+        </PopupContainerProvider>
+        {/* Stay inside Vaul's modal boundary, outside the scrolling content.
+            Menu touches must not start a drawer drag. */}
+        <div ref={setPopupContainer} data-vaul-no-drag="" />
       </DrawerContent>
     </Drawer>
   );

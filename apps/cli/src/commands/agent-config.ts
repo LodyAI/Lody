@@ -5,6 +5,7 @@ import { z } from 'zod';
 import {
   MachineAcpCapabilitiesRefreshResponseSchema,
   isMachineDocRoomId,
+  negotiatedAcpCapabilitiesRefreshForce,
   type AgentConfigCliType,
   type AgentConfigId,
   type AgentConfigMeta,
@@ -580,6 +581,11 @@ const agentConfigRefreshCapabilitiesCommand = new Command('refresh-capabilities'
             machineId: machine.id,
             workspaceId: workspace.id as WorkspaceId,
             configId: config.id,
+            // This command exists to pick up changes Lody cannot see in the launch
+            // inputs, so it must start the agent instead of accepting the stored
+            // entry. Negotiated because the CLI binary can be newer than the
+            // running daemon, which would reject an unknown field outright.
+            ...negotiatedAcpCapabilitiesRefreshForce(machine, true),
           })
         );
 
