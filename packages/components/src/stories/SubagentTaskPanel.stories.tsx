@@ -250,6 +250,31 @@ const settledRuns: SubagentTask[] = [
   },
 ];
 
+/** A run long enough to reach the dialog's height cap and scroll inside it. */
+const longRun: SubagentTask[] = [
+  {
+    type: 'subagent_task',
+    taskId: 'run-long',
+    taskKind: 'subagent',
+    status: 'in_progress',
+    actor: 'Explore',
+    description: 'Audit every settings tab for spacing drift',
+    startedAtEpochSeconds: Math.floor(Date.now() / 1000) - 412,
+    run: {
+      sessionId: 'root-acp',
+      snapshot: { state: 'running', support: support(true) },
+      progress: { totalTokens: 48_900, toolCallCount: 40 },
+      items: Array.from({ length: 40 }, (_, index) => ({
+        type: 'tool_call' as const,
+        toolCallId: `long-${index}`,
+        title: `Read packages/components/src/components/settings/tab-${index + 1}.tsx`,
+        kind: 'read' as const,
+        status: index === 39 ? ('in_progress' as const) : ('completed' as const),
+      })),
+    },
+  },
+];
+
 /** Storybook stand-in for the conversation renderers `view.tsx` passes in. */
 const renderHistory = (task: SubagentTask) => (
   <ol className="m-0 flex list-none flex-col gap-1 p-0 text-[12.5px] text-muted-foreground">
@@ -296,3 +321,4 @@ export const StreamedRuns: Story = {
   args: { tasks: streamedRuns, renderHistory, runCancellation: true, onCancel: async () => {} },
 };
 export const SettledRuns: Story = { args: { tasks: settledRuns, renderHistory } };
+export const LongRun: Story = { args: { tasks: longRun, renderHistory } };

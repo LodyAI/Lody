@@ -1,4 +1,4 @@
-import { useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
 import * as stylex from '@stylexjs/stylex';
@@ -14,6 +14,7 @@ import { writeTextToClipboard } from '@/lib/clipboard';
 import { formatCompactNumber } from '@/lib/format-compact-number';
 import { toIntlLocaleOrEn } from '@/lib/intl-locale';
 import { useStableNow } from '@/hooks/use-stable-now';
+import { withClassName } from '@/lib/stylex';
 
 /**
  * The subagent and background tasks a turn spawned, as one group of the turn's
@@ -143,8 +144,15 @@ const REGION = `color-mix(in oklab, transparent, ${colors.label} 5%)`;
 const MARK = '14px';
 const MARK_GAP = space[1.5];
 const MONO = 'var(--font-mono, ui-monospace, monospace)';
-/** A task at full depth reads as a column of transcript: wider than the default panel. */
-const DIALOG_WIDTH = '640px';
+/**
+ * A task at full depth reads as a column of transcript: as wide as the
+ * conversation column, and capped in height so a long run scrolls inside the
+ * panel rather than growing it to the edges of the window.
+ */
+const DIALOG_WIDTH = '800px';
+const DIALOG_MAX_HEIGHT = 'min(760px, 85dvh)';
+/** The app's own scrollbar skin, for every scroller the group owns. */
+const SCROLLBAR = 'scrollbar-pro';
 /** How close to the end of the run a reader must be for new steps to keep them there. */
 const FOLLOW_SLACK_PX = 24;
 
@@ -302,6 +310,9 @@ const styles = stylex.create({
     minHeight: 0,
     overflowY: 'auto',
     overscrollBehavior: 'contain',
+    // Focusable only so the dialog can land here; the panel's own shadow says
+    // where focus is, as it does for the modal itself.
+    outlineStyle: 'none',
   },
   bodyWrap: { position: 'relative', minWidth: 0 },
   body: {
@@ -533,7 +544,7 @@ function TaskBrief({ task, body }: { task: SubagentTask; body: string }) {
             ? t('sessions.subagentTasks.command', 'Command')
             : t('sessions.subagentTasks.description', 'Description')
         }
-        {...stylex.props(styles.body, isCommand && styles.bodyMono)}
+        {...withClassName(stylex.props(styles.body, isCommand && styles.bodyMono), SCROLLBAR)}
       >
         {body}
       </BriefElement>
@@ -667,19 +678,18 @@ function CancelTaskAction({
  * alone once they scroll up to read. A running task opens at its latest step; a
  * finished one opens at its brief.
  */
-function useFollowEnd(follow: boolean, content: unknown) {
-  const ref = useRef<HTMLDivElement>(null);
+function useFollowEnd(ref: RefObject<HTMLDivElement | null>, follow: boolean, content: unknown) {
   const pinned = useRef(follow);
   useLayoutEffect(() => {
     const node = ref.current;
     if (node && pinned.current) node.scrollTop = node.scrollHeight;
-  }, [content]);
+  }, [ref, content]);
   const onScroll = () => {
     const node = ref.current;
     if (!node) return;
     pinned.current = node.scrollHeight - node.scrollTop - node.clientHeight <= FOLLOW_SLACK_PX;
   };
-  return { ref, onScroll };
+  return onScroll;
 }
 
 /** The task at full depth: what it is, the whole brief, its run, its result, its cost. */
@@ -688,11 +698,14 @@ function TaskDetail({
   onCancel,
   runCancellation,
   renderHistory,
+  scrollerRef,
 }: {
   task: SubagentTask;
   onCancel?: (taskId: string) => Promise<void>;
   runCancellation: boolean;
   renderHistory?: (task: SubagentTask) => ReactNode;
+  /** The column that scrolls; the dialog focuses it on open. */
+  scrollerRef: RefObject<HTMLDivElement | null>;
 }) {
   const { t } = useTranslation();
   const actor = actorOf(task, t);
@@ -710,7 +723,7 @@ function TaskDetail({
     running &&
     task.taskKind === 'subagent' &&
     (task.run ? runCancellation && task.run.snapshot.support.cancel : true);
-  const { ref, onScroll } = useFollowEnd(running, task);
+  const onScroll = useFollowEnd(scrollerRef, running, task);
 
   return (
     <>
@@ -731,7 +744,12 @@ function TaskDetail({
         </Dialog.Description>
       </Dialog.Header>
 
-      <div ref={ref} onScroll={onScroll} {...stylex.props(styles.detail)}>
+      <div
+        ref={scrollerRef}
+        tabIndex={-1}
+        onScroll={onScroll}
+        {...withClassName(stylex.props(styles.detail), SCROLLBAR)}
+      >
         {body ? (
           <Section
             label={
@@ -815,6 +833,10 @@ export const SubagentTaskPanel = ({
   const [open, setOpen] = useState(false);
   // The dialog keeps the last task it showed while it animates closed.
   const [shownTaskId, setShownTaskId] = useState<string | null>(null);
+  // Opening focuses the transcript itself, not its first control: focusing the
+  // brief's Copy button scrolled a running task back to the top, away from the
+  // latest step. From there the arrow keys scroll the run.
+  const scrollerRef = useRef<HTMLDivElement>(null);
   const shownTask = tasks.find((task) => task.taskId === shownTaskId) ?? null;
 
   if (tasks.length === 0) return null;
@@ -868,7 +890,7 @@ export const SubagentTaskPanel = ({
         </span>
       </button>
       {expanded ? (
-        <div {...stylex.props(styles.rows)}>
+        <div {...withClassName(stylex.props(styles.rows), SCROLLBAR)}>
           {ordered.map(({ task, depth }, index) => (
             <div key={task.taskId} {...stylex.props(index > 0 && styles.rowRuled)}>
               <SubagentTaskRow task={task} depth={depth} onOpen={openTask} />
@@ -878,7 +900,8 @@ export const SubagentTaskPanel = ({
       ) : null}
       <Dialog.Root open={open && shownTask !== null} onOpenChange={setOpen}>
         <Dialog.Content
-          style={{ width: DIALOG_WIDTH }}
+          style={{ width: DIALOG_WIDTH, maxHeight: DIALOG_MAX_HEIGHT }}
+          initialFocus={scrollerRef}
           closeLabel={t('common.close', 'Close')}
           data-subagent-task-dialog=""
         >
@@ -888,6 +911,7 @@ export const SubagentTaskPanel = ({
               task={shownTask}
               onCancel={onCancel}
               runCancellation={runCancellation}
+              scrollerRef={scrollerRef}
               renderHistory={renderHistory}
             />
           ) : null}
