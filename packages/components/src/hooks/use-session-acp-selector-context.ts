@@ -1,5 +1,11 @@
 import { useMemo } from 'react';
-import type { AgentConfigCliType, AgentConfigId, MachineId } from '@lody/shared';
+import {
+  getAcpCommandScopeKey,
+  type AgentConfigCliType,
+  type AgentConfigId,
+  type MachineId,
+  type ProjectRef,
+} from '@lody/shared';
 import type { AcpConfigOptionValue } from '@/components/shared/acp-selector-options';
 
 import { useAcpSelectorOptions } from '@/hooks/use-acp-selector-options';
@@ -14,6 +20,8 @@ type UseSessionAcpSelectorContextArgs = {
   selectedModeId?: string | null;
   selectedModelId?: string | null;
   configOptionValues?: Record<string, AcpConfigOptionValue>;
+  /** Project of the session, so its own slash commands are offered. */
+  project?: ProjectRef | null;
 };
 
 export function useSessionAcpSelectorContext({
@@ -24,6 +32,7 @@ export function useSessionAcpSelectorContext({
   selectedModeId,
   selectedModelId,
   configOptionValues,
+  project,
 }: UseSessionAcpSelectorContextArgs) {
   const { machine: sessionMachine, machineFlockRows } = useResolvedMachineMeta(machineId);
   const acpTarget = useMemo(
@@ -47,7 +56,10 @@ export function useSessionAcpSelectorContext({
     ]
   );
   const selectorOptions = useAcpSelectorOptions(acpTarget);
-  const availableCommands = useAvailableCommands(acpTarget);
+  const availableCommands = useAvailableCommands({
+    ...acpTarget,
+    commandScopeKey: getAcpCommandScopeKey(project),
+  });
 
   return {
     ...selectorOptions,

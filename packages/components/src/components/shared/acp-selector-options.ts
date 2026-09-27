@@ -199,7 +199,9 @@ export type AcpSelectorTarget = {
   selectedModelId?: string | null;
   configOptionValues?: Record<string, AcpConfigOptionValue>;
   runtimeOverrides?: BuiltinRuntimeOverrides;
-  machine?: Pick<MachineViewMeta, 'acpCapabilities'> | null;
+  /** `getAcpCommandScopeKey` of the target project; selects its slash-command delta. */
+  commandScopeKey?: string | null;
+  machine?: Pick<MachineViewMeta, 'acpCapabilities' | 'acpCommandScopes'> | null;
 };
 
 /**

@@ -33,6 +33,7 @@ import type { PlanEntry } from '@agentclientprotocol/sdk';
 import type { MachineProtocolCapabilities } from './machine-protocol-capabilities';
 export * from 'loro-mirror';
 import type { RateLimit } from 'acp-extension-core';
+import type { AcpCommandScopeDelta } from './acp-command-scope';
 
 export const RATE_LIMIT_ENTRY_KEY_SEPARATOR = '::';
 
@@ -1261,6 +1262,8 @@ export type MachineLegacyMetaFields = {
 export type MachineViewMeta = MachineMeta &
   Omit<MachineLegacyMetaFields, 'raceLimits'> & {
     raceLimits: Record<string, RateLimit>;
+    /** Project slash-command deltas by capability cache key, then command scope key. */
+    acpCommandScopes?: Record<string, Record<string, AcpCommandScopeDelta>>;
   };
 
 export const getMachineHostType = (meta: Pick<MachineMeta, 'hostType'>): MachineHostType =>

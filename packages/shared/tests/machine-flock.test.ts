@@ -8,6 +8,7 @@ import {
   deleteAgentConfigFromFlock,
   deleteMachineFlockRowFromFlock,
   getMachineFlockAcpCapabilities,
+  getMachineFlockAcpCommandScopes,
   getMachineFlockAgentConfigs,
   getMachineFlockBuiltinAgentOptOuts,
   getMachineFlockDeleteLocalProjectEntries,
@@ -373,6 +374,29 @@ describe('machine Flock helpers', () => {
     });
   });
 
+  it('round-trips project command scope rows and rejects malformed deltas', () => {
+    const flock = new FakeMachineFlock();
+    const configId = 'config-1' as AgentConfigId;
+    const delta = { sourceVersion: 'v1', added: [{ name: 'skill' }], removed: ['old'] };
+
+    expect(
+      writeMachineFlockRowToFlock(flock, {
+        key: machineFlockKeys.acpCommandScope(configId, 'local:p1'),
+        value: delta,
+      })
+    ).toBe(true);
+    expect(
+      writeMachineFlockRowToFlock(flock, {
+        key: machineFlockKeys.acpCommandScope(configId, 'local:p2'),
+        value: { sourceVersion: 'v1', added: [{ description: 'no name' }], removed: [] } as never,
+      })
+    ).toBe(false);
+
+    expect(getMachineFlockAcpCommandScopes(readMachineFlockRowsFromFlock(flock))).toEqual({
+      [getAcpCapabilityCacheKey(configId)]: { 'local:p1': delta },
+    });
+  });
+
   it('extracts agent config rows', () => {
     const agentConfigId = 'config-1' as AgentConfigId;
     const row = {
@@ -622,6 +646,25 @@ describe('machine Flock helpers', () => {
       expect(flock.commits).toBe(1);
       expect(getMachineFlockAgentConfigs(readMachineFlockRowsFromFlock(flock))).toEqual({});
       expect(optOuts(flock)).toEqual(new Set(['kimi']));
+    });
+
+    it('deleting a config removes its project command scopes and keeps other configs', () => {
+      const flock = new FakeMachineFlock();
+      writeAgentConfigToFlock(flock, kimi('a'));
+      writeAgentConfigToFlock(flock, kimi('b'));
+      const delta = { sourceVersion: 'v1', added: [{ name: 'skill' }], removed: [] };
+      for (const config of [kimi('a'), kimi('b')]) {
+        writeMachineFlockRowToFlock(flock, {
+          key: machineFlockKeys.acpCommandScope(config.id, 'local:p1'),
+          value: delta,
+        });
+      }
+
+      deleteAgentConfigFromFlock(flock, kimi('a'), 1700);
+
+      expect(
+        Object.keys(getMachineFlockAcpCommandScopes(readMachineFlockRowsFromFlock(flock)))
+      ).toEqual([getAcpCapabilityCacheKey(kimi('b').id)]);
     });
 
     it('deleting one of several configs of a type does not record an opt-out', () => {

@@ -291,6 +291,7 @@ export const DraftSessionChatInterface = memo(
         selectedModeId: sessionConfigCandidates.modeId,
         selectedModelId: sessionConfigCandidates.modelId,
         configOptionValues: sessionConfigCandidates.configOptionValues,
+        project: parentSession.project,
       });
       const selectorOptions = useMemo(
         () => ({

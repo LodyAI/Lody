@@ -2202,6 +2202,7 @@ export const SessionChatInterface = memo(
       selectedModeId: sessionConfigCandidates.modeId,
       selectedModelId: sessionConfigCandidates.modelId,
       configOptionValues: sessionConfigCandidates.configOptionValues,
+      project: session.project,
     });
     const steerCapability = session.agentConfigId
       ? sessionMachine?.acpCapabilities?.[getAcpCapabilityCacheKey(session.agentConfigId)]

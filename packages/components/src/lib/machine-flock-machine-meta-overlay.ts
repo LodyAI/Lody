@@ -1,5 +1,6 @@
 import {
   getMachineFlockAcpCapabilities,
+  getMachineFlockAcpCommandScopes,
   getMachineFlockDeleteLocalProjectIds,
   getMachineFlockLocalProjects,
   getMachineFlockRateLimits,
@@ -81,11 +82,13 @@ export function mergeMachineFlockMachineMeta(
     const localProjects = getMachineFlockLocalProjects(rows);
     const deletedLocalProjectIds = getMachineFlockDeleteLocalProjectIds(rows);
     const acpCapabilities = getMachineFlockAcpCapabilities(rows);
+    const acpCommandScopes = getMachineFlockAcpCommandScopes(rows);
     const rateLimits = getMachineFlockRateLimits(rows);
     if (
       Object.keys(localProjects).length === 0 &&
       deletedLocalProjectIds.size === 0 &&
       Object.keys(acpCapabilities).length === 0 &&
+      Object.keys(acpCommandScopes).length === 0 &&
       Object.keys(rateLimits).length === 0
     ) {
       continue;
@@ -111,6 +114,9 @@ export function mergeMachineFlockMachineMeta(
             },
           }
         : {}),
+      // Scope rows exist only in the machine Flock doc, so they replace rather
+      // than merge: a deleted row must disappear from the view.
+      ...(Object.keys(acpCommandScopes).length > 0 ? { acpCommandScopes } : {}),
       ...(Object.keys(rateLimits).length > 0
         ? {
             raceLimits: mergeRateLimits(machine.raceLimits, rateLimits),

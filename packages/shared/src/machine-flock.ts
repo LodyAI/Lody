@@ -12,6 +12,7 @@ import {
   type CliType,
   type ManagedBuiltinAgentType,
 } from './ai';
+import { isAcpCommandScopeDelta, type AcpCommandScopeDelta } from './acp-command-scope';
 import type { AgentConfigId, MachineId, SessionId, WorkspaceId } from './ids';
 import type { LocalProjectWorktreeCleanupItem, LocalProjectWorktreeCleanupResult } from './message';
 import type {
@@ -175,6 +176,8 @@ export type MachineFlockProviderSetupKey = ['providerSetup', AgentConfigId];
 export type MachineFlockProviderSetupCancellationKey = ['providerSetupCancellation', AgentConfigId];
 export type MachineFlockAgentConfigIndexKey = ['agentConfigIndex', AgentConfigId];
 export type MachineFlockAcpCapabilityKey = ['acpCapability', AgentConfigId];
+/** Per-project slash-command delta over the config's base list, keyed by `getAcpCommandScopeKey`. */
+export type MachineFlockAcpCommandScopeKey = ['acpCommandScope', AgentConfigId, string];
 export type MachineFlockRateLimitKey = ['rateLimit', CliType, string];
 export type MachineFlockBuiltinAgentOptOutKey = ['builtinAgentOptOut', ManagedBuiltinAgentType];
 /** @deprecated Compatibility read/cleanup only. New writers must not store launch config per session. */
@@ -191,6 +194,7 @@ export type MachineFlockKey =
   | MachineFlockProviderSetupCancellationKey
   | MachineFlockAgentConfigIndexKey
   | MachineFlockAcpCapabilityKey
+  | MachineFlockAcpCommandScopeKey
   | MachineFlockRateLimitKey
   | MachineFlockBuiltinAgentOptOutKey
   | MachineFlockSessionLaunchConfigKey;
@@ -233,6 +237,12 @@ export type ParsedMachineFlockKey =
       kind: 'acpCapability';
       key: MachineFlockAcpCapabilityKey;
       configId: AgentConfigId;
+    }
+  | {
+      kind: 'acpCommandScope';
+      key: MachineFlockAcpCommandScopeKey;
+      configId: AgentConfigId;
+      scopeKey: string;
     }
   | {
       kind: 'rateLimit';
@@ -288,6 +298,11 @@ export const machineFlockKeys = {
   acpCapability: (configId: AgentConfigId): MachineFlockAcpCapabilityKey => [
     'acpCapability',
     configId,
+  ],
+  acpCommandScope: (configId: AgentConfigId, scopeKey: string): MachineFlockAcpCommandScopeKey => [
+    'acpCommandScope',
+    configId,
+    scopeKey,
   ],
   rateLimit: (cliType: CliType, limitId: string): MachineFlockRateLimitKey => [
     'rateLimit',
@@ -408,6 +423,21 @@ export const parseMachineFlockKey = (
     };
   }
 
+  if (
+    key.length === 3 &&
+    key[0] === 'acpCommandScope' &&
+    isNonEmptyString(key[1]) &&
+    isNonEmptyString(key[2])
+  ) {
+    const configId = key[1] as AgentConfigId;
+    return {
+      kind: 'acpCommandScope',
+      key: machineFlockKeys.acpCommandScope(configId, key[2]),
+      configId,
+      scopeKey: key[2],
+    };
+  }
+
   if (key.length === 3 && key[0] === 'rateLimit' && isCliType(key[1]) && isNonEmptyString(key[2])) {
     return {
       kind: 'rateLimit',
@@ -459,6 +489,7 @@ export type MachineFlockRow =
     }
   | { key: MachineFlockAgentConfigIndexKey; value: AgentConfigListSummary }
   | { key: MachineFlockAcpCapabilityKey; value: AcpCapabilityCacheEntry }
+  | { key: MachineFlockAcpCommandScopeKey; value: AcpCommandScopeDelta }
   | { key: MachineFlockRateLimitKey; value: RateLimit }
   | { key: MachineFlockBuiltinAgentOptOutKey; value: BuiltinAgentOptOut }
   | { key: MachineFlockSessionLaunchConfigKey; value: SessionLaunchConfig };
@@ -501,6 +532,7 @@ export type MachineFlockRowFamily =
   | 'providerSetupCancellation'
   | 'agentConfigIndex'
   | 'acpCapability'
+  | 'acpCommandScope'
   | 'rateLimit'
   | 'builtinAgentOptOut'
   | 'sessionLaunchConfig';
@@ -516,6 +548,7 @@ const MACHINE_FLOCK_ROW_FAMILY_PREFIXES: Record<MachineFlockRowFamily, readonly 
   providerSetupCancellation: ['providerSetupCancellation'],
   agentConfigIndex: ['agentConfigIndex'],
   acpCapability: ['acpCapability'],
+  acpCommandScope: ['acpCommandScope'],
   rateLimit: ['rateLimit'],
   builtinAgentOptOut: ['builtinAgentOptOut'],
   sessionLaunchConfig: ['sessionLaunchConfig'],
@@ -584,6 +617,11 @@ const isMachineFlockAcpCapabilityRow = (
   row: MachineFlockRow
 ): row is Extract<MachineFlockRow, { key: MachineFlockAcpCapabilityKey }> =>
   row.key[0] === 'acpCapability';
+
+const isMachineFlockAcpCommandScopeRow = (
+  row: MachineFlockRow
+): row is Extract<MachineFlockRow, { key: MachineFlockAcpCommandScopeKey }> =>
+  row.key[0] === 'acpCommandScope';
 
 const isMachineFlockAgentConfigRow = (
   row: MachineFlockRow
@@ -662,6 +700,31 @@ export function getMachineFlockAcpCapabilities(
     capabilities[getAcpCapabilityCacheKey(row.key[1])] = row.value;
   }
   return capabilities;
+}
+
+/** Project command deltas by capability cache key, then by command scope key. */
+export function getMachineFlockAcpCommandScopes(
+  rows: MachineFlockRowMap
+): Record<string, Record<string, AcpCommandScopeDelta>> {
+  const scopes: Record<string, Record<string, AcpCommandScopeDelta>> = {};
+  for (const row of Object.values(rows)) {
+    if (!isMachineFlockAcpCommandScopeRow(row)) {
+      continue;
+    }
+    const configKey = getAcpCapabilityCacheKey(row.key[1]);
+    (scopes[configKey] ??= {})[row.key[2]] = row.value;
+  }
+  return scopes;
+}
+
+/** Command scope rows belonging to one agent config, for cleanup when it is deleted. */
+export function getMachineFlockAcpCommandScopeKeysForConfig(
+  rows: MachineFlockRowMap,
+  configId: AgentConfigId
+): MachineFlockAcpCommandScopeKey[] {
+  return Object.values(rows).flatMap((row) =>
+    isMachineFlockAcpCommandScopeRow(row) && row.key[1] === configId ? [row.key] : []
+  );
 }
 
 export function getMachineFlockAgentConfigs(
@@ -874,12 +937,13 @@ export function deleteAgentConfigFromFlock(
   nowMs: number
 ): boolean {
   const rows = readMachineFlockRowsFromFlock(flock, {
-    families: ['agentConfig', 'builtinAgentOptOut'],
+    families: ['agentConfig', 'builtinAgentOptOut', 'acpCommandScope'],
   });
   const key = machineFlockKeys.agentConfig(config.id);
   const rowExists = serializeMachineFlockKey(key) in rows;
   const optOut = planBuiltinAgentOptOutForDeletedConfig(rows, config, nowMs);
-  if (!rowExists && !optOut) {
+  const commandScopeKeys = getMachineFlockAcpCommandScopeKeysForConfig(rows, config.id);
+  if (!rowExists && !optOut && commandScopeKeys.length === 0) {
     return false;
   }
   if (optOut) {
@@ -887,6 +951,9 @@ export function deleteAgentConfigFromFlock(
   }
   if (rowExists) {
     flock.delete(key, nowMs);
+  }
+  for (const scopeKey of commandScopeKeys) {
+    flock.delete(scopeKey, nowMs);
   }
   flock.commit();
   return true;
@@ -1076,6 +1143,8 @@ export function parseMachineFlockRow(
     }
     case 'acpCapability':
       return isAcpCapabilityCacheEntry(value) ? { key: parsedKey.key, value } : undefined;
+    case 'acpCommandScope':
+      return isAcpCommandScopeDelta(value) ? { key: parsedKey.key, value } : undefined;
     case 'rateLimit':
       return isRecord(value) ? { key: parsedKey.key, value: value as RateLimit } : undefined;
     case 'builtinAgentOptOut': {

@@ -1,6 +1,7 @@
 import { atom } from 'jotai';
 import {
   AGENT_CONFIG_DOC_PREFIX,
+  getMachineFlockAcpCommandScopeKeysForConfig,
   getMachineFlockAgentConfigs,
   getMachineFlockProviderSetups,
   getMachineFlockDocId,
@@ -86,6 +87,10 @@ async function deleteAgentConfigFromMachineFlock(
   }
   await runtime.writer.flockRowDelete(flockDocId, key);
   delete rows[serializeMachineFlockKey(key)];
+  for (const scopeKey of getMachineFlockAcpCommandScopeKeysForConfig(rows, config.id)) {
+    await runtime.writer.flockRowDelete(flockDocId, scopeKey);
+    delete rows[serializeMachineFlockKey(scopeKey)];
+  }
   return rows;
 }
 

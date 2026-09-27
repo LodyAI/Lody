@@ -26,6 +26,7 @@ import {
   migratePiProvider,
   machineSupportsProtocolCapability,
   MACHINE_PROTOCOL_CAPABILITIES,
+  getAcpCommandScopeKey,
   getMachineFlockDocId,
   machineFlockKeys,
   hashAnalyticsId,
@@ -532,6 +533,7 @@ const CHAT_LANDING_MACHINE_FLOCK_FAMILIES = [
   'localProject',
   'deleteLocalProjectCommand',
   'acpCapability',
+  'acpCommandScope',
   'rateLimit',
   'agentConfig',
   'providerSetup',
@@ -1822,6 +1824,12 @@ function WorkspaceChatLanding({
     cliType: selectedConfig?.cliType,
     agentType: selectedConfig?.agentType,
     runtimeOverrides: selectedConfig?.runtimeOverrides,
+    commandScopeKey:
+      contextType === 'local' && activeLocalProjectId
+        ? getAcpCommandScopeKey({ kind: 'local', localProjectId: activeLocalProjectId })
+        : contextType === 'github' && selectedRepo
+          ? getAcpCommandScopeKey({ kind: 'github', repoFullName: selectedRepo })
+          : undefined,
     machine: selectedMachine,
   });
   // Filters the `$` skill mention to the selected provider's skill directories.

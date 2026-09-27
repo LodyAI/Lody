@@ -23,6 +23,7 @@ export function useResolvedMachineMeta(
       'localProject',
       'deleteLocalProjectCommand',
       'acpCapability',
+      'acpCommandScope',
       'rateLimit',
     ],
     remoteSyncDelayMs: RESOLVED_MACHINE_FLOCK_REMOTE_SYNC_DELAY_MS,

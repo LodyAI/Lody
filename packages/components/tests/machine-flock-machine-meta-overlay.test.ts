@@ -12,6 +12,7 @@ import {
 } from '@lody/shared';
 
 import { mergeMachineFlockMachineMeta } from '../src/lib/machine-flock-machine-meta-overlay';
+import { resolveAvailableCommands } from '../src/hooks/use-available-commands';
 
 describe('machine Flock machine meta overlay', () => {
   it('merges local project rows over legacy machine meta', () => {
@@ -207,5 +208,58 @@ describe('machine Flock machine meta overlay', () => {
   it('keeps the same map reference when there are no Flock rows', () => {
     const machines = new Map<MachineId, MachineViewMeta>();
     expect(mergeMachineFlockMachineMeta(machines, new Map())).toBe(machines);
+  });
+
+  it('offers a project its own slash commands on top of the config base list', () => {
+    const machineId = 'machine-1' as MachineId;
+    const configId = 'config-1' as AgentConfigId;
+    const machine: MachineViewMeta = {
+      id: machineId,
+      name: 'Machine',
+      cliVersion: '',
+      os: '',
+      sessions: [],
+    };
+    const capabilityRow = {
+      key: machineFlockKeys.acpCapability(configId),
+      value: {
+        cliType: 'custom',
+        agentType: 'agent',
+        cacheVersion: 2,
+        sourceVersion: 'v1',
+        modes: [],
+        models: [],
+        availableCommands: [{ name: 'help' }, { name: 'review' }],
+        fetchedAt: 1,
+      },
+    } as const;
+    const scopeRow = {
+      key: machineFlockKeys.acpCommandScope(configId, 'local:p1'),
+      value: { sourceVersion: 'v1', added: [{ name: 'deploy' }], removed: ['review'] },
+    } as const;
+    const merged = mergeMachineFlockMachineMeta(
+      new Map([[machineId, machine]]),
+      new Map([
+        [
+          machineId,
+          {
+            [serializeMachineFlockKey(capabilityRow.key)]: capabilityRow,
+            [serializeMachineFlockKey(scopeRow.key)]: scopeRow,
+          },
+        ],
+      ])
+    ).get(machineId);
+    const commandsFor = (commandScopeKey?: string) =>
+      resolveAvailableCommands({
+        configId,
+        cliType: 'custom',
+        agentType: 'agent',
+        commandScopeKey,
+        machine: merged,
+      }).map((command) => command.name);
+
+    expect(commandsFor('local:p1')).toEqual(['help', 'deploy']);
+    expect(commandsFor('local:other')).toEqual(['help', 'review']);
+    expect(commandsFor(undefined)).toEqual(['help', 'review']);
   });
 });

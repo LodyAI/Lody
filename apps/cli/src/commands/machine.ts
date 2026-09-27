@@ -2,6 +2,7 @@ import { Command } from 'commander';
 import { addDiscoveryOptions, runDiscoveryList, type DiscoveryCommandOptions } from './discovery';
 import {
   getMachineFlockAcpCapabilities,
+  getMachineFlockAcpCommandScopes,
   getMachineFlockDocId,
   getMachineFlockRateLimits,
   isMachineDocRoomId,
@@ -46,7 +47,7 @@ type MachineRateLimits = MachineViewMeta['raceLimits'];
 type MachineOnlineStatus = 'online' | 'offline' | 'unknown';
 
 type MachineListEntry = MachineMeta &
-  Pick<MachineViewMeta, 'acpCapabilities' | 'raceLimits'> & {
+  Pick<MachineViewMeta, 'acpCapabilities' | 'acpCommandScopes' | 'raceLimits'> & {
     online: boolean;
     onlineStatus: MachineOnlineStatus;
     agentConfigs?: AgentConfigMeta[];
@@ -146,15 +147,23 @@ async function mergeMachineFlockJsonState(
 ): Promise<MachineListEntry> {
   const handle = await repo.openFlockDoc(getMachineFlockDocId(workspaceId, machine.id));
   const rows = readMachineFlockRowsFromFlock(handle.flock, {
-    families: includeAcpCapabilities ? ['acpCapability', 'rateLimit'] : ['rateLimit'],
+    families: includeAcpCapabilities
+      ? ['acpCapability', 'acpCommandScope', 'rateLimit']
+      : ['rateLimit'],
   });
   const acpCapabilities = includeAcpCapabilities ? getMachineFlockAcpCapabilities(rows) : {};
+  const acpCommandScopes = includeAcpCapabilities ? getMachineFlockAcpCommandScopes(rows) : {};
   const rateLimits = getMachineFlockRateLimits(rows);
-  if (Object.keys(acpCapabilities).length === 0 && Object.keys(rateLimits).length === 0) {
+  if (
+    Object.keys(acpCapabilities).length === 0 &&
+    Object.keys(acpCommandScopes).length === 0 &&
+    Object.keys(rateLimits).length === 0
+  ) {
     return machine;
   }
   return {
     ...machine,
+    ...(Object.keys(acpCommandScopes).length > 0 ? { acpCommandScopes } : {}),
     ...(Object.keys(acpCapabilities).length > 0
       ? {
           acpCapabilities: {
@@ -174,10 +183,13 @@ async function mergeMachineFlockJsonState(
 export function toMachineJsonEntry(
   machine: MachineListEntry,
   options: { includeAcpCapabilities: boolean; includeAgents: boolean }
-): MachineListEntry | Omit<MachineListEntry, 'acpCapabilities' | 'agentConfigs'> {
+):
+  | MachineListEntry
+  | Omit<MachineListEntry, 'acpCapabilities' | 'acpCommandScopes' | 'agentConfigs'> {
   const withoutOptional = { ...machine };
   if (!options.includeAcpCapabilities) {
     delete withoutOptional.acpCapabilities;
+    delete withoutOptional.acpCommandScopes;
   }
   if (!options.includeAgents) {
     delete withoutOptional.agentConfigs;

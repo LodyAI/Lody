@@ -12,6 +12,11 @@ import {
   isAcpCapabilityCacheEntryCurrent,
   type AcpCapabilityCacheEntry,
 } from '../src/ai';
+import {
+  applyAcpCommandScopeDelta,
+  computeAcpCommandScopeDelta,
+  getAcpCommandScopeKey,
+} from '../src/acp-command-scope';
 
 const entry = (cacheVersion?: number): AcpCapabilityCacheEntry => ({
   cliType: 'builtin',
@@ -216,5 +221,44 @@ describe('ACP capability fetch-time renewal', () => {
     expect(
       shouldRenewAcpCapabilityFetchTime({ fetchedAt: 0 }, ACP_CAPABILITY_FETCH_TIME_RENEW_AFTER_MS)
     ).toBe(true);
+  });
+});
+
+describe('ACP command scope deltas', () => {
+  const base = [
+    { name: 'help', description: 'Help' },
+    { name: 'review', description: 'Review' },
+  ];
+
+  it('rebuilds a project list from the base, including overrides and removals', () => {
+    const project = [
+      { name: 'help', description: 'Project help' },
+      { name: 'deploy', description: 'Deploy' },
+    ];
+    const delta = computeAcpCommandScopeDelta(base, project, 'v1');
+
+    expect(delta).toEqual({
+      sourceVersion: 'v1',
+      added: project,
+      removed: ['review'],
+    });
+    expect(applyAcpCommandScopeDelta(base, 'v1', delta)).toEqual(project);
+  });
+
+  it('keeps no delta for a project whose commands equal the base', () => {
+    expect(computeAcpCommandScopeDelta(base, [...base].reverse(), 'v1')).toBeUndefined();
+  });
+
+  it('ignores a delta computed against another source version', () => {
+    const delta = computeAcpCommandScopeDelta(base, [...base, { name: 'deploy' }], 'v1');
+
+    expect(applyAcpCommandScopeDelta(base, 'v2', delta)).toEqual(base);
+  });
+
+  it('shares one scope across worktrees and GitHub name casing', () => {
+    expect(getAcpCommandScopeKey({ kind: 'github', repoFullName: 'LodyAI/Lody' })).toBe(
+      getAcpCommandScopeKey({ kind: 'github', repoFullName: 'lodyai/lody' })
+    );
+    expect(getAcpCommandScopeKey(undefined)).toBeUndefined();
   });
 });

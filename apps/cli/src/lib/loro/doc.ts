@@ -45,6 +45,8 @@ import {
   shouldRenewAcpCapabilityFetchTime,
   isLoroRepoDocDeleted,
   getMachineFlockAcpCapabilities,
+  computeAcpCommandScopeDelta,
+  deleteMachineFlockRowFromFlock,
   getMachineFlockProviderSetupCancellations,
   getMachineFlockProviderSetups,
   getMachineFlockDocId,
@@ -54,6 +56,7 @@ import {
   writeMachineFlockRowToFlock,
   type AcpConfigOptionSummary,
   type AcpCommandSummary,
+  type AcpCommandScopeDelta,
   type SessionGoalAction,
   type AcpCapabilityCacheEntry,
   type SessionForkOperation,
@@ -1554,7 +1557,7 @@ export class LoroDocumentManager {
     modelReasoningEfforts?: Record<string, string[]>,
     acknowledgedSteer = false,
     goalActions?: SessionGoalAction[],
-    options: { signal?: AbortSignal; sessionTitle?: boolean } = {}
+    options: AcpCapabilityWriteOptions = {}
   ): Promise<AcpCapabilityCacheEntry> {
     options.signal?.throwIfAborted();
     if (!this.machine) {
@@ -1591,9 +1594,15 @@ export class LoroDocumentManager {
   }
 
   private createMachineDocument(machineId: MachineId): MachineDocument {
-    return new MachineDocument(this.repo, this.workspaceId, machineId, (reason) => {
-      this.markMachineFlockDocDirty(machineId, { reason });
-    });
+    return new MachineDocument(
+      this.repo,
+      this.workspaceId,
+      machineId,
+      (reason) => {
+        this.markMachineFlockDocDirty(machineId, { reason });
+      },
+      this.logger
+    );
   }
 
   /**
@@ -2347,8 +2356,23 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
       prev.acpRuntimeConfig = next;
       return prev;
     });
+    // Each write bumps the snapshot revision and syncs the session doc, so a
+    // per-turn count shows when config reports cost more than one write.
+    this.runtimeConfigWrites =
+      this.runtimeConfigWrites.turnId === basedOnUserTurnId
+        ? { turnId: basedOnUserTurnId, count: this.runtimeConfigWrites.count + 1 }
+        : { turnId: basedOnUserTurnId, count: 1 };
+    this.logger.debug(
+      `[acp-runtime-config] write session=${this.sessionId} turn=${basedOnUserTurnId} ` +
+        `revision=${next.revision} bytes=${JSON.stringify(next).length} writesThisTurn=${this.runtimeConfigWrites.count}`
+    );
     return true;
   }
+
+  private runtimeConfigWrites: { turnId: string | null; count: number } = {
+    turnId: null,
+    count: 0,
+  };
 
   async markHistoryAsSeen(turnId: string): Promise<void> {
     if (!this.sessionDataInstance) {
@@ -2980,20 +3004,82 @@ const serializeAcpCapabilityWithoutFetchTime = (entry: AcpCapabilityCacheEntry):
     acknowledgedSteer: entry.acknowledgedSteer,
     sessionTitle: entry.sessionTitle,
     sessionForkWorktree: entry.sessionForkWorktree,
+    goalActions: entry.goalActions,
   });
+
+const ACP_CAPABILITY_COMPARED_FIELDS = [
+  'cliType',
+  'agentType',
+  'cacheVersion',
+  'provenance',
+  'sourceVersion',
+  'modes',
+  'models',
+  'configOptions',
+  'modelReasoningEfforts',
+  'availableCommands',
+  'sessionFork',
+  'acknowledgedSteer',
+  'sessionTitle',
+  'sessionForkWorktree',
+  'goalActions',
+] as const satisfies readonly (keyof AcpCapabilityCacheEntry)[];
+
+/** Top-level fields that differ, for write diagnostics. */
+const diffAcpCapabilityFields = (
+  existing: AcpCapabilityCacheEntry | undefined,
+  entry: AcpCapabilityCacheEntry
+): string[] =>
+  existing
+    ? ACP_CAPABILITY_COMPARED_FIELDS.filter(
+        (field) => JSON.stringify(existing[field]) !== JSON.stringify(entry[field])
+      )
+    : ['(new)'];
+
+/**
+ * Where a capability write comes from. A probe runs in the daemon's own
+ * directory and owns the base command list; a created session runs in its
+ * project's directory, so its extra commands go to that project's scope row.
+ */
+export type AcpCapabilityWriteSource = 'probe' | 'session';
+
+export type AcpCapabilityWriteOptions = {
+  signal?: AbortSignal;
+  sessionTitle?: boolean;
+  source?: AcpCapabilityWriteSource;
+  /** `getAcpCommandScopeKey(project)` of a created session; absent for chat sessions. */
+  commandScopeKey?: string;
+};
+
+type MachineFlockWriteStats = { writes: number; bytes: number; skipped: number };
 
 export class MachineDocument implements LoroDocument<{}, MachineMeta> {
   roomId: string;
   handle: RepoDocHandle | null = null;
   private rateLimitsUpdateQueue: Promise<void> = Promise.resolve();
 
+  /** Cumulative write counters since daemon start, logged with every write attempt. */
+  private readonly capabilityWriteStats: Record<
+    'acpCapability' | 'acpCommandScope',
+    MachineFlockWriteStats
+  > = {
+    acpCapability: { writes: 0, bytes: 0, skipped: 0 },
+    acpCommandScope: { writes: 0, bytes: 0, skipped: 0 },
+  };
+
   constructor(
     private repo: LoroRepo,
     private workspaceId: WorkspaceId,
     private machineId: MachineId,
-    private markMachineFlockDirty?: (reason: string) => void
+    private markMachineFlockDirty?: (reason: string) => void,
+    private logger?: Logger
   ) {
     this.roomId = getMachineRoomId(this.machineId);
+  }
+
+  private formatCapabilityWriteTotals(): string {
+    const { acpCapability: cap, acpCommandScope: scope } = this.capabilityWriteStats;
+    return `capability=${cap.writes}w/${cap.bytes}B/${cap.skipped}s commandScope=${scope.writes}w/${scope.bytes}B/${scope.skipped}s`;
   }
 
   async setMetaState(meta: MachineMetaPatch) {
@@ -3065,9 +3151,10 @@ export class MachineDocument implements LoroDocument<{}, MachineMeta> {
     modelReasoningEfforts?: Record<string, string[]>,
     acknowledgedSteer = false,
     goalActions?: SessionGoalAction[],
-    options: { signal?: AbortSignal; sessionTitle?: boolean } = {}
+    options: AcpCapabilityWriteOptions = {}
   ): Promise<AcpCapabilityCacheEntry> {
     options.signal?.throwIfAborted();
+    const source = options.source ?? 'probe';
     const normalizedModes = modes.map((mode) => ({
       id: mode.id,
       name: mode.name,
@@ -3078,6 +3165,22 @@ export class MachineDocument implements LoroDocument<{}, MachineMeta> {
       name: model.name ?? model.modelId,
       description: model.description ?? undefined,
     }));
+    const handle = await this.openMachineFlockDoc();
+    options.signal?.throwIfAborted();
+    const capabilityKey = getAcpCapabilityCacheKey(configId);
+    const existing = getMachineFlockAcpCapabilities(
+      readMachineFlockRowsFromFlock(handle.flock, { families: ['acpCapability'] })
+    )[capabilityKey];
+    // A created session sees its project's commands on top of the user-level
+    // ones. Writing that list into the per-config row made every session in a
+    // different project rewrite and sync the whole 25-40 KB row, so once a base
+    // for this source version exists, sessions leave it alone and record only
+    // their project's difference.
+    const keepsBaseCommands =
+      source === 'session' &&
+      existing?.sourceVersion === sourceVersion &&
+      existing.availableCommands !== undefined;
+    const baseCommands = keepsBaseCommands ? existing.availableCommands : availableCommands;
     const entry: AcpCapabilityCacheEntry = {
       cliType,
       agentType,
@@ -3087,7 +3190,7 @@ export class MachineDocument implements LoroDocument<{}, MachineMeta> {
       modes: normalizedModes,
       models: normalizedModels,
       configOptions: configOptions?.length ? configOptions : undefined,
-      availableCommands: availableCommands?.length ? availableCommands : undefined,
+      availableCommands: baseCommands?.length ? baseCommands : undefined,
       sessionFork,
       acknowledgedSteer,
       goalActions: goalActions?.length ? goalActions : undefined,
@@ -3099,29 +3202,56 @@ export class MachineDocument implements LoroDocument<{}, MachineMeta> {
           : undefined,
       fetchedAt: getServerNow(),
     };
-    const handle = await this.openMachineFlockDoc();
-    options.signal?.throwIfAborted();
-    const capabilityKey = getAcpCapabilityCacheKey(configId);
-    const existing = getMachineFlockAcpCapabilities(
-      readMachineFlockRowsFromFlock(handle.flock, { families: ['acpCapability'] })
-    )[capabilityKey];
-    if (
+    let result: AcpCapabilityCacheEntry = entry;
+    const unchanged =
       existing &&
       serializeAcpCapabilityWithoutFetchTime(existing) ===
-        serializeAcpCapabilityWithoutFetchTime(entry) &&
-      // Unchanged content is still rewritten once it is old enough: the refresh
-      // cache trusts `fetchedAt`, and an entry never renewed would expire once
-      // and then miss on every later request, re-probing forever.
-      !shouldRenewAcpCapabilityFetchTime(existing, entry.fetchedAt)
-    ) {
-      return existing;
+        serializeAcpCapabilityWithoutFetchTime(entry);
+    const renewal = unchanged && shouldRenewAcpCapabilityFetchTime(existing, entry.fetchedAt);
+    let capabilityOutcome: 'unchanged' | 'renewed' | 'written' = 'unchanged';
+    let capabilityBytes = 0;
+    // Unchanged content is still rewritten once it is old enough: the refresh
+    // cache trusts `fetchedAt`, and an entry never renewed would expire once
+    // and then miss on every later request, re-probing forever.
+    if (unchanged && !renewal) {
+      result = existing;
+      this.capabilityWriteStats.acpCapability.skipped += 1;
+    } else {
+      options.signal?.throwIfAborted();
+      if (
+        writeMachineFlockRowToFlock(handle.flock, {
+          key: machineFlockKeys.acpCapability(configId),
+          value: entry,
+        })
+      ) {
+        capabilityOutcome = renewal ? 'renewed' : 'written';
+        capabilityBytes = JSON.stringify(entry).length;
+        this.capabilityWriteStats.acpCapability.writes += 1;
+        this.capabilityWriteStats.acpCapability.bytes += capabilityBytes;
+      }
     }
-    options.signal?.throwIfAborted();
-    const changed = writeMachineFlockRowToFlock(handle.flock, {
-      key: machineFlockKeys.acpCapability(configId),
-      value: entry,
-    });
-    if (changed) {
+    const scopeOutcome =
+      keepsBaseCommands && options.commandScopeKey && availableCommands
+        ? this.writeAcpCommandScope(
+            handle.flock,
+            configId,
+            options.commandScopeKey,
+            computeAcpCommandScopeDelta(
+              existing.availableCommands ?? [],
+              availableCommands,
+              sourceVersion
+            )
+          )
+        : undefined;
+    this.logger?.debug(
+      `[acp-capabilities] write config=${configId} source=${source} capability=${capabilityOutcome}` +
+        (capabilityOutcome === 'unchanged'
+          ? ''
+          : ` changed=${diffAcpCapabilityFields(existing, entry).join(',') || 'fetchedAt'} bytes=${capabilityBytes}`) +
+        (scopeOutcome ? ` commandScope=${options.commandScopeKey}:${scopeOutcome}` : '') +
+        ` totals: ${this.formatCapabilityWriteTotals()}`
+    );
+    if (capabilityOutcome !== 'unchanged' || (scopeOutcome && scopeOutcome !== 'unchanged')) {
       await this.repo.flush();
       if (this.markMachineFlockDirty) {
         this.markMachineFlockDirty('acp-capability-update');
@@ -3129,7 +3259,33 @@ export class MachineDocument implements LoroDocument<{}, MachineMeta> {
         await handle.syncOnce().catch(() => undefined);
       }
     }
-    return entry;
+    return result;
+  }
+
+  /** Writes, replaces, or removes one project's command delta; returns what happened. */
+  private writeAcpCommandScope(
+    flock: Parameters<typeof writeMachineFlockRowToFlock>[0],
+    configId: AgentConfigId,
+    scopeKey: string,
+    delta: AcpCommandScopeDelta | undefined
+  ): 'unchanged' | 'written' | 'deleted' {
+    const key = machineFlockKeys.acpCommandScope(configId, scopeKey);
+    const stats = this.capabilityWriteStats.acpCommandScope;
+    if (!delta) {
+      if (deleteMachineFlockRowFromFlock(flock, key)) {
+        stats.writes += 1;
+        return 'deleted';
+      }
+      stats.skipped += 1;
+      return 'unchanged';
+    }
+    if (writeMachineFlockRowToFlock(flock, { key, value: delta })) {
+      stats.writes += 1;
+      stats.bytes += JSON.stringify(delta).length;
+      return 'written';
+    }
+    stats.skipped += 1;
+    return 'unchanged';
   }
 
   async getAcpCapabilities(configId: AgentConfigId): Promise<AcpCapabilityCacheEntry | undefined> {

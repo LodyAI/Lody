@@ -3453,7 +3453,8 @@ describe('SessionExecutionService', () => {
           true,
           // Goal actions: the fixture client advertises no goal extension.
           undefined,
-          { sessionTitle }
+          // The session's project scopes its extra slash commands.
+          { sessionTitle, source: 'session', commandScopeKey: `local:${localProjectId}` }
         )
       );
     }
@@ -9123,8 +9124,10 @@ describe('SessionExecutionService initialization deadline', () => {
         refreshGhTokenForSession: vi.fn(async () => {}),
       } as unknown as SessionManager,
       workspaceDocument,
-      startSessionActivePresence: (sessionId: SessionId, phase?: SessionActivePresencePhase | null) =>
-        presence.start(sessionId, phase),
+      startSessionActivePresence: (
+        sessionId: SessionId,
+        phase?: SessionActivePresencePhase | null
+      ) => presence.start(sessionId, phase),
       setSessionActivePresencePhase: (
         sessionId: SessionId,
         phase: SessionActivePresencePhase | null,
@@ -9211,9 +9214,9 @@ describe('SessionExecutionService initialization deadline', () => {
 
       // The turn runtime is released, so the session stops counting as active
       // and becomes collectable again.
-      expect(harness.service.getExecutionSnapshot('session-stalled-init' as SessionId).hasActiveTurn).toBe(
-        false
-      );
+      expect(
+        harness.service.getExecutionSnapshot('session-stalled-init' as SessionId).hasActiveTurn
+      ).toBe(false);
     } finally {
       vi.useRealTimers();
     }

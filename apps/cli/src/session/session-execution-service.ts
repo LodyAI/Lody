@@ -1,6 +1,7 @@
 import { readSessionHistory } from '@lody/shared/session-data';
 import { readLatestTurn } from '@lody/shared/session-data';
 import {
+  getAcpCommandScopeKey,
   type ACPSessionId,
   type AgentConfigId,
   type AgentConfigCliType,
@@ -5948,16 +5949,9 @@ export class SessionExecutionService {
           runtimeOverrides: config.runtimeOverrides,
           env: config.env,
         });
-      const existing = await this.deps.workspaceDocument.getAcpCapabilities(
-        this.deps.machineId,
-        agentConfigId
-      );
-      const availableCommands =
-        capabilities.availableCommands !== undefined
-          ? capabilities.availableCommands
-          : existing?.sourceVersion === sourceVersion
-            ? existing.availableCommands
-            : undefined;
+      // A session's commands include its project's own; the machine document
+      // keeps the stored base list for this source version and records only the
+      // project's difference, so pass what the session reported, unmerged.
       await this.deps.workspaceDocument.updateAcpCapabilities(
         this.deps.machineId,
         agentConfigId,
@@ -5966,13 +5960,17 @@ export class SessionExecutionService {
         capabilities.modes,
         capabilities.models,
         capabilities.configOptions,
-        availableCommands,
+        capabilities.availableCommands,
         capabilities.sessionFork,
         sourceVersion,
         capabilities.modelReasoningEfforts,
         capabilities.acknowledgedSteer,
         capabilities.goalActions,
-        { sessionTitle: capabilities.sessionTitle }
+        {
+          sessionTitle: capabilities.sessionTitle,
+          source: 'session',
+          commandScopeKey: getAcpCommandScopeKey(config.project),
+        }
       );
       this.acpCapabilityLaunchInputFingerprints.set(
         agentConfigId,

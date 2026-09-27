@@ -129,3 +129,5 @@ session reconciles/minute. Backoff is flap-aware for the same reason: health tha
 not survive `LODY_LORO_HEALTH_STABILITY_WINDOW_MS` (5s) counts as a failed recovery and
 charges the attempt counter instead of resetting it, and `force` must not clear that
 history. Regression: `tests/reconnect-storm-repro.test.ts`.
+- Session capability writes keep the stored base command list; project extras go to
+  `acpCommandScope` delta rows ([note](../../../../../.agents/notes/implemented/architecture/2026-09-27-acp-command-scope-rows.md)).
