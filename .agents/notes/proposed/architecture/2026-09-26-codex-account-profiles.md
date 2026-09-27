@@ -88,8 +88,8 @@ refresh failure or success. The later
 used two pinned native app-server processes with one isolated file-backed home
 and a barriered local refresh endpoint. Both submitted the same old token; after
 one success and one simulated `refresh_token_reused`, only the winning process
-reported a usable token. No real account, keyring refresh, or existing credential
-was involved.
+reported a usable token. A fresh third process loaded the winner's saved token.
+No real account, keyring refresh, or existing credential was involved.
 
 Executed isolated experiments used synthetic credentials only: system-vault
 set/read/delete; real native API Responses completion without auth.json; different-port

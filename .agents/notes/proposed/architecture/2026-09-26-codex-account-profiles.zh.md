@@ -65,7 +65,8 @@ adapter 的缓解措施另见
 后续[合成刷新实验](../../../../packages/acp-extension-codex/scripts/probe-refresh-contention.mjs)
 让两个固定版本的真实原生 app-server 进程共用隔离的文件凭据目录和带屏障的本地
 刷新端点。两者均提交相同旧 token；一次成功及一次模拟 `refresh_token_reused` 后，
-只有胜者报告可用 token。实验未涉及真实账户、密钥库刷新或既有凭据。
+只有胜者报告可用 token；新启动的第三个进程读到了胜者保存的 token。实验未涉及
+真实账户、密钥库刷新或既有凭据。
 
 已执行的隔离实验仅用合成凭据：系统凭据增读删、无 auth.json 的真实原生 Responses
 完成、跨端口重定向移除密钥、同端口 HTTPS 降级泄漏、转发器保护下完成及阻断降级、
