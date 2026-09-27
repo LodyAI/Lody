@@ -34,7 +34,7 @@ Contract: specs/session-orchestration.md.
   `lastMissingHistoryUserMsgId` ack for that turn and surface `chat_failed`.
 - Retire an already-terminal stale activation into `settledActivationUserMsgId`; never claim the
   marker or rewrite `latestUserMsgId`, and report settled only if none survives.
-- Never re-dispatch a late-arriving history entry; recovery is a fresh send.
+- Never replay late history; recovery is a new send. Use last row per ID; stop no-progress repairs.
 - `hasPendingUserTurnActivation` is the ONLY pending-turn predicate; never compare those two
   pointers in a consumer.
 - Never inspect historical Session documents to infer work, or publish or clear active presence

@@ -40,6 +40,7 @@ import {
 import type { SessionUserResolver, SessionUserProfile } from './session-user-resolver';
 import {
   findNextDispatchableUserTurn,
+  findLastHistoryEntry,
   isActivationAwaitingHistory,
   resolveDispatchTurnInput,
   resolveDispatchAcpSessionId,
@@ -2119,7 +2120,7 @@ export class SessionDispatchWatcher {
       }
 
       const queuedTurnId = queuedItem.userTurnId?.trim() || `queued-${queuedItem.$cid}`;
-      const existing = history.find((entry) => entry.id === queuedTurnId);
+      const existing = findLastHistoryEntry(history, queuedTurnId);
       if (existing) {
         if (existing.role === 'user' && isActivationAwaitingHistory(history, queuedTurnId)) {
           const currentMeta = await sessionDoc.getMetaState();
@@ -2727,35 +2728,45 @@ export class SessionDispatchWatcher {
     meta: SessionMeta,
     isActive: () => boolean = () => true
   ): Promise<{ turn: SessionHistoryInput | null; history: SessionHistoryInput[] }> {
-    await this.deps.executionService.reconcileSteerHistory(meta.id, sessionDoc);
-    const history = readSessionHistory(sessionDoc.sessionData.history);
-    if (!isActive()) {
-      return { turn: null, history };
-    }
-    const turn = findNextDispatchableUserTurn(history, meta);
-    if (turn) {
-      const repaired = await this.maybeRepairAlreadyHandledTurn(sessionDoc, meta, turn, history);
-      if (repaired) {
-        // The repaired entry no longer matches; re-scan so an older repaired
-        // turn cannot mask a genuinely dispatchable newer one.
-        return await this.checkHistoryAndQueue(sessionDoc, meta, isActive);
+    const repairedTurnIds = new Set<string>();
+    while (true) {
+      await this.deps.executionService.reconcileSteerHistory(meta.id, sessionDoc);
+      const history = readSessionHistory(sessionDoc.sessionData.history);
+      if (!isActive()) {
+        return { turn: null, history };
       }
-      // The history copy is authoritative once it syncs; drop the RPC copy.
-      this.consumeStashedRpcTurn(meta.id, turn.id);
-      return { turn, history };
+      const turn = findNextDispatchableUserTurn(history, meta);
+      if (turn) {
+        if (repairedTurnIds.has(turn.id)) {
+          this.deps.logger.warn(
+            `[${meta.id}] Stopping history check: repaired user turn ${turn.id} is still dispatchable`
+          );
+          return { turn: null, history };
+        }
+        const repaired = await this.maybeRepairAlreadyHandledTurn(sessionDoc, meta, turn, history);
+        if (repaired) {
+          // Re-read without retaining recursive frames and stop if the repair
+          // did not retire this identity. A matched write need not change it.
+          repairedTurnIds.add(turn.id);
+          continue;
+        }
+        // The history copy is authoritative once it syncs; drop the RPC copy.
+        this.consumeStashedRpcTurn(meta.id, turn.id);
+        return { turn, history };
+      }
+      if (!isActive()) {
+        return { turn: null, history };
+      }
+      const promoted = await this.promoteNextQueuedMessage(sessionDoc, meta, history);
+      if (!isActive()) {
+        return { turn: null, history };
+      }
+      if (promoted) {
+        this.turnSourceHints.set(`${meta.id}:${promoted.id}`, 'queue');
+        return { turn: promoted, history };
+      }
+      return { turn: this.peekStashedRpcTurn(meta.id, meta, history), history };
     }
-    if (!isActive()) {
-      return { turn: null, history };
-    }
-    const promoted = await this.promoteNextQueuedMessage(sessionDoc, meta, history);
-    if (!isActive()) {
-      return { turn: null, history };
-    }
-    if (promoted) {
-      this.turnSourceHints.set(`${meta.id}:${promoted.id}`, 'queue');
-      return { turn: promoted, history };
-    }
-    return { turn: this.peekStashedRpcTurn(meta.id, meta, history), history };
   }
 
   /**

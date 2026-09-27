@@ -46,6 +46,17 @@ export type SessionWatchSnapshot = {
   hasAccessRetry: boolean;
 };
 
+export function findLastHistoryEntry(
+  history: SessionHistoryInput[],
+  turnId: string
+): SessionHistoryInput | undefined {
+  for (let index = history.length - 1; index >= 0; index--) {
+    const entry = history[index];
+    if (entry?.id === turnId) return entry;
+  }
+  return undefined;
+}
+
 /**
  * Whether an activation can still be explained by history that has not synced.
  *
@@ -57,8 +68,8 @@ export function isActivationAwaitingHistory(
   history: SessionHistoryInput[],
   pendingUserTurnId: string
 ): boolean {
-  const entry = history.find((item) => item.role === 'user' && item.id === pendingUserTurnId);
-  if (!entry) {
+  const entry = findLastHistoryEntry(history, pendingUserTurnId);
+  if (!entry || entry.role !== 'user') {
     return true;
   }
   const status = resolveSessionHistoryStatus(entry);
@@ -289,7 +300,11 @@ export function findNextDispatchableUserTurn(
   history: SessionHistoryInput[],
   meta: SessionMeta
 ): SessionHistoryInput | null {
-  for (const entry of history) {
+  // Concurrent queue promotion and steering can insert the same turn twice.
+  // Match readTurn/updateEntry: only the last stored copy owns that identity.
+  const lastPositions = new Map(history.map((entry, index) => [entry.id, index]));
+  for (const [index, entry] of history.entries()) {
+    if (lastPositions.get(entry.id) !== index) continue;
     if (entry.role !== 'user') {
       continue;
     }

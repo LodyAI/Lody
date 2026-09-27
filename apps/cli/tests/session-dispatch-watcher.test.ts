@@ -8,6 +8,7 @@ import { SessionDocument, type LoroDocumentManager } from '../src/lib/loro/doc';
 import { composeTestSessionDoc } from './session-doc-fixture';
 import { LoroDoc } from 'loro-crdt';
 import { findNextDispatchableUserTurn } from '../src/session/session-dispatch-logic';
+import { createLoroSessionData } from '@lody/shared/session-data';
 import {
   buildMissingEmail,
   getPendingUserTurnActivationId,
@@ -875,6 +876,115 @@ describe('SessionDispatchWatcher', () => {
     expect(continueSession).not.toHaveBeenCalled();
     expect(watcher.hasPendingDispatch(sessionId)).toBe(false);
   });
+
+  it.each([false, true])(
+    'finishes a duplicate-turn check without replay or unbounded repair (blocked write: %s)',
+    async (blockedWrite) => {
+      const id = 'duplicate-queue-steer' as SessionId;
+      let meta = {
+        id,
+        machineId: 'machine-1',
+        userId: 'user-1',
+        createdAt: '2026-09-27T00:00:00Z',
+        cliType: 'builtin',
+        agentType: 'codex',
+        status: { type: 'idle' },
+      } as SessionMeta;
+      const repo = {
+        getDocMeta: async () => ({ meta }),
+        upsertDocMeta: async (_room: string, patch: Partial<SessionMeta>) => {
+          meta = { ...meta, ...patch };
+        },
+      };
+      const doc = new SessionDocument(repo as never, id, async () => {}, createSilentLogger());
+      const loro = new LoroDoc();
+      loro.setPeerId('1');
+      composeTestSessionDoc(doc, { doc: loro });
+      let checks = 0;
+      const watcher = createWatcher({
+        logger: createSilentLogger(),
+        machineId: 'machine-1',
+        workspaceId: 'workspace-1' as WorkspaceId,
+        workspaceDocument: { repo } as never,
+        executionService: {
+          reconcileSteerHistory: async () => {
+            // A deterministic tripwire makes the unfixed regression fail
+            // without starving Vitest's timeout or exhausting the process heap.
+            if (++checks > 4) throw new Error('history repair did not terminate');
+          },
+        } as SessionExecutionService,
+        canUseMachine: createAllowMachineAccess(),
+      });
+      const internal = watcher as unknown as {
+        promoteNextQueuedMessage: (
+          doc: SessionDocument,
+          meta: SessionMeta,
+          history: SessionHistoryInput[]
+        ) => Promise<SessionHistoryInput | null>;
+        checkHistoryAndQueue: (
+          doc: SessionDocument,
+          meta: SessionMeta
+        ) => Promise<{ turn: SessionHistoryInput | null; history: SessionHistoryInput[] }>;
+      };
+      let rendererData: ReturnType<typeof createLoroSessionData> | undefined;
+      try {
+        await doc.pushMessageQueue({
+          userTurnId: 'duplicate',
+          task: 'synthetic queued input',
+          userId: 'user-1',
+          timestamp: '2026-09-27T00:00:00Z',
+          acpSessionConfig: {
+            prompt: 'synthetic queued input',
+            cliType: 'builtin',
+            agentType: 'codex',
+          },
+        } as never);
+        const renderer = LoroDoc.fromSnapshot(loro.export({ mode: 'snapshot' }));
+        renderer.setPeerId('2');
+        rendererData = createLoroSessionData({ sessionId: id, doc: renderer });
+        const promoted = await internal.promoteNextQueuedMessage(doc, meta, []);
+        expect(promoted?.id).toBe('duplicate');
+        if (!promoted) throw new Error('queue promotion failed');
+        // The renderer steers the same queue item before receiving the CLI's
+        // promotion. Independent list inserts retain both business IDs on merge.
+        await rendererData.commands.appendTurn({ ...promoted, status: 'pending_apply' });
+        renderer.getMovableList('mq').delete(0, 1);
+        renderer.commit();
+        loro.import(renderer.export({ mode: 'snapshot' }));
+        await doc.sessionData.commands.applyHistoryAction({
+          kind: 'user-status',
+          turnId: 'duplicate',
+          status: blockedWrite ? 'processing' : 'handled',
+        });
+        await doc.sessionData.commands.appendTurn({
+          id: 'assistant:duplicate',
+          role: 'assistant',
+          userTurnId: 'duplicate',
+          timestamp: '2026-09-27T00:00:01Z',
+          items: [],
+          endedAt: 1,
+          finished: true,
+        });
+        meta = { ...meta, lastHandledUserMsgId: 'duplicate', latestUserMsgId: 'next' };
+        const next = createPendingUserTurn('next', 'next synthetic input');
+        await doc.sessionData.commands.appendTurn(next);
+        const before = loro.getList('history').toJSON();
+        expect(before.filter((entry) => entry.id === 'duplicate')).toHaveLength(2);
+        if (blockedWrite) {
+          vi.spyOn(doc.sessionData.commands, 'applyHistoryAction').mockResolvedValue({
+            matched: true,
+          });
+        }
+        const result = await internal.checkHistoryAndQueue(doc, meta);
+        expect(result.turn?.id ?? null).toBe(blockedWrite ? null : 'next');
+        expect(loro.getList('history').toJSON()).toEqual(before);
+      } finally {
+        vi.restoreAllMocks();
+        rendererData?.dispose();
+        doc.mirror.dispose();
+      }
+    }
+  );
 
   it('repairs a late-arriving entry for an already-handled fast-path turn instead of re-dispatching', async () => {
     const continueSession = vi.fn(async () => {});
