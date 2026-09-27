@@ -1,7 +1,8 @@
 /**
  * The ONE panel treatment for framed conversation content: the plan-exit card's
- * command block, terminal command/output, tool input/output, the permission
- * card, and the proposed plan.
+ * command block, the worktree-script terminal, the permission card, and the
+ * proposed plan. An expanded tool step is not a panel: it is the header-less
+ * sheet in `tool-call-detail.tsx`.
  *
  * The rule is that the HEADER carries the lighter fill and the body stays on the
  * frame's own surface — never the reverse. Panels used to disagree about which

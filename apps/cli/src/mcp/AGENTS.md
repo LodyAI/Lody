@@ -47,6 +47,16 @@ Parent instructions apply.
 
 ## Session tool contracts
 
+- Resource discovery uses `lib/resource-discovery.ts` for CLI and MCP. Resolve the
+  active Turn user for MCP, never the daemon owner. Role list/get use
+  `canReadAgentRole`; explicit Role creation retains its separate existing contract.
+  Preserve unavailable readable Roles and three-state presence. List MCP entries
+  through the allowlisted summary, never return launch/connection credentials.
+- Directory cursors bind resource, workspace, user and filters. Operations additionally
+  bind requester Session and query only that user's machine-local rows; list replies
+  contain no canonical prompt or assistant output. See
+  [discovery Spec](../../../../specs/resource-discovery.md).
+
 - MCP session tools use stable machine/session/agent-config ids and strict, narrow input schemas.
   Create/chat Commands require a caller-chosen Operation id, and Create persists the Operation
   before its fallible availability step: a transient post-accept failure returns the active fixed

@@ -435,7 +435,9 @@ export function createLoroSessionData(options: LoroSessionDataOptions) {
         if (!preview.matched) return { matched: false };
       }
       const target = historyActionTarget(action);
-      if (target !== undefined) writer.updateEntry(target, (entry) => apply([entry])[0] ?? entry);
+      if (action.kind === 'user-status') writer.updateCopies(action.turnId, apply);
+      else if (target !== undefined)
+        writer.updateEntry(target, (entry) => apply([entry])[0] ?? entry);
       else writer.update(apply);
       return { matched };
     },

@@ -1,9 +1,10 @@
-import type {
-  GitHubCheckRunsSummary,
-  GitHubIssueComment,
-  GitHubPullRequestDetails,
-  GitHubReview,
-  GitHubReviewThread,
+import {
+  normalizeCheckRunsSummary,
+  type GitHubCheckRunsSummary,
+  type GitHubIssueComment,
+  type GitHubPullRequestDetails,
+  type GitHubReview,
+  type GitHubReviewThread,
 } from '@lody/shared';
 
 /**
@@ -90,7 +91,15 @@ export async function readPrCacheEntry(
       const req = store.get(key);
       req.onerror = () => reject(req.error);
       req.onsuccess = () => {
-        const result = (req.result as PrCacheEntry | undefined) ?? null;
+        const stored = (req.result as PrCacheEntry | undefined) ?? null;
+        // Entries written by older builds may keep superseded check attempts.
+        const result = stored && {
+          ...stored,
+          payload: {
+            ...stored.payload,
+            checkRuns: normalizeCheckRunsSummary(stored.payload.checkRuns),
+          },
+        };
         if (result) memoryCache.set(key, result);
         resolve(result);
       };

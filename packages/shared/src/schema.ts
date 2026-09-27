@@ -752,6 +752,20 @@ export type SessionContextWindowUsage = {
 
 export type SessionTitleSource = 'user' | 'generated' | 'draft';
 
+const DRAFT_SESSION_TITLE_MAX_CHARS = 50;
+
+/**
+ * Placeholder title for a new Session: the prompt's first non-empty line. Stored
+ * with `titleSource: 'draft'` so a generated title still replaces it; ACP-owned
+ * titles (e.g. Codex) only arrive after the first turn ends.
+ */
+export const deriveDraftSessionTitle = (prompt: string): string | undefined =>
+  prompt
+    .split('\n')
+    .map((line) => line.trim())
+    .find((line) => line.length > 0)
+    ?.slice(0, DRAFT_SESSION_TITLE_MAX_CHARS);
+
 export type ExternalAcpHistorySyncMeta = {
   provider: LocalProjectHistoryProvider;
   source: 'local-acp-history';

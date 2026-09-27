@@ -291,7 +291,7 @@ describe('live agent status', () => {
     // Bare command titles get the verb, in the step's tense.
     expect(container.textContent).toContain("Ran sed -n '1,240p' apps/view.tsx");
     expect(container.textContent).toContain('Running pnpm --dir apps/electron test');
-    // A kindless call carrying terminal I/O is a command too.
+    // A kindless call carrying a command is a command too.
     expect(container.textContent).toContain('Ran mycmd --flag');
     // Agent-authored labels keep their own wording — no doubled verb.
     expect(container.textContent).toContain('Shell: cat hello.txt');
@@ -306,6 +306,80 @@ describe('live agent status', () => {
       )!;
     expect(step('Running pnpm').querySelector('.animate-spin')).toBeNull();
     expect(step('Shell: npm start').querySelector('.animate-spin')).not.toBeNull();
+  });
+
+  it('opens a step onto one sheet: the command once, then its output', async () => {
+    const script =
+      "cd /tmp/extract && python3 -c \"\nimport re\nprint(*re.findall(r'a*', 'aa'))\n\"";
+    await render(
+      liveTurn([
+        {
+          type: 'tool_call',
+          toolCallId: 'python-1',
+          title: 'python3',
+          kind: 'execute',
+          status: 'completed',
+          content: [
+            // The agent restates the command as text beside the structured one.
+            { type: 'content', content: { type: 'text', text: script } },
+            { type: 'terminal_command', command: script },
+            { type: 'terminal_output', output: 'aa', stream: 'combined' },
+          ],
+        },
+        {
+          type: 'tool_call',
+          toolCallId: 'codex-1',
+          title: 'pnpm typecheck',
+          kind: 'execute',
+          status: 'failed',
+          content: [
+            { type: 'terminal_command', command: '/bin/bash', args: ['-lc', 'pnpm typecheck'] },
+            {
+              type: 'terminal_output',
+              output: "error TS6133: 'Badge' is declared",
+              stream: 'combined',
+              exitStatus: { exitCode: 2, signal: null },
+            },
+          ],
+        },
+        {
+          type: 'tool_call',
+          toolCallId: 'task-stop-1',
+          title: 'TaskStop',
+          kind: 'other',
+          status: 'completed',
+          // A Claude tool's string result is stored as terminal output.
+          content: [{ type: 'terminal_output', output: '{"task_id":"b7q2"}', stream: 'combined' }],
+        },
+      ]),
+      { label: 'Working' }
+    );
+
+    const button = (text: string) =>
+      [...container.querySelectorAll('button')].find((candidate) =>
+        candidate.textContent?.includes(text)
+      )!;
+    // A string result does not make a tool a command.
+    expect(button('Ran 2 commands').textContent).toContain('Called 1 tool');
+    await act(async () => button('Ran 2 commands').click());
+    expect(container.textContent).not.toContain('Ran TaskStop');
+    for (const step of ['Ran python3', 'Ran pnpm typecheck', 'TaskStop']) {
+      await act(async () => button(step).click());
+    }
+
+    const sheets = [...container.querySelectorAll('[data-tool-detail-sheet]')];
+    expect(sheets).toHaveLength(3);
+    const [python, codex, taskStop] = sheets as [Element, Element, Element];
+    // The echo is gone: the script appears once, as code, never as Markdown.
+    expect(container.textContent!.split('import re')).toHaveLength(2);
+    expect(python.querySelector('.markdown-renderer')).toBeNull();
+    expect(python.textContent).toContain('$');
+    // Codex's shell wrapper is not part of what the reader ran.
+    expect(codex.textContent).toContain('pnpm typecheck');
+    expect(codex.textContent).not.toContain('/bin/bash');
+    expect(codex.textContent).toContain('Exit 2');
+    // A result has no prompt and no header restating the row's title.
+    expect(taskStop.textContent).toBe('{"task_id":"b7q2"}');
   });
 
   it('shows the turn token usage in compact units with exact values on hover', async () => {

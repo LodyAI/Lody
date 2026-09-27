@@ -2890,7 +2890,13 @@ export class MessageHandler {
     this.sessionActivePresence = new SessionActivePresenceController(
       this.workspaceDocument,
       this.machineId,
-      this.logger
+      this.logger,
+      {
+        // Late-bound: the execution service is constructed further down this
+        // constructor, and the watchdog can only fire once a turn is running.
+        onInitializationStalled: (sessionId, stall) =>
+          this.executionService.notifyInitializationStalled(sessionId, stall),
+      }
     );
     this.supportRegistryAgentTypes = config.supportRegistryAgentTypes ?? [];
     this.closeSessionTerminals = config.closeSessionTerminals;
@@ -4907,13 +4913,20 @@ export class MessageHandler {
     state.acpFlushCountInTurn += 1;
     const notifications = queue.map((item) => item.notification);
     const groups = this.groupBufferedACPUpdates(queue);
-    const span = startTraceSpan(this.logger, 'acp.flush_updates_batch', {
-      sessionId,
-      turnId: this.store.getTurnId(sessionId),
-      updates: notifications.length,
-      groups: groups.length,
-      flushCount: state.acpFlushCountInTurn,
-    });
+    // One span per streamed-token batch: kept out of the default file sink, but
+    // still reported at debug when the flush fails or runs long.
+    const span = startTraceSpan(
+      this.logger,
+      'acp.flush_updates_batch',
+      {
+        sessionId,
+        turnId: this.store.getTurnId(sessionId),
+        updates: notifications.length,
+        groups: groups.length,
+        flushCount: state.acpFlushCountInTurn,
+      },
+      { hot: true }
+    );
 
     const session = this.sessionManager.getSession(sessionId);
     const modelInfo = session?.agentClient?.currentModel;
@@ -5725,6 +5738,9 @@ export class MessageHandler {
       return;
     }
     const turn = state.turn;
+    // Runs ahead of every ACP flush, so it is as hot as the flush span itself: a
+    // healthy open gate stays out of the default file sink, while a wait that
+    // fails or runs long still reports at debug.
     await traceAsync(
       this.logger,
       'history.turn_gate_wait',
@@ -5733,7 +5749,8 @@ export class MessageHandler {
         ...(turn.phase === 'idle' ? {} : { turnId: turn.turnId }),
         ...(turn.phase === 'idle' || !turn.userTurnId ? {} : { userTurnId: turn.userTurnId }),
       },
-      async () => await gate.waitUntilOpen()
+      async () => await gate.waitUntilOpen(),
+      { hot: true }
     );
   }
 

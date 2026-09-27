@@ -25,6 +25,7 @@ const tempDirs: string[] = [];
 
 const logger: Logger = {
   debug: vi.fn(),
+  trace: vi.fn(),
   error: vi.fn(),
   warn: vi.fn(),
   info: vi.fn(),

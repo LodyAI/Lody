@@ -79,9 +79,11 @@ Replacement contract: [shared rules](../../../shared/AGENTS.md#session-history).
   adoption; storage-loaded versions must be durable before cursor advancement. Never
   replace a live document. Import before constructing the history reader to avoid
   replaying bulk-import events through an initialized projection.
-- Repo storage, durable Streams cursors, and eager-sync high-water state must use the
+- Repo storage, LoroDoc Streams cursors, and eager-sync high-water state must use the
   same per-renderer cache namespace. A checkpoint must never be shared by independently
-  persisted Repo views.
+  persisted Repo views. Meta/Flock cursors are replica-bound
+  (`workspace-streams-transport.ts`): never route them through a separate cursor store;
+  delete Meta progress via `repo.getReplicaCheckpointStore`.
 - Transport state is selected per room, never merged. Runtime stores use
   `getReadinessTransportForRoom`; hooks without the router use the structural binding in
   `src/lib/room-readiness.ts`. Keep those selection rules aligned.

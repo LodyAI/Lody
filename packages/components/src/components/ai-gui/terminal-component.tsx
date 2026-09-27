@@ -33,7 +33,7 @@ export { prepareTerminalPreview } from './terminal-preview';
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
-const renderAnsiToReactNodes = ({
+export const renderAnsiToReactNodes = ({
   value,
   terminalTheme,
 }: {

@@ -286,6 +286,53 @@ describe('single history writer', () => {
     peerMirror.dispose();
   });
 
+  it('updates concurrently inserted copies of one turn together or not at all', () => {
+    const doc = new Loro();
+    doc.setPeerId('1');
+    const mirror = open(doc);
+    const peer = new Loro();
+    peer.setPeerId('2');
+    const peerMirror = open(peer);
+    mirror.historyWriter.append({ ...entry('twin'), status: 'pending' });
+    peerMirror.historyWriter.append({ ...entry('twin'), status: 'pending_apply' });
+    mirror.historyWriter.append(entry('other'));
+    doc.import(peer.export({ mode: 'update' }));
+    const statuses = () =>
+      (doc.getList('history').toJSON() as SessionHistory[]).map((turn) => [turn.id, turn.status]);
+    expect(statuses().filter(([turnId]) => turnId === 'twin')).toHaveLength(2);
+
+    expect(
+      mirror.historyWriter.updateCopies('twin', (copies) => {
+        for (const copy of copies) copy.status = 'processing';
+      })
+    ).toBe(true);
+    expect(statuses()).toEqual(
+      expect.arrayContaining([
+        ['twin', 'processing'],
+        ['other', undefined],
+      ])
+    );
+    expect(statuses().filter(([, status]) => status === 'processing')).toHaveLength(2);
+
+    const version = doc.version().toJSON();
+    expect(() =>
+      mirror.historyWriter.updateCopies('twin', (copies) => {
+        copies[0]!.status = 'handled';
+        copies[1]!.finished = 'bad' as never;
+      })
+    ).toThrow('Invalid history write');
+    expect(doc.version().toJSON()).toEqual(version);
+    expect(() =>
+      mirror.historyWriter.updateCopies('twin', (copies) => {
+        copies[1]!.id = 'renamed';
+      })
+    ).toThrow('immutable_id');
+    expect(doc.version().toJSON()).toEqual(version);
+    expect(mirror.historyWriter.updateCopies('missing', () => {})).toBe(false);
+    mirror.dispose();
+    peerMirror.dispose();
+  });
+
   it('updates only the requested field beside opaque history and preserves nested extensions', () => {
     const doc = new Loro();
     const mirror = open(doc);

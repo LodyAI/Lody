@@ -54,7 +54,7 @@ catalog:
   loro-mirror-jotai: 2.3.2
   loro-mirror-react: 2.3.2
   loro-protocol: ^0.3.0
-  loro-repo: ^0.20.0
+  loro-repo: 0.20.3
   loro-websocket: ^0.6.2
   lucide-react: ^0.523.0
   react: 19.2.0
@@ -175,11 +175,12 @@ packageExtensions:
     peerDependencies:
       react: '*'
 
-# loro-repo 0.20.0 declares ^0.15.0; its adapter APIs are compatible with
-# this reviewed release. Do not relax other packages or future Streams versions.
+# loro-repo 0.20.3 declares ^0.15.0; the Flock adaptor and cursor-save barrier
+# it wraps are unchanged in this reviewed release. Do not relax other packages
+# or future Streams versions.
 peerDependencyRules:
   allowedVersions:
-    'loro-repo@0.20.0>@loro-dev/streams-crdt': '0.16.0'
+    'loro-repo@0.20.3>@loro-dev/streams-crdt': '0.16.0'
 
 packageManagerStrictVersion: true
 
@@ -191,7 +192,6 @@ patchedDependencies:
   '@lobehub/streamdown@1.4.0': patches/@lobehub__streamdown@1.4.0.patch
   '@pierre/diffs@1.0.10': patches/@pierre__diffs@1.0.10.patch
   '@tanstack/router-generator@1.159.4': patches/@tanstack__router-generator@1.159.4.patch
-  loro-repo@0.20.0: patches/loro-repo.patch
   mdast-util-gfm-autolink-literal@2.0.1: patches/mdast-util-gfm-autolink-literal@2.0.1.patch
   react-photo-view@1.2.7: patches/react-photo-view@1.2.7.patch
   remend@1.3.0: patches/remend@1.3.0.patch

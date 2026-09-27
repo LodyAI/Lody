@@ -329,6 +329,24 @@ describe('session command helpers', () => {
       'new-archived',
       'old-active',
     ]);
+    const targeted = {
+      ...sessions[0],
+      title: 'Review parser',
+      machineId: 'target-machine',
+      agentConfigId: 'target-agent',
+      agentRoleId: 'target-role',
+    } as SessionMeta;
+    const other = { ...targeted, id: 'other', agentRoleId: 'other-role' } as SessionMeta;
+    expect(
+      filterSessionMetas([targeted, other], {
+        query: 'PARSER',
+        machineId: 'target-machine',
+        agentConfigId: 'target-agent',
+        agentRoleId: 'target-role',
+      })
+    ).toEqual([targeted]);
+    expect(filterSessionMetas([targeted], { machineId: 'wrong' })).toEqual([]);
+    expect(filterSessionMetas([targeted], { agentConfigId: 'wrong' })).toEqual([]);
   });
 
   it('filters machine selectors to authorized machine ids before selection', () => {

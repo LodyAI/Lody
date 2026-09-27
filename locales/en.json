@@ -1841,6 +1841,8 @@
   "sessions.toolActivity.tools_other": "Called {{count}} tools",
   "sessions.toolActivity.thinking": "Thinking…",
   "sessions.toolActivity.thought": "Thought",
+  "sessions.toolCall.exitCode": "Exit {{code}}",
+  "sessions.toolCall.earlierOutputHidden": "Earlier output not shown",
   "sessions.prCi.failing": "CI failed",
   "sessions.prCi.expected": "CI expected",
   "sessions.prCi.label": "CI checks",

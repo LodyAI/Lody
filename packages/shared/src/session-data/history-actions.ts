@@ -76,6 +76,63 @@ export function historyActionTarget(action: HistoryAction): string | undefined {
     : undefined;
 }
 
+const REQUEUEABLE_USER_STATUSES: readonly (SessionTurnStatus | undefined)[] = [
+  'pending_apply',
+  'pending',
+  'seen',
+];
+const STEER_PROJECTABLE_USER_STATUSES: readonly (SessionTurnStatus | undefined)[] = [
+  'pending_apply',
+  'processing',
+];
+const userStatusRank = (status: SessionTurnStatus | undefined) =>
+  status === 'processing'
+    ? 1
+    : status === 'handled' ||
+        status === 'failed' ||
+        status === 'canceled' ||
+        status === 'delivery_unknown'
+      ? 2
+      : 0;
+
+/**
+ * Concurrent producers can store one user turn twice. The last copy decides the
+ * logical state, matching targeted reads; every eligible copy is kept in step.
+ */
+function applyUserStatus(
+  history: SessionEntry[],
+  action: Extract<HistoryAction, { kind: 'user-status' }>
+): boolean {
+  const copies = history.filter((t) => t.id === action.turnId && t.role === 'user');
+  const canonical = copies.at(-1);
+  if (!canonical) return action.requeueUndelivered === true;
+  const write = (entry: SessionEntry) => {
+    entry.status = action.status;
+    entry.read = action.status !== 'pending' && action.status !== 'pending_apply';
+    if (action.deliveredSteer)
+      entry.inputConfig = { ...entry.inputConfig, _lodyDeliveryKind: 'steer' };
+  };
+  if (action.steerProjection) {
+    // A projection records a verdict; it never regresses a terminal or ordinary input.
+    if (!STEER_PROJECTABLE_USER_STATUSES.includes(canonical.status)) return false;
+    for (const copy of copies)
+      if (STEER_PROJECTABLE_USER_STATUSES.includes(copy.status)) write(copy);
+    return true;
+  }
+  if (action.requeueUndelivered || action.onlyPendingApply) {
+    // Requeueing grants execution again: any copy that started or settled vetoes it.
+    if (copies.some((copy) => !REQUEUEABLE_USER_STATUSES.includes(copy.status))) return false;
+    if (action.onlyPendingApply && canonical.status !== 'pending_apply') return false;
+    for (const copy of copies) if (copy.status === 'pending_apply') write(copy);
+    return true;
+  }
+  write(canonical);
+  const rank = userStatusRank(action.status);
+  for (const copy of copies.slice(0, -1))
+    if (userStatusRank(copy.status) <= rank) write(copy);
+  return true;
+}
+
 /** Called on a private writer draft at commit time. */
 export function applyHistoryAction(
   history: SessionEntry[],
@@ -183,24 +240,8 @@ export function applyHistoryAction(
         action.mode === 'append' ? [...(entry.items ?? []), ...action.items] : action.items;
       return { turns: history, matched: true };
     }
-    case 'user-status': {
-      const entry = history.find((t) => t.id === action.turnId && t.role === 'user');
-      if (!entry) return { turns: history, matched: action.requeueUndelivered === true };
-      if (action.onlyPendingApply && entry.status !== 'pending_apply')
-        return { turns: history, matched: false };
-      if (action.steerProjection && !['pending_apply', 'processing'].includes(entry.status ?? ''))
-        return { turns: history, matched: false };
-      if (action.requeueUndelivered) {
-        if (!['pending_apply', 'pending', 'seen'].includes(entry.status ?? ''))
-          return { turns: history, matched: false };
-        if (entry.status !== 'pending_apply') return { turns: history, matched: true };
-      }
-      entry.status = action.status;
-      entry.read = action.status !== 'pending' && action.status !== 'pending_apply';
-      if (action.deliveredSteer)
-        entry.inputConfig = { ...entry.inputConfig, _lodyDeliveryKind: 'steer' };
-      return { turns: history, matched: true };
-    }
+    case 'user-status':
+      return { turns: history, matched: applyUserStatus(history, action) };
     case 'finish-assistant': {
       const matched = history.some(
         (t) => t.role === 'assistant' && (!action.turnId || t.id === action.turnId)

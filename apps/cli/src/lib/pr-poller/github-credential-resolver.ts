@@ -13,6 +13,14 @@ import { formatErrorMessage } from '@/utils/format-error';
  */
 export type GitHubCredentialSource = 'managed' | 'gh';
 
+/**
+ * How often the ambient `gh` credential is re-harvested, so a login, logout or
+ * account switch is observed without a restart. Also the longest the scheduler
+ * may trust a remembered repo → scope mapping, so gating by that mapping never
+ * delays credential changes beyond this cadence.
+ */
+export const AMBIENT_CREDENTIAL_REFRESH_MS = 60_000;
+
 export type ResolvedGitHubCredential = {
   token: string;
   source: GitHubCredentialSource;
@@ -164,7 +172,7 @@ export class GitHubCredentialResolver {
     if (this.ghHarvest === null || now >= this.ghRefreshAt) {
       const previousToken = this.ghHarvest?.outcome === 'token' ? this.ghHarvest.token : null;
       this.ghHarvest = await this.harvestGhToken();
-      this.ghRefreshAt = now + 60_000;
+      this.ghRefreshAt = now + AMBIENT_CREDENTIAL_REFRESH_MS;
       const nextToken = this.ghHarvest.outcome === 'token' ? this.ghHarvest.token : null;
       if (previousToken !== nextToken || !this.ghUserId) this.ghUserId = undefined;
     }

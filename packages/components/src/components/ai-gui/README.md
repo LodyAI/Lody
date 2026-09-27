@@ -3,6 +3,10 @@
 Conversation rendering for a Session: the message stream, assistant turn folding,
 the outline rail, and the markdown/terminal/file content surfaces.
 
+Builtin DeepSeek Harness keeps thought prose in expandable activity groups, including
+a default-open Thought disclosure for groups without tools; explicit collapse is retained. Provider visibility is part of the
+virtual-row cache identity; other providers retain their existing filtering.
+
 Binding rules live in [AGENTS.md](AGENTS.md); this file is the directory index and
 the reasoning behind those rules.
 
@@ -41,7 +45,9 @@ the reasoning behind those rules.
   `build-chat-stream-items.ts` folds them onto the emitting turn. Invariants live
   in [agent-notices.md](agent-notices.md). `chat-failed-detail-dialog.tsx` is the
   retired modal, no longer reached from the conversation.
-  `terminal-component.tsx` / `terminal-preview.ts` own terminal output.
+  `terminal-component.tsx` / `terminal-preview.ts` own terminal output;
+  `tool-call-detail.tsx` is an expanded tool step's sheet and
+  `tool-call-command.ts` the command it shows.
 - `conversation-outline-rail.tsx`, `conversation-outline-rail-geometry.ts`, and
   `conversation-outline-arrival-intent.ts` own the reader-position rail.
   Invariants live in [conversation-outline.md](conversation-outline.md).

@@ -1090,6 +1090,9 @@ function normalizeMarkdownRendererSize(size: MarkdownRendererSize): Conversation
   return size;
 }
 
+/** A React-owned text node cut short by search marks, and how to restore it. */
+type SearchTextSplit = { node: Text; value: string; head: string; inserted: ChildNode[] };
+
 export const MarkdownRenderer = memo(function MarkdownRenderer({
   text,
   size = DEFAULT_CONVERSATION_FONT_SIZE,
@@ -1121,8 +1124,8 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
   const readonly = useContext(SessionReadonlyContext);
   const getAgentFileLinkContextMenuItems = useContext(AgentFileLinkContextMenuItemsContext);
   const containerRef = useRef<HTMLDivElement>(null);
-  /** Whether this block currently holds search marks that need unwrapping. */
-  const markedRef = useRef(false);
+  /** Text nodes split for search marks in this block, with what to undo. */
+  const searchSplitsRef = useRef<SearchTextSplit[]>([]);
   const search = useSelectionStableValue(useSessionSearch());
   const searchMatch = useSelectionStableValue(useSessionSearchBlock(searchBlockId ?? ''));
   const copyAgentFileLabel = t('sessions.copyAgentFilePath', 'Copy agent file path');
@@ -1206,23 +1209,16 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
     }
 
     const clearSearchHighlights = () => {
-      // Nothing was ever marked in this block, so there is nothing to unwrap.
-      // This effect re-runs on every streamed delta, and the query below walks
-      // the rendered subtree.
-      if (!markedRef.current) return;
-      markedRef.current = false;
-      const existingMarks = root.querySelectorAll('mark[data-session-search-mark="true"]');
-      existingMarks.forEach((mark) => {
-        const parent = mark.parentNode;
-        if (!parent) {
-          return;
-        }
-        while (mark.firstChild) {
-          parent.insertBefore(mark.firstChild, mark);
-        }
-        parent.removeChild(mark);
-        parent.normalize();
-      });
+      // This effect re-runs on every streamed delta; a block without marks
+      // has nothing to undo.
+      const splits = searchSplitsRef.current;
+      if (!splits.length) return;
+      searchSplitsRef.current = [];
+      for (const { node, value, head, inserted } of splits) {
+        for (const child of inserted) child.remove();
+        // React may have rewritten the node since it was split; its text wins.
+        if (node.nodeValue === head) node.nodeValue = value;
+      }
     };
 
     clearSearchHighlights();
@@ -1293,8 +1289,18 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
         return;
       }
 
+      const parent = node.parentNode;
+      if (!parent) {
+        return;
+      }
+
+      // React owns `node` and inserts or removes its siblings relative to it,
+      // so it stays in place holding the text before the first match; marks
+      // and the remaining text follow it. Replacing it would leave React an
+      // anchor outside the DOM (`insertBefore` throws once a link arms).
+      const head = value.slice(0, Math.max(0, overlaps[0]!.start - start));
       const fragment = document.createDocumentFragment();
-      let localCursor = 0;
+      let localCursor = head.length;
 
       overlaps.forEach((match) => {
         const localStart = Math.max(0, match.start - start);
@@ -1320,13 +1326,14 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
         fragment.appendChild(document.createTextNode(value.slice(localCursor)));
       }
 
-      const parent = node.parentNode;
-      if (!parent) {
-        return;
-      }
-      markedRef.current = true;
-      parent.insertBefore(fragment, node);
-      parent.removeChild(node);
+      searchSplitsRef.current.push({
+        node,
+        value,
+        head,
+        inserted: [...fragment.childNodes],
+      });
+      node.nodeValue = head;
+      parent.insertBefore(fragment, node.nextSibling);
     });
 
     return clearSearchHighlights;

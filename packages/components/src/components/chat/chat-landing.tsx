@@ -46,6 +46,7 @@ import {
   type WorktreeSetupScriptConfig,
   type WorktreeCleanupScriptConfig,
   type WorkspaceId,
+  deriveDraftSessionTitle,
 } from '@lody/shared';
 import { useCloudMutation, useCloudQuery } from '@lody/platform/react';
 import { usePostHog } from '@posthog/react';
@@ -3080,11 +3081,7 @@ function WorkspaceChatLanding({
         repoFullNameForMentions = selectedRepo;
       }
 
-      const draftTitle = promptText
-        .split('\n')
-        .map((line) => line.trim())
-        .find((line) => line.length > 0)
-        ?.slice(0, 50);
+      const draftTitle = deriveDraftSessionTitle(promptText);
       /* Agent config prompt, then the Role's instruction, then the task — the
          Role speaks for how this agent is being used, so it sits between the
          two. A Role only reaches here while it is still what will run. */

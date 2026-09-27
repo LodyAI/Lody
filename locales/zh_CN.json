@@ -1841,6 +1841,8 @@
   "sessions.toolActivity.tools_other": "调用了 {{count}} 个工具",
   "sessions.toolActivity.thinking": "思考中…",
   "sessions.toolActivity.thought": "思考过程",
+  "sessions.toolCall.exitCode": "退出码 {{code}}",
+  "sessions.toolCall.earlierOutputHidden": "更早的输出未显示",
   "sessions.prCi.failing": "CI 未通过",
   "sessions.prCi.expected": "等待 CI 上报",
   "sessions.prCi.label": "CI 检查",

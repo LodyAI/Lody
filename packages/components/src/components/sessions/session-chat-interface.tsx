@@ -90,7 +90,6 @@ import type {
   SessionStatus,
   SessionTurnInputConfig,
   CommentReferencePayload,
-  GitHubCheckRun,
   GitHubMergeMethod,
   VisualAnnotationReferencePayload,
 } from '@lody/shared';
@@ -213,7 +212,11 @@ import { useResolvedTheme } from '../../theme-provider';
 import { PullRequestBadge } from './pull-request-badge';
 import { SessionInfoBar } from './session-info-bar';
 import { CurrentSessionRelationsChip, useHasSessionRelations } from './session-relations-chip';
-import type { ContextChipAction, PrCiRun } from './session-info-chips';
+import {
+  mapGitHubCheckRunToPrCiRun,
+  type ContextChipAction,
+  type PrCiRun,
+} from './session-info-chips';
 import {
   resolveSessionInfoBarGitHubActionIds,
   shouldDisableSessionInfoBarGitHubActionForHydration,
@@ -337,30 +340,6 @@ function getErrorMessage(err: unknown): string {
   return String(err);
 }
 
-function mapGitHubCheckRunToInfoBar(run: GitHubCheckRun): PrCiRun {
-  const status: PrCiRun['status'] =
-    run.status === 'queued'
-      ? 'queued'
-      : run.status === 'in_progress'
-        ? 'running'
-        : run.conclusion === 'success'
-          ? 'success'
-          : run.conclusion === 'neutral' || run.conclusion === 'skipped'
-            ? 'skipped'
-            : 'failure';
-  const startedAtMs = run.startedAt ? Date.parse(run.startedAt) : Number.NaN;
-  const completedAtMs = run.completedAt ? Date.parse(run.completedAt) : Number.NaN;
-  const durationMs =
-    Number.isFinite(startedAtMs) && Number.isFinite(completedAtMs)
-      ? Math.max(0, completedAtMs - startedAtMs)
-      : undefined;
-  return {
-    name: run.name,
-    status,
-    ...(durationMs === undefined ? {} : { durationMs }),
-    ...(run.htmlUrl ? { url: run.htmlUrl } : {}),
-  };
-}
 import { usePostHog } from '@posthog/react';
 import {
   capturePostHogEvent,
@@ -4715,7 +4694,7 @@ export const SessionChatInterface = memo(
     );
 
     const infoBarPrCiRuns = useMemo(
-      () => activePrData?.checkRuns.runs.map(mapGitHubCheckRunToInfoBar),
+      () => activePrData?.checkRuns.runs.map(mapGitHubCheckRunToPrCiRun),
       [activePrData?.checkRuns.runs]
     );
     const handleOpenPrCiRun = useCallback((run: PrCiRun) => {
