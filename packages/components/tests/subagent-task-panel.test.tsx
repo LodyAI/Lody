@@ -331,4 +331,31 @@ describe('SubagentTaskPanel', () => {
     );
     expect(order).toEqual(['parent', 'child', 'sibling', 'orphan']);
   });
+
+  it('mounts its dialog inside the mobile Vaul drawer it sits in, where touch can scroll it', async () => {
+    const tasks = [task({ taskId: 'r', status: 'in_progress', run: run('running') })];
+    act(() =>
+      root.render(
+        <div data-vaul-drawer="" data-testid="drawer">
+          <SubagentTaskPanel tasks={tasks} renderHistory={renderHistory} />
+        </div>
+      )
+    );
+    await act(async () => rowNamed('Claude task · find skills')?.click());
+
+    const drawer = container.querySelector('[data-testid="drawer"]');
+    const dialog = peek();
+    expect(dialog).not.toBeNull();
+    // Inside the drawer's modal boundary, and opted out of its drag gesture.
+    expect(drawer?.contains(dialog ?? null)).toBe(true);
+    expect(dialog?.closest('[data-vaul-no-drag]')).not.toBeNull();
+  });
+
+  it('keeps its dialog on the body outside a drawer', async () => {
+    render([task({ taskId: 'r', status: 'in_progress', run: run('running') })]);
+    await act(async () => rowNamed('Claude task · find skills')?.click());
+
+    expect(peek()).not.toBeNull();
+    expect(container.contains(peek())).toBe(false);
+  });
 });

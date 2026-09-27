@@ -131,6 +131,13 @@ run history renders whatever the machine's state; only Stop waits on
 pinned by `tests/subagent-task-panel.test.tsx` and shown by
 `SubagentTaskPanel.stories.tsx`.
 
+The dialog is capped (`min(760px, 85dvh)`) and scrolls its body with the app's
+`scrollbar-pro` skin. On mobile the session lives in a Vaul drawer, and a body
+portal is outside that drawer's modal boundary: its scroll lock ate every touch
+scroll and a sideways swipe dragged the session away. So inside a
+`[data-vaul-drawer]` the dialog mounts in the drawer, `data-vaul-no-drag`,
+with a no-drag layer over its backdrop (`InMobileDrawer` story).
+
 ## Creation progress
 
 `created-session-operation-card.tsx` owns each navigable child card and its title

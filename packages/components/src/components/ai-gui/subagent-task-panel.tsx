@@ -153,6 +153,15 @@ const DIALOG_WIDTH = '800px';
 const DIALOG_MAX_HEIGHT = 'min(760px, 85dvh)';
 /** The app's own scrollbar skin, for every scroller the group owns. */
 const SCROLLBAR = 'scrollbar-pro';
+/**
+ * The Vaul drawer the group renders in, if any: the mobile session is one. A
+ * dialog portalled to the body is outside the drawer's modal boundary, so the
+ * drawer's scroll lock swallowed every touch scroll in it and a sideways swipe
+ * dragged the session away. Inside a drawer the dialog mounts in it instead,
+ * marked no-drag, as the image viewer does.
+ */
+const drawerOf = (node: HTMLElement | null): HTMLElement | null =>
+  node?.closest<HTMLElement>('[data-vaul-drawer]') ?? null;
 /** How close to the end of the run a reader must be for new steps to keep them there. */
 const FOLLOW_SLACK_PX = 24;
 
@@ -353,6 +362,8 @@ const styles = stylex.create({
     color: colors.secondaryLabel,
   },
   actionsError: { flexGrow: 1, alignSelf: 'center' },
+  /** Covers the dialog's backdrop inside a drawer, so a drag there is not Vaul's. */
+  backdropNoDrag: { position: 'absolute', inset: 0 },
 });
 
 /** How long a running task has been at it, ticking once a second. */
@@ -837,6 +848,8 @@ export const SubagentTaskPanel = ({
   // brief's Copy button scrolled a running task back to the top, away from the
   // latest step. From there the arrow keys scroll the run.
   const scrollerRef = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const [drawer, setDrawer] = useState<HTMLElement | null>(null);
   const shownTask = tasks.find((task) => task.taskId === shownTaskId) ?? null;
 
   if (tasks.length === 0) return null;
@@ -862,12 +875,13 @@ export const SubagentTaskPanel = ({
       : null;
 
   const openTask = (taskId: string) => {
+    setDrawer(drawerOf(panelRef.current));
     setShownTaskId(taskId);
     setOpen(true);
   };
 
   return (
-    <div {...stylex.props(styles.panel)}>
+    <div ref={panelRef} {...stylex.props(styles.panel)}>
       <button
         type="button"
         {...stylex.props(styles.header, canToggle && styles.headerToggle)}
@@ -904,6 +918,13 @@ export const SubagentTaskPanel = ({
           initialFocus={scrollerRef}
           closeLabel={t('common.close', 'Close')}
           data-subagent-task-dialog=""
+          data-vaul-no-drag=""
+          container={drawer ?? undefined}
+          backdropContent={
+            drawer ? (
+              <div data-vaul-no-drag="" {...stylex.props(styles.backdropNoDrag)} />
+            ) : undefined
+          }
         >
           {shownTask ? (
             <TaskDetail

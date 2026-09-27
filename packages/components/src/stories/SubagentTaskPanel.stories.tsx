@@ -1,5 +1,6 @@
 import type { Meta, StoryObj } from '@storybook/react';
 import { SubagentTaskPanel, type SubagentTask } from '@/components/ai-gui/subagent-task-panel';
+import { Drawer, DrawerContent, DrawerTitle } from '@/ui/drawer';
 
 const running: SubagentTask[] = [
   {
@@ -322,3 +323,25 @@ export const StreamedRuns: Story = {
 };
 export const SettledRuns: Story = { args: { tasks: settledRuns, renderHistory } };
 export const LongRun: Story = { args: { tasks: longRun, renderHistory } };
+
+/**
+ * Mounted the way the mobile session is: inside an open, right-hand Vaul
+ * drawer whose content is `data-vaul-no-drag`. The task dialog has to scroll by
+ * touch here without dragging the drawer.
+ */
+export const InMobileDrawer: Story = {
+  args: { tasks: longRun, renderHistory },
+  parameters: { layout: 'fullscreen', viewport: { defaultViewport: 'mobile1' } },
+  decorators: [
+    (Story) => (
+      <Drawer open direction="right">
+        <DrawerContent className="w-full! max-w-none! inset-0 rounded-none">
+          <DrawerTitle className="sr-only">Conversation</DrawerTitle>
+          <div data-vaul-no-drag="" className="p-4">
+            <Story />
+          </div>
+        </DrawerContent>
+      </Drawer>
+    ),
+  ],
+};
