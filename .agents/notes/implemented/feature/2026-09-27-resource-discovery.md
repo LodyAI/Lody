@@ -5,6 +5,8 @@ Translation: current
 
 [简体中文](2026-09-27-resource-discovery.zh.md)
 
+PR: https://github.com/LodyAI/Lody/pull/1045
+
 ## Abstract
 
 Sparse session-creation candidates could not enumerate projects, Agent configs or
@@ -51,4 +53,10 @@ authorization and visibility, unknown presence, unavailable Role bindings, safe 
 projections, real in-memory MCP requests and CLI page traversal. SQLite tests cover
 Operation reader isolation. Tests use synthetic catalogs and explicit state; no
 production write or deployment is part of verification. Live mixed-version rollout
-has not been tested. Spec status remains draft; no PR or approval is implied.
+has not been tested. Spec status remains draft; implementation does not approve it.
+
+The 178 targeted tests, full-workspace typecheck/lint, formatting, documentation,
+i18n and boundary checks passed. Full `pnpm check` stopped in the unchanged
+`code-review-helper` renderer test (`act is not a function`) under inherited
+`NODE_ENV=production`. That test passed when rerun with `NODE_ENV=test`; the
+remaining full-suite tests were not completed.

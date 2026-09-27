@@ -5,6 +5,8 @@ Translation: current
 
 [English](2026-09-27-resource-discovery.md)
 
+PR: https://github.com/LodyAI/Lody/pull/1045
+
 ## 摘要
 
 稀疏的会话创建候选项无法遍历项目、Agent 配置及离线机器，Role 创建接受 ID 却没有发现工具。
@@ -40,4 +42,9 @@ Role 仅有创建时的查找路径。现有 CLI 读取器使用不同返回投�
 行为测试覆盖超过 20 项的目录分页、游标范围拒绝、授权与可见性、未知在线状态、
 Role 不可用绑定、安全 MCP 摘要、真实内存 MCP 请求及 CLI 分页遍历。
 SQLite 测试覆盖 Operation 读取隔离。测试使用合成目录和显式状态，验证不包含
-生产写入或部署。尚未验证真实混合版本发布。Spec 保持 draft，不暗示 PR 或审批。
+生产写入或部署。尚未验证真实混合版本发布。Spec 保持 draft，实现不代表意图已获审批。
+
+178 项相关测试、全仓库类型/静态检查、格式化、文档、i18n 和边界检查通过。
+完整 `pnpm check` 在继承的 `NODE_ENV=production` 环境下，因未改动的
+`code-review-helper` 渲染测试报错 `act is not a function` 而停止。
+同一测试以 `NODE_ENV=test` 复跑通过，其余全量测试未完成。
