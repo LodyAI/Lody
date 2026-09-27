@@ -777,4 +777,45 @@ describe('mermaid full-screen viewer', () => {
     await clickOn(surface);
     expect(viewer()).toBeNull();
   });
+
+  it('pans with one touch and zooms around two touch points', async () => {
+    await renderMarkdown();
+    await openViewer();
+    const surface = viewerSurface() as HTMLElement;
+    const svg = surface.querySelector('svg[data-diagram="sequence"]') as Element;
+    const zoomLabel = () => document.body.querySelector('[title="Reset zoom"]')?.textContent;
+    const pointer = (type: string, pointerId: number, clientX: number, clientY: number) =>
+      Object.assign(new MouseEvent(type, { bubbles: true, cancelable: true, clientX, clientY }), {
+        pointerType: 'touch',
+        pointerId,
+        isPrimary: pointerId === 1,
+      });
+
+    expect(surface.style.touchAction).toBe('none');
+    surface.scrollLeft = 100;
+    surface.scrollTop = 100;
+    await act(async () => {
+      svg.dispatchEvent(pointer('pointerdown', 1, 200, 200));
+      surface.dispatchEvent(pointer('pointermove', 1, 180, 170));
+      surface.dispatchEvent(pointer('pointerup', 1, 180, 170));
+    });
+    expect(surface.scrollLeft).toBe(120);
+    expect(surface.scrollTop).toBe(130);
+
+    await act(async () => {
+      svg.dispatchEvent(pointer('pointerdown', 1, 100, 200));
+      svg.dispatchEvent(pointer('pointerdown', 2, 200, 200));
+      const move = pointer('pointermove', 2, 250, 200);
+      surface.dispatchEvent(move);
+      expect(move.defaultPrevented).toBe(true);
+      surface.dispatchEvent(pointer('pointerup', 2, 250, 200));
+      surface.dispatchEvent(pointer('pointerup', 1, 100, 200));
+    });
+
+    expect(zoomLabel()).toBe('150%');
+    // The pinch started on the diagram, so its synthetic click cannot dismiss
+    // the viewer even though pointer capture retargets it to the surface.
+    await clickOn(surface);
+    expect(viewer()).toBeTruthy();
+  });
 });
