@@ -1,4 +1,10 @@
 {
+  "sessions.markdownImage.image": "Image",
+  "sessions.markdownImage.load": "Click to load image",
+  "sessions.markdownImage.loading": "Loading image…",
+  "sessions.markdownImage.failed": "Image could not be loaded",
+  "sessions.markdownImage.retry": "Retry",
+  "sessions.markdownImage.unsupported": "Unsupported image format",
   "settings.beta.semanticShortcuts": "Pointer-aware close shortcut",
   "settings.beta.semanticShortcutsHelper": "On desktop, close the active tab in the conversation or right panel you last pointed at or used with the keyboard.",
   "sessions.cancelSend": "Cancel send",

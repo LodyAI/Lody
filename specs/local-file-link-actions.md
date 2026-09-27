@@ -57,6 +57,25 @@ session/machine identity, and returned system error. Copying is user-initiated;
 these diagnostics are not automatically uploaded. VS Code file fallback URLs must
 remain file URLs rather than acquire a directory-only trailing slash.
 
+## Markdown file images
+
+Live Markdown file previews render the complete available document without waiting
+for referenced images. Image paths resolve relative to the opened document on its
+owning machine, preserving absolute paths and decoding URL escapes once. Preview
+authorization and transfer limits continue to apply to each image.
+
+Same-machine Electron previews load images automatically through local file
+resources. Remote previews, including mobile project browsing, reserve a skeleton
+placeholder with a per-image Click to load action. No image file read or Blob URL
+creation occurs before that action. Loading keeps the placeholder; failure offers
+Retry without hiding the document. Successful remote reads become browser Blob
+URLs. Leaving the preview releases those URLs and discards late responses; a new
+document or provider must not inherit the previous image's load request.
+
+This capability is supplied only by live file providers. Chat Markdown, standalone
+uploaded Markdown without a filesystem provider, and anonymous publications do not
+gain filesystem access. Ordinary web image URLs keep their existing behavior.
+
 ## Implementation evidence
 
 - [Markdown renderer](../packages/components/src/components/ai-gui/markdown-renderer.tsx)

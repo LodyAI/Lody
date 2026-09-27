@@ -113,3 +113,6 @@ Edit `AGENTS.md`, not its `CLAUDE.md` symlink. Ownership: [README.md](README.md)
   [session-files-rendering.md](session-files-rendering.md).
 - Markdown images remember each source's natural size or failure for the page's
   life: a Virtua remount must render at its final height (failed sources show alt text).
+- Live file Markdown images use the owning file provider: same-machine reads are
+  automatic; remote reads require a per-image click. Never grant this resolver to
+  anonymous shares. Release owned Blob URLs on cleanup and ignore late reads.

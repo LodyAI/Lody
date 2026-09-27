@@ -1,4 +1,10 @@
 {
+  "sessions.markdownImage.image": "图片",
+  "sessions.markdownImage.load": "点击加载图片",
+  "sessions.markdownImage.loading": "正在加载图片…",
+  "sessions.markdownImage.failed": "图片加载失败",
+  "sessions.markdownImage.retry": "重试",
+  "sessions.markdownImage.unsupported": "不支持的图片格式",
   "settings.beta.semanticShortcuts": "跟随操作区域关闭标签",
   "settings.beta.semanticShortcutsHelper": "在桌面端，关闭最近用鼠标指向或用键盘操作的会话区或右侧面板中的当前标签。",
   "sessions.cancelSend": "取消发送",
