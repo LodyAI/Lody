@@ -52,9 +52,12 @@ within each process. A controlled two-process fixture confirmed that both can
 submit the same old refresh token before either persists a successor. The
 adapter's legacy session-open error handler previously interpreted the losing
 process's "log out" message as authority to delete the shared credential,
-potentially invalidating the winner. For managed ChatGPT profiles it now
-propagates that error without automatic logout; legacy behavior remains. This
-contains the destructive consequence but does not coordinate native refresh.
+potentially invalidating the winner. Managed ChatGPT refresh classification now
+covers new, resume, fork, and stable load session opens without automatic logout.
+The stable load path previously bypassed the classifier, so restored sessions
+missed the retry marker. Legacy load still propagates its original error without
+entering legacy logout handling. This contains the destructive consequence but
+does not coordinate native refresh.
 The host recognizes only the adapter's structured reused-refresh error during
 session startup. It cleans up the failed process, waits 750 ms, revalidates the
 live Provider, and starts one new process. A second failure is final. This
@@ -117,8 +120,9 @@ video and checks no profile writes `auth.json`; its external-wire fixture uses n
 
 The profile implementation passed `pnpm check`, formatting, public boundary,
 docs check, and E2E suite checks before the bounded retry. For the retry, 32
-targeted CLI tests, 816 adapter tests, typechecks, formatting, docs check, and
-boundary checks pass. A full local `pnpm check` has not passed on this revision:
+targeted CLI tests, 819 adapter tests including stable-load refresh and legacy
+behavior, typechecks, formatting, docs check, and boundary checks pass. A full
+local `pnpm check` has not passed on this revision:
 the checkout initially lacked the Electron binary, then an unrelated Git test
 failed only in the concurrent run; the isolated tests passed after repairing the
 binary. A standalone full CLI run timed out in unrelated worktree-broker tests.
