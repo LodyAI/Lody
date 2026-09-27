@@ -354,6 +354,8 @@ export interface CreateAgentConfig {
   args?: string[];
   env?: Record<string, string>;
   capabilitySourceVersion?: string;
+  /** A retry must confirm the managed Codex provider still authorizes this process. */
+  revalidateManagedCodexProfile?: () => Promise<void>;
   /**
    * Optional ACP session id to attempt to resume. This is a per-agent-start hint and is intentionally
    * not stored on the session instance because sessions can be reused, and persisting
@@ -1240,6 +1242,10 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
           }
         : undefined,
       capabilitySourceVersion: launch.capabilitySourceVersion,
+      revalidateManagedCodexProfile:
+        config.codexProfile?.profile.mode === 'chatgpt'
+          ? async () => await this.freezeCodexProfile(config)
+          : undefined,
       resumeSessionId: options?.resumeSessionId,
       forkSessionId: options?.forkSessionId,
       forkSessionTurnId: options?.forkSessionTurnId,

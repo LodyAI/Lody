@@ -13,7 +13,7 @@ CLI/MCP orchestration contract is specs/session-orchestration.md.
 | ---------------- | ------------------------------------------------- | -------------------------------------------------------------------- |
 | Admission        | [Dispatch watcher](session-dispatch-watcher.ts)   | Resolves metadata activation against history, queue, and RPC offers. |
 | Execution        | [Execution service](session-execution-service.ts) | Owns turns, steer results, cancellation, and raw-request drain.      |
-| Process lifetime | [Session](session.ts)                             | Owns ACP resources and confirmed termination.                        |
+| Process lifetime | [Session](session.ts)                             | Owns ACP resources, confirmed termination, and bounded Codex refresh-start recovery. |
 
 ## Files
 

@@ -74,11 +74,11 @@ Contract: specs/session-orchestration.md.
 
 ## Lifecycle
 
-- `Session.createAgent` takes the shared ACP start gate before spawn. ACP terminal creation spawns
-  the protocol's executable and argv; the only rebuild is the unsplit `sh -c` fallback. A failed
-  spawn is a JSON-RPC rejection, not a hung wait.
-- Child tab sessions reuse the parent workspace directory. Never write per-session workspace paths
-  into `MachineMeta`: the machine publishes `['dotlodyPath']` and frontends derive them.
+- `Session.createAgent` gates each ACP spawn; failed spawns reject JSON-RPC. Terminals spawn
+  protocol argv (`sh -c` only for unsplit commands). Managed Codex reused-refresh startup
+  retries once after process cleanup, delay, and live Provider recheck; other auth errors do not.
+- Child tabs reuse the parent workspace. Never write per-session paths into `MachineMeta`:
+  the machine publishes `['dotlodyPath']` for frontends to derive them.
 - INVARIANT: any `sandbox.spawn` whose OUTPUT is the result must pass `captureOutput: true` (ACP
   stdio deliberately does not), and the capture buffer stays capped at 4 MiB.
 - Shutdown is two-phase: `cleanUp({ keepWorkspaceDocumentOpen: true })`, then plain `cleanUp()`

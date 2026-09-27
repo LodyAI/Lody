@@ -39,8 +39,12 @@ Both distinct profiles and multiple native processes for the same ChatGPT profil
 may run concurrently. Per-process use records only delay deletion cleanup until
 every native process has exited; unknown orphans never block another session.
 Lody does not add credential-refresh coordination or account scheduling.
-Reauthentication must not replace an existing ChatGPT
-identity; users add a new provider when a new login is required.
+When a managed ChatGPT session opens with a confirmed reused refresh-token
+error, Lody keeps the shared credentials, ends the failed native process, waits
+briefly, rechecks the live provider binding, and retries once with a new process.
+Other refresh failures do not trigger this retry. This is startup recovery, not
+cross-process refresh serialization. Reauthentication must not replace an
+existing ChatGPT identity; users add a new provider when a new login is required.
 
 API key replacement stages a new vault generation, verifies a tools-free synthetic
 Responses request, and only then atomically changes the active generation. Failure

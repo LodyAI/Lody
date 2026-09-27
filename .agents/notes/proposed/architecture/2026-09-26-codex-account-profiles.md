@@ -13,8 +13,9 @@ host-owned profile bindings, native ChatGPT keyring storage, and system-vault AP
 generations while retaining existing local and remote provider interactions.
 The pinned native runtime forwards Authorization during a same-host HTTPS-to-HTTP
 redirect, so custom API requests require a user-side credential broker that rejects
-redirects. Same-profile ChatGPT sessions retain concurrent native processes; missing
-refresh evidence is not a reason to change that existing behavior.
+redirects. Same-profile ChatGPT sessions retain concurrent native processes;
+confirmed refresh contention preserves shared credentials and permits one fresh-process
+startup retry, without serializing native refresh.
 
 ## Decision
 
@@ -54,6 +55,12 @@ process's "log out" message as authority to delete the shared credential,
 potentially invalidating the winner. For managed ChatGPT profiles it now
 propagates that error without automatic logout; legacy behavior remains. This
 contains the destructive consequence but does not coordinate native refresh.
+The host recognizes only the adapter's structured reused-refresh error during
+session startup. It cleans up the failed process, waits 750 ms, revalidates the
+live Provider, and starts one new process. A second failure is final. This
+bounded recovery uses the winner's saved credentials when available without
+serializing sessions or implementing OAuth refresh outside Codex. A deleted or
+changed Provider cannot authorize the retry.
 Cross-process refresh serialization belongs in the native credential owner,
 not a launch-time lease or a second host OAuth implementation.
 The adapter mitigation is tracked separately in
@@ -108,11 +115,18 @@ rejected key replacement preserving a working key, and UI vault cleanup. The
 [maintained recorder](../../../../e2e/scripts/acceptance-codex-profiles.mts) retains
 video and checks no profile writes `auth.json`; its external-wire fixture uses no real accounts.
 
-`pnpm check`, formatting, public boundary, docs check, and E2E suite checks pass.
-The existing encrypted RPC suite passes; a remote desktop end-to-end run has not
-been performed. Windows/Linux vault execution and real-account keyring refresh
-contention remain unverified. Synthetic native refresh contention is reproduced,
-not fixed by the adapter's no-logout guard.
+The profile implementation passed `pnpm check`, formatting, public boundary,
+docs check, and E2E suite checks before the bounded retry. For the retry, 32
+targeted CLI tests, 816 adapter tests, typechecks, formatting, docs check, and
+boundary checks pass. A full local `pnpm check` has not passed on this revision:
+the checkout initially lacked the Electron binary, then an unrelated Git test
+failed only in the concurrent run; the isolated tests passed after repairing the
+binary. A standalone full CLI run timed out in unrelated worktree-broker tests.
+Hosted CI remains the full-suite gate. The existing encrypted RPC suite passes;
+a remote desktop end-to-end run has not been performed. Windows/Linux vault execution and real-account keyring refresh
+contention remain unverified. Synthetic native refresh contention is reproduced;
+adapter no-logout and bounded host startup retry mitigate its user impact but
+do not prevent the native race or recover every permanent credential failure.
 The recorder holds two same-account requests behind an explicit arrival barrier to
 verify overlapping native execution, not refresh contention. Unknown native orphans
 delay deletion cleanup, never session startup. The legacy external-history catalog

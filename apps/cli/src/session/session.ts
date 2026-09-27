@@ -26,6 +26,7 @@ import {
   createAcpStartupMonitor,
 } from '@/agent/acp-startup-monitor';
 import { runNpxStartupWithRecovery } from '@/agent/acp-npx-startup-policy';
+import { runCodexRefreshStartupWithRetry } from './codex-refresh-startup';
 import { ensureLodyDataDir, getLodyDataDir } from '@lody/shared/node/installation-profile';
 import { withLodyNpmCacheForNpx } from '@/agent/npx-cache';
 import { resolveDeepSeekHarnessSpawn } from '@/agent/deepseek-harness-runtime';
@@ -758,15 +759,16 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
       return acpSessionId;
     };
 
-    try {
-      return await withAcpSessionStartSlot(
+    const startAttempt = async (retry: boolean): Promise<string> =>
+      await withAcpSessionStartSlot(
         {
           label: this.sessionId,
           logger: this.logger,
           abortSignal: callbacks.abortSignal,
         },
-        async () =>
-          await runNpxStartupWithRecovery({
+        async () => {
+          if (retry) await callbacks.revalidateManagedCodexProfile?.();
+          return await runNpxStartupWithRecovery({
             command: callbacks.command,
             args: callbacks.args ?? [],
             env,
@@ -775,8 +777,22 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
             attempt: ({ startupTimeouts }) => attemptCreateAgent(startupTimeouts),
             cleanupFailedAttempt,
             getStderrTail: () => lastStderrTail,
-          })
+          });
+        }
       );
+    try {
+      return await runCodexRefreshStartupWithRetry({
+        attempt: () => startAttempt(false),
+        retryAttempt: callbacks.revalidateManagedCodexProfile
+          ? () => startAttempt(true)
+          : undefined,
+        cleanupFailedAttempt,
+        abortSignal: callbacks.abortSignal,
+        onRetry: () =>
+          this.logger.warn(
+            `[${this.sessionId}] Retrying Codex session startup after refresh contention`
+          ),
+      });
     } catch (error) {
       await cleanupFailedAttempt();
       throw error;
