@@ -49,7 +49,9 @@ Edit `AGENTS.md`, not its `CLAUDE.md` symlink. Ownership: [README.md](README.md)
 - Thought and tool rows share one compact transparent timeline and 13px
   hierarchy, with no glyphs: the verb says the kind of step. A background or
   subagent task opens a popover peek from its row, never a dialog. Execute calls are not cards. Desktop disclosure headers use
-  body type, a hover-only trailing chevron, no fill, and no thought rows.
+  body type, a hover-only trailing chevron, no fill. Only builtin DeepSeek Harness retains thought rows in expandable
+  activity groups; pure thoughts default open unless explicitly collapsed. Other providers
+  keep thoughts hidden.
   Turns are avatar-free and full-width; run config lives in the footer.
 - An expanded tool step is ONE `ToolDetailSheet` (`tool-call-detail.tsx`): composer
   fill + card shadow, no header restating the row, sections in content order. Only

@@ -219,3 +219,150 @@ it('reports a displaced turn footer as changed when it stops being the live one'
   expect(afterDisplaced).toBeDefined();
   expect(areAssistantChatVirtualRowsEqual(whileLive!, afterDisplaced!)).toBe(false);
 });
+
+describe('DSH thought visibility', () => {
+  const thought: MessageContent = { type: 'thought', text: 'Synthetic reasoning.' };
+
+  const fixture = (id: string, content: MessageContent[], finished = false) => {
+    const item = wrap(makeMessage(id, 'assistant', content, finished));
+    return {
+      items: [item],
+      lastAssistantMessageId: id,
+      expansionVersion: 0,
+      selectionLayouts: new Map([
+        [
+          id,
+          {
+            finished,
+            activeSearchBlockId: null,
+            expandState: {
+              expandedWorkedGroups: {},
+              expandedGroups: { [`activity-group:${id}:0:0`]: true },
+              expandedByIndex: {},
+              planOpen: false,
+            },
+          },
+        ],
+      ]),
+    };
+  };
+
+  it('renders a thought-only group and invalidates cached rows when visibility changes', () => {
+    const args = fixture('dsh-thought-only', [thought]);
+    const hidden = buildChatVirtualRows(args);
+    expect(
+      hidden.some((row) => row.type === 'assistant' && row.content.kind === 'activity_detail')
+    ).toBe(false);
+    const visible = buildChatVirtualRows({ ...args, showThoughts: true });
+    expect(
+      visible.flatMap((row) =>
+        row.type === 'assistant' && row.content.kind === 'activity_detail'
+          ? [row.content.entry.content]
+          : []
+      )
+    ).toEqual([thought]);
+    expect(buildChatVirtualRows({ ...args, showThoughts: true })[0]).toBe(visible[0]);
+    expect(buildChatVirtualRows({ ...args, showThoughts: false })).toEqual(hidden);
+  });
+
+  it('keeps thoughts and tools in order for interrupted DSH turns without exposing them elsewhere', () => {
+    const tool = toolCall();
+    const args = fixture('dsh-mixed', [thought, tool, thought], true);
+    const details = (showThoughts: boolean) =>
+      buildChatVirtualRows({ ...args, showThoughts }).flatMap((row) =>
+        row.type === 'assistant' && row.content.kind === 'activity_detail'
+          ? [row.content.entry.content]
+          : []
+      );
+    expect(details(true)).toEqual([thought, tool, thought]);
+    expect(details(false)).toEqual([tool]);
+  });
+
+  it('opens pure thoughts by default inside expanded work and respects an explicit collapse', () => {
+    const id = 'dsh-default-expanded';
+    const args = fixture(id, [thought, text('Answer')], true);
+    const selection = args.selectionLayouts.get(id)!;
+    const withExpansion = (expandedGroups: Record<string, boolean>) => ({
+      ...args,
+      showThoughts: true,
+      selectionLayouts: new Map([
+        [
+          id,
+          {
+            ...selection,
+            expandState: {
+              ...selection.expandState,
+              expandedWorkedGroups: { [`segment:${id}:0`]: true },
+              expandedGroups,
+            },
+          },
+        ],
+      ]),
+    });
+    const thoughtRows = (rows: ReturnType<typeof buildChatVirtualRows>) =>
+      rows.flatMap((row) =>
+        row.type === 'assistant' && row.content.kind === 'activity_detail'
+          ? [row.content.entry.content]
+          : []
+      );
+    expect(thoughtRows(buildChatVirtualRows(withExpansion({})))).toEqual([thought]);
+    expect(
+      thoughtRows(
+        buildChatVirtualRows(
+          withExpansion({
+            [`activity-group:${id}:0:0`]: false,
+          })
+        )
+      )
+    ).toEqual([]);
+    expect(
+      thoughtRows(
+        buildChatVirtualRows(
+          withExpansion({
+            [`activity-group:${id}:0:0`]: true,
+          })
+        )
+      )
+    ).toEqual([thought]);
+
+    const mixed = fixture('dsh-default-mixed', [thought, toolCall()]);
+    expect(
+      thoughtRows(
+        buildChatVirtualRows({
+          ...mixed,
+          selectionLayouts: undefined,
+          showThoughts: true,
+        })
+      )
+    ).toEqual([]);
+    expect(
+      thoughtRows(
+        buildChatVirtualRows({
+          ...fixture('dsh-default-live', [thought]),
+          selectionLayouts: undefined,
+          showThoughts: true,
+        })
+      )
+    ).toEqual([thought]);
+  });
+
+  it('keeps DSH thought groups collapsible and the completed answer outside folded work', () => {
+    const args = fixture('dsh-folded', [thought, toolCall(), text('Answer')], true);
+    const rows = buildChatVirtualRows({ ...args, selectionLayouts: undefined, showThoughts: true });
+    expect(
+      rows.some((row) => row.type === 'assistant' && row.content.kind === 'worked_group_header')
+    ).toBe(true);
+    expect(
+      rows.some((row) => row.type === 'assistant' && row.content.kind === 'activity_detail')
+    ).toBe(false);
+    expect(
+      rows.flatMap((row) =>
+        row.type === 'assistant' &&
+        row.content.kind === 'content' &&
+        row.content.block.kind === 'content'
+          ? [row.content.block.entry.content]
+          : []
+      )
+    ).toEqual([text('Answer')]);
+  });
+});

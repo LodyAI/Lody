@@ -1000,6 +1000,7 @@ type AssistantTurnRowsCacheEntry = {
   activeSearchBlockId: string | null | undefined;
   expansionVersion: number;
   copyContextAvailable: boolean;
+  showThoughts: boolean;
 };
 const assistantTurnRowsCache = new WeakMap<SessionMessageItem, AssistantTurnRowsCacheEntry>();
 
@@ -1013,6 +1014,7 @@ export const buildChatVirtualRows = ({
   activeSearchBlockId,
   expansionVersion,
   copyContextAvailable = false,
+  showThoughts = false,
   selectionLayouts,
 }: {
   selectionLayouts?: ReadonlyMap<string, SelectionTurnLayout>;
@@ -1024,6 +1026,7 @@ export const buildChatVirtualRows = ({
   activeSearchBlockId?: string | null;
   expansionVersion: number;
   copyContextAvailable?: boolean;
+  showThoughts?: boolean;
 }): ChatVirtualRow[] => {
   const rows: ChatVirtualRow[] = [];
 
@@ -1076,6 +1079,7 @@ export const buildChatVirtualRows = ({
       cachedRows.scopedAssistantActions === scopedAssistantActions &&
       cachedRows.activeSearchBlockId === activeSearchBlockId &&
       cachedRows.copyContextAvailable === copyContextAvailable &&
+      cachedRows.showThoughts === showThoughts &&
       cachedRows.expansionVersion === expansionVersion
     ) {
       rows.push(...cachedRows.rows);
@@ -1139,7 +1143,9 @@ export const buildChatVirtualRows = ({
         block.entries,
         selectionSearchBlockId
       );
-      const expanded = isSearchExpanded || cachedExpansion[block.key] === true;
+      const thoughtOnly =
+        showThoughts && block.entries.every((entry) => entry.content.type === 'thought');
+      const expanded = isSearchExpanded || (cachedExpansion[block.key] ?? thoughtOnly);
       const isActive =
         isLastAssistantMessage && message.finished !== true && blockIndex === blocks.length - 1;
       const lastEntry = block.entries[block.entries.length - 1];
@@ -1149,10 +1155,10 @@ export const buildChatVirtualRows = ({
         (lastEntry.content.type === 'thought' || lastEntry.content.kind === 'think')
       );
 
-      const toolEntries = block.entries.filter(
-        (entry) => isAssistantToolCallActivityEntry(entry) && entry.content.kind !== 'think'
+      const visibleEntries = block.entries.filter((entry) =>
+        entry.content.type === 'thought' ? showThoughts : entry.content.kind !== 'think'
       );
-      if (toolEntries.length === 0) return;
+      if (visibleEntries.length === 0) return;
 
       target.push({
         type: 'assistant',
@@ -1164,7 +1170,7 @@ export const buildChatVirtualRows = ({
         isLastRowForMessage: false,
       });
       if (expanded) {
-        for (const entry of toolEntries) {
+        for (const entry of visibleEntries) {
           const entrySuffix =
             entry.content.type === 'tool_call' ? entry.content.toolCallId : 'thought';
           target.push({
@@ -1178,7 +1184,7 @@ export const buildChatVirtualRows = ({
               entry,
               groupKey: block.key,
               showThoughtLabel: false,
-              isThinking: false,
+              isThinking: isThinking && entry === lastEntry,
             },
             isWorkedDetail,
             isLastRowForMessage: false,
@@ -1351,6 +1357,7 @@ export const buildChatVirtualRows = ({
       activeSearchBlockId,
       expansionVersion,
       copyContextAvailable,
+      showThoughts,
     });
     rows.push(...assistantRows);
   }
@@ -1411,6 +1418,15 @@ export const SessionChatStreamView = forwardRef<
     },
     ref
   ) => {
+    const thoughtVisibilityAtom = useMemo(
+      () =>
+        selectAtom(
+          sessionMetaAtomFamily(getSessionRoomId(sessionId)),
+          (meta) => meta?.cliType === 'builtin' && meta.agentType === 'deepseek'
+        ),
+      [sessionId]
+    );
+    const showThoughts = useAtomValue(thoughtVisibilityAtom);
     const vlistRef = useRef<VirtualizerHandle>(null);
     const messageSelection = useContext(MessageSelectionContext);
     const nativeTextSelectionActiveRef = useRef(false);
@@ -1513,9 +1529,11 @@ export const SessionChatStreamView = forwardRef<
         activeSearchBlockId,
         expansionVersion: assistantExpansionVersion,
         copyContextAvailable,
+        showThoughts,
         selectionLayouts,
       });
     }, [
+      showThoughts,
       selectionLayouts,
       activeSearchBlockId,
       assistantActions,
@@ -4183,7 +4201,9 @@ const ActivityGroupHeader = ({
   if (summary.otherCount > 0) {
     parts.push(t('sessions.toolActivity.tools', { count: summary.otherCount }));
   }
-  const label = parts.join(' · ');
+  const label =
+    parts.join(' · ') ||
+    (summary.hasThought ? t('sessions.toolActivity.thought', 'Thought') : '');
   if (!label) return null;
   return (
     <ProcessDisclosureButton
