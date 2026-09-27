@@ -23,11 +23,9 @@ down. Cost per call = one Streams subscription plus the doc's full initial sync.
 
 Rules:
 
-- Renderer metadata reaches the CLI by direct import into the repo's internal
-  meta Flock even when local mode has no registered transport. Keep the
-  `loro-repo` metadata live monitor enabled from repo initialization; deferring
-  it until transport join leaves `getDocMeta` stale and prevents the session
-  dispatch watcher from seeing `latestUserMsgId`.
+- Renderer metadata is imported into the meta Flock with no transport; the
+  metadata live monitor must start at repo init (`ready()`), or
+  `getDocMeta` stays stale and dispatch misses `latestUserMsgId`.
 - Never open docs in a loop over `listAliveRoomIds` or any other workspace-wide
   enumeration. A long-lived workspace holds thousands of historical session
   rooms; opening them all stalls startup and floods the Streams backend.
@@ -50,6 +48,14 @@ Rules:
 
 The dispatch watcher's contract, "session metadata is the activation index", is
 documented in `../../session/AGENTS.md` and applies to any module enumerating rooms.
+
+## Streams cursors are replica-bound
+
+Daemon and one-shot commands share `repo.sqlite3`, not replicas: Meta/Flock
+cursors come from `createRepoStreamsPersistence`, LoroDoc cursors from
+`createDocumentRemoteCursorStore` (shared rows: daemon only). No shared
+`remoteCursorStore` or schedule-only `onPersist*`. Test:
+`tests/cli-streams-replica-checkpoints.test.ts`.
 
 ## Shared ACP runtime config contains no secrets
 

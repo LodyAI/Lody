@@ -25,7 +25,7 @@ Lody 目前运行 0.20.0，外加一个上游已经吸收的补丁。因此 Lody
 3. 然后给 CLI 加上真正的"先数据后游标"屏障；
 4. 等上游 `SqliteRepoStore` 具备副本能力之后，再以同样方式绑定 CLI 的游标。
 
-不复制任何现有游标。唯一的迁移代价是每个 Meta/Flock 房间 bootstrap 一次，而这也是修复已经损坏的缓存的唯一途径。第 1 步已上线（#1049），第 2 步是 #1058。第 3 步并入了第 4 步，后者已在分支上实现，等待 loro-repo 发版。测量只发现一项真实成本：IndexedDB 的 strict 持久化会让 cloud 模式下的 flush 屏障在有 N 个脏资源时慢约 N 倍。它不影响正确性；第 2 步的按资源屏障降低了这一成本，其余由 loro-repo#140 处理。
+不复制任何现有游标。唯一的迁移代价是每个 Meta/Flock 房间 bootstrap 一次，而这也是修复已经损坏的缓存的唯一途径。第 1 步（#1049）和第 2 步（#1058）已合入。第 3 步并入了第 4 步，后者在本 PR 中实现，依赖 loro-repo 0.21.0。测量只发现一项真实成本：IndexedDB 的 strict 持久化会让 cloud 模式下的 flush 屏障在有 N 个脏资源时慢约 N 倍。它不影响正确性；第 2 步的按资源屏障降低了这一成本，其余由 loro-repo#140 处理。
 
 ## 上游变化（0.20.0 → 0.20.3，`main` 位于 `5862a2b`）
 
@@ -252,11 +252,43 @@ Lody 目前运行 0.20.0，外加一个上游已经吸收的补丁。因此 Lody
 
   上游设计必须堵住这一点。例如让 checkpoint 记录捕获时 base/日志的指纹，指纹不匹配就丢弃 checkpoint。IndexedDB 也有同样的缺口，但渲染端目前没有删除命名 Flock 的代码。
 
-- **上游进展：** [loro-dev/loro-repo#137](https://github.com/loro-dev/loro-repo/pull/137) 实现了这项能力，尚未合并，本文也还未评审。
+- **上游进展：** [loro-dev/loro-repo#137](https://github.com/loro-dev/loro-repo/pull/137) 实现了这项能力，经评审后已合并，并与 #138（IndexedDB lineage marker）、#141（每次 flush 一个 strict 事务）一起在 loro-repo 0.21.0 发布。
   - 它没有用指纹，而是用写在数据库 schema 里的删除触发器来堵回滚缺口：删除 base 行，或在没有 base 行时删除 update 行，都会一并删掉 checkpoint。
   - 这之所以成立，是因为自 #99 以来所有 SQLite 版本删除 Flock 数据只有两条路径：`deleteFlockDoc`，以及先写 base 再删 update 的压实。所以旧版本执行删除时触发器同样生效，也不会把压实误判为删除。
   - base 行写入从 `INSERT OR REPLACE` 改为 UPSERT，开启 `recursive_triggers` 时也不会误触发。
 - **IndexedDB：** 同类问题记录在 [loro-dev/loro-repo#136](https://github.com/loro-dev/loro-repo/issues/136)，也涵盖不同版本的标签页同时打开的情况，它是 Web 端推进阶段 1 的前置条件。
+
+**阶段 3 的实际实现（分支 `feat/cli-sqlite-replica-checkpoints`，基于 loro-repo 0.21.0）。**
+
+- **跳过了阶段 2。** #137 在阶段 2 开始前已经合并，而 replica-bound 持久化在每次保存游标前本来就会等待真正的按资源屏障。单独做阶段 2 只会被重写。
+- **接线。** `createCliStreamsTransport` 现在接收 repo 和 LoroDoc 游标库，并传入 `createRepoStreamsPersistence(repo, { documentRemoteCursorStore })`。
+  - `CliSqliteRepoStore.remoteCursorStore` 改名为 `documentRemoteCursorStore`。LoroDoc 房间仍保留 `AliasedRemoteCursorStore` 的 URL 别名回退。
+  - Meta 和 Flock 的 checkpoint 按精确 URL 作 key，所以网关切换会让这些房间各 bootstrap 一次。
+- **删除了合并器。** 只安排、不等待的 `onPersist*` 回调、`PersistCoalescer` 以及 `remote-*` 这几个持久化原因都已删除。
+- **SQLite 上实测的屏障成本**（WAL，`synchronous=NORMAL`，真实磁盘，5k 个 meta 文档，65 KB 的会话文档，300 个远端批次；已确认各行确实写入）：
+
+  | 屏障             | p50     | p95     | 最大值  |
+  | ---------------- | ------- | ------- | ------- |
+  | `persistMetaNow` | 0.03 ms | 0.17 ms | 20.7 ms |
+  | `persistDocNow`  | 0.03 ms | 0.14 ms | 3.3 ms  |
+
+  当初引入合并器的原因，是每个事件一次整库 `repo.flush()` 要 61 ms，这不适用于现在按资源写 journal 或增量的方式。
+
+- **`tests/cli-streams-replica-checkpoints.test.ts`** 用真实的 CLI 存储和 transport 对接一个脚本化的 Streams 服务端：
+  - **过期的一次性副本。** 一次性命令的副本如果在 daemon 推进文件之前就已加载，会 bootstrap，而不是从 daemon 的尾部继续。
+  - **写入失败后崩溃。** 数据写入失败、进程随即崩溃时，checkpoint 不会前移，重启后会 bootstrap 并恢复数据。
+  - **正常重启。** 重启后从本进程自己持久化的 checkpoint 继续。
+- **消融。** 每个测试在它所防范的那种写法下都会失败：
+  - 用共享游标的两参数工厂时，过期副本最终缺少 A；
+  - 用只安排、不等待的屏障时，写入失败了同步却报告成功；
+  - 用内存游标时，每次重启都会 bootstrap。
+- **评审修复（P1）：共享的 LoroDoc 游标只给 daemon 用。** loro-repo 并没有把 LoroDoc 游标与文档字节绑定，所以一次性命令如果在 daemon 推进某个文档之前就打开了它，会从 daemon 共享的 `remote_cursors` 行继续，并一直缺少 daemon 收到的数据。
+  - `LoroDocumentManager.create` 新增 `documentCursorScope` 选项。只有 daemon（`lib/lody.ts`）传 `shared-durable`；默认的 `process` 把 LoroDoc 进度保存在本进程内存里，所以一次性命令打开的每个文档都会 bootstrap 一次，并且永远不会写共享游标。
+  - 这样共享游标只会描述 daemon 自己的副本。一次性命令写入的数据可能领先于它，这只会导致重放。
+  - 回归测试：新增双进程 `syncDoc` 测试（一次性命令先加载空文档，daemon bootstrap 到 A 并推进共享游标，然后一次性命令同步，必须通过第二次 bootstrap 拿到 A）。若 LoroDoc 游标共享，一次性命令最终仍是空的。manager-create 测试断言一次性调用方默认得到内存游标库。
+  - 上游如果提供 LoroDoc 的 replica-bound checkpoint，可以省掉每条命令的 bootstrap，但这不是正确性所必需的。
+- **0.21.0 通过 `saveMany` 写入。** SQLite 和 IndexedDB 适配器都新增了可选的原子 `saveMany`，loro-repo 写元数据和命名 Flock 时优先用它而不是 `save`。因此崩溃测试同时在两个入口注入磁盘满错误，并断言 `saveMany` 存在。显式列举适配器方法的包装层（如 #1060 的写入观察器）必须转发 `saveMany`：漏掉它仍然正确，但会静默退回每个 payload 一次提交，抵消 #141 的收益。
+- **限制。** 升级后第一次打开会写入 checkpoint 表和触发器。如果那一刻磁盘恰好已满，工作区会打不开（loro-dev/loro-repo#139）。
 
 ## 备选方案
 
