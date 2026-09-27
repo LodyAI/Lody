@@ -1065,7 +1065,7 @@ describe('SessionFileContentView', () => {
     expect(view.querySelector('img')).toBeNull();
     expect(paths).not.toContain('images/chart.png');
     const load = [...view.querySelectorAll('button')].find(
-      (button) => button.textContent === 'Click to load image'
+      (button) => button.textContent === 'Load image'
     );
     expect(load).toBeDefined();
     await act(async () => load!.click());

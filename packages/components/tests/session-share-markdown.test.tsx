@@ -170,7 +170,7 @@ describe('file Markdown images', () => {
     });
     expect(container.textContent).toContain('Complete document');
     expect(container.textContent).toContain('Text after the image.');
-    expect(container.textContent).toContain('Click to load image');
+    expect(container.textContent).toContain('Load image');
     expect(container.querySelector('img')).toBeNull();
     expect(paths).toEqual([]);
     await click();
@@ -225,7 +225,7 @@ describe('file Markdown images', () => {
     await act(async () => settle(await provider().openFile('images/plot.png')));
     expect(blobs.size).toBe(0);
     expect(container.querySelector('img')).toBeNull();
-    expect(container.textContent).toContain('Click to load image');
+    expect(container.textContent).toContain('Load image');
   });
 
   it('does not carry a load request into a different provider', async () => {
@@ -239,7 +239,7 @@ describe('file Markdown images', () => {
     });
     expect(blobs.size).toBe(0);
     expect(container.querySelector('img')).toBeNull();
-    expect(container.textContent).toContain('Click to load image');
+    expect(container.textContent).toContain('Load image');
   });
 
   it('cannot grant filesystem access to an anonymous share', async () => {

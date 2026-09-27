@@ -33,8 +33,8 @@ the reasoning behind those rules.
   [mermaid-diagram-rendering.md](mermaid-diagram-rendering.md).
 - `message-content-guards.ts` gates which shared `MessageContent` variants render.
 - `markdown-file-image.tsx` binds live file Markdown to its owning provider. Local
-  resources load automatically; remote file images show a skeleton and load on
-  click. Relative paths use the opened document; Blob URLs last only for the mounted
+  resources load automatically; remote file images show a one-line recessed slot
+  (alt, file name, Load image) and load on click. Relative paths use the opened document; Blob URLs last only for the mounted
   image. Uploaded attachments without a file provider keep their existing behavior.
 - `chat-failed-error-report.ts` owns raw error extraction; `view.tsx`'s
   `AgentNoticeBanner` renders warnings and failures, and

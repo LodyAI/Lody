@@ -9,34 +9,52 @@ import {
 } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { useTranslation } from 'react-i18next';
+import { ImageIcon, ImageOff } from 'lucide-react';
 import { Button } from '@lody/ui/button';
-import { colors } from '@lody/ui/tokens/colors.stylex';
-import { radius, space } from '@lody/ui/tokens/scales.stylex';
+import { Spinner } from '@lody/ui/spinner';
+import { colors, shadow } from '@lody/ui/tokens/colors.stylex';
+import { corner, duration, ease, radius, space } from '@lody/ui/tokens/scales.stylex';
 import type { FileWorkspaceProvider } from '@/lib/file-workspace-provider';
 import { getImageMimeTypeForPath } from '@/lib/image-file-preview';
 import { resolveMarkdownImagePath } from '@/lib/session-file-open-target';
 
+const fadeIn = stylex.keyframes({ from: { opacity: 0 }, to: { opacity: 1 } });
+
 const styles = stylex.create({
   container: { display: 'block', marginBlock: space[2], maxWidth: '100%' },
-  placeholder: {
+  // The slot the image will fill: the recessed well, sized to one line of
+  // content so a remote document keeps reading as prose, not a wall of boxes.
+  slot: {
     display: 'flex',
-    flexDirection: 'column',
     alignItems: 'center',
-    justifyContent: 'center',
-    gap: space[2],
-    padding: space[4],
-    minHeight: 160,
-    borderRadius: radius.small,
+    gap: space[3],
+    boxSizing: 'border-box',
+    width: 'fit-content',
+    minWidth: 'min(100%, 20rem)',
+    maxWidth: '100%',
+    minHeight: 48,
+    paddingBlock: space[2],
+    paddingInlineStart: space[3],
+    paddingInlineEnd: space[2],
+    borderRadius: radius.medium,
+    cornerShape: corner.shape,
     backgroundColor: colors.wellBackground,
-    color: colors.secondaryLabel,
-    overflowWrap: 'anywhere',
+    boxShadow: shadow.inset,
+    fontSize: '0.9em',
+    lineHeight: 1.4,
   },
-  skeleton: {
-    display: 'block',
-    width: 64,
-    height: 40,
-    borderRadius: radius.small,
-    backgroundColor: colors.separator,
+  glyph: { flexShrink: 0, width: 16, height: 16, color: colors.tertiaryLabel },
+  failedGlyph: { color: colors.destructive },
+  text: { display: 'flex', flexDirection: 'column', flexGrow: 1, minWidth: 0 },
+  line: { overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' },
+  title: { color: colors.label, fontWeight: 500 },
+  meta: { color: colors.secondaryLabel, fontSize: '0.9em' },
+  error: { color: colors.destructive },
+  progress: {
+    display: 'inline-flex',
+    flexShrink: 0,
+    paddingInline: space[2],
+    color: colors.secondaryLabel,
   },
   image: {
     display: 'block',
@@ -44,6 +62,9 @@ const styles = stylex.create({
     maxWidth: '100%',
     objectFit: 'contain',
     borderRadius: radius.small,
+    animationName: { default: fadeIn, '@media (prefers-reduced-motion: reduce)': 'none' },
+    animationDuration: duration.regular,
+    animationTimingFunction: ease.standard,
   },
   pendingImage: { display: 'none' },
 });
@@ -110,7 +131,7 @@ function FileImage({ resources, path, alt }: { resources: Resources; path: strin
   }
 
   useEffect(() => {
-    if (!active || (!automatic && attempt === 0)) return;
+    if (!active || (!automatic && attempt === 0)) return undefined;
     let cancelled = false;
     let objectUrl: string | undefined;
     setDecoded(false);
@@ -161,6 +182,10 @@ function FileImage({ resources, path, alt }: { resources: Resources; path: strin
 
   const ready = state.status === 'ready' && state.provider === provider && state.path === path;
   const loading = state.status === 'loading' || (ready && !decoded);
+  const failed = state.status === 'error';
+  const fileName = path.slice(path.lastIndexOf('/') + 1) || path;
+  const title = alt || fileName;
+  const Glyph = failed ? ImageOff : ImageIcon;
   return (
     <span {...stylex.props(styles.container)}>
       {ready && state.status === 'ready' ? (
@@ -173,27 +198,43 @@ function FileImage({ resources, path, alt }: { resources: Resources; path: strin
         />
       ) : null}
       {!ready || !decoded ? (
-        <span {...stylex.props(styles.placeholder)} aria-busy={loading}>
-          <span {...stylex.props(styles.skeleton)} aria-hidden="true" />
-          <span>{alt || t('sessions.markdownImage.image', 'Image')}</span>
-          {state.status === 'error' ? (
-            <span role="status" title={state.message}>
-              {t('sessions.markdownImage.failed', 'Image could not be loaded')}
-              {state.message ? `: ${state.message}` : ''}
+        <span {...stylex.props(styles.slot)} aria-busy={loading}>
+          <Glyph aria-hidden="true" {...stylex.props(styles.glyph, failed && styles.failedGlyph)} />
+          <span {...stylex.props(styles.text)}>
+            <span {...stylex.props(styles.line, styles.title)} title={title}>
+              {title}
             </span>
-          ) : null}
-          <Button
-            size="small"
-            variant="secondary"
-            disabled={loading || !active}
-            onClick={() => setAttempt((value) => value + 1)}
-          >
-            {loading
-              ? t('sessions.markdownImage.loading', 'Loading image…')
-              : state.status === 'error'
+            {failed ? (
+              <span
+                role="status"
+                title={state.message}
+                {...stylex.props(styles.line, styles.meta, styles.error)}
+              >
+                {t('sessions.markdownImage.failed', 'Image could not be loaded')}
+                {state.message ? `: ${state.message}` : ''}
+              </span>
+            ) : title !== fileName ? (
+              <span {...stylex.props(styles.line, styles.meta)} title={path}>
+                {fileName}
+              </span>
+            ) : null}
+          </span>
+          {loading ? (
+            <span {...stylex.props(styles.progress)}>
+              <Spinner size="small" label={t('sessions.markdownImage.loading', 'Loading image…')} />
+            </span>
+          ) : (
+            <Button
+              size="small"
+              variant="secondary"
+              disabled={!active}
+              onClick={() => setAttempt((value) => value + 1)}
+            >
+              {failed
                 ? t('sessions.markdownImage.retry', 'Retry')
-                : t('sessions.markdownImage.load', 'Click to load image')}
-          </Button>
+                : t('sessions.markdownImage.load', 'Load image')}
+            </Button>
+          )}
         </span>
       ) : null}
     </span>

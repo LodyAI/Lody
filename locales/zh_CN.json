@@ -1,6 +1,5 @@
 {
-  "sessions.markdownImage.image": "图片",
-  "sessions.markdownImage.load": "点击加载图片",
+  "sessions.markdownImage.load": "加载图片",
   "sessions.markdownImage.loading": "正在加载图片…",
   "sessions.markdownImage.failed": "图片加载失败",
   "sessions.markdownImage.retry": "重试",

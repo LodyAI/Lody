@@ -65,8 +65,8 @@ owning machine, preserving absolute paths and decoding URL escapes once. Preview
 authorization and transfer limits continue to apply to each image.
 
 Same-machine Electron previews load images automatically through local file
-resources. Remote previews, including mobile project browsing, reserve a skeleton
-placeholder with a per-image Click to load action. No image file read or Blob URL
+resources. Remote previews, including mobile project browsing, reserve a compact
+placeholder naming each image, with a per-image Load image action. No image file read or Blob URL
 creation occurs before that action. Loading keeps the placeholder; failure offers
 Retry without hiding the document. Successful remote reads become browser Blob
 URLs. Leaving the preview releases those URLs and discards late responses; a new

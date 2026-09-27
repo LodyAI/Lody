@@ -1,7 +1,10 @@
 import type { Meta, StoryObj } from '@storybook/react';
 import { MarkdownRenderer } from '@/components/ai-gui/markdown-renderer';
 import { MarkdownFileResources } from '@/components/ai-gui/markdown-file-image';
-import { createFakeFileWorkspaceProvider } from '@/lib/file-workspace-provider';
+import {
+  createFakeFileWorkspaceProvider,
+  type FileWorkspaceOpenResult,
+} from '@/lib/file-workspace-provider';
 
 const provider = createFakeFileWorkspaceProvider({
   files: [{ path: 'images/chart.svg', kind: 'text', sourceState: 'live-readonly' }],
@@ -23,7 +26,7 @@ const meta = {
     children: (
       <MarkdownRenderer
         text={
-          '# Document\n\nThe text is available immediately.\n\n![Chart](../images/chart.svg)\n\nMore text after the image.\n\n![Missing image](./missing.png)'
+          '# Document\n\nThe text is available immediately.\n\n![Chart](../images/chart.svg)\n\nMore text after the image.\n\n![](./screenshots/missing.png)'
         }
       />
     ),
@@ -35,4 +38,16 @@ export const RemoteClickToLoad: Story = {};
 export const AutomaticLocal: Story = { args: { automatic: true } };
 export const Loading: Story = {
   args: { automatic: true, provider: { openFile: () => new Promise(() => {}) } },
+};
+export const Failed: Story = {
+  args: {
+    automatic: true,
+    provider: {
+      openFile: async (): Promise<FileWorkspaceOpenResult> => ({
+        status: 'unavailable',
+        reason: 'transient-io',
+        message: 'Machine offline',
+      }),
+    },
+  },
 };

@@ -1,6 +1,5 @@
 {
-  "sessions.markdownImage.image": "Image",
-  "sessions.markdownImage.load": "Click to load image",
+  "sessions.markdownImage.load": "Load image",
   "sessions.markdownImage.loading": "Loading image…",
   "sessions.markdownImage.failed": "Image could not be loaded",
   "sessions.markdownImage.retry": "Retry",
