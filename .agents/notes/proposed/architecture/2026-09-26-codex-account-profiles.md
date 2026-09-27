@@ -46,6 +46,19 @@ the tombstone, then waits for all records to prove exit. Unknown processes delay
 credential cleanup only. Late exit proofs address their own host-generated token,
 never another process's record. Existing login-operation serialization is unchanged.
 
+Native 0.156.0 reloads shared credentials before refresh but only serializes
+within each process. A controlled two-process fixture confirmed that both can
+submit the same old refresh token before either persists a successor. The
+adapter's legacy session-open error handler previously interpreted the losing
+process's "log out" message as authority to delete the shared credential,
+potentially invalidating the winner. For managed ChatGPT profiles it now
+propagates that error without automatic logout; legacy behavior remains. This
+contains the destructive consequence but does not coordinate native refresh.
+Cross-process refresh serialization belongs in the native credential owner,
+not a launch-time lease or a second host OAuth implementation.
+The adapter mitigation is tracked separately in
+[acp-extension-codex PR #58](https://github.com/LodyAI/acp-extension-codex/pull/58).
+
 A restored Session may carry a legacy `codexAuth` value. That value verifies the
 historical identity but cannot authorize a new native process: launch now requires
 the current Provider to retain the same managed binding. The local removal
@@ -68,9 +81,15 @@ remain forbidden. The marker is not a credential or executable override users ed
 The exact managed runtime is Codex 0.156.0, macOS arm64 artifact SHA-256
 `27a4c6ad8d63ab0988eb2a6699fb092d999b78845c75edad1eef674064a026de`.
 Pinned upstream auth storage derives the native keyring account from canonical
-`CODEX_HOME`. Its refresh lock is process-local; source inspection does not prove
-safe concurrent writers. Cross-application keychain ACLs blocked a manually seeded
-refresh experiment, which is not evidence of native refresh failure or success.
+`CODEX_HOME`. Its refresh lock is process-local. Cross-application keychain ACLs
+blocked a manually seeded refresh experiment, which is not evidence of native
+refresh failure or success. The later
+[synthetic refresh probe](../../../../packages/acp-extension-codex/scripts/probe-refresh-contention.mjs)
+used two pinned native app-server processes with one isolated file-backed home
+and a barriered local refresh endpoint. Both submitted the same old token; after
+one success and one simulated `refresh_token_reused`, only the winning process
+reported a usable token. No real account, keyring refresh, or existing credential
+was involved.
 
 Executed isolated experiments used synthetic credentials only: system-vault
 set/read/delete; real native API Responses completion without auth.json; different-port
@@ -91,8 +110,9 @@ video and checks no profile writes `auth.json`; its external-wire fixture uses n
 
 `pnpm check`, formatting, public boundary, docs check, and E2E suite checks pass.
 The existing encrypted RPC suite passes; a remote desktop end-to-end run has not
-been performed. Windows/Linux vault execution and native refresh contention remain
-unverified; no refresh race is claimed as a proven bug or fixed by this change.
+been performed. Windows/Linux vault execution and real-account keyring refresh
+contention remain unverified. Synthetic native refresh contention is reproduced,
+not fixed by the adapter's no-logout guard.
 The recorder holds two same-account requests behind an explicit arrival barrier to
 verify overlapping native execution, not refresh contention. Unknown native orphans
 delay deletion cleanup, never session startup. The legacy external-history catalog
