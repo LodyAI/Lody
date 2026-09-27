@@ -25,4 +25,6 @@ credential helper。长期运行的原生 Agent 通过会话文件发现轮换�
 
 参见[规格草案](../../../../specs/github-command-credentials.zh.md)。
 实现和确定性的策略、生成命令及原生 Git advertisement 测试已存在；修正后对标准 URL 支持范围的对抗式复审未发现剩余阻断项。
-未部署线上服务、未修改真实用户凭据，也尚未创建 PR。
+未部署线上服务、未修改真实用户凭据。准备 ACP adapters 和 review assets 后，CLI bundle 构建也已通过。
+
+PR：[#1034](https://github.com/LodyAI/Lody/pull/1034)。

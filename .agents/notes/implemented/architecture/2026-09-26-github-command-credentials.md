@@ -31,4 +31,7 @@ See [the draft specification](../../../../specs/github-command-credentials.md).
 Implementation is present, with deterministic policy, generated-command and native
 Git advertisement tests. Adversarial review of supported standard URLs found no
 remaining blocker after corrections. No live service
-deployment or real-user credential mutation has been performed. No PR exists yet.
+deployment or real-user credential mutation has been performed. The CLI bundle
+also builds after preparing its ACP adapters and review assets.
+
+PR: [#1034](https://github.com/LodyAI/Lody/pull/1034).
