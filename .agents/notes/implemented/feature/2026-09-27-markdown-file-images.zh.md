@@ -5,6 +5,8 @@ Translation: current
 
 [English](2026-09-27-markdown-file-images.md)
 
+PR: [#1042](https://github.com/LodyAI/Lody/pull/1042)
+
 ## 摘要
 
 Markdown 文件预览原先直接把文件系统图片路径交给浏览器，无法相对文档定位图片。

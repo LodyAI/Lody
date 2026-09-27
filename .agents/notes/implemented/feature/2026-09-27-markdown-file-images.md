@@ -5,6 +5,8 @@ Translation: current
 
 [中文](2026-09-27-markdown-file-images.zh.md)
 
+PR: [#1042](https://github.com/LodyAI/Lody/pull/1042)
+
 ## Abstract
 
 Markdown file previews passed filesystem image paths directly to the browser, so
