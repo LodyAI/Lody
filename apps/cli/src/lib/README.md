@@ -4,6 +4,16 @@ Binding rules live in [AGENTS.md](AGENTS.md) and in the scoped `AGENTS.md` of ea
 subdirectory; this file is the navigation index. Cross-module explanations live in
 [`.agents/docs/`](../../../../.agents/docs/AGENTS.md).
 
+## Resource discovery
+
+- `discovery-query.ts` — strict query schemas, scope-bound keyset pagination and
+  shared Session title/Machine/Agent/Role filters.
+- `resource-discovery.ts` — readable directory projections, Role availability,
+  sensitive-field exclusion and list/get behavior shared by MCP and CLI.
+- `resource-discovery-runtime.ts` — synchronized workspace readers and caller-specific
+  authorization; it supplies the existing workspace command runtime to the query service.
+  Intent and limits: [resource discovery](../../../../specs/resource-discovery.md).
+
 ## Message hub and transports
 
 - `usage/usage-tracking-service.ts` — cumulative usage snapshot staging and

@@ -1,8 +1,8 @@
 import { Command } from 'commander';
+import { discoveryListCommand } from './discovery';
 import { isDeepStrictEqual } from 'node:util';
 import { v4 as uuidV4 } from 'uuid';
 import {
-  describeMcpConnection,
   ENV_VAR_NAME_PATTERN,
   getServerNow,
   type McpConnectionSpec,
@@ -30,7 +30,6 @@ import {
 } from '@/lib/workspace-mcp-store';
 import type { LoroDocumentManager } from '@/lib/loro/doc';
 import { parseEnvAssignments } from './agent-config';
-import { renderTerminalTable } from '@/lib/terminal-table';
 import { formatErrorMessage } from '@/utils/format-error';
 import { captureCli } from '@/lib/analytics/posthog';
 
@@ -268,38 +267,7 @@ function addConnectionOptions(command: Command): Command {
     .option('--header <Name:value>', 'HTTP request header (repeatable)', collect);
 }
 
-const listCommand = addCommonOptions(
-  new Command('list').description('List workspace MCP servers')
-).action(async (options: McpCommandOptions) => {
-  await withMcpCatalog(options, async ({ workspaceId, servers }) => {
-    if (options.json) {
-      printJson({ ok: true, workspaceId, servers });
-      return;
-    }
-    if (servers.length === 0) {
-      console.log('No MCP servers configured.');
-      return;
-    }
-    console.log(
-      renderTerminalTable(
-        [
-          { header: 'ID' },
-          { header: 'Name' },
-          { header: 'Transport' },
-          { header: 'Default' },
-          { header: 'Connection' },
-        ],
-        servers.map((server) => [
-          server.id,
-          server.name,
-          server.transport,
-          server.enabledByDefault === true ? 'yes' : 'no',
-          describeMcpConnection(server.connection) ?? '—',
-        ])
-      )
-    );
-  });
-});
+const listCommand = discoveryListCommand('mcp');
 
 const addCommand = addConnectionOptions(
   addCommonOptions(new Command('add').description('Add a workspace MCP server'))

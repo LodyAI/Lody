@@ -7,6 +7,11 @@ import {
 } from '@/lib/prepared-session-input';
 import { readSessionHistory } from '@lody/shared/session-data';
 import { Command } from 'commander';
+import {
+  SessionDiscoveryFilterShape,
+  matchesSessionDiscovery,
+  type SessionDiscoveryFilters,
+} from '@/lib/discovery-query';
 import { promises as fs } from 'node:fs';
 import { isDeepStrictEqual } from 'node:util';
 import { z } from 'zod';
@@ -205,13 +210,14 @@ export async function ensureSessionCreateWorkspaceMetaFresh(args: {
   await syncWorkspaceMetaForRead(args.manager, `session.create:${args.workspaceId}:prewrite`);
 }
 
-type ListOptions = CommonOptions & {
-  archived?: boolean;
-  all?: boolean;
-  limit?: number;
-  openedBy?: string;
-  openedByCurrent?: boolean;
-};
+type ListOptions = CommonOptions &
+  SessionDiscoveryFilters & {
+    archived?: boolean;
+    all?: boolean;
+    limit?: number;
+    openedBy?: string;
+    openedByCurrent?: boolean;
+  };
 
 type RenameOptions = CommonOptions & {
   title?: string;
@@ -345,7 +351,11 @@ export function sortSessionMetas(sessions: SessionMeta[]): SessionMeta[] {
 
 export function filterSessionMetas(
   sessions: SessionMeta[],
-  options: { archivedOnly?: boolean; includeAll?: boolean; openedBySessionId?: SessionId }
+  options: {
+    archivedOnly?: boolean;
+    includeAll?: boolean;
+    openedBySessionId?: SessionId;
+  } & SessionDiscoveryFilters
 ): SessionMeta[] {
   let result: SessionMeta[];
   if (options.includeAll) {
@@ -358,7 +368,7 @@ export function filterSessionMetas(
   if (options.openedBySessionId) {
     result = result.filter((session) => session.openedBySessionId === options.openedBySessionId);
   }
-  return result;
+  return result.filter((session) => matchesSessionDiscovery(session, options));
 }
 
 function formatAgentConfigCandidates(configs: AgentConfigMeta[]): string {
@@ -4237,6 +4247,10 @@ const sessionListCommand = new Command('list')
   .option('--all', 'Include active and archived sessions')
   .option('--opened-by <sessionId>', 'Only include sessions opened by this session id')
   .option('--opened-by-current', 'Only include sessions opened by LODY_SESSION_ID')
+  .option('--query <text>', 'Filter session titles or ids')
+  .option('--machine-id <id>', 'Filter by machine id')
+  .option('--agent-config-id <id>', 'Filter by Agent configuration id')
+  .option('--agent-role-id <id>', 'Filter by Agent Role creation provenance')
   .option('--limit <count>', 'Maximum number of sessions to print', parsePositiveIntOption)
   .option('--offline', 'Read the local cache without syncing first')
   .option('--json', 'Print JSON output')
@@ -4265,6 +4279,12 @@ const sessionListCommand = new Command('list')
             archivedOnly: options.archived,
             includeAll: options.all,
             openedBySessionId,
+            ...z.object(SessionDiscoveryFilterShape).parse({
+              query: options.query,
+              machineId: options.machineId,
+              agentConfigId: options.agentConfigId,
+              agentRoleId: options.agentRoleId,
+            }),
           })
         );
         const limited =
