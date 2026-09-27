@@ -3,10 +3,16 @@ export const githubCredentialRuntime = String.raw`
 const readCredentialPolicy = async () => {
   const contextToken = getContextToken();
   if (!contextToken) throw new Error('GitHub credential context is missing. Restart this session.');
-  const response = await requestBroker('/github-auth-context', { contextToken }, 10000);
-  const policy = response && response.ok ? await response.json() : null;
-  if (!policy || typeof policy.allowLocalAuth !== 'boolean' || typeof policy.personalEnabled !== 'boolean') {
-    throw new Error('GitHub credential context is unavailable or expired. Restart this session.');
+  let response;
+  let policy;
+  try {
+    response = await requestBroker('/github-auth-context', { contextToken }, 10000);
+    policy = response ? await response.json() : null;
+  } catch {}
+  if (!response?.ok || !policy || typeof policy.allowLocalAuth !== 'boolean' || typeof policy.personalEnabled !== 'boolean') {
+    if (policy?.error === 'invalid_context') throw new Error('GitHub credential context expired or the requester changed. Restart this session.');
+    if (response?.status === 401) throw new Error('Lody credential broker authentication failed. Reconnect this machine to Lody before retrying; no GitHub operation was attempted.');
+    throw new Error('Cannot verify GitHub identity preferences with Lody. Check the Lody connection and machine access, then retry; no GitHub operation was attempted.');
   }
   return policy;
 };
@@ -42,7 +48,8 @@ const checkRepositoryCredential = async (token, repo, requireWrite, requirePubli
   if (!response.ok) throw new Error('GitHub permission check failed (HTTP ' + response.status + '); identity was not changed.');
   const data = await response.json();
   if (requirePublic && data.private !== false) return 'unavailable';
-  return requireWrite && data.permissions && data.permissions.push === false ? 'unavailable' : 'usable';
+  const permission = typeof requireWrite === 'string' ? requireWrite : 'push';
+  return requireWrite && data.permissions && data.permissions[permission] === false ? 'unavailable' : 'usable';
 };
 
 const selectGitHubCredential = async (repo, policy, localCandidate, requireWrite, anonymousCandidate) => {

@@ -410,6 +410,7 @@ const readRepoCommandArgs = (args) => {
   const positionals = [];
   let command;
   let help = false;
+  let disableAuto = false;
   let repo;
   let issueRepo;
   let branchRepo;
@@ -456,6 +457,7 @@ const readRepoCommandArgs = (args) => {
         !long && arg[j + 2] === '=' ? arg.slice(j + 3) : 'true';
       if (!/^(true|false|1|0|t|f)$/i.test(value)) return null;
       if (name === '--help' || name === '-h') help = /^(true|1|t)$/i.test(value);
+      if (name === '--disable-auto') disableAuto = /^(true|1|t)$/i.test(value);
       if (!long && arg[j + 2] === '=') break;
     }
   }
@@ -496,7 +498,26 @@ const readRepoCommandArgs = (args) => {
     catch { return null; }
   }
   // develop's deprecated selector overrides --repo regardless of flag order.
-  return { subject, repo: issueRepo !== undefined ? issueRepo : repo };
+  return { subject, command, disableAuto, repo: issueRepo !== undefined ? issueRepo : repo };
+};
+
+// Only require a repository role when the command necessarily needs it.
+// Comments, reviews and PR creation can be allowed without push permission.
+// Token-specific scopes and branch rules remain GitHub's final decision.
+const requiredRepositoryPermission = (args) => {
+  const parsed = readRepoCommandArgs(args);
+  const command = parsed?.command;
+  // PR authors may disable auto-merge without base-repository write access.
+  if (args[0] === 'pr' && command === 'merge' && parsed.disableAuto) return false;
+  if (args[0] === 'repo' && ['archive', 'delete', 'rename'].includes(command)) return 'admin';
+  const pushCommands = {
+    pr: ['merge'],
+    release: ['create', 'delete', 'delete-asset', 'edit', 'upload'],
+    workflow: ['run', 'enable', 'disable'],
+    run: ['cancel', 'delete', 'rerun'],
+    repo: ['sync'],
+  };
+  return pushCommands[args[0]]?.includes(command) ? 'push' : false;
 };
 
 // API accepts exactly one endpoint. Values can themselves look like URLs or
@@ -738,16 +759,14 @@ const buildGhEnv = async (ghCommand, args) => {
     // The owner's native gh can resolve ambiguous arguments itself. A shared
     // session must stop rather than risk selecting another host's credentials.
     if (allowLocalAuth && !policy.personalEnabled) return { env };
-    throw new Error('Cannot determine the GitHub target safely for this session.');
+    throw new Error('Cannot determine the GitHub target safely while personal or managed identity is required. For supported repository commands, specify -R owner/repo. Account-wide commands, extensions and unsupported flags cannot use repository-scoped credentials here; use a separately authenticated terminal. No command was executed.');
   }
   const tokenKeys = target.host === 'github.com' || target.host.endsWith('.ghe.com')
     ? ['GH_TOKEN', 'GITHUB_TOKEN'] : ['GH_ENTERPRISE_TOKEN', 'GITHUB_ENTERPRISE_TOKEN'];
   if (target.host === 'github.com' && target.repo) {
-    // Unknown operations are conservatively treated as writes. Only the
-    // preflight is retried, never the user's command.
-    // Contents push permission says nothing about issue/comment/review access.
-    // Those commands keep the selected identity if the actual operation fails.
-    const requireWrite = false;
+    // Only preflight is retried, never the user's command. Unknown/API operations
+    // and issue/comment/review access must not be inferred from contents push.
+    const requireWrite = requiredRepositoryPermission(normalizedArgs);
     const selected = await selectGitHubCredential(target.repo, policy, async () => {
       for (const key of tokenKeys) {
         const token = env[key];

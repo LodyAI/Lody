@@ -19,6 +19,20 @@ credentials or repository access can advance the chain. Network failures, generi
 403 responses, rate limits, and branch rules do not justify changing identity.
 Never replay an uncertain write. Report fallback identity without logging secrets.
 
+For `gh`, preflight known target-repository requirements: push access for merging,
+release writes, workflow/run writes and repository sync; admin for repository
+archive/delete/rename. Do not equate every write with push access: comments,
+reviews, fork-head updates and mixed-permission commands keep a read preflight.
+Token scopes, rules and command-specific restrictions can still reject execution;
+such failures never cause a write to be retried with another identity.
+If managed/personal identity is required but a command's target cannot be resolved,
+explain that boundary and suggest `-R` where supported or a separately authenticated
+terminal. Never silently bypass the personal preference.
+
+Unavailable policy is different from expired context. Report connection/access
+recovery for policy failures, not an unconditional session restart. Do not use a
+cached preference to bypass a newly selected personal identity during an outage.
+
 Helpers must not save managed tokens into local credential stores. Recovery stays
 within the workspace broker. Broker context is bound to the active requester;
 inherited environment variables cannot prove machine ownership. This policy is

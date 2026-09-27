@@ -27,6 +27,19 @@ discover rotated context from a per-session file instead of requiring a restart.
 
 ## Evidence and limits
 
+Review correction: `gh` originally skipped write-capability preflight. Known
+commands now check push/admin before selection; comments/reviews and fork-head
+updates must not inherit that requirement. Policy outages are distinguished from
+invalid session context, without caching stale identity preferences. Unresolved
+targets explain the managed-identity boundary instead of silently using local auth.
+
+The PR-owning session ID now accompanies both PR panels and diff comments. One
+identity hook gates reads and writes; comment writes also verify the numeric ID
+against GitHub. Unresolved legacy identity has explicit error/retry UI and one
+automatic safe repair attempt. A matching name alone never releases that gate.
+Hook tests cover repair/retry, name reuse and blocked writes; the review notice has
+dedicated Storybook states. Live deployment and platform smoke checks remain open.
+
 See [the draft specification](../../../../specs/github-command-credentials.md).
 Implementation is present, with deterministic policy, generated-command and native
 Git advertisement tests. Adversarial review of supported standard URLs found no

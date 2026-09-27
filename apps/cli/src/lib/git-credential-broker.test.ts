@@ -8,6 +8,32 @@ import type { GitHubTokenManager } from './github-token-manager';
 import type { Logger } from '../utils/logger';
 
 describe('GitCredentialBroker', () => {
+  it('distinguishes upstream policy failure from an invalid session context', async () => {
+    const handler = createGitCredentialBrokerHandler({
+      authToken: 'bearer',
+      ownerUserId: 'owner',
+      logger: { debug: vi.fn() } as unknown as Logger,
+      tokenManager: {
+        getCredentialPolicy: async () => {
+          throw new Error('offline');
+        },
+      } as unknown as GitHubTokenManager,
+      resolveContext: () => ({ sessionId: 's1', requesterUserId: 'owner', machineId: 'm1' }),
+    });
+    const res = makeRes();
+    handler(
+      makeReq({
+        url: '/github-auth-context',
+        auth: 'Bearer bearer',
+        body: { contextToken: 'valid' },
+      }),
+      res
+    );
+    await res.finished;
+    expect(res.statusCode).toBe(500);
+    expect(JSON.parse(res.body)).toMatchObject({ error: 'policy_unavailable' });
+    expect(JSON.parse(res.body)).not.toHaveProperty('allowLocalAuth');
+  });
   it.each(['policy', 'candidate'] as const)(
     'fences a pending %s response when the requester context rotates',
     async (kind) => {

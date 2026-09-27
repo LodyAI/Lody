@@ -2066,6 +2066,7 @@
   "sessions.prTab.filesChanged": "{{count}} files",
   "sessions.prTab.head": "Head",
   "sessions.prTab.loadError": "Failed to load pull request",
+  "sessions.prTab.repositoryIdentityUnresolved": "Cannot verify this session’s repository identity. GitHub operations are paused. Retry after reconnecting to Lody. If the repository was removed, reinstalled or renamed, ask a workspace administrator to verify the original repository and PR association; a matching name alone is not enough.",
   "sessions.prTab.mergeAction": "Merge pull request",
   "sessions.prTab.mergeBlocked": "Merging is blocked — required reviews, failing checks, or the branch is behind.",
   "sessions.prTab.mergeBlockedNotice": "Merging is blocked until required reviews and checks pass.",

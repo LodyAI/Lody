@@ -237,7 +237,15 @@ export const createGitCredentialBrokerHandler = (options: {
       const errorMessage = formatErrorMessage(error);
       options.logger.debug(`credential broker request failed: ${errorMessage}`);
       res.writeHead(500, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: 'internal_error', message: errorMessage }));
+      res.end(
+        JSON.stringify({
+          error: req.url === '/github-auth-context' ? 'policy_unavailable' : 'internal_error',
+          message:
+            req.url === '/github-auth-context'
+              ? 'Cannot verify GitHub identity preferences. Check the Lody connection and machine access, then retry.'
+              : errorMessage,
+        })
+      );
     }
   };
   return (req, res) => {

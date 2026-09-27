@@ -34,6 +34,7 @@ function harness(
     localToken?: string;
     remote?: string;
     status?: number;
+    permissions?: { push?: boolean; admin?: boolean };
   } = {}
 ) {
   const calls: Array<{ path: string; body: Record<string, unknown> }> = [];
@@ -61,7 +62,7 @@ function harness(
       return {
         ok: (options.status ?? 200) === 200,
         status: options.status ?? 200,
-        json: async () => ({ permissions: { push: false } }),
+        json: async () => ({ permissions: options.permissions ?? { push: false } }),
       };
     const endpoint = new URL(url).pathname;
     const body = JSON.parse(init.body ?? '{}');
@@ -166,6 +167,48 @@ describe('generated gh command boundary', () => {
     expect((await h.build(['pr', 'list'])).env.GH_TOKEN).toBe('local');
     expect(h.calls.map((c) => c.path)).toEqual(['/github-auth-context']);
   });
+  it.each([
+    ['pr', 'merge', '1'],
+    ['release', 'create', 'v1'],
+    ['workflow', 'run', 'build.yml'],
+    ['run', 'rerun', '123'],
+  ])('preflights required push permission for %s %s without executing a write', async (...args) => {
+    const h = harness({ localToken: 'read-only' });
+    expect((await h.build(args)).env.GH_TOKEN).toBe('app:cwd/project');
+    expect(h.actual).toEqual([]);
+  });
+  it('keeps owner credentials when a write preflight confirms push access', async () => {
+    const h = harness({ localToken: 'writer', permissions: { push: true } });
+    expect((await h.build(['-R', 'other/repo', 'pr', 'merge', '1'])).env.GH_TOKEN).toBe('writer');
+  });
+  it('uses admin rather than push capability for repository administration', async () => {
+    const h = harness({ localToken: 'writer', permissions: { push: true, admin: false } });
+    expect((await h.build(['repo', 'archive', 'other/repo'])).env.GH_TOKEN).toBe('app:other/repo');
+  });
+  it.each([
+    { flags: ['--disable-auto'], token: 'local' },
+    { flags: ['--disable-auto=true'], token: 'local' },
+    { flags: ['--disable-auto=false'], token: 'app:cwd/project' },
+    { flags: ['--disable-auto', '--disable-auto=false'], token: 'app:cwd/project' },
+    { flags: ['--body', '--disable-auto'], token: 'app:cwd/project' },
+  ])('uses parsed disable-auto semantics: $flags', async ({ flags, token }) => {
+    const h = harness({ localToken: 'local' });
+    expect((await h.build(['pr', 'merge', '1', ...flags])).env.GH_TOKEN).toBe(token);
+  });
+  it.each([
+    ['pr', 'update-branch', '1'],
+    ['repo', 'edit', '--description', 'test'],
+  ])('does not demand base push or admin for %s %s', async (...args) => {
+    const h = harness({ localToken: 'local', permissions: { push: false, admin: false } });
+    expect((await h.build(args)).env.GH_TOKEN).toBe('local');
+  });
+  it('does not reinterpret a comment body as a write command', async () => {
+    const h = harness({ localToken: 'reader' });
+    expect(
+      (await h.build(['pr', '--repo', 'other/repo', 'comment', '1', '--body', 'merge'])).env
+        .GH_TOKEN
+    ).toBe('reader');
+  });
   it('personal overrides ambient tokens and local login even without push permission', async () => {
     const h = harness({ personal: true, localToken: 'local', env: { GH_TOKEN: 'ambient' } });
     expect((await h.build(['pr', 'comment', '1'])).env.GH_TOKEN).toBe('personal:cwd/project');
@@ -193,6 +236,8 @@ describe('generated gh command boundary', () => {
   });
   it('unknown targets cannot bypass personal priority', async () => {
     const h = harness({ personal: true, localToken: 'local' });
-    await expect(h.build(['some-extension', 'write'])).rejects.toThrow('Cannot determine');
+    await expect(h.build(['some-extension', 'write'])).rejects.toThrow(
+      'separately authenticated terminal'
+    );
   });
 });

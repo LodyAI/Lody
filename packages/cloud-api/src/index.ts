@@ -522,6 +522,10 @@ export type CloudApi = {
       { state: string }
     >;
     getPersonalOperationSettings: Query<{ workspaceId: string }, PersonalOperationSettings>;
+    resolveLegacyPrRepositoryIdentity: Mutation<
+      { workspaceId: string; repoFullName: string; prNumber: number; sessionId: string },
+      { resolved: boolean }
+    >;
     getPrCacheVersions: Query<
       { workspaceId: string; repoFullName: string; prNumber: number; sessionId?: string },
       {

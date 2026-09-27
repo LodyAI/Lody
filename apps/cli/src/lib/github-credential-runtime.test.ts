@@ -52,6 +52,27 @@ function harness(
 }
 
 describe('per-command GitHub credential policy', () => {
+  it.each([null, { ok: false, status: 503, json: async () => ({ error: 'policy_unavailable' }) }])(
+    'does not tell users to restart for policy service failures',
+    async (response) => {
+      const readPolicy = vm.runInNewContext(githubCredentialRuntime + '\nreadCredentialPolicy', {
+        getContextToken: () => 'context',
+        requestBroker: async () => response,
+      }) as () => Promise<unknown>;
+      await expect(readPolicy()).rejects.toThrow('Check the Lody connection and machine access');
+    }
+  );
+  it('reserves session restart guidance for invalid contexts', async () => {
+    const readPolicy = vm.runInNewContext(githubCredentialRuntime + '\nreadCredentialPolicy', {
+      getContextToken: () => 'context',
+      requestBroker: async () => ({
+        ok: false,
+        status: 403,
+        json: async () => ({ error: 'invalid_context' }),
+      }),
+    }) as () => Promise<unknown>;
+    await expect(readPolicy()).rejects.toThrow('Restart this session');
+  });
   it('follows public rename redirects without credentials and rejects a different API origin', async () => {
     const fetch = vi
       .fn()

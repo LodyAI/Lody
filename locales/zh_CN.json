@@ -2066,6 +2066,7 @@
   "sessions.prTab.filesChanged": "{{count}} 个文件",
   "sessions.prTab.head": "源",
   "sessions.prTab.loadError": "加载 Pull Request 失败",
+  "sessions.prTab.repositoryIdentityUnresolved": "无法确认此会话的仓库身份，已暂停 GitHub 操作。请连接 Lody 后重试。若仓库曾被移除、重新安装或更名，请工作区管理员核实原仓库和 PR 关联；仅名称相同不能证明是同一仓库。",
   "sessions.prTab.mergeAction": "合并 Pull Request",
   "sessions.prTab.mergeBlocked": "合并被阻止——可能需要审核、检查未通过或分支落后。",
   "sessions.prTab.mergeBlockedNotice": "合并被阻止，需完成必要审核并通过检查后才能继续。",

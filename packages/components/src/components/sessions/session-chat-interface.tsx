@@ -2340,6 +2340,7 @@ export const SessionChatInterface = memo(
     }, [session, localeObj]);
 
     const {
+      sourceSessionId: prSessionId,
       repoFullName,
       latestPr,
       latestPrState,
@@ -2373,7 +2374,7 @@ export const SessionChatInterface = memo(
     const prLinkHandler = latestPr ? openLatestPr : undefined;
     const preferredMergeMethod = usePreferredPrMergeMethod();
     const activePrDetails = useGitHubPrDetails({
-      sessionId: session.id,
+      sessionId: prSessionId,
       workspaceId,
       repoFullName: latestPrRepoFullName,
       prNumber: latestPrNumber,

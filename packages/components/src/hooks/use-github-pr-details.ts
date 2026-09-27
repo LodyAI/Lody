@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { cloudOperations } from '@/lib/cloud-api-operations';
 import {
   getServerNow,
   GitHubPermissionError,
@@ -45,7 +44,7 @@ import {
 } from '@/lib/github-pr-details-state';
 import { canRunAuthedWorkspaceQuery } from '@/lib/authed-convex-query';
 import { useAuthenticatedConvex } from './use-authenticated-convex';
-import { useCloudQuery } from '@lody/platform/react';
+import { useGitHubPrIdentity } from './use-github-pr-identity';
 
 // Delay before probing whether a merged PR's head branch still exists. GitHub
 // auto-deletes head branches asynchronously after a merge (when the repo has
@@ -278,29 +277,21 @@ export function useGitHubPrDetails({
   enabled = true,
   visible = true,
 }: UseGitHubPrDetailsInput): UseGitHubPrDetailsResult {
-  const requestedRepoFullName = repoFullName?.trim() || null;
-  const serverVersions = useCloudQuery(
-    cloudOperations.github.getPrCacheVersions,
-    enabled && workspaceId && requestedRepoFullName && prNumber
-      ? {
-          workspaceId,
-          repoFullName: requestedRepoFullName,
-          prNumber,
-          ...(sessionId ? { sessionId } : {}),
-        }
-      : 'skip'
-  );
-  const normalizedRepoFullName = serverVersions?.repoFullName ?? requestedRepoFullName;
-  const repositoryId = serverVersions?.repositoryId;
-  const enabledWithInputs = Boolean(
-    enabled &&
-    workspaceId &&
-    normalizedRepoFullName &&
-    prNumber &&
-    prNumber > 0 &&
-    (!sessionId || serverVersions !== undefined) &&
-    !serverVersions?.identityPending
-  );
+  const identity = useGitHubPrIdentity({
+    workspaceId,
+    sessionId,
+    repoFullName,
+    prNumber,
+    enabled,
+    visible,
+  });
+  const {
+    serverVersions,
+    repositoryId,
+    repoFullName: normalizedRepoFullName,
+    ready: enabledWithInputs,
+    retry: retryIdentity,
+  } = identity;
 
   // Gate token fetches on Convex auth readiness. The token action returns
   // `unauthorized` whenever the request lands without a valid session, which is
@@ -843,6 +834,10 @@ export function useGitHubPrDetails({
 
   // --- Public refresh() ---------------------------------------------------
   const refresh = useCallback(async () => {
+    if (!enabledWithInputs) {
+      await retryIdentity();
+      return null;
+    }
     const requestOptions: GitHubReadRequestOptions = { cache: 'reload' };
     await fetchSlice('prDetails', requestOptions, 'fresh');
     await Promise.all([
@@ -852,7 +847,7 @@ export function useGitHubPrDetails({
       fetchSlice('checkRuns', requestOptions, 'fresh'),
     ]);
     return payloadToData(payloadRef.current);
-  }, [fetchSlice]);
+  }, [enabledWithInputs, fetchSlice, retryIdentity]);
 
   const fetchCurrentPullRequestDetails = useCallback(
     async (targetCacheKey: string): Promise<GitHubPullRequestDetails | null> => {
@@ -1247,9 +1242,9 @@ export function useGitHubPrDetails({
   }, [cacheKey, enabledWithInputs, recoverableAuthError, refresh]);
 
   return {
-    state: effectiveState,
-    data,
-    error,
+    state: identity.error ? 'error' : effectiveState,
+    data: enabledWithInputs ? data : null,
+    error: identity.error ?? error,
     checksPermissionError,
     isRevalidating,
     refresh,

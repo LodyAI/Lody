@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { cloudOperations } from '@/lib/cloud-api-operations';
 import { getServerNow, githubFetchPRReviewComments, type GitHubReviewThread } from '@lody/shared';
-import { withGitHubTokenRetry } from '@/lib/github-token';
-import { useCloudQuery } from '@lody/platform/react';
+import { withGitHubOperationTokenRetry, withGitHubTokenRetry } from '@/lib/github-token';
+import { useGitHubPrIdentity } from './use-github-pr-identity';
 
 type GitHubReviewCommentsStatus = 'idle' | 'loading' | 'success' | 'error';
 
@@ -19,6 +18,10 @@ export type UseGitHubReviewCommentsResult = {
   error: Error | null;
   fetchedAt: number | null;
   refresh: () => Promise<void>;
+  runWithToken: <T>(
+    operation: 'read' | 'write',
+    fn: (token: string, repoFullName: string) => Promise<T>
+  ) => Promise<T>;
 };
 
 const CACHE_TTL_MS = 60_000;
@@ -110,28 +113,14 @@ export function useGitHubReviewComments({
   prNumber?: number | null;
   enabled?: boolean;
 }): UseGitHubReviewCommentsResult {
-  const requestedRepoFullName = repoFullName?.trim() || null;
-  const serverVersions = useCloudQuery(
-    cloudOperations.github.getPrCacheVersions,
-    enabled && workspaceId && requestedRepoFullName && prNumber
-      ? {
-          workspaceId,
-          repoFullName: requestedRepoFullName,
-          prNumber,
-          ...(sessionId ? { sessionId } : {}),
-        }
-      : 'skip'
-  );
-  const normalizedRepoFullName = serverVersions?.repoFullName ?? requestedRepoFullName;
-  const enabledWithInputs = Boolean(
-    enabled &&
-    workspaceId &&
-    normalizedRepoFullName &&
-    prNumber &&
-    prNumber > 0 &&
-    (!sessionId || serverVersions !== undefined) &&
-    !serverVersions?.identityPending
-  );
+  const identity = useGitHubPrIdentity({ workspaceId, sessionId, repoFullName, prNumber, enabled });
+  const {
+    serverVersions,
+    repositoryId,
+    repoFullName: normalizedRepoFullName,
+    ready: enabledWithInputs,
+    retry: retryIdentity,
+  } = identity;
   const cacheKey = useMemo(
     () =>
       workspaceId && normalizedRepoFullName && prNumber
@@ -264,8 +253,46 @@ export function useGitHubReviewComments({
   }, [enabledWithInputs, load]);
 
   const refresh = useCallback(async () => {
+    if (!enabledWithInputs) {
+      await retryIdentity();
+      return;
+    }
     await load({ force: true });
-  }, [load]);
+  }, [enabledWithInputs, load, retryIdentity]);
 
-  return { threads, status, error, fetchedAt, refresh };
+  const runWithToken = useCallback(
+    async <T>(
+      operation: 'read' | 'write',
+      fn: (token: string, repoFullName: string) => Promise<T>
+    ): Promise<T> => {
+      if (
+        !enabledWithInputs ||
+        !workspaceId ||
+        !normalizedRepoFullName ||
+        repositoryId === undefined
+      ) {
+        throw (
+          identity.error ??
+          new Error('GitHub repository identity is not ready; no operation was attempted.')
+        );
+      }
+      return withGitHubOperationTokenRetry(
+        workspaceId,
+        normalizedRepoFullName,
+        operation,
+        (token) => fn(token, normalizedRepoFullName),
+        repositoryId
+      );
+    },
+    [enabledWithInputs, workspaceId, normalizedRepoFullName, repositoryId, identity.error]
+  );
+
+  return {
+    threads: enabledWithInputs ? threads : [],
+    status: identity.error ? 'error' : status,
+    error: identity.error ?? error,
+    fetchedAt,
+    refresh,
+    runWithToken,
+  };
 }
