@@ -9,7 +9,7 @@ import { buildChatStreamItems } from '../src/components/ai-gui/build-chat-stream
 import { SessionChatStreamView } from '../src/components/ai-gui/view';
 import { initI18n } from '../src/i18n';
 import { createConversationViewFromHistory } from '../src/lib/conversation-view';
-import { clearScrollPosition } from '../src/hooks/use-scroll-position-cache';
+import { clearSavedScrollStates } from '../src/lib/conversation-scroll/saved-state';
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -50,7 +50,7 @@ describe('live agent status', () => {
 
   beforeEach(async () => {
     await initI18n('en');
-    clearScrollPosition(sessionId);
+    clearSavedScrollStates();
     // The live turn started at 00:00:01, so every live status reads 30s in.
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(new Date('2026-09-19T00:00:31Z'));
@@ -69,7 +69,7 @@ describe('live agent status', () => {
 
   afterEach(async () => {
     await act(async () => root.unmount());
-    clearScrollPosition(sessionId);
+    clearSavedScrollStates();
     container.remove();
     vi.unstubAllGlobals();
     vi.useRealTimers();

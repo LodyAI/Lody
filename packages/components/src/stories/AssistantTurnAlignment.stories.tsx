@@ -189,7 +189,7 @@ const scrollToLatestItems: ChatStreamItem[] = [
   { type: 'message', sessionId, message: scrollToLatestTurn, turnIndex: 0 } as const,
 ];
 
-async function moveAwayFromLatest(viewport: HTMLElement): Promise<void> {
+function moveAwayFromLatest(viewport: HTMLElement): void {
   // Move away from the real bottom before releasing follow. A wheel event alone
   // changes the mode but leaves the viewport at the end, which makes the story
   // show a return control in a state that is already at the latest row.
