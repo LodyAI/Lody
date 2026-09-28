@@ -885,6 +885,15 @@ describe('SessionChatInputArea submission feedback', () => {
     return event;
   }
 
+  function readBlobAsText(blob: Blob): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result ?? ''));
+      reader.onerror = () => reject(reader.error ?? new Error('Unable to read blob'));
+      reader.readAsText(blob);
+    });
+  }
+
   it('leaves a rich-text paste to the browser instead of attaching its bitmap', async () => {
     const textarea = await renderComposer({ onSendMessage: async () => true });
     // A Word or PowerPoint copy carries a picture of the selection beside the
@@ -941,7 +950,9 @@ describe('SessionChatInputArea submission feedback', () => {
         mimeType: 'text/plain',
       });
       expect(attachment?.source?.size).toBe(new TextEncoder().encode(pastedText).length);
-      expect(await attachment?.source?.text()).toBe(pastedText);
+      expect(attachment?.source ? await readBlobAsText(attachment.source) : undefined).toBe(
+        pastedText
+      );
     });
 
     it('merges the generated file with real clipboard files', async () => {
