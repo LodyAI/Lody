@@ -215,6 +215,101 @@ jobs:
           node .github/scripts/run-ci-tests.mjs --scope "$RUNNER_TEMP/ci-scope.json" \
             --group "$GROUP" --shard "$SHARD" "${full[@]}"
 
+  # Conversation scrolling in a real browser: the components Playwright specs
+  # for hydration and the conversation scroll engine, against Storybook. Runs
+  # when the components test group runs. Not part of the required Tests check
+  # until it has proven stable on CI; see
+  # .agents/notes/implemented/architecture/2026-09-27-conversation-scroll-engine.md.
+  conversation-e2e:
+    name: Conversation browser tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Set up workspace toolchain
+        uses: ./.github/actions/setup-workspace
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Select CI scope
+        id: scope
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+        run: |
+          node .github/scripts/select-ci-scope.mjs \
+            --event "${{ github.event_name }}" \
+            --base-sha "${PR_BASE_SHA}" \
+            --head-sha "${{ github.sha }}" \
+            --workspace-root . \
+            --labels "${PR_LABELS}" \
+            --json-out "$RUNNER_TEMP/ci-scope.json"
+
+      - name: YAML fail-open override
+        id: override
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          # Must stay byte-identical to the Static checks override (do not
+          # move this floor into select-ci-scope.mjs — that script is untrusted).
+          force=true
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            if git fetch --no-tags --depth=1 origin "$PR_BASE_SHA" \
+              && git diff -z --name-only "$PR_BASE_SHA" HEAD >/tmp/ci-changed-files; then
+              force=false
+              while IFS= read -r -d '' f; do
+                [ -z "$f" ] && continue
+                case "$f" in
+                  package.json|pnpm-lock.yaml|pnpm-workspace.yaml|.github/scripts/*|.github/workflows/*)
+                    force=true
+                    break
+                    ;;
+                esac
+              done < /tmp/ci-changed-files
+            fi
+          fi
+          echo "force_full=${force}" >> "$GITHUB_OUTPUT"
+
+      - name: Plan
+        id: plan
+        # Fail open: a missing `run` output runs the browser tests.
+        continue-on-error: true
+        env:
+          FORCE_FULL: ${{ steps.override.outputs.force_full }}
+        run: |
+          full=()
+          [ "$FORCE_FULL" = "false" ] || full=(--full)
+          node .github/scripts/run-ci-tests.mjs --scope "$RUNNER_TEMP/ci-scope.json" \
+            --group components "${full[@]}" --plan >> "$GITHUB_OUTPUT"
+
+      - name: Skip for docs-only / unaffected scope
+        if: steps.plan.outputs.run == 'false'
+        run: |
+          echo "Skipping conversation browser tests: ${{ steps.scope.outputs.reason }}"
+
+      - name: Install dependencies
+        if: steps.plan.outputs.run != 'false'
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Chromium
+        if: steps.plan.outputs.run != 'false'
+        run: pnpm --filter @lody/components exec playwright install --with-deps chromium
+
+      - name: Run conversation browser tests
+        if: steps.plan.outputs.run != 'false'
+        env:
+          CI: 'true'
+        run: |
+          pnpm --filter @lody/components exec playwright test \
+            tests/e2e/session-chat-hydration.spec.ts \
+            tests/e2e/conversation-scroll-engine.spec.ts \
+            --workers=1
+
   # Stable required check: green only when every group succeeded.
   tests:
     name: Tests

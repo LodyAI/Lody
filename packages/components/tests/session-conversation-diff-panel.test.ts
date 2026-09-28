@@ -4,6 +4,7 @@ import {
   areFileDiffListsEqual,
   areSessionConversationDiffPanelPropsEqual,
   createConversationDiffViewerParseCacheKey,
+  shouldOpenDiffFileByDefault,
   type SessionConversationDiffPanelProps,
 } from '../src/components/sessions/session-conversation-diff-panel';
 
@@ -116,5 +117,45 @@ describe('createConversationDiffViewerParseCacheKey', () => {
         filePath: 'src/a.ts',
       })
     ).toBeUndefined();
+  });
+});
+
+describe('shouldOpenDiffFileByDefault', () => {
+  it('opens only the focused file in All Changes mode', () => {
+    expect(
+      shouldOpenDiffFileByDefault({
+        mode: 'base',
+        filePath: 'src/target.ts',
+        focusFilePath: 'src/target.ts',
+      })
+    ).toBe(true);
+    expect(
+      shouldOpenDiffFileByDefault({
+        mode: 'base',
+        filePath: 'src/other.ts',
+        focusFilePath: 'src/target.ts',
+      })
+    ).toBe(false);
+  });
+
+  it('keeps conversation diffs expanded and All Changes without focus collapsed', () => {
+    expect(
+      shouldOpenDiffFileByDefault({
+        mode: 'conversation',
+        filePath: 'src/other.ts',
+        focusFilePath: 'src/target.ts',
+      })
+    ).toBe(true);
+    expect(shouldOpenDiffFileByDefault({ mode: 'base', filePath: 'src/other.ts' })).toBe(false);
+  });
+
+  it('matches equivalent workspace path spellings', () => {
+    expect(
+      shouldOpenDiffFileByDefault({
+        mode: 'base',
+        filePath: './src/target.ts',
+        focusFilePath: 'src/target.ts',
+      })
+    ).toBe(true);
   });
 });

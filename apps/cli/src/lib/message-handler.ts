@@ -278,6 +278,7 @@ import {
   type BufferedACPUpdate,
 } from '@/lib/session-transient-store';
 import { fetchAcpCapabilities, type FetchAcpCapabilitiesOptions } from '@/agent/acp-capabilities';
+import { resolveExpectedAcpCapabilitySourceVersion } from '@/agent/setting';
 import type { WorkspaceWatchCoordinatorApi } from './code-collab/workspace-watch-coordinator';
 import { appendIssuePrMentionsToPrompt } from '@/session/session-execution-helpers';
 import {
@@ -496,7 +497,11 @@ function getMachineCommandEventImpact(events: readonly MachineFlockEvent[]): {
     if (parsed?.kind === 'deleteLocalProjectCommand') {
       deleteLocalProject = true;
     }
-    if (parsed?.kind === 'providerSetup' || parsed?.kind === 'providerSetupCancellation') {
+    if (
+      parsed?.kind === 'providerSetup' ||
+      parsed?.kind === 'providerSetupCancellation' ||
+      parsed?.kind === 'agentConfig'
+    ) {
       providerSetup = true;
     }
   }
@@ -2885,7 +2890,13 @@ export class MessageHandler {
     this.sessionActivePresence = new SessionActivePresenceController(
       this.workspaceDocument,
       this.machineId,
-      this.logger
+      this.logger,
+      {
+        // Late-bound: the execution service is constructed further down this
+        // constructor, and the watchdog can only fire once a turn is running.
+        onInitializationStalled: (sessionId, stall) =>
+          this.executionService.notifyInitializationStalled(sessionId, stall),
+      }
     );
     this.supportRegistryAgentTypes = config.supportRegistryAgentTypes ?? [];
     this.closeSessionTerminals = config.closeSessionTerminals;
@@ -3100,6 +3111,8 @@ export class MessageHandler {
           runtimeOverrides,
           options
         ),
+      resolveAcpCapabilitySourceVersion: async (input) =>
+        await resolveExpectedAcpCapabilitySourceVersion(input),
       evictForMemoryPressure: async (excludeSessionId) =>
         await this.evictForMemoryPressureFn(excludeSessionId),
     });
@@ -3215,13 +3228,14 @@ export class MessageHandler {
             this.triggerPendingProcessLifecycleAction(response.requestId);
           }
         },
-        refreshMachineAcpCapabilities: async ({ configId, onAcpBinaryProgress, signal }) =>
+        refreshMachineAcpCapabilities: async ({ configId, force, onAcpBinaryProgress, signal }) =>
           await this.executionService.refreshMachineAcpCapabilities(
             {
               type: 'machine/acp-capabilities-refresh',
               machineId: this.machineId,
               workspaceId: this.workspaceId,
               configId,
+              force,
             },
             { onAcpBinaryProgress, signal }
           ),
@@ -4762,6 +4776,7 @@ export class MessageHandler {
       if (notifications.length === 0) {
         return;
       }
+      const lateEvidenceOwners = new Set<string>();
       try {
         await appendACPNotificationsToAssistantEntry(
           args.sessionDoc,
@@ -4769,15 +4784,19 @@ export class MessageHandler {
           args.assistantEntryId,
           {
             logger: this.logger,
-            editCallback: async (edits) => {
+            editCallback: async (edits, assistantEntryId) => {
               // Edit tool calls (Codex apply_patch et al) bypass `fs/write_text_file` and
               // standard ACP diff blocks. Collect them so the turn-end persist can gap-fill
               // them into the diff store (old text chained from the prior recorded state),
               // keeping the turn-diff badge and its clickable content from the same source.
-              this.collectCodeCollabEditEvidence(args.sessionId, args.turnId, edits);
+              const ownerTurnId = assistantEntryId ?? args.turnId;
+              this.collectCodeCollabEditEvidence(args.sessionId, ownerTurnId, edits);
+              if (ownerTurnId !== args.turnId) lateEvidenceOwners.add(ownerTurnId);
             },
-            standardDiffCallback: async (diffs) => {
-              await this.collectCodeCollabStandardDiffs(args.sessionId, args.turnId, diffs);
+            standardDiffCallback: async (diffs, assistantEntryId) => {
+              const ownerTurnId = assistantEntryId ?? args.turnId;
+              await this.collectCodeCollabStandardDiffs(args.sessionId, ownerTurnId, diffs);
+              if (ownerTurnId !== args.turnId) lateEvidenceOwners.add(ownerTurnId);
             },
           },
           args.modelInfo
@@ -4802,6 +4821,9 @@ export class MessageHandler {
       await this.markACPNotificationsUnread(args.sessionId, args.sessionDoc, notifications);
       if (args.targetSource === 'finalized_turn') {
         await this.persistLateCodeCollabTurnDiffs(args.sessionId, args.turnId);
+      }
+      for (const ownerTurnId of lateEvidenceOwners) {
+        await this.persistLateCodeCollabTurnDiffs(args.sessionId, ownerTurnId);
       }
     };
 
@@ -4899,13 +4921,20 @@ export class MessageHandler {
     state.acpFlushCountInTurn += 1;
     const notifications = queue.map((item) => item.notification);
     const groups = this.groupBufferedACPUpdates(queue);
-    const span = startTraceSpan(this.logger, 'acp.flush_updates_batch', {
-      sessionId,
-      turnId: this.store.getTurnId(sessionId),
-      updates: notifications.length,
-      groups: groups.length,
-      flushCount: state.acpFlushCountInTurn,
-    });
+    // One span per streamed-token batch: kept out of the default file sink, but
+    // still reported at debug when the flush fails or runs long.
+    const span = startTraceSpan(
+      this.logger,
+      'acp.flush_updates_batch',
+      {
+        sessionId,
+        turnId: this.store.getTurnId(sessionId),
+        updates: notifications.length,
+        groups: groups.length,
+        flushCount: state.acpFlushCountInTurn,
+      },
+      { hot: true }
+    );
 
     const session = this.sessionManager.getSession(sessionId);
     const modelInfo = session?.agentClient?.currentModel;
@@ -5717,6 +5746,9 @@ export class MessageHandler {
       return;
     }
     const turn = state.turn;
+    // Runs ahead of every ACP flush, so it is as hot as the flush span itself: a
+    // healthy open gate stays out of the default file sink, while a wait that
+    // fails or runs long still reports at debug.
     await traceAsync(
       this.logger,
       'history.turn_gate_wait',
@@ -5725,7 +5757,8 @@ export class MessageHandler {
         ...(turn.phase === 'idle' ? {} : { turnId: turn.turnId }),
         ...(turn.phase === 'idle' || !turn.userTurnId ? {} : { userTurnId: turn.userTurnId }),
       },
-      async () => await gate.waitUntilOpen()
+      async () => await gate.waitUntilOpen(),
+      { hot: true }
     );
   }
 
@@ -8769,7 +8802,23 @@ export class MessageHandler {
       this.logger.debug(`[${sessionId}] Generating session title because title is missing`);
       const resolvedTitleConfig =
         titleConfig ?? (await this.resolveTitleConfig(sessionId, meta?.agentConfigId));
+      const provider = meta?.agentConfigId
+        ? await this.workspaceDocument.getAgentConfigById(meta.agentConfigId, this.machineId)
+        : null;
+      if (meta?.agentConfigId && !provider) return null;
+      if (
+        provider &&
+        !provider.codexAuth &&
+        (await getCodexProfileStore().list(this.workspaceId)).some(
+          (profile) => profile.configId === provider.id && profile.machineId === this.machineId
+        )
+      )
+        return null;
+      const codexProfile = provider?.codexAuth
+        ? await getCodexProfileStore().resolve(this.workspaceId, provider)
+        : undefined;
       const title = await generateTitleIsolated({
+        codexProfile: codexProfile ? { profile: codexProfile } : undefined,
         cliType,
         agentType,
         customAcp,
@@ -9739,3 +9788,4 @@ export class MessageHandler {
     this.logger.debug(`[GC] Session ${sessionId} cleaned`);
   }
 }
+import { getCodexProfileStore } from '@/agent/codex-profile-store';

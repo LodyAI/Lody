@@ -93,6 +93,7 @@ export function PrTabContainer({
     branchExists,
     isRevalidating,
   } = useGitHubPrDetails({
+    sessionId: sessionId ?? undefined,
     workspaceId: currentWorkspaceId ?? null,
     repoFullName,
     prNumber,
@@ -103,9 +104,7 @@ export function PrTabContainer({
   // The owning session (this PR tab's session) publishes the live resolve-
   // conflicts action; consuming it here keeps the PR-tab button in lockstep with
   // the info-bar "Resolve Conflicts" button (same dispatch, shared pending).
-  const resolveConflictsAction = useAtomValue(
-    resolveConflictsActionAtomFamily(sessionId ?? '')
-  );
+  const resolveConflictsAction = useAtomValue(resolveConflictsActionAtomFamily(sessionId ?? ''));
   const canResolveConflicts = Boolean(
     resolveConflictsAction?.available && !resolveConflictsAction.pending
   );

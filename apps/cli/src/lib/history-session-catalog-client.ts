@@ -130,7 +130,9 @@ type ResolvedHistoryACPProcessLaunch = Omit<ResolvedACPProcessLaunch, 'env'> & {
 };
 
 export type HistoryProviderLaunch = LocalProjectHistoryProvider &
-  Pick<ResolveACPSettingInput, 'customAcp' | 'runtimeOverrides' | 'env'>;
+  Pick<ResolveACPSettingInput, 'customAcp' | 'runtimeOverrides' | 'env'> & {
+    codexProfile?: ResolvedCodexProfile;
+  };
 
 export async function resolveHistoryACPProcessLaunch(args: {
   provider: HistoryProviderLaunch;
@@ -166,13 +168,43 @@ async function createHistoryAcpConnection(args: {
       logger: args.logger,
     },
     async () => {
-      const agentProcess = spawnAcpProcess({
-        cliType: args.provider.cliType,
-        agentType: args.provider.agentType,
-        workdir: args.workdir,
-        env,
-        command: launch.command,
-        args: launch.args,
+      const profile = args.provider.codexProfile;
+      const releaseProfile =
+        profile?.profile.mode === 'chatgpt'
+          ? await registerCodexProfileProcess(profile)
+          : undefined;
+      let closeBroker: (() => Promise<void>) | undefined;
+      const release = async () => {
+        await closeBroker?.();
+        await releaseProfile?.();
+      };
+      let agentProcess: ChildProcess;
+      try {
+        const prepared = profile
+          ? await codexProfileSpawnEnvironment({ profile }, env)
+          : { env, close: undefined };
+        closeBroker = prepared.close;
+        if (releaseProfile) prepared.env.LODY_CODEX_PROCESS_TOKEN = releaseProfile.token;
+        agentProcess = spawnAcpProcess({
+          cliType: args.provider.cliType,
+          agentType: args.provider.agentType,
+          workdir: args.workdir,
+          env: prepared.env,
+          command: launch.command,
+          args: launch.args,
+        });
+      } catch (error) {
+        await releaseProfile?.abandonBeforeSpawn();
+        await release();
+        throw error;
+      }
+      agentProcess.once('exit', () => {
+        void release().catch(() => {});
+      });
+      agentProcess.once('error', () => {
+        if (agentProcess.pid === undefined)
+          void releaseProfile?.abandonBeforeSpawn().catch(() => {});
+        void release().catch(() => {});
       });
 
       agentProcess.stderr?.setEncoding('utf8');
@@ -419,3 +451,8 @@ export async function loadHistorySessionReplay(args: {
     await terminateChildProcess(agentProcess);
   }
 }
+import type { ResolvedCodexProfile } from '@/agent/codex-profile-store';
+import {
+  registerCodexProfileProcess,
+  codexProfileSpawnEnvironment,
+} from '@/agent/codex-profile-runtime';

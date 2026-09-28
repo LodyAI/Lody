@@ -48,6 +48,16 @@ agent's answer and the agent's own warning about it.
   0.5px border up to a full pixel at EVERY device pixel ratio, so the utility
   renders identically to `border` and buys nothing.
 
+## Copying failures
+
+Every `chat_failed` banner has an always-visible Copy error button below its
+text, including title-only failures. It copies the existing plain-text error
+report (title, reason/code, session/agent/machine identifiers, remediation and
+full raw message). The shared clipboard helper supplies the browser fallback;
+show success only after the write succeeds, and show a failure toast otherwise.
+The footer keeps copying reachable on narrow touch screens without competing
+with the capacity retry action in the header.
+
 ## Capacity retry
 
 - Retry targets only the latest notice: the first click consents, and bounded

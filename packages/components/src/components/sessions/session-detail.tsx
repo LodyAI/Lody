@@ -1,3 +1,4 @@
+import { buildDraftUserHistoryEntry } from '@/lib/session-attachment-draft';
 import { windowPreparationAtom } from '@/lib/window-preparation';
 import { useEmptySessionDraft } from '@/hooks/use-empty-session-draft';
 import { sessionHasUnreadMessages } from '@/lib/session-read-receipt';
@@ -32,7 +33,6 @@ import { useRouter } from '@tanstack/react-router';
 import { useComposerNavigationFocus } from '../chat/submission/use-composer-navigation-focus';
 import { usePostHog } from '@posthog/react';
 import {
-  buildPendingUserHistoryEntry,
   getAcpCapabilityCacheKey,
   getProjectRefBranch,
   getServerNow,
@@ -1730,7 +1730,12 @@ const SessionDetail = ({
     return 'idle';
   }, [activeSession, activeSessionLiveStatus]);
   useTabStatus(tabStatus);
-  const { latestPr, repoFullName, canShowGitHubActions } = useMemo(
+  const {
+    sourceSessionId: prSessionId,
+    latestPr,
+    repoFullName,
+    canShowGitHubActions,
+  } = useMemo(
     () => getSessionGitHubState(activeTabSession, workspaceOwnerSession),
     [activeTabSession, workspaceOwnerSession]
   );
@@ -2180,14 +2185,18 @@ const SessionDetail = ({
         image_count: imageCount,
       });
       const childSessionId = payload.sessionId;
+      let accepted = false;
       try {
         const draftTitle = getDraftTabLabel({ prompt }, '').trim();
-        const pendingHistoryEntry = buildPendingUserHistoryEntry({
-          userId: user.id,
-          inputBlocks: payload.inputBlocks,
-          timestamp: new Date().toISOString(),
-          inputConfig: payload.inputConfig,
-        });
+        const pendingHistoryEntry = buildDraftUserHistoryEntry(
+          {
+            userId: user.id,
+            inputBlocks: payload.inputBlocks,
+            timestamp: new Date().toISOString(),
+            inputConfig: payload.inputConfig,
+          },
+          payload.attachments
+        );
         if (!pendingHistoryEntry) {
           toast.error(t('sessions.sendError'));
           return false;
@@ -2225,8 +2234,10 @@ const SessionDetail = ({
                 }
               : {}),
           },
-          pendingHistoryEntry
+          pendingHistoryEntry,
+          payload.attachments
         );
+        accepted = true;
         // Marks the first message read for the sender and bubbles activity to
         // the parent session, matching the ordinary send path. The child's own
         // lastMessageAt is already durable inside the startSession accept unit.
@@ -2303,16 +2314,17 @@ const SessionDetail = ({
         return true;
       } catch (error) {
         console.error('Failed to create child tab session', error);
-        try {
-          await deleteSessions([childSessionId]);
-        } catch (cleanupError) {
-          console.warn('Failed to clean up child tab session after create failure', cleanupError);
-        } finally {
-          setPendingDraftChildSessionIds((prev) => {
-            const { [payload.draftId]: _removed, ...rest } = prev;
-            return rest;
-          });
+        if (accepted) {
+          // Keep the resolution alias and acknowledge the durable send. UI bookkeeping
+          // may fail, but giving the composer a rejection would invite a duplicate.
+          clearSessionChatInputDrafts(childSessionId);
+          toast.error(t('sessions.sendError'));
+          return true;
         }
+        setPendingDraftChildSessionIds((prev) => {
+          const { [payload.draftId]: _removed, ...rest } = prev;
+          return rest;
+        });
         captureSessionDetailEvent('session/tab_child_create_failed', {
           draft_tab_id: payload.draftId,
           duration_ms: getDurationSinceMs(startedAtMs),
@@ -2371,7 +2383,6 @@ const SessionDetail = ({
     [
       activeSession,
       captureSessionDetailEvent,
-      deleteSessions,
       hidesBillingUi,
       isMobile,
       navigateToSessionTab,
@@ -3552,6 +3563,9 @@ const SessionDetail = ({
   });
 
   const handleOpenFileFromDiff = useStableCallback((filePath: string) => {
+    if (isMobile) {
+      handleCloseMobileDiff();
+    }
     handleOpenFile(filePath, { pathKind: 'canonical', source: 'diff_header' });
   });
 
@@ -5925,6 +5939,7 @@ const SessionDetail = ({
             <VaulDrawerBody topInset={MOBILE_DRAWER_HEADER_INSET}>
               {latestPr && repoFullName && urlPrNumber === latestPrNumber && latestPrNumber && (
                 <PrTabContainer
+                  sessionId={prSessionId}
                   repoFullName={latestPrRepoFullName}
                   prNumber={latestPrNumber}
                   headCommitSha={getSessionPullRequestLegacyFields(latestPr).headCommitSha}
@@ -6070,6 +6085,7 @@ const SessionDetail = ({
       />
     ) : activeSidebarTab === 'pr' && latestPr && repoFullName && latestPrNumber ? (
       <PrTabContainer
+        sessionId={prSessionId}
         repoFullName={latestPrRepoFullName}
         prNumber={latestPrNumber}
         headCommitSha={getSessionPullRequestLegacyFields(latestPr).headCommitSha}

@@ -1,3 +1,4 @@
+import type { SessionAttachmentDraft } from '@/lib/session-attachment-draft';
 import {
   forwardRef,
   memo,
@@ -88,6 +89,7 @@ const areConfigOptionValuesEqual = (
 };
 
 export type DraftSessionSendPayload = {
+  attachments?: SessionAttachmentDraft[];
   draftId: DraftSessionTab['id'];
   sessionId: SessionId;
   inputBlocks: SessionInputBlock[];
@@ -585,8 +587,15 @@ export const DraftSessionChatInterface = memo(
       );
 
       const handleSendMessage = useCallback(
-        async (inputBlocks: SessionInputBlock[]) => {
-          return await onSendDraft(buildSendPayload(inputBlocks));
+        async (
+          inputBlocks: SessionInputBlock[],
+          _role: unknown,
+          options?: { attachments?: SessionAttachmentDraft[] }
+        ) => {
+          return await onSendDraft({
+            ...buildSendPayload(inputBlocks),
+            attachments: options?.attachments,
+          });
         },
         [buildSendPayload, onSendDraft]
       );

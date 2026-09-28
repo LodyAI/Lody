@@ -375,3 +375,92 @@ test.describe('attachment upload submission', () => {
     });
   }
 });
+
+test.describe('composer selector leading column', () => {
+  /* A selector's popup is spatially a child of its trigger: its painted edge
+     stays on the trigger's edge, and the rows' leading icon column continues
+     the trigger's leading glyph on the same X, rather than establishing a
+     second grid inside the popup's own inset. */
+  const cases = [
+    // The machine selector is deliberately exempt: it keeps the popup's own
+    // inset grid by owner decision, so only the run-config family is pinned.
+    {
+      name: 'run configuration',
+      story: 'sessions-desktoprunconfigmenu--locked-agent',
+      trigger: 'Run configuration',
+      leadingRows: ['Plan', 'Fast'],
+    },
+    {
+      name: 'permission',
+      story: 'sessions-desktoprunconfigmenu--locked-agent',
+      trigger: /^Permission:/,
+      leadingRows: ['Read-only', 'Agent', 'Full access'],
+    },
+  ];
+
+  for (const { name, story, trigger, leadingRows } of cases) {
+    test(`${name} menu's icon column continues the trigger's`, async ({ page }) => {
+      await page.goto(`/iframe.html?id=${story}&viewMode=story`);
+      const triggerButton = page.getByRole('button', {
+        name: trigger,
+        exact: typeof trigger === 'string',
+      });
+      await triggerButton.click();
+      const menu = page.getByRole('menu');
+      await expect(menu).toBeVisible();
+      // Measure the popup's resting position, not a frame of its rise.
+      await page.evaluate(async () => {
+        await Promise.all(
+          document.getAnimations({ subtree: true }).map((a) => a.finished.catch(() => {}))
+        );
+      });
+      // The surface must stay parented: its painted edge sits ON the
+      // trigger's edge — sliding the popup to reach the column is a
+      // regression, the rows reach back instead.
+      const [triggerLeft, popupLeft] = await Promise.all([
+        triggerButton.evaluate((el) => el.getBoundingClientRect().left),
+        menu.evaluate((el) => el.getBoundingClientRect().left),
+      ]);
+      expect(Math.abs(popupLeft - triggerLeft)).toBeLessThanOrEqual(0.75);
+      const triggerCenter = await triggerButton
+        .locator('svg')
+        .first()
+        .evaluate((el) => {
+          const r = el.getBoundingClientRect();
+          return r.left + r.width / 2;
+        });
+      const leadingCenters = await page.evaluate(() => {
+        const items = [
+          ...document.querySelectorAll<HTMLElement>(
+            '[role="menuitem"],[role="menuitemradio"],[role="menuitemcheckbox"]'
+          ),
+        ];
+        return items
+          .map((item) => {
+            // The leading slot is the row's first element child holding the
+            // glyph itself; rows without one are skipped so a trailing
+            // chevron or check cannot stand in for the column.
+            const slot = item.firstElementChild;
+            const glyph =
+              slot?.firstElementChild instanceof SVGElement ? slot.firstElementChild : null;
+            if (!glyph) return null;
+            const rect = glyph.getBoundingClientRect();
+            return {
+              text: item.textContent?.trim() ?? '',
+              center: rect.left + rect.width / 2,
+            };
+          })
+          .filter((x): x is { text: string; center: number } => x != null);
+      });
+      for (const label of leadingRows) {
+        const row = leadingCenters.find((r) => r.text.startsWith(label));
+        expect(row, `leading icon of row "${label}"`).toBeTruthy();
+        expect(Math.abs(row!.center - triggerCenter)).toBeLessThanOrEqual(0.75);
+      }
+      // And the column is a column: every leading icon sits on one X.
+      for (const row of leadingCenters) {
+        expect(Math.abs(row.center - triggerCenter)).toBeLessThanOrEqual(0.75);
+      }
+    });
+  }
+});

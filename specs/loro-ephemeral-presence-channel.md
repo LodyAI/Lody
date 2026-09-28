@@ -19,12 +19,13 @@ slow subscriber instead of buffering every intermediate update. Everything publi
 therefore disposable, and the only reason to publish is that some reader needs to know the
 current state right now.
 
-One workspace owns ONE ephemeral transport, and machine heartbeats share it with every other
-ephemeral writer in that workspace. Publication is strictly serial: one update is in flight at
-a time, the rest wait in a first-in-first-out queue that does not merge superseded entries,
-does not prioritize heartbeats, and has no length bound. A writer that produces faster than the
-network drains therefore delays every LATER writer, including the heartbeat, for as long as the
-backlog lasts.
+One workspace owns ONE presence transport, and machine heartbeats share it with every other
+presence writer in that workspace. Publication is strictly serial: one update is in flight at
+a time. With the built-in Loro adaptor, a newer single-key set/delete replaces an older unsent
+update for that key; an in-flight update is never replaced. Unknown or multi-key updates remain
+independent entries. This reduces repeated-key bursts but does not prioritize heartbeats or
+bound the number of distinct keys, payload size, or retry budget. Publishers must still bound
+their rate and size: a backlog of independent entries can delay later heartbeats.
 
 That delay corrupts liveness rather than merely slowing it. A heartbeat's timestamp is taken
 when the entry is created, not when it is sent, so an entry that waits longer than the freshness
@@ -81,9 +82,13 @@ owner in `apps/cli/src/lib/loro/session-active-presence.ts`. Reader-side interpr
 `--json`. The MCP dispatch guards in `apps/cli/src/mcp/lody-mcp-server.ts` block on a definite
 offline only; `apps/cli/src/commands/agent-config.ts` takes the same position.
 
-The serial queue, its lack of coalescing and the unbounded retry budget are implementation
-details of `@loro-dev/streams-crdt` (`EphemeralStreamCrdt`), inspected at version 0.15.1. This
-repository does not control them, which is why the bound is stated as a publisher obligation.
+The queue behavior above was inspected in `@loro-dev/streams-crdt@0.16.0`. The CLI presence,
+CLI machine-monitor, and shared frontend ephemeral-room factory pass the built-in
+`EphemeralStoreAdaptor` directly, retaining its optional `localUpdateKey` capability.
+`pendingLocalCount` counts unacknowledged local updates, including superseded writes, rather
+than physical POSTs; `waitUntilSynced()` waits for the latest value of each chain captured at
+call time. Token acquisition and unauthorized refresh have request deadlines. These client
+changes do not establish server room retention, fan-out buffer capacity, or server TTL.
 
 The failure this spec prevents was observed on 2026-09-20 and is recorded in
 [the rejected transient-reasoning note](../.agents/notes/rejected/bug-fix/2026-09-18-codex-transient-reasoning.md):

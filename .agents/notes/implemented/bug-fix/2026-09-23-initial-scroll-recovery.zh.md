@@ -7,6 +7,8 @@ Translation: current
 
 PR: [#896](https://github.com/LodyAI/Lody/pull/896)
 
+后续：2026-09-27 起，[对话滚动引擎](../architecture/2026-09-27-conversation-scroll-engine.zh.md)取代了揭示门；本修复及其重放路径已不存在。
+
 ## 摘要
 
 会话行已经挂载并完成测量时，整个消息区仍可能一直不可见。冷启动恢复缓存像素位置时，

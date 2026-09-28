@@ -19,8 +19,8 @@ void test('matches Command+R on macOS and Ctrl+R elsewhere', () => {
   assert.equal(isRendererReloadShortcut({ ...input, control: true }, 'win32'), true)
 })
 
-void test('does not consume modified, repeated, or key-up events', () => {
-  assert.equal(isRendererReloadShortcut({ ...input, meta: true, shift: true }, 'darwin'), false)
+void test('routes force reload through the same guard but ignores other modified events', () => {
+  assert.equal(isRendererReloadShortcut({ ...input, meta: true, shift: true }, 'darwin'), true)
   assert.equal(isRendererReloadShortcut({ ...input, meta: true, control: true }, 'darwin'), false)
   assert.equal(
     isRendererReloadShortcut({ ...input, meta: true, isAutoRepeat: true }, 'darwin'),

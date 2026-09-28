@@ -278,6 +278,7 @@ export const spawnAcpProcess = (options: SpawnAcpProcessOptions): ChildProcess =
 };
 
 export type StartLocalAcpAgentOptions = {
+  codexProfile?: CodexProfileExecution;
   cliType: AgentConfigCliType;
   agentType: string;
   customAcp?: CustomAcpLaunchSpec;
@@ -383,7 +384,11 @@ export const startLocalAcpAgent = async (options: StartLocalAcpAgentOptions) => 
     isResume: false,
   };
 
-  const baseEnv = withoutElectronBootstrapCredentials(options.env ?? process.env);
+  const baseEnv = withoutElectronBootstrapCredentials(
+    options.codexProfile
+      ? codexProfileEnvironment(options.codexProfile.profile, options.env ?? process.env)
+      : (options.env ?? process.env)
+  );
   // Codex CLI reads config from `~/.codex` by default. E2E and title-agent runs use a temporary,
   // repo-local Codex home so their rollout/history state stays isolated. A title agent copies the
   // user's config into that home because custom model-provider routing and authentication must stay
@@ -465,17 +470,41 @@ export const startLocalAcpAgent = async (options: StartLocalAcpAgentOptions) => 
 
     captureAcpSpawnStarted(spawnAnalyticsProps);
     let agentProcess: ChildProcess;
+    const releaseProfile =
+      options.codexProfile?.profile.profile.mode === 'chatgpt'
+        ? await registerCodexProfileProcess(options.codexProfile.profile)
+        : undefined;
+    let closeBroker: (() => Promise<void>) | undefined;
+    const releaseResources = async () => {
+      await closeBroker?.();
+      await releaseProfile?.();
+    };
     try {
+      const prepared = options.codexProfile
+        ? await codexProfileSpawnEnvironment(options.codexProfile, envWithAcpStartup)
+        : { env: envWithAcpStartup, close: undefined };
+      closeBroker = prepared.close;
+      if (releaseProfile) prepared.env.LODY_CODEX_PROCESS_TOKEN = releaseProfile.token;
       agentProcess = spawnAcpProcess({
         cliType: options.cliType,
         agentType: options.agentType,
         workdir: options.workdir,
-        env: envWithAcpStartup,
+        env: prepared.env,
         command: launch.command,
         args: [...attemptArgs],
         spawnImpl: options.spawnImpl,
       });
+      agentProcess.once('exit', () => {
+        void releaseResources().catch(() => {});
+      });
+      agentProcess.once('error', () => {
+        void (
+          agentProcess.pid === undefined ? releaseProfile?.abandonBeforeSpawn() : releaseResources()
+        )?.catch(() => {});
+      });
     } catch (error) {
+      await releaseProfile?.abandonBeforeSpawn();
+      await releaseResources();
       // Synchronous spawn failure (e.g. spawnImpl throws). Async ENOENT/EACCES
       // surface later via the startup monitor and are captured in the catch below.
       cleanupCodexHome();
@@ -657,3 +686,9 @@ export async function shutdownLocalAcpAgent(options: ShutdownLocalAcpAgentOption
     exitTimeoutMs
   );
 }
+import {
+  codexProfileEnvironment,
+  codexProfileSpawnEnvironment,
+  registerCodexProfileProcess,
+  type CodexProfileExecution,
+} from './codex-profile-runtime';

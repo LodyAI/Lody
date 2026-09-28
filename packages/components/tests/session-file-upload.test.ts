@@ -216,3 +216,93 @@ describe('multipart session file progress', () => {
     expect(Math.max(...loadedBytes)).toBe(file.size);
   });
 });
+
+describe('multipart response and cancellation', () => {
+  it('waits for the response after 100% progress and detaches cancellation after success', async () => {
+    const { postMultipartWithProgress } = await import('../src/lib/multipart-upload');
+    let request!: ControlledRequest;
+    class ControlledRequest {
+      upload = { onprogress: null as ((event: ProgressEvent) => void) | null };
+      onload: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      onabort: (() => void) | null = null;
+      responseType = '';
+      response = { imageId: 'uploaded' };
+      status = 200;
+      aborted = false;
+      constructor() {
+        request = this;
+      }
+      open() {}
+      setRequestHeader() {}
+      send() {}
+      abort() {
+        this.aborted = true;
+        this.onabort?.();
+      }
+    }
+    vi.stubGlobal('XMLHttpRequest', ControlledRequest);
+    const controller = new AbortController();
+    const progress: number[] = [];
+    let settled = false;
+    const upload = postMultipartWithProgress({
+      url: '/upload',
+      token: 'test',
+      formData: new FormData(),
+      errorLabel: 'Image',
+      signal: controller.signal,
+      onProgress: (value) => progress.push(value),
+    });
+    void upload.then(() => {
+      settled = true;
+    });
+    request.upload.onprogress?.({ lengthComputable: true, loaded: 10, total: 10 } as ProgressEvent);
+    expect(progress).toEqual([100]);
+    expect(settled).toBe(false);
+    request.onload?.();
+    expect(await upload).toEqual({ imageId: 'uploaded' });
+    controller.abort();
+    expect(request.aborted).toBe(false);
+    expect(request.upload.onprogress).toBeNull();
+  });
+
+  it('aborts the actual request and rejects without retaining callbacks', async () => {
+    const { postMultipartWithProgress } = await import('../src/lib/multipart-upload');
+    let request!: ControlledRequest;
+    class ControlledRequest {
+      upload = { onprogress: null };
+      onload: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      onabort: (() => void) | null = null;
+      aborted = false;
+      constructor() {
+        request = this;
+      }
+      open() {}
+      setRequestHeader() {}
+      send() {}
+      abort() {
+        this.aborted = true;
+        this.onabort?.();
+      }
+    }
+    vi.stubGlobal('XMLHttpRequest', ControlledRequest);
+    const controller = new AbortController();
+    const upload = postMultipartWithProgress({
+      url: '/upload',
+      token: 'test',
+      formData: new FormData(),
+      errorLabel: 'Image',
+      signal: controller.signal,
+    });
+    controller.abort();
+    await expect(upload).rejects.toMatchObject({ name: 'AbortError' });
+    expect(request.aborted).toBe(true);
+    expect([request.onload, request.onerror, request.onabort, request.upload.onprogress]).toEqual([
+      null,
+      null,
+      null,
+      null,
+    ]);
+  });
+});

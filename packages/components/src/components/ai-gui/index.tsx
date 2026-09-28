@@ -1,4 +1,4 @@
-import { forwardRef, memo, useCallback, useEffect, useMemo, type ReactNode } from 'react';
+import { forwardRef, memo, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import type {
   SessionFilePayload,
   SessionHistoryParsed,
@@ -7,6 +7,7 @@ import type {
   WorkspaceId,
 } from '@lody/shared';
 import { DEFAULT_CONVERSATION_FONT_SIZE, type ConversationFontSize } from '@/atoms/settings';
+import { getSavedAnchorTurnId } from '@/lib/conversation-scroll/saved-state';
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import type { AgentActivityTone } from './view';
 import {
@@ -16,7 +17,11 @@ import {
   type CapacityRetryControl,
   type MessageFileDiffEntriesByTurn,
   type SessionChatStreamHandle,
+  type UserMessageEditMentionContext,
+  type UserMessageEditSubmission,
 } from './view';
+import { reanchorMessageTextSpansForTrim } from '@lody/shared';
+import { useMentionPromptExpansion } from '@/components/mentions/mention-expansion';
 import { useStableCallback } from '@/hooks/use-stable-callback';
 import { useConversationStreamItems } from '@/hooks/use-conversation-stream-items';
 import { useConversationVersion } from '@/hooks/use-conversation-view';
@@ -40,6 +45,8 @@ export type {
   SessionChatStreamViewProps,
   SessionChatUser,
   SessionMessageItem,
+  UserMessageEditMentionContext,
+  UserMessageEditSubmission,
   VisibleTurnRange,
 } from './view';
 
@@ -57,6 +64,8 @@ export interface SessionChatStreamProps {
   className?: string;
   /** Scrolls as the first conversation row (for example, Session provenance). */
   leadingContent?: ReactNode;
+  /** Scrolls after history as a local, not-yet-committed user message. */
+  trailingContent?: ReactNode;
   emptyState?: ReactNode;
   onAtBottomChange?: (atBottom: boolean) => void;
   showScrollToLatest?: boolean;
@@ -75,7 +84,14 @@ export interface SessionChatStreamProps {
   onForkLastAssistant?: (turnId: string, destination?: SessionForkDestination) => void;
   forkWorktreeAvailability?: SessionForkWorktreeAvailability;
   onForkWorktreeMenuOpen?: () => void;
-  onEditLastUser?: (message: SessionHistoryParsed, text: string) => Promise<boolean>;
+  onEditLastUser?: (
+    message: SessionHistoryParsed,
+    edit: UserMessageEditSubmission
+  ) => Promise<boolean>;
+  /** Composer-equivalent mention wiring for the edit-and-resend editor; leave
+   *  unset on surfaces without a mention source (the editor degrades to plain
+   *  text, and mentions hydrate off the visible tokens only when it is set). */
+  editMentionContext?: UserMessageEditMentionContext;
   /** Resends an undelivered (missing-history-acked) user turn's content as a
    * NEW message; the row's "Not delivered" label opens the confirmation dialog. */
   onResendUndelivered?: (userTurnId: string, inputBlocks: SessionInputBlock[]) => Promise<boolean>;
@@ -101,18 +117,23 @@ const MessageRowConnected = memo(function MessageRowConnected({
   onResendUndelivered,
   capacityRetry,
   conversationFontSize,
+  editMentionContext,
 }: {
   message: SessionHistoryParsed;
   sessionId: SessionId;
   workspaceId?: WorkspaceId | null;
   showSenderIdentity: boolean;
   onNavigateSession?: (target: SessionNavigationTarget) => void;
-  onEditLastUser?: (message: SessionHistoryParsed, text: string) => Promise<boolean>;
+  onEditLastUser?: (
+    message: SessionHistoryParsed,
+    edit: UserMessageEditSubmission
+  ) => Promise<boolean>;
   /** Resends an undelivered (missing-history-acked) user turn's content as a
    * NEW message; the row's "Not delivered" label opens the confirmation dialog. */
   onResendUndelivered?: (userTurnId: string, inputBlocks: SessionInputBlock[]) => Promise<boolean>;
   capacityRetry?: CapacityRetryControl;
   conversationFontSize: ConversationFontSize;
+  editMentionContext?: UserMessageEditMentionContext;
 }) {
   const userInfo = useCloudQuery(
     cloudOperations.auth.getUserById,
@@ -130,6 +151,7 @@ const MessageRowConnected = memo(function MessageRowConnected({
       onResendUndelivered={onResendUndelivered}
       capacityRetry={capacityRetry}
       conversationFontSize={conversationFontSize}
+      editMentionContext={editMentionContext}
     />
   );
 });
@@ -145,6 +167,7 @@ const SessionChatStreamImpl = forwardRef<SessionChatStreamHandle, SessionChatStr
       dividerLabel: _dividerLabel,
       className,
       leadingContent,
+      trailingContent,
       emptyState,
       onAtBottomChange,
       showScrollToLatest = true,
@@ -170,10 +193,14 @@ const SessionChatStreamImpl = forwardRef<SessionChatStreamHandle, SessionChatStr
       conversationFontSize = DEFAULT_CONVERSATION_FONT_SIZE,
       suppressStickyAutoScrollRef,
       outlineOverlayRoot,
+      editMentionContext,
     },
     ref
   ) => {
     const version = useConversationVersion(view);
+    // Read once per mount: the scroll engine restores this session's reading
+    // position into this turn, so load it before the first viewport report.
+    const [initialFocusTurnId] = useState(() => getSavedAnchorTurnId(sessionId));
     const {
       initialWindowReady,
       items,
@@ -182,10 +209,43 @@ const SessionChatStreamImpl = forwardRef<SessionChatStreamHandle, SessionChatStr
       onVisibleTurnRangeChange: handleVisibleTurnRangeChange,
       onOutlinePreviewRound: handleOutlinePreviewRound,
       onRetainedTurnIdsChange,
-    } = useConversationStreamItems(view, sessionId);
+    } = useConversationStreamItems(view, sessionId, { initialFocusTurnId });
     useEffect(() => {
       onLastCompletedAssistantMessageIdChange?.(lastCompletedAssistantMessageId);
     }, [lastCompletedAssistantMessageId, onLastCompletedAssistantMessageIdChange]);
+
+    /* The edit-and-resend save path needs the same before-send expansion the
+       composer's send runs; mounting it here (rather than inside each row)
+       keeps the skill/session catalogs single per stream and lets the row's
+       `onEdit` receive already-expanded text. */
+    const { expand: expandEditMentions } = useMentionPromptExpansion({
+      source: editMentionContext?.mentionSource,
+      skillAgent: editMentionContext?.skillAgent,
+      promptValue: '',
+      currentSessionId: sessionId,
+    });
+    const stableExpandEditMentions = useStableCallback(expandEditMentions);
+    const handleEditLastUser = useCallback(
+      async (message: SessionHistoryParsed, submission: UserMessageEditSubmission) => {
+        if (!onEditLastUser) return false;
+        const expanded = stableExpandEditMentions({
+          text: submission.text,
+          mentions: submission.mentions,
+        });
+        const trimmedText = expanded.text.trim();
+        const trimmedSpans = reanchorMessageTextSpansForTrim(
+          expanded.text,
+          trimmedText,
+          expanded.spans
+        );
+        return await onEditLastUser(message, {
+          text: trimmedText,
+          mentions: submission.mentions,
+          spans: trimmedSpans,
+        });
+      },
+      [onEditLastUser, stableExpandEditMentions]
+    );
 
     const stableOnFileDiffClick = useStableCallback((turnId: string, filePath: string) => {
       onFileDiffClick?.(turnId, filePath);
@@ -230,7 +290,8 @@ const SessionChatStreamImpl = forwardRef<SessionChatStreamHandle, SessionChatStr
             workspaceId={workspaceId}
             showSenderIdentity={showSenderIdentity}
             onNavigateSession={hasNavigateSession ? stableOnNavigateSession : undefined}
-            onEditLastUser={message.id === lastUserMessageId ? onEditLastUser : undefined}
+            onEditLastUser={message.id === lastUserMessageId ? handleEditLastUser : undefined}
+            editMentionContext={editMentionContext}
             onResendUndelivered={onResendUndelivered}
             capacityRetry={message.id === capacityRetry?.noticeId ? capacityRetry : undefined}
             conversationFontSize={conversationFontSize}
@@ -239,9 +300,10 @@ const SessionChatStreamImpl = forwardRef<SessionChatStreamHandle, SessionChatStr
       },
       [
         conversationFontSize,
+        editMentionContext,
+        handleEditLastUser,
         hasNavigateSession,
         lastUserMessageId,
-        onEditLastUser,
         onResendUndelivered,
         capacityRetry,
         stableOnNavigateSession,
@@ -258,6 +320,7 @@ const SessionChatStreamImpl = forwardRef<SessionChatStreamHandle, SessionChatStr
         sessionId={sessionId}
         className={className}
         leadingContent={leadingContent}
+        trailingContent={trailingContent}
         emptyState={emptyState}
         onAtBottomChange={onAtBottomChange}
         showScrollToLatest={showScrollToLatest}

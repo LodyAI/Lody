@@ -1,3 +1,5 @@
+import type { createSessionSendJournal } from '../lib/session-send-journal';
+import type { SessionSendResources } from '@/lib/session-send-resources';
 import type { LocalFilePreviewResource } from '@lody/shared/local-file-preview';
 import type { SessionData } from '@lody/shared/session-data';
 import { atom } from 'jotai';
@@ -169,6 +171,10 @@ export type WorkspaceRuntime = {
    * The workspace id used for IndexedDB/WebSocket connections.
    */
   readonly workspaceId: WorkspaceId;
+  readonly sendResources: SessionSendResources;
+  readonly sendJournal: ReturnType<typeof createSessionSendJournal> | null;
+  readonly sourceReplica: string;
+  readonly accountId: string | null;
   readonly repo: LoroRepo;
   /** Read targets from the ready metadata source, independently of UI projection. */
   readSessionOperationTargets: (

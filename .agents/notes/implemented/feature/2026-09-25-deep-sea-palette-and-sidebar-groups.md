@@ -89,6 +89,6 @@ itself is in [reading contrast](2026-09-24-reading-contrast.md).
   `tests/sidebar-machine-card.test.tsx` checks that only a known-offline machine gets the
   pill and what the hover card says. Components suite passes.
 - Checked on a local web build: group labels measure 11.48px/700 in one color; rows 14px.
-- Not done: an activity dot on collapsed groups, owner avatars in the list, a sticky
-  GitHub Worktrees label (its repos render outside its container). Light themes are
-  unchanged.
+- Not done: owner avatars in the list, a sticky GitHub Worktrees label (its repos
+  render outside its container). Light themes are unchanged. Collapsed groups now
+  carry a status mark: [folded group status](2026-09-26-sidebar-folded-group-status.md).

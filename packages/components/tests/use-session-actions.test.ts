@@ -1,3 +1,10 @@
+import { LoroDoc } from 'loro-crdt';
+import { createHistoryWriter } from '@lody/shared';
+import { createSessionSendJournal, type SessionSendRecord } from '../src/lib/session-send-journal';
+import {
+  createSessionSendResources,
+  type SessionSendResources,
+} from '../src/lib/session-send-resources';
 import { applyHistoryAction } from '../../shared/src/session-data/history-actions';
 import type { HistoryAction, SessionEntry } from '@lody/shared/session-data';
 // @vitest-environment jsdom
@@ -9,6 +16,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LoroRepo } from 'loro-repo';
 import {
   FREE_SESSION_LIMIT_PER_WORKSPACE,
+  SESSION_DOC_PREFIX,
   getMachineRoomId,
   getSessionRoomId,
   isLoroRepoDocDeleted,
@@ -142,6 +150,8 @@ const sessionDataOver = (history: unknown[]) => ({
   },
 });
 
+const sendResourceOwners = new Set<SessionSendResources>();
+
 const createRuntime = (
   overrides: Partial<
     Pick<
@@ -159,6 +169,9 @@ const createRuntime = (
     overrides.repo ??
     ({
       upsertDocMeta: vi.fn(async () => undefined),
+      getDocMeta: vi.fn(async (roomId: string) => ({
+        meta: { id: roomId.slice(SESSION_DOC_PREFIX.length), machineId: 'machine-1' },
+      })),
     } as unknown as WorkspaceRuntime['repo']);
 
   const sessionHistory: unknown[] = [];
@@ -209,7 +222,9 @@ const createRuntime = (
       reorderSessionMessages: vi.fn(async () => undefined),
     } as unknown as WorkspaceRuntime['writer']);
 
-  return {
+  const runtime = {
+    accountId: 'user-1',
+    sourceReplica: 'synthetic-replica',
     workspaceSlug: overrides.workspaceSlug ?? 'workspace-slug',
     workspaceId: overrides.workspaceId ?? ('workspace-1' as WorkspaceId),
     repo,
@@ -230,6 +245,42 @@ const createRuntime = (
       })
     ),
   } as unknown as WorkspaceRuntime;
+  const resources = createSessionSendResources({
+    acquire: (sessionId) => runtime.withSessionStore(sessionId, (store) => store),
+    releaseRef: () => {},
+  });
+  sendResourceOwners.add(resources);
+  Object.defineProperty(runtime, 'sendResources', { value: resources });
+  const records = new Map<string, SessionSendRecord>();
+  const historyDoc = new LoroDoc();
+  const historyWriter = createHistoryWriter(historyDoc);
+  const journal = createSessionSendJournal({
+    resources,
+    storage: {
+      list: async () => structuredClone([...records.values()]),
+      insert: async (input) => {
+        const saved = { ...input, sequence: records.size + 1 };
+        records.set(saved.id, saved);
+        return saved;
+      },
+      put: async (value) => {
+        records.set(value.id, value);
+      },
+      remove: async (id) => {
+        records.delete(id);
+      },
+      close: async () => {},
+    },
+    lock: async (_key, _signal, execute) => execute(),
+    prepare: async () => {},
+    commit: async (value) => {
+      historyWriter.append(value.entry);
+      sessionHistory.splice(0, sessionHistory.length, ...historyWriter.readStored());
+    },
+    deliver: async () => {},
+  });
+  Object.defineProperty(runtime, 'sendJournal', { value: journal });
+  return runtime;
 };
 
 const createSessionPayload = (sessionId: SessionId): SessionToCreate =>
@@ -330,6 +381,8 @@ describe('useSessionActions', () => {
   });
 
   afterEach(async () => {
+    await Promise.all([...sendResourceOwners].map((resources) => resources.dispose()));
+    sendResourceOwners.clear();
     if (root) {
       await act(async () => {
         root?.unmount();
@@ -778,16 +831,7 @@ describe('useSessionActions', () => {
 
   it('authors the pending user turn through the writer seam on send', async () => {
     const sessionId = 'session-append-turn-writer' as SessionId;
-    const appendSessionTurn = vi.fn(async () => 'direct' as const);
-    const runtime = createRuntime({
-      writer: {
-        modeForMachine: () => 'direct' as const,
-        modeForSession: async () => 'direct' as const,
-        upsertDocMeta: vi.fn(async () => undefined),
-        appendSessionTurn,
-        appendSessionHistory: vi.fn(async () => undefined),
-      } as unknown as WorkspaceRuntime['writer'],
-    });
+    const runtime = createRuntime({});
     const actions = await renderActions(runtime);
 
     const entry = await actions.addSessionHistory(sessionId, {
@@ -800,12 +844,11 @@ describe('useSessionActions', () => {
       finished: true,
     } as unknown as Parameters<SessionActions['addSessionHistory']>[1]);
 
-    expect(appendSessionTurn).toHaveBeenCalledTimes(1);
-    expect(appendSessionTurn).toHaveBeenCalledWith(
-      sessionId,
-      expect.objectContaining({ id: entry.id, role: 'user' }),
-      undefined
+    const stored = await runtime.withSessionStore(sessionId, (sessionStore) =>
+      sessionStore.sessionData.history.readTurn(entry.id)
     );
+    expect(stored).toMatchObject({ state: 'ready', turn: entry });
+    expect(entry.items).toEqual([{ type: 'text', text: 'hi' }]);
   });
 
   it('mints a fresh turn id when identical content is sent again (undelivered-turn resend)', async () => {
@@ -851,23 +894,15 @@ describe('useSessionActions', () => {
 
     // A resend rides the ordinary send path: identical content, brand-new id.
     expect(second.id).not.toBe(first.id);
-    expect(appendSessionTurn).toHaveBeenCalledTimes(2);
-    const resentEntry = appendSessionTurn.mock.calls[1]?.[1] as {
-      inputConfig?: { inputBlocks?: unknown };
-    };
-    expect(resentEntry.inputConfig?.inputBlocks).toEqual(inputBlocks);
+    const resent = await runtime.withSessionStore(sessionId, (store) =>
+      store.sessionData.history.readTurn(second.id)
+    );
+    expect(resent).toMatchObject({ state: 'ready', turn: { inputConfig: { inputBlocks } } });
   });
 
-  it('starts a session through one aggregate writer call', async () => {
+  it('preserves the initial history and activity through the extracted submission service', async () => {
     const sessionId = 'session-aggregate-start' as SessionId;
-    const startSession = vi.fn(async () => 'direct' as const);
-    const runtime = createRuntime({
-      writer: {
-        modeForMachine: () => 'direct' as const,
-        modeForSession: async () => 'direct' as const,
-        startSession,
-      } as unknown as WorkspaceRuntime['writer'],
-    });
+    const runtime = createRuntime({});
     const actions = await renderActions(runtime);
 
     const result = await actions.startSession(createSessionPayload(sessionId), {
@@ -884,21 +919,16 @@ describe('useSessionActions', () => {
       },
     } as unknown as Parameters<SessionActions['startSession']>[1]);
 
-    expect(startSession).toHaveBeenCalledOnce();
-    expect(startSession).toHaveBeenCalledWith(
-      sessionId,
-      // lastMessageAt rides the accept unit itself: the meta always carries
-      // the first message's activity, so a close racing the first turn can
-      // never mistake the session for an empty, deletable one.
-      expect.objectContaining({
-        id: sessionId,
-        machineId: 'machine-1',
-        lastMessageAt: expect.any(Number),
-      }),
-      expect.objectContaining({ id: result.historyEntry.id, role: 'user' }),
-      expect.objectContaining({ userTurnId: result.historyEntry.id })
+    const stored = await runtime.withSessionStore(sessionId, (sessionStore) =>
+      sessionStore.sessionData.history.readTurn(result.historyEntry.id)
     );
-    expect(runtime.withSessionStore).not.toHaveBeenCalled();
+    expect(stored).toMatchObject({ state: 'ready', turn: result.historyEntry });
+    expect(result.sessionMeta).toMatchObject({
+      id: sessionId,
+      machineId: 'machine-1',
+      lastMessageAt: expect.any(Number),
+    });
+    expect(result.historyEntry.inputConfig?.inputBlocks).toEqual([{ type: 'text', text: 'hi' }]);
   });
 
   it('keeps a local branch selector out of baseBranch until the target machine resolves it', async () => {
@@ -939,7 +969,10 @@ describe('useSessionActions', () => {
       } as unknown as Parameters<SessionActions['startSession']>[1]
     );
 
-    const meta = startSession.mock.calls[0]![1];
+    const saved = runtime
+      .sendJournal!.getSnapshot()
+      .find((record) => record.sessionId === sessionId);
+    const meta = saved!.creation!;
     expect(meta).not.toHaveProperty('baseBranch');
     expect(meta.project).toMatchObject({ branch: selector });
   });
@@ -1109,8 +1142,15 @@ describe('useSessionActions', () => {
       const result = actions.requestSessionSteer(sessionId, 'assistant:user-1', userTurnId, {
         machineId,
       });
-      if (recoveryOwned && disposition === 'promotion-failed') {
-        await expect(result).rejects.toThrow('Injected activation write failure');
+      if (
+        (recoveryOwned && disposition === 'promotion-failed') ||
+        disposition === 'delivery-unknown'
+      ) {
+        await expect(result).rejects.toThrow(
+          disposition === 'delivery-unknown'
+            ? 'Guide outcome is uncertain'
+            : 'Injected activation write failure'
+        );
       } else {
         await expect(result).resolves.toBe(disposition === 'applied');
       }
@@ -1183,7 +1223,7 @@ describe('useSessionActions', () => {
 
     await expect(
       actions.requestSessionSteer(sessionId, 'assistant:user-1', userTurnId, { machineId })
-    ).resolves.toBe(false);
+    ).rejects.toThrow('Guide outcome is uncertain');
 
     expect(history[0]).toMatchObject({ status: 'pending_apply' });
     expect(setState).not.toHaveBeenCalled();

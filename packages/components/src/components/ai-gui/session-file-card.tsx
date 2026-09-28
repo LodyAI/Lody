@@ -40,6 +40,13 @@ const KIND_ICON: Record<SessionFileKind, typeof FileIcon> = {
   binary: FileIcon,
 };
 
+/**
+ * Icon for a file's derived kind. Shared with the pre-upload pending-attachment
+ * card so a draft attachment and the delivered card read as the same object.
+ */
+export const getSessionFileIcon = (fileName: string, mimeType?: string) =>
+  KIND_ICON[getSessionFileKind(fileName, mimeType)];
+
 export type SessionFileCardProps = {
   file: SessionFilePayload;
   /** Static publications own their retention independently of the source upload. */

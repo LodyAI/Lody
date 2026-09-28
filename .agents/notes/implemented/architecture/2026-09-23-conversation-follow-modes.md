@@ -5,6 +5,8 @@ Translation: current
 
 [中文](2026-09-23-conversation-follow-modes.zh.md)
 
+Later: the follow modes moved into the [conversation scroll engine](2026-09-27-conversation-scroll-engine.md) on 2026-09-27, which replaced `use-sticky-scroll.ts` and the Virtua list.
+
 ## Abstract
 
 Following the end of a conversation often failed, and typing in the composer made the

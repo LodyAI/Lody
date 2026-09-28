@@ -10,6 +10,13 @@ reference: `context/acp-protocol.md`; per-agent payload quirks:
 
 ## Ownership is bound at enqueue time
 
+Negotiated Core subagent events retain root/run ownership through the shared
+history reducer. Enrich child tools per `(sessionId, runId, toolCallId)`; root
+permission mirrors must not duplicate child edit evidence. Child turn IDs never
+replace parent turn IDs. Disconnect marks live runs unknown and incomplete.
+Child edit evidence resolves its committed run's assistant entry, including when
+a later parent turn flushes it; unregistered child tools publish no evidence.
+
 Validated task-lifecycle `_meta` snapshots survive history filtering while running
 and merge by taskId — `_meta.lody.task` and Devin's `cognition.ai/subagent_*`
 markers alike. They are lifecycle facts, not repeated terminal output; never
@@ -32,9 +39,9 @@ not silently create uuid entries for unowned output; that is what prevents
 bad-network retry tails and duplicate dispatch from rendering the same agent turn
 twice.
 
-## Scheduling tools are the one `rawInput`/`rawOutput` exception
+## Root scheduling tools are the one `rawInput`/`rawOutput` exception
 
-INVARIANT: `history-apply.ts` strips `rawInput`/`rawOutput` from ALL generic tool
+INVARIANT: In the root transcript, `history-apply.ts` strips `rawInput`/`rawOutput` from ALL generic tool
 calls (they are unstructured by spec) EXCEPT the four scheduling tools in
 `SCHEDULING_TOOL_NAMES` (`CronCreate` / `CronDelete` / `CronList` / `ScheduleWakeup`,
 matched via `_meta.lody.toolName`). For those, the small `rawInput`/`rawOutput` are

@@ -44,8 +44,12 @@ import { useDiffFocusScroll } from './use-diff-focus-scroll';
 import { useSessionAllChangesDiffData } from './use-session-all-changes-diff-data';
 import { useSessionConversationDiffData } from './use-session-conversation-diff-data';
 import { useGitHubReviewComments } from '@/hooks/use-github-review-comments';
-import { withGitHubOperationTokenRetry, withGitHubTokenRetry } from '@/lib/github-token';
-import { getPullRequestNumber, getSessionGitHubState } from '@/lib/session-github-state';
+import {
+  getPullRequestNumber,
+  getPullRequestRepoFullName,
+  getSessionGitHubState,
+} from '@/lib/session-github-state';
+import { GitHubReviewErrorNotice } from './github-review-error-notice';
 import { SessionFileDiffNoticeCard } from './session-file-diff-notice-card';
 import { DiffFileHeaderActions } from '@/ui/diff-viewer/diff-file-header-actions';
 import type { SessionFileProvider } from '@/lib/session-file-provider';
@@ -139,6 +143,18 @@ function getMatchingPath(paths: string[], filePath?: string | null): string | nu
   return paths.find((path) => arePathsEquivalent(path, filePath)) ?? null;
 }
 
+export function shouldOpenDiffFileByDefault(input: {
+  readonly mode: 'conversation' | 'base';
+  readonly filePath: string;
+  readonly focusFilePath?: string | null;
+}): boolean {
+  if (input.mode !== 'base') {
+    return true;
+  }
+
+  return input.focusFilePath != null && arePathsEquivalent(input.filePath, input.focusFilePath);
+}
+
 export type SessionConversationDiffPanelProps = {
   sessionId: SessionId;
   turnId?: string;
@@ -163,6 +179,7 @@ export type SessionConversationDiffPanelProps = {
 type DiffFileBlockProps = {
   filePath: string;
   data: FileDiffData | undefined;
+  defaultOpen: boolean;
   commentsEnabled: boolean;
   currentUser: CommentUser | null;
   githubThreads: GitHubReviewThread[];
@@ -189,6 +206,7 @@ export function createConversationDiffViewerParseCacheKey(input: {
 const DiffFileBlock = memo(function DiffFileBlock({
   filePath,
   data,
+  defaultOpen,
   commentsEnabled,
   currentUser,
   githubThreads,
@@ -219,6 +237,7 @@ const DiffFileBlock = memo(function DiffFileBlock({
   if (data.status === 'ready-parsed') {
     return (
       <DiffViewer
+        key={`${mode}:${defaultOpen ? 'open' : 'closed'}`}
         path={filePath}
         oldText=""
         newText=""
@@ -235,7 +254,7 @@ const DiffFileBlock = memo(function DiffFileBlock({
         commentReferenceKeys={commentReferenceKeys}
         onCommentError={onCommentError}
         onOpenFile={onOpenFile}
-        defaultOpen
+        defaultOpen={defaultOpen}
         deferRenderUntilOpen
         parseCacheKey={diffViewerParseCacheKey}
         cachePrerenderedHtml={false}
@@ -246,6 +265,7 @@ const DiffFileBlock = memo(function DiffFileBlock({
   if (data.status === 'ready-text-source') {
     return (
       <DiffViewer
+        key={`${mode}:${defaultOpen ? 'open' : 'closed'}`}
         path={filePath}
         oldText=""
         newText=""
@@ -260,7 +280,7 @@ const DiffFileBlock = memo(function DiffFileBlock({
         commentReferenceKeys={commentReferenceKeys}
         onCommentError={onCommentError}
         onOpenFile={onOpenFile}
-        defaultOpen
+        defaultOpen={defaultOpen}
         deferRenderUntilOpen
         parseCacheKey={diffViewerParseCacheKey}
         cachePrerenderedHtml={false}
@@ -306,6 +326,7 @@ const DiffFileBlock = memo(function DiffFileBlock({
 
   return (
     <DiffViewer
+      key={`${mode}:${defaultOpen ? 'open' : 'closed'}`}
       path={filePath}
       oldText={data.oldSnapshot.kind === 'text' ? data.oldSnapshot.text : ''}
       newText={data.newSnapshot.kind === 'text' ? data.newSnapshot.text : ''}
@@ -319,7 +340,7 @@ const DiffFileBlock = memo(function DiffFileBlock({
       commentReferenceKeys={commentReferenceKeys}
       onCommentError={onCommentError}
       onOpenFile={onOpenFile}
-      defaultOpen
+      defaultOpen={defaultOpen}
       deferRenderUntilOpen
       responsiveSplit
       cachePrerenderedHtml={false}
@@ -428,19 +449,27 @@ function SessionConversationDiffPanelImpl({
   const { cacheKey, normalizedPaths, resolvedByPath, isDiffUnavailable } = isBaseMode
     ? allChangesDiffData
     : conversationDiffData;
-  const { repoFullName, latestPr } = useMemo(
+  const {
+    sourceSessionId: prSessionId,
+    repoFullName,
+    latestPr,
+  } = useMemo(
     () => getSessionGitHubState(session ?? null, workspaceSession ?? null),
     [session, workspaceSession]
   );
   const latestPrNumber = getPullRequestNumber(latestPr);
   const githubReviewComments = useGitHubReviewComments({
+    sessionId: prSessionId,
     workspaceId: currentWorkspaceId,
-    repoFullName,
+    repoFullName: getPullRequestRepoFullName(latestPr) ?? repoFullName,
     prNumber: latestPrNumber,
     enabled: normalizedPaths.length > 0 && Boolean(latestPrNumber),
   });
-  const { threads: githubReviewCommentThreads, refresh: refreshGitHubReviewComments } =
-    githubReviewComments;
+  const {
+    threads: githubReviewCommentThreads,
+    refresh: refreshGitHubReviewComments,
+    runWithToken: runWithGitHubReviewToken,
+  } = githubReviewComments;
 
   useEffect(() => observeDiffPerfLongTasks() ?? undefined, []);
 
@@ -534,10 +563,10 @@ function SessionConversationDiffPanelImpl({
     if (legacyHeadCommitSha?.trim()) {
       return legacyHeadCommitSha.trim();
     }
-    return await withGitHubTokenRetry(currentWorkspaceId, repoFullName, (token) =>
-      githubFetchPullRequestHeadSha(token, repoFullName, latestPrNumber)
+    return await runWithGitHubReviewToken('read', (token, canonicalRepo) =>
+      githubFetchPullRequestHeadSha(token, canonicalRepo, latestPrNumber)
     );
-  }, [currentWorkspaceId, latestPr, latestPrNumber, repoFullName]);
+  }, [currentWorkspaceId, latestPr, latestPrNumber, repoFullName, runWithGitHubReviewToken]);
 
   const addCommentReferenceToChatInput = useCallback(
     (reference: CommentReferencePayload): boolean => {
@@ -565,18 +594,14 @@ function SessionConversationDiffPanelImpl({
         try {
           const headCommitSha = await resolvePrHeadCommitSha();
           const position = lodyAnchorToGitHubParams(input.anchor, latestPr, headCommitSha);
-          const comment = await withGitHubOperationTokenRetry(
-            currentWorkspaceId,
-            repoFullName,
-            'write',
-            (token) =>
-              githubCreatePRReviewComment(token, repoFullName, latestPrNumber, {
-                body: input.body,
-                path: position.path,
-                commitId: position.commit_id,
-                line: position.line,
-                side: position.side,
-              })
+          const comment = await runWithGitHubReviewToken('write', (token, canonicalRepo) =>
+            githubCreatePRReviewComment(token, canonicalRepo, latestPrNumber, {
+              body: input.body,
+              path: position.path,
+              commitId: position.commit_id,
+              line: position.line,
+              side: position.side,
+            })
           );
           await refreshGitHubReviewComments();
           captureDiffCommentGithubThreadCreated(postHog, diffCommentAnalyticsBase, {
@@ -601,10 +626,10 @@ function SessionConversationDiffPanelImpl({
         if (!currentWorkspaceId || !repoFullName || !latestPrNumber) {
           throw new Error('This session is not linked to a GitHub pull request');
         }
-        await withGitHubOperationTokenRetry(currentWorkspaceId, repoFullName, 'write', (token) =>
+        await runWithGitHubReviewToken('write', (token, canonicalRepo) =>
           githubReplyPRReviewComment(
             token,
-            repoFullName,
+            canonicalRepo,
             latestPrNumber,
             input.githubCommentId,
             input.body
@@ -625,6 +650,7 @@ function SessionConversationDiffPanelImpl({
       refreshGitHubReviewComments,
       repoFullName,
       resolvePrHeadCommitSha,
+      runWithGitHubReviewToken,
     ]
   );
 
@@ -659,6 +685,7 @@ function SessionConversationDiffPanelImpl({
       <DiffFileBlock
         filePath={filePath}
         data={resolvedByPath[filePath]}
+        defaultOpen={shouldOpenDiffFileByDefault({ mode, filePath, focusFilePath })}
         commentsEnabled={Boolean(latestPrNumber && repoFullName)}
         currentUser={currentUser}
         githubThreads={githubThreadsByPath.get(filePath) ?? EMPTY_GITHUB_THREADS}
@@ -675,7 +702,15 @@ function SessionConversationDiffPanelImpl({
   );
 
   const panelContent = (
-    <div className="w-full space-y-4 py-2">{normalizedPaths.map(renderFileBlock)}</div>
+    <div className="w-full space-y-4 py-2">
+      {githubReviewComments.error && (
+        <GitHubReviewErrorNotice
+          message={githubReviewComments.error.message}
+          onRetry={() => void refreshGitHubReviewComments()}
+        />
+      )}
+      {normalizedPaths.map(renderFileBlock)}
+    </div>
   );
 
   return (

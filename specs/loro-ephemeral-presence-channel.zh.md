@@ -15,10 +15,11 @@ ephemeral 通道面向最新状态。它不随文档流持久化，不重放历�
 队列，并在订阅者过慢时直接断开，而不是缓冲每一次中间更新。因此通道上发布的一切都是可丢弃的，
 发布的唯一理由是某个读取端此刻需要知道当前状态。
 
-一个工作区只拥有一条 ephemeral 传输，机器心跳与该工作区内其他所有 ephemeral 写入方共用它。
-发布严格串行：同一时刻只有一个更新在途，其余排在先进先出队列中；该队列不合并已被覆盖的条目、
-不为心跳提供优先级，也没有长度上限。因此，产出速度超过网络排空速度的写入方，会在整个积压期间
-延迟其后的每一个写入方，心跳也在其中。
+一个工作区只拥有一条 presence 传输，机器心跳与工作区内其他 presence 写入方共用它。
+发布严格串行：同一时刻只有一个更新在途。内置 Loro adaptor 会让同 key 的新单条 set/delete
+替代尚未发送的旧更新；在途更新不会被替代。无法识别 key 或包含多个 key 的更新仍独立排队。
+这减少了重复 key 的突发积压，但不会给心跳优先级，也不限制不同 key 的数量、负载大小或重试预算。
+发布方仍须限制速率和大小：独立条目的积压依然会延迟后续心跳。
 
 这种延迟不只是变慢，而是破坏在线状态本身。心跳的时间戳在条目创建时取得，而非发送时取得，
 所以等待超过时效窗口的条目送达时已经过期：读取端收到了它，却仍把机器判定为离线。在此期间
@@ -65,8 +66,12 @@ store 以及机器心跳定时器位于 `apps/cli/src/lib/loro/presence.ts`；�
 其 `onlineStatus` 字段让三种状态穿过 `--json` 到达调用方。`apps/cli/src/mcp/lody-mcp-server.ts`
 中的派发守卫只在明确离线时阻塞；`apps/cli/src/commands/agent-config.ts` 采取同样立场。
 
-串行队列、不做合并以及无上限重试预算，是 `@loro-dev/streams-crdt`（`EphemeralStreamCrdt`）的
-实现细节，检查版本为 0.15.1。本仓库无法控制它们，因此该约束被表述为发布方的义务。
+上述队列行为核查于 `@loro-dev/streams-crdt@0.16.0`。CLI presence、CLI machine-monitor
+与前端共用的 ephemeral-room 工厂均直接传入内置 `EphemeralStoreAdaptor`，保留了可选的
+`localUpdateKey` 能力。`pendingLocalCount` 统计尚未确认的本地更新（包含被替代的写入），
+不是实际 POST 数；`waitUntilSynced()` 等待调用时捕获的每条更新链的最新值。
+token 获取与 unauthorized 刷新受请求超时约束。这些客户端变化不代表服务端房间保留、
+转发缓冲容量或服务端 TTL 已部署。
 
 本 Spec 所防止的故障观测于 2026-09-20，记录在
 [已驳回的 transient-reasoning note](../.agents/notes/rejected/bug-fix/2026-09-18-codex-transient-reasoning.zh.md)：

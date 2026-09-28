@@ -34,6 +34,7 @@ const createDebugLogger = (): Logger => ({
   error: (...args: unknown[]) => console.error('[ERROR]', ...args),
   success: (...args: unknown[]) => console.log('[SUCCESS]', ...args),
   debug: (...args: unknown[]) => console.log('[DEBUG]', ...args),
+  trace: (...args: unknown[]) => console.log('[DEBUG]', ...args),
   setLevel: () => {},
   child: () => createDebugLogger(),
   close: async () => {},

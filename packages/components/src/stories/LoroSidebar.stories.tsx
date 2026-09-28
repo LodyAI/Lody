@@ -423,6 +423,8 @@ function StoryLayout({ storyContent, fullApp = false, ...args }: StoryLayoutProp
       onWorkspaceSelected={setWorkspaceId}
       onHomeClicked={() => setActiveNav('home')}
       onArchiveClicked={() => setActiveNav('archive')}
+      // Production always mounts the Schedules nav row (`loro-app-sidebar`).
+      onSchedulesClicked={() => setActiveNav('schedules')}
     />
   );
 
@@ -1377,6 +1379,8 @@ function WithProjectsLayout(args: Parameters<typeof LoroSidebar>[0]) {
       onWorkspaceSelected={setWorkspaceId}
       onHomeClicked={() => setActiveNav('home')}
       onArchiveClicked={() => setActiveNav('archive')}
+      // Production always mounts the Schedules nav row (`loro-app-sidebar`).
+      onSchedulesClicked={() => setActiveNav('schedules')}
     />
   );
 

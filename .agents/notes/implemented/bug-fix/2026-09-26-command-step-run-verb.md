@@ -53,3 +53,6 @@ the untouched "Shell:"/"Searched for" shapes, and spinner presence only on the
 verb-less running row); the affected vitest suites pass (25 tests) against a
 local `pnpm install`. Visual acceptance used the new
 `DesktopCommandSteps` story in `AssistantTurnAlignment.stories.tsx`.
+
+Later: output alone no longer makes a non-shell tool a command — see
+[tool step detail sheet](../feature/2026-09-26-tool-step-detail-sheet.md).

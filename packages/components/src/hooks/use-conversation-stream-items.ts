@@ -61,7 +61,15 @@ export type ConversationStreamItems = BuildChatStreamItemsResult & {
  */
 export function useConversationStreamItems(
   view: ConversationView | null,
-  sessionId: SessionId
+  sessionId: SessionId,
+  options: {
+    /**
+     * The turn a restored reading position is in (the scroll engine's saved
+     * anchor). Until the viewport first reports, the window is loaded around
+     * it as well as the tail, so the restored position opens on real rows.
+     */
+    initialFocusTurnId?: string | null;
+  } = {}
 ): ConversationStreamItems {
   const version = useConversationVersion(view);
   const turnCount = view?.turnCount ?? 0;
@@ -75,7 +83,16 @@ export function useConversationStreamItems(
     source: ConversationView;
     range: VisibleTurnRange;
   } | null>(null);
-  const visibleRange = visible?.source === source ? visible.range : null;
+  const reportedRange = visible?.source === source ? visible.range : null;
+  const focusIndex =
+    !reportedRange && options.initialFocusTurnId && view
+      ? view.indexOf(options.initialFocusTurnId)
+      : -1;
+  const focusRange = useMemo(
+    () => (focusIndex >= 0 ? { from: focusIndex, to: focusIndex + 1 } : null),
+    [focusIndex]
+  );
+  const visibleRange = reportedRange ?? focusRange;
   const onVisibleTurnRangeChange = useCallback(
     (next: VisibleTurnRange) => {
       if (!source || !initialRef.current.ready) return;

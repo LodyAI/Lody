@@ -54,7 +54,11 @@ import {
 } from '@lody/shared';
 
 import type { LoroDocumentManager, SessionDocument } from '@/lib/loro/doc';
-import { readMachineLocalProjects, upsertMachineLocalProject } from '@/lib/local-project-meta';
+import {
+  readMachineLocalProjects,
+  upsertMachineLocalProject,
+  withMachineCatalogWriteLock,
+} from '@/lib/local-project-meta';
 import {
   type HistoryProviderLaunch,
   listHistorySessionsForLocalProject,
@@ -65,39 +69,6 @@ import { formatErrorMessage } from '@/utils/format-error';
 import type { Logger } from '@/utils/logger';
 
 const syncLeases = new Set<string>();
-
-// In-process serializer for machineRoomId-scoped catalog writes. History rows
-// are stored in machine Flock localProject entries, but each provider still does
-// a read-modify-write for its nested catalog. Two concurrent providers operating
-// on the same machine could otherwise clobber each other's history fields.
-//
-// Per-process only; cross-process races on the same machineRoomId remain
-// possible but require simultaneous CLI processes for the same machine, which
-// is not the normal mode of operation.
-const machineCatalogWriteChains = new Map<string, Promise<unknown>>();
-
-async function withMachineCatalogWriteLock<T>(
-  machineRoomId: string,
-  fn: () => Promise<T>
-): Promise<T> {
-  const prev = machineCatalogWriteChains.get(machineRoomId);
-  const current = (async () => {
-    if (prev) {
-      await prev.catch(() => {
-        // swallow prior errors — they belong to other callers, not us
-      });
-    }
-    return fn();
-  })();
-  machineCatalogWriteChains.set(machineRoomId, current);
-  try {
-    return await current;
-  } finally {
-    if (machineCatalogWriteChains.get(machineRoomId) === current) {
-      machineCatalogWriteChains.delete(machineRoomId);
-    }
-  }
-}
 
 type ExistingHistorySession = {
   sessionId: SessionId;
@@ -466,18 +437,30 @@ export class LocalProjectHistorySyncService {
 
   /** Same rule as continuing the session: its bound Provider, else the default launch. */
   private async sessionAgentConfig(meta: SessionMeta): Promise<AgentConfigMeta | null> {
-    return meta.agentConfigId
-      ? await this.manager.getAgentConfigById(meta.agentConfigId, this.context.machineId)
-      : null;
+    if (!meta.agentConfigId) return null;
+    const config = await this.manager.getAgentConfigById(
+      meta.agentConfigId,
+      this.context.machineId
+    );
+    if (!config)
+      throw new Error(
+        'The session’s bound provider is unavailable; history replay cannot use another account'
+      );
+    return config;
   }
 
-  private launchProvider(config: AgentConfigMeta | null | undefined): HistoryProviderLaunch {
+  private async launchProvider(
+    config: AgentConfigMeta | null | undefined
+  ): Promise<HistoryProviderLaunch> {
     return config
       ? {
           ...this.provider,
           customAcp: config.customAcp,
           runtimeOverrides: config.runtimeOverrides,
           env: config.env,
+          codexProfile: config.codexAuth
+            ? await getCodexProfileStore().resolve(this.context.workspaceId, config)
+            : undefined,
         }
       : this.provider;
   }
@@ -488,7 +471,7 @@ export class LocalProjectHistorySyncService {
     config: AgentConfigMeta | null | undefined
   ): Promise<MaterializedReplay> {
     const { notifications, runtimeConfig } = await loadHistorySessionReplay({
-      provider: this.launchProvider(config),
+      provider: await this.launchProvider(config),
       rootPath,
       acpSessionId,
       logger: this.logger,
@@ -837,7 +820,7 @@ export class LocalProjectHistorySyncService {
   }): Promise<HistoryCatalogSnapshot> {
     const agentConfig = await this.soleAgentConfig();
     const catalog = await listHistorySessionsForLocalProject({
-      provider: this.launchProvider(agentConfig),
+      provider: await this.launchProvider(agentConfig),
       rootPath: args.rootPath,
       logger: this.logger,
       requiredSessionIds: args.requiredSessionIds,
@@ -1142,3 +1125,4 @@ export class LocalProjectHistorySyncService {
     } satisfies Partial<SessionMeta>);
   }
 }
+import { getCodexProfileStore } from '@/agent/codex-profile-store';

@@ -81,9 +81,9 @@ This list covers shipped production dependencies plus vendored third-party asset
 - License: MIT
 - Author: inokawa
 - Source: https://github.com/inokawa/virtua/tree/0.52.7
-- Assets: Virtua core and React bindings
-- Notice file: `packages/virtua/LICENSE`
-- Notes: Forked list virtualizer (packages/virtua, @lody/virtua) with keyed item sizes and anchoring.
+- Assets: Virtua list layout and size cache
+- Notice file: `packages/components/src/lib/conversation-scroll/keyed-layout/LICENSE`
+- Notes: Keyed list layout from Virtua, adapted for the conversation scroll engine (packages/components/src/lib/conversation-scroll/keyed-layout).
 ### Visual Studio Code fuzzy scorer
 - License: MIT
 - Author: Microsoft Corporation

@@ -1016,12 +1016,30 @@ const width = stylex.create({
 export function MentionTwoLevelMenu({
   categories,
   surface = 'unknown',
+  menuSide = 'top',
+  anchor = 'composer',
+  mobileDocked = true,
 }: {
   categories: MentionCategory[];
   surface?: MentionSurface;
+  /** The side of the anchor the menu opens on. The composer pins `top` because it
+   *  sits at the bottom of the conversation; a caret-anchored editor instead
+   *  follows the caret and lets the positioner flip it. */
+  menuSide?: 'top' | 'bottom';
+  /** `composer` anchors to the nearest `[data-mention-frame]` (the composer box
+   *  itself); `caret` follows the caret line like a text-completion popup. The
+   *  edit-and-resend editor uses `caret` — it lives mid-conversation, so a
+   *  frame-anchored menu would sit beside the card rather than next to the word
+   *  being typed. */
+  anchor?: 'caret' | 'composer';
+  /** Keep the <640px docked panel. False keeps the floating popover on mobile —
+   *  for an editor mid-conversation where "dock above the composer" has no
+   *  bottom-anchored composer to sit over. */
+  mobileDocked?: boolean;
 }) {
   const context = useMentionContext('MentionTwoLevelMenu');
-  const isMobile = useIsMentionMobile();
+  const isMobileViewport = useIsMentionMobile();
+  const isMobile = isMobileViewport && mobileDocked;
   const trigger = context.trigger;
   const search = context.filterStore.search;
   const open = context.open;
@@ -1133,13 +1151,13 @@ export function MentionTwoLevelMenu({
 
   return (
     // The docked mobile panel places itself; this width is the desktop popup's.
-    // Placed against the composer, not the caret, and pinned above it: the room
-    // pick could otherwise land it below a composer pressed to the layer's top,
-    // over the very rows being completed.
+    // Composer menus anchor to the composer frame and pin `top`; a caret-anchored
+    // menu follows the caret and may flip to fit.
     <MentionContent
-      positionAnchor="composer"
-      side="top"
+      positionAnchor={anchor}
+      side={menuSide}
       sideOffset={8}
+      dockedOnMobile={mobileDocked}
       className={stylex.props(width.menu, detail && width.menuWithDetail).className}
     >
       <MentionTwoLevelMenuBody

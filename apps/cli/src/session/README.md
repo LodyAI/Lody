@@ -13,7 +13,7 @@ CLI/MCP orchestration contract is specs/session-orchestration.md.
 | ---------------- | ------------------------------------------------- | -------------------------------------------------------------------- |
 | Admission        | [Dispatch watcher](session-dispatch-watcher.ts)   | Resolves metadata activation against history, queue, and RPC offers. |
 | Execution        | [Execution service](session-execution-service.ts) | Owns turns, steer results, cancellation, and raw-request drain.      |
-| Process lifetime | [Session](session.ts)                             | Owns ACP resources and confirmed termination.                        |
+| Process lifetime | [Session](session.ts)                             | Owns ACP resources, confirmed termination, and bounded Codex refresh-start recovery. |
 
 ## Files
 
@@ -229,7 +229,8 @@ Agent `gh` auth for GitHub repo sessions is set up in `session-manager.ts`: it c
 credential broker, prepends the `~/.lody/bin/gh` shim, and injects/refreshes a managed
 `GH_TOKEN` when no user token is present. The shim lives in `../lib/gh-shim-script.ts`; token
 fetching/caching is in `../lib/github-token-manager.ts`; git HTTPS auth uses
-`../lib/git-credential-helper-script.ts`. Session process trees are already correct —
+`../lib/git-credential-helper-script.ts`. A native `gh` earlier in PATH bypasses the shim, so the
+PATH merges keep the shim dir first (see [../lib/AGENTS.md](../lib/AGENTS.md)). Session process trees are already correct —
 `prepareGitHubRepoSessionConfig` injects the env explicitly. The host-side rule is in
 [worktree/AGENTS.md](worktree/AGENTS.md).
 

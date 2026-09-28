@@ -10,6 +10,8 @@ import {
 } from '@lody/shared';
 
 export type SessionGitHubState = {
+  /** The session owning the PR, also used for server-side repository identity. */
+  sourceSessionId: SessionMeta['id'] | undefined;
   repoFullName: string;
   latestPr: SessionPullRequestMeta | null;
   latestPrState: SessionPullRequestStateMeta | null;
@@ -97,6 +99,7 @@ export const getSessionGitHubState = (
   const hasCommittedDiff = allChange ? allChange.add + allChange.del > 0 : false;
 
   return {
+    sourceSessionId: sourceSession?.id,
     repoFullName,
     latestPr,
     latestPrState,

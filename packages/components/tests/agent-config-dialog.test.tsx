@@ -206,7 +206,7 @@ describe('AgentConfigDialog', () => {
   const renderDialog = async (
     mode: AgentConfigDialogMode,
     machine: MachineViewMeta,
-    onSubmit = vi.fn(async () => { }),
+    onSubmit = vi.fn(async () => {}),
     onCheckBinaryStatus = vi.fn(async () => ({ status: 'installed' as const })),
     onRefreshCapabilities: RefreshCapabilities = async (args) => ({
       type: 'machine/acp-capabilities-refresh_response' as const,
@@ -239,6 +239,119 @@ describe('AgentConfigDialog', () => {
       );
     });
   };
+
+  it('preserves managed Codex identity and disables editing on a downgraded machine', async () => {
+    const saved: AgentConfigSubmitPayload[] = [];
+    await renderDialog(
+      {
+        kind: 'edit',
+        config: {
+          id: 'managed-codex' as AgentConfigId,
+          machineId,
+          name: 'Work Codex',
+          cliType: 'builtin',
+          agentType: 'codex',
+          env: {},
+          codexAuth: { mode: 'chatgpt', profileId: '937c8a40-0e27-4d44-9716-0eb60b26a195' },
+        },
+      },
+      createMachine('Old machine'),
+      async (payload) => {
+        saved.push(payload);
+      }
+    );
+    const save = Array.from(document.querySelectorAll('button')).find(
+      (button) => button.textContent === 'Save'
+    );
+    expect(save?.disabled).toBe(true);
+    await act(async () => {
+      save?.click();
+    });
+    expect(saved).toEqual([]);
+  });
+
+  it('shows the immutable account binding without a sign-in action for managed ChatGPT', async () => {
+    await renderDialog(
+      {
+        kind: 'edit',
+        config: {
+          id: 'managed-chatgpt' as AgentConfigId,
+          machineId,
+          name: 'Work Codex',
+          cliType: 'builtin',
+          agentType: 'codex',
+          env: {},
+          codexAuth: { mode: 'chatgpt', profileId: '937c8a40-0e27-4d44-9716-0eb60b26a195' },
+        },
+      },
+      createMachine('Workstation', { codexAuthProfiles: 1 })
+    );
+
+    expect(document.body.textContent).toContain(
+      'This provider is bound to its ChatGPT account. Add a new provider to use another account.'
+    );
+    expect(document.body.textContent).not.toContain('Sign in again');
+  });
+
+  it('keeps API key replacement available when editing a managed Codex endpoint', async () => {
+    await renderDialog(
+      {
+        kind: 'edit',
+        config: {
+          id: 'managed-api-key' as AgentConfigId,
+          machineId,
+          name: 'Relay Codex',
+          cliType: 'builtin',
+          agentType: 'codex',
+          env: {},
+          codexAuth: {
+            mode: 'api-key',
+            profileId: '3e332bd5-96ab-4d35-b9fc-9a965a1be42c',
+            baseUrl: 'https://relay.example.invalid/v1',
+          },
+        },
+      },
+      createMachine('Workstation', { codexAuthProfiles: 1 })
+    );
+
+    expect(
+      Array.from(document.body.querySelectorAll('button')).some(
+        (button) => button.textContent?.trim() === 'Update API Key'
+      )
+    ).toBe(true);
+  });
+
+  it('shows managed Codex endpoint choices only for capable machines and never saves a key in the form', async () => {
+    const saved: AgentConfigSubmitPayload[] = [];
+    await renderDialog(
+      { kind: 'create', initialForm: { name: 'Relay', cliType: 'builtin', agentType: 'codex' } },
+      createMachine('New machine', { codexAuthProfiles: 1, providerSetup: 1 }),
+      async (payload) => {
+        saved.push(payload);
+      }
+    );
+    const custom = Array.from(document.querySelectorAll('[role=tab]')).find(
+      (tab) => tab.textContent === 'Custom API'
+    ) as HTMLElement | undefined;
+    expect(custom).toBeDefined();
+    await act(async () => {
+      custom?.click();
+    });
+    const endpoint = document.querySelector<HTMLInputElement>('#codex-base-url');
+    expect(endpoint?.value).toBe('https://api.openai.com/v1');
+    expect(document.querySelector('input[type=password]')).toBeNull();
+    const create = Array.from(document.querySelectorAll('button')).find(
+      (button) => button.textContent === 'Create'
+    );
+    await act(async () => {
+      create?.click();
+    });
+    expect(saved[0]?.codexAuth).toMatchObject({
+      mode: 'api-key',
+      baseUrl: 'https://api.openai.com/v1',
+    });
+    expect(saved[0]?.env).toEqual({});
+  });
 
   it('scans Pi without publishing or enabling candidates, then saves only selected paths', async () => {
     const saved: AgentConfigSubmitPayload[] = [];
@@ -460,7 +573,7 @@ describe('AgentConfigDialog', () => {
 
   it('queues Bub for verification without publishing or probing it from the dialog', async () => {
     const mode: AgentConfigDialogMode = { kind: 'create' };
-    const onSubmit = vi.fn(async () => { });
+    const onSubmit = vi.fn(async () => {});
     const onRefreshCapabilities = vi.fn<RefreshCapabilities>(async (args) => ({
       type: 'machine/acp-capabilities-refresh_response' as const,
       machineId: args.machineId,
@@ -500,7 +613,7 @@ describe('AgentConfigDialog', () => {
   });
 
   it('does not create Bub against a daemon without deferred provider setup', async () => {
-    const onSubmit = vi.fn(async () => { });
+    const onSubmit = vi.fn(async () => {});
     await renderDialog({ kind: 'create' }, createMachine('Legacy workstation'), onSubmit);
 
     await act(async () => {
@@ -532,7 +645,7 @@ describe('AgentConfigDialog', () => {
         },
       },
       getMachineAcpBinaryProgress: () => null,
-      subscribeMachineAcpBinaryProgress: () => () => { },
+      subscribeMachineAcpBinaryProgress: () => () => {},
     } as unknown as WorkspaceRuntime);
     store.set(currentWorkspaceIdAtom, workspaceId);
     store.set(currentWorkspaceSlugAtom, workspaceSlug);
@@ -660,7 +773,7 @@ describe('AgentConfigDialog', () => {
     await renderDialog(
       { kind: 'edit', config: createBuiltinConfig({ agentType: 'bub', name: 'Bub' }) },
       createMachine('Workstation'),
-      vi.fn(async () => { }),
+      vi.fn(async () => {}),
       vi.fn(async () => ({ status: 'installed' as const })),
       refresh
     );
@@ -767,7 +880,7 @@ describe('AgentConfigDialog', () => {
   };
 
   const renderDeepSeekCreate = (
-    onSubmit = vi.fn(async (_payload: AgentConfigSubmitPayload) => { }),
+    onSubmit = vi.fn(async (_payload: AgentConfigSubmitPayload) => {}),
     onManagedRuntimeSelected = vi.fn(),
     onCheckBinaryStatus = vi.fn(async () => ({ status: 'not-installed' as const }))
   ) =>
@@ -789,7 +902,7 @@ describe('AgentConfigDialog', () => {
 
   const renderDeepSeekEdit = (
     env: Record<string, string>,
-    onSubmit = vi.fn(async (_payload: AgentConfigSubmitPayload) => { })
+    onSubmit = vi.fn(async (_payload: AgentConfigSubmitPayload) => {})
   ) =>
     renderDialog(
       {
@@ -811,7 +924,7 @@ describe('AgentConfigDialog', () => {
   it('defaults DeepSeek Harness to the official endpoint and keeps it out of managed runtime setup', async () => {
     const onManagedRuntimeSelected = vi.fn();
     const onCheckBinaryStatus = vi.fn(async () => ({ status: 'not-installed' as const }));
-    const onSubmit = vi.fn(async (_payload: AgentConfigSubmitPayload) => { });
+    const onSubmit = vi.fn(async (_payload: AgentConfigSubmitPayload) => {});
     await renderDeepSeekCreate(onSubmit, onManagedRuntimeSelected, onCheckBinaryStatus);
 
     expect(onManagedRuntimeSelected).not.toHaveBeenCalled();
@@ -858,7 +971,7 @@ describe('AgentConfigDialog', () => {
   });
 
   it('requires a valid custom DeepSeek endpoint and saves the trimmed URL as-is', async () => {
-    const onSubmit = vi.fn(async (_payload: AgentConfigSubmitPayload) => { });
+    const onSubmit = vi.fn(async (_payload: AgentConfigSubmitPayload) => {});
     await renderDeepSeekCreate(onSubmit);
 
     await selectTab('Custom Endpoint');
@@ -957,7 +1070,7 @@ describe('AgentConfigDialog', () => {
   });
 
   it('keeps DeepSeek key and custom endpoint drafts when switching tabs, and official save drops the custom URL', async () => {
-    const onSubmit = vi.fn(async (_payload: AgentConfigSubmitPayload) => { });
+    const onSubmit = vi.fn(async (_payload: AgentConfigSubmitPayload) => {});
     await renderDeepSeekEdit(
       {
         DEEPSEEK_API_KEY: 'sk-old',
@@ -1001,7 +1114,7 @@ describe('AgentConfigDialog', () => {
   });
 
   it('ignores protected DeepSeek env keys typed in the additional environment textarea', async () => {
-    const onSubmit = vi.fn(async (_payload: AgentConfigSubmitPayload) => { });
+    const onSubmit = vi.fn(async (_payload: AgentConfigSubmitPayload) => {});
     await renderDeepSeekCreate(onSubmit);
 
     await act(async () => {
@@ -1044,7 +1157,7 @@ describe('AgentConfigDialog', () => {
   });
 
   it('shows the managed Kimi Node requirement before create', async () => {
-    const onSubmit = vi.fn(async () => { });
+    const onSubmit = vi.fn(async () => {});
     await renderDialog(
       { kind: 'create', initialForm: { name: 'Kimi Code' } },
       createMachine('Old Node workstation'),
@@ -1072,7 +1185,7 @@ describe('AgentConfigDialog', () => {
   });
 
   it('prepares managed Kimi before creating it when its runtime is not downloaded', async () => {
-    const onSubmit = vi.fn(async () => { });
+    const onSubmit = vi.fn(async () => {});
     let finishRefresh: ((value: Awaited<ReturnType<RefreshCapabilities>>) => void) | undefined;
     const onRefreshCapabilities = vi.fn<RefreshCapabilities>(
       () =>
@@ -1120,7 +1233,7 @@ describe('AgentConfigDialog', () => {
   });
 
   it('persists a managed builtin setup without waiting for its runtime download', async () => {
-    const onSubmit = vi.fn(async (_payload: AgentConfigSubmitPayload) => { });
+    const onSubmit = vi.fn(async (_payload: AgentConfigSubmitPayload) => {});
     const onRefreshCapabilities = vi.fn<RefreshCapabilities>();
     await renderDialog(
       {
@@ -1156,7 +1269,7 @@ describe('AgentConfigDialog', () => {
   it.each([{ agentType: 'codex', name: 'Codex', accountName: 'ChatGPT' }])(
     'requires $accountName sign-in before creating the provider when credentials are missing',
     async ({ agentType, name, accountName }) => {
-      const onSubmit = vi.fn(async () => { });
+      const onSubmit = vi.fn(async () => {});
       const onRefreshCapabilities = vi.fn<RefreshCapabilities>(async (args) => ({
         type: 'machine/acp-capabilities-refresh_response',
         machineId: args.machineId,
@@ -1214,11 +1327,11 @@ describe('AgentConfigDialog', () => {
         }),
       }),
       cancelAuthentication: vi.fn(),
-      submitAuthorizationCode: vi.fn(async () => { }),
-      submitAuthenticationInput: vi.fn(async () => { }),
+      submitAuthorizationCode: vi.fn(async () => {}),
+      submitAuthenticationInput: vi.fn(async () => {}),
     });
     vi.spyOn(window, 'open').mockReturnValue(null);
-    const onSubmit = vi.fn(async () => { });
+    const onSubmit = vi.fn(async () => {});
     const onRefreshCapabilities = vi.fn<RefreshCapabilities>(async (args) => ({
       type: 'machine/acp-capabilities-refresh_response',
       machineId: args.machineId,
@@ -1266,7 +1379,7 @@ describe('AgentConfigDialog', () => {
   it.each([{ agentType: 'codex', name: 'Codex' }])(
     'automatically creates a verified $agentType provider after its live probe succeeds',
     async ({ agentType, name }) => {
-      const onSubmit = vi.fn(async () => { });
+      const onSubmit = vi.fn(async () => {});
       const onRefreshCapabilities = vi.fn<RefreshCapabilities>(async (args) => ({
         type: 'machine/acp-capabilities-refresh_response',
         machineId: args.machineId,
@@ -1302,7 +1415,7 @@ describe('AgentConfigDialog', () => {
   );
 
   it('persists the provider before probing and surfaces a live-probe failure', async () => {
-    const onSubmit = vi.fn(async () => { });
+    const onSubmit = vi.fn(async () => {});
     const onRefreshCapabilities = vi.fn<RefreshCapabilities>(async (args) => ({
       type: 'machine/acp-capabilities-refresh_response',
       machineId: args.machineId,
@@ -1340,7 +1453,7 @@ describe('AgentConfigDialog', () => {
   });
 
   it('revalidates a built-in provider when its environment changes after a successful test', async () => {
-    const onSubmit = vi.fn(async () => { });
+    const onSubmit = vi.fn(async () => {});
     const onRefreshCapabilities = vi.fn<RefreshCapabilities>(async (args) => ({
       type: 'machine/acp-capabilities-refresh_response',
       machineId: args.machineId,
@@ -1498,7 +1611,7 @@ describe('AgentConfigDialog', () => {
 
   it('shows a test hint while idle and updates title options in the open dialog after testing', async () => {
     const mode: AgentConfigDialogMode = { kind: 'edit', config: createBuiltinConfig() };
-    const onSubmit = vi.fn(async () => { });
+    const onSubmit = vi.fn(async () => {});
     let finishProbe!: (response: Awaited<ReturnType<RefreshCapabilities>>) => void;
     const onRefreshCapabilities: RefreshCapabilities = () =>
       new Promise((resolve) => {
@@ -1569,7 +1682,7 @@ describe('AgentConfigDialog', () => {
   });
 
   it('saves a normalized title reasoning effort after the title model changes', async () => {
-    const onSubmit = vi.fn(async () => { });
+    const onSubmit = vi.fn(async () => {});
     const config = createBuiltinConfig({
       titleGeneration: {
         configOptionValues: {

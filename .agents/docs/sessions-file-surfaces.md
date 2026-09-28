@@ -14,6 +14,12 @@ this page is the full text of the rules summarised there.
   workspace-relative path and, when wired, opens a file-preview viewer tab
   through `handleOpenFile` with `pathKind: 'canonical'` (never the markdown
   href parser).
+- Base (All Changes) diffs open only the focused file by default; the other file
+  cards start collapsed and remain individually expandable. A base diff opened
+  without a focus starts with every card collapsed. Conversation/turn diffs keep
+  their existing all-files-open default.
+  On mobile, the diff-header action closes the diff sheet before opening the
+  file drawer so the diff modal cannot cover the destination viewer.
 - Editor window (Monaco): `session-monaco-text-viewer.tsx` inside
   `session-file-content-view.tsx`.
 - **What a client may DO with a session file is one model, `hooks/use-session-file-actions.ts`,
@@ -47,7 +53,10 @@ this page is the full text of the rules summarised there.
   clicks while pending; browser downloads remain independent. Each export uses an isolated
   cache filename. No remote host path is passed to the device OS.
   The path is resolved on the OWNING machine (its Flock `dotlodyPath` /
-  local-project root) and is built ONLY from that workspace root plus a
+  local-project root). The owning daemon publishes a real, normalized project
+  root even for older registrations through a symbolic link, so the renderer's
+  worktree ID matches the directory the daemon created. The file path is built
+  ONLY from that workspace root plus a
   genuinely workspace-relative viewer path — `lib/session-local-file-path.ts`
   rejects absolute and `..` paths, so a remote session can never hand this
   machine's shell a path of its choosing. The Files tree and the side-panel ⋯

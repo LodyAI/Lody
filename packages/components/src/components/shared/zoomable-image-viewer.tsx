@@ -265,7 +265,14 @@ function OpenZoomableImageViewer({
       index={index}
       {...(onIndexChange ? { onIndexChange } : {})}
       maskClosable
-      photoClosable
+      // The photo itself is the pan/zoom surface. Letting a tap close it makes
+      // a second click after opening race with the source thumbnail and can
+      // reopen the viewer; the toolbar and backdrop remain explicit exits.
+      photoClosable={false}
+      // A vertical drag should pan the image, not turn into PhotoView's
+      // pull-to-dismiss animation. That animation is what makes a zoomed
+      // desktop image appear to float away from the pointer.
+      pullClosable={false}
       {...(isMobile ? {} : { maskOpacity: DESKTOP_MASK_OPACITY })}
       photoClassName="lody-photo-slider-image"
       photoWrapClassName="lody-photo-slider-photo-wrap"

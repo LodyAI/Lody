@@ -5,6 +5,7 @@ import { MachineFlockSyncCoordinator } from './machine-flock-sync-coordinator';
 
 const noopLogger = {
   debug: vi.fn(),
+  trace: vi.fn(),
   info: vi.fn(),
   warn: vi.fn(),
   error: vi.fn(),

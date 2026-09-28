@@ -17,9 +17,9 @@ const CONVERSATION_PATH = /\/sessions\/[^/]+\/?$/;
 /**
  * The router restores scroll by CSS selector per URL: it records every element
  * that scrolled and writes `scrollTop` back after the next render. A
- * conversation's viewport is owned by its follow controller
- * (`hooks/use-sticky-scroll.ts`); a second writer fights it and costs a storage
- * write per switch.
+ * conversation's viewport is owned by the conversation scroll engine
+ * (`lib/conversation-scroll`), its only writer; a second writer fights it and
+ * costs a storage write per switch.
  */
 export function shouldRouterRestoreScroll(pathname: string): boolean {
   return !CONVERSATION_PATH.test(pathname);

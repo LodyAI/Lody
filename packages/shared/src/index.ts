@@ -488,3 +488,4 @@ export interface Attachment {
 }
 
 export * from './schedule-control';
+export * from './codex-auth-profile';

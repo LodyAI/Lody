@@ -11,6 +11,7 @@ const testLogger: Logger = {
   error: vi.fn(),
   success: vi.fn(),
   debug: vi.fn(),
+  trace: vi.fn(),
   setLevel: vi.fn(),
   setDebug: vi.fn(),
   child: vi.fn(() => testLogger),

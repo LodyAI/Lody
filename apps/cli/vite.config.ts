@@ -22,6 +22,7 @@ const bundledNodeBuiltins = new Set([
 ]);
 
 const explicitlyExternal = new Set([
+  '@napi-rs/keyring',
   'better-sqlite3',
   '@lydell/node-pty',
   '@sqlite.org/sqlite-wasm',
