@@ -5,6 +5,8 @@ Translation: current
 
 [中文](2026-09-28-agent-role-description.zh.md)
 
+PR: https://github.com/LodyAI/Lody/pull/1092
+
 ## Abstract
 
 Roles previously had a name and execution prompt but no short invocation guidance.

@@ -5,6 +5,8 @@ Translation: current
 
 [English](2026-09-28-agent-role-description.md)
 
+PR: https://github.com/LodyAI/Lody/pull/1092
+
 ## 摘要
 
 Role 原本有名称和执行提示词，但缺少简短的调用时机说明。现在可选描述通过
