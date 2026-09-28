@@ -135,6 +135,24 @@ export const fontLigaturesEnabledAtom = atom(
   }
 );
 
+export const DEFAULT_INLINE_MATH_ENABLED = false;
+
+export function normalizeInlineMathEnabled(value: unknown): boolean {
+  return typeof value === 'boolean' ? value : DEFAULT_INLINE_MATH_ENABLED;
+}
+
+const inlineMathEnabledStorageAtom = atomWithStorage<unknown>(
+  'lody-inline-math-enabled',
+  DEFAULT_INLINE_MATH_ENABLED
+);
+
+export const inlineMathEnabledAtom = atom(
+  (get) => normalizeInlineMathEnabled(get(inlineMathEnabledStorageAtom)),
+  (_get, set, nextValue: boolean) => {
+    set(inlineMathEnabledStorageAtom, nextValue);
+  }
+);
+
 // Desktop settings modal open state. On desktop (non-mobile) the settings UI is a
 // modal overlay driven by this atom instead of a full-page route. Mobile keeps the
 // route-based settings page and ignores this atom.

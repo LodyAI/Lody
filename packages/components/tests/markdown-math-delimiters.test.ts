@@ -23,6 +23,31 @@ describe('normalizeTexMathDelimiters', () => {
     expect(normalizeTexMathDelimiters(markdown)).toBe(['incomplete \\(y', 'next $$z$$'].join('\n'));
   });
 
+  it('normalizes complete inline pairs only when enabled', () => {
+    const markdown = String.raw`before \(x_i\) after`;
+
+    expect(normalizeTexMathDelimiters(markdown)).toBe(markdown);
+    expect(normalizeTexMathDelimiters(markdown, true)).toBe('before $$x_i$$ after');
+  });
+
+  it('leaves inline delimiters in link labels unchanged when enabled', () => {
+    const markdown = String.raw`[\(x_i\)](https://example.com)`;
+
+    expect(normalizeTexMathDelimiters(markdown, true)).toBe(markdown);
+  });
+
+  it('leaves inline delimiters in link destinations unchanged when enabled', () => {
+    const markdown = String.raw`[x](https://example.com/\(value\))`;
+
+    expect(normalizeTexMathDelimiters(markdown, true)).toBe(markdown);
+  });
+
+  it('normalizes inline delimiters in ordinary square-bracket text when enabled', () => {
+    const markdown = String.raw`[\(x_i\)]`;
+
+    expect(normalizeTexMathDelimiters(markdown, true)).toBe('[$$x_i$$]');
+  });
+
   it('leaves delimiters inside inline and fenced code unchanged', () => {
     const markdown = [
       '`\\(inline\\)`',

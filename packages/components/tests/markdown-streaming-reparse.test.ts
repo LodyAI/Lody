@@ -3,7 +3,9 @@
 import { act, createElement, type ComponentProps } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createStore, Provider } from 'jotai';
 
+import { inlineMathEnabledAtom } from '../src/atoms/settings';
 import { MarkdownRenderer } from '../src/components/ai-gui/markdown-renderer';
 
 vi.mock('react-i18next', () => ({
@@ -88,6 +90,7 @@ describe('MarkdownRenderer streaming rendering', () => {
     root = undefined;
     container?.remove();
     container = undefined;
+    localStorage.removeItem('lody-inline-math-enabled');
     vi.restoreAllMocks();
   });
 
@@ -101,6 +104,22 @@ describe('MarkdownRenderer streaming rendering', () => {
 
     await act(async () => {
       root?.render(createElement(MarkdownRenderer, { text, ...props }));
+    });
+  };
+
+  const renderMarkdownWithStore = async (
+    text: string,
+    store: ReturnType<typeof createStore>,
+    props: Partial<ComponentProps<typeof MarkdownRenderer>> = {}
+  ): Promise<void> => {
+    if (!root) {
+      throw new Error('Expected test root to be initialized');
+    }
+
+    await act(async () => {
+      root?.render(
+        createElement(Provider, { store }, createElement(MarkdownRenderer, { text, ...props }))
+      );
     });
   };
 
@@ -466,6 +485,55 @@ End of synthetic document.`,
     expect(container?.querySelector('.katex')).toBeNull();
     expect(container?.textContent).toContain('$E = mc^2$');
     expect(await waitForElement('[data-streamdown="mermaid-block"]')).not.toBeNull();
+  });
+
+  it('renders inline dollar and parenthesis math when the preference is enabled', async () => {
+    const store = createStore();
+    store.set(inlineMathEnabledAtom, true);
+    await renderMarkdownWithStore('Inline $E = mc^2$ and \\(t_i\\).', store);
+
+    expect(container?.querySelectorAll('.katex')).toHaveLength(2);
+    expect(container?.querySelectorAll('.katex-display')).toHaveLength(0);
+  });
+
+  it('keeps code literal when inline math is enabled', async () => {
+    const store = createStore();
+    store.set(inlineMathEnabledAtom, true);
+    await renderMarkdownWithStore(
+      [
+        '`\\(inline_code\\)`',
+        '',
+        '```tex',
+        '\\[',
+        'fenced_code',
+        '\\]',
+        '```',
+        '',
+        '\\(x_i\\)',
+      ].join('\n'),
+      store
+    );
+
+    expect(container?.querySelectorAll('.katex')).toHaveLength(1);
+    expect(container?.querySelector('code')?.textContent).toBe('\\(inline_code\\)');
+    expect(container?.textContent).toContain('\\[fenced_code\\]');
+  });
+
+  it('keeps inline delimiters in links literal when enabled', async () => {
+    const store = createStore();
+    store.set(inlineMathEnabledAtom, true);
+    await renderMarkdownWithStore('[\\(x_i\\)](https://example.com)', store);
+
+    expect(container?.querySelectorAll('.katex')).toHaveLength(0);
+    expect(container?.querySelector('a')?.textContent).toContain('(x_i)');
+  });
+
+  it('renders inline delimiters in ordinary square-bracket text when enabled', async () => {
+    const store = createStore();
+    store.set(inlineMathEnabledAtom, true);
+    await renderMarkdownWithStore('[\\(x_i\\)]', store);
+
+    expect(container?.querySelectorAll('.katex')).toHaveLength(1);
   });
 
   it('keeps parenthesis LaTeX literal while rendering bracket display LaTeX', async () => {

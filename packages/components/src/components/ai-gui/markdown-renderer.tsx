@@ -17,6 +17,7 @@ import {
   Suspense,
 } from 'react';
 import { createPortal } from 'react-dom';
+import { useAtomValue } from 'jotai';
 import type { StreamdownProps } from '@lobehub/streamdown';
 import Markdown, {
   defaultUrlTransform,
@@ -31,7 +32,7 @@ import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import { Check, Copy } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { DEFAULT_CONVERSATION_FONT_SIZE } from '@/atoms/settings';
+import { DEFAULT_CONVERSATION_FONT_SIZE, inlineMathEnabledAtom } from '@/atoms/settings';
 import { MonochromeFileIcon } from '@/components/icons/file-icons';
 import { writeTextToClipboard } from '@/lib/clipboard';
 import {
@@ -39,7 +40,10 @@ import {
   parseMarkdownAgentFileHref,
 } from '@/lib/markdown-agent-file-link';
 import { matchWholeFilePath, splitTextIntoFilePathSegments } from '@/lib/linkify-file-paths';
-import { normalizeTexMathDelimiters } from '@/lib/markdown-single-dollar-math';
+import {
+  normalizeTexMathDelimiters,
+  remarkSingleDollarTextMath,
+} from '@/lib/markdown-single-dollar-math';
 import { cn } from '@/lib/utils';
 import { usePrLinkInterceptor } from './pr-link-context';
 import {
@@ -697,6 +701,10 @@ const MARKDOWN_REMARK_PLUGINS = [
   remarkMarkUnclosedFences,
   [remarkMath, { singleDollarTextMath: false }],
 ] satisfies StreamdownProps['remarkPlugins'];
+const INLINE_MATH_REMARK_PLUGINS = [
+  ...MARKDOWN_REMARK_PLUGINS,
+  remarkSingleDollarTextMath,
+] satisfies StreamdownProps['remarkPlugins'];
 
 const KATEX_REHYPE_PLUGIN = [
   rehypeKatex,
@@ -1154,6 +1162,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
   const openAgentFileLabel = t('sessions.openAgentFile', 'Open agent file');
   const canvasLabel = t('sessions.diagram.canvas', 'Zoom and pan diagram');
   const openDiagramLabel = t('sessions.diagramViewer.open', 'Open diagram');
+  const inlineMathEnabled = useAtomValue(inlineMathEnabledAtom);
   // Both scans below re-run over the whole accumulated answer on every streamed
   // delta. A substring test settles the common case before the line-anchored
   // pattern runs.
@@ -1161,7 +1170,10 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
     () => text.includes('mermaid') && MERMAID_FENCE_PATTERN.test(text),
     [text]
   );
-  const normalizedText = useMemo(() => normalizeTexMathDelimiters(text), [text]);
+  const normalizedText = useMemo(
+    () => normalizeTexMathDelimiters(text, inlineMathEnabled),
+    [inlineMathEnabled, text]
+  );
   const {
     blocks: mermaidBlocks,
     selection: diagramSelection,
@@ -1196,6 +1208,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
   );
 
   const components = useSelectionStableValue(currentComponents);
+  const remarkPlugins = inlineMathEnabled ? INLINE_MATH_REMARK_PLUGINS : MARKDOWN_REMARK_PLUGINS;
   const rehypePlugins = allowHtml ? HTML_MARKDOWN_REHYPE_PLUGINS : MARKDOWN_REHYPE_PLUGINS;
   const normalizedSize = normalizeMarkdownRendererSize(size);
   // The engine keeps revealing its buffered tail after the stream ends. Staying
@@ -1216,7 +1229,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
   const staticMarkdown = (
     <Markdown
       components={components}
-      remarkPlugins={MARKDOWN_REMARK_PLUGINS}
+      remarkPlugins={remarkPlugins}
       rehypePlugins={rehypePlugins}
       urlTransform={markdownUrlTransform}
     >
@@ -1378,7 +1391,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
               content={normalizedText}
               remend={STREAMING_REMEND_OPTIONS}
               components={components}
-              remarkPlugins={MARKDOWN_REMARK_PLUGINS}
+              remarkPlugins={remarkPlugins}
               rehypePlugins={rehypePlugins}
               urlTransform={markdownUrlTransform}
             />

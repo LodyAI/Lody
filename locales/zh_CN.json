@@ -2886,6 +2886,8 @@
   "settings.conversationWideMode.label": "全宽显示",
   "settings.fontLigatures.helper": "应用于对话、代码、工具输出。",
   "settings.fontLigatures.label": "字体连字",
+  "settings.inlineMath.helper": "在 Markdown 中排版 $...$ 和 \\(...\\) 行内公式。",
+  "settings.inlineMath.label": "渲染行内公式",
   "settings.autoArchive.description": "在以下情况发生时，自动归档 session 对话。仅对你自己创建的 session 生效，且仅在当前设备上启用。",
   "settings.autoArchive.onPrClosed": "PR 被关闭时",
   "settings.autoArchive.onPrMerged": "PR 被合并时",

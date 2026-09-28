@@ -2886,6 +2886,8 @@
   "settings.conversationWideMode.label": "Full width",
   "settings.fontLigatures.helper": "Applies to conversation, code, and tool output.",
   "settings.fontLigatures.label": "Font ligatures",
+  "settings.inlineMath.helper": "Typeset $...$ and \\(...\\) in Markdown.",
+  "settings.inlineMath.label": "Render inline math",
   "settings.autoArchive.description": "Automatically archive a session conversation when one of the following happens. Applies to sessions you own and only on this device.",
   "settings.autoArchive.onPrClosed": "When the PR is closed",
   "settings.autoArchive.onPrMerged": "When the PR is merged",

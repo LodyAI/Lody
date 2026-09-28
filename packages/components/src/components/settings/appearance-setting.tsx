@@ -11,6 +11,7 @@ import {
   conversationFontSizeAtom,
   conversationWideModeAtom,
   fontLigaturesEnabledAtom,
+  inlineMathEnabledAtom,
   interfaceFontFamilyAtom,
   normalizeConversationFontSize,
   normalizeTerminalFontSize,
@@ -47,6 +48,8 @@ export interface AppearanceSettingsViewProps {
   onConversationFontSizeChange: (value: ConversationFontSize) => void;
   conversationWideMode: boolean;
   onConversationWideModeChange: (value: boolean) => void;
+  inlineMathEnabled: boolean;
+  onInlineMathEnabledChange: (value: boolean) => void;
   isElectron: boolean;
   interfaceFontFamily: string;
   onInterfaceFontFamilyChange: (value: string) => void;
@@ -221,6 +224,8 @@ export function AppearanceSettingsView({
   onConversationFontSizeChange,
   conversationWideMode,
   onConversationWideModeChange,
+  inlineMathEnabled,
+  onInlineMathEnabledChange,
   isElectron,
   interfaceFontFamily,
   onInterfaceFontFamilyChange,
@@ -375,6 +380,16 @@ export function AppearanceSettingsView({
           />
         </CompactRow>
         <CompactRow
+          label={t('settings.inlineMath.label', 'Render inline math')}
+          helper={t('settings.inlineMath.helper', 'Typeset $...$ and \\(...\\) in Markdown.')}
+        >
+          <Switch
+            checked={inlineMathEnabled}
+            onCheckedChange={onInlineMathEnabledChange}
+            aria-label={t('settings.inlineMath.label', 'Render inline math')}
+          />
+        </CompactRow>
+        <CompactRow
           label={t('settings.fontLigatures.label', 'Font ligatures')}
           helper={t(
             'settings.fontLigatures.helper',
@@ -469,6 +484,7 @@ function DesktopAppearanceSettings() {
   const { theme, setTheme, previewTheme } = useTheme();
   const [conversationFontSize, setConversationFontSize] = useAtom(conversationFontSizeAtom);
   const [conversationWideMode, setConversationWideMode] = useAtom(conversationWideModeAtom);
+  const [inlineMathEnabled, setInlineMathEnabled] = useAtom(inlineMathEnabledAtom);
   const [interfaceFontFamily, setInterfaceFontFamily] = useAtom(interfaceFontFamilyAtom);
   const [terminalFontFamily, setTerminalFontFamily] = useAtom(terminalFontFamilyAtom);
   const [terminalFontSize, setTerminalFontSize] = useAtom(terminalFontSizeAtom);
@@ -535,6 +551,8 @@ function DesktopAppearanceSettings() {
       onConversationFontSizeChange={handleConversationFontSizeChange}
       conversationWideMode={conversationWideMode}
       onConversationWideModeChange={setConversationWideMode}
+      inlineMathEnabled={inlineMathEnabled}
+      onInlineMathEnabledChange={setInlineMathEnabled}
       isElectron={isElectron}
       interfaceFontFamily={interfaceFontFamily}
       onInterfaceFontFamilyChange={setInterfaceFontFamily}
