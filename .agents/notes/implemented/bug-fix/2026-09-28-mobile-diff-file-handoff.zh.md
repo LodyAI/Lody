@@ -3,6 +3,7 @@
 Status: implemented
 Date: 2026-09-28
 Translation: current
+PR: https://github.com/LodyAI/Lody/pull/1076
 [English](2026-09-28-mobile-diff-file-handoff.md)
 
 ## 摘要
