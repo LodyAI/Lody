@@ -2116,6 +2116,7 @@ export const SessionChatInputArea = memo(
           modelId={selectedModelId}
           modelLabel={selectedModelLabel}
           isContextCompacting={isContextCompacting}
+          showRateLimitWithoutContext
           showCodexResetForecast={showCodexResetForecast}
           className={isMobile ? 'h-8 shrink-0' : 'shrink-0'}
         />
