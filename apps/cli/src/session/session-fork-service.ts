@@ -43,17 +43,18 @@ const execFileAsync = promisify(execFile);
 /** Recovery opens only store-listed docs; keep even that small fan-out bounded. */
 const FORK_RECOVERY_CONCURRENCY = 4;
 
+type ForkRuntimeConfig = Omit<SessionAcpRuntimeConfigSnapshot, 'acpSessionId' | 'revision'>;
+
 type WorktreeForkPreparedInput = {
   spec: SessionForkSpec;
   source: SessionMeta;
   sourceAcpSessionId: NonNullable<SessionMeta['acpSessionId']>;
-  sourceTitle: string;
   targetDoc: Awaited<ReturnType<LoroDocumentManager['getOrCreateSessionDoc']>>;
   targetMeta: SessionMeta;
   marker: SessionForkOperationMarker;
   historyResult: NonNullable<ReturnType<typeof cloneHistoryThroughTurn>>;
   sourceSnapshot: SessionSnapshot;
-  sourceRuntimeConfig?: SessionAcpRuntimeConfigSnapshot;
+  sourceRuntimeConfig?: ForkRuntimeConfig;
   agentConfig: NonNullable<Awaited<ReturnType<LoroDocumentManager['getAgentConfigById']>>>;
   user: { name: string; email: string };
   operation: SessionForkOperation;
@@ -584,12 +585,10 @@ export class SessionForkService {
 
     const runtimeConfig = sourceControlState?.acpRuntimeConfig;
     const baseline = resolveSessionAcpRuntimeConfig(historyResult.history, [], runtimeConfig);
-    const sourceRuntimeConfig: SessionAcpRuntimeConfigSnapshot | undefined =
+    const sourceRuntimeConfig: ForkRuntimeConfig | undefined =
       baseline && runtimeConfig?.acpSessionId === sourceAcpSessionId
         ? {
-            acpSessionId: sourceAcpSessionId,
             basedOnUserTurnId: runtimeConfig.basedOnUserTurnId,
-            revision: runtimeConfig.revision,
             modelId: baseline.modelId,
             modeId: baseline.modeId,
             configOptionValues: baseline.configOptionValues,
@@ -782,7 +781,6 @@ export class SessionForkService {
         spec,
         source,
         sourceAcpSessionId,
-        sourceTitle,
         targetDoc,
         targetMeta,
         marker,

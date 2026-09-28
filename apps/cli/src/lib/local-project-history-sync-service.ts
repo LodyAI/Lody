@@ -288,24 +288,6 @@ export function buildExistingHistorySessionIndex(
   return index;
 }
 
-function getProviderLabel(provider: LocalProjectHistoryProvider): string {
-  return getLocalProjectHistoryProviderKey(provider);
-}
-
-function getHistoryImportKey(args: {
-  machineId: MachineId;
-  localProjectId: LocalProjectId;
-  provider: LocalProjectHistoryProvider;
-  acpSessionId: string;
-}): string {
-  return getExternalAcpHistoryImportKey({
-    machineId: args.machineId,
-    localProjectId: args.localProjectId,
-    provider: args.provider,
-    sourceAcpSessionId: args.acpSessionId,
-  });
-}
-
 const MAX_IMPORTED_SESSION_TITLE_CHARS = 80;
 
 function resolveSessionTitle(info: SessionInfo, provider: LocalProjectHistoryProvider): string {
@@ -313,7 +295,7 @@ function resolveSessionTitle(info: SessionInfo, provider: LocalProjectHistoryPro
   // which can carry Lody-appended instruction tails.
   const cleaned = info.title?.trim() ? sanitizeLodyInternalInstructions(info.title) : '';
   const title = cleaned.replace(/\s+/g, ' ').trim().slice(0, MAX_IMPORTED_SESSION_TITLE_CHARS);
-  return title || `${getProviderLabel(provider)} session`;
+  return title || `${getLocalProjectHistoryProviderKey(provider)} session`;
 }
 
 function parseUpdatedAtMs(updatedAt: string | undefined): number {
@@ -518,9 +500,7 @@ export class LocalProjectHistorySyncService {
       `${this.providerKey}:${this.context.workspaceId}:` +
       `${this.context.machineId}:${args.localProjectId}`;
     if (syncLeases.has(leaseKey)) {
-      throw new Error(
-        `${getProviderLabel(this.provider)} history sync is already running for this local project`
-      );
+      throw new Error(`${this.providerKey} history sync is already running for this local project`);
     }
     syncLeases.add(leaseKey);
     try {
@@ -551,9 +531,7 @@ export class LocalProjectHistorySyncService {
       `${this.providerKey}:${this.context.workspaceId}:` +
       `${this.context.machineId}:${args.localProjectId}`;
     if (syncLeases.has(leaseKey)) {
-      throw new Error(
-        `${getProviderLabel(this.provider)} history sync is already running for this local project`
-      );
+      throw new Error(`${this.providerKey} history sync is already running for this local project`);
     }
     syncLeases.add(leaseKey);
     try {
@@ -573,9 +551,7 @@ export class LocalProjectHistorySyncService {
       `${this.providerKey}:${this.context.workspaceId}:` +
       `${this.context.machineId}:${args.localProjectId}`;
     if (syncLeases.has(leaseKey)) {
-      throw new Error(
-        `${getProviderLabel(this.provider)} history sync is already running for this local project`
-      );
+      throw new Error(`${this.providerKey} history sync is already running for this local project`);
     }
     syncLeases.add(leaseKey);
     try {
@@ -605,16 +581,14 @@ export class LocalProjectHistorySyncService {
       const info = infoByAcpSessionId.get(selectedId);
       try {
         if (!info) {
-          throw new Error(
-            `${getProviderLabel(this.provider)} session was not found in the local project catalog`
-          );
+          throw new Error(`${this.providerKey} session was not found in the local project catalog`);
         }
 
-        const importKey = getHistoryImportKey({
+        const importKey = getExternalAcpHistoryImportKey({
           machineId: this.context.machineId,
           localProjectId: args.localProjectId,
           provider: this.provider,
-          acpSessionId: selectedId,
+          sourceAcpSessionId: selectedId,
         });
         const existing =
           (await this.findExistingHistorySession(args.localProjectId, selectedId)) ??
@@ -651,9 +625,7 @@ export class LocalProjectHistorySyncService {
           message: formatErrorMessage(error),
         });
         this.logger.warn(
-          `[${this.providerKey}-history-sync] Failed to import ${getProviderLabel(
-            this.provider
-          )} session ${acpSessionId}: ${formatErrorMessage(error)}`
+          `[${this.providerKey}-history-sync] Failed to import ${this.providerKey} session ${acpSessionId}: ${formatErrorMessage(error)}`
         );
       }
     }
@@ -678,16 +650,14 @@ export class LocalProjectHistorySyncService {
     });
     const info = snapshot.sessions.find((session) => session.sessionId === args.acpSessionId);
     if (!info) {
-      throw new Error(
-        `${getProviderLabel(this.provider)} session was not found in the local project catalog`
-      );
+      throw new Error(`${this.providerKey} session was not found in the local project catalog`);
     }
 
-    const importKey = getHistoryImportKey({
+    const importKey = getExternalAcpHistoryImportKey({
       machineId: this.context.machineId,
       localProjectId: args.localProjectId,
       provider: this.provider,
-      acpSessionId: args.acpSessionId,
+      sourceAcpSessionId: args.acpSessionId,
     });
     const finishResolved = async (
       meta: SessionMeta
@@ -881,11 +851,11 @@ export class LocalProjectHistorySyncService {
     localProjectId: LocalProjectId,
     acpSessionId: string
   ): Promise<ExistingHistorySession | undefined> {
-    const importKey = getHistoryImportKey({
+    const importKey = getExternalAcpHistoryImportKey({
       machineId: this.context.machineId,
       localProjectId,
       provider: this.provider,
-      acpSessionId,
+      sourceAcpSessionId: acpSessionId,
     });
     const sessionMetas = await listWorkspaceSessionMetas(this.manager);
     return buildExistingHistorySessionIndex(
@@ -928,11 +898,11 @@ export class LocalProjectHistorySyncService {
           this.provider,
           info,
           args.existingByImportKey.get(
-            getHistoryImportKey({
+            getExternalAcpHistoryImportKey({
               machineId: this.context.machineId,
               localProjectId: args.localProjectId,
               provider: this.provider,
-              acpSessionId: info.sessionId,
+              sourceAcpSessionId: info.sessionId,
             })
           )
         )

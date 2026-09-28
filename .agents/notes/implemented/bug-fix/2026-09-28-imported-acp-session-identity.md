@@ -41,6 +41,26 @@ and refresh continuity). No workspace-wide scan/migration is added.
 The shared history Provider schema also replaces Electron's handwritten validation,
 so custom ACP Providers and exact selections follow the same boundary as RPC.
 
+## Ablation evidence
+
+In [PR #1088](https://github.com/LodyAI/Lody/pull/1088), the baseline import/fork
+writer suites passed all 59 tests. Independent removals produced these results:
+
+- Removing account-binding filters failed the cross-account native-id test (1/22).
+- Replacing shared native-target resolution with the live id failed four fork tests
+  (4/37). Both protections were restored.
+- Removing two forwarding helpers and calling shared identity helpers directly
+  passed all 22 import tests. Diagnostics reuse the existing family key.
+- Removing the unused worktree `sourceTitle` parameter and the source id/revision
+  from the prepared runtime payload passed all 37 fork tests. The destination id
+  is supplied at commit and the writer owns revision assignment.
+
+Checking configuration against full source history instead of the selected fork
+history still passed all 37 tests: the durable writer independently enforces the
+last-user-turn fence. This is not evidence that snapshot selection is redundant;
+retain normalization and selection against the captured fork history. These
+experiments establish behavior for the covered boundaries, not universal redundancy.
+
 ## Evidence and limits
 
 Behavior tests cross the real SessionDocument/history writer for import and both
