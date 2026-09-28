@@ -49,7 +49,7 @@ export function SessionPreviewPreload({
       !endpointId ||
       !canPrepareManagedPreviewFrame(session.id)
     )
-      return;
+      return undefined;
     let disposed = false;
     let started = false;
     let release: (() => void) | undefined;
