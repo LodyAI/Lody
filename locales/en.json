@@ -4132,6 +4132,8 @@
   "settings.agentRoles.form.incompatibleTitle": "This role stores settings the selected agent no longer supports:",
   "settings.agentRoles.form.sectionPrompt": "Default instruction (optional)",
   "settings.agentRoles.form.sectionPromptHint": "Added before the task in the first turn of the session this role creates.",
+  "settings.agentRoles.form.description": "Description",
+  "settings.agentRoles.form.descriptionHint": "Describe this agent to help other agents know when to call it. Up to 140 characters.",
   "settings.agentRoles.form.promptPrefix": "Default instruction",
   "settings.agentRoles.form.promptPrefixPlaceholder": "Review the diff for correctness before style.",
   "settings.agentRoles.form.share": "Share with workspace",

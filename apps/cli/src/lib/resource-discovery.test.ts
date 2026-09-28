@@ -125,6 +125,7 @@ describe('resource discovery across MCP and CLI', () => {
   it('keeps readable broken Roles, hides others private Roles and filters sensitive run options', async () => {
     const roles = [
       role('good', {
+        description: 'Review changes before merging',
         promptPrefix: 'Synthetic instructions',
         runConfig: { configOptionValues: { api_key: 'synthetic-secret', effort: 'high' } },
       }),
@@ -136,6 +137,13 @@ describe('resource discovery across MCP and CLI', () => {
     ];
     const discovery = new ResourceDiscovery(source({ roles: async () => roles }));
     const page = await discovery.list('agent_role');
+    expect(page.items.find((row) => row.id === 'good')?.description).toBe(
+      'Review changes before merging'
+    );
+    expect(page.items.find((row) => row.id === 'offline')?.description).toBe('');
+    expect((await discovery.get('agent_role', 'good')).item.description).toBe(
+      'Review changes before merging'
+    );
     expect(page.items.map((row) => row.id)).not.toContain('private');
     expect(page.items.find((row) => row.id === 'missing')?.availability?.reason).toBe(
       'machine_inaccessible_or_missing'

@@ -4132,6 +4132,8 @@
   "settings.agentRoles.form.incompatibleTitle": "该角色保存了所选 Agent 已不再支持的设置：",
   "settings.agentRoles.form.sectionPrompt": "默认指令（可选）",
   "settings.agentRoles.form.sectionPromptHint": "会加在该角色创建的会话首轮任务之前。",
+  "settings.agentRoles.form.description": "描述",
+  "settings.agentRoles.form.descriptionHint": "Agent 的描述，提示其他 agent 什么时候应该调用它。最多 140 个字符。",
   "settings.agentRoles.form.promptPrefix": "默认指令",
   "settings.agentRoles.form.promptPrefixPlaceholder": "先检查正确性，再看代码风格。",
   "settings.agentRoles.form.share": "共享到工作区",

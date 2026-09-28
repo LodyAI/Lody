@@ -245,6 +245,7 @@ export class ResourceDiscovery {
       return {
         id: role.id,
         name: role.name,
+        description: role.description ?? '',
         machineId: role.machineId,
         agentConfigId: role.agentConfigId,
         visibility: role.visibility,
