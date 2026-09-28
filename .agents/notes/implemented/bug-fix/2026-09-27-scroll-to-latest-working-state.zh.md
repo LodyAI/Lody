@@ -30,3 +30,5 @@ Translation: current
 `tests/agent-activity-row.test.tsx` 的 14 个测试全部通过。Storybook production build 成功，
 无头浏览器检查两个新增 story 分别观察到工作中旋转图标和等待授权向下箭头。
 `pnpm run docs check` 仍被仓库已有的、指向未初始化 ACP 子模块的断链阻塞。
+
+- Pull request: [#1073](https://github.com/LodyAI/Lody/pull/1073)。

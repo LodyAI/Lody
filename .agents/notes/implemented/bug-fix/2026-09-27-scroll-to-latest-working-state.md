@@ -40,3 +40,5 @@ states; browser execution confirmed the expected icons.
 build succeeds, and a headless browser check of both new stories observes the
 working spinner and waiting arrow respectively. `pnpm run docs check` remains
 blocked by pre-existing broken links to uninitialized ACP submodules.
+
+- Pull request: [#1073](https://github.com/LodyAI/Lody/pull/1073).
