@@ -204,6 +204,15 @@ space is still spawned directly. The shell is non-interactive and non-login (`sh
 change its environment. A spawn that still fails answers with a JSON-RPC code instead of a bare
 errno, and its error is recorded as an exit status so no waiter is left pending.
 
+### Imported ACP identity
+
+Continuation and fork use the shared `resolveSessionAcpTargetId` projection: a
+Lody-owned runtime supersedes the immutable imported source; an unresolved source
+history conflict cannot authorize native fork. Import does not fabricate a live
+runtime id. Fork copies an ACP runtime configuration baseline only when it belongs
+to the copied last user turn and source ACP identity, rebasing it to the new native
+session id. Ordinary and worktree forks use the same projection and fence.
+
 ### Fork saga recovery
 
 Because a preparing target publishes no Session meta until its final commit, the repo meta

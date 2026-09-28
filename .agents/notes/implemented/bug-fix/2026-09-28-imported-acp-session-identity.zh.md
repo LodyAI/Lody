@@ -1,0 +1,47 @@
+# ACP 导入与 fork 保持 Provider 和运行身份
+
+Status: implemented
+Translation: current
+
+[English](2026-09-28-imported-acp-session-identity.md)
+
+## 摘要
+
+历史选择把同类型 ACP Agent 的多个配置合并为一项，导致有多个配置时导入对话
+没有绑定；fork 又要求新导入快照本就不应拥有的运行会话 ID。本次实现让目录查询
+和导入携带明确 Provider，并让续聊与两种 fork 目的地共用原生身份解析。保留旧
+历史标识和来源报告的配置；旧守护进程及旧请求继续兼容原有按类型选择的行为。
+
+## 决策
+
+界面完成协议能力协商后才选择具体 Provider。守护进程每次请求验证机器、ID 和
+类型，目录列举、历史读取及新导入绑定使用同一配置。目录键按 Provider 隔离；
+导入索引先按绑定过滤，再保留按类型生成的旧导入键，避免改写历史和破坏哈希
+基线。所选 Provider 列出来源后可以补齐旧的未绑定记录，其他账号已绑定的记录
+不会被匹配或改绑。
+
+导入来源与自有运行会话 ID 保持独立。共享纯函数优先返回自有运行身份，否则
+使用没有历史冲突的来源。普通 fork 和 worktree fork 都使用该解析结果。捕获
+历史快照时同时捕获并规范化来源运行配置，仅在原生身份及最后用户轮次匹配时
+复制，关联到 fork 的新原生 ID 后再完成本地持久化。不伪造 Role 来源，也不让
+Provider 默认值覆盖导入模型。
+
+没有采用导入时伪造运行 ID（会改变恢复语义）、随便选第一个同类型 Provider
+（可能使用错误账号），或重命名旧历史 ID（会破坏哈希及刷新连续性）。不新增
+全工作区扫描或迁移。
+
+共享历史 Provider schema 同时替代 Electron 手写验证，使自定义 ACP Provider
+和具体配置选择与 RPC 使用同一输入边界。
+
+## 证据与限制
+
+导入和两种 fork 的行为测试穿过真实 SessionDocument 与历史 writer，覆盖双账号
+显式选择、跨账号重复原生 ID、旧记录补绑定、失效或不匹配的选择、冲突来源拒绝、
+配置保留和用户轮次约束。共享协议/身份及界面目录/名称测试覆盖传输与展示边界，
+并进行包类型检查和相关静态检查。
+未修改真实账号对话，未进行打包桌面或真实 Provider 手工验收。旧的未绑定对话
+需要通过目标 Provider 同步历史后再 fork；原生能力不支持时仍不可用。
+
+相关决策：[运行中 fork](2026-09-11-streaming-fork-affordance.zh.md)、
+[Grok 原生 fork](../feature/2026-09-24-grok-session-fork.zh.md)。新
+[Spec](../../../../specs/imported-acp-session-identity.zh.md) 仍为 draft。

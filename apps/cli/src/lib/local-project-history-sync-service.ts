@@ -41,6 +41,8 @@ import {
   buildHistoryReplayImport,
   getExternalAcpHistoryImportKey,
   getLocalProjectHistoryProviderKey,
+  getLocalProjectHistoryCatalogKey,
+  matchesHistoryProviderBinding,
   getServerNow,
   getSessionRoomId,
   isLoroRepoDocDeleted,
@@ -251,6 +253,7 @@ export function buildExistingHistorySessionIndex(
   });
   for (const entry of sortedMetas) {
     if (entry.meta.machineId !== machineId) continue;
+    if (!matchesHistoryProviderBinding(entry.meta.agentConfigId, provider)) continue;
     if (entry.meta.cliType !== provider.cliType) continue;
     if (entry.meta.agentType !== provider.agentType) continue;
     if (entry.meta.project?.kind !== 'local') continue;
@@ -425,14 +428,36 @@ export class LocalProjectHistorySyncService {
     this.providerKey = getLocalProjectHistoryProviderKey(provider);
   }
 
-  private soleAgentConfigLookup?: Promise<AgentConfigMeta | undefined>;
+  private agentConfigLookup?: Promise<AgentConfigMeta | undefined>;
 
-  private soleAgentConfig(): Promise<AgentConfigMeta | undefined> {
-    return (this.soleAgentConfigLookup ??= this.manager.findSoleAgentConfig(
-      this.provider.cliType,
-      this.provider.agentType,
+  private selectedAgentConfig(): Promise<AgentConfigMeta | undefined> {
+    return (this.agentConfigLookup ??= this.resolveImportAgentConfig());
+  }
+
+  private async resolveImportAgentConfig(): Promise<AgentConfigMeta | undefined> {
+    if (!this.provider.agentConfigId) {
+      return this.manager.findSoleAgentConfig(
+        this.provider.cliType,
+        this.provider.agentType,
+        this.context.machineId
+      );
+    }
+    const config = await this.manager.getAgentConfigById(
+      this.provider.agentConfigId,
       this.context.machineId
-    ));
+    );
+    if (
+      !config ||
+      config.id !== this.provider.agentConfigId ||
+      config.machineId !== this.context.machineId ||
+      config.cliType !== this.provider.cliType ||
+      config.agentType !== this.provider.agentType
+    ) {
+      throw new Error(
+        'The selected history Provider is unavailable or does not match this machine and agent.'
+      );
+    }
+    return config;
   }
 
   /** Same rule as continuing the session: its bound Provider, else the default launch. */
@@ -598,7 +623,7 @@ export class LocalProjectHistorySyncService {
           const materialized = await this.loadReplay(
             args.rootPath,
             acpSessionId,
-            await this.soleAgentConfig()
+            await this.selectedAgentConfig()
           );
           const importedSession = await this.importNewSession({
             info,
@@ -818,7 +843,7 @@ export class LocalProjectHistorySyncService {
     rootPath: string;
     requiredSessionIds?: readonly string[];
   }): Promise<HistoryCatalogSnapshot> {
-    const agentConfig = await this.soleAgentConfig();
+    const agentConfig = await this.selectedAgentConfig();
     const catalog = await listHistorySessionsForLocalProject({
       provider: await this.launchProvider(agentConfig),
       rootPath: args.rootPath,
@@ -877,6 +902,7 @@ export class LocalProjectHistorySyncService {
     acpSessionId: string
   ): boolean {
     if (meta.machineId !== this.context.machineId) return false;
+    if (!matchesHistoryProviderBinding(meta.agentConfigId, this.provider)) return false;
     if (meta.cliType !== this.provider.cliType) return false;
     if (meta.agentType !== this.provider.agentType) return false;
     if (meta.project?.kind !== 'local') return false;
@@ -941,7 +967,7 @@ export class LocalProjectHistorySyncService {
           ...previous,
           history: {
             ...(previous.history ?? {}),
-            [this.providerKey]: {
+            [getLocalProjectHistoryCatalogKey(this.provider)]: {
               lastListedAt,
               sessions: Object.fromEntries(sessions.map((item) => [item.acpSessionId, item])),
             },
@@ -965,7 +991,7 @@ export class LocalProjectHistorySyncService {
     const roomId = getSessionRoomId(sessionId);
     const nowMs = getServerNow();
     const lastMessageAt = resolveSourceUpdatedAtMs(args.info, nowMs);
-    const agentConfig = await this.soleAgentConfig();
+    const agentConfig = await this.selectedAgentConfig();
     const meta: SessionMeta = {
       id: sessionId,
       machineId: this.context.machineId,

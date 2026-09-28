@@ -106,6 +106,13 @@ describe('ProjectHistoryImportPanel empty states', () => {
     });
   }
 
+  it('identifies the selected configuration instead of collapsing it to the agent family', async () => {
+    await renderState({ ...makeState(null), providerLabel: 'Codex work account' });
+    expect(container.textContent).toContain(
+      "Find this project's conversations in Codex work account"
+    );
+  });
+
   it('guides the first sync without showing list actions', async () => {
     await renderState(makeState(null));
 

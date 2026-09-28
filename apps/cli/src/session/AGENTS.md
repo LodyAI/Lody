@@ -92,6 +92,7 @@ Contract: specs/session-orchestration.md.
 - Dispatch and claim rescan the current row and reject changed compatibility under canonical
   `buildSessionLaunchConfig` semantics; a published incompatible resource cleans up first.
 - Nested child Sessions are rejected: ownership resolves one parent hop only.
+- Fork and continuation share `resolveSessionAcpTargetId`; source runtime config copies only at its matching user-turn fence.
 - Fork commits at `persistPendingChanges()`, never cloud sync. Persist its placeholder
   before ACP; failed commits terminate and durably delete the target. Post-commit
   display projections stay outside compensation.

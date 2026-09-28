@@ -2252,8 +2252,9 @@ export const LocalProjectSetWorktreeCleanupRequestSchema = z
   })
   .strict();
 
-const LocalProjectHistoryProviderSchema = z
+export const LocalProjectHistoryProviderSchema = z
   .object({
+    agentConfigId: AgentConfigIdSchema.refine((id) => id.trim().length > 0).optional(),
     cliType: AgentConfigCliTypeSchema,
     agentType: z.string().trim().min(1),
   })

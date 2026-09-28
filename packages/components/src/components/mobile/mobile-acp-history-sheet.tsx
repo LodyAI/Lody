@@ -80,7 +80,7 @@ export function MobileAcpHistorySheet({
   const { t, i18n } = useTranslation();
   const localeObj: Locale = i18n.language?.startsWith('zh') ? zhCN : enUS;
   const intlLocale = toIntlLocale(i18n.resolvedLanguage ?? i18n.language);
-  const providerLabel = getHistoryProviderLabel(state.provider);
+  const providerLabel = state.providerLabel ?? getHistoryProviderLabel(state.provider);
   const [conflictSessionToResolve, setConflictSessionToResolve] =
     useState<LocalProjectHistoryCatalogItem | null>(null);
 

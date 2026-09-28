@@ -9,6 +9,8 @@
  * See the class-level doc on `SessionDispatchWatcher` for the full behavioral design.
  */
 import {
+  resolveResumableAcpSessionId,
+  resolveSessionAcpTargetId as resolveDispatchAcpSessionId,
   extractPromptPreviewFromInputBlocks,
   historyItemsToInputBlocks,
   normalizeSessionInputBlocks,
@@ -142,34 +144,6 @@ function isImportedAcpReplayUserTurn(entry: SessionHistoryInput, meta: SessionMe
     !!sourceAcpSessionId &&
     entry.id.startsWith(`${provider}:${sourceAcpSessionId}:turn:`)
   );
-}
-
-export function resolveResumableAcpSessionId(
-  meta: SessionMeta | undefined
-): SessionMeta['acpSessionId'] | undefined {
-  const acpSessionId = meta?.acpSessionId;
-  if (!meta || !acpSessionId) {
-    return undefined;
-  }
-  if (!meta.externalHistory) {
-    return acpSessionId;
-  }
-
-  const sourceAcpSessionId = meta.externalHistory.sourceAcpSessionId;
-  if (!sourceAcpSessionId) {
-    return undefined;
-  }
-  return acpSessionId === sourceAcpSessionId ? undefined : acpSessionId;
-}
-
-export function resolveDispatchAcpSessionId(
-  meta: SessionMeta | undefined
-): SessionMeta['acpSessionId'] | undefined {
-  const liveSessionId = resolveResumableAcpSessionId(meta);
-  if (liveSessionId || !meta?.externalHistory || meta.externalHistory.status === 'sync_conflict') {
-    return liveSessionId;
-  }
-  return meta.externalHistory.sourceAcpSessionId;
 }
 
 // ── Dispatch decision ───────────────────────────────────────────────────────
@@ -381,3 +355,5 @@ export function resolveDispatchTurnInput(entry: SessionHistoryInput): DispatchTu
 
   return { inputBlocks, prompt };
 }
+
+export { resolveResumableAcpSessionId, resolveDispatchAcpSessionId };
