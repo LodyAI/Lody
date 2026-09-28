@@ -14,6 +14,10 @@ this page is the full text of the rules summarised there.
   workspace-relative path and, when wired, opens a file-preview viewer tab
   through `handleOpenFile` with `pathKind: 'canonical'` (never the markdown
   href parser).
+- Base (All Changes) diffs open only the focused file by default; the other file
+  cards start collapsed and remain individually expandable. A base diff opened
+  without a focus starts with every card collapsed. Conversation/turn diffs keep
+  their existing all-files-open default.
 - Editor window (Monaco): `session-monaco-text-viewer.tsx` inside
   `session-file-content-view.tsx`.
 - **What a client may DO with a session file is one model, `hooks/use-session-file-actions.ts`,

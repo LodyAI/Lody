@@ -143,6 +143,18 @@ function getMatchingPath(paths: string[], filePath?: string | null): string | nu
   return paths.find((path) => arePathsEquivalent(path, filePath)) ?? null;
 }
 
+export function shouldOpenDiffFileByDefault(input: {
+  readonly mode: 'conversation' | 'base';
+  readonly filePath: string;
+  readonly focusFilePath?: string | null;
+}): boolean {
+  if (input.mode !== 'base') {
+    return true;
+  }
+
+  return input.focusFilePath != null && arePathsEquivalent(input.filePath, input.focusFilePath);
+}
+
 export type SessionConversationDiffPanelProps = {
   sessionId: SessionId;
   turnId?: string;
@@ -167,6 +179,7 @@ export type SessionConversationDiffPanelProps = {
 type DiffFileBlockProps = {
   filePath: string;
   data: FileDiffData | undefined;
+  defaultOpen: boolean;
   commentsEnabled: boolean;
   currentUser: CommentUser | null;
   githubThreads: GitHubReviewThread[];
@@ -193,6 +206,7 @@ export function createConversationDiffViewerParseCacheKey(input: {
 const DiffFileBlock = memo(function DiffFileBlock({
   filePath,
   data,
+  defaultOpen,
   commentsEnabled,
   currentUser,
   githubThreads,
@@ -223,6 +237,7 @@ const DiffFileBlock = memo(function DiffFileBlock({
   if (data.status === 'ready-parsed') {
     return (
       <DiffViewer
+        key={`${mode}:${defaultOpen ? 'open' : 'closed'}`}
         path={filePath}
         oldText=""
         newText=""
@@ -239,7 +254,7 @@ const DiffFileBlock = memo(function DiffFileBlock({
         commentReferenceKeys={commentReferenceKeys}
         onCommentError={onCommentError}
         onOpenFile={onOpenFile}
-        defaultOpen
+        defaultOpen={defaultOpen}
         deferRenderUntilOpen
         parseCacheKey={diffViewerParseCacheKey}
         cachePrerenderedHtml={false}
@@ -250,6 +265,7 @@ const DiffFileBlock = memo(function DiffFileBlock({
   if (data.status === 'ready-text-source') {
     return (
       <DiffViewer
+        key={`${mode}:${defaultOpen ? 'open' : 'closed'}`}
         path={filePath}
         oldText=""
         newText=""
@@ -264,7 +280,7 @@ const DiffFileBlock = memo(function DiffFileBlock({
         commentReferenceKeys={commentReferenceKeys}
         onCommentError={onCommentError}
         onOpenFile={onOpenFile}
-        defaultOpen
+        defaultOpen={defaultOpen}
         deferRenderUntilOpen
         parseCacheKey={diffViewerParseCacheKey}
         cachePrerenderedHtml={false}
@@ -310,6 +326,7 @@ const DiffFileBlock = memo(function DiffFileBlock({
 
   return (
     <DiffViewer
+      key={`${mode}:${defaultOpen ? 'open' : 'closed'}`}
       path={filePath}
       oldText={data.oldSnapshot.kind === 'text' ? data.oldSnapshot.text : ''}
       newText={data.newSnapshot.kind === 'text' ? data.newSnapshot.text : ''}
@@ -323,7 +340,7 @@ const DiffFileBlock = memo(function DiffFileBlock({
       commentReferenceKeys={commentReferenceKeys}
       onCommentError={onCommentError}
       onOpenFile={onOpenFile}
-      defaultOpen
+      defaultOpen={defaultOpen}
       deferRenderUntilOpen
       responsiveSplit
       cachePrerenderedHtml={false}
@@ -668,6 +685,7 @@ function SessionConversationDiffPanelImpl({
       <DiffFileBlock
         filePath={filePath}
         data={resolvedByPath[filePath]}
+        defaultOpen={shouldOpenDiffFileByDefault({ mode, filePath, focusFilePath })}
         commentsEnabled={Boolean(latestPrNumber && repoFullName)}
         currentUser={currentUser}
         githubThreads={githubThreadsByPath.get(filePath) ?? EMPTY_GITHUB_THREADS}
