@@ -45,3 +45,5 @@ upload, retry, and persistence remain shared with manually attached files.
 - The landing handler uses the same helper and attachment selection logic but
   is not exercised through a full rendered landing page in this change. A
   packaged desktop clipboard round trip remains unverified.
+
+PR: [#1078](https://github.com/LodyAI/Lody/pull/1078)

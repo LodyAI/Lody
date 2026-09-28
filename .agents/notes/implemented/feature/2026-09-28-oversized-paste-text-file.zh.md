@@ -21,3 +21,5 @@ Translation: current
 - 已有会话输入框的渲染测试验证超限粘贴会生成 `pasted-text.txt` 卡片，文件字节、MIME 和原始内容都正确，不再触发超限错误 toast，并能在同一次粘贴中合并真实剪贴板文件。
 - 同一套测试保留闭区间边界：恰好 500 KiB 的内容仍是折叠粘贴文本胶囊；纯 helper 测试覆盖文件名、MIME、字节长度和原始文本保留。
 - landing 入口复用了相同 helper 与附件筛选逻辑，但本次没有通过完整渲染 landing 页面测试；打包桌面端的真实剪贴板往返仍未验证。
+
+PR：[#1078](https://github.com/LodyAI/Lody/pull/1078)
