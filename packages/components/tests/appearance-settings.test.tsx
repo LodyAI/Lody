@@ -72,6 +72,7 @@ function AppearanceHarness({ isElectron }: { isElectron: boolean }) {
   const [interfaceFontFamily, setInterfaceFontFamily] = useState('Atkinson Hyperlegible');
   const [terminalFontFamily, setTerminalFontFamily] = useState('Maple Mono');
   const [conversationFontSize, setConversationFontSize] = useState(14);
+  const [conversationWideMode, setConversationWideMode] = useState(false);
   const [fontSize, setFontSize] = useState(13);
   const [fontLigaturesEnabled, setFontLigaturesEnabled] = useState(true);
 
@@ -83,6 +84,8 @@ function AppearanceHarness({ isElectron }: { isElectron: boolean }) {
       onThemeCancel={vi.fn()}
       conversationFontSize={conversationFontSize}
       onConversationFontSizeChange={setConversationFontSize}
+      conversationWideMode={conversationWideMode}
+      onConversationWideModeChange={setConversationWideMode}
       isElectron={isElectron}
       interfaceFontFamily={interfaceFontFamily}
       onInterfaceFontFamilyChange={setInterfaceFontFamily}
@@ -162,6 +165,8 @@ describe('AppearanceSettingsView', () => {
           onThemeCancel={onThemeCancel}
           conversationFontSize={14}
           onConversationFontSizeChange={vi.fn()}
+          conversationWideMode={false}
+          onConversationWideModeChange={vi.fn()}
           isElectron={false}
           interfaceFontFamily=""
           onInterfaceFontFamilyChange={vi.fn()}

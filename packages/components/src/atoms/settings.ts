@@ -50,6 +50,17 @@ export const conversationFontSizeAtom = atom(
   }
 );
 
+/**
+ * Full-width conversation column (Notion-style): the session conversation's
+ * centered column drops its ~48rem cap and spans the pane, keeping only the
+ * shared side gutter. Read through `ConversationColumn` — never restyle one
+ * column by hand.
+ */
+export const conversationWideModeAtom = atomWithStorage<boolean>(
+  'lody-conversation-wide-mode',
+  false
+);
+
 export const INTERFACE_FONT_FAMILY_MAX_LENGTH = 100;
 
 export function normalizeInterfaceFontFamily(value: unknown): string {

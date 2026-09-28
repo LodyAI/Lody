@@ -49,6 +49,7 @@ import {
   LockKeyhole,
   MessageCircle,
   Monitor,
+  MoveHorizontal,
   Pencil,
   Play,
   Plus,
@@ -61,6 +62,7 @@ import {
 } from 'lucide-react';
 import { useRouter } from '@tanstack/react-router';
 import { Spinner } from '@lody/ui/spinner';
+import { Switch } from '@lody/ui/switch';
 import { Button } from '@lody/ui/button';
 import { isMacOSElectronRenderer, useElectronFullscreen } from '@/lib/electron';
 import { getIpcServices } from '@/lib/electron-ipc-client';
@@ -137,6 +139,7 @@ import { SessionShareDialog } from '@/components/sharing/session-share-dialog';
 import { useSessionShareStatus } from '@/hooks/use-session-share-management';
 import {
   conversationFontSizeAtom,
+  conversationWideModeAtom,
   currentWorkspaceIdAtom,
   currentWorkspaceSlugAtom,
   getAllAgentConfigAtom,
@@ -1004,6 +1007,8 @@ export function SessionHeaderMenu({
     (sharing?.visibility === 'private' &&
       (sharing.privateReason === 'machine-not-registered' || !sharing.canManage));
   const [reviewSetupOpen, setReviewSetupOpen] = useState(false);
+  const conversationWide = useAtomValue(conversationWideModeAtom);
+  const setConversationWide = useSetAtom(conversationWideModeAtom);
 
   const openedBySession = openedByRelations?.openedBy ?? null;
   const openedSessions = openedByRelations?.opened ?? [];
@@ -1255,6 +1260,25 @@ export function SessionHeaderMenu({
               <Menu.Separator />
             </>
           ) : null}
+
+          {/* View preference, not a session action: device-local toggle mirrored
+              from Settings > Appearance. It leads the action block — the page's
+              own display option, right after identity, like Notion's page
+              controls. A trailing Switch, not a checkmark; the row stays open
+              so the flip is visible. */}
+          <Menu.Item closeOnClick={false} onClick={() => setConversationWide(!conversationWide)}>
+            <MoveHorizontal className="h-3.5 w-3.5 shrink-0" />
+            <span className="min-w-0 flex-1 truncate">
+              {t('sessions.fullWidth', 'Full width')}
+            </span>
+            <Switch
+              checked={conversationWide}
+              onCheckedChange={(checked) => setConversationWide(checked === true)}
+              onClick={(event) => event.stopPropagation()}
+              aria-label={t('sessions.fullWidth', 'Full width')}
+              className="ml-auto shrink-0"
+            />
+          </Menu.Item>
 
           {openedByRelationRows}
 
@@ -1553,6 +1577,7 @@ export function SessionHeaderMenu({
                   </Menu.Item>
                 </>
               )}
+
         </Menu.Content>
       </Menu.Root>
       <ReviewAgentSetupDialog

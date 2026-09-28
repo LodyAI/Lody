@@ -9,6 +9,7 @@ import { corner, radius, space } from '@lody/ui/tokens/scales.stylex';
 
 import {
   conversationFontSizeAtom,
+  conversationWideModeAtom,
   fontLigaturesEnabledAtom,
   interfaceFontFamilyAtom,
   normalizeConversationFontSize,
@@ -44,6 +45,8 @@ export interface AppearanceSettingsViewProps {
   onThemeCancel: () => void;
   conversationFontSize: ConversationFontSize;
   onConversationFontSizeChange: (value: ConversationFontSize) => void;
+  conversationWideMode: boolean;
+  onConversationWideModeChange: (value: boolean) => void;
   isElectron: boolean;
   interfaceFontFamily: string;
   onInterfaceFontFamilyChange: (value: string) => void;
@@ -216,6 +219,8 @@ export function AppearanceSettingsView({
   onThemeCancel,
   conversationFontSize,
   onConversationFontSizeChange,
+  conversationWideMode,
+  onConversationWideModeChange,
   isElectron,
   interfaceFontFamily,
   onInterfaceFontFamilyChange,
@@ -357,6 +362,19 @@ export function AppearanceSettingsView({
           </div>
         </CompactRow>
         <CompactRow
+          label={t('settings.conversationWideMode.label', 'Full width')}
+          helper={t(
+            'settings.conversationWideMode.helper',
+            'Let the conversation column span the window instead of capping it.'
+          )}
+        >
+          <Switch
+            checked={conversationWideMode}
+            onCheckedChange={onConversationWideModeChange}
+            aria-label={t('settings.conversationWideMode.label', 'Full width')}
+          />
+        </CompactRow>
+        <CompactRow
           label={t('settings.fontLigatures.label', 'Font ligatures')}
           helper={t(
             'settings.fontLigatures.helper',
@@ -450,6 +468,7 @@ export function AppearanceSettingsView({
 function DesktopAppearanceSettings() {
   const { theme, setTheme, previewTheme } = useTheme();
   const [conversationFontSize, setConversationFontSize] = useAtom(conversationFontSizeAtom);
+  const [conversationWideMode, setConversationWideMode] = useAtom(conversationWideModeAtom);
   const [interfaceFontFamily, setInterfaceFontFamily] = useAtom(interfaceFontFamilyAtom);
   const [terminalFontFamily, setTerminalFontFamily] = useAtom(terminalFontFamilyAtom);
   const [terminalFontSize, setTerminalFontSize] = useAtom(terminalFontSizeAtom);
@@ -514,6 +533,8 @@ function DesktopAppearanceSettings() {
       onThemeCancel={handleThemeCancel}
       conversationFontSize={conversationFontSize}
       onConversationFontSizeChange={handleConversationFontSizeChange}
+      conversationWideMode={conversationWideMode}
+      onConversationWideModeChange={setConversationWideMode}
       isElectron={isElectron}
       interfaceFontFamily={interfaceFontFamily}
       onInterfaceFontFamilyChange={setInterfaceFontFamily}
