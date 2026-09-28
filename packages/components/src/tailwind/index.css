@@ -186,6 +186,13 @@ pre,
   .markdown-renderer :is(p, h1, h2, h3, h4, h5, h6) {
     padding-inline: 4px;
   }
+  /* Chinese prose reads more evenly with both edges aligned. The renderer adds
+     this class per paragraph so English-only paragraphs keep their start edge. */
+  .markdown-renderer > .markdown-cjk-paragraph {
+    text-align: justify;
+    text-align-last: start;
+    text-justify: auto;
+  }
   /* Desktop settings content: in light themes the section/card surfaces take the
      theme's popover fill (white in Lody Light) instead of the gray --card, so
      grouped rows read as lifted panels on the page rather than gray-on-gray.

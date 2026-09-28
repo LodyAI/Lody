@@ -161,6 +161,26 @@ End of synthetic document.`,
     expect(container?.querySelector('a[href="mailto:agent-000@example.com"]')).not.toBeNull();
   });
 
+  it('marks only Han-bearing paragraphs for CJK prose alignment', async () => {
+    await renderMarkdown(
+      [
+        '中文正文会使用段落排版。',
+        '',
+        'English prose keeps its start alignment.',
+        '',
+        '- 中文列表项',
+      ].join('\n')
+    );
+
+    const markdownRoot = container?.querySelector('.markdown-renderer');
+    expect(markdownRoot?.querySelector(':scope > p.markdown-cjk-paragraph')?.textContent).toBe(
+      '中文正文会使用段落排版。'
+    );
+    expect(
+      markdownRoot?.querySelector(':scope > p:not(.markdown-cjk-paragraph)')?.textContent
+    ).toBe('English prose keeps its start alignment.');
+  });
+
   it.each([false, true])(
     'repairs bold URLs followed by inline code while streaming=%s',
     async (isStreaming) => {
