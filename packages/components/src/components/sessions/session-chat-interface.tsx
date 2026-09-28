@@ -95,6 +95,7 @@ import type {
   SessionInputBlock,
   SessionLegacyMetaFields,
   SessionMeta,
+  SessionPreviewDocState,
   SessionStatus,
   SessionTurnInputConfig,
   CommentReferencePayload,
@@ -221,6 +222,7 @@ import { RenameSessionDialog, type RenameSessionDialogTarget } from './rename-se
 import { useResolvedTheme } from '../../theme-provider';
 import { PullRequestBadge } from './pull-request-badge';
 import { SessionInfoBar } from './session-info-bar';
+import { SessionPreviewPreload } from './session-preview-preload';
 import { CurrentSessionRelationsChip, useHasSessionRelations } from './session-relations-chip';
 import {
   mapGitHubCheckRunToPrCiRun,
@@ -6110,6 +6112,15 @@ export const SessionChatInterface = memo(
 
     return (
       <PrLinkProvider prUrl={latestPr?.url} onOpenPrTab={prLinkHandler}>
+        {isVisible &&
+          !preparingWindow &&
+          onOpenBrowser &&
+          (!browserActionSession || browserActionSession.id === session.id) && (
+            <SessionPreviewPreload
+              session={session}
+              preview={sessionDoc.preview as SessionPreviewDocState | undefined}
+            />
+          )}
         {isVisible &&
           sessionDocReady &&
           (sessionHistory.length > 0 || (sessionHistoryLength === 0 && sessionDocSynced)) && (

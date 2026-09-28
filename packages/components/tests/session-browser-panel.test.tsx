@@ -20,6 +20,11 @@ import type {
 
 import { runtimeAtom, userAtom, type WorkspaceRuntime } from '../src/atoms';
 import { SessionBrowserPanel } from '../src/components/sessions/session-browser-panel';
+import { SessionPreviewPreload } from '../src/components/sessions/session-preview-preload';
+import { clearManagedPreviewFrame } from '../src/components/sessions/managed-preview-frame-cache';
+import { PlatformContext } from '@lody/platform/react';
+import { LOCAL_PLATFORM_CAPABILITIES } from '@lody/platform';
+import { TEST_CLOUD_PLATFORM } from './test-platform';
 import { clearSessionBrowserResumeState } from '../src/components/sessions/session-browser-resume-state';
 
 const publicBrowserSurfaceRender = vi.hoisted(() => vi.fn());
@@ -272,9 +277,174 @@ describe('SessionBrowserPanel controller', () => {
     delete window.__LODY_ELECTRON__;
     clearSessionBrowserResumeState(session.id);
     clearSessionBrowserResumeState(secondSession.id);
+    clearManagedPreviewFrame(session.id);
     vi.restoreAllMocks();
     vi.useRealTimers();
   });
+
+  const reportedPreview: SessionPreviewDocState = {
+    candidate: {
+      candidateId: 'candidate-preload',
+      status: 'available',
+      target: localTarget,
+      reportedAt: 1,
+      updatedAt: 1,
+    },
+    connection: remoteConnection,
+  };
+
+  const renderPreload = async (runtime: WorkspaceRuntime, cloud = true) => {
+    vi.useFakeTimers();
+    const moveBefore = (HTMLElement.prototype as HTMLElement & { moveBefore?: unknown }).moveBefore;
+    Object.defineProperty(HTMLElement.prototype, 'moveBefore', {
+      configurable: true,
+      value: function (this: HTMLElement, node: Node, child: Node | null) {
+        this.insertBefore(node, child);
+      },
+    });
+    const store = createStore();
+    store.set(userAtom, { id: 'user-1', name: 'Browser User', email: 'browser@example.com' });
+    store.set(runtimeAtom, runtime);
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    const render = async (preview: SessionPreviewDocState) => {
+      await act(async () => {
+        root?.render(
+          <PlatformContext.Provider
+            value={
+              cloud
+                ? TEST_CLOUD_PLATFORM
+                : {
+                    ...TEST_CLOUD_PLATFORM,
+                    capabilities: LOCAL_PLATFORM_CAPABILITIES,
+                  }
+            }
+          >
+            <Provider store={store}>
+              <SessionPreviewPreload session={session} preview={preview} />
+            </Provider>
+          </PlatformContext.Provider>
+        );
+      });
+    };
+    await render(reportedPreview);
+    return {
+      render,
+      restore: () => {
+        if (moveBefore === undefined)
+          delete (HTMLElement.prototype as HTMLElement & { moveBefore?: unknown }).moveBefore;
+        else
+          Object.defineProperty(HTMLElement.prototype, 'moveBefore', {
+            configurable: true,
+            value: moveBefore,
+          });
+      },
+    };
+  };
+
+  it('preloads the exact reported page after live confirmation, without polling or renewal', async () => {
+    const { runtime } = createRuntime({ preview: reportedPreview });
+    const mounted = await renderPreload(runtime);
+    try {
+      const frame = document.querySelector<HTMLIFrameElement>('[data-lody-preview-preload] iframe');
+      expect(frame?.src).toBe(
+        'https://browser-preview.trycloudflare.com/dashboard?mode=dev&__lody_preview_token=remote-token'
+      );
+      await mounted.render({
+        ...reportedPreview,
+        connection: { ...remoteConnection, updatedAt: 2 },
+      });
+      expect(document.querySelector('[data-lody-preview-preload] iframe')).toBe(frame);
+      await act(async () => {
+        vi.advanceTimersByTime(10 * 60 * 1000);
+      });
+      expect(frame?.isConnected).toBe(false);
+      expect(document.querySelector('[data-lody-preview-preload]')).toBeNull();
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      mounted.restore();
+    }
+  });
+
+  it('invalidates preloading on endpoint closure and does not revive a late status result', async () => {
+    const { runtime, requestSessionPreviewStatus } = createRuntime({ preview: reportedPreview });
+    const pending = Promise.withResolvers<SessionPreviewStatusResponse>();
+    requestSessionPreviewStatus.mockReturnValueOnce(pending.promise);
+    const mounted = await renderPreload(runtime);
+    try {
+      await mounted.render({
+        ...reportedPreview,
+        connection: { ...remoteConnection, status: 'closed' },
+      });
+      await act(async () => {
+        pending.resolve({
+          type: 'session/preview-status_response',
+          sessionId: session.id,
+          success: true,
+          connection: remoteConnection,
+        });
+      });
+      expect(document.querySelector('[data-lody-preview-preload]')).toBeNull();
+      await mounted.render(reportedPreview);
+      const frame = document.querySelector('[data-lody-preview-preload] iframe');
+      expect(frame?.isConnected).toBe(true);
+      await mounted.render({
+        ...reportedPreview,
+        connection: { ...remoteConnection, status: 'closed' },
+      });
+      expect(frame?.isConnected).toBe(false);
+    } finally {
+      mounted.restore();
+    }
+  });
+
+  it('disposes speculative content when the client enters the background', async () => {
+    const { runtime } = createRuntime({ preview: reportedPreview });
+    const mounted = await renderPreload(runtime);
+    try {
+      const frame = document.querySelector('[data-lody-preview-preload] iframe');
+      expect(frame?.isConnected).toBe(true);
+      vi.spyOn(document, 'hidden', 'get').mockReturnValue(true);
+      await act(async () => {
+        document.dispatchEvent(new Event('visibilitychange'));
+      });
+      expect(frame?.isConnected).toBe(false);
+      vi.spyOn(document, 'hidden', 'get').mockReturnValue(false);
+      await act(async () => {
+        document.dispatchEvent(new Event('visibilitychange'));
+      });
+      expect(document.querySelector('[data-lody-preview-preload]')).toBeNull();
+    } finally {
+      mounted.restore();
+    }
+  });
+
+  it.each(['local-platform', 'local-machine', 'failed-status', 'replaced-endpoint'] as const)(
+    'does not load a remote page for %s',
+    async (condition) => {
+      const { runtime, requestSessionPreviewStatus } = createRuntime({
+        preview: reportedPreview,
+        plane: 'local',
+      });
+      if (condition === 'local-machine') window.__LODY_ELECTRON__ = true;
+      if (condition === 'failed-status')
+        requestSessionPreviewStatus.mockRejectedValueOnce(new Error('offline'));
+      if (condition === 'replaced-endpoint')
+        requestSessionPreviewStatus.mockResolvedValueOnce({
+          type: 'session/preview-status_response',
+          sessionId: session.id,
+          success: true,
+          connection: { ...remoteConnection, endpointId: 'replacement' },
+        });
+      const mounted = await renderPreload(runtime, condition !== 'local-platform');
+      try {
+        expect(document.querySelector('[data-lody-preview-preload]')).toBeNull();
+      } finally {
+        mounted.restore();
+      }
+    }
+  );
 
   const renderPanel = async (
     runtime: WorkspaceRuntime,
@@ -768,6 +938,37 @@ describe('SessionBrowserPanel controller', () => {
     expect(rendered.querySelector('[data-testid="public-browser"]')?.getAttribute('data-url')).toBe(
       'http://192.168.1.10:3000/admin'
     );
+  });
+
+  it('joins initial live status before opening a prepared candidate', async () => {
+    const pending = Promise.withResolvers<SessionPreviewStatusResponse>();
+    const testRuntime = createRuntime({
+      preview: reportedPreview,
+      createPreview: async () => ({
+        type: 'session/preview-create_response',
+        sessionId: session.id,
+        success: false,
+        error: 'tunnel_not_configured',
+        message: 'Unexpected create',
+      }),
+    });
+    testRuntime.requestSessionPreviewStatus.mockReturnValue(pending.promise);
+    const rendered = await renderPanel(testRuntime.runtime, { candidateNavigationRequestId: 1 });
+    expect(rendered.querySelector('[data-testid="managed-preview"]')).toBeNull();
+    await act(async () => {
+      pending.resolve({
+        type: 'session/preview-status_response',
+        sessionId: session.id,
+        success: true,
+        connection: remoteConnection,
+      });
+    });
+    expect(
+      rendered.querySelector('[data-testid="managed-preview"]')?.getAttribute('data-viewer-url')
+    ).toBe(
+      'https://browser-preview.trycloudflare.com/dashboard?mode=dev&__lody_preview_token=remote-token'
+    );
+    expect(rendered.textContent).not.toContain('Unexpected create');
   });
 
   it('opens a reported candidate from the composer bar and creates its tunnel directly', async () => {
