@@ -3563,6 +3563,9 @@ const SessionDetail = ({
   });
 
   const handleOpenFileFromDiff = useStableCallback((filePath: string) => {
+    if (isMobile) {
+      handleCloseMobileDiff();
+    }
     handleOpenFile(filePath, { pathKind: 'canonical', source: 'diff_header' });
   });
 

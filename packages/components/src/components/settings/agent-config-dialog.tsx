@@ -301,8 +301,19 @@ const styles = stylex.create({
     justifyContent: 'space-between',
     gap: space[3],
     minHeight: control.large,
-    // The panel's cross sits in this corner, out of the header's flow.
-    paddingInlineEnd: `calc(${control.small} + ${space[2]})`,
+  },
+  /**
+   * Capability status and the close control, centred on one line.
+   *
+   * The dialog's own cross is pinned to the panel padding, which is the top of
+   * this row, so it sat about 4px above the status. This header draws the close
+   * itself and the dialog's cross stays off.
+   */
+  headerActions: {
+    display: 'inline-flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    gap: space[2],
   },
   headerNarrow: {
     minHeight: '56px',
@@ -2699,34 +2710,53 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
             )}
           </div>
         </div>
-        {!waitingForBuiltinSetup && (
-          <ProbeStatus
-            isPreset={isPreset}
-            probing={probing}
-            probeError={probeError}
-            ready={capabilitiesReady && !builtinNeedsCredentialCheck && !authRequired}
-            showIdleAction={!isCustom}
-            disabled={isQueuedBuiltin && (!!disableReason || submitting)}
-            onRetry={() => {
-              setProbeError(null);
-              if (isQueuedBuiltin && backgroundBuiltinSetup) {
-                if (disableReason || submitting) return;
-                setTestingBuiltinSetup(true);
-                void persistConfigBeforeMachineLaunch().catch((error) => {
-                  setTestingBuiltinSetup(false);
-                  setProbeError(error instanceof Error ? error.message : String(error));
-                });
-                return;
-              }
-              if (isCustom) {
-                void runCustomProbe();
-                return;
-              }
-              setManuallyTested(false);
-              setVerifiedBuiltinContext(null);
-              setProbeTick((n) => n + 1);
-            }}
-          />
+        {(!waitingForBuiltinSetup || !isNarrowLayout) && (
+          <div {...stylex.props(styles.headerActions)}>
+            {!waitingForBuiltinSetup && (
+              <ProbeStatus
+                isPreset={isPreset}
+                probing={probing}
+                probeError={probeError}
+                ready={capabilitiesReady && !builtinNeedsCredentialCheck && !authRequired}
+                showIdleAction={!isCustom}
+                disabled={isQueuedBuiltin && (!!disableReason || submitting)}
+                onRetry={() => {
+                  setProbeError(null);
+                  if (isQueuedBuiltin && backgroundBuiltinSetup) {
+                    if (disableReason || submitting) return;
+                    setTestingBuiltinSetup(true);
+                    void persistConfigBeforeMachineLaunch().catch((error) => {
+                      setTestingBuiltinSetup(false);
+                      setProbeError(error instanceof Error ? error.message : String(error));
+                    });
+                    return;
+                  }
+                  if (isCustom) {
+                    void runCustomProbe();
+                    return;
+                  }
+                  setManuallyTested(false);
+                  setVerifiedBuiltinContext(null);
+                  setProbeTick((n) => n + 1);
+                }}
+              />
+            )}
+            {!isNarrowLayout && (
+              <Dialog.Close
+                render={
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="small"
+                    icon
+                    aria-label={t('common.close', 'Close')}
+                  />
+                }
+              >
+                <X aria-hidden="true" {...stylex.props(styles.glyphFill)} />
+              </Dialog.Close>
+            )}
+          </div>
         )}
       </header>
 
@@ -3349,10 +3379,10 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
       onOpenChangeComplete={onOpenChangeComplete}
     >
       <Dialog.Content
-        // On the narrow layout the picker and form headers carry their own
-        // left-aligned back button, which doubles as a close on the root step, so
-        // a corner cross would be redundant and easy to hit by accident.
-        closeButton={!isNarrowLayout}
+        // The wide header draws the close beside the capability status so they
+        // share a centre line. The dialog cross is pinned to the panel padding
+        // and sat above that row. On the narrow layout the back button is the close.
+        closeButton={false}
         // Keep keyboard height changes synchronous on the narrow sheet: the form
         // scroll hook measures the container on the keyboard event.
         noAnimation={isNarrowLayout}

@@ -194,6 +194,7 @@ describe('MessageHandler machine registration', () => {
       acpProtocolAuthentication: 2,
       acpCapabilityRefreshCache: 1,
       subagentCancellation: 1,
+      subagentEvents: 1,
       schedules: 1,
       preparedSessionInput: 1,
     });
