@@ -738,8 +738,6 @@
   "composer.pastedTextRemove": "移除已粘贴文本",
   "composer.pastedTextSummary": "{{charCount}} 字符 · {{lineCount}} 行",
   "composer.pastedTextTitle": "已粘贴文本",
-  "composer.pastedTextTooLarge": "粘贴的文本过大（{{size}}）。",
-  "composer.pastedTextTooLargeDescription": "上限为 {{limit}}，请改为以文件形式添加。",
   "composer.promptPlaceholder.base": "",
   "composer.promptPlaceholder.compact": "随便问点什么",
   "composer.promptPlaceholder.compactNamed": "和 {{name}} 一起工作",

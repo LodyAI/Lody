@@ -117,12 +117,11 @@ import { SESSION_FILE_MAX_COUNT, SESSION_IMAGE_MAX_SIZE_BYTES } from '@lody/shar
 import type { SessionFilePayload } from '@lody/shared';
 import {
   arePastedTextDraftsEqual,
-  getPastedTextByteSize,
+  createPastedTextFile,
   getPastedTextCharacterCount,
   getPastedTextDraftsAfterInsertion,
   insertPastedTextDraft,
   isPastedTextTooLarge,
-  MAX_PASTED_TEXT_BYTE_SIZE,
   normalizePastedTextDraft,
   shouldCapturePastedTextDraft,
   type PastedTextDraft,
@@ -1331,26 +1330,12 @@ export const SessionChatInputArea = memo(
           }
         }
 
-        // Refuse the whole paste rather than silently truncating it: a blob this
-        // large is a log dump, and a half-pasted log is worse than none.
-        if (text && isPastedTextTooLarge(text)) {
-          event.preventDefault();
-          toast.error(
-            t('composer.pastedTextTooLarge', 'Pasted text is too large ({{size}}).', {
-              size: formatFileSize(getPastedTextByteSize(text)),
-            }),
-            {
-              description: t(
-                'composer.pastedTextTooLargeDescription',
-                'The limit is {{limit}}. Attach it as a file instead.',
-                { limit: formatFileSize(MAX_PASTED_TEXT_BYTE_SIZE) }
-              ),
-            }
-          );
-          return;
-        }
+        const pastedTextFile =
+          text && isPastedTextTooLarge(text) ? createPastedTextFile(text) : null;
 
-        if (text && shouldCapturePastedTextDraft(text)) {
+        if (pastedTextFile) {
+          event.preventDefault();
+        } else if (text && shouldCapturePastedTextDraft(text)) {
           event.preventDefault();
           insertLargePastedTextAtSelection(text);
         }
@@ -1378,12 +1363,14 @@ export const SessionChatInputArea = memo(
           });
         }
 
-        if (pastedFiles.length === 0) {
+        const filesToAttach = pastedTextFile ? [pastedTextFile, ...pastedFiles] : pastedFiles;
+        if (filesToAttach.length > 0) {
+          event.preventDefault();
+          attachPastedFiles(filesToAttach);
           return;
         }
 
-        event.preventDefault();
-        attachPastedFiles(pastedFiles);
+        if (pastedTextFile) return;
       },
       [
         attachPastedFiles,

@@ -139,8 +139,16 @@ describe('SessionChatInputArea submission feedback', () => {
   let container: HTMLDivElement | null = null;
 
   beforeEach(async () => {
-    resources = createSessionSendResources({ acquire: async () => { throw new Error('Unexpected store borrow'); }, releaseRef: () => {} });
-    getDefaultStore().set(runtimeAtom, { workspaceId: 'workspace-upload', sendResources: resources } as never);
+    resources = createSessionSendResources({
+      acquire: async () => {
+        throw new Error('Unexpected store borrow');
+      },
+      releaseRef: () => {},
+    });
+    getDefaultStore().set(runtimeAtom, {
+      workspaceId: 'workspace-upload',
+      sendResources: resources,
+    } as never);
     vi.mocked(uploadSessionImage).mockReset();
     vi.mocked(computeSha256Hex).mockReset();
     vi.mocked(uploadSessionFile).mockReset();
@@ -894,23 +902,26 @@ describe('SessionChatInputArea submission feedback', () => {
   });
 
   describe('oversize pastes', () => {
-    let errors: string[] = [];
+    let errorToast: ReturnType<typeof vi.spyOn>;
 
     beforeEach(() => {
-      errors = [];
-      vi.spyOn(toast, 'error').mockImplementation((message) => {
-        errors.push(String(message));
-        return 'toast';
-      });
+      errorToast = vi.spyOn(toast, 'error').mockImplementation(() => 'toast');
     });
 
     afterEach(() => {
-      vi.mocked(toast.error).mockRestore();
+      errorToast.mockRestore();
     });
 
-    it('refuses a paste past the byte ceiling and leaves the draft untouched', async () => {
-      const textarea = await renderComposer({ onSendMessage: async () => true });
-      const event = createPasteEvent('a'.repeat(MAX_PASTED_TEXT_BYTE_SIZE + 1));
+    it('turns a paste past the byte ceiling into a text attachment', async () => {
+      const pastedText = 'a'.repeat(MAX_PASTED_TEXT_BYTE_SIZE + 1);
+      const submissions: Parameters<SessionChatInputAreaProps['onSendMessage']>[] = [];
+      const textarea = await renderComposer({
+        onSendMessage: async (...args) => {
+          submissions.push(args);
+          return true;
+        },
+      });
+      const event = createPasteEvent(pastedText);
 
       await act(async () => {
         textarea.dispatchEvent(event);
@@ -918,8 +929,45 @@ describe('SessionChatInputArea submission feedback', () => {
 
       expect(event.defaultPrevented).toBe(true);
       expect(textarea.value).toBe('focus regression draft');
-      expect(errors).toHaveLength(1);
-      expect(errors[0]).toContain('too large');
+      expect(container!.textContent).toContain('pasted-text.txt');
+      expect(errorToast).not.toHaveBeenCalled();
+
+      await submit('keyboard');
+
+      const attachment = submissions[0]?.[2]?.attachments?.[0];
+      expect(attachment).toMatchObject({
+        kind: 'file',
+        name: 'pasted-text.txt',
+        mimeType: 'text/plain',
+      });
+      expect(attachment?.source?.size).toBe(new TextEncoder().encode(pastedText).length);
+      expect(await attachment?.source?.text()).toBe(pastedText);
+    });
+
+    it('merges the generated file with real clipboard files', async () => {
+      const pastedText = 'a'.repeat(MAX_PASTED_TEXT_BYTE_SIZE + 1);
+      const submissions: Parameters<SessionChatInputAreaProps['onSendMessage']>[] = [];
+      const textarea = await renderComposer({
+        onSendMessage: async (...args) => {
+          submissions.push(args);
+          return true;
+        },
+      });
+      const event = createPasteEvent(pastedText, [
+        new File(['notes'], 'notes.txt', { type: 'text/plain' }),
+        new File(['rendered image'], 'image.png', { type: 'image/png' }),
+      ]);
+
+      await act(async () => {
+        textarea.dispatchEvent(event);
+      });
+      await submit('keyboard');
+
+      expect(submissions[0]?.[2]?.attachments?.map(({ name }) => name)).toEqual([
+        'pasted-text.txt',
+        'notes.txt',
+      ]);
+      expect(errorToast).not.toHaveBeenCalled();
     });
 
     it('still collapses a paste that sits at the ceiling', async () => {
@@ -931,7 +979,7 @@ describe('SessionChatInputArea submission feedback', () => {
       });
 
       expect(event.defaultPrevented).toBe(true);
-      expect(errors).toEqual([]);
+      expect(errorToast).not.toHaveBeenCalled();
       expect(textarea.value).toContain('Pasted');
       expect(textarea.value).toContain('focus regression draft');
       expect(textarea.value).not.toContain('aaaa');

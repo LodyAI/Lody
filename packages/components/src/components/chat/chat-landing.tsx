@@ -191,18 +191,16 @@ import {
 import { toIntlLocale } from '@/lib/intl-locale';
 import {
   arePastedTextDraftsEqual,
-  getPastedTextByteSize,
+  createPastedTextFile,
   getPastedTextCharacterCount,
   getPastedTextDraftsAfterInsertion,
   insertPastedTextDraft,
   isPastedTextTooLarge,
-  MAX_PASTED_TEXT_BYTE_SIZE,
   normalizePastedTextDraft,
   sanitizePastedTextDrafts,
   shouldCapturePastedTextDraft,
   type PastedTextDraft,
 } from '@/lib/pasted-text-draft';
-import { formatFileSize } from '@/lib/session-file-presentation';
 import { wrapPastedTextChipLabel } from '@/components/mentions/mention-chips';
 
 import { ErrorBoundary } from '@/components/error-boundary';
@@ -2808,26 +2806,11 @@ function WorkspaceChatLanding({
     (event: ClipboardEvent<HTMLTextAreaElement>) => {
       const text = event.clipboardData.getData('text/plain');
 
-      // Refuse the whole paste rather than silently truncating it: a blob this
-      // large is a log dump, and a half-pasted log is worse than none.
-      if (text && isPastedTextTooLarge(text)) {
-        event.preventDefault();
-        toast.error(
-          t('composer.pastedTextTooLarge', 'Pasted text is too large ({{size}}).', {
-            size: formatFileSize(getPastedTextByteSize(text)),
-          }),
-          {
-            description: t(
-              'composer.pastedTextTooLargeDescription',
-              'The limit is {{limit}}. Attach it as a file instead.',
-              { limit: formatFileSize(MAX_PASTED_TEXT_BYTE_SIZE) }
-            ),
-          }
-        );
-        return;
-      }
+      const pastedTextFile = text && isPastedTextTooLarge(text) ? createPastedTextFile(text) : null;
 
-      if (text && shouldCapturePastedTextDraft(text)) {
+      if (pastedTextFile) {
+        event.preventDefault();
+      } else if (text && shouldCapturePastedTextDraft(text)) {
         event.preventDefault();
         insertLargePastedTextAtSelection(text);
       }
@@ -2855,11 +2838,14 @@ function WorkspaceChatLanding({
         });
       }
 
-      if (pastedFiles.length > 0) {
+      const filesToAttach = pastedTextFile ? [pastedTextFile, ...pastedFiles] : pastedFiles;
+      if (filesToAttach.length > 0) {
         event.preventDefault();
-        attachPastedFiles(pastedFiles);
+        attachPastedFiles(filesToAttach);
         return;
       }
+
+      if (pastedTextFile) return;
 
       handleImagePromptPaste(event);
     },
