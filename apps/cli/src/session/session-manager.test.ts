@@ -11,6 +11,7 @@ import {
   normalizeSessionPreparationRunConfigForDedup,
   type ACPSessionId,
   type AgentConfigId,
+  type AgentConfigMeta,
   type LocalProjectId,
   type MachineId,
   type RepoId,
@@ -41,6 +42,7 @@ import {
   type SessionPreparationResource,
 } from './session-preparation-service';
 import { createLocalCloudPort } from '@lody/platform';
+import * as codexProfiles from '../agent/codex-profile-store';
 
 vi.mock('./worktree/worktree-setup-runner', () => ({
   runWorktreeSetup: vi.fn(async () => undefined),
@@ -55,6 +57,7 @@ vi.mock('./worktree/worktree-setup-config-store', () => ({
 const createLogger = (): Logger => {
   const logger: Logger = {
     debug: vi.fn(),
+    trace: vi.fn(),
     info: vi.fn(),
     warn: vi.fn(),
     error: vi.fn(),
@@ -88,6 +91,7 @@ const createSessionDoc = (meta?: SessionMeta): FakeSessionDoc => ({
 
 const createWorkspaceDocument = (docs: Map<SessionId, FakeSessionDoc>) =>
   ({
+    getAgentConfigById: vi.fn(async () => null),
     getOrCreateSessionDoc: vi.fn(async (sessionId: SessionId) => {
       const existing = docs.get(sessionId);
       if (existing) {
@@ -233,6 +237,82 @@ describe('SessionManager ACP project identity', () => {
       });
     }
   );
+});
+
+describe('SessionManager Codex provider binding', () => {
+  it('requires the live provider before restoring a ready managed profile', async () => {
+    const root = mkdtempSync(path.join(os.tmpdir(), 'lody-codex-launch-binding-'));
+    const store = new codexProfiles.CodexProfileStore(root, {
+      get: async () => undefined,
+      set: async () => undefined,
+      delete: async () => undefined,
+    });
+    const storeSpy = vi.spyOn(codexProfiles, 'getCodexProfileStore').mockReturnValue(store);
+    try {
+      const provider: AgentConfigMeta = {
+        id: 'codex-provider' as AgentConfigId,
+        machineId: 'machine-1' as MachineId,
+        name: 'Work Codex',
+        description: undefined,
+        cliType: 'builtin',
+        agentType: 'codex',
+        env: {},
+        codexAuth: {
+          mode: 'api-key',
+          profileId: '989f09cf-0e9a-43b9-a44a-35fa8740a8e4',
+          baseUrl: 'https://relay.example.invalid/v1',
+        },
+      };
+      const readyProfile = await store.resolve('workspace-1', provider, true);
+      if (!readyProfile) throw new Error('Expected a managed Codex profile');
+      await store.withApiKeyCandidate(readyProfile, 'synthetic-key', async () => undefined);
+
+      const workspaceDocument = createWorkspaceDocument(new Map());
+      const getProvider = vi.mocked(workspaceDocument.getAgentConfigById);
+      const manager = new SessionManager(
+        createLogger(),
+        'test-token',
+        'machine-1' as MachineId,
+        'workspace-1' as WorkspaceId,
+        workspaceDocument,
+        {
+          sessionSandboxFactory: async () => createNoopSessionSandbox(),
+          cloudPort: createTestCloudPort(),
+        }
+      );
+      const freezeProfile = async (config: SessionConfig) =>
+        await (
+          manager as unknown as { freezeCodexProfile(config: SessionConfig): Promise<void> }
+        ).freezeCodexProfile(config);
+      const restoredConfig = () =>
+        createSessionConfig({
+          sessionId: 'codex-restore' as SessionId,
+          agentConfigId: provider.id,
+          codexAuth: provider.codexAuth,
+        });
+
+      getProvider.mockResolvedValue(null);
+      await expect(freezeProfile(restoredConfig())).rejects.toThrow(
+        'This Codex provider account is no longer available'
+      );
+
+      getProvider.mockResolvedValue({ ...provider, codexAuth: undefined });
+      await expect(freezeProfile(restoredConfig())).rejects.toThrow(
+        'This Codex provider account is no longer available'
+      );
+
+      getProvider.mockResolvedValue(provider);
+      const validConfig = restoredConfig();
+      await freezeProfile(validConfig);
+      expect(validConfig.codexProfile).toMatchObject({
+        configId: provider.id,
+        profile: provider.codexAuth,
+      });
+    } finally {
+      storeSpy.mockRestore();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('SessionManager cleanup phases', () => {

@@ -8,7 +8,6 @@ import {
   type RefObject,
 } from 'react';
 import { flushSync } from 'react-dom';
-import type { VirtualizerHandle } from '@lody/virtua';
 import type { ConversationRange, ConversationView } from '@/lib/conversation-view';
 import { useLatestRef } from './use-latest-ref';
 
@@ -49,7 +48,8 @@ export function useConversationTextSelection<T>({
   sessionId: string;
   view?: ConversationView | null;
   viewport: HTMLElement | null;
-  virtualizer: RefObject<VirtualizerHandle | null>;
+  /** The conversation list: `findItemIndex` maps a scroll offset to a list index. */
+  virtualizer: RefObject<{ findItemIndex(offset: number): number } | null>;
   rows: readonly SelectableConversationRow[];
   leadingRowCount: number;
   captureTurn: (id: string) => T;

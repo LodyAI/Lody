@@ -124,8 +124,8 @@ catalogs:
       specifier: 2.3.2
       version: 2.3.2
     loro-repo:
-      specifier: ^0.20.0
-      version: 0.20.0
+      specifier: 0.21.0
+      version: 0.21.0
     loro-websocket:
       specifier: ^0.6.2
       version: 0.6.2
@@ -185,9 +185,6 @@ patchedDependencies:
   app-builder-lib@26.15.3:
     hash: 80637977dda4ea924da866a67751774a621195429af5af0f103e9129b3bec57f
     path: patches/app-builder-lib@26.15.3.patch
-  loro-repo@0.20.0:
-    hash: 74be8ab90bed65c9ce8b0d7cb32f8cafdbd0ecda6d9b7c8048836600d116d357
-    path: patches/loro-repo.patch
   mdast-util-gfm-autolink-literal@2.0.1:
     hash: b03e2c531618296b99e716d479b68761f6ebc6c81dcd1e9359e80b71e6b5ee8e
     path: patches/mdast-util-gfm-autolink-literal@2.0.1.patch
@@ -238,6 +235,9 @@ importers:
       '@lydell/node-pty':
         specifier: 1.2.0-beta.14
         version: 1.2.0-beta.14
+      '@napi-rs/keyring':
+        specifier: 2.1.0
+        version: 2.1.0
       better-sqlite3:
         specifier: 'catalog:'
         version: 13.0.3
@@ -403,7 +403,7 @@ importers:
         version: 2.3.2(loro-crdt@1.15.1)
       loro-repo:
         specifier: 'catalog:'
-        version: 0.20.0(patch_hash=74be8ab90bed65c9ce8b0d7cb32f8cafdbd0ecda6d9b7c8048836600d116d357)(@loro-dev/flock-wasm@0.4.3)(@loro-dev/flock@4.4.4)(@loro-dev/streams-crdt@0.16.0(@loro-dev/flock-wasm@0.4.3)(loro-crdt@1.15.1))(@types/better-sqlite3@7.6.13)(better-sqlite3@13.0.3)(loro-crdt@1.15.1)
+        version: 0.21.0(@loro-dev/flock-wasm@0.4.3)(@loro-dev/flock@4.4.4)(@loro-dev/streams-crdt@0.16.0(@loro-dev/flock-wasm@0.4.3)(loro-crdt@1.15.1))(@types/better-sqlite3@7.6.13)(better-sqlite3@13.0.3)(loro-crdt@1.15.1)
       ora:
         specifier: ^8.2.0
         version: 8.2.0
@@ -672,6 +672,9 @@ importers:
       typescript:
         specifier: 'catalog:'
         version: 5.9.3
+      ws:
+        specifier: 8.21.3
+        version: 8.21.3
 
   packages/acp-extension-claude:
     dependencies:
@@ -1027,9 +1030,6 @@ importers:
       '@lody/ui':
         specifier: workspace:*
         version: link:../ui
-      '@lody/virtua':
-        specifier: workspace:*
-        version: link:../virtua
       '@loro-dev/flock-wasm':
         specifier: 'catalog:'
         version: 0.4.3
@@ -1209,7 +1209,7 @@ importers:
         version: 2.3.2(loro-crdt@1.15.1)(loro-mirror@2.3.2(loro-crdt@1.15.1))(react@19.2.0)
       loro-repo:
         specifier: 'catalog:'
-        version: 0.20.0(patch_hash=74be8ab90bed65c9ce8b0d7cb32f8cafdbd0ecda6d9b7c8048836600d116d357)(@loro-dev/flock-wasm@0.4.3)(@loro-dev/flock@4.4.4)(@loro-dev/streams-crdt@0.16.0(@loro-dev/flock-wasm@0.4.3)(loro-crdt@1.15.1))(@types/better-sqlite3@7.6.13)(better-sqlite3@12.10.0)(loro-crdt@1.15.1)
+        version: 0.21.0(@loro-dev/flock-wasm@0.4.3)(@loro-dev/flock@4.4.4)(@loro-dev/streams-crdt@0.16.0(@loro-dev/flock-wasm@0.4.3)(loro-crdt@1.15.1))(@types/better-sqlite3@7.6.13)(better-sqlite3@12.10.0)(loro-crdt@1.15.1)
       loro-websocket:
         specifier: 'catalog:'
         version: 0.6.2(@loro-dev/flock@4.4.4)(loro-crdt@1.15.1)
@@ -1315,6 +1315,9 @@ importers:
       vaul:
         specifier: ^1.1.2
         version: 1.1.2(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.0(react@19.2.0))(react@19.2.0)
+      virtua:
+        specifier: 0.52.7
+        version: 0.52.7(react-dom@19.2.0(react@19.2.0))(react@19.2.0)(vue@3.5.28(typescript@5.9.3))
       zod:
         specifier: 4.3.6
         version: 4.3.6
@@ -1382,6 +1385,9 @@ importers:
       '@vitejs/plugin-react':
         specifier: 'catalog:'
         version: 5.2.0(vite@8.2.2(@types/node@24.10.12)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.13)(yaml@2.8.2))
+      fake-indexeddb:
+        specifier: ^6.2.5
+        version: 6.2.5
       jsdom:
         specifier: ^26.1.0
         version: 26.1.0
@@ -1553,7 +1559,7 @@ importers:
         version: 24.10.12
       loro-repo:
         specifier: 'catalog:'
-        version: 0.20.0(patch_hash=74be8ab90bed65c9ce8b0d7cb32f8cafdbd0ecda6d9b7c8048836600d116d357)(@loro-dev/flock-wasm@0.4.3)(@loro-dev/flock@4.4.4)(@loro-dev/streams-crdt@0.16.0(@loro-dev/flock-wasm@0.4.3)(loro-crdt@1.15.1))(@types/better-sqlite3@7.6.13)(better-sqlite3@12.10.0)(loro-crdt@1.15.1)
+        version: 0.21.0(@loro-dev/flock-wasm@0.4.3)(@loro-dev/flock@4.4.4)(@loro-dev/streams-crdt@0.16.0(@loro-dev/flock-wasm@0.4.3)(loro-crdt@1.15.1))(@types/better-sqlite3@7.6.13)(better-sqlite3@12.10.0)(loro-crdt@1.15.1)
       typescript:
         specifier: 'catalog:'
         version: 5.9.3
@@ -1607,36 +1613,6 @@ importers:
       jsdom:
         specifier: ^26.1.0
         version: 26.1.0
-      react:
-        specifier: 'catalog:'
-        version: 19.2.0
-      react-dom:
-        specifier: 'catalog:'
-        version: 19.2.0(react@19.2.0)
-      typescript:
-        specifier: 'catalog:'
-        version: 5.9.3
-      vitest:
-        specifier: ^3.2.4
-        version: 3.2.4(@types/debug@4.1.12)(@types/node@24.10.12)(jiti@2.7.0)(jsdom@26.1.0)(lightningcss@1.33.0)(terser@5.46.0)(tsx@4.23.13)(yaml@2.8.2)
-
-  packages/virtua:
-    devDependencies:
-      '@types/node':
-        specifier: 'catalog:'
-        version: 24.10.12
-      '@types/react':
-        specifier: 'catalog:'
-        version: 19.2.17
-      '@types/react-dom':
-        specifier: 'catalog:'
-        version: 19.2.3(@types/react@19.2.17)
-      jsdom:
-        specifier: ^26.1.0
-        version: 26.1.0
-      oxfmt:
-        specifier: ^0.65.0
-        version: 0.65.0
       react:
         specifier: 'catalog:'
         version: 19.2.0
@@ -3680,6 +3656,87 @@ packages:
   '@mrleebo/prisma-ast@0.13.1':
     resolution: {integrity: sha512-XyroGQXcHrZdvmrGJvsA9KNeOOgGMg1Vg9OlheUsBOSKznLMDl+YChxbkboRHvtFYJEMRYmlV3uoo/njCw05iw==}
     engines: {node: '>=16'}
+
+  '@napi-rs/keyring-darwin-arm64@2.1.0':
+    resolution: {integrity: sha512-j6ATTOhmPW+N5EKwi8Yzn6P4Bz/uqnxzyYvqOL73/dgzDSYG5pS5eprqpVmOLse68WUTf79ZMqz97HnfvirJ9g==}
+    engines: {node: '>= 10'}
+    cpu: [arm64]
+    os: [darwin]
+
+  '@napi-rs/keyring-darwin-x64@2.1.0':
+    resolution: {integrity: sha512-54Q803nguiOaQzBG2h4uIkacI0eLGAlzzdpxPNi6IZtXbjqbPI4AQ86GrQy25tw3czBqRPBoGu0lHP2U+/f5iA==}
+    engines: {node: '>= 10'}
+    cpu: [x64]
+    os: [darwin]
+
+  '@napi-rs/keyring-freebsd-x64@2.1.0':
+    resolution: {integrity: sha512-BL7ngJAYQBrUp1PTF8enOXOIVfxN51RbwVOEQ+8eAjWypF/5Ipqs8oQoMqkuc0wAbk+vatnNVjdKCIFa/HPglg==}
+    engines: {node: '>= 10'}
+    cpu: [x64]
+    os: [freebsd]
+
+  '@napi-rs/keyring-linux-arm-gnueabihf@2.1.0':
+    resolution: {integrity: sha512-JYgbCDk+giss7lKla8NTXhM/fLj+Hrfgr3xwKQ8jKn8qMD6vXLwYcfK8HJ9VoAcjIeYEUpCL6dRszJC5M4zFNg==}
+    engines: {node: '>= 10'}
+    cpu: [arm]
+    os: [linux]
+
+  '@napi-rs/keyring-linux-arm64-gnu@2.1.0':
+    resolution: {integrity: sha512-+PMONFQ+2GkBXG7vRG2spgR73bNCMeVpNopHoSmhj2E+5Gu6zJooRBjoaIZKj6hCyrOU8pXAhoZ22EEFQ/4YeQ==}
+    engines: {node: '>= 10'}
+    cpu: [arm64]
+    os: [linux]
+    libc: [glibc]
+
+  '@napi-rs/keyring-linux-arm64-musl@2.1.0':
+    resolution: {integrity: sha512-dKjiXKTHQjAS57hL0HVzLpW9XYNGFpfYkr/51FzIIvbZR08PAnzIDYKwShoNYGvjQP6+rDFf1a5Utl0aWwcFrA==}
+    engines: {node: '>= 10'}
+    cpu: [arm64]
+    os: [linux]
+    libc: [musl]
+
+  '@napi-rs/keyring-linux-riscv64-gnu@2.1.0':
+    resolution: {integrity: sha512-tqhb0ofhtEJ2+ZfmlKTDHbmIoNSz+SSTPWRgMfSVCgI4JVkqDdfcmIOcThZfRffJ3QI9C3Tng+rZL24acmD+GA==}
+    engines: {node: '>= 10'}
+    cpu: [riscv64]
+    os: [linux]
+    libc: [glibc]
+
+  '@napi-rs/keyring-linux-x64-gnu@2.1.0':
+    resolution: {integrity: sha512-7ZA0ssxfpuGXV8S5Ct1ZJoEL3sKg/8u7mIL4SK9/PwKBhxIq7K+FVcjnggNsuFnEhHTX+HYl9hHDrlX0odZnHg==}
+    engines: {node: '>= 10'}
+    cpu: [x64]
+    os: [linux]
+    libc: [glibc]
+
+  '@napi-rs/keyring-linux-x64-musl@2.1.0':
+    resolution: {integrity: sha512-dI74Fzl03CrN2TEP7YVBtUBFgyRTRPyK1LMcIgAUfgW3o6f5SD1a8EsfT82+brpFOltjOhacIlFiYOkYtSI5Fg==}
+    engines: {node: '>= 10'}
+    cpu: [x64]
+    os: [linux]
+    libc: [musl]
+
+  '@napi-rs/keyring-win32-arm64-msvc@2.1.0':
+    resolution: {integrity: sha512-SltrXXkEe9a+Jv8ConDkZW2Mdr0srpWurS7oYkYP1Mp07DNBpFyqawRnyo4p7ZvQU3e+R6irj/Fq0epCCvVUXA==}
+    engines: {node: '>= 10'}
+    cpu: [arm64]
+    os: [win32]
+
+  '@napi-rs/keyring-win32-ia32-msvc@2.1.0':
+    resolution: {integrity: sha512-l5wJQhqXkAfQ4FGxoRh0wMpL9VxVmfiYI5TTeOGNupuVsQvbHmysh8gfDQBBWVhyMENHJS2OqOSYIuqVjumAtA==}
+    engines: {node: '>= 10'}
+    cpu: [ia32]
+    os: [win32]
+
+  '@napi-rs/keyring-win32-x64-msvc@2.1.0':
+    resolution: {integrity: sha512-3zYwO7dhJiUNyv2te81ujXm2vGxHwgx+z2eBm0dTYe3aWpvKQVzpfxCp/7cViJs8duVYE04wVOgXiRhRCMEq2w==}
+    engines: {node: '>= 10'}
+    cpu: [x64]
+    os: [win32]
+
+  '@napi-rs/keyring@2.1.0':
+    resolution: {integrity: sha512-km9J3fomkGSLpImpelq0cMvLBrJ5eVlTzuWdG3Iy0laP6gU90MmHYjqhUhG32aYq0/0++r2TLuAA9xlnh4XU1g==}
+    engines: {node: '>= 10'}
 
   '@napi-rs/wasm-runtime@1.2.1':
     resolution: {integrity: sha512-KjZdi8Q1wh89gsVmghvbrMgWl6ZWmRmHV6wjB7/g4Zf0dyO+hH3neZUtuDNPO00qq5YE5RITVWvrIZKRaAmzGQ==}
@@ -8890,6 +8947,10 @@ packages:
     engines: {node: '>= 10.17.0'}
     hasBin: true
 
+  fake-indexeddb@6.2.5:
+    resolution: {integrity: sha512-CGnyrvbhPlWYMngksqrSSUT1BAVP49dZocrHuK0SvtR0D5TMs5wP0o3j7jexDJW01KSadjBp1M/71o/KR3nD1w==}
+    engines: {node: '>=18'}
+
   fast-check@3.23.2:
     resolution: {integrity: sha512-h5+1OzzfCC3Ef7VbtKdcv7zsstUQwUDlYpUTvjeUsJAssPgLn7QzbboPtL5ro04Mq0rPOsMzl7q5hIbRs2wD1A==}
     engines: {node: '>=8.0.0'}
@@ -10321,8 +10382,8 @@ packages:
     resolution: {integrity: sha512-j28FzDwOVHk95asjQEk8yse7hfYHnStdusYcQBphWRwzA8wzE5iMHQpnDyog1O6kmJQ6W/iC8yDisHpxH0wUAg==}
     engines: {node: '>=18.0.0'}
 
-  loro-repo@0.20.0:
-    resolution: {integrity: sha512-aM/aPbInSFoZXHrRhXgLAjHIKISk0NSyITNPVKDh9oLGW0iSsRFry9x1x/93oUXKrUrjlWcqqZBQzO5Qc/OIfw==}
+  loro-repo@0.21.0:
+    resolution: {integrity: sha512-/zczU1bdhGIQEnlzjPYGAyMq2gxEhiaq1IuMUKtnrQJ/U5nUCa3zrSWn0t0340IP21qcBsSse8ODU2iP6+rEJg==}
     engines: {node: '>=18'}
     peerDependencies:
       '@loro-dev/flock-wasm': ^0.4.2
@@ -13084,6 +13145,32 @@ packages:
 
   victory-vendor@36.9.2:
     resolution: {integrity: sha512-PnpQQMuxlwYdocC8fIJqVXvkeViHYzotI+NJrCuav0ZYFoq912ZHBk3mCeuj+5/VpodOjPe1z0Fk2ihgzlXqjQ==}
+
+  virtua@0.52.7:
+    resolution: {integrity: sha512-3xdhgKCbetu7Gez+DJfjmE+1zI7tsCN+07ZpUBhABDyqqT5r+fji6c0vmQCZlxI8o022d/LdIm2E/9T/LE9rPA==}
+    peerDependencies:
+      '@angular/common': '>=20.0.0'
+      '@angular/core': '>=20.0.0'
+      react: '>=16.14.0'
+      react-dom: '>=16.14.0'
+      solid-js: '>=1.0'
+      svelte: '>=5.0'
+      vue: '>=3.2'
+    peerDependenciesMeta:
+      '@angular/common':
+        optional: true
+      '@angular/core':
+        optional: true
+      react:
+        optional: true
+      react-dom:
+        optional: true
+      solid-js:
+        optional: true
+      svelte:
+        optional: true
+      vue:
+        optional: true
 
   vite-node@3.2.4:
     resolution: {integrity: sha512-EbKSKh+bh1E1IFxeO0pg1n4dvoOTt0UDiXMd/qn++r98+jPO1xtJilvXldeuQ8giIB5IkpjCgMleHMNEsGH6pg==}
@@ -15958,6 +16045,57 @@ snapshots:
       chevrotain: 10.5.0
       lilconfig: 2.1.0
     optional: true
+
+  '@napi-rs/keyring-darwin-arm64@2.1.0':
+    optional: true
+
+  '@napi-rs/keyring-darwin-x64@2.1.0':
+    optional: true
+
+  '@napi-rs/keyring-freebsd-x64@2.1.0':
+    optional: true
+
+  '@napi-rs/keyring-linux-arm-gnueabihf@2.1.0':
+    optional: true
+
+  '@napi-rs/keyring-linux-arm64-gnu@2.1.0':
+    optional: true
+
+  '@napi-rs/keyring-linux-arm64-musl@2.1.0':
+    optional: true
+
+  '@napi-rs/keyring-linux-riscv64-gnu@2.1.0':
+    optional: true
+
+  '@napi-rs/keyring-linux-x64-gnu@2.1.0':
+    optional: true
+
+  '@napi-rs/keyring-linux-x64-musl@2.1.0':
+    optional: true
+
+  '@napi-rs/keyring-win32-arm64-msvc@2.1.0':
+    optional: true
+
+  '@napi-rs/keyring-win32-ia32-msvc@2.1.0':
+    optional: true
+
+  '@napi-rs/keyring-win32-x64-msvc@2.1.0':
+    optional: true
+
+  '@napi-rs/keyring@2.1.0':
+    optionalDependencies:
+      '@napi-rs/keyring-darwin-arm64': 2.1.0
+      '@napi-rs/keyring-darwin-x64': 2.1.0
+      '@napi-rs/keyring-freebsd-x64': 2.1.0
+      '@napi-rs/keyring-linux-arm-gnueabihf': 2.1.0
+      '@napi-rs/keyring-linux-arm64-gnu': 2.1.0
+      '@napi-rs/keyring-linux-arm64-musl': 2.1.0
+      '@napi-rs/keyring-linux-riscv64-gnu': 2.1.0
+      '@napi-rs/keyring-linux-x64-gnu': 2.1.0
+      '@napi-rs/keyring-linux-x64-musl': 2.1.0
+      '@napi-rs/keyring-win32-arm64-msvc': 2.1.0
+      '@napi-rs/keyring-win32-ia32-msvc': 2.1.0
+      '@napi-rs/keyring-win32-x64-msvc': 2.1.0
 
   '@napi-rs/wasm-runtime@1.2.1(@emnapi/core@1.11.0)(@emnapi/runtime@1.11.0)':
     dependencies:
@@ -22080,6 +22218,8 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
+  fake-indexeddb@6.2.5: {}
+
   fast-check@3.23.2:
     dependencies:
       pure-rand: 6.1.0
@@ -23516,7 +23656,7 @@ snapshots:
 
   loro-protocol@0.3.0: {}
 
-  loro-repo@0.20.0(patch_hash=74be8ab90bed65c9ce8b0d7cb32f8cafdbd0ecda6d9b7c8048836600d116d357)(@loro-dev/flock-wasm@0.4.3)(@loro-dev/flock@4.4.4)(@loro-dev/streams-crdt@0.16.0(@loro-dev/flock-wasm@0.4.3)(loro-crdt@1.15.1))(@types/better-sqlite3@7.6.13)(better-sqlite3@12.10.0)(loro-crdt@1.15.1):
+  loro-repo@0.21.0(@loro-dev/flock-wasm@0.4.3)(@loro-dev/flock@4.4.4)(@loro-dev/streams-crdt@0.16.0(@loro-dev/flock-wasm@0.4.3)(loro-crdt@1.15.1))(@types/better-sqlite3@7.6.13)(better-sqlite3@12.10.0)(loro-crdt@1.15.1):
     dependencies:
       '@loro-dev/flock-wasm': 0.4.3
       '@loro-dev/streams-crdt': 0.16.0(@loro-dev/flock-wasm@0.4.3)(loro-crdt@1.15.1)
@@ -23533,7 +23673,7 @@ snapshots:
       - utf-8-validate
       - yjs
 
-  loro-repo@0.20.0(patch_hash=74be8ab90bed65c9ce8b0d7cb32f8cafdbd0ecda6d9b7c8048836600d116d357)(@loro-dev/flock-wasm@0.4.3)(@loro-dev/flock@4.4.4)(@loro-dev/streams-crdt@0.16.0(@loro-dev/flock-wasm@0.4.3)(loro-crdt@1.15.1))(@types/better-sqlite3@7.6.13)(better-sqlite3@13.0.3)(loro-crdt@1.15.1):
+  loro-repo@0.21.0(@loro-dev/flock-wasm@0.4.3)(@loro-dev/flock@4.4.4)(@loro-dev/streams-crdt@0.16.0(@loro-dev/flock-wasm@0.4.3)(loro-crdt@1.15.1))(@types/better-sqlite3@7.6.13)(better-sqlite3@13.0.3)(loro-crdt@1.15.1):
     dependencies:
       '@loro-dev/flock-wasm': 0.4.3
       '@loro-dev/streams-crdt': 0.16.0(@loro-dev/flock-wasm@0.4.3)(loro-crdt@1.15.1)
@@ -23556,7 +23696,7 @@ snapshots:
       loro-adaptors: 0.6.1(@loro-dev/flock@4.4.4)(loro-crdt@1.15.1)
       loro-crdt: 1.15.1
       loro-protocol: 0.3.0
-      ws: 8.19.0
+      ws: 8.21.3
     transitivePeerDependencies:
       - '@loro-dev/flock'
       - bufferutil
@@ -26938,6 +27078,12 @@ snapshots:
       d3-shape: 3.2.0
       d3-time: 3.1.0
       d3-timer: 3.0.1
+
+  virtua@0.52.7(react-dom@19.2.0(react@19.2.0))(react@19.2.0)(vue@3.5.28(typescript@5.9.3)):
+    optionalDependencies:
+      react: 19.2.0
+      react-dom: 19.2.0(react@19.2.0)
+      vue: 3.5.28(typescript@5.9.3)
 
   vite-node@3.2.4(@types/node@24.10.12)(jiti@2.6.1)(lightningcss@1.33.0)(terser@5.46.0)(tsx@4.23.7)(yaml@2.8.2):
     dependencies:

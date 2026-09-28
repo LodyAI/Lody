@@ -11,7 +11,8 @@ import {
   type RefObject,
 } from 'react';
 import { getDefaultStore } from 'jotai';
-import { authTokenAtom } from '../src/atoms/runtime';
+import { createSessionSendResources } from '../src/lib/session-send-resources';
+import { authTokenAtom, runtimeAtom } from '../src/atoms/runtime';
 import { localProbeResultAtom } from '../src/atoms/local-probe';
 import {
   canUseElectronLocalFileSend,
@@ -20,7 +21,6 @@ import {
 import { currentWorkspaceIdAtom } from '../src/atoms/workspace-context';
 import { computeSha256Hex, uploadSessionFile } from '../src/lib/session-file-upload';
 import { uploadSessionImage } from '../src/lib/session-image-upload';
-import { resolveSessionMessageSubmitRoute } from '../src/components/sessions/session-message-submit-route';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AgentRole, AgentRoleId, SessionMeta, SessionInputBlock } from '@lody/shared';
@@ -96,7 +96,6 @@ vi.mock('../src/hooks/use-code-collab-session-file-provider', () => ({
 import {
   SessionChatInputArea,
   setSessionChatInputTextDraft,
-  clearSessionChatInputDrafts,
   type SessionChatInputAreaHandle,
   type SessionChatInputAreaProps,
 } from '../src/components/sessions/session-chat-input-area';
@@ -135,10 +134,13 @@ function ScopeSwitchOnCommit({
 }
 
 describe('SessionChatInputArea submission feedback', () => {
+  let resources: ReturnType<typeof createSessionSendResources>;
   let root: Root | null = null;
   let container: HTMLDivElement | null = null;
 
   beforeEach(async () => {
+    resources = createSessionSendResources({ acquire: async () => { throw new Error('Unexpected store borrow'); }, releaseRef: () => {} });
+    getDefaultStore().set(runtimeAtom, { workspaceId: 'workspace-upload', sendResources: resources } as never);
     vi.mocked(uploadSessionImage).mockReset();
     vi.mocked(computeSha256Hex).mockReset();
     vi.mocked(uploadSessionFile).mockReset();
@@ -289,6 +291,8 @@ describe('SessionChatInputArea submission feedback', () => {
 
   afterEach(async () => {
     await act(async () => root?.unmount());
+    await resources.dispose();
+    getDefaultStore().set(runtimeAtom, null);
     getDefaultStore().set(localProbeResultAtom, null);
     getDefaultStore().set(authTokenAtom, null);
     getDefaultStore().set(currentWorkspaceIdAtom, null);
@@ -479,112 +483,93 @@ describe('SessionChatInputArea submission feedback', () => {
     });
   }
 
-  async function attachPendingImage(composerRef: RefObject<SessionChatInputAreaHandle | null>) {
-    await act(async () => {
-      getDefaultStore().set(authTokenAtom, 'synthetic-upload-token');
-      getDefaultStore().set(currentWorkspaceIdAtom, 'workspace-upload' as never);
-    });
+  async function attachDrafts(composerRef: RefObject<SessionChatInputAreaHandle | null>) {
     Object.defineProperty(URL, 'createObjectURL', {
       configurable: true,
-      value: () => 'blob:synthetic-image',
+      value: () => 'blob:draft',
     });
     Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: () => undefined });
-    let resolve!: (value: Awaited<ReturnType<typeof uploadSessionImage>>) => void;
-    let reject!: (reason: Error) => void;
-    const promise = new Promise<Awaited<ReturnType<typeof uploadSessionImage>>>((yes, no) => {
-      resolve = yes;
-      reject = no;
-    });
-    vi.mocked(uploadSessionImage).mockReturnValueOnce(promise);
-    await act(async () => {
+    await act(async () =>
       composerRef.current!.handleImageDrop([
         new File(['synthetic-image'], 'sample.png', { type: 'image/png' }),
-      ]);
-    });
-    return { resolve, reject };
+        new File(['synthetic-file'], 'notes.txt', { type: 'text/plain' }),
+      ])
+    );
   }
 
-  const uploadedImage = {
-    imageId: 'synthetic-image-id',
-    mimeType: 'image/png',
-    fileName: 'sample.png',
-    sizeBytes: 15,
-    width: 1,
-    height: 1,
-  } as Awaited<ReturnType<typeof uploadSessionImage>>;
-
-  it.each(['direct_dispatch', 'guide', 'queue'] as const)(
-    'waits once and uses the latest routing callback for %s',
-    async (expectedRoute) => {
+  it.each(['keyboard', 'button'] as const)(
+    'hands off complete drafts through %s without starting uploads in the composer',
+    async (source) => {
       const composerRef = createRef<SessionChatInputAreaHandle>();
-      const sessionId = `upload-route-${++nextSession}`;
-      const delivered: Array<{ route: string; blocks: SessionInputBlock[] }> = [];
-      await renderComposer({
-        sessionId,
+      const acceptance = deferredBoolean();
+      const submissions: Parameters<SessionChatInputAreaProps['onSendMessage']>[] = [];
+      const textarea = await renderComposer({
         composerRef,
-        onSendMessage: async (blocks) => {
-          delivered.push({ route: 'stale', blocks });
-          return true;
+        onSendMessage: (...args) => {
+          submissions.push(args);
+          return acceptance.promise;
         },
       });
-      const upload = await attachPendingImage(composerRef);
-      const textarea = container!.querySelector('textarea')!;
+      await attachDrafts(composerRef);
+      expect(container!.textContent).toContain('notes.txt');
+      expect(submissions).toEqual([]);
+      await submit(source);
+      await submit('keyboard');
+      expect(submissions).toHaveLength(1);
+      expect(submissions[0][0]).toEqual([{ type: 'text', text: 'focus regression draft' }]);
       expect(
-        container!.querySelector<HTMLButtonElement>('button[aria-label="Send"]')!.disabled
-      ).toBe(false);
-      await act(async () => {
-        for (let i = 0; i < 2; i++)
-          textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
-      });
-      expect(textarea.disabled).toBe(true);
-      expect(delivered).toEqual([]);
-      await renderComposer({
-        sessionId,
-        composerRef,
-        onSendMessage: async (blocks) => {
-          const route = resolveSessionMessageSubmitRoute({
-            forceDirect: false,
-            forceQueue: false,
-            invertBehavior: false,
-            isPromptBusy: expectedRoute !== 'direct_dispatch',
-            hasUnfinishedAssistantTurn: expectedRoute !== 'direct_dispatch',
-            nativeSteerAvailable: true,
-            queuedMessageBehavior: expectedRoute === 'guide' ? 'guide' : 'queue',
-          });
-          delivered.push({ route: route.type, blocks });
-          return true;
-        },
-      });
-      await act(async () => upload.resolve(uploadedImage));
-      expect(delivered).toEqual([
-        {
-          route: expectedRoute,
-          blocks: [
-            { type: 'image', ...uploadedImage },
-            { type: 'text', text: 'focus regression draft' },
-          ],
-        },
+        submissions[0][2]?.attachments?.map(({ kind, name, source: bytes }) => ({
+          kind,
+          name,
+          size: bytes.size,
+        }))
+      ).toEqual([
+        { kind: 'image', name: 'sample.png', size: 15 },
+        { kind: 'file', name: 'notes.txt', size: 14 },
       ]);
-      expect(textarea.disabled).toBe(false);
+      expect(uploadSessionImage).not.toHaveBeenCalled();
+      expect(uploadSessionFile).not.toHaveBeenCalled();
+      expect(textarea.disabled).toBe(true);
+      await act(async () => acceptance.resolve(true));
       expect(textarea.value).toBe('');
+      expect(container!.textContent).not.toContain('notes.txt');
     }
   );
 
-  it('waits for every image and retains the inverted-send shortcut', async () => {
+  it('retains all drafts after failed admission and retries the same bytes', async () => {
     const composerRef = createRef<SessionChatInputAreaHandle>();
-    const delivered: Array<{ blocks: SessionInputBlock[]; inverted: boolean }> = [];
-    await renderComposer({
+    const submissions: Parameters<SessionChatInputAreaProps['onSendMessage']>[] = [];
+    const textarea = await renderComposer({
       composerRef,
-      onSendMessage: async (blocks, _role, options) => {
-        delivered.push({ blocks, inverted: options?.invertSubmitBehavior === true });
+      onSendMessage: async (...args) => {
+        submissions.push(args);
+        return false;
+      },
+    });
+    await attachDrafts(composerRef);
+    await submit('keyboard');
+    expect(textarea.disabled).toBe(false);
+    expect(textarea.value).toBe('focus regression draft');
+    expect(container!.textContent).toContain('notes.txt');
+    await submit('keyboard');
+    expect(submissions).toHaveLength(2);
+    expect(submissions[1][2]?.attachments).toEqual(submissions[0][2]?.attachments);
+  });
+
+  it('retains queue inversion for attachment-only draft handoff', async () => {
+    const composerRef = createRef<SessionChatInputAreaHandle>();
+    const submissions: Parameters<SessionChatInputAreaProps['onSendMessage']>[] = [];
+    const textarea = await renderComposer({
+      composerRef,
+      onSendMessage: async (...args) => {
+        submissions.push(args);
         return true;
       },
     });
+    await attachDrafts(composerRef);
     await act(async () => composerRef.current!.setInputText(''));
-    const first = await attachPendingImage(composerRef);
-    const second = await attachPendingImage(composerRef);
     await act(async () =>
-      container!.querySelector('textarea')!.dispatchEvent(
+      textarea.dispatchEvent(
         new KeyboardEvent('keydown', {
           key: 'Enter',
           ctrlKey: true,
@@ -593,435 +578,50 @@ describe('SessionChatInputArea submission feedback', () => {
         })
       )
     );
-    await act(async () => second.resolve({ ...uploadedImage, imageId: 'second-image' }));
-    expect(delivered).toEqual([]);
-    expect(container!.querySelector('textarea')!.disabled).toBe(true);
-    await act(async () => first.resolve(uploadedImage));
-    expect(delivered).toEqual([
-      {
-        inverted: true,
-        blocks: [
-          { type: 'image', ...uploadedImage },
-          { type: 'image', ...uploadedImage, imageId: 'second-image' },
-        ],
-      },
-    ]);
-    expect(container!.querySelector('textarea')!.disabled).toBe(false);
-  });
-
-  it('includes an image converted to a local file before automatically sending', async () => {
-    getDefaultStore().set(localProbeResultAtom, { ok: true, machineId: 'machine-1' });
-    vi.mocked(canUseElectronLocalFileSend).mockReturnValue(true);
-    const localFile = {
-      fileId: 'local-image',
-      fileName: 'sample.png',
-      mimeType: 'image/png',
-      sizeBytes: 15,
-      sha256: 'a'.repeat(64),
-      transport: 'local' as const,
-      machineId: 'machine-1',
-      uploadedAt: 1,
-    };
-    vi.mocked(sendSessionFileToLocalRuntime).mockResolvedValue({ ok: true, files: [localFile] });
-    const composerRef = createRef<SessionChatInputAreaHandle>();
-    const delivered: SessionInputBlock[][] = [];
-    await renderComposer({
-      composerRef,
-      onSendMessage: async (blocks) => {
-        delivered.push(blocks);
-        return true;
-      },
-    });
-    const upload = await attachPendingImage(composerRef);
-    await submit('keyboard');
-    await act(async () => upload.reject(new Error('Synthetic offline upload')));
-    expect(delivered).toEqual([
-      [
-        { type: 'file', ...localFile },
-        { type: 'text', text: 'focus regression draft' },
-      ],
-    ]);
-    expect(container!.querySelector('textarea')!.value).toBe('');
-    expect(container!.querySelector('textarea')!.disabled).toBe(false);
-  });
-
-  it('restores uploaded attachments when downstream acceptance rejects the send', async () => {
-    const composerRef = createRef<SessionChatInputAreaHandle>();
-    const acceptance = deferredBoolean();
-    await renderComposer({ composerRef, onSendMessage: () => acceptance.promise });
-    const upload = await attachPendingImage(composerRef);
-    await submit('keyboard');
-    await act(async () => upload.resolve(uploadedImage));
-    expect(container!.querySelector('textarea')!.disabled).toBe(true);
-    expect(container!.querySelector('button[aria-label="Cancel send"]')).toBeNull();
-    expect(container!.querySelector<HTMLButtonElement>('button[aria-label="Send"]')?.disabled).toBe(
-      true
-    );
-    await act(async () => acceptance.resolve(false));
-    expect(container!.querySelector('textarea')!.value).toBe('focus regression draft');
-    expect(container!.querySelector('img')).not.toBeNull();
-    expect(container!.querySelector<HTMLButtonElement>('button[aria-label="Send"]')!.disabled).toBe(
-      false
-    );
-  });
-
-  it('keeps an existing upload intent across hidden tabs and locks config through acceptance', async () => {
-    const composerRef = createRef<SessionChatInputAreaHandle>();
-    const sessionId = `background-upload-${++nextSession}`;
-    const acceptance = deferredBoolean();
-    const delivered: SessionInputBlock[][] = [];
-    const onSendMessage = (blocks: SessionInputBlock[]) => {
-      delivered.push(blocks);
-      return acceptance.promise;
-    };
-    await renderComposer({ sessionId, composerRef, onSendMessage });
-    const upload = await attachPendingImage(composerRef);
-    await submit('keyboard');
-    const lockedConfig = () =>
-      container!.querySelector<HTMLButtonElement>('button[aria-label="Run configuration"]');
-    expect(lockedConfig()?.disabled).toBe(true);
-    expect(container!.querySelector('[data-testid="desktop-permission-mode-button"]')).toBeNull();
-    await renderComposer({ sessionId, composerRef, onSendMessage, isVisible: false });
-    expect(container!.querySelector('textarea')!.disabled).toBe(true);
-    await act(async () => upload.resolve(uploadedImage));
-    expect(delivered).toEqual([
-      [
-        { type: 'image', ...uploadedImage },
-        { type: 'text', text: 'focus regression draft' },
-      ],
-    ]);
-    expect(container!.querySelector('button[aria-label="Cancel send"]')).toBeNull();
-    expect(lockedConfig()?.disabled).toBe(true);
-    await act(async () => acceptance.resolve(true));
-    await renderComposer({ sessionId, composerRef, onSendMessage });
-    expect(container!.querySelector('textarea')!.value).toBe('');
-    expect(
-      container!.querySelector('[data-testid="desktop-permission-mode-button"]')
-    ).not.toBeNull();
-    expect(delivered).toHaveLength(1);
-  });
-
-  it.each(['failure', 'cancel', 'switch', 'unmount', 'archived'] as const)(
-    'preserves the draft and prevents automatic delivery after %s',
-    async (reason) => {
-      const composerRef = createRef<SessionChatInputAreaHandle>();
-      const sessionId = `upload-retire-${++nextSession}`;
-      const delivered: SessionInputBlock[][] = [];
-      const onSendMessage = async (blocks: SessionInputBlock[]) => {
-        delivered.push(blocks);
-        return true;
-      };
-      await renderComposer({ sessionId, composerRef, onSendMessage });
-      const upload = await attachPendingImage(composerRef);
-      await submit('button');
-      if (reason === 'cancel')
-        await act(async () =>
-          container!.querySelector<HTMLButtonElement>('button[aria-label="Cancel send"]')!.click()
-        );
-      if (reason === 'archived')
-        await renderComposer({ sessionId, composerRef, onSendMessage, isArchived: true });
-      if (reason === 'switch')
-        await renderComposer({ sessionId: `other-${nextSession}`, composerRef, onSendMessage });
-      if (reason === 'unmount') {
-        await act(async () => root!.unmount());
-        root = createRoot(container!);
-      }
-      await act(async () => {
-        if (reason === 'failure') upload.reject(new Error('Synthetic upload failure'));
-        else upload.resolve(uploadedImage);
-      });
-      await renderComposer({ sessionId, composerRef, onSendMessage });
-      expect(delivered).toEqual([]);
-      expect(container!.querySelector('textarea')!.value).toBe('focus regression draft');
-      expect(container!.querySelector('textarea')!.disabled).toBe(false);
-      expect(container!.querySelector('img')).not.toBeNull();
-    }
-  );
-
-  async function attachPendingFile(composerRef: RefObject<SessionChatInputAreaHandle | null>) {
-    await act(async () => {
-      getDefaultStore().set(authTokenAtom, 'synthetic-upload-token');
-      getDefaultStore().set(currentWorkspaceIdAtom, 'workspace-upload' as never);
-    });
-    let hashed!: (value: string) => void;
-    let resolve!: (value: Awaited<ReturnType<typeof uploadSessionFile>>) => void;
-    let reject!: (reason: Error) => void;
-    let progress: Parameters<typeof uploadSessionFile>[0]['onProgress'];
-    vi.mocked(computeSha256Hex).mockReturnValueOnce(
-      new Promise((done) => {
-        hashed = done;
-      })
-    );
-    const promise = new Promise<Awaited<ReturnType<typeof uploadSessionFile>>>((yes, no) => {
-      resolve = yes;
-      reject = no;
-    });
-    vi.mocked(uploadSessionFile).mockImplementationOnce((args) => {
-      progress = args.onProgress;
-      return promise;
-    });
-    await act(async () =>
-      composerRef.current!.handleImageDrop([
-        new File(['hello'], 'sample.txt', { type: 'text/plain' }),
-      ])
-    );
-    return {
-      hashed,
-      resolve,
-      reject,
-      progress: (phase: 'uploading' | 'verifying') =>
-        progress?.({ phase, percent: 100, loadedBytes: 5, totalBytes: 5 }),
-    };
-  }
-  const uploadedFile = {
-    fileId: 'synthetic-file',
-    fileName: 'sample.txt',
-    mimeType: 'text/plain',
-    sizeBytes: 5,
-    sha256: 'a'.repeat(64),
-    transport: 'cloud' as const,
-    textPreview: true,
-    uploadedAt: 1,
-  };
-
-  it('boundary: file preparation and verification both block automatic dispatch', async () => {
-    const composerRef = createRef<SessionChatInputAreaHandle>();
-    const delivered: SessionInputBlock[][] = [];
-    await renderComposer({
-      composerRef,
-      onSendMessage: async (blocks) => {
-        delivered.push(blocks);
-        return true;
-      },
-    });
-    const upload = await attachPendingFile(composerRef);
-    await submit('button');
-    expect(container!.querySelector('textarea')!.disabled).toBe(true);
-    expect(delivered).toEqual([]);
-    await act(async () => upload.hashed('a'.repeat(64)));
-    await act(async () => upload.progress('uploading'));
-    expect(delivered).toEqual([]);
-    await act(async () => upload.progress('verifying'));
-    expect(delivered).toEqual([]);
-    await act(async () => upload.resolve(uploadedFile));
-    expect(delivered).toEqual([
-      [
-        { type: 'file', ...uploadedFile },
-        { type: 'text', text: 'focus regression draft' },
-      ],
-    ]);
-  });
-
-  it('boundary: an already failed file does not cancel waiting for a newly selected image', async () => {
-    const composerRef = createRef<SessionChatInputAreaHandle>();
-    const delivered: SessionInputBlock[][] = [];
-    await renderComposer({
-      composerRef,
-      onSendMessage: async (blocks) => {
-        delivered.push(blocks);
-        return true;
-      },
-    });
-    const failedFile = await attachPendingFile(composerRef);
-    await act(async () => failedFile.hashed('a'.repeat(64)));
-    await act(async () => failedFile.reject(new Error('Old file failed')));
-    const image = await attachPendingImage(composerRef);
-    await submit('keyboard');
-    expect(container!.querySelector('textarea')!.disabled).toBe(true);
-    await act(async () => image.resolve(uploadedImage));
-    expect(delivered).toEqual([
-      [
-        { type: 'image', ...uploadedImage },
-        { type: 'text', text: 'focus regression draft' },
-      ],
-    ]);
-  });
-
-  it('boundary: a file failure during waiting restores the draft without sending text alone', async () => {
-    const composerRef = createRef<SessionChatInputAreaHandle>();
-    const delivered: SessionInputBlock[][] = [];
-    await renderComposer({
-      composerRef,
-      onSendMessage: async (blocks) => {
-        delivered.push(blocks);
-        return true;
-      },
-    });
-    const upload = await attachPendingFile(composerRef);
-    await submit('keyboard');
-    await act(async () => upload.hashed('a'.repeat(64)));
-    await act(async () => upload.reject(new Error('Selected file failed')));
-    expect(delivered).toEqual([]);
-    expect(container!.querySelector('textarea')!.disabled).toBe(false);
-    expect(container!.querySelector('textarea')!.value).toBe('focus regression draft');
-  });
-
-  it('boundary: retiring the scope during the ready commit prevents the queued continuation', async () => {
-    const composerRef = createRef<SessionChatInputAreaHandle>();
-    const sessionId = `commit-race-${++nextSession}`;
-    const delivered: SessionInputBlock[][] = [];
-    const onSendMessage = async (blocks: SessionInputBlock[]) => {
-      delivered.push(blocks);
-      return true;
-    };
-    await renderComposer({ sessionId, composerRef, onSendMessage });
-    const upload = await attachPendingImage(composerRef);
-    await submit('keyboard');
-    await act(async () => {
-      upload.resolve(uploadedImage);
-      // Let the upload handler publish its state before the joint commit.
-      await Promise.resolve();
-      await renderComposer({ sessionId, composerRef, onSendMessage, retireOnCommit: true });
-    });
-    expect(delivered).toEqual([]);
-    expect(container!.querySelector('textarea')!.disabled).toBe(false);
-    expect(container!.querySelector('textarea')!.value).toBe('focus regression draft');
-  });
-
-  it('boundary: same-batch Enter sends one accepted message', async () => {
-    const delivered: SessionInputBlock[][] = [];
-    const acceptance = deferredBoolean();
-    const textarea = await renderComposer({
-      onSendMessage: async (blocks) => {
-        delivered.push(blocks);
-        return acceptance.promise;
-      },
-    });
-    await act(async () => {
-      for (let i = 0; i < 3; i++)
-        textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
-    });
-    expect(delivered).toEqual([[{ type: 'text', text: 'focus regression draft' }]]);
-    await act(async () => acceptance.resolve(true));
-    expect(textarea.value).toBe('');
-  });
-
-  it('boundary: a failed image ends waiting before the other image settles', async () => {
-    const composerRef = createRef<SessionChatInputAreaHandle>();
-    const delivered: SessionInputBlock[][] = [];
-    await renderComposer({
-      composerRef,
-      onSendMessage: async (blocks) => {
-        delivered.push(blocks);
-        return true;
-      },
-    });
-    const first = await attachPendingImage(composerRef);
-    const second = await attachPendingImage(composerRef);
-    await submit('keyboard');
-    await act(async () => first.reject(new Error('First image failed')));
-    expect(container!.querySelector('textarea')!.disabled).toBe(false);
-    expect(container!.querySelector('textarea')!.value).toBe('focus regression draft');
-    await act(async () => second.resolve(uploadedImage));
-    expect(delivered).toEqual([]);
+    expect(submissions).toHaveLength(1);
+    expect(submissions[0][0]).toEqual([]);
+    expect(submissions[0][2]?.invertSubmitBehavior).toBe(true);
+    expect(submissions[0][2]?.attachments).toHaveLength(2);
   });
 
   it.each([
-    ['removed machine', { isMachineRemoved: true }],
-    ['history refresh', { isExternalHistoryRefreshing: true }],
-    ['role hydration', { durableAgentRoleReady: false }],
-    ['turn limit', { freeTurnLimitNotice: { current: 20, limit: 20 } }],
-  ] as const)('boundary: cancels waiting when blocked by %s', async (_name, overrides) => {
+    { isMachineRemoved: true },
+    { isExternalHistoryRefreshing: true },
+    { durableAgentRoleReady: false },
+    { freeTurnLimitNotice: { current: 20, limit: 20 } },
+    { isArchived: true },
+    { isVisible: false },
+  ])('does not hand off drafts when blocked: %j', async (overrides) => {
     const composerRef = createRef<SessionChatInputAreaHandle>();
-    const sessionId = `blocked-upload-${++nextSession}`;
-    const delivered: SessionInputBlock[][] = [];
+    const sessionId = `blocked-draft-${++nextSession}`;
+    const submissions: SessionInputBlock[][] = [];
     const onSendMessage = async (blocks: SessionInputBlock[]) => {
-      delivered.push(blocks);
+      submissions.push(blocks);
       return true;
     };
-    await renderComposer({ sessionId, composerRef, onSendMessage });
-    const upload = await attachPendingImage(composerRef);
-    await submit('keyboard');
-    await renderComposer({ sessionId, composerRef, onSendMessage, overrides });
-    expect(container!.querySelector('textarea')!.disabled).toBe(false);
-    await act(async () => upload.resolve(uploadedImage));
-    await renderComposer({ sessionId, composerRef, onSendMessage });
-    expect(delivered).toEqual([]);
-    expect(container!.querySelector('textarea')!.value).toBe('focus regression draft');
-  });
-
-  it.each(['cancel', 'switch-back'] as const)(
-    'boundary: a new submission survives old %s completion',
-    async (reason) => {
-      const composerRef = createRef<SessionChatInputAreaHandle>();
-      const sessionId = `resubmit-${++nextSession}`;
-      const delivered: SessionInputBlock[][] = [];
-      const onSendMessage = async (blocks: SessionInputBlock[]) => {
-        delivered.push(blocks);
-        return true;
-      };
-      await renderComposer({ sessionId, composerRef, onSendMessage });
-      const upload = await attachPendingImage(composerRef);
-      await submit('keyboard');
-      if (reason === 'cancel')
-        await act(async () =>
-          container!.querySelector<HTMLButtonElement>('button[aria-label="Cancel send"]')!.click()
-        );
-      else {
-        await renderComposer({ sessionId: `away-${nextSession}`, composerRef, onSendMessage });
-        await renderComposer({ sessionId, composerRef, onSendMessage });
-      }
-      await act(async () => composerRef.current!.setInputText('replacement intent'));
-      await submit('keyboard');
-      await act(async () => upload.resolve(uploadedImage));
-      expect(delivered).toEqual([
-        [
-          { type: 'image', ...uploadedImage },
-          { type: 'text', text: 'replacement intent' },
-        ],
-      ]);
-      expect(container!.querySelector('textarea')!.disabled).toBe(false);
-    }
-  );
-
-  it('boundary: an external text edit cancels the waiting payload without losing the edit', async () => {
-    const composerRef = createRef<SessionChatInputAreaHandle>();
-    const delivered: SessionInputBlock[][] = [];
+    await renderComposer({ composerRef, sessionId, onSendMessage });
+    await attachDrafts(composerRef);
     await renderComposer({
       composerRef,
-      onSendMessage: async (blocks) => {
-        delivered.push(blocks);
-        return true;
-      },
-    });
-    const upload = await attachPendingImage(composerRef);
-    await submit('keyboard');
-    await act(async () => composerRef.current!.setInputText('new draft from an external action'));
-    await act(async () => upload.resolve(uploadedImage));
-    expect(delivered).toEqual([]);
-    expect(container!.querySelector('textarea')!.value).toBe('new draft from an external action');
-  });
-
-  it('boundary: removing an attachment never silently sends a partial payload', async () => {
-    const composerRef = createRef<SessionChatInputAreaHandle>();
-    const sessionId = `removed-upload-${++nextSession}`;
-    const delivered: SessionInputBlock[][] = [];
-    await renderComposer({
       sessionId,
-      composerRef,
-      onSendMessage: async (blocks) => {
-        delivered.push(blocks);
-        return true;
-      },
+      onSendMessage,
+      isArchived: 'isArchived' in overrides ? overrides.isArchived : false,
+      overrides,
     });
-    const upload = await attachPendingImage(composerRef);
     await submit('keyboard');
-    clearSessionChatInputDrafts(sessionId);
-    await act(async () => upload.resolve(uploadedImage));
-    expect(delivered).toEqual([]);
-    expect(container!.querySelector('textarea')!.disabled).toBe(false);
+    expect(submissions).toEqual([]);
+    expect(container!.textContent).toContain('notes.txt');
   });
 
-  it('boundary: a late acceptance preserves an external replacement draft', async () => {
+  it('a late draft acceptance preserves an external replacement prompt', async () => {
     const composerRef = createRef<SessionChatInputAreaHandle>();
     const acceptance = deferredBoolean();
-    await renderComposer({ composerRef, onSendMessage: () => acceptance.promise });
-    const upload = await attachPendingImage(composerRef);
+    const textarea = await renderComposer({ composerRef, onSendMessage: () => acceptance.promise });
+    await attachDrafts(composerRef);
     await submit('keyboard');
-    await act(async () => upload.resolve(uploadedImage));
     await act(async () => composerRef.current!.setInputText('next message'));
     await act(async () => acceptance.resolve(true));
-    expect(container!.querySelector('textarea')!.value).toBe('next message');
+    expect(textarea.value).toBe('next message');
   });
 
   it('boundary: hidden composer rejects synthetic Enter even without uploads', async () => {

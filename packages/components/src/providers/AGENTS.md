@@ -4,11 +4,9 @@
 
 ## Mirrors over synced docs tolerate unknown root keys
 
-Every `new Mirror(...)` over a doc that syncs between clients must pass
-`ignoreUnknownProperties: true`. Peers on a newer schema write root keys this
-build does not declare; without the flag loro-mirror rejects the entire state
-with `Unknown property: <key>`, so the older client can never write to that doc
-again. Contract test: `packages/shared/tests/session-doc-forward-compat.test.ts`.
+Synced-doc Mirrors must set `ignoreUnknownProperties: true`: newer peers' unknown
+root keys otherwise reject the whole state and block writes. Test:
+`packages/shared/tests/session-doc-forward-compat.test.ts`.
 
 Session docs use `createSessionMirror`; only its HistoryWriter writes history.
 Replacement contract: [shared rules](../../../shared/AGENTS.md#session-history).
@@ -79,9 +77,11 @@ Replacement contract: [shared rules](../../../shared/AGENTS.md#session-history).
   adoption; storage-loaded versions must be durable before cursor advancement. Never
   replace a live document. Import before constructing the history reader to avoid
   replaying bulk-import events through an initialized projection.
-- Repo storage, durable Streams cursors, and eager-sync high-water state must use the
+- Repo storage, LoroDoc Streams cursors, and eager-sync high-water state must use the
   same per-renderer cache namespace. A checkpoint must never be shared by independently
-  persisted Repo views.
+  persisted Repo views. Meta/Flock cursors are replica-bound
+  (`workspace-streams-transport.ts`): never route them through a separate cursor store;
+  delete Meta progress via `repo.getReplicaCheckpointStore`.
 - Transport state is selected per room, never merged. Runtime stores use
   `getReadinessTransportForRoom`; hooks without the router use the structural binding in
   `src/lib/room-readiness.ts`. Keep those selection rules aligned.
@@ -109,3 +109,14 @@ Replacement contract: [shared rules](../../../shared/AGENTS.md#session-history).
 - Doc-metadata bootstrap and the live repo watch overlap by design: merge per field with
   live winning (`mergeBootstrapMetaCache`), never letting the snapshot undo an archive
   already applied live.
+
+## Attachment transfer ownership
+
+Workspace `sendResources` owns preparation, cancellation and store borrows across
+React unmount. Dispose before transports/caches; join noncancelable IPC. Only the
+cache disposes stores. Cancel I/O, fence late results, await multipart cleanup.
+
+Admission uses the scoped journal and HistoryWriter. Persist exact operations
+before import; never re-append on recovery. Lock submission/delivery separately;
+sync before retiring records. Observe live work and scoped Web Locks; reads must
+not restart interrupted sends. Keep recovery actions reachable inline on mobile.

@@ -1,4 +1,4 @@
-import { forwardRef, memo, useCallback, useEffect, useMemo, type ReactNode } from 'react';
+import { forwardRef, memo, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import type {
   SessionFilePayload,
   SessionHistoryParsed,
@@ -7,6 +7,7 @@ import type {
   WorkspaceId,
 } from '@lody/shared';
 import { DEFAULT_CONVERSATION_FONT_SIZE, type ConversationFontSize } from '@/atoms/settings';
+import { getSavedAnchorTurnId } from '@/lib/conversation-scroll/saved-state';
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import type { AgentActivityTone } from './view';
 import {
@@ -57,6 +58,8 @@ export interface SessionChatStreamProps {
   className?: string;
   /** Scrolls as the first conversation row (for example, Session provenance). */
   leadingContent?: ReactNode;
+  /** Scrolls after history as a local, not-yet-committed user message. */
+  trailingContent?: ReactNode;
   emptyState?: ReactNode;
   onAtBottomChange?: (atBottom: boolean) => void;
   showScrollToLatest?: boolean;
@@ -145,6 +148,7 @@ const SessionChatStreamImpl = forwardRef<SessionChatStreamHandle, SessionChatStr
       dividerLabel: _dividerLabel,
       className,
       leadingContent,
+      trailingContent,
       emptyState,
       onAtBottomChange,
       showScrollToLatest = true,
@@ -174,6 +178,9 @@ const SessionChatStreamImpl = forwardRef<SessionChatStreamHandle, SessionChatStr
     ref
   ) => {
     const version = useConversationVersion(view);
+    // Read once per mount: the scroll engine restores this session's reading
+    // position into this turn, so load it before the first viewport report.
+    const [initialFocusTurnId] = useState(() => getSavedAnchorTurnId(sessionId));
     const {
       initialWindowReady,
       items,
@@ -182,7 +189,7 @@ const SessionChatStreamImpl = forwardRef<SessionChatStreamHandle, SessionChatStr
       onVisibleTurnRangeChange: handleVisibleTurnRangeChange,
       onOutlinePreviewRound: handleOutlinePreviewRound,
       onRetainedTurnIdsChange,
-    } = useConversationStreamItems(view, sessionId);
+    } = useConversationStreamItems(view, sessionId, { initialFocusTurnId });
     useEffect(() => {
       onLastCompletedAssistantMessageIdChange?.(lastCompletedAssistantMessageId);
     }, [lastCompletedAssistantMessageId, onLastCompletedAssistantMessageIdChange]);
@@ -258,6 +265,7 @@ const SessionChatStreamImpl = forwardRef<SessionChatStreamHandle, SessionChatStr
         sessionId={sessionId}
         className={className}
         leadingContent={leadingContent}
+        trailingContent={trailingContent}
         emptyState={emptyState}
         onAtBottomChange={onAtBottomChange}
         showScrollToLatest={showScrollToLatest}

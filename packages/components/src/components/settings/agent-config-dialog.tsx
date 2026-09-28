@@ -24,6 +24,9 @@ import {
   getRegistryAcpLaunchKind,
   hasBuiltinRuntimeOverrideValues,
   machineSupportsProviderSetupProtocol,
+  machineSupportsProtocolCapability,
+  CodexAuthProfileSchema,
+  type CodexAuthProfile,
   machineSupportsPiExtensions,
   type MachinePiExtensionsResponse,
   isManagedBuiltinAgentType,
@@ -1115,6 +1118,7 @@ const ALL_OPTIONS: AgentTypeOption[] = [
 // =============================================================================
 
 export type AgentConfigFormData = {
+  codexAuth?: CodexAuthProfile;
   name: string;
   cliType: AgentConfigCliType;
   agentType: string;
@@ -1136,6 +1140,7 @@ export type AgentConfigFormData = {
 };
 
 export type AgentConfigSubmitPayload = {
+  codexAuth?: CodexAuthProfile;
   id: AgentConfigId;
   name: string;
   cliType: AgentConfigCliType;
@@ -1540,6 +1545,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
     if (mode.kind === 'edit') {
       return hydrateDeepSeekEndpointForm({
         name: mode.config.name,
+        codexAuth: mode.config.codexAuth,
         cliType: mode.config.cliType,
         agentType: mode.config.agentType,
         customCommandLine: mode.config.customAcp
@@ -1555,6 +1561,21 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
   }, [mode]);
 
   const [formData, setFormData] = useState<AgentConfigFormData>(initialForm);
+  const codexProfileId = useRef(uuidv4());
+  const supportsCodexProfiles = machineSupportsProtocolCapability(machine, 'codexAuthProfiles');
+  const managedCodexForm =
+    formData.cliType === 'builtin' && formData.agentType === 'codex' && supportsCodexProfiles;
+  const codexAuth = useMemo(
+    () =>
+      managedCodexForm
+        ? (formData.codexAuth ??
+          (mode.kind === 'create'
+            ? { mode: 'chatgpt' as const, profileId: codexProfileId.current }
+            : undefined))
+        : formData.codexAuth,
+    [managedCodexForm, formData.codexAuth, mode.kind]
+  );
+  const unsupportedCodexProfile = !!codexAuth && !supportsCodexProfiles;
   const [submitting, setSubmitting] = useState(false);
   const [probing, setProbing] = useState(false);
   const [probeError, setProbeError] = useState<string | null>(null);
@@ -1692,15 +1713,18 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
   const usesProtocolAuthentication =
     usesAcpProtocolAuthentication(formData.cliType) &&
     machineSupportsAcpProtocolAuthentication(machine);
+  const boundChatgptCodex =
+    mode.kind === 'edit' && managedCodexForm && codexAuth?.mode === 'chatgpt';
   const showAuthenticationPanel =
     mode.kind === 'edit'
-      ? supportsBuiltinAuthentication({
+      ? !boundChatgptCodex &&
+        (supportsBuiltinAuthentication({
           cliType: formData.cliType,
           agentType: formData.agentType,
           brandId: resolvedBrandId,
           env: formData.env,
         }) ||
-        (authRequired && usesProtocolAuthentication)
+          (authRequired && usesProtocolAuthentication))
       : authRequired &&
         ((isManagedBuiltin && formData.agentType !== 'pi') || usesProtocolAuthentication);
   const builtinRuntimeOverrideKey =
@@ -1811,6 +1835,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
         : formData.titleGeneration;
     return {
       id: agentConfigId,
+      codexAuth: codexAuth ? CodexAuthProfileSchema.parse(codexAuth) : undefined,
       name: formData.name.trim(),
       cliType: formData.cliType,
       agentType,
@@ -1828,6 +1853,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
     activePreset,
     acpProvidesSessionTitle,
     agentConfigId,
+    codexAuth,
     backgroundBuiltinSetup,
     formData,
     isCustom,
@@ -2439,7 +2465,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
   }, [onOpenChange, persistConfigBeforeMachineLaunch]);
 
   const submit = async () => {
-    if (disableReason || submitting || waitingForBuiltinSetup) return;
+    if (disableReason || unsupportedCodexProfile || submitting || waitingForBuiltinSetup) return;
     if (
       requiresBuiltinCreationVerification &&
       !backgroundBuiltinSetup &&
@@ -2789,6 +2815,72 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
             />
           ) : null}
 
+          {managedCodexForm && codexAuth ? (
+            <Field
+              label={t('settings.agent.codex.authentication', 'Authentication')}
+              hint={t(
+                'settings.agent.codex.storage',
+                'Credentials stay on the selected machine. Each provider has its own account.'
+              )}
+            >
+              <Tabs.Root
+                value={codexAuth.mode}
+                onValueChange={(value) => {
+                  if (mode.kind === 'edit') return;
+                  setFormData({
+                    ...formData,
+                    codexAuth:
+                      value === 'api-key'
+                        ? {
+                            mode: 'api-key',
+                            profileId: codexProfileId.current,
+                            baseUrl: 'https://api.openai.com/v1',
+                          }
+                        : { mode: 'chatgpt', profileId: codexProfileId.current },
+                  });
+                }}
+              >
+                <Tabs.List stretch>
+                  <Tabs.Tab
+                    value="chatgpt"
+                    disabled={mode.kind === 'edit' && codexAuth.mode !== 'chatgpt'}
+                  >
+                    ChatGPT
+                  </Tabs.Tab>
+                  <Tabs.Tab
+                    value="api-key"
+                    disabled={mode.kind === 'edit' && codexAuth.mode !== 'api-key'}
+                  >
+                    {t('settings.agent.codex.customApi', 'Custom API')}
+                  </Tabs.Tab>
+                </Tabs.List>
+              </Tabs.Root>
+              {codexAuth.mode === 'api-key' ? (
+                <Field
+                  htmlFor="codex-base-url"
+                  label={t('settings.agent.codex.baseUrl', 'Base URL')}
+                  hint={t(
+                    'settings.agent.codex.keyNext',
+                    'Enter the API Key securely during sign-in. To change the destination, add a new provider.'
+                  )}
+                >
+                  <Input
+                    id="codex-base-url"
+                    value={codexAuth.baseUrl}
+                    readOnly={mode.kind === 'edit'}
+                    onChange={(event) =>
+                      setFormData({
+                        ...formData,
+                        codexAuth: { ...codexAuth, baseUrl: event.target.value },
+                      })
+                    }
+                    autoComplete="off"
+                  />
+                </Field>
+              ) : null}
+            </Field>
+          ) : null}
+
           {isDeepSeekBuiltin ? (
             <DeepSeekHarnessPanel
               endpointMode={deepseekEndpointMode}
@@ -2916,6 +3008,19 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
           )}
           {probeError && isBubBuiltin && <BubInstallGuide />}
 
+          {boundChatgptCodex ? (
+            <Field
+              label={t('settings.agent.dialog.section.account', 'Account')}
+              icon={<KeyRound aria-hidden="true" {...stylex.props(catalog.icon)} />}
+            >
+              <p {...stylex.props(styles.statusText)}>
+                {t(
+                  'settings.agent.codex.boundChatgptAccount',
+                  'This provider is bound to its ChatGPT account. Add a new provider to use another account.'
+                )}
+              </p>
+            </Field>
+          ) : null}
           {showAuthenticationPanel ? (
             <Field
               label={t('settings.agent.dialog.section.account', 'Account')}
@@ -2933,6 +3038,8 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
               icon={<KeyRound aria-hidden="true" {...stylex.props(catalog.icon)} />}
             >
               <AcpAuthenticationPanel
+                key={JSON.stringify(codexAuth)}
+                codexAuthMode={codexAuth?.mode}
                 machineId={machine.id}
                 configId={agentConfigId}
                 cliType={formData.cliType}
@@ -3209,6 +3316,9 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
                     size="small"
                     onClick={() => void submit()}
                     disabled={
+                      unsupportedCodexProfile ||
+                      (codexAuth !== undefined &&
+                        !CodexAuthProfileSchema.safeParse(codexAuth).success) ||
                       !!disableReason ||
                       submitting ||
                       waitingForBuiltinSetup ||

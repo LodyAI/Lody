@@ -13,7 +13,7 @@ why they read the way they do. Coverage:
 - It NEVER captures an unmodified wheel, activated or not. The only wheel the
   markdown root consumes is a pinch (a ctrl- or meta-modified wheel) over the
   activated diagram; every other wheel reaches the conversation's own listeners
-  untouched, which keeps stick-to-bottom (`use-sticky-scroll.ts`) and outline
+  untouched, which keeps the scroll engine's follow (`lib/conversation-scroll`) and outline
   jumps (`view.tsx`) working. An earlier bundled pan/zoom canvas took every wheel
   and turned a page scroll into a zoom; nothing may reintroduce that.
 - Clicking a diagram with a mouse, pen, or the keyboard ACTIVATES it: that one

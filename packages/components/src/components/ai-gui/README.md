@@ -3,6 +3,10 @@
 Conversation rendering for a Session: the message stream, assistant turn folding,
 the outline rail, and the markdown/terminal/file content surfaces.
 
+Builtin DeepSeek Harness keeps thought prose in expandable activity groups, including
+a default-open Thought disclosure for groups without tools; explicit collapse is retained. Provider visibility is part of the
+virtual-row cache identity; other providers retain their existing filtering.
+
 Binding rules live in [AGENTS.md](AGENTS.md); this file is the directory index and
 the reasoning behind those rules.
 
@@ -41,7 +45,9 @@ the reasoning behind those rules.
   `build-chat-stream-items.ts` folds them onto the emitting turn. Invariants live
   in [agent-notices.md](agent-notices.md). `chat-failed-detail-dialog.tsx` is the
   retired modal, no longer reached from the conversation.
-  `terminal-component.tsx` / `terminal-preview.ts` own terminal output.
+  `terminal-component.tsx` / `terminal-preview.ts` own terminal output;
+  `tool-call-detail.tsx` is an expanded tool step's sheet and
+  `tool-call-command.ts` the command it shows.
 - `conversation-outline-rail.tsx`, `conversation-outline-rail-geometry.ts`, and
   `conversation-outline-arrival-intent.ts` own the reader-position rail.
   Invariants live in [conversation-outline.md](conversation-outline.md).
@@ -74,11 +80,10 @@ defines locale-specific spacing for these labels.
   "Exited Plan Mode" card may follow an answer, so the answer is not necessarily
   the final stream item.
 
-- **Keyed `@lody/virtua` and `bufferSize`.** Upstream `shift` reuses stale
-  cumulative heights (rows overlap) and only covers rows added at the start;
-  placeholder turns expand in the middle. The keyed fork keeps sizes with row keys
-  and the row at the viewport start in place
-  ([note](../../../../../.agents/notes/implemented/architecture/2026-09-24-virtua-keyed-fork.md)).
+- **Keyed sizes and `bufferSize`.** Placeholder turns expand in the middle of the
+  list, so the scroll engine keeps sizes with row keys and holds the reader's row
+  through its reading anchor
+  ([note](../../../../../.agents/notes/implemented/architecture/2026-09-27-conversation-scroll-engine.md)).
   `bufferSize` is a trade between blank space during a fast scroll and keeping
   resizing rows mounted.
 - **`buildChatStreamItems()` filtering.** An empty assistant entry renders `null`,
@@ -90,10 +95,10 @@ defines locale-specific spacing for these labels.
   implementation stays folded under the plan it came from.
 - **`RAIL_TRACK_WIDTH` from the peak width.** An undersized auto-overflow track
   scrolls sideways once magnification widens a tick.
-- **Far-jump correction bound.** `OUTLINE_JUMP_MAX_CORRECTIONS` exists because the
-  tail of the list may be clamped and would otherwise never reach tolerance.
-- **`pendingOutlineJumpRef` instead of render state.** Clicking the already-active
-  round may produce no commit, so a render-based flag never clears.
+- **One outline jump, no correction pass.** The scroll engine's reading anchor
+  keeps the jumped row at the top while the rows around it are measured and
+  hydrate. The Virtua-era loop re-issued the jump by a stored row index, which
+  went stale as placeholders expanded and landed rounds past the target.
 - **Static rendering once a turn finishes.** The stream engine fades only the
   in-flight tail, but it still parses per block and ships lookbehind regex
   literals that Safari < 16.4 cannot parse; finished text never needs either

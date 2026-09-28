@@ -152,6 +152,19 @@ best-effort inside the adapter and swallows failures without signalling the
 client, so a failed generation now leaves the draft title rather than falling
 back to Lody's generator.
 
+That draft only existed for sessions started from the desktop composer. Sessions
+created through `lody session create` or the MCP `lody_session_create` tools —
+typically one agent dispatching another — carried no title at all, so a Codex
+child stayed unnamed for its whole first turn (observed: 21 minutes from create
+to the pushed title) and forever if generation failed. `prepareSessionInput` now
+stores the prompt's first non-empty line as a `draft` title when no explicit title
+is given, using the same `deriveDraftSessionTitle` rule as the composer; the
+pushed or locally generated title still replaces it. An explicit title (CLI
+`--title`, a Schedule's title) is now stored as `titleSource: 'user'`. Before, it
+had no source, so it survived Lody's isolated generator but was overwritten by the
+title Claude, Codex or Grok pushed — the caller's name held or not depending on
+the agent.
+
 Handing titles to the adapters also hands over their wording. None of the three
 sees `DEFAULT_TITLE_GENERATION_PROMPT`, so constraints it carries — the 26-letter
 English budget, the single-line rule — no longer apply to them. Grok additionally

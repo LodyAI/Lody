@@ -1,9 +1,8 @@
 // @vitest-environment jsdom
 
 import React from 'react';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
-import { flushSync } from 'react-dom';
 import { createRoot, type Root } from 'react-dom/client';
 import { createStore, Provider } from 'jotai';
 import { MobileChatListCard } from '../src/components/mobile/mobile-chat-list';
@@ -61,6 +60,7 @@ let root: Root;
 let store: ReturnType<typeof createStore>;
 
 beforeEach(async () => {
+  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   await initI18n();
   container = document.createElement('div');
   document.body.appendChild(container);
@@ -68,13 +68,16 @@ beforeEach(async () => {
   store = createStore();
 });
 
-afterEach(() => {
-  flushSync(() => root.unmount());
+afterEach(async () => {
+  // Unmount and drain React work before jsdom removes window. flushSync alone
+  // leaves scheduled work behind even when the DOM is already up to date.
+  await act(async () => root.unmount());
   container.remove();
+  vi.unstubAllGlobals();
 });
 
-function render(chats: MobileConversationItem[]) {
-  flushSync(() => {
+async function render(chats: MobileConversationItem[]) {
+  await act(async () => {
     root.render(
       <Provider store={store}>
         <MobileChatListCard chats={chats} />
@@ -104,8 +107,8 @@ function toggleFor(row: HTMLElement): HTMLButtonElement | null {
 }
 
 describe('mobile chat list opened-by tree', () => {
-  it('renders opened sessions directly after their opener', () => {
-    const list = render(makeOpenerItems());
+  it('renders opened sessions directly after their opener', async () => {
+    const list = await render(makeOpenerItems());
     expect(titles(list)).toEqual([
       'Session opener',
       'Session opened-1',
@@ -116,8 +119,8 @@ describe('mobile chat list opened-by tree', () => {
     expect(list.map(isNested)).toEqual([false, true, true, true, false]);
   });
 
-  it('indents an opened session by widening its leading slot, not the row', () => {
-    const list = render(makeOpenerItems());
+  it('indents an opened session by widening its leading slot, not the row', async () => {
+    const list = await render(makeOpenerItems());
     const slot = (row: HTMLElement) =>
       row.querySelector<HTMLElement>('[data-conversation-row-leading-slot]')?.className ?? '';
     // The node must not move: only the slot after it widens (16px -> 32px), so
@@ -131,10 +134,10 @@ describe('mobile chat list opened-by tree', () => {
     for (const row of list) expect(row.className).toContain('px-4');
   });
 
-  it('keeps the flat DOM in a bucket with no nesting', () => {
+  it('keeps the flat DOM in a bucket with no nesting', async () => {
     // The regression that matters most: an ordinary list must not change shape
     // just because the feature exists.
-    const list = render([makeItem({ id: 'a' }), makeItem({ id: 'b' })]);
+    const list = await render([makeItem({ id: 'a' }), makeItem({ id: 'b' })]);
     expect(list[0]?.className).toContain('px-4');
     expect(
       list[0]?.querySelector('[data-conversation-row-leading-slot]')?.className
@@ -142,10 +145,10 @@ describe('mobile chat list opened-by tree', () => {
     expect(toggleFor(list[0]!)).toBeNull();
   });
 
-  it('gives an ACTIVE opened session its status instead of the connector', () => {
+  it('gives an ACTIVE opened session its status instead of the connector', async () => {
     // One node, one meaning: "this session needs you" outranks "this session
     // was opened by that one". Same rule the desktop sidebar row applies.
-    const list = render([
+    const list = await render([
       makeItem({ id: 'opener', latestMessageAt: NOW }),
       makeItem({
         id: 'busy',
@@ -169,8 +172,8 @@ describe('mobile chat list opened-by tree', () => {
     ).toContain('w-8');
   });
 
-  it('gives an ACTIVE opener its status instead of the fold control', () => {
-    const list = render([
+  it('gives an ACTIVE opener its status instead of the fold control', async () => {
+    const list = await render([
       makeItem({ id: 'opener', isWorking: true, latestMessageAt: NOW }),
       makeItem({
         id: 'opened',
@@ -184,8 +187,8 @@ describe('mobile chat list opened-by tree', () => {
     expect(isNested(list[1]!)).toBe(true);
   });
 
-  it('renders the fold control only on the opener, outside the row button', () => {
-    const list = render(makeOpenerItems());
+  it('renders the fold control only on the opener, outside the row button', async () => {
+    const list = await render(makeOpenerItems());
     const toggle = toggleFor(list[0]!);
     expect(toggle).not.toBeNull();
     // Nesting a button inside the row button would be invalid HTML and
@@ -196,33 +199,33 @@ describe('mobile chat list opened-by tree', () => {
     expect(toggleFor(list[4]!)).toBeNull();
   });
 
-  it('folds and unfolds the opened sessions when the control is tapped', () => {
+  it('folds and unfolds the opened sessions when the control is tapped', async () => {
     // Assert the fold STATE, not the row count: `AnimatePresence` keeps a
     // removed row mounted for its 400ms exit, so counting DOM rows right after
     // the tap would be a race on the animation clock.
-    render(makeOpenerItems());
-    act(() => {
+    await render(makeOpenerItems());
+    await act(async () => {
       toggleFor(rows()[0]!)!.click();
     });
     expect(store.get(sidebarCollapsedOpenedBySessionsAtom)).toEqual({ opener: true });
     expect(toggleFor(rows()[0]!)!.getAttribute('aria-expanded')).toBe('false');
 
-    act(() => {
+    await act(async () => {
       toggleFor(rows()[0]!)!.click();
     });
     expect(store.get(sidebarCollapsedOpenedBySessionsAtom)).toEqual({ opener: false });
     expect(toggleFor(rows()[0]!)!.getAttribute('aria-expanded')).toBe('true');
   });
 
-  it('reads its folded state from the shared sidebar atom', () => {
+  it('reads its folded state from the shared sidebar atom', async () => {
     // Folding in the sidebar drawer and in the mobile list must never disagree.
     store.set(sidebarCollapsedOpenedBySessionsAtom, { opener: true });
-    const list = render(makeOpenerItems());
+    const list = await render(makeOpenerItems());
     expect(titles(list)).toEqual(['Session opener', 'Session unrelated']);
   });
 
-  it('stops the connector trunk at the last opened session', () => {
-    const list = render(makeOpenerItems());
+  it('stops the connector trunk at the last opened session', async () => {
+    const list = await render(makeOpenerItems());
     const trunkOf = (row: HTMLElement) =>
       row.querySelector('[data-conversation-tree-connector] > span')?.className ?? '';
     // Middle children carry the trunk into the next row; the last one ends it
@@ -233,10 +236,10 @@ describe('mobile chat list opened-by tree', () => {
     expect(trunkOf(list[3]!)).not.toContain('bottom-0');
   });
 
-  it('keeps a session whose opener is missing from this list at top level', () => {
+  it('keeps a session whose opener is missing from this list at top level', async () => {
     // The orphan fallback: an opener that is archived, filtered out, or in
     // another bucket must never hide the Session it opened.
-    const list = render([
+    const list = await render([
       makeItem({ id: 'visible', latestMessageAt: NOW }),
       makeItem({
         id: 'orphan',
@@ -249,11 +252,11 @@ describe('mobile chat list opened-by tree', () => {
     expect(list.map(isNested)).toEqual([false, false]);
   });
 
-  it('ranks an opener by its freshest opened session', () => {
+  it('ranks an opener by its freshest opened session', async () => {
     // The opener is the oldest row in the list but it opened the newest one, so
     // the whole group must still sort above the mid-aged standalone row —
     // otherwise nesting would silently break the list's recency order.
-    const list = render([
+    const list = await render([
       makeItem({ id: 'stale-opener', latestMessageAt: NOW - 5 * HOUR }),
       makeItem({ id: 'standalone', latestMessageAt: NOW - 2 * HOUR }),
       makeItem({
@@ -270,8 +273,8 @@ describe('mobile chat list opened-by tree', () => {
     ]);
   });
 
-  it('keeps a pinned opener above an unpinned one with fresher opened sessions', () => {
-    const list = render([
+  it('keeps a pinned opener above an unpinned one with fresher opened sessions', async () => {
+    const list = await render([
       makeItem({ id: 'pinned', isPinned: true, latestMessageAt: NOW - 9 * HOUR }),
       makeItem({ id: 'unpinned', latestMessageAt: NOW - HOUR }),
       makeItem({

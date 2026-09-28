@@ -25,6 +25,16 @@ import {
   type WorkspaceId,
 } from '@lody/shared';
 import { getLodyDataDir } from '@lody/shared/node/installation-profile';
+import { discoveryCursor, DiscoveryPageShape } from '@/lib/discovery-query';
+
+export const OperationListQuerySchema = z
+  .object({
+    limit: DiscoveryPageShape.limit,
+    cursor: DiscoveryPageShape.cursor,
+    state: z.enum(['active', 'finished']).optional(),
+  })
+  .strict();
+export type OperationListQuery = z.input<typeof OperationListQuerySchema>;
 
 const DAY_MS = 24 * 60 * 60 * 1_000;
 const TERMINAL_RETENTION_MS = 7 * DAY_MS;
@@ -516,6 +526,53 @@ export class LodyOperationStore {
       )
       .all(workspaceId, ownerMachineId);
     return rows.map((row) => this.decodeOperation(row));
+  }
+
+  listForRequester(
+    scope: { workspaceId: WorkspaceId; requesterSessionId: SessionId; requesterUserId: string },
+    input: OperationListQuery = {}
+  ) {
+    const query = OperationListQuerySchema.parse(input);
+    const cursor = discoveryCursor(
+      { limit: query.limit, cursor: query.cursor },
+      JSON.stringify([
+        'operations',
+        scope.workspaceId,
+        scope.requesterSessionId,
+        scope.requesterUserId,
+        query.state ?? null,
+      ])
+    );
+    const rows = this.db
+      .prepare(`SELECT * FROM operations WHERE workspace_id = ? AND requester_session_id = ?
+      AND requester_user_id = ? AND (? IS NULL OR state = ?) AND (? IS NULL OR operation_id > ?)
+      ORDER BY operation_id ASC LIMIT ?`)
+      .all(
+        scope.workspaceId,
+        scope.requesterSessionId,
+        scope.requesterUserId,
+        query.state ?? null,
+        query.state ?? null,
+        cursor.after ?? null,
+        cursor.after ?? null,
+        cursor.limit + 1
+      );
+    const operations = rows.slice(0, cursor.limit).map((row) => this.decodeOperation(row));
+    const last = operations.at(-1);
+    const hasMore = rows.length > cursor.limit;
+    return {
+      ok: true as const,
+      items: operations.map((operation) => ({
+        operationId: operation.operationId,
+        kind: operation.kind,
+        state: operation.state,
+        createdAt: operation.createdAt,
+        deadlineAt: operation.deadlineAt,
+        itemCount: operation.items.length,
+      })),
+      hasMore,
+      ...(hasMore && last ? { nextCursor: cursor.encode(last.operationId) } : {}),
+    };
   }
 
   hasPendingWorkForRequester(workspaceId: WorkspaceId, requesterSessionId: SessionId): boolean {

@@ -1,3 +1,4 @@
+import { createSessionPreparationLease } from '@/lib/session-preparation-lease';
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { buildSessionPreparationRequestKey } from '@lody/shared';
 import type {
@@ -19,7 +20,7 @@ type ActivePreparation = {
   machineId: MachineId;
   requestedByUserId: string;
   runtime: WorkspaceRuntime;
-  startPromise: ReturnType<WorkspaceRuntime['requestSessionPrepare']>;
+  lease: ReturnType<typeof createSessionPreparationLease>;
 };
 
 type PreparationInput = {
@@ -39,23 +40,10 @@ type PreparationInput = {
 };
 
 export type SessionPreparationController = {
+  cancel: () => void;
   /** Transfers an active draft lease to the durable session without cancelling it. */
   handoffToSession: (sessionId: SessionId) => boolean;
 };
-
-function requestPreparationCancel(active: ActivePreparation): void {
-  void active.runtime
-    .requestSessionPrepareCancel(
-      active.machineId,
-      {
-        preparationId: active.preparationId,
-        sessionId: active.sessionId,
-        requestedByUserId: active.requestedByUserId,
-      },
-      { timeoutMs: 5_000 }
-    )
-    .catch(() => null);
-}
 
 function createPreparationId(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -115,7 +103,7 @@ export function useSessionPreparation(input: PreparationInput): SessionPreparati
     const active = activeRef.current;
     activeRef.current = null;
     if (!active) return;
-    void active.startPromise.catch(() => null).then(() => requestPreparationCancel(active));
+    active.lease.cancel();
   }, []);
 
   const handoffToSession = useCallback(
@@ -125,7 +113,7 @@ export function useSessionPreparation(input: PreparationInput): SessionPreparati
       const active = activeRef.current;
       if (!active || active.sessionId !== sessionId) return false;
       activeRef.current = null;
-      return true;
+      return active.lease.handoff();
     },
     [clearIdleTimer, clearStartTimer]
   );
@@ -148,39 +136,35 @@ export function useSessionPreparation(input: PreparationInput): SessionPreparati
       }
       const sessionId = current.sessionId ?? current.ensureSessionId();
       const preparationId = createPreparationId();
-      const startPromise = current.runtime.requestSessionPrepare(
-        current.machineId,
-        {
-          preparationId,
-          sessionId,
-          requestedByUserId: current.requestedByUserId,
-          agentConfigId: current.agentConfigId,
-          cliType: current.cliType,
-          agentType: current.agentType,
-          project: current.project,
-          runConfig: current.runConfig,
-        },
-        { timeoutMs: 5_000 }
-      );
+      const lease = createSessionPreparationLease(current.runtime, current.machineId, {
+        preparationId,
+        sessionId,
+        requestedByUserId: current.requestedByUserId,
+        agentConfigId: current.agentConfigId,
+        cliType: current.cliType,
+        agentType: current.agentType,
+        project: current.project,
+        runConfig: current.runConfig,
+      });
       const active: ActivePreparation = {
         preparationId,
         sessionId,
         machineId: current.machineId,
         requestedByUserId: current.requestedByUserId,
         runtime: current.runtime,
-        startPromise,
+        lease,
       };
       activeRef.current = active;
-      void startPromise.then(
+      void lease.ready.then(
         (response) => {
           if (activeRef.current !== active || response?.accepted) return;
           activeRef.current = null;
-          requestPreparationCancel(active);
+          active.lease.cancel();
         },
         () => {
           if (activeRef.current !== active) return;
           activeRef.current = null;
-          requestPreparationCancel(active);
+          active.lease.cancel();
         }
       );
     }, delayMs);
@@ -196,7 +180,7 @@ export function useSessionPreparation(input: PreparationInput): SessionPreparati
       clearStartTimer();
       cancelActive();
     };
-  }, [cancelActive, clearStartTimer, input.enabled, requestKey, scheduleStart]);
+  }, [cancelActive, clearStartTimer, input.enabled, input.runtime, requestKey, scheduleStart]);
 
   useEffect(() => {
     clearIdleTimer();
@@ -219,5 +203,15 @@ export function useSessionPreparation(input: PreparationInput): SessionPreparati
     scheduleStart,
   ]);
 
-  return useMemo(() => ({ handoffToSession }), [handoffToSession]);
+  return useMemo(
+    () => ({
+      handoffToSession,
+      cancel: () => {
+        clearStartTimer();
+        clearIdleTimer();
+        cancelActive();
+      },
+    }),
+    [handoffToSession, clearStartTimer, clearIdleTimer, cancelActive]
+  );
 }

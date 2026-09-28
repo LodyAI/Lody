@@ -6,6 +6,7 @@ type PostMultipartArgs = {
   onProgress?: (percent: number) => void;
   /** Prefix for network/abort error messages, e.g. "Image upload". */
   errorLabel: string;
+  signal?: AbortSignal;
 };
 
 /**
@@ -23,9 +24,20 @@ export function postMultipartWithProgress({
   formData,
   onProgress,
   errorLabel,
+  signal,
 }: PostMultipartArgs): Promise<unknown> {
   return new Promise<unknown>((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new DOMException(`${errorLabel} aborted`, 'AbortError'));
+      return;
+    }
     const request = new XMLHttpRequest();
+    const abort = () => request.abort();
+    const cleanup = () => {
+      signal?.removeEventListener('abort', abort);
+      request.upload.onprogress = null;
+      request.onerror = request.onabort = request.onload = null;
+    };
     request.open('POST', url);
     request.responseType = 'json';
     request.setRequestHeader('Authorization', `Bearer ${token}`);
@@ -40,10 +52,17 @@ export function postMultipartWithProgress({
       };
     }
 
-    request.onerror = () => reject(new Error(`${errorLabel} failed`));
-    request.onabort = () => reject(new Error(`${errorLabel} aborted`));
+    request.onerror = () => {
+      cleanup();
+      reject(new Error(`${errorLabel} failed`));
+    };
+    request.onabort = () => {
+      cleanup();
+      reject(new DOMException(`${errorLabel} aborted`, 'AbortError'));
+    };
 
     request.onload = () => {
+      cleanup();
       let responseBody: unknown = null;
       try {
         responseBody =
@@ -68,6 +87,17 @@ export function postMultipartWithProgress({
       resolve(responseBody);
     };
 
-    request.send(formData);
+    try {
+      signal?.addEventListener('abort', abort, { once: true });
+      if (signal?.aborted) {
+        cleanup();
+        reject(new DOMException(`${errorLabel} aborted`, 'AbortError'));
+        return;
+      }
+      request.send(formData);
+    } catch (error) {
+      cleanup();
+      reject(error);
+    }
   });
 }

@@ -497,7 +497,11 @@ function getMachineCommandEventImpact(events: readonly MachineFlockEvent[]): {
     if (parsed?.kind === 'deleteLocalProjectCommand') {
       deleteLocalProject = true;
     }
-    if (parsed?.kind === 'providerSetup' || parsed?.kind === 'providerSetupCancellation') {
+    if (
+      parsed?.kind === 'providerSetup' ||
+      parsed?.kind === 'providerSetupCancellation' ||
+      parsed?.kind === 'agentConfig'
+    ) {
       providerSetup = true;
     }
   }
@@ -4917,13 +4921,20 @@ export class MessageHandler {
     state.acpFlushCountInTurn += 1;
     const notifications = queue.map((item) => item.notification);
     const groups = this.groupBufferedACPUpdates(queue);
-    const span = startTraceSpan(this.logger, 'acp.flush_updates_batch', {
-      sessionId,
-      turnId: this.store.getTurnId(sessionId),
-      updates: notifications.length,
-      groups: groups.length,
-      flushCount: state.acpFlushCountInTurn,
-    });
+    // One span per streamed-token batch: kept out of the default file sink, but
+    // still reported at debug when the flush fails or runs long.
+    const span = startTraceSpan(
+      this.logger,
+      'acp.flush_updates_batch',
+      {
+        sessionId,
+        turnId: this.store.getTurnId(sessionId),
+        updates: notifications.length,
+        groups: groups.length,
+        flushCount: state.acpFlushCountInTurn,
+      },
+      { hot: true }
+    );
 
     const session = this.sessionManager.getSession(sessionId);
     const modelInfo = session?.agentClient?.currentModel;
@@ -5735,6 +5746,9 @@ export class MessageHandler {
       return;
     }
     const turn = state.turn;
+    // Runs ahead of every ACP flush, so it is as hot as the flush span itself: a
+    // healthy open gate stays out of the default file sink, while a wait that
+    // fails or runs long still reports at debug.
     await traceAsync(
       this.logger,
       'history.turn_gate_wait',
@@ -5743,7 +5757,8 @@ export class MessageHandler {
         ...(turn.phase === 'idle' ? {} : { turnId: turn.turnId }),
         ...(turn.phase === 'idle' || !turn.userTurnId ? {} : { userTurnId: turn.userTurnId }),
       },
-      async () => await gate.waitUntilOpen()
+      async () => await gate.waitUntilOpen(),
+      { hot: true }
     );
   }
 
@@ -8787,7 +8802,23 @@ export class MessageHandler {
       this.logger.debug(`[${sessionId}] Generating session title because title is missing`);
       const resolvedTitleConfig =
         titleConfig ?? (await this.resolveTitleConfig(sessionId, meta?.agentConfigId));
+      const provider = meta?.agentConfigId
+        ? await this.workspaceDocument.getAgentConfigById(meta.agentConfigId, this.machineId)
+        : null;
+      if (meta?.agentConfigId && !provider) return null;
+      if (
+        provider &&
+        !provider.codexAuth &&
+        (await getCodexProfileStore().list(this.workspaceId)).some(
+          (profile) => profile.configId === provider.id && profile.machineId === this.machineId
+        )
+      )
+        return null;
+      const codexProfile = provider?.codexAuth
+        ? await getCodexProfileStore().resolve(this.workspaceId, provider)
+        : undefined;
       const title = await generateTitleIsolated({
+        codexProfile: codexProfile ? { profile: codexProfile } : undefined,
         cliType,
         agentType,
         customAcp,
@@ -9757,3 +9788,4 @@ export class MessageHandler {
     this.logger.debug(`[GC] Session ${sessionId} cleaned`);
   }
 }
+import { getCodexProfileStore } from '@/agent/codex-profile-store';

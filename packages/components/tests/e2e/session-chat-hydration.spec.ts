@@ -137,77 +137,18 @@ for (const { story, label, working } of [
   });
 }
 
-test('opening and reopening never reveals an unmeasured tail', async ({ page }) => {
-  await page.addInitScript(() => {
-    const NativeResizeObserver = window.ResizeObserver;
-    let held: (() => void)[] = [];
-    let paused = true;
-    Object.assign(window, {
-      pauseTailMeasurement: () => {
-        paused = true;
-      },
-      releaseTailMeasurement: () => {
-        paused = false;
-        const callbacks = held;
-        held = [];
-        for (const callback of callbacks) callback();
-      },
-      hasHeldTailMeasurement: () => held.length > 0,
-    });
-    window.ResizeObserver = class extends NativeResizeObserver {
-      constructor(callback: ResizeObserverCallback) {
-        super((entries, observer) => {
-          // Gate the real browser measurement of the destination row. Parent
-          // viewport/spacer observations keep running. No timing assumptions.
-          if (
-            paused &&
-            entries.some(
-              ({ target }) =>
-                target.parentElement?.parentElement?.hasAttribute(
-                  'data-message-selection-scroll'
-                ) && target.querySelector('[data-cold-tail]')
-            )
-          ) {
-            held.push(() => callback(entries, observer));
-          } else callback(entries, observer);
-        });
-      }
-    };
-  });
-  await page.goto('/iframe.html?id=sessions-sessionchathydration--cold-tail&viewMode=story');
-  const open = page.getByRole('button', { name: 'Open conversation', exact: true });
-  await open.waitFor({ state: 'visible' });
-  for (let i = 0; i < 2; i++) {
-    await page.evaluate(() =>
-      (window as typeof window & { pauseTailMeasurement: () => void }).pauseTailMeasurement()
-    );
-    await open.click();
-    await page.waitForFunction(() =>
-      (window as typeof window & { hasHeldTailMeasurement: () => boolean }).hasHeldTailMeasurement()
-    );
-    const viewport = page.locator('[data-message-selection-scroll]');
-    await expect(viewport).toHaveCSS('visibility', 'hidden');
-    await page.evaluate(() =>
-      (window as typeof window & { releaseTailMeasurement: () => void }).releaseTailMeasurement()
-    );
-    await expect(viewport).toHaveCSS('visibility', 'visible');
-    await expect(page.locator('[data-cold-tail]')).toBeInViewport();
-    await expect
-      .poll(() => viewport.evaluate((el) => el.scrollHeight - el.clientHeight - el.scrollTop))
-      .toBeLessThanOrEqual(1);
-  }
-});
-
-test('a cached reading position reveals after late virtual row measurements', async ({ page }) => {
-  // Install before importing Virtua: it captures the timer function at load.
-  await page.clock.install({ time: 0 });
+/**
+ * Holds the ResizeObserver deliveries for conversation rows until released.
+ * The scroll engine must not depend on them: it reads the rows it mounts in
+ * the commit that mounts them, so the first painted frame is already placed.
+ */
+async function holdRowMeasurements(page: import('@playwright/test').Page) {
   await page.addInitScript(() => {
     const NativeResizeObserver = window.ResizeObserver;
     let paused = true;
     let held: (() => void)[] = [];
     Object.assign(window, {
-      heldReadingMeasurements: () => held.length,
-      releaseReadingMeasurements: () => {
+      releaseRowMeasurements: () => {
         paused = false;
         const callbacks = held;
         held = [];
@@ -219,7 +160,6 @@ test('a cached reading position reveals after late virtual row measurements', as
         super((entries, observer) => {
           const rows = entries.filter(({ target }) => target.hasAttribute('data-virtual-index'));
           const other = entries.filter(({ target }) => !target.hasAttribute('data-virtual-index'));
-          // Virtua must learn its viewport while destination measurements wait.
           if (other.length) callback(other, observer);
           if (rows.length) {
             if (paused) held.push(() => callback(rows, observer));
@@ -229,34 +169,59 @@ test('a cached reading position reveals after late virtual row measurements', as
       }
     };
   });
+}
+
+const releaseRowMeasurements = (page: import('@playwright/test').Page) =>
+  page.evaluate(() =>
+    (window as typeof window & { releaseRowMeasurements: () => void }).releaseRowMeasurements()
+  );
+
+test('opening and reopening lands on the tail without waiting for row measurements', async ({
+  page,
+}) => {
+  await holdRowMeasurements(page);
+  await page.goto('/iframe.html?id=sessions-sessionchathydration--cold-tail&viewMode=story');
+  const open = page.getByRole('button', { name: 'Open conversation', exact: true });
+  await open.waitFor({ state: 'visible' });
+  for (let i = 0; i < 2; i++) {
+    await open.click();
+    const viewport = page.locator('[data-message-selection-scroll]');
+    // Never hidden, and the tail is in place before any row observation arrives.
+    await expect(viewport).toHaveCSS('visibility', 'visible');
+    await expect(page.locator('[data-cold-tail]')).toBeInViewport();
+    await expect
+      .poll(() => viewport.evaluate((el) => el.scrollHeight - el.clientHeight - el.scrollTop))
+      .toBeLessThanOrEqual(1);
+  }
+  await releaseRowMeasurements(page);
+  const viewport = page.locator('[data-message-selection-scroll]');
+  await expect(page.locator('[data-cold-tail]')).toBeInViewport();
+  await expect
+    .poll(() => viewport.evaluate((el) => el.scrollHeight - el.clientHeight - el.scrollTop))
+    .toBeLessThanOrEqual(1);
+});
+
+test('a saved reading position opens at its row without waiting for row measurements', async ({
+  page,
+}) => {
+  await holdRowMeasurements(page);
   await page.goto(
     '/iframe.html?id=sessions-sessionchathydration--cold-cached-offset&viewMode=story'
   );
   const open = page.getByRole('button', { name: 'Open conversation', exact: true });
   await open.waitFor({ state: 'visible' });
-  await page.clock.pauseAt(await page.evaluate(() => Date.now() + 1000));
   await open.click();
-  await expect
-    .poll(() =>
-      page.evaluate(() =>
-        (
-          window as typeof window & { heldReadingMeasurements: () => number }
-        ).heldReadingMeasurements()
-      )
-    )
-    .toBeGreaterThan(0);
   const viewport = page.locator('[data-message-selection-scroll]');
-  await expect(viewport).toHaveCSS('visibility', 'hidden');
-  // Expire Virtua's 150ms scroll request using a fake clock, then deliver the
-  // held measurements. Geometry, not another request or a sleep, must recover.
-  await page.clock.runFor(200);
-  await page.evaluate(() =>
-    (
-      window as typeof window & { releaseReadingMeasurements: () => void }
-    ).releaseReadingMeasurements()
-  );
-  await page.clock.resume();
   await expect(viewport).toHaveCSS('visibility', 'visible');
-  await expect.poll(() => viewport.evaluate((el) => el.scrollTop)).toBe(1200);
-  await expect(viewport.locator('[data-virtual-index="4"]')).toBeInViewport();
+  // Distance of the saved row's top from the viewport's top edge.
+  const rowDistance = () =>
+    viewport.evaluate((el) => {
+      const row = el.querySelector('[data-conversation-turn-id="cold-4"]');
+      if (!row) return Number.POSITIVE_INFINITY;
+      return Math.abs(row.getBoundingClientRect().top - el.getBoundingClientRect().top);
+    });
+  // The saved row is at the top edge before and after the held measurements arrive.
+  await expect.poll(rowDistance).toBeLessThanOrEqual(1);
+  await releaseRowMeasurements(page);
+  await expect.poll(rowDistance).toBeLessThanOrEqual(1);
 });

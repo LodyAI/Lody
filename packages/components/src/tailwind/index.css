@@ -196,17 +196,14 @@ pre,
 
   .markdown-renderer
     :is(table, [data-streamdown='code-block'], [data-streamdown='mermaid-block'])
-    :is(p, h1, h2, h3, h4, h5, h6) {
+    :is(p, h1, h2, h3, h4, h5, h6),
+  [data-tool-detail-sheet] .markdown-renderer :is(p, h1, h2, h3, h4, h5, h6) {
     padding-inline: 0;
   }
 
-  .markdown-renderer [data-streamdown='code-block'] {
-    --markdown-code-block-bg: hsl(var(--code-background));
-    --markdown-code-block-border: hsl(var(--code-border));
-    --markdown-code-block-foreground: hsl(var(--code-foreground));
-    --markdown-code-block-language: hsl(var(--code-foreground) / 0.55);
-    --markdown-code-block-action-bg: hsl(var(--code-background) / 0.88);
-    --markdown-code-block-action-border: hsl(var(--code-border) / 0.78);
+  /* Shiki's CSS-variables theme, for every surface that shows its tokens: a
+     markdown fence and a tool step's command (`tool-call-detail.tsx`). */
+  :is(.markdown-renderer [data-streamdown='code-block'], [data-shiki-palette]) {
     --lody-shiki-background: transparent;
     --lody-shiki-foreground: hsl(var(--code-foreground));
     --lody-shiki-token-comment: hsl(var(--syntax-comment));
@@ -221,6 +218,15 @@ pre,
     --lody-shiki-token-inserted: hsl(var(--code-added));
     --lody-shiki-token-deleted: hsl(var(--code-removed));
     --lody-shiki-token-changed: hsl(var(--modified-file));
+  }
+
+  .markdown-renderer [data-streamdown='code-block'] {
+    --markdown-code-block-bg: hsl(var(--code-background));
+    --markdown-code-block-border: hsl(var(--code-border));
+    --markdown-code-block-foreground: hsl(var(--code-foreground));
+    --markdown-code-block-language: hsl(var(--code-foreground) / 0.55);
+    --markdown-code-block-action-bg: hsl(var(--code-background) / 0.88);
+    --markdown-code-block-action-border: hsl(var(--code-border) / 0.78);
     position: relative;
     /* Toolbar row, then the highlighted body. */
     display: flex !important;

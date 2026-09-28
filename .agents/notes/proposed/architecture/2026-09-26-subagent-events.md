@@ -119,6 +119,13 @@ dialog timeouts and were stopped; full-repository green is not claimed.
 The UI Designer inspected light/dark Storybook screenshots using a stand-in history
 renderer; the real tool/thought renderer still needs desktop/live-run verification.
 
+Integration with main retains both `subagentEvents` and `codexAuthProfiles` in the
+daemon capability advertisement; neither capability implies the other. The shared
+negotiation suite covers this independence. Subagent history keeps its dedicated
+dialog while main's DeepSeek-only thought visibility remains a parent-conversation
+rule. HistoryWriter keeps both run-owned child output and durable submission
+preparation; neither feature introduces a second writer.
+
 ### Remaining builtin adapters
 
 Companion draft PRs: [Claude #36](https://github.com/LodyAI/acp-extension-claude/pull/36),

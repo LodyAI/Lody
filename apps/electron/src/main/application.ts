@@ -1,3 +1,4 @@
+import { prepareRendererSendsForExit } from './services/renderer-send-lifecycle'
 import { handleWindowContentReady } from './window-target'
 import { installLocalFileResourceProtocol } from './services/local-file-resource-protocol'
 import { app, BrowserWindow, dialog, ipcMain, safeStorage } from 'electron'
@@ -44,6 +45,7 @@ import {
 } from './services/window-badge-service'
 import { setupApplicationMenu } from './menu'
 import { isRendererReloadShortcut } from './reload-shortcut'
+import { requestRendererReload } from './renderer-recovery'
 import {
   flushElectronMainErrorReporting,
   installElectronMainErrorReporting
@@ -257,11 +259,11 @@ export function startApplication(executionHost?: DesktopExecutionHost): void {
       optimizer.watchWindowShortcuts(window, { zoom: true })
       // electron-toolkit deliberately blocks the production reload shortcut.
       // Restore the normal desktop-app behavior requested by the user while
-      // leaving Cmd/Ctrl+Shift+R and DevTools handling unchanged.
+      // routing both reload shortcuts through the pending-send guard.
       window.webContents.on('before-input-event', (event, input) => {
         if (isRendererReloadShortcut(input, process.platform)) {
           event.preventDefault()
-          window.webContents.reload()
+          void requestRendererReload(window, { ignoreCache: input.shift })
         }
       })
     })
@@ -331,37 +333,38 @@ export function startApplication(executionHost?: DesktopExecutionHost): void {
       openOrFocusMainWindow({ icon })
     })
 
-    app.on(
-      'before-quit',
-      createDesktopQuitBarrier({
-        stop: async () => {
-          setAppQuitting(true)
-          setWindowsTrayAvailable(false)
-          windowsTrayService.stop()
-          windowBadgeService.reset()
-          terminalRelay.destroy()
-          loroDataPlaneRelay.destroy()
-          appUpdaterService.stop()
-          publicBrowserService.destroyAll()
-          const [cliResult] = await Promise.allSettled([
-            cliService.shutdownForQuit(),
-            flushElectronMainErrorReporting(),
-            stopDevbarDevframeService()
-          ])
-          if (cliResult.status === 'rejected') throw cliResult.reason
-        },
-        quit: () => app.quit(),
-        reportFailure: (error) => {
-          // A timeout does not prove exit. Keep ownership until quit succeeds.
-          console.error('[Electron] Quit blocked by the embedded CLI', error)
-          dialog.showErrorBox(
-            PRODUCT_NAME,
-            'The local agent has not confirmed that it stopped. Lody will stay open to prevent ' +
-              'another desktop from using its data. Wait for the agent to stop, then quit again.'
-          )
-        }
-      })
-    )
+    const beforeQuit = createDesktopQuitBarrier({
+      prepare: () => prepareRendererSendsForExit('quit'),
+      stop: async () => {
+        setAppQuitting(true)
+        setWindowsTrayAvailable(false)
+        windowsTrayService.stop()
+        windowBadgeService.reset()
+        terminalRelay.destroy()
+        loroDataPlaneRelay.destroy()
+        appUpdaterService.stop()
+        publicBrowserService.destroyAll()
+        const [cliResult] = await Promise.allSettled([
+          cliService.shutdownForQuit(),
+          flushElectronMainErrorReporting(),
+          stopDevbarDevframeService()
+        ])
+        if (cliResult.status === 'rejected') throw cliResult.reason
+      },
+      quit: () => app.quit(),
+      reportFailure: (error) => {
+        // A timeout does not prove exit. Keep ownership until quit succeeds.
+        console.error('[Electron] Quit blocked by the embedded CLI', error)
+        dialog.showErrorBox(
+          PRODUCT_NAME,
+          'The local agent has not confirmed that it stopped. Lody will stay open to prevent ' +
+            'another desktop from using its data. Wait for the agent to stop, then quit again.'
+        )
+      }
+    })
+    app.on('before-quit', (event) => {
+      void beforeQuit(event)
+    })
 
     process.on('exit', () => {
       setWindowsTrayAvailable(false)

@@ -4,11 +4,21 @@ Binding rules for this directory live in [AGENTS.md](AGENTS.md); this file keeps
 the reasoning behind them so the rules can stay short. It explains only the hooks
 that carry an invariant — the directory itself is the list of hooks.
 
+## Session submission
+
+`use-session-actions.ts` binds admission, analytics, and Jotai observations to
+`lib/session-submission.ts`. The latter owns the ordinary Promise entry points
+for creation, initial history, continuation, dispatch, and guide. It has no React
+lifetime or second writer. The workspace journal durably accepts the full input before releasing the
+composer, prepares attachments on Send, and serializes same-session submission.
+`use-session-preparation` holds an owned warmup lease; attachment takeover cancels
+and joins it. See the [attachment draft Spec](../../../../specs/session-files.md).
+
 | Area                   | Entry point                                                                                | Responsibility                                              |
 | ---------------------- | ------------------------------------------------------------------------------------------ | ----------------------------------------------------------- |
 | Session lifecycle      | [`use-session-actions.ts`](use-session-actions.ts)                                         | Bind operation targets and writes to one workspace runtime. |
 | Workspace catalogs     | [`use-agent-role-schema-reconciliation.ts`](use-agent-role-schema-reconciliation.ts)       | Reconcile owned Roles after matching runtime probes.        |
-| Conversation rendering | [`use-sticky-scroll.ts`](use-sticky-scroll.ts), [`use-session-doc.ts`](use-session-doc.ts) | Coordinate viewport ownership and history publication.      |
+| Conversation rendering | [`use-conversation-stream-items.ts`](use-conversation-stream-items.ts), [`use-session-doc.ts`](use-session-doc.ts) | Coordinate the hydration window and history publication. |
 
 ## Session lifecycle
 
@@ -45,56 +55,25 @@ ownership transfer, before organization permissions refresh. The membership hook
 therefore calls it directly and separately notifies `$activeOrgSignal`. Its tests
 use the plugin's actual action so a Promise-returning mock cannot hide this error.
 
-## Conversation scrolling (`use-sticky-scroll.ts`)
+## Conversation scrolling
 
-`virtua` owns mounted rows, measurement, and index navigation. `use-sticky-scroll.ts`
-owns one explicit follow mode: `follow` (stay on the real bottom), `anchored` (a
-just-sent message held at the top while a trailing reply room reserves the space
-below it) and `free` (nothing moves). It replaced `use-stick-to-bottom`, whose
-direction heuristics read a browser clamp — the viewport growing when the composer
-shrinks — as the reader scrolling up and released follow; the old one-shot composer
-skip flag hid the bottom behind a growing composer instead. The
-[follow-mode note](../../../../.agents/notes/implemented/architecture/2026-09-23-conversation-follow-modes.md)
-records the decision. `scroll-debug-log.ts` keeps a geometry-only timeline of open,
-reveal, follow corrections and hydration windows (`window.__lodyScrollLog.dump()`;
-console output with `localStorage['lody:debug-scroll'] = '1'`). The hook does not
-replace Virtua and keeps the product-level behaviors (per-session scroll restoration,
-search and group-expansion suppression, mobile keyboard and terminal-dock resizing).
-That is why the two concerns stay separated and why recovering the
-viewport element by DOM query, `VList` handle, item-count effect, observer retry, or
-timer is banned: only the viewport's own React callback ref fires on the real mount
-and unmount commits, which is what an empty-to-populated conversation depends on.
+The conversation viewport is owned by the conversation scroll engine
+(`lib/conversation-scroll`, rules in its `AGENTS.md`), which replaced
+`use-sticky-scroll.ts` and the Virtua list after seven fixes to the same blank-pane
+class. Why and how: the
+[scroll-engine note](../../../../.agents/notes/implemented/architecture/2026-09-27-conversation-scroll-engine.md).
+`scroll-debug-log.ts` still keeps a geometry-only timeline
+(`window.__lodyScrollLog.dump()`; console output with
+`localStorage['lody:debug-scroll'] = '1'`), and the engine keeps an always-on cycle
+log (`window.__lodyScrollEngineLog.dump()`).
 
-`ResizeObserver` records are the single source of viewport-size change because the
-mobile keyboard and the terminal dock resize that same element; custom resize-event
-pumps and guessed transition durations were the earlier, unreliable version. Only
-height matters: a flex sibling such as the desktop sidebar can animate its width
-every frame, and forwarding width-only records competes with the content observer's
-bottom correction and visibly jitters the conversation.
-
-First-window data readiness does not imply viewport readiness. A DOM `scrollTop`
-write can reach the estimated bottom while Virtua still has no destination rows,
-or has hidden unmeasured rows. Initial reveal waits for the virtualizer's offset,
-measured destination and visible-row geometry to agree. Direct row ResizeObserver
-records and spacer/row geometry commits drive this check without a settle timer.
-Those row records also correct following before the spacer's deferred resize;
-programmatic corrections record their own scrollTop so the resulting scroll event
-is not read as reader intent. Cached pixel restoration uses that own-write path too,
-reapplying the clamped target as geometry changes until reveal. A one-shot Virtua
-scroll request can expire before late measurements change its anchor, leaving the
-visibility gate waiting forever for an offset nobody will restore. Any navigation —
-reader input that releases follow, a suppressed jump, the end, or a send — retires
-the pending cached target.
-The [late-measurement decision](../../../../.agents/notes/implemented/bug-fix/2026-09-23-initial-scroll-recovery.md)
-records the reproduction and evidence boundary.
-Only mounted rows are observed, and normal window loads never hide a
-previously revealed conversation. `use-conversation-stream-items.ts` keys that
-readiness and the visible hydration range by `factSource ?? view`. Accepted-history
-projection wrappers may change while the underlying conversation stays the same;
-resetting on wrapper identity would hide the chat again and discard an off-tail
-reading window. A new underlying source, even with the same session id, must pass
-initial loading again. Range acquisition still uses the current projection so its
-turn positions and content remain current.
+`use-conversation-stream-items.ts` keys readiness and the visible hydration range by
+`factSource ?? view`. Accepted-history projection wrappers may change while the
+underlying conversation stays the same; resetting on wrapper identity would discard
+an off-tail reading window. A new underlying source, even with the same session id,
+must pass initial loading again. Before the first viewport report, the window is the
+retained tail plus the turn of the engine's restored reading anchor, so a restored
+position opens on real rows instead of placeholders.
 
 The rendered body set belongs to the reading window, the retained 40-turn tail,
 and native text selection. Other consumers may hydrate the same cache for facts,
@@ -105,11 +84,6 @@ before a scroll-driven window change; releasing selection removes that exception
 A loaded user predecessor still supplies assistant configuration even when its
 own rendered row is a placeholder. See the
 [background hydration decision](../../../../.agents/notes/implemented/bug-fix/2026-09-22-background-hydration-render-window.md).
-
-The composer one-shot ref preserves the reader's position while typing without
-changing keyboard, terminal, or window-resize follow behavior, which is why it is
-consumed for exactly one height resize and is not merged into programmatic-jump
-suppression.
 
 ## `useWorkspaceBadge`
 

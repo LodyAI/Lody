@@ -8,12 +8,31 @@ import {
   machineSupportsAcpAuthenticationInteractionsProtocol,
   machineSupportsAcpCapabilityRefreshCacheProtocol,
   machineSupportsLocalFileResourcesProtocol,
+  machineSupportsProtocolCapability,
+  machineSupportsSubagentEvents,
   negotiatedAcpCapabilitiesRefreshForce,
 } from '../src/machine-protocol-capabilities';
 import {
   MachineAcpCapabilitiesRefreshRequestSchema,
   safeParseLocalSessionControlRequest,
 } from '../src/message-schemas';
+
+it('negotiates subagent events and Codex auth profiles independently on the same daemon', () => {
+  const machine = { protocolCapabilities: CURRENT_MACHINE_PROTOCOL_CAPABILITIES };
+  expect(machineSupportsSubagentEvents(machine)).toBe(true);
+  expect(
+    machineSupportsProtocolCapability(machine, MACHINE_PROTOCOL_CAPABILITIES.codexAuthProfiles)
+  ).toBe(true);
+  expect(machineSupportsSubagentEvents({ protocolCapabilities: { codexAuthProfiles: 1 } })).toBe(
+    false
+  );
+  expect(
+    machineSupportsProtocolCapability(
+      { protocolCapabilities: { subagentEvents: 1 } },
+      MACHINE_PROTOCOL_CAPABILITIES.codexAuthProfiles
+    )
+  ).toBe(false);
+});
 
 describe('ACP authentication interaction protocol capability', () => {
   it('shares one version binding between advertisement and negotiation', () => {
@@ -61,7 +80,9 @@ describe('ACP capability refresh cache protocol capability', () => {
   const previousGenerationRequestSchema = MachineAcpCapabilitiesRefreshRequestSchema.omit({
     force: true,
   });
-  const buildRequest = (machine: { protocolCapabilities?: Record<string, number> } | undefined) => ({
+  const buildRequest = (
+    machine: { protocolCapabilities?: Record<string, number> } | undefined
+  ) => ({
     type: 'machine/acp-capabilities-refresh' as const,
     machineId: 'machine-1',
     workspaceId: 'workspace-1',
@@ -71,9 +92,7 @@ describe('ACP capability refresh cache protocol capability', () => {
 
   it('shares one version binding between advertisement and negotiation', () => {
     expect(
-      CURRENT_MACHINE_PROTOCOL_CAPABILITIES[
-        MACHINE_PROTOCOL_CAPABILITIES.acpCapabilityRefreshCache
-      ]
+      CURRENT_MACHINE_PROTOCOL_CAPABILITIES[MACHINE_PROTOCOL_CAPABILITIES.acpCapabilityRefreshCache]
     ).toBe(ACP_CAPABILITY_REFRESH_CACHE_PROTOCOL_VERSION);
     expect(
       machineSupportsAcpCapabilityRefreshCacheProtocol({
@@ -84,7 +103,10 @@ describe('ACP capability refresh cache protocol capability', () => {
 
   it.each([
     { name: 'no advertised capabilities', machine: undefined },
-    { name: 'an unrelated capability set', machine: { protocolCapabilities: { providerSetup: 1 } } },
+    {
+      name: 'an unrelated capability set',
+      machine: { protocolCapabilities: { providerSetup: 1 } },
+    },
     {
       name: 'a zero version',
       machine: { protocolCapabilities: { acpCapabilityRefreshCache: 0 } },

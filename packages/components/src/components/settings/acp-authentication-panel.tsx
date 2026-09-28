@@ -184,6 +184,7 @@ export function AcpAuthenticationPanel({
   configId,
   cliType,
   agentType,
+  codexAuthMode,
   customAcp,
   compact = false,
   reauthentication = false,
@@ -195,6 +196,7 @@ export function AcpAuthenticationPanel({
   configId?: AgentConfigId;
   cliType: AgentConfigCliType;
   agentType: string;
+  codexAuthMode?: 'chatgpt' | 'api-key';
   customAcp?: CustomAcpLaunchSpec;
   runtimeOverrides?: BuiltinRuntimeOverrides;
   env?: Record<string, string>;
@@ -713,9 +715,11 @@ export function AcpAuthenticationPanel({
           <>
             <Button type="button" size="small" variant="secondary" disabled>
               <Spinner size="small" />
-              {t('agents.authentication.waiting', 'Waiting for {{provider}} sign-in', {
-                provider,
-              })}
+              {codexAuthMode === 'api-key'
+                ? t('settings.agent.codex.verifyingKey', 'Verifying API Key')
+                : t('agents.authentication.waiting', 'Waiting for {{provider}} sign-in', {
+                    provider,
+                  })}
             </Button>
             <Button type="button" size="small" variant="ghost" onClick={handleCancel}>
               <Square {...stylex.props(catalog.icon)} />
@@ -731,11 +735,15 @@ export function AcpAuthenticationPanel({
             onClick={handleStart}
           >
             <LogIn {...stylex.props(catalog.icon)} />
-            {phase === 'error' || phase === 'cancelled'
-              ? t('agents.authentication.retry', 'Retry {{provider}} sign-in', { provider })
-              : phase === 'authenticated' || reauthentication
-                ? t('agents.authentication.signInAgain', 'Sign in again')
-                : t('agents.authentication.signIn', 'Sign in with {{provider}}', { provider })}
+            {codexAuthMode === 'api-key'
+              ? reauthentication || phase === 'authenticated'
+                ? t('settings.agent.codex.updateKey', 'Update API Key')
+                : t('settings.agent.codex.enterKey', 'Enter API Key')
+              : phase === 'error' || phase === 'cancelled'
+                ? t('agents.authentication.retry', 'Retry {{provider}} sign-in', { provider })
+                : phase === 'authenticated' || reauthentication
+                  ? t('agents.authentication.signInAgain', 'Sign in again')
+                  : t('agents.authentication.signIn', 'Sign in with {{provider}}', { provider })}
           </Button>
         )}
         {phase === 'authenticated' ? (

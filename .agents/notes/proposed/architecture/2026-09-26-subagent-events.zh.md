@@ -96,6 +96,11 @@ Codex 子事件 → Core envelope → AgentClient → HistoryWriter
 UI Designer 检查了亮色/暗色 Storybook 截图，但历史使用替身渲染器；真实工具/思考
 渲染仍需桌面端及真实执行验证。
 
+与 main 集成时，daemon 同时声明 `subagentEvents` 与 `codexAuthProfiles`，
+两项能力互不隐含；共享协商测试覆盖了这种独立性。子 agent 历史保留专用弹窗，
+main 仅对 DeepSeek 展示思考的规则仍用于父对话。HistoryWriter 同时保留按 run
+归属写入子执行输出和持久化消息提交准备的能力，两者都不引入第二个 writer。
+
 ### 其余 builtin 扩展
 
 配套草稿 PR：[Claude #36](https://github.com/LodyAI/acp-extension-claude/pull/36)、

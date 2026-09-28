@@ -23,6 +23,7 @@ const dependencyBlocks = [
 const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
 const workspacePackageNames = new Set();
 const requiredPublishedRuntimeDependencies = [
+  '@napi-rs/keyring',
   'better-sqlite3',
   'loro-crdt',
   '@lydell/node-pty',

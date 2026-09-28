@@ -42,6 +42,9 @@
   Compare only same-version hashes, recomputing from the replay when versions differ;
   unknown versions or missing replay data refuse before any write. A metadata-only
   conflict marker never upgrades the stored cursor by implication.
+- `user-status` writes every stored copy of a duplicated user turn through
+  `updateCopies`: the last copy gates guarded writes, settled copies never regress,
+  and any started or settled copy vetoes a requeue.
 - Legacy inline rows and unchanged unknown fields survive updates. Never rewrite
   history while opening or reading. Auto-seen is a separately attached CLI policy
   with a commit-time guard against regressing an advanced execution status.
@@ -52,3 +55,7 @@
   turn identity, plan, tools, or accounting. Ignore unregistered/terminal output,
   reject lineage cycles, and retain incomplete observation across snapshots. Declare
   nested transcript streaming fields in `schema.ts`; legacy rows stay unchanged.
+
+- Durable submission preparation stays within HistoryWriter: prepare on a fork,
+  persist the exact operations and their baseline before publishing, then replay
+  those operations without another append. Missing dependencies are not acceptance.

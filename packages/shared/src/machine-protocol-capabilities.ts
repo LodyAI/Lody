@@ -8,6 +8,7 @@
 export type MachineProtocolCapabilities = Record<string, number>;
 
 export const MACHINE_PROTOCOL_CAPABILITIES = {
+  codexAuthProfiles: 'codexAuthProfiles',
   builtinPi: 'builtinPi',
   subagentCancellation: 'subagentCancellation',
   subagentEvents: 'subagentEvents',
@@ -75,6 +76,7 @@ export function machineSupportsSubagentCancellation(
  */
 export const CURRENT_MACHINE_PROTOCOL_CAPABILITIES: MachineProtocolCapabilities = {
   [MACHINE_PROTOCOL_CAPABILITIES.subagentEvents]: SUBAGENT_EVENTS_PROTOCOL_VERSION,
+  [MACHINE_PROTOCOL_CAPABILITIES.codexAuthProfiles]: 1,
   [MACHINE_PROTOCOL_CAPABILITIES.subagentCancellation]: SUBAGENT_CANCELLATION_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.acpAuthenticationInteractions]:
     ACP_AUTHENTICATION_INTERACTIONS_PROTOCOL_VERSION,

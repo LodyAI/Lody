@@ -73,6 +73,9 @@ export class Lody {
       { workspaceId: options.workspaceId },
       async () =>
         await LoroDocumentManager.create(options.workspaceId, options.userId, options.logger, {
+          // The daemon is the only process that resumes LoroDoc rooms from the
+          // shared SQLite cursors; one-shot commands keep theirs in memory.
+          documentCursorScope: 'shared-durable',
           streamsTokens: options.cloudPort.streamsTokens,
           cloudBilling: options.cloudPort.billing,
         })

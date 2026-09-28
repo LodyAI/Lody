@@ -163,6 +163,35 @@ describe('conversation view React readers', () => {
     expect(itemFor('a-10')?.type).toBe('placeholder');
   });
 
+  it('loads a restored reading turn far from the tail before the first viewport report', async () => {
+    const { view } = await openView(150, 200);
+    let stream!: ReturnType<typeof useConversationStreamItems>;
+    function Probe() {
+      stream = useConversationStreamItems(view, FIXTURE_SESSION_ID, { initialFocusTurnId: 'a-40' });
+      return null;
+    }
+    await act(async () => root.render(<Probe />));
+    await flush();
+    const itemFor = (id: string) =>
+      stream.items.find((item) =>
+        item.type === 'message'
+          ? item.message.id === id
+          : item.type === 'placeholder' && item.row.id === id
+      );
+    expect(stream.initialWindowReady).toBe(true);
+    // The focus turn and its neighbours render as rows, not placeholders.
+    expect(itemFor('a-40')?.type).toBe('message');
+    expect(itemFor('a-45')?.type).toBe('message');
+    // Far from both the focus and the tail stays a placeholder.
+    expect(itemFor('a-5')?.type).toBe('placeholder');
+    // The first real report takes over from the focus (a round is a user and
+    // an assistant turn, so round 100 sits at turn index 201).
+    await act(async () => stream.onVisibleTurnRangeChange({ from: 200, to: 208 }));
+    await flush();
+    expect(itemFor('a-5')?.type).toBe('placeholder');
+    expect(itemFor('a-100')?.type).toBe('message');
+  });
+
   it('keeps revealed content and its reading window through projection refreshes', async () => {
     const { view } = await openView(150);
     let stream!: ReturnType<typeof useConversationStreamItems>;

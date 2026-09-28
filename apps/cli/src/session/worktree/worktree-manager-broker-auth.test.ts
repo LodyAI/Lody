@@ -47,6 +47,7 @@ function makeChild(stdout: string, stderr = '', code = 0) {
 function createLogger(): Logger {
   return {
     debug: vi.fn(),
+    trace: vi.fn(),
     info: vi.fn(),
     warn: vi.fn(),
     error: vi.fn(),

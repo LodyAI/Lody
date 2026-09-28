@@ -266,6 +266,7 @@ function buildSessionPreparationCompatibility(
 ) {
   return {
     launch: buildSessionLaunchConfig({
+      codexAuth: launchSource?.codexAuth,
       customAcp: launchSource?.customAcp,
       runtimeOverrides: launchSource?.runtimeOverrides,
       env: launchSource?.env,
@@ -361,6 +362,8 @@ export interface CreateAgentConfig {
   args?: string[];
   env?: Record<string, string>;
   capabilitySourceVersion?: string;
+  /** A retry must confirm the managed Codex provider still authorizes this process. */
+  revalidateManagedCodexProfile?: () => Promise<void>;
   /**
    * Optional ACP session id to attempt to resume. This is a per-agent-start hint and is intentionally
    * not stored on the session instance because sessions can be reused, and persisting
@@ -707,6 +710,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     config: SessionConfig,
     agentStart?: AgentStartConfig
   ): Promise<ISession> {
+    await this.freezeCodexProfile(config);
     const sessionId = config.sessionId!;
     const preparationIdentity = config.agentConfigId
       ? {
@@ -987,6 +991,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     }
 
     const config: SessionConfig = {
+      codexAuth: agentConfig.codexAuth,
       sessionId,
       workspaceId: this.workspaceId,
       requesterUserId: spec.requestedByUserId,
@@ -1010,6 +1015,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       userName: user.name,
       userEmail: user.email,
     };
+    await this.freezeCodexProfile(config);
     const compatibility = buildSessionPreparationCompatibility(
       config,
       config.mcpServerIds,
@@ -1322,6 +1328,10 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
           }
         : undefined,
       capabilitySourceVersion: launch.capabilitySourceVersion,
+      revalidateManagedCodexProfile:
+        config.codexProfile?.profile.mode === 'chatgpt'
+          ? async () => await this.freezeCodexProfile(config)
+          : undefined,
       resumeSessionId: options?.resumeSessionId,
       forkSessionId: options?.forkSessionId,
       forkSessionTurnId: options?.forkSessionTurnId,
@@ -1403,6 +1413,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     config: SessionConfig,
     agentStart?: AgentStartConfig
   ): Promise<ISession> {
+    await this.freezeCodexProfile(config);
     await this.prepareGitHubRepoSessionConfig(config);
     const requestedResumeSessionId = agentStart?.resumeSessionId;
     const requestedForkSessionId = agentStart?.forkSessionId;
@@ -1568,6 +1579,54 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     );
     this.logger.debug(`[${sessionId}] createSessionInnerWithAgent returning session`);
     return session;
+  }
+
+  private async freezeCodexProfile(config: SessionConfig): Promise<void> {
+    if (config.agentCliType !== 'builtin' || config.agentType !== 'codex') return;
+    const store = getCodexProfileStore();
+    if (config.agentConfigId) {
+      const provider = await this.workspaceDocument.getAgentConfigById(
+        config.agentConfigId,
+        this.machineId
+      );
+      if (config.codexAuth && !provider?.codexAuth) {
+        throw new Error('This Codex provider account is no longer available');
+      }
+      if (provider?.codexAuth) {
+        if (
+          config.codexAuth &&
+          JSON.stringify(config.codexAuth) !== JSON.stringify(provider.codexAuth)
+        )
+          throw new Error('Codex account changed before session launch');
+        config.codexAuth = provider.codexAuth;
+      }
+    }
+    if (!config.codexAuth) {
+      if (
+        config.agentConfigId &&
+        (await store.list(this.workspaceId)).some(
+          (item) => item.configId === config.agentConfigId && item.machineId === this.machineId
+        )
+      ) {
+        throw new Error(
+          'This Codex provider account reference is missing; restore its configuration'
+        );
+      }
+      return;
+    }
+    if (!config.agentConfigId) throw new Error('A managed Codex account requires a provider');
+    config.codexProfile = await store.resolve(this.workspaceId, {
+      id: config.agentConfigId,
+      machineId: this.machineId,
+      name: 'Codex',
+      description: undefined,
+      cliType: config.agentCliType,
+      agentType: config.agentType,
+      codexAuth: config.codexAuth,
+      env: config.env ?? {},
+      customAcp: config.customAcp,
+      runtimeOverrides: config.runtimeOverrides,
+    });
   }
 
   private async prepareGitHubRepoSessionConfig(config: SessionConfig): Promise<void> {
@@ -2373,3 +2432,4 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     await next;
   }
 }
+import { getCodexProfileStore } from '../agent/codex-profile-store';
