@@ -3,7 +3,7 @@ import * as stylex from '@stylexjs/stylex';
 import { forwardRef, type ComponentProps, type ReactNode } from 'react';
 import { appendClassName } from '../internal/class-name';
 import { ChevronRightGlyph, DotGlyph, TickGlyph } from '../internal/glyphs';
-import { usePopupContainer, type PopupContainer } from '../popup/portal-container';
+import { portalClassName, usePopupContainer, type PopupContainer } from '../popup/portal-container';
 import { rowLabel } from '../popup/row-label';
 import { hiddenSurfaceForSide, surface } from '../popup/surface';
 import { useForcedThemeClassNames } from '../theme/theme';
@@ -225,7 +225,7 @@ export const MenuContent = forwardRef<HTMLDivElement, MenuContentProps>(function
   // against the offset parent, which is the panel, so the two agree again.
   const strategy = rest.positionMethod ?? (mountPoint != null ? 'absolute' : undefined);
   return (
-    <BaseMenu.Portal container={mountPoint}>
+    <BaseMenu.Portal container={mountPoint} className={portalClassName}>
       <BaseMenu.Positioner
         ref={ref}
         {...rest}

@@ -2,7 +2,7 @@ import { PreviewCard as BasePreviewCard } from '@base-ui/react/preview-card';
 import * as stylex from '@stylexjs/stylex';
 import { forwardRef, type ComponentProps, type ReactNode } from 'react';
 import { appendClassName } from '../internal/class-name';
-import { usePopupContainer, type PopupContainer } from '../popup/portal-container';
+import { portalClassName, usePopupContainer, type PopupContainer } from '../popup/portal-container';
 import { hiddenSurfaceForSide, surface } from '../popup/surface';
 import { useForcedThemeClassNames } from '../theme/theme';
 
@@ -61,7 +61,7 @@ export const PreviewCardContent = forwardRef<HTMLDivElement, PreviewCardContentP
     const mountPoint = container ?? inheritedContainer;
     const strategy = rest.positionMethod ?? (mountPoint != null ? 'absolute' : undefined);
     return (
-      <BasePreviewCard.Portal container={mountPoint}>
+      <BasePreviewCard.Portal container={mountPoint} className={portalClassName}>
         <BasePreviewCard.Positioner
           ref={ref}
           {...rest}

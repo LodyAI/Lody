@@ -39,8 +39,8 @@ with this package's `stylex-options.ts`.
   or the trigger names the raw value (`test/select.test.tsx`).
 - Every floating part's `Content` assembles Base UI's portal, positioner and
   popup, taking the positioning props outside. They mount into the nearest
-  `PopupContainerProvider` on the absolute strategy: a container centred with
-  `translate` contains `fixed` descendants.
+  `PopupContainerProvider` through a boxless portal on the absolute strategy:
+  a container centred with `translate` contains `fixed` descendants.
 - `Menu` is the dropdown; `ContextMenu` and `Menubar` restate only the way in
   and re-export its rows. A menu reads `popup` and replaces one declaration,
   `--anchor-width`; surface and rows come from `src/popup/surface.ts`.

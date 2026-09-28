@@ -2,7 +2,7 @@ import { ContextMenu as BaseContextMenu } from '@base-ui/react/context-menu';
 import * as stylex from '@stylexjs/stylex';
 import { forwardRef, type ComponentProps, type ReactNode } from 'react';
 import { appendClassName } from '../internal/class-name';
-import { usePopupContainer, type PopupContainer } from '../popup/portal-container';
+import { portalClassName, usePopupContainer, type PopupContainer } from '../popup/portal-container';
 import { hiddenSurfaceForSide, surface } from '../popup/surface';
 import { useForcedThemeClassNames } from '../theme/theme';
 import {
@@ -79,7 +79,7 @@ export const ContextMenuContent = forwardRef<HTMLDivElement, ContextMenuContentP
     const palette = useForcedThemeClassNames();
     const mountPoint = container ?? inheritedContainer;
     return (
-      <BaseContextMenu.Portal container={mountPoint}>
+      <BaseContextMenu.Portal container={mountPoint} className={portalClassName}>
         <BaseContextMenu.Positioner
           ref={ref}
           {...rest}
