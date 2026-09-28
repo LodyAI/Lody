@@ -5,7 +5,7 @@ Translation: current
 
 [English](2026-09-28-conversation-wide-mode.md)
 
-PR: [#TBD](https://github.com/LodyAI/Lody/pull/TBD)
+PR: [#1080](https://github.com/LodyAI/Lody/pull/1080)
 
 ## 摘要
 
