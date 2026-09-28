@@ -1,7 +1,9 @@
 # Conversation scroll
 
 Status: draft
-Translation: pending
+Translation: current
+
+[中文](conversation-scroll.zh.md)
 
 ## Scenario
 
@@ -18,6 +20,10 @@ for, and never move unless the user or the arrival of new output asks it to.
   once. New output then grows below without moving what the user is reading. Scrolling a
   code block or terminal inside a message is not scrolling the conversation. The
   "scroll to latest" control returns to following.
+- **Editing an existing message.** While an in-place user-message editor is open, adding
+  or removing lines keeps the current viewport from being pulled to the conversation end.
+  The editor's row may be remeasured, but those measurements do not change the follow mode;
+  after the editor closes, ordinary output growth follows the mode that was already active.
 - **Sending a message** while the agent is idle smoothly scrolls the sent message to
   the top of the viewport (instantly when the system asks for reduced motion) and
   leaves the space below it empty for the reply. The reply fills that space without

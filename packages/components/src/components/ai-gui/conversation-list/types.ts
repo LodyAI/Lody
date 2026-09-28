@@ -58,6 +58,8 @@ export interface ConversationScrollerProps {
   initialWindowReady: boolean;
   /** Every reason the view has to stop follow-output (selection, jumps, search). */
   suppressAutoScrollRef?: RefObject<boolean>;
+  /** Pauses geometry-driven corrections while an in-place message editor grows. */
+  pauseAutoScrollRef?: RefObject<boolean>;
   onAtBottomChange?: (atBottom: boolean) => void;
   onScroll?: (offset: number) => void;
   onStateChange: (state: ConversationScrollerState) => void;

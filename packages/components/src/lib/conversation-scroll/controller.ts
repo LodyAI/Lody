@@ -73,6 +73,8 @@ export interface ScrollHost {
   requestCommit(sync: boolean): void;
   /** Follow-output is suppressed by a deliberate reading-position change. */
   isSuppressed(): boolean;
+  /** Geometry may be measured while editor-owned layout changes are in flight. */
+  isAutoScrollPaused?(): boolean;
   prefersReducedMotion(): boolean;
   requestFrame(callback: (time: number) => void): number;
   cancelFrame(handle: number): void;
@@ -326,6 +328,7 @@ export class ScrollController {
       !this.glide &&
       scrollTop > previous &&
       !this.host.isSuppressed() &&
+      !this.isAutoScrollPaused() &&
       this.replyRoom === 0 &&
       maxNow - scrollTop <= REARM_DISTANCE_PX
     ) {
@@ -538,7 +541,13 @@ export class ScrollController {
 
   private beginTransaction(reason: string, previousPlan: RenderPlan | null): void {
     this.refreshViewport(!this.viewportKnown);
-    if (this.host.isSuppressed() && this.intent.kind === 'follow') this.release('suppressed');
+    if (
+      this.host.isSuppressed() &&
+      !this.isAutoScrollPaused() &&
+      this.intent.kind === 'follow'
+    ) {
+      this.release('suppressed');
+    }
     const sampled = this.host.readScrollTop();
     let movement: MovementClass = 'none';
     if (this.lastObserved && Math.abs(sampled - this.lastObserved.scrollTop) >= 0.5) {
@@ -626,7 +635,12 @@ export class ScrollController {
     this.host.setExtent(Math.max(extentBefore, total));
     this.host.setReplyRoom(Math.max(roomBefore, room));
     let expected: number;
-    if (tx.relative) {
+    if (this.isAutoScrollPaused()) {
+      // Keep the current viewport while an in-place editor changes its row
+      // height. The geometry still commits, but the existing intent remains
+      // intact so normal output resumes following when editing ends.
+      expected = this.host.readScrollTop();
+    } else if (tx.relative) {
       const delta = target - tx.sampled;
       expected = tx.sampled + delta;
       if (Math.abs(delta) >= 0.5) {
@@ -966,6 +980,10 @@ export class ScrollController {
     }
   }
 
+  private isAutoScrollPaused(): boolean {
+    return this.host.isAutoScrollPaused?.() === true;
+  }
+
   // ---- Glide ----------------------------------------------------------------
 
   private lastFrameTime = 0;
@@ -997,6 +1015,10 @@ export class ScrollController {
   private readonly stepGlide = (time: number): void => {
     const glide = this.glide;
     if (!glide || this.disposed) return;
+    if (this.isAutoScrollPaused()) {
+      this.cancelGlide();
+      return;
+    }
     glide.startedAt ??= time;
     this.lastFrameTime = time;
     const progress = this.glideProgress(glide, time);

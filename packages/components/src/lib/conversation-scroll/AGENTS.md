@@ -11,6 +11,9 @@ Design, invariants I1–I8 and the coverage lemma:
   container's height. Never add another writer, `scrollTo`/`scrollIntoView` on the
   viewport, or a style that lets rows change the scroll range. Consumers go through
   `ConversationListHandle`.
+- An in-place user-message editor may pause geometry-driven corrections through the
+  `ScrollHost` pause signal. Measuring the row still commits, the existing intent stays
+  unchanged, and ordinary output resumes the same follow mode after editing ends.
 - Every written position is derived from an anchor (`read`, `follow`, `sent`, glide
   frames interpolate `screenY`). Layout compensation in `read` is relative
   (`scrollBy`), navigation absolute. No deferred compensation, no origin shift.

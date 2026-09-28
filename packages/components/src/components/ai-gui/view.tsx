@@ -541,7 +541,12 @@ export interface SessionChatStreamViewProps {
   onAtBottomChange?: (atBottom: boolean) => void;
   showScrollToLatest?: boolean;
   sendMessage?: (message: ClientToServer) => void;
-  renderMessageRow: (args: { message: SessionHistoryParsed; sessionId: SessionId }) => ReactNode;
+  renderMessageRow: (args: {
+    message: SessionHistoryParsed;
+    sessionId: SessionId;
+    /** Pauses follow correction while an in-place user message editor grows. */
+    onUserMessageEditingChange?: (editing: boolean) => void;
+  }) => ReactNode;
   onFileDiffClick?: (turnId: string, filePath: string) => void;
   onFilePathClick?: (filePath: string) => void;
   /** Returns true when an HTML attachment click was routed to a richer surface. */
@@ -1617,6 +1622,25 @@ export const SessionChatStreamView = forwardRef<
       }),
       [suppressStickyAutoScrollRef, messageSelection]
     );
+    const editingUserMessageRef = useRef(false);
+    const handleUserMessageEditingChange = useCallback((editing: boolean) => {
+      editingUserMessageRef.current = editing;
+    }, []);
+    const renderMessageRowWithEditing = useCallback(
+      ({
+        message,
+        sessionId: messageSessionId,
+      }: {
+        message: SessionHistoryParsed;
+        sessionId: SessionId;
+      }) =>
+        renderMessageRow({
+          message,
+          sessionId: messageSessionId,
+          onUserMessageEditingChange: handleUserMessageEditingChange,
+        }),
+      [handleUserMessageEditingChange, renderMessageRow]
+    );
     const handleAssistantGroupExpandedChange = useCallback(
       (messageId: string, groupKey: string, expanded: boolean) => {
         const cached = getExpandState(messageId);
@@ -2269,7 +2293,7 @@ export const SessionChatStreamView = forwardRef<
             >
               <ChatItem
                 item={row.item}
-                renderMessageRow={renderMessageRow}
+                renderMessageRow={renderMessageRowWithEditing}
                 noMessagesLabel={noMessagesLabel}
                 emptyState={emptyState}
               />
@@ -2357,6 +2381,7 @@ export const SessionChatStreamView = forwardRef<
                 keepMounted={nativeTextSelection.keepMounted}
                 initialWindowReady={initialWindowReady}
                 suppressAutoScrollRef={autoScrollSuppressedRef}
+                pauseAutoScrollRef={editingUserMessageRef}
                 onAtBottomChange={onAtBottomChange}
                 onScroll={handleStreamScroll}
                 onStateChange={handleListStateChange}
@@ -2456,6 +2481,7 @@ export const MessageRowView = memo(function MessageRowView({
   showSenderIdentity = false,
   onNavigateSession,
   onEdit,
+  onUserMessageEditingChange,
   onResendUndelivered,
   capacityRetry,
   conversationFontSize = DEFAULT_CONVERSATION_FONT_SIZE,
@@ -2464,6 +2490,7 @@ export const MessageRowView = memo(function MessageRowView({
   sessionId: SessionId;
   onNavigateSession?: (target: SessionNavigationTarget) => void;
   onEdit?: (message: SessionHistoryParsed, text: string) => Promise<boolean>;
+  onUserMessageEditingChange?: (editing: boolean) => void;
   onResendUndelivered?: (userTurnId: string, inputBlocks: SessionInputBlock[]) => Promise<boolean>;
   capacityRetry?: CapacityRetryControl;
   user?: SessionChatUser;
@@ -2503,6 +2530,7 @@ export const MessageRowView = memo(function MessageRowView({
         hasWideContent={hasWideContent}
         conversationFontSize={conversationFontSize}
         onEdit={onEdit}
+        onUserMessageEditingChange={onUserMessageEditingChange}
         onResendUndelivered={onResendUndelivered}
       />
     );
@@ -3443,6 +3471,7 @@ const UserMessageRowView = ({
   hasWideContent,
   conversationFontSize,
   onEdit,
+  onUserMessageEditingChange,
   onResendUndelivered,
 }: {
   message: SessionHistoryParsed;
@@ -3453,6 +3482,7 @@ const UserMessageRowView = ({
   hasWideContent: boolean;
   conversationFontSize: ConversationFontSize;
   onEdit?: (message: SessionHistoryParsed, text: string) => Promise<boolean>;
+  onUserMessageEditingChange?: (editing: boolean) => void;
   onResendUndelivered?: (userTurnId: string, inputBlocks: SessionInputBlock[]) => Promise<boolean>;
 }) => {
   const { t } = useTranslation();
@@ -3498,6 +3528,11 @@ const UserMessageRowView = ({
   }
 
   const isPinned = pinCtx?.pinnedHistoryId === message.id;
+
+  useLayoutEffect(() => {
+    onUserMessageEditingChange?.(isEditing);
+    return () => onUserMessageEditingChange?.(false);
+  }, [isEditing, onUserMessageEditingChange]);
 
   const handleCopy = useCallback(async () => {
     if (!hasTextContent) return;

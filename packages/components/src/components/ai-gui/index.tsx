@@ -101,6 +101,7 @@ const MessageRowConnected = memo(function MessageRowConnected({
   showSenderIdentity,
   onNavigateSession,
   onEditLastUser,
+  onUserMessageEditingChange,
   onResendUndelivered,
   capacityRetry,
   conversationFontSize,
@@ -111,6 +112,7 @@ const MessageRowConnected = memo(function MessageRowConnected({
   showSenderIdentity: boolean;
   onNavigateSession?: (target: SessionNavigationTarget) => void;
   onEditLastUser?: (message: SessionHistoryParsed, text: string) => Promise<boolean>;
+  onUserMessageEditingChange?: (editing: boolean) => void;
   /** Resends an undelivered (missing-history-acked) user turn's content as a
    * NEW message; the row's "Not delivered" label opens the confirmation dialog. */
   onResendUndelivered?: (userTurnId: string, inputBlocks: SessionInputBlock[]) => Promise<boolean>;
@@ -130,6 +132,7 @@ const MessageRowConnected = memo(function MessageRowConnected({
       showSenderIdentity={showSenderIdentity}
       onNavigateSession={onNavigateSession}
       onEdit={onEditLastUser}
+      onUserMessageEditingChange={onUserMessageEditingChange}
       onResendUndelivered={onResendUndelivered}
       capacityRetry={capacityRetry}
       conversationFontSize={conversationFontSize}
@@ -226,9 +229,11 @@ const SessionChatStreamImpl = forwardRef<SessionChatStreamHandle, SessionChatStr
       ({
         message,
         sessionId: messageSessionId,
+        onUserMessageEditingChange,
       }: {
         message: SessionHistoryParsed;
         sessionId: SessionId;
+        onUserMessageEditingChange?: (editing: boolean) => void;
       }) => {
         return (
           <MessageRowConnected
@@ -238,6 +243,9 @@ const SessionChatStreamImpl = forwardRef<SessionChatStreamHandle, SessionChatStr
             showSenderIdentity={showSenderIdentity}
             onNavigateSession={hasNavigateSession ? stableOnNavigateSession : undefined}
             onEditLastUser={message.id === lastUserMessageId ? onEditLastUser : undefined}
+            onUserMessageEditingChange={
+              message.id === lastUserMessageId ? onUserMessageEditingChange : undefined
+            }
             onResendUndelivered={onResendUndelivered}
             capacityRetry={message.id === capacityRetry?.noticeId ? capacityRetry : undefined}
             conversationFontSize={conversationFontSize}

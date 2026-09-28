@@ -112,6 +112,7 @@ export function EngineConversationScroller({
   keepMounted,
   initialWindowReady,
   suppressAutoScrollRef,
+  pauseAutoScrollRef,
   onAtBottomChange,
   onScroll,
   onStateChange,
@@ -137,8 +138,20 @@ export function EngineConversationScroller({
   );
   const [revealed, setRevealed] = useState(false);
 
-  const latest = useRef({ onAtBottomChange, onScroll, suppressAutoScrollRef, layoutKey });
-  latest.current = { onAtBottomChange, onScroll, suppressAutoScrollRef, layoutKey };
+  const latest = useRef({
+    onAtBottomChange,
+    onScroll,
+    suppressAutoScrollRef,
+    pauseAutoScrollRef,
+    layoutKey,
+  });
+  latest.current = {
+    onAtBottomChange,
+    onScroll,
+    suppressAutoScrollRef,
+    pauseAutoScrollRef,
+    layoutKey,
+  };
 
   const layoutVersion = (width: number) => `${Math.round(width)}|${latest.current.layoutKey}`;
 
@@ -189,6 +202,7 @@ export function EngineConversationScroller({
         else forceCommit();
       },
       isSuppressed: () => Boolean(latest.current.suppressAutoScrollRef?.current),
+      isAutoScrollPaused: () => Boolean(latest.current.pauseAutoScrollRef?.current),
       prefersReducedMotion,
       requestFrame: (callback) => requestAnimationFrame(callback),
       cancelFrame: (handle) => cancelAnimationFrame(handle),
