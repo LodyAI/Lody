@@ -17,7 +17,9 @@ for, and never move unless the user or the arrival of new output asks it to.
 - **Reading elsewhere.** Scrolling up (wheel, keys, scrollbar, touch) stops following at
   once. New output then grows below without moving what the user is reading. Scrolling a
   code block or terminal inside a message is not scrolling the conversation. The
-  "scroll to latest" control returns to following.
+  "scroll to latest" control returns to following. When live Agent output is below the
+  reader, that control shows the working indicator; while the Agent is waiting for
+  permission, or when there is no live work, it shows the down arrow.
 - **Sending a message** while the agent is idle smoothly scrolls the sent message to
   the top of the viewport (instantly when the system asks for reduced motion) and
   leaves the space below it empty for the reply. The reply fills that space without

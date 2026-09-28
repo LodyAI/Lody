@@ -2419,11 +2419,16 @@ export const SessionChatStreamView = forwardRef<
                   <Button
                     variant="secondary"
                     icon
+                    data-scroll-to-latest=""
                     className="pointer-events-auto rounded-full border-[0.5px] border-border bg-white text-foreground shadow-[0_0.5px_1px_1px_rgba(0,0,0,0.04)] hover:bg-white dark:bg-secondary dark:text-secondary-foreground dark:shadow-none"
                     onClick={scrollToBottom}
                     aria-label={t('sessions.scrollToLatest')}
                   >
-                    <ArrowDown className="h-4 w-4" />
+                    {agentActivityLabel && agentActivityShimmer ? (
+                      <Spinner className="h-4 w-4" aria-hidden="true" />
+                    ) : (
+                      <ArrowDown className="h-4 w-4" aria-hidden="true" />
+                    )}
                   </Button>
                 </ConversationColumn>
               </div>

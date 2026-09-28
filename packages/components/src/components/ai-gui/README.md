@@ -59,8 +59,9 @@ the reasoning behind those rules.
 
 `tests/build-chat-stream-items.test.ts`, `tests/conversation-outline*.test.ts`,
 `tests/user-message-sender-identity.test.tsx`, the `ExtremeConversation` story,
-`AssistantTurnAlignment.stories`, `ConversationViewStream.OpenWithBackgroundFacts`
-(open, then release fact batches to check the visible tail), and the multiple-sender states in
+`AssistantTurnAlignment.stories` (including the scroll-to-latest working and waiting
+states), `ConversationViewStream.OpenWithBackgroundFacts` (open, then release fact
+batches to check the visible tail), and the multiple-sender states in
 `SessionConversationPage.stories.tsx`.
 
 The assistant footer's duration — live and finished on desktop, and the leading
@@ -70,7 +71,11 @@ slot on mobile — is pinned by `tests/assistant-turn-action-inset.test.ts`,
 `AssistantTurnAlignment.stories.tsx`; `MobileTurnDurationSlot.stories.tsx` shows
 the mobile live and finished states. `tests/agent-activity-row.test.tsx` covers
 live status placement above the subagent task summary, both with and without
-footer actions, and task-summary expansion.
+footer actions, task-summary expansion, and the scroll-to-latest icon while work
+is streaming or waiting for permission. `AssistantTurnAlignment.stories.tsx`
+provides the same two states as Storybook interaction stories; its play function
+uses a synthetic upward wheel because a real scrollbar gesture is not reliable in
+the Storybook canvas.
 The [compact duration Spec](../../../../../specs/compact-duration-spacing.md)
 defines locale-specific spacing for these labels.
 
