@@ -1,4 +1,4 @@
-import { PDFDataRangeTransport } from 'pdfjs-dist';
+import { PDFDataRangeTransport } from 'pdfjs-dist/legacy/build/pdf.mjs';
 
 export const PDF_RANGE_CHUNK_BYTES = 64 * 1024;
 

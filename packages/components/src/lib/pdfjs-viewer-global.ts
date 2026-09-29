@@ -1,4 +1,4 @@
-import * as pdfjsLib from 'pdfjs-dist';
+import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.mjs';
 
 type PdfjsGlobal = typeof globalThis & { pdfjsLib?: typeof pdfjsLib };
 

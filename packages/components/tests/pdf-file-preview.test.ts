@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { getDocument } from 'pdfjs-dist';
+import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { createLocalPdfRangeTransport, PDF_RANGE_CHUNK_BYTES } from '../src/lib/pdf-file-preview';
 
 describe('local PDF range transport', () => {

@@ -8,10 +8,14 @@ import {
   PDFFindController,
   PDFLinkService,
   PDFViewer,
-} from 'pdfjs-dist/web/pdf_viewer.mjs';
-import { getDocument, GlobalWorkerOptions, type PDFDataRangeTransport } from 'pdfjs-dist';
-import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
-import 'pdfjs-dist/web/pdf_viewer.css';
+} from 'pdfjs-dist/legacy/web/pdf_viewer.mjs';
+import {
+  getDocument,
+  GlobalWorkerOptions,
+  type PDFDataRangeTransport,
+} from 'pdfjs-dist/legacy/build/pdf.mjs';
+import pdfWorkerUrl from 'pdfjs-dist/legacy/build/pdf.worker.min.mjs?url';
+import 'pdfjs-dist/legacy/web/pdf_viewer.css';
 import {
   ArrowDown,
   ArrowUp,
