@@ -5,6 +5,13 @@ Translation: current
 
 [中文](github-command-credentials.zh.md)
 
+Local projects and their worktrees use native Git and GitHub authentication,
+even when their remote is GitHub. Do not install Lody credential helpers, command
+wrappers, transport rewrites, broker context, or managed tokens for these sessions.
+Preserve the user's environment, credential helpers, SSH configuration, and `gh`
+login. Later requester refreshes must not enroll a local session in managed auth.
+The managed command policy below applies to sessions outside local projects.
+
 When an agent changes directories, addresses another repository with `gh -R`, or
 uses a submodule, credentials belong to that command's target, not the session's
 initial project. Installation tokens remain scoped to one repository.

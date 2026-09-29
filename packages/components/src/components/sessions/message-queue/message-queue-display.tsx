@@ -65,7 +65,7 @@ export function MessageQueueDisplay({
 
   const editing = useMessageQueueEditing(items, { onEditStart, onEditCancel, onEditSave });
   const pending = usePendingQueueRecords(sessionId, items);
-  const pendingActions = usePendingQueueActions(sessionId);
+  const pendingActions = usePendingQueueActions();
   const rowCount = items.length + pending.length;
 
   const itemIds = useMemo(() => items.map((item) => item.$cid), [items]);
@@ -200,7 +200,6 @@ export function MessageQueueDisplay({
               busy={pendingActions.busyId === record.id}
               onRetry={() => void pendingActions.run(record, 'retry')}
               onCancel={() => void pendingActions.run(record, 'cancel')}
-              onDiscard={() => void pendingActions.run(record, 'discard')}
             />
           ))}
         </div>

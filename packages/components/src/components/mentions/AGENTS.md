@@ -129,8 +129,8 @@ true })`. The fetch timestamp rides on the cached entry (survives IndexedDB).
   candidate sets no detail `title`. The committed range shows that emoji through
   `applyAgentRoleEmojiChip`, boxed to the icon slot and clipped; its agent
   config and machine ride on `AgentRoleMentionItem`.
-- Role candidates pass visibility, executability, then work context: Local
-  Project pins to its machine; plain chat and GitHub may use authorized machines
-  unless bound to a `localWorktree`. List all readable Roles; disabled rows follow
+- Role candidates pass visibility, then executability. Every composer may
+  dispatch a Role to any authorized machine; there is no work-context pinning.
+  List all readable Roles; disabled rows follow
   available matches with a reason below the name. Only available Roles can be
   selected, hydrated from text, or expanded before send; never fall back.

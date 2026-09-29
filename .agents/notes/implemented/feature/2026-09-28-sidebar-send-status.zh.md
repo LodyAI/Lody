@@ -1,9 +1,11 @@
 # 侧边栏发送状态取代待发送面板
 
-Status: proposed
+Status: implemented
 Translation: current
 
 [English](2026-09-28-sidebar-send-status.md)
+
+结论（2026-09-29）：已在 [#1095](https://github.com/LodyAI/Lody/pull/1095) 中实现，从 `proposed/` 移出。已被[移除会话发送日志](../simplification/2026-09-29-remove-session-send-journal.zh.md)部分替代：侧边栏状态标记和灰色标题仍然保留，由 `SessionPendingSendsHost` 从内存中暂存的发送推导；`SessionSendRecovery`、发送日志刷新和退出保护均已不存在。
 
 ## 摘要
 

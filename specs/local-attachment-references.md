@@ -59,6 +59,6 @@ That PR settles wire/IPC fields, submission binding, inherited fork authority, v
 
 ## 4. Evidence and status
 
-Design based on inspection of `8c429a890037c5b21855ce7ef9f59e3677c25a38`; no implementation, separate model, or device acceptance. The split is recorded in the [decision note](../.agents/notes/proposed/architecture/2026-09-14-deferred-attachment-send.md). The existing blob/backfill path is described in [CLI attachment lifecycle](../.agents/docs/cli-lib-session-files.md).
+Design based on inspection of `8c429a890037c5b21855ce7ef9f59e3677c25a38`; no implementation, separate model, or device acceptance. The split is recorded in the [decision note](../.agents/notes/implemented/architecture/2026-09-14-deferred-attachment-send.md). The existing blob/backfill path is described in [CLI attachment lifecycle](../.agents/docs/cli-lib-session-files.md).
 
 Source entry points: `packages/components/src/lib/electron-session-file-sender.ts`, `apps/electron/src/main/ipc/services/local-projects-ipc.ts`, `apps/electron/src/preload/index.ts`, `apps/cli/src/lib/{message-handler,session-file-backfill,session-file-blob-store}.ts`, and `packages/shared/src/{message-schemas,session-input}.ts`. Original File path API: [Electron webUtils](https://www.electronjs.org/docs/latest/api/web-utils).

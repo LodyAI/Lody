@@ -9,12 +9,15 @@ that carry an invariant — the directory itself is the list of hooks.
 `use-session-actions.ts` binds admission, analytics, and Jotai observations to
 `lib/session-submission.ts`. The latter owns the ordinary Promise entry points
 for creation, initial history, continuation, dispatch, and guide. It has no React
-lifetime or second writer. The workspace journal durably accepts the full input before releasing the
-composer, prepares attachments on Send, and serializes same-session submission.
-History and activation are committed locally; synchronization retries in the
-background on startup/reconnect without blocking archive or ordinary exit.
-Archive retains and pauses unfinished attachment drafts; restore resumes them.
-Deletion removes the matching outbox and joins its writes before the tombstone.
+lifetime or second writer. `lib/session-send-admission.ts` is the one admission for
+every user message. A ready send is written at once as local commits (creation
+meta, turn or queue row, activation, flush); the dispatch/steer RPC in
+`lib/session-send-delivery.ts` is a best-effort fast path, because the CLI starts
+pending turns from synchronized history. A send whose attachments are still
+preparing, or one queued behind such a send in the same conversation, is held
+only in the runtime's in-memory `pendingSends` and written when ready. Nothing
+persists it: closing the page mid-upload loses it, and the page asks first.
+Archive and delete cancel held sends of their targets and join in-flight writes.
 `use-session-preparation` holds an owned warmup lease; attachment takeover cancels
 and joins it. See the [attachment draft Spec](../../../../specs/session-files.md).
 
@@ -72,10 +75,9 @@ class. Why and how: the
 log (`window.__lodyScrollEngineLog.dump()`).
 
 `use-conversation-stream-items.ts` keys readiness and the visible hydration range by
-`factSource ?? view`. Accepted-history projection wrappers may change while the
-underlying conversation stays the same; resetting on wrapper identity would discard
-an off-tail reading window. A new underlying source, even with the same session id,
-must pass initial loading again. Before the first viewport report, the window is the
+the view itself, so turns landing in the same conversation never reset an off-tail
+reading window. A new view, even with the same session id, must pass initial
+loading again. Before the first viewport report, the window is the
 retained tail plus the turn of the engine's restored reading anchor, so a restored
 position opens on real rows instead of placeholders.
 

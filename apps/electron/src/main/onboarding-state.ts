@@ -1,6 +1,7 @@
 import { app } from 'electron'
 import Conf from 'conf'
 import { resolveInitialDesktopPath, type InitialDesktopPath } from './onboarding-launch-policy'
+import { createSettingsStoreWithFallback } from './settings-store-core'
 
 type OnboardingStateSchema = {
   completed: boolean
@@ -14,14 +15,18 @@ if (typeof ConfConstructor !== 'function') {
   throw new TypeError('Unable to initialize onboarding state: invalid Conf module export shape.')
 }
 
-const onboardingStateStore = new ConfConstructor<OnboardingStateSchema>({
-  cwd: app.getPath('userData'),
-  configName: 'onboarding-state',
-  defaults: { completed: false },
-  schema: {
-    completed: { type: 'boolean' }
-  }
-})
+const onboardingStateStore = createSettingsStoreWithFallback<OnboardingStateSchema>(
+  () =>
+    new ConfConstructor<OnboardingStateSchema>({
+      cwd: app.getPath('userData'),
+      configName: 'onboarding-state',
+      defaults: { completed: false },
+      schema: {
+        completed: { type: 'boolean' }
+      }
+    }),
+  { configName: 'onboarding-state', defaults: { completed: false } }
+)
 
 export function getInitialDesktopPath(): InitialDesktopPath {
   return resolveInitialDesktopPath({

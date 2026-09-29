@@ -1630,6 +1630,10 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
   }
 
   private async prepareGitHubRepoSessionConfig(config: SessionConfig): Promise<void> {
+    // A GitHub remote does not make a local project a managed GitHub checkout.
+    // Direct local sessions and their worktrees keep the user's native auth.
+    if (config.project?.kind === 'local') return;
+
     const githubRepo = config.githubRepo ?? tryDeriveGitHubRepoFromUrl(config.githubRepoUrl);
     if (githubRepo) {
       config.githubRepo = githubRepo;
@@ -1718,7 +1722,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     _githubRepo: string | undefined,
     requesterUserId: string
   ): Promise<void> {
-    const contextToken = this.gitCredentialBroker?.activateSessionContext({
+    const contextToken = this.gitCredentialBroker?.refreshSessionContext({
       sessionId: session.sessionId,
       requesterUserId,
       machineId: this.machineId,

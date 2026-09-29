@@ -196,7 +196,7 @@ function buildAndSetMenu(): void {
           label: t(locale, 'menu.reload'),
           accelerator: 'CmdOrCtrl+R',
           click: (_item, window) => {
-            if (window instanceof BrowserWindow) void requestRendererReload(window)
+            if (window instanceof BrowserWindow) requestRendererReload(window)
           }
         },
         {
@@ -204,7 +204,7 @@ function buildAndSetMenu(): void {
           accelerator: 'CmdOrCtrl+Shift+R',
           click: (_item, window) => {
             if (window instanceof BrowserWindow)
-              void requestRendererReload(window, { ignoreCache: true })
+              requestRendererReload(window, { ignoreCache: true })
           }
         },
         { role: 'toggleDevTools' },

@@ -4,6 +4,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MarkdownRenderer } from '../src/components/ai-gui/markdown-renderer';
 import { SessionReadonlyContext } from '../src/components/ai-gui/session-readonly-context';
+import { SessionLinkProvider } from '../src/components/ai-gui/session-link-context';
 import { MarkdownFileResources } from '../src/components/ai-gui/markdown-file-image';
 import {
   createFakeFileWorkspaceProvider,
@@ -266,5 +267,51 @@ describe('file Markdown images', () => {
     expect(container.querySelector('img')).toBeNull();
     expect(container.querySelector('button')).toBeNull();
     expect(container.textContent).toBe('Private image');
+  });
+});
+
+describe('Markdown session links', () => {
+  let root: Root, container: HTMLDivElement;
+  beforeEach(() => {
+    container = document.createElement('div');
+    document.body.append(container);
+    root = createRoot(container);
+  });
+  afterEach(async () => {
+    await act(async () => root.unmount());
+    container.remove();
+  });
+  const text = 'See [@Independent review](session://1ed6ba53-93bc-46d5-91e3-bb693cb0e729).';
+
+  it('renders a session chip that opens the linked Session', async () => {
+    const opened: string[] = [];
+    await act(async () =>
+      root.render(
+        <SessionLinkProvider value={(target) => opened.push(target.sessionId)}>
+          <MarkdownRenderer text={text} />
+        </SessionLinkProvider>
+      )
+    );
+    const chip = container.querySelector<HTMLButtonElement>('button[data-session-link]')!;
+    expect(chip.textContent).toBe('Independent review');
+    expect(container.querySelector('a')).toBeNull();
+    await act(async () => chip.click());
+    expect(opened).toEqual(['1ed6ba53-93bc-46d5-91e3-bb693cb0e729']);
+  });
+
+  it('stays an inert chip on a read-only share', async () => {
+    await act(async () =>
+      root.render(
+        <SessionReadonlyContext.Provider
+          value={{ renderImage: () => null, renderFiles: () => null }}
+        >
+          <SessionLinkProvider value={() => {}}>
+            <MarkdownRenderer text={text} />
+          </SessionLinkProvider>
+        </SessionReadonlyContext.Provider>
+      )
+    );
+    expect(container.querySelector('button')).toBeNull();
+    expect(container.querySelector('[data-session-link]')?.textContent).toBe('Independent review');
   });
 });

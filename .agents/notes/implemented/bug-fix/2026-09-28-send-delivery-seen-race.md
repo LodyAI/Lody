@@ -5,6 +5,8 @@ Translation: current
 
 [中文](2026-09-28-send-delivery-seen-race.zh.md)
 
+Later: [removing the session send journal](../simplification/2026-09-29-remove-session-send-journal.md) deleted the journal's `deliver()` described below. `isSessionHistoryStatusAwaitingStart`, including `seen`, still decides whether a written turn awaits start.
+
 ## Abstract
 
 After sends became local commits, a daemon that already held the session doc

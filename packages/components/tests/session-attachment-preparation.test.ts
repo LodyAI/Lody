@@ -1,16 +1,19 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { IDBFactory } from 'fake-indexeddb';
 import { LoroDoc } from 'loro-crdt';
 import {
-  createHistoryWriter,
+  getSessionRoomId,
   SESSION_FILE_MAX_COUNT,
+  type MachineId,
   type SessionHistory,
   type SessionId,
+  type SessionMeta,
 } from '@lody/shared';
+import { createConversationSession } from '../src/lib/conversation-view';
 import { createSessionSendResources } from '../src/lib/session-send-resources';
-import { createSessionSendJournal } from '../src/lib/session-send-journal';
-import { createSessionSendJournalStorage } from '../src/lib/session-send-journal-storage';
-import { prepareDraftAttachments } from '../src/lib/session-attachment-preparation';
+import { finalizePreparedSend } from '../src/lib/session-attachment-preparation';
+import { createWorkspacePendingSends } from '../src/providers/workspace-pending-sends';
+import type { PendingSessionSend, PendingSessionSends } from '../src/lib/session-pending-sends';
+import type { SessionSendRuntime } from '../src/lib/session-send-delivery';
 
 const upload = vi.hoisted(() => ({
   run: undefined as undefined | ((file: File, signal: AbortSignal) => Promise<unknown>),
@@ -49,73 +52,123 @@ vi.mock('../src/lib/electron-session-file-sender', () => ({
     };
   },
 }));
+
 const cleanup: Array<() => Promise<void>> = [];
 afterEach(async () => {
   for (const close of cleanup.splice(0)) await close();
   Object.assign(local, { enabled: false, machineId: null, files: [], fail: false });
+  upload.run = undefined;
 });
+
+const SESSION = 'session' as SessionId;
+const MACHINE = 'machine' as MachineId;
+
+/**
+ * The real workspace pending queue over a runtime whose session documents are
+ * real Loro docs: "written" means present in that document's history.
+ */
 function fixture() {
-  const doc = new LoroDoc();
-  const writer = createHistoryWriter(doc);
+  const sessions = new Map<SessionId, ReturnType<typeof createConversationSession>>();
+  const docs: LoroDoc[] = [];
+  const open = (sessionId: SessionId) => {
+    let session = sessions.get(sessionId);
+    if (!session) {
+      const doc = new LoroDoc();
+      docs.push(doc);
+      session = createConversationSession(doc, { sessionId });
+      sessions.set(sessionId, session);
+    }
+    return session;
+  };
+  const metas = new Map<string, Record<string, unknown>>([
+    [getSessionRoomId(SESSION), { id: SESSION, machineId: MACHINE }],
+  ]);
   const resources = createSessionSendResources({
-    acquire: async () => {
-      throw new Error('Unexpected borrow');
+    acquire: async (sessionId) => {
+      const session = open(sessionId);
+      return {
+        sessionData: session.sessionData,
+        getState: () => session.mirror.getState(),
+        waitUntilSynced: async () => {},
+      } as never;
     },
     releaseRef: () => {},
   });
-  const factory = new IDBFactory();
-  const storage = createSessionSendJournalStorage({
-    accountId: 'account',
-    workspaceId: 'workspace',
-    indexedDB: factory,
-  });
-  const locks = new Map<string, Promise<void>>();
-  const journal = createSessionSendJournal({
-    resources,
-    storage,
-    lock: async (key, _signal, execute) => {
-      const previous = locks.get(key) ?? Promise.resolve();
-      const release = Promise.withResolvers<void>();
-      locks.set(
-        key,
-        previous.then(() => release.promise)
-      );
-      await previous;
-      try {
-        return await execute();
-      } finally {
-        release.resolve();
-      }
+  const dispatched: string[] = [];
+  const dispatchListeners = new Set<() => void>();
+  const runtime = {
+    sendResources: resources,
+    repo: {
+      getDocMeta: async (roomId: string) =>
+        metas.has(roomId) ? { meta: metas.get(roomId) } : undefined,
+      flush: async () => {},
     },
-    prepareInput: (record, signal, checkpoint, report) =>
-      prepareDraftAttachments({
-        record,
-        signal,
-        checkpoint,
-        report,
-        resources,
-        token: () => 'token',
-        localMachineId: () => local.machineId as never,
-      }),
-    prepare: async () => {},
-    commit: async (record) => {
-      writer.append(record.entry);
+    writer: {
+      upsertDocMeta: async (roomId: string, patch: Record<string, unknown>) => {
+        metas.set(roomId, { ...metas.get(roomId), ...patch });
+      },
+      appendSessionTurn: async (sessionId: SessionId, entry: SessionHistory) => {
+        await open(sessionId).sessionData.commands.appendTurn(entry);
+      },
     },
-    deliver: async () => {},
+    requestSessionDispatchTurn: async (_machine: MachineId, args: { userTurnId: string }) => {
+      dispatched.push(args.userTurnId);
+      for (const listener of dispatchListeners) listener();
+      return { accepted: true };
+    },
+  } as unknown as SessionSendRuntime;
+  const pending = createWorkspacePendingSends({
+    runtime,
+    token: () => 'token',
+    localMachineId: () => local.machineId as MachineId | null,
   });
   cleanup.push(async () => {
+    pending.dispose();
     await resources.dispose();
-    await journal.close();
-    doc.free();
+    for (const session of sessions.values()) session.dispose();
+    for (const doc of docs) doc.free();
   });
-  return { journal, writer, storage, factory };
+  const turns = (sessionId = SESSION) => open(sessionId).historyWriter.readStored();
+  /** Resolves once the written turn's best-effort delivery reached the machine. */
+  const delivered = (id: string) =>
+    new Promise<void>((resolve) => {
+      const check = () => {
+        if (!dispatched.includes(id)) return;
+        dispatchListeners.delete(check);
+        resolve();
+      };
+      dispatchListeners.add(check);
+      check();
+    });
+  return { pending, turns, metas, delivered };
 }
-const input = (id: string, names: string[]) => ({
+
+function until(
+  pending: PendingSessionSends,
+  done: (sends: readonly PendingSessionSend[]) => boolean
+) {
+  return new Promise<readonly PendingSessionSend[]>((resolve) => {
+    const listeners = new Set<() => void>();
+    const check = () => {
+      const sends = pending.getSnapshot();
+      if (!done(sends)) return;
+      for (const stop of listeners) stop();
+      resolve(sends);
+    };
+    listeners.add(pending.subscribe(check));
+    check();
+  });
+}
+const failed = (pending: PendingSessionSends, id: string) =>
+  until(pending, (sends) => Boolean(sends.find((send) => send.id === id)?.error)).then((sends) =>
+    sends.find((send) => send.id === id)!
+  );
+
+const send = (id: string, names: string[], sessionId = SESSION) => ({
   id,
-  sessionId: 'session' as SessionId,
-  accountId: 'account',
+  sessionId,
   workspaceId: 'workspace',
-  sourceReplica: 'replica',
+  targetMachineId: MACHINE,
   entry: {
     id,
     role: 'user',
@@ -126,9 +179,9 @@ const input = (id: string, names: string[]) => ({
     inputConfig: {
       cliType: 'builtin',
       agentType: 'codex',
-      inputBlocks: [{ type: 'text', text: 'keep this text' }],
+      inputBlocks: [{ type: 'text', text: `keep ${id}` }],
     },
-  } as SessionHistory,
+  } as unknown as SessionHistory,
   delivery: { kind: 'dispatch' as const },
   attachments: names.map((name) => ({
     id: name,
@@ -145,43 +198,97 @@ const ready = (file: File) => ({
   fileName: file.name,
   sizeBytes: file.size,
 });
+const aborted = (signal: AbortSignal) =>
+  new Promise<never>((_, reject) =>
+    signal.addEventListener(
+      'abort',
+      () => reject(new DOMException('Upload canceled', 'AbortError')),
+      { once: true }
+    )
+  );
 
-it('preserves the whole message and successful attachment receipts, retrying only failure', async () => {
+it('holds an attachment send out of the document until it is ready, then writes final references', async () => {
   const f = fixture();
-  const storedImages = new Set<string>();
+  const started = Promise.withResolvers<void>();
+  const finish = Promise.withResolvers<void>();
+  upload.run = async (file) => {
+    started.resolve();
+    await finish.promise;
+    return ready(file);
+  };
+  f.pending.enqueue(send('message', ['image']));
+  await started.promise;
+  expect(f.turns()).toEqual([]);
+  expect(f.pending.hasSession(SESSION)).toBe(true);
+  finish.resolve();
+  await f.delivered('message');
+  expect(f.pending.getSnapshot()).toEqual([]);
+  const [turn] = f.turns();
+  expect(turn?.id).toBe('message');
+  expect(turn?.items).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ type: 'image', imageId: 'image' }),
+      expect.objectContaining({ type: 'text', text: 'keep message' }),
+    ])
+  );
+  expect(f.metas.get(getSessionRoomId(SESSION))?.latestUserMsgId).toBe('message');
+});
+
+it('keeps successful attachment receipts, blocks later sends, and retries only the failure', async () => {
+  const f = fixture();
+  const uploaded: string[] = [];
   let rejectSecond = true;
   upload.run = async (file) => {
     if (file.name === 'second' && rejectSecond) throw new Error('Upload failed');
-    if (storedImages.has(file.name)) throw new Error('Successful attachment uploaded twice');
-    storedImages.add(file.name);
+    uploaded.push(file.name);
     return ready(file);
   };
-  await f.journal.accept(input('message', ['first', 'second']));
-  await expect(f.journal.retry('session' as SessionId)).rejects.toThrow('Upload failed');
-  expect(f.writer.readStored()).toEqual([]);
-  expect(
-    (await f.storage.list())[0]?.attachments?.map((item) => [item.name, !!item.ready])
-  ).toEqual([
-    ['first', true],
-    ['second', false],
+  f.pending.enqueue(send('message', ['first', 'second']));
+  f.pending.enqueue(send('after', []));
+  const blocked = await failed(f.pending, 'message');
+  expect(blocked.error).toBe('Upload failed');
+  expect(blocked.attachments.map((item) => [item.name, !!item.ready, item.error])).toEqual([
+    ['first', true, undefined],
+    ['second', false, 'Upload failed'],
   ]);
-  expect(
-    (await f.storage.list())[0]?.attachments?.every((item) => item.source instanceof Blob)
-  ).toBe(true);
+  expect(f.pending.has('after')).toBe(true);
+  expect(f.turns()).toEqual([]);
+
   rejectSecond = false;
-  await f.journal.submit('session' as SessionId);
-  const prepared = (await f.storage.list())[0]!;
-  expect(prepared.attachments?.every((item) => item.ready && !item.source)).toBe(true);
-  expect(prepared.entry.items).toHaveLength(3);
-  await f.journal.retry('session' as SessionId);
-  const turns = f.writer.readStored();
-  expect(turns).toHaveLength(1);
+  f.pending.retry('message');
+  await f.delivered('after');
+  expect(uploaded).toEqual(['first', 'second']);
+  const turns = f.turns();
+  expect(turns.map((turn) => turn.id)).toEqual(['message', 'after']);
   expect(turns[0]?.items).toHaveLength(3);
-  expect(JSON.stringify(turns[0])).toContain('keep this text');
-  expect((await f.storage.list())[0]?.stage).toBe('delivered');
+  expect(JSON.stringify(turns[0])).toContain('keep message');
 });
 
-it('joins a late upload before cancel returns and never publishes the canceled message', async () => {
+it('drains one conversation in order while other conversations proceed', async () => {
+  const f = fixture();
+  const other = 'other' as SessionId;
+  f.metas.set(getSessionRoomId(other), { id: other, machineId: MACHINE });
+  const started = Promise.withResolvers<void>();
+  const finish = Promise.withResolvers<void>();
+  upload.run = async (file) => {
+    started.resolve();
+    await finish.promise;
+    return ready(file);
+  };
+  f.pending.enqueue(send('first', ['image']));
+  f.pending.enqueue(send('second', []));
+  f.pending.enqueue(send('elsewhere', [], other));
+  await started.promise;
+  await f.delivered('elsewhere');
+  expect(f.turns(other).map((turn) => turn.id)).toEqual(['elsewhere']);
+  expect(f.turns()).toEqual([]);
+  expect(f.pending.getSnapshot().map((item) => item.id)).toEqual(['first', 'second']);
+  finish.resolve();
+  await f.delivered('second');
+  expect(f.turns().map((turn) => turn.id)).toEqual(['first', 'second']);
+});
+
+it('joins a late upload before cancel returns and never writes the canceled message', async () => {
   const f = fixture();
   const started = Promise.withResolvers<void>();
   const interrupted = Promise.withResolvers<void>();
@@ -192,209 +299,90 @@ it('joins a late upload before cancel returns and never publishes the canceled m
     await finish.promise;
     return ready(file);
   };
-  await f.journal.accept(input('canceled', ['late']));
-  const work = f.journal.retry('session' as SessionId);
+  f.pending.enqueue(send('canceled', ['late']));
   await started.promise;
   let canceled = false;
-  const cancellation = f.journal.cancel('canceled').then(() => {
+  const cancellation = f.pending.cancel('canceled').then(() => {
     canceled = true;
   });
   await interrupted.promise;
   expect(canceled).toBe(false);
+  expect(f.pending.getSnapshot()).toEqual([]);
   finish.resolve();
-  await Promise.allSettled([work, cancellation]);
-  expect(canceled).toBe(true);
-  expect(await f.storage.list()).toEqual([]);
-  expect(f.writer.readStored()).toEqual([]);
+  await cancellation;
+  expect(f.turns()).toEqual([]);
+  expect(f.metas.get(getSessionRoomId(SESSION))?.latestUserMsgId).toBeUndefined();
 });
 
-it('rejects stale publication after a durable cancellation request in another storage connection', async () => {
+it('transfers a canceled first send creation to the next text message', async () => {
   const f = fixture();
-  const saved = await f.journal.accept(input('message', ['image']));
-  const peer = createSessionSendJournalStorage({
-    accountId: 'account',
-    workspaceId: 'workspace',
-    indexedDB: f.factory,
-  });
-  await peer.requestCancel!('message');
-  await expect(
-    f.storage.put({ ...saved, stage: 'prepared', update: new Uint8Array([1]) })
-  ).rejects.toThrow('canceled');
-  expect((await f.storage.list())[0]?.cancelRequested).toBe(true);
-  await peer.close();
-});
-
-it('rechecks current billing eligibility after upload without retransmitting the successful file', async () => {
-  const { createWorkspaceSessionSendJournal } =
-    await import('../src/providers/workspace-session-send-journal');
-  const { createConversationSession } = await import('../src/lib/conversation-view');
-  const doc = new LoroDoc();
-  const session = createConversationSession(doc, { sessionId: 'session' as SessionId });
-  const store = {
-    doc,
-    sessionData: session.sessionData,
-    history: session.history,
-    getState: () => session.mirror.getState(),
+  const created = 'created' as SessionId;
+  const creation = { id: created, machineId: MACHINE, userId: 'account' } as SessionMeta;
+  const started = Promise.withResolvers<void>();
+  upload.run = async (_file, signal) => {
+    started.resolve();
+    return aborted(signal);
   };
-  const resources = createSessionSendResources({
-    acquire: async () => store as never,
-    releaseRef: () => {},
-  });
-  vi.stubGlobal('indexedDB', new IDBFactory());
-  vi.stubGlobal('BroadcastChannel', undefined);
-  vi.stubGlobal('navigator', {
-    locks: {
-      request: async (_key: string, _options: unknown, execute: () => Promise<unknown>) =>
-        execute(),
-    },
-  });
-  let checkoutPending = false;
-  let uploaded = false;
-  upload.run = async (file) => {
-    if (uploaded) throw new Error('Already successful file was retransmitted');
-    uploaded = true;
-    checkoutPending = true;
-    return ready(file);
-  };
-  const journal = createWorkspaceSessionSendJournal({
-    accountId: 'account',
-    sourceReplica: 'replica',
-    token: () => 'token',
-    localMachineId: () => null,
-    getAdmissionContext: () => ({
-      entitlement: { effectivePlanTier: 'free', checkoutPending },
-      sessionCount: 1,
-    }),
-    runtime: {
-      workspaceId: 'workspace',
-      sendResources: resources,
-      repo: {
-        getDocMeta: async () => ({ meta: { id: 'session', machineId: 'machine' } }),
-        flush: async () => {},
-      },
-      writer: { upsertDocMeta: async () => {} },
-      requestSessionDispatchTurn: async () => null,
-    } as never,
-    waitForTargetSync: async () => {},
-  });
-  try {
-    await journal.accept(input('message', ['image']));
-    await expect(journal.retry('session' as SessionId)).rejects.toThrow('checkout');
-    expect(session.historyWriter.readStored()).toEqual([]);
-    expect(journal.getSnapshot()[0]?.attachments?.[0]?.ready).toBeDefined();
-    checkoutPending = false;
-    await journal.retry('session' as SessionId);
-    expect(session.historyWriter.readStored()).toHaveLength(1);
-  } finally {
-    await resources.dispose();
-    await journal.close();
-    session.dispose();
-    doc.free();
-    vi.unstubAllGlobals();
-  }
-});
-
-it('reopens saved source bytes and transfers a canceled creation to the next text message', async () => {
-  const f = fixture();
-  const creation = {
-    id: 'session',
-    machineId: 'machine',
+  f.pending.enqueue({ ...send('first', ['image'], created), creation });
+  f.pending.enqueue(send('next', [], created));
+  await started.promise;
+  expect(f.pending.hasPendingCreation(created)).toBe(true);
+  await f.pending.cancel('first');
+  await f.delivered('next');
+  expect(f.turns(created).map((turn) => turn.id)).toEqual(['next']);
+  expect(f.metas.get(getSessionRoomId(created))).toMatchObject({
+    id: created,
+    machineId: MACHINE,
     userId: 'account',
-  } as import('@lody/shared').SessionMeta;
-  await f.journal.accept({ ...input('first', ['original']), creation });
-  await f.journal.accept(input('next', []));
-  const peer = createSessionSendJournalStorage({
-    accountId: 'account',
-    workspaceId: 'workspace',
-    indexedDB: f.factory,
+    latestUserMsgId: 'next',
   });
-  const reopened = (await peer.list())[0]!;
-  expect(await reopened.attachments![0]!.source!.text()).toBe('original');
-  await f.journal.cancel('first');
-  expect((await peer.list()).map((row) => [row.id, row.creation])).toEqual([['next', creation]]);
-  await f.journal.retry('session' as SessionId);
-  expect(f.writer.readStored().map((turn) => turn.id)).toEqual(['next']);
-  await peer.close();
 });
 
-it('preparing an already checkpointed input does not duplicate its attachment blocks', async () => {
-  const { preparedDraftInput, buildDraftUserHistoryEntry } =
-    await import('../src/lib/session-attachment-draft');
-  const attachments = input('only', ['image']).attachments.map((item) => ({
+it('finalizing an already finalized input does not duplicate its attachment blocks', async () => {
+  const { buildDraftUserHistoryEntry } = await import('../src/lib/session-attachment-draft');
+  const value = send('only', ['image']);
+  const attachments = value.attachments.map((item) => ({
     ...item,
-    ready: { type: 'image' as const, imageId: item.id, mimeType: item.mimeType },
+    ready: {
+      type: 'image' as const,
+      imageId: item.id,
+      mimeType: item.mimeType,
+      fileName: item.name,
+      sizeBytes: 5,
+    },
   }));
   const draft = buildDraftUserHistoryEntry(
     { userId: 'account', timestamp: '2026-01-01T00:00:00Z', inputBlocks: [] },
     attachments
   );
   expect(draft?.items).toEqual([]);
-  const first = preparedDraftInput({ inputBlocks: [] }, attachments);
-  expect(first).toHaveLength(1);
-  expect(preparedDraftInput({ inputBlocks: first }, attachments)).toEqual(first);
+  const first = finalizePreparedSend({ ...value, attachments });
+  expect(first.entry.items).toHaveLength(2);
+  expect(first.attachments.every((item) => item.ready && !item.source)).toBe(true);
+  const again = finalizePreparedSend({ ...value, ...first });
+  expect(again.entry.items).toEqual(first.entry.items);
+  expect(again.entry.inputConfig).toEqual(first.entry.inputConfig);
 });
 
-it('keeps creation reachable when cancellation races a following message admission', async () => {
-  const { acceptSessionUserTurn } = await import('../src/lib/session-send-admission');
-  const f = fixture();
-  const creation = {
-    id: 'session',
-    machineId: 'machine',
-    userId: 'account',
-  } as import('@lody/shared').SessionMeta;
-  await f.journal.accept({ ...input('first', ['image']), creation });
-  const admitting = Promise.withResolvers<void>();
-  const proceed = Promise.withResolvers<void>();
-  const runtime = {
-    accountId: 'account',
-    workspaceId: 'workspace',
-    sourceReplica: 'replica',
-    repo: { getDocMeta: async () => undefined },
-    sendJournal: {
-      ...f.journal,
-      accept: async (record: Parameters<typeof f.journal.accept>[0]) => {
-        admitting.resolve();
-        await proceed.promise;
-        return f.journal.accept(record);
-      },
-    },
-  } as unknown as import('../src/atoms/runtime').WorkspaceRuntime;
-  const next = input('next', []);
-  const admission = acceptSessionUserTurn(runtime, next.sessionId, next.entry, next.delivery);
-  await admitting.promise;
-  await f.journal.cancel('first');
-  proceed.resolve();
-  await admission;
-  await f.journal.retry(next.sessionId);
-  expect((await f.storage.list()).find((record) => record.id === 'next')?.creation).toEqual(
-    creation
-  );
-  expect(f.writer.readStored().map((turn) => turn.id)).toEqual(['next']);
-});
-
-it('prepares a failed image through the existing local handoff and persists its file receipt', async () => {
+it('writes a failed cloud image through the same-machine local handoff as a file receipt', async () => {
   Object.assign(local, { enabled: true, machineId: 'machine' });
   const f = fixture();
   upload.run = async () => {
     throw new Error('Image upload offline');
   };
-  await f.journal.accept({
-    ...input('local-image', ['image.png']),
-    targetMachineId: 'machine' as never,
-  });
-  await f.journal.retry('session' as SessionId);
+  f.pending.enqueue(send('local-image', ['image.png']));
+  await f.delivered('local-image');
   expect(local.files).toEqual(['image.png']);
-  expect(f.writer.readStored()[0]?.items).toEqual(
+  expect(f.turns()[0]?.items).toEqual(
     expect.arrayContaining([
       expect.objectContaining({ type: 'file', transport: 'local', fileId: 'image.png' }),
-      expect.objectContaining({ type: 'text', text: 'keep this text' }),
+      expect.objectContaining({ type: 'text', text: 'keep local-image' }),
     ])
   );
-  expect((await f.journal.read('local-image'))?.stage).toBe('delivered');
 });
 
 it.each(['remote', 'no-capability', 'canceled', 'file-limit', 'local-failure'])(
-  'keeps the message recoverable without local image fallback for %s',
+  'keeps the message held without local image fallback for %s',
   async (reason) => {
     Object.assign(local, {
       enabled: reason !== 'no-capability',
@@ -409,9 +397,9 @@ it.each(['remote', 'no-capability', 'canceled', 'file-limit', 'local-failure'])(
     upload.run = async () => {
       throw failure;
     };
-    const value = { ...input('blocked', ['image.png']), targetMachineId: 'machine' as never };
+    const value = send('blocked', ['image.png']);
     if (reason === 'file-limit')
-      value.entry.inputConfig!.inputBlocks = Array.from(
+      (value.entry.inputConfig as { inputBlocks: unknown[] }).inputBlocks = Array.from(
         { length: SESSION_FILE_MAX_COUNT },
         (_, i) => ({
           type: 'file',
@@ -426,14 +414,14 @@ it.each(['remote', 'no-capability', 'canceled', 'file-limit', 'local-failure'])(
           uploadedAt: 1,
         })
       );
-    await f.journal.accept(value);
-    await expect(f.journal.retry('session' as SessionId)).rejects.toThrow(failure.message);
+    f.pending.enqueue(value);
+    const held = await failed(f.pending, 'blocked');
     expect(local.files).toEqual([]);
-    expect(f.writer.readStored()).toEqual([]);
-    expect(await f.journal.read('blocked')).toMatchObject({
-      stage: 'saved',
+    expect(f.turns()).toEqual([]);
+    expect(held).toMatchObject({
       error: failure.message,
       attachments: [expect.objectContaining({ error: failure.message })],
     });
+    expect(held.attachments[0]?.source).toBeInstanceOf(Blob);
   }
 );

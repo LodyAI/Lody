@@ -20,17 +20,9 @@ import {
   type SessionDocStore,
 } from '@/atoms/runtime';
 import { browserOnlineAtom } from '@/atoms/control-connection';
-import {
-  acceptedSessionHistoryProjectionsAtom,
-  getAcceptedSessionHistoryProjections,
-} from '@/atoms/session-history-projection';
 import type { RoomSyncState } from '@/lib/room-sync-state';
 import { subscribeLatestOnAnimationFrame } from '@/lib/latest-frame-subscription';
-import {
-  createProjectedConversationView,
-  subscribeOnFrame,
-  type ConversationView,
-} from '@/lib/conversation-view';
+import { subscribeOnFrame, type ConversationView } from '@/lib/conversation-view';
 
 declare global {
   interface Window {
@@ -55,9 +47,8 @@ export type UseSessionDocResult = {
   /** Control-plane state (session, queue, preview, fork, cursor, runtime config). */
   doc: SessionDocState;
   /**
-   * Windowed access to the turns, with this session's accepted optimistic
-   * projections overlaid; null until the store is loaded. Components must read
-   * history only through this view.
+   * Windowed access to the turns; null until the store is loaded. Components
+   * must read history only through this view.
    */
   history: ConversationView | null;
   addHistory: (
@@ -258,19 +249,7 @@ export function useSessionDoc(
     return loadedStore.acquireSync();
   }, [enabled, loadedStore, syncEnabled]);
 
-  const projections = useAtomValue(acceptedSessionHistoryProjectionsAtom);
-  const sessionProjections = useMemo(
-    () =>
-      runtime
-        ? getAcceptedSessionHistoryProjections(projections, runtime.workspaceId, sessionId)
-        : [],
-    [projections, runtime, sessionId]
-  );
-  const history = useMemo(
-    () =>
-      loadedStore ? createProjectedConversationView(loadedStore.history, sessionProjections) : null,
-    [loadedStore, sessionProjections]
-  );
+  const history = loadedStore?.history ?? null;
 
   const withStore = useCallback(
     async <T>(fn: (store: SessionDocStore) => Promise<T> | T): Promise<T> => {
@@ -306,7 +285,7 @@ export function useSessionDoc(
           entry,
           writeOptions?.guideExpectedTurnId
             ? { kind: 'guide', expectedTurnId: writeOptions.guideExpectedTurnId }
-            : { kind: writeOptions?.dispatch ? 'dispatch' : 'queue' },
+            : { kind: writeOptions?.dispatch ? 'dispatch' : 'history' },
           undefined,
           undefined,
           writeOptions?.attachments

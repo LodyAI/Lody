@@ -59,6 +59,8 @@ export function SidebarMachineOfflinePill({ machineId }: { machineId: MachineId 
  * Hovering a machine group header shows what the group is: the machine, who
  * owns it, whether it is online, its OS and how many projects it holds. The
  * header itself carries no icon; this card is where "this is a machine" is said.
+ * Pass it as the header's `wrapToggle`, so it fills the label's flex slot and
+ * leaves the header's action buttons (and the menus they open) uncovered.
  */
 export function SidebarMachineHoverCard({
   machine,
@@ -70,7 +72,11 @@ export function SidebarMachineHoverCard({
   children: ReactNode;
 }) {
   return (
-    <SidebarHoverCard disabled={disabled} content={<SidebarMachineCard machine={machine} />}>
+    <SidebarHoverCard
+      disabled={disabled}
+      content={<SidebarMachineCard machine={machine} />}
+      triggerClassName="flex min-w-0 flex-1"
+    >
       {children}
     </SidebarHoverCard>
   );

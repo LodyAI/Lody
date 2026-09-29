@@ -1,9 +1,11 @@
 # Attachment draft lifetimes and PR boundaries
 
-Status: proposed
+Status: implemented
 Translation: current
 
 [中文](2026-09-14-deferred-attachment-send.zh.md)
+
+Verdict (2026-09-29): implemented. The four-layer stack shipped through #705, #707, #709 and #719, so this note moved from `proposed/`. Partially superseded by [removing the session send journal](../simplification/2026-09-29-remove-session-send-journal.md): the durable journal, cross-window recovery, recovery-record compatibility and exit/logout/cache-clear gating were removed, and sends waiting for attachments are now held in memory only. Send-time attachment preparation, the workspace Effect resource owner and the submission boundary remain. The body below is the historical record.
 
 ## Abstract
 
@@ -50,7 +52,7 @@ Use one ManagedRuntime with storage, transport, and submission dependency bounda
 
 ## Staged adoption and rollback
 
-[Spec section 11.6](../../../../specs/session-files.md#116-staged-adoption-and-acceptance) proposes three prerequisite PRs followed by one complete draft feature PR, each merged after its responsibility is complete:
+[Spec section 11.6](../../../../specs/session-files.md#114-staged-adoption) proposes three prerequisite PRs followed by one complete draft feature PR, each merged after its responsibility is complete:
 
 1. Extract ordinary submission interfaces while preserving behavior. Baseline cases exercise actual input/configuration/routing; retain existing defects as counterexamples with an owning later fix.
 2. Use Effect inside the service to fully own migrated uploads, cancellation, retries, borrows, and release. Components keep ordinary interfaces and transfer still starts on addition; exit cleanup ships with its resources.
@@ -192,6 +194,50 @@ row. The reserved row is asserted through a `data-attachment-progress` hook
 because `Progress` merges to the same `h-1 w-full` and is indistinguishable by
 styling alone; jsdom has no layout, so the equal-height property is guarded
 structurally there and measured in the browser.
+
+## Sending in place (2026-09-29)
+
+Sending an image as the FIRST message of a new conversation showed a loading
+skeleton filling the stream, with the pending row pinned beneath it; the commit
+then replaced both with a differently shaped row. The skeleton came from the
+content-sync state, not from real loading: creation metadata already carries
+`lastMessageAt` while history stays empty until the upload commits, so the
+stream read as "has messages, nothing cached" (`cold`). The empty stream also
+lays its empty state out as `flex-1`, which pushes trailing content to the bottom.
+
+- While `sessionUnsentNewConversationAtomFamily` is true and history is empty,
+  the pending rows ARE the stream's empty state, at the top where the committed
+  turn lands, and are not also passed as trailing content. That atom changes only
+  when a first message is written, so the page-level subscription stays cheap.
+- `PendingMessageRow` now mirrors `UserMessageRowView`: avatar column (the same
+  `getUserById` query, so the same cached face), widths and container-query
+  caps, the `py-2 sm:py-3` column, a metadata line of timestamp plus a status
+  slot where the delivered row draws its read mark, and the same text bubble at
+  the conversation font size. Committing therefore changes only that slot, from
+  "Waiting to send" to the unread/read mark.
+- This partly replaces the image-card decision above: an image now uses the
+  delivered frame (a lone image at natural size capped at 10.5rem, several as
+  large squares) with the progress strip on its bottom edge and no caption,
+  because the caption was the height the row lost at commit. A failed image's
+  reason therefore reaches the reader through the row notice; file cards keep
+  their caption and remain the reason owners.
+- The action row is always in the flow at 28px, the delivered row's
+  hover-revealed action height, so nothing below moves at commit.
+- The write reaches the conversation view before the held send is removed
+  (originally: before the journal recorded the commit; after #1118, before the
+  in-memory list drops it). `SessionPendingMessages` hides any send whose id is
+  already in the conversation view, through a string snapshot so token-rate
+  view changes do not re-render it. Otherwise a continuation could show the
+  same turn twice for that interval.
+
+Verified by component typecheck, the pending-row suite (a test stalls the write
+after the history update and fails when the filter is removed), and Storybook
+screenshots at 720px and 380px in light and dark. Re-verified after merging
+main's local-first sends (#1118).
+Remaining limit: the delivered image still fetches its thumbnail from the
+server after commit and shows its own loading block meanwhile; seeding that
+cache from the uploaded blob is a separate change. Not verified in the packaged
+app or on native mobile shells.
 
 ## Mainline reconciliation (2026-09-27)
 

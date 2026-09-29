@@ -3,10 +3,8 @@ import { useAtomValue } from 'jotai';
 import {
   getAgentRoleEmoji,
   getAgentRoleMentionSlug,
-  isAgentRoleInMentionScope,
   type AgentRole,
   type AgentRoleAvailability,
-  type AgentRoleMentionScope,
   type MachineId,
   type MachineViewMeta,
   type TextRewrite,
@@ -18,7 +16,6 @@ import {
   type HydratedMentions,
 } from '@/components/mentions/mention-hydration';
 import { rankMentionCandidates } from '@/components/mentions/mention-rank';
-import type { MentionProjectSource } from '@/components/mentions/mention-project-file-source';
 import { useVisibleMachineMetas } from '@/hooks/use-visible-machine-metas';
 import {
   useAgentRoleAvailability,
@@ -41,10 +38,6 @@ import {
  * and freezes its concrete configuration when it accepts the Operation.
  */
 
-export type AgentRoleMentionAvailability =
-  | AgentRoleAvailability
-  | { kind: 'unavailable'; reason: 'outside_work_context' };
-
 export type AgentRoleMentionItem = {
   /**
    * The text written after `@`, derived from the Role's name. Whitespace-free
@@ -53,7 +46,7 @@ export type AgentRoleMentionItem = {
    */
   slug: string;
   role: AgentRole;
-  availability: AgentRoleMentionAvailability;
+  availability: AgentRoleAvailability;
   /**
    * The bound agent and the machine it runs on, carried so the detail pane can
    * resolve this Role's stored ids into the labels that agent publishes, and
@@ -62,72 +55,6 @@ export type AgentRoleMentionItem = {
    */
   agentConfig?: AgentRoleDetailSubject['agentConfig'];
   machine?: Pick<MachineViewMeta, 'acpCapabilities' | 'name'> | null;
-};
-
-// ---------------------------------------------------------------------------
-// Work-context scope
-// ---------------------------------------------------------------------------
-
-/**
- * What a composer is attached to, as far as Roles are concerned.
- *
- * Kept separate from the shared `AgentRoleMentionScope` so the rule is decidable
- * from the composer's own props: which machines the user may reach is resolved
- * later, by the hook that already reads the visible-machine index.
- */
-export type AgentRoleMentionContext =
-  | { kind: 'authorized_machines' }
-  | { kind: 'machine'; machineId: MachineId | null };
-
-/**
- * Where a composer's Roles may run.
- *
- * Plain chats and GitHub projects may use another authorized machine. A Local
- * Project is pinned to the machine the work is on, because a Role elsewhere
- * could not reach that filesystem. A GitHub session
- * that is already checked out on a machine (`localWorktree`) is pinned for the
- * same reason.
- */
-export const buildAgentRoleMentionContext = (options: {
-  mentionSource: MentionProjectSource | undefined;
-}): AgentRoleMentionContext => {
-  const { mentionSource } = options;
-  if (mentionSource?.kind === 'local') {
-    return { kind: 'machine', machineId: mentionSource.machineId };
-  }
-  if (mentionSource?.kind === 'provider' && mentionSource.localProject) {
-    return { kind: 'machine', machineId: mentionSource.localProject.machineId };
-  }
-  // A GitHub project whose files are being read out of a live worktree is
-  // already checked out on one machine, so it is pinned like a local project.
-  if (
-    mentionSource?.kind === 'github' &&
-    mentionSource.repoFullName &&
-    mentionSource.localWorktree
-  ) {
-    return { kind: 'machine', machineId: mentionSource.localWorktree.machineId };
-  }
-  return { kind: 'authorized_machines' };
-};
-
-export const resolveAgentRoleMentionScope = (
-  context: AgentRoleMentionContext,
-  authorizedMachineIds: ReadonlySet<MachineId>
-): AgentRoleMentionScope =>
-  context.kind === 'authorized_machines'
-    ? { kind: 'authorized_machines', machineIds: authorizedMachineIds }
-    : { kind: 'machine', machineId: context.machineId };
-
-/** Binding failures remain precise; work-context restrictions apply to runnable bindings. */
-export const resolveAgentRoleMentionAvailability = (
-  role: AgentRole,
-  scope: AgentRoleMentionScope,
-  resolve: (role: AgentRole) => AgentRoleAvailability
-): AgentRoleMentionAvailability => {
-  const availability = resolve(role);
-  return availability.kind === 'available' && !isAgentRoleInMentionScope(role, scope)
-    ? { kind: 'unavailable', reason: 'outside_work_context' }
-    : availability;
 };
 
 // ---------------------------------------------------------------------------
@@ -156,7 +83,7 @@ export const selectAgentRoleMentionCandidates = (
 export const buildAgentRoleMentionItems = (
   roles: readonly AgentRole[],
   resolve: {
-    availability: (role: AgentRole) => AgentRoleMentionAvailability;
+    availability: (role: AgentRole) => AgentRoleAvailability;
     machine: (machineId: MachineId) => AgentRoleMentionItem['machine'] | undefined;
     agentConfig: (role: AgentRole) => AgentRoleDetailSubject['agentConfig'] | undefined;
   }
@@ -172,30 +99,33 @@ export const buildAgentRoleMentionItems = (
     }));
 
 /**
- * Every readable Role, with execution and work-context availability retained
- * for disabled menu rows. Only available items may expand before send.
+ * Every readable Role, with execution availability retained for disabled menu
+ * rows. Only available items may expand before send.
+ *
+ * No work-context scope: a Role may be dispatched from any composer to any
+ * machine the user can reach, and "reachable" is already the availability
+ * resolver's `machine_unknown` rule over the same visible-machine index.
  *
  * One owner, like `useSessionMentionItems`: the menu and the before-send
  * expansion both need the same list, and deriving it twice would re-resolve
  * every Role's availability on each machine-presence tick.
  */
-export function useAgentRoleMentionItems(context: AgentRoleMentionContext): AgentRoleMentionItem[] {
+export function useAgentRoleMentionItems(): AgentRoleMentionItem[] {
   const agentConfigs = useAtomValue(getAllAgentConfigAtom);
   const { machines } = useVisibleMachineMetas();
   const { roles } = useWorkspaceAgentRoles();
   const { resolve } = useAgentRoleAvailability(roles);
 
   return React.useMemo(() => {
-    const scope = resolveAgentRoleMentionScope(context, new Set(machines.keys()));
     // Indexed once: the same list is walked per Role, and this rebuilds on
     // every machine-presence tick.
     const agentConfigById = new Map(agentConfigs.map((config) => [config.id, config]));
     return buildAgentRoleMentionItems(roles, {
-      availability: (role) => resolveAgentRoleMentionAvailability(role, scope, resolve),
+      availability: resolve,
       machine: (machineId) => machines.get(machineId),
       agentConfig: (role) => agentConfigById.get(role.agentConfigId),
     });
-  }, [agentConfigs, context, machines, resolve, roles]);
+  }, [agentConfigs, machines, resolve, roles]);
 }
 
 // ---------------------------------------------------------------------------

@@ -1,4 +1,3 @@
-import { prepareRendererSendsForExit } from './services/renderer-send-lifecycle'
 import { handleWindowContentReady } from './window-target'
 import { installLocalFileResourceProtocol } from './services/local-file-resource-protocol'
 import { app, BrowserWindow, dialog, ipcMain, safeStorage } from 'electron'
@@ -46,6 +45,7 @@ import {
 import { setupApplicationMenu } from './menu'
 import { isRendererReloadShortcut } from './reload-shortcut'
 import { requestRendererReload } from './renderer-recovery'
+import { closeProductWindowsForQuit } from './renderer-unload'
 import {
   flushElectronMainErrorReporting,
   installElectronMainErrorReporting
@@ -259,11 +259,11 @@ export function startApplication(executionHost?: DesktopExecutionHost): void {
       optimizer.watchWindowShortcuts(window, { zoom: true })
       // electron-toolkit deliberately blocks the production reload shortcut.
       // Restore the normal desktop-app behavior requested by the user while
-      // routing both reload shortcuts through the pending-send guard.
+      // routing both reload shortcuts through the renderer reload path.
       window.webContents.on('before-input-event', (event, input) => {
         if (isRendererReloadShortcut(input, process.platform)) {
           event.preventDefault()
-          void requestRendererReload(window, { ignoreCache: input.shift })
+          requestRendererReload(window, { ignoreCache: input.shift })
         }
       })
     })
@@ -334,7 +334,9 @@ export function startApplication(executionHost?: DesktopExecutionHost): void {
     })
 
     const beforeQuit = createDesktopQuitBarrier({
-      prepare: () => prepareRendererSendsForExit('quit'),
+      // Every renderer approves unload (closing its window) before anything is
+      // torn down, so a Stay answer leaves relays and the CLI running.
+      prepare: closeProductWindowsForQuit,
       stop: async () => {
         setAppQuitting(true)
         setWindowsTrayAvailable(false)
@@ -360,6 +362,8 @@ export function startApplication(executionHost?: DesktopExecutionHost): void {
           'The local agent has not confirmed that it stopped. Lody will stay open to prevent ' +
             'another desktop from using its data. Wait for the agent to stop, then quit again.'
         )
+        // Quit preparation already closed every window; keep a surface to retry from.
+        openOrFocusMainWindow({ icon })
       }
     })
     app.on('before-quit', (event) => {

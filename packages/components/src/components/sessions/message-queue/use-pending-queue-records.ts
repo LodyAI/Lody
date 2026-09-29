@@ -3,11 +3,11 @@ import { useAtomValue } from 'jotai';
 import { useTranslation } from 'react-i18next';
 import type { MessageQueueItem, SessionId } from '@lody/shared';
 import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
-import type { SessionSendViewRecord } from '@/lib/session-send-journal';
-import { selectPendingQueueRecords } from '@/lib/session-send-status';
+import type { PendingSessionSend } from '@/lib/session-pending-sends';
+import { selectPendingQueueSends } from '@/lib/session-send-status';
 import { toast } from '@/lib/toast';
 
-const EMPTY: readonly SessionSendViewRecord[] = [];
+const EMPTY: readonly PendingSessionSend[] = [];
 const emptySnapshot = () => EMPTY;
 const emptySubscribe = () => () => {};
 
@@ -25,17 +25,17 @@ function useQueuedTurnIds(items: readonly MessageQueueItem[]) {
 export function usePendingQueueRecords(
   sessionId: SessionId,
   items: readonly MessageQueueItem[]
-): SessionSendViewRecord[] {
-  const journal = useAtomValue(activeWorkspaceRuntimeAtom)?.sendJournal;
-  const records = useSyncExternalStore(
-    journal?.subscribe ?? emptySubscribe,
-    journal?.getSnapshot ?? emptySnapshot,
+): PendingSessionSend[] {
+  const pending = useAtomValue(activeWorkspaceRuntimeAtom)?.pendingSends;
+  const sends = useSyncExternalStore(
+    pending?.subscribe ?? emptySubscribe,
+    pending?.getSnapshot ?? emptySnapshot,
     emptySnapshot
   );
   const queuedTurnIds = useQueuedTurnIds(items);
   return useMemo(
-    () => selectPendingQueueRecords(records, sessionId, queuedTurnIds),
-    [queuedTurnIds, records, sessionId]
+    () => selectPendingQueueSends(sends, sessionId, queuedTurnIds),
+    [queuedTurnIds, sends, sessionId]
   );
 }
 
@@ -48,44 +48,39 @@ export function useHasPendingQueueRecords(
   sessionId: SessionId,
   items: readonly MessageQueueItem[]
 ): boolean {
-  const journal = useAtomValue(activeWorkspaceRuntimeAtom)?.sendJournal;
+  const pending = useAtomValue(activeWorkspaceRuntimeAtom)?.pendingSends;
   const queuedTurnIds = useQueuedTurnIds(items);
   const getSnapshot = useCallback(
     () =>
-      journal
-        ? selectPendingQueueRecords(journal.getSnapshot(), sessionId, queuedTurnIds).length > 0
+      pending
+        ? selectPendingQueueSends(pending.getSnapshot(), sessionId, queuedTurnIds).length > 0
         : false,
-    [journal, queuedTurnIds, sessionId]
+    [pending, queuedTurnIds, sessionId]
   );
-  return useSyncExternalStore(journal?.subscribe ?? emptySubscribe, getSnapshot, () => false);
+  return useSyncExternalStore(pending?.subscribe ?? emptySubscribe, getSnapshot, () => false);
 }
 
-/**
- * The recovery actions a local queue row offers, with the same semantics as the
- * conversation's pending rows: every action resumes the session's FIFO after it.
- */
-export function usePendingQueueActions(sessionId: SessionId) {
+/** Retry or cancel a held queue-bound send; the conversation's FIFO resumes after it. */
+export function usePendingQueueActions() {
   const { t } = useTranslation();
-  const journal = useAtomValue(activeWorkspaceRuntimeAtom)?.sendJournal;
+  const pending = useAtomValue(activeWorkspaceRuntimeAtom)?.pendingSends;
   const [busyId, setBusyId] = useState<string | null>(null);
   const run = useCallback(
-    async (record: SessionSendViewRecord, kind: 'retry' | 'cancel' | 'discard') => {
-      if (!journal) return;
-      setBusyId(record.id);
+    async (send: PendingSessionSend, kind: 'retry' | 'cancel') => {
+      if (!pending) return;
+      setBusyId(send.id);
       try {
-        if (kind === 'cancel') await journal.cancel(record.id);
-        if (kind === 'discard') await journal.discard(record.id);
-        await journal.retry(sessionId);
+        if (kind === 'cancel') await pending.cancel(send.id);
+        else pending.retry(send.id);
       } catch (error) {
-        toast.error(
-          error instanceof Error ? error.message : t('sessions.sendRecoveryUnavailable'),
-          { id: `pending-queue-${record.id}` }
-        );
+        toast.error(error instanceof Error ? error.message : t('sessions.sendError'), {
+          id: `pending-queue-${send.id}`,
+        });
       } finally {
         setBusyId(null);
       }
     },
-    [journal, sessionId, t]
+    [pending, t]
   );
   return { busyId, run };
 }

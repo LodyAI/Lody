@@ -116,8 +116,8 @@ wrong surface.
 ## Agent Roles
 
 Role visibility and selection follow [the Role mention Spec](../../specs/agent-role-mentions.md).
-Plain chats can reach all authorized machines. The menu keeps readable Roles
-that are loading, unavailable, or outside a filesystem-bound work context, with
+Every composer, including a Local Project one, can reach all authorized
+machines. The menu keeps readable Roles that are loading or unavailable, with
 an explanation below the name. They follow available matches and cannot be
 selected. Hydration and before-send expansion independently reject those rows,
 so showing a stale Role never creates a new dispatch instruction.

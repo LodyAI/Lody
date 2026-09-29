@@ -27,7 +27,6 @@ import {
   type SessionMentionProjectScope,
 } from '@/components/mentions/mention-session-source';
 import {
-  buildAgentRoleMentionContext,
   hydrateAgentRoleMentionsFromText,
   useAgentRoleMentionItems,
   type AgentRoleMentionItem,
@@ -880,14 +879,7 @@ export const CombinedMentionTextarea = React.forwardRef<
       () => getMentionSourceProjectKey(mentionSource),
       [mentionSource]
     );
-    const agentRoleContext = React.useMemo(
-      () =>
-        templateScope
-          ? { kind: 'authorized_machines' as const }
-          : buildAgentRoleMentionContext({ mentionSource }),
-      [mentionSource, templateScope]
-    );
-    const agentRoleItems = useAgentRoleMentionItems(agentRoleContext);
+    const agentRoleItems = useAgentRoleMentionItems();
     // A committed range carries only the Role id, so the caller's chip resolver
     // cannot reach the Role's emoji on its own. The composer already owns the
     // mentionable list, so it upgrades the glyph on the way through.
@@ -1016,8 +1008,8 @@ export const CombinedMentionTextarea = React.forwardRef<
     // already: a composer with only issues rendered a plain textarea.
     const enableSessionMentions = !templateScope && sessionItems.length > 0;
     // Having any mentionable Role IS the enablement rule: the list is already
-    // filtered by visibility, executability, and work context, so an empty one
-    // means there is nothing this composer could offer.
+    // filtered by visibility, so an empty one means there is nothing this
+    // composer could offer.
     const enableAgentRoleMentions = agentRoleItems.length > 0;
     const enableAtMentions =
       !!templateScope ||

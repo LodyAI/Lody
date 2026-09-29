@@ -23,7 +23,7 @@ represent enabled workspace repositories and have no machine binding.
 Only authorized resources are returned. MCP identity comes from the active runtime
 Turn. Role list/get follows `canReadAgentRole`; this does not change the separate
 explicit-id Role creation contract. Readable unavailable Roles remain listed with
-binding, machine, model, permission-mode or current-work-context reasons. Missing
+binding, machine, model or permission-mode reasons. Missing
 presence/capability information is unknown, not proof of unavailability. Availability
 does not replace dispatch validation or guarantee future availability.
 

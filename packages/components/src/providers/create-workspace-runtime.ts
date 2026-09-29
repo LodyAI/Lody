@@ -1,5 +1,5 @@
-import { createWorkspaceSessionSendJournal } from './workspace-session-send-journal';
-import { throwIfSendAborted } from '../lib/session-send-resources';
+import { createWorkspacePendingSends } from './workspace-pending-sends';
+import { migrateLegacySessionSends } from '../lib/legacy-session-send-migration';
 import { createSessionSendResources } from '@/lib/session-send-resources';
 import { waitForScheduleWriteSync, withScheduleWrite } from './schedule-write-sync';
 import {
@@ -185,11 +185,6 @@ export function resolveWorkspaceRuntimeCacheIdentity(
 }
 
 type RuntimeDeps = {
-  getSendAdmissionContext?: () => {
-    entitlement?: import('@lody/shared').BillingQuotaEntitlement;
-    sessionCount: number | null;
-  };
-
   accountId?: string | null;
   /**
    * Used for caching the (slug, id) mapping in localStorage.
@@ -512,6 +507,8 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   let localPresenceUnsubscribe: (() => void) | null = null;
   let transportAttached = false;
   let authToken: string | null = null;
+  // Assigned once the send resources exist; runs after the first meta sync.
+  let startLegacySendMigration: (() => void) | null = null;
   let cloudTransportAttached = false;
   let cloudTransportAttachPromise: Promise<void> | null = null;
   let metaSub: RepoRoomSubscription | null = null;
@@ -3345,6 +3342,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
           }
           initialMetaSyncCompleted = true;
           initialMetaSyncFailed = false;
+          startLegacySendMigration?.();
           currentMetaTracker.markFirstSynced();
           // Dual watches its local binding here; its marker is cleared by the
           // cloud Meta binding instead (attachCloudMetaHealthTracker).
@@ -4694,10 +4692,10 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     windowBootstrap?.close();
     sharedWindowDocuments.clear();
     disposePromise = (async () => {
-      unsubscribeSendRecovery();
+      // Held sends are in memory only: closing the workspace drops them.
+      pendingSends.dispose();
       // Cancel and join send I/O while its cache, transport and repo still exist.
       await sendResources.dispose();
-      await sendJournal?.close();
       cancelDelayedBackgroundSyncStart?.();
       cancelDelayedBackgroundSyncStart = null;
       cancelDelayedStartupAcpCapabilitiesRefresh?.();
@@ -4895,64 +4893,49 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     acquire: sessionStoreCache.acquire,
     releaseRef: sessionStoreCache.releaseRef,
   });
-  const sendJournal = deps.accountId
-    ? createWorkspaceSessionSendJournal({
-        accountId: deps.accountId,
-        getAdmissionContext: deps.getSendAdmissionContext,
-        token: () => authToken,
-        localMachineId: () => sendLocalMachineId,
-        sourceReplica: cacheIdentity.repoDbName,
+  const isMachineRpcUnreachable = (machineId: MachineId) =>
+    targetRouter.getPlaneForMachine(machineId) === 'cloud' && !isBrowserOnline();
+  const pendingSends = createWorkspacePendingSends({
+    runtime: {
+      repo,
+      writer: workspaceWriter,
+      sendResources,
+      requestSessionDispatchTurn,
+      requestSessionSteer,
+      isMachineRpcUnreachable,
+    },
+    token: () => authToken,
+    localMachineId: () => sendLocalMachineId,
+  });
+  if (deps.accountId) {
+    const accountId = deps.accountId;
+    let migrationStarted = false;
+    startLegacySendMigration = () => {
+      if (migrationStarted || disposePromise) return;
+      migrationStarted = true;
+      void migrateLegacySessionSends({
+        accountId,
+        workspaceId,
         runtime: {
-          workspaceId,
           repo,
           writer: workspaceWriter,
           sendResources,
           requestSessionDispatchTurn,
           requestSessionSteer,
         },
-        waitForTargetSync: async (sessionId, signal) => {
-          await waitForPromiseOrAbort(transportReady.promise, signal);
-          throwIfSendAborted(signal);
-          await targetRouter.prepareSessionTarget(sessionId);
-          throwIfSendAborted(signal);
-          const roomId = getSessionRoomId(sessionId);
-          const plane = targetRouter.getReadinessTransportForRoom({ kind: 'doc', id: roomId });
-          // Imported prepared operations do not emit subscribeLocalUpdates. Explicit
-          // sync exports the missing operations and reuses the transport's room.
-          // Upstream sync races its AbortSignal without joining raw stream.sync();
-          // omit that signal here so our owner retains dependencies until it settles.
-          const report = await repo.sync({
-            scope: 'full',
-            docIds: [roomId],
-            flockDocIds: [],
-            requireTransports: [plane],
-          });
-          throwIfSendAborted(signal);
-          if (
-            !report.transports.some(
-              (transport) => transport.transportId === plane && transport.ok
-            ) ||
-            targetRouter.getReadinessTransportForRoom({ kind: 'doc', id: roomId }) !== plane
-          ) {
-            throw new Error('Target synchronization is not confirmed');
-          }
-        },
-      })
-    : null;
-  const unsubscribeSendRecovery = presenceTransport.subscribeSyncState((state) => {
-    if (state === 'synced' && !disposePromise) {
-      void sendJournal?.resume().catch((error: unknown) => {
-        console.warn('Background session synchronization remains pending', error);
+      }).catch((error: unknown) => {
+        console.warn('Legacy pending messages could not be migrated', error);
       });
-    }
-  });
+    };
+    if (initialMetaSyncCompleted) startLegacySendMigration();
+  }
   return {
     workspaceSlug: deps.workspaceSlug,
     workspaceId,
     repo,
-    sourceReplica: cacheIdentity.repoDbName,
     accountId: deps.accountId ?? null,
-    sendJournal,
+    pendingSends,
+    isMachineRpcUnreachable,
     codeCollabFileIndexCache,
     sendResources,
     writer: workspaceWriter,

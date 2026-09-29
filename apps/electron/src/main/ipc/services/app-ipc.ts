@@ -1,8 +1,3 @@
-import {
-  registerRendererSendLifecycle,
-  resolveRendererSendLifecycle,
-  prepareRendererSendsForExit
-} from '../../services/renderer-send-lifecycle'
 import { assertProductWindowSender } from '../assert-sender'
 import { parseAppIconName } from '../../services/app-icon-core'
 import { productWindows } from '../../window-state'
@@ -42,7 +37,12 @@ import {
   persistRendererFatalError,
   requestRendererReload
 } from '../../renderer-recovery'
-import { applyResolvedWindowTheme, resolveNativeWindowTheme } from '../../window-theme'
+import {
+  applyResolvedWindowTheme,
+  isNativeWindowThemeSource,
+  resolveNativeWindowTheme
+} from '../../window-theme'
+import { writeStartupThemeSource } from '../../theme-settings'
 import { formatUnknownError, normalizeExternalHttpUrl } from '../../utils'
 import {
   applyAutoLaunchSettings,
@@ -112,21 +112,6 @@ export class AppIpc extends IpcService {
   static override readonly groupName = 'app'
 
   @IpcMethod()
-  async registerSendLifecycle() {
-    const { event } = getIpcContext()
-    assertProductWindowSender(event)
-    const window = BrowserWindow.fromWebContents(event.sender)
-    if (window) registerRendererSendLifecycle(window)
-  }
-
-  @IpcMethod()
-  async replySendLifecycle(input: unknown) {
-    const { event } = getIpcContext()
-    assertProductWindowSender(event)
-    resolveRendererSendLifecycle(event.sender.id, input)
-  }
-
-  @IpcMethod()
   async getAppIconState() {
     assertProductWindowSender(getIpcContext().event)
     return getIpcServiceDeps().appIconService.getState()
@@ -170,11 +155,7 @@ export class AppIpc extends IpcService {
     const { event } = getIpcContext()
     assertProductWindowSender(event)
     for (const window of productWindows) {
-      if (window.webContents !== event.sender) {
-        if (!(await prepareRendererSendsForExit('close', window)))
-          throw new Error('Cache clearing was cancelled')
-        window.destroy()
-      }
+      if (window.webContents !== event.sender) window.destroy()
     }
   }
 
@@ -529,9 +510,23 @@ export class AppIpc extends IpcService {
 
   @IpcMethod()
   async setNativeTheme(source: NativeThemeSource) {
-    if (source === 'dark' || source === 'light' || source === 'system') {
+    if (isNativeWindowThemeSource(source)) {
       nativeTheme.themeSource = source
       syncNativeThemeWindows()
+    }
+  }
+
+  /**
+   * Records the theme the next launch should open in.
+   *
+   * Deliberately separate from `setNativeTheme`, which also follows a preview
+   * (hovering a theme in Settings) so the native chrome tracks what the user is
+   * looking at. Only a committed choice belongs on disk.
+   */
+  @IpcMethod()
+  async setStartupThemeSource(source: NativeThemeSource) {
+    if (isNativeWindowThemeSource(source)) {
+      writeStartupThemeSource(source)
     }
   }
 
@@ -558,6 +553,6 @@ export class AppIpc extends IpcService {
   async requestRendererReload() {
     const { event } = getIpcContext()
     const window = findWindow(event.sender)
-    if (window) await requestRendererReload(window)
+    if (window) requestRendererReload(window)
   }
 }

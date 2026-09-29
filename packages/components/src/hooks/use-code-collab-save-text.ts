@@ -1,4 +1,3 @@
-import { registerRendererUnloadGuard } from '@/lib/renderer-unload-guards';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { SessionFileProvider } from '@/lib/session-file-provider';
 import { useLatestRef } from './use-latest-ref';
@@ -447,7 +446,6 @@ export function useCodeCollabSaveText(
       statusRef.current.kind === 'conflict_pending' ||
       statusRef.current.kind === 'conflict' ||
       statusRef.current.kind === 'error';
-    const unregister = registerRendererUnloadGuard(isDirty);
     const handleBeforeUnload = (event: BeforeUnloadEvent): void => {
       if (!isDirty()) {
         return;
@@ -457,7 +455,6 @@ export function useCodeCollabSaveText(
     };
     window.addEventListener('beforeunload', handleBeforeUnload);
     return () => {
-      unregister();
       window.removeEventListener('beforeunload', handleBeforeUnload);
     };
   }, []);

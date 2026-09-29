@@ -22,12 +22,13 @@ rules live in [AGENTS.md](AGENTS.md); the pipeline and its reasoning live in
 - `mention-session-source.ts` owns session slugs, candidates, the slug → id cache,
   hydration, the drop-time insertion, and the before-send expansion. Transfer
   format and the self-drop check live in `lib/session-mention-drag.ts`.
-- `mention-agent-role-source.ts` owns the Agent Roles work-context rule,
-  candidates, hydration, and the before-send rewrite. `useAgentRoleMentionItems`
-  is the single owner of readable Roles and their availability: the menu shows
-  disabled reasons after available matches; hydration and expansion use only
-  available Roles. Plain chat can reach any authorized machine. It reads the visible-machine index, so a test
-  that renders a composer stubs it the same way it stubs the session source.
+- `mention-agent-role-source.ts` owns the Agent Roles candidates, hydration, and
+  the before-send rewrite. `useAgentRoleMentionItems` is the single owner of
+  readable Roles and their availability: the menu shows disabled reasons after
+  available matches; hydration and expansion use only available Roles. Every
+  composer can reach any authorized machine. It reads the visible-machine index,
+  so a test that renders a composer stubs it the same way it stubs the session
+  source.
 - `issue-pr-hash-mention.tsx` provides cached GitHub issue/PR lookup, ranking,
   hydration, and post-insert title hints.
 - `mention-skill-source.tsx` provides `$` skill discovery, provider directory

@@ -128,9 +128,9 @@ That tolerance must not authorize creating new malformed items locally.
   retain the process that owns its prepared replacement. Create/restore fences remain.
 - Proven non-delivery survives a promotion write failure. The CLI returns `promotion-failed`
   with the error instead of implying successful recovery or unknown delivery. A daemon's
-  `recoveryOwned` response keeps recovery with that daemon: the renderer retries a proven
-  promotion failure once through the same RPC and surfaces persistent failure. Legacy
-  responses retain the pending_apply/pending/seen dispatch repair. Active, terminal, and
+  `recoveryOwned` response keeps recovery with that daemon: the renderer neither retries
+  nor repairs that turn. Legacy responses (no `recoveryOwned`) retain the
+  pending_apply/pending/seen dispatch repair. Active, terminal, and
   removed turns cannot be revived. Timeout or unknown delivery never authorizes retry.
 - Foreground run configuration belongs to its turn's Effect signal. Once that turn is
   interrupted, an in-flight configuration request may finish, but it must not issue a

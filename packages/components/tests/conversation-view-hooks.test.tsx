@@ -7,7 +7,6 @@ import { LoroMap } from 'loro-crdt';
 import {
   createHistoryWriter,
   resolveSessionConversationConfig,
-  type WorkspaceId,
 } from '@lody/shared';
 import {
   useConversationVersion,
@@ -18,7 +17,6 @@ import { useIncrementalSearchBlocks } from '../src/hooks/use-incremental-search-
 import {
   createConversationSession,
   createConversationDerivation,
-  createProjectedConversationView,
   collectConversationConfigSources,
   type ConversationView,
 } from '../src/lib/conversation-view';
@@ -192,8 +190,9 @@ describe('conversation view React readers', () => {
     expect(itemFor('a-100')?.type).toBe('message');
   });
 
-  it('keeps revealed content and its reading window through projection refreshes', async () => {
-    const { view } = await openView(150);
+  it('keeps revealed content and its reading window while new turns land', async () => {
+    const { doc, view } = await openView(150);
+    const writer = createHistoryWriter(doc);
     let stream!: ReturnType<typeof useConversationStreamItems>;
     function Probe({ current }: { current: ConversationView }) {
       stream = useConversationStreamItems(current, FIXTURE_SESSION_ID);
@@ -206,7 +205,6 @@ describe('conversation view React readers', () => {
     await act(async () => root.render(<Probe current={view} />));
     await act(async () => stream.onVisibleTurnRangeChange({ from: 20, to: 28 }));
     await flush();
-    const entry = view.turn(20)!;
     const acquire = view.acquireRange.bind(view);
     let releaseReady!: () => void;
     const gate = new Promise<void>((resolve) => {
@@ -216,21 +214,17 @@ describe('conversation view React readers', () => {
       const lease = acquire(...args);
       return { ...lease, ready: lease.ready.then(() => gate) };
     });
-    for (let refresh = 0; refresh < 3; refresh++) {
-      const projected = createProjectedConversationView(view, [
-        {
-          workspaceId: 'projection-fixture' as WorkspaceId,
-          sessionId: FIXTURE_SESSION_ID,
-          entry,
-        },
-      ]);
-      await act(async () => root.render(<Probe current={projected} />));
+    for (let landed = 0; landed < 3; landed++) {
+      await act(async () => {
+        writer.append({ ...buildFixtureHistory(1)[0]!, id: `landed-${landed}` });
+        await flushReaderChanges();
+      });
+      await act(async () => root.render(<Probe current={view} />));
       await flush();
+      expect(view.indexOf(`landed-${landed}`)).toBe(view.turnCount - 1);
       expect(getComputedStyle(container.firstElementChild!).visibility).toBe('visible');
       expect(view.isHydrated(20)).toBe(true);
     }
-    await act(async () => root.render(<Probe current={view} />));
-    expect(getComputedStyle(container.firstElementChild!).visibility).toBe('visible');
     await act(async () => releaseReady());
   });
 

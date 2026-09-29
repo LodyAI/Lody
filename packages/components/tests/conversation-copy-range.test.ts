@@ -1,8 +1,7 @@
 import { openReaderView } from './conversation-view-fixtures';
 import { describe, expect, it } from 'vitest';
 import { conversationCopyRange } from '../src/lib/conversation-copy-range';
-import { buildConversationMarkdown, type WorkspaceId } from '@lody/shared';
-import { createProjectedConversationView } from '../src/lib/conversation-view';
+import { buildConversationMarkdown } from '@lody/shared';
 import {
   buildFixtureHistory,
   buildSessionDoc,
@@ -31,21 +30,12 @@ describe('complete async history reads', () => {
       scheduleIdle: createManualIdle().scheduleIdle,
     });
     const expected = doc.getList('history').toJSON();
-    const projected = createProjectedConversationView(view, [
-      {
-        workspaceId: 'workspace' as WorkspaceId,
-        sessionId: FIXTURE_SESSION_ID,
-        entry: { ...buildFixtureHistory(1)[0]!, id: 'overlay' },
-        afterHistoryId: null,
-      },
-    ]);
-    const reading = projected.readAll();
+    const reading = view.readAll();
     doc.getList('history').delete(0, 1);
     doc.commit();
     view.dispose();
     const history = await reading;
     expect(history).toEqual(expected);
-    expect(history.some((t) => t.id === 'overlay')).toBe(false);
     expect(buildConversationMarkdown({ history }).stats.entryCount).toBe(expected.length);
     doc.free();
   });

@@ -2,7 +2,7 @@ import { atom } from 'jotai';
 import { atomFamily } from 'jotai/utils';
 import type { SessionSendState, SessionSendStatus } from '@/lib/session-send-status';
 
-/** Written by `SessionSendRecovery` from the local send journal; never synced. */
+/** Written by `SessionPendingSendsHost` from the in-memory pending sends; never synced. */
 export const sessionSendStatusesAtom = atom<Record<string, SessionSendStatus>>({});
 
 function sameStatus(a: SessionSendStatus | null, b: SessionSendStatus | null) {

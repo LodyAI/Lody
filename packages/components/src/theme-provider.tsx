@@ -51,6 +51,20 @@ const uiPaletteClassNames = (mode: 'light' | 'dark'): string[] =>
 const UI_PALETTE_CLASSES = [...uiPaletteClassNames('light'), ...uiPaletteClassNames('dark')];
 export type ResolvedTheme = 'light' | 'dark';
 
+/**
+ * Installed by a native shell (`window.__LODY_STARTUP_THEME__`) so the theme the
+ * user COMMITTED reaches the process that paints before this code runs.
+ *
+ * On mobile that is the splash and the WebView background, which the shell
+ * has to color from its own storage at launch; the renderer's `localStorage`
+ * is not readable there. Electron gets the same value over IPC instead. A
+ * preview never travels this way — only a committed choice says how the next
+ * launch should look.
+ */
+export type LodyStartupThemeBridge = {
+  persist: (theme: Theme) => Promise<void>;
+};
+
 export const THEME_CYCLE_ORDER: readonly Theme[] = ['light', 'dark', 'system'];
 
 export function nextCycledTheme(current: Theme): Theme {
@@ -121,8 +135,10 @@ export function ThemeProvider({
       forcedTheme={previewedTheme}
       storageKey={storageKey}
       themes={['light', 'dark']}
-      // Electron's CSP intentionally rejects inline scripts. Its native-theme
-      // bridge supplies the initial resolved theme immediately after mount.
+      // Electron's CSP rejects inline scripts, so next-themes' blocking
+      // pre-paint script is neutered here. Its job is done by the CSP-hashed
+      // boot script in `index.html` (`lib/boot-shell-script.ts`) instead, and
+      // the native-theme bridge supplies OS appearance changes after mount.
       scriptProps={isElectron ? { type: 'application/json' } : undefined}
     >
       <LodyThemeProvider
@@ -176,10 +192,28 @@ function LodyThemeProvider({
   }, [resolvedTheme, theme]);
 
   // On Electron, keep the OS-drawn window chrome (notably the Windows title bar)
-  // matching the in-app theme. Preserve `system` as the native source.
+  // matching the in-app theme. Preserve `system` as the native source. This
+  // follows the preview too, so hovering a theme in Settings retints the frame.
   useEffect(() => {
     void getIpcServices()?.app.setNativeTheme(theme);
   }, [theme]);
+
+  // Mirror the COMMITTED choice into whichever host paints before this code
+  // runs: Electron main (window background, win32 caption overlay) over IPC,
+  // and a native mobile shell (splash, WebView background) through its
+  // bridge. Both keep it in their own storage because the renderer's
+  // `localStorage` is not readable from there. A preview is excluded on
+  // purpose: it says nothing about how the app should open.
+  useEffect(() => {
+    void getIpcServices()?.app.setStartupThemeSource(storedTheme);
+    // Local cast, like `native-platform.ts`: host typecheck programs that pull
+    // this file in by path do not include `window-globals.d.ts`.
+    const shell = (window as Window & { __LODY_STARTUP_THEME__?: LodyStartupThemeBridge })
+      .__LODY_STARTUP_THEME__;
+    shell?.persist(storedTheme).catch((error: unknown) => {
+      console.warn('[theme] Failed to persist the startup theme to the native shell', error);
+    });
+  }, [storedTheme]);
 
   useIsomorphicLayoutEffect(() => {
     const root = window.document.documentElement;

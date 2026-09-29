@@ -226,11 +226,11 @@ const UNAVAILABLE_AGENT_ROLES: MentionCandidate[] = [
   ),
   toAgentRoleCandidate(
     {
-      slug: 'Remote-Reviewer',
-      role: agentRole({ id: 'remote-role' as AgentRoleId, name: 'Remote Reviewer' }),
-      availability: { kind: 'unavailable', reason: 'outside_work_context' },
+      slug: 'Unreachable-Reviewer',
+      role: agentRole({ id: 'unreachable-role' as AgentRoleId, name: 'Unreachable Reviewer' }),
+      availability: { kind: 'unavailable', reason: 'machine_unknown' },
     },
-    'Unavailable: this workspace requires a role on the same machine'
+    'Unavailable: its machine is not available to you'
   ),
 ];
 

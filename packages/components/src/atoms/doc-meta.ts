@@ -212,7 +212,7 @@ function listSessionEntries(
 
 // 分类缓存
 export const sessionMetaCacheAtom = atom<Record<string, SessionMeta>>({});
-/** Local placeholders from durable submissions; never authored into repo metadata. */
+/** Placeholders for new conversations held in memory until their first send is written; never authored into repo metadata. */
 export const pendingSendSessionMetasAtom = atom<Record<string, SessionMeta>>({});
 const visibleSessionMetaCacheAtom = atom((get) => ({
   ...get(pendingSendSessionMetasAtom),

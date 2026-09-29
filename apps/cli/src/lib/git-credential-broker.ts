@@ -380,6 +380,12 @@ export class GitCredentialBroker {
     return this.env;
   }
 
+  /** Rotate only sessions that opted into managed credentials during preparation. */
+  refreshSessionContext(context: GitCredentialBrokerSessionContext): string | undefined {
+    if (!this.sessionContextTokens.has(context.sessionId)) return undefined;
+    return this.activateSessionContext(context);
+  }
+
   activateSessionContext(context: GitCredentialBrokerSessionContext): string {
     const existingToken = this.sessionContextTokens.get(context.sessionId);
     if (existingToken) {

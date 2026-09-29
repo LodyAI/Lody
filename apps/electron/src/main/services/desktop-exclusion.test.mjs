@@ -129,7 +129,7 @@ void test('quit waits for execution exit, retains ownership on failure, and allo
   assert.equal(finalQuitPrevented, false)
 })
 
-void test('quit cancellation preserves services and a later attempt drains renderers before stopping', async () => {
+void test('quit cancellation preserves services and a later attempt closes renderers before stopping', async () => {
   const decision = Promise.withResolvers()
   const ready = Promise.withResolvers()
   const quit = Promise.withResolvers()

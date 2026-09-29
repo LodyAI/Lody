@@ -4,12 +4,24 @@ import type { MainLayout } from './main-layout';
 let prepared: typeof MainLayout | undefined;
 let loading: Promise<{ default: typeof MainLayout }> | undefined;
 
-/** Load code without mounting workspace UI or running its effects. */
+/**
+ * Load code without mounting workspace UI or running its effects.
+ *
+ * A rejection is not cached: an idle warm-up (the login page) can fail offline,
+ * and a cached rejected promise would then fail the real mount too, where a
+ * fresh `import()` would have retried.
+ */
 export function preloadMainLayout() {
-  return (loading ??= import('./main-layout').then((module) => {
-    prepared = module.MainLayout;
-    return { default: module.MainLayout };
-  }));
+  return (loading ??= import('./main-layout').then(
+    (module) => {
+      prepared = module.MainLayout;
+      return { default: module.MainLayout };
+    },
+    (error: unknown) => {
+      loading = undefined;
+      throw error;
+    }
+  ));
 }
 
 const LazyMainLayout = lazy(preloadMainLayout);

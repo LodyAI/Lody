@@ -2845,41 +2845,44 @@ export function LoroAppSidebar({
                 {/* No icon: a machine group reads like GitHub Worktrees and
                     Chats. "Offline" marks the exception, and hovering the
                     header tells what the group is (owner, status, OS). */}
-                <SidebarMachineHoverCard
-                  disabled={isMobile || !sectionMachine}
-                  machine={
-                    sectionMachine
-                      ? { ...sectionMachine, activity: sectionActivity }
-                      : {
-                          machineId: '' as MachineId,
-                          name: section.sectionLabel,
-                          isOwn: true,
-                          isCurrent: true,
-                          projectCount: section.projects.length,
-                        }
+                <SidebarSectionHeader
+                  wrapToggle={(toggle) => (
+                    <SidebarMachineHoverCard
+                      disabled={isMobile || !sectionMachine}
+                      machine={
+                        sectionMachine
+                          ? { ...sectionMachine, activity: sectionActivity }
+                          : {
+                              machineId: '' as MachineId,
+                              name: section.sectionLabel,
+                              isOwn: true,
+                              isCurrent: true,
+                              projectCount: section.projects.length,
+                            }
+                      }
+                    >
+                      {toggle}
+                    </SidebarMachineHoverCard>
+                  )}
+                  label={
+                    <span className="inline-flex min-w-0 items-center gap-1.5">
+                      <span className="min-w-0 truncate">{section.sectionLabel}</span>
+                      {section.machineId && section.kind === 'remote' ? (
+                        <SidebarMachineOfflinePill machineId={section.machineId} />
+                      ) : null}
+                    </span>
                   }
-                >
-                  <SidebarSectionHeader
-                    label={
-                      <span className="inline-flex min-w-0 items-center gap-1.5">
-                        <span className="min-w-0 truncate">{section.sectionLabel}</span>
-                        {section.machineId && section.kind === 'remote' ? (
-                          <SidebarMachineOfflinePill machineId={section.machineId} />
-                        ) : null}
-                      </span>
-                    }
-                    collapsed={sectionCollapsed}
-                    activity={sectionActivity}
-                    // The machine card owns this header's hover and lists the counts.
-                    describeActivity={isMobile || !sectionMachine}
-                    action={headerAction}
-                    isMobile={isMobile}
-                    toggleLabel={toggleLabel}
-                    onToggleCollapsed={() =>
-                      handleToggleLocalProjectsSection(section.sectionKey, section.defaultCollapsed)
-                    }
-                  />
-                </SidebarMachineHoverCard>
+                  collapsed={sectionCollapsed}
+                  activity={sectionActivity}
+                  // The machine card owns this header's hover and lists the counts.
+                  describeActivity={isMobile || !sectionMachine}
+                  action={headerAction}
+                  isMobile={isMobile}
+                  toggleLabel={toggleLabel}
+                  onToggleCollapsed={() =>
+                    handleToggleLocalProjectsSection(section.sectionKey, section.defaultCollapsed)
+                  }
+                />
               </div>
 
               {sectionCollapsed ? null : (

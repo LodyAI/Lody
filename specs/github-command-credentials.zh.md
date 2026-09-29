@@ -5,6 +5,11 @@ Translation: current
 
 [English](github-command-credentials.md)
 
+本地项目及其 worktree 使用本机 Git 和 GitHub 认证，即使其 remote 指向 GitHub。
+这些会话不安装 Lody 凭据 helper、命令包装器、传输重写、broker 上下文或托管 token；
+保留用户环境、凭据 helper、SSH 配置及 `gh` 登录。后续请求者刷新也不能把本地会话
+加入托管认证。下文托管命令策略适用于本地项目以外的会话。
+
 Agent 切换目录、使用 `gh -R` 指定其他仓库或访问子模块时，凭据应属于本次命令的目标仓库，
 而不是会话启动时的项目。Installation token 仍只授权单个仓库。
 

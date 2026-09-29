@@ -1277,17 +1277,10 @@ const resolveMcpSessionCreate = (
       false
     );
   }
+  // A Role may run on any Machine the requester can access; the shared create
+  // path enforces that access. Only a Local Project child is filesystem-bound,
+  // so a Role on another Machine starts as an independent Session there.
   const project = requester.project;
-  if (project?.kind !== 'github' && role.machineId !== requester.machineId) {
-    throw new LodyOperationStoreError(
-      'AGENT_ROLE_MACHINE_MISMATCH',
-      project?.kind === 'local'
-        ? `Agent Role ${role.name} must run on the Local Project's Machine.`
-        : `Agent Role ${role.name} must run on the current Machine in a chat Session.`,
-      false
-    );
-  }
-
   let useCurrentSessionAsParent = input.useCurrentSessionAsParent;
   let workContext = input.workContext;
   if (
@@ -1302,6 +1295,7 @@ const resolveMcpSessionCreate = (
     };
   } else if (
     project?.kind === 'local' &&
+    role.machineId === requester.machineId &&
     useCurrentSessionAsParent === undefined &&
     workContext === undefined
   ) {
@@ -3570,7 +3564,6 @@ export function buildLodyMcpServer(): McpServer {
           manager,
           auth,
           workspaceId: workspace.id as WorkspaceId,
-          requesterSessionId: ctx.sessionId as SessionId,
           delegatedRequester: { userId: source.userId },
           selectedMcpServerIds: source.inputConfig.mcpServerIds,
         })
@@ -3860,7 +3853,7 @@ export function buildLodyMcpServer(): McpServer {
     {
       title: 'Create a Lody session',
       description:
-        'Start durable asynchronous work that creates a Lody session. Supply operationId; the result arrives automatically as a continuation, so do not poll operation_get. To use an Agent Role, pass agentRoleId; the current workspace catalog row supplies the exact Machine, Agent config, model, reasoning, and permission mode. If manual machine or run-config fields are also present, the Role takes precedence and those fields are ignored. To recover an already accepted create without resending its prompt, send only operationId with resume=true. useCurrentSessionAsParent=true and workContext are mutually exclusive schema branches. Machine/config ids and runConfig values for non-Role creates come from lody_session_create_options. The wait field is temporary legacy compatibility only.',
+        'Start durable asynchronous work that creates a Lody session. Supply operationId; the result arrives automatically as a continuation, so do not poll operation_get. To use an Agent Role, pass agentRoleId; the current workspace catalog row supplies the exact Machine, Agent config, model, reasoning, and permission mode. If manual machine or run-config fields are also present, the Role takes precedence and those fields are ignored. A Role may run on any Machine the owner of this Machine can use; to work in a project there, pass workContext for a local project on that Machine (find it with lody_session_create_options machineId + localProjectQuery). Without workContext a Role on another Machine starts as a plain chat there. To recover an already accepted create without resending its prompt, send only operationId with resume=true. useCurrentSessionAsParent=true and workContext are mutually exclusive schema branches. Machine/config ids and runConfig values for non-Role creates come from lody_session_create_options. The wait field is temporary legacy compatibility only.',
       inputSchema: SessionCreateToolInputSchema,
     },
     async (input) => {

@@ -19,6 +19,7 @@ reasoning behind those rules.
 | Submission             | [`submission/`](submission/AGENTS.md)                                                                                                                                                    | Composer submission lifecycle and local rules.                                  |
 | Draft persistence      | [`../../atoms/local-storage-cache.ts`](../../atoms/local-storage-cache.ts), [`../../atoms/chat-landing-draft.ts`](../../atoms/chat-landing-draft.ts)                                     | Durable text and in-memory attachment state, scoped by workspace.               |
 | Attachment uploads     | [`../../hooks/use-chat-landing-image-draft.ts`](../../hooks/use-chat-landing-image-draft.ts), [`../../hooks/use-chat-landing-file-draft.ts`](../../hooks/use-chat-landing-file-draft.ts) | Image and file upload state, including Electron's local transport.              |
+| Held sends             | [`session-pending-messages.tsx`](session-pending-messages.tsx), [`session-pending-sends-host.tsx`](session-pending-sends-host.tsx) | In-memory sends awaiting attachments: pending rows, sidebar status, leave prompt. |
 
 ## Why the rules read the way they do
 

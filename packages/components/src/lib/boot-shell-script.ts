@@ -18,8 +18,6 @@ export const BOOT_SHELL_STORAGE_KEYS = {
   sidebarCollapsed: 'lody-sidebar-collapsed',
   /** `sidebarLastWidthAtom`, JSON number in localStorage; 0 means default. */
   sidebarWidth: 'lody-sidebar-last-width',
-  /** `last-app-route.ts`, JSON `{ path }` in the window's storage. */
-  lastAppRoute: 'lody:lastAppRoute',
 } as const;
 
 /**
@@ -62,7 +60,6 @@ export function createBootShellScript(): string {
     "var sw=/[?&]window=session(&|$)/.test(h)||w.getItem('lody:sessionWindow')==='1';" +
     'var c=j(w,K.sidebarCollapsed);if(typeof c!=="boolean")c=sw;' +
     "var p=location.hash.charAt(1)==='/'?location.hash.slice(1):location.pathname;" +
-    "if(p==='/'||p===''){var r=j(w,K.lastAppRoute);p=r&&typeof r.path==='string'?r.path:''}" +
     "var g=p.split(/[?#]/)[0].split('/'),s=g[1]||'';" +
     "if(!c&&s&&N.indexOf(s)<0&&g[2]!=='settings'){" +
     `var x=j(L,K.sidebarWidth);x=typeof x==='number'&&x>0?Math.min(${max},Math.max(${min},x)):${defaultWidth};` +

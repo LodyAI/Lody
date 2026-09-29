@@ -774,10 +774,7 @@ export function useMentionCategories(sources: MentionCategorySources): MentionCa
             const { availability } = item;
             if (availability.kind === 'available') return undefined;
             if (availability.kind === 'unknown') return t('settings.agentRoles.status.checking');
-            const reason =
-              availability.reason === 'outside_work_context'
-                ? t('mention.agentRole.unavailable.workContext')
-                : t(AGENT_ROLE_UNAVAILABLE_REASON_KEYS[availability.reason]);
+            const reason = t(AGENT_ROLE_UNAVAILABLE_REASON_KEYS[availability.reason]);
             return t('settings.agentRoles.unavailable.label', { reason });
           }),
       });

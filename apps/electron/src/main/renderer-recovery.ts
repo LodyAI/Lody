@@ -1,4 +1,3 @@
-import { prepareRendererSendsForExit } from './services/renderer-send-lifecycle'
 import { app, BrowserWindow, type WebContents } from 'electron'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
@@ -91,22 +90,13 @@ function loadTarget(window: BrowserWindow, target: ReloadTarget): Promise<void> 
 export function requestRendererReload(
   window: BrowserWindow,
   options: { ignoreCache?: boolean } = {}
-): Promise<void> {
-  if (window.isDestroyed()) return Promise.resolve()
-  return prepareRendererSendsForExit('reload', window)
-    .then((allowed) => {
-      if (allowed && !window.isDestroyed()) reloadRendererAfterCleanup(window, options.ignoreCache)
-    })
-    .catch((error: unknown) => console.error('[Electron] Reload cleanup failed', error))
-}
-
-function reloadRendererAfterCleanup(window: BrowserWindow, ignoreCache = false): void {
+): void {
   if (window.isDestroyed()) return
   const state = getState(window)
   const wasInRecovery = state.inRecovery
   state.hasNotifiedMounted = false
   state.inRecovery = false
-  if (ignoreCache && !wasInRecovery) {
+  if (options.ignoreCache && !wasInRecovery) {
     window.webContents.reloadIgnoringCache()
     return
   }

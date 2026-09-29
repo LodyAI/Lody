@@ -7,6 +7,8 @@ PR: [#1104](https://github.com/LodyAI/Lody/pull/1104)
 
 [English](2026-09-29-local-first-session-send.md)
 
+已被[移除会话发送日志](2026-09-29-remove-session-send-journal.zh.md)替代：下文的发件箱、后台恢复、归档暂停和退出规则均已不存在。先写本地再走网络、执行指针以及 `seen` 判定仍然保留。
+
 ## 摘要
 
 发送日志把缺少远端回执当作发送尚未结束，即使消息已经保存在本地也会阻止归档。
@@ -16,8 +18,8 @@ PR: [#1104](https://github.com/LodyAI/Lody/pull/1104)
 
 ## 决策与证据
 
-本决策部分替代[延迟附件方案](../../proposed/architecture/2026-09-14-deferred-attachment-send.zh.md)。
-当前 [Spec](../../../../specs/session-files.zh.md#本地优先发送) 仍为 draft。
+本决策部分替代[延迟附件方案](../architecture/2026-09-14-deferred-attachment-send.zh.md)。
+当前 [Spec](../../../../specs/session-files.zh.md) 仍为 draft。
 原来的 `saved → prepared → committed → delivered` 流程在恢复本地写入之前
 还会等待目标同步；执行指针在投递阶段才写入，因此本地历史需要后续投递任务
 才能被 daemon 发现。

@@ -1,4 +1,4 @@
-import { createFileRoute, Navigate, Outlet, useLocation } from '@tanstack/react-router';
+import { createFileRoute, Navigate, Outlet } from '@tanstack/react-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useOrganization } from '@/hooks/useOrganization';
@@ -34,7 +34,6 @@ import { LoadingPlaceholder } from '@/components/loading-placeholder';
 import { BootShell } from '@/components/boot-shell';
 import { useVisibleMachineMetas } from '@/hooks/use-visible-machine-metas';
 import { useFireOncePerKey } from '@/hooks/use-fire-once';
-import { writeLastAppRoutePath } from '@/lib/last-app-route';
 import { type LodyLiveActivityBridge, useLodyLiveActivity } from '@/hooks/use-lody-live-activity';
 import { isNativeIOSAppShell } from '@/lib/native-platform';
 import { isLocalAppPlatform } from '@/lib/app-platform';
@@ -484,7 +483,6 @@ function AuthenticatedWorkspaceContent({
 }) {
   return (
     <>
-      <AuthedWorkspaceRouteTracker />
       <Outlet />
       <ElectronSessionCompletionNotifier />
       <ElectronMenuHandler />
@@ -494,40 +492,4 @@ function AuthenticatedWorkspaceContent({
       {showWorkspaceCheckout && <WorkspaceCheckoutPendingDialog />}
     </>
   );
-}
-
-function AuthedWorkspaceRouteTracker() {
-  const location = useLocation();
-  const routeHref = location.href;
-  const routeHrefRef = useRef(routeHref);
-  routeHrefRef.current = routeHref;
-
-  useEffect(() => {
-    writeLastAppRoutePath(routeHref);
-  }, [routeHref]);
-
-  useEffect(() => {
-    if (typeof window === 'undefined' || typeof document === 'undefined') {
-      return undefined;
-    }
-
-    const persistCurrentRoute = () => {
-      writeLastAppRoutePath(routeHrefRef.current);
-    };
-    const persistWhenHidden = () => {
-      if (document.visibilityState === 'hidden') {
-        persistCurrentRoute();
-      }
-    };
-
-    window.addEventListener('pagehide', persistCurrentRoute);
-    document.addEventListener('visibilitychange', persistWhenHidden);
-
-    return () => {
-      window.removeEventListener('pagehide', persistCurrentRoute);
-      document.removeEventListener('visibilitychange', persistWhenHidden);
-    };
-  }, []);
-
-  return null;
 }

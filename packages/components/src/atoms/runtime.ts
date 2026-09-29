@@ -1,4 +1,4 @@
-import type { createSessionSendJournal } from '../lib/session-send-journal';
+import type { PendingSessionSends } from '../lib/session-pending-sends';
 import type { SessionSendResources } from '@/lib/session-send-resources';
 import type { LocalFilePreviewResource } from '@lody/shared/local-file-preview';
 import type { SessionData } from '@lody/shared/session-data';
@@ -172,9 +172,14 @@ export type WorkspaceRuntime = {
    */
   readonly workspaceId: WorkspaceId;
   readonly sendResources: SessionSendResources;
-  readonly sendJournal: ReturnType<typeof createSessionSendJournal> | null;
-  readonly sourceReplica: string;
+  /** In-memory sends whose attachments are still preparing; lost with the page. */
+  readonly pendingSends: PendingSessionSends | null;
   readonly accountId: string | null;
+  /**
+   * True only when a Machine RPC to this machine provably cannot be sent now
+   * (its route needs the network and the browser is offline).
+   */
+  isMachineRpcUnreachable?: (machineId: MachineId) => boolean;
   readonly repo: LoroRepo;
   /** Read targets from the ready metadata source, independently of UI projection. */
   readSessionOperationTargets: (

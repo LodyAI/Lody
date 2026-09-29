@@ -1,4 +1,4 @@
-import { SessionSendRecovery } from '../components/chat/session-send-recovery';
+import { SessionPendingSendsHost } from '../components/chat/session-pending-sends-host';
 import { useEffect, useRef, type ReactNode } from 'react';
 import { useAtomValue, useSetAtom, useStore } from 'jotai';
 import { LODY_PRESENCE_HEARTBEAT_MS, type MachineId, type WorkspaceId } from '@lody/shared';
@@ -39,9 +39,7 @@ import { capturePostHogEvent } from '@/lib/posthog-analytics';
 import { maybeClearLodyCacheOnBoot } from '@/lib/clear-local-cache';
 import { isElectronRenderer } from '@/lib/electron';
 import { isNativeAppShell } from '@/lib/native-platform';
-import { usePlatform, useCloudQuery } from '@lody/platform/react';
-import { cloudOperations } from '@/lib/cloud-api-operations';
-import { sessionMetaCacheAtom, docMetaCacheReadyAtom } from '@/atoms/doc-meta';
+import { usePlatform } from '@lody/platform/react';
 import { useVisibleMachineMetas } from '@/hooks/use-visible-machine-metas';
 
 const isExpectedRuntimeShutdownError = (error: unknown): boolean => {
@@ -157,19 +155,6 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
         prevWorkspaceSlug: prevWorkspaceSlugRef.current,
         prevServerWorkspaceId: prevWorkspaceIdRef.current,
       });
-  const admissionStore = useStore();
-  const sendEntitlement = useCloudQuery(
-    cloudOperations.billing.getWorkspaceBillingEntitlement,
-    !isLocalPlatform && effectiveWorkspaceId ? { workspaceId: effectiveWorkspaceId } : 'skip'
-  );
-  const sendEntitlementRef = useRef(sendEntitlement);
-  sendEntitlementRef.current = sendEntitlement;
-  const getSendAdmissionContextRef = useRef(() => ({
-    entitlement: sendEntitlementRef.current ?? undefined,
-    sessionCount: admissionStore.get(docMetaCacheReadyAtom)
-      ? Object.keys(admissionStore.get(sessionMetaCacheAtom)).length
-      : null,
-  }));
   const effectiveWorkspaceIdSource = isLocalPlatform
     ? effectiveWorkspaceId
       ? 'local-platform'
@@ -288,7 +273,6 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
         });
         workspaceRuntime = await createWorkspaceRuntime({
           accountId,
-          getSendAdmissionContext: getSendAdmissionContextRef.current,
           workspaceSlug,
           workspaceId: effectiveWorkspaceId,
           apiBaseUrl: API_BASE_URL,
@@ -453,7 +437,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
   return (
     <>
       {children}
-      <SessionSendRecovery runtime={runtime} />
+      <SessionPendingSendsHost runtime={runtime} />
     </>
   );
 }

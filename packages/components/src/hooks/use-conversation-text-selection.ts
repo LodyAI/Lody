@@ -71,7 +71,6 @@ export function useConversationTextSelection<T>({
   });
 
   const reconcile = useRef<(() => void) | undefined>(undefined);
-  const source = view?.factSource ?? view;
   useLayoutEffect(() => {
     if (!viewport) return undefined;
     const doc = viewport.ownerDocument;
@@ -126,11 +125,10 @@ export function useConversationTextSelection<T>({
       const epoch = generation;
       for (const id of ids) {
         const previous = retained.current.get(id);
-        const history = source;
-        const index = history?.indexOf(id) ?? -1;
+        const index = view?.indexOf(id) ?? -1;
         if (previous && !previous.failed && (previous.lease || index < 0)) continue;
         // acquireRange pins synchronously, before a viewport lease can evict this body.
-        const lease = index >= 0 ? history?.acquireRange(index, index + 1) : undefined;
+        const lease = index >= 0 ? view?.acquireRange(index, index + 1) : undefined;
         const held = {
           snapshot: previous?.snapshot ?? current.current.captureTurn(id),
           lease,
@@ -269,7 +267,7 @@ export function useConversationTextSelection<T>({
       if (
         [...retained.current].some(([id, held]) =>
           held.lease
-            ? (source?.indexOf(id) ?? -1) < 0
+            ? (view?.indexOf(id) ?? -1) < 0
             : current.current.view
               ? current.current.view.indexOf(id) < 0
               : !current.current.rows.some((row) => row.turnId === id)
@@ -283,7 +281,7 @@ export function useConversationTextSelection<T>({
       }
     };
     reconcile.current = reconcileRetained;
-    const unsubscribe = source?.subscribe((change) => {
+    const unsubscribe = view?.subscribe((change) => {
       if (change.kind === 'structure') reconcileRetained();
     });
     doc.addEventListener('pointerdown', onPointerDown, true);
@@ -308,7 +306,7 @@ export function useConversationTextSelection<T>({
       viewport.removeEventListener('scroll', onScroll, true);
       release();
     };
-  }, [sessionId, source, viewport, virtualizer, current, activeRef]);
+  }, [sessionId, view, viewport, virtualizer, current, activeRef]);
 
   useLayoutEffect(() => {
     reconcile.current?.();

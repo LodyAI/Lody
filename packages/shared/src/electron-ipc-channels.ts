@@ -31,7 +31,6 @@ export type IpcPushMap = {
   'publicBrowser.state': ElectronPublicBrowserState;
   'publicBrowser.interaction': ElectronPublicBrowserInteraction;
   'sessionControl.response': ElectronLocalSessionControlResponseEvent;
-  'app.sendLifecycle': { requestId: string; phase: 'check' | 'commit'; reason: 'quit' | 'reload' | 'close' };
   'app.deepLink': string;
   'auth.loginState': ElectronLoginState;
   'app.menuAction': string;
@@ -68,7 +67,6 @@ export const IPC_PUSH_CHANNELS = {
   publicBrowserState: 'publicBrowser.state',
   publicBrowserInteraction: 'publicBrowser.interaction',
   sessionControlResponse: 'sessionControl.response',
-  appSendLifecycle: 'app.sendLifecycle',
   appDeepLink: 'app.deepLink',
   authLoginState: 'auth.loginState',
   appMenuAction: 'app.menuAction',

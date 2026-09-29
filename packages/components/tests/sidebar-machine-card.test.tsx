@@ -76,29 +76,33 @@ describe('sidebar machine group', () => {
     vi.useFakeTimers();
     store.set(lodyPresenceSyncStateAtom, 'synced');
     await render(
-      <SidebarMachineHoverCard
-        machine={{
-          machineId,
-          name: 'Lampese.local',
-          owner: { name: 'Lampese', image: null },
-          isOwn: false,
-          isCurrent: false,
-          os: 'darwin',
-          projectCount: 2,
-          activity: { waiting: 0, working: 2, unread: 1 },
-        }}
-      >
-        <SidebarSectionHeader
-          label="Lampese"
-          collapsed
-          activity={{ waiting: 0, working: 2, unread: 1 }}
-          describeActivity={false}
-          onToggleCollapsed={() => undefined}
-        />
-      </SidebarMachineHoverCard>
+      <SidebarSectionHeader
+        label="Lampese"
+        collapsed
+        activity={{ waiting: 0, working: 2, unread: 1 }}
+        describeActivity={false}
+        onToggleCollapsed={() => undefined}
+        toggleLabel="Toggle Lampese"
+        wrapToggle={(toggle) => (
+          <SidebarMachineHoverCard
+            machine={{
+              machineId,
+              name: 'Lampese.local',
+              owner: { name: 'Lampese', image: null },
+              isOwn: false,
+              isCurrent: false,
+              os: 'darwin',
+              projectCount: 2,
+              activity: { waiting: 0, working: 2, unread: 1 },
+            }}
+          >
+            {toggle}
+          </SidebarMachineHoverCard>
+        )}
+      />
     );
 
-    const trigger = container.firstElementChild as HTMLElement;
+    const trigger = container.querySelector('[aria-label="Toggle Lampese"]') as HTMLElement;
     await act(async () => {
       pointer('pointerover', trigger, { relatedTarget: document.body });
     });
@@ -117,6 +121,56 @@ describe('sidebar machine group', () => {
     expect(card?.textContent).toContain('2 working · 1 unread');
     expect(container.querySelectorAll('[data-session-row-indicator]')).toHaveLength(1);
     expect(container.querySelector('[data-working-grid]')).not.toBeNull();
+  });
+
+  it("keeps the card off the header's action buttons, whose own menus open there", async () => {
+    vi.useFakeTimers();
+    store.set(lodyPresenceSyncStateAtom, 'synced');
+    await render(
+      <SidebarSectionHeader
+        label="Ark"
+        collapsed={false}
+        onToggleCollapsed={() => undefined}
+        toggleLabel="Toggle Ark"
+        wrapToggle={(toggle) => (
+          <SidebarMachineHoverCard
+            machine={{
+              machineId,
+              name: 'Ark.local',
+              isOwn: true,
+              isCurrent: true,
+              os: 'darwin',
+              projectCount: 5,
+            }}
+          >
+            {toggle}
+          </SidebarMachineHoverCard>
+        )}
+        action={<button type="button">View options</button>}
+      />
+    );
+    const cardShown = () =>
+      [...document.body.children].some(
+        (node) => node !== container && node.textContent?.includes('Ark.local')
+      );
+
+    const action = container.querySelector('button') as HTMLElement;
+    await act(async () => {
+      pointer('pointerover', action, { relatedTarget: document.body });
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(1000);
+    });
+    expect(cardShown()).toBe(false);
+
+    const toggle = container.querySelector('[aria-label="Toggle Ark"]') as HTMLElement;
+    await act(async () => {
+      pointer('pointerover', toggle, { relatedTarget: document.body });
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(1000);
+    });
+    expect(cardShown()).toBe(true);
   });
 
   it("draws the hidden Sessions' status on a folded section header only", async () => {

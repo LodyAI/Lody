@@ -1,4 +1,11 @@
-import { useId, useState, type CSSProperties, type ReactEventHandler, type ReactNode } from 'react';
+import {
+  useId,
+  useState,
+  type CSSProperties,
+  type ReactElement,
+  type ReactEventHandler,
+  type ReactNode,
+} from 'react';
 import { useTranslation } from 'react-i18next';
 import type { SessionRowOpenedByTreeSlot } from './session-row-leading-slot';
 export {
@@ -240,7 +247,7 @@ export function SessionRowStatusIndicator({
   isWaitingPermission?: boolean;
   isWorking?: boolean;
   hasUnreadMessages?: boolean;
-  /** Renderer-local send journal state for this session. */
+  /** Renderer-local state of this session's held (in-memory) sends. */
   sendState?: SessionSendState | null;
   /** 0–100; omitted when the upload has no measurable size. */
   sendProgress?: number;
@@ -960,6 +967,7 @@ export function SidebarSectionHeader({
   action,
   activity,
   describeActivity = true,
+  wrapToggle,
   onToggleCollapsed,
   isMobile,
   toggleLabel,
@@ -977,6 +985,11 @@ export function SidebarSectionHeader({
   activity?: SidebarGroupActivity | null;
   /** False when a wrapper already owns the header's hover surface (machine card). */
   describeActivity?: boolean;
+  /**
+   * Wraps the label/toggle only, never `action`: a hover card over the whole row
+   * would open on the action buttons and cover the menus they open.
+   */
+  wrapToggle?: (toggle: ReactElement) => ReactNode;
   onToggleCollapsed?: () => void;
   isMobile?: boolean;
   toggleLabel?: string;
@@ -985,50 +998,53 @@ export function SidebarSectionHeader({
   const handleToggle = () => {
     if (canToggle) onToggleCollapsed?.();
   };
+  const toggle = (
+    <div
+      role={canToggle ? 'button' : undefined}
+      tabIndex={canToggle ? 0 : -1}
+      aria-expanded={canToggle ? !collapsed : undefined}
+      aria-label={canToggle ? toggleLabel : undefined}
+      onClick={canToggle ? handleToggle : undefined}
+      onKeyDown={
+        canToggle
+          ? (event) => {
+              if (event.key !== 'Enter' && event.key !== ' ') return;
+              event.preventDefault();
+              handleToggle();
+            }
+          : undefined
+      }
+      className={cn(
+        SECTION_HEADER_BUTTON_CLASS,
+        canToggle
+          ? cn('cursor-pointer', !isMobile && 'hover:text-sidebar-foreground')
+          : 'cursor-default'
+      )}
+    >
+      {icon}
+      <span className="min-w-0 truncate">{label}</span>
+      {canToggle ? (
+        <ChevronDown
+          className={cn(
+            SECTION_HEADER_CHEVRON_CLASS,
+            // This shared header is reserved for top-level sections (Chats,
+            // machine names, GitHub Worktrees), whose folded affordance stays visible.
+            collapsed || isMobile ? 'opacity-100' : 'group-hover:opacity-100',
+            // Collapsed points right (the platform-wide convention).
+            collapsed ? '-rotate-90' : 'rotate-0'
+          )}
+          aria-hidden="true"
+        />
+      ) : null}
+      <span className="flex-1" aria-hidden="true" />
+      {collapsed && activity ? (
+        <SidebarGroupActivityMark activity={activity} describe={describeActivity} />
+      ) : null}
+    </div>
+  );
   return (
     <div className="group flex h-[26px] items-center gap-1 rounded-md has-[[role=button]:focus-visible]:shadow-[inset_0_0_0_1px_hsl(var(--primary)/0.5)]">
-      <div
-        role={canToggle ? 'button' : undefined}
-        tabIndex={canToggle ? 0 : -1}
-        aria-expanded={canToggle ? !collapsed : undefined}
-        aria-label={canToggle ? toggleLabel : undefined}
-        onClick={canToggle ? handleToggle : undefined}
-        onKeyDown={
-          canToggle
-            ? (event) => {
-                if (event.key !== 'Enter' && event.key !== ' ') return;
-                event.preventDefault();
-                handleToggle();
-              }
-            : undefined
-        }
-        className={cn(
-          SECTION_HEADER_BUTTON_CLASS,
-          canToggle
-            ? cn('cursor-pointer', !isMobile && 'hover:text-sidebar-foreground')
-            : 'cursor-default'
-        )}
-      >
-        {icon}
-        <span className="min-w-0 truncate">{label}</span>
-        {canToggle ? (
-          <ChevronDown
-            className={cn(
-              SECTION_HEADER_CHEVRON_CLASS,
-              // This shared header is reserved for top-level sections (Chats,
-              // machine names, GitHub Worktrees), whose folded affordance stays visible.
-              collapsed || isMobile ? 'opacity-100' : 'group-hover:opacity-100',
-              // Collapsed points right (the platform-wide convention).
-              collapsed ? '-rotate-90' : 'rotate-0'
-            )}
-            aria-hidden="true"
-          />
-        ) : null}
-        <span className="flex-1" aria-hidden="true" />
-        {collapsed && activity ? (
-          <SidebarGroupActivityMark activity={activity} describe={describeActivity} />
-        ) : null}
-      </div>
+      {wrapToggle ? wrapToggle(toggle) : toggle}
       {action ? <div className="mr-2 shrink-0">{action}</div> : null}
     </div>
   );

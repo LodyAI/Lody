@@ -29,17 +29,14 @@
 - Derivations retain small facts and weak identity hints, not evicted bodies.
   Structure updates prune deleted ids and restart incomplete coverage. Search
   refreshes membership/positions after structure changes.
-- Use the one shared HistoryWriter. A display projection is never a write
-  baseline or export/hash input; `readAll` forwards the authoritative read.
+- Use the one shared HistoryWriter; sends write the local CRDT directly, with no
+  optimistic display overlay; `readAll` is the authoritative export/hash read.
   The array adapter serves static shared pages, not a runtime fallback.
 - Goal, permission, scheduling and diff consumers acquire the same fact table,
-  keyed and subscribed on `factSource` — the conversation's own view, never a
-  projection wrapper. Wrappers are rebuilt as optimistic entries appear and
-  resolve; a table acquired on one stays pinned by the base view's listeners and
-  keeps deriving after release. The final consumer release HOLDS the background
-  scan and keeps the facts: deriving one needs the turn's body, so discarding
-  them re-materialized the conversation on the next open. The table is collected
-  with its view.
+  keyed and subscribed on the conversation's own view. The final consumer
+  release HOLDS the background scan and keeps the facts: deriving one needs the
+  turn's body, so discarding them re-materialized the conversation on the next
+  open. The table is collected with its view.
 - Control-plane Mirror ignores history and does not enumerate its containers.
   Queue identity must retain non-enumerable `$cid` through Immer, not a
   `structuredClone` that drops it.

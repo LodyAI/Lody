@@ -6,7 +6,7 @@ import { currentWorkspaceIdAtom, currentWorkspaceSlugAtom } from '@/atoms/worksp
 import { runtimeAtom, type WorkspaceRuntime } from '@/atoms/runtime';
 import { SessionPendingMessages } from '@/components/chat/session-pending-messages';
 import type { SessionAttachmentDraft } from '@/lib/session-attachment-draft';
-import type { SessionSendViewRecord } from '@/lib/session-send-journal';
+import type { PendingSessionSend } from '@/lib/session-pending-sends';
 
 const sessionId = 'attachment-draft-story' as SessionId;
 const workspaceId = 'attachment-draft-workspace' as WorkspaceId;
@@ -36,18 +36,14 @@ const textEntry = (id: string, text: string): SessionHistory =>
     inputConfig: { inputBlocks: [{ type: 'text', text }], cliType: 'builtin', agentType: 'codex' },
   }) as SessionHistory;
 
-const record = (overrides: Partial<SessionSendViewRecord>): SessionSendViewRecord => ({
-  version: 2,
+const record = (overrides: Partial<PendingSessionSend>): PendingSessionSend => ({
   id: 'pending-turn',
   sessionId,
-  accountId: 'storybook-user',
   workspaceId,
-  sourceReplica: 'storybook-replica',
   sequence: 1,
-  entry: textEntry('pending-turn', 'Review these attachments before committing the recovery flow.'),
+  entry: textEntry('pending-turn', 'Review these attachments before sending them.'),
   delivery: { kind: 'dispatch' },
-  stage: 'saved',
-  activity: 'active',
+  attachments: [],
   ...overrides,
 });
 
@@ -66,24 +62,22 @@ function StoryShell({
   records,
   width = 720,
 }: {
-  records: readonly SessionSendViewRecord[];
+  records: readonly PendingSessionSend[];
   width?: number;
 }) {
   const store = createStore();
-  const journal = {
+  const pendingSends = {
     subscribe: () => () => {},
     getSnapshot: () => records,
-    retry: async () => {},
+    retry: () => {},
     cancel: async () => {},
-    discard: async () => {},
-    refresh: async () => {},
   };
   store.set(currentWorkspaceIdAtom, workspaceId);
   store.set(currentWorkspaceSlugAtom, 'attachment-draft-story');
   store.set(runtimeAtom, {
     workspaceId,
     workspaceSlug: 'attachment-draft-story',
-    sendJournal: journal,
+    pendingSends,
   } as unknown as WorkspaceRuntime);
   return (
     <Provider store={store}>
@@ -136,6 +130,27 @@ export const Uploading: Story = {
   },
 };
 
+/** A lone image uploads in the frame its delivered turn will use. */
+export const SingleImageUploading: Story = {
+  args: {
+    records: [
+      record({
+        attachments: [
+          {
+            id: 'design-image',
+            kind: 'image',
+            source: imageSource,
+            name: 'design.png',
+            mimeType: 'image/png',
+            lastModified: 0,
+            progress: 42,
+          },
+        ],
+      }),
+    ],
+  },
+};
+
 /**
  * One attachment failed and the finished one is retained. The message level
  * says only "Not sent"; the reason lives on the failed card alone.
@@ -180,37 +195,9 @@ export const FailedWithoutAttachmentReason: Story = {
   },
 };
 
-export const ConfirmingTheOriginalSend: Story = {
+/** Every attachment is ready; the message waits behind an earlier held send. */
+export const WaitingBehindEarlierSend: Story = {
   args: {
-    records: [record({ stage: 'prepared', attachments: [readyImage] })],
-  },
-};
-
-/** Reopened after interruption: no fictitious progress; recovery is inline on phones too. */
-export const Interrupted: Story = {
-  args: {
-    width: 380,
-    records: [
-      record({
-        activity: 'interrupted',
-        attachments: [
-          {
-            id: 'interrupted-log',
-            kind: 'file',
-            name: 'diagnostic.log',
-            mimeType: 'text/plain',
-            lastModified: 0,
-            source: new Blob(['log']),
-            progress: 12,
-          },
-        ],
-      }),
-    ],
-  },
-};
-export const InterruptedPrepared: Story = {
-  args: {
-    width: 380,
-    records: [record({ activity: 'interrupted', stage: 'prepared', attachments: [readyImage] })],
+    records: [record({ attachments: [readyImage] })],
   },
 };

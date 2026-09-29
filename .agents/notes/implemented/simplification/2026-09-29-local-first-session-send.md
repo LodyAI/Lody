@@ -7,6 +7,8 @@ PR: [#1104](https://github.com/LodyAI/Lody/pull/1104)
 
 [中文](2026-09-29-local-first-session-send.zh.md)
 
+Superseded by [removing the session send journal](2026-09-29-remove-session-send-journal.md): the outbox, background recovery, archive pausing and exit rules below no longer exist. Local writes before the network, the activation pointer and the `seen` predicate remain.
+
 ## Abstract
 
 The send journal treated a missing remote receipt as unfinished sending, blocking
@@ -18,8 +20,8 @@ remain necessary; packaged-device acceptance has not been run.
 
 ## Decision and evidence
 
-This partially replaces the [deferred attachment design](../../proposed/architecture/2026-09-14-deferred-attachment-send.md).
-The current [Spec](../../../../specs/session-files.md#local-first-sending) remains draft.
+This partially replaces the [deferred attachment design](../architecture/2026-09-14-deferred-attachment-send.md).
+The current [Spec](../../../../specs/session-files.md) remains draft.
 The previous `saved → prepared → committed → delivered` workflow also waited for
 target synchronization before repairing interrupted local writes. The activation
 pointer was written during delivery, making a locally written turn depend on a

@@ -1,9 +1,11 @@
 # Daemon-owned guide rejections are settled by history
 
-Status: proposed
+Status: implemented
 Translation: current
 
 [中文](2026-09-28-daemon-owned-guide-outcome.zh.md)
+
+Verdict (2026-09-29): implemented in [#1095](https://github.com/LodyAI/Lody/pull/1095) and moved from `proposed/`. Superseded by [removing the session send journal](../simplification/2026-09-29-remove-session-send-journal.md): after a daemon-owned (`recoveryOwned`) rejection the renderer no longer reads history, records a guide outcome or retries; the daemon owns the turn. Uncertain outcomes are left as written and are not reported as send failures. The cause analysis below still holds.
 
 ## Abstract
 

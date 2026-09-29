@@ -17,6 +17,7 @@ import {
   Suspense,
 } from 'react';
 import { createPortal } from 'react-dom';
+import type { SessionId } from '@lody/shared';
 import { useAtomValue } from 'jotai';
 import type { StreamdownProps } from '@lobehub/streamdown';
 import Markdown, {
@@ -30,7 +31,7 @@ import rehypeRaw from 'rehype-raw';
 import rehypeSanitize from 'rehype-sanitize';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
-import { Check, Copy } from 'lucide-react';
+import { Check, Copy, MessagesSquare } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { DEFAULT_CONVERSATION_FONT_SIZE, inlineMathEnabledAtom } from '@/atoms/settings';
 import { MonochromeFileIcon } from '@/components/icons/file-icons';
@@ -46,6 +47,7 @@ import {
 } from '@/lib/markdown-single-dollar-math';
 import { cn } from '@/lib/utils';
 import { usePrLinkInterceptor } from './pr-link-context';
+import { parseSessionLinkHref, useSessionLinkNavigator } from './session-link-context';
 import {
   SEARCH_HIGHLIGHT_ACTIVE_MARK_CLASS_NAME,
   SEARCH_HIGHLIGHT_MARK_CLASS_NAME,
@@ -285,6 +287,53 @@ function MarkdownExternalLink({
     <a {...rest} href={href} target="_blank" rel={ensureLinkRel(rel)} onClick={handleClick}>
       {children}
     </a>
+  );
+}
+
+const SESSION_LINK_CHIP_CLASS_NAME =
+  'markdown-reference-chip mx-[0.1em] inline-flex max-w-full items-center gap-[0.35em] rounded-md px-[0.4em] align-[-0.12em] text-[0.92em] leading-[1.55] transition-colors';
+
+/**
+ * A `[Title](session://<id>)` link as a conversation chip. It is a button, not
+ * an anchor: `session://` is not a navigable URL, so the only way there is the
+ * in-app Session navigation. Without one (share pages, read-only surfaces) the
+ * chip still names the conversation but does nothing.
+ */
+function MarkdownSessionLink({
+  sessionId,
+  children,
+  inert,
+}: {
+  sessionId: SessionId;
+  children: ReactNode;
+  inert: boolean;
+}) {
+  const navigate = useSessionLinkNavigator();
+  // Composer mentions label the link `@Title`; the glyph already says "session".
+  const title = markdownLinkText(children).trim().replace(/^@/u, '') || sessionId;
+  const body = (
+    <>
+      <MessagesSquare className="h-[0.95em] w-[0.95em] shrink-0 self-center" aria-hidden="true" />
+      <span className="min-w-0 truncate">{title}</span>
+    </>
+  );
+  if (!navigate || inert) {
+    return (
+      <span data-session-link={sessionId} title={title} className={SESSION_LINK_CHIP_CLASS_NAME}>
+        {body}
+      </span>
+    );
+  }
+  return (
+    <button
+      type="button"
+      data-session-link={sessionId}
+      title={title}
+      className={cn(SESSION_LINK_CHIP_CLASS_NAME, 'cursor-pointer')}
+      onClick={() => navigate({ sessionId })}
+    >
+      {body}
+    </button>
   );
 }
 
@@ -751,7 +800,9 @@ const StreamingMarkdown = lazy<ComponentType<StreamdownProps>>(() =>
 const MERMAID_FENCE_PATTERN = /^[ \t]{0,3}(?:`{3,}|~{3,})[ \t]*mermaid\b/mu;
 
 const markdownUrlTransform: UrlTransform = (value) =>
-  isMarkdownAgentFileHref(value) ? value : defaultUrlTransform(value);
+  isMarkdownAgentFileHref(value) || parseSessionLinkHref(value)
+    ? value
+    : defaultUrlTransform(value);
 
 type HastElement = NonNullable<ExtraProps['node']>;
 
@@ -953,6 +1004,14 @@ const createMarkdownComponents = ({
   a: (props: MarkdownLinkProps) => {
     const { children, href, node: _node, rel, ...rest } = props;
     if (!href) return <span>{children}</span>;
+    const linkedSessionId = parseSessionLinkHref(href);
+    if (linkedSessionId) {
+      return (
+        <MarkdownSessionLink sessionId={linkedSessionId} inert={readonly}>
+          {children}
+        </MarkdownSessionLink>
+      );
+    }
     // Workspace resource links are display-only in a publication, not a second
     // download API. Ordinary article/GitHub links remain explicit external navigation.
     if (readonly && href && isWorkspaceResourceHref(href)) {

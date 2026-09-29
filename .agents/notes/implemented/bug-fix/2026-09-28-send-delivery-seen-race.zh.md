@@ -5,6 +5,8 @@ Translation: current
 
 [English](2026-09-28-send-delivery-seen-race.md)
 
+后续：[移除会话发送日志](../simplification/2026-09-29-remove-session-send-journal.zh.md)删除了下文所述发送日志的 `deliver()`。`isSessionHistoryStatusAwaitingStart`（包含 `seen`）仍用于判断已写入的消息是否在等待开始。
+
 ## 摘要
 
 发送改为本地提交后，如果 daemon 已经打开该会话文档，它可能在 renderer 做投递复查之前就把

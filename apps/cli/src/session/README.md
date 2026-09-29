@@ -33,6 +33,8 @@ CLI/MCP orchestration contract is specs/session-orchestration.md.
 - `acp-error-classification.ts` — JSON-RPC/transport error string matching for the above.
 - `session-manager.ts` / `session.ts` / `session-sandbox.ts` / `terminal-manager.ts` —
   session and process lifecycle, workdirs, worktrees, sandboxed spawning, ACP terminals.
+  Managed GitHub credential preparation excludes local projects and their worktrees;
+  context refresh only rotates sessions already enrolled during preparation.
 - `session-preparation-service.ts` — process-local speculative ACP lease/state owner.
 - `session-fork-service.ts` / `session-fork-operation-store.ts` — the fork saga and its
   machine-local marker store.

@@ -55,6 +55,8 @@ text, including title-only failures. It copies the existing plain-text error
 report (title, reason/code, session/agent/machine identifiers, remediation and
 full raw message). The shared clipboard helper supplies the browser fallback;
 show success only after the write succeeds, and show a failure toast otherwise.
+The report starts with `Error details:`: the space prevents clipboard consumers
+from interpreting the entire report as an `error:` URL and percent-encoding it.
 The footer keeps copying reachable on narrow touch screens without competing
 with the capacity retry action in the header.
 

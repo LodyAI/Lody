@@ -1,9 +1,11 @@
 # 走队列的上传消息以本地行显示在队列面板
 
-Status: proposed
+Status: implemented
 Translation: current
 
 [English](2026-09-28-local-queue-pending-rows.md)
+
+结论（2026-09-29）：已在 [#1095](https://github.com/LodyAI/Lody/pull/1095) 中实现，从 `proposed/` 移出。已被[移除会话发送日志](../simplification/2026-09-29-remove-session-send-journal.zh.md)部分替代：队列面板的本地行仍然保留，但数据来自内存中暂存的发送，而不是发送日志记录，操作只剩重试和取消。纯文本投影覆盖层已删除，因为就绪的发送现在会立即写入本地。
 
 ## 摘要
 

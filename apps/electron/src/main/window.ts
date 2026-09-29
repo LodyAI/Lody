@@ -1,4 +1,4 @@
-import { guardRendererSendClose } from './services/renderer-send-lifecycle'
+import { installRendererUnloadConfirmation } from './renderer-unload'
 import { getWindowTargetPath, presentWindowTarget } from './window-target'
 import { app, BrowserWindow, dialog, nativeTheme, shell } from 'electron'
 import { is } from '@electron-toolkit/utils'
@@ -24,6 +24,7 @@ import {
   getMainWindowBackgroundColor,
   getMainWindowTitleBarOverlay
 } from './window-theme'
+import { readStartupThemeSource } from './theme-settings'
 import { formatUnknownError, normalizeExternalHttpUrl } from './utils'
 import { describeDeepLinkForAuthDebug } from './auth-debug'
 import { captureElectronMainException } from './posthog-error-reporting'
@@ -277,9 +278,7 @@ function attachMainWindowDiagnostics(window: BrowserWindow, recoveryTarget: Relo
       })
       return response
     },
-    reload: () => {
-      void requestRendererReload(window)
-    },
+    reload: () => requestRendererReload(window),
     quit: () => app.exit(1)
   })
   window.on('unresponsive', () => {
@@ -373,7 +372,8 @@ export function createMainWindow(options: CreateMainWindowOptions): BrowserWindo
   if (options.icon) productWindowIcon = options.icon
   if (!options.auxiliary)
     nativeTheme.themeSource = getInitialMainWindowThemeSource(
-      options.initialPath === '/onboarding' ? '/onboarding' : '/'
+      options.initialPath === '/onboarding' ? '/onboarding' : '/',
+      readStartupThemeSource()
     )
   const resolvedTheme = nativeTheme.shouldUseDarkColors ? 'dark' : 'light'
   const window = new BrowserWindow({
@@ -413,12 +413,7 @@ export function createMainWindow(options: CreateMainWindowOptions): BrowserWindo
     pendingInitialMaximize.add(window)
   }
   registerProductWindow(window, options.warm ?? false)
-  guardRendererSendClose(window, () => {
-    const hidesInsteadOfClosing =
-      !options.auxiliary &&
-      (process.platform === 'darwin' || (process.platform === 'win32' && isWindowsTrayAvailable()))
-    return !isAppQuitting() && !hidesInsteadOfClosing
-  })
+  installRendererUnloadConfirmation(window)
   if (!options.auxiliary) trackMainWindowState(window)
   const initialDevbarEnabled = isDevbarRendererEnabled()
   const mainTarget = resolveMainRendererTarget(

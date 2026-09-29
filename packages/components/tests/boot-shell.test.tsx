@@ -92,11 +92,17 @@ describe('boot shell script', () => {
     ['login', '/login', {}, {}, null],
     ['onboarding', '/index.html#/onboarding', {}, {}, null],
     [
-      'the root after a workspace visit',
+      'the root ignores a legacy saved route',
       '/',
-      { 'lody:lastAppRoute': JSON.stringify({ version: 1, path: '/acme/chat', updatedAt: 1 }) },
+      {
+        'lody:lastAppRoute': JSON.stringify({
+          version: 1,
+          path: '/acme/sessions/s1',
+          updatedAt: 1,
+        }),
+      },
       {},
-      '280px',
+      null,
     ],
     ['the root on a first visit', '/', {}, {}, null],
     ['a session window, collapsed by default', '/acme/sessions/s1?window=session', {}, {}, null],

@@ -16,21 +16,47 @@ import {
 } from './electron-session-file-sender';
 import { throwIfSendAborted, type SessionSendResources } from './session-send-resources';
 import { preparedDraftInput } from './session-attachment-draft';
-import type { SessionSendRecord } from './session-send-journal';
+import type { PendingSessionSend } from './session-pending-sends';
 
+type DraftAttachmentSend = Pick<
+  PendingSessionSend,
+  'workspaceId' | 'sessionId' | 'entry' | 'queue' | 'attachments' | 'targetMachineId'
+>;
+type PreparedSend = Pick<PendingSessionSend, 'entry' | 'queue' | 'attachments'>;
+
+/** Replace draft attachments with their ready references in the turn and queue row. */
+export function finalizePreparedSend(record: DraftAttachmentSend): PreparedSend {
+  const inputBlocks = preparedDraftInput(record.entry.inputConfig, record.attachments);
+  const inputConfig = { ...record.entry.inputConfig, inputBlocks };
+  return {
+    attachments: record.attachments.map((item) => ({ ...item, source: undefined })),
+    entry: { ...record.entry, items: inputBlocksToHistoryItems(inputBlocks), inputConfig },
+    ...(record.queue
+      ? {
+          queue: {
+            ...record.queue,
+            acpSessionConfig: { ...(record.queue.acpSessionConfig as object), inputBlocks },
+          },
+        }
+      : {}),
+  };
+}
+
+/**
+ * Prepare every unready attachment, one at a time, publishing each result
+ * through `update`. Rejects with the first failure after trying the rest, so a
+ * retry only transfers what failed.
+ */
 export async function prepareDraftAttachments(args: {
-  record: SessionSendRecord;
+  record: DraftAttachmentSend;
   resources: SessionSendResources;
   signal: AbortSignal;
   token(): string | null;
   localMachineId(): MachineId | null;
-  checkpoint(
-    patch: Partial<Pick<SessionSendRecord, 'attachments' | 'entry' | 'queue'>>
-  ): Promise<void>;
+  update(attachments: DraftAttachmentSend['attachments']): void;
   report(id: string, progress: number): void;
-}) {
-  let attachments = args.record.attachments ?? [];
-  if (!attachments.length) return;
+}): Promise<PreparedSend> {
+  let attachments = args.record.attachments;
   let failure: unknown;
   // One transfer at a time per message bounds hashing memory and preserves
   // successful results; different conversations retain independent lifetimes.
@@ -120,7 +146,7 @@ export async function prepareDraftAttachments(args: {
       attachments = attachments.map((item) =>
         item.id === attachment.id ? { ...item, ready, error: undefined, progress: 100 } : item
       );
-      await args.checkpoint({ attachments });
+      args.update(attachments);
     } catch (error) {
       throwIfSendAborted(args.signal);
       failure = error;
@@ -133,22 +159,9 @@ export async function prepareDraftAttachments(args: {
             }
           : item
       );
-      await args.checkpoint({ attachments });
+      args.update(attachments);
     }
   }
   if (failure) throw failure;
-  const inputBlocks = preparedDraftInput(args.record.entry.inputConfig, attachments);
-  const inputConfig = { ...args.record.entry.inputConfig, inputBlocks };
-  await args.checkpoint({
-    attachments: attachments.map((item) => ({ ...item, source: undefined })),
-    entry: { ...args.record.entry, items: inputBlocksToHistoryItems(inputBlocks), inputConfig },
-    ...(args.record.queue
-      ? {
-          queue: {
-            ...args.record.queue,
-            acpSessionConfig: { ...(args.record.queue.acpSessionConfig as object), inputBlocks },
-          },
-        }
-      : {}),
-  });
+  return finalizePreparedSend({ ...args.record, attachments });
 }

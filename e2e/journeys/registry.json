@@ -1086,8 +1086,8 @@
       "fixture": "scripted-acp",
       "fingerprint": "c7e4c67d5bc5b5cbdf10363bea023f4de3a052c30e1205557f839051972ae18a",
       "ownerPaths": [
-        "packages/components/src/providers/workspace-session-send-journal.ts",
-        "packages/components/src/lib/session-send-journal.ts",
+        "packages/components/src/lib/session-send-delivery.ts",
+        "packages/components/src/lib/session-send-admission.ts",
         "apps/cli/src/lib/loro/history-auto-read.ts",
         "apps/cli/src/session/"
       ],
@@ -1118,7 +1118,7 @@
       ],
       "cleanup": ["ACP process exits", "Session durable state is deleted"],
       "coverage": {
-        "renderer": "Composer send and delivery journal",
+        "renderer": "Composer local send and dispatch fast path",
         "electronIpc": "Real window and Session RPC",
         "bundledCli": "Auto-read receipt and idle-Session dispatch",
         "durableState": "Consecutive committed user Turns and dispatch pointer",

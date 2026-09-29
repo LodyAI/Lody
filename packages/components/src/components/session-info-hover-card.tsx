@@ -729,12 +729,15 @@ export function SidebarHoverCard({
   children,
   disabled,
   content,
+  triggerClassName,
 }: {
   /** The trigger. Hovering it opens the card. */
   children: ReactNode;
   /** Skip the hover card entirely (e.g. on touch devices with no hover). */
   disabled?: boolean;
   content: ReactNode;
+  /** Layout of the hover area around `children` (e.g. to fill a flex row). */
+  triggerClassName?: string;
 }) {
   const [open, setOpen] = useState(false);
   // True while this card is one step of a run down the list: it appears and
@@ -848,6 +851,7 @@ export function SidebarHoverCard({
     >
       <div
         ref={anchorRef}
+        className={triggerClassName}
         onPointerEnter={requestOpen}
         onPointerLeave={scheduleClose}
         onPointerDown={handlePointerDown}

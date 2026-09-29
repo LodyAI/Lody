@@ -1,9 +1,11 @@
 # Sidebar send status replaces the pending-send panel
 
-Status: proposed
+Status: implemented
 Translation: current
 
 [中文](2026-09-28-sidebar-send-status.zh.md)
+
+Verdict (2026-09-29): implemented in [#1095](https://github.com/LodyAI/Lody/pull/1095) and moved from `proposed/`. Partially superseded by [removing the session send journal](../simplification/2026-09-29-remove-session-send-journal.md): the sidebar mark and muted title remain, fed from the in-memory held sends by `SessionPendingSendsHost`; `SessionSendRecovery`, journal refresh and exit guards no longer exist.
 
 ## Abstract
 

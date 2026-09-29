@@ -1,9 +1,11 @@
 # 由 history 判定 daemon 接手的 guide 拒绝结果
 
-Status: proposed
+Status: implemented
 Translation: current
 
 [English](2026-09-28-daemon-owned-guide-outcome.md)
+
+结论（2026-09-29）：已在 [#1095](https://github.com/LodyAI/Lody/pull/1095) 中实现，从 `proposed/` 移出。已被[移除会话发送日志](../simplification/2026-09-29-remove-session-send-journal.zh.md)替代：daemon 接手（`recoveryOwned`）的拒绝返回后，renderer 不再读取 history、不再记录 guide 结果，也不重试；这条消息由 daemon 负责。结果未知时保持原样，不报告为发送失败。下文的原因分析仍然成立。
 
 ## 摘要
 

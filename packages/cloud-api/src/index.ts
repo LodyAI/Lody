@@ -693,6 +693,25 @@ export type CloudApi = {
             | 'project_not_shared';
         }
     >;
+    /** Both the token user and `requesterUserId` must be able to use the target. */
+    canDelegateMachineUseFromCliToken: Query<
+      {
+        localProjectId?: string;
+        workspaceId: string;
+        machineId: string;
+        cliToken: string;
+        requesterUserId: string;
+      },
+      | { allowed: true }
+      | {
+          allowed: false;
+          reason:
+            | 'requester_not_member'
+            | 'machine_not_registered'
+            | 'not_visible'
+            | 'project_not_shared';
+        }
+    >;
     canRequestMachineFromCliToken: Query<
       {
         localProjectId?: string;

@@ -5,7 +5,7 @@ import type { MessageQueueItem, SessionHistory, SessionId, WorkspaceId } from '@
 import { runtimeAtom, type WorkspaceRuntime } from '@/atoms/runtime';
 import { currentWorkspaceIdAtom, currentWorkspaceSlugAtom } from '@/atoms/workspace-context';
 import { MessageQueueDisplay } from '@/components/sessions/message-queue';
-import type { SessionSendViewRecord } from '@/lib/session-send-journal';
+import type { PendingSessionSend } from '@/lib/session-pending-sends';
 
 const TASKS = [
   'Refactor the message queue to support priority ordering and cancellation tokens',
@@ -142,38 +142,33 @@ const localImage = new Blob(
 function localRecord(
   id: string,
   task: string,
-  overrides: Partial<SessionSendViewRecord>
-): SessionSendViewRecord {
+  overrides: Partial<PendingSessionSend>
+): PendingSessionSend {
   return {
-    version: 2,
     id,
     sessionId: commonArgs.sessionId,
-    accountId: 'user-1',
     workspaceId: 'workspace-story',
-    sourceReplica: 'replica-story',
     sequence: 1,
     entry: { id, role: 'user', items: [{ type: 'text', text: task }] } as SessionHistory,
     delivery: { kind: 'queue' },
     queue: { task },
-    stage: 'saved',
-    activity: 'active',
+    attachments: [],
     ...overrides,
   };
 }
 
-function withLocalQueueRows(records: readonly SessionSendViewRecord[]) {
+function withLocalQueueRows(records: readonly PendingSessionSend[]) {
   const store = createStore();
   store.set(currentWorkspaceIdAtom, 'workspace-story' as WorkspaceId);
   store.set(currentWorkspaceSlugAtom, 'workspace-story');
   store.set(runtimeAtom, {
     workspaceId: 'workspace-story',
     workspaceSlug: 'workspace-story',
-    sendJournal: {
+    pendingSends: {
       subscribe: () => () => {},
       getSnapshot: () => records,
-      retry: async () => {},
+      retry: () => {},
       cancel: async () => {},
-      discard: async () => {},
     },
   } as unknown as WorkspaceRuntime);
   return (Story: () => ReactNode) => (

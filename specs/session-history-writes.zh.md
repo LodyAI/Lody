@@ -94,7 +94,7 @@ Translation: current
   replacement 的进程。create/restore 原有的取消 fence 保持有效。
 - promotion 写入失败不能丢失已确认的未投递结论。CLI 返回 `promotion-failed` 和错误，不能
   假装恢复成功或改报投递未知。daemon 的 `recoveryOwned` 响应表示恢复仍由该 daemon 负责：
-  前端仅对明确的 promotion 失败通过同一 RPC 重试一次，持续失败则报错。旧响应保留
+  前端既不重试也不修复该轮次。旧响应（没有 `recoveryOwned`）保留
   pending_apply/pending/seen 的 dispatch 修复。不得复活 active、terminal 或已删除的轮次；
   超时或投递未知绝不授权重试。
 - foreground run configuration 归属其 turn 的 Effect signal。turn 被中断后，在途配置请求

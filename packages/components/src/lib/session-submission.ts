@@ -1,6 +1,6 @@
 import type { SessionAttachmentDraft } from '@/lib/session-attachment-draft';
 import { acceptSessionUserTurn } from './session-send-admission';
-import { readGuideTurnOutcome } from './session-guide-outcome';
+import { dispatchUserTurn, steerUserTurn } from './session-send-delivery';
 import type {
   SessionHistory,
   SessionHistoryInput,
@@ -13,17 +13,12 @@ import type {
 import {
   getSessionRoomId,
   getServerNow,
-  isLoroRepoDocDeleted,
-  isSessionHistoryStatusAwaitingStart,
   normalizeSessionTurnInputConfig,
   SessionStatusFactory,
 } from '@lody/shared';
 import { v4 as uuidv4 } from 'uuid';
-import debug from 'debug';
 import type { WorkspaceRuntime } from '@/atoms/runtime';
 import { resolveSessionCreateRepoFullName } from './session-repo';
-
-const log = debug('lody:session-submission');
 
 export type CreateSessionResult = { sessionId: SessionId; sessionMeta: SessionMeta };
 export type StartSessionResult = CreateSessionResult & { historyEntry: SessionHistory };
@@ -101,72 +96,6 @@ function buildSessionCreateResult(payload: SessionToCreate): CreateSessionResult
   return { sessionId, sessionMeta };
 }
 
-/**
- * Fire the `session/dispatch-turn` Machine RPC fast path for a user turn that
- * is (or is about to be) durable. Returns a promise resolving to whether the
- * machine accepted the offer, or null when the offer cannot be built. The RPC
- * only accelerates dispatch — the durable `latestUserMsgId` pointer write
- * remains recovery truth.
- */
-function fireSessionDispatchTurnRpc(
-  runtime: WorkspaceRuntime,
-  onRpcDelivered: SessionSubmissionPorts['onRpcDelivered'],
-  args: {
-    sessionId: SessionId;
-    userTurnId: string;
-    machineId: MachineId | null | undefined;
-    timestamp: string | undefined;
-    inputConfig: SessionTurnInputConfig | undefined;
-    dispatchUserId: string | undefined;
-  }
-): Promise<boolean> | null {
-  const { sessionId, userTurnId, machineId, timestamp, inputConfig, dispatchUserId } = args;
-  // The Machine RPC fast path rides the facade's per-target routing: local
-  // machines go over the local socket RPC, remote machines over the cloud
-  // JSON stream.
-  if (!machineId || !timestamp || !inputConfig || !dispatchUserId) {
-    return null;
-  }
-  const rpcArgs = {
-    sessionId,
-    userTurnId,
-    userId: dispatchUserId,
-    timestamp,
-    inputConfig,
-  };
-  // Attachments ride as R2/local references, so payloads are normally
-  // small; skip the fast path for pathological sizes rather than risk an
-  // oversized stream append.
-  try {
-    if (JSON.stringify(rpcArgs).length > 256 * 1024) {
-      return null;
-    }
-  } catch {
-    return null;
-  }
-  return runtime
-    .requestSessionDispatchTurn(machineId, rpcArgs)
-    .then((response) => {
-      if (response?.accepted) {
-        onRpcDelivered(sessionId, userTurnId);
-        return true;
-      }
-      log(
-        'session dispatch-turn rpc not accepted for %s/%s: %s',
-        sessionId,
-        userTurnId,
-        response
-          ? `${response.disposition}${response.error ? `: ${response.error}` : ''}`
-          : 'timeout'
-      );
-      return false;
-    })
-    .catch((error) => {
-      log('session dispatch-turn rpc threw for %s/%s: %o', sessionId, userTurnId, error);
-      return false;
-    });
-}
-
 /** Ordinary Promise boundary shared by all existing submission entry points. */
 export function createSessionSubmission(ports: SessionSubmissionPorts) {
   const {
@@ -236,7 +165,7 @@ export function createSessionSubmission(ports: SessionSubmissionPorts) {
     void runtime.ensureDocStream(sessionRoomId).catch((error: unknown) => {
       console.warn('Failed to pre-create session doc stream', { sessionId, error });
     });
-    await acceptSessionUserTurn(
+    const accepted = await acceptSessionUserTurn(
       runtime,
       sessionId,
       historyEntry,
@@ -245,7 +174,8 @@ export function createSessionSubmission(ports: SessionSubmissionPorts) {
       undefined,
       attachments
     );
-    if (!attachments?.length) publishSessionMeta(sessionRoomId, sessionMeta);
+    // A held creation shows through the local placeholder until it is written.
+    if (accepted === 'written') publishSessionMeta(sessionRoomId, sessionMeta);
     recordChat(sessionMeta, sessionId, true, history.items);
     return { sessionId, sessionMeta, historyEntry };
   };
@@ -271,8 +201,8 @@ export function createSessionSubmission(ports: SessionSubmissionPorts) {
 
     const entry = { ...history, id: uuidv4() } as SessionHistory;
 
-    // Acceptance is the existing renderer writer boundary. Persistence and
-    // independent delivery are introduced in the next layer of the stack.
+    // User turns go through the shared admission (local write, or the
+    // in-memory queue while attachments prepare); other roles append directly.
     let dispatch:
       | {
           userTurnId: string;
@@ -302,7 +232,7 @@ export function createSessionSubmission(ports: SessionSubmissionPorts) {
         entry,
         options?.guideExpectedTurnId
           ? { kind: 'guide', expectedTurnId: options.guideExpectedTurnId }
-          : { kind: options?.dispatch ? 'dispatch' : 'queue' },
+          : { kind: options?.dispatch ? 'dispatch' : 'history' },
         undefined,
         undefined,
         options?.attachments
@@ -330,76 +260,12 @@ export function createSessionSubmission(ports: SessionSubmissionPorts) {
     if (!runtime) {
       throw new Error('Runtime not ready');
     }
-    const saved = await runtime.sendJournal?.read(userTurnId);
-    if (saved) {
-      const active = await runtime.sendJournal!.activate(userTurnId, { kind: 'dispatch' });
-      await runtime.sendJournal!.submit(sessionId);
-      if (active)
-        void runtime.sendJournal!.deliver(active).catch((error: unknown) => {
-          log('background dispatch remains pending for %s/%s: %o', sessionId, userTurnId, error);
-        });
-      return;
-    }
-    const entry = await runtime.sendResources.withSessionStore(sessionId, async (sessionStore) => {
-      const read = await sessionStore.sessionData.history.readTurn(userTurnId);
-      return read.state === 'ready' && read.turn.role === 'user' ? read.turn : undefined;
+    // A held send is written and dispatched by the pending queue.
+    if (runtime.pendingSends?.has(userTurnId)) return;
+    await dispatchUserTurn(runtime, sessionId, userTurnId, {
+      ...options,
+      onAccepted: () => onRpcDelivered(sessionId, userTurnId),
     });
-    const inputConfig = options?.inputConfig ?? normalizeSessionTurnInputConfig(entry?.inputConfig);
-    const dispatchUserId = entry?.userId?.trim();
-    let rpcAcceptedPromise: Promise<boolean> | null = null;
-    const startDispatchTurnRpc = (machineId: MachineId | null | undefined): void => {
-      // The durable pointer write below remains recovery truth.
-      rpcAcceptedPromise = fireSessionDispatchTurnRpc(runtime, onRpcDelivered, {
-        sessionId,
-        userTurnId,
-        machineId,
-        timestamp: entry?.timestamp,
-        inputConfig,
-        dispatchUserId,
-      });
-    };
-
-    // Local history writes are the accept boundary. Remote document sync is a
-    // sibling of dispatch signaling, never a blocker for clearing the composer.
-    // Hold a store ref for the flush so eviction cannot unload the doc mid-flush.
-    void runtime.sendResources
-      .withSessionStore(sessionId, (sessionStore, signal) => sessionStore.waitUntilSynced(signal))
-      .catch((error: unknown) => {
-        console.warn('Failed to sync session doc after dispatch request', {
-          sessionId,
-          userTurnId,
-          error,
-        });
-      });
-    startDispatchTurnRpc(options?.machineId ?? null);
-    const roomId = getSessionRoomId(sessionId);
-    const existing = await runtime.repo.getDocMeta(roomId);
-    if (isLoroRepoDocDeleted(existing)) {
-      return;
-    }
-    if (!options?.machineId) {
-      const meta = existing?.meta as SessionMeta | undefined;
-      startDispatchTurnRpc(meta?.machineId ?? null);
-    }
-    try {
-      await runtime.writer.upsertDocMeta(roomId, {
-        latestUserMsgId: userTurnId,
-      } as Partial<SessionMeta>);
-    } catch (error) {
-      // The RPC fast path may already have delivered this turn to the CLI; a
-      // rejection here would make callers toast "failed to send" for a turn
-      // that is actually running, inviting a duplicate resend. Only surface
-      // the failure when the fast path did not deliver.
-      if (await rpcAcceptedPromise) {
-        console.warn('Dispatch metadata write failed after RPC fast-path delivery', {
-          sessionId,
-          userTurnId,
-          error,
-        });
-        return;
-      }
-      throw error;
-    }
   };
 
   const requestSessionSteer = async (
@@ -411,134 +277,12 @@ export function createSessionSubmission(ports: SessionSubmissionPorts) {
     if (!runtime) {
       throw new Error('Runtime not ready');
     }
-    const saved = await runtime.sendJournal?.read(userTurnId);
-    if (saved) {
-      const active = await runtime.sendJournal!.activate(userTurnId, {
-        kind: 'guide',
-        expectedTurnId,
-      });
-      await runtime.sendJournal!.submit(sessionId);
-      if (active) await runtime.sendJournal!.deliver(active);
-      const completed = await runtime.sendJournal!.read(userTurnId);
-      if (completed?.guideOffer === 'applied') {
-        onRpcDelivered(sessionId, userTurnId);
-        return true;
-      }
-      if (completed?.guideOffer === 'not-applied' || completed?.guideOffer === 'recovered')
-        return false;
-      throw new Error('Guide outcome is uncertain; the original message is retained');
-    }
-    const entry = await runtime.sendResources.withSessionStore(sessionId, async (sessionStore) => {
-      const read = await sessionStore.sessionData.history.readTurn(userTurnId);
-      return read.state === 'ready' && read.turn.role === 'user' ? read.turn : undefined;
+    // A held guide is offered by the pending queue once it is written.
+    if (runtime.pendingSends?.has(userTurnId)) return false;
+    return steerUserTurn(runtime, sessionId, expectedTurnId, userTurnId, {
+      machineId: options?.machineId,
+      onApplied: () => onRpcDelivered(sessionId, userTurnId),
     });
-    const inputConfig = normalizeSessionTurnInputConfig(entry?.inputConfig);
-    const userId = entry?.userId?.trim();
-    const roomId = getSessionRoomId(sessionId);
-    let machineId = options?.machineId ?? null;
-    if (!machineId) {
-      const existing = await runtime.repo.getDocMeta(roomId);
-      const meta = isLoroRepoDocDeleted(existing)
-        ? undefined
-        : (existing?.meta as SessionMeta | undefined);
-      machineId = meta?.machineId ?? null;
-    }
-    if (!entry || !inputConfig || !userId || !machineId) {
-      return false;
-    }
-    const steerRequest = {
-      sessionId,
-      expectedTurnId,
-      userTurnId,
-      userId,
-      timestamp: entry.timestamp,
-      inputConfig,
-    };
-    let response = await runtime.requestSessionSteer(machineId, steerRequest);
-    if (response?.recoveryOwned && response.disposition === 'promotion-failed') {
-      // The CLI owns recovery for this verdict. Retry through that same owner;
-      // a renderer-side promotion could overwrite a newer activation pointer.
-      response = await runtime.requestSessionSteer(machineId, steerRequest);
-      if (
-        !response ||
-        response.disposition === 'promotion-failed' ||
-        response.disposition === 'error'
-      ) {
-        throw new Error(response?.error ?? 'Could not recover the undelivered guidance');
-      }
-    }
-    if (response?.applied) {
-      onRpcDelivered(sessionId, userTurnId);
-      return true;
-    }
-    if (
-      !response?.recoveryOwned &&
-      (response?.disposition === 'no-active-turn' || response?.disposition === 'promotion-failed')
-    ) {
-      // The CLI proved the steer was not applied, either before submission
-      // or from the adapter's final verdict. Reuse the same user turn as an
-      // ordinary follow-up. `delivery-unknown` and every other result stay
-      // pending_apply because replay could deliver the input twice.
-      // Re-acquire the store for the write: the steer RPC above can run long,
-      // and we must not hold a store ref across it.
-      const promoted = await runtime.sendResources.withSessionStore(
-        sessionId,
-        async (sessionStore) => {
-          const changed =
-            (
-              await sessionStore.sessionData.commands.applyHistoryAction({
-                kind: 'user-status',
-                turnId: userTurnId,
-                status: 'pending',
-                onlyPendingApply: true,
-              })
-            ).matched ?? false;
-          if (changed) return true;
-          // CLI promotion can write history before its activation pointer
-          // fails. Auto-seen may also have observed that pending entry.
-          const read = await sessionStore.sessionData.history.readTurn(userTurnId);
-          return (
-            read.state === 'ready' &&
-            read.turn.role === 'user' &&
-            isSessionHistoryStatusAwaitingStart(read.turn.status)
-          );
-        }
-      );
-      // Pending promotion is repairable; a started, terminal, or removed turn is not.
-      if (!promoted) {
-        return false;
-      }
-      await requestSessionDispatch(sessionId, userTurnId, {
-        inputConfig,
-        machineId,
-      });
-      log(
-        'session steer promoted to ordinary dispatch for %s/%s after target turn ended',
-        sessionId,
-        userTurnId
-      );
-      return false;
-    }
-    if (response?.recoveryOwned) {
-      if (response.disposition === 'no-active-turn') return false;
-      // stale-turn, busy and unsupported are proven undelivered too, and the
-      // daemon requeues the turn itself. Its history write says whether it did.
-      const outcome = await runtime.sendResources.withSessionStore(
-        sessionId,
-        async (sessionStore, signal) => {
-          await sessionStore.waitUntilSynced(signal);
-          return readGuideTurnOutcome(await sessionStore.sessionData.history.readTurn(userTurnId));
-        }
-      );
-      if (outcome !== 'uncertain') return outcome === 'applied';
-    }
-    log(
-      'session steer not applied for %s/%s: %s',
-      sessionId,
-      userTurnId,
-      response ? `${response.disposition}${response.error ? `: ${response.error}` : ''}` : 'timeout'
-    );
-    throw new Error('Guide outcome is uncertain; the original message is retained');
   };
 
   return {

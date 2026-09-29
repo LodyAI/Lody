@@ -3,8 +3,8 @@ import { CircleAlert, File as FileIcon, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { SessionSendProgressRing } from '@/components/sidebar-row-shared';
 import type { SessionAttachmentDraft } from '@/lib/session-attachment-draft';
-import type { SessionSendViewRecord } from '@/lib/session-send-journal';
-import { deriveSessionSendRecordProgress, isInstantSendRecord } from '@/lib/session-send-status';
+import type { PendingSessionSend } from '@/lib/session-pending-sends';
+import { deriveSessionSendProgress } from '@/lib/session-send-status';
 import { cn } from '@/lib/utils';
 import { IconAction, TextAction } from './message-queue-row';
 
@@ -35,7 +35,7 @@ function LocalThumbnail({ attachment }: { attachment: SessionAttachmentDraft }) 
   );
 }
 
-function queuedText(record: SessionSendViewRecord): string {
+function queuedText(record: PendingSessionSend): string {
   const task = (record.queue as { task?: unknown } | undefined)?.task;
   if (typeof task === 'string' && task.trim()) return task;
   return (
@@ -46,9 +46,9 @@ function queuedText(record: SessionSendViewRecord): string {
 }
 
 /**
- * A message routed to the queue while its attachments are still uploading. It
- * exists only in the local send journal: it is not a queue item yet, so it
- * cannot be dragged, edited or used to steer. It takes the position the real
+ * A message routed to the queue while its attachments are still uploading (or
+ * behind one that is). It exists only in renderer memory: it is not a queue
+ * item yet, so it cannot be dragged, edited or used to steer. It takes the position the real
  * item will be appended to, and gives way to it in the same render when that
  * item syncs in.
  */
@@ -59,23 +59,21 @@ export function PendingQueueRow({
   busy,
   onRetry,
   onCancel,
-  onDiscard,
 }: {
-  record: SessionSendViewRecord;
+  record: PendingSessionSend;
   index: number;
   /** Draw the divider above: a row, local or real, precedes this one. */
   divided: boolean;
   busy: boolean;
   onRetry: () => void;
   onCancel: () => void;
-  onDiscard: () => void;
 }) {
   const { t } = useTranslation();
-  const status = deriveSessionSendRecordProgress(record);
+  const status = deriveSessionSendProgress(record);
   const failed = status.state === 'failed';
   // Nothing to upload: it reads as queued, not as sending.
-  const instant = isInstantSendRecord(record);
-  const attachments = record.attachments ?? [];
+  const attachments = record.attachments;
+  const instant = !failed && attachments.length === 0;
   const inline = attachments.slice(0, MAX_INLINE_ATTACHMENTS);
   const overflow = attachments.length - inline.length;
   const statusLabel =
@@ -152,23 +150,13 @@ export function PendingQueueRow({
             {statusLabel}
           </span>
         )}
-        {record.stage === 'saved' ? (
-          <IconAction
-            icon={X}
-            label={t('sessions.cancelPendingSend')}
-            destructive
-            disabled={busy}
-            onClick={onCancel}
-          />
-        ) : failed ? (
-          <IconAction
-            icon={X}
-            label={t('sessions.discardPreparedSendDescription')}
-            destructive
-            disabled={busy}
-            onClick={onDiscard}
-          />
-        ) : null}
+        <IconAction
+          icon={X}
+          label={t('sessions.cancelPendingSend')}
+          destructive
+          disabled={busy}
+          onClick={onCancel}
+        />
       </div>
     </div>
   );

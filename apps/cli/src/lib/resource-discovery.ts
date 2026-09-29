@@ -37,7 +37,6 @@ export type DiscoverySource = {
   userId: string;
   /** Undefined means there is no active Turn selection to report. */
   selectedMcpServerIds?: readonly string[];
-  roleMachineScope?: MachineId;
   machines(): Promise<MachineMeta[]>;
   onlineMachineIds(): Promise<ReadonlySet<MachineId> | null>;
   canAccess(machineId: MachineId, projectId?: string): Promise<boolean>;
@@ -236,12 +235,6 @@ export class ResourceDiscovery {
           : capability.modes.some((mode) => mode.id === modeId))
       )
         state = { state: 'unavailable', reason: 'mode_unavailable' };
-      if (
-        state.state === 'available' &&
-        source.roleMachineScope &&
-        role.machineId !== source.roleMachineScope
-      )
-        state = { state: 'unavailable', reason: 'outside_work_context' };
       return {
         id: role.id,
         name: role.name,

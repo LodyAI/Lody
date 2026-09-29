@@ -161,13 +161,6 @@ describe('resource discovery across MCP and CLI', () => {
     );
     await expect(discovery.get('agent_role', 'private')).rejects.toThrow('RESOURCE_NOT_FOUND');
     await expect(discovery.get('agent_role', 'absent')).rejects.toThrow('RESOURCE_NOT_FOUND');
-    const scoped = new ResourceDiscovery(
-      source({ roles: async () => [role('bound')], roleMachineScope: 'two' as MachineId })
-    );
-    expect((await scoped.get('agent_role', 'bound')).item.availability).toEqual({
-      state: 'unavailable',
-      reason: 'outside_work_context',
-    });
     const unknown = new ResourceDiscovery(
       source({ roles: async () => [role('bound')], onlineMachineIds: async () => null })
     );

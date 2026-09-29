@@ -8,6 +8,9 @@ and file responsibilities: [../README.md](../README.md).
 
 ## Git credential broker
 
+- Local projects and their worktrees use native Git/GitHub auth, even with GitHub
+  remotes. Skip managed credential preparation and never enroll them on refresh.
+
 - Host clone/fetch must receive the prepared session's managed Git PATH/config in
   `brokerAuth.transportEnv`, not just a helper: HTTP headers authenticate before
   helpers. Pin the per-call context token; do not read a mutable session file.

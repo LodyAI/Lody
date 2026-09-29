@@ -236,13 +236,14 @@ this page is the full text of the rules summarised there.
   `SessionHeaderMenu` (`machineName` prop). Mobile keeps the single
   `MobileSessionRunConfig` button + sheet.
   Images and files stay as local drafts until Send. Oversize images (>5 MiB)
-  degrade to files using the existing validation. The composer passes immutable
-  Blob snapshots with the complete input to the workspace submission journal.
-  Successful persistence releases the composer; a pending-message view owns
+  degrade to files using the existing validation. On Send the composer hands the
+  complete input to the shared send admission and clears. A send with unready
+  attachments is held in the workspace runtime's memory, and its pending row owns
   progress, retry, and cancellation. Existing-session direct/queue/guide and new
   or child-session sends share this boundary, including attachment-only input.
-  Same-session text waits behind attachment preparation. Local creation metadata
-  stays in a renderer overlay until prepared history can be committed.
+  Same-session text waits behind a held send. A held new conversation's metadata
+  is an in-memory placeholder until its first turn is written. Held sends do not
+  survive the page; leaving asks first.
 
 The workspace Effect owner joins upload, local handoff, store borrows, and warmup
 cleanup before closing their dependencies. Successful attachment receipts survive
@@ -251,6 +252,6 @@ same-machine files still use `localProjects.sendSessionFileLocal`, including its
 existing cloud fallback and backfill policy. Permanent local references remain a
 [separate proposal](../../specs/local-attachment-references.md).
 
-See the [draft Spec](../../specs/session-files.md) for ownership, recovery, and
-acceptance boundaries. Implementation and deterministic tests do not establish
+See the [draft Spec](../../specs/session-files.md) for ownership, accepted loss,
+and acceptance boundaries. Implementation and deterministic tests do not establish
 packaged-device or native-mobile-shell acceptance.

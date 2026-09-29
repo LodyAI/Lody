@@ -1,9 +1,11 @@
 # Queue-bound uploads render as local rows in the queue sheet
 
-Status: proposed
+Status: implemented
 Translation: current
 
 [中文](2026-09-28-local-queue-pending-rows.zh.md)
+
+Verdict (2026-09-29): implemented in [#1095](https://github.com/LodyAI/Lody/pull/1095) and moved from `proposed/`. Partially superseded by [removing the session send journal](../simplification/2026-09-29-remove-session-send-journal.md): the local queue rows remain, but come from the in-memory held sends instead of journal records, and have only retry and cancel. The text-only projection overlay was removed because a ready send is now written locally at once.
 
 ## Abstract
 

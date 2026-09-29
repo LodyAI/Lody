@@ -7,6 +7,8 @@ Translation: current
 
 PR: [LodyAI/Lody#1099](https://github.com/LodyAI/Lody/pull/1099)
 
+后续：[移除会话发送日志](../simplification/2026-09-29-remove-session-send-journal.zh.md)删除了下文提到的调用方 `workspace-session-send-journal.ts`，发送不再等待目标同步。Streams CRDT 的版本锁定及其理由不受影响。
+
 ## 摘要
 
 发送消息会更新工作区元数据并立即请求完整同步，此时实时同步可能仍在上传这些元数据。Streams CRDT 0.16.0 会因两者重叠而返回内部错误，即使实时上传和独立的消息派发最终成功。Lody 现固定使用已发布的 0.16.1 修复，将显式同步与实时上传串行化，并让待上传批次的确认与出队处于同一队列事务中。发布包回归测试通过；现场原始内部异常仍不可得，因此不能据此认定所有同步失败都属于这一根因。

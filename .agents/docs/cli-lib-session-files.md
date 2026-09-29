@@ -4,9 +4,9 @@ How a file or image travels from a client into an agent prompt and, eventually, 
 cloud storage. The [attachment draft Spec](../../specs/session-files.md) describes
 the implemented client deferral of existing transfers until Send; the CLI lifecycle below is retained.
 [Permanent local references](../../specs/local-attachment-references.md) belong to
-a separate follow-up PR. The Specs remain draft pending review. The implemented client journal
-separates upload preparation from durable message delivery; CLI materialization,
-Agent execution, and backfill retain their existing owners.
+a separate follow-up PR. The Specs remain draft pending review. The client holds a
+message in memory until its attachments are ready, then writes it locally; CLI
+materialization, Agent execution, and backfill retain their existing owners.
 [`apps/cli/src/lib/AGENTS.md`](../../apps/cli/src/lib/AGENTS.md) requires this page to
 be read before session file upload, dispatch materialization, or backfill is changed,
 because the statements below bind those paths.

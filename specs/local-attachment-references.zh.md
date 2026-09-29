@@ -59,6 +59,6 @@ ACP 最终仍收到正确编码的 `file://` `resource_link`，不能退化为�
 
 ## 4. 证据与状态
 
-设计基于 `8c429a890037c5b21855ce7ef9f59e3677c25a38` 的源码检查；未实施、未做独立模型或真机验收。拆分决定见[决策记录](../.agents/notes/proposed/architecture/2026-09-14-deferred-attachment-send.zh.md)。当前 blob/补传链路见[CLI 附件说明](../.agents/docs/cli-lib-session-files.md)。
+设计基于 `8c429a890037c5b21855ce7ef9f59e3677c25a38` 的源码检查；未实施、未做独立模型或真机验收。拆分决定见[决策记录](../.agents/notes/implemented/architecture/2026-09-14-deferred-attachment-send.zh.md)。当前 blob/补传链路见[CLI 附件说明](../.agents/docs/cli-lib-session-files.md)。
 
 源码入口：`packages/components/src/lib/electron-session-file-sender.ts`、`apps/electron/src/main/ipc/services/local-projects-ipc.ts`、`apps/electron/src/preload/index.ts`、`apps/cli/src/lib/{message-handler,session-file-backfill,session-file-blob-store}.ts`、`packages/shared/src/{message-schemas,session-input}.ts`。原文件路径 API 参见 [Electron webUtils](https://www.electronjs.org/docs/latest/api/web-utils)。

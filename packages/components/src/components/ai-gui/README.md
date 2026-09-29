@@ -38,6 +38,10 @@ the reasoning behind those rules.
   pure zoom/pan geometry, and `mermaid-diagram-viewer.tsx` the full-screen
   surface. Invariants live in
   [mermaid-diagram-rendering.md](mermaid-diagram-rendering.md).
+- A `[Title](session://<id>)` link (the form session mentions reach the agent in)
+  renders as a conversation chip. `session-link-context.tsx` supplies the Session
+  navigation from `SessionChatInterface`; without it, or on a read-only share, the
+  chip is inert.
 - `message-content-guards.ts` gates which shared `MessageContent` variants render.
 - `markdown-file-image.tsx` binds live file Markdown to its owning provider. Local
   resources load automatically; remote file images show a one-line recessed slot

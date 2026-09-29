@@ -74,9 +74,9 @@ export function useConversationStreamItems(
   const version = useConversationVersion(view);
   const turnCount = view?.turnCount ?? 0;
 
-  // Projection wrappers change as accepted turns reconcile. Only replacing the
-  // underlying conversation starts a new initial load or resets its read window.
-  const source = view?.factSource ?? view;
+  // Replacing the conversation view starts a new initial load and resets its
+  // read window; history changes within the same view do neither.
+  const source = view;
   const initialRef = useRef({ source, ready: false });
   if (initialRef.current.source !== source) initialRef.current = { source, ready: false };
   const [visible, setVisibleRange] = useState<{
