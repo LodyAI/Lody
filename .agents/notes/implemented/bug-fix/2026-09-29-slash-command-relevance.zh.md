@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: [#1136](https://github.com/LodyAI/Lody/pull/1136)
 
 [English](2026-09-29-slash-command-relevance.md)
 
