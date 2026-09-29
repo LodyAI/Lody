@@ -263,7 +263,9 @@ export class AgentProviderLifecyclePage {
     const settings = this.settingsDialog();
     await expect(settings).toBeVisible();
     await settings.locator('[data-settings-tab-id="agents"]').click();
-    await expect(settings.getByText('Agent Provider', { exact: true })).toBeVisible();
+    await expect(
+      settings.getByRole('button', { name: /^(Add provider|添加 Provider)$/u }).first()
+    ).toBeEnabled();
     return settings;
   }
 

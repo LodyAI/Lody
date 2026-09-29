@@ -60,12 +60,12 @@ export class ContextCopyPage {
   async copyContextThroughFirstUserMessage(): Promise<void> {
     const firstPrompt = this.page.getByText(FIRST_PROMPT_MARKER);
     await expect(firstPrompt).toBeVisible({ timeout: 30_000 });
-    // User turns expose the same real fork popover but lack a turn-id test hook.
-    // The first visible action belongs to the first rendered user turn.
     await firstPrompt.hover();
     await this.page
+      .getByTestId('user-message-metadata')
+      .locator('..')
+      .filter({ hasText: FIRST_PROMPT_MARKER })
       .getByRole('button', { name: /^(Fork session|分叉会话)$/u })
-      .first()
       .click();
     await this.copyFromForkMenu();
   }

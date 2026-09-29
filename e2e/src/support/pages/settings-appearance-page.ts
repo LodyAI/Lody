@@ -20,7 +20,7 @@ export class SettingsAppearancePage {
 
   async expectCommittedLightThemeAfterSettingsReopen(): Promise<void> {
     const settings = await this.openAppearanceSettings();
-    await expect(this.themeTrigger(settings)).toHaveAccessibleName(themeLabels.light);
+    await expect(this.themeTrigger(settings)).toContainText(themeLabels.light);
     await this.expectThemeState('light');
     await this.closeSettings(settings);
   }
@@ -40,7 +40,7 @@ export class SettingsAppearancePage {
 
   async expectCancelledPreviewKeepsCommittedLightTheme(): Promise<void> {
     const settings = await this.openAppearanceSettings();
-    await expect(this.themeTrigger(settings)).toHaveAccessibleName(themeLabels.light);
+    await expect(this.themeTrigger(settings)).toContainText(themeLabels.light);
     await this.expectThemeState('light');
     await this.closeSettings(settings);
   }
@@ -69,13 +69,13 @@ export class SettingsAppearancePage {
 
   private themeTrigger(settings: Locator): Locator {
     return settings.getByRole('button', {
-      name: /^(Dark|Light|System|深色|浅色|系统)$/u,
+      name: /^(Theme|主题)$/u,
       exact: true,
     });
   }
 
   private themeOption(theme: Theme): Locator {
-    return this.page.locator('[data-preview-item]').filter({ hasText: themeLabels[theme] });
+    return this.page.getByRole('option', { name: themeLabels[theme] });
   }
 
   private async openThemeSelector(settings: Locator): Promise<void> {
@@ -87,7 +87,7 @@ export class SettingsAppearancePage {
     await this.openThemeSelector(settings);
     await this.themeOption(theme).click();
     await expect(this.themeOption(theme)).toBeHidden();
-    await expect(this.themeTrigger(settings)).toHaveAccessibleName(themeLabels[theme]);
+    await expect(this.themeTrigger(settings)).toContainText(themeLabels[theme]);
   }
 
   private async expectThemeState(resolvedTheme: 'dark' | 'light', storedTheme = resolvedTheme) {

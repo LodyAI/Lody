@@ -79,9 +79,9 @@ export class McpCatalogPage {
   }
 
   async createCompletedSession(): Promise<McpCatalogAcpEvent> {
-    const priorSessions = this.fixture
+    const priorTurnSessions = this.fixture
       .readAcpEvents()
-      .filter((event) => event.event === 'session-new');
+      .filter((event) => event.event === 'session-new' && event.purpose === 'turn');
     await this.page.locator('#chat-prompt').fill('Use the explicitly selected synthetic MCP.');
     await this.page.getByRole('button', { name: /^(Send|发送)$/u }).click();
     await expect(this.page).toHaveURL(/#\/local\/sessions\/[^/?#]+(?:\?.*)?$/u, {
@@ -91,10 +91,31 @@ export class McpCatalogPage {
       .locator('[data-assistant-turn-id]')
       .getByText(RESPONSE_TEXT, { exact: true });
     await expect(assistantTurn).toBeVisible({ timeout: 60_000 });
-    const sessions = await this.fixture.waitForEvent('session-new', priorSessions.length + 1);
-    const session = sessions.at(-1);
+    await expect
+      .poll(
+        () =>
+          this.fixture
+            .readAcpEvents()
+            .filter((event) => event.event === 'session-new' && event.purpose === 'turn').length,
+        { timeout: 30_000, intervals: [50, 100, 250, 500] }
+      )
+      .toBeGreaterThan(priorTurnSessions.length);
+    const session = this.fixture
+      .readAcpEvents()
+      .filter((event) => event.event === 'session-new' && event.purpose === 'turn')
+      .at(-1);
     expect(session?.sessionId).toEqual(expect.any(String));
-    await this.fixture.waitForEvent('prompt-end');
+    await expect
+      .poll(
+        () =>
+          this.fixture
+            .readAcpEvents()
+            .some(
+              (event) => event.event === 'prompt-end' && event.sessionId === session?.sessionId
+            ),
+        { timeout: 30_000, intervals: [50, 100, 250, 500] }
+      )
+      .toBe(true);
     return session!;
   }
 

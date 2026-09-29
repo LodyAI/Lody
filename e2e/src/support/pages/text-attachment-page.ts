@@ -82,7 +82,7 @@ export class TextAttachmentPage {
     await expect(this.composerRemoveAttachment()).toHaveCount(0);
     await expect(this.historyAttachment()).toHaveCount(1);
     await expect(this.historyAttachment()).toBeVisible();
-    await expect(this.page.getByText(ATTACHMENT_PROMPT, { exact: true })).toBeVisible();
+    await expect(this.historyPrompt(ATTACHMENT_PROMPT)).toBeVisible();
     await expect(this.composerPrompt()).toHaveValue('');
   }
 
@@ -96,7 +96,7 @@ export class TextAttachmentPage {
   }
 
   async expectPlainTextFollowUpWithoutAttachment(): Promise<void> {
-    await expect(this.page.getByText(FOLLOW_UP_PROMPT, { exact: true })).toBeVisible();
+    await expect(this.historyPrompt(FOLLOW_UP_PROMPT)).toBeVisible();
     await expect(this.historyAttachment()).toHaveCount(1);
     await expect(this.composerRemoveAttachment()).toHaveCount(0);
   }
@@ -210,8 +210,8 @@ export class TextAttachmentPage {
   private async expectPrimaryHistory(): Promise<void> {
     await expect(this.historyAttachment()).toHaveCount(1);
     await expect(this.historyAttachment()).toBeVisible();
-    await expect(this.page.getByText(ATTACHMENT_PROMPT, { exact: true })).toBeVisible();
-    await expect(this.page.getByText(FOLLOW_UP_PROMPT, { exact: true })).toBeVisible();
+    await expect(this.historyPrompt(ATTACHMENT_PROMPT)).toBeVisible();
+    await expect(this.historyPrompt(FOLLOW_UP_PROMPT)).toBeVisible();
   }
 
   private composerPrompt(): Locator {
@@ -232,6 +232,14 @@ export class TextAttachmentPage {
 
   private historyAttachment(): Locator {
     return this.page.getByText(HISTORY_ATTACHMENT_NAME, { exact: true });
+  }
+
+  private historyPrompt(prompt: string): Locator {
+    return this.page
+      .getByTestId('user-message-metadata')
+      .locator('..')
+      .filter({ hasText: prompt })
+      .getByText(prompt, { exact: true });
   }
 
   private activeRow(sessionId: string): Locator {
