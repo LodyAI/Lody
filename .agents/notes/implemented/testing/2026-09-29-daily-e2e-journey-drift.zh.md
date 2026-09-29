@@ -7,7 +7,7 @@ Translation: current
 
 ## 摘要
 
-桌面界面变化后，Desktop Daily 的 #507 持续失败：多处 Page Object 仍按旧标签查找控件，或同时匹配无关的浮层。旅程定位现改为指向当前控件及其所属的消息或对话框。MCP 和分叉旅程将 Turn 的 ACP Session 与独立的标题生成 Session 区分开；worktree 清理在终端 relay 短暂断线时继续检查，但仍须实际观察到资源释放。三种操作系统的构建后运行仍需验证。
+桌面界面变化后，Desktop Daily 的 #507 持续失败：多处 Page Object 仍按旧标签查找控件，或同时匹配无关的浮层。旅程定位现改为指向当前控件及其所属的消息或对话框。MCP 和分叉旅程将 Turn 的 ACP Session 与独立的标题生成 Session 区分开；worktree 清理在终端 relay 短暂断线时继续检查，但仍须实际观察到资源释放。PR 首次完整运行在 macOS 通过了 24 个旅程中的 22 个，并揭示另外两处旧定位，现已修正；仍需新一轮构建后验证。
 
 ## 证据与决定
 
@@ -21,6 +21,8 @@ Windows 上，Session 归档后的第一次 `terminal.list` 返回 `terminal_soc
 
 Windows 的分叉与 Session 管理旅程在源提示后超时。[artifact 的截图和 trace](https://github.com/LodyAI/Lody/actions/runs/36539627906)显示源回复已在预期项目下完成。旧 fixture 仅通过记录的 `cwd` 与合成项目根目录的 `realpathSync` 相等来查找 ACP 提示事件；artifact 没有保留 ACP 事件日志，因此无法确定具体的路径差异。fixture 现标记标题与 Turn ACP Session，并按 Turn Session id 关联已完成提示；合成事件日志也会留在场景 artifact 中，供以后诊断路径问题。
 
+[PR 的首次完整运行](https://github.com/LodyAI/Lody/actions/runs/36563017669)在 macOS 通过了 24 个旅程中的 22 个。失败截图显示主题选择器是带 `role="combobox"` 的按钮，Playwright 的 button-role 定位无法找到它。删除最后一个 Agent Provider 后，当前机器空状态显示 `No agents on <machine> yet`，而非旧文案 `No providers on this machine yet.`。后续断言已按实际角色及两种支持语言的当前空状态文案修正。
+
 ## 验证与限制
 
-改动文件通过 Oxfmt 和 `git diff --check`。此嵌套 worktree 的 E2E 包未安装 `@cucumber/cucumber`，所以 `pnpm e2e:check` 无法启动；`pnpm e2e:build` 因 CLI 清理步骤缺少 `rimraf` 而停止。仓库指引要求嵌套 checkout 跳过 `pnpm install`，因此无法启动构建后 Electron smoke。`pnpm run docs check` 报告 62 条指向未填充 ACP submodule 路径的断链，新建的双语 Note 没有相关错误。修正尚未经过新的托管 Windows 运行验证。
+改动文件通过 Oxfmt 和 `git diff --check`。此嵌套 worktree 的 E2E 包未安装 `@cucumber/cucumber`，所以 `pnpm e2e:check` 无法启动；`pnpm e2e:build` 因 CLI 清理步骤缺少 `rimraf` 而停止。根目录的 `pnpm check` 和 `pnpm format` 也因工具缺失而停止。仓库指引要求嵌套 checkout 跳过 `pnpm install`，因此无法在本地启动构建后 Electron smoke。`pnpm run docs check` 报告 62 条指向未填充 ACP submodule 路径的断链，新建的双语 Note 没有相关错误。PR 运行验证了 22 个 macOS 旅程；两处后续修正及 Windows、Linux 运行尚待新的托管验证。

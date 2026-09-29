@@ -229,9 +229,7 @@ export class AgentProviderLifecyclePage {
     ]) {
       await expect(settings.getByText(providerName, { exact: true })).toHaveCount(0);
     }
-    await expect(
-      settings.getByText(/^(No providers on this machine yet\.|此机器还没有 Provider。)$/u)
-    ).toBeVisible();
+    await expect(settings.getByText(/^(No agents on .+ yet|.+ 上还没有 Agent)$/u)).toBeVisible();
     await this.closeSettings(settings);
     await this.openHome();
     await expect(this.page.locator('#chat-prompt')).toBeEditable();

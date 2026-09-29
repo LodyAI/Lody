@@ -68,7 +68,7 @@ export class SettingsAppearancePage {
   }
 
   private themeTrigger(settings: Locator): Locator {
-    return settings.getByRole('button', {
+    return settings.getByRole('combobox', {
       name: /^(Theme|主题)$/u,
       exact: true,
     });
