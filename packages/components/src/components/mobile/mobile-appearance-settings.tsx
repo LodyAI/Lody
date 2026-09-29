@@ -6,7 +6,12 @@ import type { SupportedLanguage } from '@lody/shared';
 import { Check, ChevronDown, Monitor, Moon, Sun } from 'lucide-react';
 import { motion } from 'framer-motion';
 
-import { conversationFontSizeAtom, fontLigaturesEnabledAtom, languageAtom } from '@/atoms';
+import {
+  conversationFontSizeAtom,
+  fontLigaturesEnabledAtom,
+  inlineMathEnabledAtom,
+  languageAtom,
+} from '@/atoms';
 import {
   MobileInlineMenu,
   MobileInlinePickerCoordinator,
@@ -30,6 +35,7 @@ export function MobileAppearanceSettings() {
   const [language, setLanguage] = useAtom(languageAtom);
   const [conversationFontSize, setConversationFontSize] = useAtom(conversationFontSizeAtom);
   const [fontLigaturesEnabled, setFontLigaturesEnabled] = useAtom(fontLigaturesEnabledAtom);
+  const [inlineMathEnabled, setInlineMathEnabled] = useAtom(inlineMathEnabledAtom);
   const postHog = usePostHog();
   const selectedThemeLabel =
     theme === 'light'
@@ -130,6 +136,17 @@ export function MobileAppearanceSettings() {
             />
           </MobileSettingsRow>
         </MobileInlinePickerRowSlot>
+        <MobileSettingsRow
+          label={t('settings.inlineMath.label', 'Render inline math')}
+          helper={t('settings.inlineMath.helper', 'Typeset $...$ and \\(...\\) in Markdown.')}
+          hasDivider
+        >
+          <Switch
+            checked={inlineMathEnabled}
+            onCheckedChange={setInlineMathEnabled}
+            aria-label={t('settings.inlineMath.label', 'Render inline math')}
+          />
+        </MobileSettingsRow>
       </MobileSettingsSection>
 
       <MobileSettingsSection>

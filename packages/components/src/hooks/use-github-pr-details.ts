@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { cloudOperations } from '@/lib/cloud-api-operations';
 import {
   getServerNow,
   GitHubPermissionError,
@@ -45,7 +44,7 @@ import {
 } from '@/lib/github-pr-details-state';
 import { canRunAuthedWorkspaceQuery } from '@/lib/authed-convex-query';
 import { useAuthenticatedConvex } from './use-authenticated-convex';
-import { useCloudQuery } from '@lody/platform/react';
+import { useGitHubPrIdentity } from './use-github-pr-identity';
 
 // Delay before probing whether a merged PR's head branch still exists. GitHub
 // auto-deletes head branches asynchronously after a merge (when the repo has
@@ -100,6 +99,7 @@ export interface UseGitHubPrDetailsResult {
 }
 
 export interface UseGitHubPrDetailsInput {
+  sessionId?: string;
   workspaceId?: string | null;
   repoFullName?: string | null;
   prNumber?: number | null;
@@ -269,6 +269,7 @@ function sliceToFetchedAtKey(slice: Slice): keyof PrCacheSliceTimestamps {
 }
 
 export function useGitHubPrDetails({
+  sessionId,
   workspaceId,
   repoFullName,
   prNumber,
@@ -276,10 +277,21 @@ export function useGitHubPrDetails({
   enabled = true,
   visible = true,
 }: UseGitHubPrDetailsInput): UseGitHubPrDetailsResult {
-  const normalizedRepoFullName = repoFullName?.trim() || null;
-  const enabledWithInputs = Boolean(
-    enabled && workspaceId && normalizedRepoFullName && prNumber && prNumber > 0
-  );
+  const identity = useGitHubPrIdentity({
+    workspaceId,
+    sessionId,
+    repoFullName,
+    prNumber,
+    enabled,
+    visible,
+  });
+  const {
+    serverVersions,
+    repositoryId,
+    repoFullName: normalizedRepoFullName,
+    ready: enabledWithInputs,
+    retry: retryIdentity,
+  } = identity;
 
   // Gate token fetches on Convex auth readiness. The token action returns
   // `unauthorized` whenever the request lands without a valid session, which is
@@ -334,16 +346,10 @@ export function useGitHubPrDetails({
 
   const cacheKey =
     enabledWithInputs && workspaceId && normalizedRepoFullName && prNumber
-      ? getPrCacheKey(workspaceId, normalizedRepoFullName, prNumber)
+      ? getPrCacheKey(workspaceId, normalizedRepoFullName, prNumber, repositoryId)
       : null;
 
   // --- Convex subscription for cache invalidation -------------------------
-  const serverVersions = useCloudQuery(
-    cloudOperations.github.getPrCacheVersions,
-    enabledWithInputs && workspaceId && normalizedRepoFullName && prNumber
-      ? { workspaceId, repoFullName: normalizedRepoFullName, prNumber }
-      : 'skip'
-  );
 
   // --- Hydration from IDB on (re)mount ------------------------------------
   useEffect(() => {
@@ -382,7 +388,12 @@ export function useGitHubPrDetails({
     // new fetchSlice call below isn't deduped onto the abandoned fetch.
     inFlightPromisesRef.current.clear();
     void (async () => {
-      const entry = await readPrCacheEntry(workspaceId, normalizedRepoFullName, prNumber);
+      const entry = await readPrCacheEntry(
+        workspaceId,
+        normalizedRepoFullName,
+        prNumber,
+        repositoryId
+      );
       if (cancelled || cacheKeyRef.current !== cacheKey) return;
       setLoadedCacheKey(cacheKey);
       if (entry) {
@@ -405,6 +416,7 @@ export function useGitHubPrDetails({
     };
   }, [
     cacheKey,
+    repositoryId,
     cancelPendingBranchProbe,
     enabledWithInputs,
     normalizedRepoFullName,
@@ -421,7 +433,12 @@ export function useGitHubPrDetails({
       targetRepo: string,
       targetPrNumber: number
     ) => {
-      const targetCacheKey = getPrCacheKey(targetWorkspaceId, targetRepo, targetPrNumber);
+      const targetCacheKey = getPrCacheKey(
+        targetWorkspaceId,
+        targetRepo,
+        targetPrNumber,
+        repositoryId
+      );
       const isCurrentTarget = cacheKeyRef.current === targetCacheKey;
       if (isCurrentTarget) {
         payloadRef.current = nextPayload;
@@ -430,6 +447,7 @@ export function useGitHubPrDetails({
         setLoadedCacheKey(targetCacheKey);
       }
       const entry: PrCacheEntry = {
+        repositoryId,
         workspaceId: targetWorkspaceId,
         repoFullName: targetRepo,
         prNumber: targetPrNumber,
@@ -439,7 +457,7 @@ export function useGitHubPrDetails({
       };
       void writePrCacheEntry(entry);
     },
-    []
+    [repositoryId]
   );
 
   // Probe whether the merged PR's head branch still exists on GitHub, gating the
@@ -468,8 +486,11 @@ export function useGitHubPrDetails({
     try {
       const exists = await runWithRetry<boolean | null>({
         run: () =>
-          withGitHubTokenRetry(workspaceId, normalizedRepoFullName, (token) =>
-            githubBranchExists(token, normalizedRepoFullName, headRef)
+          withGitHubTokenRetry(
+            workspaceId,
+            normalizedRepoFullName,
+            (token) => githubBranchExists(token, normalizedRepoFullName, headRef),
+            repositoryId
           ),
         isStale: () =>
           cacheKeyRef.current !== targetCacheKey ||
@@ -491,7 +512,7 @@ export function useGitHubPrDetails({
     } finally {
       branchProbeInFlightRef.current = false;
     }
-  }, [canFetch, normalizedRepoFullName, prNumber, workspaceId]);
+  }, [canFetch, normalizedRepoFullName, prNumber, workspaceId, repositoryId]);
   useEffect(() => {
     runBranchProbeRef.current = () => void runBranchProbe();
   }, [runBranchProbe]);
@@ -516,143 +537,150 @@ export function useGitHubPrDetails({
       let promise: Promise<void>;
       const run = async (): Promise<void> => {
         const fetchOnce = (): Promise<void> =>
-          withGitHubTokenRetry(workspaceId, normalizedRepoFullName, async (token) => {
-            if (cacheKeyRef.current !== targetCacheKey) return;
-            switch (slice) {
-              case 'prDetails': {
-                const fetchedPullRequest = await shareGitHubRead(
-                  `prDetails:${workspaceId}:${normalizedRepoFullName}#${prNumber}:${requestOptions?.cache ?? ''}`,
-                  () =>
-                    githubFetchPullRequestDetails(
-                      token,
-                      normalizedRepoFullName,
-                      prNumber,
-                      requestOptions
-                    ),
-                  sharing
-                );
-                if (cacheKeyRef.current !== targetCacheKey) return;
-                const prev = payloadRef.current ?? createEmptyPayload();
-                const pullRequest = mergePullRequestDetailsState(
-                  prev.pullRequest,
-                  fetchedPullRequest
-                );
-                const next: PrCachePayload = { ...prev, pullRequest };
-                const nextVersions: PrCacheSliceTimestamps = {
-                  ...versionsRef.current,
-                  prDetailsFetchedAt: getServerNow(),
-                };
-                writeCache(next, nextVersions, workspaceId, normalizedRepoFullName, prNumber);
-                break;
-              }
-              case 'reviewComments': {
-                const reviewThreads = await shareGitHubRead(
-                  `reviewComments:${workspaceId}:${normalizedRepoFullName}#${prNumber}:${requestOptions?.cache ?? ''}`,
-                  () =>
-                    githubFetchPRReviewComments(
-                      token,
-                      normalizedRepoFullName,
-                      prNumber,
-                      requestOptions
-                    ),
-                  sharing
-                );
-                if (cacheKeyRef.current !== targetCacheKey) return;
-                const prev = payloadRef.current ?? createEmptyPayload();
-                const next: PrCachePayload = { ...prev, reviewThreads };
-                const nextVersions: PrCacheSliceTimestamps = {
-                  ...versionsRef.current,
-                  reviewCommentsFetchedAt: getServerNow(),
-                };
-                writeCache(next, nextVersions, workspaceId, normalizedRepoFullName, prNumber);
-                break;
-              }
-              case 'reviews': {
-                const reviews = await shareGitHubRead(
-                  `reviews:${workspaceId}:${normalizedRepoFullName}#${prNumber}:${requestOptions?.cache ?? ''}`,
-                  () =>
-                    githubFetchPullRequestReviews(
-                      token,
-                      normalizedRepoFullName,
-                      prNumber,
-                      requestOptions
-                    ),
-                  sharing
-                );
-                if (cacheKeyRef.current !== targetCacheKey) return;
-                const prev = payloadRef.current ?? createEmptyPayload();
-                const next: PrCachePayload = { ...prev, reviews };
-                const nextVersions: PrCacheSliceTimestamps = {
-                  ...versionsRef.current,
-                  reviewsFetchedAt: getServerNow(),
-                };
-                writeCache(next, nextVersions, workspaceId, normalizedRepoFullName, prNumber);
-                break;
-              }
-              case 'issueComments': {
-                const issueComments = await shareGitHubRead(
-                  `issueComments:${workspaceId}:${normalizedRepoFullName}#${prNumber}:${requestOptions?.cache ?? ''}`,
-                  () =>
-                    githubFetchPRIssueComments(
-                      token,
-                      normalizedRepoFullName,
-                      prNumber,
-                      requestOptions
-                    ),
-                  sharing
-                );
-                if (cacheKeyRef.current !== targetCacheKey) return;
-                const prev = payloadRef.current ?? createEmptyPayload();
-                const next: PrCachePayload = { ...prev, issueComments };
-                const nextVersions: PrCacheSliceTimestamps = {
-                  ...versionsRef.current,
-                  issueCommentsFetchedAt: getServerNow(),
-                };
-                writeCache(next, nextVersions, workspaceId, normalizedRepoFullName, prNumber);
-                break;
-              }
-              case 'checkRuns': {
-                if (cacheKeyRef.current !== targetCacheKey) return;
-                const ref = payloadRef.current?.pullRequest?.headSha || headCommitSha?.trim() || '';
-                if (!ref) return;
-                try {
-                  const checkRuns = await shareGitHubRead(
-                    `checkRuns:${workspaceId}:${normalizedRepoFullName}@${ref}:${requestOptions?.cache ?? ''}`,
-                    () => githubFetchCheckRuns(token, normalizedRepoFullName, ref, requestOptions),
+          withGitHubTokenRetry(
+            workspaceId,
+            normalizedRepoFullName,
+            async (token) => {
+              if (cacheKeyRef.current !== targetCacheKey) return;
+              switch (slice) {
+                case 'prDetails': {
+                  const fetchedPullRequest = await shareGitHubRead(
+                    `prDetails:${workspaceId}:${normalizedRepoFullName}#${prNumber}:${requestOptions?.cache ?? ''}`,
+                    () =>
+                      githubFetchPullRequestDetails(
+                        token,
+                        normalizedRepoFullName,
+                        prNumber,
+                        requestOptions
+                      ),
                     sharing
                   );
                   if (cacheKeyRef.current !== targetCacheKey) return;
                   const prev = payloadRef.current ?? createEmptyPayload();
-                  const next: PrCachePayload = {
-                    ...prev,
-                    checkRuns,
-                    checksPermissionError: false,
-                  };
+                  const pullRequest = mergePullRequestDetailsState(
+                    prev.pullRequest,
+                    fetchedPullRequest
+                  );
+                  const next: PrCachePayload = { ...prev, pullRequest };
                   const nextVersions: PrCacheSliceTimestamps = {
                     ...versionsRef.current,
-                    checkRunsFetchedAt: getServerNow(),
+                    prDetailsFetchedAt: getServerNow(),
                   };
                   writeCache(next, nextVersions, workspaceId, normalizedRepoFullName, prNumber);
-                  setChecksPermissionError(false);
-                } catch (err) {
+                  break;
+                }
+                case 'reviewComments': {
+                  const reviewThreads = await shareGitHubRead(
+                    `reviewComments:${workspaceId}:${normalizedRepoFullName}#${prNumber}:${requestOptions?.cache ?? ''}`,
+                    () =>
+                      githubFetchPRReviewComments(
+                        token,
+                        normalizedRepoFullName,
+                        prNumber,
+                        requestOptions
+                      ),
+                    sharing
+                  );
                   if (cacheKeyRef.current !== targetCacheKey) return;
-                  if (err instanceof GitHubPermissionError) {
+                  const prev = payloadRef.current ?? createEmptyPayload();
+                  const next: PrCachePayload = { ...prev, reviewThreads };
+                  const nextVersions: PrCacheSliceTimestamps = {
+                    ...versionsRef.current,
+                    reviewCommentsFetchedAt: getServerNow(),
+                  };
+                  writeCache(next, nextVersions, workspaceId, normalizedRepoFullName, prNumber);
+                  break;
+                }
+                case 'reviews': {
+                  const reviews = await shareGitHubRead(
+                    `reviews:${workspaceId}:${normalizedRepoFullName}#${prNumber}:${requestOptions?.cache ?? ''}`,
+                    () =>
+                      githubFetchPullRequestReviews(
+                        token,
+                        normalizedRepoFullName,
+                        prNumber,
+                        requestOptions
+                      ),
+                    sharing
+                  );
+                  if (cacheKeyRef.current !== targetCacheKey) return;
+                  const prev = payloadRef.current ?? createEmptyPayload();
+                  const next: PrCachePayload = { ...prev, reviews };
+                  const nextVersions: PrCacheSliceTimestamps = {
+                    ...versionsRef.current,
+                    reviewsFetchedAt: getServerNow(),
+                  };
+                  writeCache(next, nextVersions, workspaceId, normalizedRepoFullName, prNumber);
+                  break;
+                }
+                case 'issueComments': {
+                  const issueComments = await shareGitHubRead(
+                    `issueComments:${workspaceId}:${normalizedRepoFullName}#${prNumber}:${requestOptions?.cache ?? ''}`,
+                    () =>
+                      githubFetchPRIssueComments(
+                        token,
+                        normalizedRepoFullName,
+                        prNumber,
+                        requestOptions
+                      ),
+                    sharing
+                  );
+                  if (cacheKeyRef.current !== targetCacheKey) return;
+                  const prev = payloadRef.current ?? createEmptyPayload();
+                  const next: PrCachePayload = { ...prev, issueComments };
+                  const nextVersions: PrCacheSliceTimestamps = {
+                    ...versionsRef.current,
+                    issueCommentsFetchedAt: getServerNow(),
+                  };
+                  writeCache(next, nextVersions, workspaceId, normalizedRepoFullName, prNumber);
+                  break;
+                }
+                case 'checkRuns': {
+                  if (cacheKeyRef.current !== targetCacheKey) return;
+                  const ref =
+                    payloadRef.current?.pullRequest?.headSha || headCommitSha?.trim() || '';
+                  if (!ref) return;
+                  try {
+                    const checkRuns = await shareGitHubRead(
+                      `checkRuns:${workspaceId}:${normalizedRepoFullName}@${ref}:${requestOptions?.cache ?? ''}`,
+                      () =>
+                        githubFetchCheckRuns(token, normalizedRepoFullName, ref, requestOptions),
+                      sharing
+                    );
+                    if (cacheKeyRef.current !== targetCacheKey) return;
                     const prev = payloadRef.current ?? createEmptyPayload();
-                    const next: PrCachePayload = { ...prev, checksPermissionError: true };
+                    const next: PrCachePayload = {
+                      ...prev,
+                      checkRuns,
+                      checksPermissionError: false,
+                    };
                     const nextVersions: PrCacheSliceTimestamps = {
                       ...versionsRef.current,
                       checkRunsFetchedAt: getServerNow(),
                     };
                     writeCache(next, nextVersions, workspaceId, normalizedRepoFullName, prNumber);
-                    setChecksPermissionError(true);
-                  } else {
-                    throw err;
+                    setChecksPermissionError(false);
+                  } catch (err) {
+                    if (cacheKeyRef.current !== targetCacheKey) return;
+                    if (err instanceof GitHubPermissionError) {
+                      const prev = payloadRef.current ?? createEmptyPayload();
+                      const next: PrCachePayload = { ...prev, checksPermissionError: true };
+                      const nextVersions: PrCacheSliceTimestamps = {
+                        ...versionsRef.current,
+                        checkRunsFetchedAt: getServerNow(),
+                      };
+                      writeCache(next, nextVersions, workspaceId, normalizedRepoFullName, prNumber);
+                      setChecksPermissionError(true);
+                    } else {
+                      throw err;
+                    }
                   }
+                  break;
                 }
-                break;
               }
-            }
-          });
+            },
+            repositoryId
+          );
         try {
           await runPrSliceWithUnauthorizedRetry(
             fetchOnce,
@@ -684,7 +712,15 @@ export function useGitHubPrDetails({
       inFlightPromisesRef.current.set(slice, { promise, sharing });
       return promise;
     },
-    [cacheKey, headCommitSha, normalizedRepoFullName, prNumber, workspaceId, writeCache]
+    [
+      cacheKey,
+      headCommitSha,
+      normalizedRepoFullName,
+      prNumber,
+      workspaceId,
+      writeCache,
+      repositoryId,
+    ]
   );
 
   // --- Revalidation on mount (principle #1: click-to-open ⇒ latest) -------
@@ -798,6 +834,10 @@ export function useGitHubPrDetails({
 
   // --- Public refresh() ---------------------------------------------------
   const refresh = useCallback(async () => {
+    if (!enabledWithInputs) {
+      await retryIdentity();
+      return null;
+    }
     const requestOptions: GitHubReadRequestOptions = { cache: 'reload' };
     await fetchSlice('prDetails', requestOptions, 'fresh');
     await Promise.all([
@@ -807,7 +847,7 @@ export function useGitHubPrDetails({
       fetchSlice('checkRuns', requestOptions, 'fresh'),
     ]);
     return payloadToData(payloadRef.current);
-  }, [fetchSlice]);
+  }, [enabledWithInputs, fetchSlice, retryIdentity]);
 
   const fetchCurrentPullRequestDetails = useCallback(
     async (targetCacheKey: string): Promise<GitHubPullRequestDetails | null> => {
@@ -819,7 +859,8 @@ export function useGitHubPrDetails({
         (token) =>
           githubFetchPullRequestDetails(token, normalizedRepoFullName, prNumber, {
             cache: 'reload',
-          })
+          }),
+        repositoryId
       );
       if (cacheKeyRef.current !== targetCacheKey) return null;
       const prev = payloadRef.current ?? createEmptyPayload();
@@ -832,7 +873,7 @@ export function useGitHubPrDetails({
       writeCache(next, nextVersions, workspaceId, normalizedRepoFullName, prNumber);
       return pullRequest;
     },
-    [normalizedRepoFullName, prNumber, workspaceId, writeCache]
+    [normalizedRepoFullName, prNumber, workspaceId, writeCache, repositoryId]
   );
 
   const refreshCheckRuns = useCallback(async (): Promise<GitHubPrDetailsData | null> => {
@@ -848,7 +889,8 @@ export function useGitHubPrDetails({
         (token) =>
           githubFetchCheckRuns(token, normalizedRepoFullName, pullRequest.headSha, {
             cache: 'reload',
-          })
+          }),
+        repositoryId
       );
       if (cacheKeyRef.current !== targetCacheKey) return null;
       const prev = payloadRef.current ?? createEmptyPayload();
@@ -878,6 +920,7 @@ export function useGitHubPrDetails({
     prNumber,
     workspaceId,
     writeCache,
+    repositoryId,
   ]);
 
   // --- Mutations ----------------------------------------------------------
@@ -892,7 +935,8 @@ export function useGitHubPrDetails({
           workspaceId,
           normalizedRepoFullName,
           'write',
-          (token) => githubCreatePRIssueComment(token, normalizedRepoFullName, prNumber, trimmed)
+          (token) => githubCreatePRIssueComment(token, normalizedRepoFullName, prNumber, trimmed),
+          repositoryId
         );
         if (cacheKeyRef.current !== targetCacheKey) return;
         const prev = payloadRef.current;
@@ -916,7 +960,7 @@ export function useGitHubPrDetails({
         }
       }
     },
-    [cacheKey, normalizedRepoFullName, prNumber, workspaceId, writeCache]
+    [cacheKey, normalizedRepoFullName, prNumber, workspaceId, writeCache, repositoryId]
   );
 
   const mergePullRequest = useCallback(
@@ -935,7 +979,8 @@ export function useGitHubPrDetails({
             githubMergePullRequest(token, normalizedRepoFullName, prNumber, {
               method,
               sha: currentPullRequest.headSha,
-            })
+            }),
+          repositoryId
         );
         if (cacheKeyRef.current !== targetCacheKey) return;
         // Apply the authoritative merged signal from PUT /merge. We deliberately
@@ -984,6 +1029,7 @@ export function useGitHubPrDetails({
       scheduleBranchProbe,
       workspaceId,
       writeCache,
+      repositoryId,
     ]
   );
 
@@ -997,7 +1043,8 @@ export function useGitHubPrDetails({
           workspaceId,
           normalizedRepoFullName,
           'write',
-          (token) => githubSetPullRequestState(token, normalizedRepoFullName, prNumber, nextState)
+          (token) => githubSetPullRequestState(token, normalizedRepoFullName, prNumber, nextState),
+          repositoryId
         );
         if (cacheKeyRef.current !== targetCacheKey) return;
         const prev = payloadRef.current;
@@ -1018,7 +1065,7 @@ export function useGitHubPrDetails({
         }
       }
     },
-    [cacheKey, normalizedRepoFullName, prNumber, workspaceId, writeCache]
+    [cacheKey, normalizedRepoFullName, prNumber, workspaceId, writeCache, repositoryId]
   );
 
   const markReadyForReview = useCallback(async () => {
@@ -1029,8 +1076,12 @@ export function useGitHubPrDetails({
     if (!pullRequestNodeId) return;
     setIsMarkingReady(true);
     try {
-      await withGitHubOperationTokenRetry(workspaceId, normalizedRepoFullName, 'write', (token) =>
-        githubMarkPullRequestReadyForReview(token, pullRequestNodeId)
+      await withGitHubOperationTokenRetry(
+        workspaceId,
+        normalizedRepoFullName,
+        'write',
+        (token) => githubMarkPullRequestReadyForReview(token, pullRequestNodeId),
+        repositoryId
       );
       if (cacheKeyRef.current !== targetCacheKey) return;
 
@@ -1059,7 +1110,14 @@ export function useGitHubPrDetails({
         setIsMarkingReady(false);
       }
     }
-  }, [cacheKey, fetchCurrentPullRequestDetails, normalizedRepoFullName, prNumber, workspaceId]);
+  }, [
+    cacheKey,
+    fetchCurrentPullRequestDetails,
+    normalizedRepoFullName,
+    prNumber,
+    workspaceId,
+    repositoryId,
+  ]);
 
   const deleteBranch = useCallback(async () => {
     if (!workspaceId || !normalizedRepoFullName || !prNumber || !cacheKey) return;
@@ -1068,8 +1126,12 @@ export function useGitHubPrDetails({
     if (!headRef) return;
     setIsDeletingBranch(true);
     try {
-      await withGitHubOperationTokenRetry(workspaceId, normalizedRepoFullName, 'write', (token) =>
-        githubDeleteBranch(token, normalizedRepoFullName, headRef)
+      await withGitHubOperationTokenRetry(
+        workspaceId,
+        normalizedRepoFullName,
+        'write',
+        (token) => githubDeleteBranch(token, normalizedRepoFullName, headRef),
+        repositoryId
       );
       if (cacheKeyRef.current !== targetCacheKey) return;
       // Branch is gone now; drop any pending probe so it can't race back a
@@ -1084,7 +1146,14 @@ export function useGitHubPrDetails({
         setIsDeletingBranch(false);
       }
     }
-  }, [cacheKey, cancelPendingBranchProbe, normalizedRepoFullName, prNumber, workspaceId]);
+  }, [
+    cacheKey,
+    cancelPendingBranchProbe,
+    normalizedRepoFullName,
+    prNumber,
+    workspaceId,
+    repositoryId,
+  ]);
 
   // Schedule the head-branch probe for merged PRs — the actual fetch + retry
   // lives in runBranchProbe; here we just decide when to (re)start it. We defer
@@ -1111,6 +1180,7 @@ export function useGitHubPrDetails({
     prNumber,
     scheduleBranchProbe,
     workspaceId,
+    repositoryId,
   ]);
 
   // Convex can briefly look unauthenticated after a long idle while the
@@ -1172,9 +1242,9 @@ export function useGitHubPrDetails({
   }, [cacheKey, enabledWithInputs, recoverableAuthError, refresh]);
 
   return {
-    state: effectiveState,
-    data,
-    error,
+    state: identity.error ? 'error' : effectiveState,
+    data: enabledWithInputs ? data : null,
+    error: identity.error ?? error,
     checksPermissionError,
     isRevalidating,
     refresh,

@@ -1,6 +1,11 @@
 import fs from 'fs/promises';
 import path from 'path';
-import type { JsonObject, RemoteCursor, RemoteCursorStore } from '@loro-dev/streams-crdt';
+import {
+  InMemoryRemoteCursorStore,
+  type JsonObject,
+  type RemoteCursor,
+  type RemoteCursorStore,
+} from '@loro-dev/streams-crdt';
 import { getLoroStreamsRemoteCursorUrlAliases, type WorkspaceId } from '@lody/shared';
 import { SqliteRepoStore } from 'loro-repo/storage/sqlite';
 import { getLodyDataDir } from '@lody/shared/node/installation-profile';
@@ -16,6 +21,10 @@ export const getLoroRepoSqliteDbPath = (workspaceId: WorkspaceId): string =>
 // produce different cursor keys; rejected: using the raw store would make
 // gateway flips lose checkpoints or leave stale invalidated checkpoints behind.
 // This is URL-key compatibility only, not migration of pre-SQLite JSON cursors.
+// It serves LoroDoc rooms of the daemon only (see `DocumentCursorScope`): Meta
+// and named Flock cursors are replica-bound checkpoints owned by
+// `SqliteRepoStore` itself (no alias fallback there, so a gateway flip costs
+// those rooms one bootstrap).
 export class AliasedRemoteCursorStore<
   TVersion extends JsonObject = JsonObject,
 > implements RemoteCursorStore<TVersion> {
@@ -56,7 +65,12 @@ export class AliasedRemoteCursorStore<
 export type CliSqliteRepoStore = {
   sqliteStore: SqliteRepoStore;
   storageAdapter: SqliteRepoStore['storage'];
-  remoteCursorStore: RemoteCursorStore<JsonObject>;
+  /**
+   * LoroDoc room cursors shared by every process opening this file; see
+   * `AliasedRemoteCursorStore`. Only the daemon may resume from them — use
+   * `createDocumentRemoteCursorStore`, never this field directly.
+   */
+  sharedDocumentRemoteCursorStore: RemoteCursorStore;
   dbPath: string;
   baseDir: string;
 };
@@ -76,8 +90,33 @@ export const createCliSqliteRepoStore = async (
   return {
     sqliteStore,
     storageAdapter: sqliteStore.storage,
-    remoteCursorStore: new AliasedRemoteCursorStore(sqliteStore.cursorStore),
+    sharedDocumentRemoteCursorStore: new AliasedRemoteCursorStore(sqliteStore.cursorStore),
     dbPath,
     baseDir,
   };
 };
+
+/**
+ * Which LoroDoc Streams progress a process may resume from.
+ *
+ * LoroDoc cursors are not replica-bound: loro-repo keeps them in a store
+ * separate from the doc bytes. The daemon and one-shot commands open the same
+ * `repo.sqlite3` with their own in-memory replicas, so a process that loaded a
+ * doc before another process advanced its data and shared cursor would resume
+ * at that tail and permanently miss the entries it never loaded.
+ *
+ * - `shared-durable`: the long-lived daemon. It is the only writer of the
+ *   shared cursors, so they only ever describe its own replica (data may run
+ *   ahead of them, which merely replays).
+ * - `process`: every other process. Progress lives in memory with this
+ *   process's replicas, so each doc room it opens bootstraps once.
+ */
+export type DocumentCursorScope = 'shared-durable' | 'process';
+
+export const createDocumentRemoteCursorStore = (
+  store: CliSqliteRepoStore,
+  scope: DocumentCursorScope
+): RemoteCursorStore =>
+  scope === 'shared-durable'
+    ? store.sharedDocumentRemoteCursorStore
+    : new InMemoryRemoteCursorStore();

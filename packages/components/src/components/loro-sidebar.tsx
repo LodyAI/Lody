@@ -663,7 +663,11 @@ function NavButton({
           action && 'pr-8'
         )}
       >
-        <span className="flex h-5 w-5 shrink-0 items-center justify-center text-current">
+        {/* The slot is the 16px icon box itself, not a padded frame: it starts
+            on the sidebar's +14 leading edge (wordmark, project rows) so the
+            glyphs share the column and labels land on the shared +38 text
+            column. Height stays 20px to keep the row's optical line. */}
+        <span className="flex h-5 w-4 shrink-0 items-center justify-center text-current">
           {icon}
         </span>
         <span className="truncate">{label}</span>

@@ -1,13 +1,15 @@
 // @vitest-environment jsdom
 
-import React from 'react';
+import React, { act } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync } from 'react-dom';
 import { createRoot, type Root } from 'react-dom/client';
-import { Provider } from 'jotai';
+import { createStore, Provider } from 'jotai';
+import { sessionSendStatusesAtom } from '../src/atoms/session-send-status';
 import { SessionList } from '../src/components/session-list';
 import { SessionPrIcon, SidebarRowEndSlot } from '../src/components/sidebar-row-shared';
 import { initI18n } from '../src/i18n';
+import { WORKING_HAND_OVER_MS } from '../src/ui/working-status-mark';
 
 const PR_STATUS_CASES = [
   ['open', '.lucide-git-pull-request', 'text-github-open'],
@@ -373,5 +375,142 @@ describe('SessionList PR badge', () => {
 
     expect(container.querySelector('[data-session-working-indicator]')).toBeNull();
     expect(container.querySelector('[data-working-grid]')).toBeNull();
+  });
+
+  it('keeps a folded repo group telling what its hidden sessions are doing', () => {
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    const row = (sessionId: string, status: Partial<Record<string, boolean>>) => ({
+      sessionId,
+      title: sessionId,
+      repoFullName: 'loro-dev/lody',
+      branchName: sessionId,
+      latestMessageAt: '2026-04-22T00:00:00.000Z',
+      addedLines: 0,
+      deletedLines: 0,
+      isWorking: false,
+      hasUnreadMessages: false,
+      isOffline: false,
+      isWaitingPermission: false,
+      ...status,
+    });
+    const renderList = (collapsed: boolean, sessions: ReturnType<typeof row>[]) => {
+      flushSync(() => {
+        root?.render(
+          React.createElement(
+            Provider,
+            null,
+            React.createElement(SessionList, {
+              sessions,
+              repos: [{ repoFullName: 'loro-dev/lody', collapsed }],
+              onToggleRepoCollapsed: () => undefined,
+            })
+          )
+        );
+      });
+      return container?.querySelector('[data-sidebar-group-key="loro-dev/lody"]');
+    };
+
+    const sessions = [
+      row('running', { isWorking: true }),
+      row('finished', { hasUnreadMessages: true }),
+      row('read'),
+    ];
+    let header = renderList(false, sessions);
+    expect(header?.querySelector('[data-sidebar-group-activity]')).toBeNull();
+
+    header = renderList(true, sessions);
+    expect(container.querySelectorAll('[data-sidebar-session-id]')).toHaveLength(0);
+    const mark = header?.querySelector('[data-sidebar-group-activity]');
+    expect(mark?.querySelector('[data-working-grid]')).not.toBeNull();
+    expect(mark?.getAttribute('aria-label')).toBe('1 working · 1 unread');
+
+    // Work stops with nothing new to read: like a row, the group holds its grid
+    // briefly in case the unread write is still on its way, then goes quiet.
+    vi.useFakeTimers();
+    header = renderList(true, [row('read')]);
+    expect(header?.querySelector('[data-working-grid]')).not.toBeNull();
+    act(() => {
+      vi.advanceTimersByTime(WORKING_HAND_OVER_MS);
+    });
+    expect(header?.querySelector('[data-session-row-indicator]')).toBeNull();
+    vi.useRealTimers();
+  });
+
+  it('rolls local send failures and uploads into a folded group by row priority', () => {
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    const store = createStore();
+    const row = (sessionId: string, isWorking = false) => ({
+      sessionId,
+      title: sessionId,
+      repoFullName: 'loro-dev/lody',
+      latestMessageAt: '2026-04-22T00:00:00.000Z',
+      addedLines: 0,
+      deletedLines: 0,
+      isWorking,
+      hasUnreadMessages: false,
+      isOffline: false,
+      isWaitingPermission: false,
+    });
+    const status = (state: 'sending' | 'failed') => ({
+      state,
+      progress: 40,
+      sentBytes: 400,
+      totalBytes: 1000,
+      unsentNewConversation: false,
+    });
+    const render = (collapsed: boolean) => {
+      flushSync(() => {
+        root?.render(
+          React.createElement(
+            Provider,
+            { store },
+            React.createElement(SessionList, {
+              sessions: [row('broken', true), row('running', true), row('uploading')],
+              repos: [{ repoFullName: 'loro-dev/lody', collapsed }],
+              onToggleRepoCollapsed: () => undefined,
+            })
+          )
+        );
+      });
+      return container!.querySelector('[data-sidebar-group-key="loro-dev/lody"]');
+    };
+    const groupMark = () =>
+      container!.querySelector<HTMLElement>(
+        '[data-sidebar-group-activity] [data-session-row-indicator]'
+      );
+
+    flushSync(() => {
+      store.set(sessionSendStatusesAtom, {
+        broken: status('failed'),
+        uploading: status('sending'),
+      });
+    });
+    render(false);
+    // Expanded, each row draws its own mark; a failed send outranks the agent working.
+    const rowMark = (id: string) =>
+      container!.querySelector<HTMLElement>(
+        `[data-sidebar-session-id="${id}"] [data-session-row-indicator]`
+      );
+    expect(rowMark('broken')?.dataset.sessionSendState).toBe('failed');
+    expect(rowMark('running')?.querySelector('[data-working-grid]')).not.toBeNull();
+    expect(rowMark('uploading')?.querySelector('[data-session-send-ring]')).not.toBeNull();
+
+    const header = render(true);
+    expect(groupMark()?.dataset.sessionSendState).toBe('failed');
+    expect(header?.querySelector('[data-sidebar-group-activity]')?.getAttribute('aria-label')).toBe(
+      '1 not sent · 1 working · 1 sending'
+    );
+
+    flushSync(() => {
+      store.set(sessionSendStatusesAtom, { uploading: status('sending') });
+    });
+    expect(groupMark()?.querySelector('[data-working-grid]')).not.toBeNull();
+    expect(
+      container!.querySelector('[data-sidebar-group-activity]')?.getAttribute('aria-label')
+    ).toBe('2 working · 1 sending');
   });
 });

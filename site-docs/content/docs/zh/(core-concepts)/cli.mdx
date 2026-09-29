@@ -179,8 +179,33 @@ daemon，但需要查看 workspace 内某台机器注册的项目，可以使用
 lody project list --workspace <id|slug|name> [--machine <id|name>] --json
 ```
 
-省略 `--machine` 时，Lody 会选择当前 CLI 登录所关联的机器。结果只包含已认证用户有权请求的
-机器和本地项目。开源 local platform 不执行 cloud I/O，因此不支持远程列出项目。
+省略 `--machine` 时，工作区目录包含各台已授权机器上的本地项目及已启用的 GitHub 仓库。
+用 `--kind local` 或 `--kind github` 选择种类；`--machine` 限定为该机器上的本地项目。
+`--catalog` 可在不显式传入工作区选择器时使用工作区目录。开源 local platform 不执行
+cloud I/O，因此不支持远程列出项目。
+
+### 资源发现与分页
+
+工作区机器、项目、Agent 配置、Role 和 MCP 列表默认返回 20 项。
+支持 `--limit`（1–100）、`--query`，使用相同筛选条件传入 `--cursor` 续页，或通过
+`--all-pages` 遍历。JSON 返回 `items`、`hasMore`、可选 `nextCursor` 及资源专属数组别名。
+列表返回安全摘要，不包含 MCP 连接值或 Agent 启动凭据。
+
+```bash
+lody agent-role list --workspace my-team --all-pages --json
+lody agent-role get ROLE_ID --workspace my-team --json
+lody agent-config get AGENT_ID --workspace my-team --json
+lody mcp list --workspace my-team --json
+lody operation list --workspace my-team --session SESSION_ID --state active --json
+lody session list --workspace my-team --query parser --machine-id MACHINE_ID --agent-config-id AGENT_ID --agent-role-id ROLE_ID
+```
+
+Role 详情包含 Prompt 前缀；列表保留可读但不可用的 Role 并说明原因。
+Operation 列表读取本机存储，限定请求方会话及登录用户，支持 `--state`、`--limit`
+和 `--cursor`，不会聚合其他机器。会话 Role 筛选匹配创建来源。
+Lody MCP 提供对应的 `lody_machine_list`、`lody_project_list`、
+`lody_agent_config_list/get`、`lody_agent_role_list/get`、`lody_mcp_list`
+及 `lody_operation_list` 工具。
 
 精确参数请直接查看：
 
@@ -436,8 +461,9 @@ lody machine list --workspace my-team --json
 lody machine list --workspace my-team --json --include-acp-capabilities
 ```
 
-默认表格只显示机器 ID、名称、在线状态，以及合并后的 CLI 列
-（内置 CLI 和 registry agent 会一起显示在 `CLI` 列中）。
+默认表格显示机器身份及可用性。JSON 保留 `onlineStatus: online | offline | unknown`，
+无法获取在线状态时不会报告为离线。`--include-acp-capabilities` 和 `--include-agents`
+保留旧的详情输出，不能与目录分页/筛选参数组合；分页发现能力使用 `agent-config list/get`。
 
 - 默认同时显示在线和离线机器
 - 如需只看最近有心跳的机器，使用 `--online-only`
@@ -477,7 +503,8 @@ Agent config 命令对应 Web 端的[代理配置](/zh/docs/agents)。
 lody agent-config list --workspace my-team
 ```
 
-默认显示配置 ID、名称、agent type 和描述。
+默认显示配置身份、所属机器及可用性；JSON 还包含 Agent 类型、描述和模型/运行能力。
+可用 `--machine`、`--query` 及分页缩小结果范围。
 
 ### agent-config show
 

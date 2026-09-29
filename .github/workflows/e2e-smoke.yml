@@ -84,7 +84,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          # Use the PR merge ref so local actions match the workflow revision.
           submodules: recursive
           persist-credentials: false
 

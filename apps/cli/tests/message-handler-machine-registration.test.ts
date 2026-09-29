@@ -20,6 +20,7 @@ const createSilentLogger = (): Logger => ({
   error: () => {},
   success: () => {},
   debug: () => {},
+  trace: () => {},
   setLevel: () => {},
   child: () => createSilentLogger(),
   close: async () => {},
@@ -183,14 +184,18 @@ describe('MessageHandler machine registration', () => {
     // Exhaustive on purpose: registration is where a capability key and its
     // version reach every client, so adding one must be acknowledged here.
     expect(registeredMeta.protocolCapabilities).toEqual({
+      codexAuthProfiles: 1,
       ...(getHostMachineProtocolCapabilities().builtinPi ? { builtinPi: 1 } : {}),
       acpAuthenticationInteractions: 2,
       previewControl: 1,
       localProjectRemoval: 1,
+      localProjectHistoryProvider: 1,
       localFileResources: 1,
       providerSetup: 1,
       acpProtocolAuthentication: 2,
+      acpCapabilityRefreshCache: 1,
       subagentCancellation: 1,
+      subagentEvents: 1,
       schedules: 1,
       preparedSessionInput: 1,
     });

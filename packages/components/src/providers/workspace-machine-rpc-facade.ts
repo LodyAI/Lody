@@ -131,6 +131,17 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
     }
   };
 
+  const resolveMachineTargetPlane = async (
+    machineId: MachineId,
+    options?: { timeoutMs?: number }
+  ): Promise<'local' | 'cloud'> => {
+    const existing = targetRouter.getPlaneForMachine(machineId);
+    if (existing) return existing;
+    return await targetRouter.resolvePlaneForMachine(machineId, {
+      timeoutMs: options?.timeoutMs ?? LOCAL_MACHINE_ID_READY_TIMEOUT_MS,
+    });
+  };
+
   const canUseLocalMachineRpc = async (machineId: MachineId): Promise<boolean> => {
     await waitForMachineRoute(machineId);
     return Boolean(
@@ -203,13 +214,7 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
           // Streams RPC plane. Until the target router identifies the machine,
           // returning a retryable error is safer than sending a local path to
           // the server; once identified, remote machines still use Streams.
-          await targetRouter.resolvePlaneForMachine(machineId, {
-            timeoutMs: LOCAL_MACHINE_ID_READY_TIMEOUT_MS,
-          });
-          const plane = targetRouter.getPlaneForMachine(machineId);
-          if (plane === null) {
-            throw new Error('Local Machine RPC routing is not available.');
-          }
+          const plane = await resolveMachineTargetPlane(machineId);
           if (plane === 'cloud') {
             const client = await getMachineRpcClient(machineId);
             return await client.requestFilePreview({
@@ -965,17 +970,6 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
         message: error instanceof Error ? error.message : String(error),
       };
     }
-  };
-
-  const resolveMachineTargetPlane = async (
-    machineId: MachineId,
-    options?: { timeoutMs?: number }
-  ): Promise<'local' | 'cloud'> => {
-    const existing = targetRouter.getPlaneForMachine(machineId);
-    if (existing) return existing;
-    return await targetRouter.resolvePlaneForMachine(machineId, {
-      timeoutMs: options?.timeoutMs ?? LOCAL_MACHINE_ID_READY_TIMEOUT_MS,
-    });
   };
 
   const requestSessionPreviewEndpointAcquire = async (

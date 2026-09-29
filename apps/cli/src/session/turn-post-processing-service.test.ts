@@ -33,6 +33,7 @@ const pullRequest: NonNullable<SessionMeta['pullRequests']>[number] = {
 const createLogger = () =>
   ({
     debug: vi.fn(),
+    trace: vi.fn(),
     error: vi.fn(),
     warn: vi.fn(),
     info: vi.fn(),

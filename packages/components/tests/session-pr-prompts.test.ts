@@ -6,6 +6,10 @@ import {
   buildResolvePrConflictsPrompt,
   isFailedPrCheckRun,
 } from '../src/components/sessions/session-pr-prompts';
+import {
+  mapGitHubCheckRunToPrCiRun,
+  summarizePrCiRuns,
+} from '../src/components/sessions/session-info-chips';
 import { initI18n } from '../src/i18n';
 
 const pullRequest: GitHubPullRequestDetails = {
@@ -100,9 +104,9 @@ describe('session PR prompts', () => {
     ).toBeNull();
   });
 
-  it('treats cancelled and timed-out completed checks as failures but not running checks', () => {
-    expect(isFailedPrCheckRun(checkRun('cancelled', 'cancelled'))).toBe(true);
+  it('treats timed-out checks as failures but not cancelled or running checks', () => {
     expect(isFailedPrCheckRun(checkRun('timed-out', 'timed_out'))).toBe(true);
+    expect(isFailedPrCheckRun(checkRun('cancelled', 'cancelled'))).toBe(false);
     expect(isFailedPrCheckRun(checkRun('running', null, 'in_progress'))).toBe(false);
   });
 
@@ -197,5 +201,15 @@ describe('session PR prompts', () => {
     );
 
     expect(prompt).toHaveLength(6_000);
+  });
+});
+
+describe('PR CI verdict', () => {
+  const verdict = (runs: GitHubCheckRun[]) =>
+    summarizePrCiRuns(runs.map(mapGitHubCheckRunToPrCiRun));
+
+  it('does not report a cancelled check as a CI failure', () => {
+    expect(verdict([checkRun('test', 'success'), checkRun('deploy', 'cancelled')])).toBe('passing');
+    expect(verdict([checkRun('test', 'failure'), checkRun('deploy', 'cancelled')])).toBe('failing');
   });
 });

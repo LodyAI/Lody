@@ -2,7 +2,7 @@ import { Popover as BasePopover } from '@base-ui/react/popover';
 import * as stylex from '@stylexjs/stylex';
 import { forwardRef, type ComponentProps, type ReactNode } from 'react';
 import { appendClassName } from '../internal/class-name';
-import { usePopupContainer, type PopupContainer } from '../popup/portal-container';
+import { portalClassName, usePopupContainer, type PopupContainer } from '../popup/portal-container';
 import { hiddenSurfaceForSide, surface } from '../popup/surface';
 import { useForcedThemeClassNames } from '../theme/theme';
 
@@ -74,7 +74,7 @@ export const PopoverContent = forwardRef<HTMLDivElement, PopoverContentProps>(
     // against the offset parent, which is the panel, so the two agree again.
     const strategy = rest.positionMethod ?? (mountPoint != null ? 'absolute' : undefined);
     return (
-      <BasePopover.Portal container={mountPoint}>
+      <BasePopover.Portal container={mountPoint} className={portalClassName}>
         <BasePopover.Positioner
           ref={ref}
           {...rest}

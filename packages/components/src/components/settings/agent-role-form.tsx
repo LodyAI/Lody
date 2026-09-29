@@ -4,6 +4,7 @@ import { Spinner } from '@lody/ui/spinner';
 import { useTranslation } from 'react-i18next';
 import {
   AGENT_ROLE_NAME_MAX_LENGTH,
+  normalizeAgentRoleDescription,
   DEFAULT_AGENT_ROLE_EMOJI,
   type AgentConfigId,
   type MachineId,
@@ -148,6 +149,22 @@ export function AgentRoleForm({
             <FormMessage tone="error">{t('settings.agentRoles.errors.nameTaken')}</FormMessage>
           ) : null}
         </div>
+
+        <Section
+          title={t('settings.agentRoles.form.description')}
+          hint={t('settings.agentRoles.form.descriptionHint')}
+        >
+          <Textarea
+            id={`${fieldId}-description`}
+            rows={2}
+            resize="none"
+            aria-label={t('settings.agentRoles.form.description')}
+            value={value.description}
+            onChange={(event) =>
+              update({ description: normalizeAgentRoleDescription(event.target.value) })
+            }
+          />
+        </Section>
 
         <Section
           title={t('settings.agentRoles.form.sectionPrompt')}

@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import { createContext, useContext, type ReactNode, type RefObject } from 'react';
 
 /** What Base UI's Portal accepts as its mount point. */
@@ -34,3 +35,19 @@ export function PopupContainerProvider({
 export function usePopupContainer(): PopupContainer {
   return useContext(PopupContainerContext);
 }
+
+const styles = stylex.create({
+  portal: { display: 'contents' },
+});
+
+/**
+ * The class every popup's portal element takes.
+ *
+ * Base UI mounts a popup through a `<div>` of its own, appended to the
+ * container. In a named container that div is a child of the host's layout: a
+ * modal panel is a flex column with a `gap`, so each Select opened in it added
+ * one more flex item and one more gap, and the portals stay mounted after the
+ * list closes — the footer climbed and left a strip of empty panel under it.
+ * The positioner inside is out of flow either way, so the wrapper needs no box.
+ */
+export const portalClassName = stylex.props(styles.portal).className;

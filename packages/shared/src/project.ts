@@ -1,4 +1,5 @@
 import type { AgentConfigCliType, AgentType } from './ai';
+import type { AgentConfigId } from './ids';
 
 export type LocalProjectId = string & { __brand: 'LocalProjectId' };
 
@@ -60,6 +61,8 @@ export type LocalProjectGitState =
     };
 
 export type LocalProjectHistoryProvider = {
+  /** Exact launch configuration; omitted only by legacy clients. */
+  agentConfigId?: AgentConfigId;
   cliType: AgentConfigCliType;
   agentType: AgentType;
 };
@@ -71,6 +74,24 @@ export function getLocalProjectHistoryProviderKey(
   provider: LocalProjectHistoryProvider
 ): LocalProjectHistoryProviderKey {
   return `${provider.cliType}:${provider.agentType}` as LocalProjectHistoryProviderKey;
+}
+
+/** Catalogs are account-scoped; replay/import IDs retain their historical family key. */
+export function getLocalProjectHistoryCatalogKey(
+  provider: LocalProjectHistoryProvider
+): LocalProjectHistoryProviderKey {
+  const family = getLocalProjectHistoryProviderKey(provider);
+  return (
+    provider.agentConfigId ? `${family}:${provider.agentConfigId}` : family
+  ) as LocalProjectHistoryProviderKey;
+}
+
+/** Unbound legacy imports may be claimed only after the selected provider lists them. */
+export function matchesHistoryProviderBinding(
+  agentConfigId: AgentConfigId | undefined,
+  provider: LocalProjectHistoryProvider
+): boolean {
+  return !provider.agentConfigId || !agentConfigId || agentConfigId === provider.agentConfigId;
 }
 
 export function getExternalAcpHistoryImportKey(options: {
@@ -180,9 +201,7 @@ export function isDirectLocalProject(project: unknown, sessionIsWorktree?: unkno
   }
   const typedProject = project as { kind?: unknown; useWorktree?: unknown };
   return (
-    typedProject.kind === 'local' &&
-    typedProject.useWorktree !== true &&
-    sessionIsWorktree !== true
+    typedProject.kind === 'local' && typedProject.useWorktree !== true && sessionIsWorktree !== true
   );
 }
 
@@ -208,7 +227,9 @@ type ProjectRefDedupInput =
  * drift, preparations silently stop being claimed and every draft falls back to a
  * cold start with no error. Returns `null` when there is no project.
  */
-export function normalizeProjectRefForDedup(project: ProjectRefDedupInput | null | undefined): unknown {
+export function normalizeProjectRefForDedup(
+  project: ProjectRefDedupInput | null | undefined
+): unknown {
   if (!project) return null;
   if (project.kind === 'github') {
     return ['github', project.repoFullName, project.branch];

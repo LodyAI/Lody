@@ -1,4 +1,8 @@
-import { resolveSessionHistoryStatus, type SessionHistory } from '@lody/shared';
+import {
+  isSessionHistoryStatusAwaitingStart,
+  resolveSessionHistoryStatus,
+  type SessionHistory,
+} from '@lody/shared';
 
 type SessionHistoryStatusEntry = Pick<SessionHistory, 'role' | 'status' | 'read'> & {
   timestamp?: string;
@@ -31,8 +35,7 @@ export function hasUnstartedTrailingUserTurn(
 ): boolean {
   const last = history?.at(-1);
   if (!last || last.role !== 'user') return false;
-  const status = resolveSessionHistoryStatus(last);
-  return status === 'pending' || status === 'seen';
+  return isSessionHistoryStatusAwaitingStart(resolveSessionHistoryStatus(last));
 }
 
 /**
@@ -51,8 +54,7 @@ export function resolveUnstartedTrailingDispatchAtMs(
 ): number | null {
   const last = history?.at(-1);
   if (!last || last.role !== 'user') return null;
-  const status = resolveSessionHistoryStatus(last);
-  if (status !== 'pending' && status !== 'seen') return null;
+  if (!isSessionHistoryStatusAwaitingStart(resolveSessionHistoryStatus(last))) return null;
   const parsed = last.timestamp ? Date.parse(last.timestamp) : Number.NaN;
   return Number.isFinite(parsed) ? parsed : null;
 }

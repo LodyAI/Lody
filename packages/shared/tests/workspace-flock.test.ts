@@ -128,7 +128,7 @@ describe('workspace Flock helpers', () => {
   it('keeps agent roles and MCP servers in one document without either reading the other', () => {
     const flock = new FakeWorkspaceFlock();
     const server = entry('server-1');
-    const role = agentRole('role-1', { name: 'Reviewer' });
+    const role = agentRole('role-1', { name: 'Reviewer', description: 'Review code changes' });
     expect(writeWorkspaceMcpServerToFlock(flock, server)).toBe(true);
     expect(writeWorkspaceAgentRoleToFlock(flock, role)).toBe(true);
 

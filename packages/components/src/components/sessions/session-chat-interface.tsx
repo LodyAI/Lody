@@ -1,3 +1,8 @@
+import { SessionPendingMessages } from '@/components/chat/session-pending-messages';
+import {
+  buildDraftUserHistoryEntry,
+  type SessionAttachmentDraft,
+} from '@/lib/session-attachment-draft';
 import { useSchedules } from '@/hooks/use-schedules';
 import { windowPreparationAtom } from '@/lib/window-preparation';
 import { conversationCopyRange } from '@/lib/conversation-copy-range';
@@ -44,6 +49,7 @@ import {
   LockKeyhole,
   MessageCircle,
   Monitor,
+  MoveHorizontal,
   Pencil,
   Play,
   Plus,
@@ -56,6 +62,7 @@ import {
 } from 'lucide-react';
 import { useRouter } from '@tanstack/react-router';
 import { Spinner } from '@lody/ui/spinner';
+import { Switch } from '@lody/ui/switch';
 import { Button } from '@lody/ui/button';
 import { isMacOSElectronRenderer, useElectronFullscreen } from '@/lib/electron';
 import { getIpcServices } from '@/lib/electron-ipc-client';
@@ -71,7 +78,12 @@ import {
   type SessionTurnAgentRoleSelection,
 } from './session-chat-input-area';
 import { useSessionMcpSelection } from '@/hooks/use-session-mcp-selection';
-import { MessageQueueDisplay, shouldRequestNativeQueueSteer } from './message-queue';
+import { useSessionMentionSource } from '@/hooks/use-session-mention-source';
+import {
+  MessageQueueDisplay,
+  shouldRequestNativeQueueSteer,
+  useHasPendingQueueRecords,
+} from './message-queue';
 import { useTranslation } from 'react-i18next';
 import { toast } from '@/lib/toast';
 import type {
@@ -87,16 +99,15 @@ import type {
   SessionInputBlock,
   SessionLegacyMetaFields,
   SessionMeta,
+  SessionPreviewDocState,
   SessionStatus,
   SessionTurnInputConfig,
   CommentReferencePayload,
-  GitHubCheckRun,
   GitHubMergeMethod,
   VisualAnnotationReferencePayload,
 } from '@lody/shared';
 import {
   buildConversationMarkdown,
-  buildPendingUserHistoryEntry,
   buildSessionTurnInputConfig,
   countPendingQueuedUserTurns,
   collectConversationMessages,
@@ -134,6 +145,7 @@ import { SessionShareDialog } from '@/components/sharing/session-share-dialog';
 import { useSessionShareStatus } from '@/hooks/use-session-share-management';
 import {
   conversationFontSizeAtom,
+  conversationWideModeAtom,
   currentWorkspaceIdAtom,
   currentWorkspaceSlugAtom,
   getAllAgentConfigAtom,
@@ -167,6 +179,8 @@ import SessionChatStream, {
   type GoalCommand,
   type MessageFileDiffEntriesByTurn,
   type SessionChatStreamHandle,
+  type UserMessageEditMentionContext,
+  type UserMessageEditSubmission,
 } from '../ai-gui';
 import { MessageSendStatusContext } from '../ai-gui/message-send-status-context';
 import { format, formatDistanceToNow } from 'date-fns';
@@ -212,8 +226,13 @@ import { RenameSessionDialog, type RenameSessionDialogTarget } from './rename-se
 import { useResolvedTheme } from '../../theme-provider';
 import { PullRequestBadge } from './pull-request-badge';
 import { SessionInfoBar } from './session-info-bar';
+import { SessionPreviewPreload } from './session-preview-preload';
 import { CurrentSessionRelationsChip, useHasSessionRelations } from './session-relations-chip';
-import type { ContextChipAction, PrCiRun } from './session-info-chips';
+import {
+  mapGitHubCheckRunToPrCiRun,
+  type ContextChipAction,
+  type PrCiRun,
+} from './session-info-chips';
 import {
   resolveSessionInfoBarGitHubActionIds,
   shouldDisableSessionInfoBarGitHubActionForHydration,
@@ -337,30 +356,6 @@ function getErrorMessage(err: unknown): string {
   return String(err);
 }
 
-function mapGitHubCheckRunToInfoBar(run: GitHubCheckRun): PrCiRun {
-  const status: PrCiRun['status'] =
-    run.status === 'queued'
-      ? 'queued'
-      : run.status === 'in_progress'
-        ? 'running'
-        : run.conclusion === 'success'
-          ? 'success'
-          : run.conclusion === 'neutral' || run.conclusion === 'skipped'
-            ? 'skipped'
-            : 'failure';
-  const startedAtMs = run.startedAt ? Date.parse(run.startedAt) : Number.NaN;
-  const completedAtMs = run.completedAt ? Date.parse(run.completedAt) : Number.NaN;
-  const durationMs =
-    Number.isFinite(startedAtMs) && Number.isFinite(completedAtMs)
-      ? Math.max(0, completedAtMs - startedAtMs)
-      : undefined;
-  return {
-    name: run.name,
-    status,
-    ...(durationMs === undefined ? {} : { durationMs }),
-    ...(run.htmlUrl ? { url: run.htmlUrl } : {}),
-  };
-}
 import { usePostHog } from '@posthog/react';
 import {
   capturePostHogEvent,
@@ -1021,6 +1016,8 @@ export function SessionHeaderMenu({
     (sharing?.visibility === 'private' &&
       (sharing.privateReason === 'machine-not-registered' || !sharing.canManage));
   const [reviewSetupOpen, setReviewSetupOpen] = useState(false);
+  const conversationWide = useAtomValue(conversationWideModeAtom);
+  const setConversationWide = useSetAtom(conversationWideModeAtom);
 
   const openedBySession = openedByRelations?.openedBy ?? null;
   const openedSessions = openedByRelations?.opened ?? [];
@@ -1272,6 +1269,25 @@ export function SessionHeaderMenu({
               <Menu.Separator />
             </>
           ) : null}
+
+          {/* View preference, not a session action: device-local toggle mirrored
+              from Settings > Appearance. It leads the action block — the page's
+              own display option, right after identity, like Notion's page
+              controls. A trailing Switch, not a checkmark; the row stays open
+              so the flip is visible. */}
+          <Menu.Item closeOnClick={false} onClick={() => setConversationWide(!conversationWide)}>
+            <MoveHorizontal className="h-3.5 w-3.5 shrink-0" />
+            <span className="min-w-0 flex-1 truncate">
+              {t('sessions.fullWidth', 'Full width')}
+            </span>
+            <Switch
+              checked={conversationWide}
+              onCheckedChange={(checked) => setConversationWide(checked === true)}
+              onClick={(event) => event.stopPropagation()}
+              aria-label={t('sessions.fullWidth', 'Full width')}
+              className="ml-auto shrink-0"
+            />
+          </Menu.Item>
 
           {openedByRelationRows}
 
@@ -1570,6 +1586,7 @@ export function SessionHeaderMenu({
                   </Menu.Item>
                 </>
               )}
+
         </Menu.Content>
       </Menu.Root>
       <ReviewAgentSetupDialog
@@ -1891,6 +1908,7 @@ export type SessionChatInterfaceHandle = {
 };
 
 export type DispatchInputBlocksOptions = {
+  attachments?: SessionAttachmentDraft[];
   forceQueue?: boolean;
   forceDirect?: boolean;
   /** Swaps the configured busy-send behavior (queue <-> steer) for this send. */
@@ -2340,6 +2358,7 @@ export const SessionChatInterface = memo(
     }, [session, localeObj]);
 
     const {
+      sourceSessionId: prSessionId,
       repoFullName,
       latestPr,
       latestPrState,
@@ -2373,6 +2392,7 @@ export const SessionChatInterface = memo(
     const prLinkHandler = latestPr ? openLatestPr : undefined;
     const preferredMergeMethod = usePreferredPrMergeMethod();
     const activePrDetails = useGitHubPrDetails({
+      sessionId: prSessionId,
       workspaceId,
       repoFullName: latestPrRepoFullName,
       prNumber: latestPrNumber,
@@ -2431,6 +2451,37 @@ export const SessionChatInterface = memo(
       >
     >(new Map());
     const isArchivedSession = session.isArchived === true;
+    /* The edit-and-resend editor shares the composer's mention pipeline: same
+       `@`/`$`/`/` sources, same before-send expansion. The provider is always
+       enabled here (unlike the composer, which gates on the draft containing
+       `@`) because the editor opens with the previous text already loaded and
+       must resolve its tokens on first paint. */
+    const editMentionSource = useSessionMentionSource({
+      session,
+      sessionLocalProjectRootPath: resolvedLocalProjectMeta?.rootPath ?? null,
+      isRepoPublic,
+      enableCodeCollabProvider: true,
+      debugLabel: 'session-edit:mention-provider',
+    });
+    const editSkillAgent = useMemo(
+      () =>
+        !isArchivedSession && session.cliType && session.agentType
+          ? {
+              cliType: session.cliType,
+              agentType: session.agentType,
+              machineId: session.machineId,
+            }
+          : undefined,
+      [isArchivedSession, session.agentType, session.cliType, session.machineId]
+    );
+    const editMentionContext = useMemo<UserMessageEditMentionContext>(
+      () => ({
+        mentionSource: isArchivedSession ? undefined : editMentionSource,
+        availableCommands,
+        skillAgent: editSkillAgent,
+      }),
+      [availableCommands, editMentionSource, editSkillAgent, isArchivedSession]
+    );
     const [pendingGoalCommand, setPendingGoalCommand] = useState<{
       threadId: string;
       command: GoalCommand;
@@ -2919,6 +2970,7 @@ export const SessionChatInterface = memo(
       () => (sessionDoc?.mq ?? []) as MessageQueueItem[],
       [sessionDoc?.mq]
     );
+    const hasPendingQueueRecords = useHasPendingQueueRecords(session.id, messageQueue);
     const billableSessionTurnCount = useMemo(
       () =>
         (conversationView ? countUserTurns(conversationView) : 0) +
@@ -3080,8 +3132,15 @@ export const SessionChatInterface = memo(
       sessionMachine?.acpCapabilities,
     ]);
     const handleEditLastUser = useCallback(
-      async (message: SessionHistoryParsed, text: string): Promise<boolean> => {
-        const nextText = text.trim();
+      async (
+        message: SessionHistoryParsed,
+        submission: UserMessageEditSubmission
+      ): Promise<boolean> => {
+        // `submission.text` is already expanded (session/skill/agent-role tokens
+        // rewritten to their agent-facing forms) and trimmed; `submission.spans`
+        // records where each mention landed so the transcript paints the user's
+        // own wording back over it — identical to a fresh send.
+        const nextText = submission.text;
         const requesterUserId = currentUser?.id ?? session.userId;
         if (
           !runtime ||
@@ -3099,7 +3158,11 @@ export const SessionChatInterface = memo(
         for (const block of originalBlocks) {
           if (block.type === 'text') {
             if (!replacedText) {
-              inputBlocks.push({ type: 'text', text: nextText });
+              inputBlocks.push({
+                type: 'text',
+                text: nextText,
+                ...(submission.spans ? { spans: submission.spans } : {}),
+              });
               replacedText = true;
             }
             continue;
@@ -3107,7 +3170,11 @@ export const SessionChatInterface = memo(
           inputBlocks.push(block);
         }
         if (!replacedText) {
-          inputBlocks.push({ type: 'text', text: nextText });
+          inputBlocks.push({
+            type: 'text',
+            text: nextText,
+            ...(submission.spans ? { spans: submission.spans } : {}),
+          });
         }
 
         const originalConfig = normalizeSessionTurnInputConfig(message.inputConfig) ?? {};
@@ -3756,6 +3823,7 @@ export const SessionChatInterface = memo(
       async (
         inputBlocks: SessionInputBlock[],
         options?: {
+          attachments?: SessionAttachmentDraft[];
           createHistory?: boolean;
           existingUserTurnId?: string;
           requestDispatch?: boolean;
@@ -3794,13 +3862,16 @@ export const SessionChatInterface = memo(
 
           let userTurnId = options?.existingUserTurnId?.trim() || null;
           if (!userTurnId && options?.createHistory) {
-            const pendingHistoryEntry = buildPendingUserHistoryEntry({
-              userId: derivedUserId,
-              inputBlocks,
-              timestamp: new Date().toISOString(),
-              inputConfig,
-              status: options?.guideExpectedTurnId ? 'pending_apply' : 'pending',
-            });
+            const pendingHistoryEntry = buildDraftUserHistoryEntry(
+              {
+                userId: derivedUserId,
+                inputBlocks,
+                timestamp: new Date().toISOString(),
+                inputConfig,
+                status: options?.guideExpectedTurnId ? 'pending_apply' : 'pending',
+              },
+              options?.attachments
+            );
             if (!pendingHistoryEntry) {
               return false;
             }
@@ -3809,6 +3880,8 @@ export const SessionChatInterface = memo(
             }
             const { entry: historyEntry } = await addSessionHistory(pendingHistoryEntry, {
               dispatch: options?.requestDispatch === true,
+              guideExpectedTurnId: options?.guideExpectedTurnId,
+              attachments: options?.attachments,
             });
             userTurnId = historyEntry.id;
             touchSessionActivity(session.id).catch((err: unknown) => {
@@ -3903,7 +3976,11 @@ export const SessionChatInterface = memo(
         inputBlocks: SessionInputBlock[],
         options?: Pick<
           DispatchInputBlocksOptions,
-          'modeIdOverride' | 'modelIdOverride' | 'configOptionValuesOverride' | 'agentRole'
+          | 'modeIdOverride'
+          | 'modelIdOverride'
+          | 'configOptionValuesOverride'
+          | 'agentRole'
+          | 'attachments'
         >
       ): Promise<boolean> => {
         try {
@@ -3957,6 +4034,7 @@ export const SessionChatInterface = memo(
             userId: derivedUserId,
             userTurnId,
             acpSessionConfig: queuedInputConfig,
+            attachments: options?.attachments,
           });
           return true;
         } catch (err) {
@@ -3997,7 +4075,11 @@ export const SessionChatInterface = memo(
         inputBlocks: SessionInputBlock[],
         options?: Pick<
           DispatchInputBlocksOptions,
-          'modeIdOverride' | 'modelIdOverride' | 'configOptionValuesOverride' | 'agentRole'
+          | 'modeIdOverride'
+          | 'modelIdOverride'
+          | 'configOptionValuesOverride'
+          | 'agentRole'
+          | 'attachments'
         >
       ): Promise<boolean> => {
         const turnConfigOptionValues = options?.configOptionValuesOverride ?? configOptionValues;
@@ -4008,6 +4090,7 @@ export const SessionChatInterface = memo(
           modelIdOverride: options?.modelIdOverride,
           configOptionValuesOverride: turnConfigOptionValues,
           agentRole: options?.agentRole,
+          attachments: options?.attachments,
         });
       },
       [configOptionValues, enqueueInputBlocks]
@@ -4019,7 +4102,7 @@ export const SessionChatInterface = memo(
         options?: DispatchInputBlocksOptions
       ): Promise<boolean> => {
         const normalized = normalizeSessionInputBlocks(inputBlocks, '');
-        if (normalized.length === 0) {
+        if (normalized.length === 0 && !options?.attachments?.length) {
           return false;
         }
         if (!sessionDocReady) {
@@ -4076,6 +4159,7 @@ export const SessionChatInterface = memo(
             modelIdOverride: turnModelId,
             configOptionValuesOverride: turnConfigOptionValues,
             agentRole: options?.agentRole,
+            attachments: options?.attachments,
           });
           captureSessionEvent(
             accepted ? 'session/message_queued' : 'session/message_submit_failed',
@@ -4097,6 +4181,7 @@ export const SessionChatInterface = memo(
             modelIdOverride: turnModelId,
             configOptionValuesOverride: turnConfigOptionValues,
             agentRole: options?.agentRole,
+            attachments: options?.attachments,
           });
           captureSessionEvent(
             accepted ? 'session/message_guide_requested' : 'session/message_submit_failed',
@@ -4126,7 +4211,17 @@ export const SessionChatInterface = memo(
           modelIdOverride: turnModelId,
           configOptionValuesOverride: turnConfigOptionValues,
           agentRole: options?.agentRole,
+          attachments: options?.attachments,
         });
+        if (
+          accepted &&
+          runtime?.sendJournal
+            ?.getSnapshot()
+            .some((record) => record.sessionId === session.id && record.stage === 'saved')
+        ) {
+          directDispatchInFlightRef.current = false;
+          setInputActionState('ready');
+        }
         if (!accepted) {
           captureSessionEvent('session/message_submit_failed', {
             ...inputSummary,
@@ -4139,6 +4234,8 @@ export const SessionChatInterface = memo(
         return accepted;
       },
       [
+        runtime?.sendJournal,
+        session.id,
         captureSessionEvent,
         configOptionValues,
         directDispatchInputBlocks,
@@ -4223,6 +4320,11 @@ export const SessionChatInterface = memo(
     // NEW message — the old turn is never revived.
     const handleResendUndelivered = useCallback(
       async (userTurnId: string, inputBlocks: SessionInputBlock[]): Promise<boolean> => {
+        const pending = await runtime?.sendJournal?.read(userTurnId);
+        if (pending && pending.stage !== 'delivered') {
+          await runtime!.sendJournal!.retry(session.id);
+          return true;
+        }
         // This is a new Turn with the old content, not a replay of the old run:
         // freeze the currently committed composer Role beside the current run
         // config. Copying only the original Role would pair it with unrelated
@@ -4255,6 +4357,8 @@ export const SessionChatInterface = memo(
         return accepted;
       },
       [
+        runtime,
+        session.id,
         handleSendMessage,
         sessionConversationConfig.agentRoleId,
         sessionConversationConfig.agentRoleRevision,
@@ -4713,7 +4817,7 @@ export const SessionChatInterface = memo(
     );
 
     const infoBarPrCiRuns = useMemo(
-      () => activePrData?.checkRuns.runs.map(mapGitHubCheckRunToInfoBar),
+      () => activePrData?.checkRuns.runs.map(mapGitHubCheckRunToPrCiRun),
       [activePrData?.checkRuns.runs]
     );
     const handleOpenPrCiRun = useCallback((run: PrCiRun) => {
@@ -5301,7 +5405,7 @@ export const SessionChatInterface = memo(
             inputConfig.inputBlocks,
             inputConfig.prompt ?? item.task
           );
-          const pendingHistoryEntry = buildPendingUserHistoryEntry({
+          const pendingHistoryEntry = buildDraftUserHistoryEntry({
             userId: item.userId,
             inputBlocks,
             timestamp: item.timestamp,
@@ -5312,10 +5416,22 @@ export const SessionChatInterface = memo(
             throw new Error('Queued message is empty');
           }
           const queuedUserTurnId = item.userTurnId?.trim() || `queued-${item.$cid}`;
-          const { entry: historyEntry } = await addSessionHistory({
-            ...pendingHistoryEntry,
-            id: queuedUserTurnId,
-          });
+          // Queue admission owns this ID, but its delivered operation only
+          // inserted the queue row. Promote that record back to saved work so
+          // the journal appends the matching history turn before queue removal.
+          const promoted = await runtime?.sendJournal?.promoteQueuedTurn(
+            queuedUserTurnId,
+            { ...pendingHistoryEntry, id: queuedUserTurnId },
+            { kind: 'guide', expectedTurnId: activeAssistantTurnId }
+          );
+          const historyEntry =
+            promoted?.entry ??
+            (
+              await addSessionHistory({
+                ...pendingHistoryEntry,
+                id: queuedUserTurnId,
+              })
+            ).entry;
           await removeMessageQueueItem(item.$cid);
           trackMessageSend(historyEntry.id);
           touchSessionActivity(session.id).catch((error: unknown) => {
@@ -5349,6 +5465,7 @@ export const SessionChatInterface = memo(
         guideHistoryEntry,
         isExternalHistoryRefreshing,
         removeMessageQueueItem,
+        runtime,
         session.id,
         t,
         touchSessionActivity,
@@ -6001,6 +6118,15 @@ export const SessionChatInterface = memo(
     return (
       <PrLinkProvider prUrl={latestPr?.url} onOpenPrTab={prLinkHandler}>
         {isVisible &&
+          !preparingWindow &&
+          onOpenBrowser &&
+          (!browserActionSession || browserActionSession.id === session.id) && (
+            <SessionPreviewPreload
+              session={session}
+              preview={sessionDoc.preview as SessionPreviewDocState | undefined}
+            />
+          )}
+        {isVisible &&
           sessionDocReady &&
           (sessionHistory.length > 0 || (sessionHistoryLength === 0 && sessionDocSynced)) && (
             <span
@@ -6118,6 +6244,7 @@ export const SessionChatInterface = memo(
                               className="h-full"
                               leadingContent={openedByConversationStart}
                               emptyState={chatStreamEmptyState}
+                              trailingContent={<SessionPendingMessages sessionId={session.id} />}
                               agentActivityLabel={agentActivityLabel}
                               agentActivityTone={agentActivityTone}
                               agentActivityShimmer={agentActivityShimmer}
@@ -6136,6 +6263,7 @@ export const SessionChatInterface = memo(
                               onEditLastUser={
                                 editableLastUserMessageId ? handleEditLastUser : undefined
                               }
+                              editMentionContext={editMentionContext}
                               onResendUndelivered={handleResendUndelivered}
                               capacityRetry={capacityRetry ?? undefined}
                               forkingAssistantMessageId={forkingAssistantMessageId}
@@ -6319,7 +6447,7 @@ export const SessionChatInterface = memo(
                     // bar is empty). Hidden with the composer: a pending
                     // permission bypasses the queue, as does share selection.
                     queue={
-                      messageQueue.length > 0 &&
+                      (messageQueue.length > 0 || hasPendingQueueRecords) &&
                       !shouldReplaceComposerWithPermission &&
                       !shareSelection.active ? (
                         <MessageQueueDisplay

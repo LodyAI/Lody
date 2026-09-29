@@ -34,7 +34,7 @@ Contract: specs/session-orchestration.md.
   `lastMissingHistoryUserMsgId` ack for that turn and surface `chat_failed`.
 - Retire an already-terminal stale activation into `settledActivationUserMsgId`; never claim the
   marker or rewrite `latestUserMsgId`, and report settled only if none survives.
-- Never re-dispatch a late-arriving history entry; recovery is a fresh send.
+- Never replay late history; recovery is a new send. Use last row per ID; stop no-progress repairs.
 - `hasPendingUserTurnActivation` is the ONLY pending-turn predicate; never compare those two
   pointers in a consumer.
 - Never inspect historical Session documents to infer work, or publish or clear active presence
@@ -74,11 +74,11 @@ Contract: specs/session-orchestration.md.
 
 ## Lifecycle
 
-- `Session.createAgent` takes the shared ACP start gate before spawn. ACP terminal creation spawns
-  the protocol's executable and argv; the only rebuild is the unsplit `sh -c` fallback. A failed
-  spawn is a JSON-RPC rejection, not a hung wait.
-- Child tab sessions reuse the parent workspace directory. Never write per-session workspace paths
-  into `MachineMeta`: the machine publishes `['dotlodyPath']` and frontends derive them.
+- `Session.createAgent` gates each ACP spawn; failed spawns reject JSON-RPC. Terminals spawn
+  protocol argv (`sh -c` only for unsplit commands). Managed Codex reused-refresh startup
+  retries once after process cleanup, delay, and live Provider recheck; other auth errors do not.
+- Child tabs reuse the parent workspace. Never write per-session paths into `MachineMeta`:
+  the machine publishes `['dotlodyPath']` for frontends to derive them.
 - INVARIANT: any `sandbox.spawn` whose OUTPUT is the result must pass `captureOutput: true` (ACP
   stdio deliberately does not), and the capture buffer stays capped at 4 MiB.
 - Shutdown is two-phase: `cleanUp({ keepWorkspaceDocumentOpen: true })`, then plain `cleanUp()`
@@ -86,25 +86,23 @@ Contract: specs/session-orchestration.md.
 
 ## Sagas
 
-- `session-preparation-service.ts`: peek and claim never delay cold fallback, peek never transfers
-  ownership, and the resource is published BEFORE its `start()` hook. Preparation may create the
-  final marked worktree and complete `newSession`, but must not create a session doc, run setup,
-  append history, or publish events before adoption.
+- Preparation peek/claim never delay cold fallback; peek never transfers ownership. Publish the
+  resource BEFORE `start()`. It may create the marked final worktree and complete `newSession`, but cannot
+  create a session doc, run setup, append history, or publish events before adoption.
 - Dispatch and claim rescan the current row and reject changed compatibility under canonical
   `buildSessionLaunchConfig` semantics; a published incompatible resource cleans up first.
 - Nested child Sessions are rejected: ownership resolves one parent hop only.
+- Fork and continuation share `resolveSessionAcpTargetId`; source runtime config copies only at its matching user-turn fence.
 - Fork commits at `persistPendingChanges()`, never cloud sync. Persist its placeholder
   before ACP; failed commits terminate and durably delete the target. Post-commit
   display projections stay outside compensation.
-- Fork an active source turn only on an advertised `_meta.lody.forkAtTurn = { version: 1 }`, pass
-  the adapter's `_meta.lody.turnId` through unchanged as `acpTurnId`, and reuse the source Git
-  identity only on an exact requester match. New-worktree forks also require native fork support,
-  persist a target-doc `forkOperation` before returning, publish no target meta before the final
-  commit, clean up ACP and the worktree/branch with a durable failed receipt, and stay idempotent
-  on retry.
-- Fork recovery fail-closes interrupted operations and finds them ONLY in the machine-local marker
-  store under `withForkOperationLock`. Never enumerate rooms or open docs to find candidates, and
-  never `cleanSessionDoc` a doc you do not own.
+- Active-turn fork requires advertised `_meta.lody.forkAtTurn = { version: 1 }`; pass adapter
+  `_meta.lody.turnId` unchanged as `acpTurnId`, and reuse source Git identity only for an exact requester.
+  New-worktree forks require native support, persist target-doc `forkOperation` before return,
+  publish target meta only after final commit, clean ACP/worktree/branch with a durable failed
+  receipt, and stay idempotent on retry.
+- Fork recovery fail-closes interrupted operations and finds them ONLY in machine-local markers
+  under `withForkOperationLock`; never enumerate rooms/open docs for candidates or clean an unowned doc.
 - Edit-and-resend prepares `forkAtTurn` (`session/new` for the first User), cancels the exact
   turn, waits for release, then commits history/meta. Its barrier excludes queue promotion,
   dispatch and steer. Keep the queue, User attribution/config/attachments; use new turn/ACP ids.

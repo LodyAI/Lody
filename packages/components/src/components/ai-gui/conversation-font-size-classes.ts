@@ -22,6 +22,11 @@ export function conversationMonoFontSizeStyle(fontSize: ConversationFontSize): C
   return { fontSize: `${Math.round(fontSize / 2 + 4)}px` };
 }
 
+/** Prose inside compact chrome (a tool's text result): the 0.9em tier, in px. */
+export function compactConversationFontSize(fontSize: ConversationFontSize): ConversationFontSize {
+  return Math.round(fontSize * 0.9);
+}
+
 /** Streaming terminal output text — one tier smaller than the prompt. */
 export function terminalTextFontSizeStyle(fontSize: ConversationFontSize): CSSProperties {
   return { fontSize: `${Math.round((fontSize * 3) / 4 + 1.5)}px` };

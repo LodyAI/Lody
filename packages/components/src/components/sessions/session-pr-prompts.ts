@@ -10,10 +10,8 @@ const MAX_PROMPT_LENGTH = 6_000;
 
 const FAILED_CONCLUSIONS = new Set<GitHubCheckRun['conclusion']>([
   'failure',
-  'cancelled',
   'timed_out',
   'action_required',
-  'stale',
 ]);
 
 export function isFailedPrCheckRun(run: GitHubCheckRun): boolean {

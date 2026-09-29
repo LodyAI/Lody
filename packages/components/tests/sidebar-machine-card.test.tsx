@@ -14,6 +14,7 @@ import {
   SidebarMachineHoverCard,
   SidebarMachineOfflinePill,
 } from '../src/components/sidebar-machine-card';
+import { SidebarSectionHeader } from '../src/components/sidebar-row-shared';
 import { initI18n } from '../src/i18n';
 
 const machineId = 'machine-sidebar-card' as MachineId;
@@ -71,7 +72,7 @@ describe('sidebar machine group', () => {
     expect(container.textContent).toBe('');
   });
 
-  it("tells on hover whose machine the group is, its status, OS and project count", async () => {
+  it('tells on hover whose machine the group is, its status, OS and project count', async () => {
     vi.useFakeTimers();
     store.set(lodyPresenceSyncStateAtom, 'synced');
     await render(
@@ -84,9 +85,16 @@ describe('sidebar machine group', () => {
           isCurrent: false,
           os: 'darwin',
           projectCount: 2,
+          activity: { waiting: 0, working: 2, unread: 1 },
         }}
       >
-        <span>Lampese</span>
+        <SidebarSectionHeader
+          label="Lampese"
+          collapsed
+          activity={{ waiting: 0, working: 2, unread: 1 }}
+          describeActivity={false}
+          onToggleCollapsed={() => undefined}
+        />
       </SidebarMachineHoverCard>
     );
 
@@ -105,5 +113,55 @@ describe('sidebar machine group', () => {
     expect(card?.textContent).toContain('Lampese');
     expect(card?.textContent).toContain('macOS');
     expect(card?.textContent).toContain('2 projects');
+    // The folded header draws one mark; the card, which owns its hover, counts.
+    expect(card?.textContent).toContain('2 working · 1 unread');
+    expect(container.querySelectorAll('[data-session-row-indicator]')).toHaveLength(1);
+    expect(container.querySelector('[data-working-grid]')).not.toBeNull();
+  });
+
+  it("draws the hidden Sessions' status on a folded section header only", async () => {
+    const activity = { waiting: 1, working: 3, unread: 0 };
+    await render(
+      <SidebarSectionHeader
+        label="GitHub Worktrees"
+        collapsed={false}
+        activity={activity}
+        onToggleCollapsed={() => undefined}
+      />
+    );
+    // Expanded: its rows are on screen and carry their own marks.
+    expect(container.querySelector('[data-sidebar-group-activity]')).toBeNull();
+
+    await render(
+      <SidebarSectionHeader
+        label="GitHub Worktrees"
+        collapsed
+        activity={activity}
+        onToggleCollapsed={() => undefined}
+      />
+    );
+    const mark = container.querySelector('[data-sidebar-group-activity]');
+    // Waiting outranks working, exactly as on a row.
+    expect(mark?.querySelector('.lucide-hand')).not.toBeNull();
+    expect(mark?.querySelector('[data-working-grid]')).toBeNull();
+    expect(mark?.getAttribute('aria-label')).toBe('1 waiting for approval · 3 working');
+
+    // Folded while everything is read: nothing to say.
+    await render(
+      <SidebarSectionHeader
+        label="GitHub Worktrees"
+        collapsed={false}
+        onToggleCollapsed={() => undefined}
+      />
+    );
+    await render(
+      <SidebarSectionHeader
+        label="GitHub Worktrees"
+        collapsed
+        activity={{ waiting: 0, working: 0, unread: 0 }}
+        onToggleCollapsed={() => undefined}
+      />
+    );
+    expect(container.querySelector('[data-session-row-indicator]')).toBeNull();
   });
 });

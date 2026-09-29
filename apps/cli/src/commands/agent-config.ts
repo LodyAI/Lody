@@ -1,10 +1,12 @@
 import { Command } from 'commander';
+import { discoveryListCommand, discoveryGetCommand } from './discovery';
 import { promises as fs } from 'node:fs';
 import { v4 as uuidV4 } from 'uuid';
 import { z } from 'zod';
 import {
   MachineAcpCapabilitiesRefreshResponseSchema,
   isMachineDocRoomId,
+  negotiatedAcpCapabilitiesRefreshForce,
   type AgentConfigCliType,
   type AgentConfigId,
   type AgentConfigMeta,
@@ -36,10 +38,6 @@ import {
 } from '@/lib/agent-config-machine-flock';
 
 type AgentConfigCommandOptions = CommonCommandOptions;
-
-type AgentConfigListOptions = AgentConfigCommandOptions & {
-  machine?: string;
-};
 
 type AgentConfigCreateOptions = AgentConfigCommandOptions & {
   name?: string;
@@ -443,60 +441,7 @@ function buildTitleGenerationConfig(options: {
   return { configOptionValues };
 }
 
-const agentConfigListCommand = new Command('list')
-  .description('List agent configs in a workspace')
-  .option('--workspace <selector>', 'Target workspace id, slug, or name')
-  .option('--machine <idOrName>', 'Only include configs for one machine')
-  .option('--json', 'Print JSON output')
-  .option('--debug', 'Enable debug output')
-  .action(async (options: AgentConfigListOptions) => {
-    await runOneShotCommand('agent-config', options, async () => {
-      const auth = getAuthContextOrThrow('agent-config');
-      const workspace = await resolveWorkspaceOrThrow(auth, options.workspace);
-
-      await withWorkspaceManager(auth, workspace, 'agent-config', async (manager) => {
-        const machineSelector = normalizeCliValue(options.machine);
-        let machineId: MachineId | undefined;
-        if (machineSelector) {
-          const machine = resolveMachineOrThrow(await listMachineMetasForWorkspace(manager), {
-            selector: machineSelector,
-            authMachineId: auth.machineId,
-          });
-          machineId = machine.id;
-        }
-        const configs = (
-          await listAgentConfigsForWorkspace(manager, workspace.id as WorkspaceId)
-        ).filter((config) => machineId === undefined || config.machineId === machineId);
-
-        if (options.json) {
-          printJson({
-            ok: true,
-            workspaceId: workspace.id,
-            ...(machineId ? { machineId } : {}),
-            agentConfigs: configs.map(toAgentConfigOutput),
-          });
-          return;
-        }
-
-        if (configs.length === 0) {
-          console.log('No agent configs found.');
-          return;
-        }
-
-        console.log(
-          renderTerminalTable(
-            [
-              { header: 'ID' },
-              { header: 'Name' },
-              { header: 'Agent Type' },
-              { header: 'Description' },
-            ],
-            configs.map((config) => [config.id, config.name, config.agentType, config.description])
-          )
-        );
-      });
-    });
-  });
+const agentConfigListCommand = discoveryListCommand('agent_config');
 
 const agentConfigShowCommand = new Command('show')
   .description('Show an agent config')
@@ -580,6 +525,11 @@ const agentConfigRefreshCapabilitiesCommand = new Command('refresh-capabilities'
             machineId: machine.id,
             workspaceId: workspace.id as WorkspaceId,
             configId: config.id,
+            // This command exists to pick up changes Lody cannot see in the launch
+            // inputs, so it must start the agent instead of accepting the stored
+            // entry. Negotiated because the CLI binary can be newer than the
+            // running daemon, which would reject an unknown field outright.
+            ...negotiatedAcpCapabilitiesRefreshForce(machine, true),
           })
         );
 
@@ -851,6 +801,7 @@ const agentConfigDeleteCommand = new Command('delete')
 export const agentConfigCommand = new Command('agent-config')
   .description('Manage agent configs')
   .addCommand(agentConfigListCommand)
+  .addCommand(discoveryGetCommand('agent_config'))
   .addCommand(agentConfigShowCommand)
   .addCommand(agentConfigRefreshCapabilitiesCommand)
   .addCommand(agentConfigCreateCommand)

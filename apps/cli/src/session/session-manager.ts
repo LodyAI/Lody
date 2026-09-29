@@ -1,6 +1,5 @@
 import { EventEmitter } from 'eventemitter3';
 import os from 'os';
-import path from 'path';
 import { existsSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
@@ -69,19 +68,14 @@ import {
   GitCredentialBroker,
   LODY_GIT_CRED_BROKER_STATE_FILE_ENV,
   LODY_GIT_CRED_CONTEXT_TOKEN_ENV,
+  LODY_GIT_CRED_CONTEXT_FILE_ENV,
 } from '@/lib/git-credential-broker';
 import type { CloudGithubTokenManager, CloudPort } from '@lody/platform';
-import { isDevEnv } from '@/utils/runtime-env';
 import {
   buildCredentialHelperValueForHost,
   ensureCredentialHelperScript,
 } from '@/lib/git-credential-helper-script';
-import {
-  getGhTokenFingerprint,
-  hasManagedGhToken,
-  LODY_MANAGED_GH_TOKEN_SHA256_ENV,
-  resolveGhTokenForSession,
-} from '@/lib/gh-token-injector';
+import { clearManagedGhTokenEnv } from '@/lib/gh-token-env';
 import { ensureGhShimScript, prependGhShimBinDirToPath } from '@/lib/gh-shim-script';
 import { ensureLodyBashEnvForGhShim, shouldInjectBashEnvForGhShim } from '@/lib/lody-bashenv';
 import { ensureLodyZdotdirForGhShim, shouldInjectZdotdirForGhShim } from '@/lib/lody-zdotdir';
@@ -198,6 +192,14 @@ const tryDeriveGitHubRepoFromUrl = (rawUrl?: string): string | null => {
 };
 
 const SESSION_PREPARATION_HARD_TTL_MS = 120_000;
+/**
+ * How long teardown waits for an in-flight create to reach a terminable state
+ * before detaching it. Generous enough for a cold ACP start (the slowest healthy
+ * one observed was 249s), while keeping a wedged create from hanging shutdown.
+ */
+const PENDING_CREATE_TERMINATE_TIMEOUT_MS = 300_000;
+const PENDING_CREATE_TERMINATE_TIMED_OUT = Symbol('pending-create-terminate-timed-out');
+
 const MAX_CONCURRENT_SESSION_PREPARATIONS = 1;
 
 function getSessionPreparationSandboxId(sessionId: SessionId, preparationId: string): SessionId {
@@ -264,6 +266,7 @@ function buildSessionPreparationCompatibility(
 ) {
   return {
     launch: buildSessionLaunchConfig({
+      codexAuth: launchSource?.codexAuth,
       customAcp: launchSource?.customAcp,
       runtimeOverrides: launchSource?.runtimeOverrides,
       env: launchSource?.env,
@@ -339,11 +342,6 @@ export interface ISession {
    * Takes effect on all subsequent exec() calls (each exec spawns a new process).
    */
   updateEnv(env: Record<string, string | undefined>): void;
-  /**
-   * Whether we injected a managed GitHub token as GH_TOKEN at session startup.
-   * When false, the user has their own auth and we should not overwrite it.
-   */
-  ghTokenInjected: boolean;
 }
 
 export type SessionMonitorRuntimeInfo = {
@@ -364,6 +362,8 @@ export interface CreateAgentConfig {
   args?: string[];
   env?: Record<string, string>;
   capabilitySourceVersion?: string;
+  /** A retry must confirm the managed Codex provider still authorizes this process. */
+  revalidateManagedCodexProfile?: () => Promise<void>;
   /**
    * Optional ACP session id to attempt to resume. This is a per-agent-start hint and is intentionally
    * not stored on the session instance because sessions can be reused, and persisting
@@ -457,7 +457,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
   private gitCredentialBroker: GitCredentialBroker | null = null;
   private readonly sessions = new Map<SessionId, Session>();
   /** Per-instance listener teardown for `detachSession`; see `registerSessionEvents`. */
-  private readonly sessionEventDetachers = new WeakMap<Session, () => void>();
+  private readonly sessionEventDetachers = new WeakMap<ISession, () => void>();
   private readonly pendingSessionCreates = new Map<SessionId, Promise<ISession>>();
   private readonly pendingTerminationPromises = new Map<SessionId, Promise<void>>();
   private readonly preparationSessions = new Map<SessionId, Session>();
@@ -528,6 +528,59 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
    */
   getPendingSession(sessionId: SessionId): Promise<ISession> | null {
     return this.pendingSessionCreates.get(sessionId) ?? null;
+  }
+
+  /**
+   * Detach a create that will never be awaited again, so the deduplication map
+   * stops handing the same promise to every retry.
+   *
+   * `createSession` returns the cached in-flight promise for a session id, and
+   * that entry is only removed by the promise's own `finally`. A create wedged
+   * inside a managed-runtime install or ACP startup therefore never settles,
+   * never clears its entry, and turns every subsequent attempt into the same
+   * stall. Callers that have given up (the initialization stall watchdog) must
+   * detach it here instead.
+   *
+   * The underlying work cannot be cancelled — there is no abort signal through
+   * `createSessionFromPreparationOrCold` — so it is reaped instead: if the
+   * abandoned create ever produces a Session, that Session is terminated rather
+   * than left as an orphan process. Returns whether an entry was detached.
+   */
+  abandonPendingSessionCreate(sessionId: SessionId, reason: string): boolean {
+    const pending = this.pendingSessionCreates.get(sessionId);
+    if (!pending) {
+      return false;
+    }
+    this.pendingSessionCreates.delete(sessionId);
+    this.logger.warn(
+      `[${sessionId}] Abandoning in-flight session create (${reason}); a retry will start a new one`
+    );
+    void pending.then(
+      async (session) => {
+        // The create finished after all. Its Session was never handed to a
+        // caller, so it is an orphan: terminate it — but DETACH it first, for
+        // the same reason as the `createAgent` failure path. `createSessionInner`
+        // already registered the manager's listeners on it, and `onTerminated`
+        // deletes `sessions[event.sessionId]` by ID and forwards `terminated` to
+        // MessageHandler. Left attached, the orphan's death would unregister a
+        // retry's healthy replacement under the same id and finalize its live
+        // turn as "the agent died". `detachSession` is keyed by instance, so the
+        // replacement's registration survives.
+        this.detachSession(session);
+        try {
+          await session.terminate(true);
+          this.logger.debug(
+            `[${sessionId}] Terminated orphaned session from abandoned create (${reason})`
+          );
+        } catch (error) {
+          this.logger.debug(
+            `[${sessionId}] Failed to terminate orphaned session from abandoned create: ${formatErrorMessage(error)}`
+          );
+        }
+      },
+      () => undefined
+    );
+    return true;
   }
 
   requestSessionPreparation(spec: SessionPreparationSpec): SessionPrepareResponse {
@@ -657,6 +710,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     config: SessionConfig,
     agentStart?: AgentStartConfig
   ): Promise<ISession> {
+    await this.freezeCodexProfile(config);
     const sessionId = config.sessionId!;
     const preparationIdentity = config.agentConfigId
       ? {
@@ -745,7 +799,32 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
         }
       };
       void termination.then(clearTermination, clearTermination);
-      await termination;
+      // A create wedged in a managed-runtime install or ACP startup never
+      // settles, so awaiting it outright makes teardown hang with it. Wait only
+      // as long as a create plausibly needs to reach a terminable state, then
+      // detach: `abandonPendingSessionCreate` keeps reaping it, so a Session
+      // that materializes later is still terminated rather than orphaned. The
+      // deadline is raced through a sentinel rather than a rejection so a
+      // genuine terminate failure still propagates to the caller.
+      let deadlineTimer: NodeJS.Timeout | undefined;
+      const deadline = new Promise<typeof PENDING_CREATE_TERMINATE_TIMED_OUT>((resolve) => {
+        deadlineTimer = setTimeout(
+          () => resolve(PENDING_CREATE_TERMINATE_TIMED_OUT),
+          PENDING_CREATE_TERMINATE_TIMEOUT_MS
+        );
+        deadlineTimer.unref?.();
+      });
+      try {
+        const outcome = await Promise.race([termination, deadline]);
+        if (outcome === PENDING_CREATE_TERMINATE_TIMED_OUT) {
+          clearTermination();
+          this.abandonPendingSessionCreate(sessionId, 'terminate-timeout');
+        }
+      } finally {
+        if (deadlineTimer) {
+          clearTimeout(deadlineTimer);
+        }
+      }
       return 'terminated';
     }
     const pendingPreparationCleanup = this.preparationService.discard(sessionId);
@@ -912,6 +991,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     }
 
     const config: SessionConfig = {
+      codexAuth: agentConfig.codexAuth,
       sessionId,
       workspaceId: this.workspaceId,
       requesterUserId: spec.requestedByUserId,
@@ -935,12 +1015,13 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       userName: user.name,
       userEmail: user.email,
     };
+    await this.freezeCodexProfile(config);
     const compatibility = buildSessionPreparationCompatibility(
       config,
       config.mcpServerIds,
       config.configOptionValues
     );
-    const ghTokenInjected = await this.prepareGitHubRepoSessionConfig(config);
+    await this.prepareGitHubRepoSessionConfig(config);
     signal.throwIfAborted();
     const launch = await resolveACPProcessLaunchAsync({
       cliType: config.agentCliType,
@@ -1041,7 +1122,6 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       }
       session = new Session(config, this.logger, provisionalWorkdir, sandbox);
       sandbox = null;
-      session.ghTokenInjected = ghTokenInjected;
       this.preparationSessions.set(sessionId, session);
       await this.rebalanceSessionSandboxes();
       signal.throwIfAborted();
@@ -1070,7 +1150,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
                 baseBranch: config.branch,
                 restoreBranchName: config.restoreBranchName,
                 resolveBrokerAuth: () =>
-                  this.resolveHostGitBrokerAuth(worktreeTarget.target.source),
+                  this.resolveHostGitBrokerAuth(worktreeTarget.target.source, config),
                 logger: this.logger,
               })
             : Promise.resolve(null);
@@ -1202,7 +1282,6 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
         'session.createSessionInner.prepared',
         sessionId
       );
-      session.ghTokenInjected = prepared.session.ghTokenInjected;
       session.updateGitIdentity(config.userName, config.userEmail, config.requesterUserId, {
         preferMachineIdentity: config.requesterUserId === this.cloudPort.identity.userId,
       });
@@ -1249,6 +1328,10 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
           }
         : undefined,
       capabilitySourceVersion: launch.capabilitySourceVersion,
+      revalidateManagedCodexProfile:
+        config.codexProfile?.profile.mode === 'chatgpt'
+          ? async () => await this.freezeCodexProfile(config)
+          : undefined,
       resumeSessionId: options?.resumeSessionId,
       forkSessionId: options?.forkSessionId,
       forkSessionTurnId: options?.forkSessionTurnId,
@@ -1330,7 +1413,8 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     config: SessionConfig,
     agentStart?: AgentStartConfig
   ): Promise<ISession> {
-    const ghTokenInjected = await this.prepareGitHubRepoSessionConfig(config);
+    await this.freezeCodexProfile(config);
+    await this.prepareGitHubRepoSessionConfig(config);
     const requestedResumeSessionId = agentStart?.resumeSessionId;
     const requestedForkSessionId = agentStart?.forkSessionId;
     const requestedForkSessionTurnId = agentStart?.forkSessionTurnId;
@@ -1354,7 +1438,6 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       'session.createSessionInner',
       config.sessionId!
     );
-    session.ghTokenInjected = ghTokenInjected;
     const sessionId = config.sessionId!;
     this.logger.debug(`[${sessionId}] Session workdir resolved: ${session.getWorkdir()}`);
     session.updateGitIdentity(config.userName, config.userEmail, config.requesterUserId, {
@@ -1498,129 +1581,141 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     return session;
   }
 
-  private async prepareGitHubRepoSessionConfig(config: SessionConfig): Promise<boolean> {
-    const githubRepo = config.githubRepo ?? tryDeriveGitHubRepoFromUrl(config.githubRepoUrl);
-    if (!config.githubRepo && githubRepo) {
-      config.githubRepo = githubRepo;
-    }
-    if (!githubRepo) {
-      return false;
-    }
-
-    const repoId = deriveRepoIdFromGitHubRepo(githubRepo);
-    const githubRepoUrl = buildGitHubCloneUrl(githubRepo);
-    if (config.project?.kind === 'github' || !config.project) {
-      config.repoId = repoId;
-      config.githubRepoUrl = githubRepoUrl;
-    }
-    const tokenManager = this.getGitHubTokenManager();
-    tokenManager?.retainRepoOwner(githubRepo);
-    if (tokenManager) {
-      // Prefetch token BEFORE git operations to avoid race conditions.
-      // Previously this was fire-and-forget (void), which caused the first git clone
-      // to fail because the token wasn't ready when credential helper was invoked.
-      try {
-        await tokenManager.getAppTokenForRepo(githubRepo);
-        this.logger.debug(
-          `[${config.sessionId}] [github-token] Prefetch succeeded for ${githubRepo}`
-        );
-      } catch (error) {
-        // Log but don't fail - git operations will retry with fresh token if needed
-        this.logger.debug(
-          `[${config.sessionId}] [github-token] Prefetch failed for ${githubRepo}: ${formatErrorMessage(
-            error
-          )}`
-        );
+  private async freezeCodexProfile(config: SessionConfig): Promise<void> {
+    if (config.agentCliType !== 'builtin' || config.agentType !== 'codex') return;
+    const store = getCodexProfileStore();
+    if (config.agentConfigId) {
+      const provider = await this.workspaceDocument.getAgentConfigById(
+        config.agentConfigId,
+        this.machineId
+      );
+      if (config.codexAuth && !provider?.codexAuth) {
+        throw new Error('This Codex provider account is no longer available');
+      }
+      if (provider?.codexAuth) {
+        if (
+          config.codexAuth &&
+          JSON.stringify(config.codexAuth) !== JSON.stringify(provider.codexAuth)
+        )
+          throw new Error('Codex account changed before session launch');
+        config.codexAuth = provider.codexAuth;
       }
     }
-
-    const brokerEnv = await this.ensureGitCredentialBrokerEnv();
-    if (!brokerEnv) {
-      return false;
+    if (!config.codexAuth) {
+      if (
+        config.agentConfigId &&
+        (await store.list(this.workspaceId)).some(
+          (item) => item.configId === config.agentConfigId && item.machineId === this.machineId
+        )
+      ) {
+        throw new Error(
+          'This Codex provider account reference is missing; restore its configuration'
+        );
+      }
+      return;
     }
-    const sessionId = config.sessionId;
-    if (!sessionId) {
-      throw new Error('SessionId is required to prepare GitHub session credentials');
-    }
-    const contextToken = this.gitCredentialBroker?.activateSessionContext({
-      sessionId,
-      requesterUserId: config.requesterUserId,
+    if (!config.agentConfigId) throw new Error('A managed Codex account requires a provider');
+    config.codexProfile = await store.resolve(this.workspaceId, {
+      id: config.agentConfigId,
       machineId: this.machineId,
+      name: 'Codex',
+      description: undefined,
+      cliType: config.agentCliType,
+      agentType: config.agentType,
+      codexAuth: config.codexAuth,
+      env: config.env ?? {},
+      customAcp: config.customAcp,
+      runtimeOverrides: config.runtimeOverrides,
     });
-
-    ensureCredentialHelperScript(repoId);
-
-    const isDev = isDevEnv();
-    const debugEnv: Record<string, string> = {};
-    const env = config.env;
-    if (isDev && env?.LODY_GIT_CRED_HELPER_DEBUG && !env?.LODY_GIT_CRED_HELPER_DEBUG_FILE) {
-      debugEnv.LODY_GIT_CRED_HELPER_DEBUG_FILE = path.join(
-        os.tmpdir(),
-        'lody-git-credential-helper-debug.log'
-      );
-    }
-
-    const sessionEnv: Record<string, string> = {
-      ...env,
-      ...debugEnv,
-    };
-    if (contextToken) {
-      sessionEnv[LODY_GIT_CRED_CONTEXT_TOKEN_ENV] = contextToken;
-    }
-
-    this.ensureGhShimSessionEnv(sessionEnv);
-
-    // Inject GH_TOKEN if the user isn't already authenticated with gh CLI
-    const ghToken = await resolveGhTokenForSession({
-      env: sessionEnv,
-      githubRepo,
-      tokenManager,
-      requesterUserId: config.requesterUserId,
-      machineId: this.machineId,
-      logger: this.logger,
-    });
-    if (ghToken) {
-      sessionEnv.GH_TOKEN = ghToken;
-      sessionEnv[LODY_MANAGED_GH_TOKEN_SHA256_ENV] = getGhTokenFingerprint(ghToken);
-    }
-
-    const credentialHelperValue = buildCredentialHelperValueForHost(repoId);
-    const brokerUrl = brokerEnv.url;
-
-    const brokerStateFilePath = this.gitCredentialBroker?.getStateFilePath();
-
-    config.env = {
-      ...sessionEnv,
-      LODY_GIT_CRED_BROKER_URL: brokerUrl,
-      LODY_GIT_CRED_BROKER_TOKEN: brokerEnv.token,
-      // Keeps the helper's connection-refused fallback inside this workspace instead
-      // of landing on the shared, last-writer-wins broker.json.
-      ...(brokerStateFilePath
-        ? { [LODY_GIT_CRED_BROKER_STATE_FILE_ENV]: brokerStateFilePath }
-        : {}),
-      LODY_GITHUB_REPO_FULL_NAME: githubRepo,
-      GIT_TERMINAL_PROMPT: '0',
-      // Use credential helper for all git invocations inside the ACP process tree.
-      // The helper talks to the local broker to fetch fresh managed tokens on-demand.
-      GIT_CONFIG_COUNT: '3',
-      // Clear any existing helpers so only the CLI helper is used.
-      GIT_CONFIG_KEY_0: 'credential.helper',
-      GIT_CONFIG_VALUE_0: '',
-      GIT_CONFIG_KEY_1: 'credential.helper',
-      GIT_CONFIG_VALUE_1: credentialHelperValue,
-      GIT_CONFIG_KEY_2: 'credential.useHttpPath',
-      GIT_CONFIG_VALUE_2: 'true',
-    };
-    return !!ghToken || hasManagedGhToken(sessionEnv);
   }
 
-  /**
-   * Refresh GH_TOKEN for a session using the managed write-operation token.
-   * This ensures gh CLI commands use a fresh token before each turn.
-   */
+  private async prepareGitHubRepoSessionConfig(config: SessionConfig): Promise<void> {
+    const githubRepo = config.githubRepo ?? tryDeriveGitHubRepoFromUrl(config.githubRepoUrl);
+    if (githubRepo) {
+      config.githubRepo = githubRepo;
+      if (config.project?.kind === 'github' || !config.project) {
+        config.repoId ??= deriveRepoIdFromGitHubRepo(githubRepo);
+        config.githubRepoUrl = buildGitHubCloneUrl(githubRepo);
+      }
+      this.getGitHubTokenManager()?.retainRepoOwner(githubRepo);
+    }
+    const brokerEnv = await this.ensureGitCredentialBrokerEnv();
+    if (!brokerEnv) return;
+    const allowLocalAuth = config.requesterUserId === this.cloudPort.identity.userId;
+    config.githubCredentialPolicy = { allowLocalAuth };
+    if (!config.sessionId) throw new Error('SessionId is required for GitHub credentials');
+    const contextToken = this.gitCredentialBroker!.activateSessionContext({
+      sessionId: config.sessionId,
+      requesterUserId: config.requesterUserId,
+      machineId: this.machineId,
+    });
+    const brokerStateFilePath = this.gitCredentialBroker!.getStateFilePath();
+    if (!brokerStateFilePath) throw new Error('Workspace-scoped GitHub broker is required');
+    config.githubCredentialPolicy.stateFilePath = brokerStateFilePath;
+    const sessionEnv: Record<string, string> = { ...config.env };
+    clearManagedGhTokenEnv(sessionEnv);
+    if (contextToken) sessionEnv[LODY_GIT_CRED_CONTEXT_TOKEN_ENV] = contextToken;
+    const contextFile = this.gitCredentialBroker!.getSessionContextFilePath(config.sessionId);
+    if (contextFile) sessionEnv[LODY_GIT_CRED_CONTEXT_FILE_ENV] = contextFile;
+    this.ensureGhShimSessionEnv(sessionEnv);
+    // Install even without an initial repository: commands may cd into another
+    // checkout or address an authorized repository using -R.
+    const helperRepoId = config.repoId ?? ('github-credentials' as RepoId);
+    ensureCredentialHelperScript(helperRepoId);
+    // Preserve the caller's config for the composite helper's local delegation.
+    // The outer helper list is intentionally replaced: Git sends "store" to
+    // every configured helper and must never persist an injected App/user token.
+    sessionEnv.LODY_GIT_LOCAL_CONFIG ??= JSON.stringify(
+      Object.fromEntries(
+        Object.entries({ ...process.env, ...sessionEnv }).filter(([key]) =>
+          /^GIT_CONFIG_(COUNT|KEY_\d+|VALUE_\d+)$/.test(key)
+        )
+      )
+    );
+    const localConfig = JSON.parse(sessionEnv.LODY_GIT_LOCAL_CONFIG) as Record<string, string>;
+    for (const key of Object.keys(sessionEnv)) {
+      if (/^GIT_CONFIG_(COUNT|KEY_\d+|VALUE_\d+)$/.test(key)) delete sessionEnv[key];
+    }
+    Object.assign(sessionEnv, localConfig);
+    let configCount = Number(localConfig.GIT_CONFIG_COUNT ?? 0);
+    for (const host of ['github.com', 'www.github.com']) {
+      for (const [key, value] of [
+        [`credential.https://${host}.helper`, ''],
+        [`credential.https://${host}.helper`, buildCredentialHelperValueForHost(helperRepoId)],
+        [`credential.https://${host}.useHttpPath`, 'true'],
+      ] as const) {
+        sessionEnv[`GIT_CONFIG_KEY_${configCount}`] = key;
+        sessionEnv[`GIT_CONFIG_VALUE_${configCount++}`] = value;
+      }
+    }
+    sessionEnv.GIT_CONFIG_COUNT = String(configCount);
+    for (const [key, value] of [
+      ['url.lody-github::.insteadOf', 'git@github.com:'],
+      ['url.lody-github::.insteadOf', 'ssh://git@github.com/'],
+      ['url.lody-github::.insteadOf', 'ssh://git@github.com:22/'],
+      ['url.lody-github::ssh443/.insteadOf', 'ssh://git@ssh.github.com:443/'],
+      ['url.lody-github::https/.insteadOf', 'https://github.com/'],
+      ['url.lody-github::https/.insteadOf', 'https://www.github.com/'],
+      ['url.lody-github::https/.insteadOf', 'https://github.com:443/'],
+      ['protocol.lody-github.allow', 'always'],
+    ] as const) {
+      sessionEnv[`GIT_CONFIG_KEY_${configCount}`] = key;
+      sessionEnv[`GIT_CONFIG_VALUE_${configCount++}`] = value;
+    }
+    sessionEnv.GIT_CONFIG_COUNT = String(configCount);
+    config.env = {
+      ...sessionEnv,
+      LODY_GIT_CRED_BROKER_URL: brokerEnv.url,
+      LODY_GIT_CRED_BROKER_TOKEN: brokerEnv.token,
+      [LODY_GIT_CRED_BROKER_STATE_FILE_ENV]: brokerStateFilePath,
+      ...(githubRepo ? { LODY_GITHUB_REPO_FULL_NAME: githubRepo } : {}),
+      GIT_TERMINAL_PROMPT: '0',
+    };
+  }
+
   async refreshGhTokenForSession(
     session: ISession,
-    githubRepo: string,
+    _githubRepo: string | undefined,
     requesterUserId: string
   ): Promise<void> {
     const contextToken = this.gitCredentialBroker?.activateSessionContext({
@@ -1628,61 +1723,21 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       requesterUserId,
       machineId: this.machineId,
     });
-    if (contextToken) {
-      session.updateEnv({ [LODY_GIT_CRED_CONTEXT_TOKEN_ENV]: contextToken });
-    }
-    // Only refresh if we originally injected the token at session startup.
-    // If the user has their own auth (GH_TOKEN, GITHUB_TOKEN, or gh CLI login),
-    // we must not overwrite it with a managed token.
-    if (!session.ghTokenInjected) {
-      return;
-    }
-    const tokenManager = this.getGitHubTokenManager();
-    if (!tokenManager) {
-      this.clearManagedGhTokenForSession(session, contextToken);
-      return;
-    }
-    try {
-      // Re-resolve before every turn so enabling personal identity immediately
-      // replaces any cached app write token for git/gh operations.
-      tokenManager.invalidate(githubRepo, { requesterUserId });
-      const token = await tokenManager.getWriteTokenForRepo(githubRepo, {
-        requesterUserId,
-        machineId: this.machineId,
-      });
-      session.updateEnv({
-        ...(contextToken ? { [LODY_GIT_CRED_CONTEXT_TOKEN_ENV]: contextToken } : {}),
-        GH_TOKEN: token,
-        [LODY_MANAGED_GH_TOKEN_SHA256_ENV]: getGhTokenFingerprint(token),
-      });
-    } catch (error) {
-      this.clearManagedGhTokenForSession(session, contextToken);
-      this.logger.debug(
-        `[${session.sessionId}] Failed to refresh GH_TOKEN: ${formatErrorMessage(error)}`
-      );
-    }
-  }
-
-  private clearManagedGhTokenForSession(session: ISession, contextToken: string | undefined): void {
-    session.updateEnv({
-      ...(contextToken ? { [LODY_GIT_CRED_CONTEXT_TOKEN_ENV]: contextToken } : {}),
-      GH_TOKEN: undefined,
-      GITHUB_TOKEN: undefined,
-      [LODY_MANAGED_GH_TOKEN_SHA256_ENV]: undefined,
-    });
+    if (contextToken) session.updateEnv({ [LODY_GIT_CRED_CONTEXT_TOKEN_ENV]: contextToken });
   }
 
   private ensureGhShimSessionEnv(sessionEnv: Record<string, string>): void {
-    ensureGhShimScript();
+    const statePath = this.gitCredentialBroker?.getStateFilePath();
+    ensureGhShimScript(statePath);
 
-    sessionEnv.PATH = prependGhShimBinDirToPath(sessionEnv.PATH ?? process.env.PATH);
+    sessionEnv.PATH = prependGhShimBinDirToPath(sessionEnv.PATH ?? process.env.PATH, statePath);
 
     if (shouldInjectBashEnvForGhShim()) {
-      sessionEnv.BASH_ENV = ensureLodyBashEnvForGhShim(sessionEnv.BASH_ENV);
+      sessionEnv.BASH_ENV = ensureLodyBashEnvForGhShim(sessionEnv.BASH_ENV, statePath);
     }
 
     if (shouldInjectZdotdirForGhShim()) {
-      sessionEnv.ZDOTDIR = ensureLodyZdotdirForGhShim(sessionEnv.ZDOTDIR);
+      sessionEnv.ZDOTDIR = ensureLodyZdotdirForGhShim(sessionEnv.ZDOTDIR, statePath);
     }
   }
 
@@ -1712,6 +1767,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
         tokenManager,
         workspaceId: this.workspaceId,
         logger: this.logger,
+        ownerUserId: this.cloudPort.identity.userId ?? undefined,
       });
     }
     return await this.gitCredentialBroker.ensureStarted();
@@ -1729,7 +1785,8 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
    * remote, and asking for it would start a broker they do not use.
    */
   private async resolveHostGitBrokerAuth(
-    source: WorktreeManagerSource | undefined
+    source: WorktreeManagerSource | undefined,
+    config: SessionConfig
   ): Promise<GitCredentialBrokerAuth | undefined> {
     if (source && source.kind !== 'github') {
       return undefined;
@@ -1738,10 +1795,26 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     if (!brokerEnv) {
       return undefined;
     }
+    const contextToken = config.env?.[LODY_GIT_CRED_CONTEXT_TOKEN_ENV];
+    if (!contextToken) {
+      throw new Error(
+        'GitHub worktree preparation is missing its requester credential context; no GitHub operation was attempted.'
+      );
+    }
     return {
       workspaceId: this.workspaceId,
       url: brokerEnv.url,
       token: brokerEnv.token,
+      contextToken,
+      stateFilePath: this.gitCredentialBroker?.getStateFilePath(),
+      transportEnv: Object.fromEntries(
+        Object.entries(config.env ?? {}).filter(
+          ([key]) =>
+            key === 'PATH' ||
+            key === 'LODY_GIT_LOCAL_CONFIG' ||
+            /^GIT_CONFIG_(COUNT|KEY_\d+|VALUE_\d+)$/.test(key)
+        )
+      ),
     };
   }
 
@@ -1846,16 +1919,15 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       this.logger.debug(
         `[${config.sessionId}] Shared parent worktree missing for ${config.parentSessionId}; creating it now`
       );
-      await worktreeManager.ensureRepo({
-        brokerAuth: await this.resolveHostGitBrokerAuth({
-          kind: 'github',
-          repoUrl: config.githubRepoUrl,
-        }),
-      });
       const sharedWorktree = await worktreeManager.createWorktree(
         config.parentSessionId,
         parentMeta?.baseBranch?.trim() || config.branch,
-        parentMeta?.branchName?.trim() || undefined
+        parentMeta?.branchName?.trim() || undefined,
+        undefined,
+        await this.resolveHostGitBrokerAuth(
+          { kind: 'github', repoUrl: config.githubRepoUrl },
+          config
+        )
       );
       await parentSessionDoc.setBranchName(sharedWorktree.branch);
       await parentSessionDoc.setIsWorktree(true);
@@ -2012,17 +2084,13 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       }
       const worktreeInfo =
         preparedWorktreeUsable ??
-        (await (async () => {
-          await worktreeManager.ensureRepo({
-            brokerAuth: await this.resolveHostGitBrokerAuth(worktreeTarget.target.source),
-          });
-          return await worktreeManager.createWorktree(
-            config.sessionId!,
-            config.branch,
-            config.restoreBranchName,
-            config.worktreeStartPoint
-          );
-        })());
+        (await worktreeManager.createWorktree(
+          config.sessionId!,
+          config.branch,
+          config.restoreBranchName,
+          config.worktreeStartPoint,
+          await this.resolveHostGitBrokerAuth(worktreeTarget.target.source, config)
+        ));
       if (!config.deferWorktreeMetaPersistence) {
         await sessionDoc.setBranchName(worktreeInfo.branch);
         await sessionDoc.setIsWorktree(true);
@@ -2310,11 +2378,11 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
   /**
    * Stop publishing a Session instance's lifecycle events and drop it from the
    * live map. Only for an instance that was registered by `createSessionInner`
-   * but whose creation then failed: it was never returned to a caller, so from
-   * the outside it never existed. Keyed by instance, not session id, because a
+   * but never reached a caller — its creation failed, or its create was
+   * abandoned — so from the outside it never existed. Keyed by instance, not session id, because a
    * recovery path may already be creating the replacement under the same id.
    */
-  private detachSession(session: Session): void {
+  private detachSession(session: ISession): void {
     this.sessionEventDetachers.get(session)?.();
     this.sessionEventDetachers.delete(session);
     if (this.sessions.get(session.sessionId) === session) {
@@ -2364,3 +2432,4 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     await next;
   }
 }
+import { getCodexProfileStore } from '../agent/codex-profile-store';

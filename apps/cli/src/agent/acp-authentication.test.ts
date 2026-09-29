@@ -4,7 +4,7 @@ import { PassThrough } from 'node:stream';
 import * as acp from '@agentclientprotocol/sdk';
 import { ACP_AUTHORIZATION_URL_MAX_LENGTH } from '@lody/shared';
 
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Logger } from '@/utils/logger';
 import { createStdinWritableStream, createStdoutReadableStream } from '@/utils/stream';
@@ -17,6 +17,7 @@ const createSilentLogger = (): Logger => ({
   error: () => {},
   success: () => {},
   debug: () => {},
+  trace: () => {},
   setLevel: () => {},
   child: () => createSilentLogger(),
   close: async () => {},
@@ -943,6 +944,16 @@ describe('AcpAuthenticationManager', () => {
 });
 
 describe('probeBuiltinAuthentication', () => {
+  // The probe merges process.env; a developer's or agent's own Anthropic/Bedrock
+  // settings would otherwise short-circuit it to env authentication.
+  beforeEach(() => {
+    for (const key of Object.keys(process.env)) {
+      if (/^(?:ANTHROPIC_|CLAUDE_CODE_USE_|AWS_BEARER_TOKEN_BEDROCK$)/u.test(key)) {
+        vi.stubEnv(key, undefined);
+      }
+    }
+  });
+
   it('does not spawn a status process for Pi', async () => {
     const spawnProcess = vi.fn();
     await expect(
@@ -959,6 +970,7 @@ describe('probeBuiltinAuthentication', () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.restoreAllMocks();
+    vi.unstubAllEnvs();
   });
 
   it('recognizes an authenticated Claude credential store', async () => {

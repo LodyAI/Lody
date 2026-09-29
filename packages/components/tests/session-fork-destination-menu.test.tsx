@@ -14,10 +14,6 @@ import {
   getSessionForkDestinationOptions,
 } from '../src/components/sessions/session-fork-destination-menu';
 
-vi.mock('@lody/virtua', () => ({
-  Virtualizer: ({ children }: { children: import('react').ReactNode }) => children,
-}));
-
 vi.mock('react-i18next', async (importOriginal) => ({
   ...(await importOriginal<object>()),
   useTranslation: () => ({
@@ -108,9 +104,9 @@ describe('SessionForkDestinationMenu', () => {
 
   it('keeps the Git status check inline on the disabled worktree row', async () => {
     await renderMenu({ worktreeAvailability: 'checking' });
-    const worktree = Array.from(
-      document.querySelectorAll<HTMLElement>('[role="menuitem"]')
-    ).find((item) => item.textContent?.startsWith('Fork to new worktree'));
+    const worktree = Array.from(document.querySelectorAll<HTMLElement>('[role="menuitem"]')).find(
+      (item) => item.textContent?.startsWith('Fork to new worktree')
+    );
     expect(worktree?.getAttribute('aria-disabled')).toBe('true');
     expect(worktree?.textContent).toContain('Checking Git status…');
   });

@@ -10,11 +10,13 @@ context/acp-agent-edit-evidence.md. Adapter source repositories and builtin prov
 [apps/cli/AGENTS.md](../../AGENTS.md). Where updates go after they arrive:
 context/message-flow.md "Upstream".
 
-| Boundary           | Owner                                        | Responsibility                                                               |
-| ------------------ | -------------------------------------------- | ---------------------------------------------------------------------------- |
-| ACP connection     | [AgentClient](agent-client.ts)               | Negotiates capabilities, tracks raw requests, and classifies steer evidence. |
-| Process startup    | [Runner](acp-runner.ts)                      | Spawns agents under the shared startup gate.                                 |
-| Runtime resolution | [Managed runtimes](managed-agent-runtime.ts) | Resolves pinned distributions and verifies their artifacts.                  |
+| Boundary           | Owner                                                                    | Responsibility                                                                   |
+| ------------------ | ------------------------------------------------------------------------ | -------------------------------------------------------------------------------- |
+| ACP connection     | [AgentClient](agent-client.ts)                                           | Negotiates capabilities, tracks raw requests, and classifies steer evidence.     |
+| Process startup    | [Runner](acp-runner.ts)                                                  | Spawns agents under the shared startup gate.                                     |
+| Runtime resolution | [Managed runtimes](managed-agent-runtime.ts)                             | Resolves pinned distributions and verifies their artifacts.                      |
+| Codex credentials  | [Profiles](codex-profile-store.ts), [broker](codex-credential-broker.ts) | Host-bound homes and vault generations; redirect-denying user-side API requests. |
+| Codex process uses | [Usage records](codex-profile-process-usage.ts) | Independent process records for deletion cleanup; same-profile sessions remain concurrent. |
 
 ## Files
 
@@ -153,6 +155,15 @@ Cache isolation, startup budgets, and retries still see the original npx command
 and arguments; conversion happens after those policies, on each spawn attempt.
 See the [Windows command-length fix](../../../../.agents/notes/implemented/bug-fix/2026-09-21-dsh-windows-command-length.md).
 
+### Claude upstream 0.84.0 source synchronization
+
+The bundled Claude gitlink includes upstream 0.84.0 while the fork package remains
+0.79.0. Lody builds that source directly, with SDK 0.3.284 / Claude Code 2.1.284;
+no npm adapter release is required. Lody advertises Core extensions and standard
+ACP capabilities, without AIR, terminal-output deltas or session notices. Standard
+tool fields and text fallback remain authoritative. Consumer audit and limits:
+[compatibility decision](../../../../.agents/notes/implemented/bug-fix/2026-09-29-claude-acp-sparse-updates.md).
+
 ### Managed runtimes
 
 Codex version/archive pins come from `codex-runtime-manifest.json`, which the outer
@@ -186,9 +197,10 @@ Which authentication path runs is decided by the provider, not the caller: a man
 runs its pinned login command, and everything else (registry and custom ACP) opens a
 temporary standard ACP connection in the same bounded lifecycle. Kimi runs `acp --login`;
 Grok runs the official `login --device-auth`; Claude Code runs the official
-`auth login --claudeai` subscription flow; Codex always runs the official
-`login --device-auth` ChatGPT flow so Web can complete authentication against a remote
-machine.
+`auth login --claudeai` subscription flow. Codex ChatGPT runs official
+`login --device-auth`; managed API profiles use the existing secret-input interaction
+and a tools-free Responses probe. [Account profiles](../../../../specs/codex-account-profiles.md)
+owns isolation, generation rotation, concurrency and compatibility guarantees.
 
 Remote Web transport stores only an ephemeral-ECDH/AES-GCM envelope in the 24-hour request
 stream; the target machine keeps the recipient private key in memory and decrypts

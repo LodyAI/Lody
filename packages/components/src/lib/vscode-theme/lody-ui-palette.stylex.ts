@@ -55,7 +55,12 @@ export const productDarkPalette = stylex.createTheme(colors, {
 
 export const productLightPalette = stylex.createTheme(colors, {
   background: 'hsl(var(--background))',
-  elevatedBackground: 'hsl(var(--card))',
+  // The card and modal rungs sit above the page. A light theme's `--card` is its
+  // sidebar, a step *below* the canvas, so a dialog read as sidebar gray with
+  // its wells darker still; the widget surface is the raised one. Dark keeps
+  // `--card`: there the sidebar is the deep-sea step the palette was tuned on,
+  // and the settings pane's light-only `--card` remap says the same thing.
+  elevatedBackground: 'hsl(var(--popover))',
   raisedBackground: 'hsl(var(--popover))',
   secondaryBackground: 'hsl(var(--card))',
   wellBackground: 'hsl(225 10% 11% / 0.05)',

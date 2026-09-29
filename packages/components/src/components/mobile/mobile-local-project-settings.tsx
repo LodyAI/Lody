@@ -213,7 +213,7 @@ export function MobileLocalProjectSettings({
                       />
                     </div>
                     <span className="truncate text-[0.95rem] font-medium leading-tight">
-                      {getHistoryProviderLabel(state.provider)}
+                      {state.providerLabel ?? getHistoryProviderLabel(state.provider)}
                     </span>
                   </div>
                 }

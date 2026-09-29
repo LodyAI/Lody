@@ -1,4 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
+import { mkdtempSync, mkdirSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   machineFlockKeys,
   writeMachineFlockRowToFlock,
@@ -11,12 +14,16 @@ import {
   type WorkspaceId,
 } from '@lody/shared';
 import type { LoroRepo } from 'loro-repo';
+import { deriveRepoIdFromLocalProjectPath } from '@lody/shared/node/worktree-paths';
 
 import {
+  readMachineLocalProjects,
+  reconcileMachineLocalProjectRootPaths,
   resolveWorkspaceLocalProjectRootPathWithRetry,
   resolveWorkspaceLocalProjectWithSyncOnMiss,
   isSessionInLocalProjectRemovalScope,
   shouldApplyMachineDeleteLocalProjectCommand,
+  upsertMachineLocalProject,
 } from './local-project-meta';
 
 describe('local project meta helpers', () => {
@@ -124,13 +131,72 @@ function seedLocalProject(flock: FakeMachineFlock): void {
 }
 
 function createRepo(flock: FakeMachineFlock) {
-  const openFlockDoc = vi.fn(async () => ({ flock }));
+  const openFlockDoc = vi.fn(async () => ({ flock, syncOnce: vi.fn(async () => {}) }));
   const repo = {
     getDocMeta: vi.fn(async () => undefined),
     openFlockDoc,
+    flush: vi.fn(async () => {}),
   } as unknown as LoroRepo;
   return { repo, openFlockDoc };
 }
+
+describe('local project root path publishing', () => {
+  it('repairs an older symlink row and canonicalizes later writes without changing its identity', async () => {
+    const temp = mkdtempSync(join(tmpdir(), 'lody-project-path-'));
+    try {
+      const target = join(temp, 'target');
+      const alias = join(temp, 'alias');
+      mkdirSync(target);
+      symlinkSync(target, alias, 'dir');
+      const flock = new FakeMachineFlock();
+      const { repo } = createRepo(flock);
+      const oldProject = {
+        ...projectMeta,
+        rootPath: alias,
+        history: { codex: { lastListedAt: 1, sessions: {} } },
+      } as LocalProjectMeta;
+      writeMachineFlockRowToFlock(
+        flock,
+        { key: machineFlockKeys.localProject(localProjectId), value: oldProject },
+        1
+      );
+      const sync = { markMachineFlockDocDirty: vi.fn() };
+
+      await reconcileMachineLocalProjectRootPaths(repo, workspaceId, machineId, sync);
+      const repaired = (await readMachineLocalProjects(repo, workspaceId, machineId))[
+        localProjectId
+      ];
+      expect(repaired).toEqual({
+        ...oldProject,
+        rootPath: realpathSync.native(target),
+      });
+      expect(deriveRepoIdFromLocalProjectPath(repaired.rootPath)).toBe(
+        deriveRepoIdFromLocalProjectPath(realpathSync.native(target))
+      );
+
+      await upsertMachineLocalProject(
+        repo,
+        workspaceId,
+        machineId,
+        {
+          ...oldProject,
+          lastOpenedAtMs: 2,
+        },
+        2,
+        { sync }
+      );
+      expect(
+        (await readMachineLocalProjects(repo, workspaceId, machineId))[localProjectId]
+      ).toEqual({
+        ...oldProject,
+        rootPath: realpathSync.native(target),
+        lastOpenedAtMs: 2,
+      });
+    } finally {
+      rmSync(temp, { recursive: true, force: true });
+    }
+  });
+});
 
 const instantSleep = () => vi.fn(async (_ms: number) => {});
 

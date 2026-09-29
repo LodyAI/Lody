@@ -2,7 +2,7 @@ import { Tooltip as BaseTooltip } from '@base-ui/react/tooltip';
 import * as stylex from '@stylexjs/stylex';
 import { forwardRef, type ComponentProps, type ReactNode } from 'react';
 import { appendClassName } from '../internal/class-name';
-import { usePopupContainer, type PopupContainer } from '../popup/portal-container';
+import { portalClassName, usePopupContainer, type PopupContainer } from '../popup/portal-container';
 import { useForcedThemeClassNames } from '../theme/theme';
 import { chip, hiddenChipForSide } from './chip';
 
@@ -52,7 +52,7 @@ export const TooltipContent = forwardRef<HTMLDivElement, TooltipContentProps>(
     // mounted into one switches to the absolute strategy to agree with it.
     const strategy = rest.positionMethod ?? (mountPoint != null ? 'absolute' : undefined);
     return (
-      <BaseTooltip.Portal container={mountPoint}>
+      <BaseTooltip.Portal container={mountPoint} className={portalClassName}>
         <BaseTooltip.Positioner
           ref={ref}
           {...rest}

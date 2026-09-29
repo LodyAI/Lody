@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useAtomValue } from 'jotai';
 import {
   CLOUD_PLATFORM_CAPABILITIES,
@@ -127,33 +127,65 @@ export function CloudPlatformProvider({ children }: { children: ReactNode }) {
     workspacesStore,
   ]);
 
+  // What the provider's methods call, read when they run. These callbacks change
+  // identity on every session refetch (window focus, the keepalive) —
+  // `createOrganization` closes over the refetched `user` object — and a
+  // consumer that owns resources per platform object, like the Prompt Shortcut
+  // runtime, tore them down and reopened them each time: an open Shortcut editor
+  // lost its draft and closed. The platform object changes only with what it
+  // states, not with a refetch that changed nothing.
+  const actions = useRef({
+    activateOrganization,
+    createOrganization,
+    refetchActiveOrganization,
+    refetchOrganizations,
+    updateOrganization,
+    signOut,
+    activeOrganizationId: organization.activeOrganization?.id,
+    role: organization.role,
+  });
+  actions.current = {
+    activateOrganization,
+    createOrganization,
+    refetchActiveOrganization,
+    refetchOrganizations,
+    updateOrganization,
+    signOut,
+    activeOrganizationId: organization.activeOrganization?.id,
+    role: organization.role,
+  };
+
   const provider = useMemo<PlatformProvider>(
     () => ({
       kind: 'cloud',
       identity: {
         session: sessionStore,
-        signOut,
+        signOut: () => actions.current.signOut(),
       },
       workspaces: {
         state: workspacesStore,
         retry: async () => {
-          await Promise.all([refetchOrganizations(), refetchActiveOrganization()]);
+          await Promise.all([
+            actions.current.refetchOrganizations(),
+            actions.current.refetchActiveOrganization(),
+          ]);
         },
         setActive: async (workspaceId) => {
-          await activateOrganization(workspaceId);
+          await actions.current.activateOrganization(workspaceId);
         },
         updateSlug: async (workspaceId, slug) => {
-          const updated = await updateOrganization(workspaceId, { slug });
+          const updated = await actions.current.updateOrganization(workspaceId, { slug });
           if (!updated) {
             throw new Error('Cloud workspace update returned no workspace');
           }
+          const { activeOrganizationId, role } = actions.current;
           return toWorkspaceSummary(
             updated,
-            updated.id === organization.activeOrganization?.id ? organization.role : undefined
+            updated.id === activeOrganizationId ? role : undefined
           );
         },
         create: async (input) => {
-          const created = await createOrganization(input.name, input.slug);
+          const created = await actions.current.createOrganization(input.name, input.slug);
           if (!created) {
             throw new Error('Cloud workspace creation returned no workspace');
           }
@@ -166,19 +198,7 @@ export function CloudPlatformProvider({ children }: { children: ReactNode }) {
         mode: localAgentSyncMode,
       },
     }),
-    [
-      createOrganization,
-      localAgentSyncMode,
-      refetchActiveOrganization,
-      refetchOrganizations,
-      sessionStore,
-      signOut,
-      activateOrganization,
-      organization.activeOrganization?.id,
-      organization.role,
-      updateOrganization,
-      workspacesStore,
-    ]
+    [localAgentSyncMode, sessionStore, workspacesStore]
   );
 
   return <PlatformContext.Provider value={provider}>{children}</PlatformContext.Provider>;

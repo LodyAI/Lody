@@ -6,6 +6,7 @@ import {
   CircleCheck,
   CircleDot,
   CircleMinus,
+  CircleSlash,
   CircleX,
   Clock,
   Folder,
@@ -23,6 +24,7 @@ import {
   isSessionGoalResumable,
   parseGitHubPrNumber,
   sanitizeGoalObjective,
+  type GitHubCheckRun,
   type GitHubMergeMethod,
   type PendingScheduledTask,
   type PrStatus,
@@ -736,7 +738,14 @@ export function ContextChip({
 
 /* ── PR CI checks ────────────────────────────────────────────────────── */
 
-export type PrCiRunStatus = 'success' | 'failure' | 'running' | 'queued' | 'skipped';
+export type PrCiRunStatus =
+  | 'success'
+  | 'failure'
+  | 'running'
+  | 'queued'
+  | 'skipped'
+  /** Cancelled/stale: aborted rather than failed, so it never turns CI red. */
+  | 'cancelled';
 
 export type PrCiRun = {
   name: string;
@@ -754,6 +763,33 @@ export function summarizePrCiRuns(runs: readonly PrCiRun[]): PrCiOverall {
   return 'passing';
 }
 
+export function mapGitHubCheckRunToPrCiRun(run: GitHubCheckRun): PrCiRun {
+  const status: PrCiRun['status'] =
+    run.status === 'queued'
+      ? 'queued'
+      : run.status === 'in_progress'
+        ? 'running'
+        : run.conclusion === 'success'
+          ? 'success'
+          : run.conclusion === 'neutral' || run.conclusion === 'skipped'
+            ? 'skipped'
+            : run.conclusion === 'cancelled' || run.conclusion === 'stale'
+              ? 'cancelled'
+              : 'failure';
+  const startedAtMs = run.startedAt ? Date.parse(run.startedAt) : Number.NaN;
+  const completedAtMs = run.completedAt ? Date.parse(run.completedAt) : Number.NaN;
+  const durationMs =
+    Number.isFinite(startedAtMs) && Number.isFinite(completedAtMs)
+      ? Math.max(0, completedAtMs - startedAtMs)
+      : undefined;
+  return {
+    name: run.name,
+    status,
+    ...(durationMs === undefined ? {} : { durationMs }),
+    ...(run.htmlUrl ? { url: run.htmlUrl } : {}),
+  };
+}
+
 export const PR_CI_RUN_ICON: Record<
   PrCiRunStatus,
   { Icon: typeof CircleCheck; className: string }
@@ -763,6 +799,7 @@ export const PR_CI_RUN_ICON: Record<
   running: { Icon: CircleDot, className: 'text-status-warning' },
   queued: { Icon: CircleDot, className: 'text-muted-foreground' },
   skipped: { Icon: CircleMinus, className: 'text-muted-foreground/70' },
+  cancelled: { Icon: CircleSlash, className: 'text-muted-foreground/70' },
 };
 
 export function usePrCiPresentation(runs: readonly PrCiRun[]) {

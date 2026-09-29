@@ -710,12 +710,15 @@ function SessionBrowserPanelController({
   useEffect(() => {
     if (
       !active ||
+      (!isLocalDesktopSession && checkingPreview) ||
       candidateNavigationRequestId <= handledCandidateNavigationRequestRef.current ||
       busy ||
       managedNavigationPhase !== null
     ) {
       return;
     }
+    // Wait for the initial status read to expose an already-prepared endpoint;
+    // the create path's empty viewer state would discard the speculative frame.
     if (!suggestedAddress) {
       // Hold the request while a reported candidate is still on its way: meta
       // knows one exists, the doc has not delivered its target yet. Consuming it
@@ -744,6 +747,8 @@ function SessionBrowserPanelController({
     active,
     busy,
     candidateNavigationRequestId,
+    checkingPreview,
+    isLocalDesktopSession,
     managedNavigationPhase,
     metaCandidateAvailable,
     openAddress,

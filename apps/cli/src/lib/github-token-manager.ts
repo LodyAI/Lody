@@ -10,6 +10,7 @@ import { formatErrorMessage } from '@/utils/format-error';
  * These match the public GitHub token broker protocol in `@lody/cloud-api`.
  */
 export type GitHubTokenErrorCode =
+  | 'personal_unavailable'
   | 'unauthorized'
   | 'not_a_member'
   | 'repo_not_linked'
@@ -28,6 +29,7 @@ const GitHubTokenSuccessSchema = z.object({
 const GitHubTokenErrorSchema = z.object({
   success: z.literal(false),
   errorCode: z.enum([
+    'personal_unavailable',
     'unauthorized',
     'not_a_member',
     'repo_not_linked',
@@ -108,6 +110,50 @@ export class GitHubTokenManager {
   private readonly states = new Map<RepoKey, RepoTokenState>();
   private refreshTimer: NodeJS.Timeout | null = null;
   private refreshAllInFlight: Promise<void> | null = null;
+
+  async getCredentialPolicy(
+    context: GitHubWriteTokenContext
+  ): Promise<{ personalEnabled: boolean }> {
+    return z.object({ personalEnabled: z.boolean() }).parse(
+      await this.client.action(api.github.getCredentialPolicyForCli, {
+        cliToken: this.cliToken,
+        workspaceId: this.workspaceId,
+        requesterUserId: context.requesterUserId,
+        machineId: context.machineId,
+      })
+    );
+  }
+
+  // Selection is per command. In particular, do not reuse an App candidate after
+  // the user enables personal identity, or mint App tokens to inspect preference.
+  async getCredentialCandidate(
+    repoFullName: string,
+    context: GitHubWriteTokenContext,
+    source: 'personal' | 'app',
+    invalidatedPersonalToken?: string
+  ): Promise<{ token: string; tokenSource: 'personal' | 'app' } | null> {
+    const result = GitHubTokenResponseSchema.parse(
+      await this.client.action(api.github.getOperationAccessTokenByRepoNameForCli, {
+        cliToken: this.cliToken,
+        workspaceId: this.workspaceId,
+        requesterUserId: context.requesterUserId,
+        machineId: context.machineId,
+        repoFullName,
+        operation: 'write',
+        credentialSource: source,
+        invalidatedPersonalToken,
+      })
+    );
+    if (!result.success) {
+      if (
+        result.errorCode === 'repo_not_linked' ||
+        (source === 'personal' && result.errorCode === 'personal_unavailable')
+      )
+        return null;
+      throw new GitHubTokenFetchError(result.errorCode, result.errorMessage);
+    }
+    return { token: result.token, tokenSource: result.tokenSource ?? 'app' };
+  }
 
   constructor(options: {
     serverUrl: string;

@@ -592,15 +592,16 @@ const uploadMultipart = async (args: UploadSessionFileArgs): Promise<SessionFile
     });
     return payload;
   } catch (error) {
-    // Best-effort server-side abort so abandoned uploads get cleaned up
-    // promptly (the server also expires them on its own).
-    void fetch(
+    // The transfer owns bounded cleanup; its scope cannot finish before it.
+    // The server still owns expiry if cleanup itself cannot reach it.
+    await fetch(
       buildSessionFileApiUrl(
         API_BASE_URL,
         getSessionFileMultipartAbortApiPath(workspaceId, uploadId)
       ),
       {
         method: 'DELETE',
+        signal: AbortSignal.timeout(5_000),
         headers: {
           Authorization: `Bearer ${token}`,
           'x-session-id': sessionId,

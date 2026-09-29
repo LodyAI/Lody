@@ -7,6 +7,7 @@ import { space } from '@lody/ui/tokens/scales.stylex';
 import { withClassName } from '@/lib/stylex';
 import { Button } from '@lody/ui/button';
 import { Menu } from '@/ui/menu';
+import { Spinner } from '@lody/ui/spinner';
 import { Tooltip } from '@lody/ui/tooltip';
 import { Checkbox } from '@lody/ui/checkbox';
 
@@ -29,7 +30,8 @@ const styles = stylex.create({
     color: { default: colors.secondaryLabel, ':hover': colors.label },
     userSelect: 'none',
     cursor: 'pointer',
-    transitionProperty: 'color, background-color, border-color, text-decoration-color, fill, stroke',
+    transitionProperty:
+      'color, background-color, border-color, text-decoration-color, fill, stroke',
     transitionDuration: '150ms',
     transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
   },
@@ -109,6 +111,8 @@ export interface WorktreeCheckboxPillProps {
   checked: boolean;
   onCheckedChange?: (checked: boolean) => void;
   disabled?: boolean;
+  /** Shows an inline progress mark and keeps the worktree control inert. */
+  loading?: boolean;
   disabledReason?: string;
   /** Flat composer-context presentation; the default is the standalone pill. */
   surface?: 'default' | 'context';
@@ -119,29 +123,36 @@ export function WorktreeCheckboxPill({
   checked,
   onCheckedChange,
   disabled = false,
+  loading = false,
   disabledReason,
   surface = 'default',
   className,
 }: WorktreeCheckboxPillProps) {
   const { t } = useTranslation();
+  const isDisabled = disabled || loading;
   const control = (
     <label
+      aria-busy={loading || undefined}
       {...withClassName(
         stylex.props(
           styles.checkboxPill,
-          disabled && styles.checkboxPillDisabled,
+          isDisabled && styles.checkboxPillDisabled,
           surface === 'context' && styles.checkboxPillContext,
-          surface === 'context' && disabled && styles.checkboxPillContextDisabled
+          surface === 'context' && isDisabled && styles.checkboxPillContextDisabled
         ),
         className
       )}
     >
-      <Checkbox
-        checked={checked}
-        onCheckedChange={(next) => onCheckedChange?.(next)}
-        disabled={disabled}
-        aria-label={t('chat.workdir.worktreeToggle', 'Use worktree')}
-      />
+      {loading ? (
+        <Spinner size="small" label={t('chat.workdir.loading', 'Loading Git status…')} />
+      ) : (
+        <Checkbox
+          checked={checked}
+          onCheckedChange={(next) => onCheckedChange?.(next)}
+          disabled={isDisabled}
+          aria-label={t('chat.workdir.worktreeToggle', 'Use worktree')}
+        />
+      )}
       <span>{t('chat.workdir.worktreePill', 'worktree')}</span>
     </label>
   );
@@ -150,7 +161,10 @@ export function WorktreeCheckboxPill({
 
   return (
     <Tooltip.Root>
-      <Tooltip.Trigger delay={400} render={<span {...stylex.props(styles.tooltipTrigger)}>{control}</span>} />
+      <Tooltip.Trigger
+        delay={400}
+        render={<span {...stylex.props(styles.tooltipTrigger)}>{control}</span>}
+      />
       <Tooltip.Content side="top">
         <span {...stylex.props(styles.tooltipCopy)}>{disabledReason}</span>
       </Tooltip.Content>
@@ -261,7 +275,7 @@ export function WorkdirModeSelector({
           if (option.description) {
             return (
               <Tooltip.Root key={option.value}>
-                <Tooltip.Trigger delay={500} render={item}/>
+                <Tooltip.Trigger delay={500} render={item} />
                 <Tooltip.Content side="left">{option.description}</Tooltip.Content>
               </Tooltip.Root>
             );

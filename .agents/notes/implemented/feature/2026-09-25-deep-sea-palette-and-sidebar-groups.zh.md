@@ -58,4 +58,4 @@ Translation: current
 - `tests/vscode-theme-css.test.ts` 和 `tests/vscode-theme.test.ts` 检查解析后的配色、青色强调色、琥珀色警告和抬高的弹出层。
   `tests/sidebar-machine-card.test.tsx` 检查只有确认离线的设备才显示 pill，以及悬停卡片的内容。组件测试全部通过。
 - 在本地 web 构建上检查过：分组标签实测 11.48px / 700、同一颜色；行 14px。
-- 未完成：折叠分组的活动点、列表里的主人头像、GitHub Worktrees 标签吸顶（它的仓库渲染在它的容器之外）。浅色主题不变。
+- 未完成：列表里的主人头像、GitHub Worktrees 标签吸顶（它的仓库渲染在它的容器之外）。浅色主题不变。折叠分组现已带状态标记：[折叠分组状态](2026-09-26-sidebar-folded-group-status.zh.md)。

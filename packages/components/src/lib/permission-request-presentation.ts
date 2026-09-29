@@ -8,8 +8,8 @@ export type PermissionOption = PermissionRequest['options'][number];
 /**
  * What a person needs to answer a permission request, read from what the agent
  * actually sent. The order of preference is the provider's own words first —
- * Claude and Codex send a heading ("Run command?", "Ready to code?") and a
- * reason in `_meta.permission` — and only then a heading derived from the tool
+ * Legacy adapters may send a heading and reason in `_meta.permission`;
+ * standard ACP requests instead use a heading derived from the tool
  * kind, because a derived one can only ever be generic.
  */
 
@@ -164,7 +164,13 @@ export const resolvePermissionOptionDescription = (option: PermissionOption): st
  */
 export const resolveSuggestedOptionId = (permission: PermissionRequest): string | null => {
   const options = permission.options;
-  if (readPermissionMeta(permission._meta).defaultToNo) {
+  // Claude's standard ACP projection conveys defaultToNo by leading with a
+  // refusal. Honor that conservative hint without opting into AIR metadata.
+  const first = options[0];
+  if (
+    readPermissionMeta(permission._meta).defaultToNo ||
+    (first && ['reject', 'rejectAlways'].includes(resolvePermissionOptionTone(first)))
+  ) {
     const refusal = options.find((option) => resolvePermissionOptionTone(option) === 'reject');
     if (refusal) return refusal.optionId;
   }

@@ -1,4 +1,5 @@
 import type { SessionId } from '@lody/shared';
+import * as stylex from '@stylexjs/stylex';
 
 import { LRUCache } from '@/lib/lru-cache';
 
@@ -15,6 +16,28 @@ type StatePreservingParent = HTMLElement & {
 
 const MAX_MANAGED_PREVIEW_FRAMES = 5;
 const DORMANT_FRAME_TTL_MS = 30 * 60 * 1000;
+const PRELOAD_FRAME_TTL_MS = 2 * 60 * 1000;
+
+const styles = stylex.create({
+  preload: {
+    position: 'fixed',
+    left: -10000,
+    top: 0,
+    width: 'min(720px, 100vw)',
+    height: '100vh',
+    visibility: 'hidden',
+    pointerEvents: 'none',
+  },
+});
+
+// A single speculative frame, separate from the already-opened page LRU.
+let preload:
+  | {
+      sessionId: SessionId;
+      entry: ManagedPreviewFrameEntry;
+      dispose: () => void;
+    }
+  | undefined;
 
 /**
  * Only an atomic move preserves an iframe's browsing context while reparenting.
@@ -42,6 +65,10 @@ const destroyEntry = (entry: ManagedPreviewFrameEntry): void => {
 const frames = new LRUCache<SessionId, ManagedPreviewFrameEntry>(MAX_MANAGED_PREVIEW_FRAMES, {
   onEvict: (_sessionId, entry) => destroyEntry(entry),
 });
+
+export const canPrepareManagedPreviewFrame = (sessionId: SessionId): boolean =>
+  supportsStatePreservingMove() && !frames.has(sessionId);
+
 let parkingLot: HTMLDivElement | null = null;
 
 const getParkingLot = (): HTMLDivElement => {
@@ -121,6 +148,36 @@ const createEntry = (
   return entry;
 };
 
+/** The returned cleanup owns only preparation; it cannot destroy a claimed page. */
+export const prepareManagedPreviewFrame = (
+  sessionId: SessionId,
+  viewerUrl: string,
+  title: string
+): (() => void) => {
+  if (!canPrepareManagedPreviewFrame(sessionId)) return () => {};
+  preload?.dispose();
+  const host = document.createElement('div');
+  host.className = stylex.props(styles.preload).className ?? '';
+  host.inert = true;
+  host.setAttribute('aria-hidden', 'true');
+  host.setAttribute('data-lody-preview-preload', 'true');
+  document.body.appendChild(host);
+  const entry = createEntry(viewerUrl, title);
+  host.appendChild(entry.iframe);
+  let timer: ReturnType<typeof setTimeout>;
+  const dispose = () => {
+    clearTimeout(timer);
+    if (preload?.entry === entry) {
+      preload = undefined;
+      destroyEntry(entry);
+    }
+    host.remove();
+  };
+  timer = setTimeout(dispose, PRELOAD_FRAME_TTL_MS);
+  preload = { sessionId, entry, dispose };
+  return dispose;
+};
+
 export const acquireManagedPreviewFrame = ({
   sessionId,
   viewerUrl,
@@ -146,7 +203,10 @@ export const acquireManagedPreviewFrame = ({
     return { iframe: entry.iframe, loaded: false };
   }
 
-  let entry = frames.get(sessionId);
+  const prepared = preload?.sessionId === sessionId ? preload : undefined;
+  if (prepared && prepared.entry.viewerUrl !== viewerUrl) prepared.dispose();
+  let entry =
+    frames.get(sessionId) ?? (preload?.sessionId === sessionId ? preload.entry : undefined);
   if (!entry) {
     entry = createEntry(viewerUrl, title, documentHtml);
   } else {
@@ -163,6 +223,11 @@ export const acquireManagedPreviewFrame = ({
   // be the entry evicted to make room for another session.
   frames.set(sessionId, entry);
   moveFrame(host, entry);
+  if (preload?.entry === entry) {
+    const claimed = preload;
+    preload = undefined;
+    claimed.dispose();
+  }
   return { iframe: entry.iframe, loaded: entry.loaded };
 };
 
@@ -185,6 +250,7 @@ export const releaseManagedPreviewFrame = (
 };
 
 export const clearManagedPreviewFrame = (sessionId: SessionId): void => {
+  if (preload?.sessionId === sessionId) preload.dispose();
   const entry = frames.get(sessionId);
   if (!entry) return;
   frames.delete(sessionId);

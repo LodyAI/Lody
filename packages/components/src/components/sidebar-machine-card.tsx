@@ -6,6 +6,12 @@ import { useMachineOnlineStatus } from '@/hooks/use-machine-online-status';
 import { cn } from '@/lib/utils';
 import { UserAvatar } from '@/components/user-avatar';
 import { SidebarHoverCard } from '@/components/session-info-hover-card';
+import {
+  SessionRowStatusIndicator,
+  hasSidebarGroupActivity,
+  useSidebarGroupActivityDescription,
+  type SidebarGroupActivity,
+} from '@/components/sidebar-row-shared';
 
 /** A machine's `os` (Node's `process.platform`) as people name it. */
 const OS_LABELS: Readonly<Record<string, string>> = {
@@ -25,6 +31,11 @@ export type SidebarMachineInfo = {
   isCurrent: boolean;
   os?: string | null;
   projectCount: number;
+  /**
+   * What the machine's FOLDED group hides. The header draws only the mark; the
+   * card, which already owns the header's hover, says how many of each.
+   */
+  activity?: SidebarGroupActivity | null;
 };
 
 /**
@@ -68,6 +79,7 @@ export function SidebarMachineHoverCard({
 function SidebarMachineCard({ machine }: { machine: SidebarMachineInfo }) {
   const { t } = useTranslation();
   const status = useMachineOnlineStatus(machine.machineId);
+  const activityDescription = useSidebarGroupActivityDescription(machine.activity);
   const ownerLabel = machine.isOwn
     ? t('sidebar.machineCard.yours', 'You')
     : machine.owner?.name?.trim() || t('sidebar.machineCard.unknownOwner', 'A teammate');
@@ -118,6 +130,22 @@ function SidebarMachineCard({ machine }: { machine: SidebarMachineInfo }) {
       </span>
     ),
   });
+
+  if (machine.activity && hasSidebarGroupActivity(machine.activity) && activityDescription) {
+    rows.push({
+      key: 'activity',
+      // The same mark the folded header draws, so the card reads as its legend.
+      icon: (
+        <SessionRowStatusIndicator
+          isWaitingPermission={machine.activity.waiting > 0}
+          isWorking={machine.activity.working > 0}
+          hasUnreadMessages={machine.activity.unread > 0}
+        />
+      ),
+      label: t('sidebar.machineCard.activity', 'Activity'),
+      value: <span className="min-w-0 truncate text-foreground">{activityDescription}</span>,
+    });
+  }
 
   return (
     <div className="flex min-w-0 flex-col text-xs text-foreground">

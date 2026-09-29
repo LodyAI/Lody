@@ -20,16 +20,17 @@ export type PendingImage = {
   localId: string;
   previewUrl: string;
   file: File;
-  status: 'uploading' | 'uploaded' | 'failed';
+  status: 'draft' | 'uploading' | 'uploaded' | 'failed';
   progress: number;
   error?: string;
   uploaded?: SessionImagePayload;
+  abort?: AbortController;
 };
 
 export type PendingFile = {
   localId: string;
   file: File;
-  status: SessionFileTransferPhase | 'uploaded' | 'failed';
+  status: 'draft' | SessionFileTransferPhase | 'uploaded' | 'failed';
   progress: number;
   error?: string;
   uploaded?: SessionFilePayload;

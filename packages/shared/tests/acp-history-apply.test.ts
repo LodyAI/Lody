@@ -89,6 +89,105 @@ const ACP_NOTIFICATION_FIXTURES = [
 ] as const;
 
 describe('acp history apply', () => {
+  it('replaces sparse ACP tool lists, preserves omitted fields, and clears explicit empty lists', () => {
+    const text = (value: string) => ({ type: 'content', content: { type: 'text', text: value } });
+    const updates = [
+      {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'sparse',
+        title: 'Lookup',
+        kind: 'other',
+        status: 'in_progress',
+        content: [text('old')],
+        locations: [{ path: '/old' }],
+      },
+      {
+        sessionUpdate: 'tool_call_update',
+        toolCallId: 'sparse',
+        content: [text('new')],
+        locations: [{ path: '/new' }],
+      },
+      { sessionUpdate: 'tool_call_update', toolCallId: 'sparse', status: 'completed' },
+    ].map(makeNotification);
+    for (const chunkSizes of [[1], [3]]) {
+      const history = replayInChunks(updates, chunkSizes);
+      expect(history[0]?.items).toEqual([
+        expect.objectContaining({
+          toolCallId: 'sparse',
+          title: 'Lookup',
+          kind: 'other',
+          status: 'completed',
+          content: [text('new')],
+          locations: [{ path: '/new' }],
+        }),
+      ]);
+      const cleared = applyNotificationOnHistory(history, [
+        makeNotification({
+          sessionUpdate: 'tool_call_update',
+          toolCallId: 'sparse',
+          content: [],
+          locations: [],
+        }),
+      ]);
+      expect(cleared[0]?.items).toEqual([
+        expect.objectContaining({
+          title: 'Lookup',
+          kind: 'other',
+          status: 'completed',
+          content: [],
+          locations: [],
+        }),
+      ]);
+    }
+  });
+
+  it('uses the previous tool kind and Core name when sparse updates omit them', () => {
+    const history = replayInChunks(
+      [
+        makeNotification({
+          sessionUpdate: 'tool_call',
+          toolCallId: 'read',
+          title: 'Read',
+          kind: 'read',
+          status: 'in_progress',
+        }),
+        makeNotification({
+          sessionUpdate: 'tool_call_update',
+          toolCallId: 'read',
+          content: [{ type: 'content', content: { type: 'text', text: 'private file body' } }],
+          rawOutput: 'private file body',
+          status: 'completed',
+        }),
+        makeNotification({
+          sessionUpdate: 'tool_call',
+          toolCallId: 'cron',
+          title: 'CronCreate',
+          kind: 'other',
+          status: 'in_progress',
+          _meta: { lody: { toolName: 'CronCreate' } },
+          rawInput: { cron: '* * * * *', prompt: 'synthetic reminder' },
+        }),
+        makeNotification({
+          sessionUpdate: 'tool_call_update',
+          toolCallId: 'cron',
+          status: 'completed',
+          rawOutput: { id: 'job' },
+        }),
+      ],
+      [1]
+    );
+    expect(JSON.stringify(history)).not.toContain('private file body');
+    expect(history[0]?.items).toEqual([
+      expect.objectContaining({ toolCallId: 'read', kind: 'read', status: 'completed' }),
+      expect.objectContaining({
+        toolCallId: 'cron',
+        toolName: 'CronCreate',
+        rawInput: { cron: '* * * * *', prompt: 'synthetic reminder' },
+        rawOutput: { id: 'job' },
+      }),
+    ]);
+  });
+
   it('stores ACP markdown plans beside their mode-switch card without duplicating updates', () => {
     const plan = (content: string) => makeNotification({
       sessionUpdate: 'plan_update',

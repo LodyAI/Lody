@@ -26,8 +26,8 @@ import {
  * can pinch ACTIVATES it: that one diagram becomes a canvas until Escape, a
  * click elsewhere, or the full-screen viewer takes over. Touch never activates —
  * inline pinch would mean taking `touch-action` from the browser and
- * reimplementing inertial panning — so a tap opens the viewer instead, where the
- * control bar's buttons zoom.
+ * reimplementing inertial panning — so a tap opens the viewer instead, where
+ * touch can pan and pinch without stealing the conversation's scroll.
  */
 
 /** The frame around one rendered diagram, inside a `mermaid-block`. */

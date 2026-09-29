@@ -75,7 +75,9 @@ const agent = acp
         : text.includes('[SCOUT:DIFF]')
           ? 'diff'
           : 'reply';
-    record('prompt-start', { sessionId: params.sessionId, mode });
+    // Journeys tag each user prompt so ordering and single delivery are observable.
+    const marker = /\[MARK:([\w-]+)\]/u.exec(text)?.[1];
+    record('prompt-start', { sessionId: params.sessionId, mode, ...(marker ? { marker } : {}) });
 
     if (mode === 'diff') {
       session.revision += 1;
@@ -98,7 +100,12 @@ const agent = acp
     await emitText(client, params.sessionId, 'Synthetic response started.');
     if (mode !== 'hold') {
       await emitText(client, params.sessionId, ' Synthetic response complete.');
-      record('prompt-end', { sessionId: params.sessionId, mode, stopReason: 'end_turn' });
+      record('prompt-end', {
+        sessionId: params.sessionId,
+        mode,
+        stopReason: 'end_turn',
+        ...(marker ? { marker } : {}),
+      });
       return { stopReason: 'end_turn' };
     }
 
