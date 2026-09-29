@@ -37,4 +37,4 @@ issue 里说的 180ms 关闭宽限，在指针从标题移到菜单时并不会�
 - `packages/components/tests/sidebar-machine-card.test.tsx` 渲染真实组合：机器卡包着一个展开的分组标题，标题的 action 是真实的 `SidebarFilterPopover`。菜单打开时，在机器名上停留再移进菜单，卡片都保持关闭。菜单关闭后，悬停能打开卡片，即使标题开关仍是 `aria-expanded="true"`。
 - `packages/components/tests/session-info-hover-card.test.tsx` 给触发器加了一个 portal 子节点：移进它会取消预热，直接进入它不会打开卡片，在它里面按下不会抑制触发器。
 - `tests/helpers/pointer-boundary.ts` 按浏览器在指针移动时发送的顺序触发事件：先 over/out，再在每个 DOM 祖先上触发 enter/leave。jsdom 不会从一组事件推出另一组，所以这些测试同时覆盖 React 监听和原生监听。
-- 没有在真实 Electron 会话里验证。jsdom 不会绘制两个 portal 弹出层的重叠。
+- owner 在 macOS 上用本分支构建的隔离 OSS 桌面版手动验证过：筛选菜单打开时，在机器名上停留再移进菜单，机器卡不再打开或闪烁；菜单关闭后，悬停机器名会像以前一样打开卡片。

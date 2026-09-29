@@ -81,5 +81,7 @@ Rejected:
   on a pointer move: over and out, then enter and leave on each DOM ancestor.
   jsdom derives neither pair from the other, so these tests exercise both React
   and native listeners.
-- Not verified in a live Electron session. jsdom does not paint two portalled
-  popups overlapping.
+- The owner checked the fix by hand in an isolated OSS desktop build of this
+  branch on macOS. With the filter menu open, dwelling on the machine name and
+  moving into the menu no longer opens the machine card or makes it flash.
+  After the menu closes, hovering the machine name opens the card as before.
