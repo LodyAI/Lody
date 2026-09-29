@@ -22,7 +22,9 @@ export function movePointer(from: Element, to: Element) {
   from.dispatchEvent(
     new MouseEvent('pointerout', { bubbles: true, cancelable: true, relatedTarget: to })
   );
-  for (const node of left) node.dispatchEvent(new MouseEvent('pointerleave', { relatedTarget: to }));
+  for (const node of left) {
+    node.dispatchEvent(new MouseEvent('pointerleave', { relatedTarget: to }));
+  }
   to.dispatchEvent(
     new MouseEvent('pointerover', { bubbles: true, cancelable: true, relatedTarget: from })
   );

@@ -133,7 +133,13 @@ describe('sidebar machine group', () => {
       const [filterOpen, setFilterOpen] = useState(false);
       return (
         <SidebarMachineHoverCard
-          machine={{ machineId, name: 'Lampese.local', isOwn: true, isCurrent: true, projectCount: 1 }}
+          machine={{
+            machineId,
+            name: 'Lampese.local',
+            isOwn: true,
+            isCurrent: true,
+            projectCount: 1,
+          }}
         >
           {/* Expanded, so the header's own toggle reports aria-expanded="true". */}
           <SidebarSectionHeader
