@@ -20,7 +20,6 @@ import {
 } from '@/lib/workspace-route-guard';
 import { RouteMessage } from '@/components/route-message';
 import { LoadingPlaceholder } from '@/components/loading-placeholder';
-import { clearLastAppRoutePathIfWorkspaceMatch } from '@/lib/last-app-route';
 import {
   WORKSPACE_SLUG_RESERVED_LANDING_EXACT_PATHS,
   WORKSPACE_SLUG_RESERVED_LANDING_PREFIXES,
@@ -185,7 +184,6 @@ function CloudWorkspaceGuardRoute() {
   }, [access?.status, workspaceName]);
 
   const renderWorkspaceAccessDeniedFallback = () => {
-    clearLastAppRoutePathIfWorkspaceMatch(workspaceName);
     clearPreferredWorkspaceSlugIfMatch(workspaceName);
     /* Both callers gate on a DEFINITIVE denial (`not_found` / `not_member`),
        so recording here cannot poison the set with transient errors. The set
