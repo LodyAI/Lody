@@ -6,6 +6,7 @@ import {
   isAgentRoleContentEqual,
   isSensitiveAgentRoleConfigOptionKey,
   normalizeAgentRoleEmoji,
+  normalizeAgentRoleDescription,
   normalizeAgentRoleMentionSlug,
   normalizeAgentRoleRunConfig,
   type AgentConfigId,
@@ -28,6 +29,7 @@ import {
  */
 export type AgentRoleFormValue = {
   name: string;
+  description: string;
   emoji: string;
   machineId: MachineId | null;
   agentConfigId: AgentConfigId | null;
@@ -41,6 +43,7 @@ export type AgentRoleFormValue = {
 
 export const EMPTY_AGENT_ROLE_FORM_VALUE: AgentRoleFormValue = {
   name: '',
+  description: '',
   emoji: '',
   machineId: null,
   agentConfigId: null,
@@ -84,6 +87,7 @@ export const buildAgentRoleFormValueFromRunConfig = (input: {
 
 export const buildAgentRoleFormValue = (role: AgentRole): AgentRoleFormValue => ({
   name: role.name,
+  description: role.description ?? '',
   emoji: role.emoji ?? '',
   machineId: role.machineId,
   agentConfigId: role.agentConfigId,
@@ -169,6 +173,7 @@ export const buildAgentRoleFromForm = (
     ownerUserId: existing?.ownerUserId ?? ownerUserId,
     visibility: value.shareWithWorkspace ? 'workspace' : 'private',
     name: value.name.trim(),
+    description: normalizeAgentRoleDescription(value.description),
     ...(emoji ? { emoji } : {}),
     machineId: value.machineId as MachineId,
     agentConfigId: value.agentConfigId as AgentConfigId,

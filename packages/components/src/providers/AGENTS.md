@@ -4,11 +4,9 @@
 
 ## Mirrors over synced docs tolerate unknown root keys
 
-Every `new Mirror(...)` over a doc that syncs between clients must pass
-`ignoreUnknownProperties: true`. Peers on a newer schema write root keys this
-build does not declare; without the flag loro-mirror rejects the entire state
-with `Unknown property: <key>`, so the older client can never write to that doc
-again. Contract test: `packages/shared/tests/session-doc-forward-compat.test.ts`.
+Synced-doc Mirrors must set `ignoreUnknownProperties: true`: newer peers' unknown
+root keys otherwise reject the whole state and block writes. Test:
+`packages/shared/tests/session-doc-forward-compat.test.ts`.
 
 Session docs use `createSessionMirror`; only its HistoryWriter writes history.
 Replacement contract: [shared rules](../../../shared/AGENTS.md#session-history).
@@ -23,6 +21,12 @@ Replacement contract: [shared rules](../../../shared/AGENTS.md#session-history).
   live Streams connections.
 - Release any one-shot document handle or subscription that is not already owned by the
   workspace runtime.
+- Startup capability discovery is once per agent config per runtime, recorded in the
+  runtime-owned `refreshedConfigKeys` set. A pass aborted by presence leaving `synced` is
+  re-armed, so a pass-level flag is not the gate: reconnecting must never re-probe a config that
+  already answered, because each probe starts and kills a real agent process. Refresh requests
+  default to the machine's cache; only a user action or a setup/authentication workflow sets
+  `force`. Intent: [capability refresh cache](../../../../specs/acp-capability-refresh-cache.md).
 
 ## Workspace switching
 
@@ -37,6 +41,8 @@ Replacement contract: [shared rules](../../../shared/AGENTS.md#session-history).
   projection and disables queries, Machine Flock, sharing, and eager-sync inputs. Provider-
   external consumers such as `RuntimeProvider` retain their existing default behavior. Explicit
   `workspaceId` / `enabled` options remain fenced by the route scope and cannot reopen stale work.
+- Each `resolveWorkspaceDataScope` wait names its `blocker`; keep scan failures on the scope.
+  [Stuck report](../../../../.agents/notes/implemented/feature/2026-09-26-workspace-sync-stuck-telemetry.md).
 
 ## Workspace runtime
 
@@ -71,9 +77,11 @@ Replacement contract: [shared rules](../../../shared/AGENTS.md#session-history).
   adoption; storage-loaded versions must be durable before cursor advancement. Never
   replace a live document. Import before constructing the history reader to avoid
   replaying bulk-import events through an initialized projection.
-- Repo storage, durable Streams cursors, and eager-sync high-water state must use the
+- Repo storage, LoroDoc Streams cursors, and eager-sync high-water state must use the
   same per-renderer cache namespace. A checkpoint must never be shared by independently
-  persisted Repo views.
+  persisted Repo views. Meta/Flock cursors are replica-bound
+  (`workspace-streams-transport.ts`): never route them through a separate cursor store;
+  delete Meta progress via `repo.getReplicaCheckpointStore`.
 - Transport state is selected per room, never merged. Runtime stores use
   `getReadinessTransportForRoom`; hooks without the router use the structural binding in
   `src/lib/room-readiness.ts`. Keep those selection rules aligned.
@@ -101,3 +109,14 @@ Replacement contract: [shared rules](../../../shared/AGENTS.md#session-history).
 - Doc-metadata bootstrap and the live repo watch overlap by design: merge per field with
   live winning (`mergeBootstrapMetaCache`), never letting the snapshot undo an archive
   already applied live.
+
+## Attachment transfer ownership
+
+Workspace `sendResources` owns preparation, cancellation and store borrows across
+React unmount. Dispose before transports/caches; join noncancelable IPC. Only the
+cache disposes stores. Cancel I/O, fence late results, await multipart cleanup.
+
+Admission uses the scoped journal. Commit turns locally; resume appends only
+absent ids after catch-up. Lock submission/delivery separately;
+sync before retiring records. Observe live work and scoped Web Locks; reads must
+not restart interrupted sends. Keep recovery actions reachable inline on mobile.

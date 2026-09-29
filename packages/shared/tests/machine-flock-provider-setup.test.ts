@@ -1,4 +1,9 @@
 import { describe, expect, it } from 'vitest';
+import {
+  CodexAuthProfileSchema,
+  encodeCodexProfileConfig,
+  CODEX_PROFILE_LEGACY_LAUNCH_GUARD,
+} from '../src/codex-auth-profile';
 import type { AgentConfigId, MachineId } from '../src/ids';
 import {
   getMachineFlockProviderSetups,
@@ -33,6 +38,61 @@ const setup: ProviderSetupTask = {
 };
 
 describe('machine flock provider setup rows', () => {
+  it('retains nonsecret managed identity and strips only its exact legacy executable guard', () => {
+    const config = {
+      ...setup.config,
+      codexAuth: {
+        mode: 'api-key' as const,
+        profileId: 'b15bb9a7-d3a5-4438-9f5b-d953dfdc046c',
+        baseUrl: 'https://relay.example.invalid/v1/',
+      },
+    };
+    const persisted = encodeCodexProfileConfig(config);
+    expect(persisted.runtimeOverrides?.codexPath).toBe(CODEX_PROFILE_LEGACY_LAUNCH_GUARD);
+    const parsed = parseMachineFlockRow(machineFlockKeys.providerSetup(setup.id), {
+      ...setup,
+      config: persisted,
+    });
+    expect(parsed?.value).toMatchObject({
+      config: { codexAuth: { ...config.codexAuth, baseUrl: 'https://relay.example.invalid/v1' } },
+    });
+    if (!parsed) throw new Error('Managed setup did not parse');
+    expect((parsed.value as ProviderSetupTask).config.runtimeOverrides).toBeUndefined();
+    expect(
+      parseMachineFlockRow(machineFlockKeys.providerSetup(setup.id), {
+        ...setup,
+        config: { ...persisted, runtimeOverrides: { codexPath: '/tmp/foreign' } },
+      })
+    ).toBeUndefined();
+    expect(
+      parseMachineFlockRow(machineFlockKeys.providerSetup(setup.id), {
+        ...setup,
+        config: { ...persisted, env: { openai_api_key: 'synthetic-secret' } },
+      })
+    ).toBeUndefined();
+  });
+
+  it('rejects unsafe endpoint and credential fields as structured validation errors', () => {
+    const profile = { mode: 'api-key', profileId: 'b15bb9a7-d3a5-4438-9f5b-d953dfdc046c' };
+    for (const baseUrl of [
+      'bad',
+      'http://remote.example/v1',
+      'https://user:secret@relay.example/v1',
+      'https://relay.example/v1?token=secret',
+    ]) {
+      expect(CodexAuthProfileSchema.safeParse({ ...profile, baseUrl }).success).toBe(false);
+    }
+    expect(
+      CodexAuthProfileSchema.safeParse({ ...profile, baseUrl: 'http://127.0.0.1:1234/v1' }).success
+    ).toBe(true);
+    expect(
+      CodexAuthProfileSchema.safeParse({
+        ...profile,
+        baseUrl: 'https://relay.example/v1',
+        apiKey: 'synthetic',
+      }).success
+    ).toBe(false);
+  });
   it('parses and indexes a valid durable setup', () => {
     const row = parseMachineFlockRow(machineFlockKeys.providerSetup(setupId), setup);
     expect(row).toEqual({ key: ['providerSetup', setupId], value: setup });

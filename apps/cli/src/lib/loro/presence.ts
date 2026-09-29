@@ -126,9 +126,9 @@ export class CliPresenceRuntime {
    * replica and the local-origin view from ever diverging, and is the only
    * place that announces a local-plane push.
    *
-   * Every call queues one serial POST on the workspace's SHARED presence
-   * transport, ahead of the machine heartbeat, with no coalescing and no queue
-   * bound. Callers must therefore be driven by a timer, a lifecycle transition,
+   * The workspace's SHARED presence transport sends serial POSTs. Its built-in
+   * adaptor coalesces unsent same-key updates, but never in-flight writes or
+   * distinct keys. Callers must still be driven by a timer, a lifecycle transition,
    * or a user navigation — never by a stream/progress/chunk callback. A burst
    * here makes this machine read offline even though the room stays `joined`.
    * Bounds: `specs/loro-ephemeral-presence-channel.md`.

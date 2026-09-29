@@ -1,3 +1,6 @@
+import * as stylex from '@stylexjs/stylex';
+import { space } from '@lody/ui/tokens/scales.stylex';
+import { writeTextToClipboard } from '@/lib/clipboard';
 import {
   type ComponentPropsWithoutRef,
   type ComponentType,
@@ -8,6 +11,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   memo,
   type MouseEvent as ReactMouseEvent,
+  type ReactElement,
   type ReactNode,
   useCallback,
   useContext,
@@ -49,9 +53,9 @@ import { usePostHog } from '@posthog/react';
 import { capturePostHogEvent, getAnalyticsFileKind } from '@/lib/posthog-analytics';
 import { getRpcDeliveredTurnKey, rpcDeliveredTurnsAtom } from '@/atoms/session-dispatch-delivery';
 import { selectAtom } from 'jotai/utils';
-import { Virtualizer, type VirtualizerHandle, type CustomItemComponentProps } from '@lody/virtua';
 import {
   type AgentConfigCliType,
+  type AcpCommandSummary,
   type ChatFailedCode,
   type ClientToServer,
   MODEL_THOUGHT_LEVEL_META_KEY,
@@ -87,12 +91,18 @@ import { currentWorkspaceIdAtom } from '@/atoms';
 import { getAgentMetaByIdAtomFamily } from '@/atoms/agents';
 import { sessionMetaAtomFamily } from '@/atoms/doc-meta';
 import { authTokenAtom, runtimeAtom } from '@/atoms/runtime';
-import { machineSupportsSubagentCancellation } from '@lody/shared';
+import { machineSupportsSubagentCancellation, machineSupportsSubagentEvents } from '@lody/shared';
 import { scrollDebug } from '@/hooks/scroll-debug-log';
 import { readSessionTurnTokenUsage, type SessionTurnTokenUsage } from '@lody/shared/session-data';
 import { formatCompactNumber } from '@/lib/format-compact-number';
 import { toIntlLocaleOrEn } from '@/lib/intl-locale';
-import { useStickyScroll } from '@/hooks/use-sticky-scroll';
+import type { EngineRow } from '@/lib/conversation-scroll/types';
+import { EngineConversationScroller } from './conversation-list/engine-conversation-scroller';
+import type {
+  ConversationListHandle,
+  ConversationRowComponentProps,
+  ConversationScrollerState,
+} from './conversation-list/types';
 import { buildResendInputBlocks, isUndeliveredUserTurnEntry } from '@/lib/undelivered-user-turn';
 import { ConversationOutlineRail } from './conversation-outline-rail';
 import { useLatestRef } from '@/hooks/use-latest-ref';
@@ -166,9 +176,12 @@ import {
   type AssistantToolCallRenderItem,
   type AssistantTurnRenderBlock,
 } from './assistant-turn-render-blocks';
-import { SubagentTaskPanel, collectSubagentTasks } from './subagent-task-panel';
+import { SubagentTaskPanel, collectSubagentTasks, type SubagentTask } from './subagent-task-panel';
 import { SessionReadonlyContext } from './session-readonly-context';
 import { UserMessageEditor } from './user-message-editor';
+import type { MentionProjectSource } from '@/components/mentions/mention-project-file-source';
+import type { SkillMentionAgent } from '@/components/mentions/mention-skill-source';
+import type { Mention as MentionRange } from '@/ui/mention/index';
 import { resolvePermissionRecord } from './permission-record';
 import {
   hasSeparatePlanItem,
@@ -184,6 +197,20 @@ import {
 } from './conversation-panel';
 import { TerminalComponent } from './terminal-component';
 import { prepareTerminalOutputBlocksPreview } from './terminal-preview';
+import {
+  ToolCaptionSection,
+  ToolCommandSection,
+  ToolDetailSection,
+  ToolDetailSheet,
+  ToolOutputSection,
+  ToolVerbatimSection,
+} from './tool-call-detail';
+import {
+  extractFencedToolText,
+  formatToolCommand,
+  isToolCommandEcho,
+  isToolSearchTitle,
+} from './tool-call-command';
 import { formatDurationCompact, getDurationUnitLabels } from '@/lib/format-duration';
 import {
   resolveLiveSessionHistoryDurationMs,
@@ -192,7 +219,7 @@ import {
 import { cn } from '@/lib/utils';
 import { ConversationColumn } from '@/components/shared/conversation-column';
 import type { TurnIndexRow } from '@/lib/conversation-view';
-import { TurnPlaceholderRow } from './turn-placeholder-row';
+import { TurnPlaceholderRow, estimatePlaceholderHeight } from './turn-placeholder-row';
 import { CreatedSessionOperationCard } from './created-session-operation-card';
 import { OperationReplyCard } from './operation-reply-card';
 import type { SessionNavigationTarget } from '@/lib/session-navigation';
@@ -233,10 +260,13 @@ import { ContainerQueryProvider } from './container-query-provider';
 import { ScheduleProposalNotice } from '@/components/schedules/schedule-proposal-notice';
 import { shouldRenderSystemRowItem } from './message-content-guards';
 import { getChatFailedDiagnosticCopy } from './chat-failed-diagnostic-copy';
-import { extractReadableChatFailedMessage } from './chat-failed-error-report';
+import {
+  buildChatFailedErrorReport,
+  extractReadableChatFailedMessage,
+} from './chat-failed-error-report';
 import { DEFAULT_CONVERSATION_FONT_SIZE, type ConversationFontSize } from '@/atoms/settings';
 import {
-  conversationMonoFontSizeStyle,
+  compactConversationFontSize,
   conversationTextFontSizeStyle,
   userTextCollapsedHeight,
 } from './conversation-font-size-classes';
@@ -345,15 +375,6 @@ export type MessageFileDiffEntriesByTurn = Readonly<
 
 const EMPTY_EDITED_FILE_ENTRIES: readonly AssistantEditedFileEntry[] = [];
 
-/** How close an outline jump has to land before it counts as arrived. */
-const OUTLINE_JUMP_TOLERANCE_PX = 2;
-/**
- * One correction is normally enough — arriving measures the target's rows, so
- * the re-issued jump uses real offsets. The bound only exists so a target that
- * genuinely cannot reach the top (the list's tail) stops retrying.
- */
-const OUTLINE_JUMP_MAX_CORRECTIONS = 3;
-
 export type ChatStreamItem = SessionMessageItem | EmptySessionItem | PlaceholderSessionItem;
 
 type AssistantVirtualContent =
@@ -436,6 +457,30 @@ export type SessionChatUser =
   | null
   | undefined;
 
+/**
+ * What the inline edit-and-resend editor reports on save: the raw text plus
+ * the committed mention ranges measured against it, so the caller can run the
+ * same before-send expansion a composer send does.
+ */
+export type UserMessageEditSubmission = {
+  text: string;
+  mentions: readonly MentionRange[];
+  /** Transcript spans after expansion + trim; carried into the replacement
+   *  turn's text block so the bubble can repaint the user's own wording. */
+  spans?: MessageTextSpan[];
+};
+
+/**
+ * The mention sources the session's composer resolves for the row's editor.
+ * Surfaces without a composer (share page, tour) leave this unset and the
+ * editor degrades to a plain textarea.
+ */
+export type UserMessageEditMentionContext = {
+  mentionSource?: MentionProjectSource;
+  availableCommands?: AcpCommandSummary[];
+  skillAgent?: SkillMentionAgent;
+};
+
 export interface AssistantMessageAction {
   id: string;
   label: string;
@@ -474,11 +519,12 @@ const NativeSelectionRowsContext = createContext<{
   leading: number;
   held: ReadonlySet<string>;
 }>({ rows: [], leading: 0, held: new Set() });
-// Keys of the two Virtua rows that are not conversation rows (`keyed` needs one per row).
+// Keys of the list rows that are not conversation rows (the engine keys every row).
 const LEADING_ROW_KEY = '\u0000leading';
 const AGENT_ACTIVITY_ROW_KEY = '\u0000agent-activity';
+const TRAILING_ROW_KEY = '\u0000trailing';
 
-function ConversationVirtualRow({ index, ...props }: CustomItemComponentProps) {
+function ConversationVirtualRow({ index, ...props }: ConversationRowComponentProps) {
   const { rows, leading, held } = useContext(NativeSelectionRowsContext);
   const row = rows[index - leading];
   // Row tooltips, popovers and context menus mount on the first hover or focus
@@ -517,6 +563,8 @@ export interface SessionChatStreamViewProps {
   className?: string;
   /** Scrolls as the first conversation row (for example, Session provenance). */
   leadingContent?: ReactNode;
+  /** Scrolls after history as a local, not-yet-committed user message. */
+  trailingContent?: ReactNode;
   emptyState?: ReactNode;
   onAtBottomChange?: (atBottom: boolean) => void;
   showScrollToLatest?: boolean;
@@ -980,6 +1028,7 @@ type AssistantTurnRowsCacheEntry = {
   activeSearchBlockId: string | null | undefined;
   expansionVersion: number;
   copyContextAvailable: boolean;
+  showThoughts: boolean;
 };
 const assistantTurnRowsCache = new WeakMap<SessionMessageItem, AssistantTurnRowsCacheEntry>();
 
@@ -993,6 +1042,7 @@ export const buildChatVirtualRows = ({
   activeSearchBlockId,
   expansionVersion,
   copyContextAvailable = false,
+  showThoughts = false,
   selectionLayouts,
 }: {
   selectionLayouts?: ReadonlyMap<string, SelectionTurnLayout>;
@@ -1004,6 +1054,7 @@ export const buildChatVirtualRows = ({
   activeSearchBlockId?: string | null;
   expansionVersion: number;
   copyContextAvailable?: boolean;
+  showThoughts?: boolean;
 }): ChatVirtualRow[] => {
   const rows: ChatVirtualRow[] = [];
 
@@ -1056,6 +1107,7 @@ export const buildChatVirtualRows = ({
       cachedRows.scopedAssistantActions === scopedAssistantActions &&
       cachedRows.activeSearchBlockId === activeSearchBlockId &&
       cachedRows.copyContextAvailable === copyContextAvailable &&
+      cachedRows.showThoughts === showThoughts &&
       cachedRows.expansionVersion === expansionVersion
     ) {
       rows.push(...cachedRows.rows);
@@ -1119,7 +1171,9 @@ export const buildChatVirtualRows = ({
         block.entries,
         selectionSearchBlockId
       );
-      const expanded = isSearchExpanded || cachedExpansion[block.key] === true;
+      const thoughtOnly =
+        showThoughts && block.entries.every((entry) => entry.content.type === 'thought');
+      const expanded = isSearchExpanded || (cachedExpansion[block.key] ?? thoughtOnly);
       const isActive =
         isLastAssistantMessage && message.finished !== true && blockIndex === blocks.length - 1;
       const lastEntry = block.entries[block.entries.length - 1];
@@ -1129,10 +1183,10 @@ export const buildChatVirtualRows = ({
         (lastEntry.content.type === 'thought' || lastEntry.content.kind === 'think')
       );
 
-      const toolEntries = block.entries.filter(
-        (entry) => isAssistantToolCallActivityEntry(entry) && entry.content.kind !== 'think'
+      const visibleEntries = block.entries.filter((entry) =>
+        entry.content.type === 'thought' ? showThoughts : entry.content.kind !== 'think'
       );
-      if (toolEntries.length === 0) return;
+      if (visibleEntries.length === 0) return;
 
       target.push({
         type: 'assistant',
@@ -1144,7 +1198,7 @@ export const buildChatVirtualRows = ({
         isLastRowForMessage: false,
       });
       if (expanded) {
-        for (const entry of toolEntries) {
+        for (const entry of visibleEntries) {
           const entrySuffix =
             entry.content.type === 'tool_call' ? entry.content.toolCallId : 'thought';
           target.push({
@@ -1158,7 +1212,7 @@ export const buildChatVirtualRows = ({
               entry,
               groupKey: block.key,
               showThoughtLabel: false,
-              isThinking: false,
+              isThinking: isThinking && entry === lastEntry,
             },
             isWorkedDetail,
             isLastRowForMessage: false,
@@ -1331,6 +1385,7 @@ export const buildChatVirtualRows = ({
       activeSearchBlockId,
       expansionVersion,
       copyContextAvailable,
+      showThoughts,
     });
     rows.push(...assistantRows);
   }
@@ -1338,15 +1393,164 @@ export const buildChatVirtualRows = ({
   return rows;
 };
 
+/** Heights the scroll engine assumes for a row it has not measured yet. */
+const ENGINE_ROW_ESTIMATE_PX = {
+  standard: 88,
+  content: 72,
+  compact: 36,
+  footer: 40,
+  plan: 120,
+  subagentTasks: 64,
+  leading: 48,
+  activity: 36,
+  // Pending messages: usually none, so the row is usually empty.
+  trailing: 0,
+} as const;
+
+const toolCallIdOf = (content: unknown): string | null =>
+  content &&
+  typeof content === 'object' &&
+  (content as { type?: unknown }).type === 'tool_call' &&
+  typeof (content as { toolCallId?: unknown }).toolCallId === 'string'
+    ? (content as { toolCallId: string }).toolCallId
+    : null;
+
 /**
- * Chat virtual scroll using the keyed Virtua fork (`@lody/virtua`).
- *
- * Rows are keyed (`keyed`), not `shift`ed: sizes follow row keys, and rows
- * inserted anywhere above the viewport (placeholder turns hydrating) keep the
- * row at the viewport start in place.
- *
- * Sticky-to-bottom behavior (ResizeObserver, hysteresis, scroll position
- * caching) is encapsulated in the `useStickyScroll` hook.
+ * What the conversation scroll engine knows about a row: its turn, the item
+ * it renders (for reading anchors that survive row-key changes) and a size to
+ * assume before measuring it.
+ */
+const engineRowOf = (row: ChatVirtualRow): EngineRow => {
+  const base = {
+    key: row.key,
+    turnIndex: row.messageIndex,
+    itemIndex: null,
+    itemIdentity: null,
+    firstItemIndex: null,
+    placeholder: false,
+    fixed: null,
+  };
+  if (row.type === 'placeholder') {
+    return {
+      ...base,
+      turnId: row.item.row.id,
+      placeholder: true,
+      // The placeholder's block plus its column's vertical padding.
+      estimate: estimatePlaceholderHeight(row.item.row) + 20,
+    };
+  }
+  if (row.type === 'standard') {
+    return {
+      ...base,
+      turnId: row.item.type === 'message' ? row.item.message.id : null,
+      estimate: ENGINE_ROW_ESTIMATE_PX.standard,
+    };
+  }
+  const turnId = row.item.message.id;
+  const content = row.content;
+  switch (content.kind) {
+    case 'content':
+      return {
+        ...base,
+        turnId,
+        itemIndex: row.itemIndex ?? null,
+        itemIdentity: toolCallIdOf(content.block.entry.content),
+        firstItemIndex: row.itemIndex ?? null,
+        estimate: ENGINE_ROW_ESTIMATE_PX.content,
+      };
+    case 'activity_detail':
+      return {
+        ...base,
+        turnId,
+        itemIndex: row.itemIndex ?? null,
+        itemIdentity: toolCallIdOf(content.entry.content),
+        firstItemIndex: row.itemIndex ?? null,
+        estimate: ENGINE_ROW_ESTIMATE_PX.compact,
+      };
+    case 'activity_group_header':
+      return {
+        ...base,
+        turnId,
+        firstItemIndex: content.block.entries[0]?.itemIndex ?? null,
+        estimate: ENGINE_ROW_ESTIMATE_PX.compact,
+      };
+    case 'worked_group_header':
+      return { ...base, turnId, estimate: ENGINE_ROW_ESTIMATE_PX.compact };
+    case 'plan':
+      return { ...base, turnId, estimate: ENGINE_ROW_ESTIMATE_PX.plan };
+    case 'subagent_tasks':
+      return { ...base, turnId, estimate: ENGINE_ROW_ESTIMATE_PX.subagentTasks };
+    case 'footer':
+      return { ...base, turnId, estimate: ENGINE_ROW_ESTIMATE_PX.footer };
+  }
+  return { ...base, turnId, estimate: ENGINE_ROW_ESTIMATE_PX.content };
+};
+
+const LEADING_ENGINE_ROW: EngineRow = {
+  key: LEADING_ROW_KEY,
+  turnId: null,
+  turnIndex: -1,
+  itemIndex: null,
+  itemIdentity: null,
+  firstItemIndex: null,
+  placeholder: false,
+  fixed: 'leading',
+  estimate: ENGINE_ROW_ESTIMATE_PX.leading,
+};
+
+const AGENT_ACTIVITY_ENGINE_ROW: EngineRow = {
+  key: AGENT_ACTIVITY_ROW_KEY,
+  turnId: null,
+  turnIndex: -1,
+  itemIndex: null,
+  itemIdentity: null,
+  firstItemIndex: null,
+  placeholder: false,
+  fixed: 'agent-activity',
+  estimate: ENGINE_ROW_ESTIMATE_PX.activity,
+};
+
+const TRAILING_ENGINE_ROW: EngineRow = {
+  key: TRAILING_ROW_KEY,
+  turnId: null,
+  turnIndex: -1,
+  itemIndex: null,
+  itemIdentity: null,
+  firstItemIndex: null,
+  placeholder: false,
+  fixed: 'trailing',
+  estimate: ENGINE_ROW_ESTIMATE_PX.trailing,
+};
+
+/**
+ * The conversation viewport's own style, shared by both scroller
+ * implementations. Browser scroll anchoring is off for the whole scroller, not
+ * only the rows container: the reply-room spacer and the selection overlay
+ * are its children too, and a browser anchoring on them would be a third
+ * writer of `scrollTop`.
+ */
+const CONVERSATION_VIEWPORT_STYLE = {
+  display: 'block',
+  overflowY: 'auto',
+  overflowAnchor: 'none',
+  contain: 'strict',
+  width: '100%',
+  height: '100%',
+  paddingTop: 'calc(var(--conversation-top-inset, 0px) + 1.5rem)',
+} as const;
+
+const INITIAL_SCROLLER_STATE: ConversationScrollerState = {
+  scrollElement: null,
+  revealed: false,
+  isSticky: true,
+};
+
+/**
+ * The conversation: a virtualized list of keyed rows, rendered and scrolled by
+ * the conversation scroll engine (`lib/conversation-scroll`,
+ * `conversation-list/engine-conversation-scroller.tsx`). The engine follows
+ * the end, restores the reading position by row and holds a sent message at
+ * the top; this view talks to it only through `ConversationListHandle`.
  */
 export const SessionChatStreamView = forwardRef<
   SessionChatStreamHandle,
@@ -1360,6 +1564,7 @@ export const SessionChatStreamView = forwardRef<
       initialWindowReady = true,
       className,
       leadingContent,
+      trailingContent,
       emptyState,
       onAtBottomChange,
       showScrollToLatest = true,
@@ -1391,7 +1596,16 @@ export const SessionChatStreamView = forwardRef<
     },
     ref
   ) => {
-    const vlistRef = useRef<VirtualizerHandle>(null);
+    const thoughtVisibilityAtom = useMemo(
+      () =>
+        selectAtom(
+          sessionMetaAtomFamily(getSessionRoomId(sessionId)),
+          (meta) => meta?.cliType === 'builtin' && meta.agentType === 'deepseek'
+        ),
+      [sessionId]
+    );
+    const showThoughts = useAtomValue(thoughtVisibilityAtom);
+    const listRef = useRef<ConversationListHandle>(null);
     const messageSelection = useContext(MessageSelectionContext);
     const nativeTextSelectionActiveRef = useRef(false);
     const selectionLayoutsRef = useRef(new Map<string, SelectionTurnLayout>());
@@ -1415,16 +1629,9 @@ export const SessionChatStreamView = forwardRef<
     const [assistantExpansionVersion, setAssistantExpansionVersion] = useState(0);
     const [hoveredAssistantMessageId, setHoveredAssistantMessageId] = useState<string | null>(null);
     /**
-     * An outline jump in flight. Declared here, beside the other suppression
-     * state, because `autoScrollSuppressedRef` below reads it — see
-     * `handleOutlineJump` for what maintains it.
-     */
-    const pendingOutlineJumpRef = useRef<{ rowIndex: number; attempts: number } | null>(null);
-    /**
-     * Every reason this component has to stop follow-output. Group expansion
-     * releases in the layout effect of its own commit; an outline jump releases
-     * when the jump finishes (see `pendingOutlineJumpRef`), because an event
-     * handler cannot count on a commit happening at all.
+     * Every reason this component has to stop follow-output: native text
+     * selection and message selection. A jump needs none: it sets the engine's
+     * reading intent, which already releases follow.
      */
     const autoScrollSuppressedRef = useMemo(
       () => ({
@@ -1432,7 +1639,6 @@ export const SessionChatStreamView = forwardRef<
           return (
             nativeTextSelectionActiveRef.current ||
             messageSelection !== null ||
-            pendingOutlineJumpRef.current !== null ||
             Boolean(suppressStickyAutoScrollRef?.current)
           );
         },
@@ -1450,7 +1656,7 @@ export const SessionChatStreamView = forwardRef<
           },
         });
         // Toggling must not scroll: the header stays where the reader clicked
-        // and the rows open or fold beneath it. useStickyScroll keeps a
+        // and the rows open or fold beneath it. The scroll engine keeps a
         // non-following reader from being pulled to the end by the commit's
         // observer deliveries; a reader following the tail is left there.
         setAssistantExpansionVersion((version) => version + 1);
@@ -1493,9 +1699,11 @@ export const SessionChatStreamView = forwardRef<
         activeSearchBlockId,
         expansionVersion: assistantExpansionVersion,
         copyContextAvailable,
+        showThoughts,
         selectionLayouts,
       });
     }, [
+      showThoughts,
       selectionLayouts,
       activeSearchBlockId,
       assistantActions,
@@ -1569,8 +1777,7 @@ export const SessionChatStreamView = forwardRef<
      */
     const scrollRowToTop = useCallback(
       (rowIndex: number, smooth = false) => {
-        vlistRef.current?.scrollToIndex(rowIndex + leadingRowCount, {
-          align: 'start',
+        listRef.current?.scrollRowToTop(rowIndex + leadingRowCount, {
           smooth,
           offset: itemOffsetDeltaRef.current,
         });
@@ -1578,11 +1785,6 @@ export const SessionChatStreamView = forwardRef<
       [leadingRowCount]
     );
 
-    // Whether this render reaches the virtualized branch below. A session whose
-    // document is still being acquired renders the empty sentinel and returns
-    // before `Virtualizer` mounts, yet every hook above that return has already
-    // run — including the one that reads the stored row measurements.
-    const hasVirtualizedRows = virtualRows.length > 0;
     const placeholderRowCount = useMemo(
       () => virtualRows.reduce((count, row) => count + (row.type === 'placeholder' ? 1 : 0), 0),
       [virtualRows]
@@ -1597,29 +1799,42 @@ export const SessionChatStreamView = forwardRef<
       });
     }, [leadingContent, placeholderRowCount, virtualRows.length]);
 
+    // The viewport's scroll owner is the conversation scroll engine; everything
+    // below talks to it through `listRef` (see `conversation-list/types.ts`).
+    const [listState, setListState] = useState(INITIAL_SCROLLER_STATE);
+    const handleListStateChange = useCallback((next: ConversationScrollerState) => {
+      setListState((current) =>
+        current.scrollElement === next.scrollElement &&
+        current.revealed === next.revealed &&
+        current.isSticky === next.isSticky
+          ? current
+          : next
+      );
+    }, []);
     const {
-      scrollRef: scrollContainerRef,
-      spacerRef: bottomSpacerRef,
       scrollElement: scrollViewportElement,
       isSticky,
-      scrollToBottom: scrollStreamToBottom,
-      anchorToRow,
-      retargetAnchor,
-      initialScrollRestored,
-      initialVirtualizerCache,
-      persistVirtualizerCache,
-      handleScroll,
-    } = useStickyScroll({
-      sessionId,
-      initialContentReady: initialWindowReady,
-      vlistRef,
-      hasVirtualizedRows,
-      // `leadingContent` is a real first Virtua row, so it counts here — sticky
-      // scroll otherwise targets an index short of the true bottom.
-      itemCount: virtualRows.length + leadingRowCount + (shouldShowAgentActivityRow ? 1 : 0),
-      onAtBottomChange,
-      suppressAutoScrollRef: autoScrollSuppressedRef,
-    });
+      revealed: initialScrollRestored,
+    } = listState;
+    const scrollStreamToBottom = useCallback(() => listRef.current?.scrollToBottom(), []);
+    const anchorToRow = useCallback((index: number) => listRef.current?.anchorToRow(index), []);
+    const retargetAnchor = useCallback(
+      (index: number) => listRef.current?.retargetAnchor(index),
+      []
+    );
+    const engineRowMeta = useMemo(() => {
+      const meta = virtualRows.map(engineRowOf);
+      if (leadingContent != null) meta.unshift(LEADING_ENGINE_ROW);
+      if (shouldShowAgentActivityRow && agentActivityLabel) meta.push(AGENT_ACTIVITY_ENGINE_ROW);
+      if (trailingContent != null) meta.push(TRAILING_ENGINE_ROW);
+      return meta;
+    }, [
+      agentActivityLabel,
+      leadingContent,
+      shouldShowAgentActivityRow,
+      trailingContent,
+      virtualRows,
+    ]);
 
     /**
      * A sent message waiting for its row. The send path learns the turn id
@@ -1690,7 +1905,7 @@ export const SessionChatStreamView = forwardRef<
       sessionId,
       view: conversationView,
       viewport: scrollViewportElement,
-      virtualizer: vlistRef,
+      virtualizer: listRef,
       rows: selectableRows,
       leadingRowCount,
       activeRef: nativeTextSelectionActiveRef,
@@ -1709,7 +1924,6 @@ export const SessionChatStreamView = forwardRef<
       },
       onChange: (ids) => {
         onRetainedTurnIdsChange?.(ids);
-        if (nativeTextSelectionActiveRef.current) pendingOutlineJumpRef.current = null;
         setSelectionVersion((version) => version + 1);
       },
       onRelease: () => {
@@ -1788,7 +2002,7 @@ export const SessionChatStreamView = forwardRef<
     }, [scrollViewportElement]);
 
     const syncActiveOutlineIndex = useCallback(() => {
-      const vlist = vlistRef.current;
+      const vlist = listRef.current;
       if (!initialScrollRestored || !vlist || outlineAnchors.length === 0) {
         setActiveOutlineIndex(-1);
         return;
@@ -1829,86 +2043,20 @@ export const SessionChatStreamView = forwardRef<
       syncActiveOutlineIndexRef,
     ]);
 
-    /** How far a pending jump still is from its target, in item-offset space. */
-    const outlineJumpDrift = useCallback(
-      (rowIndex: number): number => {
-        const vlist = vlistRef.current;
-        if (!vlist) return 0;
-        const targetOffset = vlist.getItemOffset(rowIndex + leadingRowCount);
-        return Math.abs(vlist.scrollOffset - itemOffsetDeltaRef.current - targetOffset);
-      },
-      [leadingRowCount]
-    );
-
     /**
-     * A jump into rows Virtua has never measured lands on ESTIMATED offsets.
-     * Virtua does re-issue internally as measurements arrive, but it gives up
-     * after 150ms of silence (`core/index.js`), and a React commit plus the
-     * ResizeObserver round trip for a screenful of message rows routinely takes
-     * longer than that — so a far jump settles a round short. Arriving is what
-     * measures the rows, so re-issuing once the scroll settles converges.
-     *
-     * While a jump is pending it also suppresses follow-output, so a jump upward
-     * out of a sticky conversation is not pulled straight back to the bottom.
-     * Tying suppression to this ref rather than to a render is deliberate: the
-     * release must not depend on a commit that React can skip.
+     * Jump to a round. The engine holds the round's row at the top as the rows
+     * around it are measured and hydrated, so one jump lands; no correction
+     * pass re-issues it (a stored row index goes stale as placeholders expand).
      */
     const handleOutlineJump = useCallback(
       (outlineIndex: number) => {
         const anchor = outlineAnchors.find((item) => item.outlineIndex === outlineIndex);
         if (!anchor) return;
-        pendingOutlineJumpRef.current = { rowIndex: anchor.rowIndex, attempts: 0 };
         scrollRowToTop(anchor.rowIndex);
-        // Clicking the round already at the top scrolls nowhere, so no
-        // `onScrollEnd` will arrive to clear the pending jump — and suppression
-        // would stay armed until some unrelated render happened to release it.
-        if (outlineJumpDrift(anchor.rowIndex) <= OUTLINE_JUMP_TOLERANCE_PX) {
-          pendingOutlineJumpRef.current = null;
-        }
         setActiveOutlineIndex(outlineIndex);
       },
-      [outlineAnchors, outlineJumpDrift, scrollRowToTop]
+      [outlineAnchors, scrollRowToTop]
     );
-
-    const handleStreamScrollEnd = useCallback(() => {
-      // Scrolling measured more rows; keep them for the next open.
-      persistVirtualizerCache();
-      const pending = pendingOutlineJumpRef.current;
-      if (!pending) return;
-      if (
-        outlineJumpDrift(pending.rowIndex) <= OUTLINE_JUMP_TOLERANCE_PX ||
-        pending.attempts >= OUTLINE_JUMP_MAX_CORRECTIONS
-      ) {
-        // Not settling within the bound means the target simply cannot reach the
-        // top — the last rounds are shorter than the viewport, so the scroll
-        // clamps. Stop rather than retry against a wall.
-        pendingOutlineJumpRef.current = null;
-        return;
-      }
-      pendingOutlineJumpRef.current = {
-        rowIndex: pending.rowIndex,
-        attempts: pending.attempts + 1,
-      };
-      scrollRowToTop(pending.rowIndex);
-    }, [outlineJumpDrift, persistVirtualizerCache, scrollRowToTop]);
-
-    // Any real input abandons the correction: a reader who starts scrolling
-    // must never be yanked back by a jump they have already moved on from.
-    useEffect(() => {
-      if (!scrollViewportElement) return undefined;
-      const abandon = () => {
-        pendingOutlineJumpRef.current = null;
-      };
-      const options = { passive: true } as const;
-      scrollViewportElement.addEventListener('wheel', abandon, options);
-      scrollViewportElement.addEventListener('touchstart', abandon, options);
-      scrollViewportElement.addEventListener('keydown', abandon, options);
-      return () => {
-        scrollViewportElement.removeEventListener('wheel', abandon);
-        scrollViewportElement.removeEventListener('touchstart', abandon);
-        scrollViewportElement.removeEventListener('keydown', abandon);
-      };
-    }, [scrollViewportElement]);
 
     // Desktop-only top fade: shown only when content has scrolled under the top
     // edge, so it reads as "more conversation above" without dimming the first
@@ -1924,7 +2072,7 @@ export const SessionChatStreamView = forwardRef<
     const onVisibleTurnRangeChangeRef = useLatestRef(onVisibleTurnRangeChange);
     const lastVisibleRangeRef = useRef<VisibleTurnRange | null>(null);
     const reportVisibleTurnRange = useCallback(() => {
-      const vlist = vlistRef.current;
+      const vlist = listRef.current;
       const report = onVisibleTurnRangeChangeRef.current;
       if (!vlist || !report) return;
       const rows = virtualRowsRef.current;
@@ -1968,13 +2116,12 @@ export const SessionChatStreamView = forwardRef<
 
     const handleStreamScroll = useCallback(
       (offset: number) => {
-        handleScroll(offset);
         setIsScrolledFromTop(offset > 0);
         syncHasContentBelow();
         syncActiveOutlineIndex();
         reportVisibleTurnRange();
       },
-      [handleScroll, reportVisibleTurnRange, syncActiveOutlineIndex, syncHasContentBelow]
+      [reportVisibleTurnRange, syncActiveOutlineIndex, syncHasContentBelow]
     );
 
     // Content also grows or shrinks without a scroll (a streaming reply under
@@ -2119,12 +2266,114 @@ export const SessionChatStreamView = forwardRef<
                     </div>
                   )}
                 </div>
+                {trailingContent == null ? null : (
+                  <div className="shrink-0" data-conversation-trailing-content="">
+                    {trailingContent}
+                  </div>
+                )}
               </div>
             </ContainerQueryProvider>
           </SessionImagePreviewContext.Provider>
         </SessionChatActionContext.Provider>
       );
     }
+
+    // Keyed rows in list order: the leading row, the conversation, the activity
+    // row, and the pending (not yet committed) messages.
+    const listRows = [
+      leadingContent == null ? null : (
+        <div key={LEADING_ROW_KEY} data-conversation-leading-content="">
+          {leadingContent}
+        </div>
+      ),
+      ...virtualRows.map((row, rowIndex) => {
+        if (row.type === 'placeholder') {
+          return <TurnPlaceholderRow key={row.key} row={row.item.row} />;
+        }
+        if (row.type === 'standard') {
+          // Standard rows are only ever system or user messages
+          // (assistant turns are flattened into `assistant` rows below),
+          // so they carry no per-turn file diffs or last-assistant
+          // quick actions.
+          return (
+            <MessageSelectionRow
+              key={row.key}
+              id={row.item.type === 'message' ? row.item.message.id : undefined}
+              first
+            >
+              <ChatItem
+                item={row.item}
+                renderMessageRow={renderMessageRow}
+                noMessagesLabel={noMessagesLabel}
+                emptyState={emptyState}
+              />
+            </MessageSelectionRow>
+          );
+        }
+
+        const canForkAssistantMessage =
+          row.item.message.finished === true &&
+          (row.item.message.id === lastCompletedAssistantMessageId ||
+            Boolean(row.item.message.acpTurnId));
+        const fileDiffOverride =
+          messageFileDiffEntriesByTurn === undefined
+            ? undefined
+            : (messageFileDiffEntriesByTurn[row.item.message.id] ?? EMPTY_EDITED_FILE_ENTRIES);
+        return (
+          <MessageSelectionRow
+            key={row.key}
+            id={row.item.message.id}
+            first={virtualRows[rowIndex - 1]?.messageIndex !== row.messageIndex}
+          >
+            <AssistantChatItem
+              row={row}
+              fileDiffOverride={fileDiffOverride}
+              assistantActions={resolveAssistantMessageActions(
+                row.item.message.id,
+                assistantActionsMessageId,
+                assistantActions
+              )}
+              onFork={canForkAssistantMessage ? onForkLastAssistant : undefined}
+              forkWorktreeAvailability={forkWorktreeAvailability}
+              onForkWorktreeMenuOpen={onForkWorktreeMenuOpen}
+              isForking={forkingAssistantMessageId === row.item.message.id}
+              onFileDiffClick={onFileDiffClick}
+              onFilePathClick={onFilePathClick}
+              onGroupExpandedChange={handleAssistantGroupExpandedChange}
+              onWorkedGroupExpandedChange={handleAssistantWorkedGroupExpandedChange}
+              isTurnHovered={hoveredAssistantMessageId === row.item.message.id}
+              onTurnHoverChange={handleAssistantTurnHoverChange}
+              conversationFontSize={conversationFontSize}
+              shimmerGroupHeader={row.key === liveGroupHeaderRowKey}
+              liveStatus={row.key === liveStatusRowKey ? liveTurnStatus : null}
+              liveStatusFollowsSurface={
+                row.key === liveStatusRowKey && assistantRowPaintsSurface(virtualRows[rowIndex - 1])
+              }
+            />
+          </MessageSelectionRow>
+        );
+      }),
+      shouldShowAgentActivityRow && agentActivityLabel ? (
+        <div
+          key={AGENT_ACTIVITY_ROW_KEY}
+          className="shrink-0 pt-1"
+          data-agent-activity-row-spacer=""
+        >
+          <AgentActivityRow
+            label={agentActivityLabel}
+            tone={agentActivityTone}
+            shimmer={agentActivityShimmer}
+            message={liveAgentActivityMessage}
+            conversationFontSize={conversationFontSize}
+          />
+        </div>
+      ) : null,
+      trailingContent == null ? null : (
+        <div key={TRAILING_ROW_KEY} data-conversation-trailing-content="">
+          {trailingContent}
+        </div>
+      ),
+    ].filter((row): row is ReactElement => row != null);
 
     return (
       <SessionChatActionContext.Provider value={chatActionContextValue}>
@@ -2133,151 +2382,40 @@ export const SessionChatStreamView = forwardRef<
             ref={scrollRootRef}
             className={cn('relative bg-background', className)}
           >
-            <div
-              ref={scrollContainerRef}
-              data-message-selection-scroll=""
-              data-window-session-stream-ready={
-                initialWindowReady && initialScrollRestored ? sessionId : undefined
-              }
-              // Keep x overflow explicit: overflow-y:auto otherwise computes
-              // the untouched x axis to auto too, letting any wide row pan the
-              // entire conversation instead of its own nested scroller.
-              className="chat-scrollbar relative h-full overflow-x-hidden py-5 sm:py-6"
-              // Mobile session page floats a frosted header over the list;
-              // `--conversation-top-inset` (set by session-detail's mobile
-              // branch) pads the scroll content so the first message clears the
-              // header at rest while later content scrolls under it and blurs.
-              // Unset elsewhere → falls back to py-6's 1.5rem, a no-op.
-              style={{
-                visibility: initialWindowReady && initialScrollRestored ? 'visible' : 'hidden',
-                display: 'block',
-                overflowY: 'auto',
-                contain: 'strict',
-                width: '100%',
-                height: '100%',
-                paddingTop: 'calc(var(--conversation-top-inset, 0px) + 1.5rem)',
-              }}
-            >
-              <NativeSelectionRowsContext.Provider value={nativeSelectionRows}>
-                <Virtualizer
-                  ref={vlistRef}
-                  item={ConversationVirtualRow}
-                  // Row heights measured the last time this session was open, so
-                  // the first layout is the real one instead of an estimate that
-                  // has to be corrected before the conversation can be shown.
-                  cache={initialVirtualizerCache}
-                  // Rows are identified by key: sizes follow their rows, and a
-                  // placeholder turn becoming several rows above the reader
-                  // leaves what they are reading in place.
-                  keyed
-                  onScroll={handleStreamScroll}
-                  onScrollEnd={handleStreamScrollEnd}
-                  // Pre-render extra items outside the viewport to reduce blank areas
-                  // during fast scrolling (especially on mobile). This is 4x Virtua's
-                  // default (200px) — generous, but deliberately not the previous 2000px:
-                  // an oversized buffer keeps a huge set of still-resizing rows mounted,
-                  // which widens the window where Virtua's offsets are mid-recompute and
-                  // rows can transiently overlap. 800 keeps ~2 viewports of headroom.
-                  bufferSize={CONVERSATION_OVERSCAN}
-                  keepMounted={nativeTextSelection.keepMounted}
-                >
-                  {leadingContent == null ? null : (
-                    <div key={LEADING_ROW_KEY} data-conversation-leading-content="">
-                      {leadingContent}
-                    </div>
-                  )}
-                  {virtualRows.map((row, rowIndex) => {
-                    if (row.type === 'placeholder') {
-                      return <TurnPlaceholderRow key={row.key} row={row.item.row} />;
-                    }
-                    if (row.type === 'standard') {
-                      // Standard rows are only ever system or user messages
-                      // (assistant turns are flattened into `assistant` rows below),
-                      // so they carry no per-turn file diffs or last-assistant
-                      // quick actions.
-                      return (
-                        <MessageSelectionRow
-                          key={row.key}
-                          id={row.item.type === 'message' ? row.item.message.id : undefined}
-                          first
-                        >
-                          <ChatItem
-                            item={row.item}
-                            renderMessageRow={renderMessageRow}
-                            noMessagesLabel={noMessagesLabel}
-                            emptyState={emptyState}
-                          />
-                        </MessageSelectionRow>
-                      );
-                    }
-
-                    const canForkAssistantMessage =
-                      row.item.message.finished === true &&
-                      (row.item.message.id === lastCompletedAssistantMessageId ||
-                        Boolean(row.item.message.acpTurnId));
-                    const fileDiffOverride =
-                      messageFileDiffEntriesByTurn === undefined
-                        ? undefined
-                        : (messageFileDiffEntriesByTurn[row.item.message.id] ??
-                          EMPTY_EDITED_FILE_ENTRIES);
-                    return (
-                      <MessageSelectionRow
-                        key={row.key}
-                        id={row.item.message.id}
-                        first={virtualRows[rowIndex - 1]?.messageIndex !== row.messageIndex}
-                      >
-                        <AssistantChatItem
-                          row={row}
-                          fileDiffOverride={fileDiffOverride}
-                          assistantActions={resolveAssistantMessageActions(
-                            row.item.message.id,
-                            assistantActionsMessageId,
-                            assistantActions
-                          )}
-                          onFork={canForkAssistantMessage ? onForkLastAssistant : undefined}
-                          forkWorktreeAvailability={forkWorktreeAvailability}
-                          onForkWorktreeMenuOpen={onForkWorktreeMenuOpen}
-                          isForking={forkingAssistantMessageId === row.item.message.id}
-                          onFileDiffClick={onFileDiffClick}
-                          onFilePathClick={onFilePathClick}
-                          onGroupExpandedChange={handleAssistantGroupExpandedChange}
-                          onWorkedGroupExpandedChange={handleAssistantWorkedGroupExpandedChange}
-                          isTurnHovered={hoveredAssistantMessageId === row.item.message.id}
-                          onTurnHoverChange={handleAssistantTurnHoverChange}
-                          conversationFontSize={conversationFontSize}
-                          shimmerGroupHeader={row.key === liveGroupHeaderRowKey}
-                          liveStatus={row.key === liveStatusRowKey ? liveTurnStatus : null}
-                          liveStatusFollowsSurface={
-                            row.key === liveStatusRowKey &&
-                            assistantRowPaintsSurface(virtualRows[rowIndex - 1])
-                          }
-                        />
-                      </MessageSelectionRow>
-                    );
-                  })}
-                  {shouldShowAgentActivityRow && agentActivityLabel && (
-                    <div
-                      key={AGENT_ACTIVITY_ROW_KEY}
-                      className="shrink-0 pt-1"
-                      data-agent-activity-row-spacer=""
-                    >
-                      <AgentActivityRow
-                        label={agentActivityLabel}
-                        tone={agentActivityTone}
-                        shimmer={agentActivityShimmer}
-                        message={liveAgentActivityMessage}
-                        conversationFontSize={conversationFontSize}
-                      />
-                    </div>
-                  )}
-                </Virtualizer>
-              </NativeSelectionRowsContext.Provider>
-              {/* Reply room below an anchored sent message; useStickyScroll
-                  owns its height. It must follow the Virtualizer: sticky scroll
-                  reads the virtualized content as the viewport's first child. */}
-              <div ref={bottomSpacerRef} aria-hidden data-conversation-reply-room="" />
-              <MessageSelectionOverlay />
-            </div>
+            <NativeSelectionRowsContext.Provider value={nativeSelectionRows}>
+              <EngineConversationScroller
+                sessionId={sessionId}
+                rows={listRows}
+                rowMeta={engineRowMeta}
+                item={ConversationVirtualRow}
+                keepMounted={nativeTextSelection.keepMounted}
+                initialWindowReady={initialWindowReady}
+                suppressAutoScrollRef={autoScrollSuppressedRef}
+                onAtBottomChange={onAtBottomChange}
+                onScroll={handleStreamScroll}
+                onStateChange={handleListStateChange}
+                layoutKey={String(conversationFontSize)}
+                // Keep x overflow explicit: overflow-y:auto otherwise computes
+                // the untouched x axis to auto too, letting any wide row pan the
+                // entire conversation instead of its own nested scroller.
+                // Mobile session page floats a frosted header over the list;
+                // `--conversation-top-inset` (set by session-detail's mobile
+                // branch) pads the scroll content so the first message clears the
+                // header at rest while later content scrolls under it and blurs.
+                // Unset elsewhere → falls back to py-6's 1.5rem, a no-op.
+                viewportClassName="chat-scrollbar relative h-full overflow-x-hidden py-5 sm:py-6"
+                viewportStyle={CONVERSATION_VIEWPORT_STYLE}
+                trailing={<MessageSelectionOverlay />}
+                // Pre-render extra items outside the viewport to reduce blank areas
+                // during fast scrolling (especially on mobile). This is 4x Virtua's
+                // default (200px) — generous, but deliberately not the previous 2000px:
+                // an oversized buffer keeps a huge set of still-resizing rows mounted,
+                // which widens the window where Virtua's offsets are mid-recompute and
+                // rows can transiently overlap. 800 keeps ~2 viewports of headroom.
+                bufferSize={CONVERSATION_OVERSCAN}
+                handleRef={listRef}
+              />
+            </NativeSelectionRowsContext.Provider>
             {/* Top fade into the bg-background canvas above (desktop only),
                 hinting that the conversation continues past the top edge. */}
             {!isMobile && isScrolledFromTop ? (
@@ -2315,11 +2453,16 @@ export const SessionChatStreamView = forwardRef<
                   <Button
                     variant="secondary"
                     icon
+                    data-scroll-to-latest=""
                     className="pointer-events-auto rounded-full border-[0.5px] border-border bg-white text-foreground shadow-[0_0.5px_1px_1px_rgba(0,0,0,0.04)] hover:bg-white dark:bg-secondary dark:text-secondary-foreground dark:shadow-none"
                     onClick={scrollToBottom}
                     aria-label={t('sessions.scrollToLatest')}
                   >
-                    <ArrowDown className="h-4 w-4" />
+                    {agentActivityLabel && agentActivityShimmer ? (
+                      <Spinner className="h-4 w-4" aria-hidden="true" />
+                    ) : (
+                      <ArrowDown className="h-4 w-4" aria-hidden="true" />
+                    )}
                   </Button>
                 </ConversationColumn>
               </div>
@@ -2355,16 +2498,18 @@ export const MessageRowView = memo(function MessageRowView({
   onResendUndelivered,
   capacityRetry,
   conversationFontSize = DEFAULT_CONVERSATION_FONT_SIZE,
+  editMentionContext,
 }: {
   message: SessionHistoryParsed;
   sessionId: SessionId;
   onNavigateSession?: (target: SessionNavigationTarget) => void;
-  onEdit?: (message: SessionHistoryParsed, text: string) => Promise<boolean>;
+  onEdit?: (message: SessionHistoryParsed, edit: UserMessageEditSubmission) => Promise<boolean>;
   onResendUndelivered?: (userTurnId: string, inputBlocks: SessionInputBlock[]) => Promise<boolean>;
   capacityRetry?: CapacityRetryControl;
   user?: SessionChatUser;
   showSenderIdentity?: boolean;
   conversationFontSize?: ConversationFontSize;
+  editMentionContext?: UserMessageEditMentionContext;
 }) {
   const { i18n } = useTranslation();
   const timestampLabel = formatConversationTimestamp(message.timestamp, {
@@ -2400,6 +2545,7 @@ export const MessageRowView = memo(function MessageRowView({
         conversationFontSize={conversationFontSize}
         onEdit={onEdit}
         onResendUndelivered={onResendUndelivered}
+        editMentionContext={editMentionContext}
       />
     );
   }
@@ -2653,6 +2799,10 @@ const DashedNoticeRule = () => (
   />
 );
 
+const noticeStyles = stylex.create({
+  footer: { paddingInline: space[2], paddingBottom: space[2] },
+});
+
 /**
  * Renders a single system notice as a divider with tooltip
  */
@@ -2676,11 +2826,13 @@ const AgentNoticeBanner = ({
   label,
   detail,
   action,
+  footer,
 }: {
   tone: 'error' | 'warning' | 'muted';
   label: string;
   detail?: string;
   action?: ReactNode;
+  footer?: ReactNode;
 }) => {
   // Error is a cross, warning a triangle, muted an info circle — an octagon
   // with an exclamation inside still read as "notice" at 14px.
@@ -2734,6 +2886,7 @@ const AgentNoticeBanner = ({
           </span>
         </div>
       ) : null}
+      {footer ? <div {...stylex.props(noticeStyles.footer)}>{footer}</div> : null}
     </div>
   );
 };
@@ -3089,9 +3242,25 @@ const ChatFailedNoticeView = ({
       </button>
     ) : null;
 
-  // Same banner as the agent warning; only the tone and the "more" path differ.
-  // A raw provider payload is a document, so it opens the report dialog instead
-  // of unfolding, and the clipboard gets the untouched text.
+  const handleCopyError = async () => {
+    const report = buildChatFailedErrorReport({
+      title: reasonMessage,
+      action: actionMessage,
+      reason: meta?.reason,
+      code: meta?.code,
+      message: rawMessage,
+      sessionId,
+      agentType: sessionMeta?.agentType,
+      machineId: sessionMeta?.machineId,
+    });
+    if (await writeTextToClipboard(report)) {
+      toast.success(t('common.copied', 'Copied'));
+    } else {
+      toast.error(t('sessions.systemNotices.chatFailed.copyFailed', 'Failed to copy error'));
+    }
+  };
+
+  // Keep copy visible on touch screens, separately from the capacity retry action.
   const noticeRow = (
     <AgentNoticeBanner
       tone={isProviderOverloaded ? 'muted' : 'error'}
@@ -3103,6 +3272,12 @@ const ChatFailedNoticeView = ({
           .join('\n\n') || undefined
       }
       action={retryAction}
+      footer={
+        <Button variant="ghost" size="medium" onClick={() => void handleCopyError()}>
+          <Copy size={14} aria-hidden="true" />
+          {t('sessions.systemNotices.chatFailed.copyError', 'Copy error')}
+        </Button>
+      }
     />
   );
 
@@ -3311,6 +3486,7 @@ const UserMessageRowView = ({
   conversationFontSize,
   onEdit,
   onResendUndelivered,
+  editMentionContext,
 }: {
   message: SessionHistoryParsed;
   sessionId: SessionId;
@@ -3319,8 +3495,11 @@ const UserMessageRowView = ({
   timestampLabel: string;
   hasWideContent: boolean;
   conversationFontSize: ConversationFontSize;
-  onEdit?: (message: SessionHistoryParsed, text: string) => Promise<boolean>;
+  onEdit?: (message: SessionHistoryParsed, edit: UserMessageEditSubmission) => Promise<boolean>;
   onResendUndelivered?: (userTurnId: string, inputBlocks: SessionInputBlock[]) => Promise<boolean>;
+  /** Composer-equivalent mention wiring for the inline editor; absent on
+   *  surfaces that cannot resolve mentions (share page, tour). */
+  editMentionContext?: UserMessageEditMentionContext;
 }) => {
   const { t } = useTranslation();
   const { copyContext } = useContext(SessionChatActionContext);
@@ -3410,17 +3589,20 @@ const UserMessageRowView = ({
     }
   }, [isResending, message, onResendUndelivered, sessionId, t]);
 
-  const handleSaveEdit = useCallback(async () => {
-    if (!onEdit || isSavingEdit || !editText.trim()) return;
-    setIsSavingEdit(true);
-    try {
-      if (await onEdit(message, editText)) {
-        setIsEditing(false);
+  const handleSaveEdit = useCallback(
+    async (submission: UserMessageEditSubmission) => {
+      if (!onEdit || isSavingEdit || !submission.text.trim()) return;
+      setIsSavingEdit(true);
+      try {
+        if (await onEdit(message, submission)) {
+          setIsEditing(false);
+        }
+      } finally {
+        setIsSavingEdit(false);
       }
-    } finally {
-      setIsSavingEdit(false);
-    }
-  }, [editText, isSavingEdit, message, onEdit]);
+    },
+    [isSavingEdit, message, onEdit]
+  );
 
   return (
     <div className={cn('flex w-full flex-row-reverse', isMobile ? 'gap-2 pl-7' : 'gap-2.5')}>
@@ -3520,9 +3702,13 @@ const UserMessageRowView = ({
                       value={editText}
                       onChange={setEditText}
                       onCancel={() => setIsEditing(false)}
-                      onSave={() => void handleSaveEdit()}
+                      onSave={(submission) => void handleSaveEdit(submission)}
                       isSaving={isSavingEdit}
                       conversationFontSize={conversationFontSize}
+                      mentionSource={editMentionContext?.mentionSource}
+                      availableCommands={editMentionContext?.availableCommands}
+                      skillAgent={editMentionContext?.skillAgent}
+                      currentSessionId={sessionId}
                     />
                   </div>
                 ) : (
@@ -4134,7 +4320,8 @@ const ActivityGroupHeader = ({
   if (summary.otherCount > 0) {
     parts.push(t('sessions.toolActivity.tools', { count: summary.otherCount }));
   }
-  const label = parts.join(' · ');
+  const label =
+    parts.join(' · ') || (summary.hasThought ? t('sessions.toolActivity.thought', 'Thought') : '');
   if (!label) return null;
   return (
     <ProcessDisclosureButton
@@ -4267,14 +4454,87 @@ const AssistantToolCallVirtualRow = memo(
     prev.fontSize === next.fontSize
 );
 
+/**
+ * A subagent run's own steps, in its task dialog. They go through the turn
+ * timeline's renderers, so a child's tool call reads exactly like the parent's.
+ * Nothing here takes a `searchBlockId`: conversation search indexes the
+ * conversation, and a dialog's content is not in it.
+ */
+const SubagentRunHistory = ({
+  task,
+  fontSize,
+}: {
+  task: SubagentTask;
+  fontSize: ConversationFontSize;
+}) => {
+  const { t } = useTranslation();
+  const run = task.run;
+  if (!run) return null;
+  const live = run.snapshot.state === 'running' || run.snapshot.state === 'pending';
+  const lastIndex = run.items.length - 1;
+  return (
+    <>
+      {run.items.map((item, index) => {
+        const streaming = live && index === lastIndex;
+        switch (item.type) {
+          case 'text':
+            return (
+              <MarkdownBlock
+                key={`text:${index}`}
+                text={item.text}
+                size={fontSize}
+                isStreaming={streaming}
+              />
+            );
+          case 'thought':
+            return (
+              <ActivityProcessStep key={`thought:${index}`}>
+                <span className="sr-only">
+                  {streaming
+                    ? t('sessions.toolActivity.thinking', 'Thinking…')
+                    : t('sessions.toolActivity.thought', 'Thought')}
+                </span>
+                <MarkdownRenderer
+                  text={item.text}
+                  size={fontSize}
+                  className={ACTIVITY_STEP_BODY_CLASS}
+                  isStreaming={streaming}
+                />
+              </ActivityProcessStep>
+            );
+          case 'tool_call':
+            return (
+              <ToolCallCard
+                key={`tool:${item.toolCallId}`}
+                toolCall={item}
+                fontSize={fontSize}
+                inlineOutput
+              />
+            );
+          case 'plan':
+            return <PlanBlock key={`plan:${index}`} entries={item.entries} fontSize={fontSize} />;
+          default:
+            return null;
+        }
+      })}
+    </>
+  );
+};
+
 const AssistantSubagentTasksRow = ({
   message,
   sessionId,
+  fontSize,
 }: {
   message: SessionHistoryParsed;
   sessionId: SessionId;
+  fontSize: ConversationFontSize;
 }) => {
   const tasks = useMemo(() => collectSubagentTasks(message.items), [message.items]);
+  const renderHistory = useCallback(
+    (task: SubagentTask) => <SubagentRunHistory task={task} fontSize={fontSize} />,
+    [fontSize]
+  );
   const runtime = useAtomValue(runtimeAtom);
   const session = useAtomValue(sessionMetaAtomFamily(getSessionRoomId(sessionId)));
   const machine = useAtomValue(getMachineMetaByIdAtomFamily(session?.machineId));
@@ -4295,7 +4555,14 @@ const AssistantSubagentTasksRow = ({
             throw new Error(response?.error || t('sessions.subagentTasks.cancelFailed'));
         }
       : undefined;
-  return <SubagentTaskPanel tasks={tasks} onCancel={onCancel} />;
+  return (
+    <SubagentTaskPanel
+      tasks={tasks}
+      onCancel={onCancel}
+      runCancellation={machineSupportsSubagentEvents(machine)}
+      renderHistory={renderHistory}
+    />
+  );
 };
 
 /**
@@ -5019,7 +5286,11 @@ const AssistantChatItem = memo(function AssistantChatItem({
                 <AgentActivityStatus {...liveStatus} message={message} />
               </div>
             ) : null}
-            <AssistantSubagentTasksRow message={message} sessionId={row.item.sessionId} />
+            <AssistantSubagentTasksRow
+              message={message}
+              sessionId={row.item.sessionId}
+              fontSize={conversationFontSize}
+            />
           </>
         );
       case 'footer':
@@ -5284,37 +5555,6 @@ type StandardToolContent = Extract<ToolCallContentBlock, { type: 'content' }>['c
 type PlanEntryItem = Extract<MessageContent, { type: 'plan' }>['entries'][number];
 type ProposedPlanMessage = Extract<MessageContent, { type: 'proposed_plan' }>;
 type GoalMessage = Extract<MessageContent, { type: 'goal' }>;
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value);
-
-const writeTextToClipboard = async (text: string): Promise<boolean> => {
-  if (!text.trim()) return false;
-
-  try {
-    await navigator.clipboard.writeText(text);
-    return true;
-  } catch {
-    try {
-      const el = document.createElement('textarea');
-      el.value = text;
-      el.style.position = 'fixed';
-      el.style.top = '0';
-      el.style.left = '0';
-      el.style.width = '1px';
-      el.style.height = '1px';
-      el.style.opacity = '0';
-      document.body.appendChild(el);
-      el.focus();
-      el.select();
-      const ok = document.execCommand('copy');
-      document.body.removeChild(el);
-      return ok;
-    } catch {
-      return false;
-    }
-  }
-};
 
 const formatJsonValue = (value: unknown) => {
   try {
@@ -6847,13 +7087,15 @@ const ToolCallCard = memo(function ToolCallCard({
   });
 
   const hasOutput = Boolean(toolCall.rawOutput);
-  const hasContent = Boolean(contentBlocks?.length);
   /* A cancelled request records nothing, so it must not count towards the body:
      otherwise the card stays collapsible and opens onto empty padding. */
   const hasPermission =
     Boolean(toolCall.permissionRequest) &&
     toolCall.permissionRequest?.outcome?.outcome !== 'cancelled';
-  const hasDetails = hasOutput || hasContent || hasPermission;
+  const commandLines = (contentBlocks ?? []).flatMap((block) =>
+    block.type === 'terminal_command' ? [formatToolCommand(block)] : []
+  );
+  const isShellCommand = isCommandToolCall(toolCall);
 
   const title = toolCall.title
     ? sanitizeToolTitle(toolCall.title)
@@ -6894,14 +7136,11 @@ const ToolCallCard = memo(function ToolCallCard({
     }
   };
 
+  /* An execute step's one-line text block is its description ("List the
+     worktree"): it becomes the row's title and leaves the body. */
   let terminalTitleBlockIndex: number | null = null;
   let terminalTitleFromContent: string | null = null;
-  const hasTerminalBlocks = Boolean(
-    contentBlocks?.some(
-      (block) => block?.type === 'terminal_command' || block?.type === 'terminal_output'
-    )
-  );
-  if (hasTerminalBlocks && contentBlocks) {
+  if (isTerminalExecuteToolCall && contentBlocks) {
     for (let index = 0; index < contentBlocks.length; index += 1) {
       const block = contentBlocks[index];
       if (!block) continue;
@@ -6911,14 +7150,15 @@ const ToolCallCard = memo(function ToolCallCard({
       if (!text) continue;
       if (text.includes('\n')) continue;
       if (text.length > 96) continue;
+      if (isToolCommandEcho(text, commandLines)) continue;
       terminalTitleBlockIndex = index;
       terminalTitleFromContent = text;
       break;
     }
   }
 
-  const terminalTitleDefault = terminalTitleFromContent ?? title;
-  const displayTitle = isTerminalExecuteToolCall ? terminalTitleDefault : title;
+  const displayTitle = isTerminalExecuteToolCall ? (terminalTitleFromContent ?? title) : title;
+  const isToolSearch = isToolSearchTitle(toolCall.title);
   const commandVerb = isCommandToolCall(toolCall) ? 'Run' : undefined;
   /* The tense verb is the running signal: a shimmering "Running …" needs no
      spinner. Keep it only where the step's own wording carries no tense
@@ -6932,115 +7172,134 @@ const ToolCallCard = memo(function ToolCallCard({
       <Spinner className="h-4 w-4 text-muted-foreground" />
     ) : null;
 
-  const renderContentBlocks = () => {
-    if (!contentBlocks?.length) return null;
+  /* Everything the step did and got back, in order, as sections of one sheet
+     (`tool-call-detail.tsx`). A diff is its own surface, so it closes the
+     sheet before it and opens a new one after. */
+  const renderDetail = () => {
     const nodes: ReactNode[] = [];
-    let terminalIndex = 0;
+    let sections: ReactNode[] = [];
+    const flushSheet = () => {
+      if (sections.length === 0) return;
+      nodes.push(<ToolDetailSheet key={`sheet-${nodes.length}`}>{sections}</ToolDetailSheet>);
+      sections = [];
+    };
+    const pushOutput = (key: string, outputs: TerminalOutputBlockType[]) => {
+      const preview = prepareTerminalOutputBlocksPreview(outputs);
+      sections.push(
+        <ToolOutputSection
+          key={key}
+          output={preview.text}
+          limited={preview.wasLimited || outputs.some((output) => output.truncated === true)}
+          exitCode={outputs[outputs.length - 1]?.exitStatus?.exitCode}
+          fontSize={fontSize}
+        />
+      );
+    };
 
-    for (let index = 0; index < contentBlocks.length; index += 1) {
-      const block = contentBlocks[index];
-      if (!block) continue;
+    const blocks = contentBlocks ?? [];
+    for (let index = 0; index < blocks.length; index += 1) {
+      const block = blocks[index];
+      if (!block || index === terminalTitleBlockIndex) continue;
 
-      if (terminalTitleBlockIndex === index) {
-        continue;
-      }
-
-      if (block.type === 'terminal' && hasTerminalBlocks) {
-        continue;
-      }
-
-      if (block.type === 'terminal_command') {
+      if (block.type === 'terminal_command' || block.type === 'terminal_output') {
         const outputs: TerminalOutputBlockType[] = [];
-        let next = index + 1;
-        while (next < contentBlocks.length) {
-          if (next === terminalTitleBlockIndex) {
+        let next = block.type === 'terminal_command' ? index + 1 : index;
+        while (next < blocks.length) {
+          const nextBlock = blocks[next];
+          if (next === terminalTitleBlockIndex || nextBlock?.type === 'terminal') {
             next += 1;
             continue;
           }
-
-          const nextBlock = contentBlocks[next];
-          if (!nextBlock) {
-            next += 1;
-            continue;
-          }
-          if (nextBlock.type === 'terminal') {
-            next += 1;
-            continue;
-          }
-          if (nextBlock.type !== 'terminal_output') break;
-          outputs.push(nextBlock as TerminalOutputBlockType);
+          if (nextBlock?.type !== 'terminal_output') break;
+          outputs.push(nextBlock);
           next += 1;
         }
-
-        const terminalTitle = terminalIndex === 0 ? terminalTitleDefault : title;
-        nodes.push(
-          <TerminalComponent
-            key={`terminal-component-${terminalIndex}`}
-            title={terminalTitle}
-            command={formatTerminalCommandLine(block)}
-            output={prepareTerminalOutputBlocksPreview(outputs).text}
-            className={isActivityRow ? 'rounded-md' : undefined}
-            showHeader={!isTerminalExecuteToolCall}
-            showBorder={!isTerminalExecuteToolCall}
-            outputDisplayMode={inlineOutput ? 'full' : undefined}
-            fontSize={fontSize}
-          />
-        );
-        terminalIndex += 1;
+        if (block.type === 'terminal_command') {
+          sections.push(
+            <ToolCommandSection
+              key={`command-${index}`}
+              command={formatToolCommand(block)}
+              shell={isShellCommand}
+              running={isRunning}
+              fontSize={fontSize}
+            />
+          );
+        }
+        if (outputs.length > 0) pushOutput(`output-${index}`, outputs);
         index = next - 1;
         continue;
       }
 
-      if (block.type === 'terminal_output') {
-        const outputs: TerminalOutputBlockType[] = [];
-        let next = index;
-        while (next < contentBlocks.length && contentBlocks[next]?.type === 'terminal_output') {
-          outputs.push(contentBlocks[next] as TerminalOutputBlockType);
-          next += 1;
-        }
-
-        const terminalTitle = terminalIndex === 0 ? terminalTitleDefault : title;
-        nodes.push(
-          <TerminalComponent
-            key={`terminal-component-${terminalIndex}`}
-            title={terminalTitle}
-            command=""
-            output={prepareTerminalOutputBlocksPreview(outputs).text}
-            className={isActivityRow ? 'rounded-md' : undefined}
-            showHeader={!isTerminalExecuteToolCall}
-            showBorder={!isTerminalExecuteToolCall}
-            outputDisplayMode={inlineOutput ? 'full' : undefined}
-            fontSize={fontSize}
-          />
+      if (block.type === 'terminal') {
+        if (hasTerminalContent) continue;
+        sections.push(
+          <ToolCaptionSection key={`terminal-${index}`}>
+            Terminal output is streaming in your CLI
+          </ToolCaptionSection>
         );
-        terminalIndex += 1;
-        index = next - 1;
         continue;
       }
 
-      nodes.push(
-        /* Inside a folded activity row the block needs its own surface to read as
-           output. At top level the only tool call that gets here is the plan-exit
-           `switch_mode` card, whose content is the plan prose itself — boxing it
-           there stacked a near-invisible frame above the permission card and made
-           one row look like three unrelated objects. Space groups it instead. */
-        <div
-          key={`${block.type}-${index}`}
-          className={cn(
-            isActivityRow && cn(CONVERSATION_PANEL_FRAME_CLASS, CONVERSATION_PANEL_BODY_CLASS)
-          )}
-        >
-          <ToolCallContentRenderer
-            block={block}
+      if (block.type === 'diff') {
+        flushSheet();
+        nodes.push(<DiffBlockRenderer key={`diff-${index}`} block={block} />);
+        continue;
+      }
+
+      if (block.type !== 'content') continue;
+      const { content } = block;
+      if (content.type === 'text') {
+        if (isToolCommandEcho(content.text, commandLines)) continue;
+        // Raw tool input arrives as serialized JSON text; keep it out of the
+        // Markdown pipeline so single-`$` math cannot eat fragments like `$(...)`.
+        const verbatim =
+          detectToolCallJsonText(content.text) ?? extractFencedToolText(content.text);
+        sections.push(
+          isToolSearch || verbatim !== null ? (
+            <ToolVerbatimSection
+              key={`text-${index}`}
+              value={verbatim ?? content.text}
+              fontSize={fontSize}
+            />
+          ) : (
+            <ToolDetailSection key={`text-${index}`}>
+              <MarkdownRenderer
+                text={content.text}
+                size={compactConversationFontSize(fontSize)}
+                className={ACTIVITY_STEP_BODY_CLASS}
+                onAgentFileLinkClick={onFilePathClick}
+              />
+            </ToolDetailSection>
+          )
+        );
+        continue;
+      }
+      sections.push(
+        <ToolDetailSection key={`content-${index}`}>
+          <StandardToolContentBlock
+            content={content}
             onFilePathClick={onFilePathClick}
             fontSize={fontSize}
           />
-        </div>
+        </ToolDetailSection>
       );
     }
 
+    if (hasOutput) {
+      sections.push(
+        <ToolVerbatimSection
+          key="raw-output"
+          value={formatJsonValue(toolCall.rawOutput)}
+          fontSize={fontSize}
+        />
+      );
+    }
+    flushSheet();
     return nodes;
   };
+
+  const detailNodes = isReadOnly ? [] : renderDetail();
+  const hasDetails = detailNodes.length > 0 || hasPermission;
 
   return (
     <CollapsibleCard
@@ -7048,34 +7307,22 @@ const ToolCallCard = memo(function ToolCallCard({
       defaultExpanded={isRunning || hasTerminalContent || isFailed || hasPermission}
       expanded={expanded}
       onExpandedChange={onExpandedChange}
-      containerClassName={cn(
-        isActivityRow && 'rounded-md',
-        !isActivityRow &&
-          isTerminalExecuteToolCall &&
-          'overflow-hidden rounded-md border border-border/60 bg-background/70 shadow-xs'
-      )}
+      containerClassName={cn(isActivityRow && 'rounded-md')}
       buttonClassName={
         isActivityRow
           ? ACTIVITY_STEP_BUTTON_CLASS
-          : isTerminalExecuteToolCall
-            ? 'rounded-none bg-muted/70 px-3 py-1.5 text-foreground hover:bg-muted/90'
-            : /* A top-level tool call (the plan-approval `switch_mode` card) is a
-                 SIBLING of the worked headers and the answer prose, so it starts
-                 on the turn's left rail. `CollapsibleCard`'s default `px-1` put
-                 its title 4px right of every chevron in the same column — and 8px
-                 right of its own `px-0` body. */
-              'px-0'
+          : /* A top-level tool call (the plan-approval `switch_mode` card) is a
+               SIBLING of the worked headers and the answer prose, so it starts
+               on the turn's left rail. `CollapsibleCard`'s default `px-1` put
+               its title 4px right of every chevron in the same column — and 8px
+               right of its own `px-0` body. */
+            'px-0'
       }
       bodyClassName={cn(
         /* An expanded body starts on the rail, like every other collapsible
            region in a turn. It still needs air under the title — they were 0px
            apart — but not an indent. */
-        isActivityRow
-          ? 'space-y-1.5 px-0 pb-1.5 pt-1'
-          : isTerminalExecuteToolCall
-            ? /* Bordered card: the body is full-bleed to its own frame. */
-              'space-y-3 border-t border-border/60 px-0 pb-0'
-            : 'space-y-2.5 px-0 pb-1 pt-1.5'
+        isActivityRow ? 'space-y-1.5 px-0 pb-1.5 pt-1' : 'space-y-2.5 px-0 pb-1 pt-1.5'
       )}
       right={runningIndicator}
       /* A file step with nothing to open (a read) is the file: pressing the
@@ -7087,7 +7334,7 @@ const ToolCallCard = memo(function ToolCallCard({
           className={cn(
             'flex min-w-0 flex-1 items-start gap-1.5',
             /* No leading margin: see `buttonClassName` — the rail is shared. */
-            isTerminalExecuteToolCall ? null : titleColorClass
+            titleColorClass
           )}
         >
           {isFileAction && fileName ? (
@@ -7172,9 +7419,7 @@ const ToolCallCard = memo(function ToolCallCard({
                 'truncate',
                 isActivityRow
                   ? ACTIVITY_STEP_TITLE_CLASS
-                  : isTerminalExecuteToolCall
-                    ? 'text-xs font-medium'
-                    : 'text-[13px] font-semibold leading-tight'
+                  : 'text-[13px] font-semibold leading-tight'
               )}
             />
           )}
@@ -7183,38 +7428,7 @@ const ToolCallCard = memo(function ToolCallCard({
     >
       {hasDetails && !isReadOnly ? (
         <Fragment>
-          {hasOutput && isRecord(toolCall.rawOutput) ? (
-            <StructuredObject
-              label="Output"
-              value={toolCall.rawOutput}
-              dense
-              unbounded={inlineOutput}
-              fontSize={fontSize}
-            />
-          ) : hasOutput ? (
-            <div className={CONVERSATION_PANEL_FRAME_CLASS}>
-              <div
-                className={cn(
-                  CONVERSATION_PANEL_HEADER_CLASS,
-                  CONVERSATION_PANEL_HEADER_RULE_CLASS
-                )}
-              >
-                <span className={CONVERSATION_PANEL_TITLE_CLASS}>Output</span>
-              </div>
-              <pre
-                className={cn(
-                  CONVERSATION_PANEL_BODY_CLASS,
-                  inlineOutput ? 'overflow-x-auto' : 'max-h-60 overflow-auto'
-                )}
-                style={conversationMonoFontSizeStyle(fontSize)}
-              >
-                {formatJsonValue(toolCall.rawOutput)}
-              </pre>
-            </div>
-          ) : null}
-
-          {hasContent ? <div className="space-y-2">{renderContentBlocks()}</div> : null}
-
+          {detailNodes}
           {hasPermission && <PermissionRequestBlock toolCall={toolCall} />}
         </Fragment>
       ) : null}
@@ -7243,7 +7457,6 @@ const TOOL_KIND_META: Record<
 };
 
 type DiffBlockType = Extract<ToolCallContentBlock, { type: 'diff' }>;
-type TerminalCommandBlockType = Extract<ToolCallContentBlock, { type: 'terminal_command' }>;
 type TerminalOutputBlockType = Extract<ToolCallContentBlock, { type: 'terminal_output' }>;
 
 /**
@@ -7252,60 +7465,6 @@ type TerminalOutputBlockType = Extract<ToolCallContentBlock, { type: 'terminal_o
 const DiffBlockRenderer = ({ block }: { block: DiffBlockType }) => (
   <DiffViewer path={block.path} oldText={block.oldText ?? ''} newText={block.newText ?? ''} />
 );
-
-const formatTerminalCommandLine = (block: TerminalCommandBlockType) => {
-  const normalizedCommand = normalizeWorktreePath(String(block.command ?? ''));
-  const normalizedArgs = (block.args ?? []).map((arg: unknown) =>
-    normalizeWorktreePath(String(arg))
-  );
-  return [normalizedCommand, ...normalizedArgs].filter(Boolean).join(' ');
-};
-
-const ToolCallContentRenderer = ({
-  block,
-  onFilePathClick,
-  fontSize,
-}: {
-  block: ToolCallContentBlock;
-  onFilePathClick?: (filePath: string) => void;
-  fontSize: ConversationFontSize;
-}) => {
-  if (block.type === 'diff') {
-    return <DiffBlockRenderer block={block} />;
-  }
-
-  if (block.type === 'terminal') {
-    return (
-      <div
-        className="flex items-center gap-2 rounded-md border border-border/60 bg-muted/30 p-3 text-muted-foreground"
-        style={conversationTextFontSizeStyle(fontSize)}
-      >
-        <Terminal className="h-4 w-4" />
-        Terminal output is streaming in your CLI
-      </div>
-    );
-  }
-
-  if (block.type === 'terminal_command') {
-    return null;
-  }
-
-  if (block.type === 'terminal_output') {
-    return null;
-  }
-
-  if (block.type === 'content') {
-    return (
-      <StandardToolContentBlock
-        content={block.content}
-        onFilePathClick={onFilePathClick}
-        fontSize={fontSize}
-      />
-    );
-  }
-
-  return null;
-};
 
 // MCP tool content (`resource_link`, `resource`, `image`) carries URIs supplied
 // by the agent and arbitrary upstream MCP servers. Untrusted strings reach `<a
@@ -7366,24 +7525,7 @@ const StandardToolContentBlock = ({
 }) => {
   const readonly = useContext(SessionReadonlyContext);
   switch (content.type) {
-    case 'text': {
-      // Raw tool input arrives as serialized JSON text; keep it out of the
-      // Markdown pipeline so single-`$` math cannot eat fragments like `$(...)`.
-      const jsonText = detectToolCallJsonText(content.text);
-      if (jsonText !== null) {
-        return (
-          <pre
-            className={cn(CONVERSATION_PANEL_BODY_CLASS, 'max-h-60 overflow-auto')}
-            style={conversationMonoFontSizeStyle(fontSize)}
-          >
-            {jsonText}
-          </pre>
-        );
-      }
-      return (
-        <MarkdownBlock text={content.text} size={fontSize} onFilePathClick={onFilePathClick} />
-      );
-    }
+    // Text is laid out by `ToolCallCard`, which owns the verbatim/Markdown split.
     case 'image': {
       const src =
         content.uri && !readonly
@@ -7596,39 +7738,6 @@ const PermissionRequestBlock = ({ toolCall }: { toolCall: ToolCallMessage }) => 
       <span className="min-w-0 flex-1 truncate" title={label}>
         {label}
       </span>
-    </div>
-  );
-};
-
-const StructuredObject = ({
-  label,
-  value,
-  dense = false,
-  unbounded = false,
-  fontSize = DEFAULT_CONVERSATION_FONT_SIZE,
-}: {
-  label: string;
-  value: Record<string, unknown>;
-  dense?: boolean;
-  unbounded?: boolean;
-  fontSize?: ConversationFontSize;
-}) => {
-  return (
-    <div className={CONVERSATION_PANEL_FRAME_CLASS}>
-      <div className={cn(CONVERSATION_PANEL_HEADER_CLASS, CONVERSATION_PANEL_HEADER_RULE_CLASS)}>
-        <span className={CONVERSATION_PANEL_TITLE_CLASS}>{label}</span>
-      </div>
-      <pre
-        className={cn(
-          CONVERSATION_PANEL_BODY_CLASS,
-          unbounded ? 'overflow-x-auto' : 'max-h-60 overflow-auto'
-        )}
-        style={
-          dense ? conversationMonoFontSizeStyle(fontSize) : conversationTextFontSizeStyle(fontSize)
-        }
-      >
-        {formatJsonValue(value)}
-      </pre>
     </div>
   );
 };

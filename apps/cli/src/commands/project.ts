@@ -1,4 +1,5 @@
 import { Command } from 'commander';
+import { addDiscoveryOptions, runDiscoveryList, type DiscoveryCommandOptions } from './discovery';
 import path from 'node:path';
 import inquirer from 'inquirer';
 import chalk from 'chalk';
@@ -19,14 +20,6 @@ import {
 import { renderTerminalTable } from '@/lib/terminal-table';
 import { getLogger, rootLogger } from '@/utils/logger';
 import { formatErrorMessage } from '@/utils/format-error';
-import {
-  getAuthContextOrThrow,
-  resolveWorkspaceOrThrow,
-  runOneShotCommand,
-  withWorkspaceManager,
-} from '@/lib/command-runtime';
-import { getCliPlatformKind } from '@/lib/cli-platform';
-import { listRemoteLocalProjects } from '@/lib/remote-local-project-list';
 
 type CommonOptions = {
   json?: boolean;
@@ -38,10 +31,11 @@ type AddProjectOptions = CommonOptions & {
   allWorkspaces?: boolean;
 };
 
-type ListProjectOptions = CommonOptions & {
-  workspace?: string;
-  machine?: string;
-};
+type ListProjectOptions = CommonOptions &
+  DiscoveryCommandOptions & {
+    workspace?: string;
+    machine?: string;
+  };
 
 type SelectableProject = {
   workspaceId: WorkspaceId;
@@ -366,47 +360,28 @@ const projectDeleteCommand = new Command('delete')
     }
   });
 
-const projectListCommand = new Command('list')
+const projectListCommand = addDiscoveryOptions(new Command('list'))
   .description('List local projects')
   .option('--workspace <selector>', 'Remote workspace id, slug, or name')
   .option('--machine <selector>', 'Remote machine id or name')
+  .option('--kind <kind>', 'Workspace catalog: local or github')
+  .option('--catalog', 'List the current workspace project catalog across machines')
   .option('--json', 'Output machine-readable JSON')
   .option('-d, --debug', 'enable debug output')
-  .action(async (options: ListProjectOptions) => {
+  .action(async (options: ListProjectOptions & { catalog?: boolean }) => {
+    if (
+      options.catalog ||
+      options.kind ||
+      options.query ||
+      options.limit ||
+      options.cursor ||
+      options.allPages ||
+      shouldUseRemoteProjectCatalog(options)
+    ) {
+      await runDiscoveryList('project', options);
+      return;
+    }
     setDebugIfEnabled(options);
-
-    const useRemoteCatalog = shouldUseRemoteProjectCatalog(options);
-    if (useRemoteCatalog && getCliPlatformKind() === 'local') {
-      const message = 'Remote project listing is not available on the local platform.';
-      if (options.json) {
-        process.stdout.write(`${JSON.stringify({ ok: false, error: message })}\n`);
-      } else {
-        getLogger('project').error(message);
-      }
-      process.exit(1);
-      return;
-    }
-
-    if (useRemoteCatalog) {
-      await runOneShotCommand('project', options, async () => {
-        const auth = getAuthContextOrThrow('project');
-        const workspace = await resolveWorkspaceOrThrow(auth, options.workspace);
-        const response = await withWorkspaceManager(
-          auth,
-          workspace,
-          'project',
-          async (manager) =>
-            await listRemoteLocalProjects({
-              manager,
-              auth,
-              workspace,
-              machineSelector: options.machine,
-            })
-        );
-        renderProjectListResponse(response, options);
-      });
-      return;
-    }
 
     const machineId = resolveMachineIdOrExit();
     const response = await sendLocalProjectControl({

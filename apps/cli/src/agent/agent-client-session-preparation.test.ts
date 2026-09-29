@@ -21,6 +21,7 @@ vi.mock('@agentclientprotocol/sdk', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@agentclientprotocol/sdk')>()),
   PROTOCOL_VERSION: 1,
   ClientSideConnection: class {
+    readonly signal = new AbortController().signal;
     readonly initialize = connectionMocks.initialize;
     readonly newSession = connectionMocks.newSession;
     readonly loadSession = connectionMocks.loadSession;
@@ -48,6 +49,7 @@ function deferred<T>() {
 function createLogger(): Logger {
   const logger: Logger = {
     debug: vi.fn(),
+    trace: vi.fn(),
     info: vi.fn(),
     warn: vi.fn(),
     error: vi.fn(),

@@ -195,9 +195,34 @@ cloud catalog path:
 lody project list --workspace <id|slug|name> [--machine <id|name>] --json
 ```
 
-If `--machine` is omitted, Lody selects the machine associated with the current CLI login. The
-result includes only machines and local projects the authenticated user may request. Remote listing
-is unavailable in the open-source local platform because that mode performs no cloud I/O.
+Without `--machine`, the workspace catalog includes authorized local projects across machines and
+enabled GitHub repositories. Use `--kind local` or `--kind github` to select one kind;
+`--machine` restricts the result to local projects on that machine. `--catalog` selects the
+workspace catalog without an explicit workspace selector. Remote listing is unavailable in the
+open-source local platform because that mode performs no cloud I/O.
+
+### Resource discovery and pagination
+
+Workspace machine, project, Agent config, Role and MCP lists return 20 entries by default.
+Use `--limit` (1–100), `--query`, and `--cursor` with the same filters, or `--all-pages`.
+JSON returns `items`, `hasMore`, and optional `nextCursor`, plus the resource-specific array alias.
+These are safe summaries; MCP connection values and Agent launch credentials are omitted.
+
+```bash
+lody agent-role list --workspace my-team --all-pages --json
+lody agent-role get ROLE_ID --workspace my-team --json
+lody agent-config get AGENT_ID --workspace my-team --json
+lody mcp list --workspace my-team --json
+lody operation list --workspace my-team --session SESSION_ID --state active --json
+lody session list --workspace my-team --query parser --machine-id MACHINE_ID --agent-config-id AGENT_ID --agent-role-id ROLE_ID
+```
+
+Role details include the prompt prefix; lists retain readable unavailable Roles with reasons.
+Operation listing reads this machine's store, scoped to the requester Session and authenticated
+user, with `--state`, `--limit` and `--cursor`. It does not aggregate other machines' stores.
+The Session Role filter matches creation provenance. Lody MCP exposes corresponding
+`lody_machine_list`, `lody_project_list`, `lody_agent_config_list/get`,
+`lody_agent_role_list/get`, `lody_mcp_list` and `lody_operation_list` tools.
 
 For the exact current flags, always check the built-in help:
 
@@ -461,8 +486,10 @@ lody machine list --workspace my-team --json
 lody machine list --workspace my-team --json --include-acp-capabilities
 ```
 
-The default table shows only machine ID, name, online/offline status, and the merged CLI list
-(builtin CLIs plus registry agents in one `CLI` column).
+The default table shows machine identity and availability. JSON preserves
+`onlineStatus: online | offline | unknown`; unavailable presence is not reported as offline.
+`--include-acp-capabilities` and `--include-agents` retain legacy detailed output and cannot
+combine with directory paging/filter flags. Use `agent-config list/get` for paginated capabilities.
 
 - by default, both online and offline machines are shown
 - use `--online-only` to filter the list down to machines with a recent heartbeat
@@ -502,7 +529,8 @@ Before you use them:
 lody agent-config list --workspace my-team
 ```
 
-Shows the config ID, name, agent type, and description.
+Shows config identity, machine and availability. JSON also includes agent type, description
+and supported model/run settings. Use `--machine`, `--query`, and pagination to narrow the list.
 
 ### agent-config show
 

@@ -9,6 +9,7 @@ export {
 import {
   Check,
   ChevronDown,
+  CircleAlert,
   CircleDot,
   CornerLeftUp,
   Github,
@@ -16,7 +17,14 @@ import {
   X,
   type LucideIcon,
 } from 'lucide-react';
+import { useAtomValue } from 'jotai';
 import { useWorkingHandOver, WorkingStatusMark } from '@/ui/working-status-mark';
+import {
+  sessionSendStatusAtomFamily,
+  sessionUnsentNewConversationAtomFamily,
+} from '@/atoms/session-send-status';
+import type { SessionSendState } from '@/lib/session-send-status';
+import { formatFileSize } from '@/lib/session-file-presentation';
 import type { PrStatus, SessionPullRequestCiState } from '@lody/shared';
 import { cn } from '@/lib/utils';
 import { Tooltip } from '@lody/ui/tooltip';
@@ -125,12 +133,96 @@ function MaskedPrCiIcon({
   );
 }
 
+const SEND_RING_RADIUS = 4.25;
+const SEND_RING_CIRCUMFERENCE = 2 * Math.PI * SEND_RING_RADIUS;
+const SEND_RING_SHIMMER_LENGTH = 5;
+
+/**
+ * A local message still uploading: a thin ring that fills with the bytes sent,
+ * with a faint highlight sweeping along the filled arc so a ring waiting on the
+ * next progress report never reads as a frozen spinner. Without a measurable
+ * size the same ring turns with a quarter arc. The turn rides an HTML wrapper,
+ * like `@lody/ui`'s Spinner: a rotating svg does not composite at DPR≠1.
+ */
+export function SessionSendProgressRing({ progress }: { progress?: number }) {
+  const known = typeof progress === 'number';
+  const filled = known ? Math.min(100, Math.max(4, progress)) : 25;
+  const maskId = `session-send-ring-${useId().replace(/:/g, '')}`;
+  const arc = {
+    cx: '6',
+    cy: '6',
+    r: SEND_RING_RADIUS,
+    strokeWidth: 1.5,
+    strokeLinecap: 'round' as const,
+    strokeDasharray: SEND_RING_CIRCUMFERENCE,
+    strokeDashoffset: SEND_RING_CIRCUMFERENCE * (1 - filled / 100),
+    transform: 'rotate(-90 6 6)',
+  };
+  return (
+    <span
+      className={cn(
+        'flex h-3 w-3 text-primary',
+        !known && 'animate-spin [animation-duration:1.2s] motion-reduce:animate-none'
+      )}
+      data-session-send-ring={known ? 'determinate' : 'indeterminate'}
+    >
+      <svg viewBox="0 0 12 12" className="h-full w-full" fill="none" aria-hidden="true">
+        <circle
+          cx="6"
+          cy="6"
+          r={SEND_RING_RADIUS}
+          stroke="currentColor"
+          strokeOpacity={0.22}
+          strokeWidth={1.5}
+        />
+        <circle
+          {...arc}
+          stroke="currentColor"
+          className="transition-[stroke-dashoffset] duration-300 ease-out motion-reduce:transition-none"
+        />
+        {known ? (
+          <>
+            <mask id={maskId} maskUnits="userSpaceOnUse" x="0" y="0" width="12" height="12">
+              <circle {...arc} stroke="white" />
+            </mask>
+            <circle
+              cx="6"
+              cy="6"
+              r={SEND_RING_RADIUS}
+              stroke="white"
+              strokeOpacity={0.65}
+              strokeWidth={2}
+              strokeLinecap="round"
+              strokeDasharray={`${SEND_RING_SHIMMER_LENGTH} ${SEND_RING_CIRCUMFERENCE}`}
+              transform="rotate(-90 6 6)"
+              mask={`url(#${maskId})`}
+              className="motion-reduce:hidden"
+              data-session-send-shimmer=""
+            >
+              <animate
+                attributeName="stroke-dashoffset"
+                from={SEND_RING_SHIMMER_LENGTH}
+                to={-SEND_RING_CIRCUMFERENCE}
+                dur="1.8s"
+                repeatCount="indefinite"
+              />
+            </circle>
+          </>
+        ) : null}
+      </svg>
+    </span>
+  );
+}
+
 /**
  * ③ The 14px status mark, rendered at the row's TRAILING edge inside
  * {@link SidebarRowEndSlot}. Single-mark priority:
- * `waitingPermission > isWorking > hasUnread`. Returns `null` when the session is
- * idle and read, which is what lets the end slot fall back to its resting metric
- * cluster (diff / worktree / PR) — a row shows one or the other, never both.
+ * `sendFailed > waitingPermission > isWorking > sending > hasUnread`. A failed
+ * local send outranks everything because nothing else will retry it; an upload
+ * in progress yields to the agent's own activity. Returns `null` when the
+ * session is idle and read, which is what lets the end slot fall back to its
+ * resting metric cluster (diff / worktree / PR) — a row shows one or the other,
+ * never both.
  *
  * It lives at the end rather than at the leading edge so the opened-by tree can
  * own the leading slot unconditionally: before this, an active child had to drop
@@ -141,15 +233,31 @@ export function SessionRowStatusIndicator({
   isWaitingPermission,
   isWorking,
   hasUnreadMessages,
+  sendState,
+  sendProgress,
+  sendLabel,
 }: {
   isWaitingPermission?: boolean;
   isWorking?: boolean;
   hasUnreadMessages?: boolean;
+  /** Renderer-local send journal state for this session. */
+  sendState?: SessionSendState | null;
+  /** 0–100; omitted when the upload has no measurable size. */
+  sendProgress?: number;
+  /** Spoken name of the send mark ("Sending · 12.4 MB / 38.0 MB"). */
+  sendLabel?: string;
 }) {
   let icon: ReactNode = null;
+  let label: string | undefined;
 
-  if (isWaitingPermission === true) {
+  if (sendState === 'failed') {
+    icon = <CircleAlert className="h-3 w-3 text-destructive" strokeWidth={2.25} />;
+    label = sendLabel;
+  } else if (isWaitingPermission === true) {
     icon = <Hand className="h-3 w-3 text-status-warning" />;
+  } else if (isWorking !== true && sendState === 'sending') {
+    icon = <SessionSendProgressRing progress={sendProgress} />;
+    label = sendLabel;
   } else if (isWorking === true || hasUnreadMessages === true) {
     // Working grid, the working → unread "done" transition, and the unread dot
     // are one component so it stays mounted across that change and can see it.
@@ -167,6 +275,9 @@ export function SessionRowStatusIndicator({
   return (
     <div
       data-session-row-indicator=""
+      data-session-send-state={sendState ?? undefined}
+      role={label ? 'img' : undefined}
+      aria-label={label}
       className="flex h-3.5 w-3.5 shrink-0 items-center justify-center"
     >
       {icon}
@@ -179,12 +290,57 @@ function hasSessionRowStatus({
   isWaitingPermission,
   isWorking,
   hasUnreadMessages,
+  sendState,
+}: SessionRowStatusFlags): boolean {
+  return Boolean(isWaitingPermission || isWorking || hasUnreadMessages || sendState);
+}
+
+/**
+ * The spoken name of a row's send mark. Sizes are shown only while bytes are
+ * measurable; a text-only message is simply "Sending".
+ */
+function useSessionSendLabel(
+  status: { state: SessionSendState; sentBytes: number; totalBytes: number } | null
+) {
+  const { t } = useTranslation();
+  if (!status) return undefined;
+  if (status.state === 'failed') return t('sessions.sendStatus.failed');
+  if (status.totalBytes <= 0) return t('sessions.sendStatus.sendingWithoutSize');
+  return t('sessions.sendStatus.sending', {
+    sent: formatFileSize(status.sentBytes),
+    total: formatFileSize(status.totalBytes),
+  });
+}
+
+/**
+ * True while a new conversation's first message is not in history yet. The row
+ * title reads muted until then; the conversation exists only on this device.
+ */
+export function useSessionUnsentNewConversation(sessionId: string | undefined): boolean {
+  return useAtomValue(sessionUnsentNewConversationAtomFamily(sessionId ?? ''));
+}
+
+/** Title colour for a row whose conversation has not been sent yet. */
+export const SIDEBAR_UNSENT_TITLE_CLASS = 'text-sidebar-foreground-muted';
+
+/** A row title span that mutes itself while its conversation is unsent. */
+export function SidebarSessionTitleText({
+  sessionId,
+  selected,
+  className,
+  children,
 }: {
-  isWaitingPermission?: boolean;
-  isWorking?: boolean;
-  hasUnreadMessages?: boolean;
-}): boolean {
-  return Boolean(isWaitingPermission || isWorking || hasUnreadMessages);
+  sessionId: string;
+  selected: boolean;
+  className?: string;
+  children: ReactNode;
+}) {
+  const isUnsent = useSessionUnsentNewConversation(sessionId);
+  return (
+    <span className={cn(className, isUnsent && !selected && SIDEBAR_UNSENT_TITLE_CLASS)}>
+      {children}
+    </span>
+  );
 }
 
 /**
@@ -475,6 +631,7 @@ export function SidebarRowArchiveButton({
  * reserves the action's 20px hit target.
  */
 export function SidebarRowEndSlot({
+  sessionId,
   isWaitingPermission,
   isWorking,
   hasUnreadMessages,
@@ -483,6 +640,11 @@ export function SidebarRowEndSlot({
   /** Fade the rest icon while hovering (match the row's group, e.g. 'group-hover/row:opacity-0'). */
   fadeClassName = 'group-hover:opacity-0 group-data-[menu-open]:opacity-0',
 }: {
+  /**
+   * Reads this session's local send status here, in the leaf, so upload
+   * progress re-renders only the slot and never the memoized row around it.
+   */
+  sessionId?: string;
   isWaitingPermission?: boolean;
   isWorking?: boolean;
   hasUnreadMessages?: boolean;
@@ -492,15 +654,21 @@ export function SidebarRowEndSlot({
 }) {
   // The end slot outlives the status mark, so the hand-over hold lives here.
   const drawWorking = useWorkingHandOver(isWorking === true, hasUnreadMessages === true);
+  const sendStatus = useAtomValue(sessionSendStatusAtomFamily(sessionId ?? ''));
+  const sendLabel = useSessionSendLabel(sendStatus);
   const restContent = hasSessionRowStatus({
     isWaitingPermission,
     isWorking: drawWorking,
     hasUnreadMessages,
+    sendState: sendStatus?.state,
   }) ? (
     <SessionRowStatusIndicator
       isWaitingPermission={isWaitingPermission}
       isWorking={drawWorking}
       hasUnreadMessages={hasUnreadMessages}
+      sendState={sendStatus?.state}
+      sendProgress={sendStatus && sendStatus.totalBytes > 0 ? sendStatus.progress : undefined}
+      sendLabel={sendLabel}
     />
   ) : (
     restIcon
@@ -528,6 +696,179 @@ export function SidebarRowEndSlot({
       ) : null}
       {archive}
     </div>
+  );
+}
+
+type SessionRowStatusFlags = {
+  isWaitingPermission?: boolean;
+  isWorking?: boolean;
+  hasUnreadMessages?: boolean;
+  sendState?: SessionSendState | null;
+};
+
+/**
+ * What a folded group hides, counted by the mark each hidden row would draw:
+ * a row counts once, under its own priority
+ * (`failed > waiting > working > sending > unread`), so the numbers add up to
+ * the rows that are asking for attention.
+ */
+export type SidebarGroupActivity = {
+  failed: number;
+  waiting: number;
+  working: number;
+  sending: number;
+  unread: number;
+};
+
+export const EMPTY_SIDEBAR_GROUP_ACTIVITY: SidebarGroupActivity = Object.freeze({
+  failed: 0,
+  waiting: 0,
+  working: 0,
+  sending: 0,
+  unread: 0,
+});
+
+/**
+ * Joins each row with the local send state of its session. Group summaries take
+ * the progress-free `sessionSendStatesAtom` map, so a layout-level group
+ * re-renders on send start, failure and completion, never on upload progress.
+ */
+export function withSessionSendStates<Row extends SessionRowStatusFlags>(
+  rows: Iterable<Row>,
+  getSessionId: (row: Row) => string,
+  sendStates: Readonly<Record<string, SessionSendState>>
+): Row[] {
+  const joined: Row[] = [];
+  for (const row of rows) {
+    const sendState = sendStates[getSessionId(row)];
+    joined.push(sendState ? { ...row, sendState } : row);
+  }
+  return joined;
+}
+
+export function summarizeSidebarGroupActivity(
+  rows: Iterable<SessionRowStatusFlags>
+): SidebarGroupActivity {
+  let failed = 0;
+  let waiting = 0;
+  let working = 0;
+  let sending = 0;
+  let unread = 0;
+  for (const row of rows) {
+    if (row.sendState === 'failed') failed += 1;
+    else if (row.isWaitingPermission) waiting += 1;
+    else if (row.isWorking) working += 1;
+    else if (row.sendState === 'sending') sending += 1;
+    else if (row.hasUnreadMessages) unread += 1;
+  }
+  if (!failed && !waiting && !working && !sending && !unread) return EMPTY_SIDEBAR_GROUP_ACTIVITY;
+  return { failed, waiting, working, sending, unread };
+}
+
+export function hasSidebarGroupActivity(activity: SidebarGroupActivity | null | undefined) {
+  return Boolean(
+    activity &&
+    (activity.failed || activity.waiting || activity.working || activity.sending || activity.unread)
+  );
+}
+
+/** "1 not sent · 1 waiting for approval · 2 working · 1 sending · 3 unread", omitting zeros. */
+export function useSidebarGroupActivityDescription(
+  activity: SidebarGroupActivity | null | undefined
+): string | null {
+  const { t } = useTranslation();
+  if (!activity || !hasSidebarGroupActivity(activity)) return null;
+  const parts: string[] = [];
+  if (activity.failed) {
+    parts.push(t('sidebar.groupActivity.failed', { count: activity.failed }));
+  }
+  if (activity.waiting) {
+    parts.push(
+      t('sidebar.groupActivity.waiting', '{{count}} waiting for approval', {
+        count: activity.waiting,
+      })
+    );
+  }
+  if (activity.working) {
+    parts.push(
+      t('sidebar.groupActivity.working', '{{count}} working', { count: activity.working })
+    );
+  }
+  if (activity.sending) {
+    parts.push(t('sidebar.groupActivity.sending', { count: activity.sending }));
+  }
+  if (activity.unread) {
+    parts.push(t('sidebar.groupActivity.unread', '{{count}} unread', { count: activity.unread }));
+  }
+  return parts.join(' · ');
+}
+
+/**
+ * The status a FOLDED group (project, repo, machine, section) draws for the
+ * Sessions it hides: the one 14px mark a row would draw, in the same trailing
+ * column as the rows, chosen by the rows' own priority. Folding therefore never
+ * hides that something is waiting on the user, running, or finished unread —
+ * and an expanded group draws nothing, because its rows already say it.
+ *
+ * One mark, never a count or a stack: the glance answers "does anything in
+ * here need me?", the hover (`description`) answers "how much?", and expanding
+ * answers "which?". The mark stays mounted across status changes and runs the
+ * same working → unread hand-over as a row, so the group plays the done
+ * transition when its last running Session finishes.
+ *
+ * Pass `describe={false}` when the header already owns a hover surface (the
+ * project path tooltip, the machine card) and put the description there: two
+ * hover surfaces on one header open together.
+ */
+export function SidebarGroupActivityMark({
+  activity,
+  describe = true,
+}: {
+  activity: SidebarGroupActivity | null | undefined;
+  describe?: boolean;
+}) {
+  const description = useSidebarGroupActivityDescription(activity);
+  const isWaitingPermission = (activity?.waiting ?? 0) > 0;
+  const hasUnreadMessages = (activity?.unread ?? 0) > 0;
+  const drawWorking = useWorkingHandOver((activity?.working ?? 0) > 0, hasUnreadMessages);
+  const sendState: SessionSendState | null = activity?.failed
+    ? 'failed'
+    : activity?.sending
+      ? 'sending'
+      : null;
+  const hasStatus = hasSessionRowStatus({
+    isWaitingPermission,
+    isWorking: drawWorking,
+    hasUnreadMessages,
+    sendState,
+  });
+  // Keep the slot mounted while empty so the hand-over state survives.
+  const mark = (
+    <span
+      data-sidebar-group-activity=""
+      role={hasStatus && description ? 'img' : undefined}
+      aria-label={hasStatus && description ? description : undefined}
+      className={cn(
+        'relative flex h-5 shrink-0 items-center justify-center',
+        hasStatus ? 'w-5' : 'w-0'
+      )}
+    >
+      {hasStatus ? (
+        <SessionRowStatusIndicator
+          isWaitingPermission={isWaitingPermission}
+          isWorking={drawWorking}
+          hasUnreadMessages={hasUnreadMessages}
+          sendState={sendState}
+        />
+      ) : null}
+    </span>
+  );
+  if (!describe || !hasStatus || !description) return mark;
+  return (
+    <Tooltip.Root>
+      <Tooltip.Trigger delay={300} render={mark} />
+      <Tooltip.Content side="right">{description}</Tooltip.Content>
+    </Tooltip.Root>
   );
 }
 
@@ -617,6 +958,8 @@ export function SidebarSectionHeader({
   label,
   collapsed,
   action,
+  activity,
+  describeActivity = true,
   onToggleCollapsed,
   isMobile,
   toggleLabel,
@@ -627,6 +970,13 @@ export function SidebarSectionHeader({
   /** @deprecated The collapsed count badge has been removed; this prop is ignored. */
   count?: number;
   action?: ReactNode;
+  /**
+   * Status of the Sessions this section hides. Drawn only while collapsed, as
+   * {@link SidebarGroupActivityMark}; an expanded section's rows speak for it.
+   */
+  activity?: SidebarGroupActivity | null;
+  /** False when a wrapper already owns the header's hover surface (machine card). */
+  describeActivity?: boolean;
   onToggleCollapsed?: () => void;
   isMobile?: boolean;
   toggleLabel?: string;
@@ -675,6 +1025,9 @@ export function SidebarSectionHeader({
           />
         ) : null}
         <span className="flex-1" aria-hidden="true" />
+        {collapsed && activity ? (
+          <SidebarGroupActivityMark activity={activity} describe={describeActivity} />
+        ) : null}
       </div>
       {action ? <div className="mr-2 shrink-0">{action}</div> : null}
     </div>

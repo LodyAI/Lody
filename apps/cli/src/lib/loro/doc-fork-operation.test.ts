@@ -8,6 +8,7 @@ import { SessionDocument } from './doc';
 const createDocument = () => {
   const doc = new SessionDocument({} as LoroRepo, 'fork-target' as SessionId, async () => {}, {
     debug: vi.fn(),
+    trace: vi.fn(),
     info: vi.fn(),
     warn: vi.fn(),
     error: vi.fn(),

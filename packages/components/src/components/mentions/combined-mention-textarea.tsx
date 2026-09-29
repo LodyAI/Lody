@@ -111,6 +111,9 @@ function TwoLevelMentionMenu({
   surface,
   templateScope,
   promptShortcutSource,
+  menuSide,
+  menuAnchor,
+  menuMobileDocked,
 }: {
   fileData: MentionFileDataState;
   fileSourceKind: MentionFileSourceKind;
@@ -136,6 +139,14 @@ function TwoLevelMentionMenu({
   surface: MentionSurface;
   templateScope?: PromptShortcutScope;
   promptShortcutSource?: MentionCategorySources['promptShortcut'];
+  menuSide?: 'top' | 'bottom';
+  /** `composer` anchors the menu to the nearest `[data-mention-frame]`; `caret`
+   *  follows the caret line like a text-completion popup. */
+  menuAnchor?: 'caret' | 'composer';
+  /** Keep the <640px docked panel. False keeps the floating caret popover on
+   *  mobile — for an editor mid-conversation where there is no bottom composer
+   *  to dock above. */
+  menuMobileDocked?: boolean;
 }) {
   const context = useMentionContext('TwoLevelMentionMenu');
   const { t } = useTranslation();
@@ -437,7 +448,15 @@ function TwoLevelMentionMenu({
     onLazyDirectoryOpen(directoryId);
   }, [active, lazyDirectoryIdByToken, onLazyDirectoryOpen, search]);
 
-  return <MentionTwoLevelMenu categories={categories} surface={surface} />;
+  return (
+    <MentionTwoLevelMenu
+      categories={categories}
+      surface={surface}
+      menuSide={menuSide}
+      anchor={menuAnchor}
+      mobileDocked={menuMobileDocked}
+    />
+  );
 }
 
 // ============================================================================
@@ -676,6 +695,17 @@ export interface CombinedMentionTextareaProps extends Omit<
   skillAgent?: SkillMentionAgent;
   /** Entry point for mention analytics (spec §8e). Defaults to 'unknown'. */
   mentionSurface?: MentionSurface;
+  /** Side the two-level menu opens on. The composer (bottom of the screen)
+   *  uses `top`; only meaningful for the default `composer` anchor. */
+  menuSide?: 'top' | 'bottom';
+  /** `composer` anchors the menu to the composer's `[data-mention-frame]` box;
+   *  `caret` follows the caret like a text-completion popup. The edit-and-resend
+   *  editor uses `caret`. */
+  menuAnchor?: 'caret' | 'composer';
+  /** Keep the <640px docked panel. False keeps the floating caret popover on
+   *  mobile — for an editor mid-conversation where there is no bottom composer
+   *  to dock above. */
+  menuMobileDocked?: boolean;
   /** False for a mounted but hidden composer that must not own app commands. */
   commandsEnabled?: boolean;
   /** Dropped from the `@session:` category — a session never references itself. */
@@ -741,6 +771,9 @@ export const CombinedMentionTextarea = React.forwardRef<
       availableCommands,
       skillAgent,
       mentionSurface = 'unknown',
+      menuSide,
+      menuAnchor,
+      menuMobileDocked,
       commandsEnabled = true,
       currentSessionId,
       value,
@@ -1144,6 +1177,9 @@ export const CombinedMentionTextarea = React.forwardRef<
           enableAgentRoleMentions={enableAgentRoleMentions}
           agentRoleItems={agentRoleItems}
           surface={mentionSurface}
+          menuSide={menuSide}
+          menuAnchor={menuAnchor}
+          menuMobileDocked={menuMobileDocked}
         />
       </Mention>
     );

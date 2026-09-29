@@ -98,6 +98,10 @@ const styles = stylex.create({
     paddingInline: 0,
     justifyContent: 'center',
   },
+  /* The icon-only trigger's glyph leads the shared column instead of sitting
+     centred: one start step lands its box at the trigger edge + one item pad,
+     the same 16px box a labeled trigger's leading glyph holds. */
+  iconOnlyGlyphLead: { marginInlineStart: space[1] },
   /** The model keeps its tail when it truncates: `provider/model` loses the prefix. */
   modelName: { maxWidth: '10rem', direction: 'rtl' },
   /** The "create a Role" mark at the end of the empty Role row. */
@@ -708,293 +712,302 @@ export function DesktopRunConfigMenu({
         </Menu.Trigger>
       )}
       <Menu.Content align="start" className="min-w-60">
-        {onRecentRunConfigSelect ? (
-          <RecentRunConfigMenuGroup
-            items={recentRunConfigs ?? []}
-            onSelect={onRecentRunConfigSelect}
-          />
-        ) : null}
-        {/* Above Agent, because a Role ANSWERS every row under it at once. With
+        {/* `menuList` reaches the rows back through the popup's inset, so the
+            surface keeps its edge on the trigger while the rows' leading
+            column lands on the trigger's own — one item pad off that edge. */}
+        <div {...stylex.props(surface.menuList)}>
+          {onRecentRunConfigSelect ? (
+            <RecentRunConfigMenuGroup
+              items={recentRunConfigs ?? []}
+              onSelect={onRecentRunConfigSelect}
+            />
+          ) : null}
+          {/* Above Agent, because a Role ANSWERS every row under it at once. With
             no Role to pick yet the row's value is the way to make one, seeded
             with whatever those rows are set to right now. */}
-        {agentRoles ? (
-          agentRoles.items.length === 0 ? (
-            <Menu.Item
-              disabled={!agentRoles.onCreate}
-              onClick={() => agentRoles.onCreate?.()}
-              endContent={
-                <Tooltip.Root>
-                  <Tooltip.Trigger
-                    delay={300}
-                    render={
-                      <span
-                        {...stylex.props(styles.createMark)}
-                        aria-label={t(
-                          'chat.runConfig.roles.createFromSettings',
-                          'Create role from current settings'
-                        )}
-                      >
-                        <Plus {...stylex.props(surface.glyph14)} aria-hidden="true" />
-                      </span>
-                    }
-                  />
-                  <Tooltip.Content side="right">
-                    {t(
-                      'chat.runConfig.roles.createFromSettings',
-                      'Create role from current settings'
-                    )}
-                  </Tooltip.Content>
-                </Tooltip.Root>
-              }
-            >
-              {roleLabel}
-            </Menu.Item>
-          ) : (
-            <Menu.Submenu>
-              <ValueSubTrigger
-                label={roleLabel}
-                value={selectedRole?.name ?? t('chat.runConfig.roles.none', 'None')}
-                icon={
-                  selectedRole ? (
-                    <span {...stylex.props(surface.emoji)} aria-hidden="true">
-                      {getAgentRoleEmoji(selectedRole)}
-                    </span>
-                  ) : null
+          {agentRoles ? (
+            agentRoles.items.length === 0 ? (
+              <Menu.Item
+                disabled={!agentRoles.onCreate}
+                onClick={() => agentRoles.onCreate?.()}
+                endContent={
+                  <Tooltip.Root>
+                    <Tooltip.Trigger
+                      delay={300}
+                      render={
+                        <span
+                          {...stylex.props(styles.createMark)}
+                          aria-label={t(
+                            'chat.runConfig.roles.createFromSettings',
+                            'Create role from current settings'
+                          )}
+                        >
+                          <Plus {...stylex.props(surface.glyph14)} aria-hidden="true" />
+                        </span>
+                      }
+                    />
+                    <Tooltip.Content side="right">
+                      {t(
+                        'chat.runConfig.roles.createFromSettings',
+                        'Create role from current settings'
+                      )}
+                    </Tooltip.Content>
+                  </Tooltip.Root>
                 }
-              />
-              <Menu.Content className="max-w-[min(29.5rem,var(--radix-popper-available-width,29.5rem))] overflow-x-hidden">
-                <ComposerAgentRolePanel
-                  items={agentRoles.items}
-                  machine={agentRoles.machine}
-                  selectedRoleId={agentRoles.selectedRoleId}
-                  onSelect={agentRoles.onSelect}
-                  onCreate={agentRoles.onCreate}
-                  onEdit={agentRoles.onEdit}
+              >
+                {roleLabel}
+              </Menu.Item>
+            ) : (
+              <Menu.Submenu>
+                <ValueSubTrigger
+                  label={roleLabel}
+                  value={selectedRole?.name ?? t('chat.runConfig.roles.none', 'None')}
+                  icon={
+                    selectedRole ? (
+                      <span {...stylex.props(surface.emoji)} aria-hidden="true">
+                        {getAgentRoleEmoji(selectedRole)}
+                      </span>
+                    ) : null
+                  }
+                />
+                <Menu.Content className="max-w-[min(29.5rem,var(--radix-popper-available-width,29.5rem))] overflow-x-hidden">
+                  <ComposerAgentRolePanel
+                    items={agentRoles.items}
+                    machine={agentRoles.machine}
+                    selectedRoleId={agentRoles.selectedRoleId}
+                    onSelect={agentRoles.onSelect}
+                    onCreate={agentRoles.onCreate}
+                    onEdit={agentRoles.onEdit}
+                  />
+                </Menu.Content>
+              </Menu.Submenu>
+            )
+          ) : null}
+          {agentOptions.length > 0 || selectedAgentConfig ? (
+            isAgentLocked ? (
+              <Menu.Item disabled>
+                {agentLabel}
+                <span {...stylex.props(styles.rowValue, styles.agentValue)}>
+                  {selectedAgentConfig ? (
+                    <AgentIcon
+                      cliType={selectedAgentConfig.cliType}
+                      agentType={selectedAgentConfig.agentType}
+                      brandId={selectedAgentConfig.brandId}
+                      env={selectedAgentConfig.env}
+                      className={stylex.props(surface.glyph12).className}
+                    />
+                  ) : null}
+                  <span {...stylex.props(surface.truncate)}>{selectedAgentConfig?.name}</span>
+                </span>
+              </Menu.Item>
+            ) : (
+              <Menu.Submenu>
+                <ValueSubTrigger label={agentLabel} value={selectedAgentConfig?.name ?? null} />
+                <Menu.Content className={COMPACT_OPTION_SUBMENU_CLASS}>
+                  {agentOptions.map(({ config }) => (
+                    <OptionItem
+                      key={`${config.id}:${config.machineId}`}
+                      icon={
+                        <AgentIcon
+                          cliType={config.cliType}
+                          agentType={config.agentType}
+                          brandId={config.brandId}
+                          env={config.env}
+                          className={stylex.props(surface.glyph16).className}
+                        />
+                      }
+                      label={config.name}
+                      selected={
+                        config.id === agentSelection?.agentId &&
+                        config.machineId === agentSelection.machineId
+                      }
+                      onSelect={() =>
+                        onAgentConfigChange?.({
+                          agentId: config.id as AgentSelection['agentId'],
+                          machineId: config.machineId as MachineId,
+                        })
+                      }
+                    />
+                  ))}
+                </Menu.Content>
+              </Menu.Submenu>
+            )
+          ) : null}
+
+          {extraSelectSelectors.map((selector) => {
+            const selectedValue =
+              (resolveConfigOptionValue(
+                selector,
+                configOptionValues?.[selector.configId]
+              ) as string) ?? null;
+            const selectedLabel =
+              selector.options.find((option) => option.value === selectedValue)?.label ??
+              selectedValue;
+            const locked = selector.configId === 'agent_preset' && agentLocked;
+            return (
+              <Menu.Submenu key={selector.configId}>
+                <ValueSubTrigger label={selector.label} value={selectedLabel} disabled={locked} />
+                <Menu.Content className={COMPACT_OPTION_SUBMENU_CLASS}>
+                  {selector.options.map((option) => (
+                    <OptionItem
+                      key={option.value}
+                      label={option.label}
+                      selected={option.value === selectedValue}
+                      disabled={option.disabled || locked}
+                      onSelect={() =>
+                        onConfigOptionChange?.(
+                          selector.configId,
+                          option.value as AcpConfigOptionValue
+                        )
+                      }
+                    />
+                  ))}
+                </Menu.Content>
+              </Menu.Submenu>
+            );
+          })}
+
+          {modelPickerOptions.length > 0 ? (
+            <Menu.Submenu>
+              <ValueSubTrigger label={modelRowLabel} value={modelLabel} />
+              <Menu.Content
+                // The popup is already a column: holding its own overflow keeps the
+                // search row put while only the options under it scroll.
+                className={cn(COMPACT_OPTION_SUBMENU_CLASS, 'overflow-y-hidden')}
+                // Cap the list so a long model list scrolls inside a compact menu
+                // instead of running the full viewport height. Inline (not a max-h-*
+                // class) so it reliably wins over the base content's max-h, and clamps
+                // to the available height so it never overflows off-screen.
+                style={{
+                  maxHeight: 'min(20rem, var(--available-height, 20rem))',
+                }}
+              >
+                {/* A provider can publish dozens of models; past
+                  `OPTION_SEARCH_MIN_OPTIONS` this list gains a fuzzy search row. */}
+                <MenuOptionSearchList
+                  options={modelPickerOptions}
+                  onSelect={(opt) => handleModelSelect(opt.value)}
+                  searchAnalyticsPicker="model"
+                  searchPlaceholder={modelSearchPlaceholder}
+                  emptyText={modelSearchEmptyLabel}
+                  renderOption={(opt, select) => (
+                    <OptionItem
+                      key={opt.value}
+                      label={opt.label}
+                      selected={opt.value === modelValue}
+                      disabled={opt.disabled}
+                      onSelect={select}
+                    />
+                  )}
                 />
               </Menu.Content>
             </Menu.Submenu>
-          )
-        ) : null}
-        {agentOptions.length > 0 || selectedAgentConfig ? (
-          isAgentLocked ? (
-            <Menu.Item disabled>
-              {agentLabel}
-              <span {...stylex.props(styles.rowValue, styles.agentValue)}>
-                {selectedAgentConfig ? (
-                  <AgentIcon
-                    cliType={selectedAgentConfig.cliType}
-                    agentType={selectedAgentConfig.agentType}
-                    brandId={selectedAgentConfig.brandId}
-                    env={selectedAgentConfig.env}
-                    className={stylex.props(surface.glyph12).className}
-                  />
-                ) : null}
-                <span {...stylex.props(surface.truncate)}>{selectedAgentConfig?.name}</span>
-              </span>
-            </Menu.Item>
-          ) : (
-            <Menu.Submenu>
-              <ValueSubTrigger label={agentLabel} value={selectedAgentConfig?.name ?? null} />
-              <Menu.Content className={COMPACT_OPTION_SUBMENU_CLASS}>
-                {agentOptions.map(({ config }) => (
-                  <OptionItem
-                    key={`${config.id}:${config.machineId}`}
-                    icon={
-                      <AgentIcon
-                        cliType={config.cliType}
-                        agentType={config.agentType}
-                        brandId={config.brandId}
-                        env={config.env}
-                        className={stylex.props(surface.glyph16).className}
-                      />
-                    }
-                    label={config.name}
-                    selected={
-                      config.id === agentSelection?.agentId &&
-                      config.machineId === agentSelection.machineId
-                    }
-                    onSelect={() =>
-                      onAgentConfigChange?.({
-                        agentId: config.id as AgentSelection['agentId'],
-                        machineId: config.machineId as MachineId,
-                      })
-                    }
-                  />
-                ))}
-              </Menu.Content>
-            </Menu.Submenu>
-          )
-        ) : null}
+          ) : null}
 
-        {extraSelectSelectors.map((selector) => {
-          const selectedValue =
-            (resolveConfigOptionValue(
-              selector,
-              configOptionValues?.[selector.configId]
-            ) as string) ?? null;
-          const selectedLabel =
-            selector.options.find((option) => option.value === selectedValue)?.label ??
-            selectedValue;
-          const locked = selector.configId === 'agent_preset' && agentLocked;
-          return (
-            <Menu.Submenu key={selector.configId}>
-              <ValueSubTrigger label={selector.label} value={selectedLabel} disabled={locked} />
+          {showDeepSeekDelegationWarning ? (
+            <Menu.Item
+              render={
+                <a
+                  href={DEEPSEEK_DELEGATION_DISCUSSION_URL}
+                  target="_blank"
+                  rel="noreferrer"
+                  onClick={(event) => {
+                    event.preventDefault();
+                    void openExternalUrl(DEEPSEEK_DELEGATION_DISCUSSION_URL);
+                  }}
+                >
+                  <span {...stylex.props(styles.note)}>
+                    <DeepSeekDelegationWarningContent />
+                  </span>
+                </a>
+              }
+            />
+          ) : null}
+
+          {interactionSelector ? (
+            <Menu.Submenu>
+              <ValueSubTrigger label={interactionSelector.label} value={interactionLabel} />
               <Menu.Content className={COMPACT_OPTION_SUBMENU_CLASS}>
-                {selector.options.map((option) => (
+                {interactionSelector.options.map((opt) => (
                   <OptionItem
-                    key={option.value}
-                    label={option.label}
-                    selected={option.value === selectedValue}
-                    disabled={option.disabled || locked}
+                    key={opt.value}
+                    label={opt.label}
+                    selected={opt.value === interactionValue}
+                    disabled={opt.disabled}
                     onSelect={() =>
                       onConfigOptionChange?.(
-                        selector.configId,
-                        option.value as AcpConfigOptionValue
+                        interactionSelector.configId,
+                        opt.value as AcpConfigOptionValue
                       )
                     }
                   />
                 ))}
               </Menu.Content>
             </Menu.Submenu>
-          );
-        })}
+          ) : null}
 
-        {modelPickerOptions.length > 0 ? (
-          <Menu.Submenu>
-            <ValueSubTrigger label={modelRowLabel} value={modelLabel} />
-            <Menu.Content
-              // The popup is already a column: holding its own overflow keeps the
-              // search row put while only the options under it scroll.
-              className={cn(COMPACT_OPTION_SUBMENU_CLASS, 'overflow-y-hidden')}
-              // Cap the list so a long model list scrolls inside a compact menu
-              // instead of running the full viewport height. Inline (not a max-h-*
-              // class) so it reliably wins over the base content's max-h, and clamps
-              // to the available height so it never overflows off-screen.
-              style={{
-                maxHeight: 'min(20rem, var(--available-height, 20rem))',
-              }}
-            >
-              {/* A provider can publish dozens of models; past
-                  `OPTION_SEARCH_MIN_OPTIONS` this list gains a fuzzy search row. */}
-              <MenuOptionSearchList
-                options={modelPickerOptions}
-                onSelect={(opt) => handleModelSelect(opt.value)}
-                searchAnalyticsPicker="model"
-                searchPlaceholder={modelSearchPlaceholder}
-                emptyText={modelSearchEmptyLabel}
-                renderOption={(opt, select) => (
+          {thinkingSelector ? (
+            <Menu.Submenu>
+              <ValueSubTrigger label={reasoningLabel} value={thinkingLabel} />
+              <Menu.Content className={COMPACT_OPTION_SUBMENU_CLASS}>
+                {thinkingSelector.options.map((opt) => (
                   <OptionItem
                     key={opt.value}
                     label={opt.label}
-                    selected={opt.value === modelValue}
+                    selected={opt.value === thinkingValue}
                     disabled={opt.disabled}
-                    onSelect={select}
+                    onSelect={() =>
+                      onConfigOptionChange?.(
+                        thinkingSelector.configId,
+                        opt.value as AcpConfigOptionValue
+                      )
+                    }
                   />
-                )}
-              />
-            </Menu.Content>
-          </Menu.Submenu>
-        ) : null}
+                ))}
+              </Menu.Content>
+            </Menu.Submenu>
+          ) : null}
 
-        {showDeepSeekDelegationWarning ? (
-          <Menu.Item
-            render={
-              <a
-                href={DEEPSEEK_DELEGATION_DISCUSSION_URL}
-                target="_blank"
-                rel="noreferrer"
-                onClick={(event) => {
-                  event.preventDefault();
-                  void openExternalUrl(DEEPSEEK_DELEGATION_DISCUSSION_URL);
-                }}
-              >
-                <span {...stylex.props(styles.note)}>
-                  <DeepSeekDelegationWarningContent />
-                </span>
-              </a>
-            }
-          />
-        ) : null}
-
-        {interactionSelector ? (
-          <Menu.Submenu>
-            <ValueSubTrigger label={interactionSelector.label} value={interactionLabel} />
-            <Menu.Content className={COMPACT_OPTION_SUBMENU_CLASS}>
-              {interactionSelector.options.map((opt) => (
-                <OptionItem
-                  key={opt.value}
-                  label={opt.label}
-                  selected={opt.value === interactionValue}
-                  disabled={opt.disabled}
-                  onSelect={() =>
-                    onConfigOptionChange?.(
-                      interactionSelector.configId,
-                      opt.value as AcpConfigOptionValue
-                    )
-                  }
+          {planSelector || fastSelector ? <Menu.Separator /> : null}
+          {planSelector ? (
+            <ToggleItem
+              icon={
+                <ListChecks
+                  {...stylex.props(surface.glyph16)}
+                  strokeWidth={1.8}
+                  aria-hidden="true"
                 />
-              ))}
-            </Menu.Content>
-          </Menu.Submenu>
-        ) : null}
-
-        {thinkingSelector ? (
-          <Menu.Submenu>
-            <ValueSubTrigger label={reasoningLabel} value={thinkingLabel} />
-            <Menu.Content className={COMPACT_OPTION_SUBMENU_CLASS}>
-              {thinkingSelector.options.map((opt) => (
-                <OptionItem
-                  key={opt.value}
-                  label={opt.label}
-                  selected={opt.value === thinkingValue}
-                  disabled={opt.disabled}
-                  onSelect={() =>
-                    onConfigOptionChange?.(
-                      thinkingSelector.configId,
-                      opt.value as AcpConfigOptionValue
-                    )
-                  }
-                />
-              ))}
-            </Menu.Content>
-          </Menu.Submenu>
-        ) : null}
-
-        {planSelector || fastSelector ? <Menu.Separator /> : null}
-        {planSelector ? (
-          <ToggleItem
-            icon={
-              <ListChecks {...stylex.props(surface.glyph16)} strokeWidth={1.8} aria-hidden="true" />
-            }
-            label={planRowLabel}
-            checked={planOn}
-            onToggle={() =>
-              onConfigOptionChange?.(
-                planSelector.configId,
-                togglePlanModeSelectorValue(
-                  planSelector,
-                  configOptionValues?.[planSelector.configId]
+              }
+              label={planRowLabel}
+              checked={planOn}
+              onToggle={() =>
+                onConfigOptionChange?.(
+                  planSelector.configId,
+                  togglePlanModeSelectorValue(
+                    planSelector,
+                    configOptionValues?.[planSelector.configId]
+                  )
                 )
-              )
-            }
-          />
-        ) : null}
-        {fastSelector ? (
-          <ToggleItem
-            icon={<Zap {...stylex.props(surface.glyph16)} strokeWidth={1.8} aria-hidden="true" />}
-            label={fastRowLabel}
-            checked={fastOn}
-            onToggle={() =>
-              onConfigOptionChange?.(
-                fastSelector.configId,
-                toggleOnOffConfigOptionValue(
-                  fastSelector,
-                  configOptionValues?.[fastSelector.configId]
+              }
+            />
+          ) : null}
+          {fastSelector ? (
+            <ToggleItem
+              icon={<Zap {...stylex.props(surface.glyph16)} strokeWidth={1.8} aria-hidden="true" />}
+              label={fastRowLabel}
+              checked={fastOn}
+              onToggle={() =>
+                onConfigOptionChange?.(
+                  fastSelector.configId,
+                  toggleOnOffConfigOptionValue(
+                    fastSelector,
+                    configOptionValues?.[fastSelector.configId]
+                  )
                 )
-              )
-            }
-          />
-        ) : null}
+              }
+            />
+          ) : null}
+        </div>
       </Menu.Content>
     </Menu.Root>
   );
@@ -1125,17 +1138,24 @@ export function DesktopPermissionModeButton({
         className={iconOnlyTriggerClassName}
         render={<button type="button" />}
       >
-        <span {...stylex.props(surface.glyph)}>{permissionModeIcon(value ?? null)}</span>
+        {/* The icon-only square still leads the shared column: the start
+            margin puts its 16px glyph box where a labeled trigger's leading
+            glyph sits — the same box the rows' icons land on below. */}
+        <span {...stylex.props(surface.glyph, styles.iconOnlyGlyphLead)}>
+          {permissionModeIcon(value ?? null)}
+        </span>
       </Menu.Trigger>
       <Menu.Content align="start" className="w-max min-w-44 max-w-64">
-        {options.map((opt) => (
-          <PermissionModeItem
-            key={opt.value}
-            option={opt}
-            selected={opt.value === value}
-            onSelect={() => handleSelect(opt.value)}
-          />
-        ))}
+        <div {...stylex.props(surface.menuList)}>
+          {options.map((opt) => (
+            <PermissionModeItem
+              key={opt.value}
+              option={opt}
+              selected={opt.value === value}
+              onSelect={() => handleSelect(opt.value)}
+            />
+          ))}
+        </div>
       </Menu.Content>
     </Menu.Root>
   );

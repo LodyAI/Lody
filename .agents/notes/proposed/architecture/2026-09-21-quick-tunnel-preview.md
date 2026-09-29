@@ -454,6 +454,44 @@ events and fake time, not test timeouts as evidence.
 Final second-pass verification: full OSS `pnpm check`, CLI production build,
 formatting and documentation checks passed. Independent review found no P0/P1.
 
+## Bounded client page preparation (2026-09-28)
+
+Agent reports already prepare tunnels, but a later Browser click still loads the
+application's resources and executes its initial JavaScript. The visible conversation
+now supplies its existing preview state to a small preparation component. It confirms
+the advertised endpoint with one non-renewing status request and preloads the exact
+candidate page only on remote-capable clients with atomic iframe reparenting.
+
+```text
+visible conversation + active endpoint → one live status confirmation
+  → one speculative iframe (two-minute limit)
+  → Browser acquisition → existing opened-page cache
+  or target change / background / unmount / expiry → dispose
+```
+
+Preparation is owned by the existing frame cache, separately from opened pages.
+Acquisition transfers the same iframe; cleanup of its former owner becomes harmless.
+No second session subscription, polling, retry scheduler, tunnel creation or keepalive
+is introduced. Existing Browser authorization and health refresh remain unchanged.
+The candidate click waits for Browser's initial live status observation, so it can
+reuse the prepared endpoint without entering a redundant create path that clears
+the speculative frame through an empty viewer state.
+Local desktop viewing and engines without atomic moves retain on-demand loading;
+preconnect is deferred to keep one lifecycle. Application requests and scripts run
+before the click and may renew normal tunnel idle time, so unopened frames have an
+independent two-minute lifetime. Expiry/background cancellation does not restart the
+same preparation on ordinary rerenders.
+
+All 41 tests in the existing surface and Browser controller suites pass: frame
+transfer, stale cleanup, expiry, replacement, backgrounding, late status results,
+platform/route gating, endpoint mismatch and first-click status ordering. A local
+Chromium check against a synthetic page confirms one navigation, a 720px offscreen
+host, preserved JavaScript context and input state, and harmless preparation cleanup
+after takeover. Components typechecking and the platform boundary check pass.
+Full docs/public-boundary checks remain blocked by unrelated uninitialized adapter
+submodules. Real-device remote latency and browser scheduling remain unmeasured;
+no instant-interactivity guarantee is made.
+
 ## Native diagnostic parsing correction
 
 Follow-up PR: [#994](https://github.com/LodyAI/Lody/pull/994).

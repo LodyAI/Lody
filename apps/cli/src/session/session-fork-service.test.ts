@@ -13,6 +13,7 @@ import {
   type SessionHistoryInput,
   type SessionId,
   type SessionMeta,
+  type SessionAcpRuntimeConfigSnapshot,
 } from '@lody/shared';
 import {
   createLoroSessionData,
@@ -59,6 +60,8 @@ function createForkHarness(
   failPersistReason?: string,
   options: {
     sourceBusy?: boolean;
+    sourceMeta?: Partial<SessionMeta>;
+    sourceRuntimeConfig?: SessionAcpRuntimeConfigSnapshot;
     supportsActiveTurnFork?: boolean;
     sourceHistory?: SessionHistoryInput[];
     worktree?: { dirty: boolean; headSha: string };
@@ -94,6 +97,7 @@ function createForkHarness(
           },
         }
       : {}),
+    ...options.sourceMeta,
   } as unknown as SessionMeta;
   const sourceLoro = new LoroDoc();
   for (const entry of options.sourceHistory ?? sourceHistory) {
@@ -105,6 +109,7 @@ function createForkHarness(
   sourceLoro.commit();
   const sourceDoc = withHistoryPort({
     getMetaState: vi.fn(async () => sourceMeta),
+    getDocState: vi.fn(async () => ({ acpRuntimeConfig: options.sourceRuntimeConfig })),
     getHistory: vi.fn(() => options.sourceHistory ?? sourceHistory),
     // The storage-owned snapshot service over the source doc: capture happens
     // through the port, and `read()` is the fork's full stored read.
@@ -131,6 +136,10 @@ function createForkHarness(
       forkOperation = operation;
     }),
     syncModelSummary: vi.fn(async () => {}),
+    applyAcpRuntimeConfigPatch: vi.fn(
+      (_turnId: string, _patch: Parameters<SessionDocument['applyAcpRuntimeConfigPatch']>[1]) =>
+        true
+    ),
   });
   const persistPendingChanges = vi.fn(async (reason: string) => {
     if (reason === failPersistReason) {
@@ -406,10 +415,39 @@ describe('cloneHistoryThroughTurn', () => {
   });
 });
 
+const importedHistory: NonNullable<SessionMeta['externalHistory']> = {
+  source: 'local-acp-history',
+  provider: { cliType: 'builtin', agentType: 'codex' },
+  sourceAcpSessionId: 'acp-source' as never,
+  importedTurnCount: 2,
+  importedTurnHashes: [],
+  lastSyncAt: 1,
+  status: 'synced',
+};
+
 describe('SessionForkService durability boundary', () => {
-  it.each(['regular', 'worktree'] as const)(
-    'writes %s fork history through the real session writer',
-    async (kind) => {
+  it('refuses a conflicted imported source before creating a target', async () => {
+    const h = createForkHarness(undefined, {
+      sourceMeta: {
+        acpSessionId: undefined,
+        externalHistory: { ...importedHistory, status: 'sync_conflict' },
+      },
+    });
+    expect(await h.service.fork(forkSpec)).toMatchObject({
+      success: false,
+      error: { code: 'FORK_UNAVAILABLE' },
+    });
+    expect(h.repo.upsertDocMeta).not.toHaveBeenCalled();
+  });
+
+  it.each(
+    ['regular', 'worktree'].flatMap((kind) =>
+      ['native', 'imported', 'later-config'].map((origin) => ({ kind, origin }))
+    )
+  )(
+    'writes $kind fork history through the real session writer (origin=$origin)',
+    async ({ kind, origin }) => {
+      const imported = origin !== 'native';
       vi.useFakeTimers({ toFake: ['setImmediate'] });
       const loro = new LoroDoc();
       const doc = new SessionDocument({} as never, targetSessionId, async () => {}, {
@@ -426,6 +464,17 @@ describe('SessionForkService durability boundary', () => {
         { type: 'text', text: 42 },
       ];
       const harness = createForkHarness(undefined, {
+        ...(imported
+          ? {
+              sourceMeta: { acpSessionId: undefined, externalHistory: importedHistory },
+              sourceRuntimeConfig: {
+                acpSessionId: 'acp-source' as never,
+                basedOnUserTurnId: origin === 'later-config' ? 'later-user' : 'user-1',
+                revision: 1,
+                modelId: 'imported-model',
+              },
+            }
+          : {}),
         ...(kind === 'worktree' ? { worktree: { dirty: false, headSha: 'a'.repeat(40) } } : {}),
         sourceHistory: [
           sourceHistory[0]!,
@@ -438,6 +487,9 @@ describe('SessionForkService durability boundary', () => {
       });
       harness.targetDoc.sessionData.snapshots.copyFrom.mockImplementation((snapshot, history) =>
         doc.sessionData.snapshots.copyFrom(snapshot, history as never)
+      );
+      harness.targetDoc.applyAcpRuntimeConfigPatch.mockImplementation((...args) =>
+        doc.applyAcpRuntimeConfigPatch(...args)
       );
       let setupRow: LoroMap | undefined;
       if (kind === 'worktree') {
@@ -500,6 +552,20 @@ describe('SessionForkService durability boundary', () => {
         ]);
         expect(stored[1].items).toEqual(opaqueItems);
         expect(stored[1].futureTurn).toBe('keep');
+        if (origin !== 'imported') {
+          expect(doc.mirror?.getState().acpRuntimeConfig?.modelId).toBeUndefined();
+        }
+        if (origin === 'imported') {
+          expect(doc.mirror?.getState().acpRuntimeConfig).toMatchObject({
+            modelId: 'imported-model',
+            acpSessionId: 'acp-target',
+            basedOnUserTurnId: 'user-1',
+          });
+          expect(harness.sessionManager.createSession).toHaveBeenCalledWith(
+            expect.anything(),
+            expect.objectContaining({ forkSessionId: 'acp-source' })
+          );
+        }
         expect(harness.targetDoc.getForkOperation()).toBeUndefined();
         expect(harness.sessionManager.terminateSession).not.toHaveBeenCalled();
       } finally {

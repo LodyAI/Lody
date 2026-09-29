@@ -10,7 +10,7 @@ full because the topic outgrew that index.
 
 - Build entries from `items`, never DOM. The rail mounts only once user rounds
   reach `OUTLINE_MIN_USER_ROUNDS`. Reader position is the last round
-  anchored above the viewport top, resolved from Virtua offsets; it never
+  anchored above the viewport top, resolved from the list's offsets; it never
   enters tick-list props. Paint one arithmetic active bar; sync `aria-current`
   imperatively. Pointer magnification may update memoized ticks; scrolling may
   not. `buildConversationOutline` runs at token rate, so memoize per message
@@ -30,10 +30,9 @@ full because the topic outgrew that index.
 - `scrollRowToTop` is the only row-index-to-scroll conversion: it adds
   `leadingRowCount` and compensates viewport top padding so reads and writes
   share one coordinate space. Outline jumps, search, and imperative scrolling
-  use it; do not call `vlistRef.scrollToIndex` elsewhere. Group toggles never
+  use it; do not scroll the conversation list any other way. Group toggles never
   scroll — expansion reveals rows in place.
-- Far jumps start from estimated offsets; after scroll settles, reissue the
-  same jump until within `OUTLINE_JUMP_TOLERANCE_PX`, bounded by
-  `OUTLINE_JUMP_MAX_CORRECTIONS`. Wheel, touch, or key input cancels correction
-  immediately. Keep `OUTLINE_ANCHOR_TOLERANCE_PX` above jump tolerance.
-- Follow-output suppression is owned by `pendingOutlineJumpRef`, never a render.
+- A jump is issued once. It sets the scroll engine's reading anchor to the
+  round's row, which stays at the top while rows around it are measured and
+  placeholders hydrate, and which releases follow-output by itself. Never
+  re-issue a jump by a stored row index: indexes shift as placeholders expand.

@@ -7,6 +7,8 @@ Translation: current
 
 PR: [#896](https://github.com/LodyAI/Lody/pull/896)
 
+Later: the [conversation scroll engine](../architecture/2026-09-27-conversation-scroll-engine.md) replaced the reveal gate on 2026-09-27; this repair and its reapplication path no longer exist.
+
 ## Abstract
 
 A conversation can remain invisible even after its rows are mounted and measured.

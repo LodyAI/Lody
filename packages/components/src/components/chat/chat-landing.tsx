@@ -1,3 +1,4 @@
+import { buildDraftUserHistoryEntry } from '@/lib/session-attachment-draft';
 import { sessionHasUnreadMessages } from '@/lib/session-read-receipt';
 import {
   useCallback,
@@ -14,7 +15,6 @@ import {
 import { useTranslation } from 'react-i18next';
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import {
-  buildPendingUserHistoryEntry,
   buildSessionPreparationRunConfig,
   buildSessionTurnInputConfig,
   evaluateSessionCreateQuota,
@@ -46,6 +46,7 @@ import {
   type WorktreeSetupScriptConfig,
   type WorktreeCleanupScriptConfig,
   type WorkspaceId,
+  deriveDraftSessionTitle,
 } from '@lody/shared';
 import { useCloudMutation, useCloudQuery } from '@lody/platform/react';
 import { usePostHog } from '@posthog/react';
@@ -190,18 +191,16 @@ import {
 import { toIntlLocale } from '@/lib/intl-locale';
 import {
   arePastedTextDraftsEqual,
-  getPastedTextByteSize,
+  createPastedTextFile,
   getPastedTextCharacterCount,
   getPastedTextDraftsAfterInsertion,
   insertPastedTextDraft,
   isPastedTextTooLarge,
-  MAX_PASTED_TEXT_BYTE_SIZE,
   normalizePastedTextDraft,
   sanitizePastedTextDrafts,
   shouldCapturePastedTextDraft,
   type PastedTextDraft,
 } from '@/lib/pasted-text-draft';
-import { formatFileSize } from '@/lib/session-file-presentation';
 import { wrapPastedTextChipLabel } from '@/components/mentions/mention-chips';
 
 import { ErrorBoundary } from '@/components/error-boundary';
@@ -1293,6 +1292,7 @@ function WorkspaceChatLanding({
   const attachmentInputRef = useRef<HTMLInputElement>(null);
   const {
     imageItems,
+    attachments: imageDraftAttachments,
     hasBlockingImages,
     hasUploadedImages,
     canAddMoreImages,
@@ -1313,6 +1313,7 @@ function WorkspaceChatLanding({
   });
   const {
     fileItems,
+    attachments: fileDraftAttachments,
     hasBlockingFiles,
     hasUploadedFiles,
     canAddMoreFiles,
@@ -2805,26 +2806,11 @@ function WorkspaceChatLanding({
     (event: ClipboardEvent<HTMLTextAreaElement>) => {
       const text = event.clipboardData.getData('text/plain');
 
-      // Refuse the whole paste rather than silently truncating it: a blob this
-      // large is a log dump, and a half-pasted log is worse than none.
-      if (text && isPastedTextTooLarge(text)) {
-        event.preventDefault();
-        toast.error(
-          t('composer.pastedTextTooLarge', 'Pasted text is too large ({{size}}).', {
-            size: formatFileSize(getPastedTextByteSize(text)),
-          }),
-          {
-            description: t(
-              'composer.pastedTextTooLargeDescription',
-              'The limit is {{limit}}. Attach it as a file instead.',
-              { limit: formatFileSize(MAX_PASTED_TEXT_BYTE_SIZE) }
-            ),
-          }
-        );
-        return;
-      }
+      const pastedTextFile = text && isPastedTextTooLarge(text) ? createPastedTextFile(text) : null;
 
-      if (text && shouldCapturePastedTextDraft(text)) {
+      if (pastedTextFile) {
+        event.preventDefault();
+      } else if (text && shouldCapturePastedTextDraft(text)) {
         event.preventDefault();
         insertLargePastedTextAtSelection(text);
       }
@@ -2852,11 +2838,14 @@ function WorkspaceChatLanding({
         });
       }
 
-      if (pastedFiles.length > 0) {
+      const filesToAttach = pastedTextFile ? [pastedTextFile, ...pastedFiles] : pastedFiles;
+      if (filesToAttach.length > 0) {
         event.preventDefault();
-        attachPastedFiles(pastedFiles);
+        attachPastedFiles(filesToAttach);
         return;
       }
+
+      if (pastedTextFile) return;
 
       handleImagePromptPaste(event);
     },
@@ -2971,8 +2960,9 @@ function WorkspaceChatLanding({
       buildInputBlocks(expandedPrompt.text, buildFileInputBlocks(), expandedPrompt.spans),
       ''
     );
+    const attachments = [...imageDraftAttachments, ...fileDraftAttachments];
     const promptText = extractPromptPreviewFromInputBlocks(inputBlocks);
-    if (inputBlocks.length === 0) {
+    if (inputBlocks.length === 0 && attachments.length === 0) {
       captureSessionInputBlocked('empty_input');
       setComposerError(t('chat.validation.missingPrompt'));
       return;
@@ -3080,11 +3070,7 @@ function WorkspaceChatLanding({
         repoFullNameForMentions = selectedRepo;
       }
 
-      const draftTitle = promptText
-        .split('\n')
-        .map((line) => line.trim())
-        .find((line) => line.length > 0)
-        ?.slice(0, 50);
+      const draftTitle = deriveDraftSessionTitle(promptText);
       /* Agent config prompt, then the Role's instruction, then the task — the
          Role speaks for how this agent is being used, so it sits between the
          two. A Role only reaches here while it is still what will run. */
@@ -3110,12 +3096,15 @@ function WorkspaceChatLanding({
         agentRoleId: activeAgentRole?.id ?? null,
         agentRoleRevision: activeAgentRole?.revision,
       });
-      const pendingHistoryEntry = buildPendingUserHistoryEntry({
-        userId,
-        inputBlocks,
-        timestamp: new Date().toISOString(),
-        inputConfig,
-      });
+      const pendingHistoryEntry = buildDraftUserHistoryEntry(
+        {
+          userId,
+          inputBlocks,
+          timestamp: new Date().toISOString(),
+          inputConfig,
+        },
+        attachments
+      );
       if (!pendingHistoryEntry) {
         throw new Error('Initial session history missing effective items');
       }
@@ -3150,8 +3139,15 @@ function WorkspaceChatLanding({
             ? { agentRoleId: activeAgentRole.id, agentRoleRevision: activeAgentRole.revision }
             : {}),
         },
-        pendingHistoryEntry
+        pendingHistoryEntry,
+        attachments
       );
+      // Admission owns the snapshot now; later preference/navigation failures must not resend it.
+      setPrompt('');
+      clearPastedTextDrafts();
+      clearPendingImages();
+      clearPendingFiles();
+      resetDraftSessionId();
       if (!historyEntry || typeof historyEntry !== 'object' || !('id' in historyEntry)) {
         throw new Error(`Initial session history missing entry id (sessionId=${sessionId})`);
       }
@@ -3181,7 +3177,8 @@ function WorkspaceChatLanding({
           Date.now()
         )
       );
-      handoffSessionPreparation(sessionId);
+      if (attachments.length) cancelSessionPreparation();
+      else handoffSessionPreparation(sessionId);
 
       capturePostHogEvent(postHog, 'session/start_requested', {
         user_id: userId,
@@ -3313,11 +3310,6 @@ function WorkspaceChatLanding({
       // be misattributed.
       startFailureReason = 'unknown';
 
-      setPrompt('');
-      clearPastedTextDrafts();
-      clearPendingImages();
-      clearPendingFiles();
-      resetDraftSessionId();
       if (mobileNewChatOpen) {
         // The mobile base ChatLanding stays mounted beneath the session drawer.
         // Close the sheet explicitly on successful start so keyboard-submit and
@@ -4320,28 +4312,29 @@ function WorkspaceChatLanding({
       selectedModelId,
     ]
   );
-  const { handoffToSession: handoffSessionPreparation } = useSessionPreparation({
-    runtime,
-    machineId: preparationMachineId,
-    requestedByUserId: userId ?? null,
-    agentConfigId: selectedConfig?.id ?? null,
-    cliType: selectedConfig?.cliType ?? null,
-    agentType: selectedConfig?.agentType ?? null,
-    project: preparationProject,
-    runConfig: preparationRunConfig,
-    sessionId: draftSessionId,
-    ensureSessionId: ensureDraftSessionId,
-    enabled:
-      preparationContextReady &&
-      Boolean(
-        runtime &&
-        preparationMachineId &&
-        userId &&
-        selectedConfig &&
-        (prompt.trim().length > 0 || imageItems.length > 0 || fileItems.length > 0)
-      ),
-    activityRevision: `${draftActivityRevision}:${imageItems.length}:${fileItems.length}`,
-  });
+  const { handoffToSession: handoffSessionPreparation, cancel: cancelSessionPreparation } =
+    useSessionPreparation({
+      runtime,
+      machineId: preparationMachineId,
+      requestedByUserId: userId ?? null,
+      agentConfigId: selectedConfig?.id ?? null,
+      cliType: selectedConfig?.cliType ?? null,
+      agentType: selectedConfig?.agentType ?? null,
+      project: preparationProject,
+      runConfig: preparationRunConfig,
+      sessionId: draftSessionId,
+      ensureSessionId: ensureDraftSessionId,
+      enabled:
+        preparationContextReady &&
+        Boolean(
+          runtime &&
+          preparationMachineId &&
+          userId &&
+          selectedConfig &&
+          (prompt.trim().length > 0 || imageItems.length > 0 || fileItems.length > 0)
+        ),
+      activityRevision: `${draftActivityRevision}:${imageItems.length}:${fileItems.length}`,
+    });
 
   const mentionSource = useMemo(() => {
     if (contextType === 'chat') return undefined;
@@ -6164,6 +6157,13 @@ function WorkspaceChatLanding({
         resetKeys={[workspaceId, workspaceSlug, contextType, mobileNewChatOpen]}
       >
         <MobileInlinePickerRowSlot>
+          <input
+            ref={attachmentInputRef}
+            type="file"
+            multiple
+            className="hidden"
+            onChange={handleAttachmentInputChange}
+          />
           {composerNoticeNode}
           <ChatComposer
             tone={tone}
@@ -6240,13 +6240,6 @@ function WorkspaceChatLanding({
   if (isMobile && mobileProjectContext) {
     return (
       <>
-        <input
-          ref={attachmentInputRef}
-          type="file"
-          multiple
-          className="hidden"
-          onChange={handleAttachmentInputChange}
-        />
         {mobileNewChatSheetNode}
         <MobileProjectScreen
           project={mobileProjectContext}
@@ -6348,13 +6341,6 @@ function WorkspaceChatLanding({
   if (isMobile) {
     return (
       <>
-        <input
-          ref={attachmentInputRef}
-          type="file"
-          multiple
-          className="hidden"
-          onChange={handleAttachmentInputChange}
-        />
         <MobileHomeScreen
           workspace={mobileHomeWorkspace}
           workspaceOptions={mobileHomeWorkspaceOptions}

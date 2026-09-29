@@ -2,6 +2,13 @@ import { describe, expect, it, vi } from 'vitest';
 import * as acp from '@agentclientprotocol/sdk';
 import type { SessionInfo } from '@agentclientprotocol/sdk';
 import type { ACPSessionId } from '@lody/shared';
+import { mkdtemp, readdir, rm } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import * as profileStore from '../src/agent/codex-profile-store';
+import * as loginShell from '../src/agent/login-shell-env';
+import type { Logger } from '../src/utils/logger';
 
 import { resolveACPProcessLaunch, resolveACPProcessLaunchAsync } from '../src/agent/setting';
 import {
@@ -9,6 +16,7 @@ import {
   listPaginatedHistorySessions,
   requestHistorySessionReplay,
   resolveHistoryACPProcessLaunch,
+  listHistorySessionsForLocalProject,
 } from '../src/lib/history-session-catalog-client';
 
 function session(sessionId: string, title: string): SessionInfo {
@@ -20,6 +28,62 @@ function session(sessionId: string, title: string): SessionInfo {
 }
 
 describe('history session catalog client', () => {
+  it('releases its process registration when removal wins before environment preparation', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'codex-history-use-'));
+    let cleaned = false;
+    const store = new profileStore.CodexProfileStore(
+      root,
+      {
+        get: async () => undefined,
+        set: async () => {},
+        delete: async () => {},
+      },
+      async () => {
+        cleaned = true;
+      }
+    );
+    try {
+      const profile = await store.resolve(
+        'workspace',
+        {
+          id: randomUUID(),
+          machineId: 'machine',
+          name: 'Synthetic',
+          cliType: 'builtin',
+          agentType: 'codex',
+          env: {},
+          codexAuth: { mode: 'chatgpt', profileId: randomUUID() },
+        } as Parameters<typeof store.resolve>[1],
+        true
+      );
+      if (!profile) throw new Error('Missing synthetic profile');
+      await store.markChatgptReady(profile);
+      vi.spyOn(profileStore, 'getCodexProfileStore').mockReturnValue(store);
+      vi.spyOn(loginShell, 'getLoginShellEnv').mockResolvedValue({});
+      vi.spyOn(store, 'isReady').mockImplementation(async () => {
+        expect(await store.remove(profile)).toBe(false);
+        return false;
+      });
+      await expect(
+        listHistorySessionsForLocalProject({
+          provider: {
+            cliType: 'builtin',
+            agentType: 'codex',
+            codexProfile: profile,
+            runtimeOverrides: { codexPath: '/synthetic/codex' },
+          },
+          rootPath: root,
+          logger: { debug() {}, info() {}, warn() {}, error() {} } as unknown as Logger,
+        })
+      ).rejects.toThrow('not ready');
+      expect(await readdir(path.join(profile.home, '..', 'processes'))).toEqual([]);
+      expect(await store.remove(profile)).toBe(true);
+      expect(cleaned).toBe(true);
+    } finally {
+      vi.restoreAllMocks();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
   it('paginates listSessions until nextCursor is empty', async () => {
     const calls: Array<{ cwd: string; cursor?: string | null }> = [];
     const result = await listPaginatedHistorySessions('/repo/project', async (params) => {

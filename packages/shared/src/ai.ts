@@ -9,6 +9,7 @@ import type { ToolCallContent as AcpToolCallContent, SessionMode } from '@agentc
 import type { PermissionOutcome } from './message';
 import type { SessionGoalAction } from './goal';
 import { createPlanModeConfigOption } from 'acp-extension-core';
+import type { LodySubagentSnapshot, LodySubagentProgress } from 'acp-extension-core';
 import type { AgentConfigId, AgentRoleId, McpServerId, SessionId } from './ids';
 import type { MessageTextSpan } from './message-text-spans';
 import type { MinimalVisualAnnotationAnchor } from './visual-annotation-types';
@@ -509,6 +510,105 @@ export const getAcpCapabilityCacheStaleReason = (
     return 'source-version-mismatch';
   }
   return undefined;
+};
+
+/**
+ * How long a persisted runtime capability entry may answer a
+ * `machine/acp-capabilities-refresh` request without starting the agent again.
+ *
+ * `sourceVersion` already covers every input Lody controls (adapter version,
+ * managed-runtime version, runtime-override path, custom launch spec, and the
+ * env values that change an agent's identity), so the TTL exists only for drift
+ * Lody cannot observe: slash commands, sub-agents or model entitlements that the
+ * user changes in the agent's own configuration. Two other paths converge faster
+ * than the TTL — creating a real session rewrites the entry from that session's
+ * own `session/new` response, and Settings offers an explicit forced refresh —
+ * so the TTL only bounds staleness for agents nobody launches, where it costs at
+ * most one probe per config per day.
+ */
+export const ACP_CAPABILITY_REFRESH_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Age after which rewriting an unchanged capability entry is worth a Machine
+ * Flock write, solely to move `fetchedAt` forward.
+ *
+ * Writers skip unchanged entries so that every probe and every created session
+ * does not cost a Flock write, flush and sync. That skip must not outlive the
+ * TTL, or an entry whose content never changes expires once and then misses
+ * forever. Half the TTL is the smallest window that still gives two guarantees
+ * at once: a renewal is at most one write per config per half-TTL no matter how
+ * often sessions start or refreshes are forced, and an agent that starts even
+ * one session per half-TTL keeps its entry fresh without any probe at all,
+ * because that session's own write lands before the entry can expire.
+ */
+export const ACP_CAPABILITY_FETCH_TIME_RENEW_AFTER_MS = ACP_CAPABILITY_REFRESH_CACHE_TTL_MS / 2;
+
+/** Whether an unchanged entry should still be rewritten to renew its fetch time. */
+export const shouldRenewAcpCapabilityFetchTime = (
+  entry: Pick<AcpCapabilityCacheEntry, 'fetchedAt'>,
+  nowMs: number
+): boolean => nowMs - entry.fetchedAt >= ACP_CAPABILITY_FETCH_TIME_RENEW_AFTER_MS;
+
+export type AcpCapabilityRefreshCacheMissReason =
+  | AcpCapabilityCacheStaleReason
+  | 'source-version-unresolved'
+  | 'launch-inputs-unknown'
+  | 'launch-inputs-changed'
+  | 'not-runtime-provenance'
+  | 'expired';
+
+export type AcpCapabilityRefreshCacheDecision =
+  | { hit: true; entry: AcpCapabilityCacheEntry }
+  | { hit: false; reason: AcpCapabilityRefreshCacheMissReason };
+
+/**
+ * Whether the launch inputs that produced a persisted entry match the ones a
+ * probe would use now. `sourceVersion` cannot answer this alone: for custom and
+ * registry configs, and for every builtin except DeepSeek's base URL, it does not
+ * depend on the config's environment, and a token or endpoint change can still
+ * change what the agent advertises. The answering daemon remembers a fingerprint
+ * per entry it wrote, in memory only, so this is `'unknown'` after a restart.
+ */
+export type AcpCapabilityLaunchInputsMatch = 'matching' | 'changed' | 'unknown';
+
+/**
+ * Decides whether a capability refresh may be answered from the persisted entry.
+ *
+ * `expectedSourceVersion` is `undefined` when the caller cannot name the version
+ * a fresh probe would produce (an uninstalled managed runtime, for example); that
+ * is always a miss, never an implicit hit. A future-dated `fetchedAt` counts as
+ * fresh because both sides stamp it from the same server clock, so a negative age
+ * means clock adjustment rather than an entry worth re-probing.
+ */
+export const decideAcpCapabilityRefreshCache = (args: {
+  entry: AcpCapabilityCacheEntry | undefined;
+  expectedSourceVersion: string | undefined;
+  launchInputs: AcpCapabilityLaunchInputsMatch;
+  nowMs: number;
+  ttlMs?: number;
+}): AcpCapabilityRefreshCacheDecision => {
+  const { entry, expectedSourceVersion, launchInputs, nowMs } = args;
+  const ttlMs = args.ttlMs ?? ACP_CAPABILITY_REFRESH_CACHE_TTL_MS;
+  if (expectedSourceVersion === undefined) {
+    return { hit: false, reason: 'source-version-unresolved' };
+  }
+  if (launchInputs !== 'matching') {
+    return {
+      hit: false,
+      reason: launchInputs === 'changed' ? 'launch-inputs-changed' : 'launch-inputs-unknown',
+    };
+  }
+  const staleReason = getAcpCapabilityCacheStaleReason(entry, expectedSourceVersion);
+  if (staleReason || !entry) {
+    return { hit: false, reason: staleReason ?? 'missing' };
+  }
+  if (entry.provenance !== 'runtime') {
+    return { hit: false, reason: 'not-runtime-provenance' };
+  }
+  if (nowMs - entry.fetchedAt > ttlMs) {
+    return { hit: false, reason: 'expired' };
+  }
+  return { hit: true, entry };
 };
 
 export const isBuiltinAgentType = (agentType: string): agentType is BuiltinAgentType =>
@@ -1577,6 +1677,13 @@ export type SubagentTaskUsage = {
  * event into the transcript.
  */
 export type SubagentTaskPayload = {
+  /** Normalized run transcript. Absent on legacy provider task rows. */
+  run?: {
+    sessionId: string;
+    snapshot: LodySubagentSnapshot;
+    progress?: LodySubagentProgress;
+    items: SubagentRunItem[];
+  };
   taskId: string;
   status: SubagentTaskStatus;
   /** Provider-neutral task category published through `_meta.lody.task`. */
@@ -1606,6 +1713,11 @@ export type SubagentTaskPayload = {
   skipTranscript?: boolean;
   hasOutputFile?: boolean;
 };
+
+export type SubagentRunItem = Extract<
+  MessageContent,
+  { type: 'text' | 'thought' | 'tool_call' | 'plan' }
+> & { nativeTurnId?: string; messageId?: string };
 
 export type MessageContent =
   | {

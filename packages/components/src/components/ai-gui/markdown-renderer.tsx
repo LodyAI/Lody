@@ -17,6 +17,7 @@ import {
   Suspense,
 } from 'react';
 import { createPortal } from 'react-dom';
+import { useAtomValue } from 'jotai';
 import type { StreamdownProps } from '@lobehub/streamdown';
 import Markdown, {
   defaultUrlTransform,
@@ -31,7 +32,7 @@ import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import { Check, Copy } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { DEFAULT_CONVERSATION_FONT_SIZE } from '@/atoms/settings';
+import { DEFAULT_CONVERSATION_FONT_SIZE, inlineMathEnabledAtom } from '@/atoms/settings';
 import { MonochromeFileIcon } from '@/components/icons/file-icons';
 import { writeTextToClipboard } from '@/lib/clipboard';
 import {
@@ -39,7 +40,10 @@ import {
   parseMarkdownAgentFileHref,
 } from '@/lib/markdown-agent-file-link';
 import { matchWholeFilePath, splitTextIntoFilePathSegments } from '@/lib/linkify-file-paths';
-import { normalizeTexMathDelimiters } from '@/lib/markdown-single-dollar-math';
+import {
+  normalizeTexMathDelimiters,
+  remarkSingleDollarTextMath,
+} from '@/lib/markdown-single-dollar-math';
 import { cn } from '@/lib/utils';
 import { usePrLinkInterceptor } from './pr-link-context';
 import {
@@ -66,6 +70,8 @@ import { MermaidFullscreenButton, useMermaidDiagramCanvas } from './use-mermaid-
 import { SessionReadonlyContext } from './session-readonly-context';
 import type { MarkdownAgentFileLinkMenuItem } from '@/hooks/use-session-file-actions';
 import { ContextMenu } from '@/ui/armed-overlays';
+import { MarkdownFileImage, MarkdownFileResourcesContext } from './markdown-file-image';
+import { resolveMarkdownImagePath } from '@/lib/session-file-open-target';
 
 export { createMarkdownMermaidConfig } from './markdown-mermaid';
 
@@ -200,6 +206,17 @@ const MARKDOWN_BASE_CLASSNAME =
   '[&_:is(th,td)+:is(th,td)]:border-l [&_:is(th,td)+:is(th,td)]:border-l-foreground/[0.08] ' +
   '[&_tbody_tr:last-child_td]:border-b-0 ' +
   '[&_table_code]:!bg-foreground/[0.08] [&_table_code]:!ring-0 dark:[&_table_code]:!bg-foreground/[0.14]';
+
+const CJK_HAN_PATTERN = /\p{Script=Han}/u;
+
+function markdownNodeText(node: ReactNode): string {
+  if (typeof node === 'string' || typeof node === 'number') return String(node);
+  if (Array.isArray(node)) return node.map(markdownNodeText).join('');
+  if (node && typeof node === 'object' && 'props' in node) {
+    return markdownNodeText((node as { props?: { children?: ReactNode } }).props?.children);
+  }
+  return '';
+}
 
 const MARKDOWN_SIZE_CLASSNAME =
   '[&_h1]:text-[length:var(--markdown-h1-font-size)] ' +
@@ -684,6 +701,10 @@ const MARKDOWN_REMARK_PLUGINS = [
   remarkMarkUnclosedFences,
   [remarkMath, { singleDollarTextMath: false }],
 ] satisfies StreamdownProps['remarkPlugins'];
+const INLINE_MATH_REMARK_PLUGINS = [
+  ...MARKDOWN_REMARK_PLUGINS,
+  remarkSingleDollarTextMath,
+] satisfies StreamdownProps['remarkPlugins'];
 
 const KATEX_REHYPE_PLUGIN = [
   rehypeKatex,
@@ -902,6 +923,17 @@ const createMarkdownComponents = ({
   readonly: boolean;
   theme: ResolvedTheme;
 }): Components => ({
+  p: ({ children, className, node: _node, ...props }) => (
+    <p
+      {...props}
+      className={cn(
+        className,
+        CJK_HAN_PATTERN.test(markdownNodeText(children)) && 'markdown-cjk-paragraph'
+      )}
+    >
+      {children}
+    </p>
+  ),
   pre: (props) => <MarkdownPre {...props} theme={theme} />,
   code: (props: MarkdownCodeProps) => {
     const { className, children, style: _style, node: _node, ...rest } = props;
@@ -975,6 +1007,7 @@ const createMarkdownComponents = ({
 
 function ConversationMarkdownImage(props: MarkdownImageProps) {
   const readonly = useContext(SessionReadonlyContext);
+  const resources = useContext(MarkdownFileResourcesContext);
   // No workspace URI fetch is mounted for an anonymous publication.
   // Typed share images are handled separately through the manifest attachment reader.
   if (readonly) {
@@ -996,6 +1029,13 @@ function ConversationMarkdownImage(props: MarkdownImageProps) {
         {props.alt || 'Image'}
       </span>
     );
+  }
+  if (
+    resources &&
+    typeof props.src === 'string' &&
+    resolveMarkdownImagePath(resources.documentPath, props.src) !== null
+  ) {
+    return <MarkdownFileImage src={props.src} alt={props.alt} />;
   }
   return <SizedMarkdownImage {...props} />;
 }
@@ -1080,6 +1120,9 @@ function normalizeMarkdownRendererSize(size: MarkdownRendererSize): Conversation
   return size;
 }
 
+/** A React-owned text node cut short by search marks, and how to restore it. */
+type SearchTextSplit = { node: Text; value: string; head: string; inserted: ChildNode[] };
+
 export const MarkdownRenderer = memo(function MarkdownRenderer({
   text,
   size = DEFAULT_CONVERSATION_FONT_SIZE,
@@ -1111,14 +1154,15 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
   const readonly = useContext(SessionReadonlyContext);
   const getAgentFileLinkContextMenuItems = useContext(AgentFileLinkContextMenuItemsContext);
   const containerRef = useRef<HTMLDivElement>(null);
-  /** Whether this block currently holds search marks that need unwrapping. */
-  const markedRef = useRef(false);
+  /** Text nodes split for search marks in this block, with what to undo. */
+  const searchSplitsRef = useRef<SearchTextSplit[]>([]);
   const search = useSelectionStableValue(useSessionSearch());
   const searchMatch = useSelectionStableValue(useSessionSearchBlock(searchBlockId ?? ''));
   const copyAgentFileLabel = t('sessions.copyAgentFilePath', 'Copy agent file path');
   const openAgentFileLabel = t('sessions.openAgentFile', 'Open agent file');
   const canvasLabel = t('sessions.diagram.canvas', 'Zoom and pan diagram');
   const openDiagramLabel = t('sessions.diagramViewer.open', 'Open diagram');
+  const inlineMathEnabled = useAtomValue(inlineMathEnabledAtom);
   // Both scans below re-run over the whole accumulated answer on every streamed
   // delta. A substring test settles the common case before the line-anchored
   // pattern runs.
@@ -1126,7 +1170,10 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
     () => text.includes('mermaid') && MERMAID_FENCE_PATTERN.test(text),
     [text]
   );
-  const normalizedText = useMemo(() => normalizeTexMathDelimiters(text), [text]);
+  const normalizedText = useMemo(
+    () => normalizeTexMathDelimiters(text, inlineMathEnabled),
+    [inlineMathEnabled, text]
+  );
   const {
     blocks: mermaidBlocks,
     selection: diagramSelection,
@@ -1161,6 +1208,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
   );
 
   const components = useSelectionStableValue(currentComponents);
+  const remarkPlugins = inlineMathEnabled ? INLINE_MATH_REMARK_PLUGINS : MARKDOWN_REMARK_PLUGINS;
   const rehypePlugins = allowHtml ? HTML_MARKDOWN_REHYPE_PLUGINS : MARKDOWN_REHYPE_PLUGINS;
   const normalizedSize = normalizeMarkdownRendererSize(size);
   // The engine keeps revealing its buffered tail after the stream ends. Staying
@@ -1181,7 +1229,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
   const staticMarkdown = (
     <Markdown
       components={components}
-      remarkPlugins={MARKDOWN_REMARK_PLUGINS}
+      remarkPlugins={remarkPlugins}
       rehypePlugins={rehypePlugins}
       urlTransform={markdownUrlTransform}
     >
@@ -1196,23 +1244,16 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
     }
 
     const clearSearchHighlights = () => {
-      // Nothing was ever marked in this block, so there is nothing to unwrap.
-      // This effect re-runs on every streamed delta, and the query below walks
-      // the rendered subtree.
-      if (!markedRef.current) return;
-      markedRef.current = false;
-      const existingMarks = root.querySelectorAll('mark[data-session-search-mark="true"]');
-      existingMarks.forEach((mark) => {
-        const parent = mark.parentNode;
-        if (!parent) {
-          return;
-        }
-        while (mark.firstChild) {
-          parent.insertBefore(mark.firstChild, mark);
-        }
-        parent.removeChild(mark);
-        parent.normalize();
-      });
+      // This effect re-runs on every streamed delta; a block without marks
+      // has nothing to undo.
+      const splits = searchSplitsRef.current;
+      if (!splits.length) return;
+      searchSplitsRef.current = [];
+      for (const { node, value, head, inserted } of splits) {
+        for (const child of inserted) child.remove();
+        // React may have rewritten the node since it was split; its text wins.
+        if (node.nodeValue === head) node.nodeValue = value;
+      }
     };
 
     clearSearchHighlights();
@@ -1283,8 +1324,18 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
         return;
       }
 
+      const parent = node.parentNode;
+      if (!parent) {
+        return;
+      }
+
+      // React owns `node` and inserts or removes its siblings relative to it,
+      // so it stays in place holding the text before the first match; marks
+      // and the remaining text follow it. Replacing it would leave React an
+      // anchor outside the DOM (`insertBefore` throws once a link arms).
+      const head = value.slice(0, Math.max(0, overlaps[0]!.start - start));
       const fragment = document.createDocumentFragment();
-      let localCursor = 0;
+      let localCursor = head.length;
 
       overlaps.forEach((match) => {
         const localStart = Math.max(0, match.start - start);
@@ -1310,13 +1361,14 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
         fragment.appendChild(document.createTextNode(value.slice(localCursor)));
       }
 
-      const parent = node.parentNode;
-      if (!parent) {
-        return;
-      }
-      markedRef.current = true;
-      parent.insertBefore(fragment, node);
-      parent.removeChild(node);
+      searchSplitsRef.current.push({
+        node,
+        value,
+        head,
+        inserted: [...fragment.childNodes],
+      });
+      node.nodeValue = head;
+      parent.insertBefore(fragment, node.nextSibling);
     });
 
     return clearSearchHighlights;
@@ -1339,7 +1391,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
               content={normalizedText}
               remend={STREAMING_REMEND_OPTIONS}
               components={components}
-              remarkPlugins={MARKDOWN_REMARK_PLUGINS}
+              remarkPlugins={remarkPlugins}
               rehypePlugins={rehypePlugins}
               urlTransform={markdownUrlTransform}
             />

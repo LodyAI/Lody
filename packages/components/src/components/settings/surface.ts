@@ -257,6 +257,15 @@ export const settingsSurface = stylex.create({
     color: colors.tertiaryLabel,
   },
   listRowIconSelected: { color: colors.label },
+  /**
+   * The account entry's 24px avatar rides the icon column's centreline rather
+   * than sitting in the box itself: 4px past each side keeps its centre on the
+   * same X every row icon shares, and its label lands where the rows' do.
+   */
+  listRowAvatar: {
+    flexShrink: 0,
+    marginInline: '-4px',
+  },
   listRowLabel: {
     flexGrow: 1,
     minWidth: 0,

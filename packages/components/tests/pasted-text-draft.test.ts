@@ -4,6 +4,7 @@ import { applyTextRewrites } from '@lody/shared';
 import {
   arePastedTextDraftsEqual,
   buildPastedTextRewrites,
+  createPastedTextFile,
   getPastedTextCharacterCount,
   getPastedTextDraftsAfterInsertion,
   getPastedTextLineCount,
@@ -32,6 +33,18 @@ describe('shouldCapturePastedTextDraft', () => {
         Array.from({ length: 20 }, (_, index) => `line ${index}`).join('\n')
       )
     ).toBe(false);
+  });
+});
+
+describe('createPastedTextFile', () => {
+  it('keeps the clipboard bytes in a plain-text attachment', async () => {
+    const text = '前缀\r\nlog line\n';
+    const file = createPastedTextFile(text);
+
+    expect(file.name).toBe('pasted-text.txt');
+    expect(file.type).toBe('text/plain');
+    expect(file.size).toBe(new TextEncoder().encode(text).length);
+    await expect(file.text()).resolves.toBe(text);
   });
 });
 

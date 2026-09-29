@@ -15,6 +15,23 @@ waiting for readiness; a Browser click joins that work. Identity comes from the
 active execution, never report fields or an inferred machine owner. Other reports
 remain candidates only. Typing and mounting a panel do not create endpoints.
 
+The visible conversation may preload its reported page after the remote endpoint
+becomes active and a non-renewing status request confirms that exact endpoint.
+This requires remote-preview capability and support for preserving an iframe's
+browsing context during reparenting; local desktop viewing is excluded. The client
+keeps at most one unopened page for two minutes, using the exact candidate path
+and query. Opening Browser adopts the same frame, including a still-loading one,
+and retains normal control authorization and health checks. Existing opened pages
+are not replaced by speculation. Session/target/endpoint changes, backgrounding,
+and unmount cancel preparation; late results cannot recreate it. No polling,
+automatic retry, tunnel creation, or control keepalive is added. Unsupported
+clients retain normal on-demand loading.
+
+Preloading executes application JavaScript and HTTP/WebSocket requests before a
+click. Those authenticated application requests may renew the normal tunnel idle
+deadline, but unopened frames expire independently. Iframe load is not a promise
+of application interactivity, and browser scheduling may limit background work.
+
 ## Ownership and access
 
 The CLI owns the target-bound HTTP/WebSocket proxy, endpoint credentials, and

@@ -106,7 +106,10 @@ export function CodeBlockCopyButton({ code }: { code: string }) {
   );
 }
 
-const tokenStyle = ({ color, htmlStyle }: MarkdownCodeToken): CSSProperties | undefined => {
+export const markdownCodeTokenStyle = ({
+  color,
+  htmlStyle,
+}: MarkdownCodeToken): CSSProperties | undefined => {
   if (!htmlStyle) return color ? { color } : undefined;
   return {
     color: htmlStyle.color ?? color,
@@ -138,7 +141,7 @@ const MarkdownCodeBody = memo(function MarkdownCodeBody({
               {line.length === 0 || (line.length === 1 && line[0]?.content === '')
                 ? '\n'
                 : line.map((token, tokenIndex) => (
-                    <span key={tokenIndex} style={tokenStyle(token)}>
+                    <span key={tokenIndex} style={markdownCodeTokenStyle(token)}>
                       {token.content}
                     </span>
                   ))}

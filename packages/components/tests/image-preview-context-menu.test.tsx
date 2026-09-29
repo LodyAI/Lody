@@ -94,17 +94,18 @@ describe('image preview context menu', () => {
     container = undefined;
     delete window.__LODY_ELECTRON__;
     delete window.ipc;
+    vi.useRealTimers();
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
 
-  const renderViewer = () => {
+  const renderViewer = (onClose: () => void = () => {}) => {
     root = createRoot(container!);
     act(() => {
       root!.render(
         <ZoomableImageViewer
           open
-          onClose={() => {}}
+          onClose={onClose}
           images={[{ key: 'shot', src: IMAGE_SRC, fileName: 'diagram.png' }]}
           index={0}
         />
@@ -189,6 +190,22 @@ describe('image preview context menu', () => {
     const event = await rightClick(photo);
 
     expect(event.defaultPrevented).toBe(false);
+  });
+
+  it('keeps a tap on the zoom surface from closing the viewer', async () => {
+    vi.useFakeTimers();
+    const onClose = vi.fn();
+    const photo = renderViewer(onClose);
+
+    await act(async () => {
+      photo.dispatchEvent(
+        new MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 0 })
+      );
+      window.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
+      await vi.advanceTimersByTimeAsync(350);
+    });
+
+    expect(onClose).not.toHaveBeenCalled();
   });
 });
 

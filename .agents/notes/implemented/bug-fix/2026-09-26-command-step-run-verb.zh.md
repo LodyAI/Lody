@@ -45,3 +45,6 @@ agent 把原始命令作为标题（`sed -n '1,240p' …`），行内只剩裸�
 以及 spinner 只出现在无动词的运行中行上）；受影响的 vitest 套件在本仓
 `pnpm install` 后全部通过（25 个测试）。视觉验收使用新增的
 `AssistantTurnAlignment.stories.tsx` 的 `DesktopCommandSteps` story。
+
+后续：只有输出不再让非 shell 工具成为命令——见
+[工具步骤详情 sheet](../feature/2026-09-26-tool-step-detail-sheet.zh.md)。

@@ -9,6 +9,7 @@
  */
 import type { Meta, StoryObj } from '@storybook/react';
 import { Provider, createStore } from 'jotai';
+import { expect, waitFor } from 'storybook/test';
 import type { ReactNode } from 'react';
 import type { MessageContent, SessionHistoryParsed, SessionId } from '@lody/shared';
 import type { ChatStreamItem, SessionChatStreamViewProps } from '@/components/ai-gui/view';
@@ -163,6 +164,135 @@ export const DesktopStreamingTurn: Story = {
       />
     </div>
   ),
+};
+
+const scrollToLatestTurn: SessionHistoryParsed = {
+  id: 'alignment-scroll-to-latest',
+  role: 'assistant',
+  // Keep the live-duration label representative when the story is opened later.
+  timestamp: new Date(Date.now() - 30_000).toISOString(),
+  read: true,
+  finished: false,
+  items: [
+    {
+      type: 'text',
+      text: Array.from(
+        { length: 36 },
+        (_, index) =>
+          `Streaming output line ${index + 1}: the reader is away from the latest response, so new content keeps arriving below the viewport.`
+      ).join('\n\n'),
+    },
+  ],
+};
+
+const scrollToLatestItems: ChatStreamItem[] = [
+  { type: 'message', sessionId, message: scrollToLatestTurn, turnIndex: 0 } as const,
+];
+
+function moveAwayFromLatest(viewport: HTMLElement): void {
+  // Move away from the real bottom before releasing follow. A wheel event alone
+  // changes the mode but leaves the viewport at the end, which makes the story
+  // show a return control in a state that is already at the latest row.
+  const maxScrollTop = viewport.scrollHeight - viewport.clientHeight;
+  if (maxScrollTop <= 0) throw new Error('Conversation viewport does not overflow');
+  viewport.scrollTop = Math.max(0, maxScrollTop - 200);
+  viewport.dispatchEvent(new Event('scroll', { bubbles: true }));
+  viewport.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -20 }));
+}
+
+async function releaseScrollToLatest(canvasElement: HTMLElement): Promise<{
+  button: HTMLButtonElement;
+  viewport: HTMLElement;
+}> {
+  const viewport = await waitFor(() => {
+    const node = canvasElement.querySelector<HTMLElement>('[data-message-selection-scroll]');
+    if (!node) throw new Error('Conversation viewport is not mounted');
+    return node;
+  });
+  await waitFor(() => {
+    moveAwayFromLatest(viewport);
+    return viewport;
+  });
+  const button = await waitFor(() => {
+    const control = canvasElement.querySelector<HTMLButtonElement>('[data-scroll-to-latest]');
+    if (!control) throw new Error('Scroll-to-latest control is not visible');
+    return control;
+  });
+  return { button, viewport };
+}
+
+async function expectAtRealBottom(viewport: HTMLElement): Promise<void> {
+  await waitFor(() => {
+    const distance = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight;
+    if (distance > 1) throw new Error(`Still ${Math.ceil(distance)}px from the real bottom`);
+    return true;
+  });
+}
+
+async function leaveScrollToLatestVisible(
+  canvasElement: HTMLElement,
+  viewport: HTMLElement
+): Promise<HTMLButtonElement> {
+  await moveAwayFromLatest(viewport);
+  return await waitFor(() => {
+    const button = canvasElement.querySelector<HTMLButtonElement>('[data-scroll-to-latest]');
+    if (!button) throw new Error('Scroll-to-latest control did not return');
+    return button;
+  });
+}
+
+export const DesktopScrollToLatestWorking: Story = {
+  args: { sessionId, items: scrollToLatestItems, renderMessageRow },
+  globals: { theme: 'dark' },
+  render: () => (
+    <div className="relative h-[520px] w-full bg-background">
+      <SessionChatStreamView
+        items={scrollToLatestItems}
+        sessionId={sessionId}
+        className="h-full"
+        renderMessageRow={renderMessageRow}
+        lastAssistantMessageId={scrollToLatestTurn.id}
+        agentActivityLabel="Working"
+        agentActivityTone="primary"
+        agentActivityShimmer
+      />
+    </div>
+  ),
+  play: async ({ canvasElement }) => {
+    const { button, viewport } = await releaseScrollToLatest(canvasElement);
+    await expect(button.querySelector('.animate-spin')).not.toBeNull();
+    await button.click();
+    await expectAtRealBottom(viewport);
+    const visibleButton = await leaveScrollToLatestVisible(canvasElement, viewport);
+    await expect(visibleButton.querySelector('.animate-spin')).not.toBeNull();
+  },
+};
+
+export const DesktopScrollToLatestWaiting: Story = {
+  args: { sessionId, items: scrollToLatestItems, renderMessageRow },
+  globals: { theme: 'dark' },
+  render: () => (
+    <div className="relative h-[520px] w-full bg-background">
+      <SessionChatStreamView
+        items={scrollToLatestItems}
+        sessionId={sessionId}
+        className="h-full"
+        renderMessageRow={renderMessageRow}
+        lastAssistantMessageId={scrollToLatestTurn.id}
+        agentActivityLabel="Waiting for permission"
+        agentActivityTone="warning"
+        agentActivityShimmer={false}
+      />
+    </div>
+  ),
+  play: async ({ canvasElement }) => {
+    const { button, viewport } = await releaseScrollToLatest(canvasElement);
+    await expect(button.querySelector('.lucide-arrow-down')).not.toBeNull();
+    await button.click();
+    await expectAtRealBottom(viewport);
+    const visibleButton = await leaveScrollToLatestVisible(canvasElement, viewport);
+    await expect(visibleButton.querySelector('.lucide-arrow-down')).not.toBeNull();
+  },
 };
 
 export const DesktopFinishedTurn: Story = {

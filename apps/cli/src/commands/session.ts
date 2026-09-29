@@ -7,6 +7,11 @@ import {
 } from '@/lib/prepared-session-input';
 import { readSessionHistory } from '@lody/shared/session-data';
 import { Command } from 'commander';
+import {
+  SessionDiscoveryFilterShape,
+  matchesSessionDiscovery,
+  type SessionDiscoveryFilters,
+} from '@/lib/discovery-query';
 import { promises as fs } from 'node:fs';
 import { isDeepStrictEqual } from 'node:util';
 import { z } from 'zod';
@@ -74,6 +79,7 @@ import {
   type SessionMeta,
   type SessionOperation,
   type WorkspaceId,
+  deriveDraftSessionTitle,
 } from '@lody/shared';
 import type { SessionTurn } from '@lody/shared/session-data';
 import { prepareCliStreamsGatewayBaseUrl } from '@/lib/loro/streams-access';
@@ -205,13 +211,14 @@ export async function ensureSessionCreateWorkspaceMetaFresh(args: {
   await syncWorkspaceMetaForRead(args.manager, `session.create:${args.workspaceId}:prewrite`);
 }
 
-type ListOptions = CommonOptions & {
-  archived?: boolean;
-  all?: boolean;
-  limit?: number;
-  openedBy?: string;
-  openedByCurrent?: boolean;
-};
+type ListOptions = CommonOptions &
+  SessionDiscoveryFilters & {
+    archived?: boolean;
+    all?: boolean;
+    limit?: number;
+    openedBy?: string;
+    openedByCurrent?: boolean;
+  };
 
 type RenameOptions = CommonOptions & {
   title?: string;
@@ -345,7 +352,11 @@ export function sortSessionMetas(sessions: SessionMeta[]): SessionMeta[] {
 
 export function filterSessionMetas(
   sessions: SessionMeta[],
-  options: { archivedOnly?: boolean; includeAll?: boolean; openedBySessionId?: SessionId }
+  options: {
+    archivedOnly?: boolean;
+    includeAll?: boolean;
+    openedBySessionId?: SessionId;
+  } & SessionDiscoveryFilters
 ): SessionMeta[] {
   let result: SessionMeta[];
   if (options.includeAll) {
@@ -358,7 +369,7 @@ export function filterSessionMetas(
   if (options.openedBySessionId) {
     result = result.filter((session) => session.openedBySessionId === options.openedBySessionId);
   }
-  return result;
+  return result.filter((session) => matchesSessionDiscovery(session, options));
 }
 
 function formatAgentConfigCandidates(configs: AgentConfigMeta[]): string {
@@ -3061,7 +3072,11 @@ export async function prepareSessionInput(
   const sessionId = options.sessionId ?? (uuidV4() as SessionId);
   const repoFullName = resolveProjectGitHubRepo(project);
   const baseBranch = project?.kind === 'local' ? undefined : project?.branch?.trim();
+  // An explicit title is final: `user` blocks both the agent-pushed and the
+  // locally generated title. Otherwise a replaceable draft covers the gap until
+  // the generated title lands, which for ACP-owned titles is after the first turn.
   const title = normalizeCliValue(options.title);
+  const draftTitle = title ? undefined : deriveDraftSessionTitle(prompt);
   const meta = {
     id: sessionId,
     machineId: targetMachine.id,
@@ -3072,7 +3087,8 @@ export async function prepareSessionInput(
     cliType: agentConfig.cliType,
     agentType: agentConfig.agentType,
     agentConfigId: agentConfig.id,
-    ...(title ? { title } : {}),
+    ...(title ? { title, titleSource: 'user' as const } : {}),
+    ...(draftTitle ? { title: draftTitle, titleSource: 'draft' as const } : {}),
     ...(project ? { project } : {}),
     ...(repoFullName ? { repoFullName } : {}),
     ...(baseBranch ? { baseBranch } : {}),
@@ -3806,7 +3822,7 @@ const sessionCreateCommand = new Command('create')
   .option('--agent-config <idOrName>', 'Agent config id or name')
   .option('--parent <sessionId>', 'Parent session whose work context should be reused')
   .option('--use-current-session-as-parent', 'Use LODY_SESSION_ID as the parent session')
-  .option('--title <title>', 'Session title')
+  .option('--title <title>', 'Fixed session title (default: generated from the prompt)')
   .option('--repo <owner/repo>', 'GitHub repository to attach')
   .option('--local-project <id|name|path>', 'Local project id, name, or root path')
   .option('--worktree', 'Create an isolated git worktree for --local-project')
@@ -4237,6 +4253,10 @@ const sessionListCommand = new Command('list')
   .option('--all', 'Include active and archived sessions')
   .option('--opened-by <sessionId>', 'Only include sessions opened by this session id')
   .option('--opened-by-current', 'Only include sessions opened by LODY_SESSION_ID')
+  .option('--query <text>', 'Filter session titles or ids')
+  .option('--machine-id <id>', 'Filter by machine id')
+  .option('--agent-config-id <id>', 'Filter by Agent configuration id')
+  .option('--agent-role-id <id>', 'Filter by Agent Role creation provenance')
   .option('--limit <count>', 'Maximum number of sessions to print', parsePositiveIntOption)
   .option('--offline', 'Read the local cache without syncing first')
   .option('--json', 'Print JSON output')
@@ -4265,6 +4285,12 @@ const sessionListCommand = new Command('list')
             archivedOnly: options.archived,
             includeAll: options.all,
             openedBySessionId,
+            ...z.object(SessionDiscoveryFilterShape).parse({
+              query: options.query,
+              machineId: options.machineId,
+              agentConfigId: options.agentConfigId,
+              agentRoleId: options.agentRoleId,
+            }),
           })
         );
         const limited =

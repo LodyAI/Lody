@@ -12,6 +12,7 @@ import {
   X,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import * as stylex from '@stylexjs/stylex';
 import { toast } from '@/lib/toast';
 
 import { useConvexErrorMessage } from '@/hooks/use-convex-error-message';
@@ -27,7 +28,8 @@ import {
 import type { MachineVisibilityAccess } from '@/lib/visible-machine-index';
 import type { VisibleLocalProjectIndex } from '@/lib/visible-local-project-index';
 import { cn } from '@/lib/utils';
-import { CONTEXT_PILL_HOVER_CLASS, CONTEXT_PILL_SURFACE_CLASS } from './context-pill-class';
+import { withClassName } from '@/lib/stylex';
+import { contextPill } from './context-pill-class';
 import { Menu, MenuSearchInput } from '@/ui/menu';
 import { Tooltip } from '@lody/ui/tooltip';
 
@@ -273,20 +275,20 @@ function ProjectAccessStatus({
     'inline-flex shrink-0 select-none items-center gap-1 text-muted-foreground',
     variant === 'trigger' && [
       'h-6 rounded-r-md px-2 text-[0.8em] font-medium transition-colors',
-      CONTEXT_PILL_SURFACE_CLASS,
-      // The pill's own left border doubles as the divider from the trigger.
-      'dark:border-l-border/60',
     ],
     variant === 'option' && 'text-[0.8em] font-medium',
     'text-foreground/75',
-    isAction && ['cursor-pointer', CONTEXT_PILL_HOVER_CLASS],
+    isAction && 'cursor-pointer hover:text-foreground',
     variant === 'trigger' &&
       'outline-hidden focus-visible:relative focus-visible:z-20 focus-visible:ring-2 focus-visible:ring-ring/50'
   );
   const content = isAction ? (
     <button
       type="button"
-      className={sharedClassName}
+      {...withClassName(
+        stylex.props(contextPill.surface, contextPill.interactive),
+        sharedClassName
+      )}
       aria-label={`${title}: ${description}. ${t(
         'workspace.projects.shareProjectAction',
         'Share project'
@@ -297,7 +299,13 @@ function ProjectAccessStatus({
       <span>{label}</span>
     </button>
   ) : (
-    <span tabIndex={variant === 'trigger' ? 0 : undefined} className={sharedClassName}>
+    <span
+      tabIndex={variant === 'trigger' ? 0 : undefined}
+      {...withClassName(
+        stylex.props(variant === 'trigger' && contextPill.surface),
+        sharedClassName
+      )}
+    >
       <LockKeyhole className="h-3 w-3" aria-hidden="true" />
       <span>{label}</span>
     </span>
@@ -305,7 +313,7 @@ function ProjectAccessStatus({
 
   return (
     <Tooltip.Root>
-      <Tooltip.Trigger delay={300} render={content}/>
+      <Tooltip.Trigger delay={300} render={content} />
       <Tooltip.Content
         side={variant === 'trigger' ? 'top' : 'right'}
         className="max-w-72 px-2.5 py-2"
@@ -491,60 +499,76 @@ export function UnifiedProjectSelectorView({
           if (!nextOpen) setQuery('');
         }}
       >
-        <Menu.Trigger render={<button
-            type="button"
-            className={cn(
-              isPropertyRow
-                ? [
-                    'flex h-8 w-full min-w-0 max-w-none items-center gap-2 rounded-md px-2',
-                    'text-[1em] font-normal transition-colors',
-                    'bg-transparent text-foreground hover:bg-hover',
-                    'data-[state=open]:bg-hover',
-                    '[&_svg]:text-current [&_svg]:opacity-70',
-                    value.kind === 'none' && 'text-muted-foreground',
-                  ]
-                : [
-                    'flex h-6 min-w-0 max-w-[18rem] items-center gap-1.5 rounded-md px-2',
-                    CONTEXT_PILL_SURFACE_CLASS,
-                    'text-[0.9em] font-normal text-foreground/80 transition-colors [&_svg]:text-current [&_svg]:opacity-100',
-                    CONTEXT_PILL_HOVER_CLASS,
-                    selectedPrivateSharing && 'rounded-r-none border-r-0',
-                  ],
-              className
-            )}
-          >
-            <span
-              className={cn(
-                'flex h-4 w-4 shrink-0 items-center justify-center',
-                !isPropertyRow &&
-                  value.kind !== 'none' &&
-                  'transition-opacity group-hover/project:opacity-0 group-focus-within/project:opacity-0'
+        <Menu.Trigger
+          render={
+            <button
+              type="button"
+              {...withClassName(
+                stylex.props(
+                  !isPropertyRow && contextPill.surface,
+                  !isPropertyRow && contextPill.interactive,
+                  !isPropertyRow && open && contextPill.open
+                ),
+                cn(
+                  isPropertyRow
+                    ? [
+                        'flex h-8 w-full min-w-0 max-w-none items-center gap-2 rounded-md px-2',
+                        'text-[1em] font-normal transition-colors',
+                        'bg-transparent text-foreground hover:bg-hover',
+                        'data-[state=open]:bg-hover',
+                        '[&_svg]:text-current [&_svg]:opacity-70',
+                        value.kind === 'none' && 'text-muted-foreground',
+                      ]
+                    : [
+                        'flex h-6 min-w-0 max-w-[18rem] items-center gap-1.5 rounded-md px-2',
+                        'text-[0.9em] font-normal text-foreground/80 transition-colors [&_svg]:text-current [&_svg]:opacity-100',
+                        'hover:text-foreground',
+                        selectedPrivateSharing && 'rounded-r-none',
+                      ],
+                  className
+                )
               )}
             >
-              {triggerIcon}
-            </span>
-            <span className="min-w-0 flex-1 truncate text-left">{triggerLabel}</span>
-          </button>}>
+              <span
+                className={cn(
+                  'flex h-4 w-4 shrink-0 items-center justify-center',
+                  !isPropertyRow &&
+                    value.kind !== 'none' &&
+                    'transition-opacity group-hover/project:opacity-0 group-focus-within/project:opacity-0'
+                )}
+              >
+                {triggerIcon}
+              </span>
+              <span className="min-w-0 flex-1 truncate text-left">{triggerLabel}</span>
+            </button>
+          }
+        >
           <button
             type="button"
-            className={cn(
-              isPropertyRow
-                ? [
-                    'flex h-8 w-full min-w-0 max-w-none items-center gap-2 rounded-md px-2',
-                    'text-[1em] font-normal transition-colors',
-                    'bg-transparent text-foreground hover:bg-foreground/[0.05] dark:hover:bg-white/[0.08]',
-                    'data-[state=open]:bg-foreground/[0.05] dark:data-[state=open]:bg-white/[0.08]',
-                    '[&_svg]:text-current [&_svg]:opacity-70',
-                    value.kind === 'none' && 'text-muted-foreground',
-                  ]
-                : [
-                    'flex h-6 min-w-0 max-w-[18rem] items-center gap-1.5 rounded-md px-2',
-                    CONTEXT_PILL_SURFACE_CLASS,
-                    'text-[0.9em] font-normal text-foreground/80 transition-colors [&_svg]:text-current [&_svg]:opacity-100',
-                    CONTEXT_PILL_HOVER_CLASS,
-                    selectedPrivateSharing && 'rounded-r-none border-r-0',
-                  ],
-              className
+            {...withClassName(
+              stylex.props(
+                !isPropertyRow && contextPill.surface,
+                !isPropertyRow && contextPill.interactive,
+                !isPropertyRow && open && contextPill.open
+              ),
+              cn(
+                isPropertyRow
+                  ? [
+                      'flex h-8 w-full min-w-0 max-w-none items-center gap-2 rounded-md px-2',
+                      'text-[1em] font-normal transition-colors',
+                      'bg-transparent text-foreground hover:bg-foreground/[0.05] dark:hover:bg-white/[0.08]',
+                      'data-[state=open]:bg-foreground/[0.05] dark:data-[state=open]:bg-white/[0.08]',
+                      '[&_svg]:text-current [&_svg]:opacity-70',
+                      value.kind === 'none' && 'text-muted-foreground',
+                    ]
+                  : [
+                      'flex h-6 min-w-0 max-w-[18rem] items-center gap-1.5 rounded-md px-2',
+                      'text-[0.9em] font-normal text-foreground/80 transition-colors [&_svg]:text-current [&_svg]:opacity-100',
+                      'hover:text-foreground',
+                      selectedPrivateSharing && 'rounded-r-none',
+                    ],
+                className
+              )
             )}
           >
             <span
@@ -609,7 +633,7 @@ export function UnifiedProjectSelectorView({
                     <span className="flex min-w-0 flex-1 flex-col">
                       {localPath ? (
                         <Tooltip.Root>
-                          <Tooltip.Trigger render={labelNode}/>
+                          <Tooltip.Trigger render={labelNode} />
                           <Tooltip.Content side="right" className="max-w-[22rem] break-all">
                             {localPath}
                           </Tooltip.Content>

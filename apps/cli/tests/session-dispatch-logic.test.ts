@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { MachineId, SessionHistoryInput, SessionMeta } from '@lody/shared';
 import {
   findNextDispatchableUserTurn,
+  isActivationAwaitingHistory,
   resolveSessionCancelAction,
   resolveSessionDispatchAction,
   type SessionDispatchSnapshot,
@@ -249,6 +250,27 @@ describe('resolveSessionCancelAction', () => {
 // ── findNextDispatchableUserTurn ─────────────────────────────────────────────
 
 describe('findNextDispatchableUserTurn', () => {
+  it.each(['handled', 'failed', 'canceled'] as const)(
+    'uses the last duplicate when its status is %s',
+    (status) => {
+      const history = [pendingTurn('duplicate'), { ...handledTurn('duplicate'), status }];
+      expect(findNextDispatchableUserTurn(history, baseMeta)).toBeNull();
+      expect(isActivationAwaitingHistory(history, 'duplicate')).toBe(false);
+      const next = pendingTurn('next');
+      expect(findNextDispatchableUserTurn([...history, next], baseMeta)).toEqual(next);
+    }
+  );
+
+  it('keeps chronological dispatch order among the last copies of each turn', () => {
+    const first = pendingTurn('first');
+    const last = pendingTurn('duplicate');
+    const older = handledTurn('duplicate');
+    const history = [older, first, last];
+    expect(findNextDispatchableUserTurn(history, baseMeta)).toEqual(first);
+    expect(findNextDispatchableUserTurn([older, last], baseMeta)).toEqual(last);
+    expect(isActivationAwaitingHistory(history, 'duplicate')).toBe(true);
+  });
+
   it('returns null for empty history', () => {
     expect(findNextDispatchableUserTurn([], baseMeta)).toBeNull();
   });

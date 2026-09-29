@@ -235,7 +235,7 @@ export class LocalLoroTransportAdapter implements TransportAdapter {
   }
 
   async syncMeta(flock: FlockLike): Promise<TransportSyncResult> {
-    await this.ensureJoinedOnce({ scope: 'meta' }, flock, false);
+    await this.syncRoom({ scope: 'meta' }, flock, false);
     return { ok: true };
   }
 
@@ -244,7 +244,7 @@ export class LocalLoroTransportAdapter implements TransportAdapter {
   }
 
   async syncDoc(docId: string, doc: LoroDoc): Promise<TransportSyncResult> {
-    await this.ensureJoinedOnce({ scope: 'doc', docId }, doc, true);
+    await this.syncRoom({ scope: 'doc', docId }, doc, true);
     return { ok: true };
   }
 
@@ -253,7 +253,7 @@ export class LocalLoroTransportAdapter implements TransportAdapter {
   }
 
   async syncFlockDoc(flockDocId: string, flock: FlockLike): Promise<TransportSyncResult> {
-    await this.ensureJoinedOnce({ scope: 'flock-doc', flockDocId }, flock, false);
+    await this.syncRoom({ scope: 'flock-doc', flockDocId }, flock, false);
     return { ok: true };
   }
 
@@ -329,19 +329,20 @@ export class LocalLoroTransportAdapter implements TransportAdapter {
     return this.subscriptionFor(state);
   }
 
-  private async ensureJoinedOnce(
+  private async syncRoom(
     room: LocalLoroDataPlaneRoom,
     target: LoroDoc | FlockLike,
     isDoc: boolean
   ): Promise<void> {
     const key = roomKey(room);
-    const existing = this.rooms.get(key);
-    if (existing) {
-      await existing.firstSynced.promise;
-      return;
-    }
-    const subscription = this.joinRoom(room, target, isDoc);
-    await subscription.firstSyncedWithRemote;
+    if (!this.rooms.has(key)) this.joinRoom(room, target, isDoc);
+    const state = this.rooms.get(key)!;
+    await state.firstSynced.promise;
+    // Live rooms upload only local events. An explicit sync must also export
+    // imported state the server lacks, e.g. operations recovered from another
+    // replica's storage; otherwise it would report success without sending.
+    this.flushLocal(state, { force: true });
+    if (!state.isDoc) await state.flockFlushChain;
   }
 
   private subscribeLocal(state: RoomState): () => void {

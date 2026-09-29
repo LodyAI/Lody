@@ -404,6 +404,36 @@ describe('docMetaSubscriptionAtom', () => {
     }
   });
 
+  it('records a rejected bootstrap scan on the scope instead of leaving it silently pending', async () => {
+    class FailingScanRepoDouble extends CompatRepoDouble {
+      override async listDoc(): Promise<CompatRepoEntry[]> {
+        throw new TypeError('scan exploded');
+      }
+    }
+    const repo = new FailingScanRepoDouble([]);
+    const store = createStore();
+    const unmount = store.sub(docMetaSubscriptionAtom, () => {});
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    try {
+      const runtime = createRuntime(repo as unknown as LoroRepo);
+      store.set(runtimeAtom, runtime);
+      await flush();
+
+      expect(store.get(docMetaCacheScopeAtom)).toEqual(
+        expect.objectContaining({
+          runtime,
+          ready: false,
+          scanFailure: { errorType: 'TypeError' },
+        })
+      );
+      expect(store.get(docMetaCacheReadyAtom)).toBe(false);
+    } finally {
+      warn.mockRestore();
+      unmount();
+    }
+  });
+
   it('observes archive updates that land while the bootstrap snapshot is being read', async () => {
     const sessionId = 'archived-during-bootstrap' as SessionId;
     const docId = getSessionRoomId(sessionId);

@@ -27,7 +27,7 @@ import {
 import { toast } from '@/lib/toast';
 import { Spinner } from '@lody/ui/spinner';
 import {
-  getLocalProjectHistoryProviderKey,
+  getLocalProjectHistoryCatalogKey,
   type LocalProjectHistoryCatalogItem,
   type LocalProjectHistoryCatalogResult,
   type LocalProjectHistoryProvider,
@@ -73,7 +73,7 @@ import { Tabs } from '@lody/ui/tabs';
 import { Badge } from '@lody/ui/badge';
 import { Textarea } from '@lody/ui/textarea';
 import { Input } from '@lody/ui/input';
-import { VList } from '@lody/virtua';
+import { VList } from 'virtua';
 
 import { AlertDialog } from '@/ui/dialog';
 import { Tooltip } from '@lody/ui/tooltip';
@@ -122,6 +122,7 @@ export type ProjectSettingsRow = {
 };
 
 export type ProjectHistoryImportState = {
+  providerLabel?: string;
   provider: LocalProjectHistoryProvider;
   providerKey: LocalProjectHistoryProviderKey;
   canSync: boolean;
@@ -810,7 +811,7 @@ function getHistoryCatalogFromProject(
   project: LocalProjectMeta,
   provider: LocalProjectHistoryProvider
 ) {
-  return project.history?.[getLocalProjectHistoryProviderKey(provider)];
+  return project.history?.[getLocalProjectHistoryCatalogKey(provider)];
 }
 
 function sortHistoryCatalogItems(
@@ -871,7 +872,7 @@ export function formatHistoryUpdatedAt(
 }
 
 export function historyStateKey(projectKey: string, provider: LocalProjectHistoryProvider): string {
-  return `${getLocalProjectHistoryProviderKey(provider)}:${projectKey}`;
+  return `${getLocalProjectHistoryCatalogKey(provider)}:${projectKey}`;
 }
 
 export function ProjectSettingsComponent({
@@ -1980,7 +1981,7 @@ function ConversationsPage({
     );
   }
 
-  const providerLabel = getHistoryProviderLabel(state.provider);
+  const providerLabel = state.providerLabel ?? getHistoryProviderLabel(state.provider);
   const selected = new Set(state.selectedSessionIds);
   const canManage = state.canSync && !state.isImporting;
   const shownSelectable = canManage
@@ -2048,7 +2049,7 @@ function ConversationsPage({
                       agentType={entry.provider.agentType}
                       className={stylex.props(win.agentGlyph).className}
                     />
-                    {getHistoryProviderLabel(entry.provider)}
+                    {entry.providerLabel ?? getHistoryProviderLabel(entry.provider)}
                   </Tabs.Tab>
                 ))}
               </Tabs.List>
@@ -2855,7 +2856,7 @@ export function ProjectHistoryImportPanel({
   const { t, i18n } = useTranslation();
   const localeObj: Locale = i18n.language?.startsWith('zh') ? zhCN : enUS;
   const intlLocale = toIntlLocale(i18n.resolvedLanguage ?? i18n.language);
-  const providerLabel = getHistoryProviderLabel(state.provider);
+  const providerLabel = state.providerLabel ?? getHistoryProviderLabel(state.provider);
   const catalogSessions = state.catalog?.sessions ?? [];
   const hasSyncedCatalog = state.catalog !== null;
   const hasCatalogSessions = catalogSessions.length > 0;

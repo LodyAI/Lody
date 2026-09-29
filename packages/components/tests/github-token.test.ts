@@ -42,8 +42,49 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.unstubAllGlobals();
   uninstallGitHubTokenPort?.();
   uninstallGitHubTokenPort = undefined;
+});
+
+describe('stable repository identity before operations', () => {
+  it('rejects a renamed/reused name before executing a write, including cached tokens', async () => {
+    invalidateGitHubTokensForWorkspace('identity-test');
+    mockAction.mockResolvedValue({ success: true, token: 'token', tokenSource: 'personal' });
+    const fetch = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ id: 101, full_name: 'org/new-name' }),
+    }));
+    vi.stubGlobal('fetch', fetch);
+    const write = vi.fn(async () => 'written');
+    await getGitHubOperationToken('identity-test', 'org/old-name', 'write');
+    await expect(
+      withGitHubOperationTokenRetry('identity-test', 'org/old-name', 'write', write, 101)
+    ).rejects.toMatchObject({ code: 'repository_identity_changed' });
+    expect(fetch).toHaveBeenCalledWith(
+      'https://api.github.com/repos/org/old-name',
+      expect.anything()
+    );
+    expect(write).not.toHaveBeenCalled();
+  });
+  it('runs the operation only after canonical name and numeric ID agree', async () => {
+    invalidateGitHubTokensForWorkspace('identity-test');
+    mockAction.mockResolvedValue({ success: true, token: 'token', tokenSource: 'app' });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        ok: true,
+        status: 200,
+        json: async () => ({ id: 101, full_name: 'Org/New' }),
+      }))
+    );
+    const write = vi.fn(async () => 'written');
+    await expect(
+      withGitHubOperationTokenRetry('identity-test', 'org/new', 'write', write, 101)
+    ).resolves.toBe('written');
+    expect(write).toHaveBeenCalledOnce();
+  });
 });
 
 function deferred<T>() {

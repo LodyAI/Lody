@@ -35,8 +35,11 @@ copy as a direct Copy action; it must not show a Fork affordance or Fork loading
 state until the reply is finished. Finished assistant fork buttons leave space
 before the timestamp. Sender names inherit the timestamp color.
 
-Pasting and submission retain their existing behavior. Automatic text-file
-conversion, editable text attachments and send-time upload feedback are excluded.
+Pasting and submission retain their existing behavior for ordinary and folded
+text. A paste above 500 KiB is automatically captured as a non-editable
+`text/plain` attachment named `pasted-text.txt`, using the existing attachment
+draft and send path. Editable text attachments and send-time upload feedback are
+excluded.
 
 ## Acceptance
 

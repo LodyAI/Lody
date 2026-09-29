@@ -156,11 +156,11 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "license": "MIT",
       "homepage": "https://github.com/inokawa/virtua/tree/0.52.7",
       "author": "inokawa",
-      "description": "Forked list virtualizer (packages/virtua, @lody/virtua) with keyed item sizes and anchoring.",
+      "description": "Keyed list layout from Virtua, adapted for the conversation scroll engine (packages/components/src/lib/conversation-scroll/keyed-layout).",
       "assets": [
-        "Virtua core and React bindings"
+        "Virtua list layout and size cache"
       ],
-      "noticePath": "packages/virtua/LICENSE"
+      "noticePath": "packages/components/src/lib/conversation-scroll/keyed-layout/LICENSE"
     },
     {
       "id": "vendored-vscode-fuzzy-scorer",

@@ -3,6 +3,7 @@ import { loadPrPollerConfig } from './pr-poller-config';
 import {
   applyProviderSafetyFloor,
   computeRepoCooldownDelayMs,
+  evaluateScopeGate,
   fullScopeQuota,
   isScopeFrozen,
   nextRepoCooldown,
@@ -100,5 +101,57 @@ describe('repo cooldown', () => {
     const second = nextRepoCooldown(first, 'token-invalid', T0 + 15 * 60_000, config);
     expect(second.consecutiveFailures).toBe(2);
     expect(second.nextRetryAtMs).toBe(T0 + 15 * 60_000 + 30 * 60_000);
+  });
+});
+
+describe('evaluateScopeGate', () => {
+  const gate = (
+    quota: Parameters<typeof evaluateScopeGate>[0]['quota'],
+    repoCooldown: Parameters<typeof evaluateScopeGate>[0]['repoCooldown'],
+    nowMs = T0
+  ) => evaluateScopeGate({ quota, repoCooldown, nowMs, config });
+
+  it('opens for an unseen scope (fresh full bucket)', () => {
+    const decision = gate(undefined, undefined);
+    expect(decision.gated).toBe(false);
+    expect(decision.quota.tokens).toBe(config.bucketCapacityPoints);
+  });
+
+  it('reports an empty bucket with the time one point takes to refill', () => {
+    const decision = gate({ tokens: 0.5, updatedAtMs: T0 }, undefined);
+    // 0.5 points missing at 4 pts/min → 7.5 s.
+    expect(decision).toMatchObject({ gated: true, reason: 'bucket-empty' });
+    expect(decision.gated && decision.availableAtMs).toBe(T0 + 7_500);
+  });
+
+  it('a freeze outranks a non-empty bucket and reports the thaw time', () => {
+    const decision = gate(
+      { tokens: config.bucketCapacityPoints, updatedAtMs: T0, frozenUntilMs: T0 + 600_000 },
+      undefined
+    );
+    expect(decision).toMatchObject({ gated: true, reason: 'frozen' });
+    expect(decision.gated && decision.availableAtMs).toBe(T0 + 600_000);
+  });
+
+  it('a repo cooldown outranks scope-wide gates and reports its own retry time', () => {
+    const decision = gate(
+      { tokens: 0, updatedAtMs: T0, frozenUntilMs: T0 + 600_000 },
+      {
+        consecutiveFailures: 1,
+        nextRetryAtMs: T0 + 900_000,
+        lastErrorKind: 'repo-not-found-or-forbidden',
+      }
+    );
+    expect(decision).toMatchObject({ gated: true, reason: 'repo-cooldown' });
+    expect(decision.gated && decision.availableAtMs).toBe(T0 + 900_000);
+  });
+
+  it('opens again once the freeze and the cooldown have elapsed', () => {
+    const decision = gate(
+      { tokens: 0, updatedAtMs: T0, frozenUntilMs: T0 + 600_000 },
+      { consecutiveFailures: 1, nextRetryAtMs: T0 + 900_000, lastErrorKind: 'token-invalid' },
+      T0 + 900_000
+    );
+    expect(decision.gated).toBe(false);
   });
 });

@@ -13,7 +13,7 @@ why they read the way they do. Coverage:
 - It NEVER captures an unmodified wheel, activated or not. The only wheel the
   markdown root consumes is a pinch (a ctrl- or meta-modified wheel) over the
   activated diagram; every other wheel reaches the conversation's own listeners
-  untouched, which keeps stick-to-bottom (`use-sticky-scroll.ts`) and outline
+  untouched, which keeps the scroll engine's follow (`lib/conversation-scroll`) and outline
   jumps (`view.tsx`) working. An earlier bundled pan/zoom canvas took every wheel
   and turned a page scroll into a zoom; nothing may reintroduce that.
 - Clicking a diagram with a mouse, pen, or the keyboard ACTIVATES it: that one
@@ -24,7 +24,8 @@ why they read the way they do. Coverage:
   View state is local to the mounted diagram; replacing it starts a new view.
 - Touch never activates: inline pinch would mean taking `touch-action` from the
   browser and reimplementing inertial panning for the phone case the viewer
-  exists to serve. A tap opens the viewer, where the control bar's buttons zoom.
+  exists to serve. A tap opens the viewer, where touch can pan and pinch and the
+  control bar provides a precise zoom fallback.
 - The transform goes on the `<svg>`, which the block injects as raw markup and
   never writes to again, so a finger resting on a diagram still scrolls the
   conversation.
@@ -65,14 +66,18 @@ why they read the way they do. Coverage:
   diagram around the pointer instead. The anchored point is restored by scrolling
   the surface, measured from the diagram's own box: the surface centres a diagram
   that fits, and that offset is not proportional to the zoom.
-- Plain wheel and touch panning stay with the surface's own scrolling. A pan
-  driven from pointer deltas cannot reproduce touch momentum or rubber-banding, so
-  only a held mouse or pen button pans by hand.
+- Plain wheel scrolling stays with the surface's own scrolling. On touch screens
+  the full-screen surface owns one-finger panning and two-finger pinch so a
+  diagram can be inspected without zooming the page; a mouse or pen drag still
+  pans by hand. The inline preview keeps the browser's native touch behavior and
+  opens the full-screen viewer on a tap.
 - Whether a click closes the viewer is decided by where the press STARTED, never
   by the click's target. Panning takes pointer capture on the surface, and pointer
   capture retargets the following `click` to the capturing element — so a plain
   click on the diagram arrives with the surface as its target and would otherwise
   dismiss the viewer the reader just opened.
-- Two-finger pinch on a touch screen is deliberately absent, here and inline:
-  implementing it means taking `touch-action` from the browser and reimplementing
-  inertial panning. Touch zooms with the control bar's buttons instead.
+- The full-screen surface sets `touch-action: none` only while it owns a touch
+  gesture. A one-finger move changes the scroll offsets, and a two-finger move
+  scales around the fingers' centre while following that centre's pan. The
+  inline preview deliberately leaves `touch-action` alone so a message can still
+  scroll naturally; tapping it opens this viewer.

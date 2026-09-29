@@ -3,7 +3,7 @@ import * as stylex from '@stylexjs/stylex';
 import { forwardRef, type ComponentProps, type ReactNode } from 'react';
 import { ChevronDownGlyph, ChevronUpGlyph, TickGlyph } from '../internal/glyphs';
 import { appendClassName } from '../internal/class-name';
-import { usePopupContainer, type PopupContainer } from '../popup/portal-container';
+import { portalClassName, usePopupContainer, type PopupContainer } from '../popup/portal-container';
 import { useForcedThemeClassNames } from '../theme/theme';
 import { surface } from '../popup/surface';
 import { rowLabel } from '../popup/row-label';
@@ -244,6 +244,11 @@ export const SelectContent = forwardRef<HTMLDivElement, SelectContentProps>(func
     // container that centres itself with `translate` then reinterprets as its
     // own origin. A caller that wants the overlap can still ask for it.
     alignItemWithTrigger = false,
+    // Base UI centres an anchored list on its trigger. A list is at least the
+    // trigger's width and often wider (long repository names), and centred it
+    // hangs past the trigger's start edge, reading as a list for something
+    // else. Its rows start where the trigger's value does instead.
+    align = 'start',
     sideOffset = POPUP_GAP,
     ...rest
   },
@@ -264,11 +269,12 @@ export const SelectContent = forwardRef<HTMLDivElement, SelectContentProps>(func
   // against the offset parent, which is the panel, so the two agree again.
   const strategy = rest.positionMethod ?? (mountPoint != null ? 'absolute' : undefined);
   return (
-    <BaseSelect.Portal container={mountPoint}>
+    <BaseSelect.Portal container={mountPoint} className={portalClassName}>
       <BaseSelect.Positioner
         ref={ref}
         {...rest}
         alignItemWithTrigger={alignItemWithTrigger}
+        align={align}
         sideOffset={sideOffset}
         positionMethod={strategy}
         className={[stylex.props(surface.positioner).className, ...palette]
@@ -294,13 +300,17 @@ export const SelectContent = forwardRef<HTMLDivElement, SelectContentProps>(func
             );
           }}
         >
-          <BaseSelect.ScrollUpArrow className={stylex.props(surface.scrollArrow).className}>
+          <BaseSelect.ScrollUpArrow
+            className={stylex.props(surface.scrollArrow, surface.scrollArrowUp).className}
+          >
             <ChevronUpGlyph />
           </BaseSelect.ScrollUpArrow>
           <BaseSelect.List className={stylex.props(surface.list).className}>
             {children}
           </BaseSelect.List>
-          <BaseSelect.ScrollDownArrow className={stylex.props(surface.scrollArrow).className}>
+          <BaseSelect.ScrollDownArrow
+            className={stylex.props(surface.scrollArrow, surface.scrollArrowDown).className}
+          >
             <ChevronDownGlyph />
           </BaseSelect.ScrollDownArrow>
         </BaseSelect.Popup>

@@ -1,4 +1,5 @@
 import { v4 as uuidV4 } from 'uuid';
+import { isLodySubagentEvent, isLodySubagentOutput } from 'acp-extension-core';
 
 import type {
   AcpSessionNotification,
@@ -14,6 +15,7 @@ import {
   ToolCallContentSchema,
   parseHistoryWrite,
   HistoryWriteError,
+  MessageContentSchema,
   parseLodyTaskMeta,
   parseDevinSubagentTaskMeta,
   getDevinSubagentContextId,
@@ -75,6 +77,7 @@ type TerminalOutputAccumulator = {
 type TerminalOutputState = Map<string, TerminalOutputAccumulator>;
 
 const enrichmentStateByDoc = new WeakMap<SessionDocument, EnrichmentState>();
+const subagentEnrichmentByDoc = new WeakMap<SessionDocument, Map<string, EnrichmentState>>();
 const terminalOutputStateByDoc = new WeakMap<SessionDocument, TerminalOutputState>();
 
 const getEnrichmentState = (doc: SessionDocument): EnrichmentState => {
@@ -145,15 +148,64 @@ export const handleACPUpdateMessage = async (
     getCurrentSessionTurnId?: (sessionId: SessionId) => string | undefined;
     targetAssistantEntryId?: string;
     allowAutonomousAssistantEntry?: boolean;
-    editCallback?: (edits: readonly AcpAgentEditEvidence[]) => void | Promise<void>;
-    standardDiffCallback?: (diffs: readonly AcpStandardDiffBlockEvidence[]) => void | Promise<void>;
+    editCallback?: (
+      edits: readonly AcpAgentEditEvidence[],
+      assistantEntryId?: string
+    ) => void | Promise<void>;
+    standardDiffCallback?: (
+      diffs: readonly AcpStandardDiffBlockEvidence[],
+      assistantEntryId?: string
+    ) => void | Promise<void>;
     logger?: Logger;
   },
   model?: ModelInfo
 ) => {
   const batch = Array.isArray(messages) ? messages : [messages];
   const validBatch = filterInvalidNotifications(batch, callbacks?.logger);
-  const enrichedBatch = enrichNotificationBatch(validBatch, getEnrichmentState(doc));
+  const rootEnrichedBatch = enrichNotificationBatch(validBatch, getEnrichmentState(doc));
+  const childGroups = new Map<
+    string,
+    { state: EnrichmentState; batch: AcpSessionNotification[]; indices: number[] }
+  >();
+  let childStates = subagentEnrichmentByDoc.get(doc);
+  if (!childStates) {
+    childStates = new Map();
+    subagentEnrichmentByDoc.set(doc, childStates);
+  }
+  for (const [index, message] of rootEnrichedBatch.entries()) {
+    if (message.update.sessionUpdate !== 'subagent_event' || message.update.event.type !== 'output')
+      continue;
+    const event = message.update.event;
+    const key = JSON.stringify([event.sessionId, event.runId]);
+    let group = childGroups.get(key);
+    if (!group) {
+      const state = childStates.get(key) ?? new Map<string, ToolCallAccumulator>();
+      childStates.set(key, state);
+      group = { state, batch: [], indices: [] };
+      childGroups.set(key, group);
+    }
+    group.batch.push({ sessionId: event.sessionId, update: event.update });
+    group.indices.push(index);
+  }
+  const enrichedBatch = [...rootEnrichedBatch];
+  for (const group of childGroups.values()) {
+    group.batch = enrichNotificationBatch(group.batch, group.state);
+    for (const [offset, child] of group.batch.entries()) {
+      const index = group.indices[offset];
+      if (index === undefined) continue;
+      const original = enrichedBatch[index];
+      if (
+        original?.update.sessionUpdate !== 'subagent_event' ||
+        original.update.event.type !== 'output' ||
+        !isLodySubagentOutput(child.update)
+      )
+        continue;
+      enrichedBatch[index] = {
+        ...original,
+        update: { ...original.update, event: { ...original.update.event, update: child.update } },
+      };
+    }
+  }
   const terminalOutputState = getTerminalOutputState(doc);
   const terminalOutputSnapshot = cloneTerminalOutputState(terminalOutputState);
   const persistableBatch = filterNotificationsForHistory(
@@ -210,19 +262,101 @@ export const handleACPUpdateMessage = async (
     // Evidence is derived from the same enriched notification, but it is only
     // safe to publish after the corresponding history write commits. Otherwise
     // a retried terminal notification records the same diff twice.
+    const childEvidenceOwners = new Map<
+      string,
+      {
+        entryId: string;
+        toolCallIds: ReadonlySet<string>;
+      }
+    >();
+    const evidenceRunKeys = new Set(
+      [...childGroups]
+        .filter(([, group]) =>
+          group.batch.some(
+            ({ update }) =>
+              update.sessionUpdate === 'tool_call' || update.sessionUpdate === 'tool_call_update'
+          )
+        )
+        .map(([key]) => key)
+    );
+    if (evidenceRunKeys.size > 0 && (callbacks?.editCallback || callbacks?.standardDiffCallback)) {
+      // Ownership comes from the committed run, not the turn that happened to flush it.
+      const directory = await doc.sessionData.history.readDirectory(
+        0,
+        await doc.sessionData.history.count()
+      );
+      for (const row of directory) {
+        if (!row.turnId || row.scalars?.role !== 'assistant') continue;
+        const read = await doc.sessionData.history.readTurn(row.turnId);
+        if (read.state !== 'ready') continue;
+        for (const stored of read.turn.items ?? []) {
+          if (
+            !stored ||
+            typeof stored !== 'object' ||
+            !('type' in stored) ||
+            stored.type !== 'subagent_task'
+          )
+            continue;
+          const parsed = MessageContentSchema.safeParse(stored);
+          if (!parsed.success || parsed.data.type !== 'subagent_task') continue;
+          const item = parsed.data;
+          if (!item.run) continue;
+          const key = JSON.stringify([item.run.sessionId, item.taskId]);
+          if (!evidenceRunKeys.has(key)) continue;
+          childEvidenceOwners.set(key, {
+            entryId: read.turn.id,
+            toolCallIds: new Set(
+              item.run.items
+                .filter((content) => content.type === 'tool_call')
+                .map((content) => content.toolCallId)
+            ),
+          });
+          evidenceRunKeys.delete(key);
+        }
+        if (evidenceRunKeys.size === 0) break;
+      }
+    }
     if (callbacks?.editCallback) {
       await triggerEditCallbacksFromNotifications(
-        enrichedBatch,
+        enrichedBatch.filter((message) => !isSubagentPermissionMirror(message)),
         getEnrichmentState(doc),
         callbacks.editCallback
       );
+      for (const [key, group] of childGroups) {
+        const owner = childEvidenceOwners.get(key);
+        if (!owner) continue;
+        await triggerEditCallbacksFromNotifications(
+          group.batch.filter((message) => hasPersistedSubagentTool(message, owner.toolCallIds)),
+          group.state,
+          (edits) => callbacks.editCallback?.(edits, owner.entryId)
+        );
+      }
     }
     if (callbacks?.standardDiffCallback) {
       await triggerStandardDiffCallbacksFromNotifications(
-        enrichedBatch,
+        enrichedBatch.filter((message) => !isSubagentPermissionMirror(message)),
         getEnrichmentState(doc),
         callbacks.standardDiffCallback
       );
+      for (const [key, group] of childGroups) {
+        const owner = childEvidenceOwners.get(key);
+        if (!owner) continue;
+        await triggerStandardDiffCallbacksFromNotifications(
+          group.batch.filter((message) => hasPersistedSubagentTool(message, owner.toolCallIds)),
+          group.state,
+          (diffs) => callbacks.standardDiffCallback?.(diffs, owner.entryId)
+        );
+      }
+    }
+    for (const message of enrichedBatch) {
+      if (message.update.sessionUpdate !== 'subagent_event') continue;
+      const event = message.update.event;
+      if (
+        event.type === 'snapshot' &&
+        ['completed', 'failed', 'cancelled'].includes(event.snapshot.state)
+      ) {
+        childStates.delete(JSON.stringify([event.sessionId, event.runId]));
+      }
     }
   } catch (error) {
     // Terminal compaction consumes its cross-flush accumulator before the doc
@@ -236,6 +370,21 @@ export const handleACPUpdateMessage = async (
     await doc.setPlan(latestPlan);
   }
 };
+
+function hasPersistedSubagentTool(
+  message: AcpSessionNotification,
+  toolCallIds: ReadonlySet<string>
+): boolean {
+  const update = message.update;
+  if (update.sessionUpdate !== 'tool_call' && update.sessionUpdate !== 'tool_call_update')
+    return false;
+  return toolCallIds.has(update.toolCallId);
+}
+
+function isSubagentPermissionMirror(message: AcpSessionNotification): boolean {
+  const lody = message.update._meta?.lody;
+  return !!lody && typeof lody === 'object' && 'subagentRunId' in lody;
+}
 
 type ACPHistoryAppendCallbacks = Omit<
   NonNullable<Parameters<typeof handleACPUpdateMessage>[2]>,
@@ -336,6 +485,10 @@ const validateNotificationForHistory = (
   }
 
   switch (update.sessionUpdate) {
+    case 'subagent_event':
+      return isLodySubagentEvent(update.event)
+        ? { ok: true }
+        : { ok: false, reason: 'invalid_subagent_event' };
     case 'agent_message_chunk':
     case 'agent_thought_chunk': {
       const content = update.content as { type?: unknown; text?: unknown } | undefined;

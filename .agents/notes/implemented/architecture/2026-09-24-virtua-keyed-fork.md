@@ -5,6 +5,8 @@ Translation: current
 
 [中文](2026-09-24-virtua-keyed-fork.zh.md)
 
+Later: on 2026-09-27 the keyed layout moved into the [conversation scroll engine](2026-09-27-conversation-scroll-engine.md), and `packages/virtua` was removed; the remaining `VList` users depend on upstream `virtua` 0.52.7.
+
 ## Abstract
 
 Scrolling up a long conversation moved what the reader was looking at by hundreds of pixels

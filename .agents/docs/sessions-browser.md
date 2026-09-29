@@ -78,6 +78,21 @@ this page is the full text of the rules summarised there.
   its target lives in the session doc `preview` state, and the two planes sync independently, so a
   click landing between those writes must wait for the doc (bounded by the doc reaching `synced`)
   instead of consuming the request and leaving an empty panel.
+  `SessionPreviewPreload` consumes the visible conversation's existing preview document.
+  An available candidate plus active endpoint triggers one non-renewing status request;
+  only a matching live endpoint may load the candidate's exact path/query. Remote-preview
+  capability and atomic iframe moves are required; local Electron routes are skipped.
+  `managed-preview-frame-cache.ts` owns one speculative frame outside its opened-page LRU,
+  in an inert offscreen host with a nonzero viewport. Browser acquisition moves that same
+  frame into its surface, then releases the preparation host and its two-minute timer.
+  Subsequent preparation cleanup cannot destroy the claimed page. Target/endpoint changes,
+  unmount, and backgrounding dispose unclaimed work. Expiry does not retry, and no poller
+  or control keepalive is added. Application scripts and traffic do run before the click;
+  their ordinary authenticated requests can extend tunnel idle time within this bounded
+  preparation lifetime. Unsupported engines retain on-demand loading. Browser still
+  performs its normal live status check when opened. Candidate navigation waits for
+  that initial observation, avoiding a redundant create and empty viewer state that
+  would otherwise discard a prepared frame before it could be adopted.
   Remote connections are queried through Machine RPC rather than restored from persisted `active`
   flags. A visible remote Browser renews only its current endpoint every minute; hidden panels,
   background documents, local viewers, and observational queries do not renew remote access.

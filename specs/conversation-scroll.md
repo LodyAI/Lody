@@ -17,7 +17,9 @@ for, and never move unless the user or the arrival of new output asks it to.
 - **Reading elsewhere.** Scrolling up (wheel, keys, scrollbar, touch) stops following at
   once. New output then grows below without moving what the user is reading. Scrolling a
   code block or terminal inside a message is not scrolling the conversation. The
-  "scroll to latest" control returns to following.
+  "scroll to latest" control returns to following. When live Agent output is below the
+  reader, that control shows the working indicator; while the Agent is waiting for
+  permission, or when there is no live work, it shows the down arrow.
 - **Sending a message** while the agent is idle smoothly scrolls the sent message to
   the top of the viewport (instantly when the system asks for reduced motion) and
   leaves the space below it empty for the reply. The reply fills that space without
@@ -32,19 +34,26 @@ for, and never move unless the user or the arrival of new output asks it to.
   is added to the conversation itself. Routine opens that catch up quickly show
   neither (a status must persist briefly before it appears, and stays long enough not
   to flash). A lost connection is not announced here: reconnecting is automatic.
-- **Opening** reveals the conversation only once it can be shown at its restored
-  position; it must not flash through intermediate positions, and late row measurements
-  must not leave it hidden
-  ([initial scroll recovery](../.agents/notes/implemented/bug-fix/2026-09-23-initial-scroll-recovery.md)).
+- **Opening** shows the conversation in its first painted frame and never hides it.
+  A conversation left while following opens at its end; one left while reading opens
+  with the row the reader was reading at the top, even if rows above it changed since.
+  The first frame is already at that position: it does not flash through intermediate
+  positions, and rows still being measured never leave the pane blank
+  ([scroll engine](../.agents/notes/implemented/architecture/2026-09-27-conversation-scroll-engine.md)).
 
 ## Open questions
 
-- The cause of repeated flicker when opening long conversations is not established; see
-  the [follow-mode note](../.agents/notes/implemented/architecture/2026-09-23-conversation-follow-modes.md).
+- On iOS, a position correction during a touch fling ends the fling. Whether that
+  matters is decided from the engine's momentum counts after release; see the
+  [scroll-engine note](../.agents/notes/implemented/architecture/2026-09-27-conversation-scroll-engine.md#write-forms).
 
 ## Evidence
 
-- Implementation: `packages/components/src/hooks/use-sticky-scroll.ts`,
+- Implementation: `packages/components/src/lib/conversation-scroll/`,
+  `packages/components/src/components/ai-gui/conversation-list/engine-conversation-scroller.tsx`,
   `packages/components/src/components/ai-gui/view.tsx`.
-- Unit tests: `packages/components/tests/use-sticky-scroll.test.ts`. Not yet validated
-  in the running desktop or Web app.
+- Tests: `packages/components/tests/conversation-scroll-engine.test.ts` (model),
+  `engine-conversation-scroller.test.tsx` (adapter),
+  `conversation-viewport-contract.test.tsx`, and the browser specs
+  `tests/e2e/conversation-scroll-engine.spec.ts` and `session-chat-hydration.spec.ts`
+  (Storybook, Chromium). Not yet validated in the running desktop app or on iOS.

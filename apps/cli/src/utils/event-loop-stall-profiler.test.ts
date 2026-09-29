@@ -25,6 +25,7 @@ function createRecordingLogger(): Logger & { lines: string[] } {
     error: record('error'),
     success: record('success'),
     debug: record('debug'),
+    trace: record('trace'),
     setLevel: () => {},
     setDebug: () => {},
     child: () => logger,

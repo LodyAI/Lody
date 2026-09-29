@@ -99,6 +99,8 @@ Shared mention primitive used by composer autocomplete surfaces.
   `@lody/ui` popup surface restated in semantic tokens (no border, no Tailwind).
   StyleX cannot read `data-highlighted`, so `ui/mention.tsx` derives the row
   highlight from `highlightedItem.value`; row values must stay unique per menu.
+  Rows keep `flexShrink: 0` so wrapped subtitles determine their height; the
+  capped list scrolls instead of letting one row paint over its neighbour.
   The entrance rises from the side the menu landed on (`--mention-rise`).
 
 ## Files

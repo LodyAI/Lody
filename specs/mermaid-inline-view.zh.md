@@ -12,10 +12,13 @@ Translation: current
 替换或重新挂载可以从初始视图开始，不承诺跨会话持久化。
 
 未激活的图表不消费捏合手势。普通滚轮在两种状态下都继续滚动会话。触摸保持打开查看器的行为。
-全屏查看器独立从自然尺寸开始，打开或关闭时均不改变内嵌视图。
+全屏查看器独立从自然尺寸开始，打开或关闭时均不改变内嵌视图。在全屏查看器内，单指触摸平移
+图表，双指触摸围绕双指中心捏合缩放；触控板捏合使用平台提供的 ctrl/meta 修饰滚轮事件。超出
+视口的大图滚动时两侧边缘都必须可以到达。
 
 ## 证据
 
 - [交互实现](../packages/components/src/components/ai-gui/use-mermaid-diagram-canvas.tsx)
 - [行为测试](../packages/components/tests/markdown-mermaid-fullscreen.test.tsx)
 - [决策记录](../.agents/notes/implemented/bug-fix/2026-09-21-mermaid-retain-view.zh.md)
+- [查看器手势决策](../.agents/notes/implemented/bug-fix/2026-09-27-mermaid-and-image-viewer-gestures.zh.md)
