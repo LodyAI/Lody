@@ -1,5 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { getSessionRoomId, type MachineId, type SessionId, type WorkspaceId } from '@lody/shared';
+import {
+  CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
+  getMachineRoomId,
+  getSessionRoomId,
+  type MachineId,
+  type SessionId,
+  type WorkspaceId,
+} from '@lody/shared';
 import type { LoroRepo } from 'loro-repo';
 
 const mocks = vi.hoisted(() => {
@@ -16,6 +23,9 @@ const mocks = vi.hoisted(() => {
   const destroy = vi.fn(async () => {});
   const reconnect = vi.fn(async () => {});
   const listDoc = vi.fn(async (): ReturnType<LoroRepo['listDoc']> => []);
+  const getDocMeta = vi.fn(
+    async (_docId: string): Promise<{ meta?: unknown } | undefined> => undefined
+  );
   const watch = vi.fn(() => ({ unsubscribe: vi.fn() }));
   const joinMetaRoom = vi.fn();
   const remoteCursorDelete = vi.fn(async () => {});
@@ -64,6 +74,7 @@ const mocks = vi.hoisted(() => {
     destroy,
     reconnect,
     listDoc,
+    getDocMeta,
     watch,
     joinMetaRoom,
     remoteCursorDelete,
@@ -181,6 +192,7 @@ vi.mock('loro-repo', () => ({
       destroy: mocks.destroy,
       reconnect: mocks.reconnect,
       listDoc: mocks.listDoc,
+      getDocMeta: mocks.getDocMeta,
       watch: mocks.watch,
     })),
   },
@@ -374,6 +386,8 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
     mocks.reconnect.mockClear();
     mocks.listDoc.mockReset();
     mocks.listDoc.mockResolvedValue([]);
+    mocks.getDocMeta.mockReset();
+    mocks.getDocMeta.mockResolvedValue(undefined);
     mocks.watch.mockClear();
     mocks.joinMetaRoom.mockReset();
     mocks.remoteCursorDelete.mockClear();
@@ -806,6 +820,62 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
     expect(mocks.addTransport).toHaveBeenCalledWith('local', expect.anything());
     expect(mocks.joinMetaRoom).toHaveBeenCalledTimes(1);
 
+    await runtime.dispose();
+  });
+
+  it('reuses a machine capability read across local file previews', async () => {
+    mocks.joinMetaRoom.mockResolvedValueOnce(createMetaSub(Promise.resolve()));
+    const machineId = 'local-machine' as MachineId;
+    const preview = {
+      status: 'error' as const,
+      code: 'file_not_found' as const,
+      message: 'synthetic missing file',
+      path: 'notes.md',
+      retryable: false,
+    };
+    const invoke = vi.fn(async (channel: string) => {
+      if (channel === 'loro.isConnected') return true;
+      if (channel === 'machineRpc.previewFile') return preview;
+      return undefined;
+    });
+    Object.assign(window, {
+      __LODY_ELECTRON__: true,
+      ipc: {
+        invoke,
+        on: vi.fn(() => () => {}),
+        send: vi.fn(),
+      },
+    });
+    mocks.getDocMeta.mockImplementation(async (docId) =>
+      docId === getMachineRoomId(machineId)
+        ? { meta: { protocolCapabilities: CURRENT_MACHINE_PROTOCOL_CAPABILITIES } }
+        : undefined
+    );
+
+    const runtime = await createWorkspaceRuntime({
+      workspaceSlug: 'workspace',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      apiBaseUrl: 'https://api.example.test',
+      syncMode: 'local',
+    });
+
+    await expect(
+      runtime.requestFilePreview(machineId, {
+        sessionId: 'session-1' as SessionId,
+        path: 'notes.md',
+      })
+    ).resolves.toMatchObject({ status: 'error', code: 'file_not_found' });
+    await expect(
+      runtime.requestFilePreview(machineId, {
+        sessionId: 'session-1' as SessionId,
+        path: 'other.md',
+      })
+    ).resolves.toMatchObject({ status: 'error', code: 'file_not_found' });
+
+    expect(mocks.getDocMeta).toHaveBeenCalledTimes(1);
+    expect(
+      invoke.mock.calls.filter(([channel]) => channel === 'machineRpc.previewFile')
+    ).toHaveLength(2);
     await runtime.dispose();
   });
 

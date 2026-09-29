@@ -250,12 +250,15 @@ describe('createWorkspaceMachineRpcFacade', () => {
       ipc: { invoke },
     });
     const getMachineRpcClient = vi.fn();
+    const resolvePlaneForMachine = vi.fn(async () => {
+      throw new Error('Unexpected route resolution');
+    });
     const facade = createWorkspaceMachineRpcFacade({
       workspaceId,
       getMachineProtocolCapabilities: async () => CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
       targetRouter: {
         getPlaneForMachine: () => 'local',
-        resolvePlaneForMachine: vi.fn(async () => 'local'),
+        resolvePlaneForMachine,
       },
       getMachineRpcClient,
     });
@@ -276,6 +279,7 @@ describe('createWorkspaceMachineRpcFacade', () => {
       })
     );
     expect(getMachineRpcClient).not.toHaveBeenCalled();
+    expect(resolvePlaneForMachine).not.toHaveBeenCalled();
   });
 
   it('reports an unsupported local daemon without requesting resource IO or cloud fallback', async () => {

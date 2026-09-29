@@ -959,6 +959,28 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   >();
   const machineRpcClients = new Map<MachineId, LoroStreamsMachineRpcClient>();
   let machineRpcResponseDispatcher: LoroStreamsRpcResponseDispatcher | null = null;
+  const machineProtocolCapabilitiesCache = new Map<MachineId, MachineProtocolCapabilities>();
+  const machineProtocolCapabilitiesReads = new Map<
+    MachineId,
+    Promise<MachineProtocolCapabilities | undefined>
+  >();
+  const machineProtocolCapabilitiesEpoch = new Map<MachineId, number>();
+
+  const invalidateMachineProtocolCapabilities = (machineId: MachineId): void => {
+    machineProtocolCapabilitiesCache.delete(machineId);
+    machineProtocolCapabilitiesReads.delete(machineId);
+    machineProtocolCapabilitiesEpoch.set(
+      machineId,
+      (machineProtocolCapabilitiesEpoch.get(machineId) ?? 0) + 1
+    );
+  };
+
+  const invalidateMachineProtocolCapabilitiesForDoc = (docId: string): void => {
+    if (!docId.startsWith(MACHINE_DOC_PREFIX)) return;
+    const machineId = docId.slice(MACHINE_DOC_PREFIX.length).trim();
+    if (machineId) invalidateMachineProtocolCapabilities(machineId as MachineId);
+  };
+
   const emitControlConnectionState = () => {
     if (disposePromise) {
       return;
@@ -1376,6 +1398,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       if (event.kind !== 'doc-metadata') {
         return;
       }
+      invalidateMachineProtocolCapabilitiesForDoc(event.docId);
       targetRouter.observeDocMeta(event.docId, event.patch);
       deps.onDocMetaPatch?.(event.docId, event.patch);
     },
@@ -1745,6 +1768,44 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     targetRouter,
     getMachineRpcClient,
   });
+
+  /**
+   * Protocol capabilities the target daemon advertised, from its machine doc meta.
+   * Absent meta means "unsupported", which is the only safe reading: a daemon that
+   * has not published a capability may be an older build that parses requests
+   * strictly.
+   */
+  async function getMachineProtocolCapabilities(
+    machineId: MachineId
+  ): Promise<MachineProtocolCapabilities | undefined> {
+    if (machineProtocolCapabilitiesCache.has(machineId)) {
+      return machineProtocolCapabilitiesCache.get(machineId);
+    }
+
+    const existingRead = machineProtocolCapabilitiesReads.get(machineId);
+    if (existingRead) return await existingRead;
+
+    const epoch = machineProtocolCapabilitiesEpoch.get(machineId) ?? 0;
+    const read = (async () => {
+      const entry = await repo.getDocMeta(getMachineRoomId(machineId));
+      const capabilities = (entry?.meta as Partial<MachineMeta> | undefined)?.protocolCapabilities;
+      if (
+        capabilities !== undefined &&
+        (machineProtocolCapabilitiesEpoch.get(machineId) ?? 0) === epoch
+      ) {
+        machineProtocolCapabilitiesCache.set(machineId, capabilities);
+      }
+      return capabilities;
+    })();
+    machineProtocolCapabilitiesReads.set(machineId, read);
+    try {
+      return await read;
+    } finally {
+      if (machineProtocolCapabilitiesReads.get(machineId) === read) {
+        machineProtocolCapabilitiesReads.delete(machineId);
+      }
+    }
+  }
 
   const dispatchMachineStatusViaRpc = async (
     message: Extract<ClientToServer, { type: 'machine/status' }>
@@ -4459,6 +4520,11 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       machineAcpBinaryProgressListeners.clear();
       machineAcpBinaryProgressSnapshots.clear();
       machineAcpAuthenticationProgressListeners.clear();
+      for (const machineId of machineProtocolCapabilitiesReads.keys()) {
+        invalidateMachineProtocolCapabilities(machineId);
+      }
+      machineProtocolCapabilitiesCache.clear();
+      machineProtocolCapabilitiesReads.clear();
 
       for (const handle of watchHandles) {
         try {
