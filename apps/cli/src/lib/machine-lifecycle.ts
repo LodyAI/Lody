@@ -1,5 +1,3 @@
-import type { ChildProcess, SpawnOptions } from 'node:child_process';
-import spawn from 'cross-spawn';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { z } from 'zod';
@@ -19,6 +17,9 @@ import {
 } from '@lody/shared/node/local-cli-supervisor';
 import { LODY_AUTH_SITE_URL, LODY_AUTH_URL } from '@/utils/const';
 import { getLodyDataDir } from '@lody/shared/node/installation-profile';
+import { startProcess } from '@/platform/promise-facade';
+import type { NodeProcessApi } from '@/platform/process/node-process';
+import type { TerminationPolicy } from '@/platform/process/process-tree';
 
 // The reserved Worker exit codes are part of the shared Supervisor<->Worker
 // contract; Electron consumes the same values from @lody/shared.
@@ -224,13 +225,17 @@ export const buildLodyUpgradeInstallArgs = (targetVersion: string): string[] => 
   `--registry=${NPM_REGISTRY_URL}`,
 ];
 
-type SpawnLike = (command: string, args: readonly string[], options: SpawnOptions) => ChildProcess;
+/**
+ * A timed-out or cancelled install is ended as a tree: npm's lifecycle scripts
+ * and their children go with it. SIGKILL after 2 s, exit proven within 5 s more.
+ */
+const UPGRADE_TERMINATION_POLICY: TerminationPolicy = { graceMs: 2_000, killWaitMs: 5_000 };
 
 const runCommand = async (args: {
   command: string;
   commandArgs: readonly string[];
   timeoutMs: number;
-  spawnImpl: SpawnLike;
+  nodeProcess?: NodeProcessApi;
   signal?: AbortSignal;
 }): Promise<{
   code: number | null;
@@ -242,39 +247,51 @@ const runCommand = async (args: {
   if (args.signal?.aborted) {
     throw new DOMException('Daemon upgrade canceled', 'AbortError');
   }
-  const child = args.spawnImpl(args.command, args.commandArgs, {
-    stdio: ['ignore', 'pipe', 'pipe'],
-    env: process.env,
-  });
   let stdout = '';
   let stderr = '';
   const append = (current: string, chunk: Buffer): string =>
     `${current}${chunk.toString()}`.slice(-64 * 1024);
-  child.stdout?.on('data', (chunk: Buffer) => {
-    stdout = append(stdout, chunk);
-  });
-  child.stderr?.on('data', (chunk: Buffer) => {
-    stderr = append(stderr, chunk);
-  });
+  const install = startProcess(
+    {
+      command: args.command,
+      args: args.commandArgs,
+      options: { stdio: ['ignore', 'pipe', 'pipe'], env: process.env },
+      processGroup: true,
+      onSpawned: (child) => {
+        child.stdout?.on('data', (chunk: Buffer) => {
+          stdout = append(stdout, chunk);
+        });
+        child.stderr?.on('data', (chunk: Buffer) => {
+          stderr = append(stderr, chunk);
+        });
+      },
+    },
+    { nodeProcess: args.nodeProcess }
+  );
+  const child = install.child;
 
   return await new Promise((resolve, reject) => {
     let timedOut = false;
     let aborted = false;
     let processError: Error | null = null;
     let terminationStarted = false;
-    let forceKillTimer: ReturnType<typeof setTimeout> | null = null;
-    let exitConfirmationTimer: ReturnType<typeof setTimeout> | null = null;
     const requestTermination = () => {
       if (terminationStarted) return;
       terminationStarted = true;
-      child.kill('SIGTERM');
-      forceKillTimer = setTimeout(() => child.kill('SIGKILL'), 2_000);
-      forceKillTimer.unref?.();
-      exitConfirmationTimer = setTimeout(() => {
-        cleanup();
-        reject(new Error('Upgrade process did not confirm exit after SIGKILL'));
-      }, 7_000);
-      exitConfirmationTimer.unref?.();
+      void install.terminate(UPGRADE_TERMINATION_POLICY).then(
+        // The whole tree is gone; do not wait on a pipe some escaped process
+        // may still hold open.
+        () =>
+          install.exited.then(({ code }) => {
+            cleanup();
+            if (processError) reject(processError);
+            else resolve({ code, stdout, stderr, timedOut, aborted });
+          }),
+        (error: unknown) => {
+          cleanup();
+          reject(new Error('Upgrade process did not confirm exit after SIGKILL', { cause: error }));
+        }
+      );
     };
     const onAbort = () => {
       if (aborted) return;
@@ -291,14 +308,15 @@ const runCommand = async (args: {
 
     const cleanup = () => {
       clearTimeout(timeout);
-      if (forceKillTimer) clearTimeout(forceKillTimer);
-      if (exitConfirmationTimer) clearTimeout(exitConfirmationTimer);
       args.signal?.removeEventListener('abort', onAbort);
     };
     child.once('error', (error) => {
       processError = error;
     });
     child.once('close', (code) => {
+      // Once termination starts it owns the result: the root can close while
+      // the rest of its tree is still being ended.
+      if (terminationStarted) return;
       cleanup();
       if (processError) {
         reject(processError);
@@ -313,7 +331,8 @@ const runCommand = async (args: {
 export const runDaemonUpgradeFromIntent = async (args: {
   logger: LifecycleLogger;
   timeoutMs?: number;
-  spawnImpl?: SpawnLike;
+  /** OS process seam of the process layer; tests substitute a fake. */
+  nodeProcess?: NodeProcessApi;
   signal?: AbortSignal;
 }): Promise<boolean> => {
   const intent = await readDaemonUpgradeIntent();
@@ -333,7 +352,7 @@ export const runDaemonUpgradeFromIntent = async (args: {
       command: npmExecutable,
       commandArgs: installArgs,
       timeoutMs: args.timeoutMs ?? MACHINE_UPGRADE_TIMEOUT_MS,
-      spawnImpl: args.spawnImpl ?? spawn,
+      nodeProcess: args.nodeProcess,
       signal: args.signal,
     });
     if (result.aborted) {

@@ -45,6 +45,9 @@ Root `AGENTS.md` applies; this file adds CLI context. Build, PR-poller, and adap
 
 - Prefer Effect TS idioms for new/refactored CLI code — services via `Context.Tag` + `Layer`,
   typed errors, structured concurrency, `Schedule` retries: context/cli-effect-ts.md.
+- Start, await or signal processes only via `src/platform/process` (Promise code: its
+  `promise-facade`), never `child_process`, `cross-spawn` or `process.kill`; enforced by
+  `check:cli-process-boundary` ([platform](src/platform/AGENTS.md)).
 - Keep the strict tsconfig, no `any` or non-null assertions, and Zod at every foreign boundary:
   context/cli-type-safety.md.
 - After a remote prompt arrives, only correctness-critical setup may block before ACP
@@ -108,8 +111,5 @@ execution/consent rules. These rules also bind CLI callers outside that director
 - Pi extension scanning runs only the pinned runtime's read-only listing entry under a frozen
   default or saved-profile environment — never caller-supplied launch fields. Selections
   require the pinned extension-aware runtime (`piExtensionsProtocolVersion`), not a fallback.
-- `src/lib/pr-poller/` compensates for a broken hosted GitHub webhook → Streams fan-out. Keep
-  policy in its pure modules with a thin scheduler, keep priority driven by presence and
-  `lastMessageAt` rather than a turn-end hook, and keep only scheduling state (never PR status) in
-  `~/.lody/pr-poller-state.json`. Spec: `specs/pr-status-reconciler.md`; invariants:
-  `src/lib/pr-poller/AGENTS.md`.
+- `src/lib/pr-poller/` compensates for the hosted GitHub webhook fan-out. Spec:
+  `specs/pr-status-reconciler.md`; invariants: [pr-poller](src/lib/pr-poller/AGENTS.md).

@@ -2,8 +2,6 @@ import fs from 'node:fs';
 import path, { isAbsolute, relative, resolve as resolvePath } from 'node:path';
 import os from 'node:os';
 import { createHash } from 'node:crypto';
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
 import type {
   LocalProjectBrowseDirectoryResult,
   LocalProjectBrowseRootsResult,
@@ -41,6 +39,7 @@ import {
 import { getLodyDataDir } from '@lody/shared/node/installation-profile';
 import type { Logger } from '@/utils/logger';
 import { formatErrorMessage } from '@/utils/format-error';
+import { runCommandText } from '@/platform/promise-facade';
 
 const DEFAULT_LOCAL_PROJECT_MAX_FILES = 80_000;
 const HARD_LOCAL_PROJECT_MAX_FILES = 200_000;
@@ -58,7 +57,6 @@ const HARD_LOCAL_PROJECT_READ_MAX_BYTES = 5 * 1024 * 1024;
 const GIT_COMMAND_MAX_BUFFER_BYTES = 64 * 1024 * 1024;
 const LOCAL_PROJECT_GIT_COMMAND_TIMEOUT_MS = 5_000;
 const LOCAL_PROJECT_WALK_YIELD_EVERY_ENTRIES = 1_000;
-const execFileAsync = promisify(execFile);
 const LOCAL_REPO_ID_RE = /^local---[0-9a-f]{12}$/;
 
 const yieldToEventLoop = (): Promise<void> =>
@@ -256,33 +254,23 @@ type GitCommandResult = {
 
 async function runGitCommand(rootPath: string, args: string[]): Promise<GitCommandResult> {
   try {
-    const result = await execFileAsync('git', args, {
+    const result = await runCommandText({
+      command: 'git',
+      args,
       cwd: rootPath,
-      encoding: 'utf8',
-      maxBuffer: GIT_COMMAND_MAX_BUFFER_BYTES,
+      maxOutputBytes: GIT_COMMAND_MAX_BUFFER_BYTES,
       timeout: LOCAL_PROJECT_GIT_COMMAND_TIMEOUT_MS,
-      killSignal: 'SIGTERM',
       env: {
         ...process.env,
         GIT_TERMINAL_PROMPT: '0',
         GIT_OPTIONAL_LOCKS: '0',
       },
+      check: 'none',
     });
-    return {
-      status: 0,
-      stdout: String(result.stdout ?? ''),
-      stderr: String(result.stderr ?? ''),
-    };
+    return { status: result.code, stdout: result.stdout, stderr: result.stderr };
   } catch (error) {
-    const withOutput = error as
-      | (Error & { code?: number | string; stdout?: string; stderr?: string })
-      | undefined;
-    const message = formatErrorMessage(error);
-    return {
-      status: typeof withOutput?.code === 'number' ? withOutput.code : null,
-      stdout: String(withOutput?.stdout ?? ''),
-      stderr: String(withOutput?.stderr ?? message),
-    };
+    // Spawn failure, timeout or output overflow: no exit status to report.
+    return { status: null, stdout: '', stderr: formatErrorMessage(error) };
   }
 }
 

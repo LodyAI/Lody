@@ -1,9 +1,10 @@
-import { spawn, type ChildProcess } from 'node:child_process';
+import type { ChildProcess } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { once } from 'node:events';
 import type { Readable } from 'node:stream';
 import { Logger } from '@/utils/logger';
 import { formatErrorMessage } from '@/utils/format-error';
+import { startProcess, type ProcessHandle } from '@/platform/promise-facade';
 import {
   MCP_HTTP_PREFERRED_PORT_ENV,
   MCP_HTTP_TOKEN_ENV,
@@ -36,6 +37,8 @@ const MAX_RESTART_ATTEMPTS = 10;
 /** An exit after this much uptime resets the restart budget. */
 const STABLE_UPTIME_MS = 30_000;
 const SIGTERM_GRACE_MS = 5_000;
+/** Bound on waiting for a SIGKILLed host to be reaped. */
+const SIGKILL_WAIT_MS = 5_000;
 /**
  * Host exit codes that mean "this environment can never serve HTTP MCP"
  * (missing token wiring, unreadable /proc/net/tcp). Restarting cannot help.
@@ -44,7 +47,7 @@ const PERMANENT_EXIT_CODES = new Set([2, 3]);
 
 class McpHttpHostSupervisor {
   private readonly token = randomBytes(32).toString('base64url');
-  private child: ChildProcess | null = null;
+  private host: ProcessHandle | null = null;
   private endpoint: LodyMcpHttpEndpoint | null = null;
   private lastPort = 0;
   private attempts = 0;
@@ -70,8 +73,9 @@ class McpHttpHostSupervisor {
       let exitSignal: NodeJS.Signals | null = null;
       let hostPid: number | undefined;
       try {
-        const child = this.spawnChild(cliEntrypoint);
-        this.child = child;
+        const host = this.spawnHost(cliEntrypoint);
+        this.host = host;
+        const { child } = host;
         hostPid = child.pid;
         const port = await this.readHandshake(child);
         handshaked = true;
@@ -88,16 +92,16 @@ class McpHttpHostSupervisor {
         if (!this.stopping) {
           this.logger.warn(`[mcp-http] host start failed: ${formatErrorMessage(error)}`);
         }
-        const failed = this.child;
-        // A handshake timeout or invalid handshake SIGKILLs the host and rejects
-        // at once: wait for its real exit, so the trace below reports how it
-        // ended and the next host never overlaps a dying one. A child that never
-        // spawned (no pid) emits no 'exit'.
-        if (failed?.pid !== undefined && failed.exitCode === null && failed.signalCode === null) {
-          await once(failed, 'exit');
+        const failed = this.host;
+        // A handshake timeout or invalid handshake rejects at once: SIGKILL the
+        // host and wait for it to be gone, so the trace below reports how it
+        // ended and the next host never overlaps a dying one. A host that
+        // already exited (or never spawned) has nothing left to end.
+        if (failed) {
+          await this.forceStop(failed);
         }
-        exitCode = failed?.exitCode ?? null;
-        exitSignal = failed?.signalCode ?? null;
+        exitCode = failed?.child.exitCode ?? null;
+        exitSignal = failed?.child.signalCode ?? null;
       }
       if (!this.stopping) {
         this.logger.warn(
@@ -107,7 +111,7 @@ class McpHttpHostSupervisor {
         );
       }
       this.endpoint = null;
-      this.child = null;
+      this.host = null;
       if (this.stopping) {
         return;
       }
@@ -135,43 +139,57 @@ class McpHttpHostSupervisor {
   async stop(): Promise<void> {
     this.stopping = true;
     this.wakeBackoffSleep?.();
-    const child = this.child;
-    if (!child || child.exitCode !== null) {
+    const host = this.host;
+    if (!host) {
       return;
     }
-    const exited = once(child, 'exit');
-    child.kill('SIGTERM');
-    const outcome = await Promise.race([
-      exited.then(() => 'exited' as const),
-      new Promise<'timeout'>((resolve) => setTimeout(() => resolve('timeout'), SIGTERM_GRACE_MS)),
-    ]);
-    if (outcome === 'timeout' && child.exitCode === null) {
-      child.kill('SIGKILL');
-      await exited;
+    await this.endHost(host, { graceMs: SIGTERM_GRACE_MS, killWaitMs: SIGKILL_WAIT_MS });
+  }
+
+  private async forceStop(host: ProcessHandle): Promise<void> {
+    await this.endHost(host, { graceMs: 0, killWaitMs: SIGKILL_WAIT_MS });
+  }
+
+  private async endHost(
+    host: ProcessHandle,
+    policy: Parameters<ProcessHandle['terminate']>[0]
+  ): Promise<void> {
+    try {
+      await host.terminate(policy);
+    } catch (error) {
+      this.logger.warn(
+        `[mcp-http] host pid=${host.child.pid ?? '?'} did not stop: ${formatErrorMessage(error)}`
+      );
     }
   }
 
-  private spawnChild(cliEntrypoint: string): ChildProcess {
-    const child = spawn(process.execPath, [cliEntrypoint, '__internal', 'lody-mcp-http-host'], {
-      // stdin held open as the daemon-death signal; fd 3 is the handshake
-      // pipe. The token goes through the environment (owner-readable only),
-      // never through argv.
-      stdio: ['pipe', 'ignore', 'pipe', 'pipe'],
-      env: {
-        ...process.env,
-        [MCP_HTTP_TOKEN_ENV]: this.token,
-        [MCP_HTTP_PREFERRED_PORT_ENV]: String(this.lastPort),
+  private spawnHost(cliEntrypoint: string): ProcessHandle {
+    return startProcess({
+      command: process.execPath,
+      args: [cliEntrypoint, '__internal', 'lody-mcp-http-host'],
+      options: {
+        // stdin held open as the daemon-death signal; fd 3 is the handshake
+        // pipe. The token goes through the environment (owner-readable only),
+        // never through argv.
+        stdio: ['pipe', 'ignore', 'pipe', 'pipe'],
+        env: {
+          ...process.env,
+          [MCP_HTTP_TOKEN_ENV]: this.token,
+          [MCP_HTTP_PREFERRED_PORT_ENV]: String(this.lastPort),
+        },
+        windowsHide: true,
       },
-      windowsHide: true,
+      processGroup: false,
+      onSpawned: (child) => {
+        child.stderr?.setEncoding('utf8');
+        child.stderr?.on('data', (chunk: string) => {
+          const text = chunk.trim();
+          if (text) {
+            this.logger.debug(`[mcp-http] host stderr: ${text.slice(0, 2_000)}`);
+          }
+        });
+      },
     });
-    child.stderr?.setEncoding('utf8');
-    child.stderr?.on('data', (chunk: string) => {
-      const text = chunk.trim();
-      if (text) {
-        this.logger.debug(`[mcp-http] host stderr: ${text.slice(0, 2_000)}`);
-      }
-    });
-    return child;
   }
 
   private async readHandshake(child: ChildProcess): Promise<number> {
@@ -197,13 +215,12 @@ class McpHttpHostSupervisor {
         // have answered. Record the lateness so a stalled parent is not misread
         // as a broken host.
         const elapsedMs = Date.now() - armedAtMs;
-        child.kill('SIGKILL');
         settle(() =>
           rejectPromise(
             new Error(
               `host handshake timed out (pid=${child.pid ?? '?'} elapsedMs=${elapsedMs} timeoutMs=${HANDSHAKE_TIMEOUT_MS} timerLateMs=${
                 elapsedMs - HANDSHAKE_TIMEOUT_MS
-              } partialHandshakeBytes=${buffer.length}); killed with SIGKILL`
+              } partialHandshakeBytes=${buffer.length}); killing with SIGKILL`
             )
           )
         );
@@ -223,7 +240,6 @@ class McpHttpHostSupervisor {
           const parsed = McpHttpHostHandshakeSchema.parse(JSON.parse(buffer.slice(0, newline)));
           settle(() => resolve(parsed.port));
         } catch (error) {
-          child.kill('SIGKILL');
           settle(() =>
             rejectPromise(new Error(`invalid host handshake: ${formatErrorMessage(error)}`))
           );

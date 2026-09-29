@@ -1,4 +1,9 @@
-import type { ChildProcess, SpawnOptions } from 'node:child_process';
+import type {
+  ChildProcess,
+  SpawnOptions,
+  SpawnSyncOptions,
+  SpawnSyncReturns,
+} from 'node:child_process';
 
 import spawn from 'cross-spawn';
 import { Context, Layer } from 'effect';
@@ -14,6 +19,15 @@ export interface NodeProcessApi {
   readonly platform: NodeJS.Platform;
   /** Synchronous like `child_process.spawn`: async failures arrive as `error`. */
   readonly spawn: (command: string, args: readonly string[], options: SpawnOptions) => ChildProcess;
+  /**
+   * Blocks the event loop until the child exits. Only for callers that are
+   * synchronous by contract and bounded by a timeout.
+   */
+  readonly spawnSync: (
+    command: string,
+    args: readonly string[],
+    options: SpawnSyncOptions
+  ) => SpawnSyncReturns<Buffer>;
   /** `process.kill` semantics: throws `ESRCH` when no process matches. */
   readonly kill: (pid: number, signal: NodeJS.Signals | 0) => void;
 }
@@ -23,6 +37,8 @@ export class NodeProcess extends Context.Tag('lody/NodeProcess')<NodeProcess, No
 export const nodeProcessLive: NodeProcessApi = {
   platform: process.platform,
   spawn: (command, args, options) => spawn(command, [...args], options),
+  spawnSync: (command, args, options) =>
+    spawn.sync(command, [...args], { ...options, encoding: 'buffer' }),
   kill: (pid, signal) => {
     process.kill(pid, signal);
   },

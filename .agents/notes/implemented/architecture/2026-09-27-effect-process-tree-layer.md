@@ -113,6 +113,75 @@ Layers per call, and the daemon runtime arrives with L4, whose session pool is
 its first daemon-scoped owner. Rewiring the turn fiber onto a daemon scope now
 would touch L5 before the layers beneath it are finished.
 
+## Follow-up: every CLI process caller ([#1069](https://github.com/LodyAI/Lody/pull/1069))
+
+The next stacked PR moves every remaining process caller in `apps/cli/src` onto the
+layer:
+- git and gh invocations;
+- daemon, worker and MCP host children;
+- tunnels;
+- setup scripts;
+- memory probes;
+- the upgrade installer;
+- PTY termination.
+
+That leaves one implementation. `pnpm check:cli-process-boundary` now fails when
+CLI source imports `child_process` or `cross-spawn`, references `node-pty`, or
+calls `process.kill` anywhere but `platform/process/node-process.ts`. Its
+allowlist holds only two kinds of entry:
+- the source text of standalone scripts that run in their own process;
+- the node-pty loader.
+
+`apps/cli/AGENTS.md` points new code at the layer.
+
+New capabilities:
+- **`runCommand` / `runCommandOk`:** collect output with a per-stream ceiling.
+- **`runCommandSync`:** for callers that are synchronous by contract; it
+  requires a timeout.
+- **`isPidAlive`.**
+- **`ManagedProcess.closed`:** exit plus drained stdio.
+- **`SpawnSpec.windowsDetached`:** for the daemon runner, which must outlive the
+  terminal that started it.
+- **Promise facades:** `runCommandText`, `runCommandTextSync`, `startProcess`,
+  `isPidAliveSync`, and the PTY's `terminatePtyProcessGroup`.
+
+Decisions, each covered by a test:
+
+- **A finished command keeps what it deliberately started.**
+  - `runCommand` ends the command's tree only when the caller stops waiting:
+    timeout, interruption, or output over the ceiling.
+  - Reaping the group after every successful command was rejected. It would
+    kill helpers that git or gh leave running on purpose, which `execFile`
+    never did.
+  - Output over the ceiling fails at once and ends the tree, as `execFile` did.
+- **Setup scripts are ended as a tree only on failure.** A successful script's
+  background services survive. A failed or timed-out one no longer leaks
+  descendants such as a half-finished `pnpm install`.
+- **The PTY is hung up first.** An interactive shell puts each job in its own
+  process group, so ending only the shell's group would miss them. The PTY
+  therefore sends SIGHUP first, then ends the shell's group with a bounded
+  escalation.
+- **The `lody` subcommand run by the stdio MCP server stays in the agent's
+  process group**, so a session teardown still reaches it.
+- **Windows opens URLs via `rundll32 url.dll,FileProtocolHandler`**, so a URL
+  never passes through cmd's metacharacter parsing.
+- **Timeouts where there were none.** Synchronous callers (`diff-line-counts`,
+  `git-identity`) now have timeouts. Worktree git output has a 64 MiB per-stream
+  ceiling; it previously had none.
+
+Trade-offs of giving commands their own process group:
+- Because `detached` starts a new session on POSIX, commands lose the
+  controlling terminal. A foreground CLI's Ctrl-C no longer reaches them, and a
+  prompt that opens `/dev/tty` (an ssh passphrase) fails instead of prompting.
+- The daemon has no terminal, so this matters only for foreground CLI runs.
+- Waits after SIGKILL are now bounded everywhere, so, for example,
+  `cloudflared stop()` can reject instead of hanging.
+
+Not covered: Electron main, `packages/cli-supervisor` and `packages/shared`
+(13 files) run outside the CLI and still start processes directly. Bringing
+them onto the same layer requires moving it into a package they can import.
+That is a separate decision.
+
 ## Verification
 
 - `@effect/vitest` 0.26 was added. The new tests in `tests/platform-process.test.ts`

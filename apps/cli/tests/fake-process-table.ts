@@ -67,6 +67,9 @@ export class FakeProcessTable {
     this.api = {
       platform,
       spawn: (command, args, options) => this.spawn(command, args, options),
+      spawnSync: () => {
+        throw new Error('FakeProcessTable does not model synchronous spawns');
+      },
       kill: (target, signal) => this.kill(target, signal),
     };
   }
@@ -149,6 +152,10 @@ export class FakeProcessTable {
     const process = this.processes.get(pid);
     if (!process?.alive) return;
     this.terminate(process, null, code);
+  }
+
+  childOf(pid: number): FakeChildProcess | undefined {
+    return this.processes.get(pid)?.child;
   }
 
   isAlive(pid: number): boolean {

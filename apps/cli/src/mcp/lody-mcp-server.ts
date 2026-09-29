@@ -1,4 +1,3 @@
-import { spawn } from 'child_process';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHash, randomUUID } from 'node:crypto';
 import path from 'path';
@@ -7,6 +6,8 @@ import { StdioServerTransport } from '@modelcontextprotocol/server/stdio';
 import { Effect } from 'effect';
 import { z } from 'zod';
 import { requestSessionShare } from '@/lib/session-share-delivery';
+import { startProcess } from '@/platform/promise-facade';
+import { formatErrorMessage } from '@/utils/format-error';
 import {
   ACP_CAPABILITY_ROW_FAMILIES,
   getAcpCapabilityCacheKey,
@@ -1101,30 +1102,54 @@ const resolveCliEntrypoint = (): string => {
   return entrypoint;
 };
 
+/** A timed-out `lody` subcommand gets SIGTERM, then SIGKILL if it lingers. */
+const LODY_CLI_TIMEOUT_TERMINATION = { graceMs: 2_000, killWaitMs: 2_000 };
+
 const runLodyCli = async (
   args: string[],
   timeoutMs = LODY_CLI_DEFAULT_TIMEOUT_MS
-): Promise<{ stdout: string; stderr: string }> =>
-  await new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [resolveCliEntrypoint(), ...args], {
+): Promise<{ stdout: string; stderr: string }> => {
+  const stdout: Buffer[] = [];
+  const stderr: Buffer[] = [];
+  const cli = startProcess({
+    command: process.execPath,
+    args: [resolveCliEntrypoint(), ...args],
+    options: {
       env: process.env,
       stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true,
-    });
-    const stdout: Buffer[] = [];
-    const stderr: Buffer[] = [];
+    },
+    // Stays in this server's process group: ending the agent tree that runs
+    // the MCP server must end its in-flight `lody` subcommands too.
+    processGroup: false,
+    onSpawned: (child) => {
+      child.stdout?.on('data', (chunk: Buffer) => stdout.push(chunk));
+      child.stderr?.on('data', (chunk: Buffer) => stderr.push(chunk));
+    },
+  });
+  return await new Promise((resolve, reject) => {
+    let timedOut = false;
     const timeout = setTimeout(() => {
-      child.kill('SIGTERM');
-      reject(new Error(`lody ${args.join(' ')} timed out after ${timeoutMs}ms`));
+      // The timeout owns the outcome: the exit it causes is not a CLI failure.
+      timedOut = true;
+      void cli.terminate(LODY_CLI_TIMEOUT_TERMINATION).then(
+        () => reject(new Error(`lody ${args.join(' ')} timed out after ${timeoutMs}ms`)),
+        (error: unknown) =>
+          reject(
+            new Error(
+              `lody ${args.join(' ')} timed out after ${timeoutMs}ms and could not be stopped: ${formatErrorMessage(error)}`
+            )
+          )
+      );
     }, timeoutMs);
 
-    child.stdout.on('data', (chunk: Buffer) => stdout.push(chunk));
-    child.stderr.on('data', (chunk: Buffer) => stderr.push(chunk));
-    child.on('error', (error) => {
+    cli.child.on('error', (error) => {
+      if (timedOut) return;
       clearTimeout(timeout);
       reject(error);
     });
-    child.on('close', (code, signal) => {
+    cli.child.on('close', (code, signal) => {
+      if (timedOut) return;
       clearTimeout(timeout);
       const stdoutText = Buffer.concat(stdout).toString('utf8');
       const stderrText = Buffer.concat(stderr).toString('utf8');
@@ -1139,6 +1164,7 @@ const runLodyCli = async (
       resolve({ stdout: stdoutText, stderr: stderrText });
     });
   });
+};
 
 const parseJsonCliOutput = (stdout: string): unknown => {
   const line = stdout

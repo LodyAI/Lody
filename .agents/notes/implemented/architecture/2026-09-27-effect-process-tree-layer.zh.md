@@ -71,6 +71,44 @@ shell 包装先退出、它启动的 agent 仍在运行时，终止照样继续�
 提供 Layer；守护进程运行时随 L4 引入，那里的会话池是第一个守护进程级的拥有者。现在就把 turn fiber
 迁到守护进程作用域，会在下层完成之前先改动 L5。
 
+## 后续：CLI 中所有进程调用方（[#1069](https://github.com/LodyAI/Lody/pull/1069)）
+
+下一个叠加的 PR 把 `apps/cli/src` 中其余所有进程调用方迁到这一层——git 与 gh 调用、daemon /
+worker / MCP host 子进程、隧道、setup 脚本、内存探测、升级安装和 PTY 终止——只留下一套实现。
+现在只要 CLI 源码在 `platform/process/node-process.ts` 之外导入 `child_process` 或 `cross-spawn`、
+引用 `node-pty` 或调用 `process.kill`，`pnpm check:cli-process-boundary` 就会失败；它的白名单
+只包含两类：在独立进程中运行的脚本源码文本，以及 node-pty 加载器。`apps/cli/AGENTS.md`
+也写明新代码必须经过这一层。
+
+新增能力：`runCommand` / `runCommandOk`（收集输出，每路输出有上限）、`runCommandSync`（供
+按约定必须同步的调用方使用，必须带超时）、`isPidAlive`、`ManagedProcess.closed`（退出且 stdio
+已读尽）、`SpawnSpec.windowsDetached`（daemon runner 需要比启动它的终端活得久），以及对应的
+Promise 门面 `runCommandText`、`runCommandTextSync`、`startProcess`、`isPidAliveSync`，外加
+PTY 用的 `terminatePtyProcessGroup`。
+
+各项决定，均有测试覆盖：
+
+- **命令正常结束后，保留它有意留下的进程。** 只有调用方不再等待时（超时、中断、输出超限），
+  `runCommand` 才结束该命令的整棵树。另一种做法是每次命令成功后都清理整个进程组，但它会杀掉
+  git 或 gh 有意留下运行的辅助进程，而 `execFile` 从不这样做，所以没有采用。输出超限时立即
+  失败并结束整棵树，与 `execFile` 一致。
+- **setup 脚本只在失败时整棵结束。** 成功脚本启动的后台服务会保留；失败或超时的脚本不再留下
+  后代进程（例如装到一半的 `pnpm install`）。
+- **PTY 先挂断再终止。** 交互式 shell 会把每个作业放进各自的进程组，只结束 shell 所在的组会
+  漏掉它们。所以先向 PTY 发 SIGHUP，再对 shell 的进程组执行有上限的升级。
+- **stdio MCP 服务器运行的 `lody` 子命令留在 agent 的进程组里**，这样会话拆除时仍能触及它。
+- **Windows 通过 `rundll32 url.dll,FileProtocolHandler` 打开 URL**，URL 不再经过 cmd 的元字符解析。
+- **补上原先缺失的超时。** 同步调用方（`diff-line-counts`、`git-identity`）现在有超时；worktree
+  的 git 输出每路上限为 64 MiB，以前没有上限。
+
+让命令自成进程组的代价：在 POSIX 上 `detached` 会新建会话，命令因此失去控制终端。前台运行
+CLI 时按 Ctrl-C 不再能传到这些命令；打开 `/dev/tty` 的提示（例如 ssh 口令）会直接失败而不是
+提示输入。daemon 本身没有终端，所以只影响前台 CLI 运行。SIGKILL 之后的等待现在处处都有上限，
+因此像 `cloudflared stop()` 这样的调用可能会 reject，而不是一直挂起。
+
+未覆盖：Electron main、`packages/cli-supervisor` 和 `packages/shared`（共 13 个文件）运行在 CLI
+之外，仍然直接启动进程。要让它们也使用这一层，需要把它移到它们能导入的包里，这是另一项决定。
+
 ## 验证
 
 - 新增 `@effect/vitest` 0.26。新测试 `tests/platform-process.test.ts` 用 `TestClock` 驱动时间，

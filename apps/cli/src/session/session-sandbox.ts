@@ -1,13 +1,12 @@
 import type { ChildProcess, SpawnOptions } from 'child_process';
 import * as fs from 'fs/promises';
 
-import spawn from 'cross-spawn';
 import { Effect, Exit, Scope } from 'effect';
 import { type SessionId } from '@lody/shared';
 
 import { platformLayer, makePlatformRunner, type PlatformRunner } from '@/platform/promise-facade';
 import { SpawnFailed } from '@/platform/process/errors';
-import type { NodeProcessApi } from '@/platform/process/node-process';
+import { nodeProcessLive, type NodeProcessApi } from '@/platform/process/node-process';
 import { makeCgroupContainer, type CgroupFs } from '@/platform/sandbox/cgroup-container';
 import { makeNoopContainer } from '@/platform/sandbox/noop-container';
 import {
@@ -118,7 +117,7 @@ interface SessionSandboxDeps {
   platform: NodeJS.Platform;
   cgroupMount: string;
   fs: CgroupFs;
-  spawnProcess: typeof spawn;
+  spawnProcess: NodeProcessApi['spawn'];
   readSelfCgroupPath: () => Promise<string>;
   configureExecutionProcess: (pid: number, logger?: Logger) => Promise<void>;
   killPid: (pid: number, signal?: NodeJS.Signals | 0) => void;
@@ -137,7 +136,7 @@ const defaultSandboxDeps = (): SessionSandboxDeps => ({
   platform: process.platform,
   cgroupMount: DEFAULT_CGROUP_MOUNT,
   fs,
-  spawnProcess: spawn,
+  spawnProcess: nodeProcessLive.spawn,
   readSelfCgroupPath: async () => {
     const content = (await fs.readFile('/proc/self/cgroup', 'utf8')) as string;
     const line = content
@@ -153,14 +152,14 @@ const defaultSandboxDeps = (): SessionSandboxDeps => ({
   configureExecutionProcess: async (pid: number, logger?: Logger) => {
     await applyExecutionProcessResourceProfile(pid, logger);
   },
-  killPid: (pid: number, signal?: NodeJS.Signals | 0) => {
-    process.kill(pid, signal);
-  },
+  killPid: (pid: number, signal?: NodeJS.Signals | 0) =>
+    nodeProcessLive.kill(pid, signal ?? 'SIGTERM'),
 });
 
 const toNodeProcess = (deps: SessionSandboxDeps): NodeProcessApi => ({
   platform: deps.platform,
-  spawn: (command, args, options) => deps.spawnProcess(command, [...args], options),
+  spawn: deps.spawnProcess,
+  spawnSync: nodeProcessLive.spawnSync,
   kill: (pid, signal) => deps.killPid(pid, signal),
 });
 
@@ -232,7 +231,7 @@ export function createSessionResourceLimitError(
 }
 
 export function createNoopSessionSandbox(
-  spawnProcess: typeof spawn = spawn,
+  spawnProcess: NodeProcessApi['spawn'] = nodeProcessLive.spawn,
   description: string = 'noop'
 ): SessionSandbox {
   const deps: SessionSandboxDeps = { ...defaultSandboxDeps(), spawnProcess };

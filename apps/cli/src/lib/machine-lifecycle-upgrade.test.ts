@@ -2,6 +2,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { FakeProcessTable } from '../../tests/fake-process-table';
 
 const fixture = vi.hoisted(() => ({ home: '' }));
 
@@ -63,5 +64,40 @@ describe('daemon upgrade command execution', () => {
     expect(errors).toEqual(
       exitCode === 0 ? [] : ['[daemon-upgrade] npm install failed with code 1: no output']
     );
+  });
+
+  it('cancels a running install by ending its whole process tree', async () => {
+    await lifecycle.writeDaemonUpgradeIntent({
+      action: 'upgrade',
+      requestId: 'synthetic-cancel',
+      requesterUserId: 'synthetic-user',
+      targetVersion: '1.2.3',
+      requestedAtMs: 0,
+    });
+    const table = new FakeProcessTable('linux');
+    const spawned = Promise.withResolvers<number>();
+    const controller = new AbortController();
+
+    const upgrade = lifecycle.runDaemonUpgradeFromIntent({
+      logger: {},
+      signal: controller.signal,
+      nodeProcess: {
+        ...table.api,
+        spawn: (command, args, options) => {
+          const child = table.api.spawn(command, args, options);
+          if (typeof child.pid === 'number') spawned.resolve(child.pid);
+          return child;
+        },
+      },
+    });
+    const npmPid = await spawned.promise;
+    // A lifecycle script npm started.
+    const scriptPid = table.addDescendant(npmPid);
+    controller.abort();
+
+    await expect(upgrade).rejects.toMatchObject({ name: 'AbortError' });
+    expect(table.isAlive(npmPid)).toBe(false);
+    expect(table.isAlive(scriptPid)).toBe(false);
+    expect(await lifecycle.readDaemonUpgradeIntent()).toBeNull();
   });
 });

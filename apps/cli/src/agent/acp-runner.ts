@@ -1,5 +1,4 @@
-import spawn from 'cross-spawn';
-import { type ChildProcess } from 'child_process';
+import type { ChildProcess } from 'child_process';
 import os from 'os';
 import path from 'path';
 import * as fs from 'fs';
@@ -16,7 +15,7 @@ import { Effect } from 'effect';
 import type { Logger } from '@/utils/logger';
 import { formatErrorMessage } from '@/utils/format-error';
 import { LOG_PREFIX_ANNOTATION } from '@/platform/logger';
-import { makePlatformRunner } from '@/platform/promise-facade';
+import { makePlatformRunner, startProcess, withSpawn } from '@/platform/promise-facade';
 import type { NodeProcessApi } from '@/platform/process/node-process';
 import { childProcessTree, terminateTree } from '@/platform/process/process-tree';
 import type { TerminalManager } from '@/session/terminal-manager';
@@ -211,7 +210,7 @@ export type SpawnAcpProcessOptions = {
   env: NodeJS.ProcessEnv;
   args?: string[];
   command?: string;
-  spawnImpl?: typeof spawn;
+  spawnImpl?: NodeProcessApi['spawn'];
 };
 
 export const spawnAcpProcess = (options: SpawnAcpProcessOptions): ChildProcess => {
@@ -231,8 +230,6 @@ export const spawnAcpProcess = (options: SpawnAcpProcessOptions): ChildProcess =
     command = command ?? launch.command;
     args = args ?? launch.args;
   }
-  const spawnFn = options.spawnImpl ?? spawn;
-
   const executable = resolveDeepSeekHarnessSpawn({
     command,
     args,
@@ -240,15 +237,17 @@ export const spawnAcpProcess = (options: SpawnAcpProcessOptions): ChildProcess =
     workdir: options.workdir,
   });
 
-  return spawnFn(executable.command, executable.args, {
-    cwd: options.workdir,
-    env: options.env,
-    stdio: ['pipe', 'pipe', 'pipe'],
-    detached: process.platform !== 'win32',
-    // On Windows the daemon has no console; without CREATE_NO_WINDOW each
-    // spawned agent CLI pops a visible console window and steals focus.
-    windowsHide: true,
-  });
+  // Its own process group on POSIX (a tree rooted at it on Windows), so
+  // `terminateAcpProcessTree` reaches everything the agent starts.
+  return startProcess(
+    {
+      command: executable.command,
+      args: executable.args,
+      options: { cwd: options.workdir, env: options.env, stdio: ['pipe', 'pipe', 'pipe'] },
+      processGroup: true,
+    },
+    withSpawn(options.spawnImpl)
+  ).child;
 };
 
 export type StartLocalAcpAgentOptions = {
@@ -271,7 +270,7 @@ export type StartLocalAcpAgentOptions = {
   onManagedRuntimeProgress?: ManagedRuntimeProgressCallback;
   signal?: AbortSignal;
   extraArgs?: string[];
-  spawnImpl?: typeof spawn;
+  spawnImpl?: NodeProcessApi['spawn'];
 };
 
 const CodexConfigOverrideSchema = z.record(z.string(), z.unknown());

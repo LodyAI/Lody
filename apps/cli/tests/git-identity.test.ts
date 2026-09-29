@@ -1,12 +1,49 @@
-import { describe, expect, it } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { buildMissingEmail } from '@lody/shared';
 
+import { runCommandText } from '../src/platform/promise-facade';
 import {
   buildGitHubNoreplyEmail,
   DEFAULT_AI_GIT_AUTHOR_EMAIL,
   DEFAULT_AI_GIT_AUTHOR_NAME,
+  readHostDefaultGitIdentity,
   resolveSessionGitIdentity,
 } from '../src/session/git-identity';
+
+describe('readHostDefaultGitIdentity', () => {
+  const tempDirs: string[] = [];
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('reads the repository Git configuration when no Git identity is in the environment', async () => {
+    for (const name of [
+      'GIT_AUTHOR_NAME',
+      'GIT_COMMITTER_NAME',
+      'GIT_AUTHOR_EMAIL',
+      'GIT_COMMITTER_EMAIL',
+    ]) {
+      vi.stubEnv(name, '');
+    }
+    const repo = mkdtempSync(path.join(os.tmpdir(), 'lody-git-identity-'));
+    tempDirs.push(repo);
+    const git = (...args: string[]) =>
+      runCommandText({ command: 'git', args, cwd: repo, check: 'exit-0' });
+    await git('init', '--quiet');
+    await git('config', 'user.name', 'Repo User');
+    await git('config', 'user.email', 'repo@example.com');
+
+    expect(readHostDefaultGitIdentity(repo)).toEqual({
+      name: 'Repo User',
+      email: 'repo@example.com',
+    });
+  });
+});
 
 describe('resolveSessionGitIdentity', () => {
   it('uses the machine identity first for the machine owner', () => {

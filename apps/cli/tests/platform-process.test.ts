@@ -2,7 +2,15 @@ import { describe, expect, it } from '@effect/vitest';
 import { Cause, Effect, Exit, Fiber, Option, TestClock } from 'effect';
 import type { Readable } from 'node:stream';
 
-import { TerminationFailed } from '../src/platform/process/errors';
+import {
+  CommandFailed,
+  CommandOutputTooLarge,
+  CommandTimedOut,
+  runCommand,
+  runCommandOk,
+  type CommandSpec,
+} from '../src/platform/process/command';
+import { SpawnFailed, TerminationFailed } from '../src/platform/process/errors';
 import { spawnProcess, spawnScoped, type SpawnSpec } from '../src/platform/process/managed-process';
 import { NodeProcess, NodeProcessLive } from '../src/platform/process/node-process';
 import { TREE_POLL_INTERVAL } from '../src/platform/process/process-tree';
@@ -173,6 +181,33 @@ describe('process tree termination (Windows)', () => {
       expect(failure?.reason).toBe('signal-failed');
     }).pipe(Effect.provideService(NodeProcess, table.api));
   });
+
+  it.effect('detaches a daemon from its console only when asked, and still ends its tree', () => {
+    const table = new FakeProcessTable('win32');
+    return Effect.gen(function* () {
+      const attached = yield* spawnProcess(agentSpec);
+      const daemon = yield* spawnProcess({ ...agentSpec, windowsDetached: true });
+      const root = daemon.child.pid ?? -1;
+
+      yield* daemon.terminate(FORCED);
+
+      expect(
+        table.spawned
+          .filter((call) => call.command !== 'taskkill')
+          .map((call) => call.options.detached)
+      ).toEqual([false, true]);
+      expect(table.isAlive(root)).toBe(false);
+      expect(table.isAlive(attached.child.pid ?? -1)).toBe(true);
+    }).pipe(Effect.provideService(NodeProcess, table.api));
+  });
+
+  it.effect('leaves POSIX detachment to the process group', () => {
+    const table = new FakeProcessTable('linux');
+    return Effect.gen(function* () {
+      yield* spawnProcess({ ...agentSpec, processGroup: false, windowsDetached: true });
+      expect(table.spawned.map((call) => call.options.detached)).toEqual([false]);
+    }).pipe(Effect.provideService(NodeProcess, table.api));
+  });
 });
 
 describe('noop process container', () => {
@@ -267,4 +302,104 @@ describe('process tree termination (real processes)', () => {
         expect(isRunning(grandchild)).toBe(false);
       }).pipe(Effect.provide(NodeProcessLive))
   );
+});
+
+describe('runCommand', () => {
+  const node = (script: string, extra: Partial<CommandSpec> = {}): CommandSpec => ({
+    command: process.execPath,
+    args: ['-e', script],
+    ...extra,
+  });
+
+  it.live('collects stdout, stderr and the exit status of any outcome', () =>
+    Effect.gen(function* () {
+      const output = yield* runCommand(
+        node('process.stdout.write("out"); process.stderr.write("err"); process.exit(3)')
+      );
+      expect(output.code).toBe(3);
+      expect(output.stdout.toString()).toBe('out');
+      expect(output.stderr.toString()).toBe('err');
+    }).pipe(Effect.provide(NodeProcessLive))
+  );
+
+  it.live('pipes input to stdin', () =>
+    Effect.gen(function* () {
+      const output = yield* runCommandOk(
+        node('process.stdin.pipe(process.stdout)', { input: 'hello' })
+      );
+      expect(output.stdout.toString()).toBe('hello');
+    }).pipe(Effect.provide(NodeProcessLive))
+  );
+
+  it.live('fails with CommandFailed carrying stderr on a non-zero exit', () =>
+    Effect.gen(function* () {
+      const failure = failureOf(
+        yield* Effect.exit(runCommandOk(node('process.stderr.write("bad ref"); process.exit(128)')))
+      );
+      expect(failure).toBeInstanceOf(CommandFailed);
+      expect(failure instanceof CommandFailed && failure.stderr).toBe('bad ref');
+    }).pipe(Effect.provide(NodeProcessLive))
+  );
+
+  it.live('fails with SpawnFailed carrying the OS error for a missing executable', () =>
+    Effect.gen(function* () {
+      const failure = failureOf(
+        yield* Effect.exit(runCommand({ command: 'lody-no-such-binary', args: [] }))
+      );
+      expect(failure).toBeInstanceOf(SpawnFailed);
+      expect((failure as SpawnFailed).cause).toMatchObject({ code: 'ENOENT' });
+    }).pipe(Effect.provide(NodeProcessLive))
+  );
+
+  it.effect('ends the command tree and fails when it outlives its timeout', () => {
+    const table = new FakeProcessTable('linux');
+    return Effect.gen(function* () {
+      const command = yield* Effect.fork(
+        runCommand({ command: 'git', args: ['fetch'], timeout: '30 seconds' })
+      );
+      yield* TestClock.adjust('30 seconds');
+      const failure = failureOf(yield* Fiber.await(command));
+
+      expect(failure).toBeInstanceOf(CommandTimedOut);
+      const pid = table.spawned.length === 1 ? 1000 : -1;
+      expect(table.isAlive(pid)).toBe(false);
+      expect(table.delivered).toEqual([{ target: -pid, signal: 'SIGKILL' }]);
+    }).pipe(Effect.provideService(NodeProcess, table.api));
+  });
+});
+
+describe('runCommand process-tree ownership', () => {
+  it.effect('leaves what a finished command deliberately started running', () => {
+    const table = new FakeProcessTable('linux');
+    return Effect.gen(function* () {
+      const command = yield* Effect.fork(runCommand({ command: 'git', args: ['status'] }));
+      while (table.spawned.length === 0) yield* Effect.yieldNow();
+      const leader = 1000;
+      const daemon = table.addDescendant(leader);
+      table.exitOnItsOwn(leader);
+
+      yield* Fiber.join(command);
+
+      expect(table.isAlive(daemon)).toBe(true);
+      expect(table.delivered).toEqual([]);
+    }).pipe(Effect.provideService(NodeProcess, table.api));
+  });
+
+  it.effect('fails at once and ends the tree when output exceeds its limit', () => {
+    const table = new FakeProcessTable('linux');
+    return Effect.gen(function* () {
+      const command = yield* Effect.fork(
+        runCommand({ command: 'git', args: ['log'], maxOutputBytes: 4 })
+      );
+      while (table.spawned.length === 0) yield* Effect.yieldNow();
+      const leader = 1000;
+      const child = table.childOf(leader);
+      child?.stdout.emit('data', Buffer.from('more than four bytes'));
+
+      const failure = failureOf(yield* Fiber.await(command));
+
+      expect(failure).toBeInstanceOf(CommandOutputTooLarge);
+      expect(table.isAlive(leader)).toBe(false);
+    }).pipe(Effect.provideService(NodeProcess, table.api));
+  });
 });

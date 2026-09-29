@@ -29,6 +29,13 @@ export interface SpawnSpec {
    */
   readonly processGroup: boolean;
   /**
+   * Windows only: start the child `detached`, with its own hidden console, so
+   * it outlives the console that launched it (a daemon started from a
+   * terminal). POSIX detachment always follows `processGroup`; the Windows
+   * tree is walked from the root pid either way.
+   */
+  readonly windowsDetached?: boolean;
+  /**
    * Runs synchronously right after the OS call, before any asynchronous
    * post-spawn step. Anything that must observe the child's first stdio or
    * lifecycle event (output capture, event replay) attaches here.
@@ -43,6 +50,8 @@ export interface ManagedProcess {
   readonly started: Effect.Effect<number, SpawnFailed>;
   /** The root's exit. A child that never started completes with nulls. */
   readonly exited: Effect.Effect<ProcessExit>;
+  /** Exit plus drained stdio (`close`): the point where captured output is complete. */
+  readonly closed: Effect.Effect<ProcessExit>;
   /**
    * Terminate the whole tree under `policy`. Concurrent calls each converge
    * on "gone": a forced call during a graceful one escalates at once instead
@@ -63,6 +72,7 @@ export const spawnProcess = (
     const np = yield* NodeProcess;
     const processGroup = spec.processGroup && np.platform !== 'win32';
     const exited = yield* Deferred.make<ProcessExit>();
+    const closed = yield* Deferred.make<ProcessExit>();
     const started = yield* Deferred.make<number, SpawnFailed>();
     const spawnFailed = (cause: unknown) =>
       new SpawnFailed({
@@ -77,7 +87,7 @@ export const spawnProcess = (
           // CREATE_NO_WINDOW every console child pops a window and steals focus.
           windowsHide: true,
           ...spec.options,
-          detached: processGroup,
+          detached: np.platform === 'win32' ? spec.windowsDetached === true : processGroup,
         });
         // Subscribe before anything can yield: Node reports a failed spawn on
         // the next tick, and a listener attached later would never hear it.
@@ -92,11 +102,15 @@ export const spawnProcess = (
         spawned.once('exit', (code, signal) => {
           Deferred.unsafeDone(exited, Effect.succeed({ code, signal }));
         });
+        spawned.once('close', (code, signal) => {
+          Deferred.unsafeDone(closed, Effect.succeed({ code, signal }));
+        });
         spawned.once('error', (error) => {
           // A spawn failure has no exit event; release anyone awaiting one.
           if (typeof spawned.pid !== 'number') {
             Deferred.unsafeDone(started, Effect.fail(spawnFailed(error)));
             Deferred.unsafeDone(exited, Effect.succeed({ code: null, signal: null }));
+            Deferred.unsafeDone(closed, Effect.succeed({ code: null, signal: null }));
           }
         });
         spec.onSpawned?.(spawned);
@@ -110,6 +124,7 @@ export const spawnProcess = (
       tree,
       started: Deferred.await(started),
       exited: Deferred.await(exited),
+      closed: Deferred.await(closed),
       terminate: (policy) => terminateTree(tree, policy),
     } satisfies ManagedProcess;
   });

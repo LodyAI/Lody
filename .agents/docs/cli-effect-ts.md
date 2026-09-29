@@ -60,10 +60,15 @@ the service Layers and applies the failure rule above. A facade is temporary:
 it is deleted when its caller migrates, and it never appears inside an already
 migrated layer. Current facades:
 
-| Facade | Replaced when |
-| --- | --- |
-| `apps/cli/src/session/session-sandbox.ts` (`SessionSandbox`) | the session resource layer owns process containers directly |
-| `terminateAcpProcessTree` in `apps/cli/src/agent/acp-runner.ts` | auxiliary ACP agents become scoped processes |
+| Facade | Used by | Replaced when |
+| --- | --- | --- |
+| `apps/cli/src/session/session-sandbox.ts` (`SessionSandbox`) | `Session`, `TerminalManager` | the session resource layer owns process containers directly |
+| `terminateAcpProcessTree` in `apps/cli/src/agent/acp-runner.ts` | auxiliary ACP agents | auxiliary ACP agents become scoped processes |
+| `runCommandText` / `runCommandTextSync` / `startProcess` / `isPidAliveSync` in `apps/cli/src/platform/promise-facade.ts` | every other CLI process caller (git, gh, daemon/worker/MCP children, tunnels, setup scripts) | each caller's own layer migrates |
+| `terminatePtyProcessGroup` in `apps/cli/src/lib/terminal-pty-service.ts` | local terminal PTYs | terminal/PTY ownership becomes an Effect layer |
+
+`pnpm check:cli-process-boundary` fails when CLI code bypasses these and reaches
+`child_process`, `cross-spawn`, `node-pty` or `process.kill` directly.
 
 ## Testing
 

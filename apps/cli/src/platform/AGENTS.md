@@ -14,8 +14,12 @@ L0 platform and L1 OS-leaf services of the Effect migration. File map:
   no `Effect.run*`. The one exception is `promise-facade.ts`, the temporary door
   for Promise callers; list every facade in cli-effect-ts.
 - Only `process/node-process.ts` imports `child_process`/`cross-spawn` or calls
-  `process.kill`. Everything else reaches the OS through the `NodeProcess`
-  service, which tests replace with `tests/fake-process-table.ts`.
+  `process.kill`, in the whole CLI. Everything else reaches the OS through the
+  `NodeProcess` service, which tests replace with `tests/fake-process-table.ts`.
+  `scripts/check-cli-process-boundary.mjs` enforces it; its allowlist holds only
+  source text of standalone scripts and the node-pty loader, each with a reason.
+- Missing a capability (a new spawn shape, a pid-only kill)? Add it here with a
+  test and a facade entry; never work around the layer in the caller.
 - End processes only through `terminateTree`. Do not add another
   SIGTERM→wait→SIGKILL loop anywhere in the CLI; extend `ProcessTree` instead.
 - Every wait is bounded. A tree that cannot be proven gone fails with

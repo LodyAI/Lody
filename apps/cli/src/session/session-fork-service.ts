@@ -1,6 +1,4 @@
 import { readSessionHistory } from '@lody/shared/session-data';
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
 import {
   getServerNow,
   resolveSessionAcpTargetId,
@@ -26,6 +24,7 @@ import {
 import type { SessionSnapshot, SessionTurn } from '@lody/shared/session-data';
 import type { Logger } from '@/utils/logger';
 import { formatErrorMessage } from '@/utils/format-error';
+import { runCommandText } from '@/platform/promise-facade';
 import { mapWithConcurrency } from '@/lib/bounded-concurrency';
 import type { LoroDocumentManager } from '@/lib/loro/doc';
 import type { SessionManager } from './session-manager';
@@ -38,7 +37,6 @@ import {
 } from './session-fork-operation-store';
 
 type ForkWarning = SessionForkResponse['warnings'][number];
-const execFileAsync = promisify(execFile);
 
 /** Recovery opens only store-listed docs; keep even that small fan-out bounded. */
 const FORK_RECOVERY_CONCURRENCY = 4;
@@ -940,15 +938,19 @@ export class SessionForkService {
   }
 
   private async inspectGitWorkdir(workdir: string): Promise<{ dirty: boolean; headSha: string }> {
-    const status = await execFileAsync('git', ['status', '--porcelain'], {
+    const status = await runCommandText({
+      command: 'git',
+      args: ['status', '--porcelain'],
       cwd: workdir,
-      windowsHide: true,
       timeout: 10_000,
+      check: 'exit-0',
     });
-    const head = await execFileAsync('git', ['rev-parse', '--verify', 'HEAD^{commit}'], {
+    const head = await runCommandText({
+      command: 'git',
+      args: ['rev-parse', '--verify', 'HEAD^{commit}'],
       cwd: workdir,
-      windowsHide: true,
       timeout: 10_000,
+      check: 'exit-0',
     });
     return { dirty: status.stdout.trim().length > 0, headSha: head.stdout.trim() };
   }
@@ -1013,10 +1015,12 @@ export class SessionForkService {
       const resolvedBranch = this.deps.resolveGitBranch
         ? await this.deps.resolveGitBranch(sessionWorkdir)
         : (
-            await execFileAsync('git', ['branch', '--show-current'], {
+            await runCommandText({
+              command: 'git',
+              args: ['branch', '--show-current'],
               cwd: sessionWorkdir,
-              windowsHide: true,
               timeout: 10_000,
+              check: 'exit-0',
             })
           ).stdout.trim() || undefined;
       const targetAcpSessionId = targetSession.acpSessionId;

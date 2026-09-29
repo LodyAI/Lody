@@ -1,6 +1,5 @@
 import type { ChildProcess } from 'child_process';
 import os from 'os';
-import spawn from 'cross-spawn';
 import { randomUUID } from 'node:crypto';
 import * as acp from '@agentclientprotocol/sdk';
 import type { AuthMethod } from '@agentclientprotocol/sdk';
@@ -36,6 +35,8 @@ import {
   BuiltinAuthenticationOutputParser,
 } from './acp-authentication-output';
 import { shutdownLocalAcpAgent, spawnAcpProcess, terminateAcpProcessTree } from './acp-runner';
+import { startProcess, withSpawn } from '@/platform/promise-facade';
+import type { NodeProcessApi } from '@/platform/process/node-process';
 import type { ManagedRuntimeProgressEvent } from './managed-agent-runtime';
 import { createStdinWritableStream, createStdoutReadableStream } from '@/utils/stream';
 import { getLoginShellEnv } from './login-shell-env';
@@ -178,7 +179,7 @@ const AcpAuthenticationInteractionInputSchema = z.discriminatedUnion('action', [
 type AcpAuthenticationManagerOptions = {
   authenticationTimeoutMs?: number;
   terminationGraceMs?: number;
-  spawnProcess?: typeof spawn;
+  spawnProcess?: NodeProcessApi['spawn'];
   resolveLoginShellEnv?: typeof getLoginShellEnv;
   resolveAuthenticationProcessLaunch?: typeof resolveBuiltinAuthenticationProcessLaunch;
 };
@@ -199,7 +200,7 @@ type ProbeBuiltinAuthenticationOptions = {
   logger: Logger;
   signal?: AbortSignal;
   statusProbeTimeoutMs?: number;
-  spawnProcess?: typeof spawn;
+  spawnProcess?: NodeProcessApi['spawn'];
   resolveLoginShellEnv?: typeof getLoginShellEnv;
 };
 
@@ -442,15 +443,17 @@ export async function probeBuiltinAuthentication(
   if (hasBuiltinEnvAuthentication(options.agentType, env)) {
     return { status: 'unknown' };
   }
-  const child = (options.spawnProcess ?? spawn)(launch.command, launch.args, {
-    cwd: os.homedir(),
-    env,
-    stdio: 'ignore',
-    windowsHide: true,
-    // Its own group, so a timeout or cancel ends whatever the status command
-    // started, not just the command itself.
-    detached: process.platform !== 'win32',
-  });
+  // Its own group, so a timeout or cancel ends whatever the status command
+  // started, not just the command itself.
+  const { child } = startProcess(
+    {
+      command: launch.command,
+      args: launch.args,
+      options: { cwd: os.homedir(), env, stdio: 'ignore' },
+      processGroup: true,
+    },
+    withSpawn(options.spawnProcess)
+  );
   let termination: Promise<void> | undefined;
   const terminateProbe = (): void => {
     termination ??= terminateAcpProcessTree(child, {
@@ -531,7 +534,7 @@ export class AcpAuthenticationManager {
   private readonly runningByAgentType = new Map<string, RunningAuthentication>();
   private readonly authenticationTimeoutMs: number;
   private readonly terminationGraceMs: number;
-  private readonly spawnProcess: typeof spawn;
+  private readonly spawnProcess: NodeProcessApi['spawn'] | undefined;
   private readonly resolveLoginShellEnv: typeof getLoginShellEnv;
   private readonly resolveAuthenticationProcessLaunch: typeof resolveBuiltinAuthenticationProcessLaunch;
 
@@ -547,7 +550,7 @@ export class AcpAuthenticationManager {
       1,
       options.terminationGraceMs ?? DEFAULT_TERMINATION_GRACE_MS
     );
-    this.spawnProcess = options.spawnProcess ?? spawn;
+    this.spawnProcess = options.spawnProcess;
     this.resolveLoginShellEnv = options.resolveLoginShellEnv ?? getLoginShellEnv;
     this.resolveAuthenticationProcessLaunch =
       options.resolveAuthenticationProcessLaunch ?? resolveBuiltinAuthenticationProcessLaunch;
@@ -697,18 +700,16 @@ export class AcpAuthenticationManager {
       if (preparationInterruption) return preparationInterruption;
 
       options.onProgress?.({ status: 'starting' });
-      const child = this.spawnProcess(
-        launch.command,
-        options.codexProfile
-          ? ['-c', 'forced_login_method="chatgpt"', ...launch.args]
-          : launch.args,
+      const { child } = startProcess(
         {
-          cwd: os.homedir(),
-          env,
-          stdio: ['pipe', 'pipe', 'pipe'],
-          detached: process.platform !== 'win32',
-          windowsHide: true,
-        }
+          command: launch.command,
+          args: options.codexProfile
+            ? ['-c', 'forced_login_method="chatgpt"', ...launch.args]
+            : launch.args,
+          options: { cwd: os.homedir(), env, stdio: ['pipe', 'pipe', 'pipe'] },
+          processGroup: true,
+        },
+        withSpawn(this.spawnProcess)
       );
       running.child = child;
       releaseProfile?.recordNativePid(child.pid);

@@ -1,8 +1,6 @@
-import { execFile } from 'child_process';
 import path from 'path';
 import os from 'os';
 import * as fs from 'fs';
-import { promisify } from 'util';
 
 import {
   type AcpSessionNotification,
@@ -29,11 +27,11 @@ import type {
 } from '@agentclientprotocol/sdk';
 import { extractTextFromAgentResponse } from './response-utils';
 import { formatErrorMessage } from '@/utils/format-error';
+import { runCommandText } from '@/platform/promise-facade';
 import { normalizeConfigOptions } from './acp-capabilities';
 import { readLegacySessionModelState } from './acp-capability-normalization';
 import { parseLodyMessagePhase } from './lody-acp-extension';
 
-const execFileAsync = promisify(execFile);
 const TITLE_GIT_TIMEOUT_MS = 5_000;
 export const TITLE_TASK_PROMPT_MAX_CHARS = 4_000;
 
@@ -235,12 +233,14 @@ export const sanitizeGeneratedTitle = (candidate?: string | null): string | null
 const ensureWorkdirIsGitRepo = async (workdir: string, logger: Logger): Promise<boolean> => {
   const isGitRepo = async (): Promise<boolean> => {
     try {
-      const result = await execFileAsync('git', ['rev-parse', '--is-inside-work-tree'], {
+      const result = await runCommandText({
+        command: 'git',
+        args: ['rev-parse', '--is-inside-work-tree'],
         cwd: workdir,
-        encoding: 'utf8',
         timeout: TITLE_GIT_TIMEOUT_MS,
+        check: 'exit-0',
       });
-      return String(result.stdout ?? '').trim() === 'true';
+      return result.stdout.trim() === 'true';
     } catch {
       return false;
     }
@@ -251,10 +251,12 @@ const ensureWorkdirIsGitRepo = async (workdir: string, logger: Logger): Promise<
   }
 
   try {
-    await execFileAsync('git', ['init', '--quiet'], {
+    await runCommandText({
+      command: 'git',
+      args: ['init', '--quiet'],
       cwd: workdir,
-      encoding: 'utf8',
       timeout: TITLE_GIT_TIMEOUT_MS,
+      check: 'exit-0',
     });
   } catch (error) {
     logger.debug(

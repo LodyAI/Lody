@@ -1,6 +1,6 @@
-import { execFileSync } from 'node:child_process';
-
 import { isMissingEmail } from '@lody/shared';
+
+import { runCommandTextSync } from '@/platform/promise-facade';
 
 export const DEFAULT_AI_GIT_AUTHOR_NAME = 'LodyAI';
 export const DEFAULT_AI_GIT_AUTHOR_EMAIL = 'agent@lody.ai';
@@ -60,15 +60,19 @@ const normalizeName = (name: string | undefined, email: string): string => {
   return email;
 };
 
+/** `git config` blocks the caller's event loop, so a wedged git cannot stall it for long. */
+const GIT_CONFIG_TIMEOUT_MS = 5_000;
+
 const readGitConfig = (key: 'user.name' | 'user.email', cwd?: string): string | undefined => {
   try {
-    const output = execFileSync('git', ['config', key], {
+    const { stdout } = runCommandTextSync({
+      command: 'git',
+      args: ['config', key],
       cwd,
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-      windowsHide: true,
+      timeout: GIT_CONFIG_TIMEOUT_MS,
+      check: 'exit-0',
     });
-    return trimNonEmpty(output);
+    return trimNonEmpty(stdout);
   } catch {
     return undefined;
   }
