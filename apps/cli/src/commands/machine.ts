@@ -1,4 +1,5 @@
 import { Command } from 'commander';
+import { addDiscoveryOptions, runDiscoveryList, type DiscoveryCommandOptions } from './discovery';
 import {
   getMachineFlockAcpCapabilities,
   getMachineFlockDocId,
@@ -26,11 +27,12 @@ import {
 import { renderTerminalTable } from '@/lib/terminal-table';
 import { listMergedAgentConfigs } from '@/lib/agent-config-machine-flock';
 
-type MachineListOptions = CommonCommandOptions & {
-  onlineOnly?: boolean;
-  includeAcpCapabilities?: boolean;
-  includeAgents?: boolean;
-};
+type MachineListOptions = CommonCommandOptions &
+  DiscoveryCommandOptions & {
+    onlineOnly?: boolean;
+    includeAcpCapabilities?: boolean;
+    includeAgents?: boolean;
+  };
 
 type MachineRateLimits = MachineViewMeta['raceLimits'];
 /**
@@ -259,15 +261,34 @@ function printHumanMachineList(
 export const machineCommand = new Command('machine')
   .description('Inspect registered machines')
   .addCommand(
-    new Command('list')
+    addDiscoveryOptions(new Command('list'))
       .description('List machines in a workspace')
       .option('--workspace <selector>', 'Target workspace id, slug, or name')
       .option('--online-only', 'Only include machines with a recent heartbeat')
+      .option('--online-status <state>', 'online, offline or unknown')
       .option('--json', 'Print JSON output')
       .option('--include-acp-capabilities', 'Include acpCapabilities in JSON output')
       .option('--include-agents', 'Include agent config summaries per machine')
       .option('--debug', 'Enable debug output')
       .action(async (options: MachineListOptions) => {
+        if (!options.includeAgents && !options.includeAcpCapabilities) {
+          await runDiscoveryList('machine', {
+            ...options,
+            onlineStatus: options.onlineOnly ? 'online' : options.onlineStatus,
+          });
+          return;
+        }
+        if (
+          options.query ||
+          options.cursor ||
+          options.limit ||
+          options.allPages ||
+          options.onlineStatus
+        ) {
+          throw new Error(
+            'Detailed legacy machine output cannot be combined with catalog paging/filter options. Use agent-config list/get for capabilities.'
+          );
+        }
         await runOneShotCommand('machine', options, async () => {
           const auth = getAuthContextOrThrow('machine');
           const workspace = await resolveWorkspaceOrThrow(auth, options.workspace);

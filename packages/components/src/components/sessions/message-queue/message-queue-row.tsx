@@ -349,7 +349,7 @@ function RowActions(props: MessageQueueRowProps) {
   );
 }
 
-function TextAction({
+export function TextAction({
   text,
   ariaLabel,
   onClick,
@@ -375,7 +375,7 @@ function TextAction({
   );
 }
 
-function IconAction({
+export function IconAction({
   icon: Icon,
   label,
   destructive,

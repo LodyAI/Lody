@@ -1,4 +1,5 @@
-import type { MessageContent, ModelInfo } from '../ai';
+import type { MessageContent, ModelInfo, SubagentRunItem } from '../ai';
+import { isLodySubagentEvent, type LodySubagentEvent } from 'acp-extension-core';
 import type { SessionHistoryInput, SessionPlanEntry } from '../schema';
 import { sanitizeLodyInternalInstructions } from '../goal';
 
@@ -743,11 +744,16 @@ const mergeStreamChunk = (current: string, incoming: string): string => {
 
 const mergeToolCallMessage = (
   prev: ToolCallMessage,
-  incoming: ToolCallMessage
+  incoming: ToolCallMessage,
+  replaceContent = false
 ): ToolCallMessage => {
   const nextKind = (incoming.kind ?? prev.kind) as ToolKind | null | undefined;
 
-  const mergedContent: StoredToolCallContent = prev.content ? [...prev.content] : [];
+  // ACP content is a replacement list. Locally derived terminal commands are
+  // independent rawInput projections and survive an output-only replacement.
+  const mergedContent: StoredToolCallContent = replaceContent
+    ? (prev.content ?? []).filter((block) => block.type === 'terminal_command')
+    : [...(prev.content ?? [])];
   const nextChunks = incoming.content ?? [];
 
   if (nextChunks.length > 0) {
@@ -924,7 +930,9 @@ const mergeToolCallMessage = (
     status: nextStatus,
     content: mergedContent.length
       ? compactToolCallContentForHistory(mergedContent, { kind: nextKind })
-      : prev.content,
+      : replaceContent
+        ? []
+        : prev.content,
     locations: incoming.locations !== undefined ? incoming.locations : prev.locations,
     // Scheduling tools split rawInput and the terminal `completed` across updates; keep
     // whichever update carried each (see SCHEDULING_TOOL_NAMES).
@@ -1069,7 +1077,8 @@ const parseAssistantTextTags = (text: string, turnId: string): MessageContent[] 
 };
 
 export const buildMessageContentFromNotification = (
-  message: AcpSessionNotification
+  message: AcpSessionNotification,
+  previousTool?: ToolCallMessage
 ): MessageContent[] => {
   const { update } = message;
   switch (update.sessionUpdate) {
@@ -1127,7 +1136,7 @@ export const buildMessageContentFromNotification = (
         return codexCollabTasks.map((task) => ({ type: 'subagent_task', ...task }));
       }
 
-      const kind = (update.kind ?? undefined) as ToolKind | null | undefined;
+      const kind = (update.kind ?? previousTool?.kind) as ToolKind | null | undefined;
 
       // `update.content` is untrusted and provider-dependent; some tools include whole file
       // contents or full old/new text. Strip those early so we never persist them.
@@ -1211,10 +1220,7 @@ export const buildMessageContentFromNotification = (
 
       const derived: StoredToolCallContent = [...derivedCommand, ...derivedOutput];
       const content = compactToolCallContentForHistory([...baseContent, ...derived], { kind });
-      const explicitLocations =
-        Array.isArray(update.locations) && update.locations.length > 0
-          ? update.locations
-          : undefined;
+      const explicitLocations = Array.isArray(update.locations) ? update.locations : undefined;
       const locations =
         explicitLocations ??
         deriveLocationsFromToolCallContent(update.content) ??
@@ -1223,7 +1229,8 @@ export const buildMessageContentFromNotification = (
       // scheduled-tasks panel derives entirely from history, so it needs the schedule and
       // the created job id. Persist them (small, stable) plus the canonical tool name the
       // deriver switches on; `title` stays whatever the agent chose to show.
-      const toolName = resolveAcpToolName((update as ToolCallUpdateWithMeta)._meta);
+      const toolName =
+        resolveAcpToolName((update as ToolCallUpdateWithMeta)._meta) ?? previousTool?.toolName;
       const activityKind = getToolCallActivityKind((update as ToolCallUpdateWithMeta)._meta);
       const isSchedulingTool = toolName !== undefined && SCHEDULING_TOOL_NAMES.has(toolName);
       return [
@@ -1232,8 +1239,8 @@ export const buildMessageContentFromNotification = (
           toolCallId: update.toolCallId,
           title: update.title,
           toolName,
-          kind: update.kind || undefined,
-          status: update.status || 'pending',
+          kind: kind ?? undefined,
+          status: update.status ?? previousTool?.status ?? 'pending',
           content: content.length ? content : undefined,
           locations,
           // Generic ACP rawInput/rawOutput is excluded because it is unstructured by spec;
@@ -1347,6 +1354,15 @@ class NotificationOnHistoryApplier {
 
     for (const notification of notifications) {
       const { update } = notification;
+      if (update.sessionUpdate === 'subagent_event') {
+        if (
+          isLodySubagentEvent(update.event) &&
+          update.event.sessionId === notification.sessionId
+        ) {
+          this.applySubagentEvent(update.event);
+        }
+        continue;
+      }
 
       // Devin subagent internals carry `cognition.ai/subagent_context`. Once the
       // owning task row exists, internals stay out of the transcript — except a
@@ -1390,9 +1406,23 @@ class NotificationOnHistoryApplier {
         continue;
       }
 
-      const contents = buildMessageContentFromNotification(notification);
+      const toolUpdate =
+        update.sessionUpdate === 'tool_call' || update.sessionUpdate === 'tool_call_update'
+          ? update
+          : undefined;
+      const entryIndex = toolUpdate
+        ? this.resolveToolCallEntryIndex(toolUpdate.toolCallId)
+        : undefined;
+      const previousTool =
+        entryIndex === undefined
+          ? undefined
+          : this.readEntryItems(entryIndex).find(
+              (item): item is ToolCallMessage =>
+                item.type === 'tool_call' && item.toolCallId === toolUpdate?.toolCallId
+            );
+      const contents = buildMessageContentFromNotification(notification, previousTool);
       for (const message of contents) {
-        this.applyMessageContent(message);
+        this.applyMessageContent(message, toolUpdate?.content != null);
       }
     }
 
@@ -1406,6 +1436,194 @@ class NotificationOnHistoryApplier {
 
   hasChanges(): boolean {
     return this.changed;
+  }
+
+  private findRun(sessionId: string, runId: string) {
+    for (let entryIndex = 0; entryIndex < this.history.length; entryIndex++) {
+      const items = this.readEntryItems(entryIndex);
+      const itemIndex = items.findIndex(
+        (item) =>
+          item.type === 'subagent_task' &&
+          item.taskId === runId &&
+          item.run?.sessionId === sessionId
+      );
+      if (itemIndex >= 0)
+        return {
+          entryIndex,
+          itemIndex,
+          task: items[itemIndex] as Extract<MessageContent, { type: 'subagent_task' }>,
+        };
+    }
+    return undefined;
+  }
+
+  /** Run identity includes the ACP root; children never alter parent turn metadata. */
+  private applySubagentEvent(event: LodySubagentEvent) {
+    const existing = this.findRun(event.sessionId, event.runId);
+    if (!existing && event.type !== 'snapshot') return;
+    const previousRun = existing?.task.run;
+    const terminal =
+      previousRun && ['completed', 'failed', 'cancelled'].includes(previousRun.snapshot.state);
+    if (terminal && event.type !== 'snapshot') return;
+    if (
+      terminal &&
+      event.type === 'snapshot' &&
+      event.snapshot.state !== previousRun.snapshot.state
+    )
+      return;
+
+    let entryIndex = existing?.entryIndex;
+    if (event.type === 'snapshot') {
+      // Only established same-root ancestry may bind a grandchild. Reject cycles.
+      let parentId = event.snapshot.parentRunId;
+      const seen = new Set([event.runId]);
+      while (parentId) {
+        if (seen.has(parentId)) return;
+        seen.add(parentId);
+        const parent = this.findRun(event.sessionId, parentId);
+        if (!parent) return;
+        entryIndex ??= parent.entryIndex;
+        parentId = parent.task.run?.snapshot.parentRunId;
+      }
+      if (entryIndex === undefined && event.snapshot.parentToolCallId) {
+        entryIndex = this.resolveToolCallEntryIndex(event.snapshot.parentToolCallId);
+      }
+      // A supplied initiating turn is evidence of ownership; never guess from the live tail.
+      if (entryIndex === undefined && this.targetAssistantEntryId)
+        entryIndex = this.ensureActiveAssistantEntry();
+      if (entryIndex === undefined) return;
+      const snapshot = {
+        ...event.snapshot,
+        ...(previousRun?.snapshot.outputIncomplete ? { outputIncomplete: true as const } : {}),
+      };
+      if (previousRun && JSON.stringify(previousRun.snapshot) === JSON.stringify(snapshot)) return;
+      const state = snapshot.state;
+      const task: Extract<MessageContent, { type: 'subagent_task' }> = {
+        type: 'subagent_task',
+        taskId: event.runId,
+        taskKind: 'subagent',
+        status:
+          state === 'running' || state === 'unknown'
+            ? 'in_progress'
+            : state === 'cancelled'
+              ? 'failed'
+              : state,
+        actor: snapshot.name,
+        description: snapshot.description,
+        summary: snapshot.summary,
+        toolUseId: snapshot.parentToolCallId,
+        parentTaskId: snapshot.parentRunId ?? undefined,
+        modelId: snapshot.modelId,
+        startedAtEpochSeconds: snapshot.startedAtEpochSeconds,
+        endedAtEpochSeconds: snapshot.endedAtEpochSeconds,
+        error: snapshot.reason?.message,
+        run: {
+          sessionId: event.sessionId,
+          snapshot,
+          items: previousRun?.items ?? [],
+          ...(previousRun?.progress ? { progress: previousRun.progress } : {}),
+        },
+      };
+      const items = this.ensureEntryItems(entryIndex);
+      if (existing) items[existing.itemIndex] = task;
+      else items.push(task);
+      this.changed = true;
+      return;
+    }
+    if (!existing || !previousRun) return;
+    const run = {
+      ...previousRun,
+      items: event.type === 'output' ? [...previousRun.items] : previousRun.items,
+    };
+    if (event.type === 'progress') {
+      run.progress = { ...run.progress, ...event.progress };
+      if (JSON.stringify(run.progress) === JSON.stringify(previousRun.progress)) return;
+    } else {
+      const update = event.update;
+      const identity = {
+        nativeTurnId: event.nativeTurnId,
+        messageId:
+          event.messageId ?? ('messageId' in update ? (update.messageId ?? undefined) : undefined),
+      };
+      if (update.sessionUpdate === 'plan') {
+        const index = run.items.findIndex((item) => item.type === 'plan');
+        const plan: SubagentRunItem = { type: 'plan', entries: update.entries, ...identity };
+        if (index < 0) run.items.push(plan);
+        else run.items[index] = plan;
+      } else if (
+        update.sessionUpdate === 'agent_message_chunk' ||
+        update.sessionUpdate === 'agent_thought_chunk'
+      ) {
+        if (update.content.type !== 'text') {
+          run.snapshot = { ...run.snapshot, outputIncomplete: true };
+        } else {
+          const type = update.sessionUpdate === 'agent_message_chunk' ? 'text' : 'thought';
+          const last = run.items.at(-1);
+          // Normalized chunks are deltas; repeated text must not be heuristically deduplicated.
+          if (
+            last?.type === type &&
+            last.nativeTurnId === identity.nativeTurnId &&
+            last.messageId === identity.messageId
+          )
+            run.items[run.items.length - 1] = { ...last, text: last.text + update.content.text };
+          else run.items.push({ type, text: update.content.text, ...identity });
+        }
+      } else {
+        const index = run.items.findIndex(
+          (item) => item.type === 'tool_call' && item.toolCallId === update.toolCallId
+        );
+        const previous = run.items[index];
+        const tool = previous?.type === 'tool_call' ? previous : undefined;
+        // Keep child tool payloads intact. The parent's compact terminal projection
+        // intentionally discards diffs and read results, unsuitable for the detail view.
+        const content: Extract<SubagentRunItem, { type: 'tool_call' }> = {
+          ...tool,
+          ...(identity.nativeTurnId !== undefined ? { nativeTurnId: identity.nativeTurnId } : {}),
+          ...(identity.messageId !== undefined ? { messageId: identity.messageId } : {}),
+          type: 'tool_call',
+          toolCallId: update.toolCallId,
+          status: update.status ?? tool?.status ?? 'pending',
+          title: update.title ?? tool?.title,
+          kind: update.kind ?? tool?.kind,
+          content: update.content ?? tool?.content,
+          locations: update.locations ?? tool?.locations,
+          rawInput: asRecordOrUndefined(update.rawInput) ?? tool?.rawInput,
+          rawOutput: asRecordOrUndefined(update.rawOutput) ?? tool?.rawOutput,
+          toolName: resolveAcpToolName(update._meta) ?? tool?.toolName,
+          _meta: update._meta ?? tool?._meta,
+        };
+        for (const [key, value] of [
+          ['rawInput', update.rawInput],
+          ['rawOutput', update.rawOutput],
+        ] as const) {
+          if (value == null || asRecordOrUndefined(value)) continue;
+          // MessageContent's historical raw fields accept records. Retain other
+          // JSON values in metadata, and make scalar output readable in the UI.
+          const meta = content._meta ?? {};
+          const lody = asRecordOrUndefined(meta.lody) ?? {};
+          const raw = asRecordOrUndefined(lody.subagentRaw) ?? {};
+          content._meta = { ...meta, lody: { ...lody, subagentRaw: { ...raw, [key]: value } } };
+          if (key === 'rawOutput') {
+            const text = typeof value === 'string' ? value : JSON.stringify(value);
+            const blocks = content.content ?? [];
+            if (
+              !blocks.some(
+                (block) =>
+                  block.type === 'content' &&
+                  block.content.type === 'text' &&
+                  block.content.text === text
+              )
+            ) {
+              content.content = [...blocks, { type: 'content', content: { type: 'text', text } }];
+            }
+          }
+        }
+        if (index >= 0) run.items[index] = content;
+        else run.items.push(content);
+      }
+    }
+    this.ensureEntryItems(existing.entryIndex)[existing.itemIndex] = { ...existing.task, run };
+    this.changed = true;
   }
 
   private primeToolCallIndexForBatch(notifications: AcpSessionNotification[]) {
@@ -1568,7 +1786,7 @@ class NotificationOnHistoryApplier {
     return this.history.length - 1;
   }
 
-  private applyMessageContent(message: MessageContent) {
+  private applyMessageContent(message: MessageContent, replaceContent = false) {
     switch (message.type) {
       case 'text': {
         const text = sanitizeLodyInternalInstructions(message.text);
@@ -1597,7 +1815,7 @@ class NotificationOnHistoryApplier {
       case 'tool_call': {
         const existingEntryIndex = this.resolveToolCallEntryIndex(message.toolCallId);
         if (existingEntryIndex !== undefined) {
-          this.upsertToolCall(existingEntryIndex, message);
+          this.upsertToolCall(existingEntryIndex, message, replaceContent);
           return;
         }
         const entryIndex = this.ensureActiveAssistantEntry();
@@ -1733,7 +1951,7 @@ class NotificationOnHistoryApplier {
     this.changed = true;
   }
 
-  private upsertToolCall(entryIndex: number, incoming: ToolCallMessage) {
+  private upsertToolCall(entryIndex: number, incoming: ToolCallMessage, replaceContent = false) {
     const entry = this.history[entryIndex];
     if (!entry) return;
 
@@ -1743,7 +1961,7 @@ class NotificationOnHistoryApplier {
     );
     if (toolIndex >= 0) {
       const prevTool = items[toolIndex] as ToolCallMessage;
-      items[toolIndex] = mergeToolCallMessage(prevTool, incoming);
+      items[toolIndex] = mergeToolCallMessage(prevTool, incoming, replaceContent);
       this.changed = true;
       return;
     }

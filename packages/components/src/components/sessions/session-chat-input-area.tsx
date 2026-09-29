@@ -1,3 +1,8 @@
+import { useSessionMentionSource } from '@/hooks/use-session-mention-source';
+import {
+  snapshotAttachmentDrafts,
+  type SessionAttachmentDraft,
+} from '@/lib/session-attachment-draft';
 import {
   useState,
   useCallback,
@@ -44,7 +49,6 @@ import type { CombinedMentionTextareaHandle } from '@/components/mentions/combin
 import type { AttachmentAddMenuMcp } from '@/components/chat/attachment-add-menu';
 import { useComposerSubmission } from '@/components/chat/submission/use-composer-submission';
 import { MobileSessionRunConfig } from '@/components/mobile/mobile-session-run-config';
-import type { MentionProjectSource } from '@/components/mentions/mention-project-file-source';
 import {
   useMentionPromptExpansion,
   type ExpandedMentionPrompt,
@@ -58,13 +62,8 @@ import {
 } from '@/components/mentions/mention-persistence';
 import { useTranslation } from 'react-i18next';
 import { usePostHog } from '@posthog/react';
-import {
-  capturePostHogEvent,
-  getDurationSinceMs,
-  getPerformanceNowMs,
-} from '@/lib/posthog-analytics';
+import { capturePostHogEvent } from '@/lib/posthog-analytics';
 import { captureAgentRoleMentionsApplied } from '@/lib/agent-role-analytics';
-import { IMAGE_UPLOAD_REASONS, type ImageUploadReason } from '@lody/shared';
 import type {
   AcpCommandSummary,
   AgentRole,
@@ -95,63 +94,39 @@ import type {
   AcpConfigOptionSelector,
   AcpConfigOptionValue,
 } from '@/components/shared/acp-selector-options';
-import { localMachineIdAtom } from '@/atoms/local-probe';
-import { authTokenAtom, runtimeAtom } from '@/atoms/runtime';
-import {
-  currentWorkspaceIdAtom,
-  getAllAgentConfigAtom,
-  mobileKeyboardActionAtom,
-  userAtom,
-} from '@/atoms';
-import {
-  resolveSessionLocalFileSource,
-  resolveSessionRepoFullName,
-} from '@/lib/session-local-file-source';
-import { resolveEffectiveCodeCollabWorkspaceId } from '@/lib/code-collab-workspace-id';
+import { currentWorkspaceIdAtom, mobileKeyboardActionAtom } from '@/atoms';
+import { getAllAgentConfigAtom } from '@/atoms';
 import { getDroppedFileLocalPath, toPathMentionInsertion } from '@/lib/dropped-local-path';
 import { isImeComposingKeyboardEvent } from '@/lib/ime';
 import { toast } from '@/lib/toast';
-import { uploadSessionImage, validateSessionImageFile } from '@/lib/session-image-upload';
+import { validateSessionImageFile } from '@/lib/session-image-upload';
 import {
-  computeSha256Hex,
-  computeTextPreviewable,
-  isUploadAbortedError,
-  isSessionFileTransferPhase,
-  uploadSessionFile,
   SESSION_FILE_MAX_SIZE_MB,
   validateSessionFile,
   type SessionFileTransferPhase,
-  type SessionFileUploadProgress,
 } from '@/lib/session-file-upload';
 import { formatFileSize } from '@/lib/session-file-presentation';
 import { SESSION_FILE_MAX_COUNT, SESSION_IMAGE_MAX_SIZE_BYTES } from '@lody/shared';
 import type { SessionFilePayload } from '@lody/shared';
 import {
   arePastedTextDraftsEqual,
-  getPastedTextByteSize,
+  createPastedTextFile,
   getPastedTextCharacterCount,
   getPastedTextDraftsAfterInsertion,
   insertPastedTextDraft,
   isPastedTextTooLarge,
-  MAX_PASTED_TEXT_BYTE_SIZE,
   normalizePastedTextDraft,
   shouldCapturePastedTextDraft,
   type PastedTextDraft,
 } from '@/lib/pasted-text-draft';
 import { wrapPastedTextChipLabel } from '@/components/mentions/mention-chips';
 import { toIntlLocale } from '@/lib/intl-locale';
-import {
-  canUseElectronLocalFileSend,
-  sendSessionFileToLocalRuntime,
-} from '@/lib/electron-session-file-sender';
 import type { AgentSelection } from '@/components/shared/agent-selector';
 import { isNativeAppShell } from '@/lib/native-platform';
 import {
   resolveMobileKeyboardEnterKeyHint,
   shouldSubmitOnEnterForMobileKeyboardAction,
 } from '@/lib/mobile-keyboard-action';
-import { useCodeCollabSessionFileProvider } from '@/hooks/use-code-collab-session-file-provider';
-import { useCodeCollabRequestedRole } from '@/hooks/use-code-collab-requested-role';
 import { selectPastedClipboardFiles, splitImageAndFileAttachments } from '@/lib/file-drop';
 import { isPlainLinkPasteShortcut, parseAppSessionUrl } from '@/lib/session-app-url';
 import { SessionUsagePopover } from './session-usage-popover';
@@ -163,50 +138,23 @@ type PendingImage = {
   localId: string;
   previewUrl: string;
   file: File;
-  status: 'uploading' | 'uploaded' | 'failed';
+  status: 'draft' | 'uploading' | 'uploaded' | 'failed';
   progress: number;
   error?: string;
   uploaded?: SessionImagePayload;
+  abort?: AbortController;
 };
 
 type PendingFile = {
   localId: string;
   file: File;
-  status: SessionFileTransferPhase | 'uploaded' | 'failed';
+  status: 'draft' | SessionFileTransferPhase | 'uploaded' | 'failed';
   progress: number;
   error?: string;
   uploaded?: SessionFilePayload;
   /** Abort controller for the in-flight upload (cleared on terminal state). */
   abort?: AbortController;
 };
-
-const imageUploadReasonSet = new Set<ImageUploadReason>(IMAGE_UPLOAD_REASONS);
-
-// uploadSessionImage throws plain Errors whose message embeds the HTTP status
-// ("Upload failed with status 503"). Until the uploader attaches a structured
-// status (see crossFileNeeds), parse it here so failures carry http_status
-// without ever sending the raw, denylisted error_message.
-const parseUploadHttpStatus = (error: unknown): number | null => {
-  if (!(error instanceof Error)) return null;
-  const match = /status\s+(\d{3})/i.exec(error.message);
-  if (!match?.[1]) return null;
-  const status = Number(match[1]);
-  return Number.isFinite(status) ? status : null;
-};
-
-const classifyImageUploadReason = (error: unknown): ImageUploadReason => {
-  const status = parseUploadHttpStatus(error);
-  if (status === 404) return 'session_not_found';
-  if (status === 403) return 'session_archived';
-  const message = error instanceof Error ? error.message.toLowerCase() : '';
-  if (message.includes('unsupported') || message.includes('invalid') || message.includes('empty')) {
-    return 'validation_error';
-  }
-  return 'upload_error';
-};
-
-const toImageUploadReason = (value: ImageUploadReason): ImageUploadReason =>
-  imageUploadReasonSet.has(value) ? value : 'unknown';
 
 const sessionImageDraftsCache = new Map<SessionId, PendingImage[]>();
 const sessionFileDraftsCache = new Map<SessionId, PendingFile[]>();
@@ -294,8 +242,11 @@ const setSessionPastedTextDrafts = (
   return next;
 };
 
-const revokeImagePreviewUrls = (images: readonly Pick<PendingImage, 'previewUrl'>[]): void => {
+const revokeImagePreviewUrls = (
+  images: readonly Pick<PendingImage, 'previewUrl' | 'abort'>[]
+): void => {
   for (const image of images) {
+    image.abort?.abort();
     URL.revokeObjectURL(image.previewUrl);
   }
 };
@@ -487,6 +438,7 @@ export interface SessionChatInputAreaProps {
 export type SessionTurnAgentRoleSelection = ComposerTurnAgentRoleSelection;
 
 export type SessionSendMessageOptions = {
+  attachments?: SessionAttachmentDraft[];
   /** Swaps the configured busy-send behavior (queue <-> steer) for this send. */
   invertSubmitBehavior?: boolean;
 };
@@ -582,25 +534,7 @@ export const SessionChatInputArea = memo(
       usesMobileKeyboardAction
     );
     const numberFormatter = useMemo(() => new Intl.NumberFormat(intlLocale), [intlLocale]);
-    const localMachineId = useAtomValue(localMachineIdAtom);
-    // Desktop local-transport fast path is available only when this very machine
-    // runs the session's runtime (its machineId matches the local CLI's) and the
-    // Electron preload bridge exposes the handoff API. Otherwise file attachments
-    // take the default cloud-upload path. We never fabricate a "local" machineId;
-    // if the session has none, the condition is simply false.
-    const canSendFileLocally =
-      !!localMachineId &&
-      !!session.machineId &&
-      localMachineId === session.machineId &&
-      canUseElectronLocalFileSend();
     const workspaceId = useAtomValue(currentWorkspaceIdAtom) as WorkspaceId | null;
-    const workspaceRuntime = useAtomValue(runtimeAtom);
-    const effectiveWorkspaceId = resolveEffectiveCodeCollabWorkspaceId({
-      currentWorkspaceId: workspaceId,
-      runtimeWorkspaceId: workspaceRuntime?.workspaceId,
-    });
-    const authToken = useAtomValue(authTokenAtom);
-    const currentUser = useAtomValue(userAtom);
     const postHog = usePostHog();
     const isArchived = session.isArchived === true;
     const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -753,16 +687,6 @@ export const SessionChatInputArea = memo(
       [publishVisualAnnotationReferences]
     );
 
-    const imageUploadFailedLabel = t('sessions.imageUploadFailed', 'Image upload failed');
-    const imageUploadMissingAuthLabel = t(
-      'sessions.imageUploadMissingAuth',
-      'Missing workspace or auth token'
-    );
-    const fileUploadFailedLabel = t('sessions.fileUploadFailed', 'File upload failed');
-    const fileUploadMissingAuthLabel = t(
-      'sessions.fileUploadMissingAuth',
-      'Missing workspace or auth token'
-    );
     const imageCountLimitLabel = t(
       'sessions.imageCountLimit',
       'At most {{count}} images are allowed',
@@ -987,315 +911,6 @@ export const SessionChatInputArea = memo(
       [updatePendingImagesForSession]
     );
 
-    const startUpload = useCallback(
-      async (targetSessionId: SessionId, localId: string, file: File) => {
-        if (!workspaceId || !authToken) {
-          capturePostHogEvent(postHog, 'session/image_upload_failed', {
-            channel: 'web',
-            entrypoint: 'session_chat',
-            actor: 'user',
-            workspace_id: workspaceId ?? null,
-            session_id: targetSessionId,
-            image_count: 1,
-            total_size_bytes: file.size,
-            project_kind: sessionProjectKind,
-            local_project_id: sessionLocalProjectId,
-            failure_reason: 'missing_auth',
-            reason_code: toImageUploadReason('missing_auth'),
-            http_status: null,
-          });
-          updatePendingImage(targetSessionId, localId, (image) => ({
-            ...image,
-            status: 'failed',
-            progress: 0,
-            error: imageUploadMissingAuthLabel,
-          }));
-          return;
-        }
-
-        updatePendingImage(targetSessionId, localId, (image) => ({
-          ...image,
-          status: 'uploading',
-          progress: 0,
-          error: undefined,
-        }));
-        capturePostHogEvent(postHog, 'session/image_upload_requested', {
-          channel: 'web',
-          entrypoint: 'session_chat',
-          actor: 'user',
-          workspace_id: workspaceId,
-          session_id: targetSessionId,
-          image_count: 1,
-          total_size_bytes: file.size,
-          project_kind: sessionProjectKind,
-          local_project_id: sessionLocalProjectId,
-        });
-
-        // Local-only upload timing (performance.now); not compared across clients.
-        const uploadStartedAtMs = getPerformanceNowMs();
-
-        try {
-          const uploaded = await uploadSessionImage({
-            workspaceId,
-            sessionId: targetSessionId,
-            token: authToken,
-            file,
-            onProgress: (progress) => {
-              updatePendingImage(targetSessionId, localId, (image) => ({ ...image, progress }));
-            },
-          });
-          updatePendingImage(targetSessionId, localId, (image) => ({
-            ...image,
-            status: 'uploaded',
-            progress: 100,
-            uploaded,
-            error: undefined,
-          }));
-          capturePostHogEvent(postHog, 'session/image_upload_succeeded', {
-            channel: 'web',
-            entrypoint: 'session_chat',
-            actor: 'user',
-            workspace_id: workspaceId,
-            session_id: targetSessionId,
-            image_count: 1,
-            total_size_bytes: file.size,
-            project_kind: sessionProjectKind,
-            local_project_id: sessionLocalProjectId,
-            mime_type: uploaded.mimeType,
-            upload_duration_ms: getDurationSinceMs(uploadStartedAtMs),
-          });
-        } catch (error) {
-          const errorMessage = error instanceof Error ? error.message : imageUploadFailedLabel;
-          const reasonCode = toImageUploadReason(classifyImageUploadReason(error));
-          if (
-            canSendFileLocally &&
-            session.machineId &&
-            getSessionFileDrafts(targetSessionId).length < SESSION_FILE_MAX_COUNT
-          ) {
-            try {
-              const outcome = await sendSessionFileToLocalRuntime({
-                workspaceId,
-                sessionId: targetSessionId,
-                machineId: session.machineId,
-                file,
-              });
-              const localFile = outcome?.ok ? outcome.files[0] : undefined;
-              if (localFile) {
-                updatePendingImagesForSession(targetSessionId, (prev) => {
-                  const removed = prev.find((image) => image.localId === localId);
-                  if (removed) {
-                    URL.revokeObjectURL(removed.previewUrl);
-                  }
-                  return prev.filter((image) => image.localId !== localId);
-                });
-                updatePendingFilesForSession(targetSessionId, (prev) => [
-                  ...prev,
-                  {
-                    localId: createLocalFileId(),
-                    file,
-                    status: 'uploaded',
-                    progress: 100,
-                    uploaded: localFile,
-                  },
-                ]);
-                toast.info(
-                  t(
-                    'sessions.imageStoredAsLocalFile',
-                    'Image upload is offline; added as a pending file attachment.'
-                  )
-                );
-                capturePostHogEvent(postHog, 'session/image_upload_failed', {
-                  channel: 'web',
-                  entrypoint: 'session_chat',
-                  actor: 'user',
-                  workspace_id: workspaceId,
-                  session_id: targetSessionId,
-                  image_count: 1,
-                  total_size_bytes: file.size,
-                  project_kind: sessionProjectKind,
-                  local_project_id: sessionLocalProjectId,
-                  failure_reason: reasonCode,
-                  reason_code: reasonCode,
-                  http_status: parseUploadHttpStatus(error),
-                  error_name: error instanceof Error ? error.name : typeof error,
-                  upload_duration_ms: getDurationSinceMs(uploadStartedAtMs),
-                  local_file_fallback: true,
-                });
-                return;
-              }
-            } catch {
-              // Keep the original image upload failure visible.
-            }
-          }
-          updatePendingImage(targetSessionId, localId, (image) => ({
-            ...image,
-            status: 'failed',
-            progress: 0,
-            error: errorMessage,
-          }));
-          capturePostHogEvent(postHog, 'session/image_upload_failed', {
-            channel: 'web',
-            entrypoint: 'session_chat',
-            actor: 'user',
-            workspace_id: workspaceId,
-            session_id: targetSessionId,
-            image_count: 1,
-            total_size_bytes: file.size,
-            project_kind: sessionProjectKind,
-            local_project_id: sessionLocalProjectId,
-            failure_reason: reasonCode,
-            reason_code: reasonCode,
-            http_status: parseUploadHttpStatus(error),
-            error_name: error instanceof Error ? error.name : typeof error,
-            upload_duration_ms: getDurationSinceMs(uploadStartedAtMs),
-          });
-        }
-      },
-      [
-        authToken,
-        canSendFileLocally,
-        imageUploadFailedLabel,
-        imageUploadMissingAuthLabel,
-        postHog,
-        session.machineId,
-        sessionLocalProjectId,
-        sessionProjectKind,
-        updatePendingImage,
-        updatePendingFilesForSession,
-        updatePendingImagesForSession,
-        t,
-        workspaceId,
-      ]
-    );
-
-    const startFileUpload = useCallback(
-      async (targetSessionId: SessionId, localId: string, file: File) => {
-        if (!workspaceId) {
-          updatePendingFile(targetSessionId, localId, (entry) => ({
-            ...entry,
-            status: 'failed',
-            progress: 0,
-            error: fileUploadMissingAuthLabel,
-          }));
-          return;
-        }
-
-        // Desktop local-transport fast path: hand bytes straight to the local CLI
-        // (zero relay round trip). The CLI stores the blob and returns a
-        // transport:'local' block, which we drop into `uploaded` exactly like a
-        // cloud upload — the block then rides the outgoing message via
-        // toFileInputBlock. No progress bar: the handoff completes in one step.
-        // On any failure we fall through to the cloud path below.
-        if (canSendFileLocally && session.machineId) {
-          try {
-            const outcome = await sendSessionFileToLocalRuntime({
-              workspaceId,
-              sessionId: targetSessionId,
-              machineId: session.machineId,
-              file,
-            });
-            if (outcome?.ok && outcome.files[0]) {
-              updatePendingFile(targetSessionId, localId, (entry) => ({
-                ...entry,
-                status: 'uploaded',
-                progress: 100,
-                uploaded: outcome.files[0],
-                error: undefined,
-                abort: undefined,
-              }));
-              return;
-            }
-          } catch {
-            // Local handoff threw; fall back to the cloud upload path.
-          }
-        }
-
-        if (!authToken) {
-          updatePendingFile(targetSessionId, localId, (entry) => ({
-            ...entry,
-            status: 'failed',
-            progress: 0,
-            error: fileUploadMissingAuthLabel,
-          }));
-          return;
-        }
-
-        const abort = new AbortController();
-        updatePendingFile(targetSessionId, localId, (entry) => ({
-          ...entry,
-          status: 'preparing',
-          progress: 0,
-          error: undefined,
-          abort,
-        }));
-
-        try {
-          // Compute the integrity hash + text-previewability once before upload;
-          // both ride along to the server and the latter pre-fills the block.
-          const [sha256, textPreview] = await Promise.all([
-            computeSha256Hex(file, {
-              signal: abort.signal,
-              onProgress: (progress) => {
-                updatePendingFile(targetSessionId, localId, (entry) => ({
-                  ...entry,
-                  status: progress.phase,
-                  progress: progress.percent,
-                }));
-              },
-            }),
-            computeTextPreviewable(file),
-          ]);
-          const uploaded = await uploadSessionFile({
-            workspaceId,
-            sessionId: targetSessionId,
-            token: authToken,
-            file,
-            sha256,
-            textPreview,
-            signal: abort.signal,
-            onProgress: (progress: SessionFileUploadProgress) => {
-              updatePendingFile(targetSessionId, localId, (entry) => ({
-                ...entry,
-                status: progress.phase,
-                progress: progress.percent,
-              }));
-            },
-          });
-          updatePendingFile(targetSessionId, localId, (entry) => ({
-            ...entry,
-            status: 'uploaded',
-            progress: 100,
-            uploaded,
-            error: undefined,
-            abort: undefined,
-          }));
-        } catch (error) {
-          if (isUploadAbortedError(error)) {
-            // Removal/clearing aborts in-flight uploads; the entry is already
-            // gone, so leave state untouched.
-            return;
-          }
-          const errorMessage = error instanceof Error ? error.message : fileUploadFailedLabel;
-          updatePendingFile(targetSessionId, localId, (entry) => ({
-            ...entry,
-            status: 'failed',
-            progress: 0,
-            error: errorMessage,
-            abort: undefined,
-          }));
-        }
-      },
-      [
-        authToken,
-        canSendFileLocally,
-        fileUploadFailedLabel,
-        fileUploadMissingAuthLabel,
-        session.machineId,
-        updatePendingFile,
-        workspaceId,
-      ]
-    );
-
     /** Enqueue a batch of non-image (or oversize-image) files as attachments. */
     const enqueueFileAttachments = useCallback(
       (files: File[]) => {
@@ -1329,7 +944,7 @@ export const SessionChatInputArea = memo(
           nextEntries.push({
             localId: createLocalFileId(),
             file,
-            status: 'preparing',
+            status: 'draft',
             progress: 0,
           });
           currentCount += 1;
@@ -1341,11 +956,8 @@ export const SessionChatInputArea = memo(
           return;
         }
         updatePendingFilesForSession(session.id, (prev) => [...prev, ...nextEntries]);
-        for (const entry of nextEntries) {
-          void startFileUpload(session.id, entry.localId, entry.file);
-        }
       },
-      [isArchived, session.id, startFileUpload, t, updatePendingFilesForSession]
+      [isArchived, session.id, t, updatePendingFilesForSession]
     );
 
     const handleAddFiles = useCallback(
@@ -1388,7 +1000,7 @@ export const SessionChatInputArea = memo(
             localId: createLocalImageId(),
             previewUrl: URL.createObjectURL(file),
             file,
-            status: 'uploading',
+            status: 'draft',
             progress: 0,
           };
           nextEntries.push(entry);
@@ -1440,9 +1052,6 @@ export const SessionChatInputArea = memo(
           pending_image_count_before: pendingImages.length,
         });
         updatePendingImagesForSession(session.id, (prev) => [...prev, ...nextEntries]);
-        for (const entry of nextEntries) {
-          void startUpload(session.id, entry.localId, entry.file);
-        }
       },
       [
         enqueueFileAttachments,
@@ -1454,7 +1063,6 @@ export const SessionChatInputArea = memo(
         sessionLocalProjectId,
         sessionProjectKind,
         showImageSelectionIssues,
-        startUpload,
         t,
         updatePendingImagesForSession,
         workspaceId,
@@ -1512,16 +1120,20 @@ export const SessionChatInputArea = memo(
           local_project_id: sessionLocalProjectId,
           total_size_bytes: target.file.size,
         });
-        void startUpload(session.id, localId, target.file);
+        updatePendingImage(session.id, localId, (item) => ({
+          ...item,
+          status: 'draft',
+          error: undefined,
+        }));
       },
       [
+        updatePendingImage,
         isArchived,
         pendingImages,
         postHog,
         session.id,
         sessionLocalProjectId,
         sessionProjectKind,
-        startUpload,
         workspaceId,
       ]
     );
@@ -1576,9 +1188,13 @@ export const SessionChatInputArea = memo(
         if (!target) {
           return;
         }
-        void startFileUpload(session.id, localId, target.file);
+        updatePendingFile(session.id, localId, (item) => ({
+          ...item,
+          status: 'draft',
+          error: undefined,
+        }));
       },
-      [isArchived, session.id, startFileUpload]
+      [isArchived, session.id, updatePendingFile]
     );
 
     const insertLargePastedTextAtSelection = useCallback(
@@ -1698,26 +1314,12 @@ export const SessionChatInputArea = memo(
           }
         }
 
-        // Refuse the whole paste rather than silently truncating it: a blob this
-        // large is a log dump, and a half-pasted log is worse than none.
-        if (text && isPastedTextTooLarge(text)) {
-          event.preventDefault();
-          toast.error(
-            t('composer.pastedTextTooLarge', 'Pasted text is too large ({{size}}).', {
-              size: formatFileSize(getPastedTextByteSize(text)),
-            }),
-            {
-              description: t(
-                'composer.pastedTextTooLargeDescription',
-                'The limit is {{limit}}. Attach it as a file instead.',
-                { limit: formatFileSize(MAX_PASTED_TEXT_BYTE_SIZE) }
-              ),
-            }
-          );
-          return;
-        }
+        const pastedTextFile =
+          text && isPastedTextTooLarge(text) ? createPastedTextFile(text) : null;
 
-        if (text && shouldCapturePastedTextDraft(text)) {
+        if (pastedTextFile) {
+          event.preventDefault();
+        } else if (text && shouldCapturePastedTextDraft(text)) {
           event.preventDefault();
           insertLargePastedTextAtSelection(text);
         }
@@ -1745,12 +1347,14 @@ export const SessionChatInputArea = memo(
           });
         }
 
-        if (pastedFiles.length === 0) {
+        const filesToAttach = pastedTextFile ? [pastedTextFile, ...pastedFiles] : pastedFiles;
+        if (filesToAttach.length > 0) {
+          event.preventDefault();
+          attachPastedFiles(filesToAttach);
           return;
         }
 
-        event.preventDefault();
-        attachPastedFiles(pastedFiles);
+        if (pastedTextFile) return;
       },
       [
         attachPastedFiles,
@@ -1845,55 +1449,6 @@ export const SessionChatInputArea = memo(
       [pastedTextDrafts, session.id, updatePastedTextDraftsForSession]
     );
 
-    const [submissionPhase, setSubmissionPhase] = useState<'waiting_upload' | 'dispatching'>(
-      'dispatching'
-    );
-    const uploadWaitRef = useRef<{ settle: (ready: boolean) => void; files: Set<File> } | null>(
-      null
-    );
-    const sendStateRef = useRef({ onSendMessage, blocked: false });
-    useLayoutEffect(() => {
-      sendStateRef.current = {
-        onSendMessage,
-        blocked:
-          isArchived ||
-          isMachineRemoved ||
-          isExternalHistoryRefreshing ||
-          durableAgentRoleReady === false ||
-          Boolean(freeTurnLimitNotice && freeTurnLimitNotice.current >= freeTurnLimitNotice.limit),
-      };
-      const wait = uploadWaitRef.current;
-      if (!wait) return;
-      const failed =
-        pendingImages.some((image) => image.status === 'failed') ||
-        pendingFiles.some((file) => wait.files.has(file.file) && file.status === 'failed');
-      const uploading =
-        pendingImages.some((image) => image.status === 'uploading') ||
-        pendingFiles.some((file) => isSessionFileTransferPhase(file.status));
-      if (failed || sendStateRef.current.blocked || !uploading) {
-        uploadWaitRef.current = null;
-        setSubmissionPhase('dispatching');
-        wait.settle(!failed && !sendStateRef.current.blocked);
-      }
-    }, [
-      onSendMessage,
-      isArchived,
-      isMachineRemoved,
-      isExternalHistoryRefreshing,
-      durableAgentRoleReady,
-      freeTurnLimitNotice,
-      pendingImages,
-      pendingFiles,
-      submissionPending,
-    ]);
-    useLayoutEffect(
-      () => () => {
-        uploadWaitRef.current?.settle(false);
-        uploadWaitRef.current = null;
-      },
-      [session.id]
-    );
-
     const sendMessage = useCallback(
       async (options?: SessionSendMessageOptions) => {
         if (!isVisible) return;
@@ -1968,7 +1523,7 @@ export const SessionChatInputArea = memo(
               },
             ]
           : [];
-        if (pendingImages.some((image) => image.status === 'failed')) return;
+        const attachments = snapshotAttachmentDrafts(pendingImages, pendingFiles);
         const commentRefBlocks: SessionInputBlock[] = commentReferencesRef.current.map((item) => ({
           type: 'comment_reference' as const,
           ...item.reference,
@@ -1985,7 +1540,7 @@ export const SessionChatInputArea = memo(
         if (
           textBlocks.length === 0 &&
           pendingImages.length === 0 &&
-          pendingFiles.every((file) => file.status === 'failed') &&
+          pendingFiles.length === 0 &&
           commentRefBlocks.length === 0 &&
           visualAnnotationRefBlocks.length === 0
         ) {
@@ -2011,39 +1566,8 @@ export const SessionChatInputArea = memo(
         const submission = beginSubmission({ dismissKeyboard: usesMobileKeyboardAction });
         if (!submission) return;
         try {
-          const uploading =
-            pendingImages.some((image) => image.status === 'uploading') ||
-            pendingFiles.some((file) => isSessionFileTransferPhase(file.status));
-          setSubmissionPhase(uploading ? 'waiting_upload' : 'dispatching');
-          if (uploading) {
-            const ready = await new Promise<boolean>((resolve) => {
-              uploadWaitRef.current = {
-                settle: resolve,
-                files: new Set(
-                  [...pendingImages, ...pendingFiles]
-                    .filter((item) => item.status !== 'failed')
-                    .map((item) => item.file)
-                ),
-              };
-            });
-            if (!ready || !submission.isCurrent() || sendStateRef.current.blocked) return;
-          }
-          const images = getSessionImageDrafts(session.id);
-          const files = getSessionFileDrafts(session.id);
-          // Uploads can replace an image with a local file. Match the original
-          // File objects so removal or an external draft edit cannot send a subset.
-          const expectedFiles = [...pendingImages, ...pendingFiles]
-            .filter((item) => item.status !== 'failed')
-            .map((item) => item.file);
-          const actualFiles = [...images, ...files]
-            .filter((item) => item.status === 'uploaded' && item.uploaded)
-            .map((item) => item.file);
-          if (
-            expectedFiles.length !== actualFiles.length ||
-            expectedFiles.some((file) => !actualFiles.includes(file)) ||
-            sessionDraftsCache.get(session.id) !== submittedDraft.text
-          )
-            return;
+          const images = pendingImages;
+          const files = pendingFiles;
           const inputBlocks: SessionInputBlock[] = [
             ...commentRefBlocks,
             ...visualAnnotationRefBlocks,
@@ -2061,11 +1585,10 @@ export const SessionChatInputArea = memo(
           submittedDraft.files = sessionFileDraftsCache.get(session.id);
           // Use the committed callback and Role after waiting: routing and run
           // config must come from the same current composer state.
-          const accepted = await sendStateRef.current.onSendMessage(
-            inputBlocks,
-            agentRoleTurnSelectionRef.current,
-            options
-          );
+          const accepted = await onSendMessage(inputBlocks, agentRoleTurnSelectionRef.current, {
+            ...options,
+            attachments,
+          });
           if (accepted) {
             captureAgentRoleMentionsApplied(postHog, {
               spans: trimmedSpans,
@@ -2107,6 +1630,7 @@ export const SessionChatInputArea = memo(
       },
       [
         beginSubmission,
+        onSendMessage,
         clearInput,
         clearPendingImages,
         clearPendingFiles,
@@ -2166,140 +1690,33 @@ export const SessionChatInputArea = memo(
       pendingFiles.length > 0 ||
       commentReferences.length > 0 ||
       visualAnnotationReferences.length > 0;
-    const hasFailedImages = pendingImages.some((image) => image.status === 'failed');
-    const hasUploadedImages = pendingImages.some((image) => image.status === 'uploaded');
-    const hasUploadedFiles = pendingFiles.some((file) => file.status === 'uploaded');
+
+    const hasUploadedImages = pendingImages.length > 0;
+    const hasUploadedFiles = pendingFiles.length > 0;
     const hasSendableContent =
       userInput.trim().length > 0 ||
       hasUploadedImages ||
-      pendingImages.some((image) => image.status === 'uploading') ||
       hasUploadedFiles ||
-      pendingFiles.some((file) => isSessionFileTransferPhase(file.status)) ||
       commentReferences.length > 0 ||
       visualAnnotationReferences.length > 0;
     const showStopButton = canStopAgent && !hasDraft && !isArchived;
     const isSendActionDisabled =
       !isVisible ||
       submissionPending ||
-      hasFailedImages ||
       isMachineRemoved ||
       isArchived ||
       isExternalHistoryRefreshing ||
       durableAgentRoleReady === false ||
       Boolean(freeTurnLimitNotice && freeTurnLimitNotice.current >= freeTurnLimitNotice.limit);
     const attachmentAddEnabled = !isArchived;
-    const sessionLocalFileSource = useMemo(
-      () =>
-        resolveSessionLocalFileSource(session, {
-          isElectronRenderer: typeof window !== 'undefined' && window.__LODY_ELECTRON__ === true,
-          localMachineId,
-          workspaceId: effectiveWorkspaceId,
-          localProjectRootPath: sessionLocalProjectRootPath,
-        }),
-      [effectiveWorkspaceId, localMachineId, session, sessionLocalProjectRootPath]
-    );
-    const repoFullName = useMemo(() => resolveSessionRepoFullName(session), [session]);
-    const codeCollabRequestedRole = useCodeCollabRequestedRole();
-    // Code Collab files live in the worktree owned by the top-level (parent)
-    // session; child-session tabs share that same workspace. Look the space up
-    // under the parent id so @ mentions read the owner-session v2 file tree.
-    // Mirrors resolveSessionLocalFileSource and the session-detail file-tree
-    // provider, which both key on the parent.
-    const codeCollabSessionId = session.parentSessionId ?? session.id;
-    const shouldEnableCodeCollabMentionProvider =
-      Boolean(effectiveWorkspaceId) && userInput.includes('@');
-    const codeCollabMentionFiles = useCodeCollabSessionFileProvider({
-      workspaceId: effectiveWorkspaceId,
-      sessionId: codeCollabSessionId,
-      enabled: shouldEnableCodeCollabMentionProvider,
-      requestedRole: codeCollabRequestedRole,
-      machineId: session.machineId,
-      requestedByUserId: currentUser?.id ?? session.userId,
-      githubRepoFullName: repoFullName || null,
+    const mentionSource = useSessionMentionSource({
+      session,
+      sessionLocalProjectRootPath,
+      isRepoPublic,
+      // No index is borrowed until someone could actually type `@`.
+      enableCodeCollabProvider: userInput.includes('@'),
       debugLabel: 'session-chat-input:mention-provider',
     });
-    const codeCollabMentionFilesPending =
-      codeCollabMentionFiles.status === 'checking' || codeCollabMentionFiles.status === 'loading';
-    const mentionSource = useMemo<MentionProjectSource | undefined>(() => {
-      if (codeCollabMentionFiles.provider || codeCollabMentionFilesPending) {
-        return {
-          kind: 'provider',
-          provider: codeCollabMentionFiles.provider,
-          providerPending: codeCollabMentionFilesPending,
-          providerMessage: codeCollabMentionFiles.message,
-          localProject:
-            session.project?.kind === 'local'
-              ? {
-                  machineId: session.machineId,
-                  localProjectId: session.project.localProjectId,
-                }
-              : undefined,
-          githubRepoFullName: repoFullName || undefined,
-          isPublic: isRepoPublic,
-        };
-      }
-
-      const localProject =
-        session.project?.kind === 'local' && effectiveWorkspaceId
-          ? {
-              workspaceId: effectiveWorkspaceId,
-              localProjectId: session.project.localProjectId,
-            }
-          : null;
-
-      if (localProject && sessionLocalFileSource?.kind === 'session-worktree') {
-        return {
-          kind: 'local',
-          machineId: session.machineId,
-          workspaceId: localProject.workspaceId,
-          localProjectId: localProject.localProjectId,
-          githubRepoFullName: repoFullName || undefined,
-          localWorktree: {
-            machineId: session.machineId,
-            repoKey: sessionLocalFileSource.repoKey,
-            sessionId: sessionLocalFileSource.sessionId,
-          },
-        };
-      }
-
-      if (sessionLocalFileSource?.kind === 'local-project') {
-        return {
-          kind: 'local',
-          machineId: session.machineId,
-          workspaceId: sessionLocalFileSource.workspaceId,
-          localProjectId: sessionLocalFileSource.localProjectId,
-          githubRepoFullName: repoFullName || undefined,
-        };
-      }
-
-      if (repoFullName) {
-        return {
-          kind: 'github',
-          repoFullName,
-          isPublic: isRepoPublic,
-          localWorktree:
-            sessionLocalFileSource?.kind === 'session-worktree'
-              ? {
-                  machineId: session.machineId,
-                  repoKey: sessionLocalFileSource.repoKey,
-                  sessionId: sessionLocalFileSource.sessionId,
-                }
-              : undefined,
-        };
-      }
-
-      return undefined;
-    }, [
-      codeCollabMentionFiles.message,
-      codeCollabMentionFiles.provider,
-      codeCollabMentionFilesPending,
-      isRepoPublic,
-      repoFullName,
-      effectiveWorkspaceId,
-      session.machineId,
-      session.project,
-      sessionLocalFileSource,
-    ]);
     const skillAgent = useMemo(
       () =>
         !isArchived && session.cliType && session.agentType
@@ -2579,6 +1996,7 @@ export const SessionChatInputArea = memo(
           modelId={selectedModelId}
           modelLabel={selectedModelLabel}
           isContextCompacting={isContextCompacting}
+          showRateLimitWithoutContext
           showCodexResetForecast={showCodexResetForecast}
           className={isMobile ? 'h-8 shrink-0' : 'shrink-0'}
         />
@@ -2613,7 +2031,6 @@ export const SessionChatInputArea = memo(
     ) : null;
     /* Keep desktop actions compact while preserving the mobile touch target. */
     const primaryActionSizeClassName = isMobile ? 'h-8 w-8' : 'h-7 w-7';
-    const waitingForUploads = submissionPending && submissionPhase === 'waiting_upload';
     const primaryActionNode = showStopButton ? (
       <Button
         onClick={() => {
@@ -2639,21 +2056,13 @@ export const SessionChatInputArea = memo(
         icon
         variant="ghost"
         onClick={() => {
-          if (waitingForUploads) {
-            uploadWaitRef.current?.settle(false);
-            uploadWaitRef.current = null;
-            setSubmissionPhase('dispatching');
-          } else {
-            void sendMessage();
-          }
+          void sendMessage();
         }}
-        disabled={!waitingForUploads && (!hasSendableContent || isSendActionDisabled)}
+        disabled={!hasSendableContent || isSendActionDisabled}
         aria-label={
-          waitingForUploads
-            ? t('sessions.cancelSend', 'Cancel send')
-            : isExternalHistoryRefreshing && externalHistorySyncLabel
-              ? externalHistorySyncLabel
-              : t('sessions.send')
+          isExternalHistoryRefreshing && externalHistorySyncLabel
+            ? externalHistorySyncLabel
+            : t('sessions.send')
         }
         className={cn(
           primaryActionSizeClassName,

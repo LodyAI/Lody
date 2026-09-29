@@ -1,7 +1,9 @@
 # Answering a permission request
 
 Status: draft
-Translation: pending
+Translation: current
+
+[中文](permission-requests.zh.md)
 
 ## Scenario
 
@@ -27,8 +29,8 @@ their hands already are, and they must not answer by accident.
   file request lists each path once; anything else shows the agent's title for
   the call. A plan decision has no subject: the plan is the message above it.
 - **The suggestion.** One answer is marked as suggested: the first one-time
-  refusal when the provider marks the request `defaultToNo`, otherwise the first
-  one-time allow. An "always" answer is never the suggestion.
+  refusal when the provider marks the request `defaultToNo` or leads its standard
+  ACP options with a refusal, otherwise the first one-time allow. An "always" answer is never the suggestion.
 - **Shape.** The composer's scale, not a dialog's: the question and why, the
   subject, and one row of answers at the end — a split button for refusing and
   one for allowing. Each shows its one-time answer (the suggestion is primary)

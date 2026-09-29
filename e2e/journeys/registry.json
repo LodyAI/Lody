@@ -27,10 +27,18 @@
         "packages/components/src/routes/onboarding.tsx"
       ],
       "actions": [
-        { "id": "desktop.launchFresh" },
-        { "id": "onboarding.waitForLocalBootstrap" },
-        { "id": "onboarding.skipAgentConfiguration" },
-        { "id": "onboarding.enterWorkspace" }
+        {
+          "id": "desktop.launchFresh"
+        },
+        {
+          "id": "onboarding.waitForLocalBootstrap"
+        },
+        {
+          "id": "onboarding.skipAgentConfiguration"
+        },
+        {
+          "id": "onboarding.enterWorkspace"
+        }
       ],
       "checkpoints": [
         "bundled CLI owns the isolated local runtime",
@@ -72,11 +80,21 @@
         "packages/components/src/components/chat/"
       ],
       "actions": [
-        { "id": "agent.configureScripted" },
-        { "id": "session.createHeld" },
-        { "id": "session.stop" },
-        { "id": "session.archive" },
-        { "id": "session.deletePermanent" }
+        {
+          "id": "agent.configureScripted"
+        },
+        {
+          "id": "session.createHeld"
+        },
+        {
+          "id": "session.stop"
+        },
+        {
+          "id": "session.archive"
+        },
+        {
+          "id": "session.deletePermanent"
+        }
       ],
       "checkpoints": [
         "Stop becomes available while ACP is running",
@@ -118,14 +136,30 @@
         "packages/components/src/hooks/use-keyboard-navigation.ts"
       ],
       "actions": [
-        { "id": "shortcut.openPaletteWithDefaultBinding" },
-        { "id": "shortcut.openSettingsWithPhysicalPunctuation" },
-        { "id": "window.openSecondaryWorkspace" },
-        { "id": "shortcut.verifySecondaryDefaults" },
-        { "id": "shortcut.rebindSidebarWithShiftedDigit" },
-        { "id": "shortcut.verifyOldBindingRemovedInBothWindows" },
-        { "id": "renderer.reloadSecondary" },
-        { "id": "shortcut.verifyUserBindingRestoredInSecondary" }
+        {
+          "id": "shortcut.openPaletteWithDefaultBinding"
+        },
+        {
+          "id": "shortcut.openSettingsWithPhysicalPunctuation"
+        },
+        {
+          "id": "window.openSecondaryWorkspace"
+        },
+        {
+          "id": "shortcut.verifySecondaryDefaults"
+        },
+        {
+          "id": "shortcut.rebindSidebarWithShiftedDigit"
+        },
+        {
+          "id": "shortcut.verifyOldBindingRemovedInBothWindows"
+        },
+        {
+          "id": "renderer.reloadSecondary"
+        },
+        {
+          "id": "shortcut.verifyUserBindingRestoredInSecondary"
+        }
       ],
       "checkpoints": [
         "default command palette and settings bindings execute in both Electron windows",
@@ -167,10 +201,25 @@
         "packages/components/src/components/sessions/session-tab-bar.tsx"
       ],
       "actions": [
-        { "id": "settings.createCustomAcpAgent" },
-        { "id": "session.createFromComposer" },
-        { "id": "session.openDraftTabsWithShortcut", "args": { "count": 2, "binding": "Mod+t" } },
-        { "id": "shortcut.switchSessionTabByDigit", "args": { "positions": [1, 8, 2, "last"] } }
+        {
+          "id": "settings.createCustomAcpAgent"
+        },
+        {
+          "id": "session.createFromComposer"
+        },
+        {
+          "id": "session.openDraftTabsWithShortcut",
+          "args": {
+            "count": 2,
+            "binding": "Mod+t"
+          }
+        },
+        {
+          "id": "shortcut.switchSessionTabByDigit",
+          "args": {
+            "positions": [1, 8, 2, "last"]
+          }
+        }
       ],
       "checkpoints": [
         "Mod+t opens each new draft tab in the conversation strip",
@@ -217,12 +266,24 @@
         "packages/components/src/components/sessions/"
       ],
       "actions": [
-        { "id": "project.addSyntheticGit" },
-        { "id": "session.enableWorktree" },
-        { "id": "session.createCompleted" },
-        { "id": "terminal.openAndRunMarker" },
-        { "id": "session.archive" },
-        { "id": "session.deletePermanent" }
+        {
+          "id": "project.addSyntheticGit"
+        },
+        {
+          "id": "session.enableWorktree"
+        },
+        {
+          "id": "session.createCompleted"
+        },
+        {
+          "id": "terminal.openAndRunMarker"
+        },
+        {
+          "id": "session.archive"
+        },
+        {
+          "id": "session.deletePermanent"
+        }
       ],
       "checkpoints": [
         "worktree Session completes",
@@ -264,11 +325,21 @@
         "packages/components/src/lib/eager-sync-high-water-cache.ts"
       ],
       "actions": [
-        { "id": "workspace.enterLocal" },
-        { "id": "window.observeAuxiliaryIndexedDb" },
-        { "id": "window.openAuxiliaryWorkspace" },
-        { "id": "window.verifyAuxiliaryRuntimeReady" },
-        { "id": "window.verifyAuxiliaryCacheNamespace" }
+        {
+          "id": "workspace.enterLocal"
+        },
+        {
+          "id": "window.observeAuxiliaryIndexedDb"
+        },
+        {
+          "id": "window.openAuxiliaryWorkspace"
+        },
+        {
+          "id": "window.verifyAuxiliaryRuntimeReady"
+        },
+        {
+          "id": "window.verifyAuxiliaryCacheNamespace"
+        }
       ],
       "checkpoints": [
         "auxiliary renderer exposes an editable composer after runtime initialization",
@@ -313,13 +384,27 @@
         "packages/components/src/components/sessions/"
       ],
       "actions": [
-        { "id": "project.addSyntheticLargeDiff" },
-        { "id": "session.createCompleted" },
-        { "id": "review.openAllChanges" },
-        { "id": "review.switchLargeDiff" },
-        { "id": "review.hideAndShow" },
-        { "id": "review.close" },
-        { "id": "session.deletePermanent" }
+        {
+          "id": "project.addSyntheticLargeDiff"
+        },
+        {
+          "id": "session.createCompleted"
+        },
+        {
+          "id": "review.openAllChanges"
+        },
+        {
+          "id": "review.switchLargeDiff"
+        },
+        {
+          "id": "review.hideAndShow"
+        },
+        {
+          "id": "review.close"
+        },
+        {
+          "id": "session.deletePermanent"
+        }
       ],
       "checkpoints": [
         "both synthetic changed files render",
@@ -363,11 +448,21 @@
         "packages/components/src/hooks/use-session-mcp-selection.ts"
       ],
       "actions": [
-        { "id": "settings.openMcpCatalog" },
-        { "id": "mcp.createSyntheticStdioServer" },
-        { "id": "composer.selectMcpServer" },
-        { "id": "session.createCompleted" },
-        { "id": "mcp.deleteServer" }
+        {
+          "id": "settings.openMcpCatalog"
+        },
+        {
+          "id": "mcp.createSyntheticStdioServer"
+        },
+        {
+          "id": "composer.selectMcpServer"
+        },
+        {
+          "id": "session.createCompleted"
+        },
+        {
+          "id": "mcp.deleteServer"
+        }
       ],
       "checkpoints": [
         "workspace MCP catalog write is durable",
@@ -410,12 +505,24 @@
         "packages/components/src/lib/composer-agent-roles.ts"
       ],
       "actions": [
-        { "id": "settings.openAgentRoles" },
-        { "id": "role.createDeterministic" },
-        { "id": "composer.selectAgentRole" },
-        { "id": "session.createCompleted" },
-        { "id": "role.editAfterDispatch" },
-        { "id": "role.delete" }
+        {
+          "id": "settings.openAgentRoles"
+        },
+        {
+          "id": "role.createDeterministic"
+        },
+        {
+          "id": "composer.selectAgentRole"
+        },
+        {
+          "id": "session.createCompleted"
+        },
+        {
+          "id": "role.editAfterDispatch"
+        },
+        {
+          "id": "role.delete"
+        }
       ],
       "checkpoints": [
         "Role row is durable and selectable",
@@ -457,11 +564,21 @@
         "packages/components/src/components/sessions/session-fork-destination-menu.tsx"
       ],
       "actions": [
-        { "id": "project.addSyntheticGit" },
-        { "id": "session.createCompleted" },
-        { "id": "session.forkToWorktree" },
-        { "id": "session.openFork" },
-        { "id": "session.deletePermanent" }
+        {
+          "id": "project.addSyntheticGit"
+        },
+        {
+          "id": "session.createCompleted"
+        },
+        {
+          "id": "session.forkToWorktree"
+        },
+        {
+          "id": "session.openFork"
+        },
+        {
+          "id": "session.deletePermanent"
+        }
       ],
       "checkpoints": [
         "fork retains the completed conversation prefix",
@@ -504,12 +621,24 @@
         "packages/components/src/lib/archived-session-tree.ts"
       ],
       "actions": [
-        { "id": "settings.createCustomAcpAgent" },
-        { "id": "session.createFromComposer" },
-        { "id": "session.rename" },
-        { "id": "session.pin" },
-        { "id": "session.archive" },
-        { "id": "archive.restoreSession" }
+        {
+          "id": "settings.createCustomAcpAgent"
+        },
+        {
+          "id": "session.createFromComposer"
+        },
+        {
+          "id": "session.rename"
+        },
+        {
+          "id": "session.pin"
+        },
+        {
+          "id": "session.archive"
+        },
+        {
+          "id": "archive.restoreSession"
+        }
       ],
       "checkpoints": [
         "renamed title survives navigation",
@@ -551,14 +680,33 @@
         "packages/components/src/components/shared/session-relation-card.tsx"
       ],
       "actions": [
-        { "id": "session.createCompletedSource" },
-        { "id": "session.forkWorktree", "args": { "count": 2 } },
-        { "id": "session.seedRelations" },
-        { "id": "session.archiveOpener" },
-        { "id": "archive.deletePermanently" },
-        { "id": "session.openSurvivors" },
-        { "id": "session.reloadWithMetadataScanBlocked" },
-        { "id": "session.closeEmptyChildTab" }
+        {
+          "id": "session.createCompletedSource"
+        },
+        {
+          "id": "session.forkWorktree",
+          "args": {
+            "count": 2
+          }
+        },
+        {
+          "id": "session.seedRelations"
+        },
+        {
+          "id": "session.archiveOpener"
+        },
+        {
+          "id": "archive.deletePermanently"
+        },
+        {
+          "id": "session.openSurvivors"
+        },
+        {
+          "id": "session.reloadWithMetadataScanBlocked"
+        },
+        {
+          "id": "session.closeEmptyChildTab"
+        }
       ],
       "checkpoints": [
         "archive cascades through containment and opened-by links to the child Tab and both opened Sessions",
@@ -606,11 +754,21 @@
         "packages/components/src/hooks/use-remove-local-project.ts"
       ],
       "actions": [
-        { "id": "project.createSyntheticGit" },
-        { "id": "project.addThroughPicker" },
-        { "id": "project.selectFromSidebar" },
-        { "id": "project.confirmRemoval" },
-        { "id": "project.verifyOriginalDirectory" }
+        {
+          "id": "project.createSyntheticGit"
+        },
+        {
+          "id": "project.addThroughPicker"
+        },
+        {
+          "id": "project.selectFromSidebar"
+        },
+        {
+          "id": "project.confirmRemoval"
+        },
+        {
+          "id": "project.verifyOriginalDirectory"
+        }
       ],
       "checkpoints": [
         "local project appears in the bundled CLI catalog and sidebar",
@@ -652,11 +810,21 @@
         "packages/components/src/components/sessions/message-queue/"
       ],
       "actions": [
-        { "id": "settings.selectQueuedMessageBehavior" },
-        { "id": "session.createHeld" },
-        { "id": "queue.enqueueTwoMessages" },
-        { "id": "queue.removeFirstMessage" },
-        { "id": "fixture.releaseHeldTurn" }
+        {
+          "id": "settings.selectQueuedMessageBehavior"
+        },
+        {
+          "id": "session.createHeld"
+        },
+        {
+          "id": "queue.enqueueTwoMessages"
+        },
+        {
+          "id": "queue.removeFirstMessage"
+        },
+        {
+          "id": "fixture.releaseHeldTurn"
+        }
       ],
       "checkpoints": [
         "both follow-ups are visible in the pending queue",
@@ -698,11 +866,21 @@
         "packages/components/src/components/settings/mcp-connection-form.tsx"
       ],
       "actions": [
-        { "id": "mcp.createEnabledCatalogEntry" },
-        { "id": "settings.reopenMcpCatalog" },
-        { "id": "mcp.editCatalogEntry" },
-        { "id": "mcp.disableAndReEnableCatalogEntry" },
-        { "id": "mcp.deleteCatalogEntry" }
+        {
+          "id": "mcp.createEnabledCatalogEntry"
+        },
+        {
+          "id": "settings.reopenMcpCatalog"
+        },
+        {
+          "id": "mcp.editCatalogEntry"
+        },
+        {
+          "id": "mcp.disableAndReEnableCatalogEntry"
+        },
+        {
+          "id": "mcp.deleteCatalogEntry"
+        }
       ],
       "checkpoints": [
         "created name, description, and enabled state survive settings reopen",
@@ -744,11 +922,21 @@
         "packages/components/src/components/loro-app-sidebar.tsx"
       ],
       "actions": [
-        { "id": "project.createTwoSyntheticGitRepositories" },
-        { "id": "project.addBothThroughPicker" },
-        { "id": "project.switchAcrossSidebarAndPicker" },
-        { "id": "project.attemptDuplicateAdd" },
-        { "id": "project.verifyCatalogIdentity" }
+        {
+          "id": "project.createTwoSyntheticGitRepositories"
+        },
+        {
+          "id": "project.addBothThroughPicker"
+        },
+        {
+          "id": "project.switchAcrossSidebarAndPicker"
+        },
+        {
+          "id": "project.attemptDuplicateAdd"
+        },
+        {
+          "id": "project.verifyCatalogIdentity"
+        }
       ],
       "checkpoints": [
         "both projects remain selectable across picker reopen",
@@ -790,11 +978,21 @@
         "packages/components/src/theme-provider.tsx"
       ],
       "actions": [
-        { "id": "settings.openAppearance" },
-        { "id": "appearance.commitLightTheme" },
-        { "id": "settings.reopenAppearance" },
-        { "id": "appearance.previewDarkTheme" },
-        { "id": "appearance.cancelPreview" }
+        {
+          "id": "settings.openAppearance"
+        },
+        {
+          "id": "appearance.commitLightTheme"
+        },
+        {
+          "id": "settings.reopenAppearance"
+        },
+        {
+          "id": "appearance.previewDarkTheme"
+        },
+        {
+          "id": "appearance.cancelPreview"
+        }
       ],
       "checkpoints": [
         "committed light theme survives settings reopen",
@@ -837,11 +1035,21 @@
         "packages/components/src/lib/session-read-receipt.ts"
       ],
       "actions": [
-        { "id": "settings.createCustomAcpAgent" },
-        { "id": "session.createTwoFromComposer" },
-        { "id": "session.markFirstUnreadFromSecond" },
-        { "id": "session.openFirstFromSidebar" },
-        { "id": "session.deleteBothThroughUi" }
+        {
+          "id": "settings.createCustomAcpAgent"
+        },
+        {
+          "id": "session.createTwoFromComposer"
+        },
+        {
+          "id": "session.markFirstUnreadFromSecond"
+        },
+        {
+          "id": "session.openFirstFromSidebar"
+        },
+        {
+          "id": "session.deleteBothThroughUi"
+        }
       ],
       "checkpoints": [
         "manual unread state appears while another Session remains active",
@@ -868,6 +1076,66 @@
       "estimatedMinutes": 4
     },
     {
+      "id": "LODY-SESSION-005",
+      "state": "active",
+      "priority": "P0",
+      "runtime": "simulator",
+      "title": "Dispatch consecutive follow-ups sent to an idle Session exactly once and in order",
+      "owner": "session-send-delivery",
+      "feature": "src/features/session-follow-up.feature",
+      "fixture": "scripted-acp",
+      "fingerprint": "c7e4c67d5bc5b5cbdf10363bea023f4de3a052c30e1205557f839051972ae18a",
+      "ownerPaths": [
+        "packages/components/src/providers/workspace-session-send-journal.ts",
+        "packages/components/src/lib/session-send-journal.ts",
+        "apps/cli/src/lib/loro/history-auto-read.ts",
+        "apps/cli/src/session/"
+      ],
+      "actions": [
+        {
+          "id": "agent.configureScripted"
+        },
+        {
+          "id": "session.createCompleted"
+        },
+        {
+          "id": "session.sendFollowUpAfterCompletion"
+        },
+        {
+          "id": "session.sendFollowUpAfterCompletion"
+        },
+        {
+          "id": "session.archive"
+        },
+        {
+          "id": "session.deletePermanent"
+        }
+      ],
+      "checkpoints": [
+        "each follow-up reaches the ACP provider after the previous Turn completes",
+        "the provider receives every prompt exactly once in send order",
+        "no follow-up remains running after its reply"
+      ],
+      "cleanup": ["ACP process exits", "Session durable state is deleted"],
+      "coverage": {
+        "renderer": "Composer send and delivery journal",
+        "electronIpc": "Real window and Session RPC",
+        "bundledCli": "Auto-read receipt and idle-Session dispatch",
+        "durableState": "Consecutive committed user Turns and dispatch pointer",
+        "externalWire": "Scripted ACP"
+      },
+      "signals": {
+        "criticality": 5,
+        "boundaryRisk": 5,
+        "changeFrequency": 5,
+        "escapedDefect": true
+      },
+      "freshness": 5,
+      "scoutJourneys": ["session"],
+      "blockedReason": null,
+      "estimatedMinutes": 2
+    },
+    {
       "id": "LODY-SEARCH-001",
       "state": "active",
       "priority": "P1",
@@ -883,15 +1151,33 @@
         "packages/components/src/components/loro-sidebar.tsx"
       ],
       "actions": [
-        { "id": "settings.createCustomAcpAgent" },
-        { "id": "session.createAndNameThree" },
-        { "id": "sidebar.searchCasePartialAndEmpty" },
-        { "id": "session.renameAfterSearch" },
-        { "id": "sidebar.openRenamedTarget" },
-        { "id": "sidebar.reopenRenamedTarget" },
-        { "id": "session.archiveTarget" },
-        { "id": "sidebar.verifyArchivedAndDeletedExclusion" },
-        { "id": "session.deleteAllThroughUi" }
+        {
+          "id": "settings.createCustomAcpAgent"
+        },
+        {
+          "id": "session.createAndNameThree"
+        },
+        {
+          "id": "sidebar.searchCasePartialAndEmpty"
+        },
+        {
+          "id": "session.renameAfterSearch"
+        },
+        {
+          "id": "sidebar.openRenamedTarget"
+        },
+        {
+          "id": "sidebar.reopenRenamedTarget"
+        },
+        {
+          "id": "session.archiveTarget"
+        },
+        {
+          "id": "sidebar.verifyArchivedAndDeletedExclusion"
+        },
+        {
+          "id": "session.deleteAllThroughUi"
+        }
       ],
       "checkpoints": [
         "case-insensitive partial search returns two matching Sessions, excludes an unrelated title, and supports an empty result",
@@ -936,16 +1222,36 @@
         "packages/components/src/hooks/use-chat-landing-file-draft.ts"
       ],
       "actions": [
-        { "id": "settings.createCustomAcpAgent" },
-        { "id": "session.createPrimaryFromComposer" },
-        { "id": "composer.cancelFilePicker" },
-        { "id": "composer.attachAndSendTextFileWithPrompt" },
-        { "id": "session.sendPlainFollowUp" },
-        { "id": "sidebar.reopenAttachmentHistory" },
-        { "id": "archive.restorePrimary" },
-        { "id": "session.createAttachmentFreeSecondary" },
-        { "id": "session.deletePrimaryAndVerifySecondary" },
-        { "id": "session.deleteSecondary" }
+        {
+          "id": "settings.createCustomAcpAgent"
+        },
+        {
+          "id": "session.createPrimaryFromComposer"
+        },
+        {
+          "id": "composer.cancelFilePicker"
+        },
+        {
+          "id": "composer.attachAndSendTextFileWithPrompt"
+        },
+        {
+          "id": "session.sendPlainFollowUp"
+        },
+        {
+          "id": "sidebar.reopenAttachmentHistory"
+        },
+        {
+          "id": "archive.restorePrimary"
+        },
+        {
+          "id": "session.createAttachmentFreeSecondary"
+        },
+        {
+          "id": "session.deletePrimaryAndVerifySecondary"
+        },
+        {
+          "id": "session.deleteSecondary"
+        }
       ],
       "checkpoints": [
         "cancelling the file chooser leaves no preview and cannot submit an empty draft",
@@ -992,16 +1298,36 @@
         "packages/shared/src/acp/"
       ],
       "actions": [
-        { "id": "settings.createGoalCapableAgent" },
-        { "id": "session.startPersistentGoal" },
-        { "id": "session.createIndependentControl" },
-        { "id": "goal.pause" },
-        { "id": "goal.rejectUnavailableActions" },
-        { "id": "goal.updateViaComposer" },
-        { "id": "goal.resume" },
-        { "id": "sidebar.reopenGoalState" },
-        { "id": "goal.pauseAndClear" },
-        { "id": "archive.restoreAndDeleteBoth" }
+        {
+          "id": "settings.createGoalCapableAgent"
+        },
+        {
+          "id": "session.startPersistentGoal"
+        },
+        {
+          "id": "session.createIndependentControl"
+        },
+        {
+          "id": "goal.pause"
+        },
+        {
+          "id": "goal.rejectUnavailableActions"
+        },
+        {
+          "id": "goal.updateViaComposer"
+        },
+        {
+          "id": "goal.resume"
+        },
+        {
+          "id": "sidebar.reopenGoalState"
+        },
+        {
+          "id": "goal.pauseAndClear"
+        },
+        {
+          "id": "archive.restoreAndDeleteBoth"
+        }
       ],
       "checkpoints": [
         "the advertised capability exposes only valid controls while a second Session has no goal state or goal wire events",
@@ -1046,14 +1372,30 @@
         "packages/components/src/components/sessions/desktop-run-config-menu.tsx"
       ],
       "actions": [
-        { "id": "settings.rejectUnparseableCustomAgent" },
-        { "id": "settings.createAndPersistCustomAgent" },
-        { "id": "settings.cancelDraftEdit" },
-        { "id": "settings.saveRenamedAgentAndCreateSecond" },
-        { "id": "settings.reopenAgentCatalog" },
-        { "id": "composer.createSessionWithEachAgent" },
-        { "id": "settings.deleteFirstAndRetainSessionHistory" },
-        { "id": "sessionAndAgent.cleanup" }
+        {
+          "id": "settings.rejectUnparseableCustomAgent"
+        },
+        {
+          "id": "settings.createAndPersistCustomAgent"
+        },
+        {
+          "id": "settings.cancelDraftEdit"
+        },
+        {
+          "id": "settings.saveRenamedAgentAndCreateSecond"
+        },
+        {
+          "id": "settings.reopenAgentCatalog"
+        },
+        {
+          "id": "composer.createSessionWithEachAgent"
+        },
+        {
+          "id": "settings.deleteFirstAndRetainSessionHistory"
+        },
+        {
+          "id": "sessionAndAgent.cleanup"
+        }
       ],
       "checkpoints": [
         "an unparseable command disables Test and Create and cancellation leaves the catalog empty",
@@ -1100,17 +1442,39 @@
         "packages/shared/src/conversation-markdown.ts"
       ],
       "actions": [
-        { "id": "settings.createCustomAcpAgent" },
-        { "id": "session.createRichTwoTurnPrimary" },
-        { "id": "message.copyUserPrefix" },
-        { "id": "message.copyAssistantPrefixWithoutNativeFork" },
-        { "id": "sidebar.reopenContextHistory" },
-        { "id": "session.copyStreamingIncompleteMarkdown" },
-        { "id": "session.stopStreamAndRequestCompletedResponse" },
-        { "id": "session.copyCompletedMarkdown" },
-        { "id": "session.cancelIsolatedStream" },
-        { "id": "session.copyIsolatedMarkdown" },
-        { "id": "session.deleteBothThroughUi" }
+        {
+          "id": "settings.createCustomAcpAgent"
+        },
+        {
+          "id": "session.createRichTwoTurnPrimary"
+        },
+        {
+          "id": "message.copyUserPrefix"
+        },
+        {
+          "id": "message.copyAssistantPrefixWithoutNativeFork"
+        },
+        {
+          "id": "sidebar.reopenContextHistory"
+        },
+        {
+          "id": "session.copyStreamingIncompleteMarkdown"
+        },
+        {
+          "id": "session.stopStreamAndRequestCompletedResponse"
+        },
+        {
+          "id": "session.copyCompletedMarkdown"
+        },
+        {
+          "id": "session.cancelIsolatedStream"
+        },
+        {
+          "id": "session.copyIsolatedMarkdown"
+        },
+        {
+          "id": "session.deleteBothThroughUi"
+        }
       ],
       "checkpoints": [
         "user-message copy includes rich Markdown from only the selected first user turn",

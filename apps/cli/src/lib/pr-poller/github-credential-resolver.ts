@@ -6,12 +6,20 @@ import { formatErrorMessage } from '@/utils/format-error';
 /**
  * Per-repo GitHub credential resolution for the poller (plan §3).
  *
- * Precedence mirrors `gh-token-injector.ts`: the managed workspace token
- * wins; the ambient `gh auth token` is only a fallback (cached for one minute). Resolver instances are workspace-local, while credential
+ * Background polling is workspace-scoped, not an interactive command: managed
+ * credentials win; ambient `gh auth token` is a read-only fallback (cached for one minute). Resolver instances are workspace-local, while credential
  * scopes intentionally converge across workspaces that use the same GitHub
  * user or App installation.
  */
 export type GitHubCredentialSource = 'managed' | 'gh';
+
+/**
+ * How often the ambient `gh` credential is re-harvested, so a login, logout or
+ * account switch is observed without a restart. Also the longest the scheduler
+ * may trust a remembered repo → scope mapping, so gating by that mapping never
+ * delays credential changes beyond this cadence.
+ */
+export const AMBIENT_CREDENTIAL_REFRESH_MS = 60_000;
 
 export type ResolvedGitHubCredential = {
   token: string;
@@ -164,7 +172,7 @@ export class GitHubCredentialResolver {
     if (this.ghHarvest === null || now >= this.ghRefreshAt) {
       const previousToken = this.ghHarvest?.outcome === 'token' ? this.ghHarvest.token : null;
       this.ghHarvest = await this.harvestGhToken();
-      this.ghRefreshAt = now + 60_000;
+      this.ghRefreshAt = now + AMBIENT_CREDENTIAL_REFRESH_MS;
       const nextToken = this.ghHarvest.outcome === 'token' ? this.ghHarvest.token : null;
       if (previousToken !== nextToken || !this.ghUserId) this.ghUserId = undefined;
     }

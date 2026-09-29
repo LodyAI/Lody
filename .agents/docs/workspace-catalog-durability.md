@@ -27,6 +27,11 @@ a mutable catalog on retry. Otherwise editing or deleting a Role could change wh
 an already accepted request executes. Session provenance describes creation; it is
 not another configuration authority.
 
+A Role's optional description gives other agents short guidance on when to call
+it. The editor and shared normalizer cap it at 140 Unicode code points; discovery
+list/get results expose it separately from the execution prompt prefix. Older rows
+without the field display as blank. See the [description Spec](../../specs/agent-role-description.md).
+
 Workspace startup also reconciles owned Roles against fresh runtime schemas without
 opening Settings. A conditional writer transaction fences delayed probe results
 against edits and deletion, then uses the same durability/upload split. See the

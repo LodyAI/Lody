@@ -5,6 +5,8 @@ Translation: current
 
 [English](2026-09-23-conversation-follow-modes.md)
 
+后续：2026-09-27 起，follow 模式移入[对话滚动引擎](2026-09-27-conversation-scroll-engine.zh.md)，它取代了 `use-sticky-scroll.ts` 和 Virtua 列表。
+
 ## 摘要
 
 对话吸底经常失效，在 Composer 里输入时对话会跳一行。两者都源于从滚动方向推断读者意图：

@@ -5,6 +5,8 @@ Translation: current
 
 [English](2026-09-24-virtua-keyed-fork.md)
 
+后续：2026-09-27 起，keyed 布局移入[对话滚动引擎](2026-09-27-conversation-scroll-engine.zh.md)，`packages/virtua` 已删除；剩下的 `VList` 使用方依赖上游 `virtua` 0.52.7。
+
 ## 摘要
 
 在长对话中向上滚动时，读者正在看的内容会一次移动几百像素。对话会在读者接近时加载较早的回合，

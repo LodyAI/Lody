@@ -56,7 +56,12 @@ import {
 } from '@lody/shared';
 import { MessageQueueDisplay } from '@/components/sessions/message-queue';
 
-import { currentWorkspaceIdAtom, currentWorkspaceSlugAtom, userAtom } from '@/atoms';
+import {
+  conversationWideModeAtom,
+  currentWorkspaceIdAtom,
+  currentWorkspaceSlugAtom,
+  userAtom,
+} from '@/atoms';
 import {
   agentConfigMetaCacheAtom,
   machineMetaCacheAtom,
@@ -1301,6 +1306,7 @@ export function SessionConversationStoryHarness({
   shareImage = false,
   showCollaborators = false,
   queued,
+  wide = false,
 }: {
   state: PageState;
   frame: DeviceFrame;
@@ -1314,6 +1320,8 @@ export function SessionConversationStoryHarness({
   shareImage?: boolean;
   showCollaborators?: boolean;
   queued?: 'with-info-bar' | 'without-info-bar';
+  /** Mirrors the Settings > Appearance "Full width" switch. */
+  wide?: boolean;
 }) {
   const { t } = useTranslation();
   const [streamChunkCount, setStreamChunkCount] = useState(0);
@@ -1336,6 +1344,11 @@ export function SessionConversationStoryHarness({
   const [preview, setPreview] = useState<ConversationMessage[] | null>(null);
   const [sentMessages, setSentMessages] = useState<SessionHistoryParsed[]>([]);
   const store = useMemo(() => createStoryStore(session, state), [session, state]);
+  /* Wide mode is a persisted atom; seed it per story instead of leaking the
+     previous story's localStorage pick into this one. */
+  useEffect(() => {
+    store.set(conversationWideModeAtom, wide);
+  }, [store, wide]);
   useEffect(() => {
     setStreamChunkCount(0);
     if (state !== 'working') {
@@ -1869,6 +1882,21 @@ export const DesktopReadingReview: Story = {
 export const DesktopReadingReviewLight: Story = {
   args: { state: 'reading', sessionTitle: '对话页阅读样式审查', branchName: 'fix/reading-comfort' },
   globals: { theme: 'light' },
+  decorators: [withDesktopViewport],
+};
+
+/**
+ * Full-width mode (Settings > Appearance): the conversation column drops its
+ * ~48rem cap and spans the pane, keeping only the shared side gutter.
+ */
+export const DesktopReadingReviewWide: Story = {
+  args: {
+    state: 'reading',
+    sessionTitle: '对话页阅读样式审查',
+    branchName: 'fix/reading-comfort',
+    wide: true,
+  },
+  globals: { theme: 'dark' },
   decorators: [withDesktopViewport],
 };
 

@@ -45,7 +45,9 @@ context/acp-agent-edit-evidence.md; adapter repos: [apps/cli/AGENTS.md](../../AG
 - `acp-runner.ts`: spawn + initialize + `newSession`/`loadSession` go through
   `acp-session-start-gate.ts` (default 2, `LODY_MAX_CONCURRENT_ACP_SESSION_STARTS`). Never bypass
   that gate.
-- `setting.ts`: every builtin requires `resolveACPProcessLaunchAsync()`.
+- Builtins use `setting.ts`'s `resolveACPProcessLaunchAsync()`. [Codex profiles](../../../../specs/codex-account-profiles.md)
+  forbid upstream keys in shared/child env. Process records delay deletion, never
+  restrict same-profile concurrency.
 - `deepseek-harness-runtime.ts` is NOT managed: no download, prefetch, override, or
   auth integration. Preserve logical npx argv for recovery; Windows uses npm's JS
   entry without cmd.exe. Keep npm, the forwarder, DSH and native Job children
@@ -78,9 +80,8 @@ context/acp-agent-edit-evidence.md; adapter repos: [apps/cli/AGENTS.md](../../AG
 
 ## `acp-authentication.ts`
 
-- The single per-agent slot covers launch preparation as well as the child process;
-  timeout/cancel terminate it and release it for Retry, and a cancel or timeout during cleanup
-  still wins. Stop the process before returning success.
+- The per-agent slot covers preparation and the child; cancel/timeout wins through cleanup,
+  terminates the process, and releases Retry. Stop the process before success.
 - Authorization data must never enter logs, chat, Flock, or config; raw provider output and
   secret defaults must never reach retained progress.
 - Claude capability refresh runs its native status command first so missing credentials surface

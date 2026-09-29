@@ -282,19 +282,53 @@ export function invalidateGitHubTokensForWorkspace(workspaceId: string) {
  * On `GitHubAuthError` the cached token is invalidated, a fresh token is
  * fetched, and the call is retried exactly once.
  */
+async function verifyRepositoryIdentity(
+  token: string,
+  repoFullName: string,
+  repositoryId?: number
+): Promise<void> {
+  if (repositoryId === undefined) return;
+  const response = await fetch(`https://api.github.com/repos/${repoFullName}`, {
+    headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json' },
+    redirect: 'error',
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (response.status === 401) throw new GitHubAuthError();
+  if (!response.ok)
+    throw new GitHubClientTokenError(
+      'repository_identity_unavailable',
+      'Cannot verify this repository identity; no operation was attempted.'
+    );
+  const repository = (await response.json()) as { id?: number; full_name?: string };
+  if (
+    repository.id !== repositoryId ||
+    repository.full_name?.toLowerCase() !== repoFullName.toLowerCase()
+  ) {
+    throw new GitHubClientTokenError(
+      'repository_identity_changed',
+      'Repository name changed. Wait for GitHub synchronization and refresh before retrying.'
+    );
+  }
+}
+
 export async function withGitHubTokenRetry<T>(
   workspaceId: string,
   repoFullName: string,
-  fn: (token: string) => Promise<T>
+  fn: (token: string) => Promise<T>,
+  repositoryId?: number
 ): Promise<T> {
+  const run = async (token: string) => {
+    await verifyRepositoryIdentity(token, repoFullName, repositoryId);
+    return fn(token);
+  };
   const token = await getGitHubRepoToken(workspaceId, repoFullName);
   try {
-    return await fn(token);
+    return await run(token);
   } catch (error) {
     if (error instanceof GitHubAuthError) {
       invalidateGitHubRepoToken(workspaceId, repoFullName);
       const freshToken = await getGitHubRepoToken(workspaceId, repoFullName);
-      return fn(freshToken);
+      return run(freshToken);
     }
     throw error;
   }
@@ -304,11 +338,16 @@ export async function withGitHubOperationTokenRetry<T>(
   workspaceId: string,
   repoFullName: string,
   operation: GitHubOperation,
-  fn: (token: string) => Promise<T>
+  fn: (token: string) => Promise<T>,
+  repositoryId?: number
 ): Promise<T> {
+  const run = async (token: string) => {
+    await verifyRepositoryIdentity(token, repoFullName, repositoryId);
+    return fn(token);
+  };
   const entry = await getGitHubOperationToken(workspaceId, repoFullName, operation);
   try {
-    return await fn(entry.token);
+    return await run(entry.token);
   } catch (error) {
     if (entry.tokenSource === 'personal' && isGitHubPermissionFailure(error)) {
       throw new GitHubPersonalIdentityPermissionError(repoFullName);
@@ -319,7 +358,7 @@ export async function withGitHubOperationTokenRetry<T>(
       const freshEntry = await getGitHubOperationToken(workspaceId, repoFullName, operation, {
         ...(entry.tokenSource === 'personal' ? { invalidatedPersonalToken: entry.token } : {}),
       });
-      return fn(freshEntry.token);
+      return run(freshEntry.token);
     }
 
     throw error;

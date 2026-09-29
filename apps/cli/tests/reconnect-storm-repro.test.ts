@@ -41,6 +41,7 @@ const ONE_MINUTE_MS = 60_000;
 const createSilentLogger = (): Logger =>
   ({
     debug: () => {},
+    trace: () => {},
     info: () => {},
     warn: () => {},
     error: () => {},

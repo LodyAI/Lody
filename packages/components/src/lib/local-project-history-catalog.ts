@@ -1,6 +1,7 @@
 import {
   getExternalAcpHistoryImportKey,
   getLocalProjectHistoryProviderKey,
+  matchesHistoryProviderBinding,
   type LocalProjectHistoryCatalogItem,
   type LocalProjectHistoryCatalogResult,
   type LocalProjectHistoryProvider,
@@ -43,6 +44,7 @@ function buildActiveImportIndex(options: {
 
   for (const session of sortedSessions) {
     if (session.machineId !== options.machineId) continue;
+    if (!matchesHistoryProviderBinding(session.agentConfigId, options.provider)) continue;
     if (session.cliType !== options.provider.cliType) continue;
     if (session.agentType !== options.provider.agentType) continue;
     if (session.project?.kind !== 'local') continue;

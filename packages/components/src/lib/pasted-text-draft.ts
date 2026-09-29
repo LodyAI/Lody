@@ -12,15 +12,20 @@ export interface PastedTextDraft {
 export const LARGE_PASTED_TEXT_MIN_CHAR_COUNT = 1024;
 
 /**
- * Hard ceiling for a single paste, in UTF-8 bytes of the text we would store.
+ * Hard ceiling for keeping a paste inline, in UTF-8 bytes of the text we would store.
  *
  * Above this the collapse stops helping: the chip hides the blob in the
  * composer, but the full text still rides along in every draft save, every
- * prompt rewrite, and the turn itself. A log dump this size is never something
- * the user meant to type into a message, so the paste is refused outright and
- * they are pointed at the file-attachment path instead.
+ * prompt rewrite, and the turn itself. A log dump this size is captured as a
+ * regular text attachment so it can use the existing file path instead.
  */
 export const MAX_PASTED_TEXT_BYTE_SIZE = 500 * 1024;
+
+export const PASTED_TEXT_FILE_NAME = 'pasted-text.txt';
+
+/** Preserve the clipboard payload as a regular text attachment. */
+export const createPastedTextFile = (text: string): File =>
+  new File([text], PASTED_TEXT_FILE_NAME, { type: 'text/plain' });
 
 export const createPastedTextDraftId = (): string => {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {

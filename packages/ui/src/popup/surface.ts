@@ -378,6 +378,35 @@ export const surface = stylex.create({
     cursor: 'default',
     userSelect: 'none',
   },
+  /**
+   * Where a live list's strips sit: across the popup's top or bottom edge,
+   * over the rows. Base UI renders them `position: absolute` and leaves the
+   * insets to the host; with none stated, an absolute child of the popup's
+   * flex column takes its static position at the start of the box, so the
+   * down arrow drew a lone chevron over the first row's label. The popup's
+   * `transform` makes it their containing block, and their outer corners
+   * follow its radius so the strip does not square them off.
+   */
+  scrollArrowUp: {
+    position: 'absolute',
+    insetInlineStart: 0,
+    insetInlineEnd: 0,
+    insetBlockStart: 0,
+    zIndex: 1,
+    borderStartStartRadius: popup.radius,
+    borderStartEndRadius: popup.radius,
+    cornerShape: corner.shape,
+  },
+  scrollArrowDown: {
+    position: 'absolute',
+    insetInlineStart: 0,
+    insetInlineEnd: 0,
+    insetBlockEnd: 0,
+    zIndex: 1,
+    borderEndStartRadius: popup.radius,
+    borderEndEndRadius: popup.radius,
+    cornerShape: corner.shape,
+  },
 });
 
 /** Which side of its anchor a popup landed on, as Base UI reports it. */

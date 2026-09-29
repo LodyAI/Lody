@@ -170,31 +170,4 @@ describe('ResilientRemoteCursorStore', () => {
     expect(await store.load(cursor.streamUrl)).toEqual(cursor);
     expect(warnings).toHaveLength(1);
   });
-
-  it('bypasses primary load when requested', async () => {
-    const primary = new MemoryRemoteCursorStore();
-    const fallback = new MemoryRemoteCursorStore();
-    const events: unknown[] = [];
-    const cursor = createCursor(`${LEGACY_LORO_STREAMS_BASE_URL}/ds/lody/workspace:meta`);
-    await primary.save(cursor);
-
-    const store = new ResilientRemoteCursorStore({
-      dbName: 'cursor-db',
-      timeoutMs: 10,
-      createPrimaryStore: () => primary,
-      createFallbackStore: () => fallback,
-      shouldBypassPrimaryLoad: (streamUrl) => streamUrl === cursor.streamUrl,
-      onEvent: (message, context) => events.push({ message, context }),
-    });
-
-    await expect(store.load(cursor.streamUrl)).resolves.toBeNull();
-    expect(events).toContainEqual(
-      expect.objectContaining({
-        context: expect.objectContaining({
-          phase: 'primary-bypass',
-          streamUrl: cursor.streamUrl,
-        }),
-      })
-    );
-  });
 });

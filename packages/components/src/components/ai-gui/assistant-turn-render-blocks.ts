@@ -83,9 +83,11 @@ const getToolFilePaths = (toolCall: ToolCallMessage): string[] => {
  * Whether a tool call is a shell-command step — the predicate behind the group
  * header's `commandCount`, shared with the row renderer so every row counted in
  * "Ran N commands" is the one that carries the "Ran" verb. `execute`/`bash`
- * always qualify; other kinds qualify only when the call actually carried
- * terminal I/O (a search's `terminal_command` pattern block does not make it
- * one, and reads/keeps their own verb).
+ * always qualify; other kinds qualify only when the call actually carried a
+ * command (a search's `terminal_command` pattern block does not make it one,
+ * and reads keep their own verb). Output alone does not: a Claude tool such as
+ * `TaskStop` or an MCP call returns a plain string, which history stores as
+ * `terminal_output`, and counting it made "Ran TaskStop" one of the commands.
  */
 export const isCommandToolCall = (toolCall: ToolCallMessage): boolean => {
   switch (toolCall.kind) {
@@ -105,11 +107,7 @@ export const isCommandToolCall = (toolCall: ToolCallMessage): boolean => {
     default:
       break;
   }
-  return Boolean(
-    toolCall.content?.some(
-      (block) => block.type === 'terminal_command' || block.type === 'terminal_output'
-    )
-  );
+  return Boolean(toolCall.content?.some((block) => block.type === 'terminal_command'));
 };
 
 export const summarizeAssistantActivity = (

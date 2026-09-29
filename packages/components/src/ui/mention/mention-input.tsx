@@ -659,6 +659,11 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
 
       if (!context.open) return;
 
+      // A modified Enter belongs to the input, not the menu: Cmd/Ctrl+Enter is
+      // the owner's send/save, Shift+Enter is a literal newline. Bail before the
+      // preventDefault below so neither selects a menu item.
+      if (event.key === 'Enter' && (event.metaKey || event.ctrlKey || event.shiftKey)) return;
+
       const isNavigationKey = [
         'ArrowDown',
         'ArrowUp',

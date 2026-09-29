@@ -150,6 +150,14 @@ describe('PermissionPrompt', () => {
     expect(selected).toEqual(['allow']);
   });
 
+  it('suggests a standard ACP decline-first request without vendor metadata', async () => {
+    await render(makeRequest([REJECT_ONCE, ALLOW_ONCE, ALLOW_ALWAYS]), { autoFocus: true });
+    await press('ArrowDown');
+    expect(document.activeElement).toBe(optionButton('No'));
+    await act(async () => (document.activeElement as HTMLButtonElement).click());
+    expect(selected).toEqual(['reject']);
+  });
+
   it('suggests the refusal when the provider marks the request defaultToNo', async () => {
     await render(
       makeRequest([ALLOW_ONCE, REJECT_ONCE], { meta: { permission: { defaultToNo: true } } }),

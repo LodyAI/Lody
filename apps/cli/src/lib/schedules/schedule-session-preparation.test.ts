@@ -42,17 +42,20 @@ const manager = {
   syncMetaOrThrow: async () => {},
 } as unknown as LoroDocumentManager;
 
-const prepare = (project?: ProjectRef) =>
+const prepare = (
+  project?: ProjectRef,
+  { prompt = 'Say good morning.', title = 'Morning check-in' } = {}
+) =>
   prepareSessionInput(
     auth,
     workspace,
     manager,
-    'Say good morning.',
+    prompt,
     buildScheduleSessionCreateOptions({
       sessionId: 'session-1' as SessionId,
       userTurnId: 'turn-1',
       agentConfigId: 'agent',
-      title: 'Morning check-in',
+      title,
       project,
     }),
     {
@@ -78,6 +81,23 @@ describe('Session preparation for a scheduled run', () => {
     expect(prepared.userTurn.id).toBe('turn-1');
     // Host-owned automation always uses the inert prepared protocol.
     expect(prepared.userTurn.status).toBe('prepared');
+  });
+
+  it('keeps an explicit title as final, so no generated title replaces it', async () => {
+    const prepared = await prepare();
+    expect(prepared.meta.title).toBe('Morning check-in');
+    expect(prepared.meta.titleSource).toBe('user');
+  });
+
+  it('names an untitled Session with a draft from the first prompt line', async () => {
+    // Agent-created Sessions carry no title; ACP-owned titles land only after
+    // the first turn, so the Session would stay unnamed while it runs.
+    const prepared = await prepare(undefined, {
+      prompt: `\n  ${'Investigate the flaky presence heartbeat '.repeat(2)}\nDetails`,
+      title: '',
+    });
+    expect(prepared.meta.title).toBe('Investigate the flaky presence heartbeat Investiga');
+    expect(prepared.meta.titleSource).toBe('draft');
   });
 
   it('still resolves a GitHub project onto the Session', async () => {

@@ -14,11 +14,14 @@ sync therefore proves nothing about presence delivery, and a machine can sync
 perfectly while reading offline.
 
 One workspace owns ONE presence transport, and the machine heartbeat shares it with
-every other presence writer in that workspace. Publication is strictly serial: one
-update in flight, the rest in a FIFO that does not merge superseded entries, does not
-prioritize heartbeats, and has no length bound. Those are properties of
-`EphemeralStreamCrdt` in `@loro-dev/streams-crdt`, which this repository does not
-control, so the bound has to be honored by publishers.
+every other presence writer in that workspace. Publication is serial. In
+`@loro-dev/streams-crdt@0.16.0`, the built-in `EphemeralStoreAdaptor` supplies
+`localUpdateKey`: newer single-key set/delete updates replace older unsent updates
+for the same key, while in-flight and unknown/multi-key updates remain independent.
+All three Lody construction sites use that adaptor directly. Coalescing does not
+prioritize heartbeats or bound distinct-key traffic, so publishers still own the
+rate and size budget. The subscription's `pendingLocalCount` counts unacknowledged
+logical updates, not the number of POSTs after coalescing.
 
 The failure mode is specific and quiet. A heartbeat's `updatedAt` is taken when the
 entry is created, not when it is sent, so an entry that waits longer than

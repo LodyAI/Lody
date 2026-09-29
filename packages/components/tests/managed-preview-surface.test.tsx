@@ -17,7 +17,11 @@ import {
 
 import { userAtom } from '../src/atoms';
 import { ManagedPreviewSurface } from '../src/components/sessions/managed-preview-surface';
-import { clearManagedPreviewFrame } from '../src/components/sessions/managed-preview-frame-cache';
+import {
+  acquireManagedPreviewFrame,
+  clearManagedPreviewFrame,
+  prepareManagedPreviewFrame,
+} from '../src/components/sessions/managed-preview-frame-cache';
 
 const mocks = vi.hoisted(() => ({
   comments: [],
@@ -164,6 +168,7 @@ describe('ManagedPreviewSurface', () => {
     container = undefined;
     vi.clearAllMocks();
     vi.restoreAllMocks();
+    vi.useRealTimers();
   });
 
   it('runs static HTML as an uncached opaque-origin srcdoc', async () => {
@@ -664,6 +669,80 @@ describe('ManagedPreviewSurface', () => {
     // A plain appendChild would also pass the identity check above while
     // silently discarding the page, so assert the atomic move actually ran.
     expect(moveBefore).toHaveBeenCalled();
+  });
+
+  it('hands the preloaded page to the surface and keeps it alive after preparation cleanup', async () => {
+    vi.useFakeTimers();
+    const release = prepareManagedPreviewFrame(session.id, 'http://127.0.0.1:61234/', 'Preview');
+    const prepared = document.querySelector('[data-lody-preview-preload] iframe');
+    expect(prepared).not.toBeNull();
+    const { firstIframe, remountedIframe } = await mountRemountCycle(vi.fn());
+    expect(firstIframe).toBe(prepared);
+    expect(remountedIframe).toBe(prepared);
+    release();
+    vi.advanceTimersByTime(2 * 60 * 1000);
+    expect(prepared?.isConnected).toBe(true);
+    expect(document.querySelector('[data-lody-preview-preload]')).toBeNull();
+  });
+
+  it('expires an unopened preload once and never recreates it', () => {
+    vi.useFakeTimers();
+    prepareManagedPreviewFrame(session.id, 'https://preview.invalid/', 'Preview');
+    const prepared = document.querySelector('[data-lody-preview-preload] iframe');
+    expect(prepared?.isConnected).toBe(true);
+    vi.advanceTimersByTime(2 * 60 * 1000);
+    expect(prepared?.isConnected).toBe(false);
+    expect(document.querySelector('[data-lody-preview-preload]')).toBeNull();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('replaces the single preload and prevents stale cleanup from destroying its replacement', () => {
+    const release = prepareManagedPreviewFrame(
+      session.id,
+      'https://preview.invalid/old',
+      'Preview'
+    );
+    const old = document.querySelector('[data-lody-preview-preload] iframe');
+    prepareManagedPreviewFrame(session.id, 'https://preview.invalid/new', 'Preview');
+    const replacement = document.querySelector('[data-lody-preview-preload] iframe');
+    release();
+    expect(old?.isConnected).toBe(false);
+    expect(replacement?.isConnected).toBe(true);
+    expect(document.querySelectorAll('[data-lody-preview-preload]')).toHaveLength(1);
+    clearManagedPreviewFrame(session.id);
+    expect(replacement?.isConnected).toBe(false);
+  });
+
+  it('discards a preload when Browser opens a different path', () => {
+    prepareManagedPreviewFrame(session.id, 'https://preview.invalid/old', 'Preview');
+    const old = document.querySelector('[data-lody-preview-preload] iframe');
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    const frame = acquireManagedPreviewFrame({
+      sessionId: session.id,
+      viewerUrl: 'https://preview.invalid/new',
+      title: 'Preview',
+      host: container,
+    });
+    expect(frame.iframe).not.toBe(old);
+    expect(frame.iframe.src).toBe('https://preview.invalid/new');
+    expect(old?.isConnected).toBe(false);
+  });
+
+  it('skips speculative frames without atomic moves and never replaces an opened page', async () => {
+    const moveBefore = (HTMLElement.prototype as StatePreservingElement).moveBefore;
+    delete (HTMLElement.prototype as StatePreservingElement).moveBefore;
+    try {
+      prepareManagedPreviewFrame(session.id, 'https://preview.invalid/', 'Preview');
+      expect(document.querySelector('[data-lody-preview-preload]')).toBeNull();
+    } finally {
+      (HTMLElement.prototype as StatePreservingElement).moveBefore = moveBefore;
+    }
+    const { remountedIframe } = await mountRemountCycle(vi.fn());
+    prepareManagedPreviewFrame(session.id, 'https://preview.invalid/other', 'Preview');
+    expect(document.querySelector('[data-lody-preview-preload]')).toBeNull();
+    expect(remountedIframe?.isConnected).toBe(true);
+    expect(remountedIframe?.src).toBe('http://127.0.0.1:61234/');
   });
 
   it('mounts a fresh iframe when the engine cannot reparent without a reload', async () => {

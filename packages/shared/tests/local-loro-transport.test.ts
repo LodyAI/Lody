@@ -124,6 +124,27 @@ const insert = (doc: LoroDoc, at: number, value: string): void => {
 };
 
 describe('LocalLoroTransportAdapter push+delta sync', () => {
+  it('uploads imported operations on an explicit sync of an already joined room', async () => {
+    const harness = new Harness();
+    const { adapter } = harness.createClient('import-peer');
+    const doc = new LoroDoc();
+    const subscription = adapter.joinDocRoom('doc-imported', doc);
+    await harness.settle();
+    await subscription.firstSyncedWithRemote;
+
+    const recovered = new LoroDoc();
+    insert(recovered, 0, 'recovered');
+    doc.import(recovered.export({ mode: 'update' }));
+    await harness.settle();
+    // Imports are not local edits, so the live subscription leaves them alone.
+    expect(text(harness.serverDoc('doc-imported'))).toBe('');
+
+    await expect(adapter.syncDoc('doc-imported', doc)).resolves.toEqual({ ok: true });
+    await harness.settle();
+    expect(text(harness.serverDoc('doc-imported'))).toBe('recovered');
+    recovered.free();
+  });
+
   it('expires a withheld join into error, then accepts a replacement join', async () => {
     const sent: LocalLoroDataPlaneClientMessage[] = [];
     const listeners = new Set<(message: LocalLoroDataPlaneServerMessage) => void>();

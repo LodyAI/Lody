@@ -34,6 +34,7 @@ import {
   SidebarRowEndSlot,
   SidebarListSkeleton,
   SidebarSectionHeader,
+  SidebarSessionTitleText,
   type SidebarRowKind,
 } from '@/components/sidebar-row-shared';
 import { SessionInfoHoverCard } from '@/components/session-info-hover-card';
@@ -668,14 +669,16 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
       )}
     />
   ) : (
-    <span
+    <SidebarSessionTitleText
+      sessionId={item.id}
+      selected={showSelectedState}
       className={cn(
         'min-w-0 flex-1 truncate font-normal',
         showSelectedState ? 'text-sidebar-selection-foreground' : 'text-sidebar-row-foreground'
       )}
     >
       {item.title}
-    </span>
+    </SidebarSessionTitleText>
   );
 
   const [rowMenuOpen, setRowMenuOpen] = useState(false);
@@ -772,6 +775,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
         </div>
         {/* Keep PR at the right edge. Line totals stay in the hover card. */}
         <SidebarRowEndSlot
+          sessionId={item.id}
           isWaitingPermission={item.isWaitingPermission}
           isWorking={item.isWorking}
           hasUnreadMessages={item.hasUnreadMessages}

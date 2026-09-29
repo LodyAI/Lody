@@ -110,7 +110,9 @@ export function SettingsAccountEntry({
       aria-label={t('settings.account.open', 'Open account settings')}
       {...stylex.props(surface.listRow, active && surface.listRowSelected)}
     >
-      <UserAvatar user={user} size="medium" />
+      <span {...stylex.props(surface.listRowAvatar)}>
+        <UserAvatar user={user} size="medium" />
+      </span>
       <span {...stylex.props(surface.listRowLabel)}>{name}</span>
     </button>
   );

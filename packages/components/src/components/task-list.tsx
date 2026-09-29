@@ -64,6 +64,7 @@ import {
   SidebarRowArchiveButton,
   SidebarRowEndSlot,
   SidebarListSkeleton,
+  SidebarSessionTitleText,
   SessionMergeablePill,
 } from '@/components/sidebar-row-shared';
 import { SessionInfoHoverCard } from '@/components/session-info-hover-card';
@@ -718,7 +719,13 @@ const TaskGroupSection = memo(function TaskGroupSection({
                     )}
                   />
                 ) : (
-                  <span className={cn('truncate font-normal', extraClassName)}>{task.title}</span>
+                  <SidebarSessionTitleText
+                    sessionId={task.taskId}
+                    selected={showSelectedState}
+                    className={cn('truncate font-normal', extraClassName)}
+                  >
+                    {task.title}
+                  </SidebarSessionTitleText>
                 );
               const handleAnchorClick = useAnchor
                 ? (event: ReactMouseEvent<HTMLAnchorElement>) => {
@@ -843,6 +850,7 @@ const TaskGroupSection = memo(function TaskGroupSection({
                     </div>
                     {/* Keep PR at the right edge. Line totals stay in the hover card. */}
                     <SidebarRowEndSlot
+                      sessionId={task.taskId}
                       isWaitingPermission={task.isWaitingPermission}
                       isWorking={task.isWorking}
                       hasUnreadMessages={task.hasUnreadMessages}

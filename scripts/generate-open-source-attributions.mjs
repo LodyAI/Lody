@@ -36,9 +36,9 @@ const VENDORED_ATTRIBUTIONS = [
     homepage: 'https://github.com/inokawa/virtua/tree/0.52.7',
     author: 'inokawa',
     description:
-      'Forked list virtualizer (packages/virtua, @lody/virtua) with keyed item sizes and anchoring.',
-    assets: ['Virtua core and React bindings'],
-    noticePath: 'packages/virtua/LICENSE',
+      'Keyed list layout from Virtua, adapted for the conversation scroll engine (packages/components/src/lib/conversation-scroll/keyed-layout).',
+    assets: ['Virtua list layout and size cache'],
+    noticePath: 'packages/components/src/lib/conversation-scroll/keyed-layout/LICENSE',
   },
   {
     id: 'bundled-theme-vscode-defaults',

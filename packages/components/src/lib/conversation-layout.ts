@@ -30,3 +30,12 @@ export const CONVERSATION_GUTTER_X_CLASS = 'px-[14px] sm:px-[18px]';
 // CONTENT box, so the max width adds the per-breakpoint gutter (14px / 18px).
 // Wide enough for code blocks, narrow enough to stay readable.
 export const CONVERSATION_CONTENT_WIDTH_CLASS = `mx-auto w-full max-w-[calc(48rem+28px)] sm:max-w-[calc(48rem+36px)] ${CONVERSATION_GUTTER_X_CLASS}`;
+
+/**
+ * Full-width variant (`conversationWideModeAtom`): the cap on the CONTENT box
+ * drops and the column spans the pane, keeping only the shared gutter — the
+ * same left/right padding the capped column already leaves at the edges of a
+ * narrow window. `mx-auto` stays so a re-capped nested column (none today)
+ * would still centre.
+ */
+export const CONVERSATION_CONTENT_WIDTH_WIDE_CLASS = `mx-auto w-full ${CONVERSATION_GUTTER_X_CLASS}`;

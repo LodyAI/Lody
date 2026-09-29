@@ -33,9 +33,9 @@ import { cn } from '@/lib/utils';
  * The viewer is also the only place a diagram behaves like a canvas. A diagram
  * sitting in a message never takes the wheel (see `markdown-renderer.tsx`);
  * here, where the user asked for the diagram and nothing else is on screen, a
- * trackpad pinch zooms around the pointer and a held button drags the diagram.
- * Plain wheel and touch panning stay with the browser's own scrolling, so
- * momentum and overscroll containment are the platform's, not a reimplementation.
+ * trackpad pinch zooms around the pointer, a held button drags the diagram, and
+ * touch owns one-finger panning plus two-finger pinch. Plain wheel scrolling
+ * still belongs to the surface, so the browser keeps its normal scroll physics.
  */
 
 export const MERMAID_DIAGRAM_MIN_ZOOM = 0.25;
@@ -58,6 +58,35 @@ const MERMAID_DIAGRAM_PINCH_SENSITIVITY = 0.01;
 
 /** A drag this short is a click that wobbled, not a pan. */
 const MERMAID_DIAGRAM_PAN_SLOP_PX = 3;
+
+/** A touch move this short is noise, not a pinch or a pan. */
+const MERMAID_DIAGRAM_TOUCH_SLOP_PX = 2;
+
+type MermaidDiagramTouchPoint = {
+  readonly clientX: number;
+  readonly clientY: number;
+  readonly onDiagram: boolean;
+};
+
+type MermaidDiagramTouchGesture = {
+  readonly centerX: number;
+  readonly centerY: number;
+  readonly distance: number;
+};
+
+function measureTouchGesture(
+  points: ReadonlyMap<number, MermaidDiagramTouchPoint>
+): MermaidDiagramTouchGesture | null {
+  const [first, second] = [...points.values()];
+  if (!first || !second) {
+    return null;
+  }
+  return {
+    centerX: (first.clientX + second.clientX) / 2,
+    centerY: (first.clientY + second.clientY) / 2,
+    distance: Math.hypot(second.clientX - first.clientX, second.clientY - first.clientY),
+  };
+}
 
 /**
  * `size="icon"` is 36px square. The viewer's controls sit at the top edge of a
@@ -227,6 +256,15 @@ function OpenMermaidDiagramViewer({
     lastX: number;
     lastY: number;
   } | null>(null);
+  const touchPointsRef = useRef(new Map<number, MermaidDiagramTouchPoint>());
+  const touchPanRef = useRef<{
+    pointerId: number;
+    originX: number;
+    originY: number;
+    lastX: number;
+    lastY: number;
+  } | null>(null);
+  const touchPinchRef = useRef<MermaidDiagramTouchGesture | null>(null);
   // A pan that ends off the diagram would otherwise read as a click on the
   // backdrop, which closes the viewer.
   const pannedRef = useRef(false);
@@ -389,18 +427,58 @@ function OpenMermaidDiagramViewer({
     };
   }, [zoomAtPoint]);
 
-  // Dragging the diagram itself pans it. Touch keeps the browser's own panning,
-  // whose momentum and rubber-banding a scroll driven from pointer deltas cannot
-  // reproduce, so only a held mouse or pen button pans by hand.
+  // A mouse/pen drag and a touch gesture share the same scroll surface, but a
+  // touch needs two live points before the browser can tell a pan from a pinch.
+  // The surface opts into `touch-action: none` below, so these handlers own the
+  // touch movement and keep the diagram under the fingers instead of letting a
+  // browser page zoom or a parent drawer consume it.
   const handlePointerDown = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
-    // Whatever the last gesture left behind, this one starts as a click.
-    pannedRef.current = false;
     const surface = scrollRef.current;
     const target = event.target;
     const onDiagram = target instanceof Node && Boolean(hostRef.current?.contains(target));
-    // Recorded for every pointer type, including the touch that never pans.
+
+    if (event.pointerType === 'touch') {
+      if (touchPointsRef.current.size === 0) {
+        // Whatever the last gesture left behind, this one starts as a click.
+        pannedRef.current = false;
+        pressedOnDiagramRef.current = onDiagram;
+      } else {
+        // A second finger may land on a child node with a different target;
+        // the gesture still belongs to the diagram if either finger began on it.
+        pressedOnDiagramRef.current ||= onDiagram;
+      }
+      touchPointsRef.current.set(event.pointerId, {
+        clientX: event.clientX,
+        clientY: event.clientY,
+        onDiagram,
+      });
+      surface?.setPointerCapture?.(event.pointerId);
+
+      const gesture = measureTouchGesture(touchPointsRef.current);
+      if (gesture) {
+        touchPanRef.current = null;
+        touchPinchRef.current = gesture;
+      } else if (onDiagram) {
+        touchPanRef.current = {
+          pointerId: event.pointerId,
+          originX: event.clientX,
+          originY: event.clientY,
+          lastX: event.clientX,
+          lastY: event.clientY,
+        };
+      }
+      return;
+    }
+
+    // A mouse or pen press starts a fresh gesture and cannot inherit a stale
+    // touch pointer if a platform drops its final pointerup during a handoff.
+    touchPointsRef.current.clear();
+    touchPanRef.current = null;
+    touchPinchRef.current = null;
+    pannedRef.current = false;
     pressedOnDiagramRef.current = onDiagram;
-    if (!surface || event.pointerType === 'touch' || event.button !== 0 || !onDiagram) {
+    panRef.current = null;
+    if (!surface || event.button !== 0 || !onDiagram) {
       return;
     }
     // Otherwise the drag paints a text selection across the diagram's labels.
@@ -415,33 +493,120 @@ function OpenMermaidDiagramViewer({
     surface.setPointerCapture?.(event.pointerId);
   }, []);
 
-  const handlePointerMove = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
-    const pan = panRef.current;
-    const surface = scrollRef.current;
-    if (!pan || !surface || pan.pointerId !== event.pointerId) {
-      return;
-    }
-    // Measured from where the drag started, so a slow pan of many small moves
-    // still counts as one.
-    if (
-      Math.abs(event.clientX - pan.originX) >= MERMAID_DIAGRAM_PAN_SLOP_PX ||
-      Math.abs(event.clientY - pan.originY) >= MERMAID_DIAGRAM_PAN_SLOP_PX
-    ) {
-      pannedRef.current = true;
-    }
-    surface.scrollLeft -= event.clientX - pan.lastX;
-    surface.scrollTop -= event.clientY - pan.lastY;
-    pan.lastX = event.clientX;
-    pan.lastY = event.clientY;
-  }, []);
+  const handlePointerMove = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>) => {
+      const surface = scrollRef.current;
+      if (event.pointerType === 'touch') {
+        const point = touchPointsRef.current.get(event.pointerId);
+        if (!point || !surface) {
+          return;
+        }
+        touchPointsRef.current.set(event.pointerId, {
+          ...point,
+          clientX: event.clientX,
+          clientY: event.clientY,
+        });
+
+        const pinch = touchPinchRef.current;
+        const gesture = measureTouchGesture(touchPointsRef.current);
+        if (pinch && gesture) {
+          const centerDeltaX = gesture.centerX - pinch.centerX;
+          const centerDeltaY = gesture.centerY - pinch.centerY;
+          const distanceChanged = Math.abs(gesture.distance - pinch.distance);
+          if (
+            Math.abs(centerDeltaX) >= MERMAID_DIAGRAM_TOUCH_SLOP_PX ||
+            Math.abs(centerDeltaY) >= MERMAID_DIAGRAM_TOUCH_SLOP_PX ||
+            distanceChanged >= MERMAID_DIAGRAM_TOUCH_SLOP_PX
+          ) {
+            pannedRef.current = true;
+          }
+          if (Math.abs(centerDeltaX) >= MERMAID_DIAGRAM_TOUCH_SLOP_PX) {
+            surface.scrollLeft -= centerDeltaX;
+          }
+          if (Math.abs(centerDeltaY) >= MERMAID_DIAGRAM_TOUCH_SLOP_PX) {
+            surface.scrollTop -= centerDeltaY;
+          }
+          if (pinch.distance > 0 && gesture.distance > 0 && distanceChanged >= 0.5) {
+            zoomAtPoint(gesture.centerX, gesture.centerY, gesture.distance / pinch.distance);
+          }
+          touchPinchRef.current = gesture;
+          event.preventDefault();
+          return;
+        }
+
+        const pan = touchPanRef.current;
+        if (!pan || pan.pointerId !== event.pointerId || !point.onDiagram) {
+          return;
+        }
+        const deltaX = event.clientX - pan.lastX;
+        const deltaY = event.clientY - pan.lastY;
+        if (
+          Math.abs(event.clientX - pan.originX) >= MERMAID_DIAGRAM_PAN_SLOP_PX ||
+          Math.abs(event.clientY - pan.originY) >= MERMAID_DIAGRAM_PAN_SLOP_PX
+        ) {
+          pannedRef.current = true;
+        }
+        surface.scrollLeft -= deltaX;
+        surface.scrollTop -= deltaY;
+        pan.lastX = event.clientX;
+        pan.lastY = event.clientY;
+        event.preventDefault();
+        return;
+      }
+
+      const pan = panRef.current;
+      if (!pan || !surface || pan.pointerId !== event.pointerId) {
+        return;
+      }
+      // Measured from where the drag started, so a slow pan of many small moves
+      // still counts as one.
+      if (
+        Math.abs(event.clientX - pan.originX) >= MERMAID_DIAGRAM_PAN_SLOP_PX ||
+        Math.abs(event.clientY - pan.originY) >= MERMAID_DIAGRAM_PAN_SLOP_PX
+      ) {
+        pannedRef.current = true;
+      }
+      surface.scrollLeft -= event.clientX - pan.lastX;
+      surface.scrollTop -= event.clientY - pan.lastY;
+      pan.lastX = event.clientX;
+      pan.lastY = event.clientY;
+    },
+    [zoomAtPoint]
+  );
 
   const handlePointerEnd = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    const surface = scrollRef.current;
+    if (event.pointerType === 'touch') {
+      touchPointsRef.current.delete(event.pointerId);
+      surface?.releasePointerCapture?.(event.pointerId);
+      if (touchPointsRef.current.size === 0) {
+        touchPanRef.current = null;
+        touchPinchRef.current = null;
+      } else {
+        const remainingEntry = [...touchPointsRef.current.entries()][0];
+        const remainingId = remainingEntry?.[0];
+        const remaining = remainingEntry?.[1];
+        touchPinchRef.current = null;
+        touchPanRef.current =
+          remainingId !== undefined && remaining?.onDiagram
+            ? {
+                pointerId: remainingId,
+                originX: remaining.clientX,
+                originY: remaining.clientY,
+                lastX: remaining.clientX,
+                lastY: remaining.clientY,
+              }
+            : null;
+      }
+      return;
+    }
+
     const pan = panRef.current;
     if (!pan || pan.pointerId !== event.pointerId) {
       return;
     }
     panRef.current = null;
-    scrollRef.current?.releasePointerCapture?.(event.pointerId);
+    surface?.releasePointerCapture?.(event.pointerId);
   }, []);
 
   const zoomBy = useCallback((factor: number) => {
@@ -542,6 +707,10 @@ function OpenMermaidDiagramViewer({
           paddingBottom: SAFE_AREA_BOTTOM,
           paddingLeft: SAFE_AREA_LEFT,
           paddingRight: SAFE_AREA_RIGHT,
+          // The viewer owns touch panning and pinch zoom. Without this, the
+          // browser turns the second finger into page zoom before pointer
+          // events can keep the diagram anchored.
+          touchAction: 'none',
         }}
         onClick={handleSurfaceClick}
         onPointerDown={handlePointerDown}
@@ -549,7 +718,13 @@ function OpenMermaidDiagramViewer({
         onPointerUp={handlePointerEnd}
         onPointerCancel={handlePointerEnd}
       >
-        <div className="flex min-h-full min-w-full items-center justify-center p-4">
+        <div
+          className="grid min-h-full min-w-full box-border p-4"
+          // `safe center` keeps a diagram centred while it fits and falls back
+          // to the start edge as soon as it overflows, so both ends remain
+          // reachable through the scroll surface.
+          style={{ placeItems: 'safe center' }}
+        >
           <div ref={hostRef} className="shrink-0 cursor-grab active:cursor-grabbing" />
         </div>
       </div>

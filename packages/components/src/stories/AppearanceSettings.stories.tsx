@@ -19,6 +19,8 @@ function ControlledAppearanceSettings({ isElectron }: { isElectron: boolean }) {
   const [theme, setTheme] = useState<AppearanceSettingsViewProps['theme']>('light');
   const [conversationFontSize, setConversationFontSize] =
     useState<AppearanceSettingsViewProps['conversationFontSize']>(14);
+  const [conversationWideMode, setConversationWideMode] = useState(false);
+  const [inlineMathEnabled, setInlineMathEnabled] = useState(false);
   const [interfaceFontFamily, setInterfaceFontFamily] = useState('Inter');
   const [terminalFontFamily, setTerminalFontFamily] = useState('');
   const [terminalFontSize, setTerminalFontSize] = useState(13);
@@ -33,6 +35,10 @@ function ControlledAppearanceSettings({ isElectron }: { isElectron: boolean }) {
         onThemeCancel={() => undefined}
         conversationFontSize={conversationFontSize}
         onConversationFontSizeChange={setConversationFontSize}
+        conversationWideMode={conversationWideMode}
+        onConversationWideModeChange={setConversationWideMode}
+        inlineMathEnabled={inlineMathEnabled}
+        onInlineMathEnabledChange={setInlineMathEnabled}
         isElectron={isElectron}
         interfaceFontFamily={interfaceFontFamily}
         onInterfaceFontFamilyChange={setInterfaceFontFamily}

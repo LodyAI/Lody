@@ -1,6 +1,6 @@
 import http from 'http';
 import { randomBytes } from 'crypto';
-import { existsSync, mkdirSync, writeFileSync, unlinkSync } from 'fs';
+import { existsSync, mkdirSync, writeFileSync, unlinkSync, renameSync } from 'fs';
 import path from 'path';
 import { Logger, getLogger } from '@/utils/logger';
 import { GitHubTokenFetchError } from '@/lib/github-token-manager';
@@ -33,6 +33,7 @@ export const LODY_GIT_CRED_BROKER_STATE_FILE_ENV = 'LODY_GIT_CRED_BROKER_STATE_F
  */
 export const BROKER_STATE_FILE_CONTAINER_PATH = '/home/node/.lody/broker.json';
 export const LODY_GIT_CRED_CONTEXT_TOKEN_ENV = 'LODY_GIT_CRED_CONTEXT_TOKEN';
+export const LODY_GIT_CRED_CONTEXT_FILE_ENV = 'LODY_GIT_CRED_CONTEXT_FILE';
 
 export type GitCredentialBrokerSessionContext = {
   sessionId: string;
@@ -53,6 +54,7 @@ export const createGitCredentialBrokerHandler = (options: {
   tokenManager: CloudGithubTokenManager;
   logger: Logger;
   resolveContext?: (contextToken: string) => GitCredentialBrokerSessionContext | null;
+  ownerUserId?: string;
 }): http.RequestListener => {
   const handleRequest = async (req: http.IncomingMessage, res: http.ServerResponse) => {
     try {
@@ -70,6 +72,7 @@ export const createGitCredentialBrokerHandler = (options: {
           '/github-token',
           '/git-credential/reject',
           '/github-token/reject',
+          '/github-auth-context',
         ].includes(req.url ?? '')
       ) {
         res.writeHead(404, { 'Content-Type': 'application/json' });
@@ -93,7 +96,7 @@ export const createGitCredentialBrokerHandler = (options: {
       const obj = body && typeof body === 'object' ? (body as Record<string, unknown>) : null;
       const repoFullName = obj && typeof obj.repoFullName === 'string' ? obj.repoFullName : null;
       const contextToken = obj && typeof obj.contextToken === 'string' ? obj.contextToken : null;
-      if (!repoFullName) {
+      if (!repoFullName && req.url !== '/github-auth-context') {
         res.writeHead(400, { 'Content-Type': 'application/json' });
         res.end(
           JSON.stringify({ error: 'bad_request', message: 'Missing required field: repoFullName.' })
@@ -101,13 +104,76 @@ export const createGitCredentialBrokerHandler = (options: {
         return;
       }
       const context = contextToken ? (options.resolveContext?.(contextToken) ?? null) : null;
-      if (contextToken && !context) {
+      if (!context) {
         res.writeHead(403, { 'Content-Type': 'application/json' });
         res.end(
           JSON.stringify({
             error: 'invalid_context',
             message: 'Invalid or expired GitHub credential context.',
           })
+        );
+        return;
+      }
+      const isContextCurrent = () => {
+        const current = contextToken ? options.resolveContext?.(contextToken) : null;
+        if (
+          current &&
+          current.sessionId === context.sessionId &&
+          current.requesterUserId === context.requesterUserId &&
+          current.machineId === context.machineId
+        )
+          return true;
+        res.writeHead(403, { 'Content-Type': 'application/json' });
+        res.end(
+          JSON.stringify({
+            error: 'invalid_context',
+            message: 'GitHub requester changed during credential resolution.',
+          })
+        );
+        return false;
+      };
+      if (req.url === '/github-auth-context') {
+        if (!context) {
+          res.writeHead(403);
+          res.end(JSON.stringify({ error: 'invalid_context' }));
+          return;
+        }
+        const policy = await options.tokenManager.getCredentialPolicy(context);
+        if (!isContextCurrent()) return;
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(
+          JSON.stringify({
+            ...policy,
+            allowLocalAuth: context.requesterUserId === options.ownerUserId,
+          })
+        );
+        return;
+      }
+      if (!repoFullName) return;
+      const source = obj?.source;
+      if (source !== undefined && source !== 'personal' && source !== 'app') {
+        res.writeHead(400);
+        res.end(JSON.stringify({ error: 'invalid_source' }));
+        return;
+      }
+      if (source !== undefined) {
+        if (!context) {
+          res.writeHead(403);
+          res.end(JSON.stringify({ error: 'invalid_context' }));
+          return;
+        }
+        const candidate = await options.tokenManager.getCredentialCandidate(
+          repoFullName,
+          context,
+          source,
+          typeof obj?.invalidatedPersonalToken === 'string'
+            ? obj.invalidatedPersonalToken
+            : undefined
+        );
+        if (!isContextCurrent()) return;
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(
+          JSON.stringify(candidate ? { ...candidate, available: true } : { available: false })
         );
         return;
       }
@@ -126,12 +192,21 @@ export const createGitCredentialBrokerHandler = (options: {
       // The git credential protocol does not tell us whether this credential
       // will be used for fetch or push. Session-scoped contexts get requester-bound
       // write tokens; host infrastructure without a context gets the installation token.
-      const tokenValue = context
-        ? await options.tokenManager.getWriteTokenForRepo(repoFullName, {
-            requesterUserId: context.requesterUserId,
-            machineId: context.machineId,
+      if (!context) {
+        res.writeHead(403, { 'Content-Type': 'application/json' });
+        res.end(
+          JSON.stringify({
+            error: 'invalid_context',
+            message: 'GitHub requester context is required.',
           })
-        : await options.tokenManager.getAppTokenForRepo(repoFullName);
+        );
+        return;
+      }
+      const tokenValue = await options.tokenManager.getWriteTokenForRepo(repoFullName, {
+        requesterUserId: context.requesterUserId,
+        machineId: context.machineId,
+      });
+      if (!isContextCurrent()) return;
       if (!tokenValue) {
         res.writeHead(404, { 'Content-Type': 'application/json' });
         res.end(
@@ -162,7 +237,15 @@ export const createGitCredentialBrokerHandler = (options: {
       const errorMessage = formatErrorMessage(error);
       options.logger.debug(`credential broker request failed: ${errorMessage}`);
       res.writeHead(500, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: 'internal_error', message: errorMessage }));
+      res.end(
+        JSON.stringify({
+          error: req.url === '/github-auth-context' ? 'policy_unavailable' : 'internal_error',
+          message:
+            req.url === '/github-auth-context'
+              ? 'Cannot verify GitHub identity preferences. Check the Lody connection and machine access, then retry.'
+              : errorMessage,
+        })
+      );
     }
   };
   return (req, res) => {
@@ -214,6 +297,7 @@ export class GitCredentialBroker {
   private readonly logger: Logger;
   private readonly tokenManager: CloudGithubTokenManager;
   private readonly workspaceId: string | undefined;
+  private readonly ownerUserId: string | undefined;
   private readonly contexts = new Map<string, GitCredentialBrokerSessionContext>();
   private readonly sessionContextTokens = new Map<string, string>();
   private server: http.Server | null = null;
@@ -224,16 +308,23 @@ export class GitCredentialBroker {
   constructor(options: {
     tokenManager: CloudGithubTokenManager;
     workspaceId?: string;
+    ownerUserId?: string;
     logger?: Logger;
   }) {
     this.logger = options.logger ?? getLogger('git-cred-broker');
     this.tokenManager = options.tokenManager;
     this.workspaceId = options.workspaceId;
+    this.ownerUserId = options.ownerUserId;
   }
 
   /** Path this broker publishes its state to, for callers pointing a session at it. */
   getStateFilePath(): string | undefined {
     return this.workspaceId ? getBrokerStateFilePathForWorkspace(this.workspaceId) : undefined;
+  }
+
+  getSessionContextFilePath(sessionId: string): string | undefined {
+    const state = this.getStateFilePath();
+    return state ? `${state}.sessions/${encodeURIComponent(sessionId)}.json` : undefined;
   }
 
   private readonly resolveContext = (
@@ -246,6 +337,7 @@ export class GitCredentialBroker {
       tokenManager: this.tokenManager,
       logger: this.logger,
       resolveContext: this.resolveContext,
+      ownerUserId: this.ownerUserId,
     });
   }
 
@@ -308,6 +400,13 @@ export class GitCredentialBroker {
     const contextToken = randomBytes(32).toString('hex');
     this.sessionContextTokens.set(context.sessionId, contextToken);
     this.contexts.set(contextToken, context);
+    const file = this.getSessionContextFilePath(context.sessionId);
+    if (file) {
+      mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+      const temporary = `${file}.${randomBytes(8).toString('hex')}.tmp`;
+      writeFileSync(temporary, JSON.stringify({ contextToken }), { mode: 0o600 });
+      renameSync(temporary, file);
+    }
     return contextToken;
   }
 

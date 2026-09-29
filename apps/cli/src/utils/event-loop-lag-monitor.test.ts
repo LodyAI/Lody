@@ -12,6 +12,7 @@ function harness(heapLimitMiB = 4096) {
     error: () => {},
     success: () => {},
     debug: () => {},
+    trace: () => {},
     setLevel: () => {},
     setDebug: () => {},
     child: () => logger,

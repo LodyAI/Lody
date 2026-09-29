@@ -1,7 +1,7 @@
 # Agent notice banner spans the column and drops its header rule
 
 Status: implemented
-Translation: current
+Translation: pending
 
 [中文](2026-09-23-agent-notice-banner-full-width.zh.md)
 
@@ -51,3 +51,13 @@ tones in place among real rows: before, each card stopped short of the column
 with a visible rule under its header; after, both span the column as single
 bands. Checked in a light theme at desktop width; dark-theme tone mixing was
 not re-reviewed, though no colour token changed.
+
+## Follow-up: copying failures on touch screens
+
+The always-open banner had lost the old dialog's copy action. Every failure now
+has a visible Copy error footer, including failures with only a title. It reuses
+`buildChatFailedErrorReport` and the shared clipboard fallback, and reports the
+write outcome with a toast. Keeping copy below the text costs one control row,
+but avoids squeezing the title beside both copy and capacity retry on mobile.
+`CapacityRetryNotice` stories cover a disconnected agent and a title-only failure;
+the disconnected story checks the clipboard report after a click.

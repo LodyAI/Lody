@@ -4,35 +4,13 @@ Parent AGENTS apply. Edit `AGENTS.md`, not its `CLAUDE.md` symlink. Background: 
 
 ## Conversation scrolling
 
+- The scroll engine owns the viewport: [its rules](../lib/conversation-scroll/AGENTS.md).
 - Only viewport/tail/selection render bodies; other reads keep placeholders.
-- Reveal when data and measured destination agree; ignore early range reports.
-  Reapply cached offsets until reveal; navigation supersedes them.
-  Key readiness/window by `factSource ?? view`; new sources reset both.
-  Restore before paint; hydration follows DOM extent only with the follow lock.
-- Correct content measurements in ResizeObserver before paint, even with unchanged
-  row counts; no RAF deferral. Correct Virtua spacer-height commits in MutationObserver
-  before deferred resize delivery. Observe spacer height and mounted row geometry
-  (which may overflow it), never message subtrees/text or scroll pointer styles. Respect the live follow
-  lock and explicit jump suppression.
-- Virtua owns rows and measurement; `use-sticky-scroll.ts` owns the follow mode
-  (`follow`/`anchored`/`free`, [note](../../../../.agents/notes/implemented/architecture/2026-09-23-conversation-follow-modes.md)).
-  Only reader input releases it: upward wheel not consumed by a nested scroller,
-  upward keys, upward scroll with pointer/touch held. Only a downward scroll to the
-  real bottom, an explicit jump or a send re-arms. Observers never change the mode.
-- Bind through the viewport's React callback ref on Virtua's public `Virtualizer`;
-  detach on unmount, including empty-to-populated transitions. Never recover it from
-  a `VList` handle, DOM query, item-count effect, observer retry or timer.
-- Handle viewport HEIGHT changes (composer, keyboard, docks) through ResizeObserver,
-  keeping the mode's position; ignore width-only records. Mark own scrollTop
-  writes. No resize pumps, skip flags or guessed timers.
-- A direct send glides (rAF, retargeted per frame; input stops it) to its row and
-  reserves a reply-room `Virtualizer` sibling; outside `anchored` it only shrinks.
-  Queue/guide sends never scroll.
-- Group toggles never scroll; a non-following reader is never pulled to the end.
-  `keyed` Virtua keeps the reader's row when rows change above; add no second writer.
-  No frame retries/settle timers. Keep per-session restore, search/expand suppression.
+- Key readiness/window by `factSource ?? view`; new sources reset both. Before the
+  first viewport report the window is the tail plus the restored anchor's turn;
+  ignore reports until the initial window is ready.
 - A cached session renders in the frame after its click: no promise tick,
-  effect-only state or deferred setState before reveal.
+  effect-only state or deferred setState before its first cycle.
 
 ## Session, auth, and app shell
 

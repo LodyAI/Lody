@@ -1,3 +1,6 @@
+import { createWorkspaceSessionSendJournal } from './workspace-session-send-journal';
+import { throwIfSendAborted } from '../lib/session-send-resources';
+import { createSessionSendResources } from '@/lib/session-send-resources';
 import { waitForScheduleWriteSync, withScheduleWrite } from './schedule-write-sync';
 import {
   getScheduleRoomId,
@@ -13,10 +16,15 @@ import {
 import { jotaiStore } from '@/lib/utils';
 import { desktopWindowId } from '@/lib/desktop-window';
 import { navigationSidebarHiddenAtom } from '@/atoms/layout-state';
-import { getMachineRoomId, type MachineMeta } from '@lody/shared';
+import {
+  getMachineRoomId,
+  type MachineMeta,
+  type MachineProtocolCapabilities,
+  negotiatedAcpCapabilitiesRefreshForce,
+} from '@lody/shared';
 import { LoroRepo, type RepoRoomSubscription, type RepoWatchHandle } from 'loro-repo';
 import { IndexedDBStorageAdaptor } from 'loro-repo/storage/indexeddb';
-import { StreamsTransportAdapter } from 'loro-repo/transport/streams';
+import type { StreamsTransportAdapter } from 'loro-repo/transport/streams';
 import { StreamsCrdt, createLoroDocAdapter } from '@loro-dev/streams-crdt/loro';
 import type { PlatformSyncMode } from '@lody/platform';
 import {
@@ -120,6 +128,10 @@ import { WorkspaceMachineMonitorTransport } from './workspace-machine-monitor-tr
 import { WorkspaceLocalMachineMonitorTransport } from './workspace-local-machine-monitor-transport';
 import { TargetRoutedMachineMonitor } from './target-routed-machine-monitor';
 import { createResilientRemoteCursorStore } from './resilient-remote-cursor-store';
+import {
+  createWorkspaceStreamsTransport,
+  getWorkspaceMetaStreamUrl,
+} from './workspace-streams-transport';
 import { scheduleAfterStartupNavigationCooldown } from './startup-network-idle';
 import { logCodeCollabDebug } from '@/lib/code-collab-debug';
 import { readSessionAndMachineMetas, type ReadDocMetaCache } from '@/lib/doc-meta-batch';
@@ -173,6 +185,12 @@ export function resolveWorkspaceRuntimeCacheIdentity(
 }
 
 type RuntimeDeps = {
+  getSendAdmissionContext?: () => {
+    entitlement?: import('@lody/shared').BillingQuotaEntitlement;
+    sessionCount: number | null;
+  };
+
+  accountId?: string | null;
   /**
    * Used for caching the (slug, id) mapping in localStorage.
    */
@@ -224,6 +242,14 @@ type LoroStreamsJsonStreamClient = ReturnType<typeof createLoroStreamsJsonStream
 const isDestroyedError = (error: unknown): boolean => {
   return error instanceof Error && error.message === 'Destroyed';
 };
+
+/** A web attach whose token generation was torn down while it was in flight. */
+class SupersededAttachError extends Error {
+  constructor() {
+    super('Superseded Loro Streams attach');
+    this.name = 'SupersededAttachError';
+  }
+}
 
 const formatTransportError = (error: unknown): string => {
   if (typeof error !== 'object' || error === null) {
@@ -439,24 +465,10 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   // Liveness invariant: opening a workspace must never wait forever on rebuildable
   // local cache. Loro Streams cursors are checkpoints, not source-of-truth data, so
   // a broken IndexedDB cursor store must fail open and let Streams bootstrap/catch up.
-  const metaStreamIdForWorkspace = getLoroMetaStreamId(deps.workspaceId);
-  const shouldBypassMetaRemoteCursorLoad = (streamUrl: string): boolean => {
-    const storage = getBrowserLocalStorage();
-    if (!storage) {
-      return false;
-    }
-    // If a previous page lifetime timed out before deleting a suspect meta cursor,
-    // persistently bypass that checkpoint on the next startup. The cursor is only
-    // replay progress; successful meta sync below clears this marker.
-    const bypassMarker = storage.getItem(getMetaRemoteCursorBypassStorageKey(deps.workspaceId));
-    return (
-      bypassMarker !== null &&
-      streamUrl.endsWith(`/${encodeURIComponent(metaStreamIdForWorkspace)}`)
-    );
-  };
+  // This store serves LoroDoc rooms only: Meta and named Flock progress is
+  // replica-bound and restored by the repo's own IndexedDB with the data it covers.
   const remoteCursorStore = createResilientRemoteCursorStore({
     dbName: cacheIdentity.remoteCursorDbName,
-    shouldBypassPrimaryLoad: shouldBypassMetaRemoteCursorLoad,
     onWarning: (message, context) => {
       console.warn(message, {
         workspaceId: deps.workspaceId,
@@ -526,6 +538,16 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   let initialMetaSyncFailed = false;
   let metaFirstSyncRecovery: Promise<void> | null = null;
   let metaRemoteCursorInvalidated = false;
+  // Whether the suspect Meta checkpoint named by the bypass marker has actually
+  // been deleted in this page lifetime. The marker may only be cleared then: a
+  // Meta session that resumed from an undeleted suspect checkpoint can sync
+  // "successfully" while still missing the prefix it skipped.
+  let suspectMetaCheckpointDropped = false;
+  // Dual mode: whether the CURRENT cloud attach deleted the suspect Meta
+  // checkpoint. The dual runtime watches its local Meta binding, which usually
+  // synced before the cloud plane existed, so only the cloud binding's first
+  // sync after such a delete may clear the marker.
+  let cloudAttachDroppedSuspectCheckpoint = false;
   const metaSyncState = (): RoomSyncState => metaTracker?.getSyncState() ?? 'idle';
 
   // workspaceId is required and provided at initialization
@@ -618,6 +640,21 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   let reconnectingStatusVisible = false;
   let localReconnectLoop: LocalReconnectLoop | null = null;
   let cloudReconnectLoop: LocalReconnectLoop | null = null;
+  // Web only: retries a durable transport attach that failed while a token is
+  // held (see attachWebDurableTransport). Room trackers cannot see this state:
+  // no room exists before the transport attaches.
+  let webAttachReconnectLoop: LocalReconnectLoop | null = null;
+  let webTransportAttachPending: { startPresence: boolean } | null = null;
+  let webTransportAttach: { generation: number; promise: Promise<void> } | null = null;
+  // Bumped by every teardownTransport (token change, sign-out, dispose, meta
+  // recovery). An attach belongs to the generation it started in; once that
+  // generation is torn down it must not publish provider, transport or state.
+  let webAttachGeneration = 0;
+  // loro-repo registers a transport synchronously when addTransport starts and
+  // only resolves after routing live rooms, so an in-flight add is already live.
+  // Generations do not wait for each other, so adds of several generations can
+  // be in flight at once; each clears only its own entry.
+  const webCloudAddsInFlight = new Set<number>();
   let reconnectBackstopTimer: ReturnType<typeof setInterval> | null = null;
   let releaseIdleDocumentStoresBeforeReconnect: () => Promise<void> = async () => {};
   // Background eager-sync coordinator. Assigned once all of its port
@@ -645,6 +682,8 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   };
 
   const markMetaRemoteCursorBypass = (reason: string): void => {
+    // A new suspicion is not covered by a delete that happened before it.
+    cloudAttachDroppedSuspectCheckpoint = false;
     const storage = getBrowserLocalStorage();
     if (!storage) {
       return;
@@ -709,6 +748,17 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     provider: LoroStreamsTokenProvider | null
   ): string | undefined => provider?.getShardHostSuffix();
 
+  const getMetaStreamUrl = (baseUrl: string): string =>
+    getWorkspaceMetaStreamUrl(workspaceId, baseUrl);
+
+  // The Meta checkpoint was captured with this window's hydrated meta Flock
+  // when the repo was created; deleting it makes the next Meta session bootstrap.
+  const deleteMetaCheckpoint = async (metaStreamUrl: string): Promise<void> => {
+    await repo
+      .getReplicaCheckpointStore({ kind: 'meta', flock: repo.getMeta() })
+      .delete?.(metaStreamUrl);
+  };
+
   const invalidateMetaRemoteCursor = async (reason: string, error: unknown): Promise<void> => {
     // Remote cursors only exist for the Streams plane; the local-only
     // platform has neither the cursor rows nor a provider to derive URLs from.
@@ -720,15 +770,20 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       return;
     }
 
-    metaRemoteCursorInvalidated = true;
+    suspectMetaCheckpointDropped = false;
     const metaStreamId = getLoroMetaStreamId(workspaceId);
-    const metaStreamUrl = createLoroStreamUrl({
-      bucketId: LORO_STREAMS_BUCKET_ID,
-      streamId: metaStreamId,
-      baseUrl: transportStreamsBaseUrl ?? getStreamsBaseUrlForProvider(streamsTokenProvider),
-    });
     try {
-      await remoteCursorStore.delete(metaStreamUrl);
+      // Throws before a Streams provider exists; the marker then makes the
+      // next cloud attach delete the checkpoint instead.
+      await deleteMetaCheckpoint(
+        getMetaStreamUrl(
+          transportStreamsBaseUrl ?? getStreamsBaseUrlForProvider(streamsTokenProvider)
+        )
+      );
+      // One-shot per lifetime only once the delete really happened; a failed
+      // delete leaves the marker set and lets the next failure or attach retry.
+      metaRemoteCursorInvalidated = true;
+      suspectMetaCheckpointDropped = true;
       console.warn('Deleted Loro Streams meta remote cursor after sync failure', {
         workspaceId,
         metaStreamId,
@@ -744,6 +799,17 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
         deleteError,
       });
     }
+  };
+
+  // While the bypass marker is set, every new Meta session must start without
+  // the suspect checkpoint (a previous page lifetime may have failed or timed
+  // out before deleting it). Callers check the marker synchronously, so an
+  // unmarked attach keeps its timing. This is a hard precondition of attaching
+  // the cloud transport: a failed delete rejects the attach, keeps the marker,
+  // and leaves the retry to the existing attach/reconnect paths.
+  const dropSuspectMetaCheckpointBeforeAttach = async (streamsBaseUrl: string): Promise<void> => {
+    await deleteMetaCheckpoint(getMetaStreamUrl(streamsBaseUrl));
+    suspectMetaCheckpointDropped = true;
   };
 
   const clearReconnectingStatusTimer = () => {
@@ -1760,10 +1826,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     requestMachinePiExtensions,
   } = createWorkspaceMachineRpcFacade({
     getSessionToken: () => authToken,
-    getMachineProtocolCapabilities: async (machineId) => {
-      const entry = await repo.getDocMeta(getMachineRoomId(machineId));
-      return (entry?.meta as Partial<MachineMeta> | undefined)?.protocolCapabilities;
-    },
+    getMachineProtocolCapabilities,
     workspaceId,
     targetRouter,
     getMachineRpcClient,
@@ -1944,6 +2007,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       const client = await getMachineRpcClient(message.machineId);
       const response = await client.requestMachineAcpCapabilitiesRefresh({
         configId: message.configId,
+        force: message.force,
         onProgress: (progress) => {
           if (!options.signal?.aborted) {
             handleMachineAcpBinaryProgress(progress);
@@ -1997,6 +2061,20 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     }
     if (signal?.aborted) return null;
 
+    // Both planes parse this request strictly on the machine, so `force` is
+    // negotiated once here rather than per transport. A daemon that did not
+    // advertise the capability has no cache to opt out of, so dropping the field
+    // still gives every forced caller the probe it asked for.
+    const { force: requestedForce, ...baseMessage } = message;
+    const negotiatedMessage = {
+      ...baseMessage,
+      ...negotiatedAcpCapabilitiesRefreshForce(
+        { protocolCapabilities: await getMachineProtocolCapabilities(message.machineId) },
+        requestedForce
+      ),
+    };
+    if (signal?.aborted) return null;
+
     if (targetRouter.getPlaneForMachine(message.machineId) === 'local') {
       if (!canUseLocalSessionControl(message)) {
         return {
@@ -2009,7 +2087,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
           error: `Local session control cannot route ${message.type} to machine ${message.machineId}`,
         };
       }
-      const localRequest = requestLocalSessionControl(message, {
+      const localRequest = requestLocalSessionControl(negotiatedMessage, {
         onProgress: (progress) => {
           if (!signal?.aborted) options.onProgress?.(progress);
         },
@@ -2064,7 +2142,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
         error: 'Cloud Machine RPC is disabled in local-only sync mode',
       };
     }
-    const request = performMachineAcpCapabilitiesRefreshViaRpc(message, options);
+    const request = performMachineAcpCapabilitiesRefreshViaRpc(negotiatedMessage, options);
     return signal ? waitForPromiseOrAbort(request, signal) : request;
   };
 
@@ -2540,6 +2618,11 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
 
   let workspaceMetaFirstSynced = false;
   let startupAcpCapabilitiesRefreshCompleted = false;
+  // Which configs this runtime has already refreshed. The boolean above only
+  // latches when a whole pass survives to its end, and presence leaving 'synced'
+  // aborts the pass and re-arms it, so without this set every presence reconnect
+  // re-probed every agent config — a real ACP process per config, forever.
+  const startupAcpCapabilitiesRefreshedConfigKeys = new Set<string>();
   let startupAcpCapabilitiesRefreshAbortController: AbortController | null = null;
   let cancelDelayedStartupAcpCapabilitiesRefresh: (() => void) | null = null;
   const startStartupAcpCapabilitiesRefresh = (): void => {
@@ -2621,6 +2704,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
         },
       },
       {
+        refreshedConfigKeys: startupAcpCapabilitiesRefreshedConfigKeys,
         machineConcurrency: ACP_CAPABILITIES_STARTUP_MACHINE_CONCURRENCY,
         signal: abortController.signal,
       }
@@ -2684,13 +2768,16 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     }
   );
 
-  const teardownTransport = async (
-    options: {
-      stopPresence?: boolean;
-      stopRpcClients?: boolean;
-      resetStreamsClient?: boolean;
-      invalidateTokenProvider?: boolean;
-    } = {}
+  type TeardownTransportOptions = {
+    stopPresence?: boolean;
+    stopRpcClients?: boolean;
+    resetStreamsClient?: boolean;
+    invalidateTokenProvider?: boolean;
+  };
+
+  const teardownTransportSteps = async (
+    options: TeardownTransportOptions,
+    cloudAddWasInFlight: boolean
   ) => {
     const stopPresence = options.stopPresence ?? true;
     const stopRpcClients = options.stopRpcClients ?? true;
@@ -2755,8 +2842,12 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     eagerSyncWorkerClient?.cancelAll();
     // Remove both planes' transports (loro-repo keeps room leases; their
     // bindings report 'detached' until a later attach).
-    if (transportAttached) {
-      await repo.removeTransport('local', { close: true }).catch(() => undefined);
+    if (transportAttached || cloudAddWasInFlight) {
+      // An add still routing rooms is removed now, not when it resolves, so a
+      // sign-out never returns with the old credentials' transport registered.
+      if (transportAttached) {
+        await repo.removeTransport('local', { close: true }).catch(() => undefined);
+      }
       await repo.removeTransport('cloud', { close: true }).catch(() => undefined);
       transportAttached = false;
     }
@@ -2774,6 +2865,23 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     }
 
     emitControlConnectionState();
+  };
+
+  const teardownTransport = async (options: TeardownTransportOptions = {}) => {
+    // Everything that could start or resume a web attach is fenced before the
+    // first await: supersede in-flight attaches, then stop the retry loop and
+    // drop its pending attempt. Every retry path (loop, wake edge, same-token
+    // replay) requires a pending attempt, so none can start an attach on the
+    // provider this teardown is about to invalidate. An in-flight attach may be
+    // blocked (e.g. on the suspect Meta checkpoint delete), so it is not
+    // awaited; it checks the generation after every await and publishes nothing.
+    webAttachGeneration += 1;
+    // Captured with the generation bump: the attach runs synchronously from its
+    // last generation check into addTransport, so no add can start unseen.
+    const cloudAddWasInFlight = webCloudAddsInFlight.size > 0;
+    webAttachReconnectLoop?.stop();
+    webTransportAttachPending = null;
+    await teardownTransportSteps(options, cloudAddWasInFlight);
   };
 
   const startPresenceTransport = () => {
@@ -2879,31 +2987,13 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     activeStreamsTokenProvider: LoroStreamsTokenProvider,
     streamsBaseUrl: string
   ): StreamsTransportAdapter =>
-    new StreamsTransportAdapter({
-      bucketId: LORO_STREAMS_BUCKET_ID,
-      metaStreamId: getLoroMetaStreamId(workspaceId),
-      docStreamId: (docId) => getLoroStreamIdForDocId(workspaceId, docId),
-      flockDocStreamId: (flockDocId) => flockDocId,
+    createWorkspaceStreamsTransport({
+      repo,
+      workspaceId,
+      documentRemoteCursorStore: remoteCursorStore,
       auth: activeStreamsTokenProvider.createAuthCallback(),
-      remoteCursorStore,
-      snapshotCodec: streamsSnapshotCodec,
-      baseUrl: streamsBaseUrl,
-      shardUrls: getLoroStreamsShardUrls(
-        streamsBaseUrl,
-        getStreamsShardHostSuffixForProvider(activeStreamsTokenProvider)
-      ),
-      snapshotUpload: {
-        canUpload: async () => true,
-      },
-      onPersistDoc: async () => {
-        await repo.flush();
-      },
-      onPersistMeta: async () => {
-        await repo.flush();
-      },
-      onPersistFlockDoc: async () => {
-        await repo.flush();
-      },
+      streamsBaseUrl,
+      shardHostSuffix: getStreamsShardHostSuffixForProvider(activeStreamsTokenProvider),
     });
 
   const attachCloudMetaHealthTracker = (): void => {
@@ -2921,6 +3011,12 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       .then(() => {
         if (cloudMetaTracker === currentCloudMetaTracker) {
           currentCloudMetaTracker.markFirstSynced();
+          // This binding's session started after the suspect checkpoint was
+          // deleted, so its first sync ends the recovery episode. A late
+          // success from a replaced tracker never reaches here.
+          if (cloudAttachDroppedSuspectCheckpoint) {
+            clearMetaRemoteCursorBypass();
+          }
         }
       })
       .catch(() => {
@@ -2930,8 +3026,16 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       });
   };
 
-  const attachTransportAdapter = async (options: { startPresence?: boolean } = {}) => {
-    const shouldStartPresence = options.startPresence ?? true;
+  const attachTransportAdapter = async (options: {
+    startPresence: boolean;
+    generation: number;
+  }) => {
+    const shouldStartPresence = options.startPresence;
+    const assertCurrentGeneration = () => {
+      if (options.generation !== webAttachGeneration) {
+        throw new SupersededAttachError();
+      }
+    };
     const startedAt = Date.now();
     console.info('createWorkspaceRuntime: attaching Loro Streams transport', {
       workspaceId,
@@ -2940,6 +3044,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     try {
       console.debug('createWorkspaceRuntime: prefetching Loro Streams token', { workspaceId });
       const { provider: activeStreamsTokenProvider, streamsBaseUrl } = await prepareStreamsAccess();
+      assertCurrentGeneration();
       console.info('createWorkspaceRuntime: Loro Streams token ready', {
         workspaceId,
         streamsBaseUrl,
@@ -2951,6 +3056,10 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
 
       createMachineRpcJsonStreamClient(activeStreamsTokenProvider, streamsBaseUrl);
 
+      if (isMetaRemoteCursorBypassActive()) {
+        await dropSuspectMetaCheckpointBeforeAttach(streamsBaseUrl);
+        assertCurrentGeneration();
+      }
       const transportAdapter = createStreamsDurableTransport(
         activeStreamsTokenProvider,
         streamsBaseUrl
@@ -2958,8 +3067,25 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
 
       // Web routes every room to ['cloud'] (router non-localFirst path), so
       // the single transport must be registered under that id.
-      await repo.addTransport('cloud', transportAdapter, { ephemeral: true });
+      webCloudAddsInFlight.add(options.generation);
+      try {
+        await repo.addTransport('cloud', transportAdapter, { ephemeral: true });
+      } finally {
+        webCloudAddsInFlight.delete(options.generation);
+      }
+      if (options.generation !== webAttachGeneration) {
+        // Torn down while addTransport ran: that teardown already removed this
+        // transport. Removing 'cloud' again here could hit the next
+        // generation's transport of the same id.
+        throw new SupersededAttachError();
+      }
     } catch (error) {
+      if (error instanceof SupersededAttachError || options.generation !== webAttachGeneration) {
+        // A superseded attach, succeeding or failing, never touches state: its
+        // teardown already stopped what it started, and presence, analytics and
+        // retry bookkeeping now belong to the next generation.
+        throw new SupersededAttachError();
+      }
       // runtime_init_failed (spec §5.2, P0): durable transport attach is the
       // gate for all remote sync; surfacing its failure with a reason_code is a
       // churn-attribution signal. Re-thrown so existing error flow is unchanged;
@@ -2989,6 +3115,64 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     emitControlConnectionState();
   };
 
+  // Web attaches the durable transport only from setAuthToken and meta-sync
+  // recovery. A failure there (for example, the suspect Meta checkpoint cannot
+  // be deleted yet) leaves a held token with no transport, and neither the
+  // local reconnect loop (requires an attached transport) nor an unchanged
+  // token would retry it. Record the failure so webAttachReconnectLoop retries
+  // under the shared backoff. Single-flight: concurrent callers share one attach.
+  const attachWebDurableTransport = async (options: { startPresence: boolean }): Promise<void> => {
+    const generation = webAttachGeneration;
+    // Share an attach only within one token generation. An older one is never
+    // awaited: it may be stuck (checkpoint delete, room routing), and the
+    // teardown that superseded it already fenced its generation and removed
+    // its transport, so it can only unwind. The new generation builds its own.
+    const inFlight = webTransportAttach;
+    if (inFlight?.generation === generation) {
+      await inFlight.promise;
+      return;
+    }
+    const pending = (async () => {
+      try {
+        await attachTransportAdapter({ startPresence: options.startPresence, generation });
+        webTransportAttachPending = null;
+      } catch (error) {
+        if (!(error instanceof SupersededAttachError)) {
+          webTransportAttachPending =
+            isDestroyedError(error) || disposePromise !== null
+              ? null
+              : { startPresence: options.startPresence };
+        }
+        throw error;
+      }
+    })();
+    const current = { generation, promise: pending };
+    webTransportAttach = current;
+    try {
+      await pending;
+    } finally {
+      if (webTransportAttach === current) {
+        webTransportAttach = null;
+      }
+      webAttachReconnectLoop?.update();
+    }
+  };
+
+  /** False when a later token generation took over; that caller owns the attach. */
+  const attachWebDurableTransportUnlessSuperseded = async (options: {
+    startPresence: boolean;
+  }): Promise<boolean> => {
+    try {
+      await attachWebDurableTransport(options);
+      return true;
+    } catch (error) {
+      if (error instanceof SupersededAttachError) {
+        return false;
+      }
+      throw error;
+    }
+  };
+
   const attachCloudPlaneTransport = async (): Promise<void> => {
     // Single choke point for the local-only zero-cloud-I/O invariant: every
     // caller (token change, reconnect loop, ensureDocStream) funnels here.
@@ -3013,9 +3197,14 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       }
       startPresenceTransport();
       createMachineRpcJsonStreamClient(provider, streamsBaseUrl);
+      cloudAttachDroppedSuspectCheckpoint = false;
       try {
         // addTransport joins routed rooms but does not await their catch-up
         // (per-room first sync stays observable on each cloud binding).
+        if (isMetaRemoteCursorBypassActive()) {
+          await dropSuspectMetaCheckpointBeforeAttach(streamsBaseUrl);
+          cloudAttachDroppedSuspectCheckpoint = true;
+        }
         await repo.addTransport('cloud', createStreamsDurableTransport(provider, streamsBaseUrl), {
           ephemeral: true,
         });
@@ -3056,6 +3245,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     cloudReconnectLoop?.stop();
     cloudMetaTracker?.dispose();
     cloudMetaTracker = null;
+    cloudAttachDroppedSuspectCheckpoint = false;
     await Promise.all([presenceTransport.stop(), machineMonitorTransport.stop()]);
     latestCloudPresenceStates = {};
     publishMergedPresence();
@@ -3156,7 +3346,11 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
           initialMetaSyncCompleted = true;
           initialMetaSyncFailed = false;
           currentMetaTracker.markFirstSynced();
-          clearMetaRemoteCursorBypass();
+          // Dual watches its local binding here; its marker is cleared by the
+          // cloud Meta binding instead (attachCloudMetaHealthTracker).
+          if (suspectMetaCheckpointDropped && !electronLocalDataPlane) {
+            clearMetaRemoteCursorBypass();
+          }
           // Claim the single-outcome slot on success so a later transient
           // failure can't emit a false meta_sync_failed/timed_out. The success
           // event itself was removed as low-value (high volume, no churn signal).
@@ -3335,7 +3529,9 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       return;
     }
 
-    await attachTransportAdapter({ startPresence: false });
+    if (!(await attachWebDurableTransportUnlessSuperseded({ startPresence: false }))) {
+      return;
+    }
     if (disposePromise) {
       return;
     }
@@ -3367,6 +3563,13 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
         } finally {
           cloudReconnectLoop?.update();
         }
+      } else if (
+        !electronLocalDataPlane &&
+        nextAuthToken !== null &&
+        webTransportAttachPending !== null
+      ) {
+        // The same token re-announced after a failed attach is a retry signal.
+        webAttachReconnectLoop?.trigger('token-refresh');
       }
       return;
     }
@@ -3436,7 +3639,9 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     }
 
     deps.onControlConnectionStateChange?.('connecting');
-    await attachTransportAdapter();
+    if (!(await attachWebDurableTransportUnlessSuperseded({ startPresence: true }))) {
+      return;
+    }
     if (disposePromise) {
       return;
     }
@@ -3447,7 +3652,9 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     }
   };
 
+  let sendLocalMachineId: MachineId | null = null;
   const setLocalMachineId = (machineId: MachineId | null) => {
+    sendLocalMachineId = machineId;
     targetRouter.setLocalMachineId(machineId);
   };
 
@@ -3478,6 +3685,36 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     subscribeSyncState: (listener) => machineMonitorTransport.subscribeSyncState(listener),
     needsReconnect: () => machineMonitorTransport.needsReconnect(),
   });
+
+  if (cloudPlaneEnabled && !electronLocalDataPlane) {
+    webAttachReconnectLoop = createLocalReconnectLoop({
+      canRun: () =>
+        disposePromise === null && authToken !== null && !transportAttached && isBrowserOnline(),
+      hasProblem: () => webTransportAttachPending !== null,
+      reconnect: async () => {
+        const pending = webTransportAttachPending;
+        // canRun() already excludes a disposed runtime.
+        if (pending === null || transportAttached) {
+          return;
+        }
+        deps.onControlConnectionStateChange?.('connecting');
+        if (!(await attachWebDurableTransportUnlessSuperseded(pending))) {
+          return;
+        }
+        if (disposePromise) {
+          return;
+        }
+        await ensureMetaRoomSynced('recovery');
+      },
+      onStateChange: () => {},
+      onError: (error) => {
+        console.warn('createWorkspaceRuntime: durable transport attach retry failed', {
+          workspaceId,
+          error,
+        });
+      },
+    });
+  }
 
   localReconnectLoop = createLocalReconnectLoop({
     canRun: canRunLocalReconnect,
@@ -3982,7 +4219,8 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
         disposeConversation();
       },
       waitUntilSynced: async (signal?: AbortSignal) => {
-        await transportReady.promise;
+        if (signal) await waitForPromiseOrAbort(transportReady.promise, signal);
+        else await transportReady.promise;
         if (signal?.aborted) {
           return;
         }
@@ -4456,6 +4694,10 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     windowBootstrap?.close();
     sharedWindowDocuments.clear();
     disposePromise = (async () => {
+      unsubscribeSendRecovery();
+      // Cancel and join send I/O while its cache, transport and repo still exist.
+      await sendResources.dispose();
+      await sendJournal?.close();
       cancelDelayedBackgroundSyncStart?.();
       cancelDelayedBackgroundSyncStart = null;
       cancelDelayedStartupAcpCapabilitiesRefresh?.();
@@ -4470,6 +4712,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       eagerSyncWorkerClient = null;
       localReconnectLoop?.stop();
       cloudReconnectLoop?.stop();
+      webAttachReconnectLoop?.stop();
       if (reconnectBackstopTimer) {
         clearInterval(reconnectBackstopTimer);
         reconnectBackstopTimer = null;
@@ -4584,6 +4827,10 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   // are disconnected, so we call reconnect() unconditionally. loro-repo handles rooms
   // that were previously live as well as rooms whose initial Streams join did not complete.
   const triggerReconnect = (reason: LocalReconnectTriggerReason) => {
+    if (!transportAttached && disposePromise === null && webTransportAttachPending !== null) {
+      webAttachReconnectLoop?.trigger(reason);
+      return;
+    }
     if (transportAttached && !disposePromise) {
       console.info('createWorkspaceRuntime: external reconnect trigger', {
         workspaceId,
@@ -4624,6 +4871,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       cloudReconnectLoop?.stop();
     } else {
       localReconnectLoop?.stop();
+      webAttachReconnectLoop?.stop();
     }
     emitControlConnectionState();
   };
@@ -4638,15 +4886,75 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   reconnectBackstopTimer = setInterval(() => {
     localReconnectLoop?.update();
     cloudReconnectLoop?.update();
+    webAttachReconnectLoop?.update();
   }, RECONNECT_BACKSTOP_INTERVAL_MS);
 
   window.repo = repo;
   const codeCollabFileIndexCache = createCodeCollabFileIndexCache(repo);
+  const sendResources = createSessionSendResources({
+    acquire: sessionStoreCache.acquire,
+    releaseRef: sessionStoreCache.releaseRef,
+  });
+  const sendJournal = deps.accountId
+    ? createWorkspaceSessionSendJournal({
+        accountId: deps.accountId,
+        getAdmissionContext: deps.getSendAdmissionContext,
+        token: () => authToken,
+        localMachineId: () => sendLocalMachineId,
+        sourceReplica: cacheIdentity.repoDbName,
+        runtime: {
+          workspaceId,
+          repo,
+          writer: workspaceWriter,
+          sendResources,
+          requestSessionDispatchTurn,
+          requestSessionSteer,
+        },
+        waitForTargetSync: async (sessionId, signal) => {
+          await waitForPromiseOrAbort(transportReady.promise, signal);
+          throwIfSendAborted(signal);
+          await targetRouter.prepareSessionTarget(sessionId);
+          throwIfSendAborted(signal);
+          const roomId = getSessionRoomId(sessionId);
+          const plane = targetRouter.getReadinessTransportForRoom({ kind: 'doc', id: roomId });
+          // Imported prepared operations do not emit subscribeLocalUpdates. Explicit
+          // sync exports the missing operations and reuses the transport's room.
+          // Upstream sync races its AbortSignal without joining raw stream.sync();
+          // omit that signal here so our owner retains dependencies until it settles.
+          const report = await repo.sync({
+            scope: 'full',
+            docIds: [roomId],
+            flockDocIds: [],
+            requireTransports: [plane],
+          });
+          throwIfSendAborted(signal);
+          if (
+            !report.transports.some(
+              (transport) => transport.transportId === plane && transport.ok
+            ) ||
+            targetRouter.getReadinessTransportForRoom({ kind: 'doc', id: roomId }) !== plane
+          ) {
+            throw new Error('Target synchronization is not confirmed');
+          }
+        },
+      })
+    : null;
+  const unsubscribeSendRecovery = presenceTransport.subscribeSyncState((state) => {
+    if (state === 'synced' && !disposePromise) {
+      void sendJournal?.resume().catch((error: unknown) => {
+        console.warn('Background session synchronization remains pending', error);
+      });
+    }
+  });
   return {
     workspaceSlug: deps.workspaceSlug,
     workspaceId,
     repo,
+    sourceReplica: cacheIdentity.repoDbName,
+    accountId: deps.accountId ?? null,
+    sendJournal,
     codeCollabFileIndexCache,
+    sendResources,
     writer: workspaceWriter,
     readSessionOperationTargets: async (sessionId, operation) => {
       if (disposePromise) throw new Error('Runtime disposed');

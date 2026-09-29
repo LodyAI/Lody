@@ -13,6 +13,36 @@ import {
  */
 export type SessionFileOpenPathKind = 'canonical' | 'markdown-href';
 
+/** Image URLs resolve against the document, without chat-link line/root rewriting.
+ * This is resolution only; the owning machine still authorizes the real path.
+ */
+export function resolveMarkdownImagePath(documentPath: string, src: string): string | null {
+  if (!src || src.startsWith('#') || src.startsWith('//')) return null;
+  const windowsAbsolute = /^[a-z]:[\\/]/i.test(src);
+  if (!windowsAbsolute && /^[a-z][a-z\d+.-]*:/i.test(src)) return null;
+  let imagePath: string;
+  try {
+    imagePath = decodeURIComponent(src.split(/[?#]/, 1)[0]!);
+  } catch {
+    imagePath = src.split(/[?#]/, 1)[0]!;
+  }
+  if (!imagePath || imagePath.includes('\0')) return null;
+  imagePath = imagePath.replace(/\\/g, '/');
+  const base = documentPath.replace(/\\/g, '/');
+  const joined = /^(?:\/|[a-z]:\/)/i.test(imagePath)
+    ? imagePath
+    : base.slice(0, base.lastIndexOf('/') + 1) + imagePath;
+  // Preserve leading .. for machine-side authorization, including external files.
+  const prefix = joined.match(/^(?:[a-z]:\/|\/\/[^/]+\/[^/]+\/|\/)/i)?.[0] ?? '';
+  const segments: string[] = [];
+  for (const segment of joined.slice(prefix.length).split('/')) {
+    if (!segment || segment === '.') continue;
+    if (segment === '..' && segments.length && segments.at(-1) !== '..') segments.pop();
+    else if (segment !== '..' || !prefix) segments.push(segment);
+  }
+  return prefix + segments.join('/');
+}
+
 export type SessionFileOpenTargetInput = {
   readonly rawPath: string;
   readonly pathKind: SessionFileOpenPathKind;

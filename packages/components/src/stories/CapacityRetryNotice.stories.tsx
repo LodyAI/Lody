@@ -190,3 +190,63 @@ export const AllStatesChinese: Story = {
   globals: { locale: 'zh_CN' },
   render: () => <RetryStateGallery />,
 };
+
+/** Copy stays visible on touch, even when there is no retry control. */
+export const DisconnectedOnMobile: Story = {
+  args: {
+    sessionId,
+    message: {
+      ...message,
+      items: [
+        {
+          type: 'system_notice',
+          name: 'chat_failed',
+          meta: {
+            reason: 'agent_disconnected',
+            message: 'The agent process disconnected unexpectedly. Please try again.',
+          },
+        },
+      ],
+    },
+  },
+  parameters: { viewport: { defaultViewport: 'mobile1' } },
+  render: renderRow,
+  play: async ({ canvasElement }) => {
+    const original = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+    let copiedText = '';
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: {
+        writeText: async (text: string) => {
+          copiedText = text;
+        },
+      },
+    });
+    try {
+      const button = within(canvasElement).getByRole('button', { name: /Copy error|复制错误/ });
+      await expect(button).toBeVisible();
+      await userEvent.click(button);
+      await expect(copiedText).toContain('Reason: agent_disconnected');
+      await expect(copiedText).toContain(`Session: ${sessionId}`);
+      await expect(copiedText).toContain(
+        'The agent process disconnected unexpectedly. Please try again.'
+      );
+    } finally {
+      if (original) Object.defineProperty(navigator, 'clipboard', original);
+      else Reflect.deleteProperty(navigator, 'clipboard');
+    }
+  },
+};
+
+export const TitleOnlyFailure: Story = {
+  args: {
+    sessionId,
+    message: {
+      ...message,
+      items: [
+        { type: 'system_notice', name: 'chat_failed', meta: { reason: 'agent_disconnected' } },
+      ],
+    },
+  },
+  render: renderRow,
+};

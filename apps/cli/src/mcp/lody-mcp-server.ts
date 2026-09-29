@@ -20,7 +20,6 @@ import {
   readMachineFlockRowsFromFlock,
   readWorkspaceFlockRowsFromFlock,
   listWorkspaceAgentRoles,
-  summarizeAgentRunConfigCapabilities,
   type AcpCapabilityCacheEntry,
   type AgentRunConfigSelection,
   LocalSessionControlResponseSchema,
@@ -39,7 +38,6 @@ import {
   shouldBypassSessionQuota,
   type LodySessionPresenceState,
   type LocalSessionControlRequest,
-  type AgentConfigMeta,
   type AgentRole,
   type LocalProjectMeta,
   type MachineId,
@@ -118,6 +116,7 @@ import {
   LodyOperationStore,
   LodyOperationStoreError,
   runWithOperationStoreBusyRetry,
+  OperationListQuerySchema,
 } from '@/orchestration/operation-store';
 import { registerScheduleTools } from './schedule-tools';
 import { truncateSessionHistoryText as truncateUtf8HeadTail } from '@/mcp/session-history-page';
@@ -130,6 +129,11 @@ import {
 } from '@/mcp/workspace-mcp-configure';
 import { captureSessionCommandEvent } from '@/commands/analytics-events';
 import { captureCli, initCliAnalytics } from '@/lib/analytics/posthog';
+import { registerDiscoveryTools } from './discovery-tools';
+import { createResourceDiscovery } from '@/lib/resource-discovery-runtime';
+import { getCliPlatformKind } from '@/lib/cli-platform';
+import { summarizeDiscoveryAgent as summarizeAgentConfig } from '@/lib/resource-discovery';
+import { SessionDiscoveryFilterShape, matchesSessionDiscovery } from '@/lib/discovery-query';
 
 const PREVIEW_TOOL_NAME = 'lody_report_preview_candidate';
 const IMAGE_UPLOAD_TOOL_NAME = 'lody_upload_images';
@@ -765,6 +769,7 @@ const SessionCancelToolInputSchema = z
 
 const SessionListToolInputSchema = z
   .object({
+    ...SessionDiscoveryFilterShape,
     archive: z.enum(['active', 'archived', 'any']).default('active'),
     createdBy: z.literal('me').optional(),
     openedBy: z.string().trim().min(1).optional(),
@@ -1657,6 +1662,10 @@ const sessionListFingerprint = (
         executionContext: input.executionContext,
         pullRequest: input.pullRequest,
         updatedAfter: input.updatedAfter,
+        query: input.query,
+        machineId: input.machineId,
+        agentConfigId: input.agentConfigId,
+        agentRoleId: input.agentRoleId,
       })
     )
     .digest('hex');
@@ -1699,6 +1708,7 @@ const matchesSessionListFilters = (
   ctx: ReturnType<typeof getSessionContext>,
   userId: string
 ): boolean => {
+  if (!matchesSessionDiscovery(session, input)) return false;
   if (input.archive === 'active' && session.isArchived === true) return false;
   if (input.archive === 'archived' && session.isArchived !== true) return false;
   if (input.createdBy === 'me' && session.userId !== userId) return false;
@@ -2236,26 +2246,6 @@ const assertDifferentMcpSession = (
   if (source.id === target.id) {
     throw new Error('An MCP agent cannot send a chat prompt to its own active session.');
   }
-};
-
-const summarizeAgentConfig = (config: AgentConfigMeta, capability?: AcpCapabilityCacheEntry) => {
-  const runConfig = summarizeAgentRunConfigCapabilities(capability);
-  return {
-    id: config.id,
-    machineId: config.machineId,
-    name: config.name,
-    description: config.description,
-    cliType: config.cliType,
-    agentType: config.agentType,
-    // Valid values for the create tool's modelId/reasoningEffort/fastMode/planMode
-    // inputs. Empty/false means the agent does not offer that control, or it has
-    // not reported capabilities on this Machine yet.
-    //
-    // Reasoning effort and fast mode are per model. Prefer a model entry's own
-    // reasoningEffortValues; the top-level list and fastMode were measured under
-    // measuredForModelId and may differ for another model.
-    runConfig,
-  };
 };
 
 /**
@@ -3566,6 +3556,28 @@ export function buildLodyMcpServer(): McpServer {
     },
   });
 
+  registerDiscoveryTools(server, async (read) => {
+    if (getCliPlatformKind() === 'local') {
+      throw new Error('Workspace catalog discovery is unavailable on the local platform.');
+    }
+    const ctx = getSessionContext();
+    const source = await resolveInvokingTurnSource();
+    const auth = getCliAuthContextOrThrow('mcp');
+    const workspace = await resolveWorkspaceOrThrow(auth, getMcpWorkspaceId(ctx));
+    return withWorkspaceManager(auth, workspace, 'mcp-discovery', async (manager) =>
+      read(
+        await createResourceDiscovery({
+          manager,
+          auth,
+          workspaceId: workspace.id as WorkspaceId,
+          requesterSessionId: ctx.sessionId as SessionId,
+          delegatedRequester: { userId: source.userId },
+          selectedMcpServerIds: source.inputConfig.mcpServerIds,
+        })
+      )
+    );
+  });
+
   server.registerTool(
     FEEDBACK_TOOL_NAME,
     {
@@ -3831,7 +3843,7 @@ export function buildLodyMcpServer(): McpServer {
     {
       title: 'List session create options',
       description:
-        'Discover stable ids and current-session metadata for creating a Lody session. The default response is intentionally sparse: online machines, the current/default agent config, the current local project, and no GitHub repositories. Use agentConfigQuery, localProjectQuery, or repoQuery to request bounded matches. Each agent config reports the runConfig accepted by lody_session_create.',
+        'Discover current-session metadata and sparse candidates for creating a Lody session: online machines, the current/default agent config, the current local project, and no GitHub repositories. Searches return at most 20 matches, not a complete catalog. Use lody_machine_list, lody_project_list, lody_agent_config_list, and lody_agent_role_list for paginated discovery. Each agent config reports the runConfig accepted by lody_session_create.',
       inputSchema: SessionCreateOptionsToolInputSchema,
     },
     async (args: SessionCreateOptionsToolInput) => {
@@ -4058,6 +4070,36 @@ export function buildLodyMcpServer(): McpServer {
             '--json',
             args.sessionId,
           ])
+        );
+      } catch (error) {
+        return mcpErrorResult(error);
+      }
+    }
+  );
+
+  server.registerTool(
+    'lody_operation_list',
+    {
+      description:
+        'List durable Operation summaries owned by the current Session and invoking user. Optional state filter and keyset pagination. Completion is automatic; do not poll.',
+      inputSchema: OperationListQuerySchema,
+      annotations: { readOnlyHint: true },
+    },
+    async (args) => {
+      try {
+        const ctx = getSessionContext();
+        const source = await resolveInvokingTurnSource();
+        return jsonTextResult(
+          await withOperationStore((store) =>
+            store.listForRequester(
+              {
+                workspaceId: getMcpWorkspaceId(ctx) as WorkspaceId,
+                requesterSessionId: ctx.sessionId as SessionId,
+                requesterUserId: source.userId,
+              },
+              args
+            )
+          )
         );
       } catch (error) {
         return mcpErrorResult(error);

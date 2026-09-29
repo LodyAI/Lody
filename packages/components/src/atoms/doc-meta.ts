@@ -212,6 +212,12 @@ function listSessionEntries(
 
 // 分类缓存
 export const sessionMetaCacheAtom = atom<Record<string, SessionMeta>>({});
+/** Local placeholders from durable submissions; never authored into repo metadata. */
+export const pendingSendSessionMetasAtom = atom<Record<string, SessionMeta>>({});
+const visibleSessionMetaCacheAtom = atom((get) => ({
+  ...get(pendingSendSessionMetasAtom),
+  ...get(sessionMetaCacheAtom),
+}));
 export const machineMetaCacheAtom = atom<Record<string, MachineMeta>>({});
 export const agentConfigMetaCacheAtom = atom<Record<string, AgentConfigMeta>>({});
 export const docMetaCacheReadyAtom = atom(false);
@@ -230,6 +236,11 @@ export type DocMetaCacheScope = {
   workspaceId: WorkspaceRuntime['workspaceId'];
   workspaceSlug: string;
   ready: boolean;
+  /**
+   * Set when this runtime's first scan rejected. The scope then stays not
+   * ready until the runtime is replaced; only diagnostics read this.
+   */
+  scanFailure?: { errorType: string };
 };
 
 /** Identifies which runtime owns the current singleton metadata projection. */
@@ -255,7 +266,7 @@ export function readReadyDocMetaCache(
 // heartbeat.
 export const docMetaCacheAtom = atom<Record<string, unknown>>((get) => {
   return {
-    ...get(sessionMetaCacheAtom),
+    ...get(visibleSessionMetaCacheAtom),
     ...get(machineMetaCacheAtom),
     ...get(agentConfigMetaCacheAtom),
   };
@@ -269,14 +280,14 @@ export const docMetaCacheAtom = atom<Record<string, unknown>>((get) => {
  * unrelated meta ticks.
  */
 export const sessionMetaCountAtom = atom((get) =>
-  get(docMetaCacheReadyAtom) ? Object.keys(get(sessionMetaCacheAtom)).length : null
+  get(docMetaCacheReadyAtom) ? Object.keys(get(visibleSessionMetaCacheAtom)).length : null
 );
 
 // 精确订阅 - 使用普通 atom 而非 selectAtom，确保缓存更新时正确触发订阅者
 export const sessionMetaAtomFamily = atomFamily((roomId: string) => {
   let previous: SessionMeta | undefined;
   return atom((get) => {
-    const next = get(sessionMetaCacheAtom)[roomId];
+    const next = get(visibleSessionMetaCacheAtom)[roomId];
     if (!next) {
       previous = undefined;
       return undefined;
@@ -298,7 +309,7 @@ export const agentConfigMetaAtomFamily = atomFamily((roomId: string) =>
 // Session 列表 (active sessions only) — stabilized with structural equality
 let _prevSessionList: SessionListEntry[] = [];
 export const sessionListAtom = atom((get) => {
-  const cache = get(sessionMetaCacheAtom);
+  const cache = get(visibleSessionMetaCacheAtom);
   const next = listSessionEntries(
     cache,
     (session) => !session.isArchived && !session.parentSessionId
@@ -324,7 +335,7 @@ export const sessionListAtom = atom((get) => {
 // Archived session 列表 — stabilized with structural equality
 let _prevArchivedSessionList: SessionListEntry[] = [];
 export const archivedSessionListAtom = atom((get) => {
-  const cache = get(sessionMetaCacheAtom);
+  const cache = get(visibleSessionMetaCacheAtom);
   const next = listSessionEntries(
     cache,
     (session) => !!session.isArchived && !session.parentSessionId
@@ -349,7 +360,7 @@ export const archivedSessionListAtom = atom((get) => {
 // All active sessions (including children) — used for child status aggregation
 let _prevAllActiveSessions: SessionMeta[] = [];
 export const allActiveSessionsAtom = atom((get) => {
-  const cache = get(sessionMetaCacheAtom);
+  const cache = get(visibleSessionMetaCacheAtom);
   const next = Object.values(cache).filter((session) => !session.isArchived);
   if (sessionMetaArrayEqual(_prevAllActiveSessions, next)) {
     return _prevAllActiveSessions;
@@ -367,7 +378,7 @@ function createChildSessionsAtomFamily(
   return atomFamily((parentId: SessionId) => {
     let previous: SessionMeta[] = [];
     return atom((get) => {
-      const cache = get(sessionMetaCacheAtom);
+      const cache = get(visibleSessionMetaCacheAtom);
       const next = Object.values(cache).filter((session) => match(session, parentId));
       if (compare) next.sort(compare);
       if (sessionMetaArrayEqual(previous, next)) {
@@ -928,25 +939,43 @@ export const docMetaSubscriptionAtom = atomEffect((get, set) => {
   // later partial live patch must not clobber complete metadata already present in
   // the flock snapshot, and a resolving snapshot must not undo an archive/restore
   // already observed live.
-  void buildDocMetaCache(runtime.repo).then((cache) => {
-    if (cancelled) return;
-    set(sessionMetaCacheAtom, (prev) =>
-      mergeBootstrapMetaCache(cache.sessions, prev, existenceStateByDocId)
-    );
-    set(machineMetaCacheAtom, (prev) =>
-      mergeBootstrapMetaCache(cache.machines, prev, existenceStateByDocId)
-    );
-    set(agentConfigMetaCacheAtom, (prev) =>
-      mergeBootstrapMetaCache(cache.agents, prev, existenceStateByDocId)
-    );
-    set(docMetaCacheReadyAtom, true);
-    set(docMetaCacheScopeAtom, {
-      runtime,
-      workspaceId: runtime.workspaceId,
-      workspaceSlug: runtime.workspaceSlug,
-      ready: true,
-    });
-  });
+  void buildDocMetaCache(runtime.repo).then(
+    (cache) => {
+      if (cancelled) return;
+      set(sessionMetaCacheAtom, (prev) =>
+        mergeBootstrapMetaCache(cache.sessions, prev, existenceStateByDocId)
+      );
+      set(machineMetaCacheAtom, (prev) =>
+        mergeBootstrapMetaCache(cache.machines, prev, existenceStateByDocId)
+      );
+      set(agentConfigMetaCacheAtom, (prev) =>
+        mergeBootstrapMetaCache(cache.agents, prev, existenceStateByDocId)
+      );
+      set(docMetaCacheReadyAtom, true);
+      set(docMetaCacheScopeAtom, {
+        runtime,
+        workspaceId: runtime.workspaceId,
+        workspaceSlug: runtime.workspaceSlug,
+        ready: true,
+      });
+    },
+    (error: unknown) => {
+      if (cancelled) return;
+      // The scope stays not ready (the workspace keeps reading as syncing), so
+      // record why: the stuck-sync report names this failure instead of a hang.
+      console.warn('[doc-meta] initial metadata scan failed', {
+        workspaceId: runtime.workspaceId,
+        error,
+      });
+      set(docMetaCacheScopeAtom, {
+        runtime,
+        workspaceId: runtime.workspaceId,
+        workspaceSlug: runtime.workspaceSlug,
+        ready: false,
+        scanFailure: { errorType: error instanceof Error ? error.name || 'Error' : typeof error },
+      });
+    }
+  );
 
   return () => {
     cancelled = true;

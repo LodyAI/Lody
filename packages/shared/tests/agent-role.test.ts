@@ -46,6 +46,25 @@ const context = (
   ...overrides,
 });
 
+describe('agent role description', () => {
+  it('reads legacy roles as blank and bounds descriptions by Unicode code point', () => {
+    expect(normalizeAgentRole(role())?.description ?? '').toBe('');
+    for (const character of ['a', '中', '😀']) {
+      const description = character.repeat(140);
+      expect(normalizeAgentRole(role({ description }))?.description).toBe(description);
+      expect(normalizeAgentRole(role({ description: description + character }))?.description).toBe(
+        description
+      );
+    }
+    expect(normalizeAgentRole({ ...role(), description: 42 })).toBeUndefined();
+  });
+
+  it('treats missing and blank as equal but detects description edits', () => {
+    expect(isAgentRoleContentEqual(role(), role({ description: '' }))).toBe(true);
+    expect(isAgentRoleContentEqual(role(), role({ description: 'Review changes' }))).toBe(false);
+  });
+});
+
 describe('agent role mention slug', () => {
   it('keeps non-ASCII text but removes what an `@` token cannot carry', () => {
     expect(normalizeAgentRoleMentionSlug('  @Code Reviewer  ')).toBe('Code-Reviewer');

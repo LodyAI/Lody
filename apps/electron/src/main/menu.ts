@@ -1,4 +1,5 @@
 import { productWindows } from './window-state'
+import { requestRendererReload } from './renderer-recovery'
 import { app, BrowserWindow, Menu, shell } from 'electron'
 import { closeFocusedTabOrWindow } from './close-focused-tab-or-window'
 import type { AppUpdaterService } from './services/app-updater-service'
@@ -191,8 +192,21 @@ function buildAndSetMenu(): void {
     {
       label: t(locale, 'menu.view'),
       submenu: [
-        { role: 'reload', accelerator: 'CmdOrCtrl+R' },
-        { role: 'forceReload' },
+        {
+          label: t(locale, 'menu.reload'),
+          accelerator: 'CmdOrCtrl+R',
+          click: (_item, window) => {
+            if (window instanceof BrowserWindow) void requestRendererReload(window)
+          }
+        },
+        {
+          label: t(locale, 'menu.forceReload'),
+          accelerator: 'CmdOrCtrl+Shift+R',
+          click: (_item, window) => {
+            if (window instanceof BrowserWindow)
+              void requestRendererReload(window, { ignoreCache: true })
+          }
+        },
         { role: 'toggleDevTools' },
         { type: 'separator' },
         { role: 'resetZoom' },
@@ -273,4 +287,8 @@ export function setMenuLanguage(locale: string): void {
     currentLocale = 'en'
   }
   buildAndSetMenu()
+}
+
+export function translateAppText(key: string): string {
+  return t(currentLocale, key)
 }

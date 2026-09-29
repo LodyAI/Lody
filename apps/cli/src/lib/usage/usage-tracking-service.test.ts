@@ -12,6 +12,7 @@ const logger: Logger = {
   error() {},
   success() {},
   debug() {},
+  trace() {},
   setLevel() {},
   child: () => logger,
   close: async () => {},

@@ -2,7 +2,37 @@ import { describe, expect, it } from 'vitest';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { resolveSessionFileOpenTarget } from '../src/lib/session-file-open-target';
+import {
+  resolveMarkdownImagePath,
+  resolveSessionFileOpenTarget,
+} from '../src/lib/session-file-open-target';
+
+describe('Markdown image paths', () => {
+  it.each([
+    ['docs/guide.md', '../images/a%20b.png?v=1#preview', 'images/a b.png'],
+    ['docs/guide.md', './中文.png', 'docs/中文.png'],
+    ['README.md', '../outside.png', '../outside.png'],
+    ['/tmp/report/doc.md', '../plot.png', '/tmp/plot.png'],
+    ['C:\\repo\\docs\\guide.md', '..\\images\\plot.png', 'C:/repo/images/plot.png'],
+    ['docs/a.md', '/tmp/plot.png', '/tmp/plot.png'],
+    ['docs/a.md', 'C:/other/plot.png', 'C:/other/plot.png'],
+    ['docs/report%20v2.md', 'plot%2520v2.png', 'docs/plot%20v2.png'],
+    ['docs/a.md', 'plot%23draft.png', 'docs/plot#draft.png'],
+    ['docs/a.md', './plot:30.png', 'docs/plot:30.png'],
+  ])('resolves %s + %s on the owning machine', (document, src, expected) => {
+    expect(resolveMarkdownImagePath(document, src)).toBe(expected);
+  });
+  it.each([
+    'https://example.org/a.png',
+    '//example.org/a.png',
+    'data:image/png;base64,AA==',
+    'javascript:alert(1)',
+    '#anchor',
+    'file:///etc/image.png',
+  ])('does not treat %s as a relative filesystem path', (src) => {
+    expect(resolveMarkdownImagePath('docs/a.md', src)).toBeNull();
+  });
+});
 
 const WORKSPACE = '/Users/dev/project';
 

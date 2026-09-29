@@ -12,8 +12,10 @@ import {
   type CustomAcpLaunchSpec,
   getBuiltinRuntimeOverrideSourceVersionSuffix,
   getRegistryAcpLaunchKind,
+  getManagedBuiltinRuntimeByAgentType,
   isBuiltinAgentType,
   isManagedBuiltinAgentType,
+  type ManagedBuiltinAgentType,
   REGISTRY_ACP_AGENTS,
   type RegistryAcpAgent,
   type RegistryNpxDistribution,
@@ -39,6 +41,7 @@ import {
   type ManagedRuntimeProgressCallback,
 } from '@/agent/managed-agent-runtime';
 import { getManagedRuntimeUpdateCoordinator } from '@/agent/managed-runtime-update-coordinator';
+import { getGhShimSessionBinRoot } from '@/lib/gh-shim-script';
 import {
   DEEPSEEK_HARNESS_CAPABILITY_SOURCE_VERSION,
   resolveDeepSeekHarnessProcessLaunch,
@@ -272,6 +275,72 @@ export function getAcpCapabilitySourceVersion(
   }
 
   return `${agent.id}@${agent.version}`;
+}
+
+/**
+ * Runtime-override path that replaces each managed builtin runtime, or `null`
+ * when the builtin has none. Declared exhaustively so a new managed builtin
+ * fails to compile until someone decides here how its overrides change the
+ * launched binary, because an unconsidered override would silently keep
+ * answering capability refreshes from the managed runtime's cached entry.
+ */
+const MANAGED_BUILTIN_RUNTIME_OVERRIDE_PATH_KEYS = {
+  kimi: 'kimiPath',
+  grok: 'grokPath',
+  claude: 'claudeCodeExecutable',
+  codex: 'codexPath',
+  // Pi has no replacement binary. Its override is an extension list, handled in
+  // resolveExpectedAcpCapabilitySourceVersion because it changes which runtime
+  // version the launcher requires rather than which binary it runs.
+  pi: null,
+} as const satisfies Record<ManagedBuiltinAgentType, keyof BuiltinRuntimeOverrides | null>;
+
+/**
+ * The `capabilitySourceVersion` a real probe would stamp, resolved without
+ * starting an agent, downloading a runtime, or touching the network.
+ *
+ * `undefined` means the version cannot be named without doing that work — a
+ * managed runtime that is not installed yet has no version to key on, and
+ * substituting the bundled target version would let a cached entry outlive an
+ * install that never happened. Callers must treat `undefined` as "probe".
+ */
+export async function resolveExpectedAcpCapabilitySourceVersion(
+  input: ResolveACPSettingInput
+): Promise<string | undefined> {
+  if (input.cliType !== 'builtin' || !isManagedBuiltinAgentType(input.agentType)) {
+    return getAcpCapabilitySourceVersion(input);
+  }
+  const overrideKey = MANAGED_BUILTIN_RUNTIME_OVERRIDE_PATH_KEYS[input.agentType];
+  if (overrideKey && trimRuntimeOverride(input.runtimeOverrides?.[overrideKey])) {
+    // An override launches the user's own binary; the launcher stamps the static
+    // adapter version plus the override suffix, never a managed runtime version.
+    return getAcpCapabilitySourceVersion(input);
+  }
+  const runtime = getManagedBuiltinRuntimeByAgentType(input.agentType);
+  if (!runtime) {
+    return undefined;
+  }
+  const status = await getManagedAgentRuntimeManager().getRuntimeStatus(runtime.runtimeName);
+  if (status.kind !== 'installed') {
+    return undefined;
+  }
+  if (
+    input.agentType === 'pi' &&
+    (input.runtimeOverrides?.piExtensions?.length ?? 0) > 0 &&
+    status.version !== status.targetVersion
+  ) {
+    // With extensions the launcher calls ensureCurrentRuntime, which installs the
+    // target version before starting; an older installed version is not what a
+    // probe would run, so it cannot name the version a probe would stamp.
+    return undefined;
+  }
+  if (status.updateAvailable) {
+    // Mirror resolveManagedRuntimeForLaunch: discovering a newer runtime is the
+    // launch path's job today, and answering from the cache must not be the
+    // reason a managed runtime stops updating on an otherwise idle machine.
+    getManagedRuntimeUpdateCoordinator().enqueue(runtime.runtimeName);
+  }
+  return getAcpCapabilitySourceVersion(input, status.version);
 }
 
 export function resolveRegistryAgentACPSetting(agent: RegistryAcpAgent): ResolvedACPSetting {
@@ -670,6 +739,33 @@ function normalizePathEntry(entry: string): string {
   return normalized.length > 1 ? normalized.replace(/[\\/]+$/, '') : normalized;
 }
 
+/**
+ * Returns the base PATH's first entry when it is a `gh` shim dir. The shim (and its
+ * sibling `git` transport) is what selects per-command GitHub credentials; a native
+ * `gh` found earlier in PATH runs without them. Agent shells (Claude Code's shell
+ * snapshot) inherit this order verbatim, so `BASH_ENV` alone cannot restore it.
+ * Only a LEADING entry counts: `prependGhShimBinDirToPath` puts the session's own
+ * dir first, while a shim dir elsewhere may be another workspace's, inherited by a
+ * daemon started inside a Lody agent, and must never be promoted.
+ */
+function getLeadingGhShimBinDir(parts: string[]): string | undefined {
+  const first = parts[0];
+  if (first === undefined) {
+    return undefined;
+  }
+  return dirname(normalizePathEntry(first)) === normalizePathEntry(getGhShimSessionBinRoot())
+    ? first
+    : undefined;
+}
+
+function withLeadingEntry(parts: string[], leading: string | undefined): string[] {
+  if (leading === undefined) {
+    return parts;
+  }
+  const normalized = normalizePathEntry(leading);
+  return [leading, ...parts.filter((entry) => normalizePathEntry(entry) !== normalized)];
+}
+
 export function getDefaultAcpPathEntries(homeDir = homedir(), agentType?: string): string[] {
   if (!homeDir) {
     return [];
@@ -696,7 +792,10 @@ export function withDefaultAcpPathEntries(
   const currentWithoutDefaults = currentParts.filter(
     (entry) => !defaultEntrySet.has(normalizePathEntry(entry))
   );
-  const nextPath = [...defaultEntries, ...currentWithoutDefaults].join(delimiter);
+  const nextPath = withLeadingEntry(
+    [...defaultEntries, ...currentWithoutDefaults],
+    getLeadingGhShimBinDir(currentParts)
+  ).join(delimiter);
 
   if (env[pathKey] === nextPath) {
     return env;
@@ -719,7 +818,9 @@ export function withDefaultAcpPathEntries(
  *   resolve from wherever the user actually put them (homebrew/cargo/volta/asdf/
  *   `~/.local/bin`/...). A GUI/daemon launch inherits a minimal PATH, so without
  *   this `opencode acp` & friends fail with ENOENT. Base-only entries (e.g.
- *   runtime-injected `node_modules/.bin`) are appended so nothing is lost.
+ *   runtime-injected `node_modules/.bin`) are appended so nothing is lost. The
+ *   one exception is a `gh` shim dir leading the base PATH, which stays first
+ *   (`getLeadingGhShimBinDir`).
  *
  * Hardcoding a few dirs (see `withDefaultAcpPathEntries`) was rejected: it cannot
  * cover the open-ended set of locations different users install tools into.
@@ -751,7 +852,7 @@ export function mergeLoginShellEnv(
   }
 
   if (ordered.length > 0) {
-    merged[pathKey] = ordered.join(delimiter);
+    merged[pathKey] = withLeadingEntry(ordered, getLeadingGhShimBinDir(baseParts)).join(delimiter);
   }
 
   return merged;

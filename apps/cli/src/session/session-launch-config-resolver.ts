@@ -28,7 +28,7 @@ type RepoLike = {
 
 export type AgentConfigLaunchFields = Pick<
   AgentConfigMeta,
-  'customAcp' | 'runtimeOverrides' | 'env'
+  'customAcp' | 'runtimeOverrides' | 'env' | 'codexAuth'
 >;
 
 type WorkspaceDocumentLike = {
@@ -62,6 +62,7 @@ function resolveSessionLaunchConfigFromSources(input: {
   }
   return {
     config: buildSessionLaunchConfig({
+      codexAuth: input.agentConfig.codexAuth,
       customAcp: input.agentConfig.customAcp,
       runtimeOverrides: input.agentConfig.runtimeOverrides,
       env: input.agentConfig.env,

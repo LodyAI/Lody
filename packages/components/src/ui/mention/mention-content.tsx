@@ -84,6 +84,15 @@ interface MentionContentProps
    * Can be used to prevent the popover from closing when the pointer is outside of the content.
    */
   onPointerDownOutside?: (event: PointerDownOutsideEvent) => void;
+
+  /**
+   * Opt out of the mobile docked panel even at the <640px breakpoint. The dock
+   * is built for a composer pinned to the bottom of the screen above the
+   * keyboard; an inline editor mid-conversation keeps the floating caret
+   * popover instead, which positions around the line regardless of where the
+   * input sits. Defaults to true (docked), preserving composer behavior.
+   */
+  dockedOnMobile?: boolean;
 }
 
 const MentionContent = React.forwardRef<ContentElement, MentionContentProps>(
@@ -104,6 +113,7 @@ const MentionContent = React.forwardRef<ContentElement, MentionContentProps>(
       hideWhenDetached = false,
       trackAnchor = true,
       positionAnchor = 'caret',
+      dockedOnMobile = true,
       onEscapeKeyDown,
       onPointerDownOutside,
       style,
@@ -111,7 +121,10 @@ const MentionContent = React.forwardRef<ContentElement, MentionContentProps>(
     } = props;
 
     const context = useMentionContext(CONTENT_NAME);
-    const isMobile = useIsMentionMobile();
+    const isMobileViewport = useIsMentionMobile();
+    // A floating-anchored editor opts out of the bottom-composer dock; the
+    // desktop popover handles the small viewport by flipping.
+    const isMobile = isMobileViewport && dockedOnMobile;
     const [inputBoundary, setInputBoundary] = React.useState<InputBoundaryRect | null>(null);
     const [frameRect, setFrameRect] = React.useState<InputBoundaryRect | null>(null);
     /** Room above and below the frame inside the visible layer, for `composer`. */

@@ -3,7 +3,7 @@ import * as stylex from '@stylexjs/stylex';
 import { createContext, forwardRef, useContext, type ComponentProps, type ReactNode } from 'react';
 import { appendClassName } from '../internal/class-name';
 import { ChevronDownGlyph, TickGlyph } from '../internal/glyphs';
-import { usePopupContainer, type PopupContainer } from '../popup/portal-container';
+import { portalClassName, usePopupContainer, type PopupContainer } from '../popup/portal-container';
 import { useForcedThemeClassNames } from '../theme/theme';
 import { surface } from '../popup/surface';
 import { rowLabel } from '../popup/row-label';
@@ -419,7 +419,7 @@ export const ComboboxContent = forwardRef<HTMLDivElement, ComboboxContentProps>(
     // against the offset parent, which is the panel, so the two agree again.
     const strategy = rest.positionMethod ?? (mountPoint != null ? 'absolute' : undefined);
     return (
-      <BaseCombobox.Portal container={mountPoint}>
+      <BaseCombobox.Portal container={mountPoint} className={portalClassName}>
         <BaseCombobox.Positioner
           ref={ref}
           {...rest}

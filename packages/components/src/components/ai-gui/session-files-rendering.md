@@ -46,7 +46,9 @@ File attachments use `file` blocks; the product contract is in
 - **There is exactly ONE zoomable image surface in the app:**
   `../shared/zoomable-image-viewer.tsx` (`ZoomableImageViewer`, wrapping
   `react-photo-view` `PhotoSlider`). It owns pinch-to-zoom, double-tap/wheel zoom,
-  drag-to-pan, and the top-right close button. Both callers mount it:
+  drag-to-pan, and the top-right close button. Tapping the photo stays inside the
+  pan/zoom surface, and vertical pulls do not dismiss it; close through the
+  toolbar or backdrop. Both callers mount it:
   `view.tsx` `ImagePreviewDialog` (chat image blocks, gallery of the turn's images)
   and `../sessions/session-file-image-preview.tsx` (Code Collab file preview, one
   image). A new image surface must reuse it rather than hand-roll gestures —

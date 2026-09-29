@@ -1,3 +1,5 @@
+import { requestSessionSendExit } from './session-send-exit';
+import { hasPendingSessionSends, SESSION_SEND_DATABASE, SESSION_SEND_STORAGE_LOCK } from './session-send-journal-storage';
 /**
  * "Clear cache" support shared by web, mobile (Capacitor), and desktop (Electron).
  *
@@ -43,13 +45,16 @@ export const META_REMOTE_CURSOR_BYPASS_STORAGE_KEY_PREFIX = 'lody:loroStreamsMet
 const CACHE_CLEAR_FLAG = 'lody:clearCacheOnBoot';
 /** Flag value for the recoverable-cache clear. Historic value, kept as-is. */
 const CACHE_CLEAR_VALUE = '1';
+const FORCED_CACHE_CLEAR_VALUE = 'force-cache';
 /** Flag value for the full local wipe. */
 const HARD_RESET_VALUE = 'all';
+const FORCED_HARD_RESET_VALUE = 'force-all';
 
 export type PendingLocalClearMode = 'cache' | 'hard';
 
 /** IndexedDB databases created with static names (not suffixed per workspace). */
 const KNOWN_INDEXEDDB_NAMES = [
+  SESSION_SEND_DATABASE,
   EAGER_SYNC_HIGH_WATER_DB_NAME,
   EAGER_SYNC_CACHE_DB,
   'lody:repo-file-paths',
@@ -183,8 +188,25 @@ function deleteDatabaseBestEffort(name: string): Promise<void> {
  *   the current workspace's databases, in case its info isn't cached yet. All
  *   visited workspaces are already covered via the cached workspace-info map.
  */
-export async function clearAllLodyLocalCache(extraNames: string[] = []): Promise<void> {
+export async function clearAllLodyLocalCache(
+  extraNames: string[] = [],
+  discardPendingRecovery = false
+): Promise<void> {
+  if (typeof navigator !== 'undefined' && navigator.locks) {
+    return navigator.locks.request(SESSION_SEND_STORAGE_LOCK, () =>
+      clearRecoverableCache(extraNames, discardPendingRecovery)
+    );
+  }
+  return clearRecoverableCache(extraNames, discardPendingRecovery);
+}
+
+async function clearRecoverableCache(
+  extraNames: string[],
+  discardPendingRecovery = false
+): Promise<void> {
   if (typeof indexedDB !== 'undefined') {
+    if (!discardPendingRecovery && await hasPendingSessionSends(indexedDB))
+      throw new Error('Pending messages need their local recovery data. Finish or cancel them before clearing caches.');
     const names = new Set<string>([
       ...KNOWN_INDEXEDDB_NAMES,
       ...knownWorkspaceDatabaseNames(),
@@ -193,7 +215,7 @@ export async function clearAllLodyLocalCache(extraNames: string[] = []): Promise
     try {
       const databases = (await indexedDB.databases?.()) ?? [];
       for (const database of databases) {
-        if (database.name && database.name.startsWith('lody')) {
+        if (database.name && database.name.startsWith('lody') && database.name !== SESSION_SEND_DATABASE) {
           names.add(database.name);
         }
       }
@@ -205,7 +227,11 @@ export async function clearAllLodyLocalCache(extraNames: string[] = []): Promise
     // explicitly destructive hard reset below may remove these databases.
     await Promise.all(
       [...names]
-        .filter((name) => !name.startsWith(PROMPT_SHORTCUT_DATA_PREFIX))
+        .filter(
+          (name) =>
+            (discardPendingRecovery || name !== SESSION_SEND_DATABASE) &&
+            !name.startsWith(PROMPT_SHORTCUT_DATA_PREFIX)
+        )
         .map(deleteDatabaseBestEffort)
     );
   }
@@ -231,7 +257,25 @@ export async function clearAllLodyLocalCache(extraNames: string[] = []): Promise
  * reset: it also removes the auth token and preferences, so the app comes back
  * signed out and factory-fresh.
  */
-export async function clearAllLodyLocalData(extraNames: string[] = []): Promise<void> {
+export async function clearAllLodyLocalData(
+  extraNames: string[] = [],
+  discardPendingRecovery = false
+): Promise<void> {
+  const clear = async () => {
+    if (
+      !discardPendingRecovery &&
+      typeof indexedDB !== 'undefined' &&
+      await hasPendingSessionSends(indexedDB)
+    ) {
+      throw new Error('Pending messages must be completed or canceled before resetting local data');
+    }
+    await clearRecoverableLocalData(extraNames);
+  };
+  if (typeof navigator !== 'undefined' && navigator.locks) await navigator.locks.request(SESSION_SEND_STORAGE_LOCK, clear);
+  else await clear();
+}
+
+async function clearRecoverableLocalData(extraNames: string[]): Promise<void> {
   clearWebStorage();
   clearCookies();
 
@@ -338,7 +382,9 @@ function writePendingFlag(value: string): void {
 
 /** Mark that the cache should be cleared on the next boot, before reloading. */
 export function markCacheClearPending(): void {
-  writePendingFlag(CACHE_CLEAR_VALUE);
+  // The exit guard asks for explicit confirmation when recovery exists. Once it
+  // allows this settings action, boot must actually remove that recovery store.
+  writePendingFlag(FORCED_CACHE_CLEAR_VALUE);
 }
 
 /** Cap on how long the escape hatch waits for the server to revoke the session. */
@@ -380,10 +426,11 @@ async function revokeServerSessionBestEffort(): Promise<void> {
  * crashed.
  */
 export async function startHardReset(): Promise<void> {
+  if (!(await requestSessionSendExit('cache-clear'))) return;
   await revokeServerSessionBestEffort();
   clearWebStorage();
   clearCookies();
-  writePendingFlag(HARD_RESET_VALUE);
+  writePendingFlag(FORCED_HARD_RESET_VALUE);
   replaceAppWindowLocation('/');
   reloadApp();
 }
@@ -395,8 +442,8 @@ export function readPendingLocalClearMode(): PendingLocalClearMode | null {
   } catch {
     return null;
   }
-  if (raw === HARD_RESET_VALUE) return 'hard';
-  if (raw === CACHE_CLEAR_VALUE) return 'cache';
+  if (raw === HARD_RESET_VALUE || raw === FORCED_HARD_RESET_VALUE) return 'hard';
+  if (raw === CACHE_CLEAR_VALUE || raw === FORCED_CACHE_CLEAR_VALUE) return 'cache';
   return null;
 }
 
@@ -435,21 +482,39 @@ async function readNativePendingClearMode(): Promise<PendingLocalClearMode | nul
 let bootClearPromise: Promise<PendingLocalClearMode | null> | null = null;
 
 async function runPendingClearOnBoot(): Promise<PendingLocalClearMode | null> {
-  const mode = readPendingLocalClearMode() ?? (await readNativePendingClearMode());
+  const raw = typeof localStorage === 'undefined' ? null : localStorage.getItem(CACHE_CLEAR_FLAG);
+  const forced = raw === FORCED_CACHE_CLEAR_VALUE || raw === FORCED_HARD_RESET_VALUE;
+  const localMode = readPendingLocalClearMode();
+  const nativeMode = localMode ? null : await readNativePendingClearMode();
+  const mode = localMode ?? nativeMode;
   if (!mode) return null;
-  await getIpcServices()?.app.prepareCacheClear();
-
+  let completed = false;
   try {
-    if (mode === 'hard') {
-      await clearAllLodyLocalData();
-    } else {
-      await clearAllLodyLocalCache();
+    if (!forced && typeof indexedDB !== 'undefined' && await hasPendingSessionSends(indexedDB)) {
+      throw new Error('Pending messages must be completed or canceled before clearing caches');
     }
+    await getIpcServices()?.app.prepareCacheClear();
+    if (mode === 'hard') {
+      await clearAllLodyLocalData([], forced);
+    } else {
+      await clearAllLodyLocalCache([], forced);
+    }
+    completed = true;
+  } catch (error) {
+    // Retain a blocked non-forced request for a later boot, but never prevent
+    // the runtime from starting merely because recovery is still present. The
+    // desktop bridge consumes its request once, so persist that case locally.
+    if (nativeMode && !forced)
+      writePendingFlag(nativeMode === 'hard' ? HARD_RESET_VALUE : CACHE_CLEAR_VALUE);
+    console.warn('[Lody] pending local clear deferred', error);
+    return null;
   } finally {
-    try {
-      localStorage.removeItem(CACHE_CLEAR_FLAG);
-    } catch (error) {
-      console.warn('[Lody] failed to clear cache-clear flag', error);
+    if (completed) {
+      try {
+        localStorage.removeItem(CACHE_CLEAR_FLAG);
+      } catch (error) {
+        console.warn('[Lody] failed to clear cache-clear flag', error);
+      }
     }
   }
   return mode;
@@ -473,6 +538,10 @@ export async function maybeClearLodyCacheOnBoot(extraNames: string[] = []): Prom
   const mode = await bootClearPromise;
   // Nothing was pending, or this caller has no extra databases to contribute.
   if (!mode || extraNames.length === 0) return;
+  if (mode === 'cache') {
+    await clearAllLodyLocalCache(extraNames);
+    return;
+  }
   await Promise.all(
     extraNames
       .filter((name) => mode === 'hard' || !name.startsWith(PROMPT_SHORTCUT_DATA_PREFIX))
@@ -499,5 +568,5 @@ export function reloadApp(): void {
       return;
     }
   }
-  window.location.reload();
+  void requestSessionSendExit('reload').then((allowed) => { if (allowed) window.location.reload(); });
 }

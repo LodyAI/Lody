@@ -6,6 +6,7 @@ import {
   type SessionData,
   type SessionTurn,
   type SessionEntry,
+  type SessionTurnStatus,
 } from '../src/session-data';
 import type { SessionId } from '../src/ids';
 const sid = 'actions' as SessionId;
@@ -238,6 +239,87 @@ for (const backend of ['loro'] as const)
     );
     expect((await data.history.readAll())[1]).not.toHaveProperty('fileDiff');
   });
+describe('user status on duplicate turn copies', () => {
+  const withCopies = async (...statuses: SessionTurnStatus[]) => {
+    const data = createLoroSessionData({ sessionId: sid, doc: new LoroDoc() });
+    // Concurrent queue promotion and queued steering can store one turn twice.
+    for (const status of statuses) await data.commands.appendTurn({ ...row('u', 'user'), status });
+    await data.commands.appendTurn(row('next', 'user'));
+    const copies = async () =>
+      (await data.history.readAll())
+        .filter((turn) => turn.id === 'u')
+        .map((turn) => [turn.status, turn.inputConfig?._lodyDeliveryKind ?? null]);
+    return { data, copies };
+  };
+
+  it('keeps every copy in step without regressing a settled one', async () => {
+    const { data, copies } = await withCopies('pending', 'pending_apply');
+    await data.commands.applyHistoryAction({ kind: 'user-status', turnId: 'u', status: 'handled' });
+    expect(await copies()).toEqual([
+      ['handled', null],
+      ['handled', null],
+    ]);
+
+    const settled = await withCopies('handled', 'pending');
+    await settled.data.commands.applyHistoryAction({
+      kind: 'user-status',
+      turnId: 'u',
+      status: 'processing',
+    });
+    expect(await settled.copies()).toEqual([
+      ['handled', null],
+      ['processing', null],
+    ]);
+  });
+
+  it('projects a steer verdict from the last copy onto steer-state copies only', async () => {
+    const projection = {
+      kind: 'user-status',
+      turnId: 'u',
+      status: 'handled',
+      steerProjection: true,
+      deliveredSteer: true,
+    } as const;
+    const { data, copies } = await withCopies('processing', 'pending', 'pending_apply');
+    expect((await data.commands.applyHistoryAction(projection)).matched).toBe(true);
+    expect(await copies()).toEqual([
+      ['handled', 'steer'],
+      ['pending', null],
+      ['handled', 'steer'],
+    ]);
+
+    const settled = await withCopies('pending_apply', 'canceled');
+    expect((await settled.data.commands.applyHistoryAction(projection)).matched).toBe(false);
+    expect(await settled.copies()).toEqual([
+      ['pending_apply', null],
+      ['canceled', null],
+    ]);
+  });
+
+  it.each([
+    ['requeueUndelivered', { requeueUndelivered: true }],
+    ['onlyPendingApply', { onlyPendingApply: true }],
+  ] as const)('%s is vetoed by any started or settled copy', async (_name, flag) => {
+    const requeue = { kind: 'user-status', turnId: 'u', status: 'pending', ...flag } as const;
+    for (const blocker of ['processing', 'handled'] as const) {
+      // The last copy alone would allow it, but the earlier copy already ran.
+      const { data, copies } = await withCopies(blocker, 'pending_apply');
+      expect((await data.commands.applyHistoryAction(requeue)).matched).toBe(false);
+      expect(await copies()).toEqual([
+        [blocker, null],
+        ['pending_apply', null],
+      ]);
+    }
+
+    const { data, copies } = await withCopies('pending_apply', 'pending_apply');
+    expect((await data.commands.applyHistoryAction(requeue)).matched).toBe(true);
+    expect(await copies()).toEqual([
+      ['pending', null],
+      ['pending', null],
+    ]);
+  });
+});
+
 it('business full reads preserve normalization without rewriting opaque stored history', async () => {
   const doc = new LoroDoc();
   const list = doc.getList('history');

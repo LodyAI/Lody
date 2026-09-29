@@ -55,6 +55,7 @@ const selectorOptions: AcpSelectorOptions = {
 const configured: AgentRoleFormValue = {
   ...EMPTY_AGENT_ROLE_FORM_VALUE,
   name: 'Code Reviewer',
+  description: 'Call this agent to review code changes for correctness before merging.',
   emoji: '🔍',
   machineId: 'machine-1' as MachineId,
   agentConfigId: 'config-1' as AgentConfigId,

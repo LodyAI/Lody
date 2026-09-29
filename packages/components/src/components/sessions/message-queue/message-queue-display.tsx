@@ -25,7 +25,9 @@ import {
   scrollEdgeOverflowEquals,
 } from '@/lib/scroll-edge-fade';
 import { MessageQueueRow } from './message-queue-row';
+import { PendingQueueRow } from './pending-queue-row';
 import { useMessageQueueEditing } from './use-message-queue-editing';
+import { usePendingQueueActions, usePendingQueueRecords } from './use-pending-queue-records';
 
 export type MessageQueueDisplayProps = {
   sessionId: SessionId;
@@ -62,6 +64,9 @@ export function MessageQueueDisplay({
   const [overflow, setOverflow] = useState(NO_SCROLL_EDGE_OVERFLOW);
 
   const editing = useMessageQueueEditing(items, { onEditStart, onEditCancel, onEditSave });
+  const pending = usePendingQueueRecords(sessionId, items);
+  const pendingActions = usePendingQueueActions(sessionId);
+  const rowCount = items.length + pending.length;
 
   const itemIds = useMemo(() => items.map((item) => item.$cid), [items]);
   const canReorder = items.length > 1;
@@ -80,7 +85,7 @@ export function MessageQueueDisplay({
 
   useLayoutEffect(() => {
     updateOverflow();
-  }, [editing.editingCid, items, updateOverflow]);
+  }, [editing.editingCid, items, pending.length, updateOverflow]);
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -106,7 +111,7 @@ export function MessageQueueDisplay({
     [onReorder]
   );
 
-  if (items.length === 0) {
+  if (rowCount === 0) {
     return null;
   }
 
@@ -130,7 +135,7 @@ export function MessageQueueDisplay({
             {t('sessions.messageQueue.upNext', 'Up next')}
             <span className="ml-1.5 text-muted-foreground/60">
               {t('sessions.messageQueue.queuedCount', {
-                count: items.length,
+                count: rowCount,
                 defaultValue: '{{count}} queued',
               })}
             </span>
@@ -184,6 +189,20 @@ export function MessageQueueDisplay({
               })}
             </SortableContext>
           </DndContext>
+          {/* Local rows stay outside the sortable list: they are not queue items
+              yet, and the real item is appended at exactly this position. */}
+          {pending.map((record, index) => (
+            <PendingQueueRow
+              key={record.id}
+              record={record}
+              index={items.length + index}
+              divided={items.length + index > 0}
+              busy={pendingActions.busyId === record.id}
+              onRetry={() => void pendingActions.run(record, 'retry')}
+              onCancel={() => void pendingActions.run(record, 'cancel')}
+              onDiscard={() => void pendingActions.run(record, 'discard')}
+            />
+          ))}
         </div>
       </div>
     </Tooltip.Provider>

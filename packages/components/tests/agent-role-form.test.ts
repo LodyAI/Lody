@@ -47,6 +47,35 @@ const formValue = (overrides: Partial<AgentRoleFormValue> = {}): AgentRoleFormVa
 
 const createId = () => 'new-role' as AgentRoleId;
 
+describe('role description authoring', () => {
+  it('preserves legacy no-op saves and round-trips edits and clearing', () => {
+    const existing = role();
+    const options = { existing, ownerUserId: 'user-1', now: 20, createId };
+    const value = buildAgentRoleFormValue(existing);
+    expect(value.description).toBe('');
+    expect(buildAgentRoleFromForm(value, options)).toBe(existing);
+    const edited = buildAgentRoleFromForm({ ...value, description: 'Review changes' }, options);
+    expect(edited.description).toBe('Review changes');
+    expect(edited.revision).toBe(2);
+    expect(buildAgentRoleFormValue(edited).description).toBe('Review changes');
+    const cleared = buildAgentRoleFromForm(
+      { ...buildAgentRoleFormValue(edited), description: '' },
+      { ...options, existing: edited }
+    );
+    expect(cleared.description).toBe('');
+    expect(cleared.revision).toBe(3);
+  });
+
+  it('caps newly saved descriptions at 140 Unicode code points', () => {
+    const saved = buildAgentRoleFromForm(formValue({ description: '😀'.repeat(141) }), {
+      ownerUserId: 'user-1',
+      now: 20,
+      createId,
+    });
+    expect(saved.description).toBe('😀'.repeat(140));
+  });
+});
+
 describe('automatic role schema reconciliation', () => {
   const capability: AcpCapabilityCacheEntry = {
     cliType: 'builtin',

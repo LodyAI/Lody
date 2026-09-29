@@ -21,12 +21,7 @@ type RemoteCursorStoreWarningContext = {
 
 type RemoteCursorStoreEvent = {
   operation: RemoteCursorStoreOperation;
-  phase:
-    | 'primary-start'
-    | 'primary-success'
-    | 'primary-failure'
-    | 'primary-bypass'
-    | 'fallback-success';
+  phase: 'primary-start' | 'primary-success' | 'primary-failure' | 'fallback-success';
   dbName: string;
   streamUrl: string;
   timeoutMs: number;
@@ -40,7 +35,6 @@ export type ResilientRemoteCursorStoreOptions<TVersion extends JsonObject = Json
   indexedDb?: IDBFactory;
   onWarning?: (message: string, context: RemoteCursorStoreWarningContext) => void;
   onEvent?: (message: string, event: RemoteCursorStoreEvent) => void;
-  shouldBypassPrimaryLoad?: (streamUrl: string) => boolean;
   createPrimaryStore?: (options: IndexedDbRemoteCursorStoreOptions) => RemoteCursorStore<TVersion>;
   createFallbackStore?: () => RemoteCursorStore<TVersion>;
 };
@@ -91,7 +85,6 @@ export class ResilientRemoteCursorStore<
     | ((message: string, context: RemoteCursorStoreWarningContext) => void)
     | undefined;
   private readonly onEvent: ((message: string, event: RemoteCursorStoreEvent) => void) | undefined;
-  private readonly shouldBypassPrimaryLoad: ((streamUrl: string) => boolean) | undefined;
   private degraded = false;
 
   constructor(options: ResilientRemoteCursorStoreOptions<TVersion>) {
@@ -99,7 +92,6 @@ export class ResilientRemoteCursorStore<
     this.timeoutMs = options.timeoutMs ?? DEFAULT_REMOTE_CURSOR_STORE_TIMEOUT_MS;
     this.onWarning = options.onWarning;
     this.onEvent = options.onEvent;
-    this.shouldBypassPrimaryLoad = options.shouldBypassPrimaryLoad;
     this.primary =
       options.createPrimaryStore?.({
         dbName: options.dbName,
@@ -116,17 +108,6 @@ export class ResilientRemoteCursorStore<
     if (this.degraded) {
       return await this.loadFromStore(this.fallback, streamUrl);
     }
-    if (this.shouldBypassPrimaryLoad?.(streamUrl) === true) {
-      this.emitEvent('Loro Streams remote cursor cache primary load bypassed', {
-        operation: 'load',
-        phase: 'primary-bypass',
-        dbName: this.dbName,
-        streamUrl,
-        timeoutMs: this.timeoutMs,
-      });
-      return await this.loadFromStore(this.fallback, streamUrl);
-    }
-
     return await this.runPrimaryOperation(
       'load',
       streamUrl,
