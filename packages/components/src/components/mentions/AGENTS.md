@@ -14,8 +14,9 @@ Pipeline background: [ui-mentions.md](../../../../../.agents/docs/ui-mentions.md
   registration and mounting `<Mention>`; every source with its own `enabled`
   rule (sessions: having any) belongs there too. Placeholder hints advertise `$`
   only under the conditions that enable Skill mentions.
-- Desktop menus render through `MentionContent`, capped at
-  `var(--mention-input-width)`; `@` pins `side="top"`.
+- Desktop menus follow the caret, flip to fit, and cap/scroll within the viewport
+  and `var(--mention-input-width)`. The mobile dock stays above the whole
+  `[data-mention-frame]`, including attachments.
 - `insertText` must keep its type's prompt form (`@path`, `#123`, `$token`,
   `/cmd`): reaching a type through `@` must not change what the agent receives.
   Directory candidates carry BOTH `navigateText` (`@dir/`, descend) and
@@ -28,11 +29,9 @@ Pipeline background: [ui-mentions.md](../../../../../.agents/docs/ui-mentions.md
 - File, Session, Agent Role, Issue, and PR candidates use the vendored VS Code
   `scoreFuzzy` with non-contiguous matching, wrapped by any source-specific
   ordering. Skills and commands keep their own ranking.
-- A candidate describes its side panel through the neutral
-  `MentionCandidateDetail` fields, which render verbatim — put i18n'd text
-  there, never a raw enum. The one exception is `detail.agentRole`, rendering
-  `sessions/agent-role-detail-pane.tsx`: desktop only. The list sets either
-  pane's height.
+- Side panels render neutral `MentionCandidateDetail` fields verbatim: use
+  i18n'd text, never raw enums. `detail.agentRole` instead renders
+  `sessions/agent-role-detail-pane.tsx` on desktop. The list sets pane height.
 - Lazy work is `MentionCategory.activation`; category navigation starts its
   destination synchronously through `MentionItem.onMentionNavigate`, while
   `selectMentionViewActivations` covers typed/pasted prefixes, direct triggers,
@@ -105,10 +104,8 @@ true })`. The fetch timestamp rides on the cached entry (survives IndexedDB).
   mention unless Cmd/Ctrl+Shift+V. No range → send verbatim; never resolve a
   slug; hydration skips tokens the file source knows. Evidence:
   [session:// URI](../../../../../.agents/notes/implemented/feature/2026-09-18-session-mention-uri-and-paste.md).
-- Slugs resolve through the live list first, then a `localStorage` slug → id
-  map. That store stays synchronous, its key is registered in
-  `lib/clear-local-cache.ts`, and the write is skipped when the serialized map
-  is unchanged.
+- Slugs resolve through the live list, then a synchronous `localStorage` slug →
+  id map registered in `lib/clear-local-cache.ts`; skip unchanged writes.
 - A session dragged from the sidebar or a session tab onto a chat surface
   becomes a mention; the drop must be a REAL range, not `@<slug>` text: use
   `mentionActionsRef.insertSessionMention(sessionId)` (false for unknown, own,

@@ -5,6 +5,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { Mention, MentionContent, MentionInput, useMentionContext } from '../src/ui/mention';
+import { MentionMobilePanel } from '../src/ui/mention/mention-mobile-content';
 import type { Mention as MentionRange } from '../src/ui/mention/mention-root';
 import {
   matchedRuns,
@@ -672,7 +673,12 @@ describe('composer placement', () => {
           autoCloseOnEmpty={false}
         >
           <MentionInput value="@" onChange={() => {}} />
-          <MentionContent positionAnchor="composer" side={side} sideOffset={8}>
+          <MentionContent
+            positionAnchor="composer"
+            side={side}
+            sideOffset={8}
+            style={{ overflowY: 'auto' }}
+          >
             {Array.from({ length: rows }, (_, index) => (
               <div key={index}>row {index}</div>
             ))}
@@ -696,6 +702,9 @@ describe('composer placement', () => {
     show(true);
     // 600 above the frame, less the 16px window margin and the 8px gap.
     expect(cap()).toBe('576px');
+    expect(
+      document.querySelector<HTMLElement>('[data-slot="mention-content"]')?.style.overflowY
+    ).toBe('auto');
   });
 
   it('keeps its side through a level change and a moved composer', async () => {
@@ -728,5 +737,65 @@ describe('composer placement', () => {
     show(true, 2, 'top');
     // Pinned above, capped to the 24px room there less the gap.
     expect(cap()).toBe('16px');
+  });
+});
+
+describe('mobile mention placement', () => {
+  let root: Root | undefined;
+  let container: HTMLDivElement | undefined;
+  let frameTop = 300;
+  let restoreRect: (() => void) | undefined;
+
+  beforeEach(() => {
+    frameTop = 300;
+    const original = HTMLElement.prototype.getBoundingClientRect;
+    HTMLElement.prototype.getBoundingClientRect = function (this: HTMLElement) {
+      if (this.hasAttribute('data-mention-frame')) {
+        return DOMRect.fromRect({ x: 100, y: frameTop, width: 400, height: 120 });
+      }
+      if (this.tagName === 'TEXTAREA') {
+        return DOMRect.fromRect({ x: 100, y: frameTop + 40, width: 400, height: 80 });
+      }
+      return original.call(this);
+    };
+    restoreRect = () => {
+      HTMLElement.prototype.getBoundingClientRect = original;
+    };
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+  });
+
+  afterEach(() => {
+    if (root) act(() => root?.unmount());
+    root = undefined;
+    container?.remove();
+    container = undefined;
+    restoreRect?.();
+  });
+
+  it('docks above the whole frame and caps itself to visible room', async () => {
+    function MobileHarness() {
+      const inputRef = React.useRef<HTMLTextAreaElement>(null);
+      return (
+        <div data-mention-frame="">
+          <button type="button">Actions</button>
+          <textarea ref={inputRef} />
+          <MentionMobilePanel open anchorRef={inputRef}>
+            <div>Item</div>
+          </MentionMobilePanel>
+        </div>
+      );
+    }
+
+    await act(async () => root?.render(<MobileHarness />));
+    const panel = document.body.querySelector<HTMLElement>('[role="listbox"]');
+    expect(panel?.style.bottom).toBe('476px');
+    expect(panel?.style.maxHeight).toBe('220px');
+
+    frameTop = 80;
+    await act(async () => window.dispatchEvent(new Event('resize')));
+    expect(panel?.style.bottom).toBe('696px');
+    expect(panel?.style.maxHeight).toBe('16px');
   });
 });

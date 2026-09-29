@@ -1016,21 +1016,16 @@ const width = stylex.create({
 export function MentionTwoLevelMenu({
   categories,
   surface = 'unknown',
-  menuSide = 'top',
-  anchor = 'composer',
+  menuSide = 'bottom',
+  anchor = 'caret',
   mobileDocked = true,
 }: {
   categories: MentionCategory[];
   surface?: MentionSurface;
-  /** The side of the anchor the menu opens on. The composer pins `top` because it
-   *  sits at the bottom of the conversation; a caret-anchored editor instead
-   *  follows the caret and lets the positioner flip it. */
+  /** The preferred side of the caret; the positioner flips when it cannot fit. */
   menuSide?: 'top' | 'bottom';
-  /** `composer` anchors to the nearest `[data-mention-frame]` (the composer box
-   *  itself); `caret` follows the caret line like a text-completion popup. The
-   *  edit-and-resend editor uses `caret` — it lives mid-conversation, so a
-   *  frame-anchored menu would sit beside the card rather than next to the word
-   *  being typed. */
+  /** `caret` follows the insertion point; `composer` anchors to the nearest
+   *  `[data-mention-frame]` for surfaces that explicitly want a fixed menu. */
   anchor?: 'caret' | 'composer';
   /** Keep the <640px docked panel. False keeps the floating popover on mobile —
    *  for an editor mid-conversation where "dock above the composer" has no
@@ -1151,13 +1146,14 @@ export function MentionTwoLevelMenu({
 
   return (
     // The docked mobile panel places itself; this width is the desktop popup's.
-    // Composer menus anchor to the composer frame and pin `top`; a caret-anchored
-    // menu follows the caret and may flip to fit.
+    // Caret menus follow typing and may flip to fit.
     <MentionContent
       positionAnchor={anchor}
       side={menuSide}
       sideOffset={8}
       dockedOnMobile={mobileDocked}
+      fitViewport={anchor === 'caret'}
+      style={anchor === 'caret' ? { overflowY: 'auto', overscrollBehavior: 'contain' } : undefined}
       className={stylex.props(width.menu, detail && width.menuWithDetail).className}
     >
       <MentionTwoLevelMenuBody

@@ -26,6 +26,24 @@ lives in its `README.md`.
 5. **Before send.** One hook rewrites the ranges that need rewriting, and the
    resulting spans are frozen into the message.
 
+## Menu placement
+
+The desktop menu's virtual anchor measures the textarea's laid-out caret, not
+the width of its unwrapped text. Soft wraps, internal scrolling, and scaled
+editor containers therefore move the popup with the insertion point. The
+virtual element retains the textarea as its observation target so an open menu
+also follows a layout shift that did not change the text. Floating placement
+flips at the viewport edge; when neither side fits a tall menu, the visible
+surface and its rows scroll instead of extending off-screen.
+
+The mobile composer uses a separate docked strip. Its boundary is the whole
+`data-mention-frame` (input, controls, and attachments), so the strip cannot
+cover content above the textarea. Its height is limited by the actual room
+above that frame, including the top inset. Inline edit-and-resend opts out of
+the dock and keeps the floating caret menu. The
+[placement Spec](../../specs/composer-mention-menu-placement.md) owns these
+visible guarantees.
+
 ## Ranking
 
 File menus use `useMentionFileSearch`: a Worker owns the file/directory index,

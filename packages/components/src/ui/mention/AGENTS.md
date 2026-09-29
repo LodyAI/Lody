@@ -81,19 +81,20 @@ Shared mention primitive used by composer autocomplete surfaces.
   match the search term against each item's `value` hides rows whose payload
   happens not to contain it, and a hidden row renders null, which strips its node
   from the collection and breaks arrow-key movement across groups.
-- Desktop `MentionContent` defaults to the caret line, horizontally constrained
-  to the textarea range via its virtual collision boundary and
-  `--mention-input-width`.
+- Desktop `MentionContent` follows the current query caret using mirrored
+  textarea wrapping/scroll. Its virtual `contextElement` is the textarea, so
+  layout shifts update an open popup. It flips to fit and stays within the
+  virtual collision boundary and `--mention-input-width`.
 - `positionAnchor="composer"` anchors to the input's nearest `[data-mention-frame]`
   (else its wrapper), left-aligned and no wider. It picks its side once per open
   — above unless there is no room — and never flips: a level change resizes it
   in place, and its height is capped to that side's room. An explicit `side`
-  pins the side instead of the room pick. A composer marks the frame around
-  its chip row and box, so the menu never half-covers a chip.
+  pins the side instead of the room pick.
 - Menu callers should include `var(--mention-input-width)` in desktop `max-w`
   classes; viewport-only caps let wide menus escape the composer.
-- Mobile mention content bypasses floating-ui and docks through
-  `MentionMobilePanel`; desktop positioning classes do not control mobile layout.
+- Mobile `MentionMobilePanel` bypasses floating-ui and desktop positioning.
+  It docks above `[data-mention-frame]` (else the input) and caps to visible
+  room without covering the frame or top inset.
   The docked strip is the only scroller: menus pass `docked` and drop their own.
 - Desktop content, the mobile strip and rows share `mention-surface.ts`: the
   `@lody/ui` popup surface restated in semantic tokens (no border, no Tailwind).
