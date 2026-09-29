@@ -121,7 +121,7 @@ describe('createConversationDiffViewerParseCacheKey', () => {
 });
 
 describe('shouldOpenDiffFileByDefault', () => {
-  it('opens only the focused file in All Changes mode', () => {
+  it('opens only the focused file in both All Changes and turn diff modes', () => {
     expect(
       shouldOpenDiffFileByDefault({
         mode: 'base',
@@ -136,14 +136,27 @@ describe('shouldOpenDiffFileByDefault', () => {
         focusFilePath: 'src/target.ts',
       })
     ).toBe(false);
-  });
-
-  it('keeps conversation diffs expanded and All Changes without focus collapsed', () => {
+    expect(
+      shouldOpenDiffFileByDefault({
+        mode: 'conversation',
+        filePath: 'src/target.ts',
+        focusFilePath: 'src/target.ts',
+      })
+    ).toBe(true);
     expect(
       shouldOpenDiffFileByDefault({
         mode: 'conversation',
         filePath: 'src/other.ts',
         focusFilePath: 'src/target.ts',
+      })
+    ).toBe(false);
+  });
+
+  it('keeps unfocused conversation diffs expanded and All Changes collapsed', () => {
+    expect(
+      shouldOpenDiffFileByDefault({
+        mode: 'conversation',
+        filePath: 'src/other.ts',
       })
     ).toBe(true);
     expect(shouldOpenDiffFileByDefault({ mode: 'base', filePath: 'src/other.ts' })).toBe(false);

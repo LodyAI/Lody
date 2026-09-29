@@ -148,11 +148,16 @@ export function shouldOpenDiffFileByDefault(input: {
   readonly filePath: string;
   readonly focusFilePath?: string | null;
 }): boolean {
-  if (input.mode !== 'base') {
-    return true;
+  if (input.focusFilePath == null) {
+    // A direct turn diff has no file selection and keeps its historical
+    // all-files-open view. An unfocused All Changes panel starts collapsed so
+    // opening it from the summary does not render every file at once.
+    return input.mode === 'conversation';
   }
 
-  return input.focusFilePath != null && arePathsEquivalent(input.filePath, input.focusFilePath);
+  // A precise file action is the same interaction in both surfaces: open the
+  // requested file and leave unrelated cards collapsed.
+  return arePathsEquivalent(input.filePath, input.focusFilePath);
 }
 
 export type SessionConversationDiffPanelProps = {
