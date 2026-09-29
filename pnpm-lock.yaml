@@ -267,6 +267,9 @@ importers:
       '@convex-dev/better-auth':
         specifier: 'catalog:'
         version: 0.11.2(@standard-schema/spec@1.1.0)(better-auth@1.5.5(4d87474277c2b9dbd5c0820f07d34abd))(convex@1.33.1(react@19.2.0))(hono@4.12.14)(react@19.2.0)(typescript@5.9.3)
+      '@effect/vitest':
+        specifier: ~0.26.0
+        version: 0.26.0(effect@3.18.4)(vitest@3.2.4(@types/debug@4.1.12)(@types/node@24.10.12)(jiti@2.6.1)(jsdom@26.1.0)(lightningcss@1.33.0)(terser@5.46.0)(tsx@4.23.7)(yaml@2.8.2))
       '@lody/cli-supervisor':
         specifier: workspace:*
         version: link:../../packages/cli-supervisor
@@ -2583,6 +2586,12 @@ packages:
 
   '@dukelib/sheets-wasm@0.1.23':
     resolution: {integrity: sha512-E/vHXR2I/EodNCpyVcFq0p8/u5qxmKxatUZvB7bsFfghUPQ2GMxg81MBFjOEQtLKXnzR7xjXOyzPzBTLbv2e1g==}
+
+  '@effect/vitest@0.26.0':
+    resolution: {integrity: sha512-h7r21XRtHpl8CQmIuplCK54bYJkUij4c6bUxK27y4d9dTXn4s7c/I3Lilb4VZxv3P3S3sChCu5YIGW4pdQFjZg==}
+    peerDependencies:
+      effect: ^3.18.0
+      vitest: ^3.2.0
 
   '@electric-sql/pglite-socket@0.0.20':
     resolution: {integrity: sha512-J5nLGsicnD9wJHnno9r+DGxfcZWh+YJMCe0q/aCgtG6XOm9Z7fKeite8IZSNXgZeGltSigM9U/vAWZQWdgcSFg==}
@@ -15014,6 +15023,11 @@ snapshots:
   '@dual-bundle/import-meta-resolve@4.2.1': {}
 
   '@dukelib/sheets-wasm@0.1.23': {}
+
+  '@effect/vitest@0.26.0(effect@3.18.4)(vitest@3.2.4(@types/debug@4.1.12)(@types/node@24.10.12)(jiti@2.6.1)(jsdom@26.1.0)(lightningcss@1.33.0)(terser@5.46.0)(tsx@4.23.7)(yaml@2.8.2))':
+    dependencies:
+      effect: 3.18.4
+      vitest: 3.2.4(@types/debug@4.1.12)(@types/node@24.10.12)(jiti@2.6.1)(jsdom@26.1.0)(lightningcss@1.33.0)(terser@5.46.0)(tsx@4.23.7)(yaml@2.8.2)
 
   '@electric-sql/pglite-socket@0.0.20(@electric-sql/pglite@0.3.15)':
     dependencies:

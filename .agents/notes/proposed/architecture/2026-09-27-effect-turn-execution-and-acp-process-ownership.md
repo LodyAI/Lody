@@ -342,6 +342,11 @@ inference in `awaitTurnFiber`:
 
 ### PR1: L0 platform + L1 ProcessService (directly targets #429)
 
+> Implemented; see [one Effect process layer](../../implemented/architecture/2026-09-27-effect-process-tree-layer.md).
+> Deviation from the list below: the daemon `DaemonRuntime` and moving the turn fiber onto it
+> are deferred to L4, because no resource in this PR has daemon lifetime; facades provide
+> Layers per call instead.
+
 - **L0:**
   - `DaemonRuntime`: a `ManagedRuntime` + root scope, disposed during shutdown.
   - An Effect Logger bridged to the existing Logger, so the ~95 Logger test doubles are

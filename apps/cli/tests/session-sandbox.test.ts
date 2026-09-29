@@ -15,6 +15,7 @@ import {
   EXECUTION_PLANE_RESOURCE_PROFILE,
 } from '../src/utils/process-resource-profile';
 import type { Logger } from '../src/utils/logger';
+import { FakeProcessTable } from './fake-process-table';
 
 const createSilentLogger = (warnings: string[] = []): Logger => ({
   info: () => {},
@@ -248,7 +249,6 @@ describe('session sandbox', () => {
         readSelfCgroupPath: async () => '/system.slice/lody.service',
         configureExecutionProcess,
         killPid: vi.fn(),
-        sleep: async () => {},
       },
     });
 
@@ -319,7 +319,6 @@ describe('session sandbox', () => {
         readSelfCgroupPath: async () => '/system.slice/lody.service',
         configureExecutionProcess: vi.fn(async () => {}),
         killPid: vi.fn(),
-        sleep: async () => {},
       },
     });
 
@@ -372,7 +371,6 @@ describe('session sandbox', () => {
         readSelfCgroupPath: async () => '/system.slice/lody.service',
         configureExecutionProcess: vi.fn(async () => {}),
         killPid: vi.fn(),
-        sleep: async () => {},
       },
     });
 
@@ -418,43 +416,36 @@ describe('session sandbox', () => {
     expect(warnings[0]).toContain('only supported on Linux');
   });
 
-  it('uses process-group tree kill for noop sandbox processes on POSIX hosts', async () => {
-    const killPid = vi.fn();
-    const configureExecutionProcess = vi.fn(async () => {});
-    const child = new FakeChildProcess(2468);
-    const spawnProcess = vi.fn(
-      (_command: string, _args: string[], _options: unknown) => child as unknown as ChildProcess
-    ) as typeof realSpawn;
-
+  const createProcessTableSandbox = async (table: FakeProcessTable) => {
     const factory = createSessionSandboxFactory({
       logger: createSilentLogger(),
       deps: {
-        platform: 'darwin',
-        spawnProcess,
-        configureExecutionProcess,
-        killPid,
+        platform: table.platform,
+        spawnProcess: table.api.spawn as unknown as typeof realSpawn,
+        configureExecutionProcess: vi.fn(async () => {}),
+        killPid: table.api.kill,
       },
     });
+    return await factory('session-noop-tree' as SessionId);
+  };
 
-    const sandbox = await factory('session-noop-tree-kill' as SessionId);
+  it('terminates a noop process together with its descendants on POSIX hosts', async () => {
+    const table = new FakeProcessTable('darwin');
+    const sandbox = await createProcessTableSandbox(table);
     const handle = await sandbox.spawn('bash', ['-lc', 'node'], {
       cwd: process.cwd(),
       env: {},
       stdio: ['ignore', 'pipe', 'pipe'],
     });
-
-    expect(spawnProcess).toHaveBeenCalledWith(
-      'bash',
-      ['-lc', 'node'],
-      expect.objectContaining({ detached: true })
-    );
-    expect(configureExecutionProcess).toHaveBeenCalledWith(2468, expect.any(Object));
+    const leader = handle.child.pid ?? -1;
+    const descendant = table.addDescendant(leader);
 
     await handle.terminate(false);
-    await sandbox.terminate(true);
 
-    expect(killPid).toHaveBeenNthCalledWith(1, -2468, 'SIGTERM');
-    expect(killPid).toHaveBeenNthCalledWith(2, -2468, 'SIGKILL');
+    expect(table.spawned[0]?.options.detached).toBe(true);
+    expect(table.isAlive(leader)).toBe(false);
+    expect(table.isAlive(descendant)).toBe(false);
+    expect(table.delivered).toEqual([{ target: -leader, signal: 'SIGTERM' }]);
   });
 
   it('buffers noop sandbox exits that happen while applying process resource profiles', async () => {
@@ -475,7 +466,6 @@ describe('session sandbox', () => {
         spawnProcess: (() => child as unknown as ChildProcess) as typeof realSpawn,
         configureExecutionProcess,
         killPid: vi.fn(),
-        sleep: async () => {},
       },
     });
 
@@ -497,33 +487,39 @@ describe('session sandbox', () => {
     expect(closeEvents).toEqual([[0, null]]);
   });
 
-  it('removes exited noop sandbox processes from later tree-kill passes', async () => {
-    const killPid = vi.fn();
-    const child = new FakeChildProcess(1357);
-    const factory = createSessionSandboxFactory({
-      logger: createSilentLogger(),
-      deps: {
-        platform: 'darwin',
-        spawnProcess: (() => child as unknown as ChildProcess) as typeof realSpawn,
-        configureExecutionProcess: vi.fn(async () => {}),
-        killPid,
-      },
-    });
-
-    const sandbox = await factory('session-noop-cleanup' as SessionId);
-    await sandbox.spawn('bash', ['-lc', 'exit 0'], {
+  it('signals nothing for a noop process group that is already empty', async () => {
+    const table = new FakeProcessTable('darwin');
+    const sandbox = await createProcessTableSandbox(table);
+    const handle = await sandbox.spawn('bash', ['-lc', 'exit 0'], {
       cwd: process.cwd(),
       env: {},
       stdio: ['ignore', 'pipe', 'pipe'],
     });
-
-    child.exitCode = 0;
-    child.emit('exit', 0, null);
-    child.emit('close', 0, null);
+    table.exitOnItsOwn(handle.child.pid ?? -1);
 
     await sandbox.terminate(true);
 
-    expect(killPid).not.toHaveBeenCalled();
+    expect(table.delivered).toEqual([]);
+  });
+
+  // An npx or shell wrapper can exit while the agent it started keeps running
+  // in the same group; the sandbox must still reach that orphan.
+  it('kills descendants that outlived their exited noop leader', async () => {
+    const table = new FakeProcessTable('darwin');
+    const sandbox = await createProcessTableSandbox(table);
+    const handle = await sandbox.spawn('npx', ['agent'], {
+      cwd: process.cwd(),
+      env: {},
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    const leader = handle.child.pid ?? -1;
+    const orphan = table.addDescendant(leader);
+    table.exitOnItsOwn(leader);
+
+    await sandbox.terminate(true);
+
+    expect(table.isAlive(orphan)).toBe(false);
+    expect(table.delivered).toEqual([{ target: -leader, signal: 'SIGKILL' }]);
   });
 
   it('continues when execution process resource profile application fails', async () => {
@@ -544,7 +540,6 @@ describe('session sandbox', () => {
           throw new Error('profile failed');
         }),
         killPid: vi.fn(),
-        sleep: async () => {},
       },
     });
 
@@ -639,7 +634,11 @@ describe('session sandbox', () => {
         },
       });
       const sandbox = await factory('session-capture-cap' as SessionId);
-      const handle = await sandbox.spawn('noisy', [], { cwd: process.cwd(), env: {}, captureOutput: true });
+      const handle = await sandbox.spawn('noisy', [], {
+        cwd: process.cwd(),
+        env: {},
+        captureOutput: true,
+      });
 
       let bytes = 0;
       let tail = '';

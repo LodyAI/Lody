@@ -35,7 +35,7 @@ import {
   AcpAgentAuthorizationOutputParser,
   BuiltinAuthenticationOutputParser,
 } from './acp-authentication-output';
-import { shutdownLocalAcpAgent, spawnAcpProcess } from './acp-runner';
+import { shutdownLocalAcpAgent, spawnAcpProcess, terminateAcpProcessTree } from './acp-runner';
 import type { ManagedRuntimeProgressEvent } from './managed-agent-runtime';
 import { createStdinWritableStream, createStdoutReadableStream } from '@/utils/stream';
 import { getLoginShellEnv } from './login-shell-env';
@@ -103,6 +103,8 @@ export type AcpAuthenticationResult =
 const DEFAULT_AUTHENTICATION_TIMEOUT_MS = 285_000;
 const DEFAULT_TERMINATION_GRACE_MS = 3_000;
 const DEFAULT_STATUS_PROBE_TIMEOUT_MS = 15_000;
+/** Bound on waiting for a SIGKILLed status probe tree to disappear. */
+const STATUS_PROBE_KILL_WAIT_MS = 2_000;
 
 const BUILTIN_AUTH_METHODS = {
   // Pi credentials are configured through the official Pi CLI on the host.
@@ -445,7 +447,19 @@ export async function probeBuiltinAuthentication(
     env,
     stdio: 'ignore',
     windowsHide: true,
+    // Its own group, so a timeout or cancel ends whatever the status command
+    // started, not just the command itself.
+    detached: process.platform !== 'win32',
   });
+  let termination: Promise<void> | undefined;
+  const terminateProbe = (): void => {
+    termination ??= terminateAcpProcessTree(child, {
+      logger: options.logger,
+      sessionLabel: `acp-auth:${options.agentType}:status`,
+      exitTimeoutMs: STATUS_PROBE_KILL_WAIT_MS,
+      force: true,
+    });
+  };
   const timeoutMs = Math.max(1, options.statusProbeTimeoutMs ?? DEFAULT_STATUS_PROBE_TIMEOUT_MS);
   const exit = await new Promise<{
     aborted?: boolean;
@@ -468,11 +482,7 @@ export async function probeBuiltinAuthentication(
       resolve(result);
     };
     const handleAbort = (): void => {
-      try {
-        child.kill('SIGKILL');
-      } catch {
-        // The process may have exited between cancellation and the kill call.
-      }
+      terminateProbe();
       finish({ aborted: true, code: null });
     };
     options.signal?.addEventListener('abort', handleAbort, { once: true });
@@ -481,11 +491,7 @@ export async function probeBuiltinAuthentication(
       return;
     }
     timeoutHandle = setTimeout(() => {
-      try {
-        child.kill('SIGKILL');
-      } catch {
-        // The process may have exited between the timeout and kill call.
-      }
+      terminateProbe();
       finish({ code: null, timedOut: true });
     }, timeoutMs);
     timeoutHandle.unref?.();
@@ -493,6 +499,12 @@ export async function probeBuiltinAuthentication(
     child.once('exit', (code) => finish({ code }));
   });
 
+  // The probe is over only once its process tree is gone.
+  await termination?.catch((error: unknown) => {
+    options.logger.warn(
+      `[acp-auth] ${getBuiltinDisplayName(options.agentType)} status probe could not be terminated: ${formatErrorMessage(error)}`
+    );
+  });
   if (exit.aborted) {
     throw new DOMException('ACP authentication probe was cancelled', 'AbortError');
   }

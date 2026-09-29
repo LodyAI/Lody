@@ -249,6 +249,10 @@ join（超限记录日志、不阻塞释放）。初始化停滞由 watchdog 直
 
 ### PR1：L0 平台 + L1 ProcessService（直接对应 #429）
 
+> 已实现，见[统一的 Effect 进程层](../../implemented/architecture/2026-09-27-effect-process-tree-layer.zh.md)。
+> 与下文的偏差：守护进程级 `DaemonRuntime` 与 turn fiber 的改接推迟到 L4，因为本 PR 中没有
+> 守护进程生命周期的资源；门面改为按调用提供 Layer。
+
 - L0：`DaemonRuntime`（`ManagedRuntime` + 根作用域，关停流程中 `dispose`）；Effect Logger 桥接到
   现有 Logger，避免牵动约 95 个 Logger 测试替身；基于 TestClock 的测试运行时辅助；恢复
   `.agents/docs/cli-effect-ts.md` 并修正 CLI `AGENTS.md` 的断链。

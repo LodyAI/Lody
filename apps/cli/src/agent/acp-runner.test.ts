@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { __test__, shutdownLocalAcpAgent, spawnAcpProcess } from './acp-runner';
 import type { Logger } from '@/utils/logger';
+import { FakeProcessTable } from '../../tests/fake-process-table';
 
 const createSilentLogger = (): Logger => ({
   info: () => {},
@@ -139,24 +140,23 @@ base_url = "https://gateway.example/v1"
 describe('shutdownLocalAcpAgent', () => {
   afterEach(() => {
     vi.useRealTimers();
-    vi.restoreAllMocks();
   });
 
-  it('closes the ACP session before terminating the local agent process', async () => {
-    const calls: string[] = [];
-    const child = createFakeChildProcess();
+  const spawnAgent = (table: FakeProcessTable): ChildProcess =>
+    table.api.spawn('agent', [], { detached: true });
+
+  it('closes the ACP session before terminating the agent process group', async () => {
+    const table = new FakeProcessTable('linux');
+    const child = spawnAgent(table);
+    const leader = child.pid ?? -1;
+    const descendant = table.addDescendant(leader);
+    const signalsAtClose: unknown[] = [];
     const client = {
       closeSession: vi.fn(async () => {
-        calls.push('close');
+        signalsAtClose.push(...table.delivered);
         return true;
       }),
     };
-    vi.mocked(child.kill).mockImplementation((signal?: NodeJS.Signals) => {
-      calls.push(`kill:${signal ?? 'default'}`);
-      child.exitCode = 0;
-      queueMicrotask(() => child.emit('exit', 0, signal));
-      return true;
-    });
 
     await shutdownLocalAcpAgent({
       agentProcess: child,
@@ -164,76 +164,63 @@ describe('shutdownLocalAcpAgent', () => {
       acpSessionId: 'acp-1' as never,
       logger: createSilentLogger(),
       sessionLabel: 'test-local-agent',
+      nodeProcess: table.api,
     });
 
     expect(client.closeSession).toHaveBeenCalledWith('acp-1', 5000);
-    expect(calls).toEqual(['close', 'kill:SIGTERM']);
+    expect(signalsAtClose).toEqual([]);
+    expect(table.delivered).toEqual([{ target: -leader, signal: 'SIGTERM' }]);
+    expect(table.isAlive(descendant)).toBe(false);
   });
 
-  it('escalates to SIGKILL when the local agent process ignores SIGTERM', async () => {
+  it('escalates to SIGKILL when the agent ignores SIGTERM', async () => {
     vi.useFakeTimers();
-    const child = createFakeChildProcess({ exitOnSigterm: false, exitOnSigkill: true });
+    const table = new FakeProcessTable('linux');
+    table.queueSpawn({ ignores: ['SIGTERM'] });
+    const child = spawnAgent(table);
+    const leader = child.pid ?? -1;
 
-    const shutdownPromise = shutdownLocalAcpAgent({
+    const shutdown = shutdownLocalAcpAgent({
       agentProcess: child,
       logger: createSilentLogger(),
       sessionLabel: 'test-local-agent',
       exitTimeoutMs: 10,
+      nodeProcess: table.api,
     });
+    await vi.advanceTimersByTimeAsync(20);
+    await shutdown;
 
-    await vi.advanceTimersByTimeAsync(10);
-    await shutdownPromise;
-
-    expect(child.kill).toHaveBeenNthCalledWith(1, 'SIGTERM');
-    expect(child.kill).toHaveBeenNthCalledWith(2, 'SIGKILL');
+    expect(table.delivered).toEqual([
+      { target: -leader, signal: 'SIGTERM' },
+      { target: -leader, signal: 'SIGKILL' },
+    ]);
+    expect(table.isAlive(leader)).toBe(false);
   });
 
-  if (process.platform !== 'win32') {
-    it('terminates the ACP process group on POSIX when the child has a PID', async () => {
-      const child = createFakeChildProcess({ pid: 1234 });
-      const processKill = vi.spyOn(process, 'kill').mockImplementation((pid, signal) => {
-        expect(pid).toBe(-1234);
-        expect(signal).toBe('SIGTERM');
-        child.exitCode = 0;
-        queueMicrotask(() => child.emit('exit', 0, signal));
-        return true;
-      });
+  // Probe, title, and login agents are never reused, so a survivor is logged
+  // as a leak instead of failing a caller whose real work already finished.
+  it('reports an agent that survives termination without rejecting', async () => {
+    vi.useFakeTimers();
+    const table = new FakeProcessTable('linux');
+    table.queueSpawn({ ignores: ['SIGTERM', 'SIGKILL'] });
+    const warnings: string[] = [];
+    const logger = {
+      ...createSilentLogger(),
+      warn: (message: unknown) => warnings.push(String(message)),
+    };
 
-      await shutdownLocalAcpAgent({
-        agentProcess: child,
-        logger: createSilentLogger(),
-        sessionLabel: 'test-local-agent',
-      });
-
-      expect(processKill).toHaveBeenCalledTimes(1);
-      expect(child.kill).not.toHaveBeenCalled();
+    const shutdown = shutdownLocalAcpAgent({
+      agentProcess: spawnAgent(table),
+      logger,
+      sessionLabel: 'test-local-agent',
+      exitTimeoutMs: 10,
+      nodeProcess: table.api,
     });
+    await vi.advanceTimersByTimeAsync(30);
 
-    it('escalates the ACP process group to SIGKILL on POSIX when SIGTERM is ignored', async () => {
-      vi.useFakeTimers();
-      const child = createFakeChildProcess({ pid: 1234 });
-      const processKill = vi.spyOn(process, 'kill').mockImplementation((pid, signal) => {
-        expect(pid).toBe(-1234);
-        if (signal === 'SIGKILL') {
-          child.exitCode = 137;
-          queueMicrotask(() => child.emit('exit', 137, signal));
-        }
-        return true;
-      });
-
-      const shutdownPromise = shutdownLocalAcpAgent({
-        agentProcess: child,
-        logger: createSilentLogger(),
-        sessionLabel: 'test-local-agent',
-        exitTimeoutMs: 10,
-      });
-
-      await vi.advanceTimersByTimeAsync(10);
-      await shutdownPromise;
-
-      expect(processKill).toHaveBeenNthCalledWith(1, -1234, 'SIGTERM');
-      expect(processKill).toHaveBeenNthCalledWith(2, -1234, 'SIGKILL');
-      expect(child.kill).not.toHaveBeenCalled();
-    });
-  }
+    await expect(shutdown).resolves.toBeUndefined();
+    expect(warnings.join('\n')).toContain(
+      '[test-local-agent] ACP agent process could not be terminated'
+    );
+  });
 });

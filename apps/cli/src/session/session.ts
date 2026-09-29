@@ -121,6 +121,7 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
   private readonly startedAtMs = getServerNow();
   private activeProcess: SessionProcessHandle | null = null;
   private agentProcess: SessionProcessHandle | null = null;
+  private termination: Promise<void> | null = null;
   private readonly sandbox: SessionSandbox;
   private gitIdentity: { id: string; name: string; email: string };
   public agentClient: AgentClient | null = null;
@@ -247,7 +248,21 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
     return execPromise;
   }
 
-  async terminate(force: boolean = false): Promise<void> {
+  /**
+   * Terminate every process this Session started and release its sandbox.
+   *
+   * Concurrent calls share one termination, so `terminated` is emitted once.
+   * Each process tree gets a bounded SIGTERM grace (none when `force`) and a
+   * bounded wait after SIGKILL. A tree that survives both still ends the
+   * Session's bookkeeping, but the returned promise rejects with the
+   * `TerminationFailed`: a caller must not treat that agent as idle and reuse it.
+   */
+  terminate(force: boolean = false): Promise<void> {
+    this.termination ??= this.terminateOnce(force);
+    return this.termination;
+  }
+
+  private async terminateOnce(force: boolean): Promise<void> {
     this.logger.debug(`[${this.sessionId}] Terminating session${force ? ' (force)' : ''}`);
     this.status = 'stopping';
 
@@ -279,19 +294,23 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
     const activeProcess = this.activeProcess;
     const agentProcess = this.agentProcess;
 
-    // Kill both processes and wait for them to actually exit before proceeding.
-    // This prevents OS-level process leaks where SIGTERM is sent but the process
-    // outlives this function (and all tracking of it).
-    await Promise.all([
-      this.killAndWait(activeProcess, force),
-      this.killAndWait(agentProcess, force),
-    ]);
-
+    // The per-process trees first, then the sandbox as a whole: the latter also
+    // reaches terminal commands and groups whose leader already exited.
+    const failures: unknown[] = [];
+    for (const outcome of await Promise.allSettled([
+      activeProcess?.terminate(force),
+      agentProcess?.terminate(force),
+    ])) {
+      if (outcome.status === 'rejected') failures.push(outcome.reason);
+    }
     try {
       await this.sandbox.terminate(force);
     } catch (error) {
-      this.logger.debug(
-        `[${this.sessionId}] Failed to terminate sandbox process tree: ${formatErrorMessage(error)}`
+      failures.push(error);
+    }
+    for (const failure of failures) {
+      this.logger.error(
+        `[${this.sessionId}] Session process termination failed: ${formatErrorMessage(failure)}`
       );
     }
 
@@ -309,69 +328,16 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
     this.acpSessionId = null;
     this.acpCapabilities = null;
 
-    this.status = 'terminated';
+    this.status = failures.length > 0 ? 'failed' : 'terminated';
 
     const event: SessionExitEvent = {
       sessionId: this.sessionId,
-      exitCode: activeProcess?.child.exitCode ?? 0,
+      exitCode: agentProcess?.child.exitCode ?? activeProcess?.child.exitCode ?? 0,
     };
     this.emit('terminated', event);
-  }
 
-  /**
-   * Kill a process and wait for it to actually exit.
-   *
-   * With force=false: sends SIGTERM, waits up to SIGTERM_GRACE_MS, then
-   * escalates to SIGKILL if the process hasn't exited.
-   * With force=true: sends SIGKILL directly.
-   *
-   * Always awaits the actual OS process exit before returning, so callers can
-   * be certain no orphaned processes remain.
-   */
-  private async killAndWait(proc: SessionProcessHandle | null, force: boolean): Promise<void> {
-    if (!proc?.child) return;
-
-    const child = proc.child;
-    // Already exited — nothing to do.
-    // Note: child.killed only means a signal was *sent*, not that the process
-    // exited. Only exitCode !== null proves the process has actually terminated.
-    if (child.exitCode !== null) return;
-
-    const waitForExit = (): Promise<void> =>
-      new Promise<void>((resolve) => {
-        const unsubscribe = proc.onExit(() => {
-          unsubscribe();
-          resolve();
-        });
-        // Guard: if the process exited between the check above and
-        // registering the listener, resolve immediately.
-        if (child.exitCode !== null) {
-          unsubscribe();
-          resolve();
-        }
-      });
-
-    if (force) {
-      await proc.terminate(true);
-      await waitForExit();
-      return;
-    }
-
-    // Graceful path: SIGTERM → wait → SIGKILL fallback
-    const SIGTERM_GRACE_MS = 5_000;
-    await proc.terminate(false);
-
-    const outcome = await Promise.race([
-      waitForExit().then(() => 'exited' as const),
-      new Promise<'timeout'>((resolve) => setTimeout(() => resolve('timeout'), SIGTERM_GRACE_MS)),
-    ]);
-
-    if (outcome === 'timeout' && child.exitCode === null) {
-      this.logger.debug(
-        `[${this.sessionId}] Process did not exit within ${SIGTERM_GRACE_MS}ms of SIGTERM; escalating to SIGKILL`
-      );
-      await proc.terminate(true);
-      await waitForExit();
+    if (failures.length > 0) {
+      throw failures[0];
     }
   }
 
@@ -544,7 +510,7 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
         return;
       }
       try {
-        await this.killAndWait(handle, true);
+        await handle.terminate(true);
       } catch (error) {
         this.logger.debug(
           `[${
