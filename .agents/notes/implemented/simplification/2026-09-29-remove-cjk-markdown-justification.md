@@ -23,7 +23,12 @@ second layout pass when Streamdown hands a completed reply to the static rendere
 The renderer no longer detects Han characters for alignment; the shared style
 explicitly aligns top-level paragraphs to the start edge.
 
+The old renderer test asserted only that a Han-bearing paragraph received an
+implementation-specific class. It did not observe rendered alignment, so that
+stale assertion was removed with the class detection.
+
 ## Verification and limits
 
 - The alignment Spec is [conversation Markdown alignment](../../../../specs/conversation-markdown-alignment.md).
-- `git diff --check` passes. `pnpm run docs check` exits 1 on 62 existing broken links from unrelated notes to absent isolated package workspaces; it reports no errors for these files. Renderer checks were not run.
+- `git diff --check` passes. `pnpm run docs check` reports no errors for these files but exits 1 on 62 unrelated broken links to absent isolated package workspaces.
+- Local `pnpm check` and `pnpm format` cannot run because this checkout has no `node_modules` (`tsgo` and `oxfmt` are unavailable). The first PR CI run found only the obsolete class assertion; follow-up CI will verify its removal.

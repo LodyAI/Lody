@@ -13,7 +13,10 @@ Translation: current
 
 会话是实时更新的混合文字阅读界面，而不是固定版心的出版页面。起始边对齐避免为填满每行而拉伸汉字间距或英文词间空格，也不需要在 Streamdown 将完成回复交给静态渲染器时再次排版。渲染器不再检测汉字来决定对齐方式；共享样式明确将顶层段落对齐到起始边。
 
+旧渲染器测试只断言含汉字的段落会获得一个实现细节类名，没有观察最终排版，因此随汉字检测逻辑一并移除了这条过时断言。
+
 ## 验证与限制
 
 - 对齐规范见[会话 Markdown 对齐方式](../../../../specs/conversation-markdown-alignment.zh.md)。
-- `git diff --check` 通过。`pnpm run docs check` 因无关 note 中存在 62 个指向缺失隔离 package workspace 的旧链接而返回失败；本次文件未报告错误。未运行渲染器检查。
+- `git diff --check` 通过。`pnpm run docs check` 因无关 note 中存在 62 个指向缺失隔离 package workspace 的旧链接而返回失败；本次文件未报告错误。
+- 当前 checkout 没有 `node_modules`，因此本地 `pnpm check` 和 `pnpm format` 因缺少 `tsgo`、`oxfmt` 无法完成。PR 首次 CI 只失败于已过时的 class 断言；后续 CI 将验证该断言移除后的结果。
