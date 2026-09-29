@@ -22,11 +22,6 @@ import { movePointer } from './helpers/pointer-boundary';
 const machineId = 'machine-sidebar-card' as MachineId;
 const instanceId = 'instance-sidebar-card' as LodyPresenceInstanceId;
 
-/** jsdom has no PointerEvent; React maps these mouse-shaped events. */
-function pointer(type: string, target: EventTarget, init: MouseEventInit = {}) {
-  target.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, ...init }));
-}
-
 describe('sidebar machine group', () => {
   let container: HTMLDivElement;
   let root: Root;

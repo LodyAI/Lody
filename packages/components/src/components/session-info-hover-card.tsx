@@ -836,7 +836,7 @@ export function SidebarHoverCard({
   // would count a pointer in that menu as one on the trigger.
   useEffect(() => {
     const anchor = anchorRef.current;
-    if (!anchor) return;
+    if (!anchor) return undefined;
     anchor.addEventListener('pointerenter', requestOpen);
     anchor.addEventListener('pointerleave', scheduleClose);
     anchor.addEventListener('pointerdown', handlePointerDown);
