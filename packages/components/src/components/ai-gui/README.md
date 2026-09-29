@@ -27,9 +27,8 @@ the reasoning behind those rules.
   streaming turn with `@lobehub/streamdown`. Its dependency patch reveals text
   already present at mount so switching back to a live Session does not replay
   the stream fade ([note](../../../../../.agents/notes/implemented/bug-fix/2026-09-26-streamdown-remount-animation.md)).
-  Top-level paragraphs containing Han characters use CJK-aware justification;
-  headings, lists, tables and code surfaces keep their start alignment
-  ([note](../../../../../.agents/notes/implemented/feature/2026-09-28-cjk-markdown-justification.md)).
+  Conversation paragraphs use start alignment during and after streaming; see
+  [conversation Markdown alignment](../../../../../specs/conversation-markdown-alignment.md).
   `markdown-code-block.tsx` owns fenced
   blocks, wrap, and Markdown-fence preview (`markdown-code-highlight.ts` the Shiki
   tokens); `markdown-diff-block.tsx` is the inline diff; `markdown-mermaid-block.tsx`

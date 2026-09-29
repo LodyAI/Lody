@@ -1,0 +1,29 @@
+# Remove CJK paragraph justification from conversation Markdown
+
+Status: implemented
+Translation: current
+
+[中文](2026-09-29-remove-cjk-markdown-justification.zh.md)
+
+## Abstract
+
+Justifying any conversation paragraph that contained a Han character stretched
+spacing in mixed Chinese and English replies. Conversation prose now stays
+start-aligned during streaming and after completion, preserving one stable
+alignment as text arrives. This gives up flush right edges for Chinese paragraphs
+in exchange for consistent spacing in chat. The earlier rationale is preserved
+in the [CJK justification decision](../feature/2026-09-28-cjk-markdown-justification.md).
+
+## Decision
+
+The user-facing conversation is a live, mixed-script reading surface rather than
+a fixed-width publication page. Native start alignment avoids stretching
+characters and English word spaces to fill each line, and does not require a
+second layout pass when Streamdown hands a completed reply to the static renderer.
+The renderer no longer detects Han characters for alignment; the shared style
+explicitly aligns top-level paragraphs to the start edge.
+
+## Verification and limits
+
+- The alignment Spec is [conversation Markdown alignment](../../../../specs/conversation-markdown-alignment.md).
+- `git diff --check` passes. `pnpm run docs check` exits 1 on 62 existing broken links from unrelated notes to absent isolated package workspaces; it reports no errors for these files. Renderer checks were not run.

@@ -207,17 +207,6 @@ const MARKDOWN_BASE_CLASSNAME =
   '[&_tbody_tr:last-child_td]:border-b-0 ' +
   '[&_table_code]:!bg-foreground/[0.08] [&_table_code]:!ring-0 dark:[&_table_code]:!bg-foreground/[0.14]';
 
-const CJK_HAN_PATTERN = /\p{Script=Han}/u;
-
-function markdownNodeText(node: ReactNode): string {
-  if (typeof node === 'string' || typeof node === 'number') return String(node);
-  if (Array.isArray(node)) return node.map(markdownNodeText).join('');
-  if (node && typeof node === 'object' && 'props' in node) {
-    return markdownNodeText((node as { props?: { children?: ReactNode } }).props?.children);
-  }
-  return '';
-}
-
 const MARKDOWN_SIZE_CLASSNAME =
   '[&_h1]:text-[length:var(--markdown-h1-font-size)] ' +
   '[&_h2]:text-[length:var(--markdown-h2-font-size)] ' +
@@ -924,13 +913,7 @@ const createMarkdownComponents = ({
   theme: ResolvedTheme;
 }): Components => ({
   p: ({ children, className, node: _node, ...props }) => (
-    <p
-      {...props}
-      className={cn(
-        className,
-        CJK_HAN_PATTERN.test(markdownNodeText(children)) && 'markdown-cjk-paragraph'
-      )}
-    >
+    <p {...props} className={className}>
       {children}
     </p>
   ),
