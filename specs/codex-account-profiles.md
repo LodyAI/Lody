@@ -15,9 +15,13 @@ setup, verification, retry, cancellation, and session-selection workflow.
 
 The execution machine owns each opaque profile, its isolated Codex home, and its
 credentials. Shared provider state contains only the profile reference, mode, and
-normalized endpoint. ChatGPT uses Codex's native keyring, never file fallback; API
-keys use the host system credential store. Unsupported or locked storage fails
-closed. Existing providers without a profile keep their native behavior and history.
+normalized endpoint. New ChatGPT profiles use Codex's native credential-storage
+default inside their private home; a machine without a keyring can store
+`auth.json` there. Existing keyring-backed profiles keep using keyring so an
+upgrade does not disconnect them. Lody never swaps or copies a global auth file
+between profiles. API keys use the host system credential store and fail closed
+when it is unavailable or locked. Existing providers without a profile keep
+their native behavior and history.
 
 Remote secret input uses the existing request-bound encrypted Machine RPC. No
 hosted credential service or model proxy is introduced. OSS composition remains

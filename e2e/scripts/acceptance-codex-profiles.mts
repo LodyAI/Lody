@@ -1,5 +1,13 @@
 import { createRequire } from 'node:module';
-import { mkdirSync, writeFileSync, cpSync, readdirSync, readFileSync, existsSync } from 'node:fs';
+import {
+  mkdirSync,
+  writeFileSync,
+  cpSync,
+  readdirSync,
+  readFileSync,
+  existsSync,
+  statSync,
+} from 'node:fs';
 import { execFileSync, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createHash } from 'node:crypto';
@@ -352,10 +360,24 @@ try {
   await page.getByRole('alertdialog').getByRole('button', { name: 'Delete', exact: true }).click();
   await expect(settings.getByRole('button', { name: 'Edit Config', exact: true })).toHaveCount(2);
   const profileDirectory = resolve(harness.getIsolatedRoot(), 'lody-data/codex-profiles');
+  const chatgptHomes: string[] = [];
   for (const entry of readdirSync(profileDirectory, { withFileTypes: true })) {
-    if (entry.isDirectory())
-      expect(existsSync(resolve(profileDirectory, entry.name, 'home/auth.json'))).toBe(false);
+    if (!entry.isDirectory()) continue;
+    const record = JSON.parse(
+      readFileSync(resolve(profileDirectory, entry.name, 'profile.json'), 'utf8')
+    );
+    const authPath = resolve(profileDirectory, entry.name, 'home/auth.json');
+    if (record.profile.mode === 'chatgpt') {
+      chatgptHomes.push(authPath);
+      expect(record.authStore).toBe('codex-default');
+      expect(existsSync(authPath)).toBe(true);
+      expect(statSync(authPath).mode & 0o077).toBe(0);
+    } else {
+      expect(existsSync(authPath)).toBe(false);
+    }
   }
+  expect(chatgptHomes).toHaveLength(2);
+  expect(new Set(chatgptHomes).size).toBe(2);
   const apiRecordFile = readdirSync(profileDirectory, { withFileTypes: true })
     .filter((entry) => entry.isDirectory())
     .map((entry) => resolve(profileDirectory, entry.name, 'profile.json'))
@@ -448,7 +470,12 @@ try {
           if (record.profile.mode === 'chatgpt') {
             await promisify(execFile)(
               resolve(isolatedRoot, 'lody-data/agent-binaries', runtimeCommand),
-              ['-c', 'cli_auth_credentials_store="keyring"', 'logout'],
+              [
+                ...(record.authStore === 'codex-default'
+                  ? []
+                  : ['-c', 'cli_auth_credentials_store="keyring"']),
+                'logout',
+              ],
               {
                 cwd: isolatedRoot,
                 env: {

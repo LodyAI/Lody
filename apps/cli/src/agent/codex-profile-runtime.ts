@@ -13,7 +13,7 @@ export function codexProfileConfig(
   baseUrl?: string
 ): Record<string, unknown> {
   const base = {
-    cli_auth_credentials_store: 'keyring',
+    ...(profile.authStore === 'keyring' ? { cli_auth_credentials_store: 'keyring' } : {}),
     check_for_update_on_startup: false,
     shell_environment_policy: {
       inherit: 'all',
