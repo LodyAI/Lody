@@ -39,7 +39,7 @@ export function parseNightlyRelease(value: unknown, base: string): NightlyReleas
     typeof value.version !== 'string' ||
     typeof value.minimumStableVersion !== 'string' ||
     !/^(0|[1-9]\d{0,7})\.(0|[1-9]\d{0,7})\.(0|[1-9]\d{0,7})$/u.test(value.minimumStableVersion) ||
-    !/^\d{1,8}\.\d{1,8}\.\d{1,8}-nightly\.[1-9]\d{0,7}$/u.test(value.version) ||
+    !/^\d{1,8}\.\d{1,8}\.\d{1,8}-nightly\.(0|[1-9]\d{0,7})$/u.test(value.version) ||
     !isRecord(value.downloads) ||
     !Array.isArray(value.files)
   ) {
