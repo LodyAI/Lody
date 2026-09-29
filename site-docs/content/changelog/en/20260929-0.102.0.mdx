@@ -1,0 +1,29 @@
+---
+title: '20260929-0.102.0'
+version: 0.102.0
+date: 2026-09-29
+description: PDF previews, clickable conversation references, and generally available Prompt Shortcuts, with improvements to message sending, themes, and command menus.
+---
+
+Version 0.102.0
+
+### ✨ New Features
+
+- Preview PDF files directly in conversations, with page navigation, zoom, and text search.
+- Prompt Shortcuts are now generally available. Manage them in settings and invoke them from the composer without enabling Developer mode or a Beta switch.
+- Conversation links in messages now appear as clickable conversation chips, making it easier to jump to related discussions.
+- The open-source desktop app now supports launching local tasks through Agent Roles without signing in to Lody.
+
+### 🐛 Fixes & Improvements
+
+- Improved message sending responsiveness by reducing synchronization delays. Image messages keep their previews in place when sent, reducing layout shifts.
+- Desktop and mobile now start with your saved theme, reducing flashes between light and dark appearances.
+- Opening the app from its default entry now takes you to the chat landing page, ready for a new conversation.
+- Mention and command menus follow the caret, with better placement when text wraps, the composer scrolls, or the mobile keyboard opens.
+- Improved slash-command search with a shared ranking for Prompt Shortcuts and agent commands, making name matches easier to find.
+- Improved alignment in Agent Role menus, sidebars, and select options, and fixed clipped text and overlapping buttons.
+- Fixed conversation Markdown alignment, inline math rendering, and duplicate command displays in some tool calls.
+- Fixed signing in to newly created Codex account profiles on Linux machines without an available system keyring.
+- Local projects retain their existing Git and GitHub authentication settings, with improved cross-machine task dispatch through Agent Roles.
+
+Thanks to community contributor Lampese for the PDF preview and math rendering fixes.
