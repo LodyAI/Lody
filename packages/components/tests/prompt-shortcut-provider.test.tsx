@@ -16,7 +16,6 @@ const fixture = vi.hoisted(() => {
     makePlatform,
     platform: makePlatform(),
     workspaceId: 'workspace-a',
-    featureEnabled: true,
     directory: [],
     createRepo: vi.fn(),
     openStore: vi.fn(),
@@ -25,10 +24,8 @@ const fixture = vi.hoisted(() => {
 });
 
 vi.mock('jotai', () => ({
-  useAtomValue: (atom: string) =>
-    atom === 'feature' ? fixture.featureEnabled : { workspaceId: fixture.workspaceId },
+  useAtomValue: () => ({ workspaceId: fixture.workspaceId }),
 }));
-vi.mock('@/atoms/settings', () => ({ promptShortcutsFeatureEnabledAtom: 'feature' }));
 vi.mock('@/atoms/runtime', () => ({ activeWorkspaceRuntimeAtom: 'workspace' }));
 vi.mock('@/hooks/use-resolved-workspace-scope', () => ({
   useResolvedWorkspaceScope: ({ enabled }: { enabled: boolean }) => ({
@@ -102,7 +99,6 @@ describe('PromptShortcutProvider lifecycle', () => {
 
   beforeEach(() => {
     fixture.workspaceId = 'workspace-a';
-    fixture.featureEnabled = true;
     fixture.platform = fixture.makePlatform();
     fixture.closeStore.mockReset().mockResolvedValue(undefined);
     fixture.createRepo.mockReset().mockImplementation(async () => ({ destroy: async () => {} }));
@@ -126,14 +122,13 @@ describe('PromptShortcutProvider lifecycle', () => {
     container.remove();
   });
 
-  it.each(['readiness', 'feature', 'workspace'] as const)(
+  it.each(['readiness', 'workspace'] as const)(
     'never resurrects a disposed runtime after %s returns to the same scope',
     async (transition) => {
       await render();
       const first = current!;
       expect(container.textContent).toBe('workspace-a');
 
-      if (transition === 'feature') fixture.featureEnabled = false;
       if (transition === 'workspace') fixture.workspaceId = 'workspace-b';
       await render(transition !== 'readiness');
       expect(() => first.setDirectory([])).toThrow('Shortcut runtime disposed');
@@ -143,7 +138,6 @@ describe('PromptShortcutProvider lifecycle', () => {
         await opening.promise;
         return { destroy: async () => {} };
       });
-      fixture.featureEnabled = true;
       fixture.workspaceId = 'workspace-a';
       rendered = [];
       await render();

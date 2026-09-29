@@ -4435,8 +4435,6 @@
   "promptShortcut.versionChanged": "快捷方式版本已变化，请重新选择以重试。",
   "promptShortcut.bodyOffline": "离线时无法读取正文，请联网后重新选择。",
   "promptShortcut.loadFailed": "无法加载快捷方式，请重新选择以重试。",
-  "settings.beta.promptShortcutsHelper": "创建可复用的提示词，通过 / 插入。功能开发中，体验可能不完善。",
-  "settings.promptShortcuts.disabled": "请在设置 → 关于的开发者模式下开启 Prompt Shortcuts。",
   "sessions.attachmentTransferInterrupted": "传输已中断，返回后可重试。",
   "sessions.pendingSends": "待发送消息（{{count}}）",
   "sessions.sendStatus.sending": "正在发送 · {{sent}} / {{total}}",

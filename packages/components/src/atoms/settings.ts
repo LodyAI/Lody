@@ -259,19 +259,6 @@ export const inboxFeatureEnabledAtom = atom(
   (get) => get(developerModeEnabledAtom) && get(inboxBetaEnabledAtom)
 );
 
-// Developer-only opt-in. Turning Developer mode off retains the local choice.
-export const promptShortcutsBetaEnabledAtom = atomWithStorage<boolean>(
-  'lody-prompt-shortcuts-beta-enabled',
-  false,
-  undefined,
-  { getOnInit: true }
-);
-
-/** Shared gate for Shortcut settings, discovery and the workspace runtime. */
-export const promptShortcutsFeatureEnabledAtom = atom(
-  (get) => get(developerModeEnabledAtom) && get(promptShortcutsBetaEnabledAtom)
-);
-
 export const semanticShortcutsBetaEnabledAtom = atomWithStorage<boolean>(
   'lody-semantic-shortcuts-beta-enabled',
   false,

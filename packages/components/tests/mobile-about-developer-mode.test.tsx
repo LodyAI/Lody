@@ -9,10 +9,10 @@ import {
   developerModeEnabledAtom,
   inboxBetaEnabledAtom,
   inboxFeatureEnabledAtom,
-  promptShortcutsBetaEnabledAtom,
-  promptShortcutsFeatureEnabledAtom,
 } from '../src/atoms/settings';
 import { MobileAboutSettings } from '../src/components/mobile/mobile-about-settings';
+import { useVisibleSettingsTabs } from '../src/components/settings/settings-tabs';
+import { TestCloudPlatformProvider } from './test-platform';
 import { initI18n } from '../src/i18n';
 
 (
@@ -107,33 +107,58 @@ describe('MobileAboutSettings developer mode', () => {
 
     expect(store.get(developerModeEnabledAtom)).toBe(true);
     expect(switchLabelled('Inbox')).not.toBeNull();
-    expect(switchLabelled('Prompt Shortcuts')).not.toBeNull();
+    expect(switchLabelled('Prompt Shortcuts')).toBeNull();
   });
 
-  it.each([
-    ['Inbox', inboxBetaEnabledAtom, inboxFeatureEnabledAtom],
-    ['Prompt Shortcuts', promptShortcutsBetaEnabledAtom, promptShortcutsFeatureEnabledAtom],
-  ] as const)(
-    'enables %s only after its beta switch is enabled',
-    (label, betaAtom, featureAtom) => {
-      const store = createStore();
-      store.set(developerModeEnabledAtom, true);
-      render(store);
+  it('enables Inbox only after its beta switch is enabled', () => {
+    const store = createStore();
+    store.set(developerModeEnabledAtom, true);
+    render(store);
 
-      expect(store.get(featureAtom)).toBe(false);
-      const toggle = switchLabelled(label);
-      expect(toggle).not.toBeNull();
-      act(() => toggle?.click());
+    expect(store.get(inboxFeatureEnabledAtom)).toBe(false);
+    const toggle = switchLabelled('Inbox');
+    expect(toggle).not.toBeNull();
+    act(() => toggle?.click());
+    expect(store.get(inboxBetaEnabledAtom)).toBe(true);
+    expect(store.get(inboxFeatureEnabledAtom)).toBe(true);
+    expect(toggle?.getAttribute('aria-checked')).toBe('true');
 
-      expect(store.get(betaAtom)).toBe(true);
-      expect(store.get(featureAtom)).toBe(true);
-      expect(toggle?.getAttribute('aria-checked')).toBe('true');
+    act(() => toggle?.click());
+    expect(store.get(inboxBetaEnabledAtom)).toBe(false);
+    expect(store.get(inboxFeatureEnabledAtom)).toBe(false);
+  });
 
-      act(() => toggle?.click());
-      expect(store.get(betaAtom)).toBe(false);
-      expect(store.get(featureAtom)).toBe(false);
+  it('keeps Prompt Shortcuts in settings regardless of developer mode or the retired opt-in', () => {
+    localStorage.setItem('lody-prompt-shortcuts-beta-enabled', 'false');
+    const store = createStore();
+    function SettingsEntries() {
+      return (
+        <>
+          {useVisibleSettingsTabs().map((tab) => (
+            <span key={tab.id}>{tab.id}</span>
+          ))}
+        </>
+      );
     }
-  );
+    const renderEntries = () =>
+      act(() =>
+        root.render(
+          <TestCloudPlatformProvider>
+            <Provider store={store}>
+              <SettingsEntries />
+            </Provider>
+          </TestCloudPlatformProvider>
+        )
+      );
+    renderEntries();
+    expect(container.textContent).toContain('prompt-shortcuts');
+    act(() => store.set(developerModeEnabledAtom, true));
+    renderEntries();
+    expect(container.textContent).toContain('prompt-shortcuts');
+    act(() => store.set(developerModeEnabledAtom, false));
+    renderEntries();
+    expect(container.textContent).toContain('prompt-shortcuts');
+  });
 
   it('re-hides the switch when Developer mode is turned off, so the reveal must be earned again', () => {
     const store = createStore();
@@ -154,7 +179,6 @@ describe('MobileAboutSettings developer mode', () => {
     const store = createStore();
     store.set(developerModeEnabledAtom, true);
     store.set(inboxBetaEnabledAtom, true);
-    store.set(promptShortcutsBetaEnabledAtom, true);
     render(store);
 
     act(() => switchLabelled('Developer mode')?.click());
@@ -163,14 +187,12 @@ describe('MobileAboutSettings developer mode', () => {
     // disappear, but the choice survives for when Developer mode comes back.
     expect(store.get(inboxBetaEnabledAtom)).toBe(true);
     expect(store.get(inboxFeatureEnabledAtom)).toBe(false);
-    expect(store.get(promptShortcutsBetaEnabledAtom)).toBe(true);
-    expect(store.get(promptShortcutsFeatureEnabledAtom)).toBe(false);
     expect(switchLabelled('Prompt Shortcuts')).toBeNull();
 
     for (let i = 0; i < 7; i += 1) act(() => revealRow().click());
     act(() => switchLabelled('Developer mode')?.click());
 
-    expect(store.get(promptShortcutsFeatureEnabledAtom)).toBe(true);
-    expect(switchLabelled('Prompt Shortcuts')?.getAttribute('aria-checked')).toBe('true');
+    expect(store.get(inboxFeatureEnabledAtom)).toBe(true);
+    expect(switchLabelled('Inbox')?.getAttribute('aria-checked')).toBe('true');
   });
 });

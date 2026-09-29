@@ -4435,8 +4435,6 @@
   "promptShortcut.versionChanged": "Shortcut changed. Select it again to retry.",
   "promptShortcut.bodyOffline": "Body is not available offline. Reconnect and select again.",
   "promptShortcut.loadFailed": "Could not load Shortcut. Select it again to retry.",
-  "settings.beta.promptShortcutsHelper": "Create reusable prompts and insert them with /. In development — expect rough edges.",
-  "settings.promptShortcuts.disabled": "Enable Prompt Shortcuts under Developer mode in Settings → About to use this feature.",
   "sessions.attachmentTransferInterrupted": "Transfer interrupted. Retry when you return.",
   "sessions.pendingSends": "Pending messages ({{count}})",
   "sessions.sendStatus.sending": "Sending · {{sent}} / {{total}}",
