@@ -26,9 +26,9 @@ Pipeline background: [ui-mentions.md](../../../../../.agents/docs/ui-mentions.md
   UI-thread fallback. Aggregate results are capped; Roles list all readable entries.
 - Issues and PRs rank over their own slice of the shared cache, partitioned once
   by `useMentionCategories`.
-- File, Session, Agent Role, Issue, and PR candidates use the vendored VS Code
-  `scoreFuzzy` with non-contiguous matching, wrapped by any source-specific
-  ordering. Skills and commands keep their own ranking.
+- Files, Sessions, Roles, Issues, and PRs use vendored VS Code `scoreFuzzy`
+  with source ordering. Skills rank alone; typed slash queries merge Commands
+  and Prompt Shortcuts after source gates.
 - Side panels render neutral `MentionCandidateDetail` fields verbatim: use
   i18n'd text, never raw enums. `detail.agentRole` instead renders
   `sessions/agent-role-detail-pane.tsx` on desktop. The list sets pane height.

@@ -14,7 +14,6 @@ import {
   useMentionCategoryActivation,
 } from '../src/components/mentions/mention-two-level-menu';
 import {
-  selectMentionMenuView,
   selectMentionMenuViewForTrigger,
   toSkillCandidate,
   type MentionCandidate,
@@ -100,10 +99,11 @@ function Harness({
   const [value, setValue] = React.useState(initialValue);
   const [mentions, setMentions] = React.useState<MentionRange[]>([]);
   const [selected, setSelected] = React.useState<string[]>([]);
-  const view = selectMentionMenuView(categories, value.slice(1));
+  const view = selectMentionMenuViewForTrigger(categories, value[0] ?? '@', value.slice(1));
 
   return (
     <Mention
+      trigger={value[0] === '/' || value[0] === '、' ? value[0] : '@'}
       defaultOpen
       inputValue={value}
       onInputValueChange={setValue}
@@ -116,13 +116,15 @@ function Harness({
     >
       <Probe />
       <MentionInput value={value} onChange={() => {}} />
-      <MentionTwoLevelMenuBody
-        view={view}
-        onBack={() => {}}
-        showBack
-        onCategoryNavigate={(category) => category.activation?.activate()}
-        detail={detail}
-      />
+      {view ? (
+        <MentionTwoLevelMenuBody
+          view={view}
+          onBack={() => {}}
+          showBack
+          onCategoryNavigate={(category) => category.activation?.activate()}
+          detail={detail}
+        />
+      ) : null}
     </Mention>
   );
 }
@@ -360,6 +362,58 @@ describe('MentionTwoLevelMenuBody', () => {
     expect(titles).toContain('Broken menu#3312');
     // Only the issue category matched, so the file group is absent.
     expect(titles.some((title) => title.startsWith('src/'))).toBe(false);
+  });
+
+  it('renders a typed slash query as ranked rows with their sources', () => {
+    const shortcuts: MentionCategory = {
+      id: 'prompt_shortcut',
+      namespace: 'shortcut',
+      directTrigger: '/',
+      label: 'Prompt Shortcuts',
+      icon: 'prompt_shortcut',
+      status: 'ready',
+      getCandidates: () =>
+        ['create-intro-video', 'videoer'].map((name) => ({
+          value: `prompt-shortcut:${name}`,
+          label: name,
+          insertText: `/${name}`,
+          kind: 'prompt_shortcut' as const,
+          icon: 'prompt_shortcut' as const,
+          title: `/${name}`,
+        })),
+    };
+    const command: MentionCategory = {
+      id: 'command',
+      namespace: 'cmd',
+      directTrigger: '/',
+      label: 'Agent Commands',
+      icon: 'command',
+      status: 'ready',
+      getCandidates: () => [
+        {
+          value: 'acp-command:video',
+          label: 'video',
+          insertText: '/video',
+          kind: 'command',
+          icon: 'command',
+          title: '/video',
+        },
+      ],
+    };
+
+    render('/video', [shortcuts, command]);
+    expect(rowTitles()).toEqual([
+      '/videoAgent Commands',
+      '/videoerPrompt Shortcuts',
+      '/create-intro-videoPrompt Shortcuts',
+    ]);
+
+    const rows = container?.querySelectorAll<HTMLElement>('[data-slot="mention-item"]');
+    act(() => rows?.[1]?.click());
+    expect(latest.inputValue).toBe('/videoer ');
+    expect(latest.mentions).toEqual([
+      { value: 'prompt-shortcut:videoer', start: 0, end: 8, kind: 'prompt_shortcut' },
+    ]);
   });
 
   it('renders a category message instead of rows when the source cannot answer', () => {

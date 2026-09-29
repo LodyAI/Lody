@@ -1,27 +1,31 @@
 ---
 title: Slash Commands
-description: Type `/` in the chat input to browse and insert slash commands exposed by the current agent.
+description: Type `/` in the chat input to find agent commands and available Prompt Shortcuts.
 ---
 
 # Slash Commands
 
-Type `/` at the start of the chat input to open a menu of commands the current agent exposes —
-for example, `/review`, `/compact`, or `/undo` when the connected agent supports them.
+Type `/` at the start of the chat input to open a menu of commands the current agent exposes
+and available workspace Prompt Shortcuts. Agent examples include `/review`, `/compact`,
+and `/undo` when the connected agent supports them.
 
 <img src="/_docs-assets/slash.png" alt="" />
 
-Slash commands are **provided by the agent**, not by Lody. Each Agent Config advertises its own
+Agent commands are **provided by the agent**, not by Lody. Each Agent Config advertises its own
 list during capability discovery, so the available commands depend on the CLI type (Claude Code,
 Codex, Kimi, OpenCode, or any ACP registry runtime) and the version installed on the machine.
+Prompt Shortcuts are workspace-defined and follow their own visibility and scope rules.
 
 ## Open the menu
 
 - Type `/` as the first character of a new turn.
-- Lody fuzzy-matches the remainder of what you type against the agent's command list.
+- As you type, available results from both sources appear in relevance order:
+  exact names first, then prefixes, word starts, contained text, and looser matches.
+  Each row identifies its source. Typing only `/` keeps the sources in separate groups.
 - Press `↑` / `↓` to move between entries, `Home` / `End` to jump to the first or last entry.
 - Press `Enter` to insert the highlighted command, or `Tab` / `Escape` to close without inserting.
 
-If nothing matches, the menu collapses and the text stays in the input as normal content.
+If nothing matches, the menu says so. The text stays in the input as normal content.
 
 ## What the commands do
 
