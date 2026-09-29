@@ -11,16 +11,20 @@ this page is the full text of the rules summarised there.
   with `leftSlot` (sidebar expand + macOS traffic-light inset via `className`)
   and `rightSlot` = a `SessionChatInterface headerVariant="toolbar"` instance
   (IDE launcher / Browser / "…" menu / sidebar toggle — no title, no PR badge).
-  All macOS traffic-light insets (sidebar `h-[72px] pt-7` header, this bar's
+  All macOS traffic-light insets (sidebar `h-11 pt-[2px]` header, this bar's
   `pl-[4.5rem]`, `reserveMacTrafficLightInset`, landing `left-[96px]`, and the
   root drag strip) are gated on `!useElectronFullscreen()` — the main process
   pushes `lody:window-fullscreen-changed` and the lights auto-hide in native
   fullscreen, so no inset is reserved there. The traffic-light CENTERLINE is
-  y=23px (`trafficLightPosition {x:20, y:16}` in `apps/electron/src/main/window.ts`
+  y=23px (`trafficLightPosition {x:14, y:16}` in `apps/electron/src/main/window.ts`
   - 7px button radius); every h-7 chrome button beside the lights centers on it
-    (sidebar collapse `-top-0.5` in `loro-sidebar.tsx`, landing expand `top-[9px]`
+    (sidebar header's `pt-[2px]` in `loro-sidebar.tsx`, landing expand `top-[9px]`
     in `web-chat-landing-screen.tsx`) — re-derive those offsets if the Electron
-    position or the card `mt-2`/border/`p-[2px]` stack changes. On Windows the native title bar is
+    position or the 44px top row changes. The macOS `x=14`
+    places the first light's optical centre over the sidebar's +15px icon column;
+    navigation, project, repository and flat session labels share a +37px text
+    column (see the [alignment decision](../notes/implemented/bug-fix/2026-09-29-macos-sidebar-traffic-light-column.md)).
+    On Windows the native title bar is
     hidden (`titleBarStyle: 'hidden'` + theme-tinted `titleBarOverlay`, see
     `apps/electron/src/main/window-theme.ts`): the OS draws the caption buttons
     in a 36px strip (centerline y=18) OVER the window-top rows. Rows reaching
