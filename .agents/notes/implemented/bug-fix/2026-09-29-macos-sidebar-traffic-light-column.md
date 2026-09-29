@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: [#1121](https://github.com/LodyAI/Lody/pull/1121)
 
 [中文](2026-09-29-macos-sidebar-traffic-light-column.zh.md)
 
