@@ -58,6 +58,10 @@ export class ContextCopyPage {
   }
 
   async copyContextThroughFirstUserMessage(): Promise<void> {
+    const conversation = this.page.locator('[data-conversation-scroll-engine]');
+    await conversation.hover();
+    await this.page.mouse.wheel(0, -1000);
+    await expect.poll(() => conversation.evaluate((element) => element.scrollTop)).toBe(0);
     const firstPrompt = this.page.getByText(FIRST_PROMPT_MARKER);
     await expect(firstPrompt).toBeVisible({ timeout: 30_000 });
     await firstPrompt.hover();
@@ -213,11 +217,9 @@ export class ContextCopyPage {
     await expect(
       forkMenu.getByRole('menuitem', { name: /^(Fork to new tab|分叉到新标签页)$/u })
     ).toHaveCount(0);
-    const copyItem = forkMenu.getByRole('menuitem', {
-      name: /(Copy context as Markdown|复制 Markdown 上下文)/u,
-    });
-    await expect(copyItem).toBeFocused();
-    await this.page.keyboard.press('Enter');
+    await forkMenu
+      .getByRole('menuitem', { name: /(Copy context as Markdown|复制 Markdown 上下文)/u })
+      .click();
   }
 
   private async openForkMenuForAssistantResponse(responseMarker: string): Promise<void> {

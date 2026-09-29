@@ -7,7 +7,7 @@ Translation: current
 
 ## 摘要
 
-桌面界面变化后，Desktop Daily 的 #507 持续失败：多处 Page Object 仍按旧标签查找控件，或同时匹配无关的浮层。旅程定位现改为指向当前控件及其所属的消息或对话框。MCP 和分叉旅程将 Turn 的 ACP Session 与独立的标题生成 Session 区分开；worktree 清理在终端 relay 短暂断线时继续检查，但仍须实际观察到资源释放。PR 完整运行又揭示两处旧设置定位及偶发位于视口外的菜单；设置修正在一次 macOS 运行中通过了全部 24 个旅程，菜单旅程现改用键盘交互契约。Windows 和 Linux 仍待新的 Daily 验证。
+桌面界面变化后，Desktop Daily 的 #507 持续失败：多处 Page Object 仍按旧标签查找控件，或同时匹配无关的浮层。旅程定位现改为指向当前控件及其所属的消息或对话框。MCP 和分叉旅程将 Turn 的 ACP Session 与独立的标题生成 Session 区分开；worktree 清理在终端 relay 短暂断线时继续检查，但仍须实际观察到资源释放。PR 完整运行又揭示两处旧设置定位及偶发位于视口外的菜单；设置修正在一次 macOS 运行中通过了全部 24 个旅程，菜单旅程现先将会话滚到首条消息，再打开菜单。Windows 和 Linux 仍待新的 Daily 验证。
 
 ## 证据与决定
 
@@ -25,8 +25,8 @@ Windows 的分叉与 Session 管理旅程在源提示后超时。[artifact 的�
 
 [PR 的后续完整运行](https://github.com/LodyAI/Lody/actions/runs/36570175372)完成桌面构建，24 个 macOS 旅程、249 个步骤全部通过，包括之前失败的两个设置旅程。
 
-随后一次[仅更新 Note 的完整运行](https://github.com/LodyAI/Lody/actions/runs/36572327622)通过了 24 个旅程中的 23 个：上下文复制打开了首条用户消息的唯一菜单项，但虚拟列表将锚点移到了视口上方。trace 记录了菜单 positioner 的负数纵坐标，所以 Playwright 鼠标点击一直等待视口外的菜单项。合成 Agent 刻意没有原生分叉能力，菜单唯一的选项就是复制上下文。旅程现在要求该项取得焦点，再用 Enter 激活，之后仍检查剪贴板前缀及排除项。这验证受支持的键盘路径，不依赖移动中的弹出菜单坐标；视口外鼠标交互问题并未声称已修复。
+随后一次[仅更新 Note 的完整运行](https://github.com/LodyAI/Lody/actions/runs/36572327622)通过了 24 个旅程中的 23 个：上下文复制打开了首条用户消息的唯一菜单项，但虚拟列表将锚点移到了视口上方。trace 记录了菜单 positioner 的负数纵坐标，且会话停在底部，所以 Playwright 鼠标点击一直等待视口外的菜单项。[下一轮运行](https://github.com/LodyAI/Lody/actions/runs/36574680042)又推翻了键盘焦点方案：打开的菜单项没有自动取得焦点。旅程现在先在会话区域使用真实的向上滚轮操作，并等待滚动位置归零，再打开首条消息菜单。它保留鼠标点击及剪贴板前缀、排除项断言；菜单若不可操作仍会失败，不会被绕过。
 
 ## 验证与限制
 
-改动文件通过 Oxfmt 和 `git diff --check`。此嵌套 worktree 的 E2E 包未安装 `@cucumber/cucumber`，所以 `pnpm e2e:check` 无法启动；`pnpm e2e:build` 因 CLI 清理步骤缺少 `rimraf` 而停止。根目录的 `pnpm check` 和 `pnpm format` 也因工具缺失而停止。仓库指引要求嵌套 checkout 跳过 `pnpm install`，因此无法在本地启动构建后 Electron smoke。`pnpm run docs check` 报告 62 条指向未填充 ACP submodule 路径的断链，新建的双语 Note 没有相关错误。设置修正已在一次托管 full 运行中通过；键盘路径调整及 Windows、Linux 运行仍待新一轮托管验证。
+改动文件通过 Oxfmt 和 `git diff --check`。此嵌套 worktree 的 E2E 包未安装 `@cucumber/cucumber`，所以 `pnpm e2e:check` 无法启动；`pnpm e2e:build` 因 CLI 清理步骤缺少 `rimraf` 而停止。根目录的 `pnpm check` 和 `pnpm format` 也因工具缺失而停止。仓库指引要求嵌套 checkout 跳过 `pnpm install`，因此无法在本地启动构建后 Electron smoke。`pnpm run docs check` 报告 62 条指向未填充 ACP submodule 路径的断链，新建的双语 Note 没有相关错误。设置修正已在一次托管 full 运行中通过；显式滚动调整及 Windows、Linux 运行仍待新一轮托管验证。
