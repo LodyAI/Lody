@@ -213,9 +213,11 @@ export class ContextCopyPage {
     await expect(
       forkMenu.getByRole('menuitem', { name: /^(Fork to new tab|分叉到新标签页)$/u })
     ).toHaveCount(0);
-    await forkMenu
-      .getByRole('menuitem', { name: /(Copy context as Markdown|复制 Markdown 上下文)/u })
-      .click();
+    const copyItem = forkMenu.getByRole('menuitem', {
+      name: /(Copy context as Markdown|复制 Markdown 上下文)/u,
+    });
+    await expect(copyItem).toBeFocused();
+    await this.page.keyboard.press('Enter');
   }
 
   private async openForkMenuForAssistantResponse(responseMarker: string): Promise<void> {
