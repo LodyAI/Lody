@@ -21,7 +21,10 @@ read is capped at 25 MiB, while a remote provider's earlier binary transfer cap
 still applies. DOCX requires worker parsing, XLSX uses its read-only virtual
 grid, and PPTX uses virtual slide rendering. Unsupported legacy Office formats
 continue to show the binary notice. All product-owned controls use StyleX; the
-PPTX engine's own stylesheet remains engine-owned.
+PPTX engine's own stylesheet remains engine-owned. That vendor stylesheet is
+imported as raw text and attached only while the PPTX renderer is mounted: a
+normal CSS import from this lazy chunk moves the app's extracted StyleX rules
+out of the startup stylesheet, leaving unrelated desktop screens unstyled.
 
 CSV/TSV parsing and searching use a disposable worker. The table caps rows,
 columns, cells, and retained search matches, then virtualizes both grid axes.
@@ -38,4 +41,6 @@ PDF-specific design.
 - Storybook rendered synthetic DOCX, XLSX, PPTX, and CSV fixtures in a browser.
 - Playwright acceptance covers rendering, controls, search, and inactive Office
   and CSV panels that fetch no engine or worker.
+- The Electron build keeps extracted StyleX rules in its startup CSS asset while
+  the PPTX vendor stylesheet stays in the lazy renderer chunk.
 - Local Electron resource-scheme rendering remains unverified in this worktree.

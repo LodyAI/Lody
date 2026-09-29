@@ -1,9 +1,11 @@
-import '@extend-ai/react-pptx/styles.css';
 import * as stylex from '@stylexjs/stylex';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ChevronLeft, ChevronRight, ZoomIn, ZoomOut } from 'lucide-react';
 import { ReactPptxViewer, setWasmSource, type ViewerZoomLevel } from '@extend-ai/react-pptx';
+// A CSS import in this lazy renderer also moves the app's extracted StyleX rules
+// into the lazy CSS chunk. Keep only the PPTX vendor CSS here as deferred text.
+import pptxStylesText from '@extend-ai/react-pptx/styles.css?raw';
 import wasmUrl from '@extend-ai/react-pptx/pptx_wasm_bg.wasm?url';
 import { Button } from '@lody/ui/button';
 import { Select } from '@lody/ui/select';
@@ -43,6 +45,17 @@ export function SessionFilePptxRenderer({
   const [slideCount, setSlideCount] = useState(0);
   const [zoom, setZoom] = useState<ViewerZoomLevel>('fit-page');
   const [failed, setFailed] = useState(false);
+  const [stylesReady, setStylesReady] = useState(false);
+
+  useEffect(() => {
+    const stylesheet = document.createElement('style');
+    stylesheet.textContent = pptxStylesText;
+    document.head.append(stylesheet);
+    setStylesReady(true);
+    return () => {
+      stylesheet.remove();
+    };
+  }, []);
   if (failed) {
     return (
       <SessionFileNoticeCard
@@ -166,25 +179,32 @@ export function SessionFilePptxRenderer({
       }
     >
       <div {...stylex.props(styles.viewer)}>
-        <ReactPptxViewer
-          source={buffer}
-          mode="continuous"
-          slideIndex={slide}
-          zoom={zoom}
-          height="100%"
-          showToolbar={false}
-          showThumbnails
-          virtualization
-          onLoad={(presentation) => setSlideCount(presentation.document.slides.length)}
-          onSlideChange={setSlide}
-          onError={() => setFailed(true)}
-          renderLoading={() => (
-            <div {...stylex.props(styles.loading)} role="status">
-              <Spinner label={null} />
-              {t('sessions.fileViewer.office.loading', 'Loading document…')}
-            </div>
-          )}
-        />
+        {stylesReady ? (
+          <ReactPptxViewer
+            source={buffer}
+            mode="continuous"
+            slideIndex={slide}
+            zoom={zoom}
+            height="100%"
+            showToolbar={false}
+            showThumbnails
+            virtualization
+            onLoad={(presentation) => setSlideCount(presentation.document.slides.length)}
+            onSlideChange={setSlide}
+            onError={() => setFailed(true)}
+            renderLoading={() => (
+              <div {...stylex.props(styles.loading)} role="status">
+                <Spinner label={null} />
+                {t('sessions.fileViewer.office.loading', 'Loading document…')}
+              </div>
+            )}
+          />
+        ) : (
+          <div {...stylex.props(styles.loading)} role="status">
+            <Spinner label={null} />
+            {t('sessions.fileViewer.office.loading', 'Loading document…')}
+          </div>
+        )}
       </div>
     </OfficeViewerFrame>
   );
