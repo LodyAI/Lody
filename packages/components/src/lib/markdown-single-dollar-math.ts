@@ -74,6 +74,31 @@ const listMarkerEnd = (value: string, start: number, end: number): number | null
   return cursor - whitespaceStart <= 4 ? cursor : whitespaceStart + 1;
 };
 
+const isMarkdownBlockStart = (value: string, lineStart: number, position: number): boolean => {
+  let cursor = lineStart;
+
+  while (cursor < position) {
+    cursor = spacesEnd(value, cursor, position, 3);
+    if (cursor === position) return true;
+
+    if (value[cursor] === '>') {
+      cursor += 1;
+      if (value[cursor] === ' ' || value[cursor] === '\t') cursor += 1;
+      continue;
+    }
+
+    const markerEnd = listMarkerEnd(value, cursor, position);
+    if (markerEnd != null && markerEnd <= position) {
+      cursor = markerEnd;
+      continue;
+    }
+
+    return false;
+  }
+
+  return cursor === position;
+};
+
 const markdownFenceAt = (value: string, lineStart: number): MarkdownFence | null => {
   const contentEnd = lineContentEnd(value, lineStart);
   let cursor = lineStart;
@@ -353,7 +378,9 @@ export const normalizeTexMathDelimiters = (value: string, inlineMathEnabled = fa
     }
 
     const kind = inlineDelimiter ? 'inline' : 'display';
-    if (delimiterMarker === '(' || delimiterMarker === '[') {
+    if (delimiterMarker === '[' && !isMarkdownBlockStart(value, lineStart, delimiterIndex)) {
+      cursor = delimiterIndex + 2;
+    } else if (delimiterMarker === '(' || delimiterMarker === '[') {
       opening = { kind, index: delimiterIndex };
     } else if ((delimiterMarker === ')' || delimiterMarker === ']') && opening?.kind === kind) {
       replacements.push(opening.index, delimiterIndex);
