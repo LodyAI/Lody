@@ -601,6 +601,7 @@
   "chat.validation.missingTitleConfig": "该 Agent 尚未配置标题生成。",
   "chat.workdir.checkingGit": "正在检查该项目是否为 Git 仓库。",
   "chat.workdir.githubRequired": "GitHub 项目始终在独立 worktree 中运行。",
+  "chat.workdir.loading": "正在加载 Git 状态…",
   "chat.workdir.local": "本地",
   "chat.workdir.localDescription": "使用原始本地项目目录。",
   "chat.workdir.notGitRepo": "该本地项目不是 Git 仓库。",

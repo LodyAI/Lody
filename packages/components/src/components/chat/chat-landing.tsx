@@ -3479,8 +3479,11 @@ function WorkspaceChatLanding({
       </Tooltip.Root>
     ) : null;
 
-  const worktreeUnavailableReason = loadingLocalGitState
-    ? t('chat.workdir.checkingGit', 'Checking whether this project is a git repository.')
+  const worktreeLoading = Boolean(
+    contextType === 'local' && selectedLocalProject && (loadingLocalGitState || runtimeInitializing)
+  );
+  const worktreeUnavailableReason = worktreeLoading
+    ? t('chat.workdir.loading', 'Loading Git status…')
     : activeLocalGitState?.git === false
       ? t('chat.workdir.notGitRepo', 'This local project is not a git repository.')
       : (localGitStateError ?? undefined);
@@ -3500,8 +3503,11 @@ function WorkspaceChatLanding({
       <WorktreeCheckboxPill
         checked={effectiveWorkdirMode === 'worktree'}
         onCheckedChange={(checked) => handleWorkdirModeChange(checked ? 'worktree' : 'local')}
-        disabled={!worktreeAvailable}
-        disabledReason={!worktreeAvailable ? worktreeUnavailableReason : undefined}
+        loading={worktreeLoading}
+        disabled={!worktreeAvailable || worktreeLoading}
+        disabledReason={
+          worktreeLoading || !worktreeAvailable ? worktreeUnavailableReason : undefined
+        }
         surface="context"
       />
     ) : null;
@@ -4109,10 +4115,15 @@ function WorkspaceChatLanding({
           </Tabs.Tab>
           <Tabs.Tab
             value="worktree"
-            disabled={!worktreeAvailable}
+            disabled={!worktreeAvailable || worktreeLoading}
             title={worktreeUnavailableReason}
+            aria-busy={worktreeLoading || undefined}
           >
-            <GitBranchIcon className="h-3.5 w-3.5" aria-hidden="true" />
+            {worktreeLoading ? (
+              <Spinner size="small" label={null} />
+            ) : (
+              <GitBranchIcon className="h-3.5 w-3.5" aria-hidden="true" />
+            )}
             <span>{t('chat.mobileNewChat.workdirWorktreeLabel', '新工作树')}</span>
           </Tabs.Tab>
         </Tabs.List>

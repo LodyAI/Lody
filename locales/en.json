@@ -601,6 +601,7 @@
   "chat.validation.missingTitleConfig": "Title generation is not configured for this agent.",
   "chat.workdir.checkingGit": "Checking whether this project is a git repository.",
   "chat.workdir.githubRequired": "GitHub projects always run in an isolated worktree.",
+  "chat.workdir.loading": "Loading Git status…",
   "chat.workdir.local": "Local",
   "chat.workdir.localDescription": "Use the original local project folder.",
   "chat.workdir.notGitRepo": "This local project is not a git repository.",
