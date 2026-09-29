@@ -1748,10 +1748,12 @@ describe('SessionExecutionService', () => {
       },
       setSessionMode: async () => {
         mutations.push('mode');
-        if (stage === 'config') await block();
       },
+      // The model is the first setting applied (permission comes last), so the
+      // stall happens there and no later setting may follow the stop.
       unstable_setSessionModel: async () => {
         mutations.push('model');
+        if (stage === 'config') await block();
       },
     };
     const session = { sessionId, acpSessionId: 'acp-waits' as ACPSessionId, agentClient };
@@ -1831,7 +1833,7 @@ describe('SessionExecutionService', () => {
     expect(prepared).toHaveLength(stage === 'document' ? 0 : 1);
     release.resolve();
     await tail;
-    expect(mutations).toEqual(stage === 'config' ? ['mode'] : []);
+    expect(mutations).toEqual(stage === 'config' ? ['model'] : []);
     await service.reconcileSteerHistory(sessionId, sessionDoc);
     expect(
       findNextDispatchableUserTurn(
@@ -9210,8 +9212,10 @@ describe('SessionExecutionService initialization deadline', () => {
         refreshGhTokenForSession: vi.fn(async () => {}),
       } as unknown as SessionManager,
       workspaceDocument,
-      startSessionActivePresence: (sessionId: SessionId, phase?: SessionActivePresencePhase | null) =>
-        presence.start(sessionId, phase),
+      startSessionActivePresence: (
+        sessionId: SessionId,
+        phase?: SessionActivePresencePhase | null
+      ) => presence.start(sessionId, phase),
       setSessionActivePresencePhase: (
         sessionId: SessionId,
         phase: SessionActivePresencePhase | null,
@@ -9298,9 +9302,9 @@ describe('SessionExecutionService initialization deadline', () => {
 
       // The turn runtime is released, so the session stops counting as active
       // and becomes collectable again.
-      expect(harness.service.getExecutionSnapshot('session-stalled-init' as SessionId).hasActiveTurn).toBe(
-        false
-      );
+      expect(
+        harness.service.getExecutionSnapshot('session-stalled-init' as SessionId).hasActiveTurn
+      ).toBe(false);
     } finally {
       vi.useRealTimers();
     }

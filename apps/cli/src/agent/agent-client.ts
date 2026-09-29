@@ -615,6 +615,18 @@ export type AcpWriteTextFileEvidence = {
   readonly newText: string;
 };
 
+/**
+ * What came back from setting the permission mode, as evidence of the result.
+ * `config-response`: the agent's complete option list for this request, whose
+ * mode option (if any) is the confirmed value. `set-mode-ack`: `session/set_mode`
+ * was sent and returned successfully. `none`: nothing confirms the result (an
+ * empty acknowledgement, or no request was sent).
+ */
+export type AcpModeSetEvidence =
+  | { kind: 'config-response'; modeId: acp.SessionConfigOption['currentValue'] | undefined }
+  | { kind: 'set-mode-ack' }
+  | { kind: 'none' };
+
 export class AgentClient implements acp.Client {
   private connection: acp.ClientSideConnection | null = null;
   private lastSessionUpdateAtMs = Date.now();
@@ -643,6 +655,16 @@ export class AgentClient implements acp.Client {
   private agentMcpCapabilities: acp.McpCapabilities | undefined;
   /** Session config options returned by the agent; the source of model/mode choices and names. */
   private configOptions: acp.SessionConfigOption[] = [];
+  /**
+   * Bumped whenever the agent itself reports session state (a complete config
+   * option list or a `current_mode_update`). Callers capture it right after a
+   * setting to tell reports that came later from ones that came earlier: an
+   * asynchronous notification carries no request id, so only its arrival order
+   * relative to the setting says anything.
+   */
+  private agentStateReportGeneration = 0;
+  /** Mode id from the latest `current_mode_update`, for agents that report mode that way. */
+  private lastReportedModeId: string | undefined;
   private readonly configOptionsListeners = new Set<() => void>();
   /** Desired config retained across same-client replacement sessions. */
   private readonly configOptionValues: NonNullable<SessionTurnInputConfig['configOptionValues']>;
@@ -946,6 +968,10 @@ export class AgentClient implements acp.Client {
 
     if (notification.update.sessionUpdate === 'config_option_update') {
       this.applyConfigOptionsState(notification.update.configOptions, true);
+    }
+    if (notification.update.sessionUpdate === 'current_mode_update') {
+      this.lastReportedModeId = notification.update.currentModeId;
+      this.agentStateReportGeneration += 1;
     }
 
     this.handleGoalSessionInfoUpdate(notification);
@@ -1811,6 +1837,7 @@ export class AgentClient implements acp.Client {
     replaceConfigOptionValues: boolean
   ): void {
     this.configOptions = filterAcpConfigOptions(configOptions);
+    this.agentStateReportGeneration += 1;
     if (replaceConfigOptionValues) {
       for (const configId of Object.keys(this.configOptionValues)) {
         delete this.configOptionValues[configId];
@@ -2820,6 +2847,16 @@ export class AgentClient implements acp.Client {
     return this.configOptions;
   }
 
+  /** See `agentStateReportGeneration`. */
+  getAgentStateReportGeneration(): number {
+    return this.agentStateReportGeneration;
+  }
+
+  /** Mode id from the latest `current_mode_update`, if the agent sent one. */
+  getLastReportedModeId(): string | undefined {
+    return this.lastReportedModeId;
+  }
+
   subscribeConfigOptions(listener: () => void): () => void {
     this.configOptionsListeners.add(listener);
     return () => {
@@ -2918,7 +2955,7 @@ export class AgentClient implements acp.Client {
     return this.options.agentConfig?.agentType === 'codex';
   }
 
-  async setSessionMode(sessionId: ACPSessionId, modeId: string) {
+  async setSessionMode(sessionId: ACPSessionId, modeId: string): Promise<AcpModeSetEvidence> {
     this.logger.debug(`[${this.options.sessionId}] setSessionMode called (modeId=${modeId})`);
     this.ensureSessionMatch(sessionId);
 
@@ -2933,11 +2970,19 @@ export class AgentClient implements acp.Client {
         `[${this.options.sessionId}] Using setSessionConfigOption for mode (configId=${modeConfigOption.id} value=${modeId})`
       );
       try {
-        await this.setSessionConfigOption(sessionId, modeConfigOption.id, modeId);
+        const reported = await this.setSessionConfigOption(sessionId, modeConfigOption.id, modeId);
         this.logger.debug(
           `[${this.options.sessionId}] ACP session mode set via configOption: ${modeId}`
         );
-        return;
+        // Only a complete list the agent returned for THIS request confirms the
+        // result; an empty acknowledgement confirms nothing.
+        return reported
+          ? {
+              kind: 'config-response',
+              modeId: filterAcpConfigOptions(reported).find((option) => option.category === 'mode')
+                ?.currentValue,
+            }
+          : { kind: 'none' };
       } catch (err) {
         this.logger.debug(
           `[${this.options.sessionId}] setSessionConfigOption failed for mode, falling back to legacy setSessionMode: ${err}`
@@ -2949,6 +2994,7 @@ export class AgentClient implements acp.Client {
     this.logger.debug(
       `[${this.options.sessionId}] Calling connection.setSessionMode (modeId=${modeId})`
     );
+    let sent = false;
     await withTransportRetry(
       async () => {
         const setModePromise = this.connection?.setSessionMode({ sessionId, modeId });
@@ -2959,6 +3005,7 @@ export class AgentClient implements acp.Client {
             'connection.setSessionMode',
             this.options.sessionId
           );
+          sent = true;
         }
       },
       this.logger,
@@ -2966,6 +3013,7 @@ export class AgentClient implements acp.Client {
       this.options.sessionId
     );
     this.logger.debug(`[${this.options.sessionId}] ACP session mode set: ${modeId}`);
+    return sent ? { kind: 'set-mode-ack' } : { kind: 'none' };
   }
 
   async unstable_setSessionModel(sessionId: ACPSessionId, modelId: string) {

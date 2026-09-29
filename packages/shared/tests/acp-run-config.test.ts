@@ -2,7 +2,10 @@ import { describe, expect, it } from 'vitest';
 import { createPlanModeConfigOption } from 'acp-extension-core';
 
 import {
+  comparePermissionModes,
   deriveModelReasoningEffortsFromLegacyModelIds,
+  isRestrictivePermissionMode,
+  resolveSessionSafetyIntent,
   getStaticBuiltinAcpCapabilities,
   resolveAgentRunConfigSelection,
   summarizeAgentRunConfigCapabilities,
@@ -386,5 +389,43 @@ describe('agent run config selection', () => {
       planMode: true,
     });
     expect(resolveAgentRunConfigSelection({ planMode: true }, legacy)).toEqual({ modeId: 'plan' });
+  });
+});
+
+describe('run-config safety intent', () => {
+  const claude = { cliType: 'builtin', agentType: 'claude' } as const;
+  const userTurn = (turnId: string, inputConfig: Record<string, unknown>) => ({
+    turnId,
+    inputConfig: { cliType: 'builtin', agentType: 'claude', ...inputConfig },
+  });
+
+  it('resolves permission and Plan separately, up to the executing turn', () => {
+    const rows = [
+      userTurn('t1', { modeId: 'plan', configOptionValues: { plan_mode: true } }),
+      userTurn('t2', { modeId: 'acceptEdits' }),
+      userTurn('t3', { configOptionValues: { plan_mode: false } }),
+      // A later queued turn must not leak into t2.
+      userTurn('t4', { modeId: 'bypassPermissions' }),
+    ];
+
+    expect(resolveSessionSafetyIntent(rows, 't2')).toEqual({
+      modeId: 'acceptEdits',
+      plan: { configId: 'plan_mode', value: true },
+    });
+    expect(resolveSessionSafetyIntent(rows, 't3')).toEqual({
+      modeId: 'acceptEdits',
+      plan: { configId: 'plan_mode', value: false },
+    });
+  });
+
+  it('orders only built-in modes and treats equal ranks as incomparable', () => {
+    expect(isRestrictivePermissionMode(claude, 'plan')).toBe(true);
+    expect(isRestrictivePermissionMode({ cliType: 'registry', agentType: 'claude' }, 'plan')).toBe(
+      false
+    );
+    expect(comparePermissionModes(claude, 'plan', 'default')).toBe('wider');
+    expect(comparePermissionModes(claude, 'acceptEdits', 'plan')).toBe('narrower');
+    expect(comparePermissionModes(claude, 'acceptEdits', 'auto')).toBe('incomparable');
+    expect(comparePermissionModes(claude, 'default', 'someNewMode')).toBe('incomparable');
   });
 });

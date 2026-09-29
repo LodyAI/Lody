@@ -74,10 +74,10 @@ execution/consent rules. These rules also bind CLI callers outside that director
 - INVARIANT: reasoning effort and fast mode are per MODEL, because an ACP probe's `configOptions`
   describe only the model current at probe time. Validate effort against the TARGET model using
   `AcpCapabilityCacheEntry.modelReasoningEfforts` and skip the resulting `validatedConfigIds` in
-  `validateTurnConfigOptionValues`; dispatch what cannot be checked offline as requested. Keep
-  runtime rejections in debug diagnostics: Codex/Claude mismatches for model, effort, Fast, or Plan
-  never become visible `agent_warning` notices, while other rejections still do. Claude Fable
-  models omit Fast, so `fast=false` is skipped as a no-op while `fast=true` is dispatched.
+  `validateTurnConfigOptionValues`; dispatch what cannot be checked offline as requested.
+  Codex/Claude model, effort, or Fast rejections stay debug diagnostics. Claude Fable omits Fast:
+  skip `fast=false`, dispatch `fast=true`. INVARIANT: apply model first and permission/Plan last,
+  then check them before the prompt ([spec](../../specs/acp-run-config-safety.md)).
 - INVARIANT: `SessionManager` publishes `exit`/`terminated` only for `Session` instances a caller
   received. `MessageHandler` treats them as "the live turn's agent died" and finalizes the turn, so
   a `createAgent` failure detaches the instance BEFORE its cleanup `terminate`; otherwise a

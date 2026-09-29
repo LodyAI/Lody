@@ -18,6 +18,7 @@ import {
   type LocalProjectGitStateRpcResponse,
 } from '@lody/loro-streams-rpc';
 import {
+  resolveSessionSafetyIntent,
   HistoryWriteError,
   MachineId,
   WorkspaceId,
@@ -1648,9 +1649,18 @@ export class MessageHandler {
       signal?: AbortSignal;
     }
   ): Promise<void> {
+    // A turn that omits its permission mode or Plan still runs under the latest
+    // earlier turn that set them; the directory read carries input configs
+    // without materializing turn bodies.
+    const inheritedSafetyIntent = context.basedOnUserTurnId
+      ? resolveSessionSafetyIntent(
+          await context.sessionDoc.sessionData.history.readDirectory(0, Number.MAX_SAFE_INTEGER),
+          context.basedOnUserTurnId
+        )
+      : undefined;
     const { runtimeConfigPatch, warningSelections } = await applyAcpSessionRunConfig({
       session,
-      config,
+      config: { ...config, inheritedSafetyIntent },
       logger: this.logger,
       signal: context.signal,
     });

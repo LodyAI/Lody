@@ -26,6 +26,7 @@ export type {
 } from './ids';
 export * from './message';
 export * from './ai';
+export * from './acp-permission-order';
 export * from './pi-provider-migration';
 export * from './message-text-spans';
 export * from './deepseek-harness';
