@@ -144,8 +144,17 @@ this page is the full text of the rules summarised there.
   deliberately absent: a sentence about what one value allows belongs to the
   Role editor, not to a scan of what is pinned. Its machine is passed
   in rather than looked up, so the pane stays renderable without the workspace's
-  machine-visibility context. The Role editor is a Dialog and is therefore
-  hosted by the composer, NOT inside menu content, where it would unmount with
+  machine-visibility context. The submenu is vertically centered against the
+  parent menu when shorter; when taller, its bottom stops at the parent menu's
+  bottom so it does not extend over the docked composer's footer controls. It
+  shifts within a short viewport rather than flipping its alignment. Its two
+  panes grow with their content up to 14rem, then scroll
+  independently. Create stays at the bottom of the Role list pane while its
+  rows scroll; it has no separator above it. The detail pane's header flows
+  into the pinned values without a divider. The parent, permission, and Role
+  menus retain the shared `@lody/ui` popup inset; neither list compensates for
+  it with custom horizontal margins. The Role editor is a Dialog and is
+  therefore hosted by the composer, NOT inside menu content, where it would unmount with
   the menu the moment it opened; `AgentRoleEditorDialog` is the one editor,
   shared with Settings.
   Picking a Role flows through the SAME preference channel as that agent's
