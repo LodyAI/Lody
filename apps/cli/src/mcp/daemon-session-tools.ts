@@ -1,17 +1,26 @@
-import { z } from 'zod';
 import {
   buildSessionToolServer,
   runWithMcpSessionContext,
   type McpSessionContext,
 } from './lody-mcp-server';
 import type { SessionToolHandlers } from './session-tool-router';
-import { getSessionRoomId, isLoroRepoDocDeleted, type SessionMeta } from '@lody/shared';
+import {
+  getSessionRoomId,
+  isLoroRepoDocDeleted,
+  SessionToolResultSchema,
+  type SessionMeta,
+} from '@lody/shared';
 import { getSessionCommandEnvironment } from '@/lib/session-command-environment';
 
-const ResultSchema = z.object({
-  content: z.array(z.object({ type: z.literal('text'), text: z.string() }).strict()),
-  isError: z.boolean().optional(),
-});
+// Registration is stateless (tools read scope from ALS), so build the handler table once.
+let handlers: SessionToolHandlers | undefined;
+const getHandlers = () => {
+  if (!handlers) {
+    handlers = new Map();
+    void buildSessionToolServer(handlers);
+  }
+  return handlers;
+};
 
 /** Only explicitly registered Session/catalog tools cross this IPC boundary. */
 export async function executeDaemonSessionTool(
@@ -36,14 +45,8 @@ export async function executeDaemonSessionTool(
     (row.meta as SessionMeta).machineId !== environment.auth.machineId
   )
     throw new Error('Requester Session does not belong to this machine');
-  const handlers: SessionToolHandlers = new Map();
-  const server = buildSessionToolServer(handlers);
-  try {
-    const handler = handlers.get(name);
-    if (!handler) throw new Error(`Unsupported daemon Session tool: ${name}`);
-    const result = await runWithMcpSessionContext(context, () => handler(args));
-    return { type: 'session/tool-result' as const, ...ResultSchema.parse(result) };
-  } finally {
-    await server.close();
-  }
+  const handler = getHandlers().get(name);
+  if (!handler) throw new Error(`Unsupported daemon Session tool: ${name}`);
+  const result = await runWithMcpSessionContext(context, () => handler(args));
+  return SessionToolResultSchema.parse({ type: 'session/tool-result', ...result });
 }

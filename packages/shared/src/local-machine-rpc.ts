@@ -84,6 +84,14 @@ export type SessionActiveInvocationContextResult = z.infer<
   typeof SessionActiveInvocationContextResultSchema
 >;
 
+export const SessionToolResultSchema = z
+  .object({
+    type: z.literal('session/tool-result'),
+    content: z.array(z.object({ type: z.literal('text'), text: z.string() }).strict()),
+    isError: z.boolean().optional(),
+  })
+  .strict();
+
 export const LocalMachineRpcRequestSchema = z.discriminatedUnion('method', [
   BaseLocalMachineRpcRequestSchema.extend({
     method: z.literal('session/call-tool'),
@@ -242,27 +250,15 @@ export const LocalMachineRpcRequestSchema = z.discriminatedUnion('method', [
   }).strict(),
   BaseLocalMachineRpcRequestSchema.extend({
     method: z.literal('session/preview-create'),
-    params: SessionPreviewCreateRequestSchema.omit({
-      type: true,
-      machineId: true,
-      workspaceId: true,
-    }),
+    params: SessionPreviewCreateRequestSchema.omit({ type: true, machineId: true, workspaceId: true }),
   }).strict(),
   BaseLocalMachineRpcRequestSchema.extend({
     method: z.literal('session/preview-revoke'),
-    params: SessionPreviewRevokeRequestSchema.omit({
-      type: true,
-      machineId: true,
-      workspaceId: true,
-    }),
+    params: SessionPreviewRevokeRequestSchema.omit({ type: true, machineId: true, workspaceId: true }),
   }).strict(),
   BaseLocalMachineRpcRequestSchema.extend({
     method: z.literal('session/preview-status'),
-    params: SessionPreviewStatusRequestSchema.omit({
-      type: true,
-      machineId: true,
-      workspaceId: true,
-    }),
+    params: SessionPreviewStatusRequestSchema.omit({ type: true, machineId: true, workspaceId: true }),
   }).strict(),
   BaseLocalMachineRpcRequestSchema.extend({
     method: z.literal('session/preview-endpoint-acquire'),
@@ -305,13 +301,7 @@ export type LocalMachineRpcRequest = z.infer<typeof LocalMachineRpcRequestSchema
 export type LocalMachineRpcRequestValidated = LocalMachineRpcRequest;
 
 export const LocalMachineRpcResultSchema = z.union([
-  z
-    .object({
-      type: z.literal('session/tool-result'),
-      content: z.array(z.object({ type: z.literal('text'), text: z.string() }).strict()),
-      isError: z.boolean().optional(),
-    })
-    .strict(),
+  SessionToolResultSchema,
   SessionActiveInvocationContextResultSchema,
   CodeCollabV2FileIndexSnapshotSchema,
   CodeCollabV2OpenTextOkSchema,
