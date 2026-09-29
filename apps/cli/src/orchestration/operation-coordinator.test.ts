@@ -57,6 +57,7 @@ const makeHarness = async (options?: {
   historyFailuresBeforeSuccess?: number;
   beforeRequesterHistoryWrite?: () => Promise<void>;
   materializeTargetOverride?: () => Promise<void>;
+  confirmTargetReadable?: (docId: string, reason: string) => Promise<void>;
   operationKind?: 'session_create' | 'session_create_many' | 'session_chat';
   failProgressHistoryWrites?: boolean;
   progressHistoryFailures?: number;
@@ -327,6 +328,7 @@ const makeHarness = async (options?: {
       return { close: vi.fn() };
     },
     materializeTarget,
+    confirmTargetReadable: options?.confirmTargetReadable,
   } satisfies ConstructorParameters<typeof LodyOperationCoordinator>[0];
   const coordinator = new LodyOperationCoordinator(coordinatorOptions);
   const store = new LodyOperationStore(storePath, () => TEST_NOW_MS);
@@ -397,6 +399,63 @@ afterEach(async () => {
 });
 
 describe('LodyOperationCoordinator', () => {
+  it('recovers local creation using daemon authority even when remote Streams is unavailable', async () => {
+    const harness = await makeHarness({
+      targetInputDurable: false,
+      operationKind: 'session_create',
+      targetDocSync: async () => {
+        throw new Error('No remote Streams in OSS');
+      },
+      confirmTargetReadable: async () => {},
+    });
+    harness.coordinator.start();
+    try {
+      await harness.coordinator.idle();
+      expect(
+        harness.histories.get(harness.targetSessionId)?.filter((turn) => turn.id === 'turn-1')
+      ).toHaveLength(1);
+      await harness.coordinator.wake('retry');
+      expect(
+        harness.histories.get(harness.targetSessionId)?.filter((turn) => turn.id === 'turn-1')
+      ).toHaveLength(1);
+      expect(harness.syncRemoteDocOrThrow).not.toHaveBeenCalled();
+      const history = harness.histories.get(harness.targetSessionId);
+      if (!history?.[0]) throw new Error('Missing materialized target');
+      history[0] = { ...history[0], status: 'handled' };
+      history.push({
+        id: 'assistant:turn-1',
+        role: 'assistant',
+        userTurnId: 'turn-1',
+        timestamp: '2026-07-20T00:00:00.500Z',
+        items: [{ type: 'text', text: 'local result' }],
+        fileDiff: [],
+        finished: true,
+      });
+      await harness.coordinator.wake('local-target-finished');
+      await harness.coordinator.wake('duplicate-finish');
+      const store = new LodyOperationStore(harness.storePath, () => TEST_NOW_MS);
+      try {
+        expect(store.get(harness.requesterSessionId, 'review-round-1')).toMatchObject({
+          state: 'finished',
+          completion: {
+            type: 'result',
+            value: { items: [{ status: 'succeeded', output: { text: 'local result' } }] },
+          },
+        });
+        expect(store.listPendingDeliveries('workspace-1' as WorkspaceId)).toEqual([]);
+        expect(
+          harness.histories
+            .get(harness.requesterSessionId)
+            ?.filter((turn) => turn.role === 'assistant')
+        ).toHaveLength(1);
+      } finally {
+        store.close();
+      }
+    } finally {
+      await harness.coordinator.stop();
+    }
+  });
+
   it('retries transient target materialization on its own bounded timer', async () => {
     vi.useFakeTimers();
     const harness = await makeHarness({

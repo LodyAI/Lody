@@ -114,6 +114,7 @@ import {
   type WorkspaceSummary,
 } from '@/lib/workspace';
 import { readMachineLocalProjects } from '@/lib/local-project-meta';
+import { getSessionCommandEnvironment } from '@/lib/session-command-environment';
 import { listMergedAgentConfigs } from '@/lib/agent-config-machine-flock';
 import { getLogger, rootLogger } from '@/utils/logger';
 import { parseEnvAssignments } from './agent-config';
@@ -2044,6 +2045,15 @@ async function ensureTargetMachineOnline(args: {
   workspaceId: WorkspaceId;
   machineId: MachineId;
 }): Promise<void> {
+  const environment = getSessionCommandEnvironment();
+  if (environment) {
+    if (
+      args.workspaceId !== environment.workspace.id ||
+      args.machineId !== environment.auth.machineId
+    )
+      throw new Error('Target machine is unavailable in this workspace');
+    return;
+  }
   if (args.machineId === args.auth.machineId) {
     await ensureLocalRuntimeAvailable(args.machineId, args.workspaceId);
     return;
@@ -2159,6 +2169,16 @@ async function readResolvedSessionMachineAccess(args: {
   requester: ResolvedSessionRequester;
   localProjectId?: string;
 }): Promise<MachineAccessCheckResult> {
+  const environment = getSessionCommandEnvironment();
+  if (environment) {
+    if (args.auth !== environment.auth) throw new Error('Session command identity mismatch');
+    return environment.checkMachineAccess({
+      workspaceId: args.workspaceId,
+      machineId: args.machineId,
+      requesterUserId: args.requester.userId,
+      localProjectId: args.localProjectId,
+    });
+  }
   const target = {
     token: args.auth.token,
     workspaceId: args.workspaceId,
@@ -2203,6 +2223,11 @@ async function dispatchTurnFastPath(args: {
   timestamp: string;
   inputConfig: SessionTurnInputConfig | undefined;
 }): Promise<void> {
+  const environment = getSessionCommandEnvironment();
+  if (environment) {
+    await environment.host.dispatchSession(args.sessionId);
+    return;
+  }
   if (!args.inputConfig) {
     return;
   }
@@ -2549,6 +2574,8 @@ async function assertGitHubRepoAccess(args: {
   repoFullName: string;
   requesterUserId: string;
 }): Promise<void> {
+  if (getSessionCommandEnvironment())
+    throw new Error('Hosted repository contexts are unavailable; use a registered local project.');
   const repos = await listWorkspaceGitHubRepositoriesForCliToken({
     token: args.auth.token,
     workspaceId: args.workspaceId,
@@ -3617,6 +3644,24 @@ export async function readSessionLiveStatusesMany(args: {
   workspaceId: WorkspaceId;
   sessions: ReadonlyArray<Pick<SessionMeta, 'id' | 'machineId'>>;
 }): Promise<Map<SessionId, SessionLiveStatusBatchItem>> {
+  const environment = getSessionCommandEnvironment();
+  if (environment) {
+    const output = new Map<SessionId, SessionLiveStatusBatchItem>();
+    for (const session of args.sessions) {
+      output.set(
+        session.id,
+        session.machineId === environment.auth.machineId
+          ? await environment.host.readLiveStatus(session.id)
+          : {
+              sessionId: session.id,
+              machineOnline: false,
+              fresh: false,
+              reason: 'Machine unavailable in local workspace',
+            }
+      );
+    }
+    return output;
+  }
   const groups = new Map<MachineId, Array<Pick<SessionMeta, 'id' | 'machineId'>>>();
   for (const session of args.sessions) {
     const group = groups.get(session.machineId) ?? [];

@@ -12,6 +12,7 @@ import type {
 } from '@lody/shared';
 import { ResourceDiscovery, type DiscoverySource } from './resource-discovery';
 import { registerDiscoveryTools } from '@/mcp/discovery-tools';
+import { createSessionToolRegistrar } from '@/mcp/session-tool-router';
 
 const machine = (id: string): MachineMeta => ({ id, name: id }) as MachineMeta;
 const config = (id: string, machineId = 'one'): AgentConfigMeta =>
@@ -275,7 +276,10 @@ describe('resource discovery across MCP and CLI', () => {
   it('serves the shared result through the real MCP wire and rejects irrelevant filters', async () => {
     const discovery = new ResourceDiscovery(source());
     const server = new McpServer({ name: 'synthetic-discovery', version: '1' });
-    registerDiscoveryTools(server, (read) => read(discovery));
+    registerDiscoveryTools(
+      createSessionToolRegistrar(server, (_name, _args, run) => run()),
+      (read) => read(discovery)
+    );
     const client = new Client({ name: 'synthetic-client', version: '1' });
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
     await server.connect(serverTransport);
