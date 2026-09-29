@@ -3,8 +3,8 @@
 Parent instructions apply.
 
 - Local Session/catalog tools route through `session/call-tool` to the daemon's
-  existing repo. `session-tool-router.ts` shares schema validation and handlers
-  with cloud MCP; `session-command-environment.ts` scopes daemon identity and
+  existing repo. `session-tool-router.ts` reuses SDK-parsed MCP arguments and
+  parses daemon inputs; `session-command-environment.ts` scopes identity and
   host operations with AsyncLocalStorage. Require an active local user Turn and
   exact workspace/machine scope; never open a second local writer replica.
   Cloud keeps its authenticated command runtime and remote recovery confirmation.

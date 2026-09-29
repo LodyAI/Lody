@@ -44,6 +44,15 @@ in [session orchestration](../../../../specs/session-orchestration.md), not its 
 
 ## Verification and limits
 
+A registrar ablation removed redundant parsing after SDK validation: a real MCP
+call with a non-idempotent field transform originally returned
+`resolved:resolved:input`, while direct daemon dispatch returned `resolved:input`.
+Calling the callback with the SDK's parsed arguments restores parity. Removing
+daemon parsing as a negative control instead admitted a numeric value rejected
+by the string schema, so that independent boundary is retained. The regression
+checks normalization and rejection through both entry points; transport-boundary
+revalidation is not treated as redundant. PR: [#1133](https://github.com/LodyAI/Lody/pull/1133).
+
 Real local-repo tests cover Role discovery, prompt expansion into target history,
 durable dispatch, repeated Operation acceptance and zero product-cloud traffic.
 Coordinator tests cover local authority recovery alongside existing remote

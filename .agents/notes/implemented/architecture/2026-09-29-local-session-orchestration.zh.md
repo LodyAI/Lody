@@ -39,6 +39,13 @@ workspace。AsyncLocalStorage 隔离并发 workspace 环境，复用已有命令
 
 ## 验证与限制
 
+注册器消融移除了 SDK 校验后的重复解析：对非幂等字段转换，真实 MCP 调用原先
+返回 `resolved:resolved:input`，daemon 直接调用则返回 `resolved:input`。
+直接使用 SDK 已解析的参数后，两者恢复一致。反向对照中，删除 daemon 解析会
+放行原本应被字符串 schema 拒绝的数字，因此保留这条独立边界。回归测试覆盖
+两种入口的转换结果和非法输入拒绝；跨传输边界的再次校验不视为冗余。
+PR：[#1133](https://github.com/LodyAI/Lody/pull/1133)。
+
 真实本地 repo 测试覆盖 Role 发现、目标历史中的 prompt 前缀、持久派发、重复
 Operation 接受以及零产品云端流量。Coordinator 测试覆盖本地权威恢复，并保留
 远端追平、防重复和 Delivery 测试。这些测试不证明打包桌面的实际交互或真实

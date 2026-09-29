@@ -19,11 +19,11 @@ export function createSessionToolRegistrar(
     config: { title?: string; description?: string; inputSchema: T; annotations?: ToolAnnotations },
     callback: (args: z.output<T>) => Promise<CallToolResult>
   ) => {
-    const execute = async (args: unknown) => callback(await config.inputSchema.parseAsync(args));
-    handlers?.set(name, execute);
+    handlers?.set(name, async (args) => callback(await config.inputSchema.parseAsync(args)));
     const inputSchema: z.ZodObject = config.inputSchema;
     return server.registerTool(name, { ...config, inputSchema }, async (args) =>
-      route(name, args, () => execute(args))
+      // The SDK has already parsed MCP input; only direct daemon calls need parsing here.
+      route(name, args, () => callback(args as z.output<T>))
     );
   };
 }
