@@ -131,3 +131,6 @@ box, the per-job list).
   private local project and a bare chat. The token board's new preview-card sample opens on hover.
 - `@radix-ui/react-popover` stays in the lockfile as a transitive dependency of
   `@assistant-ui/react`, and therefore in the generated attributions.
+
+Later, the trigger stopped following React's portal-aware enter and leave
+events: see [DOM hover](../bug-fix/2026-09-29-sidebar-hover-card-dom-hover.md).

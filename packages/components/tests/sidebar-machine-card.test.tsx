@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act } from 'react';
+import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { createStore, Provider } from 'jotai';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -14,8 +14,10 @@ import {
   SidebarMachineHoverCard,
   SidebarMachineOfflinePill,
 } from '../src/components/sidebar-machine-card';
+import { SidebarFilterPopover } from '../src/components/sidebar-filter-popover';
 import { SidebarSectionHeader } from '../src/components/sidebar-row-shared';
 import { initI18n } from '../src/i18n';
+import { movePointer } from './helpers/pointer-boundary';
 
 const machineId = 'machine-sidebar-card' as MachineId;
 const instanceId = 'instance-sidebar-card' as LodyPresenceInstanceId;
@@ -100,7 +102,7 @@ describe('sidebar machine group', () => {
 
     const trigger = container.firstElementChild as HTMLElement;
     await act(async () => {
-      pointer('pointerover', trigger, { relatedTarget: document.body });
+      movePointer(document.body, trigger);
     });
     await act(async () => {
       vi.advanceTimersByTime(1000);
@@ -117,6 +119,86 @@ describe('sidebar machine group', () => {
     expect(card?.textContent).toContain('2 working · 1 unread');
     expect(container.querySelectorAll('[data-session-row-indicator]')).toHaveLength(1);
     expect(container.querySelector('[data-working-grid]')).not.toBeNull();
+  });
+
+  it('keeps the machine card shut while the in-header filter menu is open', async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal(
+      'matchMedia',
+      (query: string) =>
+        ({
+          matches: false,
+          media: query,
+          addEventListener: () => undefined,
+          removeEventListener: () => undefined,
+        }) as unknown as MediaQueryList
+    );
+    const machineCardIsOpen = () => document.body.textContent?.includes('Lampese.local') ?? false;
+    function FirstMachineHeader() {
+      const [filterOpen, setFilterOpen] = useState(false);
+      return (
+        <SidebarMachineHoverCard
+          machine={{ machineId, name: 'Lampese.local', isOwn: true, isCurrent: true, projectCount: 1 }}
+        >
+          {/* Expanded, so the header's own toggle reports aria-expanded="true". */}
+          <SidebarSectionHeader
+            label="Lampese"
+            collapsed={false}
+            onToggleCollapsed={() => undefined}
+            action={
+              <SidebarFilterPopover
+                organize="workspace"
+                scope="my"
+                open={filterOpen}
+                onOpenChange={setFilterOpen}
+                side="right"
+                align="start"
+              />
+            }
+          />
+        </SidebarMachineHoverCard>
+      );
+    }
+    await render(<FirstMachineHeader />);
+    const label = [...container.querySelectorAll('span')].find(
+      (node) => node.textContent === 'Lampese'
+    )!;
+    const filterTrigger = container.querySelector<HTMLElement>(
+      'button[aria-label="Filter sidebar"]'
+    )!;
+
+    await act(async () => {
+      filterTrigger.click();
+    });
+    const menu = document.querySelector('[data-sidebar-filter-section="view"]')!;
+    expect(menu).not.toBeNull();
+
+    // With the menu open, dwelling on the machine name and then crossing into
+    // the menu never brings up the machine card over it.
+    await act(async () => {
+      movePointer(document.body, label);
+      vi.advanceTimersByTime(1000);
+    });
+    expect(machineCardIsOpen()).toBe(false);
+    await act(async () => {
+      movePointer(label, menu);
+      vi.advanceTimersByTime(1000);
+    });
+    expect(machineCardIsOpen()).toBe(false);
+
+    // Once the menu closes, hovering the machine name shows the card again.
+    await act(async () => {
+      movePointer(menu, document.body);
+      filterTrigger.click();
+      vi.advanceTimersByTime(1000);
+    });
+    expect(filterTrigger.getAttribute('aria-expanded')).toBe('false');
+    await act(async () => {
+      movePointer(document.body, label);
+      vi.advanceTimersByTime(1000);
+    });
+    expect(machineCardIsOpen()).toBe(true);
+    vi.unstubAllGlobals();
   });
 
   it("draws the hidden Sessions' status on a folded section header only", async () => {

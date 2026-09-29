@@ -3,7 +3,6 @@ import {
   useEffect,
   useRef,
   useState,
-  type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from 'react';
 import * as stylex from '@stylexjs/stylex';
@@ -698,6 +697,13 @@ function suppressCardsUntilPointerMoves(x: number, y: number) {
 }
 
 /**
+ * A popup opened from a control inside the trigger (a Base UI popover or menu
+ * trigger sets both while open). A section toggle's bare `aria-expanded` and a
+ * tooltip trigger match neither, so they never keep the card shut.
+ */
+const OPEN_OWNED_POPUP_SELECTOR = '[aria-haspopup][aria-expanded="true"]';
+
+/**
  * Wraps a trigger with hover-to-open behavior and renders {@link SessionInfoCard}
  * beside it (see {@link SidebarHoverCard}).
  */
@@ -723,7 +729,8 @@ export function SessionInfoHoverCard({
  * (~650ms) before opening; while the pointer keeps hitting cards, later opens
  * are instant. A short close grace lets the cursor travel from the trigger into
  * the card without it closing. `content` mounts only while the card is open,
- * on `PreviewCard`'s surface: it lays out its facts and draws no frame.
+ * on `PreviewCard`'s surface: it lays out its facts and draws no frame. A popup
+ * opened from inside the trigger takes the card's place while it is open.
  */
 export function SidebarHoverCard({
   children,
@@ -797,6 +804,7 @@ export function SidebarHoverCard({
   const requestOpen = useCallback(() => {
     clearClose();
     if (openRef.current || pressSuppression) return;
+    if (anchorRef.current?.querySelector(OPEN_OWNED_POPUP_SELECTOR)) return;
     const warm = performance.now() - lastCardInteractionAt < WARM_WINDOW_MS;
     if (warm) {
       openNow(true);
@@ -815,13 +823,29 @@ export function SidebarHoverCard({
   }, [clearOpen, clearClose, closeSelf]);
 
   const handlePointerDown = useCallback(
-    (event: ReactPointerEvent) => {
+    (event: PointerEvent) => {
       if (event.button !== 0) return;
       suppressCardsUntilPointerMoves(event.clientX, event.clientY);
       closeSelf();
     },
     [closeSelf]
   );
+
+  // Hover is judged on the DOM, not React's tree: a popover opened from inside
+  // the trigger portals away but stays its React child, so React's enter/leave
+  // would count a pointer in that menu as one on the trigger.
+  useEffect(() => {
+    const anchor = anchorRef.current;
+    if (!anchor) return;
+    anchor.addEventListener('pointerenter', requestOpen);
+    anchor.addEventListener('pointerleave', scheduleClose);
+    anchor.addEventListener('pointerdown', handlePointerDown);
+    return () => {
+      anchor.removeEventListener('pointerenter', requestOpen);
+      anchor.removeEventListener('pointerleave', scheduleClose);
+      anchor.removeEventListener('pointerdown', handlePointerDown);
+    };
+  }, [disabled, requestOpen, scheduleClose, handlePointerDown]);
 
   // Release the shared slot whenever this card is closed (incl. Escape / outside).
   useEffect(() => {
@@ -846,14 +870,7 @@ export function SidebarHoverCard({
         if (!next) closeSelf();
       }}
     >
-      <div
-        ref={anchorRef}
-        onPointerEnter={requestOpen}
-        onPointerLeave={scheduleClose}
-        onPointerDown={handlePointerDown}
-      >
-        {children}
-      </div>
+      <div ref={anchorRef}>{children}</div>
       <PreviewCard.Content
         anchor={anchorRef}
         side="right"

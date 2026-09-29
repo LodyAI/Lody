@@ -53,3 +53,6 @@ UI 的 hover card，放在 popover 同一个浮层上。会话卡用 StyleX 迁�
 - 已有的 `packages/components/tests/session-info-hover-card.test.tsx`（按下抑制、预热窗口）在新浮层上原样通过。
 - 在 Chromium 里用 zh_CN 语言、亮暗两种主题检查了 Storybook `Sessions/SessionInfoCard`。重做之后，所有独立 story 都在亮暗两种主题下截图：带作者的团队会话、已合并且 CI 运行中、已关闭且 CI 失败、无 CI 数据、超长分支、本地工作树、私有本地项目、纯聊天。token 看板上新增的预览卡示例悬停即可打开。
 - `@radix-ui/react-popover` 仍作为 `@assistant-ui/react` 的传递依赖留在 lockfile 里，所以也仍在生成的许可证清单中。
+
+之后，触发器不再使用 React 会穿过 portal 的 enter/leave 事件：见
+[按 DOM 判定悬停](../bug-fix/2026-09-29-sidebar-hover-card-dom-hover.zh.md)。
