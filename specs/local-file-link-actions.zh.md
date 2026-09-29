@@ -21,10 +21,22 @@ Electron 在会话所属机器上提供使用默认应用打开和在文件管�
 机器上打开宿主路径。
 点击助手链接只打开预览，打开系统应用需要另一次明确点击。
 
-会话中的 PDF 使用内联分页查看器，支持页码导航、有限缩放和文本搜索。本机 Electron
+会话中的 PDF 在分页查看器中以适合宽度的缩放比例打开。工具栏支持直接输入页码、上一页和
+下一页、可切换的页面缩略图侧栏、旋转 90 度并保留当前页、适合页面/适合宽度/自动及
+百分比缩放，以及可展开并逐项导航结果的文本搜索。这些查看器操作不替代侧边面板已有的
+文件操作，也不会修改 PDF。本机 Electron
 通过经过校验的 64 KiB 字节范围读取本地 PDF 资源，不把完整文件复制到 renderer；每个
 渲染页面的画布限制为 8 百万像素。读取或解析失败时回退到二进制提示卡片及其现有文件操作。
 其他 provider 继续遵守现有二进制预览大小限制。
+
+DOCX、XLSX 和 PPTX 在会话中以只读查看器打开。DOCX 支持页面缩放，XLSX 提供
+虚拟化工作表网格与工作表导航，PPTX 提供幻灯片与缩略图导航。CSV 和 TSV 以
+虚拟化表格打开，可搜索单元格并缩放；原有“源码”标签仍可用于文本编辑。这些预览
+不新增写入或上传操作。轻量查看器入口随文件面板提供，但 Office 格式引擎和工作线程
+只在对应预览激活、浏览器进入空闲期后加载。CSV/TSV 的解析与搜索在工作线程中执行；
+非活动面板不启动工作线程。Office 文件读取在导入格式引擎前限制为 25 MiB。
+超限或无法读取的 Office 文件显示已有文件操作的提示卡片。加载查看器前仍须遵守
+provider 的授权和传输上限。
 
 右键点击助手 Markdown 文件链接始终提供“复制路径”。仅当渲染器是 Electron、会话归属
 当前机器且工作区路径已解析时，菜单额外提供“打开文件”（系统默认应用）、“在所选应用中打开”
@@ -65,4 +77,6 @@ Markdown 附件以及匿名发布页不因此获得文件系统访问能力。�
 - [Markdown 渲染器](../packages/components/src/components/ai-gui/markdown-renderer.tsx)
 - [二进制预览](../packages/components/src/components/sessions/session-file-binary-preview.tsx)
 - [PDF 查看器](../packages/components/src/components/sessions/session-file-pdf-preview.tsx)
+- [Office 查看器入口](../packages/components/src/components/sessions/session-file-office-preview.tsx)
+- [CSV/TSV 查看器](../packages/components/src/components/sessions/session-file-csv-preview.tsx)
 - [共享文件操作](../packages/components/src/hooks/use-session-file-actions.ts)
