@@ -3,6 +3,8 @@
 Status: implemented
 Translation: current
 
+PR: https://github.com/LodyAI/Lody/pull/1110
+
 [English](2026-09-29-startup-chat-landing.md)
 
 ## 摘要
