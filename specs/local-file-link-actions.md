@@ -30,6 +30,13 @@ sessions never open a path on the
 viewer's machine. Clicking the assistant link itself only opens the preview;
 opening the OS application requires a separate user click.
 
+Session PDFs have an inline paged viewer with page navigation, bounded zoom,
+and text search. Same-machine Electron reads local PDF resources through validated
+64 KiB byte ranges rather than copying the complete file into the renderer; each
+rendered page is limited to an 8-megapixel canvas. A PDF that cannot be read or
+parsed falls back to the binary notice and its existing file actions. Other
+providers continue to obey their existing binary preview limits.
+
 Right-clicking an assistant Markdown file link always offers Copy Path. On an
 Electron renderer whose session belongs to this machine and whose workspace path
 has resolved, its menu additionally offers Open File with the OS default app,
@@ -61,4 +68,5 @@ remain file URLs rather than acquire a directory-only trailing slash.
 
 - [Markdown renderer](../packages/components/src/components/ai-gui/markdown-renderer.tsx)
 - [Binary preview](../packages/components/src/components/sessions/session-file-binary-preview.tsx)
+- [PDF viewer](../packages/components/src/components/sessions/session-file-pdf-preview.tsx)
 - [Shared file actions](../packages/components/src/hooks/use-session-file-actions.ts)

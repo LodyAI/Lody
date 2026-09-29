@@ -98,5 +98,7 @@ native-dependency, and OSS-composition rules stay in `apps/electron/AGENTS.md`.
   and checks device/inode/size/mtime/ctime before and during reads. Replacement or
   modification invalidates the preview; no mixing revisions or writes through resources.
 - Text above the editor budget uses fixed bounded Range requests. Binary uses raw
-  streams with backpressure/cancellation; raster header dimensions bound decode cost.
+  streams with backpressure/cancellation; PDFs stay binary `application/pdf`, and
+  cross-origin readers can inspect `Accept-Ranges` and `Content-Range`.
+  Raster header dimensions bound decode cost.
   The scheme never bypasses CSP, executes file content, or authorizes a remote RPC.

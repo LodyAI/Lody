@@ -20,7 +20,7 @@ describes the shared parsing and persistence boundary.
 | `session-tab-bar.tsx`                        | Desktop merged top row: session tab pills, status slot, drag sources        |
 | `adaptive-tab-strip.tsx`                     | Width sharing for the tab pills                                             |
 | `session-side-panel-tab-bar.tsx`             | Right-panel tab strip (fixed panels, side chats, viewers)                   |
-| `session-tab-close-target.ts`                | Resolve the focused tab or last-tab window close target                                |
+| `session-tab-close-target.ts`                | Resolve the focused tab or last-tab window close target                     |
 | `session-list-rows.ts`                       | Sidebar/tab row derivation, including child grouping by parent              |
 | `child-tab-empty-state.tsx`                  | Suggestions shown in an empty child tab                                     |
 | `session-not-found.tsx`                      | Missing-session surface                                                     |
@@ -35,7 +35,7 @@ describes the shared parsing and persistence boundary.
 | `session-chat-interface.tsx`                                    | Conversation surface: stream, header variants, read receipts, launchers                                                                             |
 | [`chat-share-image-dialog.tsx`](chat-share-image-dialog.tsx)    | Selected-message card styling, historical metadata, PNG export, and local image copying; [draft contract](../../../../../specs/chat-share-image.md) |
 | `draft-session-chat-interface.tsx`                              | Draft variant of the conversation surface                                                                                                           |
-| `session-chat-input-area.tsx`                                   | Composer: attachments, run-config footer, [upload waiting](../../../../../specs/composer-send-during-upload.md), submit                                                                                                    |
+| `session-chat-input-area.tsx`                                   | Composer: attachments, run-config footer, [upload waiting](../../../../../specs/composer-send-during-upload.md), submit                             |
 | `message-queue/`                                                | Queued turns ([scope AGENTS.md](message-queue/AGENTS.md))                                                                                           |
 | `session-message-submit-route.ts`                               | Capability-gated send, regular queue, and native steer routing                                                                                      |
 | `desktop-run-config-menu.tsx`                                   | Desktop run-config dropdown + permission-mode button                                                                                                |
@@ -67,23 +67,23 @@ describes the shared parsing and persistence boundary.
 
 ## File, diff, and browser surfaces
 
-| File                                                                                                                                      | Responsibility                                           |
-| ----------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------- |
-| `session-changes-sidebar.tsx`                                                                                                             | All Changes panel                                        |
-| `session-conversation-diff-panel.tsx`, `session-conversation-diff-types.ts`                                                               | Conversation/turn diff page                              |
-| `use-session-conversation-diff-data.ts`, `use-session-all-changes-diff-data.ts`, `use-session-diff-summary.ts`, `session-diff-summary.ts` | Diff data and summary derivation                         |
-| `use-diff-focus-scroll.ts`                                                                                                                | Scroll-to-focused-hunk behaviour                         |
-| `session-file-content-view.tsx`, `session-monaco-text-viewer.tsx`                                                                         | File viewer and its Monaco editor window                 |
-| `session-file-image-preview.tsx`, `session-file-binary-preview.tsx`                                                                       | Non-text previews                                        |
-| `session-file-diff-notice-card.tsx`, `session-file-error-state.tsx`                                                                       | File notices and the error card that offers file actions |
-| `session-file-actions-menu.tsx`                                                                                                           | Shared file-action menu rendering                        |
-| `session-file-quick-open.tsx`                                                                                                             | Quick open over the file index                           |
-| `components/`                                                                                                                             | File tree ([scope AGENTS.md](components/AGENTS.md))      |
-| `session-browser-panel.tsx`, `session-browser-toolbar.tsx`, `session-browser-resume-state.ts`                                             | Session Browser panel, address bar, and resume state     |
-| `session-browser-panel-view.tsx`, `preview-connection-status.tsx` | Shared Browser presentation and connection/recovery UI; used by production and Storybook |
-| `public-browser-surface.tsx`                                                                                                              | Public engine host (Electron `WebContentsView`)          |
-| `managed-preview-surface.tsx`, `managed-preview-frame-cache.ts`                                                                           | Managed Preview host and its LRU frame cache             |
-| `static-html-preview-document.ts`, `session-html-attachment-action.ts`                                                                    | Static `srcdoc` document policy for complete HTML text   |
+| File                                                                                                                                      | Responsibility                                                                           |
+| ----------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `session-changes-sidebar.tsx`                                                                                                             | All Changes panel                                                                        |
+| `session-conversation-diff-panel.tsx`, `session-conversation-diff-types.ts`                                                               | Conversation/turn diff page                                                              |
+| `use-session-conversation-diff-data.ts`, `use-session-all-changes-diff-data.ts`, `use-session-diff-summary.ts`, `session-diff-summary.ts` | Diff data and summary derivation                                                         |
+| `use-diff-focus-scroll.ts`                                                                                                                | Scroll-to-focused-hunk behaviour                                                         |
+| `session-file-content-view.tsx`, `session-monaco-text-viewer.tsx`                                                                         | File viewer and its Monaco editor window                                                 |
+| `session-file-image-preview.tsx`, `session-file-binary-preview.tsx`, `session-file-pdf-preview.tsx`                                       | Image, PDF, and other binary previews                                                    |
+| `session-file-diff-notice-card.tsx`, `session-file-error-state.tsx`                                                                       | File notices and the error card that offers file actions                                 |
+| `session-file-actions-menu.tsx`                                                                                                           | Shared file-action menu rendering                                                        |
+| `session-file-quick-open.tsx`                                                                                                             | Quick open over the file index                                                           |
+| `components/`                                                                                                                             | File tree ([scope AGENTS.md](components/AGENTS.md))                                      |
+| `session-browser-panel.tsx`, `session-browser-toolbar.tsx`, `session-browser-resume-state.ts`                                             | Session Browser panel, address bar, and resume state                                     |
+| `session-browser-panel-view.tsx`, `preview-connection-status.tsx`                                                                         | Shared Browser presentation and connection/recovery UI; used by production and Storybook |
+| `public-browser-surface.tsx`                                                                                                              | Public engine host (Electron `WebContentsView`)                                          |
+| `managed-preview-surface.tsx`, `managed-preview-frame-cache.ts`                                                                           | Managed Preview host and its LRU frame cache                                             |
+| `static-html-preview-document.ts`, `session-html-attachment-action.ts`                                                                    | Static `srcdoc` document policy for complete HTML text                                   |
 
 ## Long-form explanations
 
@@ -101,10 +101,13 @@ describes the shared parsing and persistence boundary.
 
 ## Binary previews
 
-`session-file-binary-preview.tsx` renders supported images and otherwise shows a
-binary notice. Local files receive Open in default app and Reveal callbacks from
-`useSessionFileActions`, shared with the More menu. Failures log the requested and
-resolved paths locally and offer Copy error details with a reason-specific next step. See the
+`session-file-binary-preview.tsx` renders supported images and PDFs and otherwise
+shows a binary notice. The [PDF viewer](session-file-pdf-preview.tsx) reads local
+resources in 64 KiB byte ranges, keeps page canvases within an 8-megapixel budget,
+and provides navigation, zoom, and text search. Local files receive Open in default
+app and Reveal callbacks from `useSessionFileActions`, shared with the More menu.
+Failures log the requested and resolved paths locally and offer Copy error details
+with a reason-specific next step. See the
 [file action spec](../../../../../specs/local-file-link-actions.md).
 
 Binary previews share `SessionFileNoticeCard` with unavailable-file states, including

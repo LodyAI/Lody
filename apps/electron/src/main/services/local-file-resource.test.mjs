@@ -56,12 +56,38 @@ void test('binary resources stream raw bytes, support ranges, and expire with th
     new Request(result.url, { headers: { Range: 'bytes=10-19' } })
   )
   assert.equal(response.status, 206)
+  assert.equal(response.headers.get('Access-Control-Allow-Origin'), '*')
+  assert.equal(
+    response.headers.get('Access-Control-Expose-Headers'),
+    'Accept-Ranges, Content-Range'
+  )
+  assert.equal(response.headers.get('Accept-Ranges'), 'bytes')
+  assert.equal(response.headers.get('Content-Range'), `bytes 10-19/${bytes.length}`)
   assert.deepEqual(Buffer.from(await response.arrayBuffer()), bytes.subarray(10, 20))
   assert.equal(response.headers.get('Content-Security-Policy'), "default-src 'none'; sandbox")
   resources.releaseOwner(9)
   assert.equal((await resources.respond(new Request(result.url, { method: 'HEAD' }))).status, 200)
   resources.releaseOwner(8)
   assert.equal((await resources.respond(new Request(result.url))).status, 404)
+})
+
+void test('large PDFs are binary resources with bounded range responses', async (t) => {
+  const bytes = Buffer.alloc(320 * 1024)
+  Buffer.from('%PDF-1.7\n').copy(bytes)
+  const file = await fixture(t, 'report.pdf', bytes)
+  const resources = new LocalFileResources()
+  const result = await resources.preview(3, file)
+  assert.equal(result.status, 'resource')
+  assert.equal(result.kind, 'binary')
+  assert.equal(result.sizeBytes, bytes.length)
+
+  const response = await resources.respond(
+    new Request(result.url, { headers: { Range: 'bytes=0-65535' } })
+  )
+  assert.equal(response.status, 206)
+  assert.equal(response.headers.get('Content-Type'), 'application/pdf')
+  assert.equal(response.headers.get('Content-Range'), `bytes 0-65535/${bytes.length}`)
+  assert.equal((await response.arrayBuffer()).byteLength, 64 * 1024)
 })
 
 void test('replacing a file invalidates every existing resource URL', async (t) => {

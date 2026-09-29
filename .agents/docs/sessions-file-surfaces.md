@@ -66,6 +66,16 @@ this page is the full text of the rules summarised there.
   memoized rows, so they must stay referentially stable, and only FILE rows get
   a menu (`item.children === undefined`; `hasChildren` is false for an empty
   directory too).
+- Session PDFs use the PDF.js paged viewer. Electron's `lody-resource://` URL is a
+  custom scheme; PDF.js's URL loader only enables its network range reader for
+  HTTP(S), so passing that URL directly can consume the whole file. Use
+  `PDFDataRangeTransport` to request and validate 64 KiB byte ranges instead. The
+  local resource service classifies `.pdf` paths as binary `application/pdf` and
+  exposes `Accept-Ranges` and `Content-Range` to the cross-origin renderer. Do not
+  copy local PDF bytes into a renderer snapshot. PDF.js virtualizes page rendering,
+  and the viewer caps each page canvas at 8 megapixels. Remote/provider binary
+  limits remain unchanged; parse and read failures return to the existing binary
+  notice with its file actions.
 - Markdown file viewers copy the latest complete source text (including unsaved
   editor changes) from the top toolbar. On mobile, source mode uses the native
   text surface instead of Monaco so long-press keeps the OS selection menu;
