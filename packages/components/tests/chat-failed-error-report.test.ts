@@ -49,7 +49,7 @@ describe('buildChatFailedErrorReport', () => {
       })
     ).toBe(
       [
-        'Error: Agent internal error',
+        'Error details: Agent internal error',
         'Reason: acp_internal_error',
         'Code: git_executable_not_found',
         'Session: session-1',
@@ -71,19 +71,34 @@ describe('buildChatFailedErrorReport', () => {
         machineId: '   ',
         message: 'boom',
       })
-    ).toBe('Error: Agent error\nReason: acp_unknown_error\n\nboom');
+    ).toBe('Error details: Agent error\nReason: acp_unknown_error\n\nboom');
   });
 
   it('keeps the raw message verbatim, including newlines', () => {
     const message = 'line one\nline two\n\nline four';
     expect(buildChatFailedErrorReport({ title: 'Agent error', message })).toBe(
-      `Error: Agent error\n\n${message}`
+      `Error details: Agent error\n\n${message}`
     );
   });
 
   it('returns only the header when there is no raw message', () => {
     expect(buildChatFailedErrorReport({ title: 'Session not found' })).toBe(
-      'Error: Session not found'
+      'Error details: Session not found'
     );
+  });
+
+  it('keeps localized reports as text rather than a custom-scheme URL', () => {
+    const message = '无法读取仓库\nhttps://example.com/team/repo.git\nprogress: 50%';
+    const report = buildChatFailedErrorReport({
+      title: '启动失败',
+      reason: 'turn_pre_prompt_failed',
+      sessionId: 'session-test',
+      message,
+    });
+
+    expect(report).toBe(
+      `Error details: 启动失败\nReason: turn_pre_prompt_failed\nSession: session-test\n\n${message}`
+    );
+    expect(() => new URL(report)).toThrow(TypeError);
   });
 });
