@@ -19,4 +19,4 @@ Translation: current
 
 - 对齐规范见[会话 Markdown 对齐方式](../../../../specs/conversation-markdown-alignment.zh.md)。
 - `git diff --check` 通过。`pnpm run docs check` 因无关 note 中存在 62 个指向缺失隔离 package workspace 的旧链接而返回失败；本次文件未报告错误。
-- 当前 checkout 没有 `node_modules`，因此本地 `pnpm check` 和 `pnpm format` 因缺少 `tsgo`、`oxfmt` 无法完成。PR 首次 CI 只失败于已过时的 class 断言；后续 CI 将验证该断言移除后的结果。
+- 当前 checkout 没有 `node_modules`，因此本地 `pnpm check` 和 `pnpm format` 因缺少 `tsgo`、`oxfmt` 无法完成。PR 首次 CI 只失败于已过时的 class 断言；移除断言后的 CI 已通过全部组件分片、静态检查、浏览器测试和桌面 smoke E2E。
