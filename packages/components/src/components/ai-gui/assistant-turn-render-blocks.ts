@@ -3,6 +3,7 @@ import {
   buildAssistantMessageRenderItems,
   type AssistantMessageRenderItem,
 } from './assistant-message-render-items';
+import { getRenderableMcpApp } from './mcp-app/mcp-app-host';
 import { shouldCollapseAssistantMessageItem } from './message-copy';
 
 type ToolCallMessage = Extract<MessageContent, { type: 'tool_call' }>;
@@ -186,7 +187,9 @@ const isActivityGroupEntry = (
   entry.content.type === 'thought' ||
   (entry.content.type === 'tool_call' &&
     entry.content.kind !== 'switch_mode' &&
-    entry.content.activityKind === undefined);
+    entry.content.activityKind === undefined &&
+    // An app is a result the user looks at, not a step to fold away.
+    getRenderableMcpApp(entry.content) === null);
 
 const buildActivityGroupKey = (messageId: string, first: AssistantActivityRenderItem): string => {
   const suffix = first.content.type === 'tool_call' ? first.content.toolCallId : first.itemIndex;
