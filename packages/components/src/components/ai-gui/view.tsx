@@ -177,6 +177,8 @@ import {
   type AssistantTurnRenderBlock,
 } from './assistant-turn-render-blocks';
 import { SubagentTaskPanel, collectSubagentTasks, type SubagentTask } from './subagent-task-panel';
+import { getRenderableMcpApp } from './mcp-app/mcp-app-host';
+import { McpAppToolCallCard } from './mcp-app/mcp-app-tool-call-card';
 import { SessionReadonlyContext } from './session-readonly-context';
 import { UserMessageEditor } from './user-message-editor';
 import type { MentionProjectSource } from '@/components/mentions/mention-project-file-source';
@@ -7079,6 +7081,8 @@ const ToolCallCard = memo(function ToolCallCard({
       </div>
     );
   }
+  const mcpApp = getRenderableMcpApp(toolCall);
+  if (mcpApp) return <McpAppToolCallCard toolCall={toolCall} app={mcpApp} />;
   const kindMeta = toolCall.kind ? TOOL_KIND_META[toolCall.kind] : undefined;
   const isActivityRow = inlineOutput;
 

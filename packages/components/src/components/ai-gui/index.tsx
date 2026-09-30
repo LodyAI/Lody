@@ -23,6 +23,9 @@ import {
 import { reanchorMessageTextSpansForTrim } from '@lody/shared';
 import { useMentionPromptExpansion } from '@/components/mentions/mention-expansion';
 import { useStableCallback } from '@/hooks/use-stable-callback';
+import { useMcpAppHost } from '@/hooks/use-mcp-app-host';
+import { isElectronRenderer } from '@/lib/electron';
+import { createMcpAppHost, McpAppHostContext } from './mcp-app/mcp-app-host';
 import { useConversationStreamItems } from '@/hooks/use-conversation-stream-items';
 import { useConversationVersion } from '@/hooks/use-conversation-view';
 import { findLastIndex, type ConversationView } from '@/lib/conversation-view';
@@ -201,6 +204,12 @@ const SessionChatStreamImpl = forwardRef<SessionChatStreamHandle, SessionChatStr
     ref
   ) => {
     const version = useConversationVersion(view);
+    const mcpAppActions = useMcpAppHost();
+    // Only the Electron main process serves the MCP App sandbox origin.
+    const mcpAppHost = useMemo(
+      () => (isElectronRenderer() ? createMcpAppHost(sessionId, mcpAppActions) : null),
+      [mcpAppActions, sessionId]
+    );
     // Read once per mount: the scroll engine restores this session's reading
     // position into this turn, so load it before the first viewport report.
     const [initialFocusTurnId] = useState(() => getSavedAnchorTurnId(sessionId));
@@ -315,7 +324,7 @@ const SessionChatStreamImpl = forwardRef<SessionChatStreamHandle, SessionChatStr
       ]
     );
 
-    return (
+    const stream = (
       <SessionChatStreamView
         initialWindowReady={initialWindowReady}
         isVisible={isVisible}
@@ -354,6 +363,7 @@ const SessionChatStreamImpl = forwardRef<SessionChatStreamHandle, SessionChatStr
         onOutlinePreviewRound={handleOutlinePreviewRound}
       />
     );
+    return <McpAppHostContext.Provider value={mcpAppHost}>{stream}</McpAppHostContext.Provider>;
   }
 );
 

@@ -102,3 +102,8 @@ native-dependency, and OSS-composition rules stay in `apps/electron/AGENTS.md`.
   cross-origin readers can inspect `Accept-Ranges` and `Content-Range`.
   Raster header dimensions bound decode cost.
   The scheme never bypasses CSP, executes file content, or authorizes a remote RPC.
+- `lody-mcp-app:` (`mcp-app-sandbox.ts`) serves only the fixed MCP Apps sandbox proxy,
+  framed `sandbox="allow-scripts"` and `credentialless` (opaque origin, no preload); the
+  renderer posts it the app HTML, after the proxy installs in-memory Web Storage and
+  cookies. Never add `allow-same-origin` without a dedicated in-memory session.
+  `srcdoc`/`blob:`/`data:` frames inherit the renderer CSP and cannot run inline scripts.

@@ -50,3 +50,12 @@ void test('renderer entries allow exactly the current inline boot shell script',
     assert.ok(getDirectiveSources(html, 'script-src').includes(`'sha256-${digest}'`))
   }
 })
+
+void test('MCP Apps frame only the dedicated sandbox scheme, never inherited local documents', () => {
+  const frameSources = getDirectiveSources(rendererHtml, 'frame-src')
+  assert.ok(frameSources.includes('lody-mcp-app:'))
+  for (const source of ['blob:', 'data:', "'unsafe-inline'"]) {
+    assert.ok(!frameSources.includes(source))
+  }
+  assert.ok(!getDirectiveSources(rendererHtml, 'script-src').includes("'unsafe-inline'"))
+})
