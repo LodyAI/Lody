@@ -409,16 +409,7 @@ export async function probeBuiltinAuthentication(
   options: ProbeBuiltinAuthenticationOptions
 ): Promise<BuiltinAuthenticationProbeResult> {
   options.signal?.throwIfAborted();
-  if (options.cliType !== 'builtin' || !isManagedBuiltinAgentType(options.agentType)) {
-    return { status: 'unknown' };
-  }
-  if (
-    options.agentType === 'devin' ||
-    options.agentType === 'kimi' ||
-    options.agentType === 'grok' ||
-    options.agentType === 'pi' ||
-    options.agentType === 'codex'
-  ) {
+  if (options.cliType !== 'builtin' || options.agentType !== 'claude') {
     return { status: 'unknown' };
   }
   const launch = await resolveBuiltinAuthenticationProcessLaunch({

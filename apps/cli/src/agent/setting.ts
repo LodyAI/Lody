@@ -625,59 +625,31 @@ async function resolveBuiltinACPProcessLaunch(
       capabilitySourceVersion: getAcpCapabilitySourceVersion(input, runtime.version),
     };
   }
-  if (input.agentType === 'codex') {
-    const overridePath = trimRuntimeOverride(input.runtimeOverrides?.codexPath);
-    const runtime = overridePath
-      ? { command: overridePath, version: undefined }
-      : await resolveManagedRuntimeForLaunch('codex', input);
-    return {
-      command: process.execPath,
-      args: [
-        ...resolveCliAdapterEntry('codex-acp'),
-        ...(BuiltinACPSetting.codex.args ?? []),
-        ...(input.extraArgs ?? []),
-      ],
-      env: { CODEX_PATH: runtime.command },
-      capabilitySourceVersion: getAcpCapabilitySourceVersion(input, runtime.version),
-    };
-  }
-  if (input.agentType === 'devin') {
-    const overridePath = trimRuntimeOverride(input.runtimeOverrides?.devinPath);
-    const runtime = overridePath
-      ? { command: overridePath, version: undefined }
-      : await resolveManagedRuntimeForLaunch('devin', input);
-    return {
-      command: process.execPath,
-      args: [...resolveCliAdapterEntry('devin-acp'), ...(input.extraArgs ?? [])],
-      env: { DEVIN_PATH: runtime.command },
-      capabilitySourceVersion: getAcpCapabilitySourceVersion(input, runtime.version),
-    };
-  }
-  if (input.agentType === 'grok') {
-    const overridePath = trimRuntimeOverride(input.runtimeOverrides?.grokPath);
-    const runtime = overridePath
-      ? { command: overridePath, version: undefined }
-      : await resolveManagedRuntimeForLaunch('grok-build', input);
-    return {
-      command: process.execPath,
-      args: [...resolveCliAdapterEntry('grok-acp'), ...(input.extraArgs ?? [])],
-      env: { GROK_PATH: runtime.command, GROK_DISABLE_AUTOUPDATER: '1' },
-      capabilitySourceVersion: getAcpCapabilitySourceVersion(input, runtime.version),
-    };
-  }
-
-  const overridePath = trimRuntimeOverride(input.runtimeOverrides?.claudeCodeExecutable);
+  const agentType = input.agentType;
+  const nativeRuntime = {
+    codex: ['codex', 'CODEX_PATH'],
+    devin: ['devin', 'DEVIN_PATH'],
+    grok: ['grok-build', 'GROK_PATH'],
+    claude: ['claude-code', 'CLAUDE_CODE_EXECUTABLE'],
+  } as const;
+  const [runtimeName, executableEnv] = nativeRuntime[agentType];
+  const overridePath = trimRuntimeOverride(
+    input.runtimeOverrides?.[MANAGED_BUILTIN_RUNTIME_OVERRIDE_PATH_KEYS[agentType]]
+  );
   const runtime = overridePath
     ? { command: overridePath, version: undefined }
-    : await resolveManagedRuntimeForLaunch('claude-code', input);
+    : await resolveManagedRuntimeForLaunch(runtimeName, input);
   return {
     command: process.execPath,
     args: [
-      ...resolveCliAdapterEntry('claude-acp'),
-      ...(BuiltinACPSetting.claude.args ?? []),
+      ...resolveCliAdapterEntry(`${agentType}-acp`),
+      ...(BuiltinACPSetting[agentType].args ?? []),
       ...(input.extraArgs ?? []),
     ],
-    env: { CLAUDE_CODE_EXECUTABLE: runtime.command },
+    env: {
+      [executableEnv]: runtime.command,
+      ...(agentType === 'grok' ? { GROK_DISABLE_AUTOUPDATER: '1' } : {}),
+    },
     capabilitySourceVersion: getAcpCapabilitySourceVersion(input, runtime.version),
   };
 }

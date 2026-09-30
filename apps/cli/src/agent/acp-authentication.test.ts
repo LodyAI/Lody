@@ -1025,19 +1025,22 @@ describe('probeBuiltinAuthentication', () => {
     }
   });
 
-  it('does not spawn a status process for Pi', async () => {
-    const spawnProcess = vi.fn();
-    await expect(
-      probeBuiltinAuthentication({
-        cliType: 'builtin',
-        agentType: 'pi',
-        logger: createSilentLogger(),
-        spawnProcess: spawnProcess as never,
-        resolveLoginShellEnv: async () => ({}),
-      })
-    ).resolves.toEqual({ status: 'unknown' });
-    expect(spawnProcess).not.toHaveBeenCalled();
-  });
+  it.each(['pi', 'devin', 'kimi', 'grok'] as const)(
+    'does not spawn a status process for %s',
+    async (agentType) => {
+      const spawnProcess = vi.fn();
+      await expect(
+        probeBuiltinAuthentication({
+          cliType: 'builtin',
+          agentType,
+          logger: createSilentLogger(),
+          spawnProcess: spawnProcess as never,
+          resolveLoginShellEnv: async () => ({}),
+        })
+      ).resolves.toEqual({ status: 'unknown' });
+      expect(spawnProcess).not.toHaveBeenCalled();
+    }
+  );
   afterEach(() => {
     vi.useRealTimers();
     vi.restoreAllMocks();

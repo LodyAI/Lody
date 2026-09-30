@@ -33,6 +33,25 @@ pinned source manifest while retaining validation. A changed loader fails the
 build explicitly. The development build keeps the adapter external at its
 original location.
 
+## Ablation evidence
+
+Removal experiments against [PR #1168](https://github.com/LodyAI/Lody/pull/1168)
+separated necessary behavior from repeated implementation:
+
+| Experiment | Observation | Decision |
+| --- | --- | --- |
+| Remove Devin launch branch without replacement | Managed Devin launch test fails | Preserve launch behavior |
+| Remove hidden legacy registry launchers | Compatibility and local Kimi launch tests fail | Keep compatibility entries |
+| Remove manifest bundling transform | Relocated bundle exits with missing manifest instead of runtime-path validation | Keep transform |
+| Remove native-status exclusions | Codex authentication delegation test fails | Keep the gate; express it as Claude-only |
+| Consolidate four native adapter launch branches | All 24 before/after launch outputs match; launch/auth tests pass | Keep one launch implementation |
+
+The differential matrix covers Claude, Codex, Grok and Devin, each with no override,
+a blank override or a trimmed custom path, with and without extra arguments. Compare
+command, arguments, environment and capability-source version against the prior
+implementation; keep provider-specific updater flags and native login behavior.
+Tests do not establish publication readiness or authenticated provider behavior.
+
 ## Verification limits
 
 Registry generation/filtering and source-manifest rejection tests pass. Shared and

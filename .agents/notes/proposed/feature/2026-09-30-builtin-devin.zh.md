@@ -28,6 +28,23 @@ Adapter 只声明 bin，没有包根导入入口，因此导入发布的 `dist/i
 `devinRuntimeContractPlugin`，内联固定源清单并保留原来的校验。加载器变化时
 显式中止构建。开发构建仍从原目录外部加载 adapter。
 
+## 消融证据
+
+对 [PR #1168](https://github.com/LodyAI/Lody/pull/1168) 的删除实验区分了必要行为与重复实现：
+
+| 实验 | 观察 | 决定 |
+| --- | --- | --- |
+| 直接删除 Devin 启动分支 | 托管 Devin 启动测试失败 | 保留启动行为 |
+| 删除隐藏的旧 registry 启动器 | 兼容性与本地 Kimi 启动测试失败 | 保留兼容条目 |
+| 删除 manifest 打包转换 | 重定位 bundle 因缺少 manifest 退出，未到达 runtime 路径校验 | 保留转换 |
+| 删除原生状态探测排除条件 | Codex 认证委托测试失败 | 保留限制，改为仅允许 Claude |
+| 合并四个原生 adapter 的启动分支 | 24 组重构前后输出完全一致，启动与认证测试通过 | 保留统一启动实现 |
+
+差分矩阵覆盖 Claude、Codex、Grok、Devin，分别使用无 override、空白 override、
+带首尾空白的自定义路径，并组合有无额外参数。与原实现比较命令、参数、环境变量和
+能力来源版本；保留 provider 专用的更新开关及原生登录行为。
+测试不代表渠道已可发布，也不证明已经完成真实 provider 登录。
+
 ## 验证限制
 
 Registry 生成/过滤和源清单拒绝测试通过，共享包与组件类型检查、39 个 adapter
