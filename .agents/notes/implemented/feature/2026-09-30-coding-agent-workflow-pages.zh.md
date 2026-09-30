@@ -3,6 +3,8 @@
 Status: implemented
 Translation: current
 
+PR: [#1150](https://github.com/LodyAI/Lody/pull/1150)
+
 [English](2026-09-30-coding-agent-workflow-pages.md)
 
 ## 摘要
@@ -44,6 +46,9 @@ Translation: current
 Chromium 无法创建本地 socket，云浏览器也拒绝 loopback 预览 URL，因此交互验证未能运行。
 不能将新增场景视为已执行或 Agent 运行时测试。
 
-仅安装站点依赖时，通过被忽略的本地符号链接提供已有隐式 `tw-animate-css@1.4.0` 依赖，
-没有修改依赖清单或 lockfile。根级综合检查需要其余 workspace 依赖和 ACP submodule。
+仅安装站点依赖时，通过被忽略的本地符号链接提供已有隐式 `tw-animate-css@1.4.0` 依赖。
+CI 暴露了已有 Codex adapter 与根 lockfile 不一致，以及 CLI 格式检查问题。main 随后通过
+[#1148](https://github.com/LodyAI/Lody/pull/1148) 修复了两者，本分支同步上游修复，包含 Codex 0.159.2
+完整平台 lock 条目，无需修改依赖隔离规则或 submodule pin。22 个 workspace 项目的冻结 lockfile
+验证、根级格式检查、初始化 submodule 后的文档检查和公开仓库边界检查通过。
 精确的已完成检查和限制记录在 PR 摘要中。

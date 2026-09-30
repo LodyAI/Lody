@@ -3,6 +3,8 @@
 Status: implemented
 Translation: current
 
+PR: [#1150](https://github.com/LodyAI/Lody/pull/1150)
+
 [中文](2026-09-30-coding-agent-workflow-pages.zh.md)
 
 ## Abstract
@@ -50,5 +52,9 @@ Chromium cannot create its local socket, and the cloud browser rejects the loopb
 Do not treat the added browser scenarios as executed or as agent-runtime tests.
 
 The site-only frozen install needed the existing implicit `tw-animate-css@1.4.0` through an ignored
-local symlink; no manifest or lockfile changes. Root aggregate checks need the rest of the workspace
-dependencies and ACP submodules. Exact completed checks and limits belong in the PR summary.
+local symlink during initial validation. CI exposed a pre-existing Codex adapter/root-lockfile
+mismatch and CLI formatting issue. Main subsequently fixed both in [#1148](https://github.com/LodyAI/Lody/pull/1148),
+so this branch incorporates that upstream repair, including the complete Codex 0.159.2 platform
+lock entries. No dependency quarantine change or submodule-pin change is needed. Frozen lockfile
+validation covers all 22 workspace projects; root formatting, initialized-submodule docs checks,
+and the public repository boundary pass. Exact completed checks and limits belong in the PR summary.
