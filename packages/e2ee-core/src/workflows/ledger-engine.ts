@@ -29,6 +29,7 @@ import { bytesEqual, copyBytes } from '../pure/cbor';
 import { hashRecordBytes } from '../pure/wire-crypto';
 import { decodeRecord, decodeRecordWithFacts, type Operation } from '../pure/ledger-schema';
 import { SigningFacts } from '../pure/signing-facts';
+import { classifyLedgerPresence, classifyUnresolvedSubmit } from '../pure/submit-outcome';
 import {
   MAX_LEDGER_RECORDS,
   MAX_LEDGER_READ_PAGES,
@@ -558,13 +559,13 @@ export class LedgerEngine {
       const hash = hashRecordBytes(record);
       const reconcile = () =>
         Effect.gen(this, function* () {
-          const tag = session.ledger.hasRecordHash(hash)
-            ? 'Committed'
-            : !bytesEqual(parent, session.ledger.head.toBytes())
-              ? 'Conflict'
-              : undefined;
-          if (tag === undefined) return undefined;
+          const presence = classifyLedgerPresence({
+            containsRecord: session.ledger.hasRecordHash(hash),
+            parentIsHead: bytesEqual(parent, session.ledger.head.toBytes()),
+          });
+          if (presence === 'absent') return undefined;
           yield* this.save(tx, session, { ...session.journal, pending: null });
+          const tag = presence === 'committed' ? 'Committed' : 'Conflict';
           return { _tag: tag, ledger: session.ledger } as const;
         });
       const prior = yield* reconcile();
@@ -584,7 +585,7 @@ export class LedgerEngine {
         const observed = yield* reconcile();
         if (observed) return observed;
       }
-      if (cas === 'unsupported' && !retrying) {
+      if (classifyUnresolvedSubmit({ cas, retrying }) === 'unsupported') {
         yield* this.save(tx, session, { ...session.journal, pending: null });
         return { _tag: 'Unsupported', ledger: session.ledger } as const;
       }

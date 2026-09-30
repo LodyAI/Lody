@@ -131,11 +131,16 @@ export function verifyLedger(input: {
     let state: InternalState | undefined;
     for (let position = 0; position < decoded.length; position++) {
       const record = decoded[position]!;
-      if (record.body.type === 'ordinary' && record.body.fields.operation.type === 'admitDevice') {
+      // Without a genesis state, replay rejects the record structurally first.
+      if (
+        state !== undefined &&
+        record.body.type === 'ordinary' &&
+        record.body.fields.operation.type === 'admitDevice'
+      ) {
         const jobs = yield* operationProofJobs(
           genesis,
           record.body.fields.operation,
-          state?.devices.get(keyId(record.body.fields.signer))?.membershipId
+          state.devices.get(keyId(record.body.fields.signer))?.membershipId
         );
         yield* verifier.verifyMany(
           jobs.map((job) => ({

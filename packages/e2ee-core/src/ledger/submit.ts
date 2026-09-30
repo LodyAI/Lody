@@ -10,7 +10,7 @@ import {
   signingPublicKey,
   type SigningPublicKey,
 } from '../pure/bytes';
-import { viewState, type LedgerView } from '../pure/records';
+import type { LedgerView } from '../pure/records';
 import { makeSignatureVerifier } from '../platform/signature-verifier';
 import type { ClientError } from '../pure/errors';
 import { DeviceSigner, JournalStore, LedgerTransport, SignatureVerifier } from '../ports/ledger';
@@ -19,7 +19,7 @@ import { rotateEpoch } from '../workflows/epoch-rotation';
 import { LedgerClient as EffectLedgerClient } from '../workflows/ledger-client';
 import { journalStoreLayer, ledgerTransportLayer } from '../platform/ledger-ports';
 import { LedgerEngine, type ResumeOutcome } from '../workflows/ledger-engine';
-import { Ledger, ledgerFromVerifiedState } from './ledger';
+import { Ledger } from './ledger';
 import type { SnapshotTrust } from './snapshot';
 export {
   MAX_LEDGER_RECORDS,
@@ -305,7 +305,7 @@ function legacyResult(result: ResumeOutcome): Effect.Effect<LedgerSubmitResult, 
 }
 
 function asLedger(view: LedgerView): Ledger {
-  return ledgerFromVerifiedState(viewState(view));
+  return Ledger.fromView(view);
 }
 
 export class MemoryLedgerStore implements LedgerStore {

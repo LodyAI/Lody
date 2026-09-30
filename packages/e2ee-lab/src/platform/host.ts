@@ -10,7 +10,6 @@ import {
   hashRecord,
   joinRequestSigningBytes,
   sequentialSignatureVerify,
-  SigningPointCache,
 } from '@lody/e2ee-core/ledger';
 import {
   Bytes,
@@ -204,8 +203,6 @@ export async function startDemoHost(options: DemoHostOptions): Promise<RunningDe
     protocol: 'http1',
   });
 
-  // Host-scoped verification cache: no mutable cache state shared across runs.
-  const pointCache = new SigningPointCache();
   const snapshotWriteLedger = new AsyncLocalStorage<LedgerView>();
 
   async function runHostLedger<A>(effect: Effect.Effect<A, ValidationError, never>): Promise<A> {
@@ -435,7 +432,7 @@ export async function startDemoHost(options: DemoHostOptions): Promise<RunningDe
             return;
           }
           const genesis = fromHex(payload.genesis);
-          const decoded = decodeRecord(genesis, pointCache);
+          const decoded = decodeRecord(genesis);
           if (decoded.body.type !== 'genesis') {
             json(res, 400, { error: 'not-genesis' });
             return;
@@ -630,7 +627,7 @@ export async function startDemoHost(options: DemoHostOptions): Promise<RunningDe
               return;
             }
             const record = records[0]!;
-            const decoded = decodeRecord(record, pointCache);
+            const decoded = decodeRecord(record);
             if (decoded.body.type !== 'ordinary') {
               json(res, 400, { error: 'not-ordinary' });
               return;

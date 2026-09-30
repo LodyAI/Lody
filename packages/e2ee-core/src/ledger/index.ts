@@ -22,7 +22,6 @@ export {
   SigningPointCache,
   createSequentialSignatureVerify,
   sequentialSignatureVerify,
-  liveSigningPointCache,
 } from './crypto';
 export {
   ENCRYPTION_KEY_BYTES,
@@ -69,7 +68,7 @@ export type {
   OrdinaryFields,
   Role,
 } from './schema';
-export type { Device, EpochState, Member, OrgState } from './policy';
+export type { Device, EpochState, Member, OrgState } from '../pure/ledger-state';
 export {
   assertEpochStreamAppend,
   canSendEpoch,
@@ -91,11 +90,6 @@ export {
   MAX_LEDGER_READ_PAGES,
   MAX_LEDGER_READ_RECORDS,
 } from './submit';
-export {
-  classifyLedgerPresence,
-  classifyUnresolvedSubmit,
-  selectSubmitWire,
-} from './submit-decision';
 export type {
   LedgerJournal,
   LedgerReadPage,

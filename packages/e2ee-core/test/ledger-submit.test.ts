@@ -6,10 +6,8 @@ import {
   MAX_LEDGER_READ_PAGE_RECORDS,
   MemoryLedgerStore,
   MemoryLedgerStream,
-  classifyLedgerPresence,
-  classifyUnresolvedSubmit,
-  selectSubmitWire,
 } from '../src/ledger';
+import { classifyLedgerPresence, classifyUnresolvedSubmit } from '../src/pure/submit-outcome';
 import { buildChain } from '../bench/chain';
 import { admitDeviceOp, append, ed25519, signGenesis } from './ledger-fixtures';
 
@@ -272,23 +270,12 @@ describe('L5 disk save faults', () => {
 
 describe('C2 Promise/Effect single implementation', () => {
   it('classifies wire selection and CAS outcomes without I/O', () => {
-    const pending = new Uint8Array([1, 2, 3]);
-    expect(selectSubmitWire(pending, undefined)).toEqual(pending);
-    expect(selectSubmitWire(null, pending)).toEqual(pending);
-    expect(() => selectSubmitWire(null, undefined)).toThrow();
-    expect(() => selectSubmitWire(pending, new Uint8Array([9]))).toThrow();
-    expect(classifyLedgerPresence({ containsWire: true, previousMatchesHead: false })).toBe(
-      'committed'
-    );
-    expect(classifyLedgerPresence({ containsWire: false, previousMatchesHead: false })).toBe(
-      'conflict'
-    );
-    expect(classifyLedgerPresence({ containsWire: false, previousMatchesHead: true })).toBe(
-      'absent'
-    );
+    expect(classifyLedgerPresence({ containsRecord: true, parentIsHead: false })).toBe('committed');
+    expect(classifyLedgerPresence({ containsRecord: false, parentIsHead: false })).toBe('conflict');
+    expect(classifyLedgerPresence({ containsRecord: false, parentIsHead: true })).toBe('absent');
     expect(classifyUnresolvedSubmit({ cas: 'unsupported', retrying: false })).toBe('unsupported');
-    expect(classifyUnresolvedSubmit({ cas: 'unsupported', retrying: true })).toBe('unknown');
-    expect(classifyUnresolvedSubmit({ cas: 'unknown', retrying: false })).toBe('unknown');
+    expect(classifyUnresolvedSubmit({ cas: 'unsupported', retrying: true })).toBe('pending');
+    expect(classifyUnresolvedSubmit({ cas: 'unknown', retrying: false })).toBe('pending');
   });
 
   it('Promise and Effect submit commit the same protocol bytes', async () => {

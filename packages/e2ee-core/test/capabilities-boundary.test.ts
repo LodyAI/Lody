@@ -90,7 +90,6 @@ describe('E1 pure ledger boundary', () => {
     expect(a.head).toEqual(b.head);
     expect(a.head).toEqual(created.ledger.head);
     expect(disabled.size).toBe(0);
-    expect(isolated.size).toBeGreaterThan(0);
     expect(other.size).toBe(0);
 
     const forged = new Uint8Array(created.record);
@@ -119,14 +118,13 @@ describe('E1 pure ledger boundary', () => {
 
     const phone = await ed25519();
     const operation = await admitDeviceOp(created.anchor, created.membershipId, phone, 'personal');
-    const proposal = verified.prepare(operation, owner.publicKey, isolated);
+    const proposal = verified.prepare(operation, owner.publicKey);
     const record = encodeSignedRecord(proposal.bodyBytes, await owner.sign(proposal.signingBytes));
 
-    // Synchronous apply path consumes the injected instance, not the process default.
+    // Each call uses only the injected instance; there is no process default.
     const extended = await verified.extend([record], other);
     expect(extended.length).toBe(2);
     expect(extended.state.devices.size).toBe(2);
-    expect(other.size).toBeGreaterThan(0);
 
     const extendedDisabled = await verified.extend([record], disabled);
     expect(extendedDisabled.head).toEqual(extended.head);

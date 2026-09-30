@@ -1,11 +1,11 @@
 import { createHpkeDriver } from '../platform/hpke';
 import * as history from '../pure/epoch-history';
 import { Either } from 'effect';
+import { unwrap } from './compat';
 import * as envelope from '../pure/epoch-envelope';
 import { parseEpochEnvelopeChunk } from '../pure/epoch-envelope-stream';
 import { decodeCbor } from '../pure/cbor';
 import { ValidationError as ValidationErrorClass } from '../pure/errors';
-import type { ValidationError } from '../pure/errors';
 import { liveEntropy, type Entropy } from '../capabilities';
 import {
   assertSignature,
@@ -16,17 +16,11 @@ import {
   commitEpochKey,
   concat,
   type Hash,
-  type SigningPointCache,
   type SigningPublicKey,
 } from './crypto';
 import { fail } from './error';
-import type { OrgState } from './policy';
+import type { OrgState } from '../pure/ledger-state';
 import type { Ledger } from './ledger';
-
-function unwrap<A>(result: Either.Either<A, ValidationError>): A {
-  if (Either.isLeft(result)) fail(result.left.code, result.left.position);
-  return result.right;
-}
 
 export function sealHistoryPacket(
   currentKey: Uint8Array,
@@ -146,13 +140,12 @@ export async function sealEpochEnvelope(input: {
   sign(bytes: Uint8Array): Promise<Uint8Array>;
   /** Test/lab only. Production omits this and uses live DHKEM keygen. */
   entropy?: Entropy;
-  cache?: SigningPointCache;
 }): Promise<Uint8Array> {
   const expectedEnc = unwrap(
     envelope.recipientEncryptionKey(input.state, input.sender, input.recipient)
   );
-  checkSigningPublicKey(input.sender, input.cache);
-  checkSigningPublicKey(input.recipient, input.cache);
+  checkSigningPublicKey(input.sender);
+  checkSigningPublicKey(input.recipient);
   checkEncryptionPublicKey(input.recipientEncryptionKey);
   if (!expectedEnc || !bytesEqual(expectedEnc, input.recipientEncryptionKey)) fail('unauthorized');
   if (input.epochKey.byteLength !== 32) fail('invalid-operation');
@@ -168,7 +161,7 @@ export async function sealEpochEnvelope(input: {
   const unsigned = concat([aad, new Uint8Array(sealed.enc), new Uint8Array(sealed.ct)]);
   const message = envelope.envelopeSigningBytes(unsigned);
   const signature = await input.sign(message);
-  await assertSignature(input.sender, message, signature, 'bad-signature', input.cache);
+  assertSignature(input.sender, message, signature);
   return concat([unsigned, signature]);
 }
 
@@ -180,7 +173,6 @@ export async function openEpochEnvelope(input: {
   recipient: SigningPublicKey;
   recipientKeyPair: CryptoKeyPair;
   frame: Uint8Array;
-  cache?: SigningPointCache;
 }): Promise<Uint8Array> {
   const expected = unwrap(
     envelope.recipientEncryptionKey(input.state, input.sender, input.recipient)
@@ -194,7 +186,7 @@ export async function openEpochEnvelope(input: {
     signature,
     signingBytes: message,
   } = unwrap(envelope.decodeEnvelopeFrame(input, input.frame));
-  await assertSignature(input.sender, message, signature, 'bad-signature', input.cache);
+  assertSignature(input.sender, message, signature);
   const driver = createHpkeDriver();
   const local = await driver.publicKey(input.recipientKeyPair);
   if (!expected || !bytesEqual(local, expected)) fail('unauthorized');

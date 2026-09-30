@@ -1,8 +1,7 @@
-/** Temporary throw-API bridge while ledger callers migrate to pure/cbor. */
-import { Either } from 'effect';
+/** Legacy throwing names over pure/cbor. */
 import * as Pure from '../pure/cbor';
-import type { ValidationError } from '../pure/errors';
-import { fail, type LedgerErrorCode } from './error';
+import { unwrap } from './compat';
+import type { LedgerErrorCode } from './error';
 
 export {
   copyBytes,
@@ -15,10 +14,6 @@ export {
   MAX_SNAPSHOT_ARRAY_LENGTH,
 } from '../pure/cbor';
 export type { CborValue } from '../pure/cbor';
-
-function unwrap<A>(value: Either.Either<A, ValidationError>): A {
-  return Either.isRight(value) ? value.right : fail(value.left.code, value.left.position);
-}
 
 export const decodeCbor = (bytes: Uint8Array, _owned = false): Pure.CborValue =>
   unwrap(Pure.decodeCbor(bytes));

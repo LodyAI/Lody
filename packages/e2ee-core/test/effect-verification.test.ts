@@ -13,9 +13,8 @@ import {
   prepareJoinRequest,
 } from '@lody/e2ee-core/effect';
 import { admitDeviceOp, append, ed25519, signGenesis } from './ledger-fixtures';
-import { applyGenesis, applyOperation } from '../src/ledger/policy';
 import { decodeRecord as decodeLegacyRecord } from '../src/ledger/schema';
-import { operationChanges } from '../src/pure/ledger-policy';
+import { applyPolicyChanges, genesisState, operationChanges } from '../src/pure/ledger-policy';
 import { cloneState } from '../src/pure/ledger-state';
 import { keyId } from '../src/pure/identifiers';
 import * as Schema from '../src/pure/ledger-schema';
@@ -159,7 +158,7 @@ it('computes policy changes without input mutation and never partially consumes 
   const created = await signGenesis(owner);
   const decoded = decodeLegacyRecord(created.record);
   if (decoded.body.type !== 'genesis') throw new Error('expected genesis fixture');
-  const state = applyGenesis(decoded.body.fields, created.anchor);
+  const state = Either.getOrThrow(genesisState(decoded.body.fields, created.anchor));
   const before = structuredClone(state);
   const operation = await admitDeviceOp(created.anchor, created.membershipId, phone, 'personal');
   // Signing key is valid, but the encryption-key check fails later.
@@ -168,8 +167,6 @@ it('computes policy changes without input mutation and never partially consumes 
     _tag: 'Left',
     left: { _tag: 'ValidationError', code: 'invalid-key' },
   });
-  expect(state).toEqual(before);
-  expect(() => applyOperation(state, owner.publicKey, invalid)).toThrow('invalid-key');
   expect(state).toEqual(before);
   const first = operationChanges(state, owner.publicKey, operation);
   expect(first).toEqual(operationChanges(state, owner.publicKey, operation));
@@ -181,9 +178,9 @@ it('computes policy changes without input mutation and never partially consumes 
   entry.encryptionPublicKey.fill(0);
   expect(state).toEqual(before);
   expect(operation.encryptionPublicKey).toEqual(phone.enc);
-  // The compatibility adapter must recompute, not accept this modified delta.
+  // Replay recomputes the delta; the mutated delta above is never applied.
   const hashes = state.hashes;
-  applyOperation(state, owner.publicKey, operation);
+  applyPolicyChanges(state, Either.getOrThrow(operationChanges(state, owner.publicKey, operation)));
   expect(state.hashes).toBe(hashes);
   expect(state.devices.get(keyId(phone.publicKey))?.membershipId).toEqual(created.membershipId);
   expect(operationChanges(state, owner.publicKey, operation)).toMatchObject({
@@ -197,7 +194,7 @@ it('copies mutable bytes when forking a replay state', async () => {
   const created = await signGenesis(owner);
   const decoded = decodeLegacyRecord(created.record);
   if (decoded.body.type !== 'genesis') throw new Error('expected genesis fixture');
-  const state = applyGenesis(decoded.body.fields, created.anchor);
+  const state = Either.getOrThrow(genesisState(decoded.body.fields, created.anchor));
   const expected = structuredClone(state);
   const fork = cloneState(state);
   fork.genesis.fill(0);

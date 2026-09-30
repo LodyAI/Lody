@@ -873,18 +873,17 @@ export class DemoSession {
     remote: ComparisonWire
   ): Promise<{ kind: string; independent?: boolean; source: 'independent' }> {
     const ledger = await this.readLedger();
-    const local = ledger.comparisonNote(this.device.publicKey, this.pointCache);
+    const local = ledger.comparisonNote(this.device.publicKey);
     return { ...this.finishCompare(local, parseNote(remote), true), source: 'independent' };
   }
 
   private finishCompare(local: ComparisonNote, remote: ComparisonNote, channelConfirmed: boolean) {
     if (!this.genesis) throw new Error('no-space');
-    const decoded = decodeRecord(this.genesis, this.pointCache);
+    const decoded = decodeRecord(this.genesis);
     if (decoded.body.type !== 'genesis') throw new Error('not-genesis');
     return Ledger.compareNotes(local, remote, {
       originalEndorser: decoded.body.fields.signer,
       confirmedNoteSigners: channelConfirmed ? [remote.noteSigner] : [],
-      pointCache: this.pointCache,
     });
   }
 

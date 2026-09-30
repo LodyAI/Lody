@@ -1,58 +1,32 @@
-import type { SignatureJob, SignatureVerifyExecutor } from '../capabilities';
-import { Either } from 'effect';
-import { operationProofJobs } from '../pure/operation-proofs';
-import { classifyEpochCandidate, type EpochCandidate } from '../pure/epoch-candidate';
-import { copyBytes } from './cbor';
+/** Promise/throw facade over the native verification workflows.
+ * It owns no replay, signature or policy logic: every state transition runs
+ * `workflows/verification.ts`, and every rule lives in pure/. */
+import { Effect, Either, Layer } from 'effect';
+import type { SignatureVerifyExecutor } from '../capabilities';
+import { SignatureVerifier } from '../ports/ledger';
 import {
-  assertSignature,
-  bytesEqual,
-  checkHash,
-  checkSignature,
-  checkSigningPublicKey,
-  createSequentialSignatureVerify,
-  hashRecordBytes,
-  headAttestationSigningBytes,
-  isTrustedSignatureVerifyExecutor,
-  keyId,
-  recordSigningBytes,
-  sequentialSignatureVerify,
-  snapshotSigningBytes,
-  type Hash,
-  type Signature,
+  genesisHash,
+  recordHash,
+  signature as signatureBytes,
+  signingPublicKey,
+} from '../pure/bytes';
+import { copyBytes } from '../pure/cbor';
+import type { EpochCandidate } from '../pure/epoch-candidate';
+import { ValidationError } from '../pure/errors';
+import * as snapshots from '../pure/ledger-snapshot';
+import { encodeOrdinaryBody, signingBytesForBody, type Operation } from '../pure/ledger-schema';
+import { publicState, type InternalState, type OrgState } from '../pure/ledger-state';
+import { viewState, type LedgerView } from '../pure/records';
+import { headAttestationSigningBytes, snapshotSigningBytes } from '../pure/wire-crypto';
+import {
+  makeExecutorSignatureVerifier,
+  makeSignatureVerifier,
   type SigningPointCache,
-  type SigningPublicKey,
-} from './crypto';
-import { LedgerError, fail } from './error';
-import {
-  applyGenesis,
-  applyOperation,
-  cloneState,
-  publicState,
-  verifyOperationProofs,
-  type InternalState,
-  type OrgState,
-} from './policy';
-import {
-  decodeRecord,
-  encodeOrdinaryBody,
-  encodeSignedRecord,
-  signingBytesForBody,
-  type DecodedRecord,
-  type Operation,
-} from './schema';
-import {
-  assertEndorserEligible,
-  compareNotes,
-  parseSignedSnapshot,
-  snapshotStateFromParsed,
-  encodeSignedSnapshot,
-  encodeSnapshotBody,
-  stateDigestOf,
-  type Comparison,
-  type ComparisonNote,
-  type SnapshotProposal,
-  type SnapshotTrust,
-} from './snapshot';
+} from '../platform/signature-verifier';
+import * as verification from '../workflows/verification';
+import { legacyVerifierLayer, runLegacy, runLegacySync, unwrap } from './compat';
+import { assertSignature, checkHash, checkSignature, checkSigningPublicKey } from './crypto';
+import type { Hash, Signature, SigningPublicKey } from './crypto';
 
 export interface TrustAnchor {
   readonly genesis: Hash;
@@ -72,127 +46,61 @@ export interface Proposal {
   readonly signingBytes: Uint8Array;
 }
 
-export type { Comparison, ComparisonNote, SnapshotProposal, SnapshotTrust };
+export type {
+  Comparison,
+  ComparisonNote,
+  SnapshotProposal,
+  SnapshotTrust,
+} from '../pure/ledger-snapshot';
 
-function withPosition(position: number, run: () => void): void {
-  try {
-    run();
-  } catch (error: unknown) {
-    if (error instanceof LedgerError && error.position === undefined) {
-      throw new LedgerError(error.code, position);
-    }
-    throw error;
-  }
-}
-
-function collectProofJobs(genesis: Hash, decoded: DecodedRecord): readonly SignatureJob[] {
-  if (decoded.body.type !== 'ordinary') return [];
-  const op = decoded.body.fields.operation;
-  if (op.type === 'admitMember') {
-    const result = operationProofJobs(genesis, op);
-    if (Either.isLeft(result)) fail(result.left.code, result.left.position);
-    return result.right;
-  }
-  // Device proofs bind the actor's membership in the preceding verified state.
-  // They must be checked during policy replay, including in the worker path.
-  return [];
-}
-
-function applyDecoded(
-  state: InternalState | undefined,
-  decoded: DecodedRecord,
-  recordHash: Hash,
-  position: number,
-  expectedAnchor?: Hash,
-  proofsChecked = false,
-  cache?: SigningPointCache
-): InternalState {
-  if (decoded.body.type === 'genesis') {
-    if (position !== 0) fail('genesis-mismatch', position);
-    if (expectedAnchor && !bytesEqual(recordHash, expectedAnchor)) fail('wrong-anchor', position);
-    if (state) fail('genesis-mismatch', position);
-    return applyGenesis(decoded.body.fields, recordHash, cache);
-  }
-  if (!state) fail('genesis-mismatch', position);
-  if (position === 0) fail('genesis-mismatch', position);
-  if (decoded.body.type !== 'ordinary') fail('genesis-mismatch', position);
-  const ordinary = decoded.body.fields;
-  if (!bytesEqual(ordinary.previousHash, state.hashes[state.hashes.length - 1]!)) {
-    fail('wrong-parent', position);
-  }
-  withPosition(position, () => {
-    if (!proofsChecked || ordinary.operation.type === 'admitDevice') {
-      verifyOperationProofs(
-        state.genesis,
-        ordinary.operation,
-        cache,
-        state.devices.get(keyId(ordinary.signer))?.membershipId
+function ownedRecords(records: readonly Uint8Array[], start: number): Uint8Array[] {
+  return records.map((record, offset) => {
+    if (!(record instanceof Uint8Array))
+      return unwrap(
+        Either.left(new ValidationError({ code: 'canonical', position: start + offset }))
       );
-    }
-    applyOperation(state, ordinary.signer, ordinary.operation, cache);
+    return copyBytes(record);
   });
-  state.hashes.push(recordHash);
-  return state;
 }
 
-function applyRecord(
-  state: InternalState | undefined,
-  recordBytes: Uint8Array,
-  position: number,
-  expectedAnchor?: Hash,
-  cache?: SigningPointCache
-): InternalState {
-  const record = decodeRecord(recordBytes, cache);
-  withPosition(position, () => {
-    assertSignature(
-      record.body.fields.signer,
-      recordSigningBytes(record.bodyBytes),
-      record.signature,
-      'bad-signature',
-      cache
-    );
-  });
-  const recordHash = hashRecordBytes(record.recordBytes);
-  return applyDecoded(state, record, recordHash, position, expectedAnchor, false, cache);
+function verifierLayer(input: {
+  readonly executor?: SignatureVerifyExecutor;
+  readonly pointCache?: SigningPointCache;
+}): Layer.Layer<SignatureVerifier, ValidationError> {
+  return input.executor
+    ? Layer.effect(SignatureVerifier, makeExecutorSignatureVerifier(input.executor))
+    : Layer.succeed(SignatureVerifier, makeSignatureVerifier({ cache: input.pointCache }));
 }
-
-async function verifyJobs(
-  jobs: SignatureJob[],
-  positions: number[],
-  codes: Array<'bad-signature' | 'bad-proof'>,
-  executor: SignatureVerifyExecutor
-): Promise<void> {
-  if (jobs.length === 0) return;
-  const results = await executor.verify(jobs);
-  if (!Array.isArray(results) || results.length !== jobs.length) fail('invalid-operation');
-  for (let i = 0; i < jobs.length; i++) {
-    if (results[i] !== true) fail(codes[i]!, positions[i]);
-  }
-}
-
-let construct: (state: InternalState) => Ledger;
 
 export class Ledger {
   // A true private field: verified state is unreachable from outside, even via `as any`.
-  readonly #internal: InternalState;
+  readonly #view: LedgerView;
 
-  static {
-    construct = (state) => new Ledger(state);
-  }
-
-  private constructor(internal: InternalState) {
-    this.#internal = internal;
+  private constructor(view: LedgerView) {
+    this.#view = view;
     Object.freeze(this);
   }
 
+  /** Wraps a view that only the verification workflows can produce. */
+  static fromView(view: LedgerView): Ledger {
+    return new Ledger(view);
+  }
+
+  /** The verified view, for callers moving to `@lody/e2ee-core/effect`. */
+  get view(): LedgerView {
+    return this.#view;
+  }
+
+  get #internal(): InternalState {
+    return viewState(this.#view);
+  }
+
   get head(): Hash {
-    const head = this.#internal.hashes[this.#internal.hashes.length - 1];
-    if (!head) fail('invalid-operation');
-    return copyBytes(head);
+    return this.#view.head.toBytes();
   }
 
   get length(): number {
-    return this.#internal.hashes.length;
+    return this.#view.length;
   }
 
   get origin(): 'genesis' | 'snapshot' {
@@ -220,18 +128,15 @@ export class Ledger {
 
   summary(): LedgerSummary {
     return Object.freeze({
-      genesis: copyBytes(this.#internal.genesis),
+      genesis: this.#view.genesis.toBytes(),
       length: this.length,
       head: this.head,
     });
   }
 
   hashAt(position: number): Hash {
-    if (!Number.isSafeInteger(position) || position < 0 || position >= this.length) {
-      fail('invalid-operation');
-    }
-    const hash = this.#internal.hashes[position];
-    if (!hash) fail('invalid-operation');
+    const hash = Number.isSafeInteger(position) ? this.#internal.hashes[position] : undefined;
+    if (!hash) return unwrap(Either.left(new ValidationError({ code: 'invalid-operation' })));
     return copyBytes(hash);
   }
 
@@ -241,16 +146,12 @@ export class Ledger {
   }
 
   hasRecordHash(digest: Hash): boolean {
-    const want = checkHash(digest);
-    for (const hash of this.#internal.hashes) {
-      if (hash && bytesEqual(hash, want)) return true;
-    }
-    return false;
+    return this.#view.hasRecordHash(checkHash(digest));
   }
 
   /** Inspection only; installing a candidate still requires durable lifecycle handling. */
   inspectEpochCandidate(candidate: EpochCandidate) {
-    return classifyEpochCandidate(this.#internal, candidate);
+    return this.#view.inspectEpochCandidate(candidate);
   }
 
   static async verify(input: {
@@ -259,110 +160,36 @@ export class Ledger {
     executor?: SignatureVerifyExecutor;
     pointCache?: SigningPointCache;
   }): Promise<Ledger> {
-    const anchor = checkHash(input.anchor);
-    if (input.records.length === 0) fail('genesis-mismatch', 0);
-    if (input.executor && !isTrustedSignatureVerifyExecutor(input.executor)) {
-      fail('invalid-operation');
-    }
-    const executor =
-      input.executor ??
-      (input.pointCache
-        ? createSequentialSignatureVerify(input.pointCache)
-        : sequentialSignatureVerify);
-    const records = input.records.map((record, position) => {
-      if (!(record instanceof Uint8Array)) fail('canonical', position);
-      return copyBytes(record);
-    });
-    const decoded: DecodedRecord[] = [];
-    const hashes: Hash[] = [];
-    const outerJobs: SignatureJob[] = [];
-    const outerPos: number[] = [];
-    const outerCodes: Array<'bad-signature' | 'bad-proof'> = [];
-    for (let position = 0; position < records.length; position++) {
-      try {
-        const record = decodeRecord(records[position]!, input.pointCache);
-        decoded.push(record);
-        hashes.push(hashRecordBytes(record.recordBytes));
-        outerJobs.push({
-          pk: record.body.fields.signer,
-          msg: recordSigningBytes(record.bodyBytes),
-          sig: record.signature,
-        });
-        outerPos.push(position);
-        outerCodes.push('bad-signature');
-      } catch (error: unknown) {
-        if (error instanceof LedgerError && error.position === undefined) {
-          throw new LedgerError(error.code, position);
-        }
-        throw error;
-      }
-    }
-    await verifyJobs(outerJobs, outerPos, outerCodes, executor);
-    const genesisHash = hashes[0]!;
-    const proofJobs: SignatureJob[] = [];
-    const proofPos: number[] = [];
-    const proofCodes: Array<'bad-signature' | 'bad-proof'> = [];
-    for (let position = 1; position < decoded.length; position++) {
-      const extra = collectProofJobs(genesisHash, decoded[position]!);
-      for (const job of extra) {
-        proofJobs.push(job);
-        proofPos.push(position);
-        proofCodes.push('bad-proof');
-      }
-    }
-    await verifyJobs(proofJobs, proofPos, proofCodes, executor);
-    let state: InternalState | undefined;
-    for (let position = 0; position < decoded.length; position++) {
-      state = applyDecoded(
-        state,
-        decoded[position]!,
-        hashes[position]!,
-        position,
-        position === 0 ? anchor : undefined,
-        true,
-        input.pointCache
-      );
-    }
-    if (!state) fail('genesis-mismatch', 0);
-    if (!bytesEqual(state.genesis, anchor) || !bytesEqual(state.hashes[0]!, anchor)) {
-      fail('wrong-anchor', 0);
-    }
-    return new Ledger(state);
+    const anchor = unwrap(genesisHash(input.anchor));
+    const records = ownedRecords(input.records, 0);
+    return runLegacy(
+      verification
+        .verifyLedger({ anchor, records })
+        .pipe(Effect.map(Ledger.fromView), Effect.provide(verifierLayer(input)))
+    );
   }
 
   async extend(suffix: readonly Uint8Array[], cache?: SigningPointCache): Promise<Ledger> {
     if (suffix.length === 0) return this;
-    const next = cloneState(this.#internal);
-    const records = suffix.map((record, offset) => {
-      if (!(record instanceof Uint8Array)) fail('canonical', this.length + offset);
-      return copyBytes(record);
-    });
-    for (let offset = 0; offset < records.length; offset++) {
-      applyRecord(next, records[offset]!, this.length + offset, undefined, cache);
-    }
-    return new Ledger(next);
+    const records = ownedRecords(suffix, this.length);
+    return runLegacy(
+      verification
+        .extendLedger(this.#view, records)
+        .pipe(Effect.map(Ledger.fromView), Effect.provide(legacyVerifierLayer(cache)))
+    );
   }
 
-  prepare(
-    operation: Operation,
-    signerPublicKey: SigningPublicKey,
-    cache?: SigningPointCache
-  ): Proposal {
-    const signer = checkSigningPublicKey(signerPublicKey, cache);
-    const bodyBytes = encodeOrdinaryBody(
-      {
-        previousHash: this.head,
-        signer,
-        operation,
-      },
-      cache
-    );
+  /** Unchecked proposal: the record is still fully verified when it is appended. */
+  prepare(operation: Operation, signerPublicKey: SigningPublicKey): Proposal {
+    const signer = checkSigningPublicKey(signerPublicKey);
+    const previousHash = this.head;
+    const bodyBytes = unwrap(encodeOrdinaryBody({ previousHash, signer, operation }));
     return Object.freeze({
       signer,
       operation,
-      previousHash: this.head,
+      previousHash,
       bodyBytes,
-      signingBytes: signingBytesForBody(bodyBytes),
+      signingBytes: unwrap(signingBytesForBody(bodyBytes)),
     });
   }
 
@@ -371,135 +198,109 @@ export class Ledger {
     signature: Signature,
     cache?: SigningPointCache
   ): Promise<Uint8Array> {
-    if (!bytesEqual(proposal.previousHash, this.head)) fail('wrong-parent');
-    const recordBytes = encodeSignedRecord(proposal.bodyBytes, signature);
-    await this.extend([recordBytes], cache);
-    return recordBytes;
+    const signed = unwrap(signatureBytes(signature));
+    return runLegacy(
+      verification
+        .finalizePrepared(this.#view, proposal.bodyBytes, proposal.previousHash, signed)
+        .pipe(
+          Effect.map(({ record }) => record),
+          Effect.provide(legacyVerifierLayer(cache))
+        )
+    );
   }
 
   /** Validate nested proofs and current policy before asking a device to sign.
-   * The copy is private: rejection cannot change this verified view. */
+   * Rejection cannot change this verified view. */
   prepareChecked(
     operation: Operation,
     signerPublicKey: SigningPublicKey,
     cache?: SigningPointCache
   ): Proposal {
-    const proposal = this.prepare(operation, signerPublicKey, cache);
-    verifyOperationProofs(
-      this.#internal.genesis,
-      operation,
-      cache,
-      this.#internal.devices.get(keyId(proposal.signer))?.membershipId
+    const signer = unwrap(signingPublicKey(signerPublicKey));
+    const prepared = runLegacySync(
+      verification
+        .prepareChecked(this.#view, operation, signer)
+        .pipe(Effect.provide(legacyVerifierLayer(cache)))
     );
-    applyOperation(cloneState(this.#internal), proposal.signer, operation, cache);
-    return proposal;
+    return Object.freeze({ signer: signer.toBytes(), operation, ...prepared });
   }
 
-  prepareSnapshot(
-    endorserPublicKey: SigningPublicKey,
-    cache?: SigningPointCache
-  ): SnapshotProposal {
-    const signer = checkSigningPublicKey(endorserPublicKey, cache);
-    assertEndorserEligible(this.#internal, signer);
-    const bodyBytes = encodeSnapshotBody(this.#internal, signer);
+  prepareSnapshot(endorserPublicKey: SigningPublicKey): snapshots.SnapshotProposal {
+    const signer = checkSigningPublicKey(endorserPublicKey);
+    unwrap(snapshots.assertEndorserEligible(this.#internal, signer));
+    const bodyBytes = unwrap(snapshots.encodeSnapshotBody(this.#internal, signer));
+    const genesis = this.#view.genesis.toBytes();
     return Object.freeze({
       signer,
-      genesis: copyBytes(this.#internal.genesis),
+      genesis,
       head: this.head,
       length: this.length,
       bodyBytes,
       signingBytes: snapshotSigningBytes(bodyBytes),
-      headAttestationSigningBytes: headAttestationSigningBytes(this.#internal.genesis, this.head),
+      headAttestationSigningBytes: unwrap(headAttestationSigningBytes(genesis, this.head)),
     });
   }
 
   static async finalizeSnapshot(
-    proposal: SnapshotProposal,
+    proposal: snapshots.SnapshotProposal,
     signature: Signature,
     cache?: SigningPointCache
   ): Promise<Uint8Array> {
-    checkSigningPublicKey(proposal.signer, cache);
+    const signer = checkSigningPublicKey(proposal.signer);
     assertSignature(
-      proposal.signer,
+      signer,
       proposal.signingBytes,
       checkSignature(signature),
       'bad-signature',
       cache
     );
-    return encodeSignedSnapshot(proposal.bodyBytes, signature);
+    return unwrap(snapshots.encodeSignedSnapshot(proposal.bodyBytes, signature));
   }
 
   static async verifySnapshot(input: {
-    trust: SnapshotTrust;
+    trust: snapshots.SnapshotTrust;
     snapshot: Uint8Array;
     suffix?: readonly Uint8Array[];
     pointCache?: SigningPointCache;
   }): Promise<Ledger> {
-    const genesis = checkHash(input.trust.genesis);
-    const endorser = checkSigningPublicKey(input.trust.endorser, input.pointCache);
-    const attestedHead = checkHash(input.trust.head);
-    const headSignature = checkSignature(input.trust.headSignature);
-    if (!(input.snapshot instanceof Uint8Array)) fail('canonical');
-    assertSignature(
-      endorser,
-      headAttestationSigningBytes(genesis, attestedHead),
-      headSignature,
-      'bad-signature',
-      input.pointCache
+    const genesis = unwrap(genesisHash(input.trust.genesis));
+    const endorser = unwrap(signingPublicKey(input.trust.endorser));
+    const head = unwrap(recordHash(input.trust.head));
+    const headSignature = unwrap(signatureBytes(input.trust.headSignature));
+    const snapshot = ownedRecords([input.snapshot], 0)[0]!;
+    const base = await runLegacy(
+      verification
+        .verifySnapshot({ genesis, endorser, head, headSignature, snapshot })
+        .pipe(Effect.map(Ledger.fromView), Effect.provide(legacyVerifierLayer(input.pointCache)))
     );
-    const parsed = parseSignedSnapshot(copyBytes(input.snapshot), input.pointCache);
-    if (!bytesEqual(parsed.genesis, genesis)) fail('wrong-anchor');
-    if (!bytesEqual(parsed.signer, endorser)) fail('wrong-anchor');
-    if (!bytesEqual(parsed.head, attestedHead)) fail('wrong-anchor');
-    assertSignature(
-      parsed.signer,
-      snapshotSigningBytes(parsed.bodyBytes),
-      parsed.signature,
-      'bad-signature',
-      input.pointCache
-    );
-    const ledger = new Ledger(snapshotStateFromParsed(parsed, input.pointCache));
-    const suffix = input.suffix ?? [];
-    if (suffix.length === 0) return ledger;
-    return ledger.extend(suffix, input.pointCache);
+    return base.extend(input.suffix ?? [], input.pointCache);
   }
 
-  comparisonNote(
-    localDevicePublicKey: SigningPublicKey,
-    cache?: SigningPointCache
-  ): ComparisonNote {
-    const noteSigner = checkSigningPublicKey(localDevicePublicKey, cache);
+  comparisonNote(localDevicePublicKey: SigningPublicKey): snapshots.ComparisonNote {
+    const noteSigner = checkSigningPublicKey(localDevicePublicKey);
     return Object.freeze({
-      genesis: copyBytes(this.#internal.genesis),
+      genesis: this.#view.genesis.toBytes(),
       length: this.length,
       head: this.head,
-      stateDigest: stateDigestOf(this.#internal),
+      stateDigest: unwrap(snapshots.stateDigestOf(this.#internal)),
       noteSigner,
     });
   }
 
   static compareNotes(
-    local: ComparisonNote,
-    remote: ComparisonNote,
+    local: snapshots.ComparisonNote,
+    remote: snapshots.ComparisonNote,
     opts: {
       originalEndorser: SigningPublicKey;
       confirmedNoteSigners?: readonly SigningPublicKey[];
-      pointCache?: SigningPointCache;
     }
-  ): Comparison {
-    const confirmed = (opts.confirmedNoteSigners ?? []).map((key) =>
-      checkSigningPublicKey(key, opts.pointCache)
-    );
-    return compareNotes(
+  ): snapshots.Comparison {
+    const confirmed = (opts.confirmedNoteSigners ?? []).map((key) => checkSigningPublicKey(key));
+    return snapshots.compareNotes(
       local,
       remote,
-      checkSigningPublicKey(opts.originalEndorser, opts.pointCache),
+      checkSigningPublicKey(opts.originalEndorser),
       confirmed
     );
   }
-}
-
-/** Package-internal Promise-adapter reconstruction from a verified view; not re-exported. */
-export function ledgerFromVerifiedState(state: InternalState): Ledger {
-  return construct(state);
 }
