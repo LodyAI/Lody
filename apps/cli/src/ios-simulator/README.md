@@ -17,7 +17,7 @@ frames never enter React, RPC, or synchronized documents.
 installer fetches only the platform runtime channel:
 
 ```
-/api/runtimes/baguette/0.2.0-lody.1/darwin-arm64/baguette_v0.2.0-lody.1_macOS_arm64.tar.gz
+/api/runtimes/baguette/0.2.1-lody.1/darwin-arm64/baguette_v0.2.1-lody.1_macOS_arm64.tar.gz
 ```
 
 The deployment composition must publish these exact bytes before shipping. The
@@ -27,7 +27,7 @@ PATH fallback. Reuse the verified versioned cache; downloads need connectivity,
 while a cached same-machine preview does not require Cloud authorization.
 
 `baguette-notices.json` contains Baguette's Apache-2.0 license and licenses/notices from
-the exact dependency revisions in v0.2.0's `Package.resolved`; source URLs accompany
+the exact dependency revisions in v0.2.1's `Package.resolved`; source URLs accompany
 each notice. The installer writes them as `THIRD_PARTY_NOTICES.txt`. Version changes
 must refresh both digests and notices, then rerun native compatibility checks.
 
@@ -39,10 +39,20 @@ unverified. H.264, multitouch, keyboard and device configuration are later work.
 
 ## Maintaining the patched build
 
-The upstream v0.2.0 Release binary crashes at the first 30-second WebSocket
-ping. A symbolized source build reproduces this at `Task.sleep(for:)`; replacing
-all three sleeps in `swift-websocket`'s `WebSocketHandler` also prevents the same
+The upstream v0.2.0 and v0.2.1 Release binaries crash at the first 30-second
+WebSocket ping. A symbolized source build reproduces this at `Task.sleep(for:)`;
+replacing all three sleeps in `swift-websocket`'s `WebSocketHandler` also prevents the same
 crash during connection shutdown. See the [decision](../../../../.agents/notes/implemented/bug-fix/2026-09-29-baguette-runtime-sleep.md).
+
+Upstream v0.2.1 fixes the separate `baguette stream` startup crash
+([PR #88](https://github.com/tddworks/baguette/pull/88)); Lody uses `baguette serve`.
+Its dependency lock and license are unchanged from v0.2.0. The official v0.2.1
+arm64 archive reproduced the sleep abort after 31.4 seconds, so `0.2.1-lody.1`
+retains the same three-call patch. Recheck both ping and close paths before
+removing it on a later upgrade. The patched build and public-channel download each
+survived three real pings (~91 seconds) on Xcode 26.6/iOS 26.2; the download also
+completed a normal WebSocket close before clean process shutdown. This is bounded
+compatibility evidence, not a long soak or full application E2E.
 
 `baguette-manifest.json.build` records the exact source revision, dependency
 revision, patch digest, Swift version and build command. To rebuild, clone the
