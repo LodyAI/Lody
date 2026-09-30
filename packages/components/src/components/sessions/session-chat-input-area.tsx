@@ -1993,6 +1993,7 @@ export const SessionChatInputArea = memo(
           contextWindowUsage={session.contextWindowUsage}
           rateLimits={rateLimits}
           agentType={session.agentType}
+          agentConfigId={session.agentConfigId}
           modelId={selectedModelId}
           modelLabel={selectedModelLabel}
           isContextCompacting={isContextCompacting}

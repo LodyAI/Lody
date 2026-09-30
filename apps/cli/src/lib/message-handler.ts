@@ -3693,8 +3693,13 @@ export class MessageHandler {
 
     this.sessionManager.on(
       'onRateLimitUpdate',
-      (machineId: MachineId, cliType: CliType, limits: RateLimit) => {
-        void this.workspaceDocument.updateRateLimits(machineId, cliType, limits);
+      (
+        machineId: MachineId,
+        agentConfigId: AgentConfigId | undefined,
+        cliType: CliType,
+        limits: RateLimit
+      ) => {
+        void this.workspaceDocument.updateRateLimits(machineId, agentConfigId, cliType, limits);
       }
     );
 
