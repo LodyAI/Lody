@@ -1,4 +1,4 @@
-import { useMemo, useRef, type ReactNode } from 'react';
+import { useMemo, useRef, useState, type ReactNode } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { useAtomValue } from 'jotai';
 import { Bot, Check, ListChecks, LockKeyhole, Monitor, Plus, ShieldAlert, Zap } from 'lucide-react';
@@ -429,6 +429,8 @@ export function DesktopRunConfigMenu({
   agentRoles,
 }: DesktopRunConfigMenuProps) {
   const { t } = useTranslation();
+  const [open, setOpen] = useState(false);
+  if (disabledReason && open) setOpen(false);
   const menuPositionerRef = useRef<HTMLDivElement>(null);
   const executorConfigs = useAtomValue(getAllAgentConfigAtom);
   const onlineMachines = useOnlineMachines(allowedMachineIds);
@@ -680,7 +682,7 @@ export function DesktopRunConfigMenu({
   );
 
   const menu = (
-    <Menu.Root>
+    <Menu.Root open={open} onOpenChange={setOpen}>
       {disabledReason ? (
         <Tooltip.Root>
           {/* A native disabled button cannot reliably trigger hover/focus events.
@@ -1095,6 +1097,7 @@ function permissionModeIcon(modeId: string | null): ReactNode {
 }
 
 export type DesktopPermissionModeButtonProps = {
+  disabled?: boolean;
   modeOptions: ReadonlyArray<AcpSessionSelectOption>;
   selectedModeId: string | null;
   onModeChange?: (value: string) => void;
@@ -1110,8 +1113,11 @@ export function DesktopPermissionModeButton({
   configOptionSelectors = [],
   configOptionValues,
   onConfigOptionChange,
+  disabled = false,
 }: DesktopPermissionModeButtonProps) {
   const { t } = useTranslation();
+  const [open, setOpen] = useState(false);
+  if (disabled && open) setOpen(false);
   const { options, value, label, source } = useMemo(
     () =>
       resolvePermissionModeFace({
@@ -1135,11 +1141,12 @@ export function DesktopPermissionModeButton({
   };
 
   return (
-    <Menu.Root>
+    <Menu.Root open={open} onOpenChange={setOpen}>
       {/* Icon only: every mode has an icon (warning modes the amber shield),
           and a label such as "Bypass permissions" took most of the control
           row. The mode's name is the tooltip and the accessible name. */}
       <Menu.Trigger
+        disabled={disabled}
         aria-label={label ? `${permissionLabel}: ${label}` : permissionLabel}
         title={label ? `${permissionLabel}: ${label}` : permissionLabel}
         className={iconOnlyTriggerClassName}

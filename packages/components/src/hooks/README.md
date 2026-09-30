@@ -21,11 +21,12 @@ Archive and delete cancel held sends of their targets and join in-flight writes.
 `use-session-preparation` holds an owned warmup lease; attachment takeover cancels
 and joins it. See the [attachment draft Spec](../../../../specs/session-files.md).
 
-| Area                   | Entry point                                                                                | Responsibility                                              |
-| ---------------------- | ------------------------------------------------------------------------------------------ | ----------------------------------------------------------- |
-| Session lifecycle      | [`use-session-actions.ts`](use-session-actions.ts)                                         | Bind operation targets and writes to one workspace runtime. |
-| Workspace catalogs     | [`use-agent-role-schema-reconciliation.ts`](use-agent-role-schema-reconciliation.ts)       | Reconcile owned Roles after matching runtime probes.        |
-| Conversation rendering | [`use-conversation-stream-items.ts`](use-conversation-stream-items.ts), [`use-session-doc.ts`](use-session-doc.ts) | Coordinate the hydration window and history publication. |
+| Area                   | Entry point                                                                                                        | Responsibility                                                                             |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------ |
+| Session lifecycle      | [`use-session-actions.ts`](use-session-actions.ts)                                                                 | Bind operation targets and writes to one workspace runtime.                                |
+| Composer configuration | [`use-session-pending-config.ts`](use-session-pending-config.ts)                                                   | Bridge frozen held-send configuration to history/queue without consuming next-draft edits. |
+| Workspace catalogs     | [`use-agent-role-schema-reconciliation.ts`](use-agent-role-schema-reconciliation.ts)                               | Reconcile owned Roles after matching runtime probes.                                       |
+| Conversation rendering | [`use-conversation-stream-items.ts`](use-conversation-stream-items.ts), [`use-session-doc.ts`](use-session-doc.ts) | Coordinate the hydration window and history publication.                                   |
 
 ## Session lifecycle
 

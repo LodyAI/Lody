@@ -17,6 +17,7 @@ import {
 vi.mock('../src/hooks/use-online-machines', () => ({ useOnlineMachines: () => [] }));
 
 import { DesktopRunConfigMenu } from '../src/components/sessions/desktop-run-config-menu';
+import { MobileSessionRunConfig } from '../src/components/mobile/mobile-session-run-config';
 import type { ComposerAgentRoleItem } from '../src/lib/composer-agent-roles';
 import { initI18n } from '../src/i18n';
 import { Tooltip } from '@lody/ui/tooltip';
@@ -119,6 +120,70 @@ describe('DesktopRunConfigMenu role face', () => {
     expect(trigger?.textContent).toContain('5.5');
   });
 
+  it('keeps the selected ACP model face while sending locks the menu', async () => {
+    const props: Partial<MenuProps> = {
+      modelOptions: [],
+      selectedModelId: 'provider-default',
+      configOptionSelectors: [
+        {
+          configId: 'model',
+          category: 'model',
+          label: 'Model',
+          type: 'select',
+          currentValue: 'provider-default',
+          options: [
+            { value: 'provider-default', label: 'Default model' },
+            { value: 'selected-model', label: 'Selected model' },
+          ],
+        },
+      ],
+      configOptionValues: { model: 'selected-model' },
+    };
+    const view = await render(props);
+    const face = view.querySelector('[data-run-config-trigger]')?.textContent;
+    expect(face).toContain('Selected model');
+    await render({ ...props, disabledReason: 'Configuration is locked while sending' });
+    const trigger = view.querySelector<HTMLButtonElement>('[data-run-config-trigger]');
+    expect(trigger?.textContent).toBe(face);
+    expect(trigger?.getAttribute('aria-disabled')).toBe('true');
+    await act(async () => {
+      trigger?.click();
+    });
+    expect(document.querySelector('[role="menu"]')).toBeNull();
+  });
+
+  it('keeps Role identity and pinned values on the locked face', async () => {
+    const props = {
+      agentRoles: { items: [roleItem], selectedRoleId: role.id, onSelect: () => undefined },
+    };
+    const view = await render(props);
+    const face = view.textContent;
+    await render({ ...props, disabledReason: 'Configuration is locked while sending' });
+    expect(view.textContent).toBe(face);
+    expect(view.querySelector('[data-run-config-trigger]')?.textContent).toContain('Code Reviewer');
+  });
+
+  it('keeps the mobile model face visible while disabling its configuration sheet', async () => {
+    await act(async () => {
+      root?.render(
+        createElement(MobileSessionRunConfig, {
+          ...baseProps,
+          onModeChange: () => undefined,
+          disabled: true,
+        })
+      );
+    });
+    const trigger = container?.querySelector<HTMLButtonElement>(
+      'button[aria-label="Run configuration"]'
+    );
+    expect(trigger?.textContent).toContain('5.5');
+    expect(trigger?.disabled).toBe(true);
+    await act(async () => {
+      trigger?.click();
+    });
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+  });
+
   it('keeps the menu closed and explains when a machine must be selected first', async () => {
     const disabledReason = 'Select a machine first';
     const view = await render({ disabledReason });
@@ -136,9 +201,9 @@ describe('DesktopRunConfigMenu role face', () => {
       trigger?.focus();
     });
     await vi.waitFor(() => {
-      expect(
-        document.querySelector('[data-base-ui-portal] [data-side]')?.textContent
-      ).toContain(disabledReason);
+      expect(document.querySelector('[data-base-ui-portal] [data-side]')?.textContent).toContain(
+        disabledReason
+      );
     });
   });
 

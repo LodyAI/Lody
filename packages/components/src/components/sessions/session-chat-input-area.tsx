@@ -14,7 +14,6 @@ import {
   forwardRef,
   useImperativeHandle,
 } from 'react';
-import * as stylex from '@stylexjs/stylex';
 import { useAtomValue } from 'jotai';
 import { ArrowUp } from 'lucide-react';
 import { Spinner } from '@lody/ui/spinner';
@@ -39,7 +38,6 @@ import {
   DesktopPermissionModeButton,
   DesktopRunConfigMenu,
 } from '@/components/sessions/desktop-run-config-menu';
-import { composerSurface } from '@/components/shared/composer-surface';
 import {
   ChatComposer,
   type ChatComposerFileItem,
@@ -49,6 +47,7 @@ import type { CombinedMentionTextareaHandle } from '@/components/mentions/combin
 import type { AttachmentAddMenuMcp } from '@/components/chat/attachment-add-menu';
 import { useComposerSubmission } from '@/components/chat/submission/use-composer-submission';
 import { MobileSessionRunConfig } from '@/components/mobile/mobile-session-run-config';
+import { useRunConfigFace } from '@/components/mobile/mobile-run-config-button';
 import {
   useMentionPromptExpansion,
   type ExpandedMentionPrompt,
@@ -1897,6 +1896,7 @@ export const SessionChatInputArea = memo(
     ]);
     const mobileFooterSelectorNode = isMobile ? (
       <MobileSessionRunConfig
+        disabled={submissionPending}
         agentSelection={mobileAgentSelection}
         allowedMachineIds={session.machineId ? [session.machineId] : []}
         agentLocked={!isEmptyConversation}
@@ -1927,6 +1927,11 @@ export const SessionChatInputArea = memo(
     const desktopFooterSelectorNode = !isMobile ? (
       <>
         <DesktopRunConfigMenu
+          disabledReason={
+            submissionPending
+              ? t('sessions.sendConfigLocked', 'Configuration is locked while sending')
+              : undefined
+          }
           agentSelection={
             session.agentConfigId && session.machineId
               ? { agentId: session.agentConfigId, machineId: session.machineId }
@@ -1948,6 +1953,7 @@ export const SessionChatInputArea = memo(
         />
         {selectedAgentRolePinsPermissionMode ? null : (
           <DesktopPermissionModeButton
+            disabled={submissionPending}
             modeOptions={modeOptions}
             selectedModeId={selectedModeId}
             onModeChange={onModeChange}
@@ -1958,9 +1964,14 @@ export const SessionChatInputArea = memo(
         )}
       </>
     ) : null;
-    const selectedModelLabel = modelOptions.find(
-      (option) => option.value === selectedModelId
-    )?.label;
+    const { modelLabel: selectedModelLabel } = useRunConfigFace({
+      modelOptions,
+      selectedModelId,
+      modeOptions,
+      selectedModeId,
+      configOptionSelectors,
+      configOptionValues,
+    });
     const footerSelectorNode = (
       <div className="flex min-w-0 flex-1 flex-nowrap items-center gap-1.5 overflow-hidden">
         {/* Mobile: run-config button is w-full inside this flex-1 slot so the
@@ -1973,21 +1984,7 @@ export const SessionChatInputArea = memo(
               : 'flex min-w-0 flex-1 flex-nowrap items-center gap-1.5 overflow-hidden'
           }
         >
-          {submissionPending ? (
-            <button
-              type="button"
-              disabled
-              aria-label={t('chat.runConfig.buttonAriaLabel', 'Run configuration')}
-              title={t('sessions.sendConfigLocked', 'Configuration is locked while sending')}
-              {...stylex.props(composerSurface.trigger)}
-            >
-              <span {...stylex.props(composerSurface.truncate)}>
-                {selectedModelLabel ?? t('chat.runConfig.buttonAriaLabel', 'Run configuration')}
-              </span>
-            </button>
-          ) : (
-            (mobileFooterSelectorNode ?? desktopFooterSelectorNode)
-          )}
+          {mobileFooterSelectorNode ?? desktopFooterSelectorNode}
         </div>
         <SessionUsagePopover
           contextWindowUsage={session.contextWindowUsage}
