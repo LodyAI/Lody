@@ -43,7 +43,7 @@ and `agentRoleId`. Creation provenance is what the Role filter matches.
 Workspace project listing now spans authorized machines and enabled GitHub repositories;
 `--machine` restricts it to local projects on that machine. Directory lists are
 paginated summaries rather than the old unbounded/full configuration dumps.
-`agent-config show` remains the trusted configuration inspection command;
+`agent-config show` inspects a configuration with environment values hidden;
 `get` returns the safe discovery projection. Legacy `machine list --include-agents`
 and `--include-acp-capabilities` retain their detailed output and cannot combine with
 directory pagination/filter flags.
@@ -60,3 +60,20 @@ These workspace queries use the existing cloud command runtime. The OSS local
 composition does not enable cloud queries; local project listing remains available.
 Catalog `--offline` skips catalog synchronization but still verifies authorization;
 GitHub repository listing requires connectivity.
+
+## Agent configuration output
+
+`agent-config show [id] [--json]` returns sorted `envKeys`, not environment values.
+Text output marks every key `[configured]`, including empty values. For deliberate
+inspection, `show --show-secrets` includes the original values (`env` in JSON).
+That output may contain credentials: use it only where the output is trusted.
+The flag is only available on `show`; list/get remain safe discovery summaries.
+
+JSON create/update responses contain `ok`, `workspaceId`, `agentConfigId` and
+`changedFields` (initialized/requested field names, not values), rather than `agentConfig`.
+Scripts should read `agentConfigId` for the saved id and use a separate `show`
+when inspection is needed. Scripts reading `show.agentConfig.env` must explicitly
+opt in to secret output, or migrate to `envKeys`. The output is a presentation
+contract, not a full configuration backup; runtime/auth/custom-launch fields are
+not exported. No masked placeholder is stored or returned as an environment value.
+Assignment errors report entry/line numbers without echoing their contents.
