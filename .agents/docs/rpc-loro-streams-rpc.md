@@ -61,3 +61,14 @@ content, so it reuses the owner-session content envelope and owner verification.
 The earlier `method.startsWith('code-collab/')` checks silently excluded any new
 envelope method, which is why every encrypt/decrypt/error-decode site now goes
 through `isOwnerScopedEncryptedRpcMethod`.
+
+## Why `session/mcp-app` stays off the control lane
+
+`session/mcp-app` proxies an MCP App view's `load`, `resources/read` and
+`tools/call` to the session's live agent (`AgentClient.requestMcpApp`). It runs on
+the shared semaphore, not in `CONTROL_METHODS`: an app tool call has unbounded
+latency, and the control lane's four slots must stay free for cancel and steer.
+The shared lane still serves it while a prompt streams. Old daemons reject the
+method, which the client maps to `MCP_APP_UNAVAILABLE`, as it does a timeout.
+Results are plaintext on the transport, like steer and goal payloads; see the
+[MCP Apps host note](../notes/proposed/feature/2026-09-30-mcp-apps-host.md).

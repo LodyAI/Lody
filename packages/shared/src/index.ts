@@ -64,6 +64,7 @@ export * from './electron-ipc';
 export * from './loro-server-auth';
 export * from './auth';
 export * from './message-schemas';
+export * from './mcp-app';
 export * from './acp/registry-generated';
 export * from './acp/codex-raw';
 export * from './acp/claude-code-raw';

@@ -67,6 +67,9 @@ import {
   type SessionSteerResponse,
   type SessionGoalAction,
   type SessionGoalResponse,
+  type SessionMcpAppRequest,
+  type SessionMcpAppResponse,
+  sessionMcpAppFailure,
   type SessionTerminateResponse,
   type SessionForkResponse,
   type SessionForkSpec,
@@ -828,6 +831,43 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
     }
   };
 
+  /** Every failure resolves to a typed response so the app card can render "unavailable". */
+  const requestSessionMcpApp = async (
+    machineId: MachineId,
+    request: SessionMcpAppRequest,
+    options?: { timeoutMs?: number }
+  ): Promise<SessionMcpAppResponse> => {
+    const timeoutMs = options?.timeoutMs ?? 60_000;
+    try {
+      if (await canUseLocalMachineRpc(machineId)) {
+        const response = await getLocalMachineRpcSender()?.({
+          machineId,
+          workspaceId,
+          method: 'session/mcp-app',
+          params: request,
+          timeoutMs,
+        });
+        if (response && !response.ok) {
+          return sessionMcpAppFailure(request, 'MCP_APP_UNAVAILABLE', response.error);
+        }
+        if (response?.ok) return response.result as SessionMcpAppResponse;
+      }
+      const response = await (
+        await getMachineRpcClient(machineId)
+      ).requestSessionMcpApp(request, { timeoutMs });
+      return (
+        response ??
+        sessionMcpAppFailure(request, 'MCP_APP_UNAVAILABLE', 'The machine did not respond.')
+      );
+    } catch (error) {
+      return sessionMcpAppFailure(
+        request,
+        'MCP_APP_UNAVAILABLE',
+        error instanceof Error ? error.message : String(error)
+      );
+    }
+  };
+
   const requestSessionFork = async (
     machineId: MachineId,
     args: SessionForkSpec,
@@ -1361,6 +1401,7 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
     requestSessionCancel,
     requestSessionSteer,
     requestSessionGoal,
+    requestSessionMcpApp,
     requestSessionTerminate,
     requestSessionFork,
     requestSessionEditAndResend,

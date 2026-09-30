@@ -2,6 +2,7 @@ import type { MessageContent, ModelInfo, SubagentRunItem } from '../ai';
 import { isLodySubagentEvent, type LodySubagentEvent } from 'acp-extension-core';
 import type { SessionHistoryInput, SessionPlanEntry } from '../schema';
 import { sanitizeLodyInternalInstructions } from '../goal';
+import { parseMcpAppToolCallMeta } from '../mcp-app';
 
 import { parseCodexTerminalCommand, parseCodexTerminalOutput } from './codex-raw';
 import type { AcpSessionNotification } from './schema';
@@ -945,6 +946,7 @@ const mergeToolCallMessage = (
     // The first-persisted stamp wins; a replayed/retried update must not move it.
     recordedAtMs: prev.recordedAtMs ?? incoming.recordedAtMs,
     toolName: incoming.toolName ?? prev.toolName,
+    mcpApp: incoming.mcpApp ?? prev.mcpApp,
     activityKind: incoming.activityKind !== undefined ? incoming.activityKind : prev.activityKind,
   };
 };
@@ -1251,6 +1253,9 @@ export const buildMessageContentFromNotification = (
           // fire time in the right timezone regardless of where it is later viewed.
           schedulingTimeZone: isSchedulingTool ? resolveMachineTimeZone() : undefined,
           activityKind,
+          mcpApp:
+            parseMcpAppToolCallMeta((update as ToolCallUpdateWithMeta)._meta) ??
+            previousTool?.mcpApp,
         },
       ];
     }

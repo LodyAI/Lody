@@ -4,6 +4,7 @@ import * as path from 'path';
 import { describe, expect, it } from 'vitest';
 
 import type { MessageContent } from '../src/ai';
+import { ToolCallMessageSchema } from '../src/message-schemas';
 import {
   MAX_STORED_TERMINAL_OUTPUT_BYTES,
   applyMessageContentsBatch,
@@ -1235,5 +1236,80 @@ describe('acp history apply', () => {
         }),
       ]);
     });
+  });
+});
+
+describe('MCP App tool call descriptor', () => {
+  type ToolCall = Extract<MessageContent, { type: 'tool_call' }>;
+  const app = {
+    version: 1,
+    server: 'codex_apps',
+    tool: 'explore_graph',
+    resourceUri: 'ui://nowledgemem/graph',
+    appName: 'NowledgeMem',
+  };
+  const readTool = (updates: unknown[]): ToolCall | undefined => {
+    const history = applyNotificationOnHistory([], updates.map(makeNotification));
+    const items = (history[0]?.items ?? []) as unknown as MessageContent[];
+    return items.find((item): item is ToolCall => item.type === 'tool_call');
+  };
+  const started = (mcpApp: unknown) => ({
+    sessionUpdate: 'tool_call',
+    toolCallId: 'mcp-1',
+    title: 'mcp.codex_apps.explore_graph',
+    kind: 'execute',
+    status: 'in_progress',
+    _meta: { is_mcp_tool_call: true, lody: { mcpApp } },
+  });
+
+  it('stores only the bounded descriptor and keeps it across updates without meta', () => {
+    const tool = readTool([
+      started(app),
+      { sessionUpdate: 'tool_call_update', toolCallId: 'mcp-1', status: 'completed' },
+    ]);
+
+    expect(tool?.status).toBe('completed');
+    expect(tool?.mcpApp).toEqual({
+      server: 'codex_apps',
+      tool: 'explore_graph',
+      resourceUri: 'ui://nowledgemem/graph',
+      appName: 'NowledgeMem',
+    });
+    // The writer validates stored tool calls with the same message schema.
+    expect(ToolCallMessageSchema.safeParse(tool).success).toBe(true);
+  });
+
+  it.each([
+    ['a non-ui resource', { ...app, resourceUri: 'https://example.com/app.html' }],
+    ['an unknown version', { ...app, version: 2 }],
+    ['an oversized server name', { ...app, server: 'x'.repeat(2049) }],
+    ['a missing tool', { ...app, tool: undefined }],
+  ])('ignores %s', (_label, mcpApp) => {
+    const tool = readTool([started(mcpApp)]);
+
+    expect(tool?.status).toBe('in_progress');
+    expect(tool?.mcpApp).toBeUndefined();
+  });
+
+  it('drops an unknown display mode instead of the whole descriptor', () => {
+    const tool = readTool([started({ ...app, preferredDisplayMode: 'pip' })]);
+
+    expect(tool?.mcpApp).toEqual({
+      server: 'codex_apps',
+      tool: 'explore_graph',
+      resourceUri: 'ui://nowledgemem/graph',
+      appName: 'NowledgeMem',
+    });
+  });
+
+  it('rejects a stored descriptor whose resource is not a ui:// URI', () => {
+    const stored = {
+      type: 'tool_call',
+      toolCallId: 'mcp-1',
+      status: 'completed',
+      mcpApp: { server: 's', tool: 't', resourceUri: 'file:///etc/passwd' },
+    };
+
+    expect(ToolCallMessageSchema.safeParse(stored).success).toBe(false);
   });
 });

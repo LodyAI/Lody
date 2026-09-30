@@ -641,6 +641,87 @@ describe('LoroStreamsMachineRpcClient', () => {
     client.stop();
   });
 
+  it('round-trips MCP App requests and maps a transport error to an unavailable app', async () => {
+    const fake = createFakeStreamClient();
+    const client = new LoroStreamsMachineRpcClient({
+      workspaceId: 'workspace-1',
+      machineId: 'machine-1',
+      streamClient: fake.streamClient,
+    });
+    const target = { sessionId: 'session-1', toolCallId: 'call-1', userId: 'user-1' };
+
+    const toolPromise = client.requestSessionMcpApp({
+      op: 'tool_call',
+      ...target,
+      name: 'refresh',
+      arguments: { depth: 2 },
+    });
+    await vi.waitFor(() => expect(fake.appended).toHaveLength(1));
+    const toolRequest = fake.appended[0]?.value as { id: string; params: unknown };
+    expect(toolRequest).toMatchObject({
+      method: 'session/mcp-app',
+      params: { op: 'tool_call', ...target, name: 'refresh', arguments: { depth: 2 } },
+    });
+    const result = { content: [{ type: 'text', text: 'ok' }], structuredContent: { nodes: 3 } };
+    fake.pushBatch({
+      messages: [
+        {
+          jsonrpc: '2.0',
+          id: toolRequest.id,
+          method: 'session/mcp-app',
+          rpcVersion: '1',
+          machineId: 'machine-1',
+          result: {
+            type: 'session/mcp-app_response',
+            sessionId: 'session-1',
+            toolCallId: 'call-1',
+            ok: true,
+            result,
+          },
+        },
+      ],
+      nextOffset: '1',
+      cursor: 'cursor-1',
+      upToDate: true,
+    });
+    await expect(toolPromise).resolves.toEqual({
+      type: 'session/mcp-app_response',
+      sessionId: 'session-1',
+      toolCallId: 'call-1',
+      ok: true,
+      result,
+    });
+
+    const loadPromise = client.requestSessionMcpApp({ op: 'load', ...target });
+    await vi.waitFor(() => expect(fake.appended).toHaveLength(2));
+    const loadRequest = fake.appended[1]?.value as { id: string };
+    fake.pushBatch({
+      messages: [
+        {
+          jsonrpc: '2.0',
+          id: loadRequest.id,
+          method: 'session/mcp-app',
+          rpcVersion: '1',
+          machineId: 'machine-1',
+          error: { code: 'invalid_request', message: 'Unknown method' },
+        },
+      ],
+      nextOffset: '2',
+      cursor: 'cursor-2',
+      upToDate: true,
+    });
+    await expect(loadPromise).resolves.toEqual({
+      type: 'session/mcp-app_response',
+      sessionId: 'session-1',
+      toolCallId: 'call-1',
+      ok: false,
+      code: 'MCP_APP_UNAVAILABLE',
+      error: 'invalid_request: Unknown method',
+    });
+
+    client.stop();
+  });
+
   it('shares one workspace response stream across multiple machine clients', async () => {
     const fake = createFakeStreamClient();
     const responseDispatcher = new LoroStreamsRpcResponseDispatcher({
