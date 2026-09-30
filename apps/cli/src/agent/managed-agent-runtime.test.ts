@@ -133,23 +133,23 @@ describe('ManagedAgentRuntimeManager', () => {
       JSON.stringify(
         options.metadataFormat === 'legacy'
           ? {
-            name: 'codex',
-            version: options.version,
-            platform: 'linux-x64',
-            archiveSha256,
-            archiveSize,
-            installedAt: options.installedAt,
-          }
+              name: 'codex',
+              version: options.version,
+              platform: 'linux-x64',
+              archiveSha256,
+              archiveSize,
+              installedAt: options.installedAt,
+            }
           : {
-            schemaVersion: 1,
-            runtimeName: 'codex',
-            runtimeVersion: options.version,
-            platformArch: 'linux-x64',
-            command: 'bin/codex',
-            archiveSha256,
-            archiveSize,
-            installedAt: options.installedAt,
-          }
+              schemaVersion: 1,
+              runtimeName: 'codex',
+              runtimeVersion: options.version,
+              platformArch: 'linux-x64',
+              command: 'bin/codex',
+              archiveSha256,
+              archiveSize,
+              installedAt: options.installedAt,
+            }
       )
     );
     await writeFile(join(dir, '.lody-complete'), '');
@@ -905,7 +905,7 @@ describe('ManagedAgentRuntimeManager', () => {
     const fetchError = new TypeError('fetch failed', { cause: lowLevel });
     const error = new ManagedRuntimeError(
       'Failed to fetch managed runtime https://runtime.example.test/runtime.tar.zst: ' +
-      formatManagedRuntimeFailureMessage(fetchError),
+        formatManagedRuntimeFailureMessage(fetchError),
       { cause: fetchError }
     );
 
