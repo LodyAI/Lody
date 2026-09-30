@@ -22,6 +22,8 @@ startup retry, without serializing native refresh.
 [The draft Spec](../../../../specs/codex-account-profiles.md) owns the intended
 product contract. Profiles live under the execution host's Lody data directory;
 nonsecret metadata binds workspace, machine, provider, profile, mode, and endpoint.
+The ChatGPT keyring-only choice below was later replaced by the
+[native-storage compatibility decision](../../implemented/bug-fix/2026-09-29-codex-profile-native-auth-storage.md).
 Codex owns OAuth refresh. Lody stages API key generations in `@napi-rs/keyring`
 2.1.0, requiring durable Linux Secret Service rather than an ephemeral keyutils
 fallback. No renderer reads saved secrets back. Remote input uses the existing

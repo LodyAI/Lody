@@ -114,9 +114,8 @@ export function UserMessageEditor({
         skillAgent={skillAgent}
         currentSessionId={currentSessionId}
         mentionSurface="session_chat"
-        // The editor lives mid-conversation — the menu tracks the caret like a
-        // text-completion popup (flipping above the line when there's no room
-        // below), instead of docking to the card the way the bottom composer does.
+        // The editor lives mid-conversation, so the menu follows the caret and
+        // flips above the line when there is no room below.
         // The <640px docked strip is built for a bottom composer above the
         // keyboard; with no bottom composer it would open clipped off-screen
         // above the editor, so mobile keeps the floating popover too.

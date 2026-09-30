@@ -139,8 +139,8 @@ function TwoLevelMentionMenu({
   templateScope?: PromptShortcutScope;
   promptShortcutSource?: MentionCategorySources['promptShortcut'];
   menuSide?: 'top' | 'bottom';
-  /** `composer` anchors the menu to the nearest `[data-mention-frame]`; `caret`
-   *  follows the caret line like a text-completion popup. */
+  /** `caret` follows the insertion point; `composer` fixes the menu to the
+   *  nearest `[data-mention-frame]`. Defaults to `caret`. */
   menuAnchor?: 'caret' | 'composer';
   /** Keep the <640px docked panel. False keeps the floating caret popover on
    *  mobile — for an editor mid-conversation where there is no bottom composer
@@ -694,12 +694,10 @@ export interface CombinedMentionTextareaProps extends Omit<
   skillAgent?: SkillMentionAgent;
   /** Entry point for mention analytics (spec §8e). Defaults to 'unknown'. */
   mentionSurface?: MentionSurface;
-  /** Side the two-level menu opens on. The composer (bottom of the screen)
-   *  uses `top`; only meaningful for the default `composer` anchor. */
+  /** Preferred side; an explicit `top` caret menu scrolls above unless no row fits. */
   menuSide?: 'top' | 'bottom';
-  /** `composer` anchors the menu to the composer's `[data-mention-frame]` box;
-   *  `caret` follows the caret like a text-completion popup. The edit-and-resend
-   *  editor uses `caret`. */
+  /** `caret` follows the insertion point; `composer` fixes the menu to the
+   *  nearest `[data-mention-frame]`. Defaults to `caret`. */
   menuAnchor?: 'caret' | 'composer';
   /** Keep the <640px docked panel. False keeps the floating caret popover on
    *  mobile — for an editor mid-conversation where there is no bottom composer

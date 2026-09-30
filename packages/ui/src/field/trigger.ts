@@ -1,4 +1,5 @@
 import * as stylex from '@stylexjs/stylex';
+import { text } from '../tokens/scales.stylex';
 import { field } from './field.tokens.stylex';
 
 /**
@@ -15,7 +16,9 @@ export const trigger = stylex.create({
     gap: field.triggerGap,
     textAlign: 'start',
     whiteSpace: 'nowrap',
-    lineHeight: 1,
+    // The value clips its inline overflow to elide long labels. Keep enough
+    // line box for descenders (g, p, y) and CJK glyphs at the 13px field size.
+    lineHeight: text.subheadlineLeading,
     userSelect: 'none',
     // A trigger opens a list; it is not a button that acts, so it keeps the
     // arrow the way a native select does rather than taking the hand.

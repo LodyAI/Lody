@@ -1,5 +1,6 @@
 import { globalShortcut } from 'electron'
 import Conf from 'conf'
+import { createSettingsStoreWithFallback } from '../settings-store-core'
 import {
   GLOBAL_SHORTCUT_DEFAULTS,
   bindingToElectronAccelerator,
@@ -53,17 +54,23 @@ const ConfConstructor: typeof Conf = resolvedConf
  * else (persistence, listing, rebinding, conflict handling) is generic here.
  */
 export class GlobalShortcutsService {
-  private readonly store = new ConfConstructor<GlobalShortcutsSchema>({
-    projectName: 'lody-desktop',
-    configName: 'global-shortcuts',
-    defaults: { overrides: {} },
-    schema: {
-      overrides: {
-        type: 'object',
-        additionalProperties: { anyOf: [{ type: 'string' }, { type: 'null' }] }
-      }
-    }
-  })
+  private readonly store = createSettingsStoreWithFallback<GlobalShortcutsSchema>(
+    () =>
+      new ConfConstructor<GlobalShortcutsSchema>({
+        projectName: 'lody-desktop',
+        configName: 'global-shortcuts',
+        defaults: { overrides: {} },
+        schema: {
+          overrides: {
+            type: 'object',
+            additionalProperties: {
+              anyOf: [{ type: 'string' }, { type: 'null' }]
+            }
+          }
+        }
+      }),
+    { configName: 'global-shortcuts', defaults: { overrides: {} } }
+  )
 
   private readonly handlers = new Map<GlobalShortcutId, () => void>()
   /** id -> the Electron accelerator currently registered for it. */

@@ -7,7 +7,6 @@ import {
   getScheduleRoomId,
   getServerNow,
   getSessionRoomId,
-  hasExplicitSchedulePermission,
   isLoroRepoDocDeleted,
   machineSupportsSchedulesProtocol,
   ScheduleRuntimeRowSchema,
@@ -173,22 +172,13 @@ export async function executeScheduleCommand(
   const now = getServerNow();
   if (command.action === 'create' || command.action === 'edit') {
     if (!machine) throw new Error('Target machine is unavailable');
-    const { readAgentAcpCapability, resolveTurnDispatchConfig, validateSessionCreateOptions } =
+    const { resolveTurnDispatchConfig, validateSessionCreateOptions } =
       await import('@/commands/session');
     const draft = command.draft;
     const configId = draft.agent.agentConfigId as AgentConfigId;
     const agent = await readMergedAgentConfigById(manager.repo, workspaceId, machine.id, configId);
     if (!agent.config || agent.config.machineId !== machine.id)
       throw new Error('Selected Agent is unavailable on the target machine');
-    const capability = await readAgentAcpCapability({
-      manager,
-      workspaceId,
-      machineId: machine.id,
-      agentConfigId: configId,
-      localOnly,
-    });
-    if (!hasExplicitSchedulePermission(draft.agent, capability))
-      throw new Error('Choose an explicit permission mode supported by the Agent');
     if (draft.project?.kind === 'local') {
       const flock = await manager.repo.openFlockDoc(getMachineFlockDocId(workspaceId, machine.id));
       const projects = getMachineFlockLocalProjects(

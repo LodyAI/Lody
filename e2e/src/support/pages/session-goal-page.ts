@@ -293,7 +293,9 @@ export class GoalSessionPage {
   }
 
   private goalDetails(): Locator {
-    return this.page.getByRole('dialog', { name: /^(Goal|目标)$/u });
+    return this.page.getByRole('dialog').filter({
+      hasText: new RegExp(`${GOAL_OBJECTIVE}|${UPDATED_GOAL_OBJECTIVE}`, 'u'),
+    });
   }
 
   private async expectGoalStage(status: RegExp, objective: string): Promise<void> {

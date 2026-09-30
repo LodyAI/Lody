@@ -1,9 +1,10 @@
 # Shared UI helpers and file surfaces
 
-Edit `AGENTS.md`, not its `CLAUDE.md` symlink. Rules also bind callers changing
-crash recovery, caches, files or IPC typing.
-Rationale: [components](../../../../.agents/docs/components-package.md) and
-[file paths](../../../../.agents/docs/components-file-paths.md).
+Rules bind callers too.
+Background: [components](../../../../.agents/docs/components-package.md),
+[files](../../../../.agents/docs/components-file-paths.md).
+
+- Send acceptance and RPC await local commits, never Repo-wide flush.
 
 ## Electron IPC types
 

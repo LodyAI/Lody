@@ -434,7 +434,12 @@ interface SessionManagerEvents {
     accountingId?: string;
   }) => void;
   onContextWindowUsageUpdate: (sessionId: SessionId, usage: SessionContextWindowUsage) => void;
-  onRateLimitUpdate: (machineId: MachineId, cliType: CliType, limits: RateLimit) => void;
+  onRateLimitUpdate: (
+    machineId: MachineId,
+    agentConfigId: AgentConfigId | undefined,
+    cliType: CliType,
+    limits: RateLimit
+  ) => void;
   onThreadGoalUpdated: (
     sessionId: SessionId,
     goal: Extract<MessageContent, { type: 'goal' }>
@@ -1282,9 +1287,12 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
         'session.createSessionInner.prepared',
         sessionId
       );
-      session.updateGitIdentity(config.userName, config.userEmail, config.requesterUserId, {
-        preferMachineIdentity: config.requesterUserId === this.cloudPort.identity.userId,
-      });
+      session.updateGitIdentity(
+        config.userName,
+        config.userEmail,
+        config.requesterUserId,
+        await this.resolveGitIdentityOptions(config.requesterUserId)
+      );
       const acpSessionId = await prepared.agentResult;
       const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
       await sessionDoc.setACPSessionId(acpSessionId as ACPSessionId);
@@ -1374,7 +1382,13 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       onRateLimitUpdate: (limits: RateLimit) => {
         dispatchEvent(() => {
           if (config.agentCliType === 'builtin' && isManagedBuiltinAgentType(config.agentType)) {
-            this.emit('onRateLimitUpdate', this.machineId, config.agentType, limits);
+            this.emit(
+              'onRateLimitUpdate',
+              this.machineId,
+              config.agentConfigId,
+              config.agentType,
+              limits
+            );
           }
         });
       },
@@ -1440,9 +1454,12 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     );
     const sessionId = config.sessionId!;
     this.logger.debug(`[${sessionId}] Session workdir resolved: ${session.getWorkdir()}`);
-    session.updateGitIdentity(config.userName, config.userEmail, config.requesterUserId, {
-      preferMachineIdentity: config.requesterUserId === this.cloudPort.identity.userId,
-    });
+    session.updateGitIdentity(
+      config.userName,
+      config.userEmail,
+      config.requesterUserId,
+      await this.resolveGitIdentityOptions(config.requesterUserId)
+    );
     let acpSessionId: string | undefined;
 
     const launchResolutionStartedAt = performance.now();
@@ -1627,6 +1644,32 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       customAcp: config.customAcp,
       runtimeOverrides: config.runtimeOverrides,
     });
+  }
+
+  /**
+   * Commit identity follows the same precedence as GitHub credentials: a
+   * requester who enabled "Act as you" commits as themselves; otherwise the
+   * machine owner may use the machine's global Git identity. Policy lookup
+   * failures degrade to "not enabled" rather than blocking the turn.
+   */
+  async resolveGitIdentityOptions(
+    requesterUserId: string
+  ): Promise<{ preferMachineIdentity: boolean; personalIdentityEnabled: boolean }> {
+    const preferMachineIdentity = requesterUserId === this.cloudPort.identity.userId;
+    const tokenManager = this.getGitHubTokenManager();
+    if (!tokenManager) return { preferMachineIdentity, personalIdentityEnabled: false };
+    try {
+      const policy = await tokenManager.getCredentialPolicy({
+        requesterUserId,
+        machineId: this.machineId,
+      });
+      return { preferMachineIdentity, personalIdentityEnabled: policy.personalEnabled };
+    } catch (error) {
+      this.logger.warn(
+        `Could not read the GitHub identity preference for ${requesterUserId}; committing without personal identity: ${formatErrorMessage(error)}`
+      );
+      return { preferMachineIdentity, personalIdentityEnabled: false };
+    }
   }
 
   private async prepareGitHubRepoSessionConfig(config: SessionConfig): Promise<void> {

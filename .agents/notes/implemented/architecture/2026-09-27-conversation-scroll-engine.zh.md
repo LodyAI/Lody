@@ -605,6 +605,50 @@ keyed 布局本身已在 P2 迁入引擎。
 - 上线后：读取惯性计数和诊断，决定是否做 iOS 正方向延期扩展，审计低于 `ENGINE_MIN_ROW_PX` 的行，并剖析长对话性能。
 - Spec 已按 `draft` 修订（按行恢复；打开时绝不空白）。
 
+## 隐藏的视口（2026-09-29）
+
+**故障。** 0.101.0 在 `SessionChatStream` 边界里因 React #185 崩溃。崩溃报告的
+render trace 显示，用户刚离开的子 tab 在切走后约 50ms 内出现了
+`scroll-engine <tab> commit covered=false … ×51`。这个 tab 第一次被隐藏时也出现过
+同样的一串。
+
+**原因。** 非激活的子 tab 以 `display: none` 保持挂载（`session-detail.tsx`）。
+没有布局框的视口，所有偏移和尺寸都读成 0，写入也会被丢弃。适配器仍在每次 commit
+后运行一次事务。写入虽然被丢弃，但 `writePhase` 把期望偏移夹到了隐藏后的范围，
+于是接受了 `0` 并上报 `onScroll(0)`。这个偏移会进入视图中由位置派生的状态：顶部
+渐隐、大纲索引，以及会移动 hydration 窗口的可见轮次上报。这些更新发生在 layout
+effect 里，列表因此同步 commit，又一次上报 0。大多数 tab 在约三次 commit 内到达
+不动点，这个 tab 没有。scroll repro 笔记里记录的锚点 ↔ hydration 翻转很可能是驱动
+因素，但用合成数据没有复现出来。
+
+**决定。** 视口隐藏时暂停引擎。`SessionChatInterface.isVisible` 经
+`SessionChatStream`、`SessionChatStreamView` 传到滚动器的 `hidden` prop，在 render
+中调用 `controller.setHidden`。隐藏期间：
+
+- `afterCommit` 记录已提交的计划，但不开启事务；
+- 忽略 scroll 事件、行和视口的 resize、命令和 glide，进行中的 glide 会被取消；
+- 保留意图（follow、read 锚点、sent），期间发出的命令在 tab 显示时生效；
+- 不测量尺寸，零高度不会进入 geometry。
+
+重新显示后的第一个事务（`reshow`）会刷新视口，不把 DOM 偏移当作读者的移动（浏览器
+可能已经丢弃了它），并以绝对写入落到保留的意图。`lastObserved` 不重置，所以隐藏
+期间 `scrollOffset` 保持最后一次真实值。以隐藏状态挂载的列表要等到首次显示才完成
+首个周期。warm window 的显示不受影响，因为它只等待可见的目标 stream。
+
+**备选方案。**
+
+- _从 DOM 检测有没有布局框_（`getClientRects()`、`offsetParent`）。它能覆盖忘了传
+  prop 的宿主。但 jsdom 把所有元素都报告为没有布局框，所有依赖首个周期完成的测试都会
+  卡住。它也违背了仓库"隐藏时的工作由实际可见性驱动"的规则。
+- _抑制消费方_：只上报变化了的偏移，或限制 hydration 反馈。这两种都只去掉一个驱动
+  因素，引擎仍会给没有位置的视口编造位置。
+
+**测试。** 模型：`tests/conversation-scroll-engine.test.ts` 的 `hidden viewport`。
+模拟器模拟 `display: none`（读数为零、写入被丢弃、偏移丢失）。隐藏中的读者和跟随者
+都不上报、不写入，再次显示时分别回到锚定的行，或回到隐藏期间流入内容的真实底部。
+适配器：`tests/engine-conversation-scroller.test.tsx` 中一个在偏移为 0 时翻转状态的
+视图，去掉暂停时复现 "Maximum update depth exceeded"，加上后通过。
+
 ## 证据
 
 - 代码：

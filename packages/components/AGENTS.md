@@ -49,7 +49,12 @@ mobile surfaces. Background for the rules below:
   `NODE_ENV=test` — a `production` value resolves React to a build without `act`.
 - System theme state, persistence, and browser preference tracking are owned by
   `next-themes`. Keep Lody's wrapper focused on preview state, fixed VS Code theme
-  application, and the Electron native-theme bridge.
+  application, and the host bridges: it mirrors the COMMITTED theme (never a
+  preview) to the host that paints before the renderer runs — Electron main via
+  `app.setStartupThemeSource`, a native mobile shell via
+  `window.__LODY_STARTUP_THEME__.persist` (type here, like `LodyLiveActivityBridge`;
+  the shell implements it from its own storage). The renderer's own first frame
+  needs no help: `lib/boot-shell-script.ts` applies the class before parse.
 - Never `@source`-scan a third-party component library in `src/tailwind/index.css`:
   it emits that library's utilities globally. Konsta's `last-child-hairline-b-none`
   (unanchored `:last-child … ::after`) made every portal open/close restyle the whole

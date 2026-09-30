@@ -15,10 +15,11 @@
   `locale` with `toIntlLocaleOrEn`; `zh_CN` is a RangeError). `AgentRunRef` and the project
   selector live in `components/shared`; the Agent and machine controls are the
   composer's (`sessions/desktop-run-config-menu.tsx`).
-- Save needs an Agent with an explicit permission mode on an owned, capable
-  machine; never a project (none = plain chat, end to end). No consent checkbox,
-  directory-scope checkbox, full-access warning or resume dialog — do not add one
-  back in any shape; ownership, capability and permission still gate save/run.
+- Save/run require an Agent on an owned, capable machine. The composer supplies
+  displayed defaults; do not require an explicit permission pin or capability
+  cache just to save. Ordinary Session config validation owns runtime support.
+  No project is required (none = plain chat). No consent checkbox, directory-scope
+  checkbox, full-access warning or resume dialog.
 - The list is the page; no tabs, no dialog. `routes/…/schedules.tsx` is a
   layout route that mounts `SchedulesWorkspace` once (its index and `$scheduleId`
   children render nothing), so opening a schedule animates instead of
@@ -41,13 +42,10 @@
   timed/manual is a row (`Tabs`) in it. The name is larger and semibold and
   autofocuses on a new schedule. Do not fork look-alikes of
   these controls; pass props to the shared ones.
-- The machine is its own choice (owned machines with agents). A new schedule
-  opens as the chat landing left things: `pickScheduleAgent` over
-  `readChatLandingDefaults`, then `seedScheduleAgentRunRef` fills that Agent's
-  remembered model, options and permission (`agentDefaultsCache`). A new machine
-  or a newly picked Agent is seeded the same way, so the controls always show a
-  complete choice; the seed fills permission exactly where
-  `hasExplicitSchedulePermission` reads it and never carries credential options.
+- Machine choices are owned machines with agents. New schedules use
+  `pickScheduleAgent` over `readChatLandingDefaults`, then `seedScheduleAgentRunRef`
+  to restore the landing's Agent, model, options and advertised permissions from
+  `agentDefaultsCache`. Reseed on machine or Agent changes; never carry credentials.
 - `collectScheduleSaveIssues` tags every blocker with the control that fixes it
   (`form | machine | agent | destination`) and `missing | invalid`. Each is an
   exclamation mark (`FieldIssueMark`) next to that control, never a list at the

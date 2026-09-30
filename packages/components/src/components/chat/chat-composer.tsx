@@ -704,9 +704,7 @@ export function ChatComposer({
         ) : null}
 
         {!isDialog ? (
-          // The `@` menu opens against this frame, above the chip row, so it lines
-          // up with the composer and never cuts a chip in half.
-          <div data-mention-frame="" className={cn('flex flex-col', isLanding ? 'gap-2' : 'gap-1')}>
+          <div className={cn('flex flex-col', isLanding ? 'gap-2' : 'gap-1')}>
             {/* Top selector (repo, branch) - shown outside and above the input box */}
             {topSelector ? (
               <div className="flex w-full min-w-0 select-none items-center gap-1">
@@ -715,6 +713,7 @@ export function ChatComposer({
             ) : null}
             <div
               ref={composerBoxRef}
+              data-mention-frame=""
               className={cn(boxContainerClassName, imageDropClassName, 'group relative')}
               onDragEnter={canHandleImageDrop ? handleImageDragEnter : undefined}
               onDragOver={canHandleImageDrop ? handleImageDragOver : undefined}
@@ -942,6 +941,7 @@ export function ChatComposer({
 
               <CombinedMentionTextarea
                 enablePromptShortcuts={shortcutsEnabled}
+                menuSide="top"
                 id={promptId}
                 ref={promptRef}
                 mentionSource={mentionSource}

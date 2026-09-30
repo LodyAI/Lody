@@ -41,6 +41,26 @@ describe('GitHubTokenManager', () => {
     expect(actionMock.mock.calls[0]?.[0]).toBe('github.getAccessTokenByRepoNameForCli');
   });
 
+  it('returns the backend reason when the personal candidate is unavailable', async () => {
+    actionMock.mockResolvedValueOnce({
+      success: false,
+      errorCode: 'personal_unavailable',
+      errorMessage: 'personal_token_refresh_failed',
+    });
+    const manager = new GitHubTokenManager({
+      serverUrl: 'http://example.test',
+      cliToken: 'cli',
+      workspaceId: 'ws',
+    });
+    await expect(
+      manager.getCredentialCandidate(
+        'Owner/Repo',
+        { requesterUserId: 'user', machineId: 'machine' },
+        'personal'
+      )
+    ).resolves.toEqual({ available: false, reason: 'personal_token_refresh_failed' });
+  });
+
   it('caches by repo (not by owner) for repo-scoped tokens', async () => {
     actionMock
       .mockResolvedValueOnce({

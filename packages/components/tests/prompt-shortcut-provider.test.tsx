@@ -3,7 +3,7 @@
 import React, { act, createElement, StrictMode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { PromptShortcutRuntime } from '@lody/shared/prompt-shortcuts';
+import { PromptShortcutRuntime } from '@lody/shared/prompt-shortcuts';
 
 const fixture = vi.hoisted(() => {
   const session = { status: 'authenticated', user: { id: 'user-a' } };
@@ -16,19 +16,17 @@ const fixture = vi.hoisted(() => {
     makePlatform,
     platform: makePlatform(),
     workspaceId: 'workspace-a',
-    featureEnabled: true,
     directory: [],
     createRepo: vi.fn(),
     openStore: vi.fn(),
     closeStore: vi.fn(),
+    records: [] as unknown[],
   };
 });
 
 vi.mock('jotai', () => ({
-  useAtomValue: (atom: string) =>
-    atom === 'feature' ? fixture.featureEnabled : { workspaceId: fixture.workspaceId },
+  useAtomValue: () => ({ workspaceId: fixture.workspaceId }),
 }));
-vi.mock('@/atoms/settings', () => ({ promptShortcutsFeatureEnabledAtom: 'feature' }));
 vi.mock('@/atoms/runtime', () => ({ activeWorkspaceRuntimeAtom: 'workspace' }));
 vi.mock('@/hooks/use-resolved-workspace-scope', () => ({
   useResolvedWorkspaceScope: ({ enabled }: { enabled: boolean }) => ({
@@ -47,9 +45,10 @@ vi.mock('@/lib/cloud-api-operations', () => ({ cloudOperations: { promptShortcut
 vi.mock('loro-repo', () => ({ LoroRepo: { create: fixture.createRepo } }));
 vi.mock('loro-repo/storage/indexeddb', () => ({ IndexedDBStorageAdaptor: class {} }));
 vi.mock('@lody/shared/prompt-shortcuts', async () => {
-  const { PromptShortcutRuntime } = await import('../../shared/src/prompt-shortcuts/runtime');
+  const { PromptShortcutRuntime: ActualRuntime } =
+    await import('../../shared/src/prompt-shortcuts/runtime');
   return {
-    PromptShortcutRuntime,
+    PromptShortcutRuntime: ActualRuntime,
     LocalShortcutStore: { open: fixture.openStore },
     PromptShortcutSync: class {
       async dispose() {}
@@ -102,14 +101,14 @@ describe('PromptShortcutProvider lifecycle', () => {
 
   beforeEach(() => {
     fixture.workspaceId = 'workspace-a';
-    fixture.featureEnabled = true;
     fixture.platform = fixture.makePlatform();
+    fixture.records = [];
     fixture.closeStore.mockReset().mockResolvedValue(undefined);
     fixture.createRepo.mockReset().mockImplementation(async () => ({ destroy: async () => {} }));
     fixture.openStore.mockReset().mockImplementation(async (identity) => ({
       ...identity,
       discovery: () => ({ directory: [], entries: [] }),
-      list: () => [],
+      list: () => fixture.records,
       applyRemoteDeletions: async () => {},
       cacheDiscovery: async () => {},
       dispose: () => fixture.closeStore(),
@@ -124,16 +123,17 @@ describe('PromptShortcutProvider lifecycle', () => {
   afterEach(async () => {
     await act(async () => root.unmount());
     container.remove();
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
   });
 
-  it.each(['readiness', 'feature', 'workspace'] as const)(
+  it.each(['readiness', 'workspace'] as const)(
     'never resurrects a disposed runtime after %s returns to the same scope',
     async (transition) => {
       await render();
       const first = current!;
       expect(container.textContent).toBe('workspace-a');
 
-      if (transition === 'feature') fixture.featureEnabled = false;
       if (transition === 'workspace') fixture.workspaceId = 'workspace-b';
       await render(transition !== 'readiness');
       expect(() => first.setDirectory([])).toThrow('Shortcut runtime disposed');
@@ -143,7 +143,6 @@ describe('PromptShortcutProvider lifecycle', () => {
         await opening.promise;
         return { destroy: async () => {} };
       });
-      fixture.featureEnabled = true;
       fixture.workspaceId = 'workspace-a';
       rendered = [];
       await render();
@@ -196,5 +195,52 @@ describe('PromptShortcutProvider lifecycle', () => {
     expect(current).not.toBeNull();
     expect(current).not.toBe(first);
     expect(container.textContent).toBe('workspace-a');
+  });
+
+  it('warms visible shortcut bodies only after an idle window', async () => {
+    const entry = {
+      v: 1 as const,
+      id: 'shortcut-a',
+      workspaceId: 'workspace-a',
+      ownerUserId: 'user-a',
+      visibility: 'private' as const,
+      name: 'Review',
+      slug: 'review',
+      description: 'Review this change',
+      scope: {},
+      revision: 'revision-a',
+      createdAt: 1,
+      updatedAt: 1,
+      bodyDocId: 'body-a',
+      dependencySummary: [],
+    };
+    fixture.records = [{ entry, published: entry, operation: null, deleted: false }];
+    const idleCallbacks = new Map<number, IdleRequestCallback>();
+    let nextIdleHandle = 1;
+    vi.stubGlobal(
+      'requestIdleCallback',
+      vi.fn((callback: IdleRequestCallback) => {
+        const handle = nextIdleHandle++;
+        idleCallbacks.set(handle, callback);
+        return handle;
+      })
+    );
+    vi.stubGlobal(
+      'cancelIdleCallback',
+      vi.fn((handle: number) => idleCallbacks.delete(handle))
+    );
+    const prefetch = vi
+      .spyOn(PromptShortcutRuntime.prototype, 'prefetch')
+      .mockResolvedValue(undefined);
+
+    await render();
+    expect(prefetch).not.toHaveBeenCalled();
+    expect(idleCallbacks.size).toBe(1);
+    const callback = [...idleCallbacks.values()][0]!;
+    await act(async () => callback({ didTimeout: false, timeRemaining: () => 10 }));
+
+    expect(prefetch).toHaveBeenCalledTimes(1);
+    expect(prefetch.mock.calls[0]?.[0]).toEqual([entry]);
+    expect(prefetch.mock.calls[0]?.[1]?.signal?.aborted).toBe(false);
   });
 });

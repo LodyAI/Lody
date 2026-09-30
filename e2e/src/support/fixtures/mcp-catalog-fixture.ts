@@ -25,6 +25,7 @@ export type McpCatalogAcpEvent = {
   sessionId?: string;
   mode?: string;
   stopReason?: string;
+  purpose?: 'title' | 'turn';
   mcpServers?: AcpMcpServer[];
 };
 

@@ -166,8 +166,13 @@ every popup with a blank row.
 ### Menus
 
 A menu is that same surface with commands on it, so it reads `popup` too and its
-rows are the rows above: one height, one radius, one highlight. Exactly one
-declaration differs. A list takes `--anchor-width`, because the control it
+rows are the rows above: one height, one radius, one highlight. Menu labels use
+weight 400, including submenu, checkbox and radio rows, so peer commands share
+one visual priority. Group headings retain weight 500; selection and hover use
+their marks and fills rather than a heavier label. Composer picker and mention
+rows follow the same menu rule.
+
+A list takes `--anchor-width`, because the control it
 belongs to shows the value it holds and the two read as one control; a menu is
 opened by whatever the surface already had there — often a 28px icon button — so
 it takes `popup.menuWidth` and grows past it for its longest row. A menu scrolls
@@ -837,6 +842,7 @@ under the finger.
 ## Type
 
 - Controls at 13 (`subheadline`), weight 500, `text.controlTracking`.
+- Menu labels use the same size and tracking at weight 400; see [Menus](#menus).
 - Prose at 14 (`body`), weight 400. Field labels and help at 12 (`footnote`).
 - Dialog title is `headline`; `title` is for a full page.
 - Sizes: 28 / 32 / 36. Default 32. 36 only for empty states and onboarding.

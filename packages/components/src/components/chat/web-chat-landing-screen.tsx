@@ -64,8 +64,8 @@ export function WebChatLandingScreen({
             WINDOW_DRAG_EXEMPT_CLASS,
             // macOS Electron: `top-[9px]` centers the h-7 button at 23px, on the
             // traffic-light centerline (`trafficLightPosition.y` 16 + 7px radius
-            // in apps/electron/src/main/window.ts); `left-[96px]` leaves a 24px
-            // buffer after the light cluster (which ends at x=72).
+            // in apps/electron/src/main/window.ts); `left-[96px]` leaves a 20px
+            // buffer after the light cluster (which ends at x=76).
             isMacOSElectronRenderer() && !isElectronFullscreen ? 'top-[9px] left-[96px]' : 'left-3'
           )}
         >

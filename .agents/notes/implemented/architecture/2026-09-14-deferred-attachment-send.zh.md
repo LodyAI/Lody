@@ -139,6 +139,18 @@ Layer 3 validation: full `TMPDIR=/private/tmp NODE_ENV=test pnpm check` passes, 
 
 这只是渲染变更，不改变 journal stage、Effect 生命周期、重试/取消语义、顺序或持久化。`PendingMessageRow` 导出为纯组件，使 Storybook 与 `tests/session-pending-message-row.test.tsx` 不需要 workspace runtime 即可驱动所有状态。回归测试已分别删去重复原因和统一 destructive 样式以确认会失败；ready-file fixture 用来覆盖仅有 ready image 看不到的文件卡回归。已用组件 typecheck、`lint:i18n`、oxlint、完整 481 文件/3,684 测试组件套件，以及 720px 和 380px、浅色和深色的 Storybook 截图验证。浏览器中读取过交叉淡入的 `opacity`、`scale`、`filter` 与 `transition-property`，没有靠假设。两次 mutation 最初静默通过，现已有对应断言：消息状态重新着色、以及移除保留进度行。进度行通过 `data-attachment-progress` 断言，因为 `Progress` 最终合并为同样的 `h-1 w-full`，仅靠样式不能区分；jsdom 没有布局，因此等高先用结构性断言守住，再在浏览器中测量。
 
+## 原位发送（2026-09-29）
+
+在新对话里把图片作为第一条消息发送时，对话流会被加载骨架屏占满，pending 行被压在底部；提交后两者又被一个形状不同的行替换。骨架屏并非真实加载，而来自内容同步状态：创建元数据已带 `lastMessageAt`，而 history 在上传提交前一直为空，于是对话流被判为“有消息但无缓存”（`cold`）。空对话流还把空状态布局为 `flex-1`，把尾部内容推到最底。
+
+- 当 `sessionUnsentNewConversationAtomFamily` 为真且 history 为空时，pending 行本身就是对话流的空状态，位于顶部、即提交后该轮落下的位置，且不再同时作为尾部内容传入。该 atom 只在第一条消息写入时变化，页面级订阅成本很低。
+- `PendingMessageRow` 现在与 `UserMessageRowView` 对齐：头像列（同一 `getUserById` 查询，因此是同一缓存头像）、宽度与容器查询上限、`py-2 sm:py-3` 列、由时间戳加状态槽组成的元信息行（状态槽就是已投递行绘制已读标记的位置），以及使用对话字号的同一文字气泡。提交因此只改变该状态槽：从“等待发送”变为未读/已读标记。
+- 这部分替代了上文的图片卡片决定：图片改用已投递形态的边框（单张按原始比例、最高 10.5rem，多张为大尺寸方块），进度条贴在底边，不再有说明文字，因为说明文字正是提交时整行丢失的高度。失败图片的原因因此经由行级 notice 呈现；文件卡保留说明文字，仍是原因的展示所有者。
+- 动作行始终占 28px 的流式高度，与已投递行悬停显示的动作行一致，提交时下方内容不移动。
+- 写入先到达对话 view，暂存的发送随后才被移除（最初是先于 journal 记录提交；#1118 之后是先于内存列表删除它）。`SessionPendingMessages` 会隐藏 id 已在对话 view 中的发送，并通过字符串快照避免随 token 频率的 view 变化重渲染。否则续聊在这段间隔内可能把同一轮显示两次。
+
+已用组件 typecheck、pending 行测试套件（一个测试在 history 更新后暂停写入，删去过滤即失败）以及 720px 和 380px、浅色和深色的 Storybook 截图验证。合并主线本地优先发送（#1118）后已重新验证。遗留限制：已投递图片提交后仍会从服务端获取缩略图，期间显示自身的加载块；用已上传的 blob 预填该缓存是另一项改动。未在打包应用或原生移动壳中验证。
+
 ## 主线整合（2026-09-27）
 
 已整合主线 `ef242986`。主线输入框等待上传的流程改为立即持久接收 draft，后续传输由 journal 管理。保留当前发送路由及 Queue 反转快捷键、作用域隔离、防重复提交，以及逐字段保护后来替换的草稿。输入框测试改为验证完整附件快照、接收失败重试、仅附件发送和阻断状态；传输与恢复失败继续由 preparation/journal 测试覆盖。保留主线按 key 虚拟列表、回复留白滚动、图片预览和当前 UI 组件。renderer 收尾接在现有 CLI 退出屏障之前，取消时服务不停止，CLI 停止失败仍保留所有权。

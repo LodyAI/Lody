@@ -16,7 +16,6 @@ import {
 } from '@lody/shared/prompt-shortcuts';
 import { Plus, Trash2 } from 'lucide-react';
 import { Spinner } from '@lody/ui/spinner';
-import { promptShortcutsFeatureEnabledAtom } from '@/atoms/settings';
 import { getAllAgentConfigAtom } from '@/atoms/agents';
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import { withClassName } from '@/lib/stylex';
@@ -150,21 +149,6 @@ const styles = stylex.create({
 });
 
 export function PromptShortcutsSetting() {
-  const enabled = useAtomValue(promptShortcutsFeatureEnabledAtom);
-  const { t } = useTranslation();
-  if (!enabled)
-    return (
-      <p {...stylex.props(surface.container)} role="status">
-        {t(
-          'settings.promptShortcuts.disabled',
-          'Enable Prompt Shortcuts under Developer mode in Settings → About to use this feature.'
-        )}
-      </p>
-    );
-  return <EnabledPromptShortcutsSetting />;
-}
-
-function EnabledPromptShortcutsSetting() {
   const state = usePromptShortcuts();
   return (
     <PromptShortcutsSettingContent

@@ -57,3 +57,5 @@ Translation: current
   [composer mention menu v2](../feature/2026-09-25-composer-mention-menu-v2.zh.md)
   （“Design review round 2”）中的定位修复：那里引入了 `positionAnchor="composer"`
   和每次打开按空间选边；本改动把 `@` 菜单的方向钉住。
+- 后来的[光标定位决策](2026-09-29-composer-mention-follows-caret.zh.md)取代了主
+  composer 中的这一固定方向。

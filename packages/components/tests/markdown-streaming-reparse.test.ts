@@ -48,6 +48,20 @@ const TRIPLE_STAR_BOLD_ITALIC_AUTOLINK_MARKDOWN = '***https://example.com***(_br
 const ESCAPED_INTERNAL_DOUBLE_ASTERISK_MARKDOWN = '**https://example.com/\\*\\*path**(`code`)';
 const HTML_ENTITY_BOLD_AUTOLINK_MARKDOWN =
   '**https://example.com/?a=1&amp;b=2**(`fix/some-branch` -> `main`)';
+const INLINE_DISPLAY_MATH_CONTEXT_MARKDOWN = String.raw`The unrestricted identity is:
+
+\[
+F(x) = G(x)+O(1)
+\]
+
+An estimate may resemble\[
+F^{p(t)}(x)
+\le G^t(x)+O(1)
+\]
+
+Here \(p\) is a polynomial.`;
+const PARENTHESIS_INLINE_MATH_MARKDOWN = String.raw`The variable \(x\) is a parameter.`;
+const NORMALIZED_INLINE_MATH_MARKDOWN = 'The variable $$x$$ is a parameter.';
 
 const buildStreamingMarkdownChunks = (count: number): string[] =>
   Array.from({ length: count }, (_, index) => {
@@ -178,26 +192,6 @@ End of synthetic document.`,
     await renderMarkdown('Contact agent-000@example.com before checking https://example.com.');
 
     expect(container?.querySelector('a[href="mailto:agent-000@example.com"]')).not.toBeNull();
-  });
-
-  it('marks only Han-bearing paragraphs for CJK prose alignment', async () => {
-    await renderMarkdown(
-      [
-        '中文正文会使用段落排版。',
-        '',
-        'English prose keeps its start alignment.',
-        '',
-        '- 中文列表项',
-      ].join('\n')
-    );
-
-    const markdownRoot = container?.querySelector('.markdown-renderer');
-    expect(markdownRoot?.querySelector(':scope > p.markdown-cjk-paragraph')?.textContent).toBe(
-      '中文正文会使用段落排版。'
-    );
-    expect(
-      markdownRoot?.querySelector(':scope > p:not(.markdown-cjk-paragraph)')?.textContent
-    ).toBe('English prose keeps its start alignment.');
   });
 
   it.each([false, true])(
@@ -494,6 +488,103 @@ End of synthetic document.`,
 
     expect(container?.querySelectorAll('.katex')).toHaveLength(2);
     expect(container?.querySelectorAll('.katex-display')).toHaveLength(0);
+  });
+
+  it('renders parenthesis inline math through the streaming path when enabled', async () => {
+    const store = createStore();
+    store.set(inlineMathEnabledAtom, true);
+    await renderMarkdownWithStore(PARENTHESIS_INLINE_MATH_MARKDOWN, store, {
+      isStreaming: true,
+    });
+
+    await act(async () => {
+      await import('@lobehub/streamdown');
+    });
+    expect(container?.querySelectorAll('.katex')).toHaveLength(1);
+    expect(container?.querySelectorAll('.katex-display')).toHaveLength(0);
+  });
+
+  it('renders an already normalized inline pair when enabled', async () => {
+    const store = createStore();
+    store.set(inlineMathEnabledAtom, true);
+    await renderMarkdownWithStore(NORMALIZED_INLINE_MATH_MARKDOWN, store);
+
+    expect(container?.querySelectorAll('.katex')).toHaveLength(1);
+    expect(container?.querySelectorAll('.katex-display')).toHaveLength(0);
+  });
+
+  it('updates an existing renderer when the inline math preference changes', async () => {
+    const store = createStore();
+    await renderMarkdownWithStore(PARENTHESIS_INLINE_MATH_MARKDOWN, store);
+    expect(container?.querySelectorAll('.katex')).toHaveLength(0);
+    expect(container?.textContent).toContain('(x)');
+
+    await act(async () => {
+      store.set(inlineMathEnabledAtom, true);
+    });
+
+    expect(container?.querySelectorAll('.katex')).toHaveLength(1);
+    expect(container?.textContent).not.toContain('$$x$$');
+  });
+
+  it('reparses a mounted streaming renderer when inline math is enabled', async () => {
+    const store = createStore();
+    const text = PARENTHESIS_INLINE_MATH_MARKDOWN;
+    await renderMarkdownWithStore(text, store, { isStreaming: true });
+    expect(container?.querySelectorAll('.katex')).toHaveLength(0);
+
+    await act(async () => {
+      store.set(inlineMathEnabledAtom, true);
+    });
+
+    await act(async () => {
+      await import('@lobehub/streamdown');
+    });
+    expect(container?.querySelectorAll('.katex')).toHaveLength(1);
+    expect(container?.textContent).not.toContain('$$x$$');
+  });
+
+  it('renders later inline math after prose-positioned display delimiters', async () => {
+    const store = createStore();
+    await renderMarkdownWithStore(INLINE_DISPLAY_MATH_CONTEXT_MARKDOWN, store);
+
+    expect(container?.querySelectorAll('.katex-display')).toHaveLength(2);
+
+    await act(async () => {
+      store.set(inlineMathEnabledAtom, true);
+    });
+
+    expect(container?.querySelectorAll('.katex-display')).toHaveLength(2);
+    expect(container?.textContent).not.toContain('$$p$$');
+    expect(container?.querySelectorAll('.katex').length).toBeGreaterThan(1);
+  });
+
+  it('renders same-line bracket math after prose with the inline preference off', async () => {
+    await renderMarkdown(String.raw`令\[x+y\]。`);
+
+    expect(container?.querySelectorAll('.katex')).toHaveLength(1);
+    expect(container?.querySelectorAll('.katex-display')).toHaveLength(0);
+    expect(container?.textContent).toContain('x+y');
+  });
+
+  it('renders later inline math after prose-positioned display delimiters while streaming', async () => {
+    const store = createStore();
+    await renderMarkdownWithStore(INLINE_DISPLAY_MATH_CONTEXT_MARKDOWN, store, {
+      isStreaming: true,
+    });
+
+    await act(async () => {
+      await import('@lobehub/streamdown');
+    });
+    expect(container?.querySelectorAll('.katex-display')).toHaveLength(2);
+
+    await act(async () => {
+      store.set(inlineMathEnabledAtom, true);
+    });
+
+    expect(container?.querySelectorAll('.katex-display')).toHaveLength(2);
+    expect(container?.textContent).not.toContain('$$p$$');
+    expect(container?.querySelectorAll('.katex').length).toBeGreaterThan(1);
   });
 
   it('keeps code literal when inline math is enabled', async () => {

@@ -73,7 +73,8 @@ execution/consent rules. These rules also bind CLI callers outside that director
   never rewrite the exact opener to the root or treat either as `parentSessionId`.
 - INVARIANT: reasoning effort and fast mode are per MODEL, because an ACP probe's `configOptions`
   describe only the model current at probe time. Validate effort against the TARGET model using
-  `AcpCapabilityCacheEntry.modelReasoningEfforts` and skip the resulting `validatedConfigIds` in
+  `getModelEffortChoices` (the stored per-model declaration first, then
+  `modelReasoningEfforts`) and skip the resulting `validatedConfigIds` in
   `validateTurnConfigOptionValues`; dispatch what cannot be checked offline as requested. Keep
   runtime rejections in debug diagnostics: Codex/Claude mismatches for model, effort, Fast, or Plan
   never become visible `agent_warning` notices, while other rejections still do. Claude Fable

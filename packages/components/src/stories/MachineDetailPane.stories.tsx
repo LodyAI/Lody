@@ -150,7 +150,7 @@ export const OwnWithProviders: Story = {
     machine: {
       ...baseMachine,
       raceLimits: {
-        [getRateLimitEntryKey('claude', 'claude')]: {
+        [getRateLimitEntryKey('claude', 'claude', 'cfg-claude' as AgentConfigId)]: {
           limitId: 'claude',
           scope: { providerId: 'claude' },
           planName: 'Claude Pro',
@@ -167,7 +167,11 @@ export const OwnWithProviders: Story = {
             },
           ],
         },
-        [getRateLimitEntryKey('codex', CODEX_SPARK_LIMIT_ID)]: {
+        [getRateLimitEntryKey(
+          'codex',
+          CODEX_SPARK_LIMIT_ID,
+          'cfg-codex' as AgentConfigId
+        )]: {
           limitId: CODEX_SPARK_LIMIT_ID,
           scope: { providerId: 'codex' },
           planName: 'Codex Spark',

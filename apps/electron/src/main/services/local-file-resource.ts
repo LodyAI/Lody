@@ -41,9 +41,16 @@ export class LocalFileResources {
     try {
       const stat = await handle.stat()
       if (!stat.isFile()) throw new Error('Not a regular file.')
-      const bytes = await readWindow(handle, 0, Math.min(stat.size, LOCAL_TEXT_EDIT_BYTES + 1))
-      const mime = isBinaryImagePath(file.path) ? getImageMimeTypeForPath(file.path) : undefined
-      if (mime) {
+      const isPdf = file.path.toLowerCase().endsWith('.pdf')
+      const imageMime = isBinaryImagePath(file.path)
+        ? getImageMimeTypeForPath(file.path)
+        : undefined
+      const mime = imageMime ?? (isPdf ? 'application/pdf' : undefined)
+      const bytes =
+        mime && !imageMime
+          ? Buffer.alloc(0)
+          : await readWindow(handle, 0, Math.min(stat.size, LOCAL_TEXT_EDIT_BYTES + 1))
+      if (imageMime) {
         const dimensions = imageDimensionsFromData(bytes) ?? legacyImageDimensions(bytes)
         if (!dimensions || dimensions.width <= 0 || dimensions.height <= 0) {
           return {
@@ -188,6 +195,7 @@ export class LocalFileResources {
         'Content-Security-Policy': "default-src 'none'; sandbox",
         // Opaque unguessable capability; never a filesystem path or a wildcard file handler.
         'Access-Control-Allow-Origin': '*',
+        'Access-Control-Expose-Headers': 'Accept-Ranges, Content-Range',
         ...(range ? { 'Content-Range': `bytes ${start}-${end}/${resource.size}` } : {})
       }
       if (request.method === 'HEAD') {

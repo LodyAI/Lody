@@ -22,18 +22,18 @@ Navigating between conversations inside the same page keeps held sends working. 
 
 Scope: new conversations, continuations including child conversations, images, ordinary files and attachment-only messages, on desktop and mobile layouts. The public desktop keeps its [platform boundary](../packages/platform/AGENTS.md). Excluded: OS background transfer, cross-device sync of unsent drafts, recovery of held sends after the page ends, editable text-file controls, a new image editor, and original-path references.
 
-| This PR                                                                                                   | Separate follow-up                                                                                          |
-| --------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| This PR                                                                                                   | Separate follow-up                                                                                       |
+| --------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
 | Draft validation/preview, transfer after Send, in-memory holding, progress, retry/cancel, ordered writing | Original local paths, permanently local generated attachments, new reference protocol, Daemon resolution |
 
 ## 2. Behavior replaced by this design
 
-| Earlier behavior                                                                                  | Current intent                                                                          |
-| ------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
-| Transfer on addition; failed ordinary files silently filtered                                     | Transfer after Send; every attachment must be ready                                     |
-| A crash-durable IndexedDB send journal with staged records, Blob persistence and window recovery | Local CRDT commits for ready sends; in-memory holding for sends awaiting attachments    |
-| Archive, logout, cache clearing, reload and quit gated on unfinished sends                        | Archive/delete cancel held sends; other actions are ungated; only a leave confirmation |
-| A renderer–main send-lifecycle handshake before Electron quit                                     | Quit closes product windows with unload approval before stopping relays or the CLI      |
+| Earlier behavior                                                                                 | Current intent                                                                         |
+| ------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------- |
+| Transfer on addition; failed ordinary files silently filtered                                    | Transfer after Send; every attachment must be ready                                    |
+| A crash-durable IndexedDB send journal with staged records, Blob persistence and window recovery | Local CRDT commits for ready sends; in-memory holding for sends awaiting attachments   |
+| Archive, logout, cache clearing, reload and quit gated on unfinished sends                       | Archive/delete cancel held sends; other actions are ungated; only a leave confirmation |
+| A renderer–main send-lifecycle handshake before Electron quit                                    | Quit closes product windows with unload approval before stopping relays or the CLI     |
 
 The renderer authors messages through WorkspaceWriter / SessionData / HistoryWriter. Keep the [single history writer](session-history-writes.md); no second history path.
 
@@ -84,13 +84,13 @@ Only explicit successful attachment results become ready. Failure/cancellation c
 
 ## 5. New-conversation and continuation flows
 
-| Stage                    | New conversation                                                                                 | Continuation                                                                   |
-| ------------------------ | ------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------ |
-| Send                     | Freeze input/configuration and reuse the reserved session ID; the draft clears                   | Freeze this turn's input/configuration/target; the draft clears                |
-| Attachments preparing    | An in-memory placeholder conversation is openable and listed; the user may start another draft   | A pending row appears; the user may navigate or draft the next message         |
-| All ready                | Creation metadata, then the first turn, written locally with the same IDs                        | The turn (or queue row) written locally with the same ID                       |
-| Failure                  | Creation parameters, text and all attachments stay held with the error; retry keeps the same IDs | The original target and input stay held; retry never rereads another view      |
-| Cancel before writing    | The held send is dropped; no empty session is written; later held sends inherit its creation data | Only this held send is dropped; the Agent and existing queue are untouched     |
+| Stage                 | New conversation                                                                                  | Continuation                                                               |
+| --------------------- | ------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| Send                  | Freeze input/configuration and reuse the reserved session ID; the draft clears                    | Freeze this turn's input/configuration/target; the draft clears            |
+| Attachments preparing | An in-memory placeholder conversation is openable and listed; the user may start another draft    | A pending row appears; the user may navigate or draft the next message     |
+| All ready             | Creation metadata, then the first turn, written locally with the same IDs                         | The turn (or queue row) written locally with the same ID                   |
+| Failure               | Creation parameters, text and all attachments stay held with the error; retry keeps the same IDs  | The original target and input stay held; retry never rereads another view  |
+| Cancel before writing | The held send is dropped; no empty session is written; later held sends inherit its creation data | Only this held send is dropped; the Agent and existing queue are untouched |
 
 Both entry points use the same admission and preparation. A ready send (including one whose attachments were already prepared) is written at once, unless an earlier held send of the same conversation exists. New-session warmup that cannot outlive the upload is canceled; the actual send may cold-start.
 
@@ -100,15 +100,23 @@ Both entry points use the same admission and preparation. A ready send (includin
 
 After synchronously excluding double submission, freeze text, mention spans, references, attachment order, creation parameters, target, Role/revision, model/mode/permissions, MCP selection (including an explicit empty array), and delivery intent. Later edits cannot change a frozen send. Archive and deletion of the target are rechecked when it is written. Preserve click-time mobile keyboard dismissal. Old asynchronous callbacks cannot clear a newer draft.
 
+The latest locally held send supplies the composer's temporary run-config and Role
+baseline, including before a new conversation's empty document hydrates. Explicit
+edits for the next draft take precedence; a runtime snapshot for an older turn does
+not. The same turn ID fences the held send and its eventual history/queue row, so
+writing it cannot consume newer draft edits or flash provider defaults. Failure
+keeps the baseline. Cancellation releases it without overwriting user edits; a newer
+durable turn supersedes it. Runtime disposal and session changes isolate the baseline.
+
 ### 6.2 Minimal message states
 
-| State                          | Meaning and actions                                                              |
-| ------------------------------ | -------------------------------------------------------------------------------- |
-| Preparing                      | Hash, upload/local handoff or server verification; cancelable                   |
-| Waiting for previous message   | An earlier held send of the same conversation has not been written; cancelable  |
-| Failed                         | Not written; the whole message stays held for retry or cancellation             |
-| Written                        | Local commits exist; synchronization and daemon execution follow on their own   |
-| Canceled                       | Only before writing; a late preparation result cannot revive it                 |
+| State                        | Meaning and actions                                                            |
+| ---------------------------- | ------------------------------------------------------------------------------ |
+| Preparing                    | Hash, upload/local handoff or server verification; cancelable                  |
+| Waiting for previous message | An earlier held send of the same conversation has not been written; cancelable |
+| Failed                       | Not written; the whole message stays held for retry or cancellation            |
+| Written                      | Local commits exist; synchronization and daemon execution follow on their own  |
+| Canceled                     | Only before writing; a late preparation result cannot revive it                |
 
 Byte progress and server verification are separate. Within one workspace runtime, each conversation writes in Send order, including later text-only messages. A failed held send blocks the ones behind it until it is retried or canceled. Different conversations progress independently.
 
@@ -116,7 +124,7 @@ Byte progress and server verification are separate. Within one workspace runtime
 
 Held sends are separate from the daemon message queue. Before attachments are ready, neither executable history nor queue rows serve as placeholders.
 
-- **Direct**: write the turn and point `latestUserMsgId` at it (never behind a newer local user turn; never for archived or deleted conversations), flush locally, then send a best-effort dispatch request. A request failure is not a send failure.
+- **Direct**: write the turn and point `latestUserMsgId` at it (never behind a newer local user turn; never for archived or deleted conversations), then send a best-effort dispatch request without waiting for Repo persistence. A request failure is not a send failure.
 - **Queue**: write the queue row. A queue-bound held send renders as a display-only local row at the end of the queue sheet, not in the conversation stream. It offers only retry and cancel, and is replaced by the real row with the same turn ID.
 - **Guide**: write the turn as `pending_apply`, then offer it to the target assistant turn.
   - Applied: the turn is marked processing with applied-steer provenance.
@@ -131,7 +139,7 @@ Applied steers follow the [history contract](session-history-writes.md) and neve
 
 Each send has a fixed turn ID from Send onward; queue rows carry it as `userTurnId`. Retry never generates a new ID. A new conversation keeps its reserved session ID.
 
-The local write is the accept boundary. Creation metadata comes first and writes absent keys only, so later edits win. The turn or queue row follows, then activation for direct sends, then a local flush. Nothing in it waits for the network. Existing transports upload local commits. The daemon dispatches `pending`/`seen` user turns it finds in synchronized history, so a written turn needs no renderer retry loop. A dispatch acknowledgment is acceleration, not proof of execution.
+The local write is the accept boundary. Creation metadata comes first and writes absent keys only, so later edits win. The turn or queue row follows, then activation for direct sends. Repo persistence and transport upload run independently: accepting a send and issuing its RPC do not wait for a Repo-wide flush or network confirmation. Local acceptance alone does not guarantee crash durability before background persistence completes. The daemon dispatches `pending`/`seen` user turns it finds in synchronized history, so a written turn needs no renderer retry loop. A dispatch acknowledgment is acceleration, not proof of execution.
 
 Local acceptance, synchronization and daemon execution are distinct facts. UI must not present local acceptance as daemon receipt.
 
@@ -179,26 +187,27 @@ This migration is temporary and will be removed after a few releases.
 
 These are acceptance requirements, not tests completed by this revision. Use synthetic files, controllable Promises and explicit signals, not sleeps.
 
-| ID  | Trigger                                                                                          | Observable result                                                                                                |
-| --- | ------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------- |
-| A01 | Pick, paste or drop images/files before Send                                                     | No upload, full hash or local handoff; validation and preview work                                               |
-| A02 | Send A with attachments, navigate to B, then A's preparation finishes                            | Only A is written; B's draft and navigation remain; a new-conversation placeholder is reachable                 |
-| A03 | One of two attachments succeeds, or transfer completes but verification is pending                | Nothing is written to history or the queue; the failed file is not omitted                                       |
-| A04 | Double Send, repeated Retry, completion after cancellation                                        | One write per message; canceled work never writes                                                                |
-| A05 | Attachment message A fails, then text B to the same conversation; conversation C is healthy       | B waits while C is written; B is written after A is retried or canceled                                          |
-| A06 | Change Role/model/permissions/MCP/text after Send                                                 | The held send keeps its frozen configuration                                                                     |
-| A07 | New-conversation attachments, leave and return to landing, send, start another draft             | Draft restored; the original session ID is kept; completion preserves the newer draft                           |
-| A08 | Draft in A, switch to B and back, send A and type the next message                               | Isolated drafts; A's completion keeps the next input and needs no mounted composer                              |
-| A09 | Image-only, file-only, mixed, or text plus attachments, in both entry points                     | Type/count/order/text/references preserved; written only when all ready                                          |
-| A10 | Remove/replace attachments or change target before Send; empty or oversized input                | No automatic transfer; final draft used; visible errors, no silent omission                                      |
-| A11 | Retry or cancel a failed held send, including a held first message followed by another held send | Only failed attachments retry; canceling the first hands creation data to the next; no empty session is written |
-| A12 | Ready send while the target is offline or its RPC fails                                          | The turn and activation are written locally; the send is not reported as failed                                 |
-| A13 | Guide answered applied, proven non-delivery, `recoveryOwned`, or uncertain                        | Processing; follow-up with the same ID; nothing; left as written and not replayed                               |
-| A14 | Archive or delete a conversation with a held send, a held child creation, or an in-flight write  | Held sends are canceled; nothing is written after the action resolves; no error about pending messages          |
-| A15 | Close, reload or quit with a held send (browser and Electron, including an auxiliary window)     | One confirmation; Stay keeps everything running; Leave loses the held send                                      |
-| A16 | Logout, cache clearing, or workspace switch with a held send                                     | Not gated; held sends are dropped; cache clearing deletes the retired journal database                          |
-| A17 | Start with leftover legacy journal records                                                       | Absent turns written once; offered guides untouched; unprepared records dropped; empty database deleted          |
-| A18 | Existing upload/local handoff, fallback and legacy local data                                    | Only transfer timing changes; attachment types, fallback/backfill and materialization unchanged                  |
+| ID  | Trigger                                                                                          | Observable result                                                                                                       |
+| --- | ------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------- |
+| A01 | Pick, paste or drop images/files before Send                                                     | No upload, full hash or local handoff; validation and preview work                                                      |
+| A02 | Send A with attachments, navigate to B, then A's preparation finishes                            | Only A is written; B's draft and navigation remain; a new-conversation placeholder is reachable                         |
+| A03 | One of two attachments succeeds, or transfer completes but verification is pending               | Nothing is written to history or the queue; the failed file is not omitted                                              |
+| A04 | Double Send, repeated Retry, completion after cancellation                                       | One write per message; canceled work never writes                                                                       |
+| A05 | Attachment message A fails, then text B to the same conversation; conversation C is healthy      | B waits while C is written; B is written after A is retried or canceled                                                 |
+| A06 | Change Role/model/permissions/MCP/text after Send                                                | The held send keeps its frozen configuration                                                                            |
+| A07 | New-conversation attachments, leave and return to landing, send, start another draft             | Draft restored; the original session ID is kept; completion preserves the newer draft                                   |
+| A08 | Draft in A, switch to B and back, send A and type the next message                               | Isolated drafts; A's completion keeps the next input and needs no mounted composer                                      |
+| A09 | Image-only, file-only, mixed, or text plus attachments, in both entry points                     | Type/count/order/text/references preserved; written only when all ready                                                 |
+| A10 | Remove/replace attachments or change target before Send; empty or oversized input                | No automatic transfer; final draft used; visible errors, no silent omission                                             |
+| A11 | Retry or cancel a failed held send, including a held first message followed by another held send | Only failed attachments retry; canceling the first hands creation data to the next; no empty session is written         |
+| A12 | Ready send while the target is offline or its RPC fails                                          | The turn and activation are written locally; the send is not reported as failed                                         |
+| A13 | Guide answered applied, proven non-delivery, `recoveryOwned`, or uncertain                       | Processing; follow-up with the same ID; nothing; left as written and not replayed                                       |
+| A14 | Archive or delete a conversation with a held send, a held child creation, or an in-flight write  | Held sends are canceled; nothing is written after the action resolves; no error about pending messages                  |
+| A15 | Close, reload or quit with a held send (browser and Electron, including an auxiliary window)     | One confirmation; Stay keeps everything running; Leave loses the held send                                              |
+| A16 | Logout, cache clearing, or workspace switch with a held send                                     | Not gated; held sends are dropped; cache clearing deletes the retired journal database                                  |
+| A17 | Start with leftover legacy journal records                                                       | Absent turns written once; offered guides untouched; unprepared records dropped; empty database deleted                 |
+| A18 | Existing upload/local handoff, fallback and legacy local data                                    | Only transfer timing changes; attachment types, fallback/backfill and materialization unchanged                         |
+| A19 | Send with a non-default model, edit the next draft, then finish/fail/cancel the upload           | Composer keeps the held configuration until superseded; next-draft edits survive history/queue handoff and cancellation |
 
 The [finite model](models/session-files.model.ts) checks only declared draft gates, readiness, ordering and state decisions. It does not establish browser lifecycle or real Agent behavior. Final acceptance includes packaged Electron, browsers and native mobile.
 

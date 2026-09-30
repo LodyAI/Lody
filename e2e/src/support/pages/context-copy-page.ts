@@ -58,14 +58,18 @@ export class ContextCopyPage {
   }
 
   async copyContextThroughFirstUserMessage(): Promise<void> {
+    const conversation = this.page.locator('[data-conversation-scroll-engine]');
+    await conversation.hover();
+    await this.page.mouse.wheel(0, -1000);
+    await expect.poll(() => conversation.evaluate((element) => element.scrollTop)).toBe(0);
     const firstPrompt = this.page.getByText(FIRST_PROMPT_MARKER);
     await expect(firstPrompt).toBeVisible({ timeout: 30_000 });
-    // User turns expose the same real fork popover but lack a turn-id test hook.
-    // The first visible action belongs to the first rendered user turn.
     await firstPrompt.hover();
     await this.page
+      .getByTestId('user-message-metadata')
+      .locator('..')
+      .filter({ hasText: FIRST_PROMPT_MARKER })
       .getByRole('button', { name: /^(Fork session|分叉会话)$/u })
-      .first()
       .click();
     await this.copyFromForkMenu();
   }

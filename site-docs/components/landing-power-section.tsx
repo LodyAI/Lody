@@ -1,5 +1,7 @@
 'use client';
 
+import { SiteAnchor } from '@site/components/site-anchor';
+
 /**
  * Landing post-demo — team collaboration surfaces that already ship:
  * usage by member + in-session PR/CI/merge demos, plus short team points
@@ -170,7 +172,7 @@ export function LandingPowerSection({
           <p className="uw-power__body">{copy.body}</p>
           {copy.docsLink ? (
             <p className="uw-section-docs">
-              <a href={copy.docsLink.href}>{copy.docsLink.label}</a>
+              <SiteAnchor href={copy.docsLink.href}>{copy.docsLink.label}</SiteAnchor>
             </p>
           ) : null}
           {copy.points && copy.points.length > 0 ? (

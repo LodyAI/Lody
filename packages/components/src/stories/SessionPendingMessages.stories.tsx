@@ -130,6 +130,27 @@ export const Uploading: Story = {
   },
 };
 
+/** A lone image uploads in the frame its delivered turn will use. */
+export const SingleImageUploading: Story = {
+  args: {
+    records: [
+      record({
+        attachments: [
+          {
+            id: 'design-image',
+            kind: 'image',
+            source: imageSource,
+            name: 'design.png',
+            mimeType: 'image/png',
+            lastModified: 0,
+            progress: 42,
+          },
+        ],
+      }),
+    ],
+  },
+};
+
 /**
  * One attachment failed and the finished one is retained. The message level
  * says only "Not sent"; the reason lives on the failed card alone.

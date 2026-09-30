@@ -11,9 +11,15 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SessionHistory, SessionId, WorkspaceId } from '@lody/shared';
 
-import { PendingMessageRow } from '../src/components/chat/session-pending-messages';
+import { Provider, createStore } from 'jotai';
+
+import { runtimeAtom } from '../src/atoms/runtime';
+import {
+  PendingMessageRow,
+  SessionPendingMessages,
+} from '../src/components/chat/session-pending-messages';
 import type { SessionAttachmentDraft } from '../src/lib/session-attachment-draft';
-import type { PendingSessionSend } from '../src/lib/session-pending-sends';
+import { createPendingSessionSends, type PendingSessionSend } from '../src/lib/session-pending-sends';
 import { initI18n } from '../src/i18n';
 
 (
@@ -152,7 +158,22 @@ describe('PendingMessageRow failure presentation', () => {
     const host = await render(record({ error: REASON, attachments: [readyImage] }));
 
     expect(reasonNodes(host)).toHaveLength(1);
-    expect(host.textContent).toContain('Ready');
+    expect(
+      host.querySelector('.border-destructive\\/30')?.contains(host.querySelector('img'))
+    ).toBe(false);
+  });
+
+  // Image frames match the delivered image and carry no caption, so a failed
+  // image's reason must still reach the reader through the row notice.
+  it('explains a failed image through the row notice', async () => {
+    const host = await render(
+      record({
+        error: REASON,
+        attachments: [{ ...readyImage, id: 'failed-image', ready: undefined, error: REASON }],
+      })
+    );
+
+    expect(reasonNodes(host)).toHaveLength(1);
   });
 
   // A ready FILE sits beside the failed one on purpose: with only a ready image
@@ -222,5 +243,81 @@ describe('PendingMessageRow failure presentation', () => {
     expect(host.querySelector('[role="status"]')?.textContent).toBe(
       'Waiting to send · Uploading attachments'
     );
+  });
+});
+
+// The write reaches the conversation view before the held send is removed; in
+// between, the turn must show once, as the history row, not also as a pending
+// row beneath it.
+describe('SessionPendingMessages', () => {
+  it('hides a held send as soon as its turn is in history', async () => {
+    await initI18n('en');
+    URL.createObjectURL = () => 'blob:pending-row';
+    URL.revokeObjectURL = () => {};
+    const historyIds = new Set<string>();
+    const listeners = new Set<() => void>();
+    const history = {
+      indexOf: (id: string) => (historyIds.has(id) ? 0 : -1),
+      subscribe: (listener: () => void) => {
+        listeners.add(listener);
+        return () => {
+          listeners.delete(listener);
+        };
+      },
+    };
+    const writing = Promise.withResolvers<void>();
+    const finishWrite = Promise.withResolvers<void>();
+    const pendingSends = createPendingSessionSends({
+      prepare: async (send) => ({
+        entry: send.entry,
+        queue: send.queue,
+        attachments: send.attachments.map((attachment) => ({ ...attachment, ...readyImage })),
+      }),
+      write: async (send) => {
+        historyIds.add(send.id);
+        for (const listener of listeners) listener();
+        writing.resolve();
+        await finishWrite.promise;
+      },
+      deliver: async () => {},
+    });
+    const store = createStore();
+    store.set(runtimeAtom, {
+      workspaceId: 'pending-row-workspace',
+      workspaceSlug: 'pending-row-workspace',
+      pendingSends,
+    } as never);
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    await act(async () => {
+      root.render(
+        createElement(
+          Provider,
+          { store },
+          createElement(SessionPendingMessages, { sessionId, history })
+        )
+      );
+    });
+
+    const held = record({
+      attachments: [{ ...readyImage, ready: undefined, progress: 0 }],
+    });
+    await act(async () => {
+      pendingSends.enqueue(held);
+      await writing.promise;
+    });
+    expect(pendingSends.has(held.id)).toBe(true);
+    expect(container.textContent).toBe('');
+
+    await act(async () => {
+      finishWrite.resolve();
+    });
+    expect(pendingSends.has(held.id)).toBe(false);
+    expect(container.textContent).toBe('');
+
+    await act(async () => root.unmount());
+    container.remove();
+    pendingSends.dispose();
   });
 });

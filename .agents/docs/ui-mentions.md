@@ -26,6 +26,26 @@ lives in its `README.md`.
 5. **Before send.** One hook rewrites the ranges that need rewriting, and the
    resulting spans are frozen into the message.
 
+## Menu placement
+
+The main desktop chat composer anchors its menu to the whole composer frame
+and pins it above that frame. The popup stays within the frame's width and
+caps its height to the available room above; the list scrolls when needed.
+The dialog composer and inline editor instead use a virtual anchor measured
+from the textarea's laid-out caret. Soft wraps, internal scrolling, and scaled
+editor containers move those popups with the insertion point. The virtual
+element retains the textarea as its observation target so layout shifts also
+update the menu. Those floating menus flip at the viewport edge and scroll
+within visible room when neither side fits.
+
+The mobile composer uses a separate docked strip. Its boundary is the whole
+`data-mention-frame` (input, controls, and attachments), so the strip cannot
+cover content above the textarea. Its height is limited by the actual room
+above that frame, including the top inset. Inline edit-and-resend opts out of
+the dock and keeps the floating caret menu. The
+[placement Spec](../../specs/composer-mention-menu-placement.md) owns these
+visible guarantees.
+
 ## Ranking
 
 File menus use `useMentionFileSearch`: a Worker owns the file/directory index,
@@ -45,8 +65,16 @@ a separate synchronous path; this worker does not perform file discovery or I/O.
 
 Issues and PRs rank their own cached slices so one kind cannot starve the other.
 Files, sessions, roles, issues and PRs retain VS Code non-contiguous matching, with
-consecutive, separator, path, case, and camel-case bonuses. Skills and commands
-keep their own ranking. The [file search Spec](../../specs/composer-file-search.md)
+consecutive, separator, path, case, and camel-case bonuses. Skills keep their
+own ranking. A typed `/` or `、` query ranks Prompt Shortcuts and Agent Commands
+together after each source applies visibility and availability gates. Exact,
+prefix, word-prefix, substring, and subsequence matches precede description-only
+matches; available rows precede disabled exact shortcuts. A bare command trigger
+keeps the two source groups. The
+[command trigger Spec](../../specs/command-mention-triggers.md) owns that intent,
+and the [ranking evaluation](../../packages/components/benchmarks/slash-search/README.md)
+records synthetic quality and timing observations. The
+[file search Spec](../../specs/composer-file-search.md)
 owns responsiveness and freshness intent; the
 [benchmark note](../notes/implemented/bug-fix/2026-09-20-composer-file-search-worker.md)
 records measurements and remaining limits.

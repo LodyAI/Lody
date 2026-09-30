@@ -788,7 +788,7 @@ const SessionGroupRow = memo(function SessionGroupRow({
           onClick={handleAnchorClick}
         />
       ) : null}
-      <div className="flex min-w-0 items-center gap-1.5">
+      <div className={cn('flex min-w-0 items-center', isMobile ? 'gap-1.5' : 'gap-2')}>
         <SessionRowLeadingSlot
           showMenuButton={hasMenuActions}
           menuLabel={moreActionsLabel}
@@ -1222,7 +1222,7 @@ const SessionGroupSection = memo(function SessionGroupSection({
           data-sidebar-group-key={group.key}
           className={cn(
             'relative flex w-full select-none items-center rounded-md px-2 text-left',
-            isGroupLabel ? 'h-[26px] gap-1.5' : 'h-7 gap-1',
+            isGroupLabel ? 'h-[26px] gap-1.5' : cn('h-7', isMobile ? 'gap-1' : 'gap-0.5'),
             'border border-transparent',
             'min-w-0 flex-1 transition-colors',
             headerTypographyClass,

@@ -10,9 +10,9 @@ Root and `apps/cli/AGENTS.md` apply; `specs/session-orchestration.md` owns behav
 - Target input creation is fenced by the SQLite item-materialization claim.
   Acceptance owns new claims; the lease Worker only adopts absent/expired
   claims. Loro history evidence clears the claim. Before an adopted claim may
-  treat a missing fixed Turn as permission to write, an explicit remote Streams
-  target-document sync must confirm that the local replica is caught up. A local
-  transport-only sync is not confirmation. A failed remote confirmation is
+  treat a missing fixed Turn as permission to write, confirm authority: cloud
+  requires remote Streams catch-up (local transport sync is insufficient); OSS
+  uses the daemon repo that owns every MCP write. A failed confirmation is
   uncertainty and arms the same owned bounded-backoff wake as a materializer
   error; unrelated SQLite/Meta watch hints must not be the only retry path, and
   every retry rechecks the fixed user Turn id first.

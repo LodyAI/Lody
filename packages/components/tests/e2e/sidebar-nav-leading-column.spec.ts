@@ -29,3 +29,49 @@ test('nav icons sit on the sidebar leading column', async ({ page }) => {
     expect(Math.abs(labelLeft - (axis + 24))).toBeLessThanOrEqual(1);
   }
 });
+
+test('settings account avatars stay square and centred on the navigation row', async ({ page }) => {
+  for (const theme of ['light', 'dark']) {
+    for (const story of ['with-image', 'initials']) {
+      await page.goto(
+        `/iframe.html?id=settings-settingsaccountentry--${story}&viewMode=story&globals=theme:${theme}`
+      );
+      const row = page.getByRole('button', { name: 'Open account settings' });
+      const avatar = row.locator('[data-size="medium"]');
+      await expect(avatar).toBeVisible();
+      if (story === 'with-image') await expect(avatar.locator('img')).toBeVisible();
+      await page.evaluate(() => document.fonts.ready);
+
+      for (const fontSize of [12, 14, 18]) {
+        await page.evaluate((size) => {
+          document.documentElement.style.setProperty('--ui-font-size', `${size}px`);
+        }, fontSize);
+        const face = await avatar.boundingBox();
+        const label = await row.locator(':scope > span').last().boundingBox();
+        const button = await row.boundingBox();
+        const icon = await page
+          .getByRole('button', { name: 'Preferences' })
+          .locator('svg')
+          .boundingBox();
+        expect(face).not.toBeNull();
+        expect(label).not.toBeNull();
+        expect(button).not.toBeNull();
+        expect(icon).not.toBeNull();
+        expect(face!.width).toBe(24);
+        expect(face!.height).toBe(24);
+        expect(
+          Math.abs(face!.y + face!.height / 2 - (button!.y + button!.height / 2))
+        ).toBeLessThan(0.5);
+        expect(Math.abs(face!.y + face!.height / 2 - (label!.y + label!.height / 2))).toBeLessThan(
+          0.5
+        );
+        expect(Math.abs(face!.x + face!.width / 2 - (icon!.x + icon!.width / 2))).toBeLessThan(0.5);
+        if (story === 'with-image') {
+          const image = avatar.locator('img');
+          expect(await image.boundingBox()).toEqual(face);
+          await expect(image).toHaveCSS('object-fit', 'cover');
+        }
+      }
+    }
+  }
+});

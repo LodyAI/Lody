@@ -126,7 +126,9 @@ describe('Schedule editor', () => {
     props.agentBar = ({ revealMissing }) => (
       <span data-testid="run-bar">{revealMissing ? 'revealed' : 'quiet'}</span>
     );
-    props.issues = [{ field: 'agent', kind: 'invalid', message: en['schedules.choosePermission'] }];
+    props.issues = [
+      { field: 'agent', kind: 'invalid', message: en['schedules.destination.agentMismatch'] },
+    ];
     render();
     expect(button().disabled).toBe(false);
     expect(footer().textContent).toBe('');

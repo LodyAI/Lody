@@ -2,7 +2,7 @@ import { z } from 'zod';
 
 import { ProjectRefSchema } from './message-schemas';
 import type { ProjectRef } from './project';
-import { classifyPermissionModeFace, type AcpCapabilityCacheEntry } from './ai';
+import { classifyPermissionModeFace } from './ai';
 import { isSensitiveAcpConfigOptionId } from './session-preparation';
 
 export const SCHEDULE_PROMPT_MAX_BYTES = 32 * 1024;
@@ -187,32 +187,6 @@ export const SCHEDULE_RUN_STATES = [
   'skipped',
 ] as const;
 export type ScheduleRunState = (typeof SCHEDULE_RUN_STATES)[number];
-
-/** Permission is an advertised semantic category, never inferred from an id. */
-export function hasExplicitSchedulePermission(
-  agent: z.infer<typeof ScheduleAgentSchema>,
-  capability: Pick<AcpCapabilityCacheEntry, 'modes' | 'configOptions'> | undefined
-): boolean {
-  if (!capability) return false;
-  const explicit =
-    capability.configOptions?.filter((option) => option.category === '_permission') ?? [];
-  const accepts = (option: NonNullable<typeof capability.configOptions>[number]): boolean => {
-    const value = agent.configOptionValues?.[option.id];
-    return (
-      value !== undefined &&
-      (option.type === 'boolean'
-        ? value === 'true' || value === 'false'
-        : option.options.some((entry) => entry.value === value))
-    );
-  };
-  if (explicit.length) return explicit.some(accepts);
-  return (
-    (!!agent.modeId && capability.modes.some((mode) => mode.id === agent.modeId)) ||
-    (capability.configOptions ?? []).some(
-      (option) => option.category === 'mode' && option.id !== 'interaction_mode' && accepts(option)
-    )
-  );
-}
 
 export function validateSchedulePrompt(prompt: string): void {
   if (!prompt.trim() || new TextEncoder().encode(prompt).length > SCHEDULE_PROMPT_MAX_BYTES) {

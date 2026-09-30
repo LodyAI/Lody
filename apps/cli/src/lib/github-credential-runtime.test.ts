@@ -8,6 +8,8 @@ function harness(
     refreshed?: string | null;
     status?: number;
     push?: boolean;
+    /** Backend fallback reason returned with `available: false`. */
+    reason?: string;
   } = {}
 ) {
   const requests: Array<Record<string, unknown>> = [];
@@ -21,7 +23,10 @@ function harness(
           : options.personal;
     return {
       ok: true,
-      json: async () => (token ? { token, tokenSource: body.source } : { available: false }),
+      json: async () =>
+        token
+          ? { token, tokenSource: body.source }
+          : { available: false, ...(options.reason ? { reason: options.reason } : {}) },
     };
   });
   const fetch = vi.fn(async (_url: string, init: { headers: { Authorization: string } }) => {
@@ -145,6 +150,29 @@ describe('per-command GitHub credential policy', () => {
     ).toBe('refreshed');
     expect(h.requests[1].invalidatedPersonalToken).toBe('expired');
     expect(h.local).not.toHaveBeenCalled();
+  });
+  it('explains a revoked personal authorization when falling back to the App', async () => {
+    const h = harness({ personal: null, reason: 'personal_token_refresh_failed' });
+    expect(
+      (
+        await h.select(
+          'owner/repo',
+          { personalEnabled: true, allowLocalAuth: false },
+          h.local,
+          true
+        )
+      ).source
+    ).toBe('app');
+    expect(h.log).toHaveBeenCalledWith(expect.stringContaining('expired or been revoked'));
+    expect(h.log).toHaveBeenCalledWith(expect.stringContaining('Settings > Integrations'));
+  });
+  it('explains missing personal authorization when falling back to local', async () => {
+    const h = harness({ personal: null, reason: 'personal_auth_missing' });
+    expect(
+      (await h.select('owner/repo', { personalEnabled: true, allowLocalAuth: true }, h.local, true))
+        .source
+    ).toBe('local');
+    expect(h.log).toHaveBeenCalledWith(expect.stringContaining('not authorized yet'));
   });
   it('reports confirmed personal permission fallback to local', async () => {
     const h = harness({ personal: 'read-only', push: false });

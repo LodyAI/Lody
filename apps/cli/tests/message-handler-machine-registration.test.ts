@@ -183,9 +183,11 @@ describe('MessageHandler machine registration', () => {
     expect(registeredMeta.name).toBe('machine-name');
     // Exhaustive on purpose: registration is where a capability key and its
     // version reach every client, so adding one must be acknowledged here.
+    const hostCapabilities = getHostMachineProtocolCapabilities();
     expect(registeredMeta.protocolCapabilities).toEqual({
       codexAuthProfiles: 1,
-      ...(getHostMachineProtocolCapabilities().builtinPi ? { builtinPi: 1 } : {}),
+      ...(hostCapabilities.builtinPi ? { builtinPi: 1 } : {}),
+      ...(hostCapabilities.piExtensions ? { piExtensions: 1 } : {}),
       acpAuthenticationInteractions: 2,
       previewControl: 1,
       iosSimulator: 1,

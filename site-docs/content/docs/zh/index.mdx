@@ -5,35 +5,23 @@ description: Lody 使用文档，涵盖桌面端与移动端使用、Agent 配�
 
 # Lody
 
-Lody.ai 让你可以在手机或电脑上并行使用你的 Coding Agents 并与团队共享。
+Lody 可以让你在手机或电脑上和团队一起使用 coding agents。如果你现在在使用 codex、claude code、deepseek harness 等等将很容易理解。你可以在[下载](https://lody.ai/download)桌面端、移动端或者直接使用 web 端。Lody 会使用你自己设备上的各种 Agents，当前内置支持 
 
-- 当前支持 Claude Code、Codex、Grok、OpenCode、Kimi、自定义 ACP Agent，以及所有支持 [ACP Registry](https://agentclientprotocol.com/get-started/registry) 的 CLI，几乎涵盖了市面上所有的 Agent。
-- iOS 与 Android 原生应用，[手机](/zh/docs/mobile)也可以随时 vibe coding
-- 通过 Worktree 和多标签会话让 Coding 任务高效并行
-- 更好的 [GitHub 集成](/zh/docs/github)，自动绑定 PR，同步 CI 状态和 review 评论
-- 支持项目和会话文件浏览，并可在实时协作文件中直接编辑
-- 内置实时 UI [预览](/zh/docs/preview)，支持响应式视口和可发送给 Agent 的视觉标注
-- 对话完成时发送推送通知，不用担心忘记
-- [团队共享](/zh/docs/team) agent 设置和所有对话上下文，时刻保持信息一致，包括[现场会话交接](/zh/docs/session-handoff)
+- codex
+- claude code
+- grok build
+- kimi code
+- deepseek harness
+- Pi
+- Dimcode
+- Bub
 
-## 最新能力
+这意味着你在 Lody 中使用这些 Agent 的时候有着最完整的功能集。除此以外，Lody 通过 [ACP](https://agentclientprotocol.com/get-started/registry) 将最大程度兼容市面上各类 Agent。
 
-- [让多个 Agent 协作](/zh/docs/agent-collaboration/)：让 Claude Code 协调 Codex、Kimi 和 Grok，分派任务、交流上下文，跨仓库与机器修复和审查。
+Lody 是基于 [Loro](https://loro.dev) 的整个技术栈构建的，我们的团队一直专注于 local-first 的基础建设，致力于解决本地优先场景下的多端同步和多人协作的体验问题。依托于前几年的技术积累，我们有着当下最稳定和快速的同步服务。打开移动端就会在几秒内同步完成你在桌面端的对话历史。在同步的流畅和丝滑上面，我们有着大量的好评。
 
-- [共享并交接 Agent 会话](/zh/docs/session-handoff)：邀请同事进入已有会话，接着同一段对话、差异和工作树继续做。
-- [对话 fork 支持](/zh/docs/session#fork-%E4%BC%9A%E8%AF%9D)：在同一个会话中 fork 出多个子对话，独立运行不同的任务。
-- [多标签会话](/zh/docs/session-tabs)：在同一个 session 中打开主对话、子对话、文件和 diff 标签。
-- [文件列表](/zh/docs/file-list)：浏览项目文件、打开会话文件、文件内搜索、预览 Markdown，并编辑实时协作文本文件。
-- [Diff 行评论](/zh/docs/diff-comments)：在差异行上添加 Markdown 评论，并同步到 GitHub PR Review。
-- [会话内搜索](/zh/docs/session-search)：搜索消息、工具调用、终端输出和 diff 内容。
-- [Daemon 模式](/zh/docs/cli#daemon-模式)：让 CLI 在后台常驻并自动恢复。
-- [图像输入](/zh/docs/image-input)：将图片作为会话上下文的一部分发送给 AI。
-- [Lody Preview](/zh/docs/preview)：打开实时 UI 预览，切换不同设备视口，并把视觉标注发送给 Agent。
-- [Claude & Codex 能力](/zh/docs/claude-codex-capabilities)：Steer 运行中的任务，并使用运行时提供的斜杠命令、提问、Fast Mode、图像生成和 Goal。
-- [CLI 类型支持](/zh/docs/cli-runtimes)：使用 ACP Registry 运行时，或填写你自己的 ACP 兼容启动命令。
-- [工作树](/zh/docs/worktrees)：隔离并行任务，并为项目配置 setup / cleanup 脚本。
-- [上下文、Token 与额度](/zh/docs/usage-and-quota)：在设置页查看上下文窗口余量、Token 花费和订阅额度。
+Lody 第一天的架构就是面向团队的 local-first 架构，所以我们不单单是想解决怎么让 coding agent 随时随地更好用的问题。我们更想解决的是 AI 能力足够的这样的背景下，我们该怎么让数据、让 context 让 human 加倍地发挥作用的问题。
 
-## 下一步
+现在大家使用 vibe coding 几乎都是每个人处理着各自自己的对话，整体团队只有最终的代码、最终的 artifacts 会通过 PR 文档等工具进行共享，实现得怎么样，实现过程的思考，spec 的边界范围都是隐藏在最终产物之外的。语言和代码的关系在如今也是已经颠倒了，code is cheap, show me chat!  我们就希望能够通过 Lody 这样的工具来为团队解决 项目进度管理、Context 共享、Agent 间协作等问题。
 
-[快速开始](/zh/docs/quickstart)查看哪些必要的基础设置。
+

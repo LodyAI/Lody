@@ -10,11 +10,10 @@ import * as tar from 'tar';
 import { compressStream } from 'zstd-stream';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import claudePackageLock from '../../../../packages/acp-extension-claude/package-lock.json';
-import codexPackageLock from '../../../../packages/acp-extension-codex/package-lock.json';
 import claudeSdkManifest from '../../node_modules/@anthropic-ai/claude-agent-sdk/manifest.json';
 import claudeRuntimeManifestJson from './claude-runtime-manifest.json';
-import codexRuntimeManifestJson from './codex-runtime-manifest.json';
 import kimiRuntimeManifestJson from './kimi-runtime-manifest.json';
+import piRuntimeManifestJson from './pi-runtime-manifest.json';
 import grokRuntimeManifest from '../../../../packages/acp-extension-grok/runtime-manifest.json';
 
 import {
@@ -50,6 +49,11 @@ describe('host runtime capabilities', () => {
     (node, platform, arch, expected) => {
       const capabilities = getHostMachineProtocolCapabilities(node, platform, arch);
       expect(capabilities.builtinPi).toBe(expected);
+      // Host compatibility alone does not prove the pinned artifact supports extensions.
+      const supportsExtensions =
+        'piExtensionsProtocolVersion' in piRuntimeManifestJson &&
+        piRuntimeManifestJson.piExtensionsProtocolVersion === 1;
+      expect(capabilities.piExtensions).toBe(supportsExtensions ? expected : undefined);
       expect(capabilities.providerSetup).toBe(1);
     }
   );
@@ -382,17 +386,6 @@ describe('ManagedAgentRuntimeManager', () => {
     } finally {
       status.mockRestore();
     }
-  });
-
-  it('matches the exact locked Codex dependency version', () => {
-    expect(CODEX_RUNTIME_VERSION).toBe(
-      codexPackageLock.packages['node_modules/@openai/codex']?.version
-    );
-    expect(CODEX_RUNTIME_VERSION).toBe(codexRuntimeManifestJson.version);
-    const manager = new ManagedAgentRuntimeManager({ rootDir });
-    expect(manager.getDefinition('codex').platforms).toMatchObject(
-      codexRuntimeManifestJson.artifacts
-    );
   });
 
   it('matches the exact locked Claude SDK and its embedded Claude Code version', () => {

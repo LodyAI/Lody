@@ -116,6 +116,35 @@ describe('GitCredentialBroker', () => {
     });
   });
 
+  it('forwards the personal fallback reason without token material', async () => {
+    const tokenManager = {
+      getCredentialCandidate: vi
+        .fn()
+        .mockResolvedValue({ available: false, reason: 'personal_token_refresh_failed' }),
+    } as unknown as GitHubTokenManager;
+    const handler = createGitCredentialBrokerHandler({
+      authToken: 'auth-token',
+      tokenManager,
+      logger: { debug: vi.fn() } as unknown as Logger,
+      resolveContext: () => ({ sessionId: 's1', requesterUserId: 'owner', machineId: 'm1' }),
+    });
+    const res = makeRes();
+    handler(
+      makeReq({
+        url: '/github-token',
+        auth: 'Bearer auth-token',
+        body: { repoFullName: 'owner/repo', contextToken: 'context', source: 'personal' },
+      }),
+      res
+    );
+    await res.finished;
+    expect(res.statusCode).toBe(200);
+    expect(JSON.parse(res.body)).toEqual({
+      available: false,
+      reason: 'personal_token_refresh_failed',
+    });
+  });
+
   it('rejects missing requester context even with a valid workspace bearer', async () => {
     const tokenManager = {
       getAppTokenForRepo: vi.fn().mockResolvedValue('app-token'),

@@ -4,6 +4,7 @@ import {
   parseRateLimitEntryKey,
   resolveAgentBrandId,
   type AgentConfigCliType,
+  type AgentConfigId,
   type AgentConfigMeta,
   type MachineViewMeta,
   type SessionContextWindowUsage,
@@ -20,6 +21,7 @@ export type MachineRateLimitUsage = MachineRateLimits[string];
 export type AgentRateLimitEntry = {
   key: string;
   limits: MachineRateLimitUsage;
+  agentConfigId: AgentConfigId | null;
   cliType: string;
   limitId: string | null;
 };
@@ -154,27 +156,43 @@ const modelNamesMatch = (left: string, right: string): boolean => {
 
 export function getAgentRateLimitEntries(
   rateLimits: MachineRateLimits | null | undefined,
-  agentType: string
+  agentType: string,
+  agentConfigId?: AgentConfigId | null
 ): AgentRateLimitEntry[] {
   return Object.entries(rateLimits ?? {})
     .flatMap(([key, value]) => {
       const parsed = parseRateLimitEntryKey(key);
       const limits = normalizePersistedRateLimit(parsed.cliType, parsed.limitId, value);
-      return limits ? [{ key, limits, cliType: parsed.cliType, limitId: parsed.limitId }] : [];
+      return limits
+        ? [
+            {
+              key,
+              limits,
+              agentConfigId: parsed.agentConfigId,
+              cliType: parsed.cliType,
+              limitId: parsed.limitId,
+            },
+          ]
+        : [];
     })
-    .filter((entry) => entry.cliType === agentType);
+    .filter(
+      (entry) =>
+        entry.cliType === agentType && entry.agentConfigId === (agentConfigId ?? null)
+    );
 }
 
 export function resolveAgentRateLimitForModel({
   rateLimits,
   agentType,
+  agentConfigId,
   modelId,
 }: {
   rateLimits: MachineRateLimits | null | undefined;
   agentType: string;
+  agentConfigId?: AgentConfigId | null;
   modelId: string | null | undefined;
 }): AgentRateLimitEntry | null {
-  const entries = getAgentRateLimitEntries(rateLimits, agentType);
+  const entries = getAgentRateLimitEntries(rateLimits, agentType, agentConfigId);
   if (entries.length === 0) return null;
 
   const normalizedModelId = normalizeModelName(modelId);

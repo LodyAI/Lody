@@ -24,6 +24,7 @@ import {
   getMainWindowBackgroundColor,
   getMainWindowTitleBarOverlay
 } from './window-theme'
+import { readStartupThemeSource } from './theme-settings'
 import { formatUnknownError, normalizeExternalHttpUrl } from './utils'
 import { describeDeepLinkForAuthDebug } from './auth-debug'
 import { captureElectronMainException } from './posthog-error-reporting'
@@ -371,7 +372,8 @@ export function createMainWindow(options: CreateMainWindowOptions): BrowserWindo
   if (options.icon) productWindowIcon = options.icon
   if (!options.auxiliary)
     nativeTheme.themeSource = getInitialMainWindowThemeSource(
-      options.initialPath === '/onboarding' ? '/onboarding' : '/'
+      options.initialPath === '/onboarding' ? '/onboarding' : '/',
+      readStartupThemeSource()
     )
   const resolvedTheme = nativeTheme.shouldUseDarkColors ? 'dark' : 'light'
   const window = new BrowserWindow({
@@ -381,8 +383,10 @@ export function createMainWindow(options: CreateMainWindowOptions): BrowserWindo
     backgroundColor: getMainWindowBackgroundColor(resolvedTheme),
     autoHideMenuBar: true,
     ...(process.platform === 'linux' ? { icon: productWindowIcon } : {}),
+    // Keep equal 16px window insets and the first light's 23px centre on the
+    // sidebar navigation icons' 23px centreline (15px start + 8px half-width).
     ...(process.platform === 'darwin'
-      ? { titleBarStyle: 'hiddenInset', trafficLightPosition: { x: 20, y: 16 } }
+      ? { titleBarStyle: 'hiddenInset', trafficLightPosition: { x: 16, y: 16 } }
       : {}),
     // Windows: hide the native title bar (its neutral gray clashes with the
     // app canvas) and keep only the OS-drawn caption buttons as an overlay

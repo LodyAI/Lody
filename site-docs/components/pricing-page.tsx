@@ -1,5 +1,7 @@
 'use client';
 
+import { SiteAnchor } from '@site/components/site-anchor';
+
 /**
  * Public pricing page (`/price`, `/zh/price`).
  *
@@ -825,7 +827,7 @@ function PricingCard({
         </span>
       </p>
 
-      <a
+      <SiteAnchor
         className={`pricing-card-cta${plan.featured ? ' pricing-card-cta-primary' : ''}`}
         href={plan.href}
         rel={isMailto ? 'noopener' : undefined}
@@ -833,17 +835,17 @@ function PricingCard({
       >
         <span>{plan.cta}</span>
         <ArrowIcon />
-      </a>
+      </SiteAnchor>
 
       {plan.secondaryCta ? (
-        <a
+        <SiteAnchor
           className="pricing-card-secondary-cta"
           href={plan.secondaryCta.href}
           rel="noreferrer"
           target="_blank"
         >
           {plan.secondaryCta.label}
-        </a>
+        </SiteAnchor>
       ) : null}
 
       <ul className="pricing-card-features">
@@ -855,9 +857,9 @@ function PricingCard({
               {typeof feature === 'string' ? (
                 <span>{feature}</span>
               ) : (
-                <a className="pricing-card-feature-link" href={feature.href}>
+                <SiteAnchor className="pricing-card-feature-link" href={feature.href}>
                   {feature.label}
-                </a>
+                </SiteAnchor>
               )}
             </li>
           );

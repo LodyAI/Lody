@@ -11,6 +11,38 @@ describe('normalizeTexMathDelimiters', () => {
     );
   });
 
+  it('rewrites a same-line display pair embedded in prose as inline math', () => {
+    const markdown = String.raw`text before \[x + y\] and \(p\)`;
+
+    expect(normalizeTexMathDelimiters(markdown, true)).toBe(
+      String.raw`text before $$x + y$$ and $$p$$`
+    );
+  });
+
+  it('puts multiline display pairs after prose on their own lines', () => {
+    const markdown = ['Derive \\[', 'x + y', '\\] in prose.'].join('\n');
+
+    expect(normalizeTexMathDelimiters(markdown)).toBe(
+      ['Derive', '$$', 'x + y', '$$', ' in prose.'].join('\n')
+    );
+  });
+
+  it('keeps inserted multiline display pairs inside list items', () => {
+    const markdown = ['- Derive \\[', '  x + y', '  \\] in prose.'].join('\n');
+
+    expect(normalizeTexMathDelimiters(markdown)).toBe(
+      ['- Derive', '  $$', '  x + y', '  $$', '   in prose.'].join('\n')
+    );
+  });
+
+  it('normalizes display pairs at Markdown block starts in quotes and lists', () => {
+    const markdown = ['> \\[', '> x + y', '> \\]', '', '- \\[', '  z', '  \\]'].join('\n');
+
+    expect(normalizeTexMathDelimiters(markdown)).toBe(
+      ['> $$', '> x + y', '> $$', '', '- $$', '  z', '  $$'].join('\n')
+    );
+  });
+
   it('leaves escaped and incomplete delimiters unchanged', () => {
     const markdown = String.raw`literal \\(x\\), unmatched z\), and incomplete \(y`;
 
@@ -18,9 +50,11 @@ describe('normalizeTexMathDelimiters', () => {
   });
 
   it('does not let inline delimiters suppress a later display formula', () => {
-    const markdown = ['incomplete \\(y', 'next \\[z\\]'].join('\n');
+    const markdown = ['incomplete \\(y', 'next', '\\[', 'z', '\\]'].join('\n');
 
-    expect(normalizeTexMathDelimiters(markdown)).toBe(['incomplete \\(y', 'next $$z$$'].join('\n'));
+    expect(normalizeTexMathDelimiters(markdown)).toBe(
+      ['incomplete \\(y', 'next', '$$', 'z', '$$'].join('\n')
+    );
   });
 
   it('normalizes complete inline pairs only when enabled', () => {

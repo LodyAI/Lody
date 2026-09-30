@@ -65,3 +65,5 @@ typecheck`, oxlint and oxfmt clean; `pnpm run docs check` passes.
   [composer mention menu v2](../feature/2026-09-25-composer-mention-menu-v2.md)
   ("Design review round 2"), which introduced `positionAnchor="composer"` and
   its once-per-open room pick; this change pins the pick for the `@` menu.
+- The later [caret-placement decision](2026-09-29-composer-mention-follows-caret.md)
+  supersedes this pin for the main composer.

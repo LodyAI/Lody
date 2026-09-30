@@ -22,14 +22,24 @@ import { colors } from '@lody/ui/tokens/colors.stylex';
 import { space, text } from '@lody/ui/tokens/scales.stylex';
 
 const styles = stylex.create({
-  root: { display: 'flex' },
+  root: {
+    display: 'flex',
+    maxHeight: '14rem',
+  },
   list: {
+    display: 'flex',
+    flexDirection: 'column',
     flexShrink: 0,
+    minHeight: 0,
+  },
+  listItems: {
+    flex: 1,
+    minHeight: 0,
     overflowY: 'auto',
     scrollbarGutter: 'stable',
   },
-  listCompact: { maxHeight: '17rem', width: '16rem' },
-  listTwoPane: { height: '17rem', width: '13.5rem' },
+  listCompact: { maxHeight: '14rem', width: '16rem' },
+  listTwoPane: { maxHeight: '14rem', width: '13.5rem' },
   roleText: {
     display: 'flex',
     flexDirection: 'column',
@@ -160,91 +170,85 @@ export function ComposerAgentRolePanel({
 
   return (
     <div ref={rootRef} {...stylex.props(styles.root)}>
-      {/* `scrollbar-pro` is the app's global scrollbar skin. */}
-      <div
-        {...withClassName(
-          stylex.props(styles.list, compact ? styles.listCompact : styles.listTwoPane),
-          'scrollbar-pro'
-        )}
-      >
-        {/* Leaving a Role is its own row rather than a second click on the
+      <div {...stylex.props(styles.list, compact ? styles.listCompact : styles.listTwoPane)}>
+        {/* The Role rows scroll independently; Create stays at the pane's bottom. */}
+        <div {...withClassName(stylex.props(styles.listItems), 'scrollbar-pro')}>
+          {/* Leaving a Role is its own row rather than a second click on the
             selected one: it clears the NAME, not the configuration, and that is
             not the same gesture as picking. */}
-        <Menu.Item
-          role="menuitemradio"
-          aria-checked={selectedRoleId === null}
-          onPointerEnter={() => {
-            if (!compact) setPreviewRoleId(null);
-          }}
-          onClick={() => onSelect(null)}
-          icon={<Ban {...stylex.props(surface.glyph16)} aria-hidden="true" />}
-          endContent={
-            selectedRoleId === null ? (
-              <Check {...stylex.props(surface.glyph14)} aria-hidden="true" />
-            ) : null
-          }
-        >
-          {t('chat.runConfig.roles.none', 'None')}
-        </Menu.Item>
-        {items.map((item) => {
-          const { role, availability } = item;
-          return (
-            /* The pointer handler rides a wrapper, not the item: a disabled row
+          <Menu.Item
+            role="menuitemradio"
+            aria-checked={selectedRoleId === null}
+            onPointerEnter={() => {
+              if (!compact) setPreviewRoleId(null);
+            }}
+            onClick={() => onSelect(null)}
+            icon={<Ban {...stylex.props(surface.glyph16)} aria-hidden="true" />}
+            endContent={
+              selectedRoleId === null ? (
+                <Check {...stylex.props(surface.glyph14)} aria-hidden="true" />
+              ) : null
+            }
+          >
+            {t('chat.runConfig.roles.none', 'None')}
+          </Menu.Item>
+          {items.map((item) => {
+            const { role, availability } = item;
+            return (
+              /* The pointer handler rides a wrapper, not the item: a disabled row
                has `pointer-events-none`, and a Role you cannot pick is still a
                Role whose configuration you may want to read. */
-            <div
-              key={role.id}
-              onPointerEnter={() => {
-                if (!compact) setPreviewRoleId(role.id);
-              }}
-            >
-              <Menu.Item
-                disabled={availability.kind !== 'available'}
-                role="menuitemradio"
-                aria-checked={role.id === selectedRoleId}
-                onFocus={() => {
+              <div
+                key={role.id}
+                onPointerEnter={() => {
                   if (!compact) setPreviewRoleId(role.id);
                 }}
-                onClick={() => onSelect(role.id)}
-                icon={
-                  <span {...stylex.props(surface.emoji)} aria-hidden="true">
-                    {getAgentRoleEmoji(role)}
-                  </span>
-                }
-                endContent={
-                  role.id === selectedRoleId ? (
-                    <Check {...stylex.props(surface.glyph14)} aria-hidden="true" />
-                  ) : null
-                }
               >
-                <span {...stylex.props(styles.roleText, compact && styles.roleTextStacked)}>
-                  <span {...stylex.props(surface.truncate)}>{role.name}</span>
-                  {compact ? <RoleBindingSubtitle item={item} machine={machine} /> : null}
-                  <RoleAvailabilityNote availability={availability} />
-                </span>
-              </Menu.Item>
-            </div>
-          );
-        })}
+                <Menu.Item
+                  disabled={availability.kind !== 'available'}
+                  role="menuitemradio"
+                  aria-checked={role.id === selectedRoleId}
+                  onFocus={() => {
+                    if (!compact) setPreviewRoleId(role.id);
+                  }}
+                  onClick={() => onSelect(role.id)}
+                  icon={
+                    <span {...stylex.props(surface.emoji)} aria-hidden="true">
+                      {getAgentRoleEmoji(role)}
+                    </span>
+                  }
+                  endContent={
+                    role.id === selectedRoleId ? (
+                      <Check {...stylex.props(surface.glyph14)} aria-hidden="true" />
+                    ) : null
+                  }
+                >
+                  <span {...stylex.props(styles.roleText, compact && styles.roleTextStacked)}>
+                    <span {...stylex.props(surface.truncate)}>{role.name}</span>
+                    {compact ? <RoleBindingSubtitle item={item} machine={machine} /> : null}
+                    <RoleAvailabilityNote availability={availability} />
+                  </span>
+                </Menu.Item>
+              </div>
+            );
+          })}
+        </div>
         {onCreate ? (
-          <>
-            <Menu.Separator />
-            <Menu.Item
-              onClick={onCreate}
-              aria-label={t(
-                'chat.runConfig.roles.createFromSettings',
-                'Create role from current settings'
-              )}
-              title={t(
-                'chat.runConfig.roles.createFromSettings',
-                'Create role from current settings'
-              )}
-            >
-              <span {...stylex.props(styles.centered)}>
-                <Plus {...stylex.props(surface.glyph14, surface.hint)} aria-hidden="true" />
-              </span>
-            </Menu.Item>
-          </>
+          <Menu.Item
+            onClick={onCreate}
+            aria-label={t(
+              'chat.runConfig.roles.createFromSettings',
+              'Create role from current settings'
+            )}
+            title={t(
+              'chat.runConfig.roles.createFromSettings',
+              'Create role from current settings'
+            )}
+          >
+            <span {...stylex.props(styles.centered)}>
+              <Plus {...stylex.props(surface.glyph14, surface.hint)} aria-hidden="true" />
+            </span>
+          </Menu.Item>
         ) : null}
       </div>
       {compact ? null : (
@@ -253,6 +257,7 @@ export function ComposerAgentRolePanel({
           agentConfig={previewItem.agentConfig}
           machine={machine}
           onEdit={onEdit}
+          className="h-auto min-h-0 max-h-[14rem]"
         />
       )}
     </div>

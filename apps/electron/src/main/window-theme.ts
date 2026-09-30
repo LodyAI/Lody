@@ -1,10 +1,28 @@
 export type ResolvedWindowTheme = 'light' | 'dark'
 export type NativeWindowThemeSource = ResolvedWindowTheme | 'system'
 
+export function isNativeWindowThemeSource(value: unknown): value is NativeWindowThemeSource {
+  return value === 'light' || value === 'dark' || value === 'system'
+}
+
+/**
+ * The `nativeTheme.themeSource` a freshly created window starts from.
+ *
+ * Onboarding is pinned to Light before its first renderer paint. Every other
+ * window follows the theme the renderer last committed (mirrored into the main
+ * process by `theme-settings.ts`), because the window's background color and
+ * caption overlay are chosen here, long before React can apply the user's
+ * choice. `system` stays the fallback for a first launch, where nothing has
+ * been committed yet.
+ */
 export function getInitialMainWindowThemeSource(
-  initialPath: '/' | '/onboarding' = '/'
+  initialPath: '/' | '/onboarding' = '/',
+  storedThemeSource: NativeWindowThemeSource | null = null
 ): NativeWindowThemeSource {
-  return initialPath === '/onboarding' ? 'light' : 'system'
+  if (initialPath === '/onboarding') {
+    return 'light'
+  }
+  return storedThemeSource ?? 'system'
 }
 
 const WINDOW_BACKGROUND_COLORS: Record<ResolvedWindowTheme, string> = {

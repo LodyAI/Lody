@@ -68,14 +68,17 @@ MentionInput.displayName = 'MentionInput';
 function MentionContent({
   className,
   children,
+  style,
   ...props
 }: React.ComponentProps<typeof MentionPrimitive.Content>) {
+  const surfaceProps = withClassName(stylex.props(surface.surface, styles.content), className);
   return (
     <MentionPrimitive.Portal>
       <MentionPrimitive.Content
         data-slot="mention-content"
         {...props}
-        {...withClassName(stylex.props(surface.surface, styles.content), className)}
+        {...surfaceProps}
+        style={{ ...surfaceProps.style, ...style }}
       >
         {children}
       </MentionPrimitive.Content>

@@ -113,6 +113,118 @@ const grokMachineWithLadderProbe = ({
     },
   });
 
+describe('declared per-model controls', () => {
+  // The probe ran on gpt-5.6-sol: its snapshot has no Fast option and a short
+  // effort list. The adapter's declaration covers the other models.
+  const machine = machineWithCapabilities({
+    [agentConfigId]: {
+      cliType: 'builtin',
+      agentType: 'codex',
+      cacheVersion: ACP_CAPABILITY_CACHE_VERSION,
+      provenance: 'runtime',
+      modes: [],
+      models: [],
+      configOptions: codexModelAndReasoningOptions('high', [
+        { value: 'low', name: 'Low' },
+        { value: 'high', name: 'High' },
+      ]),
+      declaredModelControls: {
+        'gpt-6-luna': { effortValues: ['low', 'medium'], fastMode: true },
+        'gpt-5.6-sol': { effortValues: ['low', 'high'], fastMode: false },
+      },
+      fetchedAt: 1,
+    },
+  });
+  const selectorsFor = (selectedModelId: string) =>
+    buildAcpSelectorOptions({
+      configId: agentConfigId,
+      cliType: 'builtin',
+      agentType: 'codex',
+      selectedModelId,
+      machine,
+    }).configOptionSelectors;
+  const effortValues = (selectors: AcpConfigOptionSelector[]) =>
+    selectors
+      .find((selector) => selector.configId === 'reasoning_effort')
+      ?.options.map((option) => option.value);
+  const hasFast = (selectors: AcpConfigOptionSelector[]) =>
+    selectors.some((selector) => selector.configId === 'fast-mode');
+
+  it("shows the selected model's own effort levels and Fast toggle", () => {
+    expect(effortValues(selectorsFor('gpt-6-luna'))).toEqual(['low', 'medium']);
+    expect(hasFast(selectorsFor('gpt-6-luna'))).toBe(true);
+
+    expect(effortValues(selectorsFor('gpt-5.6-sol'))).toEqual(['low', 'high']);
+    expect(hasFast(selectorsFor('gpt-5.6-sol'))).toBe(false);
+  });
+
+  it('adds the built-in effort control when the probed model had none', () => {
+    const probedWithoutEffort = (agentType: string) =>
+      machineWithCapabilities({
+        [agentConfigId]: {
+          cliType: 'builtin',
+          agentType,
+          cacheVersion: ACP_CAPABILITY_CACHE_VERSION,
+          provenance: 'runtime',
+          modes: [],
+          models: [],
+          configOptions: [
+            {
+              id: 'model',
+              name: 'Model',
+              category: 'model',
+              type: 'select',
+              currentValue: 'model-a',
+              options: [
+                { value: 'model-a', name: 'A' },
+                { value: 'model-b', name: 'B' },
+              ],
+            },
+          ],
+          declaredModelControls: {
+            'model-a': { effortValues: [] },
+            'model-b': { effortValues: ['low', 'medium', 'high'] },
+          },
+          fetchedAt: 1,
+        },
+      });
+    const effortFor = (agentType: string, selectedModelId: string) =>
+      buildAcpSelectorOptions({
+        configId: agentConfigId,
+        cliType: 'builtin',
+        agentType,
+        selectedModelId,
+        machine: probedWithoutEffort(agentType),
+      }).configOptionSelectors.find((selector) => selector.category === 'thought_level');
+
+    expect(effortFor('codex', 'model-b')).toMatchObject({
+      configId: 'reasoning_effort',
+      currentValue: 'medium',
+    });
+    // Claude's control carries its provider default and starts on it.
+    expect(effortFor('claude', 'model-b')).toMatchObject({
+      configId: 'effort',
+      currentValue: 'default',
+    });
+    expect(effortFor('claude', 'model-b')?.options.map((option) => option.value)).toEqual([
+      'default',
+      'low',
+      'medium',
+      'high',
+    ]);
+    // Declared without effort: no control, rather than a guessed one.
+    expect(effortFor('codex', 'model-a')).toBeUndefined();
+  });
+
+  it("keeps today's behaviour for a model the declaration does not cover", () => {
+    // gpt-6-astra is undeclared: Codex's own tiers extend the probed list.
+    expect(effortValues(selectorsFor('gpt-6-astra'))).toEqual(
+      expect.arrayContaining(['low', 'high', 'max', 'ultra'])
+    );
+    expect(hasFast(selectorsFor('gpt-6-astra'))).toBe(false);
+  });
+});
+
 describe('buildAcpSelectorOptions', () => {
   it('does not reuse registry Pi models after a same-ID builtin migration', () => {
     const options = buildAcpSelectorOptions({

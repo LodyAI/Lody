@@ -89,6 +89,14 @@ export type SessionActiveInvocationContextResult = z.infer<
   typeof SessionActiveInvocationContextResultSchema
 >;
 
+export const SessionToolResultSchema = z
+  .object({
+    type: z.literal('session/tool-result'),
+    content: z.array(z.object({ type: z.literal('text'), text: z.string() }).strict()),
+    isError: z.boolean().optional(),
+  })
+  .strict();
+
 export const LocalMachineRpcRequestSchema = z.discriminatedUnion('method', [
   BaseLocalMachineRpcRequestSchema.extend({
     method: z.literal('ios-simulator/agent-control'),
@@ -97,6 +105,21 @@ export const LocalMachineRpcRequestSchema = z.discriminatedUnion('method', [
   BaseLocalMachineRpcRequestSchema.extend({
     method: z.literal('ios-simulator/control'),
     params: IosSimulatorRequestSchema,
+  }).strict(),
+  BaseLocalMachineRpcRequestSchema.extend({
+    method: z.literal('session/call-tool'),
+    params: z
+      .object({
+        sessionId: SessionIdSchema,
+        name: z.string().min(1).max(100),
+        arguments: z
+          .record(z.string(), z.json())
+          .refine(
+            (value) => new TextEncoder().encode(JSON.stringify(value)).byteLength <= 256 * 1024,
+            'Session tool arguments exceed 256 KiB'
+          ),
+      })
+      .strict(),
   }).strict(),
   BaseLocalMachineRpcRequestSchema.extend({
     method: z.literal('session/get-active-invocation-context'),
@@ -304,6 +327,7 @@ export type LocalMachineRpcRequestValidated = LocalMachineRpcRequest;
 
 export const LocalMachineRpcResultSchema = z.union([
   IosSimulatorResponseSchema,
+  SessionToolResultSchema,
   SessionActiveInvocationContextResultSchema,
   CodeCollabV2FileIndexSnapshotSchema,
   CodeCollabV2OpenTextOkSchema,

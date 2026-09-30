@@ -625,6 +625,7 @@ function SidebarHeaderIconButton({
 
 function NavButton({
   active,
+  isMobile,
   label,
   icon,
   onClick,
@@ -632,6 +633,7 @@ function NavButton({
   action,
 }: {
   active: boolean;
+  isMobile: boolean;
   label: string;
   icon: ReactNode;
   onClick?: () => void;
@@ -652,7 +654,10 @@ function NavButton({
         className={cn(
           // Same size as the session titles below: a smaller label reads as
           // undersized next to its 16px icon.
-          'group flex w-full select-none items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm outline-hidden transition',
+          'group flex w-full select-none items-center rounded-lg py-1.5 text-left text-sm outline-hidden transition',
+          // Desktop rows share a +15px icon and +37px text column with the
+          // project, repository, and session rows below them.
+          isMobile ? 'gap-2 px-2' : 'gap-1.5 px-[9px]',
           'focus-visible:ring-1 focus-visible:ring-sidebar-ring/30',
           active
             ? 'bg-sidebar-selection text-sidebar-selection-foreground'
@@ -663,10 +668,9 @@ function NavButton({
           action && 'pr-8'
         )}
       >
-        {/* The slot is the 16px icon box itself, not a padded frame: it starts
-            on the sidebar's +14 leading edge (wordmark, project rows) so the
-            glyphs share the column and labels land on the shared +38 text
-            column. Height stays 20px to keep the row's optical line. */}
+        {/* The slot is the 16px icon box itself, not a padded frame. On desktop,
+            its +15px start and the label's +37px start match the list rows.
+            Height stays 20px to keep the row's optical line. */}
         <span className="flex h-5 w-4 shrink-0 items-center justify-center text-current">
           {icon}
         </span>
@@ -1217,7 +1221,7 @@ export const LoroSidebar = memo(function LoroSidebar({
           ) : (
             <span
               aria-label="Lody"
-              className="select-none px-2 text-[18px] font-semibold leading-none tracking-[-0.03em] text-reading"
+              className="select-none px-[9px] text-[18px] font-semibold leading-none tracking-[-0.03em] text-reading"
               style={{ fontFamily: 'var(--font-wordmark)' }}
             >
               Lody
@@ -1284,6 +1288,7 @@ export const LoroSidebar = memo(function LoroSidebar({
         >
           <NavButton
             active={activeNav === 'home'}
+            isMobile={isMobile}
             label={mergedLabels.home}
             icon={<SquarePen className="h-4 w-4" strokeWidth={1.75} />}
             onClick={onHomeClicked}
@@ -1291,6 +1296,7 @@ export const LoroSidebar = memo(function LoroSidebar({
           {onSchedulesClicked ? (
             <NavButton
               active={activeNav === 'schedules'}
+              isMobile={isMobile}
               label={mergedLabels.schedules}
               icon={<ListTodo className="h-4 w-4" />}
               onClick={onSchedulesClicked}
@@ -1298,6 +1304,7 @@ export const LoroSidebar = memo(function LoroSidebar({
           ) : null}
           <NavButton
             active={false}
+            isMobile={isMobile}
             label={t('common.search', 'Search')}
             icon={<Search className="h-4 w-4" strokeWidth={1.75} />}
             onClick={() => setCommandPaletteOpen(true)}

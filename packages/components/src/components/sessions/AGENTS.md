@@ -132,8 +132,8 @@ Read parent rules and each heading's linked context before edits.
 - Local paths resolve on the OWNING machine from its workspace root plus a
   genuinely workspace-relative path; `lib/session-local-file-path.ts` rejects
   absolute and `..` paths.
-- Viewers are intentionally NOT code-split; never reintroduce
-  `lazy(() => import())` for them. v2 semantics: `specs/code-collab-v2.md`.
+- Keep viewer shells static; load Office engines on activation/idle only.
+  Local PDFs use 64 KiB ranges and 8 MP canvases.
 
 ## [Stories](../../../../../.agents/docs/sessions-stories.md)
 

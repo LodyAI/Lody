@@ -746,7 +746,7 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
         onNavigate(session.id);
       }}
     >
-      <div className="flex items-center gap-1.5">
+      <div className={cn('flex items-center', isMobile ? 'gap-1.5' : 'gap-2')}>
         <SessionRowLeadingSlot
           showMenuButton={hasContextMenuActions}
           menuLabel={moreActionsLabel}

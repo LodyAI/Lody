@@ -3,7 +3,11 @@ import { useTranslation } from 'react-i18next';
 import { formatDistance, type Locale } from 'date-fns';
 import { enUS } from 'date-fns/locale/en-US';
 import { zhCN } from 'date-fns/locale/zh-CN';
-import { getServerNow, type SessionContextWindowUsage } from '@lody/shared';
+import {
+  getServerNow,
+  type AgentConfigId,
+  type SessionContextWindowUsage,
+} from '@lody/shared';
 import { Spinner } from '@lody/ui/spinner';
 
 import { Button } from '@lody/ui/button';
@@ -32,6 +36,7 @@ export type SessionUsagePopoverProps = {
   contextWindowUsage?: SessionContextWindowUsage | null;
   rateLimits?: MachineRateLimits | null;
   agentType: string;
+  agentConfigId?: AgentConfigId | null;
   modelId?: string | null;
   modelLabel?: string | null;
   isContextCompacting?: boolean;
@@ -50,6 +55,7 @@ export const SessionUsagePopover = memo(function SessionUsagePopover({
   contextWindowUsage,
   rateLimits,
   agentType,
+  agentConfigId,
   modelId,
   modelLabel,
   isContextCompacting = false,
@@ -62,7 +68,12 @@ export const SessionUsagePopover = memo(function SessionUsagePopover({
   const locale: Locale = i18n.language?.startsWith('zh') ? zhCN : enUS;
   const intlLocale = toIntlLocaleOrEn(i18n.resolvedLanguage ?? i18n.language);
   const context = getContextWindowUsageData(contextWindowUsage);
-  const rateLimit = resolveAgentRateLimitForModel({ rateLimits, agentType, modelId });
+  const rateLimit = resolveAgentRateLimitForModel({
+    rateLimits,
+    agentType,
+    agentConfigId,
+    modelId,
+  });
   const rateLimitWindows = rateLimit
     ? getAgentRateLimitWindows(rateLimit.limits).sort(
         (left, right) => (right.windowDurationSeconds ?? 0) - (left.windowDurationSeconds ?? 0)

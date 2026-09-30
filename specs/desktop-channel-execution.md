@@ -47,6 +47,8 @@ links from a complete Nightly manifest. Missing or invalid metadata MUST NOT pro
 Stable fallback links or guessed aliases. The manifest and download page MUST identify
 the verified minimum Stable version; this floor requires packaged compatibility evidence,
 not just a version comparison.
+Nightly manifest versions MUST accept the first release in a cycle, `-nightly.0`,
+as well as later non-negative integer sequences without leading zeros.
 
 About, copied crash reports and submitted bug reports MUST identify the reporting
 desktop's channel, version and both source revisions when injected by its distribution

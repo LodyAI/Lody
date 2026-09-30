@@ -130,16 +130,16 @@ pre,
      tinted chip (no border) instead of the prose underline, so it reads as
      clickable at a glance. The hue is the prose link's (`.text-markdown-link`). Outranks the
      renderer's `[&_a]:` link variants in this same layer. */
-  .markdown-renderer a.markdown-reference-chip {
+  .markdown-renderer :is(a, button, span).markdown-reference-chip {
     --reference-chip-hue: 200 72% 34%;
     color: hsl(var(--reference-chip-hue));
     background-color: hsl(var(--reference-chip-hue) / 0.12);
     text-decoration: none;
   }
-  .markdown-renderer a.markdown-reference-chip:hover {
+  .markdown-renderer :is(a, button).markdown-reference-chip:hover {
     background-color: hsl(var(--reference-chip-hue) / 0.18);
   }
-  .dark .markdown-renderer a.markdown-reference-chip {
+  .dark .markdown-renderer :is(a, button, span).markdown-reference-chip {
     --reference-chip-hue: 200 69% 70%;
   }
   .text-pr-merged {
@@ -186,12 +186,8 @@ pre,
   .markdown-renderer :is(p, h1, h2, h3, h4, h5, h6) {
     padding-inline: 4px;
   }
-  /* Chinese prose reads more evenly with both edges aligned. The renderer adds
-     this class per paragraph so English-only paragraphs keep their start edge. */
-  .markdown-renderer > .markdown-cjk-paragraph {
-    text-align: justify;
-    text-align-last: start;
-    text-justify: auto;
+  .markdown-renderer > p {
+    text-align: start;
   }
   /* Desktop settings content: in light themes the section/card surfaces take the
      theme's popover fill (white in Lody Light) instead of the gray --card, so

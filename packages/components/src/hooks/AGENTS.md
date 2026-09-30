@@ -15,6 +15,9 @@ Parent AGENTS apply. Edit `AGENTS.md`, not its `CLAUDE.md` symlink. Background: 
 ## Session, auth, and app shell
 
 - History uses SessionData commands.
+- Held-send config is a session/runtime-scoped input to selection, never a stored
+  resolved selection. Keep its logical Turn fence across history/queue handoff;
+  next-draft edits win and attachment progress does not rebuild the catalog.
 - A proven-undelivered steer (`no-active-turn` or `promotion-failed`) repairs ordinary
   dispatch for pending/seen entries even if CLI already changed their status. Never
   repair active, terminal, removed, or delivery-unknown turns.

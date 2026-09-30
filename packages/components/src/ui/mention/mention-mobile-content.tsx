@@ -90,8 +90,7 @@ export function MentionMobilePanel({
   children,
 }: {
   open: boolean;
-  /** The composer input the panel docks above (and which stays visible
-     as the search field). */
+  /** The composer input used to find its frame and search field. */
   anchorRef: React.RefObject<HTMLElement | null>;
   children: React.ReactNode;
 }) {
@@ -112,12 +111,15 @@ export function MentionMobilePanel({
     const input = anchorRef.current;
     if (!input || typeof window === 'undefined') return undefined;
 
+    // Attachments and controls can sit above the textarea inside the composer.
+    // Dock above that whole frame so the strip cannot cover them.
+    const frame = input.closest<HTMLElement>('[data-mention-frame]') ?? input;
     const layer = input.closest<HTMLElement>('[data-vaul-drawer], [data-lody-dialog-content]');
     const target = layer ?? document.body;
     setContainer(target);
 
     const measure = () => {
-      const composerRect = input.getBoundingClientRect();
+      const composerRect = frame.getBoundingClientRect();
       /* The positioned modal owns absolute coordinates; the body fallback
          uses fixed viewport coordinates. */
       const layerRect = layer?.getBoundingClientRect();
@@ -132,7 +134,7 @@ export function MentionMobilePanel({
                 Math.max(PANEL_TOP_INSET, layerRect.top + PANEL_TO_COMPOSER_GAP) -
                 PANEL_TO_COMPOSER_GAP
             )
-          : Math.max(120, composerRect.top - PANEL_TOP_INSET)
+          : Math.max(0, composerRect.top - PANEL_TOP_INSET - PANEL_TO_COMPOSER_GAP)
       );
       setMetrics({ bottom, maxHeight });
     };
@@ -145,6 +147,8 @@ export function MentionMobilePanel({
     window.visualViewport?.addEventListener('resize', measure);
     window.visualViewport?.addEventListener('scroll', measure);
     const cleanupResizeObserver = observeResizeOnAnimationFrame(input, () => measure());
+    const cleanupFrameObserver =
+      frame !== input ? observeResizeOnAnimationFrame(frame, measure) : undefined;
     const cleanupLayerObserver = layer ? observeResizeOnAnimationFrame(layer, measure) : undefined;
 
     return () => {
@@ -156,6 +160,7 @@ export function MentionMobilePanel({
       window.visualViewport?.removeEventListener('resize', measure);
       window.visualViewport?.removeEventListener('scroll', measure);
       cleanupResizeObserver();
+      cleanupFrameObserver?.();
       cleanupLayerObserver?.();
     };
   }, [open, anchorRef]);

@@ -255,4 +255,57 @@ describe('MachineDocument ACP capabilities', () => {
     expect(flock.commits).toBe(0);
     expect(flush).not.toHaveBeenCalled();
   });
+
+  it("stores each model's declared controls in its own row, writing only on change", async () => {
+    const flock = new FakeMachineFlock();
+    const markDirty = vi.fn();
+    const repo = {
+      openFlockDoc: vi.fn(async () => ({ flock, syncOnce: vi.fn(async () => undefined) })),
+      flush: vi.fn(async () => undefined),
+    } as unknown as LoroRepo;
+    const document = new MachineDocument(
+      repo,
+      'workspace-1' as WorkspaceId,
+      'machine-1' as MachineId,
+      markDirty
+    );
+    const write = (
+      modelCapabilities?: Record<string, { effortValues?: string[]; fastMode?: boolean }>
+    ) =>
+      document.updateAcpCapabilities(
+        'config-1' as AgentConfigId,
+        'builtin',
+        'codex',
+        [],
+        [{ modelId: 'gpt-6', name: 'GPT-6' }],
+        undefined,
+        undefined,
+        false,
+        'codex@1',
+        undefined,
+        false,
+        undefined,
+        { modelCapabilities }
+      );
+    const modelRow = () =>
+      flock.rows.get(JSON.stringify(['acpModelCapability', 'config-1']))?.value;
+    const declared = { 'gpt-6': { effortValues: ['low', 'ultra'], fastMode: true } };
+
+    await write(declared);
+    await write(declared);
+    expect(flock.commits).toBe(2);
+    expect(markDirty).toHaveBeenCalledTimes(1);
+    expect(modelRow()).toEqual({ version: 1, sourceVersion: 'codex@1', models: declared });
+
+    // Only the declaration changed: one write, to the per-model row.
+    const changed = { 'gpt-6': { effortValues: ['low'], fastMode: false } };
+    await write(changed);
+    expect(flock.commits).toBe(3);
+    expect(modelRow()).toMatchObject({ models: changed });
+
+    // A response without a declaration leaves the stored one alone.
+    await write(undefined);
+    expect(flock.commits).toBe(3);
+    expect(modelRow()).toMatchObject({ models: changed });
+  });
 });

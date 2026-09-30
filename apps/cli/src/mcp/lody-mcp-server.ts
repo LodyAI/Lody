@@ -8,6 +8,7 @@ import { Effect } from 'effect';
 import { z } from 'zod';
 import { requestSessionShare } from '@/lib/session-share-delivery';
 import {
+  ACP_CAPABILITY_ROW_FAMILIES,
   getAcpCapabilityCacheKey,
   getMachineFlockAcpCapabilities,
   getMachineFlockDocId,
@@ -79,6 +80,7 @@ import {
   withWorkspaceManager,
   getCommandSessionSharingPort,
   WorkspaceSyncUnavailableError,
+  classifyLocalDaemonIpcError,
 } from '@/lib/command-runtime';
 import { listMergedAgentConfigs } from '@/lib/agent-config-machine-flock';
 import {
@@ -134,6 +136,8 @@ import { createResourceDiscovery } from '@/lib/resource-discovery-runtime';
 import { getCliPlatformKind } from '@/lib/cli-platform';
 import { summarizeDiscoveryAgent as summarizeAgentConfig } from '@/lib/resource-discovery';
 import { SessionDiscoveryFilterShape, matchesSessionDiscovery } from '@/lib/discovery-query';
+import { getSessionCommandEnvironment } from '@/lib/session-command-environment';
+import { createSessionToolRegistrar, type SessionToolHandlers } from './session-tool-router';
 
 import { registerIosSimulatorPreviewTool } from './ios-simulator-tool';
 
@@ -1003,6 +1007,8 @@ const postSessionControl = async (
 const readActiveInvocationContext = async (
   ctx: McpSessionContext
 ): Promise<SessionActiveInvocationContextResult> => {
+  const environment = getSessionCommandEnvironment();
+  if (environment) return environment.host.readInvocation(ctx.sessionId);
   const response = await Effect.runPromise(
     makeLocalControlClientAuto({ socketPath: ctx.localControlSocketPath })
       .machineRpc(
@@ -2256,7 +2262,9 @@ const readMachineAcpCapabilities = async (
 ): Promise<Record<string, AcpCapabilityCacheEntry>> => {
   const handle = await manager.repo.openFlockDoc(getMachineFlockDocId(workspaceId, machineId));
   return getMachineFlockAcpCapabilities(
-    readMachineFlockRowsFromFlock(handle.flock, { families: ['acpCapability'] })
+    readMachineFlockRowsFromFlock(handle.flock, {
+      families: ACP_CAPABILITY_ROW_FAMILIES,
+    })
   );
 };
 
@@ -2473,18 +2481,19 @@ const buildSessionCreateOptions = async (
       )
     );
     const repoQuery = normalizeCliValue(input.repoQuery)?.toLowerCase();
-    const repos = repoQuery
-      ? (
-          await listWorkspaceGitHubRepositoriesForCliToken({
-            token: auth.token,
-            workspaceId,
-            requesterUserId,
-            enabledOnly: true,
-          })
-        )
-          .filter((repo) => repo.fullName.toLowerCase().includes(repoQuery))
-          .slice(0, MAX_MCP_CREATE_OPTION_MATCHES)
-      : [];
+    const repos =
+      repoQuery && !getSessionCommandEnvironment()
+        ? (
+            await listWorkspaceGitHubRepositoriesForCliToken({
+              token: auth.token,
+              workspaceId,
+              requesterUserId,
+              enabledOnly: true,
+            })
+          )
+            .filter((repo) => repo.fullName.toLowerCase().includes(repoQuery))
+            .slice(0, MAX_MCP_CREATE_OPTION_MATCHES)
+        : [];
     return {
       ok: true,
       current: await buildSessionCurrentInfo(manager, workspaceId, currentSession),
@@ -3524,6 +3533,10 @@ export const __lodyMcpServerInternals = {
 };
 
 export function buildLodyMcpServer(): McpServer {
+  return buildSessionToolServer();
+}
+
+export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServer {
   // The HTTP host is long-lived and the stdio server normally lives for the
   // Agent session. Initialization is idempotent and local-platform telemetry
   // remains hard-disabled inside the analytics layer.
@@ -3552,10 +3565,44 @@ export function buildLodyMcpServer(): McpServer {
     },
   });
 
-  registerDiscoveryTools(server, async (read) => {
-    if (getCliPlatformKind() === 'local') {
-      throw new Error('Workspace catalog discovery is unavailable on the local platform.');
-    }
+  const registerSessionTool = createSessionToolRegistrar(
+    server,
+    async (name, args, execute) => {
+      if (getCliPlatformKind() !== 'local' || getSessionCommandEnvironment()) return execute();
+      try {
+        const ctx = getSessionContext();
+        const outcome = await Effect.runPromise(
+          makeLocalControlClientAuto({ socketPath: ctx.localControlSocketPath })
+            .machineRpc(
+              {
+                method: 'session/call-tool',
+                machineId: ctx.machineId,
+                workspaceId: ctx.workspaceId,
+                ownerSessionId: ctx.sessionId,
+                params: {
+                  sessionId: ctx.sessionId,
+                  name,
+                  arguments: z.record(z.string(), z.json()).parse(args),
+                },
+              },
+              { timeoutMs: SESSION_CONTROL_TIMEOUT_MS }
+            )
+            .pipe(Effect.either)
+        );
+        if (outcome._tag === 'Left') throw classifyLocalDaemonIpcError(outcome.left);
+        const response = outcome.right;
+        if (!response.ok) throw new Error(response.error);
+        if (!('type' in response.result) || response.result.type !== 'session/tool-result')
+          throw new Error('Unexpected Session tool response');
+        return { content: response.result.content, isError: response.result.isError };
+      } catch (error) {
+        return mcpErrorResult(error);
+      }
+    },
+    handlers
+  );
+
+  registerDiscoveryTools(registerSessionTool, async (read) => {
     const ctx = getSessionContext();
     const source = await resolveInvokingTurnSource();
     const auth = getCliAuthContextOrThrow('mcp');
@@ -3850,7 +3897,7 @@ export function buildLodyMcpServer(): McpServer {
     }
   );
 
-  server.registerTool(
+  registerSessionTool(
     SESSION_CREATE_OPTIONS_TOOL_NAME,
     {
       title: 'List session create options',
@@ -3867,7 +3914,7 @@ export function buildLodyMcpServer(): McpServer {
     }
   );
 
-  server.registerTool(
+  registerSessionTool(
     SESSION_CREATE_TOOL_NAME,
     {
       title: 'Create a Lody session',
@@ -3961,7 +4008,7 @@ export function buildLodyMcpServer(): McpServer {
     }
   );
 
-  server.registerTool(
+  registerSessionTool(
     SESSION_CHAT_TOOL_NAME,
     {
       title: 'Send a prompt to a Lody session',
@@ -4026,7 +4073,7 @@ export function buildLodyMcpServer(): McpServer {
     }
   );
 
-  server.registerTool(
+  registerSessionTool(
     SESSION_CREATE_MANY_TOOL_NAME,
     {
       title: 'Create multiple Lody sessions',
@@ -4044,7 +4091,7 @@ export function buildLodyMcpServer(): McpServer {
     }
   );
 
-  server.registerTool(
+  registerSessionTool(
     SESSION_CHAT_MANY_TOOL_NAME,
     {
       title: 'Chat multiple Lody sessions',
@@ -4061,7 +4108,7 @@ export function buildLodyMcpServer(): McpServer {
     }
   );
 
-  server.registerTool(
+  registerSessionTool(
     SESSION_CANCEL_TOOL_NAME,
     {
       title: 'Cancel a Lody session turn',
@@ -4073,6 +4120,14 @@ export function buildLodyMcpServer(): McpServer {
         const ctx = getSessionContext();
         const auth = getCliAuthContextOrThrow('mcp');
         await resolveWorkspaceOrThrow(auth, getMcpWorkspaceId(ctx));
+        const environment = getSessionCommandEnvironment();
+        if (environment) {
+          const sessionId = resolveMcpSessionId(args.sessionId, ctx) as SessionId;
+          const session = await readCurrentSessionMeta(environment.manager, sessionId);
+          if (!session || session.machineId !== auth.machineId)
+            throw new Error('Session not found on this machine');
+          return jsonTextResult(await environment.host.cancelSession(sessionId));
+        }
         return jsonTextResult(
           await runLodyCliJson([
             'session',
@@ -4089,7 +4144,7 @@ export function buildLodyMcpServer(): McpServer {
     }
   );
 
-  server.registerTool(
+  registerSessionTool(
     'lody_operation_list',
     {
       description:
@@ -4119,7 +4174,7 @@ export function buildLodyMcpServer(): McpServer {
     }
   );
 
-  server.registerTool(
+  registerSessionTool(
     OPERATION_GET_TOOL_NAME,
     {
       title: 'Get a Lody Operation snapshot',
@@ -4139,7 +4194,7 @@ export function buildLodyMcpServer(): McpServer {
     }
   );
 
-  server.registerTool(
+  registerSessionTool(
     OPERATION_CANCEL_TOOL_NAME,
     {
       title: 'Cancel a Lody Operation',
@@ -4158,13 +4213,16 @@ export function buildLodyMcpServer(): McpServer {
           store.cancel(requesterSessionId, args.operationId)
         );
         if (cancellation.didCancel && before.state === 'active') {
+          const environment = getSessionCommandEnvironment();
           const startedTargets = before.items.filter(
             (item) => item.status === 'active' && item.inputDurable
           );
           await Promise.allSettled(
             startedTargets.map((item) =>
               item.status === 'active'
-                ? runLodyCliJson(buildOperationTargetCancelArgs(getMcpWorkspaceId(ctx), item))
+                ? environment
+                  ? environment.host.cancelSession(item.target.sessionId, item.target.userTurnId)
+                  : runLodyCliJson(buildOperationTargetCancelArgs(getMcpWorkspaceId(ctx), item))
                 : Promise.resolve()
             )
           );
@@ -4178,7 +4236,7 @@ export function buildLodyMcpServer(): McpServer {
     }
   );
 
-  server.registerTool(
+  registerSessionTool(
     SESSION_RENAME_TOOL_NAME,
     {
       title: 'Rename a Lody session',
@@ -4201,7 +4259,7 @@ export function buildLodyMcpServer(): McpServer {
     }
   );
 
-  server.registerTool(
+  registerSessionTool(
     SESSION_RENAME_MANY_TOOL_NAME,
     {
       title: 'Rename multiple Lody sessions',
@@ -4251,7 +4309,7 @@ export function buildLodyMcpServer(): McpServer {
     }
   );
 
-  server.registerTool(
+  registerSessionTool(
     SESSION_LIST_TOOL_NAME,
     {
       title: 'List Lody sessions',
@@ -4268,7 +4326,7 @@ export function buildLodyMcpServer(): McpServer {
     }
   );
 
-  server.registerTool(
+  registerSessionTool(
     SESSION_STATUS_MANY_TOOL_NAME,
     {
       title: 'Get Lody session statuses',
@@ -4285,7 +4343,7 @@ export function buildLodyMcpServer(): McpServer {
     }
   );
 
-  server.registerTool(
+  registerSessionTool(
     SESSION_HISTORY_TOOL_NAME,
     {
       title: 'Read Lody session history',

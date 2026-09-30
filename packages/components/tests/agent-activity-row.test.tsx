@@ -344,6 +344,7 @@ describe('live agent status', () => {
   it('opens a step onto one sheet: the command once, then its output', async () => {
     const script =
       "cd /tmp/extract && python3 -c \"\nimport re\nprint(*re.findall(r'a*', 'aa'))\n\"";
+    const linkedEcho = script.replace('/tmp/extract', '[/tmp/extract](file:///tmp/extract)');
     await render(
       liveTurn([
         {
@@ -354,7 +355,7 @@ describe('live agent status', () => {
           status: 'completed',
           content: [
             // The agent restates the command as text beside the structured one.
-            { type: 'content', content: { type: 'text', text: script } },
+            { type: 'content', content: { type: 'text', text: linkedEcho } },
             { type: 'terminal_command', command: script },
             { type: 'terminal_output', output: 'aa', stream: 'combined' },
           ],
@@ -406,6 +407,7 @@ describe('live agent status', () => {
     // The echo is gone: the script appears once, as code, never as Markdown.
     expect(container.textContent!.split('import re')).toHaveLength(2);
     expect(python.querySelector('.markdown-renderer')).toBeNull();
+    expect(python.querySelectorAll('pre')[1]?.textContent).toBe('aa');
     expect(python.textContent).toContain('$');
     // Codex's shell wrapper is not part of what the reader ran.
     expect(codex.textContent).toContain('pnpm typecheck');

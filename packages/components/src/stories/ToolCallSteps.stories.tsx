@@ -223,3 +223,54 @@ type Story = StoryObj<typeof meta>;
 export const Light: Story = { globals: { theme: 'light' } };
 
 export const Dark: Story = { globals: { theme: 'dark' } };
+
+const customAcpCommand =
+  'sleep 2; grep -E "READY|FAILED" /tmp/build-check.log | tail -5; pgrep -f build-worker >/dev/null && echo "CHECK COMPLETE"';
+const customAcpLinkedEcho = customAcpCommand.replaceAll(
+  '/tmp/build-check.log',
+  '[/tmp/build-check.log](file:///tmp/build-check.log)'
+);
+const customAcpTurn: SessionHistoryParsed = {
+  id: 'custom-acp-echo-assistant',
+  role: 'assistant',
+  timestamp: '2026-09-29T09:00:00.000Z',
+  read: true,
+  finished: false,
+  items: [
+    {
+      type: 'tool_call',
+      toolCallId: 'custom-acp-linked-echo',
+      title: 'sleep, grep, pgrep',
+      kind: 'execute',
+      status: 'completed',
+      content: [
+        { type: 'content', content: { type: 'text', text: customAcpLinkedEcho } },
+        { type: 'terminal_command', command: customAcpCommand },
+        { type: 'terminal_output', stream: 'combined', output: 'CHECK COMPLETE\n' },
+      ],
+    },
+  ],
+};
+
+/** Synthetic Custom ACP payload reproducing a linked text echo beside its structured command. */
+export const CustomAcpEcho: Story = {
+  globals: { theme: 'dark' },
+  render: () => (
+    <Provider store={storyStore}>
+      <div className="relative h-[700px] w-full bg-background">
+        <SessionChatStreamView
+          items={[{ type: 'message', sessionId, message: customAcpTurn, turnIndex: 0 }]}
+          sessionId={sessionId}
+          renderMessageRow={renderMessageRow}
+          lastAssistantMessageId={customAcpTurn.id}
+          agentActivityLabel="Working"
+        />
+      </div>
+    </Provider>
+  ),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(await canvas.findByRole('button', { expanded: false }));
+    await userEvent.click(await canvas.findByRole('button', { expanded: false }));
+  },
+};
