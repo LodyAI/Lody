@@ -37,6 +37,11 @@ Node 上的 CLI 将配置迁移成无法启动的运行时。
 模块的产物；旧 manifest 故意不声明扩展能力。具体契约见更新后的草案 Spec。
 不引入新的执行器、配置目录副本或插件沙箱。
 
+更正（2026-09-30）：已发布的 `0.2.0-lody.5cbd610f8476` 产物包含两个 Windows 模块，并声明
+`lody.piExtensionsProtocolVersion: 1`，但提交的 manifest 漏了该字段，daemon 因此从未声明
+`piExtensions`，设置页扩展区一直不可用。manifest 现已补上该字段；穷举式机器注册测试要求
+凡声明 `builtinPi` 必同时声明 `piExtensions`，运行时升级再次漏掉时 CI 会失败。
+
 ## 历史导入后续工作（2026-09-25）
 
 历史同步报错 "does not advertise sessionCapabilities.list"：适配器只实现了 resume。

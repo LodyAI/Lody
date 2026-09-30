@@ -185,7 +185,7 @@ describe('MessageHandler machine registration', () => {
     // version reach every client, so adding one must be acknowledged here.
     expect(registeredMeta.protocolCapabilities).toEqual({
       codexAuthProfiles: 1,
-      ...(getHostMachineProtocolCapabilities().builtinPi ? { builtinPi: 1 } : {}),
+      ...(getHostMachineProtocolCapabilities().builtinPi ? { builtinPi: 1, piExtensions: 1 } : {}),
       acpAuthenticationInteractions: 2,
       previewControl: 1,
       localProjectRemoval: 1,
