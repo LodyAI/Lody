@@ -1953,6 +1953,7 @@
   "sessions.imageLoadUnavailable": "无法加载图片",
   "sessions.imagePreview": "图片预览",
   "sessions.imagePreview.copied": "已复制图片",
+  "sessions.imagePreview.close": "关闭图片预览",
   "sessions.imagePreview.copy": "复制图片",
   "sessions.imagePreview.copyFailed": "复制图片失败",
   "sessions.imagePreview.save": "图片另存为…",

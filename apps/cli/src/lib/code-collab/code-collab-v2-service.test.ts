@@ -31,6 +31,7 @@ import {
   type CodeCollabV2WorkspaceResolver,
 } from './code-collab-v2-service';
 import { CodeCollabV2DiffStore } from './code-collab-v2-diff-store';
+import { getGitDiffStats } from '../git/git-diff-stats';
 import type {
   WorkspaceWatchCoordinatorApi,
   WorkspaceWatchDirtyReason,
@@ -1155,6 +1156,113 @@ describe('CodeCollabV2Service text RPC boundary', () => {
         }
       } finally {
         await diffStore.close();
+      }
+    });
+  });
+
+  it('refreshes a qualified owner base against the advancing remote and replaces pre-merge changes', async () => {
+    await withWorkspace(async (workspaceRoot) => {
+      const git = async (...args: string[]) =>
+        (
+          await execFileAsync('git', ['-c', 'commit.gpgsign=false', ...args], {
+            cwd: workspaceRoot,
+          })
+        ).stdout.trim();
+      await git('-c', 'init.defaultBranch=main', 'init');
+      await git('config', 'user.email', 'test@example.com');
+      await git('config', 'user.name', 'Test User');
+      await writeFile(path.join(workspaceRoot, 'sdk.txt'), 'old SDK\n');
+      await git('add', '.');
+      await git('commit', '-m', 'stale local main');
+      await git('checkout', '-b', 'feature');
+      await writeFile(path.join(workspaceRoot, 'sdk.txt'), 'new SDK\n');
+      await git('add', '.');
+      await git('commit', '-m', 'upstream SDK update');
+      const upstream = await git('rev-parse', 'HEAD');
+      await git('update-ref', 'refs/remotes/origin/main', upstream);
+      await writeFile(path.join(workspaceRoot, 'avatar.txt'), 'avatar fix\n');
+      await git('add', '.');
+      await git('commit', '-m', 'avatar fix');
+      const head = await git('rev-parse', 'HEAD');
+      const { published, publishFileIndex } = collectPublishedSharedStates();
+      const service = new CodeCollabV2Service({
+        resolveWorkspace: async () => ({
+          ok: true,
+          ownerSessionId: SESSION_ID,
+          workspaceRoot,
+          allChangesBaseBranch: 'refs/heads/main',
+        }),
+        publishFileIndex,
+      });
+      try {
+        for (const preferredBaseBranch of ['main', 'refs/heads/main', 'refs/remotes/origin/main']) {
+          const stats = await getGitDiffStats((args) => git(...args), { preferredBaseBranch });
+          expect(stats).toMatchObject({
+            mergeBase: upstream,
+            baseDiffStats: { allChange: { add: 1, del: 0 } },
+          });
+        }
+        await service.refreshSharedState({ sessionId: SESSION_ID });
+        expect(published.at(-1)?.allChanges).toEqual({ 'avatar.txt': { diff: [1, 0] } });
+        const preMergeProjection = published.at(-1)!;
+        const diff = await service.openAllChangesDiff({ sessionId: SESSION_ID });
+        expect(diff).toMatchObject({ status: 'ok', base: upstream });
+        if (diff.status !== 'ok') throw new Error('Expected current diff');
+        expect(diff.entries.map((entry) => entry.path)).toEqual(['avatar.txt']);
+        expect(
+          await service.openCurrentDiff({ sessionId: SESSION_ID, path: 'sdk.txt' })
+        ).toMatchObject({ status: 'unavailable', reason: 'not_changed' });
+
+        // A squash-merged PR has matching upstream content but a different head:
+        // merge-base still excludes SDK changes without erasing the PR's history.
+        const squash = await git(
+          'commit-tree',
+          await git('rev-parse', 'HEAD^{tree}'),
+          '-p',
+          upstream,
+          '-m',
+          'squashed avatar'
+        );
+        await git('update-ref', 'refs/remotes/origin/main', squash);
+        await service.refreshSharedState({ sessionId: SESSION_ID });
+        expect(published.at(-1)?.allChanges).toEqual({ 'avatar.txt': { diff: [1, 0] } });
+        expect(await service.openAllChangesDiff({ sessionId: SESSION_ID })).toMatchObject({
+          status: 'ok',
+          base: upstream,
+        });
+
+        // A merged head advances the compare base without changing any disk file.
+        await git('update-ref', 'refs/remotes/origin/main', head);
+        await service.refreshSharedState({ sessionId: SESSION_ID });
+        expect(published.at(-1)?.allChanges).toEqual({});
+        expect(published.at(-1)?.allChangesDiffStats).toEqual({ allChange: { add: 0, del: 0 } });
+        expect(
+          await getGitDiffStats((args) => git(...args), { preferredBaseBranch: 'refs/heads/main' })
+        ).toMatchObject({ mergeBase: head, baseDiffStats: { allChange: { add: 0, del: 0 } } });
+        expect(await service.openAllChangesDiff({ sessionId: SESSION_ID })).toMatchObject({
+          status: 'ok',
+          base: head,
+          entries: [],
+        });
+        // A new service/page activation repairs the old pre-merge projection too.
+        published.push(preMergeProjection);
+        const restarted = new CodeCollabV2Service({
+          resolveWorkspace: async () => ({
+            ok: true,
+            ownerSessionId: SESSION_ID,
+            workspaceRoot,
+            allChangesBaseBranch: 'refs/heads/main',
+          }),
+          publishFileIndex,
+        });
+        try {
+          await restarted.initDirectory({ sessionId: SESSION_ID, path: '.' });
+          expect(published.at(-1)?.allChanges).toEqual({});
+        } finally {
+          restarted.dispose();
+        }
+      } finally {
+        service.dispose();
       }
     });
   });

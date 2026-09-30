@@ -1953,6 +1953,7 @@
   "sessions.imageLoadUnavailable": "Unable to load image",
   "sessions.imagePreview": "Image preview",
   "sessions.imagePreview.copied": "Image copied",
+  "sessions.imagePreview.close": "Close image preview",
   "sessions.imagePreview.copy": "Copy Image",
   "sessions.imagePreview.copyFailed": "Could not copy the image",
   "sessions.imagePreview.save": "Save Image As…",

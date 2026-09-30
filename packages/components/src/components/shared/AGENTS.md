@@ -17,6 +17,9 @@ Parent `AGENTS.md` files also apply. `CLAUDE.md` is a symlink to this file; edit
   `width`/`height` decenters it and padding erases a small image. Its portal sits at
   `--z-image-viewer`, deliberately UNDER `--z-toast`, because the viewer's own copy/save
   confirmations are toasts.
+- The shared image viewer is modal: trap focus, isolate the background, use named
+  native buttons, and restore the opener without replacing the image gesture engine.
+  [Decision](../../../../../.agents/notes/implemented/bug-fix/2026-09-30-image-viewer-modal-focus.md).
 - Image preview copy/save (`lib/image-preview-export.ts`) is Electron-only and splits by
   what each process can reach: main owns the native menu, clipboard, and save dialog;
   the renderer owns the `blob:` bytes and sends them only after the user picks an
