@@ -37,7 +37,7 @@ function isStringArray(value) {
 function isLocalProjectHistoryProvider(value) {
   return (
     isObjectRecord(value) &&
-    (value.cliType === 'builtin' || value.cliType === 'registry') &&
+    (value.cliType === 'builtin' || value.cliType === 'registry' || value.cliType === 'custom') &&
     typeof value.agentType === 'string' &&
     value.agentType.trim().length > 0
   );

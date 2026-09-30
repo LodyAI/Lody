@@ -1,3 +1,4 @@
+import { createRequire } from 'node:module';
 import { describe, expect, it } from 'vitest';
 import {
   LocalProjectControlResponseSchema,
@@ -7,6 +8,13 @@ import {
   isLocalProjectControlRequest,
   isLocalProjectControlResponse,
 } from '../src/node/local-project-control';
+
+const require = createRequire(import.meta.url);
+const { isLocalProjectControlRequest: isLocalProjectControlRequestCjs } = require(
+  '../src/node/local-project-control.cjs'
+) as {
+  isLocalProjectControlRequest: (value: unknown) => boolean;
+};
 
 const codexProvider = { cliType: 'builtin', agentType: 'codex' } as const;
 const claudeProvider = { cliType: 'builtin', agentType: 'claude' } as const;
@@ -222,6 +230,18 @@ describe('local project control request schema', () => {
     }
 
     expect(parsed.data.provider).toEqual(customProvider);
+  });
+
+  it('accepts custom provider history sync requests in the CJS validator', () => {
+    const request = {
+      type: 'local-project/sync-history',
+      machineId: 'machine-1',
+      workspaceId: 'workspace-1',
+      localProjectId: 'project-1',
+      provider: customProvider,
+    };
+    expect(isLocalProjectControlRequest(request)).toBe(true);
+    expect(isLocalProjectControlRequestCjs(request)).toBe(true);
   });
 
   it('parses Codex provider history import request with selected sessions', () => {
