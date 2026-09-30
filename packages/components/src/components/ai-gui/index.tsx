@@ -59,6 +59,8 @@ export interface SessionChatStreamProps {
   /** Shows sender names and desktop profile cards in multi-member workspaces. */
   showSenderIdentity?: boolean;
   view: ConversationView | null;
+  /** The stream is on screen; false for a mounted surface under `display: none`. */
+  isVisible?: boolean;
   sessionCreatedAt?: string;
   dividerLabel?: string;
   className?: string;
@@ -194,6 +196,7 @@ const SessionChatStreamImpl = forwardRef<SessionChatStreamHandle, SessionChatStr
       suppressStickyAutoScrollRef,
       outlineOverlayRoot,
       editMentionContext,
+      isVisible = true,
     },
     ref
   ) => {
@@ -315,6 +318,7 @@ const SessionChatStreamImpl = forwardRef<SessionChatStreamHandle, SessionChatStr
     return (
       <SessionChatStreamView
         initialWindowReady={initialWindowReady}
+        isVisible={isVisible}
         ref={ref}
         items={items}
         sessionId={sessionId}

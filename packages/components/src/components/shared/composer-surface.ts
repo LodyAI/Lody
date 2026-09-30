@@ -292,21 +292,11 @@ export const composerSurface = stylex.create({
     fontWeight: 500,
     letterSpacing: text.controlTracking,
   },
-  /**
-   * The list's own box inside a selector `Menu.Content`. A selector menu is
-   * not an independent surface: its edge is the edge of the trigger it hangs
-   * from, and the rows' leading column is that same edge plus one item pad —
-   * the X the trigger's own leading mark holds. `Menu.Content` insets its
-   * rows by `popup.inset` (4px) though, so the list reaches back out to the
-   * inset's edge, the same reach `popupList` makes inside a `Popover.Content`.
-   * The popup clips `overflowX`, so a separator inside still reads as the
-   * edge-to-edge line it already is.
-   */
+  /** Groups selector rows without overriding `Menu.Content`'s inset. */
   menuList: {
     display: 'flex',
     flexDirection: 'column',
     minWidth: 0,
-    marginInline: `calc(-1 * ${space[1]})`,
   },
   /** The scrolling region under the search field. */
   popupScroll: {

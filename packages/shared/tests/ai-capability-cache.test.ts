@@ -12,6 +12,11 @@ import {
   isAcpCapabilityCacheEntryCurrent,
   type AcpCapabilityCacheEntry,
 } from '../src/ai';
+import {
+  getModelEffortChoices,
+  readAcpModelCapabilitiesMeta,
+  resolveDeclaredEffortSupport,
+} from '../src/acp-model-capabilities';
 
 const entry = (cacheVersion?: number): AcpCapabilityCacheEntry => ({
   cliType: 'builtin',
@@ -216,5 +221,62 @@ describe('ACP capability fetch-time renewal', () => {
     expect(
       shouldRenewAcpCapabilityFetchTime({ fetchedAt: 0 }, ACP_CAPABILITY_FETCH_TIME_RENEW_AFTER_MS)
     ).toBe(true);
+  });
+});
+
+describe('declared per-model controls', () => {
+  const response = (modelCapabilities: unknown) => ({ _meta: { lody: { modelCapabilities } } });
+
+  it('reads a v1 declaration and ignores unknown or malformed ones whole', () => {
+    const models = {
+      opus: { effortValues: ['low', 'high'], fastMode: true },
+      haiku: { fastMode: false },
+    };
+    expect(readAcpModelCapabilitiesMeta(response({ version: 1, models }))).toEqual(models);
+    expect(readAcpModelCapabilitiesMeta(response({ version: 2, models }))).toBeUndefined();
+    expect(
+      readAcpModelCapabilitiesMeta(
+        response({ version: 1, models: { ...models, bad: { fastMode: 'yes' } } })
+      )
+    ).toBeUndefined();
+    expect(readAcpModelCapabilitiesMeta({})).toBeUndefined();
+  });
+
+  it('prefers a model declaration over the legacy per-model map', () => {
+    const capability = {
+      cliType: 'builtin',
+      agentType: 'codex',
+      declaredModelControls: { 'gpt-6': { effortValues: ['low', 'ultra'] } },
+      modelReasoningEfforts: { 'gpt-6': ['low'], 'gpt-5': ['medium'] },
+    };
+    expect(getModelEffortChoices(capability, 'gpt-6')).toEqual(['low', 'ultra']);
+    expect(getModelEffortChoices(capability, 'gpt-5')).toEqual(['medium']);
+    expect(getModelEffortChoices(capability, 'other')).toBeUndefined();
+  });
+
+  it("adds Claude's provider default and tells unsupported from unknown per adapter", () => {
+    const declaredModelControls = {
+      opus: { effortValues: ['low', 'high'], fastMode: true },
+      haiku: { fastMode: false },
+      empty: { effortValues: [] },
+    };
+    const claude = { cliType: 'builtin', agentType: 'claude', declaredModelControls };
+    const codex = { cliType: 'builtin', agentType: 'codex', declaredModelControls };
+
+    expect(resolveDeclaredEffortSupport(claude, 'opus')).toEqual({
+      state: 'supported',
+      values: ['default', 'low', 'high'],
+      fallbackValue: 'default',
+    });
+    expect(resolveDeclaredEffortSupport(codex, 'opus')).toEqual({
+      state: 'supported',
+      values: ['low', 'high'],
+      fallbackValue: 'low',
+    });
+    // Claude omits the list exactly when a model has no effort; Codex's omission says nothing.
+    expect(resolveDeclaredEffortSupport(claude, 'haiku')).toEqual({ state: 'unsupported' });
+    expect(resolveDeclaredEffortSupport(codex, 'haiku')).toEqual({ state: 'unknown' });
+    expect(resolveDeclaredEffortSupport(codex, 'empty')).toEqual({ state: 'unsupported' });
+    expect(resolveDeclaredEffortSupport(claude, 'undeclared')).toEqual({ state: 'unknown' });
   });
 });

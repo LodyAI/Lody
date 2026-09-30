@@ -23,9 +23,27 @@ const readManagedCandidate = async (repoFullName, source, invalidatedPersonalTok
   }, 15000);
   if (!response || !response.ok) throw new Error('GitHub credential service is unavailable; no operation was attempted.');
   const body = await response.json();
-  if (body.available === false) return null;
+  if (body.available === false) return { token: null, reason: typeof body.reason === 'string' ? body.reason : null };
   if (!body.token || body.tokenSource !== source) throw new Error('Invalid GitHub credential response.');
-  return body.token;
+  return { token: body.token, reason: null };
+};
+
+// Why the personal identity was skipped, in words the user can act on. Never
+// includes token material; reasons are backend policy codes or preflight states.
+const describePersonalUnavailable = (repo, reason) => {
+  switch (reason) {
+    case 'personal_auth_missing':
+      return 'your personal GitHub account is not authorized yet (Settings > Integrations > GitHub > Authorize)';
+    case 'personal_token_expired':
+    case 'personal_token_refresh_failed':
+      return 'your personal GitHub authorization has expired or been revoked; re-authorize in Settings > Integrations > GitHub';
+    case 'no_repository_access':
+      return 'your GitHub account cannot access ' + repo + ' with the required permission';
+    case 'token_invalid':
+      return 'GitHub rejected your personal token; re-authorize in Settings > Integrations > GitHub';
+    default:
+      return reason ? 'personal access is unavailable (' + reason + ')' : 'personal access is unavailable';
+  }
 };
 
 // Read-only preflight. Never replay an actual write with another identity.
@@ -53,33 +71,38 @@ const checkRepositoryCredential = async (token, repo, requireWrite, requirePubli
 };
 
 const selectGitHubCredential = async (repo, policy, localCandidate, requireWrite, anonymousCandidate) => {
-  let personalUnavailable = false;
+  let personalUnavailable = null;
   if (policy.personalEnabled) {
-    let token = await readManagedCandidate(repo, 'personal');
+    let candidate = await readManagedCandidate(repo, 'personal');
+    let token = candidate.token;
+    personalUnavailable = candidate.reason;
     if (token) {
       let status = await checkRepositoryCredential(token, repo, requireWrite);
       if (status === 'invalid') {
-        token = await readManagedCandidate(repo, 'personal', token);
+        candidate = await readManagedCandidate(repo, 'personal', token);
+        token = candidate.token;
+        personalUnavailable = candidate.reason ?? 'token_invalid';
         if (token) status = await checkRepositoryCredential(token, repo, requireWrite);
       }
       if (token && status === 'usable') return { token, source: 'personal' };
+      if (token) personalUnavailable = status === 'invalid' ? 'token_invalid' : 'no_repository_access';
     }
-    personalUnavailable = true;
+    personalUnavailable = describePersonalUnavailable(repo, personalUnavailable);
   }
   if (policy.allowLocalAuth) {
     const local = await localCandidate();
     if (local) {
-      if (personalUnavailable) console.error('[Lody] Personal GitHub access is unavailable for ' + repo + '; using machine-local credentials.');
+      if (personalUnavailable) console.error('[Lody] Using machine-local GitHub credentials for ' + repo + ': ' + personalUnavailable + '.');
       return { ...local, source: 'local' };
     }
   }
-  const token = await readManagedCandidate(repo, 'app');
+  const token = (await readManagedCandidate(repo, 'app')).token;
   if (!token && !requireWrite && anonymousCandidate && await anonymousCandidate()) {
     console.error('[Lody] Reading public GitHub repository ' + repo + ' anonymously (no applicable credential).');
     return { token: null, source: 'anonymous' };
   }
   if (!token) throw new Error('No GitHub credential is available for ' + repo + '.');
-  console.error('[Lody] Using GitHub App identity for ' + repo + (personalUnavailable ? ' (personal access unavailable).' : '.'));
+  console.error('[Lody] Using GitHub App identity for ' + repo + (personalUnavailable ? ': ' + personalUnavailable + '.' : '.'));
   return { token, source: 'app' };
 };
 `;

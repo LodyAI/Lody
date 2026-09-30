@@ -1,3 +1,4 @@
+import type { AcpModelControls } from './acp-model-capabilities';
 import {
   AvailableCommand,
   PermissionOption,
@@ -398,6 +399,12 @@ export type AcpCapabilityCacheEntry = {
    * `configOptions` is a snapshot that only describes `currentValue`'s model.
    */
   modelReasoningEfforts?: Record<string, string[]>;
+  /**
+   * Per-model controls from the config's `acpModelCapability` row, attached by
+   * `getMachineFlockAcpCapabilities` when its source version matches. Never
+   * stored in the capability row itself; see `acp-model-capabilities.ts`.
+   */
+  declaredModelControls?: Record<string, AcpModelControls>;
   /** Available slash commands advertised by the agent. */
   availableCommands?: AcpCommandSummary[];
   /** True only when the runtime initialize response advertised `sessionCapabilities.fork`. */

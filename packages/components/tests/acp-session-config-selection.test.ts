@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
+  ACP_CAPABILITY_CACHE_VERSION,
+  type AcpCapabilityCacheEntry,
+  type AgentConfigId,
+} from '@lody/shared';
+import { buildAcpSelectorOptions } from '../src/components/shared/acp-selector-options';
+import {
   EMPTY_ACP_SESSION_USER_CONFIG_EDITS,
   areAcpSessionConfigPreferencesEqual,
   buildAcpSessionConfigCandidates,
@@ -344,9 +350,8 @@ describe('ACP session config derivation', () => {
       ).reasoning_effort
     ).toBe('xhigh');
     expect(
-      filterAcpSessionConfigOptionValues(resolved.configOptionValues, [
-        staleGrokReasoningSelector,
-      ]).reasoning_effort
+      filterAcpSessionConfigOptionValues(resolved.configOptionValues, [staleGrokReasoningSelector])
+        .reasoning_effort
     ).toBeUndefined();
   });
 
@@ -491,5 +496,101 @@ describe('fenceAcpSessionUserEdits', () => {
         preferences: { modelId: 'gpt-5.5', configOptionValues: { reasoning_effort: 'high' } },
       })
     ).toBe(EMPTY_ACP_SESSION_USER_CONFIG_EDITS);
+  });
+});
+
+describe('ACP session config with declared per-model controls', () => {
+  const configId = 'per-model-config' as AgentConfigId;
+  const modelOption = {
+    id: 'model',
+    name: 'Model',
+    category: 'model',
+    type: 'select' as const,
+    currentValue: 'model-a',
+    options: [
+      { value: 'model-a', name: 'A' },
+      { value: 'model-b', name: 'B' },
+    ],
+  };
+  const entry = (
+    agentType: string,
+    configOptions: AcpCapabilityCacheEntry['configOptions']
+  ): AcpCapabilityCacheEntry => ({
+    cliType: 'builtin',
+    agentType,
+    cacheVersion: ACP_CAPABILITY_CACHE_VERSION,
+    provenance: 'runtime',
+    modes: [],
+    models: [],
+    configOptions,
+    declaredModelControls: {
+      'model-a': { effortValues: [], fastMode: false },
+      'model-b': { effortValues: ['low', 'medium', 'high'], fastMode: true },
+    },
+    fetchedAt: 1,
+  });
+  const selectorOptions = (capability: AcpCapabilityCacheEntry, selectedModelId: string) =>
+    buildAcpSelectorOptions({
+      configId,
+      cliType: 'builtin',
+      agentType: capability.agentType,
+      selectedModelId,
+      machine: { acpCapabilities: { [configId]: capability } },
+    });
+
+  it("keeps Claude's provider default instead of pinning medium", () => {
+    // What Claude publishes for model-b to a client without AIR recommendedValue.
+    const capability = entry('claude', [
+      { ...modelOption, currentValue: 'model-b' },
+      {
+        id: 'effort',
+        name: 'Effort',
+        category: 'thought_level',
+        type: 'select',
+        currentValue: 'default',
+        options: [
+          { value: 'default', name: 'Default' },
+          { value: 'low', name: 'Low' },
+          { value: 'medium', name: 'Medium' },
+          { value: 'high', name: 'High' },
+        ],
+      },
+    ]);
+
+    const resolved = resolveAcpSessionConfigSelection(
+      {
+        edits: emptyEdits,
+        preferences: { modelId: 'model-b', configOptionValues: { effort: 'default' } },
+      },
+      selectorOptions(capability, 'model-b'),
+      { cliType: 'builtin', agentType: 'claude' }
+    );
+
+    expect(resolved.configOptionValues.effort).toBe('default');
+  });
+
+  it("keeps a Role's Fast=true when it switches away from a model without Fast", () => {
+    const capability = entry('codex', [
+      modelOption,
+      { id: 'fast-mode', name: 'Fast', type: 'boolean', currentValue: false, options: [] },
+    ]);
+    // The Role applies with the OUTGOING model's selectors, which have no Fast.
+    const outgoing = selectorOptions(capability, 'model-a').configOptionSelectors;
+    expect(outgoing.some((selector) => selector.configId === 'fast-mode')).toBe(false);
+    const edits = filterAcpSessionConfigOptionValues({ 'fast-mode': true }, outgoing, {
+      switchesModel: true,
+    });
+
+    const resolved = resolveAcpSessionConfigSelection(
+      {
+        edits: { model: { value: 'model-b' }, configOptions: edits },
+        preferences: { modelId: 'model-a' },
+      },
+      selectorOptions(capability, 'model-b'),
+      { cliType: 'builtin', agentType: 'codex' }
+    );
+
+    expect(resolved.selectedModelId).toBe('model-b');
+    expect(resolved.configOptionValues['fast-mode']).toBe(true);
   });
 });

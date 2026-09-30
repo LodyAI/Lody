@@ -56,6 +56,12 @@ export interface ConversationScrollerProps {
   /** List indexes native selection needs mounted; must commit synchronously. */
   keepMounted?: readonly number[];
   initialWindowReady: boolean;
+  /**
+   * The viewport is off screen with no layout box (an inactive tab kept
+   * mounted under `display: none`, a collapsed panel). The engine pauses until
+   * it is shown again.
+   */
+  hidden?: boolean;
   /** Every reason the view has to stop follow-output (selection, jumps, search). */
   suppressAutoScrollRef?: RefObject<boolean>;
   onAtBottomChange?: (atBottom: boolean) => void;

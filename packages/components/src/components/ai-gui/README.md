@@ -56,8 +56,12 @@ the reasoning behind those rules.
   in [agent-notices.md](agent-notices.md). `chat-failed-detail-dialog.tsx` is the
   retired modal, no longer reached from the conversation.
   `terminal-component.tsx` / `terminal-preview.ts` own terminal output;
-  `tool-call-detail.tsx` is an expanded tool step's sheet and
-  `tool-call-command.ts` the command it shows.
+  `tool-call-detail.tsx` is an expanded tool step's sheet.
+  `tool-call-command.ts` formats its command and suppresses text echoes whose
+  visible command matches it, including echoes with Markdown-linked paths;
+  result text remains in the sheet. The
+  [linked-echo fix](../../../../../.agents/notes/implemented/bug-fix/2026-09-29-linked-tool-command-echo.md)
+  records the matching boundary.
 - `conversation-outline-rail.tsx`, `conversation-outline-rail-geometry.ts`, and
   `conversation-outline-arrival-intent.ts` own the reader-position rail.
   Invariants live in [conversation-outline.md](conversation-outline.md).

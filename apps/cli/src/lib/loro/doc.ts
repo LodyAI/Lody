@@ -54,6 +54,7 @@ import {
   writeMachineFlockRowToFlock,
   type AcpConfigOptionSummary,
   type AcpCommandSummary,
+  type AcpModelControls,
   type SessionGoalAction,
   type AcpCapabilityCacheEntry,
   type SessionForkOperation,
@@ -1520,7 +1521,7 @@ export class LoroDocumentManager {
     modelReasoningEfforts?: Record<string, string[]>,
     acknowledgedSteer = false,
     goalActions?: SessionGoalAction[],
-    options: { signal?: AbortSignal; sessionTitle?: boolean } = {}
+    options: AcpCapabilityWriteOptions = {}
   ): Promise<AcpCapabilityCacheEntry> {
     options.signal?.throwIfAborted();
     if (!this.machine) {
@@ -2928,6 +2929,17 @@ const getAliveDocMeta = async <Meta>(repo: LoroRepo, roomId: string): Promise<Me
 
 type MachineMetaPatch = Partial<MachineMeta> & Pick<MachineMeta, 'id'>;
 
+export type AcpCapabilityWriteOptions = {
+  signal?: AbortSignal;
+  sessionTitle?: boolean;
+  /**
+   * Every model's controls from the adapter's `_meta.lody.modelCapabilities`,
+   * stored in the config's own `acpModelCapability` row. Absent means this
+   * response carried no declaration; the stored row is then left untouched.
+   */
+  modelCapabilities?: Record<string, AcpModelControls>;
+};
+
 const serializeAcpCapabilityWithoutFetchTime = (entry: AcpCapabilityCacheEntry): string =>
   JSON.stringify({
     cliType: entry.cliType,
@@ -3029,7 +3041,7 @@ export class MachineDocument implements LoroDocument<{}, MachineMeta> {
     modelReasoningEfforts?: Record<string, string[]>,
     acknowledgedSteer = false,
     goalActions?: SessionGoalAction[],
-    options: { signal?: AbortSignal; sessionTitle?: boolean } = {}
+    options: AcpCapabilityWriteOptions = {}
   ): Promise<AcpCapabilityCacheEntry> {
     options.signal?.throwIfAborted();
     const normalizedModes = modes.map((mode) => ({
@@ -3066,26 +3078,35 @@ export class MachineDocument implements LoroDocument<{}, MachineMeta> {
     const handle = await this.openMachineFlockDoc();
     options.signal?.throwIfAborted();
     const capabilityKey = getAcpCapabilityCacheKey(configId);
+    // Reads the stored row alone, without per-model controls, so the
+    // comparison below sees exactly what was written.
     const existing = getMachineFlockAcpCapabilities(
       readMachineFlockRowsFromFlock(handle.flock, { families: ['acpCapability'] })
     )[capabilityKey];
-    if (
+    // The per-model row holds no timestamp, so an unchanged declaration is
+    // skipped by the row comparison and costs no write or sync.
+    const modelCapabilitiesChanged =
+      options.modelCapabilities !== undefined &&
+      writeMachineFlockRowToFlock(handle.flock, {
+        key: machineFlockKeys.acpModelCapability(configId),
+        value: { version: 1, sourceVersion, models: options.modelCapabilities },
+      });
+    const capabilityUnchanged =
       existing &&
       serializeAcpCapabilityWithoutFetchTime(existing) ===
         serializeAcpCapabilityWithoutFetchTime(entry) &&
       // Unchanged content is still rewritten once it is old enough: the refresh
       // cache trusts `fetchedAt`, and an entry never renewed would expire once
       // and then miss on every later request, re-probing forever.
-      !shouldRenewAcpCapabilityFetchTime(existing, entry.fetchedAt)
-    ) {
-      return existing;
-    }
+      !shouldRenewAcpCapabilityFetchTime(existing, entry.fetchedAt);
     options.signal?.throwIfAborted();
-    const changed = writeMachineFlockRowToFlock(handle.flock, {
-      key: machineFlockKeys.acpCapability(configId),
-      value: entry,
-    });
-    if (changed) {
+    const changed =
+      !capabilityUnchanged &&
+      writeMachineFlockRowToFlock(handle.flock, {
+        key: machineFlockKeys.acpCapability(configId),
+        value: entry,
+      });
+    if (changed || modelCapabilitiesChanged) {
       await this.repo.flush();
       if (this.markMachineFlockDirty) {
         this.markMachineFlockDirty('acp-capability-update');
@@ -3093,7 +3114,7 @@ export class MachineDocument implements LoroDocument<{}, MachineMeta> {
         await handle.syncOnce().catch(() => undefined);
       }
     }
-    return entry;
+    return (capabilityUnchanged ? existing : undefined) ?? entry;
   }
 
   async getAcpCapabilities(configId: AgentConfigId): Promise<AcpCapabilityCacheEntry | undefined> {

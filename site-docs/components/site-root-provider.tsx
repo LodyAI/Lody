@@ -2,6 +2,7 @@ import { Link as RouterLink, useLocation, useNavigate } from '@tanstack/react-ro
 import { RootProvider } from 'fumadocs-ui/provider/tanstack';
 import type { ComponentProps, ReactNode } from 'react';
 
+import { isSitePageHref, siteHref } from '../lib/site-url.mjs';
 import { OptionalEnhancement } from './optional-enhancement';
 import { DocsSearchDialog } from './docs-search-dialog';
 import { MarketingAtmosphereHost } from './marketing-atmosphere';
@@ -62,10 +63,12 @@ function SiteFrameworkLink({
   prefetch = true,
   ...props
 }: ComponentProps<'a'> & { prefetch?: boolean }) {
-  if (isAppOwnedHref(href)) return <a href={href} {...props} />;
+  if (isAppOwnedHref(href) || !isSitePageHref(href)) return <a href={href} {...props} />;
 
   // Mirrors fumadocs-core's Tanstack adapter for everything this site owns.
-  return <RouterLink preload={prefetch ? 'intent' : false} to={href as never} {...props} />;
+  return (
+    <RouterLink preload={prefetch ? 'intent' : false} to={siteHref(href) as never} {...props} />
+  );
 }
 
 const frameworkComponents = { Link: SiteFrameworkLink };

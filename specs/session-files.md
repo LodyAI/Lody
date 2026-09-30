@@ -116,7 +116,7 @@ Byte progress and server verification are separate. Within one workspace runtime
 
 Held sends are separate from the daemon message queue. Before attachments are ready, neither executable history nor queue rows serve as placeholders.
 
-- **Direct**: write the turn and point `latestUserMsgId` at it (never behind a newer local user turn; never for archived or deleted conversations), flush locally, then send a best-effort dispatch request. A request failure is not a send failure.
+- **Direct**: write the turn and point `latestUserMsgId` at it (never behind a newer local user turn; never for archived or deleted conversations), then send a best-effort dispatch request without waiting for Repo persistence. A request failure is not a send failure.
 - **Queue**: write the queue row. A queue-bound held send renders as a display-only local row at the end of the queue sheet, not in the conversation stream. It offers only retry and cancel, and is replaced by the real row with the same turn ID.
 - **Guide**: write the turn as `pending_apply`, then offer it to the target assistant turn.
   - Applied: the turn is marked processing with applied-steer provenance.
@@ -131,7 +131,7 @@ Applied steers follow the [history contract](session-history-writes.md) and neve
 
 Each send has a fixed turn ID from Send onward; queue rows carry it as `userTurnId`. Retry never generates a new ID. A new conversation keeps its reserved session ID.
 
-The local write is the accept boundary. Creation metadata comes first and writes absent keys only, so later edits win. The turn or queue row follows, then activation for direct sends, then a local flush. Nothing in it waits for the network. Existing transports upload local commits. The daemon dispatches `pending`/`seen` user turns it finds in synchronized history, so a written turn needs no renderer retry loop. A dispatch acknowledgment is acceleration, not proof of execution.
+The local write is the accept boundary. Creation metadata comes first and writes absent keys only, so later edits win. The turn or queue row follows, then activation for direct sends. Repo persistence and transport upload run independently: accepting a send and issuing its RPC do not wait for a Repo-wide flush or network confirmation. Local acceptance alone does not guarantee crash durability before background persistence completes. The daemon dispatches `pending`/`seen` user turns it finds in synchronized history, so a written turn needs no renderer retry loop. A dispatch acknowledgment is acceleration, not proof of execution.
 
 Local acceptance, synchronization and daemon execution are distinct facts. UI must not present local acceptance as daemon receipt.
 

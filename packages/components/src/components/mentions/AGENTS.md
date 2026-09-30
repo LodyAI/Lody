@@ -14,9 +14,9 @@ Pipeline background: [ui-mentions.md](../../../../../.agents/docs/ui-mentions.md
   registration and mounting `<Mention>`; every source with its own `enabled`
   rule (sessions: having any) belongs there too. Placeholder hints advertise `$`
   only under the conditions that enable Skill mentions.
-- Desktop menus follow the caret, flip to fit, and cap/scroll within the viewport
-  and `var(--mention-input-width)`. The mobile dock stays above the whole
-  `[data-mention-frame]`, including attachments.
+- The main desktop chat composer pins menus above its frame; inline and dialog
+  menus follow the caret and flip to fit. All cap/scroll within available room
+  and `var(--mention-input-width)`. The mobile dock stays above the whole frame.
 - `insertText` must keep its type's prompt form (`@path`, `#123`, `$token`,
   `/cmd`): reaching a type through `@` must not change what the agent receives.
   Directory candidates carry BOTH `navigateText` (`@dir/`, descend) and
@@ -26,9 +26,9 @@ Pipeline background: [ui-mentions.md](../../../../../.agents/docs/ui-mentions.md
   UI-thread fallback. Aggregate results are capped; Roles list all readable entries.
 - Issues and PRs rank over their own slice of the shared cache, partitioned once
   by `useMentionCategories`.
-- File, Session, Agent Role, Issue, and PR candidates use the vendored VS Code
-  `scoreFuzzy` with non-contiguous matching, wrapped by any source-specific
-  ordering. Skills and commands keep their own ranking.
+- Files, Sessions, Roles, Issues, and PRs use vendored VS Code `scoreFuzzy`
+  with source ordering. Skills rank alone; typed slash queries merge Commands
+  and Prompt Shortcuts after source gates.
 - Side panels render neutral `MentionCandidateDetail` fields verbatim: use
   i18n'd text, never raw enums. `detail.agentRole` instead renders
   `sessions/agent-role-detail-pane.tsx` on desktop. The list sets pane height.

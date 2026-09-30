@@ -19,6 +19,7 @@ import { listWorkspaceGitHubRepositoriesForCliToken } from './workspace';
 import { listWorkspaceMcpCatalog } from './workspace-mcp-store';
 import { ResourceDiscovery } from './resource-discovery';
 import { getCliPlatformKind } from './cli-platform';
+import { getSessionCommandEnvironment } from './session-command-environment';
 
 export async function createResourceDiscovery(args: {
   manager: LoroDocumentManager;
@@ -43,7 +44,12 @@ export async function createResourceDiscovery(args: {
     selectedMcpServerIds: args.selectedMcpServerIds,
     machines: async () =>
       (await listAliveDocMetas<MachineMeta>(manager, isMachineDocRoomId)).map((row) => row.meta),
-    onlineMachineIds: async () => (args.offline ? null : manager.getOnlineMachineIds()),
+    onlineMachineIds: async () =>
+      getSessionCommandEnvironment()
+        ? new Set([auth.machineId])
+        : args.offline
+          ? null
+          : manager.getOnlineMachineIds(),
     canAccess: async (machineId, localProjectId) =>
       (
         await readSessionMachineAccess({

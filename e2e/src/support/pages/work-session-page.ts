@@ -144,7 +144,7 @@ export class WorkSessionPage {
     await this.page.getByRole('menuitem', { name: /^(Archive session|归档会话)$/u }).click();
     await expect(this.page).toHaveURL(/#\/local\/chat(?:\?.*)?$/u, { timeout: 30_000 });
     await expect
-      .poll(() => this.listTerminals(resources.sessionId), {
+      .poll(() => this.listTerminalsDuringCleanup(resources.sessionId), {
         timeout: 30_000,
         intervals: [50, 100, 250, 500],
       })
@@ -174,7 +174,7 @@ export class WorkSessionPage {
     await expect
       .poll(
         async () => ({
-          terminals: await this.listTerminals(resources.sessionId),
+          terminals: await this.listTerminalsDuringCleanup(resources.sessionId),
           worktreeExists: existsSync(resources.worktreePath),
           liveAgentPids: agentPids.filter(isProcessAlive),
         }),
@@ -193,5 +193,19 @@ export class WorkSessionPage {
     return (await this.page.evaluate(async (targetSessionId) => {
       return await window.ipc!.invoke('terminal.list', targetSessionId);
     }, sessionId)) as TerminalSnapshot[];
+  }
+
+  private async listTerminalsDuringCleanup(
+    sessionId: string
+  ): Promise<TerminalSnapshot[] | { transportError: string }> {
+    try {
+      return await this.listTerminals(sessionId);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (/terminal_socket_closed|terminal_socket_unavailable|daemon_unavailable/u.test(message)) {
+        return { transportError: message };
+      }
+      throw error;
+    }
   }
 }

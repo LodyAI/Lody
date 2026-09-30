@@ -1,7 +1,12 @@
 import { useMemo } from 'react';
 import { useAtomValue } from 'jotai';
 import { cloudOperations } from '@/lib/cloud-api-operations';
-import type { MachineFlockRowFamily, MachineId, WorkspaceId } from '@lody/shared';
+import {
+  ACP_CAPABILITY_ROW_FAMILIES,
+  type MachineFlockRowFamily,
+  type MachineId,
+  type WorkspaceId,
+} from '@lody/shared';
 import { getMachineMetaMapAtom } from '@/atoms/machines';
 import { userAtom } from '@/atoms';
 import { onlineMachineIdsAtom } from '@/atoms/presence';
@@ -35,7 +40,7 @@ type UseVisibleMachineMetasOptions = {
 const DEFAULT_MACHINE_FLOCK_FAMILIES = [
   'localProject',
   'deleteLocalProjectCommand',
-  'acpCapability',
+  ...ACP_CAPABILITY_ROW_FAMILIES,
   'rateLimit',
 ] as const satisfies readonly MachineFlockRowFamily[];
 

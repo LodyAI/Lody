@@ -1,4 +1,4 @@
-import { useMemo, type ReactNode } from 'react';
+import { useMemo, useRef, type ReactNode } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { useAtomValue } from 'jotai';
 import { Bot, Check, ListChecks, LockKeyhole, Monitor, Plus, ShieldAlert, Zap } from 'lucide-react';
@@ -387,11 +387,10 @@ export type DesktopRunConfigMenuProps = {
   recentRunConfigs?: ReadonlyArray<RecentRunConfigItem>;
   onRecentRunConfigSelect?: (id: string) => void;
   /**
-   * Agent Roles for the machine this chat starts on, as the row above Agent.
-   *
-   * Omit to leave the row out entirely: a surface where the agent cannot change
-   * (an in-session composer, a settings preview) has nothing a Role could
-   * apply, and offering one there would promise a switch that cannot happen.
+   * Agent Roles, shown above Agent. The caller scopes them to what this
+   * surface can apply: full configuration on new chats, run configuration
+   * only in existing sessions. Omit for non-Role surfaces such as schedules
+   * and review-policy settings.
    */
   agentRoles?: {
     items: ReadonlyArray<ComposerAgentRoleItem>;
@@ -430,6 +429,7 @@ export function DesktopRunConfigMenu({
   agentRoles,
 }: DesktopRunConfigMenuProps) {
   const { t } = useTranslation();
+  const menuPositionerRef = useRef<HTMLDivElement>(null);
   const executorConfigs = useAtomValue(getAllAgentConfigAtom);
   const onlineMachines = useOnlineMachines(allowedMachineIds);
   const selectableAgentConfigs = availableAgentConfigs ?? executorConfigs;
@@ -711,10 +711,7 @@ export function DesktopRunConfigMenu({
           {triggerFace}
         </Menu.Trigger>
       )}
-      <Menu.Content align="start" className="min-w-60">
-        {/* `menuList` reaches the rows back through the popup's inset, so the
-            surface keeps its edge on the trigger while the rows' leading
-            column lands on the trigger's own — one item pad off that edge. */}
+      <Menu.Content ref={menuPositionerRef} align="start" className="min-w-60">
         <div {...stylex.props(surface.menuList)}>
           {onRecentRunConfigSelect ? (
             <RecentRunConfigMenuGroup
@@ -770,7 +767,17 @@ export function DesktopRunConfigMenu({
                     ) : null
                   }
                 />
-                <Menu.Content className="max-w-[min(29.5rem,var(--radix-popper-available-width,29.5rem))] overflow-x-hidden">
+                {/* Center against the parent menu when the pane fits. When taller,
+                    keep its bottom at the parent bottom, above the composer footer. */}
+                <Menu.Content
+                  anchor={() => menuPositionerRef.current?.querySelector('[role="menu"]') ?? null}
+                  align="center"
+                  alignOffset={({ anchor, positioner }) =>
+                    Math.min(0, (anchor.height - positioner.height) / 2)
+                  }
+                  collisionAvoidance={{ side: 'flip', align: 'shift', fallbackAxisSide: 'none' }}
+                  className="max-w-[min(29.5rem,var(--radix-popper-available-width,29.5rem))] overflow-x-hidden"
+                >
                   <ComposerAgentRolePanel
                     items={agentRoles.items}
                     machine={agentRoles.machine}

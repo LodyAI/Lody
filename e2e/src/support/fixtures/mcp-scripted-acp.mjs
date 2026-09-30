@@ -27,7 +27,11 @@ const agent = acp
   .onRequest(acp.methods.agent.session.new, async ({ params }) => {
     const sessionId = `mcp-catalog-${randomUUID()}`;
     sessions.add(sessionId);
-    record('session-new', { sessionId, mcpServers: params.mcpServers });
+    record('session-new', {
+      sessionId,
+      mcpServers: params.mcpServers,
+      purpose: process.env.LODY_TITLE_AGENT === '1' ? 'title' : 'turn',
+    });
     const clients = [];
     for (const server of params.mcpServers ?? []) {
       if (!server.command) continue;

@@ -48,7 +48,7 @@
 | `fixtures/session-read-state-fixture.ts`             | Two UI-created Session identities and deterministic ACP command            |
 | `fixtures/session-queue-fixture.ts`                  | File-signaled queue ACP event and release evidence                         |
 | `fixtures/session-queue-scripted-acp.mjs`            | Deterministic held and completed queue turns                               |
-| `fixtures/session-fork-fixture.ts`                   | Synthetic Git repository and shared fork-process evidence                  |
+| `fixtures/session-fork-fixture.ts`                   | Synthetic Git repository and retained per-scenario fork ACP events         |
 | `fixtures/session-fork-acp.mjs`                      | Fork-capable deterministic ACP provider                                    |
 | `fixtures/session-goal-fixture.ts`                   | Two-Session goal capability, controls, prompt metadata, and snapshots      |
 | `fixtures/session-goal-scripted-acp.mjs`             | Deterministic goal state machine and Session-isolated ACP evidence         |

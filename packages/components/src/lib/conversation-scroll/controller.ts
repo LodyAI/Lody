@@ -185,6 +185,10 @@ export class ScrollController {
   private scrolledSinceCompensation = false;
   private sourceGeneration = 0;
   private disposed = false;
+  /** The viewport has no layout box (a `display: none` tab or a collapsed panel). */
+  private hidden = false;
+  /** Shown again since the last transaction: the DOM position is not the reader's. */
+  private reshown = false;
   private readonly reportedMinRow = new Set<string>();
 
   constructor(options: ControllerOptions) {
@@ -233,6 +237,27 @@ export class ScrollController {
     this.geometry.setLayoutVersion(version);
   }
 
+  /**
+   * Whether the viewport is off screen with no layout box. Called during
+   * render. A hidden viewport reads every offset and size as 0 and drops
+   * writes, so nothing it reports is a position or a size: the engine runs no
+   * transactions and reports no scroll until it is shown again, then resolves
+   * the intent it kept. Without this, the adapter's per-commit transaction
+   * accepted the hidden offset 0 and reported it to the view, whose
+   * position-derived state (hydration window, outline) re-rendered the list,
+   * whose commit reported 0 again: an unbounded synchronous loop.
+   */
+  setHidden(hidden: boolean): void {
+    if (hidden === this.hidden) return;
+    this.hidden = hidden;
+    if (hidden) {
+      this.tx = null;
+      this.cancelGlide();
+    } else {
+      this.reshown = true;
+    }
+  }
+
   /** The rows to mount and where. Called during render. */
   plan(): RenderPlan {
     const length = this.rows.length;
@@ -277,14 +302,15 @@ export class ScrollController {
     if (this.disposed) return;
     const previous = this.committedPlan;
     this.committedPlan = this.lastPlan;
-    if (this.rows.length === 0) return;
-    if (!this.tx) this.beginTransaction('commit', previous);
+    if (this.rows.length === 0 || this.hidden) return;
+    if (!this.tx) this.beginTransaction(this.reshown ? 'reshow' : 'commit', previous);
     this.continueTransaction();
   }
 
   /** Mounted rows changed size (ResizeObserver). */
   onRowsResized(entries: ReadonlyArray<{ key: string; height: number }>): void {
-    if (this.disposed) return;
+    // A hidden row measures 0; its size is unknown, not changed.
+    if (this.disposed || this.hidden) return;
     let changed = false;
     for (const { key, height } of entries) {
       const index = this.geometry.indexOfKey(key);
@@ -301,7 +327,8 @@ export class ScrollController {
 
   /** The viewport changed size (ResizeObserver). */
   onViewportResized(layoutVersion?: string): void {
-    if (this.disposed) return;
+    // Hiding reads as a resize to 0 × 0; showing again resizes back.
+    if (this.disposed || this.hidden) return;
     if (layoutVersion !== undefined) this.geometry.setLayoutVersion(layoutVersion);
     this.refreshViewport();
     this.run('viewport', true);
@@ -309,7 +336,11 @@ export class ScrollController {
 
   /** A native scroll event. */
   onScrollEvent(): void {
-    if (this.disposed || this.rows.length === 0 || this.tx) return;
+    if (this.disposed || this.hidden || this.rows.length === 0 || this.tx) return;
+    if (this.reshown) {
+      this.run('reshow', true);
+      return;
+    }
     this.refreshViewport(false);
     const scrollTop = this.host.readScrollTop();
     const last = this.lastObserved;
@@ -527,7 +558,7 @@ export class ScrollController {
   // ---- Internals ----------------------------------------------------------
 
   private run(reason: string, sync: boolean, commitFirst = true): void {
-    if (this.tx || this.rows.length === 0) return;
+    if (this.tx || this.hidden || this.rows.length === 0) return;
     this.beginTransaction(reason, this.committedPlan);
     if (commitFirst) {
       this.host.requestCommit(sync);
@@ -537,11 +568,16 @@ export class ScrollController {
   }
 
   private beginTransaction(reason: string, previousPlan: RenderPlan | null): void {
-    this.refreshViewport(!this.viewportKnown);
+    // Shown again: the viewport may have resized, and whatever offset the
+    // browser kept or reset while it was hidden is not reader movement, so the
+    // kept intent is written absolutely.
+    const reshown = this.reshown;
+    this.reshown = false;
+    this.refreshViewport(reshown || !this.viewportKnown);
     if (this.host.isSuppressed() && this.intent.kind === 'follow') this.release('suppressed');
     const sampled = this.host.readScrollTop();
     let movement: MovementClass = 'none';
-    if (this.lastObserved && Math.abs(sampled - this.lastObserved.scrollTop) >= 0.5) {
+    if (!reshown && this.lastObserved && Math.abs(sampled - this.lastObserved.scrollTop) >= 0.5) {
       movement = this.classify(sampled);
       this.applyMovement(movement, sampled, previousPlan);
     }
@@ -555,6 +591,7 @@ export class ScrollController {
       sampled,
       movement,
       relative:
+        !reshown &&
         this.intent.kind === 'read' &&
         this.lastObserved !== null &&
         !this.glide &&
@@ -976,6 +1013,8 @@ export class ScrollController {
   }
 
   private startGlide(rowKey: string, toScreenY: number, settle: Intent): void {
+    // Hidden: the settled intent is already set and is written when shown.
+    if (this.hidden) return;
     const index = this.geometry.indexOfKey(rowKey);
     if (index < 0) {
       this.run('glide-missing', true);

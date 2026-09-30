@@ -11,7 +11,7 @@ that carry an invariant — the directory itself is the list of hooks.
 for creation, initial history, continuation, dispatch, and guide. It has no React
 lifetime or second writer. `lib/session-send-admission.ts` is the one admission for
 every user message. A ready send is written at once as local commits (creation
-meta, turn or queue row, activation, flush); the dispatch/steer RPC in
+meta, turn or queue row, activation); Repo persistence runs independently. The dispatch/steer RPC in
 `lib/session-send-delivery.ts` is a best-effort fast path, because the CLI starts
 pending turns from synchronized history. A send whose attachments are still
 preparing, or one queued behind such a send in the same conversation, is held

@@ -39,7 +39,12 @@ export interface SessionConfig {
   // promptBuildConfig: PromptBuildConfig;
   env?: Record<string, string>;
   /** Runtime-only policy, derived from the driving requester (never environment flags). */
-  githubCredentialPolicy?: { allowLocalAuth: boolean; stateFilePath?: string };
+  githubCredentialPolicy?: {
+    allowLocalAuth: boolean;
+    /** Requester enabled "Act as you"; commits and credentials prefer their identity. */
+    personalEnabled?: boolean;
+    stateFilePath?: string;
+  };
   assumeDocExisting?: boolean;
   // for local session
   title?: string;

@@ -39,6 +39,7 @@ import {
 } from '@/lib/cloud-cli-port';
 import { getCliPlatformKind } from '@/lib/cli-platform';
 import type { CloudSessionSharingPort } from '@lody/platform';
+import { getSessionCommandEnvironment } from './session-command-environment';
 
 export function getCommandSessionSharingPort(): CloudSessionSharingPort | null {
   if (getCliPlatformKind() !== 'cloud') return null;
@@ -204,6 +205,8 @@ export function selectWorkspaceSummary(
 }
 
 export function getAuthContextOrThrow(loggerName: string): AuthContext {
+  const environment = getSessionCommandEnvironment();
+  if (environment) return environment.auth;
   const authClient = new AuthClient(getLogger(loggerName));
   const authInfo = authClient.getAuthInfo();
   if (!authInfo) {
@@ -224,6 +227,11 @@ export async function resolveWorkspaceOrThrow(
   auth: AuthContext,
   selector?: string
 ): Promise<WorkspaceSummary> {
+  const environment = getSessionCommandEnvironment();
+  if (environment) {
+    if (auth !== environment.auth) throw new Error('Session command identity mismatch');
+    return selectWorkspaceSummary([environment.workspace], selector);
+  }
   const workspaces = await listWorkspacesForToken(auth.token);
   const effectiveSelector =
     normalizeCliValue(selector) ?? normalizeCliValue(process.env.LODY_WORKSPACE_ID);
@@ -236,6 +244,12 @@ export async function withWorkspaceManager<T>(
   loggerName: string,
   fn: (manager: LoroDocumentManager) => Promise<T>
 ): Promise<T> {
+  const environment = getSessionCommandEnvironment();
+  if (environment) {
+    if (auth !== environment.auth || workspace.id !== environment.workspace.id)
+      throw new Error('Session command workspace mismatch');
+    return fn(environment.manager);
+  }
   // One-shot commands write directly into the workspace repo and rely on
   // Loro Streams to reach the cloud (and the daemon); without the remote
   // transport the write would silently strand in the local SQLite store.

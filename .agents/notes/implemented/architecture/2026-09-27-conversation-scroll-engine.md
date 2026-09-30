@@ -872,6 +872,60 @@ collected after release, through the diagnostics below.
   conversations.
 - The Spec is revised as `draft` (restore by row; never blank on open).
 
+## Hidden viewports (2026-09-29)
+
+**Failure.** 0.101.0 crashed with React #185 in the `SessionChatStream` boundary. The
+report's render trace showed `scroll-engine <tab> commit covered=false … ×51` for the
+child tab the user had just left, within about 50ms of the navigation. The same burst
+had appeared the first time that tab was hidden.
+
+**Cause.** Inactive child tabs stay mounted under `display: none`
+(`session-detail.tsx`). A viewport without a layout box reads every offset and size as
+0 and drops writes. The adapter still ran a transaction after every commit. Its write
+was dropped, but `writePhase` clamped the expected offset to the hidden range, so it
+accepted `0` and reported `onScroll(0)`. That offset fed the view's position-derived
+state: the top fade, the outline index, and the visible-turn report that moves the
+hydration window. Those updates run inside a layout effect, so the list committed
+synchronously and reported 0 again. Most tabs reached a fixed point within about
+three commits. This one did not. The anchor ↔ hydration flip described in the
+scroll-repro notes is the likely driver, but it was not reproduced with synthetic
+data.
+
+**Decision.** A hidden viewport pauses the engine. `SessionChatInterface.isVisible`
+flows through `SessionChatStream` and `SessionChatStreamView` to the scroller's
+`hidden` prop, which calls `controller.setHidden` during render. While hidden:
+
+- `afterCommit` records the committed plan but opens no transaction;
+- scroll events, row and viewport resizes, commands and glides are ignored, and a
+  glide in flight is cancelled;
+- the intent (follow, read anchor, sent) is kept, so a command issued meanwhile
+  takes effect when the tab is shown;
+- sizes are not measured, so no zero heights enter the geometry.
+
+The first transaction after showing (`reshow`) refreshes the viewport, treats the DOM
+offset as not the reader's (the browser may have dropped it), and writes the kept
+intent absolutely. `lastObserved` is not reset, so `scrollOffset` keeps its last real
+value while hidden. A list mounted hidden completes its first cycle only when first
+shown. Warm-window reveal is unaffected, because it only waits for the visible target
+stream.
+
+**Alternatives.**
+
+- _Detect the missing box from the DOM_ (`getClientRects()`, `offsetParent`). It
+  would cover hosts that forget the prop. But jsdom reports every element as boxless,
+  so every test that relies on a completed first cycle would stall. It also contradicts
+  the repository rule that hidden work follows effective visibility.
+- _Damp the consumers:_ report only changed offsets, or bound the hydration feedback.
+  Either removes one driver while the engine keeps inventing positions for a viewport
+  that has none.
+
+**Tests.** Model: `hidden viewport` in `tests/conversation-scroll-engine.test.ts`.
+The simulator models `display: none` (zero reads, dropped writes, a lost offset). A
+hidden reader and a hidden follower both report nothing, write nothing, and show again
+at the anchored row or at the real end of what streamed meanwhile. Adapter: in
+`tests/engine-conversation-scroller.test.tsx`, a view whose state flips at offset 0
+reproduces "Maximum update depth exceeded" without the pause and passes with it.
+
 ## Evidence
 
 - Code:

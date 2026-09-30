@@ -148,6 +148,8 @@ export type LodyOperationCoordinatorOptions = {
     onChange: (filename: string | Buffer | null) => void
   ) => Pick<FSWatcher, 'close'>;
   workerBootId?: string;
+  /** Confirm authoritative input absence before replay; cloud requires remote catch-up. */
+  confirmTargetReadable?: (docId: string, reason: string) => Promise<void>;
   materializeTarget: (
     operation: StoredLodyOperation,
     item: Extract<LodyOperationItemResult, { status: 'active' }>,
@@ -612,12 +614,13 @@ export class LodyOperationCoordinator {
         }
         claimedMaterialization = true;
         try {
-          await this.options.workspaceDocument.syncRemoteDocOrThrow(
-            getSessionRoomId(target.sessionId),
-            {
-              reason: `orchestration.materialize:${operation.operationId}:${index}`,
-            }
-          );
+          const docId = getSessionRoomId(target.sessionId);
+          const reason = `orchestration.materialize:${operation.operationId}:${index}`;
+          if (this.options.confirmTargetReadable) {
+            await this.options.confirmTargetReadable(docId, reason);
+          } else {
+            await this.options.workspaceDocument.syncRemoteDocOrThrow(docId, { reason });
+          }
         } catch (error) {
           if (signal.aborted) return item;
           if (!isAtDeadline()) {

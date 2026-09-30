@@ -74,7 +74,9 @@ describes the shared parsing and persistence boundary.
 | `use-session-conversation-diff-data.ts`, `use-session-all-changes-diff-data.ts`, `use-session-diff-summary.ts`, `session-diff-summary.ts` | Diff data and summary derivation                                                         |
 | `use-diff-focus-scroll.ts`                                                                                                                | Scroll-to-focused-hunk behaviour                                                         |
 | `session-file-content-view.tsx`, `session-monaco-text-viewer.tsx`                                                                         | File viewer and its Monaco editor window                                                 |
-| `session-file-image-preview.tsx`, `session-file-binary-preview.tsx`, `session-file-pdf-preview.tsx`                                       | Image, PDF, and other binary previews                                                    |
+| `session-file-image-preview.tsx`, `session-file-binary-preview.tsx`, `session-file-pdf-preview.tsx`, `session-file-pdf-thumbnails.tsx`    | Image, PDF, and other binary previews; virtual thumbnail navigation                      |
+| `session-file-office-preview.tsx`, `session-file-{docx,xlsx,pptx}-renderer.tsx`, `session-file-office-frame.tsx`                          | Idle-loaded, read-only Office previews with worker-backed format engines                 |
+| `session-file-csv-preview.tsx`, `session-file-csv.worker.ts`                                                                              | Virtual CSV/TSV table and worker-backed search                                           |
 | `session-file-diff-notice-card.tsx`, `session-file-error-state.tsx`                                                                       | File notices and the error card that offers file actions                                 |
 | `session-file-actions-menu.tsx`                                                                                                           | Shared file-action menu rendering                                                        |
 | `session-file-quick-open.tsx`                                                                                                             | Quick open over the file index                                                           |
@@ -82,8 +84,8 @@ describes the shared parsing and persistence boundary.
 | `session-browser-panel.tsx`, `session-browser-toolbar.tsx`, `session-browser-resume-state.ts`                                             | Session Browser panel, address bar, and resume state                                     |
 | `session-browser-panel-view.tsx`, `preview-connection-status.tsx`                                                                         | Shared Browser presentation and connection/recovery UI; used by production and Storybook |
 | `public-browser-surface.tsx`                                                                                                              | Public engine host (Electron `WebContentsView`)                                          |
-| `managed-preview-surface.tsx`, `managed-preview-frame-cache.ts`                                                                           | Managed Preview host, bounded speculative frame, and opened-page LRU                  |
-| `session-preview-preload.tsx`                                                                                                               | Event-driven remote page preparation for the visible conversation                      |
+| `managed-preview-surface.tsx`, `managed-preview-frame-cache.ts`                                                                           | Managed Preview host, bounded speculative frame, and opened-page LRU                     |
+| `session-preview-preload.tsx`                                                                                                             | Event-driven remote page preparation for the visible conversation                        |
 | `static-html-preview-document.ts`, `session-html-attachment-action.ts`                                                                    | Static `srcdoc` document policy for complete HTML text                                   |
 
 ## Long-form explanations
@@ -102,10 +104,17 @@ describes the shared parsing and persistence boundary.
 
 ## Binary previews
 
-`session-file-binary-preview.tsx` renders supported images and PDFs and otherwise
-shows a binary notice. The [PDF viewer](session-file-pdf-preview.tsx) reads local
+`session-file-binary-preview.tsx` renders supported images, PDFs, DOCX, XLSX, and
+PPTX, and otherwise shows a binary notice. The [PDF viewer](session-file-pdf-preview.tsx) reads local
 resources in 64 KiB byte ranges, keeps page canvases within an 8-megapixel budget,
-and provides navigation, zoom, and text search. Local files receive Open in default
+and provides page and thumbnail navigation, rotation, fit and percentage zoom,
+and expandable text search. Thumbnail canvases mount only for visible rows.
+The PDF.js scroll container is absolutely positioned within the viewer surface.
+The [Office entry](session-file-office-preview.tsx) defers a bounded 25 MiB read
+and imports only the active format engine at idle; its parsers use workers and
+its viewers are read-only. [CSV/TSV](session-file-csv-preview.tsx) uses a worker
+and virtualized table, while the file viewer retains its editable Source tab.
+Local files receive Open in default
 app and Reveal callbacks from `useSessionFileActions`, shared with the More menu.
 Failures log the requested and resolved paths locally and offer Copy error details
 with a reason-specific next step. See the

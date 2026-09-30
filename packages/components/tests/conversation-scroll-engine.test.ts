@@ -498,6 +498,85 @@ describe('commands', () => {
   });
 });
 
+describe('hidden viewport', () => {
+  // An inactive tab stays mounted under `display: none` and keeps committing
+  // as its conversation streams. Reporting its offset 0 to the view once fed a
+  // synchronous render loop (React #185).
+  function observe(sim: ScrollSim) {
+    const seen = { scrolls: [] as number[], transactions: 0 };
+    sim.controller.setCallbacks({
+      onScroll: (offset) => seen.scrolls.push(offset),
+      onDiagnostic: () => {
+        seen.transactions += 1;
+      },
+    });
+    return seen;
+  }
+
+  it('reports nothing while hidden and shows again at the reading position, whatever changed above it', () => {
+    let rows = turnRows(
+      60,
+      () => 100,
+      () => 100
+    );
+    const sim = new ScrollSim(rows, V);
+    sim.render();
+    sim.settle();
+    sim.task(() => sim.controller.jumpToIndex(30));
+    sim.settle();
+    const seen = observe(sim);
+    const writes = sim.writes.length;
+
+    sim.setHidden(true);
+    rows = expand(rows, 't5', 14, 100);
+    sim.render(rows);
+    sim.settle();
+    rows = [...rows, ...turnRows(3, () => 200, undefined, 'n')];
+    sim.render(rows);
+    sim.settle();
+    expect(seen).toEqual({ scrolls: [], transactions: 0 });
+    expect(sim.writes.length).toBe(writes);
+    expect(sim.controller.mode).toBe('read');
+
+    sim.setHidden(false);
+    sim.settle();
+    expectHealthy(sim);
+    expect(sim.screenTop('t30')).toBe(0);
+    expect(seen.scrolls.at(-1)).toBe(sim.readScrollTop());
+  });
+
+  it('shows a following conversation at the real bottom of what streamed while it was hidden', () => {
+    let rows = turnRows(40, () => 120);
+    const sim = new ScrollSim(rows, V);
+    sim.render();
+    sim.settle();
+    const seen = observe(sim);
+
+    sim.setHidden(true);
+    for (let step = 0; step < 5; step++) {
+      rows = [
+        ...rows.map((row, i) =>
+          i === rows.length - 1 ? { ...row, height: row.height + 300 } : row
+        ),
+        ...turnRows(
+          1,
+          () => 90,
+          () => 60,
+          `n${step}-`
+        ),
+      ];
+      sim.render(rows);
+      sim.settle();
+    }
+    expect(seen.scrolls).toEqual([]);
+
+    sim.setHidden(false);
+    sim.settle();
+    expect(sim.controller.mode).toBe('follow');
+    expectHealthy(sim);
+  });
+});
+
 describe('momentum diagnostics', () => {
   it('counts compensations during a touch fling and which of them ended it', () => {
     let rows = turnRows(

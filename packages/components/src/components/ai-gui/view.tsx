@@ -556,6 +556,11 @@ export interface SessionChatStreamViewProps {
   /** Optional for static readers; the connected stream supplies its windowed history. */
   conversationView?: ConversationView | null;
   initialWindowReady?: boolean;
+  /**
+   * The stream is on screen. A hidden surface kept mounted under
+   * `display: none` passes false: its scroll engine pauses until shown.
+   */
+  isVisible?: boolean;
   items: ChatStreamItem[];
   sessionId: SessionId;
   /**
@@ -1569,6 +1574,7 @@ export const SessionChatStreamView = forwardRef<
       sessionId,
       conversationView,
       initialWindowReady = true,
+      isVisible = true,
       className,
       leadingContent,
       trailingContent,
@@ -2397,6 +2403,7 @@ export const SessionChatStreamView = forwardRef<
                 item={ConversationVirtualRow}
                 keepMounted={nativeTextSelection.keepMounted}
                 initialWindowReady={initialWindowReady}
+                hidden={!isVisible}
                 suppressAutoScrollRef={autoScrollSuppressedRef}
                 onAtBottomChange={onAtBottomChange}
                 onScroll={handleStreamScroll}

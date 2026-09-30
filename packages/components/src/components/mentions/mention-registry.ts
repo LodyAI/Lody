@@ -2,7 +2,12 @@ import type { MentionPrepare } from '@/ui/mention/index';
 import * as React from 'react';
 import { useTranslation } from 'react-i18next';
 import { getAgentRoleEmoji, type AcpCommandSummary } from '@lody/shared';
-import { filterAndRankSlashCommands } from '@/lib/command-slash-search';
+import {
+  rankSlashItems,
+  rankSlashMatch,
+  sortRankedSlashItems,
+  type SlashMatchRank,
+} from '@/lib/command-slash-search';
 import {
   getSuggestions,
   type PathSuggestion,
@@ -38,6 +43,7 @@ export const MENTION_TRIGGER = '@';
 
 /** Per-category cap when one query is answered across every category. */
 export const AGGREGATE_LIMIT_PER_CATEGORY = 4;
+export const SLASH_MENU_LIMIT = 50;
 
 export type MentionCategoryId =
   | 'file'
@@ -111,6 +117,8 @@ export type MentionCandidate = {
    * command's description. The row stays one line; they give way first.
    */
   hint?: string;
+  /** Shared relevance for the direct command menu; never used to rank other mention types. */
+  slashRank?: SlashMatchRank;
   /** A second line under the title, such as why a Role cannot be picked. */
   subtitle?: string;
   trailing?: string;
@@ -209,6 +217,8 @@ export type MentionMenuView =
       /** Categories whose own name matches, offered above the results. */
       categories: MentionCategory[];
       groups: MentionCandidateGroup[];
+      /** Direct / and 、 searches are one relevance-ordered list across sources. */
+      rankedCandidates?: Array<{ category: MentionCategory; candidate: MentionCandidate }>;
       /** Direct grouped triggers activate only their own sources, even while empty. */
       queriedCategories?: readonly MentionCategory[];
     }
@@ -229,7 +239,11 @@ export function getCategoryNavigateText(category: Pick<MentionCategory, 'namespa
 export function getMentionViewCandidates(view: MentionMenuView | null): MentionCandidate[] {
   if (!view) return [];
   if (view.level === 'category') return view.candidates;
-  if (view.level === 'aggregate') return view.groups.flatMap((group) => group.candidates);
+  if (view.level === 'aggregate') {
+    return view.rankedCandidates
+      ? view.rankedCandidates.map(({ candidate }) => candidate)
+      : view.groups.flatMap((group) => group.candidates);
+  }
   return [];
 }
 
@@ -328,15 +342,42 @@ export function selectMentionMenuViewForTrigger(
   }
   if (isCommandMenuTrigger(trigger)) {
     const directCategories = categories.filter((category) => category.directTrigger === '/');
+    const groups = directCategories.map((category) => ({
+      category,
+      candidates:
+        category.status === 'disabled' ? [] : category.getCandidates(search, SLASH_MENU_LIMIT),
+    }));
+    const rankedCandidates = search.trim()
+      ? sortRankedSlashItems(
+          groups.flatMap((group) =>
+            group.candidates.flatMap((candidate) => {
+              const rank =
+                candidate.slashRank ??
+                rankSlashMatch({ token: candidate.label, description: candidate.hint }, search);
+              return rank
+                ? [
+                    {
+                      category: group.category,
+                      candidate,
+                      rank,
+                      disabled: candidate.disabled,
+                      token: candidate.label,
+                      id: candidate.value,
+                    },
+                  ]
+                : [];
+            })
+          ),
+          SLASH_MENU_LIMIT
+        ).map(({ category, candidate }) => ({ category, candidate }))
+      : undefined;
     return {
       level: 'aggregate',
       term: search,
       categories: [],
       queriedCategories: directCategories,
-      groups: directCategories.map((category) => ({
-        category,
-        candidates: category.status === 'disabled' ? [] : category.getCandidates(search),
-      })),
+      groups,
+      rankedCandidates,
     };
   }
   const direct = categories.find((entry) => entry.directTrigger === trigger);
@@ -574,7 +615,10 @@ export function buildAgentRoleCandidates(
   );
 }
 
-export function toCommandCandidate(command: AcpCommandSummary): MentionCandidate {
+export function toCommandCandidate(
+  command: AcpCommandSummary,
+  slashRank?: SlashMatchRank
+): MentionCandidate {
   return {
     value: `acp-command:${command.name}`,
     label: command.name,
@@ -585,6 +629,7 @@ export function toCommandCandidate(command: AcpCommandSummary): MentionCandidate
     icon: 'command',
     title: `/${command.name}`,
     hint: command.description,
+    slashRank,
   };
 }
 
@@ -593,7 +638,12 @@ export function buildCommandCandidates(
   term: string,
   limit?: number
 ): MentionCandidate[] {
-  return applyLimit(filterAndRankSlashCommands([...commands], term), limit).map(toCommandCandidate);
+  return rankSlashItems(
+    commands,
+    term,
+    (command) => ({ token: command.name, description: command.description }),
+    limit ?? commands.length
+  ).map(({ item, rank }) => toCommandCandidate(item, rank));
 }
 
 // ============================================================================
