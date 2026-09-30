@@ -73,6 +73,7 @@
     }
   },
   "devDependencies": {
+    "@better-auth/utils": "0.4.2",
     "@typescript/native-preview": "7.0.0-dev.20251217.1",
     "oxfmt": "^0.65.0",
     "oxlint": "^1.61.0",
