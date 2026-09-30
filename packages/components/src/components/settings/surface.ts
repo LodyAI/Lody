@@ -263,6 +263,9 @@ export const settingsSurface = stylex.create({
    * same X every row icon shares, and its label lands where the rows' do.
    */
   listRowAvatar: {
+    // Avoid an inline line box adding descent space below the avatar.
+    display: 'flex',
+    alignItems: 'center',
     flexShrink: 0,
     marginInline: '-4px',
   },
