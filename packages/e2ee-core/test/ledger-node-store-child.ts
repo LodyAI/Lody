@@ -1,3 +1,4 @@
+import { Effect } from 'effect';
 import { once } from 'node:events';
 import { DatabaseSync } from 'node:sqlite';
 import { decodeLedgerJournal, SqliteLedgerStore } from '../src/ledger/node-store';
@@ -27,11 +28,15 @@ if (mode === 'uncommitted') {
   db.exec('ROLLBACK');
   db.close();
 } else {
-  await new SqliteLedgerStore(path).exclusive(async (tx) => {
-    if (mode === 'save') await tx.save(parsed);
-    process.send!('locked');
-    await release;
-  });
+  await Effect.runPromise(
+    new SqliteLedgerStore(path).exclusive((tx) =>
+      Effect.gen(function* () {
+        if (mode === 'save') yield* tx.save(parsed);
+        process.send!('locked');
+        yield* Effect.promise(() => release);
+      })
+    )
+  );
 }
 process.send!('released');
 process.disconnect();

@@ -1,8 +1,9 @@
-export { journalStoreLayer, ledgerTransportLayer, deviceSignerLayer } from './ledger-ports';
+export { ledgerTransportLayer, deviceSignerLayer } from './ledger-ports';
+export { MemoryJournalStore, MemoryKeyOutbox } from './memory-stores';
 export { signatureVerifierLayer } from './signature-verifier';
 export { hpkeSenderLayer, hpkeRecipientLayer } from './hpke';
 export { cryptoEntropyLayer } from './entropy';
-export { keyOutboxLayer, keyDeliveryRemoteLayer } from './key-delivery';
+export { keyDeliveryRemoteLayer } from './key-delivery';
 export { streamsEpochLayer } from './streams-epoch';
 export {
   snapshotStoreLayer,

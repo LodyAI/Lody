@@ -155,19 +155,23 @@ export function makeExecutorSignatureVerifier(
 ): Effect.Effect<SignatureVerifier['Type'], ValidationError> {
   if (!isTrustedSignatureVerifyExecutor(executor))
     return Effect.fail(new ValidationError({ code: 'invalid-operation' }));
+  const verdict = (
+    jobs: SignatureJobInput[],
+    results: unknown
+  ): Effect.Effect<void, ValidationError> => {
+    if (!Array.isArray(results) || results.length !== jobs.length)
+      return Effect.fail(new ValidationError({ code: 'invalid-operation' }));
+    const index = results.findIndex((ok) => ok !== true);
+    return index >= 0 ? Effect.fail(rejected(jobs[index]!)) : Effect.void;
+  };
   const run = (jobs: SignatureJobInput[]) =>
-    Effect.gen(function* () {
-      if (jobs.length === 0) return;
-      const results = yield* Effect.promise(() =>
-        executor.verify(
-          jobs.map((job) => ({ pk: job.publicKey, msg: job.message, sig: job.signature }))
-        )
-      );
-      if (!Array.isArray(results) || results.length !== jobs.length)
-        return yield* Effect.fail(new ValidationError({ code: 'invalid-operation' }));
-      const index = results.findIndex((ok) => ok !== true);
-      if (index >= 0) return yield* Effect.fail(rejected(jobs[index]!));
-    });
+    jobs.length === 0
+      ? Effect.void
+      : Effect.promise(() =>
+          executor.verify(
+            jobs.map((job) => ({ pk: job.publicKey, msg: job.message, sig: job.signature }))
+          )
+        ).pipe(Effect.flatMap((results) => verdict(jobs, results)));
   return Effect.succeed(
     SignatureVerifier.of({
       verify: ({ publicKey, message, signature }) =>

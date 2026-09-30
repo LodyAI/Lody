@@ -84,7 +84,9 @@ it('native rotation reopens a pending file candidate without fresh entropy or a 
     Either.getOrThrow(KeyringCodec.decodeEpochKeyring(readFileSync(keyringPath, 'utf8'))).get(1)
   ).toEqual(new Uint8Array(Buffer.from(saved.secretHex, 'hex')));
   expect(existsSync(candidatePath)).toBe(false);
-  expect((await new SqliteLedgerStore(path).exclusive((tx) => tx.load()))?.pending).toBeNull();
+  expect(
+    (await Effect.runPromise(new SqliteLedgerStore(path).exclusive((tx) => tx.load)))?.pending
+  ).toBeNull();
 });
 
 it('native epoch files preserve old JSON, reject replacement keys, and fail closed on missing/corrupt data', async () => {
@@ -226,7 +228,9 @@ it('native outbox interruption keeps committed bytes and releases its SQLite lea
       expect(yield* store.exclusive((tx) => tx.load(id))).toEqual(frame);
     }).pipe(Effect.provide(nodeKeyOutboxLayer({ path, mode: 'create' })))
   );
-  expect(await new SqliteLedgerKeyOutbox(path).exclusive((tx) => tx.load(id))).toEqual(frame);
+  expect(
+    await Effect.runPromise(new SqliteLedgerKeyOutbox(path).exclusive((tx) => tx.load(id)))
+  ).toEqual(frame);
 });
 
 it('native outbox preserves the v0 payload across legacy and Effect reopen', async () => {
@@ -240,10 +244,14 @@ it('native outbox preserves the v0 payload across legacy and Effect reopen', asy
       yield* store.exclusive((tx) => tx.save(id, frame));
     }).pipe(Effect.provide(initial))
   );
-  expect(await new SqliteLedgerKeyOutbox(path).exclusive((tx) => tx.load(id))).toEqual(frame);
+  expect(
+    await Effect.runPromise(new SqliteLedgerKeyOutbox(path).exclusive((tx) => tx.load(id)))
+  ).toEqual(frame);
   const reopened = nodeKeyOutboxLayer({ path, mode: 'open' });
   const otherId = '34'.repeat(16);
-  await new SqliteLedgerKeyOutbox(path).exclusive((tx) => tx.save(otherId, new Uint8Array([4, 5])));
+  await Effect.runPromise(
+    new SqliteLedgerKeyOutbox(path).exclusive((tx) => tx.save(otherId, new Uint8Array([4, 5])))
+  );
   await Effect.runPromise(
     Effect.gen(function* () {
       const store = yield* KeyOutbox;
@@ -259,10 +267,14 @@ it('native outbox preserves the v0 payload across legacy and Effect reopen', asy
       expect(failed).toEqual(Either.left('after-save'));
     }).pipe(Effect.provide(reopened))
   );
-  expect(await new SqliteLedgerKeyOutbox(path).exclusive((tx) => tx.load(id))).toEqual(frame);
-  expect(await new SqliteLedgerKeyOutbox(path).exclusive((tx) => tx.load('56'.repeat(16)))).toEqual(
-    frame
-  );
+  expect(
+    await Effect.runPromise(new SqliteLedgerKeyOutbox(path).exclusive((tx) => tx.load(id)))
+  ).toEqual(frame);
+  expect(
+    await Effect.runPromise(
+      new SqliteLedgerKeyOutbox(path).exclusive((tx) => tx.load('56'.repeat(16)))
+    )
+  ).toEqual(frame);
 });
 
 it('native outbox open never creates missing or initializes foreign files', async () => {
@@ -346,7 +358,9 @@ describe('L6 sqlite journal restart', () => {
       })
     );
     expect(pending._tag).toBe('Pending');
-    const persisted = await new SqliteLedgerStore(path).exclusive((tx) => tx.load());
+    const persisted = await Effect.runPromise(
+      new SqliteLedgerStore(path).exclusive((tx) => tx.load)
+    );
     const reopened = await Effect.runPromise(
       EffectLedgerClient.restore(pending.ledger.genesis).pipe(
         Effect.provide(
@@ -364,7 +378,9 @@ describe('L6 sqlite journal restart', () => {
     stream.mode = 'ok';
     expect((await Effect.runPromise(reopened.resume()))._tag).toBe('Committed');
     expect(stream.records).toEqual([persisted?.pending]);
-    expect((await new SqliteLedgerStore(path).exclusive((tx) => tx.load()))?.pending).toBeNull();
+    expect(
+      (await Effect.runPromise(new SqliteLedgerStore(path).exclusive((tx) => tx.load)))?.pending
+    ).toBeNull();
   });
 
   it('native Effect interruption releases the lock without rolling back saved pending bytes', async () => {
@@ -404,7 +420,7 @@ describe('L6 sqlite journal restart', () => {
       }).pipe(Effect.provide(nodeJournalStoreLayer({ path, mode: 'create' })))
     );
     const reopened = new SqliteLedgerStore(path, { createFile: false, initializeSchema: false });
-    expect(await reopened.exclusive((tx) => tx.load())).toEqual(journal);
+    expect(await Effect.runPromise(reopened.exclusive((tx) => tx.load))).toEqual(journal);
   });
 
   it('explicit Effect open never creates missing storage, overwrites existing storage or recreates deleted storage', async () => {
@@ -468,10 +484,11 @@ describe('L6 sqlite journal restart', () => {
     const released = new Promise<void>((resolve) => {
       release = resolve;
     });
-    const held = new SqliteLedgerStore(path).exclusive(async () => {
-      enter();
-      await released;
-    });
+    const held = Effect.runPromise(
+      new SqliteLedgerStore(path).exclusive(() =>
+        Effect.sync(enter).pipe(Effect.zipRight(Effect.promise(() => released)))
+      )
+    );
     await entered;
     const inspect = Effect.gen(function* () {
       const store = yield* JournalStore;
@@ -542,15 +559,18 @@ describe('L6 sqlite journal restart', () => {
     expect(view.length).toBe(2);
     expect(view.head).toEqual((await first.read()).head);
 
-    await new SqliteLedgerStore(path).exclusive(async (tx) => {
-      const journal = await tx.load();
-      if (!journal) throw new Error('missing-journal');
-      const garbled = {
-        ...journal,
-        records: [journal.records[0]!, new Uint8Array(journal.records[1]!).fill(7)],
-      };
-      await tx.save(garbled);
-    });
+    await Effect.runPromise(
+      new SqliteLedgerStore(path).exclusive((tx) =>
+        Effect.gen(function* () {
+          const journal = yield* tx.load;
+          if (!journal) return yield* Effect.die('missing-journal');
+          return yield* tx.save({
+            ...journal,
+            records: [journal.records[0]!, new Uint8Array(journal.records[1]!).fill(7)],
+          });
+        })
+      )
+    );
     const poisoned = new LedgerClient(
       created.record,
       created.anchor,
@@ -571,7 +591,7 @@ describe('L6 sqlite journal restart', () => {
       pending: null as Uint8Array | null,
       offset: 'empty:/+',
     };
-    await store.exclusive((tx) => tx.save(baseline));
+    await Effect.runPromise(store.exclusive((tx) => tx.save(baseline)));
     const phone = await ed25519();
     const pending = (
       await append(
@@ -599,9 +619,12 @@ describe('L6 sqlite journal restart', () => {
     const locked = once(child, 'message');
     child.send({ mode: 'save', journal: encodeLedgerJournal(withPending) });
     expect(await Promise.race([locked, failed])).toEqual(['locked', undefined]);
-    await expect(store.exclusive((tx) => tx.load())).rejects.toThrow('journal-busy');
+    expect(await Effect.runPromise(Effect.either(store.exclusive((tx) => tx.load)))).toMatchObject({
+      _tag: 'Left',
+      left: { reason: 'busy' },
+    });
     await kill(child);
-    const recovered = await store.exclusive((tx) => tx.load());
+    const recovered = await Effect.runPromise(store.exclusive((tx) => tx.load));
     expect(recovered?.pending).toEqual(pending);
     expect(recovered?.records).toHaveLength(1);
   });
@@ -617,7 +640,7 @@ describe('L6 sqlite journal restart', () => {
       pending: null as Uint8Array | null,
       offset: 'empty:/+',
     };
-    await store.exclusive((tx) => tx.save(baseline));
+    await Effect.runPromise(store.exclusive((tx) => tx.save(baseline)));
     const child = fork(new URL('./ledger-node-store-child.ts', import.meta.url), [path], {
       execArgv: ['--import', 'tsx'],
       stdio: ['ignore', 'ignore', 'pipe', 'ipc'],
@@ -637,7 +660,7 @@ describe('L6 sqlite journal restart', () => {
     child.send({ mode: 'uncommitted', journal: encodeLedgerJournal(baseline) });
     expect(await Promise.race([locked, failed])).toEqual(['locked', undefined]);
     await kill(child);
-    const recovered = await store.exclusive((tx) => tx.load());
+    const recovered = await Effect.runPromise(store.exclusive((tx) => tx.load));
     expect(recovered?.records).toHaveLength(1);
     expect(recovered?.pending).toBeNull();
     expect(recovered?.offset).toBe('empty:/+');
@@ -664,9 +687,9 @@ describe('L6 sqlite journal restart', () => {
       stream
     );
     expect((await first.submit(record)).status).toBe('unknown');
-    const pending = await new SqliteLedgerStore(path).exclusive(
-      async (tx) => (await tx.load())?.pending
-    );
+    const pending = (
+      await Effect.runPromise(new SqliteLedgerStore(path).exclusive((tx) => tx.load))
+    )?.pending;
     expect(pending).toEqual(record);
 
     stream.mode = 'ok';
@@ -687,7 +710,7 @@ describe('L6 sqlite journal restart', () => {
     );
     const view = await after.read();
     expect(view.length).toBe(2);
-    const loaded = await new SqliteLedgerStore(path).exclusive((tx) => tx.load());
+    const loaded = await Effect.runPromise(new SqliteLedgerStore(path).exclusive((tx) => tx.load));
     expect(loaded?.pending).toBeNull();
     expect(loaded?.records).toHaveLength(2);
   });
@@ -732,12 +755,12 @@ describe('L6 sqlite journal restart', () => {
     const store = new SqliteLedgerStore(path);
     const first = await LedgerClient.openFromSnapshot({ trust, snapshot, store, stream });
     expect((await first.submit(extra)).status).toBe('committed');
-    const encoded = await new SqliteLedgerStore(path).exclusive(async (tx) => {
-      const journal = await tx.load();
-      if (!journal?.snapshot) throw new Error('missing-snapshot-journal');
-      expect(journal.records).toHaveLength(1);
-      return encodeLedgerJournal(journal);
-    });
+    const withSnapshot = await Effect.runPromise(
+      new SqliteLedgerStore(path).exclusive((tx) => tx.load)
+    );
+    if (!withSnapshot?.snapshot) throw new Error('missing-snapshot-journal');
+    expect(withSnapshot.records).toHaveLength(1);
+    const encoded = encodeLedgerJournal(withSnapshot);
     expect(encoded.startsWith('["lody-e2ee-journal/v1"')).toBe(true);
     expect(decodeLedgerJournal(encoded).snapshot?.byteLength).toBe(snapshot.byteLength);
 
@@ -790,26 +813,25 @@ describe('L6 sqlite journal restart', () => {
     const stream = new MemoryLedgerStream();
     stream.records = [created.record, extra];
     const store = new SqliteLedgerStore(path);
-    await store.exclusive((tx) => tx.save(decodeLedgerJournal(unbound)));
+    await Effect.runPromise(store.exclusive((tx) => tx.save(decodeLedgerJournal(unbound))));
     const first = await LedgerClient.openJournal(created.anchor, store, stream);
     const joined = await first.read();
     expect(joined.origin).toBe('snapshot');
     expect(joined.length).toBe(2);
-    const encoded = await new SqliteLedgerStore(path).exclusive(async (tx) => {
-      const journal = await tx.load();
-      if (!journal) throw new Error('missing-journal');
-      expect(journal.snapshotBound).toBe(true);
-      return encodeLedgerJournal(journal);
-    });
+    const bound = await Effect.runPromise(new SqliteLedgerStore(path).exclusive((tx) => tx.load));
+    if (!bound) throw new Error('missing-journal');
+    expect(bound.snapshotBound).toBe(true);
+    const encoded = encodeLedgerJournal(bound);
     expect(JSON.parse(encoded)).toHaveLength(8);
 
     const foreign = await signGenesis(await ed25519());
     stream.records.push(foreign.record);
-    const before = await new SqliteLedgerStore(path).exclusive(
-      async (tx) => (await tx.load())?.offset
-    );
+    const before = (await Effect.runPromise(new SqliteLedgerStore(path).exclusive((tx) => tx.load)))
+      ?.offset;
     await expect(first.read()).rejects.toMatchObject({ code: 'wrong-parent' });
-    const afterFail = await new SqliteLedgerStore(path).exclusive((tx) => tx.load());
+    const afterFail = await Effect.runPromise(
+      new SqliteLedgerStore(path).exclusive((tx) => tx.load)
+    );
     expect(afterFail?.offset).toBe(before);
     expect(afterFail?.records).toHaveLength(1);
 
@@ -819,7 +841,9 @@ describe('L6 sqlite journal restart', () => {
       stream
     );
     await expect(restarted.read()).rejects.toMatchObject({ code: 'wrong-parent' });
-    const afterRestart = await new SqliteLedgerStore(path).exclusive((tx) => tx.load());
+    const afterRestart = await Effect.runPromise(
+      new SqliteLedgerStore(path).exclusive((tx) => tx.load)
+    );
     expect(afterRestart?.offset).toBe(before);
   });
 });

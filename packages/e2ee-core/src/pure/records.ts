@@ -4,6 +4,7 @@ import { bytesEqual } from './cbor';
 import { ContextMismatch } from './errors';
 import { classifyEpochCandidate, type EpochCandidate } from './epoch-candidate';
 import { publicState, type InternalState } from './ledger-state';
+import { SigningFacts } from './signing-facts';
 
 const recordMaterial = Symbol('recordMaterial');
 const applicationMaterial = Symbol('applicationMaterial');
@@ -28,6 +29,8 @@ class RecordValue<Stage extends 'Decoded' | 'SignatureChecked'> {
 
 // Module-private: callers cannot reach a view's live state through a symbol.
 const viewStates = new WeakMap<object, InternalState>();
+// Point-validity evidence gathered while verifying this view; never authority.
+const viewSigningFacts = new WeakMap<object, SigningFacts>();
 
 class ViewValue {
   readonly #state: InternalState;
@@ -35,9 +38,11 @@ class ViewValue {
   constructor(
     state: InternalState,
     readonly genesis: GenesisHash,
-    readonly head: RecordHash
+    readonly head: RecordHash,
+    facts: SigningFacts
   ) {
     this.#state = state;
+    viewSigningFacts.set(this, facts);
     this.origin = state.origin === 'genesis' ? 'FullReplay' : 'EndorsedSnapshot';
     viewStates.set(this, state);
     Object.freeze(this);
@@ -89,11 +94,13 @@ export const checkedRecord = (record: DecodedRecord): SignatureCheckedRecord =>
 export const ledgerView = (
   state: InternalState,
   genesis: GenesisHash,
-  head: RecordHash
-): LedgerView => new ViewValue(state, genesis, head);
+  head: RecordHash,
+  facts = SigningFacts.empty
+): LedgerView => new ViewValue(state, genesis, head, facts);
 export const applicableRecord = (base: LedgerView, next: LedgerView): ApplicableRecord =>
   new ApplicableValue(base, next);
 export const viewState = (view: LedgerView): InternalState => viewStates.get(view)!;
+export const viewFacts = (view: LedgerView): SigningFacts => viewSigningFacts.get(view)!;
 export const applyAuthorizedRecord = (
   base: LedgerView,
   record: ApplicableRecord

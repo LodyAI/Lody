@@ -20,7 +20,8 @@ const readFrames = (text: string | null) =>
           })
       );
 
-function outboxService(database: SqliteTextStore): KeyOutbox['Type'] {
+/** Effect exact-byte outbox over one SQLite file; disk is not authority. */
+export function sqliteKeyOutboxService(database: SqliteTextStore): KeyOutbox['Type'] {
   return KeyOutbox.of({
     exclusive: (work) =>
       Effect.acquireUseRelease(
@@ -67,7 +68,7 @@ export function nodeKeyOutboxLayer(input: {
         return yield* Effect.fail(new ValidationError({ code: 'invalid-operation' }));
       if (mode === 'create') {
         yield* storageSync(() => closeSync(openSync(path, 'wx', 0o600)));
-        const initial = outboxService(
+        const initial = sqliteKeyOutboxService(
           new SqliteTextStore(path, 0x4c454b30, 0, {
             createFile: false,
             initializeSchema: true,
@@ -75,7 +76,7 @@ export function nodeKeyOutboxLayer(input: {
         );
         yield* initial.exclusive(() => Effect.void);
       }
-      const service = outboxService(
+      const service = sqliteKeyOutboxService(
         new SqliteTextStore(path, 0x4c454b30, 0, {
           createFile: false,
           initializeSchema: false,

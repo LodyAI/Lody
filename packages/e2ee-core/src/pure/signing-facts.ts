@@ -19,6 +19,12 @@ export class SigningFacts {
   has(bytes: Uint8Array): boolean {
     return HashMap.has(this.#keys, keyId(bytes));
   }
+  /** Both operands only hold checked keys, so the union is checked evidence too. */
+  union(other: SigningFacts): SigningFacts {
+    if (other.size === 0 || other === this) return this;
+    if (this.size === 0) return other;
+    return new SigningFacts(HashMap.union(this.#keys, other.#keys));
+  }
   check(bytes: Uint8Array): Either.Either<
     {
       readonly key: SigningPublicKey;

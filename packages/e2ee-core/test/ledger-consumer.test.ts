@@ -1,3 +1,4 @@
+import { Effect } from 'effect';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -260,7 +261,9 @@ describe('C2 public-package black-box consumer', () => {
 
     const genesisDecoded = decodeRecord(genesis);
     if (genesisDecoded.body.type !== 'genesis') throw new Error('not-genesis');
-    const records = (await new SqliteLedgerStore(journal).exclusive((tx) => tx.load()))!.records;
+    const records = (await Effect.runPromise(
+      new SqliteLedgerStore(journal).exclusive((tx) => tx.load)
+    ))!.records;
     const history = await recoverHistory({
       genesis: anchor,
       latestEpoch: 1,

@@ -1,10 +1,5 @@
-import { Cause, Effect, Exit, Layer } from 'effect';
-import {
-  DeviceSigner,
-  JournalStore,
-  LedgerTransport,
-  type JournalTransaction,
-} from '../ports/ledger';
+import { Effect, Layer } from 'effect';
+import { DeviceSigner, LedgerTransport } from '../ports/ledger';
 import {
   CryptoError,
   StorageError,
@@ -15,16 +10,9 @@ import {
 import { ControlLogError } from '../pure/legacy-error';
 import { signature, type SigningPublicKey } from '../pure/bytes';
 import { LedgerError } from '../ledger/error';
-import type { LedgerStore, LedgerStream, LedgerTransaction } from '../pure/journal';
+import type { LedgerStream } from '../pure/journal';
 
 export function storageError(error: unknown): StorageError {
-  if (error instanceof LedgerError)
-    return new StorageError({
-      reason:
-        error.code === 'unknown-version' || error.code === 'wrong-anchor' ? 'foreign' : 'corrupt',
-      code: error.code,
-      position: error.position,
-    });
   const code = error instanceof Error && 'code' in error ? String(error.code) : '';
   const sqliteCode = error instanceof Error && 'errcode' in error ? error.errcode : undefined;
   if (sqliteCode === 5) return new StorageError({ reason: 'busy', code });
@@ -40,18 +28,6 @@ export function storageError(error: unknown): StorageError {
   return new StorageError({ reason: 'io' });
 }
 
-export function storageCall<A>(
-  work: () => Promise<A>
-): Effect.Effect<A, StorageError | ValidationError> {
-  return Effect.tryPromise({ try: work, catch: (error) => error }).pipe(
-    Effect.catchAll((error) =>
-      error instanceof TypeError || error instanceof ReferenceError
-        ? Effect.die(error)
-        : Effect.fail(storageError(error))
-    )
-  );
-}
-
 /** Synchronous foreign boundary. Expected storage failures stay typed; defects stay defects. */
 export function storageSync<A>(work: () => A): Effect.Effect<A, StorageError | ValidationError> {
   return Effect.try({ try: work, catch: (error) => error }).pipe(
@@ -61,84 +37,6 @@ export function storageSync<A>(work: () => A): Effect.Effect<A, StorageError | V
         : Effect.fail(storageError(error))
     )
   );
-}
-
-/** Migration adapter: owns the Promise callback lock without starting an Effect runtime. */
-export function journalStoreLayer(store: LedgerStore): Layer.Layer<JournalStore> {
-  interface Held {
-    tx: LedgerTransaction;
-    release: () => void;
-    done: Promise<Exit.Exit<void, StorageError | ValidationError>>;
-  }
-  const acquire = Effect.async<Held, StorageError | ValidationError>((resume) => {
-    let cancelled = false;
-    let unlocked: (() => void) | undefined;
-    let complete: (value: Exit.Exit<void, StorageError | ValidationError>) => void = () => {};
-    const done = new Promise<Exit.Exit<void, StorageError | ValidationError>>((resolve) => {
-      complete = resolve;
-    });
-    // The callback only leases a transaction. The Effect workflow executes outside
-    // it; releasing this promise lets the adapter close its database/queue lock.
-    const running = store.exclusive(async (tx) => {
-      if (cancelled) return;
-      const wait = new Promise<void>((resolve) => {
-        unlocked = resolve;
-      });
-      resume(Effect.succeed({ tx, release: () => unlocked?.(), done }));
-      await wait;
-    });
-    void running.then(
-      () => complete(Exit.succeed(undefined)),
-      (error: unknown) => {
-        const failure = storageError(error);
-        complete(
-          error instanceof TypeError || error instanceof ReferenceError
-            ? Exit.die(error)
-            : Exit.fail(failure)
-        );
-        resume(
-          error instanceof TypeError || error instanceof ReferenceError
-            ? Effect.die(error)
-            : Effect.fail(failure)
-        );
-      }
-    );
-    return Effect.sync(() => {
-      cancelled = true;
-      unlocked?.();
-    });
-  });
-
-  return Layer.succeed(JournalStore, {
-    exclusive: (work) =>
-      Effect.uninterruptibleMask((restore) =>
-        Effect.gen(function* () {
-          const held = yield* restore(acquire);
-          const outcome = yield* Effect.exit(
-            restore(
-              Effect.suspend(() => {
-                const transaction: JournalTransaction = {
-                  load: storageCall(() => held.tx.load()),
-                  save: (journal) => storageCall(() => held.tx.save(journal)),
-                };
-                return work(transaction);
-              })
-            )
-          );
-          held.release();
-          const released = yield* Effect.promise(() => held.done);
-          if (Exit.isFailure(outcome)) {
-            return yield* Effect.failCause(
-              Exit.isFailure(released)
-                ? Cause.sequential(outcome.cause, released.cause)
-                : outcome.cause
-            );
-          }
-          if (Exit.isFailure(released)) return yield* Effect.failCause(released.cause);
-          return outcome.value;
-        })
-      ),
-  });
 }
 
 export function ledgerTransportLayer(stream: LedgerStream): Layer.Layer<LedgerTransport> {

@@ -11,6 +11,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { buildChain } from './chain';
 import { Ledger } from '../src/ledger/ledger';
 import { decodeRecord } from '../src/ledger/schema';
+import { SqliteLedgerStore } from '../src/ledger/node-store';
 
 const baseline = process.argv[2];
 if (!baseline) throw new Error('Supply a baseline package root with the same wire format');
@@ -78,23 +79,22 @@ for (const metric of ['replay', 'submit', 'snapshot', 'recovery', 'snapshot-prom
               .pipe(Effect.map(shape), Effect.provide(platform.signatureVerifierLayer))
           );
       } else {
-        const store = new v.disk.SqliteLedgerStore(path, {
-          createFile: true,
-          initializeSchema: true,
-        });
-        // Legacy SQLite opens lazily. Materialize the empty store outside timing
-        // before the native layer deliberately opens (never creates) it.
-        await store.exclusive((tx) => tx.load());
+        // Same on-disk format for both versions: prepare it with the current store,
+        // outside timing, before the native layer deliberately opens (never creates) it.
+        const store = new SqliteLedgerStore(path, { createFile: true, initializeSchema: true });
+        await Effect.runPromise(store.exclusive((tx) => tx.load));
         const records = metric === 'submit' ? fixture.records.slice(0, -1) : fixture.records;
         stream.records = records.slice(1);
         if (metric === 'submit' || metric === 'recovery') {
-          await store.exclusive((tx) =>
-            tx.save({
-              genesis: fixture.created.anchor,
-              records,
-              pending: null,
-              offset: stream.tail,
-            })
+          await Effect.runPromise(
+            store.exclusive((tx) =>
+              tx.save({
+                genesis: fixture.created.anchor,
+                records,
+                pending: null,
+                offset: stream.tail,
+              })
+            )
           );
         }
         const layer = Layer.mergeAll(
@@ -113,7 +113,8 @@ for (const metric of ['replay', 'submit', 'snapshot', 'recovery', 'snapshot-prom
                 headSignature,
               },
               snapshot,
-              store,
+              // Each version's own store shape for its own Promise facade.
+              store: new v.disk.SqliteLedgerStore(path),
               stream,
             });
             const view = await client.read();

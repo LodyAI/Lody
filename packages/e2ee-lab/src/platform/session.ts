@@ -425,7 +425,7 @@ export class DemoSession {
       createFile: false,
       initializeSchema: false,
     });
-    const journal = await store.exclusive((tx) => tx.load());
+    const journal = await Effect.runPromise(store.exclusive((tx) => tx.load));
     const genesisRecord = journal?.records[0];
     if (!journal || !genesisRecord) throw new Error('missing-genesis');
     this.genesis = new Uint8Array(genesisRecord);

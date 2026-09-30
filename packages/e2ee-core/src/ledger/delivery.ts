@@ -1,55 +1,17 @@
 import { Effect, Layer } from 'effect';
-import { runPromiseThrow } from '../effect-run';
-import { copyBytes } from './cbor';
-import { LedgerError } from './error';
-import { deliverFrame } from '../workflows/key-delivery';
+import { KeyOutbox } from '../ports/key-delivery';
 import { ValidationError } from '../pure/errors';
-import { keyOutboxLayer, keyDeliveryRemoteLayer } from '../platform/key-delivery';
+import { keyDeliveryRemoteLayer } from '../platform/key-delivery';
+import { deliverFrame } from '../workflows/key-delivery';
+import { runLegacy } from './compat';
+import { LedgerError } from './error';
 
-export interface LedgerKeyOutbox {
-  exclusive<T>(
-    work: (tx: {
-      load(id: string): Promise<Uint8Array | null>;
-      save(id: string, frame: Uint8Array): Promise<void>;
-    }) => Promise<T>
-  ): Promise<T>;
-}
+export { MemoryKeyOutbox as MemoryLedgerKeyOutbox } from '../platform/memory-stores';
+export type LedgerKeyOutbox = KeyOutbox['Type'];
 
 export interface LedgerKeyRemote {
   put(id: string, frame: Uint8Array): Promise<void>;
   read(id: string): Promise<Uint8Array | null>;
-}
-
-export class MemoryLedgerKeyOutbox implements LedgerKeyOutbox {
-  readonly frames = new Map<string, Uint8Array>();
-  private queue: Promise<void> = Promise.resolve();
-
-  async exclusive<T>(
-    work: (tx: {
-      load(id: string): Promise<Uint8Array | null>;
-      save(id: string, frame: Uint8Array): Promise<void>;
-    }) => Promise<T>
-  ): Promise<T> {
-    const previous = this.queue;
-    let release!: () => void;
-    this.queue = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    await previous;
-    try {
-      return await work({
-        load: async (id) => {
-          const saved = this.frames.get(id);
-          return saved === undefined ? null : copyBytes(saved);
-        },
-        save: async (id, frame) => {
-          this.frames.set(id, copyBytes(frame));
-        },
-      });
-    } finally {
-      release();
-    }
-  }
 }
 
 /** Exact-byte epoch envelope outbox. Retry never re-encrypts. */
@@ -59,12 +21,12 @@ export class LedgerKeyDelivery {
     private readonly remote: LedgerKeyRemote
   ) {}
 
-  async send(
+  send(
     id: string,
     frame: Uint8Array | undefined,
     authorize: (frame: Uint8Array) => void | Promise<void>
   ): Promise<'observed' | 'unknown'> {
-    return runPromiseThrow(this.sendEffect(id, frame, authorize));
+    return runLegacy(this.sendEffect(id, frame, authorize));
   }
 
   sendEffect(
@@ -84,7 +46,9 @@ export class LedgerKeyDelivery {
         )
       )
     ).pipe(
-      Effect.provide(Layer.merge(keyOutboxLayer(this.outbox), keyDeliveryRemoteLayer(this.remote))),
+      Effect.provide(
+        Layer.merge(Layer.succeed(KeyOutbox, this.outbox), keyDeliveryRemoteLayer(this.remote))
+      ),
       Effect.map((result): 'observed' | 'unknown' =>
         result._tag === 'Observed' ? 'observed' : 'unknown'
       ),

@@ -6,7 +6,9 @@ import {
   MAX_LEDGER_READ_PAGE_RECORDS,
   MemoryLedgerStore,
   MemoryLedgerStream,
+  type LedgerStore,
 } from '../src/ledger';
+import { StorageError } from '../src/pure/errors';
 import { classifyLedgerPresence, classifyUnresolvedSubmit } from '../src/pure/submit-outcome';
 import { buildChain } from '../bench/chain';
 import { admitDeviceOp, append, ed25519, signGenesis } from './ledger-fixtures';
@@ -414,19 +416,17 @@ describe('L6 page and cursor catch-up', () => {
     stream.records = [first.record, second.record];
     let saves = 0;
     const inner = a.store;
-    const wrapped = {
-      exclusive<T>(work: Parameters<(typeof inner)['exclusive']>[0]): Promise<T> {
-        return inner.exclusive(async (tx) =>
+    const wrapped: LedgerStore = {
+      exclusive: (work) =>
+        inner.exclusive((tx) =>
           work({
-            load: () => tx.load(),
-            save: async (journal) => {
-              saves += 1;
-              if (saves === 2) throw new Error('disk-failure');
-              await tx.save(journal);
-            },
+            load: tx.load,
+            save: (journal) =>
+              Effect.suspend(() =>
+                ++saves === 2 ? Effect.fail(new StorageError({ reason: 'io' })) : tx.save(journal)
+              ),
           })
-        ) as Promise<T>;
-      },
+        ),
     };
     const client = new LedgerClient(created.record, created.anchor, wrapped, stream);
     await expect(client.read()).rejects.toMatchObject({ _tag: 'StorageError', reason: 'io' });

@@ -37,6 +37,7 @@ import {
   checkedRecord,
   decodedRecord,
   ledgerView,
+  viewFacts,
   viewState,
   type ApplicableRecord,
   type DecodedRecord,
@@ -45,11 +46,19 @@ import {
 } from '../pure/records';
 import { ValidationError } from '../pure/errors';
 
-function viewOf(state: InternalState): Effect.Effect<LedgerView, ValidationError> {
+function viewOf(
+  state: InternalState,
+  facts = SigningFacts.empty
+): Effect.Effect<LedgerView, ValidationError> {
   const headBytes = state.hashes[state.hashes.length - 1];
   if (!headBytes) return Effect.fail(new ValidationError({ code: 'invalid-operation' }));
   return Effect.gen(function* () {
-    return ledgerView(state, yield* genesisHash(state.genesis), yield* recordHash(headBytes));
+    return ledgerView(
+      state,
+      yield* genesisHash(state.genesis),
+      yield* recordHash(headBytes),
+      facts
+    );
   });
 }
 
@@ -169,7 +178,7 @@ export function verifyLedger(input: {
       !bytesEqual(state.hashes[0]!, input.anchor.toBytes())
     )
       return yield* Effect.fail(new ValidationError({ code: 'wrong-anchor', position: 0 }));
-    return yield* viewOf(state);
+    return yield* viewOf(state, facts);
   });
 }
 
@@ -183,7 +192,7 @@ export function extendLedger(
     const verifier = yield* SignatureVerifier;
     const state = cloneState(viewState(view));
     const start = state.hashes.length;
-    let facts = SigningFacts.empty;
+    let facts = viewFacts(view);
     const decoded: SchemaRecord[] = [];
     const outer: SignatureJobInput[] = [];
     const memberProofs: SignatureJobInput[] = [];
@@ -254,7 +263,7 @@ export function extendLedger(
         facts
       );
     }
-    return yield* viewOf(state);
+    return yield* viewOf(state, facts);
   });
 }
 
@@ -299,9 +308,10 @@ export function prepareChecked(
           message: job.msg,
           signature: job.sig,
           code: 'bad-proof',
-        }))
+        })),
+        viewFacts(view)
       );
-    yield* operationChanges(state, signer.toBytes(), operation);
+    yield* operationChanges(state, signer.toBytes(), operation, viewFacts(view));
     const bodyBytes = yield* encodeOrdinaryBody({
       previousHash: copyBytes(previousHash),
       signer: signer.toBytes(),

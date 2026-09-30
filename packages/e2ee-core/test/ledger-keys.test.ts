@@ -12,6 +12,8 @@ import {
   StorageError,
   parseEpochEnvelopeChunk,
   LedgerClient as NativeLedgerClient,
+  JournalStore,
+  KeyOutbox,
 } from '@lody/e2ee-core/effect';
 import {
   hpkeSenderLayer,
@@ -19,9 +21,7 @@ import {
   hpkeRecipientLayer,
   signatureVerifierLayer,
   deviceSignerLayer,
-  journalStoreLayer,
   ledgerTransportLayer,
-  keyOutboxLayer,
   keyDeliveryRemoteLayer,
 } from '@lody/e2ee-core/effect/platform';
 import { MemoryLedgerStore, MemoryLedgerStream } from '../src/ledger/submit';
@@ -234,7 +234,7 @@ describe('P3 key delivery and history unwrap', () => {
         }).pipe(
           Effect.provide(
             Layer.mergeAll(
-              journalStoreLayer(new MemoryLedgerStore()),
+              Layer.succeed(JournalStore, new MemoryLedgerStore()),
               ledgerTransportLayer(remote),
               deviceSignerLayer(value(Bytes.signingPublicKey(keys.publicKey)), sign),
               signatureVerifierLayer
@@ -278,7 +278,7 @@ describe('P3 key delivery and history unwrap', () => {
     let reachable = false;
     const deliveryLayer = Layer.mergeAll(
       signatureVerifierLayer,
-      keyOutboxLayer(outbox),
+      Layer.succeed(KeyOutbox, outbox),
       keyDeliveryRemoteLayer({
         async put(id, bytes) {
           if (!reachable) throw new Error('unavailable');

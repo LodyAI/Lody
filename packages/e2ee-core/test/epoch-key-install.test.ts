@@ -13,15 +13,15 @@ import {
   EpochKeyring,
   HpkeRecipient,
   LedgerClient as NativeLedgerClient,
+  JournalStore,
+  KeyOutbox,
 } from '@lody/e2ee-core/effect';
 import {
   cryptoEntropyLayer,
   deviceSignerLayer,
   hpkeRecipientLayer,
   hpkeSenderLayer,
-  journalStoreLayer,
   keyDeliveryRemoteLayer,
-  keyOutboxLayer,
   ledgerTransportLayer,
   signatureVerifierLayer,
 } from '@lody/e2ee-core/effect/platform';
@@ -97,7 +97,7 @@ async function scenario() {
       NativeLedgerClient.importGenesis({ anchor: genesis, genesisRecord: created.record }).pipe(
         Effect.provide(
           Layer.mergeAll(
-            journalStoreLayer(new MemoryLedgerStore()),
+            Layer.succeed(JournalStore, new MemoryLedgerStore()),
             ledgerTransportLayer(stream),
             deviceSignerLayer(value(Bytes.signingPublicKey(keys.publicKey)), keys.sign),
             signatureVerifierLayer
@@ -109,7 +109,7 @@ async function scenario() {
   const deliveryLayer = Layer.mergeAll(
     hpkeSenderLayer().pipe(Layer.provide(cryptoEntropyLayer)),
     signatureVerifierLayer,
-    keyOutboxLayer(new MemoryLedgerKeyOutbox()),
+    Layer.succeed(KeyOutbox, new MemoryLedgerKeyOutbox()),
     keyDeliveryRemoteLayer({
       async put(id, bytes) {
         frames.set(id, new Uint8Array(bytes));

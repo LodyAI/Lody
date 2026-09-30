@@ -1,3 +1,4 @@
+import { Effect } from 'effect';
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { SqliteLedgerStore } from '@lody/e2ee-core/ledger-node';
@@ -13,15 +14,19 @@ export type KnownDefect = 'skip-verify' | 'cursor-before-document' | 'wrong-cont
 /** Flip one byte of a persisted journal record so verify fails on reload. */
 export async function injectSkipVerify(clientDir: string): Promise<void> {
   const store = new SqliteLedgerStore(join(clientDir, 'ledger.sqlite'));
-  await store.exclusive(async (tx) => {
-    const journal = await tx.load();
-    if (!journal || journal.records.length === 0) throw new Error('defect-no-journal');
-    const last = new Uint8Array(journal.records[journal.records.length - 1]!);
-    last[last.byteLength - 1] = (last[last.byteLength - 1] ?? 0) ^ 0xff;
-    const records = journal.records.slice();
-    records[records.length - 1] = last;
-    await tx.save({ ...journal, records });
-  });
+  await Effect.runPromise(
+    store.exclusive((tx) =>
+      Effect.gen(function* () {
+        const journal = yield* tx.load;
+        if (!journal || journal.records.length === 0) return yield* Effect.die('defect-no-journal');
+        const last = new Uint8Array(journal.records[journal.records.length - 1]!);
+        last[last.byteLength - 1] = (last[last.byteLength - 1] ?? 0) ^ 0xff;
+        const records = journal.records.slice();
+        records[records.length - 1] = last;
+        return yield* tx.save({ ...journal, records });
+      })
+    )
+  );
 }
 
 /** Persist a cursor without the matching document snapshot. */
@@ -46,11 +51,9 @@ export async function injectWrongContextJournal(
 ): Promise<void> {
   const source = new SqliteLedgerStore(join(foreignDir, 'ledger.sqlite'));
   const dest = new SqliteLedgerStore(join(targetDir, 'ledger.sqlite'));
-  const journal = await source.exclusive((tx) => tx.load());
+  const journal = await Effect.runPromise(source.exclusive((tx) => tx.load));
   if (!journal) throw new Error('defect-no-foreign-journal');
-  await dest.exclusive(async (tx) => {
-    await tx.save(journal);
-  });
+  await Effect.runPromise(dest.exclusive((tx) => tx.save(journal)));
 }
 
 export async function applyKnownDefect(

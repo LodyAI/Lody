@@ -1,3 +1,4 @@
+import { Effect } from 'effect';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -301,7 +302,9 @@ describe('P3 public-export K/R/C loop', () => {
     const restartedView = await restarted.read();
     expect(restartedView.head).toEqual(ledger.head);
     expect(restartedView.length).toBe(records.length);
-    const loaded = (await new SqliteLedgerStore(journal).exclusive((tx) => tx.load()))!.records;
+    const loaded = (await Effect.runPromise(
+      new SqliteLedgerStore(journal).exclusive((tx) => tx.load)
+    ))!.records;
     const recoveredAfterRestart = await recoverHistory({
       genesis: created.anchor,
       latestEpoch: 3,

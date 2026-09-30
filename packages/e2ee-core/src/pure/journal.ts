@@ -18,15 +18,6 @@ export interface LedgerJournal {
   readonly snapshotBound?: boolean;
 }
 
-export interface LedgerTransaction {
-  load(): Promise<LedgerJournal | null>;
-  save(journal: LedgerJournal): Promise<void>;
-}
-
-export interface LedgerStore {
-  exclusive<T>(work: (transaction: LedgerTransaction) => Promise<T>): Promise<T>;
-}
-
 export interface LedgerReadPage {
   readonly records: readonly Uint8Array[];
   readonly nextOffset: string;

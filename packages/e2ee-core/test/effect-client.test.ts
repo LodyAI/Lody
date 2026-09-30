@@ -16,7 +16,6 @@ import {
 } from '@lody/e2ee-core/effect';
 import {
   deviceSignerLayer,
-  journalStoreLayer,
   ledgerTransportLayer,
   signatureVerifierLayer,
 } from '@lody/e2ee-core/effect/platform';
@@ -51,7 +50,7 @@ async function setup() {
   const store = new MemoryLedgerStore();
   const stream = new MemoryLedgerStream();
   const layer = Layer.mergeAll(
-    journalStoreLayer(store),
+    Layer.succeed(JournalStore, store),
     ledgerTransportLayer(stream),
     deviceSignerLayer(value(Bytes.signingPublicKey(owner.publicKey)), owner.sign),
     signatureVerifierLayer
@@ -356,7 +355,7 @@ describe('Effect client owns submissions', () => {
     }).pipe(
       Effect.provide(
         Layer.mergeAll(
-          journalStoreLayer(s.store),
+          Layer.succeed(JournalStore, s.store),
           ledgerTransportLayer(s.stream),
           deviceSignerLayer(value(Bytes.signingPublicKey(s.owner.publicKey)), wrong.sign),
           signatureVerifierLayer
@@ -453,7 +452,7 @@ describe('Effect client owns submissions', () => {
       LedgerClient.importGenesis({ anchor: s.anchor, genesisRecord: s.created.record }).pipe(
         Effect.provide(
           Layer.mergeAll(
-            journalStoreLayer(s.store),
+            Layer.succeed(JournalStore, s.store),
             ledgerTransportLayer(s.stream),
             badSigner,
             signatureVerifierLayer
@@ -582,7 +581,7 @@ describe('transaction lifetime', () => {
       LedgerClient.restore(s.anchor).pipe(
         Effect.provide(
           Layer.mergeAll(
-            journalStoreLayer(s.store),
+            Layer.succeed(JournalStore, s.store),
             ledgerTransportLayer(s.stream),
             deviceSignerLayer(value(Bytes.signingPublicKey(other.publicKey)), other.sign),
             signatureVerifierLayer
@@ -619,31 +618,29 @@ describe('transaction lifetime', () => {
         exclusive: (work) =>
           s.store.exclusive((tx) =>
             work({
-              load: () => tx.load(),
-              save: async (journal) => {
-                const pending = journal.pending !== null;
-                const chosen =
-                  armed && (point.endsWith('pending') ? pending : seenPending && !pending);
-                if (pending) {
-                  seenPending = true;
-                  original ??= new Uint8Array(journal.pending);
-                }
-                if (chosen) armed = false;
-                if (chosen && point.startsWith('before')) {
-                  enter();
-                  await released;
-                }
-                await tx.save(journal);
-                if (chosen && point.startsWith('after')) {
-                  enter();
-                  await released;
-                }
-              },
+              load: tx.load,
+              save: (journal) =>
+                Effect.gen(function* () {
+                  const pending = journal.pending !== null;
+                  const chosen =
+                    armed && (point.endsWith('pending') ? pending : seenPending && !pending);
+                  if (pending) {
+                    seenPending = true;
+                    original ??= new Uint8Array(journal.pending);
+                  }
+                  if (chosen) armed = false;
+                  const pause = Effect.sync(enter).pipe(
+                    Effect.zipRight(Effect.promise(() => released))
+                  );
+                  if (chosen && point.startsWith('before')) yield* pause;
+                  yield* tx.save(journal);
+                  if (chosen && point.startsWith('after')) yield* pause;
+                }),
             })
           ),
       };
       const layer = Layer.mergeAll(
-        journalStoreLayer(store),
+        Layer.succeed(JournalStore, store),
         ledgerTransportLayer(s.stream),
         deviceSignerLayer(value(Bytes.signingPublicKey(s.owner.publicKey)), s.owner.sign),
         signatureVerifierLayer
@@ -687,7 +684,7 @@ describe('transaction lifetime', () => {
       yield* Deferred.await(acquired);
       yield* Fiber.interrupt(worker);
       return yield* service.exclusive((tx) => tx.load);
-    }).pipe(Effect.provide(journalStoreLayer(store)));
+    }).pipe(Effect.provide(Layer.succeed(JournalStore, store)));
     expect(await Effect.runPromise(program)).toBeNull();
   });
 
@@ -699,11 +696,13 @@ describe('transaction lifetime', () => {
     });
     let calls = 0;
     const store: LedgerStore = {
-      exclusive: (work) => {
-        calls++;
-        if (calls === 2) entered();
-        return memory.exclusive(work);
-      },
+      // Signals when the second holder starts acquiring, not when it is described.
+      exclusive: (work) =>
+        Effect.suspend(() => {
+          calls++;
+          if (calls === 2) entered();
+          return memory.exclusive(work);
+        }),
     };
     const program = Effect.gen(function* () {
       const service = yield* JournalStore;
@@ -724,7 +723,7 @@ describe('transaction lifetime', () => {
       yield* Fiber.join(first);
       const next = yield* service.exclusive((tx) => tx.load);
       return { interrupted, next };
-    }).pipe(Effect.provide(journalStoreLayer(store)));
+    }).pipe(Effect.provide(Layer.succeed(JournalStore, store)));
     const result = await Effect.runPromise(program);
     expect(
       Exit.isFailure(result.interrupted) && Cause.isInterrupted(result.interrupted.cause)

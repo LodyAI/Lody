@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { join, resolve } from 'node:path';
-import { Effect, type Layer } from 'effect';
+import { Effect, Option, type Layer } from 'effect';
 import { toHex } from './platform/bytes';
 import type { LabBackend } from './backend';
 import {
@@ -23,7 +23,8 @@ import { insiderDecryptEffect, type InsiderFrame, type InsiderMaterial } from '.
 import { canPermitEvent, type LabEvent } from './scheduler';
 import { firstReplayDivergence, type Divergence } from './replay';
 import { LabRuntime, type ProtocolFrame } from './runtime';
-import { Ledger } from '@lody/e2ee-core/ledger';
+import { Bytes, verifyLedger } from '@lody/e2ee-core/effect';
+import { signatureVerifierLayer } from '@lody/e2ee-core/effect/platform';
 import { contentWritesFor } from './content-trace';
 import { SqliteLedgerStore } from '@lody/e2ee-core/ledger-node';
 import { LoroDoc, VersionVector } from 'loro-crdt';
@@ -265,7 +266,7 @@ function assertBudgetEffect(state: PrivateState): Effect.Effect<void, Error, Lab
 
 /**
  * Real client measurement: live verified read, journal re-verification through
- * `Ledger.verify`, and document/cursor file consistency. Returns measured
+ * `verifyLedger`, and document/cursor file consistency. Returns measured
  * facts; `finish` derives the verdicts.
  *
  * Harness Promise entry uses LiveLabLayer. AttackLab `finish` may inject a
@@ -302,16 +303,16 @@ function inspectClientEffect(
       facts.rejectedRecords = Math.max(0, counted.count - facts.verifiedRecords);
     }
     const store = new SqliteLedgerStore(join(client.clientDir, 'ledger.sqlite'));
-    const journal = yield* Effect.tryPromise({
-      try: () => store.exclusive((tx) => tx.load()),
-      catch: (error) => error,
-    }).pipe(Effect.catchAll(() => Effect.succeed(null)));
+    const journal = yield* store
+      .exclusive((tx) => tx.load)
+      .pipe(Effect.catchAllCause(() => Effect.succeed(null)));
     if (journal && journal.records.length > 0) {
-      const verified = yield* Effect.tryPromise({
-        try: () => Ledger.verify({ anchor: journal.genesis, records: journal.records }),
-        catch: (error) => error,
-      }).pipe(Effect.catchAll(() => Effect.succeed(null)));
-      facts.unverifiedAccepted = verified === null ? journal.records.length : 0;
+      const verified = yield* Bytes.genesisHash(journal.genesis).pipe(
+        Effect.flatMap((anchor) => verifyLedger({ anchor, records: journal.records })),
+        Effect.provide(signatureVerifierLayer),
+        Effect.option
+      );
+      facts.unverifiedAccepted = Option.isNone(verified) ? journal.records.length : 0;
     } else {
       facts.unverifiedAccepted = 0;
     }
@@ -541,13 +542,9 @@ function clientStateDigestEffect(dir: string): Effect.Effect<ClientDigest, unkno
   return Effect.gen(function* () {
     const fs = yield* LabFs;
     let journal: { genesis: Uint8Array; records: readonly Uint8Array[] } | null = null;
-    journal = yield* Effect.tryPromise({
-      try: () => {
-        const store = new SqliteLedgerStore(join(dir, 'ledger.sqlite'));
-        return store.exclusive((tx) => tx.load());
-      },
-      catch: (error) => error,
-    }).pipe(Effect.catchAll(() => Effect.succeed(null)));
+    journal = yield* Effect.suspend(() =>
+      new SqliteLedgerStore(join(dir, 'ledger.sqlite')).exclusive((tx) => tx.load)
+    ).pipe(Effect.catchAllCause(() => Effect.succeed(null)));
     const hash = createHash('sha256');
     if (journal) {
       hash.update(journal.genesis);

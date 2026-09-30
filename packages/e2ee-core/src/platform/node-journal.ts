@@ -10,7 +10,8 @@ export { nodeKeyOutboxLayer } from './node-key-outbox';
 export { nodeDeviceIdentityLayer } from './node-device-identity';
 export { nodeUserIdentityLayer } from './node-user-identity';
 
-function journalService(database: SqliteTextStore): JournalStore['Type'] {
+/** Effect journal service over one SQLite file; each transaction owns an EXCLUSIVE lease. */
+export function sqliteJournalService(database: SqliteTextStore): JournalStore['Type'] {
   return JournalStore.of({
     exclusive: (work) =>
       Effect.acquireUseRelease(
@@ -62,7 +63,7 @@ export function nodeJournalStoreLayer(input: {
         return yield* Effect.fail(new ValidationError({ code: 'invalid-operation' }));
       if (mode === 'create') {
         yield* storageSync(() => closeSync(openSync(path, 'wx', 0o600)));
-        const initial = journalService(
+        const initial = sqliteJournalService(
           new SqliteTextStore(path, 0x4c454c30, 0, {
             createFile: false,
             initializeSchema: true,
@@ -70,7 +71,7 @@ export function nodeJournalStoreLayer(input: {
         );
         yield* initial.exclusive((tx) => tx.load);
       }
-      const service = journalService(
+      const service = sqliteJournalService(
         new SqliteTextStore(path, 0x4c454c30, 0, {
           createFile: false,
           initializeSchema: false,

@@ -16,7 +16,9 @@ import { ValidationError } from '../pure/errors';
 import * as snapshots from '../pure/ledger-snapshot';
 import { encodeOrdinaryBody, signingBytesForBody, type Operation } from '../pure/ledger-schema';
 import { publicState, type InternalState, type OrgState } from '../pure/ledger-state';
-import { viewState, type LedgerView } from '../pure/records';
+import { ledgerView, viewFacts, viewState, type LedgerView } from '../pure/records';
+import { SigningFacts } from '../pure/signing-facts';
+import { checkSigningPublicKey as checkSigningKey } from '../pure/wire-crypto';
 import { headAttestationSigningBytes, snapshotSigningBytes } from '../pure/wire-crypto';
 import {
   makeExecutorSignatureVerifier,
@@ -72,18 +74,40 @@ function verifierLayer(input: {
     : Layer.succeed(SignatureVerifier, makeSignatureVerifier({ cache: input.pointCache }));
 }
 
+/** Point-validity evidence shared by one Ledger and the values derived from it.
+ * It only ever holds checked keys; it is never authority and never process-wide. */
+interface Lineage {
+  facts: SigningFacts;
+}
+
 export class Ledger {
   // A true private field: verified state is unreachable from outside, even via `as any`.
   readonly #view: LedgerView;
+  readonly #lineage: Lineage;
 
-  private constructor(view: LedgerView) {
+  private constructor(view: LedgerView, lineage: Lineage) {
     this.#view = view;
+    this.#lineage = lineage;
+    lineage.facts = lineage.facts.union(viewFacts(view));
     Object.freeze(this);
   }
 
   /** Wraps a view that only the verification workflows can produce. */
   static fromView(view: LedgerView): Ledger {
-    return new Ledger(view);
+    return new Ledger(view, { facts: SigningFacts.empty });
+  }
+
+  #derive = (view: LedgerView): Ledger => new Ledger(view, this.#lineage);
+
+  /** This view carrying every key already checked along its lineage. */
+  get #working(): LedgerView {
+    const state = viewState(this.#view);
+    return ledgerView(state, this.#view.genesis, this.#view.head, this.#lineage.facts);
+  }
+
+  #remember(view: LedgerView): LedgerView {
+    this.#lineage.facts = this.#lineage.facts.union(viewFacts(view));
+    return view;
   }
 
   /** The verified view, for callers moving to `@lody/e2ee-core/effect`. */
@@ -174,14 +198,14 @@ export class Ledger {
     const records = ownedRecords(suffix, this.length);
     return runLegacy(
       verification
-        .extendLedger(this.#view, records)
-        .pipe(Effect.map(Ledger.fromView), Effect.provide(legacyVerifierLayer(cache)))
+        .extendLedger(this.#working, records)
+        .pipe(Effect.map(this.#derive), Effect.provide(legacyVerifierLayer(cache)))
     );
   }
 
   /** Unchecked proposal: the record is still fully verified when it is appended. */
   prepare(operation: Operation, signerPublicKey: SigningPublicKey): Proposal {
-    const signer = checkSigningPublicKey(signerPublicKey);
+    const signer = unwrap(checkSigningKey(signerPublicKey, this.#lineage.facts));
     const previousHash = this.head;
     const bodyBytes = unwrap(encodeOrdinaryBody({ previousHash, signer, operation }));
     return Object.freeze({
@@ -201,9 +225,9 @@ export class Ledger {
     const signed = unwrap(signatureBytes(signature));
     return runLegacy(
       verification
-        .finalizePrepared(this.#view, proposal.bodyBytes, proposal.previousHash, signed)
+        .finalizePrepared(this.#working, proposal.bodyBytes, proposal.previousHash, signed)
         .pipe(
-          Effect.map(({ record }) => record),
+          Effect.map(({ record, view }) => (this.#remember(view), record)),
           Effect.provide(legacyVerifierLayer(cache))
         )
     );
@@ -219,7 +243,7 @@ export class Ledger {
     const signer = unwrap(signingPublicKey(signerPublicKey));
     const prepared = runLegacySync(
       verification
-        .prepareChecked(this.#view, operation, signer)
+        .prepareChecked(this.#working, operation, signer)
         .pipe(Effect.provide(legacyVerifierLayer(cache)))
     );
     return Object.freeze({ signer: signer.toBytes(), operation, ...prepared });

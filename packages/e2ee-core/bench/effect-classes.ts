@@ -1,5 +1,6 @@
 /** Four-class 1000-record gates: full replay, incremental extend, snapshot start, journal recovery.
  * Local measurement only; no CI timing assertion and no restored 10k/100ms target. */
+import { Effect } from 'effect';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -45,13 +46,15 @@ async function main() {
   const path = join(dir, 'journal.sqlite');
   try {
     const store = new SqliteLedgerStore(path, { createFile: true, initializeSchema: true });
-    await store.exclusive((tx) =>
-      tx.save({
-        genesis: created.anchor,
-        records,
-        pending: null,
-        offset: 'empty:/+',
-      })
+    await Effect.runPromise(
+      store.exclusive((tx) =>
+        tx.save({
+          genesis: created.anchor,
+          records,
+          pending: null,
+          offset: 'empty:/+',
+        })
+      )
     );
 
     const replay = await measure(warmup, runs, async () => {
@@ -70,7 +73,7 @@ async function main() {
     });
     const recovery = await measure(warmup, runs, async () => {
       const reopened = new SqliteLedgerStore(path, { createFile: false, initializeSchema: false });
-      const journal = await reopened.exclusive((tx) => tx.load());
+      const journal = await Effect.runPromise(reopened.exclusive((tx) => tx.load));
       if (!journal || journal.records.length !== count) throw new Error('recovery-journal');
       const verified = await Ledger.verify({
         anchor: journal.genesis,

@@ -1,8 +1,5 @@
+/** Promise facade over `workflows/ledger-engine.ts`: no second submit path. */
 import { Effect, Layer } from 'effect';
-import { runPromiseThrow } from '../effect-run';
-import { copyBytes, bytesEqual } from './cbor';
-import { hashRecord, type Hash, type SigningPointCache } from './crypto';
-import { fail, LedgerError } from './error';
 import {
   genesisHash,
   recordHash,
@@ -10,38 +7,44 @@ import {
   signingPublicKey,
   type SigningPublicKey,
 } from '../pure/bytes';
-import type { LedgerView } from '../pure/records';
-import { makeSignatureVerifier } from '../platform/signature-verifier';
-import type { ClientError } from '../pure/errors';
-import { DeviceSigner, JournalStore, LedgerTransport, SignatureVerifier } from '../ports/ledger';
+import { bytesEqual, copyBytes } from '../pure/cbor';
 import type { LedgerCommand } from '../pure/commands';
+import { ValidationError, type ClientError } from '../pure/errors';
+import type { SnapshotTrust } from '../pure/ledger-snapshot';
+import { makeSignatureVerifier, SigningPointCache } from '../platform/signature-verifier';
+import { ledgerTransportLayer } from '../platform/ledger-ports';
+import {
+  DeviceSigner,
+  JournalStore,
+  LedgerTransport,
+  SignatureVerifier,
+  type JournalTransaction,
+} from '../ports/ledger';
 import { rotateEpoch } from '../workflows/epoch-rotation';
 import { LedgerClient as EffectLedgerClient } from '../workflows/ledger-client';
-import { journalStoreLayer, ledgerTransportLayer } from '../platform/ledger-ports';
 import { LedgerEngine, type ResumeOutcome } from '../workflows/ledger-engine';
+import { runLegacy } from './compat';
+import type { Hash } from './crypto';
 import { Ledger } from './ledger';
-import type { SnapshotTrust } from './snapshot';
+import {
+  MAX_LEDGER_READ_PAGE_RECORDS,
+  type LedgerReadPage,
+  type LedgerStream,
+} from '../pure/journal';
+import { hashRecordBytes } from '../pure/wire-crypto';
+import { LedgerError } from './error';
 export {
   MAX_LEDGER_RECORDS,
   MAX_LEDGER_READ_PAGE_RECORDS,
   MAX_LEDGER_READ_PAGES,
   MAX_LEDGER_READ_RECORDS,
 } from '../pure/journal';
-export type {
-  LedgerJournal,
-  LedgerTransaction,
-  LedgerStore,
-  LedgerReadPage,
-  LedgerStream,
-} from '../pure/journal';
-import {
-  MAX_LEDGER_READ_PAGE_RECORDS,
-  type LedgerJournal,
-  type LedgerTransaction,
-  type LedgerStore,
-  type LedgerReadPage,
-  type LedgerStream,
-} from '../pure/journal';
+export type { LedgerJournal, LedgerReadPage, LedgerStream } from '../pure/journal';
+export { MemoryJournalStore as MemoryLedgerStore } from '../platform/memory-stores';
+
+/** The journal port is the native Effect `JournalStore` service. */
+export type LedgerStore = JournalStore['Type'];
+export type LedgerTransaction = JournalTransaction;
 
 export type LedgerSubmitStatus = 'committed' | 'conflict' | 'unknown' | 'unsupported';
 
@@ -50,17 +53,19 @@ export interface LedgerSubmitResult {
   readonly ledger: Ledger;
 }
 
+const invalid = (code: ValidationError['code']): never => {
+  throw new LedgerError(code);
+};
+const failWith = (code: ValidationError['code']) => Effect.fail(new ValidationError({ code }));
+
 function checkOffset(value: unknown): asserts value is string {
-  if (typeof value !== 'string' || value.length === 0 || value.length > 1024 || value === 'now') {
-    fail('invalid-operation');
-  }
+  if (typeof value !== 'string' || value.length === 0 || value.length > 1024 || value === 'now')
+    invalid('invalid-operation');
 }
 
-function copyRecordList(records: readonly Uint8Array[]): Uint8Array[] {
-  return records.map((record) => {
-    if (!(record instanceof Uint8Array)) fail('canonical');
-    return copyBytes(record);
-  });
+function ownBytes(value: unknown): Uint8Array {
+  if (!(value instanceof Uint8Array)) invalid('canonical');
+  return copyBytes(value as Uint8Array);
 }
 
 function copyTrust(trust: SnapshotTrust): SnapshotTrust {
@@ -72,34 +77,23 @@ function copyTrust(trust: SnapshotTrust): SnapshotTrust {
   };
 }
 
-function copyJournal(journal: LedgerJournal): LedgerJournal {
-  return {
-    genesis: copyBytes(journal.genesis),
-    records: copyRecordList(journal.records),
-    pending: journal.pending === null ? null : copyBytes(journal.pending),
-    offset: journal.offset,
-    snapshot: journal.snapshot ? copyBytes(journal.snapshot) : undefined,
-    snapshotTrust: journal.snapshotTrust ? copyTrust(journal.snapshotTrust) : undefined,
-    snapshotBound: journal.snapshotBound === true ? true : undefined,
-  };
-}
-
 export class LedgerClient {
   private readonly anchor: Hash;
   private readonly genesisRecord: Uint8Array | null;
+  private readonly signatures: SignatureVerifier['Type'];
+  private engine: LedgerEngine | undefined;
 
   constructor(
     genesisRecord: Uint8Array | null,
     anchor: Hash,
     private readonly store: LedgerStore,
     private readonly stream: LedgerStream,
-    _pointCache?: SigningPointCache
+    pointCache?: SigningPointCache
   ) {
-    if (!(anchor instanceof Uint8Array)) fail('canonical');
-    if (genesisRecord !== null && !(genesisRecord instanceof Uint8Array)) fail('canonical');
-    this.genesisRecord = genesisRecord === null ? null : copyBytes(genesisRecord);
-    this.anchor = copyBytes(anchor);
+    this.anchor = ownBytes(anchor);
+    this.genesisRecord = genesisRecord === null ? null : ownBytes(genesisRecord);
     checkOffset(stream.initialOffset);
+    this.signatures = makeSignatureVerifier({ cache: pointCache ?? new SigningPointCache() });
   }
 
   static async open(
@@ -108,8 +102,8 @@ export class LedgerClient {
     stream: LedgerStream,
     pointCache?: SigningPointCache
   ): Promise<LedgerClient> {
-    const record = copyBytes(genesisRecord);
-    const anchor = await hashRecord(record);
+    const record = ownBytes(genesisRecord);
+    const anchor = hashRecordBytes(record);
     await Ledger.verify({ anchor, records: [record], pointCache });
     return new LedgerClient(record, anchor, store, stream, pointCache);
   }
@@ -121,7 +115,7 @@ export class LedgerClient {
     stream: LedgerStream;
     pointCache?: SigningPointCache;
   }): Promise<LedgerClient> {
-    const snapshot = copyBytes(input.snapshot);
+    const snapshot = ownBytes(input.snapshot);
     const trust = copyTrust(input.trust);
     const client = new LedgerClient(
       null,
@@ -130,7 +124,7 @@ export class LedgerClient {
       input.stream,
       input.pointCache
     );
-    client.engine = await runPromiseThrow(
+    client.engine = await runLegacy(
       client.provide(
         Effect.gen(function* () {
           return yield* LedgerEngine.legacyFromSnapshot({
@@ -140,7 +134,7 @@ export class LedgerClient {
             headSignature: yield* signature(trust.headSignature),
             snapshot,
           });
-        }).pipe(Effect.mapError(legacyError))
+        })
       )
     );
     return client;
@@ -153,61 +147,65 @@ export class LedgerClient {
     pointCache?: SigningPointCache
   ): Promise<LedgerClient> {
     const client = new LedgerClient(null, genesis, store, stream, pointCache);
-    await store.exclusive(async (tx) => {
-      const loaded = await tx.load();
-      if (!loaded) fail('invalid-operation');
-      if (!bytesEqual(loaded.genesis, genesis)) fail('wrong-anchor');
-    });
+    await runLegacy(
+      store.exclusive((tx) =>
+        Effect.flatMap(tx.load, (loaded) =>
+          loaded === null
+            ? failWith('invalid-operation')
+            : bytesEqual(loaded.genesis, genesis)
+              ? Effect.void
+              : failWith('wrong-anchor')
+        )
+      )
+    );
     return client;
   }
 
-  private engine: LedgerEngine | undefined;
-  private readonly signatures = makeSignatureVerifier();
-
   private provide<A, E, R>(effect: Effect.Effect<A, E, R>) {
     return effect.pipe(
-      Effect.provide(Layer.succeed(SignatureVerifier, this.signatures)),
-      Effect.provide(journalStoreLayer(this.store)),
-      Effect.provide(ledgerTransportLayer(this.stream))
+      Effect.provide(
+        Layer.mergeAll(
+          Layer.succeed(SignatureVerifier, this.signatures),
+          Layer.succeed(JournalStore, this.store),
+          ledgerTransportLayer(this.stream)
+        )
+      )
     );
   }
 
   private engineEffect(): Effect.Effect<LedgerEngine, ClientError> {
     return Effect.suspend(() => {
       if (this.engine) return Effect.succeed(this.engine);
-      const self = this;
-      return Effect.gen(function* () {
-        const anchor = yield* genesisHash(self.anchor);
-        const store = yield* JournalStore;
-        const stream = yield* LedgerTransport;
+      return Effect.gen(this, function* () {
         const engine = yield* LedgerEngine.legacy(
-          anchor,
-          self.genesisRecord,
-          store,
-          stream,
-          self.signatures
+          yield* genesisHash(this.anchor),
+          this.genesisRecord,
+          yield* JournalStore,
+          yield* LedgerTransport,
+          this.signatures
         );
-        self.engine = engine;
+        this.engine = engine;
         return engine;
       }).pipe(this.provide.bind(this));
     });
   }
 
-  /** Temporary Promise boundary. All state transitions live in LedgerEngine. */
+  private withEngine<A, E, R>(run: (engine: LedgerEngine) => Effect.Effect<A, E, R>) {
+    return this.provide(Effect.flatMap(this.engineEffect(), run));
+  }
+
   read(): Promise<Ledger> {
-    return runPromiseThrow(
-      this.provide(
-        this.engineEffect().pipe(
-          Effect.flatMap((engine) => engine.refresh()),
-          Effect.map(asLedger),
-          Effect.mapError(legacyError)
-        )
-      )
+    return runLegacy(
+      this.withEngine((engine) => engine.refresh()).pipe(Effect.map(Ledger.fromView))
     );
   }
 
   submit(record: Uint8Array): Promise<LedgerSubmitResult> {
-    return runPromiseThrow(this.submitEffect(record));
+    return runLegacy(this.submitEffect(record));
+  }
+
+  resume(): Promise<LedgerSubmitResult> {
+    return runLegacy(this.resumeEffect());
   }
 
   /** Intent submit. Callers do not assemble parent, nonce or signature bytes. */
@@ -216,83 +214,63 @@ export class LedgerClient {
       command._tag === 'AdmitMember'
         ? { ...command, request: { ...command.request } }
         : { ...command };
-    return this.provide(
-      Effect.gen(this, function* () {
-        const engine = yield* this.engineEffect();
-        const signer = yield* DeviceSigner;
-        return yield* EffectLedgerClient.fromEngine(engine, signer).execute(captured);
-      }).pipe(Effect.flatMap(legacyResult), Effect.mapError(legacyError))
-    );
+    return this.withEngine((engine) =>
+      Effect.flatMap(DeviceSigner, (signer) =>
+        EffectLedgerClient.fromEngine(engine, signer).execute(captured)
+      )
+    ).pipe(Effect.flatMap(legacyResult), Effect.mapError(legacyError));
   }
 
   /** Transitional consumer bridge; rotation behavior lives only in the native workflow. */
   rotateEpochEffect() {
-    return this.provide(
-      Effect.gen(this, function* () {
-        const engine = yield* this.engineEffect();
-        const signer = yield* DeviceSigner;
-        return yield* rotateEpoch(engine, signer);
-      })
+    return this.withEngine((engine) =>
+      Effect.flatMap(DeviceSigner, (signer) => rotateEpoch(engine, signer))
     );
   }
 
   /** Transitional consumer bridge; send/install live only in the native workflows. */
   sendCurrentEpochKeyEffect(recipient: SigningPublicKey) {
-    return this.provide(
-      Effect.gen(this, function* () {
-        const engine = yield* this.engineEffect();
-        const signer = yield* DeviceSigner;
-        return yield* EffectLedgerClient.fromEngine(engine, signer).sendCurrentEpochKey(recipient);
-      })
+    return this.withEngine((engine) =>
+      Effect.flatMap(DeviceSigner, (signer) =>
+        EffectLedgerClient.fromEngine(engine, signer).sendCurrentEpochKey(recipient)
+      )
     );
   }
 
   receiveEpochKeyEffect(sender: SigningPublicKey, frame: Uint8Array) {
     const owned = copyBytes(frame);
-    return this.provide(
-      Effect.gen(this, function* () {
-        const engine = yield* this.engineEffect();
-        const signer = yield* DeviceSigner;
-        return yield* EffectLedgerClient.fromEngine(engine, signer).receiveEpochKey(sender, owned);
-      })
+    return this.withEngine((engine) =>
+      Effect.flatMap(DeviceSigner, (signer) =>
+        EffectLedgerClient.fromEngine(engine, signer).receiveEpochKey(sender, owned)
+      )
     );
-  }
-
-  resume(): Promise<LedgerSubmitResult> {
-    return runPromiseThrow(this.resumeEffect());
   }
 
   submitEffect(record: Uint8Array): Effect.Effect<LedgerSubmitResult, ClientError | LedgerError> {
     const owned = copyBytes(record);
-    return this.provide(
-      this.engineEffect().pipe(
-        Effect.flatMap((engine) => engine.submitEncoded(owned)),
-        Effect.flatMap(legacyResult),
-        Effect.mapError(legacyError)
-      )
+    return this.withEngine((engine) => engine.submitEncoded(owned)).pipe(
+      Effect.flatMap(legacyResult),
+      Effect.mapError(legacyError)
     );
   }
 
   resumeEffect(): Effect.Effect<LedgerSubmitResult, ClientError | LedgerError> {
-    return this.provide(
-      this.engineEffect().pipe(
-        Effect.flatMap((engine) => engine.resume()),
-        Effect.flatMap(legacyResult),
-        Effect.mapError(legacyError)
-      )
+    return this.withEngine((engine) => engine.resume()).pipe(
+      Effect.flatMap(legacyResult),
+      Effect.mapError(legacyError)
     );
   }
 }
 
-function legacyError(error: ClientError | LedgerError): ClientError | LedgerError {
-  if (error instanceof LedgerError) return error;
+/** Legacy Effect methods keep their historical `LedgerError` failure values. */
+function legacyError(error: ClientError): ClientError | LedgerError {
   if (error._tag === 'ValidationError') return new LedgerError(error.code, error.position);
   if (error._tag === 'PendingOperationExists') return new LedgerError('replay');
   return error;
 }
 
-function legacyResult(result: ResumeOutcome): Effect.Effect<LedgerSubmitResult, LedgerError> {
-  if (result._tag === 'Idle') return Effect.fail(new LedgerError('invalid-operation'));
+function legacyResult(result: ResumeOutcome): Effect.Effect<LedgerSubmitResult, ValidationError> {
+  if (result._tag === 'Idle') return failWith('invalid-operation');
   const status: LedgerSubmitStatus =
     result._tag === 'Committed'
       ? 'committed'
@@ -301,42 +279,10 @@ function legacyResult(result: ResumeOutcome): Effect.Effect<LedgerSubmitResult, 
         : result._tag === 'Unsupported'
           ? 'unsupported'
           : 'unknown';
-  return Effect.succeed({ status, ledger: asLedger(result.ledger) });
+  return Effect.succeed({ status, ledger: Ledger.fromView(result.ledger) });
 }
 
-function asLedger(view: LedgerView): Ledger {
-  return Ledger.fromView(view);
-}
-
-export class MemoryLedgerStore implements LedgerStore {
-  journal: LedgerJournal | null = null;
-  failSave: 'before' | 'after' | null = null;
-  private queue: Promise<void> = Promise.resolve();
-
-  async exclusive<T>(work: (tx: LedgerTransaction) => Promise<T>): Promise<T> {
-    const previous = this.queue;
-    let release!: () => void;
-    this.queue = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    await previous;
-    try {
-      return await work({
-        load: async () => (this.journal === null ? null : copyJournal(this.journal)),
-        save: async (journal) => {
-          const failure = this.failSave;
-          this.failSave = null;
-          if (failure === 'before') throw new Error('disk-failure');
-          this.journal = copyJournal(journal);
-          if (failure === 'after') throw new Error('disk-failure');
-        },
-      });
-    } finally {
-      release();
-    }
-  }
-}
-
+/** In-memory Promise remote for tests; it models lost responses and false acks. */
 export class MemoryLedgerStream implements LedgerStream {
   readonly initialOffset = 'empty:/+';
   records: Uint8Array[] = [];
@@ -353,7 +299,7 @@ export class MemoryLedgerStream implements LedgerStream {
       offset === this.initialOffset
         ? -1
         : this.records.findIndex((_, i) => `opaque:${i + 1}/+` === offset);
-    if (index === -1 && offset !== this.initialOffset) fail('canonical');
+    if (index === -1 && offset !== this.initialOffset) invalid('canonical');
     const slice = this.records.slice(index + 1, index + 1 + this.pageSize);
     const consumed = index + 1 + slice.length;
     return {
