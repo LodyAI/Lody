@@ -1,4 +1,15 @@
-type TexMathDelimiter = { kind: 'inline' | 'display'; index: number };
+type TexMathDelimiter = {
+  kind: 'inline' | 'display';
+  index: number;
+  lineStart: number;
+  blockStart: boolean;
+};
+
+type TextReplacement = {
+  start: number;
+  end: number;
+  value: string;
+};
 
 type MarkdownContainer =
   | { kind: 'blockquote' }
@@ -98,6 +109,42 @@ const isMarkdownBlockStart = (value: string, lineStart: number, position: number
 
   return cursor === position;
 };
+
+const markdownContinuationPrefix = (value: string, lineStart: number, position: number): string => {
+  let cursor = lineStart;
+  let prefix = '';
+
+  while (cursor < position) {
+    const spacesStart = cursor;
+    cursor = spacesEnd(value, cursor, position, 3);
+    prefix += value.slice(spacesStart, cursor);
+    if (cursor === position) return prefix;
+
+    if (value[cursor] === '>') {
+      prefix += '>';
+      cursor += 1;
+      if (value[cursor] === ' ' || value[cursor] === '\t') {
+        prefix += ' ';
+        cursor += 1;
+      }
+      continue;
+    }
+
+    const markerEnd = listMarkerEnd(value, cursor, position);
+    if (markerEnd != null && markerEnd <= position) {
+      prefix += ' '.repeat(markerEnd - cursor);
+      cursor = markerEnd;
+      continue;
+    }
+
+    break;
+  }
+
+  return prefix;
+};
+
+const hasLineBreakAt = (value: string, index: number): boolean =>
+  value[index] === '\n' || (value[index] === '\r' && value[index + 1] === '\n');
 
 const markdownFenceAt = (value: string, lineStart: number): MarkdownFence | null => {
   const contentEnd = lineContentEnd(value, lineStart);
@@ -290,8 +337,8 @@ const slashRunLength = (value: string, start: number): number => {
  *
  * Only complete, matching pairs outside code spans/blocks are rewritten. Inline
  * `\\(...\\)` pairs are rewritten only when the user enables inline math. Each
- * rewritten delimiter remains two characters wide, so source offsets used by
- * later Markdown transforms stay valid.
+ * delimiter replacement remains two characters wide; multiline display pairs
+ * may also add Markdown line breaks around those replacements.
  */
 export const normalizeTexMathDelimiters = (value: string, inlineMathEnabled = false): string => {
   // Only an opening display or enabled inline delimiter can produce a
@@ -300,7 +347,7 @@ export const normalizeTexMathDelimiters = (value: string, inlineMathEnabled = fa
   // over the whole accumulated
   // answer on every delta, which is quadratic in the answer's length.
   if (!value.includes('\\[') && (!inlineMathEnabled || !value.includes('\\('))) return value;
-  const replacements: number[] = [];
+  const replacements: TextReplacement[] = [];
   let opening: TexMathDelimiter | null = null;
   let cursor = 0;
   let lineStart = 0;
@@ -378,12 +425,50 @@ export const normalizeTexMathDelimiters = (value: string, inlineMathEnabled = fa
     }
 
     const kind = inlineDelimiter ? 'inline' : 'display';
-    if (delimiterMarker === '[' && !isMarkdownBlockStart(value, lineStart, delimiterIndex)) {
-      cursor = delimiterIndex + 2;
-    } else if (delimiterMarker === '(' || delimiterMarker === '[') {
-      opening = { kind, index: delimiterIndex };
+    if (delimiterMarker === '(' || delimiterMarker === '[') {
+      opening = {
+        kind,
+        index: delimiterIndex,
+        lineStart,
+        blockStart:
+          delimiterMarker === '[' && isMarkdownBlockStart(value, lineStart, delimiterIndex),
+      };
     } else if ((delimiterMarker === ')' || delimiterMarker === ']') && opening?.kind === kind) {
-      replacements.push(opening.index, delimiterIndex);
+      if (kind === 'display' && !opening.blockStart && opening.lineStart !== lineStart) {
+        const openingPrefix = markdownContinuationPrefix(value, opening.lineStart, opening.index);
+        const closingPrefix = markdownContinuationPrefix(value, lineStart, delimiterIndex);
+        let openingStart = opening.index;
+        while (
+          openingStart > opening.lineStart &&
+          (value[openingStart - 1] === ' ' || value[openingStart - 1] === '\t')
+        ) {
+          openingStart -= 1;
+        }
+
+        if (openingStart > 0 && !hasLineBreakAt(value, openingStart - 1)) {
+          replacements.push({
+            start: openingStart,
+            end: opening.index + 2,
+            value: `\n${openingPrefix}$$`,
+          });
+        } else {
+          replacements.push({ start: opening.index, end: opening.index + 2, value: '$$' });
+        }
+
+        const afterDelimiter = delimiterIndex + 2;
+        if (afterDelimiter < value.length && !hasLineBreakAt(value, afterDelimiter)) {
+          replacements.push({
+            start: afterDelimiter,
+            end: afterDelimiter,
+            value: `\n${closingPrefix}`,
+          });
+        }
+      } else {
+        replacements.push({ start: opening.index, end: opening.index + 2, value: '$$' });
+      }
+
+      replacements.push({ start: delimiterIndex, end: delimiterIndex + 2, value: '$$' });
+
       opening = null;
     }
 
@@ -392,12 +477,17 @@ export const normalizeTexMathDelimiters = (value: string, inlineMathEnabled = fa
 
   if (replacements.length === 0) return value;
 
-  const normalized = value.split('');
-  replacements.forEach((index) => {
-    normalized[index] = '$';
-    normalized[index + 1] = '$';
-  });
-  return normalized.join('');
+  replacements.sort((left, right) => left.start - right.start || left.end - right.end);
+  let normalized = '';
+  let sourceIndex = 0;
+
+  for (const replacement of replacements) {
+    normalized += value.slice(sourceIndex, replacement.start);
+    normalized += replacement.value;
+    sourceIndex = replacement.end;
+  }
+
+  return normalized + value.slice(sourceIndex);
 };
 
 type MdastNode = {
