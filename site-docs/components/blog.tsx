@@ -1,3 +1,4 @@
+import { SiteAnchor } from '@site/components/site-anchor';
 import { getMDXComponents } from '@site/components/mdx';
 import { SiteFooter } from '@site/components/site-footer';
 import { SiteNav } from '@site/components/site-nav';
@@ -135,14 +136,14 @@ function authorItem(entry: BlogEntry, linked = true): ReactNode {
 
   const external = isExternalLink(entry.authorLink);
   return (
-    <a
+    <SiteAnchor
       href={entry.authorLink}
       key="author"
       rel={external ? 'noreferrer' : undefined}
       target={external ? '_blank' : undefined}
     >
       {entry.author}
-    </a>
+    </SiteAnchor>
   );
 }
 
@@ -190,7 +191,7 @@ function AdjacentLink({
   direction: 'previous' | 'next';
 }) {
   return (
-    <a
+    <SiteAnchor
       className={`blog-adjacent__link blog-adjacent__link--${direction}`}
       href={entry.url}
       rel={direction === 'previous' ? 'prev' : 'next'}
@@ -201,7 +202,7 @@ function AdjacentLink({
         {direction === 'next' ? <ArrowRightIcon /> : null}
       </span>
       <span className="blog-adjacent__title">{entry.title}</span>
-    </a>
+    </SiteAnchor>
   );
 }
 
@@ -219,7 +220,7 @@ export function BlogIndexPage({ entries, locale }: { entries: BlogEntry[]; local
         </header>
 
         {featured ? (
-          <a className="blog-lead" href={featured.url}>
+          <SiteAnchor className="blog-lead" href={featured.url}>
             <MetaLine className="blog-lead__date" items={[dateItem(featured, locale)]} />
             <div className="blog-lead__body">
               <h2 className="blog-lead__title">{featured.title}</h2>
@@ -242,7 +243,7 @@ export function BlogIndexPage({ entries, locale }: { entries: BlogEntry[]; local
                 <BlogCover className="blog-lead__cover" eager src={featured.image} />
               ) : null}
             </div>
-          </a>
+          </SiteAnchor>
         ) : (
           <section className="blog-empty">
             <h2>{text.emptyTitle}</h2>
@@ -256,7 +257,7 @@ export function BlogIndexPage({ entries, locale }: { entries: BlogEntry[]; local
             <ol className="blog-list">
               {rest.map((entry) => (
                 <li key={entry.url}>
-                  <a className="blog-row" href={entry.url}>
+                  <SiteAnchor className="blog-row" href={entry.url}>
                     <MetaLine className="blog-row__date" items={[dateItem(entry, locale)]} />
                     <div className="blog-row__body">
                       <h3 className="blog-row__title">{entry.title}</h3>
@@ -268,7 +269,7 @@ export function BlogIndexPage({ entries, locale }: { entries: BlogEntry[]; local
                         items={[tagItem(entry), readTimeItem(entry, locale)]}
                       />
                     </div>
-                  </a>
+                  </SiteAnchor>
                 </li>
               ))}
             </ol>
@@ -300,10 +301,10 @@ export function BlogPostPage({
         languageHref={locale === 'zh' ? `/blog/${entry.slug}` : `/zh/blog/${entry.slug}`}
       />
       <article className="blog-article">
-        <a className="blog-back" href={text.indexHref}>
+        <SiteAnchor className="blog-back" href={text.indexHref}>
           <ArrowLeftIcon />
           {text.back}
-        </a>
+        </SiteAnchor>
 
         <header className="blog-article-header">
           <MetaLine

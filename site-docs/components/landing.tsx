@@ -1,3 +1,4 @@
+import { SiteAnchor } from '@site/components/site-anchor';
 import type { CliSectionCopy } from './landing-cli-section';
 import type { LandingCtaCopy } from './landing-cta-section';
 import type { MobileDeepSectionCopy } from './landing-mobile-deep-section';
@@ -319,9 +320,9 @@ export function LandingPage({ locale }: { locale: LandingLocale }) {
 
   return (
     <div className="underwater-landing">
-      <a className="uw-skip-link" href="#main-content">
+      <SiteAnchor className="uw-skip-link" href="#main-content">
         {t.skipToContent}
-      </a>
+      </SiteAnchor>
 
       <SiteNav locale={locale} languageHref={locale === 'zh' ? '/home' : '/zh/home'} />
 

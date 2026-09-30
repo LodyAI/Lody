@@ -3,7 +3,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright-core';
-import { absoluteSiteUrl, collectSitePaths } from './site-paths.mjs';
+import { collectSitePaths } from './site-paths.mjs';
 import { createStaticHost } from './static-host.mjs';
 
 // Run against the real production build, never a dev server or synthetic page.
@@ -23,6 +23,8 @@ const results = [];
 const baselines = new Map();
 const pagePaths = collectSitePaths(packageRoot).filter((p) => !['/404', '/zh/404'].includes(p));
 const normalize = (p) => p.replace(/\/$/u, '') || '/';
+const directoryPath = (p) => (p === '/' ? '/' : `${normalize(p)}/`);
+const pagePathSet = new Set(pagePaths);
 const failures = [];
 
 async function run(name, action) {
@@ -65,6 +67,8 @@ function snapshot(page) {
     title: document.title,
     description: document.querySelector('meta[name=description]')?.content,
     canonical: document.querySelector('link[rel=canonical]')?.href,
+    ogUrl: document.querySelector('meta[property="og:url"]')?.content,
+    alternates: [...document.querySelectorAll('link[hreflang]')].map((el) => el.href),
     lang: document.documentElement.lang,
     headings: [...document.querySelectorAll('h1')].map((el) => el.textContent.trim()),
     paragraphs: [...document.querySelectorAll('main p, #nd-page p')]
@@ -118,14 +122,27 @@ async function scan() {
         const page = await context.newPage();
         for (let urlPath; (urlPath = queue.shift()) !== undefined;) {
           await run(`no-js ${urlPath}`, async () => {
-            const response = await page.goto(origin + urlPath);
+            const response = await page.goto(origin + directoryPath(urlPath));
             assert.equal(response.status(), 200);
             const data = await snapshot(page);
             assert.ok(data.title.trim().length > 0);
             assert.ok(data.description?.length > 5);
             const canonicalPath =
               urlPath === '/home' ? '/' : urlPath === '/zh/home' ? '/zh' : urlPath;
-            assert.equal(data.canonical, absoluteSiteUrl(canonicalPath));
+            assert.equal(data.canonical, `https://lody.ai${directoryPath(canonicalPath)}`);
+            assert.equal(data.ogUrl, data.canonical);
+            for (const alternate of data.alternates) {
+              const url = new URL(alternate);
+              assert.equal(
+                url.pathname,
+                directoryPath(url.pathname),
+                `Redirecting alternate: ${alternate}`
+              );
+              assert.ok(
+                pagePathSet.has(normalize(url.pathname)),
+                `Unknown alternate: ${alternate}`
+              );
+            }
             assert.equal(data.lang, urlPath.startsWith('/zh') ? 'zh-CN' : 'en');
             assert.ok(data.headings.length > 0);
             assert.ok(await page.locator('h1').first().isVisible());
@@ -136,13 +153,21 @@ async function scan() {
             assert.ok(!data.text.includes('Something went wrong!'));
             assert.ok(data.links.length > 0);
             for (const href of data.links) {
-              const url = new URL(href, origin + urlPath);
+              const url = new URL(href, page.url());
               // Hosted app/auth and third-party destinations are outside this static build.
               if (
                 [origin, 'https://lody.ai'].includes(url.origin) &&
                 !/^\/(app|login)(\/|$)/u.test(url.pathname)
-              )
+              ) {
+                if (pagePathSet.has(normalize(url.pathname))) {
+                  assert.equal(
+                    url.pathname,
+                    directoryPath(url.pathname),
+                    `Redirecting link: ${href}`
+                  );
+                }
                 targets.add(url.pathname);
+              }
             }
             baselines.set(urlPath, data);
             return { title: data.title, textLength: data.text.length };
@@ -154,7 +179,7 @@ async function scan() {
     await run('all internal static link targets', async () => {
       const broken = [];
       for (const target of targets) {
-        const response = await fetch(origin + target);
+        const response = await fetch(origin + target, { redirect: 'manual' });
         if (response.status !== 200) broken.push({ target, status: response.status });
         await response.body?.cancel();
       }
@@ -305,6 +330,7 @@ async function clickTo(page, link, destination) {
     return canonical && (new URL(canonical).pathname.replace(/\/$/u, '') || '/') === expected;
   }, expectedCanonical);
   assert.ok(await page.locator('h1').first().isVisible());
+  assert.equal(new URL(page.url()).pathname, directoryPath(destination));
   assert.equal(
     new URL((await snapshot(page)).canonical).pathname.replace(/\/$/u, '') || '/',
     destination.replace(/\/home$/u, '') || '/'
@@ -326,10 +352,10 @@ async function navigation() {
               name: mobile ? 'Primary mobile' : 'Primary',
               exact: true,
             });
-            await clickTo(page, nav.locator(`a[href="${prefix}/docs"]`), `${prefix}/docs`);
+            await clickTo(page, nav.locator(`a[href="${prefix}/docs/"]`), `${prefix}/docs`);
             await clickTo(
               page,
-              page.locator(`#nd-page a[href="${prefix}/docs/session-handoff"]`).first(),
+              page.locator(`#nd-page a[href="${prefix}/docs/session-handoff/"]`).first(),
               `${prefix}/docs/session-handoff`
             );
             await page.goto(origin + prefix + '/blog');
@@ -373,7 +399,7 @@ async function navigation() {
           page,
           page
             .getByRole('navigation', { name: 'Primary mobile' })
-            .locator(`a[href="${prefix}/blog"]`),
+            .locator(`a[href="${prefix}/blog/"]`),
           `${prefix}/blog`
         );
       });
@@ -404,7 +430,7 @@ async function navigation() {
           page,
           page
             .getByRole('navigation', { name: 'Primary mobile' })
-            .locator(`a[href="${prefix}/docs"]`),
+            .locator(`a[href="${prefix}/docs/"]`),
           `${prefix}/docs`
         );
       });

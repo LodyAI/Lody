@@ -10,6 +10,9 @@ Root `AGENTS.md` and `site-docs/AGENTS.md` also apply.
   types, formatting, and pure normalization helpers only.
 - `source.ts` exposes generated docs content for server-only loaders. Do not import it
   from route components, shared page components, or browser-safe code.
+- `site-url.mjs` owns canonical page URL normalization for metadata, generators,
+  and navigation. Known page slugs may contain dots; never infer file semantics
+  for a URL already identified as a page.
 - `metadata.ts` creates canonical, alternate/hreflang, Open Graph, Twitter, robots, and
   article metadata records for TanStack `head()`.
 - `docs-faq.ts` emits FAQPage JSON-LD through `pageHead`.

@@ -1,5 +1,7 @@
 'use client';
 
+import { SiteAnchor } from '@site/components/site-anchor';
+
 /**
  * Landing — one agent runs the others.
  * Scannable claim + short use cases + a simple fan-out visual (no MCP diagram, no CLI).
@@ -31,7 +33,7 @@ export function LandingOrchestrationSection({ copy }: { copy: OrchestrationSecti
               <p className="uw-orch__body">{copy.body}</p>
               {copy.docsLink ? (
                 <p className="uw-section-docs">
-                  <a href={copy.docsLink.href}>{copy.docsLink.label}</a>
+                  <SiteAnchor href={copy.docsLink.href}>{copy.docsLink.label}</SiteAnchor>
                 </p>
               ) : null}
             </header>

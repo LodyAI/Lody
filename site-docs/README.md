@@ -59,6 +59,14 @@ Chromium. There is no second legacy site tree.
 The dev server runs on port 3002. Use
 `pnpm --filter @lody/site-docs preview:static` to emulate the static host.
 
+## Canonical page URLs
+
+`lib/site-url.mjs` is shared by metadata, sitemap generation, and rendered links.
+Known pages always use directory URLs, including dotted changelog versions.
+`SiteAnchor` and the Fumadocs link adapter apply the same policy to navigation;
+TanStack Router retains the trailing slash after hydration. Files, downloads,
+app routes, and external destinations keep their own URL semantics.
+
 ## Static content and client startup
 
 Every published URL is prerendered. `src/client.tsx` prepares the current router

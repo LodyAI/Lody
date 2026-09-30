@@ -1,5 +1,7 @@
 'use client';
 
+import { SiteAnchor } from '@site/components/site-anchor';
+
 /**
  * Hero primary CTA: same platform-aware download as the closing CTA.
  */
@@ -52,7 +54,7 @@ export function LandingHeroDownload({ copy }: { copy: LandingHeroDownloadCopy })
   return (
     <div className="underwater-hero__cta-wrap">
       <div className="underwater-hero__cta">
-        <a
+        <SiteAnchor
           className="underwater-btn underwater-btn--primary"
           href={primary.href}
           {...(primary.external
@@ -62,32 +64,32 @@ export function LandingHeroDownload({ copy }: { copy: LandingHeroDownloadCopy })
               : {})}
         >
           {primary.label}
-        </a>
-        <a
+        </SiteAnchor>
+        <SiteAnchor
           className="underwater-btn underwater-btn--ghost"
           href={copy.secondaryHref}
           {...(copy.secondaryExternal ? { target: '_blank', rel: 'noreferrer' } : {})}
         >
           <GithubMark className="underwater-btn__icon" />
           {copy.secondary}
-        </a>
+        </SiteAnchor>
       </div>
       <div className="underwater-hero__cta-links">
-        <a className="underwater-hero__more" href={copy.otherDownloadsHref}>
+        <SiteAnchor className="underwater-hero__more" href={copy.otherDownloadsHref}>
           {copy.otherDownloads}
-        </a>
+        </SiteAnchor>
         {copy.showIntelMac !== false && platform === 'mac-arm' ? (
           <>
             <span className="underwater-hero__link-dot" aria-hidden="true">
               ·
             </span>
-            <a
+            <SiteAnchor
               className="underwater-hero__more"
               href={`${DOWNLOAD_BASE}/Lody-latest-x64.dmg`}
               download
             >
               {copy.labels.macIntel}
-            </a>
+            </SiteAnchor>
           </>
         ) : null}
       </div>
