@@ -211,6 +211,7 @@
     "@jridgewell/trace-mapping": "0.3.31",
     "@lody/configs": "workspace:*",
     "@lody/e2ee-client": "workspace:*",
+    "@modelcontextprotocol/ext-apps": "2.0.0",
     "@playwright/test": "^1.58.2",
     "@storybook/react": "^10.6.2",
     "@storybook/react-vite": "^10.6.2",

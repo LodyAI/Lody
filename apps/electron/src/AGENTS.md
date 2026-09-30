@@ -126,3 +126,4 @@ native-dependency, and OSS-composition rules stay in `apps/electron/AGENTS.md`.
   `lody-html-preview://` origin. Scripts run only when the user allowed them. Preview frames
   cannot navigate off that scheme and receive no permissions. It never
   serves dot-files or paths outside the authorized folder, including through symlinks, and its tokens share the resource owner's lifetime.
+- `lody-mcp-app:` frames must never get `allow-same-origin` (`mcp-app-sandbox.ts`).

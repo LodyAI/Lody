@@ -208,6 +208,8 @@ import { SubagentTaskPanel, collectSubagentTasks, type SubagentTask } from './su
 import { isRunning as isSubagentTaskRunning } from './subagent-task-state';
 import { SubagentRunMessageList } from './subagent-run-history';
 import { styles as subagentHistoryStyles } from './subagent-run-history.stylex';
+import { getRenderableMcpApp } from './mcp-app/mcp-app-host';
+import { McpAppToolCallCard } from './mcp-app/mcp-app-tool-call-card';
 import { SessionReadonlyContext } from './session-readonly-context';
 import { PendingImageMarkupDialog } from '../sessions/pending-image-markup-dialog';
 import type { DocumentSelection } from '@/lib/document-selection';
@@ -9522,6 +9524,8 @@ const ToolCallCard = memo(function ToolCallCard({
       </div>
     );
   }
+  const mcpApp = getRenderableMcpApp(toolCall);
+  if (mcpApp) return <McpAppToolCallCard toolCall={toolCall} app={mcpApp} />;
   const kindMeta = toolCall.kind ? TOOL_KIND_META[toolCall.kind] : undefined;
   const isActivityRow = inlineOutput;
 
