@@ -16,14 +16,16 @@ this page is the full text of the rules summarised there.
   root drag strip) are gated on `!useElectronFullscreen()` — the main process
   pushes `lody:window-fullscreen-changed` and the lights auto-hide in native
   fullscreen, so no inset is reserved there. The traffic-light CENTERLINE is
-  y=23px (`trafficLightPosition {x:14, y:16}` in `apps/electron/src/main/window.ts`
+  y=23px (`trafficLightPosition {x:16, y:16}` in `apps/electron/src/main/window.ts`
   - 7px button radius); every h-7 chrome button beside the lights centers on it
     (sidebar header's `pt-[2px]` in `loro-sidebar.tsx`, landing expand `top-[9px]`
     in `web-chat-landing-screen.tsx`) — re-derive those offsets if the Electron
-    position or the 44px top row changes. The macOS `x=14`
-    places the first light's optical centre over the sidebar's +15px icon column;
+    position or the 44px top row changes. The equal macOS `x=16, y=16` frame
+    insets place the first light's optical centre at x=23, over the sidebar icons'
+    +23px centreline; their 16px boxes start at +15px. The sidebar's navigation,
+    project and repository icons share that line, while
     navigation, project, repository and flat session labels share a +37px text
-    column (see the [alignment decision](../notes/implemented/bug-fix/2026-09-29-macos-sidebar-traffic-light-column.md)).
+    column (see the [baseline correction](../notes/implemented/bug-fix/2026-09-30-macos-traffic-light-baseline.md)).
     On Windows the native title bar is
     hidden (`titleBarStyle: 'hidden'` + theme-tinted `titleBarOverlay`, see
     `apps/electron/src/main/window-theme.ts`): the OS draws the caption buttons
