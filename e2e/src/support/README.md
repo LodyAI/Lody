@@ -19,6 +19,7 @@
 | `pages/context-copy-page.ts`                         | User/assistant prefixes, user-driven stream transitions, and isolation     |
 | `pages/mcp-catalog-editing-page.ts`                  | MCP catalog editing, state toggles, reopen checks, and deletion            |
 | `pages/mcp-catalog-page.ts`                          | MCP settings, Turn selection, ACP startup, and cleanup                     |
+| `pages/mcp-app-page.ts`                              | MCP App card, sandboxed frame, and app tool-call evidence                  |
 | `pages/project-lifecycle-page.ts`                    | Local project picker, sidebar, catalog, and removal lifecycle              |
 | `pages/project-reopen-page.ts`                       | Two-project switching and duplicate catalog identity checks                |
 | `pages/session-queue-page.ts`                        | Queued follow-up removal and ordered ACP dispatch evidence                 |
@@ -40,6 +41,8 @@
 | `fixtures/context-copy-scripted-acp.mjs`             | Deterministic completed and user-cancelled context-copy turns              |
 | `fixtures/mcp-catalog-editing-fixture.ts`            | Synthetic editable MCP catalog values                                      |
 | `fixtures/mcp-catalog-fixture.ts`                    | ACP and stdio MCP process evidence                                         |
+| `fixtures/mcp-app-fixture.ts`                        | MCP App ACP event log and wire evidence                                    |
+| `fixtures/mcp-app-scripted-acp.mjs`                  | MCP App-capable ACP serving a synthetic app and tools                      |
 | `fixtures/project-reopen-fixture.ts`                 | Two isolated Git repositories for duplicate and switching checks           |
 | `fixtures/session-management-fixture.ts`             | UI-created Session identity and deterministic ACP command                  |
 | `fixtures/load-session-fixture.ts`                   | Bounded large-message load profile and persisted-session seed              |

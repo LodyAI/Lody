@@ -1501,6 +1501,62 @@
       "scoutJourneys": ["session"],
       "blockedReason": null,
       "estimatedMinutes": 7
+    },
+    {
+      "id": "LODY-MCPAPP-001",
+      "state": "active",
+      "priority": "P1",
+      "runtime": "simulator",
+      "title": "Open an MCP App card and round-trip an app-initiated tool call",
+      "owner": "mcp-app-host",
+      "feature": "src/features/mcp-app.feature",
+      "fixture": "mcp-app-scripted-acp",
+      "fingerprint": "2b5a2bc734417f0a2e258c61a4cf3e642223998d0bfa1906af62e39b9e831d6d",
+      "ownerPaths": [
+        "packages/components/src/components/ai-gui/mcp-app/",
+        "apps/electron/src/main/services/",
+        "apps/cli/src/lib/",
+        "packages/shared/src/acp/"
+      ],
+      "actions": [
+        {
+          "id": "settings.createMcpAppCapableAgent"
+        },
+        {
+          "id": "session.sendMcpAppToolPrompt"
+        },
+        {
+          "id": "mcpApp.callAppVisibleTool"
+        },
+        {
+          "id": "desktop.reloadMainWindow"
+        }
+      ],
+      "checkpoints": [
+        "initialize advertises client mcpApps version 1 and the tool call renders an Opened Synthetic Board card",
+        "the credentialless frame loads lody-mcp-app://sandbox/, is sandboxed to allow-scripts only, and shows the loaded tool result in inline mode",
+        "the app runs in the opaque null origin and can write and read localStorage, sessionStorage, and document.cookie",
+        "one app-initiated add_card call reaches the ACP extension method and its result updates the frame",
+        "after a main window reload the app starts with empty localStorage, and its earlier values never reach the Electron user-data directory while a renderer control value does"
+      ],
+      "cleanup": ["owned ACP process exits with the isolated desktop"],
+      "coverage": {
+        "renderer": "MCP App card, sandboxed frame, and postMessage bridge",
+        "electronIpc": "Real window, app protocol, and Session RPC",
+        "bundledCli": "MCP App load, resource, and tool-call proxy",
+        "durableState": "Tool-call MCP App descriptor in history",
+        "externalWire": "MCP App-capable scripted ACP"
+      },
+      "signals": {
+        "criticality": 3,
+        "boundaryRisk": 5,
+        "changeFrequency": 4,
+        "escapedDefect": false
+      },
+      "freshness": 5,
+      "scoutJourneys": [],
+      "blockedReason": null,
+      "estimatedMinutes": 3
     }
   ]
 }
