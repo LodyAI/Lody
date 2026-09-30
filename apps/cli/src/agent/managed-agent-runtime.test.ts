@@ -48,6 +48,7 @@ describe('host runtime capabilities', () => {
     (node, platform, arch, expected) => {
       const capabilities = getHostMachineProtocolCapabilities(node, platform, arch);
       expect(capabilities.builtinPi).toBe(expected);
+      expect(capabilities.piExtensions).toBe(expected);
       expect(capabilities.providerSetup).toBe(1);
     }
   );

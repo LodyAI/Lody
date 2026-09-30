@@ -50,9 +50,9 @@ for the contract. No new executor, profile copy or plugin sandbox is introduced.
 Correction (2026-09-30): the published `0.2.0-lody.5cbd610f8476` artifact ships both Windows modules and
 declares `lody.piExtensionsProtocolVersion: 1`, but its committed manifest dropped
 the field, so the daemon never advertised `piExtensions` and the settings section
-stayed disabled. The manifest now carries the field; the exhaustive
-machine-registration test requires `piExtensions` wherever `builtinPi` is advertised,
-so a runtime bump that drops it again fails CI.
+stayed disabled. The manifest now carries the field; the fixed-host capability test
+requires `piExtensions` wherever `builtinPi` is advertised, so a runtime bump that
+drops it again fails on every test host.
 
 ## History import follow-up (2026-09-25)
 
