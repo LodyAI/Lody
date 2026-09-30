@@ -10,6 +10,7 @@
 | `desktop-windows.steps.ts`           | Verifies auxiliary Workspace connection and persistent cache namespace isolation                 |
 | `mcp-catalog-editing.steps.ts`       | Exercises MCP catalog edits, enabled-state persistence, and deletion                             |
 | `mcp-catalog.steps.ts`               | Carries an explicit MCP selection through catalog, composer, and dispatch                        |
+| `mcp-app.steps.ts`                   | Opens an MCP App card and drives an app-initiated tool call round trip                           |
 | `project-lifecycle.steps.ts`         | Adds, selects, removes, and verifies a synthetic local project                                   |
 | `project-reopen.steps.ts`            | Switches between two projects and rejects a duplicate folder registration                        |
 | `session-follow-up.steps.ts`         | Sends follow-ups after completed Turns and proves ordered single dispatch                        |
