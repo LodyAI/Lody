@@ -16,24 +16,33 @@ import { clearPreferredWorkspaceSlug } from './workspace';
 type BetterAuthClientOptions = NonNullable<Parameters<typeof createAuthClient>[0]>;
 type BetterAuthClientPlugin = NonNullable<BetterAuthClientOptions['plugins']>[number];
 
-type CreateLodyAuthClientOptions = {
-  additionalPlugins?: BetterAuthClientPlugin[];
+type CreateLodyAuthClientOptions<Plugins extends BetterAuthClientPlugin[]> = {
+  additionalPlugins?: Plugins;
   disableDefaultFetchPlugins?: boolean;
 };
 
-export const createLodyAuthClient = (options: CreateLodyAuthClientOptions = {}) => {
+export const createLodyAuthClient = <const Plugins extends BetterAuthClientPlugin[] = []>(
+  options: CreateLodyAuthClientOptions<Plugins> = {}
+) => {
   const additionalPlugins = options.additionalPlugins ?? [];
 
   const client = createAuthClient({
     baseURL: import.meta.env.VITE_CONVEX_SITE_URL,
-    plugins: [organizationClient(), convexClient(), crossDomainClient(), ...additionalPlugins],
+    plugins: [
+      organizationClient(),
+      convexClient(),
+      crossDomainClient(),
+      ...additionalPlugins,
+    ] as const,
     disableDefaultFetchPlugins: options.disableDefaultFetchPlugins || false,
   });
-  registerAuthClient(client);
+  // The singleton needs only the base client. Better Auth cannot reduce its
+  // conditional plugin types until the caller supplies the concrete extra plugins.
+  registerAuthClient(client as unknown as LodyAuthClient);
   return client;
 };
 
-export type LodyAuthClient = ReturnType<typeof createLodyAuthClient>;
+export type LodyAuthClient = ReturnType<typeof createLodyAuthClient<[]>>;
 
 const AUTH_SESSION_INTENT_GENERATIONS = new WeakMap<object, number>();
 
