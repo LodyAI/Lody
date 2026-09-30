@@ -5,6 +5,8 @@ Translation: current
 
 [中文](2026-09-30-model-search-trigger-anchor.zh.md)
 
+PR: [#1169](https://github.com/LodyAI/Lody/pull/1169)
+
 ## Abstract
 
 Attempts to prevent model-search movement first retained unfiltered height,

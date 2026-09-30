@@ -5,6 +5,8 @@ Translation: current
 
 [English](2026-09-30-composer-cascading-submenu-placement.md)
 
+PR: [#1169](https://github.com/LodyAI/Lody/pull/1169)
+
 ## 摘要
 
 Composer 子菜单相对整个主菜单居中，使其与触发行分离。现在所有桌面运行配置子菜单

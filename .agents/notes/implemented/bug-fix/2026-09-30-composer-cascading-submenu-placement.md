@@ -5,6 +5,8 @@ Translation: current
 
 [中文](2026-09-30-composer-cascading-submenu-placement.zh.md)
 
+PR: [#1169](https://github.com/LodyAI/Lody/pull/1169)
+
 ## Abstract
 
 Centering composer submenus against the whole parent menu separated them from

@@ -5,6 +5,8 @@ Translation: current
 
 [English](2026-09-30-model-search-trigger-anchor.md)
 
+PR: [#1169](https://github.com/LodyAI/Lody/pull/1169)
+
 ## 摘要
 
 为避免模型搜索框移动，首次尝试保留未过滤高度，留下空白；随后保留屏幕位置，
