@@ -30,6 +30,8 @@ export type PlatformRunner = ProcessRunner;
 
 export interface PlatformFacadeOptions {
   readonly logger?: LodyLogger;
+  /** Owner label the process layer's log lines start with, e.g. `[session-id]`. */
+  readonly logPrefix?: string;
   readonly nodeProcess?: NodeProcessApi;
 }
 
@@ -40,7 +42,7 @@ export const toShared = (
   options: PlatformFacadeOptions = {}
 ): processLayer.ProcessFacadeOptions => ({
   nodeProcess: options.nodeProcess,
-  loggerLayer: lodyLoggerLayer(options.logger ?? getLogger()),
+  loggerLayer: lodyLoggerLayer(options.logger ?? getLogger(), options.logPrefix),
 });
 
 export const platformLayer = (options: PlatformFacadeOptions): Layer.Layer<NodeProcess> =>

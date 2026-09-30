@@ -18,13 +18,13 @@ export const LOG_PREFIX_ANNOTATION = 'lody.logPrefix';
  * own level and file-sink policy; filtering here too would silently drop debug
  * diagnostics the daemon file log is required to keep.
  */
-export const lodyLoggerLayer = (logger: LodyLogger): Layer.Layer<never> =>
+export const lodyLoggerLayer = (logger: LodyLogger, defaultPrefix?: string): Layer.Layer<never> =>
   Layer.merge(
     Logger.replace(
       Logger.defaultLogger,
       Logger.make(({ logLevel, message, cause, annotations }) => {
         const prefix = Option.match(HashMap.get(annotations, LOG_PREFIX_ANNOTATION), {
-          onNone: () => '',
+          onNone: () => (defaultPrefix === undefined ? '' : `${defaultPrefix} `),
           onSome: (value) => `${String(value)} `,
         });
         const body = Cause.isEmpty(cause)

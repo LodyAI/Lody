@@ -5,7 +5,8 @@ import {
   childProcessTree,
   hasExited,
   makeProcessRunner,
-  terminateTree,
+  terminateChildTree,
+  type ProcessFacadeOptions,
   type ProcessRunner,
 } from '@lody/shared/node/process';
 import { buildRetryDelay, FailureWindow, isAlreadyRunningOutcome } from './retry.js';
@@ -86,6 +87,7 @@ export class CliSupervisor {
   private readonly failureWindow: FailureWindow;
   private readonly oomFailureWindow: FailureWindow;
   private readonly runProcess: ProcessRunner;
+  private readonly processOptions: ProcessFacadeOptions;
 
   private desiredState: 'running' | 'stopped' = 'stopped';
   private probeOnly = false;
@@ -143,7 +145,8 @@ export class CliSupervisor {
       options.fatalOomWindowMs ?? DEFAULT_FATAL_OOM_WINDOW_MS,
       options.fatalOomThreshold ?? DEFAULT_FATAL_OOM_THRESHOLD
     );
-    this.runProcess = makeProcessRunner(options.processOptions ?? {});
+    this.processOptions = options.processOptions ?? {};
+    this.runProcess = makeProcessRunner(this.processOptions);
   }
 
   getState(): SupervisorState {
@@ -675,11 +678,14 @@ export class CliSupervisor {
    */
   private async forceKill(run: ActiveRun): Promise<string | null> {
     try {
-      await this.runProcess(
-        Effect.flatMap(
-          childProcessTree(run.handle.child, { processGroup: run.handle.processGroup ?? false }),
-          (tree) => terminateTree(tree, { graceMs: 0, killWaitMs: this.forceKillWaitMs })
-        )
+      await terminateChildTree(
+        run.handle.child,
+        {
+          graceMs: 0,
+          killWaitMs: this.forceKillWaitMs,
+          processGroup: run.handle.processGroup ?? false,
+        },
+        this.processOptions
       );
       return null;
     } catch (error) {

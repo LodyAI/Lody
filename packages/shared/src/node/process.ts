@@ -390,6 +390,9 @@ export const windowsTree = (
     isAlive: Effect.sync(() => !hasExited(root)),
     signal: (signal) =>
       Effect.gen(function* () {
+        // Once the root has exited its pid may already name an unrelated
+        // process, and `taskkill /T` would end that process's tree.
+        if (hasExited(root)) return 'gone' as const;
         const force = signal === 'SIGKILL';
         const code = yield* runTaskkill(np, [
           '/PID',
@@ -621,6 +624,13 @@ export const DEFAULT_MAX_OUTPUT_BYTES = 1024 * 1024;
  */
 const ABANDONED_COMMAND_POLICY: TerminationPolicy = { graceMs: 2_000, killWaitMs: 2_000 };
 
+/**
+ * For a read-only probe with a tight budget (memory pressure, process table,
+ * login shell): it holds no lock worth a grace period, and its caller should
+ * not wait seconds past its own timeout for one.
+ */
+export const READ_ONLY_ABANDON_POLICY: TerminationPolicy = { graceMs: 0, killWaitMs: 1_000 };
+
 export interface CommandSpec {
   readonly command: string;
   readonly args: readonly string[];
@@ -634,6 +644,12 @@ export interface CommandSpec {
   readonly maxOutputBytes?: number;
   /** Runs right after the OS call, for a caller that must record the pid. */
   readonly onSpawned?: (child: ChildProcess) => void;
+  /**
+   * How the tree ends when the caller stops waiting. The default gives SIGTERM
+   * a grace period (git removes its index.lock); a read-only probe may pass
+   * `READ_ONLY_ABANDON_POLICY` so its timeout is not stretched by seconds.
+   */
+  readonly abandonPolicy?: TerminationPolicy;
 }
 
 export interface CommandOutput extends ProcessExit {
@@ -732,7 +748,7 @@ export const runCommand = (
           Exit.isSuccess(exit)
             ? Effect.void
             : process
-                .terminate(ABANDONED_COMMAND_POLICY)
+                .terminate(spec.abandonPolicy ?? ABANDONED_COMMAND_POLICY)
                 .pipe(
                   Effect.catchAll((error) =>
                     Effect.logWarning(
@@ -904,20 +920,14 @@ const runSyncSquashed = <A, E>(effect: Effect.Effect<A, E>): A => {
   throw Cause.squash(exit.cause);
 };
 
-const unwrapSpawnFailure = (error: unknown): unknown =>
+/** The raw OS error behind a `SpawnFailed` (ENOENT, EACCES), which callers classify. */
+export const unwrapSpawnFailure = (error: unknown): unknown =>
   error instanceof SpawnFailed && error.cause instanceof Error ? error.cause : error;
 
 export const makeProcessRunner = (options: ProcessFacadeOptions): ProcessRunner => {
   const layer = processLayer(options);
   return (effect) => runPromiseSquashed(Effect.provide(effect, layer));
 };
-
-/** Facade options that swap only the spawn function, for callers with a spawn test seam. */
-export const withSpawn = (
-  spawnImpl: NodeProcessApi['spawn'] | undefined,
-  options: Omit<ProcessFacadeOptions, 'nodeProcess'> = {}
-): ProcessFacadeOptions =>
-  spawnImpl ? { ...options, nodeProcess: { ...nodeProcessLive, spawn: spawnImpl } } : options;
 
 export interface CommandText {
   readonly code: number | null;

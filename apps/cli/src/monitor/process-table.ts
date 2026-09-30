@@ -1,6 +1,7 @@
 import os from 'os';
 import { z } from 'zod';
 import { CommandOutputTooLarge, CommandTimedOut } from '@lody/shared/node/process';
+import { READ_ONLY_ABANDON_POLICY } from '@lody/shared/node/process';
 import { runCommandText } from '@/platform/promise-facade';
 
 const PROCESS_TABLE_TIMEOUT_MS = 2_000;
@@ -187,6 +188,7 @@ async function runProbe(command: string, args: string[], env: NodeJS.ProcessEnv)
       args,
       env,
       timeout: PROCESS_TABLE_TIMEOUT_MS,
+      abandonPolicy: READ_ONLY_ABANDON_POLICY,
       maxOutputBytes: MAX_PROCESS_TABLE_BYTES,
       check: 'none',
     });

@@ -10,14 +10,11 @@ import {
 } from '@agentclientprotocol/sdk';
 import { v4 as uuidV4 } from 'uuid';
 import { z } from 'zod';
-import { Effect } from 'effect';
 
 import type { Logger } from '@/utils/logger';
 import { formatErrorMessage } from '@/utils/format-error';
-import { LOG_PREFIX_ANNOTATION } from '@/platform/logger';
-import { makePlatformRunner, startProcess, withSpawn } from '@/platform/promise-facade';
+import { startProcess, terminateChildTree, withSpawn } from '@/platform/promise-facade';
 import type { NodeProcessApi } from '@lody/shared/node/process';
-import { childProcessTree, terminateTree } from '@lody/shared/node/process';
 import type { TerminalManager } from '@/session/terminal-manager';
 import {
   AgentClient,
@@ -189,15 +186,18 @@ export async function terminateAcpProcessTree(
     nodeProcess?: NodeProcessApi;
   }
 ): Promise<void> {
-  const run = makePlatformRunner({ logger: options.logger, nodeProcess: options.nodeProcess });
-  const policy = {
-    graceMs: options.force ? 0 : options.exitTimeoutMs,
-    killWaitMs: options.exitTimeoutMs,
-  };
-  await run(
-    Effect.flatMap(childProcessTree(child, { processGroup: true }), (tree) =>
-      terminateTree(tree, policy)
-    ).pipe(Effect.annotateLogs(LOG_PREFIX_ANNOTATION, `[${options.sessionLabel}]`))
+  await terminateChildTree(
+    child,
+    {
+      graceMs: options.force ? 0 : options.exitTimeoutMs,
+      killWaitMs: options.exitTimeoutMs,
+      processGroup: true,
+    },
+    {
+      logger: options.logger,
+      logPrefix: `[${options.sessionLabel}]`,
+      nodeProcess: options.nodeProcess,
+    }
   );
 }
 

@@ -14,7 +14,7 @@ import {
 import { signalChildTreeNow, SpawnFailed, TerminationFailed } from '../src/node/process';
 import { spawnProcess, spawnScoped, type SpawnSpec } from '../src/node/process';
 import { NodeProcess, NodeProcessLive } from '../src/node/process';
-import { resolveWindowsCommand, TREE_POLL_INTERVAL } from '../src/node/process';
+import { READ_ONLY_ABANDON_POLICY, resolveWindowsCommand, TREE_POLL_INTERVAL } from '../src/node/process';
 import { FakeProcessTable } from '../src/node/process-testing';
 
 const GRACEFUL = { graceMs: 5_000, killWaitMs: 5_000 };
@@ -211,6 +211,18 @@ describe('process tree termination (Windows)', () => {
     }).pipe(Effect.provideService(NodeProcess, table.api));
   });
 
+  // Windows reuses pids quickly; an exit handler must not taskkill whatever
+  // process now holds the exited child's pid.
+  it('never runs taskkill for a root that has already exited', () => {
+    const table = new FakeProcessTable('win32');
+    const child = table.api.spawn('cli', [], {});
+    table.exitOnItsOwn(child.pid ?? -1);
+
+    signalChildTreeNow(child, 'SIGKILL', { processGroup: false }, { nodeProcess: table.api });
+
+    expect(table.spawned.filter((call) => call.command === 'taskkill')).toEqual([]);
+  });
+
   it.effect('leaves POSIX detachment to the process group', () => {
     const table = new FakeProcessTable('linux');
     return Effect.gen(function* () {
@@ -366,6 +378,27 @@ describe('runCommand', () => {
       expect(table.isAlive(pid)).toBe(false);
       // SIGTERM first: a git killed outright leaves its index.lock behind.
       expect(table.delivered).toEqual([{ target: -pid, signal: 'SIGTERM' }]);
+    }).pipe(Effect.provideService(NodeProcess, table.api));
+  });
+
+  // A read-only probe's caller should not wait out a grace period it has no use for.
+  it.effect('skips the SIGTERM grace under a read-only abandon policy', () => {
+    const table = new FakeProcessTable('linux');
+    table.queueSpawn({ ignores: ['SIGTERM'] });
+    return Effect.gen(function* () {
+      const command = yield* Effect.fork(
+        runCommand({
+          command: 'sysctl',
+          args: [],
+          timeout: '1 second',
+          abandonPolicy: READ_ONLY_ABANDON_POLICY,
+        })
+      );
+      yield* TestClock.adjust('1 second');
+      const failure = failureOf(yield* Fiber.await(command));
+
+      expect(failure).toBeInstanceOf(CommandTimedOut);
+      expect(table.delivered.map((delivery) => delivery.signal)).toEqual(['SIGKILL']);
     }).pipe(Effect.provideService(NodeProcess, table.api));
   });
 

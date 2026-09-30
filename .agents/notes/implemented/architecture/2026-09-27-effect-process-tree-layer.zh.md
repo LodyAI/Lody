@@ -186,6 +186,19 @@ CLI 时按 Ctrl-C 不再能传到这些命令；打开 `/dev/tty` 的提示（�
   `.kill(`，并且也扫描 `packages/code-review-helper/src`。用一个包含每种写法的探针文件验证过：每种都会被报告，
   而类型导入、`np.kill` 和非导入位置的字符串不会。
 
+对这部分工作的二次审查又发现以下问题，均在同一个 PR 中修复：
+- **探测输出丢失。** macOS 的 `/bin/sh` 会把 `echo -n` 原样打印，分隔符后的第一个变量因此损坏，所以分隔符改用 `printf` 输出。
+  探测为自身设置的 oh-my-zsh 与 tmux 防护变量不再泄漏到返回的环境中。
+- **桌面端探测失败的结果重新缓存。** 15 秒已足以覆盖冷登录较慢的情况，重试反而会拖慢每一次 CLI 启动。
+- **预备阶段的清理在进程树残留时不再 reject**，冷启动回退仍会执行。这一项没有测试：真实的预备运行时没有测试入口。
+- **已完成的 `Session.terminate` 不再复用。** 后来的 agent 留在 sandbox 里的进程也会被结束，失败的尝试会重试。
+- **`windowsTree.signal` 对已退出的根进程不做任何操作。** 它的 pid 可能已经属于别的进程。
+- **只读探测**（内存压力、进程表、登录 shell）使用 `READ_ONLY_ABANDON_POLICY`：到期直接 SIGKILL，不加 SIGTERM 宽限，
+  免得撑长它们本就很紧的时间预算。可能持有锁的命令保留默认宽限。这是有意的取舍：调用方收到超时时，进程树已确认结束，
+  立即重试不会与尚未退出的 git 竞争。
+- **去除重复。** ACP 与 supervisor 的强制结束改用 `terminateChildTree`；CLI 门面新增 `logPrefix` 以保留 ACP 标签。
+  会话 sandbox 复用 `unwrapSpawnFailure`，删除未被使用的共享版 `withSpawn`。
+
 有意不迁的：
 - 为独立进程生成的脚本（已在白名单中）；
 - node-pty：唯一的 PTY 启动方式，它的进程组经由这一层结束；

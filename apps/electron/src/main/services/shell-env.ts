@@ -25,17 +25,13 @@ async function loadUserShellEnv(): Promise<NodeJS.ProcessEnv | null> {
 /**
  * Resolve (and cache for the process lifetime) the user's login-shell
  * environment. Returns null on Windows, when disabled, or when the probe fails;
- * callers should fall back to `process.env` in that case. A failed probe is
- * not cached, so a slow cold-login shell is retried on the next call instead
- * of leaving the app with launchd's PATH until it restarts.
+ * callers should fall back to `process.env` in that case. A failure is cached
+ * too: the 15 s bound already covers a slow cold login, and a shell that
+ * outlives it would otherwise stall every CLI launch and launcher probe again.
  */
 export async function getUserShellEnvCached(): Promise<NodeJS.ProcessEnv | null> {
   if (!cachedShellEnvPromise) {
-    const probe = loadUserShellEnv()
-    cachedShellEnvPromise = probe
-    void probe.then((env) => {
-      if (env === null && cachedShellEnvPromise === probe) cachedShellEnvPromise = null
-    })
+    cachedShellEnvPromise = loadUserShellEnv()
   }
   return await cachedShellEnvPromise
 }

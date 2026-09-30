@@ -254,6 +254,22 @@ describe('Session terminate cleanup', () => {
     expect(table.isAlive(lateAgent.child.pid ?? -1)).toBe(false);
   });
 
+  // A reused Session's agent can exit on its own (clearing agentProcess) and
+  // leave its children in the sandbox; a later terminate must still end them.
+  it('ends what a later agent left in the sandbox after an earlier termination', async () => {
+    const table = new FakeProcessTable('darwin');
+    const sandbox = await createProcessTableSandbox(table);
+    const session = createSession(sandbox);
+    await session.terminate(true);
+    const lateAgent = await sandbox.spawn('agent', [], { stdio: ['pipe', 'pipe', 'pipe'] });
+    const orphan = table.addDescendant(lateAgent.child.pid ?? -1);
+    table.exitOnItsOwn(lateAgent.child.pid ?? -1);
+
+    await session.terminate(true);
+
+    expect(table.isAlive(orphan)).toBe(false);
+  });
+
   it('reports the agent exit code, not a finished command, in terminated', async () => {
     const session = createSession();
     // @ts-expect-error - exercising private process handle wiring

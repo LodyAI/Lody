@@ -5,7 +5,7 @@ import { Effect, Exit, Scope } from 'effect';
 import { type SessionId } from '@lody/shared';
 
 import { platformLayer, makePlatformRunner, type PlatformRunner } from '@/platform/promise-facade';
-import { SpawnFailed } from '@lody/shared/node/process';
+import { unwrapSpawnFailure } from '@lody/shared/node/process';
 import { nodeProcessLive, type NodeProcessApi } from '@lody/shared/node/process';
 import { makeCgroupContainer, type CgroupFs } from '@/platform/sandbox/cgroup-container';
 import { makeNoopContainer } from '@/platform/sandbox/noop-container';
@@ -303,9 +303,7 @@ class ContainerSessionSandbox implements SessionSandbox {
         },
       })
     ).catch((error: unknown) => {
-      // Callers classify the OS error itself (ENOENT, EACCES), as they did
-      // before the process layer wrapped it.
-      throw error instanceof SpawnFailed && error.cause instanceof Error ? error.cause : error;
+      throw unwrapSpawnFailure(error);
     });
     if (!events) {
       throw new Error(`Process events were not attached for ${command}`);

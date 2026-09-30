@@ -40,6 +40,24 @@ describe.skipIf(process.platform === 'win32')('probeLoginShellEnv', () => {
 
     expect(result?.LODY_PROBE_VALUE).toBe('one\ntwo=three');
     expect(result?.HOME).toBe(home);
+    // Every variable keeps its name, including the first one after the
+    // delimiter (macOS /bin/sh prints `echo -n` literally).
+    expect(result?.PATH).toBeDefined();
+    expect(Object.keys(result ?? {}).filter((key) => /\s/u.test(key))).toEqual([]);
+  });
+
+  // The probe disables oh-my-zsh auto-update and tmux autostart for itself;
+  // passing them on would disable them in every Lody terminal too.
+  it('returns none of the variables the probe injected into its own shell', async () => {
+    const result = await probeLoginShellEnv({
+      shell: '/bin/sh',
+      env: { ...env(), ZSH_TMUX_AUTOSTART: 'true' },
+      timeout: '10 seconds',
+    });
+
+    expect(result?.DISABLE_AUTO_UPDATE).toBeUndefined();
+    expect(result?.ZSH_TMUX_AUTOSTARTED).toBeUndefined();
+    expect(result?.ZSH_TMUX_AUTOSTART).toBe('true');
   });
 
   // shell-env could not reap a hung shell; the daemon kept it until exit.

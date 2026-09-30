@@ -263,16 +263,17 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
    *
    * Concurrent calls share one termination, so `terminated` is emitted once; a
    * forced call during a graceful one escalates it at once. A call after a
-   * finished termination starts a new one only if the Session has started a
-   * process since. Each process tree gets a bounded SIGTERM grace (none when
+   * termination finished starts a new one: the Session may have started
+   * processes since, and a failed attempt deserves a retry rather than its
+   * stale rejection. Each process tree gets a bounded SIGTERM grace (none when
    * forced) and a bounded wait after SIGKILL. A tree that survives both still
    * ends the Session's bookkeeping, but the returned promise rejects with the
    * `TerminationFailed`: a caller must not treat that agent as idle and reuse it.
    */
   terminate(force: boolean = false): Promise<void> {
     const current = this.termination;
-    if (current && !(current.finished && (this.agentProcess || this.activeProcess))) {
-      if (force && !current.force && !current.finished) this.escalateTermination(current);
+    if (current && !current.finished) {
+      if (force && !current.force) this.escalateTermination(current);
       return current.done;
     }
     let escalate = (): void => {};

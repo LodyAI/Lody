@@ -10,7 +10,12 @@ import { userInfo } from 'node:os';
 
 import type { Duration } from 'effect';
 
-import { CommandTimedOut, runCommandText, type ProcessFacadeOptions } from './process';
+import {
+  CommandTimedOut,
+  READ_ONLY_ABANDON_POLICY,
+  runCommandText,
+  type ProcessFacadeOptions,
+} from './process';
 
 const DELIMITER = '_LODY_SHELL_ENV_DELIMITER_';
 /** Verbose rc files (`set -x`) write to stderr; that must not fail the probe. */
@@ -22,15 +27,19 @@ const FALLBACK_SHELLS = ['/bin/zsh', '/bin/bash'];
  * The script each shell runs. `command env` skips aliases and functions named
  * `env`; `-0` keeps values with newlines intact, with plain `env` for one
  * without it (BusyBox); the delimiters separate the environment from whatever
- * the rc files print. Interactive login bash reads `~/.bash_profile` but not
- * `~/.bashrc`, where most PATH edits live.
+ * the rc files print. They go through `printf`: macOS `/bin/sh` prints
+ * `echo -n X` as `-n X` plus a newline. Interactive login bash reads
+ * `~/.bash_profile` but not `~/.bashrc`, where most PATH edits live.
  */
 const probeScript = (shell: string): string =>
   `${shell.endsWith('/bash') ? 'source ~/.bashrc >/dev/null 2>&1 || true; ' : ''}` +
-  `echo -n "${DELIMITER}"; command env -0 2>/dev/null || command env; echo -n "${DELIMITER}"; exit`;
+  `printf '%s' "${DELIMITER}"; command env -0 2>/dev/null || command env; printf '%s' "${DELIMITER}"; exit`;
 
-/** Keep rc files from blocking the probe (oh-my-zsh auto-update, tmux autostart). */
-const PROBE_ENV = {
+/**
+ * Keep rc files from blocking the probe (oh-my-zsh auto-update, tmux
+ * autostart). The shell prints them back; they are not the user's settings.
+ */
+const PROBE_ENV: Record<string, string> = {
   DISABLE_AUTO_UPDATE: 'true',
   ZSH_TMUX_AUTOSTARTED: 'true',
   ZSH_TMUX_AUTOSTART: 'false',
@@ -46,6 +55,19 @@ export const parseLoginShellEnvOutput = (stdout: string): NodeJS.ProcessEnv | nu
     parsed[entry.slice(0, separator)] = entry.slice(separator + 1);
   }
   return Object.keys(parsed).length > 0 ? parsed : null;
+};
+
+/** Undo what the probe itself injected: the base value, or nothing. */
+const withoutProbeEnv = (
+  parsed: NodeJS.ProcessEnv,
+  baseEnv: NodeJS.ProcessEnv
+): NodeJS.ProcessEnv => {
+  const result = { ...parsed };
+  for (const key of Object.keys(PROBE_ENV)) {
+    if (baseEnv[key] === undefined) delete result[key];
+    else result[key] = baseEnv[key];
+  }
+  return result;
 };
 
 const defaultShell = (env: NodeJS.ProcessEnv): string => {
@@ -90,6 +112,8 @@ export const probeLoginShellEnv = async (
           args: ['-ilc', probeScript(shell)],
           env: { ...baseEnv, ...PROBE_ENV },
           timeout: options.timeout,
+          // An interactive shell ignores SIGTERM; a grace period only delays.
+          abandonPolicy: READ_ONLY_ABANDON_POLICY,
           maxOutputBytes: MAX_OUTPUT_BYTES,
           check: 'exit-0',
         },
@@ -101,7 +125,7 @@ export const probeLoginShellEnv = async (
       continue;
     }
     const parsed = parseLoginShellEnvOutput(stdout);
-    if (parsed) return parsed;
+    if (parsed) return withoutProbeEnv(parsed, baseEnv);
   }
   return null;
 };

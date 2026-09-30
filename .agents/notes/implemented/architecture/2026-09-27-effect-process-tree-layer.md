@@ -299,6 +299,31 @@ the layer, all moved in the same PR:
   probe file with each shape confirmed every one is reported, and that type
   imports, `np.kill` and non-import strings are not.
 
+A second review of that work found, and the same PR fixed:
+- **Probe output was lost.** macOS `/bin/sh` prints `echo -n` literally, which
+  broke the first variable after the delimiter, so the delimiters go through
+  `printf`. The probe's own oh-my-zsh and tmux guards no longer leak into the
+  returned environment.
+- **A failed desktop probe is cached again.** 15 s already covers a slow cold
+  login, and retrying stalled every CLI launch.
+- **Preparation cleanup no longer rejects** when a tree survives, so the cold
+  fallback still runs. This one has no test: the real preparation runtime has
+  no test harness.
+- **A finished `Session.terminate` is never reused**, so what a later agent
+  leaves in the sandbox is ended and a failed attempt is retried.
+- **`windowsTree.signal` does nothing for an exited root.** Its pid may already
+  belong to another process.
+- **Read-only probes** (memory pressure, process table, login shell) pass
+  `READ_ONLY_ABANDON_POLICY`: SIGKILL at the deadline, with no SIGTERM grace
+  stretching their tight budgets. Commands that may hold locks keep the
+  default grace. The trade-off is deliberate: a caller learns of a timeout
+  only after the tree is proven gone, so an immediate retry cannot race a
+  dying git.
+- **Duplication removed.** ACP and supervisor force kills use
+  `terminateChildTree`; the CLI facade gained `logPrefix` so the ACP label
+  survives. The session sandbox reuses `unwrapSpawnFailure`, and the unused
+  shared `withSpawn` is gone.
+
 Left out on purpose:
 - scripts generated for their own processes (already allowlisted);
 - node-pty, the only PTY spawner, whose groups end through the layer;

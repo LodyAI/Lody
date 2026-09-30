@@ -1,6 +1,8 @@
 import { readFileSync } from 'fs';
 import os from 'os';
 
+import { READ_ONLY_ABANDON_POLICY } from '@lody/shared/node/process';
+
 import { runCommandText } from '@/platform/promise-facade';
 
 const DARWIN_MEMORY_PROBE_TIMEOUT_MS = 1_000;
@@ -263,6 +265,7 @@ async function probeWindowsMemoryStatus(): Promise<WindowsMemoryStatus | null> {
       command: 'powershell.exe',
       args: ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', script],
       timeout: WINDOWS_MEMORY_PROBE_TIMEOUT_MS,
+      abandonPolicy: READ_ONLY_ABANDON_POLICY,
       check: 'exit-0',
     });
     return parseWindowsMemoryStatus(stdout, os.totalmem());
@@ -523,6 +526,7 @@ async function getDarwinMemoryPressureLevel(): Promise<DarwinMemoryPressureLevel
       command: 'sysctl',
       args: ['-n', 'kern.memorystatus_vm_pressure_level'],
       timeout: DARWIN_MEMORY_PROBE_TIMEOUT_MS,
+      abandonPolicy: READ_ONLY_ABANDON_POLICY,
       check: 'exit-0',
     });
     return parseDarwinPressureLevel(stdout);
@@ -568,6 +572,7 @@ async function getDarwinAvailableMemoryBytes(): Promise<number | null> {
       command: 'vm_stat',
       args: [],
       timeout: DARWIN_MEMORY_PROBE_TIMEOUT_MS,
+      abandonPolicy: READ_ONLY_ABANDON_POLICY,
       check: 'exit-0',
     });
     const parsed = parseDarwinAvailableMemoryBytes(stdout);
