@@ -8,7 +8,7 @@
  */
 import { userInfo } from 'node:os';
 
-import type { Duration } from 'effect';
+import { Duration } from 'effect';
 
 import {
   CommandTimedOut,
@@ -20,6 +20,11 @@ import {
 const DELIMITER = '_LODY_SHELL_ENV_DELIMITER_';
 /** Verbose rc files (`set -x`) write to stderr; that must not fail the probe. */
 const MAX_OUTPUT_BYTES = 8 * 1024 * 1024;
+/**
+ * Rc files (nvm, conda, oh-my-zsh) can take seconds on a cold login; a shell
+ * past this is stuck. One budget for the whole probe, fallbacks included.
+ */
+const DEFAULT_TIMEOUT = Duration.seconds(15);
 /** POSIX shells to try when the default one fails (for example Nushell). */
 const FALLBACK_SHELLS = ['/bin/zsh', '/bin/bash'];
 
@@ -81,8 +86,11 @@ const defaultShell = (env: NodeJS.ProcessEnv): string => {
 };
 
 export interface LoginShellEnvOptions {
-  /** Ends the shell's whole process tree when exceeded; a hung rc file cannot leak it. */
-  readonly timeout: Duration.DurationInput;
+  /**
+   * The whole probe's budget, fallback shells included (15 s by default). A
+   * shell still running at the deadline is ended with its process tree.
+   */
+  readonly timeout?: Duration.DurationInput;
   /** The environment the shell starts from; defaults to `process.env`. */
   readonly env?: NodeJS.ProcessEnv;
   /** Defaults to the user's login shell. */
@@ -103,15 +111,17 @@ export const probeLoginShellEnv = async (
   const baseEnv = options.env ?? process.env;
   const first = options.shell ?? defaultShell(baseEnv);
   const shells = [first, ...FALLBACK_SHELLS.filter((shell) => shell !== first)];
+  const deadline = Date.now() + Duration.toMillis(options.timeout ?? DEFAULT_TIMEOUT);
   for (const shell of shells) {
-    let stdout: string;
+    const remainingMs = deadline - Date.now();
+    if (remainingMs <= 0) return null;
     try {
       const output = await runCommandText(
         {
           command: shell,
           args: ['-ilc', probeScript(shell)],
           env: { ...baseEnv, ...PROBE_ENV },
-          timeout: options.timeout,
+          timeout: remainingMs,
           // An interactive shell ignores SIGTERM; a grace period only delays.
           abandonPolicy: READ_ONLY_ABANDON_POLICY,
           maxOutputBytes: MAX_OUTPUT_BYTES,
@@ -119,13 +129,11 @@ export const probeLoginShellEnv = async (
         },
         options.processOptions
       );
-      stdout = output.stdout;
+      const parsed = parseLoginShellEnvOutput(output.stdout);
+      if (parsed) return withoutProbeEnv(parsed, baseEnv);
     } catch (error) {
       if (error instanceof CommandTimedOut) return null;
-      continue;
     }
-    const parsed = parseLoginShellEnvOutput(stdout);
-    if (parsed) return withoutProbeEnv(parsed, baseEnv);
   }
   return null;
 };

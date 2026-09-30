@@ -53,33 +53,21 @@ const allowlist = new Map([
   ],
 ]);
 
-const lineAt = (text, index) => {
-  const start = text.lastIndexOf('\n', index - 1) + 1;
-  const end = text.indexOf('\n', index);
-  return text.slice(start, end === -1 ? text.length : end);
-};
-
 // A module specifier position: `from`, a side-effect `import`, dynamic
 // `import(...)`, `require(...)` and `createRequire(...)(...)`. A string that
 // only names a module (Tinypool's `runtime: 'child_process'`) is not one.
-const MODULE_POSITION = String.raw`(?:\bfrom\s+|\bimport\s+|\bimport\s*\(\s*|\brequire\s*\(\s*|\)\s*\(\s*)`;
+const MODULE_POSITION = String.raw`(?:\bfrom|\bimport\s*\(?|(?:\brequire|\))\s*\()\s*`;
+const PROCESS_MODULES = String.raw`(?:node:)?child_process|cross-spawn|execa|shell-env|tree-kill|ps-tree|find-process|pidusage|(?:@lydell/)?node-pty`;
+/** The statement before a specifier is a type-only import or export, possibly multi-line. */
+const TYPE_ONLY_STATEMENT = /\b(?:import|export)\s+type\b[^;'"]*$/u;
 
 const forbidden = [
   {
-    // Static, dynamic and `require` imports, re-exports and
-    // `createRequire(...)('child_process')`. Type-only imports carry no
-    // behaviour and stay allowed.
-    pattern: new RegExp(`${MODULE_POSITION}['"](?:node:)?child_process['"]`, 'gu'),
-    label: 'child_process reference',
-    skip: (match, text) => /^\s*import\s+type\b/u.test(lineAt(text, match.index ?? 0)),
-  },
-  {
-    // Libraries that start or signal processes on their own.
-    pattern: new RegExp(
-      `${MODULE_POSITION}['"](?:cross-spawn|execa|shell-env|tree-kill|ps-tree|find-process|pidusage|(?:@lydell/)?node-pty)['"]`,
-      'gu'
-    ),
-    label: 'process library reference',
+    // `child_process` and the libraries that start or signal processes on
+    // their own, in any import form. Type-only imports carry no behaviour.
+    pattern: new RegExp(`${MODULE_POSITION}['"](?:${PROCESS_MODULES})['"]`, 'gu'),
+    label: 'process module reference',
+    skip: (match, text) => TYPE_ONLY_STATEMENT.test(text.slice(0, match.index)),
   },
   { pattern: /\bprocess\.kill\s*\(/gu, label: 'process.kill call' },
   // Signalling a ChildProcess (or PTY) directly is a hand-written termination

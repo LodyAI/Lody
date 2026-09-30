@@ -7,7 +7,6 @@ import {
   makeProcessRunner,
   terminateChildTree,
   type ProcessFacadeOptions,
-  type ProcessRunner,
 } from '@lody/shared/node/process';
 import { buildRetryDelay, FailureWindow, isAlreadyRunningOutcome } from './retry.js';
 import type {
@@ -86,7 +85,6 @@ export class CliSupervisor {
   private readonly healthyRunMs: number;
   private readonly failureWindow: FailureWindow;
   private readonly oomFailureWindow: FailureWindow;
-  private readonly runProcess: ProcessRunner;
   private readonly processOptions: ProcessFacadeOptions;
 
   private desiredState: 'running' | 'stopped' = 'stopped';
@@ -146,7 +144,6 @@ export class CliSupervisor {
       options.fatalOomThreshold ?? DEFAULT_FATAL_OOM_THRESHOLD
     );
     this.processOptions = options.processOptions ?? {};
-    this.runProcess = makeProcessRunner(this.processOptions);
   }
 
   getState(): SupervisorState {
@@ -659,7 +656,7 @@ export class CliSupervisor {
 
   private async signalTerminate(run: ActiveRun): Promise<boolean> {
     try {
-      await this.runProcess(
+      await makeProcessRunner(this.processOptions)(
         Effect.flatMap(
           childProcessTree(run.handle.child, { processGroup: run.handle.processGroup ?? false }),
           (tree) => tree.signal('SIGTERM')

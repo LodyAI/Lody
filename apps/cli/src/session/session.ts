@@ -62,7 +62,6 @@ import {
 /** One run of `Session.terminate`, shared by the calls that arrive while it runs. */
 type SessionTermination = {
   force: boolean;
-  finished: boolean;
   /** Settles when a forced call joins, ending the graceful waits early. */
   readonly escalated: Promise<void>;
   readonly escalate: () => void;
@@ -272,7 +271,7 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
    */
   terminate(force: boolean = false): Promise<void> {
     const current = this.termination;
-    if (current && !current.finished) {
+    if (current) {
       if (force && !current.force) this.escalateTermination(current);
       return current.done;
     }
@@ -280,16 +279,10 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
     const escalated = new Promise<void>((resolve) => {
       escalate = resolve;
     });
-    const termination: SessionTermination = {
-      force,
-      finished: false,
-      escalated,
-      escalate,
-      done: Promise.resolve(),
-    };
+    const termination: SessionTermination = { force, escalated, escalate, done: Promise.resolve() };
     this.termination = termination;
     termination.done = this.terminateOnce(termination).finally(() => {
-      termination.finished = true;
+      if (this.termination === termination) this.termination = null;
     });
     return termination.done;
   }

@@ -7,17 +7,13 @@ import { probeLoginShellEnv } from '@lody/shared/node/login-shell-env'
 // the embedded CLI as well as "Open in" path launchers — so bare command names
 // resolve the same way they do in a terminal.
 
-// Interactive rc files (nvm, conda, oh-my-zsh) can take several seconds on a
-// cold login. The bound only stops a shell that never returns: the timeout
-// ends the shell's whole process tree.
-const SHELL_ENV_TIMEOUT_MS = 15_000
-
 let cachedShellEnvPromise: Promise<NodeJS.ProcessEnv | null> | null = null
 
 async function loadUserShellEnv(): Promise<NodeJS.ProcessEnv | null> {
+  // Windows has no login shell; returning here also keeps the warning below meaningful.
   if (process.platform === 'win32') return null
   if (process.env.LODY_ELECTRON_DISABLE_SHELL_ENV === '1') return null
-  const env = await probeLoginShellEnv({ env: process.env, timeout: SHELL_ENV_TIMEOUT_MS })
+  const env = await probeLoginShellEnv({})
   if (!env) console.warn('Login shell environment unavailable; using the inherited environment')
   return env
 }
@@ -26,7 +22,7 @@ async function loadUserShellEnv(): Promise<NodeJS.ProcessEnv | null> {
  * Resolve (and cache for the process lifetime) the user's login-shell
  * environment. Returns null on Windows, when disabled, or when the probe fails;
  * callers should fall back to `process.env` in that case. A failure is cached
- * too: the 15 s bound already covers a slow cold login, and a shell that
+ * too: the probe's 15 s bound already covers a slow cold login, and a shell that
  * outlives it would otherwise stall every CLI launch and launcher probe again.
  */
 export async function getUserShellEnvCached(): Promise<NodeJS.ProcessEnv | null> {

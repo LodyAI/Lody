@@ -2,13 +2,12 @@ import { probeLoginShellEnv } from '@lody/shared/node/login-shell-env';
 
 import { toShared } from '@/platform/promise-facade';
 
-/** How long an ACP spawn waits for the probe before going ahead without it. */
-const SHELL_ENV_WAIT_MS = 3000;
 /**
- * How long the probe itself may run; matches the desktop's. A timeout ends the
- * shell's whole process tree, so a hung rc file leaks nothing.
+ * How long an ACP spawn waits for the probe before going ahead without it. The
+ * probe itself keeps its own bound (shared with the desktop) and ends the
+ * shell's whole process tree when it runs out, so a hung rc file leaks nothing.
  */
-const SHELL_ENV_PROBE_TIMEOUT_MS = 15_000;
+const SHELL_ENV_WAIT_MS = 3000;
 
 /**
  * Resolving the login-shell env spawns the user's shell with `-ilc` so it sources
@@ -19,15 +18,10 @@ let cachedShellEnvPromise: Promise<NodeJS.ProcessEnv> | null = null;
 /** Last successfully resolved env, exposed to synchronous callers. */
 let resolvedShellEnv: NodeJS.ProcessEnv = {};
 
-const shouldSkip = (): boolean =>
-  // Windows has no login shell to probe.
-  process.platform === 'win32' || process.env.LODY_DISABLE_SHELL_ENV === '1';
+const shouldSkip = (): boolean => process.env.LODY_DISABLE_SHELL_ENV === '1';
 
 const resolveOnce = (): Promise<NodeJS.ProcessEnv> => {
-  const probe = probeLoginShellEnv({
-    timeout: SHELL_ENV_PROBE_TIMEOUT_MS,
-    processOptions: toShared(),
-  })
+  const probe = probeLoginShellEnv({ processOptions: toShared() })
     .then((probed) => {
       const env = probed ?? {};
       resolvedShellEnv = env;

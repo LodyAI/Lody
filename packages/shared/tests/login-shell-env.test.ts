@@ -6,15 +6,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { parseLoginShellEnvOutput, probeLoginShellEnv } from '../src/node/login-shell-env';
-
-const isRunning = (pid: number): boolean => {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-};
+import { isPidAliveSync } from '../src/node/process';
 
 // Real shells under a throwaway HOME: the probe's contract is what a login
 // shell's rc files leave in its environment.
@@ -69,7 +61,7 @@ describe.skipIf(process.platform === 'win32')('probeLoginShellEnv', () => {
 
     expect(result).toBeNull();
     const pid = Number((await readFile(pidFile, 'utf8')).trim());
-    expect(isRunning(pid)).toBe(false);
+    expect(isPidAliveSync(pid)).toBe(false);
   });
 
   it.skipIf(!existsSync('/bin/zsh') && !existsSync('/bin/bash'))(
