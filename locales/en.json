@@ -4199,7 +4199,6 @@
   "schedules.runNow": "Run now",
   "schedules.delete": "Delete",
   "schedules.readOnly": "Only the owner can edit this schedule, using a machine with Schedule support.",
-  "schedules.choosePermission": "Choose an explicit permission mode.",
   "schedules.projectMachine": "Choose a Project on the selected machine.",
   "schedules.originalDirectory": "Runs share the original directory. Work from other Agents may overlap here.",
   "schedules.ownedMachine": "Choose your own machine with Schedule support.",

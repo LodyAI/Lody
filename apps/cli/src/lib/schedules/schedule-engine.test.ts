@@ -229,7 +229,7 @@ describe('Schedule worker handoff', () => {
   it('waits for target permission recovery without spending attempts or losing the slot', async () => {
     const h = harness();
     h.ports.validateTarget = async () => {
-      throw new ScheduleConfigurationError('PERMISSION_UNAVAILABLE');
+      throw new ScheduleConfigurationError('PROJECT_UNAVAILABLE');
     };
     await h.engine.evaluate();
     await h.engine.evaluate();
@@ -237,11 +237,11 @@ describe('Schedule worker handoff', () => {
     expect(h.store.unfinished('workspace')[0]).toMatchObject({
       state: 'retry_wait',
       attempts: 0,
-      errorCode: 'PERMISSION_UNAVAILABLE',
+      errorCode: 'PROJECT_UNAVAILABLE',
     });
     expect(h.slots.isBusy('agent')).toBe(false);
     expect(h.ports.publish).toHaveBeenLastCalledWith(
-      expect.objectContaining({ queueState: 'blocked', blockedCode: 'PERMISSION_UNAVAILABLE' })
+      expect.objectContaining({ queueState: 'blocked', blockedCode: 'PROJECT_UNAVAILABLE' })
     );
     h.ports.validateTarget = async () => {};
     h.time(90_000);
