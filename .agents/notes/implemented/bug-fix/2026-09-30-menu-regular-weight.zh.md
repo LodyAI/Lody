@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: [#1163](https://github.com/LodyAI/Lody/pull/1163)
 
 [English](2026-09-30-menu-regular-weight.md)
 
