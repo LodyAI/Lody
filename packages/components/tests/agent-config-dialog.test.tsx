@@ -549,10 +549,11 @@ describe('AgentConfigDialog', () => {
     expect(getSelectedOption()?.textContent).toContain('Kimi Code');
     expect(
       getOptionButtons()
-        .slice(0, 5)
+        .slice(0, 6)
         .map((option) => option.textContent)
     ).toEqual([
       expect.stringContaining('Kimi Code'),
+      expect.stringContaining('Devin'),
       expect.stringContaining('Grok'),
       expect.stringContaining('Claude'),
       expect.stringContaining('Codex'),

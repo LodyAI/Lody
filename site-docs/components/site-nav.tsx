@@ -10,7 +10,7 @@ type SiteNavLocale = 'en' | 'zh';
 
 type SiteNavProps = {
   locale: SiteNavLocale;
-  languageHref: string;
+  languageHref?: string;
 };
 
 const DISCORD_HREF = 'https://discord.gg/E8mZtMu38s';
@@ -255,13 +255,15 @@ export function SiteNav({ locale, languageHref }: SiteNavProps) {
             </nav>
             <div className="site-nav__actions">
               <ThemeToggle />
-              <SiteAnchor
-                className="site-nav__link site-nav__desktop"
-                href={languageHref}
-                onClick={routeLink(languageHref)}
-              >
-                {t.language}
-              </SiteAnchor>
+              {languageHref && (
+                <SiteAnchor
+                  className="site-nav__link site-nav__desktop"
+                  href={languageHref}
+                  onClick={routeLink(languageHref)}
+                >
+                  {t.language}
+                </SiteAnchor>
+              )}
               <span aria-hidden="true" className="site-nav__divider site-nav__desktop" />
               <SiteAnchor
                 aria-label="Discord"
@@ -295,13 +297,15 @@ export function SiteNav({ locale, languageHref }: SiteNavProps) {
                     ))}
                   </nav>
                   <div className="site-nav__menu-footer">
-                    <SiteAnchor
-                      className="site-nav__menu-secondary"
-                      href={languageHref}
-                      onClick={routeLink(languageHref, () => setOpen(false))}
-                    >
-                      {t.language}
-                    </SiteAnchor>
+                    {languageHref && (
+                      <SiteAnchor
+                        className="site-nav__menu-secondary"
+                        href={languageHref}
+                        onClick={routeLink(languageHref, () => setOpen(false))}
+                      >
+                        {t.language}
+                      </SiteAnchor>
+                    )}
                     <SiteAnchor
                       aria-label="Discord"
                       className="site-nav__menu-secondary site-nav__menu-social"

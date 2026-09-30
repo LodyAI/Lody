@@ -19,7 +19,6 @@ import {
   readMachineFlockRowsFromFlock,
   type MachineMeta,
   type AgentConfigId,
-  hasExplicitSchedulePermission,
   hasPendingUserTurnActivation,
 } from '@lody/shared';
 import { readSessionHistory } from '@lody/shared/session-data';
@@ -75,7 +74,6 @@ export async function createScheduleWorkspace(args: {
   const resolveTarget = async (
     run: import('./schedule-store').ScheduleRun<PreparedSessionInput>
   ) => {
-    const { readAgentAcpCapability } = await import('@/commands/session');
     const agent = run.definition.agent;
     const machineRecord = await manager.repo.getDocMeta(getMachineRoomId(auth.machineId));
     const machine = machineRecord?.meta as MachineMeta | undefined;
@@ -107,15 +105,6 @@ export async function createScheduleWorkspace(args: {
       if (!projects[requiredLocalProjectId])
         throw new ScheduleConfigurationError('PROJECT_UNAVAILABLE');
     }
-    const capability = await readAgentAcpCapability({
-      manager,
-      workspaceId,
-      machineId: auth.machineId,
-      agentConfigId: agent.agentConfigId as AgentConfigId,
-      localOnly: true,
-    });
-    if (!hasExplicitSchedulePermission(agent, capability))
-      throw new ScheduleConfigurationError('PERMISSION_UNAVAILABLE');
     const destinationSessionId = scheduleDestinationSessionId(
       run.definition.scheduleId,
       run.definition.destination

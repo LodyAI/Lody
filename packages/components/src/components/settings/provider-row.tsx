@@ -209,18 +209,21 @@ export function ProviderRow({
     canShowSubscriptionRateLimits({ cliType, agentType, config }) &&
     !!machine?.raceLimits &&
     Object.keys(machine.raceLimits).some(
-      (key) => parseRateLimitEntryKey(key).cliType === agentType
+      (key) => {
+        const parsed = parseRateLimitEntryKey(key);
+        return parsed.cliType === agentType && parsed.agentConfigId === config.id;
+      }
     );
 
   // Compact usage meters shown inline after the provider name.
   const rateLimitWindows = useMemo(() => {
     if (!showRateLimits || !machine?.raceLimits) return [];
-    for (const entry of getAgentRateLimitEntries(machine.raceLimits, agentType)) {
+    for (const entry of getAgentRateLimitEntries(machine.raceLimits, agentType, config.id)) {
       const windows = getAgentRateLimitWindows(entry.limits);
       if (windows.length > 0) return windows;
     }
     return [];
-  }, [showRateLimits, machine?.raceLimits, agentType]);
+  }, [showRateLimits, machine?.raceLimits, agentType, config.id]);
 
   // Codex-only: the third-party reset forecast for OpenAI's own usage limits.
   const showResetForecast = canShowCodexResetForecast({ cliType, agentType, config });

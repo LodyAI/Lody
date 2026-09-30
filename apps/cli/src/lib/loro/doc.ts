@@ -1499,12 +1499,17 @@ export class LoroDocumentManager {
     return this.presenceRuntime?.subscribe(listener) ?? null;
   }
 
-  async updateRateLimits(machineId: MachineId, cliType: CliType, limits: RateLimit): Promise<void> {
+  async updateRateLimits(
+    machineId: MachineId,
+    agentConfigId: AgentConfigId | undefined,
+    cliType: CliType,
+    limits: RateLimit
+  ): Promise<void> {
     if (!this.machine) {
       this.machine = this.createMachineDocument(machineId);
       await this.machine.init();
     }
-    await this.machine.updateRateLimits(cliType, limits);
+    await this.machine.updateRateLimits(agentConfigId, cliType, limits);
   }
 
   async updateAcpCapabilities(
@@ -3009,12 +3014,18 @@ export class MachineDocument implements LoroDocument<{}, MachineMeta> {
     return current;
   }
 
-  async updateRateLimits(cliType: CliType, limits: RateLimit): Promise<void> {
+  async updateRateLimits(
+    agentConfigId: AgentConfigId | undefined,
+    cliType: CliType,
+    limits: RateLimit
+  ): Promise<void> {
     return this.enqueueRateLimitsUpdate(async () => {
       const limitId = ((limits as { limitId?: string }).limitId ?? cliType).trim() || cliType;
       const handle = await this.openMachineFlockDoc();
       const changed = writeMachineFlockRowToFlock(handle.flock, {
-        key: machineFlockKeys.rateLimit(cliType, limitId),
+        key: agentConfigId
+          ? machineFlockKeys.rateLimit(agentConfigId, cliType, limitId)
+          : machineFlockKeys.legacyRateLimit(cliType, limitId),
         value: limits,
       });
       if (changed) {

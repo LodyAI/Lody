@@ -13,6 +13,7 @@ import claudePackageLock from '../../../../packages/acp-extension-claude/package
 import claudeSdkManifest from '../../node_modules/@anthropic-ai/claude-agent-sdk/manifest.json';
 import claudeRuntimeManifestJson from './claude-runtime-manifest.json';
 import kimiRuntimeManifestJson from './kimi-runtime-manifest.json';
+import piRuntimeManifestJson from './pi-runtime-manifest.json';
 import grokRuntimeManifest from '../../../../packages/acp-extension-grok/runtime-manifest.json';
 
 import {
@@ -48,6 +49,11 @@ describe('host runtime capabilities', () => {
     (node, platform, arch, expected) => {
       const capabilities = getHostMachineProtocolCapabilities(node, platform, arch);
       expect(capabilities.builtinPi).toBe(expected);
+      // Host compatibility alone does not prove the pinned artifact supports extensions.
+      const supportsExtensions =
+        'piExtensionsProtocolVersion' in piRuntimeManifestJson &&
+        piRuntimeManifestJson.piExtensionsProtocolVersion === 1;
+      expect(capabilities.piExtensions).toBe(supportsExtensions ? expected : undefined);
       expect(capabilities.providerSetup).toBe(1);
     }
   );

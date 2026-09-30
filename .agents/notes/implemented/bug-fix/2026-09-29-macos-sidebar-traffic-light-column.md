@@ -10,6 +10,10 @@ PR: [#1121](https://github.com/LodyAI/Lody/pull/1121)
 
 In a macOS desktop screenshot, the first traffic light sat about 6px to the right of the navigation icon, while navigation, project, repository and session labels started at four slightly different positions. Moving only the native lights would leave the sidebar visibly uneven. The main window now places the lights 6px farther left and the desktop row layouts share a 15px icon/group column and a 37px ordinary-label column. Native macOS verification remains necessary because Linux cannot draw Electron's traffic lights.
 
+## Correction
+
+[The native baseline follow-up](2026-09-30-macos-traffic-light-baseline.md) found that `trafficLightPosition` locates the first button frame rather than its centre, so the `x = 14` conclusion below overshot the shared icon centreline.
+
 ## Evidence and ownership
 
 The supplied screenshot shows the first light's centre near x=30 relative to the window and the navigation icon's centre near x=24. The window configured `trafficLightPosition.x = 20`, which Electron uses for the native button group. The screenshot's apparent 6px difference is consistent with that group being offset from the sidebar icon column. The window now uses `x = 14` and retains `y = 16` and the existing fullscreen gate.

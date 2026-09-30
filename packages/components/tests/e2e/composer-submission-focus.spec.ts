@@ -48,16 +48,77 @@ for (const openWith of ['hover', 'click', 'keyboard'] as const) {
         await model.hover();
       }
       await expect(search).toBeFocused();
+      const modelMenu = page.getByRole('menu').last();
+      await expect.poll(() => modelMenu.evaluate((el) => getComputedStyle(el).opacity)).toBe('1');
+      await expect
+        .poll(async () => {
+          const submenu = await modelMenu.boundingBox();
+          const viewport = page.viewportSize();
+          return (
+            !!submenu &&
+            !!viewport &&
+            submenu.y >= 0 &&
+            submenu.y + submenu.height <= viewport.height &&
+            submenu.height <= 329
+          );
+        })
+        .toBe(true);
+      const initialMenu = await modelMenu.boundingBox();
+      expect(initialMenu).not.toBeNull();
+      const expectSearchAnchored = async () => {
+        await expect(search).toBeFocused();
+        await expect
+          .poll(async () => {
+            const menu = await modelMenu.boundingBox();
+            const field = await search.boundingBox();
+            const row = await model.boundingBox();
+            const viewport = page.viewportSize();
+            if (!menu || !field || !row || !viewport) return Infinity;
+            const top = Math.max(8, Math.min(row.y - 32, viewport.height - 8 - menu.height));
+            return Math.max(Math.abs(menu.y - top), Math.abs(field.y - (menu.y + 4)));
+          })
+          .toBeLessThan(1);
+      };
       if (openWith !== 'keyboard') {
         // A real pointer keeps moving over the trigger after the submenu opens.
         await model.hover({ position: { x: 12, y: 12 } });
         if (openWith === 'click') await model.click({ position: { x: 12, y: 12 } });
         await expect(search).toBeFocused();
       }
-      await page.keyboard.type('54m');
+      for (const character of '54m') {
+        await page.keyboard.type(character);
+        await expectSearchAnchored();
+      }
       await expect(search).toHaveValue('54m');
       const match = page.getByRole('menuitemradio');
       await expect(match).toHaveText(['5.4-mini']);
+      const result = await match.boundingBox();
+      const field = await search.boundingBox();
+      expect(result).not.toBeNull();
+      expect(field).not.toBeNull();
+      expect(field!.y + field!.height).toBeLessThanOrEqual(result!.y);
+      const modelRow = await model.boundingBox();
+      expect(modelRow).not.toBeNull();
+      expect(Math.abs(result!.y - (modelRow!.y + 4))).toBeLessThan(1);
+      await expect
+        .poll(async () => (await modelMenu.boundingBox())?.height ?? Infinity)
+        .toBeLessThan(100);
+      await search.fill('zzzz-no-model');
+      await expect(match).toHaveCount(0);
+      await expect(modelMenu.getByText('No models match', { exact: true })).toBeVisible();
+      await expectSearchAnchored();
+      await expect
+        .poll(async () => (await modelMenu.boundingBox())?.height ?? Infinity)
+        .toBeLessThan(100);
+      await search.fill('');
+      await expect(match).toHaveCount(10);
+      await expectSearchAnchored();
+      await expect
+        .poll(async () => Math.abs((await modelMenu.boundingBox())!.height - initialMenu!.height))
+        .toBeLessThan(1);
+      await search.fill('54m');
+      await expect(match).toHaveText(['5.4-mini']);
+      await expectSearchAnchored();
       await page.keyboard.press('ArrowDown');
       await expect(match).toBeFocused();
       await page.keyboard.press('Escape');
@@ -67,6 +128,36 @@ for (const openWith of ['hover', 'click', 'keyboard'] as const) {
     }
   });
 }
+
+test('run-config submenus align with their own trigger rows when space permits', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1600, height: 1000 });
+  await page.goto('/iframe.html?id=sessions-composerrunconfigmenu--closed&viewMode=story');
+  await page.getByRole('button', { name: 'Run configuration', exact: true }).click();
+  for (const name of ['Role', 'Agent', 'Model', 'Reasoning']) {
+    const row = page
+      .getByRole('menu')
+      .first()
+      .getByRole('menuitem', { name: new RegExp(`^${name}`) });
+    const target = await row.boundingBox();
+    expect(target).not.toBeNull();
+    // Move through the submenu's pointer corridor rather than waiting for it to clear.
+    await page.mouse.move(target!.x + target!.width / 2, target!.y + target!.height / 2, {
+      steps: 8,
+    });
+    await expect(row).toHaveAttribute('aria-expanded', 'true');
+    await expect(page.getByRole('menu')).toHaveCount(2);
+    await expect
+      .poll(async () => {
+        const trigger = await row.boundingBox();
+        const submenu = await page.getByRole('menu').last().boundingBox();
+        if (!trigger || !submenu || submenu.x < trigger.x + trigger.width) return Infinity;
+        return Math.abs(trigger.y - submenu.y);
+      })
+      .toBeLessThan(1);
+  }
+});
 
 test.describe('model search on touch', () => {
   test.use({ hasTouch: true });

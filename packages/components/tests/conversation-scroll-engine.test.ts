@@ -359,6 +359,58 @@ describe('reading', () => {
     sim.settle();
     expect(sim.controller.mode).toBe('follow');
   });
+
+  // Rows streamed in while the reader was above were never mounted, so the
+  // bottom a fast fling runs into is estimated and too short. The compositor
+  // stops the fling at that stale bottom while the engine has already grown
+  // the range behind it, so the scroll lands short of the new bottom.
+  const flingIntoStaleBottom = () => {
+    const sim = new ScrollSim(
+      turnRows(40, () => 100),
+      V
+    );
+    sim.render();
+    sim.settle();
+    sim.task(() => sim.controller.release('wheel-up'));
+    sim.nativeScroll(sim.maxTop() - 2000);
+    sim.settle();
+    const streamed = turnRows(
+      6,
+      () => 300,
+      () => 60,
+      'late'
+    ).map((row, i) => ({ ...row, turnIndex: 40 + i }));
+    sim.render([...sim.rows, ...streamed]);
+    sim.settle();
+    const wall = sim.maxTop();
+    // The fling's first steps mount and measure the streamed rows...
+    sim.nativeScroll(wall - 700);
+    sim.settle();
+    expect(sim.maxTop()).toBeGreaterThan(wall + 1000);
+    return { sim, wall };
+  };
+
+  it('follows again when a fast downward fling stops at the bottom it was scrolling toward', () => {
+    const { sim, wall } = flingIntoStaleBottom();
+    // ...and the fling dies against the range the compositor last saw.
+    sim.nativeScroll(wall);
+    sim.settle();
+    sim.task(() => sim.controller.onScrollEnd());
+    sim.settle();
+    expect(sim.controller.mode).toBe('follow');
+    expect(sim.readScrollTop()).toBe(sim.maxTop());
+    expectHealthy(sim);
+  });
+
+  it('keeps reading when a downward scroll comes to rest anywhere else', () => {
+    const { sim, wall } = flingIntoStaleBottom();
+    sim.nativeScroll(wall - 300);
+    sim.settle();
+    sim.task(() => sim.controller.onScrollEnd());
+    sim.settle();
+    expect(sim.controller.mode).toBe('read');
+    expect(sim.readScrollTop()).toBe(wall - 300);
+  });
 });
 
 describe('commands', () => {
@@ -669,6 +721,9 @@ describe('randomized sequences', () => {
             : undefined;
         const anchorHeight = rows.find((row) => row.key === anchorKey)?.height;
         const anchorBefore = anchorKey ? sim.screenTop(anchorKey) : null;
+        // A clamped reading position has not resolved its anchor yet; it
+        // moves toward it once reachable, so I5 applies only to resolved ones.
+        const resolvedBefore = sim.readScrollTop() > 1 && sim.readScrollTop() < sim.maxTop() - 1;
         let geometryOnly = false;
         switch (action) {
           case 0: // rows above/below grow or shrink
@@ -717,6 +772,11 @@ describe('randomized sequences', () => {
           case 7:
             sim.task(() => sim.controller.scrollToBottom());
             break;
+          case 8: // the reader scrolls down and the sequence comes to rest
+            sim.nativeScroll(sim.readScrollTop() + random() * sim.maxTop());
+            sim.settle();
+            sim.task(() => sim.controller.onScrollEnd());
+            break;
           default:
             break;
         }
@@ -730,6 +790,7 @@ describe('randomized sequences', () => {
           sim.controller.mode === 'read' &&
           anchorKey &&
           anchorBefore !== null &&
+          resolvedBefore &&
           rows.some((row) => row.key === anchorKey)
         ) {
           const after = sim.screenTop(anchorKey);

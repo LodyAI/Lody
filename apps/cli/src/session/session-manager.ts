@@ -434,7 +434,12 @@ interface SessionManagerEvents {
     accountingId?: string;
   }) => void;
   onContextWindowUsageUpdate: (sessionId: SessionId, usage: SessionContextWindowUsage) => void;
-  onRateLimitUpdate: (machineId: MachineId, cliType: CliType, limits: RateLimit) => void;
+  onRateLimitUpdate: (
+    machineId: MachineId,
+    agentConfigId: AgentConfigId | undefined,
+    cliType: CliType,
+    limits: RateLimit
+  ) => void;
   onThreadGoalUpdated: (
     sessionId: SessionId,
     goal: Extract<MessageContent, { type: 'goal' }>
@@ -1377,7 +1382,13 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       onRateLimitUpdate: (limits: RateLimit) => {
         dispatchEvent(() => {
           if (config.agentCliType === 'builtin' && isManagedBuiltinAgentType(config.agentType)) {
-            this.emit('onRateLimitUpdate', this.machineId, config.agentType, limits);
+            this.emit(
+              'onRateLimitUpdate',
+              this.machineId,
+              config.agentConfigId,
+              config.agentType,
+              limits
+            );
           }
         });
       },

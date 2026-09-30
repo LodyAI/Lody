@@ -204,6 +204,144 @@ pre,
     padding-inline: 0;
   }
 
+  /* Markdown table columns (`markdown-table.tsx`). Every column keeps a
+     floor so the auto layout cannot squeeze it to a character or two, and
+     breaks between words; a column holding a long unbroken token (path, URL,
+     hash) may also break inside it and has its maximum capped, so it wraps
+     instead of starving prose columns in the auto layout's distribution.
+     `<col>` widths give each column a content-estimated preferred width, and
+     an intrinsically wide column keeps a higher floor so it stays readable
+     when even the minimums already overflow. Beyond phone widths a column of
+     short cells stays on one line at its natural width. Columns past the
+     24th get no classification. */
+  .markdown-renderer [data-markdown-table] :is(th, td) {
+    min-width: 5em;
+    overflow-wrap: break-word;
+  }
+  .markdown-renderer
+    :is(
+      [data-break-anywhere-columns~='1'] tr > :nth-child(1),
+      [data-break-anywhere-columns~='2'] tr > :nth-child(2),
+      [data-break-anywhere-columns~='3'] tr > :nth-child(3),
+      [data-break-anywhere-columns~='4'] tr > :nth-child(4),
+      [data-break-anywhere-columns~='5'] tr > :nth-child(5),
+      [data-break-anywhere-columns~='6'] tr > :nth-child(6),
+      [data-break-anywhere-columns~='7'] tr > :nth-child(7),
+      [data-break-anywhere-columns~='8'] tr > :nth-child(8),
+      [data-break-anywhere-columns~='9'] tr > :nth-child(9),
+      [data-break-anywhere-columns~='10'] tr > :nth-child(10),
+      [data-break-anywhere-columns~='11'] tr > :nth-child(11),
+      [data-break-anywhere-columns~='12'] tr > :nth-child(12),
+      [data-break-anywhere-columns~='13'] tr > :nth-child(13),
+      [data-break-anywhere-columns~='14'] tr > :nth-child(14),
+      [data-break-anywhere-columns~='15'] tr > :nth-child(15),
+      [data-break-anywhere-columns~='16'] tr > :nth-child(16),
+      [data-break-anywhere-columns~='17'] tr > :nth-child(17),
+      [data-break-anywhere-columns~='18'] tr > :nth-child(18),
+      [data-break-anywhere-columns~='19'] tr > :nth-child(19),
+      [data-break-anywhere-columns~='20'] tr > :nth-child(20),
+      [data-break-anywhere-columns~='21'] tr > :nth-child(21),
+      [data-break-anywhere-columns~='22'] tr > :nth-child(22),
+      [data-break-anywhere-columns~='23'] tr > :nth-child(23),
+      [data-break-anywhere-columns~='24'] tr > :nth-child(24)
+    ) {
+    max-width: 20em;
+    overflow-wrap: anywhere;
+  }
+  .markdown-renderer
+    :is(
+      [data-wide-columns~='1'] tr > :nth-child(1),
+      [data-wide-columns~='2'] tr > :nth-child(2),
+      [data-wide-columns~='3'] tr > :nth-child(3),
+      [data-wide-columns~='4'] tr > :nth-child(4),
+      [data-wide-columns~='5'] tr > :nth-child(5),
+      [data-wide-columns~='6'] tr > :nth-child(6),
+      [data-wide-columns~='7'] tr > :nth-child(7),
+      [data-wide-columns~='8'] tr > :nth-child(8),
+      [data-wide-columns~='9'] tr > :nth-child(9),
+      [data-wide-columns~='10'] tr > :nth-child(10),
+      [data-wide-columns~='11'] tr > :nth-child(11),
+      [data-wide-columns~='12'] tr > :nth-child(12),
+      [data-wide-columns~='13'] tr > :nth-child(13),
+      [data-wide-columns~='14'] tr > :nth-child(14),
+      [data-wide-columns~='15'] tr > :nth-child(15),
+      [data-wide-columns~='16'] tr > :nth-child(16),
+      [data-wide-columns~='17'] tr > :nth-child(17),
+      [data-wide-columns~='18'] tr > :nth-child(18),
+      [data-wide-columns~='19'] tr > :nth-child(19),
+      [data-wide-columns~='20'] tr > :nth-child(20),
+      [data-wide-columns~='21'] tr > :nth-child(21),
+      [data-wide-columns~='22'] tr > :nth-child(22),
+      [data-wide-columns~='23'] tr > :nth-child(23),
+      [data-wide-columns~='24'] tr > :nth-child(24)
+    ) {
+    min-width: 9em;
+  }
+  @media (min-width: 641px) {
+    .markdown-renderer [data-markdown-table] :is(th, td) {
+      min-width: 8em;
+    }
+    .markdown-renderer
+      :is(
+        [data-wide-columns~='1'] tr > :nth-child(1),
+        [data-wide-columns~='2'] tr > :nth-child(2),
+        [data-wide-columns~='3'] tr > :nth-child(3),
+        [data-wide-columns~='4'] tr > :nth-child(4),
+        [data-wide-columns~='5'] tr > :nth-child(5),
+        [data-wide-columns~='6'] tr > :nth-child(6),
+        [data-wide-columns~='7'] tr > :nth-child(7),
+        [data-wide-columns~='8'] tr > :nth-child(8),
+        [data-wide-columns~='9'] tr > :nth-child(9),
+        [data-wide-columns~='10'] tr > :nth-child(10),
+        [data-wide-columns~='11'] tr > :nth-child(11),
+        [data-wide-columns~='12'] tr > :nth-child(12),
+        [data-wide-columns~='13'] tr > :nth-child(13),
+        [data-wide-columns~='14'] tr > :nth-child(14),
+        [data-wide-columns~='15'] tr > :nth-child(15),
+        [data-wide-columns~='16'] tr > :nth-child(16),
+        [data-wide-columns~='17'] tr > :nth-child(17),
+        [data-wide-columns~='18'] tr > :nth-child(18),
+        [data-wide-columns~='19'] tr > :nth-child(19),
+        [data-wide-columns~='20'] tr > :nth-child(20),
+        [data-wide-columns~='21'] tr > :nth-child(21),
+        [data-wide-columns~='22'] tr > :nth-child(22),
+        [data-wide-columns~='23'] tr > :nth-child(23),
+        [data-wide-columns~='24'] tr > :nth-child(24)
+      ) {
+      min-width: 15em;
+    }
+    .markdown-renderer
+      :is(
+        [data-one-line-columns~='1'] tr > :nth-child(1),
+        [data-one-line-columns~='2'] tr > :nth-child(2),
+        [data-one-line-columns~='3'] tr > :nth-child(3),
+        [data-one-line-columns~='4'] tr > :nth-child(4),
+        [data-one-line-columns~='5'] tr > :nth-child(5),
+        [data-one-line-columns~='6'] tr > :nth-child(6),
+        [data-one-line-columns~='7'] tr > :nth-child(7),
+        [data-one-line-columns~='8'] tr > :nth-child(8),
+        [data-one-line-columns~='9'] tr > :nth-child(9),
+        [data-one-line-columns~='10'] tr > :nth-child(10),
+        [data-one-line-columns~='11'] tr > :nth-child(11),
+        [data-one-line-columns~='12'] tr > :nth-child(12),
+        [data-one-line-columns~='13'] tr > :nth-child(13),
+        [data-one-line-columns~='14'] tr > :nth-child(14),
+        [data-one-line-columns~='15'] tr > :nth-child(15),
+        [data-one-line-columns~='16'] tr > :nth-child(16),
+        [data-one-line-columns~='17'] tr > :nth-child(17),
+        [data-one-line-columns~='18'] tr > :nth-child(18),
+        [data-one-line-columns~='19'] tr > :nth-child(19),
+        [data-one-line-columns~='20'] tr > :nth-child(20),
+        [data-one-line-columns~='21'] tr > :nth-child(21),
+        [data-one-line-columns~='22'] tr > :nth-child(22),
+        [data-one-line-columns~='23'] tr > :nth-child(23),
+        [data-one-line-columns~='24'] tr > :nth-child(24)
+      ) {
+      min-width: 0;
+      white-space: nowrap;
+    }
+  }
+
   /* Shiki's CSS-variables theme, for every surface that shows its tokens: a
      markdown fence and a tool step's command (`tool-call-detail.tsx`). */
   :is(.markdown-renderer [data-streamdown='code-block'], [data-shiki-palette]) {

@@ -14,11 +14,7 @@ import {
   scheduleRunIds,
   scheduleRunKey,
 } from '../src/schedule-registry';
-import {
-  hasExplicitSchedulePermission,
-  ScheduleAgentSchema,
-  ScheduleDefinitionSchema,
-} from '../src/schedule-types';
+import { ScheduleAgentSchema, ScheduleDefinitionSchema } from '../src/schedule-types';
 import { ScheduleRepository, type ScheduleRepositoryPort } from '../src/schedule-repository';
 
 const definition = () =>
@@ -281,37 +277,7 @@ it('reads a saved definition back with the fingerprint the Registry published, o
   expect(scheduleDefinitionFingerprint(read!)).toBe(row!.definitionFingerprint);
 });
 
-it('uses explicit advertised permission categories, rejecting unrelated modes and credential options', () => {
-  const permission = {
-    id: 'arbitrary_provider_option',
-    category: '_permission',
-    name: 'Permissions',
-    type: 'select' as const,
-    currentValue: 'safe',
-    options: [{ value: 'safe', name: 'Safe' }],
-  };
-  const capability = { modes: [{ id: 'plan', name: 'Plan' }], configOptions: [permission] };
-  expect(
-    hasExplicitSchedulePermission({ agentConfigId: 'agent', modeId: 'plan' }, capability)
-  ).toBe(false);
-  expect(
-    hasExplicitSchedulePermission(
-      { agentConfigId: 'agent', configOptionValues: { arbitrary_provider_option: 'safe' } },
-      capability
-    )
-  ).toBe(true);
-  expect(
-    hasExplicitSchedulePermission(
-      { agentConfigId: 'agent', configOptionValues: { arbitrary_provider_option: 'unknown' } },
-      capability
-    )
-  ).toBe(false);
-  expect(
-    hasExplicitSchedulePermission(
-      { agentConfigId: 'agent', modeId: 'plan' },
-      { modes: capability.modes }
-    )
-  ).toBe(true);
+it('rejects credential options in schedule definitions', () => {
   expect(
     ScheduleAgentSchema.safeParse({
       agentConfigId: 'agent',
