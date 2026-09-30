@@ -8,11 +8,14 @@ Translation: current
 When a reader enables inline math in Appearance settings, Markdown content
 renders `$...$` and `\(...\)` as inline KaTeX while keeping display math
 available through `$$...$$` and block-positioned `\[...\]` delimiters. A
-`\[...\]` opener embedded in paragraph text is not promoted to a display
-block. The preference is local to the
-client, persists across launches, and defaults off so existing conversations
-remain readable source. Code spans, fenced code, indented code, links, and tool
-payloads remain literal; display math is unchanged by the preference.
+complete `\[...\]` pair embedded in paragraph text is rendered as inline math
+when it is on one line. A multiline pair in paragraph text is separated from
+the surrounding prose and rendered as a display block; Markdown container
+prefixes such as blockquotes and list items are preserved. The preference is
+local to the client, persists across launches, and defaults off so existing
+conversations remain readable source. Code spans, fenced code, indented code,
+links, and tool payloads remain literal; display math is unchanged by the
+preference.
 
 The shared Markdown renderer owns the preference for chat, previews, skills, and
 comments. Static and streaming paths use the same delimiter normalization and

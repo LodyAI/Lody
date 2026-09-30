@@ -548,13 +548,13 @@ End of synthetic document.`,
     const store = createStore();
     await renderMarkdownWithStore(INLINE_DISPLAY_MATH_CONTEXT_MARKDOWN, store);
 
-    expect(container?.querySelectorAll('.katex-display')).toHaveLength(1);
+    expect(container?.querySelectorAll('.katex-display')).toHaveLength(2);
 
     await act(async () => {
       store.set(inlineMathEnabledAtom, true);
     });
 
-    expect(container?.querySelectorAll('.katex-display')).toHaveLength(1);
+    expect(container?.querySelectorAll('.katex-display')).toHaveLength(2);
     expect(container?.textContent).not.toContain('$$p$$');
     expect(container?.querySelectorAll('.katex').length).toBeGreaterThan(1);
   });
@@ -568,13 +568,13 @@ End of synthetic document.`,
     await act(async () => {
       await import('@lobehub/streamdown');
     });
-    expect(container?.querySelectorAll('.katex-display')).toHaveLength(1);
+    expect(container?.querySelectorAll('.katex-display')).toHaveLength(2);
 
     await act(async () => {
       store.set(inlineMathEnabledAtom, true);
     });
 
-    expect(container?.querySelectorAll('.katex-display')).toHaveLength(1);
+    expect(container?.querySelectorAll('.katex-display')).toHaveLength(2);
     expect(container?.textContent).not.toContain('$$p$$');
     expect(container?.querySelectorAll('.katex').length).toBeGreaterThan(1);
   });

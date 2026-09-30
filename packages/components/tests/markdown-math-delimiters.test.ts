@@ -11,11 +11,27 @@ describe('normalizeTexMathDelimiters', () => {
     );
   });
 
-  it('does not rewrite display delimiters embedded in prose', () => {
+  it('rewrites a same-line display pair embedded in prose as inline math', () => {
     const markdown = String.raw`text before \[x + y\] and \(p\)`;
 
     expect(normalizeTexMathDelimiters(markdown, true)).toBe(
-      String.raw`text before \[x + y\] and $$p$$`
+      String.raw`text before $$x + y$$ and $$p$$`
+    );
+  });
+
+  it('puts multiline display pairs after prose on their own lines', () => {
+    const markdown = ['Derive \\[', 'x + y', '\\] in prose.'].join('\n');
+
+    expect(normalizeTexMathDelimiters(markdown)).toBe(
+      ['Derive', '$$', 'x + y', '$$', ' in prose.'].join('\n')
+    );
+  });
+
+  it('keeps inserted multiline display pairs inside list items', () => {
+    const markdown = ['- Derive \\[', '  x + y', '  \\] in prose.'].join('\n');
+
+    expect(normalizeTexMathDelimiters(markdown)).toBe(
+      ['- Derive', '  $$', '  x + y', '  $$', '   in prose.'].join('\n')
     );
   });
 

@@ -7,13 +7,13 @@ Translation: current
 
 ## Abstract
 
-An inline-math regression came from a complete `\[...\]` pair embedded after prose: the renderer still converted it to `$$`, and parsing then consumed following content instead of rendering a later inline formula. Display delimiters now convert only when their opener starts a Markdown block, including quote and list blocks. Synthetic renderer tests cover toggling the setting after mount through static and streaming paths.
+An inline-math regression came from a complete `\[...\]` pair embedded after prose: leaving it unchanged made the renderer treat the source as literal text because `remark-math` does not parse TeX bracket delimiters. Same-line pairs now become same-line `$$...$$` math. Multiline pairs are separated from surrounding prose before conversion, with quote and list prefixes preserved, so the formula renders without consuming adjacent text. Synthetic renderer tests cover static and streaming paths.
 
 ## Decision
 
-`\[...\]` is display-math syntax and only belongs at a Markdown block start. The normalizer previously converted every complete bracket pair, even when its opener followed ordinary prose. In that position, the rewritten `$$` could be interpreted as display math across surrounding text and prevent later inline formulas from being parsed.
+`\[...\]` is TeX display syntax, but real assistant output also places its opener immediately after prose. The normalizer handles the two cases according to the pair's shape. A same-line pair is converted to same-line `$$...$$`, which `remark-math` parses as inline math. A multiline pair gets line breaks around the converted delimiters; the formula therefore remains a display block without allowing `$$` to span the surrounding paragraph. A pair already at a Markdown block start keeps its existing block conversion. Quote and list prefixes are copied onto inserted lines.
 
-The normalizer now accepts leading Markdown container prefixes (blockquote and list markers) but leaves an opener after prose unchanged. The opt-in `\(...\)` inline path is unchanged. This preserves display semantics instead of coercing a misplaced display delimiter into inline math.
+The opt-in `\(...\)` inline path is unchanged. Code spans, fenced and indented code, links, and incomplete pairs remain literal.
 
 ## Evidence
 
