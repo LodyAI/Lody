@@ -97,6 +97,7 @@ export function toIosSimulatorDeviceEntry(device: IosSimulatorDevice): IosSimula
     udid: device.udid,
     name: device.name,
     runtimeKey: device.runtime,
+    deviceType: device.deviceType,
     family: getIosSimulatorDeviceFamily(device.deviceType, device.name),
     state: normalizeIosSimulatorState(device.state),
     available: device.available,

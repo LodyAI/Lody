@@ -6,6 +6,10 @@ import {
   type IosSimulatorPanelViewProps,
 } from '@/components/sessions/ios-simulator/ios-simulator-panel-view';
 import { toIosSimulatorCatalog } from '@/lib/ios-simulator/ios-simulator-model';
+import {
+  getIosSimulatorControlAvailability,
+  getIosSimulatorHardware,
+} from '@/lib/ios-simulator/ios-simulator-hardware';
 
 const IOS_18 = 'com.apple.CoreSimulator.SimRuntime.iOS-18-2';
 const IOS_17 = 'com.apple.CoreSimulator.SimRuntime.iOS-17-5';
@@ -76,6 +80,24 @@ const ready = (transport: 'local' | 'remote') =>
     transport,
   }) as const;
 
+const controls: NonNullable<IosSimulatorPanelViewProps['controls']> = {
+  controlsSupported: true,
+  unsupportedHint: 'Update Lody on Studio to use simulator controls',
+  availability: getIosSimulatorControlAvailability(
+    getIosSimulatorHardware('iphone', 'com.apple.CoreSimulator.SimDeviceType.iPhone-16-Pro', '')
+  ),
+  canAttach: true,
+  viewMode: 'device',
+  fullscreen: false,
+  canFullscreen: true,
+  onControl: fn(),
+  onTypeText: fn(),
+  onOpenUrl: fn(),
+  onScreenshot: fn(),
+  onViewModeChange: fn(),
+  onToggleFullscreen: fn(),
+};
+
 const baseArgs: IosSimulatorPanelViewProps = {
   machineName: 'Studio',
   blocker: null,
@@ -123,9 +145,48 @@ export const Preparing: Story = {
   },
 };
 
-export const PreviewingLocal: Story = { args: { status: ready('local'), viewerState: 'ready' } };
+export const PreviewingLocal: Story = {
+  args: { status: ready('local'), viewerState: 'ready', controls },
+};
 
-export const PreviewingRemote: Story = { args: { status: ready('remote'), viewerState: 'ready' } };
+export const PreviewingRemote: Story = {
+  args: { status: ready('remote'), viewerState: 'ready', controls },
+};
+
+/** A wide panel keeps every control on the second row. */
+export const WideControls: Story = {
+  decorators: [
+    (Story) => (
+      <div className="h-[720px] w-[680px] border-l border-border bg-background">
+        <Story />
+      </div>
+    ),
+  ],
+  args: { status: ready('local'), viewerState: 'ready', controls },
+};
+
+/** The bare screen, as large as the panel allows. */
+export const ScreenOnly: Story = {
+  args: {
+    status: ready('local'),
+    viewerState: 'ready',
+    controls: { ...controls, viewMode: 'screen' },
+  },
+};
+
+/** A Mac whose Lody predates native controls still previews; the row says why it is quiet. */
+export const ControlsNeedUpdate: Story = {
+  args: {
+    status: ready('local'),
+    viewerState: 'ready',
+    controls: { ...controls, controlsSupported: false },
+  },
+};
+
+/** Mobile: every control lives in one More menu beside the status. */
+export const MobileControlsMenu: Story = {
+  args: { status: ready('remote'), viewerState: 'ready', controls, controlsLayout: 'menu' },
+};
 
 export const ViewerDisconnected: Story = {
   args: { status: ready('remote'), viewerState: 'disconnected' },
@@ -203,5 +264,5 @@ export const Narrow: Story = {
       </div>
     ),
   ],
-  args: { status: ready('local'), viewerState: 'ready' },
+  args: { status: ready('local'), viewerState: 'ready', controls },
 };

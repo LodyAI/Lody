@@ -1,12 +1,31 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useAtomValue } from 'jotai';
 import { useTranslation } from 'react-i18next';
-import type { IosSimulatorCommand, IosSimulatorResponse, SessionMeta } from '@lody/shared';
+import {
+  machineSupportsIosSimulatorControls,
+  type IosSimulatorCommand,
+  type IosSimulatorDeviceControl,
+  type IosSimulatorResponse,
+  type SessionMeta,
+} from '@lody/shared';
 import { activeWorkspaceRuntimeAtom, userAtom } from '@/atoms';
 import { localMachineIdAtom } from '@/atoms/local-probe';
 import { getMachineMetaByIdAtomFamily } from '@/atoms/machines';
 import { machineOnlineStatusAtomFamily } from '@/atoms/presence';
 import { writeTextToClipboard } from '@/lib/clipboard';
+import { downloadBytesAsFile } from '@/lib/download-file';
+import {
+  getIosSimulatorScreenshotFileName,
+  type IosSimulatorCaptureError,
+} from '@/lib/ios-simulator/ios-simulator-controls';
+import {
+  getIosSimulatorControlAvailability,
+  getIosSimulatorHardware,
+  reconcileIosSimulatorQuarterTurns,
+  rotateIosSimulatorQuarterTurns,
+  type IosSimulatorControlId,
+  type IosSimulatorQuarterTurns,
+} from '@/lib/ios-simulator/ios-simulator-hardware';
 import { toast } from '@/lib/toast';
 import {
   IOS_SIMULATOR_PREPARING_MAX_POLLS,
@@ -16,6 +35,7 @@ import {
   getIosSimulatorPanelAvailability,
   getIosSimulatorStatusUdid,
   readIosSimulatorSelectedDevice,
+  redactIosSimulatorText,
   resolveIosSimulatorSelection,
   toIosSimulatorCatalog,
   toIosSimulatorPanelStatus,
@@ -28,6 +48,9 @@ import type {
   IosSimulatorViewerState,
 } from '@/lib/ios-simulator/ios-simulator-types';
 import type { IosSimulatorPendingAction } from './ios-simulator-connection-status';
+import type { IosSimulatorScreenshotTarget, IosSimulatorViewMode } from './ios-simulator-controls';
+import { IosSimulatorInputDialog, type IosSimulatorInputKind } from './ios-simulator-input-dialog';
+import type { IosSimulatorViewerHandle } from './ios-simulator-viewer';
 import {
   IosSimulatorPanelView,
   type IosSimulatorCatalogState,
@@ -39,6 +62,24 @@ type SessionIosSimulatorPanelProps = {
   /** On screen: the only state in which it polls; the viewer is told otherwise. */
   active?: boolean;
   leadingSlot?: ReactNode;
+  /** `menu` on mobile: every simulator control lives in one More menu. */
+  controlsLayout?: 'toolbar' | 'menu';
+  /**
+   * Adds a screenshot to the current Session's composer as an attachment.
+   * Returns false when there is no composer to take it. Never sends.
+   */
+  onAttachScreenshot?: (file: File) => boolean;
+};
+
+const controlIdOf = (control: IosSimulatorDeviceControl): IosSimulatorControlId => {
+  switch (control.kind) {
+    case 'button':
+      return control.button;
+    case 'rotate':
+      return control.direction === 'left' ? 'rotate-left' : 'rotate-right';
+    default:
+      return control.kind;
+  }
 };
 
 const IDLE: IosSimulatorPanelStatus = { phase: 'idle' };
@@ -66,6 +107,8 @@ function SessionIosSimulatorPanelController({
   session,
   active = true,
   leadingSlot,
+  controlsLayout = 'toolbar',
+  onAttachScreenshot,
 }: SessionIosSimulatorPanelProps) {
   const { t } = useTranslation();
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
@@ -345,6 +388,174 @@ function SessionIosSimulatorPanelController({
     [live, refreshCatalog]
   );
 
+  // ---------------------------------------------------------------------------
+  // Native controls, screenshots and the view. All of it acts on this Session's
+  // ready preview, through its exact operation.
+
+  const viewerRef = useRef<IosSimulatorViewerHandle>(null);
+  const [turns, setTurns] = useState<IosSimulatorQuarterTurns>(0);
+  const [viewMode, setViewMode] = useState<IosSimulatorViewMode>('device');
+  const [fullscreen, setFullscreen] = useState(false);
+  const [pendingControl, setPendingControl] = useState<IosSimulatorControlId | null>(null);
+  const [capturing, setCapturing] = useState(false);
+  const [inputKind, setInputKind] = useState<IosSimulatorInputKind | null>(null);
+  const machineName = machine?.name ?? t('sessions.iosSimulator.thisMac', 'this Mac');
+
+  // A new operation is a new stream in its own orientation.
+  useEffect(() => setTurns(0), [operationId]);
+
+  const readyOperationId = status.phase === 'ready' ? status.operationId : null;
+  const statusDevice = statusUdid
+    ? (devices.find((candidate) => candidate.udid === statusUdid) ?? null)
+    : null;
+  const hardware = useMemo(
+    () =>
+      getIosSimulatorHardware(
+        statusDevice?.family ?? 'iphone',
+        statusDevice?.deviceType ?? '',
+        statusDevice?.name ?? ''
+      ),
+    [statusDevice?.deviceType, statusDevice?.family, statusDevice?.name]
+  );
+  const controlsSupported = machineSupportsIosSimulatorControls(machine);
+
+  const sendControl = useCallback(
+    async (control: IosSimulatorDeviceControl): Promise<boolean> => {
+      if (!readyOperationId) return false;
+      const id = controlIdOf(control);
+      setPendingControl(id);
+      try {
+        const response = await request({
+          action: 'device-control',
+          operationId: readyOperationId,
+          control,
+        });
+        if (!response) return false;
+        if (response.success) {
+          if (control.kind === 'rotate') {
+            setTurns((current) => rotateIosSimulatorQuarterTurns(current, control.direction));
+          }
+          return true;
+        }
+        toast.error(
+          response.error === 'unavailable'
+            ? t(
+                'sessions.iosSimulator.controls.errorUnavailable',
+                'This simulator doesn’t have that control.'
+              )
+            : response.error === 'unsupported'
+              ? t(
+                  'sessions.iosSimulator.controls.errorUnsupported',
+                  'Update Lody on {{machine}} to use simulator controls.',
+                  { machine: machineName }
+                )
+              : response.error === 'denied'
+                ? t('sessions.iosSimulator.error.unauthorized', 'You can’t control simulators here')
+                : t(
+                    'sessions.iosSimulator.controls.errorFailed',
+                    'The simulator didn’t respond. Try again.'
+                  ),
+          response.message ? { description: redactIosSimulatorText(response.message) } : undefined
+        );
+        return false;
+      } finally {
+        setPendingControl((current) => (current === id ? null : current));
+      }
+    },
+    [machineName, readyOperationId, request, t]
+  );
+
+  const captureErrorMessage = useCallback(
+    (error: IosSimulatorCaptureError) =>
+      error === 'too-large'
+        ? t(
+            'sessions.iosSimulator.screenshot.tooLarge',
+            'The screenshot is too large to bring over.'
+          )
+        : error === 'timeout'
+          ? t(
+              'sessions.iosSimulator.screenshot.timeout',
+              'The simulator took too long to take a screenshot.'
+            )
+          : error === 'unavailable'
+            ? t(
+                'sessions.iosSimulator.screenshot.unavailable',
+                'Screenshots aren’t available until the screen is showing.'
+              )
+            : t('sessions.iosSimulator.screenshot.failed', 'The screenshot couldn’t be taken.'),
+    [t]
+  );
+
+  const takeScreenshot = useCallback(
+    async (target: IosSimulatorScreenshotTarget) => {
+      const viewer = viewerRef.current;
+      if (!viewer) return;
+      setCapturing(true);
+      try {
+        const result = await viewer.capture();
+        if (!result.ok) {
+          toast.error(captureErrorMessage(result.error));
+          return;
+        }
+        const fileName = getIosSimulatorScreenshotFileName(
+          statusDevice?.name ?? 'Simulator',
+          new Date()
+        );
+        if (target === 'save') {
+          downloadBytesAsFile(fileName, new Uint8Array(result.bytes));
+          return;
+        }
+        const file = new File([result.bytes], fileName, { type: 'image/png' });
+        if (onAttachScreenshot?.(file)) {
+          toast.success(
+            t('sessions.iosSimulator.screenshot.attached', 'Screenshot added to your message'),
+            {
+              description: t(
+                'sessions.iosSimulator.screenshot.attachedDetail',
+                'It is sent only when you send the message.'
+              ),
+            }
+          );
+        } else {
+          toast.error(
+            t(
+              'sessions.iosSimulator.screenshot.noComposer',
+              'Open the session chat to attach a screenshot.'
+            )
+          );
+        }
+      } finally {
+        setCapturing(false);
+      }
+    },
+    [captureErrorMessage, onAttachScreenshot, statusDevice?.name, t]
+  );
+
+  const showingPreview = status.phase === 'ready' && statusUdid === selectedUdid;
+  const controls = showingPreview
+    ? {
+        controlsSupported,
+        unsupportedHint: t(
+          'sessions.iosSimulator.controls.updateHint',
+          'Update Lody on {{machine}} to use simulator controls',
+          { machine: machineName }
+        ),
+        availability: getIosSimulatorControlAvailability(hardware),
+        pendingControl,
+        capturing,
+        canAttach: Boolean(onAttachScreenshot),
+        viewMode,
+        fullscreen,
+        canFullscreen: typeof document !== 'undefined' && document.fullscreenEnabled === true,
+        onControl: (control: IosSimulatorDeviceControl) => void sendControl(control),
+        onTypeText: () => setInputKind('text'),
+        onOpenUrl: () => setInputKind('url'),
+        onScreenshot: (target: IosSimulatorScreenshotTarget) => void takeScreenshot(target),
+        onViewModeChange: setViewMode,
+        onToggleFullscreen: () => viewerRef.current?.toggleFullscreen(),
+      }
+    : null;
+
   const handleCopyDiagnostics = useCallback(async () => {
     const device =
       devices.find((candidate) => candidate.udid === (statusUdid ?? selectedUdid)) ?? null;
@@ -398,32 +609,57 @@ function SessionIosSimulatorPanelController({
   ]);
 
   return (
-    <IosSimulatorPanelView
-      machineName={machine?.name ?? t('sessions.iosSimulator.thisMac', 'this Mac')}
-      blocker={blocker}
-      catalog={catalog}
-      refreshing={refreshing}
-      selectedUdid={selectedUdid}
-      status={status}
-      viewerState={viewerState}
-      viewerReloadKey={viewerReloadKey}
-      pendingAction={pendingAction}
-      bootExpected={bootExpected}
-      active={active}
-      leadingSlot={leadingSlot}
-      onSelectDevice={handleSelectDevice}
-      onPickerOpenChange={handlePickerOpenChange}
-      onRefresh={() => {
-        void refreshCatalog();
-        void refreshStatus();
-      }}
-      onStart={startPreview}
-      onCancel={() => stopOperation('cancel')}
-      onStop={() => stopOperation('stop')}
-      onRestore={handleRestore}
-      onRetry={handleRetry}
-      onCopyDiagnostics={() => void handleCopyDiagnostics()}
-      onViewerStateChange={handleViewerStateChange}
-    />
+    <>
+      <IosSimulatorPanelView
+        machineName={machineName}
+        blocker={blocker}
+        catalog={catalog}
+        refreshing={refreshing}
+        selectedUdid={selectedUdid}
+        status={status}
+        viewerState={viewerState}
+        viewerReloadKey={viewerReloadKey}
+        pendingAction={pendingAction}
+        bootExpected={bootExpected}
+        active={active}
+        leadingSlot={leadingSlot}
+        onSelectDevice={handleSelectDevice}
+        onPickerOpenChange={handlePickerOpenChange}
+        onRefresh={() => {
+          void refreshCatalog();
+          void refreshStatus();
+        }}
+        onStart={startPreview}
+        onCancel={() => stopOperation('cancel')}
+        onStop={() => stopOperation('stop')}
+        onRestore={handleRestore}
+        onRetry={handleRetry}
+        onCopyDiagnostics={() => void handleCopyDiagnostics()}
+        onViewerStateChange={handleViewerStateChange}
+        controls={controls}
+        controlsLayout={controlsLayout}
+        turns={turns}
+        viewerRef={viewerRef}
+        onScreenAspectChange={(aspect) =>
+          setTurns((current) => reconcileIosSimulatorQuarterTurns(current, aspect))
+        }
+        onFullscreenChange={setFullscreen}
+      />
+      <IosSimulatorInputDialog
+        kind={showingPreview ? inputKind : null}
+        deviceName={
+          statusDevice?.name ?? t('sessions.iosSimulator.connection.thisDevice', 'the simulator')
+        }
+        busy={pendingControl === 'text' || pendingControl === 'open-url'}
+        onOpenChange={(open) => {
+          if (!open) setInputKind(null);
+        }}
+        onSubmit={(kind, value) =>
+          sendControl(
+            kind === 'url' ? { kind: 'open-url', url: value } : { kind: 'text', text: value }
+          )
+        }
+      />
+    </>
   );
 }

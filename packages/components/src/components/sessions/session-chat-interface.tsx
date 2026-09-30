@@ -1887,6 +1887,11 @@ export type SessionChatInterfaceHandle = {
   toggleCommentReference: (reference: CommentReferencePayload) => boolean;
   addVisualAnnotationReference: (reference: VisualAnnotationReferencePayload) => boolean;
   toggleVisualAnnotationReference: (reference: VisualAnnotationReferencePayload) => boolean;
+  /**
+   * Adds files to the composer as attachments, the way a drop does. It never
+   * sends; false when the composer is not mounted to take them.
+   */
+  addAttachmentFiles: (files: File[]) => boolean;
   copyConversationHistory: () => Promise<void>;
   /** Plain-text conversation snapshot for the share-as-image card; null while
    * durable history has not loaded. */
@@ -5141,6 +5146,12 @@ export const SessionChatInterface = memo(
         },
         toggleVisualAnnotationReference: (reference) => {
           return inputAreaRef.current?.toggleVisualAnnotationReference(reference) ?? false;
+        },
+        addAttachmentFiles: (files) => {
+          const inputArea = inputAreaRef.current;
+          if (!inputArea) return false;
+          inputArea.handleImageDrop(files);
+          return true;
         },
         copyConversationHistory: handleCopyConversationHistory,
         getShareImageData: async () => {

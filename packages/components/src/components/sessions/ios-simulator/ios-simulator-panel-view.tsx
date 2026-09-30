@@ -1,4 +1,4 @@
-import type { CSSProperties, ReactNode } from 'react';
+import type { ReactNode, Ref } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { Check, Copy } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
@@ -27,12 +27,19 @@ import {
 } from './ios-simulator-connection-status';
 import {
   IOS_SIMULATOR_PREPARING_STAGES,
+  useIosSimulatorButtonLabel,
   useIosSimulatorDeviceStateLabel,
   useIosSimulatorErrorCopy,
   useIosSimulatorStageLabel,
 } from './ios-simulator-copy';
+import { IosSimulatorControls, type IosSimulatorControlsProps } from './ios-simulator-controls';
+import { IosSimulatorDeviceFrame } from './ios-simulator-device-frame';
 import { IosSimulatorDevicePicker } from './ios-simulator-device-picker';
-import { IosSimulatorViewer } from './ios-simulator-viewer';
+import { IosSimulatorViewer, type IosSimulatorViewerHandle } from './ios-simulator-viewer';
+import {
+  getIosSimulatorHardware,
+  type IosSimulatorQuarterTurns,
+} from '@/lib/ios-simulator/ios-simulator-hardware';
 
 export type IosSimulatorCatalogState =
   | { phase: 'loading' }
@@ -73,6 +80,18 @@ export type IosSimulatorPanelViewProps = {
   onRetry: () => void;
   onCopyDiagnostics: () => void;
   onViewerStateChange?: (state: IosSimulatorViewerState) => void;
+  /**
+   * The simulator's native controls and view options. Present only while this
+   * Session's preview is ready; everything else about the panel stays as is.
+   */
+  controls?: Omit<IosSimulatorControlsProps, 'layout'> | null;
+  /** `toolbar`: a second row (desktop). `menu`: all controls in one More menu (mobile). */
+  controlsLayout?: 'toolbar' | 'menu';
+  /** Quarter turns of the exterior; the streamed screen is never rotated. */
+  turns?: IosSimulatorQuarterTurns;
+  viewerRef?: Ref<IosSimulatorViewerHandle>;
+  onScreenAspectChange?: (aspect: number) => void;
+  onFullscreenChange?: (fullscreen: boolean) => void;
 };
 
 const styles = stylex.create({
@@ -156,20 +175,10 @@ const styles = stylex.create({
     gap: space[1.5],
   },
   /**
-   * The screen slot: the device's own shape, empty, at the size the live
-   * screen will take — so starting a preview lights the slot in place instead
-   * of swapping one layout for another. Nothing is in it yet, so it is a well.
+   * What the screen says before there is a stream: the device's own glass,
+   * empty, at the size the live screen will take — so starting a preview lights
+   * it in place. Nothing is on it yet, so it is a well.
    */
-  deviceStage: {
-    boxSizing: 'border-box',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexGrow: 1,
-    minHeight: 0,
-    padding: space[4],
-    containerType: 'size',
-  },
   slot: {
     boxSizing: 'border-box',
     display: 'flex',
@@ -177,15 +186,10 @@ const styles = stylex.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: space[3],
-    width: 'min(100cqw, calc(100cqh * var(--ios-simulator-aspect)))',
-    aspectRatio: 'var(--ios-simulator-aspect)',
-    minWidth: '12rem',
-    maxWidth: '100%',
-    maxHeight: '100%',
+    width: '100%',
+    height: '100%',
     padding: space[4],
     overflow: 'hidden',
-    borderRadius: radius.large,
-    cornerShape: corner.shape,
     backgroundColor: colors.wellBackground,
     boxShadow: shadow.inset,
     textAlign: 'center',
@@ -281,22 +285,31 @@ function Message({
 
 function DeviceSlot({
   device,
+  bezel,
   children,
 }: {
   device: IosSimulatorDeviceEntry | null;
+  bezel: boolean;
   children: ReactNode;
 }) {
-  const aspect = { '--ios-simulator-aspect': String(getIosSimulatorAspectRatio(device?.family)) };
+  const buttonLabel = useIosSimulatorButtonLabel();
+  const hardware = getIosSimulatorHardware(
+    device?.family ?? 'iphone',
+    device?.deviceType ?? '',
+    device?.name ?? ''
+  );
   return (
-    <div {...stylex.props(styles.deviceStage)}>
-      <div
-        {...stylex.props(styles.slot)}
-        style={aspect as CSSProperties}
-        data-testid="ios-simulator-slot"
-      >
+    <IosSimulatorDeviceFrame
+      hardware={hardware}
+      screenAspect={getIosSimulatorAspectRatio(hardware.family)}
+      turns={0}
+      bezel={bezel}
+      buttonLabel={buttonLabel}
+    >
+      <div {...stylex.props(styles.slot)} data-testid="ios-simulator-slot">
         {children}
       </div>
-    </div>
+    </IosSimulatorDeviceFrame>
   );
 }
 
@@ -371,6 +384,12 @@ export function IosSimulatorPanelView({
   onRetry,
   onCopyDiagnostics,
   onViewerStateChange = () => {},
+  controls = null,
+  controlsLayout = 'toolbar',
+  turns = 0,
+  viewerRef,
+  onScreenAspectChange,
+  onFullscreenChange,
 }: IosSimulatorPanelViewProps) {
   const { t } = useTranslation();
   const stateLabel = useIosSimulatorDeviceStateLabel();
@@ -383,6 +402,8 @@ export function IosSimulatorPanelView({
   const statusUdid = getIosSimulatorStatusUdid(status);
   const statusDevice = statusUdid ? (deviceByUdid.get(statusUdid) ?? null) : null;
   const busy = pendingAction !== null;
+  const buttonLabel = useIosSimulatorButtonLabel();
+  const bezel = (controls?.viewMode ?? 'device') === 'device';
 
   const copyDiagnosticsButton = (
     <Button type="button" variant="ghost" size="small" onClick={onCopyDiagnostics}>
@@ -484,22 +505,40 @@ export function IosSimulatorPanelView({
           ) : null}
           <IosSimulatorViewer
             key={`${status.operationId}:${viewerReloadKey}`}
+            ref={viewerRef}
             viewerUrl={status.viewerUrl}
             viewerOrigin={status.viewerOrigin}
             operationId={status.operationId}
             title={t('sessions.iosSimulator.viewerTitle', '{{device}} screen', {
               device: statusDevice?.name ?? '',
             })}
-            family={statusDevice?.family}
+            hardware={getIosSimulatorHardware(
+              statusDevice?.family ?? 'iphone',
+              statusDevice?.deviceType ?? '',
+              statusDevice?.name ?? ''
+            )}
+            turns={turns}
+            bezel={bezel}
             visible={active}
             onStateChange={onViewerStateChange}
+            onScreenAspectChange={onScreenAspectChange}
+            onFullscreenChange={onFullscreenChange}
+            onPressButton={
+              controls?.controlsSupported
+                ? (button) => controls.onControl({ kind: 'button', button })
+                : undefined
+            }
+            isPressAvailable={(button) =>
+              Boolean(controls?.availability[button]) && controls?.pendingControl !== button
+            }
+            buttonLabel={buttonLabel}
           />
         </div>
       );
     }
     if (showingStatusDevice && status.phase === 'preparing') {
       return (
-        <DeviceSlot device={statusDevice}>
+        <DeviceSlot device={statusDevice} bezel={bezel}>
           <p {...stylex.props(styles.deviceName)}>{statusDevice?.name}</p>
           <PreparingSteps stage={status.stage} includeBoot={bootExpected} />
           <Button
@@ -517,7 +556,7 @@ export function IosSimulatorPanelView({
     }
     if (showingStatusDevice && status.phase === 'closed') {
       return (
-        <DeviceSlot device={statusDevice}>
+        <DeviceSlot device={statusDevice} bezel={bezel}>
           <p {...stylex.props(styles.deviceName)}>{statusDevice?.name}</p>
           <p {...stylex.props(styles.detail)}>
             {t('sessions.iosSimulator.closed.detail', 'The preview ended.')}{' '}
@@ -571,7 +610,7 @@ export function IosSimulatorPanelView({
       statusDevice.udid !== selected.udid &&
       (status.phase === 'ready' || status.phase === 'preparing');
     return (
-      <DeviceSlot device={selected}>
+      <DeviceSlot device={selected} bezel={bezel}>
         <div {...stylex.props(styles.message)}>
           <p {...stylex.props(styles.deviceName)}>{selected.name}</p>
           <p {...stylex.props(styles.deviceMeta)}>
@@ -674,7 +713,13 @@ export function IosSimulatorPanelView({
             />
           </div>
         ) : null}
+        {controls && controlsLayout === 'menu' ? (
+          <IosSimulatorControls layout="menu" {...controls} />
+        ) : null}
       </div>
+      {controls && controlsLayout === 'toolbar' ? (
+        <IosSimulatorControls layout="toolbar" {...controls} />
+      ) : null}
       <div {...stylex.props(styles.stage)}>{renderStage()}</div>
     </div>
   );

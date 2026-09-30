@@ -21,6 +21,8 @@ import { machineMetaCacheAtom } from '../src/atoms/doc-meta';
 import { localProbeResultAtom } from '../src/atoms/local-probe';
 import { lodyPresenceSyncStateAtom } from '../src/atoms/presence';
 import { writeTextToClipboard } from '../src/lib/clipboard';
+import { downloadBytesAsFile } from '../src/lib/download-file';
+import { toast } from '../src/lib/toast';
 import {
   IOS_SIMULATOR_PREPARING_MAX_POLLS,
   writeIosSimulatorSelectedDevice,
@@ -43,6 +45,10 @@ vi.mock('../src/lib/clipboard', () => ({
 
 vi.mock('@/lib/toast', () => ({
   toast: { success: vi.fn(), error: vi.fn() },
+}));
+
+vi.mock('../src/lib/download-file', () => ({
+  downloadBytesAsFile: vi.fn(),
 }));
 
 const MACHINE = 'mac-studio' as MachineId;
@@ -96,13 +102,19 @@ function createFakeMachine(initial: {
   list?: IosSimulatorResponse;
 }) {
   const commands: IosSimulatorCommand[] = [];
-  const state = { preview: initial.preview, list: initial.list };
+  const state = {
+    preview: initial.preview,
+    list: initial.list,
+    control: (_command: IosSimulatorCommand): IosSimulatorResponse => answer(),
+  };
   const pending: Array<(response: IosSimulatorResponse) => void> = [];
   const requestIosSimulatorControl = async ({ command }: { command: IosSimulatorCommand }) => {
     commands.push(command);
     switch (command.action) {
       case 'list':
         return state.list ?? answer({ devices: initial.devices });
+      case 'device-control':
+        return state.control(command);
       case 'status':
         return answer({
           preview:
@@ -119,6 +131,10 @@ function createFakeMachine(initial: {
     requestIosSimulatorControl,
     setPreview: (next: IosSimulatorPreview | undefined) => {
       state.preview = next;
+    },
+    /** How the machine answers a device-control command. */
+    setControlAnswer: (answerFor: (command: IosSimulatorCommand) => IosSimulatorResponse) => {
+      state.control = answerFor;
     },
     /** Answers the oldest pending start/stop. */
     answerNext: async (response: IosSimulatorResponse) => {
@@ -149,6 +165,8 @@ async function renderPanel(options: {
   meta?: MachineMeta;
   presence?: 'synced' | 'idle';
   localMachine?: boolean;
+  onAttachScreenshot?: (file: File) => boolean;
+  controlsLayout?: 'toolbar' | 'menu';
 }) {
   const store = createStore();
   store.set(userAtom, { id: 'user-1', name: 'Sim User', email: 'sim@example.com' } as never);
@@ -171,7 +189,12 @@ async function renderPanel(options: {
         createElement(
           Provider,
           { store },
-          createElement(SessionIosSimulatorPanel, { session: SESSION, active })
+          createElement(SessionIosSimulatorPanel, {
+            session: SESSION,
+            active,
+            onAttachScreenshot: options.onAttachScreenshot,
+            controlsLayout: options.controlsLayout,
+          })
         )
       );
     });
@@ -490,5 +513,291 @@ describe('SessionIosSimulatorPanel', () => {
     expect(copied).toContain('error=environment');
     expect(copied).not.toContain('alice');
     expect(copied).not.toContain('relay.example');
+  });
+});
+
+class TestPointerEvent extends MouseEvent {
+  readonly pointerType: string;
+  constructor(type: string, init: MouseEventInit & { pointerType?: string } = {}) {
+    super(type, init);
+    this.pointerType = init.pointerType ?? '';
+  }
+}
+
+const CONTROLS_META = macMeta({ iosSimulator: 1, iosSimulatorControls: 1 });
+const READY = preview({ phase: 'ready', viewerUrl: VIEWER_URL, transport: 'local' });
+
+const labelled = (label: string) =>
+  document.body.querySelector<HTMLButtonElement>(`[aria-label="${label}"]`);
+
+/** The full pointer sequence Base UI listens for, then the frames it defers to. */
+async function pointerClick(element: Element) {
+  await act(async () => {
+    const pointer = { bubbles: true, cancelable: true, pointerType: 'mouse', button: 0, detail: 1 };
+    element.dispatchEvent(new PointerEvent('pointermove', pointer));
+    element.dispatchEvent(new PointerEvent('pointerdown', pointer));
+    element.dispatchEvent(new MouseEvent('mousedown', pointer));
+    if (element instanceof HTMLElement) element.focus();
+    element.dispatchEvent(new PointerEvent('pointerup', pointer));
+    element.dispatchEvent(new MouseEvent('mouseup', pointer));
+    (element as HTMLElement).click();
+    await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
+    await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
+  });
+  await flush();
+}
+
+async function until<T>(find: () => T | null | undefined, what: string): Promise<T> {
+  for (let attempt = 0; attempt < 30; attempt += 1) {
+    const found = find();
+    if (found) return found;
+    await pointerFrame();
+  }
+  throw new Error(`timed out waiting for ${what}`);
+}
+
+async function pointerFrame() {
+  await act(async () => {
+    await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
+  });
+}
+
+const menuItem = (label: string) =>
+  [...document.body.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(
+    (item) => item.textContent?.trim() === label
+  );
+
+async function typeInto(input: HTMLInputElement, value: string) {
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(input, value);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+}
+
+describe('SessionIosSimulatorPanel controls', () => {
+  it('sends native controls through the exact ready operation', async () => {
+    const machine = createFakeMachine({
+      devices: [
+        device({
+          udid: 'phone',
+          name: 'iPhone 16 Pro',
+          deviceType: 'com.apple.CoreSimulator.SimDeviceType.iPhone-16-Pro',
+          state: 'Booted',
+          occupancy: 'this-session',
+        }),
+      ],
+      preview: READY,
+    });
+    await renderPanel({ machine, meta: CONTROLS_META });
+
+    await act(async () => labelled('Home')?.click());
+    await flush();
+    await act(async () => labelled('Shake')?.click());
+    await flush();
+    // The exterior's side button presses the real one.
+    await act(async () =>
+      container?.querySelector<HTMLButtonElement>('[data-hardware-button="side"]')?.click()
+    );
+    await flush();
+
+    expect(machine.commands.filter((command) => command.action === 'device-control')).toEqual([
+      {
+        action: 'device-control',
+        operationId: 'op-1',
+        control: { kind: 'button', button: 'home' },
+      },
+      { action: 'device-control', operationId: 'op-1', control: { kind: 'shake' } },
+      {
+        action: 'device-control',
+        operationId: 'op-1',
+        control: { kind: 'button', button: 'lock' },
+      },
+    ]);
+  });
+
+  it('turns the exterior only after the machine confirms a rotation', async () => {
+    const machine = createFakeMachine({
+      devices: [device({ udid: 'phone', state: 'Booted', occupancy: 'this-session' })],
+      preview: READY,
+    });
+    await renderPanel({ machine, meta: CONTROLS_META });
+    const turns = () =>
+      container?.querySelector('[data-testid="ios-simulator-device"]')?.getAttribute('data-turns');
+    expect(turns()).toBe('0');
+
+    machine.setControlAnswer(() => answer({ success: false, error: 'failed' }));
+    await act(async () => labelled('Rotate left')?.click());
+    await flush();
+    expect(turns()).toBe('0');
+    expect(vi.mocked(toast.error)).toHaveBeenCalled();
+
+    machine.setControlAnswer(() => answer());
+    await act(async () => labelled('Rotate left')?.click());
+    await flush();
+    expect(turns()).toBe('3');
+  });
+
+  it('disables what the device lacks and says once why a Mac cannot take controls', async () => {
+    const machine = createFakeMachine({
+      devices: [
+        device({
+          udid: 'phone',
+          name: 'iPhone 15',
+          deviceType: 'com.apple.CoreSimulator.SimDeviceType.iPhone-15',
+          state: 'Booted',
+          occupancy: 'this-session',
+        }),
+      ],
+      preview: READY,
+    });
+    await renderPanel({ machine, meta: CONTROLS_META });
+    expect(labelled('Action button')?.disabled).toBe(true);
+    expect(labelled('Volume up')?.disabled).toBe(false);
+    act(() => root?.unmount());
+    container?.remove();
+
+    const old = createFakeMachine({
+      devices: [device({ udid: 'phone', state: 'Booted', occupancy: 'this-session' })],
+      preview: READY,
+    });
+    await renderPanel({ machine: old, meta: macMeta({ iosSimulator: 1 }) });
+    expect(text()).toContain('Update Lody on Studio to use simulator controls');
+    expect(labelled('Home')).toBeNull();
+    expect(
+      container?.querySelector<HTMLButtonElement>('[data-hardware-button="side"]')?.disabled
+    ).toBe(true);
+    expect(old.commands.some((command) => command.action === 'device-control')).toBe(false);
+  });
+
+  it('opens a deep link only after it is submitted, and never an executable scheme', async () => {
+    vi.stubGlobal('PointerEvent', TestPointerEvent);
+    const machine = createFakeMachine({
+      devices: [device({ udid: 'phone', state: 'Booted', occupancy: 'this-session' })],
+      preview: READY,
+    });
+    await renderPanel({ machine, meta: CONTROLS_META });
+    await pointerClick(labelled('Open URL or deep link…')!);
+    const input = await until(
+      () => document.body.querySelector<HTMLInputElement>('input[inputmode="url"]'),
+      'the URL field'
+    );
+    const submit = () =>
+      [...document.body.querySelectorAll<HTMLButtonElement>('button[type="submit"]')].find(
+        (candidate) => candidate.textContent?.trim() === 'Open'
+      )!;
+
+    await typeInto(input, 'javascript:alert(1)');
+    await act(async () => submit().click());
+    await flush();
+    expect(document.body.textContent).toContain('That kind of link can’t be opened');
+    expect(machine.commands.some((command) => command.action === 'device-control')).toBe(false);
+
+    await typeInto(input, 'myapp://orders/42');
+    await act(async () => submit().click());
+    await flush();
+    expect(machine.commands.filter((command) => command.action === 'device-control')).toEqual([
+      {
+        action: 'device-control',
+        operationId: 'op-1',
+        control: { kind: 'open-url', url: 'myapp://orders/42' },
+      },
+    ]);
+    vi.unstubAllGlobals();
+  });
+
+  it('attaches a screenshot to the composer without sending, trusting only its own reply', async () => {
+    vi.stubGlobal('PointerEvent', TestPointerEvent);
+    const attached: File[] = [];
+    const machine = createFakeMachine({
+      devices: [
+        device({
+          udid: 'phone',
+          name: 'iPhone 16 Pro',
+          state: 'Booted',
+          occupancy: 'this-session',
+        }),
+      ],
+      preview: READY,
+    });
+    await renderPanel({
+      machine,
+      meta: CONTROLS_META,
+      onAttachScreenshot: (file) => {
+        attached.push(file);
+        return true;
+      },
+    });
+    const frame = container?.querySelector('iframe') as HTMLIFrameElement;
+    const posted: Array<{ type: string; requestId?: string }> = [];
+    vi.spyOn(frame.contentWindow!, 'postMessage').mockImplementation(((message: {
+      type: string;
+      requestId?: string;
+    }) => posted.push(message)) as never);
+    await act(async () => {
+      frame.dispatchEvent(new Event('load'));
+    });
+
+    await pointerClick(labelled('Screenshot')!);
+    await pointerClick(await until(() => menuItem('Attach screenshot to message'), 'the menu'));
+    const request = posted.find((message) => message.type === 'lody:ios-simulator:capture');
+    expect(request).toMatchObject({ operationId: 'op-1' });
+
+    const png = new Uint8Array(16);
+    png.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    const reply = (requestId: string, source: MessageEventSource | null) =>
+      new MessageEvent('message', {
+        data: {
+          type: 'lody:ios-simulator:capture-result',
+          operationId: 'op-1',
+          requestId,
+          mimeType: 'image/png',
+          data: png.buffer,
+        },
+        origin: VIEWER_ORIGIN,
+        source,
+      });
+    await act(async () => {
+      window.dispatchEvent(reply('someone-else', frame.contentWindow));
+      window.dispatchEvent(reply(request!.requestId!, window));
+    });
+    await flush();
+    expect(attached).toEqual([]);
+
+    await act(async () => {
+      window.dispatchEvent(reply(request!.requestId!, frame.contentWindow));
+    });
+    await flush();
+    expect(attached).toHaveLength(1);
+    expect(attached[0]).toMatchObject({ type: 'image/png' });
+    expect(attached[0]?.name).toMatch(/^iPhone 16 Pro .+\.png$/);
+    // Attaching is not sending: nothing else reached the machine.
+    expect(machine.commands.some((command) => command.action === 'device-control')).toBe(false);
+    vi.unstubAllGlobals();
+  });
+
+  it('reports a screenshot the viewer never answers instead of waiting forever', async () => {
+    // Only timers: the menu still needs real animation frames to open.
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    vi.stubGlobal('PointerEvent', TestPointerEvent);
+    const machine = createFakeMachine({
+      devices: [device({ udid: 'phone', state: 'Booted', occupancy: 'this-session' })],
+      preview: READY,
+    });
+    await renderPanel({ machine, meta: CONTROLS_META, onAttachScreenshot: () => true });
+    const frame = container?.querySelector('iframe') as HTMLIFrameElement;
+    vi.spyOn(frame.contentWindow!, 'postMessage').mockImplementation((() => {}) as never);
+    await act(async () => {
+      frame.dispatchEvent(new Event('load'));
+    });
+    await pointerClick(labelled('Screenshot')!);
+    await pointerClick(await until(() => menuItem('Save screenshot'), 'the menu'));
+    expect(vi.mocked(toast.error)).not.toHaveBeenCalled();
+
+    await advance(10_000);
+    expect(vi.mocked(toast.error)).toHaveBeenCalledWith(
+      'The simulator took too long to take a screenshot.'
+    );
+    expect(vi.mocked(downloadBytesAsFile)).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
   });
 });

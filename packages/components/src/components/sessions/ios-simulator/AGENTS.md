@@ -24,3 +24,14 @@ Decision and rationale:
   replacements. Preparation polls and Stop stay bound to their exact operation id.
 - Same-machine Electron is never blocked by cloud presence reporting its machine
   offline.
+- Native controls are `device-control` on the exact ready operation id, gated by
+  `machineSupportsIosSimulatorControls`. What a device lacks stays listed and disabled
+  (`getIosSimulatorControlAvailability`); without the protocol, say so once.
+- The exterior (`ios-simulator-device-frame.tsx`) is drawn only outside the streamed
+  screen: never a notch, island or home indicator over pixels, and never a rotated
+  iframe. It turns only after a confirmed rotate, and snaps to the stream's own shape.
+- A screenshot is the viewer's `capture` answer bound to its frame, origin, operation
+  and request id, a PNG of at most 16 MiB within 10 s. It joins the current composer
+  as an attachment and is never sent for the person. No share, public viewer or
+  open-in-browser. Typed text and URLs are submitted forms; read the clipboard only
+  on an explicit Paste.
