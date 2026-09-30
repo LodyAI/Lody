@@ -38,6 +38,11 @@ builds to `site-docs/out/client`. Binding rules live in
 - `components/marketing-atmosphere.tsx` — the shared marketing ambient field,
   hosted once by `components/site-root-provider.tsx`.
 - `components/pricing-page.tsx` — pricing table, plans, and FAQ.
+- `components/coding-agent-pages.tsx` — English GUI and remote-control workflow pages,
+  shared integration cards, and native FAQs. `app/coding-agent.css` owns their layout.
+  The pages reuse real public product screenshots and the marketing shell; they do
+  not imply feature parity or certification across runtimes. Agent setup remains in
+  `content/docs/{en,zh}/(core-concepts)/agents.mdx`.
 
 Demo sequencing and screenshot notes live in
 [context/landing-demos.md](context/landing-demos.md). Measurements, history, and
@@ -96,7 +101,7 @@ The suite starts its own loopback static host and blocks all external requests.
 It checks every published HTML page with JavaScript disabled, internal link targets,
 404 behavior, actual desktop/mobile navigation, and route/article/static-data failure
 recovery on real landing, blog, and Fumadocs pages. Healthy pages must also respond
-to a theme change. `STATIC_TEST_PHASE=scan|faults|navigation` selects a focused phase;
+to a theme change. `STATIC_TEST_PHASE=scan|faults|navigation|agent-pages` selects a focused phase;
 the default runs all phases. JSON results and screenshots go to `out/static-verification`.
 
 The mobile menu is a native disclosure so navigation remains usable when client

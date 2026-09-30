@@ -6,6 +6,8 @@ export { SITE_URL, absoluteSiteUrl } from '../lib/site-url.mjs';
 const STATIC_PATHS = [
   '/',
   '/home',
+  '/coding-agent-gui',
+  '/coding-agent-remote-control',
   '/zh',
   '/zh/home',
   '/docs',

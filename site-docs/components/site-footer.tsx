@@ -2,7 +2,7 @@ import { SiteAnchor } from '@site/components/site-anchor';
 /**
  * Shared site footer — same structure as the homepage underwater footer:
  * copyright, support / terms / privacy / GitHub / X.
- * Product nav lives in SiteNav only.
+ * Primary product nav lives in SiteNav; English workflow guides are linked here.
  */
 
 import { founderCallUrl } from '@site/lib/founder-call';
@@ -43,6 +43,12 @@ export function SiteFooter({ locale }: { locale: SiteFooterLocale }) {
       <div className="underwater-footer__inner">
         <p className="underwater-footer__rights">{t.rights}</p>
         <nav className="underwater-footer__links" aria-label="Footer">
+          {locale === 'en' && (
+            <>
+              <SiteAnchor href="/coding-agent-gui/">Agent GUI</SiteAnchor>
+              <SiteAnchor href="/coding-agent-remote-control/">Remote control</SiteAnchor>
+            </>
+          )}
           <SiteAnchor href={t.supportHref}>{t.support}</SiteAnchor>
           <SiteAnchor href={founderCallUrl('footer')} rel="noreferrer" target="_blank">
             {t.bookCall}
