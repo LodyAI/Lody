@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: [#1177](https://github.com/LodyAI/Lody/pull/1177)
 
 [中文](2026-09-30-image-viewer-modal-focus.zh.md)
 
