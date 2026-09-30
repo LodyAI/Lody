@@ -43,7 +43,8 @@ type E2eeLocalOnlyMethod =
   | 'file/resolve-local'
   | 'session/dispatch-turn'
   | 'session/preview-endpoint-acquire'
-  | 'session/preview-endpoint-release';
+  | 'session/preview-endpoint-release'
+  | 'session/mcp-app';
 export type E2eeAdmittedMethod = Exclude<LocalMachineRpcRequest['method'], E2eeLocalOnlyMethod>;
 /**
  * `read` needs no execution journal; `write` claims one. Scope decides who may sign

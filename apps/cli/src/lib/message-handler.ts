@@ -225,6 +225,9 @@ import {
   isSessionGoalActive,
   type SessionGoalAction,
   type SessionGoalResponse,
+  type SessionMcpAppRequest,
+  type SessionMcpAppResponse,
+  sessionMcpAppFailure,
   resolveProjectGitHubRepo,
   deleteMachineFlockRowFromFlock,
   getMachineFlockDeleteLocalProjectEntries,
@@ -3375,6 +3378,23 @@ export class MessageHandler {
     });
   }
 
+  private async requestSessionMcpAppWithAccessCheck(
+    request: SessionMcpAppRequest
+  ): Promise<SessionMcpAppResponse> {
+    const access = await this.verifySessionMachineAccess(
+      request.sessionId as SessionId,
+      request.userId
+    );
+    if (access.outcome !== 'allowed') {
+      return sessionMcpAppFailure(
+        request,
+        'MCP_APP_ACCESS_DENIED',
+        `MCP App access verification ${access.outcome}`
+      );
+    }
+    return await this.executionService.requestSessionMcpApp(request);
+  }
+
   private async forkSessionWithAccessCheck(args: SessionForkSpec): Promise<SessionForkResponse> {
     const access = await this.verifySessionMachineAccess(
       args.sourceSessionId,
@@ -4256,6 +4276,8 @@ export class MessageHandler {
           await this.withdrawSessionInputWithAccessCheck(args, userId),
         steerSession: async (args) => await this.steerSessionWithAccessCheck(args),
         controlSessionGoal: async (args) => await this.controlSessionGoalWithAccessCheck(args),
+        requestSessionMcpApp: async (request) =>
+          await this.requestSessionMcpAppWithAccessCheck(request),
         terminateSession: async ({ sessionId }) => await this.terminateAcpSession(sessionId),
         forkSession: async (args) => await this.forkSessionWithAccessCheck(args),
         editAndResendSession: async (args) => await this.editAndResendSessionWithAccessCheck(args),
@@ -8700,6 +8722,8 @@ export class MessageHandler {
           sessionId: request.params.sessionId as SessionId,
         });
       }
+      case 'session/mcp-app':
+        return await this.requestSessionMcpAppWithAccessCheck(request.params);
       case 'session/terminate':
         return await this.terminateAcpSession(request.params.sessionId as SessionId);
       case 'machine/memory':

@@ -104,6 +104,8 @@ import type {
   SessionSteerResponse,
   SessionGoalAction,
   SessionGoalResponse,
+  SessionMcpAppRequest,
+  SessionMcpAppResponse,
   SessionId,
   SessionPreviewCreateResponse,
   SessionPreviewRevokeResponse,
@@ -524,6 +526,11 @@ type RpcServerDeps = {
     objective?: string;
     userId: string;
   }) => Promise<SessionGoalResponse>;
+  /**
+   * Proxies MCP App traffic to the session's live agent. It stays on the shared
+   * lane: app tool calls have unbounded latency and must not occupy control slots.
+   */
+  requestSessionMcpApp?: (request: SessionMcpAppRequest) => Promise<SessionMcpAppResponse>;
   terminateSession?: (args: { sessionId: SessionId }) => Promise<SessionTerminateResponse>;
   forkSession?: (args: SessionForkSpec) => Promise<SessionForkResponse>;
   editAndResendSession?: (
@@ -1766,6 +1773,18 @@ export class LoroStreamsMachineRpcServer {
           await appendResultResponse(request.replyTo, request.id, request.method, response);
           return;
         }
+        case 'session/mcp-app': {
+          if (!this.deps.requestSessionMcpApp) {
+            await this.appendErrorResponse(request.replyTo, request.id, request.method, {
+              code: LORO_STREAMS_RPC_ERROR_CODES.methodUnavailable,
+              message: 'MCP Apps are not available on this machine.',
+            });
+            return;
+          }
+          const response = await this.deps.requestSessionMcpApp(request.params);
+          await this.appendResultResponse(request.replyTo, request.id, request.method, response);
+          return;
+        }
         case 'session/terminate': {
           if (!this.deps.terminateSession) {
             await appendErrorResponse(request.replyTo, request.id, request.method, {
@@ -2731,6 +2750,7 @@ export class LoroStreamsMachineRpcServer {
       | SessionWithdrawInputResponse
       | SessionSteerResponse
       | SessionGoalResponse
+      | SessionMcpAppResponse
       | SessionTerminateResponse
       | SessionForkResponse
       | SessionEditAndResendResponse
