@@ -173,7 +173,11 @@ export const createGitCredentialBrokerHandler = (options: {
         if (!isContextCurrent()) return;
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(
-          JSON.stringify(candidate ? { ...candidate, available: true } : { available: false })
+          JSON.stringify(
+            candidate && 'token' in candidate
+              ? { ...candidate, available: true }
+              : { available: false, ...(candidate?.reason ? { reason: candidate.reason } : {}) }
+          )
         );
         return;
       }

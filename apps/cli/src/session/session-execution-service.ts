@@ -4652,13 +4652,20 @@ export class SessionExecutionService {
         let baseCommitHash: string | null = null;
         let turnStartWorkingTreeDiff: GitWorkingTreeDiffBaseline | null = null;
 
+        // A requester switch re-derives commit identity for this turn only;
+        // the policy lookup never blocks the turn (falls back to owner rules).
+        const gitIdentityOptions = yield* self.tryPromise(async () => {
+          try {
+            return await self.deps.sessionManager.resolveGitIdentityOptions(message.userId);
+          } catch {
+            return { preferMachineIdentity: message.userId === self.deps.userId };
+          }
+        });
         const bindReadySession = (nextSession: ISession): void => {
           activeSession = nextSession;
           session = nextSession;
           ctx.bindSession(nextSession);
-          nextSession.updateGitIdentity(userName, userEmail, message.userId, {
-            preferMachineIdentity: message.userId === self.deps.userId,
-          });
+          nextSession.updateGitIdentity(userName, userEmail, message.userId, gitIdentityOptions);
         };
 
         const sessionInputBlocks = normalizeSessionInputBlocks(

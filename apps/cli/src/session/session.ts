@@ -383,18 +383,25 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
     userName: string,
     userEmail: string,
     userId: string | undefined,
-    options: { preferMachineIdentity: boolean }
+    options: { preferMachineIdentity: boolean; personalIdentityEnabled?: boolean }
   ): void {
     const configEnv = this.config.env ?? {};
     if (this.config.githubCredentialPolicy) {
       this.config.githubCredentialPolicy.allowLocalAuth = options.preferMachineIdentity;
+      if (options.personalIdentityEnabled !== undefined) {
+        this.config.githubCredentialPolicy.personalEnabled = options.personalIdentityEnabled;
+      }
     }
-    // Set git identity using Git's recognized environment variables directly
+    // Set git identity using Git's recognized environment variables directly.
+    // The env is per agent process, so a shared machine never mixes requesters.
     const { name, email } = resolveSessionGitIdentity(
       { name: userName, email: userEmail },
       {
         preferMachineIdentity: options.preferMachineIdentity,
-        cwd: this.getWorkdir(),
+        personalIdentityEnabled:
+          options.personalIdentityEnabled ??
+          this.config.githubCredentialPolicy?.personalEnabled ??
+          false,
       }
     );
     configEnv.GIT_AUTHOR_NAME = name;

@@ -24,7 +24,17 @@ workspace GitHub App. With personal identity disabled, omit that first step.
 Use read-only permission checks before executing the command. Confirmed missing
 credentials or repository access can advance the chain. Network failures, generic
 403 responses, rate limits, and branch rules do not justify changing identity.
-Never replay an uncertain write. Report fallback identity without logging secrets.
+Never replay an uncertain write. Report fallback identity without logging secrets,
+and say why personal identity was skipped (not authorized, expired/revoked, no
+repository access) so the user can repair it instead of silently acting as the App.
+
+Commit identity follows the same precedence. A requester with personal identity
+enabled commits as their Lody account. The machine owner may otherwise commit
+with the machine's global Git identity; repository-level `user.*` in a
+Lody-managed bare repository is never read, because every worktree shares it and
+an agent's `git config user.name` there would leak into other sessions. Identity
+is injected per agent process through `GIT_AUTHOR_*`/`GIT_COMMITTER_*`, so
+requesters sharing a machine cannot inherit each other's author.
 
 For `gh`, preflight known target-repository requirements: push access for merging,
 release writes, workflow/run writes and repository sync; admin for repository

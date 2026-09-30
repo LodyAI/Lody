@@ -271,7 +271,9 @@ export interface CloudGithubTokenManager {
     context: CloudGithubWriteTokenContext,
     source: 'personal' | 'app',
     invalidatedPersonalToken?: string
-  ): Promise<{ token: string; tokenSource: 'personal' | 'app' } | null>;
+  ): Promise<
+    { token: string; tokenSource: 'personal' | 'app' } | { available: false; reason: string } | null
+  >;
   startAutoRefresh(): void;
   getAppTokenForRepo(repoFullName: string): Promise<string>;
   getWriteTokenForRepo(
