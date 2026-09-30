@@ -487,102 +487,106 @@ describe('AcpAuthenticationManager', () => {
     });
   });
 
-  it('bridges request-scoped ACP form elicitation for a custom provider', async () => {
-    const child = createFakeChild();
-    const stdin = new PassThrough();
-    const stdout = new PassThrough();
-    child.stdin = stdin;
-    child.stdout = stdout;
-    child.stderr = new PassThrough();
-    const elicitationReply = createDeferred<acp.CreateElicitationResponse>();
-    const agent = acp
-      .agent({ name: 'test-auth-agent' })
-      .onRequest(acp.methods.agent.initialize, async ({ params }) => ({
-        protocolVersion: params.protocolVersion,
-        authMethods: [{ id: 'oauth', name: 'OAuth' }],
-      }))
-      .onRequest(acp.methods.agent.authenticate, async ({ client, requestId }) => {
-        const reply = await client.request(acp.methods.client.elicitation.create, {
-          mode: 'form',
-          requestId,
-          message: 'Complete provider sign-in',
-          requestedSchema: {
-            type: 'object',
-            properties: {
-              token: {
-                type: 'string',
-                title: 'Token',
-                default: 'must-not-cross-machine-rpc',
-                _meta: { secret: true },
+  it.each(['custom', 'devin'] as const)(
+    'bridges request-scoped ACP form elicitation for %s',
+    async (provider) => {
+      const child = createFakeChild();
+      const stdin = new PassThrough();
+      const stdout = new PassThrough();
+      child.stdin = stdin;
+      child.stdout = stdout;
+      child.stderr = new PassThrough();
+      const elicitationReply = createDeferred<acp.CreateElicitationResponse>();
+      const agent = acp
+        .agent({ name: 'test-auth-agent' })
+        .onRequest(acp.methods.agent.initialize, async ({ params }) => ({
+          protocolVersion: params.protocolVersion,
+          authMethods: [{ id: 'oauth', name: 'OAuth' }],
+        }))
+        .onRequest(acp.methods.agent.authenticate, async ({ client, requestId }) => {
+          const reply = await client.request(acp.methods.client.elicitation.create, {
+            mode: 'form',
+            requestId,
+            message: 'Complete provider sign-in',
+            requestedSchema: {
+              type: 'object',
+              properties: {
+                token: {
+                  type: 'string',
+                  title: 'Token',
+                  default: 'must-not-cross-machine-rpc',
+                  _meta: { secret: true },
+                },
+                account: {
+                  type: 'string',
+                  title: 'Account',
+                  enum: ['work', 'personal'],
+                  default: 'work',
+                },
               },
-              account: {
-                type: 'string',
-                title: 'Account',
-                enum: ['work', 'personal'],
-                default: 'work',
-              },
+              required: ['token', 'account'],
             },
-            required: ['token', 'account'],
-          },
+          });
+          elicitationReply.resolve(reply);
+          return {};
         });
-        elicitationReply.resolve(reply);
-        return {};
+      agent.connect(
+        acp.ndJsonStream(createStdinWritableStream(stdout), createStdoutReadableStream(stdin))
+      );
+
+      const formReceived = createDeferred<{ interactionId: string }>();
+      const manager = new AcpAuthenticationManager(createSilentLogger(), {
+        spawnProcess: vi.fn(() => child) as never,
+        resolveLoginShellEnv: async () => ({}),
       });
-    agent.connect(
-      acp.ndJsonStream(createStdinWritableStream(stdout), createStdoutReadableStream(stdin))
-    );
+      const authentication = manager.authenticate({
+        requestId: 'auth-custom',
+        cliType: provider === 'devin' ? 'builtin' : 'custom',
+        agentType: provider === 'devin' ? 'devin' : 'custom-test',
+        runtimeOverrides: provider === 'devin' ? { devinPath: '/test/devin' } : undefined,
+        customAcp: { command: '/test/custom-acp', args: [] },
+        onProgress: (event) => {
+          if (event.status === 'input-required') {
+            expect(event.form.fields).toEqual([
+              { id: 'token', type: 'secret', label: 'Token', required: true },
+              {
+                id: 'account',
+                type: 'select',
+                label: 'Account',
+                required: true,
+                options: [
+                  { value: 'work', label: 'work' },
+                  { value: 'personal', label: 'personal' },
+                ],
+                defaultValue: 'work',
+              },
+            ]);
+            formReceived.resolve({ interactionId: event.interactionId });
+          }
+        },
+      });
 
-    const formReceived = createDeferred<{ interactionId: string }>();
-    const manager = new AcpAuthenticationManager(createSilentLogger(), {
-      spawnProcess: vi.fn(() => child) as never,
-      resolveLoginShellEnv: async () => ({}),
-    });
-    const authentication = manager.authenticate({
-      requestId: 'auth-custom',
-      cliType: 'custom',
-      agentType: 'custom-test',
-      customAcp: { command: '/test/custom-acp', args: [] },
-      onProgress: (event) => {
-        if (event.status === 'input-required') {
-          expect(event.form.fields).toEqual([
-            { id: 'token', type: 'secret', label: 'Token', required: true },
-            {
-              id: 'account',
-              type: 'select',
-              label: 'Account',
-              required: true,
-              options: [
-                { value: 'work', label: 'work' },
-                { value: 'personal', label: 'personal' },
-              ],
-              defaultValue: 'work',
-            },
-          ]);
-          formReceived.resolve({ interactionId: event.interactionId });
-        }
-      },
-    });
-
-    const { interactionId } = await formReceived.promise;
-    expect(
-      manager.submitAuthenticationInput(
-        'auth-custom',
-        interactionId,
-        JSON.stringify({
-          action: 'accept',
-          content: { token: 'secret-value', account: 'work' },
-        })
-      )
-    ).toEqual({ success: true, disposition: 'input-accepted' });
-    await expect(elicitationReply.promise).resolves.toEqual({
-      action: 'accept',
-      content: { token: 'secret-value', account: 'work' },
-    });
-    await expect(authentication).resolves.toEqual({
-      success: true,
-      disposition: 'authenticated',
-    });
-  });
+      const { interactionId } = await formReceived.promise;
+      expect(
+        manager.submitAuthenticationInput(
+          'auth-custom',
+          interactionId,
+          JSON.stringify({
+            action: 'accept',
+            content: { token: 'secret-value', account: 'work' },
+          })
+        )
+      ).toEqual({ success: true, disposition: 'input-accepted' });
+      await expect(elicitationReply.promise).resolves.toEqual({
+        action: 'accept',
+        content: { token: 'secret-value', account: 'work' },
+      });
+      await expect(authentication).resolves.toEqual({
+        success: true,
+        disposition: 'authenticated',
+      });
+    }
+  );
 
   it('selects between advertised agent-driven authentication methods', async () => {
     const child = createFakeChild();
