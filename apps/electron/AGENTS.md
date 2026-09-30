@@ -39,7 +39,12 @@ Root rules apply. For `src/**`, read module, IPC and window contracts in
   directory before auth stores open. `desktop-channel` changes desktop identity,
   never the shared CLI namespace, data root, or Host endpoint.
 
-- Electron 39's Chromium supports native top-level await. Keep renderer and module
+- electron-vite must list a build target for the pinned Electron major: an unknown
+  major silently compiles main/preload for Node 16 and the renderer for Chrome 108.
+  Upgrade both together and check the target table in electron-vite's `dist`.
+- Electron 42+ does not download its binary during install. `scripts/postinstall.mjs`
+  runs the package's idempotent `install.js`; dev, preview and E2E need its `path.txt`.
+- Electron's Chromium supports native top-level await. Keep renderer and module
   worker builds on native TLA; do not add `vite-plugin-top-level-await` or an
   equivalent full-bundle AST compatibility rewrite. Reprocessing Rollup's complete
   output graph materially increases production renderer peak memory.
@@ -93,19 +98,9 @@ Root rules apply. For `src/**`, read module, IPC and window contracts in
 - macOS uses Sparkle (`electron-sparkle-updater`): `SUFeedURL` + `SUPublicEDKey` in
   Info.plist, `package-electron.mjs` rebuilds the native addon, afterPack injects
   `SPARKLE_ED_PUBLIC_KEY` before signing. Tag releases contain changelogs only;
-  they do not build installers or generate Sparkle feeds/deltas. Sparkle load
-  failure falls back to electron-updater. Sparkle UI stays silent; progress and
-  ready-to-install go through `ElectronUpdaterState` for the renderer banner.
-- Linux `.deb` installs go through `app-updater-linux-install.ts`, never
-  electron-updater's `DebUpdater`: its `spawnSync` freezes the main process for
-  the whole polkit prompt, which no JS-side timeout can interrupt. Spawn
-  asynchronously, quit only after a zero exit, and treat a signalled installer
-  as a failure rather than the success `spawnSync` reports. AppImage needs no
-  privileged helper and stays on electron-updater.
-- A downloaded package outlives a failed check or install. While
-  `downloadedFile` is set, `recordError` keeps `phase: 'downloaded'`; dropping
-  to `error` hides the sidebar banner and the About install button, which are
-  the only ways to retry.
+  they do not build installers or generate Sparkle feeds/deltas.
+- Before changing updater runtime code, read the auto-update rules in
+  [`src/main/services/AGENTS.md`](src/main/services/AGENTS.md#auto-update).
 - Artifact names must stay space-free. GitHub Releases rewrites spaces to periods,
   which desynchronizes `latest*.yml` and Sparkle enclosures. Do not use
   `${productName}` in `artifactName`.

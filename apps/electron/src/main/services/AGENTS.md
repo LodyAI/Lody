@@ -59,3 +59,19 @@ approval, before it destroys relays or stops the CLI; Stay cancels quit with the
 app fully running. A quit close whose renderer hangs or dies is destroyed so quit
 cannot wait forever. Never destroy a normally closing window or add a path that
 bypasses unrelated `beforeunload` guards such as unsaved editors.
+
+## Auto-update
+
+- Sparkle load failure falls back to electron-updater. Sparkle UI stays silent;
+  progress and ready-to-install go through `ElectronUpdaterState` for the renderer
+  banner. Packaging-side updater rules live in the [Electron guide](../../../AGENTS.md).
+- Linux `.deb` installs go through `app-updater-linux-install.ts`, never
+  electron-updater's `DebUpdater`: its `spawnSync` freezes the main process for
+  the whole polkit prompt, which no JS-side timeout can interrupt. Spawn
+  asynchronously, quit only after a zero exit, and treat a signalled installer
+  as a failure rather than the success `spawnSync` reports. AppImage needs no
+  privileged helper and stays on electron-updater.
+- A downloaded package outlives a failed check or install. While
+  `downloadedFile` is set, `recordError` keeps `phase: 'downloaded'`; dropping
+  to `error` hides the sidebar banner and the About install button, which are
+  the only ways to retry.
